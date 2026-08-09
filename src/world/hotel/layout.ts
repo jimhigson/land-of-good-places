@@ -257,6 +257,164 @@ export interface Mezzanine {
  */
 export const CONNECTOR_APPROACH = 1.2;
 
+/**
+ * How far below its deck's walking surface a banded balustrade collider's
+ * base sits (`Collision.ts`'s `baseHeight`).
+ *
+ * Deep enough that a walker whose damped `y` briefly dips below the deck
+ * plane — stepping off a flight's last tread, landing from a bounce — is
+ * still held by the rail; far above anything a ground jump reaches
+ * (`JUMP_APEX_HEIGHT` is 1.28 m, and the lowest banded base in the lobby is
+ * 3.34 m). A walker between those two heights does not exist in this game:
+ * the levels are 0, 3.84 and 5.44, and nothing walkable sits between.
+ *
+ * Here rather than in `Hotel.ts` because the edge schedule below is the one
+ * owner of which edges are guarded, and `check:hotel` reads that schedule.
+ */
+export const RAIL_BASE_DROP = 0.5;
+
+/**
+ * One stretch of deck edge that a walker must not be able to step off.
+ *
+ * `outwardX`/`outwardZ` is the unit normal pointing **off** the deck — the
+ * way a child walks when she walks over the edge — so a probe can push a
+ * body that way and watch whether anything stops her.
+ */
+export interface DeckEdge {
+  readonly what: string;
+  readonly x1: number;
+  readonly z1: number;
+  readonly x2: number;
+  readonly z2: number;
+  /** The level a walker on this deck stands at. */
+  readonly deckHeight: number;
+  /** `baseHeight` for the collider that guards it. */
+  readonly base: number;
+  readonly outwardX: number;
+  readonly outwardZ: number;
+}
+
+/**
+ * Every edge of the mezzanine's two decks that is a **drop**, already split
+ * around the openings the stairs need, derived from the plan alone.
+ *
+ * **One owner, because the alternative shipped a hole.** The rails used to be
+ * five hand-written `addWall` calls in `Hotel.ts` and three hand-picked spot
+ * checks in `check:hotel`, and the landing's *north* edge appeared in neither:
+ * the gallery's front balustrade is drawn along that very line, but banded to
+ * the gallery's own 4.94 m, so a child standing on the landing at 3.84 m
+ * walked straight through the rail she could see and fell 3.84 m to the lobby
+ * floor. The check was green throughout, because nothing had ever told it that
+ * edge existed. Now the builder and the probe enumerate the same list, and an
+ * edge that is not guarded is a red test rather than a silent hole.
+ *
+ * `railRadius` is `STAIR_RAIL_RADIUS`, passed in rather than imported so this
+ * stays a leaf data module (see the file header).
+ */
+export function mezzanineGuardedEdges(plan: Mezzanine, railRadius: number): DeckEdge[] {
+  const { landing, straight } = plan;
+  const landingBase = landing.height - RAIL_BASE_DROP;
+  const deckBase = plan.height - RAIL_BASE_DROP;
+  const edges: DeckEdge[] = [];
+
+  // The straight flight's mouth, which both the gallery's front edge and the
+  // landing's north edge open onto. Same gap in both, from the same number.
+  const mouthMin = straight.centreX - straight.flankX;
+  const mouthMax = straight.centreX + straight.flankX;
+
+  // The gallery's front (south) edge, minus that mouth. Below it is open
+  // floor — the colonnade — so this is a genuine drop the whole way.
+  edges.push({
+    what: "the gallery's front balustrade, west of the flight",
+    x1: plan.minX,
+    z1: plan.maxZ,
+    x2: mouthMin,
+    z2: plan.maxZ,
+    deckHeight: plan.height,
+    base: deckBase,
+    outwardX: 0,
+    outwardZ: 1,
+  });
+  edges.push({
+    what: "the gallery's front balustrade, east of the flight",
+    x1: mouthMax,
+    z1: plan.maxZ,
+    x2: plan.maxX,
+    z2: plan.maxZ,
+    deckHeight: plan.height,
+    base: deckBase,
+    outwardX: 0,
+    outwardZ: 1,
+  });
+
+  // **The landing's north edge** — the one that was missing. It lies on the
+  // same line as the gallery's front edge, but what stands on it is a landing
+  // walker at 3.84 m, so it needs its own, lower band.
+  edges.push({
+    what: "the landing's north balustrade, west of the flight",
+    x1: landing.minX,
+    z1: landing.minZ,
+    x2: mouthMin,
+    z2: landing.minZ,
+    deckHeight: landing.height,
+    base: landingBase,
+    outwardX: 0,
+    outwardZ: -1,
+  });
+  edges.push({
+    what: "the landing's north balustrade, east of the flight",
+    x1: mouthMax,
+    z1: landing.minZ,
+    x2: landing.maxX,
+    z2: landing.minZ,
+    deckHeight: landing.height,
+    base: landingBase,
+    outwardX: 0,
+    outwardZ: -1,
+  });
+
+  // The landing's front (south) edge, between the two curves' top newels —
+  // the gaps either side of it are where the curves arrive.
+  const frontHalf = Math.abs(plan.stairs[0]?.centreX ?? 0) - railRadius;
+  edges.push({
+    what: "the landing's front balustrade",
+    x1: -frontHalf,
+    z1: landing.maxZ,
+    x2: frontHalf,
+    z2: landing.maxZ,
+    deckHeight: landing.height,
+    base: landingBase,
+    outwardX: 0,
+    outwardZ: 1,
+  });
+
+  // The landing's sides.
+  edges.push({
+    what: "the landing's west balustrade",
+    x1: landing.minX,
+    z1: landing.minZ,
+    x2: landing.minX,
+    z2: landing.maxZ,
+    deckHeight: landing.height,
+    base: landingBase,
+    outwardX: -1,
+    outwardZ: 0,
+  });
+  edges.push({
+    what: "the landing's east balustrade",
+    x1: landing.maxX,
+    z1: landing.minZ,
+    x2: landing.maxX,
+    z2: landing.maxZ,
+    deckHeight: landing.height,
+    base: landingBase,
+    outwardX: 1,
+    outwardZ: 0,
+  });
+
+  return edges;
+}
+
 /** A point on a connector's walk path, room-local metres. */
 export interface LocalConnectorPoint {
   readonly x: number;

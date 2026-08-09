@@ -57,8 +57,8 @@ import { BackSide, Box3, Mesh, Raycaster, Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { HotelCinematic, MIN_SHOT_DISTANCE } from '../src/world/hotel/cinematic.ts';
 import { IsoCamera } from '../src/core/IsoCamera.ts';
-import { Player } from '../src/entities/Player.ts';
-import { BED_MATTRESS_TOP } from '../src/art/models/hotelAssets.ts';
+import { JUMP_APEX_HEIGHT, Player } from '../src/entities/Player.ts';
+import { BED_MATTRESS_TOP, STAIR_RAIL_RADIUS } from '../src/art/models/hotelAssets.ts';
 import {
   CAMERA_DISTANCE,
   CAMERA_PITCH_DEGREES,
@@ -83,6 +83,7 @@ import {
   SUITE_DOOR_WIDTH,
   relativeLuminance,
   THEME_FLOOR_CONTRAST_MIN,
+  mezzanineGuardedEdges,
 } from '../src/world/hotel/layout.ts';
 import { segmentsMinusGaps } from '../src/world/wallRuns.ts';
 import { BUFFET_TOP, SOFA_SEAT_TOP } from '../src/world/hotel/dressing.ts';
@@ -535,41 +536,85 @@ if (!mezzanine) {
     }
   }
 
-  // **The banded rails hold both ways.** The same XZ, two heights: the
-  // landing's front rail must deflect a landing-height body and ignore a
-  // ground one; likewise the gallery's front rail. This is the collider the
-  // whole overhang design rests on, so it is proven in both directions.
-  const bandedRails: readonly [string, number, number, number][] = [
-    ['the landing front balustrade', LOBBY.originX, LOBBY.originZ + landing.maxZ, landing.height],
-    [
-      "the landing's west balustrade",
-      LOBBY.originX + landing.minX,
-      LOBBY.originZ + (landing.minZ + landing.maxZ) / 2,
-      landing.height,
-    ],
-    [
-      "the gallery's front balustrade",
-      LOBBY.originX + 6,
-      LOBBY.originZ + mezzanine.maxZ,
-      mezzanine.height,
-    ],
-  ];
-  for (const [what, x, z, level] of bandedRails) {
-    const held = new Vector3(x, level, z);
-    collision.resolve(held, PLAYER_RADIUS);
-    if (Math.hypot(held.x - x, held.z - z) < 0.05) {
-      problems.push(
-        `${what} does not hold a body at its own level (${level.toFixed(2)} m) — a child ` +
-          `walks off the edge`,
-      );
+  // **Every guarded edge, walked off, at every level.** Not a hand-picked
+  // few: `mezzanineGuardedEdges` is the same schedule `Hotel` builds the
+  // rails from, so an edge that exists in the room is an edge that is tested
+  // here, and adding an edge to the plan without guarding it is a red test.
+  //
+  // The three spot checks this replaces passed while the landing's **north**
+  // edge had no collider at all at landing height: the gallery's balustrade
+  // is drawn on that line but banded to its own 4.94 m, so a child on the
+  // landing at 3.84 m walked through the rail she could see and fell 3.84 m
+  // to the lobby floor. Nothing had ever told the check that edge existed —
+  // CLAUDE.md's "a check can pass without checking anything", in the geometry
+  // rather than in the assertion.
+  //
+  // Both directions, as before: the rail must hold a body at its own deck's
+  // height, and must not touch a ground body at the same XZ, or the arch
+  // stops being a walk-through.
+  for (const edge of mezzanineGuardedEdges(mezzanine, STAIR_RAIL_RADIUS)) {
+    const length = Math.hypot(edge.x2 - edge.x1, edge.z2 - edge.z1);
+    if (length < 0.01) continue;
+    // Sample along the span rather than at one point: a rail can be present
+    // for most of an edge and absent over the stretch that matters.
+    // Stand well clear of the rail to begin with — a body started inside the
+    // rail's own fattened zone is already overlapping it, and the resolver
+    // may push it *either* way out, which reads as a walk-through that never
+    // happened. And keep off the ends, where the room's perimeter walls and
+    // the flight's flanks stand.
+    const inset = 0.7;
+    const usable = length - inset * 2;
+    if (usable <= 0) continue;
+    const samples = Math.max(1, Math.ceil(usable / 0.9));
+    const ux = (edge.x2 - edge.x1) / length;
+    const uz = (edge.z2 - edge.z1) / length;
+    for (let i = 0; i <= samples; i += 1) {
+      const along = inset + (usable * i) / samples;
+      const startX = LOBBY.originX + edge.x1 + ux * along - edge.outwardX * 0.9;
+      const startZ = LOBBY.originZ + edge.z1 + uz * along - edge.outwardZ * 0.9;
+      // Walk her off it the way the game moves her: many small steps, each
+      // one resolved, not one 0.6 m teleport.
+      const body = new Vector3(startX, edge.deckHeight, startZ);
+      for (let step = 0; step < 30; step += 1) {
+        collision.resolveMovement(
+          body,
+          edge.outwardX * 0.06,
+          edge.outwardZ * 0.06,
+          PLAYER_RADIUS,
+          0,
+          1 / 60,
+        );
+      }
+      // How far past the edge line she ended up, along the outward normal.
+      const past =
+        (body.x - (LOBBY.originX + edge.x1)) * edge.outwardX +
+        (body.z - (LOBBY.originZ + edge.z1)) * edge.outwardZ;
+      if (past > -0.1) {
+        problems.push(
+          `${edge.what} lets a body at ${edge.deckHeight.toFixed(2)} m walk ` +
+            `${past.toFixed(2)} m past the edge at ` +
+            `(${(body.x - LOBBY.originX).toFixed(1)}, ${(body.z - LOBBY.originZ).toFixed(1)}) ` +
+            `— she falls ${edge.deckHeight.toFixed(2)} m to the floor through a rail she can see`,
+        );
+        break;
+      }
     }
-    const free = new Vector3(x, 0, z);
-    collision.resolve(free, PLAYER_RADIUS);
-    const pushed = Math.hypot(free.x - x, free.z - z);
-    if (pushed > 0.05) {
+    // …and the other direction, which is what `baseHeight` exists for: the
+    // rail must be nothing at all to anyone on the floor below, or the arch
+    // stops being a walk-through.
+    //
+    // Asserted on the **band itself** rather than by standing a body under
+    // it. A body sampled along a 26 m edge meets planters, sofas, columns and
+    // the curves' own masonry, all of which are supposed to block it — so
+    // that version of the test measured the room's furniture and failed on
+    // five edges that were perfectly correct. The band is the property that
+    // actually decides it, and it cannot be confounded. (That the arch is
+    // genuinely walkable end to end is probe 6's axis walk, above.)
+    if (edge.base <= JUMP_APEX_HEIGHT) {
       problems.push(
-        `${what} pushes a GROUND body ${pushed.toFixed(2)} m at the same XZ — an invisible ` +
-          `wall stands under the overhang, which is the exact disease baseHeight exists to cure`,
+        `${edge.what} is banded at ${edge.base.toFixed(2)} m, within reach of a ground jump ` +
+          `(apex ${JUMP_APEX_HEIGHT.toFixed(2)} m) — it would be an invisible wall under the ` +
+          `overhang, which is the exact disease baseHeight exists to cure`,
       );
     }
   }

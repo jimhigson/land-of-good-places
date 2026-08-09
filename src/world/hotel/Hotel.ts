@@ -157,6 +157,8 @@ import {
   type HotelRoom,
   type Mezzanine,
   mezzanineWalkConnectors,
+  mezzanineGuardedEdges,
+  RAIL_BASE_DROP,
   type SuitePartition,
   type WallSide,
 } from './layout';
@@ -254,19 +256,6 @@ const RUG_CLEARANCE = 0.15;
  * handrail, which eases level at `rise + railHeight` above the asset origin.
  */
 const STAIR_SINK = -0.02;
-
-/**
- * How far below its deck's walking surface a banded balustrade collider's
- * base sits (`Collision.ts`'s `baseHeight`).
- *
- * Deep enough that a walker whose damped `y` briefly dips below the deck
- * plane — stepping off a flight's last tread, landing from a bounce — is
- * still held by the rail; far above anything a ground jump reaches
- * (`JUMP_APEX_HEIGHT` is 1.28 m, and the lowest banded base in the lobby is
- * 3.34 m). A walker between those two heights does not exist in this game:
- * the levels are 0, 3.84 and 5.44, and nothing walkable sits between.
- */
-const RAIL_BASE_DROP = 0.5;
 
 /** How far a window's painted outside-glow spreads past the glass. */
 const GLOW_MARGIN = 0.34;
@@ -2656,31 +2645,27 @@ export class Hotel implements GameSystem {
     // are the rails' physics, and the whole reason `baseHeight` exists: a
     // deck walker pushed at the rail is held, a ground walker walks under the
     // same XZ freely. Proven both ways by `check:hotel`.
-    const rail = (x1: number, z1: number, x2: number, z2: number, base: number): void => {
+    // **Straight off the schedule.** `mezzanineGuardedEdges` is the one owner
+    // of which deck edges are drops and how each is banded, and `check:hotel`
+    // walks a body off every edge in that same list. These used to be five
+    // `addWall` calls written out here, and the landing's *north* edge was in
+    // neither them nor the three spot checks that were supposed to cover
+    // them: the gallery's balustrade is drawn along that line but banded to
+    // its own 4.94 m, so a child on the landing at 3.84 m walked through the
+    // rail she could see and fell to the lobby floor.
+    for (const edge of mezzanineGuardedEdges(plan, STAIR_RAIL_RADIUS)) {
       this.collision.addWall(
-        room.originX + x1,
-        room.originZ + z1,
-        room.originX + x2,
-        room.originZ + z2,
+        room.originX + edge.x1,
+        room.originZ + edge.z1,
+        room.originX + edge.x2,
+        room.originZ + edge.z2,
         0.15,
         Infinity,
         false,
         false,
-        base,
+        edge.base,
       );
-    };
-    const landingBase = landing.height - RAIL_BASE_DROP;
-    // The landing's front, between the two curves' top newels (the newels at
-    // `|centreX| − STAIR_RAIL_RADIUS` are the run's ends, per the schedule).
-    const frontHalf = Math.abs(plan.stairs[0]?.centreX ?? 0) - STAIR_RAIL_RADIUS;
-    rail(-frontHalf, landing.maxZ, frontHalf, landing.maxZ, landingBase);
-    // The landing's sides.
-    rail(landing.minX, landing.minZ, landing.minX, landing.maxZ, landingBase);
-    rail(landing.maxX, landing.minZ, landing.maxX, landing.maxZ, landingBase);
-    // The gallery's front edge, minus the straight flight's mouth.
-    const deckBase = height - RAIL_BASE_DROP;
-    rail(minX, maxZ, straight.centreX - straight.flankX, maxZ, deckBase);
-    rail(straight.centreX + straight.flankX, maxZ, maxX, maxZ, deckBase);
+    }
 
     // --- the ways between the levels, declared for the router ---------------
     // Three edges — each curve (floor ↔ landing) and the straight flight
