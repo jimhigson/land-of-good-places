@@ -2,13 +2,11 @@ import {
   Box3,
   BoxGeometry,
   BufferAttribute,
-  ConeGeometry,
   CylinderGeometry,
   DirectionalLight,
   Fog,
   Group,
   HemisphereLight,
-  IcosahedronGeometry,
   InstancedMesh,
   Matrix4,
   Mesh,
@@ -27,7 +25,22 @@ import { CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES } from '../../core/constants';
 // module — three, mathUtils and the look controls — so the ride can reach it
 // without dragging the park in behind it.
 import { fitCameraToViewport } from '../../core/RideCamera';
-import { createRandom, clamp, clamp01, lerp, smoothstep } from '../../core/mathUtils';
+import { Rng, createRandom, clamp, clamp01, lerp, smoothstep } from '../../core/mathUtils';
+// **The lane plants the park's own trees, not lookalikes of them.** See
+// `world/treeModel.ts`; `PARK_SEED` is a load-time constant (a literal, or
+// `LGP_SEED` from the environment), so reading it here costs nothing and
+// cannot race the park's generation — see {@link LANE_SCATTER_SEED}.
+import {
+  FOLIAGE_GEOMETRY,
+  TREE_REACH,
+  fileTreeParts,
+  foliageMaterial,
+  makeInstanced,
+  pickTreeKind,
+  rollTree,
+  type InstanceItem,
+} from '../treeModel';
+import { PARK_SEED } from '../parkManifest';
 import { toonMaterial } from '../../art/style/materials';
 import {
   createKid,
@@ -332,6 +345,67 @@ const LANE_OPEN_RUN = LANE_AHEAD - LANE_OPEN_FROM;
  * sitting exactly on the line it is checking.
  */
 const PARK_AHEAD_CLEAR = GATE_HALF_WIDTH + 1.2;
+
+/**
+ * **The lane's two scatters draw from the park's seed, not from a literal.**
+ *
+ * This is the part of the cone bug worth remembering after the cone itself is
+ * forgotten. Both scatters down here used to be seeded from a hard-coded number
+ * — `createRandom(20260808)` behind the wall, `createRandom(19470116)` along
+ * the verges — sitting inside a park that is otherwise generated end to end
+ * from {@link PARK_SEED}.
+ *
+ * A fixed seed in a procedural world is a **hazard, not a simplification**, and
+ * it is the reason the cone survived to production. Every guard this project
+ * has runs across five seeds precisely so that one unlucky arrangement cannot
+ * hide; a literal seed opts its scatter out of that sweep entirely and quietly
+ * turns five samples back into one. The lane was byte-identical on every seed,
+ * in dev and in production, so there was no arrangement for a sweep to *find* —
+ * the six-metre rooftop stood in the same place in the road for everybody.
+ *
+ * Xor'd with the park's seed rather than used raw, and one salt per scatter,
+ * which is the convention `world/Scenery.ts`'s `TREE_SALT`/`BUSH_SALT` already
+ * follow: the two populations stay independent of each other, and both now vary
+ * with the park. The five CI seeds therefore measure five genuinely different
+ * lanes, which is what makes `nothing stands in the journey lane carriageway`
+ * worth its runtime.
+ *
+ * This costs nothing at load: `PARK_SEED` is a module constant resolved when
+ * the bundle is first imported (a literal, or `LGP_SEED` in Node), never a
+ * value chosen part-way through a run — so reading it from a scene built
+ * *before* the park exists is safe, which is exactly what the lane is.
+ */
+const LANE_SCATTER_SEED = 0x1a5e01 ^ PARK_SEED;
+/** @see LANE_SCATTER_SEED — one salt per scatter, so the two never interlock. */
+const PARK_AHEAD_SEED = 0x9a12ee ^ PARK_SEED;
+
+/**
+ * How many trees line the lane, and how many stand behind the park's wall.
+ *
+ * **The verge count came down when the trees became real ones**, and the reason
+ * is parts, not trees: the old lookalike was a trunk plus exactly one ball,
+ * where a `treeModel.ts` tree is a trunk plus one to four canopy pieces on a
+ * rounder `IcosahedronGeometry(1, 2)`. Measured on the built lane, 400 trees
+ * produce **1218 instances** across three meshes — so the verges are *busier*
+ * than the 920 the old 460 drew, not thinner. Density on screen is what was
+ * worth preserving here; the tree count never was.
+ *
+ * Measured off both built lanes, this **doubles** the lane: 233 536 triangles
+ * against 116 260. Worth writing down rather than waving at, and affordable for
+ * a reason that is also measured rather than assumed — the park this sequence
+ * is a loading screen for draws **3 670 100** triangles across 4223 nodes, so
+ * the entire lane is 6% of the scene that replaces it twenty seconds later, and
+ * it is still three instanced draw calls' worth of trees. What is expensive
+ * about this sequence has always been generating that park on the CPU beside
+ * it, never drawing the lane.
+ *
+ * Behind the wall the count went **up**, from 54 trees (beside 54 rooftops) to
+ * 76, because the rooftops that used to fill half that silhouette are gone and
+ * a treeline with gaps in it reads as a field with some trees in it.
+ */
+const LANE_TREES = 400;
+/** @see LANE_TREES */
+const PARK_AHEAD_TREES = 76;
 
 /**
  * The hills, as a function of distance down the lane.
@@ -1168,6 +1242,45 @@ export class BusJourney {
   }
 
   /**
+   * **Plants real park trees, and adds the meshes they are drawn in.**
+   *
+   * `where` is asked for each tree's spot and is handed that tree's own
+   * {@link TREE_REACH} — how far this kind can possibly grow sideways — so a
+   * caller sets the *near face* of the canopy against its clearance line
+   * instead of the trunk. That is the whole discipline of this fix in one
+   * parameter: **a thing is placed by its own width, never sampled across a
+   * range and hoped to miss.** A wide lollipop is pushed out by its own width;
+   * a narrow stack is allowed closer.
+   *
+   * Three meshes per population — one per shape in {@link FOLIAGE_GEOMETRY} —
+   * and every tree of every kind shares them, so a lane full of trees is three
+   * draw calls, exactly as the park's lawn is.
+   */
+  private plantTrees(
+    name: string,
+    count: number,
+    rng: Rng,
+    where: (rng: Rng, index: number, reach: number) => { x: number; z: number },
+  ): void {
+    const trunk: InstanceItem[] = [];
+    const round: InstanceItem[] = [];
+    const cone: InstanceItem[] = [];
+
+    for (let i = 0; i < count; i += 1) {
+      const kind = pickTreeKind(rng);
+      const { x, z } = where(rng, i, TREE_REACH[kind]);
+      const { parts } = rollTree(rng, kind, x, groundHeight(x, z), z);
+      fileTreeParts(parts, { trunk, round, cone });
+    }
+
+    this.lane.add(
+      makeInstanced(`${name}-trunks`, FOLIAGE_GEOMETRY.trunk, foliageMaterial(0.95), trunk, true),
+      makeInstanced(`${name}-canopies`, FOLIAGE_GEOMETRY.round, foliageMaterial(0.85), round, true),
+      makeInstanced(`${name}-cones`, FOLIAGE_GEOMETRY.cone, foliageMaterial(0.85), cone, true),
+    );
+  }
+
+  /**
    * Trees and hedges either side, instanced.
    *
    * Two populations doing two different jobs, which is why there are two:
@@ -1175,26 +1288,26 @@ export class BusJourney {
    * against — a distant tree at 11 m/s barely moves — and **trees further out**
    * give the lane somewhere to be. Everything sits on {@link groundHeight}, so
    * the scenery rides the hills with the bus.
+   *
+   * ## The trees are the park's own
+   *
+   * Jim, 9 August 2026: *"Use the actual tree models same as the game uses by
+   * the side of the road but not on it."*
+   *
+   * They were a lookalike — a `CylinderGeometry` trunk under one
+   * `IcosahedronGeometry(1, 1)` ball, scattered by the loop below — while the
+   * park's are four kinds with layered canopies, blossom, and per-instance
+   * colour. So the last trees a child saw from the bus were not the trees she
+   * then walked among, and the two had already drifted apart with nothing to
+   * stop them drifting further. They now come from `world/treeModel.ts`, which
+   * the park's lawn builds from too: **one owner, and a new tree kind arrives
+   * on this lane for free.**
    */
   private buildScenery(): void {
-    const rng = createRandom(19470116);
-    const trunkGeometry = new CylinderGeometry(0.22, 0.34, 1, 6);
-    const canopyGeometry = new IcosahedronGeometry(1, 1);
+    const rng = new Rng(LANE_SCATTER_SEED);
 
-    const TREES = 460;
-    const trunks = new InstancedMesh(trunkGeometry, toonMaterial(PALETTE.barkDark), TREES);
-    const canopies = new InstancedMesh(canopyGeometry, toonMaterial(PALETTE.leafMid), TREES);
-    trunks.name = 'journey-tree-trunks';
-    canopies.name = 'journey-tree-canopies';
-    const matrix = new Matrix4();
-    const at = new Vector3();
-    const scale = new Vector3();
-    const spin = new Quaternion();
-
-    for (let i = 0; i < TREES; i += 1) {
+    this.plantTrees('journey-tree', LANE_TREES, rng, (r, i, reach) => {
       const side = i % 2 === 0 ? 1 : -1;
-      const height = 3.4 + rng() * 4.2;
-      const radius = 1.5 + rng() * 1.6;
       // Clear of the tarmac, thinning outwards so the lane has a near edge and
       // a soft far one.
       //
@@ -1202,29 +1315,18 @@ export class BusJourney {
       // to be applied to the trunk with the canopy — up to 3.1 m of it — left
       // to hang wherever it landed, which put leaves 0.17 m over the
       // carriageway at 5.4 m, right where the bus's roof goes. So the tree is
-      // pushed out by its own canopy radius and the 2.6 m verge is measured
-      // from the leaves inward. Same discipline as `PARK_AHEAD_CLEAR`: the
-      // thing's own size decides where it may stand.
-      const x = side * (ROAD_HALF_WIDTH + radius + 2.6 + rng() * rng() * 60);
-      const z = LANE_AHEAD - rng() * LANE_OPEN_RUN;
-      const ground = groundHeight(x, z);
+      // pushed out by `reach`, its own kind's widest possible canopy, and the
+      // 2.6 m verge is measured from the leaves inward. Same discipline as
+      // {@link PARK_AHEAD_CLEAR}: the thing's own size decides where it stands.
+      const x = side * (ROAD_HALF_WIDTH + reach + 2.6 + r.unit() * r.unit() * 60);
+      const z = LANE_AHEAD - r.unit() * LANE_OPEN_RUN;
+      return { x, z };
+    });
 
-      spin.setFromAxisAngle(new Vector3(0, 1, 0), rng() * Math.PI * 2);
-      at.set(x, ground + height / 2, z);
-      scale.set(1, height, 1);
-      matrix.compose(at, spin, scale);
-      trunks.setMatrixAt(i, matrix);
-
-      at.set(x, ground + height + radius * 0.3, z);
-      scale.set(radius, radius * (0.85 + rng() * 0.3), radius);
-      matrix.compose(at, spin, scale);
-      canopies.setMatrixAt(i, matrix);
-    }
-    trunks.instanceMatrix.needsUpdate = true;
-    canopies.instanceMatrix.needsUpdate = true;
-    trunks.castShadow = true;
-    canopies.castShadow = true;
-    this.lane.add(trunks, canopies);
+    const matrix = new Matrix4();
+    const at = new Vector3();
+    const scale = new Vector3();
+    const spin = new Quaternion();
 
     // The hedge: little rounded blobs marching along both verges, close enough
     // to the camera to sell the speed.
@@ -1239,7 +1341,7 @@ export class BusJourney {
       const side = i % 2 === 0 ? 1 : -1;
       const along = (i / HEDGE) * LANE_OPEN_RUN;
       const z = LANE_AHEAD - along;
-      const radius = 0.75 + rng() * 0.45;
+      const radius = 0.75 + rng.unit() * 0.45;
       // **Its own width, again.** The offset used to be applied to the blob's
       // *centre* while the blob was scaled 1.35× wider than `radius`, so up to
       // 1.62 m of hedge hung off a 0.9 m verge and the worst instance sat
@@ -1248,10 +1350,10 @@ export class BusJourney {
       // hugging the road, which is the whole reason it is here, without any of
       // it being *on* the road.
       const spread = radius * 1.35;
-      const x = side * (ROAD_HALF_WIDTH + spread + rng() * 0.4);
+      const x = side * (ROAD_HALF_WIDTH + spread + rng.unit() * 0.4);
       at.set(x, groundHeight(x, z) + radius * 0.55, z);
       scale.set(spread, radius, spread);
-      spin.setFromAxisAngle(new Vector3(0, 1, 0), rng() * Math.PI);
+      spin.setFromAxisAngle(new Vector3(0, 1, 0), rng.unit() * Math.PI);
       matrix.compose(at, spin, scale);
       hedge.setMatrixAt(i, matrix);
     }
@@ -1348,60 +1450,44 @@ export class BusJourney {
     this.lane.add(gate);
 
     // --- what stands over the wall -------------------------------------------
-    // Trees and bright pastel rooftops behind the stone, so what is on the other
-    // side reads as somewhere worth arriving at rather than a walled field. Kept
-    // to silhouettes: at this distance that is all anybody can see anyway, and a
-    // second park modelled in detail is a second park to keep in step.
-    const rng = createRandom(20260808);
-    const PARK_THINGS = 54;
-    const roofGeometry = new ConeGeometry(1, 1, 7);
-    const roofs = new InstancedMesh(roofGeometry, toonMaterial(PALETTE.markerPink), PARK_THINGS);
-    roofs.name = 'journey-park-rooftops';
-    const canopyGeometry = new IcosahedronGeometry(1, 1);
-    const canopies = new InstancedMesh(canopyGeometry, toonMaterial(PALETTE.leafMid), PARK_THINGS);
-    canopies.name = 'journey-park-trees';
-    const scale = new Vector3();
-    for (let i = 0; i < PARK_THINGS; i += 1) {
-      // Alternate sides, and start each one where the masonry starts. Both
-      // populations are placed **outward from the edge of the gate opening**
-      // rather than sampled across the whole width and hoped to miss — see
-      // {@link PARK_AHEAD_CLEAR}. `reach` is the thing's own horizontal
-      // half-extent, so the *near face* begins at the clearance rather than
-      // its centre: a wide roof is pushed out by its own width.
-      const side = i % 2 === 0 ? 1 : -1;
-
-      const roofAcross = 2.4 + rng() * 2.2;
-      const roofAlong = 2.4 + rng() * 2.2;
-      const roofHeight = 5 + rng() * 7;
-      // A cone spun about Y sweeps an ellipse, whose furthest reach in any
-      // direction is its longer semi-axis — so this bounds the spin as well as
-      // the scale, and there is no orientation that can put it back on the road.
-      const roofReach = Math.max(roofAcross, roofAlong);
-      const x = side * (PARK_AHEAD_CLEAR + roofReach + rng() * 52);
-      const z = gateZ - 6 - rng() * 55;
-      const ground = groundHeight(x, z);
-
-      spin.setFromAxisAngle(new Vector3(0, 1, 0), rng() * Math.PI * 2);
-      at.set(x, ground + roofHeight / 2, z);
-      scale.set(roofAcross, roofHeight, roofAlong);
-      matrix.compose(at, spin, scale);
-      roofs.setMatrixAt(i, matrix);
-
-      // The trees take the opposite side to the roof of the same index, which
-      // keeps both populations spread across both verges.
-      const radius = 2.6 + rng() * 2.4;
-      const treeX = -side * (PARK_AHEAD_CLEAR + radius + rng() * 57);
-      const treeZ = gateZ - 4 - rng() * 60;
-      at.set(treeX, groundHeight(treeX, treeZ) + radius * 1.5, treeZ);
-      scale.set(radius, radius * 1.15, radius);
-      matrix.compose(at, spin, scale);
-      canopies.setMatrixAt(i, matrix);
-    }
-    roofs.instanceMatrix.needsUpdate = true;
-    canopies.instanceMatrix.needsUpdate = true;
-    roofs.castShadow = true;
-    canopies.castShadow = true;
-    this.lane.add(roofs, canopies);
+    //
+    // **Woodland, and nothing else.** Jim, 9 August 2026, on the deployed game:
+    // *"Can we just remove these mystery items? Use the actual tree models same
+    // as the game uses by the side of the road but not on it."*
+    //
+    // There used to be a second population here: `journey-park-rooftops`, 54
+    // `ConeGeometry(1, 1, 7)` spikes in `markerPink`, 2.4-4.6 m across and 5-12 m
+    // tall. They were meant to read as *rooftops glimpsed over the wall* — the
+    // reason the wall has anything behind it at all is so the other side looks
+    // like somewhere worth arriving at rather than a walled field.
+    //
+    // They did not read as rooftops. They read as pink cones standing in a
+    // field, because that is what they were: **a roof with no building under
+    // it, meeting the grass at a point.** Jim could not identify them, and the
+    // one that had wandered into the carriageway he reasonably took for a
+    // traffic cone blocking the bus. A silhouette that has to be *explained* is
+    // not doing a silhouette's job, and the fix for a shape nobody recognises is
+    // not to move it — it is to delete it.
+    //
+    // What is left is the park's own trees, which everybody recognises, and
+    // which the park really does have standing inside its wall. Roughly a fifth
+    // of them roll `blossom`, so the pink that the rooftops were there to
+    // provide arrives anyway — from a thing a six-year-old can name.
+    //
+    // Real trees at real scale, not oversized stand-ins: `TREE_TOP` tops out at
+    // 7.25 m against a 2.6 m wall, so they clear it by a comfortable margin at
+    // the only distance anyone ever sees them from.
+    this.plantTrees('journey-park-tree', PARK_AHEAD_TREES, new Rng(PARK_AHEAD_SEED), (r, _i, reach) => {
+      // Alternate sides, and start each one where the masonry starts — placed
+      // **outward from the edge of the gate opening** rather than sampled across
+      // the whole width and hoped to miss (see {@link PARK_AHEAD_CLEAR}), by the
+      // tree's own widest possible canopy, so the near leaves begin at the
+      // clearance line rather than the trunk.
+      const side = r.chance(0.5) ? 1 : -1;
+      const x = side * (PARK_AHEAD_CLEAR + reach + r.unit() * 54);
+      const z = gateZ - 4 - r.unit() * 58;
+      return { x, z };
+    });
   }
 
   /**
