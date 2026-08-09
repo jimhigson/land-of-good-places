@@ -4795,9 +4795,93 @@ const nothingStandsInTheLanesCarriageway: Invariant = (facts) => {
   );
 };
 
+/**
+ * **The lane's furniture** — the things beside the road that are deliberately
+ * not trees, and are therefore allowed not to be built from the park's trees.
+ *
+ * An allow-list rather than a shape test, and that is the point: adding a new
+ * population to the lane goes red until whoever added it either builds it out
+ * of `world/treeModel.ts` or comes here and says, in one line, what it is. The
+ * pink cones would have had to be declared *"54 rooftop silhouettes"* in
+ * writing, next to a road they were standing in.
+ *
+ * Kept deliberately short. Everything here is a thing that genuinely cannot be
+ * a tree.
+ */
+const LANE_FURNITURE = new Map<string, string>([
+  ['journey-road', 'the carriageway itself'],
+  ['journey-ground', 'the hills the lane is painted on'],
+  ['journey-hedge', 'blobs hugging the kerb, close enough to sell the speed'],
+  ['journey-park-wall', "the park's boundary masonry, seen from outside"],
+  ['journey-park-gate', 'the arch the road goes through'],
+]);
+
+/**
+ * **Nothing grows in the lane but the park's own trees.**
+ *
+ * Jim, 9 August 2026, on the deployed game: *"Can we just remove these mystery
+ * items? Use the actual tree models same as the game uses by the side of the
+ * road but not on it."*
+ *
+ * The lane had been growing lookalikes — a cylinder under one
+ * `IcosahedronGeometry(1, 1)` ball — beside a population of pink
+ * `ConeGeometry` "rooftops" that no player could identify. Both are gone; the
+ * lane now plants `world/treeModel.ts`'s trees, the same objects the park's own
+ * lawn plants.
+ *
+ * **This asks about identity, not shape**, and the distinction is the whole
+ * value of the check. A hand-built copy of a lollipop tree could be
+ * pixel-identical and would still fail here, because what goes wrong with a
+ * copy is never how it looks on the day it is written — it is that the original
+ * moves on and the copy does not. `FOLIAGE_GEOMETRY`'s three `BufferGeometry`
+ * objects are shared by reference, so "is this the park's tree?" has an exact
+ * answer and no threshold to argue about.
+ *
+ * It is also a **no-mystery-items** guard, which is the other half of what Jim
+ * asked for: anything drawn in the lane that is neither one of the park's trees
+ * nor declared in {@link LANE_FURNITURE} is a foul. A new unexplained shape
+ * beside the first road a child ever sees now fails the build instead of
+ * reaching production and being mistaken for a traffic cone.
+ */
+const nothingGrowsInTheLaneButTheParksOwnTrees: Invariant = (facts) => {
+  const fouls: string[] = [];
+
+  for (const thing of facts.laneGreenery) {
+    if (thing.parkTreeGeometry !== null) continue;
+    if (LANE_FURNITURE.has(thing.population)) continue;
+    fouls.push(
+      `\`${thing.population}\`${thing.node && thing.node !== thing.population ? ` (${thing.node})` : ''} ` +
+        `draws ${thing.instances} instance(s) of a \`${thing.geometryType}\` that is not one of the ` +
+        `park's own tree shapes. Either plant it with \`rollTree\` from ` +
+        `\`world/treeModel.ts\`, so it stays the same tree the park grows, or add it to ` +
+        `LANE_FURNITURE saying what it is. A shape a player cannot name, beside the first ` +
+        `road she ever sees, is how the pink cones happened.`,
+    );
+  }
+
+  // The other direction: the lane must actually *be* planted. Without this the
+  // check above passes triumphantly on a lane with no trees in it at all —
+  // "every tree is the park's own" is trivially true of no trees, which is
+  // exactly the shape of green-because-incapable-of-failing this repo keeps
+  // being bitten by.
+  const planted = facts.laneGreenery
+    .filter((thing) => thing.parkTreeGeometry !== null)
+    .reduce((total, thing) => total + thing.instances, 0);
+  if (planted < 500) {
+    fouls.push(
+      `the journey lane draws only ${planted} park-tree instances. The verges and the ` +
+        `woodland behind the park wall together stand up about 1450 on the canonical seed, ` +
+        `so this means the planting has largely stopped happening.`,
+    );
+  }
+
+  return fouls;
+};
+
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the arrival reaches its end and hands over', theArrivalReachesItsEnd],
   ['nothing stands in the journey lane carriageway', nothingStandsInTheLanesCarriageway],
+  ["nothing grows in the lane but the park's own trees", nothingGrowsInTheLaneButTheParksOwnTrees],
   ['no two tap targets crowd each other or a doorway', tapTargetsKeepTheirDistance],
   ['the park really is twice the park', parkAreaIsWhatWasAsked],
   ['every plot stands wholly inside the boundary', plotsStayInsideTheBoundary],

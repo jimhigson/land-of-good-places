@@ -382,14 +382,22 @@ const PARK_AHEAD_SEED = 0x9a12ee ^ PARK_SEED;
 /**
  * How many trees line the lane, and how many stand behind the park's wall.
  *
- * **Both counts came down when the trees became real ones**, and the reason is
- * parts, not trees: the old lookalike was a trunk plus exactly one ball, where
- * a `treeModel.ts` tree is a trunk plus one to four canopy pieces on a rounder
- * `IcosahedronGeometry(1, 2)`. Measured on the built lane, 400 trees produce
- * 1105 instances across three meshes — so the verges are *busier* than the 920
- * the old 460 drew, not thinner, while the triangle count stays in the same
- * bracket. Density on screen is what was preserved here; the tree count was
- * never the thing worth holding constant.
+ * **The verge count came down when the trees became real ones**, and the reason
+ * is parts, not trees: the old lookalike was a trunk plus exactly one ball,
+ * where a `treeModel.ts` tree is a trunk plus one to four canopy pieces on a
+ * rounder `IcosahedronGeometry(1, 2)`. Measured on the built lane, 400 trees
+ * produce **1218 instances** across three meshes — so the verges are *busier*
+ * than the 920 the old 460 drew, not thinner. Density on screen is what was
+ * worth preserving here; the tree count never was.
+ *
+ * Measured off both built lanes, this **doubles** the lane: 233 536 triangles
+ * against 116 260. Worth writing down rather than waving at, and affordable for
+ * a reason that is also measured rather than assumed — the park this sequence
+ * is a loading screen for draws **3 670 100** triangles across 4223 nodes, so
+ * the entire lane is 6% of the scene that replaces it twenty seconds later, and
+ * it is still three instanced draw calls' worth of trees. What is expensive
+ * about this sequence has always been generating that park on the CPU beside
+ * it, never drawing the lane.
  *
  * Behind the wall the count went **up**, from 54 trees (beside 54 rooftops) to
  * 76, because the rooftops that used to fill half that silhouette are gone and
