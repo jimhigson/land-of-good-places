@@ -186,12 +186,13 @@ function route(
  * own ground damp — the flesh of the walk, not the graph of it. Returns the
  * body's final position, or where it wedged when a leg could not be finished.
  *
- * Exists because a route can be valid end-to-end while a *smoothed leg* is
- * unwalkable: string-pulling collapsed the grand flight's ramp waypoints
- * into a chord across the landing beside it, and the live walk ground
- * against the gallery rail at 3.84 m for ever, seeking a 5.44 m waypoint
- * (9 Aug 2026). Every route probe above stayed green through that, because
- * they ask where the route ends and never whether legs can be walked.
+ * Exists because a route can be valid end-to-end while a *leg* of it is
+ * unwalkable: the lattice crossed the grand flight's unstamped flank
+ * sideways, so the route stepped onto the flight from the landing beside it
+ * instead of climbing it, and the live walk ground against the gallery rail
+ * at 3.84 m for ever, seeking a 5.44 m waypoint (9 Aug 2026). Every route
+ * probe above stayed green through that, because they ask where a route
+ * *ends* and never whether its legs can be *walked*.
  */
 function walkRoute(
   from: { x: number; z: number },
@@ -299,9 +300,9 @@ assertRoute(
 // smoothed chord cut across the landing beside the flight's ramp, wedging the
 // walk against the gallery rail at 3.84 m (see `walkRoute`'s header). So the
 // smoothed waypoints are *walked*, with the resolver and the ground damp, and
-// the body must genuinely arrive on the gallery. Proven red against
-// `lineIsWalkable` without its arrival-level term: wedged on leg 19 at
-// (2.9, 3.84, −6.8).
+// the body must genuinely arrive on the gallery. Proven red by taking
+// `navStamped` off the grand flight's flanks: wedged on leg 18 at
+// (2.8, 3.84, −5.7) local, exactly the live symptom.
 {
   const eastLane = world(2.9, -9.2);
   const r = route(floorPoint, FLOOR_Y, eastLane, DECK_Y);

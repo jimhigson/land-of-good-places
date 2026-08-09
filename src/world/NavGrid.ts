@@ -916,7 +916,6 @@ export class NavGrid {
             this.pointY[anchor] ?? 0,
             this.pointX[furthest + 1] ?? 0,
             this.pointZ[furthest + 1] ?? 0,
-            this.pointY[furthest + 1] ?? 0,
           )
         ) {
           furthest += 1;
@@ -944,19 +943,18 @@ export class NavGrid {
    * Samples at half a cell, which cannot step over a blocked cell, and follows
    * the nearest level along, so a line that crosses a deck edge or a drop
    * fails for the same reason a step across one does.
-   */
-  /**
-   * `bHeight` is the level the route's own node at `(bx, bz)` stands on, and
-   * the line must genuinely **arrive** there. Following the floor under the
-   * line step by step is not enough on its own: beside a wide walkable ramp,
-   * a chord between two of the route's ramp waypoints can swing sideways onto
-   * the level plateau next to it and read walkable the whole way — at the
-   * plateau's height, not the ramp's. The route then tells a walker to cut
-   * across ground that never climbs, and she grinds at the ramp's flank a
-   * level below her next waypoint. Found live on the imperial lobby's grand
-   * flight (9 Aug 2026): string-pulling collapsed the flight's ramp waypoints
-   * into a chord across the landing, and the walk wedged at 3.84 m against
-   * the gallery's rail seeking a 5.44 m waypoint.
+   *
+   * It reads the floor, and only the floor. That is deliberate, and it is why
+   * a ramp's flank must be stamped into the lattice (`navStamped`, see
+   * `Collision.ts`): given an unstamped flank, a chord between two of a
+   * ramp's waypoints can swing sideways onto the level plateau beside it and
+   * read walkable the whole way, because every step of it *is* walkable —
+   * just not on the ramp. Making this function also demand that the line
+   * arrive at the level of the node it is pulling to was tried as the cure on
+   * 9 Aug 2026 and rejected: with the flank stamped it never once changes an
+   * answer (measured, 0 firings in 1,678 lobby routes across all three levels
+   * and 13,053 park-wide routes), so it bought nothing but an untestable
+   * branch on the router's hot path.
    */
   private lineIsWalkable(
     ax: number,
@@ -964,7 +962,6 @@ export class NavGrid {
     aHeight: number,
     bx: number,
     bz: number,
-    bHeight: number,
   ): boolean {
     const startCell = this.cellAt(ax, az);
     if (startCell < 0 || this.blocked[startCell] === 1) return false;
@@ -983,7 +980,7 @@ export class NavGrid {
       if (Math.abs(height - previousHeight) > MAX_STEP) return false;
       previousHeight = height;
     }
-    return Math.abs(previousHeight - bHeight) <= MAX_STEP;
+    return true;
   }
 
   // ---------------------------------------------------------------- plumbing
