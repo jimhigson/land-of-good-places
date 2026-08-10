@@ -66,6 +66,7 @@ import { Vector3 } from 'three';
 import { performance } from 'node:perf_hooks';
 import { GENERATION_BUDGET_MS, ParkGeneration } from '../src/boot/parkGeneration.ts';
 import { JourneyDirector } from '../src/world/entrance/journeyDirector.ts';
+import { SETTLE_SECONDS } from '../src/world/entrance/BusJourney.ts';
 
 const fouls: string[] = [];
 const said: string[] = [];
@@ -802,14 +803,24 @@ if (cruiserRidden !== cruiserPlain) {
     fouls.push('the ride hands over before the park\'s shaders have been warmed');
   }
   director.noteWarmupReady();
+  // The drive may now cut to the park — but the hand-over still waits out the
+  // closing approach (`SETTLE_SECONDS`), so the settle onto the park bearing is
+  // never thrown away. See `JourneyDirector.readyToArrive`/`readyToHandOver`.
+  if (!director.readyToArrive) {
+    fouls.push('the park exists and is warmed and the minimum ride is done, but the drive will not cut to it');
+  }
+  if (director.readyToHandOver) {
+    fouls.push('the drive handed over the instant the park was ready, skipping the closing settle');
+  }
+  for (let t = 0; t < SETTLE_SECONDS + 0.1; t += 1 / 60) director.advance(1 / 60);
   if (!director.readyToHandOver) {
-    fouls.push('the park exists and is warmed, and the ride still will not hand over');
+    fouls.push('the park exists and is warmed and the closing approach has played, and the ride still will not hand over');
   }
   said.push(
     'the World is withheld until generation finishes, and the skip until the World exists — ' +
       'checked in both directions',
   );
-  said.push('hand-over additionally waits for the shader warm-up, checked in both directions');
+  said.push('hand-over additionally waits for the shader warm-up and the closing approach, in both directions');
 }
 
 for (const line of said) console.log(`  ${line}`);
