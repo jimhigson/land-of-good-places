@@ -482,11 +482,12 @@ function rideInThenPlay(
 
   const loop = new Loop((tick) => {
     director.advance(tick.dt);
-    // **The bus waits rather than lying.** Once the ride has run its course
-    // with no park behind it, the lane stops going past and the bus pulls in to
-    // the gate and idles there; `JourneyDirector.overrunning` is the one place
-    // that is decided.
-    journey.update(tick.dt, !director.overrunning);
+    // **The bus keeps driving rather than parking.** The drive is an infinitely
+    // repeating world; it only stops looping and cuts to the park once the
+    // director says the park is ready *and* the minimum ride has been seen
+    // (`readyToArrive`). Until then a slow device simply loops for longer — the
+    // bus is always moving, so there is never a parked wait.
+    journey.update(tick.dt, director.readyToArrive);
     // **`animationTime`, not `elapsed`.** `elapsed` is a distance down the lane
     // dressed as a clock: it clamps at twenty seconds and stops dead while the
     // bus waits. Feeding it to the title froze the letters mid-jump for the
@@ -495,10 +496,11 @@ function rideInThenPlay(
     // as a wait. Anything drawn that must keep moving reads the clock that
     // never stops. See `ui/JourneyTitle.ts` and `BusJourney.animationTime`.
     title.update(journey.animationTime);
-    // **The loading caption.** Shown only while the bus is parked at the gate
-    // waiting for a slow device to finish the park (`overrunning`), and told
-    // which part is being built so the wait reads as progress rather than a
-    // stall. Idle and invisible for the whole of an on-time ride.
+    // **The loading caption.** Shown only while the drive is looping past its
+    // nominal length waiting for a slow device to finish the park (`overrunning`),
+    // and told which part is being built so the wait reads as progress. The bus is
+    // moving throughout now, so this reassures rather than rescues; idle and
+    // invisible for the whole of an on-time ride.
     wait.update(director.overrunning, generation.stage);
     const renderer = engine.renderer;
     renderer.clear(true, true, true);

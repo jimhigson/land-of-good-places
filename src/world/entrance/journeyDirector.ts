@@ -1,4 +1,4 @@
-import { JOURNEY_SECONDS } from './BusJourney';
+import { JOURNEY_SECONDS, MIN_LOOP_SECONDS, SETTLE_SECONDS } from './BusJourney';
 
 /**
  * **Who decides when the skip appears and when the ride ends.**
@@ -47,11 +47,26 @@ export class JourneyDirector {
   private generationReadyFlag = false;
   private framesDrawn = 0;
   private parkStartedOnFrame = -1;
+  /**
+   * When the drive cut to the park, in ride seconds. `-1` until it has.
+   *
+   * Latched the frame {@link readyToArrive} first comes true and never moved
+   * again, so {@link readyToHandOver} can fire a fixed {@link SETTLE_SECONDS} of
+   * closing approach later — one owner of "when did the arrival begin", rather
+   * than the ride and the director each keeping their own count.
+   */
+  private arrivalStartedAtSeconds = -1;
 
   /** One frame of the ride. `dt` in seconds. */
   advance(dt: number): void {
     this.framesDrawn += 1;
     if (dt > 0) this.elapsedSeconds += dt;
+    // Latch the moment the drive may cut to the park. Read after the flags this
+    // frame were set last frame — a frame's lag either way is invisible, and this
+    // is the single place the arrival's start is recorded.
+    if (this.arrivalStartedAtSeconds < 0 && this.readyToArrive) {
+      this.arrivalStartedAtSeconds = this.elapsedSeconds;
+    }
   }
 
   get elapsed(): number {
@@ -204,28 +219,52 @@ export class JourneyDirector {
   }
 
   /**
-   * May the park take the screen? Both, always.
+   * **May the drive cut to the park now?** Park fit to play, *and* the minimum
+   * ride has been seen.
    *
-   * A skip press is the other way through — and it is only reachable once
-   * {@link skipOffered}, so it cannot bypass this either.
+   * This is the jump-cut trigger. It needs both halves: fit-to-play so a child is
+   * never cut into a half-built park, and {@link MIN_LOOP_SECONDS} of ride so a
+   * fast device still gets the whole cinematic rather than being cut off at eight
+   * seconds. On a fast device the park is ready long before the floor, so this
+   * comes true exactly at the floor; on a slow one the loop runs on and this comes
+   * true when the park finally is. The ride reads it as `canArrive`
+   * ({@link BusJourney.update}); the director latches it in {@link advance}.
    */
-  get readyToHandOver(): boolean {
-    return this.rideOver && this.parkFitToPlay;
+  get readyToArrive(): boolean {
+    return this.parkFitToPlay && this.elapsedSeconds >= MIN_LOOP_SECONDS;
   }
 
   /**
-   * The ride has finished and the park is not fit to play. The bus is waiting.
+   * May the park take the screen? Only once the closing approach has played.
    *
-   * **Not the rare branch its old comment claimed.** It was written as "never
-   * true today — the park builds in under half a second", which is true only on
-   * a dev laptop. Generation is budgeted in wall-clock milliseconds per frame
-   * ({@link overrunAwareBudgetMs}), so a slower device completes fewer steps per
-   * frame and needs proportionally *more* frames — while the ride is a fixed 240
-   * frames (twenty seconds of `dt` clamped to 1/12 s). Below roughly twelve
-   * frames a second, generation outlasts the ride every time, so this is the
-   * *common* state on the device a six-year-old actually holds. That is why the
-   * budget below exists: overrunning is not an edge case to survive, it is a
-   * phase to get through as fast as the machine can.
+   * The jump-cut ({@link readyToArrive}) starts a fixed {@link SETTLE_SECONDS} of
+   * bus-rolls-in, camera-settles-onto-the-park-bearing before the hand-over — the
+   * same closing shot an on-time ride has always ended on. Handing over the frame
+   * the park was ready would throw that shot away and land the cut mid-turn. On a
+   * fast device the cut is at 16.8 s and this at 20.0 s, unchanged.
+   *
+   * A skip press is the other way through — reachable once {@link skipOffered}, so
+   * it can still cut the closing shot short if a child taps it.
+   */
+  get readyToHandOver(): boolean {
+    return (
+      this.arrivalStartedAtSeconds >= 0 &&
+      this.elapsedSeconds - this.arrivalStartedAtSeconds >= SETTLE_SECONDS
+    );
+  }
+
+  /**
+   * The ride has run its nominal length and the park is not fit to play — so the
+   * drive is **looping** while it waits. Drives the generation budget.
+   *
+   * **Not the rare branch its old comment claimed**, and now not a *stopped* bus
+   * either: below roughly twelve frames a second generation outlasts the twenty
+   * seconds every time (the ride is 240 clamped frames however slow the machine),
+   * so this is the common state on the device a six-year-old holds. It used to
+   * park the bus at the gate; now the bus keeps driving the looping world. What is
+   * unchanged is what this gates — the generation budget below opens right up
+   * ({@link overrunAwareBudgetMs}) so the park still builds flat-out while she
+   * rides, which is the whole point of putting it behind the bus.
    */
   get overrunning(): boolean {
     return this.rideOver && !this.parkFitToPlay;

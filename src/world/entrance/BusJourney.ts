@@ -25,7 +25,7 @@ import { CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES } from '../../core/constants';
 // module — three, mathUtils and the look controls — so the ride can reach it
 // without dragging the park in behind it.
 import { fitCameraToViewport } from '../../core/RideCamera';
-import { Rng, createRandom, clamp, clamp01, lerp, smoothstep } from '../../core/mathUtils';
+import { Rng, createRandom, clamp01, lerp, smoothstep } from '../../core/mathUtils';
 // **The lane plants the park's own trees, not lookalikes of them.** See
 // `world/treeModel.ts`; `PARK_SEED` is a load-time constant (a literal, or
 // `LGP_SEED` from the environment), so reading it here costs nothing and
@@ -62,7 +62,7 @@ import { createBusDriver, type BusDriver } from './busDriver';
 // The game's own seated pose. A leaf module precisely so the ride can reach it
 // without dragging `PARK_BOUNDARY` in behind it — see `entities/ridePose.ts`.
 import { applyRidePose } from '../../entities/ridePose';
-import { ROAD_HALF_WIDTH, applyRoadUvs, roadMaterial } from './road';
+import { ROAD_HALF_WIDTH, ROAD_TILE_METRES, applyRoadUvs, roadMaterial } from './road';
 // The park's own gate dimensions. Not a copy — `layout.ts` is the one owner, and
 // it is reachable from here precisely because it depends on nothing heavier than
 // two import-free core modules. See its note on why the arch is built twice.
@@ -127,8 +127,53 @@ export const JOURNEY_SECONDS = 20;
 /** How fast the bus travels, in metres a second. A bus, not a rocket. */
 const BUS_SPEED = 11;
 
-/** The lane, in metres — everything the ride will cross, plus room to see ahead. */
-const LANE_LENGTH = JOURNEY_SECONDS * BUS_SPEED + 220;
+/**
+ * **The drive is its own world, and it repeats exactly every this many metres.**
+ *
+ * Jim, 9 August 2026: *"The drive should be its own infinitely repeating world
+ * and a small jump cut takes it adjacent to the park when loaded."* On a slow
+ * device the park build outlasts the twenty-second ride; rather than park the
+ * bus at the gate and idle (a *stopped* bus reads as waiting), the lane loops
+ * for ever and the park arrives via a deliberate cut once it is ready.
+ *
+ * **The loop is designed in, not faked.** {@link laneHeight} and the ground's
+ * cross-slope are sums of sines whose wavelengths are exact harmonics of this
+ * length (5, 2 and 1 waves per loop), so the height at `z` and at `z ± LANE_LOOP`
+ * is *identically* equal — the repeat is byte-exact and therefore seamless. This
+ * is the whole difference from a treadmill that scrolls a non-periodic world (a
+ * visible seam) or re-places props every frame (the two-owners bug this repo
+ * pays for most): a world built to loop has no seam by construction. The scatter
+ * (verge trees, hedges) is tiled at the same period, and the countryside mesh is
+ * shifted to follow the bus by whole multiples of this, which moves identical
+ * geometry onto identical geometry and so is invisible.
+ *
+ * **A whole number of road tiles.** The countryside is shifted by whole loops to
+ * follow the bus, and the road's dashes and slabs repeat every
+ * {@link ROAD_TILE_METRES} along `v` ({@link applyRoadUvs}). If the loop were not
+ * an exact multiple of that tile the shift would jump the road markings even
+ * though the hills stayed put, so the loop is defined *as* 46 road tiles —
+ * ≈358 m, a little over eleven seconds of driving, longer than the ~7 s the three
+ * incommensurable sines used to take to stop repeating. A normal ride never
+ * completes a loop; even a slow overrun sees the same country at most once or
+ * twice.
+ */
+const ROAD_TILES_PER_LOOP = 46;
+export const LANE_LOOP = ROAD_TILE_METRES * ROAD_TILES_PER_LOOP;
+
+/** Base angular frequency of the loop — one full wave over {@link LANE_LOOP}. */
+const LOOP_W = (2 * Math.PI) / LANE_LOOP;
+
+/**
+ * How much countryside is built, in metres: three whole loops.
+ *
+ * The mesh is translated by whole loops to stay centred on the bus (see
+ * {@link BusJourney.update}), so it only ever has to cover the fog's reach either
+ * side of the bus plus the half-loop of slack the whole-loop snapping leaves.
+ * `Fog` fades out by 235 m, and the bus sits within ±½ loop of the tile centre,
+ * so three loops (±540 m of tile against ±415 m ever needed) keep the far edge
+ * comfortably inside the fog, whichever way the camera looks.
+ */
+const TILE_LENGTH = LANE_LOOP * 3;
 
 /** Half-width of the grass verge the ground mesh covers either side. */
 const GROUND_HALF_WIDTH = 90;
@@ -171,144 +216,25 @@ const RIDER_BOUNCE = 0.13;
  */
 const RIDER_BOUNCE_MARGIN = 0.04;
 
-/** Where the ride's own twenty seconds leave the bus, in metres down the lane. */
-const RIDE_END_Z = -JOURNEY_SECONDS * BUS_SPEED;
+/**
+ * Where the ride's closing shot leaves the bus, in metres down the lane.
+ *
+ * The arrival (after the jump-cut) drives the bus to exactly here — the same
+ * place, moving at the same speed, that an on-time ride has always handed over
+ * from. Exported for the lane probe.
+ */
+export const RIDE_END_Z = -JOURNEY_SECONDS * BUS_SPEED;
 
 /**
  * Where the park's gate stands, down the lane. Derived from where the ride ends.
  *
- * Exported so `check:bus-journey` can assert the bus **reaches** it while
- * waiting, rather than restating −250 in the check and having the two drift.
+ * The gate lives in its own group ({@link BusJourney}'s `parkAhead`), hidden for
+ * the whole of the looping drive and shown by the jump-cut, so it never repeats
+ * with the countryside. Exported so a check can measure the arrival against it.
  */
 export const JOURNEY_GATE_Z = -JOURNEY_SECONDS * BUS_SPEED - PARK_STANDOFF;
 const PARK_AHEAD_Z = JOURNEY_GATE_Z;
 
-/**
- * **Where the bus comes to rest when it has to wait — at the gate.**
- *
- * Jim, 8 August 2026, on the overrun: *"The bus stops in open lane, short of the
- * gate. It should idle **at the gate**, which is where a bus waits."*
- *
- * It stopped short because the only thing that had ever decided where the bus
- * *is* was `-elapsed * BUS_SPEED`, and `elapsed` clamps at {@link
- * JOURNEY_SECONDS}. So the bus's resting place was wherever twenty seconds
- * happened to leave it — {@link RIDE_END_Z}, which is {@link PARK_STANDOFF}
- * metres of empty tarmac short of the arch. That standoff is right for the
- * *closing shot* of a ride that ends on time, and it is the wrong place for a
- * vehicle to sit still: a bus parked in the open road with its engine running
- * reads as broken down, and a bus at a gate reads as waiting.
- *
- * Nose on the arch, so the bus's own length is the offset and a bus that is
- * resized still pulls up in the same relationship to the gate.
- */
-export const BUS_WAIT_Z = PARK_AHEAD_Z + CAT_BUS_LENGTH / 2;
-
-/** The last stretch, in metres: from where the ride ends to where it waits. */
-const PULL_IN_DISTANCE = RIDE_END_Z - BUS_WAIT_Z;
-
-/**
- * How long the bus takes to roll that last stretch and stop.
- *
- * **Not picked — it is what an even deceleration from {@link BUS_SPEED} to
- * nothing over {@link PULL_IN_DISTANCE} takes**, which is `2d/v`. Choosing a
- * duration instead would have been choosing a deceleration by accident, and a
- * bus that stops in half a second has crashed rather than parked.
- *
- * It lands at ~4.0 s, which is longer than four of the five overruns measured
- * on real hardware (0.96, 4.24, 4.48, 6.34, 7.73 s). So on a real slow seed the
- * bus is usually still visibly rolling when the park arrives, and the wait never
- * begins with a stationary frame.
- */
-export const PULL_IN_SECONDS = (2 * PULL_IN_DISTANCE) / BUS_SPEED;
-
-/**
- * Where the bus is, `idle` seconds after the ride ran out of road.
- *
- * Pure and exported for the same reason {@link cameraPoseAt} is: `check:bus-
- * journey` has to be able to assert *"it reaches the gate"* without building a
- * bus, and an assertion that asked the bus where it thought it was would pass on
- * a bus that never moved.
- */
-export function busWaitZAt(idleSeconds: number): number {
-  const t = clamp(idleSeconds, 0, PULL_IN_SECONDS);
-  return RIDE_END_Z - BUS_SPEED * t * (1 - t / (2 * PULL_IN_SECONDS));
-}
-
-/** How fast it is going while it pulls in. Reaches exactly zero at the gate. */
-export function busWaitSpeedAt(idleSeconds: number): number {
-  const t = clamp(idleSeconds, 0, PULL_IN_SECONDS);
-  return BUS_SPEED * (1 - t / PULL_IN_SECONDS);
-}
-
-/**
- * **A stopped bus is not a still bus.** How far it rocks on its springs once it
- * has pulled up, in metres and radians.
- *
- * Twelve children are bouncing in their seats; a body on springs carrying them
- * moves. Small enough that it reads as an idling engine rather than as a
- * wobble, and it is the difference between a held frame and a frozen one — the
- * whole complaint being fixed here is that the wait *read as a crash*.
- *
- * Ramped in by how far the bus has slowed, so it arrives with the stop rather
- * than switching on at it.
- */
-const IDLE_ROCK_LIFT = 0.035;
-const IDLE_ROCK_ROLL = 0.008;
-const IDLE_ROCK_RATE = 1.9;
-
-/**
- * **The camera breathes once the bus has stopped**, as a fraction of how far out
- * it is standing.
- *
- * Measured, not assumed. Under QA's own reproduction — 4x CPU throttle, real
- * Metal renderer — the wait divides into two halves that behave completely
- * differently, and only the first was ever looked at:
- *
- * | the wait | camera poses | bus positions | title layouts |
- * |---|---|---|---|
- * | pulling in (4.0 s) | 301 / 301 frames | 301 | 301 |
- * | stopped at the gate (1.7 s) | **1** / 131 frames | 65 | 131 |
- *
- * The pull-in moves the camera because the camera is following a moving bus, so
- * *any* liveness measurement taken across the whole wait passes on the manoeuvre
- * alone. Once the bus is parked, `busZ` stops changing and every term of the
- * camera's position is a constant: it holds one pose exactly, for as long as the
- * park takes. **One camera pose is the number QA reported as a crash**, and it
- * was still reachable, just later than anybody had looked.
- *
- * A dolly, deliberately, rather than a drift or an orbit: it scales the camera's
- * distance from the bus and leaves its **bearing untouched**, so the pose the
- * hand-over cuts from is still the park camera's own — which `cameraPoseAt` is
- * asserted against, and which an orbiting idle would quietly break, at an
- * instant chosen by however long generation happened to take.
- *
- * Ramped in by how far the bus has slowed, exactly like {@link IDLE_ROCK_LIFT},
- * so it arrives with the stop rather than switching on at it — and is therefore
- * identically zero for the whole of an on-time ride.
- */
-const IDLE_BREATH = 0.02;
-const IDLE_BREATH_RATE = 0.62;
-
-
-/**
- * How much lane exists *behind* the bus's starting point.
- *
- * The camera orbits, so for a third of every turn it is looking back down the
- * road the bus came in on. Without this there is nothing there.
- */
-const LANE_AHEAD = 120;
-
-/**
- * The stretch of **open** lane — from behind the bus's start down to the park's
- * wall, with a few metres to spare.
- *
- * The hedges and trees are scattered over this rather than over the whole ground
- * mesh, because the ground now runs on past the gate to hold the park up: left
- * alone, the roadside hedge marched straight through the boundary wall and out
- * the other side.
- */
-const LANE_OPEN_FROM = PARK_AHEAD_Z + 7;
-const LANE_OPEN_RUN = LANE_AHEAD - LANE_OPEN_FROM;
 
 /**
  * **How far out the park-behind-the-wall silhouettes have to start.**
@@ -403,24 +329,46 @@ const PARK_AHEAD_SEED = 0x9a12ee ^ PARK_SEED;
  * 76, because the rooftops that used to fill half that silhouette are gone and
  * a treeline with gaps in it reads as a field with some trees in it.
  */
-const LANE_TREES = 400;
-/** @see LANE_TREES */
+const LANE_TREES_PER_LOOP = 260;
+/** @see LANE_TREES_PER_LOOP */
 const PARK_AHEAD_TREES = 76;
+/** Kerbside hedge blobs per loop, marched evenly and tiled with the trees. */
+const HEDGE_PER_LOOP = 300;
 
 /**
- * The hills, as a function of distance down the lane.
+ * How many whole waves of each hill fit in one {@link LANE_LOOP}.
  *
- * Two sines of incommensurable wavelength plus a long swell, so the ride never
- * repeats within its own length and the bus is never level for long. Amplitudes
- * are small in absolute terms — this is a lane over rolling country, not a
- * rollercoaster, and the camera is orbiting, so vertical motion that reads as
- * gentle from one bearing reads as lurching from another.
+ * The three were sines of *incommensurable* wavelength (0.0755, 0.0412, 0.0169
+ * rad/m ≈ 83, 153, 372 m) so the ride never repeated within its own length. That
+ * property is exactly wrong for a world that has to loop: a non-periodic sum has
+ * no repeat to hide, so scrolling it always seams. So the wavelengths are now
+ * **exact harmonics** of the loop — 5, 2 and 1 whole waves in 360 m (≈ 72, 180,
+ * 360 m), close to the old three — and because `gcd(5, 2, 1) = 1` the sum's true
+ * period is the whole {@link LANE_LOOP}, not a fraction of it. `laneHeight(z)`
+ * and `laneHeight(z ± LANE_LOOP)` are then identically equal, which is what lets
+ * the countryside be shifted by whole loops with no seam.
+ */
+const HILL_WAVES_SHORT = 5;
+const HILL_WAVES_MID = 2;
+const HILL_WAVES_LONG = 1;
+
+/**
+ * The hills, as a function of distance down the lane — **periodic** in
+ * {@link LANE_LOOP}.
+ *
+ * A short ripple, a mid roll and a long swell, so the bus is never level for
+ * long. Amplitudes are unchanged from the old incommensurable version, so the
+ * feel and — the number that matters — {@link LANE_MAX_GRADIENT} are the same; only
+ * the wavelengths were nudged onto loop harmonics (see {@link HILL_WAVES_SHORT}).
+ * This is a lane over rolling country, not a rollercoaster, and the camera is
+ * orbiting, so vertical motion that reads as gentle from one bearing reads as
+ * lurching from another.
  */
 export function laneHeight(z: number): number {
   return (
-    Math.sin(z * 0.0755) * 1.25 +
-    Math.sin(z * 0.0412 + 1.7) * 2.0 +
-    Math.sin(z * 0.0169 + 0.4) * 2.8
+    Math.sin(z * LOOP_W * HILL_WAVES_SHORT) * 1.25 +
+    Math.sin(z * LOOP_W * HILL_WAVES_MID + 1.7) * 2.0 +
+    Math.sin(z * LOOP_W * HILL_WAVES_LONG + 0.4) * 2.8
   );
 }
 
@@ -437,15 +385,26 @@ export function laneHeight(z: number): number {
  * is plainly a ski slope. A real road tops out around 6.
  */
 export const LANE_MAX_GRADIENT =
-  1.25 * 0.0755 + 2.0 * 0.0412 + 2.8 * 0.0169;
+  1.25 * LOOP_W * HILL_WAVES_SHORT +
+  2.0 * LOOP_W * HILL_WAVES_MID +
+  2.8 * LOOP_W * HILL_WAVES_LONG;
 
-/** Cross-slope, so the verges fall away and the lane sits in the land. */
+/**
+ * Cross-slope, so the verges fall away and the lane sits in the land.
+ *
+ * **Periodic in `z` as well, so the whole ground loops.** The one `z` term that
+ * is not {@link laneHeight} — the verge roll — used `z * 0.019`, a wavelength of
+ * 331 m that is not a loop harmonic, so away from the tarmac the land would not
+ * repeat and the shift would seam there even though the road itself was clean.
+ * It is now `z * LOOP_W` (one wave per loop, ≈ the old 0.019), so `groundHeight`
+ * is periodic everywhere it is sampled.
+ */
 function groundHeight(x: number, z: number): number {
   const across = Math.abs(x) - ROAD_HALF_WIDTH;
   if (across <= 0) return laneHeight(z);
   // Away from the tarmac the land rolls in its own right, and drops off at the
   // far edge so the mesh never ends in a visible cliff against the sky.
-  const roll = Math.sin(x * 0.043 + z * 0.019) * 1.9 + Math.sin(x * 0.017) * 2.4;
+  const roll = Math.sin(x * 0.043 + z * LOOP_W) * 1.9 + Math.sin(x * 0.017) * 2.4;
   const fade = smoothstep(GROUND_HALF_WIDTH * 0.55, GROUND_HALF_WIDTH, Math.abs(x));
   return laneHeight(z) + roll * clamp01(across / 22) - fade * 26;
 }
@@ -475,6 +434,22 @@ function groundHeight(x: number, z: number): number {
  * check rather than restated in it.
  */
 export const SETTLE_SECONDS = 3.2;
+
+/**
+ * **The earliest the drive may cut to the park, in seconds.**
+ *
+ * The loop runs until *both* the park is ready *and* this much ride has been
+ * seen — so a fast device still gets the whole cinematic rather than being
+ * jump-cut at eight seconds. It is `JOURNEY_SECONDS − SETTLE_SECONDS` on purpose:
+ * the jump-cut is followed by the closing settle ({@link SETTLE_SECONDS}), so on a
+ * fast device the cut lands at 16.8 s and the hand-over at exactly 20 s — the same
+ * length, and the same 0.00-degree closing shot, the ride has always had. On a
+ * slow device the loop simply runs longer before the same cut and settle play.
+ *
+ * The director owns this decision ({@link JourneyDirector.readyToArrive}); it is
+ * exported so the check can assert the cut cannot happen before it.
+ */
+export const MIN_LOOP_SECONDS = JOURNEY_SECONDS - SETTLE_SECONDS;
 
 const ORBIT = {
   /** Turns completed over the ride, before the settle. */
@@ -755,33 +730,55 @@ export class BusJourney {
    * actually above her.
    */
   private readonly riderBounce: number[] = [];
+  /**
+   * The looping countryside — ground, road, verge trees and hedges.
+   *
+   * Periodic in {@link LANE_LOOP} and shifted by whole loops each frame to follow
+   * the bus, which is what makes the drive an *infinitely repeating world* with no
+   * seam (see {@link update}).
+   */
   private readonly lane = new Group();
+  /**
+   * The park at the end of the road — gate, wall, and the woodland behind it.
+   *
+   * Its **own** group, at the fixed gate z, that the loop's shift never touches:
+   * a destination does not repeat with the scenery. Hidden for the whole of the
+   * looping drive and revealed by the jump-cut ({@link update}). Kept in the scene
+   * graph while hidden so the lane facts (`parkFacts`) still measure it.
+   */
+  private readonly parkAhead = new Group();
 
+  /**
+   * **How far the bus has driven, in seconds — a clock that never stops.**
+   *
+   * The loop runs on this: `busZ = -elapsedSeconds * BUS_SPEED`, the orbit spins
+   * on it, and the shot list cuts on it. It is no longer clamped at
+   * {@link JOURNEY_SECONDS} — the drive is a loop, so the bus keeps going until the
+   * jump-cut, and freezing this is exactly the stopped-bus wait this change exists
+   * to remove.
+   */
   private elapsedSeconds = 0;
   /**
-   * **A clock that never stops, even when the bus does.**
+   * **A clock that never stops** — the one everything drawn reads.
    *
-   * Separate from {@link elapsedSeconds}, which is *distance down the lane* and
-   * is deliberately held still in two cases: once the ride has run its course,
-   * and while `JourneyDirector.overrunning` idles the bus at the kerb waiting
-   * for a park that is taking too long.
-   *
-   * Driving the children's excitement off the travel clock meant that in both of
-   * those cases twelve children froze mid-bounce — arms up, motionless — which
-   * is a worse thing to be looking at than twelve still children would have
-   * been. Found by `check:bus-journey`, which measured 0.00 m of movement in
-   * four seconds and said so; nothing about the code looked wrong.
+   * Once identical in spirit to {@link elapsedSeconds}; kept separate because the
+   * two diverge during the arrival, where the lane clock is held at the closing
+   * shot's start while the children keep bouncing and the wheels keep turning on
+   * this one.
    */
   private animationSeconds = 0;
   /**
-   * **How long the bus has been waiting** for a park that is not ready yet.
+   * **The drive has cut to the park and is playing its closing approach.**
    *
-   * Zero on every ride that ends on time, so nothing about the ordinary journey
-   * is expressed in terms of it. Once it starts running the bus is no longer
-   * where the lane clock says — it is pulling in to the gate, which is
-   * {@link busWaitZAt}'s job.
+   * False for the whole looping drive; set once, by the jump-cut, when the
+   * director says the park is ready and the minimum ride has been seen. While it
+   * is true the bus drives the closing stretch to {@link RIDE_END_Z} and the
+   * camera eases onto the park's 0.00° bearing — the arrival exactly as an on-time
+   * ride has always played it.
    */
-  private idleSeconds = 0;
+  private arriving = false;
+  /** Seconds since the jump-cut; drives the closing settle, 0 → {@link SETTLE_SECONDS}. */
+  private arrivalSeconds = 0;
   private busZ = 0;
 
   private viewMode: JourneyView = 'outside';
@@ -845,6 +842,11 @@ export class BusJourney {
     this.scene.add(new HemisphereLight(PALETTE.ambientDay, PALETTE.grass, 1.1));
 
     this.scene.add(this.lane);
+    // The park is its own group, hidden until the jump-cut reveals it. Added to
+    // the scene (not the lane) so the loop's shift never moves it, and left in the
+    // graph while hidden so `parkFacts` still measures the gate and its woodland.
+    this.parkAhead.visible = false;
+    this.scene.add(this.parkAhead);
     this.buildGround();
     this.buildScenery();
     this.buildParkAhead();
@@ -1036,12 +1038,13 @@ export class BusJourney {
   }
 
   /**
-   * Seconds of **road** — how far down the lane the bus has come, as a time.
+   * Seconds of **driving** — how far down the looping lane the bus has come.
    *
-   * Clamped at {@link JOURNEY_SECONDS} and held still while the bus waits, so
-   * **this is not the clock for anything that has to keep moving on screen**.
-   * That is {@link animationTime}. Feeding the title card this one is the whole
-   * of the frozen-title fault QA found: see `ui/JourneyTitle.ts`.
+   * No longer clamped: the drive is an infinite loop, so this keeps climbing
+   * until the jump-cut. **Still not the clock for anything that must keep moving
+   * on screen** — during the arrival it is held at the closing shot's start while
+   * {@link animationTime} runs on. Feeding the title card this one is the whole of
+   * the frozen-title fault QA found: see `ui/JourneyTitle.ts`.
    */
   get elapsed(): number {
     return this.elapsedSeconds;
@@ -1061,9 +1064,14 @@ export class BusJourney {
     return this.animationSeconds;
   }
 
-  /** How long the bus has been waiting at the kerb. Zero on an on-time ride. */
-  get waited(): number {
-    return this.idleSeconds;
+  /** True once the jump-cut has fired and the closing approach is playing. */
+  get arrivingNow(): boolean {
+    return this.arriving;
+  }
+
+  /** Seconds into the closing approach; 0 until the jump-cut. */
+  get arrivalTime(): number {
+    return this.arrivalSeconds;
   }
 
   /** Where the bus is down the lane, in metres. Negative is towards the park. */
@@ -1099,9 +1107,9 @@ export class BusJourney {
     this.bus.setCutaway(view === 'inside');
   }
 
-  /** True once the ride has run its course. */
+  /** True once the closing approach has finished and the park may take over. */
   get finished(): boolean {
-    return this.elapsedSeconds >= JOURNEY_SECONDS;
+    return this.arriving && this.arrivalSeconds >= SETTLE_SECONDS;
   }
 
   /**
@@ -1183,27 +1191,25 @@ export class BusJourney {
    * ground is", so nothing here can ever float or sink.
    */
   private buildGround(): void {
-    const segmentsZ = 220;
+    // Roughly the old two-metre spacing, over the longer looping tile.
+    const segmentsZ = Math.round(TILE_LENGTH / 2);
     const segmentsX = 40;
     const geometry = new PlaneGeometry(
       GROUND_HALF_WIDTH * 2,
-      LANE_LENGTH,
+      TILE_LENGTH,
       segmentsX,
       segmentsZ,
     );
     geometry.rotateX(-Math.PI / 2);
-    // **Translated into world space before anything is displaced.** The first
-    // version left the plane at the origin, displaced its vertices by
-    // `groundHeight(x, localZ)`, and then moved the *mesh* 100 m down the lane
-    // — so the hills ended up a hundred metres out of step with the road, the
-    // hedges, the trees and the bus, every one of which reads the same function
-    // in world coordinates. The result was a bus sailing along ten metres above
-    // a flat green sheet with the road and the verges buried underneath it, and
-    // it read on screen as "the camera is too high", which it was not.
-    //
-    // Baking the offset into the geometry means there is only ever one z here,
-    // and it is the one everything else uses.
-    geometry.translate(0, 0, LANE_AHEAD - LANE_LENGTH / 2);
+    // **Built centred on the origin, and never baked-offset.** The countryside is
+    // shifted by whole loops each frame to follow the bus (see `update`), so its
+    // z is a *loop-relative* coordinate: a vertex at built z sits, after the
+    // group's whole-loop shift, at a world z that differs by a multiple of
+    // {@link LANE_LOOP} — and because {@link groundHeight} is periodic in exactly
+    // that, the baked height is correct wherever the tile lands. (The earlier
+    // baked 100 m offset that put the hills out of step with the road is gone with
+    // the offset it corrected: there is no world offset here any more, only the
+    // runtime shift, which lands identical hills on identical hills.)
     const position = geometry.getAttribute('position') as BufferAttribute;
     for (let i = 0; i < position.count; i += 1) {
       position.setY(i, groundHeight(position.getX(i), position.getZ(i)));
@@ -1222,9 +1228,12 @@ export class BusJourney {
     // **Segmented across as well as along**, at 8 rather than 2: the texture now
     // carries kerbs at fixed `u`, and two segments across a 5.7 m road put the
     // nearest UV sample 2.9 m from the kerb it is meant to draw.
-    const roadGeometry = new PlaneGeometry(ROAD_HALF_WIDTH * 2, LANE_LENGTH, 8, segmentsZ);
+    //
+    // The road's dashes repeat every {@link ROAD_TILE_METRES} along `v`, and
+    // {@link LANE_LOOP} is an exact multiple of that (see its note), so the
+    // whole-loop shift lands the markings on themselves as cleanly as the hills.
+    const roadGeometry = new PlaneGeometry(ROAD_HALF_WIDTH * 2, TILE_LENGTH, 8, segmentsZ);
     roadGeometry.rotateX(-Math.PI / 2);
-    roadGeometry.translate(0, 0, LANE_AHEAD - LANE_LENGTH / 2);
     const roadPosition = roadGeometry.getAttribute('position') as BufferAttribute;
     for (let i = 0; i < roadPosition.count; i += 1) {
       roadPosition.setY(i, laneHeight(roadPosition.getZ(i)) + 0.07);
@@ -1261,19 +1270,40 @@ export class BusJourney {
     count: number,
     rng: Rng,
     where: (rng: Rng, index: number, reach: number) => { x: number; z: number },
+    target: Group,
+    tile: boolean,
   ): void {
     const trunk: InstanceItem[] = [];
     const round: InstanceItem[] = [];
     const cone: InstanceItem[] = [];
 
+    // **Tiled at exactly one loop, so the shift is seamless.** A verge tree is
+    // rolled once and filed at three loop offsets, giving an identical tree one
+    // whole {@link LANE_LOOP} up and down the lane. The countryside is shifted by
+    // whole loops to follow the bus (see `update`), so under that shift the tree
+    // that leaves the far edge is replaced *exactly* by its own copy arriving at
+    // the near one — there is no pop, because it is the same tree. The park-ahead
+    // woodland is `tile: false`: it lives in a group the shift never touches, and
+    // it is a one-off backdrop, not a thing the bus drives past.
+    const offsets = tile ? [-LANE_LOOP, 0, LANE_LOOP] : [0];
+
     for (let i = 0; i < count; i += 1) {
       const kind = pickTreeKind(rng);
       const { x, z } = where(rng, i, TREE_REACH[kind]);
       const { parts } = rollTree(rng, kind, x, groundHeight(x, z), z);
-      fileTreeParts(parts, { trunk, round, cone });
+      for (const dz of offsets) {
+        const copies =
+          dz === 0
+            ? parts
+            : parts.map((part) => ({
+                ...part,
+                position: part.position.clone().setZ(part.position.z + dz),
+              }));
+        fileTreeParts(copies, { trunk, round, cone });
+      }
     }
 
-    this.lane.add(
+    target.add(
       makeInstanced(`${name}-trunks`, FOLIAGE_GEOMETRY.trunk, foliageMaterial(0.95), trunk, true),
       makeInstanced(`${name}-canopies`, FOLIAGE_GEOMETRY.round, foliageMaterial(0.85), round, true),
       makeInstanced(`${name}-cones`, FOLIAGE_GEOMETRY.cone, foliageMaterial(0.85), cone, true),
@@ -1306,22 +1336,29 @@ export class BusJourney {
   private buildScenery(): void {
     const rng = new Rng(LANE_SCATTER_SEED);
 
-    this.plantTrees('journey-tree', LANE_TREES, rng, (r, i, reach) => {
-      const side = i % 2 === 0 ? 1 : -1;
-      // Clear of the tarmac, thinning outwards so the lane has a near edge and
-      // a soft far one.
-      //
-      // **The canopy is what has to clear it, not the trunk.** This offset used
-      // to be applied to the trunk with the canopy — up to 3.1 m of it — left
-      // to hang wherever it landed, which put leaves 0.17 m over the
-      // carriageway at 5.4 m, right where the bus's roof goes. So the tree is
-      // pushed out by `reach`, its own kind's widest possible canopy, and the
-      // 2.6 m verge is measured from the leaves inward. Same discipline as
-      // {@link PARK_AHEAD_CLEAR}: the thing's own size decides where it stands.
-      const x = side * (ROAD_HALF_WIDTH + reach + 2.6 + r.unit() * r.unit() * 60);
-      const z = LANE_AHEAD - r.unit() * LANE_OPEN_RUN;
-      return { x, z };
-    });
+    // Scattered over **one loop, centred on the origin**, then tiled up and down
+    // the lane by `plantTrees`. `z` is a loop-relative coordinate in
+    // [−LANE_LOOP/2, LANE_LOOP/2); the three tiles fill the whole countryside.
+    this.plantTrees(
+      'journey-tree',
+      LANE_TREES_PER_LOOP,
+      rng,
+      (r, i, reach) => {
+        const side = i % 2 === 0 ? 1 : -1;
+        // Clear of the tarmac, thinning outwards so the lane has a near edge and
+        // a soft far one.
+        //
+        // **The canopy is what has to clear it, not the trunk.** The tree is
+        // pushed out by `reach`, its own kind's widest possible canopy, so the
+        // 2.6 m verge is measured from the leaves inward — same discipline as
+        // {@link PARK_AHEAD_CLEAR}: the thing's own size decides where it stands.
+        const x = side * (ROAD_HALF_WIDTH + reach + 2.6 + r.unit() * r.unit() * 60);
+        const z = (r.unit() - 0.5) * LANE_LOOP;
+        return { x, z };
+      },
+      this.lane,
+      true,
+    );
 
     const matrix = new Matrix4();
     const at = new Vector3();
@@ -1329,33 +1366,40 @@ export class BusJourney {
     const spin = new Quaternion();
 
     // The hedge: little rounded blobs marching along both verges, close enough
-    // to the camera to sell the speed.
-    const HEDGE = 520;
+    // to the camera to sell the speed. Marched evenly over one loop and tiled
+    // three times, exactly like the trees, so it scrolls seamlessly.
+    const HEDGE = HEDGE_PER_LOOP * 3;
     const hedge = new InstancedMesh(
       new SphereGeometry(1, 8, 6),
       toonMaterial(PALETTE.leafDeep),
       HEDGE,
     );
     hedge.name = 'journey-hedge';
-    for (let i = 0; i < HEDGE; i += 1) {
-      const side = i % 2 === 0 ? 1 : -1;
-      const along = (i / HEDGE) * LANE_OPEN_RUN;
-      const z = LANE_AHEAD - along;
+    // **One loop rolled, then stamped three times.** Every random draw is made
+    // once per slot and reused for that slot's copy in each of the three tiles,
+    // so a hedge and its copies one loop up and down the lane are *identical*.
+    // That is what the seamless shift needs: rolling fresh randoms per tile would
+    // make the same slot a different blob in each loop, and the shift would pop.
+    let placed = 0;
+    for (let slot = 0; slot < HEDGE_PER_LOOP; slot += 1) {
+      const side = slot % 2 === 0 ? 1 : -1;
+      const baseZ = (slot / HEDGE_PER_LOOP - 0.5) * LANE_LOOP;
       const radius = 0.75 + rng.unit() * 0.45;
-      // **Its own width, again.** The offset used to be applied to the blob's
-      // *centre* while the blob was scaled 1.35× wider than `radius`, so up to
-      // 1.62 m of hedge hung off a 0.9 m verge and the worst instance sat
-      // 0.65 m inside the carriageway — measured, on the road, where the bus
-      // drives. Placing the near face at the kerb instead keeps the hedge
-      // hugging the road, which is the whole reason it is here, without any of
-      // it being *on* the road.
+      // **Its own width.** The near face sits at the kerb — the offset is applied
+      // to the blob's near edge, not its centre, so none of it reaches onto the
+      // carriageway however wide the blob is.
       const spread = radius * 1.35;
       const x = side * (ROAD_HALF_WIDTH + spread + rng.unit() * 0.4);
-      at.set(x, groundHeight(x, z) + radius * 0.55, z);
-      scale.set(spread, radius, spread);
-      spin.setFromAxisAngle(new Vector3(0, 1, 0), rng.unit() * Math.PI);
-      matrix.compose(at, spin, scale);
-      hedge.setMatrixAt(i, matrix);
+      const spinY = rng.unit() * Math.PI;
+      for (const dz of [-LANE_LOOP, 0, LANE_LOOP]) {
+        const z = baseZ + dz;
+        at.set(x, groundHeight(x, z) + radius * 0.55, z);
+        scale.set(spread, radius, spread);
+        spin.setFromAxisAngle(new Vector3(0, 1, 0), spinY);
+        matrix.compose(at, spin, scale);
+        hedge.setMatrixAt(placed, matrix);
+        placed += 1;
+      }
     }
     hedge.instanceMatrix.needsUpdate = true;
     hedge.castShadow = true;
@@ -1423,7 +1467,7 @@ export class BusJourney {
     wall.instanceMatrix.needsUpdate = true;
     wall.castShadow = true;
     wall.receiveShadow = true;
-    this.lane.add(wall);
+    this.parkAhead.add(wall);
 
     // --- the gate arch -------------------------------------------------------
     // `Entrance.ts`'s own posts, caps and crossbar. Same shape, same stone: this
@@ -1447,7 +1491,7 @@ export class BusJourney {
     crossbar.rotation.z = Math.PI;
     crossbar.castShadow = true;
     gate.add(crossbar);
-    this.lane.add(gate);
+    this.parkAhead.add(gate);
 
     // --- what stands over the wall -------------------------------------------
     //
@@ -1477,17 +1521,25 @@ export class BusJourney {
     // Real trees at real scale, not oversized stand-ins: `TREE_TOP` tops out at
     // 7.25 m against a 2.6 m wall, so they clear it by a comfortable margin at
     // the only distance anyone ever sees them from.
-    this.plantTrees('journey-park-tree', PARK_AHEAD_TREES, new Rng(PARK_AHEAD_SEED), (r, _i, reach) => {
-      // Alternate sides, and start each one where the masonry starts — placed
-      // **outward from the edge of the gate opening** rather than sampled across
-      // the whole width and hoped to miss (see {@link PARK_AHEAD_CLEAR}), by the
-      // tree's own widest possible canopy, so the near leaves begin at the
-      // clearance line rather than the trunk.
-      const side = r.chance(0.5) ? 1 : -1;
-      const x = side * (PARK_AHEAD_CLEAR + reach + r.unit() * 54);
-      const z = gateZ - 4 - r.unit() * 58;
-      return { x, z };
-    });
+    this.plantTrees(
+      'journey-park-tree',
+      PARK_AHEAD_TREES,
+      new Rng(PARK_AHEAD_SEED),
+      (r, _i, reach) => {
+        // Alternate sides, and start each one where the masonry starts — placed
+        // **outward from the edge of the gate opening** rather than sampled across
+        // the whole width and hoped to miss (see {@link PARK_AHEAD_CLEAR}), by the
+        // tree's own widest possible canopy, so the near leaves begin at the
+        // clearance line rather than the trunk.
+        const side = r.chance(0.5) ? 1 : -1;
+        const x = side * (PARK_AHEAD_CLEAR + reach + r.unit() * 54);
+        const z = gateZ - 4 - r.unit() * 58;
+        return { x, z };
+      },
+      // A one-off backdrop in the untranslated group — never tiled, never shifted.
+      this.parkAhead,
+      false,
+    );
   }
 
   /**
@@ -1544,98 +1596,105 @@ export class BusJourney {
   /**
    * One frame of the ride.
    *
-   * `travelling` is false while the bus idles at the kerb — the ride has run its
-   * course and the park has not finished generating (`JourneyDirector`). The
-   * road stops moving; **the children do not**, because a bus of frozen
-   * passengers is what a stopped clock actually looks like on screen.
+   * `canArrive` is the director's {@link JourneyDirector.readyToArrive}: the park
+   * has generated *and* the minimum ride has been seen. Until it is true the bus
+   * drives the looping world for ever — the drive never stops, so there is never
+   * a parked wait. The first frame it is true, the jump-cut fires and the closing
+   * approach plays: the bus rolls the last stretch to {@link RIDE_END_Z} and the
+   * camera eases onto the park's 0.00° bearing, exactly as an on-time ride always
+   * has. On a fast device that cut lands at {@link MIN_LOOP_SECONDS} and hand-over
+   * at 20 s, unchanged.
    */
-  update(dt: number, travelling = true): void {
+  update(dt: number, canArrive = false): void {
     if (dt <= 0) return;
     this.animationSeconds += dt;
-    if (travelling) {
-      this.elapsedSeconds = Math.min(JOURNEY_SECONDS, this.elapsedSeconds + dt);
+
+    // **The jump-cut, once.** From here the bus is on its closing approach and the
+    // lane clock is frozen; `arrivalSeconds` takes over.
+    if (!this.arriving && canArrive) this.jumpCutToPark();
+
+    if (this.arriving) {
+      this.arrivalSeconds = Math.min(SETTLE_SECONDS, this.arrivalSeconds + dt);
     } else {
-      this.idleSeconds += dt;
+      // The loop clock, never clamped — the world repeats, so the bus keeps going.
+      this.elapsedSeconds += dt;
     }
 
-    // **The wait is a manoeuvre, not a pause.** Once the road has run out the
-    // bus stops taking its position from the lane clock — which is clamped —
-    // and takes it from how long it has been waiting instead, rolling the last
-    // stretch and pulling up at the gate. See {@link BUS_WAIT_Z}.
-    const waiting = this.idleSeconds > 0;
-    this.busZ = waiting ? busWaitZAt(this.idleSeconds) : -this.elapsedSeconds * BUS_SPEED;
-    const speed = waiting ? busWaitSpeedAt(this.idleSeconds) : BUS_SPEED;
-    // **How stopped the bus is**, 0 at road speed and 1 at rest. Computed once
-    // and handed to everything that ramps with the stop — the rock on the
-    // springs and the camera's breath — rather than each deriving it from
-    // `speed` again, which would be two definitions of one number.
-    const atRest = clamp01(1 - Math.abs(speed) / BUS_SPEED);
+    // **The shot's own time.** During the loop it is the drive clock; during the
+    // approach it is the closing window `[MIN_LOOP_SECONDS, JOURNEY_SECONDS]`, so
+    // `busZ` runs −184.8 → −220 and `cameraPoseAt` settles onto the park bearing —
+    // the same arithmetic the last {@link SETTLE_SECONDS} of an on-time ride used.
+    const t = this.arriving ? MIN_LOOP_SECONDS + this.arrivalSeconds : this.elapsedSeconds;
+    this.busZ = -t * BUS_SPEED;
     this.place(this.busZ);
-    // **The wheels stop turning because the bus stops moving**, rather than
-    // because a boolean said so: `speed` is the real speed throughout, so they
-    // visibly slow down over the pull-in instead of switching off.
-    this.bus.animate(dt, this.animationSeconds, speed);
-    this.exciteRiders(this.animationSeconds);
-    this.rockAtRest(atRest);
 
-    // **The cut.** Driven by the ride's own clock through the shot list, so the
-    // schedule is a thing `check:bus-journey` can hold rather than something
-    // that only exists while a frame is being drawn.
-    this.cutTo(shotAt(this.elapsedSeconds).view);
+    // **The world follows the bus by whole loops.** Snapping the countryside's
+    // offset to a multiple of {@link LANE_LOOP} keeps ground under the bus for
+    // ever, and because everything in `lane` is periodic in exactly that, the
+    // snap lands identical hills, road markings, trees and hedges on top of the
+    // old ones — the infinite drive with no seam. The park (`parkAhead`) is not
+    // in this group, so the gate never repeats.
+    this.lane.position.z = Math.round(this.busZ / LANE_LOOP) * LANE_LOOP;
+
+    // Full road speed throughout: the bus is always driving, whether looping or
+    // making its final approach, so the wheels never stop turning.
+    this.bus.animate(dt, this.animationSeconds, BUS_SPEED);
+    this.exciteRiders(this.animationSeconds);
+
+    // **The cut between inside and outside.** During the loop the five-beat shot
+    // list cycles (`% JOURNEY_SECONDS`), so it keeps switching for as long as the
+    // drive lasts; during the approach it is forced outside, so the settle onto
+    // the park bearing is never interrupted by an interior beat.
+    this.cutTo(this.arriving ? 'outside' : shotAt(this.elapsedSeconds % JOURNEY_SECONDS).view);
 
     if (this.viewMode === 'inside') {
       // **The pan's own clock, which only runs while the shot is on screen.**
-      // Advanced here rather than in `update`'s preamble so the four seconds of
-      // exterior between the two interior beats are not spent travelling down a
-      // bus nobody is looking at.
+      // Advanced here rather than in `update`'s preamble so the exterior beats
+      // between interior ones are not spent travelling down a bus nobody sees.
       this.insideSeconds += dt;
       this.placeTheInsideCamera();
       this.pointTheInsideCamera();
       return;
     }
 
-    const pose = cameraPoseAt(this.elapsedSeconds);
+    // The looping orbit spins on for ever; the approach eases it onto the park's
+    // own bearing. Two owners of "where the outside camera is", one per phase —
+    // and `cameraPoseAt(JOURNEY_SECONDS)` is the 0.00° pose the hand-over cuts to,
+    // which `check:bus-journey` asserts.
+    const pose = this.arriving
+      ? cameraPoseAt(MIN_LOOP_SECONDS + this.arrivalSeconds)
+      : loopCameraPoseAt(this.elapsedSeconds);
     const height = laneHeight(this.busZ);
-    // **The breath.** A scale on how far out the camera stands, so the bearing
-    // — `pose.yaw`, the whole of what the hand-over cuts on — is untouched.
-    // Exactly 1 for the whole of an on-time ride, because `atRest` is 0 until
-    // the bus starts slowing. See {@link IDLE_BREATH}.
-    const breath = 1 + Math.sin(this.animationSeconds * IDLE_BREATH_RATE) * IDLE_BREATH * atRest;
     this.camera.position.set(
-      Math.sin(pose.yaw) * pose.horizontal * breath,
-      height + pose.lift * breath,
-      this.busZ + Math.cos(pose.yaw) * pose.horizontal * breath,
+      Math.sin(pose.yaw) * pose.horizontal,
+      height + pose.lift,
+      this.busZ + Math.cos(pose.yaw) * pose.horizontal,
     );
-    // **Aimed at the bus, not at the road under it.** The two are the same
-    // number on an ordinary ride, and they part company at exactly the moment
-    // it matters: a bus rocking at the kerb is something the camera should be
-    // seen to be watching. Taking the height off `bus.root` rather than
-    // recomputing `laneHeight` also removes a second definition of where the
-    // bus is, which is this repo's most expensive bug shape.
+    // Aimed at the bus, its height taken off `bus.root` rather than recomputed —
+    // one definition of where the bus is, which is this repo's most expensive bug
+    // shape avoided.
     this.camera.lookAt(0, this.bus.root.position.y + 2.2, this.busZ);
   }
 
   /**
-   * **The engine is running while she waits.**
+   * **The small jump cut that takes the bus adjacent to the park.**
    *
-   * Applied after {@link place}, which rewrites the bus's whole transform every
-   * frame, so this is a fresh offset each time rather than an accumulating one.
+   * Jim, 9 August 2026: *"a small jump cut takes it adjacent to the park when
+   * loaded."* One deliberate hard cut, the same grammar as the ride's inside/
+   * outside cuts: the looping countryside is left behind, the park is revealed,
+   * and the bus is placed at the start of its closing approach. `update` reads the
+   * bus and camera from `arrivalSeconds` from here on, so nothing else needs to
+   * know the loop has ended.
    *
-   * `atRest` is how far the bus has slowed — 0 at road speed, 1 stopped — and
-   * the amplitude is ramped by it, so the rock arrives *with* the stop.
-   * Switching it on at zero speed would put a visible step in the one frame the
-   * whole change exists to smooth over. Taken as an argument rather than
-   * re-derived from `speed` here: `update` needs the same number for the
-   * camera's breath, and two derivations of one quantity is the bug shape this
-   * repo pays for most often.
+   * On a fast device this fires at {@link MIN_LOOP_SECONDS}, where the loop and the
+   * approach happen to agree on the bus's position and the camera's pose to the
+   * metre and the degree — so there the only thing the cut changes is that the
+   * gate appears, and the closing shot then plays exactly as it always has.
    */
-  private rockAtRest(atRest: number): void {
-    if (atRest <= 0) return;
-    const t = this.animationSeconds;
-    this.bus.root.position.y += Math.sin(t * IDLE_ROCK_RATE) * IDLE_ROCK_LIFT * atRest;
-    // About the bus's own length, which `place`'s `lookAt` has just aimed down
-    // the road — so this is roll, whatever bearing the lane has put it on.
-    this.bus.root.rotateZ(Math.sin(t * IDLE_ROCK_RATE * 0.77 + 1.4) * IDLE_ROCK_ROLL * atRest);
+  private jumpCutToPark(): void {
+    this.arriving = true;
+    this.arrivalSeconds = 0;
+    this.parkAhead.visible = true;
   }
 
   /**
@@ -1753,5 +1812,34 @@ export function cameraPoseAt(t: number): {
     yaw,
     horizontal: Math.cos(pitch) * distance,
     lift: lerp(Math.sin(pitch) * distance, CAMERA_LIFT, settle * 0.25),
+  };
+}
+
+/**
+ * Where the camera is during the **looping drive** — the orbit that never
+ * settles.
+ *
+ * It is deliberately {@link cameraPoseAt}'s pre-settle branch, with no easing onto
+ * the park bearing: the loop must keep orbiting however long the park takes, and
+ * `cameraPoseAt` would start settling the instant `t` passed
+ * {@link MIN_LOOP_SECONDS}. Because they share that branch exactly, the two agree
+ * to the metre and the degree at `t = MIN_LOOP_SECONDS` — so on a fast device the
+ * jump-cut from this to `cameraPoseAt` is seamless, and the only thing the cut
+ * changes is that the gate appears.
+ *
+ * Pure and exported so a check can assert the loop keeps moving without a bus.
+ */
+export function loopCameraPoseAt(t: number): {
+  readonly yaw: number;
+  readonly horizontal: number;
+  readonly lift: number;
+} {
+  const yaw = ORBIT.startYawDegrees * DEG + (t / JOURNEY_SECONDS) * ORBIT.turns * Math.PI * 2;
+  const pitch = CAMERA_PITCH_DEGREES * DEG + Math.sin(t * 0.42) * 0.09;
+  const distance = CAMERA_BACK + Math.sin(t * 0.31) * 3.5;
+  return {
+    yaw,
+    horizontal: Math.cos(pitch) * distance,
+    lift: Math.sin(pitch) * distance,
   };
 }

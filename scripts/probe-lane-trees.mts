@@ -8,7 +8,7 @@
  */
 import './headless-canvas.mjs';
 import { Box3, InstancedMesh, Matrix4, Mesh, Vector3 } from 'three';
-import { BusJourney, JOURNEY_GATE_Z, BUS_WAIT_Z, laneHeight } from '../src/world/entrance/BusJourney.ts';
+import { BusJourney, JOURNEY_GATE_Z, RIDE_END_Z, laneHeight } from '../src/world/entrance/BusJourney.ts';
 import { ROAD_HALF_WIDTH } from '../src/world/entrance/road.ts';
 import { FOLIAGE_GEOMETRY } from '../src/world/treeModel.ts';
 import { PARK_SEED } from '../src/world/parkManifest.ts';
@@ -23,7 +23,7 @@ const journey = new BusJourney({
 journey.scene.updateMatrixWorld(true);
 
 console.log(`PARK_SEED ${PARK_SEED}   ROAD_HALF_WIDTH ${ROAD_HALF_WIDTH.toFixed(3)}`);
-console.log(`JOURNEY_GATE_Z ${JOURNEY_GATE_Z}   BUS_WAIT_Z ${BUS_WAIT_Z}`);
+console.log(`JOURNEY_GATE_Z ${JOURNEY_GATE_Z}   RIDE_END_Z ${RIDE_END_Z}`);
 
 const parkGeometry = new Map(Object.entries(FOLIAGE_GEOMETRY).map(([k, g]) => [g, k]));
 
