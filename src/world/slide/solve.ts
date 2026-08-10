@@ -578,36 +578,65 @@ export function cruiserCrossesColumn(
  */
 const CRUISER_CELL = 4;
 
-function cruiserCellKey(x: number, z: number): number {
-  // Packed into one integer rather than a string: this is the hottest lookup in
-  // the solve, and building a `${cx},${cz}` key per query allocates millions of
-  // short-lived strings for no benefit.
-  const cx = Math.floor(x / CRUISER_CELL);
-  const cz = Math.floor(z / CRUISER_CELL);
-  return (cx + 4096) * 8192 + (cz + 4096);
+/**
+ * The cruiser's segments filed into a **dense flat grid**, indexed by cell.
+ *
+ * This used to be a `Map<number, number[]>` keyed by a packed integer. The
+ * lookup is the hottest thing `clearsCruiser` does — one per sample of every
+ * candidate piece, millions of times — and a `Map.get` hashes the key on every
+ * one. A flat array indexed `(cx - minCx) * depth + (cz - minCz)` reads the same
+ * bucket with an integer multiply-add and no hashing. Same segments, filed from
+ * the same `i` in the same nesting order, so a cell's bucket holds the identical
+ * indices in the identical order — the first segment that fouls, and the
+ * boolean, are unchanged. Cells no segment touched are `undefined`, exactly as
+ * the `Map` had no key for them.
+ */
+interface CruiserGrid {
+  readonly minCx: number;
+  readonly minCz: number;
+  readonly depth: number;
+  readonly buckets: readonly (readonly number[] | undefined)[];
 }
 
-const CRUISER_GRID: ReadonlyMap<number, readonly number[]> = (() => {
-  const grid = new Map<number, number[]>();
+const CRUISER_GRID: CruiserGrid = (() => {
   const reach = CRUISER_OVERLAP + CRUISER_SAGITTA;
   const count = CRUISER_LINE.length;
-  for (let i = 0; i < count; i += 1) {
+  let minCx = Infinity;
+  let maxCx = -Infinity;
+  let minCz = Infinity;
+  let maxCz = -Infinity;
+  const cellRange = (i: number): [number, number, number, number] => {
     const a = CRUISER_LINE[i]!;
     const b = CRUISER_LINE[(i + 1) % count]!;
-    const minX = Math.min(a.x, b.x) - reach;
-    const maxX = Math.max(a.x, b.x) + reach;
-    const minZ = Math.min(a.z, b.z) - reach;
-    const maxZ = Math.max(a.z, b.z) + reach;
-    for (let cx = Math.floor(minX / CRUISER_CELL); cx <= Math.floor(maxX / CRUISER_CELL); cx += 1) {
-      for (let cz = Math.floor(minZ / CRUISER_CELL); cz <= Math.floor(maxZ / CRUISER_CELL); cz += 1) {
-        const key = (cx + 4096) * 8192 + (cz + 4096);
-        const bucket = grid.get(key);
+    return [
+      Math.floor((Math.min(a.x, b.x) - reach) / CRUISER_CELL),
+      Math.floor((Math.max(a.x, b.x) + reach) / CRUISER_CELL),
+      Math.floor((Math.min(a.z, b.z) - reach) / CRUISER_CELL),
+      Math.floor((Math.max(a.z, b.z) + reach) / CRUISER_CELL),
+    ];
+  };
+  for (let i = 0; i < count; i += 1) {
+    const [loCx, hiCx, loCz, hiCz] = cellRange(i);
+    if (loCx < minCx) minCx = loCx;
+    if (hiCx > maxCx) maxCx = hiCx;
+    if (loCz < minCz) minCz = loCz;
+    if (hiCz > maxCz) maxCz = hiCz;
+  }
+  const width = maxCx - minCx + 1;
+  const depth = maxCz - minCz + 1;
+  const buckets: (number[] | undefined)[] = new Array<number[] | undefined>(width * depth);
+  for (let i = 0; i < count; i += 1) {
+    const [loCx, hiCx, loCz, hiCz] = cellRange(i);
+    for (let cx = loCx; cx <= hiCx; cx += 1) {
+      for (let cz = loCz; cz <= hiCz; cz += 1) {
+        const idx = (cx - minCx) * depth + (cz - minCz);
+        const bucket = buckets[idx];
         if (bucket) bucket.push(i);
-        else grid.set(key, [i]);
+        else buckets[idx] = [i];
       }
     }
   }
-  return grid;
+  return { minCx, minCz, depth, buckets };
 })();
 
 /** Does a point at (x, y, z) keep {@link CRUISER_AIR} from the Sky Cruiser? */
@@ -615,10 +644,18 @@ function clearsCruiser(x: number, y: number, z: number): boolean {
   const reach = CRUISER_OVERLAP + CRUISER_SAGITTA;
   const reach2 = reach * reach;
   const air = CRUISER_AIR + CRUISER_SAGITTA;
-  const nearby = CRUISER_GRID.get(cruiserCellKey(x, z));
+  const cx = Math.floor(x / CRUISER_CELL) - CRUISER_GRID.minCx;
+  const cz = Math.floor(z / CRUISER_CELL) - CRUISER_GRID.minCz;
+  const depth = CRUISER_GRID.depth;
+  // Out of the grid's extent is out of every segment's reach — nothing to check.
+  if (cx < 0 || cz < 0 || cz >= depth || cx * depth + cz >= CRUISER_GRID.buckets.length) {
+    return true;
+  }
+  const nearby = CRUISER_GRID.buckets[cx * depth + cz];
   if (!nearby) return true;
   const count = CRUISER_LINE.length;
-  for (const i of nearby) {
+  for (let n = 0; n < nearby.length; n += 1) {
+    const i = nearby[n] as number;
     const a = CRUISER_LINE[i]!;
     // The cruiser is a closed loop, so the last sample joins back to the first.
     // Leaving that segment out puts a 1.5 m blind spot in the ride's own air.
