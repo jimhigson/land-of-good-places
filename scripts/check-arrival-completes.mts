@@ -36,8 +36,11 @@
  * It drives the **real** `ParkGeneration` and the **real** `JourneyDirector`
  * through the **real** budget policy (`overrunAwareBudgetMs`), one frame at a
  * time, and measures how many frames the generation takes *after the ride has
- * ended* — the frames during which the bus is parked at the gate with nothing to
- * show but a loading caption.
+ * ended* — the frames during which the bus keeps driving its looping world while
+ * the last of the park is built behind it. (The bus no longer parks at the gate;
+ * it loops until the park is ready and a jump-cut hands over. What this file
+ * guards is unchanged by that: whatever the bus is doing on screen, generation
+ * must still drain flat-out during the overrun, or the wait is unbounded.)
  *
  * The device is modelled as a fixed number of generator **steps per frame**,
  * `advance(0)` being exactly one step (the drive loops read the clock after every
@@ -47,10 +50,11 @@
  * milliseconds is what makes the frame counts below identical on a phone and on
  * CI — the same reason `check:park-boot` states its guarantees in work units.
  *
- * The load-bearing fact the fix turns on: during the ride the budget is
- * `GENERATION_BUDGET_MS` (protect the orbit); once the bus has parked it is
- * `OVERRUN_GENERATION_BUDGET_MS`, ~25x larger (nothing to protect, drain
- * flat-out). So the overrun takes ~25x fewer frames with the fix than without.
+ * The load-bearing fact the fix turns on: during the nominal ride the budget is
+ * `GENERATION_BUDGET_MS` (protect the orbit); once it has overrun it is
+ * `OVERRUN_GENERATION_BUDGET_MS`, ~25x larger (the loop tolerates a chunkier
+ * frame rate, so drain flat-out). So the overrun takes ~25x fewer frames with the
+ * fix than without.
  * Revert the fix — make the parked budget equal the rolling one — and the overrun
  * frame count explodes past the ceiling. That is exactly the mutation that models
  * today's broken `main`, and it is proven below.
@@ -116,8 +120,8 @@ while (!generation.ready && !generation.failed && frames < MAX_FRAMES) {
   if (rideEndFrame < 0 && director.rideOver) rideEndFrame = frames;
 
   if (director.shouldAdvanceGeneration()) {
-    // The real budget policy, in the real place: 8 ms while the bus is rolling,
-    // 200 ms once it has parked. Converted to this device's steps-per-frame.
+    // The real budget policy, in the real place: 8 ms during the nominal ride,
+    // 200 ms once it has overrun. Converted to this device's steps-per-frame.
     const budgetMs = director.overrunAwareBudgetMs(
       GENERATION_BUDGET_MS,
       OVERRUN_GENERATION_BUDGET_MS,
@@ -162,8 +166,8 @@ if (generation.failed) {
 }
 if (!generation.ready) {
   fouls.push(
-    `generation never finished in ${frames} frames — the bus would idle at the gate forever, ` +
-      'which is exactly the "stops forever" Jim reported',
+    `generation never finished in ${frames} frames — the drive would loop forever with the park never ` +
+      'arriving, which is exactly the "stops forever" Jim reported wearing a different surface',
   );
 }
 
@@ -176,11 +180,11 @@ said.push(
 );
 said.push(
   `${totalSteps} generator steps total: ${stepsDuringRide} behind the moving bus, ` +
-    `${stepsDuringOverrun} while parked at the gate`,
+    `${stepsDuringOverrun} while the drive is looping`,
 );
 said.push(
-  `so the bus idles at the gate for ${overrunFrames} frames while it finishes — the parked wait, ` +
-    `in device-independent frames`,
+  `so the drive loops for ${overrunFrames} frames while it finishes — the residual wait behind the ` +
+    `moving bus, in device-independent frames`,
 );
 said.push(
   `budgets: ${GENERATION_BUDGET_MS} ms rolling, ${OVERRUN_GENERATION_BUDGET_MS} ms parked ` +
@@ -208,7 +212,7 @@ said.push(
 //
 // This does not claim the wait is short in seconds — on a slow enough device the
 // residual is the raw generation cost and no scheduling beats it (that number is
-// measured in wall-clock in the PR). It claims the parked wait drains at the
+// measured in wall-clock in the PR). It claims the residual wait drains at the
 // parked budget rather than the rolling one, which is the difference between a
 // bounded loading screen and the effectively-endless idle `main` ships.
 // ---------------------------------------------------------------------------
@@ -222,18 +226,18 @@ said.push(
     `parked — the parked frames drain ${speedup.toFixed(1)}x faster (floor ${SPEEDUP_FLOOR}x)`,
 );
 said.push(
-  `so the parked wait is ${overrunFrames} frames (~${(overrunFrames / RIDE_FRAMES).toFixed(0)} rides); ` +
+  `so the residual wait is ${overrunFrames} frames (~${(overrunFrames / RIDE_FRAMES).toFixed(0)} rides); ` +
     `at the rolling budget it would be ~${(stepsDuringOverrun / Math.max(rollingRate, 1)).toFixed(0)} — ` +
     `the ${speedup.toFixed(0)}x the fix buys`,
 );
 
 if (overrunFrames < 0) {
-  fouls.push('could not measure the parked wait — the ride never ended or generation never finished');
+  fouls.push('could not measure the residual wait — the ride never ended or generation never finished');
 } else if (speedup < SPEEDUP_FLOOR) {
   fouls.push(
     `the bus's parked frames drain only ${speedup.toFixed(1)}x faster than its rolling ones ` +
       `(${parkedRate.toFixed(1)} vs ${rollingRate.toFixed(1)} steps/frame), under the ${SPEEDUP_FLOOR}x floor. ` +
-      'Generation is being metered at the rolling budget while the bus is parked, so the wait at the ' +
+      'Generation is being metered at the rolling budget while the drive is looping, so the wait at the ' +
       'gate is not draining any faster than it did during the ride — the unbounded idle Jim reported. ' +
       'Check that `overrunAwareBudgetMs` still hands the parked frames OVERRUN_GENERATION_BUDGET_MS and ' +
       'that `overrunning` fires once the ride is over',
