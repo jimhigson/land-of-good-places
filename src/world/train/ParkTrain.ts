@@ -241,8 +241,6 @@ export class ParkTrain implements GameSystem, TrainService {
         {
           index: planned.index,
           name: planned.name,
-          subtitle: planned.subtitle,
-          glyph: planned.glyph,
           accent: planned.accent,
           distance: planned.distance,
         },

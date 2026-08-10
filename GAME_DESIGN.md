@@ -107,6 +107,21 @@ Unless the grown-ups turn on **Mayhem mode**…
   no actions and so are no longer outlined at all; and a tap that lands on a
   thing no longer walks you to it, so tapping a stall selects it and tapping
   its chip is what sets off the walk.
+  **One box, not two — the chip carries the whole call to action (10 August
+  2026).** The 28 July build put a *sign card* above the chips naming the thing
+  ("The Rail Race!", "Reception", the hotel floor you were on) with a line under
+  it. Playing it, the family found it *"a bit excessive… roll it into just the
+  action"*: two boxes, a heading and a button, saying much the same thing over a
+  child's head. So the sign card is gone, and the chip's own label grew from a
+  one-word verb into a short **call to action that implies the thing by naming
+  what you do to it** — "Race the carts!", "See the view", "Go shopping!", "Pick
+  the flower!" — still one very short phrase, never a heading and never a
+  sentence. **And the hotel floor read-out (the little top-middle pill from issue
+  #236) is removed entirely:** it is one more thing to read for something a child
+  can already see out of the window, and the family asked for it gone.
+  *As built:* `ui/SignCard.ts` and `ui/FloorPill.ts` are deleted, `InteractZone`
+  has no `sign` any more, and every zone spells its chip's call to action where
+  it is registered.
 - **PREVIEW RULE — absolute, applies everywhere (28 July 2026):** **every
   screen that changes how the character looks is the character-creation
   screen, with fewer choices.** Face painting, hats, and anything else that

@@ -412,15 +412,6 @@ const artworks: (CanvasTexture | null)[] = [null, null, null, null, null];
 /** How many there are. Callers index modulo this, so a hotel cannot run out. */
 export const ARTWORK_COUNT = 5;
 
-/** What each one is, for the card a child gets when she looks at it. */
-export const ARTWORK_TITLES: readonly string[] = [
-  'Rainbow Hill',
-  'Somebody’s Cat',
-  'The Big Wheel',
-  'Flowers for You',
-  'Little Boat',
-];
-
 function artworkTexture(index: number): CanvasTexture {
   const slot = ((index % ARTWORK_COUNT) + ARTWORK_COUNT) % ARTWORK_COUNT;
   const cached = artworks[slot];

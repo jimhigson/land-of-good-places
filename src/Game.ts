@@ -34,7 +34,6 @@ import {
 import { JUMP_APEX_HEIGHT } from './entities/Player';
 import { NavGrid } from './world/NavGrid';
 import { CharacterCreation, CuteODex, Hud, LiftPanel, ScreenControls, TapBurst, WhatsNew } from './ui';
-import { FloorPill } from './ui/FloorPill';
 import { ActionChips } from './ui/ActionChips';
 import { ParkMap } from './ui/ParkMap';
 import { RaceHud } from './ui/RaceHud';
@@ -578,9 +577,6 @@ export class Game {
         this.stairMenu.isOpen,
     );
     this.addSystem(this.hotelLiftPanel);
-
-    // Eleri: "It shows on the screen which floor you are on, on the HUD."
-    this.addSystem(new FloorPill(uiRoot, () => this.world.hotel.floorLabel()));
 
     // GAME_DESIGN.md's SELECTION RULE, built once for the whole game: one thing
     // in the park is selected at a time — by standing at it, hovering it or

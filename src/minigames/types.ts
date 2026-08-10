@@ -109,19 +109,24 @@ export type MiniGameFactory = () => MiniGame;
 /**
  * A stall in the garden.
  *
- * `title`, `subtitle`, `glyph` and `accent` used to be painted onto a wooden
- * board over the booth. Since the family's ruling of 28 July 2026 there are no
- * painted boards in the park at all — those four fields become the stall's
- * `InteractZone.sign` instead, and `ui/SignCard.ts` shows them in screen space
- * when a child selects the booth. They are still the stall's *name*, so they
- * obey GAME_DESIGN.md's BREVITY RULE and `npm run check:brevity` measures them.
+ * `title`, `glyph` and `accent` used to be painted onto a wooden board over the
+ * booth, then (28 July 2026) became the stall's `InteractZone.sign`. Since the
+ * family's ruling of 10 August 2026 the sign card is gone too: the action chip
+ * is the only thing shown over the booth, so `cta` is the whole of it — a short
+ * call to action ("Race the carts!") that says what the stall is by naming what
+ * you do at it. `title` stays as the booth's internal/debug name; `glyph` and
+ * `accent` still colour the awning.
  */
 export interface StallDefinition {
   readonly id: string;
-  /** The stall's name. A title: at most ~24 characters. */
+  /** The stall's name, for the zone's debug label. */
   readonly title: string;
-  /** One short line under it. A line: one sentence, at most ~50 characters. */
-  readonly subtitle: string;
+  /**
+   * The action chip's call to action — "Race the carts!", "Bump the cars!".
+   * A very short phrase, not a sentence: it is the only text shown over the
+   * booth now that the sign card is gone.
+   */
+  readonly cta: string;
   /** One emoji, shown before the title. */
   readonly glyph: string;
   /** Awning stripe + trim colour, and the sign card's border. From PALETTE. */
