@@ -51,6 +51,27 @@ floor must be RE-AIMED at the real, changed invariant, not weakened to pass:
 5. Castle carve 4 ms is cold-compile-bound; finer yield can't shrink it. Note it.
 BYTE-IDENTITY absolute: check:park-boot fingerprints must be unchanged.
 
-## STATUS
-- [x] measured per-chunk + per-advance distributions
-- [ ] code changes  [ ] guards  [ ] browser before/after  [ ] full build + procgen
+## DONE
+- [x] measured per-chunk + per-advance distributions (worst chunk = one-time 4 ms
+      castle carve; slide already yields per joint; judder was the 200 ms budget)
+- [x] OVERRUN_GENERATION_BUDGET_MS + OVERRUN_WARMUP_BUDGET_MS 200 -> 12
+- [x] check:park-boot: new overrun advance-ceiling (one refresh + grace x slowness);
+      green at 12 (worst 13.8 ms, 0 frames over a refresh), RED at 200 (200.7 ms)
+- [x] check:arrival-completes: SPEEDUP_FLOOR -> smooth band [rolling, 16 ms];
+      RED at 200 (upper) and at 4 (lower); completion proof kept
+- [x] JourneyWait doc corrected (looping, not parked)
+- [x] byte-identity: park-boot route/chute/loop SHAs unchanged
+- [x] full `npm run build` exit 0; `npm run test:procgen` 321/321 exit 0
+- [x] browser before/after (throttled 6x overrun), real Chromium:
+      BEFORE 200ms: p99 208.8 ms, 76 frames >180 ms, worst 5583 ms
+      AFTER  12ms:  p99  26.2 ms,  1 frame  >180 ms, worst  409 ms  (~5fps -> ~60fps)
+      trace: scratchpad/frame-time-trace.png ; loop: scratchpad/overrun-after-4.png
+
+## Budget choice + wait cost (for the PR)
+Chose 12 ms (1.5x the 8 ms rolling budget), biased to smoothness. The overrun
+scene is the same moving bus the ride draws smoothly at 8 ms, so 12 ms keeps a
+frame (budget + <=2 ms worst slide unit) inside one 60 Hz refresh while draining
+~1.5x the ride's rate. Trade: on a slow device the wait is longer than the old
+200 ms flat-out drain (the loop drains at 12 ms/frame, not 200), but the bus is
+moving and smooth the whole time instead of a 5 fps slideshow — which is what
+Jim reported (jumpiness, not slowness).
