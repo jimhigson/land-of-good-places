@@ -53,8 +53,15 @@ to *reach* the gate — it loops forever, and the gate arrives via a cut.
   on `director.readyToHandOver` (now delayed by SETTLE).
 
 ## Status
-- [ ] periodic laneHeight/groundHeight + LANE_LOOP  [ ] tile+shift  [ ] parkAhead split
-- [ ] update() phases + director + main  [ ] parkFacts  [ ] guards  [ ] build+procgen
-- [ ] visual QA (throttled chromium, port 5314): loop, jump-cut, arrival; fast=20 s
+- [x] periodic laneHeight/groundHeight + LANE_LOOP (=46 road tiles ≈357.9 m; hill mismatch 4e-14)
+- [x] tile (3×LOOP) + whole-loop shift  [x] parkAhead split (own group, hidden in loop)
+- [x] update() phases + director (readyToArrive/readyToHandOver) + main  [x] parkFacts
+- [x] guards: check:bus-journey rewritten (loop keeps moving +prove-red; cut gating both ways;
+      seamless 0.00° hand-over at every ready-time); check:arrival-completes prose
+- [x] build pieces green: check:bus-journey, check:cat-bus, check:arrival-completes, test:procgen(321)
+- [ ] full `npm run build` (running) then visual QA (throttled chromium, port 5314): loop, cut, arrival;
+      fast=20 s. Screenshots for the PR + message.
 
-Fast-path invariant to preserve: park ready by 20 s → hand over at 20 s, 0.00° bearing.
+Verified: fast path hands over at 20.02 s, 0.00°; overrun loops 50 s with bus moving on 1801/1801
+frames; hand-over lands at RIDE_END_Z (−220) on the park bearing whenever the cut fires.
+LANE_TREES_PER_LOOP=260, HEDGE_PER_LOOP=300 (tune in QA if too sparse/heavy).
