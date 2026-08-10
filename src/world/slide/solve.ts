@@ -371,6 +371,65 @@ const SOUTH_WALL_Z = BUILDING_CENTRE_Z + BUILDING_HALF_Z;
  */
 const JOINED_PLOTS: ReadonlySet<string> = new Set(['building', 'ballPit']);
 
+/**
+ * The plots the slide must steer around, as parallel `Float64Array`s built once.
+ *
+ * {@link chuteMayPass} asks "is this patch clear of every plot but the two I
+ * join?" on **every sample of every candidate piece**, and the search draws
+ * millions of them (canonical seed: 3.3M candidates, seed 5: 9M). Reading it off
+ * `PARK_LAYOUT.entries` there allocated a `Map` iterator and destructured a
+ * `[id, entry]` tuple per plot per sample, and paid a `JOINED_PLOTS.has(id)`
+ * `Set` lookup whose answer is fixed at module load. Filtering to the avoided
+ * plots once, into flat arrays, removes all three costs while keeping the
+ * identical `Math.hypot(...) < boundingRadius + radius` test in the identical
+ * order — so the first plot that blocks, and the boolean returned, are
+ * unchanged (`Math.hypot` is kept precisely because squaring both sides can flip
+ * a borderline point in the last bit). This is the structure-of-arrays cure
+ * `parkLayout.ts`'s `clearOfFootprints` already applies for the Sky Cruiser; the
+ * slide cannot reuse that one because it tests each plot's bounding *circle*, not
+ * its footprint rectangle. Byte-identity is proved by `measure:slide-fingerprint`
+ * on all five CI seeds.
+ */
+const AVOIDED_PLOTS = (() => {
+  const xs: number[] = [];
+  const zs: number[] = [];
+  const rs: number[] = [];
+  for (const [id, entry] of PARK_LAYOUT.entries) {
+    if (JOINED_PLOTS.has(id)) continue;
+    xs.push(entry.x);
+    zs.push(entry.z);
+    rs.push(entry.boundingRadius);
+  }
+  return {
+    count: xs.length,
+    x: Float64Array.from(xs),
+    z: Float64Array.from(zs),
+    boundingRadius: Float64Array.from(rs),
+  };
+})();
+
+/**
+ * The half-extents of a box that contains every castle tower plus its widest
+ * radius, measured from the building centre. Derived from {@link CASTLE_TOWERS}
+ * itself so it cannot drift from the solids {@link clearsTowers} tests against.
+ *
+ * A point further than this (plus the query radius) from the centre on either
+ * axis is beyond every tower's reach, so {@link clearsTowers} can return "clear"
+ * without touching any tower. The gate only ever *skips work that would have
+ * returned clear anyway* — a blocked point is always within the box — so it
+ * changes no verdict, and it uses no `Math.hypot`, only two `abs`.
+ */
+const TOWER_BOUND_X = Math.max(
+  ...CASTLE_TOWERS.map(
+    (tower) => Math.abs(tower.x - BUILDING_CENTRE_X) + Math.max(tower.radiusBottom, tower.radiusTop),
+  ),
+);
+const TOWER_BOUND_Z = Math.max(
+  ...CASTLE_TOWERS.map(
+    (tower) => Math.abs(tower.z - BUILDING_CENTRE_Z) + Math.max(tower.radiusBottom, tower.radiusTop),
+  ),
+);
+
 
 /**
  * Does a chute of `radius`, passing (x, z) at height `y`, clear every corner
@@ -390,6 +449,17 @@ const JOINED_PLOTS: ReadonlySet<string> = new Set(['building', 'ballPit']);
  * forbid routes that are perfectly clear.
  */
 function clearsTowers(x: number, z: number, y: number, radius: number): boolean {
+  // Beyond the towers' bounding box (plus the query radius) on either axis,
+  // every tower is provably further than `radius` away — so skip the loop. This
+  // never changes the answer, only avoids eight `distanceOutsideTower` calls for
+  // the many samples out over the ball pit and the park's edge. See
+  // {@link TOWER_BOUND_X}.
+  if (
+    Math.abs(x - BUILDING_CENTRE_X) > TOWER_BOUND_X + radius ||
+    Math.abs(z - BUILDING_CENTRE_Z) > TOWER_BOUND_Z + radius
+  ) {
+    return true;
+  }
   for (const tower of CASTLE_TOWERS) {
     if (distanceOutsideTower(tower, x, z, y) < radius) return false;
   }
@@ -593,11 +663,23 @@ function chuteMayPass(
   const height = heightAtArc(distanceAlong, nominalLength);
   // The castle is a rectangle *plus* four towers. Neither alone is the castle.
   if (!clearsTowers(x, z, height, radius)) return false;
-  {
-    for (const [id, entry] of PARK_LAYOUT.entries) {
-      if (JOINED_PLOTS.has(id)) continue;
-      if (Math.hypot(x - entry.x, z - entry.z) < entry.boundingRadius + radius) return false;
-    }
+  // Every plot but the two this ride joins, read off the flat arrays. Same test,
+  // same order as the `PARK_LAYOUT.entries` walk this replaced — see
+  // {@link AVOIDED_PLOTS} for why it is prebuilt.
+  //
+  // The axis pre-check is exact, not approximate: `Math.hypot(dx, dz)` is never
+  // smaller than `|dx|` or `|dz|`, so a plot whose centre is more than `r` away
+  // on either axis cannot possibly be within `r`, and skipping its `hypot` there
+  // cannot skip a plot that would have blocked. The `hypot` verdict is reached
+  // on exactly the plots that could block, unchanged — so the first blocker, and
+  // the boolean, are identical.
+  for (let i = 0; i < AVOIDED_PLOTS.count; i += 1) {
+    const r = (AVOIDED_PLOTS.boundingRadius[i] as number) + radius;
+    const dx = x - (AVOIDED_PLOTS.x[i] as number);
+    if (dx > r || dx < -r) continue;
+    const dz = z - (AVOIDED_PLOTS.z[i] as number);
+    if (dz > r || dz < -r) continue;
+    if (Math.hypot(dx, dz) < r) return false;
   }
 
   // Whatever the Sky Cruiser turns out to be, stay out of its air — but only
