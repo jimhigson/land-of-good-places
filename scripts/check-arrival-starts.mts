@@ -41,11 +41,13 @@
  * Needs a Chromium install (`channel: 'chromium'`, real GPU — the default headless
  * SwiftShader makes every timing meaningless). `npx playwright install chromium`.
  *
- * **Proven red on today's `main`**: run it against a `main` dev server and it
- * times out at the ceiling with the bus still parked. Green on this branch. The
- * ceiling is generous on purpose — the fix makes the wait *bounded*, not *short*,
- * on a genuinely slow device (see the PR's measured numbers); this guards that
- * the game becomes startable at all, which is the failure that shipped.
+ * **Proven red on an unstartable boot**: a build where generation never finishes
+ * times out at the ceiling with no hand-over — whether the bus is parked (old
+ * `main`) or looping for ever (this branch's failure mode) does not matter, the
+ * game never becomes playable. Green on a healthy boot. The ceiling is generous
+ * on purpose — the wait is *bounded*, not *short*, on a genuinely slow device
+ * (see the PR's measured numbers); this guards that the game becomes startable at
+ * all, which is the failure that shipped.
  */
 import { chromium } from 'playwright-core';
 
@@ -133,8 +135,9 @@ while (Date.now() - t0 < ceilingMs) {
 
 if (handedOverAt === null) {
   fouls.push(
-    `the game never became playable within ${CEILING_S}s at ${THROTTLE}x CPU throttle — the bus is ` +
-      'still parked at the gate. This is the "gets to the same point and stops forever" Jim reported.',
+    `the game never became playable within ${CEILING_S}s at ${THROTTLE}x CPU throttle — the drive is ` +
+      'still looping without ever cutting to the park. This is the "gets to the same point and stops ' +
+      'forever" Jim reported, wearing a different surface.',
   );
 } else {
   said.push(`HANDED OVER: playable at ${handedOverAt.toFixed(1)}s (ceiling ${CEILING_S}s, ${THROTTLE}x throttle)`);
