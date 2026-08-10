@@ -64,7 +64,11 @@
 import { createHash } from 'node:crypto';
 import { Vector3 } from 'three';
 import { performance } from 'node:perf_hooks';
-import { GENERATION_BUDGET_MS, ParkGeneration } from '../src/boot/parkGeneration.ts';
+import {
+  GENERATION_BUDGET_MS,
+  OVERRUN_GENERATION_BUDGET_MS,
+  ParkGeneration,
+} from '../src/boot/parkGeneration.ts';
 import { JourneyDirector } from '../src/world/entrance/journeyDirector.ts';
 import { SETTLE_SECONDS } from '../src/world/entrance/BusJourney.ts';
 
@@ -821,6 +825,79 @@ if (cruiserRidden !== cruiserPlain) {
       'checked in both directions',
   );
   said.push('hand-over additionally waits for the shader warm-up and the closing approach, in both directions');
+}
+
+// ---------------------------------------------------------------------------
+// **The moving-bus budget: no frame of the LOOPING overrun may block past a
+// refresh of the moving bus.**
+//
+// The drive above measures generation at `GENERATION_BUDGET_MS` (8 ms), the
+// budget while the ride is rolling. But this branch keeps the bus *moving*
+// through the overrun too — orbiting camera, rolling countryside, a busload of
+// children — and drains generation at `OVERRUN_GENERATION_BUDGET_MS` while it
+// loops. A frame that blocks on that generation is a frame the moving bus jumps
+// across: at the old 200 ms overrun budget the throttled loop ran at ~5 fps, the
+// jumpiness Jim reported. Nothing here drove generation at that budget, so the
+// judder shipped unguarded — this is the missing half.
+//
+// So drive a real generation at the overrun budget and time every `advance()`.
+// The ceiling is **one 60 Hz refresh plus one worst unit's grace, scaled by this
+// box's speed** — a moving-bus frame, plus the single work unit a slice can
+// overshoot its budget by (`WORST_UNIT_GRACE_MS`, reused from the rolling ceiling
+// above). Crucially the base is the *refresh*, not the budget, so it does NOT
+// rise with the budget: a revert to 200 ms is red because 200 ms is far past one
+// refresh however fast the box, which is the whole point. `advance()` stops the
+// moment its budget is spent, so the worst it can block for is the budget plus
+// the unit it was mid-way through — a budget chosen at or under a refresh keeps
+// that inside the ceiling; a 200 ms budget cannot.
+//
+// **Proven red**: with `OVERRUN_GENERATION_BUDGET_MS` at its old 200, the worst
+// advance here is ~200 ms against a ~29 ms ceiling. At the smooth 12 ms it is the
+// budget plus the castle-window carve (~4 ms cold), well inside it.
+{
+  const FRAME_MS = 1000 / 60;
+  const overrunGen = new ParkGeneration();
+  const advances: number[] = [];
+  let worst = 0;
+  let overrunFrames = 0;
+  while (!overrunGen.ready && !overrunGen.failed && overrunFrames < MAX_FRAMES) {
+    const before = performance.now();
+    overrunGen.advance(OVERRUN_GENERATION_BUDGET_MS);
+    const spent = performance.now() - before;
+    advances.push(spent);
+    if (spent > worst) worst = spent;
+    overrunFrames += 1;
+    await nextFrame();
+  }
+  const sorted = [...advances].sort((a, b) => a - b);
+  const p99 = sorted[Math.min(sorted.length - 1, Math.floor(0.99 * sorted.length))] ?? 0;
+  const overRefresh = advances.filter((a) => a > FRAME_MS).length;
+  const OVERRUN_ADVANCE_CEILING_MS = FRAME_MS + WORST_UNIT_GRACE_MS * slowness;
+  said.push(
+    `overrun budget ${OVERRUN_GENERATION_BUDGET_MS} ms: ${overrunFrames} frames, worst advance ` +
+      `${worst.toFixed(1)} ms, p99 ${p99.toFixed(1)} ms, ${overRefresh} over one 60 Hz refresh ` +
+      `(${FRAME_MS.toFixed(1)} ms)`,
+  );
+  said.push(
+    `so one looping-overrun slice may block for ${OVERRUN_ADVANCE_CEILING_MS.toFixed(1)} ms ` +
+      `(one refresh + ${WORST_UNIT_GRACE_MS} ms of grace x ${slowness.toFixed(2)})`,
+  );
+  if (!overrunGen.ready) {
+    fouls.push(
+      `generation never finished at the ${OVERRUN_GENERATION_BUDGET_MS} ms overrun budget in ` +
+        `${overrunFrames} frames — the looping bus would drive forever`,
+    );
+  }
+  if (worst > OVERRUN_ADVANCE_CEILING_MS) {
+    fouls.push(
+      `one advance() at the ${OVERRUN_GENERATION_BUDGET_MS} ms overrun budget blocked for ` +
+        `${worst.toFixed(1)} ms against a ${OVERRUN_ADVANCE_CEILING_MS.toFixed(1)} ms ceiling ` +
+        `(one 60 Hz refresh + grace, scaled ${slowness.toFixed(2)}x for this box). The bus is MOVING ` +
+        'through the overrun now, so a frame that blocks this long jumps the bus, the camera and the ' +
+        'countryside across — the judder Jim reported. The overrun budget is too large for a moving ' +
+        'shot: bias it toward smoothness (near the rolling budget), do not drain flat-out',
+    );
+  }
 }
 
 for (const line of said) console.log(`  ${line}`);

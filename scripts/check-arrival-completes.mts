@@ -39,8 +39,9 @@
  * ended* — the frames during which the bus keeps driving its looping world while
  * the last of the park is built behind it. (The bus no longer parks at the gate;
  * it loops until the park is ready and a jump-cut hands over. What this file
- * guards is unchanged by that: whatever the bus is doing on screen, generation
- * must still drain flat-out during the overrun, or the wait is unbounded.)
+ * guards is that the loop still *completes* — whatever the bus is doing on screen,
+ * generation must finish in bounded frames, or the wait is unbounded and the game
+ * never starts.)
  *
  * The device is modelled as a fixed number of generator **steps per frame**,
  * `advance(0)` being exactly one step (the drive loops read the clock after every
@@ -50,21 +51,45 @@
  * milliseconds is what makes the frame counts below identical on a phone and on
  * CI — the same reason `check:park-boot` states its guarantees in work units.
  *
- * The load-bearing fact the fix turns on: during the nominal ride the budget is
- * `GENERATION_BUDGET_MS` (protect the orbit); once it has overrun it is
- * `OVERRUN_GENERATION_BUDGET_MS`, ~25x larger (the loop tolerates a chunkier
- * frame rate, so drain flat-out). So the overrun takes ~25x fewer frames with the
- * fix than without.
- * Revert the fix — make the parked budget equal the rolling one — and the overrun
- * frame count explodes past the ceiling. That is exactly the mutation that models
- * today's broken `main`, and it is proven below.
+ * ## What this used to demand, and why that was inverted (9 August 2026)
+ *
+ * This file once required the overrun to drain **~25x faster** than the ride —
+ * `OVERRUN_GENERATION_BUDGET_MS` was 200 ms against an 8 ms rolling budget — on the
+ * premise that once the ride ended *the bus parked*, so a chunky frame rate was
+ * free and the generator should drain flat-out. A `SPEEDUP_FLOOR` of 10x enforced
+ * it.
+ *
+ * The looping-bus branch overturns that premise. The overrun is no longer a parked
+ * bus: the drive **keeps moving** — orbiting camera, rolling countryside, a busload
+ * of children — until the park is ready. A 200 ms frame jerks all of that; measured
+ * on a throttled overrun it was the moving bus at ~5 fps, which is exactly the
+ * jumpiness Jim reported. So the overrun budget is now chosen for **smoothness**,
+ * a little above the rolling budget rather than 25x it (see
+ * `OVERRUN_GENERATION_BUDGET_MS`). That makes the `SPEEDUP_FLOOR` unsatisfiable
+ * *and wrong to satisfy*: any budget large enough to clear a 10x floor is a budget
+ * that drops frames of the moving bus.
+ *
+ * So the guarantee this file owns is re-aimed at the invariant that actually
+ * survived the design change:
+ *
+ * - **The loop still completes** in a bounded number of frames — the anti-"stuck
+ *   forever" core, unchanged, and the reason the file exists. A budget of zero, or
+ *   a generator that never finishes, is still caught here.
+ * - **The overrun budget sits in the smooth-and-progressing band** — at least the
+ *   rolling budget (so the wait never gets *worse* than the ride) and no more than
+ *   one 60 Hz refresh (so a single slice cannot, on its own, eat a whole frame of
+ *   the moving bus). A revert to 200 ms is red on the upper bound; a budget below
+ *   the rolling one is red on the lower.
+ * - **Whether that budget is smooth *in wall-clock*** — no single frame blocking
+ *   past a refresh's worth of work — is `check:park-boot`'s, which drives real
+ *   generation at this budget and times each `advance()`. One owner per question.
  *
  * **This does not claim the wait is *short*** — on a genuinely slow device the
  * residual wait is the device's raw generation cost and no scheduling beats it;
  * that number is measured in wall-clock in the PR, and the honest answer is that
- * the real cure is cheaper generation. This claims only that the arrival
- * *completes* in a bounded, dramatically-reduced number of parked frames rather
- * than the effectively-unbounded idle `main` ships.
+ * the real cure is cheaper generation. It claims the loop *completes*, and that it
+ * drains at a budget chosen to keep the moving bus smooth rather than to finish a
+ * moment sooner and judder.
  */
 import { performance } from 'node:perf_hooks';
 import {
@@ -187,60 +212,81 @@ said.push(
     `moving bus, in device-independent frames`,
 );
 said.push(
-  `budgets: ${GENERATION_BUDGET_MS} ms rolling, ${OVERRUN_GENERATION_BUDGET_MS} ms parked ` +
-    `(${(OVERRUN_GENERATION_BUDGET_MS / GENERATION_BUDGET_MS).toFixed(0)}x)`,
+  `budgets: ${GENERATION_BUDGET_MS} ms rolling, ${OVERRUN_GENERATION_BUDGET_MS} ms while looping ` +
+    `(${(OVERRUN_GENERATION_BUDGET_MS / GENERATION_BUDGET_MS).toFixed(1)}x — smooth, not flat-out)`,
 );
 
 // ---------------------------------------------------------------------------
-// The bound: **the parked frames must each drain far more generation than the
-// rolling ones did.** That is the whole fix — and stated this way it is
-// independent of both the machine and the seed.
+// The bound: **the overrun budget sits in the smooth-and-progressing band, and
+// the loop drains at it rather than at the rolling rate.**
 //
-// An absolute frame ceiling was tried first and rejected: the number of
-// generator steps is seed-dependent (the slide's rung retries vary), so a bare
-// "under N frames" is a tripwire that a harder seed trips with the fix perfectly
-// in place. What does NOT vary by seed is the *ratio* of work-per-frame between
-// the two phases, because it is set by the two budgets: ~25x with the fix, ~1x
-// without it. So the guard measures the ratio the generation actually ran at.
+// This replaced a `SPEEDUP_FLOOR` of 10x on 9 August 2026. That floor required
+// the overrun to drain *far faster* than the ride, which was right for a parked
+// bus and wrong for a moving one: any budget large enough to clear it (>=80 ms
+// against the 8 ms ride) drops frames of the looping bus. See the header. So the
+// two ends of the band replace the one-sided floor:
 //
-// **Proven at both ends by mutation**, canonical seed, 9 August 2026:
-//   fix  (parked budget 200): ~200 steps/parked-frame vs ~8/rolling  -> ~26x, passes
-//   main (parked budget   8): ~8 steps/parked-frame  vs ~8/rolling  -> ~1x,  RED
+//   - **lower bound `GENERATION_BUDGET_MS`** — the overrun must not drain *slower*
+//     than the ride, or a slow device's wait gets worse the moment the bus starts
+//     looping. `parkedRate >= rollingRate` is the same statement measured on the
+//     run: the budget switch (`overrunAwareBudgetMs` -> `overrunning`) still fires
+//     and still hands the loop at least the rolling budget.
+//   - **upper bound one 60 Hz refresh** — a single generation slice that alone
+//     needs a whole frame cannot leave any of that frame to draw the moving bus,
+//     so it *must* judder. A revert to the old 200 ms is red here.
 //
-// The floor is 10 — comfortably above 1 (a reverted fix), comfortably below 25
-// (the real ratio), so it is neither a tripwire on the fix nor passable by main.
+// Whether the chosen budget is smooth *in wall-clock* — no single `advance()`
+// blocking past a refresh's worth of work — is `check:park-boot`'s to prove, by
+// driving real generation at this budget and timing each slice. This file owns
+// only that the loop **completes** (asserted above, the anti-"stuck forever"
+// core) and that its budget is in the sane band. One owner per question.
 //
-// This does not claim the wait is short in seconds — on a slow enough device the
-// residual is the raw generation cost and no scheduling beats it (that number is
-// measured in wall-clock in the PR). It claims the residual wait drains at the
-// parked budget rather than the rolling one, which is the difference between a
-// bounded loading screen and the effectively-endless idle `main` ships.
+// **Proven red both ways**, canonical seed: a revert to 200 ms trips the upper
+// bound; an overrun budget below the 8 ms rolling one trips the lower.
 // ---------------------------------------------------------------------------
 const RIDE_FRAMES = Math.round(20 / SLOW_DEVICE_DT); // 240
 const rollingRate = rideEndFrame > 0 ? stepsDuringRide / rideEndFrame : 0;
 const parkedRate = overrunFrames > 0 ? stepsDuringOverrun / overrunFrames : 0;
 const speedup = rollingRate > 0 ? parkedRate / rollingRate : 0;
-const SPEEDUP_FLOOR = 10;
+/** One 60 Hz refresh: a slice at or above this cannot leave the moving bus a frame to draw. */
+const SMOOTH_OVERRUN_CEILING_MS = 16;
 said.push(
   `work per frame: ${rollingRate.toFixed(1)} steps while rolling, ${parkedRate.toFixed(1)} while ` +
-    `parked — the parked frames drain ${speedup.toFixed(1)}x faster (floor ${SPEEDUP_FLOOR}x)`,
+    `looping — the loop drains ${speedup.toFixed(1)}x the ride's rate (chosen for a smooth moving bus, ` +
+    `not to drain flat-out)`,
 );
 said.push(
-  `so the residual wait is ${overrunFrames} frames (~${(overrunFrames / RIDE_FRAMES).toFixed(0)} rides); ` +
-    `at the rolling budget it would be ~${(stepsDuringOverrun / Math.max(rollingRate, 1)).toFixed(0)} — ` +
-    `the ${speedup.toFixed(0)}x the fix buys`,
+  `so the residual wait is ${overrunFrames} frames (~${(overrunFrames / RIDE_FRAMES).toFixed(0)} rides) ` +
+    `of a moving, child-filled bus — longer than a flat-out drain, and smooth instead of juddering`,
+);
+said.push(
+  `overrun budget ${OVERRUN_GENERATION_BUDGET_MS} ms must sit in [${GENERATION_BUDGET_MS}, ` +
+    `${SMOOTH_OVERRUN_CEILING_MS}] ms: at least the rolling budget, at most one 60 Hz refresh`,
 );
 
 if (overrunFrames < 0) {
   fouls.push('could not measure the residual wait — the ride never ended or generation never finished');
-} else if (speedup < SPEEDUP_FLOOR) {
+}
+if (OVERRUN_GENERATION_BUDGET_MS > SMOOTH_OVERRUN_CEILING_MS) {
   fouls.push(
-    `the bus's parked frames drain only ${speedup.toFixed(1)}x faster than its rolling ones ` +
-      `(${parkedRate.toFixed(1)} vs ${rollingRate.toFixed(1)} steps/frame), under the ${SPEEDUP_FLOOR}x floor. ` +
-      'Generation is being metered at the rolling budget while the drive is looping, so the wait at the ' +
-      'gate is not draining any faster than it did during the ride — the unbounded idle Jim reported. ' +
-      'Check that `overrunAwareBudgetMs` still hands the parked frames OVERRUN_GENERATION_BUDGET_MS and ' +
-      'that `overrunning` fires once the ride is over',
+    `the overrun generation budget is ${OVERRUN_GENERATION_BUDGET_MS} ms, over the ` +
+      `${SMOOTH_OVERRUN_CEILING_MS} ms ceiling (one 60 Hz refresh). The bus keeps MOVING through the ` +
+      'overrun now, so a slice that eats a whole frame judders the moving shot — which is exactly the ' +
+      'jumpiness this branch exists to remove. Bias the budget toward smoothness, not toward draining fastest',
+  );
+}
+if (OVERRUN_GENERATION_BUDGET_MS < GENERATION_BUDGET_MS) {
+  fouls.push(
+    `the overrun generation budget is ${OVERRUN_GENERATION_BUDGET_MS} ms, below the ${GENERATION_BUDGET_MS} ms ` +
+      'rolling budget — the wait would drain SLOWER once the bus starts looping than it did during the ride, ' +
+      'which makes a slow device wait longer for no smoothness gained',
+  );
+}
+if (overrunFrames > 0 && parkedRate + 1e-6 < rollingRate) {
+  fouls.push(
+    `the looping frames drain ${parkedRate.toFixed(1)} steps each against ${rollingRate.toFixed(1)} while ` +
+      'rolling — the overrun is draining no faster than the ride, so `overrunAwareBudgetMs`/`overrunning` ' +
+      'is not applying the overrun budget once the ride is over',
   );
 }
 

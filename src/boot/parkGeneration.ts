@@ -88,28 +88,48 @@ import { offerPrewarmedSlide } from '../world/slide/prewarm';
 export const GENERATION_BUDGET_MS = 8;
 
 /**
- * How long a frame may spend generating **once the ride is over and the bus has
- * parked at the gate** — see `JourneyDirector.overrunAwareBudgetMs`.
+ * How long a frame may spend generating **once the ride has overrun its nominal
+ * length and the drive is looping** while it waits for the park — see
+ * `JourneyDirector.overrunAwareBudgetMs`.
  *
- * The 8 ms above is a promise to the orbit: never stutter the shot. That promise
- * is void the instant the ride ends, because there is no longer a shot to keep
- * smooth — the bus is stopped and the child is watching a loading screen whose
- * only remaining job is to finish. Holding the frame to 8 ms from here on leaves
- * ~90% of every frame idle while she waits on the very work that 8 ms is
- * rationing, which on a slow phone is the difference between a few seconds and a
- * few minutes. So during the wait the generator gets most of the frame.
+ * ## Why this is small, and why it used to be 200
  *
- * Not the whole frame: a slice yields every ~200 ms so the loading caption's
- * text keeps updating and the tab never trips the browser's "page unresponsive"
- * guard. Liveness during the wait is carried by a CSS-animated caption (compositor
- * thread, unaffected by this block), so this can be generous without the screen
- * reading as frozen. The residual wait is then the device's *raw* generation cost
- * spread over near-fully-used frames — which is the floor, and which no schedule
- * can go below. If that floor is itself too long on real hardware, the fix is to
- * make generation cheaper, not to widen this further; this only stops the ride
- * from adding an idle multiple on top of it.
+ * It was **200 ms**, on a premise that no longer holds: that once the ride ended
+ * the bus *parked* at the gate, so there was no moving shot left to keep smooth
+ * and the generator could have most of the frame to drain flat-out. That was true
+ * when the overrun was a stopped bus under a caption.
+ *
+ * This branch makes the bus **loop and keep moving** throughout the overrun (a
+ * stopped bus read as "stuck forever"; see `BusJourney`/`journeyDirector`). So the
+ * premise is void in the other direction: the looping bus, its orbiting camera and
+ * the rolling countryside are a *moving* shot exactly like the ride's, and a frame
+ * that blocks for 200 ms jerks all three. Measured on a throttled overrun, the
+ * 200 ms budget produced a p99 frame interval of ~209 ms — the moving bus at about
+ * five frames a second, which is precisely the "jumpy while it generates" Jim
+ * reported.
+ *
+ * So during the loop the generator gets a budget chosen for **smoothness**, not
+ * for draining fastest: a little more than {@link GENERATION_BUDGET_MS} because the
+ * looping scene has no shot transitions or title work competing for the frame, but
+ * nowhere near a figure that drops a frame of the moving bus. At 12 ms a frame is
+ * budget + at most one work unit (the slide's dearest is ~2 ms), which sits inside
+ * one 60 Hz refresh with room for the light looping scene to draw.
+ *
+ * **The trade, stated honestly.** A smaller budget means a longer wait on a slow
+ * device: the loop drains at 12 ms a frame rather than 200, so the residual wait is
+ * ~1.5x the rolling budget's rate instead of ~25x it. Jim reported *jumpiness, not
+ * slowness*, and a smooth loop that lasts a few seconds longer reads far better than
+ * a juddering one that ends a moment sooner — the bus is moving and full of children
+ * the whole time, so nobody is watching a frozen screen. If the raw wait is itself
+ * too long on real hardware the fix is cheaper generation (`solve.ts` §265), not a
+ * fatter budget that trades the smoothness back away.
+ *
+ * `check:park-boot` drives generation at this budget and asserts no single frame
+ * blocks past one refresh's worth of work; `check:arrival-completes` asserts the
+ * loop still *completes* (the anti-"stuck forever" guarantee) at whatever budget
+ * this is.
  */
-export const OVERRUN_GENERATION_BUDGET_MS = 200;
+export const OVERRUN_GENERATION_BUDGET_MS = 12;
 
 /**
  * The ground the Sky Cruiser measures itself against, before it is solved.
