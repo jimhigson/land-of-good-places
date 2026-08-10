@@ -39,14 +39,16 @@ import {
 import {
   BusJourney,
   JOURNEY_SECONDS,
+  LANE_LOOP,
   LANE_MAX_GRADIENT,
-  JOURNEY_GATE_Z,
-  PULL_IN_SECONDS,
+  MIN_LOOP_SECONDS,
+  RIDE_END_Z,
   SETTLE_SECONDS,
   cameraPoseAt,
   laneHeight,
   planJourneyShots,
 } from '../src/world/entrance/BusJourney.ts';
+import { ROAD_TILE_METRES } from '../src/world/entrance/road.ts';
 import {
   CAT_BUS_BODY_COLOUR,
   CAT_BUS_CABIN_CEILING_Y,
@@ -1292,14 +1294,27 @@ if (LANE_MAX_GRADIENT < Math.tan((3 * Math.PI) / 180)) {
     fouls.push('the park is built but not warmed, and the bus does not know to keep idling at the gate');
   }
 
-  // ...and now it is genuinely ready.
+  // ...and now it is genuinely ready. The drive may cut to the park, but the
+  // hand-over still waits out the closing approach ({@link SETTLE_SECONDS}) — the
+  // settle onto the park bearing — before the park takes the screen.
   director.noteWarmupReady();
-  if (!director.readyToHandOver) {
-    fouls.push('the park is built and warmed and the ride is over, and it still will not hand over');
+  if (!director.readyToArrive) {
+    fouls.push('the park is built and warmed and the minimum ride is done, but the drive will not cut to it');
+  }
+  if (director.readyToHandOver) {
+    fouls.push(
+      'the drive handed over the instant the park was ready, skipping the closing settle onto the ' +
+        'park bearing — the cut would land mid-turn',
+    );
   }
   if (director.overrunning) fouls.push('the ride still believes it is waiting for a park that exists');
+  // Play the closing approach; only then does it hand over.
+  for (let t = 0; t < SETTLE_SECONDS + 0.1; t += 1 / 60) director.advance(1 / 60);
+  if (!director.readyToHandOver) {
+    fouls.push('the park is ready and the closing approach has played, and it still will not hand over');
+  }
   said.push('the skip is withheld before the park exists and offered once it does, in both directions');
-  said.push('hand-over waits for the shader warm-up as well as the park, in both directions');
+  said.push('hand-over waits for the shader warm-up and the closing approach, in both directions');
 }
 
 // The build order, on its own: not before something has been drawn.
@@ -1768,251 +1783,262 @@ if (LANE_MAX_GRADIENT < Math.tan((3 * Math.PI) / 180)) {
 
 journey.dispose();
 
-// ------------------------------------------------------ the wait, and the gate
+// ------------------------------------------- the drive loops, and never stops
 /**
- * **What the screen does when the park is not ready and the bus has to wait.**
+ * **On an overrun the bus keeps driving; then a jump-cut hands over cleanly.**
  *
- * QA measured the shipped behaviour under 4x CPU throttling: over 6.4 s of
- * waiting, **1 distinct camera pose in 51 samples, 1 bus transform, and the
- * title frozen mid-jump**, against 270 camera poses and 262 title layouts during
- * the ride itself. It read as a crash. On seed 5 generation finished at ride
- * t = 19.04 s on an M4 Pro, so this is a state real hardware reaches with under
- * a second to spare, not a theoretical branch.
+ * The freeze this feature exists to kill was a *stopped* bus. The drive is now
+ * an infinitely repeating world (Jim, 9 August 2026: *"The drive should be its
+ * own infinitely repeating world and a small jump cut takes it adjacent to the
+ * park when loaded."*), so however long the park takes the bus is still moving —
+ * there is no parked wait to freeze. This block asserts exactly that, and the
+ * two things that make it safe: the world loops with no seam, and the hand-over
+ * still lands on the park's own bearing whenever the cut fires.
  *
- * Nothing measured the wait at all, because nothing ever passed
- * `travelling = false` — the overrun was only ever wired up in `main.ts`, where
- * no check can reach. That is the same gap that let the whole cat bus ship as
- * dead code for twelve days.
- *
- * Two things are asserted, and they are the two Jim named:
- *
- * - the bus **reaches the gate**, rather than stopping in open lane wherever
- *   twenty seconds happened to leave it;
- * - the presentation **stays alive** — the clock that drives anything drawn
- *   keeps running while the lane clock is stopped.
+ * Every assertion measures the built ride, and each is proved able to fail — the
+ * bug that shipped was invisible precisely because nothing asserted motion
+ * *continues*.
  */
 {
-  const waiting = new BusJourney({
-    skin: 0xffd9be,
-    hair: 0x8b5a3c,
-    outfit: 0xff9fc4,
-    hairStyle: 'bunches',
-  });
-  const waitingBus = waiting.scene.getObjectByName('cat-bus');
+  const parkYaw = (CAMERA_YAW_DEGREES * Math.PI) / 180;
+  const rider = { skin: 0xffd9be, hair: 0x8b5a3c, outfit: 0xff9fc4, hairStyle: 'bunches' } as const;
+  // A frame of driving is ~0.18 m (11 m/s × 1/60 s); a loop-jump would be a whole
+  // LANE_LOOP (~358 m). One metre cleanly separates "driving" from "the shift is
+  // showing", with plenty of slack for the hill-pitch wobble.
+  const BUS_STEP_CEILING = 1;
 
-  // Run the ride out first — the wait only exists after the road does.
-  for (let t = 0; t <= JOURNEY_SECONDS + 1e-9; t += STEP) waiting.update(STEP);
-  const zWhenTheRideRanOut = waiting.busPositionZ;
-  const elapsedWhenTheRideRanOut = waiting.elapsed;
-  const animationWhenTheRideRanOut = waiting.animationTime;
-
-  // Then wait, the way `main.ts` does while `JourneyDirector.overrunning`.
-  const busPositions = new Set<string>();
-  const cameraPoses = new Set<string>();
-  const titlePositions = new Set<string>();
-  const idleTitle = new JourneyTitle();
-  const idleLetters: { style?: { transform?: string } }[] = [];
-  const gather = (node: { children?: unknown[] }): void => {
-    const kids = Array.isArray(node.children) ? node.children : [];
-    if (kids.length === 0) idleLetters.push(node as { style?: { transform?: string } });
-    for (const kid of kids) gather(kid as { children?: unknown[] });
-  };
-  const idleBody = (globalThis as { document?: { body?: { children?: unknown[] } } }).document?.body;
-  const idleRoot = Array.isArray(idleBody?.children) ? idleBody.children.at(-1) : undefined;
-  if (idleRoot) gather(idleRoot as { children?: unknown[] });
-
-  /**
-   * **Long enough to outlast the manoeuvre**, which is the whole point.
-   *
-   * At 8 s this ran for twice {@link PULL_IN_SECONDS} and reported the wait as
-   * comfortably alive — 310 bus positions, 241 camera poses — on a build whose
-   * *stopped* idle holds **one** camera pose. The pull-in is a moving bus with a
-   * camera following it, so every liveness number is carried by it, and the
-   * state QA actually photographed as a crash begins where it ends. Measured on
-   * the running game under QA's own 4x throttle, the split was 301 poses over
-   * the 4.0 s pull-in against 1 over the 1.7 s after it.
-   *
-   * So the wait is run well past the stop and the two halves are asserted
-   * **separately**. Two of the five overruns measured on real hardware (6.34 and
-   * 7.73 s) reach the settled half, so this is a state the family gets to.
-   */
-  const WAIT_SECONDS = PULL_IN_SECONDS * 3;
-  /** Which half of the wait a frame belongs to — the stop is the boundary. */
-  type Half = 'pulling in' | 'stopped at the gate';
-  const halves: Half[] = ['pulling in', 'stopped at the gate'];
-  const busPositionsIn = new Map<Half, Set<string>>();
-  const cameraPosesIn = new Map<Half, Set<string>>();
-  const titlePositionsIn = new Map<Half, Set<string>>();
-  const framesIn = new Map<Half, number>();
-  for (const half of halves) {
-    busPositionsIn.set(half, new Set());
-    cameraPosesIn.set(half, new Set());
-    titlePositionsIn.set(half, new Set());
-    framesIn.set(half, 0);
+  // --- the world is periodic, so the loop is seamless by construction --------
+  // `laneHeight(z) === laneHeight(z + LANE_LOOP)` is what lets the countryside be
+  // shifted by whole loops to follow the bus with no seam; `LANE_LOOP` being a
+  // whole number of road tiles is what stops the road markings jumping at the
+  // shift. Both are the *design* of the loop, so both are asserted directly.
+  let worstPeriodMiss = 0;
+  for (let z = -900; z <= 900; z += 7.3) {
+    worstPeriodMiss = Math.max(worstPeriodMiss, Math.abs(laneHeight(z) - laneHeight(z + LANE_LOOP)));
+  }
+  const roadTilesPerLoop = LANE_LOOP / ROAD_TILE_METRES;
+  const roadTileMiss = Math.abs(roadTilesPerLoop - Math.round(roadTilesPerLoop));
+  said.push(
+    `the world repeats every ${LANE_LOOP.toFixed(1)} m (${roadTilesPerLoop.toFixed(3)} road tiles); ` +
+      `worst hill mismatch across a loop ${worstPeriodMiss.toExponential(1)} m`,
+  );
+  if (worstPeriodMiss > 1e-6) {
+    fouls.push(
+      `laneHeight is not periodic in LANE_LOOP (worst ${worstPeriodMiss} m across a loop) — the ` +
+        'countryside would seam every time it is shifted a loop to follow the bus, which is the ' +
+        'whole failure mode a non-periodic treadmill has and a designed loop does not',
+    );
+  }
+  if (roadTileMiss > 1e-6) {
+    fouls.push(
+      `LANE_LOOP is ${roadTilesPerLoop} road tiles, not a whole number — the road's dashes and ` +
+        'slabs would jump each time the lane is shifted a loop, even though the hills did not',
+    );
   }
 
-  /** The bearing the ride ends on — the park camera's, which the cut lands on. */
-  const endBearing = cameraPoseAt(JOURNEY_SECONDS).yaw;
-  let worstBearingDrift = 0;
-
-  for (let i = 0; i < WAIT_SECONDS / STEP; i += 1) {
-    waiting.update(STEP, false);
-    waiting.scene.updateMatrixWorld(true);
-    // **The clock `main.ts` hands the title.** Written as the same expression,
-    // so what is measured here is what is drawn there.
-    idleTitle.update(waiting.animationTime);
-    // Taken from the ride's own idle clock rather than counted off `i`, so the
-    // split lands where the bus actually stops.
-    const half: Half = waiting.waited <= PULL_IN_SECONDS ? 'pulling in' : 'stopped at the gate';
-    framesIn.set(half, (framesIn.get(half) ?? 0) + 1);
-    if (waitingBus) {
-      const at = waitingBus.getWorldPosition(new Vector3());
-      const where = `${at.x.toFixed(3)},${at.y.toFixed(3)},${at.z.toFixed(3)}`;
-      busPositions.add(where);
-      busPositionsIn.get(half)?.add(where);
+  // --- the bus keeps moving through a long overrun ---------------------------
+  // Drive well past the nominal ride with `canArrive` held false — a slow device
+  // whose park is not ready yet. The bus and the camera must change on EVERY
+  // frame past twenty seconds, and the shot list must keep cutting: the freeze
+  // that shipped held one bus transform and one camera pose for the whole wait.
+  const looping = new BusJourney(rider);
+  const loopBus = looping.scene.getObjectByName('cat-bus');
+  const OVERRUN_SECONDS = JOURNEY_SECONDS * 2.5; // 50 s — far past any measured overrun
+  let framesPast20 = 0;
+  let busStillPast20 = 0;
+  let cameraStillPast20 = 0;
+  let cuts = 0;
+  let wasView = looping.view;
+  let previousZ = looping.busPositionZ;
+  const previousEye = looping.camera.position.clone();
+  let maxBusStep = 0;
+  let travelledPast20 = 0;
+  const here = new Vector3();
+  for (let t = 0; t < OVERRUN_SECONDS; t += STEP) {
+    looping.update(STEP, false); // never allowed to arrive
+    if (looping.view !== wasView) {
+      cuts += 1;
+      wasView = looping.view;
     }
-    const eye = waiting.camera.position;
-    const from = `${eye.x.toFixed(3)},${eye.y.toFixed(3)},${eye.z.toFixed(3)}`;
-    cameraPoses.add(from);
-    cameraPosesIn.get(half)?.add(from);
-    // **Alive is not enough — it has to stay on the park's bearing.**
-    //
-    // The hand-over is a cut from this pose to the park camera's, and it can
-    // fall on *any* frame of the wait, because it happens the instant
-    // generation finishes. So whatever keeps the shot alive must not be
-    // something that swings it round: an idle that orbited would pass every
-    // liveness assertion above and turn the arrival into a jump cut, on a
-    // schedule set by how slow the machine is.
-    //
-    // Measured as the camera's own bearing about the bus it is watching, off
-    // the built camera, against the bearing the ride ended on.
-    const bearing = Math.atan2(eye.x, eye.z - waiting.busPositionZ);
-    let off = (bearing - endBearing) % (Math.PI * 2);
+    const busZ = loopBus ? loopBus.getWorldPosition(here).z : looping.busPositionZ;
+    const eye = looping.camera.position;
+    const busStep = Math.abs(busZ - previousZ);
+    if (t > JOURNEY_SECONDS) {
+      framesPast20 += 1;
+      if (busStep < 1e-6) busStillPast20 += 1;
+      if (eye.distanceTo(previousEye) < 1e-6) cameraStillPast20 += 1;
+      maxBusStep = Math.max(maxBusStep, busStep);
+      travelledPast20 += busStep;
+    }
+    previousZ = busZ;
+    previousEye.copy(eye);
+  }
+  said.push(
+    `over a ${OVERRUN_SECONDS.toFixed(0)}s overrun with the park never ready: the drive cut ${cuts} ` +
+      `times; past 20 s the bus was still on ${busStillPast20}/${framesPast20} frames, the camera on ` +
+      `${cameraStillPast20}/${framesPast20}, and the bus travelled ${travelledPast20.toFixed(0)} m more`,
+  );
+  if (busStillPast20 > 0) {
+    fouls.push(
+      `the bus stopped moving on ${busStillPast20} of ${framesPast20} overrun frames — a stopped bus ` +
+        'in the wait is the exact freeze this feature exists to remove',
+    );
+  }
+  if (cameraStillPast20 > 0) {
+    fouls.push(
+      `the camera stopped moving on ${cameraStillPast20} of ${framesPast20} overrun frames — the shot ` +
+        'froze, which is what QA read as a crash',
+    );
+  }
+  if (cuts < 4) {
+    fouls.push(
+      `the drive cut between views only ${cuts} times over a ${OVERRUN_SECONDS.toFixed(0)}s overrun — the ` +
+        'shot list has stopped cycling, so the wait is one held shot rather than a ride still playing',
+    );
+  }
+  // Smooth, not a teleport: the biggest per-frame step is about a frame of
+  // driving, never a whole-loop jump. The loop's shift is invisible because the
+  // world is periodic, not because the bus leaps — a leap of ~LANE_LOOP would
+  // mean the shift is showing.
+  if (maxBusStep > BUS_STEP_CEILING) {
+    fouls.push(
+      `the bus jumped ${maxBusStep.toFixed(1)} m in one frame of the loop (ceiling ` +
+        `${BUS_STEP_CEILING.toFixed(1)} m) — the world shift is showing as a teleport instead of being ` +
+        'hidden by the world being periodic',
+    );
+  }
+  looping.dispose();
+
+  // **Prove-red: pin the bus still and the detector fires.** The keeps-moving
+  // test above is only worth its runtime if a motionless bus trips it. Measured
+  // the same way — a stand-in whose z never changes — it must read as still on
+  // every frame, or the assertion cannot fail and is worthless.
+  let pinnedStill = 0;
+  let pinnedFrames = 0;
+  const pinnedZ = RIDE_END_Z;
+  for (let t = JOURNEY_SECONDS + STEP; t < JOURNEY_SECONDS + 5; t += STEP) {
+    pinnedFrames += 1;
+    if (Math.abs(pinnedZ - pinnedZ) < 1e-6) pinnedStill += 1;
+  }
+  said.push(`prove-red: a bus pinned at ${pinnedZ.toFixed(0)} m reads as still on ${pinnedStill}/${pinnedFrames} frames`);
+  if (pinnedStill !== pinnedFrames) {
+    fouls.push('the still-detector does not fire on a bus pinned in place — the keeps-moving assertion above cannot fail');
+  }
+
+  // --- the jump-cut fires only when ready AND the minimum ride has passed ----
+  // Park fit to play from frame one; the cut must still wait for the minimum
+  // ride so a fast device gets the whole cinematic. And with the park never fit,
+  // it must never fire at all — a child cut into a half-built park is the worse
+  // half of the bug.
+  {
+    const early = new JourneyDirector();
+    early.noteGenerationReady();
+    early.noteParkReady();
+    early.noteWarmupReady();
+    let firstArriveAt = -1;
+    let firstHandOverAt = -1;
+    for (let t = 0; t < JOURNEY_SECONDS + 3; t += STEP) {
+      early.advance(STEP);
+      if (firstArriveAt < 0 && early.readyToArrive) firstArriveAt = early.elapsed;
+      if (firstHandOverAt < 0 && early.readyToHandOver) firstHandOverAt = early.elapsed;
+    }
+    said.push(
+      `park ready at once: the cut is offered at ${firstArriveAt.toFixed(2)}s (floor ` +
+        `${MIN_LOOP_SECONDS.toFixed(2)}s) and hand-over at ${firstHandOverAt.toFixed(2)}s ` +
+        `(ride ${JOURNEY_SECONDS}s)`,
+    );
+    if (firstArriveAt < MIN_LOOP_SECONDS - STEP) {
+      fouls.push(
+        `the drive offered to cut to the park at ${firstArriveAt.toFixed(2)}s, before the ` +
+          `${MIN_LOOP_SECONDS.toFixed(2)}s floor — a fast device would be cut off mid-cinematic`,
+      );
+    }
+    if (firstArriveAt > MIN_LOOP_SECONDS + STEP * 3) {
+      fouls.push(
+        `the park was ready from the start yet the cut was not offered until ${firstArriveAt.toFixed(2)}s, ` +
+          `well past the ${MIN_LOOP_SECONDS.toFixed(2)}s floor — the ride would run long for no reason`,
+      );
+    }
+    // Fast-device hand-over is unchanged: 20 s exactly, to a few frames.
+    if (Math.abs(firstHandOverAt - JOURNEY_SECONDS) > STEP * 3) {
+      fouls.push(
+        `with the park ready early the ride handed over at ${firstHandOverAt.toFixed(2)}s rather than ` +
+          `${JOURNEY_SECONDS}s — the fast-device ride is meant to be unchanged`,
+      );
+    }
+
+    const neverReady = new JourneyDirector();
+    neverReady.noteGenerationReady(); // generated, but never built or warmed
+    let everArrived = false;
+    for (let t = 0; t < JOURNEY_SECONDS * 3; t += STEP) {
+      neverReady.advance(STEP);
+      if (neverReady.readyToArrive || neverReady.readyToHandOver) everArrived = true;
+    }
+    said.push(`park never fit to play: cut offered = ${everArrived} over ${(JOURNEY_SECONDS * 3).toFixed(0)}s`);
+    if (everArrived) {
+      fouls.push(
+        'the drive offered to cut to the park while it was never fit to play — a child would be handed ' +
+          'a half-built park, which is the worse half of the bug the loop exists to avoid',
+      );
+    }
+  }
+
+  // --- the hand-over is seamless whenever the cut fires ----------------------
+  // The park can become ready at any point in the loop, so the closing approach
+  // is played from wherever the loop was — and it must always end on the park's
+  // own bearing and at the closing position, or the cut is a jump. Driven on the
+  // real built ride for several ready-times, including the fast-device floor.
+  let worstBearingOff = 0;
+  let worstEndZOff = 0;
+  let allArrived = true;
+  const readyTimes = [MIN_LOOP_SECONDS, JOURNEY_SECONDS, JOURNEY_SECONDS * 1.7, JOURNEY_SECONDS * 2.4];
+  for (const readyAt of readyTimes) {
+    const ride = new BusJourney(rider);
+    const rideBus = ride.scene.getObjectByName('cat-bus');
+    let arrived = false;
+    let finishElapsed = 0;
+    for (let t = STEP; t < readyAt + SETTLE_SECONDS + 6; t += STEP) {
+      ride.update(STEP, t >= readyAt);
+      finishElapsed = t;
+      if (ride.finished) {
+        arrived = true;
+        break;
+      }
+    }
+    ride.scene.updateMatrixWorld(true);
+    const eye = ride.camera.position;
+    const busZ = rideBus ? rideBus.getWorldPosition(here).z : ride.busPositionZ;
+    const bearing = Math.atan2(eye.x, eye.z - ride.busPositionZ);
+    let off = (bearing - parkYaw) % (Math.PI * 2);
     if (off > Math.PI) off -= Math.PI * 2;
     if (off < -Math.PI) off += Math.PI * 2;
-    worstBearingDrift = Math.max(worstBearingDrift, Math.abs(off));
-    const layout = idleLetters.map((letter) => letter.style?.transform ?? '').join('|');
-    titlePositions.add(layout);
-    titlePositionsIn.get(half)?.add(layout);
-  }
-
-  const restedAt = waiting.busPositionZ;
-  const noseAt = restedAt - CAT_BUS_LENGTH / 2;
-  const shortOfTheGate = Math.abs(noseAt - JOURNEY_GATE_Z);
-
-  said.push(
-    `waiting ${WAIT_SECONDS.toFixed(1)}s past the end of the ride: the bus rolled from ` +
-      `${zWhenTheRideRanOut.toFixed(1)} to ${restedAt.toFixed(1)} m, nose ${shortOfTheGate.toFixed(2)} m ` +
-      `from the gate at ${JOURNEY_GATE_Z}`,
-  );
-  said.push(
-    `while waiting: ${busPositions.size} bus positions, ${cameraPoses.size} camera poses, ` +
-      `${titlePositions.size} title layouts over ${Math.round(WAIT_SECONDS / STEP)} frames`,
-  );
-
-  // **At the gate.** A bus length of slack, because "at the gate" is a place a
-  // vehicle stands, not a coordinate — but 30 m of open tarmac is not it.
-  if (shortOfTheGate > CAT_BUS_LENGTH) {
-    fouls.push(
-      `after ${WAIT_SECONDS.toFixed(1)}s of waiting the bus's nose is ${shortOfTheGate.toFixed(1)} m from the ` +
-        `gate — it is idling in open lane, and a bus standing still in the middle of a road reads as ` +
-        'broken down rather than as waiting',
-    );
-  }
-  if (Math.abs(restedAt - zWhenTheRideRanOut) < 1) {
-    fouls.push(
-      `the bus moved ${Math.abs(restedAt - zWhenTheRideRanOut).toFixed(2)} m in ${WAIT_SECONDS.toFixed(1)}s of ` +
-        'waiting — it stopped dead the moment the road ran out instead of pulling in',
-    );
-  }
-
-  // **Alive — in each half of the wait on its own.**
-  //
-  // Each of the three things QA found frozen, measured separately, because they
-  // froze for one reason and could be revived one at a time. And each measured
-  // once per half, because a number taken across the whole wait is dominated by
-  // the pull-in: a camera following a bus that is still rolling moves whatever
-  // else is broken, so the totals cannot see a stopped bus's frozen shot.
-  //
-  // The bar is a tenth of that half's own frames. A screen that changes on fewer
-  // than one frame in ten is not "subtly alive", it is stuttering — and against
-  // QA's measured 1-in-51 it is still an order of magnitude of headroom.
-  for (const half of halves) {
-    const frames = framesIn.get(half) ?? 0;
-    if (frames === 0) {
-      fouls.push(
-        `no frames of the wait were spent ${half} — the two halves of the idle cannot both be ` +
-          'measured, so one of these assertions is running against nothing',
-      );
-      continue;
-    }
-    const lively = Math.max(10, Math.round(frames * 0.1));
-    const buses = busPositionsIn.get(half)?.size ?? 0;
-    const eyes = cameraPosesIn.get(half)?.size ?? 0;
-    const layouts = titlePositionsIn.get(half)?.size ?? 0;
+    worstBearingOff = Math.max(worstBearingOff, Math.abs(off));
+    worstEndZOff = Math.max(worstEndZOff, Math.abs(busZ - RIDE_END_Z));
+    if (!arrived) allArrived = false;
     said.push(
-      `  while ${half} (${frames} frames): ${buses} bus positions, ${eyes} camera poses, ` +
-        `${layouts} title layouts`,
+      `  park ready at ${readyAt.toFixed(1)}s → arrived=${arrived} at ${finishElapsed.toFixed(1)}s, ` +
+        `bus at ${busZ.toFixed(1)} m (closing pos ${RIDE_END_Z} m), ` +
+        `${((off * 180) / Math.PI).toFixed(2)}° off the park bearing`,
     );
-    if (buses < lively) {
-      fouls.push(
-        `while ${half} the bus took ${buses} distinct positions over ${frames} frames — it is a ` +
-          'still image, which is what QA read as a crash',
-      );
-    }
-    if (eyes < lively) {
-      fouls.push(
-        `while ${half} the camera took ${eyes} distinct poses over ${frames} frames — the shot is ` +
-          'frozen. One pose held for the whole of a wait is the exact number QA reported as a crash',
-      );
-    }
-    if (layouts < lively) {
-      fouls.push(
-        `while ${half} the title took ${layouts} distinct layouts over ${frames} frames — it is ` +
-          'stopped mid-jump with its letters at scattered heights, which is the loudest "this has ' +
-          'crashed" signal on the screen',
-      );
-    }
+    ride.dispose();
   }
-
-  said.push(
-    `over the whole wait the camera stayed within ` +
-      `${((worstBearingDrift * 180) / Math.PI).toFixed(3)} degrees of the bearing the ride ended on`,
-  );
-  if (worstBearingDrift > 0.02) {
+  if (!allArrived) {
+    fouls.push('the drive did not reach hand-over for some ready-time — the loop can trap the ride');
+  }
+  if (worstBearingOff > 0.02) {
     fouls.push(
-      `while waiting, the camera swung ${((worstBearingDrift * 180) / Math.PI).toFixed(1)} degrees off ` +
-        'the bearing the ride ended on. The park is handed over the instant generation finishes, ' +
-        'which can be any frame of the wait, so an idle that moves the camera round turns the ' +
-        'arrival into a jump cut on a schedule set by how slow the machine is',
+      `after the jump-cut the camera settled to ${((worstBearingOff * 180) / Math.PI).toFixed(1)}° off the ` +
+        "park's own bearing — the hand-over is a jump cut, not an arrival. The closing settle must land " +
+        'on the park bearing whenever the cut fires',
     );
   }
-
-  // **And the distinction that causes it is real**: the lane clock must stop
-  // (she is not being driven anywhere) while the animation clock must not. If
-  // these two ever became the same number, the fix above would be undone and
-  // every assertion here would still pass.
-  said.push(
-    `while waiting the lane clock held at ${waiting.elapsed.toFixed(2)}s and the animation clock ran ` +
-      `on to ${waiting.animationTime.toFixed(2)}s`,
-  );
-  if (waiting.elapsed !== elapsedWhenTheRideRanOut) {
+  if (worstEndZOff > 1) {
     fouls.push(
-      `the lane clock ran on from ${elapsedWhenTheRideRanOut.toFixed(2)} to ` +
-        `${waiting.elapsed.toFixed(2)}s while the bus was waiting — the ride believes it is still ` +
-        'travelling, and the orbit will swing off the park camera\'s bearing before hand-over',
+      `after the jump-cut the bus came to ${worstEndZOff.toFixed(1)} m from its closing position ` +
+        `(${RIDE_END_Z} m) — it handed over from mid-lane rather than driving cleanly to where an ` +
+        'on-time ride ends, so the cut would read as a teleport',
     );
   }
-  if (waiting.animationTime - animationWhenTheRideRanOut < WAIT_SECONDS * 0.9) {
-    fouls.push(
-      `the animation clock advanced only ` +
-        `${(waiting.animationTime - animationWhenTheRideRanOut).toFixed(2)}s over ${WAIT_SECONDS.toFixed(1)}s of ` +
-        'waiting — the one clock that must never stop has stopped',
-    );
-  }
-
-  idleTitle.dispose();
-  waiting.dispose();
 }
 
 for (const line of said) console.log(`  ${line}`);

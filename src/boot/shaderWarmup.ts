@@ -11,15 +11,18 @@ import type { Camera, Object3D, Scene, WebGLRenderer } from 'three';
 export const WARMUP_BUDGET_MS = 8;
 
 /**
- * How long a frame may spend compiling shaders **once the ride is over and the
- * bus has parked** — the warm-up's half of `JourneyDirector.overrunAwareBudgetMs`,
- * and for exactly the reason `OVERRUN_GENERATION_BUDGET_MS` gives: the 8 ms cap
- * protects the orbit, and there is no orbit once the ride has ended. Warming the
- * park's shaders is the last thing the wait is spent on, and holding it to 8 ms a
- * frame rations it against a mostly-idle frame. During the wait it gets most of
- * the frame so it finishes in a handful of frames rather than hundreds.
+ * How long a frame may spend compiling shaders **once the ride has overrun and
+ * the drive is looping** — the warm-up's half of
+ * `JourneyDirector.overrunAwareBudgetMs`, and small for exactly the reason
+ * `OVERRUN_GENERATION_BUDGET_MS` now gives: the overrun is no longer a parked bus
+ * but a *moving* one (the loop keeps driving until the park is ready), so a frame
+ * that blocks for 200 ms judders the same moving shot the ride does. The warm-up
+ * runs behind that same looping bus — after the park is built but before the
+ * jump-cut hands over — so it takes the same smooth budget rather than draining
+ * flat-out. See `OVERRUN_GENERATION_BUDGET_MS` for the measured judder and the
+ * wait trade-off; this is the same decision applied to shader links.
  */
-export const OVERRUN_WARMUP_BUDGET_MS = 200;
+export const OVERRUN_WARMUP_BUDGET_MS = 12;
 
 /**
  * The largest number of meshes {@link ShaderWarmup} will hand to one

@@ -1967,7 +1967,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
 
     while (ridden < ceilingSeconds) {
       director.advance(RIDE_STEP);
-      journey.update(RIDE_STEP, !director.overrunning);
+      journey.update(RIDE_STEP, director.readyToArrive);
 
       if (director.shouldAdvanceGeneration() && ridden >= generationReadyAt) {
         director.noteGenerationReady();

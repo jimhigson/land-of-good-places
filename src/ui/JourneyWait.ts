@@ -1,25 +1,26 @@
 import type { GenerationStage } from '../boot/parkGeneration';
 
 /**
- * **"Getting your park ready!" — the loading caption for the parked wait.**
+ * **"Getting your park ready!" — the loading caption for the looping overrun.**
  *
  * On a dev laptop the park generates in a few seconds, well inside the twenty-
  * second ride, and this is never seen. On the device a six-year-old actually
  * holds, generation can outlast the ride (see `JourneyDirector.overrunning`): the
- * bus reaches the gate and waits while the last of the park is built. A *stopped*
- * bus with no explanation is what Jim reported as "it gets to the same point and
- * stops forever" — so the wait needs to say, unmistakably, that it is a wait and
- * that it is going somewhere.
+ * drive keeps *looping* while the last of the park is built behind it. The bus is
+ * moving the whole time now — it never parks at the gate — so this caption
+ * reassures ("nearly there, this is what we're building") rather than rescuing a
+ * stopped screen. It still names what it is doing, so a longer wait reads as
+ * progress rather than a hang.
  *
  * Two decisions carry that:
  *
- * 1. **The motion is CSS, not JavaScript.** During the wait the generator is
- *    handed most of each frame (`OVERRUN_GENERATION_BUDGET_MS`), so the main
- *    thread is blocked for ~200 ms at a stretch and anything animated in JS would
- *    freeze exactly when it needs to reassure. The bouncing dots are a CSS
- *    keyframe animation, which runs on the compositor and keeps moving through a
- *    blocked main thread. That is what lets the budget be generous *and* the
- *    screen stay legibly alive.
+ * 1. **The motion is CSS, not JavaScript.** Every overrun frame still spends its
+ *    generation budget (`OVERRUN_GENERATION_BUDGET_MS`) on the main thread before
+ *    it paints, and on a slow device an occasional slice runs longer; anything
+ *    animated in JS would hitch exactly when it needs to reassure. The bouncing
+ *    dots are a CSS keyframe animation, which runs on the compositor and keeps
+ *    moving through a busy main thread — so the caption stays legibly alive
+ *    whatever the frame is doing.
  * 2. **It names what it is doing.** The generator's own {@link GenerationStage}
  *    strings — "shaping the ginormous slide", "laying the railway" — are already
  *    written for a child, so the caption shows them: honest progress rather than
@@ -29,10 +30,10 @@ import type { GenerationStage } from '../boot/parkGeneration';
  * empties `#ui-root` from `new Game(...)`, which runs mid-ride, so anything put
  * there would be deleted at the moment it becomes useful.
  *
- * **This is not the fix.** Uncapping the generator during the wait
- * (`overrunAwareBudgetMs`) is what makes the wait short; this only makes a short
- * wait legible. A caption over a wait that is still minutes long is a lie, and
- * the wait is measured rather than trusted — see the PR.
+ * **This is not the fix.** The moving bus is what stops the wait reading as a
+ * hang; this only makes it legible. The overrun budget is chosen for a smooth
+ * moving bus rather than to drain fastest (`OVERRUN_GENERATION_BUDGET_MS`), so a
+ * slow device's wait is longer but smooth — measured rather than trusted, see the PR.
  */
 export class JourneyWait {
   private readonly root: HTMLElement;
