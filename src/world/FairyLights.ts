@@ -100,7 +100,13 @@ export class FairyLights implements GameSystem {
     const poleCount = 10;
     const ringRadius = 13.5;
     const poleHeight = 4.4;
-    const poles: Vector3[] = [];
+    // A ring slot per bearing, `null` where a pole was skipped for standing on a
+    // path. Kept sparse rather than compacted so a skip leaves a *gap* in the
+    // ring — the "gateway" a path through it wants — and the string loop below
+    // never spans one. (Compacting it was the latent bug seed 18 exposed once the
+    // train's new route moved a path onto a pole: `poles.length < poleCount`, and
+    // the loop indexed an undefined pole.)
+    const ring: (Vector3 | null)[] = new Array<Vector3 | null>(poleCount).fill(null);
 
     const poleMaterial = new MeshStandardMaterial({
       color: PALETTE.woodDark,
@@ -140,7 +146,7 @@ export class FairyLights implements GameSystem {
       knob.castShadow = true;
       this.group.add(knob);
 
-      poles.push(new Vector3(x, ground + poleHeight - 0.25, z));
+      ring[i] = new Vector3(x, ground + poleHeight - 0.25, z);
       collision.addCircle(x, z, 0.28);
     }
 
@@ -168,8 +174,11 @@ export class FairyLights implements GameSystem {
     }
 
     for (let i = 0; i < poleCount; i += 1) {
-      const from = poles[i] as Vector3;
-      const to = poles[(i + 1) % poleCount] as Vector3;
+      const from = ring[i];
+      const to = ring[(i + 1) % poleCount];
+      // Either end missing means a skipped pole — the gateway gap. No string
+      // spans it, on either side, so the opening stays open.
+      if (!from || !to) continue;
       const points: Vector3[] = [];
 
       for (let s = 0; s <= bulbsPerString + 1; s += 1) {
