@@ -97,6 +97,8 @@ import { spaceAt, SPACE_GARDEN } from '../src/world/spaces.ts';
 import { placedEntry } from '../src/world/parkLayout.ts';
 import { TOWER_DOOR_HALF, TOWER_FACADE_ALONG } from '../src/world/hotel/Hotel.ts';
 import { saveFlags } from '../src/state/flags.ts';
+import { gameStore } from '../src/state/store.ts';
+import { PET_KINDS } from '../src/art/models/pets.ts';
 
 /** Deep enough that no floor in the game is near it, shallow enough to catch a fall early. */
 const FLOOR_OF_THE_WORLD = -2;
@@ -2223,12 +2225,52 @@ let occlusionReport = 'occlusion not measured';
   }
 }
 
+// ----------------------------------------------------------------- 20. one pet bed per pet
+//
+// Jim, 11 Aug 2026: *"one small bed for every pet the player has."* The suite
+// lays out a pet bed and a pet for each paradeable pet in the inventory (or a
+// single bunny when she has none yet — an empty pet corner reads as something
+// missing). This counts the built beds and pets against the same inventory the
+// dressing reads, so a regression to "one pet, always" or "a bed with nobody in
+// it" is caught here rather than by a child noticing her second pet has no bed.
+let petBeds = 0;
+{
+  const distinctPetKinds = new Set<string>();
+  for (const item of gameStore.get().inventory) {
+    if (item.kind !== 'pet' || !item.paradeable || item.stowed) continue;
+    const species = item.id.slice(item.id.lastIndexOf('.') + 1);
+    if (PET_KINDS.some((known) => known === species)) distinctPetKinds.add(species);
+  }
+  const expected = Math.max(1, distinctPetKinds.size); // a bunny gets a bed when she has none
+
+  const suiteShell = hotel.hotelRoot.children.find(
+    (child: Object3D) => child.name === `hotel:${SUITE.space}`,
+  );
+  let suitePets = 0;
+  suiteShell?.traverse((object: Object3D) => {
+    if (object.name === 'hotel.petBed') petBeds += 1;
+    if (object.parent === suiteShell && object.name.startsWith('pet.')) suitePets += 1;
+  });
+  if (petBeds !== expected) {
+    problems.push(
+      `the suite built ${petBeds} pet bed(s) for ${expected} pet(s) — one small bed per pet ` +
+        '(a bunny when she has none) is the rule (Hotel.dressPetBeds)',
+    );
+  }
+  if (suitePets !== expected) {
+    problems.push(
+      `the suite built ${suitePets} pet(s) for ${expected} pet bed(s) — every pet bed has its ` +
+        'pet, awake on the cushion until she naps',
+    );
+  }
+}
+
 // ----------------------------------------------------------------- report
 
 console.log(
   `check:hotel — ${npcs.all.length} children (${hotel.residents.length} of them hotel residents), ` +
     `lowest foot at y=${lowest.toFixed(2)} m after ${SETTLE_SECONDS} s; ` +
-    `${mustBeSolid.length + 1} props solid, 3 beds soft and standable; ` +
+    `${mustBeSolid.length + 1} props solid, 3 beds soft and standable, ${petBeds} pet bed(s); ` +
     `${panes}/${declared} declared window panes built; ${occlusionReport}.`,
 );
 

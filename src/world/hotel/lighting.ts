@@ -1,9 +1,13 @@
-import { DirectionalLight, Group, HemisphereLight, PointLight } from 'three';
+import { Color, DirectionalLight, Group, HemisphereLight, PointLight } from 'three';
 import { PALETTE } from '../../core/palette';
+import { clamp01, lerp } from '../../core/mathUtils';
 import { ROOMS } from './layout';
 
 /**
- * The hotel's own light, which never changes.
+ * The hotel's own light: a warm afternoon that never changes on its own — with
+ * one exception, {@link HotelLighting.setNight}, which eases the whole rig to a
+ * pale, dim blue while the player naps in the suite (and back again on waking),
+ * so getting into bed reads as nighttime. `Hotel` drives that from its nap clock.
  *
  * Jim, having played it: *"the hotel shouldn't have a night/day cycle like
  * outdoors."* `World` now asks one question — *is the player in **any**
@@ -51,6 +55,22 @@ const POOL_DECAY = 1.0;
 /** Bright enough to read as sunlight through a window, gentle enough to be cosy. */
 const POOL_INTENSITY = 3.6;
 
+// ---------------------------------------------------------------------------
+// The nighttime look, reached only while the player is napping (see `setNight`).
+// "Pale and dim blue", Jim's words: a soft moonlit wash, not blackout — the room
+// must still read as a room, just plainly after-dark. The blues are the same
+// cool family `DayNight` uses for the outdoor night sky (`ambientSky 0x4a5590`),
+// lightened toward pale so the pastels underneath stay pastel rather than going
+// muddy. Intensities drop to roughly a third: dim, but never off.
+// ---------------------------------------------------------------------------
+const NIGHT_AMBIENT_SKY = 0x7d8bc4;
+const NIGHT_AMBIENT_GROUND = 0x3b4168;
+const NIGHT_AMBIENT_INTENSITY = 0.5;
+const NIGHT_KEY_COLOUR = 0x8f9bce;
+const NIGHT_KEY_INTENSITY = 0.35;
+const NIGHT_POOL_COLOUR = 0x9aa8dc;
+const NIGHT_POOL_INTENSITY = 1.2;
+
 /** How far above the floor a room's fill hangs. Clear of every wall in the hotel. */
 const POOL_HEIGHT = 5.2;
 
@@ -74,23 +94,40 @@ export function pendantLight(): PointLight {
 export class HotelLighting {
   readonly group = new Group();
 
+  /** The direction-only key, the hemisphere fill, and one warm pool per room —
+   * kept so {@link setNight} can ease them to blue and back. */
+  private readonly key: DirectionalLight;
+  private readonly ambient: HemisphereLight;
+  private readonly pools: PointLight[] = [];
+
+  // The daytime colours, held as `Color`s so `setNight` can lerp from them
+  // without re-reading the palette each frame.
+  private readonly dayKey = new Color(PALETTE.buildingWindowWarm);
+  private readonly nightKey = new Color(NIGHT_KEY_COLOUR);
+  private readonly dayAmbientSky = new Color(PALETTE.sunDay);
+  private readonly nightAmbientSky = new Color(NIGHT_AMBIENT_SKY);
+  private readonly dayAmbientGround = new Color(PALETTE.woodLight);
+  private readonly nightAmbientGround = new Color(NIGHT_AMBIENT_GROUND);
+  private readonly dayPool = new Color(PALETTE.fairyWarm);
+  private readonly nightPool = new Color(NIGHT_POOL_COLOUR);
+
   constructor() {
     this.group.name = 'hotel-lighting';
 
     // Leaning the same way the midday sun does outdoors (see
     // `DayNight.applyLook`), so stepping in from the park is a change of
     // *weather*, not a change of rendering.
-    const key = new DirectionalLight(PALETTE.buildingWindowWarm, 1.55);
-    key.position.set(-40, 60, -30);
-    key.target.position.set(0, 0, 0);
-    key.castShadow = false;
+    this.key = new DirectionalLight(PALETTE.buildingWindowWarm, 1.55);
+    this.key.position.set(-40, 60, -30);
+    this.key.target.position.set(0, 0, 0);
+    this.key.castShadow = false;
 
     // Warm sky over a warm floor bounce — the same cosy-rather-than-daylight
     // choice the castle makes, and the reason a crystal lobby at midnight
     // still looks like somewhere you would want to sleep.
-    const ambient = new HemisphereLight(PALETTE.sunDay, PALETTE.woodLight, 1.05);
+    this.ambient = new HemisphereLight(PALETTE.sunDay, PALETTE.woodLight, 1.05);
 
-    this.group.add(key, key.target, ambient);
+    this.group.add(this.key, this.key.target, this.ambient);
 
     // Read off `ROOMS` rather than listed again here: a floor added to the
     // hotel gets its light for free, and a floor that moves takes its light
@@ -100,7 +137,29 @@ export class HotelLighting {
       const pool = new PointLight(PALETTE.fairyWarm, POOL_INTENSITY, POOL_DISTANCE, POOL_DECAY);
       pool.position.set(room.originX, POOL_HEIGHT, room.originZ);
       pool.castShadow = false;
+      this.pools.push(pool);
       this.group.add(pool);
+    }
+  }
+
+  /**
+   * Ease the whole rig between its warm afternoon (`factor = 0`) and a pale,
+   * dim blue night (`factor = 1`). Called every frame from `Hotel.update` with
+   * the nap clock's eased value, so the lights fade down as the pets curl up and
+   * back up when she wakes. Absolute (it lerps from the stored day colours each
+   * call), so it is self-correcting and leaves the rig exactly at day when
+   * `factor` returns to 0 — nothing to reset by hand.
+   */
+  setNight(factor: number): void {
+    const f = clamp01(factor);
+    this.key.color.copy(this.dayKey).lerp(this.nightKey, f);
+    this.key.intensity = lerp(1.55, NIGHT_KEY_INTENSITY, f);
+    this.ambient.color.copy(this.dayAmbientSky).lerp(this.nightAmbientSky, f);
+    this.ambient.groundColor.copy(this.dayAmbientGround).lerp(this.nightAmbientGround, f);
+    this.ambient.intensity = lerp(1.05, NIGHT_AMBIENT_INTENSITY, f);
+    for (const pool of this.pools) {
+      pool.color.copy(this.dayPool).lerp(this.nightPool, f);
+      pool.intensity = lerp(POOL_INTENSITY, NIGHT_POOL_INTENSITY, f);
     }
   }
 }
