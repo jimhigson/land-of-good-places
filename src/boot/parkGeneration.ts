@@ -3,6 +3,8 @@ import { railRouteSearch, RailRouteUnsolvable } from '../world/rail/generate';
 import type { CruiserSearchStart, PlannedCoaster } from '../world/coaster/solve';
 import { offerPrewarmedCruiser } from '../world/coaster/prewarm';
 import { offerPrewarmedSlide } from '../world/slide/prewarm';
+import { offerPrewarmedTrain } from '../world/train/prewarm';
+import { SolveScheduler } from './solveScheduler';
 
 /**
  * **Building the park a few milliseconds at a time, while a bus is on screen.**
@@ -242,6 +244,17 @@ export class ParkGeneration {
   private cruiserAttemptsSeen = 0;
 
   /**
+   * The train's loop, solved a slice at a time by the generic {@link
+   * SolveScheduler} — the first feature ported onto it. Sits between the cruiser
+   * and the after-modules because its brief reads the cruiser's published low
+   * corridor (`COASTER_PLANS`) and its result must reach `train/prewarm.ts`
+   * before `train/plan` is imported below.
+   */
+  private trainModule: typeof import('../world/train/route') | null = null;
+  private trainScheduler: SolveScheduler | null = null;
+  private trainSolved = false;
+
+  /**
    * Which rung of `DESIRED_LENGTH_LADDER` the sliced search is on. The hotel
    * merge brought the ladder in (seed 5: a fixed 60 m target solved 123
    * routes and threw every one away), and the sliced path must walk the SAME
@@ -329,6 +342,7 @@ export class ParkGeneration {
     // problem while it was being profiled. A stage that lies about which work
     // is running is a measurement bug, not a cosmetic one.
     if (this.cruiserSolved) {
+      if (!this.trainSolved) return 'laying the railway';
       return this.afterIndex >= MODULES_AFTER_CRUISER.length
         ? 'shaping the ginormous slide'
         : 'laying the railway';
@@ -355,17 +369,19 @@ export class ParkGeneration {
 
   /** Steps begun after a slice's deadline had passed. Zero, on correct code. */
   get stepsPastDeadline(): number {
-    return this.overrunSteps;
+    return this.overrunSteps + (this.trainScheduler?.slicesPastDeadline ?? 0);
   }
 
   /** Which loops began a step late — the diagnosis, not just the count. */
   get lateStepsByPhase(): Readonly<Record<string, number>> {
-    return this.overrunByPhase;
+    return { ...this.overrunByPhase, ...(this.trainScheduler?.lateSlicesByTask ?? {}) };
   }
 
   /** How many pieces each sliced phase was divided into. Device-independent. */
-  get unitCounts(): Readonly<Record<'brief' | 'cruiserSearch' | 'cruiserFinish' | 'slideSearch', number>> {
-    return this.units;
+  get unitCounts(): Readonly<
+    Record<'brief' | 'cruiserSearch' | 'cruiserFinish' | 'trainSearch' | 'slideSearch', number>
+  > {
+    return { ...this.units, trainSearch: this.trainScheduler?.sliceCounts['trainSearch'] ?? 0 };
   }
 
   /**
@@ -403,6 +419,25 @@ export class ParkGeneration {
     // letterbox is read after the const it feeds has already initialised.
     if (!this.cruiserSolved) {
       this.advanceCruiser(this.cruiserModule, budgetMs);
+      return;
+    }
+
+    // The train's loop, spread over the ride's frames by the generic slice
+    // scheduler. Importing `train/route` here builds `COASTER_PLANS` from the
+    // pre-warmed cruiser (cheap) so the train's brief can read the low corridor;
+    // solving it *before* the after-modules below is what lets `TRAIN_PLAN` take
+    // a pre-warmed loop instead of blocking a frame on the ~1.1 s search.
+    if (!this.trainModule) {
+      this.workingFrames += 1;
+      this.runImport(() =>
+        import('../world/train/route').then((module) => {
+          this.trainModule = module;
+        }),
+      );
+      return;
+    }
+    if (!this.trainSolved) {
+      this.advanceTrain(this.trainModule, budgetMs);
       return;
     }
 
@@ -551,6 +586,36 @@ export class ParkGeneration {
     } catch (error) {
       this.failure = error instanceof Error ? error : new Error(String(error));
     }
+  }
+
+  /**
+   * Runs the train's loop search through the generic {@link SolveScheduler}.
+   *
+   * The train is the first feature ported onto the scheduler: one task today, so
+   * this behaves like `advanceCruiser`, but it is driven by the generic engine
+   * rather than a bespoke loop — the shape every other solve is being moved to,
+   * and the substrate the round-robin/backtracking work stands on. The task
+   * `yield*`s `train/route.ts`'s own search generator and, on completion, hands
+   * the loop to `train/prewarm.ts`; determinism is the scheduler's cadence
+   * guarantee plus `rail/generate.ts`'s yield-inertness.
+   */
+  private advanceTrain(module: typeof import('../world/train/route'), budgetMs: number): void {
+    this.workingFrames += 1;
+    const scheduler = (this.trainScheduler ??= new SolveScheduler([
+      {
+        name: 'trainSearch',
+        *start() {
+          const route = yield* module.trainRouteSearch();
+          offerPrewarmedTrain(route);
+        },
+      },
+    ]));
+    scheduler.advance(budgetMs);
+    if (scheduler.failed) {
+      this.failure = scheduler.failed;
+      return;
+    }
+    if (scheduler.done) this.trainSolved = true;
   }
 
   /**

@@ -7,8 +7,9 @@ import { PARK_LAYOUT } from '../parkLayout';
 import { terrainHeight } from '../terrain';
 import { PARK_SEED } from '../parkManifest';
 import { type Pose2, type SegmentKind, type Vec2, turnVocabulary } from '../rail/segments';
-import { solveRailRoute, type RouteBrief, type SolvedRailRoute } from '../rail/generate';
+import { railRouteSearch, solveRailRoute, type RouteBrief, type SolvedRailRoute } from '../rail/generate';
 import { TRAIN_MIN_TURN_RADIUS } from './turning';
+import { takePrewarmedTrain } from './prewarm';
 
 /**
  * Where the park train's track goes.
@@ -148,8 +149,8 @@ function trainObstacles(): Obstacle[] {
   return out;
 }
 
-/** Solves the loop once, from the layout alone. */
-function solveTrainLoop(): SolvedRailRoute {
+/** The brief the train's loop is searched from, built from the layout alone. */
+function buildTrainBrief(): RouteBrief {
   const obstacles = trainObstacles();
   const ox = Float64Array.from(obstacles, (o) => o.x);
   const oz = Float64Array.from(obstacles, (o) => o.z);
@@ -212,7 +213,21 @@ function solveTrainLoop(): SolvedRailRoute {
     minRadius: TRAIN_MIN_TURN_RADIUS,
     budgets: { perJoint: 16, restarts: startPoses.length },
   };
-  return solveRailRoute(brief);
+  return brief;
+}
+
+/**
+ * **The train's loop search, as a generator — the sliceable cadence.**
+ *
+ * `boot/parkGeneration.ts`'s slice scheduler drives this a joint at a time behind
+ * the cat bus, so the ~1.1 s search is spread over the ride's frames rather than
+ * blocking one, and hands the finished loop to `train/prewarm.ts`. It is the same
+ * relationship `railRouteSearch` has with `solveRailRoute`: identical route
+ * whatever the cadence, because the whole search lives in the generator's own
+ * locals (see `rail/generate.ts`).
+ */
+export function trainRouteSearch(): Generator<number, SolvedRailRoute, void> {
+  return railRouteSearch(buildTrainBrief());
 }
 
 /** The solved loop, and everything the train and the stations ask of it. */
@@ -230,7 +245,11 @@ export class TrainRoute {
   private readonly scratch2: Vec2 = { x: 0, z: 0 };
 
   constructor() {
-    this.solved = solveTrainLoop();
+    // The loop `boot/parkGeneration.ts` already searched a slice at a time behind
+    // the cat bus, if there is one; otherwise solve it straight through — the path
+    // `check:park`, `test:procgen` and a continued save all take, none of which
+    // pre-warm. Either way it is one search from one brief.
+    this.solved = takePrewarmedTrain() ?? solveRailRoute(buildTrainBrief());
     this.length = this.solved.length;
 
     // A lookup table for "where along the loop is this point?" — used to place

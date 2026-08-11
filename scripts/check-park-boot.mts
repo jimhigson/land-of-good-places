@@ -139,12 +139,13 @@ let framesThatBlockedMeasurably = 0;
 // interesting one: either that unit is genuinely too big to be a unit, or the
 // machine took the CPU away mid-slice. The two are told apart by the per-unit
 // figure below — a unit that is expensive is expensive on every run.
-type Phase = 'brief' | 'cruiserSearch' | 'cruiserFinish' | 'slideSearch';
-const PHASES: readonly Phase[] = ['brief', 'cruiserSearch', 'cruiserFinish', 'slideSearch'];
+type Phase = 'brief' | 'cruiserSearch' | 'cruiserFinish' | 'trainSearch' | 'slideSearch';
+const PHASES: readonly Phase[] = ['brief', 'cruiserSearch', 'cruiserFinish', 'trainSearch', 'slideSearch'];
 const unitsSeen: Record<Phase, number> = {
   brief: 0,
   cruiserSearch: 0,
   cruiserFinish: 0,
+  trainSearch: 0,
   slideSearch: 0,
 };
 let worstSlice = { ms: 0, phase: 'no generator step at all', steps: 0, stage: 'waiting' };
@@ -153,6 +154,7 @@ const phaseMs: Record<Phase, number> = {
   brief: 0,
   cruiserSearch: 0,
   cruiserFinish: 0,
+  trainSearch: 0,
   slideSearch: 0,
 };
 
@@ -512,6 +514,13 @@ const MIN_UNITS: Readonly<Record<keyof typeof units, number>> = {
   // ten; it can never produce fewer than the seams, and eleven — the count
   // before those seams existed — is now red.
   cruiserFinish: 12,
+  // The train's loop is grown by the same rail generator as the cruiser, so a
+  // solve takes hundreds to thousands of joints and yields at every one. The
+  // floor is conservative — the loop is shorter than the cruiser's and a lucky
+  // start pose solves in fewer — but comfortably proves it is not done in one
+  // lump, which is the regression this exists to catch (its old bespoke solver
+  // was one ~1.1 s block).
+  trainSearch: 100,
   slideSearch: 500,
 };
 for (const [phase, floor] of Object.entries(MIN_UNITS) as [keyof typeof units, number][]) {
