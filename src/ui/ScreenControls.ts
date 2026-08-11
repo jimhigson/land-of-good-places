@@ -37,7 +37,10 @@ export class ScreenControls {
 
   private jetpackAvailable = false;
 
-  constructor(container: HTMLElement, private readonly input: InputSystem) {
+  private readonly input: InputSystem;
+
+  constructor(container: HTMLElement, input: InputSystem) {
+    this.input = input;
     this.root = document.createElement('div');
     this.root.className = 'screen-controls';
 

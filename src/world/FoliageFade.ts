@@ -143,10 +143,15 @@ export class FoliageFade implements GameSystem {
    */
   private readonly selfFading: { readonly occluder: SightlineOccluder; alpha: number }[] = [];
 
+  private readonly scenery: Scenery;
+  private readonly camera: IsoCamera;
+
   constructor(
-    private readonly scenery: Scenery,
-    private readonly camera: IsoCamera,
+    scenery: Scenery,
+    camera: IsoCamera,
   ) {
+    this.scenery = scenery;
+    this.camera = camera;
     this.group.name = 'foliage-fade';
     this.occluderSlot = new Int32Array(scenery.foliageOccluders.length).fill(-1);
 

@@ -169,7 +169,10 @@ export class ParkMap {
   /** Rebuilt every render; see `drawLabel`. */
   private readonly labelBoxes: LabelBox[] = [];
 
-  constructor(container: HTMLElement, private readonly deps: ParkMapDeps) {
+  private readonly deps: ParkMapDeps;
+
+  constructor(container: HTMLElement, deps: ParkMapDeps) {
+    this.deps = deps;
     this.button = document.createElement('button');
     this.button.type = 'button';
     this.button.className = 'pill pill--map';

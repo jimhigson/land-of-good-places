@@ -245,10 +245,15 @@ export class FerrisWheelRide implements GameSystem {
   private readonly boardY: number;
   private readonly boardZ: number;
 
+  private readonly collision: CollisionWorld;
+  private readonly world: FerrisWorldHooks;
+
   constructor(
-    private readonly collision: CollisionWorld,
-    private readonly world: FerrisWorldHooks,
+    collision: CollisionWorld,
+    world: FerrisWorldHooks,
   ) {
+    this.collision = collision;
+    this.world = world;
     const wheel = placedEntry('ferrisWheel');
     this.boardX = wheel.x;
     this.boardZ = wheel.z;

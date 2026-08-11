@@ -17,7 +17,6 @@ for (let seed = from; seed <= to; seed += 1) {
     const out = execFileSync(
       process.execPath,
       [
-        '--experimental-transform-types',
         '--import',
         './scripts/ts-extension-resolver-register.mjs',
         'scripts/check-park.mts',

@@ -104,12 +104,19 @@ export class TreeClimbing implements GameSystem {
   // `.visible` ledger for the one pinned kid built as a real `CharacterModel`
   // — all existed only to undo the hiding. See the class doc.
 
+  private readonly player: Player;
+  private readonly npcs: NpcSystem;
+  private readonly hud: Hud;
+
   constructor(
-    private readonly player: Player,
-    private readonly npcs: NpcSystem,
-    private readonly hud: Hud,
+    player: Player,
+    npcs: NpcSystem,
+    hud: Hud,
     trees: readonly ClimbableTreeSeed[],
   ) {
+    this.player = player;
+    this.npcs = npcs;
+    this.hud = hud;
     this.trees = trees;
   }
 

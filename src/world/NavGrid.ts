@@ -279,24 +279,46 @@ export class NavGrid {
   private searchBestNode = -1;
   private searchBestScore = Infinity;
 
+  private readonly collision: CollisionWorld;
+  /** The walker's own half-width — every collider is fattened by it. */
+  private readonly walkerRadius: number;
+  /**
+   * The apex of the walker's jump above their own feet — `Player`'s
+   * `JUMP_APEX_HEIGHT`, the same number its auto-hop lookahead is fed. Passed
+   * in rather than imported so the one derivation of it stays in `Player`,
+   * and handed straight to `Collision`'s shared {@link autoHopClears}.
+   */
+  private readonly hopApex: number;
+  /**
+   * The declared ways between levels — `WalkSurfaces.connectors`, read at
+   * lattice build so a connector registered while the world goes up is in
+   * the first lattice anyone asks for. See the file comment.
+   */
+  private readonly connectors: () => readonly LevelConnector[];
+
   constructor(
-    private readonly collision: CollisionWorld,
+    collision: CollisionWorld,
     /** The walker's own half-width — every collider is fattened by it. */
-    private readonly walkerRadius: number,
+    walkerRadius: number,
     /**
      * The apex of the walker's jump above their own feet — `Player`'s
      * `JUMP_APEX_HEIGHT`, the same number its auto-hop lookahead is fed. Passed
      * in rather than imported so the one derivation of it stays in `Player`,
      * and handed straight to `Collision`'s shared {@link autoHopClears}.
      */
-    private readonly hopApex: number,
+    hopApex: number,
     /**
      * The declared ways between levels — `WalkSurfaces.connectors`, read at
      * lattice build so a connector registered while the world goes up is in
      * the first lattice anyone asks for. See the file comment.
      */
-    private readonly connectors: () => readonly LevelConnector[] = () => [],
-  ) {}
+    connectors: () => readonly LevelConnector[] = () => [],
+  ) {
+    this.collision = collision;
+    this.walkerRadius = walkerRadius;
+    this.hopApex = hopApex;
+    this.connectors = connectors;
+  }
 
   /**
    * Did the last {@link findRoute} actually get where it was asked to go?

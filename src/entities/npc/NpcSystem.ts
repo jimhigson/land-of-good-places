@@ -437,9 +437,12 @@ export class NpcSystem implements GameSystem {
    */
   private player: Player | null = null;
 
+  private readonly camera: IsoCamera;
+  private readonly arrivingByBus: number;
+
   constructor(
     collision: CollisionWorld,
-    private readonly camera: IsoCamera,
+    camera: IsoCamera,
     groundSampler: GroundSampler | null = null,
     // Trees big enough to climb — threaded down into every child's wander
     // driver so it can decide, on its own, whether one is worth stopping at.
@@ -459,13 +462,15 @@ export class NpcSystem implements GameSystem {
      * seconds of their lives. `NPC_COUNT` is unchanged and unchangeable by
      * this: eleven of the twenty-four simply start the game sitting down.
      */
-    private readonly arrivingByBus: number = 0,
+    arrivingByBus: number = 0,
     // The people who live somewhere that is not the park — the hotel's guests,
     // today. See {@link ResidentSpec}. Built last of all, below, and on their
     // own seeded streams, so hosting them cannot shift a single roll the park's
     // own twelve children make.
     residents: readonly ResidentSpec[] = [],
   ) {
+    this.camera = camera;
+    this.arrivingByBus = arrivingByBus;
     this.group.name = 'npcs';
 
     const rng = new Rng(NPC_SEED);

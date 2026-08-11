@@ -316,10 +316,15 @@ export class DayNight implements GameSystem {
   private readonly moonDirection = new Vector3(0, -1, 0);
   private readonly fogColour = new Color();
 
+  private readonly scene: Scene;
+  private readonly sky: Sky;
+
   constructor(
-    private readonly scene: Scene,
-    private readonly sky: Sky,
+    scene: Scene,
+    sky: Sky,
   ) {
+    this.scene = scene;
+    this.sky = sky;
     this.keyLight = new DirectionalLight(PALETTE.sunDay, 2.2);
     this.keyLight.castShadow = true;
     // One notch down on a modest phone: the shadow pass is fill-rate bound, and

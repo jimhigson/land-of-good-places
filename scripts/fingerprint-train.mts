@@ -6,7 +6,7 @@
  * One seed per process (`LGP_SEED`), because the plan solves at module load:
  *
  *   for seed in 20260728 2 5 11 18
- *     env LGP_SEED=$seed node --experimental-transform-types --no-warnings \
+ *     env LGP_SEED=$seed node --no-warnings \
  *       --import ./scripts/ts-extension-resolver-register.mjs scripts/fingerprint-train.mts
  *   end
  *

@@ -34,7 +34,7 @@
  * routes both, proven by fingerprint, so this is the same work measured
  * cheaper, not different work. Re-measure with:
  *
- *     node --experimental-transform-types --no-warnings \
+ *     node --no-warnings \
  *       --import ./scripts/ts-extension-resolver-register.mjs \
  *       scripts/measure-procgen.mts --no-world
  *

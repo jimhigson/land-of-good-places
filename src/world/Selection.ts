@@ -110,17 +110,32 @@ export class Selection implements GameSystem {
   private lastSelected: InteractZone | null = null;
   private pending: PendingCommit | null = null;
 
+  private readonly player: Player;
+  private readonly camera: IsoCamera;
+  /**
+   * The park canvas, so that pointing at something usable also turns the
+   * cursor into a pointer. The rule lives in `style.css`
+   * (`#game-canvas[data-hover]`); this only says when.
+   */
+  private readonly canvas: HTMLCanvasElement;
+  private readonly deps: SelectionDeps;
+
   constructor(
-    private readonly player: Player,
-    private readonly camera: IsoCamera,
+    player: Player,
+    camera: IsoCamera,
     /**
      * The park canvas, so that pointing at something usable also turns the
      * cursor into a pointer. The rule lives in `style.css`
      * (`#game-canvas[data-hover]`); this only says when.
      */
-    private readonly canvas: HTMLCanvasElement,
-    private readonly deps: SelectionDeps,
-  ) {}
+    canvas: HTMLCanvasElement,
+    deps: SelectionDeps,
+  ) {
+    this.player = player;
+    this.camera = camera;
+    this.canvas = canvas;
+    this.deps = deps;
+  }
 
   /** The one selected thing, or null. Read by `Highlights` and `ActionChips`. */
   get selected(): InteractZone | null {

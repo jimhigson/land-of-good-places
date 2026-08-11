@@ -64,14 +64,21 @@ export class ActionChips implements GameSystem {
   private rowWidth = 0;
   private rowHeight = 0;
 
+  private readonly selection: Selection;
+  private readonly activeCamera: () => Camera;
+  private readonly riding: () => boolean;
+
   constructor(
     container: HTMLElement,
-    private readonly selection: Selection,
+    selection: Selection,
     /** The camera the frame is being rendered with — the iso one, or a ride's. */
-    private readonly activeCamera: () => Camera,
+    activeCamera: () => Camera,
     /** True while a ride owns the character — see {@link place}. */
-    private readonly riding: () => boolean,
+    riding: () => boolean,
   ) {
+    this.selection = selection;
+    this.activeCamera = activeCamera;
+    this.riding = riding;
     this.root = document.createElement('div');
     this.root.className = 'action-chips';
     this.root.dataset.show = 'false';

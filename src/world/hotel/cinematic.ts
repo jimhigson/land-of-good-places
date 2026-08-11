@@ -130,7 +130,11 @@ export class HotelCinematic {
   private readonly scratch = new Vector3();
   private onEnd: (() => void) | null = null;
 
-  constructor(private readonly iso: IsoCamera) {}
+  private readonly iso: IsoCamera;
+
+  constructor(iso: IsoCamera) {
+    this.iso = iso;
+  }
 
   get running(): boolean {
     return this.shot !== null;

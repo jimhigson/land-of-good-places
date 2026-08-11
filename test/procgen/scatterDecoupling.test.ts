@@ -33,7 +33,6 @@ import { describe, expect, it } from 'vitest';
  */
 
 const DIGEST_ARGS = [
-  '--experimental-transform-types',
   '--no-warnings',
   '--import',
   './scripts/ts-extension-resolver-register.mjs',

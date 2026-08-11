@@ -11,7 +11,7 @@
  * skipped entirely and a 2 m wall goes through as easily as a 0.7 m one.
  *
  * ```
- * node --experimental-strip-types \
+ * node \
  *      --import ./scripts/ts-extension-resolver-register.mjs \
  *      scripts/measure-wall-tunnelling.mts
  * ```

@@ -3,7 +3,7 @@
  * where it was painted?**
  *
  * ```
- * node --experimental-strip-types \
+ * node \
  *      --import ./scripts/ts-extension-resolver-register.mjs \
  *      scripts/check-baked-face.mts
  * ```

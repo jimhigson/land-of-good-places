@@ -2,7 +2,7 @@
  * **Does each hat actually fit the head it is worn on?**
  *
  * ```
- * node --experimental-strip-types \
+ * node \
  *      --import ./scripts/ts-extension-resolver-register.mjs \
  *      scripts/measure-hat-fit.mts
  * ```

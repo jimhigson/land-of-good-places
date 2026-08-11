@@ -7,7 +7,7 @@
  * moved between the two parks.
  *
  * ```
- * node --experimental-transform-types --import ./scripts/ts-extension-resolver-register.mjs \
+ * node --import ./scripts/ts-extension-resolver-register.mjs \
  *   scripts/scatter-digest.mts
  * LGP_SPUR_STRETCH=4 node ... scripts/scatter-digest.mts   # one spur 4 m longer
  * ```

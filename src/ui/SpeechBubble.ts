@@ -40,7 +40,10 @@ export class SpeechBubble {
   private canvasHeight = 220;
   private currentText: string | null = null;
 
-  constructor(private readonly accent: number = PALETTE.markerSky) {
+  private readonly accent: number;
+
+  constructor(accent: number = PALETTE.markerSky) {
+    this.accent = accent;
     this.material = new SpriteMaterial({
       transparent: true,
       depthWrite: false,

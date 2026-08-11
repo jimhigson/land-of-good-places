@@ -39,7 +39,10 @@ export class StairMenu {
 
   private open = false;
 
-  constructor(container: HTMLElement, private readonly handlers: StairMenuHandlers) {
+  private readonly handlers: StairMenuHandlers;
+
+  constructor(container: HTMLElement, handlers: StairMenuHandlers) {
+    this.handlers = handlers;
     this.root = document.createElement('div');
     this.root.className = 'stair-menu';
     this.root.dataset.open = 'false';

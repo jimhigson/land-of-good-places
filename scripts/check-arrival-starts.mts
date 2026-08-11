@@ -26,7 +26,7 @@
  *
  * ## Run it
  *
- *   node --experimental-transform-types --import ./scripts/ts-extension-resolver-register.mjs \
+ *   node --import ./scripts/ts-extension-resolver-register.mjs \
  *     scripts/check-arrival-starts.mts
  *
  *   ARRIVAL_URL       dev server to drive (default http://127.0.0.1:5173). A dev

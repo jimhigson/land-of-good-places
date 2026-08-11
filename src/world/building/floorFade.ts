@@ -41,7 +41,11 @@ export class FloorFader {
    * overhead while she can see herself through it. So it ghosts rather than
    * vanishes. Same fade, same material claiming, same timing; one number.
    */
-  constructor(private readonly hiddenAmount = 0) {}
+  private readonly hiddenAmount: number;
+
+  constructor(hiddenAmount = 0) {
+    this.hiddenAmount = hiddenAmount;
+  }
 
   /** Registers a floor group. Call once per floor, bottom to top, once built. */
   addLayer(group: Group): void {

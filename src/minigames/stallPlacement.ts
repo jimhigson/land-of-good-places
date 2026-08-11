@@ -11,9 +11,8 @@ import { counterFacing, placedEntry } from '../world/parkLayout';
  *
  * - `entities/npc/poiGraph.ts` seeds a waypoint at every stand point, so a
  *   child can walk up to a booth. It is imported by `scripts/check-waypoints.mts`
- *   under `node --experimental-strip-types`, where importing `stalls.ts` would
- *   drag in five mini-games and fail on the first construct the type stripper
- *   does not support.
+ *   on plain Node, where importing `stalls.ts` would drag in five mini-games and
+ *   all of three.js behind a headless check that only wants the stand points.
  * - Anything else that needs the *layout* rather than the content.
  *
  * ARCHITECTURE-DECISIONS **Decision 5** makes the park generated: the manifest

@@ -17,6 +17,13 @@
 
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
+    // Erasable syntax only. The scripts and tests run straight on Node (26+),
+    // which strips TypeScript's *types* natively and refuses anything that is
+    // not purely a type — parameter properties, enums, namespaces, TS-only
+    // decorators, `import =`. Forbidding them in the compiler keeps a build
+    // that runs flag-free everywhere; the alternative is a transpile flag that
+    // only exists on old Node, which is an anachronism (see CLAUDE.md).
+    "erasableSyntaxOnly": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "noEmit": true,

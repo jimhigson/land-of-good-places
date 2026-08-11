@@ -156,7 +156,10 @@ export class BuildingShell {
   /** One per deck. The last one is the roof terrace on an interior shell. */
   readonly floorGroups: Group[] = [];
 
-  constructor(readonly kind: ShellKind = 'interior') {
+  readonly kind: ShellKind;
+
+  constructor(kind: ShellKind = 'interior') {
+    this.kind = kind;
     const plan = planFor(kind);
     this.group.name = kind === 'interior' ? 'building-shell' : 'building-facade';
 
