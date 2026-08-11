@@ -171,6 +171,19 @@ export interface CoSolveFeature {
   readonly name: string;
 
   /**
+   * Names of features that must be committed before this one may start — and
+   * which, if one is later backtracked, drag this feature back into the search
+   * with them (see {@link CoSolveEngine}'s cascade). Use it when a feature
+   * genuinely *reads* another's committed placement rather than merely avoiding
+   * it: the ride that samples the cruiser's built low corridor depends on the
+   * cruiser; a ride that only keeps clear of the plots does not. Ordering-only
+   * avoidance (largest-first, say) is a dep too — it just never needs the
+   * cascade, because a re-placed neighbour it only avoided is picked up by the
+   * ordinary conflict re-check.
+   */
+  readonly deps?: readonly string[];
+
+  /**
    * Search for a placement against `field`, ignoring this feature's own
    * contribution (query the field with `exclude: this.name`). Yields a progress
    * number for reporting; returns the keep-out discs to commit; throws
@@ -247,6 +260,16 @@ export class CoSolveEngine {
     if (this.byName.size !== this.states.length) {
       throw new Error('CoSolveEngine: two features share a name');
     }
+    for (const state of this.states) {
+      for (const dep of state.feature.deps ?? []) {
+        if (!this.byName.has(dep)) {
+          throw new Error(
+            `CoSolveEngine: feature '${state.feature.name}' depends on unknown feature '${dep}'`,
+          );
+        }
+      }
+    }
+    this.assertNoCycles();
   }
 
   /** Every feature has a committed placement. */
@@ -392,14 +415,35 @@ export class CoSolveEngine {
     }
 
     const victim = this.byName.get(victimName) as FeatureState;
-    this.field.withdraw(victim.feature.name);
-    victim.committed = false;
-    victim.committedAt = -1;
+    this.withdraw(victim);
     this.restart(victim); // try a different spot for the one that was in the way
 
     // The stuck feature's world just changed; give it a fresh search too.
     this.restart(stuck);
     this.backtrackCount += 1;
+  }
+
+  /**
+   * Withdraw a committed feature, and with it every committed feature that
+   * depends on it — directly or transitively.
+   *
+   * A dependent read its dep's placement to solve; if the dep moves, the
+   * dependent's solution may no longer hold, so it must re-solve rather than
+   * stay committed against ground that shifted under it. Dependents keep their
+   * `attempt` (only the feature actually asked to move is bumped): if the dep
+   * re-commits to the same spot they re-derive the same placement, and deps
+   * ordering guarantees the dep is committed again before a dependent re-runs.
+   */
+  private withdraw(state: FeatureState): void {
+    this.field.withdraw(state.feature.name);
+    state.committed = false;
+    state.committedAt = -1;
+    state.gen = null;
+    for (const other of this.states) {
+      if (other.committed && (other.feature.deps ?? []).includes(state.feature.name)) {
+        this.withdraw(other);
+      }
+    }
   }
 
   /**
@@ -424,19 +468,54 @@ export class CoSolveEngine {
 
   /**
    * The next feature to give a slice to, from the rotating cursor: any that is
-   * not yet committed. A committed feature is skipped; a withdrawn one is
-   * uncommitted again and so back in the rotation.
+   * uncommitted and whose {@link CoSolveFeature.deps} are all committed. A
+   * committed feature is skipped; a withdrawn one (and any dependent the cascade
+   * pulled down with it) is uncommitted again and so back in the rotation, but
+   * only becomes runnable once its deps have re-committed.
    */
   private nextRunnable(): FeatureState | null {
     const n = this.states.length;
     for (let i = 0; i < n; i += 1) {
       const index = (this.cursor + i) % n;
       const state = this.states[index] as FeatureState;
-      if (!state.committed) {
+      if (!state.committed && this.depsReady(state)) {
         this.cursor = (index + 1) % n;
         return state;
       }
     }
     return null;
+  }
+
+  /** Are all of a feature's dependencies currently committed? */
+  private depsReady(state: FeatureState): boolean {
+    for (const dep of state.feature.deps ?? []) {
+      if (!(this.byName.get(dep) as FeatureState).committed) return false;
+    }
+    return true;
+  }
+
+  /** Kahn's algorithm: a bad dependency graph fails loudly at construction. */
+  private assertNoCycles(): void {
+    const indegree = new Map<string, number>();
+    for (const state of this.states) indegree.set(state.feature.name, 0);
+    for (const state of this.states) {
+      indegree.set(state.feature.name, (state.feature.deps ?? []).length);
+    }
+    const queue = [...indegree.entries()].filter(([, d]) => d === 0).map(([name]) => name);
+    let visited = 0;
+    while (queue.length > 0) {
+      const name = queue.pop() as string;
+      visited += 1;
+      for (const state of this.states) {
+        if ((state.feature.deps ?? []).includes(name)) {
+          const left = (indegree.get(state.feature.name) as number) - 1;
+          indegree.set(state.feature.name, left);
+          if (left === 0) queue.push(state.feature.name);
+        }
+      }
+    }
+    if (visited !== this.states.length) {
+      throw new Error('CoSolveEngine: the feature dependency graph has a cycle');
+    }
   }
 }

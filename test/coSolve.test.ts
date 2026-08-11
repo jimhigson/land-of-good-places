@@ -259,6 +259,81 @@ describe('CoSolveEngine', () => {
     ).toThrow(/share a name/);
   });
 
+  it('never runs a feature before its dependencies are committed', () => {
+    const order: string[] = [];
+    const spy = (name: string, candidates: [number, number][], deps?: string[]): CoSolveFeature => {
+      const base = placer(name, candidates, 2);
+      return {
+        ...base,
+        ...(deps ? { deps } : {}),
+        *place(field, attempt) {
+          order.push(name);
+          return yield* base.place(field, attempt);
+        },
+      };
+    };
+    const engine = new CoSolveEngine(
+      [spy('rider', [[100, 0]], ['anchor']), spy('anchor', [[0, 0]]), spy('mid', [[50, 0]], ['anchor'])],
+      { now: () => 0 },
+    );
+    solveAll(engine);
+    expect(engine.done).toBe(true);
+    // Neither dependent's search is even entered until anchor has committed.
+    expect(order.indexOf('rider')).toBeGreaterThan(order.indexOf('anchor'));
+    expect(order.indexOf('mid')).toBeGreaterThan(order.indexOf('anchor'));
+  });
+
+  it('re-solves a dependent when its dependency is backtracked (the cascade)', () => {
+    // `anchor` prefers slot 0. `rider` depends on it and places 5 m to its +x,
+    // reading where anchor actually committed. `needy` fits ONLY in slot 0 and
+    // names `anchor` as its blocker — so placing needy must push anchor to slot
+    // 50, and the cascade must drag `rider` along to anchor's NEW side (55), not
+    // leave it stranded beside where anchor used to be.
+    const anchor = placer('anchor', [[0, 0], [50, 0]], 2);
+    const rider: CoSolveFeature = {
+      name: 'rider',
+      deps: ['anchor'],
+      *place(field) {
+        yield 0;
+        const [a] = field.obstaclesOf('anchor');
+        if (!a) throw new CoSolveUnsolvable('rider: anchor not placed');
+        const x = a.x + 5;
+        if (field.clear(x, 0, 2, 'rider')) return [{ x, z: 0, reach: 2 }];
+        throw new CoSolveUnsolvable('rider: no room beside anchor');
+      },
+    };
+    const needy: CoSolveFeature = {
+      name: 'needy',
+      blockers: () => ['anchor'],
+      *place(field) {
+        yield 0;
+        if (field.clear(0, 0, 2, 'needy')) return [{ x: 0, z: 0, reach: 2 }];
+        throw new CoSolveUnsolvable('needy: needs slot 0');
+      },
+    };
+    const engine = new CoSolveEngine([anchor, rider, needy], { now: () => 0 });
+    solveAll(engine);
+    expect(engine.done).toBe(true);
+    expect(placements(engine).anchor).toBe('50,0');
+    expect(placements(engine).needy).toBe('0,0');
+    // The cascade: rider followed anchor to its new spot.
+    expect(placements(engine).rider).toBe('55,0');
+    expect(engine.backtracks).toBeGreaterThanOrEqual(1);
+  });
+
+  it('rejects an unknown dependency and a dependency cycle at construction', () => {
+    expect(
+      () => new CoSolveEngine([{ name: 'x', deps: ['ghost'], *place() { return []; } }]),
+    ).toThrow(/unknown feature/);
+    expect(
+      () =>
+        new CoSolveEngine([
+          { name: 'a', deps: ['b'], *place() { return []; } },
+          { name: 'b', deps: ['a'], *place() { return []; } },
+        ]),
+    ).toThrow(/cycle/);
+  });
+
   it('excludes a feature\'s own contribution from its clearance queries', () => {
     const field = new PlacementField();
     field.commit('self', [{ x: 0, z: 0, reach: 5 }]);
