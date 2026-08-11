@@ -39,7 +39,6 @@ export const STALLS: readonly StallDefinition[] = [
   {
     id: 'skyCruiser',
     title: 'Sky Cruiser',
-    cta: 'Float up high!',
     glyph: '\u{1F6A0}',
     accent: PALETTE.markerSky,
     stripe: PALETTE.buildingWall,
@@ -47,12 +46,10 @@ export const STALLS: readonly StallDefinition[] = [
   },
   {
     id: 'railRacer',
-    // The id stays `railRacer` — it is a save key and the prefix
-    // `world/interact.ts` reads its default verb off — but the booth now
-    // advertises the ride it actually boards. The chip says "Race the carts!":
-    // there is somebody to beat, which is the whole point of it.
+    // The id stays `railRacer` — it is a save key — but the booth advertises
+    // the ride it actually boards: "The Rail Race!", which says there is
+    // somebody to beat, the whole point of it.
     title: 'The Rail Race!',
-    cta: 'Race the carts!',
     glyph: '🎢',
     accent: PALETTE.markerPink,
     stripe: PALETTE.buildingWall,
@@ -73,7 +70,6 @@ export const STALLS: readonly StallDefinition[] = [
   {
     id: 'spookyHouse',
     title: 'The Spooky House',
-    cta: 'Go in… eek!',
     glyph: '👻',
     accent: PALETTE.markerLilac,
     stripe: PALETTE.markerMint,
@@ -100,7 +96,6 @@ export const STALLS: readonly StallDefinition[] = [
   {
     id: 'waterFight',
     title: 'Water Fight!',
-    cta: 'Big water fight!',
     glyph: '💦',
     accent: PALETTE.markerMint,
     stripe: PALETTE.markerSky,
@@ -127,7 +122,6 @@ export const STALLS: readonly StallDefinition[] = [
   {
     id: 'spaceFerrisWheel',
     title: 'Space Ferris Wheel',
-    cta: 'Up to space!',
     glyph: '🎡',
     accent: PALETTE.markerLilac,
     stripe: PALETTE.markerSky,
@@ -150,7 +144,6 @@ export const STALLS: readonly StallDefinition[] = [
   {
     id: 'dodgems',
     title: 'Dodgems!',
-    cta: 'Bump the cars!',
     glyph: '🚗',
     accent: PALETTE.markerPink,
     stripe: PALETTE.markerLemon,
@@ -252,10 +245,10 @@ export class MiniGameStalls implements GameSystem {
    * #122 removed. The keyboard and touch paths still meet in one place —
    * `Selection.commit` — before anything game-specific happens.
    *
-   * The chip's label is the stall's own {@link StallDefinition.cta}: since the
-   * sign card was removed (10 August 2026) that call to action ("Race the
-   * carts!") is the only text shown over the booth, written once in {@link
-   * STALLS} above.
+   * The chip's label is the stall's own {@link StallDefinition.title}. With the
+   * sign card gone (10 August 2026) the chip is the only text over the booth,
+   * and for a ride the name says it — "Dodgems!", "Water Fight!" — so there is
+   * no manufactured verb to keep in step (family, 11 August 2026).
    */
   interactZones(): InteractZone[] {
     return this.stalls.map((stall) =>
@@ -277,7 +270,7 @@ export class MiniGameStalls implements GameSystem {
         },
         () => this.onEnter?.(stall.definition.id),
         stall.definition.glyph,
-        stall.definition.cta,
+        stall.definition.title,
       ),
     );
   }

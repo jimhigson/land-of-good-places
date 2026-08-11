@@ -236,7 +236,7 @@ export class FacePaintStall implements GameSystem {
         },
         () => this.requestPaint(),
         '🎨',
-        'Paint my face!',
+        'Face Painting!',
       ),
     ];
   }

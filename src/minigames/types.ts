@@ -112,24 +112,19 @@ export type MiniGameFactory = () => MiniGame;
  * `title`, `glyph` and `accent` used to be painted onto a wooden board over the
  * booth, then (28 July 2026) became the stall's `InteractZone.sign`. Since the
  * family's ruling of 10 August 2026 the sign card is gone too: the action chip
- * is the only thing shown over the booth, so `cta` is the whole of it — a short
- * call to action ("Race the carts!") that says what the stall is by naming what
- * you do at it. `title` stays as the booth's internal/debug name; `glyph` and
- * `accent` still colour the awning.
+ * is the only thing shown over the booth, and for a *ride* the family's follow-up
+ * (11 August) is that its **name is call to action enough** — "Dodgems!",
+ * "Water Fight!", "Space Ferris Wheel" all say what they are without a
+ * manufactured verb. So `title` is what the chip shows; `glyph` and `accent`
+ * still colour the awning.
  */
 export interface StallDefinition {
   readonly id: string;
-  /** The stall's name, for the zone's debug label. */
+  /** The stall's name — and, since it names an obvious-purpose ride, its chip. */
   readonly title: string;
-  /**
-   * The action chip's call to action — "Race the carts!", "Bump the cars!".
-   * A very short phrase, not a sentence: it is the only text shown over the
-   * booth now that the sign card is gone.
-   */
-  readonly cta: string;
   /** One emoji, shown before the title. */
   readonly glyph: string;
-  /** Awning stripe + trim colour, and the sign card's border. From PALETTE. */
+  /** Awning stripe + trim colour. From PALETTE. */
   readonly accent: number;
   /** The other stripe. From PALETTE. */
   readonly stripe: number;
