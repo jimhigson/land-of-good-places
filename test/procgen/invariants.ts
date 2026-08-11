@@ -76,6 +76,9 @@ import { HAT_KINDS, createHat } from '../../src/art/models/hats.ts';
 // imported" note below is about `railRace/plan.ts`, which genuinely does.
 import { CAR_FLOOR_Y, LOCO_BODY_TOP_Y, SEAT_Y } from '../../src/world/train/trainDimensions.ts';
 import { RIDER_HEADROOM, TRAIN_CLEARANCE_Y } from '../../src/world/train/clearance.ts';
+// A leaf module (imports nothing), so it cannot pin the park's seed the way a
+// static import of `train/route.ts` would — see that constant's own note.
+import { TRAIN_MIN_TURN_RADIUS } from '../../src/world/train/turning.ts';
 // Safe to import statically: `slide/landing.ts` deliberately reaches nothing
 // seeded — see the note on `PitCircle`. It takes the pit as an argument for
 // exactly this reason, so importing it here cannot fix the park's seed before
@@ -1913,6 +1916,81 @@ const skyCruiserTurnsGently: Invariant = (facts) => {
     ];
   }
   return [];
+};
+
+/**
+ * **The park train's built loop keeps its turning circle.**
+ *
+ * Its own analogue of {@link skyCruiserTurnsGently}, and it did not exist
+ * because until 11 August 2026 the train had no turning circle at all: its route
+ * was a radius-per-bearing profile with no curvature constraint anywhere, and a
+ * sharp radial dip between two 5° control bearings produced a **0.60 m** bend on
+ * the canonical seed — a hairpin tighter than one 1.5 m carriage, on a train
+ * whose cars then overlapped through it, and nothing measured it. Switching the
+ * train to the generic `rail/generate.ts` solver makes the minimum radius a
+ * number in the vocabulary ({@link TRAIN_MIN_TURN_RADIUS}); this is what proves
+ * the built curve honours it.
+ *
+ * The train keeps its own cubics rather than resampling them into a spline, so
+ * there is no rebuild sag to lose radius to — but this measures the curve a
+ * child actually rides regardless, which is the standard every rail invariant
+ * here holds to.
+ */
+const trainKeepsItsTurningCircle: Invariant = (facts) => {
+  const route = facts.world.train.route;
+  const a = new Vector3();
+  const b = new Vector3();
+  const c = new Vector3();
+  let tightest = Infinity;
+  let at = 0;
+  for (let d = 0; d < route.length; d += 0.5) {
+    route.pointAt(d - CURVATURE_SPAN, a);
+    route.pointAt(d, b);
+    route.pointAt(d + CURVATURE_SPAN, c);
+    const radius = radiusThrough(a, b, c);
+    if (radius < tightest) {
+      tightest = radius;
+      at = d;
+    }
+  }
+  if (tightest < TRAIN_MIN_TURN_RADIUS) {
+    return [
+      `the park train's built track turns at ${tightest.toFixed(2)} m radius ` +
+        `${at.toFixed(0)} m along the loop, tighter than the ${TRAIN_MIN_TURN_RADIUS} m it promises`,
+    ];
+  }
+  return [];
+};
+
+/**
+ * **The train runs through no plot and no stall.**
+ *
+ * The twin of {@link wallsClearTheRailway} and {@link treesClearTheRailway}, for
+ * the obstacles those two do not cover — the booths and the ride plots. It did
+ * not exist, and that is the second half of the 11 August 2026 bug: the old
+ * profile could snap into a different free radial interval at each 5° control
+ * bearing, and the spline between two of them ran *straight through whatever sat
+ * between* — 0.31 m from the Rail Racer booth's centre and clean through the
+ * middle of the Water Fight ride on the canonical seed, with nothing measuring
+ * stall-versus-rail at all.
+ *
+ * Measured off the built centre line (`facts.distanceToRail`) against every
+ * layout entry's own `boundingRadius` — the number the whole park routes and
+ * scatters around — held to {@link TRACK_CLEARANCE}, the train's own half-width,
+ * so a plot whose edge is within it is literally inside the train.
+ */
+const trainClearsEveryPlotAndStall: Invariant = (facts) => {
+  const fouls: string[] = [];
+  for (const plot of facts.plots) {
+    const gap = facts.distanceToRail(plot.x, plot.z) - plot.boundingRadius;
+    if (gap < TRACK_CLEARANCE) {
+      fouls.push(
+        `${plot.id} at (${plot.x.toFixed(1)}, ${plot.z.toFixed(1)}) reaches to ${gap.toFixed(2)} m ` +
+          `of the rail centre line (needs ${TRACK_CLEARANCE} m) — the train runs through it`,
+      );
+    }
+  }
+  return fouls;
 };
 
 /**
@@ -4890,6 +4968,8 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no two wall runs cross or crowd each other', wallsDoNotClash],
   ['no wall run stands on the railway', wallsClearTheRailway],
   ['no tree stands on the railway', treesClearTheRailway],
+  ['the train runs through no plot and no stall', trainClearsEveryPlotAndStall],
+  ['the park train keeps its turning circle', trainKeepsItsTurningCircle],
   ['no two plots overlap', plotsDoNotOverlap],
   ['every entrance has standable ground', entrancesAreUsable],
   ['no two trees interpenetrate', treesDoNotInterpenetrate],

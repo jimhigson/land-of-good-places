@@ -514,8 +514,15 @@ export class ParkMap {
     }
 
     // --- the train loop and its stations ------------------------------------
+    const trainRoute = this.deps.world.train.route;
+    const trainPoints: [number, number][] = [];
+    const trainProbe = new Vector3();
+    for (let i = 0; i < 140; i += 1) {
+      trainRoute.pointAt((i / 140) * trainRoute.length, trainProbe);
+      trainPoints.push([trainProbe.x, trainProbe.z]);
+    }
     this.strokeCurvePoints(
-      this.deps.world.train.route.curve.getSpacedPoints(140).map((p) => [p.x, p.z]),
+      trainPoints,
       true,
       hexToCss(PALETTE.markerLemon),
       2.2,
