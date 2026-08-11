@@ -108,6 +108,17 @@ const RIM_STANDOFF = 3.35;
 const START_POSES = 96;
 
 /**
+ * How far the loop stays clear of the plaza's heart (the fountain), in metres —
+ * the modern reading of the old polar solver's `INNER_FLOOR = 20`. Without it the
+ * generic search, knowing only "avoid obstacles, stay inside the wall", is free
+ * to dip a loop up to the fountain's own keep-out and seal off a pocket of garden
+ * between the loop and the plaza. Keeping it out past this leaves the inner park
+ * plaza-side and connected, and keeps the railway ringing the park rather than
+ * cutting across its middle.
+ */
+const PLAZA_INNER_FLOOR = 18;
+
+/**
  * The pieces the train is built from. {@link TRAIN_MIN_TURN_RADIUS} lives in the
  * tightest band; the wider bands and straights are what make the loop a shape
  * rather than a constant-radius ring. Gentle and long, for a slow train.
@@ -144,7 +155,13 @@ interface Obstacle {
 function trainObstacles(): Obstacle[] {
   const out: Obstacle[] = [];
   for (const entry of PARK_LAYOUT.entries.values()) {
-    out.push({ x: entry.x, z: entry.z, reach: entry.boundingRadius + TRACK_PLOT_CLEARANCE });
+    // The fountain keeps the loop out of the plaza's heart by PLAZA_INNER_FLOOR,
+    // not merely off its own basin — see that constant.
+    const reach =
+      entry.id === 'fountain'
+        ? Math.max(entry.boundingRadius + TRACK_PLOT_CLEARANCE, PLAZA_INNER_FLOOR)
+        : entry.boundingRadius + TRACK_PLOT_CLEARANCE;
+    out.push({ x: entry.x, z: entry.z, reach });
   }
   // The cruiser's dismount point: a fence across the spot a ride sets a child
   // down is the seed-18 failure shape, so the avoidance lives here.
