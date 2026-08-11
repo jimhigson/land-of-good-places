@@ -405,6 +405,7 @@ export class Flowers implements GameSystem {
           // with the chip — see `world/InteractRouter.ts`.
           () => this.pickByIndex(i),
           '🌼',
+          'Pick the flower!',
         ),
       );
     }

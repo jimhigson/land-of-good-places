@@ -97,24 +97,6 @@ export interface InteractZone {
   readonly verb?: string;
 
   /**
-   * The thing's own sign — its name, and one short line about it.
-   *
-   * The park used to say this on a painted board standing next to the thing.
-   * The family's ruling of 28 July 2026 is that those were hard to read (a
-   * board is a texture on a rectangle seen from a fixed 45°, so its words are
-   * small, foreshortened and lit by whatever the sky is doing), so the boards
-   * are gone and this is what replaced them: when the zone is selected,
-   * `ui/SignCard.ts` shows the same words as a card in screen space, directly
-   * above the action chips.
-   *
-   * Optional. A zone with no sign simply shows chips, exactly as before — and
-   * note that a zone with no *actions* is not selectable at all
-   * (`world/Selection.ts`), so a sign is an adornment on something you can
-   * already do, never a reason to select something on its own.
-   */
-  readonly sign?: ZoneSign;
-
-  /**
    * What to draw the rainbow around, for GAME_DESIGN.md's HIGHLIGHT RULE — the
    * `Object3D` (or the one `InstancedMesh` instance) this zone stands for. See
    * `world/highlight.ts` for the helpers, `world/Highlights.ts` for the system.
@@ -127,32 +109,14 @@ export interface InteractZone {
 }
 
 /**
- * What a thing's sign says — the words off the board that used to stand beside
- * it, now drawn in screen space over the selected item.
+ * One thing you can do to a selected item: one chip, and a short call to action
+ * on it.
  *
- * **The copy is never written here.** Every one of these is built from the
- * table that already owned the words: `minigames/stalls.ts` for the stalls,
- * `building/shops/Shops.ts` for the shop fronts, `train/ParkTrain.ts`'s station
- * seeds for the platforms. That is what keeps one name for one thing, and it is
- * what lets `scripts/check-copy-brevity.mts` measure all of it from the modules
- * the game itself imports.
- */
-export interface ZoneSign {
-  /** The thing's name. GAME_DESIGN.md's BREVITY RULE: a title, ~24 characters. */
-  readonly title: string;
-  /** One short line under it. BREVITY RULE: one sentence, ~50 characters. */
-  readonly note?: string;
-  /** An emoji, shown before the title. Plain text — no image assets. */
-  readonly glyph?: string;
-  /** The colour this thing's board was painted with, as a hex number. */
-  readonly accent?: number;
-}
-
-/**
- * One thing you can do to a selected item: one chip, with one word on it.
- *
- * `label` obeys GAME_DESIGN.md's BREVITY RULE and then some — a chip wants one
- * or two words ("Get on", "Pick", "Shop!"), never a sentence.
+ * Since the sign card was removed (10 August 2026) the chip is the *only* thing
+ * shown over an item, so its `label` carries the whole call to action — "See the
+ * view", "Race the carts!", "Pick the flower!". It still obeys GAME_DESIGN.md's
+ * BREVITY RULE: a very short phrase that implies what the thing is by naming what
+ * you do to it, never a sentence and never a separate heading.
  */
 export interface ZoneAction {
   readonly id: string;

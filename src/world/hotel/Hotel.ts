@@ -102,7 +102,6 @@ import {
   crystalPlanter,
   createDiscoSparkle,
   ARTWORK_COUNT,
-  ARTWORK_TITLES,
   paintedPicture,
   type DiscoSparkle,
   fishShape,
@@ -995,12 +994,6 @@ export class Hotel implements GameSystem {
     return this.guests;
   }
 
-  /** What the HUD's floor pill shows — Eleri: "It shows which floor you are on". */
-  floorLabel(): string | null {
-    if (!this.inside) return null;
-    return this.currentRoom()?.floorLabel ?? null;
-  }
-
   attachPlayer(player: Player): void {
     this.player = player;
   }
@@ -1062,18 +1055,10 @@ export class Hotel implements GameSystem {
         standX: x,
         standZ: z + 2.4,
         verb: 'Check in',
-        sign: {
-          title: 'Reception',
-          note: saveFlags.hasHotelKey()
-            ? 'welcome back! your room is floor 50'
-            : 'check in and get your key!',
-          glyph: '🔑',
-          accent: PALETTE.markerLilac,
-        },
         actions: () =>
           saveFlags.hasHotelKey()
-            ? pressAction('Hello!', () => this.wave())
-            : pressAction('Check in!', () => this.checkIn(), '🔑'),
+            ? pressAction('Say hello!', () => this.wave(), '👋')
+            : pressAction('Check in here!', () => this.checkIn(), '🔑'),
       });
     }
 
@@ -1100,15 +1085,9 @@ export class Hotel implements GameSystem {
         standZ: CORRIDOR.originZ,
         standRadius: 2.6,
         verb: hasKey ? 'Go in' : 'Locked',
-        sign: {
-          title: 'yours',
-          note: hasKey ? 'walk in — this one is yours!' : 'get your key at reception!',
-          glyph: hasKey ? '⭐' : '🔑',
-          accent: hasKey ? PALETTE.flowerYellow : PALETTE.markerPink,
-        },
         actions: () =>
           hasKey
-            ? pressAction('Go in!', () => this.enterSuiteThroughDoor(), '⭐')
+            ? pressAction('Go in — this is yours!', () => this.enterSuiteThroughDoor(), '⭐')
             : pressAction('Where is my key?', () => this.blinkYoursStar(), '🔑'),
       });
     }
@@ -1127,13 +1106,7 @@ export class Hotel implements GameSystem {
         standZ: art.z + art.normalZ * 1.9,
         standRadius: 2.4,
         verb: 'Look',
-        sign: {
-          title: ARTWORK_TITLES[art.art] ?? 'A painting',
-          note: 'a painting — have a proper look!',
-          glyph: '🖼️',
-          accent: PALETTE.markerLilac,
-        },
-        actions: () => pressAction('Look!', () => this.lookAtArt(art), '🖼️'),
+        actions: () => pressAction('See the painting', () => this.lookAtArt(art), '🖼️'),
       });
     }
 
@@ -1227,13 +1200,7 @@ export class Hotel implements GameSystem {
         standZ: spot ? spot.z : side === 'north' ? z + stand : z,
         standRadius: 2.6,
         verb: 'Look out',
-        sign: {
-          title: room.floorLabel,
-          note: 'see the park from up here!',
-          glyph: '🪟',
-          accent: PALETTE.markerSky,
-        },
-        actions: () => pressAction('Look outside!', () => this.lookOutside(room), '🪟'),
+        actions: () => pressAction('See the view', () => this.lookOutside(room), '🪟'),
       });
     }
 
@@ -1257,7 +1224,6 @@ export class Hotel implements GameSystem {
         // including 'Hop down' and a child is stuck at the table forever.
         selectableWhileRiding: true,
         verb: 'Sit',
-        sign: { title: 'Breakfast', note: 'sit down and choose!', glyph: '🥄' },
         actions: () =>
           this.seatedAt === chair.id
             ? [
@@ -1273,7 +1239,7 @@ export class Hotel implements GameSystem {
                 // table rather than as the way out of it.
                 { id: 'hop-down', label: 'Leave breakfast', run: () => this.standUp() },
               ]
-            : pressAction('Sit down!', () => this.sitAt(chair), '🪑'),
+            : pressAction('Have breakfast', () => this.sitAt(chair), '🪑'),
       });
     }
 
@@ -1297,12 +1263,6 @@ export class Hotel implements GameSystem {
         standZ: SUITE.originZ + panZ - 1.1,
         standRadius: 2.2,
         verb: 'Use',
-        sign: {
-          title: 'Bathroom',
-          note: 'wash your hands!',
-          glyph: '🚽',
-          accent: PALETTE.markerMint,
-        },
         actions: () =>
           routine.busy ? [] : pressAction('Use the toilet!', () => routine.use(), '🚽'),
       });
@@ -1321,9 +1281,8 @@ export class Hotel implements GameSystem {
         standZ: bed.z + 1.5,
         standRadius: 2.4,
         verb: 'Sleep',
-        sign: { title: 'Your bed', note: 'sleep, or go jumpy jumpy!', glyph: '🛏️' },
         actions: () =>
-          this.napping > 0 ? [] : pressAction('Sleep!', () => this.nap(bed), '💤'),
+          this.napping > 0 ? [] : pressAction('Have a sleep', () => this.nap(bed), '💤'),
       });
     }
 

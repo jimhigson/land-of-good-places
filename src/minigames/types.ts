@@ -109,22 +109,22 @@ export type MiniGameFactory = () => MiniGame;
 /**
  * A stall in the garden.
  *
- * `title`, `subtitle`, `glyph` and `accent` used to be painted onto a wooden
- * board over the booth. Since the family's ruling of 28 July 2026 there are no
- * painted boards in the park at all — those four fields become the stall's
- * `InteractZone.sign` instead, and `ui/SignCard.ts` shows them in screen space
- * when a child selects the booth. They are still the stall's *name*, so they
- * obey GAME_DESIGN.md's BREVITY RULE and `npm run check:brevity` measures them.
+ * `title`, `glyph` and `accent` used to be painted onto a wooden board over the
+ * booth, then (28 July 2026) became the stall's `InteractZone.sign`. Since the
+ * family's ruling of 10 August 2026 the sign card is gone too: the action chip
+ * is the only thing shown over the booth, and for a *ride* the family's follow-up
+ * (11 August) is that its **name is call to action enough** — "Dodgems!",
+ * "Water Fight!", "Space Ferris Wheel" all say what they are without a
+ * manufactured verb. So `title` is what the chip shows; `glyph` and `accent`
+ * still colour the awning.
  */
 export interface StallDefinition {
   readonly id: string;
-  /** The stall's name. A title: at most ~24 characters. */
+  /** The stall's name — and, since it names an obvious-purpose ride, its chip. */
   readonly title: string;
-  /** One short line under it. A line: one sentence, at most ~50 characters. */
-  readonly subtitle: string;
   /** One emoji, shown before the title. */
   readonly glyph: string;
-  /** Awning stripe + trim colour, and the sign card's border. From PALETTE. */
+  /** Awning stripe + trim colour. From PALETTE. */
   readonly accent: number;
   /** The other stripe. From PALETTE. */
   readonly stripe: number;

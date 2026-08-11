@@ -169,6 +169,7 @@ export class TreeClimbing implements GameSystem {
         // different answer than the chip did (issue #122).
         () => this.requestClimb(tree),
         '🌳',
+        'Climb the tree!',
       );
     });
   }

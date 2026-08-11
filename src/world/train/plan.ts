@@ -21,8 +21,6 @@ import { PALETTE } from '../../core/palette';
 export interface PlannedStation {
   readonly index: number;
   readonly name: string;
-  readonly subtitle: string;
-  readonly glyph: string;
   readonly accent: number;
   /** Metres along the loop of the platform's centre. */
   readonly distance: number;
@@ -54,16 +52,12 @@ export interface PlannedStation {
 const STATION_SEEDS = [
   {
     name: 'Sunny Side',
-    subtitle: 'all aboard for the whole park!',
-    glyph: '🚂',
     accent: PALETTE.markerLemon,
     bearingX: 1,
     bearingZ: 0,
   },
   {
     name: 'Bluebell Halt',
-    subtitle: 'mind the gap, and the bunnies',
-    glyph: '🚉',
     accent: PALETTE.markerSky,
     bearingX: -1,
     bearingZ: 0,
@@ -226,8 +220,6 @@ function planStations(route: TrainRoute): readonly PlannedStation[] {
     return {
       index,
       name: seed.name,
-      subtitle: seed.subtitle,
-      glyph: seed.glyph,
       accent: seed.accent,
       distance,
       standX,

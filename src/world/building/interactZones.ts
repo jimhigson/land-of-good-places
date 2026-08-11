@@ -1,5 +1,4 @@
 import { PRIMARY_ACTION, pressAction, pressZone, type InteractZone, type ZoneAction } from '../interact';
-import { PALETTE } from '../../core/palette';
 import { SLIDE_PLAN } from '../slide/plan';
 import {
   BUBBLE_RADIUS,
@@ -30,7 +29,7 @@ import {
   worldX,
   worldZ,
 } from './layout';
-import { SHOP_SIGNS, SHOP_STAND_Z } from './shops/Shops';
+import { SHOP_STAND_Z } from './shops/Shops';
 import { BUILDING_FLOOR_COUNT, BUILDING_HALF_Z } from '../../core/constants';
 
 /**
@@ -74,7 +73,7 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
   // more — since issue #122 each deck's chip carries *which* stairwell it is,
   // rather than firing an unaddressed press for `Building` to work out.
   const callAction: readonly ZoneAction[] = [
-    { id: PRIMARY_ACTION, label: 'Call', glyph: '🛗', run: () => state.callLift() },
+    { id: PRIMARY_ACTION, label: 'Call the lift', glyph: '🛗', run: () => state.callLift() },
   ];
 
   // The way in, out in the garden. A tap on the tower walks a child to the top
@@ -125,16 +124,7 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
       pickRadius: 4.2,
       standX: worldX(STAIR_STAND_X),
       standZ: worldZ(STAIR_STAND_Z),
-      // Off the little board that used to stand beside the pad on every deck
-      // (`building/Building.ts`'s `addRideEntrances`). The pad stayed; the
-      // board did not.
-      sign: {
-        title: 'Stairs',
-        note: 'tap for a ride up or down!',
-        glyph: '🪜',
-        accent: PALETTE.markerMint,
-      },
-      actions: () => stairsActions[deck] ?? (stairsActions[deck] = pressAction('Climb!', () => state.openStairs(deck), '🪜')),
+      actions: () => stairsActions[deck] ?? (stairsActions[deck] = pressAction('Take the stairs', () => state.openStairs(deck), '🪜')),
     });
   }
 
@@ -199,11 +189,10 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
         pickRadius: 3.2,
         standX: worldX(TOILET_STAND_X),
         standZ: worldZ(TOILET_STAND_Z),
-        // Off the board that used to hang over the door (`building/Toilets.ts`).
-        sign: { title: 'Toilets', note: 'wash your hands!', glyph: '🚻', accent: PALETTE.markerMint },
       },
       () => state.useToilets(),
       '🚽',
+      'Use the toilet',
     ),
   );
 
@@ -226,13 +215,10 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
           pickRadius: 2.3,
           standX: worldX(standX),
           standZ: worldZ(standZ),
-          // The shop's own name and line of patter, off the board that used to
-          // hang from its awning — see `shops/Shops.ts`'s `SHOP_SIGNS`, which
-          // builds them from the same tables the shop itself is built from.
-          ...(SHOP_SIGNS[unit.id] === undefined ? {} : { sign: SHOP_SIGNS[unit.id] }),
         },
         () => state.openShop(unit.id),
         '🛍️',
+        'Go shopping!',
       ),
     );
   }
@@ -246,21 +232,13 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
         y: deckY(TOP_DECK),
         z: worldZ(GROWN_UP_Z),
         pickRadius: 1.7,
-        // The board here used to say "Press E", which the chip's own key hint
-        // says better and only when the key actually works. So the card keeps
-        // the half of it that was about the grown-up.
-        sign: {
-          title: 'A grown-up',
-          note: 'a grown-up comes too!',
-          glyph: '🤗',
-          accent: PALETTE.grownUpScarf,
-        },
         // Stand in front of them rather than inside them.
         standX: worldX(GROWN_UP_X),
         standZ: worldZ(GROWN_UP_Z + 1.4),
       },
       () => state.askGrownUp(),
       '🧑',
+      'Ask them along',
     ),
   );
 

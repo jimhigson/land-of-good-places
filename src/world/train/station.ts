@@ -13,7 +13,7 @@ import { toonMaterial } from '../../art/style/materials';
 import { ART } from '../../art/style/artPalette';
 import { terrainHeight } from '../terrain';
 import type { CollisionWorld } from '../Collision';
-import type { InteractZone, ZoneSign } from '../interact';
+import type { InteractZone } from '../interact';
 import type { MovingPlatform } from '../building/surfaces';
 import type { TrainRoute } from './route';
 
@@ -55,8 +55,6 @@ const CANOPY_CENTRE = -1.4;
 export interface StationOptions {
   readonly index: number;
   readonly name: string;
-  readonly subtitle: string;
-  readonly glyph: string;
   readonly accent: number;
   /** Where on the loop it stands, in metres along the route. */
   readonly distance: number;
@@ -66,19 +64,6 @@ export class Station {
   readonly group = new Group();
   readonly name: string;
   readonly index: number;
-
-  /**
-   * The station's name board, as words rather than as a painted plank.
-   *
-   * There *was* a board on a post at the end of every platform. The family
-   * found in-world signs hard to read (28 July 2026) and had them all taken
-   * out; the same four fields now ride on the platform's interact zone, so
-   * "Bluebell Halt — mind the gap, and the bunnies" appears on the sign card
-   * the moment a child selects the platform. Which is also strictly better than
-   * the board was: it is legible from the far end of the platform, and it is
-   * still there when she is sitting in the carriage looking back at it.
-   */
-  private readonly sign: ZoneSign;
 
   /** Distance along the route the train stops at. */
   readonly distance: number;
@@ -102,12 +87,6 @@ export class Station {
     this.index = options.index;
     this.name = options.name;
     this.distance = options.distance;
-    this.sign = {
-      title: options.name,
-      note: options.subtitle,
-      glyph: options.glyph,
-      accent: options.accent,
-    };
 
     const centre = route.pointAt(options.distance, new Vector3());
     const tangent = route.tangentAt(options.distance, new Vector3());
@@ -175,7 +154,6 @@ export class Station {
       pickRadius: 4.2,
       standX: this.standX,
       standZ: this.standZ,
-      sign: this.sign,
       // Wider than the default three metres, and measured from the middle of a
       // 7.2 m platform: a child at either end of it, or sitting in the far
       // carriage, is still "at this station" as far as the chip is concerned.

@@ -18,7 +18,6 @@ import type { ShopUnits } from '../ShopUnits';
 import { buildKiosk } from './kiosk';
 import { buildFitout, type Fitout } from './fitouts';
 import { rainbowFlossAvailable, type ShopId } from './catalogue';
-import type { ZoneSign } from '../../interact';
 
 /**
  * The seven fitted-out shops.
@@ -26,7 +25,8 @@ import type { ZoneSign } from '../../interact';
  * {@link ShopUnits} owns the empty alcoves; this owns what is in them. Each unit
  * gets the shared kiosk shell (counter, shelves, awning), its own stock on the
  * shelves, and a shopkeeper behind the counter. The name board that used to
- * hang off the awning is gone — see {@link SHOP_SIGNS}.
+ * hang off the awning is gone — the shop's own goods say what it is, and its
+ * "Go shopping!" chip does the rest (see `building/interactZones.ts`).
  *
  * **Two visibility tiers, and the reason is the draw-call budget.** The shell
  * lives with the floor and is hidden by the cutaway along with it. The *detail*
@@ -89,7 +89,6 @@ interface FittedShop {
 /** A line of patter and a keeper's colours for each shop. */
 interface Skin {
   readonly greeting: string;
-  readonly subtitle: string;
   readonly apron: number;
   readonly hair: number;
   readonly skin: number;
@@ -98,81 +97,47 @@ interface Skin {
 const SKINS: Readonly<Record<ShopId, Skin>> = {
   toy: {
     greeting: 'Hello! Would you like a cuddly one?',
-    subtitle: 'cuddly things!',
     apron: PALETTE.markerSky,
     hair: PALETTE.hair,
     skin: PALETTE.skin,
   },
   balloon: {
     greeting: 'Hold on tight — they do float off!',
-    subtitle: 'hold on tight!',
     apron: PALETTE.markerLemon,
     hair: ART.ripikaTip,
     skin: ART.biscuitMuzzle,
   },
   candyFloss: {
     greeting: 'Freshly spun. Mind your fingers!',
-    subtitle: 'freshly spun',
     apron: PALETTE.markerMint,
     hair: PALETTE.markerLilac,
     skin: ART.corgiTanDark,
   },
   iceCream: {
     greeting: 'Three scoops is allowed. Four is showing off.',
-    subtitle: 'silly flavours',
     apron: PALETTE.markerPink,
     hair: ART.ripikaTip,
     skin: PALETTE.skin,
   },
   hat: {
     greeting: 'Every hat here fits everybody. It is magic.',
-    subtitle: 'one for everyone',
     apron: PALETTE.markerSky,
     hair: PALETTE.flowerYellow,
     skin: ART.biscuitMuzzle,
   },
   stickerPet: {
     greeting: 'The little ones like being carried.',
-    subtitle: 'stickers & tiny pets',
     apron: PALETTE.markerLilac,
     hair: PALETTE.hair,
     skin: ART.corgiTanDark,
   },
   surpriseEgg: {
     greeting: 'Nobody knows what is inside. Not even me!',
-    subtitle: 'what is inside?',
     apron: PALETTE.blossomPink,
     hair: PALETTE.markerMint,
     skin: PALETTE.skin,
   },
 };
-
-/**
- * Each shop's name and its little line, for its `shop-<id>` interact zone.
- *
- * These two strings used to be painted onto the board hanging off the shop's
- * awning. The family had every sign in the park taken out on 28 July 2026, so
- * they travel on the zone instead and `ui/SignCard.ts` shows them the moment a
- * child selects the counter — which is also where the shop's "Shop!" chip
- * already is, and which no longer costs the stock a board's width of shelf.
- *
- * Built from {@link SKINS} and {@link SHOP_UNITS} rather than retyped, so there
- * is still exactly one place each shop is named. Exported because
- * `building/interactZones.ts` builds the zones and
- * `scripts/check-copy-brevity.mts` measures the words.
- */
-export const SHOP_SIGNS: Readonly<Record<string, ZoneSign>> = Object.fromEntries(
-  SHOP_UNITS.flatMap((unit) => {
-    const skin = SKINS[unit.id as ShopId];
-    if (!skin) return [];
-    return [
-      [
-        unit.id,
-        { title: unit.title, note: skin.subtitle, glyph: unit.glyph, accent: unit.accent },
-      ] as const,
-    ];
-  }),
-);
 
 /**
  * Takes a shop's contents out of the shadow pass altogether.

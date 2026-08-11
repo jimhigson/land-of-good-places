@@ -39,7 +39,6 @@ export const STALLS: readonly StallDefinition[] = [
   {
     id: 'skyCruiser',
     title: 'Sky Cruiser',
-    subtitle: 'float over the whole park!',
     glyph: '\u{1F6A0}',
     accent: PALETTE.markerSky,
     stripe: PALETTE.buildingWall,
@@ -47,13 +46,10 @@ export const STALLS: readonly StallDefinition[] = [
   },
   {
     id: 'railRacer',
-    // The id stays `railRacer` — it is a save key and the prefix
-    // `world/interact.ts` reads the "Ride!" verb off — but the booth now
-    // advertises the ride it actually boards. "hold on, let go, whoosh!"
-    // described the controls of the retired 2D game and never said that there
-    // is somebody to beat, which is the whole point of it.
+    // The id stays `railRacer` — it is a save key — but the booth advertises
+    // the ride it actually boards: "The Rail Race!", which says there is
+    // somebody to beat, the whole point of it.
     title: 'The Rail Race!',
-    subtitle: 'four tracks, duck the bars, mind the sparks!',
     glyph: '🎢',
     accent: PALETTE.markerPink,
     stripe: PALETTE.buildingWall,
@@ -74,7 +70,6 @@ export const STALLS: readonly StallDefinition[] = [
   {
     id: 'spookyHouse',
     title: 'The Spooky House',
-    subtitle: 'ooOOoo... just for giggles!',
     glyph: '👻',
     accent: PALETTE.markerLilac,
     stripe: PALETTE.markerMint,
@@ -101,7 +96,6 @@ export const STALLS: readonly StallDefinition[] = [
   {
     id: 'waterFight',
     title: 'Water Fight!',
-    subtitle: 'very big water guns',
     glyph: '💦',
     accent: PALETTE.markerMint,
     stripe: PALETTE.markerSky,
@@ -128,7 +122,6 @@ export const STALLS: readonly StallDefinition[] = [
   {
     id: 'spaceFerrisWheel',
     title: 'Space Ferris Wheel',
-    subtitle: 'all the way up to space!',
     glyph: '🎡',
     accent: PALETTE.markerLilac,
     stripe: PALETTE.markerSky,
@@ -151,7 +144,6 @@ export const STALLS: readonly StallDefinition[] = [
   {
     id: 'dodgems',
     title: 'Dodgems!',
-    subtitle: 'bonk the wobbly tree!',
     glyph: '🚗',
     accent: PALETTE.markerPink,
     stripe: PALETTE.markerLemon,
@@ -247,18 +239,16 @@ export class MiniGameStalls implements GameSystem {
   /**
    * Tap targets, one per stall (see `world/interact.ts`).
    *
-   * One action each — "Ride!", "Play!", "Enter!" — and it names this booth by
-   * id. `MiniGameHost` used to find the booth itself, by sweeping every stall
-   * for one within its own `REACH`; that second opinion about who a press was
-   * meant for is what GitHub issue #122 removed. The keyboard and touch paths
-   * still meet in one place — `Selection.commit` — before anything
-   * game-specific happens.
+   * One action each, and it names this booth by id. `MiniGameHost` used to find
+   * the booth itself, by sweeping every stall for one within its own `REACH`;
+   * that second opinion about who a press was meant for is what GitHub issue
+   * #122 removed. The keyboard and touch paths still meet in one place —
+   * `Selection.commit` — before anything game-specific happens.
    *
-   * The `sign` is the booth's own board, which the booth no longer carries: the
-   * family's 28 July 2026 ruling took the painted signs out of the park, so the
-   * same four fields that used to be baked into a canvas texture now travel to
-   * `ui/SignCard.ts` instead. Read straight off {@link StallDefinition} — the
-   * words are written once, in {@link STALLS} above.
+   * The chip's label is the stall's own {@link StallDefinition.title}. With the
+   * sign card gone (10 August 2026) the chip is the only text over the booth,
+   * and for a ride the name says it — "Dodgems!", "Water Fight!" — so there is
+   * no manufactured verb to keep in step (family, 11 August 2026).
    */
   interactZones(): InteractZone[] {
     return this.stalls.map((stall) =>
@@ -272,12 +262,6 @@ export class MiniGameStalls implements GameSystem {
           pickRadius: STALL_PICK_RADIUS,
           standX: stall.standX,
           standZ: stall.standZ,
-          sign: {
-            title: stall.definition.title,
-            note: stall.definition.subtitle,
-            glyph: stall.definition.glyph,
-            accent: stall.definition.accent,
-          },
           // The whole booth lights up in rainbow when it is selected — see
           // GAME_DESIGN.md's HIGHLIGHT RULE and `world/highlight.ts`. `props` is
           // filled in step with `stalls` in the constructor above, one prop per
@@ -286,6 +270,7 @@ export class MiniGameStalls implements GameSystem {
         },
         () => this.onEnter?.(stall.definition.id),
         stall.definition.glyph,
+        stall.definition.title,
       ),
     );
   }
