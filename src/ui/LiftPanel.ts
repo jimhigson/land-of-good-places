@@ -44,12 +44,17 @@ export class LiftPanel implements GameSystem {
   /** Last frame's `LiftPanelState.arrived`, so the ding fires once per arrival. */
   private wasArriving = false;
 
+  private readonly lift: LiftPanelSource;
+  private readonly isBlocked: () => boolean;
+
   constructor(
     container: HTMLElement,
-    private readonly lift: LiftPanelSource,
+    lift: LiftPanelSource,
     /** True while a shop, book, map, menu or overlay already owns the screen. */
-    private readonly isBlocked: () => boolean,
+    isBlocked: () => boolean,
   ) {
+    this.lift = lift;
+    this.isBlocked = isBlocked;
     this.root = document.createElement('div');
     this.root.className = 'lift-panel';
     this.root.dataset.show = 'false';

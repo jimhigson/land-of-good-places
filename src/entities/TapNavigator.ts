@@ -159,19 +159,37 @@ export class TapNavigator implements GameSystem {
   /** Set by a double-tap. Holds the `sprint` action for as long as we seek. */
   private running = false;
 
+  private readonly player: Player;
+  private readonly camera: IsoCamera;
+  private readonly input: InputSystem;
+  private readonly navGrid: NavGrid;
+  /**
+   * The height above which surfaces are hidden from the player — the castle
+   * cutaway's fact, `Infinity` everywhere everything is on show. The pick
+   * tests the ray against the topmost surface *below* this, so a tap lands
+   * on what the child can see and never on a floor the fade has removed.
+   */
+  private readonly visibleCeiling: () => number;
+
   constructor(
-    private readonly player: Player,
-    private readonly camera: IsoCamera,
-    private readonly input: InputSystem,
-    private readonly navGrid: NavGrid,
+    player: Player,
+    camera: IsoCamera,
+    input: InputSystem,
+    navGrid: NavGrid,
     /**
      * The height above which surfaces are hidden from the player — the castle
      * cutaway's fact, `Infinity` everywhere everything is on show. The pick
      * tests the ray against the topmost surface *below* this, so a tap lands
      * on what the child can see and never on a floor the fade has removed.
      */
-    private readonly visibleCeiling: () => number = () => Infinity,
-  ) {}
+    visibleCeiling: () => number = () => Infinity,
+  ) {
+    this.player = player;
+    this.camera = camera;
+    this.input = input;
+    this.navGrid = navGrid;
+    this.visibleCeiling = visibleCeiling;
+  }
 
   /** The tap marker's geometry. Add it to the scene once, at construction. */
   get group(): TapMarker['root'] {

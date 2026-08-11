@@ -20,13 +20,14 @@ import { PLAYER_RADIUS } from '../core/constants';
  * the numbers are shared.
  *
  * They live here, in their own module, rather than being exported from
- * `FoliageFade.ts`, for a blunt mechanical reason: the check scripts run under
- * Node's `--experimental-strip-types`, which is **strip-only** and rejects
- * TypeScript parameter properties. `FoliageFade`'s constructor uses them
- * (`private readonly scenery: Scenery`), so importing anything at all from that
- * file throws `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX` before a single constant
- * arrives. Splitting the tuning out is much the smaller change — the
- * alternative was rewriting a working constructor to suit a test runner.
+ * `FoliageFade.ts`, so a check script can read the numbers without importing
+ * the whole system (three.js, the scenery graph) behind a headless run. The
+ * original reason was sharper — `FoliageFade`'s constructor used a *parameter
+ * property*, which Node's type-stripping rejects, so importing that file at all
+ * threw `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`. That hazard is now gone repo-wide
+ * (`erasableSyntaxOnly` in `tsconfig.json` forbids parameter properties, so
+ * every file is import-safe on plain Node), but the split still earns its keep
+ * on import weight alone, so it stays.
  *
  * If you are about to "restore consistency" by folding these back into
  * `FoliageFade.ts`, that is the change this note is asking you not to make: it

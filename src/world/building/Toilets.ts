@@ -146,11 +146,18 @@ export class ToiletRoutine {
   /** 0 = fully lifted, 1 = fully covering. */
   private roofAmount = 0;
 
+  private readonly pan: PanParts;
+  private readonly basin: BasinParts;
+  private readonly roof: RoofParts;
+
   constructor(
-    private readonly pan: PanParts,
-    private readonly basin: BasinParts,
-    private readonly roof: RoofParts,
+    pan: PanParts,
+    basin: BasinParts,
+    roof: RoofParts,
   ) {
+    this.pan = pan;
+    this.basin = basin;
+    this.roof = roof;
     this.applyRoof();
   }
 

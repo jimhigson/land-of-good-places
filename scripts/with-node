@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+#
+# Run a command under a current Node (26+) — the version this repo requires and
+# CI pins. The cloud dev container ships an OLDER default `node` on PATH; this
+# repo's scripts run TypeScript natively (no bundler, no transpile), which needs
+# a modern Node, so put a current one in front of whatever you run:
+#
+#   scripts/with-node npm run check:park-boot
+#   scripts/with-node npm run build          # the whole check suite
+#   scripts/with-node node --version         # -> v26.x
+#
+# It uses the newest installed Node >= 26, installing the latest via nvm on first
+# use if none is present. Idempotent; safe in front of any npm/node invocation.
+#
+set -euo pipefail
+
+newest_node() {
+  # Newest installed v26+ across the nvm dirs this container might use.
+  ls -d /root/.nvm/versions/node/v*/bin "$HOME"/.nvm/versions/node/v*/bin 2>/dev/null \
+    | sed -E 's#.*/node/v([0-9]+)\..*#\1 &#' \
+    | awk '$1 >= 26 {print}' | sort -V | tail -1 | cut -d' ' -f2-
+}
+
+BIN="$(newest_node || true)"
+if [ -z "${BIN:-}" ] || [ ! -x "$BIN/node" ]; then
+  echo "with-node: no Node >= 26 found; installing the latest via nvm..." >&2
+  export NVM_DIR="${NVM_DIR:-/root/.nvm}"
+  for f in "$NVM_DIR/nvm.sh" /opt/nvm/nvm.sh /etc/profile.d/nvm.sh "$HOME/.nvm/nvm.sh"; do
+    # shellcheck disable=SC1090
+    [ -s "$f" ] && . "$f" && break
+  done
+  command -v nvm >/dev/null || { echo "with-node: nvm not available on this box" >&2; exit 1; }
+  nvm install node >&2   # 'node' = the latest release
+  BIN="$(newest_node || true)"
+fi
+
+[ -n "${BIN:-}" ] && [ -x "$BIN/node" ] || { echo "with-node: could not locate a Node >= 26 binary" >&2; exit 1; }
+
+export PATH="$BIN:$PATH"
+[ "$#" -gt 0 ] || { echo "with-node: node $("$BIN/node" --version) ready on PATH; give a command to run" >&2; exit 0; }
+exec "$@"

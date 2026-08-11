@@ -26,7 +26,11 @@ export class Loop {
   private fpsValue = 60;
   private running = false;
 
-  constructor(private readonly onTick: (tick: LoopTick) => void) {}
+  private readonly onTick: (tick: LoopTick) => void;
+
+  constructor(onTick: (tick: LoopTick) => void) {
+    this.onTick = onTick;
+  }
 
   start(): void {
     if (this.running) return;

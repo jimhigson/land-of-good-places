@@ -165,10 +165,16 @@ export class PointerControls {
   private lastTapX = 0;
   private lastTapY = 0;
 
+  private readonly canvas: HTMLCanvasElement;
+  private readonly options: PointerControlsOptions;
+
   constructor(
-    private readonly canvas: HTMLCanvasElement,
-    private readonly options: PointerControlsOptions,
-  ) {}
+    canvas: HTMLCanvasElement,
+    options: PointerControlsOptions,
+  ) {
+    this.canvas = canvas;
+    this.options = options;
+  }
 
   attach(): void {
     if (this.attached) return;

@@ -59,10 +59,16 @@ export class StairRide {
   private elapsed = 0;
   private running = false;
 
+  private readonly surfaces: WalkSurfaces;
+  private readonly hooks: StairRideHooks;
+
   constructor(
-    private readonly surfaces: WalkSurfaces,
-    private readonly hooks: StairRideHooks,
-  ) {}
+    surfaces: WalkSurfaces,
+    hooks: StairRideHooks,
+  ) {
+    this.surfaces = surfaces;
+    this.hooks = hooks;
+  }
 
   get active(): boolean {
     return this.running;

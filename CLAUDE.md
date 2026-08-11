@@ -38,6 +38,32 @@ non-compiling branch to `main` that way once.
 TypeScript is strict with `exactOptionalPropertyTypes: true`: optional
 properties must be **omitted**, never assigned `undefined`.
 
+### Use current runtimes; never an old-version-only flag
+
+The checks and `scripts/*.mts` run **straight on Node** — no bundler, no
+transpile step — so this repo tracks **current Node** (26+; CI pins it, and
+the cloud sandbox ships an older default, so install the latest and use it:
+`scripts/with-node`). Modern Node runs TypeScript by *stripping types*, with
+no flags. So two rules, and they are not style preferences — a violation
+either fails to run or only runs on a Node nobody should still be on:
+
+- **Erasable syntax only** (`erasableSyntaxOnly` is on, so `tsc` enforces
+  it). Everything that is not purely a type is banned: **parameter
+  properties** (`constructor(private x: T)` → declare the field and assign
+  `this.x = x`), `enum` (use a `const` object + a union type), `namespace`,
+  TS-only `import =`/`export =`, and experimental decorators. These are not
+  types, so type-stripping cannot erase them; they are also, uniformly, the
+  *older* way to write the same thing.
+- **Never add a flag that only exists on an old Node.**
+  `--experimental-transform-types` was the tell here: it makes an old Node
+  transpile the non-erasable syntax above, and **it was removed in Node 26**,
+  so a script carrying it dies with `bad option` on the runtime we actually
+  use. It is an anachronism. If code needs a transpile flag to run, the code
+  is wrong (see the rule above), not the runtime. The same goes for any flag
+  you reach for to paper over a new runtime rejecting old input: fix the
+  input. When a sandbox's bundled tools are too old, install the current
+  version rather than writing to the old one's quirks.
+
 ## Expanding the procedural generation
 
 `test/procgen/invariants.ts` proves the generated park is placed sanely — no

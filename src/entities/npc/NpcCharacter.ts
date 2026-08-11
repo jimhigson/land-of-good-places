@@ -123,15 +123,18 @@ export class NpcCharacter {
   /** Gait the script asked for, 0..1 — what makes scripted legs actually walk. */
   private scriptedGait = 0;
 
+  private readonly collision: CollisionWorld;
+
   constructor(
     avatar: NpcAvatar,
     driver: CharacterDriver,
-    private readonly collision: CollisionWorld,
+    collision: CollisionWorld,
     x: number,
     z: number,
     facing: number,
     name: string,
   ) {
+    this.collision = collision;
     this.avatar = avatar;
     this.driver = driver;
     this.name = name;

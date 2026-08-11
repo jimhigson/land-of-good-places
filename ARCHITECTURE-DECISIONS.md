@@ -9,6 +9,122 @@ sources you actually read.
 
 ---
 
+## Decision 12 — One joint search: plots and rides co-solve and backtrack for each other, round-robining across frames
+
+**Date:** 11 August 2026 · **Status:** decided; substrate built and unit-tested
+(`src/boot/coSolve.ts`, `test/coSolve.test.ts`), feature migration staged and
+**not yet wired into the live park** — see the migration path below.
+**Jim's ruling, verbatim:** *"The tracks and other features are not generated
+individually one at a time but as an overall problem space search across all
+features ... they should all solve at once and backtrack for each other by
+different features round robining so they run on different frames, naturally
+allowing them to backtrack so that another can take advantage — ie, a backtrack
+may be one possible move."* — given 11 August 2026, after the park train (grown
+by the generic rail solver) had to be held out of the inner park by hand
+(`train/route.ts`'s `PLAZA_INNER_FLOOR`) because it could not ask a stall to move
+and the stall could not know to leave it room.
+
+### What this supersedes, and what it keeps
+
+This extends **Decision 6**, it does not overturn it. Decision 6's two load-bearing
+rules **stay**: *nothing reserves space* (a system publishes what it actually
+solved; everyone else treats it as an obstacle), and *placement is
+generate-and-backtrack against real collisions*. What changes is the **scope of
+the backtracking and the order of the solve**:
+
+- **Decision 6 (today):** the layout is solved *first and whole*
+  (`parkLayout.ts` — a greedy, largest-first rejection sampler with whole-park
+  *restart* backtracking), frozen into an immutable `PARK_LAYOUT`, and then each
+  ride solves *strictly after it* in a fixed dependency order (layout → cruiser →
+  train → railRace; slide parallel), treating every plot as a fixed obstacle. A
+  ride backtracks its own joints (`rail/generate.ts`); **a ride can never move a
+  plot, and one ride can never move another.** The only cross-feature "backtrack"
+  is the sledgehammer of re-rolling the entire layout.
+
+- **Decision 12 (target):** the plots *and* the ride routes are **features of one
+  joint search**. They round-robin — each advances a slice at a time on
+  successive frames — against a shared, mutable configuration, and when one
+  cannot fit given what its neighbours have currently claimed, the engine
+  **withdraws a committed neighbour and asks it to try elsewhere**. The railway
+  making a stall step aside is now one legal move in the search, not something
+  the stall had to foresee.
+
+### The substrate (built)
+
+`src/boot/coSolve.ts` — `CoSolveEngine` over a shared `PlacementField`. It is the
+cooperative-backtracking layer the round-robin `SolveScheduler`'s own doc named as
+"the next layer ... a joint search over a shared configuration, a larger thing
+built on top of this." A `CoSolveFeature` searches (as a resumable generator, so
+it slices) for its own keep-out discs against everything committed *except its
+own*; a slice yields (still searching), returns (a candidate, re-checked against
+the field as it now stands and committed or retried on conflict), or throws
+`CoSolveUnsolvable` (nothing fits) — which backtracks a committed neighbour (its
+`blockers` hint, else the most-recently-committed) and restarts both.
+
+It is deterministic and frame-budget-independent by the same argument as the
+scheduler and `rail/generate.ts`: the order of `(feature, step)` turns is a
+function of step counts and the rotating cursor alone, never of the clock, so the
+configuration the search settles on is identical whether solved in one slice or
+ten thousand. Total backtracks are capped so a pathological seed fails loudly
+rather than hanging. Ten unit tests cover the round-robin, a *forced* backtrack
+(greedy order paints a feature into a corner), the `blockers` hint, identical
+results across frame budgets, "stops when asked", clean failure, and the cap.
+
+### The migration path (staged, because the blast radius is the whole park)
+
+`PARK_LAYOUT` is read by ~21 files — `paths.ts`, `Scenery.ts`, `poiGraph.ts`,
+`anchors.ts`, `building/layout.ts`, `Hotel.ts`, every ride solver, the lamp and
+tree scatters, and the reachability checks. The immutable-`PARK_LAYOUT`
+assumption is baked into hot caches (`plots()`, `plotGrid()`), and today's
+determinism contract (`candidateRng(hashString(id) ^ seed, restart)`, issue #241:
+"editing one entry cannot move another") is **deliberately traded** by this
+decision — the whole point is that one feature *can* now move another. So the
+migration is staged, each stage judged by `check:park` + `test:procgen`, which
+validate the *output* (they import modules normally; only `check:park-boot`
+exercises the sliced boot):
+
+1. **Substrate + tests.** `coSolve.ts`. *(done)*
+2. **Layout as features.** Re-express `parkLayout.ts`'s solve as a `CoSolveEngine`
+   run — each manifest entry a `CoSolveFeature` placing its own footprint disc —
+   producing the same `PARK_LAYOUT` shape (so no consumer changes). Per-feature
+   backtracking replaces whole-park restart. Consumers still read one settled,
+   frozen result.
+3. **Rides join the search.** Bring the ride routes in as features against the
+   *same* field, so a ride's `CoSolveUnsolvable` can back out a *plot*, not just
+   re-roll its own joints. This is where the train can ask a stall to move, and
+   where `PLAZA_INNER_FLOOR`-style hand-holds come out.
+4. **Drive it from the boot.** Replace `parkGeneration.ts`'s hand-wired
+   cruiser/train/slide phases with one `CoSolveEngine` the slice scheduler
+   drives, so the whole park is "solved at once, round-robining across frames",
+   and re-reconcile `check:park-boot`'s per-phase piece-count floors.
+
+Each stage compiles and ships green on its own; the park is never left half-
+migrated across a merge.
+
+### What it costs
+
+Parks change: co-solving *will* move plots from where the greedy solver put them,
+because moving a plot to admit a ride is now a move — so the canonical seed's park
+is not preserved byte-for-byte, and issue #241's "one entry can't move another"
+locality is gone by design. The joint search is a larger state space than any
+single solver's, so budgets (Decision 6 §2: generous, wall-clock-bounded) matter
+more, and the `blockers` heuristic is what keeps a real park settling in a handful
+of backtracks rather than exploring the cross-product. And `check:park-boot`'s
+"sliced equals straight-through" proof has to be re-established for the joint
+engine, on CI's Node — the local Node-22 loader deadlocks the boot harness's
+fire-and-forget-import polling, so that half is CI-validated.
+
+### What it unblocks
+
+The park stops needing hand-tuned keep-outs that encode "leave room for the thing
+that solves after me" — the `PLAZA_INNER_FLOOR` that rings the train outside the
+path network, the reserved-feeling clearances each ride carries. A feature that
+needs room asks for it in the search instead of a constant asserting it in
+advance, which is Decision 6's "nothing reserves space" finally made true for the
+*layout*, not just the rides.
+
+---
+
 ## Decision 11 — Routing is level-aware: nodes are *(cell, level)*, and a stair is an edge its own plan declares
 
 **Date:** 8 August 2026 · **Status:** decided and implemented (player routing);

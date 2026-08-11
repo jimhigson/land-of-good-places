@@ -502,11 +502,16 @@ export class Building implements GameSystem {
   private readonly point = new Vector3();
   private readonly tangent = new Vector3();
 
+  private readonly collision: CollisionWorld;
+  private readonly controls: InteriorControls;
+
   constructor(
-    private readonly collision: CollisionWorld,
+    collision: CollisionWorld,
     anchorPlots: AnchorPlots,
-    private readonly controls: InteriorControls,
+    controls: InteriorControls,
   ) {
+    this.collision = collision;
+    this.controls = controls;
     // ---------------------------------------------------------- the interior
     this.interiorRoot.name = 'the-big-building-inside';
     this.interiorRoot.position.set(INTERIOR_ORIGIN_X, BUILDING_BASE_Y, INTERIOR_ORIGIN_Z);

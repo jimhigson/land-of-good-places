@@ -92,13 +92,25 @@ const ROUND_PLATE_FRACTION = 0.75;
 
 /** A static walkable plate — a room floor, a mattress top, a sofa seat. */
 export class Plate implements MovingPlatform {
+  readonly surfaceY: number;
+  private readonly minX: number;
+  private readonly maxX: number;
+  private readonly minZ: number;
+  private readonly maxZ: number;
+
   constructor(
-    readonly surfaceY: number,
-    private readonly minX: number,
-    private readonly maxX: number,
-    private readonly minZ: number,
-    private readonly maxZ: number,
-  ) {}
+    surfaceY: number,
+    minX: number,
+    maxX: number,
+    minZ: number,
+    maxZ: number,
+  ) {
+    this.surfaceY = surfaceY;
+    this.minX = minX;
+    this.maxX = maxX;
+    this.minZ = minZ;
+    this.maxZ = maxZ;
+  }
 
   covers(x: number, z: number): boolean {
     return x >= this.minX && x <= this.maxX && z >= this.minZ && z <= this.maxZ;
@@ -180,10 +192,16 @@ export interface PropPlan {
 export class HotelProps {
   private readonly keepOuts: RoomKeepOut[] = [];
 
+  private readonly collision: CollisionWorld;
+  private readonly surfaces: WalkSurfaces;
+
   constructor(
-    private readonly collision: CollisionWorld,
-    private readonly surfaces: WalkSurfaces,
-  ) {}
+    collision: CollisionWorld,
+    surfaces: WalkSurfaces,
+  ) {
+    this.collision = collision;
+    this.surfaces = surfaces;
+  }
 
   /** The whole keep-out list, once the rooms are dressed. */
   get roomKeepOuts(): readonly RoomKeepOut[] {

@@ -114,10 +114,13 @@ export class Highlights implements GameSystem {
   private readonly rings: RainbowRings;
   private readonly sparks: RainbowSparks;
 
+  private readonly sources: HighlightSources;
+
   constructor(
     scene: Scene,
-    private readonly sources: HighlightSources,
+    sources: HighlightSources,
   ) {
+    this.sources = sources;
     this.group.name = 'highlights';
     this.material = createRainbowOutlineMaterial();
     this.ringGeometry = rainbowRingGeometry(RING_INNER, 1);

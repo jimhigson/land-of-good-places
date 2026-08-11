@@ -530,11 +530,16 @@ export class Player implements GameSystem {
    */
   railRaceRide: RiderPose | null = null;
 
+  private readonly collision: CollisionWorld;
+  private readonly camera: IsoCamera;
+
   constructor(
-    private readonly collision: CollisionWorld,
-    private readonly camera: IsoCamera,
+    collision: CollisionWorld,
+    camera: IsoCamera,
     spawn: Vector3,
   ) {
+    this.collision = collision;
+    this.camera = camera;
     this.group.name = 'player';
 
     const playerState = gameStore.get().player;

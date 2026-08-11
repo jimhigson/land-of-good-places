@@ -2,7 +2,7 @@
  * **Can you actually see the critter hoods' faces?**
  *
  * ```
- * node --experimental-strip-types \
+ * node \
  *      --import ./scripts/ts-extension-resolver-register.mjs \
  *      scripts/check-hood-face.mts
  * ```

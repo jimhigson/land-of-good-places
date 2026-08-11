@@ -22,10 +22,19 @@ permissions:
   contents: read
 
 jobs:
+  # Two parallel jobs rather than one. They used to run sequentially in a single
+  # 20-minute budget — `test:procgen` first, then the full `npm run build` — and
+  # once the train started solving with the generic rail search (a ~1.5 s solve
+  # that every park-building check now pays, up from ~40 ms) the two together
+  # crept past 20 minutes on a slow runner: `test:procgen` alone ate ~5 of the
+  # 20, starving the build. Splitting them gives each its own runner and its own
+  # budget, halves the wall clock, and makes a failure read plainly as "an
+  # invariant broke" vs "a check broke". They each do their own `npm ci`; the
+  # extra install is cheap next to what it unblocks.
   invariants:
     name: Procgen invariants
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -33,7 +42,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
 
       - name: Install dependencies
@@ -41,13 +50,31 @@ jobs:
         # reasoning as deploy.yml.
         run: npm ci --fetch-retries=5 --fetch-retry-maxtimeout=120000
 
-      # Runs first and on its own, so a failure reads as "an invariant broke"
-      # rather than being buried in the build log. Six parks, a few seconds.
+      # The invariant suite on its own, so a failure reads as "an invariant
+      # broke" rather than being buried in the build log.
       - name: Procgen invariant suite
         run: npm run test:procgen
 
-      # The full gate, which includes `check:park`'s six invariants and the
-      # ratchet on the canonical seed. Kept in the same job because it shares
-      # the npm install and still finishes well inside the timeout.
+  build:
+    name: Build and checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --fetch-retries=5 --fetch-retry-maxtimeout=120000
+
+      # The full gate: `tsc`, every `check:*` (including `check:park`'s six
+      # invariants and the canonical-seed ratchet, and `check:park-boot`), and
+      # `vite build`. Heavier since the generic train solve, so it gets the whole
+      # budget to itself with headroom.
       - name: Build
         run: npm run build

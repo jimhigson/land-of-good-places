@@ -39,7 +39,6 @@ function timeSeedInChild(seed: number): { ms: number; length: number; ok: boolea
   const result = spawnSync(
     process.execPath,
     [
-      '--experimental-transform-types',
       '--no-warnings',
       '--import',
       './scripts/ts-extension-resolver-register.mjs',

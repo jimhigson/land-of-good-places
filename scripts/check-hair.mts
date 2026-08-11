@@ -2,7 +2,7 @@
  * **Is the hair still one piece, and still off her face and out of her hands?**
  *
  * ```
- * node --experimental-strip-types \
+ * node \
  *      --import ./scripts/ts-extension-resolver-register.mjs \
  *      scripts/check-hair.mts
  * ```

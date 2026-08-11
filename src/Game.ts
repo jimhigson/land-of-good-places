@@ -182,6 +182,8 @@ export class Game {
   private readonly lookPause = new OverlayPause();
   /** Every sign in the park, as a selectable zone. Built once: signs do not move. */
 
+  private readonly uiRoot: HTMLElement;
+
   constructor(
     /**
      * The renderer, the scene and the canvas sizing — built by the **caller**,
@@ -200,9 +202,10 @@ export class Game {
     // Kept as a field (not just a constructor-local) for `applyLiveLook`,
     // which needs somewhere to mount the "Look" pill's `CharacterCreation`
     // overlay long after the constructor has returned.
-    private readonly uiRoot: HTMLElement,
+    uiRoot: HTMLElement,
     options: GameOptions = {},
   ) {
+    this.uiRoot = uiRoot;
     this.engine = engine;
     const canvas = engine.canvas;
     this.camera = new IsoCamera();

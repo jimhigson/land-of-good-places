@@ -77,10 +77,16 @@ export class InteractRouter implements GameSystem {
    * @param selection Where a press goes when nothing claims it — which is
    *   almost always, and is the case issue #122 is about.
    */
+  private readonly claims: readonly InteractClaim[];
+  private readonly selection: Selection;
+
   constructor(
-    private readonly claims: readonly InteractClaim[],
-    private readonly selection: Selection,
-  ) {}
+    claims: readonly InteractClaim[],
+    selection: Selection,
+  ) {
+    this.claims = claims;
+    this.selection = selection;
+  }
 
   update(context: FrameContext): void {
     if (!context.input.takeInteractPress()) return;

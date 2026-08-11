@@ -148,7 +148,6 @@ function runChild(seed: number, withWorld: boolean): Promise<SeedResult> {
     execFile(
       process.execPath,
       [
-        '--experimental-transform-types',
         '--no-warnings',
         '--import',
         './scripts/ts-extension-resolver-register.mjs',

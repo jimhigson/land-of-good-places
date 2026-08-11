@@ -33,11 +33,13 @@ const TYPEABLE_CODES = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'KeyF', 'KeyI', 
  * field inside an iframe.
  */
 class FakeNode extends EventTarget {
-  constructor(
-    readonly tagName: string,
-    readonly isContentEditable = false,
-  ) {
+  readonly tagName: string;
+  readonly isContentEditable: boolean;
+
+  constructor(tagName: string, isContentEditable = false) {
     super();
+    this.tagName = tagName;
+    this.isContentEditable = isContentEditable;
   }
 }
 

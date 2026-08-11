@@ -34,7 +34,7 @@
  * routes both, proven by fingerprint, so this is the same work measured
  * cheaper, not different work. Re-measure with:
  *
- *     node --experimental-transform-types --no-warnings \
+ *     node --no-warnings \
  *       --import ./scripts/ts-extension-resolver-register.mjs \
  *       scripts/measure-procgen.mts --no-world
  *
@@ -69,7 +69,16 @@ const STAGES: readonly Stage[] = [
   { stage: 'boundary', load: () => import('../src/world/boundary.ts'), measuredMs: 54 },
   { stage: 'layout', load: () => import('../src/world/parkLayout.ts'), measuredMs: 9 },
   { stage: 'cruiser', load: () => import('../src/world/coaster/plan.ts'), measuredMs: 788 },
-  { stage: 'train', load: () => import('../src/world/train/plan.ts'), measuredMs: 41 },
+  // Re-derived 11 August 2026: the train no longer solves a bespoke ~41 ms
+  // radius-per-bearing profile — it grows its loop with the generic rail
+  // generator (so it respects turns and dodges stalls), which is a real search
+  // in the ~1.5 s class of the cruiser. Same category, same reason its budget is
+  // large: the runtime cost is sliced over the cat-bus ride (`train/prewarm.ts`,
+  // driven by the slice scheduler), so this cold module-load figure is what the
+  // budget's 8x absorbs, exactly as the cruiser's 788 ms is. Back-derived from a
+  // 2.6x-slow CI-class box that timed the cruiser at 2066 ms (ref 788) and the
+  // train at 3875 ms, i.e. ~1490 ms at reference speed.
+  { stage: 'train', load: () => import('../src/world/train/plan.ts'), measuredMs: 1500 },
   { stage: 'slide', load: () => import('../src/world/slide/plan.ts'), measuredMs: 4070 },
   { stage: 'railRace', load: () => import('../src/world/railRace/plan.ts'), measuredMs: 13 },
   { stage: 'paths', load: () => import('../src/world/paths.ts'), measuredMs: 12 },

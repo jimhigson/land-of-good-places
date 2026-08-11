@@ -53,7 +53,11 @@ export class HotelLift implements LiftPanelSource {
   private readonly step = { fromX: 0, fromZ: 0, toX: 0, toZ: 0, y: 0 };
   private travelled = false;
 
-  constructor(private readonly deps: HotelLiftDeps) {}
+  private readonly deps: HotelLiftDeps;
+
+  constructor(deps: HotelLiftDeps) {
+    this.deps = deps;
+  }
 
   // -------------------------------------------------------------- the seam
 

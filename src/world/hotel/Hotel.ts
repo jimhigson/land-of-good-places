@@ -448,15 +448,31 @@ export interface HotelDeps {
  * what a step of a spiral stair *is*.
  */
 class ArcTread implements MovingPlatform {
+  readonly surfaceY: number;
+  private readonly centreX: number;
+  private readonly centreZ: number;
+  private readonly innerRadius: number;
+  private readonly outerRadius: number;
+  private readonly fromAngle: number;
+  private readonly toAngle: number;
+
   constructor(
-    readonly surfaceY: number,
-    private readonly centreX: number,
-    private readonly centreZ: number,
-    private readonly innerRadius: number,
-    private readonly outerRadius: number,
-    private readonly fromAngle: number,
-    private readonly toAngle: number,
-  ) {}
+    surfaceY: number,
+    centreX: number,
+    centreZ: number,
+    innerRadius: number,
+    outerRadius: number,
+    fromAngle: number,
+    toAngle: number,
+  ) {
+    this.surfaceY = surfaceY;
+    this.centreX = centreX;
+    this.centreZ = centreZ;
+    this.innerRadius = innerRadius;
+    this.outerRadius = outerRadius;
+    this.fromAngle = fromAngle;
+    this.toAngle = toAngle;
+  }
 
   covers(x: number, z: number): boolean {
     const dx = x - this.centreX;
@@ -766,13 +782,22 @@ export class Hotel implements GameSystem {
   private readonly facadeX: number;
   private readonly facadeZ: number;
 
+  private readonly collision: CollisionWorld;
+  private readonly controls: InteriorControls;
+  private readonly surfaces: WalkSurfaces;
+  private readonly deps: HotelDeps;
+
   constructor(
-    private readonly collision: CollisionWorld,
+    collision: CollisionWorld,
     anchorPlots: AnchorPlots,
-    private readonly controls: InteriorControls,
-    private readonly surfaces: WalkSurfaces,
-    private readonly deps: HotelDeps,
+    controls: InteriorControls,
+    surfaces: WalkSurfaces,
+    deps: HotelDeps,
   ) {
+    this.collision = collision;
+    this.controls = controls;
+    this.surfaces = surfaces;
+    this.deps = deps;
     // ------------------------------------------------------------ the tower
     const plot = placedEntry('hotel');
     this.facadeX = plot.x;

@@ -371,8 +371,8 @@ const BRIDGE_RISE = TRAIN_CLEARANCE_Y + BRIDGE_DECK_DEPTH;
  *
  * This constant is **named in the failure message and was never defined** —
  * `scripts/` is outside `tsconfig.json`'s `include`, so nothing typechecked it,
- * and the script runs under `node --experimental-transform-types`, which does
- * not care either. The message only renders when a violation is found and the
+ * and the script runs straight on Node, which strips the types without
+ * checking them, so it does not care either. The message only renders when a violation is found and the
  * measured count has always been 0, so the `ReferenceError` sat here unfired:
  * the first genuinely illegal crossing would have crashed the checker with a
  * stack trace instead of reporting the finding. Found while starting #116,

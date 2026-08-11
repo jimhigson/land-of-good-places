@@ -9,7 +9,7 @@
  * and nobody did.
  *
  * ```
- * node --experimental-strip-types \
+ * node \
  *      --import ./scripts/ts-extension-resolver-register.mjs \
  *      scripts/measure-hop-clearance.mts
  * ```
