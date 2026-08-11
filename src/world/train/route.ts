@@ -7,7 +7,7 @@ import { PARK_LAYOUT } from '../parkLayout';
 import { terrainHeight } from '../terrain';
 import { PARK_SEED } from '../parkManifest';
 import { type Pose2, type SegmentKind, type Vec2, turnVocabulary } from '../rail/segments';
-import { railRouteSearch, solveRailRoute, type RouteBrief, type SolvedRailRoute } from '../rail/generate';
+import { railRouteSearch, RailRouteUnsolvable, type RouteBrief, type SolvedRailRoute } from '../rail/generate';
 import { TRAIN_MIN_TURN_RADIUS } from './turning';
 import { takePrewarmedTrain } from './prewarm';
 
@@ -80,7 +80,21 @@ const TRACK_PLOT_CLEARANCE = 4.2;
 const CORRIDOR_RADIUS = 1.8;
 
 /** How close the loop may come to an earlier part of itself. */
-const SELF_CLEARANCE = 4;
+const SELF_CLEARANCE = 3;
+
+/**
+ * The loop lengths tried, as fractions of the rim perimeter, **largest first**.
+ *
+ * The train wants to ring the park near the rim, so the search aims big first;
+ * but a full-perimeter loop is over-constrained on a pinched or densely-plotted
+ * seed — measured, it exhausted every start pose with a wall of boundary and
+ * self-clearance rejections on seeds 2, 5, 11 and 18. So this is the train's
+ * equivalent of the slide's `DESIRED_LENGTH_LADDER` and the cruiser's escalation:
+ * a rung that cannot close hands off to a shorter, slacker one, which sits
+ * further inside the rim but always has room to solve. A loop shorter than
+ * these still avoids everything — it just rings less of the park.
+ */
+const TRAIN_LENGTH_FRACTIONS: readonly number[] = [0.62, 0.5, 0.4, 0.32];
 
 /**
  * How far inside the wall the ring of candidate start poses sits — the modern
@@ -90,8 +104,8 @@ const SELF_CLEARANCE = 4;
  */
 const RIM_STANDOFF = 3.35;
 
-/** Bearings of candidate start poses spread round the rim. */
-const START_POSES = 60;
+/** Bearings of candidate start poses spread round the rim. More is more attempts. */
+const START_POSES = 96;
 
 /**
  * The pieces the train is built from. {@link TRAIN_MIN_TURN_RADIUS} lives in the
@@ -149,8 +163,15 @@ function trainObstacles(): Obstacle[] {
   return out;
 }
 
-/** The brief the train's loop is searched from, built from the layout alone. */
-function buildTrainBrief(): RouteBrief {
+/** Everything the ladder's briefs share — the obstacle field, boundary and poses. */
+interface TrainContext {
+  readonly clear: (x: number, z: number, radius: number) => boolean;
+  readonly startPoses: readonly Pose2[];
+  readonly perimeter: number;
+}
+
+/** Builds the shared search context from the layout alone (obstacles + rim poses). */
+function buildTrainContext(): TrainContext {
   const obstacles = trainObstacles();
   const ox = Float64Array.from(obstacles, (o) => o.x);
   const oz = Float64Array.from(obstacles, (o) => o.z);
@@ -176,8 +197,8 @@ function buildTrainBrief(): RouteBrief {
   };
 
   // Candidate start poses spread round the rim, each heading along it, so the
-  // search grows a big park-circling loop rather than a knot in the middle. A
-  // pose inside a plot simply has no legal first piece and the search moves on.
+  // search grows a park-circling loop rather than a knot in the middle. A pose
+  // inside a plot simply has no legal first piece and the search moves on.
   const rim: { x: number; z: number }[] = [];
   for (let i = 0; i < START_POSES; i += 1) {
     const angle = (i / START_POSES) * TAU;
@@ -198,36 +219,68 @@ function buildTrainBrief(): RouteBrief {
     return { x: p.x, z: p.z, hx: hx / m, hz: hz / m };
   });
 
-  const brief: RouteBrief = {
-    seed: PARK_SEED ^ 0x7241,
+  return { clear, startPoses, perimeter };
+}
+
+/** One ladder rung's brief: the shared context aimed at a particular length. */
+function briefForLength(context: TrainContext, desiredLength: number, salt: number): RouteBrief {
+  return {
+    seed: PARK_SEED ^ 0x7241 ^ salt,
     vocabulary: TRAIN_VOCABULARY,
-    // The rim perimeter is the natural size of a loop that rings the park; the
-    // solver aims for it and closes around there.
-    desiredLength: perimeter,
+    desiredLength,
     closed: true,
-    startPoses,
-    clear: (x, z, radius) => clear(x, z, radius),
+    startPoses: context.startPoses,
+    clear: context.clear,
     boundary: PARK_BOUNDARY,
     corridorRadius: CORRIDOR_RADIUS,
     selfClearance: SELF_CLEARANCE,
     minRadius: TRAIN_MIN_TURN_RADIUS,
-    budgets: { perJoint: 16, restarts: startPoses.length },
+    budgets: { perJoint: 16, restarts: context.startPoses.length },
   };
-  return brief;
 }
 
 /**
  * **The train's loop search, as a generator — the sliceable cadence.**
  *
  * `boot/parkGeneration.ts`'s slice scheduler drives this a joint at a time behind
- * the cat bus, so the ~1.1 s search is spread over the ride's frames rather than
+ * the cat bus, so the ~1.5 s search is spread over the ride's frames rather than
  * blocking one, and hands the finished loop to `train/prewarm.ts`. It is the same
  * relationship `railRouteSearch` has with `solveRailRoute`: identical route
  * whatever the cadence, because the whole search lives in the generator's own
  * locals (see `rail/generate.ts`).
+ *
+ * **It walks the length ladder** ({@link TRAIN_LENGTH_FRACTIONS}): the biggest
+ * rim loop first, falling back to a shorter, slacker one when a rung exhausts
+ * every start pose — the same escalation the slide and cruiser use, and what
+ * keeps the park building on the pinched/dense seeds a single fixed length
+ * cannot close (seeds 2, 5, 11, 18). Only if *every* rung fails does the park
+ * fail, loudly, with the last rung's diagnostic — exactly as before.
  */
-export function trainRouteSearch(): Generator<number, SolvedRailRoute, void> {
-  return railRouteSearch(buildTrainBrief());
+export function* trainRouteSearch(): Generator<number, SolvedRailRoute, void> {
+  const context = buildTrainContext();
+  let lastFailure: RailRouteUnsolvable | null = null;
+  for (let i = 0; i < TRAIN_LENGTH_FRACTIONS.length; i += 1) {
+    const fraction = TRAIN_LENGTH_FRACTIONS[i] as number;
+    // A distinct seed salt per rung, so a shorter fallback explores differently
+    // rather than re-walking the longer rung's dead ends at a new length.
+    const brief = briefForLength(context, context.perimeter * fraction, (i + 1) * 0x1000);
+    try {
+      return yield* railRouteSearch(brief);
+    } catch (error) {
+      if (!(error instanceof RailRouteUnsolvable)) throw error;
+      lastFailure = error;
+    }
+  }
+  throw lastFailure ?? new Error('train route: the length ladder was empty');
+}
+
+/** Drives {@link trainRouteSearch} straight through — the non-pre-warmed cadence. */
+function solveTrainLoop(): SolvedRailRoute {
+  const search = trainRouteSearch();
+  for (;;) {
+    const step = search.next();
+    if (step.done) return step.value;
+  }
 }
 
 /** The solved loop, and everything the train and the stations ask of it. */
@@ -248,8 +301,8 @@ export class TrainRoute {
     // The loop `boot/parkGeneration.ts` already searched a slice at a time behind
     // the cat bus, if there is one; otherwise solve it straight through — the path
     // `check:park`, `test:procgen` and a continued save all take, none of which
-    // pre-warm. Either way it is one search from one brief.
-    this.solved = takePrewarmedTrain() ?? solveRailRoute(buildTrainBrief());
+    // pre-warm. Either way it is the same ladder walk.
+    this.solved = takePrewarmedTrain() ?? solveTrainLoop();
     this.length = this.solved.length;
 
     // A lookup table for "where along the loop is this point?" — used to place
