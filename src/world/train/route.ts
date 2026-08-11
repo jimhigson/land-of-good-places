@@ -108,15 +108,31 @@ const RIM_STANDOFF = 3.35;
 const START_POSES = 96;
 
 /**
- * How far the loop stays clear of the plaza's heart (the fountain), in metres —
- * the modern reading of the old polar solver's `INNER_FLOOR = 20`. Without it the
- * generic search, knowing only "avoid obstacles, stay inside the wall", is free
- * to dip a loop up to the fountain's own keep-out and seal off a pocket of garden
- * between the loop and the plaza. Keeping it out past this leaves the inner park
- * plaza-side and connected, and keeps the railway ringing the park rather than
- * cutting across its middle.
+ * How far the loop stays clear of the plaza's heart, in metres — and with it,
+ * clear of the whole inner path network the plaza anchors.
+ *
+ * The generic search knows only "avoid these obstacle discs, stay inside the
+ * wall", so left to itself it dips a short loop into the r ≈ 15–37 band where
+ * the ring road and its spurs live (`paths.ts`'s `solveRing`, capped 30 m off
+ * the plaza). It does not *cross* a path there — it runs *alongside* one, and a
+ * rail whose exclusion fence pinches a paved lane against nothing walkable
+ * strands that lane's own waypoint samples off the graph. That is exactly what
+ * seed 20260728 did: the loop grazed a ring-road sample at (-24, 24) — 1.3 m
+ * off the centre line — and `check:park` reported one waypoint nobody could
+ * walk to.
+ *
+ * Paths solve *after* the train (Decision 6), so the train cannot read the ring
+ * as an obstacle. But the ring is a pure function of the plaza and the plots,
+ * both known here, and it never reaches more than ~29 m from the plaza (its own
+ * `highCap`). So keeping the loop this far out clears the ring's whole envelope
+ * plus a fence and a walkable lane, everywhere, without coupling to the ring's
+ * exact per-bearing shape: the railway rings the park *outside* the path
+ * network, the way the old rim-hugging polar solver did (0 rail crossings, all
+ * waypoints connected), rather than threading through its middle. Measured to
+ * hold on the canonical seed and the four sweep seeds; a value this large has
+ * room because the plaza sits in open lawn on every seed the manifest allows.
  */
-const PLAZA_INNER_FLOOR = 18;
+const PLAZA_INNER_FLOOR = 26;
 
 /**
  * The pieces the train is built from. {@link TRAIN_MIN_TURN_RADIUS} lives in the
