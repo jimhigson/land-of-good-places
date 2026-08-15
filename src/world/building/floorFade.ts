@@ -118,6 +118,7 @@ function applyFade(layer: FloorLayer): void {
     const material = layer.materials[i];
     if (!material) continue;
     const base = layer.baseOpacity[i] ?? 1;
+    const wasTransparent = material.transparent;
     if (amount >= 0.998) {
       material.opacity = base;
       material.transparent = layer.baseTransparent[i] ?? false;
@@ -127,5 +128,16 @@ function applyFade(layer: FloorLayer): void {
       material.transparent = true;
       material.depthWrite = false;
     }
+    // **`transparent` is a shader define, not a uniform.** `opacity` alone is
+    // picked up every frame, but turning `transparent` on after a material has
+    // compiled needs a recompile, and without it three.js keeps drawing the
+    // opaque program: the deck stays solid on screen while every number on the
+    // material says it is a ghost. That is precisely what QA measured in the
+    // imperial lobby — she painted 0.4% of her own silhouette under the arch
+    // against 29-37% in the open, with 420 of the group's 436 materials still
+    // at `version` 1, and the 16 that *did* look right being the ones some
+    // other code had already dirtied. Flagged only on the frame the flag
+    // actually changes, so the ordinary case costs nothing.
+    if (material.transparent !== wasTransparent) material.needsUpdate = true;
   }
 }

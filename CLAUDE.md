@@ -292,14 +292,25 @@ a backpack rule four of five shapes obeyed, three disagreeing exhibit lists.
 not a mechanism, and the copy is always found wrong by a child rather than by a
 check. The next section is the worked example.
 
-## Anything that looks solid must be solid
+## Anything that looks solid and is reachable must be solid
 
 **A mesh a child can see and lean on has a collider that covers it, from every
-approach.** Nothing derives a collider from a mesh, so the two are only ever
-kept together on purpose — and a mesh whose collider has a hole in it is the
-same disease as a check that cannot fail: it reads correctly, renders
-correctly, screenshots correctly, and is wrong only when somebody walks
-through it.
+approach she can get to.**
+
+**Reachable is wider than "walkable", and the jet pack is why** (Jim, 15 August
+2026). Outdoors she can fly: a roof, a ledge, the top of a wall, the side of a
+tower six metres up — anything the pack can carry her to is somewhere she will
+land on, so it needs a collider as much as a doorway does. Ask "can she get
+there by walking, jumping, hopping, riding or *flying*?", and only the honestly
+unreachable — a mesh sealed inside another, geometry outside the play bounds,
+the far side of a portal wall — is exempt. A probe that marches a walker at
+ground level answers a smaller question than the game asks; where the pack can
+fly, probe from the air too.
+
+Nothing derives a collider from a mesh, so the two are only ever kept together
+on purpose — and a mesh whose collider has a hole in it is the same disease as
+a check that cannot fail: it reads correctly, renders correctly, screenshots
+correctly, and is wrong only when somebody walks through it.
 
 Jim, playing, 9 August 2026: *"The hotel building is not solid. I can walk
 straight through it."* The tower's collision was a ring of eight chords built
