@@ -1602,16 +1602,28 @@ for (const room of ROOMS) {
   }
 }
 
-// ------------------------- 21. the suite has a bathroom with the manners
+// ------------------- 21. every floor has a bathroom with the manners
 //
-// Jim, 8 Aug 2026: *"Add a bathroom using the models and rules from the
-// bathroom in the other big building."* The castle's rules
-// (`building/Toilets.ts`, from GAME_DESIGN.md): the pan and basin are the
-// shared factories, using one is the two-beat flush-then-wash routine, and a
-// **privacy roof** slides over the room while she is in it and lifts at the
-// wash beat — on before she is out of sight, never able to trap her. The
-// suite's bathroom reuses those exact owners; this probe checks the built
-// result behaves like the castle's:
+// Jim, 8 Aug 2026, of the suite's own: *"Add a bathroom using the models and
+// rules from the bathroom in the other big building."* Issue #272 widened
+// that to every floor: *"every floor needs a bathroom with a toilet, reusing
+// the castle's toilet code."* The castle's rules (`building/Toilets.ts`, from
+// GAME_DESIGN.md): the pan and basin are the shared factories, using one is
+// the two-beat flush-then-wash routine, and a **privacy roof** slides over
+// the room while she is in it and lifts at the wash beat — on before she is
+// out of sight, never able to trap her.
+//
+// This probe walks `hotel.bathroomRooms` — the hotel's own list, not a copy
+// of it (CLAUDE.md's "one owner; everyone else asks") — so a floor that gains
+// a `dress*` method without a bathroom, or loses the one it had, is a probe
+// failure rather than a silent gap. The one exception is deliberate:
+// `CORRIDOR` (Floor 50) has no rectangle left for a nook of its own (see
+// `Hotel.dressCorridor`'s comment — the room is 8 m deep, both crystal
+// clusters and the statue row already claim the east wall, and the middle is
+// `marchAtSuiteDoor`'s own straight probe to the "yours" door), so this
+// probe accepts the suite's bathroom, one door down the same corridor and
+// answering to the same "Yours! · Floor 50" lift button, in its place. For
+// every floor it checks the built result behaves like the castle's:
 //  * the pan and basin are solid (place.ts registered them), the pan
 //    mountable like any low flat-topped prop;
 //  * a bathroom zone exists, offers a real action, and its stand spot is
@@ -1619,80 +1631,104 @@ for (const room of ROOMS) {
 //  * a player standing in the bathroom is covered by the roof, and the wash
 //    beat lifts it while she is still inside.
 {
-  const bathX = SUITE.originX - 7.8;
-  const bathZ = SUITE.originZ + 4.6;
-  if (deflection(bathX, bathZ) < 0.1) {
-    problems.push('the suite bathroom pan is not solid — a child walks straight through it');
-  }
-  if (deflection(SUITE.originX - 9.7, SUITE.originZ + 2.45) < 0.1) {
-    problems.push('the suite bathroom basin is not solid — a child walks straight through it');
-  }
-  const atopPan = deflectionAt(bathX, 0.75, bathZ);
-  if (atopPan > 0.01) {
+  const bathroomRooms = hotel.bathroomRooms;
+  // Every floor a child can actually reach with the lift must lead to a
+  // bathroom — but CORRIDOR and SUITE are one floor by the lift's own
+  // reckoning (both answer to "Yours! · Floor 50"), so CORRIDOR is covered
+  // if SUITE has one, without needing a rectangle of its own.
+  const coveredFloors = HOTEL_FLOORS.filter(
+    (floor) =>
+      bathroomRooms.includes(floor.room) ||
+      (floor.room === CORRIDOR && bathroomRooms.includes(SUITE)),
+  );
+  if (coveredFloors.length < HOTEL_FLOORS.length) {
+    const missing = HOTEL_FLOORS.filter((floor) => !coveredFloors.includes(floor));
     problems.push(
-      `the suite bathroom pan pushes a child stood on its top ${atopPan.toFixed(2)} m sideways — ` +
-        'solid and standable are fighting (place.ts)',
+      `${missing.length} of ${HOTEL_FLOORS.length} hotel floors have no bathroom reachable ` +
+        `from them at all: ${missing.map((floor) => floor.name).join(', ')}`,
     );
   }
 
-  hotel.attachPlayer(fallenPlayer as never);
-  fallenPlayer.position.set(SUITE.originX - 7.6, 0, SUITE.originZ + 4.8);
-  hotel.adoptRestoredPlayer();
-  const bathroomZone = hotel.interactZones().find((zone) => zone.id === 'hotel-bathroom');
-  if (!bathroomZone) {
-    problems.push('the suite offers no bathroom zone at all — nothing to tap, no routine to run');
-  } else {
+  for (const room of bathroomRooms) {
+    const fixtures = hotel.bathroomFixtures(room);
+    if (!fixtures) {
+      problems.push(`${room.space}: bathroomRooms lists it but bathroomFixtures returns nothing`);
+      continue;
+    }
+    const { pan, basin } = fixtures;
+    if (deflection(pan.x, pan.z) < 0.1) {
+      problems.push(`${room.space}'s bathroom pan is not solid — a child walks straight through it`);
+    }
+    if (deflection(basin.x, basin.z) < 0.1) {
+      problems.push(`${room.space}'s bathroom basin is not solid — a child walks straight through it`);
+    }
+    const atopPan = deflectionAt(pan.x, 0.75, pan.z);
+    if (atopPan > 0.01) {
+      problems.push(
+        `${room.space}'s bathroom pan pushes a child stood on its top ${atopPan.toFixed(2)} m ` +
+          'sideways — solid and standable are fighting (place.ts)',
+      );
+    }
+
+    hotel.attachPlayer(fallenPlayer as never);
+    fallenPlayer.position.set(pan.x, 0, pan.z);
+    hotel.adoptRestoredPlayer();
+    const bathroomZone = hotel
+      .interactZones()
+      .find((zone) => zone.id === `hotel-bathroom-${room.space}`);
+    if (!bathroomZone) {
+      problems.push(`${room.space} offers no bathroom zone at all — nothing to tap, no routine to run`);
+      continue;
+    }
     if ((bathroomZone.actions?.() ?? []).length === 0) {
-      problems.push('the bathroom zone offers no actions — its sign can never appear');
+      problems.push(`${room.space}'s bathroom zone offers no actions — its sign can never appear`);
     }
     if (
       bathroomZone.standX !== undefined &&
       bathroomZone.standZ !== undefined &&
       deflection(bathroomZone.standX, bathroomZone.standZ) > 0.01
     ) {
-      problems.push('the bathroom zone asks her to stand inside something solid');
+      problems.push(`${room.space}'s bathroom zone asks her to stand inside something solid`);
     }
 
     // The privacy roof, driven exactly as the game drives it: she stands in
     // the room, frames pass, the lid covers; the wash beat lifts it while
     // she is still there (the castle's rule, `building/Toilets.ts`).
-    const suiteShell = hotel.hotelRoot.children.find(
-      (child) => child.name === `hotel:${SUITE.space}`,
-    );
+    const roomShell = hotel.hotelRoot.children.find((child) => child.name === `hotel:${room.space}`);
     let roofGroup: { visible: boolean } | null = null;
-    suiteShell?.traverse((object) => {
+    roomShell?.traverse((object) => {
       if (object.name === 'toilet-roof') roofGroup = object;
     });
     if (!roofGroup) {
-      problems.push('the suite bathroom has no privacy roof — the castle rule it must honour');
-    } else {
-      const tick = (seconds: number): void => {
-        for (let i = 0; i < Math.ceil(seconds * 60); i += 1) {
-          hotel.update({ dt: 1 / 60, elapsed: i / 60 } as never);
-        }
-      };
-      tick(1.2);
-      if (!(roofGroup as { visible: boolean }).visible) {
-        problems.push(
-          'a child standing in the suite bathroom is not covered by the privacy roof — ' +
-            'the lid must lead her in',
-        );
+      problems.push(`${room.space}'s bathroom has no privacy roof — the castle rule it must honour`);
+      continue;
+    }
+    const tick = (seconds: number): void => {
+      for (let i = 0; i < Math.ceil(seconds * 60); i += 1) {
+        hotel.update({ dt: 1 / 60, elapsed: i / 60 } as never);
       }
-      const useAction = (bathroomZone.actions?.() ?? [])[0];
-      useAction?.run();
-      tick(3.0);
-      if ((roofGroup as { visible: boolean }).visible) {
-        problems.push(
-          'the privacy roof is still down after the wash beat — the lid must lift while she ' +
-            'washes her hands, not trap her',
-        );
-      }
-      // Out of the room: nothing remembered, the roof stays up.
-      fallenPlayer.position.set(SUITE.originX, 0, SUITE.originZ);
-      tick(1.0);
-      if ((roofGroup as { visible: boolean }).visible) {
-        problems.push('the privacy roof stayed on over an empty bathroom');
-      }
+    };
+    tick(1.2);
+    if (!(roofGroup as { visible: boolean }).visible) {
+      problems.push(
+        `a child standing in ${room.space}'s bathroom is not covered by the privacy roof — ` +
+          'the lid must lead her in',
+      );
+    }
+    const useAction = (bathroomZone.actions?.() ?? [])[0];
+    useAction?.run();
+    tick(3.0);
+    if ((roofGroup as { visible: boolean }).visible) {
+      problems.push(
+        `${room.space}'s privacy roof is still down after the wash beat — the lid must lift ` +
+          'while she washes her hands, not trap her',
+      );
+    }
+    // Out of the room: nothing remembered, the roof stays up.
+    fallenPlayer.position.set(room.originX, 0, room.originZ);
+    tick(1.0);
+    if ((roofGroup as { visible: boolean }).visible) {
+      problems.push(`${room.space}'s privacy roof stayed on over an empty bathroom`);
     }
   }
 }
