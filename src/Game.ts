@@ -406,22 +406,46 @@ export class Game {
       },
       // Pinching is the touch equivalent of the +/- keys, expressed in the same
       // units, so it lands in the camera's existing clamped zoom target.
-      onPinch: (delta) => this.camera.nudgeZoom(delta * CAMERA_ZOOM_STEP * 6),
+      //
+      // Guarded exactly like `onWheelZoom` below, for the same reason issue
+      // #282's fix introduced: `PointerControls` used to track pinch on the
+      // canvas alone, so a ride's `cameraOverride` and a mini-game's
+      // full-screen `.mg-layer` (`minigames/overlay.ts`, `pointer-events: auto`
+      // while `hidesPark`) *incidentally* kept pinch from ever seeing two
+      // fingers in either case — the touches simply never reached the canvas.
+      // Moving pinch to a window-level, capture-phase listener (so a finger
+      // resting on an ordinary HUD button no longer breaks it) removed that
+      // incidental protection too: two fingers resting on a mini-game's own
+      // hold pad, or on a ride's own on-screen stick, would otherwise still
+      // read as a pinch and silently drift `zoomTarget` until it jumps the
+      // moment the park camera comes back — the same failure mode
+      // `onWheelZoom`'s own `cameraOverride` guard exists to prevent, just
+      // reachable by touch now that pinch is not canvas-scoped. `hidesPark`
+      // (not the broader `active`) is the precise match for the window
+      // `.mg-layer` actually covers the screen: `active` also covers the
+      // curtain opening/closing, during which the transition renders to the
+      // park's own canvas and a pinch there always worked, before and after
+      // this guard.
+      onPinch: (delta) => {
+        if (this.cameraOverride || this.miniGames.hidesPark) return;
+        this.camera.nudgeZoom(delta * CAMERA_ZOOM_STEP * 6);
+      },
       // The wheel is the mouse equivalent of pinch (issue #242): same call,
       // same clamp, same damping — `nudgeZoom` is the one and only owner of
       // "how far you may zoom" and neither gesture may restate it. One notch
       // is defined as one keyboard `+`/`-` press's worth of zoom.
       //
-      // Guarded on `cameraOverride` (unlike `onPinch`, which needs no such
-      // guard: a pinch takes a finger actually resting on the glass, so it
-      // essentially never fires while a ride has taken the camera over, and
-      // touch has no scroll-wheel equivalent riding could fight anyway). A
-      // mouse wheel sits right under a hand that is otherwise idle while
-      // enjoying a ride, so without this a stray notch would fight the ride's
-      // own camera the moment it next let go — the camera on screen wouldn't
-      // visibly jump (the ride renders through `cameraOverride`, not
-      // `this.camera.camera`), but `zoomTarget` would have drifted underneath
-      // it for when the ride hands the camera back.
+      // Guarded on `cameraOverride` alone, unlike `onPinch` above: a mouse
+      // wheel notch's `event.target` is still whatever DOM element is
+      // topmost, so a mini-game's `.mg-layer` already keeps a wheel notch
+      // from ever reaching this file while `hidesPark` — the same thing that
+      // used to be true of pinch, before it moved off the canvas. A mouse
+      // wheel sits right under a hand that is otherwise idle while enjoying a
+      // ride, so without the `cameraOverride` guard a stray notch would fight
+      // the ride's own camera the moment it next let go — the camera on
+      // screen wouldn't visibly jump (the ride renders through
+      // `cameraOverride`, not `this.camera.camera`), but `zoomTarget` would
+      // have drifted underneath it for when the ride hands the camera back.
       onWheelZoom: (notches) => {
         if (this.cameraOverride) return;
         this.camera.nudgeZoom(notches * CAMERA_ZOOM_STEP);
