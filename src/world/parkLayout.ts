@@ -1,4 +1,5 @@
 import { candidateRng, hashString, Rng, TAU } from '../core/mathUtils';
+import { CAMERA_FACING_YAW } from '../core/constants';
 import {
   BOUNDARY_CLEARANCE,
   GATE_CORRIDOR_HALF_WIDTH,
@@ -60,9 +61,11 @@ export interface PlacedEntry {
   readonly entranceX: number;
   readonly entranceZ: number;
   /**
-   * Sign yaw. Always near +45° — the one angle the fixed camera can read
-   * (ARCHITECTURE.md, "One camera angle, forever") — with a little seeded
-   * variation so a row of signs does not read as billboards.
+   * Sign yaw. Exactly {@link CAMERA_FACING_YAW} (45°, "One camera angle,
+   * forever") — axis-aligned to the camera's own fixed diagonal, not an
+   * arbitrary per-plot rotation (issue #269: every previous build drew this
+   * from a random range, which put most signs off dead-on without any of
+   * them actually reading square to the camera).
    */
   readonly signYaw: number;
 }
@@ -146,14 +149,21 @@ function solve(): ParkLayout {
 }
 
 /**
- * The bearing a camera-facing entry's counter (and so its doormat) faces,
- * from its sign yaw. THE one owner of the formula — `stallPlacement.ts`
- * builds the booth with it and this file places the doormat with it, which
- * is exactly the pair that drifted apart before (two authorities for which
- * side of a booth is the front; reviewer finding 4 on PR #247).
+ * The bearing a camera-facing entry's counter (and so its doormat) faces.
+ * THE one owner of the formula — `stallPlacement.ts` builds the booth with
+ * it and this file places the doormat with it, which is exactly the pair
+ * that drifted apart before (two authorities for which side of a booth is
+ * the front; reviewer finding 4 on PR #247).
+ *
+ * Identity, deliberately (issue #269): `signYaw` is already
+ * {@link CAMERA_FACING_YAW}, the camera's own fixed diagonal, so the
+ * counter faces exactly that — no second, independently-tuned scale factor
+ * (this used to be `signYaw * 0.35`, which pointed the counter at a
+ * different, arbitrary angle from the sign sitting right above it) to drift
+ * out of step with the sign it stands beside.
  */
 export function counterFacing(signYaw: number): number {
-  return signYaw * 0.35;
+  return signYaw;
 }
 
 /** One candidate position, with the spread score it was chosen on. */
@@ -213,7 +223,12 @@ function buildOnce(restart: number): ParkLayout | null {
     // the doormat, the stand and the counter are one line by construction.
     // Everything else faces the park middle, the stable thing paths and the
     // camera both live by.
-    const signYaw = Math.PI * rng.range(0.2, 0.3);
+    //
+    // Every entry's sign — camera-facing or not — turns to exactly
+    // CAMERA_FACING_YAW (issue #269): axis-aligned to the camera's own fixed
+    // diagonal, not drawn from `rng`, so there is no per-seed rotation left
+    // to call "arbitrary."
+    const signYaw = CAMERA_FACING_YAW;
     let dirX: number;
     let dirZ: number;
     if (entry.cameraFacing) {

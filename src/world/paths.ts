@@ -219,67 +219,282 @@ function solveRing(): (readonly [number, number])[] {
       PLAZA.z + Math.sin(angle) * (profile[i] as number),
     ]);
   }
-  return points;
+  // The profile above still says "how far out, at this bearing" — a circle.
+  // issue #269 wants the *drawn* loop on grid axes, so the last step turns
+  // those 32 bearing samples into a closed axis-aligned polygon rather than
+  // tracing straight (generally diagonal) lines between them.
+  return toAxisAlignedLoop(points);
 }
 
 const TAU_PATH = Math.PI * 2;
 
 /**
- * Straight line from `from` to `to`, detouring around any blocker it clips:
- * the offending circle contributes a tangent-side waypoint, repeatedly,
- * until the polyline is clear. Greedy but bounded, and the ribbon curve
- * smooths the corners it leaves.
+ * The grid every trunk path segment steps along (issue #269: paths run on
+ * grid axes, never diagonally). Coarse enough that a route across the whole
+ * park is a few thousand cells; fine enough that a step under half
+ * `parkLayout.ts`'s `CORRIDOR_GAP` (5 m, the walkable gap the layout solver
+ * guarantees between any two plots) can always find that gap rather than
+ * stepping clean over it.
  */
-function routeAround(
+const ROUTE_GRID_STEP = 2;
+
+/** A walker's width either side of a route's centreline, kept clear of every
+ * blocker on top of the blocker's own already-inflated radius. */
+const ROUTE_WALKER_PAD = 0.9;
+
+/** How far past `from`/`to` the search may range, hunting for a way round —
+ * bigger than the largest single blocker (the castle, ~19 m across) so one
+ * detour always fits inside the halo rather than hitting its edge. */
+const ROUTE_SEARCH_HALO = 26;
+
+/** True if (x, z) is clear of every blocker by at least `pad` metres. */
+function blockerClearAt(x: number, z: number, pad: number): boolean {
+  for (const blocker of BLOCKERS) {
+    if (Math.hypot(x - blocker.x, z - blocker.z) < blocker.radius + pad) return false;
+  }
+  return true;
+}
+
+/** True if the straight segment (ax,az)-(bx,bz) stays clear of every blocker
+ * by at least `pad` metres — same closest-approach test as `rayToBlocker`,
+ * bounded to the segment rather than an infinite ray. */
+function segmentClearOfBlockers(ax: number, az: number, bx: number, bz: number, pad: number): boolean {
+  const dx = bx - ax;
+  const dz = bz - az;
+  const lengthSq = dx * dx + dz * dz;
+  for (const blocker of BLOCKERS) {
+    const t =
+      lengthSq > 1e-9
+        ? Math.max(0, Math.min(1, ((blocker.x - ax) * dx + (blocker.z - az) * dz) / lengthSq))
+        : 0;
+    const cx = ax + dx * t;
+    const cz = az + dz * t;
+    if (Math.hypot(blocker.x - cx, blocker.z - cz) < blocker.radius + pad) return false;
+  }
+  return true;
+}
+
+/** Minimal binary min-heap of grid-cell indices, ordered by `priority[i]`. */
+class MinHeap {
+  private readonly heap: number[] = [];
+  private readonly priority: Float64Array;
+  constructor(priority: Float64Array) {
+    this.priority = priority;
+  }
+
+  get size(): number {
+    return this.heap.length;
+  }
+
+  push(index: number): void {
+    this.heap.push(index);
+    let i = this.heap.length - 1;
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      if ((this.priority[this.heap[parent] as number] as number) <= (this.priority[this.heap[i] as number] as number))
+        break;
+      [this.heap[parent], this.heap[i]] = [this.heap[i] as number, this.heap[parent] as number];
+      i = parent;
+    }
+  }
+
+  pop(): number {
+    const top = this.heap[0] as number;
+    const last = this.heap.pop() as number;
+    if (this.heap.length > 0) {
+      this.heap[0] = last;
+      let i = 0;
+      for (;;) {
+        const left = i * 2 + 1;
+        const right = i * 2 + 2;
+        let smallest = i;
+        if (left < this.heap.length && (this.priority[this.heap[left] as number] as number) < (this.priority[this.heap[smallest] as number] as number))
+          smallest = left;
+        if (right < this.heap.length && (this.priority[this.heap[right] as number] as number) < (this.priority[this.heap[smallest] as number] as number))
+          smallest = right;
+        if (smallest === i) break;
+        [this.heap[i], this.heap[smallest]] = [this.heap[smallest] as number, this.heap[i] as number];
+        i = smallest;
+      }
+    }
+    return top;
+  }
+}
+
+/**
+ * Axis-aligned (Manhattan) route from `from` to `to`, threading the gaps
+ * between blockers on {@link ROUTE_GRID_STEP}'s grid via A* — every step is a
+ * single cell north, south, east or west of the last, so every edge of the
+ * returned polyline is purely horizontal or purely vertical (issue #269:
+ * paths run on grid axes, never diagonally). Replaces the old
+ * straight-line-plus-detour `routeAround`, which produced a diagonal leg
+ * whenever `from` and `to` were not already axis-aligned — which was always,
+ * since nothing else in the park is.
+ *
+ * The two true endpoints are kept exactly; only the interior of the route is
+ * grid-snapped, so a spur still lands precisely on a doormat or a branch
+ * point rather than on the nearest grid node to it. Both endpoints are
+ * themselves exempt from the blocker test, for the same reason the old
+ * `routeAround` exempted its destination: every spur's last couple of metres
+ * run into a plot mouth, and a junction point sits exactly where an earlier
+ * spur's search already proved clear.
+ */
+function manhattanRoute(
   from: readonly [number, number],
   to: readonly [number, number],
 ): (readonly [number, number])[] {
-  const points: [number, number][] = [[from[0], from[1]], [to[0], to[1]]];
-  for (let pass = 0; pass < 8; pass += 1) {
-    let changed = false;
-    for (let i = 0; i < points.length - 1 && !changed; i += 1) {
-      const a = points[i] as [number, number];
-      const b = points[i + 1] as [number, number];
-      const abx = b[0] - a[0];
-      const abz = b[1] - a[1];
-      const length = Math.hypot(abx, abz);
-      if (length < 1e-6) continue;
-      const dx = abx / length;
-      const dz = abz / length;
-      for (const blocker of BLOCKERS) {
-        // A segment ending inside the circle is arriving at a destination —
-        // every spur's last metres run into a plot mouth. Detouring that
-        // blocker would splice the same escape point forever (measured:
-        // seven copies of one point). Only the *far* endpoint can be inside
-        // a blocker: starts are junction points, kept outside every circle
-        // by `bestBranchPoint`.
-        if (Math.hypot(blocker.x - b[0], blocker.z - b[1]) < blocker.radius) continue;
-        const t = Math.max(0, Math.min(length, (blocker.x - a[0]) * dx + (blocker.z - a[1]) * dz));
-        const cx = a[0] + dx * t;
-        const cz = a[1] + dz * t;
-        const distance = Math.hypot(blocker.x - cx, blocker.z - cz);
-        if (distance >= blocker.radius) continue;
-        // Step out of the circle, on the side the segment already favours.
-        const sideX = distance > 1e-6 ? (cx - blocker.x) / distance : -dz;
-        const sideZ = distance > 1e-6 ? (cz - blocker.z) / distance : dx;
-        const out = blocker.radius + 1.6;
-        points.splice(i + 1, 0, [blocker.x + sideX * out, blocker.z + sideZ * out]);
-        changed = true;
-        break;
+  const step = ROUTE_GRID_STEP;
+  const toGrid = (v: number) => Math.round(v / step);
+  const toWorld = (g: number) => g * step;
+
+  const sgx = toGrid(from[0]);
+  const sgz = toGrid(from[1]);
+  const ggx = toGrid(to[0]);
+  const ggz = toGrid(to[1]);
+
+  if (sgx === ggx && sgz === ggz) return [from, to];
+
+  const haloCells = Math.ceil(ROUTE_SEARCH_HALO / step);
+  const minGx = Math.min(sgx, ggx) - haloCells;
+  const maxGx = Math.max(sgx, ggx) + haloCells;
+  const minGz = Math.min(sgz, ggz) - haloCells;
+  const maxGz = Math.max(sgz, ggz) + haloCells;
+  const widthZ = maxGz - minGz + 1;
+  const cellCount = (maxGx - minGx + 1) * widthZ;
+
+  const index = (gx: number, gz: number): number => (gx - minGx) * widthZ + (gz - minGz);
+  const gxOf = (i: number): number => minGx + Math.floor(i / widthZ);
+  const gzOf = (i: number): number => minGz + (i % widthZ);
+  const isEndpoint = (gx: number, gz: number): boolean =>
+    (gx === sgx && gz === sgz) || (gx === ggx && gz === ggz);
+
+  const inBounds = (gx: number, gz: number): boolean =>
+    gx >= minGx && gx <= maxGx && gz >= minGz && gz <= maxGz;
+  const cellWalkable = (gx: number, gz: number): boolean =>
+    inBounds(gx, gz) && (isEndpoint(gx, gz) || blockerClearAt(toWorld(gx), toWorld(gz), ROUTE_WALKER_PAD));
+
+  const startIdx = index(sgx, sgz);
+  const goalIdx = index(ggx, ggz);
+
+  const gScore = new Float64Array(cellCount).fill(Infinity);
+  const fScore = new Float64Array(cellCount).fill(Infinity);
+  const cameFrom = new Int32Array(cellCount).fill(-1);
+  const closed = new Uint8Array(cellCount);
+  const heuristic = (gx: number, gz: number): number => (Math.abs(gx - ggx) + Math.abs(gz - ggz)) * step;
+
+  gScore[startIdx] = 0;
+  fScore[startIdx] = heuristic(sgx, sgz);
+  const open = new MinHeap(fScore);
+  open.push(startIdx);
+  let reached = false;
+
+  while (open.size > 0) {
+    const currentIdx = open.pop();
+    if (closed[currentIdx]) continue;
+    closed[currentIdx] = 1;
+    if (currentIdx === goalIdx) {
+      reached = true;
+      break;
+    }
+    const cgx = gxOf(currentIdx);
+    const cgz = gzOf(currentIdx);
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+      const ngx = cgx + dx;
+      const ngz = cgz + dz;
+      if (!cellWalkable(ngx, ngz)) continue;
+      const nIdx = index(ngx, ngz);
+      if (closed[nIdx]) continue;
+      // The one edge that may pass close to a blocker is the last step into
+      // an endpoint sitting inside its own plot's inflated radius; every
+      // other edge must itself stay clear, not just the cells either side.
+      if (
+        !isEndpoint(ngx, ngz) &&
+        !isEndpoint(cgx, cgz) &&
+        !segmentClearOfBlockers(toWorld(cgx), toWorld(cgz), toWorld(ngx), toWorld(ngz), ROUTE_WALKER_PAD)
+      )
+        continue;
+      const tentative = (gScore[currentIdx] as number) + step;
+      if (tentative < (gScore[nIdx] as number)) {
+        gScore[nIdx] = tentative;
+        fScore[nIdx] = tentative + heuristic(ngx, ngz);
+        cameFrom[nIdx] = currentIdx;
+        open.push(nIdx);
       }
     }
-    if (!changed) break;
   }
-  // Collapse any near-identical neighbours: a zero-length Catmull-Rom
-  // segment is a NaN tangent waiting for the ribbon extruder.
-  const clean: [number, number][] = [];
-  for (const point of points) {
-    const last = clean[clean.length - 1];
-    if (last && Math.hypot(point[0] - last[0], point[1] - last[1]) < 0.4) continue;
-    clean.push(point);
+
+  if (!reached) {
+    // No axis-aligned route found inside the search halo. Every call site's
+    // endpoints already sit on the open network or just outside their own
+    // plot, so this is a safety net rather than the expected path; a
+    // straight hop keeps the graph connected instead of failing the build,
+    // and `test/procgen/invariants.ts`'s axis-alignment check will flag it
+    // by seed if it ever actually fires.
+    return [from, to];
   }
-  if (clean.length < 2) clean.push([to[0], to[1]]);
-  return clean;
+
+  const gridPoints: [number, number][] = [];
+  let cur = goalIdx;
+  while (cur !== startIdx) {
+    gridPoints.push([toWorld(gxOf(cur)), toWorld(gzOf(cur))]);
+    cur = cameFrom[cur] as number;
+  }
+  gridPoints.push([toWorld(sgx), toWorld(sgz)]);
+  gridPoints.reverse();
+
+  // Swap in the true endpoints: the ribbon must reach exactly `from`/`to`,
+  // not the grid cell nearest them.
+  gridPoints[0] = [from[0], from[1]];
+  gridPoints[gridPoints.length - 1] = [to[0], to[1]];
+
+  return collapseCollinear(gridPoints);
+}
+
+/** Drops interior points that lie on the same straight run as their
+ * neighbours — a 20 m corridor of grid steps collapses to its two ends,
+ * which keeps the Catmull-Rom curve from wobbling at every grid seam. */
+function collapseCollinear(points: readonly (readonly [number, number])[]): (readonly [number, number])[] {
+  if (points.length < 3) return points.map((p) => [p[0], p[1]] as [number, number]);
+  const out: [number, number][] = [points[0] as [number, number]];
+  for (let i = 1; i < points.length - 1; i += 1) {
+    const prev = out[out.length - 1] as readonly [number, number];
+    const cur = points[i] as readonly [number, number];
+    const next = points[i + 1] as readonly [number, number];
+    const sameX = Math.abs(prev[0] - cur[0]) < 1e-6 && Math.abs(cur[0] - next[0]) < 1e-6;
+    const sameZ = Math.abs(prev[1] - cur[1]) < 1e-6 && Math.abs(cur[1] - next[1]) < 1e-6;
+    if (sameX || sameZ) continue; // still on the same straight run
+    out.push([cur[0], cur[1]]);
+  }
+  out.push(points[points.length - 1] as [number, number]);
+  return out;
+}
+
+/**
+ * Turns the ring's per-bearing profile vertices into a closed axis-aligned
+ * loop (issue #269): every edge purely horizontal or vertical, via
+ * {@link manhattanRoute} between each consecutive pair. Adjacent bearings
+ * are close together (32 samples round the loop), so each hop is a short,
+ * cheap search — the same router the spurs use, not a separate shape.
+ */
+function toAxisAlignedLoop(
+  vertices: readonly (readonly [number, number])[],
+): (readonly [number, number])[] {
+  const n = vertices.length;
+  if (n === 0) return [];
+  const first = vertices[0] as readonly [number, number];
+  const out: [number, number][] = [[first[0], first[1]]];
+  for (let i = 0; i < n; i += 1) {
+    const a = vertices[i] as readonly [number, number];
+    const b = vertices[(i + 1) % n] as readonly [number, number];
+    const leg = manhattanRoute(a, b);
+    // Every leg repeats its own start point (`out`'s last entry already);
+    // the very last leg also repeats the loop's own start point, which
+    // `route.closed` already connects the last entry back to — so it is
+    // left off the end rather than duplicated.
+    const upper = i === n - 1 ? leg.length - 1 : leg.length;
+    for (let j = 1; j < upper; j += 1) out.push(leg[j] as [number, number]);
+  }
+  return out;
 }
 
 function nearestRingPoint(
@@ -360,7 +575,7 @@ function buildGraph(): PathGraph {
         points: [
           [0, 54] as const,
           [0, 30] as const,
-          ...routeAround([0, 27], nearestRingPoint(ringPoints, 0, 27)).slice(1),
+          ...manhattanRoute([0, 27], nearestRingPoint(ringPoints, 0, 27)).slice(1),
         ],
       },
     },
@@ -374,7 +589,7 @@ function buildGraph(): PathGraph {
         name: 'fountain-approach',
         width: 3.0,
         closed: false,
-        points: routeAround(
+        points: manhattanRoute(
           nearestRingPoint(ringPoints, PLAZA.x, PLAZA.z + PLAZA.radius + 4),
           [PLAZA.x, PLAZA.z + PLAZA.radius - 1],
         ),
@@ -467,7 +682,7 @@ function buildGraph(): PathGraph {
     }
     // See {@link SPUR_STRETCH}: no-op in the game, non-zero only for the test
     // that proves a longer spur leaves distant scenery where it was.
-    const routed = [...routeAround(start, lead.length ? (lead[0] as [number, number]) : [ex, ez]), ...(lead.length ? [[ex, ez] as readonly [number, number]] : [])];
+    const routed = [...manhattanRoute(start, lead.length ? (lead[0] as [number, number]) : [ex, ez]), ...(lead.length ? [[ex, ez] as readonly [number, number]] : [])];
     if (SPUR_STRETCH > 0 && id === SPUR_STRETCH_ID && routed.length >= 2) {
       const head = routed[0] as readonly [number, number];
       const tail = routed[routed.length - 1] as readonly [number, number];
@@ -564,7 +779,7 @@ function buildGraph(): PathGraph {
         width: 2.6,
         closed: false,
         points: [
-          ...routeAround(start, [station.leadX, station.leadZ]),
+          ...manhattanRoute(start, [station.leadX, station.leadZ]),
           [station.approachX, station.approachZ],
           [station.standX, station.standZ],
         ],
@@ -714,7 +929,7 @@ function bestBranchPoint(
   let best = candidates[candidates.length - 1] as readonly [number, number];
   let shortest = Infinity;
   for (const candidate of candidates) {
-    const walk = polylineLength(routeAround(candidate, [x, z]));
+    const walk = polylineLength(manhattanRoute(candidate, [x, z]));
     if (walk < shortest - 1e-9) {
       shortest = walk;
       best = candidate;

@@ -1,3 +1,4 @@
+import { CAMERA_FACING_YAW } from '../core/constants';
 import { ANCHORS_BY_ID } from '../world/anchors';
 import { counterFacing, placedEntry } from '../world/parkLayout';
 
@@ -92,16 +93,19 @@ function ferrisKiosk(): StallPlacement {
  *
  * Its two numbers are its own, not a mini-game booth's: the counter is
  * shallower, so the customer stands 2.3 m out rather than 3.1 m, and the yaw
- * is the fixed `+0.3` the booth has always been turned to — a shade east of
- * +Z, the one absolute direction the fixed isometric camera can read a counter
- * from (GAME_DESIGN.md #16, ARCHITECTURE.md "One camera angle, forever"). That
- * yaw must *not* be mirrored to match the position mirroring the rail racer's
- * across the X axis; an earlier version did, and quietly turned the counter
- * away from the camera.
+ * is the fixed {@link CAMERA_FACING_YAW} the booth is always turned to —
+ * dead down the camera's own diagonal, the one absolute direction the fixed
+ * isometric camera can read a counter from (GAME_DESIGN.md #16,
+ * ARCHITECTURE.md "One camera angle, forever"; issue #269 removed the
+ * stall's own independently-tuned `+0.3` in favour of the one shared
+ * constant every other camera-facing thing now uses). That yaw must *not* be
+ * mirrored to match the position mirroring the rail racer's across the X
+ * axis; an earlier version did, and quietly turned the counter away from the
+ * camera.
  */
 function facePaintStall(): StallPlacement {
   const p = placedEntry('stall.facePaint');
-  return { position: [p.x, p.z], facing: 0.3, standDistance: 2.3 };
+  return { position: [p.x, p.z], facing: CAMERA_FACING_YAW, standDistance: 2.3 };
 }
 
 /**
