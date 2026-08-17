@@ -95,7 +95,12 @@ import { segmentsMinusGaps } from '../src/world/wallRuns.ts';
 import { BUFFET_TOP, SOFA_SEAT_TOP } from '../src/world/hotel/dressing.ts';
 import { spaceAt, SPACE_GARDEN } from '../src/world/spaces.ts';
 import { placedEntry } from '../src/world/parkLayout.ts';
-import { TOWER_DOOR_HALF, TOWER_FACADE_ALONG } from '../src/world/hotel/Hotel.ts';
+import {
+  TOWER_DOOR_HALF,
+  TOWER_FACADE_ALONG,
+  RECEPTION_X,
+  RECEPTION_Z,
+} from '../src/world/hotel/Hotel.ts';
 import { saveFlags } from '../src/state/flags.ts';
 
 /** Deep enough that no floor in the game is near it, shallow enough to catch a fall early. */
@@ -177,10 +182,14 @@ const mustBeSolid: readonly [string, number, number][] = [
   // On the axis south of the arch (the imperial relayout) — the walk-through
   // runs entrance → statue medallion → under the arch, and you go round it.
   ['the lobby RiPika statue', LOBBY.originX + 0, LOBBY.originZ + 4.6],
-  // Reception moved off the axis into the east bay (the axis runs through
-  // the arch now). Probe 13 separately asserts the interact zone is anchored
-  // on this same footprint.
-  ['the reception desk', LOBBY.originX + 8.6, LOBBY.originZ - 5.2],
+  // Reception stands in the entrance foyer now, a few strides inside the
+  // front door (issue #270) — imported from `Hotel.ts` rather than typed
+  // again beside it, because a second literal here is exactly how the *last*
+  // relayout went stale: this line kept the desk's old spot after the desk
+  // moved, and it kept passing anyway because that old spot happened to sit
+  // inside the staircase's own solid wedge. Probe 13 separately asserts the
+  // interact zone is anchored on this same footprint.
+  ['the reception desk', LOBBY.originX + RECEPTION_X, LOBBY.originZ + RECEPTION_Z],
   ['a lobby sofa', LOBBY.originX + 5.9, LOBBY.originZ + 4.8],
   ['a lobby crystal column', LOBBY.originX - 11.9, LOBBY.originZ - 6.6],
   ['a Floor 12 hedge', GARDEN_FLOOR.originX - 6.4, GARDEN_FLOOR.originZ - 6.4],

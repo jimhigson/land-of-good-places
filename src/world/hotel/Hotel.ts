@@ -206,6 +206,15 @@ const PICTURE_Y = 1.9;
 /** Clear air demanded between a picture's frame and a pane's edge, metres. */
 const PICTURE_GLASS_MARGIN = 0.15;
 
+/**
+ * How far a hung picture stands proud of its wall's own face, metres — the
+ * one number `hangOnWalls`' placement and `clearOfGlass`'s occlusion search
+ * both need, so a picture is never hung this far off one and tested against
+ * the mezzanine's shadow at another (issue #271's own class of bug, guarded
+ * against rather than repeated).
+ */
+const PICTURE_WALL_INSET = 0.31;
+
 /** The breakfast tables' flat top, metres — the asset's own figure. */
 const TABLE_TOP = 0.74;
 
@@ -351,20 +360,26 @@ const DISCO_COLOURS: readonly number[] = [
  * (Jim, live play, 7 Aug 2026; QA pinned the stale pair). Every consumer now
  * derives from these two numbers, and `check:hotel` probe 13 asserts the
  * zone's anchor really stands on something solid that is not a staircase.
+ * **Exported** so that probe is the desk's own numbers, not a second literal
+ * beside them — the exact class of bug this comment already tells the story
+ * of, once.
  *
- * **Beside the axis now, not on it.** The 7 August relayout put the desk dead
- * on the entrance axis against the gallery's face — and the imperial rework's
- * whole subject is that the axis runs *through* that spot: doors → statue →
- * under the arch → the colonnade beyond. A desk on the axis is a desk in the
- * archway. So it stands in the east bay between the right-hand flight and the
- * gallery, still facing the entrance, the way a grand lobby seats its
- * reception to one side of the promenade. The spot is radially inside the
- * right arc's band but far outside its sweep — probe 13 measures both.
+ * **In the entrance foyer now, not the stairs hall** (issue #270). Jim,
+ * 17 August 2026, playing it: *"the reception desk is too far from where the
+ * player enters."* The desk used to stand at local z −5.2 — beside the grand
+ * staircase, 17.6 m from the door, on the far side of where {@link LOBBY_HALL_Z}
+ * now draws the line between the two rooms — which is the exact "suggests
+ * getting a key near the staircase" bug QA first found on 7 August, reopened
+ * by the same spot. It now stands a few strides inside the front door, in the
+ * east bay so nothing stands between it and the entrance, still facing the
+ * doors the way a grand lobby seats its reception facing the promenade.
  */
-const RECEPTION_X = 8.6;
-const RECEPTION_Z = -5.2;
+export const RECEPTION_X = 10.5;
+export const RECEPTION_Z = 8.8;
 
-/** Where the receptionist herself stands: between her desk and the gallery face. */
+/** Where the receptionist herself stands: behind her own desk, north of it —
+ *  i.e. further from the front door, so a child walks up to the counter
+ *  rather than past her. */
 const RECEPTIONIST_Z = RECEPTION_Z - 1.15;
 
 /**
@@ -1610,10 +1625,9 @@ export class Hotel implements GameSystem {
     player.teleportTo(LOBBY.originX, 0, LOBBY.originZ + LOBBY.halfZ - 2.2, Math.PI);
     if (!saveFlags.hasHotelKey()) {
       this.greet();
-      // …and the receptionist calls out from the desk straight ahead of her,
-      // so the first words and the room agree about where checking in
-      // happens. The desk is on the entrance axis now — she is looking
-      // straight at it as this line appears.
+      // …and the receptionist calls out from the desk a few strides away, so
+      // the first words and the room agree about where checking in happens
+      // (issue #270 — reception moved into the entrance foyer itself).
       this.say([`${greetingFor(this.deps.clock())}! Come to the desk and check in!`], -1);
     }
   }
@@ -2991,9 +3005,10 @@ export class Hotel implements GameSystem {
     // rather than a disc, or a child could not walk along it to reach the far
     // end of it.
     //
-    // **Beside the axis, facing the doors** — see RECEPTION_X's header for
-    // why it came off the axis (the axis runs through the arch now). It holds
-    // the east bay between the right-hand flight and the colonnade.
+    // **In the entrance foyer's east bay, facing the doors** — see
+    // RECEPTION_X's header (issue #270): a few strides inside the front
+    // door, south of {@link LOBBY_HALL_Z}, so it is the first thing a child
+    // reaches rather than something beside the staircase 17 m in.
     const desk = createReceptionDesk();
     this.props.place(shell, LOBBY, desk.root, {
       x: RECEPTION_X,
@@ -3115,25 +3130,38 @@ export class Hotel implements GameSystem {
       // north wall is the end of the axis now, the far side of the
       // see-through, and a dark terminus reads as a hole rather than a room.
       north: [-8.4, 0, 8.4],
-      // The southern sconce moved off z = -6 when the west wall's northern
-      // pane did (see `LOBBY.windows` — a sconce on glass lights nothing).
-      west: [-4.6, 2],
-      // The paintings hang at the end of the axis, in the colonnade, either
-      // side of the centre sconce: walk under the arch and there is something
-      // to arrive at. Their "Look" stands are open colonnade floor, a clear
-      // finger from every other zone (`world/tapSpacing.ts`).
+      // Moved off −4.6/2 (8 Aug 2026's spots) to make room for the two
+      // paintings below, which now hang between them.
+      west: [-6.9, 0.8],
+      // **Issue #271: not on the north wall any more.** Every point on that
+      // wall stands under the gallery deck (`LOBBY.mezzanine` reaches all the
+      // way to it), and the fixed iso camera's own ray from any point there
+      // crosses the deck's box before it reaches the lens — `mezzanineHidesPoint`
+      // says so of the *old* declared spots, which is exactly how this bug
+      // was found. There is no position on that wall {@link clearOfGlass}
+      // could have slid to, because the whole wall is the shadow, not a
+      // stretch of it — so the fix is a different wall, not a different
+      // number. These two hang on the west wall instead, in the stairs-and-
+      // -lifts hall, clear of the shadow, the lift gap and the window either
+      // side (`clearOfGlass` now refuses a spot the deck hides, the same way
+      // it already refuses one over glass — see its own comment).
       pictures: [
-        { wall: 'north', along: -3.2, width: 1.7, height: 1.25, seed: 0x10c2 },
-        { wall: 'north', along: 3.2, width: 1.7, height: 1.25, seed: 0x10c3 },
+        { wall: 'west', along: -4.75, width: 1.5, height: 1.25, seed: 0x10c2 },
+        { wall: 'west', along: -2.55, width: 1.5, height: 1.25, seed: 0x10c3 },
       ],
     });
     this.dressMezzanine(shell);
 
     // A painted arrow on the floor pointing at the lift — "an arrow showing
-    // the way to your floor, on the floors of the hotel". Peels off the
-    // runner's west edge and threads between the west seating group and the
-    // café to the lift's mouth.
-    this.paintArrow(shell, -2.4, 9.2, -10.8, 0.4);
+    // the way to your floor, on the floors of the hotel". Two legs now
+    // (issue #270): the straight line this used to be would have crossed the
+    // new foyer/hall partition through solid wall, 9 m off-centre from its
+    // one doorway. The first leg threads clear of the statue's own footprint
+    // to the doorway at x ≈ −1 (inside {@link LOBBY_HALL_Z}'s ±1.2 m
+    // opening); the second picks up on the far side and carries on between
+    // the west seating group and the café to the lift's mouth.
+    this.paintArrow(shell, -2.4, 9.2, -1.0, 2.4);
+    this.paintArrow(shell, -1.0, 1.6, -10.8, 0.4);
 
     return statue;
   }
@@ -4308,9 +4336,9 @@ export class Hotel implements GameSystem {
       const normalX = frame.wall === 'north' ? 0 : 1;
       const normalZ = frame.wall === 'north' ? 1 : 0;
       if (frame.wall === 'north') {
-        painting.position.set(along, PICTURE_Y, -room.halfZ + 0.31);
+        painting.position.set(along, PICTURE_Y, -room.halfZ + PICTURE_WALL_INSET);
       } else {
-        painting.position.set(-room.halfX + 0.31, PICTURE_Y, along);
+        painting.position.set(-room.halfX + PICTURE_WALL_INSET, PICTURE_Y, along);
         painting.rotation.y = Math.PI / 2;
       }
       shell.add(painting);
@@ -4642,9 +4670,21 @@ function glazedSpans(
 /**
  * Where a picture of `width` × `height` may actually hang on this wall, at or
  * near the declared `along` — slid to the nearest clear stretch when the
- * declared spot would put it over a pane (at the picture's own heights) or
- * across the wall's doorway gap, or `null` when the whole wall is spoken
- * for. The declared position is a wish; the glazing is the law.
+ * declared spot would put it over a pane (at the picture's own heights),
+ * across the wall's doorway gap, or **behind the room's mezzanine** as seen
+ * from the fixed camera, or `null` when the whole wall is spoken for. The
+ * declared position is a wish; the glazing, the doorway and the deck overhead
+ * are the law.
+ *
+ * **Issue #271.** A painting hung where `mezzanineHidesPoint` says the deck
+ * stands between it and the camera is a painting that is never actually on
+ * screen — the highlight ring and the "Look" chip still fire off distance
+ * alone, so a child can select and walk to something she can never see. This
+ * is exactly the same shape of guard as the glass and the doorway above it:
+ * catch the bad spot where the picture is *placed*, so nothing downstream
+ * (the highlight, the interact zone, the cinematic "Look!" shot) ever has to
+ * know the wall had a shadow on it. `check:hotel` proves the built paintings
+ * against the same function, on the built scene, so the two cannot drift.
  */
 function clearOfGlass(
   room: HotelRoom,
@@ -4665,10 +4705,22 @@ function clearOfGlass(
 
   const wallHalf = side === 'north' ? room.halfX : room.halfZ;
   const reach = width / 2 + PICTURE_GLASS_MARGIN;
+  // The wall-local point a candidate `at` would actually hang at — the same
+  // formula `hangOnWalls` places the mesh with, so the two can never place a
+  // picture somewhere different from what this asked about.
+  const hidden = (at: number): boolean => {
+    if (!room.mezzanine) return false;
+    const localX = side === 'north' ? at : -room.halfX + PICTURE_WALL_INSET;
+    const localZ = side === 'north' ? -room.halfZ + PICTURE_WALL_INSET : at;
+    return mezzanineHidesPoint(room.mezzanine, localX, PICTURE_Y, localZ);
+  };
   const fits = (at: number): boolean =>
     at - reach >= -wallHalf + 0.3 &&
     at + reach <= wallHalf - 0.3 &&
-    forbidden.every(([from, to]) => at + reach <= from || at - reach >= to);
+    forbidden.every(([from, to]) => at + reach <= from || at - reach >= to) &&
+    !hidden(at - reach) &&
+    !hidden(at) &&
+    !hidden(at + reach);
 
   if (fits(along)) return along;
   for (let step = 0.1; step <= wallHalf * 2; step += 0.1) {

@@ -867,6 +867,34 @@ export const LOBBY_LANDING_SLAB = 0.4;
 export const STAIR_ARC_C = 7.99;
 const STAIR_ARC_Z = -2.5;
 
+/**
+ * Splits the lobby into the two rooms issue #270 asked for: the **entrance
+ * foyer** south of this line — the front door, reception, the RiPika statue
+ * and the café corner, exactly Eleri's own list at the top of this file — and
+ * the **stairs and lifts hall** north of it, where the imperial staircase, the
+ * mezzanine and the lift alcove stand.
+ *
+ * Jim, 17 August 2026: *"the reception desk is too far from where the player
+ * enters. Rework the layout so the player enters directly into the lobby, then
+ * proceeds onward to a separate room containing the stairs and lifts."* The
+ * desk used to stand at local z −5.2, 17.6 m from the door and beside the
+ * staircase — QA's own *"suggests getting a key near the staircase"* bug from
+ * 7 August, reopened by the same layout. Reception now stands south of this
+ * line, a few strides from the door; nothing north of it is reachable without
+ * first passing through it.
+ *
+ * **Still one `SPACE_HOTEL_LOBBY`.** The suite already turns one space into
+ * four rooms this exact way — an ordinary internal wall
+ * ({@link SuitePartition}) with a doorway in it — so a fifth room reuses that
+ * mechanism rather than inventing new space plumbing (NavGrid, save flags,
+ * portals) for what is, underneath, still a floor a child never leaves.
+ *
+ * The doorway sits on the promenade axis (x = 0), the same line the statue
+ * and the arch beyond it already stand on, so "doors → reception → through to
+ * the stairs" continues to read as one straight walk rather than a detour.
+ */
+export const LOBBY_HALL_Z = 2.0;
+
 export const LOBBY: HotelRoom = {
   space: SPACE_HOTEL_LOBBY,
   theme: LOBBY_THEME,
@@ -901,6 +929,12 @@ export const LOBBY: HotelRoom = {
     // lift band and the pane the café tables crowd.
     west: { at: [-6.6, 3.2, 9.6], width: 1.8, sill: 1.2, head: 3.6, zoneAt: -6.6 },
   },
+  // The foyer/hall divide — see {@link LOBBY_HALL_Z}. One doorway, on the
+  // promenade axis, {@link SUITE_DOOR_WIDTH} wide like every other room
+  // doorway in the hotel; the run reaches both outer walls (CLAUDE.md's own
+  // lesson from the suite — a partition that stops short of a wall is a
+  // free-standing wall end you can see, and walk, around).
+  partitions: [{ along: 'x', at: LOBBY_HALL_Z, from: -13, to: 13, doors: [0] }],
   // The imperial plan — see {@link Mezzanine} for what each piece is, and
   // HANDOFF-lobby-art.md for where every number comes from. The derivations,
   // for the reader (assertStairMatches proves them):
@@ -1269,6 +1303,26 @@ export function hotelDoorBands(room: HotelRoom): HotelDoorBand[] {
       yaw: 0,
       y: 0,
     });
+    // The foyer/hall doorway — straight off the partition data (see
+    // {@link LOBBY_HALL_Z}) so the two can never disagree, exactly the
+    // suite's own bathroom-doorway derivation below. `yaw: 0` because this
+    // wall runs along X (an `along: 'x'` run), the same orientation as the
+    // front door above, not the suite's `Math.PI / 2` internal walls.
+    for (const run of room.partitions ?? []) {
+      if (run.along !== 'x') continue;
+      for (const door of run.doors) {
+        bands.push({
+          kind: 'room-door',
+          what: "the lobby's doorway through to the stairs and lifts",
+          centreX: room.originX + door,
+          centreZ: room.originZ + run.at,
+          halfAlong: 0.6,
+          halfAcross: SUITE_DOOR_WIDTH / 2 + 0.4,
+          yaw: 0,
+          y: 0,
+        });
+      }
+    }
   }
   if (room === CORRIDOR) {
     // The "yours" door into the suite, as **two** rectangles, because the
