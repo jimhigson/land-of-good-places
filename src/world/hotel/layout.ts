@@ -725,6 +725,87 @@ export function clearFloorAround(room: HotelRoom, x: number, z: number): ClearRe
   return { minX, maxX, minZ, maxZ };
 }
 
+/**
+ * A doorway's clearance zone, in the room's own local metres — an
+ * axis-aligned rectangle a piece of furniture must never overlap. The same
+ * shape as {@link ClearRect}; kept as its own name so a reader sees at the
+ * call site that this rectangle is about a *doorway*, not a wall.
+ */
+export type DoorwayZone = ClearRect;
+
+/**
+ * Every doorway a body can walk through in this room — an outer wall's gap
+ * or a partition's own door — each widened by `clearance` on every side.
+ *
+ * **Derived straight from {@link HotelRoom.gaps} and {@link
+ * HotelRoom.partitions}, never re-typed.** Those two fields are already this
+ * room's one description of where its walls have holes in them; a wall or a
+ * partition that moves takes its doorway's clearance zone with it for free,
+ * with nothing here that could go stale the way a hand-copied doorway list
+ * would. `world/hotel/place.ts`'s `isClearOfDoorways` checks every solid
+ * prop's footprint against this list as it goes down, so furniture that
+ * would leave a doorway too narrow to use is a thrown error at hotel
+ * construction rather than a bug a child finds by walking into a sofa
+ * (issue #273 — CLAUDE.md's "anything that looks solid must be solid",
+ * aimed at the door instead of the wall).
+ *
+ * This is deliberately a **superset** of {@link hotelDoorBands}: that list
+ * exists for the walk-through trigger and the tap-spacing rule, and leaves
+ * out the suite's bedroom-to-hall doorways on purpose (banding them there
+ * trips the bed zones by 0.03 m — a change for its own PR). A sofa does not
+ * care about tap targets; it cares whether a body can get through the gap,
+ * so every gap counts here.
+ */
+export function doorwayClearanceZones(room: HotelRoom, clearance: number): DoorwayZone[] {
+  const zones: DoorwayZone[] = [];
+
+  for (const side of ['north', 'south', 'east', 'west'] as const) {
+    const gap = room.gaps[side];
+    if (!gap) continue;
+    const [from, to] = gap;
+    if (side === 'north' || side === 'south') {
+      const wallZ = side === 'north' ? -room.halfZ : room.halfZ;
+      zones.push({
+        minX: from - clearance,
+        maxX: to + clearance,
+        minZ: wallZ - clearance,
+        maxZ: wallZ + clearance,
+      });
+    } else {
+      const wallX = side === 'west' ? -room.halfX : room.halfX;
+      zones.push({
+        minX: wallX - clearance,
+        maxX: wallX + clearance,
+        minZ: from - clearance,
+        maxZ: to + clearance,
+      });
+    }
+  }
+
+  for (const run of room.partitions ?? []) {
+    const doorHalf = SUITE_DOOR_WIDTH / 2;
+    for (const at of run.doors) {
+      if (run.along === 'x') {
+        zones.push({
+          minX: at - doorHalf - clearance,
+          maxX: at + doorHalf + clearance,
+          minZ: run.at - clearance,
+          maxZ: run.at + clearance,
+        });
+      } else {
+        zones.push({
+          minX: run.at - clearance,
+          maxX: run.at + clearance,
+          minZ: at - doorHalf - clearance,
+          maxZ: at + doorHalf + clearance,
+        });
+      }
+    }
+  }
+
+  return zones;
+}
+
 /** How far the lift alcove pokes out of the west wall. */
 export const LIFT_ALCOVE_DEPTH = 3.4;
 

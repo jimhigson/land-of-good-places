@@ -857,6 +857,12 @@ export class Hotel implements GameSystem {
     this.dressOcean();
     this.dressCorridor();
     this.dressSuite();
+    // Every solid prop just placed by the `dress*` calls above has already
+    // been checked against its room's doorways as it went down
+    // (`HotelProps.footprint`); this is where any violation collected along
+    // the way actually throws — once, with every offender named, rather than
+    // shipping a sofa nobody can walk past.
+    this.props.assertDoorwaysClear();
     // After every table exists, because it picks its chairs out of the list
     // those tables filled in — see `seatGuests`.
     this.seatGuests();
@@ -3862,9 +3868,17 @@ export class Hotel implements GameSystem {
     // (QA, 8 Aug 2026). Same rule as the lobby's crystal columns: the
     // camera looks along (−X, −Z), so nothing worth seeing lives close
     // behind a +X or +Z wall.
+    //
+    // **z = 3.4 used to reach into the hall partition's own doorway** (the
+    // north wall of this room is that partition, run 2 of `SUITE.partitions`,
+    // whose one door sits at x = 4.4) — `HotelProps.assertDoorwaysClear`
+    // (issue #273) caught the sofa's north edge at z = 2.1 sitting inside the
+    // door's `PLAYER_RADIUS`-widened clearance zone, which tops out at
+    // z ≈ 2.32. 3.9 clears it with a 0.28 m margin and is still squarely on
+    // the rug the sofa sits on.
     this.props.place(shell, SUITE, sofa(3.2, PALETTE.markerSky, PALETTE.blossomWhite), {
       x: 5.6,
-      z: 3.4,
+      z: 3.9,
       spin: -0.9,
       halfX: 1.1,
       halfZ: 1.3,
@@ -3884,9 +3898,16 @@ export class Hotel implements GameSystem {
     // A hand east of where it stood: the bathroom wall now runs at x = −4.2
     // (face −4.0), and the set's 0.7 m footprint at −3.4 backed 10 cm into
     // it. At −3.0 it backs *against* the wall, which is where a telly goes.
+    //
+    // **z stands off `FLOOR_Z` by 0.4** — that same bathroom wall carries its
+    // own doorway at z = 2.9 (`SUITE.partitions`'s z-run at x = −4.2), and
+    // `HotelProps.assertDoorwaysClear` (issue #273) measured the set's
+    // 0.7 m radius at `FLOOR_Z` reaching 0.093 m into that door's
+    // `PLAYER_RADIUS`-widened clearance zone. `FLOOR_Z + 0.4` clears it by
+    // 0.12 m and keeps the set backed against the same stretch of wall.
     this.props.place(shell, SUITE, tv.root, {
       x: -3.0,
-      z: FLOOR_Z,
+      z: FLOOR_Z + 0.4,
       spin: Math.PI / 2 - 0.7,
       radius: 0.7,
       top: tv.height,

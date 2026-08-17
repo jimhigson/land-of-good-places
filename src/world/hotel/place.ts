@@ -2,7 +2,8 @@ import type { Group, Object3D } from 'three';
 import type { CollisionWorld } from '../Collision';
 import type { MovingPlatform, WalkSurfaces } from '../building/surfaces';
 import { JUMP_APEX_HEIGHT } from '../../entities/Player';
-import type { HotelRoom } from './layout';
+import { PLAYER_RADIUS } from '../../core/constants';
+import { doorwayClearanceZones, type DoorwayZone, type HotelRoom } from './layout';
 
 /**
  * **Putting a thing in a hotel room is one call, and that call decides
@@ -81,6 +82,58 @@ import type { HotelRoom } from './layout';
  * footprint is still the visual one.
  */
 const WALL_HALF_THICKNESS = 0.2;
+
+/**
+ * How far a solid footprint must stay clear of a doorway, on every side —
+ * {@link PLAYER_RADIUS} itself, because the question a doorway clearance
+ * check is answering is exactly "can her body still fit through here",
+ * never a number the furniture layout invented for itself.
+ */
+const DOORWAY_CLEARANCE = PLAYER_RADIUS;
+
+/**
+ * A footprint to test against a room's doorways — the same two shapes
+ * {@link PropPlan} offers (round or rectangular), in the room's own local
+ * metres, matching {@link PropPlan.x}/{@link PropPlan.z}.
+ */
+export type FurnitureBounds =
+  | { readonly x: number; readonly z: number; readonly radius: number }
+  | { readonly x: number; readonly z: number; readonly halfX: number; readonly halfZ: number };
+
+/**
+ * **Does this footprint keep clear of every doorway in `doors`?**
+ *
+ * The general form of the rule issue #273 asked for, sitting beside CLAUDE.md's
+ * "anything that looks solid must be solid" — aimed at the doorway instead of
+ * the wall: a doorway a child can *see* has to be a doorway she can *use*, and
+ * a sofa that merely looks like it fits beside a door is the same silent hole
+ * as a wall with a gap in its collider. Pure geometry, with no idea what a
+ * "room" or a "hotel" is: `doors` is expected to already carry its own
+ * clearance margin (see {@link doorwayClearanceZones}), so any furniture
+ * placer that can produce a room's doorway zones and a candidate footprint
+ * calls this once — round or rectangular alike, a sofa today, a pet bed or a
+ * resized bedroom's furniture tomorrow.
+ */
+export function isClearOfDoorways(
+  bounds: FurnitureBounds,
+  doors: readonly DoorwayZone[],
+): boolean {
+  return doors.every((door) => !overlapsDoorway(bounds, door));
+}
+
+function overlapsDoorway(bounds: FurnitureBounds, door: DoorwayZone): boolean {
+  if ('radius' in bounds) {
+    const nearestX = Math.max(door.minX, Math.min(bounds.x, door.maxX));
+    const nearestZ = Math.max(door.minZ, Math.min(bounds.z, door.maxZ));
+    return Math.hypot(bounds.x - nearestX, bounds.z - nearestZ) < bounds.radius;
+  }
+  return (
+    bounds.x - bounds.halfX < door.maxX &&
+    bounds.x + bounds.halfX > door.minX &&
+    bounds.z - bounds.halfZ < door.maxZ &&
+    bounds.z + bounds.halfZ > door.minZ
+  );
+}
 
 /**
  * A round prop's standing plate is this fraction of its collider radius, per
@@ -195,6 +248,21 @@ export class HotelProps {
   private readonly collision: CollisionWorld;
   private readonly surfaces: WalkSurfaces;
 
+  /**
+   * Every solid footprint {@link footprint} found sitting in a doorway's
+   * clearance zone, collected rather than thrown as it is found — so one
+   * broken build reports every offending prop in one run instead of stopping
+   * at the first, the same reason `assertStairMatches`'s `problems` array
+   * exists. {@link assertDoorwaysClear} is the one place they turn into a
+   * thrown error.
+   */
+  private readonly doorwayViolations: string[] = [];
+
+  /** {@link doorwayClearanceZones} is pure, but a room's doorways never
+   *  change mid-build — computed once per room the first time it is asked
+   *  for, rather than once per prop placed in it. */
+  private readonly doorwayZonesByRoom = new Map<HotelRoom, readonly DoorwayZone[]>();
+
   constructor(
     collision: CollisionWorld,
     surfaces: WalkSurfaces,
@@ -206,6 +274,23 @@ export class HotelProps {
   /** The whole keep-out list, once the rooms are dressed. */
   get roomKeepOuts(): readonly RoomKeepOut[] {
     return this.keepOuts;
+  }
+
+  /**
+   * Throws with every prop {@link footprint} found blocking a doorway,
+   * named and located — call once, after every `dress*` method has run.
+   * Nothing about this repo's philosophy is served by a placement rule that
+   * is only checked when somebody remembers to; a rule with a hole in it
+   * reads correctly, renders correctly, and is wrong only when a child tries
+   * the door (CLAUDE.md, "anything that looks solid must be solid"), so this
+   * is a hard failure rather than a console warning nobody reads.
+   */
+  assertDoorwaysClear(): void {
+    if (this.doorwayViolations.length === 0) return;
+    throw new Error(
+      `${this.doorwayViolations.length} prop(s) block a doorway's clearance zone:\n` +
+        this.doorwayViolations.map((line) => `  - ${line}`).join('\n'),
+    );
   }
 
   /**
@@ -241,6 +326,8 @@ export class HotelProps {
     const solid = plan.solid ?? true;
     const worldTop = (plan.base ?? 0) + plan.top;
 
+    if (solid) this.checkDoorwayClearance(room, plan);
+
     if (plan.radius !== undefined) {
       if (solid) {
         this.collision.addCircle(worldX, worldZ, plan.radius, worldTop, false, true);
@@ -270,6 +357,32 @@ export class HotelProps {
       this.standable(plan, worldX, worldZ, halfX, halfZ, worldTop);
     }
     this.coverWithDiscs(room, plan.x, plan.z, halfX, halfZ);
+  }
+
+  /**
+   * Checks one solid footprint against its room's doorways and records a
+   * violation rather than throwing — see {@link assertDoorwaysClear}.
+   */
+  private checkDoorwayClearance(room: HotelRoom, plan: PropPlan): void {
+    let zones = this.doorwayZonesByRoom.get(room);
+    if (!zones) {
+      zones = doorwayClearanceZones(room, DOORWAY_CLEARANCE);
+      this.doorwayZonesByRoom.set(room, zones);
+    }
+    const halfX = plan.halfX ?? 0.5;
+    const halfZ = plan.halfZ ?? 0.5;
+    const bounds: FurnitureBounds =
+      plan.radius !== undefined
+        ? { x: plan.x, z: plan.z, radius: plan.radius }
+        : { x: plan.x, z: plan.z, halfX, halfZ };
+    if (!isClearOfDoorways(bounds, zones)) {
+      this.doorwayViolations.push(
+        `${room.space} prop at local (${plan.x}, ${plan.z}) — ` +
+          (plan.radius !== undefined
+            ? `radius ${plan.radius}`
+            : `${halfX * 2}×${halfZ * 2} m footprint`),
+      );
+    }
   }
 
   /**
