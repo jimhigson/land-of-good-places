@@ -121,6 +121,17 @@ interface Blocker {
   readonly x: number;
   readonly z: number;
   readonly radius: number; // bounding circle, already inflated for kerbs
+  /**
+   * `'plot'` blockers are legitimate to end a route *inside* — a doormat
+   * genuinely stands close to its own plot, "arriving at a destination" is
+   * real. `'archFoot'` blockers never are: nobody's destination is the post
+   * of the finish rainbow, so a route endpoint that happens to land inside
+   * one is a clearance failure to route around, not a place to exempt (see
+   * {@link gridDetourAttempt}'s embedded-blocker filter, and issue #269 QA:
+   * exempting an arch foot here is exactly what let a rail-race leg come
+   * down 0.58 m from a path on seed 11 — well inside `WALKABLE_GAP`).
+   */
+  readonly kind: 'plot' | 'archFoot';
 }
 
 /**
@@ -174,10 +185,10 @@ const ARCH_FOOT_MARGIN = PLAYER_RADIUS * 2 + 0.4 + RIBBON_HALF_WIDTH_CEILING;
 const BLOCKERS: readonly Blocker[] = [
   ...[...PARK_LAYOUT.entries.values()]
     .filter((e) => e.id !== 'fountain')
-    .map((e) => ({ x: e.x, z: e.z, radius: e.boundingRadius + 2.2 })),
+    .map((e) => ({ x: e.x, z: e.z, radius: e.boundingRadius + 2.2, kind: 'plot' as const })),
   ...[RAIL_RACE_PLAN.walkPastRing, RAIL_RACE_PLAN.raceRing]
     .flatMap((ring) => archFeet(ring))
-    .map((foot) => ({ x: foot.x, z: foot.z, radius: foot.radius + ARCH_FOOT_MARGIN })),
+    .map((foot) => ({ x: foot.x, z: foot.z, radius: foot.radius + ARCH_FOOT_MARGIN, kind: 'archFoot' as const })),
 ];
 
 /** Distance from `(px,pz)` along unit `(dx,dz)` to `blocker`, or Infinity. */
@@ -274,14 +285,22 @@ function segmentClearOfBlockers(
   const dz = bz - az;
   const lengthSq = dx * dx + dz * dz;
   for (const blocker of blockers) {
-    // A segment ending inside a blocker is arriving at a destination — every
-    // spur's last metres run into a plot mouth — so only the segment's
-    // *approach* is asked about, never whether it ends inside one.
+    // A segment ending inside a *plot* blocker is arriving at a destination —
+    // every spur's last metres run into a plot mouth — so only the segment's
+    // *approach* is asked about, never whether it ends inside one. An arch
+    // foot is never a destination (issue #269 QA, seed 11: exempting one here
+    // is exactly what let a rail-race leg land 0.58 m from a path), so it
+    // never gets this exemption regardless of where the segment ends.
     const t =
       lengthSq > 1e-9
         ? Math.max(0, Math.min(1, ((blocker.x - ax) * dx + (blocker.z - az) * dz) / lengthSq))
         : 0;
-    if (t >= 1 - 1e-9 && Math.hypot(blocker.x - bx, blocker.z - bz) < blocker.radius) continue;
+    if (
+      blocker.kind === 'plot' &&
+      t >= 1 - 1e-9 &&
+      Math.hypot(blocker.x - bx, blocker.z - bz) < blocker.radius
+    )
+      continue;
     const cx = ax + dx * t;
     const cz = az + dz * t;
     if (Math.hypot(blocker.x - cx, blocker.z - cz) < blocker.radius + pad) return false;
@@ -353,13 +372,16 @@ function detourAroundBlockers(
       const dx = abx / length;
       const dz = abz / length;
       for (const blocker of BLOCKERS) {
-        // A segment ending inside the circle is arriving at a destination —
-        // every spur's last metres run into a plot mouth. Detouring that
-        // blocker would splice the same escape point forever (measured:
-        // seven copies of one point). Only the *far* endpoint can be inside
-        // a blocker: starts are junction points, kept outside every circle
-        // by `bestBranchPoint`.
-        if (Math.hypot(blocker.x - b[0], blocker.z - b[1]) < blocker.radius) continue;
+        // A segment ending inside a *plot* circle is arriving at a
+        // destination — every spur's last metres run into a plot mouth.
+        // Detouring that blocker would splice the same escape point forever
+        // (measured: seven copies of one point). Only the *far* endpoint can
+        // be inside a blocker: starts are junction points, kept outside every
+        // circle by `bestBranchPoint`. An arch foot is never a destination
+        // (issue #269 QA, seed 11), so it keeps demanding clearance right up
+        // to the segment's own end, exactly like every other approach.
+        if (blocker.kind === 'plot' && Math.hypot(blocker.x - b[0], blocker.z - b[1]) < blocker.radius)
+          continue;
         const t = Math.max(0, Math.min(length, (blocker.x - a[0]) * dx + (blocker.z - a[1]) * dz));
         const cx = a[0] + dx * t;
         const cz = a[1] + dz * t;
@@ -502,8 +524,9 @@ function gridDetourAttempt(
   // would otherwise have a walkable goal with no walkable way to reach it.
   const localBlockers = BLOCKERS.filter(
     (blocker) =>
-      Math.hypot(a[0] - blocker.x, a[1] - blocker.z) >= blocker.radius &&
-      Math.hypot(b[0] - blocker.x, b[1] - blocker.z) >= blocker.radius,
+      blocker.kind !== 'plot' ||
+      (Math.hypot(a[0] - blocker.x, a[1] - blocker.z) >= blocker.radius &&
+        Math.hypot(b[0] - blocker.x, b[1] - blocker.z) >= blocker.radius),
   );
   const walkable = (ax: number, az: number, bx: number, bz: number, pad: number): boolean =>
     segmentClearOfBlockers(ax, az, bx, bz, pad, localBlockers) && segmentClearOfBoundary(ax, az, bx, bz);
