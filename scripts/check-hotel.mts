@@ -82,11 +82,14 @@ import {
   SUITE,
   SUITE_BEDSIDE_X,
   SUITE_BEDSIDE_Z,
+  SUITE_BEDSIDE_RADIUS,
   SUITE_BED_SPOTS,
+  SUITE_BED_HALF_X,
+  SUITE_BED_HALF_Z,
   SUITE_DOOR_WIDTH,
-  PET_BED_SLOTS_X,
-  PET_BED_ROW_Z,
+  petBedSlots,
   PET_BED_FOOTPRINT_RADIUS,
+  clearFloorAround,
   doorwayClearanceZones,
   relativeLuminance,
   THEME_FLOOR_CONTRAST_MIN,
@@ -316,43 +319,89 @@ for (const [index, spot] of SUITE_BED_SPOTS.entries()) {
 
 // ------------------------------------------ 3b. every pet bed slot is usable
 //
-// Issue #275: a small pet bed for every pet she owns, at one of
-// `PET_BED_SLOTS_X`'s slots (`layout.ts`). A fresh headless save's empty
-// inventory only ever exercises slot 0 (the fallback bunny bed), so this
-// checks every slot by pure geometry instead of seeding six pets into a save
-// just to reach slot 5 — the same reason `SUITE_BED_SPOTS` is read from
-// `layout.ts` rather than typed out here a second time.
+// Issue #275: a small pet bed for every pet she owns, one per
+// `layout.ts`'s `petBedSlots(count)` slot. `store.ts` puts **no ceiling** on
+// how many pets a child can own, so review on #279 found the original
+// hand-typed, fixed-length slot list placing every pet past its own length
+// at the exact same coordinates as the last slot — identical, overlapping
+// bed and pet meshes, not graceful degradation. This checks the function
+// itself at several counts, including well past the shop's four species —
+// 1 (the fresh-save fallback), 8 (what the review specifically asked to be
+// exercised), 20 (well into the bedroom's real 28-slot capacity) and 30
+// (past that capacity, proving the cap degrades by drawing *fewer* beds
+// than requested rather than by overlapping two of them) — proving by pure
+// geometry, for every count, that no two returned slots coincide or
+// overlap, every slot clears the human bed, its bedside table and every
+// doorway, and every slot stays on the bedroom's own real floor (derived
+// the same way `Hotel.dressPetBeds` derives it — `clearFloorAround`, never
+// a hand-typed wall position, so a future move of the bedroom's own walls
+// cannot go unnoticed here either).
 {
   const doors = doorwayClearanceZones(SUITE, PLAYER_RADIUS);
   const humanBed = SUITE_BED_SPOTS[1] ?? [0, 0];
   const bedsideX = SUITE_BEDSIDE_X[1] ?? 0;
-  for (const [index, x] of PET_BED_SLOTS_X.entries()) {
-    const bounds = { x, z: PET_BED_ROW_Z, radius: PET_BED_FOOTPRINT_RADIUS };
-    if (!isClearOfDoorways(bounds, doors)) {
+
+  for (const count of [1, 8, 20, 30]) {
+    const slots = petBedSlots(count);
+    if (slots.length > count) {
+      problems.push(`petBedSlots(${count}) returned ${slots.length} slots — more than asked for`);
+      continue;
+    }
+    if (slots.length < count && count <= 28) {
       problems.push(
-        `pet bed slot ${index} at local x=${x} sits inside a doorway's clearance zone — a bed ` +
-          `there would leave the hall too narrow to use`,
+        `petBedSlots(${count}) returned only ${slots.length} slots, short of the bedroom's own ` +
+          `28-slot capacity (4 rows × 7 columns) — a slot generator regression, not real capacity`,
       );
     }
-    // Clear of the bedroom's own two side walls (the partitions at x = −8.0
-    // and x = 7.2 — see `SUITE.partitions`).
-    if (x - PET_BED_FOOTPRINT_RADIUS < -8.0 + 0.2 || x + PET_BED_FOOTPRINT_RADIUS > 7.2 - 0.2) {
-      problems.push(`pet bed slot ${index} at local x=${x} reaches past the bedroom's own wall`);
-    }
-    // Clear of the human bed (a 1.4 × 2 m rectangle) and its bedside table
-    // (a 0.36 m-radius circle), both at z ≈ SUITE_BEDSIDE_Z.
-    const bedDX = Math.max(Math.abs(x - humanBed[0]) - 0.7, 0);
-    const bedDZ = Math.max(Math.abs(PET_BED_ROW_Z - humanBed[1]) - 1, 0);
-    if (Math.hypot(bedDX, bedDZ) < PET_BED_FOOTPRINT_RADIUS) {
-      problems.push(`pet bed slot ${index} at local x=${x} overlaps the human bed`);
-    }
-    if (Math.hypot(x - bedsideX, PET_BED_ROW_Z - SUITE_BEDSIDE_Z) < PET_BED_FOOTPRINT_RADIUS + 0.36) {
-      problems.push(`pet bed slot ${index} at local x=${x} overlaps its bedside table`);
-    }
-    // Clear of every other slot in the row.
-    for (const other of PET_BED_SLOTS_X.slice(index + 1)) {
-      if (Math.abs(x - other) < PET_BED_FOOTPRINT_RADIUS * 2) {
-        problems.push(`pet bed slots at local x=${x} and x=${other} overlap each other`);
+    for (const [index, slot] of slots.entries()) {
+      const { x, z } = slot;
+      const bounds = { x, z, radius: PET_BED_FOOTPRINT_RADIUS };
+      if (!isClearOfDoorways(bounds, doors)) {
+        problems.push(
+          `petBedSlots(${count})[${index}] at local (${x.toFixed(2)}, ${z.toFixed(2)}) sits ` +
+            `inside a doorway's clearance zone — a bed there would leave the hall too narrow to use`,
+        );
+      }
+      // Clear of the bedroom's own real floor — the two partitions either
+      // side of it, derived exactly the way `petBedSlots` itself derives
+      // them, not a copy of their positions.
+      const rect = clearFloorAround(SUITE, 0, z);
+      if (x - PET_BED_FOOTPRINT_RADIUS < rect.minX || x + PET_BED_FOOTPRINT_RADIUS > rect.maxX) {
+        problems.push(
+          `petBedSlots(${count})[${index}] at local (${x.toFixed(2)}, ${z.toFixed(2)}) reaches ` +
+            `past the bedroom's own wall (clear floor is ${rect.minX.toFixed(2)}…${rect.maxX.toFixed(2)})`,
+        );
+      }
+      // Clear of the human bed ({@link SUITE_BED_HALF_X}/{@link SUITE_BED_HALF_Z}
+      // half-extents) and its bedside table ({@link SUITE_BEDSIDE_RADIUS}),
+      // both at z ≈ SUITE_BEDSIDE_Z — the same three numbers `dressSuite`
+      // itself places them with, not a fresh copy (review on #279 found this
+      // probe's first draft hardcoding its own 0.7/1/0.36).
+      const bedDX = Math.max(Math.abs(x - humanBed[0]) - SUITE_BED_HALF_X, 0);
+      const bedDZ = Math.max(Math.abs(z - humanBed[1]) - SUITE_BED_HALF_Z, 0);
+      if (Math.hypot(bedDX, bedDZ) < PET_BED_FOOTPRINT_RADIUS) {
+        problems.push(
+          `petBedSlots(${count})[${index}] at local (${x.toFixed(2)}, ${z.toFixed(2)}) overlaps ` +
+            `the human bed`,
+        );
+      }
+      if (Math.hypot(x - bedsideX, z - SUITE_BEDSIDE_Z) < PET_BED_FOOTPRINT_RADIUS + SUITE_BEDSIDE_RADIUS) {
+        problems.push(
+          `petBedSlots(${count})[${index}] at local (${x.toFixed(2)}, ${z.toFixed(2)}) overlaps ` +
+            `its bedside table`,
+        );
+      }
+      // Clear of every other slot at this same count — the actual bug #279's
+      // review found: every pet past the list's own length landing on top
+      // of the last one.
+      for (const other of slots.slice(index + 1)) {
+        if (Math.hypot(x - other.x, z - other.z) < PET_BED_FOOTPRINT_RADIUS * 2) {
+          problems.push(
+            `petBedSlots(${count}) has two slots within ${(PET_BED_FOOTPRINT_RADIUS * 2).toFixed(2)} m ` +
+              `of each other, at (${x.toFixed(2)}, ${z.toFixed(2)}) and ` +
+              `(${other.x.toFixed(2)}, ${other.z.toFixed(2)}) — their beds would overlap`,
+          );
+        }
       }
     }
   }

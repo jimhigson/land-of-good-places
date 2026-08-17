@@ -149,10 +149,12 @@ import {
   SUITE_PARTITION_HALF,
   WALL_HALF_DEPTH,
   SUITE_BED_SPOTS,
+  SUITE_BED_HALF_X,
+  SUITE_BED_HALF_Z,
   SUITE_BEDSIDE_X,
   SUITE_BEDSIDE_Z,
-  PET_BED_SLOTS_X,
-  PET_BED_ROW_Z,
+  SUITE_BEDSIDE_RADIUS,
+  petBedSlots,
   PET_BED_FOOTPRINT_RADIUS,
   SUITE_DOOR_WIDTH,
   SUITE_PARTITION_HEIGHT,
@@ -3674,8 +3676,8 @@ export class Hotel implements GameSystem {
       this.props.place(shell, SUITE, bed.root, {
         x,
         z,
-        halfX: 0.7,
-        halfZ: 1,
+        halfX: SUITE_BED_HALF_X,
+        halfZ: SUITE_BED_HALF_Z,
         top: BED_MATTRESS_TOP,
         solid: false,
       });
@@ -3691,10 +3693,10 @@ export class Hotel implements GameSystem {
       this.surfaces.addPlatform(
         new Plate(
           BED_MATTRESS_TOP,
-          SUITE.originX + x - 0.7,
-          SUITE.originX + x + 0.7,
-          SUITE.originZ + z - 1,
-          SUITE.originZ + z + 1,
+          SUITE.originX + x - SUITE_BED_HALF_X,
+          SUITE.originX + x + SUITE_BED_HALF_X,
+          SUITE.originZ + z - SUITE_BED_HALF_Z,
+          SUITE.originZ + z + SUITE_BED_HALF_Z,
         ),
       );
     });
@@ -3705,7 +3707,7 @@ export class Hotel implements GameSystem {
       this.props.place(shell, SUITE, bedsideTable(), {
         x,
         z: SUITE_BEDSIDE_Z,
-        radius: 0.36,
+        radius: SUITE_BEDSIDE_RADIUS,
         top: 1.0,
         stand: false,
       });
@@ -3790,32 +3792,33 @@ export class Hotel implements GameSystem {
    * an empty pet bed reads as something missing rather than as something to
    * look forward to.
    *
-   * ## Laid out as a row, clear of the human furniture and the doorway
+   * ## Laid out row by row, clear of the human furniture and the doorway
    *
-   * `PET_BED_SLOTS_X` (`layout.ts`, alongside `SUITE_BED_SPOTS` for the same
-   * reason: `check:hotel` needs the list too) are hand-measured against this
-   * bedroom's own furniture — the human bed at x ≈ −0.4 and its bedside
-   * table at x ≈ 1.1 — the same way every other prop in this room is placed:
-   * each bed's own footprint radius stays clear of that cluster, of the
-   * partitions either side of the bedroom (x = −8.0 and x = 7.2), and —
-   * since the whole row sits at `PET_BED_ROW_Z`, 4.7 m north of the hall
-   * doorway — of that doorway's own clearance zone with room to spare.
-   * `HotelProps.place` still checks all of that itself (issue #273's
-   * machinery); the slot list only has to keep each bed off its neighbours
-   * and the walls, which nothing checks automatically. Six slots is
-   * headroom, not a hard cap — the shop sells four species — so a seventh
-   * pet re-uses the last slot rather than the row spilling into a wall.
+   * `layout.ts`'s `petBedSlots(count)` (alongside `SUITE_BED_SPOTS` for the
+   * same reason: `check:hotel` needs it too) hands back one non-overlapping
+   * slot per pet, tiled outward from the human bed and bedside table across
+   * the bedroom's own real clear floor — never a hand-typed list, because
+   * `store.ts` puts no ceiling on how many pets a child can own, and a fixed
+   * list silently started placing every pet past its own length on top of
+   * the last one (caught in review on #279). `HotelProps.place` still checks
+   * every bed against the doorway itself (issue #273's machinery); the slot
+   * function only has to keep beds off their neighbours and the walls, which
+   * nothing checks automatically.
    */
   private dressPetBeds(shell: Group): void {
-    this.ownedPetKinds().forEach((kind, index) => {
-      const x = PET_BED_SLOTS_X[index] ?? PET_BED_SLOTS_X[PET_BED_SLOTS_X.length - 1] ?? 0;
+    const kinds = this.ownedPetKinds();
+    const slots = petBedSlots(kinds.length);
+    kinds.forEach((kind, index) => {
+      const slot = slots[index];
+      if (!slot) return;
+      const { x, z } = slot;
       const bed = createPetBed();
       // Solid and standable, like every other flat-topped prop now — QA
       // found it walk-through, and a pet bed is a cushion, which is a thing
       // a child may absolutely bounce onto.
       this.props.place(shell, SUITE, bed.root, {
         x,
-        z: PET_BED_ROW_Z,
+        z,
         radius: PET_BED_FOOTPRINT_RADIUS,
         top: PET_BED_CUSHION_TOP,
       });
@@ -3824,8 +3827,8 @@ export class Hotel implements GameSystem {
       shell.add(pet.root);
       // Standing awake by default; `nap` (and its own end) lie every bed's
       // pet down or stand it back up, all together — issue #275.
-      this.standPetUp(pet, x, PET_BED_ROW_Z);
-      this.petBedRoster.push({ pet, x, z: PET_BED_ROW_Z });
+      this.standPetUp(pet, x, z);
+      this.petBedRoster.push({ pet, x, z });
     });
   }
 
@@ -3917,7 +3920,9 @@ export class Hotel implements GameSystem {
 
     // The rug the room is arranged on — wanting 9 × 5, taking whatever the
     // lounge's clear floor (`clearFloorAround`) actually allows, so the
-    // bathroom wall arriving at x = −4.2 can never put a wall on the rug.
+    // bathroom wall (x = −8.0, moved from −4.2 when issue #274 widened the
+    // middle bedroom — see `SUITE.partitions`) can never put a wall on the
+    // rug.
     const RUG_X = 2.5;
     const lounge = clearFloorAround(SUITE, RUG_X, FLOOR_Z);
     const rugWidth = Math.min(
@@ -3971,18 +3976,26 @@ export class Hotel implements GameSystem {
     // authored facing +Z with nodes at identity, so one local-Z nudge stands
     // the picture 2 cm in front of the wood.
     tv.screen.position.z += 0.09;
-    // A hand east of where it stood: the bathroom wall now runs at x = −4.2
-    // (face −4.0), and the set's 0.7 m footprint at −3.4 backed 10 cm into
-    // it. At −3.0 it backs *against* the wall, which is where a telly goes.
+    // Backed against the bathroom wall, same as always — the wall itself
+    // moved (x = −4.2 → −8.0, face −4.0 → −7.8) when issue #274 widened the
+    // middle bedroom, and this shifted the same 3.8 m with it, so the set's
+    // 0.7 m footprint still stands off the face by the same 0.3 m it always
+    // has. **Deliberately not left at its old x = −3.0**: the lounge itself
+    // grew by that same 3.8 m on both walls (it is one rectangle with the
+    // bedroom row — see `SUITE.halfX`'s own comment), and a review of #279
+    // found the set sitting 3.8 m clear of a wall it was supposed to be
+    // backed against, with the whole west flank of the now much wider room
+    // bare behind it. Moving it back onto the wall is the fix, not a rug or
+    // a planter papering over the gap.
     //
     // **z stands off `FLOOR_Z` by 0.4** — that same bathroom wall carries its
-    // own doorway at z = 2.9 (`SUITE.partitions`'s z-run at x = −4.2), and
+    // own doorway at z = 2.9 (`SUITE.partitions`'s z-run at x = −8.0), and
     // `HotelProps.assertDoorwaysClear` (issue #273) measured the set's
     // 0.7 m radius at `FLOOR_Z` reaching 0.093 m into that door's
     // `PLAYER_RADIUS`-widened clearance zone. `FLOOR_Z + 0.4` clears it by
     // 0.12 m and keeps the set backed against the same stretch of wall.
     this.props.place(shell, SUITE, tv.root, {
-      x: -3.0,
+      x: -6.8,
       z: FLOOR_Z + 0.4,
       spin: Math.PI / 2 - 0.7,
       radius: 0.7,
@@ -4001,9 +4014,20 @@ export class Hotel implements GameSystem {
     gameBoy.root.rotation.y = 0.5;
     shell.add(gameBoy.root);
 
-    // A planter in the corner and a picture over the sofa, so the lounge is
-    // dressed to the same standard as the rest of the hotel. x shifted 3.8 m
-    // east with the outer wall it hugs when `SUITE.halfX` grew for #274.
+    // A planter in each corner and a picture over the sofa, so the lounge is
+    // dressed to the same standard as the rest of the hotel. The east one's x
+    // shifted 3.8 m out with the outer wall it hugs when `SUITE.halfX` grew
+    // for #274; its west mirror is new, at the same 7.2 m south depth,
+    // hugging the (also moved) bathroom wall the way the telly now does —
+    // otherwise the whole west end of the room, past the telly, was bare
+    // floor with nothing standing in it.
+    this.props.place(shell, SUITE, crystalPlanter(0x41a2, PALETTE.markerPink), {
+      x: -7.1,
+      z: 7.2,
+      radius: 0.6,
+      top: PLANTER_TOP,
+      stand: false,
+    });
     this.props.place(shell, SUITE, crystalPlanter(0x41a1, PALETTE.markerPink), {
       x: 13.6,
       z: 7.2,
