@@ -270,6 +270,24 @@ const TAU_PATH = Math.PI * 2;
  */
 const ROUTE_WALKER_PAD = 0.6;
 
+/**
+ * How far *outside* its own plot's blocker circle a route's true endpoint
+ * may still sit and count as "arriving at a destination" for
+ * {@link gridDetourAttempt}'s connector screening (issue #269 QA, seed 2/18).
+ *
+ * A camera-facing entry's doormat sits `standOff` (1.4 m, `parkLayout.ts`)
+ * plus its own edge distance off the plot centre — routinely just outside
+ * `boundingRadius` rather than inside it, so requiring literal embedding
+ * (as the general mid-search exemption still does) missed it: the rail-race
+ * stall's own doormat sat only 0.2 m outside its plot's blocker circle, none
+ * of the 4 candidate grid corners had a fully clear connector to it, and the
+ * leg gave up and fell back to a 25 m raw diagonal. 3 m comfortably covers
+ * the standoff itself plus the wobble a plot's actual footprint shape (a
+ * rectangle's corner reaches further than its `boundingRadius` circle
+ * suggests) can add on top.
+ */
+const DESTINATION_ARRIVAL_MARGIN = 3;
+
 /** True if the straight segment (ax,az)-(bx,bz) stays clear of every blocker
  * by at least `pad` metres — same closest-approach test as `rayToBlocker`,
  * bounded to the segment rather than an infinite ray. */
@@ -280,30 +298,32 @@ function segmentClearOfBlockers(
   bz: number,
   pad: number,
   blockers: readonly Blocker[] = BLOCKERS,
+  arrivalMargin = 0,
 ): boolean {
   const dx = bx - ax;
   const dz = bz - az;
   const lengthSq = dx * dx + dz * dz;
   for (const blocker of blockers) {
-    // A segment ending inside a *plot* blocker is arriving at a destination —
-    // every spur's last metres run into a plot mouth — so only the segment's
-    // *approach* is asked about, never whether it ends inside one. An arch
-    // foot is never a destination (issue #269 QA, seed 11: exempting one here
-    // is exactly what let a rail-race leg land 0.58 m from a path), so it
-    // never gets this exemption regardless of where the segment ends.
+    // A segment ending inside (or, within `arrivalMargin`, just outside) a
+    // *plot* blocker is arriving at a destination — every spur's last metres
+    // run into a plot mouth — so only the segment's *approach* is asked
+    // about, never whether it ends inside one. An arch foot is never a
+    // destination (issue #269 QA, seed 11: exempting one here is exactly
+    // what let a rail-race leg land 0.58 m from a path), so it never gets
+    // this exemption regardless of where the segment ends.
     const t =
       lengthSq > 1e-9
         ? Math.max(0, Math.min(1, ((blocker.x - ax) * dx + (blocker.z - az) * dz) / lengthSq))
         : 0;
-    if (
+    const exempt =
       blocker.kind === 'plot' &&
       t >= 1 - 1e-9 &&
-      Math.hypot(blocker.x - bx, blocker.z - bz) < blocker.radius
-    )
-      continue;
+      Math.hypot(blocker.x - bx, blocker.z - bz) < blocker.radius + arrivalMargin;
+    if (exempt) continue;
     const cx = ax + dx * t;
     const cz = az + dz * t;
-    if (Math.hypot(blocker.x - cx, blocker.z - cz) < blocker.radius + pad) return false;
+    const dist = Math.hypot(blocker.x - cx, blocker.z - cz);
+    if (dist < blocker.radius + pad) return false;
   }
   return true;
 }
@@ -530,6 +550,22 @@ function gridDetourAttempt(
   );
   const walkable = (ax: number, az: number, bx: number, bz: number, pad: number): boolean =>
     segmentClearOfBlockers(ax, az, bx, bz, pad, localBlockers) && segmentClearOfBoundary(ax, az, bx, bz);
+  // The connector into the *true* endpoint gets a little more slack on the
+  // "arriving at a destination" exemption than an ordinary mid-search edge
+  // does: a doormat typically stands `standOff` (1.4 m, `parkLayout.ts`) plus
+  // its own edge distance off its plot's centre, which is routinely just
+  // outside the plot's `boundingRadius` circle rather than inside it — close
+  // enough to be "arriving" in every sense that matters, but not literally
+  // embedded, so the plain (`arrivalMargin = 0`) exemption above missed it.
+  // Seed 2's rail-race stall sat only 0.2 m outside its own plot's blocker
+  // circle, and none of the 4 candidate grid corners had a fully clear
+  // connector to it — `goals` came back empty at every search reach, and the
+  // leg fell all the way back to a 25 m raw diagonal (issue #269 QA). Applied
+  // only to the one connector actually touching `a`/`b`, never to the
+  // ordinary edges the A* search walks between them.
+  const walkableToEndpoint = (ax: number, az: number, bx: number, bz: number): boolean =>
+    segmentClearOfBlockers(ax, az, bx, bz, ROUTE_WALKER_PAD, localBlockers, DESTINATION_ARRIVAL_MARGIN) &&
+    segmentClearOfBoundary(ax, az, bx, bz);
 
   const touching = (p: readonly [number, number]): [number, number][] => {
     const fx = Math.floor(p[0] / step);
@@ -542,8 +578,43 @@ function gridDetourAttempt(
     for (const gx of xs) for (const gz of zs) nodes.push([gx, gz]);
     return nodes;
   };
-  const starts = touching(a).filter(([gx, gz]) => walkable(a[0], a[1], toWorld(gx), toWorld(gz), ROUTE_WALKER_PAD));
-  const goals = touching(b).filter(([gx, gz]) => walkable(toWorld(gx), toWorld(gz), b[0], b[1], ROUTE_WALKER_PAD));
+  // The 4 immediate touching corners can *all* fail: a stall's doormat can
+  // sit in a genuinely tight pocket (seed 2/18's rail-race spur, issue #269
+  // QA) where every corner right next to it is blocked either by its own
+  // plot's mid-segment footprint or by a neighbouring arch foot that must
+  // never be exempted (seed 11's fix). None of that makes the *point itself*
+  // unreachable — a corner a couple of grid steps further out is routinely
+  // clear, since the measured gaps here were as small as 0.15-0.6 m. So when
+  // the immediate ring comes back empty, widen outward ring by ring (2 m grid
+  // steps, Chebyshev shells) and take the first shell with any walkable
+  // candidate, rather than giving up at reach 45/90/160 with a route that was
+  // always going to find a point but never a way to actually stand next to
+  // it.
+  const MAX_ENTRY_RING = 4;
+  const entryCandidates = (
+    p: readonly [number, number],
+    endpointWalkable: (gx: number, gz: number) => boolean,
+  ): [number, number][] => {
+    const immediate = touching(p).filter(([gx, gz]) => endpointWalkable(gx, gz));
+    if (immediate.length > 0) return immediate;
+    const cgx = Math.round(p[0] / step);
+    const cgz = Math.round(p[1] / step);
+    for (let radius = 1; radius <= MAX_ENTRY_RING; radius++) {
+      const ring: [number, number][] = [];
+      for (let dx = -radius; dx <= radius; dx++) {
+        for (let dz = -radius; dz <= radius; dz++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== radius) continue; // outer shell only
+          const gx = cgx + dx;
+          const gz = cgz + dz;
+          if (endpointWalkable(gx, gz)) ring.push([gx, gz]);
+        }
+      }
+      if (ring.length > 0) return ring;
+    }
+    return [];
+  };
+  const starts = entryCandidates(a, (gx, gz) => walkableToEndpoint(a[0], a[1], toWorld(gx), toWorld(gz)));
+  const goals = entryCandidates(b, (gx, gz) => walkableToEndpoint(toWorld(gx), toWorld(gz), b[0], b[1]));
   if (starts.length === 0 || goals.length === 0) return null; // no clear entry/exit at this reach
 
   const reachCells = Math.ceil(reach / step);
