@@ -1059,6 +1059,23 @@ export class Hotel implements GameSystem {
     return true;
   }
 
+  /**
+   * The `/hotel-suite` deep link: straight into the guest suite — where
+   * #273/#278's doorway-clearance fix (the lounge sofa and TV) and #279's
+   * bigger bedrooms and pet beds actually live — from wherever she is.
+   * Bypasses reception's key check on purpose: the normal route in is
+   * `CORRIDOR`'s `suite-door` band refusing entry without
+   * `saveFlags.hasHotelKey()` (see the walk-through handling above), but a
+   * deep link exists precisely so QA does not have to check in first to see
+   * the room. Same shape as {@link requestEnterLobby}.
+   */
+  requestEnterSuite(): boolean {
+    const player = this.player;
+    if (!player || player.riding || this.changingSpace || this.inside) return false;
+    this.changeSpace(() => this.enterSuite());
+    return true;
+  }
+
   // ---------------------------------------------------------------- zones
 
   interactZones(): InteractZone[] {
@@ -1622,6 +1639,25 @@ export class Hotel implements GameSystem {
       // straight at it as this line appears.
       this.say([`${greetingFor(this.deps.clock())}! Come to the desk and check in!`], -1);
     }
+  }
+
+  /**
+   * Lands just inside the suite's own corridor door, facing east down the
+   * hall — the exact spot `stepThroughDoor(SUITE, ...)` puts a guest who
+   * walked in from `CORRIDOR` (line ~1589), reused rather than re-picked so
+   * it is already known not to land inside a wall or a prop. From there the
+   * three bedroom doors (and `SUITE_BED_SPOTS`' beds behind them) line the
+   * north wall ahead-left, and the lounge door — home to the sofa and TV
+   * #278 moved clear of it — sits ahead-right: a look down the hall shows
+   * the whole doorway layout in one frame rather than one room jammed in a
+   * corner.
+   */
+  private enterSuite(): void {
+    const player = this.player;
+    if (!player) return;
+    this.inside = true;
+    this.hotelRoot.visible = true;
+    this.stepThroughDoor(SUITE, -SUITE.halfX + 1.6, 0, Math.PI / 2);
   }
 
   private leaveToPark(): void {
