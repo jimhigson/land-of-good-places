@@ -840,7 +840,7 @@ if (keyedReach < 1) {
   if (frames2.length === 0) problems.push('no hotel.artwork groups found — the paintings are gone');
 }
 
-// ---------------------- 21. no painting hangs where the mezzanine hides it
+// ---------------------- 26. no painting hangs where the mezzanine hides it
 //
 // Issue #271, Jim: the lobby's paintings could be highlighted and "Look!"ed
 // at while actually standing behind the gallery deck from the fixed camera's
