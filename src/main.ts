@@ -142,6 +142,11 @@ const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
   // layout that is different on every seed. Drops her just inside the front
   // door, key not yet given, so the whole check-in flow is testable.
   '/hotel': 'hotelLobby',
+  // A guest-floor bathroom (#281, every floor gets one) — same QA problem
+  // again, and worse: reaching one on foot means the lobby, the stairs *and*
+  // the corridor first. Drops her at Floor 1's own "Use" stand spot, facing
+  // the pan, so the fixtures and the privacy roof are on screen immediately.
+  '/hotel-bathroom': 'hotelBathroom',
 };
 
 /** What `/view` needs to drop a debug camera into the built park. See {@link parseDebugView}. */

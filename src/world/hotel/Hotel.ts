@@ -1108,6 +1108,24 @@ export class Hotel implements GameSystem {
     return true;
   }
 
+  /**
+   * The `/hotel-bathroom` deep link (#281): straight to a guest-floor
+   * bathroom, without the lobby-stairs-corridor walk to find one. Lands on
+   * Floor 1's (`BREAKFAST`'s) nook, facing the pan — the same "Use" stand
+   * spot `interactZones` itself walks her to, read from `this.bathrooms`
+   * rather than a second hand-copied literal, so a re-tuned nook stays
+   * correct here for free (see the "kept in step by hand" warning this repo
+   * has paid for before).
+   */
+  requestEnterBathroom(): boolean {
+    const player = this.player;
+    if (!player || player.riding || this.changingSpace || this.inside) return false;
+    const bathroom = this.bathrooms.get(BREAKFAST);
+    if (!bathroom) return false;
+    this.changeSpace(() => this.enterFloorBathroom(BREAKFAST, bathroom));
+    return true;
+  }
+
   // ---------------------------------------------------------------- zones
 
   interactZones(): InteractZone[] {
@@ -1681,6 +1699,26 @@ export class Hotel implements GameSystem {
       // straight at it as this line appears.
       this.say([`${greetingFor(this.deps.clock())}! Come to the desk and check in!`], -1);
     }
+  }
+
+  /**
+   * The `/hotel-bathroom` deep link's landing, mirroring {@link enterLobby}:
+   * binds play bounds to the floor room and stands her at the nook's own
+   * "Use" spot, facing the pan — derived from `bathroom`'s own fields
+   * (`standX/standZ` to `panX/panZ`) rather than a hardcoded yaw, so it stays
+   * right if the nook is ever re-tuned.
+   */
+  private enterFloorBathroom(room: HotelRoom, bathroom: Bathroom): void {
+    const player = this.player;
+    if (!player) return;
+    this.inside = true;
+    this.hotelRoot.visible = true;
+    this.boundTo(room);
+    const facing = Math.atan2(
+      bathroom.panX - bathroom.standX,
+      bathroom.panZ - bathroom.standZ,
+    );
+    player.teleportTo(room.originX + bathroom.standX, 0, room.originZ + bathroom.standZ, facing);
   }
 
   private leaveToPark(): void {
