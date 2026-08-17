@@ -262,11 +262,18 @@ const ROUTE_WALKER_PAD = 0.6;
 /** True if the straight segment (ax,az)-(bx,bz) stays clear of every blocker
  * by at least `pad` metres — same closest-approach test as `rayToBlocker`,
  * bounded to the segment rather than an infinite ray. */
-function segmentClearOfBlockers(ax: number, az: number, bx: number, bz: number, pad: number): boolean {
+function segmentClearOfBlockers(
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+  pad: number,
+  blockers: readonly Blocker[] = BLOCKERS,
+): boolean {
   const dx = bx - ax;
   const dz = bz - az;
   const lengthSq = dx * dx + dz * dz;
-  for (const blocker of BLOCKERS) {
+  for (const blocker of blockers) {
     // A segment ending inside a blocker is arriving at a destination — every
     // spur's last metres run into a plot mouth — so only the segment's
     // *approach* is asked about, never whether it ends inside one.
@@ -446,10 +453,61 @@ function elbowLeg(a: readonly [number, number], b: readonly [number, number]): (
  * their touching corners, screened by a real connector segment each, is
  * affordable here where it was a 100x solver regression as the general case.
  */
+/**
+ * Search reaches tried in order, widening until one finds a route.
+ *
+ * A single fixed reach was tried first (45 m) and was not enough: seed 5's
+ * sky-cruiser stall (tucked in the castle's tight west pocket) needed it
+ * widened from an original 30 m to clear, and seed 18's ball-pit spur then
+ * needed more still — a squeeze between two `near`-related plots can be
+ * arbitrarily tight depending on where the solver happened to land them, so
+ * there is no one constant that is "enough" for every seed. Widening on
+ * failure, rather than picking one large number up front, keeps the common
+ * case (a small search, resolved in microseconds) cheap and only pays for a
+ * bigger one when the smaller one actually failed.
+ */
+const GRID_DETOUR_REACHES: readonly number[] = [45, 90, 160];
+
 function gridDetour(a: readonly [number, number], b: readonly [number, number]): (readonly [number, number])[] {
+  for (const reach of GRID_DETOUR_REACHES) {
+    const found = gridDetourAttempt(a, b, reach);
+    if (found) return found;
+  }
+  // Every reach failed: the direct diagonal is the one leg
+  // `detourAroundBlockers` already proved clear, so this keeps the route
+  // connected rather than failing the build. `test/procgen/invariants.ts`'s
+  // axis-alignment check measures how often this actually fires.
+  return [b];
+}
+
+/** One `gridDetour` search at a given `reach`, or `null` if it finds nothing. */
+function gridDetourAttempt(
+  a: readonly [number, number],
+  b: readonly [number, number],
+  reach: number,
+): (readonly [number, number])[] | null {
   const step = 2;
-  const reach = 45; // metres past the pair's own bounding box the search may range
   const toWorld = (g: number) => g * step;
+
+  // `a` or `b` can genuinely sit *inside* a blocker's circle — arriving at a
+  // destination, exactly as `detourAroundBlockers`'s own "only the far
+  // endpoint may be inside a blocker" rule allows (seed 18's ball-pit spur:
+  // its own intermediate waypoint sits 17.3 m from the castle's centre,
+  // inside its 21.5 m radius). `segmentClearOfBlockers`'s endpoint exemption
+  // covers the *direct* connector into that point, but a grid search still
+  // has to walk actual cells to reach it — and every cell approaching an
+  // embedded point is, correctly, inside the same blocker too. So any
+  // blocker that already contains `a` or `b` is dropped from this search
+  // entirely, not just exempted at the one point touching it: the search
+  // would otherwise have a walkable goal with no walkable way to reach it.
+  const localBlockers = BLOCKERS.filter(
+    (blocker) =>
+      Math.hypot(a[0] - blocker.x, a[1] - blocker.z) >= blocker.radius &&
+      Math.hypot(b[0] - blocker.x, b[1] - blocker.z) >= blocker.radius,
+  );
+  const walkable = (ax: number, az: number, bx: number, bz: number, pad: number): boolean =>
+    segmentClearOfBlockers(ax, az, bx, bz, pad, localBlockers) && segmentClearOfBoundary(ax, az, bx, bz);
+
   const touching = (p: readonly [number, number]): [number, number][] => {
     const fx = Math.floor(p[0] / step);
     const cx = Math.ceil(p[0] / step);
@@ -461,13 +519,9 @@ function gridDetour(a: readonly [number, number], b: readonly [number, number]):
     for (const gx of xs) for (const gz of zs) nodes.push([gx, gz]);
     return nodes;
   };
-  const starts = touching(a).filter(([gx, gz]) =>
-    segmentIsWalkable(a[0], a[1], toWorld(gx), toWorld(gz), ROUTE_WALKER_PAD),
-  );
-  const goals = touching(b).filter(([gx, gz]) =>
-    segmentIsWalkable(toWorld(gx), toWorld(gz), b[0], b[1], ROUTE_WALKER_PAD),
-  );
-  if (starts.length === 0 || goals.length === 0) return [b]; // give up: keep the proven diagonal
+  const starts = touching(a).filter(([gx, gz]) => walkable(a[0], a[1], toWorld(gx), toWorld(gz), ROUTE_WALKER_PAD));
+  const goals = touching(b).filter(([gx, gz]) => walkable(toWorld(gx), toWorld(gz), b[0], b[1], ROUTE_WALKER_PAD));
+  if (starts.length === 0 || goals.length === 0) return null; // no clear entry/exit at this reach
 
   const reachCells = Math.ceil(reach / step);
   const allGx = [...starts, ...goals].map((n) => n[0]);
@@ -523,7 +577,7 @@ function gridDetour(a: readonly [number, number], b: readonly [number, number]):
       const startOrGoal = isStart(ngx, ngz) || isGoal(ngx, ngz) || isStart(cgx, cgz) || isGoal(cgx, cgz);
       if (
         !startOrGoal &&
-        !segmentIsWalkable(toWorld(cgx), toWorld(cgz), toWorld(ngx), toWorld(ngz), ROUTE_WALKER_PAD)
+        !walkable(toWorld(cgx), toWorld(cgz), toWorld(ngx), toWorld(ngz), ROUTE_WALKER_PAD)
       )
         continue;
       const tentative = (gScore[currentIdx] as number) + step;
@@ -536,13 +590,7 @@ function gridDetour(a: readonly [number, number], b: readonly [number, number]):
     }
   }
 
-  if (reachedIdx === -1) {
-    // Give up: the direct diagonal is the one leg `detourAroundBlockers`
-    // already proved clear, so this keeps the route connected rather than
-    // failing the build. `test/procgen/invariants.ts`'s axis-alignment
-    // check measures how often this actually fires.
-    return [b];
-  }
+  if (reachedIdx === -1) return null; // no route found within this reach
 
   const gridPoints: [number, number][] = [];
   let cur = reachedIdx;
