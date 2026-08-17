@@ -172,6 +172,21 @@ line to add** in `RIDE_DEEP_LINKS`, and worth adding rather than writing
 directions. Say plainly which URL shows which thing when several are in
 flight at once, because they will be on several ports.
 
+**The same rule applies to PR preview URLs, not just local dev servers.**
+When handing Jim a Cloudflare Workers preview link (`wrangler versions
+upload`'s `<hash>-land-of-good-places.blockstack.workers.dev`), append the
+feature's deep-link path exactly as you would for `localhost` — the same
+`origin/main..HEAD` build sitting behind a different host is still a park
+he has to find his way around blind on a root URL. Before opening a PR (or
+before handing a preview link over if the PR is already open), check
+whether the feature has an existing entry in `RIDE_DEEP_LINKS` or a
+documented `/view` camera; if it doesn't and reaching the feature would
+otherwise mean walking or triggering game state, add one on that PR's own
+branch — it travels with the branch into the preview build for free. Not
+everything needs one: an input-handling or gesture fix (pinch-to-zoom,
+tap-and-hold) has no "place" to link to — say so plainly instead of forcing
+a link that adds nothing.
+
 **Deep links for reaching a ride under test without walking there:**
 `/rail-race`, `/sky-cruiser` and `/ferris` skip straight past the welcome-back
 prompt and board that ride the instant the park (or a freshly created
