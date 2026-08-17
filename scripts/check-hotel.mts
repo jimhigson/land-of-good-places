@@ -840,6 +840,44 @@ if (keyedReach < 1) {
   if (frames2.length === 0) problems.push('no hotel.artwork groups found — the paintings are gone');
 }
 
+// ---------------------- 21. no painting hangs where the mezzanine hides it
+//
+// Issue #271, Jim: the lobby's paintings could be highlighted and "Look!"ed
+// at while actually standing behind the gallery deck from the fixed camera's
+// own point of view — the highlight and the interact zone are pure distance,
+// with no idea a deck stands between the canvas and the lens. Root cause:
+// both were declared on the north wall, and `LOBBY.mezzanine` reaches the
+// *whole* width of that wall, so every point on it is permanently in the
+// deck's shadow — not a placement mistake `hangOnWalls`' glass-and-doorway
+// search would ever have caught, because it had never been taught the deck
+// was a third kind of "spoken for".
+//
+// `Hotel.hangOnWalls`'s `clearOfGlass` now refuses a spot `mezzanineHidesPoint`
+// calls hidden, the same way it already refuses one over glass or a doorway
+// gap — this probe is the belt to that generator-time brace: it re-asks the
+// same question of the **built** `hotel.artworks` list (never the layout
+// declarations that produced it), against every room that has a mezzanine.
+// Today only the lobby does; the loop is written for whichever room next
+// grows one.
+//
+// Proven red before trusted green: reverting `clearOfGlass`'s mezzanine
+// check while leaving the lobby's old north-wall picture declarations in
+// place reproduces exactly the two hidden paintings this was written for.
+for (const placement of hotel.artworkPlacements) {
+  const plan = placement.room.mezzanine;
+  if (!plan) continue;
+  const localX = placement.x - placement.room.originX;
+  const localY = placement.y;
+  const localZ = placement.z - placement.room.originZ;
+  if (mezzanineHidesPoint(plan, localX, localY, localZ)) {
+    problems.push(
+      `${placement.room.space}: a painting at local (${localX.toFixed(1)}, ${localY.toFixed(1)}, ` +
+        `${localZ.toFixed(1)}) is hidden behind the mezzanine from the fixed camera — it can still ` +
+        `be highlighted and "Look!"ed at, but there is never anything to see`,
+    );
+  }
+}
+
 // ------------------------------------------ 9. the close-ups keep their distance
 //
 // Jim, live play, 7 Aug 2026: the breakfast push-in *"often zooms in to

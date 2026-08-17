@@ -963,6 +963,21 @@ export class Hotel implements GameSystem {
   }
 
   /**
+   * Where each painting actually hangs, world metres, plus which room it is
+   * in — for `check:hotel`'s mezzanine-occlusion probe (issue #271), which
+   * needs the room's own mezzanine plan alongside the built position and
+   * cannot get both from {@link artworkStands} alone.
+   */
+  get artworkPlacements(): readonly {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+    readonly room: HotelRoom;
+  }[] {
+    return this.artworks.map((art) => ({ x: art.x, y: art.y, z: art.z, room: art.room }));
+  }
+
+  /**
    * One frame of whichever camera moment is running, and the seam.
    *
    * `onCinematic` is told **only when the answer changes** — handing `Game` the
