@@ -2967,9 +2967,12 @@ export class Hotel implements GameSystem {
     // statue. Its beams sweep all three levels.
     this.hangDiscoBall(shell, 0, 8.3, 4.6, { scale: 3, lit: true, room: LOBBY });
     // The medallion: Eleri's rainbow ring, inlaid round the plinth. Inner
-    // radius 1.4 clears the 1.15 m footing; six 0.22 m bands keep the whole
-    // medallion inside the runner's line so the axis stays one composition.
-    const ring = rainbowRing(1.4, 0.22);
+    // radius 1.4 clears the 1.15 m footing; six 0.15 m bands (0.22 until
+    // issue #270's foyer/hall partition landed at `LOBBY_HALL_Z`) keep the
+    // whole medallion inside the runner's line **and** short of the new
+    // partition — `check:hotel` probe 19 measures the built ring's box
+    // against the built wall's, so the two cannot drift back into each other.
+    const ring = rainbowRing(1.4, 0.15);
     ring.position.set(0, 0, 4.6);
     shell.add(ring);
     // Kept, because checking in flashes them — see `checkIn`. The ring is six
@@ -3130,38 +3133,52 @@ export class Hotel implements GameSystem {
       // north wall is the end of the axis now, the far side of the
       // see-through, and a dark terminus reads as a hole rather than a room.
       north: [-8.4, 0, 8.4],
-      // Moved off −4.6/2 (8 Aug 2026's spots) to make room for the two
-      // paintings below, which now hang between them.
-      west: [-6.9, 0.8],
-      // **Issue #271: not on the north wall any more.** Every point on that
-      // wall stands under the gallery deck (`LOBBY.mezzanine` reaches all the
-      // way to it), and the fixed iso camera's own ray from any point there
-      // crosses the deck's box before it reaches the lens — `mezzanineHidesPoint`
-      // says so of the *old* declared spots, which is exactly how this bug
-      // was found. There is no position on that wall {@link clearOfGlass}
-      // could have slid to, because the whole wall is the shadow, not a
-      // stretch of it — so the fix is a different wall, not a different
-      // number. These two hang on the west wall instead, in the stairs-and-
-      // -lifts hall, clear of the shadow, the lift gap and the window either
-      // side (`clearOfGlass` now refuses a spot the deck hides, the same way
-      // it already refuses one over glass — see its own comment).
-      pictures: [
-        { wall: 'west', along: -4.75, width: 1.5, height: 1.25, seed: 0x10c2 },
-        { wall: 'west', along: -2.55, width: 1.5, height: 1.25, seed: 0x10c3 },
-      ],
+      // The southern sconce moved off z = -6 when the west wall's northern
+      // pane did (see `LOBBY.windows` — a sconce on glass lights nothing).
+      west: [-4.6, 2],
+      // **Issue #271: no lobby wall paintings any more, on either wall.**
+      // The north wall was the bug — every point on it stands under the
+      // gallery deck (`LOBBY.mezzanine` reaches the whole way to that wall),
+      // so the fixed camera's own ray from anywhere on it crosses the deck's
+      // box before it reaches the lens; `mezzanineHidesPoint` says so, which
+      // is how the bug was found. {@link clearOfGlass} now refuses a spot
+      // the deck hides (the same way it already refuses one over glass), so
+      // that wall can never host one again.
+      //
+      // The west wall looked like the fix, until `check:tap-spacing` measured
+      // it: that wall's every point is within 0.31 m (local x) of the lift's
+      // own boarding band, whose 2.6 m half-width plus a picture's 2 m pick
+      // radius plus the tap-spacing finger needs |z| ≥ 5.73 m of the lift —
+      // and on both sides of that line the wall is already spoken for, tight
+      // enough that nothing 1.5 m wide fits the gap: the crystal column at
+      // z = −6.6/+6.6 and the "Look out" zone pinned to the window at −6.6 to
+      // the north, the same column and the café table at +7.7 to the south,
+      // then the room's own south-wall corner. Measured, not guessed — this
+      // is the shape a real search through every candidate came back with.
+      //
+      // So: no lobby wall art. The statue, the disco ball, the mosaic floor
+      // and the café corner carry the room; two other floors (breakfast,
+      // the suite) still hang real paintings.
+      pictures: [],
     });
     this.dressMezzanine(shell);
 
     // A painted arrow on the floor pointing at the lift — "an arrow showing
     // the way to your floor, on the floors of the hotel". Two legs now
     // (issue #270): the straight line this used to be would have crossed the
-    // new foyer/hall partition through solid wall, 9 m off-centre from its
-    // one doorway. The first leg threads clear of the statue's own footprint
-    // to the doorway at x ≈ −1 (inside {@link LOBBY_HALL_Z}'s ±1.2 m
-    // opening); the second picks up on the far side and carries on between
-    // the west seating group and the café to the lift's mouth.
-    this.paintArrow(shell, -2.4, 9.2, -1.0, 2.4);
-    this.paintArrow(shell, -1.0, 1.6, -10.8, 0.4);
+    // new foyer/hall partition through solid wall. The first leg carries on
+    // past the statue to {@link LOBBY_HALL_DOOR_X}'s doorway; the second
+    // picks up on the far side and carries on between the west seating group
+    // and the café to the lift's mouth.
+    //
+    // **A decal tier up from the default**, because the first leg's straight
+    // line still passes inside the rainbow ring's own radius round the
+    // statue — `check:hotel` probe 17 caught the two exactly coplanar at
+    // 4·`DECAL_STEP` (both 0.080 m, "0.0 mm apart"), the same class of
+    // flicker the garden's arrow already sidesteps over its own stacked lawn
+    // rug.
+    this.paintArrow(shell, -2.4, 9.2, -3.0, 2.4, 8 * DECAL_STEP);
+    this.paintArrow(shell, -3.0, 1.6, -10.8, 0.4, 8 * DECAL_STEP);
 
     return statue;
   }

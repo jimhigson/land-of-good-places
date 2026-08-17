@@ -889,11 +889,67 @@ const STAIR_ARC_Z = -2.5;
  * mechanism rather than inventing new space plumbing (NavGrid, save flags,
  * portals) for what is, underneath, still a floor a child never leaves.
  *
- * The doorway sits on the promenade axis (x = 0), the same line the statue
- * and the arch beyond it already stand on, so "doors → reception → through to
- * the stairs" continues to read as one straight walk rather than a detour.
+ * **Off the promenade axis, not on it** — see {@link LOBBY_HALL_DOOR_X}.
  */
 export const LOBBY_HALL_Z = 2.0;
+
+/**
+ * Where the foyer/hall doorway sits along {@link LOBBY_HALL_Z} — off the
+ * promenade axis (x = 0) on purpose, even though the axis is where a doorway
+ * "reads" best.
+ *
+ * The first cut put it at x = 0, square with the statue and the arch beyond.
+ * `check:nav-routes` found the real bug that hides behind "square with the
+ * statue": the statue's own collision footprint, fattened by a player's own
+ * radius, reaches to within about 0.6 m of the wall on that exact line, so
+ * the only way through was a dogleg past the statue and back onto the axis
+ * through a gap not much wider than a child — narrow enough that the router's
+ * half-metre lattice (`NavGrid`'s own doc) could not reliably find it, the
+ * same class of problem the mezzanine's stairs solved with a declared
+ * connector rather than trusting the lattice. Moving the statue was the other
+ * option and the worse one: it is Eleri's own placement, "south of the arch,
+ * on the promenade", and not this fix's business to re-tune. The doorway
+ * moves instead, comfortably clear of the statue's fattened footprint in
+ * every direction, and `check:nav-routes`'s floor ↔ gallery walk (not just
+ * its waypoint count) is what proves a body can actually make the trip.
+ */
+export const LOBBY_HALL_DOOR_X = -3;
+
+/**
+ * Where each curved flight's own foot stands, along the partition — the
+ * **second** reason this wall carries more than one doorway.
+ *
+ * `check:nav-routes` found this one after {@link LOBBY_HALL_DOOR_X}: a
+ * flight's floor-level connector anchor (`mezzanineWalkConnectors`'
+ * `CONNECTOR_APPROACH` point, one stride out from the bottom tread) sits at
+ * `±(STAIR_ARC_C + CONNECTOR_APPROACH)`, and the wall — even pushed as far
+ * from the statue as {@link LOBBY_HALL_Z} allows — still fattens, by a
+ * walker's own radius, across that exact point. A blocked anchor is not a
+ * detour, it is a connector with nowhere to start: `findRoute` never climbed
+ * at all, ending every route to the gallery at floor level with the goal
+ * still unreached (`lastRouteReachedGoal` false), which is what the multi-hop
+ * probes in `check:nav-routes` exist to catch.
+ *
+ * So the wall does not run past either flight's own foot — the same
+ * principle as the lift alcove's gap, just for a staircase instead of a car.
+ * A grand staircase's own structure is where a dividing wall stops anyway;
+ * nothing here is holding a door open beside the stairs, the stairs simply
+ * are the opening.
+ *
+ * **A single {@link SUITE_DOOR_WIDTH} gap here is not enough**, and this one
+ * doorway is why: `check:nav-routes`' walked leg (not just its planned route)
+ * still wedged, 0.4 m off the jamb — a wall's own registered half-thickness
+ * plus a walker's radius rounds a doorway's *corner* off by about 0.87 m, and
+ * a route arriving at this doorway on the diagonal (from the foyer, off to
+ * one side, to a point on the far side of the room) clips exactly that
+ * corner rather than passing through the middle the way a square-on suite
+ * doorway is normally crossed. Two doors, `±0.8` either side of the same
+ * centre, give one continuous 4 m opening — plenty of room for a diagonal
+ * crossing to clear both corners — where one alone gives 2.4 m with two
+ * corners already eating most of it.
+ */
+export const LOBBY_HALL_STAIR_CLEARANCE_X = STAIR_ARC_C + CONNECTOR_APPROACH;
+const STAIR_CLEARANCE_DOOR_SPREAD = 0.8;
 
 export const LOBBY: HotelRoom = {
   space: SPACE_HOTEL_LOBBY,
@@ -929,12 +985,30 @@ export const LOBBY: HotelRoom = {
     // lift band and the pane the café tables crowd.
     west: { at: [-6.6, 3.2, 9.6], width: 1.8, sill: 1.2, head: 3.6, zoneAt: -6.6 },
   },
-  // The foyer/hall divide — see {@link LOBBY_HALL_Z}. One doorway, on the
-  // promenade axis, {@link SUITE_DOOR_WIDTH} wide like every other room
-  // doorway in the hotel; the run reaches both outer walls (CLAUDE.md's own
-  // lesson from the suite — a partition that stops short of a wall is a
+  // The foyer/hall divide — see {@link LOBBY_HALL_Z}. Five doorways:
+  // {@link LOBBY_HALL_DOOR_X} for foot traffic, {@link SUITE_DOOR_WIDTH}
+  // wide like every other room doorway in the hotel, and a paired,
+  // double-wide one either side at ±{@link LOBBY_HALL_STAIR_CLEARANCE_X}
+  // where the wall would otherwise fatten across a stair's own connector
+  // anchor (see that constant's own doc for why one doorway's width was not
+  // enough there). The run reaches both outer walls (CLAUDE.md's own lesson
+  // from the suite — a partition that stops short of a wall is a
   // free-standing wall end you can see, and walk, around).
-  partitions: [{ along: 'x', at: LOBBY_HALL_Z, from: -13, to: 13, doors: [0] }],
+  partitions: [
+    {
+      along: 'x',
+      at: LOBBY_HALL_Z,
+      from: -13,
+      to: 13,
+      doors: [
+        LOBBY_HALL_DOOR_X,
+        LOBBY_HALL_STAIR_CLEARANCE_X - STAIR_CLEARANCE_DOOR_SPREAD,
+        LOBBY_HALL_STAIR_CLEARANCE_X + STAIR_CLEARANCE_DOOR_SPREAD,
+        -LOBBY_HALL_STAIR_CLEARANCE_X - STAIR_CLEARANCE_DOOR_SPREAD,
+        -LOBBY_HALL_STAIR_CLEARANCE_X + STAIR_CLEARANCE_DOOR_SPREAD,
+      ],
+    },
+  ],
   // The imperial plan — see {@link Mezzanine} for what each piece is, and
   // HANDOFF-lobby-art.md for where every number comes from. The derivations,
   // for the reader (assertStairMatches proves them):
