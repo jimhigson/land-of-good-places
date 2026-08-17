@@ -1144,15 +1144,50 @@ export const SUITE_DOOR_WIDTH = 2.4;
  * side of it, so moving a bed without moving its partition is a bed in a wall;
  * `check:hotel` measures that too.
  */
+// Bedroom1's and bedroom3's spots shifted 3.8 m with their bedrooms when
+// `SUITE.halfX` grew for issue #274 (see the comment there); bedroom2's is
+// untouched, since bedroom2 grew symmetrically about its own centre.
 export const SUITE_BED_SPOTS: readonly (readonly [number, number])[] = [
-  [-6.9, -5.2],
+  [-10.7, -5.2],
   [-0.4, -5.2],
-  [7.2, -5.2],
+  [11.0, -5.2],
 ];
 
 /** Where the bedside tables stand — beside each bed, same reasoning as above. */
-export const SUITE_BEDSIDE_X: readonly number[] = [-5.4, 1.1, 8.7];
+export const SUITE_BEDSIDE_X: readonly number[] = [-9.2, 1.1, 12.5];
 export const SUITE_BEDSIDE_Z = -5.2;
+
+/**
+ * Candidate slots for the middle bedroom's pet beds, one per pet the player
+ * owns — see `Hotel.dressPetBeds` (issue #275). **Here, not in `Hotel.ts`,
+ * for the same reason {@link SUITE_BED_SPOTS} is**: `check:hotel` needs them
+ * too, to prove the whole row keeps clear of the human bed, the bedside
+ * table and the hall doorway — including the slots a fresh save's empty
+ * inventory never exercises, since the default build only ever places one
+ * fallback bed.
+ *
+ * Hand-measured against this bedroom's own furniture — the human bed at
+ * x ≈ −0.4 and its bedside table at x ≈ 1.1 (both {@link SUITE_BED_SPOTS}[1]
+ * and {@link SUITE_BEDSIDE_X}[1]) — closest to that cluster first,
+ * alternating west and east so the row grows outward evenly across the
+ * bedroom issue #274 widened for exactly this. Each same-side pair is 1.3 m
+ * apart, comfortably past the 1.24 m two {@link PET_BED_FOOTPRINT_RADIUS}
+ * circles need to clear each other; west has room for one more than east
+ * before either reaches its own wall, because the human bed's cluster sits
+ * slightly west of the bedroom's own centre. Seven slots is headroom, not a
+ * hard cap: the shop sells four species, so an eighth pet re-uses the last
+ * slot rather than the row spilling into a wall.
+ */
+export const PET_BED_SLOTS_X: readonly number[] = [-2.7, 3.6, -4.0, 4.9, -5.3, 6.2, -6.6];
+
+/** Z of every pet bed's row — 4.7 m north of the hall doorway, well clear of it. */
+export const PET_BED_ROW_Z = -6.4;
+
+/**
+ * A pet bed's whole footprint radius — the posts and canopy, not just
+ * {@link PET_BED_CUSHION_RADIUS}'s cushion (`art/models/hotelAssets.ts`).
+ */
+export const PET_BED_FOOTPRINT_RADIUS = 0.62;
 
 /**
  * How tall the suite's internal partitions are.
@@ -1173,9 +1208,23 @@ export const SUITE: HotelRoom = {
   theme: SUITE_THEME,
   originX: HOTEL_ORIGIN_X,
   originZ: HOTEL_SUITE_Z,
-  // Grown from 8 × 6 to hold four rooms. The far corner is 13.6 m from the
-  // origin, well inside `HOTEL_PLAY_RADIUS`'s 24 m.
-  halfX: 11,
+  // Grown from 8 × 6 to hold four rooms, then widened again (issue #274,
+  // 17 Aug 2026: *"the hotel bedroom should be roughly double its current
+  // size"*) so the middle bedroom — the one with the pet's own furniture,
+  // see {@link SUITE.partitions} — could hold a small bed for each pet the
+  // player owns rather than one shared four-poster (issue #275).
+  //
+  // **Width only, and by exactly the middle bedroom's own old width.** The
+  // west and east bedrooms keep their existing footprint and furniture,
+  // simply translated outward by 3.8 m each; every extra metre of the 7.6 m
+  // `halfX` grew by goes to the middle bedroom alone, taking it from 7.6 to
+  // 15.2 m wide — literally double, area included, since its 6.3 m depth is
+  // untouched. Depth was deliberately left alone: the room is one rectangle,
+  // so growing `halfZ` would have grown the hall, lounge and bathroom by the
+  // same amount for free, which is a much bigger change than "the bedroom"
+  // asked for. The far corner is now 17 m from the origin, still comfortably
+  // inside `HOTEL_PLAY_RADIUS`'s 24 m.
+  halfX: 14.8,
   halfZ: 8,
   wallHeight: 3.0,
   // West: back out to the corridor.
@@ -1193,20 +1242,26 @@ export const SUITE: HotelRoom = {
   // to the edge of the space."* `check:hotel` probe 18 now measures every
   // partition end in the hotel against the built walls.
   partitions: [
-    { along: 'x', at: -1.7, from: -11, to: 11, doors: [-6.6, 0, 6.6] },
-    { along: 'x', at: 1.7, from: -11, to: 11, doors: [4.4] },
-    { along: 'z', at: -4.2, from: -8, to: -1.7, doors: [] },
-    { along: 'z', at: 3.4, from: -8, to: -1.7, doors: [] },
-    // The bathroom's own wall — the south half's answer to the bedroom
-    // divider at the same x, so the plan reads as one grid. **Its doorway
-    // opens off the lounge, not the hall** — an en-suite off the living
-    // room — because a hall-side door boxed the pan into corners the fixed
-    // camera cannot see (a 2.2 m partition hides 2.8 m of floor behind it)
-    // or into the door band's own finger of tap clearance; watched in the
-    // browser, not guessed. The door's north jamb lands exactly on the hall
-    // wall's line, so the run's built span is one clean piece from jamb to
-    // south wall.
-    { along: 'z', at: -4.2, from: 1.7, to: 8, doors: [2.9] },
+    { along: 'x', at: -1.7, from: -14.8, to: 14.8, doors: [-10.4, 0, 10.4] },
+    { along: 'x', at: 1.7, from: -14.8, to: 14.8, doors: [4.4] },
+    // Bedroom1/bedroom2 boundary — was x = −4.2, moved 3.8 m west so bedroom2
+    // (east of here) gains that much extra width.
+    { along: 'z', at: -8.0, from: -8, to: -1.7, doors: [] },
+    // Bedroom2/bedroom3 boundary — was x = 3.4, moved 3.8 m east for the
+    // same reason, from the other side.
+    { along: 'z', at: 7.2, from: -8, to: -1.7, doors: [] },
+    // The bathroom's own wall — the south half's answer to the bedroom1/2
+    // divider at the same x, so the plan still reads as one grid; it moved
+    // with that divider (−4.2 → −8.0) rather than staying put, which is what
+    // keeps the bathroom itself exactly the size it always was. **Its
+    // doorway opens off the lounge, not the hall** — an en-suite off the
+    // living room — because a hall-side door boxed the pan into corners the
+    // fixed camera cannot see (a 2.2 m partition hides 2.8 m of floor behind
+    // it) or into the door band's own finger of tap clearance; watched in
+    // the browser, not guessed. The door's north jamb lands exactly on the
+    // hall wall's line, so the run's built span is one clean piece from jamb
+    // to south wall.
+    { along: 'z', at: -8.0, from: 1.7, to: 8, doors: [2.9] },
   ],
   // **One per room.** The suite is four rooms now, and a bedroom with no
   // window is the thing Jim objected to in the first place (*"a room without
@@ -1223,10 +1278,13 @@ export const SUITE: HotelRoom = {
     // apart, and the tap-spacing rule (`world/tapSpacing.ts`) wants a full
     // finger between different actions.
     // `zoneAt` pins "Look out" to the third bedroom's pane: the middle one's
-    // stand spot is blocked (the pet's four-poster lives in that bedroom), so
-    // the default picker slid to the first bedroom's pane — 3.04 m from the
-    // west wall's painting, inside the tap rule's finger.
-    north: { at: [-9.5, -2.9, 9.7], width: 2.2, sill: 1.5, head: 2.6, zoneAt: 9.7 },
+    // stand spot is blocked (the pet beds live in that bedroom — see
+    // `Hotel.dressPetBeds`), so the default picker slid to the first
+    // bedroom's pane — 3.04 m from the west wall's painting, inside the tap
+    // rule's finger. Bedroom1's and bedroom3's panes shifted 3.8 m with their
+    // bedrooms (see `SUITE.halfX`); bedroom2's is untouched, since bedroom2
+    // grew symmetrically about its own centre.
+    north: { at: [-13.3, -2.9, 13.5], width: 2.2, sill: 1.5, head: 2.6, zoneAt: 13.5 },
     // One pane, lighting the bathroom — light only, no zone (see
     // {@link WindowWall.lookZone}). The pair that used to flank the front
     // door (±1.95) could not survive the partitions reaching the west wall:

@@ -84,11 +84,16 @@ import {
   SUITE_BEDSIDE_Z,
   SUITE_BED_SPOTS,
   SUITE_DOOR_WIDTH,
+  PET_BED_SLOTS_X,
+  PET_BED_ROW_Z,
+  PET_BED_FOOTPRINT_RADIUS,
+  doorwayClearanceZones,
   relativeLuminance,
   THEME_FLOOR_CONTRAST_MIN,
   mezzanineGuardedEdges,
   mezzanineHidesPoint,
 } from '../src/world/hotel/layout.ts';
+import { isClearOfDoorways } from '../src/world/hotel/place.ts';
 import { ZONE_HEIGHT_TOLERANCE, pickInteractZone } from '../src/world/interact.ts';
 import { cameraOffset } from '../src/core/cameraRig.ts';
 import { segmentsMinusGaps } from '../src/world/wallRuns.ts';
@@ -306,6 +311,50 @@ for (const [index, spot] of SUITE_BED_SPOTS.entries()) {
       `${what} is boxed in at (${spot[0]}, ${spot[1]}) — solid within 1.3 m on both sides, so it ` +
         `is standing in a partition rather than in a bedroom`,
     );
+  }
+}
+
+// ------------------------------------------ 3b. every pet bed slot is usable
+//
+// Issue #275: a small pet bed for every pet she owns, at one of
+// `PET_BED_SLOTS_X`'s slots (`layout.ts`). A fresh headless save's empty
+// inventory only ever exercises slot 0 (the fallback bunny bed), so this
+// checks every slot by pure geometry instead of seeding six pets into a save
+// just to reach slot 5 — the same reason `SUITE_BED_SPOTS` is read from
+// `layout.ts` rather than typed out here a second time.
+{
+  const doors = doorwayClearanceZones(SUITE, PLAYER_RADIUS);
+  const humanBed = SUITE_BED_SPOTS[1] ?? [0, 0];
+  const bedsideX = SUITE_BEDSIDE_X[1] ?? 0;
+  for (const [index, x] of PET_BED_SLOTS_X.entries()) {
+    const bounds = { x, z: PET_BED_ROW_Z, radius: PET_BED_FOOTPRINT_RADIUS };
+    if (!isClearOfDoorways(bounds, doors)) {
+      problems.push(
+        `pet bed slot ${index} at local x=${x} sits inside a doorway's clearance zone — a bed ` +
+          `there would leave the hall too narrow to use`,
+      );
+    }
+    // Clear of the bedroom's own two side walls (the partitions at x = −8.0
+    // and x = 7.2 — see `SUITE.partitions`).
+    if (x - PET_BED_FOOTPRINT_RADIUS < -8.0 + 0.2 || x + PET_BED_FOOTPRINT_RADIUS > 7.2 - 0.2) {
+      problems.push(`pet bed slot ${index} at local x=${x} reaches past the bedroom's own wall`);
+    }
+    // Clear of the human bed (a 1.4 × 2 m rectangle) and its bedside table
+    // (a 0.36 m-radius circle), both at z ≈ SUITE_BEDSIDE_Z.
+    const bedDX = Math.max(Math.abs(x - humanBed[0]) - 0.7, 0);
+    const bedDZ = Math.max(Math.abs(PET_BED_ROW_Z - humanBed[1]) - 1, 0);
+    if (Math.hypot(bedDX, bedDZ) < PET_BED_FOOTPRINT_RADIUS) {
+      problems.push(`pet bed slot ${index} at local x=${x} overlaps the human bed`);
+    }
+    if (Math.hypot(x - bedsideX, PET_BED_ROW_Z - SUITE_BEDSIDE_Z) < PET_BED_FOOTPRINT_RADIUS + 0.36) {
+      problems.push(`pet bed slot ${index} at local x=${x} overlaps its bedside table`);
+    }
+    // Clear of every other slot in the row.
+    for (const other of PET_BED_SLOTS_X.slice(index + 1)) {
+      if (Math.abs(x - other) < PET_BED_FOOTPRINT_RADIUS * 2) {
+        problems.push(`pet bed slots at local x=${x} and x=${other} overlap each other`);
+      }
+    }
   }
 }
 
@@ -1274,9 +1323,26 @@ if (fallenPlayer.position.y < 0) {
         );
       }
 
+      // **Issue #275: the pets go to sleep too, all together.** Every pet
+      // bed's pet should now be lying down — `Hotel.layPetDown`'s rotation,
+      // read off the public `petBeds` list rather than re-derived here.
+      for (const { pet, x } of hotel.petBeds) {
+        if (Math.abs(pet.root.rotation.x + Math.PI / 2) > 0.01) {
+          problems.push(
+            `a pet bed's pet at local x=${x} is not lying down while the player naps — issue ` +
+              `#275 wants every pet asleep too`,
+          );
+        }
+      }
+
       // Hand the room back the way the earlier probes left it: one giant tick
-      // outlasts any nap.
+      // outlasts any nap. The pets should stand back up with it.
       hotel.update({ dt: 999, elapsed: 0 } as never);
+      for (const { pet, x } of hotel.petBeds) {
+        if (Math.abs(pet.root.rotation.x) > 0.01) {
+          problems.push(`a pet bed's pet at local x=${x} did not wake back up when the nap ended`);
+        }
+      }
       scene.remove(napper.group);
     }
   }
@@ -1619,12 +1685,14 @@ for (const room of ROOMS) {
 //  * a player standing in the bathroom is covered by the roof, and the wash
 //    beat lifts it while she is still inside.
 {
-  const bathX = SUITE.originX - 7.8;
+  // Both shifted 3.8 m west with the bathroom wall when `SUITE.halfX` grew
+  // for issue #274 (`Hotel.dressBathroom`).
+  const bathX = SUITE.originX - 11.6;
   const bathZ = SUITE.originZ + 4.6;
   if (deflection(bathX, bathZ) < 0.1) {
     problems.push('the suite bathroom pan is not solid — a child walks straight through it');
   }
-  if (deflection(SUITE.originX - 9.7, SUITE.originZ + 2.45) < 0.1) {
+  if (deflection(SUITE.originX - 13.5, SUITE.originZ + 2.45) < 0.1) {
     problems.push('the suite bathroom basin is not solid — a child walks straight through it');
   }
   const atopPan = deflectionAt(bathX, 0.75, bathZ);
@@ -1636,7 +1704,9 @@ for (const room of ROOMS) {
   }
 
   hotel.attachPlayer(fallenPlayer as never);
-  fallenPlayer.position.set(SUITE.originX - 7.6, 0, SUITE.originZ + 4.8);
+  // Shifted 3.8 m west with the bathroom wall, matching `dressBathroom`'s
+  // own `clearFloorAround` query point.
+  fallenPlayer.position.set(SUITE.originX - 11.4, 0, SUITE.originZ + 4.8);
   hotel.adoptRestoredPlayer();
   const bathroomZone = hotel.interactZones().find((zone) => zone.id === 'hotel-bathroom');
   if (!bathroomZone) {

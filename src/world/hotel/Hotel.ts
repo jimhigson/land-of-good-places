@@ -151,6 +151,9 @@ import {
   SUITE_BED_SPOTS,
   SUITE_BEDSIDE_X,
   SUITE_BEDSIDE_Z,
+  PET_BED_SLOTS_X,
+  PET_BED_ROW_Z,
+  PET_BED_FOOTPRINT_RADIUS,
   SUITE_DOOR_WIDTH,
   SUITE_PARTITION_HEIGHT,
   type HotelDoorBand,
@@ -686,8 +689,18 @@ export class Hotel implements GameSystem {
     null;
   /** Guests sat at tables, bobbing over their breakfast. See {@link seatGuests}. */
   private readonly diners: { model: CharacterModel; phase: number }[] = [];
-  /** The pet asleep in the suite's four-poster — kept so it breathes. */
-  private sleepingPet: CreatureHandle | null = null;
+  /**
+   * One small bed per pet the player owns (or one, with a bunny, if she owns
+   * none yet) — see {@link dressPetBeds}. Kept so {@link update} can breathe
+   * every one of them and {@link nap} (and its own end) can lie them all
+   * down or stand them all back up together, whenever the player has a
+   * sleep — issue #275.
+   */
+  private readonly petBedRoster: {
+    readonly pet: CreatureHandle;
+    readonly x: number;
+    readonly z: number;
+  }[] = [];
   /**
    * The suite bathroom: the shared flush-wash-roof behaviour
    * (`building/Toilets.ts`'s `ToiletRoutine` — the castle's own, imported
@@ -1023,6 +1036,16 @@ export class Hotel implements GameSystem {
    */
   get residents(): readonly ResidentSpec[] {
     return this.guests;
+  }
+
+  /**
+   * Every pet bed's pet and where it stands — `check:hotel`'s way of proving
+   * issue #275's "all the pets go to sleep too" without reaching into a
+   * private field: nap a real `Player` and read each pet's own
+   * `root.rotation.x` off this list before and after.
+   */
+  get petBeds(): readonly { readonly pet: CreatureHandle; readonly x: number; readonly z: number }[] {
+    return this.petBedRoster;
   }
 
   attachPlayer(player: Player): void {
@@ -1399,10 +1422,10 @@ export class Hotel implements GameSystem {
       if (near) rig.sparkle.update(elapsed);
     }
 
-    // The pet asleep in the suite, breathing. `setWalkPhase(phase, 0)` is the
-    // pets' own idle — no stride, just the body's bob — so a sleeping pet uses
-    // the same one line every other pet in the park uses to stand still.
-    this.sleepingPet?.setWalkPhase(elapsed * 0.7, 0);
+    // Every pet bed's pet, breathing — asleep or awake. `setWalkPhase(phase,
+    // 0)` is the pets' own idle — no stride, just the body's bob — so this
+    // is the same one line every other pet in the park uses to stand still.
+    for (const { pet } of this.petBedRoster) pet.setWalkPhase(elapsed * 0.7, 0);
 
     // The bathroom's flush-wash-roof clock — the same call the castle makes,
     // every frame, occupancy asked fresh from where she is standing (the roof
@@ -1458,6 +1481,9 @@ export class Hotel implements GameSystem {
         // pitched (see `nap` — the posture owns the recline).
         player.endRide();
         player.model.setExpression('happy');
+        // The pets wake up together too, back onto all fours on their own
+        // cushions — the other half of `nap`'s issue #275 hookup.
+        for (const { pet, x, z } of this.petBedRoster) this.standPetUp(pet, x, z);
       }
       return;
     }
@@ -2150,6 +2176,13 @@ export class Hotel implements GameSystem {
    * head at −0.72: on the pillow, which the bed asset authors at the −Z end,
    * with the tucked blanket (built with the bed, hidden until now) over her
    * body and her face in the open air. Probe 16 measures all three.
+   *
+   * **The pets go to sleep too, all together, each in her own bed** — issue
+   * #275, Jim's direct ask: *"when the player sleeps, all pets should also
+   * go to sleep."* It does not matter which of the three bedrooms she napped
+   * in; {@link napping} is one room-wide timer already (it is what disables
+   * every other bed's own "Have a sleep" chip while it runs), so every pet
+   * bed answers to it rather than only the one nearest her.
    */
   private nap(bed: Bed): void {
     const player = this.player;
@@ -2161,6 +2194,7 @@ export class Hotel implements GameSystem {
     this.napping = NAP_SECONDS;
     this.nappingAt = bed;
     player.model.setExpression('blink');
+    for (const { pet, x, z } of this.petBedRoster) this.layPetDown(pet, x, z);
   }
 
   // ------------------------------------------------------------- queries
@@ -3677,10 +3711,10 @@ export class Hotel implements GameSystem {
       });
     }
 
-    // **The pet's four-poster**, in the middle bedroom, with the pet lying in
-    // it — Eleri's own brief for the bed, and Jim's for who is in it. See
-    // `dressPetBed`.
-    this.dressPetBed(shell);
+    // **A pet bed for each pet she owns**, in the middle bedroom — Eleri's
+    // own brief for the bed (one shared four-poster, occupied), grown by
+    // issue #275 into one each. See `dressPetBeds`.
+    this.dressPetBeds(shell);
 
     // The rainbow rug, in the hall between the bedrooms and the lounge, under
     // the disco ball — which is where a child actually stands when the ball is
@@ -3710,10 +3744,13 @@ export class Hotel implements GameSystem {
       PALETTE.markerMint,
       PALETTE.markerSky,
     ];
+    // x shifted 3.8 m with bedroom1/the bathroom (west, −9.6 → −13.4) and
+    // bedroom3 (east, 9.8 → 13.6) when `SUITE.halfX` grew for issue #274 —
+    // both still hug the same wall at the same margin, just further out.
     this.placeProps(shell, SUITE, [
-      { prop: () => crystalCluster(0x40b1, 1, suiteCrystals), x: -9.6, z: -7, top: CLUSTER_TOP },
-      { prop: () => crystalCluster(0x40b2, 1, suiteCrystals), x: 9.8, z: -7, top: CLUSTER_TOP },
-      { prop: () => crystalPlanter(0x40b3, PALETTE.markerPink, suiteCrystals), x: -9.6, z: 6.6, top: PLANTER_TOP },
+      { prop: () => crystalCluster(0x40b1, 1, suiteCrystals), x: -13.4, z: -7, top: CLUSTER_TOP },
+      { prop: () => crystalCluster(0x40b2, 1, suiteCrystals), x: 13.6, z: -7, top: CLUSTER_TOP },
+      { prop: () => crystalPlanter(0x40b3, PALETTE.markerPink, suiteCrystals), x: -13.4, z: 6.6, top: PLANTER_TOP },
     ]);
     this.hangOnWalls(shell, SUITE, {
       // Threaded between the three north windows, one per bedroom.
@@ -3736,68 +3773,107 @@ export class Hotel implements GameSystem {
   }
 
   /**
-   * The pet's four-poster, with the pet asleep in it — Eleri asked for the bed
-   * (*"half-human half-cat bed … with a pillow and a blanket and even a toy"*)
-   * and Jim asked for it to be **occupied when you walk in**.
+   * A small pet bed for every pet she owns, in a row in the middle bedroom —
+   * Eleri's original brief (*"half-human half-cat bed … with a pillow and a
+   * blanket and even a toy"*) was one shared four-poster with one pet in it;
+   * issue #275 asks for one each, sized by how many she has actually bought.
+   * Issue #274 doubled this bedroom's width for exactly this — a row of beds
+   * needs room a single four-poster never did.
    *
-   * ## Which pet, and why it is read once
+   * ## How many, and which kind each one is
    *
-   * Hers, if she has one: the first paradeable pet in the inventory, which is
-   * the same thing that walks behind her in the park. Read **once, here**,
-   * rather than subscribed to — the hotel's rooms are built at construction
-   * and a pet that changed mid-visit would be a pet that pops. If she has no
-   * pet yet the bed is not empty either: a bunny is asleep in it, because an
-   * empty pet bed in the room of a child who has not been to the pet shop reads
-   * as something missing rather than as something to look forward to.
+   * {@link ownedPetKinds} reads the *whole* inventory once, at construction
+   * (the hotel's rooms are built once and a bed count that changed mid-visit
+   * would be a bed that pops) — every `kind: 'pet'` entry, not just the one
+   * currently out of the backpack, because a bed is about *ownership*. If she
+   * owns none yet there is still one bed with a bunny in it, same as before:
+   * an empty pet bed reads as something missing rather than as something to
+   * look forward to.
    *
-   * ## Lying down, from the asset's own two numbers
+   * ## Laid out as a row, clear of the human furniture and the doorway
    *
-   * `PET_BED_CUSHION_TOP` and `PET_BED_CUSHION_RADIUS` are exported for
-   * exactly this, and the artist's note asks callers to take them rather than
-   * measure the mesh. The pet is tipped onto its side about its own long axis
-   * and dropped so it rests on the cushion; the pillow is at −Z, so a pet
-   * lying with its head on it faces the camera without being turned.
+   * `PET_BED_SLOTS_X` (`layout.ts`, alongside `SUITE_BED_SPOTS` for the same
+   * reason: `check:hotel` needs the list too) are hand-measured against this
+   * bedroom's own furniture — the human bed at x ≈ −0.4 and its bedside
+   * table at x ≈ 1.1 — the same way every other prop in this room is placed:
+   * each bed's own footprint radius stays clear of that cluster, of the
+   * partitions either side of the bedroom (x = −8.0 and x = 7.2), and —
+   * since the whole row sits at `PET_BED_ROW_Z`, 4.7 m north of the hall
+   * doorway — of that doorway's own clearance zone with room to spare.
+   * `HotelProps.place` still checks all of that itself (issue #273's
+   * machinery); the slot list only has to keep each bed off its neighbours
+   * and the walls, which nothing checks automatically. Six slots is
+   * headroom, not a hard cap — the shop sells four species — so a seventh
+   * pet re-uses the last slot rather than the row spilling into a wall.
    */
-  private dressPetBed(shell: Group): void {
-    // **Where the camera can actually see it** (QA, 7 Aug 2026): the bed used
-    // to stand at (2.2, −6.4), which is 1.2 m behind the bedroom partition at
-    // x = 3.4 — squarely inside that wall's 1.28·H occlusion band, so Eleri's
-    // four-poster and its sleeping pet were invisible in play, canopy ring
-    // excepted. The partition at x = 3.4 hides x 0.6…3.4 and the one at
-    // x = −4.2 hides −7.0…−4.2; this spot sits in the clear strip between,
-    // beside her own bed.
-    const PET_BED_X = -2.6;
-    const PET_BED_Z = -6.4;
-    const bed = createPetBed();
-    // Solid and standable, like every other flat-topped prop now — QA found
-    // it walk-through, and a pet bed is a cushion, which is a thing a child
-    // may absolutely bounce onto.
-    this.props.place(shell, SUITE, bed.root, {
-      x: PET_BED_X,
-      z: PET_BED_Z,
-      radius: 0.62,
-      top: PET_BED_CUSHION_TOP,
-    });
+  private dressPetBeds(shell: Group): void {
+    this.ownedPetKinds().forEach((kind, index) => {
+      const x = PET_BED_SLOTS_X[index] ?? PET_BED_SLOTS_X[PET_BED_SLOTS_X.length - 1] ?? 0;
+      const bed = createPetBed();
+      // Solid and standable, like every other flat-topped prop now — QA
+      // found it walk-through, and a pet bed is a cushion, which is a thing
+      // a child may absolutely bounce onto.
+      this.props.place(shell, SUITE, bed.root, {
+        x,
+        z: PET_BED_ROW_Z,
+        radius: PET_BED_FOOTPRINT_RADIUS,
+        top: PET_BED_CUSHION_TOP,
+      });
 
-    const pet = createPet(this.paradePetKind());
-    // Onto its side, head toward the pillow at −Z. A quarter turn about X lays
-    // a standing pet down; the drop is the cushion plus roughly the radius of
-    // the body now resting on it.
-    pet.root.rotation.set(-Math.PI / 2, 0, 0);
-    pet.root.position.set(
-      PET_BED_X,
-      PET_BED_CUSHION_TOP + PET_BED_CUSHION_RADIUS * 0.72,
-      PET_BED_Z - 0.1,
-    );
-    shell.add(pet.root);
-    // Kept so it breathes — a pet that is perfectly still in a bed reads as an
-    // ornament of a pet. `setWalkPhase(phase, 0)` is the pets' own idle: no
-    // stride, just the body's bob.
-    this.sleepingPet = pet;
+      const pet = createPet(kind);
+      shell.add(pet.root);
+      // Standing awake by default; `nap` (and its own end) lie every bed's
+      // pet down or stand it back up, all together — issue #275.
+      this.standPetUp(pet, x, PET_BED_ROW_Z);
+      this.petBedRoster.push({ pet, x, z: PET_BED_ROW_Z });
+    });
   }
 
   /**
-   * The kind of pet walking behind her, or a bunny if there is not one yet.
+   * The species of every pet she owns, one entry per purchase — *ownership*,
+   * not who is currently out of the backpack, which is {@link paradePetKind}
+   * below's question instead. Falls back to a lone bunny so a bedroom with no
+   * pet bought yet is never simply empty (see {@link dressPetBeds}).
+   *
+   * **The species is in the catalogue `id`, not in `kind`** — see
+   * {@link paradePetKind} for why the same lookup appears in both.
+   */
+  private ownedPetKinds(): PetKind[] {
+    const owned = gameStore.get().inventory.filter((item) => item.kind === 'pet');
+    if (owned.length === 0) return ['bunny'];
+    return owned.map((item) => {
+      const species = item.id.slice(item.id.lastIndexOf('.') + 1);
+      return PET_KINDS.find((known) => known === species) ?? 'bunny';
+    });
+  }
+
+  /**
+   * Stands a pet up on its own bed's cushion, awake — the default pose, and
+   * where {@link nap}'s own end returns every pet bed to.
+   */
+  private standPetUp(pet: CreatureHandle, x: number, z: number): void {
+    pet.root.rotation.set(0, 0, 0);
+    pet.root.position.set(x, PET_BED_CUSHION_TOP, z);
+  }
+
+  /**
+   * Lies a pet down on its own bed, asleep — {@link nap}'s pet-side half.
+   *
+   * Onto its side, head toward the pillow at −Z. A quarter turn about X lays
+   * a standing pet down; the drop is the cushion plus roughly the radius of
+   * the body now resting on it — `PET_BED_CUSHION_TOP` and
+   * `PET_BED_CUSHION_RADIUS` are exported for exactly this, and the artist's
+   * note asks callers to take them rather than measure the mesh.
+   */
+  private layPetDown(pet: CreatureHandle, x: number, z: number): void {
+    pet.root.rotation.set(-Math.PI / 2, 0, 0);
+    pet.root.position.set(x, PET_BED_CUSHION_TOP + PET_BED_CUSHION_RADIUS * 0.72, z - 0.1);
+  }
+
+  /**
+   * The kind of pet walking behind her, or a bunny if there is not one yet —
+   * the *parade's* question (the breakfast feast's pet reads this), not
+   * {@link ownedPetKinds}' "how many does she own" above.
    *
    * **The species is in the catalogue `id`, not in `kind`.** An
    * `InventoryItem`'s `kind` is its *category* — `'pet'`, `'toy'`, `'hat'` —
@@ -3926,9 +4002,10 @@ export class Hotel implements GameSystem {
     shell.add(gameBoy.root);
 
     // A planter in the corner and a picture over the sofa, so the lounge is
-    // dressed to the same standard as the rest of the hotel.
+    // dressed to the same standard as the rest of the hotel. x shifted 3.8 m
+    // east with the outer wall it hugs when `SUITE.halfX` grew for #274.
     this.props.place(shell, SUITE, crystalPlanter(0x41a1, PALETTE.markerPink), {
-      x: 9.8,
+      x: 13.6,
       z: 7.2,
       radius: 0.6,
       top: PLANTER_TOP,
@@ -3952,14 +4029,16 @@ export class Hotel implements GameSystem {
    * the hotel's fixtures go through `place.ts` like every other prop, solid
    * and (the pan) mountable.
    *
-   * The room itself is partition data in `layout.ts` (the z-run at x = −4.2
-   * across the south half, doorway off the hall at −7.6); everything here is
-   * derived from `clearFloorAround` inside it, so the walls own the room and
-   * the fittings follow.
+   * The room itself is partition data in `layout.ts` (the z-run at x = −8.0
+   * across the south half — moved from −4.2 with the bedroom1/2 divider it
+   * grids with when issue #274 widened the middle bedroom); everything here
+   * is derived from `clearFloorAround` inside it, so the walls own the room
+   * and the fittings follow.
    */
   private dressBathroom(shell: Group): void {
     // Any interior point of the bathroom yields its whole clear floor.
-    const rect = clearFloorAround(SUITE, -7.6, 4.8);
+    // (−11.4, 4.8): shifted 3.8 m west with the bathroom wall above.
+    const rect = clearFloorAround(SUITE, -11.4, 4.8);
     const centreX = (rect.minX + rect.maxX) / 2;
     const centreZ = (rect.minZ + rect.maxZ) / 2;
 
@@ -3986,7 +4065,8 @@ export class Hotel implements GameSystem {
     // a full finger clear of the bathroom doorway's own band — measured by
     // check:tap-spacing, found the hard way by a phone tap in the doorway
     // selecting the pan instead of walking through.
-    const panX = -7.8;
+    // Shifted 3.8 m west with the bathroom wall (see the method header).
+    const panX = -11.6;
     const panZ = 4.6;
     const bathMat = rug(2.0, 1.6, PALETTE.markerMint, PALETTE.blossomWhite, 1);
     bathMat.position.set(panX, 0, panZ);
