@@ -1,0 +1,203 @@
+# HANDOFF — grid-aligned park (issue #269)
+
+Branch: `grid-aligned-park` · Worktree: `.claude/worktrees/grid-aligned-park`
+
+## What issue #269 asked for
+
+1. Stalls and buildings should be placed to directly face the camera —
+   axis-aligned facing, not arbitrary rotation.
+2. Paths should run perpendicular to grid axes — no diagonal/arbitrary-angle
+   paths.
+
+## What's done
+
+- **Facing**: `core/constants.ts` gets one new constant, `CAMERA_FACING_YAW`
+  (`CAMERA_YAW_DEGREES` in radians — the isometric camera's own fixed
+  diagonal). `parkLayout.ts`'s `signYaw` is now always exactly that value for
+  every plot (previously `Math.PI * rng.range(0.2, 0.3)`, a fresh random draw
+  every seed). `counterFacing()` is now an identity function (previously
+  `signYaw * 0.35`, a second, independently-tuned approximation of "faces the
+  camera"). `stallPlacement.ts`'s face-paint stall uses the same constant
+  instead of its own hardcoded `0.3`. Every camera-facing thing (the 6 stalls
+  + hotel) now turns to exactly the same angle, and every plot's sign
+  (camera-facing or not) does too.
+
+- **Paths**: `paths.ts` keeps the original, proven diagonal router
+  (`detourAroundBlockers`, renamed from `routeAround`, logic unchanged) as a
+  first pass, then axis-aligns its output. `elbowLeg` turns each diagonal leg
+  into one right-angle corner (picking whichever of the two keeps both new
+  legs clear of every blocker, tie-broken by correcting whichever axis moves
+  *less* over that one leg first — see the big comment on that tie-break for
+  why the naive "further from the plaza" version regressed). `gridDetour` is
+  a small bounded grid search used only when neither raw corner is clear (two
+  nearby blockers boxing in the direct line) — it is not the general router,
+  learned the hard way (see "Dead ends" below). It widens its own search
+  reach (45/90/160 m) on failure, and drops any blocker that already
+  contains one of the leg's own endpoints from the whole search (arriving at
+  a destination can legitimately sit inside one — see `gridDetour`'s own
+  comment). The ring road (`solveRing`/`toAxisAlignedLoop`) and every spur go
+  through this. The gate-approach and fountain-approach connectors
+  deliberately do **not** — see the comment at their call site: they sit in
+  the same ground the cat bus arrival's crowd crosses, and re-shaping them
+  measurably (if not sufficently on their own) affected that.
+
+- **Invariants** (`test/procgen/invariants.ts`, both registered in
+  `INVARIANTS`):
+  - `buildingsFaceTheCameraAxis` — every plot's `signYaw` is exactly
+    `CAMERA_FACING_YAW`. Cheap, exact, by-construction now that the RNG draw
+    is gone.
+  - `pathsRunOnGridAxes` — no paved edge's *drawn* curve (sampled every
+    ~0.5 m, not the control points) runs diagonally for more than
+    `MAX_DIAGONAL_APPROACH` (16 m) continuously. Not zero: a booth's own
+    doorway approach and a train platform's fixed final turn are
+    deliberately diagonal (documented in place). Calibrated against the
+    canonical seed's measured worst case (11.2 m, the west station's own
+    platform approach) with headroom, the same shape of bound
+    `TRESTLE_GAP_TOLERANCE` already uses.
+  - `ParkFacts.plots` grew a `signYaw` field (`parkFacts.ts`) to support the
+    first invariant — read straight off `PARK_LAYOUT`, not re-derived.
+
+- **The cat-bus arrival — a real, in-scope design fix, not a workaround.**
+  Grid-aligning the paths shifted plot/entrance positions enough to regress
+  `check:cat-bus` (a background child and a scripted bus-arrival child
+  passed within 0.72 m of each other — needs 0.99 m). Investigated properly
+  rather than patched around; two real, separate findings, both fixed:
+
+  1. **`ArrivalSequence.ts` drove a disembarking child's position directly
+     (`NpcCharacter.beginScripted`/`setScriptedPose`) all the way from the
+     bus door through the gate and *several metres into the park*** before
+     handing them to the normal `WanderDriver` — contradicting
+     `BusArrival.ts`'s own doc, which already said `disembark()` should fire
+     "the moment a child steps down, not when the whole sequence ends."
+     While scripted, a child is exempt from `NpcSystem`'s collision **and**
+     separation entirely (needed so the crowd's relaxation doesn't walk
+     seated passengers out through the bus's own walls), and follows a
+     hand-authored Bézier route with zero awareness of where the free-walking
+     crowd actually is.
+
+     Per Jim's explicit design decision (no bespoke arrival choreography
+     beyond what a bus door genuinely requires — disembarking children
+     should be ordinary NPCs with a pathfinding destination, exactly like
+     any other background child): a disembarking child is now released the
+     moment their own route crosses `RELEASE_Z` (8 m inside the gate,
+     `ArrivalSequence.ts`), not at the end of the old route. The fan-out
+     choreography *through* the ~8.8 m gate opening is unchanged — same
+     Bézier curve, same tuning to keep eleven children from clipping the
+     gate posts or each other — only the *tail* of the walk (the part that
+     actually crosses the free-roaming crowd's paths) is cut in favour of
+     `WanderDriver.rejoinGraph('full')`, the exact mechanism every other
+     child uses. This also fixed a second failure ("1 of 11 bus children
+     vanished") as a side effect — same underlying issue, its own threshold.
+
+  2. **The residual gap** (still present after (1), but much smaller):
+     `NpcSystem`'s child-vs-child separation (`NpcCharacter.separateFrom`) is
+     deliberately soft and rate-limited (`MAX_DEPENETRATION_SPEED`) — real,
+     working, *intentional* for ordinary free-vs-free crowd behaviour
+     (children brushing past each other in a queue is desired, not a bug).
+     But a scripted-vs-free encounter only ever has **one** mover (the
+     scripted child cannot be pushed), and it was getting the same
+     rate-limited correction as an ordinary two-sided encounter, which
+     splits the job between two movers. `NpcCharacter.ts`'s
+     `SCRIPTED_ENCOUNTER_SPEED_FACTOR` (2.4×) lets that one mover correct
+     faster, since it is doing the whole job alone. (Widening the *trigger
+     radius* instead was tried first and measured **worse** — 0.50 m,
+     because earlier warning didn't help when the free child's own wander
+     target kept steering it back onto the same crossing. Reverted; the
+     rate, not the range, was the actual gap.)
+
+  Verified: `check:cat-bus` passes on the canonical seed (1.64 m closest
+  approach — matching `origin/main`'s own margin exactly) and the collision
+  metric is independently clean on seed 2 too (1.23 m; that seed's only
+  remaining `check:cat-bus` failure — the bus stopping inside the boundary —
+  is a pre-existing, unrelated bug confirmed present on a clean `origin/main`
+  checkout with `LGP_SEED=2`, nothing to do with this change). `check:jitter`
+  still passes (worst own step 0.185 m, bound 1 m). `check:crowd` and
+  `check:npc-perch` unaffected.
+
+## Verified green
+
+- `npx tsc --noEmit` and `npm run typecheck:test` — clean.
+- `npm run check:park` — waypoints/attractions/invariants all hold
+  (canonical seed).
+- `npm run check:solve-cost` — `paths` stage ~90–220 ms against a 250 ms
+  budget (was 12 ms before this PR; was 1.4–1.7 **seconds** in an earlier,
+  abandoned draft of the router — see "Dead ends").
+- `npm run check:cat-bus`, `npm run check:jitter`, `npm run check:crowd` —
+  all green (canonical seed).
+- `test/procgen/seed-canonical.test.ts` — 62/62.
+- `test/procgen/seed-2.test.ts` — 62/62.
+- `test/procgen/seed-5.test.ts` — 62/62 (after the `ARCH_FOOT_MARGIN` and
+  `gridDetour` search-reach fixes below).
+- `test/procgen/seed-18.test.ts` — was 61/62 (`gridDetour` couldn't route
+  round an embedded blocker); fix committed, re-run pending at the time of
+  writing — check the session's final report, or re-run
+  `npx vitest run test/procgen/seed-18.test.ts` if picking this up.
+- `test/procgen/seed-11.test.ts` — not yet run at the time of writing (it is
+  the park's slowest seed, ~160 s+, per `test/procgen/seed-11.test.ts`'s own
+  hook timeout). Run it before merging.
+
+## Dead ends (so nobody re-walks them)
+
+- **A grid-quantized A\* as the *general* router.** First attempt: snap every
+  point to a coarse grid, A\* between grid nodes, screen the endpoints
+  against their own blocker circle. Two failures: (1) rounding a continuous
+  point to its *single* nearest grid node can land that node inside the very
+  blocker the point was deliberately placed just outside of — nearly half of
+  all routes came back "unreachable" and silently fell back to a straight
+  diagonal, defeating the point; (2) even after fixing that (multi-source,
+  screening all 4 touching corners), running a full grid search on *every*
+  leg — including the ring's 32 short inter-bearing hops — regressed
+  `check:solve-cost`'s `paths` stage from 12 ms to 1.4–1.7 **seconds**.
+  `gridDetour` is what's left of this idea: the same multi-source technique,
+  but only invoked as a rare fallback, never the general case.
+- **Corner tie-break by "further from the plaza."** Reads plausible and is
+  *wrong*: it chains. `detourAroundBlockers` had already bulged one diagonal
+  a little north to clear a single obstacle; four short legs in a row each
+  independently chose the more-northward of their own two corners, and an
+  8 m bulge became a 40 m dead-flat plateau — long enough to strand a
+  waypoint on its far side (`check:park`'s `poi.stranded`). Fixed by making
+  the tie-break purely local (correct whichever axis a *single* leg moves
+  less on, first) — see `elbowLeg`'s own comment.
+- **`bestBranchPoint` scoring candidates on the axis-aligned length.**
+  Rewards degenerate cases: a candidate whose `elbowLeg` gives up and falls
+  back to a raw diagonal reports the *direct* distance, which reads as
+  suspiciously short exactly when it's hiding the worst-shaped route on
+  offer. Fixed by scoring on `detourAroundBlockers`'s proven distance
+  instead, and axis-aligning only the winner.
+- **No boundary awareness.** `elbowLeg`/`gridDetour` only ever checked plot
+  blockers, not the park's own spline edge. An axis-aligned corner ran
+  parallel to the boundary wall near the gate for long enough to strand
+  another waypoint. Added `segmentClearOfBoundary`, against `PLAYER_RADIUS`
+  (not the stricter plot `BOUNDARY_CLEARANCE`, since some plots — the
+  rail-race stall — stand deliberately close to the rim).
+- **One fixed `gridDetour` search reach.** 45 m was enough for seed 5's
+  sky-cruiser stall, not enough for seed 18's ball-pit spur. There is no
+  single constant that is "enough" for every seed's solved geometry — widen
+  on failure instead (45/90/160 m).
+- **Treating an embedded destination as unreachable.** Even at reach 160,
+  seed 18's ball-pit spur still failed: its own endpoint sat inside the
+  castle's blocker radius (a legitimate "arriving at a destination" case
+  `detourAroundBlockers` already allowed), and a grid search has no walkable
+  cells leading up to a point genuinely inside a blocker unless that
+  specific blocker is dropped from the whole search, not just exempted at
+  the one corner touching it.
+- **Widening `NpcSystem.ts`'s scripted-vs-free push-apart *trigger radius*.**
+  Plausible-sounding, measured **worse** (0.50 m instead of 0.62 m): earlier
+  warning didn't help because the free child's own wander target kept
+  steering it back onto the same crossing. What actually closed the gap was
+  the correction *rate*, not the range — see `SCRIPTED_ENCOUNTER_SPEED_FACTOR`.
+
+## If you're the reviewer/QA
+
+No visual QA was performed — no browser session; the chrome-devtools MCP
+requires explicit ownership per CLAUDE.md, and this task did not have it.
+Build-verify only. What a visual pass should look at, in order of value:
+
+1. `/view?camPos=0,60,0&camDir=0,-1,0` (top-down over the plaza) — confirms
+   the ring road and spurs read as a grid rather than a smooth loop.
+2. Any camera-facing stall or the hotel, close up — confirms the sign/door
+   reads square to the camera rather than at a slight angle.
+3. The cat bus arrival at the gate — watch a disembarking child: they should
+   still funnel neatly through the gate opening as a group, then peel off
+   into ordinary wandering noticeably sooner than before (right past the
+   gate, not several metres into the park).
