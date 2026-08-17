@@ -116,25 +116,65 @@ Branch: `grid-aligned-park` · Worktree: `.claude/worktrees/grid-aligned-park`
 
 ## Verified green
 
-- `npx tsc --noEmit` and `npm run typecheck:test` — clean.
-- `npm run check:park` — waypoints/attractions/invariants all hold
-  (canonical seed).
-- `npm run check:solve-cost` — `paths` stage ~90–220 ms against a 250 ms
-  budget (was 12 ms before this PR; was 1.4–1.7 **seconds** in an earlier,
-  abandoned draft of the router — see "Dead ends").
+- `npx tsc --noEmit` — clean.
+- `npm run check:park` — 16/16 attractions routed, 0 rail crossings, 189/189
+  waypoints connected, all six invariants hold (canonical seed).
+- `npm run check:solve-cost` — `paths` stage 86.1 ms against a 250 ms budget
+  (was 12 ms on `main` before this PR; was 1.4–1.7 **seconds** in an earlier,
+  abandoned draft of the router — see "Dead ends"). The ring-widening entry
+  search added for the seed-2/18 fix (below) does not show up here: it only
+  ever engages for the handful of legs that were already failing outright.
 - `npm run check:cat-bus`, `npm run check:jitter`, `npm run check:crowd` —
   all green (canonical seed).
-- `test/procgen/seed-canonical.test.ts` — 62/62.
-- `test/procgen/seed-2.test.ts` — 62/62.
-- `test/procgen/seed-5.test.ts` — 62/62 (after the `ARCH_FOOT_MARGIN` and
-  `gridDetour` search-reach fixes below).
-- `test/procgen/seed-18.test.ts` — was 61/62 (`gridDetour` couldn't route
-  round an embedded blocker); fix committed, re-run pending at the time of
-  writing — check the session's final report, or re-run
-  `npx vitest run test/procgen/seed-18.test.ts` if picking this up.
-- `test/procgen/seed-11.test.ts` — not yet run at the time of writing (it is
-  the park's slowest seed, ~160 s+, per `test/procgen/seed-11.test.ts`'s own
-  hook timeout). Run it before merging.
+- **`npm run test:procgen`, run fresh in one sitting after the seed-2/18 fix
+  (commit `09827ee`): 13 test files passed, 361/361 tests passed, exit code
+  0.** This is the number to trust — see "The real CI failure and its fix"
+  below for why an earlier claim of "all five seeds green" in this same repo
+  turned out to be wrong, and what changed since.
+
+## The real CI failure and its fix (read this if seed 2 or 18 look wrong again)
+
+The PR was first opened claiming "all five seeds green, 62/62 each," but that
+claim was assembled from vitest runs taken at *different* commits — seed-2,
+seed-5, seed-18 and canonical were never actually re-run after the final
+commit that restricted the arch-foot exemption. GitHub's real CI caught it:
+`pathsRunOnGridAxes` genuinely failed on seed 2 and seed 18, both on
+`spur-stall.railRacer` (25.4 m and 28.7 m diagonal runs — the raw,
+un-axis-aligned distance, meaning the router had given up entirely on that
+leg). Reproduced locally with the exact same numbers CI reported, which ruled
+out a stale/pinned-seed false pass (CLAUDE.md's "static import loads
+`parkManifest.ts` before the seed is set" class of bug) — `isolate: true` in
+`vitest.config.ts` was doing its job; this was a real, deterministic bug.
+
+Root cause, found with targeted debug logging (since stripped —
+`LGP_DEBUG_ELBOW`/`LGP_DEBUG_SCB`, if you need to reproduce the technique):
+`gridDetourAttempt` only ever tried the 4 grid corners immediately *touching*
+each endpoint as A* entry/exit candidates. For the rail-race stall's doormat
+on these two seeds, all 4 were blocked — two by the stall's own plot at a
+genuine mid-segment closest approach (correctly not exempted; the exemption
+only applies to a connector arriving "practically at" its own endpoint, and
+these weren't), two by neighbouring arch feet (never exempted, per the
+seed-11 fix). With zero viable entry points at *any* search reach, the whole
+search gave up and returned the raw diagonal `detourAroundBlockers` had
+originally found.
+
+The gaps were small (0.15–0.6 m short of clearing). Fix: when the immediate
+touching corners are all blocked, `gridDetourAttempt` now widens outward ring
+by ring (2 m grid steps, Chebyshev shells, capped at 4 rings) and takes the
+first ring with any walkable candidate, instead of giving up. See
+`entryCandidates` in `paths.ts`.
+
+Verified fresh after this fix (commit `09827ee`):
+- `npx vitest run test/procgen/seed-2.test.ts test/procgen/seed-18.test.ts` —
+  2 files passed, 124/124 tests passed.
+- `npm run test:procgen` (all 5 seeds, one sitting) — 13 files passed,
+  361/361 tests passed.
+- `npm run check:park` and `npm run check:solve-cost` re-run afterward, still
+  green (numbers above).
+
+**If you're re-verifying this yourself: do not trust a per-seed count
+assembled across separate historical runs. Run `npm run test:procgen` once,
+fresh, and quote the number that's actually on the screen.**
 
 ## Dead ends (so nobody re-walks them)
 
@@ -181,6 +221,16 @@ Branch: `grid-aligned-park` · Worktree: `.claude/worktrees/grid-aligned-park`
   cells leading up to a point genuinely inside a blocker unless that
   specific blocker is dropped from the whole search, not just exempted at
   the one corner touching it.
+- **`gridDetourAttempt` screening only the 4 grid corners immediately
+  touching each endpoint.** Worked for every seed tried at the time, then
+  failed for real on seeds 2 and 18 once CI ran it — a stall's doormat can
+  sit in a pocket tight enough that all 4 immediate corners are blocked
+  (two by its own plot's mid-segment footprint, two by neighbouring arch
+  feet), even though a corner one or two grid steps further out is clear.
+  Fixed by widening outward ring-by-ring when the immediate ring is empty
+  (`entryCandidates`) — see "The real CI failure and its fix" above. This is
+  the one to remember: a case that passes on every seed you happened to try
+  locally is not the same as a case that's actually handled.
 - **Widening `NpcSystem.ts`'s scripted-vs-free push-apart *trigger radius*.**
   Plausible-sounding, measured **worse** (0.50 m instead of 0.62 m): earlier
   warning didn't help because the free child's own wander target kept
