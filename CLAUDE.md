@@ -392,6 +392,55 @@ at the end.
 This is a game a father is building with his six-year-old daughter. When a
 trade-off is close, pick the one a six-year-old will enjoy more.
 
+## QA is not optional, and it is not paperwork
+
+On 17 August a full pipeline of "QA approved" PRs shipped a furniture piece
+sitting square across a doorway, a pet that never got into its bed, and a
+"grid-aligned" park whose paths were a wiggly, un-grid, un-circular mess —
+three separate features, three separate QA sign-offs, and not one of them
+had ever actually been looked at. Every "QA" pass had been `tsc` plus the
+check scripts, re-reading what the build already said. That is not QA. It
+proves the code is *sound*; it says nothing about whether the game is
+*right*. Only eyes on a rendered frame can say that, so:
+
+**The QA agent's job, no exceptions: open every feature the PR touches, in
+an actual running browser, and look at it.** Work out what "correct" looks
+like for a person playing the game, then go and see whether that is what is
+on screen. A doorway-clearance fix means standing a character in every
+doorway the PR touches and confirming nothing blocks it. A "pets sleep in
+beds" fix means putting a pet-owning character to sleep and watching the pet
+actually walk to a bed. A grid-aligned-park fix means looking at the
+top-down camera, not inferring the shape of the paths from a segment-length
+assertion. If a feature can be seen, QA must see it before it can be signed
+off. "The checks pass" is an engineer's claim, not a QA verdict.
+
+**The QA agent runs on Opus, not a smaller or faster model.** This is the one
+stage in the whole pipeline that is pure judgement — does this look right,
+does this play right, is this actually what was asked for — and it carries
+the most weight of any gate here. Give it the model that can tell the
+difference.
+
+**Before a sandboxed QA agent does *any* QA work, update the sandbox's Chrome
+to the latest available version first.** An old bundled browser can render,
+or fail to render, differently from what a real player sees — the same
+"old tool, new input" trap CLAUDE.md's Node section warns about elsewhere.
+Do this before opening a single page, not after finding something odd.
+
+**If a real browser is not available to the QA agent — for any reason: no
+chrome-devtools MCP connected, no ownership granted, a sandboxed environment
+with no route to a rendered page, anything at all — every agent on this
+project halts immediately, not just the one PR waiting on QA.** New
+engineering work, new PRs, new merges: all of it stops until browser-based
+QA is possible again. Do not quietly fall back to build-verify and call it
+QA. Do not write "no visual QA was performed" in a handoff and let the PR
+proceed to sign-off anyway — that sentence is a stop sign, not a footnote.
+The correct response to "I cannot open a browser" is: stop everything, tell
+the human plainly that QA is blocked and why, and wait for them to unblock
+it. An unverified backlog growing while nobody can check it is not
+progress — it is debt nobody can see accumulating. Five minutes of the
+human's time to unblock QA costs far less than one more feature shipping
+unseen.
+
 ## PRs
 
 Raise with `gh pr create`. **Do not merge your own work** — every PR gets two
