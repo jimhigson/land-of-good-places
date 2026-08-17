@@ -160,6 +160,12 @@ export interface PlotFact {
   readonly x: number;
   readonly z: number;
   readonly boundingRadius: number;
+  /**
+   * The yaw the solver gave this plot's sign — every plot's, camera-facing
+   * or not (`anchors.ts`'s `AnchorDefinition.signYaw` doc). Issue #269:
+   * should be exactly `CAMERA_FACING_YAW` on every plot, on every seed.
+   */
+  readonly signYaw: number;
 }
 
 /** A place a visitor must be able to stand: a doormat or a stall counter. */
@@ -933,6 +939,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     x: entry.x,
     z: entry.z,
     boundingRadius: entry.boundingRadius,
+    signYaw: entry.signYaw,
   }));
 
   // The ginormous slide's chute, sampled off the built curve and pushed out

@@ -47,7 +47,12 @@ import {
   zoneBandClearance,
   zoneSeparation,
 } from '../../src/world/tapSpacing.ts';
-import { PLAYER_MAX_SPEED, PLAYER_RADIUS, RIM_OUTSET_START } from '../../src/core/constants.ts';
+import {
+  CAMERA_FACING_YAW,
+  PLAYER_MAX_SPEED,
+  PLAYER_RADIUS,
+  RIM_OUTSET_START,
+} from '../../src/core/constants.ts';
 import {
   ENTRANCE_ANGLE,
   ENTRANCE_BUS_ARRIVE_X,
@@ -670,6 +675,124 @@ const noPathEndsNowhere: Invariant = (facts) => {
     }
   }
   return strays;
+};
+
+/**
+ * **Every plot's sign faces exactly the camera's own fixed diagonal**
+ * (issue #269).
+ *
+ * `anchors.ts`'s own doc is explicit that this applies to every plot, camera
+ * facing or not: "these all sit near +45 degrees, which is the one fixed
+ * angle the camera ever looks from... a sign facing any other way is one a
+ * child simply cannot read." Before issue #269, "near" meant a fresh random
+ * draw every seed (`parkLayout.ts` drew `Math.PI * rng.range(0.2, 0.3)`) —
+ * never exactly square to the camera, and different on every rebuild.
+ *
+ * `PlotFact.signYaw` is read straight off the solved `PARK_LAYOUT` entry —
+ * not re-derived — and that same field is what a sign's own mesh rotation is
+ * built from everywhere it appears (`minigames/dodgems/plot.ts`'s
+ * `signGroup.rotation.y`, `world/hotel/Hotel.ts`'s `facadeYaw`,
+ * `stallPlacement.ts`'s `counterFacing`), so one measurement here catches
+ * every one of those drifting apart again, the way `parkLayout.ts`'s own
+ * "one owner" doc warns they used to.
+ */
+const buildingsFaceTheCameraAxis: Invariant = (facts) => {
+  const problems: string[] = [];
+  for (const plot of facts.plots) {
+    const drift = Math.abs(plot.signYaw - CAMERA_FACING_YAW);
+    if (drift > 1e-9) {
+      problems.push(
+        `'${plot.id}' has signYaw ${plot.signYaw.toFixed(4)} rad, ${drift.toFixed(4)} rad off ` +
+          `CAMERA_FACING_YAW (${CAMERA_FACING_YAW.toFixed(4)} rad) — not axis-aligned to the camera`,
+      );
+    }
+  }
+  return problems;
+};
+
+/**
+ * Longest continuous stretch of any paved ribbon allowed to run diagonally
+ * rather than along a grid axis (issue #269).
+ *
+ * Not zero, on purpose. Two things legitimately still run at an angle:
+ *
+ * - **A booth's own doorway approach.** `paths.ts`'s `spur()` deliberately
+ *   carries the last few metres of a camera-facing booth's spur along the
+ *   counter's own facing diagonal so the ribbon arrives head-on rather than
+ *   grazing the counter's side wall (see that function's "Arrive HEAD-ON,
+ *   not obliquely" note) — a short, intentional exception to the rule this
+ *   invariant otherwise enforces.
+ * - **A train platform's fixed final approach**, which predates issue #269
+ *   and is out of its scope: the platform turn is authored geometry, not
+ *   part of the axis-aligned trunk network `paths.ts` grows.
+ *
+ * Measured, not guessed: the canonical seed's longest such stretch is 11.2 m
+ * (the west station's own platform approach). This is set generously above
+ * that measured worst case — the same shape of bound
+ * {@link TRESTLE_GAP_TOLERANCE} uses — so what actually trips it is a
+ * regression: a long run of the *trunk* network (a ring segment, a spur's
+ * main body) left diagonal, not a legitimate short approach.
+ */
+const MAX_DIAGONAL_APPROACH = 16;
+
+/**
+ * **Every paved ribbon's trunk runs on grid axes** — purely north/south or
+ * purely east/west, never a sustained diagonal (issue #269).
+ *
+ * Measured on the drawn curve (`PathEdgeFact.points`, sampled every ~0.5 m
+ * off the real Catmull-Rom curve `paths.ts` sweeps) — the same ground
+ * {@link noPathEndsNowhere} stands on, and for the same reason:
+ * `paths.ts` axis-aligns its *control* points, and the curve bows a little
+ * rounding each corner, so "runs on grid axes" is stated as a bound on how
+ * far any *continuous* stretch of off-axis travel can run
+ * ({@link MAX_DIAGONAL_APPROACH}), not as "every single 0.5 m hop is
+ * exactly axis-aligned" — a corner's own rounding would fail that trivially
+ * and prove nothing about the shape of the route.
+ *
+ * A hop counts as off-axis when the smaller of its x/z movement is more
+ * than 15% of its own length (~8.6 degrees off a grid axis) — loose enough
+ * that ordinary curve-sampling jitter on a straight run never counts, tight
+ * enough that a genuinely diagonal run cannot hide inside it.
+ */
+const pathsRunOnGridAxes: Invariant = (facts) => {
+  const problems: string[] = [];
+  const OFF_AXIS_FRACTION = 0.15;
+
+  for (const edge of facts.pathEdges) {
+    const points = edge.points;
+    let runStart: readonly [number, number] | null = null;
+    let runEnd: readonly [number, number] | null = null;
+
+    const flushRun = (): void => {
+      if (!runStart || !runEnd) return;
+      const runLength = Math.hypot(runEnd[0] - runStart[0], runEnd[1] - runStart[1]);
+      if (runLength > MAX_DIAGONAL_APPROACH) {
+        problems.push(
+          `${edge.name} runs diagonally for ${runLength.toFixed(1)} m, from ${fmt(runStart)} to ` +
+            `${fmt(runEnd)} — longer than a doorway approach or a platform turn should ever need`,
+        );
+      }
+      runStart = null;
+      runEnd = null;
+    };
+
+    for (let i = 1; i < points.length; i += 1) {
+      const a = points[i - 1] as readonly [number, number];
+      const b = points[i] as readonly [number, number];
+      const dx = Math.abs(b[0] - a[0]);
+      const dz = Math.abs(b[1] - a[1]);
+      const hop = Math.hypot(dx, dz);
+      const offAxis = hop > 1e-6 && Math.min(dx, dz) / hop > OFF_AXIS_FRACTION;
+      if (offAxis) {
+        if (!runStart) runStart = a;
+        runEnd = b;
+      } else {
+        flushRun();
+      }
+    }
+    flushRun();
+  }
+  return problems;
 };
 
 /**
@@ -5144,6 +5267,8 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no lamp stands in anything', lampsTouchNothing],
   ['every path is lit end to end', everyPathIsLit],
   ['no paved path stops anywhere but a destination', noPathEndsNowhere],
+  ['every plot faces exactly the camera axis', buildingsFaceTheCameraAxis],
+  ['every paved path runs on grid axes', pathsRunOnGridAxes],
   ['every place a child can be served is a node in the path graph', everyDestinationIsANode],
   ['every ride exit is clear ground, reachable from the entrance', rideExitsAreUsable],
   ['the Rail Race exit fits the whole party that arrives on it', railRaceExitFitsTheParty],
