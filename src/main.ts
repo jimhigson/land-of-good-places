@@ -142,6 +142,11 @@ const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
   // layout that is different on every seed. Drops her just inside the front
   // door, key not yet given, so the whole check-in flow is testable.
   '/hotel': 'hotelLobby',
+  // The hotel's breakfast room (#276) — the clipped `.action-chip-row` this
+  // was added for lives here and nowhere else. Drops her already seated at a
+  // free chair, so the chip row is on screen the instant the park exists
+  // rather than after a walk across the hotel and a tap to sit down.
+  '/hotel-breakfast': 'hotelBreakfast',
 };
 
 /** What `/view` needs to drop a debug camera into the built park. See {@link parseDebugView}. */

@@ -829,6 +829,9 @@ export class Game {
       }
       // Not a ride: the hotel's front door, for its deep link.
       if (stallId === 'hotelLobby') return this.world.hotel.requestEnterLobby();
+      // Not a ride either: the hotel's breakfast room, seated, for #276's
+      // clipped action-chip-row deep link.
+      if (stallId === 'hotelBreakfast') return this.world.hotel.requestEnterBreakfast();
       return false;
     };
 
