@@ -1,0 +1,99 @@
+name: PR preview
+
+# Builds the client bundle only and publishes it as a Cloudflare Workers
+# *version* — a real, load-testable preview URL that never touches production
+# traffic — then comments the link on the PR. Updates the same comment on
+# every push instead of piling up new ones.
+#
+# Deliberately skips the check suite: "Procgen invariants / build" (see
+# procgen-invariants.yml) already runs the full `npm run build` gate on every
+# PR and is a required check. That job takes 20-30 minutes; a preview only
+# needs to *look* right, so this job does a bare `vite build` and is usually
+# done in a couple of minutes. A red preview build here is a real build
+# failure (syntax error, missing import) — it is not re-proving correctness
+# the other job already owns.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: pr-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  preview:
+    name: Deploy PR preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+
+      - name: Install dependencies
+        # Registry hiccups are common enough to be worth retrying — same
+        # reasoning as deploy.yml.
+        run: npm ci --fetch-retries=5 --fetch-retry-maxtimeout=120000
+
+      # Client bundle only — see the on: comment above for why the check
+      # suite is deliberately not run here.
+      - name: Build
+        run: npx vite build
+
+      # `wrangler versions upload` publishes a new Worker *version* with its
+      # own preview URL, without promoting it to production traffic — the
+      # Cloudflare-native equivalent of a Vercel/Netlify preview deploy.
+      # `preview_urls: true` in wrangler.jsonc is what makes a URL exist for
+      # a version that was uploaded but never made the default (live) one.
+      - name: Upload preview version
+        id: preview
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: >-
+            versions upload
+            --message "PR #${{ github.event.pull_request.number }}"
+            --tag "pr-${{ github.event.pull_request.number }}"
+
+      - name: Comment preview link on PR
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const output = `${{ steps.preview.outputs.command-output }}`;
+            const match = output.match(/https:\/\/[a-zA-Z0-9.-]+\.workers\.dev\S*/);
+            const url = match ? match[0] : null;
+            const marker = "<!-- pr-preview-comment -->";
+            const body = url
+              ? `${marker}\n### 🎡 Preview deployed\n\n[Open the preview](${url})\n\nUpdated automatically on every push to this PR. **Open it in a private/incognito window** — this box has served many dev builds from many ports over its lifetime, and a stale service worker or save from an unrelated earlier visit can silently serve old content with no error (see CLAUDE.md's "A stale service worker will waste your hour").`
+              : `${marker}\n### 🎡 Preview build finished\n\nBut no preview URL was found in the \`wrangler versions upload\` output — check the [workflow run](${context.payload.repository.html_url}/actions/runs/${context.runId}) for details.`;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find((c) => c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
