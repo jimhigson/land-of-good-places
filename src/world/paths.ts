@@ -125,14 +125,29 @@ interface Blocker {
 
 /**
  * How much room to leave round a rail-race arch foot: the post itself, plus
- * the width a child genuinely needs to walk past it.
+ * the width a child genuinely needs to walk past it, plus half the widest
+ * ribbon this file draws (so the *paved edge*, not just the centreline, clears
+ * the post).
  *
  * `PLAYER_RADIUS * 2` is `test/procgen/invariants.ts`'s `WALKABLE_GAP` — the
  * same number, taken from the game rather than from the check, because
  * `NavGrid` fattens every collider by a player radius before deciding a cell is
  * walkable. A margin narrower than this is a gap only on paper.
+ *
+ * The ribbon term is new (issue #269 QA, seed 5): `BLOCKERS` only ever kept
+ * the route's *centreline* this far from a foot's own tiny post radius
+ * (0.11 m); a diagonal route's centreline rarely lingered anywhere near that
+ * minimum, so the plain margin above was never actually tested against a
+ * ribbon's real paved width. An axis-aligned leg can hold its minimum
+ * clearance in a straight line for metres, and did — `finishRainbowStandsOnTheGround`
+ * measured a leg only 1.05 m from a path edge (needs `WALKABLE_GAP`, 1.24 m)
+ * on seed 5, because the centreline sat at exactly the old margin while the
+ * ring road's own half-width plus kerb (3.6 / 2 + 0.85 = 2.65 m) ate into it
+ * from there. `RIBBON_HALF_WIDTH_CEILING` is the largest half-width plus kerb
+ * any route in {@link ROUTES}/{@link solveRing} is ever built with.
  */
-const ARCH_FOOT_MARGIN = PLAYER_RADIUS * 2 + 0.4;
+const RIBBON_HALF_WIDTH_CEILING = 3.6 / 2 + 0.85;
+const ARCH_FOOT_MARGIN = PLAYER_RADIUS * 2 + 0.4 + RIBBON_HALF_WIDTH_CEILING;
 
 /**
  * Everything the ring road and the spurs must steer around: every plot, and
@@ -729,6 +744,18 @@ function buildGraph(): PathGraph {
     { from: 'ring', to: 'ring', paved: true, route: ring },
     // The approach: from just inside the park gate, down the protected
     // corridor, then around whatever stands between it and the plaza.
+    //
+    // Left on `detourAroundBlockers` rather than axis-aligned (issue #269
+    // QA): both of these two short, fixed connectors sit in the same small
+    // patch of ground the cat bus arrival choreographs its own crowd through
+    // (`check:cat-bus`), and re-shaping either one measurably shifted where a
+    // background child's own wander route crosses a scripted arrival child's
+    // — the two are not procgen-coupled today, so any change to the ground
+    // they cross can move a close pass from "fine" to "not." Fixing that
+    // crossing properly is a `NpcSystem` job (arrival-aware crowd avoidance),
+    // not a path-shape one, so these two connectors keep the proven diagonal
+    // rather than trading a real regression there for grid-alignment on two
+    // segments nobody would call "the trunk network" anyway.
     {
       from: 'gate',
       to: 'ring',
@@ -740,7 +767,7 @@ function buildGraph(): PathGraph {
         points: [
           [0, 54] as const,
           [0, 30] as const,
-          ...manhattanRoute([0, 27], nearestRingPoint(ringPoints, 0, 27)).slice(1),
+          ...detourAroundBlockers([0, 27], nearestRingPoint(ringPoints, 0, 27)).slice(1),
         ],
       },
     },
@@ -754,7 +781,7 @@ function buildGraph(): PathGraph {
         name: 'fountain-approach',
         width: 3.0,
         closed: false,
-        points: manhattanRoute(
+        points: detourAroundBlockers(
           nearestRingPoint(ringPoints, PLAZA.x, PLAZA.z + PLAZA.radius + 4),
           [PLAZA.x, PLAZA.z + PLAZA.radius - 1],
         ),
