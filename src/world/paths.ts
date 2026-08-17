@@ -448,7 +448,7 @@ function elbowLeg(a: readonly [number, number], b: readonly [number, number]): (
  */
 function gridDetour(a: readonly [number, number], b: readonly [number, number]): (readonly [number, number])[] {
   const step = 2;
-  const reach = 30; // metres past the pair's own bounding box the search may range
+  const reach = 45; // metres past the pair's own bounding box the search may range
   const toWorld = (g: number) => g * step;
   const touching = (p: readonly [number, number]): [number, number][] => {
     const fx = Math.floor(p[0] / step);
