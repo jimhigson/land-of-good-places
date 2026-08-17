@@ -195,7 +195,29 @@ export const INTERIOR_PLAZA_RADIUS = 52;
  * the doors themselves.
  */
 export const HOTEL_ORIGIN_X = -600;
-export const HOTEL_LOBBY_Z = 600;
+/**
+ * Nudged +`LOBBY_FOYER_GROWTH` (17 August 2026 — the lobby's own foyer/hall
+ * regrow): `LOBBY.halfZ` grew by the same amount so the entrance foyer could
+ * hold two visible wall paintings again (issue #271's original fix had left
+ * it with none). See {@link LOBBY_FOYER_GROWTH}'s own doc in `layout.ts` for
+ * the arithmetic — moving the origin **and** growing the half-extent by the
+ * same amount is what keeps the north wall, the mezzanine and everything
+ * north of the foyer/hall partition at *exactly* the world position they
+ * were already built and proven at (`check:nav-routes`), while a foyer
+ * fixture's own *local* z shifts by that same amount again to end up twice
+ * as far from the lift in world terms. 260 m of clearance to the next room
+ * either side swallows a shift this size without comment.
+ *
+ * **The `+ 7` here must equal `LOBBY_FOYER_GROWTH` exactly.** It cannot be
+ * written as `600 + LOBBY_FOYER_GROWTH` — `layout.ts` imports *from* this
+ * file, so the reverse import would cycle — which makes this the one
+ * legitimate case of CLAUDE.md's "two definitions" trap in this feature: a
+ * mismatch is not silent, though. It moves the north wall (`check:nav-routes`
+ * fails hard, not quietly, because that suite proves exact world positions
+ * for the mezzanine's connectors) rather than degrading gracefully, so a
+ * drift here is caught at the next build, not found by a child.
+ */
+export const HOTEL_LOBBY_Z = 600 + 7;
 export const HOTEL_BREAKFAST_Z = 860;
 export const HOTEL_CORRIDOR_Z = 1120;
 export const HOTEL_SUITE_Z = 1380;

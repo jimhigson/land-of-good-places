@@ -865,7 +865,63 @@ export const LOBBY_LANDING_SLAB = 0.4;
  * meshes in the artist's handoff.
  */
 export const STAIR_ARC_C = 7.99;
-const STAIR_ARC_Z = -2.5;
+
+/**
+ * How much deeper the entrance foyer grew, 17 August 2026 — the fix to a
+ * fix. Issue #271's own repair removed the lobby's two wall paintings
+ * outright, because every candidate spot on both walls was spoken for:
+ * north by the mezzanine's shadow (unfixable — {@link LOBBY.mezzanine}
+ * reaches the whole width of that wall), west by the lift's own
+ * tap-spacing exclusion (`|z − liftZ| ≥ 5.73`, from `LIFT_ALCOVE_DEPTH`'s
+ * boarding band — `liftZ` was still 0 at the time) squeezed against the
+ * crystal column, the seating group and the café already there. Jim's call:
+ * don't drop the paintings, make room for them.
+ *
+ * **Both halves of the room move; only the foyer's own furniture does.**
+ * `LOBBY.halfZ` grows by this constant and {@link HOTEL_LOBBY_Z}
+ * (`core/constants.ts`) moves by it too — `originZ − halfZ` is the north
+ * wall's world position, and adding the same number to both terms leaves
+ * that subtraction, so the wall the room is *built* with (`Hotel.ts`'s
+ * `buildRoomShell`, which places both outer walls at `±room.halfZ` — a
+ * formula, not a literal) does not move in the world at all. `originZ +
+ * halfZ` (the south wall, the front door) moves by **twice** this constant,
+ * because both terms grew by it.
+ *
+ * **The mezzanine is not a formula, though — it is `LOBBY.mezzanine`'s own
+ * set of literals, `minZ: −12.4` and everything derived from it, and
+ * nothing makes a literal follow a wall that moved out from under it.**
+ * The first cut of this fix left them alone, on the theory that "the north
+ * wall doesn't move" meant "the hall doesn't move" — and shipped a 7 m gap
+ * of genuinely walkable, genuinely mezzanine-shadowed floor between the
+ * built wall and the built mezzanine, standable and *silently unfaded*:
+ * `check:hotel`'s own probe 25 casts a ray at the **built meshes**, not this
+ * arithmetic, and found six spots hidden with nothing fading them, exactly
+ * because the overhang group's real geometry sat 7 m south of where the
+ * fade's own box-model (`mezzanineHidesPoint`, reading `LOBBY.mezzanine`
+ * unchanged) still thought it was. So `LOBBY.mezzanine` and every other
+ * hall fixture keyed to the north wall (the lift, the foyer/hall partition,
+ * the chandelier, the north runner, the west sconce that lit the old arch,
+ * the hall-side crystal column and clusters) carry `− LOBBY_FOYER_GROWTH`
+ * of their own, the same distance the wall moved, so the hall is
+ * *translated*, not left behind: everything that answers to `check:nav-routes`
+ * — the doorway off the statue's footprint, the stairs' own paired connector
+ * clearances — moves as one rigid piece, and that suite is what re-proves
+ * it still holds together at the new position.
+ *
+ * Every **foyer** fixture (south of the partition: the statue, the seating,
+ * the café, the south crystal column, reception, the runner, the door) has
+ * its own *local* z increased by this same constant — which, added to the
+ * origin's own equal shift, lands it at twice this constant further from
+ * the lift, matching how far the door moved. The whole room translates in
+ * two rigid pieces meeting at the (also-moved) partition, rather than being
+ * redesigned — the same pattern `SUITE.halfX`'s bedroom-widening PR used for
+ * its own untouched bedrooms. The two returning paintings are new, not
+ * translated: they hang in the gap this growth actually opens, between the
+ * lift's exclusion line and the relocated seating group.
+ */
+export const LOBBY_FOYER_GROWTH = 7;
+
+const STAIR_ARC_Z = -2.5 - LOBBY_FOYER_GROWTH;
 
 /**
  * Splits the lobby into the two rooms issue #270 asked for: the **entrance
@@ -889,31 +945,43 @@ const STAIR_ARC_Z = -2.5;
  * mechanism rather than inventing new space plumbing (NavGrid, save flags,
  * portals) for what is, underneath, still a floor a child never leaves.
  *
- * **Off the promenade axis, not on it** — see {@link LOBBY_HALL_DOOR_X}.
+ * See {@link LOBBY_HALL_DOOR_X} for exactly where the doorway sits along
+ * this line — it moved off the promenade axis and then back onto it as the
+ * room's own geometry changed underneath it.
+ *
+ * **Carries `− LOBBY_FOYER_GROWTH`**, same as every other hall fixture keyed
+ * to the north wall — see that constant's own doc. The line itself is still
+ * 2.0 m south of the (translated) hall; it is the wall on both sides of it
+ * that moved.
  */
-export const LOBBY_HALL_Z = 2.0;
+export const LOBBY_HALL_Z = 2.0 - LOBBY_FOYER_GROWTH;
 
 /**
- * Where the foyer/hall doorway sits along {@link LOBBY_HALL_Z} — off the
- * promenade axis (x = 0) on purpose, even though the axis is where a doorway
- * "reads" best.
+ * Where the foyer/hall doorway sits along {@link LOBBY_HALL_Z}.
  *
- * The first cut put it at x = 0, square with the statue and the arch beyond.
- * `check:nav-routes` found the real bug that hides behind "square with the
- * statue": the statue's own collision footprint, fattened by a player's own
- * radius, reaches to within about 0.6 m of the wall on that exact line, so
- * the only way through was a dogleg past the statue and back onto the axis
- * through a gap not much wider than a child — narrow enough that the router's
- * half-metre lattice (`NavGrid`'s own doc) could not reliably find it, the
- * same class of problem the mezzanine's stairs solved with a declared
- * connector rather than trusting the lattice. Moving the statue was the other
- * option and the worse one: it is Eleri's own placement, "south of the arch,
- * on the promenade", and not this fix's business to re-tune. The doorway
- * moves instead, comfortably clear of the statue's fattened footprint in
- * every direction, and `check:nav-routes`'s floor ↔ gallery walk (not just
- * its waypoint count) is what proves a body can actually make the trip.
+ * **On the promenade axis (x = 0), which was not always true.** The first cut
+ * of #270 put a doorway here, square with the statue and the arch beyond, and
+ * `check:nav-routes` found a real bug hiding behind "square with the statue":
+ * the statue's own collision footprint, fattened by a player's own radius,
+ * reached to within about 0.6 m of the (then much closer) partition on that
+ * exact line, leaving a dogleg not much wider than a child. The fix at the
+ * time moved the doorway off-axis instead of re-tuning Eleri's own statue
+ * placement.
+ *
+ * **#271's later foyer growth made that fix obsolete, and put a new one in
+ * its place.** {@link LOBBY_FOYER_GROWTH} pushes the statue and the doorway
+ * 16 m+ apart in world terms — nowhere near the 0.6 m clearance that forced
+ * the move — so this went back to x = 0. But at x = 0 exactly, the *hall*
+ * side of the doorway now grazes the **left curved stair's own outer
+ * balustrade**, which sweeps to within about 0.13 m of x = −3, the old
+ * doorway spot precisely: `check:hotel`'s "walker on the doorway line" probe
+ * (the same one #270's original fix was proven against) is what caught this
+ * one, pushed 0.71 m sideways rather than blocked outright. x = 0 clears both
+ * the statue (by a wide margin now) and both stairs' balustrades (each
+ * curve's own closest approach to the axis is ≈3.1 m) — the one spot that
+ * was ever actually a problem was −3, not 0.
  */
-export const LOBBY_HALL_DOOR_X = -3;
+export const LOBBY_HALL_DOOR_X = 0;
 
 /**
  * Where each curved flight's own foot stands, along the partition — the
@@ -959,8 +1027,10 @@ export const LOBBY: HotelRoom = {
   halfX: 13,
   // Deepened from 10 by exactly the gallery's own 4.8 m, so the open floor of
   // the lobby is the room it always was and the mezzanine is *added* space
-  // rather than space taken off a child.
-  halfZ: 12.4,
+  // rather than space taken off a child; deepened again by
+  // {@link LOBBY_FOYER_GROWTH} for the entrance foyer's own paintings — see
+  // that constant's doc for why the south wall actually moves by twice this.
+  halfZ: 12.4 + LOBBY_FOYER_GROWTH,
   // The imperial composition stands 5.44 m to the gallery and a child on it
   // wants `ARCH_CLEAR` of air over her head, so the two far walls rise to
   // 8.9 — over the asset's `LOBBY_MIN_WALL_HEIGHT` (8.81), which
@@ -968,8 +1038,12 @@ export const LOBBY: HotelRoom = {
   // `nearWallHeight` for why the two the camera looks through are not.
   wallHeight: 8.9,
   nearWallHeight: 3.4,
-  // South: the front door back out to the park. West: the lift.
-  gaps: { south: [-DOOR_HALF, DOOR_HALF], west: [-1.6, 1.6] },
+  // South: the front door back out to the park (formula-derived from
+  // `halfZ`, so it needs no edit of its own — `Hotel.ts`'s `buildRoomShell`
+  // builds both outer walls at `±room.halfZ`). West: the lift, centred on
+  // `liftZ` — this gap must track that field by hand (nothing derives one
+  // from the other), so it carries `LOBBY_FOYER_GROWTH` the same way.
+  gaps: { south: [-DOOR_HALF, DOOR_HALF], west: [-1.6 - LOBBY_FOYER_GROWTH, 1.6 - LOBBY_FOYER_GROWTH] },
   // **Clerestory.** The north row sits above the gallery deck (5.44), so the
   // panes read as the windows the gallery looks out of and throw the room's
   // brightest band high across the double-height space. `lookZone: false`:
@@ -983,7 +1057,24 @@ export const LOBBY: HotelRoom = {
     // finger outside the lift's boarding band, and `zoneAt` pins "Look out"
     // to it — the default picker's other candidates are the pane over the
     // lift band and the pane the café tables crowd.
-    west: { at: [-6.6, 3.2, 9.6], width: 1.8, sill: 1.2, head: 3.6, zoneAt: -6.6 },
+    //
+    // **3.2 stays put; 9.6 moves with the café it lights.** The foyer's
+    // {@link LOBBY_FOYER_GROWTH} translates every foyer *fixture* south, and
+    // every hall fixture (this pane included — it lights the old arch, not
+    // anything in the foyer) north by the same constant, in lockstep (see
+    // that constant's doc). The one exception, kept deliberately unmoved: 3.2
+    // lights the statue's end of the promenade regardless of how much
+    // further south the room now reaches, so moving it would only separate
+    // it from what it lights. 9.6 lights the café table it was placed beside
+    // (`dressLobby`'s `lobby-a`/`-b`), which *did* move, so this pane follows
+    // it — 9.6 + growth.
+    west: {
+      at: [-6.6 - LOBBY_FOYER_GROWTH, 3.2, 9.6 + LOBBY_FOYER_GROWTH],
+      width: 1.8,
+      sill: 1.2,
+      head: 3.6,
+      zoneAt: -6.6 - LOBBY_FOYER_GROWTH,
+    },
   },
   // The foyer/hall divide — see {@link LOBBY_HALL_Z}. Five doorways:
   // {@link LOBBY_HALL_DOOR_X} for foot traffic, {@link SUITE_DOOR_WIDTH}
@@ -1011,7 +1102,10 @@ export const LOBBY: HotelRoom = {
   ],
   // The imperial plan — see {@link Mezzanine} for what each piece is, and
   // HANDOFF-lobby-art.md for where every number comes from. The derivations,
-  // for the reader (assertStairMatches proves them):
+  // for the reader (assertStairMatches proves them, and none of them cares
+  // about absolute z — only relative heights, radii and sweeps — so the
+  // whole plan carries `LOBBY_FOYER_GROWTH` below without disturbing any of
+  // it, per that constant's own doc):
   //   arc centres (±7.99, −2.5); radii 3.06/4.86; twelve treads over ±90°;
   //   landing x ±4.93 (= C − innerRadius, lapping 3 cm into each curve's
   //   inner string — the designed STAIR_STRING_BITE overlap), z −7.6…−2.5
@@ -1023,13 +1117,13 @@ export const LOBBY: HotelRoom = {
   mezzanine: {
     minX: -13,
     maxX: 13,
-    minZ: -12.4,
-    maxZ: -7.6,
+    minZ: -12.4 - LOBBY_FOYER_GROWTH,
+    maxZ: -7.6 - LOBBY_FOYER_GROWTH,
     height: LOBBY_MEZZANINE_Y,
     landing: {
       minX: -4.93,
       maxX: 4.93,
-      minZ: -7.6,
+      minZ: -7.6 - LOBBY_FOYER_GROWTH,
       maxZ: STAIR_ARC_Z,
       height: LOBBY_LANDING_Y,
       slab: LOBBY_LANDING_SLAB,
@@ -1060,14 +1154,16 @@ export const LOBBY: HotelRoom = {
     ],
     straight: {
       centreX: 0,
-      frontZ: -5.008,
+      frontZ: -5.008 - LOBBY_FOYER_GROWTH,
       walkWidth: 3.6,
       flankX: 2.01,
       treads: 5,
       rise: LOBBY_MEZZANINE_Y - LOBBY_LANDING_Y,
     },
   },
-  liftZ: 0,
+  // Carries `− LOBBY_FOYER_GROWTH`, same as every other hall fixture keyed
+  // to the north wall — the lift alcove is a hall feature.
+  liftZ: 0 - LOBBY_FOYER_GROWTH,
   liftFloor: 0,
   floorLabel: 'Lobby',
 };
