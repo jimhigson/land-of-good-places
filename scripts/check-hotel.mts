@@ -78,6 +78,8 @@ import {
   GARDEN_FLOOR,
   HOTEL_FLOORS,
   LOBBY,
+  LOBBY_FOYER_GROWTH,
+  LOBBY_HALL_DOOR_X,
   OCEAN_FLOOR,
   SUITE,
   SUITE_BEDSIDE_X,
@@ -181,7 +183,8 @@ collision.setPlayBounds({ radius: 1e6, distanceToEdge: () => 1e6 });
 const mustBeSolid: readonly [string, number, number][] = [
   // On the axis south of the arch (the imperial relayout) — the walk-through
   // runs entrance → statue medallion → under the arch, and you go round it.
-  ['the lobby RiPika statue', LOBBY.originX + 0, LOBBY.originZ + 4.6],
+  // z carries `LOBBY_FOYER_GROWTH`, same as the statue itself (17 Aug 2026).
+  ['the lobby RiPika statue', LOBBY.originX + 0, LOBBY.originZ + 4.6 + LOBBY_FOYER_GROWTH],
   // Reception stands in the entrance foyer now, a few strides inside the
   // front door (issue #270) — imported from `Hotel.ts` rather than typed
   // again beside it, because a second literal here is exactly how the *last*
@@ -190,8 +193,10 @@ const mustBeSolid: readonly [string, number, number][] = [
   // inside the staircase's own solid wedge. Probe 13 separately asserts the
   // interact zone is anchored on this same footprint.
   ['the reception desk', LOBBY.originX + RECEPTION_X, LOBBY.originZ + RECEPTION_Z],
-  ['a lobby sofa', LOBBY.originX + 5.9, LOBBY.originZ + 4.8],
-  ['a lobby crystal column', LOBBY.originX - 11.9, LOBBY.originZ - 6.6],
+  // z carries `LOBBY_FOYER_GROWTH`, same as the sofa itself.
+  ['a lobby sofa', LOBBY.originX + 5.9, LOBBY.originZ + 4.8 + LOBBY_FOYER_GROWTH],
+  // z carries `LOBBY_FOYER_GROWTH` (−) with the rest of the hall it stands in.
+  ['a lobby crystal column', LOBBY.originX - 11.9, LOBBY.originZ - 6.6 - LOBBY_FOYER_GROWTH],
   ['a Floor 12 hedge', GARDEN_FLOOR.originX - 6.4, GARDEN_FLOOR.originZ - 6.4],
   ['a Floor 12 bench', GARDEN_FLOOR.originX + 2.2, GARDEN_FLOOR.originZ + 5.2],
   ['a Floor 33 seaweed clump', OCEAN_FLOOR.originX - 8.4, OCEAN_FLOOR.originZ - 6.4],
@@ -251,7 +256,7 @@ function deflectionAt(worldX: number, worldY: number, worldZ: number): number {
 }
 
 const mustBeMountable: readonly [string, number, number, number][] = [
-  ['a lobby sofa', LOBBY.originX + 5.9, LOBBY.originZ + 4.8, SOFA_SEAT_TOP],
+  ['a lobby sofa', LOBBY.originX + 5.9, LOBBY.originZ + 4.8 + LOBBY_FOYER_GROWTH, SOFA_SEAT_TOP],
   ['the buffet counter', BREAKFAST.originX + 1.5, BREAKFAST.originZ - 7.4, BUFFET_TOP],
   ['a breakfast table', BREAKFAST.originX - 6.4, BREAKFAST.originZ + 6.2, 0.74],
   ['a Floor 50 pet plinth', CORRIDOR.originX - 7.5, CORRIDOR.originZ - CORRIDOR.halfZ + 1.4, 0.4],
@@ -495,13 +500,24 @@ if (!mezzanine) {
     }
   }
 
-  // **The arch is a walk-through.** A ground body marched up the axis crosses
-  // the whole room — under the landing, through the colonnade, to the north
-  // wall — without being pushed off the line. This is the see-through Jim
-  // asked for, as a walk; a naive (height-agnostic) balustrade collider
-  // stalls it at the arch mouth, measured before the banded mechanism landed.
+  // **The arch is a walk-through.** A ground body marched up the doorway
+  // crosses the whole room — under the landing, through the colonnade, to
+  // the north wall — without being pushed off the line. This is the
+  // see-through Jim asked for, as a walk; a naive (height-agnostic)
+  // balustrade collider stalls it at the arch mouth, measured before the
+  // banded mechanism landed.
+  //
+  // **Marched at `LOBBY_HALL_DOOR_X`, not the room's own x = 0 axis.** Issue
+  // #270's own fix moved the foyer/hall doorway off the promenade axis (that
+  // constant's own doc in `layout.ts`), specifically so it would *not* line
+  // up with the statue's footprint any more — so a walker on the true axis
+  // now meets solid partition, by design, and this probe would be measuring
+  // the thing #270 deliberately built rather than a bug. The colonnade
+  // itself stays open underneath the whole gallery width, so the walk-through
+  // still holds off-axis.
   {
-    const probe = new Vector3(LOBBY.originX, 0, LOBBY.originZ + 2);
+    const AXIS_X = LOBBY.originX + LOBBY_HALL_DOOR_X;
+    const probe = new Vector3(AXIS_X, 0, LOBBY.originZ + 2);
     const steps = Math.ceil((2 - (-LOBBY.halfZ + 1.2)) / 0.05);
     for (let step = 0; step < steps; step += 1) {
       probe.z -= 0.05;
@@ -510,14 +526,14 @@ if (!mezzanine) {
     const reachedZ = probe.z - LOBBY.originZ;
     if (reachedZ > -LOBBY.halfZ + 2.0) {
       problems.push(
-        `a walker on the axis is stopped at local z = ${reachedZ.toFixed(2)} — the arch under ` +
-          `the landing is not a walk-through (something invisible stands in it)`,
+        `a walker on the doorway line is stopped at local z = ${reachedZ.toFixed(2)} — the arch ` +
+          `under the landing is not a walk-through (something invisible stands in it)`,
       );
     }
-    if (Math.abs(probe.x - LOBBY.originX) > 0.5) {
+    if (Math.abs(probe.x - AXIS_X) > 0.5) {
       problems.push(
-        `a walker on the axis is pushed ${(probe.x - LOBBY.originX).toFixed(2)} m sideways — ` +
-          `the arch is not clear on the centre line`,
+        `a walker on the doorway line is pushed ${(probe.x - AXIS_X).toFixed(2)} m sideways — ` +
+          `the arch is not clear on that line`,
       );
     }
 
@@ -526,9 +542,12 @@ if (!mezzanine) {
     // z ≈ −7.5 on every attempt: the old solid-mass rescue net still covered
     // the mezzanine rectangle, which the colonnade made honest floor. A
     // frame's update on a player standing in the colonnade must not move her.
+    // z carries `LOBBY_FOYER_GROWTH` (−) with the rest of the hall she is
+    // standing in — the colonnade this once probed at local z = −9 is now
+    // 7 m further north.
     {
       const walker = {
-        position: new Vector3(LOBBY.originX, 0, LOBBY.originZ - 9),
+        position: new Vector3(LOBBY.originX, 0, LOBBY.originZ - 9 - LOBBY_FOYER_GROWTH),
         riding: false,
         model: { setExpression: () => {} },
         teleportTo(x: number, y: number, z: number) {
@@ -540,7 +559,7 @@ if (!mezzanine) {
       hotel.update({ dt: 1 / 60, elapsed: 0 } as never);
       const moved = Math.hypot(
         walker.position.x - LOBBY.originX,
-        walker.position.z - (LOBBY.originZ - 9),
+        walker.position.z - (LOBBY.originZ - 9 - LOBBY_FOYER_GROWTH),
       );
       if (moved > 0.05) {
         problems.push(
