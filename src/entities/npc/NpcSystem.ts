@@ -448,6 +448,12 @@ export class NpcSystem implements GameSystem {
     // driver so it can decide, on its own, whether one is worth stopping at.
     // Empty by default so nothing here breaks if a caller has none to offer.
     climbableTrees: readonly ClimbableTreeSeed[] = [],
+    // Every railway bridge's own surface height at (x, z), or null off every
+    // bridge — `PoiGraph`'s height-aware line-of-sight probe needs it to
+    // stand a candidate edge's sample point on the deck rather than at
+    // ground level (issue #116, Decision 8). Defaults to "no bridges
+    // anywhere", which is every space but the park itself.
+    bridgeHeightAt: (x: number, z: number) => number | null = () => null,
     /**
      * How many of these children ride in on the cat bus.
      *
@@ -508,7 +514,7 @@ export class NpcSystem implements GameSystem {
     const otherNames = pickNames(nameRng, NPC_COUNT - activePinned.length);
     let nameCursor = 0;
 
-    this.graph = new PoiGraph(collision);
+    this.graph = new PoiGraph(collision, bridgeHeightAt);
     this.kids = new KidCrowd(NPC_COUNT);
     this.group.add(this.kids.crowd.group);
 

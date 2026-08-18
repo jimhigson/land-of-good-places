@@ -14,6 +14,7 @@ import { Station } from './station';
 import { RideCamera } from '../../core/RideCamera';
 import { computeCrossings, type LevelCrossing } from './crossings';
 import { buildRailFence } from './fence';
+import { buildBridges, type Bridge } from './bridges';
 import { SmokePuffs } from './puffs';
 import {
   createCarriage,
@@ -121,6 +122,11 @@ export class ParkTrain implements GameSystem, TrainService {
   readonly stops: TrainStop[] = [];
   /** The level crossings — exported so `check:park` knows where feet may cross. */
   readonly crossings: readonly LevelCrossing[] = [];
+  /** The bridge built at every crossing (issue #116, Decision 8) — exported
+   * so `check:park`, `NavGrid` and `PoiGraph` can all route across them. */
+  readonly bridges: readonly Bridge[] = [];
+  /** Every bridge's own deck and ramp treads — folded into {@link platforms}. */
+  private readonly bridgePlatforms: readonly MovingPlatform[] = [];
 
   /**
    * The first-person view from the player's seat (Decision 4 C2), built on
@@ -186,12 +192,28 @@ export class ParkTrain implements GameSystem, TrainService {
     this.group.add(this.track.group);
 
     // Level crossings first (they come out of the solved curve and the drawn
-    // paths), then the fence, which leaves a gap at every one of them and at
-    // both stations (whose spots were fixed in `train/plan.ts`).
+    // paths) — each one gets a bridge, below, and the fence gaps only for
+    // boarding at a station now (whose spots were fixed in `train/plan.ts`).
     this.crossings = computeCrossings(
       this.route,
       TRAIN_PLAN.stations.map((station) => station.distance),
     );
+
+    // A bridge at every crossing (issue #116, Decision 8) — built before the
+    // fence, which needs to know where every deck stands so it can seam
+    // around it rather than gap for it. See `bridges.ts`'s header.
+    const built = buildBridges(this.route, this.crossings);
+    this.bridges = built.bridges;
+    this.bridgePlatforms = built.platforms;
+    this.group.add(built.group);
+    for (const rail of built.guardRails) {
+      // A banded collider — `baseHeight` a half-step below the local surface
+      // it guards, exactly `hotel/place.ts`'s overhanging-landing rail.
+      collision.addWall(
+        rail.x1, rail.z1, rail.x2, rail.z2, 0.08,
+        Infinity, false, false, rail.baseHeight, rail.navStamped,
+      );
+    }
 
     // --- the train itself ----------------------------------------------------
     this.locomotive = createLocomotive();
@@ -258,11 +280,10 @@ export class ParkTrain implements GameSystem, TrainService {
     }
 
     // --- the fence (Decision 4 §6: keeping feet off the track) -------------
-    // Built last of all the trackside furniture, because its gaps are defined
-    // by everything above: a gap at every level crossing, and a gap along
-    // every platform so children can board.
+    // Built last of all the trackside furniture, so it can seam around every
+    // bridge and gap for every platform.
     this.group.add(
-      buildRailFence(this.route, collision, this.crossings, this.stations.map((station) => ({
+      buildRailFence(this.route, collision, this.bridges, this.stations.map((station) => ({
         distance: station.distance,
       }))),
     );
@@ -279,10 +300,12 @@ export class ParkTrain implements GameSystem, TrainService {
     setTrainService(this);
   }
 
-  /** Platforms and carriage floors, for `WalkSurfaces.addPlatform`. */
+  /** Platforms, carriage floors and every bridge deck/tread, for
+   * `WalkSurfaces.addPlatform`. */
   platforms(): MovingPlatform[] {
     const platforms: MovingPlatform[] = this.stations.map((station) => station.asPlatform());
     for (const carriage of this.carriages) platforms.push(carriageFloor(carriage));
+    platforms.push(...this.bridgePlatforms);
     return platforms;
   }
 

@@ -8,7 +8,8 @@ import {
   Vector3,
 } from 'three';
 import type { TrainRoute } from './route';
-import type { LevelCrossing } from './crossings';
+import type { Bridge } from './bridges';
+import { FENCE_OFFSET, FENCE_SEAM_MARGIN } from './clearance';
 import type { CollisionWorld } from '../Collision';
 import { PALETTE } from '../../core/palette';
 import { toonMaterial } from '../../art/style/materials';
@@ -20,14 +21,19 @@ import { terrainHeight } from '../terrain';
  * Two picket runs offset either side of the solved loop: invisible walls for
  * the collision world (full height — the fence is a rule, not a hurdle), and
  * a visible pink post-and-rail fence so the rule reads as scenery rather
- * than as an invisible force. Gaps at every level crossing and along every
- * platform; everywhere else, continuous by construction — which is what
- * finally closes `check:park`'s rail.exclusion and rail.walkable ratchets.
+ * than as an invisible force. A gap along every platform, for boarding; no
+ * gap anywhere else — not even at a crossing, since issue #116 (Decision 8)
+ * a path crosses on a bridge, and the fence runs on underneath it. Where a
+ * bridge's own deck stands directly over a run of posts, that run's wall
+ * gets an absolute top pinned just under the deck instead of the usual
+ * `Infinity`: solid at ground height (nobody reachable there clears it),
+ * open at the deck's own height (see `bridges.ts`'s header for why that is
+ * safe against the jump-the-fence hazard Decision 8 records). Continuous by
+ * construction everywhere else — which is what closes `check:park`'s
+ * rail.exclusion and rail.walkable ratchets.
  */
 
-export const FENCE_OFFSET = 2.0;
 const STEP = 2.4;
-// A crossing's fence gap is its own `halfGap` — self-measured for obliquity.
 /** Fence gap half-length around a station, along the loop. Exported so
  * `check:park` can subtract the *declared* open stretches and hold the rest
  * of the loop to zero holes. */
@@ -40,29 +46,41 @@ interface StationSpan {
 export function buildRailFence(
   route: TrainRoute,
   collision: CollisionWorld,
-  crossings: readonly LevelCrossing[],
+  bridges: readonly Bridge[],
   stations: readonly StationSpan[],
 ): Group {
   const group = new Group();
   group.name = 'rail-fence';
 
-  // --- 1. the open intervals: crossings and platforms, merged --------------
+  /**
+   * The deck height directly over `(x, z)`, or `null` off every bridge —
+   * consulted by every wall segment this function adds, so a run of fence
+   * that happens to fall under a deck gets the `topIsAbsolute` seam instead
+   * of the ordinary always-solid wall. See the file header.
+   */
+  const deckSpanAt = (x: number, z: number): number | null => {
+    for (const bridge of bridges) {
+      if (bridge.deckCovers(x, z)) return bridge.deckY;
+    }
+    return null;
+  };
+
+  // --- 1. the open intervals: platforms only --------------------------------
   // Everything else is a CLOSED stretch, and each closed stretch is fenced as
   // a sealed box: both sides, plus an end cap at each end. Airtight by
-  // construction — overlapping gaps, oblique paths and station spacing can
-  // change where the boxes are, never whether they seal. (The first version
-  // fenced the loop with gaps and added compartment walls separately;
-  // overlapping gaps let a child slalom around a compartment wall whose side
-  // fence was absent — measured as 229 of 392 track points strollable.)
+  // construction — overlapping gaps and station spacing can change where the
+  // boxes are, never whether they seal. (The first version fenced the loop
+  // with gaps and added compartment walls separately; overlapping gaps let a
+  // child slalom around a compartment wall whose side fence was absent —
+  // measured as 229 of 392 track points strollable.) A crossing no longer
+  // opens one of these — issue #116/Decision 8, the fence runs on underneath
+  // every bridge instead.
   interface Interval {
     from: number;
     to: number;
   }
   const length = route.length;
   const open: Interval[] = [];
-  for (const crossing of crossings) {
-    open.push({ from: crossing.railDistance - crossing.halfGap, to: crossing.railDistance + crossing.halfGap });
-  }
   for (const station of stations) {
     open.push({ from: station.distance - STATION_GAP, to: station.distance + STATION_GAP });
   }
@@ -133,8 +151,19 @@ export function buildRailFence(
     const z = point.z - tangent.x * side * FENCE_OFFSET;
     return { x, z, y: terrainHeight(x, z) };
   };
+  /** Every wall segment this file adds goes through here, so a run that
+   * passes under a bridge deck always gets the seam instead of the ordinary
+   * always-solid wall — see `deckSpanAt` above. */
+  const addFenceWall = (a: Post, b: Post): void => {
+    const deckY = deckSpanAt((a.x + b.x) / 2, (a.z + b.z) / 2);
+    if (deckY === null) {
+      collision.addWall(a.x, a.z, b.x, b.z, 0.18);
+    } else {
+      collision.addWall(a.x, a.z, b.x, b.z, 0.18, deckY - FENCE_SEAM_MARGIN, false, true);
+    }
+  };
   const link = (a: Post, b: Post) => {
-    collision.addWall(a.x, a.z, b.x, b.z, 0.18);
+    addFenceWall(a, b);
     rails.push({
       x: (a.x + b.x) / 2,
       z: (a.z + b.z) / 2,
@@ -151,7 +180,7 @@ export function buildRailFence(
    * fence turning in to meet the crossing; what the train sees is nothing.
    */
   const cap = (a: Post, b: Post) => {
-    collision.addWall(a.x, a.z, b.x, b.z, 0.18);
+    addFenceWall(a, b);
     const span = Math.hypot(b.x - a.x, b.z - a.z);
     const stub = Math.max(0, span / 2 - 1.1) / span; // fraction of the way in
     for (const [from, to] of [
@@ -195,9 +224,11 @@ export function buildRailFence(
   // the cheapest way ACROSS the railway, and the tap-to-move router found
   // it: once issue #241 spread the plots to both sides of the loop, walks
   // to anything beyond it cut straight over the rails at a platform
-  // (`check:park`'s route.crossesRail). Crossing belongs to level
-  // crossings; boarding belongs to platforms; so the platform's far side
-  // now carries the same fence as any closed stretch.
+  // (`check:park`'s route.crossesRail). Crossing belongs to bridges;
+  // boarding belongs to platforms; so the platform's far side carries the
+  // same fence as any closed stretch, with no break — if a bridge happens to
+  // stand in a platform's window, `addFenceWall` gives that run the same
+  // seam as anywhere else a deck crosses it.
   const stationRun = (station: StationSpan) => {
     route.pointAt(station.distance, point);
     route.tangentAt(station.distance, tangent);
@@ -209,18 +240,6 @@ export function buildRailFence(
     const steps = Math.max(2, Math.ceil((STATION_GAP * 2) / STEP));
     for (let i = 0; i <= steps; i += 1) {
       const distance = route.wrap(station.distance - STATION_GAP + (STATION_GAP * 2 * i) / steps);
-      // A real level crossing can sit inside a platform's window (a path
-      // crossing the rail just past the boarding gap) — its passage stays
-      // open on both sides, so the far-side run breaks around it.
-      const inCrossing = crossings.some(
-        (crossing) =>
-          Math.abs(route.wrap(distance - crossing.railDistance + route.length / 2) - route.length / 2) <
-          crossing.halfGap,
-      );
-      if (inCrossing) {
-        previous = null;
-        continue;
-      }
       route.pointAt(distance, point);
       route.tangentAt(distance, tangent);
       const x = point.x + tangent.z * farSide * FENCE_OFFSET;
@@ -262,23 +281,9 @@ export function buildRailFence(
   railMesh.instanceMatrix.needsUpdate = true;
   group.add(postMesh, railMesh);
 
-  // --- the crossings themselves: a timber deck between the rails ---------
-  const deckMaterial = toonMaterial(PALETTE.woodLight);
-  for (const crossing of crossings) {
-    const deck = new InstancedMesh(new BoxGeometry(1.1, 0.06, 0.52), deckMaterial, 7);
-    const deckTangent = route.tangentAt(crossing.railDistance, new Vector3());
-    for (let i = 0; i < 7; i += 1) {
-      const along = (i - 3) * 0.62;
-      const x = crossing.x + deckTangent.x * along;
-      const z = crossing.z + deckTangent.z * along;
-      rotation.setFromAxisAngle(axis, Math.atan2(deckTangent.x, deckTangent.z));
-      position.set(x, terrainHeight(x, z) + 0.055, z);
-      matrix.compose(position, rotation, one);
-      deck.setMatrixAt(i, matrix);
-    }
-    deck.instanceMatrix.needsUpdate = true;
-    group.add(deck);
-  }
+  // The crossings themselves no longer get a flat timber deck here — every
+  // one now has a real hump-back bridge, built and added to the scene by
+  // `bridges.ts`/`ParkTrain` alongside this fence.
 
   return group;
 }

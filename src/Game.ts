@@ -369,6 +369,9 @@ export class Game {
       // whatever the imperial rebuild declares after it. Read at lattice
       // build; see NavGrid's header and Decision 11.
       () => this.world.building.surfaces.connectors,
+      // Every railway bridge's deck and ramps (issue #116, Decision 8) — see
+      // NavGrid's own `bridgeCovers` header.
+      (x, z) => this.world.train.bridges.some((bridge) => bridge.covers(x, z)),
     );
 
     // Tap-to-move. Built after the world so it can ask the building where its

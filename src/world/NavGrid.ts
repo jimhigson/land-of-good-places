@@ -164,8 +164,13 @@ export const MAX_LEVEL_GAP = MAX_STEP;
  * A reference height above everything walkable, for asking the sampler
  * "what is the topmost surface here?". The tallest walkable thing in the game
  * is the castle's top deck at ~18 m; nothing legitimate approaches this.
+ *
+ * Exported so `scripts/check-park.mts` can ask the same "what's the topmost
+ * surface here" question its own invariant 2 needs (a bridge deck stands
+ * several metres up, so a check that samples from ground level never finds
+ * it) without a second "high enough" number that could drift from this one.
  */
-const TOP_REFERENCE = 500;
+export const TOP_REFERENCE = 500;
 
 /** Surfaces closer than this are one surface, asked twice. */
 const LEVEL_EPSILON = 0.01;
@@ -295,6 +300,16 @@ export class NavGrid {
    * the first lattice anyone asks for. See the file comment.
    */
   private readonly connectors: () => readonly LevelConnector[];
+  /**
+   * True over any registered bridge deck or ramp — `ParkTrain.bridges`, one
+   * `covers(x, z)` per bridge, OR'd together. Every cell this answers true
+   * for is exempt from collider stamping (Decision 8: the deck wins the
+   * cell, because what is under it — the fenced rail corridor — was already
+   * unwalkable) and is given exactly one level, the bridge's own surface —
+   * see `rebuild`'s two uses of this. Defaults to "no bridges anywhere",
+   * which is every space but the park itself.
+   */
+  private readonly bridgeCovers: (x: number, z: number) => boolean;
 
   constructor(
     collision: CollisionWorld,
@@ -313,11 +328,14 @@ export class NavGrid {
      * the first lattice anyone asks for. See the file comment.
      */
     connectors: () => readonly LevelConnector[] = () => [],
+    /** See {@link bridgeCovers}. */
+    bridgeCovers: (x: number, z: number) => boolean = () => false,
   ) {
     this.collision = collision;
     this.walkerRadius = walkerRadius;
     this.hopApex = hopApex;
     this.connectors = connectors;
+    this.bridgeCovers = bridgeCovers;
   }
 
   /**
@@ -487,6 +505,23 @@ export class NavGrid {
       },
     );
 
+    // Bridges (Decision 8): a cell a deck or ramp covers is exempt from
+    // everything just stamped, however it got blocked — the rail fence
+    // that would otherwise wall off the deck's own cells included. Safe
+    // because what a bridge stands over is the fenced rail corridor, which
+    // was never walkable ground to begin with; nothing is lost by letting
+    // the surface a level up win. See `bridges.ts`'s header for the
+    // physical half of this (the fence's own `topIsAbsolute` seam) — this
+    // is only the lattice's own bookkeeping.
+    for (let cz = 0; cz < side; cz += 1) {
+      const z = this.originZ + cz * CELL;
+      const row = cz * side;
+      for (let cx = 0; cx < side; cx += 1) {
+        const x = this.originX + cx * CELL;
+        if (this.bridgeCovers(x, z)) this.blocked[row + cx] = 0;
+      }
+    }
+
     // Levels, for the free cells only — a blocked cell is never stepped on, so
     // its heights are never asked for, and this is much the most expensive
     // part. Top-down: the topmost surface first, then whatever the sampler
@@ -513,7 +548,15 @@ export class NavGrid {
         this.nodeCell[nodes] = index;
         let kept = cursor;
         nodes += 1;
-        for (let level = 1; level < MAX_LEVELS_PER_CELL; level += 1) {
+        // A bridge cell stops here, at its one level — the deck (or ramp
+        // tread) itself. `sample` always has *something* to say further
+        // down (the raw, unconditional ground, `WalkSurfaces`'s own
+        // comment for it), and under a bridge that ground is the fenced
+        // rail corridor: a level the physical fence refuses ever getting a
+        // route from the resolver it cannot deliver. See the exemption
+        // pass above.
+        const onBridge = this.bridgeCovers(x, z);
+        for (let level = 1; !onBridge && level < MAX_LEVELS_PER_CELL; level += 1) {
           const next = sample(x, z, cursor - MAX_STEP - LEVEL_EPSILON);
           if (next >= cursor - LEVEL_EPSILON) break;
           cursor = next;

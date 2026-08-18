@@ -90,3 +90,50 @@ export const RIDER_HEADROOM = 0.4;
  * datum, not part of it.
  */
 export const TRAIN_CLEARANCE_Y = TRAIN_SWEPT_TOP_Y + RIDER_HEADROOM;
+
+/**
+ * The depth of a bridge's own structure — deck planks plus the beams under
+ * them — between the surface a child walks on and the soffit a train passes
+ * beneath.
+ *
+ * The one number here that is a *claim* rather than a derivation, because
+ * nothing in the built park measures a deck's own thickness back. Stated
+ * separately, and named, so it is obvious what to reconcile if the real deck
+ * geometry (`world/train/bridges.ts`) ever settles on something else.
+ */
+export const BRIDGE_DECK_DEPTH = 0.35;
+
+/**
+ * How far a walkable surface must stand above the ground under the track
+ * before a route passing over it counts as a **bridge** rather than a level
+ * crossing (issue #116, Decision 8) — {@link TRAIN_CLEARANCE_Y} plus the
+ * deck's own thickness.
+ *
+ * The single owner: `world/train/bridges.ts` builds every deck to stand
+ * exactly this high above the ground under the crossing, and
+ * `scripts/check-park.mts`'s invariant 2 re-derives the same number to judge
+ * it, so a retune of the train, the rider, or the deck's own thickness moves
+ * both sides together.
+ */
+export const BRIDGE_RISE = TRAIN_CLEARANCE_Y + BRIDGE_DECK_DEPTH;
+
+/**
+ * How far the exclusion fence stands from the rail centre line, each side.
+ *
+ * Lives here, a leaf module with no three.js and no `TrainRoute`, rather
+ * than in `fence.ts` itself — `bridges.ts` needs the same number (a deck has
+ * to clear both fence lines) and `fence.ts` needs `bridges.ts`'s own
+ * {@link FENCE_SEAM_MARGIN} to build the seam under a deck, so the two
+ * importing each other directly would be a cycle. One leaf both sides read
+ * from is the same fix `trainDimensions.ts`'s own header describes for the
+ * same disease.
+ */
+export const FENCE_OFFSET = 2.0;
+
+/**
+ * How far below a bridge deck's own surface the fence's `topIsAbsolute` top
+ * sits, where a run of fence posts falls directly under a deck — a decisive
+ * margin, never a graze, and nowhere near a ground jump reaches (see
+ * `bridges.ts`'s header for the full mechanism).
+ */
+export const FENCE_SEAM_MARGIN = 0.18;
