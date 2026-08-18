@@ -494,3 +494,14 @@ commits as the same GitHub user, so GitHub thinks you are reviewing your own
 PR. Post the review as a comment instead and **state the verdict plainly in
 the first line** ("Verdict: changes requested"). The Overseer reads the text,
 not the review state.
+
+**When telling Jim a PR is ready to look at, never hand him a bare PR
+link.** A PR page is a diff and a comment thread — it does not show him the
+feature. Give the Cloudflare Workers deploy-preview URL with the feature's
+own deep link appended (`https://<hash>-land-of-good-places.blockstack.workers.dev/rail-race`,
+not just `.../pull/280`), exactly per this file's own "hand over the URL of
+the thing itself" rule above. Pull the preview URL from that PR's "Deploy PR
+preview" check run (or its posted comment) rather than guessing one. The PR
+link itself is still worth including alongside — Jim needs it to actually
+merge — but as the second link, for the merge action, never the only one or
+the first one he has to click through to find the feature.
