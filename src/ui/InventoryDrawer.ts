@@ -43,7 +43,7 @@ export interface InventoryHandlers {
  * label and the tap itself so the three can never describe different things.
  */
 interface RowAction {
-  /** `wear` covers both slots; the store call picks which. */
+  /** `wear` covers all four wearable slots; the store call picks which. */
   readonly kind: 'wear' | 'carry' | 'none';
   /** True when the thing is currently in use, so the tap undoes it. */
   readonly active: boolean;
@@ -66,6 +66,10 @@ function actionFor(item: InventoryItem, state: GameState): RowAction {
   if (slot === 'jetpack') {
     const active = item.uid === state.wornJetpackUid;
     return { kind: 'wear', active, label: active ? 'Take off' : 'Wear', glyph: active ? '🚀' : '' };
+  }
+  if (slot === 'keychain') {
+    const active = item.uid === state.wornKeychainUid;
+    return { kind: 'wear', active, label: active ? 'Take off' : 'Wear', glyph: active ? '🔑' : '' };
   }
   if (item.carryable) {
     const active = item.uid === state.carriedUid;
@@ -281,6 +285,7 @@ export class InventoryDrawer {
     if (slot === 'hat') gameStore.setWornHat(action.active ? null : item.uid);
     else if (slot === 'flower') gameStore.setWornFlower(action.active ? null : item.uid);
     else if (slot === 'jetpack') gameStore.setWornJetpack(action.active ? null : item.uid);
+    else if (slot === 'keychain') gameStore.setWornKeychain(action.active ? null : item.uid);
     else if (action.kind === 'carry') this.handlers.onCarry(action.active ? null : item.uid);
   }
 }
