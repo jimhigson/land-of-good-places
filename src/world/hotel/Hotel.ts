@@ -380,8 +380,24 @@ const DISCO_COLOURS: readonly number[] = [
  * the foyer grew, and "a few strides inside the front door" is a statement
  * about the desk's distance from the door, not from the room's own origin —
  * so the desk moves with the door it is a few strides from.
+ *
+ * **x dropped from 10.5 to 4.5, 18 August 2026** (QA on #280, portrait
+ * phone): the fix above moved the desk 7 m closer to the door in a straight
+ * line, but 10.5 m of that line was *sideways* and only 1.4 m was deeper into
+ * the room — so on a 390×844 portrait screen, standing at the entry point,
+ * the desk sat off the right edge of the frame entirely (`IsoCamera`
+ * projects it to NDC x=1.53; the visible frustum is ±1). A child had to walk
+ * ~5 m sideways, unprompted, before anything appeared. Verified
+ * geometrically (no browser access) by projecting the desk and receptionist
+ * through `IsoCamera` at the player's real teleport-in point
+ * (`enterLobby`'s `LOBBY.halfZ - 2.2`): x=4.5 lands the whole desk footprint
+ * (NDC x from 0.585 to 0.932) and the receptionist (NDC x=0.906) on-screen
+ * with margin, while clearing every neighbour by at least 1.5 m — the
+ * closest is the south-east crystal planter. Kept in the east bay, just
+ * narrower, so the desk is still the first thing reached rather than
+ * something in the central promenade the statue and its rug runner own.
  */
-export const RECEPTION_X = 10.5;
+export const RECEPTION_X = 4.5;
 export const RECEPTION_Z = 8.8 + LOBBY_FOYER_GROWTH;
 
 /** Where the receptionist herself stands: behind her own desk, north of it —
@@ -3184,7 +3200,14 @@ export class Hotel implements GameSystem {
       },
       { prop: () => crystalCluster(0x10b1), x: -12.2, z: -5.8 - LOBBY_FOYER_GROWTH, top: CLUSTER_TOP },
       { prop: () => crystalCluster(0x10b2), x: 12.2, z: -5.8 - LOBBY_FOYER_GROWTH, top: CLUSTER_TOP },
-      { prop: () => crystalPlanter(0x10b3), x: 3.4, z: 10.8 + LOBBY_FOYER_GROWTH, top: PLANTER_TOP },
+      // x moved from 3.4 to 7.2, 18 August 2026, with RECEPTION_X's own drop
+      // to 4.5: `check:hotel` caught it red-handed — the reception zone's
+      // stand spot (RECEPTION_X, RECEPTION_Z + 2.4) now landed 0.6 m short of
+      // this planter's own footprint on x, inside PLAYER_RADIUS (0.62) of it,
+      // so a child walking to check in was pushed off her own destination.
+      // Only this one moves; the mirrored planter at x −3.4 is nowhere near
+      // the desk's new east-bay spot and was never in conflict.
+      { prop: () => crystalPlanter(0x10b3), x: 7.2, z: 10.8 + LOBBY_FOYER_GROWTH, top: PLANTER_TOP },
       { prop: () => crystalPlanter(0x10b5), x: -3.4, z: 10.8 + LOBBY_FOYER_GROWTH, top: PLANTER_TOP },
       { prop: () => crystalPlanter(0x10b4), x: -6.2, z: -6.6 - LOBBY_FOYER_GROWTH, top: PLANTER_TOP },
     ]);
