@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { Rng } from '../src/core/mathUtils.ts';
 import {
   gapSecondsFor,
+  HOLD_EXTENSION_SECONDS,
   JUMPSCARE_TUNING,
   JumpscareDirector,
+  MAX_HOLD_EXTENSION_SECONDS,
   windowSecondsFor,
   type JumpscareTuning,
 } from '../src/minigames/spookyHouse/jumpscare.ts';
@@ -170,6 +172,110 @@ describe('JumpscareDirector', () => {
     expect(director.windowOpen).toBe(false);
     expect(director.registerHit()).toBe(false);
     expect(director.score).toBe(0);
+  });
+
+  // ---------------------------------------------------- mouth-tap hold (#294)
+
+  it('extendHold pushes the window\'s close out, tap by tap, but stops applying past the 2s cap', () => {
+    const director = new JumpscareDirector(new Rng(20));
+    director.update(JUMPSCARE_TUNING.firstDelaySeconds + 0.001); // now inside cycle 0's window
+    expect(director.windowOpen).toBe(true);
+    const windowSeconds = windowSecondsFor(0);
+
+    // Tap the mouth far more than enough to blow past the cap: 20 taps of
+    // HOLD_EXTENSION_SECONDS each request 20 * 0.3s = 6s, well over the 2s cap.
+    for (let i = 0; i < 20; i += 1) director.extendHold(HOLD_EXTENSION_SECONDS);
+
+    // The window should now close at (original close) + the 2s cap, not 6s
+    // later — advance to just short of that and it must still be open.
+    const remaining = windowSeconds - 0.001 + MAX_HOLD_EXTENSION_SECONDS;
+    const beforeClose = director.update(remaining - 0.01);
+    expect(beforeClose).toHaveLength(0);
+    expect(director.windowOpen).toBe(true);
+
+    // Taps offered after the cap is already spent do nothing further.
+    director.extendHold(HOLD_EXTENSION_SECONDS);
+    director.extendHold(HOLD_EXTENSION_SECONDS);
+
+    const afterClose = director.update(0.02);
+    expect(afterClose.some((e) => e.kind === 'retreat')).toBe(true);
+    expect(director.windowOpen).toBe(false);
+  });
+
+  it('registerHit alone — what tapping the EYE does — never extends the window; only extendHold does', () => {
+    const director = new JumpscareDirector(new Rng(21));
+    director.update(JUMPSCARE_TUNING.firstDelaySeconds + 0.001); // now inside cycle 0's window
+    const windowSeconds = windowSecondsFor(0);
+
+    // Simulate many eye taps: registerHit only, exactly what tapEye() calls.
+    for (let i = 0; i < 10; i += 1) director.registerHit();
+
+    // The window still closes on its original, un-extended schedule.
+    const remaining = windowSeconds - 0.001;
+    const beforeClose = director.update(remaining - 0.001);
+    expect(beforeClose).toHaveLength(0);
+    const afterClose = director.update(0.002);
+    expect(afterClose.some((e) => e.kind === 'retreat')).toBe(true);
+  });
+
+  it('no taps at all leaves the window\'s timing exactly as it was before this feature existed', () => {
+    const director = new JumpscareDirector(new Rng(22));
+    director.update(JUMPSCARE_TUNING.firstDelaySeconds + 0.001); // now inside cycle 0's window
+    const windowSeconds = windowSecondsFor(0);
+
+    // Nothing tapped, hit or extended — the window closes exactly at
+    // firstDelaySeconds + windowSeconds, the same schedule windowSecondsFor
+    // has always described.
+    const remaining = windowSeconds - 0.001;
+    const beforeClose = director.update(remaining - 0.001);
+    expect(beforeClose).toHaveLength(0);
+    expect(director.windowOpen).toBe(true);
+    const afterClose = director.update(0.002);
+    expect(afterClose.some((e) => e.kind === 'retreat')).toBe(true);
+    expect(director.windowOpen).toBe(false);
+  });
+
+  it('the hold-extension budget resets for each new cycle — no carry-over credit', () => {
+    const director = new JumpscareDirector(new Rng(23));
+    director.update(JUMPSCARE_TUNING.firstDelaySeconds + 0.001); // cycle 0's window open
+    // Spend the whole cap on cycle 0.
+    for (let i = 0; i < 20; i += 1) director.extendHold(HOLD_EXTENSION_SECONDS);
+
+    // Run all the way through cycle 0's (extended) retreat and into cycle 1's
+    // window, reading cycle 1's own window length off its `jumpOut` event
+    // rather than assuming anything about internal state.
+    let cycle1WindowSeconds: number | null = null;
+    let elapsed = 0;
+    const dt = 1 / 30;
+    while (cycle1WindowSeconds === null && elapsed < 60) {
+      for (const event of director.update(dt)) {
+        if (event.kind === 'jumpOut' && event.cycleIndex === 1) {
+          cycle1WindowSeconds = event.windowSeconds;
+        }
+      }
+      elapsed += dt;
+    }
+    expect(cycle1WindowSeconds).not.toBeNull();
+    expect(director.windowOpen).toBe(true);
+    const win = cycle1WindowSeconds as number;
+
+    // Spend most of a fresh cap. If cycle 0's cap had NOT reset (a bug: still
+    // sitting maxed-out from cycle 0), this would be a no-op — room would be
+    // zero — and the window would close on its natural, un-extended
+    // schedule; because a fresh 2s cap is available, it does not.
+    const extension = MAX_HOLD_EXTENSION_SECONDS - 0.1;
+    director.extendHold(extension);
+
+    // Comfortably past the natural close, comfortably short of natural close
+    // + the extension just applied.
+    const stillOpen = director.update(win + extension / 2);
+    expect(stillOpen).toHaveLength(0);
+    expect(director.windowOpen).toBe(true);
+
+    // And it does eventually close once the (reset, fresh) extended budget
+    // itself runs out.
+    const afterClose = director.update(extension);
+    expect(afterClose.some((e) => e.kind === 'retreat')).toBe(true);
   });
 
   it('a missed cycle costs nothing — no fail state, the next cycle still happens on schedule', () => {

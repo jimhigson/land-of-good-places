@@ -7,7 +7,7 @@ import { createCandyShower, type CandyShower } from './candyShower';
 import { createSpookyFace, type EyeStalk, type SpookyFace } from './face';
 import { createHotspot, type Hotspot } from './hotspots';
 import { createSpookyHud, type SpookyHud } from './hud';
-import { JumpscareDirector } from './jumpscare';
+import { HOLD_EXTENSION_SECONDS, JumpscareDirector } from './jumpscare';
 import { createSpookyRoom, type SpookyRoom } from './room';
 import { playBooSound, playCandySound, playPopSound, playSquirtSound } from './sounds';
 import { createScreenSplash, createSquirt, type ScreenSplash, type Squirt } from './squirt';
@@ -288,9 +288,17 @@ class SpookyHouse implements MiniGame {
    * first tap is held back for {@link DOUBLE_TAP_MS} in case a second one is
    * on its way; that little wait is the only way to tell "one tap" from "the
    * first half of two" apart at all.
+   *
+   * Independent of that squirt/pour choice, every mouth tap while a jump-
+   * scare window is open also extends the window (#294 review comment: "make
+   * it stay for another 300ms each tap, up to a maximum of 2s") —
+   * `extendHold` is a no-op outside an open window, so this is always safe to
+   * call. The eye's `tapEye` deliberately never calls this — only the mouth
+   * holds the face out longer.
    */
   private tapMouth(): void {
     this.registerJumpscareHit();
+    this.jumpscare?.extendHold(HOLD_EXTENSION_SECONDS);
 
     const now = performance.now();
     const sinceLast = now - this.mouthTapAt;

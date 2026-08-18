@@ -22,6 +22,17 @@ import type { Rng } from '../../core/mathUtils';
  * pours candy exactly as it did before, jump-scare window open or not. That
  * is the "reuse the existing hit-target mechanic" half of #293's ask; this
  * file is only the "make it a repeating, timed reflex test" half.
+ *
+ * A follow-up (PR #294 review comment, 18 August 2026) added a second, mouth-
+ * only mechanic on top: {@link JumpscareDirector.extendHold}. Every mouth tap
+ * while a window is open pushes that window's own close a little further out
+ * — "stay for another 300ms each tap" — up to
+ * {@link MAX_HOLD_EXTENSION_SECONDS} of *cumulative* extension for that one
+ * cycle. Tapping the eye only calls `registerHit`, never `extendHold`, so eye
+ * taps score exactly as before and never hold the face out longer — only the
+ * mouth can do that. Not tapping at all changes nothing: the window closes on
+ * {@link windowSecondsFor}'s normal, already cycle-shrinking schedule exactly
+ * as it did before this existed.
  */
 
 export type JumpscareEvent =
@@ -135,6 +146,20 @@ export function gapSecondsFor(
   return rng.range(min, max) * shrink;
 }
 
+/**
+ * "Clicking its mouth should make it stay for another 300ms each tap" (PR
+ * #294 review comment) — how much each mouth tap extends the currently-open
+ * window by.
+ */
+export const HOLD_EXTENSION_SECONDS = 0.3;
+
+/**
+ * "...up to a maximum of 2s" — the cap on *cumulative* extension for a single
+ * cycle. Reset to zero the moment a new cycle's window opens, so holding one
+ * cycle to its limit does not carry any credit into the next.
+ */
+export const MAX_HOLD_EXTENSION_SECONDS = 2;
+
 type Phase = 'waiting' | 'out' | 'retreating' | 'done';
 
 export class JumpscareDirector {
@@ -143,6 +168,8 @@ export class JumpscareDirector {
   private cycleIndex = 0;
   private hitThisCycle = false;
   private hitCount = 0;
+  /** Cumulative seconds added via {@link extendHold} so far this cycle — capped at {@link MAX_HOLD_EXTENSION_SECONDS}. */
+  private holdExtensionThisCycle = 0;
 
   private readonly rng: Rng;
   private readonly tuning: JumpscareTuning;
@@ -205,10 +232,29 @@ export class JumpscareDirector {
     return true;
   }
 
+  /**
+   * A mouth tap landed while the window is open — push this cycle's close
+   * further out by `seconds`, up to {@link MAX_HOLD_EXTENSION_SECONDS} of
+   * *cumulative* extension for the cycle. A no-op outside the 'out' phase (an
+   * eye tap never calls this at all — only `SpookyHouse.tapMouth` does — and
+   * even a stray call while retreating/waiting/done does nothing), and a
+   * no-op once the cap for this cycle is already spent, so calling it on
+   * every mouth tap unconditionally is always safe.
+   */
+  extendHold(seconds: number): void {
+    if (this.phase !== 'out' || seconds <= 0) return;
+    const room = MAX_HOLD_EXTENSION_SECONDS - this.holdExtensionThisCycle;
+    if (room <= 0) return;
+    const applied = Math.min(seconds, room);
+    this.holdExtensionThisCycle += applied;
+    this.timer += applied;
+  }
+
   private advance(): JumpscareEvent | null {
     if (this.phase === 'waiting') {
       this.phase = 'out';
       this.hitThisCycle = false;
+      this.holdExtensionThisCycle = 0;
       const windowSeconds = windowSecondsFor(this.cycleIndex, this.tuning);
       this.timer += windowSeconds;
       return {
