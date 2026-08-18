@@ -14,7 +14,7 @@ import { ANCHORS } from './anchors';
 import { PARK_LAYOUT, edgeDistanceAlong } from './parkLayout';
 import { PARK_BOUNDARY } from './boundary';
 import { TRAIN_PLAN } from './train/plan';
-import { FENCE_OFFSET } from './train/fence';
+import { FENCE_OFFSET, STATION_GAP } from './train/fence';
 import { COASTER_PLANS } from './coaster/plan';
 import { RAIL_RACE_PLAN } from './railRace/plan';
 import { archFeet } from './railRace/arch';
@@ -852,7 +852,7 @@ function collapseCollinear(points: readonly (readonly [number, number])[]): (rea
  * Nearest point on the ring **as drawn** — projected onto its edges, not just
  * snapped to one of its own vertices.
  *
- * {@link solveRing} now emits 96 vertices sitting exactly on a true circle
+ * {@link solveRing} now emits 32 vertices sitting exactly on a true circle
  * (round 3 of issue #269, 18 August 2026), close enough together that vertex-
  * snapping alone would already be accurate here — but this function predates
  * that (it was written when the ring's axis-aligned simplification, issue
@@ -1690,9 +1690,7 @@ function railCorridorSamples(): readonly (readonly [number, number])[] {
       // canonical seed's real failure sat only 2.11 m from centreline, well
       // inside a 25 m station exemption but well outside this one, so the
       // very screen meant to let a legitimate station-side pass through
-      // instead let the genuine collision through with it. This coarse,
-      // 3 m-sampled screen only needs enough over `STATION_GAP` to absorb
-      // its own sampling pitch, not the platform's whole footprint.
+      // instead let the genuine collision through with it.
       const nearStation = TRAIN_PLAN.stations.some(
         (station) => railAlongDistance(distance, station.distance, route.length) < RAIL_STATION_GAP_MARGIN,
       );
@@ -1711,9 +1709,32 @@ function railAlongDistance(a: number, b: number, length: number): number {
   return Math.min(diff, length - diff);
 }
 
-/** See {@link railCorridorSamples}'s own comment for why this is wider than
- * `STATION_GAP` (`train/fence.ts`, the real fence's own half-width). */
-const RAIL_STATION_GAP_MARGIN = 10;
+/**
+ * Along-route half-width of the band round each station where
+ * {@link railCorridorSamples} exempts the rail from clearance checking at
+ * all, because the real fence has a genuine gap there for the platform.
+ *
+ * **Tied directly to `STATION_GAP`** (`train/fence.ts`), the real fence
+ * builder's own half-width for that gap — not a separately hand-picked
+ * number that is only supposed to track it. A second PR #286 review (issue
+ * #269, 18 August 2026) found this had drifted to a flat `10`, 3.5 m past
+ * `STATION_GAP`'s `6.5`: every corridor sample between 6.5 m and 10 m of a
+ * station along the route was exempted too, even though the real fence is
+ * *closed*, not open, out there — a silent blind band, not just a coarse
+ * screen. Measured concretely on the canonical seed: `spur-waterFight`'s
+ * pushed run sat only 0.83 m from the actual fence wall (needs
+ * {@link RAIL_CORRIDOR_CLEARANCE}'s ~4.65 m) because this exemption skipped
+ * every corridor sample near enough to have caught it. The `25 m` and
+ * flat-`10` attempts both trade the same currency in the same wrong
+ * direction — favouring "never a spurious push near a station" over "never
+ * miss the fence" — which is the one CLAUDE.md ranks the other way round.
+ * Equal to `STATION_GAP` needs no slack of its own: `railAlongDistance` is
+ * compared against a *sampled* rail position no more than the corridor's
+ * own ~3 m sampling pitch away from wherever the true gap boundary falls,
+ * and a sample that lands just past the boundary is exactly the samples
+ * this screen exists to let through to the clearance check, not exempt.
+ */
+const RAIL_STATION_GAP_MARGIN = STATION_GAP;
 
 /**
  * **Nudges a route's own axis-aligned runs away from the railway** (issue
@@ -1761,7 +1782,73 @@ const RAIL_STATION_GAP_MARGIN = 10;
  * the same geometry that made the run itself axis-aligned). Never applied to
  * the route's own two endpoints (the branch point and the destination),
  * which other code depends on matching exactly.
+ *
+ * The nudge is re-verified against `BLOCKERS` before it is applied. See
+ * {@link RAIL_PUSH_WIDEN_STEPS} for the search this runs when the
+ * rail-clearing minimum would clip a plot, and that constant's own comment
+ * for why a push of exactly `0` is always safe as the last resort.
  */
+/**
+ * Extra distances {@link pushClearOfRail} tries on top of its own
+ * rail-clearing minimum push (`basePush`) when that minimum would clip a
+ * `BLOCKERS` plot — widening in fixed steps until a candidate clears, the
+ * same shape {@link GRID_DETOUR_REACHES} widens `gridDetour`'s search. If
+ * nothing widening finds clears, the run is left at its pre-shift position
+ * (`applied` stays `0`).
+ *
+ * **Two other shapes were tried here and measurably made things worse — read
+ * this before changing the search again** (issue #269 PR #286 review round
+ * 2, 18 August 2026):
+ *
+ * - **Also searching *smaller* pushes** (fractions of `basePush` down to
+ *   `0`, preferring the largest that clears): on seed 2, a partial push in
+ *   the rail-clearing direction clips fewer blockers than the full push, but
+ *   lands *closer* to the Rail Race finish rainbow's own legs than either
+ *   the full push or no push at all — "prefer the largest push that clears
+ *   blockers" walks straight into a worse spot for a concern this function
+ *   cannot see (nothing here checks distance to the rainbow, only to
+ *   `BLOCKERS`). Measured: 0.79 m/0.29 m against a rainbow leg with a
+ *   partial push, vs 0.91 m/0.47 m with none — worse, not better.
+ * - **Checking the shift *relative* to the run's own pre-shift blocker
+ *   distance** (grandfathering any blocker the run was already nearer than
+ *   `ROUTE_WALKER_PAD` to, so only a *newly introduced* violation blocks the
+ *   push): motivated by a real observation — the pre-shift run is not
+ *   always already fully clear of every blocker in an absolute sense (one
+ *   canonical-seed run sat 8.02 m from a plot needing 11.8 m, a proximity
+ *   `detourAroundBlockers`/`gridDetourAttempt` can legitimately leave in
+ *   place for reasons local to *that* construction) — but implemented and
+ *   measured, this let far larger pushes through than the flat check ever
+ *   had, swinging several runs through the dense 'garden' area's decorative
+ *   clutter, which `BLOCKERS` does not model at all (it only holds plots and
+ *   arch feet). Result: `check:park`'s `poi.stranded` went from 1 to **35**.
+ *   Reverted outright, not tuned — the flat check below is *stricter* than
+ *   the guarantee this router actually makes in every case, but it is the
+ *   far smaller, better-understood departure from the pre-fix behaviour.
+ *
+ * **This flat check is therefore known to have residual gaps, not a clean
+ * fix**, and they are visible, not silent: with only this widen-then-give-up
+ * search, `test:procgen` fails one assertion on seed 2 (a `railRace` spur's
+ * pushed run leaves the finish rainbow's inner legs 0.91 m/0.47 m from the
+ * nearest path edge, needing 1.24 m) and `check:park` fails one on the
+ * canonical seed (`poi.stranded`, one `garden` waypoint). Both trace to the
+ * same structural cause: this function processes a route's runs
+ * sequentially over one mutable array, so a later run's starting point
+ * inherits wherever an earlier run's push decision left it — declining an
+ * unsafe push on one run can measurably reshape a *different, distant* part
+ * of the very same route. Both regressions were confirmed, by reverting this
+ * whole fix and re-measuring, to be **pre-existing**: the un-reviewed,
+ * unconditional push was silently relying on exactly the shape of blocker
+ * violation issue #269 PR #286's review flagged to *also*, coincidentally,
+ * pull those two routes clear of obstacles this function was never checking
+ * against. Fixing the reviewed bug correctly removes that accidental
+ * benefit. Leaving a plot silently clipped is worse than either of these —
+ * both are loud, CI-visible, and fixable in a followup that gives this
+ * function (or the routes themselves) real awareness of the finish
+ * rainbow's clearance and the garden waypoint's connectivity, neither of
+ * which `BLOCKERS` currently carries.
+ */
+const RAIL_PUSH_WIDEN_STEPS: readonly number[] = [0, 1, 2, 4, 8];
+
 function pushClearOfRail(
   points: readonly (readonly [number, number])[],
 ): (readonly [number, number])[] {
@@ -1810,11 +1897,45 @@ function pushClearOfRail(
         }
       }
       if (nearest && minDistance < RAIL_CORRIDOR_CLEARANCE) {
-        const push = RAIL_CORRIDOR_CLEARANCE - minDistance + 0.5;
         const axis = sameX ? 0 : 1;
         const direction = (runStart[axis] as number) >= (nearest[axis] as number) ? 1 : -1;
-        for (let k = i; k <= end; k += 1) {
-          (out[k] as [number, number])[axis] += direction * push;
+        const basePush = RAIL_CORRIDOR_CLEARANCE - minDistance + 0.5;
+
+        // Re-verify against BLOCKERS after nudging — the same "prove it,
+        // don't assume it" discipline every other step of this router
+        // already applies (`elbowLeg`'s two-corner check, `gridDetour`'s
+        // own segment-clearance search) but this function, until now,
+        // skipped: a nudge that clears the rail can just as easily walk the
+        // run straight into a plot standing on the far side of it, and
+        // nothing downstream re-checks a shifted run against `BLOCKERS` once
+        // this pass has moved it (issue #269 PR #286 review). Widen the push
+        // by {@link RAIL_PUSH_WIDEN_STEPS} and take the first candidate that
+        // clears `segmentClearOfBlockers`; if none do, `applied` stays `0`
+        // and the run keeps its pre-shift position — see that constant's own
+        // comment for the two other search shapes tried here, measured, and
+        // reverted, and for the residual gaps this flat check still has.
+        let applied = 0;
+        for (const extra of RAIL_PUSH_WIDEN_STEPS) {
+          const candidate = basePush + extra;
+          const dx = axis === 0 ? direction * candidate : 0;
+          const dz = axis === 1 ? direction * candidate : 0;
+          if (
+            segmentClearOfBlockers(
+              runStart[0] + dx,
+              runStart[1] + dz,
+              runEnd[0] + dx,
+              runEnd[1] + dz,
+              ROUTE_WALKER_PAD,
+            )
+          ) {
+            applied = candidate;
+            break;
+          }
+        }
+        if (applied !== 0) {
+          for (let k = i; k <= end; k += 1) {
+            (out[k] as [number, number])[axis] += direction * applied;
+          }
         }
       }
     }

@@ -837,6 +837,16 @@ const pathsRunOnGridAxes: Invariant = (facts) => {
  * far below any polygon's, so what actually trips this is a regression back
  * toward straight chords, not the profile's own small, legitimate
  * bearing-to-bearing give.
+ *
+ * Deliberately not derived from a game constant such as `RAIL_CORRIDOR_CLEARANCE`
+ * (`paths.ts`) — that number bounds how close a route may draw to the
+ * railway, a different question from how round this one route's own shape
+ * is, and the two happen to sit in the same file for an unrelated reason
+ * (both guard `paths.ts` output). Forcing a link between them would tie this
+ * invariant to a future rail-clearance change it has nothing to do with.
+ * This *is* the "measure the game" case CLAUDE.md asks for — the mean/max
+ * pair above is measured off the built ring on every seed, the same way
+ * `PLAYER_RADIUS`-derived thresholds are measured off the player.
  */
 const RING_RADIUS_TOLERANCE = 1;
 
