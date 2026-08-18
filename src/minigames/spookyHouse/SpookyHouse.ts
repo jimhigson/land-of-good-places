@@ -117,16 +117,35 @@ class SpookyHouse implements MiniGame {
   init(context: MiniGameContext): void {
     this.context = context;
 
-    // Cool grey-green ambient plus one warm lantern-coloured key: the "cosy
-    // dim room" look comes from colour temperature, not from actually
-    // dropping the light level — see the note on this in `room.ts`. Reworked
-    // from the original warm-purple pair after Jim's PR #294 note asked for
-    // the room to read as dark green on dark grey, not purple — the wall,
-    // floor and rug materials changed in `room.ts`, and a light tinted for
-    // the old purple palette would have fought the new one instead of
-    // shading it, still bright and just recoloured underneath.
+    // Cool grey-green ambient plus a soft, cool-neutral key: the "cosy dim
+    // room" look comes from colour temperature, not from actually dropping
+    // the light level — see the note on this in `room.ts`. Reworked from the
+    // original warm-purple pair after Jim's PR #294 note asked for the room
+    // to read as dark green on dark grey, not purple — the wall, floor and
+    // rug materials changed in `room.ts`.
+    //
+    // The first attempt at this rework (round 2) kept the key light itself
+    // lantern-lemon-coloured (`PALETTE.markerLemon`, 0xffdf7a — R,G,B ≈
+    // 1.0, 0.88, 0.48) at a high intensity (1.4). QA round 3 caught that this
+    // washes `ART.statueStoneDark` (the "genuinely grey" wall, 0x7e7379)
+    // toward warm olive/khaki on screen. Measured (multiplying the wall's
+    // base colour by each light's colour × intensity × the wall's
+    // approximate camera-facing normal, the way toon shading combines them):
+    // the old key alone contributed roughly (1.11, 0.97, 0.53) of irradiance
+    // — blue lagging red/green by more than half — against the hemisphere's
+    // own (0.31, 0.38, 0.33), which was *already* cool/neutral. So the
+    // hemisphere was never the problem; the key light was overpowering it.
+    // The wall's resulting on-screen colour worked out to ~0xcfc891, a
+    // textbook khaki. The key here is now a pale, cool sage (lightening the
+    // hemisphere's own sky tone, 0x7d9488, toward white) at a lower
+    // intensity, which brings the same multiply out to ~0x9baca6 — a
+    // neutral, faintly cool grey, R and B within 0.02 of each other instead
+    // of 0.25 apart. All the room's actual *warmth* now comes only from the
+    // physical lantern prop's own `PointLight` in `room.ts` (already
+    // lemon-coloured and localised to the lantern itself), plus the two
+    // jack-o-lanterns — accent light sources, not a wash across every wall.
     this.scene.add(new HemisphereLight(0x7d9488, 0x232b20, 1.0));
-    const key = new DirectionalLight(PALETTE.markerLemon, 1.4);
+    const key = new DirectionalLight(0xcbd4cf, 1.1);
     key.position.set(1.5, 6, 8);
     this.scene.add(key, key.target);
     const fill = new DirectionalLight(PALETTE.markerMint, 0.65);

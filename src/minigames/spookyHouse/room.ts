@@ -178,15 +178,38 @@ export function createSpookyRoom(): SpookyRoom {
   frame.position.set(0, 4.1, -5.55);
   root.add(frame);
 
-  // --- spider webs, tucked into the wall/ceiling corners either side of the
-  // face — the "spooky artwork" half of Jim's PR #294 note.
+  // --- spider webs, tucked into the wall corners either side of the face —
+  // the "spooky artwork" half of Jim's PR #294 note.
+  //
+  // Round 3 QA found these invisible in the fixed camera's frame at both top
+  // corners. The original y=7.05 put them almost entirely *above* the
+  // camera's own visible top edge: projecting the decal's four corners into
+  // the fixed camera's view space (`SpookyHouse.ts`'s `CAMERA_POS`/
+  // `CAMERA_TARGET`, the same lookAt basis the round-2 lunge-offscreen review
+  // used) put the decal's own top edge at view-y ≈ 4.99 against a guaranteed
+  // frame half-height of only 4.0 (`MIN_HALF_HEIGHT`) — over half the mesh,
+  // including the corner the web actually radiates from (the canvas is
+  // painted with its strands starting at (0,0) and reaching outward; the
+  // opposite corner is blank), was cropped off the top of every frame. What
+  // little remained in-frame was the near-empty far corner of the canvas.
+  //
+  // y=5.3 brings the decal's own top edge to view-y ≈ 3.27 — comfortably
+  // inside 4.0 on *every* supported aspect ratio, since 4.0 is a floor
+  // (`MIN_HALF_HEIGHT`) the camera only ever grows past, never shrinks
+  // below. x is unchanged: 3.35 was already chosen (successfully) to clear
+  // the picture-frame moulding's own 3.27-radius ring, and moving it inward
+  // to also guarantee the frame on extreme narrow-portrait aspects would put
+  // it back on top of that ring — a worse trade for a background decal that
+  // was never the reported bug (which was full invisibility on the tested,
+  // ordinary-aspect frame, not partial edge cropping on a phone held
+  // upright).
   const cobwebLeft = createCobwebMesh(false);
-  cobwebLeft.position.set(-3.35, 7.05, -4.55);
+  cobwebLeft.position.set(-3.35, 5.3, -4.55);
   cobwebLeft.rotation.z = 0.18;
   root.add(cobwebLeft);
 
   const cobwebRight = createCobwebMesh(true);
-  cobwebRight.position.set(3.35, 7.05, -4.55);
+  cobwebRight.position.set(3.35, 5.3, -4.55);
   cobwebRight.rotation.z = -0.18;
   root.add(cobwebRight);
 
