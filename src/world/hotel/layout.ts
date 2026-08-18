@@ -1193,14 +1193,23 @@ const PET_BED_PITCH = 1.3;
 const PET_BED_DOORWAY_MARGIN = 0.6;
 
 /**
- * The rectangle around the human bed and its bedside table (both
- * {@link SUITE_BED_SPOTS}[1] and {@link SUITE_BEDSIDE_X}[1]) that a pet bed
- * must stay clear of, widened by {@link PET_BED_FOOTPRINT_RADIUS} so a pet
- * bed's own footprint clears it, not just its centre.
+ * The rectangle around a bedroom's own human bed and bedside table (both
+ * {@link SUITE_BED_SPOTS}`[bedIndex]` and {@link SUITE_BEDSIDE_X}`[bedIndex]`)
+ * that a pet bed must stay clear of, widened by {@link PET_BED_FOOTPRINT_RADIUS}
+ * so a pet bed's own footprint clears it, not just its centre.
+ *
+ * Takes `bedIndex` rather than always reading bedroom 2 (issue #279's
+ * original shape) because issue #274/#275's follow-up bug (Jim, 18 Aug 2026:
+ * *"the pet didn't get into any bed when I went to sleep"*) traced to every
+ * pet bed living in bedroom 2 alone: a nap taken from bedroom 1 or 3 — the
+ * first bedroom door a child actually reaches from the corridor, per
+ * `Hotel.enterSuite`'s own doc comment — is a solid partition and the fixed
+ * camera's whole field of view away from where any pet lies down, so it
+ * looked exactly like nothing had happened. See {@link petBedSlots}.
  */
-function humanFurnitureKeepOutX(): { readonly minX: number; readonly maxX: number } {
-  const [bedX] = SUITE_BED_SPOTS[1] ?? [0, 0];
-  const bedsideX = SUITE_BEDSIDE_X[1] ?? 0;
+function humanFurnitureKeepOutX(bedIndex: number): { readonly minX: number; readonly maxX: number } {
+  const [bedX] = SUITE_BED_SPOTS[bedIndex] ?? [0, 0];
+  const bedsideX = SUITE_BEDSIDE_X[bedIndex] ?? 0;
   return {
     minX: Math.min(bedX - SUITE_BED_HALF_X, bedsideX - SUITE_BEDSIDE_RADIUS) - PET_BED_FOOTPRINT_RADIUS,
     maxX: Math.max(bedX + SUITE_BED_HALF_X, bedsideX + SUITE_BEDSIDE_RADIUS) + PET_BED_FOOTPRINT_RADIUS,
@@ -1208,15 +1217,18 @@ function humanFurnitureKeepOutX(): { readonly minX: number; readonly maxX: numbe
 }
 
 /**
- * Every pet-bed row's z, tiled from the bedroom's own north wall down to
- * {@link PET_BED_DOORWAY_MARGIN} short of the hall doorway — derived from
- * {@link clearFloorAround} rather than the wall positions themselves (any
- * point in the bedroom's own column gives the same answer, since nothing
- * inside it subdivides the room further), so a future move of either wall
- * re-fits every row automatically.
+ * Every pet-bed row's z in `bedIndex`'s own bedroom, tiled from the
+ * bedroom's own north wall down to {@link PET_BED_DOORWAY_MARGIN} short of
+ * the hall doorway — derived from {@link clearFloorAround} rather than the
+ * wall positions themselves (any point in the bedroom's own column gives the
+ * same answer, since nothing inside it subdivides the room further), so a
+ * future move of any wall re-fits every row automatically. The representative
+ * x is the bedroom's own bed — always inside its own bedroom's column by
+ * construction, whichever of the three bedrooms `bedIndex` names.
  */
-function petBedRowsZ(): number[] {
-  const rect = clearFloorAround(SUITE, 0, (SUITE_BED_SPOTS[1] ?? [0, 0])[1]);
+function petBedRowsZ(bedIndex: number): number[] {
+  const [bedX, bedZ] = SUITE_BED_SPOTS[bedIndex] ?? [0, 0];
+  const rect = clearFloorAround(SUITE, bedX, bedZ);
   const southLimit = rect.maxZ - PET_BED_DOORWAY_MARGIN;
   const rows: number[] = [];
   for (
@@ -1230,36 +1242,46 @@ function petBedRowsZ(): number[] {
 }
 
 /**
- * Enough non-overlapping pet-bed slots for `count` pets, in the middle
- * bedroom's own local metres — one per pet the player owns, see
- * `Hotel.dressPetBeds` (issue #275). **Here, not a hand-typed list in
- * `Hotel.ts`, for the same reason {@link SUITE_BED_SPOTS} is a list and not a
- * literal in `Hotel.dressSuite`**: `check:hotel` needs this function too, to
- * prove it never overlaps, and `store.ts` puts **no ceiling at all** on how
- * many pets a child can own — a fixed, hand-typed slot list silently started
- * placing every pet past its own length at the exact same coordinates as the
- * last slot (issue #275's original review bug: identical overlapping bed and
- * pet meshes, not graceful degradation).
+ * Enough non-overlapping pet-bed slots for `count` pets, in one bedroom's own
+ * local metres — one per pet the player owns, see `Hotel.dressPetBeds`
+ * (issue #275). **Here, not a hand-typed list in `Hotel.ts`, for the same
+ * reason {@link SUITE_BED_SPOTS} is a list and not a literal in
+ * `Hotel.dressSuite`**: `check:hotel` needs this function too, to prove it
+ * never overlaps, and `store.ts` puts **no ceiling at all** on how many pets
+ * a child can own — a fixed, hand-typed slot list silently started placing
+ * every pet past its own length at the exact same coordinates as the last
+ * slot (issue #275's original review bug: identical overlapping bed and pet
+ * meshes, not graceful degradation).
  *
- * Tiles every row {@link petBedRowsZ} finds — north of the human bed and its
- * bedside table, south of them down to short of the hall doorway — outward
- * from that furniture, west then east, across the bedroom's own **real**
- * clear floor at each row ({@link clearFloorAround}, never a hand-typed wall
- * position). This bedroom (doubled by issue #274 for exactly this) fits
- * *four* such rows of *seven* columns each — 28 slots, twice what
- * `check:hotel` now asks this function to place at once, and every one of
- * them genuinely non-overlapping rather than a fixed list's silent tail. A
- * `count` past even that is capped rather than reusing a slot: nothing drawn
- * is safer than something drawn twice in the same spot, and no purchase this
- * game's shop can produce reaches it (four species, so a genuinely dedicated
- * collector would need to buy the same pet seven times over before a bed
- * failed to appear for one of them).
+ * `bedIndex` picks which of {@link SUITE_BED_SPOTS}' three bedrooms the row
+ * tiles across — **default 1, the middle bedroom**, exactly the original
+ * (and still primary) behaviour: that room alone was doubled by issue #274
+ * for this, and fits *four* rows of *seven* columns — 28 slots, twice what
+ * `check:hotel` asks this function to place at once. `Hotel.dressPetBeds`
+ * passes 0 or 2 for the two side bedrooms, one slot at a time — see the
+ * doc comment on {@link humanFurnitureKeepOutX} for why a second bedroom's
+ * worth of calls exists at all now.
+ *
+ * Tiles every row {@link petBedRowsZ} finds for that bedroom — north of its
+ * own human bed and bedside table, south of them down to short of the hall
+ * doorway — outward from that furniture, west then east, across the
+ * bedroom's own **real** clear floor at each row ({@link clearFloorAround},
+ * never a hand-typed wall position). A `count` past a bedroom's own capacity
+ * is capped rather than reusing a slot: nothing drawn is safer than
+ * something drawn twice in the same spot, and no purchase this game's shop
+ * can produce reaches the middle bedroom's 28 (four species, so a genuinely
+ * dedicated collector would need to buy the same pet seven times over before
+ * a bed failed to appear for one of them).
  */
-export function petBedSlots(count: number): readonly { readonly x: number; readonly z: number }[] {
-  const keepOut = humanFurnitureKeepOutX();
+export function petBedSlots(
+  count: number,
+  bedIndex = 1,
+): readonly { readonly x: number; readonly z: number }[] {
+  const keepOut = humanFurnitureKeepOutX(bedIndex);
+  const bedX = (SUITE_BED_SPOTS[bedIndex] ?? [0, 0])[0];
   const slots: { readonly x: number; readonly z: number }[] = [];
-  for (const z of petBedRowsZ()) {
-    const rect = clearFloorAround(SUITE, 0, z);
+  for (const z of petBedRowsZ(bedIndex)) {
+    const rect = clearFloorAround(SUITE, bedX, z);
     const west: number[] = [];
     for (
       let x = keepOut.minX - PET_BED_FOOTPRINT_RADIUS - 0.05;

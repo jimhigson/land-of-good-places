@@ -3840,32 +3840,69 @@ export class Hotel implements GameSystem {
    * every bed against the doorway itself (issue #273's machinery); the slot
    * function only has to keep beds off their neighbours and the walls, which
    * nothing checks automatically.
+   *
+   * ## A bed she can actually see, whichever of the three she naps in
+   *
+   * Jim, live play, 18 Aug 2026, from `/hotel-suite`: *"the pet didn't get
+   * into any bed when I did [went to sleep]."* Every pet bed used to live
+   * only here, in the middle bedroom — every pet genuinely did lie down
+   * (`Hotel.nap` walks the whole roster, unconditionally on which bed she
+   * used), but `Hotel.enterSuite`'s own doc comment has her reaching
+   * **bedroom 1's** door first, not bedroom 2's, and a 2.2 m partition plus
+   * the fixed camera's field of view put bedroom 2 nowhere she could see it
+   * from bedroom 1 or bedroom 3. The data changed; nothing she was looking at
+   * did, which reads as exactly what she reported. `check:hotel` probe 16
+   * proved the rotation flips correctly at bed 0 the whole time — the one
+   * thing it never asked is whether bed 0's own room has a pet bed *in* it.
+   *
+   * So the first pet she owns (`kinds[0]`) also gets a single bed of its own
+   * in bedroom 1 and in bedroom 3 — `petBedSlots(1, 0)` / `petBedSlots(1, 2)`,
+   * the same function, just told which bedroom rather than defaulting to the
+   * middle one. Every extra pet beyond the first still only appears in the
+   * middle bedroom's own full row: this is a visibility fix for the bed she
+   * is standing in, not a redesign of where a collector's whole menagerie
+   * lives. The two rooms can never both be on screen at once (the fixed
+   * camera only ever shows the bedroom she is in), so the same pet quietly
+   * having three beds is not a thing a child can catch her out on.
    */
   private dressPetBeds(shell: Group): void {
     const kinds = this.ownedPetKinds();
-    const slots = petBedSlots(kinds.length);
-    kinds.forEach((kind, index) => {
-      const slot = slots[index];
-      if (!slot) return;
-      const { x, z } = slot;
-      const bed = createPetBed();
-      // Solid and standable, like every other flat-topped prop now — QA
-      // found it walk-through, and a pet bed is a cushion, which is a thing
-      // a child may absolutely bounce onto.
-      this.props.place(shell, SUITE, bed.root, {
-        x,
-        z,
-        radius: PET_BED_FOOTPRINT_RADIUS,
-        top: PET_BED_CUSHION_TOP,
-      });
+    for (const [index, slot] of petBedSlots(kinds.length).entries()) {
+      const kind = kinds[index];
+      if (kind === undefined) continue;
+      this.placePetBed(shell, kind, slot.x, slot.z);
+    }
+    const firstKind = kinds[0];
+    if (firstKind !== undefined) {
+      for (const bedIndex of [0, 2] as const) {
+        const slot = petBedSlots(1, bedIndex)[0];
+        if (slot) this.placePetBed(shell, firstKind, slot.x, slot.z);
+      }
+    }
+  }
 
-      const pet = createPet(kind);
-      shell.add(pet.root);
-      // Standing awake by default; `nap` (and its own end) lie every bed's
-      // pet down or stand it back up, all together — issue #275.
-      this.standPetUp(pet, x, z);
-      this.petBedRoster.push({ pet, x, z });
+  /** One pet bed, with its pet stood awake on it — the one placement path
+   *  {@link dressPetBeds} uses for the middle bedroom's row and for each
+   *  side bedroom's single visibility bed, so there is exactly one way a
+   *  pet bed gets built and registered. */
+  private placePetBed(shell: Group, kind: PetKind, x: number, z: number): void {
+    const bed = createPetBed();
+    // Solid and standable, like every other flat-topped prop now — QA
+    // found it walk-through, and a pet bed is a cushion, which is a thing
+    // a child may absolutely bounce onto.
+    this.props.place(shell, SUITE, bed.root, {
+      x,
+      z,
+      radius: PET_BED_FOOTPRINT_RADIUS,
+      top: PET_BED_CUSHION_TOP,
     });
+
+    const pet = createPet(kind);
+    shell.add(pet.root);
+    // Standing awake by default; `nap` (and its own end) lie every bed's
+    // pet down or stand it back up, all together — issue #275.
+    this.standPetUp(pet, x, z);
+    this.petBedRoster.push({ pet, x, z });
   }
 
   /**
