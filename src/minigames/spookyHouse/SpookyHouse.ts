@@ -7,6 +7,7 @@ import { createCandyShower, type CandyShower } from './candyShower';
 import { createSpookyFace, type EyeStalk, type SpookyFace } from './face';
 import { createHotspot, type Hotspot } from './hotspots';
 import { createSpookyHud, type SpookyHud } from './hud';
+import { JumpscareDirector } from './jumpscare';
 import { createSpookyRoom, type SpookyRoom } from './room';
 import { playBooSound, playCandySound, playPopSound, playSquirtSound } from './sounds';
 import { createScreenSplash, createSquirt, type ScreenSplash, type Squirt } from './squirt';
@@ -24,19 +25,30 @@ const VISIT_SECONDS = 30;
 /**
  * **The Spooky House** — a fun-fair stall that opens onto a dim, cosy little
  * room with one enormous comic-scary face on the back wall. The family spec
- * (GAME_DESIGN.md, "The spooky house") is three exact interactions and
- * nothing else:
+ * (GAME_DESIGN.md, "The spooky house") was originally three exact
+ * interactions and nothing else:
  *
  * - tap an eye → it pops out on a stalk with a boing, then springs back
  * - tap the mouth → water squirts out at the camera
  * - tap the mouth **twice quickly** → candy pours out, and it's a real
  *   collectible (the Cute-o-dex entry, `catalogue.ts`'s `candy.spookyHouse`)
  *
- * No score and no fail state — "it's a toy box" — but it does have an *ending*:
- * {@link VISIT_SECONDS}. It used to have none at all, and leaving meant
- * pressing the framework's ✕. That ✕ is gone (getting out of anything in this
- * park is waiting for it to finish), and a toy box with no ending would have
- * been a toy box with no way out.
+ * #293 (18 August 2026) added a fourth layer on top of those three, not a
+ * fourth thing to tap: roughly {@link JUMPSCARE_TUNING}`.cycles` times per
+ * visit the face lunges out at the camera (the same `boo()` lean it already
+ * had, just bigger and timed) and, for a short reflex window while it's out,
+ * a tap that lands on an eye or the mouth — the *same* tap, doing the *same*
+ * eye-pop/squirt/candy thing it always did — also scores a point on the new
+ * reflex tally. See `jumpscare.ts` for the cycle's own state machine and the
+ * reasoning behind its timing. This is the one place "no score and no fail
+ * state" stopped being quite true: there is a score now (the reflex tally,
+ * shown once the first jump-scare fires), but still no fail state — missing
+ * a window costs nothing, the face just tries again next cycle.
+ *
+ * The whole visit still ends itself: {@link VISIT_SECONDS}. It used to have
+ * no ending at all, and leaving meant pressing the framework's ✕. That ✕ is
+ * gone (getting out of anything in this park is waiting for it to finish),
+ * and a toy box with no ending would have been a toy box with no way out.
  *
  * The one wrinkle: every other stall in this park is a one-button "hold"
  * game (`types.ts`), but this one needs to know *which* of three things was
@@ -72,10 +84,6 @@ const DOUBLE_TAP_MS = 320;
 /** How many sweets one pour gives out. */
 const CANDY_PER_POUR = 10;
 
-/** How often the face leans in for a playful "boo!". */
-const BOO_MIN_SECONDS = 17;
-const BOO_MAX_SECONDS = 29;
-
 class SpookyHouse implements MiniGame {
   readonly id = 'spookyHouse';
   readonly title = 'The Spooky House';
@@ -97,7 +105,8 @@ class SpookyHouse implements MiniGame {
   private context: MiniGameContext | null = null;
   /** Seconds left in the house. See {@link VISIT_SECONDS}. */
   private remaining = VISIT_SECONDS;
-  private nextBoo = BOO_MIN_SECONDS;
+  /** The jump-scare cycle (#293). Built in `init()` so it shares `this.rng`. */
+  private jumpscare: JumpscareDirector | null = null;
   private splashTimer: ReturnType<typeof window.setTimeout> | null = null;
 
   private mouthTapAt = -Infinity;
@@ -160,7 +169,9 @@ class SpookyHouse implements MiniGame {
       createHotspot(context.overlay, this.camera, this.face.mouthAnchor, 22, () => this.tapMouth()),
     );
 
-    this.nextBoo = this.rng.range(BOO_MIN_SECONDS, BOO_MAX_SECONDS);
+    // Shares `this.rng` with everything else in this stall — one seeded
+    // stream for the whole visit, same as before #293.
+    this.jumpscare = new JumpscareDirector(this.rng);
   }
 
   // ------------------------------------------------------------------ frame
@@ -181,7 +192,7 @@ class SpookyHouse implements MiniGame {
         id: this.id,
         outcome: 'finished',
         seconds: VISIT_SECONDS,
-        message: this.candyCount > 0 ? 'You found the candy!' : 'Boo! Come back soon.',
+        message: this.finishMessage(),
       });
     }
 
@@ -193,18 +204,56 @@ class SpookyHouse implements MiniGame {
     this.hud?.update(dt);
     for (const hotspot of this.hotspots) hotspot.update();
 
-    this.nextBoo -= dt;
-    if (this.nextBoo <= 0) {
-      this.nextBoo = this.rng.range(BOO_MIN_SECONDS, BOO_MAX_SECONDS);
-      this.face?.boo();
-      playBooSound();
-      this.hud?.shout('Boo! ...just kidding!', 1.6);
+    // The jump-scare cycle (#293) — see `jumpscare.ts` for the state machine
+    // and its timing. `update()` can return more than one event on a dropped
+    // frame, so this is a loop, not an `if`.
+    for (const event of this.jumpscare?.update(dt) ?? []) {
+      if (event.kind === 'jumpOut') {
+        this.face?.boo(event.windowSeconds);
+        playBooSound();
+        this.hud?.shout(event.cycleIndex === 0 ? 'Here it comes — tap it!' : 'Quick — tap it!', 1.1);
+        for (const hotspot of this.hotspots) hotspot.setActive(true);
+      } else if (event.kind === 'retreat') {
+        for (const hotspot of this.hotspots) hotspot.setActive(false);
+        // A hit already got its own "Got it!" and score-pill update the
+        // instant the tap landed (`registerJumpscareHit`) — instant feedback
+        // matters more than end-of-cycle feedback for a reflex game. A miss
+        // gets nothing here on purpose: "always kind, nobody loses" means a
+        // missed window is just quiet, not a scolding.
+      }
+      // 'complete' needs no reaction here — `finishMessage()` reads the
+      // director's own final score straight off it when the visit ends.
     }
+  }
+
+  /** What the visit's closing card says. Always kind — nobody loses here (`types.ts`). */
+  private finishMessage(): string {
+    // `this.jumpscare` is only ever null before `init()` has run, which
+    // cannot happen here — the framework always calls `init()` before a
+    // single `update()`. The `??` is defensive typing, not a real case.
+    const reflexLine = this.jumpscare
+      ? `You caught ${this.jumpscare.score} of ${this.jumpscare.cycleCount} jump-scares!`
+      : 'Boo! Come back soon.';
+    return this.candyCount > 0 ? `${reflexLine} And you found the candy!` : reflexLine;
   }
 
   // -------------------------------------------------------------- the taps
 
+  /**
+   * Tells the jump-scare cycle (#293) a tap landed on a reflex target — call
+   * this from every tap handler below, before any of its own effect. Scores
+   * only when a window is actually open, and only once per cycle
+   * (`JumpscareDirector.registerHit`), so calling it unconditionally on
+   * every eye/mouth tap is always safe: it is a no-op outside a jump-scare.
+   */
+  private registerJumpscareHit(): void {
+    if (!this.jumpscare?.registerHit()) return;
+    this.hud?.shout('Got it!', 0.8);
+    this.hud?.setReflexScore(this.jumpscare.score, this.jumpscare.cycleCount);
+  }
+
   private tapEye(eye: EyeStalk): void {
+    this.registerJumpscareHit();
     if (eye.popped) return; // already mid-boing — let it finish.
     eye.popOut();
     playPopSound();
@@ -217,6 +266,8 @@ class SpookyHouse implements MiniGame {
    * first half of two" apart at all.
    */
   private tapMouth(): void {
+    this.registerJumpscareHit();
+
     const now = performance.now();
     const sinceLast = now - this.mouthTapAt;
     this.mouthTapAt = now;

@@ -136,8 +136,15 @@ export interface SpookyFace {
   readonly mouthAnchor: Object3D;
   /** Opens the mouth wide for a beat — used by both the squirt and the candy. */
   openMouth(): void;
-  /** The whole face leans toward the camera for a beat. Purely for charm. */
-  boo(): void;
+  /**
+   * The whole face leans toward the camera — the jump-scare lunge (#293) as
+   * well as the original charm flourish it grew out of. `holdSeconds` is how
+   * long the lean holds before the same spring pulls it back; `SpookyHouse.ts`
+   * passes its jump-scare cycle's reflex window here, so the visible "it's
+   * out and reachable" beat and the window a tap actually scores in are the
+   * same number, not two numbers a future edit could pull apart.
+   */
+  boo(holdSeconds?: number): void;
   update(dt: number, elapsed: number): void;
   dispose(): void;
 }
@@ -242,9 +249,9 @@ export function createSpookyFace(): SpookyFace {
       mouthHoldTimer = 0.32;
     },
 
-    boo(): void {
+    boo(holdSeconds = 0.3): void {
       lean.target = 1;
-      leanHoldTimer = 0.3;
+      leanHoldTimer = holdSeconds;
       browWaggle.target = 1;
     },
 
