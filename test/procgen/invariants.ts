@@ -3211,10 +3211,19 @@ const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
   // the *built* deck, not `BRIDGE_RISE` (which already has `BRIDGE_DECK_DEPTH`,
   // a stated claim rather than a derivation, baked into it) and not
   // `bridge.deckY` restated — the mesh's own lowest visible vertex, the same
-  // way builtBodyTop above is the locomotive's. `world.building.surfaces` is
-  // the already-built sampler every walker's feet use, so asking it for the
-  // ground under a crossing costs nothing seed-unsafe: it is a method call
-  // on an object `facts` already carries, never an import.
+  // way builtBodyTop above is the locomotive's.
+  //
+  // The ground reference is the *route's own* Y at the crossing — the same
+  // "ground under the track" `check-park.mts`'s invariant 2 calls `hit.rail`
+  // — never `WalkSurfaces.sample`. A station platform is a `MovingPlatform`
+  // too, and `sample`'s "highest surface within a step" rule happily answers
+  // with a *platform's* height for a crossing that merely stands near one:
+  // measured live, a crossing 3.6 m from a station read 0.58 m of phantom
+  // extra ground, understating real clearance by exactly that much (issue
+  // #116). The route was solved against the same terrain the deck's own
+  // height is built from, so it is ground either way — just never a
+  // platform's.
+  const clearancePoint = new Vector3();
   for (const crossing of facts.world.train.crossings) {
     // The same name `bridges.ts` builds this crossing's own group under —
     // one owner (the crossing's own `railDistance`) for both.
@@ -3228,7 +3237,9 @@ const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
       continue;
     }
     const soffit = new Box3().setFromObject(deckMesh).min.y;
-    const groundY = facts.world.building.surfaces.sample(crossing.x, crossing.z, 0);
+    const route = facts.world.train.route;
+    route.pointAt(route.distanceNear(crossing.x, crossing.z), clearancePoint);
+    const groundY = clearancePoint.y;
     const clearance = soffit - groundY;
     if (clearance < TRAIN_CLEARANCE_Y) {
       complaints.push(
@@ -3267,8 +3278,27 @@ const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
 const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
   const complaints: string[] = [];
   const probe = new Vector3();
-  const standableAt = (bridge: (typeof facts.world.train.bridges)[number], x: number, z: number): boolean => {
-    probe.set(x, bridge.heightAt(x, z), z);
+  // The *tallest* bridge surface over `(x, z)`, never "the crossing's own
+  // bridge" alone — two crossings close enough together can have one
+  // bridge's ramp and a neighbour's much taller deck both genuinely cover
+  // the same point (`bridges.ts`'s own `bridgeHeightAt` exists for exactly
+  // this and every other caller uses it; this probe reimplements the same
+  // rule locally rather than importing a module that reaches `paths.ts`
+  // into a seed-sensitive test file — see this file's own header on static
+  // imports). Asking the wrong bridge for its height here reproduced the
+  // exact bug `bridgeHeightAt` was written to fix, just inside the checker
+  // instead of the game.
+  const heightAt = (x: number, z: number): number | null => {
+    let best: number | null = null;
+    for (const bridge of facts.world.train.bridges) {
+      if (!bridge.covers(x, z)) continue;
+      const height = bridge.heightAt(x, z);
+      if (best === null || height > best) best = height;
+    }
+    return best;
+  };
+  const standableAt = (x: number, z: number, height: number): boolean => {
+    probe.set(x, height, z);
     facts.world.collision.resolve(probe, PLAYER_RADIUS);
     return Math.hypot(probe.x - x, probe.z - z) < 1e-3;
   };
@@ -3276,14 +3306,15 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
   for (const crossing of facts.world.train.crossings) {
     const bridge = facts.world.train.bridges.find((b) => b.deckCovers(crossing.x, crossing.z));
     if (!bridge) continue; // reported by railwayClearanceCoversTheTrainAndItsRiders above
+    const deckHeight = heightAt(crossing.x, crossing.z) ?? bridge.deckY;
 
-    if (!facts.reachableFromEntrance(crossing.x, crossing.z, bridge.heightAt(crossing.x, crossing.z))) {
+    if (!facts.reachableFromEntrance(crossing.x, crossing.z, deckHeight)) {
       complaints.push(
         `the bridge deck at (${fmt([crossing.x, crossing.z])}) is not reachable ` +
           'from the entrance on the real nav lattice',
       );
     }
-    if (!standableAt(bridge, crossing.x, crossing.z)) {
+    if (!standableAt(crossing.x, crossing.z, deckHeight)) {
       complaints.push(`the bridge deck at (${fmt([crossing.x, crossing.z])}) is not itself standable`);
     }
 
@@ -3293,8 +3324,9 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
     for (const sign of [1, -1] as const) {
       const rx = crossing.x + crossing.pathDirX * 6 * sign;
       const rz = crossing.z + crossing.pathDirZ * 6 * sign;
-      if (!bridge.covers(rx, rz)) continue; // a maximally cramped bridge; nothing to probe this far out
-      if (!standableAt(bridge, rx, rz)) {
+      const rampHeight = heightAt(rx, rz);
+      if (rampHeight === null) continue; // a maximally cramped bridge; nothing to probe this far out
+      if (!standableAt(rx, rz, rampHeight)) {
         complaints.push(`the ramp at (${fmt([rx, rz])}), off the crossing at (${fmt([crossing.x, crossing.z])}), is not standable`);
       }
     }
