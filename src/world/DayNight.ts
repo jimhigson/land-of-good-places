@@ -329,12 +329,23 @@ export class DayNight implements GameSystem {
    * {@link setNapSkyOverride}.
    */
   private napSkyOverrideActive = false;
+  /**
+   * {@link napSkyOverrideActive}, as it stood at the *previous* indoor frame —
+   * so `update` can tell "the nap just ended" (true → false) apart from every
+   * other frame the override is off. See the false-edge repaint in `update`.
+   */
+  private napSkyOverrideWasActive = false;
 
   /** World-space direction *towards* the sun. Always the true sun, day or night. */
   private readonly sunDirection = new Vector3(0, 1, 0);
   /** World-space direction *towards* the moon — the sun's, reflected. */
   private readonly moonDirection = new Vector3(0, -1, 0);
   private readonly fogColour = new Color();
+  /**
+   * Scratch sun direction for {@link applyWakeSky}, kept deliberately separate
+   * from {@link sunDirection} — see that method's own doc comment.
+   */
+  private readonly wakeSunDirection = new Vector3(0, 1, 0);
 
   private readonly scene: Scene;
   private readonly sky: Sky;
@@ -558,7 +569,19 @@ export class DayNight implements GameSystem {
       // The sky-only exception to "nothing about the look changes indoors" —
       // see `setNapSkyOverride`'s own doc comment for why this is safe to run
       // even though everything else this branch touches stays frozen.
-      if (this.napSkyOverrideActive) this.applyNapNightSky();
+      if (this.napSkyOverrideActive) {
+        this.applyNapNightSky();
+      } else if (this.napSkyOverrideWasActive) {
+        // False-edge: the nap just ended but she is still in the room. With
+        // neither branch of `if (!this.indoors)` / `napSkyOverrideActive` now
+        // true, nothing else in this method would touch the sky quad again —
+        // it would hold last frame's painted-black-midnight look indefinitely,
+        // exactly as frozen as the pre-#279 "daytime sky at night" bug this PR
+        // fixed, just with the two times swapped. See {@link applyWakeSky} for
+        // why this calls that rather than the full `applyLook`.
+        this.applyWakeSky(this.time);
+      }
+      this.napSkyOverrideWasActive = this.napSkyOverrideActive;
 
       // Fog is the one thing in this method that is *not* a light, so it does
       // not switch off with them — and `scene.fog` is shared, so whatever the
@@ -614,6 +637,55 @@ export class DayNight implements GameSystem {
     const moonPosition = (uniforms.uMoonPosition as { value: Vector2 }).value;
     this.sky.directionToScreen(NAP_MOON_AZIMUTH, NAP_MOON_ALTITUDE, moonPosition);
     (uniforms.uMoonVisible as { value: number }).value = 1;
+  }
+
+  /**
+   * QA on PR #279 (18 Aug 2026): after a nap ends naturally and the room's
+   * lighting fully restores, the sky above the wall stayed stuck on
+   * {@link applyNapNightSky}'s full starry midnight indefinitely — moon
+   * uniform still on, colours still exactly night values — for as long as she
+   * stayed in the room. Root cause: {@link update} only ever paints the sky
+   * while `!indoors` (the every-frame path) or while `indoors &&
+   * napSkyOverrideActive` ({@link applyNapNightSky}); the frame the override
+   * clears but she has not stepped back outside, *neither* branch runs, so
+   * whatever was last painted — night — simply holds.
+   *
+   * Called exactly once, on that false edge (see `update`'s
+   * `napSkyOverrideWasActive` branch), to repaint the sky quad from the real
+   * current time of day, same as stepping outside would.
+   *
+   * **Still sky-only, same rule as {@link applyNapNightSky}.** Deliberately
+   * recomputes the sun direction, altitude, look and night factor into local
+   * variables — never reading or writing {@link sunDirection},
+   * {@link moonDirection} or {@link nightFactorValue} — because those three
+   * are themselves frozen at whatever `applyLook` last wrote *before* she
+   * walked in (see `update`'s `!indoors` gate), which is stale by however
+   * long the nap ran. Reading them here would paint the sky at the wrong
+   * hour; writing them would leak the real elapsed time into
+   * {@link nightFactorValue}, which is exactly the "a three-metre bedroom
+   * must not turn the whole park's evening lighting on" leak
+   * `setNapSkyOverride`'s own doc comment warns against — `nightFactorValue`
+   * is what `World` fans out to the park's lamps, fireflies and fountain
+   * glow every frame regardless of indoor state, and none of that may react
+   * to a nap. The light rig and fog are left alone for the same reason (and
+   * the fog is overwritten unconditionally by `update`'s own indoor fog fix
+   * immediately after this returns).
+   */
+  private applyWakeSky(time: number): void {
+    const theta = (time - 0.25) * TAU;
+    const sunDirection = this.wakeSunDirection
+      .set(Math.cos(theta), Math.sin(theta), -0.42 * Math.sin(theta) - 0.28)
+      .normalize();
+    const altitude = Math.asin(clamp(sunDirection.y, -1, 1));
+    const daylight = smoothstep(-0.12, 0.12, sunDirection.y);
+    const nightFactor = Math.max(1 - daylight, this.spaceFactorValue);
+
+    const look =
+      this.spaceFactorValue > 0
+        ? mixKeys(sampleSkyKeys(time), SPACE_KEY, this.spaceFactorValue)
+        : sampleSkyKeys(time);
+
+    this.paintSkyQuad(sunDirection, altitude, look, nightFactor);
   }
 
   /** Keeps the shadow frustum centred on the action rather than the origin. */
@@ -673,62 +745,7 @@ export class DayNight implements GameSystem {
         ? mixKeys(sampleSkyKeys(time), SPACE_KEY, this.spaceFactorValue)
         : sampleSkyKeys(time);
 
-    const uniforms = this.sky.uniforms;
-    (uniforms.uTopColour as { value: Color }).value.setHex(look.top);
-    (uniforms.uBottomColour as { value: Color }).value.setHex(look.bottom);
-    (uniforms.uHorizonColour as { value: Color }).value.setHex(look.horizon);
-    (uniforms.uHorizonStrength as { value: number }).value = look.horizonStrength;
-    (uniforms.uStarStrength as { value: number }).value = smoothstep(0.35, 0.85, this.nightFactorValue);
-    // How high up we are, handed to the sky unshaped. It uses it to ease off
-    // the star field's horizon fade: on the ground stars fade out low so they
-    // sit behind the park, and in space there is no horizon to fade towards,
-    // so they go the whole way round and underfoot — a child looking down
-    // through the glass floor is looking at the bottom of the sky. Jim's note
-    // after riding it: "the stars need to be all around in every direction,
-    // not just upwards."
-    this.sky.setSpace(this.spaceFactorValue);
-
-    // --- place sun and moon on screen ------------------------------------
-    // `Sky` owns the mapping from "a bearing and an altitude" to "a spot on
-    // the frame", because the star field has to use the same one — see
-    // `Sky.setView`. Under the park's orthographic rig it is the same cheat it
-    // always was (there is no true projection of something at infinity through
-    // a parallel projection); under a ride's perspective camera it is the
-    // camera's real field of view, and both discs then track a turning head.
-    const sunAzimuth = Math.atan2(this.sunDirection.x, this.sunDirection.z);
-    const perspective = this.sky.viewIsPerspective;
-
-    const sunPosition = (uniforms.uSunPosition as { value: Vector2 }).value;
-    this.sky.directionToScreen(sunAzimuth, altitude, sunPosition);
-    (uniforms.uSunColour as { value: Color }).value.setHex(
-      this.sunDirection.y > 0 ? look.sun : PALETTE.sunSet,
-    );
-    // Below the horizon it fades out, always. The *bearing* fade is the
-    // orthographic cheat's own safety rail: with no field of view, a disc more
-    // than about 83° off axis has nowhere sensible to be drawn and would wrap
-    // across the frame. A real projection has no such problem — a disc behind
-    // you simply lands far outside the quad and is not drawn, while its bloom
-    // keeps contributing the faint off-frame glow that is actually correct.
-    const sunBearingFade = perspective
-      ? 1
-      : smoothstep(1.45, 0.85, Math.abs(angleDelta(this.sky.viewYaw, sunAzimuth)));
-    // Both discs fade off as space comes in. They are painted *into the sky
-    // quad*, which is drawn before the world and behind everything in it — so
-    // in space they would sit behind the ferris wheel's own 3D Moon and the
-    // whole Earth, which reads as a bug rather than as astronomy. Up there the
-    // show owns the sky; down here nothing changes, because this is 1.
-    const inSky = 1 - this.spaceFactorValue;
-    (uniforms.uSunVisible as { value: number }).value =
-      inSky * sunBearingFade * smoothstep(-0.14, 0.05, this.sunDirection.y);
-
-    const moonAzimuth = sunAzimuth + Math.PI;
-    const moonPosition = (uniforms.uMoonPosition as { value: Vector2 }).value;
-    this.sky.directionToScreen(moonAzimuth, -altitude, moonPosition);
-    const moonBearingFade = perspective
-      ? 1
-      : smoothstep(1.45, 0.85, Math.abs(angleDelta(this.sky.viewYaw, moonAzimuth)));
-    (uniforms.uMoonVisible as { value: number }).value =
-      inSky * moonBearingFade * smoothstep(0.02, 0.2, -this.sunDirection.y);
+    this.paintSkyQuad(this.sunDirection, altitude, look, this.nightFactorValue);
 
     // --- lights ----------------------------------------------------------
     // The sun and the moon cross-fade through the horizon, in **mirrored**
@@ -811,6 +828,80 @@ export class DayNight implements GameSystem {
         this.spaceFactorValue,
       );
     }
+  }
+
+  /**
+   * Writes the sky quad's own uniforms — gradient, star strength, sun/moon
+   * screen position and visibility — from an already-resolved sun direction,
+   * altitude, look and night factor. Nothing else: no light rig, no fog, no
+   * field of this class.
+   *
+   * Pulled out of {@link applyLook} so there is **one** place that turns
+   * "a sun direction and a look" into "what's painted on the backdrop",
+   * shared by the day-to-day path ({@link applyLook}, fed its own persistent
+   * {@link sunDirection}/{@link nightFactorValue}) and the nap wake-up repaint
+   * ({@link applyWakeSky}, fed *local* values it computes itself and never
+   * stores) — see {@link applyWakeSky}'s own doc comment for why those must
+   * stay two different sources of the sun direction while sharing this one
+   * painting routine.
+   */
+  private paintSkyQuad(sunDirection: Vector3, altitude: number, look: SkyKey, nightFactor: number): void {
+    const uniforms = this.sky.uniforms;
+    (uniforms.uTopColour as { value: Color }).value.setHex(look.top);
+    (uniforms.uBottomColour as { value: Color }).value.setHex(look.bottom);
+    (uniforms.uHorizonColour as { value: Color }).value.setHex(look.horizon);
+    (uniforms.uHorizonStrength as { value: number }).value = look.horizonStrength;
+    (uniforms.uStarStrength as { value: number }).value = smoothstep(0.35, 0.85, nightFactor);
+    // How high up we are, handed to the sky unshaped. It uses it to ease off
+    // the star field's horizon fade: on the ground stars fade out low so they
+    // sit behind the park, and in space there is no horizon to fade towards,
+    // so they go the whole way round and underfoot — a child looking down
+    // through the glass floor is looking at the bottom of the sky. Jim's note
+    // after riding it: "the stars need to be all around in every direction,
+    // not just upwards."
+    this.sky.setSpace(this.spaceFactorValue);
+
+    // --- place sun and moon on screen ------------------------------------
+    // `Sky` owns the mapping from "a bearing and an altitude" to "a spot on
+    // the frame", because the star field has to use the same one — see
+    // `Sky.setView`. Under the park's orthographic rig it is the same cheat it
+    // always was (there is no true projection of something at infinity through
+    // a parallel projection); under a ride's perspective camera it is the
+    // camera's real field of view, and both discs then track a turning head.
+    const sunAzimuth = Math.atan2(sunDirection.x, sunDirection.z);
+    const perspective = this.sky.viewIsPerspective;
+
+    const sunPosition = (uniforms.uSunPosition as { value: Vector2 }).value;
+    this.sky.directionToScreen(sunAzimuth, altitude, sunPosition);
+    (uniforms.uSunColour as { value: Color }).value.setHex(
+      sunDirection.y > 0 ? look.sun : PALETTE.sunSet,
+    );
+    // Below the horizon it fades out, always. The *bearing* fade is the
+    // orthographic cheat's own safety rail: with no field of view, a disc more
+    // than about 83° off axis has nowhere sensible to be drawn and would wrap
+    // across the frame. A real projection has no such problem — a disc behind
+    // you simply lands far outside the quad and is not drawn, while its bloom
+    // keeps contributing the faint off-frame glow that is actually correct.
+    const sunBearingFade = perspective
+      ? 1
+      : smoothstep(1.45, 0.85, Math.abs(angleDelta(this.sky.viewYaw, sunAzimuth)));
+    // Both discs fade off as space comes in. They are painted *into the sky
+    // quad*, which is drawn before the world and behind everything in it — so
+    // in space they would sit behind the ferris wheel's own 3D Moon and the
+    // whole Earth, which reads as a bug rather than as astronomy. Up there the
+    // show owns the sky; down here nothing changes, because this is 1.
+    const inSky = 1 - this.spaceFactorValue;
+    (uniforms.uSunVisible as { value: number }).value =
+      inSky * sunBearingFade * smoothstep(-0.14, 0.05, sunDirection.y);
+
+    const moonAzimuth = sunAzimuth + Math.PI;
+    const moonPosition = (uniforms.uMoonPosition as { value: Vector2 }).value;
+    this.sky.directionToScreen(moonAzimuth, -altitude, moonPosition);
+    const moonBearingFade = perspective
+      ? 1
+      : smoothstep(1.45, 0.85, Math.abs(angleDelta(this.sky.viewYaw, moonAzimuth)));
+    (uniforms.uMoonVisible as { value: number }).value =
+      inSky * moonBearingFade * smoothstep(0.02, 0.2, -sunDirection.y);
   }
 }
 
