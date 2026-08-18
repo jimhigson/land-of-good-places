@@ -11,6 +11,7 @@ import type { TrainRoute } from './route';
 import { TRACK_CLEARANCE } from './route';
 import type { Bridge } from './bridges';
 import { FENCE_OFFSET, FENCE_SEAM_MARGIN } from './clearance';
+import { PLAYER_RADIUS } from '../../core/constants';
 import type { CollisionWorld } from '../Collision';
 import { PALETTE } from '../../core/palette';
 import { toonMaterial } from '../../art/style/materials';
@@ -58,17 +59,80 @@ export function buildRailFence(
    * consulted by every wall segment this function adds, so a run of fence
    * that happens to fall under a deck gets the `topIsAbsolute` seam instead
    * of the ordinary always-solid wall. See the file header.
+   *
+   * `margin` pads `deckCovers`'s own exact edge outward — see that method's
+   * own doc comment on why a caller whose wall has real thickness needs one:
+   * an un-seamed wall run just past the deck's exact geometric edge can
+   * still physically reach a probe standing on the deck, because its own
+   * half-thickness extends the collision boundary past where its centreline
+   * stops. Each call site below sizes its own margin off its own wall's
+   * half-thickness.
    */
-  const deckSpanAt = (x: number, z: number): number | null => {
-    // The *tallest* deck over this point, not the first in list order —
-    // two crossings close enough together can have both decks (or a deck
-    // and a neighbour's ramp) genuinely cover the same fence run, and the
-    // seam has to sit under whichever surface is actually highest there.
-    // See `bridges.ts`'s `bridgeHeightAt`, the same fix for the same
-    // reason.
+  const deckSpanAt = (x: number, z: number, margin: number): number | null => {
+    // The *lowest* deck over this point, not the first in list order and
+    // — this is the one place in the whole feature that is deliberately
+    // NOT `bridgeHeightAt`'s own "tallest, never first" rule, despite
+    // looking like the same situation. `bridgeHeightAt` answers "how high
+    // does a walker actually stand here", and the highest overlapping
+    // surface is the right answer to that (the same "highest within a
+    // step" rule `WalkSurfaces.sample` already uses). This answers a
+    // different question — "at what height does the ground-level fence
+    // stop blocking" — and a *single* `topIsAbsolute` wall has only one
+    // threshold, so when two crossings close enough together genuinely
+    // overlap the same fence run at two different deck heights, picking
+    // the TALLER one strands a walker on the SHORTER deck below the seam:
+    // still genuinely on a real deck, still genuinely blocked (issue #116,
+    // canonical seed: a 4.62 m deck sat under a neighbour's 5.05 m seam,
+    // and a probe standing on its own deck was pushed off). Picking the
+    // lower one instead opens the fence the moment EITHER deck's own
+    // walker reaches it, and never opens it for anyone actually still on
+    // the ground — the lowest bridge rise in this whole park is still
+    // several metres up, so there is no height between "on the ground"
+    // and "on the lower of two decks" for this to open early for.
     let best: number | null = null;
     for (const bridge of bridges) {
-      if (bridge.deckCovers(x, z) && (best === null || bridge.deckY > best)) best = bridge.deckY;
+      if (bridge.deckCovers(x, z, margin) && (best === null || bridge.deckY < best)) best = bridge.deckY;
+    }
+    return best;
+  };
+
+  /**
+   * The same question, asked of a whole SEGMENT rather than one point.
+   *
+   * A fence segment is `STEP` (2.4 m) long, and a deck's own edge does not
+   * fall on a post — so the one segment straddling that edge has one end
+   * genuinely under the deck and the other genuinely not. Testing only the
+   * midpoint (the original approach) can miss both: a short, off-centre
+   * deck can leave the midpoint just outside `deckCovers` while one whole
+   * end sits under it, and that segment then goes up as an ordinary
+   * always-solid wall — ordinary walls ignore a mover's real elevation
+   * entirely, so it blocks a probe standing on the deck above it exactly
+   * like any other relative-height collider would (see
+   * `bridgeKeepout.ts`'s own note on the same failure mode). Found live,
+   * issue #116 seed 11: the centre-line run one segment short of a tight
+   * (halfGap-floor) crossing was still an `Inf`-height wall, and a probe
+   * standing on the real deck above it was pushed sideways.
+   *
+   * Sampling both endpoints as well as the midpoint and taking whichever
+   * gives the LOWEST deck (never "first covered", same "lowest, not
+   * highest" convention as `deckSpanAt` above, for the same reason) means a
+   * segment gets the seam the moment ANY part of it is under a deck —
+   * erring toward one short (<= 2.4 m) stretch of fence reading as
+   * open-above when a sliver of it is not, rather than leaving a hole in
+   * "the deck is walkable" that a child actually finds — while still never
+   * stranding a walker on whichever of two overlapping decks happens to be
+   * shorter.
+   */
+  const deckSpanForSegment = (a: Post, b: Post, wallHalfThickness: number): number | null => {
+    const margin = wallHalfThickness + PLAYER_RADIUS;
+    let best: number | null = null;
+    for (const [x, z] of [
+      [a.x, a.z],
+      [b.x, b.z],
+      [(a.x + b.x) / 2, (a.z + b.z) / 2],
+    ] as const) {
+      const deckY = deckSpanAt(x, z, margin);
+      if (deckY !== null && (best === null || deckY < best)) best = deckY;
     }
     return best;
   };
@@ -163,7 +227,7 @@ export function buildRailFence(
    * passes under a bridge deck always gets the seam instead of the ordinary
    * always-solid wall — see `deckSpanAt` above. */
   const addFenceWall = (a: Post, b: Post): void => {
-    const deckY = deckSpanAt((a.x + b.x) / 2, (a.z + b.z) / 2);
+    const deckY = deckSpanForSegment(a, b, 0.18);
     if (deckY === null) {
       collision.addWall(a.x, a.z, b.x, b.z, 0.18);
     } else {
@@ -243,7 +307,7 @@ export function buildRailFence(
   // seam under a bridge deck that the flanks get, so nothing here narrows
   // what a bridge already opened.
   const linkCentre = (a: Post, b: Post): void => {
-    const deckY = deckSpanAt((a.x + b.x) / 2, (a.z + b.z) / 2);
+    const deckY = deckSpanForSegment(a, b, TRACK_CLEARANCE);
     if (deckY === null) {
       collision.addWall(a.x, a.z, b.x, b.z, TRACK_CLEARANCE);
     } else {
