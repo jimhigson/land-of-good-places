@@ -63,6 +63,7 @@ import {
   CAMERA_DISTANCE,
   CAMERA_YAW_DEGREES,
   CAMERA_PITCH_DEGREES,
+  HOTEL_PLAY_RADIUS,
   MAX_FRAME_DELTA,
   NPC_RADIUS,
   PLAYER_LONGEST_STEP,
@@ -1677,16 +1678,28 @@ for (const room of ROOMS) {
   }
 }
 
-// ------------------------- 21. the suite has a bathroom with the manners
+// ------------------- 21. every floor has a bathroom with the manners
 //
-// Jim, 8 Aug 2026: *"Add a bathroom using the models and rules from the
-// bathroom in the other big building."* The castle's rules
-// (`building/Toilets.ts`, from GAME_DESIGN.md): the pan and basin are the
-// shared factories, using one is the two-beat flush-then-wash routine, and a
-// **privacy roof** slides over the room while she is in it and lifts at the
-// wash beat — on before she is out of sight, never able to trap her. The
-// suite's bathroom reuses those exact owners; this probe checks the built
-// result behaves like the castle's:
+// Jim, 8 Aug 2026, of the suite's own: *"Add a bathroom using the models and
+// rules from the bathroom in the other big building."* Issue #272 widened
+// that to every floor: *"every floor needs a bathroom with a toilet, reusing
+// the castle's toilet code."* The castle's rules (`building/Toilets.ts`, from
+// GAME_DESIGN.md): the pan and basin are the shared factories, using one is
+// the two-beat flush-then-wash routine, and a **privacy roof** slides over
+// the room while she is in it and lifts at the wash beat — on before she is
+// out of sight, never able to trap her.
+//
+// This probe walks `hotel.bathroomRooms` — the hotel's own list, not a copy
+// of it (CLAUDE.md's "one owner; everyone else asks") — so a floor that gains
+// a `dress*` method without a bathroom, or loses the one it had, is a probe
+// failure rather than a silent gap. The one exception is deliberate:
+// `CORRIDOR` (Floor 50) has no rectangle left for a nook of its own (see
+// `Hotel.dressCorridor`'s comment — the room is 8 m deep, both crystal
+// clusters and the statue row already claim the east wall, and the middle is
+// `marchAtSuiteDoor`'s own straight probe to the "yours" door), so this
+// probe accepts the suite's bathroom, one door down the same corridor and
+// answering to the same "Yours! · Floor 50" lift button, in its place. For
+// every floor it checks the built result behaves like the castle's:
 //  * the pan and basin are solid (place.ts registered them), the pan
 //    mountable like any low flat-topped prop;
 //  * a bathroom zone exists, offers a real action, and its stand spot is
@@ -1694,80 +1707,104 @@ for (const room of ROOMS) {
 //  * a player standing in the bathroom is covered by the roof, and the wash
 //    beat lifts it while she is still inside.
 {
-  const bathX = SUITE.originX - 7.8;
-  const bathZ = SUITE.originZ + 4.6;
-  if (deflection(bathX, bathZ) < 0.1) {
-    problems.push('the suite bathroom pan is not solid — a child walks straight through it');
-  }
-  if (deflection(SUITE.originX - 9.7, SUITE.originZ + 2.45) < 0.1) {
-    problems.push('the suite bathroom basin is not solid — a child walks straight through it');
-  }
-  const atopPan = deflectionAt(bathX, 0.75, bathZ);
-  if (atopPan > 0.01) {
+  const bathroomRooms = hotel.bathroomRooms;
+  // Every floor a child can actually reach with the lift must lead to a
+  // bathroom — but CORRIDOR and SUITE are one floor by the lift's own
+  // reckoning (both answer to "Yours! · Floor 50"), so CORRIDOR is covered
+  // if SUITE has one, without needing a rectangle of its own.
+  const coveredFloors = HOTEL_FLOORS.filter(
+    (floor) =>
+      bathroomRooms.includes(floor.room) ||
+      (floor.room === CORRIDOR && bathroomRooms.includes(SUITE)),
+  );
+  if (coveredFloors.length < HOTEL_FLOORS.length) {
+    const missing = HOTEL_FLOORS.filter((floor) => !coveredFloors.includes(floor));
     problems.push(
-      `the suite bathroom pan pushes a child stood on its top ${atopPan.toFixed(2)} m sideways — ` +
-        'solid and standable are fighting (place.ts)',
+      `${missing.length} of ${HOTEL_FLOORS.length} hotel floors have no bathroom reachable ` +
+        `from them at all: ${missing.map((floor) => floor.name).join(', ')}`,
     );
   }
 
-  hotel.attachPlayer(fallenPlayer as never);
-  fallenPlayer.position.set(SUITE.originX - 7.6, 0, SUITE.originZ + 4.8);
-  hotel.adoptRestoredPlayer();
-  const bathroomZone = hotel.interactZones().find((zone) => zone.id === 'hotel-bathroom');
-  if (!bathroomZone) {
-    problems.push('the suite offers no bathroom zone at all — nothing to tap, no routine to run');
-  } else {
+  for (const room of bathroomRooms) {
+    const fixtures = hotel.bathroomFixtures(room);
+    if (!fixtures) {
+      problems.push(`${room.space}: bathroomRooms lists it but bathroomFixtures returns nothing`);
+      continue;
+    }
+    const { pan, basin } = fixtures;
+    if (deflection(pan.x, pan.z) < 0.1) {
+      problems.push(`${room.space}'s bathroom pan is not solid — a child walks straight through it`);
+    }
+    if (deflection(basin.x, basin.z) < 0.1) {
+      problems.push(`${room.space}'s bathroom basin is not solid — a child walks straight through it`);
+    }
+    const atopPan = deflectionAt(pan.x, 0.75, pan.z);
+    if (atopPan > 0.01) {
+      problems.push(
+        `${room.space}'s bathroom pan pushes a child stood on its top ${atopPan.toFixed(2)} m ` +
+          'sideways — solid and standable are fighting (place.ts)',
+      );
+    }
+
+    hotel.attachPlayer(fallenPlayer as never);
+    fallenPlayer.position.set(pan.x, 0, pan.z);
+    hotel.adoptRestoredPlayer();
+    const bathroomZone = hotel
+      .interactZones()
+      .find((zone) => zone.id === `hotel-bathroom-${room.space}`);
+    if (!bathroomZone) {
+      problems.push(`${room.space} offers no bathroom zone at all — nothing to tap, no routine to run`);
+      continue;
+    }
     if ((bathroomZone.actions?.() ?? []).length === 0) {
-      problems.push('the bathroom zone offers no actions — its sign can never appear');
+      problems.push(`${room.space}'s bathroom zone offers no actions — its sign can never appear`);
     }
     if (
       bathroomZone.standX !== undefined &&
       bathroomZone.standZ !== undefined &&
       deflection(bathroomZone.standX, bathroomZone.standZ) > 0.01
     ) {
-      problems.push('the bathroom zone asks her to stand inside something solid');
+      problems.push(`${room.space}'s bathroom zone asks her to stand inside something solid`);
     }
 
     // The privacy roof, driven exactly as the game drives it: she stands in
     // the room, frames pass, the lid covers; the wash beat lifts it while
     // she is still there (the castle's rule, `building/Toilets.ts`).
-    const suiteShell = hotel.hotelRoot.children.find(
-      (child) => child.name === `hotel:${SUITE.space}`,
-    );
+    const roomShell = hotel.hotelRoot.children.find((child) => child.name === `hotel:${room.space}`);
     let roofGroup: { visible: boolean } | null = null;
-    suiteShell?.traverse((object) => {
+    roomShell?.traverse((object) => {
       if (object.name === 'toilet-roof') roofGroup = object;
     });
     if (!roofGroup) {
-      problems.push('the suite bathroom has no privacy roof — the castle rule it must honour');
-    } else {
-      const tick = (seconds: number): void => {
-        for (let i = 0; i < Math.ceil(seconds * 60); i += 1) {
-          hotel.update({ dt: 1 / 60, elapsed: i / 60 } as never);
-        }
-      };
-      tick(1.2);
-      if (!(roofGroup as { visible: boolean }).visible) {
-        problems.push(
-          'a child standing in the suite bathroom is not covered by the privacy roof — ' +
-            'the lid must lead her in',
-        );
+      problems.push(`${room.space}'s bathroom has no privacy roof — the castle rule it must honour`);
+      continue;
+    }
+    const tick = (seconds: number): void => {
+      for (let i = 0; i < Math.ceil(seconds * 60); i += 1) {
+        hotel.update({ dt: 1 / 60, elapsed: i / 60 } as never);
       }
-      const useAction = (bathroomZone.actions?.() ?? [])[0];
-      useAction?.run();
-      tick(3.0);
-      if ((roofGroup as { visible: boolean }).visible) {
-        problems.push(
-          'the privacy roof is still down after the wash beat — the lid must lift while she ' +
-            'washes her hands, not trap her',
-        );
-      }
-      // Out of the room: nothing remembered, the roof stays up.
-      fallenPlayer.position.set(SUITE.originX, 0, SUITE.originZ);
-      tick(1.0);
-      if ((roofGroup as { visible: boolean }).visible) {
-        problems.push('the privacy roof stayed on over an empty bathroom');
-      }
+    };
+    tick(1.2);
+    if (!(roofGroup as { visible: boolean }).visible) {
+      problems.push(
+        `a child standing in ${room.space}'s bathroom is not covered by the privacy roof — ` +
+          'the lid must lead her in',
+      );
+    }
+    const useAction = (bathroomZone.actions?.() ?? [])[0];
+    useAction?.run();
+    tick(3.0);
+    if ((roofGroup as { visible: boolean }).visible) {
+      problems.push(
+        `${room.space}'s privacy roof is still down after the wash beat — the lid must lift ` +
+          'while she washes her hands, not trap her',
+      );
+    }
+    // Out of the room: nothing remembered, the roof stays up.
+    fallenPlayer.position.set(room.originX, 0, room.originZ);
+    tick(1.0);
+    if ((roofGroup as { visible: boolean }).visible) {
+      problems.push(`${room.space}'s privacy roof stayed on over an empty bathroom`);
     }
   }
 }
@@ -2475,6 +2512,163 @@ if (crossingFailures.length > 0) {
   );
 }
 
+// -------------- 27. no piece of furniture sits inside a wall's solid band
+
+// PR #281 review, 18 Aug 2026: the breakfast bathroom's new west partition
+// wall overlapped a pre-existing chair at table b1-d by 0.324 m — a real
+// child-visible bug (CLAUDE.md's "anything that looks solid must be solid"),
+// invisible to every check that ran green. `mustBeSolid`'s "is this one
+// chair solid" probe (2/3, above) only ever asks about b1-a; `check:tap-spacing`
+// measures interaction zones, not physical footprints. Nothing anywhere asked
+// whether one piece of registered hotel furniture physically overlaps a wall,
+// so a partition move that happened to graze a chair could only ever be found
+// by a reviewer doing the arithmetic by hand — exactly the "check that can't
+// fail" gap CLAUDE.md warns about, just never written down as a probe.
+//
+// **General, not the one instance.** Every round footprint `HotelProps.place`
+// registered as a real solid `CollisionWorld` circle — chairs, tables,
+// columns, statues, planters, plinths, bedside tables, pet plinths, the lot —
+// against every wall segment `CollisionWorld.forEachWall` holds (a room's
+// own outer walls and every partition), using the exact same
+// clamped-point-to-segment distance `CollisionWorld.resolve` itself uses.
+// That clamp is what makes a wall's *end* a rounded cap rather than a flat
+// face — the same shape that made the b1-d chair's overlap live at a
+// partition's corner rather than along either wall's own face, which is
+// exactly why the review had to trace it by hand instead of eyeballing a
+// wall's straight run. Asking the real `CollisionWorld` the real question
+// means this probe cannot disagree with what a child's own body would meet.
+//
+// Scoped to each room by distance from its own origin (`HOTEL_PLAY_RADIUS`,
+// the same leash the room's own play boundary already uses) rather than by
+// object identity — no collider carries a tag saying which room built it, and
+// "is this near this room" is the honest question, not a guess at which prop
+// belongs to which list. Rectangular footprints (`addRectangle`, a counter, a
+// sofa) are wall-shaped themselves and are deliberately out of scope — the
+// reviewer's own suggested shape for this check ("any registered circle
+// collider vs any wall collider") is what is implemented here.
+//
+// Running this exhaustively found more than the one instance: eight
+// pre-existing pairs (four lobby crystal clusters/columns against the outer
+// wall and a reception-area wall, two suite pieces against a partition and
+// the north wall) also register a few centimetres of overlap — and diffing
+// against the state of the tree *before* this task's own fix confirms they
+// are unchanged by it (same eight, same numbers, on both sides of the b1-d
+// fix). Two different severities live inside "overlap", and this probe tells
+// them apart the same way the review itself described the real bug — not by
+// how much the disc's *edge* pokes in, but by whether the disc's own **centre**
+// ends up inside the wall's solid band at all:
+//
+//  * b1-d's chair: centre 0.226 m from the wall's own line, **inside** its
+//    0.25 m half-thickness by 0.024 m — the wall's line passes through the
+//    chair's own middle, which is the "roughly half the chair is embedded"
+//    the review described, and can only happen when a piece of furniture is
+//    placed too close to a wall it was never checked against.
+//  * The eight pre-existing pairs: every one has its centre 0.5–0.7 m clear
+//    of its wall's line — comfortably outside the half-thickness band — and
+//    only the *outer edge* of an oversized, deliberately generic collider
+//    (`Hotel.placeProps`'s scatter-prop default, `radius: 0.6`, shared by
+//    every crystal/planter regardless of its own visual size — never sized
+//    down to the individual model) grazes a few centimetres past the wall's
+//    face. Nothing here is a hole a body can walk through, and the mesh
+//    itself was never near the wall to begin with.
+//
+// A **centre** inside a wall's own band is a hard failure — a piece of
+// furniture placed there was never checked against the wall at all, which is
+// this probe's whole reason to exist. A grazed **edge**, centre still clear,
+// is reported as a warning (this file's `check:tap-spacing` sibling already
+// has exactly this two-tier pattern for its own "harmless ambiguity" case) —
+// visible for a future pass on the scatter-prop radius, but not a reason to
+// block a PR that never touched it.
+//
+// Proven red before trusted green: run against the pre-fix `BREAKFAST.partitions`
+// (west wall at local x=8.6, z 5.8–11.3) and this probe reports the breakfast
+// room's chair with its centre 0.024 m inside the wall's own band — the exact
+// number the review measured by hand.
+
+/** How far inside a wall's own half-thickness a furniture disc's *centre* may sit before this probe calls it embedded. */
+const FURNITURE_CENTRE_TOLERANCE = 0.005;
+/** How far a furniture disc's *edge* may overlap a wall (centre still clear) before it is even worth a warning. */
+const FURNITURE_EDGE_TOLERANCE = 0.02;
+
+/** The point on segment `(x1,z1)`–`(x2,z2)` nearest `(px,pz)` — `CollisionWorld.resolve`'s own clamp, read back. */
+function closestPointOnWall(
+  px: number,
+  pz: number,
+  x1: number,
+  z1: number,
+  x2: number,
+  z2: number,
+): { x: number; z: number } {
+  const ax = x2 - x1;
+  const az = z2 - z1;
+  const lengthSquared = ax * ax + az * az;
+  if (lengthSquared < 1e-8) return { x: x1, z: z1 };
+  let t = ((px - x1) * ax + (pz - z1) * az) / lengthSquared;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return { x: x1 + ax * t, z: z1 + az * t };
+}
+
+interface HotelWallSegment {
+  readonly x1: number;
+  readonly z1: number;
+  readonly x2: number;
+  readonly z2: number;
+  readonly halfThickness: number;
+}
+interface HotelFurnitureCircle {
+  readonly x: number;
+  readonly z: number;
+  readonly radius: number;
+}
+
+let furnitureWallPairsChecked = 0;
+const furnitureWallEmbeds: string[] = [];
+const furnitureWallGrazes: string[] = [];
+for (const room of ROOMS) {
+  const nearRoom = (x: number, z: number): boolean =>
+    Math.hypot(x - room.originX, z - room.originZ) < HOTEL_PLAY_RADIUS;
+
+  const walls: HotelWallSegment[] = [];
+  collision.forEachWall((x1, z1, x2, z2, halfThickness) => {
+    if (nearRoom(x1, z1) || nearRoom(x2, z2)) walls.push({ x1, z1, x2, z2, halfThickness });
+  });
+
+  const circles: HotelFurnitureCircle[] = [];
+  collision.forEachCircle((x, z, radius) => {
+    if (radius > 0 && nearRoom(x, z)) circles.push({ x, z, radius });
+  });
+
+  for (const circle of circles) {
+    for (const wall of walls) {
+      furnitureWallPairsChecked += 1;
+      const closest = closestPointOnWall(circle.x, circle.z, wall.x1, wall.z1, wall.x2, wall.z2);
+      const distance = Math.hypot(circle.x - closest.x, circle.z - closest.z);
+      const centreEmbed = wall.halfThickness - distance;
+      const edgeOverlap = wall.halfThickness + circle.radius - distance;
+      const where =
+        `${room.space}: furniture at local (${(circle.x - room.originX).toFixed(2)}, ` +
+        `${(circle.z - room.originZ).toFixed(2)}) r=${circle.radius.toFixed(2)} vs the wall local ` +
+        `(${(wall.x1 - room.originX).toFixed(2)}, ${(wall.z1 - room.originZ).toFixed(2)})–` +
+        `(${(wall.x2 - room.originX).toFixed(2)}, ${(wall.z2 - room.originZ).toFixed(2)})`;
+      if (centreEmbed > FURNITURE_CENTRE_TOLERANCE) {
+        furnitureWallEmbeds.push(`${where}: centre is ${centreEmbed.toFixed(3)} m inside the wall's own band`);
+      } else if (edgeOverlap > FURNITURE_EDGE_TOLERANCE) {
+        furnitureWallGrazes.push(`${where}: edge overlaps by ${edgeOverlap.toFixed(3)} m, centre clear`);
+      }
+    }
+  }
+}
+if (furnitureWallPairsChecked === 0) {
+  problems.push('no furniture-vs-wall pairs were checked in the hotel — the probe is blind');
+}
+if (furnitureWallEmbeds.length > 0) {
+  problems.push(
+    `${furnitureWallEmbeds.length}/${furnitureWallPairsChecked} furniture-vs-wall pair(s) have a ` +
+      `furniture centre embedded inside the wall's own band: ${furnitureWallEmbeds.join('; ')}`,
+  );
+}
+for (const graze of furnitureWallGrazes) console.log(`  ~ ${graze}`);
+
 // ----------------------------------------------------------------- report
 
 console.log(
@@ -2482,7 +2676,9 @@ console.log(
     `lowest foot at y=${lowest.toFixed(2)} m after ${SETTLE_SECONDS} s; ` +
     `${mustBeSolid.length + 1} props solid, 3 beds soft and standable; ` +
     `${panes}/${declared} declared window panes built; ${occlusionReport}; ` +
-    `${crossingsChecked} doorway crossing marches, ${crossingFailures.length} fell short.`,
+    `${crossingsChecked} doorway crossing marches, ${crossingFailures.length} fell short; ` +
+    `${furnitureWallPairsChecked} furniture-vs-wall pairs, ${furnitureWallEmbeds.length} embedded, ` +
+    `${furnitureWallGrazes.length} grazed (warnings).`,
 );
 
 if (problems.length > 0) {

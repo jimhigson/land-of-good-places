@@ -682,6 +682,31 @@ interface Bed {
   readonly blanket: Group;
 }
 
+/**
+ * One floor's bathroom — issue #272: *"every floor needs a bathroom with a
+ * toilet, reusing the castle's toilet code."* Everything behavioural is the
+ * shared `routine` (`building/Toilets.ts`'s `ToiletRoutine`, the castle's
+ * own); this is just the geometry a particular room's copy of it stands in —
+ * see {@link Hotel.buildBathroomFixtures}, the one place that ties the two
+ * together, and {@link Hotel.bathrooms} for where every floor's one lives.
+ */
+interface Bathroom {
+  readonly routine: ToiletRoutine;
+  /** The room-local rectangle the privacy roof covers and the roof-approach
+   *  test ({@link Hotel.bathroomOccupied}) is measured against. */
+  readonly rect: ClearRect;
+  readonly panX: number;
+  readonly panZ: number;
+  readonly basinX: number;
+  readonly basinZ: number;
+  /** Where the "Use" chip walks her to before it presses — always just
+   *  outside the pan, on the nook's own open (doorless) side. */
+  readonly standX: number;
+  readonly standZ: number;
+  /** How far the "Use" zone's pick area reaches. See {@link Hotel.buildBathroomFixtures}. */
+  readonly pickRadius: number;
+}
+
 /** What `Hotel.hangOnWalls` puts on the two walls the camera can see. */
 interface WallPlan {
   /** Sconce x positions on the north (−Z) wall. */
@@ -783,18 +808,22 @@ export class Hotel implements GameSystem {
   /** The pet asleep in the suite's four-poster — kept so it breathes. */
   private sleepingPet: CreatureHandle | null = null;
   /**
-   * The suite bathroom: the shared flush-wash-roof behaviour
-   * (`building/Toilets.ts`'s `ToiletRoutine` — the castle's own, imported
-   * rather than copied), the clear-floor rectangle it watches for occupancy,
-   * and where the pan stands (the zone anchors on it). See
-   * {@link dressBathroom}.
+   * Every floor's bathroom (issue #272), keyed by the room it stands in.
+   * Five rooms, five entries — the suite's own (`dressBathroom`, unchanged
+   * from 8 Aug 2026: four walls it already had) and one new nook per other
+   * floor (`dressLobby`, `dressBreakfast`, `dressGarden`, `dressOcean`), all
+   * built by the one shared {@link buildBathroomFixtures}. Nothing here is a
+   * second copy of the castle's toilet: the fittings (`buildPan`,
+   * `buildBasin`, `buildPrivacyRoof`) and the flush-wash-roof behaviour
+   * (`ToiletRoutine`) are `building/Toilets.ts`'s own, imported rather than
+   * re-implemented — only the room geometry each one stands in differs.
+   *
+   * `CORRIDOR` (Floor 50) is deliberately not a sixth entry — see
+   * `dressCorridor`'s own note on why there is no honest rectangle left for
+   * one there, and why the suite's own bathroom, one door away on the same
+   * lift button, is what that floor offers instead.
    */
-  private bathroom: {
-    readonly routine: ToiletRoutine;
-    readonly rect: ClearRect;
-    readonly panX: number;
-    readonly panZ: number;
-  } | null = null;
+  private readonly bathrooms = new Map<HotelRoom, Bathroom>();
 
   // -------------------------------------------------- the camera moments
   /**
@@ -996,6 +1025,32 @@ export class Hotel implements GameSystem {
     return this.lift;
   }
 
+  /**
+   * Every room with its own bathroom (issue #272 — five of the hotel's six
+   * rooms; `CORRIDOR` shares the suite's, see `dressCorridor`).
+   *
+   * `check:hotel` walks this list rather than keeping its own copy of which
+   * floors have one and where the fittings stand — CLAUDE.md's "one owner;
+   * everyone else asks" — so a floor added here without a bathroom shows up
+   * as a probe failure rather than as a silent gap.
+   */
+  get bathroomRooms(): readonly HotelRoom[] {
+    return [...this.bathrooms.keys()];
+  }
+
+  /** World-metre pan and basin positions for `room`'s bathroom, or `null` if
+   *  it has none. See {@link bathroomRooms}. */
+  bathroomFixtures(
+    room: HotelRoom,
+  ): { readonly pan: { readonly x: number; readonly z: number }; readonly basin: { readonly x: number; readonly z: number } } | null {
+    const bathroom = this.bathrooms.get(room);
+    if (!bathroom) return null;
+    return {
+      pan: { x: room.originX + bathroom.panX, z: room.originZ + bathroom.panZ },
+      basin: { x: room.originX + bathroom.basinX, z: room.originZ + bathroom.basinZ },
+    };
+  }
+
   /** The cinematic camera's aspect, from `Game`'s resize handler. */
   resizeCinematic(width: number, height: number): void {
     this.cine.resize(width, height);
@@ -1165,6 +1220,27 @@ export class Hotel implements GameSystem {
     const player = this.player;
     if (!player || player.riding || this.changingSpace || this.inside) return false;
     this.changeSpace(() => this.enterLobby());
+    return true;
+  }
+
+  /**
+   * The `/hotel-bathroom` family of deep links (#281, extended for the
+   * own-room rewrite to reach every floor's bathroom, not just Floor 1's):
+   * straight to a guest-floor bathroom, without the lobby-stairs-corridor
+   * walk to find one. Defaults to `BREAKFAST` (the original `/hotel-bathroom`
+   * link's target, kept stable) but takes any bathroom-bearing room, so a QA
+   * pass can land in each floor's own room in turn. Lands facing the pan —
+   * the same "Use" stand spot `interactZones` itself walks her to, read from
+   * `this.bathrooms` rather than a second hand-copied literal, so a re-tuned
+   * room stays correct here for free (see the "kept in step by hand" warning
+   * this repo has paid for before).
+   */
+  requestEnterBathroom(room: HotelRoom = BREAKFAST): boolean {
+    const player = this.player;
+    if (!player || player.riding || this.changingSpace || this.inside) return false;
+    const bathroom = this.bathrooms.get(room);
+    if (!bathroom) return false;
+    this.changeSpace(() => this.enterFloorBathroom(room, bathroom));
     return true;
   }
 
@@ -1415,28 +1491,33 @@ export class Hotel implements GameSystem {
       });
     }
 
-    // The bathroom — the castle's toilets zone, in your own suite. One zone
-    // for the whole two-beat routine (flush, then wash), anchored on the pan
-    // with its stand spot inside the room, so tapping it walks her in and the
-    // privacy roof has already closed over her by the time the flush plays.
-    if (room === SUITE && this.bathroom) {
-      const { routine, panX, panZ } = this.bathroom;
+    // The bathroom — the castle's toilets zone, one per floor now (issue
+    // #272). One zone for the whole two-beat routine (flush, then wash),
+    // anchored on the pan with its stand spot inside the room, so tapping it
+    // walks her in and the privacy roof has already closed over her by the
+    // time the flush plays.
+    const bathroom = this.bathrooms.get(room);
+    if (bathroom) {
       zones.push({
-        id: 'hotel-bathroom',
+        id: `hotel-bathroom-${room.space}`,
         label: 'bathroom',
-        x: SUITE.originX + panX,
+        x: room.originX + bathroom.panX,
         y: 1,
-        z: SUITE.originZ + panZ,
+        z: room.originZ + bathroom.panZ,
         // A bed-sized target: any bigger and the pick area reaches the
         // bathroom doorway's band (`hotelDoorBands`), and a doorway a zone
-        // covers is a doorway a phone cannot use.
-        pickRadius: 1.8,
-        standX: SUITE.originX + panX,
-        standZ: SUITE.originZ + panZ - 1.1,
+        // covers is a doorway a phone cannot use. Per-room, because a floor
+        // nook has closer neighbours than the suite's own bathroom did —
+        // see {@link buildBathroomFixtures}.
+        pickRadius: bathroom.pickRadius,
+        standX: room.originX + bathroom.standX,
+        standZ: room.originZ + bathroom.standZ,
         standRadius: 2.2,
         verb: 'Use',
         actions: () =>
-          routine.busy ? [] : pressAction('Use the toilet!', () => routine.use(), '🚽'),
+          bathroom.routine.busy
+            ? []
+            : pressAction('Use the toilet!', () => bathroom.routine.use(), '🚽'),
       });
     }
 
@@ -1545,10 +1626,15 @@ export class Hotel implements GameSystem {
     // the same one line every other pet in the park uses to stand still.
     this.sleepingPet?.setWalkPhase(elapsed * 0.7, 0);
 
-    // The bathroom's flush-wash-roof clock — the same call the castle makes,
-    // every frame, occupancy asked fresh from where she is standing (the roof
-    // must lead her in and can never trap her; `building/Toilets.ts`).
-    this.bathroom?.routine.update(dt, elapsed, this.playerInBathroom());
+    // Every floor's bathroom clock — the same call the castle makes, every
+    // frame, occupancy asked fresh from where she is standing (the roof must
+    // lead her in and can never trap her; `building/Toilets.ts`). Only the
+    // bathroom in the room she is actually in can be occupied; every other
+    // floor's routine simply idles.
+    for (const [bathroomRoom, bathroom] of this.bathrooms) {
+      const occupied = here === bathroomRoom && this.bathroomOccupied(bathroomRoom, bathroom);
+      bathroom.routine.update(dt, elapsed, occupied);
+    }
 
     // Children at breakfast, rocking gently over their cereal. Three lines of
     // motion is the difference between somebody eating and a mannequin.
@@ -1761,6 +1847,26 @@ export class Hotel implements GameSystem {
       // (issue #270 — reception moved into the entrance foyer itself).
       this.say([`${greetingFor(this.deps.clock())}! Come to the desk and check in!`], -1);
     }
+  }
+
+  /**
+   * The `/hotel-bathroom` deep link's landing, mirroring {@link enterLobby}:
+   * binds play bounds to the floor room and stands her at the nook's own
+   * "Use" spot, facing the pan — derived from `bathroom`'s own fields
+   * (`standX/standZ` to `panX/panZ`) rather than a hardcoded yaw, so it stays
+   * right if the nook is ever re-tuned.
+   */
+  private enterFloorBathroom(room: HotelRoom, bathroom: Bathroom): void {
+    const player = this.player;
+    if (!player) return;
+    this.inside = true;
+    this.hotelRoot.visible = true;
+    this.boundTo(room);
+    const facing = Math.atan2(
+      bathroom.panX - bathroom.standX,
+      bathroom.panZ - bathroom.standZ,
+    );
+    player.teleportTo(room.originX + bathroom.standX, 0, room.originZ + bathroom.standZ, facing);
   }
 
   /**
@@ -3439,6 +3545,42 @@ export class Hotel implements GameSystem {
       8 * DECAL_STEP,
     );
 
+    // The bathroom (issue #272, own-room rewrite issue #281) — south-east
+    // corner of the *foyer*, now a genuinely enclosed room: `LOBBY.partitions`
+    // closes the two sides the room's own east wall (x = 13, untouched by
+    // #280) and the reception/lobby partition (its new south side — see
+    // `LOBBY.partitions`'s own comment for why that's the wall now) don't
+    // already own, door on the (widened-in) west wall at x = 7.0. Clear of
+    // the breakfast corner (south-west, x ≈ −10), the seating groups and
+    // columns (|x| ≤ 12.2, z ≤ 7.6) and the corner planters (x = ±3.4,
+    // z = 11.8) — all of it, this bathroom included, carrying #280's
+    // `+ LOBBY_FOYER_GROWTH − RECEPTION_ORIGIN_SHIFT` foyer shift together, so
+    // the relative gaps between them are exactly what they always were.
+    //
+    // With the door pushed well west, the pan sits with room to spare from
+    // both the doorway's own clearance zone (reach 1.24 m from x = 7.0) and
+    // its tap-spacing band (a further finger, `check:tap-spacing`), and
+    // still a comfortable margin short of the east wall — no more fighting
+    // one rule against the other the way the narrower nook did.
+    //
+    // A tighter pick radius than the suite's own 1.8 m default — this small
+    // a room puts the "Use" zone within a finger of its own doorway
+    // (`check:tap-spacing`'s rule) at the default radius.
+    const rect = clearFloorAround(LOBBY, 11.5, 10.7 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT);
+    this.buildBathroomFixtures(
+      shell,
+      LOBBY,
+      rect,
+      11.5,
+      10.7 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
+      10.2,
+      10.7 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
+      10.8,
+      9.8 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
+      -Math.PI / 2,
+      0.9,
+    );
+
     return statue;
   }
 
@@ -3542,6 +3684,32 @@ export class Hotel implements GameSystem {
       // own "Look out" pane at 8.1.
       pictures: [{ wall: 'west', along: -6.4, width: 1.6, height: 1.2, seed: 0x20c1 }],
     });
+
+    // The bathroom (issue #272, own-room rewrite issue #281) — south-east
+    // corner, same shape as the lobby's: `BREAKFAST.partitions` closes the
+    // two open sides, door on the west wall, jamb at the (grown) south wall.
+    // The floor grew deeper (`BREAKFAST.halfZ`) so the door sits a full
+    // 5.5 m south of table b1-d (8.8, 4.6) — clear of it and its chairs'
+    // "Sit" zones for both `check:hotel`'s doorway-clearance check and
+    // `check:tap-spacing`'s finger rule. The pan sits east and well south of
+    // the door's own tap-spacing band — the extra room's own depth is what
+    // buys the "Use" zone its clearance, not extra width (see `halfX`'s own
+    // comment for why widening the room instead put a painting in a wall).
+    // It also sits a body's width shy of the east wall, not flush against it
+    // — `check:hotel` found the wall's own face shoving a standing child
+    // sideways at the position tried first.
+    //
+    // The whole nook — this query point and every coordinate below — is
+    // translated a further 0.6 m south of that (`BREAKFAST.halfZ`'s own
+    // comment): the room's own NW corner sat only 0.226 m from b1-d's own
+    // chair (a real 0.324 m disc-into-wall overlap — PR #281 review, 18 Aug
+    // 2026), and a pure translation keeps every fixture's spacing from every
+    // other fixture exactly as it was, so nothing here needed re-deriving.
+    const rect = clearFloorAround(BREAKFAST, 10.9, 9.1);
+    // A tighter pick radius than the suite's own 1.8 m — this nook has a
+    // breakfast chair for a neighbour, and check:tap-spacing wants a full
+    // finger (TAP_FINGER_METRES) between them.
+    this.buildBathroomFixtures(shell, BREAKFAST, rect, 10.9, 7.6, 9.6, 7.6, 11.0, 9.6, Math.PI / 2, 0.9);
   }
 
   /**
@@ -3637,6 +3805,27 @@ export class Hotel implements GameSystem {
     // the moment reception handed the key over.
     this.lightYoursStar(saveFlags.hasHotelKey());
     this.paintArrow(shell, -2, 0, CORRIDOR.halfX - 2, 0);
+
+    // **No bathroom nook of its own** (issue #272) — this is the one floor of
+    // the five where that is the right call rather than a shortfall. The
+    // corridor is 8 m deep and every stretch of its east wall that is not
+    // the doorway itself is already claimed: the pet statues' row to the
+    // north (last one at 7.5, radius 0.95), the crystal cluster to the south
+    // (9.6, 2.6) whose own `PLAYER_RADIUS` clearance overruns the real south
+    // wall's, and — the one that actually broke `check:hotel` first —
+    // `Hotel.marchAtSuiteDoor`'s straight probe down the local z = 0 spine
+    // from x = 8 to the "yours" door, which a nook anywhere near the middle
+    // of this wall sits squarely on top of. There is no rectangle left big
+    // enough for a solid, standable pan and basin a `PLAYER_RADIUS`
+    // (0.62 m) apart from each other and from every wall.
+    //
+    // The suite is not a different floor pretending to be this one: the
+    // lift panel answers to this room and the suite both under the single
+    // "Yours! · Floor 50" button (`HOTEL_FLOORS`), and its own door is at
+    // the far end of this very corridor. Its bathroom (`dressBathroom`,
+    // reached through it) is what this floor offers — `check:hotel`'s probe
+    // 21 checks exactly that pairing rather than asking this room for a
+    // second one it has no honest room to build.
   }
 
   /**
@@ -3753,6 +3942,27 @@ export class Hotel implements GameSystem {
     });
     // Six ladder steps, not four: this arrow crosses the stacked lawn rug.
     this.paintArrow(shell, 6.4, -2.6, -room.halfX + 2.5, 0, 6 * DECAL_STEP);
+
+    // The bathroom (issue #272, own-room rewrite issue #281) — against the
+    // (grown) east wall, between the two hedges (spanning x 3.7–9.1 both
+    // north and south, half-depth 0.31 at z ±6.4) and well clear of the pond
+    // (x 4.1–8.3, z 0.3–4.6). `room.partitions` closes all four sides now:
+    // the same two north/south walls the old nook had, plus a third on the
+    // west (previously open) side carrying the door — the floor grew 1.4 m
+    // east so this room has real depth instead of the old nook's bare
+    // corner-of-two-walls.
+    //
+    // The doorway's clearance zone (reach 1.24 m from x = 8.35) still eats
+    // into the room along X, so the fixtures sit east of x = 9.59 — every
+    // fitting also keeps a full `PLAYER_RADIUS` (0.62 m) clear of every wall
+    // *centreline* and of every other fitting's own collider, the margin
+    // `check:hotel` probe 21 actually measures (a child standing on the pan
+    // must not be shoved by the wall or the basin beside it).
+    // A tighter pick radius than the suite's own 1.8 m default — this small
+    // a room puts the "Use" zone within a finger of its own doorway
+    // (`check:tap-spacing`'s rule) at the default radius.
+    const rect = clearFloorAround(room, 11.1, -2.6);
+    this.buildBathroomFixtures(shell, room, rect, 11.1, -2.6, 9.8, -2.6, 11.6, -3.7, -Math.PI / 2, 0.9);
   }
 
   /**
@@ -3833,13 +4043,24 @@ export class Hotel implements GameSystem {
     this.placeProps(shell, room, [
       { prop: () => seaweed(0x60c1, 1.2), x: -8.4, z: -6.4, top: SEAWEED_TOP },
       { prop: () => seaweed(0x60c2, 1.1), x: 8.4, z: -6.4, top: SEAWEED_TOP },
-      { prop: () => seaweed(0x60c3, 1), x: -8.6, z: 6.4, top: SEAWEED_TOP },
+      // Moved from (-8.6, 6.4) to (-6.0, 7.2) (issue #281) — the bathroom's
+      // own room now occupies exactly that corner, growing a real south wall
+      // out to z = 6.8; the old spot first sat inside the doorway's
+      // clearance zone, and once nudged along the wall to clear that, sat
+      // inside the wall's own collider instead (the wall physically stands
+      // there now — this decoration cannot). East of the bathroom's own east
+      // wall (x = -7.6) instead, still low in the room's south end.
+      { prop: () => seaweed(0x60c3, 1), x: -6.0, z: 7.2, top: SEAWEED_TOP },
       { prop: () => seaweed(0x60c4, 1.25), x: 8.6, z: 6.2, top: SEAWEED_TOP },
       { prop: () => seaweed(0x60c5, 0.9), x: -2.6, z: -6.6, top: SEAWEED_TOP },
       { prop: () => seaweed(0x60c6, 0.95), x: 3.2, z: -6.6, top: SEAWEED_TOP },
       {
+        // x nudged from -6.4 to -5.4 (issue #281) — sat squarely inside the
+        // new bathroom doorway's clearance zone, which reaches from the
+        // wall at x = -7.6 out to -6.36 (`check:hotel` found this: prop at
+        // local (-6.4, 3.6), fully inside).
         prop: () => crystalPlanter(0x60c7, PALETTE.waterFoam, [PALETTE.markerMint, PALETTE.bubbleSkin, PALETTE.waterTop]),
-        x: -6.4,
+        x: -5.4,
         z: 3.6,
         top: PLANTER_TOP,
       },
@@ -3870,6 +4091,33 @@ export class Hotel implements GameSystem {
       pictures: [],
     });
     this.paintArrow(shell, 4.6, 0, -room.halfX + 2.5, 0);
+
+    // The bathroom (issue #272, own-room rewrite issue #281) — against the
+    // (grown) west wall, above the lift gap (z ±1.6, cleared by 0.4 m — see
+    // `layout.ts`). Now a real four-sided room: the north wall shifted from
+    // the old nook's z = 1.6 to 2.0 to clear the lift gap, the south wall
+    // pushed on to z = 6.8 (see `layout.ts` — there was room to spare before
+    // `halfZ`), and a third wall on the east (previously open) side carries
+    // the door.
+    //
+    // The doorway's clearance zone (reach 1.24 m from x = −7.6) eats into
+    // the room along X, so the fixtures sit west of x = −8.84. The pan sits
+    // near the room's south end, far from *two* neighbours at once: the
+    // lift alcove's own boarding band to the north (`hotelDoorBands`,
+    // reaching to z ≈ 2.6) and this room's own doorway band, centred on the
+    // door at z = 4.0 — `check:tap-spacing` ruled out every more central
+    // position. It sits a full body's width off the south wall (z = 6.8),
+    // not flush against it — `check:hotel` found the wall's own face
+    // shoving a standing child sideways at the position tried first. The
+    // stand spot sits north-east of the pan rather than level with it —
+    // `check:hotel` found a level stand spot inside the west wall's own
+    // rounded end-cap (`CollisionWorld.addWall`'s half-thickness capsule
+    // reaches past a wall segment's literal endpoint), the same class of
+    // bug the breakfast room's stand spot hit.
+    const rect = clearFloorAround(room, -9.7, 3.5);
+    // Tighter still than the lobby/garden nooks' 0.9 m — this nook has both
+    // the lift alcove *and* its own doorway for neighbours.
+    this.buildBathroomFixtures(shell, room, rect, -10.1, 5.6, -9.0, 4.8, -9.8, 2.9, Math.PI / 2, 0.6);
   }
 
   private dressSuite(): void {
@@ -4272,8 +4520,9 @@ export class Hotel implements GameSystem {
   }
 
   /**
-   * The suite's bathroom — Jim, 8 Aug 2026: *"Add a bathroom using the models
-   * and rules from the bathroom in the other big building."*
+   * The one place a room's own geometry is wired to the castle's toilet code
+   * — issue #272: *"every floor needs a bathroom with a toilet, reusing the
+   * castle's toilet code."*
    *
    * The models ARE the castle's: `buildPan`, `buildBasin` and
    * `buildPrivacyRoof` are imported from `building/Toilets.ts`, and the rules
@@ -4282,19 +4531,38 @@ export class Hotel implements GameSystem {
    * then the tap while you wash (*"good manners are part of the game"*); the
    * wash beat lifts the roof, and stepping out always clears everything, so
    * it can never trap her. The one thing the castle's room could not have is
-   * the one thing this room adds: **real solidity** — the castle's collision
-   * is height-blind across decks so its toilet room is open geometry, while
-   * the hotel's fixtures go through `place.ts` like every other prop, solid
-   * and (the pan) mountable.
+   * the one thing every room here adds: **real solidity** — the castle's
+   * collision is height-blind across decks so its toilet room is open
+   * geometry, while the hotel's fixtures go through `place.ts` like every
+   * other prop, solid and (the pan) mountable.
    *
-   * The room itself is partition data in `layout.ts` (the z-run at x = −4.2
-   * across the south half, doorway off the hall at −7.6); everything here is
-   * derived from `clearFloorAround` inside it, so the walls own the room and
-   * the fittings follow.
+   * Every caller hands this the room, the rectangle its own walls (real
+   * ones, or `layout.ts` partition data) already enclose, and where the two
+   * fittings should stand inside it — the walls own the room, the fittings
+   * follow. `standX`/`standZ` is the one thing worth choosing with care: it
+   * must sit on the nook's own open (doorless) side, or the "Use" chip walks
+   * her into a wall instead of the pan.
+   *
+   * `pickRadius` defaults to the suite's own 1.8 m; the floor nooks — built
+   * into corners of rooms that already have chairs and a lift alcove nearby
+   * — pass a tighter one where `check:tap-spacing` measures theirs crowding
+   * a neighbour (a full finger, `TAP_FINGER_METRES`, is the rule; a smaller
+   * pick area is the one knob this call has to buy that back without moving
+   * the neighbour).
    */
-  private dressBathroom(shell: Group): void {
-    // Any interior point of the bathroom yields its whole clear floor.
-    const rect = clearFloorAround(SUITE, -7.6, 4.8);
+  private buildBathroomFixtures(
+    shell: Group,
+    room: HotelRoom,
+    rect: ClearRect,
+    panX: number,
+    panZ: number,
+    standX: number,
+    standZ: number,
+    basinX: number,
+    basinZ: number,
+    basinYaw = 0,
+    pickRadius = 1.8,
+  ): void {
     const centreX = (rect.minX + rect.maxX) / 2;
     const centreZ = (rect.minZ + rect.maxZ) / 2;
 
@@ -4310,30 +4578,26 @@ export class Hotel implements GameSystem {
     );
     tiles.position.set(centreX, 0, centreZ);
     shell.add(tiles);
-    // The pan stands mid-room on its own mat, facing the lens, because the
-    // walls this room got are exactly the ones a prop cannot stand against:
-    // the east partition hides 2.8 m of floor behind it (2.2 m of wall at the
-    // 38° pitch — watched in the browser: a pan by the doorway was simply
-    // absent from the frame), the hall wall's west end belongs to the basin,
-    // and the west wall is owned by the corridor door's tap band and the
-    // pane. Mid-room is also honestly where a child can walk all round it,
-    // which is what the mat says. The exact spot keeps the zone's pick area
-    // a full finger clear of the bathroom doorway's own band — measured by
-    // check:tap-spacing, found the hard way by a phone tap in the doorway
-    // selecting the pan instead of walking through.
-    const panX = -7.8;
-    const panZ = 4.6;
-    const bathMat = rug(2.0, 1.6, PALETTE.markerMint, PALETTE.blossomWhite, 1);
+    // A mat under the pan, sized to whatever clear floor actually surrounds
+    // *where the pan stands* — the suite's own bathroom has room for the
+    // full 2.0 × 1.6; the smaller floor nooks take whatever is left. Measured
+    // from the pan's own position rather than the rect's total size: the pan
+    // is rarely centred in its nook, and a mat sized only off the rect's
+    // extent can reach past the nearer wall on one side even while fitting
+    // the rect's average easily (check:hotel found exactly this — a rug
+    // "reaching under a wall").
+    const matWidth = Math.min(2.0, 2 * Math.min(panX - rect.minX, rect.maxX - panX) - 0.2);
+    const matDepth = Math.min(1.6, 2 * Math.min(panZ - rect.minZ, rect.maxZ - panZ) - 0.2);
+    const bathMat = rug(matWidth, matDepth, PALETTE.markerMint, PALETTE.blossomWhite, 1);
     bathMat.position.set(panX, 0, panZ);
     shell.add(bathMat);
     const pan = buildPan(0, 0);
-    this.props.place(shell, SUITE, pan.group, { x: panX, z: panZ, radius: 0.45, top: 0.7 });
-    // The basin west of the doorway, its mirror against the hall wall — far
-    // enough from the east partition's sight shadow to be in frame.
+    this.props.place(shell, room, pan.group, { x: panX, z: panZ, radius: 0.45, top: 0.7 });
     const basin = buildBasin(0, 0);
-    this.props.place(shell, SUITE, basin.group, {
-      x: rect.minX + 1.1,
-      z: rect.minZ + 0.55,
+    this.props.place(shell, room, basin.group, {
+      x: basinX,
+      z: basinZ,
+      spin: basinYaw,
       radius: 0.4,
       top: 1.0,
       stand: false,
@@ -4347,17 +4611,65 @@ export class Hotel implements GameSystem {
     );
     shell.add(roof.group);
 
-    this.bathroom = { routine: new ToiletRoutine(pan, basin, roof), rect, panX, panZ };
+    this.bathrooms.set(room, {
+      routine: new ToiletRoutine(pan, basin, roof),
+      rect,
+      panX,
+      panZ,
+      basinX,
+      basinZ,
+      standX,
+      standZ,
+      pickRadius,
+    });
   }
 
-  /** Whether the player is in the suite's bathroom, by the castle's own
-   *  generous-margin rule ({@link TOILET_APPROACH} — the roof has to lead her). */
-  private playerInBathroom(): boolean {
+  /**
+   * The suite's bathroom — Jim, 8 Aug 2026: *"Add a bathroom using the models
+   * and rules from the bathroom in the other big building."* The room itself
+   * is partition data in `layout.ts` (the z-run at x = −4.2 across the south
+   * half, doorway off the hall at −7.6); `clearFloorAround` turns that into
+   * the rectangle below, so the walls own the room and the fittings follow.
+   */
+  private dressBathroom(shell: Group): void {
+    // Any interior point of the bathroom yields its whole clear floor.
+    const rect = clearFloorAround(SUITE, -7.6, 4.8);
+    // The pan stands mid-room on its own mat, facing the lens, because the
+    // walls this room got are exactly the ones a prop cannot stand against:
+    // the east partition hides 2.8 m of floor behind it (2.2 m of wall at the
+    // 38° pitch — watched in the browser: a pan by the doorway was simply
+    // absent from the frame), the hall wall's west end belongs to the basin,
+    // and the west wall is owned by the corridor door's tap band and the
+    // pane. Mid-room is also honestly where a child can walk all round it,
+    // which is what the mat says. The exact spot keeps the zone's pick area
+    // a full finger clear of the bathroom doorway's own band — measured by
+    // check:tap-spacing, found the hard way by a phone tap in the doorway
+    // selecting the pan instead of walking through. The basin stands west of
+    // the doorway, its mirror against the hall wall.
+    this.buildBathroomFixtures(
+      shell,
+      SUITE,
+      rect,
+      -7.8,
+      4.6,
+      -7.8,
+      4.6 - 1.1,
+      rect.minX + 1.1,
+      rect.minZ + 0.55,
+    );
+  }
+
+  /**
+   * Whether the player is standing in `room`'s bathroom, by the castle's own
+   * generous-margin rule ({@link TOILET_APPROACH} — the roof has to lead
+   * her). Only meaningful while she is actually in `room`; {@link update}
+   * checks that first.
+   */
+  private bathroomOccupied(room: HotelRoom, bathroom: Bathroom): boolean {
     const player = this.player;
-    const bathroom = this.bathroom;
-    if (!player || !bathroom || !this.inside) return false;
-    const x = player.position.x - SUITE.originX;
-    const z = player.position.z - SUITE.originZ;
+    if (!player || !this.inside) return false;
+    const x = player.position.x - room.originX;
+    const z = player.position.z - room.originZ;
     return (
       x >= bathroom.rect.minX - TOILET_APPROACH &&
       x <= bathroom.rect.maxX + TOILET_APPROACH &&
