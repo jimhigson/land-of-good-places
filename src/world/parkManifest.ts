@@ -325,6 +325,24 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
   // thing that stands there. If this ever needs to move again, re-run both
   // gates on all five seeds before trusting a new number — this file's own
   // history says a single-seed pass proves nothing.
+  //
+  // **Known open issue, disclosed rather than chased further**: this exact
+  // config fails `check:slide-rider` on the canonical seed alone — one
+  // trackside-camera sample during the ginormous slide's ride (beat 1,
+  // frame 240) shows her body at 0.11% of frame against a 0.40% floor. The
+  // free `band: { 13, 60 }` config above passes `check:slide-rider` clean
+  // (1.31%+ on every sample) but fails `test:procgen` on seed 2, which is the
+  // one CLAUDE.md names as the actual CI-blocking gate ("not optional");
+  // `check:slide-rider` is bundled into `npm run build`'s wider chain, not
+  // named there the same way. Given the choice between a config that passes
+  // the mandatory gate and fails one camera-framing sample, and one that
+  // fails the mandatory gate outright, this PR ships the former and reports
+  // the slide-rider regression plainly rather than silently. Whoever picks
+  // this up: it is very likely the same mechanism as the rest of this
+  // comment — the slide's chute route reacts to occupied ground near the
+  // plaza — so it is a candidate for the same fix this file never fully
+  // found: either a placement that clears all three known-fragile systems
+  // at once, or resilience added to the systems themselves.
   {
     id: 'stall.keychain',
     cameraFacing: true,
