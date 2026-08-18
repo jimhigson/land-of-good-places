@@ -81,6 +81,9 @@ import {
   type HotelRoom,
   HOTEL_FLOORS,
   LOBBY,
+  LOBBY_FOYER_GROWTH,
+  RECEPTION_ORIGIN_SHIFT,
+  LOBBY_HALL_DOOR_X,
   OCEAN_FLOOR,
   SUITE,
   SUITE_BEDSIDE_X,
@@ -98,7 +101,12 @@ import { segmentsMinusGaps } from '../src/world/wallRuns.ts';
 import { BUFFET_TOP, SOFA_SEAT_TOP } from '../src/world/hotel/dressing.ts';
 import { spaceAt, SPACE_GARDEN } from '../src/world/spaces.ts';
 import { placedEntry } from '../src/world/parkLayout.ts';
-import { TOWER_DOOR_HALF, TOWER_FACADE_ALONG } from '../src/world/hotel/Hotel.ts';
+import {
+  TOWER_DOOR_HALF,
+  TOWER_FACADE_ALONG,
+  RECEPTION_X,
+  RECEPTION_Z,
+} from '../src/world/hotel/Hotel.ts';
 import { saveFlags } from '../src/state/flags.ts';
 
 /** Deep enough that no floor in the game is near it, shallow enough to catch a fall early. */
@@ -179,13 +187,26 @@ collision.setPlayBounds({ radius: 1e6, distanceToEdge: () => 1e6 });
 const mustBeSolid: readonly [string, number, number][] = [
   // On the axis south of the arch (the imperial relayout) — the walk-through
   // runs entrance → statue medallion → under the arch, and you go round it.
-  ['the lobby RiPika statue', LOBBY.originX + 0, LOBBY.originZ + 4.6],
-  // Reception moved off the axis into the east bay (the axis runs through
-  // the arch now). Probe 13 separately asserts the interact zone is anchored
-  // on this same footprint.
-  ['the reception desk', LOBBY.originX + 8.6, LOBBY.originZ - 5.2],
-  ['a lobby sofa', LOBBY.originX + 5.9, LOBBY.originZ + 4.8],
-  ['a lobby crystal column', LOBBY.originX - 11.9, LOBBY.originZ - 6.6],
+  // z carries `LOBBY_FOYER_GROWTH` and, since 18 Aug 2026's reception-room
+  // split, `RECEPTION_ORIGIN_SHIFT` too (both `layout.ts`), same as the
+  // statue itself — this literal duplicates `Hotel.ts`'s `STATUE_Z`, which
+  // is exactly the "two definitions of one thing" trap CLAUDE.md warns
+  // about, but `STATUE_Z` is a private `const` inside `dressLobby` with
+  // nothing exported to import instead.
+  ['the lobby RiPika statue', LOBBY.originX + 0, LOBBY.originZ + 4.6 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT],
+  // Reception stands in the entrance foyer now, a few strides inside the
+  // front door (issue #270) — imported from `Hotel.ts` rather than typed
+  // again beside it, because a second literal here is exactly how the *last*
+  // relayout went stale: this line kept the desk's old spot after the desk
+  // moved, and it kept passing anyway because that old spot happened to sit
+  // inside the staircase's own solid wedge. Probe 13 separately asserts the
+  // interact zone is anchored on this same footprint.
+  ['the reception desk', LOBBY.originX + RECEPTION_X, LOBBY.originZ + RECEPTION_Z],
+  // z carries `LOBBY_FOYER_GROWTH` and `RECEPTION_ORIGIN_SHIFT`, same as the sofa itself.
+  ['a lobby sofa', LOBBY.originX + 5.9, LOBBY.originZ + 4.8 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT],
+  // z carries `LOBBY_FOYER_GROWTH` (−) and `RECEPTION_ORIGIN_SHIFT` (−) with
+  // the rest of the hall it stands in.
+  ['a lobby crystal column', LOBBY.originX - 11.9, LOBBY.originZ - 6.6 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT],
   ['a Floor 12 hedge', GARDEN_FLOOR.originX - 6.4, GARDEN_FLOOR.originZ - 6.4],
   ['a Floor 12 bench', GARDEN_FLOOR.originX + 2.2, GARDEN_FLOOR.originZ + 5.2],
   ['a Floor 33 seaweed clump', OCEAN_FLOOR.originX - 8.4, OCEAN_FLOOR.originZ - 6.4],
@@ -245,7 +266,7 @@ function deflectionAt(worldX: number, worldY: number, worldZ: number): number {
 }
 
 const mustBeMountable: readonly [string, number, number, number][] = [
-  ['a lobby sofa', LOBBY.originX + 5.9, LOBBY.originZ + 4.8, SOFA_SEAT_TOP],
+  ['a lobby sofa', LOBBY.originX + 5.9, LOBBY.originZ + 4.8 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, SOFA_SEAT_TOP],
   ['the buffet counter', BREAKFAST.originX + 1.5, BREAKFAST.originZ - 7.4, BUFFET_TOP],
   ['a breakfast table', BREAKFAST.originX - 6.4, BREAKFAST.originZ + 6.2, 0.74],
   ['a Floor 50 pet plinth', CORRIDOR.originX - 7.5, CORRIDOR.originZ - CORRIDOR.halfZ + 1.4, 0.4],
@@ -489,13 +510,24 @@ if (!mezzanine) {
     }
   }
 
-  // **The arch is a walk-through.** A ground body marched up the axis crosses
-  // the whole room — under the landing, through the colonnade, to the north
-  // wall — without being pushed off the line. This is the see-through Jim
-  // asked for, as a walk; a naive (height-agnostic) balustrade collider
-  // stalls it at the arch mouth, measured before the banded mechanism landed.
+  // **The arch is a walk-through.** A ground body marched up the doorway
+  // crosses the whole room — under the landing, through the colonnade, to
+  // the north wall — without being pushed off the line. This is the
+  // see-through Jim asked for, as a walk; a naive (height-agnostic)
+  // balustrade collider stalls it at the arch mouth, measured before the
+  // banded mechanism landed.
+  //
+  // **Marched at `LOBBY_HALL_DOOR_X`, not the room's own x = 0 axis.** Issue
+  // #270's own fix moved the foyer/hall doorway off the promenade axis (that
+  // constant's own doc in `layout.ts`), specifically so it would *not* line
+  // up with the statue's footprint any more — so a walker on the true axis
+  // now meets solid partition, by design, and this probe would be measuring
+  // the thing #270 deliberately built rather than a bug. The colonnade
+  // itself stays open underneath the whole gallery width, so the walk-through
+  // still holds off-axis.
   {
-    const probe = new Vector3(LOBBY.originX, 0, LOBBY.originZ + 2);
+    const AXIS_X = LOBBY.originX + LOBBY_HALL_DOOR_X;
+    const probe = new Vector3(AXIS_X, 0, LOBBY.originZ + 2);
     const steps = Math.ceil((2 - (-LOBBY.halfZ + 1.2)) / 0.05);
     for (let step = 0; step < steps; step += 1) {
       probe.z -= 0.05;
@@ -504,14 +536,14 @@ if (!mezzanine) {
     const reachedZ = probe.z - LOBBY.originZ;
     if (reachedZ > -LOBBY.halfZ + 2.0) {
       problems.push(
-        `a walker on the axis is stopped at local z = ${reachedZ.toFixed(2)} — the arch under ` +
-          `the landing is not a walk-through (something invisible stands in it)`,
+        `a walker on the doorway line is stopped at local z = ${reachedZ.toFixed(2)} — the arch ` +
+          `under the landing is not a walk-through (something invisible stands in it)`,
       );
     }
-    if (Math.abs(probe.x - LOBBY.originX) > 0.5) {
+    if (Math.abs(probe.x - AXIS_X) > 0.5) {
       problems.push(
-        `a walker on the axis is pushed ${(probe.x - LOBBY.originX).toFixed(2)} m sideways — ` +
-          `the arch is not clear on the centre line`,
+        `a walker on the doorway line is pushed ${(probe.x - AXIS_X).toFixed(2)} m sideways — ` +
+          `the arch is not clear on that line`,
       );
     }
 
@@ -520,9 +552,12 @@ if (!mezzanine) {
     // z ≈ −7.5 on every attempt: the old solid-mass rescue net still covered
     // the mezzanine rectangle, which the colonnade made honest floor. A
     // frame's update on a player standing in the colonnade must not move her.
+    // z carries `LOBBY_FOYER_GROWTH` (−) with the rest of the hall she is
+    // standing in — the colonnade this once probed at local z = −9 is now
+    // 7 m further north.
     {
       const walker = {
-        position: new Vector3(LOBBY.originX, 0, LOBBY.originZ - 9),
+        position: new Vector3(LOBBY.originX, 0, LOBBY.originZ - 9 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT),
         riding: false,
         model: { setExpression: () => {} },
         teleportTo(x: number, y: number, z: number) {
@@ -534,7 +569,7 @@ if (!mezzanine) {
       hotel.update({ dt: 1 / 60, elapsed: 0 } as never);
       const moved = Math.hypot(
         walker.position.x - LOBBY.originX,
-        walker.position.z - (LOBBY.originZ - 9),
+        walker.position.z - (LOBBY.originZ - 9 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT),
       );
       if (moved > 0.05) {
         problems.push(
@@ -832,6 +867,44 @@ if (keyedReach < 1) {
     }
   }
   if (frames2.length === 0) problems.push('no hotel.artwork groups found — the paintings are gone');
+}
+
+// ---------------------- 26. no painting hangs where the mezzanine hides it
+//
+// Issue #271, Jim: the lobby's paintings could be highlighted and "Look!"ed
+// at while actually standing behind the gallery deck from the fixed camera's
+// own point of view — the highlight and the interact zone are pure distance,
+// with no idea a deck stands between the canvas and the lens. Root cause:
+// both were declared on the north wall, and `LOBBY.mezzanine` reaches the
+// *whole* width of that wall, so every point on it is permanently in the
+// deck's shadow — not a placement mistake `hangOnWalls`' glass-and-doorway
+// search would ever have caught, because it had never been taught the deck
+// was a third kind of "spoken for".
+//
+// `Hotel.hangOnWalls`'s `clearOfGlass` now refuses a spot `mezzanineHidesPoint`
+// calls hidden, the same way it already refuses one over glass or a doorway
+// gap — this probe is the belt to that generator-time brace: it re-asks the
+// same question of the **built** `hotel.artworks` list (never the layout
+// declarations that produced it), against every room that has a mezzanine.
+// Today only the lobby does; the loop is written for whichever room next
+// grows one.
+//
+// Proven red before trusted green: reverting `clearOfGlass`'s mezzanine
+// check while leaving the lobby's old north-wall picture declarations in
+// place reproduces exactly the two hidden paintings this was written for.
+for (const placement of hotel.artworkPlacements) {
+  const plan = placement.room.mezzanine;
+  if (!plan) continue;
+  const localX = placement.x - placement.room.originX;
+  const localY = placement.y;
+  const localZ = placement.z - placement.room.originZ;
+  if (mezzanineHidesPoint(plan, localX, localY, localZ)) {
+    problems.push(
+      `${placement.room.space}: a painting at local (${localX.toFixed(1)}, ${localY.toFixed(1)}, ` +
+        `${localZ.toFixed(1)}) is hidden behind the mezzanine from the fixed camera — it can still ` +
+        `be highlighted and "Look!"ed at, but there is never anything to see`,
+    );
+  }
 }
 
 // ------------------------------------------ 9. the close-ups keep their distance

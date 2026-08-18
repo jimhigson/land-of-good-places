@@ -1,4 +1,5 @@
-import { CanvasTexture, Sprite, SpriteMaterial, SRGBColorSpace } from 'three';
+import { CanvasTexture, Sprite, SpriteMaterial, SRGBColorSpace, Vector3 } from 'three';
+import type { IsoCamera } from '../core/IsoCamera';
 import { hexToCss, PALETTE } from '../core/palette';
 import { minTextPx } from '../core/uiScale';
 
@@ -13,6 +14,16 @@ import { minTextPx } from '../core/uiScale';
  * little tail pointing down at the speaker, neither of which a name pill
  * needs. Same look and feel (rounded pill, soft ink text, a coloured rim), so
  * it reads as the same game rather than a second UI idiom.
+ *
+ * **Screen-space clamped** (QA on #280, PR #280 round 2): a bubble pinned in
+ * world space near its speaker can, on a narrow enough screen, project
+ * partly or wholly off the visible frustum — the receptionist's own greeting
+ * did exactly this on a 390×844 portrait phone, clipped and unreadable. Every
+ * caller still hands {@link updateScreenSize} the sprite's natural,
+ * unclamped world anchor (via `sprite.position`, same as before this fix);
+ * the clamp is applied on top, every call, via `IsoCamera.clampToFrustum` —
+ * see that method's own doc for why the camera owns the screen axes rather
+ * than this class reconstructing them.
  */
 
 /** Beyond this many metres from the camera a bubble is not worth drawing. */
@@ -27,6 +38,14 @@ const FONT = `bold ${FONT_PX}px "Trebuchet MS", "Segoe UI", sans-serif`;
 const PADDING_X = 40;
 const LINE_HEIGHT = 54;
 const TAIL_HEIGHT = 28;
+
+/** Screen-space breathing room the clamp leaves past a bubble's own edge —
+ *  a phone's bezel/safe-area inset, not just the mathematical frustum edge. */
+const EDGE_MARGIN_PX = 12;
+
+// Scratch for `getWorldPosition` in `updateScreenSize` — read immediately,
+// never stored, so safe to share across every bubble's own call.
+const SCRATCH_ANCHOR = new Vector3();
 
 export class SpeechBubble {
   readonly sprite: Sprite;
@@ -84,16 +103,32 @@ export class SpeechBubble {
    * height makes its {@link FONT_PX} line land exactly on `minTextPx()`. It
    * used to be a flat 30px tall for the *whole* canvas, which left the words
    * themselves around 10px — the smallest text in the game.
+   *
+   * `camera` is also where the bubble gets clamped onto the visible screen —
+   * see the class doc and `IsoCamera.clampToFrustum`. The caller sets
+   * `sprite.position` to the bubble's natural, unclamped world anchor (as
+   * before this fix) immediately before calling this; the clamp is worked
+   * out fresh from that anchor every call, so there is no drift from
+   * clamping an already-clamped position on the next frame.
    */
-  updateScreenSize(worldUnitsPerPixel: number, distanceToCamera: number): void {
+  updateScreenSize(camera: IsoCamera): void {
     if (!this.currentText) return;
+    const anchor = this.sprite.getWorldPosition(SCRATCH_ANCHOR);
+    const distanceToCamera = anchor.distanceTo(camera.focusPoint);
     if (distanceToCamera > BUBBLE_MAX_DISTANCE) {
       this.sprite.visible = false;
       return;
     }
     this.sprite.visible = true;
+    const worldUnitsPerPixel = camera.worldUnitsPerPixel;
     const height = worldUnitsPerPixel * this.canvasHeight * (minTextPx() / FONT_PX);
-    this.sprite.scale.set(height * this.aspect, height, 1);
+    const width = height * this.aspect;
+    this.sprite.scale.set(width, height, 1);
+
+    const clamped = camera.clampToFrustum(anchor, width / 2, height / 2, worldUnitsPerPixel * EDGE_MARGIN_PX);
+    const parent = this.sprite.parent;
+    if (parent) parent.worldToLocal(clamped);
+    this.sprite.position.copy(clamped);
   }
 
   dispose(): void {
