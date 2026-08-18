@@ -25,6 +25,7 @@ import { ANCHORS } from './anchors';
 import { PARK_LAYOUT } from './parkLayout';
 import { clearOfCruiser, onRideExit } from './Scenery';
 import { distanceToRailCorridor, RAIL_CORRIDOR_CLEARANCE } from './train/plan';
+import { isInBridgeFootprint } from './train/bridgeKeepout';
 import { STALL_STANDS } from '../minigames/stallPlacement';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from './Collision';
@@ -553,10 +554,14 @@ function lampFits(
     if (Math.hypot(x - entry.x, z - entry.z) < entry.boundingRadius + ANCHOR_MARGIN) return false;
   }
 
-  // Off the railway. This one number also buys the level-crossing decks and
-  // the station platforms, neither of which exists yet when lamps are built
-  // (see `World`) — the corridor is wider than both.
+  // Off the railway. This one number also buys the station platforms, which
+  // do not exist yet when lamps are built (see `World`) — the corridor is
+  // wider than they are. A bridge's own deck and ramps (issue #116) are a
+  // separate check below: unlike a platform they can run well past the
+  // corridor's own width, along whichever path drew them, so one fixed
+  // radius from the centre line cannot cover them.
   if (distanceToRailCorridor(x, z) < RAIL_CORRIDOR_CLEARANCE) return false;
+  if (isInBridgeFootprint(x, z)) return false;
 
   // And out from under the Sky Cruiser wherever it flies low. The station
   // spurs it now lights (issue #241 spread the plots, so paths follow them

@@ -76,6 +76,7 @@ import { SHORTFALL_TOLERANCE } from '../src/entities/TapNavigator.ts';
 import { TRACK_CLEARANCE } from '../src/world/train/route.ts';
 import { STATION_GAP } from '../src/world/train/fence.ts';
 import { BRIDGE_RISE } from '../src/world/train/clearance.ts';
+import { bridgeHeightAt } from '../src/world/train/bridges.ts';
 import type { InteractZone } from '../src/world/interact.ts';
 
 // ---------------------------------------------------------------- the ratchet
@@ -517,15 +518,7 @@ for (const target of targets) {
 // Built here rather than borrowed from `NpcSystem`, which keeps its copy
 // private. Forty-odd nodes, so the edge validation costs a few milliseconds —
 // and it is the same constructor the game runs, which is the point.
-const graph = quietly(
-  () =>
-    new PoiGraph(collision, (x, z) => {
-      for (const bridge of world.train.bridges) {
-        if (bridge.covers(x, z)) return bridge.heightAt(x, z);
-      }
-      return null;
-    }),
-);
+const graph = quietly(() => new PoiGraph(collision, (x, z) => bridgeHeightAt(world.train.bridges, x, z)));
 
 const dropped = SEEDS.length - graph.nodes.length;
 if (dropped > 0) {

@@ -60,10 +60,17 @@ export function buildRailFence(
    * of the ordinary always-solid wall. See the file header.
    */
   const deckSpanAt = (x: number, z: number): number | null => {
+    // The *tallest* deck over this point, not the first in list order —
+    // two crossings close enough together can have both decks (or a deck
+    // and a neighbour's ramp) genuinely cover the same fence run, and the
+    // seam has to sit under whichever surface is actually highest there.
+    // See `bridges.ts`'s `bridgeHeightAt`, the same fix for the same
+    // reason.
+    let best: number | null = null;
     for (const bridge of bridges) {
-      if (bridge.deckCovers(x, z)) return bridge.deckY;
+      if (bridge.deckCovers(x, z) && (best === null || bridge.deckY > best)) best = bridge.deckY;
     }
-    return null;
+    return best;
   };
 
   // --- 1. the open intervals: platforms only --------------------------------
