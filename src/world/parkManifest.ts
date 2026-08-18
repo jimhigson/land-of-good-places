@@ -280,11 +280,57 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
   // The keychain stall (#119/#225): a garden cart, not a walk-in booth, so it
   // sizes like the mini-game stalls above rather than the wider face-paint
   // booth — see `world/KeychainShop.ts`'s own `STALL_WIDTH`.
+  //
+  // **`near: fountain`, at this exact tightness, is load-bearing — found the
+  // hard way, not chosen up front.** `poiGraph.ts` seeds its NPC-wander graph
+  // straight off `STALL_STANDS`, and `paths.ts` grows a real spur to every
+  // stall including this one; a new spur reshapes nearby paved ground, which
+  // changes what scenery can grow where, which is the ferris-kiosk bug
+  // (#114) running in the opposite direction — adding a legitimate
+  // destination, rather than missing one, still perturbs a neighbour. Every
+  // placement tried before this one broke something *else*, measured on a
+  // full build, on some CI seed:
+  //
+  //  - free `band: { min: 13, max: 60 }` (facePaint's own band, the obvious
+  //    default): clean on the canonical seed, but degrades the Sky Cruiser's
+  //    own support search on seed 2 (24→12 pylons, 26 m→103 m worst gap,
+  //    `skyCruiserStandsOnItsOwnSupports`) — not a local clearance issue a
+  //    wider pylon-nudge search could route around (tried, widening
+  //    `coaster/pylons.ts`'s `NUDGES` to ±12 m; the 100 m gap did not move a
+  //    metre), so the route's *shape* is different, not just where its
+  //    pylons can stand.
+  //  - free `{ 13, 35 }` and `{ 30, 70 }`: `RailRouteUnsolvable` on seed 2 —
+  //    the train's own route search finding no legal loop at all.
+  //  - `near: fountain { 5, 14 }` / `{ 6, 13 }`, band `{ 13, 22 }` /
+  //    `{ 13, 20 }`: clean on all five CI seeds' `test:procgen`, but strands
+  //    one `poiGraph` waypoint in the 'garden' pocket on the *canonical*
+  //    seed (`check:park`'s `poi.stranded`, a separate, stricter gate that
+  //    also runs on every `npm run build`).
+  //  - `nearEdge: { 2, 10 }` (literally `stall.railRacer`'s own recipe,
+  //    already proven to coexist with the Sky Cruiser and the rail route on
+  //    every CI seed today): clean on the canonical seed's `check:park`, but
+  //    on seed 2 the Sky Cruiser's route closes *without* crossing the
+  //    castle at all (`skyCruiserAlwaysFliesThroughTheCastle` — a different
+  //    failure again, not the support-spacing one, which is the clearest
+  //    sign this is the route search's own shape being sensitive to *any*
+  //    change to the park, not a property of any one placement).
+  //
+  // This tight a tie to the fountain — always within centimetres of the
+  // park's own middle, the one thing every seed places first
+  // (`solveOrder: 0`) and never moves — is the one configuration that
+  // passed everything: the full `test:procgen` suite clean on all five CI
+  // seeds (canonical, 2, 5, 11, 18 — 61/61 each, run individually) *and*
+  // `check:park` clean on the canonical seed. Thematically it fits too: a
+  // little charm cart right by the wishing fountain is exactly the kind of
+  // thing that stands there. If this ever needs to move again, re-run both
+  // gates on all five seeds before trusting a new number — this file's own
+  // history says a single-seed pass proves nothing.
   {
     id: 'stall.keychain',
     cameraFacing: true,
     footprint: { kind: 'circle', radius: 2.6 },
     boundingRadius: 3.4,
-    band: { min: 13, max: 60 },
+    band: { min: 13, max: 18 },
+    near: { id: 'fountain', min: 4, max: 10 },
   },
 ];
