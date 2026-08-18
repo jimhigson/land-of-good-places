@@ -216,8 +216,17 @@ export const HOTEL_ORIGIN_X = -600;
  * fails hard, not quietly, because that suite proves exact world positions
  * for the mezzanine's connectors) rather than degrading gracefully, so a
  * drift here is caught at the next build, not found by a child.
+ *
+ * **The trailing `+ 6` is the same trap a second time**, added 18 August
+ * 2026 for issue #280's reception room: it must equal `RECEPTION_ORIGIN_SHIFT`
+ * (`layout.ts`, `= RECEPTION_ROOM_DEPTH / 2`) exactly, for the same
+ * unavoidable reason (the reverse import still cycles). Shifting the origin
+ * without this term moved the room's own outer walls but left the mezzanine,
+ * the stairs and every hand-placed hall fixture standing exactly where they
+ * were — `check:hotel` caught it (a wall sconce hiding standable floor with
+ * nothing fading it) before `check:nav-routes` had to.
  */
-export const HOTEL_LOBBY_Z = 600 + 7;
+export const HOTEL_LOBBY_Z = 600 + 7 + 6;
 export const HOTEL_BREAKFAST_Z = 860;
 export const HOTEL_CORRIDOR_Z = 1120;
 export const HOTEL_SUITE_Z = 1380;
@@ -239,8 +248,24 @@ export const HOTEL_OCEAN_Z = 1900;
 /** The rooms' shared floor level. Terrain out there is ~-16 m; a flat plate
  * at zero keeps every hotel Y a plain human number. */
 export const HOTEL_FLOOR_Y = 0;
-/** Soft play boundary radius inside any hotel room. */
-export const HOTEL_PLAY_RADIUS = 24;
+/**
+ * Soft play boundary radius inside any hotel room.
+ *
+ * **24 → 30, 18 August 2026**, issue #280's reception room: `LOBBY`'s own
+ * far corner (`±halfX, +halfZ` = `±13, 25.4`) is now `√(13² + 25.4²) ≈
+ * 28.5 m` from the room's origin — past the old 24 m boundary entirely, so
+ * the front door itself (dead centre of that far wall, 25.4 m out) sat
+ * outside the circle `Hotel.boundTo` clamps her to. She could never reach
+ * it: every one of `check:hotel`'s front-door portal walks failed, silently
+ * clamped short of the doorway band on every phase and stride, until this
+ * was raised to give the new, deeper `LOBBY` room-real headroom (30 m, ~1.5
+ * m of margin outside the actual 28.5 m corner) rather than the bare
+ * minimum. Every other hotel room's own far corner is well inside even the
+ * old 24 m, so this only ever *widens* their boundary — still nowhere near
+ * `spaces.ts`'s 70 m room-matching radius or the 260 m spacing between
+ * rooms (`HOTEL_GARDEN_Z`'s own doc).
+ */
+export const HOTEL_PLAY_RADIUS = 30;
 
 /** Radius of the interior's soft boundary, mirroring GARDEN_PLAY_RADIUS. */
 export const INTERIOR_PLAY_RADIUS = 46;
