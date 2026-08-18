@@ -45,22 +45,6 @@ export type JumpscareEvent =
     };
 
 /**
- * Timing constants for the cycle.
- *
- * `windowStartSeconds` / `windowEndSeconds` are the one pair of numbers here
- * that actually needed measuring rather than guessing — see the "Where the
- * reflex window came from" block at the bottom of this file, and the
- * Monte-Carlo fairness test in `test/spookyJumpscare.test.ts` that checks
- * they still land in a sane difficulty band whenever either changes.
- *
- * Everything else is a pacing choice made to fit `SpookyHouse.ts`'s
- * `VISIT_SECONDS` (30s): with these numbers the cycle schedule sums to
- * 22.4s–28.5s depending on how the random gaps land (see the same comment
- * block), which is comfortably inside the visit with room for the toy-box
- * play (the eye-pop, the squirt, the candy double-tap) the family already
- * has either side of it.
- */
-/**
  * A plain `number`-typed interface, not `typeof JUMPSCARE_TUNING` off an
  * `as const` object — the fairness test in `test/spookyJumpscare.test.ts`
  * builds a deliberately-harsh variant (`{ ...JUMPSCARE_TUNING,
@@ -77,6 +61,22 @@ export interface JumpscareTuning {
   readonly gapShrinkPerCycle: number;
 }
 
+/**
+ * Timing constants for the cycle.
+ *
+ * `windowStartSeconds` / `windowEndSeconds` are the one pair of numbers here
+ * that actually needed measuring rather than guessing — see the "Where the
+ * reflex window came from" block at the bottom of this file, and the
+ * Monte-Carlo fairness test in `test/spookyJumpscare.test.ts` that checks
+ * they still land in a sane difficulty band whenever either changes.
+ *
+ * Everything else is a pacing choice made to fit `SpookyHouse.ts`'s
+ * `VISIT_SECONDS` (30s): with these numbers the cycle schedule sums to
+ * 22.4s–28.5s depending on how the random gaps land (see the same comment
+ * block), which is comfortably inside the visit with room for the toy-box
+ * play (the eye-pop, the squirt, the candy double-tap) the family already
+ * has either side of it.
+ */
 export const JUMPSCARE_TUNING: JumpscareTuning = {
   /** Issue #293 asked for "about 5-6" jump-scares per visit. 6 fits the visit's time budget with room to spare — see above. */
   cycles: 6,
