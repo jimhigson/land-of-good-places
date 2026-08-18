@@ -726,7 +726,16 @@ const buildingsFaceTheCameraAxis: Invariant = (facts) => {
  *   and is out of its scope: the platform turn is authored geometry, not
  *   part of the axis-aligned trunk network `paths.ts` grows.
  *
- * Measured, not guessed: the canonical seed's longest such stretch is 11.2 m
+ * The closed backbone ring is exempt outright, not just tolerated — see
+ * {@link ringIsATrueCircleRoundTheStatue} below. It is not a lapse in this
+ * invariant's coverage: Jim's own follow-up instruction (issue #269, 18
+ * August 2026) is that the ring is deliberately the one route in the network
+ * allowed to be a genuine circle, off grid axes for its entire circumference,
+ * while everything else — every spur, every interconnect — stays on the
+ * grid this invariant polices.
+ *
+ * Measured, not guessed: the canonical seed's longest such stretch (outside
+ * the now-exempt ring) is 11.2 m
  * (the west station's own platform approach). This is set generously above
  * that measured worst case — the same shape of bound
  * {@link TRESTLE_GAP_TOLERANCE} uses — so what actually trips it is a
@@ -759,6 +768,9 @@ const pathsRunOnGridAxes: Invariant = (facts) => {
   const OFF_AXIS_FRACTION = 0.15;
 
   for (const edge of facts.pathEdges) {
+    // The ring is deliberately a circle, not a grid loop — see this
+    // invariant's own comment and {@link ringIsATrueCircleRoundTheStatue}.
+    if (edge.backbone) continue;
     const points = edge.points;
     let runStart: readonly [number, number] | null = null;
     let runEnd: readonly [number, number] | null = null;
@@ -796,144 +808,79 @@ const pathsRunOnGridAxes: Invariant = (facts) => {
 };
 
 /**
- * How short an on-axis straight run is allowed to sit before
- * {@link buildOnAxisRuns} treats it as an imperceptible clearance nudge
- * rather than a real corner, and merges it into a neighbour.
+ * How far the drawn backbone ring's radius (measured from the plaza/statue
+ * centre `PLAZA` is built around) may vary from its own mean before it stops
+ * counting as "one true circle" (issue #269 follow-up, Jim, 18 August 2026,
+ * superseding round 2's `ringReadsAsAGrid` — a straight *reversal* of that
+ * invariant's own requirement, not a refinement of it): *"one central perfect
+ * circle is ok circling the statue, and then the rest should be on a grid,
+ * with a fairly high degree of connectivity between the closer nodes in the
+ * graph."*
  *
- * `elbowLeg`'s own clearance search occasionally lands a leg a few
- * centimetres short of a blocker, producing a genuine but tiny extra jog —
- * measured on the fixed ring, 0.10-0.11 m on seeds 2 and 5 — which is real
- * geometry but invisible to a player and not the defect this invariant
- * exists to catch. 1 m sits comfortably above every such measured nudge and
- * comfortably below the shortest *meaningful* run this file has ever
- * measured on a paved edge (~1.5 m, a tight elbow's short leg).
+ * Measured, not guessed, fresh on all five procgen seeds after
+ * {@link solveRing} stopped feeding its 32-point, blocker-clearance profile
+ * through axis-alignment: the drawn (sampled-every-~0.5 m Catmull-Rom)
+ * curve's radius from the plaza centre never strays more than **0.27 m**
+ * from its own mean on any seed (0.02 m on the canonical 20260728, 0.27 m on
+ * seed 2, 0.18 m on seed 5, 0.07 m on seed 11, 0.19 m on seed 18) — real
+ * variation, not curve-sampling noise, because the profile still relaxes its
+ * radius slightly per bearing to keep clear of whichever plot sits nearest
+ * at that angle (see {@link solveRing}'s own comment for why a genuinely
+ * fixed radius was tried and reverted). Checked out `paths.ts` as it stood
+ * immediately before this fix (the simplified-then-axis-aligned ~12-vertex
+ * polygon) and re-measured the same way: radius varied by **6.55 m** on the
+ * canonical seed (16.76 m to 29.39 m from plaza centre) and **7.68 m** on
+ * seed 2 (16.42 m to 29.16 m) — more than an order of magnitude past the
+ * true circle's worst case, an axis-aligned polygon being exactly what a
+ * "radius from centre" metric is built to catch. 1 m sits with real
+ * headroom above every true-circle measurement (>3.7x the worst seed) and
+ * far below any polygon's, so what actually trips this is a regression back
+ * toward straight chords, not the profile's own small, legitimate
+ * bearing-to-bearing give.
  */
-const MICRO_RUN_MERGE = 1;
-
-interface OnAxisRun {
-  /** 0/1/2/3 = +x/+z/-x/-z; -1 = off-axis (diagonal) — never merged away. */
-  readonly heading: -1 | 0 | 1 | 2 | 3;
-  readonly length: number;
-}
-
-/**
- * Groups a drawn curve into maximal same-heading straight runs (an off-axis
- * stretch gets its own `heading: -1` run, matching {@link pathsRunOnGridAxes}'s
- * own classification), then merges away any on-axis run shorter than
- * {@link MICRO_RUN_MERGE} — real, but a clearance nudge rather than a corner
- * a player would ever notice (see that constant's own comment) — into
- * whichever neighbour keeps the truest shape: two same-heading neighbours
- * either side of the sliver combine into one continuous run (the sliver was
- * never really a separate straight bit at all); otherwise the sliver is
- * folded into whichever neighbour is longer.
- *
- * Used only by {@link ringReadsAsAGrid} — {@link pathsRunOnGridAxes} above
- * already owns "how long can one diagonal stretch run"; this owns "how often
- * does the ring turn."
- */
-function buildOnAxisRuns(points: readonly (readonly [number, number])[]): OnAxisRun[] {
-  const OFF_AXIS_FRACTION = 0.15;
-  const raw: OnAxisRun[] = [];
-  for (let i = 1; i < points.length; i += 1) {
-    const a = points[i - 1] as readonly [number, number];
-    const b = points[i] as readonly [number, number];
-    const dx = b[0] - a[0];
-    const dz = b[1] - a[1];
-    const hop = Math.hypot(dx, dz);
-    if (hop < 1e-6) continue;
-    const offAxis = Math.min(Math.abs(dx), Math.abs(dz)) / hop > OFF_AXIS_FRACTION;
-    const heading: OnAxisRun['heading'] = offAxis
-      ? -1
-      : Math.abs(dx) > Math.abs(dz)
-        ? dx > 0 ? 0 : 2
-        : dz > 0 ? 1 : 3;
-    const last = raw[raw.length - 1];
-    if (last && last.heading === heading) raw[raw.length - 1] = { heading, length: last.length + hop };
-    else raw.push({ heading, length: hop });
-  }
-  let runs = raw;
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (let i = 0; i < runs.length; i += 1) {
-      const run = runs[i] as OnAxisRun;
-      if (run.heading === -1 || run.length >= MICRO_RUN_MERGE) continue;
-      const prev = runs[i - 1];
-      const next = runs[i + 1];
-      if (prev && next && prev.heading === next.heading && prev.heading !== -1) {
-        runs = [
-          ...runs.slice(0, i - 1),
-          { heading: prev.heading, length: prev.length + run.length + next.length },
-          ...runs.slice(i + 2),
-        ];
-      } else if (prev && (!next || prev.length >= next.length)) {
-        runs = [...runs.slice(0, i - 1), { heading: prev.heading, length: prev.length + run.length }, ...runs.slice(i + 1)];
-      } else if (next) {
-        runs = [...runs.slice(0, i), { heading: next.heading, length: next.length + run.length }, ...runs.slice(i + 2)];
-      } else {
-        continue;
-      }
-      changed = true;
-      break;
-    }
-  }
-  return runs.filter((r) => r.heading !== -1);
-}
+const RING_RADIUS_TOLERANCE = 1;
 
 /**
- * Minimum mean straight-run length {@link ringReadsAsAGrid} requires of the
- * closed backbone loop before it counts as reading like a grid loop rather
- * than a stepped approximation of a circle.
+ * **The ring road is one true circle round the statue, not a grid loop**
+ * (issue #269 follow-up). Round 2 (issue #319) fixed a wiggly axis-aligned
+ * staircase by simplifying it down to ~12 long straight runs and asserted
+ * exactly the opposite of this — `ringReadsAsAGrid`, "reads as a grid loop,
+ * not a stepped approximation of a circle." Jim's next comment on the same
+ * live preview reversed that requirement outright for this one route: *"one
+ * central perfect circle is ok circling the statue, and then the rest should
+ * be on a grid."* `solveRing` (`paths.ts`) now hands its 32-point,
+ * blocker-clearance profile straight to the backbone's Catmull-Rom curve
+ * instead of axis-aligning it at all — this invariant is the direct
+ * replacement for `ringReadsAsAGrid`, checking the *opposite* shape claim:
+ * that the ring's radius from the plaza centre stays close to constant,
+ * rather than that it turns onto grid axes.
  *
- * Measured identically (same {@link buildOnAxisRuns}) on all five procgen
- * seeds, 18 August 2026: the fixed ring's mean run is 12.2-15.9 m across
- * 8-10 runs per loop; the pre-fix staircase (issue #319) measured 5.6-6.1 m
- * across 32-33 runs on the very same five seeds — the ring turned every
- * ~3 m of drawn control-point geometry rather than roughly every 15 m. 8 m
- * sits with real headroom below every fixed-park measurement and real
- * headroom above every broken one.
+ * Scoped to the closed backbone loop (`edge.backbone`) specifically — every
+ * other route in the network (spurs, {@link addInterconnects}'s shortcuts)
+ * is still required to run on grid axes by {@link pathsRunOnGridAxes} above,
+ * unchanged; the statue's ring is the one deliberate exception, not a
+ * loosening of the rule generally.
  */
-const MIN_RING_RUN_LENGTH = 8;
-
-/**
- * **The ring road reads as a grid loop, not a stepped approximation of a
- * circle** (issue #319). Jim, on PR #286's live preview
- * (`/view?camPos=0,60,0&camDir=0,-1,0`, top-down over the plaza): "grid
- * based park layout also a hard failure - this fails both to draw on a grid,
- * and also to draw a circle, it is literally disgusting to look at and the
- * worst of all worlds."
- *
- * {@link pathsRunOnGridAxes} above only bounds how long any *one* continuous
- * diagonal stretch is allowed to run — it says nothing about how often the
- * ring turns, and a ring built from many short axis-aligned elbows (every
- * one individually, genuinely on-axis) passed that check clean while still
- * reading as a wiggly curve: `solveRing` used to feed `toAxisAlignedLoop` 32
- * tightly-spaced bearing samples and axis-align every consecutive pair
- * independently, so nearly every one of those 32 short legs needed its own
- * elbow correction — 64 control-point segments, 59 heading changes around
- * one 191 m loop on the canonical seed, mean straight run 2.98 m. A check on
- * *turn density* is the only kind that can see this class of bug — see
- * CLAUDE.md's "a check can pass without checking anything."
- *
- * Scoped to the closed backbone loop (`edge.backbone`) specifically, not
- * every paved edge: it is the one Jim's screenshot was actually of, and a
- * spur's own short elbow-heavy detour round a tight blocker squeeze
- * (`gridDetour`, `elbowLeg`'s "Z" fallback) is real, bounded, already-tested
- * geometry that this metric was never meant to re-litigate — the *ring*, not
- * spurs, is what should read as one continuous grid loop.
- */
-const ringReadsAsAGrid: Invariant = (facts) => {
+const ringIsATrueCircleRoundTheStatue: Invariant = (facts) => {
   const problems: string[] = [];
+  const plaza = facts.pathNodes.find((node) => node.kind === 'plaza');
+  if (!plaza) {
+    problems.push('no plaza node in the path graph — cannot check the ring circles the statue');
+    return problems;
+  }
   for (const edge of facts.pathEdges) {
     if (!edge.backbone) continue;
-    const runs = buildOnAxisRuns(edge.points);
-    const total = runs.reduce((sum, run) => sum + run.length, 0);
-    const mean = runs.length > 0 ? total / runs.length : 0;
-    if (mean < MIN_RING_RUN_LENGTH) {
+    const radii = edge.points.map(([x, z]) => Math.hypot(x - plaza.x, z - plaza.z));
+    const mean = radii.reduce((sum, r) => sum + r, 0) / radii.length;
+    const maxDeviation = radii.reduce((worst, r) => Math.max(worst, Math.abs(r - mean)), 0);
+    if (maxDeviation > RING_RADIUS_TOLERANCE) {
+      const min = Math.min(...radii);
+      const max = Math.max(...radii);
       problems.push(
-        `${edge.name} turns every ${mean.toFixed(1)} m on average (${runs.length} straight runs over ` +
-          `${total.toFixed(1)} m of ring) — needs a mean straight run of at least ${MIN_RING_RUN_LENGTH} m ` +
-          `to read as a grid loop rather than a stepped approximation of a circle`,
+        `${edge.name}'s radius from the plaza/statue centre (${plaza.x.toFixed(1)}, ${plaza.z.toFixed(1)}) ` +
+          `varies from ${min.toFixed(2)} m to ${max.toFixed(2)} m (${maxDeviation.toFixed(2)} m off its own ` +
+          `${mean.toFixed(2)} m mean) — needs to stay within ${RING_RADIUS_TOLERANCE} m of constant to read as ` +
+          `one true circle round the statue, not a faceted or grid-aligned approximation of one`,
       );
     }
   }
@@ -5736,7 +5683,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no paved path stops anywhere but a destination', noPathEndsNowhere],
   ['every plot faces exactly the camera axis', buildingsFaceTheCameraAxis],
   ['every paved path runs on grid axes', pathsRunOnGridAxes],
-  ['the ring road reads as a grid loop, not a stepped circle', ringReadsAsAGrid],
+  ['the ring road is one true circle round the statue', ringIsATrueCircleRoundTheStatue],
   ['every place a child can be served is a node in the path graph', everyDestinationIsANode],
   [
     'no two close destinations are left with a wildly disproportionate paved detour',

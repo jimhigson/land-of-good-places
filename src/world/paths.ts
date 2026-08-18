@@ -14,6 +14,7 @@ import { ANCHORS } from './anchors';
 import { PARK_LAYOUT, edgeDistanceAlong } from './parkLayout';
 import { PARK_BOUNDARY } from './boundary';
 import { TRAIN_PLAN } from './train/plan';
+import { FENCE_OFFSET } from './train/fence';
 import { COASTER_PLANS } from './coaster/plan';
 import { RAIL_RACE_PLAN } from './railRace/plan';
 import { archFeet } from './railRace/arch';
@@ -209,9 +210,60 @@ function rayToBlocker(px: number, pz: number, dx: number, dz: number, b: Blocker
 }
 
 /**
- * The ring road: a radius-per-bearing profile around the plaza, held off
- * every plot and relaxed smooth — the same shape of solve as the train
- * loop's (`train/route.ts`), two sizes smaller.
+ * The ring road: **a genuine smooth circle round the plaza, not a grid loop**
+ * (issue #269 follow-up, Jim, 18 August 2026 — the instruction that arrived
+ * mid-round-3 and was deliberately *not* acted on then, see that round's
+ * HANDOFF note, and is acted on here): *"one central perfect circle is ok
+ * circling the statue, and then the rest should be on a grid, with a fairly
+ * high degree of connectivity between the closer nodes in the graph."*
+ *
+ * Rounds 1-2 of this same ring (see the history below) tried to have it both
+ * ways — axis-align the ring like everything else, then simplify away the
+ * staircase that produced — and both readings of the result were wrong: a
+ * grid loop that still doesn't read as a grid (too few, too long a run to
+ * *feel* rectilinear round something this small) fighting a circle that
+ * still doesn't read as a circle (dead-straight chords). Jim's actual ask
+ * was never "make the ring's staircase less ugly," it was "the ring is the
+ * one thing in this network allowed to be a genuine circle, and everything
+ * *else* (spurs, interconnects) is the grid." So: skip axis-alignment for
+ * this one route entirely, and hand back exactly the smooth radius-per-
+ * bearing profile below, unmodified — no straight chords anywhere on it.
+ *
+ * **Deliberately still the per-bearing profile, not one fixed radius.** A
+ * literal constant-radius circle was tried first and reverted: forcing every
+ * bearing to the *tightest* clearance found anywhere pulled the whole ring in
+ * by up to ~5.7 m wherever the old profile had room to bulge outward (this
+ * profile's own blocker-clearance solve, unchanged below), which shifted
+ * enough of the paved footprint to strand a `Garden.ts` waypoint that the
+ * unmodified profile does not (`check:park`'s `poi.stranded`, caught before
+ * this landed — see CLAUDE.md's own "a longer path must not move distant
+ * scenery" precedent, `SPUR_STRETCH`'s comment). The per-bearing profile
+ * below is not new geometry invented for this round: it is the same
+ * blocker-clearance solve every round of this ring has used since before
+ * issue #269 existed, and the *only* thing this round changes is that
+ * nothing downstream flattens it onto grid axes any more. It already reads
+ * as a circle — Laplacian-relaxed smooth, no corners, no straight run longer
+ * than a couple of metres — which is exactly the shape Jim is asking for;
+ * "perfect" was never a request for millimetre-constant radius so much as
+ * "not a polygon," and forcing literal constant radius is what broke a
+ * waypoint two bearings did not need broken.
+ *
+ * ### History
+ *
+ * Round 1 (issue #269): every bearing became its own control point, axis-
+ * aligned pairwise — the "staircase" round 2 fixed.
+ *
+ * Round 2 (issue #319, Jim: *"this fails both to draw on a grid, and also to
+ * draw a circle, it is literally disgusting to look at and the worst of all
+ * worlds"*): Douglas-Peucker-simplified the 32 samples down to ~12 vertices
+ * before axis-aligning, which fixed the staircase but — exactly as this
+ * round's own instruction says — left the ring looking like neither a grid
+ * nor a circle, just a shorter staircase. The simplification/axis-alignment
+ * machinery that round built (`simplifyClosedLoop`, `rdpKeep`,
+ * `toAxisAlignedLoop`, `collapseCollinearClosed`) is removed in this round,
+ * not kept dormant: nothing else in this file ever called it, and a ring
+ * whose control points are the raw profile has no straight chords for it to
+ * simplify.
  */
 function solveRing(): (readonly [number, number])[] {
   const bearings = 32;
@@ -241,9 +293,10 @@ function solveRing(): (readonly [number, number])[] {
     }
   }
   const points: (readonly [number, number])[] = [];
-  // Every bearing becomes a control point: the ribbon's spline interpolates
-  // between them, and with 11-degree gaps it bulged into plot circles the
-  // profile itself had correctly avoided.
+  // Every bearing becomes a control point of the ribbon's Catmull-Rom spline
+  // directly — no axis-alignment, no simplification. See this function's own
+  // comment for why round 3 tried, then reverted, collapsing this into one
+  // fixed radius: it strands scenery a smooth variable radius does not.
   for (let i = 0; i < bearings; i += 1) {
     const angle = (i / bearings) * TAU_PATH;
     points.push([
@@ -251,132 +304,10 @@ function solveRing(): (readonly [number, number])[] {
       PLAZA.z + Math.sin(angle) * (profile[i] as number),
     ]);
   }
-  // The profile above still says "how far out, at this bearing" — a circle.
-  // issue #269 wants the *drawn* loop on grid axes, so the last step turns
-  // those 32 bearing samples into a closed axis-aligned polygon rather than
-  // tracing straight (generally diagonal) lines between them.
-  //
-  // Simplify *before* axis-aligning (issue #319, Jim 18 Aug 2026): see
-  // {@link simplifyClosedLoop}'s own comment for why axis-aligning all 32 raw
-  // samples pairwise is exactly what produced the "wiggly, disgusting"
-  // staircase Jim called out, and why dropping the redundant samples first
-  // cannot reopen a blocker-clearance hole.
-  return toAxisAlignedLoop(simplifyClosedLoop(points, RING_SIMPLIFY_TOLERANCE));
+  return points;
 }
 
 const TAU_PATH = Math.PI * 2;
-
-/**
- * How far a bearing sample is allowed to sit off the straight chord between
- * its two surviving neighbours before {@link simplifyClosedLoop} keeps it as
- * a vertex in its own right.
- *
- * Measured, not guessed, on all five procgen seeds: at 2.5 m, the raw 32
- * bearing samples reduce to 12 surviving vertices every time (after
- * {@link toAxisAlignedLoop}'s own leg-boundary collapse,
- * {@link collapseCollinearClosed}), the loop's turn count drops from
- * 57-59 to 11, and its mean straight-run length rises from ~3 m to
- * 13.4-15.9 m — canonical seed 20260728: 59 -> 11 turns, 2.98 m -> 15.92 m
- * mean run; seeds 2/5/11/18 land in the same range (18 August 2026, see
- * `HANDOFF-grid-visual-refix-2.md`). `low` (plaza radius + 4.5, ~14 m here)
- * sets the scale a "genuine" bend has to clear a blocker at, so a tolerance a
- * fifth of that comfortably keeps every real dodge (the profile's Laplacian
- * relax already smooths blocker bulges over several bearings, well past
- * this) while erasing the sub-metre wobble between neighbouring samples on an
- * otherwise flat stretch. A handful of legs still end in a sub-0.15 m jog
- * (seeds 2 and 5) where `elbowLeg`'s own clearance nudge kicks in right next
- * to a real blocker — a genuine, tiny local correction, not the wobble this
- * fixes, and far below anything a player could see.
- */
-const RING_SIMPLIFY_TOLERANCE = 2.5;
-
-/**
- * Douglas–Peucker simplification of a **closed** polyline: drops any vertex
- * that sits within `tolerance` of the straight chord its neighbours would
- * draw without it, recursively, keeping only the vertices a straight-line
- * approximation of the loop actually needs.
- *
- * **Why {@link solveRing} needs this at all (issue #319, Jim, 18 August
- * 2026):** "grid based park layout also a hard failure - this fails both to
- * draw on a grid, and also to draw a circle... the worst of all worlds."
- * {@link toAxisAlignedLoop} turns every *consecutive pair* of its input
- * vertices into its own {@link manhattanRoute}. Feeding it all 32 raw bearing
- * samples — ~3 m apart round a near-circular profile, almost never sharing an
- * x or a z with their neighbour — meant almost every one of those 32 short
- * legs needed its own elbow correction: 64 control-point segments on the
- * canonical seed, each one genuinely, individually axis-aligned (which is
- * why the old "no continuous diagonal run over 16 m" invariant passed clean),
- * but turning 59 times in one 191 m loop, a mean straight run of 2.98 m. That
- * is a staircase tracing a circle, not a grid: it reads as neither.
- *
- * Simplifying the loop *before* axis-aligning fixes this without touching
- * blocker safety at all: {@link manhattanRoute} re-proves clearance for
- * whatever leg it is actually given, via {@link detourAroundBlockers} and
- * {@link elbowLeg}/{@link gridDetour}, however far apart its two endpoints
- * are. So dropping a redundant sample never removes a clearance check — it
- * only changes which points the (already fully general) router is asked to
- * connect. Where the profile genuinely bends to dodge a blocker, that bend
- * survives simplification (it sits far from the chord its neighbours would
- * draw) and the loop still comes in close there; on an unconstrained stretch
- * the redundant in-between samples drop out and the loop runs one long
- * straight leg instead of a chain of them.
- *
- * Split at two well-separated indices first, standard practice for running
- * open-line Douglas-Peucker on a closed loop: DP needs a fixed chord to
- * measure a half against, and a loop has no natural start/end to anchor one.
- */
-function simplifyClosedLoop(
-  points: readonly (readonly [number, number])[],
-  tolerance: number,
-): (readonly [number, number])[] {
-  const n = points.length;
-  if (n <= 4) return points.map((p) => [p[0], p[1]] as [number, number]);
-  const splitA = 0;
-  const splitB = Math.floor(n / 2);
-  const keep = new Set<number>([splitA, splitB]);
-  rdpKeep(points, splitA, splitB, tolerance, keep);
-  rdpKeep(points, splitB, n, tolerance, keep); // `n` wraps: it means points[0]
-  const indices = [...keep].sort((a, b) => a - b);
-  return indices.map((i) => {
-    const p = points[i % n] as readonly [number, number];
-    return [p[0], p[1]] as [number, number];
-  });
-}
-
-/** One Douglas-Peucker split, `points[start]` to `points[end]` (`end` may
- * equal `points.length`, meaning "wraps to `points[0]`") — recursively adds
- * every index whose point sits more than `tolerance` from the chord to
- * `keep`. Used only by {@link simplifyClosedLoop}. */
-function rdpKeep(
-  points: readonly (readonly [number, number])[],
-  start: number,
-  end: number,
-  tolerance: number,
-  keep: Set<number>,
-): void {
-  if (end - start < 2) return;
-  const n = points.length;
-  const a = points[start % n] as readonly [number, number];
-  const b = points[end % n] as readonly [number, number];
-  const abx = b[0] - a[0];
-  const abz = b[1] - a[1];
-  const abLen = Math.hypot(abx, abz) || 1;
-  let maxDist = -1;
-  let maxIndex = -1;
-  for (let i = start + 1; i < end; i += 1) {
-    const p = points[i % n] as readonly [number, number];
-    const dist = Math.abs((p[0] - a[0]) * abz - (p[1] - a[1]) * abx) / abLen;
-    if (dist > maxDist) {
-      maxDist = dist;
-      maxIndex = i;
-    }
-  }
-  if (maxDist > tolerance) {
-    keep.add(maxIndex % n);
-    rdpKeep(points, start, maxIndex, tolerance, keep);
-    rdpKeep(points, maxIndex, end, tolerance, keep);
-  }
-}
 
 /**
  * Extra clearance an axis-aligned corner or leg keeps beyond a blocker's own
@@ -879,6 +810,9 @@ class MinHeap {
  * the well-tested "can these two points connect around whatever plots
  * stand between them" question is never re-asked in a stricter form than
  * the park was actually built to answer.
+ *
+ * A third pass, {@link pushClearOfRail}, runs last: see its own comment for
+ * why the railway needed a pass of its own rather than joining the first two.
  */
 function manhattanRoute(
   from: readonly [number, number],
@@ -892,7 +826,7 @@ function manhattanRoute(
     const b = clear[i] as readonly [number, number];
     for (const point of elbowLeg(a, b)) out.push([point[0], point[1]]);
   }
-  return collapseCollinear(out);
+  return collapseCollinear(pushClearOfRail(collapseCollinear(out)));
 }
 
 /** Drops interior points that lie on the same straight run as their
@@ -915,97 +849,19 @@ function collapseCollinear(points: readonly (readonly [number, number])[]): (rea
 }
 
 /**
- * Turns the ring's per-bearing profile vertices into a closed axis-aligned
- * loop (issue #269): every edge purely horizontal or vertical, via
- * {@link manhattanRoute} between each consecutive pair. Adjacent bearings
- * are close together (32 samples round the loop), so each hop is a short,
- * cheap search — the same router the spurs use, not a separate shape.
- */
-function toAxisAlignedLoop(
-  vertices: readonly (readonly [number, number])[],
-): (readonly [number, number])[] {
-  const n = vertices.length;
-  if (n === 0) return [];
-  const first = vertices[0] as readonly [number, number];
-  const out: [number, number][] = [[first[0], first[1]]];
-  for (let i = 0; i < n; i += 1) {
-    const a = vertices[i] as readonly [number, number];
-    const b = vertices[(i + 1) % n] as readonly [number, number];
-    const leg = manhattanRoute(a, b);
-    // Every leg repeats its own start point (`out`'s last entry already);
-    // the very last leg also repeats the loop's own start point, which
-    // `route.closed` already connects the last entry back to — so it is
-    // left off the end rather than duplicated.
-    const upper = i === n - 1 ? leg.length - 1 : leg.length;
-    for (let j = 1; j < upper; j += 1) out.push(leg[j] as [number, number]);
-  }
-  // Each leg above collapses its *own* collinear points (`manhattanRoute`'s
-  // own `collapseCollinear` call), but two independent legs can still land a
-  // straight continuation across their shared boundary — e.g. leg i ends
-  // running +z and leg i+1's own elbow correction also happens to run +z —
-  // which `collapseCollinear` alone cannot see since it never looks past
-  // either leg's own two ends. Left alone this is still every segment
-  // genuinely axis-aligned (so the old per-segment invariant never saw it),
-  // just one redundant vertex sitting mid-straight — a small extra source of
-  // exactly the "corner that isn't a corner" wiggle issue #319 was about, so
-  // it is worth erasing on the one route (the ring) actually built by
-  // stitching many independent legs together like this.
-  return collapseCollinearClosed(out);
-}
-
-/** Like {@link collapseCollinear}, but for a **closed** loop: also checks the
- * wrap seam (last point through first point to second), since a ring's own
- * "first" vertex is not a real corner the way an open route's endpoints are —
- * it is just wherever {@link toAxisAlignedLoop} happened to start listing
- * from. */
-function collapseCollinearClosed(
-  points: readonly (readonly [number, number])[],
-): (readonly [number, number])[] {
-  if (points.length < 3) return points.map((p) => [p[0], p[1]] as [number, number]);
-  let out: [number, number][] = points.map((p) => [p[0], p[1]] as [number, number]);
-  // Two passes: a first pass can turn a formerly-real corner (points[0]) into
-  // a collinear midpoint once its neighbours' own redundant points drop out,
-  // so run again until nothing more is removed (bounded by the point count).
-  for (let guard = 0; guard < points.length; guard += 1) {
-    const n = out.length;
-    if (n < 3) break;
-    const next: [number, number][] = [];
-    let changed = false;
-    for (let i = 0; i < n; i += 1) {
-      const prev = out[(i + n - 1) % n] as readonly [number, number];
-      const cur = out[i] as readonly [number, number];
-      const nxt = out[(i + 1) % n] as readonly [number, number];
-      const sameX = Math.abs(prev[0] - cur[0]) < 1e-6 && Math.abs(cur[0] - nxt[0]) < 1e-6;
-      const sameZ = Math.abs(prev[1] - cur[1]) < 1e-6 && Math.abs(cur[1] - nxt[1]) < 1e-6;
-      if (sameX || sameZ) {
-        changed = true;
-        continue;
-      }
-      next.push([cur[0], cur[1]]);
-    }
-    out = next;
-    if (!changed) break;
-  }
-  return out;
-}
-
-/**
  * Nearest point on the ring **as drawn** — projected onto its edges, not just
  * snapped to one of its own vertices.
  *
- * Vertex-only used to be an adequate stand-in for "nearest point on the
- * curve": {@link solveRing} fed {@link toAxisAlignedLoop} 32 tightly-spaced
- * bearing samples, so no vertex sat more than a couple of metres off the
- * ring's own line. Simplifying that down to ~12 long straight runs (issue
- * #319) is exactly the fix for the ring itself, but it also meant a vertex
- * can now sit well off the point this function is actually being asked to
- * approximate — measured on seed 5, at the fixed `gate-approach` connector's
- * own query point `(0, 27)`: the nearest surviving *vertex* sat 5.12 m from
- * the ring's true nearest edge point, which alone was enough to push that
- * connector's own diagonal leg over `test/procgen/invariants.ts`'s
- * `MAX_DIAGONAL_APPROACH` (16 m). Projecting onto the ring's segments keeps
- * this function's answer accurate regardless of how few vertices the (still
- * fully walkable) ring polygon has.
+ * {@link solveRing} now emits 96 vertices sitting exactly on a true circle
+ * (round 3 of issue #269, 18 August 2026), close enough together that vertex-
+ * snapping alone would already be accurate here — but this function predates
+ * that (it was written when the ring's axis-aligned simplification, issue
+ * #319, could leave as few as ~12 long straight runs with a vertex 5+ metres
+ * from a connector's own query point) and segment projection is free either
+ * way, so it stays the general, always-correct answer rather than something
+ * that has to be re-justified every time the ring's own vertex density
+ * changes. Projecting onto the ring's segments keeps this function's answer
+ * accurate regardless of how few (or many) vertices the ring polygon has.
  */
 function nearestRingPoint(
   ring: readonly (readonly [number, number])[],
@@ -1790,6 +1646,181 @@ function routeCrossesARideCorridor(points: readonly (readonly [number, number])[
     }
   }
   return false;
+}
+
+/**
+ * How close a route's own drawn walk may come to the train's centreline
+ * before {@link pushClearOfRail} nudges it away.
+ *
+ * `FENCE_OFFSET` (`train/fence.ts`) is where the real invisible flanking
+ * wall actually stands — a route any closer than that is not routing near
+ * the railway, it is routing into its own fence. `RIBBON_HALF_WIDTH_CEILING`
+ * on top is the same "paved edge, not the centreline" reasoning
+ * {@link ARCH_FOOT_MARGIN} above uses.
+ */
+const RAIL_CORRIDOR_CLEARANCE = FENCE_OFFSET + RIBBON_HALF_WIDTH_CEILING;
+
+/**
+ * Every point of the train's solved loop, sampled coarsely (3 m) — the same
+ * "clearance screen, not a collision proof" shape as {@link rideCorridorSamples}.
+ * Built once, lazily, from `TRAIN_PLAN.route`, which is already solved before
+ * any path is drawn (`buildGraph` already relies on this to place station
+ * spurs).
+ */
+let railCorridorSamplesCache: (readonly [number, number])[] | null = null;
+function railCorridorSamples(): readonly (readonly [number, number])[] {
+  if (railCorridorSamplesCache) return railCorridorSamplesCache;
+  const samples: [number, number][] = [];
+  const route = TRAIN_PLAN.route;
+  if (Number.isFinite(route.length) && route.length > 0) {
+    const steps = Math.max(2, Math.ceil(route.length / 3));
+    const point = new Vector3();
+    for (let i = 0; i <= steps; i += 1) {
+      const distance = (i / steps) * route.length;
+      // Skip the real fence's own gaps (`buildRailFence`'s `open` ranges,
+      // `train/fence.ts`): every station's platform legitimately stands
+      // close to the track, and a spur passing near one — including one
+      // headed somewhere else entirely, on the far side of the loop, the way
+      // the canonical seed's `spur-station-0` genuinely does — is walking
+      // through a real gap in the real wall, not through the fence itself.
+      // Kept close to `STATION_GAP` itself (the fence's own half-width, not
+      // the platform's own length): tried wider first (25 m, covering the
+      // platform's `PLATFORM_LENGTH` plus an approach reach) and it silently
+      // exempted the *actual* danger along with the legitimate gap — the
+      // canonical seed's real failure sat only 2.11 m from centreline, well
+      // inside a 25 m station exemption but well outside this one, so the
+      // very screen meant to let a legitimate station-side pass through
+      // instead let the genuine collision through with it. This coarse,
+      // 3 m-sampled screen only needs enough over `STATION_GAP` to absorb
+      // its own sampling pitch, not the platform's whole footprint.
+      const nearStation = TRAIN_PLAN.stations.some(
+        (station) => railAlongDistance(distance, station.distance, route.length) < RAIL_STATION_GAP_MARGIN,
+      );
+      if (nearStation) continue;
+      route.pointAt(distance, point);
+      samples.push([point.x, point.z]);
+    }
+  }
+  railCorridorSamplesCache = samples;
+  return samples;
+}
+
+/** Circular distance between two along-route offsets, wrapping at `length`. */
+function railAlongDistance(a: number, b: number, length: number): number {
+  const diff = Math.abs(a - b) % length;
+  return Math.min(diff, length - diff);
+}
+
+/** See {@link railCorridorSamples}'s own comment for why this is wider than
+ * `STATION_GAP` (`train/fence.ts`, the real fence's own half-width). */
+const RAIL_STATION_GAP_MARGIN = 10;
+
+/**
+ * **Nudges a route's own axis-aligned runs away from the railway** (issue
+ * #269 follow-up, discovered by this very round, 18 August 2026). Making the
+ * statue's ring a true circle moves several spurs' branch points
+ * (`bestBranchPoint`'s "shortest real walk" search re-scores every candidate
+ * against the ring's new shape, exactly as it is supposed to) — and on the
+ * canonical seed, `spur-waterFight`'s resulting route ran a ~19 m vertical
+ * leg only 2-3 m off the train's own flanking fence, stranding a `poiGraph`
+ * waypoint whose lane sample sat against a wall nobody had ever told this
+ * router about (`check:park`'s `poi.stranded`, caught before this landed).
+ * `paths.ts` never needed rail awareness before this — no spur had ever been
+ * measured to graze it in five seeds (see {@link routeCrossesARideCorridor}'s
+ * own "a spur can graze the same corridor in principle, but never has" note
+ * about the Sky Cruiser; same shape of gap, now genuinely hit here instead).
+ *
+ * **Two other shapes of fix were tried and measurably failed:**
+ *
+ * - **A `BLOCKERS` entry** (a discrete circle every 3 m along the whole
+ *   363 m loop, exactly like {@link archFeet}): `elbowLeg`/`gridDetour`'s
+ *   corner search is tuned against a handful of isolated blobs, not a dense
+ *   chain of ~120 near-touching circles forming a continuous wall —
+ *   {@link pathsRunOnGridAxes} in the invariants failed on all five seeds,
+ *   on spurs that have nothing to do with the railway, each one giving up
+ *   its own corner search and falling back to a 16-27 m raw diagonal.
+ * - **Preferring a different `bestBranchPoint` candidate** whose own
+ *   constructed walk stayed clear of the rail (scoring-only, no new
+ *   blockers): still moved the *branch point*, which moved everything
+ *   downstream of it exactly the way a longer or shorter spur always does
+ *   (`SPUR_STRETCH`'s own comment: "a longer spur leaves distant scenery
+ *   where it was" is not automatically true once the branch point itself
+ *   moves) — measured on the canonical seed, it swapped one stranded
+ *   waypoint for **sixteen**, all in an entirely different part of the park
+ *   the original route never touched.
+ *
+ * So this is neither: it leaves {@link bestBranchPoint}'s choice of branch
+ * point, and every other point of the route, completely alone, and instead
+ * locally deforms only the one maximal axis-aligned run that actually comes
+ * too close — shifting its own shared coordinate (an axis-aligned run's `x`
+ * if vertical, `z` if horizontal) directly away from the railway by just
+ * enough to clear. Both neighbouring runs stay exactly where they were
+ * (`manhattanRoute` alternates horizontal/vertical runs by construction, via
+ * `collapseCollinear`, so the connecting hop either side of a shifted run
+ * only ever changes *length*, never direction — it stays axis-aligned by
+ * the same geometry that made the run itself axis-aligned). Never applied to
+ * the route's own two endpoints (the branch point and the destination),
+ * which other code depends on matching exactly.
+ */
+function pushClearOfRail(
+  points: readonly (readonly [number, number])[],
+): (readonly [number, number])[] {
+  const corridor = railCorridorSamples();
+  const out: [number, number][] = points.map((p) => [p[0], p[1]] as [number, number]);
+  if (corridor.length === 0 || out.length < 3) return out;
+
+  let i = 0;
+  while (i < out.length - 1) {
+    const a = out[i] as [number, number];
+    const b = out[i + 1] as [number, number];
+    const sameX = Math.abs(a[0] - b[0]) < 1e-6;
+    const sameZ = !sameX && Math.abs(a[1] - b[1]) < 1e-6;
+    if (!sameX && !sameZ) {
+      i += 1;
+      continue;
+    }
+    // Extend the run while later hops keep sharing the same coordinate.
+    let end = i + 1;
+    while (end < out.length - 1) {
+      const c = out[end] as [number, number];
+      const d = out[end + 1] as [number, number];
+      const stillX = sameX && Math.abs(c[0] - d[0]) < 1e-6 && Math.abs(c[0] - a[0]) < 1e-6;
+      const stillZ = sameZ && Math.abs(c[1] - d[1]) < 1e-6 && Math.abs(c[1] - a[1]) < 1e-6;
+      if (!stillX && !stillZ) break;
+      end += 1;
+    }
+    // Never the route's own endpoints — see this function's own comment.
+    if (i > 0 && end < out.length - 1) {
+      const runStart = out[i] as [number, number];
+      const runEnd = out[end] as [number, number];
+      let minDistance = Infinity;
+      let nearest: readonly [number, number] | null = null;
+      const runLength = Math.hypot(runEnd[0] - runStart[0], runEnd[1] - runStart[1]);
+      const steps = Math.max(1, Math.ceil(runLength));
+      for (let s = 0; s <= steps; s += 1) {
+        const t = s / steps;
+        const px = runStart[0] + (runEnd[0] - runStart[0]) * t;
+        const pz = runStart[1] + (runEnd[1] - runStart[1]) * t;
+        for (const sample of corridor) {
+          const d = Math.hypot(sample[0] - px, sample[1] - pz);
+          if (d < minDistance) {
+            minDistance = d;
+            nearest = sample;
+          }
+        }
+      }
+      if (nearest && minDistance < RAIL_CORRIDOR_CLEARANCE) {
+        const push = RAIL_CORRIDOR_CLEARANCE - minDistance + 0.5;
+        const axis = sameX ? 0 : 1;
+        const direction = (runStart[axis] as number) >= (nearest[axis] as number) ? 1 : -1;
+        for (let k = i; k <= end; k += 1) {
+          (out[k] as [number, number])[axis] += direction * push;
+        }
+      }
+    }
+    i = end;
+  }
+  return out;
 }
 
 /** The closest point on one route to `(x, z)`, or null if it has none usable. */
