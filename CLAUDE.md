@@ -441,6 +441,49 @@ progress — it is debt nobody can see accumulating. Five minutes of the
 human's time to unblock QA costs far less than one more feature shipping
 unseen.
 
+## Send the screenshot, don't just describe it
+
+18 August, Jim's own ruling: **it is cheaper for him to look at a screenshot
+than to open the app**, most of the time. A QA verdict of "the desk is
+clearly visible from the entrance" is a claim; the frame it was read off is
+the evidence, and the evidence is worth more than the claim it supports —
+this is the same principle as "quote the count off the screen, never the one
+you expected" applied to pixels instead of numbers.
+
+So: **whenever a QA pass (or any agent) produces a screenshot of something a
+human would judge by eye — layout, clearance, a UI element, "does this look
+right" — send the actual image to the Overseer, who relays it to Jim.** This
+is not limited to QA sign-off: any new visual feature, reported up, should
+come with a screenshot rather than a paragraph describing one. Text is for
+what a screenshot can't show (measurements, verdicts, what was clicked);
+the screenshot is for what it can.
+
+- **QA/engineer agents**: when you capture a screenshot worth a human's
+  judgement, hand it to whoever you report to (the Overseer, if you were
+  dispatched by one) rather than only describing its contents in your
+  summary. Keep describing what you saw in words too — the image is in
+  addition to the verdict, not instead of it.
+- **The Overseer**: relay every such screenshot to Jim promptly, don't hold
+  a batch waiting for "the full picture" — a screenshot from twenty minutes
+  ago that's still sitting in a subagent's output is exactly the kind of
+  work that reads as progress but isn't, until it's actually in front of
+  him.
+- **Backfill, don't just apply forwards.** If a QA pass already ran and took
+  real screenshots before this rule existed, don't let that evidence stay
+  buried in a subagent transcript — send it retroactively.
+
+**And it belongs on the issue, not only in chat.** Jim's own follow-up rule,
+18 August: any design feedback he gives — verbally, mid-conversation — gets
+posted onto the relevant GitHub issue or PR as a comment, and any screenshot
+that informed it (or that a QA/engineer pass produced afterward) gets
+attached there too. A conversation is not a record; the issue thread is.
+Chat is where the discussion happens, but the next agent to pick up that
+issue reads the issue, not this transcript — feedback that only exists here
+is invisible to them. GitHub issue comments don't take a raw local file
+path, so host images by committing them to a dedicated orphan branch (e.g.
+`qa-screenshots`) and linking the `raw.githubusercontent.com` URL — keeps
+binary screenshots out of `main`'s and every feature branch's own history.
+
 ## PRs
 
 Raise with `gh pr create`. **Do not merge your own work** — every PR gets two

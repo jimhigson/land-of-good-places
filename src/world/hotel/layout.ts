@@ -8,6 +8,7 @@ import {
   HOTEL_OCEAN_Z,
   HOTEL_ORIGIN_X,
   HOTEL_SUITE_Z,
+  PLAYER_RADIUS,
 } from '../../core/constants';
 import { PALETTE } from '../../core/palette';
 import {
@@ -725,6 +726,115 @@ export function clearFloorAround(room: HotelRoom, x: number, z: number): ClearRe
   return { minX, maxX, minZ, maxZ };
 }
 
+/**
+ * A doorway's clearance zone, in the room's own local metres — an
+ * axis-aligned rectangle a piece of furniture must never overlap. The same
+ * shape as {@link ClearRect}; kept as its own name so a reader sees at the
+ * call site that this rectangle is about a *doorway*, not a wall.
+ */
+export type DoorwayZone = ClearRect;
+
+/**
+ * How far past `clearance` a doorway's zone reaches **into the room**, on top
+ * of the thin band hugging the wall itself.
+ *
+ * Jim, 18 Aug 2026, on `/hotel-suite`: *"is this a joke? … dumb furniture
+ * clearly still in the way … non-functional by any degree."* The lounge
+ * sofa's placement comment claimed a clean 0.28 m margin from the doorway —
+ * true, but only of a zone that reached exactly `clearance` (0.62 m) past the
+ * wall plane. A sofa is 2.6 m deep; parking its *front* edge 0.28 m past that
+ * thin band still put its bulk squarely across most of the doorway's own
+ * width, because nothing had ever asked "is there room to take a stride once
+ * you're actually through" — only "is the wall's own opening clear". A
+ * player-sized probe marched straight through the built doorway (the ground
+ * truth this file's header insists on) got stuck 0.42 m short of the far
+ * side, at the sofa's own edge — `scripts/check-hotel.mts`'s
+ * doorway-crossing probe (`marchCrossing`, over every `doorwayCrossings`)
+ * reproduces exactly that march on every doorway in the hotel now.
+ *
+ * One more player-width, so a body that has just cleared the wall can still
+ * take a full stride before meeting anything solid, not just half of one.
+ */
+export const DOORWAY_THROUGH_DEPTH = PLAYER_RADIUS;
+
+/**
+ * Every doorway a body can walk through in this room — an outer wall's gap
+ * or a partition's own door — widened by `clearance` **along** the wall (so a
+ * body doesn't graze the jamb) and by `clearance + `{@link
+ * DOORWAY_THROUGH_DEPTH} **through** it, into the room on both sides (so a
+ * body has a real stride of clear floor once it's past the wall, not just
+ * the width of the opening itself — see that constant's header).
+ *
+ * **Derived straight from {@link HotelRoom.gaps} and {@link
+ * HotelRoom.partitions}, never re-typed.** Those two fields are already this
+ * room's one description of where its walls have holes in them; a wall or a
+ * partition that moves takes its doorway's clearance zone with it for free,
+ * with nothing here that could go stale the way a hand-copied doorway list
+ * would. `world/hotel/place.ts`'s `isClearOfDoorways` checks every solid
+ * prop's footprint against this list as it goes down, so furniture that
+ * would leave a doorway too narrow — or too shallow — to use is a thrown
+ * error at hotel construction rather than a bug a child finds by walking
+ * into a sofa (issue #273 — CLAUDE.md's "anything that looks solid must be
+ * solid", aimed at the door instead of the wall).
+ *
+ * This is deliberately a **superset** of {@link hotelDoorBands}: that list
+ * exists for the walk-through trigger and the tap-spacing rule, and leaves
+ * out the suite's bedroom-to-hall doorways on purpose (banding them there
+ * trips the bed zones by 0.03 m — a change for its own PR). A sofa does not
+ * care about tap targets; it cares whether a body can get through the gap
+ * *and keep walking*, so every gap counts here.
+ */
+export function doorwayClearanceZones(room: HotelRoom, clearance: number): DoorwayZone[] {
+  const zones: DoorwayZone[] = [];
+  const reach = clearance + DOORWAY_THROUGH_DEPTH;
+
+  for (const side of ['north', 'south', 'east', 'west'] as const) {
+    const gap = room.gaps[side];
+    if (!gap) continue;
+    const [from, to] = gap;
+    if (side === 'north' || side === 'south') {
+      const wallZ = side === 'north' ? -room.halfZ : room.halfZ;
+      zones.push({
+        minX: from - clearance,
+        maxX: to + clearance,
+        minZ: wallZ - reach,
+        maxZ: wallZ + reach,
+      });
+    } else {
+      const wallX = side === 'west' ? -room.halfX : room.halfX;
+      zones.push({
+        minX: wallX - reach,
+        maxX: wallX + reach,
+        minZ: from - clearance,
+        maxZ: to + clearance,
+      });
+    }
+  }
+
+  for (const run of room.partitions ?? []) {
+    const doorHalf = SUITE_DOOR_WIDTH / 2;
+    for (const at of run.doors) {
+      if (run.along === 'x') {
+        zones.push({
+          minX: at - doorHalf - clearance,
+          maxX: at + doorHalf + clearance,
+          minZ: run.at - reach,
+          maxZ: run.at + reach,
+        });
+      } else {
+        zones.push({
+          minX: run.at - reach,
+          maxX: run.at + reach,
+          minZ: at - doorHalf - clearance,
+          maxZ: at + doorHalf + clearance,
+        });
+      }
+    }
+  }
+
+  return zones;
+}
+
 /** How far the lift alcove pokes out of the west wall. */
 export const LIFT_ALCOVE_DEPTH = 3.4;
 
@@ -865,18 +975,298 @@ export const LOBBY_LANDING_SLAB = 0.4;
  * meshes in the artist's handoff.
  */
 export const STAIR_ARC_C = 7.99;
-const STAIR_ARC_Z = -2.5;
+
+/**
+ * How much deeper the entrance foyer grew, 17 August 2026 — the fix to a
+ * fix. Issue #271's own repair removed the lobby's two wall paintings
+ * outright, because every candidate spot on both walls was spoken for:
+ * north by the mezzanine's shadow (unfixable — {@link LOBBY.mezzanine}
+ * reaches the whole width of that wall), west by the lift's own
+ * tap-spacing exclusion (`|z − liftZ| ≥ 5.73`, from `LIFT_ALCOVE_DEPTH`'s
+ * boarding band — `liftZ` was still 0 at the time) squeezed against the
+ * crystal column, the seating group and the café already there. Jim's call:
+ * don't drop the paintings, make room for them.
+ *
+ * **Both halves of the room move; only the foyer's own furniture does.**
+ * `LOBBY.halfZ` grows by this constant and {@link HOTEL_LOBBY_Z}
+ * (`core/constants.ts`) moves by it too — `originZ − halfZ` is the north
+ * wall's world position, and adding the same number to both terms leaves
+ * that subtraction, so the wall the room is *built* with (`Hotel.ts`'s
+ * `buildRoomShell`, which places both outer walls at `±room.halfZ` — a
+ * formula, not a literal) does not move in the world at all. `originZ +
+ * halfZ` (the south wall, the front door) moves by **twice** this constant,
+ * because both terms grew by it.
+ *
+ * **The mezzanine is not a formula, though — it is `LOBBY.mezzanine`'s own
+ * set of literals, `minZ: −12.4` and everything derived from it, and
+ * nothing makes a literal follow a wall that moved out from under it.**
+ * The first cut of this fix left them alone, on the theory that "the north
+ * wall doesn't move" meant "the hall doesn't move" — and shipped a 7 m gap
+ * of genuinely walkable, genuinely mezzanine-shadowed floor between the
+ * built wall and the built mezzanine, standable and *silently unfaded*:
+ * `check:hotel`'s own probe 25 casts a ray at the **built meshes**, not this
+ * arithmetic, and found six spots hidden with nothing fading them, exactly
+ * because the overhang group's real geometry sat 7 m south of where the
+ * fade's own box-model (`mezzanineHidesPoint`, reading `LOBBY.mezzanine`
+ * unchanged) still thought it was. So `LOBBY.mezzanine` and every other
+ * hall fixture keyed to the north wall (the lift, the foyer/hall partition,
+ * the chandelier, the north runner, the west sconce that lit the old arch,
+ * the hall-side crystal column and clusters) carry `− LOBBY_FOYER_GROWTH`
+ * of their own, the same distance the wall moved, so the hall is
+ * *translated*, not left behind: everything that answers to `check:nav-routes`
+ * — the doorway off the statue's footprint, the stairs' own paired connector
+ * clearances — moves as one rigid piece, and that suite is what re-proves
+ * it still holds together at the new position.
+ *
+ * Every **foyer** fixture (south of the partition: the statue, the seating,
+ * the café, the south crystal column, reception, the runner, the door) has
+ * its own *local* z increased by this same constant — which, added to the
+ * origin's own equal shift, lands it at twice this constant further from
+ * the lift, matching how far the door moved. The whole room translates in
+ * two rigid pieces meeting at the (also-moved) partition, rather than being
+ * redesigned — the same pattern `SUITE.halfX`'s bedroom-widening PR used for
+ * its own untouched bedrooms. The two returning paintings are new, not
+ * translated: they hang in the gap this growth actually opens, between the
+ * lift's exclusion line and the relocated seating group.
+ */
+export const LOBBY_FOYER_GROWTH = 7;
+
+/**
+ * Depth of the new reception room the front door now opens directly into,
+ * south of {@link LOBBY_HALFZ_BEFORE_RECEPTION} (defined further down, once
+ * the room's other geometry is in scope — this constant only needs its own
+ * value).
+ *
+ * Jim explicitly authorized growing the floor's footprint rather than
+ * cramming ("Growing the floor's overall footprint to fit is explicitly
+ * authorized... don't cram"). 12 m gives real walking room: `RECEPTION_X/Z`
+ * (`Hotel.ts`) put the desk dead centre, 6 m from both the new partition's
+ * doorway and the front door — comfortably past `DOORWAY_THROUGH_DEPTH` +
+ * `DOORWAY_CLEARANCE` (1.24 m) on both sides (`doorwayClearanceZones`,
+ * `place.ts`), so the desk's own footprint (halfZ 0.45) can never be
+ * flagged as blocking either doorway.
+ *
+ * **Not 9, which `check:hotel`'s own generic walk-through probe caught
+ * live**: it starts every "back out to the park" walk 4 m inside whatever
+ * the front door currently is (`scripts/check-hotel.mts`'s `portals`), and
+ * at depth 9 that fixed 4 m offset landed her almost exactly on the desk's
+ * own south edge (0.05 m clear against a 0.62 m player radius) — she spawned
+ * embedded in the reception desk and the doorway-crossing walk failed on
+ * every phase and stride. 12 m puts that same test point comfortably clear
+ * of the desk (over 1.5 m) regardless of which side of the room a future
+ * change nudges the desk toward.
+ */
+export const RECEPTION_ROOM_DEPTH = 12;
+
+/**
+ * How far the room's own local-coordinate origin moves south to make room
+ * for {@link RECEPTION_ROOM_DEPTH} of new floor **without moving the north
+ * wall** — half the new depth, the same halving `LOBBY_FOYER_GROWTH`'s own
+ * doc explains (shift the origin and the half-extent by the same amount and
+ * the north wall, `originZ − halfZ`, doesn't move at all; the south wall,
+ * `originZ + halfZ`, moves by twice the shift).
+ *
+ * **Every existing local-z coordinate in `LOBBY` needs this subtracted** —
+ * hall-side, foyer-side, and the handful with no `LOBBY_FOYER_GROWTH` term
+ * at all (the two returning `#271` paintings) alike — to stay at the exact
+ * world position it already had, because *all* of that content is now
+ * "north of the new reception partition" from this shift's point of view,
+ * unlike `LOBBY_FOYER_GROWTH` itself (which deliberately moves the foyer
+ * one way and the hall the other).
+ *
+ * **Found live, not guessed**: the first cut of this fix grew `halfZ`
+ * alone, moving the south wall out by `RECEPTION_ROOM_DEPTH` as intended
+ * but also dragging the *north* wall out by the same amount, since
+ * `buildRoomShell` builds both outer walls at `±room.halfZ` — a formula,
+ * exactly the trap `LOBBY_FOYER_GROWTH`'s own doc already names ("the
+ * mezzanine is not a formula... nothing makes a literal follow a wall that
+ * moved out from under it"). That shipped two real bugs, both caught by
+ * `check:hotel` without a browser: (1) 6 of several thousand standable
+ * spots in the new gap between the mezzanine's own fixed box and the
+ * (moved) wall were hidden from the camera by a `dressMezzanine` wall
+ * sconce with nothing fading them — the exact `#271` failure mode, on a
+ * *different* fixture; (2) that sconce, and the seating nook, and the
+ * gallery planters — every hand-placed hall fixture that is a *literal*,
+ * not derived from `plan` — were left standing exactly where they always
+ * were, now floating in open air nowhere near the wall they used to be
+ * flush against. This constant, subtracted everywhere alongside
+ * {@link LOBBY_FOYER_GROWTH}, keeps every one of those fixtures — and the
+ * room's own outer geometry — moving together as what
+ * {@link LOBBY_FOYER_GROWTH}'s own doc calls "one rigid piece," the same
+ * discipline applied a second time.
+ */
+export const RECEPTION_ORIGIN_SHIFT = RECEPTION_ROOM_DEPTH / 2;
+
+const STAIR_ARC_Z = -2.5 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT;
+
+/**
+ * Splits the lobby into the two rooms issue #270 asked for: the **entrance
+ * foyer** south of this line — the front door, reception, the RiPika statue
+ * and the café corner, exactly Eleri's own list at the top of this file — and
+ * the **stairs and lifts hall** north of it, where the imperial staircase, the
+ * mezzanine and the lift alcove stand.
+ *
+ * Jim, 17 August 2026: *"the reception desk is too far from where the player
+ * enters. Rework the layout so the player enters directly into the lobby, then
+ * proceeds onward to a separate room containing the stairs and lifts."* The
+ * desk used to stand at local z −5.2, 17.6 m from the door and beside the
+ * staircase — QA's own *"suggests getting a key near the staircase"* bug from
+ * 7 August, reopened by the same layout. Reception now stands south of this
+ * line, a few strides from the door; nothing north of it is reachable without
+ * first passing through it.
+ *
+ * **Still one `SPACE_HOTEL_LOBBY`.** The suite already turns one space into
+ * four rooms this exact way — an ordinary internal wall
+ * ({@link SuitePartition}) with a doorway in it — so a fifth room reuses that
+ * mechanism rather than inventing new space plumbing (NavGrid, save flags,
+ * portals) for what is, underneath, still a floor a child never leaves.
+ *
+ * See {@link LOBBY_HALL_DOOR_X} for exactly where the doorway sits along
+ * this line — it moved off the promenade axis and then back onto it as the
+ * room's own geometry changed underneath it.
+ *
+ * **Carries `− LOBBY_FOYER_GROWTH`**, same as every other hall fixture keyed
+ * to the north wall — see that constant's own doc. The line itself is still
+ * 5.0 m south of the (translated) hall; it is the wall on both sides of it
+ * that moved.
+ *
+ * **Moved 3.0 m further from the stairs, 18 August 2026** (from a base of 2.0
+ * to 5.0), fixing a real CI failure: `check:hotel`'s doorway-crossing march
+ * (#278) found the two "stair clearance" doors below led a body straight into
+ * the curved flights' own outer-radius flank collider (`Hotel.ts`'s stair
+ * builder, `for (const radius of [flight.innerRadius, flight.outerRadius])`).
+ * That collider's closest point to this wall sits at local
+ * `(STAIR_ARC_C, STAIR_ARC_Z + flight.outerRadius)` — with the *old* base of
+ * 2.0 that point measured only 1.2 m past the wall plane, well inside the
+ * march's own `CROSSING_APPROACH` (1.0 m) before the wall even starts, so a
+ * body approaching the inner stair-clearance door from the foyer collided
+ * with the balustrade before it ever reached the doorway. Measured directly
+ * against the built `CollisionWorld` (not the rule that placed it): the old
+ * base (2.0) left every bearing on both stair-clearance doors blocked; 4.0
+ * already cleared every bearing with margin; 5.0 was chosen for headroom
+ * beyond that minimum, still gives the hall a full `RECEPTION_ROOM_DEPTH`
+ * scale of empty floor before the stairs, and touches nothing else — nothing
+ * but this partition's own `at` reads {@link LOBBY_HALL_Z}.
+ */
+export const LOBBY_HALL_Z = 5.0 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT;
+
+/**
+ * Where the foyer/hall doorway sits along {@link LOBBY_HALL_Z}.
+ *
+ * **On the promenade axis (x = 0), which was not always true.** The first cut
+ * of #270 put a doorway here, square with the statue and the arch beyond, and
+ * `check:nav-routes` found a real bug hiding behind "square with the statue":
+ * the statue's own collision footprint, fattened by a player's own radius,
+ * reached to within about 0.6 m of the (then much closer) partition on that
+ * exact line, leaving a dogleg not much wider than a child. The fix at the
+ * time moved the doorway off-axis instead of re-tuning Eleri's own statue
+ * placement.
+ *
+ * **#271's later foyer growth made that fix obsolete, and put a new one in
+ * its place.** {@link LOBBY_FOYER_GROWTH} pushes the statue and the doorway
+ * 16 m+ apart in world terms — nowhere near the 0.6 m clearance that forced
+ * the move — so this went back to x = 0. But at x = 0 exactly, the *hall*
+ * side of the doorway now grazes the **left curved stair's own outer
+ * balustrade**, which sweeps to within about 0.13 m of x = −3, the old
+ * doorway spot precisely: `check:hotel`'s "walker on the doorway line" probe
+ * (the same one #270's original fix was proven against) is what caught this
+ * one, pushed 0.71 m sideways rather than blocked outright. x = 0 clears both
+ * the statue (by a wide margin now) and both stairs' balustrades (each
+ * curve's own closest approach to the axis is ≈3.1 m) — the one spot that
+ * was ever actually a problem was −3, not 0.
+ */
+export const LOBBY_HALL_DOOR_X = 0;
+
+/**
+ * Where each curved flight's own foot stands, along the partition — the
+ * **second** reason this wall carries more than one doorway.
+ *
+ * `check:nav-routes` found this one after {@link LOBBY_HALL_DOOR_X}: a
+ * flight's floor-level connector anchor (`mezzanineWalkConnectors`'
+ * `CONNECTOR_APPROACH` point, one stride out from the bottom tread) sits at
+ * `±(STAIR_ARC_C + CONNECTOR_APPROACH)`, and the wall — even pushed as far
+ * from the statue as {@link LOBBY_HALL_Z} allows — still fattens, by a
+ * walker's own radius, across that exact point. A blocked anchor is not a
+ * detour, it is a connector with nowhere to start: `findRoute` never climbed
+ * at all, ending every route to the gallery at floor level with the goal
+ * still unreached (`lastRouteReachedGoal` false), which is what the multi-hop
+ * probes in `check:nav-routes` exist to catch.
+ *
+ * So the wall does not run past either flight's own foot — the same
+ * principle as the lift alcove's gap, just for a staircase instead of a car.
+ * A grand staircase's own structure is where a dividing wall stops anyway;
+ * nothing here is holding a door open beside the stairs, the stairs simply
+ * are the opening.
+ *
+ * **A single {@link SUITE_DOOR_WIDTH} gap here is not enough**, and this one
+ * doorway is why: `check:nav-routes`' walked leg (not just its planned route)
+ * still wedged, 0.4 m off the jamb — a wall's own registered half-thickness
+ * plus a walker's radius rounds a doorway's *corner* off by about 0.87 m, and
+ * a route arriving at this doorway on the diagonal (from the foyer, off to
+ * one side, to a point on the far side of the room) clips exactly that
+ * corner rather than passing through the middle the way a square-on suite
+ * doorway is normally crossed. Two doors, `±0.8` either side of the same
+ * centre, give one continuous 4 m opening — plenty of room for a diagonal
+ * crossing to clear both corners — where one alone gives 2.4 m with two
+ * corners already eating most of it.
+ */
+export const LOBBY_HALL_STAIR_CLEARANCE_X = STAIR_ARC_C + CONNECTOR_APPROACH;
+const STAIR_CLEARANCE_DOOR_SPREAD = 0.8;
+
+/**
+ * Where the (old) front door stood before this room grew a reception room of
+ * its own — now the position of the **reception/lobby partition**, the wall
+ * that used to be the room's own south outer wall.
+ *
+ * Jim, 18 August 2026, on PR #280: *"still way too hidden. The desk should be
+ * in a separate ROOM (like the split rooms in the bedroom) and the lobby in
+ * the next room. The desk should be dead centre of this new reception room
+ * prior to the main lobby."* Two rounds of nudging `RECEPTION_X`/`RECEPTION_Z`
+ * inside the one giant foyer never fixed it because the desk was never the
+ * first thing in the room — the statue, the seating and the café all
+ * competed with it for the same open floor. A genuinely separate room fixes
+ * that structurally: nothing else can be sharing the frame, because nothing
+ * else is in the room.
+ *
+ * **Same mechanism the suite bedroom split uses** ({@link SuitePartition}):
+ * an ordinary internal wall with a doorway, inside the one
+ * `SPACE_HOTEL_LOBBY` — not a new room/space/portal. Everything that used to
+ * be "the foyer" (the statue, the seating, the café, both crystal columns,
+ * the hall beyond) keeps its exact local position; only the desk moves, into
+ * the new room this line and {@link RECEPTION_ROOM_DEPTH} carve out south of
+ * it. This constant is exactly the room's old `halfZ`
+ * (`12.4 + LOBBY_FOYER_GROWTH`), named rather than re-typed, so the wall it
+ * places the new partition at can never drift from the position it is
+ * replacing.
+ */
+export const LOBBY_HALFZ_BEFORE_RECEPTION = 12.4 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT;
 
 export const LOBBY: HotelRoom = {
   space: SPACE_HOTEL_LOBBY,
   theme: LOBBY_THEME,
   originX: HOTEL_ORIGIN_X,
   originZ: HOTEL_LOBBY_Z,
+  // Held at 13 deliberately — issue #281's bathroom fix first tried widening
+  // this, which moved the west wall (everything here is measured from
+  // `±halfX`) far enough that the west window's own "Look out" stand-spot
+  // search (pinned to this wall by `zoneAt: -6.6`) landed squarely on the
+  // crystal column at local (-11.9, -6.6) from every candidate depth and
+  // lateral offset it tried — `check:hotel` found the zone offering "Look
+  // out" from nowhere a child could stand. The bathroom's own east-west room
+  // comes from widening the *nook itself* into already-empty floor instead
+  // (its west wall moved from local x = 9.4 to 7.0 — nothing else in this
+  // room occupies x > 7 at z ≥ 9), which touches none of the room's outer
+  // walls at all.
   halfX: 13,
   // Deepened from 10 by exactly the gallery's own 4.8 m, so the open floor of
   // the lobby is the room it always was and the mezzanine is *added* space
-  // rather than space taken off a child.
-  halfZ: 12.4,
+  // rather than space taken off a child; deepened again by
+  // {@link LOBBY_FOYER_GROWTH} for the entrance foyer's own paintings (see
+  // that constant's doc for why the south wall actually moves by twice
+  // this), and deepened once more by {@link RECEPTION_ROOM_DEPTH} for the
+  // new reception room the front door now opens into — see
+  // {@link LOBBY_HALFZ_BEFORE_RECEPTION}'s own doc.
+  halfZ: LOBBY_HALFZ_BEFORE_RECEPTION + RECEPTION_ROOM_DEPTH,
   // The imperial composition stands 5.44 m to the gallery and a child on it
   // wants `ARCH_CLEAR` of air over her head, so the two far walls rise to
   // 8.9 — over the asset's `LOBBY_MIN_WALL_HEIGHT` (8.81), which
@@ -884,8 +1274,18 @@ export const LOBBY: HotelRoom = {
   // `nearWallHeight` for why the two the camera looks through are not.
   wallHeight: 8.9,
   nearWallHeight: 3.4,
-  // South: the front door back out to the park. West: the lift.
-  gaps: { south: [-DOOR_HALF, DOOR_HALF], west: [-1.6, 1.6] },
+  // South: the front door back out to the park (formula-derived from
+  // `halfZ`, so it needs no edit of its own — `Hotel.ts`'s `buildRoomShell`
+  // builds both outer walls at `±room.halfZ`). West: the lift, centred on
+  // `liftZ` — this gap must track that field by hand (nothing derives one
+  // from the other), so it carries `LOBBY_FOYER_GROWTH` the same way.
+  gaps: {
+    south: [-DOOR_HALF, DOOR_HALF],
+    west: [
+      -1.6 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
+      1.6 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
+    ],
+  },
   // **Clerestory.** The north row sits above the gallery deck (5.44), so the
   // panes read as the windows the gallery looks out of and throw the room's
   // brightest band high across the double-height space. `lookZone: false`:
@@ -899,11 +1299,130 @@ export const LOBBY: HotelRoom = {
     // finger outside the lift's boarding band, and `zoneAt` pins "Look out"
     // to it — the default picker's other candidates are the pane over the
     // lift band and the pane the café tables crowd.
-    west: { at: [-6.6, 3.2, 9.6], width: 1.8, sill: 1.2, head: 3.6, zoneAt: -6.6 },
+    //
+    // **3.2 stays put; 9.6 moves with the café it lights.** The foyer's
+    // {@link LOBBY_FOYER_GROWTH} translates every foyer *fixture* south, and
+    // every hall fixture (this pane included — it lights the old arch, not
+    // anything in the foyer) north by the same constant, in lockstep (see
+    // that constant's doc). The one exception, kept deliberately unmoved: 3.2
+    // lights the statue's end of the promenade regardless of how much
+    // further south the room now reaches, so moving it would only separate
+    // it from what it lights. 9.6 lights the café table it was placed beside
+    // (`dressLobby`'s `lobby-a`/`-b`), which *did* move, so this pane follows
+    // it — 9.6 + growth.
+    west: {
+      at: [
+        -6.6 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
+        3.2 - RECEPTION_ORIGIN_SHIFT,
+        9.6 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
+        // The reception room's own pane — north of the desk (which sits
+        // dead centre, `RECEPTION_Z`), so it lights the walk in from the
+        // partition doorway without competing with the desk's own "Look!"
+        // stand spot for floor space. Same style as the rest of the foyer's
+        // west glazing.
+        LOBBY_HALFZ_BEFORE_RECEPTION + 2.5,
+      ],
+      width: 1.8,
+      sill: 1.2,
+      head: 3.6,
+      zoneAt: -6.6 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
+    },
   },
+  // Four partitions, three purposes:
+  //
+  // 1. **The reception/lobby divide** — issue #280's room split (18 August
+  //    2026, Jim: *"the desk should be in a separate ROOM ... dead centre of
+  //    this new reception room prior to the main lobby"*). A single centred
+  //    doorway, on the promenade axis like every other doorway in this room:
+  //    nothing this side of it competes for space with the desk, so a single
+  //    {@link SUITE_DOOR_WIDTH} gap is plenty — no stair, no statue, nothing
+  //    to dogleg around.
+  // 2. **The foyer/hall divide** — see {@link LOBBY_HALL_Z}. Five doorways:
+  //    {@link LOBBY_HALL_DOOR_X} for foot traffic, {@link SUITE_DOOR_WIDTH}
+  //    wide like every other room doorway in the hotel, and a paired,
+  //    double-wide one either side at ±{@link LOBBY_HALL_STAIR_CLEARANCE_X}
+  //    where the wall would otherwise fatten across a stair's own connector
+  //    anchor (see that constant's own doc for why one doorway's width was
+  //    not enough there).
+  // 3. **The bathroom** (issue #272, own-room rewrite issue #281 — Jim: "make
+  //    the bathrooms … a new room adjoining the existing floorplan, don't try
+  //    to squeeze it into the existing"). South-east corner of the *foyer*
+  //    (#280's split put this whole area — statue, seating, café — south of
+  //    {@link LOBBY_HALL_Z}, so the bathroom is a foyer fixture and every one
+  //    of its z-literals carries the same
+  //    `+ LOBBY_FOYER_GROWTH − RECEPTION_ORIGIN_SHIFT` every other foyer
+  //    fixture does; see that constant's own doc for why). Two runs: the
+  //    room's own east wall (x = 13, untouched by #280) closes one side for
+  //    free; the *south* side no longer does, though — #280 moved the real
+  //    south (front-door) wall out to `halfZ` = 25.4, so what used to be the
+  //    room's outer wall at old z = 12.4 is now
+  //    {@link LOBBY_HALFZ_BEFORE_RECEPTION}, the reception/lobby partition
+  //    above. It closes for free just the same (solid there — its only door
+  //    is at x = 0, 7 m clear of this bathroom), so `to` below reads that
+  //    constant directly rather than re-deriving the same number, the same
+  //    reasoning {@link LOBBY_HALFZ_BEFORE_RECEPTION}'s own doc gives for
+  //    referencing it instead of retyping `12.4 + LOBBY_FOYER_GROWTH −
+  //    RECEPTION_ORIGIN_SHIFT`. The other run closes the remaining two sides
+  //    — the door sits on the west wall, well clear of both corners (0.5 m of
+  //    solid wall either side of it, `check:hotel` probe 18's "every
+  //    partition end reaches a wall or a doorway jamb" — untouched by the
+  //    shift, since it is a rigid translation). **The west wall sits at
+  //    x = 7.0, not the doorway's original 9.4** — widened into open floor
+  //    nobody else uses south of (old) z = 9, now `9.0 + LOBBY_FOYER_GROWTH −
+  //    RECEPTION_ORIGIN_SHIFT` (the seating groups, breakfast tables and
+  //    planters all sit north of it, and none of them reach x > 3.4, well
+  //    clear of this bathroom's x ≥ 7). `check:tap-spacing` ruled out every
+  //    narrower version: the "Use" zone needs a finger clear of the doorway's
+  //    own tap-spacing band *and* of the east wall's face at once, and the
+  //    old 3.6 m nook could satisfy one only by failing the other (`halfX`'s
+  //    own comment has the version of this fix that tried widening the
+  //    *room* instead, and what that broke).
+  //
+  // All four runs reach both outer walls or another partition (CLAUDE.md's
+  // own lesson from the suite — a partition that stops short of a wall is a
+  // free-standing wall end you can see, and walk, around).
+  partitions: [
+    {
+      along: 'x',
+      at: LOBBY_HALFZ_BEFORE_RECEPTION,
+      from: -13,
+      to: 13,
+      doors: [0],
+    },
+    {
+      along: 'x',
+      at: LOBBY_HALL_Z,
+      from: -13,
+      to: 13,
+      doors: [
+        LOBBY_HALL_DOOR_X,
+        LOBBY_HALL_STAIR_CLEARANCE_X - STAIR_CLEARANCE_DOOR_SPREAD,
+        LOBBY_HALL_STAIR_CLEARANCE_X + STAIR_CLEARANCE_DOOR_SPREAD,
+        -LOBBY_HALL_STAIR_CLEARANCE_X - STAIR_CLEARANCE_DOOR_SPREAD,
+        -LOBBY_HALL_STAIR_CLEARANCE_X + STAIR_CLEARANCE_DOOR_SPREAD,
+      ],
+    },
+    {
+      along: 'z',
+      at: 7.0,
+      from: 9.0 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
+      to: LOBBY_HALFZ_BEFORE_RECEPTION,
+      doors: [10.7 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT],
+    },
+    {
+      along: 'x',
+      at: 9.0 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
+      from: 7.0,
+      to: 13,
+      doors: [],
+    },
+  ],
   // The imperial plan — see {@link Mezzanine} for what each piece is, and
   // HANDOFF-lobby-art.md for where every number comes from. The derivations,
-  // for the reader (assertStairMatches proves them):
+  // for the reader (assertStairMatches proves them, and none of them cares
+  // about absolute z — only relative heights, radii and sweeps — so the
+  // whole plan carries `LOBBY_FOYER_GROWTH` below without disturbing any of
+  // it, per that constant's own doc):
   //   arc centres (±7.99, −2.5); radii 3.06/4.86; twelve treads over ±90°;
   //   landing x ±4.93 (= C − innerRadius, lapping 3 cm into each curve's
   //   inner string — the designed STAIR_STRING_BITE overlap), z −7.6…−2.5
@@ -915,13 +1434,13 @@ export const LOBBY: HotelRoom = {
   mezzanine: {
     minX: -13,
     maxX: 13,
-    minZ: -12.4,
-    maxZ: -7.6,
+    minZ: -12.4 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
+    maxZ: -7.6 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
     height: LOBBY_MEZZANINE_Y,
     landing: {
       minX: -4.93,
       maxX: 4.93,
-      minZ: -7.6,
+      minZ: -7.6 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
       maxZ: STAIR_ARC_Z,
       height: LOBBY_LANDING_Y,
       slab: LOBBY_LANDING_SLAB,
@@ -952,14 +1471,16 @@ export const LOBBY: HotelRoom = {
     ],
     straight: {
       centreX: 0,
-      frontZ: -5.008,
+      frontZ: -5.008 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
       walkWidth: 3.6,
       flankX: 2.01,
       treads: 5,
       rise: LOBBY_MEZZANINE_Y - LOBBY_LANDING_Y,
     },
   },
-  liftZ: 0,
+  // Carries `− LOBBY_FOYER_GROWTH`, same as every other hall fixture keyed
+  // to the north wall — the lift alcove is a hall feature.
+  liftZ: 0 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
   liftFloor: 0,
   floorLabel: 'Lobby',
 };
@@ -979,8 +1500,36 @@ export const BREAKFAST: HotelRoom = {
   theme: BREAKFAST_THEME,
   originX: HOTEL_ORIGIN_X,
   originZ: HOTEL_BREAKFAST_Z,
+  // Held at 12 deliberately — issue #281's own bathroom fix first tried
+  // growing this too, which moved the west wall (everything here is
+  // measured from `±halfX`) close enough to the crystal cluster at local
+  // (-10.6, -7.4) to put a painting's "Look" stand spot inside it
+  // (`check:hotel` found this). The bathroom's east-west room comes from
+  // `halfZ` and the door's own position instead — see below.
   halfX: 12,
-  halfZ: 9,
+  // Grown from 9 (issue #281). The south-east nook's own doorway needs
+  // distance from table b1-d (local 8.8, 4.6) that a 9 m room did not have:
+  // with the run only 3.2 m long the door could not sit far enough south of
+  // the table to clear the tap-spacing rule for either the table's own
+  // chairs or the bathroom's "Use" zone (`check:tap-spacing`), nor the
+  // doorway-clearance check for a chair's footprint (`check:hotel`). The
+  // extra 2.3 m — split evenly, so it also opens up welcome floor between
+  // the buffet and the north wall — gives the run enough length to push the
+  // door within a stride of the south wall, well clear of the table.
+  //
+  // A further 0.6 m south (PR #281 review, 18 Aug 2026): the bathroom's own
+  // NW corner — where `partitions[0]`'s west wall meets `partitions[1]`'s
+  // north wall — sat only 0.226 m from table b1-d's own chair (local 8.49,
+  // 5.60; a real 0.324 m disc-into-wall overlap, since `CollisionWorld`
+  // clamps a wall's closest point to its segment, so the corner is a capsule
+  // cap, not just two flat faces). The whole bathroom sub-room (both
+  // partitions, the door, `buildBathroomFixtures`' rect query and every
+  // fixture coordinate in `dressBreakfast`) is translated south by the same
+  // 0.6 m together, so its own internal layout — door position, fixture
+  // spacing, rug sizing — is unchanged; only its distance from the chair
+  // moves. Verified against the real `CollisionWorld` — see
+  // `check-hotel.mts`'s furniture-vs-wall probe.
+  halfZ: 11.9,
   wallHeight: 3.0,
   gaps: { west: [-1.6, 1.6] },
   // Seven of them along the north wall, above the buffet — this is the room
@@ -991,6 +1540,20 @@ export const BREAKFAST: HotelRoom = {
     north: { at: [-10, -6.6, -3.2, 0.2, 3.6, 7, 10.4], width: 2.2, sill: 1.5, head: 2.75 },
     west: { at: [-8.1, -3, 2.9, 8.1], width: 1.4, sill: 1.1, head: 2.6 },
   },
+  // The bathroom (issue #272/#281) — south-east corner, same shape as the
+  // lobby's. The door sits on the west wall, jamb touching the (now further
+  // south) south outer wall exactly (a valid, zero-length jamb —
+  // `check:hotel` probe 18 skips a jamb end's own wall-touching check, the
+  // same pattern the suite's own hall-to-bathroom door already uses), which
+  // puts it a full 5.5 m south of table b1-d — comfortably clear of both its
+  // footprint and its chairs' "Sit" zones. **The whole room is a further
+  // 0.6 m south of that** (`halfZ`'s own comment) — the room's own NW corner,
+  // not its west wall's face, is what actually sits closest to b1-d's own
+  // chair, and needed the margin the corner (not the face) was short of.
+  partitions: [
+    { along: 'z', at: 8.6, from: 6.4, to: 11.9, doors: [10.7] },
+    { along: 'x', at: 6.4, from: 8.6, to: 12, doors: [] },
+  ],
   liftZ: 0,
   liftFloor: 1,
   floorLabel: 'Floor 1',
@@ -1175,7 +1738,13 @@ export const GARDEN_FLOOR: HotelRoom = {
   theme: GARDEN_THEME,
   originX: HOTEL_ORIGIN_X,
   originZ: HOTEL_GARDEN_Z,
-  halfX: 11,
+  // Grown from 11 (issue #281 — Jim: "it is fine to make the floor bigger")
+  // so the bathroom's own east-wall room has real depth for a doorway rather
+  // than the old two-wall nook squeezed against the existing east wall. The
+  // extra 1.4 m lands on both the east (the bathroom's own gain) and west
+  // (empty, past the lift alcove) sides — nothing else in this room is
+  // positioned relative to the old halfX, so nothing else moves.
+  halfX: 12.4,
   halfZ: 8,
   wallHeight: 3.2,
   gaps: { west: [-1.6, 1.6] },
@@ -1183,6 +1752,19 @@ export const GARDEN_FLOOR: HotelRoom = {
     north: { at: [-8.4, -4.2, 0, 4.2, 8.4], width: 2.4, sill: 1.1, head: 2.75 },
     west: { at: [-5.6, 5.6], width: 1.6, sill: 1.1, head: 2.6 },
   },
+  // The bathroom (issue #272/#281) — against the (new, further-out) east
+  // wall, between the two hedges, now a real four-sided room: the two
+  // north/south partitions that used to be the nook's only walls, closed on
+  // the west (open) side by a third partition carrying the door. That run is
+  // only 3.0 m, so the door (2.4 m) leaves a thinner 0.3 m jamb each side
+  // than the lobby's — still real wall, not a corner-touching jamb, so
+  // `check:hotel` probe 18 (partition ends must reach a wall) has something
+  // to reach.
+  partitions: [
+    { along: 'x', at: -4.6, from: 8.35, to: 12.4, doors: [] },
+    { along: 'x', at: -1.6, from: 8.35, to: 12.4, doors: [] },
+    { along: 'z', at: 8.35, from: -4.6, to: -1.6, doors: [-3.1] },
+  ],
   liftZ: 0,
   liftFloor: 2,
   floorLabel: 'Floor 12',
@@ -1201,7 +1783,12 @@ export const OCEAN_FLOOR: HotelRoom = {
   theme: OCEAN_THEME,
   originX: HOTEL_ORIGIN_X,
   originZ: HOTEL_OCEAN_Z,
-  halfX: 10,
+  // Grown from 10 (issue #281 — "it is fine to make the floor bigger"), the
+  // same reasoning as the garden floor: real depth for the bathroom's own
+  // doorway rather than a nook with no fourth wall. The gain lands on the
+  // west side (the bathroom's own, plus the lift alcove which re-derives its
+  // position from halfX for free) and the east (empty, unused).
+  halfX: 11.4,
   halfZ: 8.5,
   wallHeight: 3.1,
   gaps: { west: [-1.6, 1.6] },
@@ -1212,6 +1799,26 @@ export const OCEAN_FLOOR: HotelRoom = {
     north: { at: [-7, -2.4, 2.4, 7], width: 1.7, sill: 1.15, head: 2.55 },
     west: { at: [-5.4, 5.4], width: 1.7, sill: 1.15, head: 2.55 },
   },
+  // The bathroom (issue #272/#281) — against the west wall, now a real
+  // four-sided room: two horizontal partitions (the north one shifted from
+  // the old nook's z = 1.6 to 2.0, clearing the outer wall's own lift gap,
+  // `gaps.west` z ±1.6, by a clean 0.4 m rather than sitting flush on its
+  // very edge the way the old two-wall nook silently did —
+  // `buildBathroomWall` built its own collider straight into the
+  // `CollisionWorld` and was never checked against the lift gap at all)
+  // closed on the east (open) side by a third partition carrying the door.
+  // The south wall sits at z = 6.8, not the old nook's 5.6 — `check:hotel`
+  // and `check:tap-spacing` between them ruled out every position for the
+  // pan closer to the door: too close to the door's own doorway band, too
+  // close to the lift's boarding band, or (at exactly z = 6.0) close enough
+  // to the wall's own face to shove a standing child sideways. There was
+  // room to spare between the old nook's south wall and `halfZ` (8.5), so
+  // the wall moved rather than the room.
+  partitions: [
+    { along: 'x', at: 2.0, from: -11.4, to: -7.6, doors: [] },
+    { along: 'x', at: 6.8, from: -11.4, to: -7.6, doors: [] },
+    { along: 'z', at: -7.6, from: 2.0, to: 6.8, doors: [4.0] },
+  ],
   liftZ: 0,
   liftFloor: 3,
   floorLabel: 'Floor 33',
@@ -1269,6 +1876,26 @@ export function hotelDoorBands(room: HotelRoom): HotelDoorBand[] {
       yaw: 0,
       y: 0,
     });
+    // The foyer/hall doorway — straight off the partition data (see
+    // {@link LOBBY_HALL_Z}) so the two can never disagree, exactly the
+    // suite's own bathroom-doorway derivation below. `yaw: 0` because this
+    // wall runs along X (an `along: 'x'` run), the same orientation as the
+    // front door above, not the suite's `Math.PI / 2` internal walls.
+    for (const run of room.partitions ?? []) {
+      if (run.along !== 'x') continue;
+      for (const door of run.doors) {
+        bands.push({
+          kind: 'room-door',
+          what: "the lobby's doorway through to the stairs and lifts",
+          centreX: room.originX + door,
+          centreZ: room.originZ + run.at,
+          halfAlong: 0.6,
+          halfAcross: SUITE_DOOR_WIDTH / 2 + 0.4,
+          yaw: 0,
+          y: 0,
+        });
+      }
+    }
   }
   if (room === CORRIDOR) {
     // The "yours" door into the suite, as **two** rectangles, because the
@@ -1319,26 +1946,32 @@ export function hotelDoorBands(room: HotelRoom): HotelDoorBand[] {
       yaw: Math.PI / 2,
       y: 0,
     });
-    // The bathroom's doorway, straight off the partition data so the two can
-    // never disagree. Only the doored **z-runs** are banded (today: exactly
-    // the bathroom door). Banding the x-runs' bedroom doorways too was
-    // measured, and trips the bed zones by 0.03 m — the beds and their signs
-    // would all have to shuffle, which is a reform for its own PR, not a
-    // rider on this one.
-    for (const run of room.partitions ?? []) {
-      if (run.along !== 'z') continue;
-      for (const door of run.doors) {
-        bands.push({
-          kind: 'room-door',
-          what: "the suite bathroom's doorway",
-          centreX: room.originX + run.at,
-          centreZ: room.originZ + door,
-          halfAlong: 0.6,
-          halfAcross: SUITE_DOOR_WIDTH / 2 + 0.4,
-          yaw: Math.PI / 2,
-          y: 0,
-        });
-      }
+  }
+  // Every partitioned room's own bathroom doorway, straight off the
+  // partition data so the two can never disagree — the suite's bathroom
+  // originally (issue #278), and now every guest floor's own-room bathroom
+  // too (issue #281: "a new room adjoining the existing floorplan"). Only
+  // the doored **z-runs** are banded. For the suite specifically that also
+  // means the x-runs' bedroom doorways stay unbanded: measured once, and
+  // banding them trips the bed zones by 0.03 m — the beds and their signs
+  // would all have to shuffle, which is a reform for its own PR, not a rider
+  // on this one. The four floor bathrooms have no x-run doors at all (their
+  // "north"/"south" walls are solid, no-door runs), so this loop bands
+  // exactly one doorway per floor, same as it always banded exactly one for
+  // the suite.
+  for (const run of room.partitions ?? []) {
+    if (run.along !== 'z') continue;
+    for (const door of run.doors) {
+      bands.push({
+        kind: 'room-door',
+        what: `${room.floorLabel}'s bathroom doorway`,
+        centreX: room.originX + run.at,
+        centreZ: room.originZ + door,
+        halfAlong: 0.6,
+        halfAcross: SUITE_DOOR_WIDTH / 2 + 0.4,
+        yaw: Math.PI / 2,
+        y: 0,
+      });
     }
   }
   if (room.liftZ !== null) {
