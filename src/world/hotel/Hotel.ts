@@ -1136,6 +1136,21 @@ export class Hotel implements GameSystem {
   }
 
   /**
+   * The `/hotel-breakfast` deep link (#276): straight into the breakfast
+   * room, already seated at a table, chip row up. Same "safe from anywhere"
+   * shape as {@link requestEnterLobby} — the whole point of a deep link for a
+   * clipped `.action-chip-row` is showing the row on the very first frame,
+   * not requiring a tester to walk over and sit down before the bug is even
+   * on screen.
+   */
+  requestEnterBreakfast(): boolean {
+    const player = this.player;
+    if (!player || player.riding || this.changingSpace || this.inside) return false;
+    this.changeSpace(() => this.enterBreakfastRoom());
+    return true;
+  }
+
+  /**
    * The `/hotel-suite` deep link: straight into the guest suite — where
    * #273/#278's doorway-clearance fix (the lounge sofa and TV) and #279's
    * bigger bedrooms and pet beds actually live — from wherever she is.
@@ -1745,6 +1760,31 @@ export class Hotel implements GameSystem {
       bathroom.panZ - bathroom.standZ,
     );
     player.teleportTo(room.originX + bathroom.standX, 0, room.originZ + bathroom.standZ, facing);
+  }
+
+  /**
+   * The other half of {@link requestEnterBreakfast}. Lands her bound to the
+   * breakfast room and, whenever a chair is free, already sat down at it —
+   * `sitAt` does the pose and sets `seatedAt`, which is what makes
+   * `interactZones` offer the `BREAKFASTS` chip row instead of "Have
+   * breakfast", so the very row #276 fixes is up on the first frame.
+   */
+  private enterBreakfastRoom(): void {
+    const player = this.player;
+    if (!player) return;
+    this.inside = true;
+    this.hotelRoot.visible = true;
+    this.boundTo(BREAKFAST);
+    // Fixed seating order, same list `interactZones` reads — first chair
+    // no guest has been dealt into. `seatGuests` can occupy some of these,
+    // so this is never assumed free; if every chair is taken, land her in
+    // the room anyway rather than dead-ending the link.
+    const chair = this.chairs.find((seat) => seat.room === BREAKFAST && !seat.taken);
+    if (chair) {
+      this.sitAt(chair);
+    } else {
+      player.teleportTo(BREAKFAST.originX, 0, BREAKFAST.originZ, 0);
+    }
   }
 
   /**
