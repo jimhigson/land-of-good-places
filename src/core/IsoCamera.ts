@@ -249,8 +249,53 @@ export class IsoCamera {
     this.camera.bottom = -halfHeight;
     this.camera.updateProjectionMatrix();
   }
+
+  /**
+   * Clamps `point` so that a screen-constant sprite of the given half-extents
+   * (world metres) centred on it stays fully inside the visible frustum, with
+   * an optional world-unit `margin` on top.
+   *
+   * Written for {@link SpeechBubble} (QA on #280, PR #280 round 2: the
+   * receptionist's greeting ran off the right edge of a 390×844 portrait
+   * screen, clipped and unreadable — a world-space sprite pinned near its
+   * speaker with no screen-space awareness at all). Kept here rather than on
+   * the sprite's own class because the frustum and the screen axes are the
+   * camera's own numbers — {@link screenRight}/{@link screenUp} are already
+   * solved once a frame in {@link applyTransform} for {@link skyAnchor}, and a
+   * second place computing its own idea of "which way is right on screen"
+   * is exactly the class of bug CLAUDE.md's "two definitions of one thing"
+   * warns about. General on purpose — any screen-constant sprite can call
+   * this, not only a speech bubble: the fix is a camera capability, not a
+   * patch on one caller.
+   *
+   * Degrades gracefully — clamping to the frustum's own centre — for a
+   * sprite too large to fit even centred, rather than an inverted range.
+   */
+  clampToFrustum(point: Readonly<Vector3>, halfWidth: number, halfHeight: number, margin = 0): Vector3 {
+    const relative = SCRATCH_CLAMP_RELATIVE.copy(point).sub(this.camera.position);
+    const right = relative.dot(this.screenRight);
+    const up = relative.dot(this.screenUp);
+
+    const maxRight = Math.max(0, this.camera.right - halfWidth - margin);
+    const maxUp = Math.max(0, this.camera.top - halfHeight - margin);
+    const clampedRight = clamp(right, -maxRight, maxRight);
+    const clampedUp = clamp(up, -maxUp, maxUp);
+
+    // A fresh Vector3, not a shared scratch: this is the caller's return
+    // value, and a second clampToFrustum call later the same frame (a second
+    // bubble) must not silently overwrite a reference the first caller is
+    // still holding.
+    return point
+      .clone()
+      .addScaledVector(this.screenRight, clampedRight - right)
+      .addScaledVector(this.screenUp, clampedUp - up);
+  }
 }
 
 // Raised with the closer framing: the aim point wants to sit around chest height
 // on the character, and the character's chest went up when her head did.
 const TEMP_LIFT = new Vector3(0, 1.25, 0);
+
+// Scratch vector for clampToFrustum's own intermediate maths — discarded
+// before the method returns, so safe to share across calls.
+const SCRATCH_CLAMP_RELATIVE = new Vector3();

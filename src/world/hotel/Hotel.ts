@@ -392,13 +392,51 @@ const DISCO_COLOURS: readonly number[] = [
  * through `IsoCamera` at the player's real teleport-in point
  * (`enterLobby`'s `LOBBY.halfZ - 2.2`): x=4.5 lands the whole desk footprint
  * (NDC x from 0.585 to 0.932) and the receptionist (NDC x=0.906) on-screen
- * with margin, while clearing every neighbour by at least 1.5 m — the
- * closest is the south-east crystal planter. Kept in the east bay, just
- * narrower, so the desk is still the first thing reached rather than
- * something in the central promenade the statue and its rug runner own.
+ * — *technically*, per the same QA round that came back with real rendered
+ * screenshots and found only ≈2 px of margin at x=4.5 (298→388 of 390 px),
+ * the greeting bubble clipped off the right edge entirely, and the check-in
+ * stand spot half behind the (short, see-through) near wall. See the round-3
+ * entry below for the fix.
+ *
+ * **x=4.5→3.2, z carries `8.3` not `8.8`, 18 August 2026** (QA round 3 on
+ * #280): the round-2 fix only moved the desk *sideways*; this one moves it
+ * **north** too — deeper into the foyer, which {@link LOBBY_FOYER_GROWTH}
+ * grew by 7 m for exactly this — so the same total displacement buys real
+ * screen margin instead of 2 px of it. The two axes pull screen-x in
+ * opposite, near-equal directions at this camera's fixed 45°/38° rig
+ * (measured: ∂px/∂x ≈ +25.1 px/m, ∂px/∂z ≈ −25.1 px/m, at 390×844), so
+ * "north and recentre together" is not two independent knobs — pushing z
+ * north on its own makes the screen-x crowding *worse*, and only combining
+ * it with a bigger x pull-in nets a leftward move at all.
+ *
+ * The room's own furniture bounds how far that combination can go: the
+ * RiPika medallion (`STATUE_Z`, ring outer radius 2.3 m) and the doors→
+ * medallion runner sit directly in the path a large north+recentre move
+ * would take, so this is the best point found that clears both by a real
+ * margin (statue 1.44 m, runner 0.25 m, the east lounge rug 0.45 m) while
+ * still gaining real screen room — a genuine three-way trade-off against the
+ * screen, the statue and the wall, not a single free lever. Verified the
+ * same way, geometrically, against `IsoCamera`, `deps.camera` (the same
+ * instance `updateScreenSize` itself uses, not a second one), at the
+ * player's real teleport-in point:
+ *
+ *   - desk footprint: px 278→368 of 390 (**22 px margin** each edge, up
+ *     from ≈2 px);
+ *   - check-in stand spot (`RECEPTION_Z + 2.4`) to the south wall
+ *     (`LOBBY.halfZ`): **1.70 m**, up from 1.20 m;
+ *   - the greeting bubble's own *rendered footprint* (not just its anchor
+ *     point) — see {@link IsoCamera.clampToFrustum}, which this PR also
+ *     adds — now clamps inside the frustum with a 12 px margin, rather than
+ *     projecting to px 255→488 of a 390 px screen (98 px off the right edge,
+ *     unreadable) the way it did unclamped at the old spot.
+ *
+ * Not eliminated, only reduced: the wall gap is real headroom over the old
+ * 1.2 m, but the room's furniture (not this constant) is what stops it
+ * being larger without either crowding the statue or losing the screen
+ * margin back again — see the geometry above.
  */
-export const RECEPTION_X = 4.5;
-export const RECEPTION_Z = 8.8 + LOBBY_FOYER_GROWTH;
+export const RECEPTION_X = 3.2;
+export const RECEPTION_Z = 8.3 + LOBBY_FOYER_GROWTH;
 
 /** Where the receptionist herself stands: behind her own desk, north of it —
  *  i.e. further from the front door, so a child walks up to the counter
@@ -1466,13 +1504,12 @@ export class Hotel implements GameSystem {
     this.updateFeast(dt, elapsed);
     this.updateSpeech(dt);
     if (this.speech) {
-      const x = LOBBY.originX + RECEPTION_X;
-      const z = LOBBY.originZ + RECEPTIONIST_Z;
-      const camera = this.deps.camera;
-      this.receptionBubble.updateScreenSize(
-        camera.worldUnitsPerPixel,
-        Math.hypot(x - camera.focusPoint.x, z - camera.focusPoint.z),
-      );
+      // The bubble's natural (unclamped) world anchor is the position it was
+      // parented at in `dressLobby` — she never moves, so nothing re-sets it
+      // here. `updateScreenSize` reads that anchor straight off the sprite
+      // (`sprite.getWorldPosition`) and re-clamps it to the screen fresh,
+      // every call — see `SpeechBubble`'s own doc.
+      this.receptionBubble.updateScreenSize(this.deps.camera);
     }
 
     // The "that door is not yours yet" blink. Driven off `elapsed` like the
@@ -3207,6 +3244,12 @@ export class Hotel implements GameSystem {
       // so a child walking to check in was pushed off her own destination.
       // Only this one moves; the mirrored planter at x −3.4 is nowhere near
       // the desk's new east-bay spot and was never in conflict.
+      //
+      // **Still clear after RECEPTION_X's second move (4.5→3.2, round 3 on
+      // #280)**: the desk moved further away from this planter, not closer
+      // (3.2 < 4.5), so the reserve circle at (RECEPTION_X, RECEPTION_Z+2.2)
+      // now sits ≈1.4 m clear of this planter's own footprint — no re-move
+      // needed; re-checked by `check:hotel` rather than assumed.
       { prop: () => crystalPlanter(0x10b3), x: 7.2, z: 10.8 + LOBBY_FOYER_GROWTH, top: PLANTER_TOP },
       { prop: () => crystalPlanter(0x10b5), x: -3.4, z: 10.8 + LOBBY_FOYER_GROWTH, top: PLANTER_TOP },
       { prop: () => crystalPlanter(0x10b4), x: -6.2, z: -6.6 - LOBBY_FOYER_GROWTH, top: PLANTER_TOP },
