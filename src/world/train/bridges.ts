@@ -1,4 +1,4 @@
-import { BoxGeometry, Group, InstancedMesh, Matrix4, Quaternion, Vector3 } from 'three';
+import { BoxGeometry, CylinderGeometry, Group, InstancedMesh, Matrix4, Quaternion, Vector3 } from 'three';
 import type { TrainRoute } from './route';
 import type { LevelCrossing } from './crossings';
 import { BRIDGE_RISE } from './clearance';
@@ -102,6 +102,14 @@ const HEIGHT_MARGIN = 0.15;
 
 const deckMaterial = toonMaterial(PALETTE.woodLight);
 const beamMaterial = toonMaterial(PALETTE.woodDark);
+const postMaterial = toonMaterial(PALETTE.woodDark);
+
+/** How tall a visible deck-rail post stands above the deck — comfortably
+ * below a walking child's eye line (never mind obscuring one riding past
+ * on the train, GAME_DESIGN.md's "a small bridge does not obscure a player
+ * walking on it"), and comfortably above where the real, collision guard
+ * rail's own band starts (`GUARD_RAIL_BAND` below the deck). */
+const VISIBLE_RAIL_HEIGHT = 0.7;
 
 /** A wall this module wants registered with `CollisionWorld`, deferred so the
  * caller (`ParkTrain`) controls exactly when colliders are added. */
@@ -329,10 +337,47 @@ export function buildBridges(_route: TrainRoute, crossings: readonly LevelCrossi
       });
     }
 
+    // The same two edges, drawn — a low post-and-rail so the invisible
+    // collision guard above reads as an actual bridge rail rather than an
+    // unmarked ledge. Kept low on purpose (see `VISIBLE_RAIL_HEIGHT`) so it
+    // cannot be what GAME_DESIGN.md's "a small bridge does not obscure a
+    // player walking on it" is worried about.
+    const postsPerSide = Math.max(2, Math.ceil((DECK_HALF_LENGTH * 2) / 1.6) + 1);
+    const postMesh = new InstancedMesh(
+      new CylinderGeometry(0.05, 0.06, VISIBLE_RAIL_HEIGHT, 6),
+      postMaterial,
+      postsPerSide * 2,
+    );
+    const railMesh = new InstancedMesh(
+      new BoxGeometry(0.07, 0.06, DECK_HALF_LENGTH * 2),
+      deckMaterial,
+      2,
+    );
+    let postIndex = 0;
+    for (let side = 0; side < 2; side += 1) {
+      const sign = side === 0 ? 1 : -1;
+      const railX = cx + acrossX * halfAcross * sign;
+      const railZ = cz + acrossZ * halfAcross * sign;
+      for (let p = 0; p < postsPerSide; p += 1) {
+        const along = -DECK_HALF_LENGTH + (p / (postsPerSide - 1)) * (DECK_HALF_LENGTH * 2);
+        position.set(railX + dirX * along, deckY + VISIBLE_RAIL_HEIGHT / 2, railZ + dirZ * along);
+        matrix.compose(position, rotation.identity(), scale);
+        postMesh.setMatrixAt(postIndex, matrix);
+        postIndex += 1;
+      }
+      rotation.setFromAxisAngle(axis, yaw);
+      position.set(railX, deckY + VISIBLE_RAIL_HEIGHT, railZ);
+      matrix.compose(position, rotation, scale);
+      railMesh.setMatrixAt(side, matrix);
+    }
+    postMesh.instanceMatrix.needsUpdate = true;
+    railMesh.instanceMatrix.needsUpdate = true;
+    bridgeGroup.add(postMesh, railMesh);
+
     // --- the two ramps -------------------------------------------------------
     const treadCount = Math.max(4, Math.ceil(BRIDGE_RISE / TREAD_RISE));
     // `footprint.rampRun` already accounts for how close the *next* crossing
-    // is, not just the entrace ramp's own gradient — see
+    // is, not just the entrance ramp's own gradient — see
     // `bridgeFootprint.ts`'s own note on `rampRunCap`. Read here rather than
     // recomputed, so the mesh this builds and the ground-plane exclusion
     // `Scenery`/`LampPosts` already kept off of it (`bridgeKeepout.ts`) can
