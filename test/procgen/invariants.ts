@@ -1732,6 +1732,49 @@ const railRaceStallDoormatIsUsable: Invariant = (facts) => {
 };
 
 /**
+ * **The keychain stall's stand point is usable — issues #119/#225.**
+ *
+ * `railRaceStallDoormatIsUsable`'s twin, added for the reason that one's own
+ * doc comment gives: standability is already covered for every entrance by
+ * the generic {@link entrancesAreUsable}, but reachability from the park
+ * entrance is not covered anywhere else in this file for any stall, and
+ * reachability is exactly the property a brand-new manifest entry can break —
+ * `stall.keychain` is placed by the same solver as every other plot
+ * (`STALL_PLACEMENTS.keychain`, an ordinary `placedStall(...)`), and the path
+ * network grows a spur to it the same way it does for every other stall
+ * (`world/paths.ts`, seeded from `STALL_STANDS`), but nothing else here would
+ * notice if that spur came out disconnected from the rest of the paving.
+ *
+ * `stand.x`/`stand.z` (the interact zone's `standX`/`standZ`, not the cart's
+ * own `x`/`z`) is what a child is actually walked to on pressing the chip, and
+ * so is the coordinate worth measuring — `KeychainShop.interactZones()`'s
+ * `pressZone` computes it from `STALL_STANDS_BY_ID.get('keychain')`, and this
+ * reads it back from the **built world's own interact zone**
+ * (`facts.entrances`, filtered to `stall:` ids by `parkFacts.ts`) rather than
+ * from that table directly — the same "measure what the game actually sends
+ * her to, not the table it was computed from" reasoning `parkFacts.ts`'s own
+ * `entrances` comment gives, and the same defect class (the ferris kiosk
+ * stand point existing in a table that nothing built ever reached) this
+ * whole mechanism exists to catch.
+ */
+const keychainStallStandIsUsable: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const stand = facts.entrances.find((entrance) => entrance.id === 'stall:keychain');
+  if (!stand) {
+    complaints.push("the built park has no 'stall:keychain' stand point");
+    return complaints;
+  }
+  const at = `(${stand.x.toFixed(1)}, ${stand.z.toFixed(1)})`;
+  if (!standableNear(facts, stand.x, stand.z)) {
+    complaints.push(`the keychain stall's stand point at ${at} has no standable ground nearby`);
+  }
+  if (!facts.reachableFromEntrance(stand.x, stand.z)) {
+    complaints.push(`the keychain stall's stand point at ${at} cannot be walked to from the park entrance`);
+  }
+  return complaints;
+};
+
+/**
  * Half a Sky Cruiser car, in metres.
  *
  * The car body is `toonBox(1.5, 0.7, 2.2, …)` in `Coaster.ts` — so 0.75 m of it
@@ -5005,6 +5048,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     railRaceRingsStandOutsideThePark,
   ],
   ["the rail-race stall's doormat is standable and reachable", railRaceStallDoormatIsUsable],
+  ["the keychain stall's stand point is standable and reachable", keychainStallStandIsUsable],
   ['the Sky Cruiser flies clear of the whole park', skyCruiserFliesClearOfThePark],
   ['the Sky Cruiser goes round the big wheel', skyCruiserGoesRoundTheBigWheel],
   ['the Sky Cruiser built track turns as gently as it promises', skyCruiserTurnsGently],

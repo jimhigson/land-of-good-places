@@ -142,6 +142,11 @@ const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
   // layout that is different on every seed. Drops her just inside the front
   // door, key not yet given, so the whole check-in flow is testable.
   '/hotel': 'hotelLobby',
+  // The keychain stall (#119/#225) — a garden cart on a layout that
+  // reshuffles per seed, the same QA problem the hotel and the slide have.
+  // Teleports her to the stand point and opens the picker directly; see
+  // `KeychainShop.requestOpen`.
+  '/keychain-stall': 'keychainStall',
 };
 
 /** What `/view` needs to drop a debug camera into the built park. See {@link parseDebugView}. */

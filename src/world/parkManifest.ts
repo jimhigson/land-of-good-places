@@ -59,8 +59,14 @@ function seedOverride(): number | null {
  *
  * 3: issue #241 — the pins are gone and plots spread across the whole
  * spline-bounded park, so every position from layout 2 is meaningless.
+ *
+ * 4: issues #119/#225 — the keychain stall's manifest entry. Per-entry RNG
+ * streams (#241's own doc comment above) mean adding it cannot move any
+ * *other* entry's candidates, but this still forces a fresh solve rather than
+ * risk `cachedSolve` handing back a `localStorage` layout from before the
+ * stall existed on some browser that visited an earlier build of this seed.
  */
-export const LAYOUT_VERSION = 3;
+export const LAYOUT_VERSION = 4;
 
 export interface ManifestEntry {
   readonly id: string;
@@ -269,6 +275,16 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
     cameraFacing: true,
     footprint: { kind: 'circle', radius: 2.8 },
     boundingRadius: 3.6,
+    band: { min: 13, max: 60 },
+  },
+  // The keychain stall (#119/#225): a garden cart, not a walk-in booth, so it
+  // sizes like the mini-game stalls above rather than the wider face-paint
+  // booth — see `world/KeychainShop.ts`'s own `STALL_WIDTH`.
+  {
+    id: 'stall.keychain',
+    cameraFacing: true,
+    footprint: { kind: 'circle', radius: 2.6 },
+    boundingRadius: 3.4,
     band: { min: 13, max: 60 },
   },
 ];

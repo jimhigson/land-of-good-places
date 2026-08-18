@@ -598,6 +598,19 @@ export function itemsForShop(shopId: ShopId): ShopItem[] {
 }
 
 /**
+ * The five keychains, in catalogue order — the garden stall's whole display.
+ *
+ * `itemsForShop` cannot answer this: it takes a real {@link ShopId}, and
+ * `'keychainStall'` deliberately is not one (see {@link ShopItem.shopId}'s own
+ * doc comment). One small function rather than a second filter written out at
+ * the call site, so `world/KeychainShop.ts` and `ui/KeychainPanel.ts` cannot
+ * quietly disagree about which five entries the stall means.
+ */
+export function keychainItems(): readonly ShopItem[] {
+  return SHOP_ITEMS.filter((item) => item.shopId === 'keychainStall');
+}
+
+/**
  * What can be inside a surprise egg.
  *
  * Four prizes, all of them small models the game already has, so a hatch never

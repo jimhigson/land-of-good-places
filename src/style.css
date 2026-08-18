@@ -1299,6 +1299,36 @@ kbd {
   transform: translateX(-50%) translateY(0);
 }
 
+/* ---- the keychain stall (additive, #119/#225) ----
+   `.keychain-panel`/`.keychain-card` mirror `.facepaint-panel`/`.facepaint-card`
+   exactly — see that block's own header for what comes free from `.shop-panel`/
+   `.shop-card`/`.charcreate-*` and why so little needs restating here. The rows
+   themselves need nothing of their own at all: `.shop-row`/`.facepaint-row`/
+   `.row-action` already carry the owned/worn styling `ui/InventoryDrawer.ts`'s
+   backpack rows use (`[data-worn='true']` etc.), and `ui/KeychainPanel.ts`
+   reuses those classes rather than drawing a second version of the same
+   picture-button-with-a-status-pill. */
+.keychain-card {
+  --shop-accent: var(--lgp-sky);
+  width: min(46rem, 96vw);
+  max-height: min(40rem, 92vh);
+}
+
+.keychain-hint {
+  position: absolute;
+  left: 50%;
+  bottom: calc(6rem + env(safe-area-inset-bottom));
+  transform: translateX(-50%) translateY(0.5rem);
+  opacity: 0;
+  transition: opacity 160ms ease, transform 160ms ease;
+  pointer-events: none;
+}
+
+.keychain-hint[data-show='true'] {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
 /* ---- the backpack drawer ---- */
 
 .backpack {
