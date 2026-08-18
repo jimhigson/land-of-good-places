@@ -352,3 +352,100 @@ they should be inter-connected." Full detail is in the PR #286 comment
   I did not act on it (contradicted my actual instructions, no corroborating
   PR comment from Jim found). Noted on the PR in case it needs following up
   through the normal channel.
+
+## Round 4: the statue's ring is now a true circle (18 August 2026)
+
+The round 3 note above was the right call — this landed once the
+instruction came through the normal channel, quoted verbatim: *"one
+central perfect circle is ok circling the statue, and then the rest
+should be on a grid, with a fairly high degree of connectivity between
+the closer nodes in the graph."*
+
+- `solveRing()` (`paths.ts`) drops the axis-alignment/simplification step
+  entirely for the backbone ring: its existing 32-point, Laplacian-relaxed,
+  blocker-clearance profile now feeds the ring's Catmull-Rom curve
+  directly. `simplifyClosedLoop`/`rdpKeep`/`toAxisAlignedLoop`/
+  `collapseCollinearClosed` (round 2's own machinery) are deleted, not left
+  dormant — nothing else called them.
+- **A literal fixed-radius circle was tried first and reverted** — see
+  `solveRing`'s own comment. Forcing every bearing to the single tightest
+  clearance found anywhere pulled the ring in wherever the old profile had
+  room to bulge outward, shifted enough paved footprint to strand a
+  `poiGraph` waypoint the unmodified profile does not. The shipped ring is
+  the *unmodified* per-bearing profile — a genuine circle by Jim's own
+  standard (Laplacian-smooth, no corners, no straight run longer than a
+  couple of metres) without that side effect.
+- **Making the ring smooth re-scores every spur's own branch point**
+  (`bestBranchPoint`'s "shortest real walk" search, working exactly as
+  designed) — and on the canonical seed this legitimately routed
+  `spur-waterFight`'s constructed leg to within ~2 m of the train's own
+  flanking fence, a case `paths.ts` never had to guard against before (no
+  spur had ever been measured to graze the railway in five seeds). Fixed
+  with a new `pushClearOfRail()` pass at the end of `manhattanRoute`: it
+  locally nudges only the one maximal axis-aligned run that comes too
+  close, directly away from the (station-gap-exempt) rail corridor, and
+  leaves `bestBranchPoint`'s own candidate choice and every other point of
+  every route completely alone.
+- **Two other shapes of fix were tried and measurably failed** — see
+  `pushClearOfRail`'s own comment for the full story:
+  - A `BLOCKERS` entry (a discrete circle every 3 m along the whole 363 m
+    rail loop, exactly like `archFeet`): `elbowLeg`/`gridDetour`'s corner
+    search is tuned against a handful of isolated blobs, not a dense chain
+    of ~120 near-touching circles forming a continuous wall —
+    `pathsRunOnGridAxes` failed on all five seeds, on spurs that have
+    nothing to do with the railway.
+  - Preferring a different `bestBranchPoint` candidate whose own
+    constructed walk stayed clear of the rail (scoring-only, no new
+    blockers): still moved the *branch point*, which moved everything
+    downstream of it — measured on the canonical seed, it swapped one
+    stranded waypoint for **sixteen**, in an entirely different part of
+    the park the original route never touched.
+  - The rail-corridor clearance screen itself needed a real fix along the
+    way too: an early version had no station-gap exemption at all and
+    flagged **every** route to a far-side destination, including the
+    already-shipped baseline route (0.31 m from centreline at its
+    closest, at a legitimate station crossing) — a first attempt at an
+    exemption (25 m either side of a station, covering the platform's own
+    length) was *too* generous and silently exempted the real 2.11 m
+    failure along with the legitimate gap. Settled on 10 m, close to the
+    real fence's own `STATION_GAP` (6.5 m) plus headroom for this
+    screen's own 3 m sampling pitch — see `railCorridorSamples`'s comment
+    for the measured numbers.
+- `test/procgen/invariants.ts`: `pathsRunOnGridAxes` now exempts the
+  backbone ring outright (`if (edge.backbone) continue`) — it's
+  deliberately circular now, not grid-aligned, and everything else (every
+  spur, every interconnect) is still covered exactly as before.
+  `ringReadsAsAGrid` (round 2's invariant, now asserting the opposite of
+  what's wanted) is replaced by `ringIsATrueCircleRoundTheStatue`: the
+  ring's radius from the plaza/statue centre must stay within 1 m of
+  constant. Proven red against the pre-fix axis-aligned polygon (6.55 m
+  variance on the canonical seed, 7.68 m on seed 2 — checked out `paths.ts`
+  as it stood immediately before this landed and re-measured) and green
+  against the shipped profile ring (0.02-0.27 m across all five seeds).
+- Verified fresh: `npx tsc --noEmit` clean (both `src` and
+  `tsconfig.test.json`); `npm run test:procgen` 371/371 across all five
+  seeds (seed 5 again needed an isolated re-run under shared-machine
+  contention during the full-suite run — same as round 3 — passed clean
+  solo, 64/64); `npm run check:park` clean on the canonical seed (198/198
+  waypoints connected, 0 rail crossings, all six invariants hold);
+  `npm run check:solve-cost` paths stage 125 ms / 250 ms budget (cheaper
+  than round 3's 232 ms — the axis-alignment machinery this round removed
+  was itself part of that cost).
+- **`check:park` on the four sweep seeds is informational, not part of
+  its own gated contract** (that script's own docs: it holds a ratchet on
+  the *canonical* seed only; the other four are `test:procgen`'s job,
+  which is what's covered above). For the record: seed 2 and seed 18 are
+  clean; seed 5 shows `poi.nospot: 2`, byte-identical to a fresh baseline
+  run on the same seed (pre-existing, unrelated to this change); seed 11
+  shows `poi.stranded: 2`, a **strict improvement** over baseline's 22 on
+  the same seed (the 2 remaining are a subset of baseline's own 22 —
+  nothing new).
+- **Still needs visual QA — no browser this session.** Before/after
+  top-down path-graph topology SVGs are on the PR comment and on
+  `qa-screenshots` (`images/286-ring-circle-before.svg` /
+  `-after.svg`), same pattern as round 3's interconnect diagrams. A real
+  QA pass should open `/view?camPos=0,60,0&camDir=0,-1,0` and confirm: the
+  innermost ring around the statue reads as a smooth circle with no
+  corners anywhere on it, and everything further out (every spur, the new
+  interconnect shortcuts) still reads as grid-aligned exactly as round 3
+  left it.
