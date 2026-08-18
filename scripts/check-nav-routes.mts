@@ -303,8 +303,15 @@ assertRoute(
 // the body must genuinely arrive on the gallery. Proven red by taking
 // `navStamped` off the grand flight's flanks: wedged on leg 18 at
 // (2.8, 3.84, −5.7) local, exactly the live symptom.
+//
+// z is `plan.maxZ - 1.6` rather than a bare literal — this file's own header
+// promises every coordinate is derived from the lobby's plan, and a literal
+// here (found as −9.2, once `LOBBY_FOYER_GROWTH` moved the gallery 7 m north)
+// is exactly the "two definitions" trap CLAUDE.md warns about: it drifted out
+// from under the real gallery silently until this probe wedged on the stale
+// spot instead of the real east lane.
 {
-  const eastLane = world(2.9, -9.2);
+  const eastLane = world(2.9, plan.maxZ - 1.6);
   const r = route(floorPoint, FLOOR_Y, eastLane, DECK_Y);
   const walked = walkRoute(floorPoint, FLOOR_Y, r);
   const planar = Math.hypot(walked.x - eastLane.x, walked.z - eastLane.z);
