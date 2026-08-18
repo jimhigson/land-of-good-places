@@ -142,7 +142,11 @@ import {
   hotelDoorBands,
   LIFT_ALCOVE_DEPTH,
   LOBBY,
+  LOBBY_FOYER_GROWTH,
+  LOBBY_HALFZ_BEFORE_RECEPTION,
   OCEAN_FLOOR,
+  RECEPTION_ORIGIN_SHIFT,
+  RECEPTION_ROOM_DEPTH,
   ROOMS,
   roomFor,
   SUITE,
@@ -205,6 +209,15 @@ const PICTURE_Y = 1.9;
 
 /** Clear air demanded between a picture's frame and a pane's edge, metres. */
 const PICTURE_GLASS_MARGIN = 0.15;
+
+/**
+ * How far a hung picture stands proud of its wall's own face, metres — the
+ * one number `hangOnWalls`' placement and `clearOfGlass`'s occlusion search
+ * both need, so a picture is never hung this far off one and tested against
+ * the mezzanine's shadow at another (issue #271's own class of bug, guarded
+ * against rather than repeated).
+ */
+const PICTURE_WALL_INSET = 0.31;
 
 /** The breakfast tables' flat top, metres — the asset's own figure. */
 const TABLE_TOP = 0.74;
@@ -351,20 +364,101 @@ const DISCO_COLOURS: readonly number[] = [
  * (Jim, live play, 7 Aug 2026; QA pinned the stale pair). Every consumer now
  * derives from these two numbers, and `check:hotel` probe 13 asserts the
  * zone's anchor really stands on something solid that is not a staircase.
+ * **Exported** so that probe is the desk's own numbers, not a second literal
+ * beside them — the exact class of bug this comment already tells the story
+ * of, once.
  *
- * **Beside the axis now, not on it.** The 7 August relayout put the desk dead
- * on the entrance axis against the gallery's face — and the imperial rework's
- * whole subject is that the axis runs *through* that spot: doors → statue →
- * under the arch → the colonnade beyond. A desk on the axis is a desk in the
- * archway. So it stands in the east bay between the right-hand flight and the
- * gallery, still facing the entrance, the way a grand lobby seats its
- * reception to one side of the promenade. The spot is radially inside the
- * right arc's band but far outside its sweep — probe 13 measures both.
+ * **In the entrance foyer now, not the stairs hall** (issue #270). Jim,
+ * 17 August 2026, playing it: *"the reception desk is too far from where the
+ * player enters."* The desk used to stand at local z −5.2 — beside the grand
+ * staircase, 17.6 m from the door, on the far side of where {@link LOBBY_HALL_Z}
+ * now draws the line between the two rooms — which is the exact "suggests
+ * getting a key near the staircase" bug QA first found on 7 August, reopened
+ * by the same spot. It now stands a few strides inside the front door, in the
+ * east bay so nothing stands between it and the entrance, still facing the
+ * doors the way a grand lobby seats its reception facing the promenade.
+ *
+ * **z carries `LOBBY_FOYER_GROWTH`** (17 Aug 2026, same day, issue #271's
+ * paintings coming back): the front door moved that much further south when
+ * the foyer grew, and "a few strides inside the front door" is a statement
+ * about the desk's distance from the door, not from the room's own origin —
+ * so the desk moves with the door it is a few strides from.
+ *
+ * **x dropped from 10.5 to 4.5, 18 August 2026** (QA on #280, portrait
+ * phone): the fix above moved the desk 7 m closer to the door in a straight
+ * line, but 10.5 m of that line was *sideways* and only 1.4 m was deeper into
+ * the room — so on a 390×844 portrait screen, standing at the entry point,
+ * the desk sat off the right edge of the frame entirely (`IsoCamera`
+ * projects it to NDC x=1.53; the visible frustum is ±1). A child had to walk
+ * ~5 m sideways, unprompted, before anything appeared. Verified
+ * geometrically (no browser access) by projecting the desk and receptionist
+ * through `IsoCamera` at the player's real teleport-in point
+ * (`enterLobby`'s `LOBBY.halfZ - 2.2`): x=4.5 lands the whole desk footprint
+ * (NDC x from 0.585 to 0.932) and the receptionist (NDC x=0.906) on-screen
+ * — *technically*, per the same QA round that came back with real rendered
+ * screenshots and found only ≈2 px of margin at x=4.5 (298→388 of 390 px),
+ * the greeting bubble clipped off the right edge entirely, and the check-in
+ * stand spot half behind the (short, see-through) near wall. See the round-3
+ * entry below for the fix.
+ *
+ * **x=4.5→3.2, z carries `8.3` not `8.8`, 18 August 2026** (QA round 3 on
+ * #280): the round-2 fix only moved the desk *sideways*; this one moves it
+ * **north** too — deeper into the foyer, which {@link LOBBY_FOYER_GROWTH}
+ * grew by 7 m for exactly this — so the same total displacement buys real
+ * screen margin instead of 2 px of it. The two axes pull screen-x in
+ * opposite, near-equal directions at this camera's fixed 45°/38° rig
+ * (measured: ∂px/∂x ≈ +25.1 px/m, ∂px/∂z ≈ −25.1 px/m, at 390×844), so
+ * "north and recentre together" is not two independent knobs — pushing z
+ * north on its own makes the screen-x crowding *worse*, and only combining
+ * it with a bigger x pull-in nets a leftward move at all.
+ *
+ * The room's own furniture bounds how far that combination can go: the
+ * RiPika medallion (`STATUE_Z`, ring outer radius 2.3 m) and the doors→
+ * medallion runner sit directly in the path a large north+recentre move
+ * would take, so 3.2/8.3+GROWTH was the best point found inside the shared
+ * foyer that cleared both by a real margin while still gaining screen room
+ * — a genuine three-way trade-off against the screen, the statue and the
+ * wall, not a single free lever.
+ *
+ * **Round 4, and a different kind of fix, 18 August 2026** (Jim, direct on
+ * #280, superseding all three rounds above): *"still way too hidden. The
+ * desk should be in a separate ROOM (like the split rooms in the bedroom)
+ * and the lobby in the next room. The desk should be dead centre of this new
+ * reception room prior to the main lobby."* Three rounds of nudging this
+ * constant inside the one shared foyer never fixed the underlying problem —
+ * the desk was always competing with the statue, the seating and the café
+ * for the same frame, so any position that avoided one of them crowded
+ * another. A genuinely separate room removes the competition structurally:
+ * {@link LOBBY_HALFZ_BEFORE_RECEPTION} and {@link RECEPTION_ROOM_DEPTH}
+ * (`layout.ts`) carve a new room, entered directly from the (moved) front
+ * door, that holds nothing but the desk — so "dead centre" and "obviously
+ * visible from the door" stop being in tension with each other for the
+ * first time.
+ *
+ * **x = 0**: dead centre of the room's own `halfX` (13, unchanged) — also
+ * the promenade axis every other doorway in this room sits on, so the desk
+ * is square in the camera's own natural symmetric frame rather than pulling
+ * screen-x toward one edge the way every off-axis value in rounds 1–3 did.
+ * **z**: the room's own midpoint, `LOBBY_HALFZ_BEFORE_RECEPTION +
+ * RECEPTION_ROOM_DEPTH / 2` — 4.5 m from both the new partition's doorway
+ * and the front door, comfortably clear of both doorways' own
+ * `DOORWAY_THROUGH_DEPTH + DOORWAY_CLEARANCE` (1.24 m) reach (`place.ts`).
+ *
+ * Verified geometrically (no browser access this session either — see the
+ * HANDOFF/PR comment for the real `IsoCamera` NDC projection from the
+ * player's true teleport-in point): the desk's whole footprint and the
+ * receptionist project well inside the ±1 frustum at 390×844 portrait, with
+ * wide margin on every edge — no round-4 trade-off was needed the way one
+ * was in rounds 2/3, because being alone in a small room made the old
+ * "sideways vs. deep vs. the statue" bind disappear rather than requiring a
+ * better balance point within it.
  */
-const RECEPTION_X = 8.6;
-const RECEPTION_Z = -5.2;
+export const RECEPTION_X = 0;
+export const RECEPTION_Z = LOBBY_HALFZ_BEFORE_RECEPTION + RECEPTION_ROOM_DEPTH / 2;
 
-/** Where the receptionist herself stands: between her desk and the gallery face. */
+/** Where the receptionist herself stands: behind her own desk, north of it —
+ *  i.e. further from the front door, so a child walks up to the counter
+ *  rather than past her. */
 const RECEPTIONIST_Z = RECEPTION_Z - 1.15;
 
 /**
@@ -954,6 +1048,21 @@ export class Hotel implements GameSystem {
   }
 
   /**
+   * Where each painting actually hangs, world metres, plus which room it is
+   * in — for `check:hotel`'s mezzanine-occlusion probe (issue #271), which
+   * needs the room's own mezzanine plan alongside the built position and
+   * cannot get both from {@link artworkStands} alone.
+   */
+  get artworkPlacements(): readonly {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+    readonly room: HotelRoom;
+  }[] {
+    return this.artworks.map((art) => ({ x: art.x, y: art.y, z: art.z, room: art.room }));
+  }
+
+  /**
    * One frame of whichever camera moment is running, and the seam.
    *
    * `onCinematic` is told **only when the answer changes** — handing `Game` the
@@ -1451,13 +1560,12 @@ export class Hotel implements GameSystem {
     this.updateFeast(dt, elapsed);
     this.updateSpeech(dt);
     if (this.speech) {
-      const x = LOBBY.originX + RECEPTION_X;
-      const z = LOBBY.originZ + RECEPTIONIST_Z;
-      const camera = this.deps.camera;
-      this.receptionBubble.updateScreenSize(
-        camera.worldUnitsPerPixel,
-        Math.hypot(x - camera.focusPoint.x, z - camera.focusPoint.z),
-      );
+      // The bubble's natural (unclamped) world anchor is the position it was
+      // parented at in `dressLobby` — she never moves, so nothing re-sets it
+      // here. `updateScreenSize` reads that anchor straight off the sprite
+      // (`sprite.getWorldPosition`) and re-clamps it to the screen fresh,
+      // every call — see `SpeechBubble`'s own doc.
+      this.receptionBubble.updateScreenSize(this.deps.camera);
     }
 
     // The "that door is not yours yet" blink. Driven off `elapsed` like the
@@ -1648,10 +1756,9 @@ export class Hotel implements GameSystem {
     player.teleportTo(LOBBY.originX, 0, LOBBY.originZ + LOBBY.halfZ - 2.2, Math.PI);
     if (!saveFlags.hasHotelKey()) {
       this.greet();
-      // …and the receptionist calls out from the desk straight ahead of her,
-      // so the first words and the room agree about where checking in
-      // happens. The desk is on the entrance axis now — she is looking
-      // straight at it as this line appears.
+      // …and the receptionist calls out from the desk a few strides away, so
+      // the first words and the room agree about where checking in happens
+      // (issue #270 — reception moved into the entrance foyer itself).
       this.say([`${greetingFor(this.deps.clock())}! Come to the desk and check in!`], -1);
     }
   }
@@ -3016,12 +3123,20 @@ export class Hotel implements GameSystem {
     // the colonnade. A grand lobby's centrepiece stands on the promenade and
     // you walk round it, which the rainbow ring invites; it must not stand IN
     // the archway, which the old spot (0, −1) now is.
+    //
+    // **z moved with the whole foyer** when it grew by `LOBBY_FOYER_GROWTH`
+    // (17 Aug 2026, issue #271's paintings coming back) — the statue's own
+    // position relative to the door, the runner and the seating either side
+    // of it is exactly what it always was, just carried 5 m further from
+    // the (unmoved) lift and stairs hall. See that constant's doc in
+    // `layout.ts`.
+    const STATUE_Z = 4.6 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT;
     const statue = createRipikaStatue();
     // Solid at its plinth's own 1.15 m footing — Jim: *"the statues and chairs
     // you can clip through are weird."*
     this.props.place(shell, LOBBY, statue.root, {
       x: 0,
-      z: 4.6,
+      z: STATUE_Z,
       radius: 1.2,
       // The statue's real height — far above any jump, so no plate; honest
       // rather than Infinity so probe 11's pillar sweep stays meaningful.
@@ -3033,12 +3148,15 @@ export class Hotel implements GameSystem {
     // from up there it is at eye height and close enough to touch, and from
     // the lobby floor it hangs in the middle of the tall room over the
     // statue. Its beams sweep all three levels.
-    this.hangDiscoBall(shell, 0, 8.3, 4.6, { scale: 3, lit: true, room: LOBBY });
+    this.hangDiscoBall(shell, 0, 8.3, STATUE_Z, { scale: 3, lit: true, room: LOBBY });
     // The medallion: Eleri's rainbow ring, inlaid round the plinth. Inner
-    // radius 1.4 clears the 1.15 m footing; six 0.22 m bands keep the whole
-    // medallion inside the runner's line so the axis stays one composition.
-    const ring = rainbowRing(1.4, 0.22);
-    ring.position.set(0, 0, 4.6);
+    // radius 1.4 clears the 1.15 m footing; six 0.15 m bands (0.22 until
+    // issue #270's foyer/hall partition landed at `LOBBY_HALL_Z`) keep the
+    // whole medallion inside the runner's line **and** short of the new
+    // partition — `check:hotel` probe 19 measures the built ring's box
+    // against the built wall's, so the two cannot drift back into each other.
+    const ring = rainbowRing(1.4, 0.15);
+    ring.position.set(0, 0, STATUE_Z);
     shell.add(ring);
     // Kept, because checking in flashes them — see `checkIn`. The ring is six
     // meshes with six materials and this is the only handle on them; asking
@@ -3061,21 +3179,25 @@ export class Hotel implements GameSystem {
     // globe stays above the gallery's own deck, and a hatted child on the
     // landing walks nowhere near it. Its glow is a real light, built by
     // `hotel/lighting.ts`'s own helper so the fitting and the room's lamps
-    // stay one system.
+    // stay one system. z carries `LOBBY_FOYER_GROWTH` with the rest of the
+    // hall it hangs over — the arch itself moved.
+    const CHANDELIER_Z = -0.7 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT;
     const chandelier = createChandelier();
-    chandelier.root.position.set(0, 8.7, -0.7);
+    chandelier.root.position.set(0, 8.7, CHANDELIER_Z);
     shell.add(chandelier.root);
     const pendant = pendantLight();
-    pendant.position.set(0, 8.7 - chandelier.height / 2, -0.7);
+    pendant.position.set(0, 8.7 - chandelier.height / 2, CHANDELIER_Z);
     shell.add(pendant);
 
     // The desk is 2.67 m of bowed crystal counter — a run, so a rectangle
     // rather than a disc, or a child could not walk along it to reach the far
     // end of it.
     //
-    // **Beside the axis, facing the doors** — see RECEPTION_X's header for
-    // why it came off the axis (the axis runs through the arch now). It holds
-    // the east bay between the right-hand flight and the colonnade.
+    // **Dead centre of its own reception room, facing the doors** — see
+    // RECEPTION_X's header (issue #280): the room between
+    // {@link LOBBY_HALFZ_BEFORE_RECEPTION} (the doorway into the rest of the
+    // lobby) and the front door holds nothing else, so the desk is the one
+    // and only thing a child sees stepping in.
     const desk = createReceptionDesk();
     this.props.place(shell, LOBBY, desk.root, {
       x: RECEPTION_X,
@@ -3115,32 +3237,43 @@ export class Hotel implements GameSystem {
     // the entrance, round the statue, under the arch and into the colonnade.
     // Two pieces rather than one because a decal under the medallion's own
     // bands would sit inside the depth ladder's two-step window (probe 17).
+    //
+    // The south piece moves with `LOBBY_FOYER_GROWTH` (+) — it runs
+    // doors-to-medallion, and both of those moved with the statue. The north
+    // piece runs medallion-to-arch, and the arch moved too, the other way
+    // (−) — so this one carries the *same constant, negated*: the medallion
+    // ends up twice as far from the door as it was, and each runner still
+    // reaches exactly what it always reached.
     const runnerSouth = rug(3.2, 4.6, LOBBY.theme.accent, PALETTE.blossomWhite);
-    runnerSouth.position.set(0, 0, 9.8);
+    runnerSouth.position.set(0, 0, 9.8 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT);
     shell.add(runnerSouth);
     const runnerNorth = rug(3.2, 3.9, LOBBY.theme.accent, PALETTE.blossomWhite);
-    runnerNorth.position.set(0, 0, -0.35);
+    runnerNorth.position.set(0, 0, -0.35 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT);
     shell.add(runnerNorth);
 
     // The breakfast corner — "breakfast ... at the ground floor". Two tables
     // only (the *room* full of them is Floor 1 now), tucked in the south-west
     // corner by the west windows, where a café by the glass belongs — not
-    // scattered mid-floor where they read as lost furniture.
-    this.placeBreakfastTable(shell, LOBBY, -10.2, 9.6, 'lobby-a', 0.15);
+    // scattered mid-floor where they read as lost furniture. z carries
+    // `LOBBY_FOYER_GROWTH` with the rest of the foyer.
+    this.placeBreakfastTable(shell, LOBBY, -10.2, 9.6 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, 'lobby-a', 0.15);
     // Spun so its chairs sit east-west (at the first spin a chair interleaved
-    // with the west lounge's rug), and kept a good two metres clear of the
-    // west wall's painting at z ~5.1: with the table at 6.4 the "Look!" shot
-    // flew through a seated café guest's head, and her chair's zone stole
-    // the E press from the painting's (both watched in the browser).
-    this.placeBreakfastTable(shell, LOBBY, -10.3, 7.7, 'lobby-b', 1.35);
+    // with the west lounge's rug). "kept clear of the west wall's painting"
+    // no longer describes this table specifically — the paintings that
+    // spacing was measured against are the two returning ones below, hung
+    // well north of here in the gap `LOBBY_FOYER_GROWTH` opened, not beside
+    // the café — but the same two-metre clearance this spin bought is still
+    // worth keeping for whatever else ends up on that wall.
+    this.placeBreakfastTable(shell, LOBBY, -10.3, 7.7 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, 'lobby-b', 1.35);
 
     // **Two mirrored seating groups flanking the axis** — the symmetric pair
     // every grand lobby seats its guests in, shifted a stride south of the
     // old spots so the rugs stay clear of the flights' feet. Both groups face
-    // +Z so you see who is sitting on them (the camera rule).
+    // +Z so you see who is sitting on them (the camera rule). z carries
+    // `LOBBY_FOYER_GROWTH` with the rest of the foyer.
     for (const side of [-1, 1] as const) {
       const lounge = roundRug(2.6, LOBBY.theme.accent, PALETTE.stonePinkLight);
-      lounge.position.set(side * 7.6, 0, 5.3);
+      lounge.position.set(side * 7.6, 0, 5.3 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT);
       shell.add(lounge);
       for (const [x, colour] of [
         [side * 5.9, PALETTE.markerSky],
@@ -3148,7 +3281,7 @@ export class Hotel implements GameSystem {
       ] as const) {
         this.props.place(shell, LOBBY, sofa(2.6, colour, PALETTE.blossomWhite), {
           x,
-          z: 4.8,
+          z: 4.8 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
           halfX: 1.3,
           halfZ: 0.48,
           // The seat: what a jump lands on. Sailing over the backrest on the
@@ -3159,7 +3292,7 @@ export class Hotel implements GameSystem {
       }
       this.props.place(shell, LOBBY, bedsideTable(), {
         x: side * 7.6,
-        z: 6.4,
+        z: 6.4 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
         radius: 0.36,
         top: 1.0,
         stand: false,
@@ -3179,18 +3312,47 @@ export class Hotel implements GameSystem {
     // than across them. The old cluster at (12, −10.4) stood where the
     // colonnade now runs; it holds the east bay's corner instead, mirroring
     // the west one.
+    //
+    // **Every one of these carries `LOBBY_FOYER_GROWTH`, sign matching
+    // which side of the partition it is on.** The south column and the two
+    // south planters (+) are the entire point of the growth — issue #271's
+    // returning paintings hang in the gap this opens between the relocated
+    // column and the lift's own exclusion line (that constant's own doc).
+    // The hall-side column, both clusters and the hall planter (−) are not
+    // about the paintings at all; they carry it only because the hall they
+    // stand in moved with the wall it is built flush against.
     this.placeProps(shell, LOBBY, [
-      { prop: () => crystalColumn(8.3, LOBBY.theme.floor), x: -11.9, z: -6.6, radius: 0.62, top: 8.3 },
-      { prop: () => crystalColumn(8.3, LOBBY.theme.floor), x: -11.9, z: 6.6, radius: 0.62, top: 8.3 },
-      { prop: () => crystalCluster(0x10b1), x: -12.2, z: -5.8, top: CLUSTER_TOP },
-      { prop: () => crystalCluster(0x10b2), x: 12.2, z: -5.8, top: CLUSTER_TOP },
-      { prop: () => crystalPlanter(0x10b3), x: 3.4, z: 10.8, top: PLANTER_TOP },
-      { prop: () => crystalPlanter(0x10b5), x: -3.4, z: 10.8, top: PLANTER_TOP },
-      { prop: () => crystalPlanter(0x10b4), x: -6.2, z: -6.6, top: PLANTER_TOP },
+      {
+        prop: () => crystalColumn(8.3, LOBBY.theme.floor),
+        x: -11.9,
+        z: -6.6 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
+        radius: 0.62,
+        top: 8.3,
+      },
+      {
+        prop: () => crystalColumn(8.3, LOBBY.theme.floor),
+        x: -11.9,
+        z: 6.6 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
+        radius: 0.62,
+        top: 8.3,
+      },
+      { prop: () => crystalCluster(0x10b1), x: -12.2, z: -5.8 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, top: CLUSTER_TOP },
+      { prop: () => crystalCluster(0x10b2), x: 12.2, z: -5.8 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, top: CLUSTER_TOP },
+      // Back at its natural, mirrored x (3.4, matching the planter at −3.4),
+      // 18 August 2026: it moved to 7.2 only to dodge the reception check-in
+      // stand spot, which shared this room with it at the time. Issue #280's
+      // room split moved the desk (and its stand spot) into its own room
+      // entirely — see {@link RECEPTION_X} — so nothing here needs dodging
+      // any more.
+      { prop: () => crystalPlanter(0x10b3), x: 3.4, z: 10.8 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, top: PLANTER_TOP },
+      { prop: () => crystalPlanter(0x10b5), x: -3.4, z: 10.8 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, top: PLANTER_TOP },
+      { prop: () => crystalPlanter(0x10b4), x: -6.2, z: -6.6 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, top: PLANTER_TOP },
     ]);
 
     // The one keep-out in the lobby that is not a prop: the patch of floor a
-    // child stands on to check in. See `HotelProps.reserve`.
+    // child stands on to check in — now in the reception room, a few strides
+    // south of the desk (toward the front door), same convention as before
+    // the room split. See `HotelProps.reserve`.
     this.props.reserve(LOBBY, RECEPTION_X, RECEPTION_Z + 2.2, 2);
     this.hangOnWalls(shell, LOBBY, {
       // Ground-level sconces on the north wall light the colonnade — the
@@ -3199,23 +3361,83 @@ export class Hotel implements GameSystem {
       north: [-8.4, 0, 8.4],
       // The southern sconce moved off z = -6 when the west wall's northern
       // pane did (see `LOBBY.windows` — a sconce on glass lights nothing).
-      west: [-4.6, 2],
-      // The paintings hang at the end of the axis, in the colonnade, either
-      // side of the centre sconce: walk under the arch and there is something
-      // to arrive at. Their "Look" stands are open colonnade floor, a clear
-      // finger from every other zone (`world/tapSpacing.ts`).
+      // Both are hall fixtures (they light the stairs-and-lifts hall, not
+      // the foyer) and carry `− LOBBY_FOYER_GROWTH` with the rest of it.
+      west: [-4.6 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, 2 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT],
+      // **Issue #271, then #271-again: the paintings are back, on the west
+      // wall, south of the lift.**
+      //
+      // The north wall is still permanently out — every point on it stands
+      // under the gallery deck (`LOBBY.mezzanine` reaches the whole width of
+      // that wall), so the fixed camera's own ray from anywhere on it
+      // crosses the deck's box before it reaches the lens;
+      // `mezzanineHidesPoint` says so, which is how the original bug was
+      // found. {@link clearOfGlass} refuses a spot the deck hides (the same
+      // way it already refuses one over glass), so that wall can never host
+      // one again, whatever this array says.
+      //
+      // The west wall was the fix, once there was somewhere on it — the
+      // first attempt found there wasn't: every point on it sits within
+      // 0.31 m (local x) of the lift's own boarding band, whose 2.6 m
+      // half-width plus a picture's 2 m pick radius plus the tap-spacing
+      // finger needs 5.73 m of clearance from `liftZ` (the exact number
+      // moves with the lift, since `LOBBY_FOYER_GROWTH` shifts that too),
+      // and both directions from there were already spoken for by the
+      // crystal column and the café. Jim's call (17 Aug 2026): don't drop
+      // the paintings, make more wall — {@link LOBBY_FOYER_GROWTH} moves
+      // every foyer fixture's own local z by itself, which (added to the
+      // same shift in the room's own origin) doubles to how far each
+      // actually ends up from the lift. The seating group's sofas turned out
+      // to be the binding one, not the column — `check:hotel`'s "Look!"
+      // stand-spot probe (7) found a picture's stand point still landing on
+      // a sofa at the growth's first, smaller value, which the column alone
+      // would never have caught — so these two hang in the stretch between
+      // the lift's own exclusion line and the sofas' own (now much further)
+      // north edge, `clearOfGlass`'s own search finding the exact clear
+      // metres within it rather than this array guessing them.
       pictures: [
-        { wall: 'north', along: -3.2, width: 1.7, height: 1.25, seed: 0x10c2 },
-        { wall: 'north', along: 3.2, width: 1.7, height: 1.25, seed: 0x10c3 },
+        { wall: 'west', along: 7.0 - RECEPTION_ORIGIN_SHIFT, width: 1.5, height: 1.25, seed: 0x10c2 },
+        { wall: 'west', along: 9.4 - RECEPTION_ORIGIN_SHIFT, width: 1.5, height: 1.25, seed: 0x10c3 },
       ],
     });
     this.dressMezzanine(shell);
 
     // A painted arrow on the floor pointing at the lift — "an arrow showing
-    // the way to your floor, on the floors of the hotel". Peels off the
-    // runner's west edge and threads between the west seating group and the
-    // café to the lift's mouth.
-    this.paintArrow(shell, -2.4, 9.2, -10.8, 0.4);
+    // the way to your floor, on the floors of the hotel". Two legs now
+    // (issue #270): the straight line this used to be would have crossed the
+    // new foyer/hall partition through solid wall — its two endpoints sit on
+    // the same (negative) side of x, so a single straight line between them
+    // never reaches {@link LOBBY_HALL_DOOR_X}'s doorway however that constant
+    // is tuned. The first leg carries on past the statue to the doorway; the
+    // second picks up on the far side and carries on between the west
+    // seating group and the café to the lift's mouth. Every z here carries
+    // `LOBBY_FOYER_GROWTH`, sign matching whichever side of the (also-moved)
+    // doorway it is on: + for the first leg's start (it is routed round the
+    // statue, a foyer fixture), − for both the doorway crossing itself and
+    // the second leg's end at the lift's own (also relocated) mouth.
+    //
+    // **A decal tier up from the default**, because the first leg's straight
+    // line still passes inside the rainbow ring's own radius round the
+    // statue — `check:hotel` probe 17 caught the two exactly coplanar at
+    // 4·`DECAL_STEP` (both 0.080 m, "0.0 mm apart"), the same class of
+    // flicker the garden's arrow already sidesteps over its own stacked lawn
+    // rug.
+    this.paintArrow(
+      shell,
+      -2.4,
+      9.2 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
+      0,
+      2.4 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
+      8 * DECAL_STEP,
+    );
+    this.paintArrow(
+      shell,
+      0,
+      1.6 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
+      -10.8,
+      0.4 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
+      8 * DECAL_STEP,
+    );
 
     return statue;
   }
@@ -4243,13 +4465,25 @@ export class Hotel implements GameSystem {
     // Mirrored, because the whole composition below is; both face +Z, out
     // over the balustrade at the statue and the disco ball — the view is the
     // reason to climb, and it is now two flights up instead of one.
+    //
+    // **Every z here carries `-LOBBY_FOYER_GROWTH`**, same as the rest of the
+    // hall/mezzanine composition — these were the one part of it missed when
+    // that shift went in: they're hardcoded literals, not derived from
+    // `plan`, so they stayed put while the gallery/landing box moved out from
+    // under them. That left this whole seating nook floating 7 m south of the
+    // deck it used to sit on — no longer over the (now-relocated) landing at
+    // all, but hanging in open air above the main lobby floor, where
+    // `mezzanineHidesPoint`'s box no longer reaches it. Found by check:hotel
+    // probe 25: ground-floor spots the sofa/rug now occluded with nothing
+    // fading them.
     for (const side of [-1, 1] as const) {
       const nookX = side * 8.4;
       // Radius fitted to the deck's own clear depth: the north wall's face is
-      // at −12.15, and a 1.9 m rug at this centre reached 0.15 m under it —
-      // found by probe 19 on the first build of this gallery.
+      // at −19.15 (was −12.15 before `LOBBY_FOYER_GROWTH`), and a 1.9 m rug
+      // at this centre reached 0.15 m under it — found by probe 19 on the
+      // first build of this gallery.
       const nook = roundRug(1.7, LOBBY.theme.accent, PALETTE.stonePinkLight);
-      nook.position.set(nookX, height + 0.01, -10.4);
+      nook.position.set(nookX, height + 0.01, -10.4 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT);
       overhang.add(nook);
       for (const [x, colour] of [
         [nookX - side * 1.2, PALETTE.markerLilac],
@@ -4258,7 +4492,7 @@ export class Hotel implements GameSystem {
         this.props.place(overhang, LOBBY, sofa(2.3, colour, PALETTE.blossomWhite), {
           x,
           y: height,
-          z: -10.9,
+          z: -10.9 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
           halfX: 1.15,
           halfZ: 0.48,
           base: height,
@@ -4268,7 +4502,7 @@ export class Hotel implements GameSystem {
       this.props.place(overhang, LOBBY, bedsideTable(), {
         x: nookX,
         y: height,
-        z: -9.4,
+        z: -9.4 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
         radius: 0.36,
         base: height,
         top: 1.0,
@@ -4279,11 +4513,13 @@ export class Hotel implements GameSystem {
     // Planters bookending the gallery, and a pair on the landing's back
     // corners so the stage a child arrives on is dressed without being
     // cluttered — its middle stays clear for the walk to the grand flight.
+    // z carries `-LOBBY_FOYER_GROWTH` with the rest of the hall (see the
+    // seating-nook comment above — same bug, same fix).
     for (const [x, z, base, seed] of [
-      [-11.8, -8.8, height, 0x11a1],
-      [11.8, -8.8, height, 0x11a2],
-      [-4.1, -7.0, landing.height, 0x11a3],
-      [4.1, -7.0, landing.height, 0x11a4],
+      [-11.8, -8.8 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, height, 0x11a1],
+      [11.8, -8.8 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, height, 0x11a2],
+      [-4.1, -7.0 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, landing.height, 0x11a3],
+      [4.1, -7.0 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, landing.height, 0x11a4],
     ] as const) {
       this.props.place(overhang, LOBBY, crystalPlanter(seed), {
         x,
@@ -4442,9 +4678,9 @@ export class Hotel implements GameSystem {
       const normalX = frame.wall === 'north' ? 0 : 1;
       const normalZ = frame.wall === 'north' ? 1 : 0;
       if (frame.wall === 'north') {
-        painting.position.set(along, PICTURE_Y, -room.halfZ + 0.31);
+        painting.position.set(along, PICTURE_Y, -room.halfZ + PICTURE_WALL_INSET);
       } else {
-        painting.position.set(-room.halfX + 0.31, PICTURE_Y, along);
+        painting.position.set(-room.halfX + PICTURE_WALL_INSET, PICTURE_Y, along);
         painting.rotation.y = Math.PI / 2;
       }
       shell.add(painting);
@@ -4776,9 +5012,21 @@ function glazedSpans(
 /**
  * Where a picture of `width` × `height` may actually hang on this wall, at or
  * near the declared `along` — slid to the nearest clear stretch when the
- * declared spot would put it over a pane (at the picture's own heights) or
- * across the wall's doorway gap, or `null` when the whole wall is spoken
- * for. The declared position is a wish; the glazing is the law.
+ * declared spot would put it over a pane (at the picture's own heights),
+ * across the wall's doorway gap, or **behind the room's mezzanine** as seen
+ * from the fixed camera, or `null` when the whole wall is spoken for. The
+ * declared position is a wish; the glazing, the doorway and the deck overhead
+ * are the law.
+ *
+ * **Issue #271.** A painting hung where `mezzanineHidesPoint` says the deck
+ * stands between it and the camera is a painting that is never actually on
+ * screen — the highlight ring and the "Look" chip still fire off distance
+ * alone, so a child can select and walk to something she can never see. This
+ * is exactly the same shape of guard as the glass and the doorway above it:
+ * catch the bad spot where the picture is *placed*, so nothing downstream
+ * (the highlight, the interact zone, the cinematic "Look!" shot) ever has to
+ * know the wall had a shadow on it. `check:hotel` proves the built paintings
+ * against the same function, on the built scene, so the two cannot drift.
  */
 function clearOfGlass(
   room: HotelRoom,
@@ -4799,10 +5047,22 @@ function clearOfGlass(
 
   const wallHalf = side === 'north' ? room.halfX : room.halfZ;
   const reach = width / 2 + PICTURE_GLASS_MARGIN;
+  // The wall-local point a candidate `at` would actually hang at — the same
+  // formula `hangOnWalls` places the mesh with, so the two can never place a
+  // picture somewhere different from what this asked about.
+  const hidden = (at: number): boolean => {
+    if (!room.mezzanine) return false;
+    const localX = side === 'north' ? at : -room.halfX + PICTURE_WALL_INSET;
+    const localZ = side === 'north' ? -room.halfZ + PICTURE_WALL_INSET : at;
+    return mezzanineHidesPoint(room.mezzanine, localX, PICTURE_Y, localZ);
+  };
   const fits = (at: number): boolean =>
     at - reach >= -wallHalf + 0.3 &&
     at + reach <= wallHalf - 0.3 &&
-    forbidden.every(([from, to]) => at + reach <= from || at - reach >= to);
+    forbidden.every(([from, to]) => at + reach <= from || at - reach >= to) &&
+    !hidden(at - reach) &&
+    !hidden(at) &&
+    !hidden(at + reach);
 
   if (fits(along)) return along;
   for (let step = 0.1; step <= wallHalf * 2; step += 0.1) {

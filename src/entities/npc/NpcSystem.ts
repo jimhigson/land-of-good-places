@@ -1110,7 +1110,7 @@ export class NpcSystem implements GameSystem {
         character.position.y + character.avatar.height + BUBBLE_HEIGHT_OFFSET,
         character.position.z,
       );
-      bubble.updateScreenSize(camera.worldUnitsPerPixel, character.position.distanceTo(camera.focusPoint));
+      bubble.updateScreenSize(camera);
     }
   }
 }
