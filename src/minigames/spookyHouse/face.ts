@@ -55,8 +55,23 @@ const POP_HOLD_SECONDS = 0.4;
  * snaps `presence.target` to 1, and the spring (tuned hard and light — see
  * the `presence.update` call below) covers {@link PRESENCE_DROP} of vertical
  * travel in a few hundred milliseconds: it reads as leaping into frame, not
- * growing closer. When the hold timer runs out the same spring is sent back
- * to 0 and the face drops out of frame again just as fast.
+ * growing closer. `retreat()` sends the same spring back to 0 and the face
+ * drops out of frame again just as fast.
+ *
+ * Deliberately **no timer lives here.** An earlier version had `boo()` take a
+ * `holdSeconds` and count its own retreat down internally — which is exactly
+ * the "two definitions of one thing kept in step by hand" shape CLAUDE.md
+ * warns about: `JumpscareDirector` (`jumpscare.ts`) already owns exactly how
+ * long a cycle's window stays open, including `extendHold`'s mouth-tap
+ * extensions, and a second countdown in here could only ever *start* in sync
+ * with it, never *stay* in sync once a tap extended one but not the other
+ * (found live on PR #294 — the face retreated on the original schedule while
+ * `extendHold` kept the director's own window open). So this face has no
+ * opinion on duration at all: `SpookyHouse.ts` calls `boo()` the instant the
+ * director's `jumpOut` event fires and `retreat()` the instant its `retreat`
+ * event fires, whatever caused that timing — a fresh cycle or a stack of
+ * mouth-tap extensions — and the face is out for exactly as long as
+ * `windowOpen` says it is, because nothing here can disagree with that.
  *
  * The eye/mouth hotspots (`hotspots.ts`) need no code change for this: they
  * re-project their anchor's *world* position every frame, and those anchors
@@ -170,14 +185,21 @@ export interface SpookyFace {
   openMouth(): void;
   /**
    * The whole face leaps into frame from nowhere — the jump-scare lunge
-   * (#293). `holdSeconds` is how long it stays fully in view before the same
-   * spring snaps it back out of frame; `SpookyHouse.ts` passes its jump-scare
-   * cycle's reflex window here, so the visible "it's out and reachable" beat
-   * and the window a tap actually scores in are the same number, not two
-   * numbers a future edit could pull apart. See {@link PRESENCE_DROP} above
-   * for what "in frame" now means.
+   * (#293). Call this the instant `JumpscareDirector`'s `jumpOut` event
+   * fires; call {@link retreat} the instant its `retreat` event fires. This
+   * face holds no duration of its own — see the file-level comment above for
+   * why — so it stays visible for exactly as long as the caller keeps it
+   * that way. See {@link PRESENCE_DROP} above for what "in frame" now means.
    */
-  boo(holdSeconds?: number): void;
+  boo(): void;
+  /**
+   * Sends the face back out of frame — the other half of {@link boo}. Call
+   * this the instant `JumpscareDirector`'s `retreat` event fires, whether
+   * that is on the cycle's original schedule or after mouth-tap extensions
+   * (`extendHold`) pushed it out; the director is the only clock that
+   * matters here.
+   */
+  retreat(): void;
   update(dt: number, elapsed: number): void;
   dispose(): void;
 }
@@ -267,9 +289,11 @@ export function createSpookyFace(): SpookyFace {
   const mouthOpen = new Spring(0);
   let mouthHoldTimer = 0;
   // Starts at 0 — off-frame, below the floor — not at the old "resting on the
-  // wall" pose. See the {@link PRESENCE_DROP} comment above.
+  // wall" pose. See the {@link PRESENCE_DROP} comment above. No hold timer
+  // lives alongside it any more — see the file-level comment for why: the
+  // caller (`SpookyHouse.ts`, driven by `JumpscareDirector`) decides when it
+  // comes back in and goes back out, by calling `boo()`/`retreat()` directly.
   const presence = new Spring(0);
-  let presenceHoldTimer = 0;
   const browWaggle = new Spring(0);
   let elapsedTime = 0;
   // Captured from whatever `root.position` is set to once (`SpookyHouse.ts`
@@ -289,10 +313,14 @@ export function createSpookyFace(): SpookyFace {
       mouthHoldTimer = 0.32;
     },
 
-    boo(holdSeconds = 0.3): void {
+    boo(): void {
       presence.target = 1;
-      presenceHoldTimer = holdSeconds;
       browWaggle.target = 1;
+    },
+
+    retreat(): void {
+      presence.target = 0;
+      browWaggle.target = 0;
     },
 
     update(dt: number, elapsed: number): void {
@@ -313,13 +341,6 @@ export function createSpookyFace(): SpookyFace {
       cavity.scale.y = 0.5 + openAmount * 1.05;
       lowerLip.position.y = -0.42 - openAmount * 0.32;
 
-      if (presenceHoldTimer > 0) {
-        presenceHoldTimer -= dt;
-        if (presenceHoldTimer <= 0) {
-          presence.target = 0;
-          browWaggle.target = 0;
-        }
-      }
       // Hard and light on purpose — this has to read as a snap-into-frame
       // lunge inside a well-under-a-second reflex window, not a creep. The
       // spring's own overshoot (see `spring.ts`) gives the "boing" past full

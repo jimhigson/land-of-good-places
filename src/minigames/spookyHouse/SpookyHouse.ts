@@ -233,11 +233,18 @@ class SpookyHouse implements MiniGame {
     // frame, so this is a loop, not an `if`.
     for (const event of this.jumpscare?.update(dt) ?? []) {
       if (event.kind === 'jumpOut') {
-        this.face?.boo(event.windowSeconds);
+        this.face?.boo();
         playBooSound();
         this.hud?.shout(event.cycleIndex === 0 ? 'Here it comes — tap it!' : 'Quick — tap it!', 1.1);
         for (const hotspot of this.hotspots) hotspot.setActive(true);
       } else if (event.kind === 'retreat') {
+        // The director is the only clock for "how long is the face out this
+        // cycle" (`extendHold` may have pushed this well past the cycle's
+        // base `windowSeconds`) — `face.ts` holds no duration of its own any
+        // more, so this call is what actually sends it back out of frame,
+        // exactly when the director says the window closed, extensions and
+        // all. See `face.ts`'s file-level comment for why (#294 QA finding).
+        this.face?.retreat();
         for (const hotspot of this.hotspots) hotspot.setActive(false);
         // A hit already got its own "Got it!" and score-pill update the
         // instant the tap landed (`registerJumpscareHit`) — instant feedback
