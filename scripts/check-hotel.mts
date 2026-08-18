@@ -75,7 +75,9 @@ import {
   ROOMS,
   BREAKFAST,
   CORRIDOR,
+  DOORWAY_THROUGH_DEPTH,
   GARDEN_FLOOR,
+  type HotelRoom,
   HOTEL_FLOORS,
   LOBBY,
   LOBBY_FOYER_GROWTH,
@@ -2289,13 +2291,191 @@ let occlusionReport = 'occlusion not measured';
   }
 }
 
+// -------------- 26. every doorway leaves a real stride of floor past it
+
+// Jim, 18 Aug 2026, on `/hotel-suite`: *"is this a joke? … dumb furniture
+// clearly still in the way … non-functional by any degree."* The lounge
+// sofa's own placement comment had claimed a clean 0.28 m margin from the
+// doorway — true, and useless: `HotelProps.assertDoorwaysClear` (issue #273)
+// only ever asked whether a footprint overlapped a thin band hugging the
+// wall, sized to keep the *opening* clear. Nothing asked whether a body could
+// take a single stride past that band before meeting something solid, so a
+// sofa parked just past the band still choked most of the doorway's own
+// width — `layout.ts`'s `DOORWAY_THROUGH_DEPTH` is the fix for that gap.
+//
+// This probe asks that question directly, and **independently of the
+// geometry `isClearOfDoorways` checks** — CLAUDE.md's "a check can pass
+// without checking anything" the other way round: a bug in the zone math
+// itself (exactly what shipped here — a zone too shallow to matter) cannot
+// blind a check built from different first principles. It reads the same
+// `HotelRoom.gaps`/`.partitions` data `doorwayClearanceZones` is built from,
+// but never calls that function: instead it marches a player-sized body at
+// the real `CollisionWorld`, from outside, across several bearings spanning
+// each doorway's width, both directions, and asserts she can clear a full
+// `DOORWAY_THROUGH_DEPTH` past the wall plane from every one of them — the
+// same "probe it from outside, from many bearings" standard the hotel-shell
+// bug (9 Aug 2026) forced on the tower's own front door (probe 22).
+//
+// Proven red first: run this against the pre-fix suite (sofa at z = 3.9,
+// TV at `FLOOR_Z + 0.4`) and it reports both doorways short by 0.4–0.6 m.
+
+interface DoorwayCrossing {
+  readonly room: string;
+  readonly throughAxis: 'x' | 'z';
+  /** World coordinate of the wall plane, along `throughAxis`. */
+  readonly wallPos: number;
+  /** World coordinate of the doorway's own centre, along the other axis. */
+  readonly alongCenter: number;
+  readonly alongHalfWidth: number;
+}
+
+/**
+ * Every doorway a body can walk through in `room` — outer wall gaps and
+ * partition doors alike — as a crossing a probe can be marched at. Kept
+ * deliberately separate from `layout.ts`'s `doorwayClearanceZones`: both read
+ * `HotelRoom.gaps`/`.partitions`, but this one never calls that function, so
+ * a mistake in *its* geometry cannot also be baked into the thing checking
+ * it (the same reasoning `park-harness.mts`'s inert `iris` documents for why
+ * a headless check has to drive the real thing, not a description of it).
+ */
+function doorwayCrossings(room: HotelRoom): DoorwayCrossing[] {
+  const crossings: DoorwayCrossing[] = [];
+  for (const side of ['north', 'south', 'east', 'west'] as const) {
+    const gap = room.gaps[side];
+    if (!gap) continue;
+    const [from, to] = gap;
+    if (side === 'north' || side === 'south') {
+      crossings.push({
+        room: room.space,
+        throughAxis: 'z',
+        wallPos: room.originZ + (side === 'north' ? -room.halfZ : room.halfZ),
+        alongCenter: room.originX + (from + to) / 2,
+        alongHalfWidth: (to - from) / 2,
+      });
+    } else {
+      crossings.push({
+        room: room.space,
+        throughAxis: 'x',
+        wallPos: room.originX + (side === 'west' ? -room.halfX : room.halfX),
+        alongCenter: room.originZ + (from + to) / 2,
+        alongHalfWidth: (to - from) / 2,
+      });
+    }
+  }
+  for (const run of room.partitions ?? []) {
+    const doorHalf = SUITE_DOOR_WIDTH / 2;
+    for (const at of run.doors) {
+      crossings.push(
+        run.along === 'x'
+          ? {
+              room: room.space,
+              throughAxis: 'z',
+              wallPos: room.originZ + run.at,
+              alongCenter: room.originX + at,
+              alongHalfWidth: doorHalf,
+            }
+          : {
+              room: room.space,
+              throughAxis: 'x',
+              wallPos: room.originX + run.at,
+              alongCenter: room.originZ + at,
+              alongHalfWidth: doorHalf,
+            },
+      );
+    }
+  }
+  return crossings;
+}
+
+/** How far before the wall plane each march starts. */
+const CROSSING_APPROACH = 1.0;
+// Exactly what `DOORWAY_THROUGH_DEPTH` promises a *body*, not a point: the
+// zone keeps every solid footprint's near edge at least `clearance +
+// DOORWAY_THROUGH_DEPTH` from the wall, and `clearance` is `PLAYER_RADIUS`
+// itself (`place.ts`'s `DOORWAY_CLEARANCE`) — so a body's own centre,
+// stopped `PLAYER_RADIUS` short of whatever it meets, can always reach
+// `(clearance + DOORWAY_THROUGH_DEPTH) − PLAYER_RADIUS` = `DOORWAY_THROUGH_DEPTH`
+// past the wall. Asking for more here would be asking this probe to prove a
+// promise the zone never made; asking for less would let furniture creep
+// back to where `assertDoorwaysClear` alone already missed it once.
+const CROSSING_TARGET = DOORWAY_THROUGH_DEPTH;
+const CROSSING_STEP = 0.03;
+/** Samples across a doorway's width, inset so a bearing is never aimed at a jamb. */
+const CROSSING_BEARINGS = 5;
+
+/**
+ * Marches a player-sized body through one doorway crossing, from `sign`'s
+ * side, at `offset` from the doorway's own centre. Returns how far past the
+ * wall plane she actually got (negative if she never reached it at all).
+ */
+function marchCrossing(crossing: DoorwayCrossing, sign: 1 | -1, offset: number): number {
+  const along = crossing.alongCenter + offset;
+  const probe =
+    crossing.throughAxis === 'z'
+      ? new Vector3(along, 0, crossing.wallPos - sign * CROSSING_APPROACH)
+      : new Vector3(crossing.wallPos - sign * CROSSING_APPROACH, 0, along);
+  const steps = Math.round((CROSSING_APPROACH + CROSSING_TARGET + 0.3) / CROSSING_STEP);
+  for (let i = 0; i < steps; i += 1) {
+    if (crossing.throughAxis === 'z') probe.z += sign * CROSSING_STEP;
+    else probe.x += sign * CROSSING_STEP;
+    collision.resolve(probe, PLAYER_RADIUS);
+  }
+  const reachedAt = crossing.throughAxis === 'z' ? probe.z : probe.x;
+  return (reachedAt - crossing.wallPos) * sign;
+}
+
+let crossingsChecked = 0;
+const crossingFailures: string[] = [];
+for (const room of ROOMS) {
+  for (const crossing of doorwayCrossings(room)) {
+    const usable = crossing.alongHalfWidth - PLAYER_RADIUS;
+    const offsets =
+      usable <= 0
+        ? [0]
+        : Array.from({ length: CROSSING_BEARINGS }, (_, i) =>
+            usable * (-1 + (2 * i) / (CROSSING_BEARINGS - 1)),
+          );
+    for (const sign of [1, -1] as const) {
+      for (const offset of offsets) {
+        crossingsChecked += 1;
+        const reached = marchCrossing(crossing, sign, offset);
+        if (reached < CROSSING_TARGET - 0.1) {
+          crossingFailures.push(
+            `${crossing.room} doorway at ${crossing.throughAxis}=${crossing.wallPos.toFixed(2)} ` +
+              `(along ${crossing.alongCenter.toFixed(2)}, offset ${offset.toFixed(2)}, ` +
+              `${sign > 0 ? '+' : '-'}${crossing.throughAxis}): a player-sized march only reached ` +
+              `${reached.toFixed(2)} m past the wall, short of the ${CROSSING_TARGET.toFixed(2)} m a ` +
+              `real stride needs`,
+          );
+        }
+      }
+    }
+  }
+}
+if (crossingsChecked === 0) {
+  problems.push('no doorway crossings were built to march at — the probe is blind');
+}
+if (crossingFailures.length > 0) {
+  // One line per doorway/bearing would drown the report in near-duplicates
+  // (five bearings times two directions per doorway); name the doorways,
+  // not every bearing that failed at each one.
+  const byDoorway = new Set(
+    crossingFailures.map((line) => line.slice(0, line.indexOf(':'))),
+  );
+  problems.push(
+    `${crossingFailures.length}/${crossingsChecked} doorway crossing march(es) fell short across ` +
+      `${byDoorway.size} doorway(s): ${[...byDoorway].join('; ')}`,
+  );
+}
+
 // ----------------------------------------------------------------- report
 
 console.log(
   `check:hotel — ${npcs.all.length} children (${hotel.residents.length} of them hotel residents), ` +
     `lowest foot at y=${lowest.toFixed(2)} m after ${SETTLE_SECONDS} s; ` +
     `${mustBeSolid.length + 1} props solid, 3 beds soft and standable; ` +
-    `${panes}/${declared} declared window panes built; ${occlusionReport}.`,
+    `${panes}/${declared} declared window panes built; ${occlusionReport}; ` +
+    `${crossingsChecked} doorway crossing marches, ${crossingFailures.length} fell short.`,
 );
 
 if (problems.length > 0) {
