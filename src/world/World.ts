@@ -268,6 +268,14 @@ export class World implements GameSystem {
       camera,
       (x, z, y) => this.building.surfaces.sample(x, z, y),
       this.scenery.climbableTrees,
+      // Every railway bridge's own surface height (issue #116, Decision 8) —
+      // `train` is built well above, so every bridge already exists here.
+      (x, z) => {
+        for (const bridge of this.train.bridges) {
+          if (bridge.covers(x, z)) return bridge.heightAt(x, z);
+        }
+        return null;
+      },
       this.entrance.arrival ? ARRIVAL_KID_COUNT : 0,
       this.hotel.residents,
     );

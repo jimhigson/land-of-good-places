@@ -24,8 +24,11 @@
  * ## The six
  *
  * 1. **Every attraction routes from the entrance** on the real nav lattice.
- * 2. **No route crosses the railway** except over a bridge deck. (There are no
- *    bridges yet, so today it reduces to: no crossings at all.)
+ * 2. **No route crosses the railway** except over a bridge deck — issue #116,
+ *    Decision 8. Every crossing `world/train/crossings.ts` finds gets a real
+ *    bridge (`world/train/bridges.ts`), so this is no longer a vacuous "no
+ *    crossings exist to check": a route that meets the rail anywhere the
+ *    deck does not clear it by {@link BRIDGE_RISE} is a genuine finding.
  * 3. **`poiGraph` is one connected component containing every POI.** The graph
  *    already validates its nodes and its edges; nothing checked that they add
  *    up to a single network, which is exactly what the three dead indoor seeds
@@ -40,9 +43,11 @@
  *
  * Proved against the hand-authored park, and the hand-authored park does not
  * satisfy all six. It was never asked to: invariant 4's exclusion wall is
- * Decision 4 work nobody has built yet, and invariant 2 cannot be satisfied
- * without the bridges Decision 5 §L3 will emit. Silently passing those would
- * make this script decorative on the night it is most needed.
+ * Decision 4 work nobody has built yet. Invariant 2 was the same story until
+ * issue #116/Decision 8 built the bridges it needed — silently passing it
+ * before that would have made this script decorative on the night it was
+ * most needed, which is why it always measured the real park rather than
+ * assuming "no bridges built yet" meant "nothing to check".
  *
  * So, {@link RATCHET}, after `check-asset-contract.mts`: each existing
  * deviation is recorded with the number it measured on the day this landed, and
@@ -60,7 +65,7 @@
 import './headless-canvas.mjs';
 import { Matrix4, Quaternion, Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
-import { NavGrid, MAX_ROUTE_WAYPOINTS } from '../src/world/NavGrid.ts';
+import { NavGrid, MAX_ROUTE_WAYPOINTS, TOP_REFERENCE } from '../src/world/NavGrid.ts';
 import { PLAYER_LONGEST_STEP, PLAYER_RADIUS } from '../src/core/constants.ts';
 import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
 import { ANCHORS, anchorGroupName } from '../src/world/anchors.ts';
@@ -70,7 +75,7 @@ import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from '../src/world/entrance/layo
 import { SHORTFALL_TOLERANCE } from '../src/entities/TapNavigator.ts';
 import { TRACK_CLEARANCE } from '../src/world/train/route.ts';
 import { STATION_GAP } from '../src/world/train/fence.ts';
-import { TRAIN_CLEARANCE_Y } from '../src/world/train/clearance.ts';
+import { BRIDGE_RISE } from '../src/world/train/clearance.ts';
 import type { InteractZone } from '../src/world/interact.ts';
 
 // ---------------------------------------------------------------- the ratchet
@@ -205,7 +210,15 @@ const ENTRANCE_Z = ENTRANCE_PLAYER_Z;
  * player's own radius and her own jump apex, so a wall this says she can hop is
  * one she hops.
  */
-const navGrid = new NavGrid(collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT);
+const navGrid = new NavGrid(
+  collision,
+  PLAYER_RADIUS,
+  JUMP_APEX_HEIGHT,
+  undefined,
+  // Every railway bridge's deck and ramps (issue #116, Decision 8) — see
+  // NavGrid's own `bridgeCovers` header.
+  (x, z) => world.train.bridges.some((bridge) => bridge.covers(x, z)),
+);
 const route = new Float32Array(MAX_ROUTE_WAYPOINTS * 2);
 
 /** A place a child has to be able to get to, and what to call it if she cannot. */
@@ -315,38 +328,14 @@ const trackY = new Float64Array(TRACK_SAMPLES + 1);
 }
 
 /**
- * The depth of a bridge's own structure — deck planks plus the beams under
- * them — between the surface a child walks on and the soffit a train passes
- * beneath.
+ * How far a walkable surface must stand above the ground under the track
+ * before a route passing over it counts as a **bridge**.
  *
- * The one number here that is a *claim* rather than a derivation, because the
- * thing it describes is still being built (#116). It is stated separately, and
- * named, so that it is obvious what to reconcile when the real deck lands
- * rather than being buried inside a single fudged total.
- */
-const BRIDGE_DECK_DEPTH = 0.35;
-
-/**
- * How far a walkable surface must stand above the ground under the track before
- * a route passing over it counts as a **bridge** rather than a level crossing.
- *
- * **Derived from the train, not chosen.** It used to be a flat `2`, honestly
- * documented as picked "because there are no bridges in the park today, so
- * nothing can be looked up" — comfortably more than the terrain wanders (~1.4 m
- * across the whole park) and assumed comfortably less than any real deck.
- *
- * That assumption was wrong, and dangerously so. It was then made *less* wrong
- * and still dangerous: deriving it from the locomotive's funnel gave 2.77, which
- * puts a soffit at exactly the funnel tip — **zero** margin for Percy, and a
- * standing child rider's head 0.28 m inside the deck and the player's 0.70 m
- * inside it, because the train carries passengers and they are taller than the
- * funnel.
- *
- * So it now reads `TRAIN_CLEARANCE_Y` from `train/clearance.ts`, which owns the
- * whole derivation — loco body, standing NPC, the player standing on the bench,
- * headroom — and is
- * the only place any of those numbers live. Retuning the loco, moving the bench
- * or adding a taller hat all move this.
+ * Imported from `train/clearance.ts` rather than derived here — the single
+ * owner both `world/train/bridges.ts` (which builds every deck to stand
+ * exactly this high) and this checker (which judges it) read from, so a
+ * retune of the train, the rider or the deck's own thickness moves both
+ * sides together. See that module for the full derivation.
  *
  * ### The datum
  *
@@ -356,32 +345,17 @@ const BRIDGE_DECK_DEPTH = 0.35;
  * at exactly that same terrain height. So `deck - hit.rail >= BRIDGE_RISE`
  * compares like with like. `RAIL_HEIGHT` is deliberately absent: it is rail
  * sitting *on* the datum, not part of it.
- */
-const BRIDGE_RISE = TRAIN_CLEARANCE_Y + BRIDGE_DECK_DEPTH;
-
-/**
- * How far *past* a level crossing's own fence gap a route may still meet the
- * rails and count as using that crossing.
  *
- * A stride's worth of slack, and it is needed because the two things being
- * compared are measured differently: `halfGap` is the crossing's self-measured
- * fence opening (`train/crossings.ts`), while the route is a nav-lattice
- * polyline on a 0.5 m grid that can clip the corner of the opening without any
- * of its vertices landing inside it.
+ * ### Why there is no more "or a level crossing" escape
  *
- * This constant is **named in the failure message and was never defined** —
- * `scripts/` is outside `tsconfig.json`'s `include`, so nothing typechecked it,
- * and the script runs straight on Node, which strips the types without
- * checking them, so it does not care either. The message only renders when a violation is found and the
- * measured count has always been 0, so the `ReferenceError` sat here unfired:
- * the first genuinely illegal crossing would have crashed the checker with a
- * stack trace instead of reporting the finding. Found while starting #116,
- * which is the change that finally makes invariant 2 capable of failing.
+ * Until issue #116/Decision 8 built real bridges, this invariant accepted a
+ * route meeting the rail within a declared level crossing's fence gap too —
+ * the only way it could ever pass, since nothing built a deck. That escape is
+ * gone: every crossing the park draws now gets a bridge
+ * (`ParkTrain.bridges`), so a route meeting the rail anywhere the deck does
+ * not clear it by `BRIDGE_RISE` is exactly what invariant 2 says it is — a
+ * bug, not an expected level crossing.
  */
-const LEVEL_CROSSING_REACH = 2.5;
-
-// A route may meet the rail within a crossing's own (self-measured) fence
-// gap plus a stride — the crossings module publishes `halfGap` per crossing.
 
 /** Do segments a→b and c→d cross? Proper crossing only; touching does not count. */
 function segmentsCross(
@@ -482,11 +456,14 @@ for (const target of targets) {
     });
   }
 
-  // --- 2. and it may cross the railway only where crossing is provided ------
-  // A crossing is legal over a bridge deck (2 m above the rail) or within a
-  // declared level crossing's fence gap — the train now dives through the
-  // park (Decision 4), and the crossings module publishes exactly where feet
-  // may meet rails. Anywhere else is still a bug.
+  // --- 2. and it may cross the railway only over a bridge deck --------------
+  // The train dives through the park (Decision 4), and every place a path
+  // meets it now has a real bridge (issue #116, Decision 8) — so the only
+  // legal way to cross is a walkable surface at least `BRIDGE_RISE` above
+  // the ground under the track at that point. Sampled from `TOP_REFERENCE`
+  // down, the same "what's the topmost surface here" NavGrid itself asks —
+  // a deck stands several metres up, and a ground-level sample would never
+  // find it. Anywhere else is a bug.
   let crossings = 0;
   let fromX = ENTRANCE_X;
   let fromZ = ENTRANCE_Z;
@@ -495,14 +472,9 @@ for (const target of targets) {
     const toZ = route[i * 2 + 1] ?? fromZ;
     const hit = crossesTrack(fromX, fromZ, toX, toZ);
     if (hit) {
-      const deck = park.sample(hit.x, hit.z, 0);
+      const deck = park.sample(hit.x, hit.z, TOP_REFERENCE);
       const overBridge = deck - hit.rail >= BRIDGE_RISE;
-      const atLevelCrossing = park.world.train.crossings.some(
-        (crossing) =>
-          Math.hypot(crossing.x - hit.x, crossing.z - hit.z) <
-          crossing.halfGap + LEVEL_CROSSING_REACH,
-      );
-      if (!overBridge && !atLevelCrossing) {
+      if (!overBridge) {
         crossings += 1;
         report({
           invariant: 2,
@@ -510,8 +482,8 @@ for (const target of targets) {
           measured: 1,
           detail:
             `the walk to ${target.label} crosses the railway at ` +
-            `(${hit.x.toFixed(1)}, ${hit.z.toFixed(1)}) with no bridge overhead and no ` +
-            `level crossing within ${LEVEL_CROSSING_REACH} m`,
+            `(${hit.x.toFixed(1)}, ${hit.z.toFixed(1)}) ${(deck - hit.rail).toFixed(2)} m above ` +
+            `the rail, short of the ${BRIDGE_RISE.toFixed(2)} m a bridge deck needs`,
         });
       }
     }
@@ -545,7 +517,15 @@ for (const target of targets) {
 // Built here rather than borrowed from `NpcSystem`, which keeps its copy
 // private. Forty-odd nodes, so the edge validation costs a few milliseconds —
 // and it is the same constructor the game runs, which is the point.
-const graph = quietly(() => new PoiGraph(collision));
+const graph = quietly(
+  () =>
+    new PoiGraph(collision, (x, z) => {
+      for (const bridge of world.train.bridges) {
+        if (bridge.covers(x, z)) return bridge.heightAt(x, z);
+      }
+      return null;
+    }),
+);
 
 const dropped = SEEDS.length - graph.nodes.length;
 if (dropped > 0) {
@@ -632,21 +612,22 @@ function somethingSolidNear(x: number, z: number): boolean {
   let firstGapAt = -1;
   let firstStandableAt = -1;
 
-  // The stretches deliberately left open — every level crossing's own gap and
-  // the boarding gap at each platform. Measured *against the declarations*
-  // rather than against a recorded total (issue #241): the loop's length and
-  // its crossing count now change with the layout, so "how many open metres
-  // is normal" is not a stable number — but "no hole we did not declare" is,
-  // and it is the invariant a child actually experiences. Anything open
-  // outside these spans is a defect at any length.
+  // The stretches deliberately left open — the boarding gap at each
+  // platform, and nothing else. Measured *against the declarations* rather
+  // than against a recorded total (issue #241): the loop's length changes
+  // with the layout, so "how many open metres is normal" is not a stable
+  // number — but "no hole we did not declare" is, and it is the invariant a
+  // child actually experiences. Anything open outside this span is a defect
+  // at any length. A crossing no longer opens one of these (issue #116,
+  // Decision 8): the fence runs on underneath every bridge instead of
+  // gapping for it, so `somethingSolidNear` below finds it exactly like any
+  // other stretch of closed track — which is the point of building it that
+  // way rather than leaving invariant 4 unable to see a bridge at all.
   const declaredOpen = (distance: number): boolean => {
     const along = (target: number, halfGap: number): boolean => {
       const wrapped = world.train.route.wrap(distance - target + world.train.route.length / 2);
       return Math.abs(wrapped - world.train.route.length / 2) <= halfGap + step;
     };
-    for (const crossing of world.train.crossings) {
-      if (along(crossing.railDistance, crossing.halfGap)) return true;
-    }
     for (const station of world.train.stations) {
       if (along(station.distance, STATION_GAP)) return true;
     }
