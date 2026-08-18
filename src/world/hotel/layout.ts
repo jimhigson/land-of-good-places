@@ -1136,7 +1136,20 @@ export const BREAKFAST: HotelRoom = {
   // extra 2.3 m — split evenly, so it also opens up welcome floor between
   // the buffet and the north wall — gives the run enough length to push the
   // door within a stride of the south wall, well clear of the table.
-  halfZ: 11.3,
+  //
+  // A further 0.6 m south (PR #281 review, 18 Aug 2026): the bathroom's own
+  // NW corner — where `partitions[0]`'s west wall meets `partitions[1]`'s
+  // north wall — sat only 0.226 m from table b1-d's own chair (local 8.49,
+  // 5.60; a real 0.324 m disc-into-wall overlap, since `CollisionWorld`
+  // clamps a wall's closest point to its segment, so the corner is a capsule
+  // cap, not just two flat faces). The whole bathroom sub-room (both
+  // partitions, the door, `buildBathroomFixtures`' rect query and every
+  // fixture coordinate in `dressBreakfast`) is translated south by the same
+  // 0.6 m together, so its own internal layout — door position, fixture
+  // spacing, rug sizing — is unchanged; only its distance from the chair
+  // moves. Verified against the real `CollisionWorld` — see
+  // `check-hotel.mts`'s furniture-vs-wall probe.
+  halfZ: 11.9,
   wallHeight: 3.0,
   gaps: { west: [-1.6, 1.6] },
   // Seven of them along the north wall, above the buffet — this is the room
@@ -1153,10 +1166,13 @@ export const BREAKFAST: HotelRoom = {
   // `check:hotel` probe 18 skips a jamb end's own wall-touching check, the
   // same pattern the suite's own hall-to-bathroom door already uses), which
   // puts it a full 5.5 m south of table b1-d — comfortably clear of both its
-  // footprint and its chairs' "Sit" zones.
+  // footprint and its chairs' "Sit" zones. **The whole room is a further
+  // 0.6 m south of that** (`halfZ`'s own comment) — the room's own NW corner,
+  // not its west wall's face, is what actually sits closest to b1-d's own
+  // chair, and needed the margin the corner (not the face) was short of.
   partitions: [
-    { along: 'z', at: 8.6, from: 5.8, to: 11.3, doors: [10.1] },
-    { along: 'x', at: 5.8, from: 8.6, to: 12, doors: [] },
+    { along: 'z', at: 8.6, from: 6.4, to: 11.9, doors: [10.7] },
+    { along: 'x', at: 6.4, from: 8.6, to: 12, doors: [] },
   ],
   liftZ: 0,
   liftFloor: 1,

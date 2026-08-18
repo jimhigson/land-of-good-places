@@ -63,6 +63,7 @@ import {
   CAMERA_DISTANCE,
   CAMERA_YAW_DEGREES,
   CAMERA_PITCH_DEGREES,
+  HOTEL_PLAY_RADIUS,
   MAX_FRAME_DELTA,
   NPC_RADIUS,
   PLAYER_LONGEST_STEP,
@@ -2438,6 +2439,163 @@ if (crossingFailures.length > 0) {
   );
 }
 
+// -------------- 27. no piece of furniture sits inside a wall's solid band
+
+// PR #281 review, 18 Aug 2026: the breakfast bathroom's new west partition
+// wall overlapped a pre-existing chair at table b1-d by 0.324 m — a real
+// child-visible bug (CLAUDE.md's "anything that looks solid must be solid"),
+// invisible to every check that ran green. `mustBeSolid`'s "is this one
+// chair solid" probe (2/3, above) only ever asks about b1-a; `check:tap-spacing`
+// measures interaction zones, not physical footprints. Nothing anywhere asked
+// whether one piece of registered hotel furniture physically overlaps a wall,
+// so a partition move that happened to graze a chair could only ever be found
+// by a reviewer doing the arithmetic by hand — exactly the "check that can't
+// fail" gap CLAUDE.md warns about, just never written down as a probe.
+//
+// **General, not the one instance.** Every round footprint `HotelProps.place`
+// registered as a real solid `CollisionWorld` circle — chairs, tables,
+// columns, statues, planters, plinths, bedside tables, pet plinths, the lot —
+// against every wall segment `CollisionWorld.forEachWall` holds (a room's
+// own outer walls and every partition), using the exact same
+// clamped-point-to-segment distance `CollisionWorld.resolve` itself uses.
+// That clamp is what makes a wall's *end* a rounded cap rather than a flat
+// face — the same shape that made the b1-d chair's overlap live at a
+// partition's corner rather than along either wall's own face, which is
+// exactly why the review had to trace it by hand instead of eyeballing a
+// wall's straight run. Asking the real `CollisionWorld` the real question
+// means this probe cannot disagree with what a child's own body would meet.
+//
+// Scoped to each room by distance from its own origin (`HOTEL_PLAY_RADIUS`,
+// the same leash the room's own play boundary already uses) rather than by
+// object identity — no collider carries a tag saying which room built it, and
+// "is this near this room" is the honest question, not a guess at which prop
+// belongs to which list. Rectangular footprints (`addRectangle`, a counter, a
+// sofa) are wall-shaped themselves and are deliberately out of scope — the
+// reviewer's own suggested shape for this check ("any registered circle
+// collider vs any wall collider") is what is implemented here.
+//
+// Running this exhaustively found more than the one instance: eight
+// pre-existing pairs (four lobby crystal clusters/columns against the outer
+// wall and a reception-area wall, two suite pieces against a partition and
+// the north wall) also register a few centimetres of overlap — and diffing
+// against the state of the tree *before* this task's own fix confirms they
+// are unchanged by it (same eight, same numbers, on both sides of the b1-d
+// fix). Two different severities live inside "overlap", and this probe tells
+// them apart the same way the review itself described the real bug — not by
+// how much the disc's *edge* pokes in, but by whether the disc's own **centre**
+// ends up inside the wall's solid band at all:
+//
+//  * b1-d's chair: centre 0.226 m from the wall's own line, **inside** its
+//    0.25 m half-thickness by 0.024 m — the wall's line passes through the
+//    chair's own middle, which is the "roughly half the chair is embedded"
+//    the review described, and can only happen when a piece of furniture is
+//    placed too close to a wall it was never checked against.
+//  * The eight pre-existing pairs: every one has its centre 0.5–0.7 m clear
+//    of its wall's line — comfortably outside the half-thickness band — and
+//    only the *outer edge* of an oversized, deliberately generic collider
+//    (`Hotel.placeProps`'s scatter-prop default, `radius: 0.6`, shared by
+//    every crystal/planter regardless of its own visual size — never sized
+//    down to the individual model) grazes a few centimetres past the wall's
+//    face. Nothing here is a hole a body can walk through, and the mesh
+//    itself was never near the wall to begin with.
+//
+// A **centre** inside a wall's own band is a hard failure — a piece of
+// furniture placed there was never checked against the wall at all, which is
+// this probe's whole reason to exist. A grazed **edge**, centre still clear,
+// is reported as a warning (this file's `check:tap-spacing` sibling already
+// has exactly this two-tier pattern for its own "harmless ambiguity" case) —
+// visible for a future pass on the scatter-prop radius, but not a reason to
+// block a PR that never touched it.
+//
+// Proven red before trusted green: run against the pre-fix `BREAKFAST.partitions`
+// (west wall at local x=8.6, z 5.8–11.3) and this probe reports the breakfast
+// room's chair with its centre 0.024 m inside the wall's own band — the exact
+// number the review measured by hand.
+
+/** How far inside a wall's own half-thickness a furniture disc's *centre* may sit before this probe calls it embedded. */
+const FURNITURE_CENTRE_TOLERANCE = 0.005;
+/** How far a furniture disc's *edge* may overlap a wall (centre still clear) before it is even worth a warning. */
+const FURNITURE_EDGE_TOLERANCE = 0.02;
+
+/** The point on segment `(x1,z1)`–`(x2,z2)` nearest `(px,pz)` — `CollisionWorld.resolve`'s own clamp, read back. */
+function closestPointOnWall(
+  px: number,
+  pz: number,
+  x1: number,
+  z1: number,
+  x2: number,
+  z2: number,
+): { x: number; z: number } {
+  const ax = x2 - x1;
+  const az = z2 - z1;
+  const lengthSquared = ax * ax + az * az;
+  if (lengthSquared < 1e-8) return { x: x1, z: z1 };
+  let t = ((px - x1) * ax + (pz - z1) * az) / lengthSquared;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return { x: x1 + ax * t, z: z1 + az * t };
+}
+
+interface HotelWallSegment {
+  readonly x1: number;
+  readonly z1: number;
+  readonly x2: number;
+  readonly z2: number;
+  readonly halfThickness: number;
+}
+interface HotelFurnitureCircle {
+  readonly x: number;
+  readonly z: number;
+  readonly radius: number;
+}
+
+let furnitureWallPairsChecked = 0;
+const furnitureWallEmbeds: string[] = [];
+const furnitureWallGrazes: string[] = [];
+for (const room of ROOMS) {
+  const nearRoom = (x: number, z: number): boolean =>
+    Math.hypot(x - room.originX, z - room.originZ) < HOTEL_PLAY_RADIUS;
+
+  const walls: HotelWallSegment[] = [];
+  collision.forEachWall((x1, z1, x2, z2, halfThickness) => {
+    if (nearRoom(x1, z1) || nearRoom(x2, z2)) walls.push({ x1, z1, x2, z2, halfThickness });
+  });
+
+  const circles: HotelFurnitureCircle[] = [];
+  collision.forEachCircle((x, z, radius) => {
+    if (radius > 0 && nearRoom(x, z)) circles.push({ x, z, radius });
+  });
+
+  for (const circle of circles) {
+    for (const wall of walls) {
+      furnitureWallPairsChecked += 1;
+      const closest = closestPointOnWall(circle.x, circle.z, wall.x1, wall.z1, wall.x2, wall.z2);
+      const distance = Math.hypot(circle.x - closest.x, circle.z - closest.z);
+      const centreEmbed = wall.halfThickness - distance;
+      const edgeOverlap = wall.halfThickness + circle.radius - distance;
+      const where =
+        `${room.space}: furniture at local (${(circle.x - room.originX).toFixed(2)}, ` +
+        `${(circle.z - room.originZ).toFixed(2)}) r=${circle.radius.toFixed(2)} vs the wall local ` +
+        `(${(wall.x1 - room.originX).toFixed(2)}, ${(wall.z1 - room.originZ).toFixed(2)})–` +
+        `(${(wall.x2 - room.originX).toFixed(2)}, ${(wall.z2 - room.originZ).toFixed(2)})`;
+      if (centreEmbed > FURNITURE_CENTRE_TOLERANCE) {
+        furnitureWallEmbeds.push(`${where}: centre is ${centreEmbed.toFixed(3)} m inside the wall's own band`);
+      } else if (edgeOverlap > FURNITURE_EDGE_TOLERANCE) {
+        furnitureWallGrazes.push(`${where}: edge overlaps by ${edgeOverlap.toFixed(3)} m, centre clear`);
+      }
+    }
+  }
+}
+if (furnitureWallPairsChecked === 0) {
+  problems.push('no furniture-vs-wall pairs were checked in the hotel — the probe is blind');
+}
+if (furnitureWallEmbeds.length > 0) {
+  problems.push(
+    `${furnitureWallEmbeds.length}/${furnitureWallPairsChecked} furniture-vs-wall pair(s) have a ` +
+      `furniture centre embedded inside the wall's own band: ${furnitureWallEmbeds.join('; ')}`,
+  );
+}
+for (const graze of furnitureWallGrazes) console.log(`  ~ ${graze}`);
+
 // ----------------------------------------------------------------- report
 
 console.log(
@@ -2445,7 +2603,9 @@ console.log(
     `lowest foot at y=${lowest.toFixed(2)} m after ${SETTLE_SECONDS} s; ` +
     `${mustBeSolid.length + 1} props solid, 3 beds soft and standable; ` +
     `${panes}/${declared} declared window panes built; ${occlusionReport}; ` +
-    `${crossingsChecked} doorway crossing marches, ${crossingFailures.length} fell short.`,
+    `${crossingsChecked} doorway crossing marches, ${crossingFailures.length} fell short; ` +
+    `${furnitureWallPairsChecked} furniture-vs-wall pairs, ${furnitureWallEmbeds.length} embedded, ` +
+    `${furnitureWallGrazes.length} grazed (warnings).`,
 );
 
 if (problems.length > 0) {

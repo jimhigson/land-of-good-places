@@ -3420,11 +3420,18 @@ export class Hotel implements GameSystem {
     // It also sits a body's width shy of the east wall, not flush against it
     // — `check:hotel` found the wall's own face shoving a standing child
     // sideways at the position tried first.
-    const rect = clearFloorAround(BREAKFAST, 10.9, 8.5);
+    //
+    // The whole nook — this query point and every coordinate below — is
+    // translated a further 0.6 m south of that (`BREAKFAST.halfZ`'s own
+    // comment): the room's own NW corner sat only 0.226 m from b1-d's own
+    // chair (a real 0.324 m disc-into-wall overlap — PR #281 review, 18 Aug
+    // 2026), and a pure translation keeps every fixture's spacing from every
+    // other fixture exactly as it was, so nothing here needed re-deriving.
+    const rect = clearFloorAround(BREAKFAST, 10.9, 9.1);
     // A tighter pick radius than the suite's own 1.8 m — this nook has a
     // breakfast chair for a neighbour, and check:tap-spacing wants a full
     // finger (TAP_FINGER_METRES) between them.
-    this.buildBathroomFixtures(shell, BREAKFAST, rect, 10.9, 7.0, 9.6, 7.0, 11.0, 9.0, Math.PI / 2, 0.9);
+    this.buildBathroomFixtures(shell, BREAKFAST, rect, 10.9, 7.6, 9.6, 7.6, 11.0, 9.6, Math.PI / 2, 0.9);
   }
 
   /**
