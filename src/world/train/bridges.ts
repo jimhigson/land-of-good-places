@@ -127,8 +127,20 @@ export interface Bridge {
   readonly deckY: number;
   /** True over the deck or either ramp — everything this bridge makes walkable. */
   covers(x: number, z: number): boolean;
-  /** True over the deck alone — what the fence seam keys off. */
-  deckCovers(x: number, z: number): boolean;
+  /**
+   * True over the deck alone — what the fence seam keys off. `margin`
+   * defaults to `0`, the deck's own exact edge (what `heightAt` and every
+   * ordinary caller wants); `fence.ts` is the one caller that asks with a
+   * margin, because an un-seamed fence run just past that exact edge can
+   * still have its own half-thickness (`TRACK_CLEARANCE`, 1.3 m for the
+   * centre-line run) reach back in and touch a point nominally "on" the
+   * deck — the same class of bug `bridgeKeepout.ts`'s own margin exists
+   * for, found on the same tightly-boundary-capped crossing (issue #116,
+   * seed 11: the un-seamed continuation of the centre-line wall, one
+   * segment past where a severely narrowed deck's width ended, still
+   * reached a probe standing dead centre on the deck).
+   */
+  deckCovers(x: number, z: number, margin?: number): boolean;
   /** The continuous (unstepped) height of the bridge's own surface at this
    * point, for callers that want a smooth answer rather than the discrete
    * `MovingPlatform` treads a walker actually stands on — `poiGraph`'s
@@ -376,17 +388,19 @@ export function buildBridges(_route: TrainRoute, crossings: readonly LevelCrossi
 
     // --- the two ramps -------------------------------------------------------
     const treadCount = Math.max(4, Math.ceil(BRIDGE_RISE / TREAD_RISE));
-    // `footprint.rampRun` already accounts for how close the *next* crossing
-    // is, not just the entrance ramp's own gradient — see
-    // `bridgeFootprint.ts`'s own note on `rampRunCap`. Read here rather than
-    // recomputed, so the mesh this builds and the ground-plane exclusion
-    // `Scenery`/`LampPosts` already kept off of it (`bridgeKeepout.ts`) can
-    // never disagree about how far a ramp reaches.
-    const rampRun = footprint.rampRun;
-    const treadRun = rampRun / treadCount;
 
     for (let side = 0; side < 2; side += 1) {
       const sign = side === 0 ? 1 : -1;
+      // `footprint.rampRunPos`/`rampRunNeg` already account for how close the
+      // *next* crossing is, and how close the park's own boundary is, on
+      // this specific side — not just the entrance ramp's own gradient. See
+      // `bridgeFootprint.ts`'s own note on `rampRunCap` and on why the two
+      // sides are tracked separately. Read here rather than recomputed, so
+      // the mesh this builds and the ground-plane exclusion `Scenery`/
+      // `LampPosts` already kept off of it (`bridgeKeepout.ts`) can never
+      // disagree about how far a ramp reaches.
+      const rampRun = sign > 0 ? footprint.rampRunPos : footprint.rampRunNeg;
+      const treadRun = rampRun / treadCount;
       const farAlong = DECK_HALF_LENGTH + rampRun;
       const farX = cx + dirX * farAlong * sign;
       const farZ = cz + dirZ * farAlong * sign;
@@ -432,7 +446,20 @@ export function buildBridges(_route: TrainRoute, crossings: readonly LevelCrossi
 
     const bridge: Bridge = {
       deckY,
-      deckCovers: (x: number, z: number): boolean => deck.covers(x, z),
+      // Not `deck.covers(x, z)` — `RectPlatform` implements the generic
+      // `MovingPlatform` interface, which has no margin parameter and
+      // should not grow one just for this. The deck rectangle's own
+      // geometry (`cx`, `cz`, `dirX`, `dirZ`, `acrossX`, `acrossZ`,
+      // `halfAcross`, `DECK_HALF_LENGTH`) is already in scope here, so the
+      // padded test is restated directly rather than routed through a
+      // second object.
+      deckCovers: (x: number, z: number, margin = 0): boolean => {
+        const dx = x - cx;
+        const dz = z - cz;
+        const along = dx * dirX + dz * dirZ;
+        const across = dx * acrossX + dz * acrossZ;
+        return Math.abs(along) <= DECK_HALF_LENGTH + margin && Math.abs(across) <= halfAcross + margin;
+      },
       covers: (x: number, z: number): boolean => footprint.covers(x, z),
       // Blends toward the **local** ground under `(x, z)` itself, not a
       // single "low end" reference sampled once at across = 0 — a ramp is
@@ -450,6 +477,7 @@ export function buildBridges(_route: TrainRoute, crossings: readonly LevelCrossi
         const dz = z - cz;
         const along = dx * dirX + dz * dirZ;
         if (Math.abs(along) <= DECK_HALF_LENGTH) return deckY;
+        const rampRun = along >= 0 ? footprint.rampRunPos : footprint.rampRunNeg;
         const t = clamp01((Math.abs(along) - DECK_HALF_LENGTH) / rampRun);
         return deckY + (terrainHeight(x, z) - deckY) * t;
       },
