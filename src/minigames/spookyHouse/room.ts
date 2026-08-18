@@ -3,6 +3,7 @@ import {
   CircleGeometry,
   ConeGeometry,
   CylinderGeometry,
+  DoubleSide,
   Group,
   Mesh,
   MeshBasicMaterial,
@@ -24,11 +25,15 @@ import { createFacePatch, css } from '../../art/style/faces';
  * "A dim cosy room" — dim comes from colour temperature, not from actually
  * turning the lights down: `MeshToonMaterial` needs enough light hitting it for
  * the four-band ramp to read at all (ARCHITECTURE.md's "do not darken the first
- * band" applies here just as much as out in the park), so cosiness is a deep
- * plum-purple palette and one warm lantern rather than low lux. Nothing here is
+ * band" applies here just as much as out in the park), so cosiness comes from
+ * a deep dark-green-on-dark-grey palette (see the palette note below — this
+ * used to be plum-purple, reworked after Jim's PR #294 feedback) and one warm
+ * lantern, rather than from low lux. Nothing here is
  * meant to be looked at for long — the big face is the point — so it stays
- * simple: a floor, a back wall the face sits on, two short side walls, a rug,
- * a hanging lantern, and a pair of grinning jack-o-lanterns for company.
+ * simple: a floor, a single back wall the face sits on (a wide `CylinderGeometry`
+ * arc, not two separate side walls — the camera's frame never reaches far
+ * enough round to see a seam, so one arc covers it), a rug, a hanging lantern,
+ * and a pair of grinning jack-o-lanterns for company.
  *
  * The room's palette was reworked after Jim's PR #294 preview note: "the
  * background should also be generally dark and spooky artwork in it such as
@@ -131,7 +136,16 @@ export function createSpookyRoom(): SpookyRoom {
   const root = new Group();
   root.name = 'spookyHouse:room';
 
-  const wallMaterial = toonMaterial(ART.statueStoneDark);
+  // `DoubleSide`: the room's camera sits inside this cylinder's radius, looking
+  // at the *concave* face of an open arc (`CylinderGeometry`'s side normals
+  // point radially outward, away from the axis — correct for something you
+  // walk around, wrong for something you stand inside). `FrontSide` (the
+  // default) culled every triangle here, which is exactly the "mesh present,
+  // wound the wrong way for this camera" trap CLAUDE.md's hood-face writeup
+  // describes — see `BallPit.ts`'s open-ended cylinder wall and
+  // `SlideRide.ts`'s chute for the same shape of fix already established in
+  // this codebase.
+  const wallMaterial = toonMaterial(ART.statueStoneDark, { side: DoubleSide });
   const wallDarkMaterial = toonMaterial(0x645766); // ART.statueStoneDark mixed 50/50 toward PALETTE.ink — a shadow step, never past ink itself.
   const floorMaterial = toonMaterial(PALETTE.ink); // the darkest surface in the room takes the darkest colour the game allows.
   const rugMaterial = toonMaterial(ART.spookyGreen);
