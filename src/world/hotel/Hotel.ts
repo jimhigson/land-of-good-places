@@ -1115,20 +1115,23 @@ export class Hotel implements GameSystem {
   }
 
   /**
-   * The `/hotel-bathroom` deep link (#281): straight to a guest-floor
-   * bathroom, without the lobby-stairs-corridor walk to find one. Lands on
-   * Floor 1's (`BREAKFAST`'s) nook, facing the pan — the same "Use" stand
-   * spot `interactZones` itself walks her to, read from `this.bathrooms`
-   * rather than a second hand-copied literal, so a re-tuned nook stays
-   * correct here for free (see the "kept in step by hand" warning this repo
-   * has paid for before).
+   * The `/hotel-bathroom` family of deep links (#281, extended for the
+   * own-room rewrite to reach every floor's bathroom, not just Floor 1's):
+   * straight to a guest-floor bathroom, without the lobby-stairs-corridor
+   * walk to find one. Defaults to `BREAKFAST` (the original `/hotel-bathroom`
+   * link's target, kept stable) but takes any bathroom-bearing room, so a QA
+   * pass can land in each floor's own room in turn. Lands facing the pan —
+   * the same "Use" stand spot `interactZones` itself walks her to, read from
+   * `this.bathrooms` rather than a second hand-copied literal, so a re-tuned
+   * room stays correct here for free (see the "kept in step by hand" warning
+   * this repo has paid for before).
    */
-  requestEnterBathroom(): boolean {
+  requestEnterBathroom(room: HotelRoom = BREAKFAST): boolean {
     const player = this.player;
     if (!player || player.riding || this.changingSpace || this.inside) return false;
-    const bathroom = this.bathrooms.get(BREAKFAST);
+    const bathroom = this.bathrooms.get(room);
     if (!bathroom) return false;
-    this.changeSpace(() => this.enterFloorBathroom(BREAKFAST, bathroom));
+    this.changeSpace(() => this.enterFloorBathroom(room, bathroom));
     return true;
   }
 

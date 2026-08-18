@@ -144,9 +144,16 @@ const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
   '/hotel': 'hotelLobby',
   // A guest-floor bathroom (#281, every floor gets one) — same QA problem
   // again, and worse: reaching one on foot means the lobby, the stairs *and*
-  // the corridor first. Drops her at Floor 1's own "Use" stand spot, facing
-  // the pan, so the fixtures and the privacy roof are on screen immediately.
+  // the corridor first. Drops her at the floor's own "Use" stand spot,
+  // facing the pan, so the fixtures and the privacy roof are on screen
+  // immediately. `/hotel-bathroom` alone keeps its original Floor 1 target;
+  // the own-room rewrite (each bathroom is now a real room, not a nook that
+  // always looked the same) adds one link per remaining floor so each can
+  // be reached — and QA'd — on its own.
   '/hotel-bathroom': 'hotelBathroom',
+  '/hotel-bathroom-lobby': 'hotelBathroomLobby',
+  '/hotel-bathroom-garden': 'hotelBathroomGarden',
+  '/hotel-bathroom-ocean': 'hotelBathroomOcean',
   // The guest suite, fifty storeys up (#273/#278's doorway-clearance fix and
   // #279's bigger bedrooms and pet beds) — same problem again, and worse: the
   // normal way in is a walk across the park *and* the lift *and* reception

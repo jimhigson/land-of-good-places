@@ -21,6 +21,7 @@ import { Selection } from './world/Selection';
 import type { InteractZone } from './world/interact';
 import { InteractRouter, type InteractClaim } from './world/InteractRouter';
 import type { InteriorControls } from './world/building';
+import { GARDEN_FLOOR, LOBBY, OCEAN_FLOOR } from './world/hotel/layout';
 import {
   HeldBalloons,
   Parade,
@@ -830,7 +831,14 @@ export class Game {
       // Not a ride: the hotel's front door, for its deep link.
       if (stallId === 'hotelLobby') return this.world.hotel.requestEnterLobby();
       // Not a ride either: a guest-floor bathroom, for its deep link (#281).
+      // `hotelBathroom` keeps its original target (Floor 1, `BREAKFAST`) for
+      // link stability; the other three reach the lobby's, garden's and
+      // ocean floor's own rooms, now that each is a real room worth QA'ing
+      // on its own rather than a nook that always looked the same shape.
       if (stallId === 'hotelBathroom') return this.world.hotel.requestEnterBathroom();
+      if (stallId === 'hotelBathroomLobby') return this.world.hotel.requestEnterBathroom(LOBBY);
+      if (stallId === 'hotelBathroomGarden') return this.world.hotel.requestEnterBathroom(GARDEN_FLOOR);
+      if (stallId === 'hotelBathroomOcean') return this.world.hotel.requestEnterBathroom(OCEAN_FLOOR);
       // Not a ride either: the guest suite, for its own deep link — see
       // `Hotel.requestEnterSuite`.
       if (stallId === 'hotelSuite') return this.world.hotel.requestEnterSuite();
