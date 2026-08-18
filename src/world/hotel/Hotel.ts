@@ -111,7 +111,6 @@ import {
   hedge,
   lilyPond,
   napBlanket,
-  napMoon,
   napZGlyph,
   porthole,
   rainbowRing,
@@ -956,12 +955,6 @@ export class Hotel implements GameSystem {
    * See {@link nap}'s doc comment for the whole feature.
    */
   private napDim = 0;
-  /** The starry backdrop over the bedrooms, and its own twinkle state — see
-   *  {@link buildNapSky} and {@link updateNapSky}. Built once, over the open
-   *  wall line the way `dressing.ts`'s `cloud` already floats there; shown
-   *  only while {@link napping} is running. */
-  private readonly napStars: { readonly mesh: Mesh; readonly phase: number }[] = [];
-  private napSkyGroup: Group | null = null;
   /**
    * One rising, fading "Z" per glyph, grouped by who it floats off —
    * the player (read fresh every frame, since she can nap in any of the
@@ -1259,6 +1252,22 @@ export class Hotel implements GameSystem {
     // truer than adding a second flag that has to be kept in step with this
     // one.
     return this.inside && this.moment !== 'window';
+  }
+
+  /**
+   * True while a nap is in progress — {@link napping}, exposed for `World`
+   * to read.
+   *
+   * The only consumer is `World.update`, which feeds it straight to
+   * `DayNight.setNapSkyOverride` before `dayNight.update` runs, so the shared
+   * {@link Sky} backdrop visible over the suite's own open wall line paints
+   * as real night for exactly the frames a nap is running — see
+   * `DayNight`'s own doc comment on `setNapSkyOverride` for why this is a
+   * sky-only override and not a second `setIndoors`. `Hotel` decides *when*;
+   * `DayNight` remains the one place that decides what "night" looks like.
+   */
+  get isNapping(): boolean {
+    return this.napping > 0;
   }
 
   /**
@@ -1692,19 +1701,6 @@ export class Hotel implements GameSystem {
     this.lighting.setNapDim(this.napDim);
   }
 
-  /** Shows/hides the nap sky and twinkles its stars — see {@link buildNapSky}. */
-  private updateNapSky(elapsed: number): void {
-    const group = this.napSkyGroup;
-    if (!group) return;
-    const visible = this.napping > 0;
-    group.visible = visible;
-    if (!visible) return;
-    for (const { mesh, phase } of this.napStars) {
-      const material = mesh.material as MeshToonMaterial;
-      material.emissiveIntensity = 0.4 + 0.35 * (0.5 + 0.5 * Math.sin(elapsed * 2.4 + phase));
-    }
-  }
-
   /**
    * Rises and fades every sleeper's own "Z" glyphs while {@link napping} is
    * running, and hides them the instant it stops — see {@link buildNapGlyphs}.
@@ -1741,11 +1737,11 @@ export class Hotel implements GameSystem {
     const { dt, elapsed } = context;
     if (this.spaceCooldown > 0) this.spaceCooldown -= dt;
     this.updateOverhangCutaway(context);
-    // The nap's own light, sky and sleep glyphs — run unconditionally, like
-    // every other always-on frame of this method, so they fade back out
-    // correctly even in the frame `napping` itself hits zero below.
+    // The nap's own light and sleep glyphs — run unconditionally, like every
+    // other always-on frame of this method, so they fade back out correctly
+    // even in the frame `napping` itself hits zero below. The nap's *sky* is
+    // not driven here at all any more — see {@link isNapping}.
     this.updateNapDim(dt);
-    this.updateNapSky(elapsed);
     this.updateNapGlyphs(elapsed);
 
     // The key turning in the lock. Before the player-null return, so a
@@ -2615,13 +2611,14 @@ export class Hotel implements GameSystem {
    * bed answers to it rather than only the one nearest her.
    *
    * **The room itself joins in** — issue #279's own follow-up (Jim, 18 Aug
-   * 2026): the light dims, a moon and stars come out over the wall line, and
-   * "Z" glyphs rise off her and every pet bed. None of that is started here:
-   * this method only sets the timer, and {@link update}'s own
-   * `updateNapDim` / `updateNapSky` / `updateNapGlyphs` read `napping` fresh
-   * every frame — the same "one flag, several readers" shape the pets'
-   * sleep already uses, rather than a second thing this method has to
-   * remember to switch on and back off.
+   * 2026): the light dims, "Z" glyphs rise off her and every pet bed, and the
+   * sky visible over the open wall line switches from whatever it was to a
+   * real night. None of that is started here: this method only sets the
+   * timer, and {@link update}'s own `updateNapDim` / `updateNapGlyphs` read
+   * `napping` fresh every frame — the same "one flag, several readers" shape
+   * the pets' sleep already uses, rather than a second thing this method has
+   * to remember to switch on and back off. The sky is the odd one out: it is
+   * not this class's own state at all, but `World`'s — see {@link isNapping}.
    */
   private nap(bed: Bed): void {
     const player = this.player;
@@ -4405,11 +4402,6 @@ export class Hotel implements GameSystem {
       );
     });
 
-    // The night sky that comes out over the beds while somebody naps — see
-    // `buildNapSky`'s own doc comment for why this is a decorative float
-    // over the wall line rather than a repaint of the real windows.
-    this.buildNapSky(shell);
-
     // A bedside table and its little crystal lamp beside each bed. The lamp
     // is the top, and a lamp is not a floor.
     for (const x of SUITE_BEDSIDE_X) {
@@ -4481,57 +4473,6 @@ export class Hotel implements GameSystem {
 
     // Over the hall, where all four rooms can see it.
     this.hangDiscoBall(shell, -3.4, SUITE.wallHeight + 0.9, 0);
-  }
-
-  /**
-   * The starry backdrop that comes out over the bedrooms while somebody
-   * naps — issue #279's follow-up (Jim, 18 Aug 2026): *"the background
-   * [should] change to stars and a moon."* Built once, here, and left
-   * `visible = false` until {@link nap} shows it; {@link updateNapSky}
-   * twinkles the stars and hides the whole group again when the nap ends.
-   *
-   * **Floats above the wall line, like Floor 50's own clouds and stars
-   * already do** (`dressing.ts`'s `cloud` — every hotel room is
-   * open-topped purely so the iso camera can look in, and Floor 50 already
-   * proves that space reads as sky when something is put there). That is
-   * the sensible answer here, and deliberately not a repaint of the
-   * suite's real north-wall panes: those already drive a click-triggered
-   * daytime "Look out" vantage (`windowVantage`) that `check:hotel` probes
-   * on, and a passive nap effect bolted onto that same glass would be a
-   * second meaning for one mechanism — exactly the "two definitions of one
-   * thing" trap CLAUDE.md opens with. One moon, roughly over the middle
-   * bedroom, and a scatter of stars along the whole north wall so whichever
-   * of the three beds she is in, there is sky over her.
-   */
-  private buildNapSky(shell: Group): void {
-    const group = new Group();
-    group.name = 'hotel.napSky';
-    group.visible = false;
-
-    const moon = napMoon(0.85);
-    moon.position.set(
-      SUITE_BED_SPOTS[1]?.[0] ?? 0,
-      SUITE.wallHeight + 1.7,
-      -SUITE.halfZ + 1.1,
-    );
-    group.add(moon);
-
-    const starRng = new Rng(0x4a5590);
-    const starSpread = SUITE.halfX - 1.6;
-    for (let i = 0; i < 9; i += 1) {
-      const star = flatStar(starRng.range(0.14, 0.26), PALETTE.moon);
-      star.position.set(
-        starRng.range(-starSpread, starSpread),
-        SUITE.wallHeight + starRng.range(0.4, 1.5),
-        -SUITE.halfZ + starRng.range(0.5, 1.9),
-      );
-      star.rotation.z = starRng.range(-0.3, 0.3);
-      group.add(star);
-      this.napStars.push({ mesh: star, phase: starRng.range(0, Math.PI * 2) });
-    }
-
-    shell.add(group);
-    this.napSkyGroup = group;
   }
 
   /**

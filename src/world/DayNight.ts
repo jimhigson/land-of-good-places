@@ -249,6 +249,21 @@ const MOON_INTENSITY = 0.62;
  */
 const MOON_FILL_BOOST = 1.7;
 
+/**
+ * Where {@link DayNight.applyNapNightSky} parks the moon on screen — a fixed
+ * azimuth/altitude, not the real midnight moon's own position.
+ *
+ * The real deep-night moon sits close enough to overhead that
+ * `Sky.directionToScreen`'s orthographic cheat puts it right at the top edge
+ * of the frame — reasonable outdoors, where there is a whole park under it,
+ * but cramped seen through one bedroom's own wall line. `0` azimuth centres
+ * it on the camera's fixed view axis; the altitude was picked (not derived)
+ * for a "comfortably high in the sky" screen position, the same kind of
+ * placement `Hotel.ts`'s old hand-built moon aimed for.
+ */
+const NAP_MOON_AZIMUTH = 0;
+const NAP_MOON_ALTITUDE = 0.85;
+
 export class DayNight implements GameSystem {
   readonly name = 'dayNight';
 
@@ -309,6 +324,11 @@ export class DayNight implements GameSystem {
    * shining the moment this flips on — see `update`.
    */
   private indoors = false;
+  /**
+   * True while a hotel nap is running (`Hotel.isNapping`). See
+   * {@link setNapSkyOverride}.
+   */
+  private napSkyOverrideActive = false;
 
   /** World-space direction *towards* the sun. Always the true sun, day or night. */
   private readonly sunDirection = new Vector3(0, 1, 0);
@@ -471,6 +491,37 @@ export class DayNight implements GameSystem {
     this.indoors = indoors;
   }
 
+  /**
+   * Told once a frame by `World`, from `Hotel.isNapping`.
+   *
+   * PR #279's follow-up (Jim, 18 Aug 2026): *"while sleeping, the sky
+   * background outside the room doesn't look like nighttime at all... it
+   * should use the same sky shader as the park outside uses, but with
+   * nighttime uniforms."* Every hotel room is open-topped precisely so the
+   * iso camera can see over the wall line (`Hotel.buildRoomShell`'s own
+   * comment), which means the shared {@link Sky} backdrop is *already*
+   * visible there, the exact same way it is above the park's own treeline —
+   * nothing has to be drawn to reveal it, only driven correctly. The bug was
+   * never a missing view, only a frozen one: {@link update} skips
+   * {@link applyLook} entirely while indoors (see below), so the backdrop
+   * simply keeps whatever look it had the instant she walked in, which is
+   * why a daytime nap showed a daytime sky through an ostensibly night-time
+   * room.
+   *
+   * **A sky-only override, deliberately not a second `setIndoors`.** The sun,
+   * the shadows, `nightFactor` (which the park's own lamps, fireflies and
+   * fountain glow key off of) and the real clock must all stay exactly as
+   * they are while she naps — a room three metres across going dark at noon
+   * must not turn the whole *park*'s lamps on. So this flag only ever
+   * reaches {@link applyLook}'s sky-uniform lines, called with a fixed deep
+   * night rather than the real clock, and never the light-rig or
+   * `nightFactorValue` side of that same method — see `update`'s own
+   * `napSkyOverrideActive` branch.
+   */
+  setNapSkyOverride(active: boolean): void {
+    this.napSkyOverrideActive = active;
+  }
+
   /** Human-readable clock for the HUD, e.g. "14:35". */
   formatClock(): string {
     const totalMinutes = Math.floor(this.time * 24 * 60);
@@ -504,6 +555,11 @@ export class DayNight implements GameSystem {
       this.applyLook(this.time);
       this.followPlayer(context.playerPosition);
     } else {
+      // The sky-only exception to "nothing about the look changes indoors" —
+      // see `setNapSkyOverride`'s own doc comment for why this is safe to run
+      // even though everything else this branch touches stays frozen.
+      if (this.napSkyOverrideActive) this.applyNapNightSky();
+
       // Fog is the one thing in this method that is *not* a light, so it does
       // not switch off with them — and `scene.fog` is shared, so whatever the
       // park was last set to follows the player indoors. That never showed
@@ -524,6 +580,41 @@ export class DayNight implements GameSystem {
   }
 
   // ------------------------------------------------------------- internals
+
+  /**
+   * Paints the shared {@link Sky} backdrop as a fixed deep night — the same
+   * colours and star strength {@link SKY_KEYS}' `t: 0` key gives the park at
+   * midnight, reused rather than re-invented so there is exactly one place
+   * that decides what "night" looks like.
+   *
+   * **Touches only the sky quad's own uniforms.** Not {@link sunDirection},
+   * not {@link moonDirection}, not {@link nightFactorValue} (the number the
+   * park's lamps, fireflies, fountain glow and train key off of), not the
+   * real clock, and none of the four world lights — all of those stay
+   * exactly where the real outdoor time of day left them, because a nap in
+   * one small room must not turn the whole park's evening lighting on at
+   * noon. Called only from {@link update}, only while
+   * {@link napSkyOverrideActive} and {@link indoors} are both true.
+   */
+  private applyNapNightSky(): void {
+    const look = SKY_KEYS[0] as SkyKey; // t: 0, "deep night"
+    const uniforms = this.sky.uniforms;
+    (uniforms.uTopColour as { value: Color }).value.setHex(look.top);
+    (uniforms.uBottomColour as { value: Color }).value.setHex(look.bottom);
+    (uniforms.uHorizonColour as { value: Color }).value.setHex(look.horizon);
+    (uniforms.uHorizonStrength as { value: number }).value = look.horizonStrength;
+    // Full night's own star strength (`smoothstep(0.35, 0.85, nightFactor)`
+    // saturates at 1 for any `nightFactor` at or past 0.85, which deep
+    // night's own 1.0 comfortably is) — spelled out here rather than reusing
+    // `nightFactorValue`, which this method deliberately never touches.
+    (uniforms.uStarStrength as { value: number }).value = 1;
+    this.sky.setSpace(0);
+
+    (uniforms.uSunVisible as { value: number }).value = 0;
+    const moonPosition = (uniforms.uMoonPosition as { value: Vector2 }).value;
+    this.sky.directionToScreen(NAP_MOON_AZIMUTH, NAP_MOON_ALTITUDE, moonPosition);
+    (uniforms.uMoonVisible as { value: number }).value = 1;
+  }
 
   /** Keeps the shadow frustum centred on the action rather than the origin. */
   private followPlayer(playerPosition: Vector3): void {

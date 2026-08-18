@@ -1,7 +1,6 @@
 import {
   BoxGeometry,
   CanvasTexture,
-  CircleGeometry,
   Color,
   ConeGeometry,
   CylinderGeometry,
@@ -907,30 +906,6 @@ export function napBlanket(colour: number): Group {
   hem.position.set(0, BED_MATTRESS_TOP + 0.02 + 0.21, -0.3);
   group.add(hem);
   return group;
-}
-
-/**
- * A flat, self-lit moon disc — the suite's answer to Jim's *"the background
- * [should] change to stars and a moon"* (18 Aug 2026, PR #279's follow-up).
- *
- * A plain circle rather than a crescent: ART_DIRECTION §1's "chunky, simple,
- * a shape a six-year-old could draw" applies here exactly as it does to every
- * other prop in this room, and a full disc reads unambiguously as "the moon"
- * at the size and distance this hangs at, where a thin crescent would just
- * read as a smudge. Front on **+Z**, like every other flat decal in this
- * file, so it faces the camera unrotated.
- *
- * Built the same way `flatStar` is: emissive rather than lit, so it stays
- * bright through `HotelLighting.setNapDim`'s own dimming — a moon that went
- * dark along with the room it is meant to be lighting would be backwards.
- */
-export function napMoon(radius: number, colour: number = PALETTE.moon): Mesh {
-  return decal(
-    new Mesh(
-      new CircleGeometry(radius, 28),
-      toonMaterial(colour, { emissive: colour, emissiveIntensity: 0.75 }),
-    ),
-  );
 }
 
 /**
