@@ -656,7 +656,17 @@ function somethingSolidNear(x: number, z: number): boolean {
     // Standable AND reachable: the fence cannot stop a teleported probe, so
     // since §6 built it, the honest question is whether a child can *walk*
     // onto the track — anywhere the declarations above did not invite her.
-    if (isStandable(x, z) && walkReachable(x, z)) {
+    // `isStandable`/`walkReachable` both probe at (or route to) whatever
+    // surface's *reachable* at this (x, z) — a bridge deck included, since
+    // that is now genuinely the highest, genuinely reachable thing here, and
+    // `isStandable`'s own ground-level probe was never in range of the
+    // fence to begin with (it sits `FENCE_OFFSET` away in the crossing
+    // direction, not athwart the rail — its job is only to catch a *ground*
+    // level foothold the fence failed to block). So a bridge (which is
+    // never at ground level) needs its own exemption here, the same as
+    // invariant 2's own `overBridge` test.
+    const onBridge = world.train.bridges.some((bridge) => bridge.covers(x, z));
+    if (!onBridge && isStandable(x, z) && walkReachable(x, z)) {
       standable += 1;
       if (firstStandableAt < 0) firstStandableAt = i;
     }

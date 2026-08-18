@@ -96,6 +96,38 @@ const TREAD_RISE = 0.28;
  * mirrors `hotel/place.ts`'s landing rail exactly. */
 const GUARD_RAIL_BAND = 0.5;
 
+/**
+ * Extra width, beyond a crossing's own self-measured `halfGap`, that the
+ * deck and every ramp tread carry before a guard rail stands.
+ *
+ * `halfGap` is tuned for exactly one job — sizing the *old* level crossing's
+ * fence gap so an oblique path's own waypoint samples never straddled a
+ * compartment wall (its own comment: "a fixed gap strands the path's own
+ * waypoint samples"). That gap had nothing at all in this direction to
+ * clip against. A bridge does — its own guard rails — so a path sample that
+ * used to graze `halfGap` with metres to spare in every other direction now
+ * grazes the rail meant to stop a child falling off the side. A stride's
+ * worth of slack, the same margin `check-park.mts` used to give a route
+ * meeting a crossing's own fence gap before bridges made that escape
+ * unnecessary.
+ */
+const ACROSS_MARGIN = 2.0;
+
+/**
+ * Safety margin added on top of the worst (highest) ground sampled across a
+ * deck's own footprint, before it counts as clearing {@link BRIDGE_RISE}.
+ *
+ * `check:park`'s invariant 2 measures clearance at wherever a *specific*
+ * route actually crosses the rail — which, across a corridor several metres
+ * wide, is not always the exact crossing centre a deck's own height is
+ * derived from. The terrain wanders (~1.4 m across the whole park), so a
+ * deck built to clear only its own centre point missed by hundredths of a
+ * metre where a route crossed nearer the corridor's edge. Sampling several
+ * points across the deck's width (below) and taking the highest closes most
+ * of that gap; this covers what sampling still misses.
+ */
+const HEIGHT_MARGIN = 0.15;
+
 const deckMaterial = toonMaterial(PALETTE.woodLight);
 const beamMaterial = toonMaterial(PALETTE.woodDark);
 
@@ -214,9 +246,26 @@ export function buildBridges(_route: TrainRoute, crossings: readonly LevelCrossi
     // (`pathDirX = tangent.z, pathDirZ = -tangent.x`).
     const acrossX = -dirZ;
     const acrossZ = dirX;
-    const halfAcross = crossing.halfGap;
+    const halfAcross = crossing.halfGap + ACROSS_MARGIN;
+    // Guard rails stand further out again than the walkable surface's own
+    // edge — a second margin on top of the first. `ACROSS_MARGIN` keeps a
+    // drawn path's own waypoints off the surface's edge; this keeps them off
+    // a *rail* planted right at that edge, which the surface alone never had
+    // to contend with (see `ACROSS_MARGIN`'s own note).
+    const railHalfAcross = halfAcross + ACROSS_MARGIN;
     const groundY = terrainHeight(cx, cz);
-    const deckY = groundY + BRIDGE_RISE;
+    // The deck's own datum is the *worst* (highest) ground sampled across
+    // its full width, not just the crossing's own centre point — see
+    // `HEIGHT_MARGIN`. Any real route may cross the rail anywhere within
+    // this corridor, not only at the point `crossings.ts` picked to
+    // represent it.
+    let worstGroundY = groundY;
+    for (const t of [-1, -0.5, 0, 0.5, 1]) {
+      const sampleX = cx + acrossX * halfAcross * t;
+      const sampleZ = cz + acrossZ * halfAcross * t;
+      worstGroundY = Math.max(worstGroundY, terrainHeight(sampleX, sampleZ));
+    }
+    const deckY = worstGroundY + BRIDGE_RISE + HEIGHT_MARGIN;
     const yaw = Math.atan2(dirX, dirZ);
     const deckWidth = halfAcross * 2;
 
@@ -259,8 +308,8 @@ export function buildBridges(_route: TrainRoute, crossings: readonly LevelCrossi
     // Guard rails along the deck's two long edges.
     for (let side = 0; side < 2; side += 1) {
       const sign = side === 0 ? 1 : -1;
-      const railX = cx + acrossX * halfAcross * sign;
-      const railZ = cz + acrossZ * halfAcross * sign;
+      const railX = cx + acrossX * railHalfAcross * sign;
+      const railZ = cz + acrossZ * railHalfAcross * sign;
       guardRails.push({
         x1: railX - dirX * DECK_HALF_LENGTH,
         z1: railZ - dirZ * DECK_HALF_LENGTH,
@@ -275,7 +324,6 @@ export function buildBridges(_route: TrainRoute, crossings: readonly LevelCrossi
     const treadCount = Math.max(4, Math.ceil(BRIDGE_RISE / TREAD_RISE));
     const rampRun = BRIDGE_RISE / BRIDGE_RAMP_GRADIENT;
     const treadRun = rampRun / treadCount;
-    const rampLowY: [number, number] = [groundY, groundY];
 
     for (let side = 0; side < 2; side += 1) {
       const sign = side === 0 ? 1 : -1;
@@ -283,7 +331,6 @@ export function buildBridges(_route: TrainRoute, crossings: readonly LevelCrossi
       const farX = cx + dirX * farAlong * sign;
       const farZ = cz + dirZ * farAlong * sign;
       const lowY = terrainHeight(farX, farZ);
-      rampLowY[side] = lowY;
 
       const rampMesh = new InstancedMesh(new BoxGeometry(deckWidth, 0.16, treadRun + 0.04), deckMaterial, treadCount);
       for (let i = 0; i < treadCount; i += 1) {
@@ -308,29 +355,19 @@ export function buildBridges(_route: TrainRoute, crossings: readonly LevelCrossi
       rampMesh.receiveShadow = true;
       bridgeGroup.add(rampMesh);
 
-      // Guard rails down each ramp's flanks, banded in shorter runs so one
-      // absolute `baseHeight` tracks the local tread height reasonably
-      // closely along the whole slope, and `navStamped` throughout — see
-      // the file header.
-      const bandCount = Math.max(2, Math.ceil(treadCount / 3));
-      for (let acrossSide = 0; acrossSide < 2; acrossSide += 1) {
-        const acrossSign = acrossSide === 0 ? 1 : -1;
-        for (let b = 0; b < bandCount; b += 1) {
-          const fromAlong = DECK_HALF_LENGTH + (b / bandCount) * rampRun;
-          const toAlong = DECK_HALF_LENGTH + ((b + 1) / bandCount) * rampRun;
-          const midT = (fromAlong + toAlong) / 2 - DECK_HALF_LENGTH;
-          const midY = deckY + (lowY - deckY) * (midT / rampRun);
-          const fromX = cx + dirX * fromAlong * sign + acrossX * halfAcross * acrossSign;
-          const fromZ = cz + dirZ * fromAlong * sign + acrossZ * halfAcross * acrossSign;
-          const toX = cx + dirX * toAlong * sign + acrossX * halfAcross * acrossSign;
-          const toZ = cz + dirZ * toAlong * sign + acrossZ * halfAcross * acrossSign;
-          guardRails.push({
-            x1: fromX, z1: fromZ, x2: toX, z2: toZ,
-            baseHeight: midY - GUARD_RAIL_BAND,
-            navStamped: true,
-          });
-        }
-      }
+      // No guard rail down a ramp's own flanks, deliberately, unlike the
+      // deck's (above). The deck stands several metres over a moving train
+      // and losing the edge there is exactly the fall a bridge exists to
+      // prevent; a ramp is a gentle, ordinary slope over ordinary lawn —
+      // stepping off its side is no different from stepping off any other
+      // path's edge in this park, none of which carry a rail either. It is
+      // also where a straight `poiGraph` chord between two waypoints
+      // sampled off the *real, curved* drawn path is least likely to match
+      // this bridge's own straight, fixed-width rectangle: a rail planted
+      // tight to that rectangle's edge caught a live edge that curved
+      // slightly wide of it (found live, issue #116). The deck does not
+      // have this problem — it is short, so a crossing edge's own curvature
+      // barely has room to drift before it is past the deck entirely.
     }
 
     const bridge: Bridge = {
@@ -344,14 +381,24 @@ export function buildBridges(_route: TrainRoute, crossings: readonly LevelCrossi
         if (Math.abs(across) > halfAcross) return false;
         return Math.abs(along) <= DECK_HALF_LENGTH + rampRun;
       },
+      // Blends toward the **local** ground under `(x, z)` itself, not a
+      // single "low end" reference sampled once at across = 0 — a ramp is
+      // several metres wide, the terrain it descends onto is not flat
+      // across that width, and a fixed reference disagreed with the real
+      // ground by enough, right at the ramp's own low edge, to graze a
+      // guard rail's `baseHeight` a `poiGraph` probe standing there had no
+      // way to know about (found live: an edge stepping off a ramp exactly
+      // at that seam). Blending to `terrainHeight(x, z)` itself instead
+      // means the two *necessarily* agree in the limit — at `t = 1` this
+      // returns exactly what `groundAt` reports one step outside `covers()`,
+      // because both read the same function.
       heightAt: (x: number, z: number): number => {
         const dx = x - cx;
         const dz = z - cz;
         const along = dx * dirX + dz * dirZ;
         if (Math.abs(along) <= DECK_HALF_LENGTH) return deckY;
-        const side = along > 0 ? 0 : 1;
         const t = clamp01((Math.abs(along) - DECK_HALF_LENGTH) / rampRun);
-        return deckY + ((rampLowY[side] ?? groundY) - deckY) * t;
+        return deckY + (terrainHeight(x, z) - deckY) * t;
       },
     };
     bridges.push(bridge);
