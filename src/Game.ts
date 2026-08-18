@@ -831,6 +831,9 @@ export class Game {
       if (stallId === 'hotelLobby') return this.world.hotel.requestEnterLobby();
       // Not a ride either: a guest-floor bathroom, for its deep link (#281).
       if (stallId === 'hotelBathroom') return this.world.hotel.requestEnterBathroom();
+      // Not a ride either: the guest suite, for its own deep link — see
+      // `Hotel.requestEnterSuite`.
+      if (stallId === 'hotelSuite') return this.world.hotel.requestEnterSuite();
       return false;
     };
 

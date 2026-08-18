@@ -172,6 +172,21 @@ line to add** in `RIDE_DEEP_LINKS`, and worth adding rather than writing
 directions. Say plainly which URL shows which thing when several are in
 flight at once, because they will be on several ports.
 
+**The same rule applies to PR preview URLs, not just local dev servers.**
+When handing Jim a Cloudflare Workers preview link (`wrangler versions
+upload`'s `<hash>-land-of-good-places.blockstack.workers.dev`), append the
+feature's deep-link path exactly as you would for `localhost` — the same
+`origin/main..HEAD` build sitting behind a different host is still a park
+he has to find his way around blind on a root URL. Before opening a PR (or
+before handing a preview link over if the PR is already open), check
+whether the feature has an existing entry in `RIDE_DEEP_LINKS` or a
+documented `/view` camera; if it doesn't and reaching the feature would
+otherwise mean walking or triggering game state, add one on that PR's own
+branch — it travels with the branch into the preview build for free. Not
+everything needs one: an input-handling or gesture fix (pinch-to-zoom,
+tap-and-hold) has no "place" to link to — say so plainly instead of forcing
+a link that adds nothing.
+
 **Deep links for reaching a ride under test without walking there:**
 `/rail-race`, `/sky-cruiser` and `/ferris` skip straight past the welcome-back
 prompt and board that ride the instant the park (or a freshly created
@@ -376,6 +391,86 @@ at the end.
 
 This is a game a father is building with his six-year-old daughter. When a
 trade-off is close, pick the one a six-year-old will enjoy more.
+
+## QA is not optional, and it is not paperwork
+
+On 17 August a full pipeline of "QA approved" PRs shipped a furniture piece
+sitting square across a doorway, a pet that never got into its bed, and a
+"grid-aligned" park whose paths were a wiggly, un-grid, un-circular mess —
+three separate features, three separate QA sign-offs, and not one of them
+had ever actually been looked at. Every "QA" pass had been `tsc` plus the
+check scripts, re-reading what the build already said. That is not QA. It
+proves the code is *sound*; it says nothing about whether the game is
+*right*. Only eyes on a rendered frame can say that, so:
+
+**The QA agent's job, no exceptions: open every feature the PR touches, in
+an actual running browser, and look at it.** Work out what "correct" looks
+like for a person playing the game, then go and see whether that is what is
+on screen. A doorway-clearance fix means standing a character in every
+doorway the PR touches and confirming nothing blocks it. A "pets sleep in
+beds" fix means putting a pet-owning character to sleep and watching the pet
+actually walk to a bed. A grid-aligned-park fix means looking at the
+top-down camera, not inferring the shape of the paths from a segment-length
+assertion. If a feature can be seen, QA must see it before it can be signed
+off. "The checks pass" is an engineer's claim, not a QA verdict.
+
+**The QA agent runs on Opus, not a smaller or faster model.** This is the one
+stage in the whole pipeline that is pure judgement — does this look right,
+does this play right, is this actually what was asked for — and it carries
+the most weight of any gate here. Give it the model that can tell the
+difference.
+
+**Before a sandboxed QA agent does *any* QA work, update the sandbox's Chrome
+to the latest available version first.** An old bundled browser can render,
+or fail to render, differently from what a real player sees — the same
+"old tool, new input" trap CLAUDE.md's Node section warns about elsewhere.
+Do this before opening a single page, not after finding something odd.
+
+**If a real browser is not available to the QA agent — for any reason: no
+chrome-devtools MCP connected, no ownership granted, a sandboxed environment
+with no route to a rendered page, anything at all — every agent on this
+project halts immediately, not just the one PR waiting on QA.** New
+engineering work, new PRs, new merges: all of it stops until browser-based
+QA is possible again. Do not quietly fall back to build-verify and call it
+QA. Do not write "no visual QA was performed" in a handoff and let the PR
+proceed to sign-off anyway — that sentence is a stop sign, not a footnote.
+The correct response to "I cannot open a browser" is: stop everything, tell
+the human plainly that QA is blocked and why, and wait for them to unblock
+it. An unverified backlog growing while nobody can check it is not
+progress — it is debt nobody can see accumulating. Five minutes of the
+human's time to unblock QA costs far less than one more feature shipping
+unseen.
+
+## Send the screenshot, don't just describe it
+
+18 August, Jim's own ruling: **it is cheaper for him to look at a screenshot
+than to open the app**, most of the time. A QA verdict of "the desk is
+clearly visible from the entrance" is a claim; the frame it was read off is
+the evidence, and the evidence is worth more than the claim it supports —
+this is the same principle as "quote the count off the screen, never the one
+you expected" applied to pixels instead of numbers.
+
+So: **whenever a QA pass (or any agent) produces a screenshot of something a
+human would judge by eye — layout, clearance, a UI element, "does this look
+right" — send the actual image to the Overseer, who relays it to Jim.** This
+is not limited to QA sign-off: any new visual feature, reported up, should
+come with a screenshot rather than a paragraph describing one. Text is for
+what a screenshot can't show (measurements, verdicts, what was clicked);
+the screenshot is for what it can.
+
+- **QA/engineer agents**: when you capture a screenshot worth a human's
+  judgement, hand it to whoever you report to (the Overseer, if you were
+  dispatched by one) rather than only describing its contents in your
+  summary. Keep describing what you saw in words too — the image is in
+  addition to the verdict, not instead of it.
+- **The Overseer**: relay every such screenshot to Jim promptly, don't hold
+  a batch waiting for "the full picture" — a screenshot from twenty minutes
+  ago that's still sitting in a subagent's output is exactly the kind of
+  work that reads as progress but isn't, until it's actually in front of
+  him.
+- **Backfill, don't just apply forwards.** If a QA pass already ran and took
+  real screenshots before this rule existed, don't let that evidence stay
+  buried in a subagent transcript — send it retroactively.
 
 ## PRs
 
