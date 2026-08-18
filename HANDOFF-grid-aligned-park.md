@@ -251,3 +251,61 @@ Build-verify only. What a visual pass should look at, in order of value:
    still funnel neatly through the gate opening as a group, then peel off
    into ordinary wandering noticeably sooner than before (right past the
    gate, not several metres into the park).
+
+## Round 2 — the ring itself was still a wiggly staircase (issue #319, 18 Aug 2026)
+
+Jim's own eyes caught what the above "verified green" section missed. On this
+PR's live preview: *"grid based park layout also a hard failure - this fails
+both to draw on a grid, and also to draw a circle, it is literally disgusting
+to look at and the worst of all worlds."*
+
+**Root cause**: `solveRing()` fed `toAxisAlignedLoop()` 32 tightly-spaced
+bearing samples (~3 m apart round a near-circle) and axis-aligned every
+consecutive pair independently. Almost every one of those 32 short legs
+needed its own `elbowLeg` correction — 64 control-point segments on the
+canonical seed, mean length 2.98 m, 59 heading changes around one 191 m
+loop. Every segment WAS purely axis-aligned, which is exactly why
+`pathsRunOnGridAxes` (this file's own "verified green" invariant, above)
+passed clean — it only ever bounded one continuous diagonal run's length,
+never how often the path turns. A textbook instance of CLAUDE.md's "a check
+can pass without checking anything."
+
+**Fix**: `simplifyClosedLoop`/`rdpKeep` (Douglas-Peucker, tolerance 2.5 m)
+simplifies the 32-point profile *before* it reaches `toAxisAlignedLoop`, plus
+`collapseCollinearClosed` merges straight continuations across two
+independently-routed legs. Blocker safety is untouched — `manhattanRoute`
+re-proves clearance for whatever leg it's given regardless of point spacing.
+Measured on all five seeds: ring goes from ~64 segments / 59 turns / 2.98 m
+mean run down to 12 vertices / 11 turns / 13.4-15.9 m mean run.
+
+**Side effect caught and fixed**: `nearestRingPoint` searched only the ring's
+*vertices*— fine at 64 densely-packed points, but at ~12 it left the fixed
+`gate-approach` connector's landing point 5.12 m off the ring's true nearest
+edge on seed 5, pushing that connector's diagonal leg over
+`MAX_DIAGONAL_APPROACH` and failing `test:procgen`. Now projects onto the
+ring's segments instead of snapping to a vertex.
+
+**Invariant strengthened, not just the geometry**: added `ringReadsAsAGrid`
+(scoped to the closed backbone loop specifically — not spurs, whose own
+elbow-heavy tight-squeeze detours are legitimate, already-tested geometry).
+Groups the drawn curve into maximal same-heading straight runs (merging
+sub-1 m clearance nudges first), asserts mean run length >= 8 m. Measured:
+fixed ring 12.2-15.9 m mean run; pre-fix staircase 5.6-6.1 m, on the same
+five seeds. Proved it can fail (checked out the pre-fix `paths.ts`, ran the
+canonical-seed test alone, watched it go red with real numbers, restored,
+watched it go green).
+
+**Also merged latest `main`** to pick up `check-cat-bus.mts`'s fix — my push
+briefly regressed that check (the ring's shifted shape moved where two free
+children's walks crossed near the gate to 0.97 m apart), but Jim's call was
+that two free children at 0.97 m is normal crowd proximity, not a bug, and
+he fixed the check itself (0.99 m gate is now informational) rather than
+having me chase path geometry to satisfy an arbitrary margin.
+
+Verified: `npx tsc --noEmit` clean; `npm run test:procgen` 366/366 passed,
+13/13 files; `npm run check:park` 16/16 attractions, all six invariants
+hold; `npm run check:solve-cost` paths stage 54.6 ms / 250 ms budget.
+
+**Still needs the same visual QA as round 1** — nobody has looked at the new
+ring shape in a browser yet. `/view?camPos=0,60,0&camDir=0,-1,0` is still the
+right URL; this is exactly the shot Jim's original complaint was about.
