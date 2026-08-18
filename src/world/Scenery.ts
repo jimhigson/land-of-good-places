@@ -188,6 +188,33 @@ interface HideableInstance {
   readonly matrix: Matrix4;
 }
 
+/**
+ * One tree's own collision registration, indexed exactly as
+ * {@link FoliageOccluder} — see {@link Scenery.clearTreesNear}.
+ */
+interface TreeCollider {
+  /** The id `collision.addCircle` handed back, so it can be taken out again. */
+  readonly id: number;
+  /** The trunk collider's own radius — what "does this tree block that spot" asks against. */
+  readonly radius: number;
+}
+
+/**
+ * One bush clump's own collision registration, indexed exactly as the
+ * `bushes` array {@link Scenery} publishes — the bush equivalent of
+ * {@link TreeCollider}. A clump is two or three blob *instances* in the one
+ * shared `bushes` `InstancedMesh` rather than a single instance, so felling
+ * one has to hide a contiguous run rather than one index.
+ */
+interface BushCollider {
+  /** The id `collision.addCircle` handed back, so it can be taken out again. */
+  readonly id: number;
+  /** First instance index in the shared `bushes` mesh this clump's blobs occupy. */
+  readonly instanceStart: number;
+  /** How many consecutive instances, starting there, belong to this clump. */
+  readonly instanceCount: number;
+}
+
 /** Degenerate matrix that renders an instance as nothing — cheaper than touching instance count. */
 const HIDDEN_MATRIX = new Matrix4().makeScale(0, 0, 0);
 
@@ -233,22 +260,52 @@ export class Scenery {
   readonly group = new Group();
   /** Every wall run standing in the park. See {@link PlacedWallRun}. */
   readonly wallRuns: readonly PlacedWallRun[];
-  /** The subset of trees big enough to climb. See {@link ClimbableTreeSeed}. */
-  readonly climbableTrees: readonly ClimbableTreeSeed[];
-  /** Every tree big enough to hide the player. See {@link FoliageOccluder}. */
-  readonly foliageOccluders: readonly FoliageOccluder[];
-  /** Every bush clump standing in the park. See {@link PlacedBush}. */
-  readonly bushes: readonly PlacedBush[];
-  private readonly hideableInstances: readonly (readonly HideableInstance[])[];
+  /**
+   * The subset of trees big enough to climb. See {@link ClimbableTreeSeed}.
+   * Mutable internally — {@link clearTreesNear} strikes a felled tree out —
+   * exposed read-only because nothing outside this file plants or fells one.
+   */
+  private readonly climbableTreesMutable: ClimbableTreeSeed[];
+  get climbableTrees(): readonly ClimbableTreeSeed[] {
+    return this.climbableTreesMutable;
+  }
+  /**
+   * Every tree big enough to hide the player. See {@link FoliageOccluder}.
+   * Indexed exactly as {@link hideableInstances} and {@link treeColliders} —
+   * the three are filled by the same loop, one push apiece, per tree — so
+   * {@link clearTreesNear} can remove all three at once by index.
+   */
+  private readonly occludersMutable: FoliageOccluder[];
+  get foliageOccluders(): readonly FoliageOccluder[] {
+    return this.occludersMutable;
+  }
+  /**
+   * Every bush clump standing in the park. See {@link PlacedBush}. Mutable
+   * internally for the same reason {@link occludersMutable} is — a felled
+   * clump comes out of this list too.
+   */
+  private readonly bushesMutable: PlacedBush[];
+  get bushes(): readonly PlacedBush[] {
+    return this.bushesMutable;
+  }
+  private readonly hideableInstances: HideableInstance[][];
+  private readonly treeColliders: TreeCollider[];
+  private readonly bushColliders: BushCollider[];
+  private readonly bushMesh: InstancedMesh;
+  private readonly collision: CollisionWorld;
 
   constructor(collision: CollisionWorld) {
     this.group.name = 'scenery';
+    this.collision = collision;
     const foliage = buildFoliage(collision);
     this.group.add(foliage.group);
-    this.climbableTrees = foliage.climbableTrees;
-    this.foliageOccluders = foliage.occluders;
-    this.bushes = foliage.bushes;
+    this.climbableTreesMutable = foliage.climbableTrees;
+    this.occludersMutable = foliage.occluders;
+    this.bushesMutable = foliage.bushes;
     this.hideableInstances = foliage.hideableInstances;
+    this.treeColliders = foliage.treeColliders;
+    this.bushColliders = foliage.bushColliders;
+    this.bushMesh = foliage.bushMesh;
     this.group.add(buildTreeline());
     // Collected as they are built, from the already-trimmed `wallPlan`, so
     // what is published is what is standing — and is what `buildFoliage`
@@ -277,6 +334,81 @@ export class Scenery {
       mesh.setMatrixAt(index, hidden ? HIDDEN_MATRIX : matrix);
       mesh.instanceMatrix.needsUpdate = true;
     }
+  }
+
+  /**
+   * **Fells every tree and bush clump standing in a disc at (x, z, radius).**
+   *
+   * The mechanism a park already has for making a tree disappear
+   * ({@link setTreeHidden}'s swap to {@link HIDDEN_MATRIX}) — a permanent
+   * felling is the same swap, just never swapped back — plus taking the
+   * plant's own collision circle back out with
+   * {@link CollisionWorld.removeCircle}, so the ground it stood on genuinely
+   * reads as clear afterwards rather than looking clear while still refusing
+   * anything that asks. A bush clump gets the identical treatment: its blob
+   * instances are a contiguous run in the shared `bushes` mesh rather than a
+   * `hideableInstances` entry, so they are hidden by index range instead, but
+   * the swap and the collision removal are the same two moves.
+   *
+   * This is for `coaster/pylons.ts`: a support spot that is otherwise good
+   * but has foliage standing on it should get that foliage cleared rather
+   * than be skipped, the way a real park would clear ground to hold its own
+   * ride up (issue #301) — Jim's own example was a dense tree-and-bush
+   * cluster, not trees alone. It is **not** a general "remove any collider"
+   * escape hatch — only this file's own trees and bush clumps are
+   * candidates, found by walking the same lists {@link foliageOccluders} and
+   * {@link bushes} publish, so nothing outside a plant's own footprint is
+   * ever at risk of being cleared by a support search.
+   *
+   * Trees are removed from {@link occludersMutable}, {@link hideableInstances}
+   * and {@link treeColliders} by splicing every index that matched; bushes
+   * from {@link bushesMutable} and {@link bushColliders} the same way. Both
+   * loops walk from the end backwards so an earlier splice never invalidates
+   * a later index still to be checked. A felled tree that happened to be
+   * climbable also comes out of {@link climbableTreesMutable} (matched by
+   * position, since that list is a *subset* of the trees and does not share
+   * their indices).
+   *
+   * Must run before anything reads these lists and keeps its own copy of an
+   * index into them — `World.ts` builds the Sky Cruiser (and so calls this)
+   * before `TreeLights` strings a garland between trees or `NpcSystem` hands
+   * climbable trees to its wander drivers, which is what makes felling here
+   * safe rather than merely convenient.
+   *
+   * Returns how many plants were actually felled in total, so a caller can
+   * tell "the spot is clear now" from "there was nothing here to clear".
+   */
+  clearTreesNear(x: number, z: number, radius: number): number {
+    let felled = 0;
+    for (let i = this.occludersMutable.length - 1; i >= 0; i -= 1) {
+      const tree = this.occludersMutable[i]!;
+      const trunk = this.treeColliders[i]!;
+      if (Math.hypot(tree.x - x, tree.z - z) >= radius + trunk.radius) continue;
+      this.setTreeHidden(i, true);
+      this.collision.removeCircle(trunk.id);
+      const climbableIndex = this.climbableTreesMutable.findIndex(
+        (seed) => seed.x === tree.x && seed.z === tree.z,
+      );
+      if (climbableIndex !== -1) this.climbableTreesMutable.splice(climbableIndex, 1);
+      this.occludersMutable.splice(i, 1);
+      this.hideableInstances.splice(i, 1);
+      this.treeColliders.splice(i, 1);
+      felled += 1;
+    }
+    for (let i = this.bushesMutable.length - 1; i >= 0; i -= 1) {
+      const bush = this.bushesMutable[i]!;
+      const clump = this.bushColliders[i]!;
+      if (Math.hypot(bush.x - x, bush.z - z) >= radius + bush.radius) continue;
+      for (let b = 0; b < clump.instanceCount; b += 1) {
+        this.bushMesh.setMatrixAt(clump.instanceStart + b, HIDDEN_MATRIX);
+      }
+      this.bushMesh.instanceMatrix.needsUpdate = true;
+      this.collision.removeCircle(clump.id);
+      this.bushesMutable.splice(i, 1);
+      this.bushColliders.splice(i, 1);
+      felled += 1;
+    }
+    return felled;
   }
 }
 
@@ -367,6 +499,9 @@ function buildFoliage(collision: CollisionWorld): {
   occluders: FoliageOccluder[];
   bushes: PlacedBush[];
   hideableInstances: HideableInstance[][];
+  treeColliders: TreeCollider[];
+  bushColliders: BushCollider[];
+  bushMesh: InstancedMesh;
 } {
   const group = new Group();
   group.name = 'foliage';
@@ -382,6 +517,10 @@ function buildFoliage(collision: CollisionWorld): {
   // `InstancedMesh`es below exist — kept as plain indices until then because
   // the meshes don't exist yet while this loop is still filling the arrays.
   const occluderRefs: { kind: 'trunk' | 'round' | 'cone'; index: number }[][] = [];
+  // Parallel to `occluders` too: each tree's own collision registration, so
+  // `Scenery.clearTreesNear` can take a single tree's circle back out again
+  // without touching any other collider. See {@link TreeCollider}.
+  const treeColliders: TreeCollider[] = [];
 
   // --- trees ---------------------------------------------------------------
   let attempts = 0;
@@ -540,13 +679,23 @@ function buildFoliage(collision: CollisionWorld): {
     occluders.push({ x, z, centreY: tree.wideCentreY, radius: tree.wideRadius, parts });
     occluderRefs.push(refs);
 
-    collision.addCircle(x, z, 0.55 * lean);
+    const trunkRadius = 0.55 * lean;
+    const colliderId = collision.addCircle(x, z, trunkRadius);
+    treeColliders.push({ id: colliderId, radius: trunkRadius });
     treeCount += 1;
   }
 
   // --- bushes --------------------------------------------------------------
   /** Where each clump stands, published as {@link PlacedBush}. */
   const bushClumps: PlacedBush[] = [];
+  /**
+   * Parallel to `bushClumps`: each clump's own collision registration and
+   * which instances of the shared `bushes` `InstancedMesh` its blobs are —
+   * everything {@link Scenery.clearTreesNear} needs to fell a clump exactly
+   * the way it fells a tree. See {@link TreeCollider}, whose shape this
+   * mirrors with one addition: a clump is several blob *instances*, not one.
+   */
+  const bushColliders: BushCollider[] = [];
   /** Radius of the collider a clump registers, and so the ground it occupies. */
   const BUSH_COLLIDER = 0.85;
   attempts = 0;
@@ -606,6 +755,7 @@ function buildFoliage(collision: CollisionWorld): {
     const blobs = rng.int(2, 3);
     const colour = rng.pick(CANOPY_GREENS);
     const y = terrainHeight(x, z);
+    const instanceStart = bushes.length;
     for (let i = 0; i < blobs; i += 1) {
       const radius = rng.range(0.7, 1.3);
       const offset = rng.range(0, TAU);
@@ -622,7 +772,8 @@ function buildFoliage(collision: CollisionWorld): {
         shade: rng.range(0.9, 1.1),
       });
     }
-    collision.addCircle(x, z, BUSH_COLLIDER);
+    const bushColliderId = collision.addCircle(x, z, BUSH_COLLIDER);
+    bushColliders.push({ id: bushColliderId, instanceStart, instanceCount: blobs });
     bushClumps.push({ x, z, radius: BUSH_COLLIDER });
   }
 
@@ -655,12 +806,8 @@ function buildFoliage(collision: CollisionWorld): {
     coneCanopies,
     true,
   );
-  group.add(
-    trunkMesh,
-    canopyMesh,
-    coneMesh,
-    makeInstanced('bushes', bushGeometry, foliageMaterial(0.9), bushes, true),
-  );
+  const bushMesh = makeInstanced('bushes', bushGeometry, foliageMaterial(0.9), bushes, true);
+  group.add(trunkMesh, canopyMesh, coneMesh, bushMesh);
 
   // Resolve every tree's `occluderRefs` into real `HideableInstance`s now
   // that the meshes they point into actually exist. `getMatrixAt` reads back
@@ -675,7 +822,16 @@ function buildFoliage(collision: CollisionWorld): {
     }),
   );
 
-  return { group, climbableTrees, occluders, bushes: bushClumps, hideableInstances };
+  return {
+    group,
+    climbableTrees,
+    occluders,
+    bushes: bushClumps,
+    hideableInstances,
+    treeColliders,
+    bushColliders,
+    bushMesh,
+  };
 }
 
 /**

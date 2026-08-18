@@ -148,6 +148,27 @@ export class World implements GameSystem {
     // rule, `world/tapSpacing.ts`). Any flower already inside is replanted.
     this.flowers.keepClearOfTapZones(this.train.stationTapAreas());
 
+    // Two rollercoasters (family ruling, 28 July): the Sky Cruiser, a
+    // serene first-person ride, and the Rail Race, third person with
+    // barriers to duck. Both routes are solved already — `coaster/plan.ts`
+    // grows the cruiser first and the race avoiding it (loop-over-loop),
+    // at module load — so this just *builds* them, same as the train's
+    // stations. Still built after the train, for the rail-over-rail assert.
+    //
+    // Built **before** `TreeLights` just below, and that order is now load-
+    // bearing rather than incidental (issue #301): the cruiser's pylon search
+    // fells a tree standing on an otherwise-good support spot instead of
+    // skipping it (`coaster/pylons.ts`), and a tree felled after `TreeLights`
+    // had already strung a garland to it would leave that garland's end
+    // hanging in mid-air over a stump nobody can see. Building the coaster
+    // first means every garland below is generated from the trees the park
+    // actually keeps.
+    this.coaster = new Coaster(this.collision, this.train, {
+      plan: COASTER_PLANS.cruiser,
+      camera: 'firstPerson',
+      clearTreesNear: (x, z, radius) => this.scenery.clearTreesNear(x, z, radius),
+    });
+
     // Garlands of lights strung tree to tree. Nothing about them is authored:
     // they are generated from where `Scenery` actually planted the trees and
     // from the railway's *solved* centre line, so both the next tree scatter
@@ -157,16 +178,6 @@ export class World implements GameSystem {
     // It registers no collision itself; the wires hang overhead.
     this.treeLights = new TreeLights(this.scenery.foliageOccluders, this.train.route);
 
-    // Two rollercoasters (family ruling, 28 July): the Sky Cruiser, a
-    // serene first-person ride, and the Rail Race, third person with
-    // barriers to duck. Both routes are solved already — `coaster/plan.ts`
-    // grows the cruiser first and the race avoiding it (loop-over-loop),
-    // at module load — so this just *builds* them, same as the train's
-    // stations. Still built after the train, for the rail-over-rail assert.
-    this.coaster = new Coaster(this.collision, this.train, {
-      plan: COASTER_PLANS.cruiser,
-      camera: 'firstPerson',
-    });
     // The Rail Race is no longer a coaster at all (reform of 31 July 2026): it
     // is four parallel rails round the park's rim, raced side-on with the park
     // itself as the backdrop. Its own module owns the route, the physics, the
