@@ -423,6 +423,8 @@ export class RailRace implements GameSystem {
       track: buildRailRaceTrack(RAIL_RACE_PLAN.walkPastRing, HAZARD_LAYOUT, collision, {
         ringName: 'railRace:walk-past-ring',
         registerCollision: true,
+        // No finish rainbow here — see `RailRaceTrackOptions.showArch` (#299).
+        showArch: false,
       }),
     };
     this.raceRing = {
@@ -430,6 +432,7 @@ export class RailRace implements GameSystem {
       track: buildRailRaceTrack(RAIL_RACE_PLAN.raceRing, HAZARD_LAYOUT, collision, {
         ringName: 'railRace:race-ring',
         registerCollision: false,
+        showArch: true,
       }),
     };
     for (const ring of [this.walkPastRing, this.raceRing]) {
