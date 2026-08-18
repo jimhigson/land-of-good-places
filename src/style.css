@@ -2886,6 +2886,21 @@ kbd {
   gap: 0.375rem;
   /* Two chips over a small thing would otherwise reach past its edges. */
   align-items: flex-end;
+  /* Breakfast hands out four chips at once (three foods + "Leave breakfast",
+     `Hotel.ts`'s `BREAKFASTS`), and a nowrap row that wide overruns a phone
+     in portrait — `#276`, reported as "the breakfast choices are clipped
+     off". `place()` in `ActionChips.ts` only re-centres the row's anchor
+     point; it cannot shrink content that refuses to reflow, so the outer
+     chips landed past the screen edge and `body`'s `overflow: hidden` (this
+     file, THE ROOT SCALE) cut them off — invisible and unreachable, not
+     merely tight. Same shape of bug, same fix, as `.journey-title` below:
+     let the row wrap and cap its width so it wraps *before* it runs out of
+     screen, rather than after. `getBoundingClientRect()` in `sync()` re-measures
+     post-wrap, so the row/edge clamping in `place()` still sees the true
+     (now possibly taller, multi-line) box and keeps it fully on screen. */
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 92vw;
 }
 
 .action-chips[data-show='false'] {
