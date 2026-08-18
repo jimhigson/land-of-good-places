@@ -36,6 +36,7 @@ import { KeychainShop } from './KeychainShop';
 import { Entrance, type EntranceOptions } from './entrance/Entrance';
 import { ARRIVAL_KID_COUNT } from './entrance/ArrivalSequence';
 import { terrainHeight } from './terrain';
+import { bridgeHeightAt } from './train/bridges';
 
 export interface WorldOptions {
   /** Passed straight to {@link Entrance} — see `EntranceOptions.arriveByBus`. */
@@ -270,12 +271,7 @@ export class World implements GameSystem {
       this.scenery.climbableTrees,
       // Every railway bridge's own surface height (issue #116, Decision 8) —
       // `train` is built well above, so every bridge already exists here.
-      (x, z) => {
-        for (const bridge of this.train.bridges) {
-          if (bridge.covers(x, z)) return bridge.heightAt(x, z);
-        }
-        return null;
-      },
+      (x, z) => bridgeHeightAt(this.train.bridges, x, z),
       this.entrance.arrival ? ARRIVAL_KID_COUNT : 0,
       this.hotel.residents,
     );

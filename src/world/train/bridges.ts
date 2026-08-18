@@ -1,11 +1,16 @@
 import { BoxGeometry, Group, InstancedMesh, Matrix4, Quaternion, Vector3 } from 'three';
 import type { TrainRoute } from './route';
 import type { LevelCrossing } from './crossings';
-import { BRIDGE_RISE, FENCE_OFFSET } from './clearance';
+import { BRIDGE_RISE } from './clearance';
+import {
+  ACROSS_MARGIN,
+  DECK_HALF_LENGTH,
+  planBridgeFootprints,
+  type BridgeFootprint,
+} from './bridgeFootprint';
 import { terrainHeight } from '../terrain';
 import { PALETTE } from '../../core/palette';
 import { toonMaterial } from '../../art/style/materials';
-import { ENTRANCE_RAMP } from '../building/layout';
 import type { MovingPlatform } from '../building/surfaces';
 
 /**
@@ -72,22 +77,6 @@ import type { MovingPlatform } from '../building/surfaces';
  * route sideways through the ramp's own flank onto the lawn it flanks.
  */
 
-/**
- * Bridge ramps climb at the same steepness the park's own front steps do —
- * derived from `ENTRANCE_RAMP`, never a separately chosen number, so a
- * retune of the entrance moves the bridges with it rather than leaving two
- * "how steep is a ramp here" answers to drift apart.
- */
-export const BRIDGE_RAMP_GRADIENT =
-  Math.abs(ENTRANCE_RAMP.yTo - ENTRANCE_RAMP.yFrom) / Math.abs(ENTRANCE_RAMP.to - ENTRANCE_RAMP.from);
-
-/**
- * Half-length of the deck along the crossing direction — has to clear both
- * fence lines (each {@link FENCE_OFFSET} out from the rail centre) with a
- * little margin so the deck's own edge does not sit flush on a fence post.
- */
-const DECK_HALF_LENGTH = FENCE_OFFSET + 1.2;
-
 /** Rise per ramp tread. Comfortably under `BUILDING_STEP_UP` (0.62 m) so
  * consecutive treads always read as one connected walking level. */
 const TREAD_RISE = 0.28;
@@ -95,23 +84,6 @@ const TREAD_RISE = 0.28;
 /** How far below a guard rail's own local surface it starts existing —
  * mirrors `hotel/place.ts`'s landing rail exactly. */
 const GUARD_RAIL_BAND = 0.5;
-
-/**
- * Extra width, beyond a crossing's own self-measured `halfGap`, that the
- * deck and every ramp tread carry before a guard rail stands.
- *
- * `halfGap` is tuned for exactly one job — sizing the *old* level crossing's
- * fence gap so an oblique path's own waypoint samples never straddled a
- * compartment wall (its own comment: "a fixed gap strands the path's own
- * waypoint samples"). That gap had nothing at all in this direction to
- * clip against. A bridge does — its own guard rails — so a path sample that
- * used to graze `halfGap` with metres to spare in every other direction now
- * grazes the rail meant to stop a child falling off the side. A stride's
- * worth of slack, the same margin `check-park.mts` used to give a route
- * meeting a crossing's own fence gap before bridges made that escape
- * unnecessary.
- */
-const ACROSS_MARGIN = 2.0;
 
 /**
  * Safety margin added on top of the worst (highest) ground sampled across a
@@ -218,6 +190,34 @@ function clamp01(value: number): number {
   return value < 0 ? 0 : value > 1 ? 1 : value;
 }
 
+/**
+ * The highest bridge surface over `(x, z)`, or `null` off every bridge.
+ *
+ * **Not** "the first bridge that covers it." Two crossings close enough
+ * together (their ramps run up to `BRIDGE_RISE / BRIDGE_RAMP_GRADIENT`,
+ * ~18 m, each way) can have one bridge's ramp and a neighbour's deck both
+ * genuinely cover the same point, and a fence seam is built against
+ * whichever is taller there (`WalkSurfaces.sample` picks the highest
+ * surface everywhere else in the park; this is the one place that logic
+ * lived outside `WalkSurfaces` and it must not quietly disagree). Picking
+ * the first in list order instead of the tallest handed a `poiGraph` probe
+ * a ramp's low height at a point a neighbour's much taller deck also
+ * claimed — the deck's own fence seam sits well above that height, so the
+ * probe read as blocked by a wall a walker actually standing at the height
+ * the deck offers would have cleared (found live, issue #116). The single
+ * owner both `World.ts` and `check-park.mts` call, so the two can never
+ * repeat that disagreement independently.
+ */
+export function bridgeHeightAt(bridges: readonly Bridge[], x: number, z: number): number | null {
+  let best: number | null = null;
+  for (const bridge of bridges) {
+    if (!bridge.covers(x, z)) continue;
+    const height = bridge.heightAt(x, z);
+    if (best === null || height > best) best = height;
+  }
+  return best;
+}
+
 /** Builds every bridge the park's crossings need, and the group holding all
  * of their geometry. `route` is currently unused by the geometry itself
  * (every number a bridge needs comes off its own crossing), but kept in the
@@ -236,17 +236,21 @@ export function buildBridges(_route: TrainRoute, crossings: readonly LevelCrossi
   const position = new Vector3();
   const scale = new Vector3(1, 1, 1);
 
-  for (const crossing of crossings) {
-    const cx = crossing.x;
-    const cz = crossing.z;
-    const dirX = crossing.pathDirX;
-    const dirZ = crossing.pathDirZ;
-    // Perpendicular to the crossing direction — the rail's own tangent,
-    // recovered by undoing the rotation `crossings.ts` built `pathDir` with
-    // (`pathDirX = tangent.z, pathDirZ = -tangent.x`).
-    const acrossX = -dirZ;
-    const acrossZ = dirX;
-    const halfAcross = crossing.halfGap + ACROSS_MARGIN;
+  // One footprint per crossing, same order — the single owner of every
+  // ground-plane number below, shared with whatever keeps scenery off a
+  // ramp before it exists (`bridgeKeepout.ts`).
+  const footprints = planBridgeFootprints(crossings);
+
+  for (let crossingIndex = 0; crossingIndex < crossings.length; crossingIndex += 1) {
+    const crossing = crossings[crossingIndex] as LevelCrossing;
+    const footprint = footprints[crossingIndex] as BridgeFootprint;
+    const cx = footprint.cx;
+    const cz = footprint.cz;
+    const dirX = footprint.dirX;
+    const dirZ = footprint.dirZ;
+    const acrossX = footprint.acrossX;
+    const acrossZ = footprint.acrossZ;
+    const halfAcross = footprint.halfAcross;
     // Guard rails stand further out again than the walkable surface's own
     // edge — a second margin on top of the first. `ACROSS_MARGIN` keeps a
     // drawn path's own waypoints off the surface's edge; this keeps them off
@@ -280,6 +284,11 @@ export function buildBridges(_route: TrainRoute, crossings: readonly LevelCrossi
     platforms.push(deck);
 
     const deckMesh = new InstancedMesh(new BoxGeometry(deckWidth, 0.16, DECK_HALF_LENGTH * 2), deckMaterial, 1);
+    // Named so `test/procgen/invariants.ts` can find the real, built deck
+    // and measure its own soffit — never `BRIDGE_DECK_DEPTH` (a claim, not
+    // a derivation, by its own doc) and never this box's height literal
+    // restated a second place either.
+    deckMesh.name = 'deck';
     deckMesh.castShadow = true;
     deckMesh.receiveShadow = true;
     rotation.setFromAxisAngle(axis, yaw);
@@ -322,7 +331,13 @@ export function buildBridges(_route: TrainRoute, crossings: readonly LevelCrossi
 
     // --- the two ramps -------------------------------------------------------
     const treadCount = Math.max(4, Math.ceil(BRIDGE_RISE / TREAD_RISE));
-    const rampRun = BRIDGE_RISE / BRIDGE_RAMP_GRADIENT;
+    // `footprint.rampRun` already accounts for how close the *next* crossing
+    // is, not just the entrace ramp's own gradient — see
+    // `bridgeFootprint.ts`'s own note on `rampRunCap`. Read here rather than
+    // recomputed, so the mesh this builds and the ground-plane exclusion
+    // `Scenery`/`LampPosts` already kept off of it (`bridgeKeepout.ts`) can
+    // never disagree about how far a ramp reaches.
+    const rampRun = footprint.rampRun;
     const treadRun = rampRun / treadCount;
 
     for (let side = 0; side < 2; side += 1) {
@@ -373,14 +388,7 @@ export function buildBridges(_route: TrainRoute, crossings: readonly LevelCrossi
     const bridge: Bridge = {
       deckY,
       deckCovers: (x: number, z: number): boolean => deck.covers(x, z),
-      covers: (x: number, z: number): boolean => {
-        const dx = x - cx;
-        const dz = z - cz;
-        const along = dx * dirX + dz * dirZ;
-        const across = dx * acrossX + dz * acrossZ;
-        if (Math.abs(across) > halfAcross) return false;
-        return Math.abs(along) <= DECK_HALF_LENGTH + rampRun;
-      },
+      covers: (x: number, z: number): boolean => footprint.covers(x, z),
       // Blends toward the **local** ground under `(x, z)` itself, not a
       // single "low end" reference sampled once at across = 0 — a ramp is
       // several metres wide, the terrain it descends onto is not flat

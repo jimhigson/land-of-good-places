@@ -28,7 +28,7 @@
  * about the park, not a check on it.
  */
 import { describe, it, beforeAll, expect } from 'vitest';
-import { InstancedMesh, Matrix4, Mesh, Vector3, type Object3D } from 'three';
+import { Box3, InstancedMesh, Matrix4, Mesh, Vector3, type Object3D } from 'three';
 import {
   buildParkFacts,
   segmentDistance,
@@ -3205,6 +3205,101 @@ const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
     );
   }
 
+  // --- 4. every real bridge deck, over the ground it actually stands over ---
+  //
+  // The promise this file's own header made when #116 was still open: measure
+  // the *built* deck, not `BRIDGE_RISE` (which already has `BRIDGE_DECK_DEPTH`,
+  // a stated claim rather than a derivation, baked into it) and not
+  // `bridge.deckY` restated — the mesh's own lowest visible vertex, the same
+  // way builtBodyTop above is the locomotive's. `world.building.surfaces` is
+  // the already-built sampler every walker's feet use, so asking it for the
+  // ground under a crossing costs nothing seed-unsafe: it is a method call
+  // on an object `facts` already carries, never an import.
+  for (const crossing of facts.world.train.crossings) {
+    // The same name `bridges.ts` builds this crossing's own group under —
+    // one owner (the crossing's own `railDistance`) for both.
+    const deckMesh = facts.world.train.group.getObjectByName(
+      `bridge-${crossing.railDistance.toFixed(1)}`,
+    )?.getObjectByName('deck');
+    if (!deckMesh) {
+      complaints.push(
+        `the crossing at (${fmt([crossing.x, crossing.z])}) has no built bridge deck to measure`,
+      );
+      continue;
+    }
+    const soffit = new Box3().setFromObject(deckMesh).min.y;
+    const groundY = facts.world.building.surfaces.sample(crossing.x, crossing.z, 0);
+    const clearance = soffit - groundY;
+    if (clearance < TRAIN_CLEARANCE_Y) {
+      complaints.push(
+        `the bridge deck at (${fmt([crossing.x, crossing.z])}) leaves only ` +
+          `${clearance.toFixed(2)} m under its own built soffit, against the ` +
+          `${TRAIN_CLEARANCE_Y.toFixed(2)} m the train and its riders sweep to`,
+      );
+    }
+  }
+
+  return complaints;
+};
+
+/**
+ * Every railway crossing's bridge is genuinely walkable and genuinely
+ * reachable (issue #116, Decision 8) — measured against the real, built
+ * bridge and the real nav lattice, never against the plan that placed
+ * either.
+ *
+ * Three questions, in the order a child would meet them:
+ *
+ * 1. **Does a route from the entrance actually reach the deck?** The exact
+ *    question `check:park`'s invariant 1 asks of every attraction, asked
+ *    here of every bridge, at the deck's own height (`reachableFromEntrance`'s
+ *    `goalY` — a ground-level probe would find nothing there at all, which
+ *    is the whole point of a bridge over a level crossing).
+ * 2. **Is the deck itself standable**, at the height a walker on it really
+ *    stands at? A ground-level probe passing here would prove nothing: it
+ *    is exactly the question a level crossing's own probe used to ask, and
+ *    exactly what this feature retired.
+ * 3. **Is each ramp standable partway down its own slope?** — proving the
+ *    climb itself is walkable, not just its two ends, which is where
+ *    #116's own ramp-flank guard rails (since removed) once wedged a
+ *    routable edge without ever touching the deck or the ground.
+ */
+const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const probe = new Vector3();
+  const standableAt = (bridge: (typeof facts.world.train.bridges)[number], x: number, z: number): boolean => {
+    probe.set(x, bridge.heightAt(x, z), z);
+    facts.world.collision.resolve(probe, PLAYER_RADIUS);
+    return Math.hypot(probe.x - x, probe.z - z) < 1e-3;
+  };
+
+  for (const crossing of facts.world.train.crossings) {
+    const bridge = facts.world.train.bridges.find((b) => b.deckCovers(crossing.x, crossing.z));
+    if (!bridge) continue; // reported by railwayClearanceCoversTheTrainAndItsRiders above
+
+    if (!facts.reachableFromEntrance(crossing.x, crossing.z, bridge.heightAt(crossing.x, crossing.z))) {
+      complaints.push(
+        `the bridge deck at (${fmt([crossing.x, crossing.z])}) is not reachable ` +
+          'from the entrance on the real nav lattice',
+      );
+    }
+    if (!standableAt(bridge, crossing.x, crossing.z)) {
+      complaints.push(`the bridge deck at (${fmt([crossing.x, crossing.z])}) is not itself standable`);
+    }
+
+    // A point partway down each ramp — comfortably on the slope, clear of
+    // both the deck and the ordinary ground the ramp joins, so a pass here
+    // proves the climb itself rather than either end of it.
+    for (const sign of [1, -1] as const) {
+      const rx = crossing.x + crossing.pathDirX * 6 * sign;
+      const rz = crossing.z + crossing.pathDirZ * 6 * sign;
+      if (!bridge.covers(rx, rz)) continue; // a maximally cramped bridge; nothing to probe this far out
+      if (!standableAt(bridge, rx, rz)) {
+        complaints.push(`the ramp at (${fmt([rx, rz])}), off the crossing at (${fmt([crossing.x, crossing.z])}), is not standable`);
+      }
+    }
+  }
+
   return complaints;
 };
 
@@ -5249,6 +5344,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     'the clearance over the railway covers the train and everyone riding it',
     railwayClearanceCoversTheTrainAndItsRiders,
   ],
+  ['every railway crossing has a bridge you can walk to, onto and across', everyBridgeIsWalkableAndReachable],
   ['the cat bus is actually in the park, at the gate, with everyone aboard', theCatBusIsInThePark],
   ['every child fits in the cat bus seat they are sitting in', childrenFitTheSeatsTheySitIn],
   ['the boundary wall has a gate you can actually walk through', theGateIsAHoleInTheWall],
