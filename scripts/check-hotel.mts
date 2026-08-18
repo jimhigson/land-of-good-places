@@ -1397,6 +1397,75 @@ if (fallenPlayer.position.y < 0) {
   }
 }
 
+// ---------------- 16b. every bed's own nap has a sleeping pet she can see
+//
+// Jim, live play, 18 Aug 2026, from `/hotel-suite`: *"the pet didn't get into
+// any bed when I did [went to sleep]."* Root cause: every pet bed used to
+// live only in the middle bedroom (`SUITE_BED_SPOTS[1]`'s room). `Hotel.nap`
+// really did lay every pet down — probe 16 above proves the rotation flips —
+// but `Hotel.enterSuite`'s own doc comment has her reaching **bedroom 1's**
+// door first, not bedroom 2's, and a 2.2 m partition plus the fixed camera's
+// field of view put bedroom 2 nowhere in frame from bedroom 1 or bedroom 3.
+// The data changed; nothing she was looking at did — which reads as exactly
+// what she reported, and probe 16 stayed green through it the whole time
+// because it only ever checks bed 0's rotation numbers, never whether bed
+// 0's own room has a pet bed in it at all.
+//
+// So this asks that question directly, for **all three** beds: run each
+// bed's own real Sleep action, then require at least one pet in the public
+// `hotel.petBeds` list to be both lying down and standing on *that bed's
+// own* real clear floor (`clearFloorAround` — the same rectangle the room's
+// actual walls build, not a hand-typed span) — i.e. visibly in the room she
+// is in, not merely somewhere in the data.
+//
+// Proven red on the pre-fix build (pet beds only ever in bedroom 2): bed 0's
+// own floor is x -14.55…-8.20 and every pet bed sat at x ≈ -2.39, so no pet
+// bed's a chair the bedroom 0 checkist would ever have counted as "in this
+// room" — likewise for bed 2's floor at x 7.40…14.55.
+{
+  const napper2 = quietly(
+    () => new Player(collision, new IsoCamera(), new Vector3(SUITE.originX, 0, SUITE.originZ)),
+  );
+  scene.add(napper2.group);
+  hotel.attachPlayer(napper2 as never);
+  hotel.adoptRestoredPlayer();
+
+  for (const bedIndex of [0, 1, 2] as const) {
+    const spot = SUITE_BED_SPOTS[bedIndex];
+    if (!spot) {
+      problems.push(`SUITE_BED_SPOTS has no entry ${bedIndex}`);
+      continue;
+    }
+    const bedZone = hotel.interactZones().find((zone) => zone.id === `hotel-bed-bed-${bedIndex}`);
+    const sleep = bedZone?.actions?.()[0];
+    if (!sleep) {
+      problems.push(`bed ${bedIndex} offers no Sleep action for the visible-pet check`);
+      continue;
+    }
+    sleep.run();
+
+    const room = clearFloorAround(SUITE, spot[0], spot[1]);
+    const visible = hotel.petBeds.some(({ pet, x, z }) => {
+      const lying = Math.abs(pet.root.rotation.x + Math.PI / 2) < 0.01;
+      const inThisRoom = x >= room.minX && x <= room.maxX && z >= room.minZ && z <= room.maxZ;
+      return lying && inThisRoom;
+    });
+    if (!visible) {
+      problems.push(
+        `napping at bed ${bedIndex} (its own room floor is local x ${room.minX.toFixed(2)}…` +
+          `${room.maxX.toFixed(2)}, z ${room.minZ.toFixed(2)}…${room.maxZ.toFixed(2)}) lies every ` +
+          `pet down somewhere, but none of them is on that bedroom's own floor — a child sleeping ` +
+          `there sees no pet go to bed at all (issue #275, live-play regression)`,
+      );
+    }
+
+    // One giant tick ends the nap before the next bed's turn — same idiom as
+    // probe 16's own hand-back.
+    hotel.update({ dt: 999, elapsed: 0 } as never);
+  }
+  scene.remove(napper2.group);
+}
+
 // --------------------------------- 15. the walls abut: no notch at any corner
 //
 // Jim, live play, 8 Aug 2026: *"the walls don't abut each other properly, they
