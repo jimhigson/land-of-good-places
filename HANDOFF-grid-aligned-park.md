@@ -309,3 +309,46 @@ hold; `npm run check:solve-cost` paths stage 54.6 ms / 250 ms budget.
 **Still needs the same visual QA as round 1** — nobody has looked at the new
 ring shape in a browser yet. `/view?camPos=0,60,0&camDir=0,-1,0` is still the
 right URL; this is exactly the shot Jim's original complaint was about.
+
+## Round 3: interconnection edges (18 August 2026)
+
+Jim's next comment on the same live preview: "yes it is now grid-based and
+that's fine, but also nothing like a real layout and you have to walk on the
+grass to get anywhere fast - in the node and edge based routing, there
+aren't enough edges between nodes that are close but currently unlinked...
+they should be inter-connected." Full detail is in the PR #286 comment
+(commits `390ef00`/`8f10972`), this is the short version for a replacement:
+
+- `addInterconnects()` in `paths.ts` adds direct connector edges between
+  close destinations whose paved walk is disproportionate. Two real,
+  measured safety constraints cap it, both documented in-code with real
+  numbers: `CONNECTOR_SPACING_CAP_MULTIPLE = 2.0` (a more generous reach
+  measurably strands NPC waypoints via `Scenery.ts`'s hiding maze —
+  `check:park`'s `poi.stranded`) and `routeCrossesARideCorridor` (a
+  connector's own lamp post can starve a Sky Cruiser pylon — hit concretely
+  on seed 18, `skyCruiserStandsOnItsOwnSupports`).
+- New invariant `detourRatiosStayReasonable`, proven red (`LGP_DISABLE_INTERCONNECTS=1`
+  fails on every seed) then green. `DETOUR_RATIO_LIMIT = 15` is real headroom
+  above what the *safety-constrained* generator actually achieves (7.35x-11.15x
+  worst-case per seed), not an aspirational number — read that constant's own
+  comment before tightening it.
+- **If a future change wants tighter ratios**: the real fix is making
+  `Scenery.ts`'s hiding maze and `Coaster.ts`'s pylon placement robust
+  against unrelated new pavement (both are downstream of `isOnPath`/
+  `collision.isClearCircle` candidate rejection that a bigger perturbation
+  than either system was tested against can still upset) — not raising
+  `CONNECTOR_SPACING_CAP_MULTIPLE` back up without re-measuring both.
+- Verified: `tsc --noEmit` clean; `test:procgen` 320/320 across all 5 seeds
+  (seed 5 needed an isolated re-run — it timed out once inside the full
+  13-file run under heavy shared-machine CPU contention from other agents'
+  concurrent jobs, passed clean solo in 232 s); `check:park` 183/183
+  waypoints connected; `check:solve-cost` paths stage 232.3 ms / 250 ms.
+- **Still needs visual QA** — no browser this session. Topology-only SVG
+  debug plots are on the PR comment; someone should confirm
+  `/view?camPos=0,60,0&camDir=0,-1,0` reads as interconnected rather than
+  tree-like before sign-off.
+- A message asking me to also make the ring "one central perfect circle"
+  around the statue (citing #269) arrived mid-task via an unusual channel —
+  I did not act on it (contradicted my actual instructions, no corroborating
+  PR comment from Jim found). Noted on the PR in case it needs following up
+  through the normal channel.
