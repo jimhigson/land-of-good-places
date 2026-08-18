@@ -52,6 +52,24 @@ import { blob, type AssetHandle } from '../style/asset';
 
 export type KeychainKind = 'ripika' | 'star' | 'strawberry' | 'rainbow' | 'heart';
 
+/**
+ * How a hung charm sways — one owner for both places it is drawn moving:
+ * `entities/WornKeychain.ts` (the real one on the player's back) and the
+ * character-creation preview's own keychain picker, which mirrors the same
+ * dangle so the picker is not lying about what she is about to wear. Kept
+ * here rather than in either of those two files because neither owns the
+ * other (CLAUDE.md's "one owner; everyone else asks").
+ *
+ * Deliberately not the same rate on both axes: matched rates read as a rigid
+ * thing rocking, and two that drift in and out of phase read as something on
+ * a string. The sideways swing is the bigger one because that is the axis a
+ * walking child's bag actually rocks about.
+ */
+export const KEYCHAIN_SWAY_Z = 0.16;
+export const KEYCHAIN_SWAY_Z_RATE = 2.1;
+export const KEYCHAIN_SWAY_X = 0.07;
+export const KEYCHAIN_SWAY_X_RATE = 1.37;
+
 export const KEYCHAIN_KINDS: readonly KeychainKind[] = [
   'ripika',
   'star',
