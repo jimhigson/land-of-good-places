@@ -136,6 +136,35 @@ function overlapsDoorway(bounds: FurnitureBounds, door: DoorwayZone): boolean {
 }
 
 /**
+ * The axis-aligned box a `halfX`×`halfZ` rectangle actually sweeps once it is
+ * turned by `spin` radians about its own centre — or the plain box back,
+ * unrotated, when `spin` is absent or zero.
+ *
+ * A rotated rectangle's own AABB is the standard trig identity (each new
+ * half-extent is the sum of the old two projected onto that axis): it is a
+ * **superset** of the true rotated shape (a conservative box round a
+ * diamond), which is exactly what a collider and a doorway check both want —
+ * neither can leave a corner uncovered.
+ *
+ * Every caller in this file that builds a rectangular footprint routes
+ * `halfX`/`halfZ` through this first (see {@link HotelProps.footprint}'s own
+ * header for why it did not, once). A round footprint never needs it — a
+ * circle looks the same from every angle — which is the whole reason this
+ * bug stayed invisible until the day a *rectangular* prop finally got a
+ * `spin` of its own.
+ */
+function effectiveHalfExtents(
+  halfX: number,
+  halfZ: number,
+  spin: number | undefined,
+): { halfX: number; halfZ: number } {
+  if (!spin) return { halfX, halfZ };
+  const c = Math.abs(Math.cos(spin));
+  const s = Math.abs(Math.sin(spin));
+  return { halfX: halfX * c + halfZ * s, halfZ: halfX * s + halfZ * c };
+}
+
+/**
  * A round prop's standing plate is this fraction of its collider radius, per
  * side — between the inscribed square (0.71, gaps at the compass points) and
  * the circumscribed one (1.0, floating corners). Slightly floaty corners on a
@@ -297,11 +326,17 @@ export class HotelProps {
    * Stands one prop in a room: parents it, positions it, makes it solid, and
    * tells the guests to walk round it. The single call the header is about.
    *
-   * `spin` turns the model but **not** the footprint, which stays
-   * axis-aligned. That is honest for everything in this hotel today — the
-   * spun props are the breakfast tables, and a table is round — and a rotated
-   * rectangle is a fifth shape for `CollisionWorld` to learn for one prop that
-   * does not exist.
+   * `spin` turns the model, and — for a rectangular footprint — the
+   * axis-aligned box {@link effectiveHalfExtents} conservatively bounds it in
+   * too, so the collider, the doorway check and the keep-out all agree with
+   * what a rotated model actually occupies. This used to be honest without
+   * the extra step, on the theory that the only spun props were round
+   * breakfast tables; it stopped being true the day the suite's lounge sofa
+   * (`Hotel.dressSuite`) got a `spin` of its own to face both the telly and
+   * the camera, and nothing here noticed — `isClearOfDoorways` kept measuring
+   * the *unrotated* box, so the sofa's true, rotated silhouette could (and
+   * did) reach further into a doorway than the check ever saw (18 Aug 2026,
+   * alongside the `DOORWAY_THROUGH_DEPTH` fix in `layout.ts`).
    */
   place(shell: Group, room: HotelRoom, prop: Object3D, plan: PropPlan): void {
     prop.position.set(plan.x, plan.y ?? 0, plan.z);
@@ -337,8 +372,16 @@ export class HotelProps {
       return;
     }
 
-    const halfX = plan.halfX ?? 0.5;
-    const halfZ = plan.halfZ ?? 0.5;
+    // {@link effectiveHalfExtents} — the box a rotated rectangle actually
+    // occupies, or the plain box unrotated. Every consumer below (the
+    // collider, the standing plate, the guest keep-out) uses this, not the
+    // raw `plan.halfX`/`plan.halfZ`, so a `spin` can never make one of them
+    // disagree with what the model visually covers.
+    const { halfX, halfZ } = effectiveHalfExtents(
+      plan.halfX ?? 0.5,
+      plan.halfZ ?? 0.5,
+      plan.spin,
+    );
     if (solid) {
       // Inset by the wall's own half-thickness, so the four walls' outer faces
       // land on the visual edge rather than {@link WALL_HALF_THICKNESS} beyond
@@ -369,8 +412,11 @@ export class HotelProps {
       zones = doorwayClearanceZones(room, DOORWAY_CLEARANCE);
       this.doorwayZonesByRoom.set(room, zones);
     }
-    const halfX = plan.halfX ?? 0.5;
-    const halfZ = plan.halfZ ?? 0.5;
+    const { halfX, halfZ } = effectiveHalfExtents(
+      plan.halfX ?? 0.5,
+      plan.halfZ ?? 0.5,
+      plan.spin,
+    );
     const bounds: FurnitureBounds =
       plan.radius !== undefined
         ? { x: plan.x, z: plan.z, radius: plan.radius }
@@ -380,7 +426,7 @@ export class HotelProps {
         `${room.space} prop at local (${plan.x}, ${plan.z}) — ` +
           (plan.radius !== undefined
             ? `radius ${plan.radius}`
-            : `${halfX * 2}×${halfZ * 2} m footprint`),
+            : `${halfX * 2}×${halfZ * 2} m footprint${plan.spin ? ' (rotated)' : ''}`),
       );
     }
   }
