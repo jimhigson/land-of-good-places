@@ -472,6 +472,18 @@ the screenshot is for what it can.
   real screenshots before this rule existed, don't let that evidence stay
   buried in a subagent transcript — send it retroactively.
 
+**And it belongs on the issue, not only in chat.** Jim's own follow-up rule,
+18 August: any design feedback he gives — verbally, mid-conversation — gets
+posted onto the relevant GitHub issue or PR as a comment, and any screenshot
+that informed it (or that a QA/engineer pass produced afterward) gets
+attached there too. A conversation is not a record; the issue thread is.
+Chat is where the discussion happens, but the next agent to pick up that
+issue reads the issue, not this transcript — feedback that only exists here
+is invisible to them. GitHub issue comments don't take a raw local file
+path, so host images by committing them to a dedicated orphan branch (e.g.
+`qa-screenshots`) and linking the `raw.githubusercontent.com` URL — keeps
+binary screenshots out of `main`'s and every feature branch's own history.
+
 ## PRs
 
 Raise with `gh pr create`. **Do not merge your own work** — every PR gets two
