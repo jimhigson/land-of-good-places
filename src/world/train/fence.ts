@@ -8,6 +8,7 @@ import {
   Vector3,
 } from 'three';
 import type { TrainRoute } from './route';
+import { TRACK_CLEARANCE } from './route';
 import type { Bridge } from './bridges';
 import { FENCE_OFFSET, FENCE_SEAM_MARGIN } from './clearance';
 import type { CollisionWorld } from '../Collision';
@@ -216,6 +217,41 @@ export function buildRailFence(
       previousRight = right;
     }
     if (previousLeft && previousRight) cap(previousLeft, previousRight); // far cap
+  }
+
+  // --- 2b. the rail itself, down the centre of every closed stretch --------
+  // The two flanking runs above are thin (0.18 m) lines offset FENCE_OFFSET
+  // either side of the centre line — collision-solid, but only *there*.
+  // Nothing ever stamped the ground *between* them, so a walker's own
+  // fattened reach (`walkerRadius`) from each flank reaches a couple of
+  // steps in and no further, leaving an un-stamped strip down the middle of
+  // the whole loop. Nobody could walk there from open ground (the flanks
+  // still block that), but the strip is internally connected end to end —
+  // exactly a `check:park` invariant 4 finding waited for: one bridge
+  // giving that strip a single legitimate connection to the rest of the
+  // lattice let `NavGrid` route the *entire uncovered ring* as reachable,
+  // not just the bridge's own cells. A third, invisible run straight down
+  // the rail — half of `TRACK_CLEARANCE` wider than the flanks reach solo —
+  // closes it, and (see `addFenceWall`) gets exactly the same `topIsAbsolute`
+  // seam under a bridge deck that the flanks get, so nothing here narrows
+  // what a bridge already opened.
+  const linkCentre = (a: Post, b: Post): void => {
+    const deckY = deckSpanAt((a.x + b.x) / 2, (a.z + b.z) / 2);
+    if (deckY === null) {
+      collision.addWall(a.x, a.z, b.x, b.z, TRACK_CLEARANCE);
+    } else {
+      collision.addWall(a.x, a.z, b.x, b.z, TRACK_CLEARANCE, deckY - FENCE_SEAM_MARGIN, false, true);
+    }
+  };
+  for (const box of closed) {
+    let previousCentre: Post | null = null;
+    const steps = Math.max(2, Math.ceil((box.to - box.from) / STEP));
+    for (let i = 0; i <= steps; i += 1) {
+      const distance = box.from + ((box.to - box.from) * i) / steps;
+      const centre = sideAt(distance, 0);
+      if (previousCentre) linkCentre(previousCentre, centre);
+      previousCentre = centre;
+    }
   }
 
   // --- 3. the far rail of every platform stays fenced ----------------------
