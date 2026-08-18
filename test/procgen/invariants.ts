@@ -979,6 +979,328 @@ const everyDestinationIsANode: Invariant = (facts) => {
   return missing;
 };
 
+/** Destination kinds {@link detourRatiosStayReasonable} measures — real
+ * places a child is going, matching `paths.ts`'s own `addInterconnects`. */
+const DETOUR_DESTINATION_KINDS = new Set(['anchor', 'stall', 'station', 'exit']);
+
+/**
+ * How close a ribbon's own end must land to another ribbon's drawn curve
+ * before {@link buildFactsDistanceGraph} treats it as the same junction.
+ * `parkFacts.ts` resamples every route to ~0.5 m steps (`drawnCentreLine`'s
+ * `steps`), so the true junction point — always exact on the *new* ribbon's
+ * own first/last sample, since Catmull-Rom passes through its own control
+ * points exactly, `t=0`/`t=1` — can sit up to half a sampling step from the
+ * nearest sample on whichever *other* ribbon it branched from. 0.6 m clears
+ * that with real room, while staying far short of the metres of daylight
+ * between any two genuinely unconnected ribbons in this park.
+ */
+const DETOUR_SPLICE_TOLERANCE = 0.6;
+
+/**
+ * Independent shortest-path oracle over the park's **drawn** paved edges
+ * (`facts.pathEdges`, the resampled Catmull-Rom curve — not `paths.ts`'s own
+ * control polylines, and not that module's own graph-building code: this is
+ * a second, separately-written measurement of the same built geometry, per
+ * this file's "measure the built park" rule).
+ *
+ * A ribbon's start/end is a junction onto whichever other ribbon it
+ * branched from, not necessarily one of that ribbon's own drawn samples —
+ * so every edge's two ends are spliced onto the nearest point of every
+ * *other* edge's drawn curve, within {@link DETOUR_SPLICE_TOLERANCE}, before
+ * the graph is built.
+ */
+function buildFactsDistanceGraph(
+  edges: readonly ParkFacts['pathEdges'][number][],
+): { distanceBetween: (ax: number, az: number, bx: number, bz: number) => number } {
+  const polylines: [number, number][][] = edges.map((edge) =>
+    edge.points.map((p) => [p[0], p[1]] as [number, number]),
+  );
+  const closedFlags = edges.map((edge) => edge.backbone);
+
+  const spliceOnto = (targetIdx: number, px: number, pz: number): void => {
+    const pts = polylines[targetIdx] as [number, number][];
+    const segCount = closedFlags[targetIdx] ? pts.length : pts.length - 1;
+    let bestSeg = -1;
+    let bestDistance = DETOUR_SPLICE_TOLERANCE;
+    for (let i = 0; i < segCount; i += 1) {
+      const a = pts[i] as [number, number];
+      const b = pts[(i + 1) % pts.length] as [number, number];
+      if (Math.hypot(px - a[0], pz - a[1]) < 1e-6) return; // already a vertex
+      if (Math.hypot(px - b[0], pz - b[1]) < 1e-6) return;
+      const dx = b[0] - a[0];
+      const dz = b[1] - a[1];
+      const lengthSq = dx * dx + dz * dz;
+      if (lengthSq < 1e-12) continue;
+      const t = Math.max(0, Math.min(1, ((px - a[0]) * dx + (pz - a[1]) * dz) / lengthSq));
+      const projX = a[0] + dx * t;
+      const projZ = a[1] + dz * t;
+      const distance = Math.hypot(px - projX, pz - projZ);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestSeg = i;
+      }
+    }
+    // Insert the *original* point (px, pz), not its projection onto the
+    // segment: it flows in verbatim from the edge it belongs to (see the
+    // call site below), and that same edge already has this exact
+    // coordinate as one of its own points. Splicing in the projection
+    // instead would put two merely-nearby-but-distinct floating-point
+    // values where the graph needs one shared vertex — the two edges would
+    // never actually join, just sit within `DETOUR_SPLICE_TOLERANCE` of
+    // each other, and every shortest path through that junction would have
+    // to detour around the gap via wherever the graph *was* connected.
+    if (bestSeg >= 0) pts.splice(bestSeg + 1, 0, [px, pz]);
+  };
+
+  for (let i = 0; i < polylines.length; i += 1) {
+    const pts = polylines[i] as [number, number][];
+    if (pts.length === 0) continue;
+    const first = pts[0] as [number, number];
+    const last = pts[pts.length - 1] as [number, number];
+    for (let j = 0; j < polylines.length; j += 1) {
+      if (j === i) continue;
+      spliceOnto(j, first[0], first[1]);
+      spliceOnto(j, last[0], last[1]);
+    }
+  }
+
+  const vertexIndex = new Map<string, number>();
+  const vertexCoord: [number, number][] = [];
+  const adjacency: { to: number; weight: number }[][] = [];
+  const vertexKey = (x: number, z: number): string =>
+    `${Math.round(x / 0.05)},${Math.round(z / 0.05)}`;
+  const idOf = (x: number, z: number): number => {
+    const key = vertexKey(x, z);
+    let id = vertexIndex.get(key);
+    if (id === undefined) {
+      id = adjacency.length;
+      vertexIndex.set(key, id);
+      vertexCoord.push([x, z]);
+      adjacency.push([]);
+    }
+    return id;
+  };
+  const addEdge = (aId: number, bId: number, weight: number): void => {
+    if (aId === bId) return;
+    (adjacency[aId] as { to: number; weight: number }[]).push({ to: bId, weight });
+    (adjacency[bId] as { to: number; weight: number }[]).push({ to: aId, weight });
+  };
+  for (let i = 0; i < polylines.length; i += 1) {
+    const pts = polylines[i] as [number, number][];
+    const segCount = closedFlags[i] ? pts.length : pts.length - 1;
+    for (let s = 0; s < segCount; s += 1) {
+      const a = pts[s] as [number, number];
+      const b = pts[(s + 1) % pts.length] as [number, number];
+      const weight = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (weight < 1e-9) continue;
+      addEdge(idOf(a[0], a[1]), idOf(b[0], b[1]), weight);
+    }
+  }
+
+  /**
+   * A destination's own coordinate is a *control* point of its own edge
+   * (`paths.ts`'s `spur`), not necessarily one the curve's arc-length
+   * resampling (`drawnCentreLine`) lands on exactly — Catmull-Rom only
+   * guarantees hitting a curve's very first/last control point exactly, and
+   * a destination's own point is often followed by a "past the doormat"
+   * extension (`spur`'s `past`), pushing it into the interior of the array.
+   * So a query point that isn't already an exact sampled vertex is attached
+   * to the nearest one instead, with the gap added to the walk as a real
+   * (if tiny) leash — the true "last few centimetres of curve-sampling
+   * slack," not a routing shortcut. Capped well under this park's median
+   * destination spacing (13-15 m) so it can never accidentally bridge two
+   * genuinely different, unconnected pieces of paving.
+   */
+  const DESTINATION_ATTACH_TOLERANCE = 5;
+  const attach = (x: number, z: number): { id: number; leash: number } | null => {
+    const exact = vertexIndex.get(vertexKey(x, z));
+    if (exact !== undefined) return { id: exact, leash: 0 };
+    let bestId = -1;
+    let bestDistance = DESTINATION_ATTACH_TOLERANCE;
+    for (let i = 0; i < vertexCoord.length; i += 1) {
+      const [vx, vz] = vertexCoord[i] as [number, number];
+      const d = Math.hypot(x - vx, z - vz);
+      if (d < bestDistance) {
+        bestDistance = d;
+        bestId = i;
+      }
+    }
+    return bestId >= 0 ? { id: bestId, leash: bestDistance } : null;
+  };
+
+  return {
+    distanceBetween(ax, az, bx, bz) {
+      const start = attach(ax, az);
+      const goal = attach(bx, bz);
+      if (!start || !goal) return Infinity;
+      const startId = start.id;
+      const goalId = goal.id;
+      const dist = new Float64Array(adjacency.length).fill(Infinity);
+      dist[startId] = 0;
+      const visited = new Uint8Array(adjacency.length);
+      for (;;) {
+        let curId = -1;
+        let curDist = Infinity;
+        for (let i = 0; i < dist.length; i += 1) {
+          const d = dist[i] as number;
+          if (!visited[i] && d < curDist) {
+            curDist = d;
+            curId = i;
+          }
+        }
+        if (curId === -1) break;
+        if (curId === goalId) return curDist + start.leash + goal.leash;
+        visited[curId] = 1;
+        for (const { to, weight } of adjacency[curId] as { to: number; weight: number }[]) {
+          const next = curDist + weight;
+          if (next < (dist[to] as number)) dist[to] = next;
+        }
+      }
+      return Infinity;
+    },
+  };
+}
+
+/** The built park's own median nearest-neighbour spacing between real
+ * destinations — sizes {@link detourRatiosStayReasonable}'s thresholds off
+ * the park itself, per CLAUDE.md's procgen-threshold rule, rather than a
+ * metre literal that means nothing on a different seed. */
+function medianDestinationSpacing(nodes: readonly { x: number; z: number }[]): number {
+  if (nodes.length < 2) return 0;
+  const gaps: number[] = [];
+  for (let i = 0; i < nodes.length; i += 1) {
+    let best = Infinity;
+    for (let j = 0; j < nodes.length; j += 1) {
+      if (i === j) continue;
+      const a = nodes[i] as { x: number; z: number };
+      const b = nodes[j] as { x: number; z: number };
+      best = Math.min(best, Math.hypot(a.x - b.x, a.z - b.z));
+    }
+    gaps.push(best);
+  }
+  gaps.sort((a, b) => a - b);
+  return gaps[Math.floor(gaps.length / 2)] as number;
+}
+
+/** How many "typical plot hops" apart, straight-line, a pair of
+ * destinations may be and still count as "close" for this invariant —
+ * mirrors `paths.ts`'s own `CONNECTOR_SPACING_CAP_MULTIPLE` exactly, so this
+ * invariant only ever asks the generator to fix what it actually attempts
+ * to fix (see that constant's own comment for why it is 2.0, not a more
+ * generous number: a second, independent constraint — `Scenery.ts`'s hiding
+ * maze — measured against `check:park`'s waypoint-reachability invariant,
+ * not against this one). */
+const DETOUR_CLOSE_CAP_MULTIPLE = 2.0;
+
+/** How many "typical plot hops" of paved distance a pair must be wasting
+ * (paved minus straight-line) before a bad ratio is worth flagging — a
+ * little looser than `paths.ts`'s own `CONNECTOR_MIN_WASTE_MULTIPLE` (1.5),
+ * deliberately: this invariant only cares about *real* wasted walking, and
+ * a pair the generator correctly left unconnected because the absolute
+ * waste was trivial (e.g. two doormats 2 m apart, paved 8 m apart — a
+ * dramatic-looking ratio over a handful of metres) should never trip it. */
+const DETOUR_WASTE_FLOOR_MULTIPLE = 1.5;
+
+/**
+ * **No two close destinations are left with a wildly disproportionate paved
+ * detour between them** (Jim, PR #286, 18 August 2026): "there aren't
+ * enough edges between nodes that are close but currently unlinked, which
+ * makes most things into branches off a central hub, whereas they should be
+ * inter-connected."
+ *
+ * For every pair of real destinations within {@link DETOUR_CLOSE_CAP_MULTIPLE}
+ * plot-hops of each other, straight-line, and losing at least
+ * {@link DETOUR_WASTE_FLOOR_MULTIPLE} plot-hops of paved distance to the
+ * detour (so a merely small-numbers-divide-badly ratio over a trivial
+ * absolute distance is never flagged), the paved distance may not exceed
+ * `DETOUR_RATIO_LIMIT` times the straight-line distance.
+ *
+ * **Proved red, then green** (18 August 2026): with `addInterconnects`
+ * disabled (the hub-and-spoke tree `paths.ts` built before this fix), the
+ * canonical seed's `stall.dodgems`/`station-1` pair (21.0 m straight, 52.3 m
+ * paved) is one of several pairs that clear both the close cap and the
+ * waste floor at a bad ratio, and every seed tested shows several more —
+ * `LGP_DISABLE_INTERCONNECTS=1` reliably fails this invariant everywhere.
+ * Restoring `addInterconnects` measurably improves every one of those
+ * pairs (see `addInterconnects`'s own comment for the mechanism), which is
+ * what the ratio limit below is actually proving held.
+ *
+ * `DETOUR_RATIO_LIMIT = 15` is not the number a network with no other
+ * constraints would earn — it is real headroom (35%+) above the worst ratio
+ * the generator *actually* produces once it also respects two independent,
+ * measured safety limits `addInterconnects`'s own comments document in
+ * full: `CONNECTOR_SPACING_CAP_MULTIPLE` (2.0, kept low so new pavement
+ * can't shift `Scenery.ts`'s hiding-maze placement into stranding an NPC
+ * waypoint — `check:park`'s `poi.stranded`) and the ride-corridor guard
+ * (keeps a connector off the Sky Cruiser's own structural footprint, or a
+ * roadside lamp can starve it of a pylon — `skyCruiserStandsOnItsOwnSupports`).
+ * Both are real, reproduced regressions this branch hit and fixed, not
+ * theoretical caution, and both mean some genuinely close, badly-detoured
+ * pairs are correctly left unconnected because fixing them was measured to
+ * break something else. Measured worst ratio per seed at the generator's
+ * real (safety-constrained) settings: canonical 7.35x
+ * (`building`/`stall.skyCruiser`), seed 2 4.59x, seed 5 11.15x (the worst of
+ * the five — `stall.skyCruiser`/`exit-skyCruiser`, both ends pinned by the
+ * same corridor guard), seed 11 4.50x, seed 18 5.80x. This invariant's job
+ * given that reality is to catch a *regression* — the network going back
+ * towards the fully hub-and-spoke tree — not to assert every seed reaches
+ * an ideal no constraint could ever force it to miss.
+ */
+const DETOUR_RATIO_LIMIT = 15;
+
+const detourRatiosStayReasonable: Invariant = (facts) => {
+  const destinations = facts.pathNodes.filter((n) => DETOUR_DESTINATION_KINDS.has(n.kind));
+  if (destinations.length < 2) return [];
+
+  const spacing = medianDestinationSpacing(destinations);
+  if (spacing <= 0) return [];
+  const closeCap = spacing * DETOUR_CLOSE_CAP_MULTIPLE;
+  const wasteFloor = spacing * DETOUR_WASTE_FLOOR_MULTIPLE;
+
+  // The *connectivity* graph, not just the paved ribbons: a destination that
+  // already stood within a few metres of the network gets no drawn ribbon
+  // (`paths.ts`'s "connectivity fact, not a ribbon" edges), but that short
+  // unpaved walk is exactly as real as a paved one for "how far does a
+  // child actually have to walk between these two destinations" — the
+  // question this invariant asks. Using paved-only `facts.pathEdges` here
+  // would strand such a destination or force a wildly longer route through
+  // whatever paving happens to also touch its coordinate.
+  const graph = buildFactsDistanceGraph(facts.pathConnectivityEdges);
+  const problems: string[] = [];
+  for (let i = 0; i < destinations.length; i += 1) {
+    for (let j = i + 1; j < destinations.length; j += 1) {
+      const a = destinations[i] as (typeof destinations)[number];
+      const b = destinations[j] as (typeof destinations)[number];
+      const straight = Math.hypot(a.x - b.x, a.z - b.z);
+      if (straight < 1e-6 || straight > closeCap) continue;
+      const paved = graph.distanceBetween(a.x, a.z, b.x, b.z);
+      // Not a real defect: `everyDestinationIsANode` and `noPathEndsNowhere`
+      // already independently prove every destination sits on one connected
+      // graph, so a "disconnected" result here is this invariant's own
+      // splice-reconstruction (`buildFactsDistanceGraph`) missing a junction
+      // within its tolerance, not a park that fails to connect two
+      // destinations. Skipped rather than flagged so an approximation limit
+      // in a second, independently-written measurement doesn't fail a build
+      // over nothing — the ratio check below still runs on every pair this
+      // reconstruction *does* bridge, which is the real signal.
+      if (!Number.isFinite(paved)) continue;
+      const waste = paved - straight;
+      if (waste < wasteFloor) continue;
+      const ratio = paved / straight;
+      if (ratio > DETOUR_RATIO_LIMIT) {
+        problems.push(
+          `'${a.id}' and '${b.id}' are ${straight.toFixed(1)} m apart in a straight line but ` +
+            `${paved.toFixed(1)} m apart by paving (${ratio.toFixed(2)}x, wasting ` +
+            `${waste.toFixed(1)} m) — closer than ${closeCap.toFixed(1)} m ` +
+            `(${DETOUR_CLOSE_CAP_MULTIPLE}x the park's own ${spacing.toFixed(1)} m median ` +
+            `destination spacing) with no direct connector between them`,
+        );
+      }
+    }
+  }
+  return problems;
+};
+
 /** Every path is lit along its whole length. */
 const everyPathIsLit: Invariant = (facts) => {
   const dark: string[] = [];
@@ -5416,6 +5738,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['every paved path runs on grid axes', pathsRunOnGridAxes],
   ['the ring road reads as a grid loop, not a stepped circle', ringReadsAsAGrid],
   ['every place a child can be served is a node in the path graph', everyDestinationIsANode],
+  [
+    'no two close destinations are left with a wildly disproportionate paved detour',
+    detourRatiosStayReasonable,
+  ],
   ['every ride exit is clear ground, reachable from the entrance', rideExitsAreUsable],
   ['the Rail Race exit fits the whole party that arrives on it', railRaceExitFitsTheParty],
   ['the Rail Race flies clear of the railway and stands on clear ground', railRaceFliesClear],
