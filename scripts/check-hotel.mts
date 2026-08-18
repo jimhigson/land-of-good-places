@@ -81,6 +81,7 @@ import {
   HOTEL_FLOORS,
   LOBBY,
   LOBBY_FOYER_GROWTH,
+  RECEPTION_ORIGIN_SHIFT,
   LOBBY_HALL_DOOR_X,
   OCEAN_FLOOR,
   SUITE,
@@ -185,8 +186,13 @@ collision.setPlayBounds({ radius: 1e6, distanceToEdge: () => 1e6 });
 const mustBeSolid: readonly [string, number, number][] = [
   // On the axis south of the arch (the imperial relayout) — the walk-through
   // runs entrance → statue medallion → under the arch, and you go round it.
-  // z carries `LOBBY_FOYER_GROWTH`, same as the statue itself (17 Aug 2026).
-  ['the lobby RiPika statue', LOBBY.originX + 0, LOBBY.originZ + 4.6 + LOBBY_FOYER_GROWTH],
+  // z carries `LOBBY_FOYER_GROWTH` and, since 18 Aug 2026's reception-room
+  // split, `RECEPTION_ORIGIN_SHIFT` too (both `layout.ts`), same as the
+  // statue itself — this literal duplicates `Hotel.ts`'s `STATUE_Z`, which
+  // is exactly the "two definitions of one thing" trap CLAUDE.md warns
+  // about, but `STATUE_Z` is a private `const` inside `dressLobby` with
+  // nothing exported to import instead.
+  ['the lobby RiPika statue', LOBBY.originX + 0, LOBBY.originZ + 4.6 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT],
   // Reception stands in the entrance foyer now, a few strides inside the
   // front door (issue #270) — imported from `Hotel.ts` rather than typed
   // again beside it, because a second literal here is exactly how the *last*
@@ -195,10 +201,11 @@ const mustBeSolid: readonly [string, number, number][] = [
   // inside the staircase's own solid wedge. Probe 13 separately asserts the
   // interact zone is anchored on this same footprint.
   ['the reception desk', LOBBY.originX + RECEPTION_X, LOBBY.originZ + RECEPTION_Z],
-  // z carries `LOBBY_FOYER_GROWTH`, same as the sofa itself.
-  ['a lobby sofa', LOBBY.originX + 5.9, LOBBY.originZ + 4.8 + LOBBY_FOYER_GROWTH],
-  // z carries `LOBBY_FOYER_GROWTH` (−) with the rest of the hall it stands in.
-  ['a lobby crystal column', LOBBY.originX - 11.9, LOBBY.originZ - 6.6 - LOBBY_FOYER_GROWTH],
+  // z carries `LOBBY_FOYER_GROWTH` and `RECEPTION_ORIGIN_SHIFT`, same as the sofa itself.
+  ['a lobby sofa', LOBBY.originX + 5.9, LOBBY.originZ + 4.8 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT],
+  // z carries `LOBBY_FOYER_GROWTH` (−) and `RECEPTION_ORIGIN_SHIFT` (−) with
+  // the rest of the hall it stands in.
+  ['a lobby crystal column', LOBBY.originX - 11.9, LOBBY.originZ - 6.6 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT],
   ['a Floor 12 hedge', GARDEN_FLOOR.originX - 6.4, GARDEN_FLOOR.originZ - 6.4],
   ['a Floor 12 bench', GARDEN_FLOOR.originX + 2.2, GARDEN_FLOOR.originZ + 5.2],
   ['a Floor 33 seaweed clump', OCEAN_FLOOR.originX - 8.4, OCEAN_FLOOR.originZ - 6.4],
@@ -258,7 +265,7 @@ function deflectionAt(worldX: number, worldY: number, worldZ: number): number {
 }
 
 const mustBeMountable: readonly [string, number, number, number][] = [
-  ['a lobby sofa', LOBBY.originX + 5.9, LOBBY.originZ + 4.8 + LOBBY_FOYER_GROWTH, SOFA_SEAT_TOP],
+  ['a lobby sofa', LOBBY.originX + 5.9, LOBBY.originZ + 4.8 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, SOFA_SEAT_TOP],
   ['the buffet counter', BREAKFAST.originX + 1.5, BREAKFAST.originZ - 7.4, BUFFET_TOP],
   ['a breakfast table', BREAKFAST.originX - 6.4, BREAKFAST.originZ + 6.2, 0.74],
   ['a Floor 50 pet plinth', CORRIDOR.originX - 7.5, CORRIDOR.originZ - CORRIDOR.halfZ + 1.4, 0.4],
@@ -549,7 +556,7 @@ if (!mezzanine) {
     // 7 m further north.
     {
       const walker = {
-        position: new Vector3(LOBBY.originX, 0, LOBBY.originZ - 9 - LOBBY_FOYER_GROWTH),
+        position: new Vector3(LOBBY.originX, 0, LOBBY.originZ - 9 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT),
         riding: false,
         model: { setExpression: () => {} },
         teleportTo(x: number, y: number, z: number) {
@@ -561,7 +568,7 @@ if (!mezzanine) {
       hotel.update({ dt: 1 / 60, elapsed: 0 } as never);
       const moved = Math.hypot(
         walker.position.x - LOBBY.originX,
-        walker.position.z - (LOBBY.originZ - 9 - LOBBY_FOYER_GROWTH),
+        walker.position.z - (LOBBY.originZ - 9 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT),
       );
       if (moved > 0.05) {
         problems.push(
