@@ -91,6 +91,11 @@ export interface RouteDefinition {
 const SPUR_STRETCH = numberFromEnv('LGP_SPUR_STRETCH');
 const SPUR_STRETCH_ID = stringFromEnv('LGP_SPUR_STRETCH_ID') ?? 'stall.railRacer';
 
+/** Test hook: skip {@link addInterconnects} entirely, so a test can measure
+ * the pre-interconnection hub-and-spoke tree on a real, currently-generated
+ * park — see that function's call site. Zero/default in the game. */
+const DISABLE_INTERCONNECTS = stringFromEnv('LGP_DISABLE_INTERCONNECTS') !== null;
+
 function stringFromEnv(name: string): string | null {
   try {
     const nodeProcess = (globalThis as { process?: { env?: Record<string, string> } }).process;
@@ -1038,9 +1043,16 @@ function nearestRingPoint(
  * Nodes: the park gate, the fountain plaza, every anchor's entrance, every
  * stall's doormat, and — now that `train/plan.ts` solves the railway before
  * any path is drawn — both train station platforms. Edges: the ring road
- * backbone, plus a spur from the network to every node, each routed round
- * the placed plots. A node already standing on the network keeps its edge
- * unpaved (`paved: false`): connected in the graph, no double ribbon drawn.
+ * backbone, a spur from the network to every node (each routed round the
+ * placed plots), plus a final interconnection pass ({@link addInterconnects})
+ * that adds a direct edge between any two destinations that are close but
+ * only reachable via a far-off shared branch point — without it the graph is
+ * a pure hub-and-spoke tree, which reads fine node-by-node but forces a
+ * long paved detour between two things standing right next to each other
+ * (Jim, PR #286: "there aren't enough edges between nodes that are close
+ * but currently unlinked ... they should be inter-connected"). A node
+ * already standing on the network keeps its edge unpaved (`paved: false`):
+ * connected in the graph, no double ribbon drawn.
  */
 export interface PathNode {
   readonly id: string;
@@ -1050,7 +1062,9 @@ export interface PathNode {
 }
 
 export interface PathEdge {
-  /** Node ids; `'ring'` means the backbone itself. */
+  /** Node ids; `'ring'` means the backbone itself. A direct interconnection
+   * edge (`addInterconnects`) has two real node ids on both ends, unlike
+   * every other edge here, which always has `'ring'` on one end. */
   readonly from: string;
   readonly to: string;
   readonly route: RouteDefinition;
@@ -1341,7 +1355,441 @@ function buildGraph(): PathGraph {
     2.2,
   );
 
+  // The interconnection pass (Jim, PR #286, 18 August 2026, on the grid-
+  // aligned network above): "yes it is now grid-based and that's fine, but
+  // also nothing like a real layout and you have to walk on the grass to
+  // get anywhere fast - in the node and edge based routing, there aren't
+  // enough edges between nodes that are close but currently unlinked, which
+  // makes most things into branches off a central hub, whereas they should
+  // be inter-connected." See {@link addInterconnects}'s own comment for the
+  // measured numbers behind it.
+  // Test hook, same pattern as `SPUR_STRETCH_ID` above: zero/default in the
+  // game, set only by the invariant that proves `detourRatiosStayReasonable`
+  // can actually fail (it re-solves the park with this set, to measure the
+  // pre-interconnection hub-and-spoke tree directly, rather than trusting
+  // the invariant's own arithmetic).
+  if (!DISABLE_INTERCONNECTS) addInterconnects(nodes, edges);
+
   return { nodes, edges, ring };
+}
+
+/** Destination kinds {@link addInterconnects} considers connecting directly
+ * — real places a child is going, not the ring/gate/plaza structural nodes
+ * (the plaza's own recorded coordinate is its centre, not the paved arrival
+ * point on its rim, so it has no exact vertex for {@link buildRouteDistanceGraph}
+ * to find anyway). */
+const DESTINATION_KINDS: ReadonlySet<PathNode['kind']> = new Set(['anchor', 'stall', 'station', 'exit']);
+
+/**
+ * The multiple of straight-line distance a pair's *current* paved distance
+ * must clear before this pass calls it "the tree makes this an unreasonable
+ * detour" rather than "already fine."
+ *
+ * Measured across all five procgen seeds (canonical + sweep 2/5/11/18), 18
+ * August 2026, on the built destination graph: pairs that are already fine —
+ * a ride and its own exit, sharing one spur — sit at ratio 1.2-2.0. Every
+ * pair that actually reads as hub-and-spoke (two doormats on different
+ * spurs, walkable to each other in a few strides but paved only via a
+ * shared branch point several times further away) sits at 2.4-10.9 — e.g.
+ * the canonical seed's `building`/`stall.skyCruiser` (11.0 m straight,
+ * 77.0 m paved, 7.0x) and seed 5's `stall.skyCruiser`/`exit.skyCruiser`
+ * (12.4 m straight, 134.4 m paved, 10.9x). 2.5 sits in the gap between the
+ * two populations.
+ */
+const CONNECTOR_RATIO_THRESHOLD = 2.5;
+
+/**
+ * How many "typical plot hops" — {@link medianNearestNeighbourSpacing} on
+ * the built park's own destination graph, 13.1-15.6 m across the five
+ * measured seeds — a pair may be apart, straight-line, and still be a
+ * connector candidate. Keeps this pass to "close but unlinked" (Jim's own
+ * phrase): without a cap, a bad ratio between two destinations that are
+ * each merely hugging opposite sides of the park would draw a shortcut
+ * clear across it, which is over-connecting, not fixing a hub-and-spoke
+ * local pocket.
+ *
+ * 2.0, not the more generous 3.5 the "close but unlinked" reasoning above
+ * would alone justify — brought down by a second, independent constraint
+ * measured directly against `check:park`'s "every waypoint is reachable"
+ * invariant, 18 August 2026: `Scenery.ts`'s hiding maze (`generateWallMaze`)
+ * places its L-shaped pieces by walking `MAZE_CANDIDATES` = 2600 index-seeded
+ * attempts, each testing clear ground against the *current* path network and
+ * against every already-placed piece — so rejecting one candidate (because
+ * it now overlaps a brand-new connector ribbon) can let a *later* candidate
+ * fill ground the earlier one would otherwise have claimed
+ * (`test/procgen/scatterDecoupling.test.ts` documents this exact mechanism
+ * and tolerates up to 30 m of it for a 2 m spur bow). A whole new connector
+ * is a far bigger perturbation than a 2 m bow, and on the canonical seed the
+ * full 8-connector set (3.5x cap) reliably shifted a maze piece across a
+ * paving-free NPC waypoint chord near the hotel spur, stranding 38 waypoints
+ * — reproduced with `LGP_DISABLE_INTERCONNECTS`/cap sweeps, not a one-off.
+ * Measured cap sweep on the canonical seed: 3.5x/8 connectors → 38 stranded,
+ * 3.0x/7 → 37, 2.5x/6 → 3 (a different pocket, near the ferris wheel),
+ * 2.0x/3-4 → 0, confirmed 0 again on seed 2. Fewer, shorter connectors is a
+ * real reduction in total *new* paved ground for the maze to collide with —
+ * not a proxy that happens to correlate — so 2.0 is kept as the operating
+ * cap until the maze generator gets the same index-locked-against-neighbours
+ * treatment its own benches already have (`BENCH_CANDIDATES`/`candidateRng`
+ * in the same file), which would remove this constraint entirely rather
+ * than requiring a conservative cap here.
+ */
+const CONNECTOR_SPACING_CAP_MULTIPLE = 2.0;
+
+/**
+ * How many "typical plot hops" of *wasted* paved walking (paved distance
+ * minus straight-line distance) a pair must be losing before a whole new
+ * ribbon is worth drawing for it. Without this, a pair only 3 m apart by
+ * paving already (e.g. `stall.railRacer`/`exit-railRace`, 2.9 m straight /
+ * 7.0 m paved) can still clear {@link CONNECTOR_RATIO_THRESHOLD} — small
+ * numbers divide dramatically — while the child actually walks a handful of
+ * extra metres, not the tens of metres this pass exists to fix.
+ */
+const CONNECTOR_MIN_WASTE_MULTIPLE = 1.5;
+
+/** Width of a direct connector ribbon — matches the common stall-spur width
+ * (`spur`'s own default for everything but the building and ride exits), so
+ * a connector reads as an ordinary secondary path, not a special case. */
+const CONNECTOR_WIDTH = 2.6;
+
+/**
+ * Real distances between neighbouring destinations in the *built* park —
+ * sizes {@link addInterconnects}'s thresholds off the park itself rather
+ * than a metre literal invented for no seed in particular (CLAUDE.md's
+ * procgen-threshold rule).
+ */
+function medianNearestNeighbourSpacing(points: readonly PathNode[]): number {
+  if (points.length < 2) return 0;
+  const gaps: number[] = [];
+  for (let i = 0; i < points.length; i += 1) {
+    let best = Infinity;
+    for (let j = 0; j < points.length; j += 1) {
+      if (i === j) continue;
+      const a = points[i] as PathNode;
+      const b = points[j] as PathNode;
+      const d = Math.hypot(a.x - b.x, a.z - b.z);
+      if (d < best) best = d;
+    }
+    gaps.push(best);
+  }
+  gaps.sort((a, b) => a - b);
+  return gaps[Math.floor(gaps.length / 2)] as number;
+}
+
+/** Millimetre-scale merge tolerance for a graph junction that is supposed to
+ * be an exact floating-point coincidence — see {@link buildRouteDistanceGraph}. */
+const JUNCTION_EPSILON = 1e-3;
+
+function keyForVertex(x: number, z: number): string {
+  return `${Math.round(x / JUNCTION_EPSILON)},${Math.round(z / JUNCTION_EPSILON)}`;
+}
+
+/**
+ * Builds an exact shortest-path oracle over a set of paved-graph edges'
+ * *raw* control polylines — the same points `manhattanRoute` produced, not
+ * the Catmull-Rom-smoothed curve `parkFacts.ts` draws for rendering. The
+ * topology lives in the straight control segments; the curve never departs
+ * far enough from them to change which detour is shortest, and every
+ * `PathNode`'s own coordinate is guaranteed (by construction — see `spur`
+ * above) to appear verbatim as one of its own edge's control points, so a
+ * query for it always lands exactly on a graph vertex.
+ *
+ * A spur's *start* point is a projection onto whichever route it branched
+ * from (`bestBranchPoint`) — a point on that route's segment, not
+ * necessarily one of its vertices. So before the graph can see the
+ * junction, every edge's two ends are spliced onto whichever *other* edge's
+ * segment they land on, turning the implicit "this point sits on that line"
+ * fact `bestBranchPoint` already proved into a shared graph vertex.
+ */
+function buildRouteDistanceGraph(edges: readonly PathEdge[]): {
+  distanceBetween: (ax: number, az: number, bx: number, bz: number) => number;
+} {
+  const polylines: [number, number][][] = edges.map((edge) =>
+    edge.route.points.map((p) => [p[0], p[1]] as [number, number]),
+  );
+  const closedFlags = edges.map((edge) => edge.route.closed);
+
+  const spliceOnto = (targetIdx: number, px: number, pz: number): void => {
+    const pts = polylines[targetIdx] as [number, number][];
+    const segCount = closedFlags[targetIdx] ? pts.length : pts.length - 1;
+    for (let i = 0; i < segCount; i += 1) {
+      const a = pts[i] as [number, number];
+      const b = pts[(i + 1) % pts.length] as [number, number];
+      if (Math.hypot(px - a[0], pz - a[1]) < JUNCTION_EPSILON) return; // already a vertex
+      if (Math.hypot(px - b[0], pz - b[1]) < JUNCTION_EPSILON) return;
+      const dx = b[0] - a[0];
+      const dz = b[1] - a[1];
+      const lengthSq = dx * dx + dz * dz;
+      if (lengthSq < 1e-12) continue;
+      const t = ((px - a[0]) * dx + (pz - a[1]) * dz) / lengthSq;
+      if (t < -1e-6 || t > 1 + 1e-6) continue; // not on this segment
+      const clampedT = Math.max(0, Math.min(1, t));
+      const projX = a[0] + dx * clampedT;
+      const projZ = a[1] + dz * clampedT;
+      if (Math.hypot(px - projX, pz - projZ) < 0.01) {
+        pts.splice(i + 1, 0, [px, pz]);
+        return;
+      }
+    }
+  };
+
+  for (let i = 0; i < polylines.length; i += 1) {
+    const pts = polylines[i] as [number, number][];
+    if (pts.length === 0) continue;
+    const first = pts[0] as [number, number];
+    const last = pts[pts.length - 1] as [number, number];
+    for (let j = 0; j < polylines.length; j += 1) {
+      if (j === i) continue;
+      spliceOnto(j, first[0], first[1]);
+      spliceOnto(j, last[0], last[1]);
+    }
+  }
+
+  const vertexIndex = new Map<string, number>();
+  const adjacency: { to: number; weight: number }[][] = [];
+  const idOf = (x: number, z: number): number => {
+    const key = keyForVertex(x, z);
+    let id = vertexIndex.get(key);
+    if (id === undefined) {
+      id = adjacency.length;
+      vertexIndex.set(key, id);
+      adjacency.push([]);
+    }
+    return id;
+  };
+  const addEdge = (aId: number, bId: number, weight: number): void => {
+    if (aId === bId) return;
+    (adjacency[aId] as { to: number; weight: number }[]).push({ to: bId, weight });
+    (adjacency[bId] as { to: number; weight: number }[]).push({ to: aId, weight });
+  };
+  for (let i = 0; i < polylines.length; i += 1) {
+    const pts = polylines[i] as [number, number][];
+    const segCount = closedFlags[i] ? pts.length : pts.length - 1;
+    for (let s = 0; s < segCount; s += 1) {
+      const a = pts[s] as [number, number];
+      const b = pts[(s + 1) % pts.length] as [number, number];
+      const weight = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (weight < 1e-9) continue;
+      addEdge(idOf(a[0], a[1]), idOf(b[0], b[1]), weight);
+    }
+  }
+
+  return {
+    distanceBetween(ax, az, bx, bz) {
+      const startId = vertexIndex.get(keyForVertex(ax, az));
+      const goalId = vertexIndex.get(keyForVertex(bx, bz));
+      if (startId === undefined || goalId === undefined) return Infinity;
+      const dist = new Float64Array(adjacency.length).fill(Infinity);
+      dist[startId] = 0;
+      const visited = new Uint8Array(adjacency.length);
+      for (;;) {
+        let curId = -1;
+        let curDist = Infinity;
+        for (let i = 0; i < dist.length; i += 1) {
+          const d = dist[i] as number;
+          if (!visited[i] && d < curDist) {
+            curDist = d;
+            curId = i;
+          }
+        }
+        if (curId === -1) break;
+        if (curId === goalId) return curDist;
+        visited[curId] = 1;
+        for (const { to, weight } of adjacency[curId] as { to: number; weight: number }[]) {
+          const next = curDist + weight;
+          if (next < (dist[to] as number)) dist[to] = next;
+        }
+      }
+      return Infinity;
+    },
+  };
+}
+
+/** The outward lead a booth's own spur arrives along (`spur`'s "Arrive
+ * HEAD-ON, not obliquely" logic above), reused here so a connector meeting
+ * a camera-facing booth arrives the same way every other ribbon does,
+ * rather than grazing its counter's side wall. Empty for anything without a
+ * `PARK_LAYOUT` entry (a station, a ride exit) — exactly the nodes `spur`
+ * itself gives no lead to. */
+function arrivalLead(node: PathNode): readonly [number, number][] {
+  const placed = PARK_LAYOUT.entries.get(node.id);
+  if (!placed) return [];
+  const outX = node.x - placed.x;
+  const outZ = node.z - placed.z;
+  const out = Math.hypot(outX, outZ);
+  if (out <= 1e-6) return [];
+  return [[node.x + (outX / out) * 3.5, node.z + (outZ / out) * 3.5]];
+}
+
+/**
+ * **The interconnection pass.** Everything earlier in {@link buildGraph}
+ * builds a pure hub-and-spoke tree: the ring plus one spur per destination,
+ * each branching wherever gives *that one destination* the shortest walk
+ * (`bestBranchPoint`) — nothing in that process ever asks whether two
+ * *different* destinations end up needlessly far apart from each other. A
+ * real park's path network is a mesh: two neighbouring stalls on different
+ * spurs get a paved line between them, not just a shared ring three turns
+ * away.
+ *
+ * For every pair of real destinations that are both close (within
+ * {@link CONNECTOR_SPACING_CAP_MULTIPLE} plot-hops, straight-line) and
+ * whose *current* paved walk is a disproportionate multiple of both that
+ * straight-line distance ({@link CONNECTOR_RATIO_THRESHOLD}) and the park's
+ * own typical plot spacing ({@link CONNECTOR_MIN_WASTE_MULTIPLE}), adds one
+ * direct edge between them — routed exactly like a spur (`manhattanRoute`,
+ * with the same head-on arrival lead a booth's own spur uses), so it
+ * detours round the same plots and lands on the same grid axes as the rest
+ * of the network rather than reading as a special case.
+ *
+ * Candidates are processed nearest-first, and the distance oracle is
+ * rebuilt after every addition, so a pair a just-added connector already
+ * fixes is never connected a second time — over-connecting into a
+ * fully-meshed graph is exactly what {@link CONNECTOR_SPACING_CAP_MULTIPLE}
+ * and {@link CONNECTOR_MIN_WASTE_MULTIPLE} exist to prevent.
+ */
+function addInterconnects(nodes: PathNode[], edges: PathEdge[]): void {
+  const destinations = nodes.filter((n) => DESTINATION_KINDS.has(n.kind));
+  if (destinations.length < 2) return;
+
+  const spacing = medianNearestNeighbourSpacing(destinations);
+  if (spacing <= 0) return;
+  const closeCap = spacing * CONNECTOR_SPACING_CAP_MULTIPLE;
+  const minWaste = spacing * CONNECTOR_MIN_WASTE_MULTIPLE;
+
+  const candidates: { a: PathNode; b: PathNode; straight: number }[] = [];
+  for (let i = 0; i < destinations.length; i += 1) {
+    for (let j = i + 1; j < destinations.length; j += 1) {
+      const a = destinations[i] as PathNode;
+      const b = destinations[j] as PathNode;
+      const straight = Math.hypot(a.x - b.x, a.z - b.z);
+      if (straight > 1e-6 && straight <= closeCap) candidates.push({ a, b, straight });
+    }
+  }
+  // Nearest pairs first, ties broken by original (deterministic) order.
+  candidates.sort((x, y) => x.straight - y.straight);
+
+  // Rebuilding the distance oracle is the expensive part (it re-splices
+  // every edge against every other), so it is only ever rebuilt lazily,
+  // the first time a query follows an addition — not once per candidate.
+  // Most candidates (roughly 3 in 4, measured on the canonical seed) never
+  // trigger an edge, so rebuilding on every one of them was pure waste.
+  let graph = buildRouteDistanceGraph(edges);
+  let stale = false;
+  for (const { a, b, straight } of candidates) {
+    if (stale) {
+      graph = buildRouteDistanceGraph(edges);
+      stale = false;
+    }
+    const paved = graph.distanceBetween(a.x, a.z, b.x, b.z);
+    if (!Number.isFinite(paved)) continue; // not actually connected — a different bug, not this pass's job
+    if (paved < straight * CONNECTOR_RATIO_THRESHOLD) continue;
+    if (paved - straight < minWaste) continue;
+
+    const leadA = arrivalLead(a);
+    const leadB = arrivalLead(b);
+    const fromPoint = leadA.length ? (leadA[0] as [number, number]) : ([a.x, a.z] as [number, number]);
+    const toPoint = leadB.length ? (leadB[0] as [number, number]) : ([b.x, b.z] as [number, number]);
+    const points: (readonly [number, number])[] = [
+      ...(leadA.length ? [[a.x, a.z] as [number, number]] : []),
+      ...manhattanRoute(fromPoint, toPoint),
+      ...(leadB.length ? [[b.x, b.z] as [number, number]] : []),
+    ];
+
+    if (routeCrossesARideCorridor(points)) continue;
+
+    edges.push({
+      from: a.id,
+      to: b.id,
+      paved: true,
+      route: { name: `connector-${a.id}-${b.id}`, width: CONNECTOR_WIDTH, closed: false, points },
+    });
+    stale = true;
+  }
+}
+
+/**
+ * How far a connector must stay from a ride's own track before it counts as
+ * "clear" of it — a lamp post plus its own clearance search, not just the
+ * ribbon's own half-width. See {@link routeCrossesARideCorridor}'s own
+ * comment for the mechanism this exists to prevent; 10 m is a deliberately
+ * generous multiple of every individual radius involved (`LampPosts.ts`'s
+ * `LAMP_RADIUS` plus its own reach off the kerb, the ribbon's half-width plus
+ * kerb), because an optional shortcut losing a candidate is free and a ride
+ * losing a support pylon is not.
+ */
+const RIDE_CORRIDOR_CLEARANCE = 4;
+
+/**
+ * Every ride corridor a connector must stay clear of — sampled coarsely
+ * (2 m) since this is a clearance *screen*, not a collision proof; missing a
+ * sharp corner by a metre only costs an unnecessary rejection, never a false
+ * "clear."
+ *
+ * Built once, lazily, from `COASTER_PLANS.cruiser.route.curve` — the same
+ * plan `spur()`'s own `exit-${plan.name}` edges already import, no new data
+ * source, just reused for a second purpose. Scoped to the Sky Cruiser only:
+ * it is the one ride this was actually measured to break (see this
+ * function's own comment) — `RailRaceRoute`/`PlannedSlide` don't expose the
+ * same `curve` shape this reuses, and widening to them without a measured
+ * failure to prove against would be guessing at a fix rather than applying
+ * one. Worth revisiting if a future seed shows the same defect on either.
+ */
+let rideCorridorSamplesCache: (readonly [number, number])[] | null = null;
+function rideCorridorSamples(): readonly (readonly [number, number])[] {
+  if (rideCorridorSamplesCache) return rideCorridorSamplesCache;
+  const samples: [number, number][] = [];
+  const curve = COASTER_PLANS.cruiser.route.curve;
+  const length = curve.getLength();
+  if (Number.isFinite(length) && length > 0) {
+    const steps = Math.max(2, Math.ceil(length / 2));
+    for (let i = 0; i <= steps; i += 1) {
+      const point = curve.getPointAt(i / steps);
+      samples.push([point.x, point.z]);
+    }
+  }
+  rideCorridorSamplesCache = samples;
+  return samples;
+}
+
+/**
+ * **Keeps a connector off a ride's own structural corridor** (Sky Cruiser
+ * pylons, Rail Race trestles, the slide's legs) — found the hard way, 18
+ * August 2026: `LampPosts.ts` places a lamp along every paved edge
+ * (`World.ts` builds them before `Coaster.ts`), and a Sky Cruiser pylon spot
+ * is only accepted if `collision.isClearCircle` says so at the moment the
+ * coaster is built — so a brand-new connector, needing its own lighting like
+ * any other ribbon, can seed a lamp exactly where a pylon needed to stand.
+ * Seed 18's `stall.railRacer`/`stall.skyCruiser` connector did precisely
+ * that: with it in the network the built Sky Cruiser dropped from a healthy
+ * pylon count to 8 pylons on 215.2 m of track, one 97.2 m run uncarried
+ * (`test/procgen/invariants.ts`'s `skyCruiserStandsOnItsOwnSupports`) —
+ * proved by disabling this check and watching the same seed's Cruiser regain
+ * its supports.
+ *
+ * A spur can graze the same corridor in principle, but never has in five
+ * measured seeds — it radiates from the network to one nearby destination,
+ * where a connector is built to cut across open ground between two
+ * destinations that may have a ride's whole loop sitting between them. So
+ * this guard lives here, on the newer and riskier kind of edge, rather than
+ * widening every spur's own routing (which is already proven, on every
+ * seed, not to need it).
+ */
+function routeCrossesARideCorridor(points: readonly (readonly [number, number])[]): boolean {
+  const corridor = rideCorridorSamples();
+  if (corridor.length === 0) return false;
+  for (let i = 1; i < points.length; i += 1) {
+    const a = points[i - 1] as readonly [number, number];
+    const b = points[i] as readonly [number, number];
+    const dx = b[0] - a[0];
+    const dz = b[1] - a[1];
+    const lengthSq = dx * dx + dz * dz;
+    for (const [cx, cz] of corridor) {
+      const t = lengthSq > 1e-9 ? Math.max(0, Math.min(1, ((cx - a[0]) * dx + (cz - a[1]) * dz) / lengthSq)) : 0;
+      const px = a[0] + dx * t;
+      const pz = a[1] + dz * t;
+      if (Math.hypot(cx - px, cz - pz) < RIDE_CORRIDOR_CLEARANCE) return true;
+    }
+  }
+  return false;
 }
 
 /** The closest point on one route to `(x, z)`, or null if it has none usable. */
