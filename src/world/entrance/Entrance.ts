@@ -8,6 +8,7 @@ import {
   PlaneGeometry,
   SphereGeometry,
   TorusGeometry,
+  Vector3,
 } from 'three';
 import { PALETTE } from '../../core/palette';
 import { pinkStoneTexture, woodTexture } from '../../core/textures';
@@ -29,12 +30,17 @@ import {
   ENTRANCE_BUS_ARRIVE_X,
   ENTRANCE_BUS_STOP_Z,
   ENTRANCE_BUS_VANISH_X,
+  ENTRANCE_CLEAR_RADIUS,
+  ENTRANCE_CLEAR_X,
+  ENTRANCE_CLEAR_Z,
   ENTRANCE_GATE_HALF_WIDTH,
   ENTRANCE_GATE_POST_HEIGHT,
   ENTRANCE_GATE_X,
   ENTRANCE_GATE_Z,
   ENTRANCE_STOP_Z,
 } from './layout';
+import { TRACK_CLEARANCE, type TrainRoute } from '../train/route';
+import { CARRIAGE_BODY_HALF_WIDTH } from '../train/trainDimensions';
 
 /** Candy colours for the welcome sign's bulbs — the fairground palette used everywhere else in the park. */
 const WELCOME_SIGN_BULB_COLOURS = [
@@ -45,17 +51,131 @@ const WELCOME_SIGN_BULB_COLOURS = [
 ] as const;
 
 /**
- * Where the welcome sign stands: just inside the gate, off to the east of the
- * gate-approach path (`paths.ts`'s `gate-approach` is 3.2 m wide, centred on
- * x = 0, so anything past |x| ≈ 1.6 is clear of it) and well inside
- * `ENTRANCE_CLEAR_RADIUS`'s scenery-free pocket around the gate, so no bush or
- * tree scatter can land on it. Mirrors the bus shelter's offset on the west
- * side, so the gate reads as symmetric even though only one side has a prop.
+ * Where the welcome sign **prefers** to stand: just inside the gate, off to
+ * the east of the gate-approach path (`paths.ts`'s `gate-approach` is 3.2 m
+ * wide, centred on x = 0, so anything past |x| ≈ 1.6 is clear of it) and well
+ * inside `ENTRANCE_CLEAR_RADIUS`'s scenery-free pocket around the gate, so no
+ * bush or tree scatter can land on it. Mirrors the bus shelter's offset on
+ * the west side, so the gate reads as symmetric even though only one side has
+ * a prop.
+ *
+ * **Not where it always ends up.** {@link findWelcomeSignSpot} searches
+ * outward from here for the nearest point that clears the train's *solved*
+ * centre line — see that function's own comment for why a fixed coordinate
+ * cannot be right here.
  */
-const WELCOME_SIGN_X = 7;
-const WELCOME_SIGN_Z = 56;
+const WELCOME_SIGN_PREFERRED_X = 7;
+const WELCOME_SIGN_PREFERRED_Z = 56;
 /** Near the +45° every sign and anchor in the park uses — the one angle the fixed isometric camera reads square-on (ARCHITECTURE.md). */
 const WELCOME_SIGN_YAW = Math.PI * 0.25;
+
+/** Local x-offsets of the sign's two posts from its own centre — see {@link buildWelcomeSign}. */
+const WELCOME_SIGN_POST_OFFSETS = [-1.9, 1.9] as const;
+/** Collision radius of each post, as actually built below. */
+const WELCOME_SIGN_POST_RADIUS = 0.35;
+/** Half the board's own width (it is 4.4 m across), for sampling its far corners. */
+const WELCOME_SIGN_BOARD_HALF_WIDTH = 2.2;
+
+/**
+ * **How far the sign's board and posts must clear the train's centre line.**
+ *
+ * `TRACK_CLEARANCE` (`train/route.ts`) is the half-width anything is "inside
+ * the train" within; `CARRIAGE_BODY_HALF_WIDTH` (`train/trainDimensions.ts`)
+ * is the carriage's own real body half-width, and a prop closer than their
+ * sum (2.1 m) is standing where the carriage's body actually passes. This
+ * asks for a metre more than that sum on top: "clears" means clears with
+ * room, not sits a centimetre outside one of the two numbers — which is
+ * exactly what happened before this fix (issue #303 QA: the nearest post
+ * measured 0.63 m off the centre line, inside *both* numbers at once).
+ */
+const WELCOME_SIGN_TRACK_MARGIN = 1.0;
+export const WELCOME_SIGN_MIN_TRACK_CLEARANCE =
+  TRACK_CLEARANCE + CARRIAGE_BODY_HALF_WIDTH + WELCOME_SIGN_TRACK_MARGIN;
+
+/**
+ * The closest distance any sampled point of the welcome sign's real footprint
+ * — both posts (less their own collision radius) and the board's full width —
+ * comes to the train's *solved* centre line, were the sign centred at (x, z).
+ *
+ * Sampled rather than measured from the centre alone because the board is
+ * 4.4 m wide: a centre point can clear the line by metres while one end of
+ * the board does not, which is exactly the shape of bug this function exists
+ * to catch rather than repeat.
+ */
+function welcomeSignFootprintClearance(route: TrainRoute, x: number, z: number): number {
+  let worst = Infinity;
+  const point = new Vector3();
+  const sample = (localX: number, radius: number): void => {
+    const px = x + Math.cos(WELCOME_SIGN_YAW) * localX;
+    const pz = z - Math.sin(WELCOME_SIGN_YAW) * localX;
+    route.pointAt(route.distanceNear(px, pz), point);
+    const gap = Math.hypot(point.x - px, point.z - pz) - radius;
+    if (gap < worst) worst = gap;
+  };
+  for (const offset of WELCOME_SIGN_POST_OFFSETS) sample(offset, WELCOME_SIGN_POST_RADIUS);
+  // Five samples across the board's own width — wider spacing than the posts
+  // themselves catch, and the part actually likely to clip the train if the
+  // two posts happened to straddle it.
+  for (let t = -WELCOME_SIGN_BOARD_HALF_WIDTH; t <= WELCOME_SIGN_BOARD_HALF_WIDTH; t += 1.1) {
+    sample(t, 0);
+  }
+  return worst;
+}
+
+/**
+ * **Finds somewhere for the welcome sign that genuinely clears the train.**
+ *
+ * The QA finding on issue #303 (PR #303): the sign's preferred spot put its
+ * nearest post 0.63 m from the rail centre line, inside both `TRACK_CLEARANCE`
+ * (1.3 m) and the carriage's own body half-width (0.8 m). Cause: `train/route.ts`
+ * solves the train's loop from `PARK_LAYOUT` alone (see that module's own doc),
+ * and the entrance — the welcome sign included — is built afterwards, from a
+ * fixed coordinate the solver never knew existed. **The gate itself is the one
+ * fixed thing in the park** (`entrance/layout.ts`), but the train's loop is not:
+ * `TRAIN_LENGTH_FRACTIONS`'s ladder, the search's own restarts and `PARK_SEED`
+ * all mean the *solved* centre line runs somewhere different — sometimes close
+ * to the gate, sometimes not — on every one of the five CI seeds. A single
+ * hand-placed coordinate could only ever be checked against one of them.
+ *
+ * So this asks the *actual, already-solved* route the same question
+ * `test/procgen`'s new invariant asks of the built park: searching outward
+ * from the sign's preferred spot, in the scenery-free pocket `Scenery.ts`
+ * already keeps clear around the gate (`ENTRANCE_CLEAR_X/Z/RADIUS`) and clear
+ * of the gate-approach path, for the nearest point whose whole footprint
+ * clears the centre line by {@link WELCOME_SIGN_MIN_TRACK_CLEARANCE}. On a
+ * seed where the preferred spot is already clear (most of them), this returns
+ * it unchanged — the search is a safety net, not a redesign.
+ */
+function findWelcomeSignSpot(route: TrainRoute): { x: number; z: number } {
+  let bestPassing: { x: number; z: number; distance: number } | null = null;
+  // Kept in case *no* candidate clears — which should never happen given the
+  // search area, but a best-effort spot is a better failure than a crash, and
+  // the new invariant is what would catch it actually happening.
+  let bestOverall = { x: WELCOME_SIGN_PREFERRED_X, z: WELCOME_SIGN_PREFERRED_Z, clearance: -Infinity };
+
+  for (let dz = -6; dz <= 4; dz += 0.5) {
+    for (let dx = -3; dx <= 4; dx += 0.5) {
+      const x = WELCOME_SIGN_PREFERRED_X + dx;
+      const z = WELCOME_SIGN_PREFERRED_Z + dz;
+
+      // Off the gate-approach path (half-width 1.6 m, see the preferred spot's
+      // own comment), and inside the scenery-free pocket with margin left for
+      // the sign's own ~2.5 m reach — straying outside it risks a tree or bush
+      // nobody re-scattered to make room.
+      if (x < 3) continue;
+      if (Math.hypot(x - ENTRANCE_CLEAR_X, z - ENTRANCE_CLEAR_Z) > ENTRANCE_CLEAR_RADIUS - 3) continue;
+
+      const clearance = welcomeSignFootprintClearance(route, x, z);
+      if (clearance > bestOverall.clearance) bestOverall = { x, z, clearance };
+      if (clearance < WELCOME_SIGN_MIN_TRACK_CLEARANCE) continue;
+
+      const distance = Math.hypot(x - WELCOME_SIGN_PREFERRED_X, z - WELCOME_SIGN_PREFERRED_Z);
+      if (!bestPassing || distance < bestPassing.distance) bestPassing = { x, z, distance };
+    }
+  }
+
+  return bestPassing ?? bestOverall;
+}
 
 export interface EntranceOptions {
   /**
@@ -114,7 +234,14 @@ export class Entrance implements GameSystem {
   /** The welcome sign's own tap target — see {@link interactZones}. */
   private readonly welcomeSignZone: InteractZone;
 
-  constructor(collision: CollisionWorld, options: EntranceOptions = {}) {
+  /**
+   * @param trainRoute The park train's already-*solved* route
+   * (`World.ts` builds `ParkTrain` — and therefore this — before `Entrance`,
+   * precisely so the welcome sign can be placed against the real centre line
+   * rather than a coordinate the solver never knew about). See
+   * {@link findWelcomeSignSpot}.
+   */
+  constructor(collision: CollisionWorld, trainRoute: TrainRoute, options: EntranceOptions = {}) {
     this.group.name = 'entrance';
 
     const stoneMaterial = toonMaterial(0xffffff, { map: pinkStoneTexture(2, 1) });
@@ -171,7 +298,7 @@ export class Entrance implements GameSystem {
     this.group.add(crossbar);
 
     // --- the welcome sign ----------------------------------------------------
-    this.welcomeSignZone = this.buildWelcomeSign(collision);
+    this.welcomeSignZone = this.buildWelcomeSign(collision, trainRoute);
 
     // --- the bus stop shelter ----------------------------------------------
     // **On the pavement, outside the gate** — because that is where the bus
@@ -313,12 +440,25 @@ export class Entrance implements GameSystem {
    * small thing to press for, but it is a real one — the same one the shop
    * counter and the backpack already use for "something opened", not a new
    * sound invented for a one-off prop.
+   *
+   * **Two more bugs fixed here, both found by QA on PR #303:**
+   *
+   * 1. The zone's `y` used to be the board's *visual centre height*
+   *    (`ground + 2.6`), not a ground-level surface like every other interact
+   *    zone in the codebase (`minigames/stalls.ts`, `FacePaintStall.ts`) — so it
+   *    sat outside `ZONE_HEIGHT_TOLERANCE` (2.2 m) of a standing player's own
+   *    `y` and the chip could never be selected in normal play. Fixed by using
+   *    `ground` itself, the same pattern everywhere else.
+   * 2. The sign's position used to be the fixed preferred spot outright, which
+   *    on the canonical seed put a post 0.63 m from the train's centre line.
+   *    Fixed by {@link findWelcomeSignSpot} — see its own comment.
    */
-  private buildWelcomeSign(collision: CollisionWorld): InteractZone {
-    const ground = terrainHeight(WELCOME_SIGN_X, WELCOME_SIGN_Z);
+  private buildWelcomeSign(collision: CollisionWorld, trainRoute: TrainRoute): InteractZone {
+    const { x: signX, z: signZ } = findWelcomeSignSpot(trainRoute);
+    const ground = terrainHeight(signX, signZ);
     const signGroup = new Group();
     signGroup.name = 'welcome-sign';
-    signGroup.position.set(WELCOME_SIGN_X, ground, WELCOME_SIGN_Z);
+    signGroup.position.set(signX, ground, signZ);
     signGroup.rotation.y = WELCOME_SIGN_YAW;
     this.group.add(signGroup);
 
@@ -331,14 +471,14 @@ export class Entrance implements GameSystem {
     // any tighter than this the gap between the two posts inflates shut (the
     // dodgems arch this was moved from found that the hard way).
     const postGeometry = new CylinderGeometry(0.14, 0.16, 2.6, 8);
-    for (const offset of [-1.9, 1.9]) {
+    for (const offset of WELCOME_SIGN_POST_OFFSETS) {
       const post = solid(new Mesh(postGeometry, toonMaterial(PALETTE.wood)));
       post.position.set(offset, 1.3, 0);
       signGroup.add(post);
       collision.addCircle(
-        WELCOME_SIGN_X + Math.cos(WELCOME_SIGN_YAW) * offset,
-        WELCOME_SIGN_Z - Math.sin(WELCOME_SIGN_YAW) * offset,
-        0.35,
+        signX + Math.cos(WELCOME_SIGN_YAW) * offset,
+        signZ - Math.sin(WELCOME_SIGN_YAW) * offset,
+        WELCOME_SIGN_POST_RADIUS,
       );
     }
 
@@ -363,14 +503,16 @@ export class Entrance implements GameSystem {
     return {
       id: 'welcome-sign',
       label: 'welcome sign',
-      x: WELCOME_SIGN_X,
-      y: ground + 2.6,
-      z: WELCOME_SIGN_Z,
+      x: signX,
+      // Ground level, like every other interact zone — see this method's own
+      // doc for why `ground + 2.6` (the board's visual centre) was wrong.
+      y: ground,
+      z: signZ,
       pickRadius: 3.2,
       // Stood between the sign and the gate-approach path, so walking up to
       // read it never means stepping behind the board.
-      standX: WELCOME_SIGN_X - 2.4,
-      standZ: WELCOME_SIGN_Z,
+      standX: signX - 2.4,
+      standZ: signZ,
       verb: 'Read',
       highlight: highlightObject(signGroup),
       actions: () => pressAction('Welcome to the Land of Good Places.', () => playOpenChime(), '👋'),
