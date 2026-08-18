@@ -154,6 +154,12 @@ const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
   // corridor door, key check skipped, facing down the hall so the bedroom
   // doors and the lounge doorway are both in view — see `Hotel.enterSuite`.
   '/hotel-suite': 'hotelSuite',
+  // The Spooky House's jump-scare cycle (#293) — same QA problem as every
+  // other deep link, and the stall QA had no way to reach without walking a
+  // seed-different park first. `spookyHouse` is a curtain mini-game, not a
+  // world ride, so this falls to `MiniGameHost.open` the same way `/ferris`
+  // does.
+  '/spooky-house': 'spookyHouse',
 };
 
 /** What `/view` needs to drop a debug camera into the built park. See {@link parseDebugView}. */
