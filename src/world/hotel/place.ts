@@ -2,7 +2,8 @@ import type { Group, Object3D } from 'three';
 import type { CollisionWorld } from '../Collision';
 import type { MovingPlatform, WalkSurfaces } from '../building/surfaces';
 import { JUMP_APEX_HEIGHT } from '../../entities/Player';
-import type { HotelRoom } from './layout';
+import { PLAYER_RADIUS } from '../../core/constants';
+import { doorwayClearanceZones, type DoorwayZone, type HotelRoom } from './layout';
 
 /**
  * **Putting a thing in a hotel room is one call, and that call decides
@@ -81,6 +82,87 @@ import type { HotelRoom } from './layout';
  * footprint is still the visual one.
  */
 const WALL_HALF_THICKNESS = 0.2;
+
+/**
+ * How far a solid footprint must stay clear of a doorway, on every side —
+ * {@link PLAYER_RADIUS} itself, because the question a doorway clearance
+ * check is answering is exactly "can her body still fit through here",
+ * never a number the furniture layout invented for itself.
+ */
+const DOORWAY_CLEARANCE = PLAYER_RADIUS;
+
+/**
+ * A footprint to test against a room's doorways — the same two shapes
+ * {@link PropPlan} offers (round or rectangular), in the room's own local
+ * metres, matching {@link PropPlan.x}/{@link PropPlan.z}.
+ */
+export type FurnitureBounds =
+  | { readonly x: number; readonly z: number; readonly radius: number }
+  | { readonly x: number; readonly z: number; readonly halfX: number; readonly halfZ: number };
+
+/**
+ * **Does this footprint keep clear of every doorway in `doors`?**
+ *
+ * The general form of the rule issue #273 asked for, sitting beside CLAUDE.md's
+ * "anything that looks solid must be solid" — aimed at the doorway instead of
+ * the wall: a doorway a child can *see* has to be a doorway she can *use*, and
+ * a sofa that merely looks like it fits beside a door is the same silent hole
+ * as a wall with a gap in its collider. Pure geometry, with no idea what a
+ * "room" or a "hotel" is: `doors` is expected to already carry its own
+ * clearance margin (see {@link doorwayClearanceZones}), so any furniture
+ * placer that can produce a room's doorway zones and a candidate footprint
+ * calls this once — round or rectangular alike, a sofa today, a pet bed or a
+ * resized bedroom's furniture tomorrow.
+ */
+export function isClearOfDoorways(
+  bounds: FurnitureBounds,
+  doors: readonly DoorwayZone[],
+): boolean {
+  return doors.every((door) => !overlapsDoorway(bounds, door));
+}
+
+function overlapsDoorway(bounds: FurnitureBounds, door: DoorwayZone): boolean {
+  if ('radius' in bounds) {
+    const nearestX = Math.max(door.minX, Math.min(bounds.x, door.maxX));
+    const nearestZ = Math.max(door.minZ, Math.min(bounds.z, door.maxZ));
+    return Math.hypot(bounds.x - nearestX, bounds.z - nearestZ) < bounds.radius;
+  }
+  return (
+    bounds.x - bounds.halfX < door.maxX &&
+    bounds.x + bounds.halfX > door.minX &&
+    bounds.z - bounds.halfZ < door.maxZ &&
+    bounds.z + bounds.halfZ > door.minZ
+  );
+}
+
+/**
+ * The axis-aligned box a `halfX`×`halfZ` rectangle actually sweeps once it is
+ * turned by `spin` radians about its own centre — or the plain box back,
+ * unrotated, when `spin` is absent or zero.
+ *
+ * A rotated rectangle's own AABB is the standard trig identity (each new
+ * half-extent is the sum of the old two projected onto that axis): it is a
+ * **superset** of the true rotated shape (a conservative box round a
+ * diamond), which is exactly what a collider and a doorway check both want —
+ * neither can leave a corner uncovered.
+ *
+ * Every caller in this file that builds a rectangular footprint routes
+ * `halfX`/`halfZ` through this first (see {@link HotelProps.footprint}'s own
+ * header for why it did not, once). A round footprint never needs it — a
+ * circle looks the same from every angle — which is the whole reason this
+ * bug stayed invisible until the day a *rectangular* prop finally got a
+ * `spin` of its own.
+ */
+function effectiveHalfExtents(
+  halfX: number,
+  halfZ: number,
+  spin: number | undefined,
+): { halfX: number; halfZ: number } {
+  if (!spin) return { halfX, halfZ };
+  const c = Math.abs(Math.cos(spin));
+  const s = Math.abs(Math.sin(spin));
+  return { halfX: halfX * c + halfZ * s, halfZ: halfX * s + halfZ * c };
+}
 
 /**
  * A round prop's standing plate is this fraction of its collider radius, per
@@ -195,6 +277,21 @@ export class HotelProps {
   private readonly collision: CollisionWorld;
   private readonly surfaces: WalkSurfaces;
 
+  /**
+   * Every solid footprint {@link footprint} found sitting in a doorway's
+   * clearance zone, collected rather than thrown as it is found — so one
+   * broken build reports every offending prop in one run instead of stopping
+   * at the first, the same reason `assertStairMatches`'s `problems` array
+   * exists. {@link assertDoorwaysClear} is the one place they turn into a
+   * thrown error.
+   */
+  private readonly doorwayViolations: string[] = [];
+
+  /** {@link doorwayClearanceZones} is pure, but a room's doorways never
+   *  change mid-build — computed once per room the first time it is asked
+   *  for, rather than once per prop placed in it. */
+  private readonly doorwayZonesByRoom = new Map<HotelRoom, readonly DoorwayZone[]>();
+
   constructor(
     collision: CollisionWorld,
     surfaces: WalkSurfaces,
@@ -209,14 +306,37 @@ export class HotelProps {
   }
 
   /**
+   * Throws with every prop {@link footprint} found blocking a doorway,
+   * named and located — call once, after every `dress*` method has run.
+   * Nothing about this repo's philosophy is served by a placement rule that
+   * is only checked when somebody remembers to; a rule with a hole in it
+   * reads correctly, renders correctly, and is wrong only when a child tries
+   * the door (CLAUDE.md, "anything that looks solid must be solid"), so this
+   * is a hard failure rather than a console warning nobody reads.
+   */
+  assertDoorwaysClear(): void {
+    if (this.doorwayViolations.length === 0) return;
+    throw new Error(
+      `${this.doorwayViolations.length} prop(s) block a doorway's clearance zone:\n` +
+        this.doorwayViolations.map((line) => `  - ${line}`).join('\n'),
+    );
+  }
+
+  /**
    * Stands one prop in a room: parents it, positions it, makes it solid, and
    * tells the guests to walk round it. The single call the header is about.
    *
-   * `spin` turns the model but **not** the footprint, which stays
-   * axis-aligned. That is honest for everything in this hotel today — the
-   * spun props are the breakfast tables, and a table is round — and a rotated
-   * rectangle is a fifth shape for `CollisionWorld` to learn for one prop that
-   * does not exist.
+   * `spin` turns the model, and — for a rectangular footprint — the
+   * axis-aligned box {@link effectiveHalfExtents} conservatively bounds it in
+   * too, so the collider, the doorway check and the keep-out all agree with
+   * what a rotated model actually occupies. This used to be honest without
+   * the extra step, on the theory that the only spun props were round
+   * breakfast tables; it stopped being true the day the suite's lounge sofa
+   * (`Hotel.dressSuite`) got a `spin` of its own to face both the telly and
+   * the camera, and nothing here noticed — `isClearOfDoorways` kept measuring
+   * the *unrotated* box, so the sofa's true, rotated silhouette could (and
+   * did) reach further into a doorway than the check ever saw (18 Aug 2026,
+   * alongside the `DOORWAY_THROUGH_DEPTH` fix in `layout.ts`).
    */
   place(shell: Group, room: HotelRoom, prop: Object3D, plan: PropPlan): void {
     prop.position.set(plan.x, plan.y ?? 0, plan.z);
@@ -241,6 +361,8 @@ export class HotelProps {
     const solid = plan.solid ?? true;
     const worldTop = (plan.base ?? 0) + plan.top;
 
+    if (solid) this.checkDoorwayClearance(room, plan);
+
     if (plan.radius !== undefined) {
       if (solid) {
         this.collision.addCircle(worldX, worldZ, plan.radius, worldTop, false, true);
@@ -250,8 +372,16 @@ export class HotelProps {
       return;
     }
 
-    const halfX = plan.halfX ?? 0.5;
-    const halfZ = plan.halfZ ?? 0.5;
+    // {@link effectiveHalfExtents} — the box a rotated rectangle actually
+    // occupies, or the plain box unrotated. Every consumer below (the
+    // collider, the standing plate, the guest keep-out) uses this, not the
+    // raw `plan.halfX`/`plan.halfZ`, so a `spin` can never make one of them
+    // disagree with what the model visually covers.
+    const { halfX, halfZ } = effectiveHalfExtents(
+      plan.halfX ?? 0.5,
+      plan.halfZ ?? 0.5,
+      plan.spin,
+    );
     if (solid) {
       // Inset by the wall's own half-thickness, so the four walls' outer faces
       // land on the visual edge rather than {@link WALL_HALF_THICKNESS} beyond
@@ -270,6 +400,35 @@ export class HotelProps {
       this.standable(plan, worldX, worldZ, halfX, halfZ, worldTop);
     }
     this.coverWithDiscs(room, plan.x, plan.z, halfX, halfZ);
+  }
+
+  /**
+   * Checks one solid footprint against its room's doorways and records a
+   * violation rather than throwing — see {@link assertDoorwaysClear}.
+   */
+  private checkDoorwayClearance(room: HotelRoom, plan: PropPlan): void {
+    let zones = this.doorwayZonesByRoom.get(room);
+    if (!zones) {
+      zones = doorwayClearanceZones(room, DOORWAY_CLEARANCE);
+      this.doorwayZonesByRoom.set(room, zones);
+    }
+    const { halfX, halfZ } = effectiveHalfExtents(
+      plan.halfX ?? 0.5,
+      plan.halfZ ?? 0.5,
+      plan.spin,
+    );
+    const bounds: FurnitureBounds =
+      plan.radius !== undefined
+        ? { x: plan.x, z: plan.z, radius: plan.radius }
+        : { x: plan.x, z: plan.z, halfX, halfZ };
+    if (!isClearOfDoorways(bounds, zones)) {
+      this.doorwayViolations.push(
+        `${room.space} prop at local (${plan.x}, ${plan.z}) — ` +
+          (plan.radius !== undefined
+            ? `radius ${plan.radius}`
+            : `${halfX * 2}×${halfZ * 2} m footprint${plan.spin ? ' (rotated)' : ''}`),
+      );
+    }
   }
 
   /**
