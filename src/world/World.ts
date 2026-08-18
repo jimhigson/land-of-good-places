@@ -31,6 +31,8 @@ import { NpcSystem } from '../entities/npc';
 // note). Not a mini-game, so it is wired in here rather than through
 // `minigames/`.
 import { FacePaintStall } from './FacePaintStall';
+// The keychain stall (#119/#225) — FacePaintStall's sibling, wired the same way.
+import { KeychainShop } from './KeychainShop';
 import { Entrance, type EntranceOptions } from './entrance/Entrance';
 import { ARRIVAL_KID_COUNT } from './entrance/ArrivalSequence';
 import { terrainHeight } from './terrain';
@@ -78,6 +80,8 @@ export class World implements GameSystem {
   readonly npcs: NpcSystem;
   /** The face-painting stall (additive). See `FacePaintStall.ts`. */
   readonly facePaintStall: FacePaintStall;
+  /** The keychain stall (additive). See `KeychainShop.ts`. */
+  readonly keychainShop: KeychainShop;
   /** The park's front gate, its bus-stop shelter, and the cat bus arrival. */
   readonly entrance: Entrance;
   /** Every group that makes up the park itself. See {@link setParkVisible}. */
@@ -148,6 +152,27 @@ export class World implements GameSystem {
     // rule, `world/tapSpacing.ts`). Any flower already inside is replanted.
     this.flowers.keepClearOfTapZones(this.train.stationTapAreas());
 
+    // Two rollercoasters (family ruling, 28 July): the Sky Cruiser, a
+    // serene first-person ride, and the Rail Race, third person with
+    // barriers to duck. Both routes are solved already — `coaster/plan.ts`
+    // grows the cruiser first and the race avoiding it (loop-over-loop),
+    // at module load — so this just *builds* them, same as the train's
+    // stations. Still built after the train, for the rail-over-rail assert.
+    //
+    // Built **before** `TreeLights` just below, and that order is now load-
+    // bearing rather than incidental (issue #301): the cruiser's pylon search
+    // fells a tree standing on an otherwise-good support spot instead of
+    // skipping it (`coaster/pylons.ts`), and a tree felled after `TreeLights`
+    // had already strung a garland to it would leave that garland's end
+    // hanging in mid-air over a stump nobody can see. Building the coaster
+    // first means every garland below is generated from the trees the park
+    // actually keeps.
+    this.coaster = new Coaster(this.collision, this.train, {
+      plan: COASTER_PLANS.cruiser,
+      camera: 'firstPerson',
+      clearTreesNear: (x, z, radius) => this.scenery.clearTreesNear(x, z, radius),
+    });
+
     // Garlands of lights strung tree to tree. Nothing about them is authored:
     // they are generated from where `Scenery` actually planted the trees and
     // from the railway's *solved* centre line, so both the next tree scatter
@@ -157,16 +182,6 @@ export class World implements GameSystem {
     // It registers no collision itself; the wires hang overhead.
     this.treeLights = new TreeLights(this.scenery.foliageOccluders, this.train.route);
 
-    // Two rollercoasters (family ruling, 28 July): the Sky Cruiser, a
-    // serene first-person ride, and the Rail Race, third person with
-    // barriers to duck. Both routes are solved already — `coaster/plan.ts`
-    // grows the cruiser first and the race avoiding it (loop-over-loop),
-    // at module load — so this just *builds* them, same as the train's
-    // stations. Still built after the train, for the rail-over-rail assert.
-    this.coaster = new Coaster(this.collision, this.train, {
-      plan: COASTER_PLANS.cruiser,
-      camera: 'firstPerson',
-    });
     // The Rail Race is no longer a coaster at all (reform of 31 July 2026): it
     // is four parallel rails round the park's rim, raced side-on with the park
     // itself as the backdrop. Its own module owns the route, the physics, the
@@ -200,6 +215,12 @@ export class World implements GameSystem {
     // two are constructed in, since every `WanderDriver` reads that
     // module-level target on its own next update regardless.
     this.facePaintStall = new FacePaintStall(this.collision);
+
+    // The keychain stall (#119/#225): same reasoning, same build-order
+    // requirement — it registers its own walls with `this.collision` before
+    // `NpcSystem`'s waypoint graph is validated against the finished
+    // collision world.
+    this.keychainShop = new KeychainShop(this.collision);
 
     // The front gate, its bus-stop shelter, and — for a player who has not
     // arrived yet — the cat bus that brings her in. Built before the NPCs for
@@ -275,6 +296,7 @@ export class World implements GameSystem {
       this.npcs.group,
       this.stalls.group,
       this.facePaintStall.group,
+      this.keychainShop.group,
       this.train.group,
       this.coaster.group,
       this.railRace.group,
@@ -402,6 +424,7 @@ export class World implements GameSystem {
     this.npcs.update(context);
     this.stalls.update(context);
     this.facePaintStall.update(context);
+    this.keychainShop.update(context);
     this.flowers.update(context);
     this.dodgems.update(context);
     // Last: the arrival moves the player, and everything above has already had
@@ -423,6 +446,7 @@ export class World implements GameSystem {
       ...this.hotel.interactZones(),
       ...this.stalls.interactZones(),
       ...this.facePaintStall.interactZones(),
+      ...this.keychainShop.interactZones(),
       ...this.train.interactZones(),
       ...this.flowers.interactZones(),
     ];
@@ -438,6 +462,7 @@ export class World implements GameSystem {
    */
   mountUi(uiRoot: HTMLElement): void {
     this.facePaintStall.mountUi(uiRoot);
+    this.keychainShop.mountUi(uiRoot);
   }
 
   /**
@@ -452,6 +477,7 @@ export class World implements GameSystem {
     this.building.attachPlayer(player);
     this.hotel.attachPlayer(player);
     this.facePaintStall.attachPlayer(player);
+    this.keychainShop.attachPlayer(player);
     this.train.attachPlayer(player);
     this.coaster.attachPlayer(player);
     this.railRace.attachPlayer(player);
@@ -482,6 +508,7 @@ export class World implements GameSystem {
     this.fireflies.dispose();
     this.stalls.dispose();
     this.facePaintStall.dispose();
+    this.keychainShop.dispose();
     this.train.dispose();
     this.coaster.dispose();
     this.railRace.dispose();

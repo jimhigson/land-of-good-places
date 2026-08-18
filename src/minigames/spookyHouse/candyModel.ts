@@ -24,6 +24,27 @@ const WRAP_COLOURS = [
   PALETTE.markerLemon,
 ] as const;
 
+/**
+ * The sweet's shape, as numbers rather than as this file's `Mesh`es — the one
+ * source of truth for "what shape is a wrapped sweet" shared with
+ * `candyShower.ts`'s `buildSweetGeometry()`. That function cannot import
+ * `createSpookyCandy` itself: it needs a merged, instance-ready
+ * `BufferGeometry` for an `InstancedMesh`, and this factory builds a `Group`
+ * of separate outlined `Mesh`es for one held/shelved item — a different
+ * output for a different rendering need. So the shared thing is these
+ * numbers, not the function; both files build their own geometry from the
+ * same constants, and a shape change here only has one place to also change.
+ */
+export const SWEET_SHAPE = {
+  bodyRadius: 0.075,
+  bodySquashYZ: 0.62,
+  twistRadius: 0.052,
+  twistConeHeight: 0.075,
+  twistOffsetX: 0.095,
+  twistRotationZ: Math.PI / 2 - 0.5,
+  twistSquashZ: 0.55,
+} as const;
+
 export function createSpookyCandy(seed = 0): AssetHandle {
   const root = new Group();
   root.name = 'prop.spookyCandy';
@@ -40,18 +61,25 @@ export function createSpookyCandy(seed = 0): AssetHandle {
 
   const bodyHeight = 0.16;
 
-  const body = solid(new Mesh(new SphereGeometry(0.075, 14, 10), wrapMaterial));
-  body.scale.set(1, 0.62, 0.62);
+  const body = solid(
+    new Mesh(new SphereGeometry(SWEET_SHAPE.bodyRadius, 14, 10), wrapMaterial),
+  );
+  body.scale.set(1, SWEET_SHAPE.bodySquashYZ, SWEET_SHAPE.bodySquashYZ);
   body.position.y = bodyHeight;
   body.rotation.z = Math.PI / 2;
   sweet.add(body);
   addOutline(body, 0.008);
 
   for (const side of [-1, 1] as const) {
-    const twist = solid(new Mesh(new ConeGeometry(0.052, 0.075, 8), foilMaterial));
-    twist.position.set(side * 0.095, bodyHeight, 0);
-    twist.rotation.z = side * (Math.PI / 2 - 0.5);
-    twist.scale.set(1, 1, 0.55);
+    const twist = solid(
+      new Mesh(
+        new ConeGeometry(SWEET_SHAPE.twistRadius, SWEET_SHAPE.twistConeHeight, 8),
+        foilMaterial,
+      ),
+    );
+    twist.position.set(side * SWEET_SHAPE.twistOffsetX, bodyHeight, 0);
+    twist.rotation.z = side * SWEET_SHAPE.twistRotationZ;
+    twist.scale.set(1, 1, SWEET_SHAPE.twistSquashZ);
     sweet.add(twist);
   }
 

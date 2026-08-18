@@ -98,6 +98,9 @@ import { GARDEN_PLAY_BOUNDARY, type ParkBoundary } from './boundary';
  */
 
 interface CircleCollider {
+  /** Assigned by {@link CollisionWorld.addCircle}, so a caller can name this
+   * exact registration again later — see {@link CollisionWorld.removeCircle}. */
+  id: number;
   x: number;
   z: number;
   radius: number;
@@ -360,6 +363,8 @@ const MAX_SUBSTEPS = 16;
 export class CollisionWorld {
   private readonly circles: CircleCollider[] = [];
   private readonly walls: WallCollider[] = [];
+  /** Source of {@link CircleCollider.id} — see {@link addCircle}. */
+  private nextCircleId = 0;
 
   /**
    * True if a disc at (x, z) touches nothing registered so far. A *planning*
@@ -446,6 +451,12 @@ export class CollisionWorld {
     return this.bounds;
   }
 
+  /**
+   * Registers a circular collider and hands back its id, so a caller that
+   * might later need to take this exact registration back out again — see
+   * {@link removeCircle} — has something to name it by. Every existing call
+   * site simply drops the return value, which costs nothing.
+   */
   addCircle(
     x: number,
     z: number,
@@ -455,8 +466,11 @@ export class CollisionWorld {
     topIsAbsolute = false,
     baseHeight = -Infinity,
     navStamped = false,
-  ): void {
+  ): number {
+    const id = this.nextCircleId;
+    this.nextCircleId += 1;
     this.circles.push({
+      id,
       x,
       z,
       radius,
@@ -468,6 +482,35 @@ export class CollisionWorld {
     });
     this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, radius);
     this.revisionCounter += 1;
+    return id;
+  }
+
+  /**
+   * Takes a circular collider back out, by the id {@link addCircle} handed
+   * back when it was registered. Returns whether anything was actually
+   * removed, so a caller asking "is this still here" gets a real answer
+   * rather than having to track it separately.
+   *
+   * Exists for `Scenery`'s tree-felling (see `pylons.ts`'s pylon search):
+   * a support that would otherwise be skipped because a tree stands on its
+   * spot removes that one tree's collider instead of giving up the spot.
+   * Every other registration in the park is still added once, at build time,
+   * and never removed — this is deliberately the *only* mutation of that
+   * kind, not a general licence to reshuffle the world at will.
+   *
+   * `thinnestHalfWidth` is deliberately left alone: if the collider removed
+   * happened to be the thinnest one registered, the cached value is now a
+   * hair more conservative than it needs to be — sub-stepping the mover's
+   * movement a little finer than strictly required — never the other way
+   * round, so it stays safe to leave stale rather than rescanning every
+   * collider on every removal.
+   */
+  removeCircle(id: number): boolean {
+    const index = this.circles.findIndex((circle) => circle.id === id);
+    if (index === -1) return false;
+    this.circles.splice(index, 1);
+    this.revisionCounter += 1;
+    return true;
   }
 
   addWall(

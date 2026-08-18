@@ -142,6 +142,28 @@ const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
   // layout that is different on every seed. Drops her just inside the front
   // door, key not yet given, so the whole check-in flow is testable.
   '/hotel': 'hotelLobby',
+  // The keychain stall (#119/#225) — a garden cart on a layout that
+  // reshuffles per seed, the same QA problem the hotel and the slide have.
+  // Teleports her to the stand point and opens the picker directly; see
+  // `KeychainShop.requestOpen`.
+  '/keychain-stall': 'keychainStall',
+  // A guest-floor bathroom (#281, every floor gets one) — same QA problem
+  // again, and worse: reaching one on foot means the lobby, the stairs *and*
+  // the corridor first. Drops her at the floor's own "Use" stand spot,
+  // facing the pan, so the fixtures and the privacy roof are on screen
+  // immediately. `/hotel-bathroom` alone keeps its original Floor 1 target;
+  // the own-room rewrite (each bathroom is now a real room, not a nook that
+  // always looked the same) adds one link per remaining floor so each can
+  // be reached — and QA'd — on its own.
+  '/hotel-bathroom': 'hotelBathroom',
+  '/hotel-bathroom-lobby': 'hotelBathroomLobby',
+  '/hotel-bathroom-garden': 'hotelBathroomGarden',
+  '/hotel-bathroom-ocean': 'hotelBathroomOcean',
+  // The hotel's breakfast room (#276) — the clipped `.action-chip-row` this
+  // was added for lives here and nowhere else. Drops her already seated at a
+  // free chair, so the chip row is on screen the instant the park exists
+  // rather than after a walk across the hotel and a tap to sit down.
+  '/hotel-breakfast': 'hotelBreakfast',
   // The guest suite, fifty storeys up (#273/#278's doorway-clearance fix and
   // #279's bigger bedrooms and pet beds) — same problem again, and worse: the
   // normal way in is a walk across the park *and* the lift *and* reception
@@ -149,6 +171,12 @@ const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
   // corridor door, key check skipped, facing down the hall so the bedroom
   // doors and the lounge doorway are both in view — see `Hotel.enterSuite`.
   '/hotel-suite': 'hotelSuite',
+  // The Spooky House's jump-scare cycle (#293) — same QA problem as every
+  // other deep link, and the stall QA had no way to reach without walking a
+  // seed-different park first. `spookyHouse` is a curtain mini-game, not a
+  // world ride, so this falls to `MiniGameHost.open` the same way `/ferris`
+  // does.
+  '/spooky-house': 'spookyHouse',
 };
 
 /** What `/view` needs to drop a debug camera into the built park. See {@link parseDebugView}. */

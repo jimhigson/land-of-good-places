@@ -2,6 +2,12 @@ import { Group } from 'three';
 import { clamp01 } from '../core/mathUtils';
 import { disposeTree } from '../art/style/materials';
 import type { AssetHandle } from '../art/style/asset';
+import {
+  KEYCHAIN_SWAY_X,
+  KEYCHAIN_SWAY_X_RATE,
+  KEYCHAIN_SWAY_Z,
+  KEYCHAIN_SWAY_Z_RATE,
+} from '../art/models/keychains';
 import { SHOP_ITEMS } from '../world/building/shops/catalogue';
 import type { FrameContext, GameSystem } from '../core/types';
 import { gameStore, type GameState } from '../state';
@@ -39,19 +45,6 @@ import { gameStore, type GameState } from '../state';
 /** Seconds the pop-in takes, same beat as `WornHat`/`WornJetpack` and a purchase. */
 const POP_SECONDS = 0.3;
 
-/**
- * Sway, in radians and radians per second.
- *
- * Deliberately not the same rate on both axes: matched rates read as a rigid
- * thing rocking, and two that drift in and out of phase read as something on a
- * string. The sideways swing is the bigger one because that is the axis a
- * walking child's bag actually rocks about.
- */
-const SWAY_Z = 0.16;
-const SWAY_Z_RATE = 2.1;
-const SWAY_X = 0.07;
-const SWAY_X_RATE = 1.37;
-
 export class WornKeychain implements GameSystem {
   readonly name = 'wornKeychain';
 
@@ -81,8 +74,8 @@ export class WornKeychain implements GameSystem {
     if (!this.handle) return;
     this.handle.update?.(dt, elapsed);
 
-    this.pivot.rotation.z = Math.sin(elapsed * SWAY_Z_RATE) * SWAY_Z;
-    this.pivot.rotation.x = Math.sin(elapsed * SWAY_X_RATE) * SWAY_X;
+    this.pivot.rotation.z = Math.sin(elapsed * KEYCHAIN_SWAY_Z_RATE) * KEYCHAIN_SWAY_Z;
+    this.pivot.rotation.x = Math.sin(elapsed * KEYCHAIN_SWAY_X_RATE) * KEYCHAIN_SWAY_X;
 
     if (this.pop >= 1) return;
     this.pop = clamp01(this.pop + dt / POP_SECONDS);

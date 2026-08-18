@@ -40,6 +40,21 @@ import type { RailSampler } from '../rail/sweptRail';
  * **asking the route**, rather than naming them in a hand-maintained set that
  * nothing checks and that goes stale the day the park is re-laid.
  *
+ * ## The second organ: a tree is not a wall (issue #301)
+ *
+ * Fixing the plot keep-out did not fix the whole ride. Jim, playing, spotted a
+ * long stretch with no supports at all running straight through a dense tree
+ * and bush cluster — his own diagnosis, correct: `isClear` below asks the
+ * general collision world, which cannot tell a tree from a wall, so a
+ * candidate standing in even one tree's trunk collider was refused exactly as
+ * hard as one standing in the castle's wall. His ruling was that a park would
+ * simply clear the ground it needs: *"it is very reasonable to assume that the
+ * park would cut down trees that would stop them supporting their rides"*.
+ * `clearTreesNear` below is that clearing, and it is deliberately narrow — it
+ * only ever removes a tree, real ones felled by `Scenery.clearTreesNear`, so a
+ * spot that is blocked by a wall, a booth or the paved network is refused
+ * exactly as before.
+ *
  * What is *not* relaxed: a pylon still has to stand on ground that is clear, off
  * the paved network, out of a stall's approach, and clear of its neighbours.
  * Those are measurements of the built world. The plot circle was a proxy, and it
@@ -141,6 +156,7 @@ function plotsThisRideSpans(route: RailSampler): ReadonlySet<string> {
 export function planCruiserPylons(
   route: RailSampler,
   isClear: (x: number, z: number, radius: number) => boolean,
+  clearTreesNear: (x: number, z: number, radius: number) => number,
 ): CruiserPylon[] {
   const spanned = plotsThisRideSpans(route);
   const pylons: CruiserPylon[] = [];
@@ -156,7 +172,6 @@ export function planCruiserPylons(
       const ground = terrainHeight(point.x, point.z);
       const height = point.y - ground;
       if (height < MIN_PYLON_HEIGHT) continue;
-      if (!isClear(point.x, point.z, GROUND_CLEARANCE)) continue;
       if (distanceToPath(point.x, point.z) < PATH_CLEARANCE) continue;
       // Only plots this ride does *not* span — see the header. A ride that flies
       // over the castle cannot also keep 21.4 m clear of it.
@@ -169,13 +184,35 @@ export function planCruiserPylons(
       // Not too close to one already placed. Slots are spaced along the route,
       // which is not the same as being spaced apart on the ground: this loop
       // doubles back past the castle, so two slots far apart along the track can
-      // stand almost on the same spot.
+      // stand almost on the same spot. Checked before ground clearance below,
+      // for the same reason path and plot clearance are: this is independent
+      // of any tree, so it must reject a doomed candidate before that
+      // candidate gets a chance to cost anybody a tree.
       const crowds = pylons.some(
         (placed) =>
           Math.hypot(point.x - placed.x, point.z - placed.z) <
           2 * POST_FOOT_RADIUS + WALKABLE_GAP,
       );
       if (crowds) continue;
+      // Ground clearance is checked last, once every other test on this spot
+      // has already passed. A tree is only ever cut down for a spot that
+      // would otherwise be built on; checking this earlier would fell trees
+      // for candidates the path, a plot or a neighbouring pylon was always
+      // going to refuse anyway.
+      if (!isClear(point.x, point.z, GROUND_CLEARANCE)) {
+        // A spot that is otherwise good but has a tree standing on it should
+        // lose the tree, not the support — a real park would clear the
+        // ground it needs to hold a ride up (Jim, issue #301: "it is very
+        // reasonable to assume that the park would cut down trees that would
+        // stop them supporting their rides"). Only *this* candidate's own
+        // circle is asked to clear: felling is real and permanent
+        // (`Scenery.clearTreesNear`), so a spot blocked by something that is
+        // not a tree — a wall, a booth, the paved network — still refuses it
+        // exactly as before, because there is nothing here for felling to
+        // remove.
+        if (clearTreesNear(point.x, point.z, GROUND_CLEARANCE) === 0) continue;
+        if (!isClear(point.x, point.z, GROUND_CLEARANCE)) continue;
+      }
       pylons.push({ x: point.x, z: point.z, ground, height, at });
       break;
     }

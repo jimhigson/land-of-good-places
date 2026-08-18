@@ -687,6 +687,7 @@ function isFacePaintDesign(value: FacePaintId): value is FacePaintDesign {
 function playerLook(): FacePaintLook {
   const state = gameStore.get();
   const worn = state.inventory.find((item) => item.uid === state.wornHatUid);
+  const keychain = state.inventory.find((item) => item.uid === state.wornKeychainUid);
   return {
     skin: state.player.skinColour,
     hair: state.player.hairColour,
@@ -701,6 +702,12 @@ function playerLook(): FacePaintLook {
     hatId: worn?.id ?? '',
     petId: '',
     glasses: state.player.glassesKind,
+    // The camera never leaves the face here, so a worn charm is never
+    // actually in shot — populated for real anyway, rather than left `''`,
+    // because this function's whole point is "how she really looks", and a
+    // preview that quietly drops what she is wearing on her bag is exactly
+    // the small drift GAME_DESIGN.md's PREVIEW RULE exists to prevent.
+    keychainId: keychain?.id ?? '',
   };
 }
 

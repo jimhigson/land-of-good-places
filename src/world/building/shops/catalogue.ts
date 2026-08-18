@@ -15,6 +15,11 @@ import {
   createSurpriseEgg,
 } from '../../../art/models/shopItems';
 import { createSpookyCandy } from '../../../minigames/spookyHouse/candyModel';
+import {
+  createKeychain,
+  KEYCHAIN_KINDS,
+  type KeychainKind,
+} from '../../../art/models/keychains';
 import type { CuteCategory, InventoryKind } from '../../../state';
 
 /**
@@ -31,6 +36,32 @@ import type { CuteCategory, InventoryKind } from '../../../state';
  * which is why the panel says *Collect* rather than *Buy* there (see
  * `state/wording.ts`).
  */
+/**
+ * Name and blurb for each charm, kept beside the kinds they name.
+ *
+ * `check:brevity` holds these to a title of 24 characters and a blurb of one
+ * sentence of 50 — do not add `KNOWN_LONG` entries to buy room, write shorter.
+ */
+const KEYCHAIN_COPY: Record<KeychainKind, { displayName: string; blurb: string; icon: string }> = {
+  ripika: { displayName: 'RiPika Keychain', blurb: 'A tiny RiPika for your bag.', icon: '🐹' },
+  star: {
+    displayName: 'Star Keychain',
+    blurb: 'A little star that swings when you walk.',
+    icon: '🌟',
+  },
+  strawberry: {
+    displayName: 'Strawberry Keychain',
+    blurb: 'A tiny strawberry, never squashy.',
+    icon: '🍓',
+  },
+  rainbow: {
+    displayName: 'Rainbow Keychain',
+    blurb: 'A whole rainbow, small enough to carry.',
+    icon: '🌈',
+  },
+  heart: { displayName: 'Heart Keychain', blurb: 'A little heart bouncing on your bag.', icon: '💗' },
+};
+
 export type ShopId =
   | 'toy'
   | 'balloon'
@@ -51,7 +82,7 @@ export interface ShopItem {
    * `Record<ShopId, …>` tables in `fitouts.ts`/`Shops.ts` never have to know
    * about a shop that doesn't physically exist.
    */
-  readonly shopId: ShopId | 'spookyHouse';
+  readonly shopId: ShopId | 'spookyHouse' | 'keychainStall';
   readonly displayName: string;
   /** One cheerful line under the name in the purchase panel. */
   readonly blurb: string;
@@ -533,10 +564,50 @@ export const SHOP_ITEMS: readonly ShopItem[] = [
     heldScale: 0.9,
     rare: false,
   },
+
+  // ----------------------------------------------------------- the keychains
+  // Collected at the garden stall, never bought — hence `price: 0`, and hence
+  // `shopId: 'keychainStall'`, which matches no real `ShopId` so `itemsForShop`
+  // never puts one on a shelf inside the tower. Same trick as
+  // `candy.spookyHouse` above, and for the same reason: being in `SHOP_ITEMS`
+  // is what gets them the Cute-o-dex page, the save, the counts, the brevity
+  // check and the asset check with no second list to keep in step.
+  //
+  // Not `carryable` and not paradeable. A keychain is worn on the bag or it is
+  // in the bag; there is no third thing it can be doing, which is what makes
+  // `wearableSlot('keychain')` the only sensible answer to tapping one in the
+  // backpack drawer.
+  ...KEYCHAIN_KINDS.map((kind) => ({
+    id: `keychain.${kind}`,
+    shopId: 'keychainStall' as const,
+    ...KEYCHAIN_COPY[kind],
+    price: 0,
+    kind: 'keychain' as const,
+    category: 'keychain' as const,
+    carryable: false,
+    model: () => createKeychain(kind),
+    // Never held — kept sane rather than zero so a preview that scales by it
+    // cannot collapse the charm to nothing.
+    heldScale: 1,
+    rare: false,
+  })),
 ];
 
 export function itemsForShop(shopId: ShopId): ShopItem[] {
   return SHOP_ITEMS.filter((item) => item.shopId === shopId);
+}
+
+/**
+ * The five keychains, in catalogue order — the garden stall's whole display.
+ *
+ * `itemsForShop` cannot answer this: it takes a real {@link ShopId}, and
+ * `'keychainStall'` deliberately is not one (see {@link ShopItem.shopId}'s own
+ * doc comment). One small function rather than a second filter written out at
+ * the call site, so `world/KeychainShop.ts` and `ui/KeychainPanel.ts` cannot
+ * quietly disagree about which five entries the stall means.
+ */
+export function keychainItems(): readonly ShopItem[] {
+  return SHOP_ITEMS.filter((item) => item.shopId === 'keychainStall');
 }
 
 /**

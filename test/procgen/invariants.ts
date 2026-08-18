@@ -1732,6 +1732,49 @@ const railRaceStallDoormatIsUsable: Invariant = (facts) => {
 };
 
 /**
+ * **The keychain stall's stand point is usable — issues #119/#225.**
+ *
+ * `railRaceStallDoormatIsUsable`'s twin, added for the reason that one's own
+ * doc comment gives: standability is already covered for every entrance by
+ * the generic {@link entrancesAreUsable}, but reachability from the park
+ * entrance is not covered anywhere else in this file for any stall, and
+ * reachability is exactly the property a brand-new manifest entry can break —
+ * `stall.keychain` is placed by the same solver as every other plot
+ * (`STALL_PLACEMENTS.keychain`, an ordinary `placedStall(...)`), and the path
+ * network grows a spur to it the same way it does for every other stall
+ * (`world/paths.ts`, seeded from `STALL_STANDS`), but nothing else here would
+ * notice if that spur came out disconnected from the rest of the paving.
+ *
+ * `stand.x`/`stand.z` (the interact zone's `standX`/`standZ`, not the cart's
+ * own `x`/`z`) is what a child is actually walked to on pressing the chip, and
+ * so is the coordinate worth measuring — `KeychainShop.interactZones()`'s
+ * `pressZone` computes it from `STALL_STANDS_BY_ID.get('keychain')`, and this
+ * reads it back from the **built world's own interact zone**
+ * (`facts.entrances`, filtered to `stall:` ids by `parkFacts.ts`) rather than
+ * from that table directly — the same "measure what the game actually sends
+ * her to, not the table it was computed from" reasoning `parkFacts.ts`'s own
+ * `entrances` comment gives, and the same defect class (the ferris kiosk
+ * stand point existing in a table that nothing built ever reached) this
+ * whole mechanism exists to catch.
+ */
+const keychainStallStandIsUsable: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const stand = facts.entrances.find((entrance) => entrance.id === 'stall:keychain');
+  if (!stand) {
+    complaints.push("the built park has no 'stall:keychain' stand point");
+    return complaints;
+  }
+  const at = `(${stand.x.toFixed(1)}, ${stand.z.toFixed(1)})`;
+  if (!standableNear(facts, stand.x, stand.z)) {
+    complaints.push(`the keychain stall's stand point at ${at} has no standable ground nearby`);
+  }
+  if (!facts.reachableFromEntrance(stand.x, stand.z)) {
+    complaints.push(`the keychain stall's stand point at ${at} cannot be walked to from the park entrance`);
+  }
+  return complaints;
+};
+
+/**
  * Half a Sky Cruiser car, in metres.
  *
  * The car body is `toonBox(1.5, 0.7, 2.2, …)` in `Coaster.ts` — so 0.75 m of it
@@ -4546,6 +4589,84 @@ const CRUISER_MAX_UNSUPPORTED_SPAN = 90;
 const CRUISER_MAX_TRACK_PER_PYLON = 25;
 
 /**
+ * How far a point may sit from the paved network and still count as
+ * "explained by the path", for {@link CRUISER_MAX_OPEN_UNSUPPORTED_SPAN}
+ * below — the same 2.8 m `coaster/pylons.ts` itself keeps a pylon off paving
+ * by (`PATH_CLEARANCE`). Not imported from there: this file measures the
+ * built park, and a static import reaching `pylons.ts` → `paths.ts` →
+ * `parkManifest.ts` would pin every seed here to whichever one runs first
+ * (see this file's header). Kept in step by hand, the one place this rule
+ * accepts that (issue #301's fix does not touch this figure, so it is not at
+ * live risk of drifting quietly).
+ */
+const OPEN_SPAN_PATH_CLEARANCE = 2.8;
+
+/**
+ * How far a point may sit from a plot's edge and still count as "explained
+ * by the plot" — `PLOT_SKIRT` from `coaster/pylons.ts`, kept in step for the
+ * same reason as {@link OPEN_SPAN_PATH_CLEARANCE} above.
+ */
+const OPEN_SPAN_PLOT_SKIRT = 2.4;
+
+/**
+ * **No unsupported span may run this far over plain open lawn**, in metres —
+ * the second half of issue #301's fix, and the tighter counterpart to
+ * {@link CRUISER_MAX_UNSUPPORTED_SPAN} above.
+ *
+ * That constant is deliberately loose because a long gap over the castle, a
+ * plot or the paved network is *correct* — a post genuinely may not stand
+ * there. This one is not loose, because open lawn carries no such excuse: if
+ * a candidate spot there was refused, the only thing that could have refused
+ * it before this PR was a tree or a bush, and issue #301 is exactly Jim
+ * finding one of those refusals live — a support-free stretch of track
+ * running through a dense tree-and-bush cluster.
+ *
+ * **Measured, not targeted.** For every gap between two consecutive built
+ * pylons, this walks the gap in 1 m steps and finds the longest run that sits
+ * outside every plot's `boundingRadius + `{@link OPEN_SPAN_PLOT_SKIRT} and
+ * outside {@link OPEN_SPAN_PATH_CLEARANCE} of the paved network — the same
+ * two exemptions `planCruiserPylons` itself is allowed to refuse a spot for —
+ * then takes the worst such run anywhere on the loop. Measured against both
+ * sides of this PR, worst run per CI seed (canonical / 2 / 5 / 11 / 18):
+ *
+ * | | canonical | seed 2 | seed 5 | seed 11 | seed 18 |
+ * |---|---|---|---|---|---|
+ * | before | 16 m | 15 m | 15 m | **17 m** | 15 m |
+ * | after  | 15 m | 13 m | 12 m | 13 m | 14 m |
+ *
+ * 15 sits below the two seeds this PR actually fixes (canonical's 16, seed
+ * 11's 17 — the shape of the gap Jim found, a genuinely tree-blocked spot
+ * with nothing else standing in the way) and at or above every seed's
+ * post-fix worst, including canonical's, which lands exactly on it. That is
+ * a real margin of zero on the one seed, not headroom invented for safety —
+ * the two numbers are this close on this park. If a future, legitimate
+ * change to the scatter or the route needs more than 15 m of unexplained
+ * open lawn between two real supports, that is exactly the kind of seed
+ * swap CLAUDE.md asks for, written down rather than silently widened.
+ */
+const CRUISER_MAX_OPEN_UNSUPPORTED_SPAN = 15;
+
+/**
+ * Distance from (x, z) to the nearest paved-path sample, less that sample's
+ * own half-width — `paths.ts`'s own `distanceToPath`, recomputed from
+ * {@link ParkFacts.pathEdges} rather than by importing `paths.ts`, which
+ * reaches `parkManifest.ts` and would pin every seed in this suite to
+ * whichever one runs first (see this file's header). `pathEdges[].points` is
+ * the same drawn centre line at the same ~0.5 m sampling `distanceToPath`
+ * itself scans, so this is the real network, not a re-derivation of it.
+ */
+function nearestPathClearance(facts: ParkFacts, x: number, z: number): number {
+  let best = Infinity;
+  for (const edge of facts.pathEdges) {
+    for (const [px, pz] of edge.points) {
+      const d = Math.hypot(x - px, z - pz) - edge.halfWidth;
+      if (d < best) best = d;
+    }
+  }
+  return best;
+}
+
+/**
  * **The Sky Cruiser stands on something.**
  *
  * There was no invariant of any kind on this ride's supports — the pylon mesh
@@ -4640,6 +4761,50 @@ const skyCruiserStandsOnItsOwnSupports: Invariant = (facts) => {
         `${pylons.count} pylons in total.`,
     );
   }
+
+  // --- issue #301: a gap over plain lawn has no excuse ---------------------
+  //
+  // Walks every gap between consecutive built pylons (the same `ats`, already
+  // sorted above) and finds the longest run, anywhere on the loop, that is
+  // neither over a plot nor near the paved network — see
+  // {@link CRUISER_MAX_OPEN_UNSUPPORTED_SPAN}'s own comment for why that is
+  // the one shape of gap this ride cannot legitimately have.
+  let worstOpen = 0;
+  let worstOpenAt = 0;
+  for (let i = 0; i < ats.length; i += 1) {
+    const start = ats[i]!;
+    const end = i + 1 < ats.length ? ats[i + 1]! : ats[0]! + coaster.route.length;
+    let contig = 0;
+    let contigStart = start;
+    for (let d = start; d < end; d += 1) {
+      coaster.route.pointAt(d % coaster.route.length, point);
+      const overPlot = facts.plots.some(
+        (plot) =>
+          Math.hypot(point.x - plot.x, point.z - plot.z) < plot.boundingRadius + OPEN_SPAN_PLOT_SKIRT,
+      );
+      const overPath = !overPlot && nearestPathClearance(facts, point.x, point.z) < OPEN_SPAN_PATH_CLEARANCE;
+      if (overPlot || overPath) {
+        contig = 0;
+        continue;
+      }
+      if (contig === 0) contigStart = d;
+      contig += 1;
+      if (contig > worstOpen) {
+        worstOpen = contig;
+        worstOpenAt = contigStart;
+      }
+    }
+  }
+  if (worstOpen > CRUISER_MAX_OPEN_UNSUPPORTED_SPAN) {
+    complaints.push(
+      `the Sky Cruiser runs ${worstOpen.toFixed(1)} m without a support over plain open lawn, from ` +
+        `${worstOpenAt.toFixed(1)} m along its ${coaster.route.length.toFixed(1)} m loop — clear of every ` +
+        `plot and the paved network, so nothing legitimately explains the gap. Over the ` +
+        `${CRUISER_MAX_OPEN_UNSUPPORTED_SPAN} m open ground may span unsupported (issue #301: the search ` +
+        'should have felled whatever foliage was refusing a spot here rather than skip it).',
+    );
+  }
+
   return complaints;
 };
 
@@ -5005,6 +5170,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     railRaceRingsStandOutsideThePark,
   ],
   ["the rail-race stall's doormat is standable and reachable", railRaceStallDoormatIsUsable],
+  ["the keychain stall's stand point is standable and reachable", keychainStallStandIsUsable],
   ['the Sky Cruiser flies clear of the whole park', skyCruiserFliesClearOfThePark],
   ['the Sky Cruiser goes round the big wheel', skyCruiserGoesRoundTheBigWheel],
   ['the Sky Cruiser built track turns as gently as it promises', skyCruiserTurnsGently],

@@ -104,6 +104,17 @@ function facePaintStall(): StallPlacement {
   return { position: [p.x, p.z], facing: 0.3, standDistance: 2.3 };
 }
 
+/**
+ * The keychain stall (#119/#225), which `world/KeychainShop.ts` builds rather
+ * than `stalls.ts` — `FacePaintStall`'s sibling, not a mini-game, so it
+ * borrows placement conventions the same way.
+ *
+ * Unlike `facePaintStall()` above, this uses the ordinary `placedStall()`
+ * path: the fixed `+0.3` yaw that one carries is a pre-`cameraFacing` relic
+ * (its own doc comment says so), and `stall.keychain`'s manifest entry
+ * already sets `cameraFacing: true`, so `counterFacing(p.signYaw)` gives a
+ * camera-legible counter with no bespoke constant to keep in step.
+ */
 export const STALL_PLACEMENTS = {
   railRacer: placedStall('stall.railRacer'),
   skyCruiser: placedStall('stall.skyCruiser'),
@@ -112,6 +123,7 @@ export const STALL_PLACEMENTS = {
   spaceFerrisWheel: ferrisKiosk(),
   dodgems: placedStall('stall.dodgems'),
   facePaint: facePaintStall(),
+  keychain: placedStall('stall.keychain'),
 } as const satisfies Record<string, StallPlacement>;
 
 /** Where a child stands to be served at a stall. */

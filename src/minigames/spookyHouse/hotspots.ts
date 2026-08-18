@@ -21,6 +21,16 @@ import { Vector3 } from 'three';
 export interface Hotspot {
   /** Re-projects the anchor to screen space. Call every frame. */
   update(): void;
+  /**
+   * Marks this hotspot as a live jump-scare reflex target (#293) or not.
+   * Sets `data-jumpscare-active` on the underlying `<button>`, which
+   * `style.css` puts in the same selector as `:hover`/`:focus-visible` for
+   * the HIGHLIGHT RULE's rainbow ring — so a jump-scare target gets the
+   * park's one existing "you can press this" language instead of a bespoke
+   * effect, and it shows up with no hover needed, which matters on the
+   * touch devices this game is mostly played on.
+   */
+  setActive(active: boolean): void;
   dispose(): void;
 }
 
@@ -88,6 +98,10 @@ export function createHotspot(
       // Hides it if it ever ends up behind the camera — shouldn't happen in
       // this static scene, but cheap insurance against a stray tap target.
       el.style.display = projected.z > 1 ? 'none' : '';
+    },
+    setActive(active: boolean): void {
+      if (active) el.setAttribute('data-jumpscare-active', 'true');
+      else el.removeAttribute('data-jumpscare-active');
     },
     dispose(): void {
       if (flashTimer !== null) window.clearTimeout(flashTimer);

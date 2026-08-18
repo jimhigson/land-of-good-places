@@ -96,6 +96,14 @@ export interface CoasterOptions {
    *   lines and the next ride that wants a chase view should not re-derive it.
    */
   readonly camera: 'firstPerson' | 'chase';
+  /**
+   * Fells every tree standing in a disc at (x, z, radius) and reports how
+   * many it actually felled — `Scenery.clearTreesNear`, threaded through
+   * rather than reaching for `Scenery` directly, so this file only ever
+   * touches the collision world and the trees through the one door the park
+   * already keeps for it. See `pylons.ts`'s search for why it needs one.
+   */
+  readonly clearTreesNear: (x: number, z: number, radius: number) => number;
 }
 
 export class Coaster implements GameSystem {
@@ -400,8 +408,10 @@ export class Coaster implements GameSystem {
     // `test/procgen/invariants.ts` can measure the choice. It also fixes the
     // reason this ride had **four** supports on 217 m of track: see that file's
     // header.
-    const pylonSpots = planCruiserPylons(this.route, (x, z, radius) =>
-      collision.isClearCircle(x, z, radius),
+    const pylonSpots = planCruiserPylons(
+      this.route,
+      (x, z, radius) => collision.isClearCircle(x, z, radius),
+      this.options.clearTreesNear,
     );
     const pylons = new InstancedMesh(
       // Straight and vertical, and the **same thickness as the Rail Race's base

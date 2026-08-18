@@ -22,6 +22,19 @@ import type { FrameContext } from '../../src/core/types';
  *  runs `PointerControls`'s listener and `preventDefault` behaves for real. */
 class FakeCanvas extends EventTarget {}
 
+/**
+ * Issue #282's fix moved pointer listening from the canvas to `window`
+ * (capture phase), so `attach()`/`detach()` now unconditionally touch
+ * `window.addEventListener`/`removeEventListener` — real in every browser,
+ * absent in this project's plain-Node vitest environment (no jsdom, see
+ * above). These tests only ever exercise the wheel path, which stays
+ * canvas-scoped, so a bare `EventTarget` stand-in is enough to stop
+ * `attach()` throwing; nothing here needs it to actually receive an event.
+ */
+if (typeof window === 'undefined') {
+  (globalThis as { window: EventTarget }).window = new EventTarget();
+}
+
 function dispatchWheel(target: EventTarget, deltaY: number, deltaMode = 0): boolean {
   const event = new Event('wheel', { cancelable: true });
   Object.defineProperty(event, 'deltaY', { value: deltaY });

@@ -24,6 +24,12 @@ import { createFaceLife } from '../art/style/faceLife';
 import type { BackpackKind, GlassesKind, HairStyle, ShoeKind } from '../state';
 import { pixelRatioCap } from '../core/device';
 import { shopItem } from '../world/building/shops/catalogue';
+import {
+  KEYCHAIN_SWAY_X,
+  KEYCHAIN_SWAY_X_RATE,
+  KEYCHAIN_SWAY_Z,
+  KEYCHAIN_SWAY_Z_RATE,
+} from '../art/models/keychains';
 
 /**
  * The character creator's live 3D preview: its own tiny scene, camera and
@@ -72,6 +78,13 @@ export interface PreviewChoice {
   readonly shoesColour: number;
   readonly hatId: string;
   readonly petId: string;
+  /**
+   * Which charm hangs off the bag, or `''` for none — bare and non-optional
+   * for the same reason `hatId`/`petId` are: this is a shop-item id, and the
+   * empty string is the established "nothing chosen" sentinel for one, not a
+   * second convention next to it.
+   */
+  readonly keychainId: string;
   /** Which glasses she wears, or `null` for none. See `PlayerState.glassesKind`. */
   readonly glasses: GlassesKind | null;
   /**
@@ -91,18 +104,22 @@ export interface PreviewChoice {
  * it changes: face painting zooms right in on the face; a hat frames the head;
  * a pet frames the pet."* The character creator changes everything, so it
  * rests on the whole character (`full`); the face-painting stall changes one
- * thing, on the face, so it rests there (`face`) and never pulls back.
+ * thing, on the face, so it rests there (`face`) and never pulls back; the
+ * keychain stall changes what hangs off the bag, so it rests turned round to
+ * show it (`backpack`) — the one framing that is also a turn of the plinth
+ * rather than only a camera move, see {@link BACK_TURN}.
  *
  * Deliberately a small, closed vocabulary of *what a screen is for*, rather
  * than exposing {@link PreviewFocus} itself: a resting framing of `pet` or
  * `hair` is not a thing any screen wants today, and every value here has to
  * hold up as somewhere the camera can simply live.
  */
-export type PreviewFraming = 'full' | 'face';
+export type PreviewFraming = 'full' | 'face' | 'backpack';
 
 const RESTING_FOCUS: Readonly<Record<PreviewFraming, PreviewFocus>> = {
   full: 'all',
   face: 'face',
+  backpack: 'backpack',
 };
 
 /**
@@ -277,6 +294,19 @@ export class CharacterPreview {
   private character: Group | null = null;
   private kid: KidHandle | null = null;
   private pet: Object3D | null = null;
+  /**
+   * The worn charm's swing point — owned by the preview itself, not by the
+   * per-choice `character` group, for the same reason `stage` is: `update()`
+   * throws the whole character away and rebuilds it on every tap, and a sway
+   * that reset to zero on every keystroke would never look like it was
+   * swinging. Reparented onto the fresh `kid.keychainAnchor` each rebuild
+   * (`Object3D.add` moves an object between parents on its own); cleared
+   * first so a charm that was removed does not linger as a stale child.
+   * `entities/WornKeychain.ts` is the real thing's twin — same pivot idea,
+   * same sway numbers (`art/models/keychains.ts`'s `KEYCHAIN_SWAY_*`), so the
+   * picker does not show a different dangle than the one she walks away with.
+   */
+  private readonly keychainPivot = new Group();
   private rafHandle: number | null = null;
   private elapsed = 0;
   private lastTime = 0;
@@ -478,6 +508,21 @@ export class CharacterPreview {
     // change `height`. `null` ("None" in the creator) attaches nothing.
     if (choice.glasses) kid.glassesAnchor.add(createGlasses(choice.glasses).root);
 
+    // The worn keychain, hung exactly the way `entities/WornKeychain.ts` hangs
+    // the real one: the charm models stand up from their own base (the asset
+    // contract grants the `'anchor'` origin reading only to `hat.` ids), so it
+    // is dropped by its own measured `height` and swung about the top rather
+    // than about its feet. `keychainPivot` is cleared first — see its own doc
+    // comment for why it is not part of the per-choice `character` group.
+    this.keychainPivot.clear();
+    this.keychainPivot.removeFromParent();
+    const keychainAsset = choice.keychainId ? shopItem(choice.keychainId)?.model() : undefined;
+    if (keychainAsset) {
+      keychainAsset.root.position.y = -keychainAsset.height;
+      this.keychainPivot.add(keychainAsset.root);
+      kid.keychainAnchor.add(this.keychainPivot);
+    }
+
     // The chosen starting pet, stood beside the kid at its own natural scale
     // — the same scale it will actually walk behind the player at in the
     // parade (see `entities/parade/ParadeMember.ts`; nothing there rescales a
@@ -571,6 +616,11 @@ export class CharacterPreview {
     // it is driven from the anchor's WORLD position, which is exactly why the
     // hair swishes as the plinth rocks. Free on every other style.
     this.kid?.update(dt);
+    // Same two-sine dangle `entities/WornKeychain.ts` drives, off this
+    // preview's own clock. Harmless to run with nothing on the pivot — a
+    // rotation on an empty `Group` costs a sine and nothing draws.
+    this.keychainPivot.rotation.z = Math.sin(this.elapsed * KEYCHAIN_SWAY_Z_RATE) * KEYCHAIN_SWAY_Z;
+    this.keychainPivot.rotation.x = Math.sin(this.elapsed * KEYCHAIN_SWAY_X_RATE) * KEYCHAIN_SWAY_X;
     this.updateFace(dt);
     this.updateCamera(dt);
     this.renderer.render(this.scene, this.camera);
@@ -668,8 +718,15 @@ export class CharacterPreview {
         // Only the parts on show: the shapes she did not pick are hidden, not
         // absent, and `expandByObject` does not check visibility — a box drawn
         // round all five would frame a RiPika head nobody can see.
+        //
+        // Plus the keychain pivot, when a charm is worn: `charmAnchor` is a
+        // sibling of the bag parts under `body` (`art/models/backpacks.ts`),
+        // not a descendant of any one of them, so `expandByObject` on the bag
+        // alone would never see a dangling charm and the keychain stall's own
+        // picker would crop the very thing it exists to show.
         box = this.measure(
           ...kid.backpackParts.filter((part) => part.mesh.visible).map((part) => part.mesh),
+          ...(this.keychainPivot.children.length > 0 ? [this.keychainPivot] : []),
         );
       } else if (focus === 'face') {
         const patch = kid.root.getObjectByName('facePatch');
