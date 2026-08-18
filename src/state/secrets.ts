@@ -42,6 +42,12 @@ export const SECRETS: readonly Secret[] = [
     icon: '🏆',
     done: 'You beat the other cart on the rails!',
   },
+  {
+    id: 'secret.keychain',
+    name: 'Charm collector',
+    icon: '🔑',
+    done: 'You collected your first keychain!',
+  },
 ];
 
 const BY_ID = new Map<string, Secret>(SECRETS.map((secret) => [secret.id, secret]));

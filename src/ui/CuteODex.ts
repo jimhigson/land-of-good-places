@@ -50,6 +50,11 @@ const SECTIONS: readonly { category: CuteCategory; title: string; glyph: string 
   { category: 'hat', title: 'Hats', glyph: '👒' },
   { category: 'sticker', title: 'Stickers', glyph: '✨' },
   { category: 'egg', title: 'Surprise eggs', glyph: '🥚' },
+  // Collected at the garden keychain stall, never bought — see
+  // `world/building/shops/catalogue.ts`'s `keychainStall` entries. Rendered
+  // from `CATALOGUE` exactly like every shop section above; only `secret` and
+  // `flower` below need their own reader.
+  { category: 'keychain', title: 'Keychains', glyph: '🔑' },
   // Free finds from the meadow, not sold in any shop — rendered from
   // `FLOWER_COLOURS` rather than the shop catalogue, see `renderFlowerSection`.
   { category: 'flower', title: 'Flowers', glyph: '🌷' },
