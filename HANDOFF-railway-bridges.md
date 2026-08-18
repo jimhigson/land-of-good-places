@@ -10,30 +10,74 @@ already exists in `src/world/boundary.ts` on current `origin/main`, so that
 reshape landed before this branch started — the sequencing concern is
 already satisfied, not overlooked.
 
-## State: feature complete, verification in progress
+## State: feature complete, fully verified, ready for PR
 
-All code is written and committed. `tsc` clean (both main and test
-tsconfig). `check:park` clean on canonical seed and sweep seeds 2, 5, 18.
-`check:solve-cost` passes. Branch merged with `origin/main` (which had moved
-significantly — other PRs landed mid-task) with no conflicts; my own hunks
-verified intact post-merge via `git diff origin/main...HEAD`.
+`tsc` clean. `test:procgen` clean across all five seeds (canonical, 2, 5,
+11, 18) — 353/356 tests pass; the only 3 failures are `test/input/
+wheel-zoom.test.ts` (`window is not defined`), pre-existing and unrelated
+to bridges, already fixed on `origin/main` (#296) but not yet in this
+branch. `check:park` clean (16/16 attractions, 0 rail crossings, 166/166
+waypoints, all six invariants). `npm run build` runs every check clean
+**except** `check:park-boot`, which is a wall-clock/frame-budget check that
+also fails on an unmodified `origin/main` checkout in this sandbox — see
+"Known non-issue" below, this is not a regression.
 
-**Still running when this was written:** `npm run test:procgen` (full 5-seed
-vitest suite, background task `byvicct1a`) and a follow-up `npm run build`.
-An earlier run of both raced against the `git merge` and produced
-contradictory output (files "1 failed" + "exited with code 0" in the same
-run) — discarded, do not trust that result, re-run clean.
+## Three real bugs found and fixed after the first "feature complete" pass
 
-**If you're picking this up:** check `test:procgen`'s result. If clean,
-open the PR (`gh pr create` or `mcp__github__create_pull_request`,
-`railway-bridges` → `main`, body drafted at `.pr-body.md` in this worktree —
-delete that file before/after opening the PR, it's scratch, not meant to be
-committed). If seed 11 (the slow one, ~160s solve) shows a bridge-related
-failure not seen on the other seeds, it's likely the same class of bug as
-seeds 2/5/18 hit before the fixes in the second and third commits
-(overlapping bridges at tight crossing spacing, or a scenery conflict) —
-check `bridgeHeightAt`'s max-not-first fix and `bridgeKeepout.ts` are both
-still wired in.
+The earlier state of this handoff (superseded) believed the feature was
+done pending a clean `test:procgen` run. It wasn't — three real, separate
+bugs surfaced under full verification, all now fixed:
+
+1. **`bridgeKeepout.ts` computed its crossings at module-load time**, before
+   `Garden`'s `buildPaths()` ever runs — `pathCentreline()` was reliably
+   empty at that point, so the plan-time footprint used to keep scenery off
+   a bridge silently disagreed with the real, built bridge. Fixed by making
+   the computation lazy (first real call, which happens during `Scenery`'s
+   own construction — always after `Garden`). Also gave `BridgeFootprint
+   .covers()` and `Bridge.deckCovers()` an optional padding margin (default
+   `0`, exact, for every runtime consumer) so a caller with real physical
+   thickness — a garden wall, a lamp base — can ask for a bit of clearance
+   past the bridge's own exact edge without that padding leaking into
+   `NavGrid`/`fence.ts`/`poiGraph`'s own exact boundary.
+2. **A single, shared `rampRun`** forced a boundary-constrained crossing's
+   short side onto the roomy side too, and — worse — a boundary truncation
+   that re-applied `MAX_RAMP_GRADIENT`'s own floor could snap straight back
+   up past the truncation it just found, on the hand-added "gate walk"
+   crossing (issue #116 seeds 11/18: the ramp reached ~8 m past the map's
+   edge). Fixed with per-side `rampRunPos`/`rampRunNeg`, and the boundary
+   truncation now floors at a small physical minimum instead of the grade
+   floor — `everyBridgeIsWalkableAndReachable`'s own "a maximally cramped
+   bridge; nothing to probe this far out" already anticipated this case.
+   Also: `fence.ts`'s deck-seam height picked the *tallest* of two
+   overlapping decks, which is right for "where does a walker stand"
+   (`bridgeHeightAt`) but wrong for "where does the fence open" — it
+   stranded a walker on the *shorter* deck below the taller seam. Now picks
+   the lowest.
+3. **`check:jitter` failed** (children moving at up to 216 m/s) — pre-dated
+   this session's own fixes, bisected to commit `248b339`'s new fence
+   centre-line collider landing under a couple of existing NPC routes.
+   Root cause: `NpcCharacter.move()`'s "trust the resolved position"
+   formula divides *any* one-time `collision.resolve()` escape by `dt`, so
+   an unrelated large correction (not this frame's own small step) reads
+   back as a burst of speed, and bounded deceleration then takes many
+   frames to bleed it off — the same feedback loop `endScripted()`'s own
+   comment already names once, for a different trigger. Fixed with a shared
+   `boundEscape()` helper, used by both `move()` and `endScripted()`, that
+   caps how far one `resolve()` call may be trusted per frame and lets a
+   genuinely embedded child walk free over a few frames instead of being
+   launched. Verified against `origin/main` directly (`check:jitter` passes
+   clean there) to confirm this was a real regression on this branch, not a
+   pre-existing, unrelated issue.
+
+## Known non-issue: `check:park-boot` in this sandbox
+
+Fails with a different phase reported "0 pieces" and different overrun
+timings on every run — the signature of CPU-contention noise, not a
+deterministic bug. Confirmed by running it against a clean `origin/main`
+worktree in the same sandbox: fails there too, exit 1. This sandbox runs
+many concurrent agent sessions; `check:park-boot` measures real wall-clock
+frame budgets and is not resilient to that contention. Not something this
+PR introduced or can fix from inside the PR.
 
 ## What was built (see the two commits' own messages for full detail)
 
