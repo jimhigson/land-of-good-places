@@ -250,10 +250,128 @@ function solveRing(): (readonly [number, number])[] {
   // issue #269 wants the *drawn* loop on grid axes, so the last step turns
   // those 32 bearing samples into a closed axis-aligned polygon rather than
   // tracing straight (generally diagonal) lines between them.
-  return toAxisAlignedLoop(points);
+  //
+  // Simplify *before* axis-aligning (issue #319, Jim 18 Aug 2026): see
+  // {@link simplifyClosedLoop}'s own comment for why axis-aligning all 32 raw
+  // samples pairwise is exactly what produced the "wiggly, disgusting"
+  // staircase Jim called out, and why dropping the redundant samples first
+  // cannot reopen a blocker-clearance hole.
+  return toAxisAlignedLoop(simplifyClosedLoop(points, RING_SIMPLIFY_TOLERANCE));
 }
 
 const TAU_PATH = Math.PI * 2;
+
+/**
+ * How far a bearing sample is allowed to sit off the straight chord between
+ * its two surviving neighbours before {@link simplifyClosedLoop} keeps it as
+ * a vertex in its own right.
+ *
+ * Measured, not guessed, on all five procgen seeds: at 2.5 m, the raw 32
+ * bearing samples reduce to 12 surviving vertices every time (after
+ * {@link toAxisAlignedLoop}'s own leg-boundary collapse,
+ * {@link collapseCollinearClosed}), the loop's turn count drops from
+ * 57-59 to 11, and its mean straight-run length rises from ~3 m to
+ * 13.4-15.9 m — canonical seed 20260728: 59 -> 11 turns, 2.98 m -> 15.92 m
+ * mean run; seeds 2/5/11/18 land in the same range (18 August 2026, see
+ * `HANDOFF-grid-visual-refix-2.md`). `low` (plaza radius + 4.5, ~14 m here)
+ * sets the scale a "genuine" bend has to clear a blocker at, so a tolerance a
+ * fifth of that comfortably keeps every real dodge (the profile's Laplacian
+ * relax already smooths blocker bulges over several bearings, well past
+ * this) while erasing the sub-metre wobble between neighbouring samples on an
+ * otherwise flat stretch. A handful of legs still end in a sub-0.15 m jog
+ * (seeds 2 and 5) where `elbowLeg`'s own clearance nudge kicks in right next
+ * to a real blocker — a genuine, tiny local correction, not the wobble this
+ * fixes, and far below anything a player could see.
+ */
+const RING_SIMPLIFY_TOLERANCE = 2.5;
+
+/**
+ * Douglas–Peucker simplification of a **closed** polyline: drops any vertex
+ * that sits within `tolerance` of the straight chord its neighbours would
+ * draw without it, recursively, keeping only the vertices a straight-line
+ * approximation of the loop actually needs.
+ *
+ * **Why {@link solveRing} needs this at all (issue #319, Jim, 18 August
+ * 2026):** "grid based park layout also a hard failure - this fails both to
+ * draw on a grid, and also to draw a circle... the worst of all worlds."
+ * {@link toAxisAlignedLoop} turns every *consecutive pair* of its input
+ * vertices into its own {@link manhattanRoute}. Feeding it all 32 raw bearing
+ * samples — ~3 m apart round a near-circular profile, almost never sharing an
+ * x or a z with their neighbour — meant almost every one of those 32 short
+ * legs needed its own elbow correction: 64 control-point segments on the
+ * canonical seed, each one genuinely, individually axis-aligned (which is
+ * why the old "no continuous diagonal run over 16 m" invariant passed clean),
+ * but turning 59 times in one 191 m loop, a mean straight run of 2.98 m. That
+ * is a staircase tracing a circle, not a grid: it reads as neither.
+ *
+ * Simplifying the loop *before* axis-aligning fixes this without touching
+ * blocker safety at all: {@link manhattanRoute} re-proves clearance for
+ * whatever leg it is actually given, via {@link detourAroundBlockers} and
+ * {@link elbowLeg}/{@link gridDetour}, however far apart its two endpoints
+ * are. So dropping a redundant sample never removes a clearance check — it
+ * only changes which points the (already fully general) router is asked to
+ * connect. Where the profile genuinely bends to dodge a blocker, that bend
+ * survives simplification (it sits far from the chord its neighbours would
+ * draw) and the loop still comes in close there; on an unconstrained stretch
+ * the redundant in-between samples drop out and the loop runs one long
+ * straight leg instead of a chain of them.
+ *
+ * Split at two well-separated indices first, standard practice for running
+ * open-line Douglas-Peucker on a closed loop: DP needs a fixed chord to
+ * measure a half against, and a loop has no natural start/end to anchor one.
+ */
+function simplifyClosedLoop(
+  points: readonly (readonly [number, number])[],
+  tolerance: number,
+): (readonly [number, number])[] {
+  const n = points.length;
+  if (n <= 4) return points.map((p) => [p[0], p[1]] as [number, number]);
+  const splitA = 0;
+  const splitB = Math.floor(n / 2);
+  const keep = new Set<number>([splitA, splitB]);
+  rdpKeep(points, splitA, splitB, tolerance, keep);
+  rdpKeep(points, splitB, n, tolerance, keep); // `n` wraps: it means points[0]
+  const indices = [...keep].sort((a, b) => a - b);
+  return indices.map((i) => {
+    const p = points[i % n] as readonly [number, number];
+    return [p[0], p[1]] as [number, number];
+  });
+}
+
+/** One Douglas-Peucker split, `points[start]` to `points[end]` (`end` may
+ * equal `points.length`, meaning "wraps to `points[0]`") — recursively adds
+ * every index whose point sits more than `tolerance` from the chord to
+ * `keep`. Used only by {@link simplifyClosedLoop}. */
+function rdpKeep(
+  points: readonly (readonly [number, number])[],
+  start: number,
+  end: number,
+  tolerance: number,
+  keep: Set<number>,
+): void {
+  if (end - start < 2) return;
+  const n = points.length;
+  const a = points[start % n] as readonly [number, number];
+  const b = points[end % n] as readonly [number, number];
+  const abx = b[0] - a[0];
+  const abz = b[1] - a[1];
+  const abLen = Math.hypot(abx, abz) || 1;
+  let maxDist = -1;
+  let maxIndex = -1;
+  for (let i = start + 1; i < end; i += 1) {
+    const p = points[i % n] as readonly [number, number];
+    const dist = Math.abs((p[0] - a[0]) * abz - (p[1] - a[1]) * abx) / abLen;
+    if (dist > maxDist) {
+      maxDist = dist;
+      maxIndex = i;
+    }
+  }
+  if (maxDist > tolerance) {
+    keep.add(maxIndex % n);
+    rdpKeep(points, start, maxIndex, tolerance, keep);
+    rdpKeep(points, maxIndex, end, tolerance, keep);
+  }
+}
 
 /**
  * Extra clearance an axis-aligned corner or leg keeps beyond a blocker's own
@@ -816,9 +934,74 @@ function toAxisAlignedLoop(
     const upper = i === n - 1 ? leg.length - 1 : leg.length;
     for (let j = 1; j < upper; j += 1) out.push(leg[j] as [number, number]);
   }
+  // Each leg above collapses its *own* collinear points (`manhattanRoute`'s
+  // own `collapseCollinear` call), but two independent legs can still land a
+  // straight continuation across their shared boundary — e.g. leg i ends
+  // running +z and leg i+1's own elbow correction also happens to run +z —
+  // which `collapseCollinear` alone cannot see since it never looks past
+  // either leg's own two ends. Left alone this is still every segment
+  // genuinely axis-aligned (so the old per-segment invariant never saw it),
+  // just one redundant vertex sitting mid-straight — a small extra source of
+  // exactly the "corner that isn't a corner" wiggle issue #319 was about, so
+  // it is worth erasing on the one route (the ring) actually built by
+  // stitching many independent legs together like this.
+  return collapseCollinearClosed(out);
+}
+
+/** Like {@link collapseCollinear}, but for a **closed** loop: also checks the
+ * wrap seam (last point through first point to second), since a ring's own
+ * "first" vertex is not a real corner the way an open route's endpoints are —
+ * it is just wherever {@link toAxisAlignedLoop} happened to start listing
+ * from. */
+function collapseCollinearClosed(
+  points: readonly (readonly [number, number])[],
+): (readonly [number, number])[] {
+  if (points.length < 3) return points.map((p) => [p[0], p[1]] as [number, number]);
+  let out: [number, number][] = points.map((p) => [p[0], p[1]] as [number, number]);
+  // Two passes: a first pass can turn a formerly-real corner (points[0]) into
+  // a collinear midpoint once its neighbours' own redundant points drop out,
+  // so run again until nothing more is removed (bounded by the point count).
+  for (let guard = 0; guard < points.length; guard += 1) {
+    const n = out.length;
+    if (n < 3) break;
+    const next: [number, number][] = [];
+    let changed = false;
+    for (let i = 0; i < n; i += 1) {
+      const prev = out[(i + n - 1) % n] as readonly [number, number];
+      const cur = out[i] as readonly [number, number];
+      const nxt = out[(i + 1) % n] as readonly [number, number];
+      const sameX = Math.abs(prev[0] - cur[0]) < 1e-6 && Math.abs(cur[0] - nxt[0]) < 1e-6;
+      const sameZ = Math.abs(prev[1] - cur[1]) < 1e-6 && Math.abs(cur[1] - nxt[1]) < 1e-6;
+      if (sameX || sameZ) {
+        changed = true;
+        continue;
+      }
+      next.push([cur[0], cur[1]]);
+    }
+    out = next;
+    if (!changed) break;
+  }
   return out;
 }
 
+/**
+ * Nearest point on the ring **as drawn** — projected onto its edges, not just
+ * snapped to one of its own vertices.
+ *
+ * Vertex-only used to be an adequate stand-in for "nearest point on the
+ * curve": {@link solveRing} fed {@link toAxisAlignedLoop} 32 tightly-spaced
+ * bearing samples, so no vertex sat more than a couple of metres off the
+ * ring's own line. Simplifying that down to ~12 long straight runs (issue
+ * #319) is exactly the fix for the ring itself, but it also meant a vertex
+ * can now sit well off the point this function is actually being asked to
+ * approximate — measured on seed 5, at the fixed `gate-approach` connector's
+ * own query point `(0, 27)`: the nearest surviving *vertex* sat 5.12 m from
+ * the ring's true nearest edge point, which alone was enough to push that
+ * connector's own diagonal leg over `test/procgen/invariants.ts`'s
+ * `MAX_DIAGONAL_APPROACH` (16 m). Projecting onto the ring's segments keeps
+ * this function's answer accurate regardless of how few vertices the (still
+ * fully walkable) ring polygon has.
+ */
 function nearestRingPoint(
   ring: readonly (readonly [number, number])[],
   x: number,
@@ -826,11 +1009,20 @@ function nearestRingPoint(
 ): readonly [number, number] {
   let best = ring[0] as readonly [number, number];
   let bestDistance = Infinity;
-  for (const point of ring) {
-    const distance = Math.hypot(point[0] - x, point[1] - z);
+  const n = ring.length;
+  for (let i = 0; i < n; i += 1) {
+    const [ax, az] = ring[i] as readonly [number, number];
+    const [bx, bz] = ring[(i + 1) % n] as readonly [number, number];
+    const dx = bx - ax;
+    const dz = bz - az;
+    const lengthSq = dx * dx + dz * dz;
+    const t = lengthSq > 0 ? Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / lengthSq)) : 0;
+    const px = ax + dx * t;
+    const pz = az + dz * t;
+    const distance = Math.hypot(x - px, z - pz);
     if (distance < bestDistance) {
       bestDistance = distance;
-      best = point;
+      best = [px, pz];
     }
   }
   return best;
