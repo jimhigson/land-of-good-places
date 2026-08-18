@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="833" viewBox="0 0 900 833" font-family="sans-serif">
+<rect x="0" y="0" width="900" height="833" fill="#e8ecdf"/>
+<path d="M 486.8 418.4 L 442.0 418.4 L 442.0 571.6 L 333.7 571.6 L 333.7 526.7 L 180.5 526.7 L 180.5 418.4 L 225.4 418.4 L 225.4 265.2 L 333.7 265.2 L 333.7 310.1 L 486.8 310.1 Z" fill="none" stroke="#1b998b" stroke-width="3" opacity="0.9"/>
+<path d="M 391.9 717.5 L 391.9 563.5 L 391.9 571.6" fill="none" stroke="#555555" stroke-width="2" opacity="0.9"/>
+<path d="M 333.7 526.7 L 333.7 472.3" fill="none" stroke="#555555" stroke-width="2" opacity="0.9"/>
+<path d="M 486.8 418.4 L 486.8 423.9 L 580.2 423.9 L 601.8 430.0 L 604.3 430.7" fill="none" stroke="#555555" stroke-width="2" opacity="0.9"/>
+<path d="M 391.9 717.5 L 417.6 717.5 L 417.6 730.3 L 443.2 730.3 L 443.2 756.0 L 533.0 756.0 L 533.0 768.8 L 545.8 768.8 L 554.9 767.3 L 622.8 767.3 L 622.8 744.2 L 607.0 728.4 L 605.1 726.5" fill="none" stroke="#555555" stroke-width="2" opacity="0.9"/>
+<path d="M 622.8 744.2 L 635.6 743.2 L 661.3 743.2 L 661.3 679.0 L 687.0 679.0 L 687.0 640.5 L 699.8 640.5 L 699.8 602.0 L 712.6 602.0 L 712.6 563.5 L 725.5 563.5 L 736.2 558.9 L 756.0 569.7 L 758.2 570.9" fill="none" stroke="#555555" stroke-width="2" opacity="0.9"/>
+<path d="M 225.4 265.2 L 191.9 265.2 L 191.9 160.3 L 176.5 144.0 L 174.7 142.2" fill="none" stroke="#555555" stroke-width="2" opacity="0.9"/>
+<path d="M 180.5 526.7 L 142.0 526.7 L 142.0 575.6 L 124.7 589.8 L 122.7 591.5" fill="none" stroke="#555555" stroke-width="2" opacity="0.9"/>
+<path d="M 486.8 310.1 L 561.2 310.1 L 561.2 85.7 L 572.7 66.4 L 574.0 64.2" fill="none" stroke="#555555" stroke-width="2" opacity="0.9"/>
+<path d="M 391.9 689.1 L 391.9 705.0 L 349.1 705.0 L 333.3 689.1" fill="none" stroke="#555555" stroke-width="2" opacity="0.9"/>
+<path d="M 561.2 310.1 L 561.2 299.1 L 623.1 299.1 L 623.1 314.6 L 634.5 314.6 L 634.5 348.8 L 622.8 358.2 L 622.8 371.0 L 618.4 375.1 L 602.5 359.2" fill="none" stroke="#555555" stroke-width="2" opacity="0.9"/>
+<path d="M 479.6 310.1 L 495.4 310.1 L 495.4 264.4 L 479.6 248.6" fill="none" stroke="#555555" stroke-width="2" opacity="0.9"/>
+<path d="M 623.1 299.1 L 760.8 299.1 L 760.8 92.2 L 744.9 76.4" fill="none" stroke="#555555" stroke-width="2" opacity="0.9"/>
+<path d="M 191.9 180.2 L 167.3 180.2" fill="none" stroke="#bbbbbb" stroke-width="2" stroke-dasharray="3,3" opacity="0.9"/>
+<path d="M 142.0 531.8 L 142.0 547.7 L 80.0 547.7 L 64.1 531.8" fill="none" stroke="#555555" stroke-width="2" opacity="0.9"/>
+<path d="M 180.5 418.4 L 180.5 356.9 L 106.3 356.9 L 90.4 341.1" fill="none" stroke="#555555" stroke-width="2" opacity="0.9"/>
+<path d="M 561.2 156.7 L 477.0 156.7 L 510.8 127.7 L 489.6 120.4" fill="none" stroke="#555555" stroke-width="2" opacity="0.9"/>
+<path d="M 180.5 410.7 L 171.9 410.7 L 130.3 394.6 L 133.8 416.8" fill="none" stroke="#555555" stroke-width="2" opacity="0.9"/>
+<path d="M 495.4 301.9 L 488.4 301.9" fill="none" stroke="#bbbbbb" stroke-width="2" stroke-dasharray="3,3" opacity="0.9"/>
+<path d="M 346.4 702.2 L 340.6 704.7 L 353.4 704.7 L 347.1 701.5" fill="none" stroke="#bbbbbb" stroke-width="2" stroke-dasharray="3,3" opacity="0.9"/>
+<path d="M 712.6 602.0 L 738.3 602.0 L 738.3 614.8 L 828.1 614.8 L 828.1 627.7 L 835.9 632.4" fill="none" stroke="#555555" stroke-width="2" opacity="0.9"/>
+<path d="M 191.9 160.3 L 218.3 160.3 L 218.3 134.0 L 225.1 127.2 L 225.1 114.4 L 220.6 102.0" fill="none" stroke="#555555" stroke-width="2" opacity="0.9"/>
+<circle cx="601.8" cy="430.0" r="5" fill="#264653" stroke="white" stroke-width="1"/>
+<text x="608.8" y="425.0" font-size="10" fill="#111">building</text>
+<circle cx="607.0" cy="728.4" r="5" fill="#264653" stroke="white" stroke-width="1"/>
+<text x="614.0" y="723.4" font-size="10" fill="#111">hotel</text>
+<circle cx="756.0" cy="569.7" r="5" fill="#264653" stroke="white" stroke-width="1"/>
+<text x="763.0" y="564.7" font-size="10" fill="#111">ballPit</text>
+<circle cx="176.5" cy="144.0" r="5" fill="#264653" stroke="white" stroke-width="1"/>
+<text x="183.5" y="139.0" font-size="10" fill="#111">ferrisWheel</text>
+<circle cx="124.7" cy="589.8" r="5" fill="#264653" stroke="white" stroke-width="1"/>
+<text x="131.7" y="584.8" font-size="10" fill="#111">dodgems</text>
+<circle cx="572.7" cy="66.4" r="5" fill="#264653" stroke="white" stroke-width="1"/>
+<text x="579.7" y="61.4" font-size="10" fill="#111">waterFight</text>
+<circle cx="333.3" cy="689.1" r="5" fill="#e76f51" stroke="white" stroke-width="1"/>
+<text x="340.3" y="684.1" font-size="10" fill="#111">stall.railRacer</text>
+<circle cx="602.5" cy="359.2" r="5" fill="#e76f51" stroke="white" stroke-width="1"/>
+<text x="609.5" y="354.2" font-size="10" fill="#111">stall.skyCruiser</text>
+<circle cx="479.6" cy="248.6" r="5" fill="#e76f51" stroke="white" stroke-width="1"/>
+<text x="486.6" y="243.6" font-size="10" fill="#111">stall.spookyHouse</text>
+<circle cx="744.9" cy="76.4" r="5" fill="#e76f51" stroke="white" stroke-width="1"/>
+<text x="751.9" y="71.4" font-size="10" fill="#111">stall.waterFight</text>
+<circle cx="167.3" cy="180.2" r="5" fill="#e76f51" stroke="white" stroke-width="1"/>
+<text x="174.3" y="175.2" font-size="10" fill="#111">stall.spaceFerrisWheel</text>
+<circle cx="64.1" cy="531.8" r="5" fill="#e76f51" stroke="white" stroke-width="1"/>
+<text x="71.1" y="526.8" font-size="10" fill="#111">stall.dodgems</text>
+<circle cx="90.4" cy="341.1" r="5" fill="#e76f51" stroke="white" stroke-width="1"/>
+<text x="97.4" y="336.1" font-size="10" fill="#111">stall.facePaint</text>
+<circle cx="489.6" cy="120.4" r="5" fill="#2a9d8f" stroke="white" stroke-width="1"/>
+<text x="496.6" y="115.4" font-size="10" fill="#111">station-0</text>
+<circle cx="133.8" cy="416.8" r="5" fill="#2a9d8f" stroke="white" stroke-width="1"/>
+<text x="140.8" y="411.8" font-size="10" fill="#111">station-1</text>
+<circle cx="488.4" cy="301.9" r="5" fill="#8338ec" stroke="white" stroke-width="1"/>
+<text x="495.4" y="296.9" font-size="10" fill="#111">exit-skyCruiser</text>
+<circle cx="347.1" cy="701.5" r="5" fill="#8338ec" stroke="white" stroke-width="1"/>
+<text x="354.1" y="696.5" font-size="10" fill="#111">exit-railRace</text>
+<circle cx="835.9" cy="632.4" r="5" fill="#8338ec" stroke="white" stroke-width="1"/>
+<text x="842.9" y="627.4" font-size="10" fill="#111">exit-ginormousSlide</text>
+<circle cx="220.6" cy="102.0" r="5" fill="#8338ec" stroke="white" stroke-width="1"/>
+<text x="227.6" y="97.0" font-size="10" fill="#111">exit-ferrisWheel</text>
+<text x="10" y="20" font-size="16" fill="#111">Seed 20260728 — BEFORE (interconnects disabled)</text>
+<text x="10" y="823" font-size="11" fill="#333">green = ring backbone, dark grey = existing spur, red = new interconnection edge, dashed = unpaved (connectivity fact only)</text>
+</svg>
