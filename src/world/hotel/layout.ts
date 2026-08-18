@@ -982,6 +982,17 @@ export const LOBBY: HotelRoom = {
   theme: LOBBY_THEME,
   originX: HOTEL_ORIGIN_X,
   originZ: HOTEL_LOBBY_Z,
+  // Held at 13 deliberately — issue #281's bathroom fix first tried widening
+  // this, which moved the west wall (everything here is measured from
+  // `±halfX`) far enough that the west window's own "Look out" stand-spot
+  // search (pinned to this wall by `zoneAt: -6.6`) landed squarely on the
+  // crystal column at local (-11.9, -6.6) from every candidate depth and
+  // lateral offset it tried — `check:hotel` found the zone offering "Look
+  // out" from nowhere a child could stand. The bathroom's own east-west room
+  // comes from widening the *nook itself* into already-empty floor instead
+  // (its west wall moved from local x = 9.4 to 7.0 — nothing else in this
+  // room occupies x > 7 at z ≥ 9), which touches none of the room's outer
+  // walls at all.
   halfX: 13,
   // Deepened from 10 by exactly the gallery's own 4.8 m, so the open floor of
   // the lobby is the room it always was and the mezzanine is *added* space
@@ -1069,6 +1080,26 @@ export const LOBBY: HotelRoom = {
       rise: LOBBY_MEZZANINE_Y - LOBBY_LANDING_Y,
     },
   },
+  // The bathroom (issue #272, and its own-room rewrite issue #281 — Jim: "make
+  // the bathrooms … a new room adjoining the existing floorplan, don't try to
+  // squeeze it into the existing"). South-east corner: the room's own east and
+  // south walls close two sides for free, and these two partitions close the
+  // other two — the door sits on the west wall, well clear of both corners
+  // (0.5 m of solid wall either side of it, `check:hotel` probe 18's "every
+  // partition end reaches a wall or a doorway jamb").
+  //
+  // **The west wall sits at x = 7.0, not the doorway's original 9.4** —
+  // widened into open floor nobody else uses south of z = 9 (the seating
+  // groups, breakfast tables and planters all sit north of z = 6.4).
+  // `check:tap-spacing` ruled out every narrower version: the "Use" zone
+  // needs a finger clear of the doorway's own tap-spacing band *and* of the
+  // east wall's face at once, and the old 3.6 m nook could satisfy one only
+  // by failing the other (`halfX`'s own comment has the version of this fix
+  // that tried widening the *room* instead, and what that broke).
+  partitions: [
+    { along: 'z', at: 7.0, from: 9.0, to: 12.4, doors: [10.7] },
+    { along: 'x', at: 9.0, from: 7.0, to: 13, doors: [] },
+  ],
   liftZ: 0,
   liftFloor: 0,
   floorLabel: 'Lobby',
@@ -1089,8 +1120,23 @@ export const BREAKFAST: HotelRoom = {
   theme: BREAKFAST_THEME,
   originX: HOTEL_ORIGIN_X,
   originZ: HOTEL_BREAKFAST_Z,
+  // Held at 12 deliberately — issue #281's own bathroom fix first tried
+  // growing this too, which moved the west wall (everything here is
+  // measured from `±halfX`) close enough to the crystal cluster at local
+  // (-10.6, -7.4) to put a painting's "Look" stand spot inside it
+  // (`check:hotel` found this). The bathroom's east-west room comes from
+  // `halfZ` and the door's own position instead — see below.
   halfX: 12,
-  halfZ: 9,
+  // Grown from 9 (issue #281). The south-east nook's own doorway needs
+  // distance from table b1-d (local 8.8, 4.6) that a 9 m room did not have:
+  // with the run only 3.2 m long the door could not sit far enough south of
+  // the table to clear the tap-spacing rule for either the table's own
+  // chairs or the bathroom's "Use" zone (`check:tap-spacing`), nor the
+  // doorway-clearance check for a chair's footprint (`check:hotel`). The
+  // extra 2.3 m — split evenly, so it also opens up welcome floor between
+  // the buffet and the north wall — gives the run enough length to push the
+  // door within a stride of the south wall, well clear of the table.
+  halfZ: 11.3,
   wallHeight: 3.0,
   gaps: { west: [-1.6, 1.6] },
   // Seven of them along the north wall, above the buffet — this is the room
@@ -1101,6 +1147,17 @@ export const BREAKFAST: HotelRoom = {
     north: { at: [-10, -6.6, -3.2, 0.2, 3.6, 7, 10.4], width: 2.2, sill: 1.5, head: 2.75 },
     west: { at: [-8.1, -3, 2.9, 8.1], width: 1.4, sill: 1.1, head: 2.6 },
   },
+  // The bathroom (issue #272/#281) — south-east corner, same shape as the
+  // lobby's. The door sits on the west wall, jamb touching the (now further
+  // south) south outer wall exactly (a valid, zero-length jamb —
+  // `check:hotel` probe 18 skips a jamb end's own wall-touching check, the
+  // same pattern the suite's own hall-to-bathroom door already uses), which
+  // puts it a full 5.5 m south of table b1-d — comfortably clear of both its
+  // footprint and its chairs' "Sit" zones.
+  partitions: [
+    { along: 'z', at: 8.6, from: 5.8, to: 11.3, doors: [10.1] },
+    { along: 'x', at: 5.8, from: 8.6, to: 12, doors: [] },
+  ],
   liftZ: 0,
   liftFloor: 1,
   floorLabel: 'Floor 1',
@@ -1285,7 +1342,13 @@ export const GARDEN_FLOOR: HotelRoom = {
   theme: GARDEN_THEME,
   originX: HOTEL_ORIGIN_X,
   originZ: HOTEL_GARDEN_Z,
-  halfX: 11,
+  // Grown from 11 (issue #281 — Jim: "it is fine to make the floor bigger")
+  // so the bathroom's own east-wall room has real depth for a doorway rather
+  // than the old two-wall nook squeezed against the existing east wall. The
+  // extra 1.4 m lands on both the east (the bathroom's own gain) and west
+  // (empty, past the lift alcove) sides — nothing else in this room is
+  // positioned relative to the old halfX, so nothing else moves.
+  halfX: 12.4,
   halfZ: 8,
   wallHeight: 3.2,
   gaps: { west: [-1.6, 1.6] },
@@ -1293,6 +1356,19 @@ export const GARDEN_FLOOR: HotelRoom = {
     north: { at: [-8.4, -4.2, 0, 4.2, 8.4], width: 2.4, sill: 1.1, head: 2.75 },
     west: { at: [-5.6, 5.6], width: 1.6, sill: 1.1, head: 2.6 },
   },
+  // The bathroom (issue #272/#281) — against the (new, further-out) east
+  // wall, between the two hedges, now a real four-sided room: the two
+  // north/south partitions that used to be the nook's only walls, closed on
+  // the west (open) side by a third partition carrying the door. That run is
+  // only 3.0 m, so the door (2.4 m) leaves a thinner 0.3 m jamb each side
+  // than the lobby's — still real wall, not a corner-touching jamb, so
+  // `check:hotel` probe 18 (partition ends must reach a wall) has something
+  // to reach.
+  partitions: [
+    { along: 'x', at: -4.6, from: 8.35, to: 12.4, doors: [] },
+    { along: 'x', at: -1.6, from: 8.35, to: 12.4, doors: [] },
+    { along: 'z', at: 8.35, from: -4.6, to: -1.6, doors: [-3.1] },
+  ],
   liftZ: 0,
   liftFloor: 2,
   floorLabel: 'Floor 12',
@@ -1311,7 +1387,12 @@ export const OCEAN_FLOOR: HotelRoom = {
   theme: OCEAN_THEME,
   originX: HOTEL_ORIGIN_X,
   originZ: HOTEL_OCEAN_Z,
-  halfX: 10,
+  // Grown from 10 (issue #281 — "it is fine to make the floor bigger"), the
+  // same reasoning as the garden floor: real depth for the bathroom's own
+  // doorway rather than a nook with no fourth wall. The gain lands on the
+  // west side (the bathroom's own, plus the lift alcove which re-derives its
+  // position from halfX for free) and the east (empty, unused).
+  halfX: 11.4,
   halfZ: 8.5,
   wallHeight: 3.1,
   gaps: { west: [-1.6, 1.6] },
@@ -1322,6 +1403,26 @@ export const OCEAN_FLOOR: HotelRoom = {
     north: { at: [-7, -2.4, 2.4, 7], width: 1.7, sill: 1.15, head: 2.55 },
     west: { at: [-5.4, 5.4], width: 1.7, sill: 1.15, head: 2.55 },
   },
+  // The bathroom (issue #272/#281) — against the west wall, now a real
+  // four-sided room: two horizontal partitions (the north one shifted from
+  // the old nook's z = 1.6 to 2.0, clearing the outer wall's own lift gap,
+  // `gaps.west` z ±1.6, by a clean 0.4 m rather than sitting flush on its
+  // very edge the way the old two-wall nook silently did —
+  // `buildBathroomWall` built its own collider straight into the
+  // `CollisionWorld` and was never checked against the lift gap at all)
+  // closed on the east (open) side by a third partition carrying the door.
+  // The south wall sits at z = 6.8, not the old nook's 5.6 — `check:hotel`
+  // and `check:tap-spacing` between them ruled out every position for the
+  // pan closer to the door: too close to the door's own doorway band, too
+  // close to the lift's boarding band, or (at exactly z = 6.0) close enough
+  // to the wall's own face to shove a standing child sideways. There was
+  // room to spare between the old nook's south wall and `halfZ` (8.5), so
+  // the wall moved rather than the room.
+  partitions: [
+    { along: 'x', at: 2.0, from: -11.4, to: -7.6, doors: [] },
+    { along: 'x', at: 6.8, from: -11.4, to: -7.6, doors: [] },
+    { along: 'z', at: -7.6, from: 2.0, to: 6.8, doors: [4.0] },
+  ],
   liftZ: 0,
   liftFloor: 3,
   floorLabel: 'Floor 33',
@@ -1429,26 +1530,32 @@ export function hotelDoorBands(room: HotelRoom): HotelDoorBand[] {
       yaw: Math.PI / 2,
       y: 0,
     });
-    // The bathroom's doorway, straight off the partition data so the two can
-    // never disagree. Only the doored **z-runs** are banded (today: exactly
-    // the bathroom door). Banding the x-runs' bedroom doorways too was
-    // measured, and trips the bed zones by 0.03 m — the beds and their signs
-    // would all have to shuffle, which is a reform for its own PR, not a
-    // rider on this one.
-    for (const run of room.partitions ?? []) {
-      if (run.along !== 'z') continue;
-      for (const door of run.doors) {
-        bands.push({
-          kind: 'room-door',
-          what: "the suite bathroom's doorway",
-          centreX: room.originX + run.at,
-          centreZ: room.originZ + door,
-          halfAlong: 0.6,
-          halfAcross: SUITE_DOOR_WIDTH / 2 + 0.4,
-          yaw: Math.PI / 2,
-          y: 0,
-        });
-      }
+  }
+  // Every partitioned room's own bathroom doorway, straight off the
+  // partition data so the two can never disagree — the suite's bathroom
+  // originally (issue #278), and now every guest floor's own-room bathroom
+  // too (issue #281: "a new room adjoining the existing floorplan"). Only
+  // the doored **z-runs** are banded. For the suite specifically that also
+  // means the x-runs' bedroom doorways stay unbanded: measured once, and
+  // banding them trips the bed zones by 0.03 m — the beds and their signs
+  // would all have to shuffle, which is a reform for its own PR, not a rider
+  // on this one. The four floor bathrooms have no x-run doors at all (their
+  // "north"/"south" walls are solid, no-door runs), so this loop bands
+  // exactly one doorway per floor, same as it always banded exactly one for
+  // the suite.
+  for (const run of room.partitions ?? []) {
+    if (run.along !== 'z') continue;
+    for (const door of run.doors) {
+      bands.push({
+        kind: 'room-door',
+        what: `${room.floorLabel}'s bathroom doorway`,
+        centreX: room.originX + run.at,
+        centreZ: room.originZ + door,
+        halfAlong: 0.6,
+        halfAcross: SUITE_DOOR_WIDTH / 2 + 0.4,
+        yaw: Math.PI / 2,
+        y: 0,
+      });
     }
   }
   if (room.liftZ !== null) {

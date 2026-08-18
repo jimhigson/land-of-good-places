@@ -3280,13 +3280,25 @@ export class Hotel implements GameSystem {
     // café to the lift's mouth.
     this.paintArrow(shell, -2.4, 9.2, -10.8, 0.4);
 
-    // The bathroom (issue #272) — south-east corner. One wall, into the real
-    // east and south walls, open to the north (the lift alcove's own shape —
-    // see `buildBathroomWall`), clear of the breakfast corner (south-west,
-    // x ≈ −10), the seating groups and columns (|x| ≤ 12.2, z ≤ 6.6) and the
-    // corner planters (x = ±3.4, z = 10.8).
-    this.buildBathroomWall(shell, LOBBY, 9.4, 9.0, 9.4, 12.4);
-    this.buildBathroomFixtures(shell, LOBBY, { minX: 9.6, maxX: 12.75, minZ: 9.0, maxZ: 12.15 }, 10.6, 10.8, 10.6, 10.8 - 1.1, 11.9, 10.575, -Math.PI / 2);
+    // The bathroom (issue #272, own-room rewrite issue #281) — south-east
+    // corner, now a genuinely enclosed room: `LOBBY.partitions` closes the
+    // two sides the room's own east and south walls don't already own, door
+    // on the (widened-in, see `LOBBY.partitions`'s own comment) west wall at
+    // x = 7.0. Clear of the breakfast corner (south-west, x ≈ −10), the
+    // seating groups and columns (|x| ≤ 12.2, z ≤ 6.6) and the corner
+    // planters (x = ±3.4, z = 10.8).
+    //
+    // With the door pushed well west, the pan sits with room to spare from
+    // both the doorway's own clearance zone (reach 1.24 m from x = 7.0) and
+    // its tap-spacing band (a further finger, `check:tap-spacing`), and
+    // still a comfortable margin short of the east wall — no more fighting
+    // one rule against the other the way the narrower nook did.
+    //
+    // A tighter pick radius than the suite's own 1.8 m default — this small
+    // a room puts the "Use" zone within a finger of its own doorway
+    // (`check:tap-spacing`'s rule) at the default radius.
+    const rect = clearFloorAround(LOBBY, 11.5, 10.7);
+    this.buildBathroomFixtures(shell, LOBBY, rect, 11.5, 10.7, 10.2, 10.7, 10.8, 9.8, -Math.PI / 2, 0.9);
 
     return statue;
   }
@@ -3392,14 +3404,24 @@ export class Hotel implements GameSystem {
       pictures: [{ wall: 'west', along: -6.4, width: 1.6, height: 1.2, seed: 0x20c1 }],
     });
 
-    // The bathroom (issue #272) — south-east corner, same shape as the
-    // lobby's. Clear of table b1-d (8.8, 4.6) and the east planter (10.6, 1)
-    // by well over a stride.
-    this.buildBathroomWall(shell, BREAKFAST, 8.6, 5.8, 8.6, 9);
+    // The bathroom (issue #272, own-room rewrite issue #281) — south-east
+    // corner, same shape as the lobby's: `BREAKFAST.partitions` closes the
+    // two open sides, door on the west wall, jamb at the (grown) south wall.
+    // The floor grew deeper (`BREAKFAST.halfZ`) so the door sits a full
+    // 5.5 m south of table b1-d (8.8, 4.6) — clear of it and its chairs'
+    // "Sit" zones for both `check:hotel`'s doorway-clearance check and
+    // `check:tap-spacing`'s finger rule. The pan sits east and well south of
+    // the door's own tap-spacing band — the extra room's own depth is what
+    // buys the "Use" zone its clearance, not extra width (see `halfX`'s own
+    // comment for why widening the room instead put a painting in a wall).
+    // It also sits a body's width shy of the east wall, not flush against it
+    // — `check:hotel` found the wall's own face shoving a standing child
+    // sideways at the position tried first.
+    const rect = clearFloorAround(BREAKFAST, 10.9, 8.5);
     // A tighter pick radius than the suite's own 1.8 m — this nook has a
     // breakfast chair for a neighbour, and check:tap-spacing wants a full
     // finger (TAP_FINGER_METRES) between them.
-    this.buildBathroomFixtures(shell, BREAKFAST, { minX: 8.8, maxX: 11.75, minZ: 5.8, maxZ: 8.75 }, 10.3, 7.9, 10.3, 7.9 - 1.1, 9.3, 8.2, Math.PI / 2, 0.9);
+    this.buildBathroomFixtures(shell, BREAKFAST, rect, 10.9, 7.0, 9.6, 7.0, 11.0, 9.0, Math.PI / 2, 0.9);
   }
 
   /**
@@ -3633,18 +3655,26 @@ export class Hotel implements GameSystem {
     // Six ladder steps, not four: this arrow crosses the stacked lawn rug.
     this.paintArrow(shell, 6.4, -2.6, -room.halfX + 2.5, 0, 6 * DECAL_STEP);
 
-    // The bathroom (issue #272) — against the east wall, between the two
-    // hedges (spanning x 3.7–9.1 both north and south, half-depth 0.31 at
-    // z ±6.4) and well clear of the pond (x 4.1–8.3, z 0.3–4.6). Two walls,
-    // top and bottom, open to the west — neither real wall reaches here.
-    // Every fitting keeps a full `PLAYER_RADIUS` (0.62 m) clear of every
-    // wall *centreline* (not just its visual face) and of every other
-    // fitting's own collider — the margin `check:hotel` probe 21 actually
-    // measures (a child standing on the pan must not be shoved by the wall
-    // or the basin beside it).
-    this.buildBathroomWall(shell, room, 8.35, -4.6, 11, -4.6);
-    this.buildBathroomWall(shell, room, 8.35, -1.6, 11, -1.6);
-    this.buildBathroomFixtures(shell, room, { minX: 8.55, maxX: 10.75, minZ: -4.4, maxZ: -1.8 }, 9.0, -2.6, 7.8, -2.6, 9.9, -3.6, -Math.PI / 2);
+    // The bathroom (issue #272, own-room rewrite issue #281) — against the
+    // (grown) east wall, between the two hedges (spanning x 3.7–9.1 both
+    // north and south, half-depth 0.31 at z ±6.4) and well clear of the pond
+    // (x 4.1–8.3, z 0.3–4.6). `room.partitions` closes all four sides now:
+    // the same two north/south walls the old nook had, plus a third on the
+    // west (previously open) side carrying the door — the floor grew 1.4 m
+    // east so this room has real depth instead of the old nook's bare
+    // corner-of-two-walls.
+    //
+    // The doorway's clearance zone (reach 1.24 m from x = 8.35) still eats
+    // into the room along X, so the fixtures sit east of x = 9.59 — every
+    // fitting also keeps a full `PLAYER_RADIUS` (0.62 m) clear of every wall
+    // *centreline* and of every other fitting's own collider, the margin
+    // `check:hotel` probe 21 actually measures (a child standing on the pan
+    // must not be shoved by the wall or the basin beside it).
+    // A tighter pick radius than the suite's own 1.8 m default — this small
+    // a room puts the "Use" zone within a finger of its own doorway
+    // (`check:tap-spacing`'s rule) at the default radius.
+    const rect = clearFloorAround(room, 11.1, -2.6);
+    this.buildBathroomFixtures(shell, room, rect, 11.1, -2.6, 9.8, -2.6, 11.6, -3.7, -Math.PI / 2, 0.9);
   }
 
   /**
@@ -3725,13 +3755,24 @@ export class Hotel implements GameSystem {
     this.placeProps(shell, room, [
       { prop: () => seaweed(0x60c1, 1.2), x: -8.4, z: -6.4, top: SEAWEED_TOP },
       { prop: () => seaweed(0x60c2, 1.1), x: 8.4, z: -6.4, top: SEAWEED_TOP },
-      { prop: () => seaweed(0x60c3, 1), x: -8.6, z: 6.4, top: SEAWEED_TOP },
+      // Moved from (-8.6, 6.4) to (-6.0, 7.2) (issue #281) — the bathroom's
+      // own room now occupies exactly that corner, growing a real south wall
+      // out to z = 6.8; the old spot first sat inside the doorway's
+      // clearance zone, and once nudged along the wall to clear that, sat
+      // inside the wall's own collider instead (the wall physically stands
+      // there now — this decoration cannot). East of the bathroom's own east
+      // wall (x = -7.6) instead, still low in the room's south end.
+      { prop: () => seaweed(0x60c3, 1), x: -6.0, z: 7.2, top: SEAWEED_TOP },
       { prop: () => seaweed(0x60c4, 1.25), x: 8.6, z: 6.2, top: SEAWEED_TOP },
       { prop: () => seaweed(0x60c5, 0.9), x: -2.6, z: -6.6, top: SEAWEED_TOP },
       { prop: () => seaweed(0x60c6, 0.95), x: 3.2, z: -6.6, top: SEAWEED_TOP },
       {
+        // x nudged from -6.4 to -5.4 (issue #281) — sat squarely inside the
+        // new bathroom doorway's clearance zone, which reaches from the
+        // wall at x = -7.6 out to -6.36 (`check:hotel` found this: prop at
+        // local (-6.4, 3.6), fully inside).
         prop: () => crystalPlanter(0x60c7, PALETTE.waterFoam, [PALETTE.markerMint, PALETTE.bubbleSkin, PALETTE.waterTop]),
-        x: -6.4,
+        x: -5.4,
         z: 3.6,
         top: PLANTER_TOP,
       },
@@ -3763,19 +3804,32 @@ export class Hotel implements GameSystem {
     });
     this.paintArrow(shell, 4.6, 0, -room.halfX + 2.5, 0);
 
-    // The bathroom (issue #272) — against the west wall, above the lift gap
-    // (z ±1.6) and well below the seaweed guarding every true corner here
-    // (default 1×1 footprint at x = ±8.4…8.6, z = ±6.2…6.4, so its west edge
-    // is where the stand spot's own clearance is measured from). Two walls,
-    // top and bottom, open to the east — every fitting a full `PLAYER_RADIUS`
-    // (0.62 m) clear of every wall centreline and of the seaweed and each
-    // other, the same rule the garden floor's follows.
-    this.buildBathroomWall(shell, room, -10, 1.6, -7.6, 1.6);
-    this.buildBathroomWall(shell, room, -10, 5.6, -7.6, 5.6);
-    // A tighter pick radius than the suite's own 1.8 m — this nook has the
-    // lift alcove for a neighbour, and check:tap-spacing wants a full
-    // finger (TAP_FINGER_METRES) between them.
-    this.buildBathroomFixtures(shell, room, { minX: -9.7, maxX: -7.6, minZ: 1.85, maxZ: 5.35 }, -8.8, 4.65, -7.65, 4.65, -9.0, 3.0, Math.PI / 2, 0.7);
+    // The bathroom (issue #272, own-room rewrite issue #281) — against the
+    // (grown) west wall, above the lift gap (z ±1.6, cleared by 0.4 m — see
+    // `layout.ts`). Now a real four-sided room: the north wall shifted from
+    // the old nook's z = 1.6 to 2.0 to clear the lift gap, the south wall
+    // pushed on to z = 6.8 (see `layout.ts` — there was room to spare before
+    // `halfZ`), and a third wall on the east (previously open) side carries
+    // the door.
+    //
+    // The doorway's clearance zone (reach 1.24 m from x = −7.6) eats into
+    // the room along X, so the fixtures sit west of x = −8.84. The pan sits
+    // near the room's south end, far from *two* neighbours at once: the
+    // lift alcove's own boarding band to the north (`hotelDoorBands`,
+    // reaching to z ≈ 2.6) and this room's own doorway band, centred on the
+    // door at z = 4.0 — `check:tap-spacing` ruled out every more central
+    // position. It sits a full body's width off the south wall (z = 6.8),
+    // not flush against it — `check:hotel` found the wall's own face
+    // shoving a standing child sideways at the position tried first. The
+    // stand spot sits north-east of the pan rather than level with it —
+    // `check:hotel` found a level stand spot inside the west wall's own
+    // rounded end-cap (`CollisionWorld.addWall`'s half-thickness capsule
+    // reaches past a wall segment's literal endpoint), the same class of
+    // bug the breakfast room's stand spot hit.
+    const rect = clearFloorAround(room, -9.7, 3.5);
+    // Tighter still than the lobby/garden nooks' 0.9 m — this nook has both
+    // the lift alcove *and* its own doorway for neighbours.
+    this.buildBathroomFixtures(shell, room, rect, -10.1, 5.6, -9.0, 4.8, -9.8, 2.9, Math.PI / 2, 0.6);
   }
 
   private dressSuite(): void {
@@ -4174,56 +4228,6 @@ export class Hotel implements GameSystem {
       radius: 0.6,
       top: PLANTER_TOP,
       stand: false,
-    });
-  }
-
-  /**
-   * One straight wall of a floor's bathroom nook (issue #272) — built the
-   * same way `buildRoomShell` builds the lift alcove: a solid box registered
-   * straight with the collision world, not `layout.ts` partition data.
-   *
-   * A `HotelRoom.partitions` run makes a promise `check:hotel` probe 18
-   * holds it to — every end reaches a wall or a *declared doorway* — and a
-   * doorway there is always `SUITE_DOOR_WIDTH` (2.4 m), because
-   * `partitionRoom` and that probe both hard-code the same jamb half-width.
-   * These nooks are corners of already-furnished rooms with far less than
-   * 2.4 m to spare on the wall that would carry one, so they take the lift
-   * alcove's own shape instead — walls on some sides, **intentionally open**
-   * on the one she walks in through, exactly the way the lift's own "car" is
-   * three walls and an open mouth with no doorway declared anywhere. That is
-   * not dodging the promise partition data makes; it is the other shape this
-   * file already uses for "some sides, open on purpose."
-   */
-  private buildBathroomWall(shell: Group, room: HotelRoom, x1: number, z1: number, x2: number, z2: number): void {
-    const height = SUITE_PARTITION_HEIGHT;
-    this.collision.addWall(
-      room.originX + x1,
-      room.originZ + z1,
-      room.originX + x2,
-      room.originZ + z2,
-      0.25,
-    );
-    const wall = solid(
-      new Mesh(
-        x1 === x2
-          ? new BoxGeometry(0.4, height, Math.abs(z2 - z1))
-          : new BoxGeometry(Math.abs(x2 - x1), height, 0.4),
-        interiorMaterial(room.theme.wall),
-      ),
-    );
-    wall.name = 'hotel.wall';
-    wall.position.set((x1 + x2) / 2, height / 2, (z1 + z2) / 2);
-    shell.add(wall);
-    // No guest ever wanders in here (the bathroom is not on anyone's
-    // circuit), but the keep-out costs one entry and means that stays true
-    // even if a future roster change adds one.
-    this.props.footprint(room, {
-      x: (x1 + x2) / 2,
-      z: (z1 + z2) / 2,
-      halfX: x1 === x2 ? 0.2 : Math.abs(x2 - x1) / 2,
-      halfZ: x1 === x2 ? Math.abs(z2 - z1) / 2 : 0.2,
-      top: height,
-      solid: false,
     });
   }
 
