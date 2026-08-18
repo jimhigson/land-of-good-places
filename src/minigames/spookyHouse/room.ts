@@ -1,18 +1,22 @@
 import {
+  CanvasTexture,
   CircleGeometry,
   ConeGeometry,
   CylinderGeometry,
   Group,
   Mesh,
   MeshBasicMaterial,
+  PlaneGeometry,
   PointLight,
   SphereGeometry,
+  SRGBColorSpace,
   TorusGeometry,
 } from 'three';
 import { PALETTE } from '../../core/palette';
 import { Rng } from '../../core/mathUtils';
+import { ART } from '../../art/style/artPalette';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
-import { createFacePatch } from '../../art/style/faces';
+import { createFacePatch, css } from '../../art/style/faces';
 
 /**
  * The little room the Spooky House opens into.
@@ -25,6 +29,17 @@ import { createFacePatch } from '../../art/style/faces';
  * meant to be looked at for long — the big face is the point — so it stays
  * simple: a floor, a back wall the face sits on, two short side walls, a rug,
  * a hanging lantern, and a pair of grinning jack-o-lanterns for company.
+ *
+ * The room's palette was reworked after Jim's PR #294 preview note: "the
+ * background should also be generally dark and spooky artwork in it such as
+ * spider webs, dark green on dark grey". `ART.statueStoneDark` (already the
+ * park's one "dark grey" — see its own doc comment for why it is warm, not
+ * neutral) is the walls; `ART.spookyGreen` is the rug and trim; the floor
+ * takes `PALETTE.ink` itself, the one colour in the whole game the rulebook
+ * calls "the darkest value anywhere" — nothing here goes past it. Two
+ * corner cobwebs (`createCobwebTexture`) are the "spooky artwork": the same
+ * painted-canvas-decal technique every face and marking in this park already
+ * uses (ART_DIRECTION.md §3/§7), not a new one.
  */
 
 export interface SpookyRoom {
@@ -34,15 +49,93 @@ export interface SpookyRoom {
   dispose(): void;
 }
 
+let cobwebTextureCache: CanvasTexture | null = null;
+
+/**
+ * A simple corner cobweb, painted the same way `art/style/faces.ts` paints a
+ * face: flat ink-tinted lines on a transparent canvas, cached and reused
+ * (`ART_DIRECTION.md` §7's "canvas-drawn only, cached by key" — this is one
+ * texture shared by both corners, mirrored in `createCobwebMesh` rather than
+ * painted twice). Radial threads from the corner plus a few connecting arcs —
+ * enough to read as a web at gameplay distance, nothing fussier: this is
+ * "fun-spooky, not scary-scary" set dressing (GAME_DESIGN.md), so the web is
+ * a friendly cartoon prop, not a photoreal texture.
+ */
+function createCobwebTexture(): CanvasTexture {
+  if (cobwebTextureCache) return cobwebTextureCache;
+
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('2D canvas context unavailable — cannot paint the cobweb.');
+
+  // Anchored at the top-left corner of the canvas — the mesh gets tucked into
+  // an actual room corner, so the web should visibly spring from one.
+  const originX = 0;
+  const originY = 0;
+  const reach = size * 1.32;
+
+  ctx.strokeStyle = css(ART.cream);
+  ctx.globalAlpha = 0.62;
+  ctx.lineCap = 'round';
+  ctx.lineWidth = size * 0.012;
+
+  // Radial threads.
+  const strandCount = 6;
+  const strandAngle = Math.PI / 2 / (strandCount - 1);
+  for (let i = 0; i < strandCount; i += 1) {
+    const angle = i * strandAngle;
+    ctx.beginPath();
+    ctx.moveTo(originX, originY);
+    ctx.lineTo(originX + Math.cos(angle) * reach, originY + Math.sin(angle) * reach);
+    ctx.stroke();
+  }
+
+  // Connecting arcs, evenly spaced out from the corner, linking the strands
+  // into a proper web rather than a spray of lines.
+  const ringCount = 4;
+  for (let r = 1; r <= ringCount; r += 1) {
+    const radius = (reach / (ringCount + 0.6)) * r;
+    ctx.beginPath();
+    ctx.arc(originX, originY, radius, 0, Math.PI / 2);
+    ctx.stroke();
+  }
+
+  ctx.globalAlpha = 1;
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.anisotropy = 4;
+  texture.needsUpdate = true;
+  cobwebTextureCache = texture;
+  return texture;
+}
+
+/**
+ * One corner cobweb decal. `mirror` flips it so the same texture (drawn
+ * anchored at its own top-left) can dress both top corners of the back wall
+ * without a second canvas.
+ */
+function createCobwebMesh(mirror: boolean): Mesh {
+  const material = toonMaterial(0xffffff, { map: createCobwebTexture(), transparent: true, depthWrite: false });
+  material.alphaTest = 0.02;
+  const mesh = decal(new Mesh(new PlaneGeometry(2.1, 2.1), material));
+  mesh.name = 'spookyHouse:cobweb';
+  mesh.renderOrder = 2;
+  if (mirror) mesh.scale.x = -1;
+  return mesh;
+}
+
 export function createSpookyRoom(): SpookyRoom {
   const root = new Group();
   root.name = 'spookyHouse:room';
 
-  const wallMaterial = toonMaterial(PALETTE.markerLilac);
-  const wallDarkMaterial = toonMaterial(0x6a4f8a);
-  const floorMaterial = toonMaterial(0x3f2f52);
-  const rugMaterial = toonMaterial(PALETTE.markerMint);
-  const trimMaterial = toonMaterial(PALETTE.markerMint);
+  const wallMaterial = toonMaterial(ART.statueStoneDark);
+  const wallDarkMaterial = toonMaterial(0x645766); // ART.statueStoneDark mixed 50/50 toward PALETTE.ink — a shadow step, never past ink itself.
+  const floorMaterial = toonMaterial(PALETTE.ink); // the darkest surface in the room takes the darkest colour the game allows.
+  const rugMaterial = toonMaterial(ART.spookyGreen);
+  const trimMaterial = toonMaterial(ART.spookyGreen);
 
   // --- floor + rug -----------------------------------------------------------
   const floor = solid(new Mesh(new CylinderGeometry(9, 9, 0.3, 28), floorMaterial));
@@ -70,6 +163,18 @@ export function createSpookyRoom(): SpookyRoom {
   const frame = decal(new Mesh(new TorusGeometry(3.05, 0.22, 10, 6, Math.PI * 1.98), wallDarkMaterial));
   frame.position.set(0, 4.1, -5.55);
   root.add(frame);
+
+  // --- spider webs, tucked into the wall/ceiling corners either side of the
+  // face — the "spooky artwork" half of Jim's PR #294 note.
+  const cobwebLeft = createCobwebMesh(false);
+  cobwebLeft.position.set(-3.35, 7.05, -4.55);
+  cobwebLeft.rotation.z = 0.18;
+  root.add(cobwebLeft);
+
+  const cobwebRight = createCobwebMesh(true);
+  cobwebRight.position.set(3.35, 7.05, -4.55);
+  cobwebRight.rotation.z = -0.18;
+  root.add(cobwebRight);
 
   // --- ceiling -----------------------------------------------------------------
   const ceiling = solid(new Mesh(new CylinderGeometry(9, 9, 0.3, 28), wallDarkMaterial));

@@ -117,10 +117,15 @@ class SpookyHouse implements MiniGame {
   init(context: MiniGameContext): void {
     this.context = context;
 
-    // Warm-purple ambient plus one cool fill: the "cosy dim room" look comes
-    // from colour temperature, not from actually dropping the light level —
-    // see the note on this in `room.ts`.
-    this.scene.add(new HemisphereLight(0x9a86e0, 0x2c2140, 1.0));
+    // Cool grey-green ambient plus one warm lantern-coloured key: the "cosy
+    // dim room" look comes from colour temperature, not from actually
+    // dropping the light level — see the note on this in `room.ts`. Reworked
+    // from the original warm-purple pair after Jim's PR #294 note asked for
+    // the room to read as dark green on dark grey, not purple — the wall,
+    // floor and rug materials changed in `room.ts`, and a light tinted for
+    // the old purple palette would have fought the new one instead of
+    // shading it, still bright and just recoloured underneath.
+    this.scene.add(new HemisphereLight(0x7d9488, 0x232b20, 1.0));
     const key = new DirectionalLight(PALETTE.markerLemon, 1.4);
     key.position.set(1.5, 6, 8);
     this.scene.add(key, key.target);
@@ -146,10 +151,10 @@ class SpookyHouse implements MiniGame {
     this.camera.updateMatrixWorld();
 
     this.hud = createSpookyHud(context.overlay);
-    this.hud.shout(
-      context.touch ? 'Tap an eye! Tap the mouth!' : 'Click an eye! Click the mouth!',
-      3.6,
-    );
+    // The face is off-frame until its first jump-scare (see `face.ts`'s
+    // `PRESENCE_DROP`), so the intro line can no longer promise it is sitting
+    // there ready to tap — it hasn't leapt out yet.
+    this.hud.shout('Something is about to jump out — get ready!', 3.0);
 
     this.splash = createScreenSplash(context.overlay);
 
