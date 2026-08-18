@@ -1,5 +1,15 @@
 # Handoff — railway-bridges (issue #116)
 
+**This file replaces an earlier handoff from #220's own author** (the
+groundwork PR), which this commit overwrites rather than appends to — noted
+here so that's not silent. Their one live concern was sequencing: land the
+deck/ramp work only *after* `feat/park-spline-boundary`'s reshape, since
+bridge placement is fully derived from the park boundary and would need
+redoing otherwise. Checked before writing this: `GARDEN_PLAY_BOUNDARY`
+already exists in `src/world/boundary.ts` on current `origin/main`, so that
+reshape landed before this branch started — the sequencing concern is
+already satisfied, not overlooked.
+
 ## State: feature complete, verification in progress
 
 All code is written and committed. `tsc` clean (both main and test
