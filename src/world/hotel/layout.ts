@@ -8,6 +8,7 @@ import {
   HOTEL_OCEAN_Z,
   HOTEL_ORIGIN_X,
   HOTEL_SUITE_Z,
+  PLAYER_RADIUS,
 } from '../../core/constants';
 import { PALETTE } from '../../core/palette';
 import {
@@ -734,8 +735,35 @@ export function clearFloorAround(room: HotelRoom, x: number, z: number): ClearRe
 export type DoorwayZone = ClearRect;
 
 /**
+ * How far past `clearance` a doorway's zone reaches **into the room**, on top
+ * of the thin band hugging the wall itself.
+ *
+ * Jim, 18 Aug 2026, on `/hotel-suite`: *"is this a joke? … dumb furniture
+ * clearly still in the way … non-functional by any degree."* The lounge
+ * sofa's placement comment claimed a clean 0.28 m margin from the doorway —
+ * true, but only of a zone that reached exactly `clearance` (0.62 m) past the
+ * wall plane. A sofa is 2.6 m deep; parking its *front* edge 0.28 m past that
+ * thin band still put its bulk squarely across most of the doorway's own
+ * width, because nothing had ever asked "is there room to take a stride once
+ * you're actually through" — only "is the wall's own opening clear". A
+ * player-sized probe marched straight through the built doorway (the ground
+ * truth this file's header insists on) got stuck 0.42 m short of the far
+ * side, at the sofa's own edge — `scripts/check-hotel.mts`'s
+ * doorway-crossing probe (`marchCrossing`, over every `doorwayCrossings`)
+ * reproduces exactly that march on every doorway in the hotel now.
+ *
+ * One more player-width, so a body that has just cleared the wall can still
+ * take a full stride before meeting anything solid, not just half of one.
+ */
+export const DOORWAY_THROUGH_DEPTH = PLAYER_RADIUS;
+
+/**
  * Every doorway a body can walk through in this room — an outer wall's gap
- * or a partition's own door — each widened by `clearance` on every side.
+ * or a partition's own door — widened by `clearance` **along** the wall (so a
+ * body doesn't graze the jamb) and by `clearance + `{@link
+ * DOORWAY_THROUGH_DEPTH} **through** it, into the room on both sides (so a
+ * body has a real stride of clear floor once it's past the wall, not just
+ * the width of the opening itself — see that constant's header).
  *
  * **Derived straight from {@link HotelRoom.gaps} and {@link
  * HotelRoom.partitions}, never re-typed.** Those two fields are already this
@@ -744,20 +772,21 @@ export type DoorwayZone = ClearRect;
  * with nothing here that could go stale the way a hand-copied doorway list
  * would. `world/hotel/place.ts`'s `isClearOfDoorways` checks every solid
  * prop's footprint against this list as it goes down, so furniture that
- * would leave a doorway too narrow to use is a thrown error at hotel
- * construction rather than a bug a child finds by walking into a sofa
- * (issue #273 — CLAUDE.md's "anything that looks solid must be solid",
- * aimed at the door instead of the wall).
+ * would leave a doorway too narrow — or too shallow — to use is a thrown
+ * error at hotel construction rather than a bug a child finds by walking
+ * into a sofa (issue #273 — CLAUDE.md's "anything that looks solid must be
+ * solid", aimed at the door instead of the wall).
  *
  * This is deliberately a **superset** of {@link hotelDoorBands}: that list
  * exists for the walk-through trigger and the tap-spacing rule, and leaves
  * out the suite's bedroom-to-hall doorways on purpose (banding them there
  * trips the bed zones by 0.03 m — a change for its own PR). A sofa does not
- * care about tap targets; it cares whether a body can get through the gap,
- * so every gap counts here.
+ * care about tap targets; it cares whether a body can get through the gap
+ * *and keep walking*, so every gap counts here.
  */
 export function doorwayClearanceZones(room: HotelRoom, clearance: number): DoorwayZone[] {
   const zones: DoorwayZone[] = [];
+  const reach = clearance + DOORWAY_THROUGH_DEPTH;
 
   for (const side of ['north', 'south', 'east', 'west'] as const) {
     const gap = room.gaps[side];
@@ -768,14 +797,14 @@ export function doorwayClearanceZones(room: HotelRoom, clearance: number): Doorw
       zones.push({
         minX: from - clearance,
         maxX: to + clearance,
-        minZ: wallZ - clearance,
-        maxZ: wallZ + clearance,
+        minZ: wallZ - reach,
+        maxZ: wallZ + reach,
       });
     } else {
       const wallX = side === 'west' ? -room.halfX : room.halfX;
       zones.push({
-        minX: wallX - clearance,
-        maxX: wallX + clearance,
+        minX: wallX - reach,
+        maxX: wallX + reach,
         minZ: from - clearance,
         maxZ: to + clearance,
       });
@@ -789,13 +818,13 @@ export function doorwayClearanceZones(room: HotelRoom, clearance: number): Doorw
         zones.push({
           minX: at - doorHalf - clearance,
           maxX: at + doorHalf + clearance,
-          minZ: run.at - clearance,
-          maxZ: run.at + clearance,
+          minZ: run.at - reach,
+          maxZ: run.at + reach,
         });
       } else {
         zones.push({
-          minX: run.at - clearance,
-          maxX: run.at + clearance,
+          minX: run.at - reach,
+          maxX: run.at + reach,
           minZ: at - doorHalf - clearance,
           maxZ: at + doorHalf + clearance,
         });

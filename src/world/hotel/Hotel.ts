@@ -3388,7 +3388,12 @@ export class Hotel implements GameSystem {
     }
 
     this.placeProps(shell, CORRIDOR, [
-      { prop: () => crystalCluster(0x30b1, 1, sky), x: -9.8, z: 2.6, top: CLUSTER_TOP },
+      // z = 3.0, not the lift gap's own 2.6: `doorwayClearanceZones` reaching
+      // `DOORWAY_THROUGH_DEPTH` further into the room (18 Aug 2026, the
+      // `/hotel-suite` furniture fix) caught this cluster 0.22 m inside the
+      // west lift doorway's now-deeper zone. It is still the same corner
+      // scatter, just a stride further from the door it stands beside.
+      { prop: () => crystalCluster(0x30b1, 1, sky), x: -9.8, z: 3.0, top: CLUSTER_TOP },
       { prop: () => crystalCluster(0x30b2, 1, sky), x: 9.6, z: 2.6, top: CLUSTER_TOP },
       { prop: () => crystalPlanter(0x30b3, CORRIDOR.theme.trim, sky), x: -4, z: 2.9, top: PLANTER_TOP },
       { prop: () => crystalPlanter(0x30b4, CORRIDOR.theme.trim, sky), x: 4, z: 2.9, top: PLANTER_TOP },
@@ -3488,7 +3493,12 @@ export class Hotel implements GameSystem {
     }
 
     this.placeProps(shell, room, [
-      { prop: () => crystalPlanter(0x50f1, PALETTE.woodLight, [PALETTE.leafMid, PALETTE.grass, PALETTE.blossomPink]), x: -9.2, z: 0.4, top: PLANTER_TOP },
+      // x = -9.0, not the lift gap's own -9.2: `doorwayClearanceZones`
+      // reaching `DOORWAY_THROUGH_DEPTH` further into the room (18 Aug 2026,
+      // the `/hotel-suite` furniture fix) caught this planter 0.04 m inside
+      // the west lift doorway's now-deeper zone. Still the same corner spot,
+      // just clear of it.
+      { prop: () => crystalPlanter(0x50f1, PALETTE.woodLight, [PALETTE.leafMid, PALETTE.grass, PALETTE.blossomPink]), x: -9.0, z: 0.4, top: PLANTER_TOP },
       { prop: () => crystalPlanter(0x50f2, PALETTE.woodLight, [PALETTE.leafMid, PALETTE.grass, PALETTE.flowerYellow]), x: 9.2, z: -0.6, top: PLANTER_TOP },
       { prop: () => flowerTuft(0x50f3, 1.6), x: -2.4, z: 5.4, radius: 0.4, top: 1.2 },
     ]);
@@ -4027,12 +4037,33 @@ export class Hotel implements GameSystem {
     // north wall of this room is that partition, run 2 of `SUITE.partitions`,
     // whose one door sits at x = 4.4) — `HotelProps.assertDoorwaysClear`
     // (issue #273) caught the sofa's north edge at z = 2.1 sitting inside the
-    // door's `PLAYER_RADIUS`-widened clearance zone, which tops out at
-    // z ≈ 2.32. 3.9 clears it with a 0.28 m margin and is still squarely on
-    // the rug the sofa sits on.
+    // door's `PLAYER_RADIUS`-widened clearance zone.
+    //
+    // **z = 3.9 was the second miss, and the one Jim actually found live**
+    // (18 Aug 2026, `/hotel-suite`: *"dumb furniture clearly still in the
+    // way … non-functional by any degree"*). It cleared the doorway zone as
+    // it stood then by 0.28 m — but that zone only ever reached
+    // `PLAYER_RADIUS` past the wall, a band sized to keep the *opening*
+    // clear, not to promise any floor beyond it. A 2.6 m-deep sofa parked
+    // 0.28 m past that band still put its own front edge across most of the
+    // doorway's width, so a body who had just stepped through walked
+    // straight into it one stride later — confirmed on the real collision
+    // world: `scripts/check-hotel.mts`'s doorway-crossing probe stopped
+    // 0.42 m short of clearing this exact doorway. `doorwayClearanceZones`
+    // now reaches `DOORWAY_THROUGH_DEPTH` further into the room on top of
+    // that band (`layout.ts`).
+    //
+    // **z = 4.4 was the third miss, and it was never actually clear.** This
+    // sofa also carries a `spin` (below), and `place.ts`'s own footprint
+    // check used to measure the *unrotated* 2.2×2.6 m box — `place.ts`'s
+    // `effectiveHalfExtents` now measures the true, rotated box a −0.9 rad
+    // turn sweeps (3.40×3.34 m), which reaches 0.21 m further toward the
+    // doorway than the axis-aligned one ever admitted. 4.8 clears the
+    // strengthened zone against that honest, rotated footprint by 0.19 m and
+    // is still on the rug the sofa sits on.
     this.props.place(shell, SUITE, sofa(3.2, PALETTE.markerSky, PALETTE.blossomWhite), {
       x: 5.6,
-      z: 3.9,
+      z: 4.8,
       spin: -0.9,
       halfX: 1.1,
       halfZ: 1.3,
@@ -4061,15 +4092,27 @@ export class Hotel implements GameSystem {
     // bare behind it. Moving it back onto the wall is the fix, not a rug or
     // a planter papering over the gap.
     //
-    // **z stands off `FLOOR_Z` by 0.4** — that same bathroom wall carries its
-    // own doorway at z = 2.9 (`SUITE.partitions`'s z-run at x = −8.0), and
+    // **z stands off `FLOOR_Z` by 0.7** — that same bathroom wall carries its
+    // own doorway at z = 2.9 (`SUITE.partitions`'s z-run, now at x = −8.0
+    // after issue #274's widening — the door's own z-position and
+    // through-depth are unaffected by that x-shift, only its x is), and
     // `HotelProps.assertDoorwaysClear` (issue #273) measured the set's
-    // 0.7 m radius at `FLOOR_Z` reaching 0.093 m into that door's
-    // `PLAYER_RADIUS`-widened clearance zone. `FLOOR_Z + 0.4` clears it by
-    // 0.12 m and keeps the set backed against the same stretch of wall.
+    // 0.7 m radius at `FLOOR_Z` reaching 0.093 m into that door's old,
+    // wall-hugging clearance zone. Widening that zone's *depth*
+    // (`DOORWAY_THROUGH_DEPTH`, the 18 Aug 2026 fix alongside the sofa's
+    // above) pushed the set's own margin to −0.12 m — its footprint was
+    // already fully inside the zone's through-wall span, only barely outside
+    // the along-wall one, so a deeper zone reached it from the corner.
+    // `FLOOR_Z + 0.7` clears the strengthened zone by 0.18 m and keeps the
+    // set backed against the same stretch of wall, just further from the
+    // doorway along it. **x stays at −6.8** (not the doorway-clearance
+    // commit's −3.0): that commit was cut before issue #274 moved the
+    // bathroom wall itself 3.8 m west to −8.0, so its x is stale here — the
+    // set still needs to back onto the wall's *current* face, which #274's
+    // own fix already re-derived.
     this.props.place(shell, SUITE, tv.root, {
       x: -6.8,
-      z: FLOOR_Z + 0.4,
+      z: FLOOR_Z + 0.7,
       spin: Math.PI / 2 - 0.7,
       radius: 0.7,
       top: tv.height,
