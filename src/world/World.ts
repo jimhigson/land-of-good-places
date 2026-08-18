@@ -449,6 +449,7 @@ export class World implements GameSystem {
       ...this.keychainShop.interactZones(),
       ...this.train.interactZones(),
       ...this.flowers.interactZones(),
+      ...this.entrance.interactZones(),
     ];
   }
 

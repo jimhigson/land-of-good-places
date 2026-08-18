@@ -1,6 +1,7 @@
 import {
   BoxGeometry,
   type BufferAttribute,
+  ConeGeometry,
   CylinderGeometry,
   Group,
   Mesh,
@@ -10,7 +11,7 @@ import {
 } from 'three';
 import { PALETTE } from '../../core/palette';
 import { pinkStoneTexture, woodTexture } from '../../core/textures';
-import { toonMaterial } from '../../art/style/materials';
+import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
 import { terrainHeight } from '../terrain';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld } from '../Collision';
@@ -20,6 +21,9 @@ import { ROAD_HALF_WIDTH, applyRoadUvs, roadMaterial } from './road';
 import { PARK_BOUNDARY, edgeRadiusAt } from '../boundary';
 import { ArrivalSequence, arrivalIsDue } from './ArrivalSequence';
 import type { NpcCharacter } from '../../entities/npc/NpcCharacter';
+import { highlightObject } from '../highlight';
+import { pressAction, type InteractZone } from '../interact';
+import { playOpenChime } from '../../ui/chime';
 import {
   ENTRANCE_ANGLE,
   ENTRANCE_BUS_ARRIVE_X,
@@ -31,6 +35,27 @@ import {
   ENTRANCE_GATE_Z,
   ENTRANCE_STOP_Z,
 } from './layout';
+
+/** Candy colours for the welcome sign's bulbs — the fairground palette used everywhere else in the park. */
+const WELCOME_SIGN_BULB_COLOURS = [
+  PALETTE.fairyWarm,
+  PALETTE.fairyPink,
+  PALETTE.fairyMint,
+  PALETTE.fairyBlue,
+] as const;
+
+/**
+ * Where the welcome sign stands: just inside the gate, off to the east of the
+ * gate-approach path (`paths.ts`'s `gate-approach` is 3.2 m wide, centred on
+ * x = 0, so anything past |x| ≈ 1.6 is clear of it) and well inside
+ * `ENTRANCE_CLEAR_RADIUS`'s scenery-free pocket around the gate, so no bush or
+ * tree scatter can land on it. Mirrors the bus shelter's offset on the west
+ * side, so the gate reads as symmetric even though only one side has a prop.
+ */
+const WELCOME_SIGN_X = 7;
+const WELCOME_SIGN_Z = 56;
+/** Near the +45° every sign and anchor in the park uses — the one angle the fixed isometric camera reads square-on (ARCHITECTURE.md). */
+const WELCOME_SIGN_YAW = Math.PI * 0.25;
 
 export interface EntranceOptions {
   /**
@@ -52,13 +77,23 @@ export interface EntranceOptions {
  * in the wall itself, and `paths.ts`'s `spur-entrance` route for the path that
  * leads up to it.
  *
- * **The park's name is no longer painted on a board under the arch.** The
- * family had every sign in the park taken out on 28 July 2026 — a canvas face
- * on a rectangle seen from the camera's one fixed angle is hard to read, which
- * is exactly why it needed a full-screen reader to go with it. The name is not
- * lost: `ui/Hud.ts`'s park pill has said it, in ordinary DOM text at the
- * ordinary minimum size, since long before this. The arch keeps its posts, its
- * caps, its paw prints and its crossbar, which is what makes it a gate.
+ * **The park's name is no longer painted on a board under the arch itself.**
+ * The family had every sign in the park taken out on 28 July 2026 — a canvas
+ * face on a rectangle seen from the camera's one fixed angle is hard to read,
+ * which is exactly why it needed a full-screen reader to go with it. The name
+ * is not lost: `ui/Hud.ts`'s park pill has said it, in ordinary DOM text at
+ * the ordinary minimum size, since long before this. The arch keeps its
+ * posts, its caps, its paw prints and its crossbar, which is what makes it a
+ * gate.
+ *
+ * **There is a welcome sign, just inside it, and it does carry words** — on
+ * its interact chip, the same way every other sign in the park says its piece
+ * now (`world/interact.ts`). It is the board that used to stand, blank and
+ * unreachable, at the dodgems' own doorway on a dead-end path spur that led
+ * nowhere a child could read or press (issue #298, Jim playing 18 August
+ * 2026). Moved here rather than rebuilt: same posts, same candy-coloured
+ * bulbs, same little pennant, just given somewhere to stand and something to
+ * say. See {@link buildWelcomeSign}.
  */
 export class Entrance implements GameSystem {
   readonly name = 'entrance';
@@ -73,6 +108,11 @@ export class Entrance implements GameSystem {
    * bus inside reach of the invariant suite CI blocks the merge on.
    */
   readonly arrival: ArrivalSequence | null;
+
+  /** The welcome sign's bulbs, twinkling on `elapsed` like every other fairy light in the park. */
+  private readonly welcomeSignBulbs: Mesh[] = [];
+  /** The welcome sign's own tap target — see {@link interactZones}. */
+  private readonly welcomeSignZone: InteractZone;
 
   constructor(collision: CollisionWorld, options: EntranceOptions = {}) {
     this.group.name = 'entrance';
@@ -129,6 +169,9 @@ export class Entrance implements GameSystem {
     crossbar.rotation.y = Math.PI / 2;
     crossbar.castShadow = true;
     this.group.add(crossbar);
+
+    // --- the welcome sign ----------------------------------------------------
+    this.welcomeSignZone = this.buildWelcomeSign(collision);
 
     // --- the bus stop shelter ----------------------------------------------
     // **On the pavement, outside the gate** — because that is where the bus
@@ -230,14 +273,108 @@ export class Entrance implements GameSystem {
   }
 
   /**
-   * Drives the arrival, while there is one.
+   * Drives the arrival, and twinkles the welcome sign's bulbs.
    *
    * The stonework is stonework and does not move; `Entrance` was already a
    * {@link GameSystem} with an empty `update` against the day something here
-   * wanted a frame, and the cat bus is that day.
+   * wanted a frame, and the cat bus was the first thing to need one — the
+   * sign's bulbs are the second, on the same `elapsed`-driven sine every other
+   * string of fairy lights in the park uses (`minigames/dodgems/plot.ts`,
+   * `world/TreeLights.ts`).
    */
   update(context: FrameContext): void {
     this.arrival?.update(context);
+    for (let i = 0; i < this.welcomeSignBulbs.length; i += 1) {
+      const bulb = this.welcomeSignBulbs[i];
+      if (!bulb) continue;
+      bulb.scale.setScalar(0.82 + 0.3 * Math.sin(context.elapsed * 3 + i * 0.7));
+    }
+  }
+
+  /** The welcome sign's own tap target — the park's one piece of readable text. */
+  interactZones(): InteractZone[] {
+    return [this.welcomeSignZone];
+  }
+
+  /**
+   * Builds the welcome sign and its interact zone.
+   *
+   * The prop itself — two posts, a board, a lintel of candy-coloured bulbs and
+   * a little pennant — is the one that used to stand at the dodgems' own
+   * doorway, unread and unreachable (issue #298). It carries no painted text
+   * (the TEXT RULE took every canvas face off a board on 28 July 2026): the
+   * words live on the interact chip instead, exactly where every other sign in
+   * the park keeps its words now.
+   *
+   * **The action has to be real**, not a bare label with nothing behind it —
+   * `Selection` drops any zone whose `actions()` comes back empty, so a sign
+   * with no press was a sign nobody could ever select (`world/hotel/Hotel.ts`'s
+   * "your door" zone hit this exact bug on 7 August 2026). A soft chime is a
+   * small thing to press for, but it is a real one — the same one the shop
+   * counter and the backpack already use for "something opened", not a new
+   * sound invented for a one-off prop.
+   */
+  private buildWelcomeSign(collision: CollisionWorld): InteractZone {
+    const ground = terrainHeight(WELCOME_SIGN_X, WELCOME_SIGN_Z);
+    const signGroup = new Group();
+    signGroup.name = 'welcome-sign';
+    signGroup.position.set(WELCOME_SIGN_X, ground, WELCOME_SIGN_Z);
+    signGroup.rotation.y = WELCOME_SIGN_YAW;
+    this.group.add(signGroup);
+
+    const bulbMaterials = WELCOME_SIGN_BULB_COLOURS.map((colour) =>
+      toonMaterial(colour, { emissive: colour, emissiveIntensity: 0.85 }),
+    );
+    const bulbGeometry = new SphereGeometry(0.16, 10, 8);
+
+    // 1.9 m out: the nav lattice fattens each post by the walker radius, and
+    // any tighter than this the gap between the two posts inflates shut (the
+    // dodgems arch this was moved from found that the hard way).
+    const postGeometry = new CylinderGeometry(0.14, 0.16, 2.6, 8);
+    for (const offset of [-1.9, 1.9]) {
+      const post = solid(new Mesh(postGeometry, toonMaterial(PALETTE.wood)));
+      post.position.set(offset, 1.3, 0);
+      signGroup.add(post);
+      collision.addCircle(
+        WELCOME_SIGN_X + Math.cos(WELCOME_SIGN_YAW) * offset,
+        WELCOME_SIGN_Z - Math.sin(WELCOME_SIGN_YAW) * offset,
+        0.35,
+      );
+    }
+
+    const board = solid(new Mesh(new BoxGeometry(4.4, 1.9, 0.16), toonMaterial(PALETTE.woodLight)));
+    board.position.y = 2.6;
+    signGroup.add(board);
+    addOutline(board, 0.02);
+
+    // Bulbs along the lintel, like a real fairground arch.
+    for (let i = 0; i < 10; i += 1) {
+      const t = i / 9;
+      const bulb = decal(new Mesh(bulbGeometry, bulbMaterials[i % 4] ?? bulbMaterials[0]));
+      bulb.position.set(-1.5 + t * 3, 3.62, 0.06);
+      signGroup.add(bulb);
+      this.welcomeSignBulbs.push(bulb);
+    }
+
+    const topper = decal(new Mesh(new ConeGeometry(0.3, 0.7, 5), toonMaterial(PALETTE.markerLemon)));
+    topper.position.set(0, 3.95, 0);
+    signGroup.add(topper);
+
+    return {
+      id: 'welcome-sign',
+      label: 'welcome sign',
+      x: WELCOME_SIGN_X,
+      y: ground + 2.6,
+      z: WELCOME_SIGN_Z,
+      pickRadius: 3.2,
+      // Stood between the sign and the gate-approach path, so walking up to
+      // read it never means stepping behind the board.
+      standX: WELCOME_SIGN_X - 2.4,
+      standZ: WELCOME_SIGN_Z,
+      verb: 'Read',
+      highlight: highlightObject(signGroup),
+      actions: () => pressAction('Welcome to the Land of Good Places.', () => playOpenChime(), '👋'),
+    };
   }
 }
 
