@@ -16,6 +16,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { PALETTE } from '../../core/palette';
 import { Rng } from '../../core/mathUtils';
 import { toonMaterial } from '../../art/style/materials';
+import { SWEET_SHAPE } from './candyModel';
 
 /**
  * "Tap the mouth TWICE quickly → CANDY pours out" — a shower of real,
@@ -32,19 +33,24 @@ import { toonMaterial } from '../../art/style/materials';
  *
  * The catalogue's actual `candy.spookyHouse` collectible
  * (`candyModel.ts`'s `createSpookyCandy`) is a wrapped sweet built from a
- * squashed-sphere body plus two cone "twist" ends — that shape is *reused*
- * here rather than reinvented, because that is what "the candy" already
- * looks like everywhere else in the game (backpack peek, Cute-o-dex). It
- * cannot be used directly, though: that factory returns a `Group` of several
- * `Mesh`es built for one held or shelved item, and a shower needs a couple of
- * dozen of these bouncing at once — a `Group` per piece would be a
+ * squashed-sphere body plus two cone "twist" ends. That factory returns a
+ * `Group` of several outlined `Mesh`es built for one held or shelved item,
+ * which a shower cannot use directly — it needs a couple of dozen of these
+ * bouncing at once, and a `Group` per piece would be a
  * `Group`-and-several-`Mesh`es-per-piece, i.e. real scene-graph and draw-call
  * cost for something that only ever needs a position, a colour and a spin
- * (`Flowers.ts`'s "no per-flower objects" reasoning applies here too). So the
- * same body-plus-twists shape is rebuilt as one **merged** `BufferGeometry`
- * (`buildSweetGeometry`, same technique as `Flowers.ts`'s `petalRingGeometry`)
- * and drawn as an `InstancedMesh` — one draw call for every sweet on screen,
- * whatever its wrapper colour or size. A second merged geometry
+ * (`Flowers.ts`'s "no per-flower objects" reasoning applies here too). So
+ * `buildSweetGeometry` below rebuilds the same body-plus-twists shape as one
+ * **merged** `BufferGeometry` (same technique as `Flowers.ts`'s
+ * `petalRingGeometry`), drawn as an `InstancedMesh` — one draw call for every
+ * sweet on screen, whatever its wrapper colour or size. It is not the same
+ * *code* as `createSpookyCandy` (a `Group` of toon-shaded outlined meshes and
+ * a merged vertex-coloured buffer are built by genuinely different means),
+ * but it must be the same *shape* — so the actual size numbers (sphere
+ * radius, squash, cone dimensions, twist offset) live once, exported as
+ * `SWEET_SHAPE` from `candyModel.ts`, and both files build their own geometry
+ * from that one set of constants. Changing the sweet's proportions means
+ * changing `SWEET_SHAPE` and both shapes move together. A second merged geometry
  * (`buildCaneGeometry`) is a bent, striped candy cane, in its own
  * `InstancedMesh` — a torus "hook" merged onto a cylinder "shaft" cannot share
  * one instance buffer with the sweet's shape (different geometry, different
@@ -173,10 +179,12 @@ export interface CandyShower {
 }
 
 /**
- * The catalogue's wrapped-sweet shape (`candyModel.ts`'s `createSpookyCandy`),
- * rebuilt as one merged, instance-ready `BufferGeometry`: a squashed-sphere
- * body plus two cone "twist" ends, proportioned exactly the same way. The
- * body is painted plain white so the per-instance wrapper colour
+ * The catalogue's wrapped-sweet shape, rebuilt as one merged, instance-ready
+ * `BufferGeometry`: a squashed-sphere body plus two cone "twist" ends, sized
+ * from `candyModel.ts`'s exported {@link SWEET_SHAPE} constants so the two
+ * shapes cannot drift apart the way independently-chosen numbers could — see
+ * the file doc above for why this can't just import `createSpookyCandy`
+ * itself. The body is painted plain white so the per-instance wrapper colour
  * (`InstancedMesh.setColorAt`) shows through true; the twists are painted a
  * touch duller so they read as a slightly different material (foil) even
  * though both are tinted by the same per-instance colour.
@@ -187,17 +195,17 @@ export interface CandyShower {
  * through it.
  */
 function buildSweetGeometry(): BufferGeometry {
-  const body = new SphereGeometry(0.075, 12, 8);
-  body.scale(1, 0.62, 0.62);
+  const body = new SphereGeometry(SWEET_SHAPE.bodyRadius, 12, 8);
+  body.scale(1, SWEET_SHAPE.bodySquashYZ, SWEET_SHAPE.bodySquashYZ);
   body.rotateZ(Math.PI / 2);
   paintSolidVertexColour(body, 1, 1, 1);
 
   const parts: BufferGeometry[] = [body];
   for (const side of [-1, 1] as const) {
-    const twist = new ConeGeometry(0.052, 0.075, 8);
-    twist.scale(1, 1, 0.55);
-    twist.rotateZ(side * (Math.PI / 2 - 0.5));
-    twist.translate(side * 0.095, 0, 0);
+    const twist = new ConeGeometry(SWEET_SHAPE.twistRadius, SWEET_SHAPE.twistConeHeight, 8);
+    twist.scale(1, 1, SWEET_SHAPE.twistSquashZ);
+    twist.rotateZ(side * SWEET_SHAPE.twistRotationZ);
+    twist.translate(side * SWEET_SHAPE.twistOffsetX, 0, 0);
     paintSolidVertexColour(twist, 0.82, 0.79, 0.76);
     parts.push(twist);
   }
