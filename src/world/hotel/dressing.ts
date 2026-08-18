@@ -1,6 +1,7 @@
 import {
   BoxGeometry,
   CanvasTexture,
+  CircleGeometry,
   Color,
   ConeGeometry,
   CylinderGeometry,
@@ -906,6 +907,72 @@ export function napBlanket(colour: number): Group {
   hem.position.set(0, BED_MATTRESS_TOP + 0.02 + 0.21, -0.3);
   group.add(hem);
   return group;
+}
+
+/**
+ * A flat, self-lit moon disc — the suite's answer to Jim's *"the background
+ * [should] change to stars and a moon"* (18 Aug 2026, PR #279's follow-up).
+ *
+ * A plain circle rather than a crescent: ART_DIRECTION §1's "chunky, simple,
+ * a shape a six-year-old could draw" applies here exactly as it does to every
+ * other prop in this room, and a full disc reads unambiguously as "the moon"
+ * at the size and distance this hangs at, where a thin crescent would just
+ * read as a smudge. Front on **+Z**, like every other flat decal in this
+ * file, so it faces the camera unrotated.
+ *
+ * Built the same way `flatStar` is: emissive rather than lit, so it stays
+ * bright through `HotelLighting.setNapDim`'s own dimming — a moon that went
+ * dark along with the room it is meant to be lighting would be backwards.
+ */
+export function napMoon(radius: number, colour: number = PALETTE.moon): Mesh {
+  return decal(
+    new Mesh(
+      new CircleGeometry(radius, 28),
+      toonMaterial(colour, { emissive: colour, emissiveIntensity: 0.75 }),
+    ),
+  );
+}
+
+/**
+ * A flat "Z" — the little sleep glyph that rises and fades off a napping
+ * sleeper (issue #279's follow-up, Jim: *"animated z symbols float off the
+ * player and all their pets"*).
+ *
+ * Traced as one ten-point outline, the same construction `flatStar` and
+ * `floorChevron` use for exactly the same reason: a real shape reads as a
+ * "Z" at a glance, where three thin boxes stacked and rotated would read as
+ * three thin boxes until you squinted. Front on **+Z**, unrotated, per this
+ * file's own rule. `transparent: true` because `Hotel.updateNapGlyphs`
+ * fades each instance's own `material.opacity` as it rises — every glyph
+ * gets its **own** material rather than a shared one for exactly that reason,
+ * so one glyph mid-fade never dims its neighbours.
+ */
+export function napZGlyph(size: number, colour: number): Mesh {
+  const half = size / 2;
+  const stroke = size * 0.34;
+  const shape = new Shape();
+  shape.moveTo(-half, half);
+  shape.lineTo(half, half);
+  shape.lineTo(half, half - stroke);
+  shape.lineTo(-half + stroke, -half + stroke);
+  shape.lineTo(half, -half + stroke);
+  shape.lineTo(half, -half);
+  shape.lineTo(-half, -half);
+  shape.lineTo(-half, -half + stroke);
+  shape.lineTo(half - stroke, half - stroke);
+  shape.lineTo(-half, half - stroke);
+  shape.closePath();
+  return decal(
+    new Mesh(
+      new ShapeGeometry(shape),
+      toonMaterial(colour, {
+        emissive: colour,
+        emissiveIntensity: 0.6,
+        transparent: true,
+        depthWrite: false,
+      }),
+    ),
+  );
 }
 
 /** The flat top of a buffet counter, metres — the reception desk's own height. */
