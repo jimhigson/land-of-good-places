@@ -857,6 +857,12 @@ export class Hotel implements GameSystem {
     this.dressOcean();
     this.dressCorridor();
     this.dressSuite();
+    // Every solid prop just placed by the `dress*` calls above has already
+    // been checked against its room's doorways as it went down
+    // (`HotelProps.footprint`); this is where any violation collected along
+    // the way actually throws — once, with every offender named, rather than
+    // shipping a sofa nobody can walk past.
+    this.props.assertDoorwaysClear();
     // After every table exists, because it picks its chairs out of the list
     // those tables filled in — see `seatGuests`.
     this.seatGuests();
@@ -1065,6 +1071,23 @@ export class Hotel implements GameSystem {
     const player = this.player;
     if (!player || player.riding || this.changingSpace || this.inside) return false;
     this.changeSpace(() => this.enterBreakfastRoom());
+    return true;
+  }
+
+  /**
+   * The `/hotel-suite` deep link: straight into the guest suite — where
+   * #273/#278's doorway-clearance fix (the lounge sofa and TV) and #279's
+   * bigger bedrooms and pet beds actually live — from wherever she is.
+   * Bypasses reception's key check on purpose: the normal route in is
+   * `CORRIDOR`'s `suite-door` band refusing entry without
+   * `saveFlags.hasHotelKey()` (see the walk-through handling above), but a
+   * deep link exists precisely so QA does not have to check in first to see
+   * the room. Same shape as {@link requestEnterLobby}.
+   */
+  requestEnterSuite(): boolean {
+    const player = this.player;
+    if (!player || player.riding || this.changingSpace || this.inside) return false;
+    this.changeSpace(() => this.enterSuite());
     return true;
   }
 
@@ -1656,6 +1679,25 @@ export class Hotel implements GameSystem {
     } else {
       player.teleportTo(BREAKFAST.originX, 0, BREAKFAST.originZ, 0);
     }
+  }
+
+  /**
+   * Lands just inside the suite's own corridor door, facing east down the
+   * hall — the exact spot `stepThroughDoor(SUITE, ...)` puts a guest who
+   * walked in from `CORRIDOR` (line ~1589), reused rather than re-picked so
+   * it is already known not to land inside a wall or a prop. From there the
+   * three bedroom doors (and `SUITE_BED_SPOTS`' beds behind them) line the
+   * north wall ahead-left, and the lounge door — home to the sofa and TV
+   * #278 moved clear of it — sits ahead-right: a look down the hall shows
+   * the whole doorway layout in one frame rather than one room jammed in a
+   * corner.
+   */
+  private enterSuite(): void {
+    const player = this.player;
+    if (!player) return;
+    this.inside = true;
+    this.hotelRoot.visible = true;
+    this.stepThroughDoor(SUITE, -SUITE.halfX + 1.6, 0, Math.PI / 2);
   }
 
   private leaveToPark(): void {
@@ -3350,7 +3392,12 @@ export class Hotel implements GameSystem {
     }
 
     this.placeProps(shell, CORRIDOR, [
-      { prop: () => crystalCluster(0x30b1, 1, sky), x: -9.8, z: 2.6, top: CLUSTER_TOP },
+      // z = 3.0, not the lift gap's own 2.6: `doorwayClearanceZones` reaching
+      // `DOORWAY_THROUGH_DEPTH` further into the room (18 Aug 2026, the
+      // `/hotel-suite` furniture fix) caught this cluster 0.22 m inside the
+      // west lift doorway's now-deeper zone. It is still the same corner
+      // scatter, just a stride further from the door it stands beside.
+      { prop: () => crystalCluster(0x30b1, 1, sky), x: -9.8, z: 3.0, top: CLUSTER_TOP },
       { prop: () => crystalCluster(0x30b2, 1, sky), x: 9.6, z: 2.6, top: CLUSTER_TOP },
       { prop: () => crystalPlanter(0x30b3, CORRIDOR.theme.trim, sky), x: -4, z: 2.9, top: PLANTER_TOP },
       { prop: () => crystalPlanter(0x30b4, CORRIDOR.theme.trim, sky), x: 4, z: 2.9, top: PLANTER_TOP },
@@ -3450,7 +3497,12 @@ export class Hotel implements GameSystem {
     }
 
     this.placeProps(shell, room, [
-      { prop: () => crystalPlanter(0x50f1, PALETTE.woodLight, [PALETTE.leafMid, PALETTE.grass, PALETTE.blossomPink]), x: -9.2, z: 0.4, top: PLANTER_TOP },
+      // x = -9.0, not the lift gap's own -9.2: `doorwayClearanceZones`
+      // reaching `DOORWAY_THROUGH_DEPTH` further into the room (18 Aug 2026,
+      // the `/hotel-suite` furniture fix) caught this planter 0.04 m inside
+      // the west lift doorway's now-deeper zone. Still the same corner spot,
+      // just clear of it.
+      { prop: () => crystalPlanter(0x50f1, PALETTE.woodLight, [PALETTE.leafMid, PALETTE.grass, PALETTE.blossomPink]), x: -9.0, z: 0.4, top: PLANTER_TOP },
       { prop: () => crystalPlanter(0x50f2, PALETTE.woodLight, [PALETTE.leafMid, PALETTE.grass, PALETTE.flowerYellow]), x: 9.2, z: -0.6, top: PLANTER_TOP },
       { prop: () => flowerTuft(0x50f3, 1.6), x: -2.4, z: 5.4, radius: 0.4, top: 1.2 },
     ]);
@@ -3902,9 +3954,38 @@ export class Hotel implements GameSystem {
     // (QA, 8 Aug 2026). Same rule as the lobby's crystal columns: the
     // camera looks along (−X, −Z), so nothing worth seeing lives close
     // behind a +X or +Z wall.
+    //
+    // **z = 3.4 used to reach into the hall partition's own doorway** (the
+    // north wall of this room is that partition, run 2 of `SUITE.partitions`,
+    // whose one door sits at x = 4.4) — `HotelProps.assertDoorwaysClear`
+    // (issue #273) caught the sofa's north edge at z = 2.1 sitting inside the
+    // door's `PLAYER_RADIUS`-widened clearance zone.
+    //
+    // **z = 3.9 was the second miss, and the one Jim actually found live**
+    // (18 Aug 2026, `/hotel-suite`: *"dumb furniture clearly still in the
+    // way … non-functional by any degree"*). It cleared the doorway zone as
+    // it stood then by 0.28 m — but that zone only ever reached
+    // `PLAYER_RADIUS` past the wall, a band sized to keep the *opening*
+    // clear, not to promise any floor beyond it. A 2.6 m-deep sofa parked
+    // 0.28 m past that band still put its own front edge across most of the
+    // doorway's width, so a body who had just stepped through walked
+    // straight into it one stride later — confirmed on the real collision
+    // world: `scripts/check-hotel.mts`'s doorway-crossing probe stopped
+    // 0.42 m short of clearing this exact doorway. `doorwayClearanceZones`
+    // now reaches `DOORWAY_THROUGH_DEPTH` further into the room on top of
+    // that band (`layout.ts`).
+    //
+    // **z = 4.4 was the third miss, and it was never actually clear.** This
+    // sofa also carries a `spin` (below), and `place.ts`'s own footprint
+    // check used to measure the *unrotated* 2.2×2.6 m box — `place.ts`'s
+    // `effectiveHalfExtents` now measures the true, rotated box a −0.9 rad
+    // turn sweeps (3.40×3.34 m), which reaches 0.21 m further toward the
+    // doorway than the axis-aligned one ever admitted. 4.8 clears the
+    // strengthened zone against that honest, rotated footprint by 0.19 m and
+    // is still on the rug the sofa sits on.
     this.props.place(shell, SUITE, sofa(3.2, PALETTE.markerSky, PALETTE.blossomWhite), {
       x: 5.6,
-      z: 3.4,
+      z: 4.8,
       spin: -0.9,
       halfX: 1.1,
       halfZ: 1.3,
@@ -3924,9 +4005,22 @@ export class Hotel implements GameSystem {
     // A hand east of where it stood: the bathroom wall now runs at x = −4.2
     // (face −4.0), and the set's 0.7 m footprint at −3.4 backed 10 cm into
     // it. At −3.0 it backs *against* the wall, which is where a telly goes.
+    //
+    // **z stands off `FLOOR_Z` by 0.7** — that same bathroom wall carries its
+    // own doorway at z = 2.9 (`SUITE.partitions`'s z-run at x = −4.2), and
+    // `HotelProps.assertDoorwaysClear` (issue #273) measured the set's
+    // 0.7 m radius at `FLOOR_Z` reaching 0.093 m into that door's old,
+    // wall-hugging clearance zone. Widening that zone's *depth*
+    // (`DOORWAY_THROUGH_DEPTH`, the 18 Aug 2026 fix alongside the sofa's
+    // above) pushed the set's own margin to −0.12 m — its footprint was
+    // already fully inside the zone's through-wall span, only barely outside
+    // the along-wall one, so a deeper zone reached it from the corner.
+    // `FLOOR_Z + 0.7` clears the strengthened zone by 0.18 m and keeps the
+    // set backed against the same stretch of wall, just further from the
+    // doorway along it.
     this.props.place(shell, SUITE, tv.root, {
       x: -3.0,
-      z: FLOOR_Z,
+      z: FLOOR_Z + 0.7,
       spin: Math.PI / 2 - 0.7,
       radius: 0.7,
       top: tv.height,

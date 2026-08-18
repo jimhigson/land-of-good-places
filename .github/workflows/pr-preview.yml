@@ -22,6 +22,12 @@ concurrency:
 
 permissions:
   contents: read
+  # PR conversation comments are the Issues API, not the Pull Requests API —
+  # `pull-requests: write` alone gets `Resource not accessible by
+  # integration` from `listComments`/`createComment`/`updateComment`.
+  # Confirmed against a real failed run: the token only carried
+  # `issues=read; pull_requests=read` even with pull-requests declared write.
+  issues: write
   pull-requests: write
 
 jobs:

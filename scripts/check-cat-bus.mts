@@ -701,17 +701,31 @@ check(
     `walking at ${NPC_WALK_SPEED} m/s needs ${REQUIRED_GAP.toFixed(2)} s to clear the doorway, so they overlap in it`,
 );
 
-// --- 4. they never walk through each other --------------------------------
+// --- 4. how close free children get, for information only -----------------
 //
-// Threshold from the model, not from a literal: two children are inside one
-// another whenever their centres are closer than a child is wide. Some slack,
-// because a chibi head is a sphere and touching is not overlapping.
-const REQUIRED_CLEARANCE = CHILD_FOOTPRINT * 0.55;
-check(
-  closestPairEver >= REQUIRED_CLEARANCE,
-  `two disembarking children came within ${closestPairEver.toFixed(2)} m of each other at ` +
-    `${closestPairWhen.toFixed(1)} s — children ${closestPairWho} — a child is ${CHILD_FOOTPRINT} m across, so their models overlap`,
-);
+// This used to gate on CHILD_FOOTPRINT * 0.55 (0.99 m) of clearance between
+// any two children, at any point in the arrival, and re-failed by a few
+// centimetres every time nearby path geometry shifted — most recently when
+// the ring road was grid-aligned. That number was never a collision bound;
+// it was an invented personal-space preference. Once a disembarking child
+// crosses RELEASE_Z they are an ordinary free child under ordinary crowd
+// rules, no different from the other twenty-odd in the park — NpcSystem.ts's
+// own SEPARATION constant (CHILD_FOOTPRINT, 1.8 m) is only where two free
+// children *start* a soft, rate-limited push-apart, not a floor they are
+// held to, and children brushing past each other is normal, wanted
+// behaviour (see NpcSystem.ts's comment on SEPARATION). Even the tighter,
+// physically-real NPC_RADIUS * 2 (1.0 m, the actual wall-collision radius)
+// isn't a meaningful "looks fine" line — a chibi rig is almost entirely
+// head, so two children *at* that distance already read as skulls
+// overlapping to a viewer, which is exactly why SEPARATION was raised past
+// it in the first place. There is no single number here that is "the
+// correct" personal-space floor, so this check stops picking one: per Jim
+// (18 August 2026), "just use normal pathfinding and collision
+// detection... who cares how close they are so long as they collide
+// normally." The seat-overlap check above (`worst mutual overlap`) already
+// catches genuine interpenetration — the original bug this check was built
+// for, twelve children 0.52 m inside one another, was a *seated* bug, and
+// that section still gates hard on it. This one is a note, not a gate.
 
 // --- 5. they walk at the park's walking speed ------------------------------
 const speeds = kids.map((_, index) =>
@@ -1060,7 +1074,7 @@ notes.push(
   `children left over ${(departures[departures.length - 1]! - departures[0]!).toFixed(1)} s, ` +
     `tightest gap ${tightestGap.toFixed(2)} s (needs ${REQUIRED_GAP.toFixed(2)})`,
 );
-notes.push(`closest two children ever got: ${closestPairEver.toFixed(2)} m (needs ${REQUIRED_CLEARANCE.toFixed(2)})`);
+notes.push(`closest two children ever got: ${closestPairEver.toFixed(2)} m (informational only — see check 4's comment)`);
 notes.push(`walking speed ${slowest.toFixed(2)}-${fastest.toFixed(2)} m/s against the park's ${NPC_WALK_SPEED}`);
 notes.push(`controls at ${ARRIVAL_CONTROL_AT.toFixed(1)} s, whole arrival ${ARRIVAL_DURATION.toFixed(1)} s`);
 notes.push(`${stillInTheWorld} children in the park ${AFTERWARDS_SECONDS} s later; ${movedAfterwards} of the ${ARRIVAL_KID_COUNT} arrivals walking about, ${busyAfterwards} more busy with an activity (the train, usually)`);

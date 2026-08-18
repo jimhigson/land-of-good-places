@@ -147,6 +147,13 @@ const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
   // free chair, so the chip row is on screen the instant the park exists
   // rather than after a walk across the hotel and a tap to sit down.
   '/hotel-breakfast': 'hotelBreakfast',
+  // The guest suite, fifty storeys up (#273/#278's doorway-clearance fix and
+  // #279's bigger bedrooms and pet beds) — same problem again, and worse: the
+  // normal way in is a walk across the park *and* the lift *and* reception
+  // handing over the key first. Drops her just inside the suite's own
+  // corridor door, key check skipped, facing down the hall so the bedroom
+  // doors and the lounge doorway are both in view — see `Hotel.enterSuite`.
+  '/hotel-suite': 'hotelSuite',
 };
 
 /** What `/view` needs to drop a debug camera into the built park. See {@link parseDebugView}. */
