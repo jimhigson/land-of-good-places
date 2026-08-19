@@ -854,6 +854,10 @@ export class Game {
       }
       // Not a ride: the hotel's front door, for its deep link.
       if (stallId === 'hotelLobby') return this.world.hotel.requestEnterLobby();
+      // Not a ride either: the keychain stall's picker, for its own deep
+      // link — `KeychainShop.requestOpen`'s own doc comment names this as
+      // its entry point, mirroring `hotelLobby` above.
+      if (stallId === 'keychainStall') return this.world.keychainShop.requestOpen();
       // Not a ride either: a guest-floor bathroom, for its deep link (#281).
       // `hotelBathroom` keeps its original target (Floor 1, `BREAKFAST`) for
       // link stability; the other three reach the lobby's, garden's and
@@ -968,6 +972,7 @@ export class Game {
     return (
       this.shopping.uiOpen ||
       this.world.facePaintStall.uiOpen ||
+      this.world.keychainShop.uiOpen ||
       this.cuteODex.isOpen ||
       this.whatsNew.isOpen ||
       this.miniGames.frozen ||
@@ -1009,6 +1014,7 @@ export class Game {
     return (
       this.shopping.uiOpen ||
       this.world.facePaintStall.uiOpen ||
+      this.world.keychainShop.uiOpen ||
       this.cuteODex.isOpen ||
       this.whatsNew.isOpen ||
       this.miniGames.frozen ||
@@ -1303,6 +1309,7 @@ export class Game {
       this.input.justPressed('menu') &&
       !this.shopping.uiOpen &&
       !this.world.facePaintStall.uiOpen &&
+      !this.world.keychainShop.uiOpen &&
       // The look overlay owns the screen the same way those two do. Without
       // this, Escape — the one key anyone presses to back out of a modal —
       // toggled the pause of the park *behind* the open dialog. `lookOpen`

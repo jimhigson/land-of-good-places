@@ -31,6 +31,8 @@ import { NpcSystem } from '../entities/npc';
 // note). Not a mini-game, so it is wired in here rather than through
 // `minigames/`.
 import { FacePaintStall } from './FacePaintStall';
+// The keychain stall (#119/#225) — FacePaintStall's sibling, wired the same way.
+import { KeychainShop } from './KeychainShop';
 import { Entrance, type EntranceOptions } from './entrance/Entrance';
 import { ARRIVAL_KID_COUNT } from './entrance/ArrivalSequence';
 import { terrainHeight } from './terrain';
@@ -78,6 +80,8 @@ export class World implements GameSystem {
   readonly npcs: NpcSystem;
   /** The face-painting stall (additive). See `FacePaintStall.ts`. */
   readonly facePaintStall: FacePaintStall;
+  /** The keychain stall (additive). See `KeychainShop.ts`. */
+  readonly keychainShop: KeychainShop;
   /** The park's front gate, its bus-stop shelter, and the cat bus arrival. */
   readonly entrance: Entrance;
   /** Every group that makes up the park itself. See {@link setParkVisible}. */
@@ -201,6 +205,12 @@ export class World implements GameSystem {
     // module-level target on its own next update regardless.
     this.facePaintStall = new FacePaintStall(this.collision);
 
+    // The keychain stall (#119/#225): same reasoning, same build-order
+    // requirement — it registers its own walls with `this.collision` before
+    // `NpcSystem`'s waypoint graph is validated against the finished
+    // collision world.
+    this.keychainShop = new KeychainShop(this.collision);
+
     // The front gate, its bus-stop shelter, and — for a player who has not
     // arrived yet — the cat bus that brings her in. Built before the NPCs for
     // the same reason the stall above is: it registers collision circles for
@@ -275,6 +285,7 @@ export class World implements GameSystem {
       this.npcs.group,
       this.stalls.group,
       this.facePaintStall.group,
+      this.keychainShop.group,
       this.train.group,
       this.coaster.group,
       this.railRace.group,
@@ -402,6 +413,7 @@ export class World implements GameSystem {
     this.npcs.update(context);
     this.stalls.update(context);
     this.facePaintStall.update(context);
+    this.keychainShop.update(context);
     this.flowers.update(context);
     this.dodgems.update(context);
     // Last: the arrival moves the player, and everything above has already had
@@ -423,6 +435,7 @@ export class World implements GameSystem {
       ...this.hotel.interactZones(),
       ...this.stalls.interactZones(),
       ...this.facePaintStall.interactZones(),
+      ...this.keychainShop.interactZones(),
       ...this.train.interactZones(),
       ...this.flowers.interactZones(),
     ];
@@ -438,6 +451,7 @@ export class World implements GameSystem {
    */
   mountUi(uiRoot: HTMLElement): void {
     this.facePaintStall.mountUi(uiRoot);
+    this.keychainShop.mountUi(uiRoot);
   }
 
   /**
@@ -452,6 +466,7 @@ export class World implements GameSystem {
     this.building.attachPlayer(player);
     this.hotel.attachPlayer(player);
     this.facePaintStall.attachPlayer(player);
+    this.keychainShop.attachPlayer(player);
     this.train.attachPlayer(player);
     this.coaster.attachPlayer(player);
     this.railRace.attachPlayer(player);
@@ -482,6 +497,7 @@ export class World implements GameSystem {
     this.fireflies.dispose();
     this.stalls.dispose();
     this.facePaintStall.dispose();
+    this.keychainShop.dispose();
     this.train.dispose();
     this.coaster.dispose();
     this.railRace.dispose();
