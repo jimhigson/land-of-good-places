@@ -3223,12 +3223,18 @@ export class Hotel implements GameSystem {
     // answer here and a material colour is not.
     this.layMosaic(shell, LOBBY);
 
-    // The giant RiPika on its floor medallion, with the disco ball above —
-    // Eleri: "a disco ball above the ripika statue" — **on the axis, south of
-    // the arch**: doors → runner → the statue's medallion → under the arch →
-    // the colonnade. A grand lobby's centrepiece stands on the promenade and
-    // you walk round it, which the rainbow ring invites; it must not stand IN
-    // the archway, which the old spot (0, −1) now is.
+    // The giant RiPika on its floor medallion — Eleri: "a disco ball above
+    // the ripika statue," originally, which is where it hung until issue
+    // #305 (19 Aug 2026): Jim, playing — "the disco ball in the hotel lobby
+    // overlaps the statue's head." It had shared this axis with her since 7
+    // August, and going 3x size that same day is what turned "above her"
+    // into "through her." His ruling moved the ball off this axis entirely,
+    // to `DISCO_Z` near the chandelier below — see `hangDiscoBall`'s call
+    // site there for where and why. The statue keeps this spot, **on the
+    // axis, south of the arch**: doors → runner → the statue's medallion →
+    // under the arch → the colonnade. A grand lobby's centrepiece stands on
+    // the promenade and you walk round it, which the rainbow ring invites;
+    // it must not stand IN the archway, which the old spot (0, −1) now is.
     //
     // **z moved with the whole foyer** when it grew by `LOBBY_FOYER_GROWTH`
     // (17 Aug 2026, issue #271's paintings coming back) — the statue's own
@@ -3249,12 +3255,6 @@ export class Hotel implements GameSystem {
       top: statue.height,
       stand: false,
     });
-    // **Three times the size, and it lights the room** (Jim, 7 August 2026).
-    // Hung so the ball's middle rides just above the gallery deck (5.44):
-    // from up there it is at eye height and close enough to touch, and from
-    // the lobby floor it hangs in the middle of the tall room over the
-    // statue. Its beams sweep all three levels.
-    this.hangDiscoBall(shell, 0, 8.3, STATUE_Z, { scale: 3, lit: true, room: LOBBY });
     // The medallion: Eleri's rainbow ring, inlaid round the plinth. Inner
     // radius 1.4 clears the 1.15 m footing; six 0.15 m bands (0.22 until
     // issue #270's foyer/hall partition landed at `LOBBY_HALL_Z`) keep the
@@ -3294,6 +3294,33 @@ export class Hotel implements GameSystem {
     const pendant = pendantLight();
     pendant.position.set(0, 8.7 - chandelier.height / 2, CHANDELIER_Z);
     shell.add(pendant);
+
+    // **The disco ball** — moved here 19 Aug 2026, issue #305. Jim's ruling:
+    // "move the disco ball to between the bifurcated staircase." x = 0 is
+    // already equidistant between the two mirrored flights (they're built at
+    // `±STAIR_ARC_C`, same z). `DISCO_Z` is picked from the **built park's
+    // own meshes**, not the arc maths that placed them — a headless survey
+    // of `hotel.hotelRoot` (`check:hotel` probe 28 below re-runs the same
+    // measurement on every build) found:
+    //   - the overhang — the landing, the gallery deck, and every sofa,
+    //     planter and column standing on either — has a real box reaching no
+    //     further south than z ≈ −15.4, so any z south of that clears the
+    //     low 3.44 m archway underneath it and its furniture entirely;
+    //   - both curved flights' real boxes stop at |x| ≈ 2.9 nearest this
+    //     axis and top out at y ≈ 4.97 (the top newels' finials) — x = 0 is
+    //     clear of stair mass at any z on this axis, and the ball hangs 3+ m
+    //     above their tallest point regardless, so the beam's 9.6 m span
+    //     crossing their footprint in plan (it has to, at this scale) never
+    //     becomes a real 3-D collision;
+    //   - the chandelier already hangs on this same axis at `CHANDELIER_Z`,
+    //     real box reaching to z ≈ −12.6 on its south face — the ball's own
+    //     radius at this scale is ≈1.4 m, so keeping `DISCO_Z` this far
+    //     south of it leaves the two a real 0.4 m apart, not just centre to
+    //     centre.
+    // Same height and scale as before (8.3 m, 3x) — nothing about *why*
+    // those changes, only where.
+    const DISCO_Z = CHANDELIER_Z + 2.9;
+    this.hangDiscoBall(shell, 0, 8.3, DISCO_Z, { scale: 3, lit: true, room: LOBBY });
 
     // The desk is 2.67 m of bowed crystal counter — a run, so a rectangle
     // rather than a disc, or a child could not walk along it to reach the far
