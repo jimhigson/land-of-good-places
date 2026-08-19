@@ -10,6 +10,14 @@
  */
 export interface SpookyHud {
   setCandyCount(count: number): void;
+  /**
+   * The jump-scare reflex tally (#293) — `hit` out of `total` jump-scares
+   * caught in time so far. Shown from the moment the first jump-scare fires,
+   * not before: a "0/6" pill sitting there before anything has happened yet
+   * would read as a countdown to dread for a six-year-old, which is exactly
+   * what this feature is not supposed to be.
+   */
+  setReflexScore(hit: number, total: number): void;
   /** A short cheerful line, centred, that fades on its own. */
   shout(text: string, seconds?: number): void;
   update(dt: number): void;
@@ -27,7 +35,12 @@ export function createSpookyHud(container: HTMLElement): SpookyHud {
   candyPill.className = 'mg-pill';
   candyPill.innerHTML = '<span>🍬</span> <b>0</b>';
 
-  topRow.append(candyPill);
+  const reflexPill = document.createElement('div');
+  reflexPill.className = 'mg-pill';
+  reflexPill.style.display = 'none'; // hidden until the first jump-scare fires — see setReflexScore's doc.
+  reflexPill.innerHTML = '<span>⚡</span> <b>0/0</b>';
+
+  topRow.append(candyPill, reflexPill);
 
   const centre = document.createElement('div');
   centre.className = 'mg-centre';
@@ -41,6 +54,11 @@ export function createSpookyHud(container: HTMLElement): SpookyHud {
   return {
     setCandyCount(count: number): void {
       candyPill.innerHTML = `<span>🍬</span> <b>${count}</b>`;
+    },
+
+    setReflexScore(hit: number, total: number): void {
+      reflexPill.style.display = '';
+      reflexPill.innerHTML = `<span>⚡</span> <b>${hit}/${total}</b>`;
     },
 
     shout(text: string, seconds = 2.2): void {

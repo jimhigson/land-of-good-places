@@ -1,18 +1,23 @@
 import {
+  CanvasTexture,
   CircleGeometry,
   ConeGeometry,
   CylinderGeometry,
+  DoubleSide,
   Group,
   Mesh,
   MeshBasicMaterial,
+  PlaneGeometry,
   PointLight,
   SphereGeometry,
+  SRGBColorSpace,
   TorusGeometry,
 } from 'three';
 import { PALETTE } from '../../core/palette';
 import { Rng } from '../../core/mathUtils';
+import { ART } from '../../art/style/artPalette';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
-import { createFacePatch } from '../../art/style/faces';
+import { createFacePatch, css } from '../../art/style/faces';
 
 /**
  * The little room the Spooky House opens into.
@@ -20,11 +25,26 @@ import { createFacePatch } from '../../art/style/faces';
  * "A dim cosy room" — dim comes from colour temperature, not from actually
  * turning the lights down: `MeshToonMaterial` needs enough light hitting it for
  * the four-band ramp to read at all (ARCHITECTURE.md's "do not darken the first
- * band" applies here just as much as out in the park), so cosiness is a deep
- * plum-purple palette and one warm lantern rather than low lux. Nothing here is
+ * band" applies here just as much as out in the park), so cosiness comes from
+ * a deep dark-green-on-dark-grey palette (see the palette note below — this
+ * used to be plum-purple, reworked after Jim's PR #294 feedback) and one warm
+ * lantern, rather than from low lux. Nothing here is
  * meant to be looked at for long — the big face is the point — so it stays
- * simple: a floor, a back wall the face sits on, two short side walls, a rug,
- * a hanging lantern, and a pair of grinning jack-o-lanterns for company.
+ * simple: a floor, a single back wall the face sits on (a wide `CylinderGeometry`
+ * arc, not two separate side walls — the camera's frame never reaches far
+ * enough round to see a seam, so one arc covers it), a rug, a hanging lantern,
+ * and a pair of grinning jack-o-lanterns for company.
+ *
+ * The room's palette was reworked after Jim's PR #294 preview note: "the
+ * background should also be generally dark and spooky artwork in it such as
+ * spider webs, dark green on dark grey". `ART.statueStoneDark` (already the
+ * park's one "dark grey" — see its own doc comment for why it is warm, not
+ * neutral) is the walls; `ART.spookyGreen` is the rug and trim; the floor
+ * takes `PALETTE.ink` itself, the one colour in the whole game the rulebook
+ * calls "the darkest value anywhere" — nothing here goes past it. Two
+ * corner cobwebs (`createCobwebTexture`) are the "spooky artwork": the same
+ * painted-canvas-decal technique every face and marking in this park already
+ * uses (ART_DIRECTION.md §3/§7), not a new one.
  */
 
 export interface SpookyRoom {
@@ -34,15 +54,102 @@ export interface SpookyRoom {
   dispose(): void;
 }
 
+let cobwebTextureCache: CanvasTexture | null = null;
+
+/**
+ * A simple corner cobweb, painted the same way `art/style/faces.ts` paints a
+ * face: flat ink-tinted lines on a transparent canvas, cached and reused
+ * (`ART_DIRECTION.md` §7's "canvas-drawn only, cached by key" — this is one
+ * texture shared by both corners, mirrored in `createCobwebMesh` rather than
+ * painted twice). Radial threads from the corner plus a few connecting arcs —
+ * enough to read as a web at gameplay distance, nothing fussier: this is
+ * "fun-spooky, not scary-scary" set dressing (GAME_DESIGN.md), so the web is
+ * a friendly cartoon prop, not a photoreal texture.
+ */
+function createCobwebTexture(): CanvasTexture {
+  if (cobwebTextureCache) return cobwebTextureCache;
+
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('2D canvas context unavailable — cannot paint the cobweb.');
+
+  // Anchored at the top-left corner of the canvas — the mesh gets tucked into
+  // an actual room corner, so the web should visibly spring from one.
+  const originX = 0;
+  const originY = 0;
+  const reach = size * 1.32;
+
+  ctx.strokeStyle = css(ART.cream);
+  ctx.globalAlpha = 0.62;
+  ctx.lineCap = 'round';
+  ctx.lineWidth = size * 0.012;
+
+  // Radial threads.
+  const strandCount = 6;
+  const strandAngle = Math.PI / 2 / (strandCount - 1);
+  for (let i = 0; i < strandCount; i += 1) {
+    const angle = i * strandAngle;
+    ctx.beginPath();
+    ctx.moveTo(originX, originY);
+    ctx.lineTo(originX + Math.cos(angle) * reach, originY + Math.sin(angle) * reach);
+    ctx.stroke();
+  }
+
+  // Connecting arcs, evenly spaced out from the corner, linking the strands
+  // into a proper web rather than a spray of lines.
+  const ringCount = 4;
+  for (let r = 1; r <= ringCount; r += 1) {
+    const radius = (reach / (ringCount + 0.6)) * r;
+    ctx.beginPath();
+    ctx.arc(originX, originY, radius, 0, Math.PI / 2);
+    ctx.stroke();
+  }
+
+  ctx.globalAlpha = 1;
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.anisotropy = 4;
+  texture.needsUpdate = true;
+  cobwebTextureCache = texture;
+  return texture;
+}
+
+/**
+ * One corner cobweb decal. `mirror` flips it so the same texture (drawn
+ * anchored at its own top-left) can dress both top corners of the back wall
+ * without a second canvas.
+ */
+function createCobwebMesh(mirror: boolean): Mesh {
+  const material = toonMaterial(0xffffff, { map: createCobwebTexture(), transparent: true, depthWrite: false });
+  material.alphaTest = 0.02;
+  const mesh = decal(new Mesh(new PlaneGeometry(2.1, 2.1), material));
+  mesh.name = 'spookyHouse:cobweb';
+  mesh.renderOrder = 2;
+  if (mirror) mesh.scale.x = -1;
+  return mesh;
+}
+
 export function createSpookyRoom(): SpookyRoom {
   const root = new Group();
   root.name = 'spookyHouse:room';
 
-  const wallMaterial = toonMaterial(PALETTE.markerLilac);
-  const wallDarkMaterial = toonMaterial(0x6a4f8a);
-  const floorMaterial = toonMaterial(0x3f2f52);
-  const rugMaterial = toonMaterial(PALETTE.markerMint);
-  const trimMaterial = toonMaterial(PALETTE.markerMint);
+  // `DoubleSide`: the room's camera sits inside this cylinder's radius, looking
+  // at the *concave* face of an open arc (`CylinderGeometry`'s side normals
+  // point radially outward, away from the axis — correct for something you
+  // walk around, wrong for something you stand inside). `FrontSide` (the
+  // default) culled every triangle here, which is exactly the "mesh present,
+  // wound the wrong way for this camera" trap CLAUDE.md's hood-face writeup
+  // describes — see `BallPit.ts`'s open-ended cylinder wall and
+  // `SlideRide.ts`'s chute for the same shape of fix already established in
+  // this codebase.
+  const wallMaterial = toonMaterial(ART.statueStoneDark, { side: DoubleSide });
+  const wallDarkMaterial = toonMaterial(0x645766); // ART.statueStoneDark mixed 50/50 toward PALETTE.ink — a shadow step, never past ink itself.
+  const floorMaterial = toonMaterial(PALETTE.ink); // the darkest surface in the room takes the darkest colour the game allows.
+  const rugMaterial = toonMaterial(ART.spookyGreen);
+  const trimMaterial = toonMaterial(ART.spookyGreen);
 
   // --- floor + rug -----------------------------------------------------------
   const floor = solid(new Mesh(new CylinderGeometry(9, 9, 0.3, 28), floorMaterial));
@@ -70,6 +177,41 @@ export function createSpookyRoom(): SpookyRoom {
   const frame = decal(new Mesh(new TorusGeometry(3.05, 0.22, 10, 6, Math.PI * 1.98), wallDarkMaterial));
   frame.position.set(0, 4.1, -5.55);
   root.add(frame);
+
+  // --- spider webs, tucked into the wall corners either side of the face —
+  // the "spooky artwork" half of Jim's PR #294 note.
+  //
+  // Round 3 QA found these invisible in the fixed camera's frame at both top
+  // corners. The original y=7.05 put them almost entirely *above* the
+  // camera's own visible top edge: projecting the decal's four corners into
+  // the fixed camera's view space (`SpookyHouse.ts`'s `CAMERA_POS`/
+  // `CAMERA_TARGET`, the same lookAt basis the round-2 lunge-offscreen review
+  // used) put the decal's own top edge at view-y ≈ 4.99 against a guaranteed
+  // frame half-height of only 4.0 (`MIN_HALF_HEIGHT`) — over half the mesh,
+  // including the corner the web actually radiates from (the canvas is
+  // painted with its strands starting at (0,0) and reaching outward; the
+  // opposite corner is blank), was cropped off the top of every frame. What
+  // little remained in-frame was the near-empty far corner of the canvas.
+  //
+  // y=5.3 brings the decal's own top edge to view-y ≈ 3.27 — comfortably
+  // inside 4.0 on *every* supported aspect ratio, since 4.0 is a floor
+  // (`MIN_HALF_HEIGHT`) the camera only ever grows past, never shrinks
+  // below. x is unchanged: 3.35 was already chosen (successfully) to clear
+  // the picture-frame moulding's own 3.27-radius ring, and moving it inward
+  // to also guarantee the frame on extreme narrow-portrait aspects would put
+  // it back on top of that ring — a worse trade for a background decal that
+  // was never the reported bug (which was full invisibility on the tested,
+  // ordinary-aspect frame, not partial edge cropping on a phone held
+  // upright).
+  const cobwebLeft = createCobwebMesh(false);
+  cobwebLeft.position.set(-3.35, 5.3, -4.55);
+  cobwebLeft.rotation.z = 0.18;
+  root.add(cobwebLeft);
+
+  const cobwebRight = createCobwebMesh(true);
+  cobwebRight.position.set(3.35, 5.3, -4.55);
+  cobwebRight.rotation.z = -0.18;
+  root.add(cobwebRight);
 
   // --- ceiling -----------------------------------------------------------------
   const ceiling = solid(new Mesh(new CylinderGeometry(9, 9, 0.3, 28), wallDarkMaterial));
