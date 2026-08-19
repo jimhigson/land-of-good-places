@@ -147,8 +147,13 @@ const ARCH_FOOT_MARGIN = PLAYER_RADIUS * 2 + 0.4;
  * ride publishes what it solved (`railRace/arch.ts`), and the walk network
  * treats it as an obstacle exactly as it does a plot.
  *
- * Both rings, because both arches are built and they stand at the same place
- * at different scales.
+ * Both rings' feet, even though only the race ring actually builds a visible
+ * arch (see `RailRaceTrackOptions.showArch`, #299) — `archFeet` is a pure
+ * function of a route, computed the same way whether or not `track.ts`
+ * chooses to draw a rainbow there, and this file runs at module load, long
+ * before any ring's visibility is decided at runtime. Keeping both rings'
+ * footprints out of the paving costs nothing and means the walk-past ring's
+ * feet stay excluded even if a future change makes it draw one again.
  */
 const BLOCKERS: readonly Blocker[] = [
   ...[...PARK_LAYOUT.entries.values()]

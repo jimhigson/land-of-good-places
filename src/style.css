@@ -200,12 +200,19 @@ body {
   cursor: pointer;
 }
 
+/* `[data-jumpscare-active='true']` is the Spooky House's jump-scare reflex
+   window (#293, `spookyHouse/hotspots.ts`): the same rainbow ring as hover
+   and focus, on demand, with no hover needed — the touch devices this game
+   is mostly played on have no hover to show "you can press this" with, and a
+   jump-scare's reflex window is exactly the moment that needs saying loudest.
+   Added to this shared selector rather than a one-off rule of its own, same
+   as everything else in the HIGHLIGHT RULE block. */
 @supports (mask-composite: exclude) or (-webkit-mask-composite: xor) {
   :is(button, summary, a[href], [role='button']):not(
       :disabled,
       [aria-disabled='true'],
       [data-show='false']
-    ):is(:hover, :focus-visible)::after {
+    ):is(:hover, :focus-visible, [data-jumpscare-active='true'])::after {
     content: '';
     position: absolute;
     /* Just outside the button, so it reads as an outline around the thing
@@ -240,7 +247,7 @@ body {
       :disabled,
       [aria-disabled='true'],
       [data-show='false']
-    ):is(:hover, :focus-visible) {
+    ):is(:hover, :focus-visible, [data-jumpscare-active='true']) {
     outline: var(--lgp-highlight-width) solid var(--lgp-pink-deep);
     outline-offset: calc(var(--lgp-highlight-width) * 0.7);
   }

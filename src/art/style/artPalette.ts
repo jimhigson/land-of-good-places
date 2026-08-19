@@ -207,6 +207,21 @@ export const ART = {
   lollipopLeafAlt: 0x74d489,
   lollipopBerry: 0xff8f8f,
 
+  // --- Spooky House interior (#294, dark green on dark grey) ----------------
+  /**
+   * Jim, on PR #294's preview: "the background should also be generally dark
+   * and spooky artwork in it such as spider webs, dark green on dark grey".
+   * The grey half of that ask already exists — `statueStoneDark` above is
+   * warm-toned and "stays well clear of `PALETTE.ink`", exactly what a wall
+   * here needs — so only the green is new. Same rule as everywhere else in
+   * this file: never darker than `PALETTE.ink` (0x4a3a52, L≈0.28 in HSL).
+   * This is `PALETTE.leafDeep` (the park's own forest green) mixed 55/45
+   * toward `PALETTE.ink` — a deep, warm forest green (L≈0.36), not a
+   * desaturated "spooky" grey-green, so it still reads as a toy colour next
+   * to the grey walls rather than as a hole in the picture.
+   */
+  spookyGreen: 0x447357,
+
   // --- effects ---------------------------------------------------------------
   /**
    * The park's rainbow, inner band first. Used by the hop ring.
