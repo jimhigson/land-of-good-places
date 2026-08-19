@@ -631,23 +631,37 @@ export interface HotelRoom {
   /** Wall height. Rooms are open-topped — the iso camera looks in. */
   readonly wallHeight: number;
   /**
-   * Height of the **south and east** walls, when they should be lower than the
-   * rest. Defaults to {@link wallHeight}.
+   * When true, the **south and east** walls build at the full room
+   * {@link wallHeight} like every other wall, but render invisible —
+   * `mesh.visible = false`, not a fade or a transparency — while their
+   * collision (`CollisionWorld.addWall`) stays exactly as solid as any other
+   * wall. Defaults to false: an ordinary room draws all four walls the same.
    *
-   * The camera sits at focus + (+X, +Y, +Z) at a fixed 38° pitch, so those two
-   * walls are the ones *between it and the room*: a wall of height H hides the
-   * floor for 1.28·H metres behind it. At the 3.0–3.4 m every room used to be
-   * that is a 4 m shadow you never notice, because you are rarely that close to
-   * a near wall. The lobby is 8.9 m tall now (the imperial composition stands
-   * 5.44 m to its gallery), and 8.9 m of near wall would hide eleven metres —
-   * which is a child standing in her own hotel and seeing a wall.
+   * The camera sits at focus + (+X, +Y, +Z) at a fixed 38° pitch — see
+   * ARCHITECTURE.md, "One camera angle, forever" — so those two walls are
+   * always the ones *between it and the room*: a wall of height H hides the
+   * floor for 1.28·H metres behind it (`Hotel.ts`'s crystal-column comment
+   * has the same rule applied to furniture). At the 3.0–3.4 m most rooms are
+   * that used to read as a 4 m shadow nobody noticed. The lobby is 8.9 m tall
+   * (the imperial composition stands 5.44 m to its gallery), so a *solid*
+   * near wall at that height would hide eleven metres — a child standing in
+   * her own hotel and seeing a wall.
    *
-   * So the two walls the camera looks *through* stay low and the two it looks
-   * *at* go up. That is not a fudge: it is the same rule `windows` and
-   * `hangOnWalls` already obey, written down once more for the one dimension
-   * that had been assuming every wall was the same.
+   * Before issue #307 the fix was to build these two walls shorter
+   * (`nearWallHeight`, since removed) — cheap, but it meant the room's own
+   * walls visibly stopped short of its true height, which read as unfinished
+   * rather than open. Full height *and* fully hidden gets both: a genuinely
+   * tall room, with the two walls that would otherwise blot it out simply not
+   * drawn. This is safe for exactly this room shape because `CAMERA_DISTANCE`
+   * (90 m) so far exceeds any hotel room's half-extents that the camera sits
+   * beyond these two walls' own plane for every reachable player position —
+   * there is no place inside the room from which they would ever read as the
+   * *far* walls instead, so there is nothing to toggle back and forth as the
+   * player moves. Whichever room sets this, its whole south and east run
+   * simply never draws; `check:hotel` probe 29 proves the collision is still
+   * there by walking a body straight at both hidden runs from outside.
    */
-  readonly nearWallHeight?: number;
+  readonly nearWallsHidden?: boolean;
   /** Gaps in the walls, per side, as [from, to] along that wall's axis. */
   readonly gaps: Partial<Record<WallSide, readonly [number, number]>>;
   /**
@@ -1273,7 +1287,12 @@ export const LOBBY: HotelRoom = {
   // `assertStairMatches` enforces. Only the two far walls are this tall; see
   // `nearWallHeight` for why the two the camera looks through are not.
   wallHeight: 8.9,
-  nearWallHeight: 3.4,
+  // Issue #307, Jim playing the lobby: *"extend the walls upwards, but hide
+  // them ... when they are near the camera - on the side where they'd be
+  // obscuring the room."* See {@link HotelRoom.nearWallsHidden} for the full
+  // reasoning; this used to be `nearWallHeight: 3.4` (a shorter wall) and is
+  // now a full 8.9 m wall that simply is not drawn.
+  nearWallsHidden: true,
   // South: the front door back out to the park (formula-derived from
   // `halfZ`, so it needs no edit of its own — `Hotel.ts`'s `buildRoomShell`
   // builds both outer walls at `±room.halfZ`). West: the lift, centred on
