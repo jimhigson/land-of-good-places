@@ -1849,6 +1849,48 @@ const RAIL_STATION_GAP_MARGIN = STATION_GAP;
  */
 const RAIL_PUSH_WIDEN_STEPS: readonly number[] = [0, 1, 2, 4, 8];
 
+/**
+ * **Investigated, and confirmed structural rather than tunable** (issue #269
+ * PR #286 followup, 18 August 2026): the canonical seed's `spur-waterFight`
+ * push leaves a `poiGraph` waypoint stranded (`check:park`'s `poi.stranded`)
+ * because the *rendered* Catmull-Rom curve — not the straight control
+ * polygon every check in this function walks — swings past a short dog-leg
+ * (the pushed run's own connecting hop to its unmoved neighbour) and comes
+ * within about a metre of the rail's fence, well inside the ~4.65 m
+ * `RAIL_CORRIDOR_CLEARANCE` this function targets.
+ *
+ * A curve-aware re-verification was built and tried here: reconstruct the
+ * actual `CatmullRomCurve3` (`makeCurve`, tension 0.4 — identical to what
+ * every route in this file is finally rendered with, and to what
+ * `poiGraph.ts` samples its waypoints from) for each candidate push and walk
+ * its locally-influenced window (three.js's own local support: a segment
+ * `[k, k+1]` depends only on control points `[k-1, k, k+1, k+2]`, so nothing
+ * outside `[i-2, end+2]` can differ between candidates) against the rail
+ * corridor. It correctly *detects* the overshoot — every one of
+ * {@link RAIL_PUSH_WIDEN_STEPS}'s five magnitudes measurably violates
+ * clearance somewhere in that window. But widening the search past that made
+ * it clear the defect is not a missing magnitude: a fine sweep from 0 m to
+ * 15 m of push (every 0.5 m) never once cleared `RAIL_CORRIDOR_CLEARANCE` —
+ * clearance oscillated between 0.09 m and 1.19 m the entire way, because two
+ * *different* local minima (the run's own body at low push, the dog-leg's
+ * overshoot at high push) trade off against each other with no push value
+ * that satisfies both.
+ *
+ * That means a pure single-axis shift of the one run — everything
+ * `pushClearOfRail` does — cannot fix this route: the fixed neighbour on the
+ * other side of the short hop would have to move too, which this function
+ * cannot do without either breaking that neighbour's own axis alignment
+ * (its shared coordinate belongs to the *previous*, already-decided run) or
+ * cascading the shift backward through the route towards its branch point —
+ * a materially different algorithm, not a wider search. So the curve-aware
+ * check above was reverted rather than shipped half-working: a check that
+ * can reliably detect a defect it can never let the search resolve would
+ * only turn every rail-adjacent run in the park into a permanently-declined
+ * push, `applied` always `0`, the exact "leave it wherever the pre-shift
+ * position was" failure this whole function exists to avoid. `poi.stranded`
+ * on the canonical seed stays open — see PR #286's followup comment for the
+ * measurements above and why a real fix needs to move more than one run.
+ */
 function pushClearOfRail(
   points: readonly (readonly [number, number])[],
 ): (readonly [number, number])[] {
@@ -1914,19 +1956,47 @@ function pushClearOfRail(
         // and the run keeps its pre-shift position — see that constant's own
         // comment for the two other search shapes tried here, measured, and
         // reverted, and for the residual gaps this flat check still has.
+        //
+        // **The two connecting hops either side of the run need the same
+        // proof, not just the run itself** (issue #269 PR #286 followup, 18
+        // August 2026). This function's own header comment claims a shifted
+        // run's neighbours "only ever change length, never direction"
+        // because `manhattanRoute` alternates horizontal/vertical runs by
+        // construction — true whenever both neighbours are themselves
+        // axis-aligned legs `elbowLeg` built. It is *not* true when a
+        // neighbour is `gridDetour`'s own last-resort fallback: a raw,
+        // un-axis-aligned diagonal left in place when every corner search it
+        // tried failed (that function's own comment — "keeps the route
+        // connected rather than failing the build"). Shifting a shared
+        // vertex changes *that* segment's direction, not just its length,
+        // exactly like moving one end of any other line segment. Measured on
+        // seed 2: `spur-stall.railRacer` couldn't find a clear elbow into its
+        // tightly-packed rail-race-arch doormat, so `gridDetour` gave up and
+        // left a raw diagonal for the final approach; pushing the *previous*
+        // run's shared corner away from the rail swung that diagonal's other
+        // end closer to two finish-rainbow legs it had never been checked
+        // against, landing at 0.91 m / 0.47 m (needs `WALKABLE_GAP`, 1.24 m).
+        // So both connecting hops are checked here too, with whichever
+        // out-of-range point they still reach into (`out[i - 1]`/
+        // `out[end + 1]`, always in bounds — the outer `if` above guarantees
+        // `i > 0` and `end < out.length - 1`) — cheap (one more
+        // `segmentClearOfBlockers` call each) next to the run's own sampled
+        // sweep above, and it is exactly the check this function already
+        // does for the run itself, just extended to the two segments a shift
+        // can also silently move.
         let applied = 0;
         for (const extra of RAIL_PUSH_WIDEN_STEPS) {
           const candidate = basePush + extra;
           const dx = axis === 0 ? direction * candidate : 0;
           const dz = axis === 1 ? direction * candidate : 0;
+          const shiftedStart: readonly [number, number] = [runStart[0] + dx, runStart[1] + dz];
+          const shiftedEnd: readonly [number, number] = [runEnd[0] + dx, runEnd[1] + dz];
+          const before = out[i - 1] as readonly [number, number];
+          const after = out[end + 1] as readonly [number, number];
           if (
-            segmentClearOfBlockers(
-              runStart[0] + dx,
-              runStart[1] + dz,
-              runEnd[0] + dx,
-              runEnd[1] + dz,
-              ROUTE_WALKER_PAD,
-            )
+            segmentClearOfBlockers(shiftedStart[0], shiftedStart[1], shiftedEnd[0], shiftedEnd[1], ROUTE_WALKER_PAD) &&
+            segmentClearOfBlockers(before[0], before[1], shiftedStart[0], shiftedStart[1], ROUTE_WALKER_PAD) &&
+            segmentClearOfBlockers(shiftedEnd[0], shiftedEnd[1], after[0], after[1], ROUTE_WALKER_PAD)
           ) {
             applied = candidate;
             break;
