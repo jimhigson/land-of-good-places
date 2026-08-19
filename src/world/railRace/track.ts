@@ -211,6 +211,33 @@ export interface RailRaceTrackOptions {
    * drawn) has nowhere to live.
    */
   readonly registerCollision: boolean;
+  /**
+   * Whether this ring builds the finish-line rainbow arch at all.
+   *
+   * **Only the race ring says yes.** `buildArch`'s own solve is deliberately
+   * *not* scaled by `ringSizeVsRace` — its clear height and half-width come
+   * off a standing rider's own head height, absolute, so a park-scale child
+   * needs exactly as much headroom on the toy-sized walk-past ring as a rider
+   * does on the full-sized race ring. That is correct for a rider mid-race,
+   * and exactly wrong for a rainbow left standing over the everyday walk-past
+   * ring at that same full size, permanently, whether a race is on or not —
+   * Jim, playing, 18 August 2026, issue #299: it dwarfs the path, the nearby
+   * trees and the lamppost every single time he walks past.
+   *
+   * `setActiveRing` in `RailRace.ts` already toggles the whole ring group's
+   * `.visible` on the actual race-active signal — the race ring is shown only
+   * from `board()` through `arrive()`, the walk-past ring the rest of the
+   * time. So the simplest fix (Jim's own suggestion — "it can go away
+   * entirely when a race isn't on") is to never build the arch on the
+   * walk-past ring in the first place, rather than maintain a second,
+   * correctly-scaled-down rainbow for it: one arch, shown exactly when the
+   * ring that carries it is shown.
+   *
+   * The arch has no collision role to worry about either way — see
+   * `buildArch`'s own "Nothing here is solid" note — so there is no stale
+   * collider to leave behind by not building it here.
+   */
+  readonly showArch: boolean;
 }
 
 export function buildRailRaceTrack(
@@ -878,7 +905,10 @@ export function buildRailRaceTrack(
   }
 
   // --- the start/finish arch -------------------------------------------------
-  group.add(buildArch(route, ringSizeVsRace, keep));
+  // See `RailRaceTrackOptions.showArch` — only the race ring gets one.
+  if (options.showArch) {
+    group.add(buildArch(route, ringSizeVsRace, keep));
+  }
 
   // --- the live bits ---------------------------------------------------------
   const tint = new Color();
