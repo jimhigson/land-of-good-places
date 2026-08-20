@@ -3321,13 +3321,60 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
     // A point partway down each ramp — comfortably on the slope, clear of
     // both the deck and the ordinary ground the ramp joins, so a pass here
     // proves the climb itself rather than either end of it.
+    //
+    // **Walked to the ramp's own real, built length, never a fixed offset.**
+    // A fixed `6 m` here used to fall straight off a short ramp — the deck's
+    // own two extremes were measured for `everyBridgeIsWalkableAndReachable`
+    // and it never reads the constant `bridgeFootprint.ts`'s `rampRunPos`/
+    // `rampRunNeg` truncate down to, so for a ramp truncated shorter than
+    // that (the gate-walk crossing on seeds 11/18: ~3.5–3.7 m; a boundary-
+    // or plot-cramped ramp on other crossings) the probe landed off the far
+    // end (`bridge.heightAt` returns `null` there) and this loop's own
+    // `continue` read that as "nothing to probe" — exactly the review's
+    // finding on PR #297: **invisible to this check, precisely for the two
+    // hard cases it exists to catch.** Fixed by measuring the real ramp's
+    // own reach off the *built* `Bridge` itself (`covers`/`deckCovers`),
+    // never a re-import of the seed-sensitive planner that built it (this
+    // file's own header on static imports of seed-dependent modules) —
+    // walked outward from the crossing until `deckCovers` first lets go
+    // (the deck's own real half-length, empirically, not the constant) and
+    // then again until `covers` lets go (the ramp's own real far edge), so
+    // the probe below is genuinely 90% of *this specific ramp's* built
+    // length on *this specific side*, whatever `bridgeFootprint.ts` decided
+    // it should be. A ramp side truncated to (near) nothing — the correct
+    // answer on a side nothing ever walks, per that module's own note on
+    // the gate-walk crossing's outward-facing side — has nothing real to
+    // probe either, and is skipped for that reason now, not because the
+    // probe missed it.
+    const STEP = 0.5;
     for (const sign of [1, -1] as const) {
-      const rx = crossing.x + crossing.pathDirX * 6 * sign;
-      const rz = crossing.z + crossing.pathDirZ * 6 * sign;
+      let deckEdge = 0;
+      for (let d = 0; d <= 6; d += STEP) {
+        const x = crossing.x + crossing.pathDirX * d * sign;
+        const z = crossing.z + crossing.pathDirZ * d * sign;
+        if (!bridge.deckCovers(x, z)) break;
+        deckEdge = d;
+      }
+      let rampEdge = deckEdge;
+      for (let d = deckEdge + STEP; d <= deckEdge + 25; d += STEP) {
+        const x = crossing.x + crossing.pathDirX * d * sign;
+        const z = crossing.z + crossing.pathDirZ * d * sign;
+        if (!bridge.covers(x, z)) break;
+        rampEdge = d;
+      }
+      const rampReach = rampEdge - deckEdge;
+      if (rampReach < 1) continue; // this side's real, built ramp is too cramped to probe — nothing stands here to fail on
+      const probeAlong = deckEdge + rampReach * 0.9;
+      const rx = crossing.x + crossing.pathDirX * probeAlong * sign;
+      const rz = crossing.z + crossing.pathDirZ * probeAlong * sign;
       const rampHeight = heightAt(rx, rz);
-      if (rampHeight === null) continue; // a maximally cramped bridge; nothing to probe this far out
+      if (rampHeight === null) continue; // should not happen given the walk above, but never trust a probe blindly
       if (!standableAt(rx, rz, rampHeight)) {
-        complaints.push(`the ramp at (${fmt([rx, rz])}), off the crossing at (${fmt([crossing.x, crossing.z])}), is not standable`);
+        complaints.push(
+          `the ramp at (${fmt([rx, rz])}), ${probeAlong.toFixed(1)} m out from the crossing at ` +
+            `(${fmt([crossing.x, crossing.z])}) — 90% of its real, built ${rampReach.toFixed(1)} m ramp reach on ` +
+            `this side — is not standable`,
+        );
       }
     }
   }
