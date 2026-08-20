@@ -1291,13 +1291,28 @@ export class Hotel implements GameSystem {
    * there has never been an "enter the hotel" button to press: walking
    * through the doorway is what has always done it, via
    * {@link checkDoorways}'s own crossing trigger, and that fires on the walk
-   * itself with no help from this zone. `standX/standZ` sits well past
-   * {@link towerDoorBand}'s inner edge, so the routed walk here necessarily
-   * crosses the whole band on the way rather than stopping short of it on the
-   * doorstep.
+   * itself with no help from this zone.
+   *
+   * **`standX/standZ` is {@link towerDoorBand}'s own centre — not a second,
+   * hand-picked offset.** The first cut placed it 1.5 m *past* the band's
+   * inner edge, reasoning that only a point beyond the whole band could force
+   * a routed walk to cross it — sound for straight-line steering, wrong for
+   * the actual routed walk, which plans on `NavGrid`'s half-metre lattice
+   * baked from collision. That lattice has no waypoint past the tower's real
+   * back wall (measured empirically, sat well short of the doc comment's own
+   * `TOWER_BACK_ALONG`), so the route stopped 2.6 m short of the target every
+   * time and the doorway's crossing trigger never fired (`check:park`'s
+   * `route.unreachable`, and a live repro, both caught it — PR #315 review).
+   * The band's centre needs no such offset trick: it is, by construction,
+   * inside the band on every axis, so any walk that reaches it has already
+   * crossed the band getting there — and it is comfortably inside the
+   * lattice's real reach (confirmed against the built park: the whole band
+   * from its centre out to the facade routes with zero shortfall). One
+   * number, already owned by {@link towerDoorBand}, used here instead of
+   * copied.
    */
   private exteriorEntranceZone(): InteractZone {
-    const insideAlong = TOWER_BACK_ALONG - 1.5;
+    const band = this.towerDoorBand();
     return {
       id: 'hotel-entrance',
       label: 'The Land Hotel',
@@ -1305,8 +1320,8 @@ export class Hotel implements GameSystem {
       y: this.surfaces.sample(this.facadeX, this.facadeZ, 3),
       z: this.facadeZ,
       pickRadius: TOWER_SHELL_RADIUS + 2,
-      standX: this.facadeX + Math.sin(this.facadeYaw) * insideAlong,
-      standZ: this.facadeZ + Math.cos(this.facadeYaw) * insideAlong,
+      standX: band.centreX,
+      standZ: band.centreZ,
     };
   }
 
@@ -1772,6 +1787,17 @@ export class Hotel implements GameSystem {
       halfAcross: DOOR_HALF + 0.4,
       yaw: this.facadeYaw,
       y: 0,
+      // `exteriorEntranceZone`'s `hotel-entrance` zone *is* this door now
+      // (GitHub issue #309: a `ui/ParkMap.ts` tap anywhere on the tower walks
+      // her to this band and its own crossing trigger does the rest) — same
+      // pattern as `Building.ts`'s `castleEntranceBand`, whose `frontDoor`
+      // zone is its band's handle the same way. Without this,
+      // `scripts/check-tap-spacing.mts` reads the zone's wide `pickRadius`
+      // (it has to cover the whole tower footprint, not just the door) as one
+      // zone's pick area eating another's trigger band — which is exactly
+      // backwards here, since there is no "another": the zone and the band
+      // are the same doorway.
+      ownZoneId: 'hotel-entrance',
     };
   }
 
