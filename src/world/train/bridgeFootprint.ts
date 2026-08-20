@@ -322,14 +322,14 @@ export function planBridgeFootprints(crossings: readonly LevelCrossing[]): Bridg
     // unlike the boundary-truncation loop's own "too cramped to reach
     // `BRIDGE_RISE`" case above, a `0`-length ramp on one side is not a
     // failure, it is the correct answer for a side nothing walks on.
-    const truncateForBoundary = (sign: 1 | -1): number => {
+    const truncateForBoundary = (sign: 1 | -1, requiredClearance = halfAcross): number => {
       let rampRun = idealRampRun;
       const steps = Math.max(1, Math.ceil(rampRun));
       for (let i = 1; i <= steps; i += 1) {
         const along = DECK_HALF_LENGTH + (i / steps) * rampRun;
         const x = cx + dirX * along * sign;
         const z = cz + dirZ * along * sign;
-        if (GARDEN_PLAY_BOUNDARY.distanceToEdge(x, z) < halfAcross) {
+        if (GARDEN_PLAY_BOUNDARY.distanceToEdge(x, z) < requiredClearance) {
           rampRun = Math.max(0.5, along - DECK_HALF_LENGTH - 1.5);
           break;
         }
@@ -339,7 +339,7 @@ export function planBridgeFootprints(crossings: readonly LevelCrossing[]): Bridg
         const along = DECK_HALF_LENGTH + rampRun;
         const x = cx + dirX * along * sign;
         const z = cz + dirZ * along * sign;
-        if (GARDEN_PLAY_BOUNDARY.distanceToEdge(x, z) >= halfAcross) break;
+        if (GARDEN_PLAY_BOUNDARY.distanceToEdge(x, z) >= requiredClearance) break;
         rampRun = Math.max(0, rampRun - BACKOFF_STEP);
       }
       return rampRun;
@@ -356,7 +356,7 @@ export function planBridgeFootprints(crossings: readonly LevelCrossing[]): Bridg
     // boundary walk already knows to check the *whole* ramp for (see that
     // loop's own comment), not only sampled at the wrong axis here. See
     // {@link RAMP_PLOT_MARGIN} for the measured numbers this closes.
-    const truncateForPlots = (sign: 1 | -1): number => {
+    const truncateForPlots = (sign: 1 | -1, margin = RAMP_PLOT_MARGIN): number => {
       let rampRun = idealRampRun;
       const steps = Math.max(1, Math.ceil(rampRun));
       for (let i = 1; i <= steps; i += 1) {
@@ -364,7 +364,7 @@ export function planBridgeFootprints(crossings: readonly LevelCrossing[]): Bridg
         for (const t of [-1, -0.5, 0, 0.5, 1]) {
           const x = cx + dirX * along * sign + acrossX * halfAcross * t;
           const z = cz + dirZ * along * sign + acrossZ * halfAcross * t;
-          if (!clearOfPlots(x, z, RAMP_PLOT_MARGIN)) {
+          if (!clearOfPlots(x, z, margin)) {
             return Math.max(0.5, along - DECK_HALF_LENGTH - 1.5);
           }
         }
@@ -388,7 +388,7 @@ export function planBridgeFootprints(crossings: readonly LevelCrossing[]): Bridg
     // very first ramp tread). `underAnyDeck` (pass 1, above) is the same
     // Euclidean rectangle test the real fence build uses, so this and the
     // built game can never disagree about which stretch is safe.
-    const truncateForRailLoop = (sign: 1 | -1): number => {
+    const truncateForRailLoop = (sign: 1 | -1, margin = RAMP_RAIL_MARGIN): number => {
       let rampRun = idealRampRun;
       const steps = Math.max(1, Math.ceil(rampRun));
       for (let i = 1; i <= steps; i += 1) {
@@ -397,7 +397,7 @@ export function planBridgeFootprints(crossings: readonly LevelCrossing[]): Bridg
           const x = cx + dirX * along * sign + acrossX * halfAcross * t;
           const z = cz + dirZ * along * sign + acrossZ * halfAcross * t;
           if (underAnyDeck(x, z, RAMP_CLEARANCE)) continue; // the fence stands aside here — safe
-          if (distanceToRailCorridor(x, z) < FENCE_OFFSET + RAMP_RAIL_MARGIN) {
+          if (distanceToRailCorridor(x, z) < FENCE_OFFSET + margin) {
             return Math.max(0.5, along - DECK_HALF_LENGTH - 1.5);
           }
         }
@@ -426,35 +426,63 @@ export function planBridgeFootprints(crossings: readonly LevelCrossing[]): Bridg
     // *both* sides, one from a plot, the other from the boundary, and nothing
     // reached the deck at all.
     //
-    // So: only once a crossing would genuinely be stranded on both sides
-    // (below the same walkable floor {@link BRIDGE_RISE}`/`{@link
-    // MAX_RAMP_GRADIENT} already uses elsewhere as "the steepest a ramp may
-    // ever be forced to") does this drop exactly one constraint, on exactly
-    // one side, to the single combination that recovers the most room —
-    // reachability is a harder, pre-existing requirement than any one of
-    // these three, and every one of the review's own two named bugs above
-    // keeps a healthy, untouched side already, so neither is affected by a
-    // rescue that only fires when NEITHER side would otherwise be usable at
-    // all.
-    const boundaryPos = truncateForBoundary(1);
-    const plotsPos = truncateForPlots(1);
-    const railPos = truncateForRailLoop(1);
-    const boundaryNeg = truncateForBoundary(-1);
-    const plotsNeg = truncateForPlots(-1);
-    const railNeg = truncateForRailLoop(-1);
-
-    let rampRunPos = Math.min(boundaryPos, plotsPos, railPos);
-    let rampRunNeg = Math.min(boundaryNeg, plotsNeg, railNeg);
-
+    // **This is genuinely tiered, not "drop whichever of the three is
+    // smallest."** An earlier version of this fallback computed
+    // `Math.max(Math.min(a,b), Math.min(a,c), Math.min(b,c))` over the raw
+    // per-constraint results — the "median of three" identity, which drops
+    // whichever constraint happens to be tightest, *including the
+    // boundary*, with nothing recomputed at a lesser standard. Peer review
+    // caught it live on the *canonical* seed (rail-distance 128.2's
+    // crossing): the boundary had correctly floored `rampRunPos` to `0.5 m`
+    // — a real, tight boundary — but because `rampRunNeg` was *also* below
+    // the walkable floor for an unrelated reason (`RAMP_PLOT_MARGIN`), the
+    // fallback fired and threw the boundary's own answer away outright,
+    // landing the real, built far tread `1.68 m` past `GARDEN_PLAY_BOUNDARY`
+    // with real collision pushback up to `2.26 m` — the exact class of bug
+    // this whole file exists to close, reintroduced by its own rescue path.
+    //
+    // The fix: `plots` and `rail loop` carry a real safety **margin** on top
+    // of the literal overlap they measure ({@link RAMP_PLOT_MARGIN}, {@link
+    // RAMP_RAIL_MARGIN}), and `truncateForBoundary` carries the ramp's full
+    // `halfAcross` **width** requirement on top of its own literal edge —
+    // three genuinely different things to give up, at three genuinely
+    // different tiers, never the boundary's edge itself:
+    //
+    // 1. Full margins (already computed above as `rampRunPos`/`rampRunNeg`).
+    // 2. If a side is still short: the *margin* on plots and the rail loop
+    //    given up (recomputed at `margin = 0` — the literal, unpadded
+    //    overlap, never crossed), boundary untouched.
+    // 3. If, even then, BOTH sides are still short together: boundary's own
+    //    *width* requirement also given up (recomputed at `requiredClearance
+    //    = 0` — literal-edge-only, its own backoff loop still floors at
+    //    `distanceToEdge >= 0`, i.e. never actually past the map).
+    //
+    // Reachability is a harder, pre-existing requirement than any one of
+    // these margins (`check:park`'s invariant 1, this file's own
+    // `reachableFromEntrance`), which is why a crossing this cramped is
+    // allowed to give them up at all — but the literal boundary edge is
+    // never one of the things given up, at any tier.
     const WALKABLE_FLOOR = BRIDGE_RISE / MAX_RAMP_GRADIENT;
+    const sideWithMargins = (sign: 1 | -1): number =>
+      Math.min(truncateForBoundary(sign), truncateForPlots(sign), truncateForRailLoop(sign));
+    const sideMarginFree = (sign: 1 | -1): number =>
+      Math.min(truncateForBoundary(sign), truncateForPlots(sign, 0), truncateForRailLoop(sign, 0));
+    const sideBoundaryEdgeOnly = (sign: 1 | -1): number =>
+      Math.min(truncateForBoundary(sign, 0), truncateForPlots(sign, 0), truncateForRailLoop(sign, 0));
+
+    let rampRunPos = sideWithMargins(1);
+    let rampRunNeg = sideWithMargins(-1);
+    if (rampRunPos < WALKABLE_FLOOR) rampRunPos = Math.max(rampRunPos, sideMarginFree(1));
+    if (rampRunNeg < WALKABLE_FLOOR) rampRunNeg = Math.max(rampRunNeg, sideMarginFree(-1));
     if (rampRunPos < WALKABLE_FLOOR && rampRunNeg < WALKABLE_FLOOR) {
-      const bestDroppingOne = (a: number, b: number, c: number): number =>
-        Math.max(Math.min(a, b), Math.min(a, c), Math.min(b, c));
-      const bestPos = bestDroppingOne(boundaryPos, plotsPos, railPos);
-      const bestNeg = bestDroppingOne(boundaryNeg, plotsNeg, railNeg);
-      if (bestPos >= bestNeg) rampRunPos = Math.max(rampRunPos, bestPos);
-      else rampRunNeg = Math.max(rampRunNeg, bestNeg);
+      rampRunPos = Math.max(rampRunPos, sideBoundaryEdgeOnly(1));
+      rampRunNeg = Math.max(rampRunNeg, sideBoundaryEdgeOnly(-1));
     }
+    // If both sides are still short even here, this crossing is genuinely
+    // as cramped as the gate-walk crossing's own tight side, and is left as
+    // measured — `everyBridgeIsWalkableAndReachable`
+    // (test/procgen/invariants.ts) is what judges whether that leaves the
+    // deck reachable at all.
 
     return {
       cx,
