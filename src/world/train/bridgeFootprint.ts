@@ -4,6 +4,8 @@ import { ENTRANCE_RAMP } from '../building/layout';
 import { GARDEN_PLAY_BOUNDARY } from '../boundary';
 import { clearOfPlots } from '../parkLayout';
 import { distanceToRailCorridor } from './plan';
+import { BOUNDARY_WALL_COLLISION_HALF } from '../Garden';
+import { PLAYER_RADIUS } from '../../core/constants';
 
 /**
  * The bridge's own footprint in the ground plane (issue #116, Decision 8) —
@@ -106,6 +108,30 @@ const RAMP_PLOT_MARGIN = 2.0;
  * rather than stand comfortably past it.
  */
 const RAMP_RAIL_MARGIN = 0.5;
+
+/**
+ * The real, physical minimum a ramp tread must clear
+ * {@link GARDEN_PLAY_BOUNDARY} by — the boundary wall's own built collision
+ * half-thickness (`BOUNDARY_WALL_COLLISION_HALF`, `Garden.ts`) plus a
+ * walker's own body (`PLAYER_RADIUS`). `distanceToEdge` measures to the
+ * boundary *line*, not to the wall's own near face, so a tread whose
+ * centreline sits exactly on that line is still standing inside the wall's
+ * real collision by its own half-thickness, and a walker there still has
+ * `PLAYER_RADIUS` of her own body reaching further in again.
+ *
+ * This is `planBridgeFootprints`'s own last-resort tier's floor (below) —
+ * "never crosses `distanceToEdge = 0`" and "produces a walkable tread" are
+ * different guarantees, and the tier that only delivered the first landed a
+ * real, measured `0.13 m` collision pushback on the canonical seed's
+ * gate-walk crossing (distance to the boundary line as thin as `0.621 m`,
+ * well under what `BOUNDARY_WALL_COLLISION_HALF + PLAYER_RADIUS` — `1.07 m`
+ * — needs) — found live by peer review on PR #297, re-running
+ * `everyBridgeIsWalkableAndReachable` rather than trusting the earlier
+ * "zero boundary breaches" measurement, which was a real but incomplete
+ * check (it asked "past the line?", never "clear of the wall that stands
+ * on it?").
+ */
+const BOUNDARY_WALKER_CLEARANCE = BOUNDARY_WALL_COLLISION_HALF + PLAYER_RADIUS;
 
 export interface BridgeFootprint {
   readonly cx: number;
@@ -453,30 +479,42 @@ export function planBridgeFootprints(crossings: readonly LevelCrossing[]): Bridg
     //    given up (recomputed at `margin = 0` — the literal, unpadded
     //    overlap, never crossed), boundary untouched.
     // 3. If, even then, BOTH sides are still short together: boundary's own
-    //    *width* requirement also given up (recomputed at `requiredClearance
-    //    = 0` — literal-edge-only, its own backoff loop still floors at
-    //    `distanceToEdge >= 0`, i.e. never actually past the map).
+    //    *width* requirement also given up, down to {@link
+    //    BOUNDARY_WALKER_CLEARANCE} — the real, physical minimum a walker's
+    //    own body needs past the boundary wall's own built collision, never
+    //    all the way to `0`. "Never crosses `distanceToEdge = 0`" and
+    //    "produces a walkable tread" are different guarantees, and this
+    //    tier's own first version delivered only the first — landing a
+    //    real `0.13 m` collision pushback on the canonical seed's gate-walk
+    //    crossing (`distanceToEdge` as thin as `0.621 m`, well under the
+    //    `1.07 m` a body actually needs there). See
+    //    {@link BOUNDARY_WALKER_CLEARANCE}'s own note.
     //
     // Reachability is a harder, pre-existing requirement than any one of
     // these margins (`check:park`'s invariant 1, this file's own
     // `reachableFromEntrance`), which is why a crossing this cramped is
-    // allowed to give them up at all — but the literal boundary edge is
-    // never one of the things given up, at any tier.
+    // allowed to give them up at all — but a walker's own physical
+    // clearance past the boundary wall is never one of the things given
+    // up, at any tier.
     const WALKABLE_FLOOR = BRIDGE_RISE / MAX_RAMP_GRADIENT;
     const sideWithMargins = (sign: 1 | -1): number =>
       Math.min(truncateForBoundary(sign), truncateForPlots(sign), truncateForRailLoop(sign));
     const sideMarginFree = (sign: 1 | -1): number =>
       Math.min(truncateForBoundary(sign), truncateForPlots(sign, 0), truncateForRailLoop(sign, 0));
-    const sideBoundaryEdgeOnly = (sign: 1 | -1): number =>
-      Math.min(truncateForBoundary(sign, 0), truncateForPlots(sign, 0), truncateForRailLoop(sign, 0));
+    const sideBoundaryWalkerClearanceOnly = (sign: 1 | -1): number =>
+      Math.min(
+        truncateForBoundary(sign, BOUNDARY_WALKER_CLEARANCE),
+        truncateForPlots(sign, 0),
+        truncateForRailLoop(sign, 0),
+      );
 
     let rampRunPos = sideWithMargins(1);
     let rampRunNeg = sideWithMargins(-1);
     if (rampRunPos < WALKABLE_FLOOR) rampRunPos = Math.max(rampRunPos, sideMarginFree(1));
     if (rampRunNeg < WALKABLE_FLOOR) rampRunNeg = Math.max(rampRunNeg, sideMarginFree(-1));
     if (rampRunPos < WALKABLE_FLOOR && rampRunNeg < WALKABLE_FLOOR) {
-      rampRunPos = Math.max(rampRunPos, sideBoundaryEdgeOnly(1));
-      rampRunNeg = Math.max(rampRunNeg, sideBoundaryEdgeOnly(-1));
+      rampRunPos = Math.max(rampRunPos, sideBoundaryWalkerClearanceOnly(1));
+      rampRunNeg = Math.max(rampRunNeg, sideBoundaryWalkerClearanceOnly(-1));
     }
     // If both sides are still short even here, this crossing is genuinely
     // as cramped as the gate-walk crossing's own tight side, and is left as
