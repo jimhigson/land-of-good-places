@@ -484,6 +484,20 @@ path, so host images by committing them to a dedicated orphan branch (e.g.
 `qa-screenshots`) and linking the `raw.githubusercontent.com` URL — keeps
 binary screenshots out of `main`'s and every feature branch's own history.
 
+## Agents persist and stay current
+
+Don't exit the moment one task is done — stay resumable (via `SendMessage`)
+so the Overseer can hand you follow-on work without a fresh spin-up. Before
+starting real work, and again before opening or updating a PR, `git fetch
+origin main` and rebase onto it — a branch built on a stale base can silently
+carry an already-fixed bug back in (PR #311 rebuilt the disco ball at its old
+position because it branched before PR #306, which moved it, had merged).
+
+## Editing this file
+
+When Jim asks for a change to CLAUDE.md itself, edit it and push straight to
+`main` — no worktree-and-PR round trip, no asking first.
+
 ## PRs
 
 Raise with `gh pr create`. **Do not merge your own work** — every PR gets two
