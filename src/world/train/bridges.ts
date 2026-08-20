@@ -478,7 +478,14 @@ export function buildBridges(_route: TrainRoute, crossings: readonly LevelCrossi
         const along = dx * dirX + dz * dirZ;
         if (Math.abs(along) <= DECK_HALF_LENGTH) return deckY;
         const rampRun = along >= 0 ? footprint.rampRunPos : footprint.rampRunNeg;
-        const t = clamp01((Math.abs(along) - DECK_HALF_LENGTH) / rampRun);
+        // `rampRun` can be `0` on a side the boundary truncation floored all
+        // the way down (`bridgeFootprint.ts`'s own note on the gate-walk
+        // crossing) — `covers()` then only ever admits `along` up to exactly
+        // `DECK_HALF_LENGTH` on that side, so this branch should never be
+        // asked about it, but a division by a real `0` here would answer
+        // `NaN` rather than throw, which is a silent wrong answer instead of
+        // a loud one. Guarded rather than trusted.
+        const t = rampRun > 0 ? clamp01((Math.abs(along) - DECK_HALF_LENGTH) / rampRun) : 1;
         return deckY + (terrainHeight(x, z) - deckY) * t;
       },
     };
