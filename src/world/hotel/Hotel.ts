@@ -1278,8 +1278,40 @@ export class Hotel implements GameSystem {
 
   // ---------------------------------------------------------------- zones
 
+  /**
+   * The tower from outside, before she has ever walked in — GitHub issue
+   * #309's "the character can't be sent there at all", for the hotel
+   * specifically.
+   *
+   * One zone covering the whole crystal footprint, so a `ui/ParkMap.ts` tap
+   * anywhere on the tower's plot finds it (`Game.useZoneNear`'s
+   * `pickInteractZone`, tested against `pickRadius`) rather than getting the
+   * flat "can't walk there" a solid collider used to earn. No `actions` —
+   * same as `world/building/interactZones.ts`'s own `frontDoor` — because
+   * there has never been an "enter the hotel" button to press: walking
+   * through the doorway is what has always done it, via
+   * {@link checkDoorways}'s own crossing trigger, and that fires on the walk
+   * itself with no help from this zone. `standX/standZ` sits well past
+   * {@link towerDoorBand}'s inner edge, so the routed walk here necessarily
+   * crosses the whole band on the way rather than stopping short of it on the
+   * doorstep.
+   */
+  private exteriorEntranceZone(): InteractZone {
+    const insideAlong = TOWER_BACK_ALONG - 1.5;
+    return {
+      id: 'hotel-entrance',
+      label: 'The Land Hotel',
+      x: this.facadeX,
+      y: this.surfaces.sample(this.facadeX, this.facadeZ, 3),
+      z: this.facadeZ,
+      pickRadius: TOWER_SHELL_RADIUS + 2,
+      standX: this.facadeX + Math.sin(this.facadeYaw) * insideAlong,
+      standZ: this.facadeZ + Math.cos(this.facadeYaw) * insideAlong,
+    };
+  }
+
   interactZones(): InteractZone[] {
-    if (!this.inside) return [];
+    if (!this.inside) return [this.exteriorEntranceZone()];
     const zones: InteractZone[] = [];
     const room = this.currentRoom();
     if (!room) return zones;
