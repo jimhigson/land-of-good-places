@@ -825,17 +825,34 @@ async function finishLaunch(
     // returned by this point — nothing here waits a frame.
     game.whatsNew.close();
     switch (deepLink.kind) {
-      case 'ride':
+      case 'ride': {
         // A world ride boards through `boardRide`; a stall with a curtain
         // mini-game behind it opens through `open()`. Trying the ride first and
         // falling back is what lets one deep-link table serve both kinds — and
         // what means a stall that graduates from mini-game to world ride is
         // already wired the day it does. `boardRide` returns false for an id it
         // does not know, which is exactly the signal needed here.
-        if (!game.miniGames.boardRide?.(deepLink.stallId)) {
-          game.miniGames.open(deepLink.stallId);
+        //
+        // **If neither succeeds, that must not be quiet.** #308: `/keychain-stall`
+        // read as correctly wired end to end on a static read-through and still
+        // "just started the game normally" — a deep link silently no-op'ing is
+        // indistinguishable from a working park unless something says otherwise.
+        // A `RIDE_DEEP_LINKS` entry pointing at an id nothing recognises (a typo,
+        // a ride renamed on one side of the table only, a stall not yet wired
+        // into either `boardRide` or `MiniGameHost`) now shouts in the console
+        // instead of handing back a normal-looking boot.
+        const boarded = game.miniGames.boardRide?.(deepLink.stallId) ?? false;
+        const opened = boarded || game.miniGames.open(deepLink.stallId);
+        if (!opened) {
+          console.error(
+            `Land of Good Places: deep-link stall id "${deepLink.stallId}" did not board a ride ` +
+              '(miniGames.boardRide) or open a mini-game (miniGames.open) — the deep link silently ' +
+              'did nothing. Check RIDE_DEEP_LINKS in main.ts against Game.ts\'s boardRide table and ' +
+              'MiniGameHost\'s own stall list.',
+          );
         }
         break;
+      }
       case 'view':
         game.enterDebugView(
           deepLink.view.position,
