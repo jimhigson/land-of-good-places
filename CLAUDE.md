@@ -515,7 +515,9 @@ feature. Give the Cloudflare Workers deploy-preview URL with the feature's
 own deep link appended (`https://<hash>-land-of-good-places.blockstack.workers.dev/rail-race`,
 not just `.../pull/280`), exactly per this file's own "hand over the URL of
 the thing itself" rule above. Pull the preview URL from that PR's "Deploy PR
-preview" check run (or its posted comment) rather than guessing one. The PR
-link itself is still worth including alongside — Jim needs it to actually
-merge — but as the second link, for the merge action, never the only one or
-the first one he has to click through to find the feature.
+preview" check run (or its posted comment) rather than guessing one.
+
+**Do not include the PR link at all unless Jim explicitly asks for it.** He
+merges through the Overseer's own workflow, not by clicking a GitHub link —
+the preview+deep-link is the whole message. Only add the bare PR link when he
+names it directly ("give me the PR link", "what's the PR for X").
