@@ -619,9 +619,19 @@ export class Player implements GameSystem {
     this.group.add(this.model.root);
   }
 
-  /** Puts the character somewhere immediately, clearing momentum. */
-  teleport(x: number, z: number): void {
-    this.teleportTo(x, this.groundAt(x, z, Infinity), z);
+  /**
+   * Puts the character somewhere immediately, clearing momentum, standing on
+   * whatever the ground turns out to be there.
+   *
+   * `facing` is optional and means the same as {@link teleportTo}'s: omitted
+   * leaves her looking whichever way she already was. It is here rather than
+   * left to a follow-up `teleportTo` call so that "put her at x,z, facing
+   * that way" stays one operation with one owner of the ground question —
+   * {@link groundAt} is private, so a caller that wanted both had no way to
+   * ask for the height without a second teleport landing on top of the first.
+   */
+  teleport(x: number, z: number, facing?: number): void {
+    this.teleportTo(x, this.groundAt(x, z, Infinity), z, facing);
   }
 
   /**

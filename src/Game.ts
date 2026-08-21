@@ -1212,6 +1212,46 @@ export class Game {
     }
   }
 
+  /**
+   * Debug-only: stands the **real player** at an arbitrary world point, ready
+   * to walk. See `/spawn` in `main.ts`, the only caller.
+   *
+   * The deliberate difference from {@link enterDebugView} next door is that
+   * nothing here is a camera trick. There is no `cameraOverride`, no pause and
+   * no second scene object: this teleports the one `Player` the game already
+   * has, so collision, interact zones, the parade, the HUD and every control
+   * are live from the first frame — the question `/view` cannot answer is
+   * *"does it feel right to stand here?"*, and only the actual character
+   * standing there can.
+   *
+   * `y` omitted means "stand on whatever the ground is", sampled through
+   * `Player`'s own sampler rather than a second copy of the terrain question.
+   * Pass it only for somewhere the ground is not a function of the terrain — a
+   * deck, a bridge, the castle.
+   *
+   * `facing` omitted turns her to look at the middle of the park, the same
+   * spirit as `/view`'s `camDir` defaulting to looking back at the origin: a
+   * hand-typed URL with no bearing in it should still open on the park rather
+   * than on whatever happens to be behind her.
+   *
+   * **The camera is snapped, not eased.** Without this it opens on the
+   * entrance (where the constructor put her) and glides across the park to
+   * catch up — the exact opening-pan bug `world/entrance/arrivalSpawn.ts`
+   * records, arrived at from the other direction.
+   */
+  enterDebugSpawn(x: number, z: number, y?: number, facing?: number): void {
+    // A `rotation.y` of `t` sends local +Z to world `(sin t, cos t)`, so
+    // looking at the origin from `(x, z)` is the bearing of `(-x, -z)`. At the
+    // origin itself that degenerates (`atan2(0, 0)` is 0, i.e. an arbitrary
+    // direction), so fall back to the bearing a fresh game starts on.
+    const towardsCentre =
+      x === 0 && z === 0 ? DEFAULT_SPAWN_FACING : Math.atan2(-x, -z);
+    const yaw = facing ?? towardsCentre;
+    if (y === undefined) this.player.teleport(x, z, yaw);
+    else this.player.teleportTo(x, y, z, yaw);
+    this.camera.snapTo(this.player.position);
+  }
+
   start(): void {
     if (this.started) return;
     this.started = true;

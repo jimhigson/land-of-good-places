@@ -158,14 +158,31 @@ again on every single round of feedback.
 
 So, in order of preference:
 
+- **`/spawn?pos=x,z&facing=deg`** whenever the thing is somewhere he would
+  **stand at or interact with**, rather than only look at — a moved prop, a
+  fixed collider, a doorway, a bug's own square metre. It puts the real,
+  controllable character on that exact spot, so he can walk about, bump into
+  things and press the button, which is the only way to answer "does this
+  feel right?". Works on any seed and on any coordinate, so nothing has to
+  be wired up in advance. This is the default answer now.
 - **A ride deep link** — `/rail-race`, `/slide`, `/sky-cruiser`, `/ferris`
-  (the list below).
-- **`/view?camPos=...&camDir=...`** for anything that is not a ride: a
-  building, a statue, the boundary, a bit of scenery. It puts the camera on
-  the thing, and it works on any seed.
+  (the list below) — when the thing to see is a **specific ride**, boarded.
+  `/spawn` cannot board one; these can, and they still skip the walk.
+- **`/view?camPos=...&camDir=...`** when it really is a **pure look-at-this**:
+  a rooftop, the boundary, the sky at 21:40, a bit of geometry seen from an
+  angle no player could stand at. A free camera goes where a child cannot,
+  and freezes the clock, which `/spawn` deliberately does not.
 - **Only then a bare root**, and if you are giving one, say so — "no deep link
   for this yet, walk out of the castle and turn left" — rather than leaving it
   to be discovered.
+
+Between the top two: **if the answer to "what should he do when he gets
+there?" is anything other than "ride it", use `/spawn`.** Between `/spawn` and
+`/view`: **if he needs to be *in* the park rather than *above* it, use
+`/spawn`.** Sending a bare root for a spot that has coordinates is now the
+same mistake as sending a bare root for a ride that has a deep link — the
+coordinates are free, and you already have them from whatever you were
+measuring.
 
 **If the feature you are asking about has no deep link, that is usually one
 line to add** in `RIDE_DEEP_LINKS`, and worth adding rather than writing
@@ -197,6 +214,50 @@ works for **both** kinds of ride: a world ride that `Game.ts` wired into
 `MiniGameHost.boardRide`, and a stall with a curtain mini-game behind it
 (`/ferris` today), because `launchGame` tries the ride and falls back to
 `MiniGameHost.open`.
+
+**`/spawn` — the real player, standing anywhere you like (#320):**
+
+```
+/spawn?pos=x,z&facing=deg
+```
+
+Skips character creation and the cat bus, then puts the **actual character**
+on that coordinate, ready to walk. Not a camera: collision, interact zones,
+the parade, the HUD and every control are live on the first frame, so the
+thing you sent somebody to look at can be walked around, bumped into and
+pressed. Jim, 21 August 2026: *"we need a way to go straight into the game,
+skipping character creation, and the bus, and with the player starting at a
+given co-ordinate."*
+
+- **`pos=x,z`** — plain metres, comma-separated, no encoding, the same style
+  as `/view`'s `camPos`. **Two numbers is the normal form**: the height is
+  then sampled from the ground under her, which is the answer anyone reading
+  a coordinate off a top-down view wants and cannot supply. `pos=x,y,z` is
+  accepted too, in the same order `camPos` takes, for the places where the
+  ground is not a function of the terrain — a deck, a bridge, a castle floor.
+- **`facing=deg`** — the same yaw `Player.facing` keeps, in degrees: `0` looks
+  along +Z, `90` along +X. Optional; omitted, she turns to look at the middle
+  of the park, so a URL with no bearing in it still opens on something.
+- **Works on a fresh profile and on a returning save**, exactly as the ride
+  deep links do — the welcome-back prompt is skipped either way, because
+  there is nobody to ask. On a returning save it deliberately ignores
+  `save.place` (everything else the save carries is kept): a save written
+  inside the hotel restores by position *plus* room adoption, and teleporting
+  out afterwards would leave her standing in the park inside a hotel room's
+  bounds.
+- **A bad coordinate never breaks the boot.** An unreadable `pos` logs a
+  console warning and opens the park at the ordinary spawn instead — these
+  are typed by hand, often off a screenshot, and a missed comma should not
+  fail in front of whoever was sent the link.
+- **For an interior, use the `/hotel…` links, not this.** Those bind the play
+  bounds to the room they land in; `/spawn` drops her at a world coordinate
+  and does not, so a coordinate inside a building gets you the geometry
+  without the space.
+- Same spirit as the two below: a URL a developer types, never a button a
+  child presses, and it works against a production build too — so
+  `landofgoodplaces.blockstack.ing/spawn?pos=...` stands you on the live park.
+- See `parseDebugSpawn` and the `DeepLink` union in `main.ts`, and
+  `Game.enterDebugSpawn`.
 
 **`/view` — a debug camera, for checking rendering without playing the game:**
 
@@ -502,6 +563,18 @@ When Jim asks for a change to CLAUDE.md itself, edit it and push straight to
 
 Raise with `gh pr create`. **Do not merge your own work** — every PR gets two
 peer reviews plus QA, and the Overseer merges.
+
+**One standing exception, and it is one PR wide.** Jim, 21 August 2026, on
+issue #320: the `/spawn` deep link PR is **pre-approved to merge the moment it
+passes QA** — it does not wait for his personal merge sign-off, because it is
+developer tooling rather than anything in the park. It still gets the normal
+code review and the normal real-browser QA first; only the "wait for Jim"
+step is waived, and only for that PR. **This is not a general loosening.**
+Every other PR — including a later change *to* `/spawn` — goes through the
+usual gate. Do not read this paragraph as licence to self-merge anything on
+the grounds that it is "only tooling"; if you are asking whether yours
+qualifies, it does not, because the only PR that qualifies is the one Jim
+named.
 
 **Reviewers:** `gh pr review --request-changes` will be refused — every agent
 commits as the same GitHub user, so GitHub thinks you are reviewing your own
