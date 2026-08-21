@@ -60,6 +60,20 @@ export const MAX_RAMP_GRADIENT = 0.6;
 export const RAMP_CLEARANCE = 2.0;
 
 /**
+ * Ordinary safety stride a ramp's own edge keeps past `GARDEN_PLAY_BOUNDARY`
+ * — {@link planBridgeFootprints}'s pass-1 deck-width loop already uses this
+ * same value (there, inline) to keep the *deck's* edge clear at its own two
+ * along-extremes; named here so `truncateForBoundary`'s tier-1 default can
+ * ask the identical question of the *ramp's* edge, at every point along it,
+ * rather than each staying its own hand-picked number that can drift apart.
+ * Deliberately a flat metres-of-daylight figure, not scaled by `halfAcross`
+ * — the ramp's own edge is what gets tested directly (every `t` in
+ * `truncateForBoundary`'s own sampling), so nothing here needs to infer the
+ * edge's position from the centreline any more.
+ */
+const RAMP_BOUNDARY_MARGIN = 1.5;
+
+/**
  * Extra width, beyond a crossing's own self-measured `halfGap`, that the
  * deck and every ramp tread carry before a guard rail stands.
  *
@@ -202,19 +216,30 @@ export function planBridgeFootprints(crossings: readonly LevelCrossing[]): Bridg
     // metres inside the boundary there (the gate *is* the boundary), and a
     // deck several metres wider than that on each side cannot fit no
     // matter how short its ramps are. Checked at the deck's own two
-    // extremes (`along = ±DECK_HALF_LENGTH`), which is where the full
-    // width actually has to stand; reduced until both sides of the deck
-    // are genuinely inside, with a stride of margin so a walker at the
-    // very edge is not standing on the boundary itself.
-    for (const along of [-DECK_HALF_LENGTH, DECK_HALF_LENGTH]) {
-      for (const sign of [1, -1] as const) {
-        while (halfAcross > 1) {
-          const x = cx + dirX * along + acrossX * halfAcross * sign;
-          const z = cz + dirZ * along + acrossZ * halfAcross * sign;
-          if (GARDEN_PLAY_BOUNDARY.distanceToEdge(x, z) >= 1.5) break;
-          halfAcross -= 0.5;
+    // along-extremes (`along = ±DECK_HALF_LENGTH`), and — critically —
+    // across the *whole* width at each, not just its two outer edges: a
+    // curved boundary can dip closer to an *interior* point of the deck's
+    // own cross-section than to either edge (found live by QA on PR #297,
+    // seed 18's gate-walk crossing: shrinking `halfAcross` until the two
+    // extreme edges cleared left an interior point, `t ≈ 0.4` between
+    // centre and edge, only `0.13 m` from the boundary, real collision
+    // pushback `0.49 m`, at the *deck's own edge* rather than any ramp —
+    // the same "sampled only the extremes" shape `truncateForBoundary`'s
+    // own ramp-length fix already closed one class down). Reduced together
+    // until every sampled point clears, with a stride of margin so a
+    // walker at the very edge is not standing on the boundary itself.
+    const clearsBoundaryAt = (testHalfAcross: number): boolean => {
+      for (const along of [-DECK_HALF_LENGTH, DECK_HALF_LENGTH]) {
+        for (const t of [-1, -0.5, 0, 0.5, 1]) {
+          const x = cx + dirX * along + acrossX * testHalfAcross * t;
+          const z = cz + dirZ * along + acrossZ * testHalfAcross * t;
+          if (GARDEN_PLAY_BOUNDARY.distanceToEdge(x, z) < 1.5) return false;
         }
       }
+      return true;
+    };
+    while (halfAcross > 1 && !clearsBoundaryAt(halfAcross)) {
+      halfAcross -= 0.5;
     }
 
     // Same shape, against every nearby layout entry — a wide, oblique
@@ -226,17 +251,21 @@ export function planBridgeFootprints(crossings: readonly LevelCrossing[]): Bridg
     // `halfAcross` 6.84 m, wide enough that even its very first ramp tread
     // — before any rail-loop or plot ramp-truncation ran — still stood
     // 0.98 m inside `stall.spookyHouse`'s own wall). Reduced the same way
-    // the boundary loop above is, so a walker at the deck's own edge always
-    // has {@link RAMP_PLOT_MARGIN} of daylight past the nearest plot.
-    for (const along of [-DECK_HALF_LENGTH, DECK_HALF_LENGTH]) {
-      for (const sign of [1, -1] as const) {
-        while (halfAcross > 1) {
-          const x = cx + dirX * along + acrossX * halfAcross * sign;
-          const z = cz + dirZ * along + acrossZ * halfAcross * sign;
-          if (clearOfPlots(x, z, RAMP_PLOT_MARGIN)) break;
-          halfAcross -= 0.5;
+    // the boundary loop above is — every `t` across the width, not just
+    // the two outer edges — so a walker anywhere on the deck's own edge
+    // always has {@link RAMP_PLOT_MARGIN} of daylight past the nearest plot.
+    const clearsPlotsAt = (testHalfAcross: number): boolean => {
+      for (const along of [-DECK_HALF_LENGTH, DECK_HALF_LENGTH]) {
+        for (const t of [-1, -0.5, 0, 0.5, 1]) {
+          const x = cx + dirX * along + acrossX * testHalfAcross * t;
+          const z = cz + dirZ * along + acrossZ * testHalfAcross * t;
+          if (!clearOfPlots(x, z, RAMP_PLOT_MARGIN)) return false;
         }
       }
+      return true;
+    };
+    while (halfAcross > 1 && !clearsPlotsAt(halfAcross)) {
+      halfAcross -= 0.5;
     }
     return { cx, cz, dirX, dirZ, acrossX, acrossZ, halfAcross };
   });
@@ -296,9 +325,9 @@ export function planBridgeFootprints(crossings: readonly LevelCrossing[]): Bridg
     // inside too — a ramp near the rim genuinely reached past the edge
     // (found live, issue #116: `GARDEN_PLAY_BOUNDARY.distanceToEdge` read
     // negative partway along it). `distanceToEdge` is a signed field —
-    // "a corridor of width w fits wherever distanceToEdge >= w" is its own
-    // documented contract — so asking it to clear `halfAcross`, the ramp's
-    // own half-width, is the direct question, not an approximation.
+    // asked directly of every point actually on the ramp's own surface
+    // (see `clearAt` below, which samples the real width, not an
+    // edge-from-centreline approximation).
     //
     // Walked in 1 m steps along the *whole* ramp, not just tested at its
     // far end: `GARDEN_PLAY_BOUNDARY` is a spline, not a circle, and it can
@@ -340,32 +369,47 @@ export function planBridgeFootprints(crossings: readonly LevelCrossing[]): Bridg
     // 0.19–0.34 m inside the boundary respectively, and the unconditional
     // `0.5 m` floor then landed the far tread 0.06–0.20 m *past* it. So the
     // floored value is walked back down here, in fine (0.1 m) steps, until
-    // its own far tread genuinely clears the boundary by `halfAcross` —
-    // never assumed safe just because it is short. This can reach `0` (no
+    // its own far tread genuinely clears the boundary by `requiredClearance`
+    // — never assumed safe just because it is short. This can reach `0` (no
     // ramp reach on this side at all): the gate-walk crossing's tight side
     // faces *outward*, past the gate the walk-in samples run from
     // (`crossings.ts`'s own note), so nobody ever needs to stand there —
     // unlike the boundary-truncation loop's own "too cramped to reach
     // `BRIDGE_RISE`" case above, a `0`-length ramp on one side is not a
     // failure, it is the correct answer for a side nothing walks on.
-    const truncateForBoundary = (sign: 1 | -1, requiredClearance = halfAcross): number => {
+    //
+    // **Sampled across the ramp's whole width, not just its centreline** —
+    // the same reason `truncateForPlots`/`truncateForRailLoop` already
+    // sample every `t` in `[-1, -0.5, 0, 0.5, 1]` rather than one ray down
+    // the middle. A ramp several metres wide can have its centreline
+    // comfortably inside `GARDEN_PLAY_BOUNDARY` while an outer edge is not:
+    // found live by QA on PR #297, canonical seed — the crossing at
+    // (12.64, 57.02), `halfAcross` ≈ 4.48 m, had its centreline clearing
+    // the boundary by 0.418 m at the worst point while its outer edge, 4.48
+    // m further across at the very same `along`, was still `1.385 m` past
+    // it outright (a real `collision.resolve()` pushback of `2.454 m`) —
+    // this function's own two loops only ever asked the centreline, so
+    // neither the coarse walk nor the fine backoff had any way to see it.
+    const truncateForBoundary = (sign: 1 | -1, requiredClearance = RAMP_BOUNDARY_MARGIN): number => {
+      const clearAt = (along: number): boolean => {
+        for (const t of [-1, -0.5, 0, 0.5, 1]) {
+          const x = cx + dirX * along * sign + acrossX * halfAcross * t;
+          const z = cz + dirZ * along * sign + acrossZ * halfAcross * t;
+          if (GARDEN_PLAY_BOUNDARY.distanceToEdge(x, z) < requiredClearance) return false;
+        }
+        return true;
+      };
       let rampRun = idealRampRun;
       const steps = Math.max(1, Math.ceil(rampRun));
       for (let i = 1; i <= steps; i += 1) {
         const along = DECK_HALF_LENGTH + (i / steps) * rampRun;
-        const x = cx + dirX * along * sign;
-        const z = cz + dirZ * along * sign;
-        if (GARDEN_PLAY_BOUNDARY.distanceToEdge(x, z) < requiredClearance) {
+        if (!clearAt(along)) {
           rampRun = Math.max(0.5, along - DECK_HALF_LENGTH - 1.5);
           break;
         }
       }
       const BACKOFF_STEP = 0.1;
-      while (rampRun > 0) {
-        const along = DECK_HALF_LENGTH + rampRun;
-        const x = cx + dirX * along * sign;
-        const z = cz + dirZ * along * sign;
-        if (GARDEN_PLAY_BOUNDARY.distanceToEdge(x, z) >= requiredClearance) break;
+      while (rampRun > 0 && !clearAt(DECK_HALF_LENGTH + rampRun)) {
         rampRun = Math.max(0, rampRun - BACKOFF_STEP);
       }
       return rampRun;
