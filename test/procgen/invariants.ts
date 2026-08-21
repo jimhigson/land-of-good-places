@@ -3303,10 +3303,20 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
     return Math.hypot(probe.x - x, probe.z - z) < 1e-3;
   };
 
+  // Perpendicular to the crossing's own path direction — the same
+  // `acrossX = -dirZ, acrossZ = dirX` convention `bridgeFootprint.ts` uses
+  // for `halfAcross`, restated here rather than imported (this file's own
+  // header on why seed-dependent modules stay out of static imports).
+  const acrossOf = (crossing: { pathDirX: number; pathDirZ: number }): [number, number] => [
+    -crossing.pathDirZ,
+    crossing.pathDirX,
+  ];
+
   for (const crossing of facts.world.train.crossings) {
     const bridge = facts.world.train.bridges.find((b) => b.deckCovers(crossing.x, crossing.z));
     if (!bridge) continue; // reported by railwayClearanceCoversTheTrainAndItsRiders above
     const deckHeight = heightAt(crossing.x, crossing.z) ?? bridge.deckY;
+    const [acrossX, acrossZ] = acrossOf(crossing);
 
     if (!facts.reachableFromEntrance(crossing.x, crossing.z, deckHeight)) {
       complaints.push(
@@ -3316,6 +3326,21 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
     }
     if (!standableAt(crossing.x, crossing.z, deckHeight)) {
       complaints.push(`the bridge deck at (${fmt([crossing.x, crossing.z])}) is not itself standable`);
+    }
+
+    // The deck's own real half-width, walked outward empirically off the
+    // built `Bridge` (`deckCovers`) rather than re-imported from
+    // `bridgeFootprint.ts`'s own `halfAcross` — that module reaches
+    // `./plan` → `./route`/`../coaster/plan`, exactly the seed-dependent
+    // static-import trap this file's header warns about, so it stays
+    // unimported here the same as everywhere else in this function.
+    const WIDTH_STEP = 0.5;
+    let deckHalfAcross = 0;
+    for (let w = WIDTH_STEP; w <= 15; w += WIDTH_STEP) {
+      const x = crossing.x + acrossX * w;
+      const z = crossing.z + acrossZ * w;
+      if (!bridge.deckCovers(x, z)) break;
+      deckHalfAcross = w;
     }
 
     // A point partway down each ramp — comfortably on the slope, clear of
@@ -3355,6 +3380,40 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
         if (!bridge.deckCovers(x, z)) break;
         deckEdge = d;
       }
+
+      // **Swept across the deck's own real width at this edge, not just
+      // its centreline.** The centre-point check above only asks whether
+      // the crossing's own track-centre point stands; a deck several
+      // metres wide can have that centre clear while an edge, part-way
+      // along its forward or backward face, is not. Found live extending
+      // PR #297 round 4's width-sweep fix (which closed the identical gap
+      // in `truncateForBoundary`'s ramp-length check) to
+      // `bridgeFootprint.ts`'s own pass-1 deck-width loop: seed 18's
+      // gate-walk crossing has `halfAcross` bottomed out at its hardcoded
+      // 1 m floor, and every point along that deck's own forward edge is
+      // still only 0.108–0.209 m from `GARDEN_PLAY_BOUNDARY` — real
+      // collision pushback up to 0.505 m. Confirmed pre-existing
+      // (identical numbers reproduce against `bridgeFootprint.ts` from
+      // before that round's fix), not something the width-sweep fix
+      // caused — filed as issue #317 rather than silently weakening this
+      // check to let seed 18 pass, per this file's own "never weaken an
+      // assertion to make a seed pass" rule.
+      if (deckHalfAcross > 0.5) {
+        for (const t of [-0.9, -0.45, 0, 0.45, 0.9]) {
+          const ex = crossing.x + crossing.pathDirX * deckEdge * sign + acrossX * deckHalfAcross * t;
+          const ez = crossing.z + crossing.pathDirZ * deckEdge * sign + acrossZ * deckHalfAcross * t;
+          const eh = heightAt(ex, ez);
+          if (eh === null) continue; // off the deck's own built extent — nothing to probe
+          if (!standableAt(ex, ez, eh)) {
+            complaints.push(
+              `the bridge deck at (${fmt([crossing.x, crossing.z])}) is not standable at ` +
+                `(${fmt([ex, ez])}) — ${(t * 100).toFixed(0)}% across its own ${(deckHalfAcross * 2).toFixed(1)} m ` +
+                `width at the ${sign > 0 ? 'forward' : 'backward'} edge (see issue #317)`,
+            );
+          }
+        }
+      }
+
       let rampEdge = deckEdge;
       for (let d = deckEdge + STEP; d <= deckEdge + 25; d += STEP) {
         const x = crossing.x + crossing.pathDirX * d * sign;
@@ -3365,16 +3424,29 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
       const rampReach = rampEdge - deckEdge;
       if (rampReach < 1) continue; // this side's real, built ramp is too cramped to probe — nothing stands here to fail on
       const probeAlong = deckEdge + rampReach * 0.9;
-      const rx = crossing.x + crossing.pathDirX * probeAlong * sign;
-      const rz = crossing.z + crossing.pathDirZ * probeAlong * sign;
-      const rampHeight = heightAt(rx, rz);
-      if (rampHeight === null) continue; // should not happen given the walk above, but never trust a probe blindly
-      if (!standableAt(rx, rz, rampHeight)) {
-        complaints.push(
-          `the ramp at (${fmt([rx, rz])}), ${probeAlong.toFixed(1)} m out from the crossing at ` +
-            `(${fmt([crossing.x, crossing.z])}) — 90% of its real, built ${rampReach.toFixed(1)} m ramp reach on ` +
-            `this side — is not standable`,
-        );
+
+      // **Swept across the ramp's own real width, not just its
+      // centreline** — the exact QA finding this round: PR #297,
+      // canonical seed, the crossing at (12.64, 57.02) had its centreline
+      // clearing `GARDEN_PLAY_BOUNDARY` by 0.418 m at the worst point
+      // while its outer edge, `halfAcross` further across at the same
+      // `along`, was still 1.385 m past it — real pushback 2.454 m — and
+      // this loop's own single centreline probe had no way to see it.
+      // `bridges.ts` builds every ramp tread as a `RectPlatform` at the
+      // deck's own uniform `halfAcross` (no taper), so the same
+      // `deckHalfAcross` measured off the deck above applies here too.
+      for (const t of deckHalfAcross > 0.5 ? [-0.9, -0.45, 0, 0.45, 0.9] : [0]) {
+        const rx = crossing.x + crossing.pathDirX * probeAlong * sign + acrossX * deckHalfAcross * t;
+        const rz = crossing.z + crossing.pathDirZ * probeAlong * sign + acrossZ * deckHalfAcross * t;
+        const rampHeight = heightAt(rx, rz);
+        if (rampHeight === null) continue; // off the ramp's own built width at this t — nothing to probe
+        if (!standableAt(rx, rz, rampHeight)) {
+          complaints.push(
+            `the ramp at (${fmt([rx, rz])}), ${probeAlong.toFixed(1)} m out from the crossing at ` +
+              `(${fmt([crossing.x, crossing.z])}), ${(t * 100).toFixed(0)}% across its width — 90% of its real, ` +
+              `built ${rampReach.toFixed(1)} m ramp reach on this side — is not standable`,
+          );
+        }
       }
     }
   }
