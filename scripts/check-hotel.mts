@@ -351,9 +351,11 @@ for (const [index, spot] of SUITE_BED_SPOTS.entries()) {
 // bed and pet meshes, not graceful degradation. This checks the function
 // itself at several counts, including well past the shop's four species —
 // 1 (the fresh-save fallback), 8 (what the review specifically asked to be
-// exercised), 20 (well into the bedroom's real 28-slot capacity) and 30
-// (past that capacity, proving the cap degrades by drawing *fewer* beds
-// than requested rather than by overlapping two of them) — proving by pure
+// exercised), 20 (well into the bedroom's real 27-slot capacity — 28 raw
+// tile positions, minus one `clearsDoorways` throws out for grazing the hall
+// doorway's own zone at this room's geometry) and 30 (past that capacity,
+// proving the cap degrades by drawing *fewer* beds than requested rather
+// than by overlapping two of them) — proving by pure
 // geometry, for every count, that no two returned slots coincide or
 // overlap, every slot clears the human bed, its bedside table and every
 // doorway, and every slot stays on the bedroom's own real floor (derived
@@ -371,10 +373,11 @@ for (const [index, spot] of SUITE_BED_SPOTS.entries()) {
       problems.push(`petBedSlots(${count}) returned ${slots.length} slots — more than asked for`);
       continue;
     }
-    if (slots.length < count && count <= 28) {
+    if (slots.length < count && count <= 27) {
       problems.push(
         `petBedSlots(${count}) returned only ${slots.length} slots, short of the bedroom's own ` +
-          `28-slot capacity (4 rows × 7 columns) — a slot generator regression, not real capacity`,
+          `27-slot capacity (28 raw tile positions minus one doorway-zone reject) — a slot ` +
+          `generator regression, not real capacity`,
       );
     }
     for (const [index, slot] of slots.entries()) {

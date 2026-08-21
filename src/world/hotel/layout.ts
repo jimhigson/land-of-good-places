@@ -1724,6 +1724,32 @@ function petBedRowsZ(bedIndex: number): number[] {
 }
 
 /**
+ * Does a pet bed centred at `(x, z)` clear every zone in `doors`? The same
+ * clamped-point-to-rectangle test `place.ts`'s `isClearOfDoorways` uses for
+ * every other prop, reimplemented here (four lines of pure geometry) rather
+ * than imported — `place.ts` already imports {@link doorwayClearanceZones}
+ * *from* this file, so importing back would be circular.
+ *
+ * {@link PET_BED_DOORWAY_MARGIN} only ever bounded the row's own *z*, one
+ * doorway at a flat distance; it stayed blind to a row's *columns*, which
+ * can sit close enough to a doorway's own width to graze its zone on the
+ * diagonal even while comfortably clear on z alone (found on #279's rebase
+ * over #278's widened `DOORWAY_THROUGH_DEPTH`: the innermost west column of
+ * the bedroom's last row, 0.57 m off the door's own edge in x and 0.19 m in
+ * z, at 0.601 m from the zone's corner — inside the bed's own 0.62 m
+ * radius). Checking every candidate against the real zones this room's own
+ * doorways produce is what actually proves the whole footprint clears them,
+ * not just the row that carries it.
+ */
+function clearsDoorways(x: number, z: number, doors: readonly DoorwayZone[]): boolean {
+  return doors.every((door) => {
+    const nearestX = Math.max(door.minX, Math.min(x, door.maxX));
+    const nearestZ = Math.max(door.minZ, Math.min(z, door.maxZ));
+    return Math.hypot(x - nearestX, z - nearestZ) >= PET_BED_FOOTPRINT_RADIUS;
+  });
+}
+
+/**
  * Enough non-overlapping pet-bed slots for `count` pets, in one bedroom's own
  * local metres — one per pet the player owns, see `Hotel.dressPetBeds`
  * (issue #275). **Here, not a hand-typed list in `Hotel.ts`, for the same
@@ -1738,20 +1764,24 @@ function petBedRowsZ(bedIndex: number): number[] {
  * `bedIndex` picks which of {@link SUITE_BED_SPOTS}' three bedrooms the row
  * tiles across — **default 1, the middle bedroom**, exactly the original
  * (and still primary) behaviour: that room alone was doubled by issue #274
- * for this, and fits *four* rows of *seven* columns — 28 slots, twice what
- * `check:hotel` asks this function to place at once. `Hotel.dressPetBeds`
- * passes 0 or 2 for the two side bedrooms, one slot at a time — see the
- * doc comment on {@link humanFurnitureKeepOutX} for why a second bedroom's
- * worth of calls exists at all now.
+ * for this, and its four rows of seven columns tile out to 28 raw slots —
+ * minus whichever ones {@link clearsDoorways} throws out for actually
+ * grazing the hall doorway's own zone (one, at the middle bedroom's current
+ * geometry: the innermost west column of the southmost row), leaving 27
+ * usable — twice what `check:hotel` asks this function to place at once.
+ * `Hotel.dressPetBeds` passes 0 or 2 for the two side bedrooms, one slot at
+ * a time — see the doc comment on {@link humanFurnitureKeepOutX} for why a
+ * second bedroom's worth of calls exists at all now.
  *
  * Tiles every row {@link petBedRowsZ} finds for that bedroom — north of its
  * own human bed and bedside table, south of them down to short of the hall
  * doorway — outward from that furniture, west then east, across the
  * bedroom's own **real** clear floor at each row ({@link clearFloorAround},
- * never a hand-typed wall position). A `count` past a bedroom's own capacity
- * is capped rather than reusing a slot: nothing drawn is safer than
- * something drawn twice in the same spot, and no purchase this game's shop
- * can produce reaches the middle bedroom's 28 (four species, so a genuinely
+ * never a hand-typed wall position), then drops any candidate
+ * {@link clearsDoorways} rejects. A `count` past a bedroom's own capacity is
+ * capped rather than reusing a slot: nothing drawn is safer than something
+ * drawn twice in the same spot, and no purchase this game's shop can
+ * produce reaches the middle bedroom's 27 (four species, so a genuinely
  * dedicated collector would need to buy the same pet seven times over before
  * a bed failed to appear for one of them).
  */
@@ -1761,6 +1791,7 @@ export function petBedSlots(
 ): readonly { readonly x: number; readonly z: number }[] {
   const keepOut = humanFurnitureKeepOutX(bedIndex);
   const bedX = (SUITE_BED_SPOTS[bedIndex] ?? [0, 0])[0];
+  const doors = doorwayClearanceZones(SUITE, PLAYER_RADIUS);
   const slots: { readonly x: number; readonly z: number }[] = [];
   for (const z of petBedRowsZ(bedIndex)) {
     const rect = clearFloorAround(SUITE, bedX, z);
@@ -1770,7 +1801,7 @@ export function petBedSlots(
       x - PET_BED_FOOTPRINT_RADIUS >= rect.minX;
       x -= PET_BED_PITCH
     ) {
-      west.push(x);
+      if (clearsDoorways(x, z, doors)) west.push(x);
     }
     const east: number[] = [];
     for (
@@ -1778,7 +1809,7 @@ export function petBedSlots(
       x + PET_BED_FOOTPRINT_RADIUS <= rect.maxX;
       x += PET_BED_PITCH
     ) {
-      east.push(x);
+      if (clearsDoorways(x, z, doors)) east.push(x);
     }
     // Closest to the human furniture first, alternating west and east.
     const columns = Math.max(west.length, east.length);
