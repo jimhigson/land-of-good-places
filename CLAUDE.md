@@ -29,6 +29,25 @@ edits, **leave it exactly as you found it** — that is somebody's live work.
 - Never `git add -A` or `git add .`. Name the files you mean.
 - `.claude/` is gitignored; worktree gitlinks must never reach `main`.
 
+## Zero tolerance for CI failure
+
+**ZERO failures in CI are acceptable.** A failure in CI is just as serious
+as a failure of the deployed application, and must never be brushed aside —
+not as "pre-existing," not as "unrelated to this PR," not as "known,"
+not as anything else. A red check on `main` is `main` being broken, in
+exactly the same sense a crash in the shipped game would be.
+
+**Flakiness is equal to failure.** No retries to gloss over a flaky check —
+the fix is to find and remove the root non-determinism, regardless of how
+hard that is. A check that fails one run in five is not "mostly passing," it
+is failing; treat it exactly like a check that fails every time.
+
+**Flaky is equal to failing is equal to a complete failure to deliver.**
+Live this from here on: a red check anywhere, on any branch, gets root-caused
+and fixed before anything else proceeds — never disclosed-and-left, never
+"someone else's problem," never deferred because a PR's own diff didn't
+cause it. If a check is red when you find it, fixing it is the work now.
+
 ## Building
 
 `npm run build` must pass. **Run it and check the exit code.** Never pipe a
