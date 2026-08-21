@@ -904,6 +904,16 @@ export class Hotel implements GameSystem {
   private readonly facadeYaw: number;
   private readonly facadeX: number;
   private readonly facadeZ: number;
+  /**
+   * The anchor's own "entrance" point — `world/anchors.ts`'s `entrance: [p.
+   * entranceX, p.entranceZ]`, the exact spot `ui/ParkMap.ts` draws this
+   * attraction's pin at. Both come from the same `placedEntry('hotel')`
+   * call, stored here rather than re-read, so {@link exteriorEntranceZone}
+   * can size itself to reach it without a second, hand-picked constant that
+   * could drift out of sync with wherever the solver puts it.
+   */
+  private readonly entranceX: number;
+  private readonly entranceZ: number;
 
   private readonly collision: CollisionWorld;
   private readonly controls: InteriorControls;
@@ -925,6 +935,8 @@ export class Hotel implements GameSystem {
     const plot = placedEntry('hotel');
     this.facadeX = plot.x;
     this.facadeZ = plot.z;
+    this.entranceX = plot.entranceX;
+    this.entranceZ = plot.entranceZ;
     // The door faces the doormat the solver placed — the tower is a cluster
     // of crystals, so any yaw is as natural as any other.
     this.facadeYaw = Math.atan2(plot.entranceX - plot.x, plot.entranceZ - plot.z);
@@ -1310,16 +1322,39 @@ export class Hotel implements GameSystem {
    * from its centre out to the facade routes with zero shortfall). One
    * number, already owned by {@link towerDoorBand}, used here instead of
    * copied.
+   *
+   * **`pickRadius` reaches at least as far as {@link entranceX}/{@link
+   * entranceZ}** — the exact point `world/anchors.ts` reports as this
+   * anchor's `entrance` and `ui/ParkMap.ts` draws the tower's pin at. PR
+   * #315's second review round found the two 9.38 m apart on one seed: this
+   * zone was centred on the tower's true plot centre (`facadeX`/`facadeZ`)
+   * with a fixed `TOWER_SHELL_RADIUS + 2` reach, which happened to fall just
+   * short of wherever the solver had put the doormat that seed, so tapping
+   * the pin a family actually sees fell through to a plain ground walk and
+   * the doorway trigger never had a chance to fire — the "two definitions of
+   * one thing" bug class CLAUDE.md names as this repo's most common, with
+   * the map's pin and this zone's reach kept in step by two separate
+   * numbers instead of one owner. Deriving the radius from the real,
+   * measured distance to the entrance point — rather than nudging the
+   * constant up until this seed's number happens to clear it — means it
+   * always covers the pin, whatever a future reseed puts it at, with no
+   * second number to fall out of sync again. `Math.max` with
+   * `TOWER_SHELL_RADIUS` keeps the whole crystal footprint tappable too, on
+   * a seed where the entrance sits unusually close to centre.
    */
   private exteriorEntranceZone(): InteractZone {
     const band = this.towerDoorBand();
+    const entranceReach = Math.hypot(
+      this.entranceX - this.facadeX,
+      this.entranceZ - this.facadeZ,
+    );
     return {
       id: 'hotel-entrance',
       label: 'The Land Hotel',
       x: this.facadeX,
       y: this.surfaces.sample(this.facadeX, this.facadeZ, 3),
       z: this.facadeZ,
-      pickRadius: TOWER_SHELL_RADIUS + 2,
+      pickRadius: Math.max(TOWER_SHELL_RADIUS, entranceReach) + 1,
       standX: band.centreX,
       standZ: band.centreZ,
     };
