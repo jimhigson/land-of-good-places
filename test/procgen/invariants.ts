@@ -4609,13 +4609,38 @@ const OPEN_SPAN_PATH_CLEARANCE = 2.8;
 const OPEN_SPAN_PLOT_SKIRT = 2.4;
 
 /**
+ * How low the built rail may stand above the terrain and still count as
+ * "explained by the station dip" — `pylons.ts`'s own `MIN_PYLON_HEIGHT`,
+ * kept in step for the same reason as {@link OPEN_SPAN_PATH_CLEARANCE} and
+ * {@link OPEN_SPAN_PLOT_SKIRT} above.
+ *
+ * **Found on seed 18, 21 August 2026 (issue #312).** Every candidate this
+ * check flagged as an unexplained 16 m gap turned out to sit over the
+ * station's own boarding dip, where `planCruiserPylons` never even reaches
+ * its foliage-clearing step — every attempted spot in that stretch was
+ * refused for being *too low* (0.22-1.57 m of rail above the ground, against
+ * a 1.4 m floor), the exact scenario `MIN_PYLON_HEIGHT`'s own comment names:
+ * "it is exactly where the track is low ... that a child is most likely to
+ * be walking beside it". No tree or bush was ever in play, so issue #301's
+ * fix had nothing to do here — a low rail standing near the ground does not
+ * read as floating, it reads as *grounded*, which is a third legitimate
+ * reason for a gap, the same shape as standing over a plot or the paved
+ * network. This check recognised only two of the three; the third is now
+ * measured too, from {@link ParkFacts.cruiserRouteGroundClearance} — sampled
+ * off the built loop and terrain, not re-derived from `pylons.ts`'s own
+ * rule.
+ */
+const OPEN_SPAN_MIN_PYLON_HEIGHT = 1.4;
+
+/**
  * **No unsupported span may run this far over plain open lawn**, in metres —
  * the second half of issue #301's fix, and the tighter counterpart to
  * {@link CRUISER_MAX_UNSUPPORTED_SPAN} above.
  *
  * That constant is deliberately loose because a long gap over the castle, a
- * plot or the paved network is *correct* — a post genuinely may not stand
- * there. This one is not loose, because open lawn carries no such excuse: if
+ * plot, the paved network, or the station's own boarding dip is *correct* —
+ * a post genuinely may not stand there, or would be clutter where a child is
+ * walking. This one is not loose, because open lawn carries no such excuse: if
  * a candidate spot there was refused, the only thing that could have refused
  * it before this PR was a tree or a bush, and issue #301 is exactly Jim
  * finding one of those refusals live — a support-free stretch of track
@@ -4623,26 +4648,30 @@ const OPEN_SPAN_PLOT_SKIRT = 2.4;
  *
  * **Measured, not targeted.** For every gap between two consecutive built
  * pylons, this walks the gap in 1 m steps and finds the longest run that sits
- * outside every plot's `boundingRadius + `{@link OPEN_SPAN_PLOT_SKIRT} and
- * outside {@link OPEN_SPAN_PATH_CLEARANCE} of the paved network — the same
- * two exemptions `planCruiserPylons` itself is allowed to refuse a spot for —
+ * outside every plot's `boundingRadius + `{@link OPEN_SPAN_PLOT_SKIRT},
+ * outside {@link OPEN_SPAN_PATH_CLEARANCE} of the paved network, and above
+ * {@link OPEN_SPAN_MIN_PYLON_HEIGHT} of the terrain — the same three
+ * exemptions `planCruiserPylons` itself is allowed to refuse a spot for —
  * then takes the worst such run anywhere on the loop. Measured against both
- * sides of this PR, worst run per CI seed (canonical / 2 / 5 / 11 / 18):
+ * sides of #304, worst run per CI seed (canonical / 2 / 5 / 11 / 18):
  *
  * | | canonical | seed 2 | seed 5 | seed 11 | seed 18 |
  * |---|---|---|---|---|---|
- * | before | 16 m | 15 m | 15 m | **17 m** | 15 m |
- * | after  | 15 m | 13 m | 12 m | 13 m | 14 m |
+ * | before #304 | 16 m | 15 m | 15 m | **17 m** | 15 m |
+ * | after #304  | 15 m | 13 m | 12 m | 13 m | 14 m |
  *
- * 15 sits below the two seeds this PR actually fixes (canonical's 16, seed
+ * 15 sits below the two seeds #304 actually fixed (canonical's 16, seed
  * 11's 17 — the shape of the gap Jim found, a genuinely tree-blocked spot
  * with nothing else standing in the way) and at or above every seed's
- * post-fix worst, including canonical's, which lands exactly on it. That is
- * a real margin of zero on the one seed, not headroom invented for safety —
- * the two numbers are this close on this park. If a future, legitimate
- * change to the scatter or the route needs more than 15 m of unexplained
- * open lawn between two real supports, that is exactly the kind of seed
- * swap CLAUDE.md asks for, written down rather than silently widened.
+ * post-fix worst *at the time*. Seed 18 later measured 16 m against this same
+ * 15 m ceiling with none of the three exemptions changed and no code
+ * touching the generator or the route in between (issue #312) — the station
+ * dip above is what moved it, not a regression, and adding that third
+ * exemption is what a genuine, previously-unrecognised "explained" gap
+ * deserves rather than a wider number. If a future, legitimate change to the
+ * scatter or the route needs more than 15 m of unexplained open lawn between
+ * two real supports, that is exactly the kind of seed swap CLAUDE.md asks
+ * for, written down rather than silently widened.
  */
 const CRUISER_MAX_OPEN_UNSUPPORTED_SPAN = 15;
 
@@ -4762,13 +4791,15 @@ const skyCruiserStandsOnItsOwnSupports: Invariant = (facts) => {
     );
   }
 
-  // --- issue #301: a gap over plain lawn has no excuse ---------------------
+  // --- issue #301 (and #312): a gap over plain lawn has no excuse ----------
   //
   // Walks every gap between consecutive built pylons (the same `ats`, already
   // sorted above) and finds the longest run, anywhere on the loop, that is
-  // neither over a plot nor near the paved network — see
+  // neither over a plot, near the paved network, nor low enough over the
+  // ground to be the station's own boarding dip — see
   // {@link CRUISER_MAX_OPEN_UNSUPPORTED_SPAN}'s own comment for why that is
   // the one shape of gap this ride cannot legitimately have.
+  const groundClearance = facts.cruiserRouteGroundClearance;
   let worstOpen = 0;
   let worstOpenAt = 0;
   for (let i = 0; i < ats.length; i += 1) {
@@ -4783,7 +4814,17 @@ const skyCruiserStandsOnItsOwnSupports: Invariant = (facts) => {
           Math.hypot(point.x - plot.x, point.z - plot.z) < plot.boundingRadius + OPEN_SPAN_PLOT_SKIRT,
       );
       const overPath = !overPlot && nearestPathClearance(facts, point.x, point.z) < OPEN_SPAN_PATH_CLEARANCE;
-      if (overPlot || overPath) {
+      // `d` is always a whole number of metres here (both `ats` and this
+      // loop's own step are integers), so this is an exact lookup into
+      // `cruiserRouteGroundClearance`'s own 1 m sampling — not a re-derivation
+      // of `pylons.ts`'s rule, a read of the built loop against the built
+      // terrain (see that field's own comment).
+      const tooLowToNeedAPost =
+        !overPlot &&
+        !overPath &&
+        (groundClearance[((d % groundClearance.length) + groundClearance.length) % groundClearance.length] ??
+          Infinity) < OPEN_SPAN_MIN_PYLON_HEIGHT;
+      if (overPlot || overPath || tooLowToNeedAPost) {
         contig = 0;
         continue;
       }
