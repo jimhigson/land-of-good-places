@@ -29,6 +29,8 @@ import {
   KEYCHAIN_SWAY_X_RATE,
   KEYCHAIN_SWAY_Z,
   KEYCHAIN_SWAY_Z_RATE,
+  KEYCHAIN_WORN_SCALE,
+  keychainWornLift,
 } from '../art/models/keychains';
 
 /**
@@ -511,14 +513,23 @@ export class CharacterPreview {
     // The worn keychain, hung exactly the way `entities/WornKeychain.ts` hangs
     // the real one: the charm models stand up from their own base (the asset
     // contract grants the `'anchor'` origin reading only to `hat.` ids), so it
-    // is dropped by its own measured `height` and swung about the top rather
-    // than about its feet. `keychainPivot` is cleared first — see its own doc
-    // comment for why it is not part of the per-choice `character` group.
+    // is dropped by its own measured `height` (at `KEYCHAIN_WORN_SCALE`, and
+    // lifted the same `keychainWornLift` amount off the bag's exact corner)
+    // and swung about the top rather than about its feet — the picker must
+    // not show a smaller charm than the one she is about to actually wear.
+    // `keychainPivot` is cleared first — see its own doc comment for why it
+    // is not part of the per-choice `character` group.
     this.keychainPivot.clear();
     this.keychainPivot.removeFromParent();
     const keychainAsset = choice.keychainId ? shopItem(choice.keychainId)?.model() : undefined;
     if (keychainAsset) {
-      keychainAsset.root.position.y = -keychainAsset.height;
+      keychainAsset.root.position.y = -keychainAsset.height * KEYCHAIN_WORN_SCALE;
+      keychainAsset.root.scale.setScalar(KEYCHAIN_WORN_SCALE);
+      this.keychainPivot.position.set(
+        0,
+        keychainWornLift(kid.keychainAnchor.position.y, keychainAsset.height),
+        0,
+      );
       this.keychainPivot.add(keychainAsset.root);
       kid.keychainAnchor.add(this.keychainPivot);
     }

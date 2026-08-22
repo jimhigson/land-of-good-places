@@ -53,12 +53,65 @@ import { blob, type AssetHandle } from '../style/asset';
 export type KeychainKind = 'ripika' | 'star' | 'strawberry' | 'rainbow' | 'heart';
 
 /**
- * How a hung charm sways — one owner for both places it is drawn moving:
- * `entities/WornKeychain.ts` (the real one on the player's back) and the
- * character-creation preview's own keychain picker, which mirrors the same
- * dangle so the picker is not lying about what she is about to wear. Kept
- * here rather than in either of those two files because neither owns the
- * other (CLAUDE.md's "one owner; everyone else asks").
+ * How big a charm is once it is actually **worn** on the bag, versus the
+ * ~11-20cm the model itself measures at (see the file header). Jim, 22 August
+ * 2026: *"make the keyrings once on the bag 2.5x their current size."*
+ *
+ * One owner for both places a worn charm is drawn — `entities/WornKeychain.ts`
+ * (the real one) and the character-creation preview's own mirror of it — for
+ * the same reason {@link KEYCHAIN_SWAY_Z} below is: the picker must not show
+ * a smaller charm than the one she is about to actually wear. The shop's own
+ * display rack (`world/KeychainShop.ts`) is a separate, smaller "1.5x" scale
+ * of its own — a display stand, not a worn charm, so it does not use this.
+ */
+export const KEYCHAIN_WORN_SCALE = 2.5;
+
+/**
+ * How far a worn charm's lowest point must clear the ground, in metres, once
+ * it is scaled up by {@link KEYCHAIN_WORN_SCALE}.
+ *
+ * At the old, unscaled size (~20cm) every `CHARM_HANGS` anchor
+ * (`art/models/backpacks.ts`, 0.43-0.56m above the feet) had metres of slack
+ * below it. At 2.5x a charm reaches 0.5-0.6m down from its ring, which is
+ * *more* than most of those anchors sit above the ground — hung literally
+ * from the same point, several of the five charms would drag their tip
+ * through the terrain on several of the five bags. {@link keychainWornLift}
+ * is the fix: not a bigger anchor number (that stays what it always was, the
+ * bag's own clip point, still checked against real geometry by
+ * `check:charm-hang`), but a per-equip vertical lift, computed from the
+ * actual worn charm's own measured height, that only ever pulls the ring
+ * *up* off the bag's exact corner — and only as far as the ground makes it,
+ * never further.
+ */
+const KEYCHAIN_GROUND_CLEARANCE = 0.08;
+
+/**
+ * How far above the charm anchor a worn charm's pivot must sit so its tip
+ * clears the ground at {@link KEYCHAIN_WORN_SCALE}, in the anchor's own local
+ * frame (where Y is height above the feet — see `art/models/kid.ts`).
+ *
+ * `anchorHeight` is `CHARM_HANGS`' own Y for the bag actually worn;
+ * `charmHeight` is the un-scaled charm's own measured `AssetHandle.height`.
+ * Zero whenever the bag already has enough headroom on its own (nothing
+ * moves); otherwise exactly enough to put the tip at
+ * {@link KEYCHAIN_GROUND_CLEARANCE} — never more, so a charm that fits stays
+ * clipped to the bag's own corner precisely where `CHARM_HANGS` says, and one
+ * that would not fit rides no higher than it has to.
+ */
+export function keychainWornLift(anchorHeight: number, charmHeight: number): number {
+  const scaledDrop = charmHeight * KEYCHAIN_WORN_SCALE;
+  return Math.max(0, scaledDrop + KEYCHAIN_GROUND_CLEARANCE - anchorHeight);
+}
+
+/**
+ * How a hung charm sways when nothing is driving it dynamically — the
+ * character-creation preview's own keychain picker, which mirrors a worn
+ * charm's dangle (scale included) so the picker is not lying about what she
+ * is about to wear, but has no player movement of its own to swing it. The
+ * real worn charm used to share this (a fixed two-sine sway, "no physics" by
+ * design) but now drives its swing off the player's own motion instead — see
+ * `entities/WornKeychain.ts`'s header — so these constants are the preview's
+ * alone now, not a second owner of the real thing's motion.
  *
  * Deliberately not the same rate on both axes: matched rates read as a rigid
  * thing rocking, and two that drift in and out of phase read as something on

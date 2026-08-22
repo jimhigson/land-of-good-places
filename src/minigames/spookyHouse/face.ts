@@ -12,7 +12,7 @@ import {
 import { PALETTE } from '../../core/palette';
 import { ART } from '../../art/style/artPalette';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
-import { Spring } from './spring';
+import { Spring } from '../../core/Spring';
 
 /**
  * The big comic-scary face — the whole point of the Spooky House.
