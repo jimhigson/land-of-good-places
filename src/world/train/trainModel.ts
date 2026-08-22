@@ -16,7 +16,7 @@ import { PALETTE } from '../../core/palette';
 import { createFacePatch, type FacePatch } from '../../art/style/faces';
 import { toonMaterial } from '../../art/style/materials';
 import { RAIL_HEIGHT } from './track';
-import { CAR_FLOOR_Y, LOCO_BODY_TOP_Y, SEAT_Y } from './trainDimensions';
+import { CAR_FLOOR_Y, CARRIAGE_BODY_HALF_WIDTH, LOCO_BODY_TOP_Y, SEAT_Y } from './trainDimensions';
 
 /**
  * Puffing Percy and her three open carriages.
@@ -48,7 +48,10 @@ export const CARRIAGE_LENGTH = 2.6;
 /** Gap between one car's end and the next one's. */
 export const CAR_GAP = 0.42;
 
-const BODY_HALF_WIDTH = 0.8;
+// One owner: `trainDimensions.ts`'s `CARRIAGE_BODY_HALF_WIDTH`, so a prop
+// placer checking real clearance against the train's body reads the same
+// number this geometry is actually built from.
+const BODY_HALF_WIDTH = CARRIAGE_BODY_HALF_WIDTH;
 
 /** Bright and different enough that a child can say which one they want. */
 export const CARRIAGE_COLOURS = [

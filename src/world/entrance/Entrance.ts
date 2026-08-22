@@ -1,16 +1,18 @@
 import {
   BoxGeometry,
   type BufferAttribute,
+  ConeGeometry,
   CylinderGeometry,
   Group,
   Mesh,
   PlaneGeometry,
   SphereGeometry,
   TorusGeometry,
+  Vector3,
 } from 'three';
 import { PALETTE } from '../../core/palette';
 import { pinkStoneTexture, woodTexture } from '../../core/textures';
-import { toonMaterial } from '../../art/style/materials';
+import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
 import { terrainHeight } from '../terrain';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld } from '../Collision';
@@ -20,17 +22,160 @@ import { ROAD_HALF_WIDTH, applyRoadUvs, roadMaterial } from './road';
 import { PARK_BOUNDARY, edgeRadiusAt } from '../boundary';
 import { ArrivalSequence, arrivalIsDue } from './ArrivalSequence';
 import type { NpcCharacter } from '../../entities/npc/NpcCharacter';
+import { highlightObject } from '../highlight';
+import { pressAction, type InteractZone } from '../interact';
+import { playOpenChime } from '../../ui/chime';
 import {
   ENTRANCE_ANGLE,
   ENTRANCE_BUS_ARRIVE_X,
   ENTRANCE_BUS_STOP_Z,
   ENTRANCE_BUS_VANISH_X,
+  ENTRANCE_CLEAR_RADIUS,
+  ENTRANCE_CLEAR_X,
+  ENTRANCE_CLEAR_Z,
   ENTRANCE_GATE_HALF_WIDTH,
   ENTRANCE_GATE_POST_HEIGHT,
   ENTRANCE_GATE_X,
   ENTRANCE_GATE_Z,
   ENTRANCE_STOP_Z,
 } from './layout';
+import { TRACK_CLEARANCE, type TrainRoute } from '../train/route';
+import { CARRIAGE_BODY_HALF_WIDTH } from '../train/trainDimensions';
+
+/** Candy colours for the welcome sign's bulbs — the fairground palette used everywhere else in the park. */
+const WELCOME_SIGN_BULB_COLOURS = [
+  PALETTE.fairyWarm,
+  PALETTE.fairyPink,
+  PALETTE.fairyMint,
+  PALETTE.fairyBlue,
+] as const;
+
+/**
+ * Where the welcome sign **prefers** to stand: just inside the gate, off to
+ * the east of the gate-approach path (`paths.ts`'s `gate-approach` is 3.2 m
+ * wide, centred on x = 0, so anything past |x| ≈ 1.6 is clear of it) and well
+ * inside `ENTRANCE_CLEAR_RADIUS`'s scenery-free pocket around the gate, so no
+ * bush or tree scatter can land on it. Mirrors the bus shelter's offset on
+ * the west side, so the gate reads as symmetric even though only one side has
+ * a prop.
+ *
+ * **Not where it always ends up.** {@link findWelcomeSignSpot} searches
+ * outward from here for the nearest point that clears the train's *solved*
+ * centre line — see that function's own comment for why a fixed coordinate
+ * cannot be right here.
+ */
+const WELCOME_SIGN_PREFERRED_X = 7;
+const WELCOME_SIGN_PREFERRED_Z = 56;
+/** Near the +45° every sign and anchor in the park uses — the one angle the fixed isometric camera reads square-on (ARCHITECTURE.md). */
+const WELCOME_SIGN_YAW = Math.PI * 0.25;
+
+/** Local x-offsets of the sign's two posts from its own centre — see {@link buildWelcomeSign}. */
+const WELCOME_SIGN_POST_OFFSETS = [-1.9, 1.9] as const;
+/** Collision radius of each post, as actually built below. */
+const WELCOME_SIGN_POST_RADIUS = 0.35;
+/** Half the board's own width (it is 4.4 m across), for sampling its far corners. */
+const WELCOME_SIGN_BOARD_HALF_WIDTH = 2.2;
+
+/**
+ * **How far the sign's board and posts must clear the train's centre line.**
+ *
+ * `TRACK_CLEARANCE` (`train/route.ts`) is the half-width anything is "inside
+ * the train" within; `CARRIAGE_BODY_HALF_WIDTH` (`train/trainDimensions.ts`)
+ * is the carriage's own real body half-width, and a prop closer than their
+ * sum (2.1 m) is standing where the carriage's body actually passes. This
+ * asks for a metre more than that sum on top: "clears" means clears with
+ * room, not sits a centimetre outside one of the two numbers — which is
+ * exactly what happened before this fix (issue #303 QA: the nearest post
+ * measured 0.63 m off the centre line, inside *both* numbers at once).
+ */
+const WELCOME_SIGN_TRACK_MARGIN = 1.0;
+export const WELCOME_SIGN_MIN_TRACK_CLEARANCE =
+  TRACK_CLEARANCE + CARRIAGE_BODY_HALF_WIDTH + WELCOME_SIGN_TRACK_MARGIN;
+
+/**
+ * The closest distance any sampled point of the welcome sign's real footprint
+ * — both posts (less their own collision radius) and the board's full width —
+ * comes to the train's *solved* centre line, were the sign centred at (x, z).
+ *
+ * Sampled rather than measured from the centre alone because the board is
+ * 4.4 m wide: a centre point can clear the line by metres while one end of
+ * the board does not, which is exactly the shape of bug this function exists
+ * to catch rather than repeat.
+ */
+function welcomeSignFootprintClearance(route: TrainRoute, x: number, z: number): number {
+  let worst = Infinity;
+  const point = new Vector3();
+  const sample = (localX: number, radius: number): void => {
+    const px = x + Math.cos(WELCOME_SIGN_YAW) * localX;
+    const pz = z - Math.sin(WELCOME_SIGN_YAW) * localX;
+    route.pointAt(route.distanceNear(px, pz), point);
+    const gap = Math.hypot(point.x - px, point.z - pz) - radius;
+    if (gap < worst) worst = gap;
+  };
+  for (const offset of WELCOME_SIGN_POST_OFFSETS) sample(offset, WELCOME_SIGN_POST_RADIUS);
+  // Five samples across the board's own width — wider spacing than the posts
+  // themselves catch, and the part actually likely to clip the train if the
+  // two posts happened to straddle it.
+  for (let t = -WELCOME_SIGN_BOARD_HALF_WIDTH; t <= WELCOME_SIGN_BOARD_HALF_WIDTH; t += 1.1) {
+    sample(t, 0);
+  }
+  return worst;
+}
+
+/**
+ * **Finds somewhere for the welcome sign that genuinely clears the train.**
+ *
+ * The QA finding on issue #303 (PR #303): the sign's preferred spot put its
+ * nearest post 0.63 m from the rail centre line, inside both `TRACK_CLEARANCE`
+ * (1.3 m) and the carriage's own body half-width (0.8 m). Cause: `train/route.ts`
+ * solves the train's loop from `PARK_LAYOUT` alone (see that module's own doc),
+ * and the entrance — the welcome sign included — is built afterwards, from a
+ * fixed coordinate the solver never knew existed. **The gate itself is the one
+ * fixed thing in the park** (`entrance/layout.ts`), but the train's loop is not:
+ * `TRAIN_LENGTH_FRACTIONS`'s ladder, the search's own restarts and `PARK_SEED`
+ * all mean the *solved* centre line runs somewhere different — sometimes close
+ * to the gate, sometimes not — on every one of the five CI seeds. A single
+ * hand-placed coordinate could only ever be checked against one of them.
+ *
+ * So this asks the *actual, already-solved* route the same question
+ * `test/procgen`'s new invariant asks of the built park: searching outward
+ * from the sign's preferred spot, in the scenery-free pocket `Scenery.ts`
+ * already keeps clear around the gate (`ENTRANCE_CLEAR_X/Z/RADIUS`) and clear
+ * of the gate-approach path, for the nearest point whose whole footprint
+ * clears the centre line by {@link WELCOME_SIGN_MIN_TRACK_CLEARANCE}. On a
+ * seed where the preferred spot is already clear (most of them), this returns
+ * it unchanged — the search is a safety net, not a redesign.
+ */
+function findWelcomeSignSpot(route: TrainRoute): { x: number; z: number } {
+  let bestPassing: { x: number; z: number; distance: number } | null = null;
+  // Kept in case *no* candidate clears — which should never happen given the
+  // search area, but a best-effort spot is a better failure than a crash, and
+  // the new invariant is what would catch it actually happening.
+  let bestOverall = { x: WELCOME_SIGN_PREFERRED_X, z: WELCOME_SIGN_PREFERRED_Z, clearance: -Infinity };
+
+  for (let dz = -6; dz <= 4; dz += 0.5) {
+    for (let dx = -3; dx <= 4; dx += 0.5) {
+      const x = WELCOME_SIGN_PREFERRED_X + dx;
+      const z = WELCOME_SIGN_PREFERRED_Z + dz;
+
+      // Off the gate-approach path (half-width 1.6 m, see the preferred spot's
+      // own comment), and inside the scenery-free pocket with margin left for
+      // the sign's own ~2.5 m reach — straying outside it risks a tree or bush
+      // nobody re-scattered to make room.
+      if (x < 3) continue;
+      if (Math.hypot(x - ENTRANCE_CLEAR_X, z - ENTRANCE_CLEAR_Z) > ENTRANCE_CLEAR_RADIUS - 3) continue;
+
+      const clearance = welcomeSignFootprintClearance(route, x, z);
+      if (clearance > bestOverall.clearance) bestOverall = { x, z, clearance };
+      if (clearance < WELCOME_SIGN_MIN_TRACK_CLEARANCE) continue;
+
+      const distance = Math.hypot(x - WELCOME_SIGN_PREFERRED_X, z - WELCOME_SIGN_PREFERRED_Z);
+      if (!bestPassing || distance < bestPassing.distance) bestPassing = { x, z, distance };
+    }
+  }
+
+  return bestPassing ?? bestOverall;
+}
 
 export interface EntranceOptions {
   /**
@@ -52,13 +197,23 @@ export interface EntranceOptions {
  * in the wall itself, and `paths.ts`'s `spur-entrance` route for the path that
  * leads up to it.
  *
- * **The park's name is no longer painted on a board under the arch.** The
- * family had every sign in the park taken out on 28 July 2026 — a canvas face
- * on a rectangle seen from the camera's one fixed angle is hard to read, which
- * is exactly why it needed a full-screen reader to go with it. The name is not
- * lost: `ui/Hud.ts`'s park pill has said it, in ordinary DOM text at the
- * ordinary minimum size, since long before this. The arch keeps its posts, its
- * caps, its paw prints and its crossbar, which is what makes it a gate.
+ * **The park's name is no longer painted on a board under the arch itself.**
+ * The family had every sign in the park taken out on 28 July 2026 — a canvas
+ * face on a rectangle seen from the camera's one fixed angle is hard to read,
+ * which is exactly why it needed a full-screen reader to go with it. The name
+ * is not lost: `ui/Hud.ts`'s park pill has said it, in ordinary DOM text at
+ * the ordinary minimum size, since long before this. The arch keeps its
+ * posts, its caps, its paw prints and its crossbar, which is what makes it a
+ * gate.
+ *
+ * **There is a welcome sign, just inside it, and it does carry words** — on
+ * its interact chip, the same way every other sign in the park says its piece
+ * now (`world/interact.ts`). It is the board that used to stand, blank and
+ * unreachable, at the dodgems' own doorway on a dead-end path spur that led
+ * nowhere a child could read or press (issue #298, Jim playing 18 August
+ * 2026). Moved here rather than rebuilt: same posts, same candy-coloured
+ * bulbs, same little pennant, just given somewhere to stand and something to
+ * say. See {@link buildWelcomeSign}.
  */
 export class Entrance implements GameSystem {
   readonly name = 'entrance';
@@ -74,7 +229,19 @@ export class Entrance implements GameSystem {
    */
   readonly arrival: ArrivalSequence | null;
 
-  constructor(collision: CollisionWorld, options: EntranceOptions = {}) {
+  /** The welcome sign's bulbs, twinkling on `elapsed` like every other fairy light in the park. */
+  private readonly welcomeSignBulbs: Mesh[] = [];
+  /** The welcome sign's own tap target — see {@link interactZones}. */
+  private readonly welcomeSignZone: InteractZone;
+
+  /**
+   * @param trainRoute The park train's already-*solved* route
+   * (`World.ts` builds `ParkTrain` — and therefore this — before `Entrance`,
+   * precisely so the welcome sign can be placed against the real centre line
+   * rather than a coordinate the solver never knew about). See
+   * {@link findWelcomeSignSpot}.
+   */
+  constructor(collision: CollisionWorld, trainRoute: TrainRoute, options: EntranceOptions = {}) {
     this.group.name = 'entrance';
 
     const stoneMaterial = toonMaterial(0xffffff, { map: pinkStoneTexture(2, 1) });
@@ -129,6 +296,9 @@ export class Entrance implements GameSystem {
     crossbar.rotation.y = Math.PI / 2;
     crossbar.castShadow = true;
     this.group.add(crossbar);
+
+    // --- the welcome sign ----------------------------------------------------
+    this.welcomeSignZone = this.buildWelcomeSign(collision, trainRoute);
 
     // --- the bus stop shelter ----------------------------------------------
     // **On the pavement, outside the gate** — because that is where the bus
@@ -230,14 +400,123 @@ export class Entrance implements GameSystem {
   }
 
   /**
-   * Drives the arrival, while there is one.
+   * Drives the arrival, and twinkles the welcome sign's bulbs.
    *
    * The stonework is stonework and does not move; `Entrance` was already a
    * {@link GameSystem} with an empty `update` against the day something here
-   * wanted a frame, and the cat bus is that day.
+   * wanted a frame, and the cat bus was the first thing to need one — the
+   * sign's bulbs are the second, on the same `elapsed`-driven sine every other
+   * string of fairy lights in the park uses (`minigames/dodgems/plot.ts`,
+   * `world/TreeLights.ts`).
    */
   update(context: FrameContext): void {
     this.arrival?.update(context);
+    for (let i = 0; i < this.welcomeSignBulbs.length; i += 1) {
+      const bulb = this.welcomeSignBulbs[i];
+      if (!bulb) continue;
+      bulb.scale.setScalar(0.82 + 0.3 * Math.sin(context.elapsed * 3 + i * 0.7));
+    }
+  }
+
+  /** The welcome sign's own tap target — the park's one piece of readable text. */
+  interactZones(): InteractZone[] {
+    return [this.welcomeSignZone];
+  }
+
+  /**
+   * Builds the welcome sign and its interact zone.
+   *
+   * The prop itself — two posts, a board, a lintel of candy-coloured bulbs and
+   * a little pennant — is the one that used to stand at the dodgems' own
+   * doorway, unread and unreachable (issue #298). It carries no painted text
+   * (the TEXT RULE took every canvas face off a board on 28 July 2026): the
+   * words live on the interact chip instead, exactly where every other sign in
+   * the park keeps its words now.
+   *
+   * **The action has to be real**, not a bare label with nothing behind it —
+   * `Selection` drops any zone whose `actions()` comes back empty, so a sign
+   * with no press was a sign nobody could ever select (`world/hotel/Hotel.ts`'s
+   * "your door" zone hit this exact bug on 7 August 2026). A soft chime is a
+   * small thing to press for, but it is a real one — the same one the shop
+   * counter and the backpack already use for "something opened", not a new
+   * sound invented for a one-off prop.
+   *
+   * **Two more bugs fixed here, both found by QA on PR #303:**
+   *
+   * 1. The zone's `y` used to be the board's *visual centre height*
+   *    (`ground + 2.6`), not a ground-level surface like every other interact
+   *    zone in the codebase (`minigames/stalls.ts`, `FacePaintStall.ts`) — so it
+   *    sat outside `ZONE_HEIGHT_TOLERANCE` (2.2 m) of a standing player's own
+   *    `y` and the chip could never be selected in normal play. Fixed by using
+   *    `ground` itself, the same pattern everywhere else.
+   * 2. The sign's position used to be the fixed preferred spot outright, which
+   *    on the canonical seed put a post 0.63 m from the train's centre line.
+   *    Fixed by {@link findWelcomeSignSpot} — see its own comment.
+   */
+  private buildWelcomeSign(collision: CollisionWorld, trainRoute: TrainRoute): InteractZone {
+    const { x: signX, z: signZ } = findWelcomeSignSpot(trainRoute);
+    const ground = terrainHeight(signX, signZ);
+    const signGroup = new Group();
+    signGroup.name = 'welcome-sign';
+    signGroup.position.set(signX, ground, signZ);
+    signGroup.rotation.y = WELCOME_SIGN_YAW;
+    this.group.add(signGroup);
+
+    const bulbMaterials = WELCOME_SIGN_BULB_COLOURS.map((colour) =>
+      toonMaterial(colour, { emissive: colour, emissiveIntensity: 0.85 }),
+    );
+    const bulbGeometry = new SphereGeometry(0.16, 10, 8);
+
+    // 1.9 m out: the nav lattice fattens each post by the walker radius, and
+    // any tighter than this the gap between the two posts inflates shut (the
+    // dodgems arch this was moved from found that the hard way).
+    const postGeometry = new CylinderGeometry(0.14, 0.16, 2.6, 8);
+    for (const offset of WELCOME_SIGN_POST_OFFSETS) {
+      const post = solid(new Mesh(postGeometry, toonMaterial(PALETTE.wood)));
+      post.position.set(offset, 1.3, 0);
+      signGroup.add(post);
+      collision.addCircle(
+        signX + Math.cos(WELCOME_SIGN_YAW) * offset,
+        signZ - Math.sin(WELCOME_SIGN_YAW) * offset,
+        WELCOME_SIGN_POST_RADIUS,
+      );
+    }
+
+    const board = solid(new Mesh(new BoxGeometry(4.4, 1.9, 0.16), toonMaterial(PALETTE.woodLight)));
+    board.position.y = 2.6;
+    signGroup.add(board);
+    addOutline(board, 0.02);
+
+    // Bulbs along the lintel, like a real fairground arch.
+    for (let i = 0; i < 10; i += 1) {
+      const t = i / 9;
+      const bulb = decal(new Mesh(bulbGeometry, bulbMaterials[i % 4] ?? bulbMaterials[0]));
+      bulb.position.set(-1.5 + t * 3, 3.62, 0.06);
+      signGroup.add(bulb);
+      this.welcomeSignBulbs.push(bulb);
+    }
+
+    const topper = decal(new Mesh(new ConeGeometry(0.3, 0.7, 5), toonMaterial(PALETTE.markerLemon)));
+    topper.position.set(0, 3.95, 0);
+    signGroup.add(topper);
+
+    return {
+      id: 'welcome-sign',
+      label: 'welcome sign',
+      x: signX,
+      // Ground level, like every other interact zone — see this method's own
+      // doc for why `ground + 2.6` (the board's visual centre) was wrong.
+      y: ground,
+      z: signZ,
+      pickRadius: 3.2,
+      // Stood between the sign and the gate-approach path, so walking up to
+      // read it never means stepping behind the board.
+      standX: signX - 2.4,
+      standZ: signZ,
+      verb: 'Read',
+      highlight: highlightObject(signGroup),
+      actions: () => pressAction('Welcome to the Land of Good Places.', () => playOpenChime(), '👋'),
+    };
   }
 }
 

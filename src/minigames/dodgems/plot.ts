@@ -1,5 +1,4 @@
 import {
-  BoxGeometry,
   CircleGeometry,
   ConeGeometry,
   CylinderGeometry,
@@ -16,7 +15,6 @@ import { PALETTE } from '../../core/palette';
 import { Rng, TAU } from '../../core/mathUtils';
 import { addOutline, decal, softMaterial, solid, toonMaterial } from '../../art/style/materials';
 import { ANCHORS_BY_ID } from '../../world/anchors';
-import { terrainHeight } from '../../world/terrain';
 import type { AnchorPlots } from '../../world/AnchorPlots';
 import type { CollisionWorld } from '../../world/Collision';
 import type { FrameContext, GameSystem } from '../../core/types';
@@ -62,7 +60,6 @@ export function buildDodgemsPlot(
 ): DodgemsPlot {
   const anchor = ANCHORS_BY_ID.dodgems;
   const [centreX, centreZ] = anchor.position;
-  const ground = terrainHeight(centreX, centreZ);
 
   const plot = anchorPlots.getGroup('dodgems');
   const root = new Group();
@@ -205,57 +202,18 @@ export function buildDodgemsPlot(
   railRing.position.y = deck + 1.0;
   root.add(railRing);
 
-  // --- the entrance arch ------------------------------------------------------
-  // This began life as the "coming soon" board's replacement and is now an arch
-  // rather than a sign: two posts, a plain wooden lintel, a string of fairground
-  // bulbs along the top and a cone on the peak. The painted face that used to
-  // name the ride is gone with every other sign in the park (family ruling, 28
-  // July 2026); the lintel stays because it is what the bulbs and the topper sit
-  // on and what makes the two posts read as a gateway. `signYaw` stays too — an
-  // arch you walk *through* still wants to be square to the one camera angle.
-  const signGroup = new Group();
-  signGroup.position.set(
-    entranceX - centreX,
-    terrainHeight(entranceX, entranceZ) - ground,
-    entranceZ - centreZ,
-  );
-  signGroup.rotation.y = anchor.signYaw;
-  root.add(signGroup);
-
-  // 1.9 m out, not 1.35: the nav lattice fattens each post by the walker
-  // radius, and at 1.35 the gap between the arch's posts inflated shut —
-  // 0.76 m of walkable slot that pocketed the whole doorway behind it.
-  const signPostGeometry = new CylinderGeometry(0.14, 0.16, 2.6, 8);
-  for (const offset of [-1.9, 1.9]) {
-    const post = solid(new Mesh(signPostGeometry, toonMaterial(PALETTE.wood)));
-    post.position.set(offset, 1.3, 0);
-    signGroup.add(post);
-    collision.addCircle(
-      entranceX + Math.cos(anchor.signYaw) * offset,
-      entranceZ - Math.sin(anchor.signYaw) * offset,
-      0.35,
-    );
-  }
-
-  const board = solid(
-    new Mesh(new BoxGeometry(4.4, 1.9, 0.16), toonMaterial(PALETTE.woodLight)),
-  );
-  board.position.y = 2.6;
-  signGroup.add(board);
-  addOutline(board, 0.02);
-
-  // Bulbs along the lintel, like a real fairground arch.
-  for (let i = 0; i < 10; i += 1) {
-    const t = i / 9;
-    const bulb = decal(new Mesh(bulbGeometry, bulbMaterials[i % 4] ?? padA));
-    bulb.position.set(-1.5 + t * 3, 3.62, 0.06);
-    signGroup.add(bulb);
-    bulbs.push(bulb);
-  }
-
-  const topper = decal(new Mesh(new ConeGeometry(0.3, 0.7, 5), toonMaterial(PALETTE.markerLemon)));
-  topper.position.set(0, 3.95, 0);
-  signGroup.add(topper);
+  // --- the entrance doorway ---------------------------------------------------
+  // There used to be an arch here — two posts, a wooden lintel, a string of
+  // fairground bulbs and a cone on the peak — built as the "coming soon"
+  // board's replacement when every painted sign came out of the park (28 July
+  // 2026). It never carried an interact zone or a word of text, so a child
+  // walking up to it got nothing: no prompt, no message, just a blank board on
+  // its own dead-end spur (issue #298). Jim's ruling was to move it rather than
+  // give it a voice it was never built for, so the whole board-and-posts group
+  // now stands at the park's own entrance as the welcome sign
+  // (`world/entrance/Entrance.ts`) instead. The doorway itself needs no
+  // separate marker: the barrier's gap, the rink's own bulbs, the fake tree and
+  // RiPika's parked car already say "this is a ride, come in" without one.
 
   // --- the fake wooden tree -------------------------------------------------
   const tree = buildStaticTree(rng);
@@ -302,7 +260,6 @@ export function buildDodgemsPlot(
       segmentGeometry.dispose();
       bulbGeometry.dispose();
       postGeometry.dispose();
-      signPostGeometry.dispose();
       padA.dispose();
       padB.dispose();
       railMaterial.dispose();
