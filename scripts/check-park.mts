@@ -347,16 +347,33 @@ const trackY = new Float64Array(TRACK_SAMPLES + 1);
  * compares like with like. `RAIL_HEIGHT` is deliberately absent: it is rail
  * sitting *on* the datum, not part of it.
  *
- * ### Why there is no more "or a level crossing" escape
+ * ### The "or a level crossing" escape, reopened for a genuine last resort
  *
- * Until issue #116/Decision 8 built real bridges, this invariant accepted a
- * route meeting the rail within a declared level crossing's fence gap too —
- * the only way it could ever pass, since nothing built a deck. That escape is
- * gone: every crossing the park draws now gets a bridge
- * (`ParkTrain.bridges`), so a route meeting the rail anywhere the deck does
- * not clear it by `BRIDGE_RISE` is exactly what invariant 2 says it is — a
- * bug, not an expected level crossing.
+ * Between issue #116/Decision 8 and issues #317/#319, this invariant accepted
+ * *no* level crossing at all: every crossing the park draws got a real
+ * bridge, so a route meeting the rail anywhere the deck did not clear it by
+ * `BRIDGE_RISE` was unconditionally a bug. That stopped being true once
+ * `bridgeFootprint.ts`'s real, backtracking footprint search (issues #317,
+ * #319) could find no walkable, collision-clear bridge for a crossing at
+ * all — genuinely rare, and only after every width, shift and fellable tree
+ * has been tried (see that file's own header) — and fell back to an ordinary
+ * ground-level crossing instead, `ParkTrain.fallbackCrossings`. So the escape
+ * is back, but scoped to exactly those: a route meeting the rail anywhere
+ * else still has to clear `BRIDGE_RISE` over a real deck, same as always.
  */
+
+/**
+ * How far *past* a fallback crossing's own fence gap a route may still meet
+ * the rails and count as legitimately using it.
+ *
+ * A stride's worth of slack, because the two things compared are measured
+ * differently: `halfGap` is the crossing's self-measured fence opening
+ * (`train/crossings.ts`), while the route is a nav-lattice polyline on a
+ * 0.5 m grid that can clip the corner of the opening without any of its
+ * vertices landing inside it. The same figure, and the same reasoning, this
+ * file used for every crossing before issue #116 built real bridges.
+ */
+const LEVEL_CROSSING_REACH = 2.5;
 
 /** Do segments a→b and c→d cross? Proper crossing only; touching does not count. */
 function segmentsCross(
@@ -475,7 +492,11 @@ for (const target of targets) {
     if (hit) {
       const deck = park.sample(hit.x, hit.z, TOP_REFERENCE);
       const overBridge = deck - hit.rail >= BRIDGE_RISE;
-      if (!overBridge) {
+      const atFallbackCrossing = world.train.fallbackCrossings.some(
+        (crossing) =>
+          Math.hypot(crossing.x - hit.x, crossing.z - hit.z) < crossing.halfGap + LEVEL_CROSSING_REACH,
+      );
+      if (!overBridge && !atFallbackCrossing) {
         crossings += 1;
         report({
           invariant: 2,
@@ -606,16 +627,21 @@ function somethingSolidNear(x: number, z: number): boolean {
   let firstStandableAt = -1;
 
   // The stretches deliberately left open — the boarding gap at each
-  // platform, and nothing else. Measured *against the declarations* rather
-  // than against a recorded total (issue #241): the loop's length changes
-  // with the layout, so "how many open metres is normal" is not a stable
-  // number — but "no hole we did not declare" is, and it is the invariant a
-  // child actually experiences. Anything open outside this span is a defect
-  // at any length. A crossing no longer opens one of these (issue #116,
-  // Decision 8): the fence runs on underneath every bridge instead of
-  // gapping for it, so `somethingSolidNear` below finds it exactly like any
-  // other stretch of closed track — which is the point of building it that
-  // way rather than leaving invariant 4 unable to see a bridge at all.
+  // platform, a fallback crossing's own fence gap (issues #317, #319 — see
+  // `ParkTrain.fallbackCrossings`'s own note), and nothing else. Measured
+  // *against the declarations* rather than against a recorded total (issue
+  // #241): the loop's length changes with the layout, so "how many open
+  // metres is normal" is not a stable number — but "no hole we did not
+  // declare" is, and it is the invariant a child actually experiences.
+  // Anything open outside this span is a defect at any length. An ordinary,
+  // bridged crossing no longer opens one of these (issue #116, Decision 8):
+  // the fence runs on underneath every bridge instead of gapping for it, so
+  // `somethingSolidNear` below finds it exactly like any other stretch of
+  // closed track — which is the point of building it that way rather than
+  // leaving invariant 4 unable to see a bridge at all. A *fallback*
+  // crossing is the one exception: there is no deck to run the fence under,
+  // by design, so its own gap is declared open here exactly the way a
+  // station's boarding gap always has been.
   const declaredOpen = (distance: number): boolean => {
     const along = (target: number, halfGap: number): boolean => {
       const wrapped = world.train.route.wrap(distance - target + world.train.route.length / 2);
@@ -623,6 +649,9 @@ function somethingSolidNear(x: number, z: number): boolean {
     };
     for (const station of world.train.stations) {
       if (along(station.distance, STATION_GAP)) return true;
+    }
+    for (const crossing of world.train.fallbackCrossings) {
+      if (along(crossing.railDistance, crossing.halfGap)) return true;
     }
     return false;
   };

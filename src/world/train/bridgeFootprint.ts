@@ -4,7 +4,7 @@ import { ENTRANCE_RAMP } from '../building/layout';
 import { GARDEN_PLAY_BOUNDARY } from '../boundary';
 import { clearOfPlots } from '../parkLayout';
 import { distanceToRailCorridor } from './plan';
-import { BOUNDARY_WALL_COLLISION_HALF } from '../Garden';
+import type { CollisionWorld } from '../Collision';
 import { PLAYER_RADIUS } from '../../core/constants';
 
 /**
@@ -16,11 +16,48 @@ import { PLAYER_RADIUS } from '../../core/constants';
  * from growing through a ramp that has not been built yet (see
  * `train/bridgeKeepout.ts`), and they already import `train/plan.ts`'s
  * `distanceToRailCorridor` the same way. `bridges.ts` imports every constant
- * and the planner below rather than restating them — the exact "two
- * definitions of one thing" disease CLAUDE.md tracks by name, and the reason
- * a scenery-collision bug (a lamp inside a live ramp, found by
- * `test/procgen/invariants.ts`'s `everyBridgeIsWalkableAndReachable`) is what
- * finally split this file out rather than a ramp-geometry change.
+ * and the planner below rather than restating them.
+ *
+ * ## Two calling conventions, one function (issues #317, #319)
+ *
+ * `bridgeKeepout.ts` calls this **before** `Scenery`/`LampPosts` have placed
+ * a single tree or lamp — there is no real collision world worth asking yet,
+ * only the park's own fixed geometry (the boundary, the named plots). That
+ * call omits `real` and gets a *conservative reservation*: generous enough
+ * that whatever the real, later pass below decides to build always fits
+ * inside it (see {@link maxLateralShiftFor}'s own note on why that is true by
+ * construction), so nothing ever gets planted somewhere this file's own
+ * later, better-informed pass wants for itself.
+ *
+ * `bridges.ts` calls this **last of all**, from inside `ParkTrain`'s own
+ * constructor — by then `World`'s build order (see `World.ts`'s own
+ * comments) has already registered the boundary, every garden wall and
+ * tree, every lamp post, the castle, the hotel, every stall and the water-
+ * fight dressing with the shared `CollisionWorld`. Passing `real` here is
+ * what turns this from "check two or three hand-picked obstacle classes"
+ * into "check whatever is actually there" — Jim, 22 August 2026: *"the
+ * procgen should backtrack on collisions and make some different decisions
+ * until it works - literally the same way the procgen always works."* This
+ * is that backtracking: for each crossing, walk the width down, and try
+ * shifting the deck sideways along the crossing, until a configuration is
+ * found whose deck and at least one ramp genuinely clear
+ * `collision.isClearCircle` — the identical planning query
+ * `coaster/pylons.ts` already asks the same collision world for its own
+ * pylon spots — rather than shrinking to a hard floor and shipping whatever
+ * that floor happens to land on (issues #317 and #319: exactly that floor,
+ * hit and shipped anyway, on 14 crossings across 5 seeds).
+ *
+ * The one obstacle class that genuinely *cannot* be asked of `real.collision`
+ * even on the late call is the rail's own exclusion fence: `fence.ts` builds
+ * it **after** this planner runs, seamed around whatever footprint this
+ * function returns, so at plan time it does not exist as a collider yet.
+ * `distanceToRailCorridor` (a pure geometric query against the solved rail
+ * centreline, no collision registration required) stands in for it, exactly
+ * as it always has — this is not a second hand-picked obstacle class in the
+ * same sense as the old `clearOfPlots`/`GARDEN_PLAY_BOUNDARY` checks were,
+ * because there is no way to make it a real one without bridges and fence
+ * swapping which gets built first, which the fence's own seaming needs to
+ * not happen.
  */
 
 /**
@@ -61,15 +98,11 @@ export const RAMP_CLEARANCE = 2.0;
 
 /**
  * Ordinary safety stride a ramp's own edge keeps past `GARDEN_PLAY_BOUNDARY`
- * — {@link planBridgeFootprints}'s pass-1 deck-width loop already uses this
- * same value (there, inline) to keep the *deck's* edge clear at its own two
- * along-extremes; named here so `truncateForBoundary`'s tier-1 default can
- * ask the identical question of the *ramp's* edge, at every point along it,
- * rather than each staying its own hand-picked number that can drift apart.
- * Deliberately a flat metres-of-daylight figure, not scaled by `halfAcross`
- * — the ramp's own edge is what gets tested directly (every `t` in
- * `truncateForBoundary`'s own sampling), so nothing here needs to infer the
- * edge's position from the centreline any more.
+ * in the early, conservative (no `real` world) reservation pass — see this
+ * file's own header on the two calling conventions. The late, real pass
+ * below does not use this at all: the boundary is a real, registered wall by
+ * the time that pass runs, so it is simply one more thing
+ * `collision.isClearCircle` already refuses to stand near.
  */
 const RAMP_BOUNDARY_MARGIN = 1.5;
 
@@ -79,73 +112,131 @@ const RAMP_BOUNDARY_MARGIN = 1.5;
  *
  * `halfGap` is tuned for exactly one job — sizing the *old* level crossing's
  * fence gap so an oblique path's own waypoint samples never straddled a
- * compartment wall (its own comment: "a fixed gap strands the path's own
- * waypoint samples"). That gap had nothing at all in this direction to
- * clip against. A bridge does — its own guard rails — so a path sample that
- * used to graze `halfGap` with metres to spare in every other direction now
- * grazes the rail meant to stop a child falling off the side. A stride's
- * worth of slack, the same margin `check-park.mts` used to give a route
- * meeting a crossing's own fence gap before bridges made that escape
- * unnecessary.
+ * compartment wall. A bridge has its own guard rails a path sample could
+ * otherwise graze, so this is a stride's worth of slack on top.
  */
 export const ACROSS_MARGIN = 2.0;
 
 /**
- * Stride of clearance a ramp keeps from the nearest layout entry — a stall,
- * a plot, a building — beyond that entry's own `boundingRadius`, tested at
- * the ramp's own two edges (see {@link planBridgeFootprints}'s
- * `truncateForPlots`).
- *
- * `route.ts`'s own solve only keeps the *rail centre line* {@link
- * BRIDGE_RAMP_GRADIENT}'s sibling, `TRACK_PLOT_CLEARANCE` (4.2 m), off a
- * plot — and a bridge's ramp reaches far further out than the rail ever
- * did (up to `BRIDGE_RISE / BRIDGE_RAMP_GRADIENT`, ~18 m each way), so a
- * long ramp can walk straight into the side of a stall the rail solve
- * never had to keep clear of at that distance. Measured live, issue #116
- * seed 11: a ramp's own documented far tread landed 2.12 m inside the
- * hotel's `boundingRadius`, another 2.21 m inside `stall.facePaint`'s, a
- * third 0.92 m inside `stall.spookyHouse`'s — a probe standing there was
- * pushed 0.69–0.85 m by the stall's own wall. (The topmost review pass on
- * this PR read those walls' `topHeight: Infinity` as "the fence's own
- * signature" and attributed the overlap to the rail loop; measured against
- * the real built park, wall half-thickness and `PARK_LAYOUT` both point to
- * ordinary stall/building walls instead — the fix belongs here regardless,
- * since a ramp truncated to clear its neighbours clears both causes.)
+ * Stride of clearance a ramp keeps from the nearest layout entry in the
+ * early, conservative reservation pass — see {@link RAMP_BOUNDARY_MARGIN}'s
+ * own note; same reasoning, same pass.
  */
 const RAMP_PLOT_MARGIN = 2.0;
 
 /**
- * Safety stride on top of {@link FENCE_OFFSET} in `truncateForRailLoop` — a
- * walker's own body (`PLAYER_RADIUS`) plus the fence post's own thickness
- * both live between "on the centre line" and "clear of the fence", so
- * requiring exactly `FENCE_OFFSET` would let a ramp tread graze the post
- * rather than stand comfortably past it.
+ * Safety stride on top of {@link FENCE_OFFSET} — a walker's own body
+ * (`PLAYER_RADIUS`) plus the fence post's own thickness both live between
+ * "on the centre line" and "clear of the fence", so requiring exactly
+ * `FENCE_OFFSET` would let a ramp tread graze the post rather than stand
+ * comfortably past it. Used by both passes, since the rail loop is never a
+ * real, queryable collider at plan time (see the file header).
  */
 const RAMP_RAIL_MARGIN = 0.5;
 
 /**
- * The real, physical minimum a ramp tread must clear
- * {@link GARDEN_PLAY_BOUNDARY} by — the boundary wall's own built collision
- * half-thickness (`BOUNDARY_WALL_COLLISION_HALF`, `Garden.ts`) plus a
- * walker's own body (`PLAYER_RADIUS`). `distanceToEdge` measures to the
- * boundary *line*, not to the wall's own near face, so a tread whose
- * centreline sits exactly on that line is still standing inside the wall's
- * real collision by its own half-thickness, and a walker there still has
- * `PLAYER_RADIUS` of her own body reaching further in again.
+ * How far the real, late pass may slide a crossing's deck sideways — along
+ * the crossing's own `across` axis, which runs roughly parallel to the rail
+ * — while backtracking a candidate that does not clear. "A different
+ * position along the crossing", the second lever `CLAUDE.md`'s "procgen
+ * backtracks on collision" rule names after "a smaller width".
  *
- * This is `planBridgeFootprints`'s own last-resort tier's floor (below) —
- * "never crosses `distanceToEdge = 0`" and "produces a walkable tread" are
- * different guarantees, and the tier that only delivered the first landed a
- * real, measured `0.13 m` collision pushback on the canonical seed's
- * gate-walk crossing (distance to the boundary line as thin as `0.621 m`,
- * well under what `BOUNDARY_WALL_COLLISION_HALF + PLAYER_RADIUS` — `1.07 m`
- * — needs) — found live by peer review on PR #297, re-running
- * `everyBridgeIsWalkableAndReachable` rather than trusting the earlier
- * "zero boundary breaches" measurement, which was a real but incomplete
- * check (it asked "past the line?", never "clear of the wall that stands
- * on it?").
+ * Bounded well under a crossing's own smallest workable `halfAcross` (see
+ * {@link MIN_DECK_HALF_WIDTH}) so a shift can never slide the deck out from
+ * under the actual drawn path that crosses here — the search below only
+ * ever accepts a shift that still leaves the crossing's own touch point at
+ * least {@link MIN_DECK_HALF_WIDTH} inside the shifted deck's near edge.
+ *
+ * Also why the early, conservative reservation pass pads its own width by
+ * this same figure (see `planBridgeFootprints`'s conservative branch): the
+ * real pass can shift a deck this far from its natural centre, so a
+ * reservation computed without knowing which way it will shift has to cover
+ * every direction it might.
+ *
+ * Scaled to the crossing's own `halfGap` rather than held flat, and it has
+ * to be: `halfGap` is the *real, self-measured* spread of where the drawn
+ * path's own samples actually touch the rail (`crossings.ts`'s own note),
+ * so the whole of that spread is where a bridge legitimately belongs — a
+ * flat 4 m cap left an 11 m-`halfGap` crossing unable to slide far enough
+ * within its *own* corridor to dodge an obstacle sitting near its
+ * self-measured centre, even though clear room existed nearer either end of
+ * that same corridor (found live testing this search, canonical seed: an
+ * 11.2 m-`halfGap` crossing shrank to a technically-clear but 1–2 m sliver
+ * because every shift within ±4 m still crossed the same obstacle, and
+ * stranded five waypoints scattered 7–20 m across the very corridor
+ * `halfGap` was measuring in the first place). Floored at the old flat
+ * figure for an ordinary, tighter crossing, where it was never the limit.
  */
-const BOUNDARY_WALKER_CLEARANCE = BOUNDARY_WALL_COLLISION_HALF + PLAYER_RADIUS;
+function maxLateralShiftFor(crossing: LevelCrossing): number {
+  return Math.max(4.0, crossing.halfGap);
+}
+
+/**
+ * The narrowest a deck or ramp may be shrunk to and still read as a deck —
+ * a walker's own body plus a real, physical sliver of daylight past it, not
+ * the old floor's bare `1.0`. If backtracking exhausts every width down to
+ * this and every shift, the crossing genuinely cannot take a bridge and the
+ * search gives up on this crossing (see `planBridgeFootprints`'s own note
+ * on what happens then).
+ */
+export const MIN_DECK_HALF_WIDTH = PLAYER_RADIUS + 0.3;
+
+/** Coarse step the width search backtracks by. */
+const WIDTH_STEP = 0.5;
+
+/**
+ * Fractions of the *current candidate width* tried as a lateral shift, in
+ * the order tried — natural centre first, then increasingly large nudges
+ * either way. Scaled by the candidate's own `halfAcross` (rather than a
+ * flat metre figure) so a shift never asks a narrow deck to slide further
+ * than its own width could plausibly still cover the original crossing
+ * point, and clamped again against {@link maxLateralShiftFor} regardless.
+ */
+const SHIFT_FRACTIONS: readonly number[] = [0, 0.35, -0.35, 0.7, -0.7];
+
+/** Points swept across a candidate's own width — the union of the two
+ * resolutions `planBridgeFootprints`'s own search and
+ * `test/procgen/invariants.ts`'s `everyBridgeIsWalkableAndReachable` use, so
+ * nothing the generator calls "clear" can read as a breach to the invariant
+ * that re-measures it against the real, built park afterwards. */
+const SAMPLE_TS: readonly number[] = [-1, -0.9, -0.5, -0.45, 0, 0.45, 0.5, 0.9, 1];
+
+/**
+ * How much real daylight a probe needs past whatever `real.collision` has
+ * registered, on top of a walker's own body — smaller than the old
+ * hand-picked margins (`RAMP_PLOT_MARGIN`, `RAMP_BOUNDARY_MARGIN`) because
+ * this is now checking a real, exact collider rather than a proxy
+ * (`boundingRadius`, `distanceToEdge` against a spline) that itself already
+ * carried slack.
+ */
+const REAL_CLEARANCE_STRIDE = 0.5;
+
+const REAL_PROBE_RADIUS = PLAYER_RADIUS + REAL_CLEARANCE_STRIDE;
+
+/**
+ * How far a ramp side has to reach before it counts as a genuinely walkable
+ * approach — {@link BRIDGE_RISE} spread over the steepest grade
+ * {@link MAX_RAMP_GRADIENT} ever forces. A candidate whose *better* side
+ * still falls short of this is not offering a real bridge on either side,
+ * whatever its collision clearance — see `planBridgeFootprints`'s own note
+ * on why the search keeps going past such a candidate rather than accepting
+ * it.
+ */
+const WALKABLE_FLOOR = BRIDGE_RISE / MAX_RAMP_GRADIENT;
+
+/**
+ * What the late, real pass needs from the caller: the actual collision
+ * world to query, and — the last lever before giving up on a crossing
+ * entirely — a way to fell a real, felt tree that turns out to be the one
+ * thing standing in an otherwise-clear candidate's way, exactly the lever
+ * `coaster/pylons.ts` already uses for its own placement search (issue
+ * #301). Optional: `bridgeKeepout.ts`'s early call passes neither, and gets
+ * the conservative reservation instead (see this file's own header).
+ */
+export interface RealWorldQuery {
+  readonly collision: CollisionWorld;
+  readonly clearTreesNear?: (x: number, z: number, radius: number) => number;
+}
 
 export interface BridgeFootprint {
   readonly cx: number;
@@ -158,8 +249,8 @@ export interface BridgeFootprint {
   /**
    * How far the ramp reaches past the deck on the `sign = +1` side (the
    * direction `dirX`/`dirZ` point) and the `sign = -1` side, kept separate
-   * rather than one shared `rampRun` — see {@link planBridgeFootprints}'s
-   * own note on why a boundary-constrained crossing needs this.
+   * rather than one shared `rampRun` — a boundary- or plot-constrained
+   * crossing can have room on one side and none on the other.
    */
   readonly rampRunPos: number;
   readonly rampRunNeg: number;
@@ -173,35 +264,41 @@ export interface BridgeFootprint {
    * margin living as a second, separate boundary that could drift from the
    * first.
    *
-   * `bridgeKeepout.ts` is the one caller that wants a bigger boundary: an
-   * ordinary decorative wall or lamp built right up against the *exact*
-   * footprint edge can still have its own half-thickness (up to 0.34 m) plus
-   * `PLAYER_RADIUS` (0.62 m) reach a probe standing on the ramp, because an
-   * ordinary relative-`topHeight` collider ignores the prober's actual
-   * elevation entirely (issue #116 seed 5: a 0.95 m garden wall, built
-   * 0.66 m from a ramp point that already read as on-bridge, still blocked a
-   * probe standing 3.1 m up). Padding the *keepout* rather than the bridge's
-   * own boundary keeps that one exact edge — the one everything else
-   * depends on — untouched.
+   * `bridgeKeepout.ts` is the one caller that wants a bigger boundary — see
+   * that module's own note.
    */
   covers(x: number, z: number, margin?: number): boolean;
 }
+
+/** One footprint per crossing that can genuinely take a bridge, `null` at
+ * the (expected to be rare — see `planBridgeFootprints`'s own note) index
+ * of a crossing the search could not find any walkable, collision-clear
+ * configuration for at all. `bridges.ts` reads a `null` as "fall back to a
+ * level crossing here instead". */
+export type PlannedFootprint = BridgeFootprint | null;
 
 /**
  * One footprint per crossing, in the order `crossings` gave them — the
  * ground-plane rectangle every bridge occupies, deck and both ramps, before
  * a single mesh or collider exists.
+ *
+ * See this file's own header for the two calling conventions (`real`
+ * present or absent) and issues #317/#319 for why the real one exists at
+ * all.
  */
-export function planBridgeFootprints(crossings: readonly LevelCrossing[]): BridgeFootprint[] {
-  // Pass 1: every crossing's own deck rectangle — position, orientation and
-  // (boundary-truncated) half-width — computed before any ramp length, so
-  // pass 2's rail-loop truncation (below) can ask "does a candidate ramp
-  // point fall under ANY crossing's deck", exactly the Euclidean rectangle
-  // test `fence.ts`'s own `deckSpanAt`/`Bridge.deckCovers` use to decide
-  // where the fence gets its `topIsAbsolute` seam. A ramp's own rampRun has
-  // not been decided yet at this point and does not need to be — the deck
-  // rectangle alone is what makes a stretch of fence safe to stand near.
-  const decks = crossings.map((crossing) => {
+export function planBridgeFootprints(
+  crossings: readonly LevelCrossing[],
+  real?: RealWorldQuery,
+): PlannedFootprint[] {
+  return real ? planReal(crossings, real) : planConservative(crossings);
+}
+
+// --------------------------------------------------------------------------
+// The early, conservative reservation — no real collision world to ask yet.
+// --------------------------------------------------------------------------
+
+function planConservative(crossings: readonly LevelCrossing[]): BridgeFootprint[] {
+  return crossings.map((crossing) => {
     const cx = crossing.x;
     const cz = crossing.z;
     const dirX = crossing.pathDirX;
@@ -210,53 +307,22 @@ export function planBridgeFootprints(crossings: readonly LevelCrossing[]): Bridg
     const acrossZ = dirX;
     let halfAcross = crossing.halfGap + ACROSS_MARGIN;
 
-    // Capped by the park boundary too, along the deck's own width this
-    // time rather than the ramp's length — the crossing `computeCrossings`
-    // includes by hand for the walk in from the gate sits only a few
-    // metres inside the boundary there (the gate *is* the boundary), and a
-    // deck several metres wider than that on each side cannot fit no
-    // matter how short its ramps are. Checked at the deck's own two
-    // along-extremes (`along = ±DECK_HALF_LENGTH`), and — critically —
-    // across the *whole* width at each, not just its two outer edges: a
-    // curved boundary can dip closer to an *interior* point of the deck's
-    // own cross-section than to either edge (found live by QA on PR #297,
-    // seed 18's gate-walk crossing: shrinking `halfAcross` until the two
-    // extreme edges cleared left an interior point, `t ≈ 0.4` between
-    // centre and edge, only `0.13 m` from the boundary, real collision
-    // pushback `0.49 m`, at the *deck's own edge* rather than any ramp —
-    // the same "sampled only the extremes" shape `truncateForBoundary`'s
-    // own ramp-length fix already closed one class down). Reduced together
-    // until every sampled point clears, with a stride of margin so a
-    // walker at the very edge is not standing on the boundary itself.
     const clearsBoundaryAt = (testHalfAcross: number): boolean => {
       for (const along of [-DECK_HALF_LENGTH, DECK_HALF_LENGTH]) {
-        for (const t of [-1, -0.5, 0, 0.5, 1]) {
+        for (const t of SAMPLE_TS) {
           const x = cx + dirX * along + acrossX * testHalfAcross * t;
           const z = cz + dirZ * along + acrossZ * testHalfAcross * t;
-          if (GARDEN_PLAY_BOUNDARY.distanceToEdge(x, z) < 1.5) return false;
+          if (GARDEN_PLAY_BOUNDARY.distanceToEdge(x, z) < RAMP_BOUNDARY_MARGIN) return false;
         }
       }
       return true;
     };
-    while (halfAcross > 1 && !clearsBoundaryAt(halfAcross)) {
-      halfAcross -= 0.5;
+    while (halfAcross > MIN_DECK_HALF_WIDTH && !clearsBoundaryAt(halfAcross)) {
+      halfAcross -= WIDTH_STEP;
     }
-
-    // Same shape, against every nearby layout entry — a wide, oblique
-    // crossing's own deck can be broad enough to reach a stall or building
-    // at its own two along-extremes, before a single ramp tread exists.
-    // `route.ts`'s solve only kept the *rail centre line* clear of a plot
-    // (`TRACK_PLOT_CLEARANCE`); nothing kept a wide DECK's own edge clear
-    // of one too (issue #116, seed 11: the deck at rail-distance 186.5 had
-    // `halfAcross` 6.84 m, wide enough that even its very first ramp tread
-    // — before any rail-loop or plot ramp-truncation ran — still stood
-    // 0.98 m inside `stall.spookyHouse`'s own wall). Reduced the same way
-    // the boundary loop above is — every `t` across the width, not just
-    // the two outer edges — so a walker anywhere on the deck's own edge
-    // always has {@link RAMP_PLOT_MARGIN} of daylight past the nearest plot.
     const clearsPlotsAt = (testHalfAcross: number): boolean => {
       for (const along of [-DECK_HALF_LENGTH, DECK_HALF_LENGTH]) {
-        for (const t of [-1, -0.5, 0, 0.5, 1]) {
+        for (const t of SAMPLE_TS) {
           const x = cx + dirX * along + acrossX * testHalfAcross * t;
           const z = cz + dirZ * along + acrossZ * testHalfAcross * t;
           if (!clearOfPlots(x, z, RAMP_PLOT_MARGIN)) return false;
@@ -264,147 +330,34 @@ export function planBridgeFootprints(crossings: readonly LevelCrossing[]): Bridg
       }
       return true;
     };
-    while (halfAcross > 1 && !clearsPlotsAt(halfAcross)) {
-      halfAcross -= 0.5;
+    while (halfAcross > MIN_DECK_HALF_WIDTH && !clearsPlotsAt(halfAcross)) {
+      halfAcross -= WIDTH_STEP;
     }
-    return { cx, cz, dirX, dirZ, acrossX, acrossZ, halfAcross };
-  });
 
-  /**
-   * True wherever ANY crossing's own deck rectangle — padded outward by
-   * `margin` — covers `(x, z)`. `margin = 0` is where the fence really
-   * does stand aside (see the header above); `truncateForRailLoop` below
-   * asks with a real margin instead, because an *oblique, wide* deck's
-   * rail can curve away from its own straight-sided rectangle faster than
-   * the ramp's own wide edge does — a point one ramp-tread past the
-   * rectangle's exact corner is still genuinely this crossing's own
-   * approach, not a foreign stretch of the loop, and the exact-edge test
-   * alone read it as one (issue #116, canonical seed: crossing at
-   * rail-distance 204.9, `halfAcross` 5.79 m — a point 1 m past its own
-   * deck's far corner, still following the same curve in, measured 1.9 m
-   * from the corridor and got truncated to the floor on a side that had
-   * **7.4 m of genuinely clear room**, stranding the deck off the nav
-   * lattice entirely on four of the five seeds). Padded by
-   * {@link RAMP_CLEARANCE} — the same "stride of margin" a capped ramp
-   * already keeps clear of a *neighbouring* crossing's own corridor,
-   * reused here for a crossing's own.
-   */
-  const underAnyDeck = (x: number, z: number, margin = 0): boolean => {
-    for (const deck of decks) {
-      const dx = x - deck.cx;
-      const dz = z - deck.cz;
-      const along = dx * deck.dirX + dz * deck.dirZ;
-      const across = dx * deck.acrossX + dz * deck.acrossZ;
-      if (Math.abs(along) <= DECK_HALF_LENGTH + margin && Math.abs(across) <= deck.halfAcross + margin) {
-        return true;
-      }
-    }
-    return false;
-  };
+    // Padded by the full lateral shift budget: the real, late pass may slide
+    // the deck this far sideways from this same natural centre, and this
+    // reservation has to cover wherever it lands — see
+    // `maxLateralShiftFor`'s own note.
+    const reservedHalfAcross = halfAcross + maxLateralShiftFor(crossing);
 
-  return crossings.map((crossing, crossingIndex) => {
-    const { cx, cz, dirX, dirZ, acrossX, acrossZ, halfAcross } = decks[crossingIndex] as (typeof decks)[number];
-
-    // Capped by how close the *next* crossing is — see `bridges.ts`'s own
-    // note on `rampRunCap` for why (two crossings closer together than the
-    // ordinary grade's own ramp length would otherwise overlap).
-    let nearestOtherCrossing = Infinity;
-    for (const other of crossings) {
-      if (other === crossing) continue;
-      nearestOtherCrossing = Math.min(nearestOtherCrossing, Math.hypot(other.x - cx, other.z - cz));
-    }
-    const rampRunCap = Math.max(
-      BRIDGE_RISE / MAX_RAMP_GRADIENT,
-      nearestOtherCrossing / 2 - DECK_HALF_LENGTH - RAMP_CLEARANCE,
-    );
-    const idealRampRun = Math.min(BRIDGE_RISE / BRIDGE_RAMP_GRADIENT, rampRunCap);
-
-    // Never run past the park's own playable edge either. A crossing's own
-    // position is derived from the drawn path, well inside the boundary,
-    // but nothing about that keeps an ~18 m ramp reaching *out* from it
-    // inside too — a ramp near the rim genuinely reached past the edge
-    // (found live, issue #116: `GARDEN_PLAY_BOUNDARY.distanceToEdge` read
-    // negative partway along it). `distanceToEdge` is a signed field —
-    // asked directly of every point actually on the ramp's own surface
-    // (see `clearAt` below, which samples the real width, not an
-    // edge-from-centreline approximation).
-    //
-    // Walked in 1 m steps along the *whole* ramp, not just tested at its
-    // far end: `GARDEN_PLAY_BOUNDARY` is a spline, not a circle, and it can
-    // dip inward partway along a ramp while the far end still clears —
-    // trimming only the endpoint would leave that dip un-caught (measured
-    // live: a far end that passed with room to spare, on a ramp whose
-    // *middle* was already 2.35 m outside).
-    //
-    // Truncated **per side**, independently — the entrance gate itself sits
-    // hard against the boundary on one side of the hand-added "gate walk"
-    // crossing (`crossings.ts`'s own note on why that crossing exists),
-    // while the other side opens onto ordinary lawn with room to spare.
-    // A single shared `rampRun` (the original approach) forces the tight
-    // side's cap onto the roomy side too, for no reason; worse, re-applying
-    // `MAX_RAMP_GRADIENT`'s own floor after truncating *defeated* the
-    // truncation outright whenever that floor's own reach (`BRIDGE_RISE /
-    // MAX_RAMP_GRADIENT`) was itself larger than the room the boundary
-    // truncation just found — exactly the gate-walk crossing's own shape
-    // (issue #116, seeds 11 and 18: the floor snapped a ~1 m-deep
-    // truncation straight back up to ~7.9 m, reaching 8 m past the edge of
-    // the map). `MAX_RAMP_GRADIENT`'s floor exists to keep two *competing
-    // bridges* from squeezing each other into an unwalkable slope
-    // (`rampRunCap` above); it says nothing useful about the edge of the
-    // world, where there is no slope to walk *at all* past a certain point
-    // — so the boundary truncation below floors only at a small physical
-    // minimum, not at the walkability grade. A ramp genuinely too cramped
-    // to reach anywhere near {@link BRIDGE_RISE} on one side is exactly
-    // `everyBridgeIsWalkableAndReachable`'s own "a maximally cramped
-    // bridge; nothing to probe this far out" case — deliberately handled
-    // there rather than forced here.
-    //
-    // **The `0.5 m` floor above is a physical minimum, not a promise it is
-    // itself inside the boundary — and on the gate-walk crossing it isn't.**
-    // The gate sits so hard against `GARDEN_PLAY_BOUNDARY` that the coarse
-    // walk above can find the violation on its very first sampled metre,
-    // while the deck's own edge (`along = DECK_HALF_LENGTH`, before any
-    // ramp at all) is *already* only a few tens of centimetres inside it —
-    // issue #116, seeds 11 and 18: the deck edge measured 0.44 m and
-    // 0.19–0.34 m inside the boundary respectively, and the unconditional
-    // `0.5 m` floor then landed the far tread 0.06–0.20 m *past* it. So the
-    // floored value is walked back down here, in fine (0.1 m) steps, until
-    // its own far tread genuinely clears the boundary by `requiredClearance`
-    // — never assumed safe just because it is short. This can reach `0` (no
-    // ramp reach on this side at all): the gate-walk crossing's tight side
-    // faces *outward*, past the gate the walk-in samples run from
-    // (`crossings.ts`'s own note), so nobody ever needs to stand there —
-    // unlike the boundary-truncation loop's own "too cramped to reach
-    // `BRIDGE_RISE`" case above, a `0`-length ramp on one side is not a
-    // failure, it is the correct answer for a side nothing walks on.
-    //
-    // **Sampled across the ramp's whole width, not just its centreline** —
-    // the same reason `truncateForPlots`/`truncateForRailLoop` already
-    // sample every `t` in `[-1, -0.5, 0, 0.5, 1]` rather than one ray down
-    // the middle. A ramp several metres wide can have its centreline
-    // comfortably inside `GARDEN_PLAY_BOUNDARY` while an outer edge is not:
-    // found live by QA on PR #297, canonical seed — the crossing at
-    // (12.64, 57.02), `halfAcross` ≈ 4.48 m, had its centreline clearing
-    // the boundary by 0.418 m at the worst point while its outer edge, 4.48
-    // m further across at the very same `along`, was still `1.385 m` past
-    // it outright (a real `collision.resolve()` pushback of `2.454 m`) —
-    // this function's own two loops only ever asked the centreline, so
-    // neither the coarse walk nor the fine backoff had any way to see it.
-    const truncateForBoundary = (sign: 1 | -1, requiredClearance = RAMP_BOUNDARY_MARGIN): number => {
+    const idealRampRun = BRIDGE_RISE / BRIDGE_RAMP_GRADIENT;
+    const truncate = (sign: 1 | -1): number => {
       const clearAt = (along: number): boolean => {
-        for (const t of [-1, -0.5, 0, 0.5, 1]) {
-          const x = cx + dirX * along * sign + acrossX * halfAcross * t;
-          const z = cz + dirZ * along * sign + acrossZ * halfAcross * t;
-          if (GARDEN_PLAY_BOUNDARY.distanceToEdge(x, z) < requiredClearance) return false;
+        for (const t of SAMPLE_TS) {
+          const x = cx + dirX * along * sign + acrossX * reservedHalfAcross * t;
+          const z = cz + dirZ * along * sign + acrossZ * reservedHalfAcross * t;
+          if (GARDEN_PLAY_BOUNDARY.distanceToEdge(x, z) < RAMP_BOUNDARY_MARGIN) return false;
+          if (!clearOfPlots(x, z, RAMP_PLOT_MARGIN)) return false;
+          if (distanceToRailCorridor(x, z) < FENCE_OFFSET + RAMP_RAIL_MARGIN) return false;
         }
         return true;
       };
       let rampRun = idealRampRun;
-      const steps = Math.max(1, Math.ceil(rampRun));
+      const steps = Math.max(1, Math.ceil(rampRun / WIDTH_STEP));
       for (let i = 1; i <= steps; i += 1) {
         const along = DECK_HALF_LENGTH + (i / steps) * rampRun;
         if (!clearAt(along)) {
-          rampRun = Math.max(0.5, along - DECK_HALF_LENGTH - 1.5);
+          rampRun = Math.max(0, along - DECK_HALF_LENGTH - 1.5);
           break;
         }
       }
@@ -414,157 +367,357 @@ export function planBridgeFootprints(crossings: readonly LevelCrossing[]): Bridg
       }
       return rampRun;
     };
-    // Truncated against every nearby layout entry too — a stall, a plot, a
-    // building — the thing `route.ts`'s own solve keeps only the rail
-    // *centre line* clear of (`TRACK_PLOT_CLEARANCE`, 4.2 m), never a
-    // bridge's ramp reaching several times that far out from it. Sampled
-    // across the ramp's *whole* width, not just its two edges: a wide
-    // crossing's `halfAcross` can swing both far edges clear of a stall
-    // sitting just off the ramp's own centreline while the middle of the
-    // walkable surface still stands on top of it — the same "the edge
-    // clears but the middle does not" shape `planBridgeFootprints`'s own
-    // boundary walk already knows to check the *whole* ramp for (see that
-    // loop's own comment), not only sampled at the wrong axis here. See
-    // {@link RAMP_PLOT_MARGIN} for the measured numbers this closes.
-    const truncateForPlots = (sign: 1 | -1, margin = RAMP_PLOT_MARGIN): number => {
-      let rampRun = idealRampRun;
-      const steps = Math.max(1, Math.ceil(rampRun));
-      for (let i = 1; i <= steps; i += 1) {
-        const along = DECK_HALF_LENGTH + (i / steps) * rampRun;
-        for (const t of [-1, -0.5, 0, 0.5, 1]) {
-          const x = cx + dirX * along * sign + acrossX * halfAcross * t;
-          const z = cz + dirZ * along * sign + acrossZ * halfAcross * t;
-          if (!clearOfPlots(x, z, margin)) {
-            return Math.max(0.5, along - DECK_HALF_LENGTH - 1.5);
-          }
-        }
-      }
-      return rampRun;
+    const rampRunPos = truncate(1);
+    const rampRunNeg = truncate(-1);
+
+    return {
+      cx,
+      cz,
+      dirX,
+      dirZ,
+      acrossX,
+      acrossZ,
+      halfAcross: reservedHalfAcross,
+      rampRunPos,
+      rampRunNeg,
+      covers: (x: number, z: number, margin = 0): boolean => {
+        const dx = x - cx;
+        const dz = z - cz;
+        const along = dx * dirX + dz * dirZ;
+        const across = dx * acrossX + dz * acrossZ;
+        if (Math.abs(across) > reservedHalfAcross + margin) return false;
+        const rampRun = along >= 0 ? rampRunPos : rampRunNeg;
+        return Math.abs(along) <= DECK_HALF_LENGTH + rampRun + margin;
+      },
     };
+  });
+}
 
-    // Truncated against the rail/fence loop itself, not only the map edge
-    // and the nearest crossing — on a layout where the loop curves back
-    // near itself, a long ramp can otherwise walk straight into a stretch
-    // of its own exclusion fence that has nothing to do with this
-    // crossing. Sampled across the ramp's whole width (same reason as
-    // `truncateForPlots` above), and — critically — a rail sample is only
-    // a hazard where it is NOT under any crossing's own deck: `fence.ts`
-    // only ever seams the fence under a deck's exact rectangle
-    // (`Bridge.deckCovers`), never under a ramp, so a ramp tread standing
-    // close to rail that is *not* under a deck meets an ordinary,
-    // always-solid wall regardless of whose crossing that rail belongs to
-    // — including, past the deck's own edge, this crossing's own (a wide,
-    // oblique deck's curve can swing its own nearby rail back close to the
-    // very first ramp tread). `underAnyDeck` (pass 1, above) is the same
-    // Euclidean rectangle test the real fence build uses, so this and the
-    // built game can never disagree about which stretch is safe.
-    const truncateForRailLoop = (sign: 1 | -1, margin = RAMP_RAIL_MARGIN): number => {
-      let rampRun = idealRampRun;
-      const steps = Math.max(1, Math.ceil(rampRun));
-      for (let i = 1; i <= steps; i += 1) {
-        const along = DECK_HALF_LENGTH + (i / steps) * rampRun;
-        for (const t of [-1, -0.5, 0, 0.5, 1]) {
-          const x = cx + dirX * along * sign + acrossX * halfAcross * t;
-          const z = cz + dirZ * along * sign + acrossZ * halfAcross * t;
-          if (underAnyDeck(x, z, RAMP_CLEARANCE)) continue; // the fence stands aside here — safe
-          if (distanceToRailCorridor(x, z) < FENCE_OFFSET + margin) {
-            return Math.max(0.5, along - DECK_HALF_LENGTH - 1.5);
-          }
-        }
-      }
-      return rampRun;
-    };
+// --------------------------------------------------------------------------
+// The late, real pass — genuine backtracking against the built park.
+// --------------------------------------------------------------------------
 
-    // Every one of the three truncations above is a real constraint, and
-    // ordinarily all three apply together (`Math.min` of all three, per
-    // side). But **a `0.5 m` floor was never a claim that side is walkable
-    // — only that its geometry will not be literally degenerate.** It
-    // never could be: a tread run has to cover the *whole* {@link
-    // BRIDGE_RISE} regardless of how little `along` room it is given, so a
-    // `0.5 m` ramp descends the same rise a normal one spreads over ~18 m
-    // in a fraction of the distance — a grade far past anything `NavGrid`
-    // links as one walkable level, which is exactly why a bridge whose
-    // *only* two approaches both floor this way ends up with its deck
-    // simply unreachable, not just cordoned off (`check:park`'s invariant 1
-    // and this file's own `reachableFromEntrance` check both hold every
-    // attraction, bridges included, to that). The pre-fix code never hit
-    // this: only the boundary truncation had a floor at all, and a
-    // crossing needing *this* rescue needs it precisely because the two
-    // truncations this PR adds (plots, the rail loop) can now each
-    // independently floor a *different* side of the same crossing — found
-    // live, issue #116, seed 2: rail-distance 286.4 floored to `0.5 m` on
-    // *both* sides, one from a plot, the other from the boundary, and nothing
-    // reached the deck at all.
-    //
-    // **This is genuinely tiered, not "drop whichever of the three is
-    // smallest."** An earlier version of this fallback computed
-    // `Math.max(Math.min(a,b), Math.min(a,c), Math.min(b,c))` over the raw
-    // per-constraint results — the "median of three" identity, which drops
-    // whichever constraint happens to be tightest, *including the
-    // boundary*, with nothing recomputed at a lesser standard. Peer review
-    // caught it live on the *canonical* seed (rail-distance 128.2's
-    // crossing): the boundary had correctly floored `rampRunPos` to `0.5 m`
-    // — a real, tight boundary — but because `rampRunNeg` was *also* below
-    // the walkable floor for an unrelated reason (`RAMP_PLOT_MARGIN`), the
-    // fallback fired and threw the boundary's own answer away outright,
-    // landing the real, built far tread `1.68 m` past `GARDEN_PLAY_BOUNDARY`
-    // with real collision pushback up to `2.26 m` — the exact class of bug
-    // this whole file exists to close, reintroduced by its own rescue path.
-    //
-    // The fix: `plots` and `rail loop` carry a real safety **margin** on top
-    // of the literal overlap they measure ({@link RAMP_PLOT_MARGIN}, {@link
-    // RAMP_RAIL_MARGIN}), and `truncateForBoundary` carries the ramp's full
-    // `halfAcross` **width** requirement on top of its own literal edge —
-    // three genuinely different things to give up, at three genuinely
-    // different tiers, never the boundary's edge itself:
-    //
-    // 1. Full margins (already computed above as `rampRunPos`/`rampRunNeg`).
-    // 2. If a side is still short: the *margin* on plots and the rail loop
-    //    given up (recomputed at `margin = 0` — the literal, unpadded
-    //    overlap, never crossed), boundary untouched.
-    // 3. If, even then, BOTH sides are still short together: boundary's own
-    //    *width* requirement also given up, down to {@link
-    //    BOUNDARY_WALKER_CLEARANCE} — the real, physical minimum a walker's
-    //    own body needs past the boundary wall's own built collision, never
-    //    all the way to `0`. "Never crosses `distanceToEdge = 0`" and
-    //    "produces a walkable tread" are different guarantees, and this
-    //    tier's own first version delivered only the first — landing a
-    //    real `0.13 m` collision pushback on the canonical seed's gate-walk
-    //    crossing (`distanceToEdge` as thin as `0.621 m`, well under the
-    //    `1.07 m` a body actually needs there). See
-    //    {@link BOUNDARY_WALKER_CLEARANCE}'s own note.
-    //
-    // Reachability is a harder, pre-existing requirement than any one of
-    // these margins (`check:park`'s invariant 1, this file's own
-    // `reachableFromEntrance`), which is why a crossing this cramped is
-    // allowed to give them up at all — but a walker's own physical
-    // clearance past the boundary wall is never one of the things given
-    // up, at any tier.
-    const WALKABLE_FLOOR = BRIDGE_RISE / MAX_RAMP_GRADIENT;
-    const sideWithMargins = (sign: 1 | -1): number =>
-      Math.min(truncateForBoundary(sign), truncateForPlots(sign), truncateForRailLoop(sign));
-    const sideMarginFree = (sign: 1 | -1): number =>
-      Math.min(truncateForBoundary(sign), truncateForPlots(sign, 0), truncateForRailLoop(sign, 0));
-    const sideBoundaryWalkerClearanceOnly = (sign: 1 | -1): number =>
-      Math.min(
-        truncateForBoundary(sign, BOUNDARY_WALKER_CLEARANCE),
-        truncateForPlots(sign, 0),
-        truncateForRailLoop(sign, 0),
-      );
+interface DeckPlan {
+  readonly crossingIndex: number;
+  readonly cx: number;
+  readonly cz: number;
+  readonly dirX: number;
+  readonly dirZ: number;
+  readonly acrossX: number;
+  readonly acrossZ: number;
+  readonly halfAcross: number;
+}
 
-    let rampRunPos = sideWithMargins(1);
-    let rampRunNeg = sideWithMargins(-1);
-    if (rampRunPos < WALKABLE_FLOOR) rampRunPos = Math.max(rampRunPos, sideMarginFree(1));
-    if (rampRunNeg < WALKABLE_FLOOR) rampRunNeg = Math.max(rampRunNeg, sideMarginFree(-1));
-    if (rampRunPos < WALKABLE_FLOOR && rampRunNeg < WALKABLE_FLOOR) {
-      rampRunPos = Math.max(rampRunPos, sideBoundaryWalkerClearanceOnly(1));
-      rampRunNeg = Math.max(rampRunNeg, sideBoundaryWalkerClearanceOnly(-1));
+function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): PlannedFootprint[] {
+  const { collision, clearTreesNear } = real;
+  // `isClearCircle` only ever asks the registered circles and walls — the
+  // park's own soft edge (`CollisionWorld.playBounds`, what `resolve()`
+  // pushes a walker back across) is a *separate* mechanism, asked nowhere
+  // else in `isClearCircle`, precisely because a real gate leaves a genuine
+  // gap in the *wall* right where the soft edge still has to hold (found
+  // live debugging this very search, seed 18's gate-walk crossing: a
+  // candidate `isClearCircle` accepted was still 0.51 m inside the soft
+  // boundary, and `resolve()` pushed a probe standing there by exactly the
+  // shortfall). So this asks both, the same two things a real walker's
+  // `resolve()` call would ever be stopped by on open ground.
+  /**
+   * The one real-collision test every check in this file goes through.
+   *
+   * **Fells a real, felt tree inline, the same "try, then clear, then
+   * try again" order `coaster/pylons.ts` already uses for its own placement
+   * search (issue #301)** — not a separate rescue pass tried only once a
+   * whole crossing has failed outright. `Scenery`'s own scatter already
+   * keeps the *ordinary* case clear (it asks `isInBridgeFootprint` before
+   * planting), but a clump's individual trunks are jittered a little off
+   * the candidate spot that check actually asked about, so a lone trunk can
+   * still land inside a bridge's real, final footprint even though the
+   * scatter's own check passed (found live testing this search: a
+   * deck edge otherwise clearing the conservative reservation with
+   * 2 m to spare still had a 0.68 m-radius trunk sitting 0.08 m from it).
+   * Felling only ever removes a real, registered tree — a point blocked by
+   * anything else (a wall, a building, the boundary) is refused exactly as
+   * before, because {@link Scenery.clearTreesNear} has nothing there to
+   * remove.
+   */
+  const clearOfReal = (x: number, z: number): boolean => {
+    if (
+      collision.isClearCircle(x, z, REAL_PROBE_RADIUS) &&
+      collision.playBounds.distanceToEdge(x, z) >= REAL_PROBE_RADIUS
+    ) {
+      return true;
     }
-    // If both sides are still short even here, this crossing is genuinely
-    // as cramped as the gate-walk crossing's own tight side, and is left as
-    // measured — `everyBridgeIsWalkableAndReachable`
-    // (test/procgen/invariants.ts) is what judges whether that leaves the
-    // deck reachable at all.
+    if (clearTreesNear && clearTreesNear(x, z, REAL_PROBE_RADIUS) > 0) {
+      return collision.isClearCircle(x, z, REAL_PROBE_RADIUS);
+    }
+    return false;
+  };
+
+  // --- pass 1: each crossing's own deck — width and lateral shift ---------
+  //
+  // Independent per crossing: a deck's own extent never depends on where
+  // any other crossing's deck ends up (the rail loop, the one thing that
+  // does create cross-crossing dependency, is never a hazard to the deck
+  // itself — the deck's whole job is to stand over its own stretch of it).
+  // Backtracks width first (the least visually disruptive lever — a
+  // narrower bridge is still obviously the same bridge), then, at each
+  // width, lateral shift (issue #319's "a shifted position along the
+  // crossing") — accepting the first combination whose deck clears the real
+  // collision world AND whose better ramp side can plausibly reach
+  // {@link WALKABLE_FLOOR} against a conservative (no cross-deck exception)
+  // reading of the rail loop, so pass 1 never locks in a width pass 2 could
+  // not actually build a walkable ramp for.
+  /**
+   * True near a *different* crossing's own guard rail — the real, physical
+   * wall `bridges.ts` stands along each long edge of a deck (never a ramp:
+   * see that file's own `railHalfAcross`), at `halfAcross + ACROSS_MARGIN`
+   * out, running the deck's own `DECK_HALF_LENGTH` span. It is not a real,
+   * queryable collider yet at plan time — `ParkTrain` only calls
+   * `collision.addWall` for every bridge's guard rails once this whole
+   * search has returned — so it needs the same synthetic treatment as the
+   * rail loop, this time as an EXCLUSION rather than an exemption: found
+   * live testing this search, two crossings close enough that one's deck
+   * edge, cleared against everything real, still landed inside where a
+   * neighbour's own guard rail was about to stand.
+   */
+  const nearOtherGuardRail = (
+    otherDecks: readonly DeckPlan[],
+    x: number,
+    z: number,
+    margin: number,
+  ): boolean => {
+    for (const deck of otherDecks) {
+      const dx = x - deck.cx;
+      const dz = z - deck.cz;
+      const along = dx * deck.dirX + dz * deck.dirZ;
+      const across = dx * deck.acrossX + dz * deck.acrossZ;
+      const railAcross = deck.halfAcross + ACROSS_MARGIN;
+      // Real point-to-segment distance to each of the two rail lines — not
+      // "along within span, then across within margin" separately, which
+      // reads a point near a rail's own END as safe whenever it clears
+      // *either* test alone even though the true nearest point (the rail's
+      // own endpoint, a corner) is still close. Found live testing this
+      // search, seed 11: a probe 0.68 m from a real guard rail's endpoint —
+      // comfortably within this file's own margin — still read as "no
+      // nearby guard rail" because its `along` alone sat just past
+      // `DECK_HALF_LENGTH + margin`, and its `across` alone was too, even
+      // though neither excess was on its own enough to put the *point* that
+      // far from the *segment*.
+      const alongClamped = Math.max(-DECK_HALF_LENGTH, Math.min(DECK_HALF_LENGTH, along));
+      const dAlong = along - alongClamped;
+      for (const sign of [1, -1] as const) {
+        const dAcross = across - sign * railAcross;
+        if (Math.hypot(dAlong, dAcross) < margin) return true;
+      }
+    }
+    return false;
+  };
+
+  const GUARD_RAIL_MARGIN = 0.08 + REAL_PROBE_RADIUS;
+
+  /**
+   * `siblingDecks` is every OTHER crossing's own current-best deck — empty
+   * where none of them have a deck yet, filled in as `resweep` (below)
+   * updates each crossing in place, so a later crossing's guard rail is
+   * known to an earlier one too and vice versa within the very same sweep
+   * (see `nearOtherGuardRail`'s own note for the live case this closes).
+   * `nearOtherGuardRail` only ever *removes* room a candidate would
+   * otherwise have — so a crossing accepted with fuller sibling knowledge
+   * is never worse than one accepted with less, only ever more cautious.
+   */
+  const searchDeck = (crossing: LevelCrossing, siblingDecks: readonly DeckPlan[]): DeckPlan | null => {
+    const dirX = crossing.pathDirX;
+    const dirZ = crossing.pathDirZ;
+    const acrossX = -dirZ;
+    const acrossZ = dirX;
+    const idealRampRun = idealRampRunFor(crossing, crossings);
+
+    const deckClears = (centerX: number, centerZ: number, halfAcross: number): boolean => {
+      for (const along of [-DECK_HALF_LENGTH, DECK_HALF_LENGTH]) {
+        for (const t of SAMPLE_TS) {
+          const x = centerX + dirX * along + acrossX * halfAcross * t;
+          const z = centerZ + dirZ * along + acrossZ * halfAcross * t;
+          if (!clearOfReal(x, z)) return false;
+          if (nearOtherGuardRail(siblingDecks, x, z, GUARD_RAIL_MARGIN)) return false;
+        }
+      }
+      return true;
+    };
+    // Provisional probe of one ramp side, used only to decide whether a
+    // candidate width/shift is even worth locking in — pass 2 re-measures
+    // the real, final reach with every other crossing's deck fully in place.
+    const provisionalReach = (
+      centerX: number,
+      centerZ: number,
+      halfAcross: number,
+      sign: 1 | -1,
+    ): number => {
+      let rampRun = idealRampRun;
+      const steps = Math.max(1, Math.ceil(rampRun / WIDTH_STEP));
+      for (let i = 1; i <= steps; i += 1) {
+        const along = DECK_HALF_LENGTH + (i / steps) * rampRun;
+        let blocked = false;
+        for (const t of SAMPLE_TS) {
+          const x = centerX + dirX * along * sign + acrossX * halfAcross * t;
+          const z = centerZ + dirZ * along * sign + acrossZ * halfAcross * t;
+          if (!clearOfReal(x, z) || nearOtherGuardRail(siblingDecks, x, z, GUARD_RAIL_MARGIN)) {
+            blocked = true;
+            break;
+          }
+          if (distanceToRailCorridor(x, z) < FENCE_OFFSET + RAMP_RAIL_MARGIN) {
+            blocked = true;
+            break;
+          }
+        }
+        if (blocked) return Math.max(0, along - DECK_HALF_LENGTH - WIDTH_STEP);
+      }
+      return rampRun;
+    };
+
+    // Never shrink past the crossing's own self-measured `halfGap` — that
+    // number is not a suggestion, it is the real spread of where the drawn
+    // path's own samples actually touch the rail (`crossings.ts`'s own
+    // note: "an oblique path occupies more corridor than a perpendicular
+    // one, and a fixed gap strands the path's own waypoint samples"). A
+    // deck narrower than that still technically clears real collision —
+    // {@link MIN_DECK_HALF_WIDTH} alone never stops it — but it is a bridge
+    // wide enough for one child standing exactly on the crossing's own
+    // centre line and nobody approaching from anywhere else the path
+    // actually runs, which is not a usable crossing at all. Found live
+    // testing this search, canonical seed: an extremely oblique crossing
+    // (`halfGap` 11.2 m) shrank to a technically-clear 1–2 m sliver and
+    // stranded five waypoints scattered 7–20 m across the very corridor
+    // `halfGap` was measuring in the first place. Below this floor the
+    // search gives up on a bridge here entirely rather than accept a deck
+    // too narrow to be the crossing it is meant to be — see this file's own
+    // header on the fallback that follows.
+    const USABLE_HALF_WIDTH_FLOOR = Math.max(MIN_DECK_HALF_WIDTH, crossing.halfGap);
+    const maxShift = maxLateralShiftFor(crossing);
+    for (
+      let halfAcross = crossing.halfGap + ACROSS_MARGIN;
+      halfAcross >= USABLE_HALF_WIDTH_FLOOR;
+      halfAcross -= WIDTH_STEP
+    ) {
+      for (const fraction of SHIFT_FRACTIONS) {
+        const shift = Math.max(-maxShift, Math.min(maxShift, fraction * halfAcross));
+        // The crossing's own touch point — where the real, drawn path meets
+        // the rail — must stay genuinely inside the shifted deck, not just
+        // past its exact edge.
+        if (Math.abs(shift) > halfAcross - MIN_DECK_HALF_WIDTH) continue;
+        const centerX = crossing.x + acrossX * shift;
+        const centerZ = crossing.z + acrossZ * shift;
+        if (!deckClears(centerX, centerZ, halfAcross)) continue;
+        const reachPos = provisionalReach(centerX, centerZ, halfAcross, 1);
+        const reachNeg = provisionalReach(centerX, centerZ, halfAcross, -1);
+        if (Math.max(reachPos, reachNeg) >= WALKABLE_FLOOR) {
+          return { crossingIndex: -1, cx: centerX, cz: centerZ, dirX, dirZ, acrossX, acrossZ, halfAcross };
+        }
+      }
+    }
+    return null;
+  };
+
+  /**
+   * Gauss-Seidel, not Jacobi — each crossing's search sees every OTHER
+   * crossing's **latest** result, including ones already updated earlier in
+   * this very sweep, rather than a whole-array snapshot frozen at the start
+   * of it. Updating the whole array at once from a single frozen snapshot
+   * (this file's first version) let two mutually-adjacent crossings
+   * perpetually flip-flop: each round, crossing A's search saw crossing B's
+   * *previous* (wide, pre-conflict) answer and reclaimed the space crossing
+   * B needed, while crossing B's search — reading the *same* frozen
+   * snapshot — did the exact same thing back, so both rejected each other
+   * every other round and forgave each other on the rounds between,
+   * forever (found live, seed 11: rounds 0/2 both placed a 6.5 m-wide deck
+   * each, rounds 1/3 both went `null`, and the code's own "retry a null
+   * against whatever placed" rescue then picked the unsafe, mutually-blind
+   * answer straight back up). Updating in place instead means crossing B's
+   * search, run right after crossing A's in the same sweep, already knows
+   * whatever A just decided — the two can still each shrink the other, but
+   * neither can un-know what the other only just chose, which is what
+   * actually settles it.
+   */
+  const current: (DeckPlan | null)[] = crossings.map(() => null);
+  const resweep = (): boolean => {
+    let changed = false;
+    for (let index = 0; index < crossings.length; index += 1) {
+      const siblings = current.filter((d, i): d is DeckPlan => i !== index && d !== null);
+      const next = searchDeck(crossings[index] as LevelCrossing, siblings);
+      const previous = current[index];
+      if (
+        (next === null) !== (previous === null) ||
+        (next && previous && (next.halfAcross !== previous.halfAcross || next.cx !== previous.cx || next.cz !== previous.cz))
+      ) {
+        changed = true;
+      }
+      current[index] = next;
+    }
+    return changed;
+  };
+  // Sweep until nothing changes any more, or a generous bound — the same
+  // "cheap insurance, not a proof" this file's own tree-felling retry
+  // already accepts. Every sweep after the first only ever tightens or
+  // holds what an earlier one found (an extra, already-in-place sibling
+  // only ever adds a genuine exemption or a genuine exclusion the built
+  // park will actually enforce), so stopping early on "nothing changed" is
+  // the true fixed point, not an approximation of one.
+  const MAX_SWEEPS = 6;
+  for (let sweep = 0; sweep < MAX_SWEEPS; sweep += 1) {
+    if (!resweep()) break;
+  }
+  // A crossing still `null` here has been through a full, converged sweep —
+  // every other crossing's own final answer was already visible to its own
+  // search (see `resweep`'s own note) — and still found no width, at any
+  // lateral shift, whose deck clears the real collision world with a ramp
+  // reaching {@link WALKABLE_FLOOR} on at least one side. A real, felled
+  // tree (`coaster/pylons.ts`'s own lever, `CLAUDE.md`'s "procgen
+  // backtracks on collision") was already tried inline at every point every
+  // check above asked about — see `clearOfReal`'s own note — so there is
+  // nothing left to clear. This crossing genuinely cannot take a bridge;
+  // see this file's own header for what happens next (a level crossing).
+  const decksOrNull: (DeckPlan | null)[] = current;
+
+  // --- pass 2: real, final ramp reach, now that every deck is fixed -------
+  const decks: DeckPlan[] = decksOrNull
+    .map((deck, crossingIndex) => (deck ? { ...deck, crossingIndex } : null))
+    .filter((deck): deck is DeckPlan => deck !== null);
+
+  return crossings.map((crossing, crossingIndex) => {
+    const deck = decks.find((d) => d.crossingIndex === crossingIndex);
+    if (!deck) return null; // see this file's own header: fall back to a level crossing
+
+    const { cx, cz, dirX, dirZ, acrossX, acrossZ, halfAcross } = deck;
+    const idealRampRun = idealRampRunFor(crossing, crossings);
+    const otherDecks = decks.filter((d) => d.crossingIndex !== crossingIndex);
+
+    const clearAt = (along: number, sign: 1 | -1): boolean => {
+      for (const t of SAMPLE_TS) {
+        const x = cx + dirX * along * sign + acrossX * halfAcross * t;
+        const z = cz + dirZ * along * sign + acrossZ * halfAcross * t;
+        if (!clearOfReal(x, z)) return false;
+        if (nearOtherGuardRail(otherDecks, x, z, GUARD_RAIL_MARGIN)) return false;
+        if (distanceToRailCorridor(x, z) < FENCE_OFFSET + RAMP_RAIL_MARGIN) return false;
+      }
+      return true;
+    };
+    const rampReach = (sign: 1 | -1): number => {
+      let rampRun = idealRampRun;
+      const steps = Math.max(1, Math.ceil(rampRun / WIDTH_STEP));
+      for (let i = 1; i <= steps; i += 1) {
+        const along = DECK_HALF_LENGTH + (i / steps) * rampRun;
+        if (!clearAt(along, sign)) {
+          rampRun = Math.max(0, along - DECK_HALF_LENGTH - WIDTH_STEP);
+          break;
+        }
+      }
+      const BACKOFF_STEP = 0.1;
+      while (rampRun > 0 && !clearAt(DECK_HALF_LENGTH + rampRun, sign)) {
+        rampRun = Math.max(0, rampRun - BACKOFF_STEP);
+      }
+      return rampRun;
+    };
+
+    const rampRunPos = rampReach(1);
+    const rampRunNeg = rampReach(-1);
 
     return {
       cx,
@@ -587,4 +740,24 @@ export function planBridgeFootprints(crossings: readonly LevelCrossing[]): Bridg
       },
     };
   });
+}
+
+/** Capped by how close the *next* crossing is — two crossings closer
+ * together than the ordinary grade's own ramp length would otherwise
+ * overlap. Shared by both the deck search and the final ramp pass so
+ * neither can disagree about how far a ramp is even trying to reach. */
+function idealRampRunFor(crossing: LevelCrossing, crossings: readonly LevelCrossing[]): number {
+  let nearestOtherCrossing = Infinity;
+  for (const other of crossings) {
+    if (other === crossing) continue;
+    nearestOtherCrossing = Math.min(
+      nearestOtherCrossing,
+      Math.hypot(other.x - crossing.x, other.z - crossing.z),
+    );
+  }
+  const rampRunCap = Math.max(
+    BRIDGE_RISE / MAX_RAMP_GRADIENT,
+    nearestOtherCrossing / 2 - DECK_HALF_LENGTH - RAMP_CLEARANCE,
+  );
+  return Math.min(BRIDGE_RISE / BRIDGE_RAMP_GRADIENT, rampRunCap);
 }

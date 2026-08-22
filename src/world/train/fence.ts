@@ -10,6 +10,7 @@ import {
 import type { TrainRoute } from './route';
 import { TRACK_CLEARANCE } from './route';
 import type { Bridge } from './bridges';
+import type { LevelCrossing } from './crossings';
 import { FENCE_OFFSET, FENCE_SEAM_MARGIN } from './clearance';
 import { PLAYER_RADIUS } from '../../core/constants';
 import type { CollisionWorld } from '../Collision';
@@ -50,6 +51,15 @@ export function buildRailFence(
   collision: CollisionWorld,
   bridges: readonly Bridge[],
   stations: readonly StationSpan[],
+  /**
+   * Crossings the real footprint search found no walkable bridge for at all
+   * (issues #317, #319) — genuinely rare (see `bridges.ts`'s own note on
+   * `BuiltBridges.fallbackCrossings`). Each gets an ordinary open fence gap,
+   * exactly the pre-Decision-8 level crossing this replaces: the ground
+   * between the rails there was always plain, walkable terrain, so opening
+   * the gap is the whole fix — no deck, no ramp, nothing else to build.
+   */
+  fallbackCrossings: readonly LevelCrossing[] = [],
 ): Group {
   const group = new Group();
   group.name = 'rail-fence';
@@ -155,6 +165,9 @@ export function buildRailFence(
   const open: Interval[] = [];
   for (const station of stations) {
     open.push({ from: station.distance - STATION_GAP, to: station.distance + STATION_GAP });
+  }
+  for (const crossing of fallbackCrossings) {
+    open.push({ from: crossing.railDistance - crossing.halfGap, to: crossing.railDistance + crossing.halfGap });
   }
   // Unwrap the circle at a seam that lies in CLOSED track, so no open
   // interval straddles it. (Seaming at the middle of the first gap fenced

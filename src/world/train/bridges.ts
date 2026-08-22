@@ -6,7 +6,7 @@ import {
   ACROSS_MARGIN,
   DECK_HALF_LENGTH,
   planBridgeFootprints,
-  type BridgeFootprint,
+  type RealWorldQuery,
 } from './bridgeFootprint';
 import { terrainHeight } from '../terrain';
 import { PALETTE } from '../../core/palette';
@@ -156,6 +156,15 @@ export interface BuiltBridges {
   readonly platforms: readonly MovingPlatform[];
   /** Every guard rail, ready for `collision.addWall`. */
   readonly guardRails: readonly BridgeWall[];
+  /**
+   * Crossings the real, backtracking search (`bridgeFootprint.ts`'s
+   * `planReal`) could not find any walkable, collision-clear bridge
+   * configuration for at all — genuinely the last resort, not the common
+   * case (issues #317, #319; `CLAUDE.md`'s "procgen backtracks on
+   * collision"). `fence.ts` opens an ordinary ground-level gap for each of
+   * these instead of seaming a deck over it.
+   */
+  readonly fallbackCrossings: readonly LevelCrossing[];
 }
 
 /** A flat, oriented rectangle of walking surface — the deck is one of these;
@@ -238,17 +247,31 @@ export function bridgeHeightAt(bridges: readonly Bridge[], x: number, z: number)
   return best;
 }
 
-/** Builds every bridge the park's crossings need, and the group holding all
+/**
+ * Builds every bridge the park's crossings need, and the group holding all
  * of their geometry. `route` is currently unused by the geometry itself
  * (every number a bridge needs comes off its own crossing), but kept in the
  * signature to match `buildRailFence`'s and stay available the day a bridge
- * wants to check its own approach against the curve. */
-export function buildBridges(_route: TrainRoute, crossings: readonly LevelCrossing[]): BuiltBridges {
+ * wants to check its own approach against the curve.
+ *
+ * `real` is the actual, already-mostly-built collision world — `ParkTrain`
+ * is constructed after almost everything else in `World` (see `World.ts`'s
+ * own build-order comments), so by the time this runs, the boundary, every
+ * garden wall and tree, every lamp post, the castle, the hotel and every
+ * stall are already real, registered colliders. See `bridgeFootprint.ts`'s
+ * own header for why this matters (issues #317, #319).
+ */
+export function buildBridges(
+  _route: TrainRoute,
+  crossings: readonly LevelCrossing[],
+  real: RealWorldQuery,
+): BuiltBridges {
   const group = new Group();
   group.name = 'railway-bridges';
   const bridges: Bridge[] = [];
   const platforms: MovingPlatform[] = [];
   const guardRails: BridgeWall[] = [];
+  const fallbackCrossings: LevelCrossing[] = [];
 
   const matrix = new Matrix4();
   const rotation = new Quaternion();
@@ -258,12 +281,19 @@ export function buildBridges(_route: TrainRoute, crossings: readonly LevelCrossi
 
   // One footprint per crossing, same order — the single owner of every
   // ground-plane number below, shared with whatever keeps scenery off a
-  // ramp before it exists (`bridgeKeepout.ts`).
-  const footprints = planBridgeFootprints(crossings);
+  // ramp before it exists (`bridgeKeepout.ts`, the early conservative pass).
+  // A `null` entry is a crossing the real, backtracking search found no
+  // walkable, collision-clear bridge for at all — see `BuiltBridges.
+  // fallbackCrossings`'s own note.
+  const footprints = planBridgeFootprints(crossings, real);
 
   for (let crossingIndex = 0; crossingIndex < crossings.length; crossingIndex += 1) {
     const crossing = crossings[crossingIndex] as LevelCrossing;
-    const footprint = footprints[crossingIndex] as BridgeFootprint;
+    const footprint = footprints[crossingIndex];
+    if (!footprint) {
+      fallbackCrossings.push(crossing);
+      continue;
+    }
     const cx = footprint.cx;
     const cz = footprint.cz;
     const dirX = footprint.dirX;
@@ -493,5 +523,5 @@ export function buildBridges(_route: TrainRoute, crossings: readonly LevelCrossi
     group.add(bridgeGroup);
   }
 
-  return { group, bridges, platforms, guardRails };
+  return { group, bridges, platforms, guardRails, fallbackCrossings };
 }

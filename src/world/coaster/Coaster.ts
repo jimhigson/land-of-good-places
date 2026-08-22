@@ -19,6 +19,7 @@ import {
 } from './cart';
 import { railFrameAt, sweptRails, type RailFrame } from '../rail/sweptRail';
 import { planCruiserPylons } from './pylons';
+import { isInBridgeFootprint } from '../train/bridgeKeepout';
 import { POST_FOOT_RADIUS, POST_TOP_RADIUS } from '../railRace/trestleGeometry';
 import type { PlannedCoaster } from './plan';
 import { RideCamera } from '../../core/RideCamera';
@@ -408,9 +409,21 @@ export class Coaster implements GameSystem {
     // `test/procgen/invariants.ts` can measure the choice. It also fixes the
     // reason this ride had **four** supports on 217 m of track: see that file's
     // header.
+    //
+    // `isInBridgeFootprint` too — `Coaster` is built *after* `ParkTrain`
+    // (`World.ts`'s own build order), so a bridge's real deck and ramps
+    // already exist here, but neither registers ground-plane collision (a
+    // walkable platform is not a solid circle or wall), so `isClearCircle`
+    // alone cannot see one. Without this a pylon foot could plant itself
+    // dead centre on a bridge's own ramp — found live, issue #319's own
+    // follow-up work on this file's neighbour, `bridgeFootprint.ts`: a
+    // Sky Cruiser pylon (`POST_FOOT_RADIUS`, 0.68 m) landed 0.08 m from a
+    // ramp edge that had cleared everything the bridge's own planner could
+    // see at *its* plan time, because the pylon did not exist yet then
+    // either.
     const pylonSpots = planCruiserPylons(
       this.route,
-      (x, z, radius) => collision.isClearCircle(x, z, radius),
+      (x, z, radius) => collision.isClearCircle(x, z, radius) && !isInBridgeFootprint(x, z, radius),
       this.options.clearTreesNear,
     );
     const pylons = new InstancedMesh(

@@ -127,6 +127,14 @@ export class ParkTrain implements GameSystem, TrainService {
   readonly bridges: readonly Bridge[] = [];
   /** Every bridge's own deck and ramp treads — folded into {@link platforms}. */
   private readonly bridgePlatforms: readonly MovingPlatform[] = [];
+  /**
+   * Crossings the real, backtracking footprint search (issues #317, #319)
+   * could not find any walkable bridge for at all — genuinely rare, the
+   * last resort before this class of failure was falling straight through
+   * to a known-too-close edge. `fence.ts` opens an ordinary ground-level
+   * gap for each, exactly the pre-Decision-8 level crossing.
+   */
+  readonly fallbackCrossings: readonly LevelCrossing[] = [];
 
   /**
    * The first-person view from the player's seat (Decision 4 C2), built on
@@ -183,7 +191,7 @@ export class ParkTrain implements GameSystem, TrainService {
   private readonly tangent = new Vector3();
   private readonly seatWorld = new Vector3();
 
-  constructor(collision: CollisionWorld) {
+  constructor(collision: CollisionWorld, clearTreesNear?: (x: number, z: number, radius: number) => number) {
     this.group.name = 'park-train';
     this.collision = collision;
 
@@ -199,12 +207,59 @@ export class ParkTrain implements GameSystem, TrainService {
       TRAIN_PLAN.stations.map((station) => station.distance),
     );
 
+    // --- the stations ----------------------------------------------------
+    // Planned in `train/plan.ts` — position, name, everything — before any
+    // scene object existed, so the path graph could take them as nodes. Here
+    // they are only *built* — and built **before** the bridges, not after:
+    // a station's canopy posts are real, registered colliders
+    // (`collision.addCircle`, `radius = 0.22`), and the bridge footprint
+    // search below asks the real collision world for exactly this kind of
+    // thing. Built the other way round, a bridge's own (issues #317, #319)
+    // backtracking search — free, for the first time, to slide a deck
+    // sideways along the crossing — could slide one into a canopy post that
+    // exists in the finished game but did not yet exist in `collision` when
+    // the search ran (found live testing this very search, seed 2: a deck
+    // edge cleared everything the search could see and still landed 0.78 m
+    // from a post the search never got to ask about).
+    for (const planned of TRAIN_PLAN.stations) {
+      const station = new Station(
+        {
+          index: planned.index,
+          name: planned.name,
+          accent: planned.accent,
+          distance: planned.distance,
+        },
+        this.route,
+        collision,
+      );
+      this.stations.push(station);
+      this.group.add(station.group);
+      this.stops.push({
+        index: planned.index,
+        name: planned.name,
+        x: station.standX,
+        z: station.standZ,
+      });
+    }
+
     // A bridge at every crossing (issue #116, Decision 8) — built before the
     // fence, which needs to know where every deck stands so it can seam
     // around it rather than gap for it. See `bridges.ts`'s header.
-    const built = buildBridges(this.route, this.crossings);
+    //
+    // `collision` is handed in here as `real` (issues #317, #319) — by this
+    // point in `World`'s own build order, almost everything solid in the
+    // park already exists, so the footprint search backtracks against what
+    // is actually there rather than a couple of hand-picked obstacle
+    // classes. `clearTreesNear` is the same last-resort lever
+    // `coaster/pylons.ts` already uses for its own placement search.
+    const built = buildBridges(
+      this.route,
+      this.crossings,
+      clearTreesNear ? { collision, clearTreesNear } : { collision },
+    );
     this.bridges = built.bridges;
     this.bridgePlatforms = built.platforms;
+    this.fallbackCrossings = built.fallbackCrossings;
     this.group.add(built.group);
     for (const rail of built.guardRails) {
       // A banded collider — `baseHeight` a half-step below the local surface
@@ -254,38 +309,17 @@ export class ParkTrain implements GameSystem, TrainService {
       );
     }
 
-    // --- the stations --------------------------------------------------------
-    // Planned in `train/plan.ts` — position, name, everything — before any
-    // scene object existed, so the path graph could take them as nodes. Here
-    // they are only *built*.
-    for (const planned of TRAIN_PLAN.stations) {
-      const station = new Station(
-        {
-          index: planned.index,
-          name: planned.name,
-          accent: planned.accent,
-          distance: planned.distance,
-        },
-        this.route,
-        collision,
-      );
-      this.stations.push(station);
-      this.group.add(station.group);
-      this.stops.push({
-        index: planned.index,
-        name: planned.name,
-        x: station.standX,
-        z: station.standZ,
-      });
-    }
-
     // --- the fence (Decision 4 §6: keeping feet off the track) -------------
     // Built last of all the trackside furniture, so it can seam around every
     // bridge and gap for every platform.
     this.group.add(
-      buildRailFence(this.route, collision, this.bridges, this.stations.map((station) => ({
-        distance: station.distance,
-      }))),
+      buildRailFence(
+        this.route,
+        collision,
+        this.bridges,
+        this.stations.map((station) => ({ distance: station.distance })),
+        this.fallbackCrossings,
+      ),
     );
 
     // Start standing at the first station, so the first thing a child sees is a

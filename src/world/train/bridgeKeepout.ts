@@ -1,6 +1,6 @@
 import { TRAIN_PLAN } from './plan';
 import { computeCrossings } from './crossings';
-import { planBridgeFootprints, type BridgeFootprint } from './bridgeFootprint';
+import { planBridgeFootprints, type PlannedFootprint } from './bridgeFootprint';
 
 /**
  * Where a bridge's deck and ramps will stand — computed lazily, on first
@@ -39,14 +39,17 @@ import { planBridgeFootprints, type BridgeFootprint } from './bridgeFootprint';
  * `test/procgen/invariants.ts`'s `everyBridgeIsWalkableAndReachable`, not
  * by eye, which is exactly the kind of thing that check exists to catch.
  */
-let footprintsCache: readonly BridgeFootprint[] | null = null;
+let footprintsCache: readonly PlannedFootprint[] | null = null;
 
-function footprints(): readonly BridgeFootprint[] {
+function footprints(): readonly PlannedFootprint[] {
   if (footprintsCache) return footprintsCache;
   const crossings = computeCrossings(
     TRAIN_PLAN.route,
     TRAIN_PLAN.stations.map((station) => station.distance),
   );
+  // No `real` collision world handed in — this is the early, conservative
+  // reservation pass (see `bridgeFootprint.ts`'s own header on the two
+  // calling conventions); it never returns `null` entries.
   footprintsCache = planBridgeFootprints(crossings);
   return footprintsCache;
 }
@@ -75,7 +78,7 @@ const KEEPOUT_MARGIN = 2.0;
  * `LampPosts.ts`'s own call for why a lamp does. */
 export function isInBridgeFootprint(x: number, z: number, margin = KEEPOUT_MARGIN): boolean {
   for (const footprint of footprints()) {
-    if (footprint.covers(x, z, margin)) return true;
+    if (footprint && footprint.covers(x, z, margin)) return true;
   }
   return false;
 }

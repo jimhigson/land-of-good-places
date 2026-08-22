@@ -3225,6 +3225,14 @@ const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
   // platform's.
   const clearancePoint = new Vector3();
   for (const crossing of facts.world.train.crossings) {
+    // A crossing the real, backtracking footprint search (issues #317,
+    // #319) found no walkable, collision-clear bridge for at all falls back
+    // to an ordinary level crossing instead — genuinely rare, the last
+    // resort `bridgeFootprint.ts`'s own header describes. There is no deck
+    // to measure clearance over there by design, not by omission: nothing
+    // stands over the rail at that one spot, so nothing needs the air
+    // `BRIDGE_RISE` reserves for a train passing underneath.
+    if (facts.world.train.fallbackCrossings.includes(crossing)) continue;
     // The same name `bridges.ts` builds this crossing's own group under —
     // one owner (the crossing's own `railDistance`) for both.
     const deckMesh = facts.world.train.group.getObjectByName(

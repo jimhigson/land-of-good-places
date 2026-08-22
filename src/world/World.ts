@@ -144,7 +144,7 @@ export class World implements GameSystem {
     // world, so a tree planted across the park edge bends the track rather than
     // growing through it (see `train/route.ts`). Built before the NPCs, so the
     // waypoint graph is validated against its station posts too.
-    this.train = new ParkTrain(this.collision);
+    this.train = new ParkTrain(this.collision, (x, z, radius) => this.scenery.clearTreesNear(x, z, radius));
     // The platforms and the carriage floors are things you stand on, so they go
     // to the same sampler the lift and the bubble use.
     for (const platform of this.train.platforms()) this.building.surfaces.addPlatform(platform);
