@@ -47,7 +47,12 @@ import {
   zoneBandClearance,
   zoneSeparation,
 } from '../../src/world/tapSpacing.ts';
-import { PLAYER_MAX_SPEED, PLAYER_RADIUS, RIM_OUTSET_START } from '../../src/core/constants.ts';
+import {
+  CAMERA_FACING_YAW,
+  PLAYER_MAX_SPEED,
+  PLAYER_RADIUS,
+  RIM_OUTSET_START,
+} from '../../src/core/constants.ts';
 import {
   ENTRANCE_ANGLE,
   ENTRANCE_BUS_ARRIVE_X,
@@ -312,6 +317,110 @@ const wallsClearTheRailway: Invariant = (facts) => {
     }
   }
   return fouls;
+};
+
+/**
+ * **Every decorative wall run actually borders something, on its own grid
+ * axis.** Issue #300, Jim, playing, on `grid-aligned-park`'s own preview:
+ * *"here we see 3 walls placed at nonsensical locations that make no sense.
+ * On the grid layout, the walls should be at the same orthogonal axes as the
+ * path and also be around the edges of the path where there is nothing else
+ * they would collide with — the point of walls isn't to scatter them at
+ * random!"*
+ *
+ * Before the fix, both `Scenery.ts` wall generators drew a candidate's centre
+ * from the whole lawn disc — `(angle, radius)`, fully free — and only
+ * afterwards asked whether the result was *clear* of everything nearby.
+ * "Clear of everything" and "next to something" are different claims, and a
+ * candidate could satisfy the first while utterly failing the second: nothing
+ * ever measured how far a wall ended up from the path or plot it was
+ * supposedly decorating. The lawn benches additionally rolled a fully free
+ * yaw (`rng.range(0, Math.PI)`), so half the time they landed further off a
+ * grid axis than on one.
+ *
+ * Two real, measured claims, neither taken from the generator's own intent —
+ * `ParkFacts.walls` reads `from`/`to` off the built runs, `ParkFacts.pathEdges`
+ * and `ParkFacts.plots` off the built network and layout:
+ *
+ * 1. **Angle.** The path network is itself locked to the global X/Z axes —
+ *    {@link pathsRunOnGridAxes} above proves exactly that of the drawn curve,
+ *    with the closed ring the one deliberate exception, excluded here for the
+ *    same reason it is excluded there ({@link ringIsATrueCircleRoundTheStatue}).
+ *    So "the same orthogonal axis as the nearest path edge" and "a global
+ *    grid axis" are the same claim wherever a wall sits close enough to a
+ *    spur or interconnect to be called bordering it. Measuring against the
+ *    fixed global axis directly — rather than hunting for the one nearby
+ *    curve sample and trusting its local tangent — means a momentary wobble
+ *    in one Catmull-Rom sample near a corner can never be mistaken for the
+ *    thing a wall is meant to match.
+ * 2. **Proximity.** Every point along a wall run ({@link alongRun}, sampled
+ *    every metre) is within reach of the nearest thing it could plausibly be
+ *    bordering — a paved edge's own surface, or a plot's own bounding circle
+ *    — so a whole run stays near what it borders rather than just touching it
+ *    at one lucky corner and trailing off into open lawn.
+ *
+ * `WALL_BORDER_PROXIMITY_TOLERANCE` carries real headroom above the measured
+ * worst case: built and measured across all five CI seeds after the fix, the
+ * furthest any sampled wall point ever sits from the nearest path edge or
+ * plot boundary is 10.96 m (wood, seed 20260728) — comfortably inside the
+ * 14 m here, while still nowhere near what an unconstrained scatter across
+ * the ~90 m-wide lawn disc could produce. `WALL_AXIS_TOLERANCE_DEG` is looser
+ * than the generator's own worst rounding (the tightest `pathBorderSegments`
+ * stretch can be ~2.9 deg off true axis) but far tighter than a genuine
+ * diagonal, which the old bench yaw could put anywhere up to 45 deg off.
+ */
+const WALL_AXIS_TOLERANCE_DEG = 8;
+const WALL_BORDER_PROXIMITY_TOLERANCE = 14;
+
+const wallsBorderTheGridSensibly: Invariant = (facts) => {
+  const problems: string[] = [];
+  // The ring is a deliberate true circle, never a grid edge — see this
+  // invariant's own comment and `pathsRunOnGridAxes` above.
+  const borderEdges = facts.pathEdges.filter((edge) => !edge.backbone);
+
+  const nearestBorderDistance = (point: readonly [number, number]): number => {
+    let nearest = Infinity;
+    for (const edge of borderEdges) {
+      for (let i = 1; i < edge.points.length; i += 1) {
+        const d = pointToSegment(point, edge.points[i - 1]!, edge.points[i]!) - edge.halfWidth;
+        if (d < nearest) nearest = d;
+      }
+    }
+    for (const plot of facts.plots) {
+      const d = Math.hypot(point[0] - plot.x, point[1] - plot.z) - plot.boundingRadius;
+      if (d < nearest) nearest = d;
+    }
+    return nearest;
+  };
+
+  for (const wall of facts.walls) {
+    const dx = wall.to[0] - wall.from[0];
+    const dz = wall.to[1] - wall.from[1];
+    if (Math.hypot(dx, dz) < 1e-6) continue;
+
+    const angleDeg = (Math.atan2(dz, dx) * 180) / Math.PI;
+    const mod90 = ((angleDeg % 90) + 90) % 90;
+    const offAxis = Math.min(mod90, 90 - mod90);
+    if (offAxis > WALL_AXIS_TOLERANCE_DEG) {
+      problems.push(
+        `${wall.kind} run (${fmt(wall.from)}->${fmt(wall.to)}) sits ${offAxis.toFixed(1)} deg off ` +
+          `the park's grid axes — the path network itself runs orthogonal, this wall does not`,
+      );
+    }
+
+    let worstProximity = 0;
+    for (const point of alongRun(wall.from, wall.to, 1)) {
+      worstProximity = Math.max(worstProximity, nearestBorderDistance(point));
+    }
+    if (worstProximity > WALL_BORDER_PROXIMITY_TOLERANCE) {
+      problems.push(
+        `${wall.kind} run (${fmt(wall.from)}->${fmt(wall.to)}) strays ${worstProximity.toFixed(1)} m ` +
+          `from the nearest path edge or plot boundary at its furthest point — bordering nothing`,
+      );
+    }
+  }
+
+  return problems;
 };
 
 /**
@@ -673,6 +782,226 @@ const noPathEndsNowhere: Invariant = (facts) => {
 };
 
 /**
+ * **Every plot's sign faces exactly the camera's own fixed diagonal**
+ * (issue #269).
+ *
+ * `anchors.ts`'s own doc is explicit that this applies to every plot, camera
+ * facing or not: "these all sit near +45 degrees, which is the one fixed
+ * angle the camera ever looks from... a sign facing any other way is one a
+ * child simply cannot read." Before issue #269, "near" meant a fresh random
+ * draw every seed (`parkLayout.ts` drew `Math.PI * rng.range(0.2, 0.3)`) —
+ * never exactly square to the camera, and different on every rebuild.
+ *
+ * `PlotFact.signYaw` is read straight off the solved `PARK_LAYOUT` entry —
+ * not re-derived — and that same field is what a sign's own mesh rotation is
+ * built from everywhere it appears (`minigames/dodgems/plot.ts`'s
+ * `signGroup.rotation.y`, `world/hotel/Hotel.ts`'s `facadeYaw`,
+ * `stallPlacement.ts`'s `counterFacing`), so one measurement here catches
+ * every one of those drifting apart again, the way `parkLayout.ts`'s own
+ * "one owner" doc warns they used to.
+ */
+const buildingsFaceTheCameraAxis: Invariant = (facts) => {
+  const problems: string[] = [];
+  for (const plot of facts.plots) {
+    const drift = Math.abs(plot.signYaw - CAMERA_FACING_YAW);
+    if (drift > 1e-9) {
+      problems.push(
+        `'${plot.id}' has signYaw ${plot.signYaw.toFixed(4)} rad, ${drift.toFixed(4)} rad off ` +
+          `CAMERA_FACING_YAW (${CAMERA_FACING_YAW.toFixed(4)} rad) — not axis-aligned to the camera`,
+      );
+    }
+  }
+  return problems;
+};
+
+/**
+ * Longest continuous stretch of any paved ribbon allowed to run diagonally
+ * rather than along a grid axis (issue #269).
+ *
+ * Not zero, on purpose. Two things legitimately still run at an angle:
+ *
+ * - **A booth's own doorway approach.** `paths.ts`'s `spur()` deliberately
+ *   carries the last few metres of a camera-facing booth's spur along the
+ *   counter's own facing diagonal so the ribbon arrives head-on rather than
+ *   grazing the counter's side wall (see that function's "Arrive HEAD-ON,
+ *   not obliquely" note) — a short, intentional exception to the rule this
+ *   invariant otherwise enforces.
+ * - **A train platform's fixed final approach**, which predates issue #269
+ *   and is out of its scope: the platform turn is authored geometry, not
+ *   part of the axis-aligned trunk network `paths.ts` grows.
+ *
+ * The closed backbone ring is exempt outright, not just tolerated — see
+ * {@link ringIsATrueCircleRoundTheStatue} below. It is not a lapse in this
+ * invariant's coverage: Jim's own follow-up instruction (issue #269, 18
+ * August 2026) is that the ring is deliberately the one route in the network
+ * allowed to be a genuine circle, off grid axes for its entire circumference,
+ * while everything else — every spur, every interconnect — stays on the
+ * grid this invariant polices.
+ *
+ * Measured, not guessed: the canonical seed's longest such stretch (outside
+ * the now-exempt ring) is 11.2 m
+ * (the west station's own platform approach). This is set generously above
+ * that measured worst case — the same shape of bound
+ * {@link TRESTLE_GAP_TOLERANCE} uses — so what actually trips it is a
+ * regression: a long run of the *trunk* network (a ring segment, a spur's
+ * main body) left diagonal, not a legitimate short approach.
+ */
+const MAX_DIAGONAL_APPROACH = 16;
+
+/**
+ * **Every paved ribbon's trunk runs on grid axes** — purely north/south or
+ * purely east/west, never a sustained diagonal (issue #269).
+ *
+ * Measured on the drawn curve (`PathEdgeFact.points`, sampled every ~0.5 m
+ * off the real Catmull-Rom curve `paths.ts` sweeps) — the same ground
+ * {@link noPathEndsNowhere} stands on, and for the same reason:
+ * `paths.ts` axis-aligns its *control* points, and the curve bows a little
+ * rounding each corner, so "runs on grid axes" is stated as a bound on how
+ * far any *continuous* stretch of off-axis travel can run
+ * ({@link MAX_DIAGONAL_APPROACH}), not as "every single 0.5 m hop is
+ * exactly axis-aligned" — a corner's own rounding would fail that trivially
+ * and prove nothing about the shape of the route.
+ *
+ * A hop counts as off-axis when the smaller of its x/z movement is more
+ * than 15% of its own length (~8.6 degrees off a grid axis) — loose enough
+ * that ordinary curve-sampling jitter on a straight run never counts, tight
+ * enough that a genuinely diagonal run cannot hide inside it.
+ */
+const pathsRunOnGridAxes: Invariant = (facts) => {
+  const problems: string[] = [];
+  const OFF_AXIS_FRACTION = 0.15;
+
+  for (const edge of facts.pathEdges) {
+    // The ring is deliberately a circle, not a grid loop — see this
+    // invariant's own comment and {@link ringIsATrueCircleRoundTheStatue}.
+    if (edge.backbone) continue;
+    const points = edge.points;
+    let runStart: readonly [number, number] | null = null;
+    let runEnd: readonly [number, number] | null = null;
+
+    const flushRun = (): void => {
+      if (!runStart || !runEnd) return;
+      const runLength = Math.hypot(runEnd[0] - runStart[0], runEnd[1] - runStart[1]);
+      if (runLength > MAX_DIAGONAL_APPROACH) {
+        problems.push(
+          `${edge.name} runs diagonally for ${runLength.toFixed(1)} m, from ${fmt(runStart)} to ` +
+            `${fmt(runEnd)} — longer than a doorway approach or a platform turn should ever need`,
+        );
+      }
+      runStart = null;
+      runEnd = null;
+    };
+
+    for (let i = 1; i < points.length; i += 1) {
+      const a = points[i - 1] as readonly [number, number];
+      const b = points[i] as readonly [number, number];
+      const dx = Math.abs(b[0] - a[0]);
+      const dz = Math.abs(b[1] - a[1]);
+      const hop = Math.hypot(dx, dz);
+      const offAxis = hop > 1e-6 && Math.min(dx, dz) / hop > OFF_AXIS_FRACTION;
+      if (offAxis) {
+        if (!runStart) runStart = a;
+        runEnd = b;
+      } else {
+        flushRun();
+      }
+    }
+    flushRun();
+  }
+  return problems;
+};
+
+/**
+ * How far the drawn backbone ring's radius (measured from the plaza/statue
+ * centre `PLAZA` is built around) may vary from its own mean before it stops
+ * counting as "one true circle" (issue #269 follow-up, Jim, 18 August 2026,
+ * superseding round 2's `ringReadsAsAGrid` — a straight *reversal* of that
+ * invariant's own requirement, not a refinement of it): *"one central perfect
+ * circle is ok circling the statue, and then the rest should be on a grid,
+ * with a fairly high degree of connectivity between the closer nodes in the
+ * graph."*
+ *
+ * Measured, not guessed, fresh on all five procgen seeds after
+ * {@link solveRing} stopped feeding its 32-point, blocker-clearance profile
+ * through axis-alignment: the drawn (sampled-every-~0.5 m Catmull-Rom)
+ * curve's radius from the plaza centre never strays more than **0.27 m**
+ * from its own mean on any seed (0.02 m on the canonical 20260728, 0.27 m on
+ * seed 2, 0.18 m on seed 5, 0.07 m on seed 11, 0.19 m on seed 18) — real
+ * variation, not curve-sampling noise, because the profile still relaxes its
+ * radius slightly per bearing to keep clear of whichever plot sits nearest
+ * at that angle (see {@link solveRing}'s own comment for why a genuinely
+ * fixed radius was tried and reverted). Checked out `paths.ts` as it stood
+ * immediately before this fix (the simplified-then-axis-aligned ~12-vertex
+ * polygon) and re-measured the same way: radius varied by **6.55 m** on the
+ * canonical seed (16.76 m to 29.39 m from plaza centre) and **7.68 m** on
+ * seed 2 (16.42 m to 29.16 m) — more than an order of magnitude past the
+ * true circle's worst case, an axis-aligned polygon being exactly what a
+ * "radius from centre" metric is built to catch. 1 m sits with real
+ * headroom above every true-circle measurement (>3.7x the worst seed) and
+ * far below any polygon's, so what actually trips this is a regression back
+ * toward straight chords, not the profile's own small, legitimate
+ * bearing-to-bearing give.
+ *
+ * Deliberately not derived from a game constant such as `RAIL_CORRIDOR_CLEARANCE`
+ * (`paths.ts`) — that number bounds how close a route may draw to the
+ * railway, a different question from how round this one route's own shape
+ * is, and the two happen to sit in the same file for an unrelated reason
+ * (both guard `paths.ts` output). Forcing a link between them would tie this
+ * invariant to a future rail-clearance change it has nothing to do with.
+ * This *is* the "measure the game" case CLAUDE.md asks for — the mean/max
+ * pair above is measured off the built ring on every seed, the same way
+ * `PLAYER_RADIUS`-derived thresholds are measured off the player.
+ */
+const RING_RADIUS_TOLERANCE = 1;
+
+/**
+ * **The ring road is one true circle round the statue, not a grid loop**
+ * (issue #269 follow-up). Round 2 (issue #319) fixed a wiggly axis-aligned
+ * staircase by simplifying it down to ~12 long straight runs and asserted
+ * exactly the opposite of this — `ringReadsAsAGrid`, "reads as a grid loop,
+ * not a stepped approximation of a circle." Jim's next comment on the same
+ * live preview reversed that requirement outright for this one route: *"one
+ * central perfect circle is ok circling the statue, and then the rest should
+ * be on a grid."* `solveRing` (`paths.ts`) now hands its 32-point,
+ * blocker-clearance profile straight to the backbone's Catmull-Rom curve
+ * instead of axis-aligning it at all — this invariant is the direct
+ * replacement for `ringReadsAsAGrid`, checking the *opposite* shape claim:
+ * that the ring's radius from the plaza centre stays close to constant,
+ * rather than that it turns onto grid axes.
+ *
+ * Scoped to the closed backbone loop (`edge.backbone`) specifically — every
+ * other route in the network (spurs, {@link addInterconnects}'s shortcuts)
+ * is still required to run on grid axes by {@link pathsRunOnGridAxes} above,
+ * unchanged; the statue's ring is the one deliberate exception, not a
+ * loosening of the rule generally.
+ */
+const ringIsATrueCircleRoundTheStatue: Invariant = (facts) => {
+  const problems: string[] = [];
+  const plaza = facts.pathNodes.find((node) => node.kind === 'plaza');
+  if (!plaza) {
+    problems.push('no plaza node in the path graph — cannot check the ring circles the statue');
+    return problems;
+  }
+  for (const edge of facts.pathEdges) {
+    if (!edge.backbone) continue;
+    const radii = edge.points.map(([x, z]) => Math.hypot(x - plaza.x, z - plaza.z));
+    const mean = radii.reduce((sum, r) => sum + r, 0) / radii.length;
+    const maxDeviation = radii.reduce((worst, r) => Math.max(worst, Math.abs(r - mean)), 0);
+    if (maxDeviation > RING_RADIUS_TOLERANCE) {
+      const min = Math.min(...radii);
+      const max = Math.max(...radii);
+      problems.push(
+        `${edge.name}'s radius from the plaza/statue centre (${plaza.x.toFixed(1)}, ${plaza.z.toFixed(1)}) ` +
+          `varies from ${min.toFixed(2)} m to ${max.toFixed(2)} m (${maxDeviation.toFixed(2)} m off its own ` +
+          `${mean.toFixed(2)} m mean) — needs to stay within ${RING_RADIUS_TOLERANCE} m of constant to read as ` +
+          `one true circle round the statue, not a faceted or grid-aligned approximation of one`,
+      );
+    }
+  }
+  return problems;
+};
+
+/**
  * **Every place a child can be served is a node in the graph.**
  *
  * The other half of §5's ruling: the network derives from a graph of *real*
@@ -709,6 +1038,328 @@ const everyDestinationIsANode: Invariant = (facts) => {
     }
   }
   return missing;
+};
+
+/** Destination kinds {@link detourRatiosStayReasonable} measures — real
+ * places a child is going, matching `paths.ts`'s own `addInterconnects`. */
+const DETOUR_DESTINATION_KINDS = new Set(['anchor', 'stall', 'station', 'exit']);
+
+/**
+ * How close a ribbon's own end must land to another ribbon's drawn curve
+ * before {@link buildFactsDistanceGraph} treats it as the same junction.
+ * `parkFacts.ts` resamples every route to ~0.5 m steps (`drawnCentreLine`'s
+ * `steps`), so the true junction point — always exact on the *new* ribbon's
+ * own first/last sample, since Catmull-Rom passes through its own control
+ * points exactly, `t=0`/`t=1` — can sit up to half a sampling step from the
+ * nearest sample on whichever *other* ribbon it branched from. 0.6 m clears
+ * that with real room, while staying far short of the metres of daylight
+ * between any two genuinely unconnected ribbons in this park.
+ */
+const DETOUR_SPLICE_TOLERANCE = 0.6;
+
+/**
+ * Independent shortest-path oracle over the park's **drawn** paved edges
+ * (`facts.pathEdges`, the resampled Catmull-Rom curve — not `paths.ts`'s own
+ * control polylines, and not that module's own graph-building code: this is
+ * a second, separately-written measurement of the same built geometry, per
+ * this file's "measure the built park" rule).
+ *
+ * A ribbon's start/end is a junction onto whichever other ribbon it
+ * branched from, not necessarily one of that ribbon's own drawn samples —
+ * so every edge's two ends are spliced onto the nearest point of every
+ * *other* edge's drawn curve, within {@link DETOUR_SPLICE_TOLERANCE}, before
+ * the graph is built.
+ */
+function buildFactsDistanceGraph(
+  edges: readonly ParkFacts['pathEdges'][number][],
+): { distanceBetween: (ax: number, az: number, bx: number, bz: number) => number } {
+  const polylines: [number, number][][] = edges.map((edge) =>
+    edge.points.map((p) => [p[0], p[1]] as [number, number]),
+  );
+  const closedFlags = edges.map((edge) => edge.backbone);
+
+  const spliceOnto = (targetIdx: number, px: number, pz: number): void => {
+    const pts = polylines[targetIdx] as [number, number][];
+    const segCount = closedFlags[targetIdx] ? pts.length : pts.length - 1;
+    let bestSeg = -1;
+    let bestDistance = DETOUR_SPLICE_TOLERANCE;
+    for (let i = 0; i < segCount; i += 1) {
+      const a = pts[i] as [number, number];
+      const b = pts[(i + 1) % pts.length] as [number, number];
+      if (Math.hypot(px - a[0], pz - a[1]) < 1e-6) return; // already a vertex
+      if (Math.hypot(px - b[0], pz - b[1]) < 1e-6) return;
+      const dx = b[0] - a[0];
+      const dz = b[1] - a[1];
+      const lengthSq = dx * dx + dz * dz;
+      if (lengthSq < 1e-12) continue;
+      const t = Math.max(0, Math.min(1, ((px - a[0]) * dx + (pz - a[1]) * dz) / lengthSq));
+      const projX = a[0] + dx * t;
+      const projZ = a[1] + dz * t;
+      const distance = Math.hypot(px - projX, pz - projZ);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestSeg = i;
+      }
+    }
+    // Insert the *original* point (px, pz), not its projection onto the
+    // segment: it flows in verbatim from the edge it belongs to (see the
+    // call site below), and that same edge already has this exact
+    // coordinate as one of its own points. Splicing in the projection
+    // instead would put two merely-nearby-but-distinct floating-point
+    // values where the graph needs one shared vertex — the two edges would
+    // never actually join, just sit within `DETOUR_SPLICE_TOLERANCE` of
+    // each other, and every shortest path through that junction would have
+    // to detour around the gap via wherever the graph *was* connected.
+    if (bestSeg >= 0) pts.splice(bestSeg + 1, 0, [px, pz]);
+  };
+
+  for (let i = 0; i < polylines.length; i += 1) {
+    const pts = polylines[i] as [number, number][];
+    if (pts.length === 0) continue;
+    const first = pts[0] as [number, number];
+    const last = pts[pts.length - 1] as [number, number];
+    for (let j = 0; j < polylines.length; j += 1) {
+      if (j === i) continue;
+      spliceOnto(j, first[0], first[1]);
+      spliceOnto(j, last[0], last[1]);
+    }
+  }
+
+  const vertexIndex = new Map<string, number>();
+  const vertexCoord: [number, number][] = [];
+  const adjacency: { to: number; weight: number }[][] = [];
+  const vertexKey = (x: number, z: number): string =>
+    `${Math.round(x / 0.05)},${Math.round(z / 0.05)}`;
+  const idOf = (x: number, z: number): number => {
+    const key = vertexKey(x, z);
+    let id = vertexIndex.get(key);
+    if (id === undefined) {
+      id = adjacency.length;
+      vertexIndex.set(key, id);
+      vertexCoord.push([x, z]);
+      adjacency.push([]);
+    }
+    return id;
+  };
+  const addEdge = (aId: number, bId: number, weight: number): void => {
+    if (aId === bId) return;
+    (adjacency[aId] as { to: number; weight: number }[]).push({ to: bId, weight });
+    (adjacency[bId] as { to: number; weight: number }[]).push({ to: aId, weight });
+  };
+  for (let i = 0; i < polylines.length; i += 1) {
+    const pts = polylines[i] as [number, number][];
+    const segCount = closedFlags[i] ? pts.length : pts.length - 1;
+    for (let s = 0; s < segCount; s += 1) {
+      const a = pts[s] as [number, number];
+      const b = pts[(s + 1) % pts.length] as [number, number];
+      const weight = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (weight < 1e-9) continue;
+      addEdge(idOf(a[0], a[1]), idOf(b[0], b[1]), weight);
+    }
+  }
+
+  /**
+   * A destination's own coordinate is a *control* point of its own edge
+   * (`paths.ts`'s `spur`), not necessarily one the curve's arc-length
+   * resampling (`drawnCentreLine`) lands on exactly — Catmull-Rom only
+   * guarantees hitting a curve's very first/last control point exactly, and
+   * a destination's own point is often followed by a "past the doormat"
+   * extension (`spur`'s `past`), pushing it into the interior of the array.
+   * So a query point that isn't already an exact sampled vertex is attached
+   * to the nearest one instead, with the gap added to the walk as a real
+   * (if tiny) leash — the true "last few centimetres of curve-sampling
+   * slack," not a routing shortcut. Capped well under this park's median
+   * destination spacing (13-15 m) so it can never accidentally bridge two
+   * genuinely different, unconnected pieces of paving.
+   */
+  const DESTINATION_ATTACH_TOLERANCE = 5;
+  const attach = (x: number, z: number): { id: number; leash: number } | null => {
+    const exact = vertexIndex.get(vertexKey(x, z));
+    if (exact !== undefined) return { id: exact, leash: 0 };
+    let bestId = -1;
+    let bestDistance = DESTINATION_ATTACH_TOLERANCE;
+    for (let i = 0; i < vertexCoord.length; i += 1) {
+      const [vx, vz] = vertexCoord[i] as [number, number];
+      const d = Math.hypot(x - vx, z - vz);
+      if (d < bestDistance) {
+        bestDistance = d;
+        bestId = i;
+      }
+    }
+    return bestId >= 0 ? { id: bestId, leash: bestDistance } : null;
+  };
+
+  return {
+    distanceBetween(ax, az, bx, bz) {
+      const start = attach(ax, az);
+      const goal = attach(bx, bz);
+      if (!start || !goal) return Infinity;
+      const startId = start.id;
+      const goalId = goal.id;
+      const dist = new Float64Array(adjacency.length).fill(Infinity);
+      dist[startId] = 0;
+      const visited = new Uint8Array(adjacency.length);
+      for (;;) {
+        let curId = -1;
+        let curDist = Infinity;
+        for (let i = 0; i < dist.length; i += 1) {
+          const d = dist[i] as number;
+          if (!visited[i] && d < curDist) {
+            curDist = d;
+            curId = i;
+          }
+        }
+        if (curId === -1) break;
+        if (curId === goalId) return curDist + start.leash + goal.leash;
+        visited[curId] = 1;
+        for (const { to, weight } of adjacency[curId] as { to: number; weight: number }[]) {
+          const next = curDist + weight;
+          if (next < (dist[to] as number)) dist[to] = next;
+        }
+      }
+      return Infinity;
+    },
+  };
+}
+
+/** The built park's own median nearest-neighbour spacing between real
+ * destinations — sizes {@link detourRatiosStayReasonable}'s thresholds off
+ * the park itself, per CLAUDE.md's procgen-threshold rule, rather than a
+ * metre literal that means nothing on a different seed. */
+function medianDestinationSpacing(nodes: readonly { x: number; z: number }[]): number {
+  if (nodes.length < 2) return 0;
+  const gaps: number[] = [];
+  for (let i = 0; i < nodes.length; i += 1) {
+    let best = Infinity;
+    for (let j = 0; j < nodes.length; j += 1) {
+      if (i === j) continue;
+      const a = nodes[i] as { x: number; z: number };
+      const b = nodes[j] as { x: number; z: number };
+      best = Math.min(best, Math.hypot(a.x - b.x, a.z - b.z));
+    }
+    gaps.push(best);
+  }
+  gaps.sort((a, b) => a - b);
+  return gaps[Math.floor(gaps.length / 2)] as number;
+}
+
+/** How many "typical plot hops" apart, straight-line, a pair of
+ * destinations may be and still count as "close" for this invariant —
+ * mirrors `paths.ts`'s own `CONNECTOR_SPACING_CAP_MULTIPLE` exactly, so this
+ * invariant only ever asks the generator to fix what it actually attempts
+ * to fix (see that constant's own comment for why it is 2.0, not a more
+ * generous number: a second, independent constraint — `Scenery.ts`'s hiding
+ * maze — measured against `check:park`'s waypoint-reachability invariant,
+ * not against this one). */
+const DETOUR_CLOSE_CAP_MULTIPLE = 2.0;
+
+/** How many "typical plot hops" of paved distance a pair must be wasting
+ * (paved minus straight-line) before a bad ratio is worth flagging — a
+ * little looser than `paths.ts`'s own `CONNECTOR_MIN_WASTE_MULTIPLE` (1.5),
+ * deliberately: this invariant only cares about *real* wasted walking, and
+ * a pair the generator correctly left unconnected because the absolute
+ * waste was trivial (e.g. two doormats 2 m apart, paved 8 m apart — a
+ * dramatic-looking ratio over a handful of metres) should never trip it. */
+const DETOUR_WASTE_FLOOR_MULTIPLE = 1.5;
+
+/**
+ * **No two close destinations are left with a wildly disproportionate paved
+ * detour between them** (Jim, PR #286, 18 August 2026): "there aren't
+ * enough edges between nodes that are close but currently unlinked, which
+ * makes most things into branches off a central hub, whereas they should be
+ * inter-connected."
+ *
+ * For every pair of real destinations within {@link DETOUR_CLOSE_CAP_MULTIPLE}
+ * plot-hops of each other, straight-line, and losing at least
+ * {@link DETOUR_WASTE_FLOOR_MULTIPLE} plot-hops of paved distance to the
+ * detour (so a merely small-numbers-divide-badly ratio over a trivial
+ * absolute distance is never flagged), the paved distance may not exceed
+ * `DETOUR_RATIO_LIMIT` times the straight-line distance.
+ *
+ * **Proved red, then green** (18 August 2026): with `addInterconnects`
+ * disabled (the hub-and-spoke tree `paths.ts` built before this fix), the
+ * canonical seed's `stall.dodgems`/`station-1` pair (21.0 m straight, 52.3 m
+ * paved) is one of several pairs that clear both the close cap and the
+ * waste floor at a bad ratio, and every seed tested shows several more —
+ * `LGP_DISABLE_INTERCONNECTS=1` reliably fails this invariant everywhere.
+ * Restoring `addInterconnects` measurably improves every one of those
+ * pairs (see `addInterconnects`'s own comment for the mechanism), which is
+ * what the ratio limit below is actually proving held.
+ *
+ * `DETOUR_RATIO_LIMIT = 15` is not the number a network with no other
+ * constraints would earn — it is real headroom (35%+) above the worst ratio
+ * the generator *actually* produces once it also respects two independent,
+ * measured safety limits `addInterconnects`'s own comments document in
+ * full: `CONNECTOR_SPACING_CAP_MULTIPLE` (2.0, kept low so new pavement
+ * can't shift `Scenery.ts`'s hiding-maze placement into stranding an NPC
+ * waypoint — `check:park`'s `poi.stranded`) and the ride-corridor guard
+ * (keeps a connector off the Sky Cruiser's own structural footprint, or a
+ * roadside lamp can starve it of a pylon — `skyCruiserStandsOnItsOwnSupports`).
+ * Both are real, reproduced regressions this branch hit and fixed, not
+ * theoretical caution, and both mean some genuinely close, badly-detoured
+ * pairs are correctly left unconnected because fixing them was measured to
+ * break something else. Measured worst ratio per seed at the generator's
+ * real (safety-constrained) settings: canonical 7.35x
+ * (`building`/`stall.skyCruiser`), seed 2 4.59x, seed 5 11.15x (the worst of
+ * the five — `stall.skyCruiser`/`exit-skyCruiser`, both ends pinned by the
+ * same corridor guard), seed 11 4.50x, seed 18 5.80x. This invariant's job
+ * given that reality is to catch a *regression* — the network going back
+ * towards the fully hub-and-spoke tree — not to assert every seed reaches
+ * an ideal no constraint could ever force it to miss.
+ */
+const DETOUR_RATIO_LIMIT = 15;
+
+const detourRatiosStayReasonable: Invariant = (facts) => {
+  const destinations = facts.pathNodes.filter((n) => DETOUR_DESTINATION_KINDS.has(n.kind));
+  if (destinations.length < 2) return [];
+
+  const spacing = medianDestinationSpacing(destinations);
+  if (spacing <= 0) return [];
+  const closeCap = spacing * DETOUR_CLOSE_CAP_MULTIPLE;
+  const wasteFloor = spacing * DETOUR_WASTE_FLOOR_MULTIPLE;
+
+  // The *connectivity* graph, not just the paved ribbons: a destination that
+  // already stood within a few metres of the network gets no drawn ribbon
+  // (`paths.ts`'s "connectivity fact, not a ribbon" edges), but that short
+  // unpaved walk is exactly as real as a paved one for "how far does a
+  // child actually have to walk between these two destinations" — the
+  // question this invariant asks. Using paved-only `facts.pathEdges` here
+  // would strand such a destination or force a wildly longer route through
+  // whatever paving happens to also touch its coordinate.
+  const graph = buildFactsDistanceGraph(facts.pathConnectivityEdges);
+  const problems: string[] = [];
+  for (let i = 0; i < destinations.length; i += 1) {
+    for (let j = i + 1; j < destinations.length; j += 1) {
+      const a = destinations[i] as (typeof destinations)[number];
+      const b = destinations[j] as (typeof destinations)[number];
+      const straight = Math.hypot(a.x - b.x, a.z - b.z);
+      if (straight < 1e-6 || straight > closeCap) continue;
+      const paved = graph.distanceBetween(a.x, a.z, b.x, b.z);
+      // Not a real defect: `everyDestinationIsANode` and `noPathEndsNowhere`
+      // already independently prove every destination sits on one connected
+      // graph, so a "disconnected" result here is this invariant's own
+      // splice-reconstruction (`buildFactsDistanceGraph`) missing a junction
+      // within its tolerance, not a park that fails to connect two
+      // destinations. Skipped rather than flagged so an approximation limit
+      // in a second, independently-written measurement doesn't fail a build
+      // over nothing — the ratio check below still runs on every pair this
+      // reconstruction *does* bridge, which is the real signal.
+      if (!Number.isFinite(paved)) continue;
+      const waste = paved - straight;
+      if (waste < wasteFloor) continue;
+      const ratio = paved / straight;
+      if (ratio > DETOUR_RATIO_LIMIT) {
+        problems.push(
+          `'${a.id}' and '${b.id}' are ${straight.toFixed(1)} m apart in a straight line but ` +
+            `${paved.toFixed(1)} m apart by paving (${ratio.toFixed(2)}x, wasting ` +
+            `${waste.toFixed(1)} m) — closer than ${closeCap.toFixed(1)} m ` +
+            `(${DETOUR_CLOSE_CAP_MULTIPLE}x the park's own ${spacing.toFixed(1)} m median ` +
+            `destination spacing) with no direct connector between them`,
+        );
+      }
+    }
+  }
+  return problems;
 };
 
 /** Every path is lit along its whole length. */
@@ -5173,6 +5824,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the Land Hotel stands close to the castle', hotelIsCloseToTheCastle],
   ['no two wall runs cross or crowd each other', wallsDoNotClash],
   ['no wall run stands on the railway', wallsClearTheRailway],
+  ['every wall run sits on a grid axis and actually borders something', wallsBorderTheGridSensibly],
   ['no tree stands on the railway', treesClearTheRailway],
   ['the train runs through no plot and no stall', trainClearsEveryPlotAndStall],
   ['the park train keeps its turning circle', trainKeepsItsTurningCircle],
@@ -5185,7 +5837,14 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no lamp stands in anything', lampsTouchNothing],
   ['every path is lit end to end', everyPathIsLit],
   ['no paved path stops anywhere but a destination', noPathEndsNowhere],
+  ['every plot faces exactly the camera axis', buildingsFaceTheCameraAxis],
+  ['every paved path runs on grid axes', pathsRunOnGridAxes],
+  ['the ring road is one true circle round the statue', ringIsATrueCircleRoundTheStatue],
   ['every place a child can be served is a node in the path graph', everyDestinationIsANode],
+  [
+    'no two close destinations are left with a wildly disproportionate paved detour',
+    detourRatiosStayReasonable,
+  ],
   ['every ride exit is clear ground, reachable from the entrance', rideExitsAreUsable],
   ['the Rail Race exit fits the whole party that arrives on it', railRaceExitFitsTheParty],
   ['the Rail Race flies clear of the railway and stands on clear ground', railRaceFliesClear],

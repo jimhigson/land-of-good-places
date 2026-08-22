@@ -160,6 +160,12 @@ export interface PlotFact {
   readonly x: number;
   readonly z: number;
   readonly boundingRadius: number;
+  /**
+   * The yaw the solver gave this plot's sign — every plot's, camera-facing
+   * or not (`anchors.ts`'s `AnchorDefinition.signYaw` doc). Issue #269:
+   * should be exactly `CAMERA_FACING_YAW` on every plot, on every seed.
+   */
+  readonly signYaw: number;
 }
 
 /** A place a visitor must be able to stand: a doormat or a stall counter. */
@@ -251,6 +257,13 @@ export interface PathEdgeFact {
   readonly halfWidth: number;
   /** The drawn centre line, every ~0.5 m. */
   readonly points: readonly (readonly [number, number])[];
+  /** False when the destination already stood on the network (`paths.ts`'s
+   * own "connectivity fact, not a ribbon" edges) — no ribbon was drawn, but
+   * the short walk it represents is real. Always `true` in {@link
+   * ParkFacts.pathEdges}, which is paved-only; present so an invariant that
+   * wants the *full* connectivity graph — {@link
+   * ParkFacts.pathConnectivityEdges} — can tell the two kinds of edge apart. */
+  readonly paved: boolean;
 }
 
 /**
@@ -551,6 +564,8 @@ export interface ParkFacts {
   readonly pathNodes: readonly PathNodeFact[];
   /** Its paved edges, each with the ribbon that was drawn for it. */
   readonly pathEdges: readonly PathEdgeFact[];
+  /** Every edge in the graph, paved or not — see {@link PathEdgeFact.paved}. */
+  readonly pathConnectivityEdges: readonly PathEdgeFact[];
   /**
    * The ginormous slide's chute, in **world space**, sampled along what was
    * actually built — not the plan it was built from.
@@ -950,6 +965,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     x: entry.x,
     z: entry.z,
     boundingRadius: entry.boundingRadius,
+    signYaw: entry.signYaw,
   }));
 
   // The ginormous slide's chute, sampled off the built curve and pushed out
@@ -1329,6 +1345,26 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     backbone: edge.route.closed,
     halfWidth: edge.route.width / 2,
     points: drawn[index]!.points,
+    paved: true,
+  }));
+
+  // Every edge in the graph, paved or not — an invariant asking "how far
+  // does a child actually have to walk between these two destinations"
+  // needs the unpaved "connectivity fact" edges too (`paths.ts`'s own
+  // phrase): a destination that already stood within a few metres of the
+  // network gets no drawn ribbon, but the short unpaved walk it represents
+  // is exactly as real as a paved one, and dropping it from the graph would
+  // strand that destination or force a wildly longer route through
+  // whatever paving happens to also touch its coordinate.
+  const allDrawn = PATH_GRAPH.edges.map((edge) => drawnCentreLine(edge.route));
+  const pathConnectivityEdges: PathEdgeFact[] = PATH_GRAPH.edges.map((edge, index) => ({
+    name: edge.route.name,
+    from: edge.from,
+    to: edge.to,
+    backbone: edge.route.closed,
+    halfWidth: edge.route.width / 2,
+    points: allDrawn[index]!.points,
+    paved: edge.paved,
   }));
 
   const pathNodes: PathNodeFact[] = PATH_GRAPH.nodes.map((node) => ({
@@ -2085,6 +2121,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     exits,
     pathNodes,
     pathEdges,
+    pathConnectivityEdges,
     slideChute,
     slideRiderFrame: { local: slideRiderLocal, world: slideRiderWorld },
     slideChuteBands,

@@ -378,6 +378,18 @@ export const CAMERA_PITCH_DEGREES = 38;
 export const CAMERA_YAW_DEGREES = 45;
 
 /**
+ * The exact yaw a camera-facing thing turns to — `CAMERA_YAW_DEGREES` in
+ * radians, dead down the camera's own diagonal, and nothing else (issue
+ * #269). Before this, a sign or a counter's yaw was drawn per plot from a
+ * random range and then rescaled again for a booth's counter — two more
+ * numbers that only ever *approximated* "faces the camera" instead of
+ * stating it. One owner: `parkLayout.ts`'s solver gives every entry this
+ * exact yaw, `stallPlacement.ts`'s face-paint stall and `ferrisKiosk` read
+ * it the same way, and nothing else defines its own approximation.
+ */
+export const CAMERA_FACING_YAW = (CAMERA_YAW_DEGREES * Math.PI) / 180;
+
+/**
  * Vertical world-units visible at default zoom (orthographic frustum height).
  *
  * Was 22, which put a 1.86 m character at 8% of the screen — the park read as a

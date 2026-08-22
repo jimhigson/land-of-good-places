@@ -30,7 +30,7 @@ import {
   RAIL_CORRIDOR_CLEARANCE,
 } from './train/plan';
 import { terrainHeight } from './terrain';
-import { isOnPath, PLAZA } from './paths';
+import { isOnPath, PLAZA, pathBorderSegments } from './paths';
 import { ANCHORS } from './anchors';
 import { COASTER_PLANS } from './coaster/plan';
 import {
@@ -1305,6 +1305,144 @@ const MAZE_CANDIDATES = 2600;
 const BENCH_CANDIDATES = 4200;
 const BENCH_SALT = 0xbe7c4;
 
+/**
+ * **Where a decorative wall may stand: bordering a path edge or a plot
+ * boundary, on the same grid axis it borders — never freestanding in open
+ * lawn.** (Issue #300, Jim, playing: *"here we see 3 walls placed at
+ * nonsensical locations that make no sense. On the grid layout, the walls
+ * should be at the same orthogonal axes as the path and also be around the
+ * edges of the path where there is nothing else they would collide with —
+ * the point of walls isn't to scatter them at random!"*)
+ *
+ * Before this, both wall generators drew a fully free `(angle, radius)` from
+ * the whole lawn disc and only *afterwards* asked whether the result was
+ * clear of everything — so a run's existence never depended on anything it
+ * was actually next to. The maze's yaw was `rng.pick([0, PI/2]) +
+ * rng.range(-0.12, 0.12)`, so even its own grid intent was jittered off axis
+ * by up to ~6.9 degrees, and the lawn benches picked their yaw fully at
+ * random (`rng.range(0, Math.PI)`) with no grid consideration whatsoever.
+ * Both drew their centre point from the whole disc with no reference to a
+ * path or a plot at all — "clear of everything" is not the same claim as
+ * "next to something", and Jim's three walls satisfied the first while
+ * failing the second.
+ *
+ * A wall picked here instead starts from something real: a straight,
+ * grid-axis stretch of the paved network ({@link pathBorderSegments}) or a
+ * plot's own bounding circle ({@link ANCHORS}), snapped to a cardinal
+ * bearing. Its yaw is read straight off that anchor's own axis — never
+ * jittered — and its centre sits a fixed offset outside the thing it
+ * borders, clear of the isPlantable margin that thing already keeps. The
+ * *safety* checks below (`runIsClear`, `fitsAmong`, `clearOfAnchors`) are
+ * unchanged: this only changes where a candidate's centre and yaw come from,
+ * not what makes one acceptable once proposed.
+ */
+interface BorderAnchor {
+  readonly x: number;
+  readonly z: number;
+  /** 0 or PI/2 — the grid axis the bordered thing itself runs along. */
+  readonly axisYaw: number;
+  /** Direction pointing away from the thing being bordered, so an arm that
+   * extends this way only ever moves further from it, never back across it. */
+  readonly outward: number;
+}
+
+/** Clear of a path's own `isPlantable` margin (3.2 m, `runIsClear`), with
+ * enough left over that the wall still reads as hugging the kerb rather than
+ * standing off in the middle of the lawn. */
+const PATH_BORDER_OFFSET_MIN = 3.6;
+const PATH_BORDER_OFFSET_MAX = 6.5;
+
+/** Clear of a plot's own keepout (`insideAnyAnchor`: boundingRadius + 5.7 m),
+ * with the same "hugs it, doesn't wander off" ceiling as the path case. */
+const PLOT_BORDER_OFFSET_MIN = 6.2;
+const PLOT_BORDER_OFFSET_MAX = 9.5;
+
+const CARDINAL_BEARINGS = [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2] as const;
+
+/**
+ * Draws one candidate anchor from this attempt's own RNG stream — a point
+ * and grid axis taken from a real path edge or a real plot boundary, never
+ * from open lawn. `null` only if the park has neither (never true in
+ * practice; kept honest rather than assuming the network is non-empty).
+ */
+function pickBorderAnchor(rng: Rng): BorderAnchor | null {
+  const segments = pathBorderSegments();
+  const anchorPlots = ANCHORS.length > 0;
+  const anchorPath = segments.length > 0;
+  if (!anchorPlots && !anchorPath) return null;
+  // Paths run through far more of the lawn than the dozen-odd plots do, so
+  // they get the larger share — but plots are still asked often enough that
+  // a garden wall regularly reads as squaring off a building's corner too.
+  const useAPlot = anchorPlots && (!anchorPath || rng.unit() < 0.35);
+
+  if (useAPlot) {
+    const anchor = rng.pick(ANCHORS);
+    const bearing = rng.pick(CARDINAL_BEARINGS);
+    const offset = rng.range(PLOT_BORDER_OFFSET_MIN, PLOT_BORDER_OFFSET_MAX);
+    const distance = anchor.boundingRadius + offset;
+    const x = anchor.position[0] + Math.cos(bearing) * distance;
+    const z = anchor.position[1] + Math.sin(bearing) * distance;
+    // Tangent to the circle at a cardinal bearing is itself cardinal.
+    const axisYaw = bearing % Math.PI === 0 ? Math.PI / 2 : 0;
+    return { x, z, axisYaw, outward: bearing };
+  }
+
+  const seg = rng.pick(segments);
+  const t = rng.range(0.15, 0.85);
+  const px = seg.a[0] + (seg.b[0] - seg.a[0]) * t;
+  const pz = seg.a[1] + (seg.b[1] - seg.a[1]) * t;
+  const side = rng.pick([1, -1] as const);
+  const perp = seg.axisYaw + Math.PI / 2;
+  const offset = rng.range(PATH_BORDER_OFFSET_MIN, PATH_BORDER_OFFSET_MAX);
+  const distance = seg.halfWidth + offset;
+  const x = px + Math.cos(perp) * side * distance;
+  const z = pz + Math.sin(perp) * side * distance;
+  const outward = side > 0 ? perp : perp + Math.PI;
+  return { x, z, axisYaw: seg.axisYaw, outward };
+}
+
+/**
+ * How far (x, z) is from the nearest thing a wall may legitimately border: a
+ * paved edge, or a plot's own bounding circle. Negative inside either.
+ *
+ * This is the general-purpose backstop {@link pickBorderAnchor} alone cannot
+ * be: an anchor's *corner* is placed a known offset from the border it was
+ * drawn from, but an arm's far *tip* can walk past the end of a short border
+ * segment (see {@link MIN_BORDER_SEGMENT_LENGTH} in `paths.ts` — a segment
+ * only has to clear 4 m, and a maze arm can reach 8.5) and land somewhere no
+ * longer close to that segment, or to anything else. Checking every arm tip
+ * against every border, not just the one it was drawn from, is what catches
+ * that the same way {@link runIsClear} checks a candidate against the whole
+ * park rather than trusting the anchor it started from.
+ */
+function distanceToBorderedThing(x: number, z: number): number {
+  let best = Infinity;
+  for (const seg of pathBorderSegments()) {
+    const d = pointToSegment([x, z], seg.a, seg.b) - seg.halfWidth;
+    if (d < best) best = d;
+  }
+  for (const anchor of ANCHORS) {
+    const d = Math.hypot(x - anchor.position[0], z - anchor.position[1]) - anchor.boundingRadius;
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+/**
+ * No point of a decorative wall may end up further than this from the
+ * nearest path edge or plot boundary — the actual bound {@link
+ * distanceToBorderedThing} is checked against, and the number
+ * `wallsBorderSomethingReal` (`test/procgen/invariants.ts`) proves the built
+ * park never exceeds.
+ *
+ * Generous above the anchor offsets above (path: up to 6.5 m; plot: up to
+ * 9.5 m) so a maze piece's own arms — up to 8.5 m of tangent reach plus 5 m of
+ * outward reach — are not refused for merely being a real L-shape, but tight
+ * enough that "close to a path or a plot", not "somewhere on the lawn", is
+ * what every accepted candidate actually is.
+ */
+const WALL_BORDER_MAX_DISTANCE = 11;
+
 function generateWallMaze(placed: WallRun[]): WallRun[] {
   // Exactly 1.00 m sits ON the measured flight ceiling and fails the boot
   // assert by a float hair - honest heights only.
@@ -1322,21 +1460,28 @@ function generateWallMaze(placed: WallRun[]): WallRun[] {
     // depending on which test refused it, which is precisely how a longer path
     // spur used to relocate a garden wall onto an unrelated kiosk's doorstep.
     const rng = candidateRng(MAZE_SALT, attempts);
-    const angle = rng.range(0, Math.PI * 2);
-    const radius = Math.sqrt(rng.range(13 * 13, 42 * 42));
-    const cx = Math.cos(angle) * radius;
-    const cz = Math.sin(angle) * radius;
+    const anchor = pickBorderAnchor(rng);
+    if (!anchor) continue;
+    const { x: cx, z: cz, axisYaw, outward } = anchor;
     if (cornerPoints.some(([px, pz]) => Math.hypot(cx - px, cz - pz) < MAZE_PIECE_GAP + 12)) {
       continue;
     }
-    const yaw = rng.pick([0, Math.PI / 2] as const) + rng.range(-0.12, 0.12);
+    // One arm hugs the bordered edge (either direction along it); the other
+    // extends outward, away from what it borders, so it only ever opens
+    // further into the lawn and never doubles back across the thing it
+    // anchors to.
+    const armATowards = rng.pick([axisYaw, axisYaw + Math.PI] as const);
     const armA = rng.range(5.5, 8.5);
-    const armB = rng.range(4.5, 7.5);
-    const a2: [number, number] = [cx + Math.cos(yaw) * armA, cz + Math.sin(yaw) * armA];
-    const b2: [number, number] = [
-      cx + Math.cos(yaw + Math.PI / 2) * armB,
-      cz + Math.sin(yaw + Math.PI / 2) * armB,
-    ];
+    const armB = rng.range(3.5, 5.5);
+    const a2: [number, number] = [cx + Math.cos(armATowards) * armA, cz + Math.sin(armATowards) * armA];
+    const b2: [number, number] = [cx + Math.cos(outward) * armB, cz + Math.sin(outward) * armB];
+    // Both tips, not just the anchored corner — see `distanceToBorderedThing`.
+    if (
+      distanceToBorderedThing(a2[0], a2[1]) > WALL_BORDER_MAX_DISTANCE ||
+      distanceToBorderedThing(b2[0], b2[1]) > WALL_BORDER_MAX_DISTANCE
+    ) {
+      continue;
+    }
     if (!runIsClear(cx, cz, a2[0], a2[1]) || !runIsClear(cx, cz, b2[0], b2[1])) continue;
 
     // The L goes down whole or not at all: half a hiding piece is a stub.
@@ -1376,10 +1521,12 @@ function generateStoneRuns(placed: WallRun[]): WallRun[] {
     placed.push(run);
   };
 
-  // Beds: short tangent walls just off the plaza kerb, at seeded bearings.
+  // Beds: short tangent walls just off the plaza kerb, on the plaza's own
+  // cardinal bearings — exactly on grid axis, not jittered off it, for the
+  // same reason the lawn benches below no longer roll a free yaw (issue #300).
   const bedDistance = PLAZA.radius + 3.2;
   for (let i = 0; i < 4; i += 1) {
-    const bearing = (i / 4) * Math.PI * 2 + rng.range(-0.3, 0.3);
+    const bearing = (i / 4) * Math.PI * 2;
     const cx = PLAZA.x + Math.cos(bearing) * bedDistance;
     const cz = PLAZA.z + Math.sin(bearing) * bedDistance;
     const tangent = bearing + Math.PI / 2;
@@ -1400,19 +1547,30 @@ function generateStoneRuns(placed: WallRun[]): WallRun[] {
   // little per seed instead, which "every park is unique" is happy with.
   for (let attempt = 0; attempt < BENCH_CANDIDATES; attempt += 1) {
     const bench = candidateRng(BENCH_SALT ^ PARK_SEED, attempt);
-    const angle = bench.range(0, Math.PI * 2);
-    const radius = Math.sqrt(bench.range(16 * 16, 44 * 44));
-    const cx = Math.cos(angle) * radius;
-    const cz = Math.sin(angle) * radius;
-    const yaw = bench.range(0, Math.PI);
+    // Anchored to a real path edge or plot boundary, on that thing's own grid
+    // axis (issue #300) — not the free `(angle, radius)` position and fully
+    // random `rng.range(0, Math.PI)` yaw this used to roll, which is exactly
+    // what put stonework at nonsensical diagonal angles out among the bushes
+    // with nothing to do with anything nearby.
+    const anchor = pickBorderAnchor(bench);
+    if (!anchor) continue;
+    const { x: cx, z: cz, axisYaw } = anchor;
     // Shorter than the 7-9 m these used to roll. A run that long is a garden
     // wall, and the lawn has very few 9 m stretches that clear every path,
     // plot and now the railway along their whole length — the old length only
     // ever fitted because `runIsClear` sampled five points and stepped over
     // what lay between them. 4.4-6.4 m still reads as stonework to sit on.
     const half = bench.range(2.2, 3.2);
-    const from: [number, number] = [cx - Math.cos(yaw) * half, cz - Math.sin(yaw) * half];
-    const to: [number, number] = [cx + Math.cos(yaw) * half, cz + Math.sin(yaw) * half];
+    const from: [number, number] = [cx - Math.cos(axisYaw) * half, cz - Math.sin(axisYaw) * half];
+    const to: [number, number] = [cx + Math.cos(axisYaw) * half, cz + Math.sin(axisYaw) * half];
+    // Same backstop as the maze arms: a short border segment can still let a
+    // tangent run walk past its end into open lawn.
+    if (
+      distanceToBorderedThing(from[0], from[1]) > WALL_BORDER_MAX_DISTANCE ||
+      distanceToBorderedThing(to[0], to[1]) > WALL_BORDER_MAX_DISTANCE
+    ) {
+      continue;
+    }
     piece += 1;
     consider({ from, to, height: bench.pick([0.8, 0.95] as const), kind: 'stone', piece });
   }

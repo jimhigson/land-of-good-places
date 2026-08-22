@@ -58,6 +58,19 @@ import { NPC_RADIUS } from '../../core/constants';
 const NPC_JUMP_SPEED = 4.6;
 const GRAVITY = 17;
 
+/**
+ * How much faster than the ordinary `MAX_DEPENETRATION_SPEED` a free child
+ * is corrected away from a *scripted* one it cannot ask to move in return.
+ *
+ * The ordinary child-vs-child case splits the correction between two
+ * movers, each covering half the overlap at the shared rate limit. A
+ * scripted encounter already gives the free side the *whole* correction in
+ * one go (`pushAway`, not the halved version below) — this is the other
+ * half of that same idea, applied to the rate rather than the amount: one
+ * mover doing the whole job alone is allowed to do it faster, not just more.
+ */
+const SCRIPTED_ENCOUNTER_SPEED_FACTOR = 2.4;
+
 /** Drop further than this below the surface under your feet and you fall. */
 const FALL_THRESHOLD = 0.5;
 
@@ -411,12 +424,24 @@ export class NpcCharacter {
     // the one who steps aside.
     const bothScripted = this.scriptedFlag && other.scriptedFlag;
     if (bothScripted) return;
+    // A scripted child cannot react at all, so the free one takes the *whole*
+    // correction (`pushAway`, never the halved one below) at a faster rate
+    // than the ordinary two-sided case — the one place in this system where
+    // a single mover has to cover the entire correction alone. Measured on
+    // the cat bus arrival (issue #269 QA, `check:cat-bus`): at the ordinary
+    // rate two children still closed to 0.5-0.7 m (needs 0.99 m) even after
+    // the scripted route was shortened to the minimum a bus door can't avoid
+    // (`ArrivalSequence.ts`'s `RELEASE_Z`) — a wider *trigger* radius alone
+    // did not help (tried and measured worse: 0.50 m), because the free
+    // child's own wander target keeps steering it back onto the same
+    // crossing; only moving it faster, once it is actually being corrected,
+    // clears the gap in time.
     if (this.scriptedFlag) {
-      pushAway(other, this, minimum, maxPush);
+      pushAway(other, this, minimum, maxPush * SCRIPTED_ENCOUNTER_SPEED_FACTOR);
       return;
     }
     if (other.scriptedFlag) {
-      pushAway(this, other, minimum, maxPush);
+      pushAway(this, other, minimum, maxPush * SCRIPTED_ENCOUNTER_SPEED_FACTOR);
       return;
     }
     const dx = other.position.x - this.position.x;

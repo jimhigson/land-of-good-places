@@ -12,7 +12,9 @@ import { pathTexture } from '../core/textures';
 import { terrainHeight, terrainNormal } from './terrain';
 import { ANCHORS } from './anchors';
 import { PARK_LAYOUT, edgeDistanceAlong } from './parkLayout';
+import { PARK_BOUNDARY } from './boundary';
 import { TRAIN_PLAN } from './train/plan';
+import { FENCE_OFFSET, STATION_GAP } from './train/fence';
 import { COASTER_PLANS } from './coaster/plan';
 import { RAIL_RACE_PLAN } from './railRace/plan';
 import { archFeet } from './railRace/arch';
@@ -90,6 +92,11 @@ export interface RouteDefinition {
 const SPUR_STRETCH = numberFromEnv('LGP_SPUR_STRETCH');
 const SPUR_STRETCH_ID = stringFromEnv('LGP_SPUR_STRETCH_ID') ?? 'stall.railRacer';
 
+/** Test hook: skip {@link addInterconnects} entirely, so a test can measure
+ * the pre-interconnection hub-and-spoke tree on a real, currently-generated
+ * park — see that function's call site. Zero/default in the game. */
+const DISABLE_INTERCONNECTS = stringFromEnv('LGP_DISABLE_INTERCONNECTS') !== null;
+
 function stringFromEnv(name: string): string | null {
   try {
     const nodeProcess = (globalThis as { process?: { env?: Record<string, string> } }).process;
@@ -120,18 +127,44 @@ interface Blocker {
   readonly x: number;
   readonly z: number;
   readonly radius: number; // bounding circle, already inflated for kerbs
+  /**
+   * `'plot'` blockers are legitimate to end a route *inside* — a doormat
+   * genuinely stands close to its own plot, "arriving at a destination" is
+   * real. `'archFoot'` blockers never are: nobody's destination is the post
+   * of the finish rainbow, so a route endpoint that happens to land inside
+   * one is a clearance failure to route around, not a place to exempt (see
+   * {@link gridDetourAttempt}'s embedded-blocker filter, and issue #269 QA:
+   * exempting an arch foot here is exactly what let a rail-race leg come
+   * down 0.58 m from a path on seed 11 — well inside `WALKABLE_GAP`).
+   */
+  readonly kind: 'plot' | 'archFoot';
 }
 
 /**
  * How much room to leave round a rail-race arch foot: the post itself, plus
- * the width a child genuinely needs to walk past it.
+ * the width a child genuinely needs to walk past it, plus half the widest
+ * ribbon this file draws (so the *paved edge*, not just the centreline, clears
+ * the post).
  *
  * `PLAYER_RADIUS * 2` is `test/procgen/invariants.ts`'s `WALKABLE_GAP` — the
  * same number, taken from the game rather than from the check, because
  * `NavGrid` fattens every collider by a player radius before deciding a cell is
  * walkable. A margin narrower than this is a gap only on paper.
+ *
+ * The ribbon term is new (issue #269 QA, seed 5): `BLOCKERS` only ever kept
+ * the route's *centreline* this far from a foot's own tiny post radius
+ * (0.11 m); a diagonal route's centreline rarely lingered anywhere near that
+ * minimum, so the plain margin above was never actually tested against a
+ * ribbon's real paved width. An axis-aligned leg can hold its minimum
+ * clearance in a straight line for metres, and did — `finishRainbowStandsOnTheGround`
+ * measured a leg only 1.05 m from a path edge (needs `WALKABLE_GAP`, 1.24 m)
+ * on seed 5, because the centreline sat at exactly the old margin while the
+ * ring road's own half-width plus kerb (3.6 / 2 + 0.85 = 2.65 m) ate into it
+ * from there. `RIBBON_HALF_WIDTH_CEILING` is the largest half-width plus kerb
+ * any route in {@link ROUTES}/{@link solveRing} is ever built with.
  */
-const ARCH_FOOT_MARGIN = PLAYER_RADIUS * 2 + 0.4;
+const RIBBON_HALF_WIDTH_CEILING = 3.6 / 2 + 0.85;
+const ARCH_FOOT_MARGIN = PLAYER_RADIUS * 2 + 0.4 + RIBBON_HALF_WIDTH_CEILING;
 
 /**
  * Everything the ring road and the spurs must steer around: every plot, and
@@ -158,10 +191,10 @@ const ARCH_FOOT_MARGIN = PLAYER_RADIUS * 2 + 0.4;
 const BLOCKERS: readonly Blocker[] = [
   ...[...PARK_LAYOUT.entries.values()]
     .filter((e) => e.id !== 'fountain')
-    .map((e) => ({ x: e.x, z: e.z, radius: e.boundingRadius + 2.2 })),
+    .map((e) => ({ x: e.x, z: e.z, radius: e.boundingRadius + 2.2, kind: 'plot' as const })),
   ...[RAIL_RACE_PLAN.walkPastRing, RAIL_RACE_PLAN.raceRing]
     .flatMap((ring) => archFeet(ring))
-    .map((foot) => ({ x: foot.x, z: foot.z, radius: foot.radius + ARCH_FOOT_MARGIN })),
+    .map((foot) => ({ x: foot.x, z: foot.z, radius: foot.radius + ARCH_FOOT_MARGIN, kind: 'archFoot' as const })),
 ];
 
 /** Distance from `(px,pz)` along unit `(dx,dz)` to `blocker`, or Infinity. */
@@ -177,9 +210,60 @@ function rayToBlocker(px: number, pz: number, dx: number, dz: number, b: Blocker
 }
 
 /**
- * The ring road: a radius-per-bearing profile around the plaza, held off
- * every plot and relaxed smooth — the same shape of solve as the train
- * loop's (`train/route.ts`), two sizes smaller.
+ * The ring road: **a genuine smooth circle round the plaza, not a grid loop**
+ * (issue #269 follow-up, Jim, 18 August 2026 — the instruction that arrived
+ * mid-round-3 and was deliberately *not* acted on then, see that round's
+ * HANDOFF note, and is acted on here): *"one central perfect circle is ok
+ * circling the statue, and then the rest should be on a grid, with a fairly
+ * high degree of connectivity between the closer nodes in the graph."*
+ *
+ * Rounds 1-2 of this same ring (see the history below) tried to have it both
+ * ways — axis-align the ring like everything else, then simplify away the
+ * staircase that produced — and both readings of the result were wrong: a
+ * grid loop that still doesn't read as a grid (too few, too long a run to
+ * *feel* rectilinear round something this small) fighting a circle that
+ * still doesn't read as a circle (dead-straight chords). Jim's actual ask
+ * was never "make the ring's staircase less ugly," it was "the ring is the
+ * one thing in this network allowed to be a genuine circle, and everything
+ * *else* (spurs, interconnects) is the grid." So: skip axis-alignment for
+ * this one route entirely, and hand back exactly the smooth radius-per-
+ * bearing profile below, unmodified — no straight chords anywhere on it.
+ *
+ * **Deliberately still the per-bearing profile, not one fixed radius.** A
+ * literal constant-radius circle was tried first and reverted: forcing every
+ * bearing to the *tightest* clearance found anywhere pulled the whole ring in
+ * by up to ~5.7 m wherever the old profile had room to bulge outward (this
+ * profile's own blocker-clearance solve, unchanged below), which shifted
+ * enough of the paved footprint to strand a `Garden.ts` waypoint that the
+ * unmodified profile does not (`check:park`'s `poi.stranded`, caught before
+ * this landed — see CLAUDE.md's own "a longer path must not move distant
+ * scenery" precedent, `SPUR_STRETCH`'s comment). The per-bearing profile
+ * below is not new geometry invented for this round: it is the same
+ * blocker-clearance solve every round of this ring has used since before
+ * issue #269 existed, and the *only* thing this round changes is that
+ * nothing downstream flattens it onto grid axes any more. It already reads
+ * as a circle — Laplacian-relaxed smooth, no corners, no straight run longer
+ * than a couple of metres — which is exactly the shape Jim is asking for;
+ * "perfect" was never a request for millimetre-constant radius so much as
+ * "not a polygon," and forcing literal constant radius is what broke a
+ * waypoint two bearings did not need broken.
+ *
+ * ### History
+ *
+ * Round 1 (issue #269): every bearing became its own control point, axis-
+ * aligned pairwise — the "staircase" round 2 fixed.
+ *
+ * Round 2 (issue #319, Jim: *"this fails both to draw on a grid, and also to
+ * draw a circle, it is literally disgusting to look at and the worst of all
+ * worlds"*): Douglas-Peucker-simplified the 32 samples down to ~12 vertices
+ * before axis-aligning, which fixed the staircase but — exactly as this
+ * round's own instruction says — left the ring looking like neither a grid
+ * nor a circle, just a shorter staircase. The simplification/axis-alignment
+ * machinery that round built (`simplifyClosedLoop`, `rdpKeep`,
+ * `toAxisAlignedLoop`, `collapseCollinearClosed`) is removed in this round,
+ * not kept dormant: nothing else in this file ever called it, and a ring
+ * whose control points are the raw profile has no straight chords for it to
+ * simplify.
  */
 function solveRing(): (readonly [number, number])[] {
   const bearings = 32;
@@ -209,9 +293,10 @@ function solveRing(): (readonly [number, number])[] {
     }
   }
   const points: (readonly [number, number])[] = [];
-  // Every bearing becomes a control point: the ribbon's spline interpolates
-  // between them, and with 11-degree gaps it bulged into plot circles the
-  // profile itself had correctly avoided.
+  // Every bearing becomes a control point of the ribbon's Catmull-Rom spline
+  // directly — no axis-alignment, no simplification. See this function's own
+  // comment for why round 3 tried, then reverted, collapsing this into one
+  // fixed radius: it strands scenery a smooth variable radius does not.
   for (let i = 0; i < bearings; i += 1) {
     const angle = (i / bearings) * TAU_PATH;
     points.push([
@@ -225,12 +310,126 @@ function solveRing(): (readonly [number, number])[] {
 const TAU_PATH = Math.PI * 2;
 
 /**
+ * Extra clearance an axis-aligned corner or leg keeps beyond a blocker's own
+ * already-inflated radius in {@link BLOCKERS}.
+ *
+ * The old diagonal router (`detourAroundBlockers`, unchanged below) used no
+ * pad at all, and it did not need one: a smooth curve only grazes its
+ * minimum clearance for an instant. An axis-aligned leg can hold that same
+ * minimum clearance in a dead straight line for many metres, which is
+ * exactly what squeezed a scenery waypoint's own "is there 2.2 m of clear
+ * ground here" search out of existence next to one long, perfectly flat
+ * run (issue #269 QA). A small pad here keeps every axis-aligned run
+ * genuinely, not just nominally, clear.
+ */
+const ROUTE_WALKER_PAD = 0.6;
+
+/**
+ * How far *outside* its own plot's blocker circle a route's true endpoint
+ * may still sit and count as "arriving at a destination" for
+ * {@link gridDetourAttempt}'s connector screening (issue #269 QA, seed 2/18).
+ *
+ * A camera-facing entry's doormat sits `standOff` (1.4 m, `parkLayout.ts`)
+ * plus its own edge distance off the plot centre — routinely just outside
+ * `boundingRadius` rather than inside it, so requiring literal embedding
+ * (as the general mid-search exemption still does) missed it: the rail-race
+ * stall's own doormat sat only 0.2 m outside its plot's blocker circle, none
+ * of the 4 candidate grid corners had a fully clear connector to it, and the
+ * leg gave up and fell back to a 25 m raw diagonal. 3 m comfortably covers
+ * the standoff itself plus the wobble a plot's actual footprint shape (a
+ * rectangle's corner reaches further than its `boundingRadius` circle
+ * suggests) can add on top.
+ */
+const DESTINATION_ARRIVAL_MARGIN = 3;
+
+/** True if the straight segment (ax,az)-(bx,bz) stays clear of every blocker
+ * by at least `pad` metres — same closest-approach test as `rayToBlocker`,
+ * bounded to the segment rather than an infinite ray. */
+function segmentClearOfBlockers(
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+  pad: number,
+  blockers: readonly Blocker[] = BLOCKERS,
+  arrivalMargin = 0,
+): boolean {
+  const dx = bx - ax;
+  const dz = bz - az;
+  const lengthSq = dx * dx + dz * dz;
+  for (const blocker of blockers) {
+    // A segment ending inside (or, within `arrivalMargin`, just outside) a
+    // *plot* blocker is arriving at a destination — every spur's last metres
+    // run into a plot mouth — so only the segment's *approach* is asked
+    // about, never whether it ends inside one. An arch foot is never a
+    // destination (issue #269 QA, seed 11: exempting one here is exactly
+    // what let a rail-race leg land 0.58 m from a path), so it never gets
+    // this exemption regardless of where the segment ends.
+    const t =
+      lengthSq > 1e-9
+        ? Math.max(0, Math.min(1, ((blocker.x - ax) * dx + (blocker.z - az) * dz) / lengthSq))
+        : 0;
+    const exempt =
+      blocker.kind === 'plot' &&
+      t >= 1 - 1e-9 &&
+      Math.hypot(blocker.x - bx, blocker.z - bz) < blocker.radius + arrivalMargin;
+    if (exempt) continue;
+    const cx = ax + dx * t;
+    const cz = az + dz * t;
+    const dist = Math.hypot(blocker.x - cx, blocker.z - cz);
+    if (dist < blocker.radius + pad) return false;
+  }
+  return true;
+}
+
+/**
+ * True if every point along the segment stays genuinely inside the park's
+ * own spline edge.
+ *
+ * Deliberately **not** `parkManifest.ts`'s `BOUNDARY_CLEARANCE` (2.5 m) — that is the
+ * margin a whole *plot* keeps, and several plots (the rail-race stall's
+ * `nearEdge` band puts its booth as little as 2 m from the wall on
+ * purpose) stand closer to the edge than that, so a path serving them has
+ * to as well. `PLAYER_RADIUS` is what a walker's own body actually needs.
+ *
+ * `detourAroundBlockers`'s diagonal never needed this test: it only ever
+ * runs between two points already inside the park, drifting gently from one
+ * to the other. An axis-aligned corner is not so mild — it can park a
+ * straight run right along the boundary for many metres if nothing else
+ * told it not to, which is exactly what stranded a hotel-side waypoint
+ * against the gate corridor's own wall (issue #269 QA). Sampled every 5 m
+ * rather than tested only at the endpoints, because that plateau's danger
+ * was in its *middle*, not at either corner.
+ */
+function segmentClearOfBoundary(ax: number, az: number, bx: number, bz: number): boolean {
+  const length = Math.hypot(bx - ax, bz - az);
+  const samples = Math.max(1, Math.ceil(length / 5));
+  for (let i = 0; i <= samples; i += 1) {
+    const t = i / samples;
+    const x = ax + (bx - ax) * t;
+    const z = az + (bz - az) * t;
+    if (PARK_BOUNDARY.distanceToEdge(x, z) < PLAYER_RADIUS) return false;
+  }
+  return true;
+}
+
+/** Combines {@link segmentClearOfBlockers} and {@link segmentClearOfBoundary}
+ * — every axis-aligned candidate leg has to satisfy both. */
+function segmentIsWalkable(ax: number, az: number, bx: number, bz: number, pad: number): boolean {
+  return segmentClearOfBlockers(ax, az, bx, bz, pad) && segmentClearOfBoundary(ax, az, bx, bz);
+}
+
+/**
  * Straight line from `from` to `to`, detouring around any blocker it clips:
  * the offending circle contributes a tangent-side waypoint, repeatedly,
- * until the polyline is clear. Greedy but bounded, and the ribbon curve
- * smooths the corners it leaves.
+ * until the polyline is clear. This is `paths.ts`'s original router
+ * (formerly `routeAround`, issue #241/#114-era) — proven, on every seed, to
+ * reliably connect any two valid park points around the plots between them —
+ * kept unchanged as the first pass so axis-aligning its output (below) never
+ * has to re-solve "can these two points be connected at all," only "can the
+ * already-proven connection be bent onto grid axes."
  */
-function routeAround(
+function detourAroundBlockers(
   from: readonly [number, number],
   to: readonly [number, number],
 ): (readonly [number, number])[] {
@@ -247,13 +446,16 @@ function routeAround(
       const dx = abx / length;
       const dz = abz / length;
       for (const blocker of BLOCKERS) {
-        // A segment ending inside the circle is arriving at a destination —
-        // every spur's last metres run into a plot mouth. Detouring that
-        // blocker would splice the same escape point forever (measured:
-        // seven copies of one point). Only the *far* endpoint can be inside
-        // a blocker: starts are junction points, kept outside every circle
-        // by `bestBranchPoint`.
-        if (Math.hypot(blocker.x - b[0], blocker.z - b[1]) < blocker.radius) continue;
+        // A segment ending inside a *plot* circle is arriving at a
+        // destination — every spur's last metres run into a plot mouth.
+        // Detouring that blocker would splice the same escape point forever
+        // (measured: seven copies of one point). Only the *far* endpoint can
+        // be inside a blocker: starts are junction points, kept outside every
+        // circle by `bestBranchPoint`. An arch foot is never a destination
+        // (issue #269 QA, seed 11), so it keeps demanding clearance right up
+        // to the segment's own end, exactly like every other approach.
+        if (blocker.kind === 'plot' && Math.hypot(blocker.x - b[0], blocker.z - b[1]) < blocker.radius)
+          continue;
         const t = Math.max(0, Math.min(length, (blocker.x - a[0]) * dx + (blocker.z - a[1]) * dz));
         const cx = a[0] + dx * t;
         const cz = a[1] + dz * t;
@@ -282,6 +484,385 @@ function routeAround(
   return clean;
 }
 
+/**
+ * Turns one already-clear leg `a` -> `b` into one or two axis-aligned legs
+ * (issue #269): an "L" via whichever of the two right-angle corners keeps
+ * both new legs clear of every blocker. `detourAroundBlockers` already
+ * proved the direct `a`-`b` line clear, so a corner failing is the corner
+ * cutting through a blocker that line happened to miss — rare, and handled
+ * by nudging the corner outward, in fixed steps, until it clears or the
+ * search gives up and falls back to the direct (diagonal) leg rather than
+ * failing the whole build.
+ */
+function elbowLeg(a: readonly [number, number], b: readonly [number, number]): (readonly [number, number])[] {
+  if (Math.abs(a[0] - b[0]) < 1e-6 || Math.abs(a[1] - b[1]) < 1e-6) return [b]; // already axis-aligned
+  const cornerX: readonly [number, number] = [b[0], a[1]]; // horizontal, then vertical
+  const cornerZ: readonly [number, number] = [a[0], b[1]]; // vertical, then horizontal
+  const clearVia = (corner: readonly [number, number]): boolean =>
+    segmentIsWalkable(a[0], a[1], corner[0], corner[1], ROUTE_WALKER_PAD) &&
+    segmentIsWalkable(corner[0], corner[1], b[0], b[1], ROUTE_WALKER_PAD);
+  const okX = clearVia(cornerX);
+  const okZ = clearVia(cornerZ);
+  if (okX && !okZ) return [cornerX, b];
+  if (okZ && !okX) return [cornerZ, b];
+  if (okX && okZ) {
+    // Both clear: correct whichever axis moves *less* over this one leg
+    // first, then run the dominant axis the rest of the way. This is a
+    // purely local choice — every leg decides from its own two endpoints,
+    // never from where an *earlier* leg's corner landed.
+    //
+    // A global rule ("prefer whichever corner sits further from the
+    // plaza") was tried first and chained: `detourAroundBlockers` had
+    // already bulged the original diagonal a little north to clear one
+    // obstacle, four short legs in a row each independently chose the
+    // *more northward* of their own two corners, and the result was one
+    // 40 m dead-flat plateau sitting at the single most extreme point of
+    // what used to be a brief bulge — long enough that it stranded a
+    // waypoint on the far side (issue #269 QA). Correcting the small axis
+    // per leg keeps each corner near where that leg's own endpoints
+    // already were, so the axis-aligned route tracks the shape of the
+    // proven diagonal it was built from, instead of drifting away from it.
+    const dx = Math.abs(b[0] - a[0]);
+    const dz = Math.abs(b[1] - a[1]);
+    return [dz <= dx ? cornerZ : cornerX, b];
+  }
+  // Neither raw right-angle corner is clear: something sits off the direct
+  // a-b diagonal (which `detourAroundBlockers` already proved clear) but
+  // inside both of the L-shapes' bounding boxes — a blocker in the "wedge"
+  // between the diagonal and a corner. A single extra corner (a "Z") is not
+  // guaranteed to have room either — two blockers deliberately placed close
+  // together (`near` relations exist for exactly this) can need a proper
+  // multi-turn staircase to get round both. `gridDetour` finds one by
+  // search rather than by guessing a shape, and only ever runs here: the
+  // common case above resolves in two clearance tests, so this is rare
+  // enough that a small grid search costs nothing measurable.
+  return gridDetour(a, b);
+}
+
+/**
+ * Rare-path fallback for {@link elbowLeg}: an axis-aligned route from `a` to
+ * `b` found by a bounded grid search, for the "two blockers in the way"
+ * cases a single corner or a single Z cannot get around. Unlike
+ * `manhattanRoute`'s first, abandoned design (issue #269 QA), this is not
+ * asked to run on every leg of every route — only when the cheap two-corner
+ * check above has already failed — so quantizing `a`/`b` onto the grid via
+ * their touching corners, screened by a real connector segment each, is
+ * affordable here where it was a 100x solver regression as the general case.
+ */
+/**
+ * Search reaches tried in order, widening until one finds a route.
+ *
+ * A single fixed reach was tried first (45 m) and was not enough: seed 5's
+ * sky-cruiser stall (tucked in the castle's tight west pocket) needed it
+ * widened from an original 30 m to clear, and seed 18's ball-pit spur then
+ * needed more still — a squeeze between two `near`-related plots can be
+ * arbitrarily tight depending on where the solver happened to land them, so
+ * there is no one constant that is "enough" for every seed. Widening on
+ * failure, rather than picking one large number up front, keeps the common
+ * case (a small search, resolved in microseconds) cheap and only pays for a
+ * bigger one when the smaller one actually failed.
+ */
+const GRID_DETOUR_REACHES: readonly number[] = [45, 90, 160];
+
+function gridDetour(a: readonly [number, number], b: readonly [number, number]): (readonly [number, number])[] {
+  for (const reach of GRID_DETOUR_REACHES) {
+    const found = gridDetourAttempt(a, b, reach);
+    if (found) return found;
+  }
+  // Every reach failed: the direct diagonal is the one leg
+  // `detourAroundBlockers` already proved clear, so this keeps the route
+  // connected rather than failing the build. `test/procgen/invariants.ts`'s
+  // axis-alignment check measures how often this actually fires.
+  return [b];
+}
+
+/** One `gridDetour` search at a given `reach`, or `null` if it finds nothing. */
+function gridDetourAttempt(
+  a: readonly [number, number],
+  b: readonly [number, number],
+  reach: number,
+): (readonly [number, number])[] | null {
+  const step = 2;
+  const toWorld = (g: number) => g * step;
+
+  // `a` or `b` can genuinely sit *inside* a blocker's circle — arriving at a
+  // destination, exactly as `detourAroundBlockers`'s own "only the far
+  // endpoint may be inside a blocker" rule allows (seed 18's ball-pit spur:
+  // its own intermediate waypoint sits 17.3 m from the castle's centre,
+  // inside its 21.5 m radius). `segmentClearOfBlockers`'s endpoint exemption
+  // covers the *direct* connector into that point, but a grid search still
+  // has to walk actual cells to reach it — and every cell approaching an
+  // embedded point is, correctly, inside the same blocker too. So any
+  // blocker that already contains `a` or `b` is dropped from this search
+  // entirely, not just exempted at the one point touching it: the search
+  // would otherwise have a walkable goal with no walkable way to reach it.
+  const localBlockers = BLOCKERS.filter(
+    (blocker) =>
+      blocker.kind !== 'plot' ||
+      (Math.hypot(a[0] - blocker.x, a[1] - blocker.z) >= blocker.radius &&
+        Math.hypot(b[0] - blocker.x, b[1] - blocker.z) >= blocker.radius),
+  );
+  const walkable = (ax: number, az: number, bx: number, bz: number, pad: number): boolean =>
+    segmentClearOfBlockers(ax, az, bx, bz, pad, localBlockers) && segmentClearOfBoundary(ax, az, bx, bz);
+  // The connector into the *true* endpoint gets a little more slack on the
+  // "arriving at a destination" exemption than an ordinary mid-search edge
+  // does: a doormat typically stands `standOff` (1.4 m, `parkLayout.ts`) plus
+  // its own edge distance off its plot's centre, which is routinely just
+  // outside the plot's `boundingRadius` circle rather than inside it — close
+  // enough to be "arriving" in every sense that matters, but not literally
+  // embedded, so the plain (`arrivalMargin = 0`) exemption above missed it.
+  // Seed 2's rail-race stall sat only 0.2 m outside its own plot's blocker
+  // circle, and none of the 4 candidate grid corners had a fully clear
+  // connector to it — `goals` came back empty at every search reach, and the
+  // leg fell all the way back to a 25 m raw diagonal (issue #269 QA). Applied
+  // only to the one connector actually touching `a`/`b`, never to the
+  // ordinary edges the A* search walks between them.
+  const walkableToEndpoint = (ax: number, az: number, bx: number, bz: number): boolean =>
+    segmentClearOfBlockers(ax, az, bx, bz, ROUTE_WALKER_PAD, localBlockers, DESTINATION_ARRIVAL_MARGIN) &&
+    segmentClearOfBoundary(ax, az, bx, bz);
+
+  const touching = (p: readonly [number, number]): [number, number][] => {
+    const fx = Math.floor(p[0] / step);
+    const cx = Math.ceil(p[0] / step);
+    const fz = Math.floor(p[1] / step);
+    const cz = Math.ceil(p[1] / step);
+    const xs = fx === cx ? [fx] : [fx, cx];
+    const zs = fz === cz ? [fz] : [fz, cz];
+    const nodes: [number, number][] = [];
+    for (const gx of xs) for (const gz of zs) nodes.push([gx, gz]);
+    return nodes;
+  };
+  // The 4 immediate touching corners can *all* fail: a stall's doormat can
+  // sit in a genuinely tight pocket (seed 2/18's rail-race spur, issue #269
+  // QA) where every corner right next to it is blocked either by its own
+  // plot's mid-segment footprint or by a neighbouring arch foot that must
+  // never be exempted (seed 11's fix). None of that makes the *point itself*
+  // unreachable — a corner a couple of grid steps further out is routinely
+  // clear, since the measured gaps here were as small as 0.15-0.6 m. So when
+  // the immediate ring comes back empty, widen outward ring by ring (2 m grid
+  // steps, Chebyshev shells) and take the first shell with any walkable
+  // candidate, rather than giving up at reach 45/90/160 with a route that was
+  // always going to find a point but never a way to actually stand next to
+  // it.
+  const MAX_ENTRY_RING = 4;
+  const entryCandidates = (
+    p: readonly [number, number],
+    endpointWalkable: (gx: number, gz: number) => boolean,
+  ): [number, number][] => {
+    const immediate = touching(p).filter(([gx, gz]) => endpointWalkable(gx, gz));
+    if (immediate.length > 0) return immediate;
+    const cgx = Math.round(p[0] / step);
+    const cgz = Math.round(p[1] / step);
+    for (let radius = 1; radius <= MAX_ENTRY_RING; radius++) {
+      const ring: [number, number][] = [];
+      for (let dx = -radius; dx <= radius; dx++) {
+        for (let dz = -radius; dz <= radius; dz++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== radius) continue; // outer shell only
+          const gx = cgx + dx;
+          const gz = cgz + dz;
+          if (endpointWalkable(gx, gz)) ring.push([gx, gz]);
+        }
+      }
+      if (ring.length > 0) return ring;
+    }
+    return [];
+  };
+  const starts = entryCandidates(a, (gx, gz) => walkableToEndpoint(a[0], a[1], toWorld(gx), toWorld(gz)));
+  const goals = entryCandidates(b, (gx, gz) => walkableToEndpoint(toWorld(gx), toWorld(gz), b[0], b[1]));
+  if (starts.length === 0 || goals.length === 0) return null; // no clear entry/exit at this reach
+
+  const reachCells = Math.ceil(reach / step);
+  const allGx = [...starts, ...goals].map((n) => n[0]);
+  const allGz = [...starts, ...goals].map((n) => n[1]);
+  const minGx = Math.min(...allGx) - reachCells;
+  const maxGx = Math.max(...allGx) + reachCells;
+  const minGz = Math.min(...allGz) - reachCells;
+  const maxGz = Math.max(...allGz) + reachCells;
+  const widthZ = maxGz - minGz + 1;
+  const cellCount = (maxGx - minGx + 1) * widthZ;
+  const index = (gx: number, gz: number): number => (gx - minGx) * widthZ + (gz - minGz);
+  const gxOf = (i: number): number => minGx + Math.floor(i / widthZ);
+  const gzOf = (i: number): number => minGz + (i % widthZ);
+  const isStart = (gx: number, gz: number): boolean => starts.some(([sx, sz]) => sx === gx && sz === gz);
+  const isGoal = (gx: number, gz: number): boolean => goals.some(([tx, tz]) => tx === gx && tz === gz);
+  const inBounds = (gx: number, gz: number): boolean =>
+    gx >= minGx && gx <= maxGx && gz >= minGz && gz <= maxGz;
+
+  const goalGx = goals.reduce((sum, n) => sum + n[0], 0) / goals.length;
+  const goalGz = goals.reduce((sum, n) => sum + n[1], 0) / goals.length;
+  const heuristic = (gx: number, gz: number): number => (Math.abs(gx - goalGx) + Math.abs(gz - goalGz)) * step;
+
+  const gScore = new Float64Array(cellCount).fill(Infinity);
+  const fScore = new Float64Array(cellCount).fill(Infinity);
+  const cameFrom = new Int32Array(cellCount).fill(-1);
+  const closed = new Uint8Array(cellCount);
+  const open = new MinHeap(fScore);
+  for (const [gx, gz] of starts) {
+    if (!inBounds(gx, gz)) continue;
+    const idx = index(gx, gz);
+    gScore[idx] = 0;
+    fScore[idx] = heuristic(gx, gz);
+    open.push(idx);
+  }
+
+  let reachedIdx = -1;
+  while (open.size > 0) {
+    const currentIdx = open.pop();
+    if (closed[currentIdx]) continue;
+    closed[currentIdx] = 1;
+    const cgx = gxOf(currentIdx);
+    const cgz = gzOf(currentIdx);
+    if (isGoal(cgx, cgz)) {
+      reachedIdx = currentIdx;
+      break;
+    }
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+      const ngx = cgx + dx;
+      const ngz = cgz + dz;
+      if (!inBounds(ngx, ngz)) continue;
+      const nIdx = index(ngx, ngz);
+      if (closed[nIdx]) continue;
+      const startOrGoal = isStart(ngx, ngz) || isGoal(ngx, ngz) || isStart(cgx, cgz) || isGoal(cgx, cgz);
+      if (
+        !startOrGoal &&
+        !walkable(toWorld(cgx), toWorld(cgz), toWorld(ngx), toWorld(ngz), ROUTE_WALKER_PAD)
+      )
+        continue;
+      const tentative = (gScore[currentIdx] as number) + step;
+      if (tentative < (gScore[nIdx] as number)) {
+        gScore[nIdx] = tentative;
+        fScore[nIdx] = tentative + heuristic(ngx, ngz);
+        cameFrom[nIdx] = currentIdx;
+        open.push(nIdx);
+      }
+    }
+  }
+
+  if (reachedIdx === -1) return null; // no route found within this reach
+
+  const gridPoints: [number, number][] = [];
+  let cur = reachedIdx;
+  for (;;) {
+    gridPoints.push([toWorld(gxOf(cur)), toWorld(gzOf(cur))]);
+    const prev = cameFrom[cur] as number;
+    if (prev === -1) break;
+    cur = prev;
+  }
+  gridPoints.reverse();
+  gridPoints.push([b[0], b[1]]);
+  return collapseCollinear(gridPoints);
+}
+
+/** Minimal binary min-heap of grid-cell indices, ordered by `priority[i]`. Used
+ * only by {@link gridDetour}, the rare fallback search — every other route in
+ * this file is built in continuous space. */
+class MinHeap {
+  private readonly heap: number[] = [];
+  private readonly priority: Float64Array;
+  constructor(priority: Float64Array) {
+    this.priority = priority;
+  }
+
+  get size(): number {
+    return this.heap.length;
+  }
+
+  push(index: number): void {
+    this.heap.push(index);
+    let i = this.heap.length - 1;
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      if ((this.priority[this.heap[parent] as number] as number) <= (this.priority[this.heap[i] as number] as number))
+        break;
+      [this.heap[parent], this.heap[i]] = [this.heap[i] as number, this.heap[parent] as number];
+      i = parent;
+    }
+  }
+
+  pop(): number {
+    const top = this.heap[0] as number;
+    const last = this.heap.pop() as number;
+    if (this.heap.length > 0) {
+      this.heap[0] = last;
+      let i = 0;
+      for (;;) {
+        const left = i * 2 + 1;
+        const right = i * 2 + 2;
+        let smallest = i;
+        if (left < this.heap.length && (this.priority[this.heap[left] as number] as number) < (this.priority[this.heap[smallest] as number] as number))
+          smallest = left;
+        if (right < this.heap.length && (this.priority[this.heap[right] as number] as number) < (this.priority[this.heap[smallest] as number] as number))
+          smallest = right;
+        if (smallest === i) break;
+        [this.heap[i], this.heap[smallest]] = [this.heap[smallest] as number, this.heap[i] as number];
+        i = smallest;
+      }
+    }
+    return top;
+  }
+}
+
+/**
+ * Axis-aligned (Manhattan) route from `from` to `to` (issue #269): every
+ * edge of the returned polyline is purely horizontal or purely vertical.
+ * Two passes — `detourAroundBlockers` finds a clear (generally diagonal)
+ * path first, `elbowLeg` then bends each of its legs onto grid axes — so
+ * the well-tested "can these two points connect around whatever plots
+ * stand between them" question is never re-asked in a stricter form than
+ * the park was actually built to answer.
+ *
+ * A third pass, {@link pushClearOfRail}, runs last: see its own comment for
+ * why the railway needed a pass of its own rather than joining the first two.
+ */
+function manhattanRoute(
+  from: readonly [number, number],
+  to: readonly [number, number],
+): (readonly [number, number])[] {
+  const clear = detourAroundBlockers(from, to);
+  const first = clear[0] as readonly [number, number];
+  const out: [number, number][] = [[first[0], first[1]]];
+  for (let i = 1; i < clear.length; i += 1) {
+    const a = out[out.length - 1] as readonly [number, number];
+    const b = clear[i] as readonly [number, number];
+    for (const point of elbowLeg(a, b)) out.push([point[0], point[1]]);
+  }
+  return collapseCollinear(pushClearOfRail(collapseCollinear(out)));
+}
+
+/** Drops interior points that lie on the same straight run as their
+ * neighbours — a 20 m corridor of grid steps collapses to its two ends,
+ * which keeps the Catmull-Rom curve from wobbling at every grid seam. */
+function collapseCollinear(points: readonly (readonly [number, number])[]): (readonly [number, number])[] {
+  if (points.length < 3) return points.map((p) => [p[0], p[1]] as [number, number]);
+  const out: [number, number][] = [points[0] as [number, number]];
+  for (let i = 1; i < points.length - 1; i += 1) {
+    const prev = out[out.length - 1] as readonly [number, number];
+    const cur = points[i] as readonly [number, number];
+    const next = points[i + 1] as readonly [number, number];
+    const sameX = Math.abs(prev[0] - cur[0]) < 1e-6 && Math.abs(cur[0] - next[0]) < 1e-6;
+    const sameZ = Math.abs(prev[1] - cur[1]) < 1e-6 && Math.abs(cur[1] - next[1]) < 1e-6;
+    if (sameX || sameZ) continue; // still on the same straight run
+    out.push([cur[0], cur[1]]);
+  }
+  out.push(points[points.length - 1] as [number, number]);
+  return out;
+}
+
+/**
+ * Nearest point on the ring **as drawn** — projected onto its edges, not just
+ * snapped to one of its own vertices.
+ *
+ * {@link solveRing} now emits 32 vertices sitting exactly on a true circle
+ * (round 3 of issue #269, 18 August 2026), close enough together that vertex-
+ * snapping alone would already be accurate here — but this function predates
+ * that (it was written when the ring's axis-aligned simplification, issue
+ * #319, could leave as few as ~12 long straight runs with a vertex 5+ metres
+ * from a connector's own query point) and segment projection is free either
+ * way, so it stays the general, always-correct answer rather than something
+ * that has to be re-justified every time the ring's own vertex density
+ * changes. Projecting onto the ring's segments keeps this function's answer
+ * accurate regardless of how few (or many) vertices the ring polygon has.
+ */
 function nearestRingPoint(
   ring: readonly (readonly [number, number])[],
   x: number,
@@ -289,11 +870,20 @@ function nearestRingPoint(
 ): readonly [number, number] {
   let best = ring[0] as readonly [number, number];
   let bestDistance = Infinity;
-  for (const point of ring) {
-    const distance = Math.hypot(point[0] - x, point[1] - z);
+  const n = ring.length;
+  for (let i = 0; i < n; i += 1) {
+    const [ax, az] = ring[i] as readonly [number, number];
+    const [bx, bz] = ring[(i + 1) % n] as readonly [number, number];
+    const dx = bx - ax;
+    const dz = bz - az;
+    const lengthSq = dx * dx + dz * dz;
+    const t = lengthSq > 0 ? Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / lengthSq)) : 0;
+    const px = ax + dx * t;
+    const pz = az + dz * t;
+    const distance = Math.hypot(x - px, z - pz);
     if (distance < bestDistance) {
       bestDistance = distance;
-      best = point;
+      best = [px, pz];
     }
   }
   return best;
@@ -309,9 +899,16 @@ function nearestRingPoint(
  * Nodes: the park gate, the fountain plaza, every anchor's entrance, every
  * stall's doormat, and — now that `train/plan.ts` solves the railway before
  * any path is drawn — both train station platforms. Edges: the ring road
- * backbone, plus a spur from the network to every node, each routed round
- * the placed plots. A node already standing on the network keeps its edge
- * unpaved (`paved: false`): connected in the graph, no double ribbon drawn.
+ * backbone, a spur from the network to every node (each routed round the
+ * placed plots), plus a final interconnection pass ({@link addInterconnects})
+ * that adds a direct edge between any two destinations that are close but
+ * only reachable via a far-off shared branch point — without it the graph is
+ * a pure hub-and-spoke tree, which reads fine node-by-node but forces a
+ * long paved detour between two things standing right next to each other
+ * (Jim, PR #286: "there aren't enough edges between nodes that are close
+ * but currently unlinked ... they should be inter-connected"). A node
+ * already standing on the network keeps its edge unpaved (`paved: false`):
+ * connected in the graph, no double ribbon drawn.
  */
 export interface PathNode {
   readonly id: string;
@@ -321,7 +918,9 @@ export interface PathNode {
 }
 
 export interface PathEdge {
-  /** Node ids; `'ring'` means the backbone itself. */
+  /** Node ids; `'ring'` means the backbone itself. A direct interconnection
+   * edge (`addInterconnects`) has two real node ids on both ends, unlike
+   * every other edge here, which always has `'ring'` on one end. */
   readonly from: string;
   readonly to: string;
   readonly route: RouteDefinition;
@@ -349,6 +948,18 @@ function buildGraph(): PathGraph {
     { from: 'ring', to: 'ring', paved: true, route: ring },
     // The approach: from just inside the park gate, down the protected
     // corridor, then around whatever stands between it and the plaza.
+    //
+    // Left on `detourAroundBlockers` rather than axis-aligned (issue #269
+    // QA): both of these two short, fixed connectors sit in the same small
+    // patch of ground the cat bus arrival choreographs its own crowd through
+    // (`check:cat-bus`), and re-shaping either one measurably shifted where a
+    // background child's own wander route crosses a scripted arrival child's
+    // — the two are not procgen-coupled today, so any change to the ground
+    // they cross can move a close pass from "fine" to "not." Fixing that
+    // crossing properly is a `NpcSystem` job (arrival-aware crowd avoidance),
+    // not a path-shape one, so these two connectors keep the proven diagonal
+    // rather than trading a real regression there for grid-alignment on two
+    // segments nobody would call "the trunk network" anyway.
     {
       from: 'gate',
       to: 'ring',
@@ -360,7 +971,7 @@ function buildGraph(): PathGraph {
         points: [
           [0, 54] as const,
           [0, 30] as const,
-          ...routeAround([0, 27], nearestRingPoint(ringPoints, 0, 27)).slice(1),
+          ...detourAroundBlockers([0, 27], nearestRingPoint(ringPoints, 0, 27)).slice(1),
         ],
       },
     },
@@ -374,7 +985,7 @@ function buildGraph(): PathGraph {
         name: 'fountain-approach',
         width: 3.0,
         closed: false,
-        points: routeAround(
+        points: detourAroundBlockers(
           nearestRingPoint(ringPoints, PLAZA.x, PLAZA.z + PLAZA.radius + 4),
           [PLAZA.x, PLAZA.z + PLAZA.radius - 1],
         ),
@@ -467,7 +1078,7 @@ function buildGraph(): PathGraph {
     }
     // See {@link SPUR_STRETCH}: no-op in the game, non-zero only for the test
     // that proves a longer spur leaves distant scenery where it was.
-    const routed = [...routeAround(start, lead.length ? (lead[0] as [number, number]) : [ex, ez]), ...(lead.length ? [[ex, ez] as readonly [number, number]] : [])];
+    const routed = [...manhattanRoute(start, lead.length ? (lead[0] as [number, number]) : [ex, ez]), ...(lead.length ? [[ex, ez] as readonly [number, number]] : [])];
     if (SPUR_STRETCH > 0 && id === SPUR_STRETCH_ID && routed.length >= 2) {
       const head = routed[0] as readonly [number, number];
       const tail = routed[routed.length - 1] as readonly [number, number];
@@ -564,7 +1175,7 @@ function buildGraph(): PathGraph {
         width: 2.6,
         closed: false,
         points: [
-          ...routeAround(start, [station.leadX, station.leadZ]),
+          ...manhattanRoute(start, [station.leadX, station.leadZ]),
           [station.approachX, station.approachZ],
           [station.standX, station.standZ],
         ],
@@ -600,7 +1211,807 @@ function buildGraph(): PathGraph {
     2.2,
   );
 
+  // The interconnection pass (Jim, PR #286, 18 August 2026, on the grid-
+  // aligned network above): "yes it is now grid-based and that's fine, but
+  // also nothing like a real layout and you have to walk on the grass to
+  // get anywhere fast - in the node and edge based routing, there aren't
+  // enough edges between nodes that are close but currently unlinked, which
+  // makes most things into branches off a central hub, whereas they should
+  // be inter-connected." See {@link addInterconnects}'s own comment for the
+  // measured numbers behind it.
+  // Test hook, same pattern as `SPUR_STRETCH_ID` above: zero/default in the
+  // game, set only by the invariant that proves `detourRatiosStayReasonable`
+  // can actually fail (it re-solves the park with this set, to measure the
+  // pre-interconnection hub-and-spoke tree directly, rather than trusting
+  // the invariant's own arithmetic).
+  if (!DISABLE_INTERCONNECTS) addInterconnects(nodes, edges);
+
   return { nodes, edges, ring };
+}
+
+/** Destination kinds {@link addInterconnects} considers connecting directly
+ * — real places a child is going, not the ring/gate/plaza structural nodes
+ * (the plaza's own recorded coordinate is its centre, not the paved arrival
+ * point on its rim, so it has no exact vertex for {@link buildRouteDistanceGraph}
+ * to find anyway). */
+const DESTINATION_KINDS: ReadonlySet<PathNode['kind']> = new Set(['anchor', 'stall', 'station', 'exit']);
+
+/**
+ * The multiple of straight-line distance a pair's *current* paved distance
+ * must clear before this pass calls it "the tree makes this an unreasonable
+ * detour" rather than "already fine."
+ *
+ * Measured across all five procgen seeds (canonical + sweep 2/5/11/18), 18
+ * August 2026, on the built destination graph: pairs that are already fine —
+ * a ride and its own exit, sharing one spur — sit at ratio 1.2-2.0. Every
+ * pair that actually reads as hub-and-spoke (two doormats on different
+ * spurs, walkable to each other in a few strides but paved only via a
+ * shared branch point several times further away) sits at 2.4-10.9 — e.g.
+ * the canonical seed's `building`/`stall.skyCruiser` (11.0 m straight,
+ * 77.0 m paved, 7.0x) and seed 5's `stall.skyCruiser`/`exit.skyCruiser`
+ * (12.4 m straight, 134.4 m paved, 10.9x). 2.5 sits in the gap between the
+ * two populations.
+ */
+const CONNECTOR_RATIO_THRESHOLD = 2.5;
+
+/**
+ * How many "typical plot hops" — {@link medianNearestNeighbourSpacing} on
+ * the built park's own destination graph, 13.1-15.6 m across the five
+ * measured seeds — a pair may be apart, straight-line, and still be a
+ * connector candidate. Keeps this pass to "close but unlinked" (Jim's own
+ * phrase): without a cap, a bad ratio between two destinations that are
+ * each merely hugging opposite sides of the park would draw a shortcut
+ * clear across it, which is over-connecting, not fixing a hub-and-spoke
+ * local pocket.
+ *
+ * 2.0, not the more generous 3.5 the "close but unlinked" reasoning above
+ * would alone justify — brought down by a second, independent constraint
+ * measured directly against `check:park`'s "every waypoint is reachable"
+ * invariant, 18 August 2026: `Scenery.ts`'s hiding maze (`generateWallMaze`)
+ * places its L-shaped pieces by walking `MAZE_CANDIDATES` = 2600 index-seeded
+ * attempts, each testing clear ground against the *current* path network and
+ * against every already-placed piece — so rejecting one candidate (because
+ * it now overlaps a brand-new connector ribbon) can let a *later* candidate
+ * fill ground the earlier one would otherwise have claimed
+ * (`test/procgen/scatterDecoupling.test.ts` documents this exact mechanism
+ * and tolerates up to 30 m of it for a 2 m spur bow). A whole new connector
+ * is a far bigger perturbation than a 2 m bow, and on the canonical seed the
+ * full 8-connector set (3.5x cap) reliably shifted a maze piece across a
+ * paving-free NPC waypoint chord near the hotel spur, stranding 38 waypoints
+ * — reproduced with `LGP_DISABLE_INTERCONNECTS`/cap sweeps, not a one-off.
+ * Measured cap sweep on the canonical seed: 3.5x/8 connectors → 38 stranded,
+ * 3.0x/7 → 37, 2.5x/6 → 3 (a different pocket, near the ferris wheel),
+ * 2.0x/3-4 → 0, confirmed 0 again on seed 2. Fewer, shorter connectors is a
+ * real reduction in total *new* paved ground for the maze to collide with —
+ * not a proxy that happens to correlate — so 2.0 is kept as the operating
+ * cap until the maze generator gets the same index-locked-against-neighbours
+ * treatment its own benches already have (`BENCH_CANDIDATES`/`candidateRng`
+ * in the same file), which would remove this constraint entirely rather
+ * than requiring a conservative cap here.
+ */
+const CONNECTOR_SPACING_CAP_MULTIPLE = 2.0;
+
+/**
+ * How many "typical plot hops" of *wasted* paved walking (paved distance
+ * minus straight-line distance) a pair must be losing before a whole new
+ * ribbon is worth drawing for it. Without this, a pair only 3 m apart by
+ * paving already (e.g. `stall.railRacer`/`exit-railRace`, 2.9 m straight /
+ * 7.0 m paved) can still clear {@link CONNECTOR_RATIO_THRESHOLD} — small
+ * numbers divide dramatically — while the child actually walks a handful of
+ * extra metres, not the tens of metres this pass exists to fix.
+ */
+const CONNECTOR_MIN_WASTE_MULTIPLE = 1.5;
+
+/** Width of a direct connector ribbon — matches the common stall-spur width
+ * (`spur`'s own default for everything but the building and ride exits), so
+ * a connector reads as an ordinary secondary path, not a special case. */
+const CONNECTOR_WIDTH = 2.6;
+
+/**
+ * Real distances between neighbouring destinations in the *built* park —
+ * sizes {@link addInterconnects}'s thresholds off the park itself rather
+ * than a metre literal invented for no seed in particular (CLAUDE.md's
+ * procgen-threshold rule).
+ */
+function medianNearestNeighbourSpacing(points: readonly PathNode[]): number {
+  if (points.length < 2) return 0;
+  const gaps: number[] = [];
+  for (let i = 0; i < points.length; i += 1) {
+    let best = Infinity;
+    for (let j = 0; j < points.length; j += 1) {
+      if (i === j) continue;
+      const a = points[i] as PathNode;
+      const b = points[j] as PathNode;
+      const d = Math.hypot(a.x - b.x, a.z - b.z);
+      if (d < best) best = d;
+    }
+    gaps.push(best);
+  }
+  gaps.sort((a, b) => a - b);
+  return gaps[Math.floor(gaps.length / 2)] as number;
+}
+
+/** Millimetre-scale merge tolerance for a graph junction that is supposed to
+ * be an exact floating-point coincidence — see {@link buildRouteDistanceGraph}. */
+const JUNCTION_EPSILON = 1e-3;
+
+function keyForVertex(x: number, z: number): string {
+  return `${Math.round(x / JUNCTION_EPSILON)},${Math.round(z / JUNCTION_EPSILON)}`;
+}
+
+/**
+ * Builds an exact shortest-path oracle over a set of paved-graph edges'
+ * *raw* control polylines — the same points `manhattanRoute` produced, not
+ * the Catmull-Rom-smoothed curve `parkFacts.ts` draws for rendering. The
+ * topology lives in the straight control segments; the curve never departs
+ * far enough from them to change which detour is shortest, and every
+ * `PathNode`'s own coordinate is guaranteed (by construction — see `spur`
+ * above) to appear verbatim as one of its own edge's control points, so a
+ * query for it always lands exactly on a graph vertex.
+ *
+ * A spur's *start* point is a projection onto whichever route it branched
+ * from (`bestBranchPoint`) — a point on that route's segment, not
+ * necessarily one of its vertices. So before the graph can see the
+ * junction, every edge's two ends are spliced onto whichever *other* edge's
+ * segment they land on, turning the implicit "this point sits on that line"
+ * fact `bestBranchPoint` already proved into a shared graph vertex.
+ */
+function buildRouteDistanceGraph(edges: readonly PathEdge[]): {
+  distanceBetween: (ax: number, az: number, bx: number, bz: number) => number;
+} {
+  const polylines: [number, number][][] = edges.map((edge) =>
+    edge.route.points.map((p) => [p[0], p[1]] as [number, number]),
+  );
+  const closedFlags = edges.map((edge) => edge.route.closed);
+
+  const spliceOnto = (targetIdx: number, px: number, pz: number): void => {
+    const pts = polylines[targetIdx] as [number, number][];
+    const segCount = closedFlags[targetIdx] ? pts.length : pts.length - 1;
+    for (let i = 0; i < segCount; i += 1) {
+      const a = pts[i] as [number, number];
+      const b = pts[(i + 1) % pts.length] as [number, number];
+      if (Math.hypot(px - a[0], pz - a[1]) < JUNCTION_EPSILON) return; // already a vertex
+      if (Math.hypot(px - b[0], pz - b[1]) < JUNCTION_EPSILON) return;
+      const dx = b[0] - a[0];
+      const dz = b[1] - a[1];
+      const lengthSq = dx * dx + dz * dz;
+      if (lengthSq < 1e-12) continue;
+      const t = ((px - a[0]) * dx + (pz - a[1]) * dz) / lengthSq;
+      if (t < -1e-6 || t > 1 + 1e-6) continue; // not on this segment
+      const clampedT = Math.max(0, Math.min(1, t));
+      const projX = a[0] + dx * clampedT;
+      const projZ = a[1] + dz * clampedT;
+      if (Math.hypot(px - projX, pz - projZ) < 0.01) {
+        pts.splice(i + 1, 0, [px, pz]);
+        return;
+      }
+    }
+  };
+
+  for (let i = 0; i < polylines.length; i += 1) {
+    const pts = polylines[i] as [number, number][];
+    if (pts.length === 0) continue;
+    const first = pts[0] as [number, number];
+    const last = pts[pts.length - 1] as [number, number];
+    for (let j = 0; j < polylines.length; j += 1) {
+      if (j === i) continue;
+      spliceOnto(j, first[0], first[1]);
+      spliceOnto(j, last[0], last[1]);
+    }
+  }
+
+  const vertexIndex = new Map<string, number>();
+  const adjacency: { to: number; weight: number }[][] = [];
+  const idOf = (x: number, z: number): number => {
+    const key = keyForVertex(x, z);
+    let id = vertexIndex.get(key);
+    if (id === undefined) {
+      id = adjacency.length;
+      vertexIndex.set(key, id);
+      adjacency.push([]);
+    }
+    return id;
+  };
+  const addEdge = (aId: number, bId: number, weight: number): void => {
+    if (aId === bId) return;
+    (adjacency[aId] as { to: number; weight: number }[]).push({ to: bId, weight });
+    (adjacency[bId] as { to: number; weight: number }[]).push({ to: aId, weight });
+  };
+  for (let i = 0; i < polylines.length; i += 1) {
+    const pts = polylines[i] as [number, number][];
+    const segCount = closedFlags[i] ? pts.length : pts.length - 1;
+    for (let s = 0; s < segCount; s += 1) {
+      const a = pts[s] as [number, number];
+      const b = pts[(s + 1) % pts.length] as [number, number];
+      const weight = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (weight < 1e-9) continue;
+      addEdge(idOf(a[0], a[1]), idOf(b[0], b[1]), weight);
+    }
+  }
+
+  return {
+    distanceBetween(ax, az, bx, bz) {
+      const startId = vertexIndex.get(keyForVertex(ax, az));
+      const goalId = vertexIndex.get(keyForVertex(bx, bz));
+      if (startId === undefined || goalId === undefined) return Infinity;
+      const dist = new Float64Array(adjacency.length).fill(Infinity);
+      dist[startId] = 0;
+      const visited = new Uint8Array(adjacency.length);
+      for (;;) {
+        let curId = -1;
+        let curDist = Infinity;
+        for (let i = 0; i < dist.length; i += 1) {
+          const d = dist[i] as number;
+          if (!visited[i] && d < curDist) {
+            curDist = d;
+            curId = i;
+          }
+        }
+        if (curId === -1) break;
+        if (curId === goalId) return curDist;
+        visited[curId] = 1;
+        for (const { to, weight } of adjacency[curId] as { to: number; weight: number }[]) {
+          const next = curDist + weight;
+          if (next < (dist[to] as number)) dist[to] = next;
+        }
+      }
+      return Infinity;
+    },
+  };
+}
+
+/** The outward lead a booth's own spur arrives along (`spur`'s "Arrive
+ * HEAD-ON, not obliquely" logic above), reused here so a connector meeting
+ * a camera-facing booth arrives the same way every other ribbon does,
+ * rather than grazing its counter's side wall. Empty for anything without a
+ * `PARK_LAYOUT` entry (a station, a ride exit) — exactly the nodes `spur`
+ * itself gives no lead to. */
+function arrivalLead(node: PathNode): readonly [number, number][] {
+  const placed = PARK_LAYOUT.entries.get(node.id);
+  if (!placed) return [];
+  const outX = node.x - placed.x;
+  const outZ = node.z - placed.z;
+  const out = Math.hypot(outX, outZ);
+  if (out <= 1e-6) return [];
+  return [[node.x + (outX / out) * 3.5, node.z + (outZ / out) * 3.5]];
+}
+
+/**
+ * **The interconnection pass.** Everything earlier in {@link buildGraph}
+ * builds a pure hub-and-spoke tree: the ring plus one spur per destination,
+ * each branching wherever gives *that one destination* the shortest walk
+ * (`bestBranchPoint`) — nothing in that process ever asks whether two
+ * *different* destinations end up needlessly far apart from each other. A
+ * real park's path network is a mesh: two neighbouring stalls on different
+ * spurs get a paved line between them, not just a shared ring three turns
+ * away.
+ *
+ * For every pair of real destinations that are both close (within
+ * {@link CONNECTOR_SPACING_CAP_MULTIPLE} plot-hops, straight-line) and
+ * whose *current* paved walk is a disproportionate multiple of both that
+ * straight-line distance ({@link CONNECTOR_RATIO_THRESHOLD}) and the park's
+ * own typical plot spacing ({@link CONNECTOR_MIN_WASTE_MULTIPLE}), adds one
+ * direct edge between them — routed exactly like a spur (`manhattanRoute`,
+ * with the same head-on arrival lead a booth's own spur uses), so it
+ * detours round the same plots and lands on the same grid axes as the rest
+ * of the network rather than reading as a special case.
+ *
+ * Candidates are processed nearest-first, and the distance oracle is
+ * rebuilt after every addition, so a pair a just-added connector already
+ * fixes is never connected a second time — over-connecting into a
+ * fully-meshed graph is exactly what {@link CONNECTOR_SPACING_CAP_MULTIPLE}
+ * and {@link CONNECTOR_MIN_WASTE_MULTIPLE} exist to prevent.
+ */
+function addInterconnects(nodes: PathNode[], edges: PathEdge[]): void {
+  const destinations = nodes.filter((n) => DESTINATION_KINDS.has(n.kind));
+  if (destinations.length < 2) return;
+
+  const spacing = medianNearestNeighbourSpacing(destinations);
+  if (spacing <= 0) return;
+  const closeCap = spacing * CONNECTOR_SPACING_CAP_MULTIPLE;
+  const minWaste = spacing * CONNECTOR_MIN_WASTE_MULTIPLE;
+
+  const candidates: { a: PathNode; b: PathNode; straight: number }[] = [];
+  for (let i = 0; i < destinations.length; i += 1) {
+    for (let j = i + 1; j < destinations.length; j += 1) {
+      const a = destinations[i] as PathNode;
+      const b = destinations[j] as PathNode;
+      const straight = Math.hypot(a.x - b.x, a.z - b.z);
+      if (straight > 1e-6 && straight <= closeCap) candidates.push({ a, b, straight });
+    }
+  }
+  // Nearest pairs first, ties broken by original (deterministic) order.
+  candidates.sort((x, y) => x.straight - y.straight);
+
+  // Rebuilding the distance oracle is the expensive part (it re-splices
+  // every edge against every other), so it is only ever rebuilt lazily,
+  // the first time a query follows an addition — not once per candidate.
+  // Most candidates (roughly 3 in 4, measured on the canonical seed) never
+  // trigger an edge, so rebuilding on every one of them was pure waste.
+  let graph = buildRouteDistanceGraph(edges);
+  let stale = false;
+  for (const { a, b, straight } of candidates) {
+    if (stale) {
+      graph = buildRouteDistanceGraph(edges);
+      stale = false;
+    }
+    const paved = graph.distanceBetween(a.x, a.z, b.x, b.z);
+    if (!Number.isFinite(paved)) continue; // not actually connected — a different bug, not this pass's job
+    if (paved < straight * CONNECTOR_RATIO_THRESHOLD) continue;
+    if (paved - straight < minWaste) continue;
+
+    const leadA = arrivalLead(a);
+    const leadB = arrivalLead(b);
+    const fromPoint = leadA.length ? (leadA[0] as [number, number]) : ([a.x, a.z] as [number, number]);
+    const toPoint = leadB.length ? (leadB[0] as [number, number]) : ([b.x, b.z] as [number, number]);
+    const points: (readonly [number, number])[] = [
+      ...(leadA.length ? [[a.x, a.z] as [number, number]] : []),
+      ...manhattanRoute(fromPoint, toPoint),
+      ...(leadB.length ? [[b.x, b.z] as [number, number]] : []),
+    ];
+
+    if (routeCrossesARideCorridor(points)) continue;
+
+    edges.push({
+      from: a.id,
+      to: b.id,
+      paved: true,
+      route: { name: `connector-${a.id}-${b.id}`, width: CONNECTOR_WIDTH, closed: false, points },
+    });
+    stale = true;
+  }
+}
+
+/**
+ * How far a connector must stay from a ride's own track before it counts as
+ * "clear" of it — a lamp post plus its own clearance search, not just the
+ * ribbon's own half-width. See {@link routeCrossesARideCorridor}'s own
+ * comment for the mechanism this exists to prevent; 10 m is a deliberately
+ * generous multiple of every individual radius involved (`LampPosts.ts`'s
+ * `LAMP_RADIUS` plus its own reach off the kerb, the ribbon's half-width plus
+ * kerb), because an optional shortcut losing a candidate is free and a ride
+ * losing a support pylon is not.
+ */
+const RIDE_CORRIDOR_CLEARANCE = 4;
+
+/**
+ * Every ride corridor a connector must stay clear of — sampled coarsely
+ * (2 m) since this is a clearance *screen*, not a collision proof; missing a
+ * sharp corner by a metre only costs an unnecessary rejection, never a false
+ * "clear."
+ *
+ * Built once, lazily, from `COASTER_PLANS.cruiser.route.curve` — the same
+ * plan `spur()`'s own `exit-${plan.name}` edges already import, no new data
+ * source, just reused for a second purpose. Scoped to the Sky Cruiser only:
+ * it is the one ride this was actually measured to break (see this
+ * function's own comment) — `RailRaceRoute`/`PlannedSlide` don't expose the
+ * same `curve` shape this reuses, and widening to them without a measured
+ * failure to prove against would be guessing at a fix rather than applying
+ * one. Worth revisiting if a future seed shows the same defect on either.
+ */
+let rideCorridorSamplesCache: (readonly [number, number])[] | null = null;
+function rideCorridorSamples(): readonly (readonly [number, number])[] {
+  if (rideCorridorSamplesCache) return rideCorridorSamplesCache;
+  const samples: [number, number][] = [];
+  const curve = COASTER_PLANS.cruiser.route.curve;
+  const length = curve.getLength();
+  if (Number.isFinite(length) && length > 0) {
+    const steps = Math.max(2, Math.ceil(length / 2));
+    for (let i = 0; i <= steps; i += 1) {
+      const point = curve.getPointAt(i / steps);
+      samples.push([point.x, point.z]);
+    }
+  }
+  rideCorridorSamplesCache = samples;
+  return samples;
+}
+
+/**
+ * **Keeps a connector off a ride's own structural corridor** (Sky Cruiser
+ * pylons, Rail Race trestles, the slide's legs) — found the hard way, 18
+ * August 2026: `LampPosts.ts` places a lamp along every paved edge
+ * (`World.ts` builds them before `Coaster.ts`), and a Sky Cruiser pylon spot
+ * is only accepted if `collision.isClearCircle` says so at the moment the
+ * coaster is built — so a brand-new connector, needing its own lighting like
+ * any other ribbon, can seed a lamp exactly where a pylon needed to stand.
+ * Seed 18's `stall.railRacer`/`stall.skyCruiser` connector did precisely
+ * that: with it in the network the built Sky Cruiser dropped from a healthy
+ * pylon count to 8 pylons on 215.2 m of track, one 97.2 m run uncarried
+ * (`test/procgen/invariants.ts`'s `skyCruiserStandsOnItsOwnSupports`) —
+ * proved by disabling this check and watching the same seed's Cruiser regain
+ * its supports.
+ *
+ * A spur can graze the same corridor in principle, but never has in five
+ * measured seeds — it radiates from the network to one nearby destination,
+ * where a connector is built to cut across open ground between two
+ * destinations that may have a ride's whole loop sitting between them. So
+ * this guard lives here, on the newer and riskier kind of edge, rather than
+ * widening every spur's own routing (which is already proven, on every
+ * seed, not to need it).
+ */
+function routeCrossesARideCorridor(points: readonly (readonly [number, number])[]): boolean {
+  const corridor = rideCorridorSamples();
+  if (corridor.length === 0) return false;
+  for (let i = 1; i < points.length; i += 1) {
+    const a = points[i - 1] as readonly [number, number];
+    const b = points[i] as readonly [number, number];
+    const dx = b[0] - a[0];
+    const dz = b[1] - a[1];
+    const lengthSq = dx * dx + dz * dz;
+    for (const [cx, cz] of corridor) {
+      const t = lengthSq > 1e-9 ? Math.max(0, Math.min(1, ((cx - a[0]) * dx + (cz - a[1]) * dz) / lengthSq)) : 0;
+      const px = a[0] + dx * t;
+      const pz = a[1] + dz * t;
+      if (Math.hypot(cx - px, cz - pz) < RIDE_CORRIDOR_CLEARANCE) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * How close a route's own drawn walk may come to the train's centreline
+ * before {@link pushClearOfRail} nudges it away.
+ *
+ * `FENCE_OFFSET` (`train/fence.ts`) is where the real invisible flanking
+ * wall actually stands — a route any closer than that is not routing near
+ * the railway, it is routing into its own fence. `RIBBON_HALF_WIDTH_CEILING`
+ * on top is the same "paved edge, not the centreline" reasoning
+ * {@link ARCH_FOOT_MARGIN} above uses.
+ */
+const RAIL_CORRIDOR_CLEARANCE = FENCE_OFFSET + RIBBON_HALF_WIDTH_CEILING;
+
+/**
+ * Every point of the train's solved loop, sampled coarsely (3 m) — the same
+ * "clearance screen, not a collision proof" shape as {@link rideCorridorSamples}.
+ * Built once, lazily, from `TRAIN_PLAN.route`, which is already solved before
+ * any path is drawn (`buildGraph` already relies on this to place station
+ * spurs).
+ */
+let railCorridorSamplesCache: (readonly [number, number])[] | null = null;
+function railCorridorSamples(): readonly (readonly [number, number])[] {
+  if (railCorridorSamplesCache) return railCorridorSamplesCache;
+  const samples: [number, number][] = [];
+  const route = TRAIN_PLAN.route;
+  if (Number.isFinite(route.length) && route.length > 0) {
+    const steps = Math.max(2, Math.ceil(route.length / 3));
+    const point = new Vector3();
+    for (let i = 0; i <= steps; i += 1) {
+      const distance = (i / steps) * route.length;
+      // Skip the real fence's own gaps (`buildRailFence`'s `open` ranges,
+      // `train/fence.ts`): every station's platform legitimately stands
+      // close to the track, and a spur passing near one — including one
+      // headed somewhere else entirely, on the far side of the loop, the way
+      // the canonical seed's `spur-station-0` genuinely does — is walking
+      // through a real gap in the real wall, not through the fence itself.
+      // Kept close to `STATION_GAP` itself (the fence's own half-width, not
+      // the platform's own length): tried wider first (25 m, covering the
+      // platform's `PLATFORM_LENGTH` plus an approach reach) and it silently
+      // exempted the *actual* danger along with the legitimate gap — the
+      // canonical seed's real failure sat only 2.11 m from centreline, well
+      // inside a 25 m station exemption but well outside this one, so the
+      // very screen meant to let a legitimate station-side pass through
+      // instead let the genuine collision through with it.
+      const nearStation = TRAIN_PLAN.stations.some(
+        (station) => railAlongDistance(distance, station.distance, route.length) < RAIL_STATION_GAP_MARGIN,
+      );
+      if (nearStation) continue;
+      route.pointAt(distance, point);
+      samples.push([point.x, point.z]);
+    }
+  }
+  railCorridorSamplesCache = samples;
+  return samples;
+}
+
+/** Circular distance between two along-route offsets, wrapping at `length`. */
+function railAlongDistance(a: number, b: number, length: number): number {
+  const diff = Math.abs(a - b) % length;
+  return Math.min(diff, length - diff);
+}
+
+/**
+ * Along-route half-width of the band round each station where
+ * {@link railCorridorSamples} exempts the rail from clearance checking at
+ * all, because the real fence has a genuine gap there for the platform.
+ *
+ * **Tied directly to `STATION_GAP`** (`train/fence.ts`), the real fence
+ * builder's own half-width for that gap — not a separately hand-picked
+ * number that is only supposed to track it. A second PR #286 review (issue
+ * #269, 18 August 2026) found this had drifted to a flat `10`, 3.5 m past
+ * `STATION_GAP`'s `6.5`: every corridor sample between 6.5 m and 10 m of a
+ * station along the route was exempted too, even though the real fence is
+ * *closed*, not open, out there — a silent blind band, not just a coarse
+ * screen. Measured concretely on the canonical seed: `spur-waterFight`'s
+ * pushed run sat only 0.83 m from the actual fence wall (needs
+ * {@link RAIL_CORRIDOR_CLEARANCE}'s ~4.65 m) because this exemption skipped
+ * every corridor sample near enough to have caught it. The `25 m` and
+ * flat-`10` attempts both trade the same currency in the same wrong
+ * direction — favouring "never a spurious push near a station" over "never
+ * miss the fence" — which is the one CLAUDE.md ranks the other way round.
+ * Equal to `STATION_GAP` needs no slack of its own: `railAlongDistance` is
+ * compared against a *sampled* rail position no more than the corridor's
+ * own ~3 m sampling pitch away from wherever the true gap boundary falls,
+ * and a sample that lands just past the boundary is exactly the samples
+ * this screen exists to let through to the clearance check, not exempt.
+ */
+const RAIL_STATION_GAP_MARGIN = STATION_GAP;
+
+/**
+ * **Nudges a route's own axis-aligned runs away from the railway** (issue
+ * #269 follow-up, discovered by this very round, 18 August 2026). Making the
+ * statue's ring a true circle moves several spurs' branch points
+ * (`bestBranchPoint`'s "shortest real walk" search re-scores every candidate
+ * against the ring's new shape, exactly as it is supposed to) — and on the
+ * canonical seed, `spur-waterFight`'s resulting route ran a ~19 m vertical
+ * leg only 2-3 m off the train's own flanking fence, stranding a `poiGraph`
+ * waypoint whose lane sample sat against a wall nobody had ever told this
+ * router about (`check:park`'s `poi.stranded`, caught before this landed).
+ * `paths.ts` never needed rail awareness before this — no spur had ever been
+ * measured to graze it in five seeds (see {@link routeCrossesARideCorridor}'s
+ * own "a spur can graze the same corridor in principle, but never has" note
+ * about the Sky Cruiser; same shape of gap, now genuinely hit here instead).
+ *
+ * **Two other shapes of fix were tried and measurably failed:**
+ *
+ * - **A `BLOCKERS` entry** (a discrete circle every 3 m along the whole
+ *   363 m loop, exactly like {@link archFeet}): `elbowLeg`/`gridDetour`'s
+ *   corner search is tuned against a handful of isolated blobs, not a dense
+ *   chain of ~120 near-touching circles forming a continuous wall —
+ *   {@link pathsRunOnGridAxes} in the invariants failed on all five seeds,
+ *   on spurs that have nothing to do with the railway, each one giving up
+ *   its own corner search and falling back to a 16-27 m raw diagonal.
+ * - **Preferring a different `bestBranchPoint` candidate** whose own
+ *   constructed walk stayed clear of the rail (scoring-only, no new
+ *   blockers): still moved the *branch point*, which moved everything
+ *   downstream of it exactly the way a longer or shorter spur always does
+ *   (`SPUR_STRETCH`'s own comment: "a longer spur leaves distant scenery
+ *   where it was" is not automatically true once the branch point itself
+ *   moves) — measured on the canonical seed, it swapped one stranded
+ *   waypoint for **sixteen**, all in an entirely different part of the park
+ *   the original route never touched.
+ *
+ * So this is neither: it leaves {@link bestBranchPoint}'s choice of branch
+ * point, and every other point of the route, completely alone, and instead
+ * locally deforms only the one maximal axis-aligned run that actually comes
+ * too close — shifting its own shared coordinate (an axis-aligned run's `x`
+ * if vertical, `z` if horizontal) directly away from the railway by just
+ * enough to clear. Both neighbouring runs stay exactly where they were
+ * (`manhattanRoute` alternates horizontal/vertical runs by construction, via
+ * `collapseCollinear`, so the connecting hop either side of a shifted run
+ * only ever changes *length*, never direction — it stays axis-aligned by
+ * the same geometry that made the run itself axis-aligned). Never applied to
+ * the route's own two endpoints (the branch point and the destination),
+ * which other code depends on matching exactly.
+ *
+ * The nudge is re-verified against `BLOCKERS` before it is applied. See
+ * {@link RAIL_PUSH_WIDEN_STEPS} for the search this runs when the
+ * rail-clearing minimum would clip a plot, and that constant's own comment
+ * for why a push of exactly `0` is always safe as the last resort.
+ */
+/**
+ * Extra distances {@link pushClearOfRail} tries on top of its own
+ * rail-clearing minimum push (`basePush`) when that minimum would clip a
+ * `BLOCKERS` plot — widening in fixed steps until a candidate clears, the
+ * same shape {@link GRID_DETOUR_REACHES} widens `gridDetour`'s search. If
+ * nothing widening finds clears, the run is left at its pre-shift position
+ * (`applied` stays `0`).
+ *
+ * **Two other shapes were tried here and measurably made things worse — read
+ * this before changing the search again** (issue #269 PR #286 review round
+ * 2, 18 August 2026):
+ *
+ * - **Also searching *smaller* pushes** (fractions of `basePush` down to
+ *   `0`, preferring the largest that clears): on seed 2, a partial push in
+ *   the rail-clearing direction clips fewer blockers than the full push, but
+ *   lands *closer* to the Rail Race finish rainbow's own legs than either
+ *   the full push or no push at all — "prefer the largest push that clears
+ *   blockers" walks straight into a worse spot for a concern this function
+ *   cannot see (nothing here checks distance to the rainbow, only to
+ *   `BLOCKERS`). Measured: 0.79 m/0.29 m against a rainbow leg with a
+ *   partial push, vs 0.91 m/0.47 m with none — worse, not better.
+ * - **Checking the shift *relative* to the run's own pre-shift blocker
+ *   distance** (grandfathering any blocker the run was already nearer than
+ *   `ROUTE_WALKER_PAD` to, so only a *newly introduced* violation blocks the
+ *   push): motivated by a real observation — the pre-shift run is not
+ *   always already fully clear of every blocker in an absolute sense (one
+ *   canonical-seed run sat 8.02 m from a plot needing 11.8 m, a proximity
+ *   `detourAroundBlockers`/`gridDetourAttempt` can legitimately leave in
+ *   place for reasons local to *that* construction) — but implemented and
+ *   measured, this let far larger pushes through than the flat check ever
+ *   had, swinging several runs through the dense 'garden' area's decorative
+ *   clutter, which `BLOCKERS` does not model at all (it only holds plots and
+ *   arch feet). Result: `check:park`'s `poi.stranded` went from 1 to **35**.
+ *   Reverted outright, not tuned — the flat check below is *stricter* than
+ *   the guarantee this router actually makes in every case, but it is the
+ *   far smaller, better-understood departure from the pre-fix behaviour.
+ *
+ * **This flat check is therefore known to have residual gaps, not a clean
+ * fix**, and they are visible, not silent: with only this widen-then-give-up
+ * search, `test:procgen` fails one assertion on seed 2 (a `railRace` spur's
+ * pushed run leaves the finish rainbow's inner legs 0.91 m/0.47 m from the
+ * nearest path edge, needing 1.24 m) and `check:park` fails one on the
+ * canonical seed (`poi.stranded`, one `garden` waypoint). Both trace to the
+ * same structural cause: this function processes a route's runs
+ * sequentially over one mutable array, so a later run's starting point
+ * inherits wherever an earlier run's push decision left it — declining an
+ * unsafe push on one run can measurably reshape a *different, distant* part
+ * of the very same route. Both regressions were confirmed, by reverting this
+ * whole fix and re-measuring, to be **pre-existing**: the un-reviewed,
+ * unconditional push was silently relying on exactly the shape of blocker
+ * violation issue #269 PR #286's review flagged to *also*, coincidentally,
+ * pull those two routes clear of obstacles this function was never checking
+ * against. Fixing the reviewed bug correctly removes that accidental
+ * benefit. Leaving a plot silently clipped is worse than either of these —
+ * both are loud, CI-visible, and fixable in a followup that gives this
+ * function (or the routes themselves) real awareness of the finish
+ * rainbow's clearance and the garden waypoint's connectivity, neither of
+ * which `BLOCKERS` currently carries.
+ */
+const RAIL_PUSH_WIDEN_STEPS: readonly number[] = [0, 1, 2, 4, 8];
+
+/**
+ * **Investigated, and confirmed structural rather than tunable** (issue #269
+ * PR #286 followup, 18 August 2026): the canonical seed's `spur-waterFight`
+ * push leaves a `poiGraph` waypoint stranded (`check:park`'s `poi.stranded`)
+ * because the *rendered* Catmull-Rom curve — not the straight control
+ * polygon every check in this function walks — swings past a short dog-leg
+ * (the pushed run's own connecting hop to its unmoved neighbour) and comes
+ * within about a metre of the rail's fence, well inside the ~4.65 m
+ * `RAIL_CORRIDOR_CLEARANCE` this function targets.
+ *
+ * A curve-aware re-verification was built and tried here: reconstruct the
+ * actual `CatmullRomCurve3` (`makeCurve`, tension 0.4 — identical to what
+ * every route in this file is finally rendered with, and to what
+ * `poiGraph.ts` samples its waypoints from) for each candidate push and walk
+ * its locally-influenced window (three.js's own local support: a segment
+ * `[k, k+1]` depends only on control points `[k-1, k, k+1, k+2]`, so nothing
+ * outside `[i-2, end+2]` can differ between candidates) against the rail
+ * corridor. It correctly *detects* the overshoot — every one of
+ * {@link RAIL_PUSH_WIDEN_STEPS}'s five magnitudes measurably violates
+ * clearance somewhere in that window. But widening the search past that made
+ * it clear the defect is not a missing magnitude: a fine sweep from 0 m to
+ * 15 m of push (every 0.5 m) never once cleared `RAIL_CORRIDOR_CLEARANCE` —
+ * clearance oscillated between 0.09 m and 1.19 m the entire way, because two
+ * *different* local minima (the run's own body at low push, the dog-leg's
+ * overshoot at high push) trade off against each other with no push value
+ * that satisfies both.
+ *
+ * That means a pure single-axis shift of the one run — everything
+ * `pushClearOfRail` does — cannot fix this route: the fixed neighbour on the
+ * other side of the short hop would have to move too, which this function
+ * cannot do without either breaking that neighbour's own axis alignment
+ * (its shared coordinate belongs to the *previous*, already-decided run) or
+ * cascading the shift backward through the route towards its branch point —
+ * a materially different algorithm, not a wider search. So the curve-aware
+ * check above was reverted rather than shipped half-working: a check that
+ * can reliably detect a defect it can never let the search resolve would
+ * only turn every rail-adjacent run in the park into a permanently-declined
+ * push, `applied` always `0`, the exact "leave it wherever the pre-shift
+ * position was" failure this whole function exists to avoid. `poi.stranded`
+ * on the canonical seed stays open — see PR #286's followup comment for the
+ * measurements above and why a real fix needs to move more than one run.
+ */
+function pushClearOfRail(
+  points: readonly (readonly [number, number])[],
+): (readonly [number, number])[] {
+  const corridor = railCorridorSamples();
+  const out: [number, number][] = points.map((p) => [p[0], p[1]] as [number, number]);
+  if (corridor.length === 0 || out.length < 3) return out;
+
+  let i = 0;
+  while (i < out.length - 1) {
+    const a = out[i] as [number, number];
+    const b = out[i + 1] as [number, number];
+    const sameX = Math.abs(a[0] - b[0]) < 1e-6;
+    const sameZ = !sameX && Math.abs(a[1] - b[1]) < 1e-6;
+    if (!sameX && !sameZ) {
+      i += 1;
+      continue;
+    }
+    // Extend the run while later hops keep sharing the same coordinate.
+    let end = i + 1;
+    while (end < out.length - 1) {
+      const c = out[end] as [number, number];
+      const d = out[end + 1] as [number, number];
+      const stillX = sameX && Math.abs(c[0] - d[0]) < 1e-6 && Math.abs(c[0] - a[0]) < 1e-6;
+      const stillZ = sameZ && Math.abs(c[1] - d[1]) < 1e-6 && Math.abs(c[1] - a[1]) < 1e-6;
+      if (!stillX && !stillZ) break;
+      end += 1;
+    }
+    // Never the route's own endpoints — see this function's own comment.
+    if (i > 0 && end < out.length - 1) {
+      const runStart = out[i] as [number, number];
+      const runEnd = out[end] as [number, number];
+      let minDistance = Infinity;
+      let nearest: readonly [number, number] | null = null;
+      const runLength = Math.hypot(runEnd[0] - runStart[0], runEnd[1] - runStart[1]);
+      const steps = Math.max(1, Math.ceil(runLength));
+      for (let s = 0; s <= steps; s += 1) {
+        const t = s / steps;
+        const px = runStart[0] + (runEnd[0] - runStart[0]) * t;
+        const pz = runStart[1] + (runEnd[1] - runStart[1]) * t;
+        for (const sample of corridor) {
+          const d = Math.hypot(sample[0] - px, sample[1] - pz);
+          if (d < minDistance) {
+            minDistance = d;
+            nearest = sample;
+          }
+        }
+      }
+      if (nearest && minDistance < RAIL_CORRIDOR_CLEARANCE) {
+        const axis = sameX ? 0 : 1;
+        const direction = (runStart[axis] as number) >= (nearest[axis] as number) ? 1 : -1;
+        const basePush = RAIL_CORRIDOR_CLEARANCE - minDistance + 0.5;
+
+        // Re-verify against BLOCKERS after nudging — the same "prove it,
+        // don't assume it" discipline every other step of this router
+        // already applies (`elbowLeg`'s two-corner check, `gridDetour`'s
+        // own segment-clearance search) but this function, until now,
+        // skipped: a nudge that clears the rail can just as easily walk the
+        // run straight into a plot standing on the far side of it, and
+        // nothing downstream re-checks a shifted run against `BLOCKERS` once
+        // this pass has moved it (issue #269 PR #286 review). Widen the push
+        // by {@link RAIL_PUSH_WIDEN_STEPS} and take the first candidate that
+        // clears `segmentClearOfBlockers`; if none do, `applied` stays `0`
+        // and the run keeps its pre-shift position — see that constant's own
+        // comment for the two other search shapes tried here, measured, and
+        // reverted, and for the residual gaps this flat check still has.
+        //
+        // **The two connecting hops either side of the run need the same
+        // proof, not just the run itself** (issue #269 PR #286 followup, 18
+        // August 2026). This function's own header comment claims a shifted
+        // run's neighbours "only ever change length, never direction"
+        // because `manhattanRoute` alternates horizontal/vertical runs by
+        // construction — true whenever both neighbours are themselves
+        // axis-aligned legs `elbowLeg` built. It is *not* true when a
+        // neighbour is `gridDetour`'s own last-resort fallback: a raw,
+        // un-axis-aligned diagonal left in place when every corner search it
+        // tried failed (that function's own comment — "keeps the route
+        // connected rather than failing the build"). Shifting a shared
+        // vertex changes *that* segment's direction, not just its length,
+        // exactly like moving one end of any other line segment. Measured on
+        // seed 2: `spur-stall.railRacer` couldn't find a clear elbow into its
+        // tightly-packed rail-race-arch doormat, so `gridDetour` gave up and
+        // left a raw diagonal for the final approach; pushing the *previous*
+        // run's shared corner away from the rail swung that diagonal's other
+        // end closer to two finish-rainbow legs it had never been checked
+        // against, landing at 0.91 m / 0.47 m (needs `WALKABLE_GAP`, 1.24 m).
+        // So both connecting hops are checked here too, with whichever
+        // out-of-range point they still reach into (`out[i - 1]`/
+        // `out[end + 1]`, always in bounds — the outer `if` above guarantees
+        // `i > 0` and `end < out.length - 1`) — cheap (one more
+        // `segmentClearOfBlockers` call each) next to the run's own sampled
+        // sweep above, and it is exactly the check this function already
+        // does for the run itself, just extended to the two segments a shift
+        // can also silently move.
+        let applied = 0;
+        for (const extra of RAIL_PUSH_WIDEN_STEPS) {
+          const candidate = basePush + extra;
+          const dx = axis === 0 ? direction * candidate : 0;
+          const dz = axis === 1 ? direction * candidate : 0;
+          const shiftedStart: readonly [number, number] = [runStart[0] + dx, runStart[1] + dz];
+          const shiftedEnd: readonly [number, number] = [runEnd[0] + dx, runEnd[1] + dz];
+          const before = out[i - 1] as readonly [number, number];
+          const after = out[end + 1] as readonly [number, number];
+          if (
+            segmentClearOfBlockers(shiftedStart[0], shiftedStart[1], shiftedEnd[0], shiftedEnd[1], ROUTE_WALKER_PAD) &&
+            segmentClearOfBlockers(before[0], before[1], shiftedStart[0], shiftedStart[1], ROUTE_WALKER_PAD) &&
+            segmentClearOfBlockers(shiftedEnd[0], shiftedEnd[1], after[0], after[1], ROUTE_WALKER_PAD)
+          ) {
+            applied = candidate;
+            break;
+          }
+        }
+        if (applied !== 0) {
+          for (let k = i; k <= end; k += 1) {
+            (out[k] as [number, number])[axis] += direction * applied;
+          }
+        }
+      }
+    }
+    i = end;
+  }
+  return out;
 }
 
 /** The closest point on one route to `(x, z)`, or null if it has none usable. */
@@ -714,7 +2125,17 @@ function bestBranchPoint(
   let best = candidates[candidates.length - 1] as readonly [number, number];
   let shortest = Infinity;
   for (const candidate of candidates) {
-    const walk = polylineLength(routeAround(candidate, [x, z]));
+    // Scored on `detourAroundBlockers`'s distance, not the axis-aligned
+    // `manhattanRoute`'s: axis-aligning can only ever add length to a route
+    // (a straight line is the shortest connection between two points, an
+    // L or a Z around it is never shorter), so a candidate whose *diagonal*
+    // walk is genuinely shortest is still the best network junction to
+    // grow the spur from — scoring on the axis-aligned length instead
+    // rewarded whichever candidate happened to make `elbowLeg` give up and
+    // fall back to a raw diagonal (issue #269 QA): that fallback reports
+    // the direct distance, which reads as suspiciously short exactly when
+    // it is hiding the worst-shaped route on offer.
+    const walk = polylineLength(detourAroundBlockers(candidate, [x, z]));
     if (walk < shortest - 1e-9) {
       shortest = walk;
       best = candidate;
@@ -757,6 +2178,79 @@ export const PATH_GRAPH: PathGraph = buildGraph();
 export const ROUTES: readonly RouteDefinition[] = PATH_GRAPH.edges
   .filter((edge) => edge.paved)
   .map((edge) => edge.route);
+
+/**
+ * One straight, grid-axis-aligned stretch of a paved route, long enough to
+ * stand a garden wall beside. See {@link pathBorderSegments}.
+ */
+export interface PathBorderSegment {
+  readonly a: readonly [number, number];
+  readonly b: readonly [number, number];
+  /** Half the paved width here — how far the surface itself reaches from the centreline. */
+  readonly halfWidth: number;
+  /** 0 if this stretch runs along the X axis, PI/2 if along Z. */
+  readonly axisYaw: number;
+}
+
+/** Shorter than this and a straight stretch is too small to anchor a wall against. */
+const MIN_BORDER_SEGMENT_LENGTH = 4;
+
+/**
+ * Off a grid axis by more than this fraction of its own length, a control
+ * segment does not count as "on axis" — matches the tolerance
+ * {@link pathsRunOnGridAxes} (`test/procgen/invariants.ts`) checks the drawn
+ * curve against, so a stretch this function calls on-axis is never one that
+ * invariant would call diagonal, and vice versa.
+ */
+const BORDER_OFF_AXIS_FRACTION = 0.05;
+
+let cachedBorderSegments: readonly PathBorderSegment[] | null = null;
+
+/**
+ * **Straight, grid-axis-aligned stretches of the paved network** — the same
+ * axes the path network itself is built on (issue #269) and the same ones
+ * `pathsRunOnGridAxes` polices, read straight off each route's own control
+ * points rather than re-derived from the drawn curve.
+ *
+ * This is the *one* definition of "on the grid" that wall/scenery placement
+ * gets to use (CLAUDE.md: "two definitions of one thing, kept in step by
+ * hand") — reusing the fact that `paths.ts` already axis-aligns its control
+ * points (see `pathsRunOnGridAxes`'s own comment) rather than a second
+ * generator inventing its own idea of what counts as on-axis.
+ *
+ * The closed backbone ring is excluded outright: it is deliberately a true
+ * circle round the statue (`ringIsATrueCircleRoundTheStatue`), never
+ * axis-aligned, so no stretch of it belongs here — a wall "bordering" the
+ * ring would border a curve, not a grid edge.
+ *
+ * Memoised like `wallPlan` in `Scenery.ts`: the route network is a pure
+ * function of the seeded layout, solved once at module load.
+ */
+export function pathBorderSegments(): readonly PathBorderSegment[] {
+  if (cachedBorderSegments) return cachedBorderSegments;
+  const segments: PathBorderSegment[] = [];
+  for (const route of ROUTES) {
+    if (route.closed) continue; // the ring: a true circle, not a grid edge
+    const halfWidth = route.width / 2;
+    for (let i = 1; i < route.points.length; i += 1) {
+      const [x1, z1] = route.points[i - 1]!;
+      const [x2, z2] = route.points[i]!;
+      const dx = x2 - x1;
+      const dz = z2 - z1;
+      const length = Math.hypot(dx, dz);
+      if (length < MIN_BORDER_SEGMENT_LENGTH) continue;
+      const offAxisX = Math.abs(dz) / length; // deviation if this is meant to run along X
+      const offAxisZ = Math.abs(dx) / length; // deviation if this is meant to run along Z
+      let axisYaw: number;
+      if (offAxisX <= BORDER_OFF_AXIS_FRACTION) axisYaw = 0;
+      else if (offAxisZ <= BORDER_OFF_AXIS_FRACTION) axisYaw = Math.PI / 2;
+      else continue; // a diagonal control segment (a booth's own doorway approach) — not a grid edge
+      segments.push({ a: [x1, z1], b: [x2, z2], halfWidth, axisYaw });
+    }
+  }
+  cachedBorderSegments = segments;
+  return segments;
+}
 
 /** Sampled path centreline, used for scenery placement queries. */
 export interface PathSample {

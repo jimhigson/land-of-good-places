@@ -31,10 +31,11 @@ export interface AnchorDefinition {
   /**
    * Yaw in radians the sign faces. 0 looks down +Z.
    *
-   * These all sit near +45°, which is the one fixed angle the camera ever
+   * Exactly `CAMERA_FACING_YAW` (45°), the one fixed angle the camera ever
    * looks from (ARCHITECTURE.md, "One camera angle, forever") — a sign facing
-   * any other way is one a child simply cannot read. Small per-anchor
-   * variation stops them looking like a row of billboards.
+   * any other way is one a child simply cannot read. Every anchor gets the
+   * same exact yaw (issue #269: axis-aligned to the camera, not an arbitrary
+   * per-anchor rotation).
    */
   readonly signYaw: number;
   readonly signTitle: string;
