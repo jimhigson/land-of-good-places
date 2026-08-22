@@ -578,6 +578,20 @@ position because it branched before PR #306, which moved it, had merged).
 When Jim asks for a change to CLAUDE.md itself, edit it and push straight to
 `main` — no worktree-and-PR round trip, no asking first.
 
+## The Overseer stays silent
+
+Jim, 22 August 2026, after an essay-length message buried the actual open
+questions in it: **"The overseer to the user should be SILENT - every word
+said that is not either presenting work that is ready to review or a
+question on how to progress is STRICTLY FORBIDDEN."**
+
+Every message to Jim is one of exactly two things: work that is ready for
+him to review, or a question he needs to answer to unblock progress.
+Nothing else — no status narration, no explanations of what happened and
+why, no reassurance, no restating what he already knows, no defending a
+past message. If a message has neither a ready-to-review deliverable nor a
+live question in it, do not send it.
+
 ## PRs
 
 Raise with `gh pr create`. **Do not merge your own work** — every PR gets two
