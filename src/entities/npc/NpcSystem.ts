@@ -134,7 +134,7 @@ const NPC_SEED = 20260726;
  * children at once; but it was never a bus bug, and raising it here fixes the
  * same overlap wherever two children happen to meet.
  */
-const SEPARATION = CHILD_FOOTPRINT;
+export const SEPARATION = CHILD_FOOTPRINT;
 
 /**
  * Closer than this and a child pushes gently apart from the player instead of
