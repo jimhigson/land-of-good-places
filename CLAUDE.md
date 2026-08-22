@@ -101,6 +101,29 @@ assertion to make a seed pass — swap the seed and write down why.
 is not optional. It complements `check:park`, which owns whether the park
 *works*; this owns whether its furniture is *placed sanely*.
 
+## Procgen backtracks on collision, always
+
+Jim, 22 August 2026, on the bridge planner clamping to a hard-coded minimum
+width and shipping a known-too-close edge rather than finding a placement
+that actually clears: **"the procgen should backtrack on collisions and make
+some different decisions until it works - literally the same way the procgen
+always works."** This is the standing rule for every generator in this
+codebase, not a one-off fix for bridges: on a real collision, try a different
+decision — a different width, position, or orientation, clearing a movable
+obstacle the way pylon placement fells foliage, or as a last resort falling
+back to a simpler alternative (a level crossing instead of a bridge) — never
+shrink to a floor and accept a result that still doesn't clear.
+
+**Because every feature generates step by step at the same time, not one
+system finishing before the next starts, "backtrack" means checking the real
+collision world as it stands at that moment, not just the two or three
+obstacle classes a given generator happens to know about by name.** A
+generator that only checks itself against a hand-picked obstacle list will
+silently miss whatever a sibling system placed there — the exact shape of
+issues #317 and #319. If a generator in this codebase does not yet backtrack
+this way, that is a bug in the generator: refactor it until it does, rather
+than documenting the gap as a known limitation.
+
 ## A check can pass without checking anything
 
 Most of what cost us 5 August 2026 was one disease in different organs: **an
