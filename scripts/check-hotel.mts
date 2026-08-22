@@ -2669,6 +2669,66 @@ if (furnitureWallEmbeds.length > 0) {
 }
 for (const graze of furnitureWallGrazes) console.log(`  ~ ${graze}`);
 
+// ---------- 28. the disco ball doesn't overlap the statue, the chandelier,
+// the staircase, or the overhang above it
+
+// Issue #305, 19 Aug 2026: Jim, playing — "the disco ball in the hotel
+// lobby overlaps the statue's head." It had hung on the statue's own axis
+// since 7 August, and going 3x size that same day is what turned "above
+// her" into "through her" — nothing checked the two real meshes against
+// each other, so a size change with no position change silently became a
+// visual bug nobody caught until a six-year-old's dad walked up to it.
+// Moved to `DISCO_Z`, between the two staircase flights (`Hotel.dressLobby`'s
+// own comment there has the real numbers this probe re-derives). This is the
+// mechanism that keeps it there: it measures the **built** meshes' own
+// boxes — the same method that found the new spot — so a future change to
+// any of these fixtures' positions or sizes that reintroduces an overlap
+// fails loudly instead of shipping unseen (CLAUDE.md: "a mesh a child can
+// see... is the same disease as a check that cannot fail").
+//
+// Scoped to named top-level meshes inside the lobby shell rather than a
+// second copy of the arc/offset arithmetic that placed them — asking the
+// real geometry is what makes this probe unable to agree with a stale
+// comment the way the arithmetic could.
+function namedDescendantBox(root: Object3D, name: string): Box3 | undefined {
+  let found: Object3D | undefined;
+  root.traverse((object) => {
+    if (!found && object.name === name) found = object;
+  });
+  return found ? new Box3().setFromObject(found) : undefined;
+}
+
+let discoNeighboursChecked = 0;
+const lobbyShellForDisco = hotel.hotelRoot.children.find(
+  (child) => child.name === `hotel:${LOBBY.space}`,
+);
+if (!lobbyShellForDisco) {
+  problems.push('probe 28: no lobby shell found to check the disco ball in');
+} else {
+  lobbyShellForDisco.updateMatrixWorld(true);
+  const discoBallBox = namedDescendantBox(lobbyShellForDisco, 'hotel.discoBall');
+  const discoNeighbours: readonly (readonly [string, Box3 | undefined])[] = [
+    ['the RiPika statue', namedDescendantBox(lobbyShellForDisco, 'prop.ripikaStatue')],
+    ['the chandelier', namedDescendantBox(lobbyShellForDisco, 'hotel.chandelier')],
+    ['the right stair flight', namedDescendantBox(lobbyShellForDisco, 'hotel.grandStaircase.right')],
+    ['the left stair flight', namedDescendantBox(lobbyShellForDisco, 'hotel.grandStaircase.left')],
+    ['the straight stair flight', namedDescendantBox(lobbyShellForDisco, 'hotel.straightStaircase')],
+    ['the gallery/landing overhang', namedDescendantBox(lobbyShellForDisco, 'hotel:lobby/overhang')],
+  ];
+  discoNeighboursChecked = discoNeighbours.length;
+  if (!discoBallBox) {
+    problems.push("probe 28: no mesh named 'hotel.discoBall' found in the lobby to check");
+  } else {
+    for (const [label, box] of discoNeighbours) {
+      if (!box) {
+        problems.push(`probe 28: no mesh found for ${label} to check the disco ball against`);
+      } else if (discoBallBox.intersectsBox(box)) {
+        problems.push(`probe 28: the disco ball's real box overlaps ${label}'s real box`);
+      }
+    }
+  }
+}
+
 // ----------------------------------------------------------------- report
 
 console.log(
@@ -2678,7 +2738,8 @@ console.log(
     `${panes}/${declared} declared window panes built; ${occlusionReport}; ` +
     `${crossingsChecked} doorway crossing marches, ${crossingFailures.length} fell short; ` +
     `${furnitureWallPairsChecked} furniture-vs-wall pairs, ${furnitureWallEmbeds.length} embedded, ` +
-    `${furnitureWallGrazes.length} grazed (warnings).`,
+    `${furnitureWallGrazes.length} grazed (warnings); ` +
+    `disco ball checked against ${discoNeighboursChecked} lobby fixtures.`,
 );
 
 if (problems.length > 0) {
