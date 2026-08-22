@@ -127,6 +127,18 @@ export class World implements GameSystem {
       this.building.surfaces,
       { camera, clock: () => this.dayNight.timeOfDay },
     );
+    // The hotel's exterior tap target (`hotel-entrance`) reaches out from the
+    // tower's true centre as far as the map pin at `entranceX`/`entranceZ` —
+    // deliberately wide, per `Hotel.exteriorEntranceZone`'s own doc comment,
+    // so a tap on the pin always finds it. The meadow was already planted
+    // (built above) with no knowledge of that reach, so on a seed where the
+    // pin sits far from the tower a flower can land inside the zone's own
+    // pick radius (PR #315, seed 18: `hotel-entrance` and a flower 0.33 m
+    // apart, inside the tap-spacing clearance). Same pattern as the train
+    // stations and the welcome sign (#303): tell the meadow after the fact
+    // and let it replant anything caught underneath, rather than shrinking
+    // the zone back down and losing the pin's reachability fix.
+    this.flowers.keepClearOfTapZones(this.hotel.interactZones());
     // The water-fight garden's shop window: takes the "coming soon" sign off the
     // `waterFight` plot and lays it out as a water-fight corner — pools, hedges,
     // a sprinkler and a rack of very big water guns. The fight itself is a
