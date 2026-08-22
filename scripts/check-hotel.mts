@@ -88,13 +88,21 @@ import {
   SUITE,
   SUITE_BEDSIDE_X,
   SUITE_BEDSIDE_Z,
+  SUITE_BEDSIDE_RADIUS,
   SUITE_BED_SPOTS,
+  SUITE_BED_HALF_X,
+  SUITE_BED_HALF_Z,
   SUITE_DOOR_WIDTH,
+  petBedSlots,
+  PET_BED_FOOTPRINT_RADIUS,
+  clearFloorAround,
+  doorwayClearanceZones,
   relativeLuminance,
   THEME_FLOOR_CONTRAST_MIN,
   mezzanineGuardedEdges,
   mezzanineHidesPoint,
 } from '../src/world/hotel/layout.ts';
+import { isClearOfDoorways } from '../src/world/hotel/place.ts';
 import { ZONE_HEIGHT_TOLERANCE, pickInteractZone } from '../src/world/interact.ts';
 import { cameraOffset } from '../src/core/cameraRig.ts';
 import { segmentsMinusGaps } from '../src/world/wallRuns.ts';
@@ -330,6 +338,99 @@ for (const [index, spot] of SUITE_BED_SPOTS.entries()) {
       `${what} is boxed in at (${spot[0]}, ${spot[1]}) — solid within 1.3 m on both sides, so it ` +
         `is standing in a partition rather than in a bedroom`,
     );
+  }
+}
+
+// ------------------------------------------ 3b. every pet bed slot is usable
+//
+// Issue #275: a small pet bed for every pet she owns, one per
+// `layout.ts`'s `petBedSlots(count)` slot. `store.ts` puts **no ceiling** on
+// how many pets a child can own, so review on #279 found the original
+// hand-typed, fixed-length slot list placing every pet past its own length
+// at the exact same coordinates as the last slot — identical, overlapping
+// bed and pet meshes, not graceful degradation. This checks the function
+// itself at several counts, including well past the shop's four species —
+// 1 (the fresh-save fallback), 8 (what the review specifically asked to be
+// exercised), 20 (well into the bedroom's real 27-slot capacity — 28 raw
+// tile positions, minus one `clearsDoorways` throws out for grazing the hall
+// doorway's own zone at this room's geometry) and 30 (past that capacity,
+// proving the cap degrades by drawing *fewer* beds than requested rather
+// than by overlapping two of them) — proving by pure
+// geometry, for every count, that no two returned slots coincide or
+// overlap, every slot clears the human bed, its bedside table and every
+// doorway, and every slot stays on the bedroom's own real floor (derived
+// the same way `Hotel.dressPetBeds` derives it — `clearFloorAround`, never
+// a hand-typed wall position, so a future move of the bedroom's own walls
+// cannot go unnoticed here either).
+{
+  const doors = doorwayClearanceZones(SUITE, PLAYER_RADIUS);
+  const humanBed = SUITE_BED_SPOTS[1] ?? [0, 0];
+  const bedsideX = SUITE_BEDSIDE_X[1] ?? 0;
+
+  for (const count of [1, 8, 20, 30]) {
+    const slots = petBedSlots(count);
+    if (slots.length > count) {
+      problems.push(`petBedSlots(${count}) returned ${slots.length} slots — more than asked for`);
+      continue;
+    }
+    if (slots.length < count && count <= 27) {
+      problems.push(
+        `petBedSlots(${count}) returned only ${slots.length} slots, short of the bedroom's own ` +
+          `27-slot capacity (28 raw tile positions minus one doorway-zone reject) — a slot ` +
+          `generator regression, not real capacity`,
+      );
+    }
+    for (const [index, slot] of slots.entries()) {
+      const { x, z } = slot;
+      const bounds = { x, z, radius: PET_BED_FOOTPRINT_RADIUS };
+      if (!isClearOfDoorways(bounds, doors)) {
+        problems.push(
+          `petBedSlots(${count})[${index}] at local (${x.toFixed(2)}, ${z.toFixed(2)}) sits ` +
+            `inside a doorway's clearance zone — a bed there would leave the hall too narrow to use`,
+        );
+      }
+      // Clear of the bedroom's own real floor — the two partitions either
+      // side of it, derived exactly the way `petBedSlots` itself derives
+      // them, not a copy of their positions.
+      const rect = clearFloorAround(SUITE, 0, z);
+      if (x - PET_BED_FOOTPRINT_RADIUS < rect.minX || x + PET_BED_FOOTPRINT_RADIUS > rect.maxX) {
+        problems.push(
+          `petBedSlots(${count})[${index}] at local (${x.toFixed(2)}, ${z.toFixed(2)}) reaches ` +
+            `past the bedroom's own wall (clear floor is ${rect.minX.toFixed(2)}…${rect.maxX.toFixed(2)})`,
+        );
+      }
+      // Clear of the human bed ({@link SUITE_BED_HALF_X}/{@link SUITE_BED_HALF_Z}
+      // half-extents) and its bedside table ({@link SUITE_BEDSIDE_RADIUS}),
+      // both at z ≈ SUITE_BEDSIDE_Z — the same three numbers `dressSuite`
+      // itself places them with, not a fresh copy (review on #279 found this
+      // probe's first draft hardcoding its own 0.7/1/0.36).
+      const bedDX = Math.max(Math.abs(x - humanBed[0]) - SUITE_BED_HALF_X, 0);
+      const bedDZ = Math.max(Math.abs(z - humanBed[1]) - SUITE_BED_HALF_Z, 0);
+      if (Math.hypot(bedDX, bedDZ) < PET_BED_FOOTPRINT_RADIUS) {
+        problems.push(
+          `petBedSlots(${count})[${index}] at local (${x.toFixed(2)}, ${z.toFixed(2)}) overlaps ` +
+            `the human bed`,
+        );
+      }
+      if (Math.hypot(x - bedsideX, z - SUITE_BEDSIDE_Z) < PET_BED_FOOTPRINT_RADIUS + SUITE_BEDSIDE_RADIUS) {
+        problems.push(
+          `petBedSlots(${count})[${index}] at local (${x.toFixed(2)}, ${z.toFixed(2)}) overlaps ` +
+            `its bedside table`,
+        );
+      }
+      // Clear of every other slot at this same count — the actual bug #279's
+      // review found: every pet past the list's own length landing on top
+      // of the last one.
+      for (const other of slots.slice(index + 1)) {
+        if (Math.hypot(x - other.x, z - other.z) < PET_BED_FOOTPRINT_RADIUS * 2) {
+          problems.push(
+            `petBedSlots(${count}) has two slots within ${(PET_BED_FOOTPRINT_RADIUS * 2).toFixed(2)} m ` +
+              `of each other, at (${x.toFixed(2)}, ${z.toFixed(2)}) and ` +
+              `(${other.x.toFixed(2)}, ${other.z.toFixed(2)}) — their beds would overlap`,
+          );
+        }
+      }
+    }
   }
 }
 
@@ -1350,12 +1451,98 @@ if (fallenPlayer.position.y < 0) {
         );
       }
 
+      // **Issue #275: the pets go to sleep too, all together.** Every pet
+      // bed's pet should now be lying down — `Hotel.layPetDown`'s rotation,
+      // read off the public `petBeds` list rather than re-derived here.
+      for (const { pet, x } of hotel.petBeds) {
+        if (Math.abs(pet.root.rotation.x + Math.PI / 2) > 0.01) {
+          problems.push(
+            `a pet bed's pet at local x=${x} is not lying down while the player naps — issue ` +
+              `#275 wants every pet asleep too`,
+          );
+        }
+      }
+
       // Hand the room back the way the earlier probes left it: one giant tick
-      // outlasts any nap.
+      // outlasts any nap. The pets should stand back up with it.
       hotel.update({ dt: 999, elapsed: 0 } as never);
+      for (const { pet, x } of hotel.petBeds) {
+        if (Math.abs(pet.root.rotation.x) > 0.01) {
+          problems.push(`a pet bed's pet at local x=${x} did not wake back up when the nap ended`);
+        }
+      }
       scene.remove(napper.group);
     }
   }
+}
+
+// ---------------- 16b. every bed's own nap has a sleeping pet she can see
+//
+// Jim, live play, 18 Aug 2026, from `/hotel-suite`: *"the pet didn't get into
+// any bed when I did [went to sleep]."* Root cause: every pet bed used to
+// live only in the middle bedroom (`SUITE_BED_SPOTS[1]`'s room). `Hotel.nap`
+// really did lay every pet down — probe 16 above proves the rotation flips —
+// but `Hotel.enterSuite`'s own doc comment has her reaching **bedroom 1's**
+// door first, not bedroom 2's, and a 2.2 m partition plus the fixed camera's
+// field of view put bedroom 2 nowhere in frame from bedroom 1 or bedroom 3.
+// The data changed; nothing she was looking at did — which reads as exactly
+// what she reported, and probe 16 stayed green through it the whole time
+// because it only ever checks bed 0's rotation numbers, never whether bed
+// 0's own room has a pet bed in it at all.
+//
+// So this asks that question directly, for **all three** beds: run each
+// bed's own real Sleep action, then require at least one pet in the public
+// `hotel.petBeds` list to be both lying down and standing on *that bed's
+// own* real clear floor (`clearFloorAround` — the same rectangle the room's
+// actual walls build, not a hand-typed span) — i.e. visibly in the room she
+// is in, not merely somewhere in the data.
+//
+// Proven red on the pre-fix build (pet beds only ever in bedroom 2): bed 0's
+// own floor is x -14.55…-8.20 and every pet bed sat at x ≈ -2.39, so no pet
+// bed's a chair the bedroom 0 checkist would ever have counted as "in this
+// room" — likewise for bed 2's floor at x 7.40…14.55.
+{
+  const napper2 = quietly(
+    () => new Player(collision, new IsoCamera(), new Vector3(SUITE.originX, 0, SUITE.originZ)),
+  );
+  scene.add(napper2.group);
+  hotel.attachPlayer(napper2 as never);
+  hotel.adoptRestoredPlayer();
+
+  for (const bedIndex of [0, 1, 2] as const) {
+    const spot = SUITE_BED_SPOTS[bedIndex];
+    if (!spot) {
+      problems.push(`SUITE_BED_SPOTS has no entry ${bedIndex}`);
+      continue;
+    }
+    const bedZone = hotel.interactZones().find((zone) => zone.id === `hotel-bed-bed-${bedIndex}`);
+    const sleep = bedZone?.actions?.()[0];
+    if (!sleep) {
+      problems.push(`bed ${bedIndex} offers no Sleep action for the visible-pet check`);
+      continue;
+    }
+    sleep.run();
+
+    const room = clearFloorAround(SUITE, spot[0], spot[1]);
+    const visible = hotel.petBeds.some(({ pet, x, z }) => {
+      const lying = Math.abs(pet.root.rotation.x + Math.PI / 2) < 0.01;
+      const inThisRoom = x >= room.minX && x <= room.maxX && z >= room.minZ && z <= room.maxZ;
+      return lying && inThisRoom;
+    });
+    if (!visible) {
+      problems.push(
+        `napping at bed ${bedIndex} (its own room floor is local x ${room.minX.toFixed(2)}…` +
+          `${room.maxX.toFixed(2)}, z ${room.minZ.toFixed(2)}…${room.maxZ.toFixed(2)}) lies every ` +
+          `pet down somewhere, but none of them is on that bedroom's own floor — a child sleeping ` +
+          `there sees no pet go to bed at all (issue #275, live-play regression)`,
+      );
+    }
+
+    // One giant tick ends the nap before the next bed's turn — same idiom as
+    // probe 16's own hand-back.
+    hotel.update({ dt: 999, elapsed: 0 } as never);
+  }
+  scene.remove(napper2.group);
 }
 
 // --------------------------------- 15. the walls abut: no notch at any corner

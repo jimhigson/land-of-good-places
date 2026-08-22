@@ -908,6 +908,48 @@ export function napBlanket(colour: number): Group {
   return group;
 }
 
+/**
+ * A flat "Z" — the little sleep glyph that rises and fades off a napping
+ * sleeper (issue #279's follow-up, Jim: *"animated z symbols float off the
+ * player and all their pets"*).
+ *
+ * Traced as one ten-point outline, the same construction `flatStar` and
+ * `floorChevron` use for exactly the same reason: a real shape reads as a
+ * "Z" at a glance, where three thin boxes stacked and rotated would read as
+ * three thin boxes until you squinted. Front on **+Z**, unrotated, per this
+ * file's own rule. `transparent: true` because `Hotel.updateNapGlyphs`
+ * fades each instance's own `material.opacity` as it rises — every glyph
+ * gets its **own** material rather than a shared one for exactly that reason,
+ * so one glyph mid-fade never dims its neighbours.
+ */
+export function napZGlyph(size: number, colour: number): Mesh {
+  const half = size / 2;
+  const stroke = size * 0.34;
+  const shape = new Shape();
+  shape.moveTo(-half, half);
+  shape.lineTo(half, half);
+  shape.lineTo(half, half - stroke);
+  shape.lineTo(-half + stroke, -half + stroke);
+  shape.lineTo(half, -half + stroke);
+  shape.lineTo(half, -half);
+  shape.lineTo(-half, -half);
+  shape.lineTo(-half, -half + stroke);
+  shape.lineTo(half - stroke, half - stroke);
+  shape.lineTo(-half, half - stroke);
+  shape.closePath();
+  return decal(
+    new Mesh(
+      new ShapeGeometry(shape),
+      toonMaterial(colour, {
+        emissive: colour,
+        emissiveIntensity: 0.6,
+        transparent: true,
+        depthWrite: false,
+      }),
+    ),
+  );
+}
+
 /** The flat top of a buffet counter, metres — the reception desk's own height. */
 export const BUFFET_TOP = 1.02;
 

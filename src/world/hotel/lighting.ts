@@ -1,5 +1,6 @@
 import { DirectionalLight, Group, HemisphereLight, PointLight } from 'three';
 import { PALETTE } from '../../core/palette';
+import { clamp01, lerp } from '../../core/mathUtils';
 import { ROOMS } from './layout';
 
 /**
@@ -71,8 +72,28 @@ export function pendantLight(): PointLight {
   return light;
 }
 
+/**
+ * How dark the hotel's own light goes while somebody naps, as a fraction of
+ * its usual self — **never zero**. ART_DIRECTION's "nothing in this park
+ * bottoms out at black" rule applies here exactly as it does to `DayNight`'s
+ * own midnight: a nap is meant to read as a cosy, starlit room, not a room
+ * with the lights switched off.
+ */
+const NAP_DIM_FACTOR = 0.34;
+
 export class HotelLighting {
   readonly group = new Group();
+
+  private readonly key: DirectionalLight;
+  private readonly ambient: HemisphereLight;
+  private readonly baseKeyIntensity: number;
+  private readonly baseAmbientIntensity: number;
+  /** Every room's own warm pool, so {@link setNapDim} can dim all of them
+   *  together — a child asleep in the suite is the only one anybody is
+   *  looking at, but the light rig is shared across the whole hotel and
+   *  dimming just one room's pool would leave the key and ambient lights
+   *  (which reach every room alike) still at full daytime strength. */
+  private readonly pools: PointLight[] = [];
 
   constructor() {
     this.group.name = 'hotel-lighting';
@@ -84,11 +105,15 @@ export class HotelLighting {
     key.position.set(-40, 60, -30);
     key.target.position.set(0, 0, 0);
     key.castShadow = false;
+    this.key = key;
+    this.baseKeyIntensity = key.intensity;
 
     // Warm sky over a warm floor bounce — the same cosy-rather-than-daylight
     // choice the castle makes, and the reason a crystal lobby at midnight
     // still looks like somewhere you would want to sleep.
     const ambient = new HemisphereLight(PALETTE.sunDay, PALETTE.woodLight, 1.05);
+    this.ambient = ambient;
+    this.baseAmbientIntensity = ambient.intensity;
 
     this.group.add(key, key.target, ambient);
 
@@ -101,6 +126,28 @@ export class HotelLighting {
       pool.position.set(room.originX, POOL_HEIGHT, room.originZ);
       pool.castShadow = false;
       this.group.add(pool);
+      this.pools.push(pool);
     }
+  }
+
+  /**
+   * Dims the hotel's whole light rig toward {@link NAP_DIM_FACTOR} of its
+   * usual self, for issue #279's follow-up — *"the lighting should dim when
+   * sleeping"* (Jim, 18 Aug 2026). `amount` is 0 (wide awake) to 1 (settled
+   * into the nap); `Hotel.update` eases it up when a nap starts and back
+   * down when it ends, so the change reads as the room dimming rather than
+   * a light switching.
+   *
+   * Scales every light **from its own base intensity**, not by repeatedly
+   * multiplying whatever the light is currently at — the latter would drift
+   * further from the truth every time a nap started before the last one's
+   * fade had finished, which is exactly the "two definitions of one thing"
+   * trap CLAUDE.md opens with.
+   */
+  setNapDim(amount: number): void {
+    const factor = lerp(1, NAP_DIM_FACTOR, clamp01(amount));
+    this.key.intensity = this.baseKeyIntensity * factor;
+    this.ambient.intensity = this.baseAmbientIntensity * factor;
+    for (const pool of this.pools) pool.intensity = POOL_INTENSITY * factor;
   }
 }

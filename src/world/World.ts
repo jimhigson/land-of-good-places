@@ -379,6 +379,11 @@ export class World implements GameSystem {
     // — invisible in practice, since every doorway crossing already happens
     // behind a closed iris (see `Building.changeSpace`).
     this.dayNight.setIndoors(this.playerInAnyInterior);
+    // The nap's own sky, over `DayNight.setIndoors`'s frozen backdrop — see
+    // `DayNight.setNapSkyOverride`'s own doc comment (PR #279's follow-up,
+    // 18 Aug 2026: the hotel's nap sky has to be the real sky shader at
+    // night-time uniforms, not a separate hand-built moon and stars).
+    this.dayNight.setNapSkyOverride(this.hotel.isNapping);
     this.dayNight.update(context);
 
     // Fan the time-of-day out to everything that changes with it. Systems read
