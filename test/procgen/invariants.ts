@@ -28,7 +28,7 @@
  * about the park, not a check on it.
  */
 import { describe, it, beforeAll, expect } from 'vitest';
-import { InstancedMesh, Matrix4, Mesh, Vector3, type Object3D } from 'three';
+import { Box3, InstancedMesh, Matrix4, Mesh, Vector3, type Object3D } from 'three';
 import {
   buildParkFacts,
   segmentDistance,
@@ -3205,6 +3205,252 @@ const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
     );
   }
 
+  // --- 4. every real bridge deck, over the ground it actually stands over ---
+  //
+  // The promise this file's own header made when #116 was still open: measure
+  // the *built* deck, not `BRIDGE_RISE` (which already has `BRIDGE_DECK_DEPTH`,
+  // a stated claim rather than a derivation, baked into it) and not
+  // `bridge.deckY` restated — the mesh's own lowest visible vertex, the same
+  // way builtBodyTop above is the locomotive's.
+  //
+  // The ground reference is the *route's own* Y at the crossing — the same
+  // "ground under the track" `check-park.mts`'s invariant 2 calls `hit.rail`
+  // — never `WalkSurfaces.sample`. A station platform is a `MovingPlatform`
+  // too, and `sample`'s "highest surface within a step" rule happily answers
+  // with a *platform's* height for a crossing that merely stands near one:
+  // measured live, a crossing 3.6 m from a station read 0.58 m of phantom
+  // extra ground, understating real clearance by exactly that much (issue
+  // #116). The route was solved against the same terrain the deck's own
+  // height is built from, so it is ground either way — just never a
+  // platform's.
+  const clearancePoint = new Vector3();
+  for (const crossing of facts.world.train.crossings) {
+    // The same name `bridges.ts` builds this crossing's own group under —
+    // one owner (the crossing's own `railDistance`) for both.
+    const deckMesh = facts.world.train.group.getObjectByName(
+      `bridge-${crossing.railDistance.toFixed(1)}`,
+    )?.getObjectByName('deck');
+    if (!deckMesh) {
+      complaints.push(
+        `the crossing at (${fmt([crossing.x, crossing.z])}) has no built bridge deck to measure`,
+      );
+      continue;
+    }
+    const soffit = new Box3().setFromObject(deckMesh).min.y;
+    const route = facts.world.train.route;
+    route.pointAt(route.distanceNear(crossing.x, crossing.z), clearancePoint);
+    const groundY = clearancePoint.y;
+    const clearance = soffit - groundY;
+    if (clearance < TRAIN_CLEARANCE_Y) {
+      complaints.push(
+        `the bridge deck at (${fmt([crossing.x, crossing.z])}) leaves only ` +
+          `${clearance.toFixed(2)} m under its own built soffit, against the ` +
+          `${TRAIN_CLEARANCE_Y.toFixed(2)} m the train and its riders sweep to`,
+      );
+    }
+  }
+
+  return complaints;
+};
+
+/**
+ * Every railway crossing's bridge is genuinely walkable and genuinely
+ * reachable (issue #116, Decision 8) — measured against the real, built
+ * bridge and the real nav lattice, never against the plan that placed
+ * either.
+ *
+ * Three questions, in the order a child would meet them:
+ *
+ * 1. **Does a route from the entrance actually reach the deck?** The exact
+ *    question `check:park`'s invariant 1 asks of every attraction, asked
+ *    here of every bridge, at the deck's own height (`reachableFromEntrance`'s
+ *    `goalY` — a ground-level probe would find nothing there at all, which
+ *    is the whole point of a bridge over a level crossing).
+ * 2. **Is the deck itself standable**, at the height a walker on it really
+ *    stands at? A ground-level probe passing here would prove nothing: it
+ *    is exactly the question a level crossing's own probe used to ask, and
+ *    exactly what this feature retired.
+ * 3. **Is each ramp standable partway down its own slope?** — proving the
+ *    climb itself is walkable, not just its two ends, which is where
+ *    #116's own ramp-flank guard rails (since removed) once wedged a
+ *    routable edge without ever touching the deck or the ground.
+ */
+const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const probe = new Vector3();
+  // The *tallest* bridge surface over `(x, z)`, never "the crossing's own
+  // bridge" alone — two crossings close enough together can have one
+  // bridge's ramp and a neighbour's much taller deck both genuinely cover
+  // the same point (`bridges.ts`'s own `bridgeHeightAt` exists for exactly
+  // this and every other caller uses it; this probe reimplements the same
+  // rule locally rather than importing a module that reaches `paths.ts`
+  // into a seed-sensitive test file — see this file's own header on static
+  // imports). Asking the wrong bridge for its height here reproduced the
+  // exact bug `bridgeHeightAt` was written to fix, just inside the checker
+  // instead of the game.
+  const heightAt = (x: number, z: number): number | null => {
+    let best: number | null = null;
+    for (const bridge of facts.world.train.bridges) {
+      if (!bridge.covers(x, z)) continue;
+      const height = bridge.heightAt(x, z);
+      if (best === null || height > best) best = height;
+    }
+    return best;
+  };
+  const standableAt = (x: number, z: number, height: number): boolean => {
+    probe.set(x, height, z);
+    facts.world.collision.resolve(probe, PLAYER_RADIUS);
+    return Math.hypot(probe.x - x, probe.z - z) < 1e-3;
+  };
+
+  // Perpendicular to the crossing's own path direction — the same
+  // `acrossX = -dirZ, acrossZ = dirX` convention `bridgeFootprint.ts` uses
+  // for `halfAcross`, restated here rather than imported (this file's own
+  // header on why seed-dependent modules stay out of static imports).
+  const acrossOf = (crossing: { pathDirX: number; pathDirZ: number }): [number, number] => [
+    -crossing.pathDirZ,
+    crossing.pathDirX,
+  ];
+
+  for (const crossing of facts.world.train.crossings) {
+    const bridge = facts.world.train.bridges.find((b) => b.deckCovers(crossing.x, crossing.z));
+    if (!bridge) continue; // reported by railwayClearanceCoversTheTrainAndItsRiders above
+    const deckHeight = heightAt(crossing.x, crossing.z) ?? bridge.deckY;
+    const [acrossX, acrossZ] = acrossOf(crossing);
+
+    if (!facts.reachableFromEntrance(crossing.x, crossing.z, deckHeight)) {
+      complaints.push(
+        `the bridge deck at (${fmt([crossing.x, crossing.z])}) is not reachable ` +
+          'from the entrance on the real nav lattice',
+      );
+    }
+    if (!standableAt(crossing.x, crossing.z, deckHeight)) {
+      complaints.push(`the bridge deck at (${fmt([crossing.x, crossing.z])}) is not itself standable`);
+    }
+
+    // The deck's own real half-width, walked outward empirically off the
+    // built `Bridge` (`deckCovers`) rather than re-imported from
+    // `bridgeFootprint.ts`'s own `halfAcross` — that module reaches
+    // `./plan` → `./route`/`../coaster/plan`, exactly the seed-dependent
+    // static-import trap this file's header warns about, so it stays
+    // unimported here the same as everywhere else in this function.
+    const WIDTH_STEP = 0.5;
+    let deckHalfAcross = 0;
+    for (let w = WIDTH_STEP; w <= 15; w += WIDTH_STEP) {
+      const x = crossing.x + acrossX * w;
+      const z = crossing.z + acrossZ * w;
+      if (!bridge.deckCovers(x, z)) break;
+      deckHalfAcross = w;
+    }
+
+    // A point partway down each ramp — comfortably on the slope, clear of
+    // both the deck and the ordinary ground the ramp joins, so a pass here
+    // proves the climb itself rather than either end of it.
+    //
+    // **Walked to the ramp's own real, built length, never a fixed offset.**
+    // A fixed `6 m` here used to fall straight off a short ramp — the deck's
+    // own two extremes were measured for `everyBridgeIsWalkableAndReachable`
+    // and it never reads the constant `bridgeFootprint.ts`'s `rampRunPos`/
+    // `rampRunNeg` truncate down to, so for a ramp truncated shorter than
+    // that (the gate-walk crossing on seeds 11/18: ~3.5–3.7 m; a boundary-
+    // or plot-cramped ramp on other crossings) the probe landed off the far
+    // end (`bridge.heightAt` returns `null` there) and this loop's own
+    // `continue` read that as "nothing to probe" — exactly the review's
+    // finding on PR #297: **invisible to this check, precisely for the two
+    // hard cases it exists to catch.** Fixed by measuring the real ramp's
+    // own reach off the *built* `Bridge` itself (`covers`/`deckCovers`),
+    // never a re-import of the seed-sensitive planner that built it (this
+    // file's own header on static imports of seed-dependent modules) —
+    // walked outward from the crossing until `deckCovers` first lets go
+    // (the deck's own real half-length, empirically, not the constant) and
+    // then again until `covers` lets go (the ramp's own real far edge), so
+    // the probe below is genuinely 90% of *this specific ramp's* built
+    // length on *this specific side*, whatever `bridgeFootprint.ts` decided
+    // it should be. A ramp side truncated to (near) nothing — the correct
+    // answer on a side nothing ever walks, per that module's own note on
+    // the gate-walk crossing's outward-facing side — has nothing real to
+    // probe either, and is skipped for that reason now, not because the
+    // probe missed it.
+    const STEP = 0.5;
+    for (const sign of [1, -1] as const) {
+      let deckEdge = 0;
+      for (let d = 0; d <= 6; d += STEP) {
+        const x = crossing.x + crossing.pathDirX * d * sign;
+        const z = crossing.z + crossing.pathDirZ * d * sign;
+        if (!bridge.deckCovers(x, z)) break;
+        deckEdge = d;
+      }
+
+      // **Swept across the deck's own real width at this edge, not just
+      // its centreline.** The centre-point check above only asks whether
+      // the crossing's own track-centre point stands; a deck several
+      // metres wide can have that centre clear while an edge, part-way
+      // along its forward or backward face, is not. Found live extending
+      // PR #297 round 4's width-sweep fix (which closed the identical gap
+      // in `truncateForBoundary`'s ramp-length check) to
+      // `bridgeFootprint.ts`'s own pass-1 deck-width loop: seed 18's
+      // gate-walk crossing has `halfAcross` bottomed out at its hardcoded
+      // 1 m floor, and every point along that deck's own forward edge is
+      // still only 0.108–0.209 m from `GARDEN_PLAY_BOUNDARY` — real
+      // collision pushback up to 0.505 m. Confirmed pre-existing
+      // (identical numbers reproduce against `bridgeFootprint.ts` from
+      // before that round's fix), not something the width-sweep fix
+      // caused — filed as issue #317 rather than silently weakening this
+      // check to let seed 18 pass, per this file's own "never weaken an
+      // assertion to make a seed pass" rule.
+      if (deckHalfAcross > 0.5) {
+        for (const t of [-0.9, -0.45, 0, 0.45, 0.9]) {
+          const ex = crossing.x + crossing.pathDirX * deckEdge * sign + acrossX * deckHalfAcross * t;
+          const ez = crossing.z + crossing.pathDirZ * deckEdge * sign + acrossZ * deckHalfAcross * t;
+          const eh = heightAt(ex, ez);
+          if (eh === null) continue; // off the deck's own built extent — nothing to probe
+          if (!standableAt(ex, ez, eh)) {
+            complaints.push(
+              `the bridge deck at (${fmt([crossing.x, crossing.z])}) is not standable at ` +
+                `(${fmt([ex, ez])}) — ${(t * 100).toFixed(0)}% across its own ${(deckHalfAcross * 2).toFixed(1)} m ` +
+                `width at the ${sign > 0 ? 'forward' : 'backward'} edge (see issue #317)`,
+            );
+          }
+        }
+      }
+
+      let rampEdge = deckEdge;
+      for (let d = deckEdge + STEP; d <= deckEdge + 25; d += STEP) {
+        const x = crossing.x + crossing.pathDirX * d * sign;
+        const z = crossing.z + crossing.pathDirZ * d * sign;
+        if (!bridge.covers(x, z)) break;
+        rampEdge = d;
+      }
+      const rampReach = rampEdge - deckEdge;
+      if (rampReach < 1) continue; // this side's real, built ramp is too cramped to probe — nothing stands here to fail on
+      const probeAlong = deckEdge + rampReach * 0.9;
+
+      // **Swept across the ramp's own real width, not just its
+      // centreline** — the exact QA finding this round: PR #297,
+      // canonical seed, the crossing at (12.64, 57.02) had its centreline
+      // clearing `GARDEN_PLAY_BOUNDARY` by 0.418 m at the worst point
+      // while its outer edge, `halfAcross` further across at the same
+      // `along`, was still 1.385 m past it — real pushback 2.454 m — and
+      // this loop's own single centreline probe had no way to see it.
+      // `bridges.ts` builds every ramp tread as a `RectPlatform` at the
+      // deck's own uniform `halfAcross` (no taper), so the same
+      // `deckHalfAcross` measured off the deck above applies here too.
+      for (const t of deckHalfAcross > 0.5 ? [-0.9, -0.45, 0, 0.45, 0.9] : [0]) {
+        const rx = crossing.x + crossing.pathDirX * probeAlong * sign + acrossX * deckHalfAcross * t;
+        const rz = crossing.z + crossing.pathDirZ * probeAlong * sign + acrossZ * deckHalfAcross * t;
+        const rampHeight = heightAt(rx, rz);
+        if (rampHeight === null) continue; // off the ramp's own built width at this t — nothing to probe
+        if (!standableAt(rx, rz, rampHeight)) {
+          complaints.push(
+            `the ramp at (${fmt([rx, rz])}), ${probeAlong.toFixed(1)} m out from the crossing at ` +
+              `(${fmt([crossing.x, crossing.z])}), ${(t * 100).toFixed(0)}% across its width — 90% of its real, ` +
+              `built ${rampReach.toFixed(1)} m ramp reach on this side — is not standable`,
+          );
+        }
+      }
+    }
+  }
+
   return complaints;
 };
 
@@ -5249,6 +5495,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     'the clearance over the railway covers the train and everyone riding it',
     railwayClearanceCoversTheTrainAndItsRiders,
   ],
+  ['every railway crossing has a bridge you can walk to, onto and across', everyBridgeIsWalkableAndReachable],
   ['the cat bus is actually in the park, at the gate, with everyone aboard', theCatBusIsInThePark],
   ['every child fits in the cat bus seat they are sitting in', childrenFitTheSeatsTheySitIn],
   ['the boundary wall has a gate you can actually walk through', theGateIsAHoleInTheWall],
