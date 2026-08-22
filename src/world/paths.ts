@@ -2179,6 +2179,79 @@ export const ROUTES: readonly RouteDefinition[] = PATH_GRAPH.edges
   .filter((edge) => edge.paved)
   .map((edge) => edge.route);
 
+/**
+ * One straight, grid-axis-aligned stretch of a paved route, long enough to
+ * stand a garden wall beside. See {@link pathBorderSegments}.
+ */
+export interface PathBorderSegment {
+  readonly a: readonly [number, number];
+  readonly b: readonly [number, number];
+  /** Half the paved width here — how far the surface itself reaches from the centreline. */
+  readonly halfWidth: number;
+  /** 0 if this stretch runs along the X axis, PI/2 if along Z. */
+  readonly axisYaw: number;
+}
+
+/** Shorter than this and a straight stretch is too small to anchor a wall against. */
+const MIN_BORDER_SEGMENT_LENGTH = 4;
+
+/**
+ * Off a grid axis by more than this fraction of its own length, a control
+ * segment does not count as "on axis" — matches the tolerance
+ * {@link pathsRunOnGridAxes} (`test/procgen/invariants.ts`) checks the drawn
+ * curve against, so a stretch this function calls on-axis is never one that
+ * invariant would call diagonal, and vice versa.
+ */
+const BORDER_OFF_AXIS_FRACTION = 0.05;
+
+let cachedBorderSegments: readonly PathBorderSegment[] | null = null;
+
+/**
+ * **Straight, grid-axis-aligned stretches of the paved network** — the same
+ * axes the path network itself is built on (issue #269) and the same ones
+ * `pathsRunOnGridAxes` polices, read straight off each route's own control
+ * points rather than re-derived from the drawn curve.
+ *
+ * This is the *one* definition of "on the grid" that wall/scenery placement
+ * gets to use (CLAUDE.md: "two definitions of one thing, kept in step by
+ * hand") — reusing the fact that `paths.ts` already axis-aligns its control
+ * points (see `pathsRunOnGridAxes`'s own comment) rather than a second
+ * generator inventing its own idea of what counts as on-axis.
+ *
+ * The closed backbone ring is excluded outright: it is deliberately a true
+ * circle round the statue (`ringIsATrueCircleRoundTheStatue`), never
+ * axis-aligned, so no stretch of it belongs here — a wall "bordering" the
+ * ring would border a curve, not a grid edge.
+ *
+ * Memoised like `wallPlan` in `Scenery.ts`: the route network is a pure
+ * function of the seeded layout, solved once at module load.
+ */
+export function pathBorderSegments(): readonly PathBorderSegment[] {
+  if (cachedBorderSegments) return cachedBorderSegments;
+  const segments: PathBorderSegment[] = [];
+  for (const route of ROUTES) {
+    if (route.closed) continue; // the ring: a true circle, not a grid edge
+    const halfWidth = route.width / 2;
+    for (let i = 1; i < route.points.length; i += 1) {
+      const [x1, z1] = route.points[i - 1]!;
+      const [x2, z2] = route.points[i]!;
+      const dx = x2 - x1;
+      const dz = z2 - z1;
+      const length = Math.hypot(dx, dz);
+      if (length < MIN_BORDER_SEGMENT_LENGTH) continue;
+      const offAxisX = Math.abs(dz) / length; // deviation if this is meant to run along X
+      const offAxisZ = Math.abs(dx) / length; // deviation if this is meant to run along Z
+      let axisYaw: number;
+      if (offAxisX <= BORDER_OFF_AXIS_FRACTION) axisYaw = 0;
+      else if (offAxisZ <= BORDER_OFF_AXIS_FRACTION) axisYaw = Math.PI / 2;
+      else continue; // a diagonal control segment (a booth's own doorway approach) — not a grid edge
+      segments.push({ a: [x1, z1], b: [x2, z2], halfWidth, axisYaw });
+    }
+  }
+  cachedBorderSegments = segments;
+  return segments;
+}
+
 /** Sampled path centreline, used for scenery placement queries. */
 export interface PathSample {
   readonly x: number;

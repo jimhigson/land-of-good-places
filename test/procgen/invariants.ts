@@ -320,6 +320,110 @@ const wallsClearTheRailway: Invariant = (facts) => {
 };
 
 /**
+ * **Every decorative wall run actually borders something, on its own grid
+ * axis.** Issue #300, Jim, playing, on `grid-aligned-park`'s own preview:
+ * *"here we see 3 walls placed at nonsensical locations that make no sense.
+ * On the grid layout, the walls should be at the same orthogonal axes as the
+ * path and also be around the edges of the path where there is nothing else
+ * they would collide with — the point of walls isn't to scatter them at
+ * random!"*
+ *
+ * Before the fix, both `Scenery.ts` wall generators drew a candidate's centre
+ * from the whole lawn disc — `(angle, radius)`, fully free — and only
+ * afterwards asked whether the result was *clear* of everything nearby.
+ * "Clear of everything" and "next to something" are different claims, and a
+ * candidate could satisfy the first while utterly failing the second: nothing
+ * ever measured how far a wall ended up from the path or plot it was
+ * supposedly decorating. The lawn benches additionally rolled a fully free
+ * yaw (`rng.range(0, Math.PI)`), so half the time they landed further off a
+ * grid axis than on one.
+ *
+ * Two real, measured claims, neither taken from the generator's own intent —
+ * `ParkFacts.walls` reads `from`/`to` off the built runs, `ParkFacts.pathEdges`
+ * and `ParkFacts.plots` off the built network and layout:
+ *
+ * 1. **Angle.** The path network is itself locked to the global X/Z axes —
+ *    {@link pathsRunOnGridAxes} above proves exactly that of the drawn curve,
+ *    with the closed ring the one deliberate exception, excluded here for the
+ *    same reason it is excluded there ({@link ringIsATrueCircleRoundTheStatue}).
+ *    So "the same orthogonal axis as the nearest path edge" and "a global
+ *    grid axis" are the same claim wherever a wall sits close enough to a
+ *    spur or interconnect to be called bordering it. Measuring against the
+ *    fixed global axis directly — rather than hunting for the one nearby
+ *    curve sample and trusting its local tangent — means a momentary wobble
+ *    in one Catmull-Rom sample near a corner can never be mistaken for the
+ *    thing a wall is meant to match.
+ * 2. **Proximity.** Every point along a wall run ({@link alongRun}, sampled
+ *    every metre) is within reach of the nearest thing it could plausibly be
+ *    bordering — a paved edge's own surface, or a plot's own bounding circle
+ *    — so a whole run stays near what it borders rather than just touching it
+ *    at one lucky corner and trailing off into open lawn.
+ *
+ * `WALL_BORDER_PROXIMITY_TOLERANCE` carries real headroom above the measured
+ * worst case: built and measured across all five CI seeds after the fix, the
+ * furthest any sampled wall point ever sits from the nearest path edge or
+ * plot boundary is 10.96 m (wood, seed 20260728) — comfortably inside the
+ * 14 m here, while still nowhere near what an unconstrained scatter across
+ * the ~90 m-wide lawn disc could produce. `WALL_AXIS_TOLERANCE_DEG` is looser
+ * than the generator's own worst rounding (the tightest `pathBorderSegments`
+ * stretch can be ~2.9 deg off true axis) but far tighter than a genuine
+ * diagonal, which the old bench yaw could put anywhere up to 45 deg off.
+ */
+const WALL_AXIS_TOLERANCE_DEG = 8;
+const WALL_BORDER_PROXIMITY_TOLERANCE = 14;
+
+const wallsBorderTheGridSensibly: Invariant = (facts) => {
+  const problems: string[] = [];
+  // The ring is a deliberate true circle, never a grid edge — see this
+  // invariant's own comment and `pathsRunOnGridAxes` above.
+  const borderEdges = facts.pathEdges.filter((edge) => !edge.backbone);
+
+  const nearestBorderDistance = (point: readonly [number, number]): number => {
+    let nearest = Infinity;
+    for (const edge of borderEdges) {
+      for (let i = 1; i < edge.points.length; i += 1) {
+        const d = pointToSegment(point, edge.points[i - 1]!, edge.points[i]!) - edge.halfWidth;
+        if (d < nearest) nearest = d;
+      }
+    }
+    for (const plot of facts.plots) {
+      const d = Math.hypot(point[0] - plot.x, point[1] - plot.z) - plot.boundingRadius;
+      if (d < nearest) nearest = d;
+    }
+    return nearest;
+  };
+
+  for (const wall of facts.walls) {
+    const dx = wall.to[0] - wall.from[0];
+    const dz = wall.to[1] - wall.from[1];
+    if (Math.hypot(dx, dz) < 1e-6) continue;
+
+    const angleDeg = (Math.atan2(dz, dx) * 180) / Math.PI;
+    const mod90 = ((angleDeg % 90) + 90) % 90;
+    const offAxis = Math.min(mod90, 90 - mod90);
+    if (offAxis > WALL_AXIS_TOLERANCE_DEG) {
+      problems.push(
+        `${wall.kind} run (${fmt(wall.from)}->${fmt(wall.to)}) sits ${offAxis.toFixed(1)} deg off ` +
+          `the park's grid axes — the path network itself runs orthogonal, this wall does not`,
+      );
+    }
+
+    let worstProximity = 0;
+    for (const point of alongRun(wall.from, wall.to, 1)) {
+      worstProximity = Math.max(worstProximity, nearestBorderDistance(point));
+    }
+    if (worstProximity > WALL_BORDER_PROXIMITY_TOLERANCE) {
+      problems.push(
+        `${wall.kind} run (${fmt(wall.from)}->${fmt(wall.to)}) strays ${worstProximity.toFixed(1)} m ` +
+          `from the nearest path edge or plot boundary at its furthest point — bordering nothing`,
+      );
+    }
+  }
+
+  return problems;
+};
+
+/**
  * **No tree stands on the railway.** Issue #235.
  *
  * The twin of {@link wallsClearTheRailway}, and it did not exist because it
@@ -5679,6 +5783,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the Land Hotel stands close to the castle', hotelIsCloseToTheCastle],
   ['no two wall runs cross or crowd each other', wallsDoNotClash],
   ['no wall run stands on the railway', wallsClearTheRailway],
+  ['every wall run sits on a grid axis and actually borders something', wallsBorderTheGridSensibly],
   ['no tree stands on the railway', treesClearTheRailway],
   ['the train runs through no plot and no stall', trainClearsEveryPlotAndStall],
   ['the park train keeps its turning circle', trainKeepsItsTurningCircle],
