@@ -2515,11 +2515,14 @@ export class Hotel implements GameSystem {
     ];
     const wallMaterial = interiorMaterial(room.theme.wall);
     for (const { side, x1, z1, x2, z2 } of sides) {
-      // The two walls the camera looks *through* may be shorter than the two it
-      // looks *at* — see `HotelRoom.nearWallHeight`. Everywhere but the lobby
-      // they are the same number and this reads as it always did.
-      const height =
-        side === 'south' || side === 'east' ? room.nearWallHeight ?? room.wallHeight : room.wallHeight;
+      // Every wall is genuinely `room.wallHeight` tall now — issue #307, Jim
+      // playing the lobby: *"extend the walls upwards"*. The two the camera
+      // looks *through* (south, east) used to build shorter instead
+      // (`HotelRoom.nearWallHeight`, since removed) so the fixed rig could see
+      // past them; that made the room's own walls visibly stop short of its
+      // true height. See `HotelRoom.nearWallsHidden` for what replaced it.
+      const height = room.wallHeight;
+      const hideThisWall = room.nearWallsHidden === true && (side === 'south' || side === 'east');
       const gap = room.gaps[side];
       const along = side === 'north' || side === 'south' ? 'x' : 'z';
       const from = along === 'x' ? x1 : z1;
@@ -2559,6 +2562,14 @@ export class Hotel implements GameSystem {
         );
         wall.name = 'hotel.wall';
         wall.position.set(along === 'x' ? mid : x1, height / 2, along === 'x' ? z1 : mid);
+        // **Hidden, not shortened, not faded.** `mesh.visible = false` drops
+        // the wall from every render pass — colour and shadow both — while
+        // leaving its name and geometry alone, so probes 15/18/19 (corner
+        // abutment, partition ends, rug clearance) keep seeing it exactly as
+        // if it were drawn. The collider three lines below is untouched
+        // either way: a hidden wall is still a wall, just not one the fixed
+        // isometric rig is ever shown.
+        if (hideThisWall) wall.visible = false;
         shell.add(wall);
         const wx1 = room.originX + (along === 'x' ? a : x1);
         const wz1 = room.originZ + (along === 'x' ? z1 : a);
@@ -3319,8 +3330,22 @@ export class Hotel implements GameSystem {
     //     centre.
     // Same height and scale as before (8.3 m, 3x) — nothing about *why*
     // those changes, only where.
+    //
+    // Issue #307: the beam must reach the room's *real* walls at this z —
+    // full room width (wall centreline to wall centreline, so each end
+    // embeds into the wall rather than stopping short of it), not a length
+    // guessed from the ball's own scale. The ball sits on the promenade axis
+    // (x = 0), which is also the room's own centre, so a beam spanning the
+    // full width is centred on the ball for free — still true after the ball
+    // moved from `STATUE_Z` to `DISCO_Z`, since `LOBBY` is one rectangular
+    // shell for its whole depth.
     const DISCO_Z = CHANDELIER_Z + 2.9;
-    this.hangDiscoBall(shell, 0, 8.3, DISCO_Z, { scale: 3, lit: true, room: LOBBY });
+    this.hangDiscoBall(shell, 0, 8.3, DISCO_Z, {
+      scale: 3,
+      lit: true,
+      room: LOBBY,
+      beamSpan: LOBBY.halfX * 2,
+    });
 
     // The desk is 2.67 m of bowed crystal counter — a run, so a rectangle
     // rather than a disc, or a child could not walk along it to reach the far
@@ -3440,8 +3465,9 @@ export class Hotel implements GameSystem {
     // Both stand against the **west** wall, and that is not decoration: the
     // camera looks along (−X, −Z) and down 38°, so anything tall on the +X or
     // +Z side of a child stands between her and the lens. The far two walls
-    // are the only place a tall prop is free. (Same rule as `nearWallHeight`,
-    // applied to furniture.) They are set between the west windows rather
+    // are the only place a tall prop is free. (Same rule as
+    // `nearWallsHidden`, applied to furniture rather than a wall.) They are
+    // set between the west windows rather
     // than across them. The old cluster at (12, −10.4) stood where the
     // colonnade now runs; it holds the east bay's corner instead, mirroring
     // the west one.
@@ -4314,7 +4340,14 @@ export class Hotel implements GameSystem {
       pictures: [{ wall: 'west', along: -4.8, width: 1.5, height: 1.15, seed: 0x40c1 }],
     });
 
-    // Over the hall, where all four rooms can see it.
+    // Over the hall, where all four rooms can see it. **Checked against
+    // issue #307's beam-reaches-the-walls fix and left alone on purpose**:
+    // this hall is a full-width strip of the *suite* (SUITE.halfX = 11), not
+    // a room of its own, and the ball hangs 3.4 m off the promenade — a beam
+    // actually reaching x = ±11 would be a 22 m rafter over a 6.8 m-wide
+    // hall, wildly out of scale for what is a small connecting space, not the
+    // lobby's double-height room the issue was about. Default (unscaled)
+    // 3.2 m beam stays.
     this.hangDiscoBall(shell, -3.4, SUITE.wallHeight + 0.9, 0);
   }
 
@@ -5158,20 +5191,46 @@ export class Hotel implements GameSystem {
    * fourteen of them, and the ferris wheel's is the brightest thing in the
    * game), so five more that burn while a child is out on the lawn would be
    * five for nothing. `Hotel.update` toggles the group — see {@link discoLit}.
+   *
+   * **The beam must reach real walls.** Issue #307, Jim playing the lobby:
+   * *"the disco ball has these horizontal supports holding it up that just
+   * stop in mid-air - can we extend these out to the walls please?"* The
+   * default 3.2 m length is sized for a small room where that happens to
+   * clear both walls without anyone measuring; the lobby is 26 m wide and a
+   * 9.6 m beam (3.2 × its scale of 3) centred on the ball left both ends
+   * floating in 8 m of open air. `beamSpan`, when a caller passes one, is the
+   * real full width to build (wall centreline to wall centreline, so each end
+   * embeds half a wall's thickness rather than stopping short with a visible
+   * gap) — computed by the caller from the room's own `halfX`, the one owner
+   * of that number, rather than guessed here.
    */
   private hangDiscoBall(
     shell: Group,
     x: number,
     y: number,
     z: number,
-    options: { readonly scale?: number; readonly lit?: boolean; readonly room?: HotelRoom } = {},
+    options: {
+      readonly scale?: number;
+      readonly lit?: boolean;
+      readonly room?: HotelRoom;
+      readonly beamSpan?: number;
+    } = {},
   ): void {
     const scale = options.scale ?? 1;
     // A slim beam carries the ball — the rooms are open-topped, so there is
     // no ceiling to hang it from, and a ball on nothing reads as a bug.
+    // `beamSpan` overrides the default scale-derived length for a room where
+    // that default would not reach the walls — see the doc above.
     const beam = solid(
-      new Mesh(new BoxGeometry(3.2 * scale, 0.16, 0.16), softMaterial(PALETTE.stonePinkDark)),
+      new Mesh(
+        new BoxGeometry(options.beamSpan ?? 3.2 * scale, 0.16, 0.16),
+        softMaterial(PALETTE.stonePinkDark),
+      ),
     );
+    // Named so `check:hotel` probe 28 can find it and measure its built
+    // world-space extent against the room's real walls, rather than trusting
+    // the number handed to `beamSpan`.
+    beam.name = 'hotel.discoBeam';
     beam.position.set(x, y + 0.08, z);
     shell.add(beam);
     const ball = createDiscoBall();
