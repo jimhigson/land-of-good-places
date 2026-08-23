@@ -13,7 +13,7 @@ import {
 import { PALETTE } from '../style/bridge';
 import { ART } from '../style/artPalette';
 import { visibleBounds, visibleTop } from '../style/measure';
-import { addOutline, decal, solid, toonMaterial } from '../style/materials';
+import { addOutline, addSmoothOutline, decal, solid, toonMaterial } from '../style/materials';
 import { starGeometry } from '../style/shapes';
 import { blob, type AssetHandle } from '../style/asset';
 
@@ -262,7 +262,9 @@ function strawberryCharm(): Group {
   body.rotation.x = Math.PI;
   body.position.y = 0.0425;
   charm.add(body);
-  addOutline(body, 0.008);
+  // Smooth, not plain: a cone's apex blows the plain inverted hull apart into
+  // a fan of dark flaps — see `addSmoothOutline`'s own doc.
+  addSmoothOutline(body, 0.008);
 
   const shoulders = blob(0.05, red, [1, 0.5, 1], 16);
   shoulders.position.y = 0.085;
@@ -340,7 +342,8 @@ function heartCharm(): Group {
   point.rotation.x = Math.PI;
   point.position.y = 0.039;
   charm.add(point);
-  addOutline(point, 0.008);
+  // Same cone-apex disease the strawberry had — see `addSmoothOutline`.
+  addSmoothOutline(point, 0.008);
 
   for (const side of [-1, 1] as const) {
     const lobe = blob(0.032, pink, [1, 0.95, 0.8], 14);
@@ -378,7 +381,8 @@ function rumiCharm(): Group {
   const dress = solid(new Mesh(new ConeGeometry(0.036, 0.062, 12), ink));
   dress.position.y = 0.031;
   charm.add(dress);
-  addOutline(dress, 0.008);
+  // A cone, so the outline is the welded kind — see `addSmoothOutline`.
+  addSmoothOutline(dress, 0.008);
 
   // Two little ink shoes peeking out under the hem.
   for (const side of [-1, 1] as const) {

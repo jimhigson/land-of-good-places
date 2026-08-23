@@ -14,6 +14,7 @@ import {
   type Material,
   type Texture,
 } from 'three';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { ART } from './artPalette';
 
 /**
@@ -215,10 +216,48 @@ export function outlineGeometry(geometry: BufferGeometry, thickness: number): Bu
  * internal lines and it stops reading as one creature.
  */
 export function addOutline(mesh: Mesh, thickness = 0.016, colour?: number): Mesh {
+  return addOutlineFromGeometry(mesh, mesh.geometry, thickness, colour);
+}
+
+/**
+ * {@link addOutline} for a mesh whose geometry has **hard edges or an apex** —
+ * a cone, an extrusion, anything with duplicated vertices carrying per-face
+ * normals.
+ *
+ * The plain inverted hull pushes every vertex along its *own* normal, so a
+ * cone's apex — one point stored as a ring of duplicates, each with a
+ * different normal — is blown apart into a fan of dark flaps with gaps
+ * between them. Invisible at a few centimetres; at the keychains' 2.5x worn
+ * scale it read as a broken outline hanging off the strawberry's tip (Jim's
+ * screenshot, 23 August 2026). Welding the duplicates and re-deriving
+ * smooth (averaged) normals first gives the push one direction per *point*,
+ * so the hull stays closed and hugs the silhouette. Only the outline copy is
+ * welded — the visible mesh keeps its own crisp shading normals.
+ */
+export function addSmoothOutline(mesh: Mesh, thickness = 0.016, colour?: number): Mesh {
+  const source = mesh.geometry.clone();
+  // `mergeVertices` only welds bit-identical vertices, and the duplicates at
+  // a hard edge differ in exactly the attribute being fixed — the normal. An
+  // outline never reads normals-as-shading or UVs, so drop both and weld on
+  // position alone.
+  source.deleteAttribute('normal');
+  source.deleteAttribute('uv');
+  const welded = mergeVertices(source);
+  welded.computeVertexNormals();
+  return addOutlineFromGeometry(mesh, welded, thickness, colour);
+}
+
+/** The shared tail of {@link addOutline}/{@link addSmoothOutline}. */
+function addOutlineFromGeometry(
+  mesh: Mesh,
+  geometry: BufferGeometry,
+  thickness: number,
+  colour?: number,
+): Mesh {
   const base = (mesh.material as { color?: Color }).color;
   const tint = colour ?? inkTint(base ? base.getHex() : ART.ink);
   const outline = new Mesh(
-    outlineGeometry(mesh.geometry, thickness),
+    outlineGeometry(geometry, thickness),
     new MeshBasicMaterial({ color: tint, side: BackSide }),
   );
   outline.castShadow = false;
