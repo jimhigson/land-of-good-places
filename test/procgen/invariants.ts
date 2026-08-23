@@ -3430,7 +3430,27 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
         rampEdge = d;
       }
       const rampReach = rampEdge - deckEdge;
-      if (rampReach < 1) continue; // this side's real, built ramp is too cramped to probe — nothing stands here to fail on
+      // A real failure, not a skip (found by real-browser QA on PR #330: a
+      // `continue` here let three bridges on the canonical seed alone ship
+      // with a sheer, `BRIDGE_RISE`-tall drop on one side — a 4.7–4.9 m
+      // vertical face where the path ran straight into it — because the
+      // exact bug this probe exists to catch also made it too short to
+      // probe, and "nothing to probe" and "skip" read the same to a loop
+      // that never distinguished them. `bridgeFootprint.ts`'s own search now
+      // requires {@link WALKABLE_FLOOR} on BOTH sides of every deck it
+      // accepts (see that constant's own note), so a real, built bridge
+      // reaching this invariant should never have a side this cramped —
+      // this is CLAUDE.md's own "break every check deliberately and watch it
+      // go red" lesson: a floor that cannot fire on the exact case it was
+      // named for is not a floor.
+      if (rampReach < 1) {
+        complaints.push(
+          `the bridge at (${fmt([crossing.x, crossing.z])}) has no usable ramp on its ` +
+            `${sign > 0 ? 'forward' : 'backward'} side — built reach ${rampReach.toFixed(2)} m, a sheer drop ` +
+            `where the path runs straight into it`,
+        );
+        continue;
+      }
       const probeAlong = deckEdge + rampReach * 0.9;
 
       // **Swept across the ramp's own real width, not just its

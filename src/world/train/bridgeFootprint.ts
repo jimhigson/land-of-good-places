@@ -216,11 +216,23 @@ const REAL_PROBE_RADIUS = PLAYER_RADIUS + REAL_CLEARANCE_STRIDE;
 /**
  * How far a ramp side has to reach before it counts as a genuinely walkable
  * approach — {@link BRIDGE_RISE} spread over the steepest grade
- * {@link MAX_RAMP_GRADIENT} ever forces. A candidate whose *better* side
- * still falls short of this is not offering a real bridge on either side,
- * whatever its collision clearance — see `planBridgeFootprints`'s own note
- * on why the search keeps going past such a candidate rather than accepting
- * it.
+ * {@link MAX_RAMP_GRADIENT} ever forces.
+ *
+ * **Both sides must clear this, not just the better one** — a path crosses a
+ * bridge in either direction, so a deck that only ramps down on one side is
+ * a dead end approached from the other: a sheer, `BRIDGE_RISE`-tall drop with
+ * nothing under it at all (`covers()` stops dead at the deck's own edge on
+ * the ramp-less side, so a walker there is not even standing on a surface,
+ * let alone a walkable one). Found by real-browser QA on PR #330: three
+ * bridges on the canonical seed and more on seeds 2 and 18 had exactly one
+ * side with `rampRun` at or near zero — a 4.7–4.9 m vertical face where the
+ * path ran straight into it — because the search below originally accepted
+ * `Math.max(reachPos, reachNeg) >= WALKABLE_FLOOR`, "at least the better
+ * side clears", which is not what a through-crossing needs. Missed by
+ * `test/procgen/invariants.ts` for the same reason CLAUDE.md's hotel-collision
+ * story keeps recurring: that invariant's own check treated `rampReach < 1`
+ * as "skip this side" rather than "fail this bridge", so the exact bug this
+ * floor exists to catch could pass with the very floor doing nothing.
  */
 const WALKABLE_FLOOR = BRIDGE_RISE / MAX_RAMP_GRADIENT;
 
@@ -502,10 +514,11 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
   // narrower bridge is still obviously the same bridge), then, at each
   // width, lateral shift (issue #319's "a shifted position along the
   // crossing") — accepting the first combination whose deck clears the real
-  // collision world AND whose better ramp side can plausibly reach
-  // {@link WALKABLE_FLOOR} against a conservative (no cross-deck exception)
-  // reading of the rail loop, so pass 1 never locks in a width pass 2 could
-  // not actually build a walkable ramp for.
+  // collision world AND whose ramp can plausibly reach {@link WALKABLE_FLOOR}
+  // on BOTH sides (see that constant's own note on why "the better side" was
+  // the wrong test) against a conservative (no cross-deck exception) reading
+  // of the rail loop, so pass 1 never locks in a width pass 2 could not
+  // actually build a walkable ramp for.
   /**
    * True near a *different* crossing's own guard rail — the real, physical
    * wall `bridges.ts` stands along each long edge of a deck (never a ramp:
@@ -563,8 +576,38 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
    * `nearOtherGuardRail` only ever *removes* room a candidate would
    * otherwise have — so a crossing accepted with fuller sibling knowledge
    * is never worse than one accepted with less, only ever more cautious.
+   *
+   * `existing` is this same crossing's own answer from the *previous*
+   * sweep, if it found one — checked first, and kept unchanged if it still
+   * clears, rather than re-searching from this crossing's own maximum width
+   * back down every sweep. Without this, two crossings close enough to
+   * compete for the same ground exhibit a winner-take-all runaway: crossing
+   * A converges to a modest, valid width in sweep 1 while crossing B (its
+   * competitor) finds nothing and goes `null`; in sweep 2, A's search sees
+   * `null` for B and — because it always starts back at its own *maximum*
+   * desired width — happily re-claims the room it had just as happily given
+   * up, which then makes B's own sweep-2 attempt fail even harder than
+   * sweep 1's, permanently. Which of two competing, nearly-tied crossings
+   * ends up on the losing end of that runaway is decided by whichever
+   * happened to converge (or fail) first, which is sensitive to real but
+   * entirely incidental collision-world detail nowhere near either crossing
+   * (found reviewing PR #330: a lamp post 40+ m away, itself shifted a few
+   * metres by an ordinary, already-tolerated scatter perturbation, was
+   * enough to flip which of two crossings 17 m apart got a bridge — and the
+   * *loser*, having no deck built at all, then needed no tree felled near
+   * it while the winner did, so trees near BOTH crossings changed between
+   * builds even though neither crossing's own geometry, nor a single real
+   * tree, had moved at all). Keeping a validated answer fixed instead of
+   * re-maximising it every sweep means the first sweep's more modest,
+   * available-room-for-everyone allocation is what actually sticks, and a
+   * neighbour's later disappearance never retroactively claims back room
+   * this crossing no longer needs.
    */
-  const searchDeck = (crossing: LevelCrossing, siblingDecks: readonly DeckPlan[]): DeckPlan | null => {
+  const searchDeck = (
+    crossing: LevelCrossing,
+    siblingDecks: readonly DeckPlan[],
+    existing: DeckPlan | null,
+  ): DeckPlan | null => {
     const dirX = crossing.pathDirX;
     const dirZ = crossing.pathDirZ;
     const acrossX = -dirZ;
@@ -613,6 +656,24 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
       return rampRun;
     };
 
+    // Keep a still-valid previous answer rather than re-maximising — see
+    // this function's own header for why. `existing` was itself only ever
+    // accepted because it once passed exactly these same two checks, so
+    // re-running them against the *current* siblings is the whole test: if
+    // a sibling has newly encroached, this legitimately fails and falls
+    // through to a real re-search below; otherwise this crossing's answer
+    // does not change shape just because something elsewhere did.
+    if (
+      existing &&
+      deckClears(existing.cx, existing.cz, existing.halfAcross) &&
+      Math.min(
+        provisionalReach(existing.cx, existing.cz, existing.halfAcross, 1),
+        provisionalReach(existing.cx, existing.cz, existing.halfAcross, -1),
+      ) >= WALKABLE_FLOOR
+    ) {
+      return existing;
+    }
+
     // Never shrink past the crossing's own self-measured `halfGap` — that
     // number is not a suggestion, it is the real spread of where the drawn
     // path's own samples actually touch the rail (`crossings.ts`'s own
@@ -648,7 +709,11 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
         if (!deckClears(centerX, centerZ, halfAcross)) continue;
         const reachPos = provisionalReach(centerX, centerZ, halfAcross, 1);
         const reachNeg = provisionalReach(centerX, centerZ, halfAcross, -1);
-        if (Math.max(reachPos, reachNeg) >= WALKABLE_FLOOR) {
+        // Both sides, not the better one — see `WALKABLE_FLOOR`'s own note.
+        // A path crosses this deck in either direction; a ramp missing on
+        // one side is a sheer drop approached from that direction, not a
+        // usable bridge with merely a worse approach.
+        if (Math.min(reachPos, reachNeg) >= WALKABLE_FLOOR) {
           return { crossingIndex: -1, cx: centerX, cz: centerZ, dirX, dirZ, acrossX, acrossZ, halfAcross };
         }
       }
@@ -685,8 +750,8 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
     lastChangedIndices = [];
     for (let index = 0; index < crossings.length; index += 1) {
       const siblings = current.filter((d, i): d is DeckPlan => i !== index && d !== null);
-      const next = searchDeck(crossings[index] as LevelCrossing, siblings);
-      const previous = current[index];
+      const previous = current[index] ?? null;
+      const next = searchDeck(crossings[index] as LevelCrossing, siblings, previous);
       if (
         (next === null) !== (previous === null) ||
         (next && previous && (next.halfAcross !== previous.halfAcross || next.cx !== previous.cx || next.cz !== previous.cz))
@@ -732,10 +797,10 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
   // search (see `resweep`'s own note) — and still found no width, at any
   // lateral shift, whose deck clears the real collision world (felling
   // considered — see `searchClear`'s own note) with a ramp reaching
-  // {@link WALKABLE_FLOOR} on at least one side, OR was still oscillating
-  // when the sweep bound ran out (see the convergence safety net just
-  // above). This crossing genuinely cannot take a bridge; see this file's
-  // own header for what happens next (a level crossing).
+  // {@link WALKABLE_FLOOR} on BOTH sides, OR was still oscillating when the
+  // sweep bound ran out (see the convergence safety net just above). This
+  // crossing genuinely cannot take a bridge; see this file's own header for
+  // what happens next (a level crossing).
   const decksOrNull: (DeckPlan | null)[] = current;
 
   // --- pass 2: real, final ramp reach, now that every deck is fixed -------
