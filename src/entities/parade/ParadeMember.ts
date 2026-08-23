@@ -1,4 +1,4 @@
-import { Group, Vector3 } from 'three';
+import { Box3, Group, Vector3 } from 'three';
 import { clamp, clamp01, TAU, turnTowards } from '../../core/mathUtils';
 import { disposeTree } from '../../art/style/materials';
 import type { AssetHandle, CreatureHandle } from '../../art/style/asset';
@@ -6,6 +6,7 @@ import type { Expression } from '../../art/style/faces';
 import { createJetpack, type JetpackHandle } from '../../art/models/jetpack';
 import { KID_HEIGHT } from '../../art/models/kid';
 import type { ShopItem } from '../../world/building/shops/catalogue';
+import type { PetBedSpot } from '../../world/hotel/Hotel';
 
 /**
  * One cute thing walking behind you.
@@ -55,6 +56,58 @@ const POP_SECONDS = 0.34;
 const JOY_SECONDS = 1.1;
 
 /**
+ * How close a pet has to get to its own bed's run-up spot before it starts
+ * climbing in — see {@link ParadeMember.goToBed}.
+ *
+ * Loose enough that the critically-damped follow spring's own settle can never
+ * leave a pet hovering a few centimetres short of its bed for ever; tight
+ * enough that "arrived" means standing at the bed rather than somewhere in the
+ * room. Measured against `root.position`, never against {@link target}, which
+ * is the goal from the first frame and would call every pet arrived before it
+ * had moved at all.
+ */
+const BED_ARRIVE_RADIUS = 0.35;
+
+/**
+ * Seconds a pet takes to trot off the floor and settle onto its own cushion.
+ *
+ * Long enough to read as *the pet getting into bed* — the whole point of a
+ * nap for a six-year-old — and short enough to finish well inside the nap
+ * itself (`Hotel.NAP_SECONDS`).
+ */
+const BED_CLIMB_SECONDS = 0.8;
+
+/**
+ * The sleeping pose, as a rotation of the whole model: tipped a quarter turn
+ * back about X — which swings the head, and so the pillow end, to −Z — and
+ * rolled a quarter turn about its own Y so it lies **on its side** rather than
+ * flat on its back.
+ *
+ * Both quarters matter, and both were measured on the real bed
+ * (`art/models/hotelAssets.ts`, `createPetBed`) rather than picked:
+ *
+ * - Every pet stands {@link PET_RENDER_HEIGHT} = 1.46 m tall, so tipped flat on
+ *   its back its own *depth* becomes its height in the bed — 1.09 m for the
+ *   kitten, 1.30 m for the puff — against a canopy whose fabric starts at
+ *   0.72 m and peaks at 1.27 m. Three of the four pets went through the roof of
+ *   their own bed.
+ * - Rolled onto its side it is the pet's *width* that stands up instead — 0.67 m
+ *   for the bunny, 0.84 m for the kitten, 0.90 m for the mouse — which clears
+ *   the canopy, and it is what a sleeping animal actually looks like.
+ * - Y is +π/2 rather than −π/2 so the pet's front (and its face) rolls toward
+ *   +X, which is the side the fixed iso camera looks from.
+ *
+ * Three.js applies an `XYZ` Euler as `Rx·Ry·Rz`, so the roll happens in the
+ * pet's own frame first and the tip afterwards, which is what keeps the head
+ * on the pillow whichever way it is rolled.
+ */
+const BED_POSE_X = -Math.PI / 2;
+const BED_POSE_Y = Math.PI / 2;
+
+/** Where a pet is in {@link ParadeMember.goToBed}'s routine. */
+export type BedPhase = 'walking' | 'climbing' | 'asleep';
+
+/**
  * The smallest a follower's jet pack may be shrunk, as a fraction of the one on
  * the player's back.
  *
@@ -87,18 +140,6 @@ export class ParadeMember {
    * shrinks instead of chasing the line it has just left.
    */
   readonly target = new Vector3();
-
-  /**
-   * Taken off screen for a moment while still in the line — see
-   * {@link Parade.setPetsHidden}, whose one caller is the hotel suite's nap.
-   *
-   * A flag the member reads rather than an outside write to `root.visible`,
-   * because {@link updatePop} assigns that property every single frame from
-   * the pop-in animation: anything set from outside would be stamped over
-   * within a frame and look like it had been ignored. Same shape, same
-   * reason, as `Player.railRaceFrown`.
-   */
-  hidden = false;
 
   private readonly handle: AssetHandle;
   private readonly creature: CreatureHandle | null;
@@ -137,6 +178,30 @@ export class ParadeMember {
   private jetpack: JetpackHandle | null = null;
   private flying = false;
 
+  /**
+   * This one's own bed in the hotel suite while the player naps, or `null`
+   * the rest of the time — see {@link goToBed}. Holding it here, on the
+   * member, is what makes this class the **single** owner of where its body
+   * is and whether it is drawn, awake or asleep: nothing else in the game
+   * moves, hides or poses a parade pet.
+   */
+  private bed: PetBedSpot | null = null;
+  private phase_: BedPhase = 'walking';
+  private climbTimer = 0;
+  /** Where the climb starts from, captured on arrival at the run-up spot. */
+  private readonly climbFrom = new Vector3();
+  private climbFromFacing = 0;
+
+  /**
+   * The offset from a bed's cushion centre that puts **this** model's own
+   * lowest point exactly on the cushion and its plan footprint centred on the
+   * bed — measured off the built model in {@link measureSleepOffset}, never
+   * hand-written, because the four pets differ by up to 0.29 m in the y term
+   * alone and a shared literal is the "two definitions of one thing"
+   * CLAUDE.md warns about.
+   */
+  private readonly sleepOffset = new Vector3();
+
   constructor(uid: string, item: ShopItem) {
     this.uid = uid;
     this.itemId = item.id;
@@ -156,6 +221,12 @@ export class ParadeMember {
     // a teddy walking at the same *speed* without either one moon-walking.
     this.cyclesPerMetre = 1 / Math.max(0.32, this.handle.height * 0.85);
 
+    // Before the pop-in shrinks the model to nothing: the measurement has to
+    // be taken at full size, and this is the one moment in a member's life
+    // when the model is built, unposed and not yet scaled or carrying a jet
+    // pack (which is lazy, and would otherwise land inside the box).
+    this.measureSleepOffset();
+
     // Stagger the first joyful face so eight toys do not all beam at once.
     this.joyCountdown = 2 + Math.random() * 7;
     this.root.scale.setScalar(0.001);
@@ -164,6 +235,65 @@ export class ParadeMember {
   /** Height of the model in metres — the parade uses it to space the line out. */
   get height(): number {
     return this.handle.height;
+  }
+
+  /**
+   * This one's own bed while the player naps, or `null` — the parade reads it
+   * to know whether to aim this member at a trail sample or at its bed.
+   */
+  get bedSpot(): PetBedSpot | null {
+    return this.bed;
+  }
+
+  /**
+   * Where this one is in its bedtime routine, or `null` if it is not going to
+   * bed at all. `'asleep'` is the only state a "Z" glyph — or a check — should
+   * treat as *in bed*.
+   */
+  get bedPhase(): BedPhase | null {
+    return this.bed ? this.phase_ : null;
+  }
+
+  /**
+   * **Go to bed**: walk to `bed`'s run-up spot on the floor beside it, then
+   * climb in and lie down. The hotel suite's nap is the one caller, by way of
+   * `Parade.sendPetToBed`.
+   *
+   * The walk is the ordinary follow spring every member already uses — the
+   * parade simply points {@link target} at the run-up spot instead of at a
+   * trail sample — so there is no second way of moving a pet anywhere in this
+   * game. The climb and the sleeping pose are this class's own, for the same
+   * reason: the body a child is watching is this one, and nothing else may
+   * write to it. There is no stand-in, no hand-off and no second model, so
+   * there is nothing for a hand-off to get wrong (Jim, 23 Aug 2026: the pet
+   * *"phases in and out of existence on alternating frames … then morphs into
+   * a totally different pet"*).
+   *
+   * Idempotent for a pet already on its way to the same bed, so a caller may
+   * re-assert it every frame if it likes.
+   */
+  goToBed(bed: PetBedSpot): void {
+    if (this.bed === bed) return;
+    this.bed = bed;
+    this.phase_ = 'walking';
+    this.climbTimer = 0;
+  }
+
+  /**
+   * The nap is over: stand back up, wherever the routine had got to, and
+   * rejoin the line. A no-op for a member that was never sent to bed.
+   */
+  getOutOfBed(): void {
+    if (!this.bed) return;
+    this.bed = null;
+    this.phase_ = 'walking';
+    this.climbTimer = 0;
+    this.root.rotation.set(0, this.facing, 0);
+    // No teleport out: {@link position} tracked the body the whole way into
+    // the bed (see {@link updateInBed}), so the ordinary follow spring simply
+    // carries it back to its place in the line from where it was lying.
+    this.velocity.set(0, 0, 0);
+    this.rejoice();
   }
 
   /** True once the poof-out has finished and the member can be thrown away. */
@@ -251,6 +381,16 @@ export class ParadeMember {
 
   /** Follows {@link target}, animates, and writes the result onto `root`. */
   update(dt: number, elapsed: number): void {
+    const bed = this.bed;
+    // Past the run-up spot the bedtime routine owns this body outright — the
+    // climb and the sleeping pose are not a spring following a target, and
+    // letting both write `root` in the same frame is the two-owners bug this
+    // whole class is now the single owner against.
+    if (bed && this.phase_ !== 'walking') {
+      this.updateInBed(dt, elapsed, bed);
+      return;
+    }
+
     const target = this.target;
     this.updatePop(dt);
 
@@ -286,6 +426,15 @@ export class ParadeMember {
     this.handle.update?.(dt, elapsed);
     // Flickers the flames. Only while lit — see `createJetpack`.
     if (this.flying) this.jetpack?.update?.(dt, elapsed);
+
+    // Arrived at its own bed? Asked of the body that was just drawn, never of
+    // {@link target}, which has been the run-up spot since the first frame.
+    if (bed && Math.hypot(this.position.x - bed.runUpX, this.position.z - bed.runUpZ) <= BED_ARRIVE_RADIUS) {
+      this.phase_ = 'climbing';
+      this.climbTimer = 0;
+      this.climbFrom.copy(this.position);
+      this.climbFromFacing = this.facing;
+    }
   }
 
   dispose(): void {
@@ -303,6 +452,96 @@ export class ParadeMember {
   }
 
   // -------------------------------------------------------------- internals
+
+  /**
+   * One frame of a pet climbing into, and then sleeping in, its own bed.
+   *
+   * **The one owner of this body's transform while it is in bed.** No spring,
+   * no trail, no second model: the climb eases the same body from the run-up
+   * spot it walked to onto the cushion, and the sleeping pose holds it there.
+   * {@link position} is kept level with what is drawn throughout, so waking is
+   * simply handing this body back to the spring rather than a teleport.
+   */
+  private updateInBed(dt: number, elapsed: number, bed: PetBedSpot): void {
+    this.updatePop(dt);
+
+    const restX = bed.cushionX + this.sleepOffset.x;
+    const restY = bed.cushionTop + this.sleepOffset.y;
+    const restZ = bed.cushionZ + this.sleepOffset.z;
+
+    if (this.phase_ === 'climbing') {
+      this.climbTimer += dt;
+      const t = clamp01(this.climbTimer / BED_CLIMB_SECONDS);
+      // The same smoothstep the rest of the game eases a short move with, so a
+      // pet getting into bed reads like everything else that arrives softly.
+      const eased = t * t * (3 - 2 * t);
+      this.position.set(
+        this.climbFrom.x + (restX - this.climbFrom.x) * eased,
+        this.climbFrom.y + (restY - this.climbFrom.y) * eased,
+        this.climbFrom.z + (restZ - this.climbFrom.z) * eased,
+      );
+      this.root.rotation.set(
+        BED_POSE_X * eased,
+        this.climbFromFacing + (BED_POSE_Y - this.climbFromFacing) * eased,
+        0,
+      );
+      // Still trotting while it climbs — the stride every pet in the park has.
+      this.creature?.setWalkPhase(elapsed * 9, 1);
+      if (t >= 1) this.phase_ = 'asleep';
+    } else {
+      this.position.set(restX, restY, restZ);
+      this.root.rotation.set(BED_POSE_X, BED_POSE_Y, 0);
+      // Asleep: breathing, no stride — `setWalkPhase(phase, 0)` is the pets'
+      // own idle, the same one every other still pet in the park uses.
+      this.creature?.setWalkPhase(elapsed * 0.7, 0);
+    }
+
+    this.root.position.copy(this.position);
+    this.facing = this.root.rotation.y;
+    this.gait = 0;
+    this.updateFace(dt);
+    this.handle.update?.(dt, elapsed);
+  }
+
+  /**
+   * Measures the offset from a cushion's centre that lands **this** model's
+   * lowest point on the cushion and its plan footprint centred on the bed,
+   * in the {@link BED_POSE_X}/{@link BED_POSE_Y} sleeping pose.
+   *
+   * Measured, never written down. The pose that shipped before this put every
+   * pet's *feet* at the bed's centre and let the rest of it hang off the
+   * pillow end — a bunny lay from z −0.10 to −1.57 on a bolster that stops at
+   * −0.67, i.e. 0.90 m of rabbit over the edge, and the kitten, mouse and puff
+   * all had their lowest point *below the floor*. That was Jim's *"clips out
+   * of the bed and floats half hanging off the edge"* (23 Aug 2026), and no
+   * single hand-picked drop could have fixed it for all four: the four pets'
+   * own y terms differ by 0.29 m.
+   *
+   * Taken in the constructor because that is the one moment the model is at
+   * full scale, unposed, and has no lazily-built jet pack in it to inflate the
+   * box.
+   */
+  private measureSleepOffset(): void {
+    const rotation = this.root.rotation.clone();
+    const scale = this.root.scale.clone();
+    const position = this.root.position.clone();
+    this.root.rotation.set(BED_POSE_X, BED_POSE_Y, 0);
+    this.root.scale.setScalar(1);
+    this.root.position.set(0, 0, 0);
+    this.root.updateMatrixWorld(true);
+    const box = new Box3().setFromObject(this.root);
+    if (!box.isEmpty()) {
+      this.sleepOffset.set(
+        -(box.min.x + box.max.x) / 2,
+        -box.min.y,
+        -(box.min.z + box.max.z) / 2,
+      );
+    }
+    this.root.rotation.copy(rotation);
+    this.root.scale.copy(scale);
+    this.root.position.copy(position);
+    this.root.updateMatrixWorld(true);
+  }
 
   /**
    * Builds this one's jet pack and straps it to its back.
@@ -332,7 +571,12 @@ export class ParadeMember {
     // and the carried item use, so the whole game pops the same way.
     const eased = 1 + Math.sin(this.pop * Math.PI) * 0.3;
     this.root.scale.setScalar(Math.max(0.001, this.pop * eased));
-    this.root.visible = this.pop > 0.002 && !this.hidden;
+    // **The one and only writer of this member's visibility, ever.** It reads
+    // one number, which moves at most one step a frame, so this body cannot
+    // flicker: there is no second system with an opinion about whether a pet
+    // is on screen (Jim, 23 Aug 2026, on the version that had one: the pet
+    // *"phases in and out of existence on alternating frames"*).
+    this.root.visible = this.pop > 0.002;
   }
 
   /** Returns the current hop height in metres, and advances the hop clock. */
@@ -393,7 +637,13 @@ export class ParadeMember {
 
     // Faces are canvas textures: `setExpression` re-uploads one. Only ever call
     // it on a transition, never per frame. See ARCHITECTURE.md.
-    const wanted: Expression = this.joyRemaining > 0 ? 'happy' : 'neutral';
+    //
+    // Asleep in its own bed beats every other mood: a blink *is* shut eyes, so
+    // holding it is the whole of "this pet is asleep" — the same one mechanism
+    // `Player.sleeping` uses for the child in the bed next to it, rather than a
+    // second eye-closing idea.
+    const wanted: Expression =
+      this.bedPhase === 'asleep' ? 'blink' : this.joyRemaining > 0 ? 'happy' : 'neutral';
     if (wanted === this.expression) return;
     this.expression = wanted;
     this.expressive.setExpression(wanted);

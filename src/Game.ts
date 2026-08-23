@@ -1464,14 +1464,13 @@ export class Game {
     this.sky.setView(skyViewFor(this.cameraOverride, this.camera.forward));
     this.world.update(this.frameContext);
 
-    // Between the world and the systems, and it has to be after the world:
-    // `hotel.isNapping` is written inside `world.update`, and the parade is
-    // one of the systems below. While she naps in the hotel suite, every pet
-    // she owns is trotting into its own bed in that room — so the parade's
-    // copies of those same animals must not also be standing at the bedside.
-    // One owner of "is she asleep", read fresh; see `Parade.setPetsHidden`.
-    this.parade.setPetsHidden(this.world.hotel.isNapping);
-
+    // Nothing between the world and the systems any more. There used to be a
+    // line here taking the parade's pets off screen for the length of a hotel
+    // nap, because the hotel put a *second* copy of each animal in its pet
+    // beds; there is one body per pet now (`Hotel.sendPetsToBed` hands the
+    // parade the bed and the parade's own member walks into it), so there is
+    // nothing to hide and no second system with an opinion about whether a
+    // pet is drawn. See `entities/parade/ParadeMember.ts`.
     for (const system of this.systems) system.update(this.frameContext);
 
     this.updateHud(tick);

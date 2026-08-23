@@ -204,16 +204,6 @@ const NAP_SECONDS = 2.6;
 const NAP_FADE_SECONDS = 0.7;
 
 /**
- * How long a pet takes to trot off the floor and settle onto its own cushion
- * when the player goes to sleep, in seconds.
- *
- * Comfortably inside {@link NAP_SECONDS}' own 2.6 s, so a child watching sees
- * *the pet get into bed* and then a pet asleep in it, rather than the nap
- * ending mid-trot. See {@link Hotel.sendPetsToBed}.
- */
-const PET_BEDTIME_SECONDS = 0.8;
-
-/**
  * How far off its own bed, in metres, a pet starts that trot — toward +Z,
  * which in every bedroom is the doorway side of the room (`petBedRowsZ` tiles
  * its rows from the north wall *southward* toward the hall door), so a pet
@@ -780,57 +770,101 @@ interface Bed {
 }
 
 /**
- * One entry in {@link Hotel.petBedRoster} — see that field's own doc comment
- * for `bedtime`, and {@link Hotel.ownedPets} for `uid`.
+ * One pet bed, as **furniture** — see {@link Hotel.ownedPets} for `uid`.
+ *
+ * There is deliberately no pet in here. This class used to build a second
+ * animal per bed and cut it into view at bedtime while the parade hid the real
+ * one; two bodies for one pet is what Jim watched fall apart on 23 Aug 2026
+ * (*"phases in and out of existence … morphs into a totally different pet"*),
+ * and the fix was to delete the second body rather than to synchronise it. A
+ * pet bed is now a bed: the animal that sleeps in it is the one out of the
+ * parade, and `entities/parade/ParadeMember.ts` owns it from the line all the
+ * way onto the cushion and back.
  */
 interface PetBedEntry {
-  readonly pet: CreatureHandle;
   readonly x: number;
   readonly z: number;
-  bedtime: number;
   /** Which of {@link SUITE_BED_SPOTS}' bedrooms this bed stands in — see {@link Bed.bedIndex}. */
   readonly bedIndex: number;
   /**
    * The owned pet this bed belongs to, by parade uid — `null` for the "she
-   * owns nothing yet" fallback bunny, which has no real inventory entry and
-   * so nothing for {@link PetParadeLink.beginPetNapWalk} to find.
+   * owns nothing yet" fallback bed, which has no real inventory entry and so
+   * nothing for {@link PetParadeLink.sendPetToBed} to find. That bed stays
+   * empty furniture, which is what an unearned pet bed honestly is.
    */
   readonly uid: string | null;
+  /**
+   * This bed, in world metres, built once — see {@link PetBedSpot}.
+   *
+   * Once, and kept, because it is also this bed's **identity**: a pet owns at
+   * most one bed at a time, so `petBedPhase(uid, spot)` can answer "is this
+   * pet in *this* bed" by comparing the object it was handed, rather than by
+   * comparing coordinates and hoping. She owns one bunny and it has a bed in
+   * each of the three bedrooms; only the one she is sleeping beside may say
+   * it has a bunny in it.
+   */
+  readonly spot: PetBedSpot;
+}
+
+/**
+ * One pet bed, in **world metres**, as the parade needs it — where the pet
+ * stands to get in, and where it lies once it is in.
+ *
+ * The two spots are one object rather than two calls because they are one
+ * decision: the run-up spot only makes sense as "the clear floor beside *this*
+ * cushion". `cushionTop` is the bed asset's own `PET_BED_CUSHION_TOP`, passed
+ * along rather than restated, so the height a pet rests at is the height the
+ * artist authored the cushion at.
+ */
+export interface PetBedSpot {
+  /** Clear floor beside the bed: where a pet walks to before climbing in. */
+  readonly runUpX: number;
+  readonly runUpY: number;
+  readonly runUpZ: number;
+  /** The middle of the cushion, in plan. */
+  readonly cushionX: number;
+  readonly cushionZ: number;
+  /** Top of the cushion — a sleeping pet's lowest point rests exactly here. */
+  readonly cushionTop: number;
 }
 
 /**
  * The seam onto the parade of cute things — see `entities/parade/Parade.ts`,
  * which is the one real implementer. Set by `Game`, the one place that already
- * holds both a `Parade` and this `Hotel` (see `Parade.setPetsHidden`'s own
- * caller, right next to where this gets wired up).
+ * holds both a `Parade` and this `Hotel`.
  *
- * A type-only import of `Parade` here would be free of any runtime cost or
- * cycle risk either way, but this file does not need the concrete class —
- * only the two calls {@link Hotel.sendPetsToBed} and
- * {@link Hotel.standPetsDown} actually make, which is the whole of what a
- * pet's nap needs from the parade. See CLAUDE.md's note on this PR's own
- * diagnosis: the hotel and the parade were two systems with no shared
- * walk-target handoff, and this interface is that handoff, kept as small as
- * the two calls that use it.
+ * Kept as small as the three calls that use it. A type-only import of `Parade`
+ * here would be free of any runtime cost or cycle risk either way, but this
+ * file does not need the concrete class.
+ *
+ * **This interface is the whole of what a pet's nap needs from the parade,
+ * and the parade is the whole of what owns a pet's body.** The hotel says
+ * *there is a bed here, and it is yours*; the parade walks the pet to it,
+ * gets it in and holds it there. Nothing crosses back the other way — no
+ * callback, no hand-off, no second model to keep in step — which is what
+ * makes a flicker or a swapped animal impossible rather than merely fixed.
  */
 export interface PetParadeLink {
   /**
-   * Routes the parade member with this uid to a world point and keeps it
-   * visible (regardless of {@link Parade.setPetsHidden}) until it gets
-   * there, at which point `onArrive` fires once. Returns `false` — starting
-   * nothing — when this uid is not a live, visible pet in the line right
-   * now: stowed, carried in her hands, or a bed built before she ever owned
-   * a matching pet at all. `Hotel` falls back to its own instant
-   * appear-in-bed for exactly that case, unchanged from before this PR.
+   * Sends the pet with this uid to `bed`. Returns `false`, and starts
+   * nothing, when that uid is not a live pet in the line right now — stowed,
+   * carried in her hands, or a bed built before she owned a matching pet at
+   * all — in which case the bed simply stays the empty furniture it already
+   * was.
    */
-  beginPetNapWalk(uid: string, x: number, y: number, z: number, onArrive: () => void): boolean;
+  sendPetToBed(uid: string, bed: PetBedSpot): boolean;
   /**
-   * Abandons an in-flight nap walk, if the uid has one — the pet simply
-   * resumes following the trail from wherever it had got to, rather than
-   * being left walking toward a bed nobody is watching any more. Safe to
-   * call for a uid that already arrived, or never had a walk at all.
+   * The nap is over, or ended early: this pet stands back up and rejoins the
+   * line. Safe to call for a uid that was never sent to bed.
    */
-  cancelPetNapWalk(uid: string): void;
+  wakePetFromBed(uid: string): void;
+  /**
+   * How far through its bedtime routine this pet is **in this particular
+   * bed** — `'asleep'` is the only answer that means *in bed and settled*.
+   * `null` when it is not going to bed at all, or is going to a different
+   * one of its own beds (every pet has one in each of the three bedrooms).
+   */
+  petBedPhase(uid: string, bed: PetBedSpot): 'walking' | 'climbing' | 'asleep' | null;
 }
 
 /**
@@ -957,23 +991,17 @@ export class Hotel implements GameSystem {
   /** Guests sat at tables, bobbing over their breakfast. See {@link seatGuests}. */
   private readonly diners: { model: CharacterModel; phase: number }[] = [];
   /**
-   * One small bed per pet the player owns (or one, with a bunny, if she owns
-   * none yet) — see {@link dressPetBeds}. Kept so {@link update} can breathe
-   * every one of them and {@link nap} (and its own end) can send them all to
-   * bed or turn them all back out together, whenever the player has a
-   * sleep — issue #275.
+   * One small bed per pet the player owns, **in each of the three bedrooms**
+   * — see {@link dressPetBeds}. Kept so {@link nap} (and its own end) can
+   * send every pet in the room she is actually sleeping in to bed, and turn
+   * them all back out together — issue #275.
    *
-   * **`bedtime` is the whole of bug 1's fix** (Jim, live play, 21 Aug 2026):
-   * *"walking into the room, a pet bed already has a sleeping pet in it, even
-   * though the player hasn't triggered a nap yet, while a second pet stands
-   * loose nearby."* Every bed's pet used to be built already standing on its
-   * own cushion and simply left there, which — under a canopy, at the park's
-   * camera distance — reads as a pet that is already in bed, beside the real
-   * pet still trotting round behind her in the parade. Now a pet bed is
-   * **empty furniture** until she actually naps: `bedtime` is `-1` (nobody is
-   * going to bed, the pet is hidden) or seconds into
-   * {@link PET_BEDTIME_SECONDS}' trot from the floor up onto the cushion. See
-   * {@link sendPetsToBed} and {@link updatePetBedtime}.
+   * These are beds, not pets: nothing in this class builds, poses, hides or
+   * moves an animal any more. A bed is **empty furniture** until she naps
+   * (Jim, 21 Aug 2026: *"walking into the room, a pet bed already has a
+   * sleeping pet in it"*) and it is empty furniture again afterwards; what
+   * fills it in between is her own pet, walking out of the parade under
+   * `ParadeMember`'s own steam. See {@link sendPetsToBed}.
    */
   private readonly petBedRoster: PetBedEntry[] = [];
   /**
@@ -995,11 +1023,10 @@ export class Hotel implements GameSystem {
   private readonly bathrooms = new Map<HotelRoom, Bathroom>();
 
   /**
-   * The parade of cute things, so a nap can send the pet she is actually
-   * watching for a genuine walk rather than a cut — see {@link PetParadeLink}.
-   * `null` until `Game` wires it up (and always `null` in a headless build,
-   * which is `sendPetsToBed`'s own cue to fall back to the instant
-   * appear-in-bed it always used).
+   * The parade of cute things — the one place a pet's body lives, and so the
+   * only way a pet bed ever gets a pet in it. See {@link PetParadeLink}.
+   * `null` until `Game` wires it up, and in a headless build that never made
+   * a parade, in which case every pet bed simply stays empty furniture.
    */
   petParade: PetParadeLink | null = null;
 
@@ -1424,36 +1451,37 @@ export class Hotel implements GameSystem {
   }
 
   /**
-   * Every pet bed's pet, where its bed is, and whether that pet is in it —
-   * `check:hotel`'s way of proving issue #275's "all the pets go to sleep
-   * too" without reaching into a private field: nap a real `Player` and read
-   * each pet's own `root.rotation.x` off this list before and after.
+   * Every pet bed: where it is (room-local, and in world metres), which
+   * bedroom it stands in, whose it is, and whether that pet is actually
+   * asleep in it right now — `check:hotel`'s way of proving issue #275's "all
+   * the pets go to sleep too" without reaching into a private field.
    *
-   * `asleep` is here because "not lying down" and "not in the room at all"
-   * were indistinguishable from outside, and the difference is precisely
-   * 21 Aug's bug 1: a pet is now **hidden** until she naps rather than posed
-   * on the cushion, so a probe has to be able to ask for the state, not infer
-   * it from a rotation that happens to be zero either way. See
-   * {@link petBedRoster}.
-   *
-   * `uid` is here for issue #279 round 6's own probe: matching a bed to the
-   * live parade member walking to it (`Parade.petState`) needs the same key
-   * {@link PetParadeLink.beginPetNapWalk} was called with, not a coordinate
-   * guess.
+   * `asleep` is answered by the parade, because the parade owns the pet. Two
+   * places with an opinion about whether an animal is in a bed is precisely
+   * the bug this list used to be able to hide (a pet handle of the hotel's
+   * own, lying in the bed, while the animal the child was watching was
+   * somewhere else entirely), so there is now nothing here to disagree with:
+   * a bed knows its uid, and the uid's owner knows the rest.
    */
   get petBeds(): readonly {
-    readonly pet: CreatureHandle;
     readonly x: number;
     readonly z: number;
+    readonly worldX: number;
+    readonly worldZ: number;
+    readonly bedIndex: number;
     readonly asleep: boolean;
     readonly uid: string | null;
+    readonly spot: PetBedSpot;
   }[] {
     return this.petBedRoster.map((bed) => ({
-      pet: bed.pet,
       x: bed.x,
       z: bed.z,
+      worldX: SUITE.originX + bed.x,
+      worldZ: SUITE.originZ + bed.z,
+      bedIndex: bed.bedIndex,
       asleep: this.petIsAsleep(bed),
       uid: bed.uid,
+      spot: bed.spot,
     }));
   }
 
@@ -1977,9 +2005,10 @@ export class Hotel implements GameSystem {
     // even in the frame `napping` itself hits zero below. The nap's *sky* is
     // not driven here at all any more — see {@link isNapping}.
     this.updateNapDim(dt);
-    // Before the glyphs, so a pet's own "Z"s can ask whether it has actually
-    // got into bed yet using this frame's answer rather than last frame's.
-    this.updatePetBedtime(dt, elapsed);
+    // No pet-bed frame here any more: the animals in those beds are the
+    // parade's own, and `ParadeMember` steps them. This class stopped having
+    // a second opinion about where a pet is on 23 Aug 2026 — see
+    // {@link sendPetsToBed}.
     this.updateNapGlyphs(elapsed);
 
     // The key turning in the lock. Before the player-null return, so a
@@ -2073,7 +2102,6 @@ export class Hotel implements GameSystem {
       if (this.napping <= 0) {
         this.napping = 0;
         this.nappingAt.blanket.visible = false;
-        const bedIndex = this.nappingAt.bedIndex;
         this.nappingAt = null;
         // `endRide` stands the model back up itself and opens her eyes again
         // (it clears `sleeping`); the group was never pitched (see `nap` — the
@@ -2083,7 +2111,7 @@ export class Hotel implements GameSystem {
         // The pets get up together too, and go back to being out and about
         // rather than standing in bed — the other half of `nap`'s issue #275
         // hookup, and of 21 Aug's bug 1. See `standPetsDown`.
-        this.standPetsDown(bedIndex);
+        this.standPetsDown();
       }
       return;
     }
@@ -4842,47 +4870,42 @@ export class Hotel implements GameSystem {
    * proved the rotation flips correctly at bed 0 the whole time — the one
    * thing it never asked is whether bed 0's own room has a pet bed *in* it.
    *
-   * So the first pet she owns (`kinds[0]`) also gets a single bed of its own
-   * in bedroom 1 and in bedroom 3 — `petBedSlots(1, 0)` / `petBedSlots(1, 2)`,
-   * the same function, just told which bedroom rather than defaulting to the
-   * middle one. Every extra pet beyond the first still only appears in the
-   * middle bedroom's own full row: this is a visibility fix for the bed she
-   * is standing in, not a redesign of where a collector's whole menagerie
-   * lives. The two rooms can never both be on screen at once (the fixed
-   * camera only ever shows the bedroom she is in), so the same pet quietly
-   * having three beds is not a thing a child can catch her out on.
+   * So **every** pet she owns gets a bed of its own in **every** bedroom —
+   * `petBedSlots(count, bedIndex)` for 0, 1 and 2, the same function, just
+   * told which bedroom rather than defaulting to the middle one. It used to
+   * be only the *first* pet that got a bed in the side bedrooms, and that was
+   * half of Jim's 23 Aug 2026 report: napping in bedroom 1 with a bunny and a
+   * kitten, only the bunny had a bed to walk to there, so the kitten she was
+   * actually watching simply vanished and *"a totally different pet"* got
+   * into the bed. A pet with no bed in the room she chose is a pet with
+   * nowhere to go.
+   *
+   * The two side bedrooms are smaller and hold three beds each rather than
+   * the middle one's 27; a fourth pet gets no bed *there* and simply stays
+   * standing in the line for the nap, which is what a teddy does too. The
+   * three rooms can never be on screen at once (the fixed camera only ever
+   * shows the bedroom she is in), so one pet quietly having a bed in each is
+   * not something a child can catch her out on — and only the room she is
+   * actually in is ever sent a pet (see {@link sendPetsToBed}).
    */
   private dressPetBeds(shell: Group): void {
     const pets = this.ownedPets();
-    for (const [index, slot] of petBedSlots(pets.length).entries()) {
-      const pet = pets[index];
-      if (pet === undefined) continue;
-      this.placePetBed(shell, pet.kind, slot.x, slot.z, 1, pet.uid);
-    }
-    const first = pets[0];
-    if (first !== undefined) {
-      for (const bedIndex of [0, 2] as const) {
-        const slot = petBedSlots(1, bedIndex)[0];
-        if (slot) this.placePetBed(shell, first.kind, slot.x, slot.z, bedIndex, first.uid);
+    for (const bedIndex of [0, 1, 2] as const) {
+      for (const [index, slot] of petBedSlots(pets.length, bedIndex).entries()) {
+        const pet = pets[index];
+        if (pet === undefined) continue;
+        this.placePetBed(shell, slot.x, slot.z, bedIndex, pet.uid);
       }
     }
   }
 
-  /** One pet bed — **empty**, with its own pet built but hidden until the
-   *  player naps. The one placement path {@link dressPetBeds} uses for the
-   *  middle bedroom's row and for each side bedroom's single visibility bed,
-   *  so there is exactly one way a pet bed gets built and registered.
-   *  `bedIndex` and `uid` are what let {@link sendPetsToBed} tell "the bed
-   *  she can actually see, for a pet that is actually out" from every other
-   *  case — see {@link petBedRoster}. */
-  private placePetBed(
-    shell: Group,
-    kind: PetKind,
-    x: number,
-    z: number,
-    bedIndex: number,
-    uid: string | null,
-  ): void {
+  /** One pet bed — furniture, and nothing else. The one placement path
+   *  {@link dressPetBeds} uses for every bedroom's row, so there is exactly
+   *  one way a pet bed gets built and registered. `bedIndex` and `uid` are
+   *  what let {@link sendPetsToBed} tell "the bed she can actually see, for a
+   *  pet that is actually out" from every other case — see
+   *  {@link petBedRoster}. */
+  private placePetBed(shell: Group, x: number, z: number, bedIndex: number, uid: string | null): void {
     const bed = createPetBed();
     // Solid and standable, like every other flat-topped prop now — QA
     // found it walk-through, and a pet bed is a cushion, which is a thing
@@ -4893,205 +4916,89 @@ export class Hotel implements GameSystem {
       radius: PET_BED_FOOTPRINT_RADIUS,
       top: PET_BED_CUSHION_TOP,
     });
-
-    const pet = createPet(kind);
-    shell.add(pet.root);
-    // Out and about, not in bed: the pet a child sees between naps is the one
-    // walking behind her in the parade, and this one is not drawn at all until
-    // `nap` sends it to bed (`bedtime`, and the roster's own doc comment).
-    // Built up front anyway, rather than made on demand, for the reason
-    // `buildNapGlyphs` gives about per-nap allocation.
-    pet.root.visible = false;
-    this.standPetUp(pet, x, z);
-    this.petBedRoster.push({ pet, x, z, bedtime: -1, bedIndex, uid });
+    this.petBedRoster.push({
+      x,
+      z,
+      bedIndex,
+      uid,
+      spot: {
+        runUpX: SUITE.originX + x,
+        runUpY: 0,
+        runUpZ: SUITE.originZ + z + PET_BEDTIME_RUN_UP,
+        cushionX: SUITE.originX + x,
+        cushionZ: SUITE.originZ + z,
+        cushionTop: PET_BED_CUSHION_TOP,
+      },
+    });
   }
 
   /**
    * Every pet she owns, one entry per purchase — *ownership*, not who is
    * currently out of the backpack, which is {@link paradePetKind} below's
-   * question instead. Falls back to a lone, unreal bunny (`uid: null`) so a
-   * bedroom with no pet bought yet is never simply empty (see
-   * {@link dressPetBeds}); a real purchase always carries its own inventory
-   * `uid`, which is what lets {@link sendPetsToBed} find its live body in the
-   * parade rather than only ever cutting a bed-side stand-in into view.
+   * question instead. Falls back to a single bed's worth (`uid: null`) so a
+   * bedroom with no pet bought yet still has a pet bed in it to look forward
+   * to (see {@link dressPetBeds}); nothing ever sleeps in that one, because
+   * there is no pet to sleep in it.
    *
-   * **The species is in the catalogue `id`, not in `kind`** — see
-   * {@link paradePetKind} for why the same lookup appears in both.
+   * A real purchase carries its own inventory `uid`, which is the whole key:
+   * it is what lets {@link sendPetsToBed} find that pet's own live body in
+   * the parade. Nothing here needs the *species* any more — the hotel does
+   * not build pets.
    */
-  private ownedPets(): { readonly kind: PetKind; readonly uid: string | null }[] {
+  private ownedPets(): { readonly uid: string | null }[] {
     const owned = gameStore.get().inventory.filter((item) => item.kind === 'pet');
-    if (owned.length === 0) return [{ kind: 'bunny', uid: null }];
-    return owned.map((item) => {
-      const species = item.id.slice(item.id.lastIndexOf('.') + 1);
-      const kind = PET_KINDS.find((known) => known === species) ?? 'bunny';
-      return { kind, uid: item.uid };
-    });
+    if (owned.length === 0) return [{ uid: null }];
+    return owned.map((item) => ({ uid: item.uid }));
   }
 
   /**
-   * Stands a pet up on all fours at its own bed's run-up spot, awake — where
-   * a trot to bed starts, and where {@link standPetsDown}'s own end leaves it
-   * (hidden) when the nap is over.
-   */
-  private standPetUp(pet: CreatureHandle, x: number, z: number): void {
-    // Facing −Z, at its own bed: the pillow end, and the way it is about to
-    // walk. See {@link PET_BEDTIME_RUN_UP}.
-    pet.root.rotation.set(0, Math.PI, 0);
-    pet.root.position.set(x, 0, z + PET_BEDTIME_RUN_UP);
-  }
-
-  /**
-   * Lies a pet down on its own bed, asleep — the end of the trot
-   * {@link sendPetsToBed} starts.
+   * **Bedtime**: every pet with a bed in the room she just lay down in walks
+   * over to it and gets in — {@link nap}'s pet-side half, and issue #275's
+   * *"when the player sleeps, all pets should also go to sleep."*
    *
-   * Onto its side, head toward the pillow at −Z. A quarter turn about X lays
-   * a standing pet down; the drop is the cushion plus roughly the radius of
-   * the body now resting on it — `PET_BED_CUSHION_TOP` and
-   * `PET_BED_CUSHION_RADIUS` are exported for exactly this, and the artist's
-   * note asks callers to take them rather than measure the mesh.
-   */
-  private layPetDown(pet: CreatureHandle, x: number, z: number): void {
-    pet.root.rotation.set(-Math.PI / 2, 0, 0);
-    pet.root.position.set(x, PET_BED_CUSHION_TOP + PET_BED_CUSHION_RADIUS * 0.72, z - 0.1);
-  }
-
-  /**
-   * **Bedtime**: every pet bed's own pet appears on the floor beside its bed
-   * and starts trotting into it — {@link nap}'s pet-side half, and the fix
-   * for Jim's *"a pet bed already has a sleeping pet in it before the player
-   * naps"* (21 Aug 2026; see {@link petBedRoster}).
+   * All this does is hand the parade each bed. The pet a child is watching
+   * walks there itself, on the same follow spring it walks everywhere else
+   * with, and climbs in under its own steam
+   * (`entities/parade/ParadeMember.ts`). **One body, one owner** — this class
+   * builds no animal, hides none and poses none, so there is nothing here
+   * that can disagree with what is on screen. Jim's 23 Aug 2026 report was
+   * three symptoms of the one cause this deletes: a stand-in pet flickering
+   * against the real one, the stand-in being a different species from the pet
+   * she owned, and the stand-in's own hand-placed pose hanging off the bed.
    *
-   * The pet a child is actually watching is the one behind her in the parade,
-   * and `Game.tick` takes the parade's *pets* off screen (`setPetsHidden`) for
-   * exactly as long as these are up, so there is one of each animal on screen
-   * rather than a sleeping twin of the one still following her about — her
-   * toys carry on standing there, having no bed to go to. Getting *into* the
-   * bed is therefore the
-   * whole point: something has to be seen to happen at the moment she goes to
-   * sleep, or a bed that was empty a second ago simply has a pet in it.
-   *
-   * It does not matter which of the three bedrooms she napped in — every pet
-   * bed still lies down (the same room-wide {@link napping} timer she has
-   * always answered to, issue #275) — but only the bed or beds in **her own
-   * room** are worth a real walk: the other bedrooms' beds are never on
-   * screen at once with this one (the camera only ever shows the room she is
-   * in), so a child can never catch the same pet appearing to have two
-   * bodies. `bedIndex` is that room; see {@link Bed.bedIndex}.
-   *
-   * **The genuine walk** (issue #279 round 6, Jim: *"the pet cuts — it
-   * vanishes from the parade and appears already in its bed"*): for a bed in
-   * her own room whose {@link uid} matches a pet actually out in the parade
-   * right now, this hands {@link petParade} a walk target — the bed's own
-   * run-up spot, in world metres, the exact point {@link standPetUp} already
-   * poses a stand-in pet at — and leaves the bed **empty** until
-   * {@link petArrivedAtBed} reports the real body got there. The parade
-   * keeps that pet visible and walking for as long as the route takes; this
-   * class does nothing more until the callback fires. Every other bed — a
-   * stowed pet, a pet she is carrying, the no-pets-yet fallback bunny
-   * (`uid: null`), or simply a bed in a room she cannot see right now —
-   * falls straight back to the instant appear-and-trot this method has
-   * always done, because there is no live body anywhere for a cut to be
-   * visible in.
+   * **Only the room she is actually in.** Every pet has a bed in each of the
+   * three bedrooms (see {@link dressPetBeds}) and there is exactly one body
+   * per pet, so exactly one of those beds may be sent for. `bedIndex` is the
+   * room she pressed Sleep in; see {@link Bed.bedIndex}.
    */
   private sendPetsToBed(bedIndex: number): void {
     for (const bed of this.petBedRoster) {
-      if (
-        bed.bedIndex === bedIndex &&
-        bed.uid !== null &&
-        (this.petParade?.beginPetNapWalk(
-          bed.uid,
-          SUITE.originX + bed.x,
-          0,
-          SUITE.originZ + bed.z + PET_BEDTIME_RUN_UP,
-          () => this.petArrivedAtBed(bed),
-        ) ??
-          false)
-      ) {
-        continue; // Routed — stays empty furniture until the real walk arrives.
-      }
-      bed.bedtime = 0;
-      bed.pet.root.visible = true;
-      this.standPetUp(bed.pet, bed.x, bed.z);
+      if (bed.bedIndex !== bedIndex || bed.uid === null) continue;
+      this.petParade?.sendPetToBed(bed.uid, bed.spot);
     }
   }
 
   /**
-   * One pet's own real body got to its bed's run-up spot — {@link
-   * PetParadeLink.beginPetNapWalk}'s `onArrive`. From here it is exactly the
-   * instant appear-and-trot {@link sendPetsToBed} has always used for every
-   * other bed: the hand-off is invisible because the parade member vanishes
-   * (hidden by the parade itself, the instant it calls this) at the very
-   * spot this stand-in now appears at.
-   */
-  private petArrivedAtBed(bed: PetBedEntry): void {
-    bed.bedtime = 0;
-    bed.pet.root.visible = true;
-    this.standPetUp(bed.pet, bed.x, bed.z);
-  }
-
-  /**
-   * The other end of it: nobody is in bed, and the beds go back to being
-   * empty furniture — see {@link petBedRoster} for why they are empty rather
-   * than occupied by a standing pet.
+   * The other end of it: every pet gets up and rejoins the line, and the beds
+   * go back to being empty furniture.
    *
-   * Also cancels any walk to `bedIndex`'s own beds that had not arrived yet
-   * — a nap that ends before a distant pet finishes its route must not leave
-   * that pet stranded mid-walk toward a bed nobody is watching any more; it
-   * simply resumes following the trail, exactly as it would have if it had
-   * never been routed at all.
+   * Every bed, not just this room's: `wakePetFromBed` is a no-op for a pet
+   * that never went to bed, so there is no list of "which ones did I actually
+   * send" to keep — and a nap that ends while a pet is still walking to its
+   * bed has to release that pet too, or it would keep walking to a bed
+   * nobody is watching any more.
    */
-  private standPetsDown(bedIndex: number): void {
+  private standPetsDown(): void {
     for (const bed of this.petBedRoster) {
-      if (bed.bedIndex === bedIndex && bed.uid !== null) this.petParade?.cancelPetNapWalk(bed.uid);
-      bed.bedtime = -1;
-      bed.pet.root.visible = false;
-      this.standPetUp(bed.pet, bed.x, bed.z);
+      if (bed.uid !== null) this.petParade?.wakePetFromBed(bed.uid);
     }
   }
 
-  /**
-   * One frame of every pet's trot from the floor onto its own cushion.
-   *
-   * Driven off each bed's own `bedtime` clock rather than off {@link napping}
-   * so it reads the same whichever way a nap started, and eased with the same
-   * smoothstep the breakfast pet's own trot uses ({@link updateFeast}) — one
-   * idea of "a pet trots over" in this file, not two. The stride comes from
-   * `setWalkPhase(elapsed * 9, 1)`, which is that same trot exactly.
-   *
-   * Called unconditionally from {@link update}, above its player-null return,
-   * like every other always-on line there: a headless world (`check:hotel`)
-   * has to be able to watch a pet get into bed too.
-   */
-  private updatePetBedtime(dt: number, elapsed: number): void {
-    for (const bed of this.petBedRoster) {
-      if (bed.bedtime < 0) continue;
-      bed.bedtime += dt;
-      const walk = Math.min(1, bed.bedtime / PET_BEDTIME_SECONDS);
-      if (walk >= 1) {
-        // Arrived, and asleep — breathing, no stride. Written every frame
-        // rather than once on the edge because it is three numbers, and an
-        // edge is a thing to get wrong. `setWalkPhase(phase, 0)` is the pets'
-        // own idle, the same one line every other pet in the park stands
-        // still with.
-        this.layPetDown(bed.pet, bed.x, bed.z);
-        bed.pet.setWalkPhase(elapsed * 0.7, 0);
-        continue;
-      }
-      const eased = walk * walk * (3 - 2 * walk);
-      bed.pet.root.rotation.set(0, Math.PI, 0);
-      bed.pet.root.position.set(
-        bed.x,
-        PET_BED_CUSHION_TOP * eased,
-        bed.z + PET_BEDTIME_RUN_UP * (1 - eased),
-      );
-      bed.pet.setWalkPhase(elapsed * 9, 1);
-    }
-  }
-
-  /** True once this bed's own pet has finished its trot and is lying asleep
-   *  on the cushion — what a "Z" glyph and `check:hotel` both ask. */
-  private petIsAsleep(bed: { readonly bedtime: number }): boolean {
-    return bed.bedtime >= PET_BEDTIME_SECONDS;
+  /** True once this bed's own pet has actually got in and settled — what a
+   *  "Z" glyph and `check:hotel` both ask, answered by the one system that
+   *  owns that pet's body rather than by a second clock in this file. */
+  private petIsAsleep(bed: PetBedEntry): boolean {
+    return bed.uid !== null && this.petParade?.petBedPhase(bed.uid, bed.spot) === 'asleep';
   }
 
   /**
@@ -5125,9 +5032,10 @@ export class Hotel implements GameSystem {
       const worldZ = SUITE.originZ + bed.z;
       const y = PET_BED_CUSHION_TOP + PET_BED_CUSHION_RADIUS * 0.72 + NAP_Z_PET_Y;
       this.napGlyphSleepers.push({
-        // `null` until this pet has actually finished its trot and lain down:
-        // a "Z" over an empty bed, or over a pet still trotting towards one,
-        // is the *look* of the bug this whole trot exists to fix.
+        // `null` until this bed's own pet has actually walked over, got in and
+        // settled — a "Z" over an empty bed, or over a pet still on its way
+        // there, is the *look* of the bug the walk exists to fix. Asked of the
+        // parade, which owns that pet, rather than of a clock in this file.
         anchor: () => (this.petIsAsleep(bed) ? { x: worldX, y, z: worldZ } : null),
         glyphs: this.makeNapGlyphSet(0x50b1 + index),
       });
