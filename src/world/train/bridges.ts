@@ -7,6 +7,7 @@ import {
   Mesh,
   Quaternion,
   Vector3,
+  type Material,
 } from 'three';
 import type { TrainRoute } from './route';
 import type { LevelCrossing } from './crossings';
@@ -165,8 +166,23 @@ const SHELL_STEP = 0.6;
 /** Pitch of the parapet collision-wall segments, metres. */
 const WALL_SEGMENT = 2.0;
 
-const stoneMaterial = toonMaterial(0xffffff, { map: pinkStoneTexture(1, 1) });
-const copingMaterial = toonMaterial(PALETTE.stonePinkLight);
+/**
+ * Built on first use, never at module load: `pinkStoneTexture` paints a
+ * real 2D canvas, and this module is imported (via the train's own leaf
+ * chain) by Node check scripts that never install the headless-canvas shim
+ * and never build a bridge — a module-level call broke `check:space-night`
+ * with `document is not defined` without a single bridge being asked for.
+ */
+let materialsCache: { stone: Material; coping: Material } | null = null;
+function bridgeMaterials(): { stone: Material; coping: Material } {
+  if (!materialsCache) {
+    materialsCache = {
+      stone: toonMaterial(0xffffff, { map: pinkStoneTexture(1, 1) }),
+      coping: toonMaterial(PALETTE.stonePinkLight),
+    };
+  }
+  return materialsCache;
+}
 
 /** Metres of masonry per texture tile — sized so a stone course reads at
  * about half a metre, the same chunkiness the garden walls carry. */
@@ -422,7 +438,7 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   const origin0 = frame.worldAt(0, 0, shift);
   const deckMesh = new Mesh(
     new BoxGeometry(halfAcross * 2, 0.12, ARCH_CLEAR_HALF * 2),
-    stoneMaterial,
+    bridgeMaterials().stone,
   );
   deckMesh.name = 'deck';
   deckMesh.castShadow = true;
@@ -451,10 +467,10 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
     soffitAt,
     springY,
   );
-  const shellMesh = new Mesh(shell.stone, stoneMaterial);
+  const shellMesh = new Mesh(shell.stone, bridgeMaterials().stone);
   shellMesh.castShadow = true;
   shellMesh.receiveShadow = true;
-  const copingMesh = new Mesh(shell.coping, copingMaterial);
+  const copingMesh = new Mesh(shell.coping, bridgeMaterials().coping);
   copingMesh.castShadow = true;
   bridgeGroup.add(shellMesh, copingMesh);
 
