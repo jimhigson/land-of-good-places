@@ -780,21 +780,6 @@ interface Bed {
 }
 
 /**
- * The seam onto the parade of cute things — see `entities/parade/Parade.ts`,
- * which is the one real implementer. Set by `Game`, the one place that already
- * holds both a `Parade` and this `Hotel` (see `Parade.setPetsHidden`'s own
- * caller, right next to where this gets wired up).
- *
- * A type-only import of `Parade` here would be free of any runtime cost or
- * cycle risk either way, but this file does not need the concrete class —
- * only the two calls {@link Hotel.sendPetsToBed} and
- * {@link Hotel.standPetsDown} actually make, which is the whole of what a
- * pet's nap needs from the parade. See CLAUDE.md's note on this PR's own
- * diagnosis: the hotel and the parade were two systems with no shared
- * walk-target handoff, and this interface is that handoff, kept as small as
- * the two calls that use it.
- */
-/**
  * One entry in {@link Hotel.petBedRoster} — see that field's own doc comment
  * for `bedtime`, and {@link Hotel.ownedPets} for `uid`.
  */
@@ -813,6 +798,21 @@ interface PetBedEntry {
   readonly uid: string | null;
 }
 
+/**
+ * The seam onto the parade of cute things — see `entities/parade/Parade.ts`,
+ * which is the one real implementer. Set by `Game`, the one place that already
+ * holds both a `Parade` and this `Hotel` (see `Parade.setPetsHidden`'s own
+ * caller, right next to where this gets wired up).
+ *
+ * A type-only import of `Parade` here would be free of any runtime cost or
+ * cycle risk either way, but this file does not need the concrete class —
+ * only the two calls {@link Hotel.sendPetsToBed} and
+ * {@link Hotel.standPetsDown} actually make, which is the whole of what a
+ * pet's nap needs from the parade. See CLAUDE.md's note on this PR's own
+ * diagnosis: the hotel and the parade were two systems with no shared
+ * walk-target handoff, and this interface is that handoff, kept as small as
+ * the two calls that use it.
+ */
 export interface PetParadeLink {
   /**
    * Routes the parade member with this uid to a world point and keeps it
