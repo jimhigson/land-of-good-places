@@ -268,6 +268,19 @@ export class ParkGeneration {
   /** A solved chute waiting to be judged and built, on a frame of its own. */
   private slidePending: { readonly route: SolvedRailRoute; readonly target: number } | null = null;
   private slideSolved = false;
+
+  /**
+   * The railway crossing plan (`train/crossingPlanSolve.ts`) — the
+   * feasibility march deciding where a bridge provably fits — solved a
+   * candidate at a time after the slide and offered to
+   * `train/crossingPrewarm.ts` before `paths.ts` (whose import would
+   * otherwise run the whole ~300 ms march inside one frame; check:park-boot
+   * measured exactly that lump at 323 ms).
+   */
+  private crossingModule: typeof import('../world/train/crossingPlanSolve') | null = null;
+  private crossingPrewarmModule: typeof import('../world/train/crossingPrewarm') | null = null;
+  private crossingScheduler: SolveScheduler | null = null;
+  private crossingSitesSolved = false;
   private pathsDone = false;
   private failure: Error | null = null;
 
@@ -369,12 +382,20 @@ export class ParkGeneration {
 
   /** Steps begun after a slice's deadline had passed. Zero, on correct code. */
   get stepsPastDeadline(): number {
-    return this.overrunSteps + (this.trainScheduler?.slicesPastDeadline ?? 0);
+    return (
+      this.overrunSteps +
+      (this.trainScheduler?.slicesPastDeadline ?? 0) +
+      (this.crossingScheduler?.slicesPastDeadline ?? 0)
+    );
   }
 
   /** Which loops began a step late — the diagnosis, not just the count. */
   get lateStepsByPhase(): Readonly<Record<string, number>> {
-    return { ...this.overrunByPhase, ...(this.trainScheduler?.lateSlicesByTask ?? {}) };
+    return {
+      ...this.overrunByPhase,
+      ...(this.trainScheduler?.lateSlicesByTask ?? {}),
+      ...(this.crossingScheduler?.lateSlicesByTask ?? {}),
+    };
   }
 
   /** How many pieces each sliced phase was divided into. Device-independent. */
@@ -468,6 +489,27 @@ export class ParkGeneration {
       return;
     }
 
+    // The crossing plan: where the railway can genuinely take a bridge,
+    // marched a candidate at a time (see the field's own comment). It reads
+    // the settled layout and TRAIN_PLAN, both long since in place here.
+    if (!this.crossingModule || !this.crossingPrewarmModule) {
+      this.workingFrames += 1;
+      this.runImport(() =>
+        Promise.all([
+          import('../world/train/crossingPlanSolve'),
+          import('../world/train/crossingPrewarm'),
+        ]).then(([solveModule, prewarmModule]) => {
+          this.crossingModule = solveModule;
+          this.crossingPrewarmModule = prewarmModule;
+        }),
+      );
+      return;
+    }
+    if (!this.crossingSitesSolved) {
+      this.advanceCrossingSites(this.crossingModule, this.crossingPrewarmModule, budgetMs);
+      return;
+    }
+
     // `paths.ts` last: it reads `SLIDE_PLAN`, so it must not be imported until
     // the pre-warmed plan is in the letterbox above.
     this.workingFrames += 1;
@@ -476,6 +518,35 @@ export class ParkGeneration {
         this.pathsDone = true;
       }),
     );
+  }
+
+  /**
+   * Runs the crossing-plan march through the generic {@link SolveScheduler},
+   * exactly the train's own pattern: `yield*` the search, post the result to
+   * the letterbox, and let `crossingPlan.ts`'s eventual load take it instead
+   * of re-solving.
+   */
+  private advanceCrossingSites(
+    solveModule: typeof import('../world/train/crossingPlanSolve'),
+    prewarmModule: typeof import('../world/train/crossingPrewarm'),
+    budgetMs: number,
+  ): void {
+    this.workingFrames += 1;
+    const scheduler = (this.crossingScheduler ??= new SolveScheduler([
+      {
+        name: 'crossingSites',
+        *start() {
+          const sites = yield* solveModule.crossingSitesSearch();
+          prewarmModule.offerPrewarmedCrossingSites(sites);
+        },
+      },
+    ]));
+    scheduler.advance(budgetMs);
+    if (scheduler.failed) {
+      this.failure = scheduler.failed;
+      return;
+    }
+    if (scheduler.done) this.crossingSitesSolved = true;
   }
 
   /**
