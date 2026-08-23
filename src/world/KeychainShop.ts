@@ -5,6 +5,7 @@ import {
   MeshBasicMaterial,
   OctahedronGeometry,
   SphereGeometry,
+  Vector3,
 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PALETTE } from '../core/palette';
@@ -34,41 +35,65 @@ import { keychainItems, type ShopItem } from './building/shops/catalogue';
  * `minigames/stallPlacement.ts` but not one line of code from `minigames/`
  * itself — importing `minigames/` into `world/` would be backwards layering.
  *
- * ## The rack IS the picker (23 August 2026)
+ * ## The rack IS the picker (23 August 2026) — now entered, not walked (23 August 2026)
  *
  * This used to build the display rack purely as set-dressing and open a
  * separate 2D list panel (`ui/KeychainPanel.ts`) for the actual picking —
  * two presentations of the same six charms. Jim, having seen a screenshot of
  * the real rack: *"I like this much better than the menu style - let's keep
- * it this way for the shop."* So the rack is now the only picker: each charm
- * already stood on the counter (`buildCart`) is its own
- * `InteractZone` (GAME_DESIGN.md's SELECTION RULE — `world/Selection.ts`,
- * `world/Flowers.ts` is the closest existing precedent, a cluster of
- * individually-tappable things), rainbow-outlined on its own real silhouette
- * (`highlightObject`), with a chip that reads "Wear the Star!", "Collect the
- * Heart!" or "Take off the RiPika!" depending on what she owns and wears —
- * live, the same way the train's platform swaps "Get on" for "Get off".
- * There is no modal to open any more, so `KeychainShop` no longer has a
- * `uiOpen`; tapping a charm equips it immediately and `WornKeychain.ts` draws
- * it on her actual back on the very next frame — better confirmation than
- * the old panel's stylised preview ever gave, because it is the real thing.
+ * it this way for the shop."* So the rack is the only picker, and there is
+ * no modal to open: tapping a charm equips it immediately and
+ * `WornKeychain.ts` draws it on her actual back on the very next frame —
+ * better confirmation than the old panel's stylised preview ever gave,
+ * because it is the real thing.
  *
- * Six charms this close together on one small cart (≈0.32 m apart) would
- * ordinarily fail `check:tap-spacing`'s "different actions must sit a
- * finger apart" rule the moment their chip text differs — which it does,
- * constantly, as she collects them one by one. The fix is the same one
- * `tapSpacing.ts` already carves out for two flowers in one bed: every charm
- * zone declares the same **static** `verb: 'Wear'`, so the check classifies
- * them as same-action (a harmless-ambiguity warning) even though the live
- * chip label — built fresh per zone, per frame, in {@link charmActions} — says
- * something different for each.
+ * **The first cut made every charm its own walk-up `InteractZone`.** Jim,
+ * having tried it live: *"Interesting take. You should still be able to
+ * 'enter' the shop, but the menu is the camera zooming in on the wares and
+ * select by clicking or tapping the one you want."* Six charms 0.32 m apart
+ * meant six almost-identical stand points to shuffle between — workable, but
+ * fiddlier than every other shop in the park, which is entered once. So the
+ * cart is now **one** `InteractZone` ({@link shopEntryZone}, `stall:keychain`
+ * — the same walk-up-and-press-E/tap-it convention `FacePaintStall` and every
+ * mini-game stall use, `MiniGameHost.enter`'s own doc comment is the
+ * canonical statement of it), and pressing it calls {@link openView} instead
+ * of opening a panel: the park camera itself glides in on the rack
+ * (`Game.tick`, reading {@link viewOpen}/{@link viewFocus} and driving
+ * `IsoCamera.setFocusOverride`/`setZoomTarget`), and **only then** do the six
+ * charms become their own tappable things ({@link charmZone}) — the exact
+ * same `InteractZone`s, rainbow-outlined on their own real silhouette
+ * (`highlightObject`) with the live "Wear the Star!"/"Collect the
+ * Heart!"/"Take off the RiPika!" chip {@link charmActions} always built, now
+ * simply reachable from one spot instead of six. Closing the view
+ * ({@link closeView} — the on-screen ✕, Esc/cancel, or simply walking away,
+ * `update`'s own job) swaps them back out for the one entry zone and hands
+ * the camera back to the ordinary follow.
+ *
+ * **Why the two zone shapes never coexist.** `interactZones()` returns
+ * *either* the one entry zone *or* the six charm zones, never both: they sit
+ * on the very same small cart, so a snapshot holding both would fail
+ * `check:tap-spacing`'s "different actions must sit a finger apart" rule
+ * outright — a tap anywhere near the rack would be within a finger of a zone
+ * offering a completely different action. That check (and the procgen
+ * reachability invariant, `keychainStallStandIsUsable`) exercise both real
+ * states of this object explicitly — `scripts/check-tap-spacing.mts` opens
+ * the view for one snapshot the same way it moves the probe player between
+ * hotel rooms; `test/procgen/parkFacts.ts`'s `keychainCharmEntrances` does
+ * the same for the invariant — rather than the checks accidentally seeing
+ * only whichever state happens to be default.
+ *
+ * Within the six-open state, the same tap-spacing problem the previous cut
+ * solved still applies and is solved the same way: every charm zone declares
+ * the same **static** `verb: 'Wear'`, so the check classifies them as
+ * same-action (a harmless-ambiguity warning) even though the live chip label
+ * — built fresh per zone, per frame, in {@link charmActions} — says something
+ * different for each.
  *
  * Collected, not chosen for the moment (`HANDOFF-keychain-shop.md`'s
- * decisions 2 and 3, unchanged by the rack becoming the picker): tapping an
- * unowned charm both collects it (`gameStore.buy`, price 0 — see
- * `shops/catalogue.ts`'s `keychainStall` entries) and wears it in the same
- * motion; tapping an owned one just wears it; tapping the one already worn
- * takes it off.
+ * decisions 2 and 3, unchanged by any of the above): tapping an unowned charm
+ * both collects it (`gameStore.buy`, price 0 — see `shops/catalogue.ts`'s
+ * `keychainStall` entries) and wears it in the same motion; tapping an owned
+ * one just wears it; tapping the one already worn takes it off.
  */
 
 // ---------------------------------------------------------------- placement
@@ -82,6 +107,15 @@ const STALL_WIDTH = 2.1;
 const STALL_DEPTH = 1.5;
 /** How close counts as "at the stall" for the proximity/interact check. */
 const REACH = 3.1;
+
+/**
+ * How far she may drift from the stand point before the zoomed view gives up
+ * and closes on its own (see `update`) — looser than {@link REACH} itself, so
+ * standing at the very edge of "in reach" does not flicker the view open and
+ * shut. One of the view's three ways out, alongside the on-screen ✕ and
+ * Esc/cancel — see this file's own header.
+ */
+const VIEW_EXIT_REACH = REACH + 1.5;
 
 /**
  * Tap/hit radius for one charm's own zone, in metres — deliberately small (a
@@ -145,6 +179,24 @@ export class KeychainShop implements GameSystem {
 
   private player: Player | null = null;
 
+  /**
+   * True while the zoomed rack picker owns the camera — `Game.tick` reads
+   * this (and {@link viewFocus}) to drive `IsoCamera.setFocusOverride`/
+   * `setZoomTarget`, and {@link interactZones} reads it to decide which zone
+   * shape to offer. See this file's own header for why the two never
+   * coexist.
+   */
+  private open = false;
+
+  /**
+   * World point the camera orbits while {@link viewOpen} — the rack's own
+   * centre, averaged across the six charms once in {@link buildCart} (they
+   * do not move afterwards, so this is solved once rather than every frame).
+   */
+  private readonly rackFocus = new Vector3();
+
+  private closeButton: HTMLElement | null = null;
+
   constructor(collision: CollisionWorld) {
     this.group.name = 'keychainShop';
 
@@ -169,35 +221,121 @@ export class KeychainShop implements GameSystem {
   }
 
   /**
-   * One `InteractZone` per charm on the rack — see this file's own header
-   * for why they can sit this close together and still pass
-   * `check:tap-spacing`.
+   * Builds the on-screen ✕, one of the zoomed view's three ways out (the
+   * other two are Esc/cancel and simply walking away — see `update`). Called
+   * by `World.mountUi`, after the HUD exists — see `FacePaintStall.mountUi`'s
+   * own doc comment for why this cannot happen from the constructor.
+   */
+  mountUi(uiRoot: HTMLElement): void {
+    if (this.closeButton) return;
+    this.closeButton = buildCloseButton(uiRoot, () => this.closeView());
+  }
+
+  /** True while the zoomed rack picker owns the camera. `Game.tick` reads this. */
+  get viewOpen(): boolean {
+    return this.open;
+  }
+
+  /** {@link rackFocus}, for `Game.tick` to hand to `IsoCamera.setFocusOverride`. */
+  get viewFocus(): Readonly<Vector3> {
+    return this.rackFocus;
+  }
+
+  /**
+   * Either the one "enter the shop" zone, or the six charms — never both at
+   * once. See this file's own header for why, and `scripts/check-tap-spacing.mts`
+   * / `test/procgen/parkFacts.ts` for how both states get checked even though
+   * a single snapshot only ever shows one.
    */
   interactZones(): InteractZone[] {
-    return this.rack.map((charm) => this.charmZone(charm));
+    return this.open ? this.rack.map((charm) => this.charmZone(charm)) : [this.shopEntryZone()];
   }
 
   update(context: FrameContext): void {
     this.frameElapsed = context.elapsed;
     this.updateSparkles(context.elapsed);
+    setCloseButtonVisible(this.closeButton, this.open);
+
+    if (!this.open) return;
+    const { input, playerPosition } = context;
+    const dx = playerPosition.x - this.standX;
+    const dz = playerPosition.z - this.standZ;
+    const wandered = Math.hypot(dx, dz) > VIEW_EXIT_REACH;
+    if (wandered || input.justPressed('menu') || input.justPressed('cancel')) this.closeView();
   }
 
   /**
-   * Teleports her to the stand point in front of the rack — the deep link's
-   * own entry point (`Game.ts`'s `boardRide` table, `/keychain-stall`).
-   * There is nothing to "open" any more: standing this close to the cart
-   * selects whichever charm she's nearest to on its own, through the
-   * ordinary SELECTION RULE proximity pick (`interactZones()`, above), the
-   * same as walking there ever did.
+   * Opens the zoomed rack picker — the run body of {@link shopEntryZone}'s
+   * chip. Pure state; the camera move itself lives in `Game.tick`, which
+   * re-derives it every frame from {@link viewOpen}/{@link viewFocus} exactly
+   * the way the cat-bus arrival re-derives its own zoom (see
+   * `IsoCamera.setFocusOverride`'s doc comment).
+   */
+  openView(): void {
+    this.open = true;
+  }
+
+  /**
+   * Leaves the zoomed picker and hands the camera back to the ordinary
+   * follow. Three ways in: the on-screen ✕, Esc/cancel, or walking far enough
+   * from the stand point (`update`, above) — the last one is new precisely
+   * because, unlike a paused panel, this view never stops her walking (see
+   * this file's own header on why it deliberately does not pause the park).
+   */
+  closeView(): void {
+    this.open = false;
+  }
+
+  /**
+   * Teleports her to the stand point and opens the view in one motion — the
+   * deep link's own entry point (`Game.ts`'s `boardRide` table,
+   * `/keychain-stall`). A real walk-up would press the chip after arriving;
+   * this does both at once so the deep link lands on the feature itself
+   * rather than one press short of it.
    */
   requestOpen(): boolean {
     if (!this.player || this.player.riding) return false;
     this.player.teleport(this.standX, this.standZ);
+    this.beginView();
     return true;
   }
 
   dispose(): void {
+    this.closeButton?.remove();
     disposeGroup(this.group);
+  }
+
+  /**
+   * The whole cart — the one "enter the shop" trigger (see this file's own
+   * header). Standing this close and pressing E, or tapping the rack, opens
+   * the zoomed picker; the six charms are not their own zones again until it
+   * does. `highlight` names the whole group so the rainbow outline (and the
+   * tap hit-test, which prefers a named object's real bounding box over
+   * `pickRadius`) reads as "the cart", not a plain circle floating over it.
+   */
+  private shopEntryZone(): InteractZone {
+    return {
+      id: 'stall:keychain',
+      label: 'Charm Rack!',
+      x: STALL_X,
+      y: this.groundY,
+      z: STALL_Z,
+      pickRadius: REACH,
+      standX: this.standX,
+      standZ: this.standZ,
+      standRadius: REACH,
+      highlight: highlightObject(this.group),
+      actions: () =>
+        !this.player || this.player.riding
+          ? []
+          : pressAction('See the charms!', () => this.beginView(), '🔑'),
+    };
+  }
+
+  /** {@link shopEntryZone}'s run body: the chime, then the state flip. */
+  private beginView(): void {
+    playOpenChime();
+    this.openView();
   }
 
   // -------------------------------------------------------------- internals
@@ -466,6 +604,19 @@ export class KeychainShop implements GameSystem {
         standZ,
       });
     });
+
+    // {@link rackFocus}: the six charms' own world centre, solved once here
+    // rather than every frame — they never move afterwards. A touch above
+    // the counter height (not the charms' own y) so the framed shot centres
+    // on the display rather than sitting low with the parasol looming over
+    // an empty top half.
+    let sumX = 0;
+    let sumZ = 0;
+    for (const charm of this.rack) {
+      sumX += charm.x;
+      sumZ += charm.z;
+    }
+    this.rackFocus.set(sumX / this.rack.length, this.groundY + 1.05, sumZ / this.rack.length);
   }
 
   private buildCollision(collision: CollisionWorld): void {
@@ -514,4 +665,35 @@ function disposeGroup(root: Group): void {
     const mesh = object as Partial<Mesh>;
     mesh.geometry?.dispose();
   });
+}
+
+/**
+ * The zoomed view's on-screen ✕ — `.shop-close`, the same class `Shopping`'s
+ * own panel and `ParkMap` already use for "leave this view", so it reads as
+ * the same button a child has met elsewhere rather than a new one to learn.
+ * Hidden (not removed) when the view is shut, via {@link setCloseButtonVisible}.
+ */
+function buildCloseButton(uiRoot: HTMLElement, onClose: () => void): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'keychain-view-close';
+  wrap.dataset.show = 'false';
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'shop-close';
+  button.setAttribute('aria-label', 'Close the charm rack');
+  button.textContent = '✕';
+  button.addEventListener('click', () => {
+    button.blur();
+    onClose();
+  });
+
+  wrap.append(button);
+  uiRoot.append(wrap);
+  return wrap;
+}
+
+function setCloseButtonVisible(button: HTMLElement | null, visible: boolean): void {
+  if (!button) return;
+  button.dataset.show = visible ? 'true' : 'false';
 }

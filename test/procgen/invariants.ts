@@ -1864,16 +1864,27 @@ const railRaceStallDoormatIsUsable: Invariant = (facts) => {
  * charm's own `x`/`z` on the counter) is what a child is actually walked to
  * on pressing the chip, and so is the coordinate worth measuring — this
  * reads it back from the **built world's own interact zones**
- * (`facts.entrances`, filtered to `stall:` ids by `parkFacts.ts`) rather than
- * from `STALL_STANDS_BY_ID` directly — the same "measure what the game
- * actually sends her to, not the table it was computed from" reasoning
- * `parkFacts.ts`'s own `entrances` comment gives, and the same defect class
- * (the ferris kiosk stand point existing in a table that nothing built ever
- * reached) this whole mechanism exists to catch.
+ * (`facts.keychainCharmEntrances`, `parkFacts.ts`'s own field for exactly
+ * this — see its doc comment) rather than from `STALL_STANDS_BY_ID`
+ * directly — the same "measure what the game actually sends her to, not the
+ * table it was computed from" reasoning `parkFacts.ts`'s own `entrances`
+ * comment gives, and the same defect class (the ferris kiosk stand point
+ * existing in a table that nothing built ever reached) this whole mechanism
+ * exists to catch.
+ *
+ * **Not `facts.entrances` any more (23 August 2026).** The rack is now
+ * *entered* rather than walked up to charm by charm (`world/KeychainShop.ts`'s
+ * own header): `interactZones()` offers the six charms only while its zoomed
+ * view is open, and the one `stall:keychain` entry zone otherwise — never
+ * both, because they sit on the same small cart and would fail
+ * `check:tap-spacing`'s spacing rule if they did. `facts.entrances` is built
+ * from the shop's ordinary, closed, default state, so it only ever holds the
+ * one entry zone now; `parkFacts.ts` opens the view for one extra read to
+ * populate `keychainCharmEntrances`, which is what this invariant needs.
  */
 const keychainStallStandIsUsable: Invariant = (facts) => {
   const complaints: string[] = [];
-  const charms = facts.entrances.filter((entrance) => entrance.id.startsWith('stall:keychain:'));
+  const charms = facts.keychainCharmEntrances;
   if (charms.length === 0) {
     complaints.push("the built park has no 'stall:keychain:*' charm stand points");
     return complaints;

@@ -484,6 +484,22 @@ export interface ParkFacts {
   readonly plots: readonly PlotFact[];
   readonly entrances: readonly EntranceFact[];
   /**
+   * The keychain rack's six charm stand points, specifically — **not**
+   * included in {@link entrances} above.
+   *
+   * `KeychainShop.interactZones()` returns *either* the cart's one entry zone
+   * *or* the six per-charm zones, never both (they sit on the same small
+   * cart, and a snapshot holding both would fail `check:tap-spacing` outright
+   * — see `world/KeychainShop.ts`'s own header). `entrances` is built from
+   * `world.interactZones()` in the shop's ordinary, closed, default state, so
+   * it only ever carries the one `stall:keychain` entry — same as every other
+   * stall gets one `stall:` entrance. This field opens the view for one
+   * extra read, the same way `scripts/check-tap-spacing.mts` moves its probe
+   * player between hotel rooms to see each one's own zones in turn, so the
+   * six real stand points a child reaches once inside stay checked.
+   */
+  readonly keychainCharmEntrances: readonly EntranceFact[];
+  /**
    * **The cat bus, as actually found in the built scene graph.** `null` if
    * there is no node named `cat-bus` anywhere in it.
    *
@@ -1293,6 +1309,17 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
       .map((zone) => ({ id: zone.id, x: zone.standX, z: zone.standZ })),
   ];
 
+  // The six charm stand points, read with the rack's own zoomed view opened
+  // — see {@link ParkFacts.keychainCharmEntrances}'s own doc comment for why
+  // `entrances` above cannot carry these. Closed again immediately after:
+  // nothing later in this function should see the shop mid-browse.
+  world.keychainShop.openView();
+  const keychainCharmEntrances: EntranceFact[] = world.keychainShop
+    .interactZones()
+    .filter((zone) => zone.id.startsWith('stall:keychain:'))
+    .map((zone) => ({ id: zone.id, x: zone.standX, z: zone.standZ }));
+  world.keychainShop.closeView();
+
   // The drawn ribbon, not the control points it was drawn from. `paths.ts`
   // sweeps a Catmull-Rom (tension 0.4) through those controls, and the curve
   // bows away from them — so where the paving actually runs, and where it
@@ -2080,6 +2107,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     lamps: world.lampPosts.positions.map((p) => [p.x, p.z] as const),
     plots,
     entrances,
+    keychainCharmEntrances,
     catBus,
     hidingTheArrivingBus,
     exits,
