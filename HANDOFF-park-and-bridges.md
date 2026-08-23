@@ -66,16 +66,37 @@ Plus: riders sit; `BRIDGE_RISE` = 4.25 m (real commits on bridge-backtrack,
   wall-owner}.mts. `quietly()` swallows console.warn — use
   process.stdout.write in debug scripts.
 
-## Next
+## Next / state at handoff
 
-1. `npm run build` running (background; check its real exit code).
-2. Browser QA + screenshots (scripts/qa-bridges.mts + qa-walk-bridges.mts;
-   chromium via PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers; own vite port
-   with --strictPort). 3. Push branch to grid-aligned-park (PR #286).
-4. Follow-up to file: bridge decks carry no lamps at night.
+DONE, verified fresh:
+- test:procgen 418/418, 14/14 files, all five seeds (post-memo re-run).
+- check:park EXIT 0 canonical/2/18; check:solve-cost green (paths budget
+  honestly re-measured, see check-solve-cost.mts's paths row).
+- Real-browser QA (playwright chromium via
+  PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers, vite --strictPort):
+  - top-down: the network reads as grid + one true circle at the statue
+    with exactly 4 compass junctions;
+  - BOTH canonical bridges walked across by the real player via
+    tap-to-move (peakY == deckY on each, far foot reached);
+  - screenshots on the qa-screenshots branch, park-and-bridges/ (commit
+    3bfe5d8): 01-top-down, 02-ring-top, 03-bridge-{1,2},
+    04-bridge-{1,2}-middeck (Eleri standing mid-deck), 05-*-end.
+- Bridges per seed: canonical 2 of 3 crossings (gate walk stays a level
+  crossing — entrance furniture on its ramp ground), seed 2: 2 of 3,
+  seed 18: 2 of 2. Was 0 bridges on every seed.
 
-**test:procgen: 418/418, 14/14 files, all five seeds — FULLY GREEN**
-(commit 19336e7). check:park EXIT 0 canonical/2/18. Bridges 2/3, 2/3, 2/2.
+REMAINING (whoever picks this up):
+- Final `npm run build` was running at handoff — check its real exit code
+  (scratchpad build2.txt / re-run; the previously-red check:solve-cost is
+  fixed and green standalone).
+- Push this branch onto grid-aligned-park (PR #286):
+  `git push origin park-and-bridges:grid-aligned-park` (fetch first —
+  check nobody else pushed).
+- Follow-up worth filing: bridge decks carry no lamps at night
+  (everyPathIsLit exempts reservation ground; guard-rail lanterns would
+  be the real fix). Also `generate.ts` gained an optional boundaryMargin
+  brief field (currently unused) from a reverted experiment — kept as
+  capability.
 
 ### This round landed (commit b66b66e)
 
