@@ -242,6 +242,58 @@ function sampleTsFor(
 }
 
 /**
+ * Real-metre spacing {@link denseSampleTs} sweeps a candidate's own width
+ * at — never a fixed `t` step, because `t` is a *fraction* of `halfAcross`
+ * and this crossing's decks range from `MIN_DECK_HALF_WIDTH` (~1 m) to well
+ * past 10 m: a fixed-`t` step that is dense enough for a narrow deck is
+ * nowhere near dense enough for a wide one. A first version of this fixed
+ * `t` at `0.08` — dense-*sounding*, but on an 11 m-`halfAcross` deck (this
+ * crossing's own real, shifted width, this file's own header) that is
+ * 0.88 m between samples, comfortably wide enough to still step clean over
+ * a 0.5 m-wide stone bench, and did. Half the narrowest thing this file
+ * guards against (a `WALL_HALF_WIDTH.wood`-thick post, ~0.22 m half-width,
+ * 0.44 m across) leaves genuine margin.
+ */
+const DENSE_REAL_STEP = 0.2;
+
+/**
+ * A genuinely dense sweep across a candidate's own width, `DENSE_T_STEP`
+ * apart, `t` from `-1` to `1` inclusive — every point {@link SAMPLE_TS}'s
+ * nine fixed fractions could still miss between them.
+ *
+ * **Only for pass 2's final commit, never pass 1's search.** `SAMPLE_TS`'s
+ * own header already explains why the search itself stays sparse: it tries
+ * dozens of width/shift candidates per crossing, so a dense sweep there
+ * multiplies real cost by an order of magnitude for a hole the fixed list
+ * mostly does not have. Pass 2 is different — it runs exactly **once**, on
+ * the crossing's own already-decided, final geometry, so a dense sweep
+ * there costs a few hundred extra `isClearCircle` calls total across the
+ * whole park, not per candidate.
+ *
+ * Found needed live, canonical seed, PR #330: a stone garden bench (four
+ * short walls, built by `Scenery.ts` well before this crossing had ever
+ * accepted a shifted, real candidate to check itself against) sat squarely
+ * on a ramp at `t ≈ 0.87` — between `SAMPLE_TS`'s `0.5` and `0.9`, on
+ * neither of them, on a deck whose own accepted centre had shifted several
+ * metres off the crossing's natural one (this file's own header on why a
+ * shift happens at all). `everyBridgeIsWalkableAndReachable` caught it —
+ * "the ramp ... is not standable" — exactly the disease CLAUDE.md's hotel
+ * story describes: a search whose own acceptance test can pass a state the
+ * built game does not actually guarantee. `sampleTsFor`'s touch-line
+ * addition closes the *one* line guaranteed to carry foot traffic; nothing
+ * before this closed the rest of the width for the one pass that actually
+ * ships.
+ */
+function denseSampleTs(crossing: { x: number; z: number }, centerX: number, centerZ: number, acrossX: number, acrossZ: number, halfAcross: number): readonly number[] {
+  const ts: number[] = [];
+  const step = DENSE_REAL_STEP / Math.max(halfAcross, DENSE_REAL_STEP);
+  for (let t = -1; t <= 1 + 1e-9; t += step) ts.push(t);
+  const crossingT = ((crossing.x - centerX) * acrossX + (crossing.z - centerZ) * acrossZ) / halfAcross;
+  ts.push(crossingT);
+  return ts;
+}
+
+/**
  * How much real daylight a probe needs past whatever `real.collision` has
  * registered, on top of a walker's own body — smaller than the old
  * hand-picked margins (`RAMP_PLOT_MARGIN`, `RAMP_BOUNDARY_MARGIN`) because
@@ -251,7 +303,17 @@ function sampleTsFor(
  */
 const REAL_CLEARANCE_STRIDE = 0.5;
 
-const REAL_PROBE_RADIUS = PLAYER_RADIUS + REAL_CLEARANCE_STRIDE;
+/**
+ * Exported so a caller placing an object near a bridge before one exists
+ * (`LampPosts.ts`'s own, tighter margin) can derive its own safety margin
+ * from the exact radius the real search's own probe uses, rather than
+ * re-deriving a number by hand that has to be kept in step separately — see
+ * CLAUDE.md's "Two definitions of one thing, kept in step by hand". A
+ * hand-copied `0.92` here once sat 0.2 m short of what a lamp actually
+ * needed (`PLAYER_RADIUS + 0.3` omitted `REAL_CLEARANCE_STRIDE` entirely),
+ * found live once real bridges existed to measure it against.
+ */
+export const REAL_PROBE_RADIUS = PLAYER_RADIUS + REAL_CLEARANCE_STRIDE;
 
 /**
  * How far a ramp side has to reach before it counts as a genuinely walkable
@@ -428,10 +490,33 @@ function planConservative(crossings: readonly LevelCrossing[]): BridgeFootprint[
 
     const idealRampRun = BRIDGE_RISE / BRIDGE_RAMP_GRADIENT;
     const truncate = (sign: 1 | -1): number => {
+      // **Not `reservedHalfAcross` here** (issue found on PR #330's own
+      // canonical-seed measurement: `rampRunPos`/`rampRunNeg` came out `0.00`
+      // on 12 of this seed's 14 crossing-sides). `reservedHalfAcross` is the
+      // *union* of every width/shift combination the real, late search might
+      // ever try — correct for how wide `covers()` needs to stay near the
+      // crossing, where a shift can genuinely land the deck anywhere in that
+      // band. But no *single* candidate the real search ever accepts is that
+      // wide: pass 1's own width loop tops out at `crossing.halfGap +
+      // ACROSS_MARGIN` (`halfAcross` here, before the shift padding is
+      // added) — a shift moves *where* that band sits, it never *widens* it.
+      // Sampling ramp-length clearance across the full shift-padded envelope
+      // therefore tests corners no real candidate's ramp will ever occupy —
+      // on this park, routinely 11-24 m out to either side of the crossing —
+      // and a single boundary or plot hit at one of those corners collapsed
+      // the *entire* ramp-length reservation to near zero, for every shift,
+      // not just the one whose corner actually failed. That measured
+      // directly as `bridgeKeepout.ts`'s own reservation covering none of
+      // the real search's actual blocking points on any of the seven
+      // canonical-seed crossings — the "generous" reservation was reserving
+      // almost nothing past the deck itself, so `Scenery`/`LampPosts` (which
+      // both honestly ask `isInBridgeFootprint` before planting) freely
+      // planted lamps and garden walls exactly where the real, much
+      // narrower ramp went on to need the ground.
       const clearAt = (along: number): boolean => {
         for (const t of SAMPLE_TS) {
-          const x = cx + dirX * along * sign + acrossX * reservedHalfAcross * t;
-          const z = cz + dirZ * along * sign + acrossZ * reservedHalfAcross * t;
+          const x = cx + dirX * along * sign + acrossX * halfAcross * t;
+          const z = cz + dirZ * along * sign + acrossZ * halfAcross * t;
           if (GARDEN_PLAY_BOUNDARY.distanceToEdge(x, z) < RAMP_BOUNDARY_MARGIN) return false;
           if (!clearOfPlots(x, z, RAMP_PLOT_MARGIN)) return false;
           if (distanceToRailCorridor(x, z) < FENCE_OFFSET + RAMP_RAIL_MARGIN) return false;
@@ -894,11 +979,12 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
     const { cx, cz, dirX, dirZ, acrossX, acrossZ, halfAcross } = deck;
     const idealRampRun = idealRampRunFor(crossing, crossings);
     const otherDecks = decks.filter((d) => d.crossingIndex !== crossingIndex);
-    // Same augmented set `deckClears`/`provisionalReach` searched with —
-    // see `sampleTsFor`'s own note. This deck's `(cx, cz)` is already fixed
-    // (pass 1's accepted answer), so this is the one, fixed extra `t` every
-    // sample loop below adds.
-    const ts = sampleTsFor(crossing, cx, cz, acrossX, acrossZ, halfAcross);
+    // A genuinely dense sweep, not the sparse set `deckClears`/
+    // `provisionalReach` searched candidates with — see `denseSampleTs`'s
+    // own note for why pass 2 can afford, and needs, better than pass 1.
+    // This deck's `(cx, cz)` is already fixed (pass 1's accepted answer), so
+    // this runs exactly once for this crossing.
+    const ts = denseSampleTs(crossing, cx, cz, acrossX, acrossZ, halfAcross);
 
     // Commit the deck's own footprint — the exact points `deckClears`
     // probed with `searchClear` (felling-considered, non-mutating) during
@@ -929,11 +1015,19 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
     };
     const rampReach = (sign: 1 | -1): number => {
       let rampRun = idealRampRun;
-      const steps = Math.max(1, Math.ceil(rampRun / WIDTH_STEP));
+      // `DENSE_REAL_STEP`, not `WIDTH_STEP` — this is pass 2's own final
+      // commit, exactly like `denseSampleTs`'s own width densification, and
+      // for the same reason: a coarse 0.5 m along-step can step clean over
+      // an obstacle whose own along-extent is narrower than that, exactly as
+      // a coarse `t` step could across the width. Found paired with the
+      // width fix, canonical seed: the width densification alone still
+      // missed the same stone bench, because the *along* stepping that
+      // decides which `t`-rows even get tested had already skipped past it.
+      const steps = Math.max(1, Math.ceil(rampRun / DENSE_REAL_STEP));
       for (let i = 1; i <= steps; i += 1) {
         const along = DECK_HALF_LENGTH + (i / steps) * rampRun;
         if (!clearAt(along, sign)) {
-          rampRun = Math.max(0, along - DECK_HALF_LENGTH - WIDTH_STEP);
+          rampRun = Math.max(0, along - DECK_HALF_LENGTH - DENSE_REAL_STEP);
           break;
         }
       }
@@ -946,6 +1040,27 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
 
     const rampRunPos = rampReach(1);
     const rampRunNeg = rampReach(-1);
+
+    // **Re-verify the same floor pass 1 accepted this candidate for, now
+    // against pass 2's own denser, more accurate measurement — never ship a
+    // bridge pass 2 itself has just proven does not actually clear it.**
+    // Pass 1 accepts a candidate using `provisionalReach`'s cheaper,
+    // sparse-`t` sampling (real cost: it runs for every width/shift
+    // candidate the search tries, not just the one kept); pass 2 re-measures
+    // the one, final, already-decided geometry with `denseSampleTs` and a
+    // finer along-step, specifically so a real obstacle the sparse pass
+    // could straddle does not silently ship. Found live, canonical seed:
+    // pass 1's sparse check found `Math.min(reachPos, reachNeg) >= 7.58 m`
+    // and accepted a heavily shifted deck; pass 2's dense re-check found the
+    // *same* side's real reach was `0.00 m` — a sheer drop, not a ramp — the
+    // exact obstacle `denseSampleTs`'s own header names (the shift put the
+    // deck's real width mostly on one side of the crossing, and the sparse
+    // sampling never happened to land inside the stone bench sitting on it).
+    // Falling back to a level crossing here is this file's own header's
+    // documented, expected outcome for a crossing that cannot actually take
+    // a bridge — not a new kind of failure, just caught one pass later than
+    // it should have been.
+    if (Math.min(rampRunPos, rampRunNeg) < WALKABLE_FLOOR + WALKABLE_MARGIN) return null;
 
     return {
       cx,

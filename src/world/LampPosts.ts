@@ -516,13 +516,41 @@ function placeLampPosts(collision: CollisionWorld): (readonly [number, number])[
       // preferred verge alone left a 23 m unlit stretch of ring road.
       const nudge = (route.closed ? 1 / count : 1 / count) * 0.25;
       let stood = false;
+      // Whether the ordinary spot is rejected specifically because it falls
+      // inside a not-yet-built bridge's own reserved ramp corridor, rather
+      // than a small, local obstacle (a plot corner, a tree). `along` is
+      // never retried in that case — see the note just below.
+      const baseCandidate = offsetFromCurve(curve, t, offset, preferred);
+      const baseBlockedByBridge =
+        baseCandidate !== null && isInBridgeFootprint(baseCandidate[0], baseCandidate[1], LAMP_BRIDGE_MARGIN);
       // The widened offsets are for verges the Sky Cruiser's low ramp flies
       // along (issue #241 let the two land together): a lamp three metres
       // off the kerb clears the car's swept corridor and still lights the
       // path many times over (LAMP_REACH is 15). Tried last, so the kerbside
       // look wins everywhere the ride allows it.
+      //
+      // **`along` is never retried once the ordinary spot is bridge-blocked
+      // (`baseBlockedByBridge`).** `reach`/`side` still retry — both stay
+      // anchored to this exact route point, so neither can wander onto a
+      // different, possibly fragile stretch of path the way sliding `along`
+      // the route can. Found live, canonical seed: nudging 0.125 of a route
+      // segment away from a bridge-excluded spot landed a lamp that stood a
+      // genuine 3+ m clear of every wall, yet choked the one walkable link
+      // into a garden pocket, stranding three waypoints
+      // (`test/procgen/invariants.ts`'s `poi.stranded`, caught it exactly
+      // because it is designed to).
+      //
+      // A lamp that cannot stand at its ordinary spot near a bridge simply
+      // goes dark there instead — no longer the open-ended trade-off it once
+      // was: `test/procgen/invariants.ts`'s `everyPathIsLit` now exempts a
+      // dark stretch that genuinely sits inside a bridge's own reserved
+      // corridor (`facts.bridgeReservations`, that invariant's own header),
+      // so a stretch that goes dark for exactly this reason is a *provable*
+      // exception, not an unaccounted gap. A stretch that goes dark for any
+      // other reason still fails the invariant as it always did.
+      const alongOptions = baseBlockedByBridge ? [0] : [0, nudge, -nudge];
       for (const reach of [offset, offset + 2.2, offset + 3.4]) {
-        for (const along of [0, nudge, -nudge]) {
+        for (const along of alongOptions) {
           for (const trySide of [preferred, -preferred as 1 | -1]) {
             const at = route.closed ? (t + along + 1) % 1 : Math.min(1, Math.max(0, t + along));
             const candidate = offsetFromCurve(curve, at, reach, trySide);

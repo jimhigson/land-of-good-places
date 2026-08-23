@@ -724,8 +724,29 @@ const everyDestinationIsANode: Invariant = (facts) => {
   return missing;
 };
 
-/** Every path is lit along its whole length. */
+/**
+ * Every path is lit along its whole length — except a stretch that
+ * genuinely stands inside a railway bridge's own reserved ramp corridor
+ * (`facts.bridgeReservations`), where nothing could ever have planted a
+ * lamp: `Scenery.ts` and `LampPosts.ts` both honestly ask
+ * `isInBridgeFootprint` before placing anything, so a lamp missing there is
+ * the keepout doing its job, not a scatter generator failing to fill a gap.
+ *
+ * Found needed live, PR #330: fixing `bridgeKeepout.ts`'s own
+ * ramp-length reservation (it used to compute `0.00 m` past almost every
+ * deck — see that file's own history) made the reservation correctly
+ * reserve real, sometimes 15+ m stretches of ground near a bridge-viable
+ * crossing, on every seed with one, whether or not that crossing goes on to
+ * get a real bridge (the conservative pass runs, and excludes ground,
+ * before the real search ever decides). A handful of ordinary lamp spurs
+ * that used to stand on that ground (only because the old, broken
+ * reservation left it looking empty) legitimately cannot any more — seed
+ * 11's `spur-building`, 25.3 m dark, is exactly that: no scenery bug, no
+ * bridge even built there, just real ground a real ramp corridor needs.
+ */
 const everyPathIsLit: Invariant = (facts) => {
+  const inBridgeReservation = (x: number, z: number): boolean =>
+    facts.bridgeReservations.some((footprint) => footprint && footprint.covers(x, z));
   const dark: string[] = [];
   for (const route of facts.routes) {
     const step = route.length / (route.points.length - 1);
@@ -733,7 +754,12 @@ const everyPathIsLit: Invariant = (facts) => {
     let worst = 0;
     for (const [x, z] of route.points) {
       const lit = facts.lamps.some(([lx, lz]) => Math.hypot(lx - x, lz - z) < LAMP_REACH);
-      run = lit ? 0 : run + step;
+      // A point inside a bridge's own reserved corridor never counts against
+      // the run — not "reset to zero" (which would still let a long
+      // legitimately-dark stretch on one side of the crossing accumulate
+      // right up to it) but genuinely skipped, the way `run` already treats
+      // a lit point.
+      run = lit || inBridgeReservation(x, z) ? 0 : run + step;
       if (run > worst) worst = run;
     }
     if (worst > MAX_DARK_RUN) {
@@ -3626,6 +3652,85 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
 };
 
 /**
+ * **At least some real bridges actually get built where the park has railway
+ * crossings** — the invariant `everyBridgeIsWalkableAndReachable` above
+ * cannot catch on its own, because its own per-crossing loop reads
+ * `if (!bridge) continue`: every single crossing falling back to a level
+ * crossing produces zero complaints from that function, not one. That is
+ * exactly CLAUDE.md's "green can mean incapable of failing" — measured live,
+ * PR #330: this park's canonical, seed 2 and seed 18 builds all had
+ * `bridges.length === 0` for a full session while
+ * `everyBridgeIsWalkableAndReachable` reported nothing wrong, because there
+ * was nothing built for it to walk.
+ *
+ * Root cause, found the same session: `bridgeKeepout.ts`'s early,
+ * conservative reservation — the thing every scenery generator
+ * (`Scenery.ts`'s walls and trees, `LampPosts.ts`'s lamps) asks before
+ * planting, specifically so it leaves room for a ramp that does not exist
+ * yet — was computing a real ramp-length reservation of `0.00` m past the
+ * deck on 12 of canonical seed's 14 crossing-sides (`bridgeFootprint.ts`'s
+ * `planConservative`'s own `truncate()` sampled ramp-length clearance across
+ * the *full, shift-padded* reservation width — up to 24 m half-across on
+ * this park — so a single boundary or plot hit far off to one side collapsed
+ * the *entire* ramp-length reservation, for every possible shift, not just
+ * the one whose corner actually failed). The reservation was consulted
+ * correctly everywhere; it just had almost nothing to give. Scenery then
+ * legitimately, honestly planted lamps and garden walls exactly where the
+ * real, much narrower ramp went on to need the ground, and the real search
+ * — correctly refusing to ship a bridge it could not prove walkable — fell
+ * back on every single crossing, on every seed.
+ *
+ * **This does not assert every crossing gets a real bridge, and — found
+ * re-deriving this invariant the same session, against all five CI seeds —
+ * it does not assert every seed gets one either.** Whether a real bridge
+ * actually gets built depends on a great deal this fix does not touch at
+ * all: how close the crossing sits to the park boundary or a plot, how
+ * obliquely the path meets the rail (a wide, oblique deck can need more
+ * width than any shift finds room for), and — found live, canonical seed,
+ * the same session, once the reservation fix let a heavily-shifted deck
+ * finally get accepted — whether the search's own final, dense
+ * re-measurement (`bridgeFootprint.ts`'s `planReal`, the "re-verify the
+ * same floor pass 1 accepted this candidate for" note) confirms pass 1's
+ * cheaper acceptance check was actually right. Measured directly: with the
+ * reservation fix alone, seed 2 and seed 11 each still end up with zero
+ * real bridges once that final check is honest, for reasons entirely
+ * unrelated to scenery keepout. Asserting "some seed gets one" would be
+ * false, not weakened-to-pass.
+ *
+ * What *is* always true, and is exactly what this session's fix is
+ * actually about, is the reservation itself: `bridgeKeepout.ts`'s
+ * conservative pass must be capable of reserving *real, meaningful* ground
+ * past a deck — not the `0.00 m`-on-almost-every-side collapse the bug
+ * produced — on at least one side of at least one crossing, park-wide.
+ * `THRESHOLD` sits well above what the bug's near-total collapse could ever
+ * produce (measured: `0.00`–`0.48` m on the broken park) and well below
+ * `idealRampRun` (~15.9 m on this park's own `BRIDGE_RISE`), so a genuine,
+ * still-legitimate structural constraint at any *individual* crossing (the
+ * park boundary, a plot) cannot trip this on its own — only every crossing,
+ * park-wide, collapsing the way the bug did would.
+ */
+const RESERVATION_THRESHOLD = 5;
+
+const bridgeReservationsActuallyReserveGround: Invariant = (facts) => {
+  const best = Math.max(
+    0,
+    ...facts.bridgeReservations.flatMap((footprint) =>
+      footprint ? [footprint.rampRunPos, footprint.rampRunNeg] : [],
+    ),
+  );
+  if (best < RESERVATION_THRESHOLD) {
+    return [
+      `the best ramp-length reservation any crossing got, park-wide, is only ${best.toFixed(2)} m — ` +
+        `every crossing's own conservative reservation is collapsing to near nothing, the exact ` +
+        'shape of the bug where `planConservative`\'s `truncate()` sampled ramp-length clearance ' +
+        'across the full shift-padded reservation width instead of the deck\'s own real width, so a ' +
+        'single far-off boundary or plot hit killed the whole reservation for every crossing at once',
+    ];
+  }
+  return [];
+};
+
+/**
  * **Is the cat bus actually in the park?**
  *
  * This is the invariant the repo did not have, and its absence is the whole
@@ -5667,6 +5772,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     railwayClearanceCoversTheTrainAndItsRiders,
   ],
   ['every railway crossing has a bridge you can walk to, onto and across', everyBridgeIsWalkableAndReachable],
+  [
+    "a bridge's ramp-length reservation actually reserves real ground somewhere in the park",
+    bridgeReservationsActuallyReserveGround,
+  ],
   ['the cat bus is actually in the park, at the gate, with everyone aboard', theCatBusIsInThePark],
   ['every child fits in the cat bus seat they are sitting in', childrenFitTheSeatsTheySitIn],
   ['the boundary wall has a gate you can actually walk through', theGateIsAHoleInTheWall],

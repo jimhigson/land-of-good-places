@@ -481,6 +481,28 @@ export interface ParkFacts {
   /** The subset of {@link trees} a child is offered a climb on. */
   readonly climbableTrees: readonly ClimbableTreeFact[];
   readonly lamps: readonly (readonly [number, number])[];
+  /**
+   * The early, conservative reservation `bridgeKeepout.ts` computes for
+   * every railway crossing (`train/bridgeFootprint.ts`'s `planConservative`
+   * — the same thing `Scenery.ts` and `LampPosts.ts` both ask
+   * `isInBridgeFootprint` about before planting), re-derived here rather
+   * than imported statically at this file's own top level for the same
+   * seed-pinning reason `everyBridgeIsWalkableAndReachable` avoids a static
+   * import of `bridgeFootprint.ts` (see that invariant's own header).
+   * `null` for a crossing the conservative pass itself could not reserve
+   * anything for at all (see that function's own, expected-rare note).
+   *
+   * Exists so `everyPathIsLit` can tell a genuinely explained dark stretch
+   * — one standing inside ground a bridge's own ramp legitimately needs,
+   * where nothing could ever have planted a lamp — from an ordinary gap a
+   * scatter generator merely failed to fill. A `covers()` object, the same
+   * shape `bridgeFootprint.ts`'s own `BridgeFootprint` exposes.
+   */
+  readonly bridgeReservations: readonly (null | {
+    readonly rampRunPos: number;
+    readonly rampRunNeg: number;
+    covers(x: number, z: number, margin?: number): boolean;
+  })[];
   readonly plots: readonly PlotFact[];
   readonly entrances: readonly EntranceFact[];
   /**
@@ -892,6 +914,12 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   }
 
   const { world, scene, buildMs, sample } = buildHeadlessPark();
+
+  // Dynamically imported here, after `world` (and so `TRAIN_PLAN`) is
+  // already built for this exact seed — never at this file's own top level,
+  // the seed-pinning trap this file's header already warns about.
+  const { planBridgeFootprints } = await import('../../src/world/train/bridgeFootprint.ts');
+  const bridgeReservations = planBridgeFootprints(world.train.crossings);
 
   const { BOUNDARY_MASONRY_HALF_WIDTH, BOUNDARY_WALL_COLLISION_HALF } = await import(
     '../../src/world/Garden.ts'
@@ -2088,6 +2116,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     bushes,
     climbableTrees,
     lamps: world.lampPosts.positions.map((p) => [p.x, p.z] as const),
+    bridgeReservations,
     plots,
     entrances,
     catBus,
