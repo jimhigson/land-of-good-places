@@ -5,12 +5,13 @@ import { PALETTE, hexToCss } from '../core/palette';
 import { isTouchDevice } from '../core/device';
 import { minTextPx, uiUnitPx } from '../core/uiScale';
 import { gameStore } from '../state';
-import { ANCHORS, type AnchorDefinition, type AnchorFootprint } from '../world/anchors';
+import { ANCHORS, type AnchorDefinition } from '../world/anchors';
 import { PLAZA, ROUTES, type RouteDefinition } from '../world/paths';
 import { STALLS } from '../minigames';
 import type { World } from '../world/World';
 import type { Player } from '../entities/Player';
 import { SLIDE_PLAN } from '../world/slide/plan';
+import { buildBlobBoundary, drawIcon, scatterTrees, type ContentCircle } from './parkMapArt';
 import {
   BUBBLE_X,
   BUBBLE_Z,
@@ -499,44 +500,81 @@ export class ParkMap {
     }
   }
 
+  /**
+   * Every real thing the park placed, as a plain [x, z, clearance-radius]
+   * circle — the single list `buildBlobBoundary` (the ground shape) and
+   * `scatterTrees` (where NOT to drop a tree) both read from, so the two
+   * never learn about the park's layout differently.
+   */
+  private collectContentCircles(): ContentCircle[] {
+    const out: ContentCircle[] = [];
+    for (const anchor of ANCHORS) {
+      const [ax, az] = anchor.position;
+      out.push({ x: ax, z: az, r: anchor.boundingRadius });
+    }
+    for (const stall of STALLS) {
+      const [sx, sz] = stall.position;
+      out.push({ x: sx, z: sz, r: 5 });
+    }
+    out.push({ x: PLAZA.x, z: PLAZA.z, r: PLAZA.radius });
+    for (const station of this.deps.world.train.stations) {
+      out.push({ x: station.standX, z: station.standZ, r: 4 });
+    }
+    out.push({
+      x: BUILDING_CENTRE_X,
+      z: BUILDING_CENTRE_Z,
+      r: Math.hypot(BUILDING_HALF_X, BUILDING_HALF_Z),
+    });
+    return out;
+  }
+
   private renderOutdoor(): void {
     const ctx = this.ctx;
     const w = this.canvasCssWidth;
     const h = this.canvasCssHeight;
     ctx.clearRect(0, 0, w, h);
 
-    // --- terrain + boundary --------------------------------------------------
-    const [cx, cy] = this.planeToCanvas(0, 0);
+    const content = this.collectContentCircles();
+
+    // --- terrain: one connected, organic ground blob, sized and shaped from
+    // the real layout above rather than a fixed circle (GitHub issue #334) --
+    const blob = buildBlobBoundary(content, GARDEN_HALF_SIZE - 4);
     ctx.fillStyle = hexToCss(PALETTE.grassLight);
     ctx.beginPath();
-    ctx.arc(cx, cy, GARDEN_HALF_SIZE * this.scale, 0, Math.PI * 2);
+    const [b0x, b0z] = blob[0] ?? [0, 0];
+    const [bsx, bsy] = this.planeToCanvas(b0x, b0z);
+    ctx.moveTo(bsx, bsy);
+    for (const [bx2, bz2] of blob.slice(1)) {
+      const [px2, py2] = this.planeToCanvas(bx2, bz2);
+      ctx.lineTo(px2, py2);
+    }
+    ctx.closePath();
     ctx.fill();
-    ctx.strokeStyle = hexToCss(PALETTE.stonePinkDark);
+    ctx.strokeStyle = hexToCss(PALETTE.grassDark);
     ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(cx, cy, (GARDEN_HALF_SIZE - 2) * this.scale, 0, Math.PI * 2);
     ctx.stroke();
 
+    // --- trees, scattered clear of every real plot/plaza/station above -----
+    const trees = scatterTrees(content, content, GARDEN_HALF_SIZE - 4);
+    for (const tree of trees) {
+      const [tx, ty] = this.planeToCanvas(tree.x, tree.z);
+      drawIcon(ctx, 'tree', tx, ty, 0.55 * uiUnitPx(), '#4fa84a');
+    }
+
     // --- paths, rebuilt from the same control points the real path network
-    // uses (world/paths.ts), so this can never draw a path that has moved.
-    ctx.strokeStyle = hexToCss(PALETTE.pathSand);
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
+    // uses (world/paths.ts), so this can never draw a path that has moved —
+    // now a single thick white ribbon rather than a sand-coloured line.
     for (const route of ROUTES) this.strokeRoute(route);
 
     // --- fountain plaza --------------------------------------------------
     const [px, py] = this.planeToCanvas(PLAZA.x, PLAZA.z);
-    ctx.fillStyle = hexToCss(PALETTE.pathSand);
+    ctx.fillStyle = '#ffffff';
     ctx.beginPath();
     ctx.arc(px, py, PLAZA.radius * this.scale, 0, Math.PI * 2);
     ctx.fill();
     const fountain = this.deps.world.fountain;
     const [fx, fy] = this.planeToCanvas(fountain.centre.x, fountain.centre.z);
-    ctx.fillStyle = hexToCss(PALETTE.waterTop);
-    ctx.beginPath();
-    ctx.arc(fx, fy, fountain.rimRadius * this.scale, 0, Math.PI * 2);
-    ctx.fill();
-    this.drawGlyph('⛲', fx, fy, uiUnitPx());
+    drawIcon(ctx, 'fountain', fx, fy, 1.6 * uiUnitPx(), hexToCss(PALETTE.waterTop));
 
     // --- ride plots, straight from the anchor table -----------------------
     for (const anchor of ANCHORS) this.drawAnchor(anchor);
@@ -545,7 +583,8 @@ export class ParkMap {
     for (const stall of STALLS) {
       const [sx, sz] = stall.position;
       const [cx2, cy2] = this.planeToCanvas(sx, sz);
-      this.drawPin(cx2, cy2, stall.glyph, stall.title, hexToCss(stall.accent));
+      drawIcon(ctx, stall.id, cx2, cy2, 1.5 * uiUnitPx(), hexToCss(stall.accent));
+      this.drawLabel(stall.title, cx2, cy2 + 0.9 * uiUnitPx());
     }
 
     // --- the train loop and its stations ------------------------------------
@@ -560,26 +599,19 @@ export class ParkMap {
       trainPoints,
       true,
       hexToCss(PALETTE.markerLemon),
-      2.2,
+      1.6,
       [7, 6],
     );
     for (const station of this.deps.world.train.stations) {
       const [stx, sty] = this.planeToCanvas(station.standX, station.standZ);
-      this.drawPin(stx, sty, '🚉', station.name, hexToCss(PALETTE.markerLemon));
+      drawIcon(ctx, 'station', stx, sty, 1.3 * uiUnitPx(), hexToCss(PALETTE.markerLemon));
+      this.drawLabel(station.name, stx, sty + 0.75 * uiUnitPx());
     }
 
     // --- the castle, drawn at its real facade footprint ---------------------
-    this.drawRect(
-      BUILDING_CENTRE_X,
-      BUILDING_CENTRE_Z,
-      BUILDING_HALF_X,
-      BUILDING_HALF_Z,
-      hexToCss(PALETTE.buildingWall),
-      hexToCss(PALETTE.buildingTrim),
-    );
     const [bx, by] = this.planeToCanvas(BUILDING_CENTRE_X, BUILDING_CENTRE_Z);
-    this.drawGlyph('🏰', bx, by, 1.2 * uiUnitPx());
-    this.drawLabel('The Big Building', bx, by + 0.9 * uiUnitPx());
+    drawIcon(ctx, 'building', bx, by, 2.6 * uiUnitPx(), hexToCss(PALETTE.buildingWall));
+    this.drawLabel('The Big Building', bx, by + 1.4 * uiUnitPx());
 
     // --- the player ----------------------------------------------------------
     if (!this.indoor) {
@@ -647,7 +679,11 @@ export class ParkMap {
       const p = curve.getPoint(t);
       points.push([p.x, p.z]);
     }
-    this.strokeCurvePoints(points, route.closed, hexToCss(PALETTE.pathSand), route.width * 0.7);
+    // A single thick white ribbon, outlined for definition — the "one winding
+    // path" look from the reference, not the sand-coloured line the real
+    // in-game path texture uses (that reads as scenery, not a route on a map).
+    this.strokeCurvePoints(points, route.closed, hexToCss(PALETTE.grassDark), route.width * 0.85);
+    this.strokeCurvePoints(points, route.closed, '#ffffff', route.width * 0.62);
   }
 
   private strokeCurvePoints(
@@ -681,39 +717,17 @@ export class ParkMap {
     // (see `renderOutdoor`) rather than its reserved plot, so it is skipped here.
     if (anchor.id === 'building') return;
 
-    const [ax, az] = anchor.position;
     const accent = hexToCss(anchor.accent);
-    this.drawFootprint(ax, az, anchor.footprint, hexToCss(PALETTE.buildingWall), accent);
 
-    // A ride with its own fairground stall gets its name from that stall's pin
-    // instead (drawn separately, below) — one label per ride, not two.
+    // A ride with its own fairground stall gets its icon and name from that
+    // stall instead (drawn separately, in `renderOutdoor`) — one illustration
+    // per ride, not two overlapping ones.
     if (ANCHORS_WITH_STALL_ENTRY.has(anchor.id)) return;
 
     const [ex, ez] = anchor.entrance;
     const [cx, cy] = this.planeToCanvas(ex, ez);
-    this.drawPin(cx, cy, anchor.glyph, anchor.signTitle, accent);
-  }
-
-  private drawFootprint(
-    x: number,
-    z: number,
-    footprint: AnchorFootprint,
-    fill: string,
-    stroke: string,
-  ): void {
-    if (footprint.kind === 'circle') {
-      const [cx, cy] = this.planeToCanvas(x, z);
-      const ctx = this.ctx;
-      ctx.fillStyle = fill;
-      ctx.strokeStyle = stroke;
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      ctx.arc(cx, cy, footprint.radius * this.scale, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      return;
-    }
-    this.drawRect(x, z, footprint.halfX, footprint.halfZ, fill, stroke);
+    drawIcon(this.ctx, anchor.id, cx, cy, 1.7 * uiUnitPx(), accent);
+    this.drawLabel(anchor.signTitle, cx, cy + 1.0 * uiUnitPx());
   }
 
   private drawRect(
