@@ -18,7 +18,7 @@ import { arrivalOwnsTheSpawn } from './world/entrance/arrivalSpawn';
 import { arrivalCameraZoom } from './world/entrance/ArrivalSequence';
 import { Highlights } from './world/Highlights';
 import { Selection } from './world/Selection';
-import type { InteractZone } from './world/interact';
+import { pickInteractZone, PRIMARY_ACTION, type InteractZone } from './world/interact';
 import { InteractRouter, type InteractClaim } from './world/InteractRouter';
 import type { InteriorControls } from './world/building';
 import { GARDEN_FLOOR, LOBBY, OCEAN_FLOOR } from './world/hotel/layout';
@@ -501,6 +501,14 @@ export class Game {
       player: this.player,
       walkTo: (x, y, z) => this.tapNavigator.navigateTo(x, y, z),
       blocked: () => this.miniGames.frozen || this.player.riding,
+      // Issue #309: a map tap that lands on an attraction (a ride, a stall, the
+      // hotel lobby, a garden cart…) walks her to its stand point and uses it
+      // on arrival, instead of the old flat refusal a solid collider used to
+      // get from `isReachable`. `useZoneNear` is built once `selection` exists
+      // below (referenced through a closure for the same reason `miniGames`
+      // is), and it is the *only* new "use this attraction" path — everything
+      // it calls is the ordinary walk-up-and-press-E plumbing.
+      useAttraction: (x, y, z) => this.useZoneNear(x, y, z),
     });
     this.screenControls = new ScreenControls(uiRoot, this.input);
     // A DOM layer of its own for the ferris wheel's HUD, so `RideHud` — written
@@ -962,6 +970,35 @@ export class Game {
       ];
     }
     return this.zoneCache;
+  }
+
+  /**
+   * GitHub issue #309: a tap on `ui/ParkMap.ts` that landed on an attraction.
+   *
+   * Picks the zone the same way a 3D tap does — `world/interact.ts`'s
+   * `pickInteractZone`, over the same `currentZones()` list the SELECTION
+   * RULE itself reads — and hands it straight to `Selection.commitZone`,
+   * which is the *existing* "walk there if far, run the action now if
+   * close" machinery a chip commit already uses. Returns false for anything
+   * that isn't a real, usable attraction (open ground, the castle's bare
+   * facade, a sign) so `ParkMap` falls back to its own plain "walk here" —
+   * this only ever narrows what the old flat refusal used to reject, never
+   * widens what a tap can do.
+   *
+   * A zone with no `actions()` at all — the front door, the hotel's own
+   * doorway — still counts as found: walking her to its `standX/standZ`
+   * (the ordinary routed walk, same as any other tap-to-move) is the whole
+   * of what "using" it means, because arriving is what fires the doorway's
+   * own crossing trigger (`Building`/`Hotel`'s `checkDoorways`), not a chip.
+   */
+  private useZoneNear(x: number, y: number, z: number): boolean {
+    const zone = pickInteractZone(this.currentZones(), x, y, z);
+    if (!zone) return false;
+    const actions = zone.actions?.() ?? [];
+    const primary = actions.find((action) => action.id === PRIMARY_ACTION) ?? actions[0];
+    if (primary) this.selection.commitZone(zone, primary);
+    else this.tapNavigator.navigateTo(zone.standX, zone.y, zone.standZ);
+    return true;
   }
 
   /**

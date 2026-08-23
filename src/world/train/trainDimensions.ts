@@ -48,6 +48,21 @@
 /** Height of a carriage floor above the sleepers. */
 export const CAR_FLOOR_Y = 0.58;
 
+/**
+ * Half the loco's and each carriage's own body width — the real horizontal
+ * reach of the train, not the track's own clearance figure.
+ *
+ * Not vertical, unlike everything else this module owns (see the module
+ * doc), but it belongs here for the same reason: a dependency-free leaf a
+ * caller outside `trainModel.ts` (a prop placer, a procgen invariant) can
+ * read without dragging in three.js, the palette or the face-patch builder.
+ * `trainModel.ts`'s own `BODY_HALF_WIDTH` is this value, imported rather than
+ * hand-copied — the "one owner; everyone else asks" rule, after the entrance
+ * welcome sign was placed 0.63 m from the rail centre line (issue #303 QA)
+ * with nothing anywhere checking it against the carriage's actual width.
+ */
+export const CARRIAGE_BODY_HALF_WIDTH = 0.8;
+
 /** Where a passenger's feet go: the top of the bench. */
 export const SEAT_Y = CAR_FLOOR_Y + 0.42;
 

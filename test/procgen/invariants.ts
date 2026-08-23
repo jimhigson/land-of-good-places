@@ -88,7 +88,11 @@ import { HAT_KINDS, createHat } from '../../src/art/models/hats.ts';
 // The leaf module is defence against that chain becoming real, not a fix for a
 // live bug. `railRaceFliesClear`'s "reached through the built world, never
 // imported" note below is about `railRace/plan.ts`, which genuinely does.
-import { CAR_FLOOR_Y, LOCO_BODY_TOP_Y } from '../../src/world/train/trainDimensions.ts';
+import {
+  CAR_FLOOR_Y,
+  CARRIAGE_BODY_HALF_WIDTH,
+  LOCO_BODY_TOP_Y,
+} from '../../src/world/train/trainDimensions.ts';
 import { RIDER_HEADROOM, TRAIN_CLEARANCE_Y } from '../../src/world/train/clearance.ts';
 // A leaf module (imports nothing), so it cannot pin the park's seed the way a
 // static import of `train/route.ts` would — see that constant's own note.
@@ -469,6 +473,104 @@ const treesClearTheRailway: Invariant = (facts) => {
       );
     }
   }
+  return fouls;
+};
+
+/**
+ * How close any part of an entrance prop may come to the train's centre line
+ * before it is standing where the carriage's own body actually passes.
+ *
+ * `TRACK_CLEARANCE` is the half-width anything counts as "inside the train"
+ * within — the same number {@link wallsClearTheRailway} and
+ * {@link treesClearTheRailway} hold walls and trees to. `CARRIAGE_BODY_HALF_WIDTH`
+ * (`train/trainDimensions.ts`) is what the carriage is actually built to, so a
+ * prop closer than their sum is inside the carriage's real geometry, not just
+ * inside a safety margin around it. This is the hard minimum the game itself
+ * would be broken by crossing — not `Entrance.WELCOME_SIGN_MIN_TRACK_CLEARANCE`,
+ * which is the *placer's own target* (this minimum plus a metre of slack it
+ * aims for); asserting the placer's target here would only prove the placer
+ * agrees with itself, which is the mistake this file's own header warns against.
+ */
+const ENTRANCE_PROP_MIN_TRACK_CLEARANCE = TRACK_CLEARANCE + CARRIAGE_BODY_HALF_WIDTH;
+
+/**
+ * **Named entrance props whose built geometry must clear the railway.**
+ *
+ * One line per prop — the same shape as {@link INVARIANTS} itself — so a
+ * future prop standing near the gate gets this check for free by giving its
+ * `Group` a name and adding it here, rather than by writing a new invariant.
+ */
+const ENTRANCE_PROP_NAMES = ['welcome-sign'] as const;
+
+/**
+ * **No entrance prop stands on the railway.** Issue #303 (PR #303 QA).
+ *
+ * The welcome sign moved to just inside the gate (#298) and landed 0.63 m
+ * from the train's *solved* centre line on the canonical seed — inside both
+ * `TRACK_CLEARANCE` and the carriage's own body half-width at once. The cause
+ * was structural, not a bad coordinate: `train/route.ts` solves the train's
+ * loop from `PARK_LAYOUT` alone, **before** `Entrance` is built (see that
+ * module's own doc), so nothing the solver avoided knew the sign would stand
+ * there. `wallsClearTheRailway` and `treesClearTheRailway` above ask this
+ * question of every wall and every tree; nothing before this asked it of a
+ * prop, which is exactly the gap that let it through five seeds of CI.
+ *
+ * **Measured off the built mesh geometry** — every vertex of every prop in
+ * {@link ENTRANCE_PROP_NAMES}, in world space, against `facts.distanceToRail`
+ * (the same solved centre line the train itself runs on) — not off the
+ * placement logic that positions the prop. `Entrance.findWelcomeSignSpot`
+ * already asks a version of this question in order to *place* the sign;
+ * re-deriving that same answer here would only prove the placer agrees with
+ * itself, the exact failure mode this file's header warns against. This
+ * walks the real triangles a player would actually see clip the train.
+ *
+ * Proven red on the bug it fixes: reverting `Entrance.ts`'s placement search
+ * back to the fixed `(7, 56)` coordinate and re-running `test:procgen`
+ * reports `entrance prop 'welcome-sign' comes within 0.63 m of the train's
+ * centre line ... (needs 2.10 m)` on the canonical seed — the exact QA
+ * measurement — before going green again once the search is restored.
+ */
+const entrancePropsClearTheRailway: Invariant = (facts) => {
+  const fouls: string[] = [];
+  const at = new Vector3();
+
+  for (const propName of ENTRANCE_PROP_NAMES) {
+    const prop = facts.world.entrance.group.getObjectByName(propName);
+    if (!prop) {
+      fouls.push(`entrance prop '${propName}' was not found anywhere in the built scene to measure`);
+      continue;
+    }
+    prop.updateWorldMatrix(true, false);
+
+    let worst = Infinity;
+    let worstAt: readonly [number, number] = [0, 0];
+    prop.traverse((child) => {
+      if (!(child instanceof Mesh)) return;
+      const position = child.geometry.getAttribute('position');
+      if (!position) return;
+      for (let i = 0; i < position.count; i += 1) {
+        at.set(position.getX(i), position.getY(i), position.getZ(i)).applyMatrix4(child.matrixWorld);
+        const gap = facts.distanceToRail(at.x, at.z);
+        if (gap < worst) {
+          worst = gap;
+          worstAt = [at.x, at.z];
+        }
+      }
+    });
+
+    if (!Number.isFinite(worst)) {
+      fouls.push(`entrance prop '${propName}' has no mesh geometry in the built scene to measure`);
+      continue;
+    }
+    if (worst < ENTRANCE_PROP_MIN_TRACK_CLEARANCE) {
+      fouls.push(
+        `entrance prop '${propName}' comes within ${worst.toFixed(2)} m of the train's centre ` +
+          `line at ${fmt(worstAt)} (needs ${ENTRANCE_PROP_MIN_TRACK_CLEARANCE.toFixed(2)} m: ` +
+          `${TRACK_CLEARANCE} m TRACK_CLEARANCE + ${CARRIAGE_BODY_HALF_WIDTH} m carriage half-width)`,
+      );
+    }
+  }
+
   return fouls;
 };
 
@@ -6239,6 +6341,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no wall run stands on the railway', wallsClearTheRailway],
   ['every wall run sits on a grid axis and actually borders something', wallsBorderTheGridSensibly],
   ['no tree stands on the railway', treesClearTheRailway],
+  ['no entrance prop stands on the railway', entrancePropsClearTheRailway],
   ['the train runs through no plot and no stall', trainClearsEveryPlotAndStall],
   ['the park train keeps its turning circle', trainKeepsItsTurningCircle],
   ['no two plots overlap', plotsDoNotOverlap],
