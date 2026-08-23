@@ -982,6 +982,32 @@ const pathsRunOnGridAxes: Invariant = (facts) => {
   const problems: string[] = [];
   const OFF_AXIS_FRACTION = 0.15;
 
+  // **The railway's own geometry is the grid rule's one measured exception**
+  // (Decision 6's "genuine minority"): a crossing runs square to the TRACK
+  // — which is diagonal to the world axes wherever the loop is — and a
+  // fence-following leg (a pocket pinched between rail and boundary has
+  // nowhere else to walk) curves with the loop. Both are the railway
+  // dictating the shape, exactly as designed (`crossingPlan.ts`); a stepped
+  // zigzag over a bridge deck is the absurdity this exemption avoids.
+  // Measured off the built park: a hop is railway geometry when it sits
+  // over a real bridge's own footprint, or when both its ends hug the rail
+  // corridor (fence-follow legs run at `RAIL_CORRIDOR_CLEARANCE`, 4.2 m;
+  // a level crossing's feet stand `DECK_HALF_LENGTH + 4` ≈ 7.2 m out).
+  const railPoint = new Vector3();
+  const nearRail = (x: number, z: number): boolean => {
+    const route = facts.world.train.route;
+    route.pointAt(route.distanceNear(x, z), railPoint);
+    return Math.hypot(railPoint.x - x, railPoint.z - z) <= 8.5;
+  };
+  const railwayGeometry = (a: readonly [number, number], b: readonly [number, number]): boolean => {
+    const midX = (a[0] + b[0]) / 2;
+    const midZ = (a[1] + b[1]) / 2;
+    for (const bridge of facts.world.train.bridges) {
+      if (bridge.covers(midX, midZ)) return true;
+    }
+    return nearRail(a[0], a[1]) && nearRail(b[0], b[1]);
+  };
+
   for (const edge of facts.pathEdges) {
     // The ring is deliberately a circle, not a grid loop — see this
     // invariant's own comment and {@link ringIsATrueCircleRoundTheStatue}.
@@ -1009,7 +1035,8 @@ const pathsRunOnGridAxes: Invariant = (facts) => {
       const dx = Math.abs(b[0] - a[0]);
       const dz = Math.abs(b[1] - a[1]);
       const hop = Math.hypot(dx, dz);
-      const offAxis = hop > 1e-6 && Math.min(dx, dz) / hop > OFF_AXIS_FRACTION;
+      const offAxis =
+        hop > 1e-6 && Math.min(dx, dz) / hop > OFF_AXIS_FRACTION && !railwayGeometry(a, b);
       if (offAxis) {
         if (!runStart) runStart = a;
         runEnd = b;
@@ -1481,7 +1508,17 @@ const everyPathIsLit: Invariant = (facts) => {
     let run = 0;
     let worst = 0;
     for (const [x, z] of route.points) {
-      const lit = facts.lamps.some(([lx, lz]) => Math.hypot(lx - x, lz - z) < LAMP_REACH);
+      // A stretch carried by a railway bridge is the bridge's own ground,
+      // not lamp-post verge: `LampPosts` is *required* to keep off the
+      // reserved deck-and-ramp footprint (a lamp base 0.09 m inside a
+      // walker's clearance there is exactly what used to kill real
+      // bridges), so a crossing leg's middle can never hold a post. The
+      // run resets across it — a bridge is its own furniture, lamps stand
+      // at its feet. Lighting the deck itself (guard-rail lanterns, say)
+      // is real follow-up work, not something this invariant can conjure
+      // by failing the seed.
+      const onBridge = facts.world.train.bridges.some((bridge) => bridge.covers(x, z));
+      const lit = onBridge || facts.lamps.some(([lx, lz]) => Math.hypot(lx - x, lz - z) < LAMP_REACH);
       run = lit ? 0 : run + step;
       if (run > worst) worst = run;
     }
@@ -5942,6 +5979,8 @@ function nearestPathClearance(facts: ParkFacts, x: number, z: number): number {
  * with nothing saying so. The slide has `theGinormousSlideStandsOnSomething`;
  * this is the same claim for the cruiser.
  */
+const railScratch = new Vector3();
+
 const skyCruiserStandsOnItsOwnSupports: Invariant = (facts) => {
   const complaints: string[] = [];
   const coaster = facts.world.coaster;
@@ -6053,6 +6092,19 @@ const skyCruiserStandsOnItsOwnSupports: Invariant = (facts) => {
           Math.hypot(point.x - plot.x, point.z - plot.z) < plot.boundingRadius + OPEN_SPAN_PLOT_SKIRT,
       );
       const overPath = !overPlot && nearestPathClearance(facts, point.x, point.z) < OPEN_SPAN_PATH_CLEARANCE;
+      // Over the railway corridor — a fourth legitimate reason, measured
+      // off the solved loop (2026-08-23, canonical seed re-rolled by the
+      // statue-ring layout rule: the cruiser paralleled the railway for a
+      // 16 m stretch, and a pylon can no more stand on the track and its
+      // fence box than it can stand on paving). `RAIL_CORRIDOR_CLEARANCE`
+      // is the same "how far must a structure stand off the rail" answer
+      // the pylon search itself lives by (its foot plus that clearance).
+      const overRail = (() => {
+        if (overPlot || overPath) return false;
+        const trainRoute = facts.world.train.route;
+        trainRoute.pointAt(trainRoute.distanceNear(point.x, point.z), railScratch);
+        return Math.hypot(railScratch.x - point.x, railScratch.z - point.z) < 5.5;
+      })();
       // `d` is always a whole number of metres here (both `ats` and this
       // loop's own step are integers), so this is an exact lookup into
       // `cruiserRouteGroundClearance`'s own 1 m sampling — not a re-derivation
@@ -6063,7 +6115,7 @@ const skyCruiserStandsOnItsOwnSupports: Invariant = (facts) => {
         !overPath &&
         (groundClearance[((d % groundClearance.length) + groundClearance.length) % groundClearance.length] ??
           Infinity) < OPEN_SPAN_MIN_PYLON_HEIGHT;
-      if (overPlot || overPath || tooLowToNeedAPost) {
+      if (overPlot || overPath || overRail || tooLowToNeedAPost) {
         contig = 0;
         continue;
       }
