@@ -512,6 +512,102 @@ prevent. The constant itself is safe either way, because every term is imported
 and the invariant re-measures; it is the geometry built on top that is expensive
 to redo. **Never shave the constant to avoid the conversation.**
 
+### Resolved, 2026-08-23: yes, everyone on the train sits
+
+**Date:** 23 August 2026 · **Decided by:** Jim, directly, once real measurement
+showed the alternative was a park with no real bridges at all — see
+`HANDOFF-bridge-backtrack-continue.md`'s "Open question for Jim" section for
+the investigation that forced the question. Measured, before this change: 0 of
+7 crossings on the canonical seed, 0 of 7 on seed 2 and 0 of 5 on seed 18 built
+a real bridge under the fully-enforced "both ramp sides clear" rule QA had
+correctly demanded — every single crossing fell back to a level crossing. One
+crossing (39.9, -31.5 on the canonical seed) missed the required reach by only
+0.64 m; most others missed by several metres, not tens. A shorter `BRIDGE_RISE`
+was "very plausibly enough to make real bridges buildable at several of these
+crossings," per that handoff, without touching the search algorithm at all —
+so the question above stopped being deferrable.
+
+**Both riders now sit**, reusing the game's own established seated-ride pose
+(`entities/ridePose.ts`'s `applyRidePose`, posture `'seated'` — the same
+function the ferris wheel, the cat bus and the hotel's dining chairs already
+pose their riders through) rather than a second hand-copied pose:
+
+- `ParkTrain.updateRider` seats the player with her feet on the **carriage
+  floor** (`CAR_FLOOR_Y`), not the bench top (`SEAT_Y`) — the position bug
+  this decision's own "buys only 0.42 m" paragraph named.
+- `NpcCharacter.animate` now folds `applyRidePose('seated')` onto whoever
+  `ParkTrain.carryPassengers` is carrying that frame, replacing the "standing,
+  posed by their own walk cycle" choice this decision recorded as deliberate.
+  `carryPassengers` no longer stands children on purpose.
+- `kid.ts`'s new `TALLEST_CHILD_SEATED_HEIGHT` (2.92 m) replaces
+  `TALLEST_CHILD_HEIGHT` (2.97 m) in `train/clearance.ts`'s derivation — real,
+  measured on the posed rig (`visibleTop`, the hair × hat cross product,
+  exactly `TALLEST_CHILD_HEIGHT`'s own method), not assumed. `BRIDGE_RISE`
+  drops **4.72 m → 4.25 m**.
+
+**The saving is real but modest, and worth stating honestly rather than as a
+bigger win than it is.** This rig has no knee: a seated leg swings from a fixed
+hip and moves nothing else, so bending it measured **zero** height reduction on
+the built model — confirmed live before this was wired in, not assumed. The
+entire saving is the forward body lean `applyRidePose('seated')` already
+applies for "holding on, delighted" (a real but small 0.054 m at the tallest
+hair-and-hat combination) plus the player's feet moving off the bench and onto
+the floor (0.42 m) — not the roughly-half-of-standing a real child's bent knees
+would buy. Guessing a bigger number to hit a target bridge count would have
+been exactly "shave the constant to avoid the conversation," which this
+decision's own last line forbids; the number is what real geometry gives.
+
+**Re-run against the same three seeds, same rule: canonical, seed 2 and seed
+18 all stayed at 0/7, 0/7 and 0/5 real bridges — no change in the count.**
+That is a genuinely different finding from the shorter `BRIDGE_RISE` alone,
+and it needs its own honest account rather than being folded into "sitting
+didn't help":
+
+The shorter rise *did* let the canonical seed's closest crossing (39.9, -31.5,
+0.64 m short before) clear for the first time — but doing so exposed a real,
+pre-existing bug in `bridgeFootprint.ts`'s own search, never exercised before
+because no candidate had ever gotten this close to building: the search
+samples a fixed 9 points across a candidate deck's width (`SAMPLE_TS`), all
+relative to that *candidate's own, possibly laterally-shifted* centre — never
+relative to the crossing's real touch line, the one point a shift is required
+to keep inside the deck but that a shift is *not* required to land on one of
+those 9 fractions. On this crossing the accepted shift put the real touch line
+at `t ≈ 0.38`, squarely between the list's `0` and `0.45` — untested — and a
+lamp base sat exactly there, 0.09 m inside a walker's real clearance. The
+search called the candidate clear; a real player standing there was not
+(`test/procgen/invariants.ts`'s ground-to-ground march caught it, red, the
+first time this code path had ever run for real). Fixed by adding that one
+guaranteed point to every width-sample loop (`sampleTsFor`, same file) —
+cheap, because it is one extra point, not a dense re-sweep of the whole
+width. With the hole closed, the search correctly re-evaluated this crossing
+against a real, larger obstacle a few metres further down the same ramp and
+found no width or shift clears it either, so it now — correctly — falls back
+to a level crossing like the rest, rather than shipping a bridge with a
+collision hole in it.
+
+**So the honest shape of this result is: the seating change is real and
+correctly wired, the search now genuinely never accepts an unwalkable
+candidate, and neither of those things was enough to build a real bridge
+anywhere across these three seeds.** `BRIDGE_RISE` shrinking by 0.47 m moved
+the margin on the closest crossings by a comparable amount — real, but small
+against shortfalls the prior investigation already measured at several
+metres on most crossings, and this rig's lack of a knee (see
+`TALLEST_CHILD_SEATED_HEIGHT`'s own note) means sitting was never going to
+buy much more than that. Scatter (the lamp, and the larger object found once
+it was fixed) landing this close to a ramp's real, final reach in the first
+place is itself a live question — the early, conservative reservation
+(`bridgeKeepout.ts`) that `Scenery` places lamps and trees against is
+supposed to keep this stretch clear and evidently is not doing so reliably —
+but that is a separate investigation from this one (see
+`HANDOFF-bridge-backtrack-continue.md`'s updated state), the same way the
+prior session found and deliberately deferred a related `LAMP_BRIDGE_MARGIN`
+mismatch rather than ship it unproven against nothing.
+
+Whether closing that gap, further ramp-search work, a shorter train, or
+Decision 8's own opening question ("is a level crossing an acceptable normal
+outcome, not just a rare exception") being revisited is the next lever is now
+a question for Jim again, not an engineering default to assume either way.
+
 ## Decision 9 — The limit is the boundary, and the manifest is unpinned
 
 **Date:** 7 August 2026 · **Status:** decided and implemented (issue #241,
