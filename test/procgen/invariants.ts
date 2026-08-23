@@ -74,7 +74,12 @@ import { HAT_KINDS, createHat } from '../../src/art/models/hats.ts';
 // The leaf module is defence against that chain becoming real, not a fix for a
 // live bug. `railRaceFliesClear`'s "reached through the built world, never
 // imported" note below is about `railRace/plan.ts`, which genuinely does.
-import { CAR_FLOOR_Y, LOCO_BODY_TOP_Y, SEAT_Y } from '../../src/world/train/trainDimensions.ts';
+import {
+  CAR_FLOOR_Y,
+  CARRIAGE_BODY_HALF_WIDTH,
+  LOCO_BODY_TOP_Y,
+  SEAT_Y,
+} from '../../src/world/train/trainDimensions.ts';
 import { RIDER_HEADROOM, TRAIN_CLEARANCE_Y } from '../../src/world/train/clearance.ts';
 // A leaf module (imports nothing), so it cannot pin the park's seed the way a
 // static import of `train/route.ts` would — see that constant's own note.
@@ -351,6 +356,104 @@ const treesClearTheRailway: Invariant = (facts) => {
       );
     }
   }
+  return fouls;
+};
+
+/**
+ * How close any part of an entrance prop may come to the train's centre line
+ * before it is standing where the carriage's own body actually passes.
+ *
+ * `TRACK_CLEARANCE` is the half-width anything counts as "inside the train"
+ * within — the same number {@link wallsClearTheRailway} and
+ * {@link treesClearTheRailway} hold walls and trees to. `CARRIAGE_BODY_HALF_WIDTH`
+ * (`train/trainDimensions.ts`) is what the carriage is actually built to, so a
+ * prop closer than their sum is inside the carriage's real geometry, not just
+ * inside a safety margin around it. This is the hard minimum the game itself
+ * would be broken by crossing — not `Entrance.WELCOME_SIGN_MIN_TRACK_CLEARANCE`,
+ * which is the *placer's own target* (this minimum plus a metre of slack it
+ * aims for); asserting the placer's target here would only prove the placer
+ * agrees with itself, which is the mistake this file's own header warns against.
+ */
+const ENTRANCE_PROP_MIN_TRACK_CLEARANCE = TRACK_CLEARANCE + CARRIAGE_BODY_HALF_WIDTH;
+
+/**
+ * **Named entrance props whose built geometry must clear the railway.**
+ *
+ * One line per prop — the same shape as {@link INVARIANTS} itself — so a
+ * future prop standing near the gate gets this check for free by giving its
+ * `Group` a name and adding it here, rather than by writing a new invariant.
+ */
+const ENTRANCE_PROP_NAMES = ['welcome-sign'] as const;
+
+/**
+ * **No entrance prop stands on the railway.** Issue #303 (PR #303 QA).
+ *
+ * The welcome sign moved to just inside the gate (#298) and landed 0.63 m
+ * from the train's *solved* centre line on the canonical seed — inside both
+ * `TRACK_CLEARANCE` and the carriage's own body half-width at once. The cause
+ * was structural, not a bad coordinate: `train/route.ts` solves the train's
+ * loop from `PARK_LAYOUT` alone, **before** `Entrance` is built (see that
+ * module's own doc), so nothing the solver avoided knew the sign would stand
+ * there. `wallsClearTheRailway` and `treesClearTheRailway` above ask this
+ * question of every wall and every tree; nothing before this asked it of a
+ * prop, which is exactly the gap that let it through five seeds of CI.
+ *
+ * **Measured off the built mesh geometry** — every vertex of every prop in
+ * {@link ENTRANCE_PROP_NAMES}, in world space, against `facts.distanceToRail`
+ * (the same solved centre line the train itself runs on) — not off the
+ * placement logic that positions the prop. `Entrance.findWelcomeSignSpot`
+ * already asks a version of this question in order to *place* the sign;
+ * re-deriving that same answer here would only prove the placer agrees with
+ * itself, the exact failure mode this file's header warns against. This
+ * walks the real triangles a player would actually see clip the train.
+ *
+ * Proven red on the bug it fixes: reverting `Entrance.ts`'s placement search
+ * back to the fixed `(7, 56)` coordinate and re-running `test:procgen`
+ * reports `entrance prop 'welcome-sign' comes within 0.63 m of the train's
+ * centre line ... (needs 2.10 m)` on the canonical seed — the exact QA
+ * measurement — before going green again once the search is restored.
+ */
+const entrancePropsClearTheRailway: Invariant = (facts) => {
+  const fouls: string[] = [];
+  const at = new Vector3();
+
+  for (const propName of ENTRANCE_PROP_NAMES) {
+    const prop = facts.world.entrance.group.getObjectByName(propName);
+    if (!prop) {
+      fouls.push(`entrance prop '${propName}' was not found anywhere in the built scene to measure`);
+      continue;
+    }
+    prop.updateWorldMatrix(true, false);
+
+    let worst = Infinity;
+    let worstAt: readonly [number, number] = [0, 0];
+    prop.traverse((child) => {
+      if (!(child instanceof Mesh)) return;
+      const position = child.geometry.getAttribute('position');
+      if (!position) return;
+      for (let i = 0; i < position.count; i += 1) {
+        at.set(position.getX(i), position.getY(i), position.getZ(i)).applyMatrix4(child.matrixWorld);
+        const gap = facts.distanceToRail(at.x, at.z);
+        if (gap < worst) {
+          worst = gap;
+          worstAt = [at.x, at.z];
+        }
+      }
+    });
+
+    if (!Number.isFinite(worst)) {
+      fouls.push(`entrance prop '${propName}' has no mesh geometry in the built scene to measure`);
+      continue;
+    }
+    if (worst < ENTRANCE_PROP_MIN_TRACK_CLEARANCE) {
+      fouls.push(
+        `entrance prop '${propName}' comes within ${worst.toFixed(2)} m of the train's centre ` +
+          `line at ${fmt(worstAt)} (needs ${ENTRANCE_PROP_MIN_TRACK_CLEARANCE.toFixed(2)} m: ` +
+          `${TRACK_CLEARANCE} m TRACK_CLEARANCE + ${CARRIAGE_BODY_HALF_WIDTH} m carriage half-width)`,
+      );
+    }
+  }
+
   return fouls;
 };
 
@@ -4609,13 +4712,38 @@ const OPEN_SPAN_PATH_CLEARANCE = 2.8;
 const OPEN_SPAN_PLOT_SKIRT = 2.4;
 
 /**
+ * How low the built rail may stand above the terrain and still count as
+ * "explained by the station dip" — `pylons.ts`'s own `MIN_PYLON_HEIGHT`,
+ * kept in step for the same reason as {@link OPEN_SPAN_PATH_CLEARANCE} and
+ * {@link OPEN_SPAN_PLOT_SKIRT} above.
+ *
+ * **Found on seed 18, 21 August 2026 (issue #312).** Every candidate this
+ * check flagged as an unexplained 16 m gap turned out to sit over the
+ * station's own boarding dip, where `planCruiserPylons` never even reaches
+ * its foliage-clearing step — every attempted spot in that stretch was
+ * refused for being *too low* (0.22-1.57 m of rail above the ground, against
+ * a 1.4 m floor), the exact scenario `MIN_PYLON_HEIGHT`'s own comment names:
+ * "it is exactly where the track is low ... that a child is most likely to
+ * be walking beside it". No tree or bush was ever in play, so issue #301's
+ * fix had nothing to do here — a low rail standing near the ground does not
+ * read as floating, it reads as *grounded*, which is a third legitimate
+ * reason for a gap, the same shape as standing over a plot or the paved
+ * network. This check recognised only two of the three; the third is now
+ * measured too, from {@link ParkFacts.cruiserRouteGroundClearance} — sampled
+ * off the built loop and terrain, not re-derived from `pylons.ts`'s own
+ * rule.
+ */
+const OPEN_SPAN_MIN_PYLON_HEIGHT = 1.4;
+
+/**
  * **No unsupported span may run this far over plain open lawn**, in metres —
  * the second half of issue #301's fix, and the tighter counterpart to
  * {@link CRUISER_MAX_UNSUPPORTED_SPAN} above.
  *
  * That constant is deliberately loose because a long gap over the castle, a
- * plot or the paved network is *correct* — a post genuinely may not stand
- * there. This one is not loose, because open lawn carries no such excuse: if
+ * plot, the paved network, or the station's own boarding dip is *correct* —
+ * a post genuinely may not stand there, or would be clutter where a child is
+ * walking. This one is not loose, because open lawn carries no such excuse: if
  * a candidate spot there was refused, the only thing that could have refused
  * it before this PR was a tree or a bush, and issue #301 is exactly Jim
  * finding one of those refusals live — a support-free stretch of track
@@ -4623,26 +4751,30 @@ const OPEN_SPAN_PLOT_SKIRT = 2.4;
  *
  * **Measured, not targeted.** For every gap between two consecutive built
  * pylons, this walks the gap in 1 m steps and finds the longest run that sits
- * outside every plot's `boundingRadius + `{@link OPEN_SPAN_PLOT_SKIRT} and
- * outside {@link OPEN_SPAN_PATH_CLEARANCE} of the paved network — the same
- * two exemptions `planCruiserPylons` itself is allowed to refuse a spot for —
+ * outside every plot's `boundingRadius + `{@link OPEN_SPAN_PLOT_SKIRT},
+ * outside {@link OPEN_SPAN_PATH_CLEARANCE} of the paved network, and above
+ * {@link OPEN_SPAN_MIN_PYLON_HEIGHT} of the terrain — the same three
+ * exemptions `planCruiserPylons` itself is allowed to refuse a spot for —
  * then takes the worst such run anywhere on the loop. Measured against both
- * sides of this PR, worst run per CI seed (canonical / 2 / 5 / 11 / 18):
+ * sides of #304, worst run per CI seed (canonical / 2 / 5 / 11 / 18):
  *
  * | | canonical | seed 2 | seed 5 | seed 11 | seed 18 |
  * |---|---|---|---|---|---|
- * | before | 16 m | 15 m | 15 m | **17 m** | 15 m |
- * | after  | 15 m | 13 m | 12 m | 13 m | 14 m |
+ * | before #304 | 16 m | 15 m | 15 m | **17 m** | 15 m |
+ * | after #304  | 15 m | 13 m | 12 m | 13 m | 14 m |
  *
- * 15 sits below the two seeds this PR actually fixes (canonical's 16, seed
+ * 15 sits below the two seeds #304 actually fixed (canonical's 16, seed
  * 11's 17 — the shape of the gap Jim found, a genuinely tree-blocked spot
  * with nothing else standing in the way) and at or above every seed's
- * post-fix worst, including canonical's, which lands exactly on it. That is
- * a real margin of zero on the one seed, not headroom invented for safety —
- * the two numbers are this close on this park. If a future, legitimate
- * change to the scatter or the route needs more than 15 m of unexplained
- * open lawn between two real supports, that is exactly the kind of seed
- * swap CLAUDE.md asks for, written down rather than silently widened.
+ * post-fix worst *at the time*. Seed 18 later measured 16 m against this same
+ * 15 m ceiling with none of the three exemptions changed and no code
+ * touching the generator or the route in between (issue #312) — the station
+ * dip above is what moved it, not a regression, and adding that third
+ * exemption is what a genuine, previously-unrecognised "explained" gap
+ * deserves rather than a wider number. If a future, legitimate change to the
+ * scatter or the route needs more than 15 m of unexplained open lawn between
+ * two real supports, that is exactly the kind of seed swap CLAUDE.md asks
+ * for, written down rather than silently widened.
  */
 const CRUISER_MAX_OPEN_UNSUPPORTED_SPAN = 15;
 
@@ -4762,13 +4894,15 @@ const skyCruiserStandsOnItsOwnSupports: Invariant = (facts) => {
     );
   }
 
-  // --- issue #301: a gap over plain lawn has no excuse ---------------------
+  // --- issue #301 (and #312): a gap over plain lawn has no excuse ----------
   //
   // Walks every gap between consecutive built pylons (the same `ats`, already
   // sorted above) and finds the longest run, anywhere on the loop, that is
-  // neither over a plot nor near the paved network — see
+  // neither over a plot, near the paved network, nor low enough over the
+  // ground to be the station's own boarding dip — see
   // {@link CRUISER_MAX_OPEN_UNSUPPORTED_SPAN}'s own comment for why that is
   // the one shape of gap this ride cannot legitimately have.
+  const groundClearance = facts.cruiserRouteGroundClearance;
   let worstOpen = 0;
   let worstOpenAt = 0;
   for (let i = 0; i < ats.length; i += 1) {
@@ -4783,7 +4917,17 @@ const skyCruiserStandsOnItsOwnSupports: Invariant = (facts) => {
           Math.hypot(point.x - plot.x, point.z - plot.z) < plot.boundingRadius + OPEN_SPAN_PLOT_SKIRT,
       );
       const overPath = !overPlot && nearestPathClearance(facts, point.x, point.z) < OPEN_SPAN_PATH_CLEARANCE;
-      if (overPlot || overPath) {
+      // `d` is always a whole number of metres here (both `ats` and this
+      // loop's own step are integers), so this is an exact lookup into
+      // `cruiserRouteGroundClearance`'s own 1 m sampling — not a re-derivation
+      // of `pylons.ts`'s rule, a read of the built loop against the built
+      // terrain (see that field's own comment).
+      const tooLowToNeedAPost =
+        !overPlot &&
+        !overPath &&
+        (groundClearance[((d % groundClearance.length) + groundClearance.length) % groundClearance.length] ??
+          Infinity) < OPEN_SPAN_MIN_PYLON_HEIGHT;
+      if (overPlot || overPath || tooLowToNeedAPost) {
         contig = 0;
         continue;
       }
@@ -5133,6 +5277,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no two wall runs cross or crowd each other', wallsDoNotClash],
   ['no wall run stands on the railway', wallsClearTheRailway],
   ['no tree stands on the railway', treesClearTheRailway],
+  ['no entrance prop stands on the railway', entrancePropsClearTheRailway],
   ['the train runs through no plot and no stall', trainClearsEveryPlotAndStall],
   ['the park train keeps its turning circle', trainKeepsItsTurningCircle],
   ['no two plots overlap', plotsDoNotOverlap],

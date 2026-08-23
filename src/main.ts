@@ -66,10 +66,11 @@ import { askForOrientationOnFirstGesture } from './core/deviceOrientationLook';
  *   fresh start is always offered rather than a crash or a half-loaded park;
  *   see `state/save.ts`.
  *
- * `RIDE_DEEP_LINKS` below is a fourth, developer-only path: a URL typed by
- * hand, not a button a child presses, so it also skips the welcome-back
- * prompt straight into {@link continueGame} — there being nobody to *ask*
- * "keep playing?" is the entire point of pasting the link in the first place.
+ * {@link DeepLink} below is a fourth, developer-only path — `RIDE_DEEP_LINKS`,
+ * `/view` and `/spawn`: a URL typed by hand, not a button a child presses, so
+ * it also skips the welcome-back prompt straight into {@link continueGame} —
+ * there being nobody to *ask* "keep playing?" is the entire point of pasting
+ * the link in the first place.
  */
 function boot(): void {
   const canvas = document.getElementById('game-canvas');
@@ -81,8 +82,7 @@ function boot(): void {
   }
 
   const save = loadSave();
-  const rideDeepLink = RIDE_DEEP_LINKS[location.pathname];
-  const debugView = parseDebugView(location.pathname, location.search) ?? undefined;
+  const deepLink = parseDeepLink(location.pathname, location.search) ?? undefined;
 
   // A save from before the character creator existed, or one where "start
   // again" was pressed and the tab was closed mid-creation, has everything
@@ -93,25 +93,26 @@ function boot(): void {
     // them — hide it now rather than waiting for a first game frame that is
     // still a button press away.
     splash?.classList.add('hidden');
-    if (rideDeepLink) {
-      continueGame(canvas, uiRoot, splash, save, rideDeepLink);
-      return;
-    }
-    if (debugView) {
-      continueGame(canvas, uiRoot, splash, save, undefined, debugView);
+    // Any developer deep link — a ride, `/view` or `/spawn` — goes straight
+    // past the welcome-back prompt into the saved park. One branch for all
+    // three, because the reason is the same for all three.
+    if (deepLink) {
+      continueGame(canvas, uiRoot, splash, save, deepLink);
       return;
     }
     new ContinueOrRestart(uiRoot, save, {
       onContinue: () => continueGame(canvas, uiRoot, splash, save),
-      onStartAgain: () => startFresh(canvas, uiRoot, splash, rideDeepLink),
+      // Provably `undefined` here — a deep link returned above — but passed
+      // rather than dropped so this stays one forwarding path, not two.
+      onStartAgain: () => startFresh(canvas, uiRoot, splash, deepLink),
     });
     return;
   }
 
-  // No save to skip past, but a deep link still boards the ride the instant
-  // the brand-new character exists.
+  // No save to skip past, but a deep link still boards the ride (or stands her
+  // on the spot) the instant the brand-new character exists.
   splash?.classList.add('hidden');
-  startFresh(canvas, uiRoot, splash, rideDeepLink, debugView);
+  startFresh(canvas, uiRoot, splash, deepLink);
 }
 
 /**
@@ -179,6 +180,47 @@ const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
   '/spooky-house': 'spookyHouse',
 };
 
+/**
+ * The one developer-typed URL this load matched, if it matched any.
+ *
+ * **A union, not three optional parameters**, because the three are mutually
+ * exclusive by construction: a pathname is one of `/rail-race`, `/view` or
+ * `/spawn`, never two of them, and every function between {@link boot} and
+ * {@link finishLaunch} only ever forwards whichever one it was handed. Written
+ * this way round, "a ride deep link that is also a spawn point" is not a state
+ * the boot can be in — where three optional arguments would have made it one
+ * the code had to keep choosing not to enter.
+ *
+ * All three share the same two privileges, and for the same reason: somebody
+ * typed the URL to be looking at the thing it names on the first frame, so all
+ * three skip the welcome-back prompt (there is nobody to ask) and the cat-bus
+ * arrival (`arriveByBus: false` in {@link launchGame}).
+ */
+type DeepLink =
+  | { readonly kind: 'ride'; readonly stallId: string }
+  | { readonly kind: 'view'; readonly view: DebugViewParams }
+  /**
+   * `spawn: null` is `/spawn` with a `pos` that could not be read — see
+   * {@link parseDebugSpawn}. Still a deep link, because "skip the creator and
+   * the bus and put me in the park" is most of what was asked for and is worth
+   * honouring; she just starts wherever an ordinary game would.
+   */
+  | { readonly kind: 'spawn'; readonly spawn: DebugSpawnParams | null };
+
+/**
+ * Matches this load's URL against every developer deep link, in the order they
+ * were added. One place, so {@link boot}'s two branches cannot disagree about
+ * what the URL meant.
+ */
+function parseDeepLink(pathname: string, search: string): DeepLink | null {
+  const stallId = RIDE_DEEP_LINKS[pathname];
+  if (stallId) return { kind: 'ride', stallId };
+  const view = parseDebugView(pathname, search);
+  if (view) return { kind: 'view', view };
+  if (pathname === '/spawn') return { kind: 'spawn', spawn: parseDebugSpawn(search) };
+  return null;
+}
+
 /** What `/view` needs to drop a debug camera into the built park. See {@link parseDebugView}. */
 interface DebugViewParams {
   readonly position: Vector3;
@@ -226,6 +268,106 @@ function parseDebugView(pathname: string, search: string): DebugViewParams | nul
   return view;
 }
 
+/** What `/spawn` needs to stand the real player somewhere. See {@link parseDebugSpawn}. */
+interface DebugSpawnParams {
+  readonly x: number;
+  readonly z: number;
+  /** Omitted means "stand on whatever the ground is" — `Game.enterDebugSpawn`. */
+  readonly y?: number;
+  /** Radians, already converted from the URL's degrees. Omitted faces the park's middle. */
+  readonly facing?: number;
+}
+
+/**
+ * `/spawn?pos=x,z&facing=deg` — a debug-only way to start playing at any point
+ * in the park, as the **real character**, without walking there.
+ *
+ * The third of this file's developer URLs, and the gap between the other two.
+ * {@link RIDE_DEEP_LINKS} puts her somewhere real and controllable but only at
+ * a fixed stand point somebody wired up in advance; `/view` reaches any
+ * coordinate at all but arrives as a free camera, with nothing to walk with
+ * and nothing to walk into. Showing Jim a moved prop, a fixed collider or a
+ * bug's own square metre needs both halves at once: *this exact spot*, and
+ * *her actually standing in it* (issue #320).
+ *
+ * - **`pos`** is `x,z` — plain metres, comma-separated, no encoding, the same
+ *   style as `/view`'s `camPos`. Two numbers is the normal form and the one to
+ *   reach for: the height is then sampled from the ground under her, which is
+ *   the answer anybody reading a coordinate off a top-down view wants and
+ *   cannot supply. `x,y,z` is accepted too, for the places where the ground is
+ *   not a function of the terrain — a deck, a bridge, a castle floor.
+ * - **`facing`** is degrees of the same yaw `Player.facing` keeps: `0` looks
+ *   along +Z, `90` along +X, and so on round. Optional; omitted turns her to
+ *   look at the middle of the park, so a URL with no bearing in it still opens
+ *   on something.
+ *
+ * **Nothing here throws on a hand-typed URL** — the same promise
+ * {@link parseVector3} makes, and for the same reason: these are typed by
+ * hand, often from a screenshot, and a missed comma should cost a warning and
+ * an ordinary spawn, never a boot failure in front of whoever was sent the
+ * link. An unreadable `pos` returns `null`, which {@link parseDeepLink} keeps
+ * as a `/spawn` link with no point: the creator and the bus are still skipped
+ * and the park still opens, she simply starts where she otherwise would.
+ *
+ * For an *interior* — the hotel's lobby, a guest floor, the castle — use the
+ * `/hotel…` links instead. Those bind the play bounds to the room they land
+ * in; this one drops her at a world coordinate and does not, so a coordinate
+ * inside a building gets the geometry without the space.
+ */
+function parseDebugSpawn(search: string): DebugSpawnParams | null {
+  const params = new URLSearchParams(search);
+  const pos = params.get('pos');
+  const point = parseSpawnPoint(pos);
+  if (!point) {
+    console.warn(
+      `Land of Good Places: /spawn could not read pos=${pos ?? '(missing)'} — ` +
+        'expected "x,z" or "x,y,z" in metres. Starting where a normal game would.',
+    );
+    return null;
+  }
+  const facing = parseDegrees(params.get('facing'));
+  // Assigned rather than spread, so an absent param stays *absent* — under
+  // `exactOptionalPropertyTypes` an optional property may be missing but never
+  // explicitly `undefined`. Same shape as `parseDebugView` above.
+  const spawn: { x: number; z: number; y?: number; facing?: number } = {
+    x: point.x,
+    z: point.z,
+  };
+  if (point.y !== undefined) spawn.y = point.y;
+  if (facing !== undefined) spawn.facing = facing;
+  return spawn;
+}
+
+/**
+ * `"x,z"` or `"x,y,z"` -> a point, or null if missing/malformed.
+ *
+ * Two numbers is the horizontal pair with the height left to the ground; three
+ * is `x,y,z` in the same order `/view`'s `camPos` takes, so a coordinate
+ * copied from one URL to the other means the same thing in both.
+ */
+function parseSpawnPoint(text: string | null): { x: number; y?: number; z: number } | null {
+  if (!text) return null;
+  const parts = text.split(',').map(Number);
+  if (parts.some((n) => !Number.isFinite(n))) return null;
+  // Destructured rather than indexed, because `noUncheckedIndexedAccess` is on:
+  // `parts[0]` is `number | undefined` and a length check on its own does not
+  // narrow it. Naming them makes one guard serve as both the runtime check and
+  // the type one, rather than a cast asserting what the length already implies.
+  const [first, second, third] = parts;
+  if (first === undefined || second === undefined) return null;
+  if (parts.length === 2) return { x: first, z: second };
+  if (parts.length === 3 && third !== undefined) return { x: first, y: second, z: third };
+  return null;
+}
+
+/** "90" -> the same angle in radians. Anything unreadable is treated as absent. */
+function parseDegrees(text: string | null): number | undefined {
+  if (!text) return undefined;
+  const value = Number(text);
+  if (!Number.isFinite(value)) return undefined;
+  return value * (Math.PI / 180);
+}
+
 /**
  * Makes sure a ride deep link has somebody to ride with.
  *
@@ -271,24 +413,32 @@ function parseClockFraction(text: string | null): number | undefined {
 /**
  * Loads the park back exactly as it was left.
  *
- * `boardStallId` — set only by a {@link RIDE_DEEP_LINKS} match — boards that
- * ride the moment the park exists, ahead of wherever `save.place` would
- * otherwise have put her.
+ * A {@link DeepLink} — a ride, `/view` or `/spawn` — is applied the moment the
+ * park exists, ahead of wherever `save.place` would otherwise have put her.
+ *
+ * **`/spawn` drops `save.place` entirely**, which the other two do not need to.
+ * A save written inside the hotel restores by *position plus adoption*
+ * (`Hotel.adoptRestoredPlayer`): the room is entered and the play bounds are
+ * bound to it. Teleporting out to a park coordinate afterwards moves the
+ * character and leaves the binding, so she would stand in the park inside a
+ * hotel room's walls. Starting the park at its ordinary spawn instead means
+ * there is no room to be adopted into, and everything else the save carries —
+ * her look, her name, her pets, her flags, her shopping — is untouched.
  */
 function continueGame(
   canvas: HTMLCanvasElement,
   uiRoot: HTMLElement,
   splash: HTMLElement | null,
   save: SaveFile,
-  boardStallId?: string,
-  debugView?: DebugViewParams,
+  deepLink?: DeepLink,
 ): void {
   gameStore.hydrate(save);
   saveFlags.hydrate(save.flags);
-  if (boardStallId) grantRideCompanion();
+  if (deepLink?.kind === 'ride') grantRideCompanion();
   // Omitted rather than passed as undefined — `exactOptionalPropertyTypes`.
-  const options: GameOptions = save.place ? { startPlace: save.place } : {};
-  launchGame(canvas, uiRoot, splash, options, boardStallId, debugView);
+  const options: GameOptions =
+    save.place && deepLink?.kind !== 'spawn' ? { startPlace: save.place } : {};
+  launchGame(canvas, uiRoot, splash, options, deepLink);
 }
 
 /**
@@ -299,36 +449,36 @@ function continueGame(
  * to be offered again — the child already said goodbye to it, and being asked
  * a second time would be worse than either answer.
  *
- * `boardStallId` set means a ride deep link brought us here with nobody to
- * ask — "goes straight into the ride" has to be true even from a completely
- * empty profile, not only a returning one, so this skips the form itself and
- * hands `defaultCharacterChoice()` (`ui/CharacterCreation.ts` — the exact
- * defaults the form would otherwise have started on) straight to
- * `completeCharacterCreation`, same as the form's own "Let's go!" would.
+ * A {@link DeepLink} means a developer's URL brought us here with nobody to
+ * ask — "goes straight into the ride" (or straight to the coordinate) has to
+ * be true even from a completely empty profile, not only a returning one, so
+ * this skips the form itself and hands `defaultCharacterChoice()`
+ * (`ui/CharacterCreation.ts` — the exact defaults the form would otherwise
+ * have started on) straight to `completeCharacterCreation`, same as the form's
+ * own "Let's go!" would.
  */
 function startFresh(
   canvas: HTMLCanvasElement,
   uiRoot: HTMLElement,
   splash: HTMLElement | null,
-  boardStallId?: string,
-  debugView?: DebugViewParams,
+  deepLink?: DeepLink,
 ): void {
   clearSave();
-  if (boardStallId || debugView) {
+  if (deepLink) {
     // `defaultCharacterChoice` includes the default pet and
     // `completeCharacterCreation` grants it unstowed, so a brand-new profile
     // already has something to ride with. The belt-and-braces call is for the
     // *continued* profile above, which may have none.
     gameStore.completeCharacterCreation(defaultCharacterChoice());
     saveFlags.markCharacterCreated();
-    launchGame(canvas, uiRoot, splash, {}, boardStallId, debugView);
+    launchGame(canvas, uiRoot, splash, {}, deepLink);
     return;
   }
   new CharacterCreation(uiRoot, {
     onComplete: (choice) => {
       gameStore.completeCharacterCreation(choice);
       saveFlags.markCharacterCreated();
-      launchGame(canvas, uiRoot, splash, {}, boardStallId, debugView);
+      launchGame(canvas, uiRoot, splash, {});
     },
   });
 }
@@ -339,7 +489,7 @@ function startFresh(
  * **One place, so both boot paths load the same module the same way.** Awaiting
  * this is what runs every module-scope `const` that has not been run already —
  * so when the ride has pre-warmed them (`boot/parkGeneration.ts`) this settles
- * in a frame, and when nothing has (a continued save, a ride deep link, `/view`)
+ * in a frame, and when nothing has (a continued save, a ride deep link, `/view` or `/spawn`)
  * it pays the full cost here exactly as the old static import did.
  *
  * The module cache makes it idempotent, so calling it twice is free.
@@ -353,37 +503,36 @@ function launchGame(
   uiRoot: HTMLElement,
   splash: HTMLElement | null,
   options: GameOptions,
-  boardStallId?: string,
-  debugView?: DebugViewParams,
+  deepLink?: DeepLink,
 ): void {
-  // A ride deep link and `/view` are the only two things that skip the cat-bus
-  // arrival, and both for the same reason: the entire point of typing either
-  // URL is to be looking at the thing it names on the first frame, not sitting
-  // through an arrival first. Everything else leaves the decision to the save
-  // flag, so the arrival is what happens unless something says otherwise —
-  // forgetting to wire an opt-out shows up as a bus that should not be there,
-  // which somebody notices, rather than as no bus at all, which nobody did for
-  // twelve days. See `world/entrance/ArrivalSequence.ts`.
+  // A developer deep link — a ride, `/view` or `/spawn` — is the only thing
+  // that skips the cat-bus arrival, and all three for the same reason: the
+  // entire point of typing one of those URLs is to be looking at the thing it
+  // names on the first frame, not sitting through an arrival first. Everything
+  // else leaves the decision to the save flag, so the arrival is what happens
+  // unless something says otherwise — forgetting to wire an opt-out shows up
+  // as a bus that should not be there, which somebody notices, rather than as
+  // no bus at all, which nobody did for twelve days. Asking the union once,
+  // rather than testing each kind, is what means a fourth link added later
+  // cannot forget to opt out. See `world/entrance/ArrivalSequence.ts`.
   const gameOptions: GameOptions =
-    boardStallId !== undefined || debugView !== undefined
-      ? { ...options, arriveByBus: false }
-      : options;
+    deepLink !== undefined ? { ...options, arriveByBus: false } : options;
   const engine = new Engine(canvas);
 
   // **The ride comes first, and the park is built while it plays.**
   //
-  // Only for a genuine arrival: a ride deep link or `/view` has already said
+  // Only for a genuine arrival: a ride deep link, `/view` or `/spawn` has already said
   // `arriveByBus: false`, and a continued save has already arrived, so both go
   // straight to the park exactly as before. `arrivalIsDue()` is the same one
   // question `Entrance` asks — asked here too rather than answered a second
   // way, so a journey without an arrival behind it is not expressible.
   if (gameOptions.arriveByBus !== false && arrivalIsDue()) {
     rideInThenPlay(engine, uiRoot, splash, gameOptions, () => {
-      void finishLaunch(engine, uiRoot, splash, gameOptions, boardStallId, debugView);
+      void finishLaunch(engine, uiRoot, splash, gameOptions, deepLink);
     });
     return;
   }
-  void finishLaunch(engine, uiRoot, splash, gameOptions, boardStallId, debugView);
+  void finishLaunch(engine, uiRoot, splash, gameOptions, deepLink);
 }
 
 /**
@@ -641,12 +790,11 @@ async function finishLaunch(
   uiRoot: HTMLElement,
   splash: HTMLElement | null,
   gameOptions: GameOptions,
-  boardStallId?: string,
-  debugView?: DebugViewParams,
+  deepLink?: DeepLink,
 ): Promise<void> {
   // Free when the ride has already loaded it; the full four seconds of
-  // module-scope solving when nothing has — a continued save, a ride deep link
-  // or `/view`, none of which play an arrival. Those are exactly the paths that
+  // module-scope solving when nothing has — a continued save, a ride deep link,
+  // `/view` or `/spawn`, none of which play an arrival. Those are exactly the paths that
   // paid it before this change too, so none of them got slower.
   const GameClass = await loadGame();
   const game = handOverGame ?? new GameClass(engine, uiRoot, gameOptions);
@@ -668,26 +816,65 @@ async function finishLaunch(
 
   game.start();
 
-  if (boardStallId) {
-    // Both wired synchronously inside `Game`'s own constructor, which has
-    // already returned by this point — nothing here waits a frame.
+  if (deepLink) {
+    // Every deep link means somebody typed a URL to look at one thing. The
+    // "what's new" panel standing in front of it is exactly as wrong here as
+    // it was in front of the arrival, so it is closed once, above the switch,
+    // rather than in each arm. Everything the arms reach for is wired
+    // synchronously inside `Game`'s own constructor, which has already
+    // returned by this point — nothing here waits a frame.
     game.whatsNew.close();
-    // A world ride boards through `boardRide`; a stall with a curtain
-    // mini-game behind it opens through `open()`. Trying the ride first and
-    // falling back is what lets one deep-link table serve both kinds — and
-    // what means a stall that graduates from mini-game to world ride is
-    // already wired the day it does. `boardRide` returns false for an id it
-    // does not know, which is exactly the signal needed here.
-    if (!game.miniGames.boardRide?.(boardStallId)) game.miniGames.open(boardStallId);
-  }
-  if (debugView) {
-    game.whatsNew.close();
-    game.enterDebugView(
-      debugView.position,
-      debugView.lookAt,
-      debugView.timeOfDay,
-      debugView.space,
-    );
+    switch (deepLink.kind) {
+      case 'ride': {
+        // A world ride boards through `boardRide`; a stall with a curtain
+        // mini-game behind it opens through `open()`. Trying the ride first and
+        // falling back is what lets one deep-link table serve both kinds — and
+        // what means a stall that graduates from mini-game to world ride is
+        // already wired the day it does. `boardRide` returns false for an id it
+        // does not know, which is exactly the signal needed here.
+        //
+        // **If neither succeeds, that must not be quiet.** #308: `/keychain-stall`
+        // read as correctly wired end to end on a static read-through and still
+        // "just started the game normally" — a deep link silently no-op'ing is
+        // indistinguishable from a working park unless something says otherwise.
+        // A `RIDE_DEEP_LINKS` entry pointing at an id nothing recognises (a typo,
+        // a ride renamed on one side of the table only, a stall not yet wired
+        // into either `boardRide` or `MiniGameHost`) now shouts in the console
+        // instead of handing back a normal-looking boot.
+        const boarded = game.miniGames.boardRide?.(deepLink.stallId) ?? false;
+        const opened = boarded || game.miniGames.open(deepLink.stallId);
+        if (!opened) {
+          console.error(
+            `Land of Good Places: deep-link stall id "${deepLink.stallId}" did not board a ride ` +
+              '(miniGames.boardRide) or open a mini-game (miniGames.open) — the deep link silently ' +
+              'did nothing. Check RIDE_DEEP_LINKS in main.ts against Game.ts\'s boardRide table and ' +
+              'MiniGameHost\'s own stall list.',
+          );
+        }
+        break;
+      }
+      case 'view':
+        game.enterDebugView(
+          deepLink.view.position,
+          deepLink.view.lookAt,
+          deepLink.view.timeOfDay,
+          deepLink.view.space,
+        );
+        break;
+      case 'spawn':
+        // `null` is `/spawn` with an unreadable `pos` — the park still opens,
+        // she just starts where an ordinary game would. See
+        // {@link parseDebugSpawn}.
+        if (deepLink.spawn) {
+          game.enterDebugSpawn(
+            deepLink.spawn.x,
+            deepLink.spawn.z,
+            deepLink.spawn.y,
+            deepLink.spawn.facing,
+          );
+        }
+        break;
+    }
   }
 
   // Unmissable red "DEV" watermark — never present in a production build.

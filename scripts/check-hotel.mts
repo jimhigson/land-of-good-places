@@ -3006,6 +3006,221 @@ if (furnitureWallEmbeds.length > 0) {
 }
 for (const graze of furnitureWallGrazes) console.log(`  ~ ${graze}`);
 
+// -------------- 28. the disco ball's beam reaches the lobby's real walls
+//
+// Issue #307, Jim playing the lobby: *"the disco ball has these horizontal
+// supports holding it up that just stop in mid-air - can we extend these out
+// to the walls please?"* `Hotel.hangDiscoBall`'s beam used to be a fixed
+// 3.2 m × its scale regardless of the room it hung in — 9.6 m in a 26 m-wide
+// lobby, both ends floating in open air. The fix (`beamSpan`, computed by the
+// caller from `LOBBY.halfX`) is only as good as whatever actually got built,
+// so this measures the real mesh against the real collision walls, the same
+// discipline probe 27 uses, rather than re-checking the arithmetic that
+// produced `beamSpan` in the first place.
+{
+  hotel.hotelRoot.updateMatrixWorld(true);
+  const lobbyShell = hotel.hotelRoot.children.find((child) => child.name === `hotel:${LOBBY.space}`);
+  if (!lobbyShell) {
+    problems.push('lobby shell not found — the disco-beam probe is blind');
+  } else {
+    let beamBox: Box3 | null = null;
+    lobbyShell.traverse((object) => {
+      if (object instanceof Mesh && object.name === 'hotel.discoBeam') {
+        beamBox = new Box3().setFromObject(object);
+      }
+    });
+    if (!beamBox) {
+      problems.push('no hotel.discoBeam mesh found in the lobby — the probe is blind');
+    } else {
+      // The real west/east wall lines, read off collision (halfThickness
+      // 0.3 is unique to the four outer walls — lift alcove, stair flanks
+      // and partitions all register thinner) rather than retyping `halfX`.
+      let westX = Infinity;
+      let eastX = -Infinity;
+      collision.forEachWall((x1, z1, x2, z2, halfThickness) => {
+        if (Math.abs(halfThickness - 0.3) > 0.005) return;
+        if (Math.abs(x1 - x2) > 0.01) return; // vertical (west/east) runs only
+        if (Math.hypot(x1 - LOBBY.originX, z1 - LOBBY.originZ) > HOTEL_PLAY_RADIUS) return;
+        westX = Math.min(westX, x1);
+        eastX = Math.max(eastX, x1);
+      });
+      if (westX === Infinity || eastX === -Infinity) {
+        problems.push('no lobby west/east outer wall segments found for the disco-beam probe');
+      } else {
+        const box = beamBox as Box3;
+        const westGap = box.min.x - westX;
+        const eastGap = eastX - box.max.x;
+        if (westGap > 0.05) {
+          problems.push(
+            `lobby disco beam's west end stops ${westGap.toFixed(2)} m short of the west wall ` +
+              `(beam at x=${box.min.x.toFixed(2)}, wall at x=${westX.toFixed(2)})`,
+          );
+        }
+        if (eastGap > 0.05) {
+          problems.push(
+            `lobby disco beam's east end stops ${eastGap.toFixed(2)} m short of the east wall ` +
+              `(beam at x=${box.max.x.toFixed(2)}, wall at x=${eastX.toFixed(2)})`,
+          );
+        }
+      }
+    }
+  }
+}
+
+// -------------- 29. the lobby's near walls are hidden, not shortened, and still solid
+//
+// Issue #307, Jim playing the lobby: *"extend the walls upwards, but hide
+// them (not transparent) when they are near the camera - on the side where
+// they'd be obscuring the room."* `HotelRoom.nearWallsHidden` replaces the
+// old `nearWallHeight` shortening hack: every wall now builds at the room's
+// real `wallHeight`, and the two the fixed rig looks *through* (south, east)
+// render invisible instead. Both halves are worth proving on the built
+// scene — a regression could bring back a short wall, or could hide a wall
+// without keeping its collision, and either looks identical from a diff.
+{
+  hotel.hotelRoot.updateMatrixWorld(true);
+  const lobbyShell = hotel.hotelRoot.children.find((child) => child.name === `hotel:${LOBBY.space}`);
+  if (!lobbyShell) {
+    problems.push('lobby shell not found — the hidden-wall probe is blind');
+  } else {
+    const sides: Record<'north' | 'south' | 'east' | 'west', { count: number; allFullHeight: boolean }> = {
+      north: { count: 0, allFullHeight: true },
+      south: { count: 0, allFullHeight: true },
+      east: { count: 0, allFullHeight: true },
+      west: { count: 0, allFullHeight: true },
+    };
+    const wrongVisibility: string[] = [];
+    lobbyShell.traverse((object) => {
+      if (!(object instanceof Mesh) || object.name !== 'hotel.wall') return;
+      const box = new Box3().setFromObject(object);
+      const centreX = (box.min.x + box.max.x) / 2 - LOBBY.originX;
+      const centreZ = (box.min.z + box.max.z) / 2 - LOBBY.originZ;
+      const height = box.max.y - box.min.y;
+      let side: 'north' | 'south' | 'east' | 'west' | null = null;
+      if (Math.abs(centreX - LOBBY.halfX) < 0.05) side = 'east';
+      else if (Math.abs(centreX + LOBBY.halfX) < 0.05) side = 'west';
+      else if (Math.abs(centreZ - LOBBY.halfZ) < 0.05) side = 'south';
+      else if (Math.abs(centreZ + LOBBY.halfZ) < 0.05) side = 'north';
+      if (!side) return; // an internal partition, not an outer wall
+      sides[side].count += 1;
+      if (Math.abs(height - LOBBY.wallHeight) > 0.02) sides[side].allFullHeight = false;
+      const shouldBeHidden = side === 'south' || side === 'east';
+      if (object.visible === shouldBeHidden) {
+        wrongVisibility.push(
+          `${side} wall at local (${centreX.toFixed(1)}, ${centreZ.toFixed(1)}) is ` +
+            `${object.visible ? 'visible' : 'hidden'}, expected ${shouldBeHidden ? 'hidden' : 'visible'}`,
+        );
+      }
+    });
+    for (const side of ['north', 'south', 'east', 'west'] as const) {
+      if (sides[side].count === 0) {
+        problems.push(`no ${side} wall mesh found in the lobby — the hidden-wall probe is blind`);
+      } else if (!sides[side].allFullHeight) {
+        problems.push(
+          `lobby ${side} wall is not built at the room's full ${LOBBY.wallHeight} m — a short wall crept back in`,
+        );
+      }
+    }
+    if (wrongVisibility.length > 0) {
+      problems.push(`lobby wall visibility wrong for ${wrongVisibility.length} run(s): ${wrongVisibility.join('; ')}`);
+    }
+    // And the collision itself: the hidden south/east runs must still block a
+    // body exactly like the drawn north/west ones do. Marched from outside
+    // the room straight at the wall's own line, the same shape probe 22 uses
+    // for the tower's facade.
+    for (const [label, worldX, worldZ, dirX, dirZ] of [
+      // South's bearing sits 6 m off-axis, clear of the front door
+      // (gaps.south is ±DOOR_HALF = ±1.3 either side of x = 0) — this probe
+      // wants the solid run, not the doorway. East, north and west have no
+      // gap anywhere near their own axis, so the room's own centre line is
+      // fine for them.
+      ['south (hidden)', LOBBY.originX + 6, LOBBY.originZ + LOBBY.halfZ + 3, 0, -1],
+      ['east (hidden)', LOBBY.originX + LOBBY.halfX + 3, LOBBY.originZ, -1, 0],
+      ['north (visible)', LOBBY.originX, LOBBY.originZ - LOBBY.halfZ - 3, 0, 1],
+      ['west (visible)', LOBBY.originX - LOBBY.halfX - 3, LOBBY.originZ, 1, 0],
+    ] as const) {
+      const probe = new Vector3(worldX, 0, worldZ);
+      for (let step = 0; step < 200; step += 1) {
+        probe.x += dirX * 0.03;
+        probe.z += dirZ * 0.03;
+        collision.resolve(probe, PLAYER_RADIUS);
+      }
+      const travelled =
+        Math.abs(dirX) > 0 ? Math.abs(probe.x - worldX) : Math.abs(probe.z - worldZ);
+      // 200 steps of 3 cm each aim 6 m past the wall; stopping short of ~3.4 m
+      // means the wall (and, on the near sides, the door gap it does not
+      // cover here — this bearing is on-axis, clear of every declared
+      // doorway) actually held.
+      if (travelled > 3.4) {
+        problems.push(
+          `${label} lobby wall did not hold a body marched straight at it — travelled ${travelled.toFixed(2)} m ` +
+            `of a possible 6 m`,
+        );
+      }
+    }
+  }
+}
+
+// ---------- 30. the disco ball doesn't overlap the statue, the chandelier,
+// the staircase, or the overhang above it
+
+// Issue #305, 19 Aug 2026: Jim, playing — "the disco ball in the hotel
+// lobby overlaps the statue's head." It had hung on the statue's own axis
+// since 7 August, and going 3x size that same day is what turned "above
+// her" into "through her" — nothing checked the two real meshes against
+// each other, so a size change with no position change silently became a
+// visual bug nobody caught until a six-year-old's dad walked up to it.
+// Moved to `DISCO_Z`, between the two staircase flights (`Hotel.dressLobby`'s
+// own comment there has the real numbers this probe re-derives). This is the
+// mechanism that keeps it there: it measures the **built** meshes' own
+// boxes — the same method that found the new spot — so a future change to
+// any of these fixtures' positions or sizes that reintroduces an overlap
+// fails loudly instead of shipping unseen (CLAUDE.md: "a mesh a child can
+// see... is the same disease as a check that cannot fail").
+//
+// Scoped to named top-level meshes inside the lobby shell rather than a
+// second copy of the arc/offset arithmetic that placed them — asking the
+// real geometry is what makes this probe unable to agree with a stale
+// comment the way the arithmetic could.
+function namedDescendantBox(root: Object3D, name: string): Box3 | undefined {
+  let found: Object3D | undefined;
+  root.traverse((object) => {
+    if (!found && object.name === name) found = object;
+  });
+  return found ? new Box3().setFromObject(found) : undefined;
+}
+
+let discoNeighboursChecked = 0;
+const lobbyShellForDisco = hotel.hotelRoot.children.find(
+  (child) => child.name === `hotel:${LOBBY.space}`,
+);
+if (!lobbyShellForDisco) {
+  problems.push('probe 30: no lobby shell found to check the disco ball in');
+} else {
+  lobbyShellForDisco.updateMatrixWorld(true);
+  const discoBallBox = namedDescendantBox(lobbyShellForDisco, 'hotel.discoBall');
+  const discoNeighbours: readonly (readonly [string, Box3 | undefined])[] = [
+    ['the RiPika statue', namedDescendantBox(lobbyShellForDisco, 'prop.ripikaStatue')],
+    ['the chandelier', namedDescendantBox(lobbyShellForDisco, 'hotel.chandelier')],
+    ['the right stair flight', namedDescendantBox(lobbyShellForDisco, 'hotel.grandStaircase.right')],
+    ['the left stair flight', namedDescendantBox(lobbyShellForDisco, 'hotel.grandStaircase.left')],
+    ['the straight stair flight', namedDescendantBox(lobbyShellForDisco, 'hotel.straightStaircase')],
+    ['the gallery/landing overhang', namedDescendantBox(lobbyShellForDisco, 'hotel:lobby/overhang')],
+  ];
+  discoNeighboursChecked = discoNeighbours.length;
+  if (!discoBallBox) {
+    problems.push("probe 30: no mesh named 'hotel.discoBall' found in the lobby to check");
+  } else {
+    for (const [label, box] of discoNeighbours) {
+      if (!box) {
+        problems.push(`probe 30: no mesh found for ${label} to check the disco ball against`);
+      } else if (discoBallBox.intersectsBox(box)) {
+        problems.push(`probe 30: the disco ball's real box overlaps ${label}'s real box`);
+      }
+    }
+  }
+}
+
 // ----------------------------------------------------------------- report
 
 console.log(
@@ -3015,7 +3230,9 @@ console.log(
     `${panes}/${declared} declared window panes built; ${occlusionReport}; ` +
     `${crossingsChecked} doorway crossing marches, ${crossingFailures.length} fell short; ` +
     `${furnitureWallPairsChecked} furniture-vs-wall pairs, ${furnitureWallEmbeds.length} embedded, ` +
-    `${furnitureWallGrazes.length} grazed (warnings).`,
+    `${furnitureWallGrazes.length} grazed (warnings); ` +
+    `lobby disco beam and near-wall hide/collision probes ran; ` +
+    `disco ball checked against ${discoNeighboursChecked} lobby fixtures.`,
 );
 
 if (problems.length > 0) {

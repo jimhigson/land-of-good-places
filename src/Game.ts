@@ -18,7 +18,7 @@ import { arrivalOwnsTheSpawn } from './world/entrance/arrivalSpawn';
 import { arrivalCameraZoom } from './world/entrance/ArrivalSequence';
 import { Highlights } from './world/Highlights';
 import { Selection } from './world/Selection';
-import type { InteractZone } from './world/interact';
+import { pickInteractZone, PRIMARY_ACTION, type InteractZone } from './world/interact';
 import { InteractRouter, type InteractClaim } from './world/InteractRouter';
 import type { InteriorControls } from './world/building';
 import { GARDEN_FLOOR, LOBBY, OCEAN_FLOOR } from './world/hotel/layout';
@@ -498,6 +498,14 @@ export class Game {
       player: this.player,
       walkTo: (x, y, z) => this.tapNavigator.navigateTo(x, y, z),
       blocked: () => this.miniGames.frozen || this.player.riding,
+      // Issue #309: a map tap that lands on an attraction (a ride, a stall, the
+      // hotel lobby, a garden cart…) walks her to its stand point and uses it
+      // on arrival, instead of the old flat refusal a solid collider used to
+      // get from `isReachable`. `useZoneNear` is built once `selection` exists
+      // below (referenced through a closure for the same reason `miniGames`
+      // is), and it is the *only* new "use this attraction" path — everything
+      // it calls is the ordinary walk-up-and-press-E plumbing.
+      useAttraction: (x, y, z) => this.useZoneNear(x, y, z),
     });
     this.screenControls = new ScreenControls(uiRoot, this.input);
     // A DOM layer of its own for the ferris wheel's HUD, so `RideHud` — written
@@ -962,6 +970,35 @@ export class Game {
   }
 
   /**
+   * GitHub issue #309: a tap on `ui/ParkMap.ts` that landed on an attraction.
+   *
+   * Picks the zone the same way a 3D tap does — `world/interact.ts`'s
+   * `pickInteractZone`, over the same `currentZones()` list the SELECTION
+   * RULE itself reads — and hands it straight to `Selection.commitZone`,
+   * which is the *existing* "walk there if far, run the action now if
+   * close" machinery a chip commit already uses. Returns false for anything
+   * that isn't a real, usable attraction (open ground, the castle's bare
+   * facade, a sign) so `ParkMap` falls back to its own plain "walk here" —
+   * this only ever narrows what the old flat refusal used to reject, never
+   * widens what a tap can do.
+   *
+   * A zone with no `actions()` at all — the front door, the hotel's own
+   * doorway — still counts as found: walking her to its `standX/standZ`
+   * (the ordinary routed walk, same as any other tap-to-move) is the whole
+   * of what "using" it means, because arriving is what fires the doorway's
+   * own crossing trigger (`Building`/`Hotel`'s `checkDoorways`), not a chip.
+   */
+  private useZoneNear(x: number, y: number, z: number): boolean {
+    const zone = pickInteractZone(this.currentZones(), x, y, z);
+    if (!zone) return false;
+    const actions = zone.actions?.() ?? [];
+    const primary = actions.find((action) => action.id === PRIMARY_ACTION) ?? actions[0];
+    if (primary) this.selection.commitZone(zone, primary);
+    else this.tapNavigator.navigateTo(zone.standX, zone.y, zone.standZ);
+    return true;
+  }
+
+  /**
    * True while a panel, a book, a ride or a mini-game owns the screen.
    *
    * One definition, shared by the action button, the sign reader and the
@@ -1210,6 +1247,46 @@ export class Game {
       // ride — exactly what a debug screenshot wants.
       gameStore.setPaused(true);
     }
+  }
+
+  /**
+   * Debug-only: stands the **real player** at an arbitrary world point, ready
+   * to walk. See `/spawn` in `main.ts`, the only caller.
+   *
+   * The deliberate difference from {@link enterDebugView} next door is that
+   * nothing here is a camera trick. There is no `cameraOverride`, no pause and
+   * no second scene object: this teleports the one `Player` the game already
+   * has, so collision, interact zones, the parade, the HUD and every control
+   * are live from the first frame — the question `/view` cannot answer is
+   * *"does it feel right to stand here?"*, and only the actual character
+   * standing there can.
+   *
+   * `y` omitted means "stand on whatever the ground is", sampled through
+   * `Player`'s own sampler rather than a second copy of the terrain question.
+   * Pass it only for somewhere the ground is not a function of the terrain — a
+   * deck, a bridge, the castle.
+   *
+   * `facing` omitted turns her to look at the middle of the park, the same
+   * spirit as `/view`'s `camDir` defaulting to looking back at the origin: a
+   * hand-typed URL with no bearing in it should still open on the park rather
+   * than on whatever happens to be behind her.
+   *
+   * **The camera is snapped, not eased.** Without this it opens on the
+   * entrance (where the constructor put her) and glides across the park to
+   * catch up — the exact opening-pan bug `world/entrance/arrivalSpawn.ts`
+   * records, arrived at from the other direction.
+   */
+  enterDebugSpawn(x: number, z: number, y?: number, facing?: number): void {
+    // A `rotation.y` of `t` sends local +Z to world `(sin t, cos t)`, so
+    // looking at the origin from `(x, z)` is the bearing of `(-x, -z)`. At the
+    // origin itself that degenerates (`atan2(0, 0)` is 0, i.e. an arbitrary
+    // direction), so fall back to the bearing a fresh game starts on.
+    const towardsCentre =
+      x === 0 && z === 0 ? DEFAULT_SPAWN_FACING : Math.atan2(-x, -z);
+    const yaw = facing ?? towardsCentre;
+    if (y === undefined) this.player.teleport(x, z, yaw);
+    else this.player.teleportTo(x, y, z, yaw);
+    this.camera.snapTo(this.player.position);
   }
 
   start(): void {

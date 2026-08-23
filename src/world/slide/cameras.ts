@@ -99,6 +99,38 @@ import { fitCameraToViewport } from '../../core/RideCamera';
  * the trough obliquely and the near wall is effectively taller. A number taken
  * from the profile alone would have been wrong by that margin, which is why it
  * was measured on the built chute instead.
+ *
+ * ### 55° cleared occlusion and still failed legibility — a second, later measurement
+ *
+ * The table above answers "is the ray to her blocked at all", which is a real
+ * question but not the one `check:slide-rider`'s trackside clause actually asks
+ * (added 6 August, after this table was measured): **how much of her body fills
+ * the frame**, not merely whether a single ray reaches her. 55° passed the
+ * occlusion sweep and still let a rider's body collapse to 0.11% of frame
+ * against the check's 0.40% floor — found on beat 1 of the canonical seed, at
+ * the far end of its span (t≈0.333), where her chute-relative heading has
+ * swung ~45° from the beat's own midpoint (which is where the eye's `right`/`up`
+ * frame is built) and the beat's pitch is almost flat (≈3.7°). The occlusion
+ * sweep is binary — a ray either lands on her or it does not — so it cannot see
+ * a rider who is technically unoccluded but reduced to a sliver by being viewed
+ * nearly end-on down the trough. That is a second, independent failure mode
+ * from the hand-rail cut the 50°/55° figures were tuned against, and it needed
+ * a second measurement to find.
+ *
+ * Re-measured directly against `check:slide-rider`'s own pixel-fraction floor
+ * (not the occlusion raycast) by sweeping elevation and standoff together and
+ * rendering the actual worst frame: **standoff turns out not to be inert after
+ * all** once legibility rather than bare occlusion is the question — a bigger
+ * standoff *and* a steeper elevation both help, up to a point, and pushing
+ * either one alone past its own sweet spot makes it worse again (she reads
+ * smaller from further away; a near-vertical eye loses its lateral spread).
+ * **75°, at the existing 7 m standoff, is where the same worst frame that
+ * measured 0.11% measures 0.48%** — 20% of headroom over the 0.40% floor,
+ * without moving the standoff at all. The other two trackside beats, which
+ * already passed, get *better* too (their own worst samples rose from 0.56%
+ * and 0.77% to 1.03% and 1.17%) — steeper is safe everywhere on this ride, not
+ * just on the beat that was failing, which is the same "steeper is always
+ * safe; shallower is a cliff" shape the original 50° finding already had.
  */
 
 // --------------------------------------------------------------- the numbers
@@ -116,19 +148,33 @@ export const BEATS = 6;
 /**
  * How high above the chute's own side plane a trackside eye sits, in radians.
  *
- * **50° is measured, not chosen** — see the table above. This is 55°, five
- * degrees of margin on the safe side, because the number that fails is a hard
- * edge (below it the near hand-rail simply cuts her in half) and because the
- * measurement was taken on one seed's bends. Steeper is always safe; shallower
- * is a cliff.
+ * **50° is measured against occlusion — see the table above — but 75° is what
+ * the actual pixel-fraction floor (`check:slide-rider`'s trackside clause)
+ * needs**, see the "55° cleared occlusion and still failed legibility" section
+ * above. 55° (occlusion's 50° plus a flat 5° margin) shipped for a month and
+ * then failed on the canonical seed's beat 1, at the far end of its span,
+ * where the beat is nearly flat *and* turns hard — the one combination the
+ * occlusion sweep could not see because it only asks whether a single ray
+ * reaches her, not how much of her the frame can actually show. Re-measured
+ * directly against the pixel floor by rendering the worst frame while sweeping
+ * elevation and standoff together: 75° at the existing 7 m standoff turns that
+ * frame's 0.11% into 0.48% (floor is 0.40%), and raises the other two trackside
+ * beats' own worst samples too rather than trading one for another. Steeper is
+ * still always safe; shallower is still a cliff.
  */
-const TRACKSIDE_ELEVATION = (55 * Math.PI) / 180;
+const TRACKSIDE_ELEVATION = (75 * Math.PI) / 180;
 
 /**
  * How far a trackside eye stands from the chute, in metres.
  *
- * Free to choose, because the sweep proved distance has no effect at all on
- * whether she is visible. So it is chosen for the two things it *does* set:
+ * Free to choose against the **occlusion** sweep, which proved distance has no
+ * effect at all on whether a ray reaches her — see the table above. It is not
+ * free against the **legibility** floor `check:slide-rider` actually gates on;
+ * see {@link TRACKSIDE_ELEVATION}'s "cleared occlusion and still failed
+ * legibility" note. 7 m happens to already sit at the sweet spot the later
+ * elevation/standoff sweep found, so this number did not need to move — only
+ * {@link TRACKSIDE_ELEVATION} did. So it is chosen for the two things it *does*
+ * set:
  *
  * - **How big she reads.** At 7 m she is 6.8–10.5 m away across a beat, which
  *   with {@link TRACKSIDE_FOV} puts a reclining child at roughly a quarter of

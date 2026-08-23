@@ -457,6 +457,23 @@ export interface ParkFacts {
    * "does the ride hit anything" and it cannot drift between them.
    */
   readonly cruiserStrikes: readonly string[];
+  /**
+   * How high the Sky Cruiser's rail stands above the terrain beneath it, in
+   * metres, sampled every 1 m along the built loop — index `i` is the height
+   * at route distance `i`. For `coaster/pylons.ts`'s own `skyCruiserStandsOnItsOwnSupports`
+   * invariant: a stretch of track close enough to the ground needs no post
+   * (`pylons.ts`'s `MIN_PYLON_HEIGHT` — "below this the track is close enough
+   * to the ground that a post is clutter"), and that is exactly the shape of
+   * the boarding dip at the station, where the loop closes. An invariant that
+   * only excuses a gap for standing over a plot or near a path would
+   * misread that dip as unexplained floating track.
+   *
+   * Sampled here, with the dynamic `terrainHeight` import every other
+   * seed-dependent thing in this file already uses (see this interface's own
+   * header) — a static import would pull in a second copy of the park at the
+   * default seed.
+   */
+  readonly cruiserRouteGroundClearance: readonly number[];
   readonly walls: readonly WallFact[];
   readonly trees: readonly TreeFact[];
   /** Every bush clump standing in the park. See {@link BushFact}. */
@@ -2027,6 +2044,21 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     ),
   };
 
+  // See `ParkFacts.cruiserRouteGroundClearance`'s own comment: how high the
+  // built loop stands above the terrain under it, sampled every metre, so an
+  // invariant can tell a genuinely-low stretch (the station boarding dip)
+  // from unexplained floating track without re-deriving `pylons.ts`'s own
+  // placement rule.
+  const cruiserRouteGroundClearance: number[] = [];
+  {
+    const point = new Vector3();
+    const route = world.coaster.route;
+    for (let d = 0; d < route.length; d += 1) {
+      route.pointAt(d, point);
+      cruiserRouteGroundClearance.push(point.y - terrainHeight(point.x, point.z));
+    }
+  }
+
   return {
     laneCarriageway,
     laneGreenery,
@@ -2038,6 +2070,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     cameraTracking,
     castlePass,
     cruiserStrikes: cruiserStrikes(world.coaster.route, world.coaster.group, [world.coaster.group]),
+    cruiserRouteGroundClearance,
     seed,
     world,
     walls,

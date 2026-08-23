@@ -1032,6 +1032,16 @@ export class Hotel implements GameSystem {
   private readonly facadeYaw: number;
   private readonly facadeX: number;
   private readonly facadeZ: number;
+  /**
+   * The anchor's own "entrance" point — `world/anchors.ts`'s `entrance: [p.
+   * entranceX, p.entranceZ]`, the exact spot `ui/ParkMap.ts` draws this
+   * attraction's pin at. Both come from the same `placedEntry('hotel')`
+   * call, stored here rather than re-read, so {@link exteriorEntranceZone}
+   * can size itself to reach it without a second, hand-picked constant that
+   * could drift out of sync with wherever the solver puts it.
+   */
+  private readonly entranceX: number;
+  private readonly entranceZ: number;
 
   private readonly collision: CollisionWorld;
   private readonly controls: InteriorControls;
@@ -1055,6 +1065,8 @@ export class Hotel implements GameSystem {
     const plot = placedEntry('hotel');
     this.facadeX = plot.x;
     this.facadeZ = plot.z;
+    this.entranceX = plot.entranceX;
+    this.entranceZ = plot.entranceZ;
     // The door faces the doormat the solver placed — the tower is a cluster
     // of crystals, so any yaw is as natural as any other.
     this.facadeYaw = Math.atan2(plot.entranceX - plot.x, plot.entranceZ - plot.z);
@@ -1457,8 +1469,78 @@ export class Hotel implements GameSystem {
 
   // ---------------------------------------------------------------- zones
 
+  /**
+   * The tower from outside, before she has ever walked in — GitHub issue
+   * #309's "the character can't be sent there at all", for the hotel
+   * specifically.
+   *
+   * One zone covering the whole crystal footprint, so a `ui/ParkMap.ts` tap
+   * anywhere on the tower's plot finds it (`Game.useZoneNear`'s
+   * `pickInteractZone`, tested against `pickRadius`) rather than getting the
+   * flat "can't walk there" a solid collider used to earn. No `actions` —
+   * same as `world/building/interactZones.ts`'s own `frontDoor` — because
+   * there has never been an "enter the hotel" button to press: walking
+   * through the doorway is what has always done it, via
+   * {@link checkDoorways}'s own crossing trigger, and that fires on the walk
+   * itself with no help from this zone.
+   *
+   * **`standX/standZ` is {@link towerDoorBand}'s own centre — not a second,
+   * hand-picked offset.** The first cut placed it 1.5 m *past* the band's
+   * inner edge, reasoning that only a point beyond the whole band could force
+   * a routed walk to cross it — sound for straight-line steering, wrong for
+   * the actual routed walk, which plans on `NavGrid`'s half-metre lattice
+   * baked from collision. That lattice has no waypoint past the tower's real
+   * back wall (measured empirically, sat well short of the doc comment's own
+   * `TOWER_BACK_ALONG`), so the route stopped 2.6 m short of the target every
+   * time and the doorway's crossing trigger never fired (`check:park`'s
+   * `route.unreachable`, and a live repro, both caught it — PR #315 review).
+   * The band's centre needs no such offset trick: it is, by construction,
+   * inside the band on every axis, so any walk that reaches it has already
+   * crossed the band getting there — and it is comfortably inside the
+   * lattice's real reach (confirmed against the built park: the whole band
+   * from its centre out to the facade routes with zero shortfall). One
+   * number, already owned by {@link towerDoorBand}, used here instead of
+   * copied.
+   *
+   * **`pickRadius` reaches at least as far as {@link entranceX}/{@link
+   * entranceZ}** — the exact point `world/anchors.ts` reports as this
+   * anchor's `entrance` and `ui/ParkMap.ts` draws the tower's pin at. PR
+   * #315's second review round found the two 9.38 m apart on one seed: this
+   * zone was centred on the tower's true plot centre (`facadeX`/`facadeZ`)
+   * with a fixed `TOWER_SHELL_RADIUS + 2` reach, which happened to fall just
+   * short of wherever the solver had put the doormat that seed, so tapping
+   * the pin a family actually sees fell through to a plain ground walk and
+   * the doorway trigger never had a chance to fire — the "two definitions of
+   * one thing" bug class CLAUDE.md names as this repo's most common, with
+   * the map's pin and this zone's reach kept in step by two separate
+   * numbers instead of one owner. Deriving the radius from the real,
+   * measured distance to the entrance point — rather than nudging the
+   * constant up until this seed's number happens to clear it — means it
+   * always covers the pin, whatever a future reseed puts it at, with no
+   * second number to fall out of sync again. `Math.max` with
+   * `TOWER_SHELL_RADIUS` keeps the whole crystal footprint tappable too, on
+   * a seed where the entrance sits unusually close to centre.
+   */
+  private exteriorEntranceZone(): InteractZone {
+    const band = this.towerDoorBand();
+    const entranceReach = Math.hypot(
+      this.entranceX - this.facadeX,
+      this.entranceZ - this.facadeZ,
+    );
+    return {
+      id: 'hotel-entrance',
+      label: 'The Land Hotel',
+      x: this.facadeX,
+      y: this.surfaces.sample(this.facadeX, this.facadeZ, 3),
+      z: this.facadeZ,
+      pickRadius: Math.max(TOWER_SHELL_RADIUS, entranceReach) + 1,
+      standX: band.centreX,
+      standZ: band.centreZ,
+    };
+  }
+
   interactZones(): InteractZone[] {
-    if (!this.inside) return [];
+    if (!this.inside) return [this.exteriorEntranceZone()];
     const zones: InteractZone[] = [];
     const room = this.currentRoom();
     if (!room) return zones;
@@ -1980,6 +2062,17 @@ export class Hotel implements GameSystem {
       halfAcross: DOOR_HALF + 0.4,
       yaw: this.facadeYaw,
       y: 0,
+      // `exteriorEntranceZone`'s `hotel-entrance` zone *is* this door now
+      // (GitHub issue #309: a `ui/ParkMap.ts` tap anywhere on the tower walks
+      // her to this band and its own crossing trigger does the rest) — same
+      // pattern as `Building.ts`'s `castleEntranceBand`, whose `frontDoor`
+      // zone is its band's handle the same way. Without this,
+      // `scripts/check-tap-spacing.mts` reads the zone's wide `pickRadius`
+      // (it has to cover the whole tower footprint, not just the door) as one
+      // zone's pick area eating another's trigger band — which is exactly
+      // backwards here, since there is no "another": the zone and the band
+      // are the same doorway.
+      ownZoneId: 'hotel-entrance',
     };
   }
 
@@ -2787,11 +2880,14 @@ export class Hotel implements GameSystem {
     ];
     const wallMaterial = interiorMaterial(room.theme.wall);
     for (const { side, x1, z1, x2, z2 } of sides) {
-      // The two walls the camera looks *through* may be shorter than the two it
-      // looks *at* — see `HotelRoom.nearWallHeight`. Everywhere but the lobby
-      // they are the same number and this reads as it always did.
-      const height =
-        side === 'south' || side === 'east' ? room.nearWallHeight ?? room.wallHeight : room.wallHeight;
+      // Every wall is genuinely `room.wallHeight` tall now — issue #307, Jim
+      // playing the lobby: *"extend the walls upwards"*. The two the camera
+      // looks *through* (south, east) used to build shorter instead
+      // (`HotelRoom.nearWallHeight`, since removed) so the fixed rig could see
+      // past them; that made the room's own walls visibly stop short of its
+      // true height. See `HotelRoom.nearWallsHidden` for what replaced it.
+      const height = room.wallHeight;
+      const hideThisWall = room.nearWallsHidden === true && (side === 'south' || side === 'east');
       const gap = room.gaps[side];
       const along = side === 'north' || side === 'south' ? 'x' : 'z';
       const from = along === 'x' ? x1 : z1;
@@ -2831,6 +2927,14 @@ export class Hotel implements GameSystem {
         );
         wall.name = 'hotel.wall';
         wall.position.set(along === 'x' ? mid : x1, height / 2, along === 'x' ? z1 : mid);
+        // **Hidden, not shortened, not faded.** `mesh.visible = false` drops
+        // the wall from every render pass — colour and shadow both — while
+        // leaving its name and geometry alone, so probes 15/18/19 (corner
+        // abutment, partition ends, rug clearance) keep seeing it exactly as
+        // if it were drawn. The collider three lines below is untouched
+        // either way: a hidden wall is still a wall, just not one the fixed
+        // isometric rig is ever shown.
+        if (hideThisWall) wall.visible = false;
         shell.add(wall);
         const wx1 = room.originX + (along === 'x' ? a : x1);
         const wz1 = room.originZ + (along === 'x' ? z1 : a);
@@ -3495,12 +3599,18 @@ export class Hotel implements GameSystem {
     // answer here and a material colour is not.
     this.layMosaic(shell, LOBBY);
 
-    // The giant RiPika on its floor medallion, with the disco ball above —
-    // Eleri: "a disco ball above the ripika statue" — **on the axis, south of
-    // the arch**: doors → runner → the statue's medallion → under the arch →
-    // the colonnade. A grand lobby's centrepiece stands on the promenade and
-    // you walk round it, which the rainbow ring invites; it must not stand IN
-    // the archway, which the old spot (0, −1) now is.
+    // The giant RiPika on its floor medallion — Eleri: "a disco ball above
+    // the ripika statue," originally, which is where it hung until issue
+    // #305 (19 Aug 2026): Jim, playing — "the disco ball in the hotel lobby
+    // overlaps the statue's head." It had shared this axis with her since 7
+    // August, and going 3x size that same day is what turned "above her"
+    // into "through her." His ruling moved the ball off this axis entirely,
+    // to `DISCO_Z` near the chandelier below — see `hangDiscoBall`'s call
+    // site there for where and why. The statue keeps this spot, **on the
+    // axis, south of the arch**: doors → runner → the statue's medallion →
+    // under the arch → the colonnade. A grand lobby's centrepiece stands on
+    // the promenade and you walk round it, which the rainbow ring invites;
+    // it must not stand IN the archway, which the old spot (0, −1) now is.
     //
     // **z moved with the whole foyer** when it grew by `LOBBY_FOYER_GROWTH`
     // (17 Aug 2026, issue #271's paintings coming back) — the statue's own
@@ -3521,12 +3631,6 @@ export class Hotel implements GameSystem {
       top: statue.height,
       stand: false,
     });
-    // **Three times the size, and it lights the room** (Jim, 7 August 2026).
-    // Hung so the ball's middle rides just above the gallery deck (5.44):
-    // from up there it is at eye height and close enough to touch, and from
-    // the lobby floor it hangs in the middle of the tall room over the
-    // statue. Its beams sweep all three levels.
-    this.hangDiscoBall(shell, 0, 8.3, STATUE_Z, { scale: 3, lit: true, room: LOBBY });
     // The medallion: Eleri's rainbow ring, inlaid round the plinth. Inner
     // radius 1.4 clears the 1.15 m footing; six 0.15 m bands (0.22 until
     // issue #270's foyer/hall partition landed at `LOBBY_HALL_Z`) keep the
@@ -3566,6 +3670,47 @@ export class Hotel implements GameSystem {
     const pendant = pendantLight();
     pendant.position.set(0, 8.7 - chandelier.height / 2, CHANDELIER_Z);
     shell.add(pendant);
+
+    // **The disco ball** — moved here 19 Aug 2026, issue #305. Jim's ruling:
+    // "move the disco ball to between the bifurcated staircase." x = 0 is
+    // already equidistant between the two mirrored flights (they're built at
+    // `±STAIR_ARC_C`, same z). `DISCO_Z` is picked from the **built park's
+    // own meshes**, not the arc maths that placed them — a headless survey
+    // of `hotel.hotelRoot` (`check:hotel` probe 28 below re-runs the same
+    // measurement on every build) found:
+    //   - the overhang — the landing, the gallery deck, and every sofa,
+    //     planter and column standing on either — has a real box reaching no
+    //     further south than z ≈ −15.4, so any z south of that clears the
+    //     low 3.44 m archway underneath it and its furniture entirely;
+    //   - both curved flights' real boxes stop at |x| ≈ 2.9 nearest this
+    //     axis and top out at y ≈ 4.97 (the top newels' finials) — x = 0 is
+    //     clear of stair mass at any z on this axis, and the ball hangs 3+ m
+    //     above their tallest point regardless, so the beam's 9.6 m span
+    //     crossing their footprint in plan (it has to, at this scale) never
+    //     becomes a real 3-D collision;
+    //   - the chandelier already hangs on this same axis at `CHANDELIER_Z`,
+    //     real box reaching to z ≈ −12.6 on its south face — the ball's own
+    //     radius at this scale is ≈1.4 m, so keeping `DISCO_Z` this far
+    //     south of it leaves the two a real 0.4 m apart, not just centre to
+    //     centre.
+    // Same height and scale as before (8.3 m, 3x) — nothing about *why*
+    // those changes, only where.
+    //
+    // Issue #307: the beam must reach the room's *real* walls at this z —
+    // full room width (wall centreline to wall centreline, so each end
+    // embeds into the wall rather than stopping short of it), not a length
+    // guessed from the ball's own scale. The ball sits on the promenade axis
+    // (x = 0), which is also the room's own centre, so a beam spanning the
+    // full width is centred on the ball for free — still true after the ball
+    // moved from `STATUE_Z` to `DISCO_Z`, since `LOBBY` is one rectangular
+    // shell for its whole depth.
+    const DISCO_Z = CHANDELIER_Z + 2.9;
+    this.hangDiscoBall(shell, 0, 8.3, DISCO_Z, {
+      scale: 3,
+      lit: true,
+      room: LOBBY,
+      beamSpan: LOBBY.halfX * 2,
+    });
 
     // The desk is 2.67 m of bowed crystal counter — a run, so a rectangle
     // rather than a disc, or a child could not walk along it to reach the far
@@ -3685,8 +3830,9 @@ export class Hotel implements GameSystem {
     // Both stand against the **west** wall, and that is not decoration: the
     // camera looks along (−X, −Z) and down 38°, so anything tall on the +X or
     // +Z side of a child stands between her and the lens. The far two walls
-    // are the only place a tall prop is free. (Same rule as `nearWallHeight`,
-    // applied to furniture.) They are set between the west windows rather
+    // are the only place a tall prop is free. (Same rule as
+    // `nearWallsHidden`, applied to furniture rather than a wall.) They are
+    // set between the west windows rather
     // than across them. The old cluster at (12, −10.4) stood where the
     // colonnade now runs; it holds the east bay's corner instead, mirroring
     // the west one.
@@ -4562,7 +4708,14 @@ export class Hotel implements GameSystem {
       pictures: [{ wall: 'west', along: -4.8, width: 1.5, height: 1.15, seed: 0x40c1 }],
     });
 
-    // Over the hall, where all four rooms can see it.
+    // Over the hall, where all four rooms can see it. **Checked against
+    // issue #307's beam-reaches-the-walls fix and left alone on purpose**:
+    // this hall is a full-width strip of the *suite* (SUITE.halfX = 11), not
+    // a room of its own, and the ball hangs 3.4 m off the promenade — a beam
+    // actually reaching x = ±11 would be a 22 m rafter over a 6.8 m-wide
+    // hall, wildly out of scale for what is a small connecting space, not the
+    // lobby's double-height room the issue was about. Default (unscaled)
+    // 3.2 m beam stays.
     this.hangDiscoBall(shell, -3.4, SUITE.wallHeight + 0.9, 0);
   }
 
@@ -5669,20 +5822,46 @@ export class Hotel implements GameSystem {
    * fourteen of them, and the ferris wheel's is the brightest thing in the
    * game), so five more that burn while a child is out on the lawn would be
    * five for nothing. `Hotel.update` toggles the group — see {@link discoLit}.
+   *
+   * **The beam must reach real walls.** Issue #307, Jim playing the lobby:
+   * *"the disco ball has these horizontal supports holding it up that just
+   * stop in mid-air - can we extend these out to the walls please?"* The
+   * default 3.2 m length is sized for a small room where that happens to
+   * clear both walls without anyone measuring; the lobby is 26 m wide and a
+   * 9.6 m beam (3.2 × its scale of 3) centred on the ball left both ends
+   * floating in 8 m of open air. `beamSpan`, when a caller passes one, is the
+   * real full width to build (wall centreline to wall centreline, so each end
+   * embeds half a wall's thickness rather than stopping short with a visible
+   * gap) — computed by the caller from the room's own `halfX`, the one owner
+   * of that number, rather than guessed here.
    */
   private hangDiscoBall(
     shell: Group,
     x: number,
     y: number,
     z: number,
-    options: { readonly scale?: number; readonly lit?: boolean; readonly room?: HotelRoom } = {},
+    options: {
+      readonly scale?: number;
+      readonly lit?: boolean;
+      readonly room?: HotelRoom;
+      readonly beamSpan?: number;
+    } = {},
   ): void {
     const scale = options.scale ?? 1;
     // A slim beam carries the ball — the rooms are open-topped, so there is
     // no ceiling to hang it from, and a ball on nothing reads as a bug.
+    // `beamSpan` overrides the default scale-derived length for a room where
+    // that default would not reach the walls — see the doc above.
     const beam = solid(
-      new Mesh(new BoxGeometry(3.2 * scale, 0.16, 0.16), softMaterial(PALETTE.stonePinkDark)),
+      new Mesh(
+        new BoxGeometry(options.beamSpan ?? 3.2 * scale, 0.16, 0.16),
+        softMaterial(PALETTE.stonePinkDark),
+      ),
     );
+    // Named so `check:hotel` probe 28 can find it and measure its built
+    // world-space extent against the room's real walls, rather than trusting
+    // the number handed to `beamSpan`.
+    beam.name = 'hotel.discoBeam';
     beam.position.set(x, y + 0.08, z);
     shell.add(beam);
     const ball = createDiscoBall();
