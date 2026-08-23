@@ -83,13 +83,15 @@ export class SpineFrame {
    * How far, in arc metres from the crossing, the REAL drawn path is known
    * to continue in each direction before the recorded spine was trimmed (a
    * route end, a corner too tight for masonry, a deviation breach) —
-   * `Infinity` for the straight fallback, which promises nothing about a
-   * drawn path and so constrains nothing. Beyond this the frame
-   * extrapolates a straight line the actual path may well have left, so
-   * `bridgeFootprint.ts` caps each ramp's run against it: a hump's foot
-   * must land on the path that carries it, never on extrapolated ground
-   * the path has turned away from (found live, canonical seed: a ramp
-   * extrapolated past its path's turn walled off the path behind it).
+   * `Infinity` for the straight fallback, which records no drawn path at
+   * all. Beyond this the frame extrapolates a straight line the actual
+   * path may well have left. Deliberately NOT used to cap a ramp's run:
+   * a hump foot landing on plain lawn past its path's own turn is fine
+   * (walkers route over grass, and the old geometry always overran this
+   * way) — see `bridgeFootprint.ts`'s note where the cap was tried and
+   * reverted. Kept measured and exposed because the number is the honest
+   * answer to "how far does this bridge really follow its path", which a
+   * future consumer (or a debugging session) will want again.
    */
   private trustedNeg = Infinity;
   private trustedPos = Infinity;
