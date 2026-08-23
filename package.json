@@ -15,8 +15,9 @@
     "check:baked-face": "node --import ./scripts/ts-extension-resolver-register.mjs scripts/check-baked-face.mts",
     "check:hair": "node --import ./scripts/ts-extension-resolver-register.mjs scripts/check-hair.mts",
     "check:assets": "node --import ./scripts/ts-extension-resolver-register.mjs scripts/check-asset-contract.mts",
-    "check:crowd": "node --import ./scripts/ts-extension-resolver-register.mjs scripts/trace-npc-driver.mts && npm run check:npc-perch",
+    "check:crowd": "node --import ./scripts/ts-extension-resolver-register.mjs scripts/trace-npc-driver.mts && npm run check:npc-perch && npm run check:npc-separation",
     "check:npc-perch": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-npc-perch.mts",
+    "check:npc-separation": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-npc-separation.mts",
     "check:ride-camera": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/trace-ride-camera.mts",
     "check:orientation": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-orientation-math.mts",
     "check:sky-view": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-sky-view.mts",
@@ -73,6 +74,7 @@
     "check:park-boot": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-park-boot.mts",
     "check:arrival-completes": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-arrival-completes.mts",
     "check:arrival-starts": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-arrival-starts.mts",
+    "check:deep-links": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-deep-links.mts",
     "check:frame-time": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-frame-time.mts"
   },
   "dependencies": {

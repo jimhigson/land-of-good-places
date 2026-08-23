@@ -2515,11 +2515,14 @@ export class Hotel implements GameSystem {
     ];
     const wallMaterial = interiorMaterial(room.theme.wall);
     for (const { side, x1, z1, x2, z2 } of sides) {
-      // The two walls the camera looks *through* may be shorter than the two it
-      // looks *at* — see `HotelRoom.nearWallHeight`. Everywhere but the lobby
-      // they are the same number and this reads as it always did.
-      const height =
-        side === 'south' || side === 'east' ? room.nearWallHeight ?? room.wallHeight : room.wallHeight;
+      // Every wall is genuinely `room.wallHeight` tall now — issue #307, Jim
+      // playing the lobby: *"extend the walls upwards"*. The two the camera
+      // looks *through* (south, east) used to build shorter instead
+      // (`HotelRoom.nearWallHeight`, since removed) so the fixed rig could see
+      // past them; that made the room's own walls visibly stop short of its
+      // true height. See `HotelRoom.nearWallsHidden` for what replaced it.
+      const height = room.wallHeight;
+      const hideThisWall = room.nearWallsHidden === true && (side === 'south' || side === 'east');
       const gap = room.gaps[side];
       const along = side === 'north' || side === 'south' ? 'x' : 'z';
       const from = along === 'x' ? x1 : z1;
@@ -2559,6 +2562,14 @@ export class Hotel implements GameSystem {
         );
         wall.name = 'hotel.wall';
         wall.position.set(along === 'x' ? mid : x1, height / 2, along === 'x' ? z1 : mid);
+        // **Hidden, not shortened, not faded.** `mesh.visible = false` drops
+        // the wall from every render pass — colour and shadow both — while
+        // leaving its name and geometry alone, so probes 15/18/19 (corner
+        // abutment, partition ends, rug clearance) keep seeing it exactly as
+        // if it were drawn. The collider three lines below is untouched
+        // either way: a hidden wall is still a wall, just not one the fixed
+        // isometric rig is ever shown.
+        if (hideThisWall) wall.visible = false;
         shell.add(wall);
         const wx1 = room.originX + (along === 'x' ? a : x1);
         const wz1 = room.originZ + (along === 'x' ? z1 : a);
@@ -3223,12 +3234,18 @@ export class Hotel implements GameSystem {
     // answer here and a material colour is not.
     this.layMosaic(shell, LOBBY);
 
-    // The giant RiPika on its floor medallion, with the disco ball above —
-    // Eleri: "a disco ball above the ripika statue" — **on the axis, south of
-    // the arch**: doors → runner → the statue's medallion → under the arch →
-    // the colonnade. A grand lobby's centrepiece stands on the promenade and
-    // you walk round it, which the rainbow ring invites; it must not stand IN
-    // the archway, which the old spot (0, −1) now is.
+    // The giant RiPika on its floor medallion — Eleri: "a disco ball above
+    // the ripika statue," originally, which is where it hung until issue
+    // #305 (19 Aug 2026): Jim, playing — "the disco ball in the hotel lobby
+    // overlaps the statue's head." It had shared this axis with her since 7
+    // August, and going 3x size that same day is what turned "above her"
+    // into "through her." His ruling moved the ball off this axis entirely,
+    // to `DISCO_Z` near the chandelier below — see `hangDiscoBall`'s call
+    // site there for where and why. The statue keeps this spot, **on the
+    // axis, south of the arch**: doors → runner → the statue's medallion →
+    // under the arch → the colonnade. A grand lobby's centrepiece stands on
+    // the promenade and you walk round it, which the rainbow ring invites;
+    // it must not stand IN the archway, which the old spot (0, −1) now is.
     //
     // **z moved with the whole foyer** when it grew by `LOBBY_FOYER_GROWTH`
     // (17 Aug 2026, issue #271's paintings coming back) — the statue's own
@@ -3249,12 +3266,6 @@ export class Hotel implements GameSystem {
       top: statue.height,
       stand: false,
     });
-    // **Three times the size, and it lights the room** (Jim, 7 August 2026).
-    // Hung so the ball's middle rides just above the gallery deck (5.44):
-    // from up there it is at eye height and close enough to touch, and from
-    // the lobby floor it hangs in the middle of the tall room over the
-    // statue. Its beams sweep all three levels.
-    this.hangDiscoBall(shell, 0, 8.3, STATUE_Z, { scale: 3, lit: true, room: LOBBY });
     // The medallion: Eleri's rainbow ring, inlaid round the plinth. Inner
     // radius 1.4 clears the 1.15 m footing; six 0.15 m bands (0.22 until
     // issue #270's foyer/hall partition landed at `LOBBY_HALL_Z`) keep the
@@ -3294,6 +3305,47 @@ export class Hotel implements GameSystem {
     const pendant = pendantLight();
     pendant.position.set(0, 8.7 - chandelier.height / 2, CHANDELIER_Z);
     shell.add(pendant);
+
+    // **The disco ball** — moved here 19 Aug 2026, issue #305. Jim's ruling:
+    // "move the disco ball to between the bifurcated staircase." x = 0 is
+    // already equidistant between the two mirrored flights (they're built at
+    // `±STAIR_ARC_C`, same z). `DISCO_Z` is picked from the **built park's
+    // own meshes**, not the arc maths that placed them — a headless survey
+    // of `hotel.hotelRoot` (`check:hotel` probe 28 below re-runs the same
+    // measurement on every build) found:
+    //   - the overhang — the landing, the gallery deck, and every sofa,
+    //     planter and column standing on either — has a real box reaching no
+    //     further south than z ≈ −15.4, so any z south of that clears the
+    //     low 3.44 m archway underneath it and its furniture entirely;
+    //   - both curved flights' real boxes stop at |x| ≈ 2.9 nearest this
+    //     axis and top out at y ≈ 4.97 (the top newels' finials) — x = 0 is
+    //     clear of stair mass at any z on this axis, and the ball hangs 3+ m
+    //     above their tallest point regardless, so the beam's 9.6 m span
+    //     crossing their footprint in plan (it has to, at this scale) never
+    //     becomes a real 3-D collision;
+    //   - the chandelier already hangs on this same axis at `CHANDELIER_Z`,
+    //     real box reaching to z ≈ −12.6 on its south face — the ball's own
+    //     radius at this scale is ≈1.4 m, so keeping `DISCO_Z` this far
+    //     south of it leaves the two a real 0.4 m apart, not just centre to
+    //     centre.
+    // Same height and scale as before (8.3 m, 3x) — nothing about *why*
+    // those changes, only where.
+    //
+    // Issue #307: the beam must reach the room's *real* walls at this z —
+    // full room width (wall centreline to wall centreline, so each end
+    // embeds into the wall rather than stopping short of it), not a length
+    // guessed from the ball's own scale. The ball sits on the promenade axis
+    // (x = 0), which is also the room's own centre, so a beam spanning the
+    // full width is centred on the ball for free — still true after the ball
+    // moved from `STATUE_Z` to `DISCO_Z`, since `LOBBY` is one rectangular
+    // shell for its whole depth.
+    const DISCO_Z = CHANDELIER_Z + 2.9;
+    this.hangDiscoBall(shell, 0, 8.3, DISCO_Z, {
+      scale: 3,
+      lit: true,
+      room: LOBBY,
+      beamSpan: LOBBY.halfX * 2,
+    });
 
     // The desk is 2.67 m of bowed crystal counter — a run, so a rectangle
     // rather than a disc, or a child could not walk along it to reach the far
@@ -3413,8 +3465,9 @@ export class Hotel implements GameSystem {
     // Both stand against the **west** wall, and that is not decoration: the
     // camera looks along (−X, −Z) and down 38°, so anything tall on the +X or
     // +Z side of a child stands between her and the lens. The far two walls
-    // are the only place a tall prop is free. (Same rule as `nearWallHeight`,
-    // applied to furniture.) They are set between the west windows rather
+    // are the only place a tall prop is free. (Same rule as
+    // `nearWallsHidden`, applied to furniture rather than a wall.) They are
+    // set between the west windows rather
     // than across them. The old cluster at (12, −10.4) stood where the
     // colonnade now runs; it holds the east bay's corner instead, mirroring
     // the west one.
@@ -4287,7 +4340,14 @@ export class Hotel implements GameSystem {
       pictures: [{ wall: 'west', along: -4.8, width: 1.5, height: 1.15, seed: 0x40c1 }],
     });
 
-    // Over the hall, where all four rooms can see it.
+    // Over the hall, where all four rooms can see it. **Checked against
+    // issue #307's beam-reaches-the-walls fix and left alone on purpose**:
+    // this hall is a full-width strip of the *suite* (SUITE.halfX = 11), not
+    // a room of its own, and the ball hangs 3.4 m off the promenade — a beam
+    // actually reaching x = ±11 would be a 22 m rafter over a 6.8 m-wide
+    // hall, wildly out of scale for what is a small connecting space, not the
+    // lobby's double-height room the issue was about. Default (unscaled)
+    // 3.2 m beam stays.
     this.hangDiscoBall(shell, -3.4, SUITE.wallHeight + 0.9, 0);
   }
 
@@ -5131,20 +5191,46 @@ export class Hotel implements GameSystem {
    * fourteen of them, and the ferris wheel's is the brightest thing in the
    * game), so five more that burn while a child is out on the lawn would be
    * five for nothing. `Hotel.update` toggles the group — see {@link discoLit}.
+   *
+   * **The beam must reach real walls.** Issue #307, Jim playing the lobby:
+   * *"the disco ball has these horizontal supports holding it up that just
+   * stop in mid-air - can we extend these out to the walls please?"* The
+   * default 3.2 m length is sized for a small room where that happens to
+   * clear both walls without anyone measuring; the lobby is 26 m wide and a
+   * 9.6 m beam (3.2 × its scale of 3) centred on the ball left both ends
+   * floating in 8 m of open air. `beamSpan`, when a caller passes one, is the
+   * real full width to build (wall centreline to wall centreline, so each end
+   * embeds half a wall's thickness rather than stopping short with a visible
+   * gap) — computed by the caller from the room's own `halfX`, the one owner
+   * of that number, rather than guessed here.
    */
   private hangDiscoBall(
     shell: Group,
     x: number,
     y: number,
     z: number,
-    options: { readonly scale?: number; readonly lit?: boolean; readonly room?: HotelRoom } = {},
+    options: {
+      readonly scale?: number;
+      readonly lit?: boolean;
+      readonly room?: HotelRoom;
+      readonly beamSpan?: number;
+    } = {},
   ): void {
     const scale = options.scale ?? 1;
     // A slim beam carries the ball — the rooms are open-topped, so there is
     // no ceiling to hang it from, and a ball on nothing reads as a bug.
+    // `beamSpan` overrides the default scale-derived length for a room where
+    // that default would not reach the walls — see the doc above.
     const beam = solid(
-      new Mesh(new BoxGeometry(3.2 * scale, 0.16, 0.16), softMaterial(PALETTE.stonePinkDark)),
+      new Mesh(
+        new BoxGeometry(options.beamSpan ?? 3.2 * scale, 0.16, 0.16),
+        softMaterial(PALETTE.stonePinkDark),
+      ),
     );
+    // Named so `check:hotel` probe 28 can find it and measure its built
+    // world-space extent against the room's real walls, rather than trusting
+    // the number handed to `beamSpan`.
+    beam.name = 'hotel.discoBeam';
     beam.position.set(x, y + 0.08, z);
     shell.add(beam);
     const ball = createDiscoBall();

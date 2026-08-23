@@ -29,6 +29,25 @@ edits, **leave it exactly as you found it** — that is somebody's live work.
 - Never `git add -A` or `git add .`. Name the files you mean.
 - `.claude/` is gitignored; worktree gitlinks must never reach `main`.
 
+## Zero tolerance for CI failure
+
+**ZERO failures in CI are acceptable.** A failure in CI is just as serious
+as a failure of the deployed application, and must never be brushed aside —
+not as "pre-existing," not as "unrelated to this PR," not as "known,"
+not as anything else. A red check on `main` is `main` being broken, in
+exactly the same sense a crash in the shipped game would be.
+
+**Flakiness is equal to failure.** No retries to gloss over a flaky check —
+the fix is to find and remove the root non-determinism, regardless of how
+hard that is. A check that fails one run in five is not "mostly passing," it
+is failing; treat it exactly like a check that fails every time.
+
+**Flaky is equal to failing is equal to a complete failure to deliver.**
+Live this from here on: a red check anywhere, on any branch, gets root-caused
+and fixed before anything else proceeds — never disclosed-and-left, never
+"someone else's problem," never deferred because a PR's own diff didn't
+cause it. If a check is red when you find it, fixing it is the work now.
+
 ## Building
 
 `npm run build` must pass. **Run it and check the exit code.** Never pipe a
@@ -81,6 +100,29 @@ assertion to make a seed pass — swap the seed and write down why.
 `npm run test:procgen`. CI runs it on every PR and **blocks the merge**, so this
 is not optional. It complements `check:park`, which owns whether the park
 *works*; this owns whether its furniture is *placed sanely*.
+
+## Procgen backtracks on collision, always
+
+Jim, 22 August 2026, on the bridge planner clamping to a hard-coded minimum
+width and shipping a known-too-close edge rather than finding a placement
+that actually clears: **"the procgen should backtrack on collisions and make
+some different decisions until it works - literally the same way the procgen
+always works."** This is the standing rule for every generator in this
+codebase, not a one-off fix for bridges: on a real collision, try a different
+decision — a different width, position, or orientation, clearing a movable
+obstacle the way pylon placement fells foliage, or as a last resort falling
+back to a simpler alternative (a level crossing instead of a bridge) — never
+shrink to a floor and accept a result that still doesn't clear.
+
+**Because every feature generates step by step at the same time, not one
+system finishing before the next starts, "backtrack" means checking the real
+collision world as it stands at that moment, not just the two or three
+obstacle classes a given generator happens to know about by name.** A
+generator that only checks itself against a hand-picked obstacle list will
+silently miss whatever a sibling system placed there — the exact shape of
+issues #317 and #319. If a generator in this codebase does not yet backtrack
+this way, that is a bug in the generator: refactor it until it does, rather
+than documenting the gap as a known limitation.
 
 ## A check can pass without checking anything
 
@@ -558,6 +600,20 @@ position because it branched before PR #306, which moved it, had merged).
 
 When Jim asks for a change to CLAUDE.md itself, edit it and push straight to
 `main` — no worktree-and-PR round trip, no asking first.
+
+## The Overseer stays silent
+
+Jim, 22 August 2026, after an essay-length message buried the actual open
+questions in it: **"The overseer to the user should be SILENT - every word
+said that is not either presenting work that is ready to review or a
+question on how to progress is STRICTLY FORBIDDEN."**
+
+Every message to Jim is one of exactly two things: work that is ready for
+him to review, or a question he needs to answer to unblock progress.
+Nothing else — no status narration, no explanations of what happened and
+why, no reassurance, no restating what he already knows, no defending a
+past message. If a message has neither a ready-to-review deliverable nor a
+live question in it, do not send it.
 
 ## PRs
 

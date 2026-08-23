@@ -25,7 +25,9 @@ import { ANCHORS } from './anchors';
 import { PARK_LAYOUT } from './parkLayout';
 import { clearOfCruiser, onRideExit } from './Scenery';
 import { distanceToRailCorridor, RAIL_CORRIDOR_CLEARANCE } from './train/plan';
+import { isInBridgeFootprint } from './train/bridgeKeepout';
 import { STALL_STANDS } from '../minigames/stallPlacement';
+import { PLAYER_RADIUS } from '../core/constants';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from './Collision';
 
@@ -461,6 +463,10 @@ const LAMP_GAP = 4;
 /** The lamp's own collider radius, as registered below. */
 const LAMP_RADIUS = 0.22;
 
+/** How far past a bridge's exact footprint a lamp keeps — see the call site
+ * in {@link lampFits} for the reasoning. */
+const LAMP_BRIDGE_MARGIN = LAMP_RADIUS + PLAYER_RADIUS + 0.3;
+
 /** Top of the finial: base + shaft + housing + cap, with their overlaps. */
 const LAMP_TOP = 3.6;
 
@@ -553,10 +559,23 @@ function lampFits(
     if (Math.hypot(x - entry.x, z - entry.z) < entry.boundingRadius + ANCHOR_MARGIN) return false;
   }
 
-  // Off the railway. This one number also buys the level-crossing decks and
-  // the station platforms, neither of which exists yet when lamps are built
-  // (see `World`) — the corridor is wider than both.
+  // Off the railway. This one number also buys the station platforms, which
+  // do not exist yet when lamps are built (see `World`) — the corridor is
+  // wider than they are. A bridge's own deck and ramps (issue #116) are a
+  // separate check below: unlike a platform they can run well past the
+  // corridor's own width, along whichever path drew them, so one fixed
+  // radius from the centre line cannot cover them.
+  //
+  // A tighter margin than `isInBridgeFootprint`'s own default: that default
+  // is sized for the widest thing `Scenery.ts` builds near a bridge (a
+  // 0.34 m-thick stone wall), but a lamp's own base is a 0.22 m circle
+  // (`LAMP_RADIUS`) — 0.22 + `PLAYER_RADIUS` (0.62) = 0.84 m of genuine
+  // overlap risk, not 0.96 m. The full 2 m default pushed a lamp back far
+  // enough to strand two whole seeds' worth of a bridge-adjacent spur
+  // 25-36 m dark (`everyPathIsLit`, issue #116) for no safety this smaller
+  // margin does not already cover.
   if (distanceToRailCorridor(x, z) < RAIL_CORRIDOR_CLEARANCE) return false;
+  if (isInBridgeFootprint(x, z, LAMP_BRIDGE_MARGIN)) return false;
 
   // And out from under the Sky Cruiser wherever it flies low. The station
   // spurs it now lights (issue #241 spread the plots, so paths follow them

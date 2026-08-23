@@ -29,6 +29,7 @@ import {
   distanceToRailCorridor,
   RAIL_CORRIDOR_CLEARANCE,
 } from './train/plan';
+import { isInBridgeFootprint } from './train/bridgeKeepout';
 import { terrainHeight } from './terrain';
 import { isOnPath, PLAZA, pathBorderSegments } from './paths';
 import { ANCHORS } from './anchors';
@@ -378,6 +379,36 @@ export class Scenery {
    * Returns how many plants were actually felled in total, so a caller can
    * tell "the spot is clear now" from "there was nothing here to clear".
    */
+  /**
+   * Non-mutating twin of {@link clearTreesNear} — "would felling here find
+   * anything", not "fell it now". Same matching rule (a tree or bush clump
+   * whose own radius brings it within `radius` of `(x, z)`), zero side
+   * effects.
+   *
+   * Exists for `train/bridgeFootprint.ts`'s search (issues #317, #319,
+   * scatterDecoupling regression found reviewing PR #330): the width/shift
+   * backtracking loop tries many candidates before settling on one, and only
+   * the *winning* candidate should ever actually fell a tree — a rejected
+   * candidate that happened to probe a point near a tree must not remove it,
+   * or which trees end up standing becomes a function of every candidate the
+   * search happened to *consider*, not just the one it *kept*. The search
+   * uses this to ask "is this candidate viable, felling included" without
+   * committing to the fell; the one, final commit for whichever candidate is
+   * actually kept calls {@link clearTreesNear} for real.
+   */
+  hasFellableTreeNear(x: number, z: number, radius: number): boolean {
+    for (let i = 0; i < this.occludersMutable.length; i += 1) {
+      const tree = this.occludersMutable[i]!;
+      const trunk = this.treeColliders[i]!;
+      if (Math.hypot(tree.x - x, tree.z - z) < radius + trunk.radius) return true;
+    }
+    for (let i = 0; i < this.bushesMutable.length; i += 1) {
+      const bush = this.bushesMutable[i]!;
+      if (Math.hypot(bush.x - x, bush.z - z) < radius + bush.radius) return true;
+    }
+    return false;
+  }
+
   clearTreesNear(x: number, z: number, radius: number): number {
     let felled = 0;
     for (let i = this.occludersMutable.length - 1; i >= 0; i -= 1) {
@@ -1028,10 +1059,16 @@ function isPlantable(x: number, z: number, clearance: number): boolean {
 }
 
 /**
- * The rail corridor and the platforms. The dependency used to point the
- * other way — the route was solved against the finished collision world and
- * bent around trees — but the route is a pure pre-scene plan now
- * (`train/plan.ts`), so the trees are the ones that give way.
+ * The rail corridor, the platforms, and every bridge's deck and ramps. The
+ * dependency used to point the other way — the route was solved against the
+ * finished collision world and bent around trees — but the route is a pure
+ * pre-scene plan now (`train/plan.ts`), so the trees are the ones that give
+ * way. The bridge check is the same trick one step further: issue #116's
+ * bridges are pure geometry off that same plan, not yet built either, so
+ * asking `isInBridgeFootprint` costs nothing that was not already being
+ * spent — see that module's own header for why a plant needs to know at all
+ * (a lamp planted well clear of the *old*, narrow corridor still landed on
+ * a ramp's own low end).
  */
 function onRailway(x: number, z: number, clearance: number): boolean {
   const route = TRAIN_PLAN.route;
@@ -1041,6 +1078,7 @@ function onRailway(x: number, z: number, clearance: number): boolean {
   for (const station of TRAIN_PLAN.stations) {
     if (Math.hypot(station.standX - x, station.standZ - z) < 5.2 + clearance) return true;
   }
+  if (isInBridgeFootprint(x, z)) return true;
   return false;
 }
 const railProbe = new Vector3();
@@ -1198,6 +1236,7 @@ function runIsClear(x1: number, z1: number, x2: number, z2: number): boolean {
     const z = z1 + (z2 - z1) * t;
     if (!isPlantable(x, z, 3.2)) return false;
     if (distanceToRailCorridor(x, z) < RAIL_CORRIDOR_CLEARANCE) return false;
+    if (isInBridgeFootprint(x, z)) return false;
     // Seed 5 built a hiding wall across the cruiser's station approach and the
     // ride flew through it (#198). Safe to ask here, unlike `clearOfWalls`:
     // the coaster is solved at module load and knows nothing of this file.

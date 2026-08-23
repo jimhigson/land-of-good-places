@@ -612,6 +612,21 @@ check(
 // So: gather every instance translation in the built scene, and require one
 // near each child. This is measuring pixels' worth of truth rather than
 // bookkeeping.
+//
+// **Not every bus passenger is a crowd instance, though.** `ArrivalSequence`
+// hands the bus the first `ARRIVAL_KID_COUNT` of `npcs.all` with no exemption
+// for the three pinned kids (`NpcSystem.ts`'s Ethan/Eleri/Rumi) — and two of
+// those three (Eleri's hat and pet, Rumi's simulated ponytail) are built as a
+// real, individually-rendered `CharacterModel` rather than an instanced
+// `KidAvatar` (`NpcAvatar.member` is only ever set on the crowd path — see
+// that field's own doc in `npcAvatar.ts`). Her rig is *not* a detached proxy —
+// it is the genuine scene-graph object a normal render draws — so the
+// instance-matrix search above can never find her: she was reported "undrawn"
+// while a raycast at her `foot-l` mesh, 0.20 m from her tracked position,
+// found a fully attached, fully visible child. That is a hole in this check,
+// not in the game — `Rumi` (or `Eleri`) riding the bus is exactly as legitimate
+// as any other child, so the two avatar kinds each get the test that is
+// actually meaningful for them.
 const drawnAt: Vector3[] = [];
 const instanceMatrix = new Matrix4();
 park.scene.traverse((object) => {
@@ -625,21 +640,47 @@ park.scene.traverse((object) => {
     drawnAt.push(at);
   }
 });
-let undrawn = 0;
+const undrawnKids: string[] = [];
 for (const kid of kids) {
-  let nearest = Infinity;
-  for (const at of drawnAt) {
-    nearest = Math.min(nearest, Math.hypot(at.x - kid.position.x, at.z - kid.position.z));
+  if (kid.avatar.member) {
+    // The common case: an instanced crowd member, drawn only through the
+    // instance buffer gathered above.
+    let nearest = Infinity;
+    for (const at of drawnAt) {
+      nearest = Math.min(nearest, Math.hypot(at.x - kid.position.x, at.z - kid.position.z));
+    }
+    if (nearest > 2) undrawnKids.push(`${kid.name} (crowd, nearest instance ${nearest.toFixed(2)} m away)`);
+  } else {
+    // A pinned kid (Eleri, Rumi): a real `CharacterModel`, so ask about her
+    // own root rather than the crowd's instance buffer — attached to the
+    // scene, visible all the way up, and actually where she is tracked to be.
+    const root = kid.avatar.rig.root;
+    let attached = false;
+    let visibleChain = true;
+    for (let node: Object3D | null = root; node; node = node.parent) {
+      if (!node.visible) visibleChain = false;
+      if (node === park.scene) attached = true;
+    }
+    const at = root.getWorldPosition(new Vector3());
+    const drift = Math.hypot(at.x - kid.position.x, at.z - kid.position.z);
+    if (!attached || !visibleChain || drift > 2) {
+      undrawnKids.push(
+        `${kid.name} (individual model, attached=${attached}, visible=${visibleChain}, drift ${drift.toFixed(2)} m)`,
+      );
+    }
   }
-  if (nearest > 2) undrawn += 1;
 }
 check(
-  undrawn === 0,
-  `${undrawn} of the ${ARRIVAL_KID_COUNT} bus children have nothing drawn anywhere near them ` +
-    `${AFTERWARDS_SECONDS} s after the arrival — they are in the crowd's book-keeping but not ` +
-    'on the screen, which is exactly what "they walk in and vanish" looks like from in here',
+  undrawnKids.length === 0,
+  `${undrawnKids.length} of the ${ARRIVAL_KID_COUNT} bus children have nothing drawn anywhere near ` +
+    `them ${AFTERWARDS_SECONDS} s after the arrival — on screen for neither the crowd instance buffer ` +
+    'nor (for a pinned child) their own model, which is exactly what "they walk in and vanish" looks ' +
+    `like from in here: ${undrawnKids.join('; ')}`,
 );
-notes.push(`${drawnAt.length} crowd instances drawn; all ${ARRIVAL_KID_COUNT} arrivals have one within 2 m`);
+notes.push(
+  `${drawnAt.length} crowd instances drawn; every arrival is drawn either as a crowd instance within ` +
+    '2 m or, for a pinned child riding the bus, as her own attached, visible model',
+);
 
 const stillScripted = kids.filter((kid) => kid.scripted).length;
 check(

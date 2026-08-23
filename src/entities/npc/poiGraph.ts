@@ -362,12 +362,24 @@ interface BuildingNode {
 export class PoiGraph {
   readonly nodes: readonly PoiNode[];
 
-  constructor(collision: CollisionWorld) {
+  constructor(
+    collision: CollisionWorld,
+    /**
+     * Every railway bridge's own surface height at `(x, z)`, or `null` off
+     * every bridge — issue #116, Decision 8. Lets a candidate edge crossing
+     * a bridge stand its clearance probe on the deck instead of at ground
+     * level, which is the only thing that makes an edge across a bridge
+     * possible: at ground level the probe finds the same always-solid fence
+     * every ground walker does. Defaults to "no bridges anywhere", which is
+     * every space but the park itself.
+     */
+    bridgeHeightAt: (x: number, z: number) => number | null = () => null,
+  ) {
     const probe = new Vector3();
     const nodes: BuildingNode[] = [];
 
     for (const seed of SEEDS) {
-      const clear = findClearSpot(collision, seed.x, seed.z, probe);
+      const clear = findClearSpot(collision, seed.x, seed.z, probe, bridgeHeightAt);
       if (!clear) continue;
       nodes.push({
         index: nodes.length,
@@ -401,8 +413,8 @@ export class PoiGraph {
         // plots there) the chord between two on-lane samples routinely cuts
         // the very corner the lane was drawn to avoid, and whole spur ends
         // stranded over geometry a child could genuinely walk.
-        if (!lineIsClear(collision, from.x, from.z, to.x, to.z, probe) &&
-            !laneIsClear(collision, from, to, probe)) continue;
+        if (!lineIsClear(collision, from.x, from.z, to.x, to.z, probe, bridgeHeightAt) &&
+            !laneIsClear(collision, from, to, probe, bridgeHeightAt)) continue;
         from.neighbours.push(b);
         to.neighbours.push(a);
       }
@@ -565,6 +577,7 @@ function findClearSpot(
   x: number,
   z: number,
   probe: Vector3,
+  bridgeHeightAt: (x: number, z: number) => number | null,
 ): { x: number; z: number } | null {
   // Of every nudge that lands clear, prefer the one most towards the park
   // middle — never just the first in list order. A doormat seed that needs
@@ -580,7 +593,7 @@ function findClearSpot(
   let best: { x: number; z: number } | null = null;
   let bestDot = -Infinity;
   for (const [dx, dz] of NUDGES) {
-    if (!isClear(collision, x + dx, z + dz, probe)) continue;
+    if (!isClear(collision, x + dx, z + dz, probe, bridgeHeightAt)) continue;
     const dot = dx * inX + dz * inZ;
     if (dot > bestDot) {
       bestDot = dot;
@@ -590,10 +603,24 @@ function findClearSpot(
   return best;
 }
 
-/** Would a character standing here be pushed out of something? On paving the
- * probe narrows to {@link PAVED_CLEARANCE} — see its comment. */
-function isClear(collision: CollisionWorld, x: number, z: number, probe: Vector3): boolean {
-  probe.set(x, 0, z);
+/**
+ * Would a character standing here be pushed out of something? On paving the
+ * probe narrows to {@link PAVED_CLEARANCE} — see its comment.
+ *
+ * Stands the probe at `bridgeHeightAt(x, z)` rather than always at ground —
+ * Decision 8's own words for why: "a `lineIsClear` sample standing on the
+ * deck ignores what is under the deck; one that is not, does not." Off every
+ * bridge `bridgeHeightAt` answers `null` and this is exactly the old
+ * ground-level probe.
+ */
+function isClear(
+  collision: CollisionWorld,
+  x: number,
+  z: number,
+  probe: Vector3,
+  bridgeHeightAt: (x: number, z: number) => number | null,
+): boolean {
+  probe.set(x, bridgeHeightAt(x, z) ?? 0, z);
   collision.resolve(probe, isOnPath(x, z, 0) ? PAVED_CLEARANCE : CLEARANCE);
   const dx = probe.x - x;
   const dz = probe.z - z;
@@ -614,6 +641,7 @@ function laneIsClear(
   from: { x: number; z: number; lane?: { name: string; at: number } },
   to: { x: number; z: number; lane?: { name: string; at: number } },
   probe: Vector3,
+  bridgeHeightAt: (x: number, z: number) => number | null,
 ): boolean {
   if (!from.lane || !to.lane || from.lane.name !== to.lane.name) return false;
   const lane = LANES.get(from.lane.name);
@@ -631,7 +659,7 @@ function laneIsClear(
   for (let i = 0; i + 1 < walk.length; i += 1) {
     const p = walk[i] as { x: number; z: number };
     const q = walk[i + 1] as { x: number; z: number };
-    if (!lineIsClear(collision, p.x, p.z, q.x, q.z, probe)) return false;
+    if (!lineIsClear(collision, p.x, p.z, q.x, q.z, probe, bridgeHeightAt)) return false;
   }
   return true;
 }
@@ -643,12 +671,13 @@ function lineIsClear(
   x2: number,
   z2: number,
   probe: Vector3,
+  bridgeHeightAt: (x: number, z: number) => number | null,
 ): boolean {
   const length = Math.hypot(x2 - x1, z2 - z1);
   const steps = Math.max(1, Math.ceil(length / SAMPLE_STEP));
   for (let i = 0; i <= steps; i += 1) {
     const t = i / steps;
-    if (!isClear(collision, x1 + (x2 - x1) * t, z1 + (z2 - z1) * t, probe)) return false;
+    if (!isClear(collision, x1 + (x2 - x1) * t, z1 + (z2 - z1) * t, probe, bridgeHeightAt)) return false;
   }
   return true;
 }

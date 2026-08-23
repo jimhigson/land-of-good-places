@@ -36,6 +36,7 @@ import { KeychainShop } from './KeychainShop';
 import { Entrance, type EntranceOptions } from './entrance/Entrance';
 import { ARRIVAL_KID_COUNT } from './entrance/ArrivalSequence';
 import { terrainHeight } from './terrain';
+import { bridgeHeightAt } from './train/bridges';
 
 export interface WorldOptions {
   /** Passed straight to {@link Entrance} — see `EntranceOptions.arriveByBus`. */
@@ -143,7 +144,11 @@ export class World implements GameSystem {
     // world, so a tree planted across the park edge bends the track rather than
     // growing through it (see `train/route.ts`). Built before the NPCs, so the
     // waypoint graph is validated against its station posts too.
-    this.train = new ParkTrain(this.collision);
+    this.train = new ParkTrain(
+      this.collision,
+      (x, z, radius) => this.scenery.clearTreesNear(x, z, radius),
+      (x, z, radius) => this.scenery.hasFellableTreeNear(x, z, radius),
+    );
     // The platforms and the carriage floors are things you stand on, so they go
     // to the same sampler the lift and the bubble use.
     for (const platform of this.train.platforms()) this.building.surfaces.addPlatform(platform);
@@ -268,6 +273,9 @@ export class World implements GameSystem {
       camera,
       (x, z, y) => this.building.surfaces.sample(x, z, y),
       this.scenery.climbableTrees,
+      // Every railway bridge's own surface height (issue #116, Decision 8) —
+      // `train` is built well above, so every bridge already exists here.
+      (x, z) => bridgeHeightAt(this.train.bridges, x, z),
       this.entrance.arrival ? ARRIVAL_KID_COUNT : 0,
       this.hotel.residents,
     );

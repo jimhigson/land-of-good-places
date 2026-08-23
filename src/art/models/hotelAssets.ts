@@ -1066,9 +1066,11 @@ export const STAIR_RISE = LANDING_HEIGHT + STRAIGHT_RISE;
  *
  * A child standing on the gallery deck wants the same air over her head that the
  * arch below gives her, or she is a hat sticking out of the top of her own
- * hotel. `LOBBY.wallHeight` is 6.4 today and has to come up with the
- * composition; `nearWallHeight` does not, because those two walls are low so the
- * camera can see in and nobody stands on them.
+ * hotel. `LOBBY.wallHeight` has to come up with the composition. The south
+ * and east walls do not: they build at that same full height as every other
+ * wall but render invisible (`nearWallsHidden` — see `layout.ts`'s
+ * `HotelRoom.nearWallsHidden` doc) so the camera can still see in, with their
+ * collision left exactly as solid underneath; nobody stands on them.
  */
 export const LOBBY_MIN_WALL_HEIGHT = STAIR_RISE + ARCH_CLEAR;
 /**

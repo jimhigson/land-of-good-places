@@ -11,6 +11,7 @@ import type { GroundSampler } from '../Player';
 import type { Expression } from '../../art/style/faces';
 import { createIntent, clearIntent, type CharacterDriver, type CharacterIntent } from './driver';
 import type { NpcAvatar } from './npcAvatar';
+import { applyRidePose } from '../ridePose';
 
 /**
  * A character that is not the player.
@@ -249,8 +250,18 @@ export class NpcCharacter {
     // same feedback loop that once had train passengers doing 2,200 m/s.
     //
     // Resolving here, while the velocity is still being decided rather than
-    // derived, makes the hand-back silent.
+    // derived, makes the hand-back silent to `move()` — but not, on its own,
+    // to anything watching `this.position` itself frame to frame: a scripted
+    // route can be dropped by a collider that did not exist when it was
+    // planned (issue #116: the rail fence's new centre-line wall, at the
+    // narrow gap between two crossings close together), and `resolve` alone
+    // is then free to snap the hand-back a metre or more in this one frame.
+    // `boundEscape` (`move()`'s own note has the full reasoning) caps that
+    // the same way it caps an ordinary frame's — `this.previousPosition`
+    // still holds where the script left her, from `setScriptedPose`'s own
+    // copy, so it is the right "before" to measure the escape against.
     this.collision.resolve(this.position, NPC_RADIUS);
+    this.boundEscape(this.previousPosition);
     this.previousPosition.copy(this.position);
     this.avatar.rig.root.position.copy(this.position);
     // Not zeroed: she is mid-stride walking into the park, and dropping the
@@ -388,9 +399,12 @@ export class NpcCharacter {
     } else {
       this.move(dt);
     }
+    // Read before the reset below clears it — see `animate`'s own note on
+    // why the seated fold has to be decided here rather than inside it.
+    const seated = this.carriedFlag;
     // The carry is re-asserted every frame; one that is not is over.
     this.carriedFlag = false;
-    this.animate(elapsed);
+    this.animate(elapsed, seated);
   }
 
   /**
@@ -503,6 +517,49 @@ export class NpcCharacter {
     this.gait = damp(this.gait, 0, 0.07, dt);
   }
 
+  /**
+   * Caps how far a single `collision.resolve()` call is allowed to have just
+   * moved `this.position` away from `from` — shared by `move()` (every
+   * ordinary frame) and `endScripted()` (the one-off hand-back from a
+   * scripted pose), because both call `resolve` and both can meet the same
+   * failure: `resolve` is entitled to push a genuinely embedded child
+   * however far it takes to stand clear of every collider, and normally that
+   * is at most the couple of centimetres a frame's own step could have
+   * driven them into something. It stops being that small only when the
+   * *starting* position was already standing in newly-solid ground through
+   * no fault of anything this frame did — a new collider landing under an
+   * existing spawn, waypoint or scripted drop-off point (issue #116: the
+   * rail fence's new centre-line collider did exactly this at the narrow gap
+   * between two crossings close together). Snapping there outright reads
+   * exactly like a teleport to anything watching position frame to frame
+   * (`check:jitter`'s "own step" bound exists for precisely this — and see
+   * `move()`'s own note on the matching "own speed" half of the same bug,
+   * from reading that one-time snap back as momentum). Taking only a bounded
+   * bite of the correction here means the same number of `resolve` calls
+   * gets there just the same, over the next few *ordinary* frames — a child
+   * pinned in new geometry is walked back out, not thrown there in one.
+   *
+   * Half a body-radius per call, not a whole one: `endScripted()` can hand
+   * straight off into `move()`'s own first frame, and each has its own call
+   * to bound — two escapes landing in the same single frame is exactly the
+   * case to leave headroom for, not the rare case to ignore. A quarter-metre
+   * twice is still comfortably under `check:jitter`'s 1 m own-step bound
+   * (`NPC_RADIUS * 2`) with this frame's own ordinary step added on top;
+   * measured live, the un-halved version left two characters landing at
+   * 1.02–1.04 m, a hair over the bound, for exactly this reason.
+   */
+  private boundEscape(from: Vector3): void {
+    const dx = this.position.x - from.x;
+    const dz = this.position.z - from.z;
+    const distance = Math.hypot(dx, dz);
+    const maxEscape = NPC_RADIUS / 2;
+    if (distance > maxEscape) {
+      const take = maxEscape / distance;
+      this.position.x = from.x + dx * take;
+      this.position.z = from.z + dz * take;
+    }
+  }
+
   private move(dt: number): void {
     const intentLength = Math.hypot(this.intent.moveX, this.intent.moveZ);
 
@@ -516,16 +573,48 @@ export class NpcCharacter {
     const rate = intentLength > 1e-4 ? NPC_ACCELERATION : NPC_DECELERATION;
     approach(this.velocity, this.desiredVelocity, rate * dt);
 
+    // The speed this frame was actually asking for — resolve() is allowed to
+    // cut it down to nothing (a wall stops you dead) but never to hand back
+    // *more* than this, however far it ends up moving `this.position`. See
+    // the clamp below.
+    const askedSpeed = Math.hypot(this.velocity.x, this.velocity.z);
+
     this.previousPosition.copy(this.position);
     this.position.x += this.velocity.x * dt;
     this.position.z += this.velocity.z * dt;
     this.collision.resolve(this.position, NPC_RADIUS);
+    this.boundEscape(this.previousPosition);
 
     // Trust the resolved position over the intended one, so walking into a wall
     // kills the momentum instead of grinding against it.
     if (dt > 0) {
       this.velocity.x = (this.position.x - this.previousPosition.x) / dt;
       this.velocity.z = (this.position.z - this.previousPosition.z) / dt;
+
+      // A wall can only ever take momentum away — this formula has no other
+      // way to express "stopped dead" than dividing the resolved delta by
+      // `dt`, and normally that delta is at most the step just taken, so it
+      // reads back at or under `askedSpeed`. It stops being at most that only
+      // when `collision.resolve` has to escape a position that did not come
+      // from this frame's own small step at all — a genuine overlap with
+      // something the character did not walk into, discovered here instead
+      // (a newly-solid collider under an existing spawn or waypoint, a
+      // procgen ordering change, anything). Un-clamped, that one-time escape
+      // reads as a burst of speed many times a child's own walking pace, and
+      // `approach`'s bounded deceleration then takes many frames to bleed it
+      // back off — exactly `check:jitter`'s own signature (issue #116: the
+      // rail fence's new centre-line collider, closing a different hole,
+      // landed under a handful of existing NPC positions on some seeds).
+      // Clamping the *velocity* reading to what was actually asked for keeps
+      // `this.position` exactly where `resolve` decided it must be — nobody
+      // ends up standing inside a wall — while refusing to let that escape
+      // masquerade as the child's own accelerating stride.
+      const resolvedSpeed = Math.hypot(this.velocity.x, this.velocity.z);
+      if (resolvedSpeed > askedSpeed && resolvedSpeed > 1e-6) {
+        const scale = askedSpeed / resolvedSpeed;
+        this.velocity.x *= scale;
+        this.velocity.z *= scale;
+      }
     }
 
     const groundY = this.groundAt(this.position.x, this.position.z, this.position.y);
@@ -574,7 +663,8 @@ export class NpcCharacter {
   }
 
   /**
-   * The house walk cycle, posed onto the rig.
+   * The house walk cycle, posed onto the rig — or, for a rider `setCarriedPose`
+   * just touched this frame, the game's own seated ride pose instead.
    *
    * Deliberately the same maths as `Player.animate` — bob on each step, squash
    * at the bottom of it, arms and legs in opposition, head lagging a touch —
@@ -583,9 +673,49 @@ export class NpcCharacter {
    *
    * Nothing here hardcodes a joint's rest position; the head's is read off the
    * model at build time, so retuning the kid's proportions carries through.
+   *
+   * **`seated` has to be read before `update` clears `carriedFlag`, not from
+   * the flag itself.** `setCarriedPose` sets `carriedFlag` for the ride to
+   * re-assert every frame it still owns the child, and `update` deliberately
+   * clears it straight after branching on it — "the carry is re-asserted
+   * every frame; one that is not is over" — so that a ride which stops
+   * calling it hands the child back to the ordinary walk cycle on the very
+   * next frame rather than leaving them frozen mid-pose. `animate` always
+   * runs after that reset, so it cannot ask `this.carriedFlag` and has to be
+   * told.
+   *
+   * **Reuses `applyRidePose` rather than a second copy of "holding on,
+   * delighted".** `ridePose.ts`'s own header is explicit about why a pose
+   * hand-copied a second place is exactly the bug the cat bus shipped —
+   * twelve children riding bolt upright with the seat cushions through their
+   * shins, because nothing declared what "seated" meant for them. The train's
+   * own riders get the same fix: one function, called from both the player's
+   * `animate` and this one, is what lets `train/clearance.ts` measure a
+   * pose the game actually renders instead of one only a comment promised.
    */
-  private animate(elapsed: number): void {
+  private animate(elapsed: number, seated = false): void {
     const rig = this.avatar.rig;
+    if (seated) {
+      // No bob, no squash, no walk-cycle lean — she is not walking, she is
+      // riding. Reset to rest before folding the seated pose over it, or a
+      // stride caught mid-frame at the moment she boarded would freeze into
+      // the ride.
+      rig.body.position.y = 0;
+      rig.body.scale.set(1, 1, 1);
+      rig.head.position.y = this.avatar.headBaseY;
+      // `applyRidePose` only ever touches `head.rotation.x`, and only while
+      // waving (`climbWave > 0`, never true here) — a rider who boarded
+      // mid-stride would otherwise keep whatever idle head tilt the walk
+      // cycle last wrote, frozen for the length of the ride.
+      rig.head.rotation.x = 0;
+      rig.head.rotation.z = 0;
+      applyRidePose(rig, 0, elapsed, 'seated');
+      if (this.intent.expression !== this.expression) {
+        this.expression = this.intent.expression;
+        this.avatar.setExpression(this.expression);
+      }
+      return;
+    }
     const gait = this.gait;
     const phase = this.walkPhase;
     const groundY = this.groundAt(this.position.x, this.position.z, this.position.y);

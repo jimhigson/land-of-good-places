@@ -122,6 +122,9 @@ export class Coaster implements GameSystem {
   private readonly eyeMount: Group;
   /** Kept for {@link arrive}'s dismount safety net — see `world/dismount.ts`. */
   private readonly collision: CollisionWorld;
+  /** Kept so `buildTrack`'s pylon search can ask each real, already-built
+   * bridge's own footprint — see that method's own note. */
+  private readonly train: ParkTrain;
   private player: Player | null = null;
   private riding = false;
   private distance: number;
@@ -136,6 +139,7 @@ export class Coaster implements GameSystem {
   constructor(collision: CollisionWorld, train: ParkTrain, options: CoasterOptions) {
     this.options = options;
     this.collision = collision;
+    this.train = train;
     this.name = options.plan.name;
     this.playerStaysVisible = options.camera === 'chase';
     this.group.name = options.plan.name;
@@ -408,9 +412,35 @@ export class Coaster implements GameSystem {
     // `test/procgen/invariants.ts` can measure the choice. It also fixes the
     // reason this ride had **four** supports on 217 m of track: see that file's
     // header.
+    //
+    // A bridge's real deck and ramps too — `Coaster` is built *after*
+    // `ParkTrain` (`World.ts`'s own build order), so they already exist
+    // here, but neither registers ground-plane collision (a walkable
+    // platform is not a solid circle or wall), so `isClearCircle` alone
+    // cannot see one. Without this a pylon foot could plant itself dead
+    // centre on a bridge's own ramp — found live, issue #319's own
+    // follow-up work on this file's neighbour, `bridgeFootprint.ts`: a
+    // Sky Cruiser pylon (`POST_FOOT_RADIUS`, 0.68 m) landed 0.08 m from a
+    // ramp edge that had cleared everything the bridge's own planner could
+    // see at *its* plan time, because the pylon did not exist yet then
+    // either.
+    //
+    // Asks each real, built `Bridge.footprintNear` rather than
+    // `bridgeKeepout.ts`'s `isInBridgeFootprint` — that keepout is sized for
+    // callers built *before* a single bridge exists (`Scenery`, `LampPosts`)
+    // and pads a crossing's reservation by its own full lateral-shift
+    // budget, which can run to several dozen metres across on a wide,
+    // oblique crossing. Asked here, after every bridge is already built for
+    // real, that padding excludes far more ground than the bridge actually
+    // standing there occupies — found reviewing PR #330, seed 11: a 37 m
+    // stretch of track with no legitimate obstacle at all. `footprintNear`
+    // is the bridge's own real, final edge plus this file's own
+    // `GROUND_CLEARANCE`-derived margin, nothing more.
     const pylonSpots = planCruiserPylons(
       this.route,
-      (x, z, radius) => collision.isClearCircle(x, z, radius),
+      (x, z, radius) =>
+        collision.isClearCircle(x, z, radius) &&
+        !this.train.bridges.some((bridge) => bridge.footprintNear(x, z, radius)),
       this.options.clearTreesNear,
     );
     const pylons = new InstancedMesh(
