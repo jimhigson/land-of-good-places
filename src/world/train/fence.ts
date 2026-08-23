@@ -106,8 +106,26 @@ export function buildRailFence(
     let best: number | null = null;
     for (const bridge of bridges) {
       if (!bridge.deckCovers(x, z, margin)) continue;
-      const height = bridge.heightAt(x, z);
-      if (best === null || height < best) best = height;
+      // The LOWEST surface within the wall's own collision reach of this
+      // point, not just the surface directly above it. The hump slopes:
+      // a walker is stopped by this wall while her body is still `margin`
+      // (the wall's half-thickness plus her own radius) short of the wall
+      // line, where the surface — and so her feet — are genuinely lower
+      // than at the line itself. A seam pinned to the at-the-line height
+      // stood 0.26 m proud of her feet at that approach and jammed her on
+      // her own bridge (real-browser QA, canonical seed, bridge A's south
+      // slope). Ground walkers are unaffected: every sampled surface is
+      // still several metres up.
+      for (const [ox, oz] of [
+        [0, 0],
+        [margin, 0],
+        [-margin, 0],
+        [0, margin],
+        [0, -margin],
+      ] as const) {
+        const height = bridge.heightAt(x + ox, z + oz);
+        if (best === null || height < best) best = height;
+      }
     }
     return best;
   };
