@@ -66,37 +66,33 @@ Plus: riders sit; `BRIDGE_RISE` = 4.25 m (real commits on bridge-backtrack,
   wall-owner}.mts. `quietly()` swallows console.warn — use
   process.stdout.write in debug scripts.
 
-## Next / state at handoff
+## FINAL STATE — everything verified fresh at a160e8f
 
-DONE, verified fresh:
-- test:procgen 418/418, 14/14 files, all five seeds (post-memo re-run).
-- check:park EXIT 0 canonical/2/18; check:solve-cost green (paths budget
-  honestly re-measured, see check-solve-cost.mts's paths row).
-- Real-browser QA (playwright chromium via
-  PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers, vite --strictPort):
-  - top-down: the network reads as grid + one true circle at the statue
-    with exactly 4 compass junctions;
-  - BOTH canonical bridges walked across by the real player via
-    tap-to-move (peakY == deckY on each, far foot reached);
-  - screenshots on the qa-screenshots branch, park-and-bridges/ (commit
-    3bfe5d8): 01-top-down, 02-ring-top, 03-bridge-{1,2},
-    04-bridge-{1,2}-middeck (Eleri standing mid-deck), 05-*-end.
-- Bridges per seed: canonical 2 of 3 crossings (gate walk stays a level
-  crossing — entrance furniture on its ramp ground), seed 2: 2 of 3,
-  seed 18: 2 of 2. Was 0 bridges on every seed.
+- `npm run build`: **EXIT 0**, unpiped — the entire check chain (all
+  check:* scripts incl. check:park, check:solve-cost, check:park-boot,
+  check:cat-bus) plus vite build.
+- `test:procgen`: **418/418, 14/14 files, all five seeds** (fresh at the
+  final commit).
+- `check:park`: EXIT 0 on canonical (220/220), seed 2 (255/255), seed 18
+  (215/215) — poi.stranded (29→35 at dispatch) is gone.
+- Bridges (real, built, walkable): canonical **2 of 3** crossings, seed 2
+  **2 of 3**, seed 18 **2 of 2** — was **0 everywhere**. The remaining
+  level crossings are the gate walk's own fixed corridor (entrance
+  furniture stands on its ramp ground) and planned level sites where the
+  loop passes within ~6 m of itself.
+- Real-browser QA: both canonical bridges crossed on foot by the real
+  player via tap-to-move (peakY == deckY, far foot reached); screenshots
+  on `qa-screenshots` branch under `park-and-bridges/` (commit 3bfe5d8).
+- The statue ring is one true circle (measured drawn spread 0.01 m)
+  with exactly 4 compass junctions; plots keep out of its annulus via the
+  layout solver (Decision 5 delivered).
+- Boot: the crossing plan solves in slices through SolveScheduler +
+  a prewarm letterbox, like the train/cruiser/slide.
 
-REMAINING (whoever picks this up):
-- Final `npm run build` was running at handoff — check its real exit code
-  (scratchpad build2.txt / re-run; the previously-red check:solve-cost is
-  fixed and green standalone).
-- Push this branch onto grid-aligned-park (PR #286):
-  `git push origin park-and-bridges:grid-aligned-park` (fetch first —
-  check nobody else pushed).
-- Follow-up worth filing: bridge decks carry no lamps at night
-  (everyPathIsLit exempts reservation ground; guard-rail lanterns would
-  be the real fix). Also `generate.ts` gained an optional boundaryMargin
-  brief field (currently unused) from a reverted experiment — kept as
-  capability.
+Follow-ups worth filing (not blockers): bridge decks carry no lamps at
+night (everyPathIsLit exempts reservation ground; guard-rail lanterns
+would be the real fix); rail/generate.ts gained an optional
+boundaryMargin brief field, currently unused, kept as capability.
 
 ### This round landed (commit b66b66e)
 
