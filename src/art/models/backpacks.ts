@@ -157,13 +157,23 @@ const MOUTHS: Readonly<Record<BackpackKind, readonly [number, number]>> = {
 };
 
 /**
- * Where a keychain clips on, per shape — the low outer corner of the bag's own
- * mass, in `body` metres. `[x, y, z]`, mirrored to the other side by nothing:
- * one charm, one side.
+ * Where a keychain clips on, per shape — the **upper** outer flank of the
+ * bag's own mass, in `body` metres. `[x, y, z]`, mirrored to the other side
+ * by nothing: one charm, one side.
  *
- * **Measured off each built shape, not guessed**, and each one sits inside that
- * bag's own body (excluding the straps, which reach forward to z ≈ -0.10 and
- * would hang a charm off the child's shoulder). The bag bodies measure:
+ * Upper flank, not the low corner it used to be: at `KEYCHAIN_WORN_SCALE`
+ * (2.5x) a charm hangs half a metre below its ring, and hung from the low
+ * corner the whole charm dangled *below* the bag's silhouette — from behind
+ * or above, a floating charm with no visible connection to anything (Jim's
+ * screenshot, 23 August 2026). Clipped to the upper flank, and a few
+ * centimetres prouder in x so the ring is not buried in the bag's surface,
+ * the charm hangs *across* the bag's own side — visibly attached from every
+ * angle the camera actually takes. `check:charm-hang` still proves each
+ * point sits against real geometry, same as ever.
+ *
+ * **Measured off each built shape, not guessed**, and each one sits against
+ * that bag's own body (excluding the straps, which reach forward to z ≈ -0.10
+ * and would hang a charm off the child's shoulder). The bag bodies measure:
  *
  * ```
  * satchel     x±0.196  y 0.384..0.736  z -0.436..-0.204
@@ -182,17 +192,15 @@ const MOUTHS: Readonly<Record<BackpackKind, readonly [number, number]>> = {
  * shape adds a row here; it cannot silently invalidate a number somewhere else.
  */
 const CHARM_HANGS: Readonly<Record<BackpackKind, readonly [number, number, number]>> = {
-  satchel: [0.19, 0.43, -0.32],
-  bubble: [0.2, 0.43, -0.34],
-  // The odd one out, and measured rather than patterned: a heart tapers to a
-  // point at the bottom, so the low outer corner every other bag uses is 0.12 m
-  // outside its surface — a charm hanging in mid-air. Its widest lateral reach
-  // is also further back (z ≈ -0.48, not mid-depth), because the lobes bulge
-  // rearward. Hung on the lobe instead, half way up, where there is real
-  // geometry to clip to.
-  heart: [0.19, 0.56, -0.45],
-  ripikaHead: [0.2, 0.47, -0.36],
-  trillaHead: [0.2, 0.46, -0.36],
+  satchel: [0.22, 0.6, -0.32],
+  bubble: [0.24, 0.62, -0.34],
+  // Measured rather than patterned: a heart's widest lateral reach is further
+  // back than the other bags' (z ≈ -0.48, not mid-depth), because the lobes
+  // bulge rearward. Hung high on the lobe, where there is real geometry to
+  // clip to.
+  heart: [0.22, 0.64, -0.46],
+  ripikaHead: [0.24, 0.66, -0.36],
+  trillaHead: [0.24, 0.64, -0.36],
 };
 
 /** Centre of the bag mass on the back, shared by every shape. */

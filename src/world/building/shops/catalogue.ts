@@ -60,6 +60,7 @@ const KEYCHAIN_COPY: Record<KeychainKind, { displayName: string; blurb: string; 
     icon: '🌈',
   },
   heart: { displayName: 'Heart Keychain', blurb: 'A little heart bouncing on your bag.', icon: '💗' },
+  rumi: { displayName: 'Rumi Keychain', blurb: 'A tiny Rumi doll, ponytail and all.', icon: '🖤' },
 };
 
 export type ShopId =

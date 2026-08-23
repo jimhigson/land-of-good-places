@@ -20,11 +20,11 @@ import { blob, type AssetHandle } from '../style/asset';
 /**
  * Keychains — the little charms that dangle off the player's backpack.
  *
- * Five of them, all procedural, all tiny: a charm about 11 cm tall, a short
+ * Six of them, all procedural, all tiny: a charm about 11 cm tall, a short
  * chain, and a split ring on top. At game zoom a keychain is a few dozen
  * pixels, so every one of them is built to read as a **silhouette plus one
- * colour** — a star, a strawberry, an arc of rainbow — rather than as a
- * detailed model shrunk down.
+ * colour** — a star, a strawberry, an arc of rainbow, a doll of Rumi —
+ * rather than as a detailed model shrunk down.
  *
  * ## Origin, and why it is at the bottom
  *
@@ -43,14 +43,14 @@ import { blob, type AssetHandle } from '../style/asset';
  *
  * ## Faces
  *
- * Three of the five have eyes; the rainbow and the heart do not. `shopItems.ts`
+ * Four of the six have eyes; the rainbow and the heart do not. `shopItems.ts`
  * already settled the principle for props this size — "a face patch would be a
  * whole canvas for a 30 cm prop; two ink dots and a blush do the same job" —
  * and a keychain is a third of that again. So no `createFacePatch` anywhere in
  * this file: a canvas texture per charm would cost more than the charm.
  */
 
-export type KeychainKind = 'ripika' | 'star' | 'strawberry' | 'rainbow' | 'heart';
+export type KeychainKind = 'ripika' | 'star' | 'strawberry' | 'rainbow' | 'heart' | 'rumi';
 
 /**
  * How big a charm is once it is actually **worn** on the bag, versus the
@@ -104,14 +104,15 @@ export function keychainWornLift(anchorHeight: number, charmHeight: number): num
 }
 
 /**
- * How a hung charm sways when nothing is driving it dynamically — the
- * character-creation preview's own keychain picker, which mirrors a worn
- * charm's dangle (scale included) so the picker is not lying about what she
- * is about to wear, but has no player movement of its own to swing it. The
- * real worn charm used to share this (a fixed two-sine sway, "no physics" by
- * design) but now drives its swing off the player's own motion instead — see
- * `entities/WornKeychain.ts`'s header — so these constants are the preview's
- * alone now, not a second owner of the real thing's motion.
+ * How a hung charm sways when nothing is driving it dynamically — used by
+ * **both** places a worn charm dangles, again. The character-creation
+ * preview's picker has no player movement to swing its charm, so this is the
+ * whole of its motion; the real worn charm (`entities/WornKeychain.ts`)
+ * layers the same two sines *under* its motion-driven pendulum springs,
+ * because springs alone left a standing charm frozen rigid at exactly 0°
+ * (Jim, 23 August 2026 — a hung thing never quite stops). One set of
+ * constants for both, for the reason {@link KEYCHAIN_WORN_SCALE} is: the
+ * picker must not show a livelier dangle than the bag delivers.
  *
  * Deliberately not the same rate on both axes: matched rates read as a rigid
  * thing rocking, and two that drift in and out of phase read as something on
@@ -129,6 +130,7 @@ export const KEYCHAIN_KINDS: readonly KeychainKind[] = [
   'strawberry',
   'rainbow',
   'heart',
+  'rumi',
 ];
 
 // --- the hardware ----------------------------------------------------------
@@ -247,7 +249,14 @@ function strawberryCharm(): Group {
   const red = toonMaterial(PALETTE.flowerRed);
   const green = toonMaterial(PALETTE.leafMid);
 
-  const body = solid(new Mesh(new ConeGeometry(0.05, 0.085, 14), red));
+  // Open-ended: the base cap is buried inside the shoulders blob so it never
+  // draws, and — the real reason — `addOutline` pushes every vertex of the
+  // geometry it is handed, so a capped cone grows a dark cap *disc* floating
+  // `thickness` beyond its base. At the modelled 20 cm that disc hid inside
+  // the shoulders; at `KEYCHAIN_WORN_SCALE` it poked out as a detached dark
+  // ring around the berry's top (Jim's screenshot, 23 August 2026). No cap,
+  // no disc.
+  const body = solid(new Mesh(new ConeGeometry(0.05, 0.085, 14, 1, true), red));
   // Turned over so the point hangs downwards, which is which way up a
   // strawberry is.
   body.rotation.x = Math.PI;
@@ -258,6 +267,10 @@ function strawberryCharm(): Group {
   const shoulders = blob(0.05, red, [1, 0.5, 1], 16);
   shoulders.position.y = 0.085;
   charm.add(shoulders);
+  // The shoulders are the berry's widest point, so they own part of the
+  // silhouette — outlined too, or the cone's own outline rim shows as a dark
+  // line standing proud of un-outlined red where the two shapes meet.
+  addOutline(shoulders, 0.008);
 
   // Six seeds as one instanced mesh — they are the only repeated geometry on
   // the charm and they are what makes a red cone read as a strawberry.
@@ -344,12 +357,76 @@ function heartCharm(): Group {
   return charm;
 }
 
+/**
+ * A doll of Rumi, the pinned NPC — `entities/npc/NpcSystem.ts`'s `RUMI` is
+ * the look being miniaturised: lilac hair in a ponytail, honey skin, and
+ * everything else ink. The same relationship the RiPika charm has to
+ * `ripika.ts`: a likeness in this file's own silhouette-plus-one-colour
+ * budget, not a scaled copy of the full `CharacterModel`.
+ */
+function rumiCharm(): Group {
+  const charm = new Group();
+  // Rumi's own colours: `ART.miniLilac` hair, `PALETTE.ink` for the all-black
+  // outfit, and 'Honey' skin (`KID_SKIN_TONES[2]`, the literal NpcSystem's
+  // RUMI spec also carries).
+  const lilac = toonMaterial(ART.miniLilac);
+  const lilacDark = toonMaterial(ART.miniLilacDark);
+  const ink = toonMaterial(PALETTE.ink);
+  const skin = toonMaterial(0xf0b787);
+
+  // The dress: an A-line cone, point up under the head.
+  const dress = solid(new Mesh(new ConeGeometry(0.036, 0.062, 12), ink));
+  dress.position.y = 0.031;
+  charm.add(dress);
+  addOutline(dress, 0.008);
+
+  // Two little ink shoes peeking out under the hem.
+  for (const side of [-1, 1] as const) {
+    const shoe = solid(new Mesh(new SphereGeometry(0.009, 8, 6), ink));
+    shoe.scale.set(0.9, 0.7, 1.2);
+    shoe.position.set(side * 0.013, 0.006, 0.008);
+    charm.add(shoe);
+  }
+
+  const head = blob(0.031, skin, [1, 0.95, 0.95], 16);
+  head.position.y = 0.088;
+  charm.add(head);
+  addOutline(head, 0.008);
+
+  // The hair: a slightly bigger dome sat back off the face, so the front of
+  // the skull shows skin — the same one-blob hair every doll this size gets.
+  const hair = blob(0.034, lilac, [1.02, 0.96, 0.98], 16);
+  hair.position.set(0, 0.095, -0.008);
+  charm.add(hair);
+  addOutline(hair, 0.008);
+
+  // The ponytail: a tie bobble high on the back of the head, and a tapered
+  // swish falling behind the dress — the one thing that says "Rumi" at a
+  // dozen pixels, so it gets real length.
+  const tie = solid(new Mesh(new SphereGeometry(0.009, 8, 6), lilacDark));
+  tie.position.set(0, 0.112, -0.036);
+  charm.add(tie);
+
+  const tail = solid(new Mesh(new CylinderGeometry(0.006, 0.011, 0.075, 8), lilac));
+  tail.position.set(0, 0.068, -0.042);
+  tail.rotation.x = -0.18;
+  charm.add(tail);
+
+  const tailTip = solid(new Mesh(new SphereGeometry(0.011, 8, 6), lilac));
+  tailTip.position.set(0, 0.028, -0.049);
+  charm.add(tailTip);
+
+  addTinyFace(charm, 0.088, 0.031, 0.013, 0.023);
+  return charm;
+}
+
 const CHARMS: Readonly<Record<KeychainKind, () => Group>> = {
   ripika: ripikaCharm,
   star: starCharm,
   strawberry: strawberryCharm,
   rainbow: rainbowCharm,
   heart: heartCharm,
+  rumi: rumiCharm,
 };
 
 /**

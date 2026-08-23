@@ -3,7 +3,14 @@ import { clamp, clamp01 } from '../core/mathUtils';
 import { Spring } from '../core/Spring';
 import { disposeTree } from '../art/style/materials';
 import type { AssetHandle } from '../art/style/asset';
-import { KEYCHAIN_WORN_SCALE, keychainWornLift } from '../art/models/keychains';
+import {
+  KEYCHAIN_SWAY_X,
+  KEYCHAIN_SWAY_X_RATE,
+  KEYCHAIN_SWAY_Z,
+  KEYCHAIN_SWAY_Z_RATE,
+  KEYCHAIN_WORN_SCALE,
+  keychainWornLift,
+} from '../art/models/keychains';
 import { SHOP_ITEMS } from '../world/building/shops/catalogue';
 import type { FrameContext, GameSystem } from '../core/types';
 import { gameStore, type GameState } from '../state';
@@ -67,6 +74,18 @@ import { gameStore, type GameState } from '../state';
  * `PonytailChain`/`BalloonString` detect one — a one-frame jump bigger than
  * any real footstep — and resets the spring to rest instead of flinging the
  * charm across the anchor's stale-to-fresh gap.
+ *
+ * ## …plus the idle dangle underneath it
+ *
+ * The springs alone made a *standing* charm perfectly rigid — frozen at
+ * exactly 0° the instant she stops, which read as glued-on rather than hung
+ * (Jim, 23 August 2026). So the picker's own gentle two-sine idle sway
+ * (`KEYCHAIN_SWAY_*`, the pre-physics motion this file used to have) is
+ * layered **additively** under the spring value every frame: at rest it is
+ * the whole of the motion, a soft ±9° dangle; while she moves the springs'
+ * far larger driven swing simply rides on top of it, untouched. One sum, no
+ * "is she idle?" state to get stuck on, and the picker and the bag agree
+ * about what a hanging charm does when nobody is swinging it.
  */
 
 /** Seconds the pop-in takes, same beat as `WornHat`/`WornJetpack` and a purchase. */
@@ -127,6 +146,14 @@ export class WornKeychain implements GameSystem {
     this.handle.update?.(dt, elapsed);
 
     this.updateSwing(dt);
+
+    // Spring (driven swing) + sine (idle dangle) — see the class header. The
+    // pivot's rotation is written here and only here, every worn frame, so
+    // neither half can leave a stale angle behind for the other.
+    this.pivot.rotation.z =
+      this.swingZ.value + Math.sin(elapsed * KEYCHAIN_SWAY_Z_RATE) * KEYCHAIN_SWAY_Z;
+    this.pivot.rotation.x =
+      this.swingX.value + Math.sin(elapsed * KEYCHAIN_SWAY_X_RATE) * KEYCHAIN_SWAY_X;
 
     if (this.pop >= 1) return;
     this.pop = clamp01(this.pop + dt / POP_SECONDS);
@@ -197,8 +224,6 @@ export class WornKeychain implements GameSystem {
       this.previousPos.copy(this.worldPos);
       this.previousVelocity.set(0, 0, 0);
       this.swingStarted = true;
-      this.pivot.rotation.z = this.swingZ.value;
-      this.pivot.rotation.x = this.swingX.value;
       return;
     }
 
@@ -238,9 +263,6 @@ export class WornKeychain implements GameSystem {
     this.swingX.target = clamp(this.scratchAccel.z * SWING_ACCEL_GAIN, -SWING_MAX_ANGLE, SWING_MAX_ANGLE);
     this.swingZ.update(dt, SWING_STIFFNESS, SWING_DAMPING);
     this.swingX.update(dt, SWING_STIFFNESS, SWING_DAMPING);
-
-    this.pivot.rotation.z = this.swingZ.value;
-    this.pivot.rotation.x = this.swingX.value;
   }
 
   /** Hangs the charm straight down and forgets any motion so far, with no catch-up snap. */
@@ -254,7 +276,5 @@ export class WornKeychain implements GameSystem {
     this.swingX.value = 0;
     this.swingX.velocity = 0;
     this.swingX.target = 0;
-    this.pivot.rotation.z = 0;
-    this.pivot.rotation.x = 0;
   }
 }
