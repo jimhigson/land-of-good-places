@@ -204,7 +204,14 @@ export class KeychainShop implements GameSystem {
 
   private charmZone(charm: RackCharm): InteractZone {
     return {
-      id: `keychain:${charm.kind}`,
+      // `stall:` prefixed, not `keychain:`, so `parkFacts.ts`'s `entrances`
+      // (which filters on that prefix — every other stall's zone id starts
+      // this way) picks all six up automatically, the same way
+      // `keychainStallStandIsUsable` in `test/procgen/invariants.ts` now
+      // reads them back. A bare `keychain:${kind}` id silently fell outside
+      // that filter and made the whole rack invisible to the reachability
+      // invariant — caught by CI, not locally.
+      id: `stall:keychain:${charm.kind}`,
       label: charm.kind,
       x: charm.x,
       y: charm.y,
