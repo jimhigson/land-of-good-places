@@ -379,6 +379,36 @@ export class Scenery {
    * Returns how many plants were actually felled in total, so a caller can
    * tell "the spot is clear now" from "there was nothing here to clear".
    */
+  /**
+   * Non-mutating twin of {@link clearTreesNear} — "would felling here find
+   * anything", not "fell it now". Same matching rule (a tree or bush clump
+   * whose own radius brings it within `radius` of `(x, z)`), zero side
+   * effects.
+   *
+   * Exists for `train/bridgeFootprint.ts`'s search (issues #317, #319,
+   * scatterDecoupling regression found reviewing PR #330): the width/shift
+   * backtracking loop tries many candidates before settling on one, and only
+   * the *winning* candidate should ever actually fell a tree — a rejected
+   * candidate that happened to probe a point near a tree must not remove it,
+   * or which trees end up standing becomes a function of every candidate the
+   * search happened to *consider*, not just the one it *kept*. The search
+   * uses this to ask "is this candidate viable, felling included" without
+   * committing to the fell; the one, final commit for whichever candidate is
+   * actually kept calls {@link clearTreesNear} for real.
+   */
+  hasFellableTreeNear(x: number, z: number, radius: number): boolean {
+    for (let i = 0; i < this.occludersMutable.length; i += 1) {
+      const tree = this.occludersMutable[i]!;
+      const trunk = this.treeColliders[i]!;
+      if (Math.hypot(tree.x - x, tree.z - z) < radius + trunk.radius) return true;
+    }
+    for (let i = 0; i < this.bushesMutable.length; i += 1) {
+      const bush = this.bushesMutable[i]!;
+      if (Math.hypot(bush.x - x, bush.z - z) < radius + bush.radius) return true;
+    }
+    return false;
+  }
+
   clearTreesNear(x: number, z: number, radius: number): number {
     let felled = 0;
     for (let i = this.occludersMutable.length - 1; i >= 0; i -= 1) {

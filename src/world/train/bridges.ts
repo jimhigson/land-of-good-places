@@ -141,6 +141,30 @@ export interface Bridge {
    * reached a probe standing dead centre on the deck).
    */
   deckCovers(x: number, z: number, margin?: number): boolean;
+  /**
+   * True over the deck or either ramp, padded `margin` past the bridge's
+   * own **real, final** edge — for a caller built *after* `ParkTrain`
+   * (`World.ts`'s own order) that wants a genuine keepout around this
+   * specific bridge without the padding `train/bridgeKeepout.ts`'s
+   * `isInBridgeFootprint` necessarily carries for callers built *before* a
+   * single bridge exists (see that file's own header).
+   *
+   * `coaster/Coaster.ts`'s pylon search is the one caller: it used to ask
+   * `isInBridgeFootprint`, whose reservation pads a crossing's own width by
+   * `maxLateralShiftFor` — up to the crossing's full `halfGap`, deliberately
+   * generous because the *real* pass has not run yet when the early passes
+   * ask it — plus `ACROSS_MARGIN` and a further `KEEPOUT_MARGIN`. Stacked on
+   * an oblique, wide-`halfGap` crossing that reservation rectangle can run
+   * to several dozen metres wide, and asked *after* the real bridge is
+   * built, it excludes far more ground than the bridge that actually stands
+   * there occupies — found reviewing PR #330, seed 11: a 37 m stretch of the
+   * Sky Cruiser with no legitimate obstacle at all, every candidate along it
+   * rejected by the conservative reservation of a crossing whose *real*
+   * bridge was a fraction of that width. This asks the real, already-built
+   * footprint instead, which is exactly as wide as the deck and ramps this
+   * bridge actually has.
+   */
+  footprintNear(x: number, z: number, margin: number): boolean;
   /** The continuous (unstepped) height of the bridge's own surface at this
    * point, for callers that want a smooth answer rather than the discrete
    * `MovingPlatform` treads a walker actually stands on — `poiGraph`'s
@@ -491,6 +515,7 @@ export function buildBridges(
         return Math.abs(along) <= DECK_HALF_LENGTH + margin && Math.abs(across) <= halfAcross + margin;
       },
       covers: (x: number, z: number): boolean => footprint.covers(x, z),
+      footprintNear: (x: number, z: number, margin: number): boolean => footprint.covers(x, z, margin),
       // Blends toward the **local** ground under `(x, z)` itself, not a
       // single "low end" reference sampled once at across = 0 — a ramp is
       // several metres wide, the terrain it descends onto is not flat

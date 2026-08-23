@@ -191,7 +191,11 @@ export class ParkTrain implements GameSystem, TrainService {
   private readonly tangent = new Vector3();
   private readonly seatWorld = new Vector3();
 
-  constructor(collision: CollisionWorld, clearTreesNear?: (x: number, z: number, radius: number) => number) {
+  constructor(
+    collision: CollisionWorld,
+    clearTreesNear?: (x: number, z: number, radius: number) => number,
+    hasFellableTreeNear?: (x: number, z: number, radius: number) => boolean,
+  ) {
     this.group.name = 'park-train';
     this.collision = collision;
 
@@ -252,11 +256,11 @@ export class ParkTrain implements GameSystem, TrainService {
     // is actually there rather than a couple of hand-picked obstacle
     // classes. `clearTreesNear` is the same last-resort lever
     // `coaster/pylons.ts` already uses for its own placement search.
-    const built = buildBridges(
-      this.route,
-      this.crossings,
-      clearTreesNear ? { collision, clearTreesNear } : { collision },
-    );
+    const built = buildBridges(this.route, this.crossings, {
+      collision,
+      ...(clearTreesNear ? { clearTreesNear } : {}),
+      ...(hasFellableTreeNear ? { hasFellableTreeNear } : {}),
+    });
     this.bridges = built.bridges;
     this.bridgePlatforms = built.platforms;
     this.fallbackCrossings = built.fallbackCrossings;

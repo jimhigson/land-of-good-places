@@ -236,6 +236,18 @@ const WALKABLE_FLOOR = BRIDGE_RISE / MAX_RAMP_GRADIENT;
 export interface RealWorldQuery {
   readonly collision: CollisionWorld;
   readonly clearTreesNear?: (x: number, z: number, radius: number) => number;
+  /**
+   * Non-mutating twin of {@link clearTreesNear} — "would felling here find
+   * anything", asked without removing it. The width/shift search below tries
+   * many candidates before settling on one; asking this (never
+   * {@link clearTreesNear}) while exploring means a candidate the search goes
+   * on to *reject* never fells a real tree along the way — only the one,
+   * final commit for whichever candidate is actually kept does that (see
+   * `planReal`'s own note). Optional for the same reason
+   * {@link clearTreesNear} is: `bridgeKeepout.ts`'s early call passes
+   * neither.
+   */
+  readonly hasFellableTreeNear?: (x: number, z: number, radius: number) => boolean;
 }
 
 export interface BridgeFootprint {
@@ -409,7 +421,7 @@ interface DeckPlan {
 }
 
 function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): PlannedFootprint[] {
-  const { collision, clearTreesNear } = real;
+  const { collision, clearTreesNear, hasFellableTreeNear } = real;
   // `isClearCircle` only ever asks the registered circles and walls — the
   // park's own soft edge (`CollisionWorld.playBounds`, what `resolve()`
   // pushes a walker back across) is a *separate* mechanism, asked nowhere
@@ -420,32 +432,60 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
   // boundary, and `resolve()` pushed a probe standing there by exactly the
   // shortfall). So this asks both, the same two things a real walker's
   // `resolve()` call would ever be stopped by on open ground.
+  const realClear = (x: number, z: number): boolean =>
+    collision.isClearCircle(x, z, REAL_PROBE_RADIUS) &&
+    collision.playBounds.distanceToEdge(x, z) >= REAL_PROBE_RADIUS;
+
   /**
-   * The one real-collision test every check in this file goes through.
+   * **Pass-1 probe: "would this point be clear, felling included" — never
+   * fells for real.** Used by every candidate the width/shift search below
+   * tries (`deckClears`, `provisionalReach`).
    *
-   * **Fells a real, felt tree inline, the same "try, then clear, then
-   * try again" order `coaster/pylons.ts` already uses for its own placement
-   * search (issue #301)** — not a separate rescue pass tried only once a
-   * whole crossing has failed outright. `Scenery`'s own scatter already
-   * keeps the *ordinary* case clear (it asks `isInBridgeFootprint` before
-   * planting), but a clump's individual trunks are jittered a little off
-   * the candidate spot that check actually asked about, so a lone trunk can
-   * still land inside a bridge's real, final footprint even though the
-   * scatter's own check passed (found live testing this search: a
-   * deck edge otherwise clearing the conservative reservation with
-   * 2 m to spare still had a 0.68 m-radius trunk sitting 0.08 m from it).
-   * Felling only ever removes a real, registered tree — a point blocked by
-   * anything else (a wall, a building, the boundary) is refused exactly as
-   * before, because {@link Scenery.clearTreesNear} has nothing there to
-   * remove.
+   * Scatter-decoupling regression, found reviewing PR #330: the search
+   * tries many widths and, at each, several lateral shifts, before settling
+   * on the one it keeps — the great majority of what it tries gets
+   * rejected for some other reason (a ramp too short, a neighbour's guard
+   * rail) even when a tree stood in its way and *could* have been felled to
+   * clear it. The previous version of this function felled inline for every
+   * one of those candidates, not just the winner, so which real trees ended
+   * up standing became a function of everything the search *considered*,
+   * not just what it *kept* — and since the search's own candidate order
+   * can shift with scatter jitter nowhere near this crossing (an ordinary,
+   * tolerated effect `test/procgen/scatterDecoupling.test.ts` already
+   * expects within its own `LOCALITY_LIMIT`), that leaked into genuinely
+   * different trees being felled between two otherwise-identical builds,
+   * far outside any locality bound. Asking `hasFellableTreeNear` instead —
+   * "is there a fellable tree here", no mutation — keeps the search free to
+   * *consider* felling as a lever (a candidate that only clears once a tree
+   * is felled must still read as viable, or the search would wrongly prefer
+   * a narrower/shifted candidate that needed no felling at all) without
+   * ever paying for a candidate it does not keep. See `searchClear`'s call
+   * sites for where this is used, and pass 2 below (`commitFell`) for where
+   * the one real fell per crossing actually happens.
    */
-  const clearOfReal = (x: number, z: number): boolean => {
-    if (
-      collision.isClearCircle(x, z, REAL_PROBE_RADIUS) &&
-      collision.playBounds.distanceToEdge(x, z) >= REAL_PROBE_RADIUS
-    ) {
-      return true;
-    }
+  const searchClear = (x: number, z: number): boolean =>
+    realClear(x, z) || (hasFellableTreeNear ? hasFellableTreeNear(x, z, REAL_PROBE_RADIUS) : false);
+
+  /**
+   * **Pass-2 commit: fells a real, felt tree inline, the same "try, then
+   * clear, then try again" order `coaster/pylons.ts` already uses for its
+   * own placement search (issue #301)** — but, unlike the old version of
+   * this file, only ever called against the one, final, already-decided
+   * geometry per crossing (see `searchClear`'s own note on why the search
+   * itself must not fell). `Scenery`'s own scatter already keeps the
+   * *ordinary* case clear (it asks `isInBridgeFootprint` before planting),
+   * but a clump's individual trunks are jittered a little off the candidate
+   * spot that check actually asked about, so a lone trunk can still land
+   * inside a bridge's real, final footprint even though the scatter's own
+   * check passed (found live testing this search: a deck edge otherwise
+   * clearing the conservative reservation with 2 m to spare still had a
+   * 0.68 m-radius trunk sitting 0.08 m from it). Felling only ever removes a
+   * real, registered tree — a point blocked by anything else (a wall, a
+   * building, the boundary) is refused exactly as before, because
+   * {@link Scenery.clearTreesNear} has nothing there to remove.
+   */
+  const commitFell = (x: number, z: number): boolean => {
+    if (realClear(x, z)) return true;
     if (clearTreesNear && clearTreesNear(x, z, REAL_PROBE_RADIUS) > 0) {
       return collision.isClearCircle(x, z, REAL_PROBE_RADIUS);
     }
@@ -536,7 +576,7 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
         for (const t of SAMPLE_TS) {
           const x = centerX + dirX * along + acrossX * halfAcross * t;
           const z = centerZ + dirZ * along + acrossZ * halfAcross * t;
-          if (!clearOfReal(x, z)) return false;
+          if (!searchClear(x, z)) return false;
           if (nearOtherGuardRail(siblingDecks, x, z, GUARD_RAIL_MARGIN)) return false;
         }
       }
@@ -559,7 +599,7 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
         for (const t of SAMPLE_TS) {
           const x = centerX + dirX * along * sign + acrossX * halfAcross * t;
           const z = centerZ + dirZ * along * sign + acrossZ * halfAcross * t;
-          if (!clearOfReal(x, z) || nearOtherGuardRail(siblingDecks, x, z, GUARD_RAIL_MARGIN)) {
+          if (!searchClear(x, z) || nearOtherGuardRail(siblingDecks, x, z, GUARD_RAIL_MARGIN)) {
             blocked = true;
             break;
           }
@@ -637,8 +677,12 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
    * actually settles it.
    */
   const current: (DeckPlan | null)[] = crossings.map(() => null);
+  /** Every crossing index the most recent {@link resweep} call actually
+   * changed — read after the sweep loop to tell a genuinely converged
+   * answer from one the sweep bound merely cut off mid-oscillation. */
+  let lastChangedIndices: number[] = [];
   const resweep = (): boolean => {
-    let changed = false;
+    lastChangedIndices = [];
     for (let index = 0; index < crossings.length; index += 1) {
       const siblings = current.filter((d, i): d is DeckPlan => i !== index && d !== null);
       const next = searchDeck(crossings[index] as LevelCrossing, siblings);
@@ -647,11 +691,11 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
         (next === null) !== (previous === null) ||
         (next && previous && (next.halfAcross !== previous.halfAcross || next.cx !== previous.cx || next.cz !== previous.cz))
       ) {
-        changed = true;
+        lastChangedIndices.push(index);
       }
       current[index] = next;
     }
-    return changed;
+    return lastChangedIndices.length > 0;
   };
   // Sweep until nothing changes any more, or a generous bound — the same
   // "cheap insurance, not a proof" this file's own tree-felling retry
@@ -661,19 +705,37 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
   // park will actually enforce), so stopping early on "nothing changed" is
   // the true fixed point, not an approximation of one.
   const MAX_SWEEPS = 6;
+  let converged = false;
   for (let sweep = 0; sweep < MAX_SWEEPS; sweep += 1) {
-    if (!resweep()) break;
+    if (!resweep()) {
+      converged = true;
+      break;
+    }
+  }
+  // Convergence safety net (flagged reviewing PR #330: the sweep bound had
+  // no check for non-convergence, and none of the 5 CI seeds happened to
+  // exercise it). A crossing still changing on the very last sweep the
+  // budget allowed for has never been seen stable against its siblings'
+  // truly final answers — keeping it anyway would ship whichever of two (or
+  // more) oscillating candidates the bound happened to cut off on, exactly
+  // the "shrink to a hard floor and ship it" failure this whole search
+  // exists to avoid (`CLAUDE.md`'s "procgen backtracks on collision"). Safer
+  // to fall back to a level crossing for it — genuinely rare in practice
+  // (oscillation needs two crossings close enough to fight over the same
+  // ground, see `resweep`'s own note), and the fallback is real, tested
+  // infrastructure (`fence.ts`), not a guess.
+  if (!converged) {
+    for (const index of lastChangedIndices) current[index] = null;
   }
   // A crossing still `null` here has been through a full, converged sweep —
   // every other crossing's own final answer was already visible to its own
   // search (see `resweep`'s own note) — and still found no width, at any
-  // lateral shift, whose deck clears the real collision world with a ramp
-  // reaching {@link WALKABLE_FLOOR} on at least one side. A real, felled
-  // tree (`coaster/pylons.ts`'s own lever, `CLAUDE.md`'s "procgen
-  // backtracks on collision") was already tried inline at every point every
-  // check above asked about — see `clearOfReal`'s own note — so there is
-  // nothing left to clear. This crossing genuinely cannot take a bridge;
-  // see this file's own header for what happens next (a level crossing).
+  // lateral shift, whose deck clears the real collision world (felling
+  // considered — see `searchClear`'s own note) with a ramp reaching
+  // {@link WALKABLE_FLOOR} on at least one side, OR was still oscillating
+  // when the sweep bound ran out (see the convergence safety net just
+  // above). This crossing genuinely cannot take a bridge; see this file's
+  // own header for what happens next (a level crossing).
   const decksOrNull: (DeckPlan | null)[] = current;
 
   // --- pass 2: real, final ramp reach, now that every deck is fixed -------
@@ -689,11 +751,28 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
     const idealRampRun = idealRampRunFor(crossing, crossings);
     const otherDecks = decks.filter((d) => d.crossingIndex !== crossingIndex);
 
+    // Commit the deck's own footprint — the exact points `deckClears`
+    // probed with `searchClear` (felling-considered, non-mutating) during
+    // the search. Whatever candidate the search kept is this one, so a
+    // point it only passed because a tree *could* be felled there genuinely
+    // needs that tree gone now — this is the one real fell for the deck
+    // itself, matching `clearAt` below's own fell for the ramps.
+    for (const along of [-DECK_HALF_LENGTH, DECK_HALF_LENGTH]) {
+      for (const t of SAMPLE_TS) {
+        const x = cx + dirX * along + acrossX * halfAcross * t;
+        const z = cz + dirZ * along + acrossZ * halfAcross * t;
+        commitFell(x, z);
+      }
+    }
+
     const clearAt = (along: number, sign: 1 | -1): boolean => {
       for (const t of SAMPLE_TS) {
         const x = cx + dirX * along * sign + acrossX * halfAcross * t;
         const z = cz + dirZ * along * sign + acrossZ * halfAcross * t;
-        if (!clearOfReal(x, z)) return false;
+        // The one real fell per crossing (see `commitFell`'s own note) —
+        // this deck is already the search's final, kept answer, so a tree
+        // felled here is a tree the built park genuinely needed cleared.
+        if (!commitFell(x, z)) return false;
         if (nearOtherGuardRail(otherDecks, x, z, GUARD_RAIL_MARGIN)) return false;
         if (distanceToRailCorridor(x, z) < FENCE_OFFSET + RAMP_RAIL_MARGIN) return false;
       }
