@@ -558,7 +558,7 @@ export class ParkMap {
     const trees = scatterTrees(content, content, GARDEN_HALF_SIZE - 4);
     for (const tree of trees) {
       const [tx, ty] = this.planeToCanvas(tree.x, tree.z);
-      drawIcon(ctx, 'tree', tx, ty, 0.55 * uiUnitPx(), '#4fa84a');
+      drawIcon(ctx, 'tree', tx, ty, 1.15 * uiUnitPx(), '#4fa84a');
     }
 
     // --- paths, rebuilt from the same control points the real path network
@@ -574,7 +574,7 @@ export class ParkMap {
     ctx.fill();
     const fountain = this.deps.world.fountain;
     const [fx, fy] = this.planeToCanvas(fountain.centre.x, fountain.centre.z);
-    drawIcon(ctx, 'fountain', fx, fy, 1.6 * uiUnitPx(), hexToCss(PALETTE.waterTop));
+    drawIcon(ctx, 'fountain', fx, fy, 2.6 * uiUnitPx(), hexToCss(PALETTE.waterTop));
 
     // --- ride plots, straight from the anchor table -----------------------
     for (const anchor of ANCHORS) this.drawAnchor(anchor);
@@ -583,8 +583,8 @@ export class ParkMap {
     for (const stall of STALLS) {
       const [sx, sz] = stall.position;
       const [cx2, cy2] = this.planeToCanvas(sx, sz);
-      drawIcon(ctx, stall.id, cx2, cy2, 1.5 * uiUnitPx(), hexToCss(stall.accent));
-      this.drawLabel(stall.title, cx2, cy2 + 0.9 * uiUnitPx());
+      drawIcon(ctx, stall.id, cx2, cy2, 2.6 * uiUnitPx(), hexToCss(stall.accent));
+      this.drawLabel(stall.title, cx2, cy2 + 1.5 * uiUnitPx());
     }
 
     // --- the train loop and its stations ------------------------------------
@@ -604,14 +604,14 @@ export class ParkMap {
     );
     for (const station of this.deps.world.train.stations) {
       const [stx, sty] = this.planeToCanvas(station.standX, station.standZ);
-      drawIcon(ctx, 'station', stx, sty, 1.3 * uiUnitPx(), hexToCss(PALETTE.markerLemon));
-      this.drawLabel(station.name, stx, sty + 0.75 * uiUnitPx());
+      drawIcon(ctx, 'station', stx, sty, 2.2 * uiUnitPx(), hexToCss(PALETTE.markerLemon));
+      this.drawLabel(station.name, stx, sty + 1.2 * uiUnitPx());
     }
 
     // --- the castle, drawn at its real facade footprint ---------------------
     const [bx, by] = this.planeToCanvas(BUILDING_CENTRE_X, BUILDING_CENTRE_Z);
-    drawIcon(ctx, 'building', bx, by, 2.6 * uiUnitPx(), hexToCss(PALETTE.buildingWall));
-    this.drawLabel('The Big Building', bx, by + 1.4 * uiUnitPx());
+    drawIcon(ctx, 'building', bx, by, 4.2 * uiUnitPx(), hexToCss(PALETTE.buildingWall));
+    this.drawLabel('The Big Building', bx, by + 2.2 * uiUnitPx());
 
     // --- the player ----------------------------------------------------------
     if (!this.indoor) {
@@ -726,8 +726,8 @@ export class ParkMap {
 
     const [ex, ez] = anchor.entrance;
     const [cx, cy] = this.planeToCanvas(ex, ez);
-    drawIcon(this.ctx, anchor.id, cx, cy, 1.7 * uiUnitPx(), accent);
-    this.drawLabel(anchor.signTitle, cx, cy + 1.0 * uiUnitPx());
+    drawIcon(this.ctx, anchor.id, cx, cy, 2.9 * uiUnitPx(), accent);
+    this.drawLabel(anchor.signTitle, cx, cy + 1.6 * uiUnitPx());
   }
 
   private drawRect(

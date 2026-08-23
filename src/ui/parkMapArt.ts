@@ -81,13 +81,19 @@ export function buildBlobBoundary(
     // roughly along it (a wide angular window, so a plot doesn't need to sit
     // exactly on a sample ray to be honoured).
     let required = fallbackRadius;
+    const window = 0.85;
     for (const c of content) {
       const dist = Math.hypot(c.x, c.z);
       if (dist < 0.01) continue;
       const bearing = Math.atan2(c.x, c.z);
       let diff = Math.abs(theta - bearing);
       if (diff > Math.PI) diff = Math.PI * 2 - diff;
-      if (diff < 0.7) required = Math.max(required, dist + c.r + margin);
+      if (diff >= window) continue;
+      // A smooth half-cosine falloff rather than a hard cutoff, so the
+      // outline can't pick up a sharp corner where one content point's
+      // influence window ends and its neighbour's begins.
+      const attenuation = 0.5 * (1 + Math.cos((Math.PI * diff) / window));
+      required = Math.max(required, fallbackRadius + (dist + c.r + margin - fallbackRadius) * attenuation);
     }
     const wobble =
       1 +
