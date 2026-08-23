@@ -168,6 +168,38 @@ const scratch = new Vector3();
 const sideTangent = new Vector3();
 
 /**
+ * Memoised boundary distance on a 1 m grid — `distanceToEdge` walks the
+ * whole boundary spline per query, and this module's feasibility march asks
+ * it tens of thousands of times over overlapping candidate footprints
+ * (`check:solve-cost` measured the un-memoised solve at ~940 ms of the
+ * paths stage's ~1 s, 2026-08-23). 1 m is far finer than any margin this
+ * planner decides against (1.0–2.0 m), and deterministic.
+ */
+const boundaryDistanceCache = new Map<number, number>();
+function boundaryDistanceAt(x: number, z: number): number {
+  const key = (Math.round(x) + 8192) * 32768 + (Math.round(z) + 8192);
+  const hit = boundaryDistanceCache.get(key);
+  if (hit !== undefined) return hit;
+  const value = GARDEN_PLAY_BOUNDARY.distanceToEdge(x, z);
+  boundaryDistanceCache.set(key, value);
+  return value;
+}
+
+/** The same memo for "how far from the rail centre line" — `distanceNear`
+ * walks the whole solved loop per query. */
+const railDistanceCache = new Map<number, number>();
+function railDistanceAt(x: number, z: number): number {
+  const key = (Math.round(x) + 8192) * 32768 + (Math.round(z) + 8192);
+  const hit = railDistanceCache.get(key);
+  if (hit !== undefined) return hit;
+  const route = TRAIN_PLAN.route;
+  const p = route.pointAt(route.distanceNear(x, z), scratch);
+  const value = Math.hypot(x - p.x, z - p.z);
+  railDistanceCache.set(key, value);
+  return value;
+}
+
+/**
  * Ground the stations' own structures stand on, *spatially* — the platform,
  * canopy posts and station furniture live within a few metres of the rail
  * across the platform window. {@link stationBlocked} already keeps a site
@@ -228,22 +260,19 @@ function probeReach(
   boundaryMargin: number,
   plotMargin: number,
 ): { pos: number; neg: number; deckClear: boolean } {
-  const route = TRAIN_PLAN.route;
   const acrossX = -dirZ;
   const acrossZ = dirX;
   const clearAt = (along: number, sign: 1 | -1): boolean => {
     for (const t of [-1, -0.5, 0, 0.5, 1]) {
       const x = point.x + dirX * along * sign + acrossX * halfWidth * t;
       const z = point.z + dirZ * along * sign + acrossZ * halfWidth * t;
-      if (GARDEN_PLAY_BOUNDARY.distanceToEdge(x, z) < boundaryMargin) return false;
+      if (boundaryDistanceAt(x, z) < boundaryMargin) return false;
       if (!clearOfPlots(x, z, plotMargin)) return false;
       if (nearStationStructure(x, z)) return false;
       if (along > DECK_HALF_LENGTH) {
         // Past the deck the ramp is ordinary near-ground paving — it may
         // not run inside the rail's own corridor (obliques skirt it).
-        const rd = route.distanceNear(x, z);
-        const rp = route.pointAt(rd, scratch);
-        if (Math.hypot(x - rp.x, z - rp.z) < SITE_RAIL_MARGIN) return false;
+        if (railDistanceAt(x, z) < SITE_RAIL_MARGIN) return false;
       }
     }
     return true;

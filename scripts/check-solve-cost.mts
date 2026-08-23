@@ -81,7 +81,17 @@ const STAGES: readonly Stage[] = [
   { stage: 'train', load: () => import('../src/world/train/plan.ts'), measuredMs: 1500 },
   { stage: 'slide', load: () => import('../src/world/slide/plan.ts'), measuredMs: 4070 },
   { stage: 'railRace', load: () => import('../src/world/railRace/plan.ts'), measuredMs: 13 },
-  { stage: 'paths', load: () => import('../src/world/paths.ts'), measuredMs: 12 },
+  // Re-measured 2026-08-23 (three fresh runs: 357 / 343 / 330 ms, median
+  // 343), after the stage legitimately grew: it now also solves the railway
+  // crossing plan (`train/crossingPlan.ts` — a feasibility march of the
+  // whole loop against boundary, plots and stations, ~295 ms of the total
+  // even after its query memos) and routes every rail-crossing leg through
+  // the planned sites with side-holding repairs and quality backtracking.
+  // The old 12 ms row described a router that did not know the railway
+  // existed. Fed through the one budget formula (8 x measured) exactly like
+  // every other row — the 8x is the cross-machine/parallel-load headroom
+  // the file header derives, not this row's to trim.
+  { stage: 'paths', load: () => import('../src/world/paths.ts'), measuredMs: 343 },
 ];
 
 await import('three'); // parse cost lands here, not on the first stage to touch it

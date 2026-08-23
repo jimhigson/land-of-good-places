@@ -13,11 +13,7 @@ import { terrainHeight, terrainNormal } from './terrain';
 import { ANCHORS } from './anchors';
 import { PARK_LAYOUT, RING_RADIUS, edgeDistanceAlong } from './parkLayout';
 import { PARK_BOUNDARY } from './boundary';
-import {
-  TRAIN_PLAN,
-  distanceToRailCorridor,
-  RAIL_CORRIDOR_CLEARANCE as RAIL_CORRIDOR_CLEARANCE_PLAN,
-} from './train/plan';
+import { TRAIN_PLAN, RAIL_CORRIDOR_CLEARANCE as RAIL_CORRIDOR_CLEARANCE_PLAN } from './train/plan';
 import { STATION_GAP } from './train/fence';
 import { FENCE_OFFSET } from './train/clearance';
 import { DECK_HALF_LENGTH } from './train/bridgeFootprint';
@@ -25,7 +21,6 @@ import {
   CROSSING_SITES,
   LEVEL_CROSSING_SITES,
   LEVEL_CROSSING_PENALTY,
-  railSideOf,
   type CrossingSite,
 } from './train/crossingPlan';
 import { COASTER_PLANS } from './coaster/plan';
@@ -858,7 +853,7 @@ function crossingFeet(site: CrossingSite): {
     while (r > 4) {
       const x = site.x + site.dirX * sign * (DECK_HALF_LENGTH + r);
       const z = site.z + site.dirZ * sign * (DECK_HALF_LENGTH + r);
-      if (railSideOf(x, z) === sign) return [x, z] as const;
+      if (railInfoAt(x, z).side === sign) return [x, z] as const;
       r -= 1;
     }
     return [
@@ -890,8 +885,8 @@ function routeLeg(
   from: readonly [number, number],
   to: readonly [number, number],
 ): (readonly [number, number])[] {
-  const fromSide = railSideOf(from[0], from[1]);
-  const toSide = railSideOf(to[0], to[1]);
+  const fromSide = railInfoAt(from[0], from[1]).side;
+  const toSide = railInfoAt(to[0], to[1]).side;
   // Same side: ordinary routing — but still held to its side, because the
   // routers are not rail-aware and a corner can hop the rail and back
   // mid-leg (measured: a stall connector crossed twice, once *inside* a
@@ -977,7 +972,7 @@ function longestOffAxisRun(
   // band (the crossing axis, whose feet legitimately reach well past the
   // corridor). Mirrors `pathsRunOnGridAxes`'s measured exemptions.
   const exempt = (x: number, z: number): boolean => {
-    if (distanceToRailCorridor(x, z) < 8.5) return true;
+    if (railInfoAt(x, z).dist < 8.5) return true;
     // Only the leg's OWN crossing site earns a footprint exemption — a hop
     // that happens to pass along some other, unused site's would-be ramp
     // corridor gets no bridge built over it, so the invariant this metric
@@ -1115,6 +1110,35 @@ function doubleCrossingLeg(
  */
 const RAIL_CLAMP_DISTANCE = RAIL_CORRIDOR_CLEARANCE_PLAN;
 
+/**
+ * Memoised "which side of the railway, and how far from it" — the two
+ * questions every leg repair below asks thousands of times over the same
+ * half-metre of ground (`enforceRailSide` re-scans each pass, the quality
+ * metric samples every hop, and `routeLeg` tries several candidate sites).
+ * `TrainRoute.distanceNear` walks the whole solved loop per query, and
+ * unmemoised this took the `paths` solve stage from 12 ms to over a second
+ * (`check:solve-cost`, 2026-08-23). Keyed on a 0.5 m grid — comfortably
+ * finer than any decision threshold these queries feed (the clamp distance,
+ * the 8.5 m exemption band), and deterministic.
+ */
+const railInfoCache = new Map<number, { side: 1 | -1; dist: number }>();
+const railInfoScratch = new Vector3();
+const railInfoTangent = new Vector3();
+
+function railInfoAt(x: number, z: number): { side: 1 | -1; dist: number } {
+  const key = (Math.round(x * 2) + 8192) * 32768 + (Math.round(z * 2) + 8192);
+  const hit = railInfoCache.get(key);
+  if (hit) return hit;
+  const route = TRAIN_PLAN.route;
+  const d = route.distanceNear(x, z);
+  const p = route.pointAt(d, railInfoScratch);
+  const t = route.tangentAt(d, railInfoTangent);
+  const side: 1 | -1 = Math.sign(t.z * (x - p.x) - t.x * (z - p.z)) >= 0 ? 1 : -1;
+  const info = { side, dist: Math.hypot(x - p.x, z - p.z) };
+  railInfoCache.set(key, info);
+  return info;
+}
+
 /** One point pulled to `side` of the rail at {@link RAIL_CLAMP_DISTANCE}. */
 function clampPoint(x: number, z: number, side: 1 | -1): readonly [number, number] {
   const route = TRAIN_PLAN.route;
@@ -1156,7 +1180,7 @@ function enforceRailSide(
   let out = points.map(([x, z], index) =>
     index === 0 ||
     index === points.length - 1 ||
-    (railSideOf(x, z) === side && distanceToRailCorridor(x, z) >= RAIL_CLAMP_DISTANCE - 0.1)
+    (railInfoAt(x, z).side === side && railInfoAt(x, z).dist >= RAIL_CLAMP_DISTANCE - 0.1)
       ? ([x, z] as const)
       : clampPoint(x, z, side),
   );
@@ -1185,15 +1209,15 @@ function enforceRailSide(
         // path drawn down the middle of the railway (the canonical seed's
         // waterFight spur ran 20 m dead along the centre line, side never
         // changing, and its waypoints spawned inside the fence box).
-        if (railSideOf(x, z) !== side || distanceToRailCorridor(x, z) < RAIL_CLAMP_DISTANCE - 0.1)
-          slips = true;
-        if (distanceToRailCorridor(x, z) < RAIL_CLAMP_DISTANCE + 2.5) nearRail = true;
+        const info = railInfoAt(x, z);
+        if (info.side !== side || info.dist < RAIL_CLAMP_DISTANCE - 0.1) slips = true;
+        if (info.dist < RAIL_CLAMP_DISTANCE + 2.5) nearRail = true;
       }
       if (slips || (nearRail && length > 4)) {
         const mx = (a[0] + b[0]) / 2;
         const mz = (a[1] + b[1]) / 2;
         const mid =
-          railSideOf(mx, mz) === side && !slips
+          railInfoAt(mx, mz).side === side && !slips
             ? ([mx, mz] as const)
             : clampPoint(mx, mz, side);
         next.push(mid);
@@ -1220,7 +1244,7 @@ function polylineCrossesRail(points: readonly (readonly [number, number])[]): bo
     for (let s = 0; s <= steps; s += 1) {
       const x = a[0] + ((b[0] - a[0]) * s) / steps;
       const z = a[1] + ((b[1] - a[1]) * s) / steps;
-      const here = railSideOf(x, z);
+      const here = railInfoAt(x, z).side;
       if (side !== null && here !== side) return true;
       side = here;
     }
@@ -1947,7 +1971,7 @@ function addInterconnects(nodes: PathNode[], edges: PathEdge[]): void {
       // sense this pass fixes: the walk between them is via a planned
       // crossing (`routeLeg`), and a direct connector here would either
       // cross the rail off-site or draw a second, redundant crossing run.
-      if (railSideOf(a.x, a.z) !== railSideOf(b.x, b.z)) continue;
+      if (railInfoAt(a.x, a.z).side !== railInfoAt(b.x, b.z).side) continue;
       candidates.push({ a, b, straight });
     }
   }
@@ -2565,9 +2589,9 @@ function bestBranchPoint(
   // awareness sent seed 2's dodgems spur straight through a 9 m pinch
   // between two rail passes (two rogue crossings), when a same-side branch
   // point a little further away needed none.
-  const destinationSide = railSideOf(x, z);
+  const destinationSide = railInfoAt(x, z).side;
   const sameSide = allCandidates.filter(
-    (candidate) => railSideOf(candidate[0], candidate[1]) === destinationSide,
+    (candidate) => railInfoAt(candidate[0], candidate[1]).side === destinationSide,
   );
   const candidates = sameSide.length ? sameSide : allCandidates;
 
