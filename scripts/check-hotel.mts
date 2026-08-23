@@ -1458,12 +1458,15 @@ if (fallenPlayer.position.y < 0) {
       if (faceTexture() !== restingFace) tickPlayer(0.5, 15);
 
       // ---- every pet bed is **empty** until she naps (Jim, 21 Aug 2026).
-      for (const { pet, asleep, x } of hotel.petBeds) {
-        if (asleep || pet.root.visible) {
+      // This park owns no pets, so no bed here can ever be occupied — which
+      // is itself worth asserting, because an unearned pet bed with a pet in
+      // it is the fallback bunny bug all over again. The real occupancy
+      // probes, against real owned pets and a real parade, are 16c.
+      for (const { asleep, x } of hotel.petBeds) {
+        if (asleep) {
           problems.push(
-            `a pet bed at local x=${x.toFixed(2)} already has its pet in it before the player ` +
-              `naps (visible ${pet.root.visible}, asleep ${asleep}) — a child walking in sees a ` +
-              `pet already asleep in bed while her real one still follows her about`,
+            `a pet bed at local x=${x.toFixed(2)} says it has a pet asleep in it, in a park where ` +
+              'the player owns no pets at all — an unearned bed can only ever be empty furniture',
           );
         }
       }
@@ -1585,34 +1588,11 @@ if (fallenPlayer.position.y < 0) {
         }
       }
 
-      // **Issue #275: the pets go to sleep too, all together** — and, since
-      // 21 Aug 2026, only *now*, not since the room was built. Every pet bed's
-      // pet should be visible and lying down — `Hotel.layPetDown`'s rotation,
-      // read off the public `petBeds` list rather than re-derived here.
-      for (const { pet, x, asleep } of hotel.petBeds) {
-        if (!asleep || !pet.root.visible || Math.abs(pet.root.rotation.x + Math.PI / 2) > 0.01) {
-          problems.push(
-            `a pet bed's pet at local x=${x.toFixed(2)} is not lying in it while the player ` +
-              `naps (visible ${pet.root.visible}, asleep ${asleep}, rotation.x ` +
-              `${pet.root.rotation.x.toFixed(2)}) — issue #275 wants every pet asleep too`,
-          );
-        }
-      }
-
       // Hand the room back the way the earlier probes left it: one giant tick
-      // outlasts any nap. The pets should get up and go back out with it —
-      // out of the bed *and* off the screen, which is what "the beds are
-      // empty until she naps" means at the other end of a nap.
+      // outlasts any nap. (Issue #275's "the pets go to sleep too" is probe
+      // 16c's, against a park where she actually owns some.)
       hotel.update({ dt: 999, elapsed: 0 } as never);
-      for (const { pet, x, asleep } of hotel.petBeds) {
-        if (asleep || pet.root.visible || Math.abs(pet.root.rotation.x) > 0.01) {
-          problems.push(
-            `a pet bed's pet at local x=${x.toFixed(2)} did not get out of bed when the nap ` +
-              `ended (visible ${pet.root.visible}, asleep ${asleep})`,
-          );
-        }
-      }
-      // And her eyes open again with them.
+      // And her eyes open again.
       tickPlayer(0.2, 20);
       if (blinkFace !== null && faceTexture() === blinkFace) {
         problems.push('a woken child still has her eyes shut — the sleeping face never cleared');
@@ -1622,101 +1602,49 @@ if (fallenPlayer.position.y < 0) {
   }
 }
 
-// ---------------- 16b. every bed's own nap has a sleeping pet she can see
+// ---------------- 16b. her own pets, walking into their own beds, no flicker
 //
-// Jim, live play, 18 Aug 2026, from `/hotel-suite`: *"the pet didn't get into
-// any bed when I did [went to sleep]."* Root cause: every pet bed used to
-// live only in the middle bedroom (`SUITE_BED_SPOTS[1]`'s room). `Hotel.nap`
-// really did lay every pet down — probe 16 above proves the rotation flips —
-// but `Hotel.enterSuite`'s own doc comment has her reaching **bedroom 1's**
-// door first, not bedroom 2's, and a 2.2 m partition plus the fixed camera's
-// field of view put bedroom 2 nowhere in frame from bedroom 1 or bedroom 3.
-// The data changed; nothing she was looking at did — which reads as exactly
-// what she reported, and probe 16 stayed green through it the whole time
-// because it only ever checks bed 0's rotation numbers, never whether bed
-// 0's own room has a pet bed in it at all.
+// Jim, live play, 23 Aug 2026, on PR #279's pet beds — the whole report, and
+// every clause of it is a probe below:
 //
-// So this asks that question directly, for **all three** beds: run each
-// bed's own real Sleep action, then require at least one pet in the public
-// `hotel.petBeds` list to be both lying down and standing on *that bed's
-// own* real clear floor (`clearFloorAround` — the same rectangle the room's
-// actual walls build, not a hand-typed span) — i.e. visibly in the room she
-// is in, not merely somewhere in the data.
+//   *"they don't fit in the bed; furthermore, when the player gets into bed,
+//   the pet phases in and out of existence on alternating frames, no smooth
+//   animation and then morphs into a totally different pet, who then clips out
+//   of the bed and floats half hanging off the edge."*
 //
-// Proven red on the pre-fix build (pet beds only ever in bedroom 2): bed 0's
-// own floor is x -14.55…-8.20 and every pet bed sat at x ≈ -2.39, so no pet
-// bed's a chair the bedroom 0 checkist would ever have counted as "in this
-// room" — likewise for bed 2's floor at x 7.40…14.55.
-{
-  const napper2 = quietly(
-    () => new Player(collision, new IsoCamera(), new Vector3(SUITE.originX, 0, SUITE.originZ)),
-  );
-  scene.add(napper2.group);
-  hotel.attachPlayer(napper2 as never);
-  hotel.adoptRestoredPlayer();
-
-  for (const bedIndex of [0, 1, 2] as const) {
-    const spot = SUITE_BED_SPOTS[bedIndex];
-    if (!spot) {
-      problems.push(`SUITE_BED_SPOTS has no entry ${bedIndex}`);
-      continue;
-    }
-    const bedZone = hotel.interactZones().find((zone) => zone.id === `hotel-bed-bed-${bedIndex}`);
-    const sleep = bedZone?.actions?.()[0];
-    if (!sleep) {
-      problems.push(`bed ${bedIndex} offers no Sleep action for the visible-pet check`);
-      continue;
-    }
-    sleep.run();
-    // Long enough for the trot from the floor into the bed to finish — since
-    // 21 Aug 2026 a pet is not *already* in its bed at `sleep.run()`, it walks
-    // there, and this probe is about what she sees when it has arrived. Still
-    // well inside the nap's own 2.6 s.
-    for (let frame = 0; frame < 90; frame += 1) {
-      hotel.update({ dt: 1 / 60, elapsed: frame / 60 } as never);
-    }
-
-    const room = clearFloorAround(SUITE, spot[0], spot[1]);
-    const visible = hotel.petBeds.some(({ pet, x, z, asleep }) => {
-      const lying = asleep && pet.root.visible && Math.abs(pet.root.rotation.x + Math.PI / 2) < 0.01;
-      const inThisRoom = x >= room.minX && x <= room.maxX && z >= room.minZ && z <= room.maxZ;
-      return lying && inThisRoom;
-    });
-    if (!visible) {
-      problems.push(
-        `napping at bed ${bedIndex} (its own room floor is local x ${room.minX.toFixed(2)}…` +
-          `${room.maxX.toFixed(2)}, z ${room.minZ.toFixed(2)}…${room.maxZ.toFixed(2)}) lies every ` +
-          `pet down somewhere, but none of them is on that bedroom's own floor — a child sleeping ` +
-          `there sees no pet go to bed at all (issue #275, live-play regression)`,
-      );
-    }
-
-    // One giant tick ends the nap before the next bed's turn — same idiom as
-    // probe 16's own hand-back.
-    hotel.update({ dt: 999, elapsed: 0 } as never);
-  }
-  scene.remove(napper2.group);
-}
-
-// ---------------- 16c. pets WALK to their own beds, not cut there (round 6)
+// Four symptoms, one cause: **there were two bodies for every pet.** `Hotel`
+// built a `createPet()` stand-in per bed and cut it in at bedtime while
+// `Parade` hid the animal the child had been watching. Everything this probe
+// asks is a question that could not be asked while that was true — a probe
+// reading the hotel's own stand-in cannot tell a bunny standing in for a
+// kitten from the kitten, and cannot see the real one flicker at all. Probe
+// 16c (this file's previous shape) sampled visibility every frame and stayed
+// green through all of it, because it only ever asked *when* the real body
+// vanished, never whether it should have.
 //
-// Jim, 23 Aug 2026, on top of probe 16's own fix: *"the pet cuts — it
-// vanishes from the parade and appears already in its bed the instant
-// 'Have a sleep' is tapped, rather than visibly walking there."* Bug 1 (probe
-// 16, above) proved every bed stays empty until she naps; it never asked
-// whether the thing that then fills it got there by walking or by
-// teleporting. And, Jim's own follow-up: this has to hold for **every** pet
-// she owns, independently — `petBedSlots`/`dressPetBeds` already give each
-// one its own bed, so a fix that only moved the first would be half done.
+// So this is the one pet-bed probe now, and it owns:
 //
-// This is the one probe in the file that needs a real `Parade` — nothing
-// else here ever needed to move a pet's own body, only the hotel's
-// stand-in. So: a fresh, second, headless park (`buildHeadlessPark` again —
-// `park-harness.mts`'s own point is to build the real thing, never a model
-// of it), with two real pets bought into the store *before* it is built,
-// because `Hotel.ownedPets` snapshots the roster once, at construction, and
-// never revisits it — the same timing every other pet-bed probe here has
-// always relied on, just made to matter for once.
+//  * **empty until she naps** (Jim, 21 Aug 2026) — no bed has a pet in it
+//    before she lies down, and none has one after she gets up;
+//  * **a bed in the room she chose** (Jim, 18 Aug 2026: *"the pet didn't get
+//    into any bed when I went to sleep"*) — for **every** pet she owns, in
+//    **all three** bedrooms, on that bedroom's own real clear floor
+//    (`clearFloorAround`, never a hand-typed span);
+//  * **it walks there** (23 Aug, round 6) — visible and moving, frame by
+//    frame, no single frame covering more ground than a pet could;
+//  * **no flicker** — its visibility may not change *at all* across the whole
+//    nap, and its bedtime phase may only ever go forwards;
+//  * **the right animal** — the pet in the bed carries the catalogue id of the
+//    pet she actually bought;
+//  * **it fits** — its own measured world box sits on the real cushion, in
+//    plan on the real bed, under the real canopy.
+//
+// One fresh headless park (`buildHeadlessPark` again — `park-harness.mts`'s
+// own point is to build the real thing, never a model of it) with two real
+// pets bought into the store **before** it is built, because `Hotel.ownedPets`
+// snapshots the roster once, at construction, and never revisits it. Buying
+// after boot leaves the beds built against an empty inventory and proves
+// nothing (an earlier round's browser QA lost an afternoon to exactly that).
 {
   gameStore.earn(1000);
   const bunnySpec = shopItem('pet.bunny');
@@ -1741,13 +1669,9 @@ if (fallenPlayer.position.y < 0) {
       const { world: walkWorld, scene: walkScene } = quietly(() => buildHeadlessPark());
       const walkHotel = walkWorld.hotel;
       const walkCamera = new IsoCamera();
-      const spot = SUITE_BED_SPOTS[1];
-      const bedX = SUITE.originX + (spot?.[0] ?? 0);
-      const bedZ = SUITE.originZ + (spot?.[1] ?? 0);
-      const startX = SUITE.originX - 3;
-      const standZ = bedZ + 1.4;
       const walker = quietly(
-        () => new Player(walkWorld.collision, walkCamera, new Vector3(startX, 0, SUITE.originZ)),
+        () =>
+          new Player(walkWorld.collision, walkCamera, new Vector3(SUITE.originX, 0, SUITE.originZ)),
       );
       walkScene.add(walker.group);
       walkHotel.attachPlayer(walker as never);
@@ -1755,172 +1679,354 @@ if (fallenPlayer.position.y < 0) {
 
       const parade = new Parade(walker as never, walkWorld.collision, walkCamera);
       walkScene.add(parade.group);
-      // The one wire-up `Game.ts` makes in the real game, between the two
-      // systems this probe otherwise has no reason to build together.
+      // The one wire-up `Game.ts` makes, between the two systems this probe
+      // otherwise has no reason to build together.
       walkHotel.petParade = parade;
 
-      // She walks in from three metres off and settles by the bed — a real
-      // trail, so both pets start their nap walk a genuine stride away, not
-      // already standing on the spot, which would prove nothing at all.
-      for (let frame = 0; frame < 90; frame += 1) {
-        const t = Math.min(1, frame / 60);
-        walker.position.set(startX + (bedX - startX) * t, 0, SUITE.originZ + (standZ - SUITE.originZ) * t);
-        walker.group.position.copy(walker.position);
-        parade.update({ dt: 1 / 60, elapsed: frame / 60 } as never);
+      const owned = [
+        { uid: bunny.item.uid, id: bunnySpec.id, who: 'bunny' },
+        { uid: kitten.item.uid, id: kittenSpec.id, who: 'kitten' },
+      ] as const;
+
+      // ---- **empty furniture** before anybody naps.
+      for (const bed of walkHotel.petBeds) {
+        if (bed.asleep) {
+          problems.push(
+            `a pet bed at local x=${bed.x.toFixed(2)} already has a pet asleep in it before the ` +
+              'player has napped at all — a child walking in sees a pet in bed while her real one ' +
+              'still follows her about (Jim, 21 Aug 2026)',
+          );
+        }
       }
 
-      const bedZone = walkHotel.interactZones().find((zone) => zone.id === 'hotel-bed-bed-1');
-      const sleep = bedZone?.actions?.()[0];
-      if (!sleep) {
-        problems.push('bed 1 offers no Sleep action — the walk-to-bed probe cannot start a nap');
-      } else {
-        // Each pet's own bed, in world metres — **not** the human bed spot
-        // both pets merely stand near: `petBedSlots` tiles them out to
-        // either side of it, so measuring against the wrong point would
-        // call a pet "walking away" for the entirely ordinary reason that
-        // its own bed and the human bed are a metre or more apart.
-        const uids = [bunny.item.uid, kitten.item.uid] as const;
-        const bedWorld = new Map<string, { readonly x: number; readonly z: number }>();
-        for (const uid of uids) {
-          const bed = walkHotel.petBeds.find((candidate) => candidate.uid === uid);
-          if (bed) bedWorld.set(uid, { x: SUITE.originX + bed.x, z: SUITE.originZ + bed.z });
+      // The bed furniture as **built**, so the fit below is measured against
+      // real geometry rather than against the constants that placed it: the
+      // bolster is the rim a sleeping pet may rest an ear over, and the group
+      // box's own top is the canopy it must not go through.
+      const petBedRims: { readonly box: Box3; readonly canopyTop: number }[] = [];
+      // Every box below is a **world** box, and a room shell carries its
+      // room's origin — without this they all come out in room-local metres
+      // and silently miss the beds they are describing.
+      walkHotel.hotelRoot.updateMatrixWorld(true);
+      walkHotel.hotelRoot.traverse((object: Object3D) => {
+        if (object.name !== 'hotel.petBed') return;
+        const group = new Box3().setFromObject(object);
+        let rim: Box3 | null = null;
+        object.traverse((part: Object3D) => {
+          if (part.name !== 'petbed-bolster') return;
+          rim = new Box3().setFromObject(part);
+        });
+        if (rim) petBedRims.push({ box: rim, canopyTop: group.max.y });
+      });
+      if (petBedRims.length === 0) {
+        problems.push(
+          'no built pet bed with a `petbed-bolster` in it was found in the suite — the "does the ' +
+            'pet fit in the bed" probe below is blind',
+        );
+      }
+
+      /** The built bed whose rim is centred nearest this cushion. */
+      const rimAt = (x: number, z: number): { readonly box: Box3; readonly canopyTop: number } | null => {
+        let best: { readonly box: Box3; readonly canopyTop: number } | null = null;
+        let bestDistance = Infinity;
+        for (const candidate of petBedRims) {
+          const centre = candidate.box.getCenter(new Vector3());
+          const distance = Math.hypot(centre.x - x, centre.z - z);
+          if (distance >= bestDistance) continue;
+          bestDistance = distance;
+          best = candidate;
+        }
+        return bestDistance <= 0.2 ? best : null;
+      };
+
+      // A per-frame step no real pet could take — a bunny at 60 fps covering
+      // more than this in one frame is not walking, it teleported.
+      const MAX_PLAUSIBLE_STEP = 0.6;
+      // How far past the bolster's own rim a sleeping pet may lie. Every pet
+      // stands `PET_RENDER_HEIGHT` = 1.46 m and the bolster is 1.34 m across,
+      // so an ear at the pillow end and a tail at the other rest **on** the
+      // rim — which is what a big pet in a small bed looks like, and is what
+      // the bed asset's own doc comment says it was sized for. What this
+      // number exists to catch is the 0.90 m of rabbit that used to hang past
+      // the pillow end with nothing under it (measured, pre-fix: a bunny lay
+      // from bed-local z −0.10 to −1.57 against a rim ending at −0.67).
+      const RIM_OVERHANG_ALLOWED = 0.12;
+      // The cushion is where a sleeping pet rests. Below it is inside the
+      // bed's own base — pre-fix, the kitten, the mouse and the puff all had
+      // their lowest point *under the floor*.
+      const CUSHION_TOLERANCE = 0.05;
+
+      for (const bedIndex of [0, 1, 2] as const) {
+        const spot = SUITE_BED_SPOTS[bedIndex];
+        if (!spot) {
+          problems.push(`SUITE_BED_SPOTS has no entry ${bedIndex}`);
+          continue;
+        }
+        const room = clearFloorAround(SUITE, spot[0], spot[1]);
+        const bedX = SUITE.originX + spot[0];
+        const bedZ = SUITE.originZ + spot[1];
+
+        // ---- **a bed of its own, in this room**, for each pet she owns.
+        const bedsHere = walkHotel.petBeds.filter((bed) => bed.bedIndex === bedIndex);
+        for (const { uid, who } of owned) {
+          const bed = bedsHere.find((candidate) => candidate.uid === uid);
+          if (!bed) {
+            problems.push(
+              `the ${who} has no bed at all in bedroom ${bedIndex} — a child who naps there watches ` +
+                'it vanish with nowhere to go, and a different pet get into the one bed that is ' +
+                'there (Jim, 23 Aug 2026)',
+            );
+            continue;
+          }
+          if (bed.x < room.minX || bed.x > room.maxX || bed.z < room.minZ || bed.z > room.maxZ) {
+            problems.push(
+              `the ${who}'s bed for bedroom ${bedIndex} is at local (${bed.x.toFixed(2)}, ` +
+                `${bed.z.toFixed(2)}), outside that bedroom's own clear floor (x ` +
+                `${room.minX.toFixed(2)}…${room.maxX.toFixed(2)}, z ${room.minZ.toFixed(2)}…` +
+                `${room.maxZ.toFixed(2)}) — she cannot see a pet go to bed in another room`,
+            );
+          }
         }
 
+        // She walks in from three metres off and settles by that bedroom's own
+        // bed — a real trail, so both pets start a genuine stride away rather
+        // than already standing on the spot, which would prove nothing.
+        const startX = bedX - 3;
+        const standZ = bedZ + 1.4;
+        for (let frame = 0; frame < 90; frame += 1) {
+          const t = Math.min(1, frame / 60);
+          walker.position.set(startX + (bedX - startX) * t, 0, SUITE.originZ + (standZ - SUITE.originZ) * t);
+          walker.group.position.copy(walker.position);
+          parade.update({ dt: 1 / 60, elapsed: frame / 60 } as never);
+        }
+
+        const bedZone = walkHotel
+          .interactZones()
+          .find((zone) => zone.id === `hotel-bed-bed-${bedIndex}`);
+        const sleep = bedZone?.actions?.()[0];
+        if (!sleep) {
+          problems.push(`bed ${bedIndex} offers no Sleep action — its pets' walk cannot start`);
+          continue;
+        }
         sleep.run();
 
-        // Sampled well **inside** `NAP_SECONDS` (2.6 s = 156 frames at
-        // 60 fps): this has to catch the walk while it is still a nap, not
-        // read the state after the nap has already ended on its own and
-        // handed everything back — see the explicit wake check below for
-        // that half instead.
-        type Sample = { readonly x: number; readonly z: number; readonly visible: boolean; readonly bedVisible: boolean };
-        const samples = new Map<string, Sample[]>(uids.map((uid) => [uid, []]));
+        // Sampled well inside `NAP_SECONDS` (2.6 s = 156 frames at 60 fps):
+        // this has to catch the walk while it is still a nap, not read the
+        // state after the nap has ended and handed everything back — the
+        // explicit wake check below is that half.
+        type Sample = {
+          readonly x: number;
+          readonly z: number;
+          readonly visible: boolean;
+          readonly phase: string | null;
+          readonly itemId: string;
+        };
         const NAP_WALK_FRAMES = 130;
+        const samples = new Map<string, Sample[]>(owned.map(({ uid }) => [uid, []]));
         for (let frame = 0; frame < NAP_WALK_FRAMES; frame += 1) {
           const elapsed = frame / 60;
           walkHotel.update({ dt: 1 / 60, elapsed } as never);
-          parade.setPetsHidden(walkHotel.isNapping);
           parade.update({ dt: 1 / 60, elapsed } as never);
-          const beds = walkHotel.petBeds;
-          for (const uid of uids) {
+          for (const { uid } of owned) {
             const state = parade.petState(uid);
-            const bedVisible = beds.find((bed) => bed.uid === uid)?.pet.root.visible ?? false;
-            if (state) {
-              samples.get(uid)!.push({ x: state.x, z: state.z, visible: state.visible, bedVisible });
+            if (!state) continue;
+            samples.get(uid)!.push({
+              x: state.x,
+              z: state.z,
+              visible: state.visible,
+              phase: state.bedPhase,
+              itemId: state.itemId,
+            });
+          }
+        }
+
+        for (const { uid, id, who } of owned) {
+          const trace = samples.get(uid) ?? [];
+          const bed = walkHotel.petBeds.find(
+            (candidate) => candidate.bedIndex === bedIndex && candidate.uid === uid,
+          );
+          if (trace.length === 0 || !bed) {
+            problems.push(
+              `the ${who}'s own body or its bed in bedroom ${bedIndex} was never found at all — ` +
+                'nothing below this line can mean anything',
+            );
+            continue;
+          }
+          const goalX = bed.worldX;
+          const goalZ = bed.worldZ;
+
+          // ---- **no flicker.** The whole of Jim's *"phases in and out of
+          // existence on alternating frames"*. There is one writer of a pet's
+          // visibility now, so the honest threshold is not "not too often" —
+          // it is **never**: a pet that is out of the bag stays drawn for the
+          // entire nap, walk, climb, sleep and all.
+          const flickers = trace.filter(
+            (sample, index) => index > 0 && sample.visible !== trace[index - 1]!.visible,
+          ).length;
+          if (flickers > 0) {
+            problems.push(
+              `the ${who} changed from drawn to not-drawn (or back) ${flickers} time(s) during a ` +
+                `single nap in bedroom ${bedIndex} — with one body per pet nothing may toggle its ` +
+                'visibility at all, and a toggle is what Jim watched "phase in and out of ' +
+                'existence on alternating frames"',
+            );
+          }
+          const neverDrawn = trace.filter((sample) => !sample.visible).length;
+          if (neverDrawn > 0) {
+            problems.push(
+              `the ${who} was not drawn on ${neverDrawn} of ${trace.length} frames of its nap in ` +
+                `bedroom ${bedIndex} — the pet she is watching must walk to its bed and stay in ` +
+                'view, not be hidden and replaced',
+            );
+          }
+
+          // ---- **the right animal.** A stand-in of the wrong species in the
+          // bed is Jim's *"morphs into a totally different pet"*, and it was
+          // un-askable while the hotel built its own.
+          const wrong = trace.find((sample) => sample.itemId !== id);
+          if (wrong) {
+            problems.push(
+              `the body in the ${who}'s bed in bedroom ${bedIndex} is a ${wrong.itemId}, not the ` +
+                `${id} she owns`,
+            );
+          }
+
+          // ---- **it walks there**, and the phase only ever goes forwards.
+          const order = ['walking', 'climbing', 'asleep'];
+          let worstStep = 0;
+          let wentBackwards = '';
+          for (let index = 1; index < trace.length; index += 1) {
+            const previous = trace[index - 1]!;
+            const now = trace[index]!;
+            if (previous.phase === 'walking' && now.phase === 'walking') {
+              worstStep = Math.max(worstStep, Math.hypot(now.x - previous.x, now.z - previous.z));
+            }
+            const before = order.indexOf(previous.phase ?? '');
+            const after = order.indexOf(now.phase ?? '');
+            if (before >= 0 && after >= 0 && after < before) {
+              wentBackwards = `${previous.phase} → ${now.phase} at frame ${index}`;
+            }
+          }
+          if (worstStep > MAX_PLAUSIBLE_STEP) {
+            problems.push(
+              `the ${who} covered ${worstStep.toFixed(2)} m in a single frame on its way to bed in ` +
+                `bedroom ${bedIndex} — a walk should never jump more than ${MAX_PLAUSIBLE_STEP} m ` +
+                'in 1/60 s',
+            );
+          }
+          if (wentBackwards) {
+            problems.push(
+              `the ${who}'s bedtime went backwards in bedroom ${bedIndex} (${wentBackwards}) — the ` +
+                'routine may only ever go walk → climb → asleep',
+            );
+          }
+          const walkFrames = trace.filter((sample) => sample.phase === 'walking').length;
+          if (walkFrames < 5) {
+            problems.push(
+              `the ${who} spent only ${walkFrames} frame(s) walking to its bed in bedroom ` +
+                `${bedIndex} — that is the cut Jim reported (23 Aug 2026), not a walk`,
+            );
+          }
+          const walked = trace.filter((sample) => sample.phase === 'walking');
+          const first = walked[0];
+          const last = walked[walked.length - 1];
+          if (first && last) {
+            const startDistance = Math.hypot(first.x - goalX, first.z - goalZ);
+            const endDistance = Math.hypot(last.x - goalX, last.z - goalZ);
+            if (endDistance >= startDistance) {
+              problems.push(
+                `the ${who} was ${startDistance.toFixed(2)} m from its own bed in bedroom ` +
+                  `${bedIndex} when the walk started and ${endDistance.toFixed(2)} m away when it ` +
+                  'ended — it did not get any closer',
+              );
+            }
+          }
+
+          // ---- **asleep in it, and it fits.**
+          if (!bed.asleep) {
+            problems.push(
+              `the ${who}'s own bed in bedroom ${bedIndex} does not have it asleep in it ` +
+                `${NAP_WALK_FRAMES} frames into a 2.6 s nap — it should have settled by now`,
+            );
+            continue;
+          }
+          const body = parade.petState(uid);
+          const rim = rimAt(goalX, goalZ);
+          if (!body || !rim) {
+            problems.push(
+              `no built bed rim was found under the ${who}'s bed in bedroom ${bedIndex} — the fit ` +
+                'below cannot be measured',
+            );
+            continue;
+          }
+          body.root.updateMatrixWorld(true);
+          const pet = new Box3().setFromObject(body.root);
+          const rimCentre = rim.box.getCenter(new Vector3());
+
+          // On the cushion: not sunk into the bed's own base, not floating.
+          if (
+            pet.min.y < bed.spot.cushionTop - 0.01 ||
+            pet.min.y > bed.spot.cushionTop + CUSHION_TOLERANCE
+          ) {
+            problems.push(
+              `the ${who} asleep in bedroom ${bedIndex} has its lowest point at y=` +
+                `${pet.min.y.toFixed(2)} m against a cushion top of ` +
+                `${bed.spot.cushionTop.toFixed(2)} m — it is ` +
+                `${pet.min.y < bed.spot.cushionTop ? 'sunk into the bed' : 'floating above it'}`,
+            );
+          }
+          // Under the canopy it is lying beneath.
+          if (pet.max.y > rim.canopyTop) {
+            problems.push(
+              `the ${who} asleep in bedroom ${bedIndex} reaches y=${pet.max.y.toFixed(2)} m, up ` +
+                `through its own bed's canopy at ${rim.canopyTop.toFixed(2)} m`,
+            );
+          }
+          // Centred on the bed, not hanging off one end of it.
+          for (const axis of ['x', 'z'] as const) {
+            const centre = (pet.min[axis] + pet.max[axis]) / 2;
+            const drift = Math.abs(centre - rimCentre[axis]);
+            if (drift > 0.06) {
+              problems.push(
+                `the ${who} asleep in bedroom ${bedIndex} is centred ${drift.toFixed(2)} m off its ` +
+                  `own bed in ${axis} — it is lying half off the edge (Jim, 23 Aug 2026)`,
+              );
+            }
+            const over = Math.max(
+              rim.box.min[axis] - pet.min[axis],
+              pet.max[axis] - rim.box.max[axis],
+            );
+            if (over > RIM_OVERHANG_ALLOWED) {
+              problems.push(
+                `the ${who} asleep in bedroom ${bedIndex} sticks ${over.toFixed(2)} m past its own ` +
+                  `bed's bolster in ${axis} (allowed: ${RIM_OVERHANG_ALLOWED} m of ear and tail on ` +
+                  'the rim) — that is a pet hanging off its bed, not lying in it',
+              );
             }
           }
         }
 
-        // A per-frame step no real pet could take — a bunny at 60 fps
-        // covering more than this in one frame is not walking, it teleported.
-        const MAX_PLAUSIBLE_STEP = 0.6;
-        for (const [index, uid] of uids.entries()) {
-          const who = index === 0 ? 'bunny' : 'kitten';
-          const trace = samples.get(uid) ?? [];
-          const goal = bedWorld.get(uid);
-          if (trace.length === 0 || !goal) {
-            problems.push(`the ${who}'s parade member or its own bed was never found at all`);
-            continue;
-          }
-          const arriveAt = trace.findIndex((sample) => !sample.visible);
-          if (arriveAt < 0) {
-            problems.push(
-              `the ${who} never disappeared into its bed within ${NAP_WALK_FRAMES} frames ` +
-                `(${(NAP_WALK_FRAMES / 60).toFixed(2)} s of a 2.6 s nap) — it is still walking (or ` +
-                'stuck) well before the nap should end',
-            );
-            continue;
-          }
-          // Not an instant cut: `beginPetNapWalk` must take real frames to
-          // close a real gap, not hide the pet on the very frame it starts.
-          if (arriveAt < 5) {
-            problems.push(
-              `the ${who} vanished into its bed after only ${arriveAt} frame(s) — that is the cut ` +
-                "Jim reported (23 Aug 2026), not a walk",
-            );
-          }
-          // Continuous, not teleporting: no single frame of the visible walk
-          // may cover more ground than a bunny plausibly could.
-          let worstStep = 0;
-          for (let i = 1; i < arriveAt; i += 1) {
-            const a = trace[i - 1]!;
-            const b = trace[i]!;
-            worstStep = Math.max(worstStep, Math.hypot(b.x - a.x, b.z - a.z));
-          }
-          if (worstStep > MAX_PLAUSIBLE_STEP) {
-            problems.push(
-              `the ${who} covered ${worstStep.toFixed(2)} m in a single frame on its way to bed — ` +
-                `a walk should never jump more than ${MAX_PLAUSIBLE_STEP} m in 1/60 s`,
-            );
-          }
-          // Genuinely converging on its own bed, not wandering: the last
-          // visible sample must be closer to it than the first one was.
-          const first = trace[0]!;
-          const last = trace[arriveAt - 1] ?? first;
-          const startDistance = Math.hypot(first.x - goal.x, first.z - goal.z);
-          const endDistance = Math.hypot(last.x - goal.x, last.z - goal.z);
-          if (endDistance >= startDistance) {
-            problems.push(
-              `the ${who} was ${startDistance.toFixed(2)} m from its own bed when the walk started ` +
-                `and ${endDistance.toFixed(2)} m away just before it vanished — it did not get any ` +
-                'closer',
-            );
-          }
-          // Bug 1 (probe 16) must still hold **through** the new walk, not
-          // just before and after it: the stand-in bed stays empty for
-          // every one of these frames, while the real body is still
-          // visibly on its way — proving the walk and the empty-bed fix
-          // compose, rather than one quietly undoing the other.
-          const cutEarly = trace.slice(0, arriveAt).findIndex((sample) => sample.bedVisible);
-          if (cutEarly >= 0) {
-            problems.push(
-              `the ${who}'s bed already shows its stand-in pet at frame ${cutEarly}, while the real ` +
-                `${who} is still visibly walking there (arrives at frame ${arriveAt}) — the bed and ` +
-                'the parade both have a body on screen at once',
-            );
-          }
-          // And, once it has arrived: asleep in its own bed, and not also
-          // still standing in the line — one body, not two.
-          const settled = walkHotel.petBeds.find((bed) => bed.uid === uid);
-          if (!settled || !settled.asleep || !settled.pet.root.visible) {
-            problems.push(
-              `the ${who}'s own bed is not occupied and asleep ${NAP_WALK_FRAMES} frames into the ` +
-                `nap, well after it vanished from the line at frame ${arriveAt} — it should have ` +
-                'settled by now',
-            );
-          }
-          if (parade.petState(uid)?.visible) {
-            problems.push(
-              `the ${who} is both asleep in its own bed and still visibly standing in the parade ` +
-                'line at the same time — two bodies on screen for the same pet',
-            );
-          }
-        }
-
-        // The reverse, issue #279 round 6's own other half (Jim: it "gets
-        // up" too, not a hidden teleport back): end the nap for real —
-        // `NAP_SECONDS` is only 2.6 s, so a big single `dt` finishes it —
-        // and require every pet to leave its bed and rejoin the parade
-        // properly, the same as `standPetsDown` has always been proven to
-        // do for the instant-appear case (probe 16, above).
+        // ---- **and out again.** `NAP_SECONDS` is only 2.6 s, so one big
+        // `dt` finishes it; every pet then leaves its bed and rejoins the line.
         walkHotel.update({ dt: 999, elapsed: 0 } as never);
-        parade.setPetsHidden(walkHotel.isNapping);
-        // A few settled frames for the reunited line to catch up to the
-        // (stationary) player, the same way any returning member does.
         for (let frame = 0; frame < 30; frame += 1) {
           parade.update({ dt: 1 / 60, elapsed: (NAP_WALK_FRAMES + frame) / 60 } as never);
         }
-        for (const [index, uid] of uids.entries()) {
-          const who = index === 0 ? 'bunny' : 'kitten';
-          const bed = walkHotel.petBeds.find((candidate) => candidate.uid === uid);
-          if (bed && (bed.asleep || bed.pet.root.visible)) {
+        for (const { uid, who } of owned) {
+          const bed = walkHotel.petBeds.find(
+            (candidate) => candidate.bedIndex === bedIndex && candidate.uid === uid,
+          );
+          if (bed?.asleep) {
             problems.push(
-              `the ${who} did not get out of bed when the nap ended (visible ` +
-                `${bed.pet.root.visible}, asleep ${bed.asleep})`,
+              `the ${who} did not get out of bed in bedroom ${bedIndex} when the nap ended`,
             );
           }
-          if (!parade.petState(uid)?.visible) {
-            problems.push(`the ${who} did not rejoin the parade when the nap ended — it stayed hidden`);
+          const state = parade.petState(uid);
+          if (!state?.visible || state.bedPhase !== null) {
+            problems.push(
+              `the ${who} did not rejoin the parade when the nap in bedroom ${bedIndex} ended ` +
+                `(drawn ${state?.visible ?? false}, bedtime phase ${state?.bedPhase ?? 'none'})`,
+            );
           }
         }
       }
