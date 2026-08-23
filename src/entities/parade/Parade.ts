@@ -120,6 +120,28 @@ export class Parade implements GameSystem {
   }
 
   /**
+   * Hide the whole line for a moment — **it is asleep somewhere else.**
+   *
+   * The hotel suite's nap is the one caller (`Game.tick`, off
+   * `Hotel.isNapping`). Every pet the player owns has its own bed in that
+   * room and trots into it when she goes to sleep, so without this her bunny
+   * is asleep in a pet bed *and* still standing behind her at the bedside —
+   * two of the same animal on screen at once, which is half of what Jim
+   * reported on 21 Aug 2026.
+   *
+   * Deliberately just the group's `visible` flag rather than tearing the line
+   * down: {@link update} keeps running, the members keep following the trail,
+   * and coming back is one flag rather than a rebuild that could put a toy
+   * somewhere it never walked. Re-asserted every frame by the caller (the
+   * setter is free when nothing changed), which is the same shape as
+   * `Hud.setLookAvailable` next door to it.
+   */
+  setHidden(hidden: boolean): void {
+    if (this.group.visible === !hidden) return;
+    this.group.visible = !hidden;
+  }
+
+  /**
    * The HUD's "Look" pill, by way of `Game.applyLiveLook`: `player.model` has
    * just been rebuilt, so whoever `peek` had reached into the old
    * `backpackAnchor` for is gone with it. `peek` already reads the anchor

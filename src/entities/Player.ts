@@ -506,6 +506,30 @@ export class Player implements GameSystem {
   railRaceFrown = false;
 
   /**
+   * True while she is asleep — **eyes shut, and staying shut**.
+   *
+   * Jim, live play, 21 Aug 2026, of the hotel suite's nap: *"the player's
+   * character doesn't close their eyes when in bed."* `Hotel.nap` really did
+   * call `setExpression('blink')` — and it was overwritten by `animate()`
+   * within a single frame, because {@link face} rewrites the face from its own
+   * blink clock every frame and knows nothing about anybody else's one-shot
+   * call. That is the same trap {@link railRaceFrown} and
+   * {@link ridePosture} both exist to avoid, so this is the same shape: a flag
+   * the frame reads, not a call that races the frame.
+   *
+   * It feeds the **resting** face rather than bypassing the blink clock, and
+   * that is the whole trick — a blink *is* shut eyes (`art/style/faces.ts`),
+   * so resting on `'blink'` holds them shut and the clock's own blinks punch
+   * through as a no-op. No new mechanism, no second eye-closing path to keep
+   * in step with the one every other face in the park uses.
+   *
+   * Reset by {@link beginRide} and {@link endRide} alongside
+   * {@link ridePosture}, so it can never leak out of the bed and follow her
+   * round the park asleep on her feet.
+   */
+  sleeping = false;
+
+  /**
    * `null` when she is not on the Rail Race; otherwise everything the ride
    * wants her body doing this frame — see `RiderPose` in `railRace/duckPose.ts`.
    *
@@ -770,6 +794,8 @@ export class Player implements GameSystem {
     // Every ride is sat in until it says otherwise, so a ride that has never
     // heard of postures cannot inherit one from the ride before it.
     this.ridePosture = 'seated';
+    // …and nobody boards anything asleep. Same reasoning, same line.
+    this.sleeping = false;
     this.scriptedWalkSpeed = 0;
     this.velocity.set(0, 0, 0);
     this.verticalVelocity = 0;
@@ -838,9 +864,13 @@ export class Player implements GameSystem {
     this.ridingFlag = false;
     // Stand her back up before handing her over, or she walks away lying down.
     this.ridePosture = 'seated';
+    // …and wake her up, or she walks away with her eyes shut.
+    this.sleeping = false;
     this.scriptedWalkSpeed = 0;
     this.model.root.rotation.x = 0;
     this.model.head.rotation.x = 0;
+    // The sleeping pose lolls her head to one side; unloll it with the rest.
+    this.model.head.rotation.z = 0;
     this.climbWave = 0;
     this.velocity.set(velocityX, 0, velocityZ);
     this.verticalVelocity = velocityY;
@@ -1430,6 +1460,11 @@ export class Player implements GameSystem {
     // on the two TRANSITIONS — calling `setExpression` every frame would flip
     // `needsUpdate` every frame and re-upload the texture to the GPU.
     //
+    // `sleeping` outranks everything, because a child asleep in a bed is not
+    // having a mood — and `'blink'` **is** shut eyes, so resting on it holds
+    // them shut for the whole nap and the clock's own blinks land on the face
+    // that is already showing. See {@link sleeping}.
+    //
     // `railRaceFrown` outranks `waterHappy`/`smelling` because a bonk is a
     // sudden thing that happens *to* her and should win over an ambient good
     // mood, but a blink still outranks the lot — `faceLife` punches one
@@ -1437,7 +1472,13 @@ export class Player implements GameSystem {
     // keeps interrupting a held frown exactly as it does a held smile.
     this.face.update(
       dt,
-      this.railRaceFrown ? 'frown' : this.waterHappy || this.smelling ? 'happy' : 'neutral',
+      this.sleeping
+        ? 'blink'
+        : this.railRaceFrown
+          ? 'frown'
+          : this.waterHappy || this.smelling
+            ? 'happy'
+            : 'neutral',
     );
 
     // The pose worn on any ride — "holding on, delighted", with the tree-climb

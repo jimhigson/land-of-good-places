@@ -882,11 +882,25 @@ export function rainbowRug(innerRadius: number, band: number): Group {
  *
  * Bed-local, origin at the bed's origin: a chunky quilt over the body half of
  * the 1.4 × 2 m bed (the pillow end stays open — her head lies there, in the
- * air) with a folded-back hem at the chest. Sized a whisker wider than the
+ * air) with a folded-back sheet at the chest. Sized a whisker wider than the
  * mattress so its sides drape past the bed's own flat blanket rather than
- * sharing a face with anything: bottom 2 cm above the mattress top, hem 4 cm
- * above the quilt, which keeps every horizontal face a step of its own (the
- * decal-ladder rule in this file's header, writ soft).
+ * sharing a face with anything, and every horizontal face is a step of its own
+ * (the decal-ladder rule in this file's header, writ soft).
+ *
+ * **It is two boxes, not one, and that is the fix for Jim's second complaint
+ * on 21 Aug 2026**: *"[the character] clips into the sheets"* — the body
+ * poking out through the covers. The old quilt was a single 0.38 m slab whose
+ * top face sat at y = 0.97 m, and this game's children are 2.12 m tall and
+ * built out of chunky cartoon boxes: measured lying flat on the suite's own
+ * mattress, her chest reaches 1.00 m, her collar 1.02 m and her shirt hem
+ * 1.07 m. Every one of those stood proud of the covers. A duvet that is
+ * merely *thicker* everywhere fixes that and reads as a mattress laid on top
+ * of her, so instead the quilt is shaped like what is under it: a **mound**
+ * over her torso and hips, and a **lower run** over her legs, which is what a
+ * bed with somebody in it actually looks like. `check:hotel` probe 16 fires a
+ * grid of rays straight down at the covers and asserts none of them reaches
+ * the child, so these numbers are held against the real rig rather than by
+ * this paragraph.
  *
  * `decal` because it exists only mid-nap: a shadow popping in and out with it
  * would read as a glitch, and nothing about a quilt needs one.
@@ -895,15 +909,31 @@ export function napBlanket(colour: number): Group {
   const group = new Group();
   group.name = 'hotel.napBlanket';
 
-  const quilt = decal(new Mesh(new BoxGeometry(1.5, 0.38, 1.42), toonMaterial(colour)));
-  quilt.position.set(0, BED_MATTRESS_TOP + 0.02 + 0.19, 0.25);
-  addOutline(quilt, 0.018);
-  group.add(quilt);
-
-  const hem = decal(
-    new Mesh(new BoxGeometry(1.54, 0.42, 0.3), toonMaterial(PALETTE.blossomWhite)),
+  // The mound, over her torso and hips — the deep part.
+  const moundTop = BED_MATTRESS_TOP + 0.57;
+  const moundBottom = BED_MATTRESS_TOP + 0.02;
+  const mound = decal(
+    new Mesh(new BoxGeometry(1.5, moundTop - moundBottom, 0.84), toonMaterial(colour)),
   );
-  hem.position.set(0, BED_MATTRESS_TOP + 0.02 + 0.21, -0.3);
+  mound.position.set(0, (moundTop + moundBottom) / 2, 0.06);
+  addOutline(mound, 0.018);
+  group.add(mound);
+
+  // The lower run, over her legs and feet, down to the foot of the bed.
+  const legsTop = BED_MATTRESS_TOP + 0.47;
+  const legs = decal(
+    new Mesh(new BoxGeometry(1.5, legsTop - moundBottom, 0.6), toonMaterial(colour)),
+  );
+  legs.position.set(0, (legsTop + moundBottom) / 2, 0.72);
+  addOutline(legs, 0.018);
+  group.add(legs);
+
+  // The sheet, folded back over the top of the mound at her chest. Sits proud
+  // of the mound's own top face so it reads as a fold rather than a stripe.
+  const hem = decal(
+    new Mesh(new BoxGeometry(1.54, 0.26, 0.28), toonMaterial(PALETTE.blossomWhite)),
+  );
+  hem.position.set(0, moundTop - 0.03, -0.28);
   group.add(hem);
   return group;
 }

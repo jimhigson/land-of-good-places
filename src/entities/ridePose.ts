@@ -44,8 +44,12 @@ import { KID_REST_GAZE_PITCH } from '../art/models/kid';
  * herself. It borrows the *riding* machinery only for what riding already means
  * here: input, collision and gravity stop applying, so a script can put her
  * exactly where it wants her without fighting the movement code.
+ *
+ * `'sleeping'` is **flat on her back in a bed**, which is not the same shape as
+ * `'reclined'` and cannot be a tuning of it — see
+ * {@link applySleepingRidePose}.
  */
-export type RidePosture = 'seated' | 'reclined' | 'walking';
+export type RidePosture = 'seated' | 'reclined' | 'walking' | 'sleeping';
 
 /**
  * How far back a reclining rider lies, in radians about her own left-right axis.
@@ -61,6 +65,17 @@ export type RidePosture = 'seated' | 'reclined' | 'walking';
  * in the trough. This leaves her propped just enough to see where she is going.
  */
 const RIDE_RECLINE = -1.35;
+
+/**
+ * How far back a **sleeping** rider lies: all the way, flat on her back.
+ *
+ * The quarter turn, deliberately, and not {@link RIDE_RECLINE}: a bed is not a
+ * chute, and the propped-up slide angle is what stuck a napping child's elbows
+ * and knees out through the bedclothes. The same quarter turn
+ * `Hotel.layPetDown` already lays a pet down with — one idea of "lying down"
+ * across the two things that do it. See {@link applySleepingRidePose}.
+ */
+const SLEEP_RECLINE = -Math.PI / 2;
 
 /**
  * The waving arm, up a tree — see {@link Player.setClimbWave}.
@@ -184,7 +199,8 @@ export interface RidePoseTarget {
   /** Turned as a whole to lie her down; see {@link applyRidePose}'s recline. */
   readonly root: { rotation: { x: number } };
   readonly body: { rotation: { x: number; z: number } };
-  readonly head: { rotation: { x: number } };
+  /** `z` is the sleeping pose's own lolled head — see {@link applySleepingRidePose}. */
+  readonly head: { rotation: { x: number; z: number } };
   readonly leftArm: { rotation: { x: number; z: number } };
   readonly rightArm: { rotation: { x: number; z: number } };
   readonly leftLeg: { rotation: { x: number } };
@@ -236,6 +252,10 @@ export function applyRidePose(
   // it flushes the roll `Player.animate` writes from the gait.
   if (posture === 'reclined') {
     applyReclinedRidePose(model);
+    return;
+  }
+  if (posture === 'sleeping') {
+    applySleepingRidePose(model);
     return;
   }
   // Upright again, in case the last ride laid her down. The recline turns
@@ -331,4 +351,67 @@ function applyReclinedRidePose(model: RidePoseTarget): void {
   // slide at her own feet** — the direction she is travelling. Without it she
   // rides the whole way staring at the sky.
   model.head.rotation.x = -0.45;
+}
+
+/**
+ * **Asleep in a bed** — flat on her back, arms at her sides, under the covers.
+ *
+ * Jim, live play, 21 Aug 2026, on the hotel suite's nap: *"the player's
+ * character doesn't close their eyes when in bed, and clips into the sheets"*
+ * — the body poking out through a quilt that is supposed to be draped over
+ * it.
+ *
+ * **Why this is its own posture and not a number tweak to
+ * {@link applyReclinedRidePose}.** That pose is the *slide's*: it is
+ * deliberately propped up at {@link RIDE_RECLINE} (−1.35, not flat) so she can
+ * see where she is going, with her arms thrown back over her head and her
+ * knees bent — a whole shape built around riding a chute. Measured on the real
+ * rig in the suite's own bed, that shape put her forearms at y = 1.28 m and
+ * her knees at y = 1.05 m against a quilt whose top face is at 0.97 m: elbows
+ * and knees sticking straight up through the bedclothes, exactly what was
+ * reported. Retuning the slide's recline to fix a bed would break the slide,
+ * and re-using it for the bed is what caused this; so a bed says what a bed
+ * means, the same way {@link Hotel}'s pet beds have their own `layPetDown`.
+ *
+ * **Flat, at −π/2**, which is the same quarter turn `Hotel.layPetDown` lays a
+ * pet down with, and what the grown-up's `GROWN_UP_RECLINE` already uses. The
+ * turn is on `root` for the reason {@link applyReclinedRidePose} gives at
+ * length: the rig has no knee and the hips hang off `body`, so bending
+ * anywhere but the model's own origin folds her in half. Her origin is at her
+ * feet, so this swings her whole length back along −Z from wherever her feet
+ * were put — which is why `Hotel.nap` puts her feet at the *foot* of the bed
+ * and lets this lay her out towards the pillow.
+ *
+ * Everything else here is "and lying still": the arms come down (the slide's
+ * −1.95 is what stuck them through the quilt), the legs go straight, the waist
+ * unbends, and the head stops looking at its own feet. The one flourish is a
+ * small roll of the head onto one side — ART_DIRECTION.md's "nothing is
+ * plumb", and it is what stops a sleeping child reading as a laid-out plank.
+ */
+function applySleepingRidePose(model: RidePoseTarget): void {
+  model.root.rotation.x = SLEEP_RECLINE;
+  // Arms down by her sides and tucked in a little, so they lie *along* her
+  // under the quilt rather than out across it.
+  model.leftArm.rotation.x = -0.06;
+  model.rightArm.rotation.x = 0.04;
+  model.leftArm.rotation.z = 0.14;
+  model.rightArm.rotation.z = -0.11;
+  // Flat out. The waist is unbent (the slide's own -0.12 chest lift would
+  // raise her ribs into the bedclothes) and the roll is flushed for the same
+  // reason every other posture here flushes it: `Player.animate` writes the
+  // gait's lean into it a moment before this runs.
+  model.body.rotation.x = 0;
+  model.body.rotation.z = 0;
+  // Legs straight and **toes pointed**, which is +x here: the rig's shoe
+  // sticks out in front of the shin, and flat on her back "in front" is
+  // straight up, so the slide's own small negative stood her feet up out of
+  // the bedclothes (measured: shoe tops at 1.01 m against a 0.97 m quilt).
+  // Not quite matching each other — "nothing is plumb".
+  model.leftLeg.rotation.x = 0.1;
+  model.rightLeg.rotation.x = 0.15;
+  // Chin neutral: flat on her back that is a face pointing at the ceiling,
+  // which is the whole of what "in bed" looks like from the park's camera.
+  model.head.rotation.x = 0;
+  // Lolled onto one side, asleep.
+  model.head.rotation.z = 0.13;
 }

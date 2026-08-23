@@ -1350,17 +1350,48 @@ if (fallenPlayer.position.y < 0) {
 // mattress: her head ended 0.64 m *below the floor*.
 //
 // This runs the real thing: a real `Player`, stood at the first suite bed,
-// running the bed zone's own Sleep action, ticked one frame so the ride pose
-// is applied exactly as the game applies it. Then three claims, measured on
-// the posed kid and the built bed:
+// running the bed zone's own Sleep action, ticked frame by frame so the ride
+// pose is applied exactly as the game applies it. Then, measured on the posed
+// kid and the built bed:
 //  * her head is **above the mattress top** and at the pillow end;
 //  * a straight-down ray at her head hits *her*, not a blanket — head out;
-//  * a straight-down ray over her body hits the bed's nap blanket — tucked in.
+//  * a straight-down ray over her body hits the bed's nap blanket — tucked in;
+//  * **a whole grid of them does**, over the blanket's own footprint — see
+//    below;
+//  * **her eyes are shut, and stay shut** — likewise;
+//  * every pet bed is empty before she naps and has its own pet asleep in it
+//    afterwards — probe 16c.
 //
 // Proven red before trusted green, on the pre-fix build:
 //   x a napping child's head is at y=-0.66 m — the mattress top is 0.55 m,
 //     so she has vanished into the bed
 //   x nothing over the napping child's body says 'blanket' — no blanket mesh
+//
+// ## The grid, and the eyes — Jim, live play, 21 Aug 2026
+//
+// *"The player's character doesn't close their eyes when in bed, and clips
+// into the sheets."* Both had been green here the whole time, and both for
+// the same reason: **one ray over one point is not "under the covers", and a
+// call to `setExpression` is not "her eyes are shut".**
+//
+// The single `firstHit(bedX, bedZ + 0.35)` above hit blanket because the
+// blanket's slab happened to be over that one spot. Measured on the same
+// build, her chest stood at 1.00 m, her collar at 1.02 m and her shirt hem at
+// 1.07 m against a blanket whose top face was 0.97 m — she was through the
+// covers at 16 of 91 points on this grid, and the probe could not see any of
+// them. So the grid: rays down over the blanket's whole footprint, and none of
+// them may reach the child.
+//
+// The eyes are the same disease. `Hotel.nap` really did call
+// `setExpression('blink')`; `Player.animate`'s own blink clock rewrote the
+// face from its resting mood within one frame, every frame, so the eyes were
+// open for all but the first. Nothing here could have caught it, because
+// nothing here ever looked at the face. So: **find the blink texture the way
+// the game makes one** — tick her awake until the ordinary blink cycle swaps
+// it in, and keep that texture — then assert the face wears exactly that one,
+// on every frame of the nap, and goes back to its resting face on waking.
+// A held expression and a natural blink are the same texture, so the "held"
+// half is what the many frames prove.
 {
   const napCamera = new IsoCamera();
   const napper = quietly(
@@ -1383,12 +1414,77 @@ if (fallenPlayer.position.y < 0) {
     if (!sleep) {
       problems.push('bed 0 offers no Sleep action');
     } else {
+      // ---- her face, before she sleeps. `napFaceTexture` is whatever the
+      // baked face is currently showing (`art/style/faces.ts` swaps
+      // `material.map`); the *blink* one is found by watching for the swap
+      // the ordinary blink clock makes, rather than being named here.
+      const faceTexture = (): unknown => {
+        let map: unknown = null;
+        napper.model.head.traverse((object: Object3D) => {
+          const mesh = object as Mesh & { material?: { map?: unknown } };
+          if (mesh.isMesh && mesh.material && 'map' in mesh.material && map === null) {
+            map = mesh.material.map;
+          }
+        });
+        return map;
+      };
+      const tickPlayer = (seconds: number, from: number): void => {
+        for (let t = 0; t < seconds; t += 1 / 60) {
+          napper.update({
+            dt: 1 / 60,
+            elapsed: from + t,
+            input: { justPressed: () => false, isDown: () => false },
+          } as never);
+        }
+      };
+      const restingFace = faceTexture();
+      let blinkFace: unknown = null;
+      // Two whole blink gaps' worth (`faceLife.ts`: 2.6 s + up to 3.4 s), so a
+      // blink is certain rather than likely.
+      for (let t = 0; t < 15 && blinkFace === null; t += 1 / 60) {
+        tickPlayer(1 / 60, t);
+        const now = faceTexture();
+        if (now !== restingFace) blinkFace = now;
+      }
+      if (blinkFace === null) {
+        problems.push(
+          'a waking child never blinked in 15 s of frames — the face texture never changed, ' +
+            'so the eyes-shut check below cannot mean anything',
+        );
+      }
+      if (faceTexture() !== restingFace) tickPlayer(0.5, 15);
+
+      // ---- every pet bed is **empty** until she naps (Jim, 21 Aug 2026).
+      for (const { pet, asleep, x } of hotel.petBeds) {
+        if (asleep || pet.root.visible) {
+          problems.push(
+            `a pet bed at local x=${x.toFixed(2)} already has its pet in it before the player ` +
+              `naps (visible ${pet.root.visible}, asleep ${asleep}) — a child walking in sees a ` +
+              `pet already asleep in bed while her real one still follows her about`,
+          );
+        }
+      }
+
       sleep.run();
-      napper.update({
-        dt: 1 / 60,
-        elapsed: 0,
-        input: { justPressed: () => false, isDown: () => false },
-      } as never);
+      // Long enough for every pet's trot to finish, well inside the 2.6 s nap.
+      const NAP_FRAMES = 90;
+      let sleepingFaceWrong = 0;
+      for (let frame = 0; frame < NAP_FRAMES; frame += 1) {
+        const elapsed = 16 + frame / 60;
+        hotel.update({ dt: 1 / 60, elapsed } as never);
+        napper.update({
+          dt: 1 / 60,
+          elapsed,
+          input: { justPressed: () => false, isDown: () => false },
+        } as never);
+        if (blinkFace !== null && faceTexture() !== blinkFace) sleepingFaceWrong += 1;
+      }
+      if (sleepingFaceWrong > 0) {
+        problems.push(
+          `a napping child's eyes were open on ${sleepingFaceWrong} of ${NAP_FRAMES} frames — ` +
+            `the face was not the shut-eye texture the blink cycle uses`,
+        );
+      }
       hotel.hotelRoot.updateMatrixWorld(true);
       napper.group.updateMatrixWorld(true);
 
@@ -1451,25 +1547,72 @@ if (fallenPlayer.position.y < 0) {
         );
       }
 
-      // **Issue #275: the pets go to sleep too, all together.** Every pet
-      // bed's pet should now be lying down — `Hotel.layPetDown`'s rotation,
-      // read off the public `petBeds` list rather than re-derived here.
-      for (const { pet, x } of hotel.petBeds) {
-        if (Math.abs(pet.root.rotation.x + Math.PI / 2) > 0.01) {
+      // ---- **the whole of her, under the whole of the covers.** The grid
+      // this probe's header is about: the blanket's own built footprint, in
+      // both directions, inset a little from its edges so a ray grazing the
+      // very lip of the mound is not counted as her sticking out of it.
+      const blanket = hotel.hotelRoot.getObjectByName('hotel.napBlanket');
+      const blanketBox = blanket ? new Box3().setFromObject(blanket) : null;
+      if (!blanketBox || blanketBox.isEmpty()) {
+        problems.push('no nap blanket was built for bed 0 — the drape grid has nothing to probe');
+      } else {
+        const inset = 0.06;
+        const minX = blanketBox.min.x + inset;
+        const maxX = blanketBox.max.x - inset;
+        const minZ = blanketBox.min.z + inset;
+        const maxZ = blanketBox.max.z - inset;
+        const exposed: string[] = [];
+        const STEPS_X = 8;
+        const STEPS_Z = 16;
+        for (let ix = 0; ix <= STEPS_X; ix += 1) {
+          for (let iz = 0; iz <= STEPS_Z; iz += 1) {
+            const x = minX + ((maxX - minX) * ix) / STEPS_X;
+            const z = minZ + ((maxZ - minZ) * iz) / STEPS_Z;
+            if (isKid(firstHit(x, z))) {
+              exposed.push(`(${(x - bedX).toFixed(2)}, ${(z - bedZ).toFixed(2)})`);
+            }
+          }
+        }
+        if (exposed.length > 0) {
           problems.push(
-            `a pet bed's pet at local x=${x} is not lying down while the player naps — issue ` +
-              `#275 wants every pet asleep too`,
+            `a napping child pokes out through the bedclothes at ${exposed.length} of ` +
+              `${(STEPS_X + 1) * (STEPS_Z + 1)} points over the blanket — first few, bed-local: ` +
+              `${exposed.slice(0, 6).join(' ')}`,
+          );
+        }
+      }
+
+      // **Issue #275: the pets go to sleep too, all together** — and, since
+      // 21 Aug 2026, only *now*, not since the room was built. Every pet bed's
+      // pet should be visible and lying down — `Hotel.layPetDown`'s rotation,
+      // read off the public `petBeds` list rather than re-derived here.
+      for (const { pet, x, asleep } of hotel.petBeds) {
+        if (!asleep || !pet.root.visible || Math.abs(pet.root.rotation.x + Math.PI / 2) > 0.01) {
+          problems.push(
+            `a pet bed's pet at local x=${x.toFixed(2)} is not lying in it while the player ` +
+              `naps (visible ${pet.root.visible}, asleep ${asleep}, rotation.x ` +
+              `${pet.root.rotation.x.toFixed(2)}) — issue #275 wants every pet asleep too`,
           );
         }
       }
 
       // Hand the room back the way the earlier probes left it: one giant tick
-      // outlasts any nap. The pets should stand back up with it.
+      // outlasts any nap. The pets should get up and go back out with it —
+      // out of the bed *and* off the screen, which is what "the beds are
+      // empty until she naps" means at the other end of a nap.
       hotel.update({ dt: 999, elapsed: 0 } as never);
-      for (const { pet, x } of hotel.petBeds) {
-        if (Math.abs(pet.root.rotation.x) > 0.01) {
-          problems.push(`a pet bed's pet at local x=${x} did not wake back up when the nap ended`);
+      for (const { pet, x, asleep } of hotel.petBeds) {
+        if (asleep || pet.root.visible || Math.abs(pet.root.rotation.x) > 0.01) {
+          problems.push(
+            `a pet bed's pet at local x=${x.toFixed(2)} did not get out of bed when the nap ` +
+              `ended (visible ${pet.root.visible}, asleep ${asleep})`,
+          );
         }
+      }
+      // And her eyes open again with them.
+      tickPlayer(0.2, 20);
+      if (blinkFace !== null && faceTexture() === blinkFace) {
+        problems.push('a woken child still has her eyes shut — the sleeping face never cleared');
       }
       scene.remove(napper.group);
     }
@@ -1522,10 +1665,17 @@ if (fallenPlayer.position.y < 0) {
       continue;
     }
     sleep.run();
+    // Long enough for the trot from the floor into the bed to finish — since
+    // 21 Aug 2026 a pet is not *already* in its bed at `sleep.run()`, it walks
+    // there, and this probe is about what she sees when it has arrived. Still
+    // well inside the nap's own 2.6 s.
+    for (let frame = 0; frame < 90; frame += 1) {
+      hotel.update({ dt: 1 / 60, elapsed: frame / 60 } as never);
+    }
 
     const room = clearFloorAround(SUITE, spot[0], spot[1]);
-    const visible = hotel.petBeds.some(({ pet, x, z }) => {
-      const lying = Math.abs(pet.root.rotation.x + Math.PI / 2) < 0.01;
+    const visible = hotel.petBeds.some(({ pet, x, z, asleep }) => {
+      const lying = asleep && pet.root.visible && Math.abs(pet.root.rotation.x + Math.PI / 2) < 0.01;
       const inThisRoom = x >= room.minX && x <= room.maxX && z >= room.minZ && z <= room.maxZ;
       return lying && inThisRoom;
     });
