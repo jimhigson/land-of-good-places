@@ -778,7 +778,13 @@ function buildFoliage(collision: CollisionWorld): {
     const distance = Math.sqrt(rng.unit()) * (edgeRadiusAt(PARK_BOUNDARY, angle) - 5);
     const x = Math.cos(angle) * distance;
     const z = Math.sin(angle) * distance;
-    if (!isPlantable(x, z, 1.6)) continue;
+    // BUSH_REACH, not the old 1.6: a clump's blobs spread up to 0.85 m off
+    // the accepted centre with radii up to 1.3 m, so the farthest leaf can
+    // stand 2.15 m out — clearing the centre by less lets a blob overlap
+    // the paving by up to 0.55 m (seed 18, 2026-08-23: 0.54 m, caught by
+    // `bushesStandOnOpenGround`). One owner: the same constant the cruiser
+    // check on the next line already uses for exactly this reach.
+    if (!isPlantable(x, z, BUSH_REACH)) continue;
     if (!clearOfCruiser(x, z, BUSH_REACH, BUSH_TOP)) continue;
     if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + BUSH_TOP)) continue;
 

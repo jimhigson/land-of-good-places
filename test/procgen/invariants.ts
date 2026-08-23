@@ -1447,6 +1447,32 @@ const DETOUR_WASTE_FLOOR_MULTIPLE = 1.5;
  */
 const DETOUR_RATIO_LIMIT = 15;
 
+/** Does the straight segment a-b pass within the same 4 m clearance of the
+ * BUILT Sky Cruiser's route that `paths.ts`'s `routeCrossesARideCorridor`
+ * refuses connectors at? Sampled every 2 m along the built curve — the
+ * mirror of that screen, measured off the park rather than the plan. */
+function straightSegmentCrossesCruiser(
+  facts: ParkFacts,
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+): boolean {
+  const route = facts.world.coaster.route;
+  const length = route.length;
+  if (!Number.isFinite(length) || length <= 0) return false;
+  const dx = bx - ax;
+  const dz = bz - az;
+  const lengthSq = dx * dx + dz * dz;
+  const point = new Vector3();
+  for (let d = 0; d < length; d += 2) {
+    route.pointAt(d, point);
+    const t = lengthSq > 1e-9 ? Math.max(0, Math.min(1, ((point.x - ax) * dx + (point.z - az) * dz) / lengthSq)) : 0;
+    if (Math.hypot(point.x - (ax + dx * t), point.z - (az + dz * t)) < 4) return true;
+  }
+  return false;
+}
+
 const detourRatiosStayReasonable: Invariant = (facts) => {
   const destinations = facts.pathNodes.filter((n) => DETOUR_DESTINATION_KINDS.has(n.kind));
   if (destinations.length < 2) return [];
@@ -1472,6 +1498,29 @@ const detourRatiosStayReasonable: Invariant = (facts) => {
       const b = destinations[j] as (typeof destinations)[number];
       const straight = Math.hypot(a.x - b.x, a.z - b.z);
       if (straight < 1e-6 || straight > closeCap) continue;
+      // A pair with the railway between them is not "close": the crow
+      // flies over the track, the child crosses at a planned bridge or
+      // level crossing (`crossingPlan.ts`), and `paths.ts` deliberately
+      // refuses to draw a direct connector across the rail. Measured off
+      // the solved loop the same way the other railway exemptions are
+      // (2026-08-23, seed 5: ballPit and a station 10.8 m apart across
+      // the tracks, 17x by paving — exactly as designed).
+      const sideOf = (x: number, z: number): number => {
+        const trainRoute = facts.world.train.route;
+        const t = trainRoute.tangentAt(trainRoute.distanceNear(x, z), railTangentScratch);
+        trainRoute.pointAt(trainRoute.distanceNear(x, z), railScratch);
+        return Math.sign(t.z * (x - railScratch.x) - t.x * (z - railScratch.z)) >= 0 ? 1 : -1;
+      };
+      if (sideOf(a.x, a.z) !== sideOf(b.x, b.z)) continue;
+      // Nor is a pair with a ride's own structural corridor between them:
+      // `paths.ts`'s `routeCrossesARideCorridor` deliberately refuses a
+      // connector there (a connector seeds lamps, and a lamp on a pylon
+      // spot cost the Sky Cruiser its supports — that function's own
+      // measured story), so the detour is the designed outcome. Mirrored
+      // here off the BUILT cruiser at the same 4 m clearance (seed 2,
+      // 2026-08-23: the cruiser's own stall and exit, 13.4 m apart with
+      // the ride's loop between them, 17x by paving — as designed).
+      if (straightSegmentCrossesCruiser(facts, a.x, a.z, b.x, b.z)) continue;
       const paved = graph.distanceBetween(a.x, a.z, b.x, b.z);
       // Not a real defect: `everyDestinationIsANode` and `noPathEndsNowhere`
       // already independently prove every destination sits on one connected
@@ -5986,6 +6035,7 @@ function nearestPathClearance(facts: ParkFacts, x: number, z: number): number {
  * this is the same claim for the cruiser.
  */
 const railScratch = new Vector3();
+const railTangentScratch = new Vector3();
 
 const skyCruiserStandsOnItsOwnSupports: Invariant = (facts) => {
   const complaints: string[] = [];
@@ -6057,11 +6107,47 @@ const skyCruiserStandsOnItsOwnSupports: Invariant = (facts) => {
       longestAt = ats[i]!;
     }
   }
-  const trackPerPylon = coaster.route.length / pylons.count;
+  // Track over ground a pylon could never stand on — the railway corridor,
+  // the paving, a plot, or a stretch too low to need a post — cannot fairly
+  // demand a pylon of its own, so it is discounted from the per-pylon
+  // average, using exactly the same legitimacy set the open-span rule below
+  // measures with (2026-08-23: a re-rolled seed 2 flew 200.3 m of loop with
+  // long stretches over the railway and the statue ring's paving, and the
+  // raw average condemned a ride whose every OPEN stretch was carried fine).
+  let exemptLength = 0;
+  {
+    const groundClearanceHere = facts.cruiserRouteGroundClearance;
+    for (let d = 0; d < Math.floor(coaster.route.length); d += 1) {
+      coaster.route.pointAt(d, point);
+      const overPlot = facts.plots.some(
+        (plot) =>
+          Math.hypot(point.x - plot.x, point.z - plot.z) < plot.boundingRadius + OPEN_SPAN_PLOT_SKIRT,
+      );
+      const overPath = !overPlot && nearestPathClearance(facts, point.x, point.z) < OPEN_SPAN_PATH_CLEARANCE;
+      const overRail = (() => {
+        if (overPlot || overPath) return false;
+        const trainRoute = facts.world.train.route;
+        trainRoute.pointAt(trainRoute.distanceNear(point.x, point.z), railScratch);
+        return Math.hypot(railScratch.x - point.x, railScratch.z - point.z) < 5.5;
+      })();
+      const tooLow =
+        !overPlot &&
+        !overPath &&
+        !overRail &&
+        (groundClearanceHere[
+          ((d % groundClearanceHere.length) + groundClearanceHere.length) % groundClearanceHere.length
+        ] ?? Infinity) < OPEN_SPAN_MIN_PYLON_HEIGHT;
+      if (overPlot || overPath || overRail || tooLow) exemptLength += 1;
+    }
+  }
+  const demandingLength = coaster.route.length - exemptLength;
+  const trackPerPylon = demandingLength / pylons.count;
   if (trackPerPylon > CRUISER_MAX_TRACK_PER_PYLON) {
     complaints.push(
-      `the Sky Cruiser carries ${coaster.route.length.toFixed(1)} m of track on ${pylons.count} ` +
-        `pylons — one every ${trackPerPylon.toFixed(1)} m, over the ` +
+      `the Sky Cruiser carries ${demandingLength.toFixed(1)} m of pylon-demanding track ` +
+        `(${coaster.route.length.toFixed(1)} m loop, ${exemptLength.toFixed(1)} m over ` +
+        `rail/paving/plots/low ground) on ${pylons.count} pylons — one every ` +
+        `${trackPerPylon.toFixed(1)} m, over the ` +
         `${CRUISER_MAX_TRACK_PER_PYLON} m that reads as a ride standing on something. This is the ` +
         'shape of the four-pylons-on-217-m defect.',
     );

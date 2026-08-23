@@ -898,43 +898,99 @@ function routeLeg(
   // station's sealed window, exactly the ground `stationRun` fences).
   if (fromSide === toSide) return sameSideLeg(from, to, fromSide);
 
-  let best: { site: CrossingSite; near: readonly [number, number]; far: readonly [number, number] } | null = null;
-  let bestCost = Infinity;
-  for (const site of [...CROSSING_SITES, ...LEVEL_CROSSING_SITES]) {
-    const feet = crossingFeet(site);
-    const near = fromSide === 1 ? feet.plus : feet.minus;
-    const far = fromSide === 1 ? feet.minus : feet.plus;
-    const cost =
-      Math.hypot(from[0] - near[0], from[1] - near[1]) +
-      Math.hypot(near[0] - far[0], near[1] - far[1]) +
-      Math.hypot(far[0] - to[0], far[1] - to[1]) +
-      (site.bridge ? 0 : LEVEL_CROSSING_PENALTY);
-    if (cost < bestCost) {
-      bestCost = cost;
-      best = { site, near, far };
-    }
-  }
+  const candidates = [...CROSSING_SITES, ...LEVEL_CROSSING_SITES]
+    .map((site) => {
+      const feet = crossingFeet(site);
+      const near = fromSide === 1 ? feet.plus : feet.minus;
+      const far = fromSide === 1 ? feet.minus : feet.plus;
+      const cost =
+        Math.hypot(from[0] - near[0], from[1] - near[1]) +
+        Math.hypot(near[0] - far[0], near[1] - far[1]) +
+        Math.hypot(far[0] - to[0], far[1] - to[1]) +
+        (site.bridge ? 0 : LEVEL_CROSSING_PENALTY);
+      return { site, near, far, cost };
+    })
+    .sort((a, b) => a.cost - b.cost);
   // No site anywhere on the loop (should not happen — the level tier exists
   // for exactly this): the old behaviour, an ad-hoc crossing wherever the
   // route lands, is still better than no path at all.
-  if (!best) return manhattanRoute(from, to);
+  if (candidates.length === 0) return manhattanRoute(from, to);
 
-  const site = best.site;
-  return [
-    // The ordinary routers know nothing about the railway, so each sub-leg
-    // goes through the same side-holding pipeline as a whole same-side leg
-    // (measured: the dodgems and hotel spurs each crossed the rail *three*
-    // times before this, and seed 2's station spur crossed twice more at a
-    // pinch even after its main crossing went via a site).
-    ...sameSideLeg(from, best.near, fromSide),
-    // The crossing axis, pinned at the deck's edges and centre so the drawn
-    // Catmull-Rom curve runs dead straight over the rail rather than bowing
-    // off the deck between two distant feet.
-    [site.x + site.dirX * DECK_HALF_LENGTH, site.z + site.dirZ * DECK_HALF_LENGTH] as const,
-    [site.x, site.z] as const,
-    [site.x - site.dirX * DECK_HALF_LENGTH, site.z - site.dirZ * DECK_HALF_LENGTH] as const,
-    ...sameSideLeg(best.far, to, toSide),
-  ];
+  const build = (candidate: (typeof candidates)[number]): (readonly [number, number])[] => {
+    const site = candidate.site;
+    return [
+      // The ordinary routers know nothing about the railway, so each sub-leg
+      // goes through the same side-holding pipeline as a whole same-side leg
+      // (measured: the dodgems and hotel spurs each crossed the rail *three*
+      // times before this, and seed 2's station spur crossed twice more at a
+      // pinch even after its main crossing went via a site).
+      ...sameSideLeg(from, candidate.near, fromSide),
+      // The crossing axis, pinned at the deck's edges and centre so the drawn
+      // Catmull-Rom curve runs dead straight over the rail rather than bowing
+      // off the deck between two distant feet.
+      [site.x + site.dirX * DECK_HALF_LENGTH, site.z + site.dirZ * DECK_HALF_LENGTH] as const,
+      [site.x, site.z] as const,
+      [site.x - site.dirX * DECK_HALF_LENGTH, site.z - site.dirZ * DECK_HALF_LENGTH] as const,
+      ...sameSideLeg(candidate.far, to, toSide),
+    ];
+  };
+  // **Backtracks on route QUALITY, not just on collision**: the cheapest
+  // site can leave a sub-leg the ordinary router gives up on (a raw 20 m
+  // diagonal where the castle boxes in every axis-aligned corner — seed 5's
+  // building spur, 2026-08-23), while the next site over routes cleanly.
+  // Try the best few sites and keep the first whose drawn legs stay on
+  // grid axes; if none manage it, keep the least-diagonal offender.
+  let fallback: (readonly [number, number])[] | null = null;
+  let fallbackWorst = Infinity;
+  for (const candidate of candidates.slice(0, 4)) {
+    const points = build(candidate);
+    const worst = longestOffAxisRun(points);
+    if (worst <= MAX_OFF_AXIS_RUN) return points;
+    if (worst < fallbackWorst) {
+      fallbackWorst = worst;
+      fallback = points;
+    }
+  }
+  return fallback ?? build(candidates[0] as (typeof candidates)[number]);
+}
+
+/**
+ * Longest continuous off-axis (diagonal) stretch of a polyline, ignoring
+ * hops that are the railway's own geometry (over/near the corridor — the
+ * crossing axis and any fence-follow run), mirroring the exemption
+ * `test/procgen/invariants.ts`'s `pathsRunOnGridAxes` measures with.
+ */
+const MAX_OFF_AXIS_RUN = 15;
+
+function longestOffAxisRun(points: readonly (readonly [number, number])[]): number {
+  let worst = 0;
+  let runStart: readonly [number, number] | null = null;
+  let runEnd: readonly [number, number] | null = null;
+  const flush = (): void => {
+    if (runStart && runEnd) {
+      worst = Math.max(worst, Math.hypot(runEnd[0] - runStart[0], runEnd[1] - runStart[1]));
+    }
+    runStart = null;
+    runEnd = null;
+  };
+  for (let i = 1; i < points.length; i += 1) {
+    const a = points[i - 1] as readonly [number, number];
+    const b = points[i] as readonly [number, number];
+    const dx = Math.abs(b[0] - a[0]);
+    const dz = Math.abs(b[1] - a[1]);
+    const hop = Math.hypot(dx, dz);
+    const nearRail =
+      distanceToRailCorridor((a[0] + b[0]) / 2, (a[1] + b[1]) / 2) < 8.5;
+    const offAxis = hop > 1e-6 && Math.min(dx, dz) / hop > 0.15 && !nearRail;
+    if (offAxis) {
+      if (!runStart) runStart = a;
+      runEnd = b;
+    } else {
+      flush();
+    }
+  }
+  flush();
+  return worst;
 }
 
 /**
@@ -1056,8 +1112,15 @@ function enforceRailSide(
   points: readonly (readonly [number, number])[],
   side: 1 | -1,
 ): (readonly [number, number])[] {
-  let out = points.map(([x, z]) =>
-    railSideOf(x, z) === side && distanceToRailCorridor(x, z) >= RAIL_CLAMP_DISTANCE - 0.1
+  // A leg's own two ENDPOINTS are destinations and stay exactly where they
+  // are — a station's stand legitimately lives beside the platform, well
+  // inside the corridor clearance, and clamping it moved four connectors'
+  // terminals 2.05 m short of their own station nodes (seeds 2/18,
+  // noPathEndsNowhere). Only the run between the ends is held clear.
+  let out = points.map(([x, z], index) =>
+    index === 0 ||
+    index === points.length - 1 ||
+    (railSideOf(x, z) === side && distanceToRailCorridor(x, z) >= RAIL_CLAMP_DISTANCE - 0.1)
       ? ([x, z] as const)
       : clampPoint(x, z, side),
   );
@@ -1069,6 +1132,9 @@ function enforceRailSide(
       next.push(a);
       const b = out[i + 1];
       if (!b) break;
+      // The final approach to either endpoint is allowed to enter the
+      // corridor band — see the endpoint note above.
+      if (i === 0 || i + 2 === out.length) continue;
       const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
       if (length < 2.5) continue;
       // Does the segment slip across, or run sparsely near the rail?
@@ -1288,7 +1354,13 @@ function buildGraph(): PathGraph {
         points: [
           [0, 54] as const,
           [0, 30] as const,
-          ...detourAroundBlockers([0, 27], nearestCompassPoint(0, 27)).slice(1),
+          // routeLeg, since issue #269's grid rule now genuinely binds this
+          // tail (a re-rolled seed put the ring's compass junction 17 m
+          // diagonally from the corridor mouth): the same axis-aligned
+          // routing every spur uses, entering the ring at its compass
+          // point. The corridor itself ([0,54]->[0,30]) stays exactly as
+          // it always was — the ground the cat-bus arrival choreographs.
+          ...routeLeg([0, 27], nearestCompassPoint(0, 27)).slice(1),
         ],
       },
     },
