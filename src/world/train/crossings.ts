@@ -150,7 +150,13 @@ export function computeCrossings(
           railDistance: site.railDistance,
           pathDirX: site.dirX,
           pathDirZ: site.dirZ,
-          halfGap,
+          // Capped at the width the site was actually proven feasible at —
+          // `halfGap` is also the bridge search's deck-width FLOOR, so a
+          // floor above the proven width would doom a narrow site's search
+          // before it started. A path snapped to a site arrives square, so
+          // the wide-gap-for-oblique-paths reasoning behind the ordinary
+          // 4.5 floor does not apply here.
+          halfGap: Math.min(halfGap, Math.max(3.0, site.halfWidth - 0.5)),
         });
         group = [];
         return;

@@ -73,6 +73,13 @@ export interface CrossingSite {
   /** True when a real bridge provably fits here; false for a deliberate
    * level crossing (the rare fallback). */
   readonly bridge: boolean;
+  /** The corridor half-width this site was proven at. For a bridge site
+   * this is what the measured crossing's `halfGap` is capped to (minus the
+   * probe's own half-stride of slack), so the real search's deck-width
+   * floor never exceeds the width the site was actually proven feasible
+   * at. {@link SITE_HALF_WIDTH} normally; {@link NARROW_HALF_WIDTH} for a
+   * site that only fits a narrower deck. */
+  readonly halfWidth: number;
 }
 
 /**
@@ -96,6 +103,15 @@ export const SITE_RAMP_IDEAL = BRIDGE_RISE / BRIDGE_RAMP_GRADIENT;
  * candidate will actually occupy, plus half a stride of slack.
  */
 export const SITE_HALF_WIDTH = 4.5 + 0.5;
+
+/**
+ * The narrower corridor tried when {@link SITE_HALF_WIDTH} finds nothing —
+ * a deck for a path that arrives square needs barely more than the ribbon
+ * itself, and a whole district with no bridge at all is a far worse
+ * outcome than a slimmer one (seed 2's east: plots, a station and the
+ * boundary between them ruled out every full-width candidate).
+ */
+export const NARROW_HALF_WIDTH = 4.0;
 
 /** Boundary / plot margins for a ramp — the early reservation pass's own
  * figures (`bridgeFootprint.ts`'s `RAMP_BOUNDARY_MARGIN` / `RAMP_PLOT_MARGIN`
@@ -136,12 +152,17 @@ const SITE_SPACING = 24;
 /** Ground corridor a level-crossing site keeps clear past the fence gap on
  * each side — room for the path to arrive square and walk on, nothing
  * more. Short on purpose: this tier exists precisely where long clear runs
- * do not. */
-const LEVEL_REACH = 6;
+ * do not, and it must stay permissive enough to exist wherever a district
+ * genuinely needs a crossing — a level crossing is barely more than a
+ * fence gap, and the pre-plan park opened one wherever a path crossed with
+ * no feasibility test at all. Making this tier too choosy stranded seed
+ * 2's whole east district (8 waypoints, 1 unreachable attraction) the
+ * moment its only bridge site was correctly ruled out. */
+const LEVEL_REACH = 4;
 
 /** Corridor half-width probed for a level-crossing site — the path ribbon
  * plus a walker, not a bridge deck. */
-const LEVEL_HALF_WIDTH = 2.6;
+const LEVEL_HALF_WIDTH = 2.0;
 
 const scratch = new Vector3();
 const sideTangent = new Vector3();
@@ -257,32 +278,35 @@ function bridgeCandidateAt(railDistance: number): Candidate | null {
   route.tangentAt(railDistance, tangent);
   const [perpX, perpZ] = sidePlusDirection(tangent);
 
-  for (const offset of ANGLE_OFFSETS) {
-    const cos = Math.cos(offset);
-    const sin = Math.sin(offset);
-    const dirX = perpX * cos + perpZ * sin;
-    const dirZ = -perpX * sin + perpZ * cos;
-    const { pos, neg, deckClear } = probeReach(
-      point,
-      dirX,
-      dirZ,
-      SITE_HALF_WIDTH,
-      SITE_RAMP_IDEAL,
-      SITE_BOUNDARY_MARGIN,
-      SITE_PLOT_MARGIN,
-    );
-    if (!deckClear || pos < SITE_RAMP_FLOOR || neg < SITE_RAMP_FLOOR) continue;
-    return {
-      railDistance,
-      x: point.x,
-      z: point.z,
-      dirX,
-      dirZ,
-      rampReachPos: pos,
-      rampReachNeg: neg,
-      bridge: true,
-      obliqueness: Math.abs(offset),
-    };
+  for (const halfWidth of [SITE_HALF_WIDTH, NARROW_HALF_WIDTH]) {
+    for (const offset of ANGLE_OFFSETS) {
+      const cos = Math.cos(offset);
+      const sin = Math.sin(offset);
+      const dirX = perpX * cos + perpZ * sin;
+      const dirZ = -perpX * sin + perpZ * cos;
+      const { pos, neg, deckClear } = probeReach(
+        point,
+        dirX,
+        dirZ,
+        halfWidth,
+        SITE_RAMP_IDEAL,
+        SITE_BOUNDARY_MARGIN,
+        SITE_PLOT_MARGIN,
+      );
+      if (!deckClear || pos < SITE_RAMP_FLOOR || neg < SITE_RAMP_FLOOR) continue;
+      return {
+        railDistance,
+        x: point.x,
+        z: point.z,
+        dirX,
+        dirZ,
+        rampReachPos: pos,
+        rampReachNeg: neg,
+        bridge: true,
+        halfWidth,
+        obliqueness: Math.abs(offset) + (halfWidth < SITE_HALF_WIDTH ? 0.01 : 0),
+      };
+    }
   }
   return null;
 }
@@ -301,8 +325,8 @@ function levelCandidateAt(railDistance: number): Candidate | null {
     dirZ,
     LEVEL_HALF_WIDTH,
     LEVEL_REACH,
-    SITE_BOUNDARY_MARGIN,
     1.0,
+    0.5,
   );
   if (!deckClear || pos < LEVEL_REACH - 0.5 || neg < LEVEL_REACH - 0.5) return null;
   return {
@@ -314,6 +338,7 @@ function levelCandidateAt(railDistance: number): Candidate | null {
     rampReachPos: pos,
     rampReachNeg: neg,
     bridge: false,
+    halfWidth: LEVEL_HALF_WIDTH,
     obliqueness: 0,
   };
 }
