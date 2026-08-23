@@ -23,50 +23,58 @@ Plus: riders sit; `BRIDGE_RISE` = 4.25 m (real commits on bridge-backtrack,
 
 ## State (updated every commit)
 
-- **Done**: merged `origin/bridge-backtrack` (both riders sit, BRIDGE_RISE
-  4.25, bridge backtracking search, invariants) and `origin/main` into
-  `park-and-bridges`. Conflicts: import-only in `test/procgen/invariants.ts`
-  (kept both sides' imports, dropped `SEAT_Y` — riders-sit removed its use).
-  Cross-branch break fixed: `paths.ts` imported `FENCE_OFFSET` from
-  `train/fence`; bridge-backtrack moved it to `train/clearance`. tsc clean.
-- **Measured on merged tree (canonical seed)**: bridges built 0/7,
-  `check:park` fails `poi.stranded: 35` (was 29 on grid-aligned-park alone,
-  5 on bridge-backtrack seed 2). All 7 crossings fall back to level
-  crossings.
-- **Root-cause in progress for poi.stranded**: the stranded nodes form
-  pockets east of the park (x 42–67, z 29–60; x 55–59, z −22…−44; north
-  strip x 17–42, z 54–60) — beyond the railway, connected internally but cut
-  from the main graph. Direct probe of the cut edges finds them blocked by
-  the **rail fence's own walls standing inside what should be an open
-  level-crossing gap**: crossing at railDistance 330.1 (halfGap 7.24 →
-  open [322.9, 337.3]) has fence flank walls at railD 322–333 and the
-  centre-line TRACK_CLEARANCE wall likewise (site 2: crossing railD 116.7,
-  gap [108.2, 125.2], cap found at 125.1 but blocked chord passes the gap
-  edge/cap). Suspect: fence's open-interval unwrap/merge logic vs these
-  crossing positions, OR fence built from different crossing list than
-  `ParkTrain.fallbackCrossings`. Instrumentation added locally
-  (`LGP_DEBUG_FENCE`, uncommitted) — NOTE: `quietly()` in park-harness
-  swallows console.warn, use `process.stdout.write` for debug prints.
-- Debug helpers (uncommitted, not for merge): `scripts/debug-park.mts`,
-  `scripts/debug-stranded.mts`, `scripts/debug-crossings.mts`,
-  `scripts/debug-fence.mts`.
+- Merged `origin/bridge-backtrack` + `origin/main` into this branch;
+  cross-branch `FENCE_OFFSET` import fixed; tsc clean throughout.
+- **The joint solve is wired in and working on canonical** (commit
+  6616d56):
+  - `src/world/train/crossingPlan.ts` — NEW. At module load (rail + plots
+    solved, before any path drawn) it finds every loop point where a real
+    bridge provably fits (deck + walkable ramp BOTH sides at the real
+    acceptance floor + 1 m slack, vs boundary/plots/rail-corridor/station
+    windows). Tier 2 = deliberate square level-crossing sites where a whole
+    stretch is unbridgeable. Exports `CROSSING_SITES`,
+    `LEVEL_CROSSING_SITES`, `railSideOf`, `LEVEL_CROSSING_PENALTY`.
+  - `paths.ts` `routeLeg()` — any leg straddling the railway routes via the
+    best site (bridge sites preferred by a 45 m penalty on level ones);
+    crossing axis pinned at deck edges + centre; sub-legs and same-side
+    legs clamped to their side (`clampToRailSide`) because the routers are
+    not rail-aware (corners hopped the rail and back — measured 3
+    crossings on one spur, and one connector crossed INSIDE a station
+    window). Cross-rail interconnect pairs skipped.
+  - `crossings.ts` — a crossing is now a side FLIP within one drawn run
+    (per-run detection, RUN_BREAK=3), not a cloud of near-rail touches
+    (touch-clouds smeared halfGap to the 14 m cap and minted a phantom
+    crossing from two different paths hugging opposite fence sides).
+    Measured crossings SNAP to the planned site's exact frame
+    (SITE_SNAP_TOLERANCE=8) — frame jitter alone flipped feasible sites
+    into fallbacks via the rail-corridor margin test.
+  - `bridgeFootprint.ts` — conservative reservation reserves the FULL
+    ideal ramp run (truncation only ever removed protection; a lamp stood
+    8 m down a ramp the real pass needed — the old handoff's open
+    question, closed). `REAL_PROBE_RADIUS` exported; `LGP_DEBUG_BRIDGE=1`
+    narrates every rejected candidate. `LampPosts.ts`
+    `LAMP_BRIDGE_MARGIN` now derives from it (was 0.2 m short).
+- **Canonical measured: 4 real bridges + 2 level crossings** (hotel strip
+  genuinely unbridgeable — boundary hugs the rail; gate walk's +ramp
+  blocked by entrance furniture at ~(-4.1,44.7) — worth a later look).
+  Was 0 bridges / 7 levels. **check:park EXIT 0, 19/19 attractions,
+  267/267 waypoints — poi.stranded (was 35/29) FIXED.** Root causes of
+  stranding: (a) a crossing landed inside a station's stationRun-sealed
+  window, (b) the touch-smear swallowed the gate crossing's fence gap.
+- Debug helpers (uncommitted): scripts/debug-{park,stranded,crossings,
+  fence,cutedges,route-crossings,sites,site-why,site-vs-real,bridge-why,
+  wall-owner}.mts. `quietly()` swallows console.warn — use
+  process.stdout.write in debug scripts.
 
-## Plan
+## Next
 
-1. Root-cause + fix the fence-vs-crossing mismatch (this is likely most of
-   poi.stranded, and it is exactly the "two definitions of one thing"
-   disease).
-2. Make bridge feasibility a first-class constraint in the joint solve:
-   when paths choose where to cross the railway, the solver must verify a
-   real bridge (ramp clearance vs everything placed/reserved so far) fits
-   there, and backtrack to a different crossing point / street shape if
-   not; level crossing only as rare last resort.
-3. Get real bridges on a majority of crossings on canonical, seed 2,
-   seed 18. Report real numbers.
-4. Extend `test/procgen/invariants.ts` red-then-green for whatever changes.
-5. Full verify: tsc, `npm run build` (unpiped exit code), `test:procgen`
-   all 5 seeds, real-browser QA with screenshots (top-down grid + walk two
-   bridges).
+1. Measure seeds 2 and 18: bridge counts + check:park. Tune if needed.
+2. test:procgen all 5 seeds; extend invariants (red-then-green):
+   crossings-at-sites-only + station-clear; majority-bridges; keep
+   pathsRunOnGridAxes happy with the (legitimately diagonal) crossing
+   axes — may need a measured exemption for runs over a bridge deck/ramp.
+3. Full npm run build (unpiped). 4. Browser QA + screenshots (top-down
+   grid, walk two bridges). 5. Update PR #286.
 
 ## Numbers to beat / reproduce
 
