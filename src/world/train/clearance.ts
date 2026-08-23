@@ -152,3 +152,13 @@ export const FENCE_OFFSET = 2.0;
  * `bridges.ts`'s header for the full mechanism).
  */
 export const FENCE_SEAM_MARGIN = 0.18;
+
+/**
+ * Half-length of a station's open fence gap along the loop — the stretch
+ * `fence.ts` leaves unfenced on the platform side and seals on the far
+ * side (`stationRun`). Lives here, in the leaf module, so seed-sensitive
+ * test files can read it without a static import that reaches
+ * `parkManifest` (fence.ts pulls `route.ts`, which does) — the same
+ * reasoning as every other constant in this file.
+ */
+export const STATION_GAP = 6.5;

@@ -93,7 +93,7 @@ import {
   CARRIAGE_BODY_HALF_WIDTH,
   LOCO_BODY_TOP_Y,
 } from '../../src/world/train/trainDimensions.ts';
-import { RIDER_HEADROOM, TRAIN_CLEARANCE_Y } from '../../src/world/train/clearance.ts';
+import { RIDER_HEADROOM, STATION_GAP, TRAIN_CLEARANCE_Y } from '../../src/world/train/clearance.ts';
 // A leaf module (imports nothing), so it cannot pin the park's seed the way a
 // static import of `train/route.ts` would — see that constant's own note.
 import { TRAIN_MIN_TURN_RADIUS } from '../../src/world/train/turning.ts';
@@ -4375,6 +4375,79 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
 };
 
 /**
+ * **The railway is crossed on purpose, and mostly on bridges.**
+ *
+ * Jim, 23 August 2026: the park is designed around the bridge constraints —
+ * `crossingPlan.ts` decides, before a single path is drawn, where the loop
+ * can genuinely take a bridge (or, rarely, a deliberate level crossing),
+ * and `paths.ts` routes every rail-crossing leg through those sites. This
+ * measures the two consequences that matter on the *built* park:
+ *
+ * 1. **No crossing's fence gap overlaps a station's sealed window.** The
+ *    far side of every platform is fenced shut (`fence.ts`'s `stationRun`),
+ *    so a crossing inside that window is a paved route walking into a wall
+ *    — exactly what stranded 6 waypoints on the canonical seed before the
+ *    crossing plan existed (a spur crossed at railDistance 330.1, 3.6 m
+ *    from a platform).
+ * 2. **Real bridges are the rule, level crossings the exception**
+ *    (Decision 8): at least as many crossings carry a real, built bridge
+ *    as fall back to a level crossing, and — whenever the park has any
+ *    crossing at all — at least one real bridge exists. The second clause
+ *    is what keeps this whole invariant honest: with zero bridges anywhere
+ *    every per-bridge check above passes vacuously (the "check that cannot
+ *    fail" trap), which is precisely the state the three required seeds
+ *    were in (0/7, 0/7, 0/5) before the plan-first rework.
+ *
+ * Thresholds come from the built world (`facts.world.train`) and the
+ * fence's own `STATION_GAP` (a leaf-module constant), never from
+ * `crossingPlan.ts` itself — importing the plan would both pin the seed
+ * (it solves against `PARK_LAYOUT` at module load) and re-measure the
+ * rules instead of the park.
+ */
+const crossingsArePlannedAndMostlyBridged: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const train = facts.world.train;
+  const route = train.route;
+  const crossings = train.crossings;
+  const fallbacks = train.fallbackCrossings;
+
+  for (const crossing of crossings) {
+    for (const station of train.stations) {
+      const along = Math.abs(
+        route.wrap(crossing.railDistance - station.distance + route.length / 2) - route.length / 2,
+      );
+      const needed = STATION_GAP + crossing.halfGap;
+      if (along < needed) {
+        complaints.push(
+          `the crossing at (${fmt([crossing.x, crossing.z])}) opens its fence gap ` +
+            `${along.toFixed(1)} m along the loop from a station platform — its ` +
+            `${crossing.halfGap.toFixed(1)} m half-gap overlaps the station's sealed ` +
+            `±${STATION_GAP} m window, so the far side of this crossing is a fenced wall`,
+        );
+      }
+    }
+  }
+
+  if (crossings.length > 0) {
+    const built = train.bridges.length;
+    if (built === 0) {
+      complaints.push(
+        `the park has ${crossings.length} railway crossing(s) and not one real bridge — ` +
+          'every per-bridge check above is passing vacuously',
+      );
+    } else if (built < fallbacks.length) {
+      complaints.push(
+        `only ${built} of ${crossings.length} railway crossings carry a real bridge ` +
+          `(${fallbacks.length} fell back to level crossings) — Decision 8 wants bridges ` +
+          'the rule and level crossings the rare exception',
+      );
+    }
+  }
+
+  return complaints;
+};
+
+/**
  * **Is the cat bus actually in the park?**
  *
  * This is the invariant the repo did not have, and its absence is the whole
@@ -6425,6 +6498,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     railwayClearanceCoversTheTrainAndItsRiders,
   ],
   ['every railway crossing has a bridge you can walk to, onto and across', everyBridgeIsWalkableAndReachable],
+  [
+    'railway crossings are planned — station-clear, and mostly real bridges',
+    crossingsArePlannedAndMostlyBridged,
+  ],
   ['the cat bus is actually in the park, at the gate, with everyone aboard', theCatBusIsInThePark],
   ['every child fits in the cat bus seat they are sitting in', childrenFitTheSeatsTheySitIn],
   ['the boundary wall has a gate you can actually walk through', theGateIsAHoleInTheWall],

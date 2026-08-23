@@ -11,7 +11,7 @@ import type { TrainRoute } from './route';
 import { TRACK_CLEARANCE } from './route';
 import type { Bridge } from './bridges';
 import type { LevelCrossing } from './crossings';
-import { FENCE_OFFSET, FENCE_SEAM_MARGIN } from './clearance';
+import { FENCE_OFFSET, FENCE_SEAM_MARGIN, STATION_GAP } from './clearance';
 import { PLAYER_RADIUS } from '../../core/constants';
 import type { CollisionWorld } from '../Collision';
 import { PALETTE } from '../../core/palette';
@@ -37,10 +37,9 @@ import { terrainHeight } from '../terrain';
  */
 
 const STEP = 2.4;
-/** Fence gap half-length around a station, along the loop. Exported so
- * `check:park` can subtract the *declared* open stretches and hold the rest
- * of the loop to zero holes. */
-export const STATION_GAP = 6.5;
+// Re-exported so existing importers keep one obvious home for it; the value
+// itself lives in the leaf module (see clearance.ts's own note).
+export { STATION_GAP } from './clearance';
 
 interface StationSpan {
   readonly distance: number;
@@ -210,6 +209,14 @@ export function buildRailFence(
     cursor = Math.max(cursor, span.to);
   }
   if (cursor < length - 1) closed.push({ from: cursor, to: length });
+  if ((globalThis as { process?: { env?: Record<string, string> } }).process?.env?.['LGP_DEBUG_FENCE']) {
+    const say = (s: string) =>
+      (globalThis as unknown as { process: { stdout: { write: (s: string) => void } } }).process.stdout.write(s + '\n');
+    say('fence seam ' + seam.toFixed(1));
+    say('fence open ' + open.map((i) => `[${i.from.toFixed(1)},${i.to.toFixed(1)}]`).join(' '));
+    say('fence merged(unwrapped) ' + merged.map((i) => `[${i.from.toFixed(1)},${i.to.toFixed(1)}]`).join(' '));
+    say('fence closed(unwrapped) ' + closed.map((i) => `[${i.from.toFixed(1)},${i.to.toFixed(1)}]`).join(' '));
+  }
 
   // --- 2. build each sealed box -------------------------------------------
   const point = new Vector3();

@@ -11,9 +11,13 @@ import { PALETTE } from '../core/palette';
 import { pathTexture } from '../core/textures';
 import { terrainHeight, terrainNormal } from './terrain';
 import { ANCHORS } from './anchors';
-import { PARK_LAYOUT, edgeDistanceAlong } from './parkLayout';
+import { PARK_LAYOUT, RING_RADIUS, edgeDistanceAlong } from './parkLayout';
 import { PARK_BOUNDARY } from './boundary';
-import { TRAIN_PLAN, distanceToRailCorridor } from './train/plan';
+import {
+  TRAIN_PLAN,
+  distanceToRailCorridor,
+  RAIL_CORRIDOR_CLEARANCE as RAIL_CORRIDOR_CLEARANCE_PLAN,
+} from './train/plan';
 import { STATION_GAP } from './train/fence';
 import { FENCE_OFFSET } from './train/clearance';
 import { DECK_HALF_LENGTH } from './train/bridgeFootprint';
@@ -206,17 +210,7 @@ const BLOCKERS: readonly Blocker[] = [
     .map((foot) => ({ x: foot.x, z: foot.z, radius: foot.radius + ARCH_FOOT_MARGIN, kind: 'archFoot' as const })),
 ];
 
-/** Distance from `(px,pz)` along unit `(dx,dz)` to `blocker`, or Infinity. */
-function rayToBlocker(px: number, pz: number, dx: number, dz: number, b: Blocker): number {
-  const ex = b.x - px;
-  const ez = b.z - pz;
-  const proj = ex * dx + ez * dz;
-  if (proj <= 0) return Infinity;
-  const perp2 = ex * ex + ez * ez - proj * proj;
-  const r2 = b.radius * b.radius;
-  if (perp2 >= r2) return Infinity;
-  return proj - Math.sqrt(r2 - perp2);
-}
+
 
 /**
  * The ring road: **a genuine smooth circle round the plaza, not a grid loop**
@@ -275,48 +269,53 @@ function rayToBlocker(px: number, pz: number, dx: number, dz: number, b: Blocker
  * simplify.
  */
 function solveRing(): (readonly [number, number])[] {
+  // A true, constant-radius circle — nothing here reacts to plots any
+  // more, because the layout solver now keeps every plot out of the ring's
+  // own annulus (`parkLayout.ts`'s ring rule): the street constrains the
+  // buildings, not the other way round. 32 bearings is plenty for the
+  // Catmull-Rom ribbon to read as a smooth circle.
   const bearings = 32;
-  const low = PLAZA.radius + 4.5;
-  const highCap = 30;
-  const profile: number[] = [];
-  for (let i = 0; i < bearings; i += 1) {
-    const angle = (i / bearings) * TAU_PATH;
-    const dx = Math.cos(angle);
-    const dz = Math.sin(angle);
-    let high = highCap;
-    for (const b of BLOCKERS) high = Math.min(high, rayToBlocker(PLAZA.x, PLAZA.z, dx, dz, b));
-    profile.push(Math.max(low, Math.min(high - 1.2, low + 0.62 * (high - low))));
-  }
-  // Laplacian relax, re-clamped each pass so smoothing never re-enters a plot.
-  for (let pass = 0; pass < 60; pass += 1) {
-    for (let i = 0; i < bearings; i += 1) {
-      const prev = profile[(i + bearings - 1) % bearings] as number;
-      const next = profile[(i + 1) % bearings] as number;
-      const angle = (i / bearings) * TAU_PATH;
-      const dx = Math.cos(angle);
-      const dz = Math.sin(angle);
-      let high = highCap;
-      for (const b of BLOCKERS) high = Math.min(high, rayToBlocker(PLAZA.x, PLAZA.z, dx, dz, b));
-      const target = (prev + next) / 2;
-      profile[i] = Math.max(low, Math.min(high - 1.2, ((profile[i] as number) + target) / 2));
-    }
-  }
   const points: (readonly [number, number])[] = [];
-  // Every bearing becomes a control point of the ribbon's Catmull-Rom spline
-  // directly — no axis-alignment, no simplification. See this function's own
-  // comment for why round 3 tried, then reverted, collapsing this into one
-  // fixed radius: it strands scenery a smooth variable radius does not.
   for (let i = 0; i < bearings; i += 1) {
     const angle = (i / bearings) * TAU_PATH;
     points.push([
-      PLAZA.x + Math.cos(angle) * (profile[i] as number),
-      PLAZA.z + Math.sin(angle) * (profile[i] as number),
+      PLAZA.x + Math.cos(angle) * RING_RADIUS,
+      PLAZA.z + Math.sin(angle) * RING_RADIUS,
     ]);
   }
   return points;
 }
 
+
 const TAU_PATH = Math.PI * 2;
+
+/**
+ * **The statue ring's four junctions — compass points, and only these**
+ * (issue #269, Jim: "exactly 4 connections at compass points"). Every leg
+ * that joins the ring — the gate approach, the fountain approach, every
+ * spur that branches off the backbone — does so at one of these four, so
+ * the circle reads as a deliberate landmark with four gateways rather than
+ * a loop nibbled at from every direction.
+ */
+const RING_COMPASS_POINTS: readonly (readonly [number, number])[] = [
+  [PLAZA.x + RING_RADIUS, PLAZA.z],
+  [PLAZA.x - RING_RADIUS, PLAZA.z],
+  [PLAZA.x, PLAZA.z + RING_RADIUS],
+  [PLAZA.x, PLAZA.z - RING_RADIUS],
+];
+
+function nearestCompassPoint(x: number, z: number): readonly [number, number] {
+  let best = RING_COMPASS_POINTS[0] as readonly [number, number];
+  let bestDistance = Infinity;
+  for (const point of RING_COMPASS_POINTS) {
+    const d = Math.hypot(point[0] - x, point[1] - z);
+    if (d < bestDistance) {
+      bestDistance = d;
+      best = point;
+    }
+  }
+  return best;
+}
 
 /**
  * Extra clearance an axis-aligned corner or leg keeps beyond a blocker's own
@@ -951,19 +950,78 @@ function sameSideLeg(
   from: readonly [number, number],
   to: readonly [number, number],
   side: 1 | -1,
+  allowDoubleCrossing = true,
 ): (readonly [number, number])[] {
   const direct = enforceRailSide(manhattanRoute(from, to), side);
   if (!polylineCrossesRail(direct)) return direct;
-  return fenceFollowRoute(from, to, side);
+  return fenceFollowRoute(from, to, side, allowDoubleCrossing);
 }
 
 /**
- * How far a clamped point stands from the rail centre line: past the fence
- * (`FENCE_OFFSET`) with a walker's stride of daylight, and just past
- * `crossings.ts`'s own `TOUCH_DISTANCE` (3.2) so a clamped run does not
- * smear the measured crossing clusters it was moved to stay out of.
+ * Serve a same-side leg by crossing the railway twice — in through one
+ * planned site, across the loop's other side (the park's main body, always
+ * walkable), back out through another. The last resort for a pocket whose
+ * own side pinches out against the boundary in both directions along the
+ * fence: the ground the leg needs simply does not exist on its own side,
+ * and this is exactly what the crossings are FOR (seed 2: the waterFight
+ * anchor's strip narrowed under a ribbon's width both ways, and its walk
+ * measurably stopped 21 m short of the plot).
  */
-const RAIL_CLAMP_DISTANCE = 3.5;
+function doubleCrossingLeg(
+  from: readonly [number, number],
+  to: readonly [number, number],
+  side: 1 | -1,
+): (readonly [number, number])[] | null {
+  const sites = [...CROSSING_SITES, ...LEVEL_CROSSING_SITES];
+  if (sites.length < 2) return null;
+  const pick = (x: number, z: number, not: CrossingSite | null): CrossingSite | null => {
+    let best: CrossingSite | null = null;
+    let bestCost = Infinity;
+    for (const site of sites) {
+      if (site === not) continue;
+      const cost =
+        Math.hypot(site.x - x, site.z - z) + (site.bridge ? 0 : LEVEL_CROSSING_PENALTY);
+      if (cost < bestCost) {
+        bestCost = cost;
+        best = site;
+      }
+    }
+    return best;
+  };
+  const siteIn = pick(from[0], from[1], null);
+  const siteOut = pick(to[0], to[1], siteIn);
+  if (!siteIn || !siteOut) return null;
+  const inner: 1 | -1 = side === 1 ? -1 : 1;
+  const feetIn = crossingFeet(siteIn);
+  const feetOut = crossingFeet(siteOut);
+  const nearIn = side === 1 ? feetIn.plus : feetIn.minus;
+  const farIn = side === 1 ? feetIn.minus : feetIn.plus;
+  const nearOut = side === 1 ? feetOut.minus : feetOut.plus;
+  const farOut = side === 1 ? feetOut.plus : feetOut.minus;
+  const axis = (site: CrossingSite): (readonly [number, number])[] => [
+    [site.x + site.dirX * DECK_HALF_LENGTH, site.z + site.dirZ * DECK_HALF_LENGTH] as const,
+    [site.x, site.z] as const,
+    [site.x - site.dirX * DECK_HALF_LENGTH, site.z - site.dirZ * DECK_HALF_LENGTH] as const,
+  ];
+  return [
+    ...sameSideLeg(from, nearIn, side, false),
+    ...axis(siteIn),
+    ...sameSideLeg(farIn, nearOut, inner, false),
+    ...axis(siteOut),
+    ...sameSideLeg(farOut, to, side, false),
+  ];
+}
+
+/**
+ * How far a clamped point stands from the rail centre line —
+ * `RAIL_CORRIDOR_CLEARANCE` (`train/plan.ts`), the same "how far must a
+ * structure stand off the rail" answer everything else uses: far enough
+ * that the ribbon's own paved edge (half-width + kerb, up to 2.15 m for a
+ * spur) stays outside the fence line, and past `crossings.ts`'s
+ * `TOUCH_DISTANCE` so a clamped run does not smear the measured crossings
+ * it was moved to stay out of.
+ */
+const RAIL_CLAMP_DISTANCE = RAIL_CORRIDOR_CLEARANCE_PLAN;
 
 /** One point pulled to `side` of the rail at {@link RAIL_CLAMP_DISTANCE}. */
 function clampPoint(x: number, z: number, side: 1 | -1): readonly [number, number] {
@@ -999,7 +1057,9 @@ function enforceRailSide(
   side: 1 | -1,
 ): (readonly [number, number])[] {
   let out = points.map(([x, z]) =>
-    railSideOf(x, z) === side ? ([x, z] as const) : clampPoint(x, z, side),
+    railSideOf(x, z) === side && distanceToRailCorridor(x, z) >= RAIL_CLAMP_DISTANCE - 0.1
+      ? ([x, z] as const)
+      : clampPoint(x, z, side),
   );
   for (let pass = 0; pass < 6; pass += 1) {
     let changed = false;
@@ -1018,7 +1078,13 @@ function enforceRailSide(
       for (let s = 1; s < steps; s += 1) {
         const x = a[0] + ((b[0] - a[0]) * s) / steps;
         const z = a[1] + ((b[1] - a[1]) * s) / steps;
-        if (railSideOf(x, z) !== side) slips = true;
+        // "Slips" now covers converging as well as crossing: a run that
+        // stays on its own side while drifting inside the corridor is a
+        // path drawn down the middle of the railway (the canonical seed's
+        // waterFight spur ran 20 m dead along the centre line, side never
+        // changing, and its waypoints spawned inside the fence box).
+        if (railSideOf(x, z) !== side || distanceToRailCorridor(x, z) < RAIL_CLAMP_DISTANCE - 0.1)
+          slips = true;
         if (distanceToRailCorridor(x, z) < RAIL_CLAMP_DISTANCE + 2.5) nearRail = true;
       }
       if (slips || (nearRail && length > 4)) {
@@ -1071,21 +1137,52 @@ function fenceFollowRoute(
   from: readonly [number, number],
   to: readonly [number, number],
   side: 1 | -1,
+  allowDouble = true,
 ): (readonly [number, number])[] {
   const route = TRAIN_PLAN.route;
   const dFrom = route.distanceNear(from[0], from[1]);
   const dTo = route.distanceNear(to[0], to[1]);
   const forward = route.wrap(dTo - dFrom);
-  const signed = forward <= route.length / 2 ? forward : forward - route.length;
-  const steps = Math.max(1, Math.ceil(Math.abs(signed) / 3));
-  const points: (readonly [number, number])[] = [from];
-  for (let i = 0; i <= steps; i += 1) {
-    const d = route.wrap(dFrom + (signed * i) / steps);
-    const p = route.pointAt(d, clampScratch);
-    points.push(clampPoint(p.x, p.z, side));
+
+  const walkOf = (signed: number): (readonly [number, number])[] => {
+    const steps = Math.max(1, Math.ceil(Math.abs(signed) / 3));
+    const points: (readonly [number, number])[] = [from];
+    for (let i = 0; i <= steps; i += 1) {
+      const d = route.wrap(dFrom + (signed * i) / steps);
+      const p = route.pointAt(d, clampScratch);
+      points.push(clampPoint(p.x, p.z, side));
+    }
+    points.push(to);
+    return points;
+  };
+  // How much of a candidate walk is genuinely standable ground: a fence
+  // path squeezed against the boundary (the strips between rail and rim
+  // pinch below a ribbon's width in places) is a route whose waypoints
+  // spawn inside the wall, which is worse than a longer way round.
+  const blockedCount = (points: readonly (readonly [number, number])[]): number => {
+    let blocked = 0;
+    for (const [x, z] of points) {
+      if (PARK_BOUNDARY.distanceToEdge(x, z) < PLAYER_RADIUS + 1.3) blocked += 1;
+    }
+    return blocked;
+  };
+  const short = forward <= route.length / 2 ? forward : forward - route.length;
+  const long = short > 0 ? short - route.length : short + route.length;
+  const shortWalk = walkOf(short);
+  const shortBlocked = blockedCount(shortWalk);
+  if (shortBlocked === 0) return enforceRailSide(shortWalk, side);
+  const longWalk = walkOf(long);
+  const longBlocked = blockedCount(longWalk);
+  if (longBlocked === 0) return enforceRailSide(longWalk, side);
+  // Both ways round pinch out against the boundary: the ground this leg
+  // needs does not exist on its own side. Cross the railway twice instead
+  // — through planned sites, over the loop's other side — rather than
+  // draw a ribbon through the boundary wall (see {@link doubleCrossingLeg}).
+  if (allowDouble) {
+    const doubled = doubleCrossingLeg(from, to, side);
+    if (doubled) return doubled;
   }
-  points.push(to);
-  return enforceRailSide(points, side);
+  return enforceRailSide(longBlocked < shortBlocked ? longWalk : shortWalk, side);
 }
 
 /** Drops interior points that lie on the same straight run as their
@@ -1107,46 +1204,7 @@ function collapseCollinear(points: readonly (readonly [number, number])[]): (rea
   return out;
 }
 
-/**
- * Nearest point on the ring **as drawn** — projected onto its edges, not just
- * snapped to one of its own vertices.
- *
- * {@link solveRing} now emits 32 vertices sitting exactly on a true circle
- * (round 3 of issue #269, 18 August 2026), close enough together that vertex-
- * snapping alone would already be accurate here — but this function predates
- * that (it was written when the ring's axis-aligned simplification, issue
- * #319, could leave as few as ~12 long straight runs with a vertex 5+ metres
- * from a connector's own query point) and segment projection is free either
- * way, so it stays the general, always-correct answer rather than something
- * that has to be re-justified every time the ring's own vertex density
- * changes. Projecting onto the ring's segments keeps this function's answer
- * accurate regardless of how few (or many) vertices the ring polygon has.
- */
-function nearestRingPoint(
-  ring: readonly (readonly [number, number])[],
-  x: number,
-  z: number,
-): readonly [number, number] {
-  let best = ring[0] as readonly [number, number];
-  let bestDistance = Infinity;
-  const n = ring.length;
-  for (let i = 0; i < n; i += 1) {
-    const [ax, az] = ring[i] as readonly [number, number];
-    const [bx, bz] = ring[(i + 1) % n] as readonly [number, number];
-    const dx = bx - ax;
-    const dz = bz - az;
-    const lengthSq = dx * dx + dz * dz;
-    const t = lengthSq > 0 ? Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / lengthSq)) : 0;
-    const px = ax + dx * t;
-    const pz = az + dz * t;
-    const distance = Math.hypot(x - px, z - pz);
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      best = [px, pz];
-    }
-  }
-  return best;
-}
+
 
 /**
  * The network as a *graph* first: named nodes (every place a child might be
@@ -1230,7 +1288,7 @@ function buildGraph(): PathGraph {
         points: [
           [0, 54] as const,
           [0, 30] as const,
-          ...detourAroundBlockers([0, 27], nearestRingPoint(ringPoints, 0, 27)).slice(1),
+          ...detourAroundBlockers([0, 27], nearestCompassPoint(0, 27)).slice(1),
         ],
       },
     },
@@ -1245,7 +1303,7 @@ function buildGraph(): PathGraph {
         width: 3.0,
         closed: false,
         points: detourAroundBlockers(
-          nearestRingPoint(ringPoints, PLAZA.x, PLAZA.z + PLAZA.radius + 4),
+          nearestCompassPoint(PLAZA.x, PLAZA.z + PLAZA.radius + 4),
           [PLAZA.x, PLAZA.z + PLAZA.radius - 1],
         ),
       },
@@ -1290,7 +1348,7 @@ function buildGraph(): PathGraph {
     // as good a trunk as the ring. Starting from the nearest ring vertex sent
     // the west station's spur on a 45 m wander from (-8.7, 5) around three
     // booths; from the sky cruiser's spur it is a 21 m walk.
-    const start = bestBranchPoint(network(), ringPoints, ex, ez);
+    const start = bestBranchPoint(network(), ex, ez);
     const l = Math.hypot(towardX - ex, towardZ - ez);
     // `past` used to walk a flat 2 m towards the destination regardless of
     // how far the doormat actually stands from the plot's own edge. For a
@@ -1424,7 +1482,7 @@ function buildGraph(): PathGraph {
     // Via the lead — past the platform's empty end, stepped into the park —
     // so the incoming leg can arrive from any bearing without paving through
     // the canopy posts on the furnished half (see `PlannedStation.leadX`).
-    const start = bestBranchPoint(network(), ringPoints, station.leadX, station.leadZ);
+    const start = bestBranchPoint(network(), station.leadX, station.leadZ);
     edges.push({
       from: 'ring',
       to: id,
@@ -2377,7 +2435,6 @@ function polylineLength(points: readonly (readonly [number, number])[]): number 
  */
 function bestBranchPoint(
   routes: readonly RouteDefinition[],
-  ringPoints: readonly (readonly [number, number])[],
   x: number,
   z: number,
 ): readonly [number, number] {
@@ -2388,7 +2445,9 @@ function bestBranchPoint(
   }
   // The ring is always a legal place to start from, and it is the fallback if
   // no paved route offered a junction outside every plot.
-  allCandidates.push(nearestRingPoint(ringPoints, x, z));
+  // The ring's own candidate is its nearest COMPASS junction, never an
+  // arbitrary point on the circle — Decision: exactly 4 ring connections.
+  allCandidates.push(nearestCompassPoint(x, z));
 
   // **Branch from the destination's own side of the railway whenever the
   // network already reaches it.** The first spur to a far-side district
