@@ -819,9 +819,10 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
     for (const fraction of SHIFT_FRACTIONS) {
       const shift = Math.max(-maxShift, Math.min(maxShift, fraction * halfAcross));
       // The crossing's own touch point — where the real, drawn path meets
-      // the rail — must stay genuinely inside the shifted deck, not just
-      // past its exact edge.
-      if (Math.abs(shift) > halfAcross - MIN_DECK_HALF_WIDTH) continue;
+      // the rail — must stay genuinely STANDABLE on the shifted deck (not
+      // merely inside the masonry): a shift past the walkable half-width
+      // parks the parapet on the path's own centreline.
+      if (Math.abs(shift) > Math.max(0, walkHalfFor(crossing) - 0.1)) continue;
       if (!deckClears(shift)) {
         debugBridge?.(
           `crossing railD=${crossing.railDistance.toFixed(1)} w=${halfAcross.toFixed(1)} shift=${shift.toFixed(1)}: deck blocked`,
@@ -1002,11 +1003,7 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
     const rampRunPos = rampReach(1);
     const rampRunNeg = rampReach(-1);
     const roadHalf = crossing.pathHalfWidth;
-    // See the interface's own doc: `covers` promises standability, and the
-    // parapet's collision reach (its wall half-thickness plus the walker's
-    // own body) eats exactly `PLAYER_RADIUS` of the paved width from each
-    // side, measured from the wall's inner face.
-    const walkHalf = Math.max(roadHalf - PLAYER_RADIUS, MIN_DECK_HALF_WIDTH - PLAYER_RADIUS);
+    const walkHalf = walkHalfFor(crossing);
 
     return {
       cx,
@@ -1030,6 +1027,18 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
       },
     };
   });
+}
+
+/**
+ * The standable half-width of a crossing's bridge — see
+ * {@link BridgeFootprint.walkHalf}'s own doc: the paved half-width less the
+ * walker's own body, which is what the parapet's collision genuinely
+ * leaves. One owner for the search's shift guard and the footprint's own
+ * `covers`, so the two can never disagree about where a walker's centre
+ * fits.
+ */
+function walkHalfFor(crossing: LevelCrossing): number {
+  return Math.max(crossing.pathHalfWidth - PLAYER_RADIUS, MIN_DECK_HALF_WIDTH - PLAYER_RADIUS);
 }
 
 /** Capped by how close the *next* crossing is — two crossings closer
