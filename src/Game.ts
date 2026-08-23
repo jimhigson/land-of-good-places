@@ -329,12 +329,14 @@ export class Game {
     this.parade = new Parade(this.player, this.world.collision, this.camera);
     this.engine.scene.add(this.parade.group);
     this.addSystem(this.parade);
-    // The seam a nap uses to send a pet on a real walk to its own bed
-    // instead of cutting there — see `Hotel.PetParadeLink` and
-    // `Hotel.sendPetsToBed`, its one caller. `Parade` satisfies the
-    // interface structurally; this is the one place that holds both a
-    // `Parade` and a `Hotel` to introduce them, same as `setPetsHidden`
-    // below reads `hotel.isNapping` back the other way.
+    // The seam a nap uses to send a pet to its own bed — see
+    // `Hotel.PetParadeLink` and `Hotel.sendPetsToBed`, its one caller.
+    // `Parade` satisfies the interface structurally; this is the one place
+    // that holds both a `Parade` and a `Hotel` to introduce them.
+    //
+    // **It is the whole of the wiring, and deliberately one-way.** The parade
+    // owns a pet's body from the line all the way onto the cushion and back;
+    // nothing here hides a pet, moves one, or holds a second copy of one.
     this.world.hotel.petParade = this.parade;
 
     // Every balloon the player owns and has not stowed, held above them on a

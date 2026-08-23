@@ -122,7 +122,8 @@ export class ParadeMember {
   /** The purchase this member *is* — the key everything else identifies it by. */
   readonly uid: string;
   readonly itemId: string;
-  /** The catalogue's own category — `'pet'`, `'toy'`, … See {@link Parade.setPetsHidden}. */
+  /** The catalogue's own category — `'pet'`, `'toy'`, … Only a pet has a bed
+   *  to go to; see {@link Parade.sendPetToBed}. */
   readonly kind: ShopItem['kind'];
   readonly displayName: string;
   readonly style: MemberStyle;

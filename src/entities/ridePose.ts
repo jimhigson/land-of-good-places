@@ -71,9 +71,10 @@ const RIDE_RECLINE = -1.35;
  *
  * The quarter turn, deliberately, and not {@link RIDE_RECLINE}: a bed is not a
  * chute, and the propped-up slide angle is what stuck a napping child's elbows
- * and knees out through the bedclothes. The same quarter turn
- * `Hotel.layPetDown` already lays a pet down with — one idea of "lying down"
- * across the two things that do it. See {@link applySleepingRidePose}.
+ * and knees out through the bedclothes. The same quarter turn a pet is laid
+ * down with in its own bed (`ParadeMember`'s `BED_POSE_X`) — one idea of
+ * "lying down" across the two things that do it. See
+ * {@link applySleepingRidePose}.
  */
 const SLEEP_RECLINE = -Math.PI / 2;
 
@@ -371,10 +372,11 @@ function applyReclinedRidePose(model: RidePoseTarget): void {
  * and knees sticking straight up through the bedclothes, exactly what was
  * reported. Retuning the slide's recline to fix a bed would break the slide,
  * and re-using it for the bed is what caused this; so a bed says what a bed
- * means, the same way {@link Hotel}'s pet beds have their own `layPetDown`.
+ * means, the same way a pet's own bed has its own pose
+ * (`ParadeMember`'s `BED_POSE_X`/`BED_POSE_Y`).
  *
- * **Flat, at −π/2**, which is the same quarter turn `Hotel.layPetDown` lays a
- * pet down with, and what the grown-up's `GROWN_UP_RECLINE` already uses. The
+ * **Flat, at −π/2**, which is the same quarter turn a pet is laid down with,
+ * and what the grown-up's `GROWN_UP_RECLINE` already uses. The
  * turn is on `root` for the reason {@link applyReclinedRidePose} gives at
  * length: the rig has no knee and the hips hang off `body`, so bending
  * anywhere but the model's own origin folds her in half. Her origin is at her
