@@ -102,9 +102,22 @@ interface RackCharm {
   /** `shops/catalogue.ts`'s id for this charm — `keychain.${kind}`. */
   readonly id: string;
   readonly root: Group;
+  /** Where the tap has to land — on the counter, inside the cart's own footprint. */
   readonly x: number;
   readonly y: number;
   readonly z: number;
+  /**
+   * Where a child's feet actually go to reach this charm — out in front of
+   * the cart, same as every stall's stand point, **not** {@link x}/{@link z}:
+   * those sit on the counter, inside `buildCollision`'s own walls, and a
+   * zone whose stand point is somewhere solid is a zone `check:park` rightly
+   * refuses to certify as reachable. Offset sideways per charm (see
+   * {@link KeychainShop.buildCart}) so proximity naturally favours whichever
+   * one she's actually stood in front of, at the same depth the stall's own
+   * `STALL_STANDS_BY_ID` point already proved clear.
+   */
+  readonly standX: number;
+  readonly standZ: number;
 }
 
 export class KeychainShop implements GameSystem {
@@ -114,6 +127,8 @@ export class KeychainShop implements GameSystem {
   private readonly standX: number;
   private readonly standZ: number;
   private readonly groundY: number;
+  /** {@link standX}/{@link standZ}, in the cart's own local frame — how far out in front of it counts as "arrived". */
+  private readonly standLocalZ: number;
 
   /** Every charm stood on the counter, built once in {@link buildCart}. */
   private readonly rack: RackCharm[] = [];
@@ -141,6 +156,7 @@ export class KeychainShop implements GameSystem {
     if (!stand) throw new Error('KeychainShop: no stand point in STALL_PLACEMENTS.keychain');
     this.standX = stand.x;
     this.standZ = stand.z;
+    [, this.standLocalZ] = this.toLocal(this.standX, this.standZ);
 
     this.buildCart();
     this.buildCollision(collision);
@@ -194,8 +210,8 @@ export class KeychainShop implements GameSystem {
       y: charm.y,
       z: charm.z,
       pickRadius: CHARM_PICK_RADIUS,
-      standX: charm.x,
-      standZ: charm.z,
+      standX: charm.standX,
+      standZ: charm.standZ,
       standRadius: REACH,
       // A single static classification, the same for every charm regardless
       // of what its live chip actually says — see this file's own header.
@@ -335,6 +351,15 @@ export class KeychainShop implements GameSystem {
     return [STALL_X + localX * cos + localZ * sin, STALL_Z - localX * sin + localZ * cos];
   }
 
+  /** {@link toWorld}'s inverse — used once, to read {@link standLocalZ} off the stall's own proven-reachable stand point. */
+  private toLocal(worldX: number, worldZ: number): [number, number] {
+    const sin = Math.sin(STALL_FACING);
+    const cos = Math.cos(STALL_FACING);
+    const dx = worldX - STALL_X;
+    const dz = worldZ - STALL_Z;
+    return [cos * dx - sin * dz, sin * dx + cos * dz];
+  }
+
   /**
    * The cart: a little two-wheeled trolley with a counter, and the six real
    * charm models stood up on it as a display rack — the origin-at-the-base
@@ -418,7 +443,21 @@ export class KeychainShop implements GameSystem {
       this.group.add(handle.root);
 
       const [x, z] = this.toWorld(localX, charmLocalZ);
-      this.rack.push({ kind, id: `keychain.${kind}`, root: handle.root, x, y: this.groundY + charmLocalY, z });
+      // Same lateral offset as the charm itself, but out at the stall's own
+      // proven-clear stand depth — never the counter's own `charmLocalZ`,
+      // which sits inside `buildCollision`'s walls (see `RackCharm.standX`'s
+      // own doc comment).
+      const [standX, standZ] = this.toWorld(localX, this.standLocalZ);
+      this.rack.push({
+        kind,
+        id: `keychain.${kind}`,
+        root: handle.root,
+        x,
+        y: this.groundY + charmLocalY,
+        z,
+        standX,
+        standZ,
+      });
     });
   }
 
