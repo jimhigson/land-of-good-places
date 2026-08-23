@@ -236,7 +236,14 @@ function ripikaCharm(): Group {
 /** A chunky five-pointed star, the same shape the plush star toy is cut from. */
 function starCharm(): Group {
   const charm = new Group();
-  const star = solid(new Mesh(starGeometry(0.115, 0.028), toonMaterial(PALETTE.flowerYellow)));
+  // `starGeometry`'s default puts one point straight down, not the classic
+  // "one point up" a star charm needs to read right-way-up hanging off a bag
+  // — see that function's own `rotation` doc comment, and
+  // `glasses.ts`'s `STAR_ROTATION`, which flips the same default for the
+  // same reason. Jim, 23 August 2026: "the star is upside down again."
+  const star = solid(
+    new Mesh(starGeometry(0.115, 0.028, 5, 0, Math.PI), toonMaterial(PALETTE.flowerYellow)),
+  );
   charm.add(star);
   addOutline(star, 0.008);
   addTinyFace(charm, 0.004, 0.026, 0.018, 0.032);
