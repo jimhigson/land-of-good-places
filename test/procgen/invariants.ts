@@ -47,7 +47,19 @@ import {
   zoneBandClearance,
   zoneSeparation,
 } from '../../src/world/tapSpacing.ts';
-import { PLAYER_MAX_SPEED, PLAYER_RADIUS, RIM_OUTSET_START } from '../../src/core/constants.ts';
+import {
+  BUILDING_STEP_UP,
+  PLAYER_MAX_SPEED,
+  PLAYER_RADIUS,
+  RIM_OUTSET_START,
+} from '../../src/core/constants.ts';
+// `NavGrid.ts` itself reaches only `core/constants`, `Collision.ts` and two
+// type-only imports (`boundary.ts`, `entities/Player.ts`'s `GroundSampler`,
+// `building/surfaces.ts`'s `LevelConnector`) — no seed-dependent module, so
+// a static import here cannot fix the park's seed early (this file's own
+// header). `TOP_REFERENCE` is the same "start above everything real" probe
+// height `NavGrid`'s own first sample uses.
+import { TOP_REFERENCE } from '../../src/world/NavGrid.ts';
 import {
   ENTRANCE_ANGLE,
   ENTRANCE_BUS_ARRIVE_X,
@@ -3475,6 +3487,105 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
               `built ${rampReach.toFixed(1)} m ramp reach on this side — is not standable`,
           );
         }
+      }
+    }
+  }
+
+  // --- ground-to-ground: the whole bridge, not just each ramp alone -------
+  //
+  // Everything above proves a real, built ramp reaches {@link WALKABLE_FLOOR}
+  // on each side *taken separately* — it does not prove a child can actually
+  // walk the bridge, ground to ground, without a step too tall to climb
+  // hiding at the seam between two things that were each individually fine.
+  // Real-browser QA on PR #330 found exactly that: a bridge whose two sides
+  // each "reached" still dropped 4.72 m over 1.5 m at the deck/ramp join —
+  // a 1.73 m single riser, nearly three times {@link BUILDING_STEP_UP}
+  // (0.62 m, the real per-step limit a walking foot obeys — `NavGrid`'s own
+  // `MAX_STEP`) — because nothing had ever walked the join itself as one
+  // continuous line. This marches the bridge's own centreline from where
+  // the real, built ramp meets the ground on one side, across, to where it
+  // meets the ground on the other — `bridge.heightAt` blends all the way to
+  // `terrainHeight` at each ramp's own far edge by construction (its own
+  // header), so marching *to* that edge already reaches genuine ground
+  // without needing to step past it — and fails on the first step too tall
+  // to climb, never a `continue`, per this file's own "a check that cannot
+  // fail" lesson (see the per-side probe above, same PR, same lesson: `if
+  // (rampReach < 1) continue` let three sheer, ramp-less sides through
+  // clean).
+  //
+  // **Bridges only, not a fallback (no-bridge) level crossing** — a level
+  // crossing has nothing built to march across at all, and the only figure
+  // that names its own extent (`crossing.halfGap`) is measured along the
+  // *rail* (`crossings.ts`'s own note), not along `pathDirX`/`pathDirZ`
+  // (this march's own axis, roughly perpendicular to the rail) — the two
+  // are different quantities on different axes, and marching one crossing's
+  // rail-axis spread out along its path-axis direction reaches well past
+  // its own real, reserved corridor into ordinary park territory nothing
+  // promises to keep clear (found live writing this check: it flagged
+  // perfectly ordinary trees and lamps 6–8 m out from three fallback
+  // crossings on the canonical seed as "not standable", which they
+  // genuinely are not, and never needed to be — ordinary scatter, not a
+  // crossing bug). A fallback crossing's own real walkability is
+  // `check-park.mts`'s job (`route.unreachable`, hard-gated), which routes
+  // it on the real nav lattice rather than a straight geometric line.
+  {
+    const MARCH_STEP = 0.5;
+    for (const crossing of facts.world.train.crossings) {
+      const bridge = facts.world.train.bridges.find((b) => b.deckCovers(crossing.x, crossing.z));
+      if (!bridge) continue;
+
+      const reachOf = (sign: 1 | -1): number => {
+        let edge = 0;
+        for (let d = 0; d <= 40; d += MARCH_STEP) {
+          const x = crossing.x + crossing.pathDirX * d * sign;
+          const z = crossing.z + crossing.pathDirZ * d * sign;
+          if (!bridge.covers(x, z)) break;
+          edge = d;
+        }
+        return edge;
+      };
+      const farNeg = reachOf(-1);
+      const farPos = reachOf(1);
+      // Nothing built either side of this crossing at all (both reaches at
+      // zero) — nothing to march, and nothing to fail on here; the per-side
+      // probe above already covers a bridge with no ramp.
+      if (farNeg <= 0 && farPos <= 0) continue;
+
+      let previousHeight: number | null = null;
+      let previousAlong = -farNeg;
+      let reportedStep = false;
+      for (let along = -farNeg; along <= farPos + 1e-6; along += MARCH_STEP) {
+        const x = crossing.x + crossing.pathDirX * along;
+        const z = crossing.z + crossing.pathDirZ * along;
+        const bridgeH = heightAt(x, z);
+        const groundH = facts.world.building.surfaces.sample(x, z, TOP_REFERENCE);
+        const h = bridgeH ?? groundH;
+        if (!standableAt(x, z, h)) {
+          complaints.push(
+            `the crossing at (${fmt([crossing.x, crossing.z])}) is not standable ` +
+              `${along.toFixed(1)} m along its own centreline, on the ` +
+              `${bridgeH !== null ? 'bridge' : 'ground'}`,
+          );
+        }
+        if (previousHeight !== null) {
+          const step = Math.abs(h - previousHeight);
+          // One complaint per crossing for this, not one per offending
+          // sample — a genuine sheer drop fails every step downstream of it
+          // too (the march never recovers a "previous" height on solid
+          // ground), and a wall of near-identical complaints obscures the
+          // one real finding rather than describing it.
+          if (step > BUILDING_STEP_UP && !reportedStep) {
+            reportedStep = true;
+            complaints.push(
+              `the crossing at (${fmt([crossing.x, crossing.z])}) has a ${step.toFixed(2)} m step ` +
+                `between ${previousAlong.toFixed(1)} m and ${along.toFixed(1)} m along its own ` +
+                `centreline — too tall for a real walk (BUILDING_STEP_UP is ` +
+                `${BUILDING_STEP_UP.toFixed(2)} m); this is not a walkable crossing, ground to ground`,
+            );
+          }
+        }
+        previousHeight = h;
+        previousAlong = along;
       }
     }
   }
