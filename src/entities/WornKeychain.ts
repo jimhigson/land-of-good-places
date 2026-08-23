@@ -78,7 +78,11 @@ const SWING_STIFFNESS = 55;
 const SWING_DAMPING = 9;
 /** Radians of target swing per m/s² of the anchor's own local acceleration. */
 const SWING_ACCEL_GAIN = 0.045;
-/** Hard clamp on the swing angle, so a hard stop or a bad frame cannot fling the charm past horizontal. */
+/**
+ * Hard clamp on the swing *target* (not the displayed angle — the underdamped
+ * spring can overshoot it by roughly 10%), so a hard stop or a bad frame
+ * cannot aim the charm anywhere near horizontal, let alone fling it past it.
+ */
 const SWING_MAX_ANGLE = 0.9;
 /** An anchor jump bigger than this in one frame is a teleport, not real motion. */
 const TELEPORT_DISTANCE = 2.5;
