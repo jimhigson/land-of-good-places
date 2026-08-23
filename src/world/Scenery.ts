@@ -10,7 +10,7 @@ import {
   SphereGeometry,
   Vector3,
 } from 'three';
-import { PLAYER_RADIUS } from '../core/constants';
+import { PLAYER_MAX_SPEED, PLAYER_RADIUS } from '../core/constants';
 import { edgeRadiusAt, PARK_BOUNDARY, TERRAIN_APRON } from './boundary';
 
 /** How far inside the park's edge anything may be planted. Was `> 55` against a 60 m wall. */
@@ -31,7 +31,7 @@ import {
 } from './train/plan';
 import { isInBridgeFootprint } from './train/bridgeKeepout';
 import { terrainHeight } from './terrain';
-import { isOnPath, PLAZA, pathBorderSegments } from './paths';
+import { isOnPath, PLAZA, pathBorderSegments, pathCentreline } from './paths';
 import { ANCHORS } from './anchors';
 import { COASTER_PLANS } from './coaster/plan';
 import {
@@ -59,6 +59,7 @@ import {
   pickTreeKind,
   rollTree,
   type InstanceItem,
+  type TreeKind,
   type TreePart,
 } from './treeModel';
 
@@ -611,32 +612,25 @@ function buildFoliage(collision: CollisionWorld): {
   // rather than guessed — trees and walls use separate RNG streams, and
   // disabling the wall keep-out left the stranding in place while reverting the
   // budget alone cleared it.
-  while (treeCount < targetTrees && attempts < 180000) {
-    attempts += 1;
-    // This candidate's own stream. Everything below draws from it and nothing
-    // else, so what this attempt proposes depends on `attempts` and the seed —
-    // never on how many earlier candidates happened to be accepted.
-    const rng = candidateRng(TREE_SALT, attempts);
-    const angle = rng.range(0, TAU);
-    // Scaled to the park's reach on the bearing picked, so the lawn is seeded
-    // evenly whether that bearing runs 57 m to the edge or 110 m. A fixed
-    // radius would crowd every tree into the middle of a park this shape.
-    const distance = Math.sqrt(rng.unit()) * (edgeRadiusAt(PARK_BOUNDARY, angle) - 6);
-    const x = Math.cos(angle) * distance;
-    const z = Math.sin(angle) * distance;
-    if (!isPlantable(x, z, 2.6)) continue;
-
-    const kind = pickTreeKind(rng);
+  /**
+   * Every check and every piece of bookkeeping one accepted tree needs —
+   * extracted so the climbable-coverage pass below plants through exactly
+   * the same gate as the main scatter (same spacing, walls, cruiser and
+   * sightline rules, same collider/occluder filing), rather than a second,
+   * driftable copy. `requireClimbable` additionally refuses a rolled tree
+   * whose top ball is too small to climb out of, before any bookkeeping.
+   */
+  const tryPlantTree = (rng: Rng, kind: TreeKind, x: number, z: number, requireClimbable: boolean): boolean => {
     const reach = TREE_REACH[kind];
-    if (planted.some((tree) => Math.hypot(x - tree.x, z - tree.z) < tree.reach + reach)) continue;
+    if (planted.some((tree) => Math.hypot(x - tree.x, z - tree.z) < tree.reach + reach)) return false;
     // The walls are decided before any of this runs, so a tree that would grow
     // into one is simply refused the spot. See `clearOfWalls`/`TREE_WALL_GAP`.
-    if (!clearOfWalls(x, z, reach)) continue;
+    if (!clearOfWalls(x, z, reach)) return false;
     // ...and so is the Sky Cruiser's loop, which dips to boarding height beside
     // its station and would otherwise fly straight through this canopy (#198).
     // Asked here rather than in `isPlantable` because it wants the kind, which
     // is already picked above — so no RNG draw moves to make room for it.
-    if (!clearOfCruiser(x, z, reach, TREE_TOP[kind])) continue;
+    if (!clearOfCruiser(x, z, reach, TREE_TOP[kind])) return false;
     // ...and nor may it stand between the camera and the arriving cat bus. Asked
     // here rather than in `isPlantable` for exactly the reason `clearOfCruiser`
     // above is: it needs the tree's *height*, and the kind — which is what
@@ -644,7 +638,7 @@ function buildFoliage(collision: CollisionWorld): {
     // guessing at the tallest tree the scatter can produce, and a keep-out sized
     // for a tree that never grows there is the same disease as a 10 m disc sized
     // for an 11 m bus. See `entrance/arrivalSightline.ts`.
-    if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + TREE_TOP[kind])) continue;
+    if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + TREE_TOP[kind])) return false;
     planted.push({ x, z, reach });
     const y = terrainHeight(x, z);
 
@@ -653,6 +647,10 @@ function buildFoliage(collision: CollisionWorld): {
     // cat bus's lane plants the very same ones — so a new kind, or a wider
     // canopy, reaches both scenes at once instead of only this one.
     const tree = rollTree(rng, kind, x, y, z);
+    if (requireClimbable && tree.topBallRadius < CLIMBABLE_MIN_CANOPY_RADIUS) {
+      planted.pop();
+      return false;
+    }
     const lean = tree.lean;
 
     // Occlusion bookkeeping for this tree (see `FoliageOccluder`/
@@ -714,6 +712,68 @@ function buildFoliage(collision: CollisionWorld): {
     const colliderId = collision.addCircle(x, z, trunkRadius);
     treeColliders.push({ id: colliderId, radius: trunkRadius });
     treeCount += 1;
+    return true;
+  };
+
+
+  while (treeCount < targetTrees && attempts < 180000) {
+    attempts += 1;
+    // This candidate's own stream. Everything below draws from it and nothing
+    // else, so what this attempt proposes depends on `attempts` and the seed —
+    // never on how many earlier candidates happened to be accepted.
+    const rng = candidateRng(TREE_SALT, attempts);
+    const angle = rng.range(0, TAU);
+    // Scaled to the park's reach on the bearing picked, so the lawn is seeded
+    // evenly whether that bearing runs 57 m to the edge or 110 m. A fixed
+    // radius would crowd every tree into the middle of a park this shape.
+    const distance = Math.sqrt(rng.unit()) * (edgeRadiusAt(PARK_BOUNDARY, angle) - 6);
+    const x = Math.cos(angle) * distance;
+    const z = Math.sin(angle) * distance;
+    if (!isPlantable(x, z, 2.6)) continue;
+
+    if (!tryPlantTree(rng, pickTreeKind(rng), x, z, false)) continue;
+  }
+
+
+  // --- climbable coverage along the paths (Jim, 6 August: "it takes a long
+  // time to find one") ------------------------------------------------------
+  //
+  // The scatter above rolls climbability out of random geometry, so nothing
+  // guarantees the far reaches of the path network end up near a tree a
+  // child can climb — a re-rolled park measured one spur corner 67.6 m from
+  // the nearest (2026-08-23), just past the nine-flat-out-seconds bar the
+  // procgen invariant walks. So: walk the drawn network, and wherever no
+  // climbable tree is within reach, plant one nearby through the exact same
+  // gate as every other tree (`tryPlantTree`), forced to a big-canopy kind
+  // and refused unless the rolled top ball is genuinely climbable.
+  //
+  // The target is deliberately STRICTER than the check: the invariant allows
+  // `PLAYER_MAX_SPEED` x 9 s of walk; the generator aims for 7 s, so ordinary
+  // seed-to-seed wobble lands inside the bar rather than on it.
+  const CLIMB_COVER_TARGET = PLAYER_MAX_SPEED * 7;
+  const CLIMB_COVER_SALT = 0xc11f0b ^ PARK_SEED;
+  {
+    const centreSamples = pathCentreline();
+    for (let i = 0; i < centreSamples.length; i += 12) {
+      const sample = centreSamples[i];
+      if (!sample) continue;
+      const covered = climbableTrees.some(
+        (tree) => Math.hypot(tree.x - sample.x, tree.z - sample.z) < CLIMB_COVER_TARGET,
+      );
+      if (covered) continue;
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        const rng = candidateRng(CLIMB_COVER_SALT, i * 64 + attempt);
+        const angle = rng.range(0, TAU);
+        const radius = rng.range(6, CLIMB_COVER_TARGET * 0.55);
+        const x = sample.x + Math.cos(angle) * radius;
+        const z = sample.z + Math.sin(angle) * radius;
+        if (!isPlantable(x, z, 2.6)) continue;
+        // 'lollipop' is the classic big-ball silhouette — the kind whose
+        // rolled top ball most often clears CLIMBABLE_MIN_CANOPY_RADIUS —
+        // but the roll still decides, and tryPlantTree refuses a runt.
+        if (tryPlantTree(rng, 'lollipop', x, z, true)) break;
+      }
+    }
   }
 
   // --- bushes --------------------------------------------------------------

@@ -944,7 +944,7 @@ function routeLeg(
   let fallbackWorst = Infinity;
   for (const candidate of candidates.slice(0, 4)) {
     const points = build(candidate);
-    const worst = longestOffAxisRun(points);
+    const worst = longestOffAxisRun(points, candidate.site);
     if (worst <= MAX_OFF_AXIS_RUN) return points;
     if (worst < fallbackWorst) {
       fallbackWorst = worst;
@@ -962,16 +962,37 @@ function routeLeg(
  */
 const MAX_OFF_AXIS_RUN = 15;
 
-function longestOffAxisRun(points: readonly (readonly [number, number])[]): number {
+function longestOffAxisRun(
+  points: readonly (readonly [number, number])[],
+  crossedSite: CrossingSite | null = null,
+): number {
   let worst = 0;
-  let runStart: readonly [number, number] | null = null;
-  let runEnd: readonly [number, number] | null = null;
+  let run = 0;
   const flush = (): void => {
-    if (runStart && runEnd) {
-      worst = Math.max(worst, Math.hypot(runEnd[0] - runStart[0], runEnd[1] - runStart[1]));
+    worst = Math.max(worst, run);
+    run = 0;
+  };
+  // A sample is the railway's own geometry when it hugs the corridor (a
+  // fence-follow run) or stands inside a planned crossing's own footprint
+  // band (the crossing axis, whose feet legitimately reach well past the
+  // corridor). Mirrors `pathsRunOnGridAxes`'s measured exemptions.
+  const exempt = (x: number, z: number): boolean => {
+    if (distanceToRailCorridor(x, z) < 8.5) return true;
+    // Only the leg's OWN crossing site earns a footprint exemption — a hop
+    // that happens to pass along some other, unused site's would-be ramp
+    // corridor gets no bridge built over it, so the invariant this metric
+    // mirrors will count every metre of it (seed 5, 2026-08-23: a 39.8 m
+    // raw diagonal read as 9.9 because an unrelated site's band split it).
+    if (crossedSite) {
+      const dx = x - crossedSite.x;
+      const dz = z - crossedSite.z;
+      const along = dx * crossedSite.dirX + dz * crossedSite.dirZ;
+      const across = -dx * crossedSite.dirZ + dz * crossedSite.dirX;
+      const reach =
+        DECK_HALF_LENGTH + Math.max(crossedSite.rampReachPos, crossedSite.rampReachNeg) + 2;
+      if (Math.abs(across) <= 6.5 && Math.abs(along) <= reach) return true;
     }
-    runStart = null;
-    runEnd = null;
+    return false;
   };
   for (let i = 1; i < points.length; i += 1) {
     const a = points[i - 1] as readonly [number, number];
@@ -979,15 +1000,22 @@ function longestOffAxisRun(points: readonly (readonly [number, number])[]): numb
     const dx = Math.abs(b[0] - a[0]);
     const dz = Math.abs(b[1] - a[1]);
     const hop = Math.hypot(dx, dz);
-    const nearRail =
-      distanceToRailCorridor((a[0] + b[0]) / 2, (a[1] + b[1]) / 2) < 8.5;
-    const offAxis = hop > 1e-6 && Math.min(dx, dz) / hop > 0.15 && !nearRail;
-    if (offAxis) {
-      if (!runStart) runStart = a;
-      runEnd = b;
-    } else {
+    if (hop < 1e-6) continue;
+    if (Math.min(dx, dz) / hop <= 0.15) {
       flush();
+      continue;
     }
+    // Off-axis hop: accumulate only its non-exempt sampled length — a 39 m
+    // hop whose midpoint alone was tested read as "near the rail" while
+    // most of its length ran over open lawn (seed 5, 2026-08-23).
+    const steps = Math.max(1, Math.ceil(hop / 2));
+    for (let step = 0; step <= steps; step += 1) {
+      const x = a[0] + ((b[0] - a[0]) * step) / steps;
+      const z = a[1] + ((b[1] - a[1]) * step) / steps;
+      if (exempt(x, z)) flush();
+      else run += hop / steps;
+    }
+    worst = Math.max(worst, run);
   }
   flush();
   return worst;
@@ -1009,8 +1037,16 @@ function sameSideLeg(
   allowDoubleCrossing = true,
 ): (readonly [number, number])[] {
   const direct = enforceRailSide(manhattanRoute(from, to), side);
-  if (!polylineCrossesRail(direct)) return direct;
-  return fenceFollowRoute(from, to, side, allowDoubleCrossing);
+  const directCrosses = polylineCrossesRail(direct);
+  if (!directCrosses && longestOffAxisRun(direct) <= MAX_OFF_AXIS_RUN) return direct;
+  const fence = fenceFollowRoute(from, to, side, allowDoubleCrossing);
+  if (directCrosses) return fence;
+  // Both candidates stay on their side; the direct one merely carries a
+  // long raw diagonal (an elbow give-up in a boxed-in pocket — seed 5's
+  // building spur, 2026-08-23). A fence-following run is legal geometry
+  // (the railway's own shape, exempt from the grid rule by measurement),
+  // so pick whichever keeps the drawn network straighter.
+  return longestOffAxisRun(fence) < longestOffAxisRun(direct) ? fence : direct;
 }
 
 /**
