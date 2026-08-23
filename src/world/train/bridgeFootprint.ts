@@ -237,6 +237,28 @@ const REAL_PROBE_RADIUS = PLAYER_RADIUS + REAL_CLEARANCE_STRIDE;
 const WALKABLE_FLOOR = BRIDGE_RISE / MAX_RAMP_GRADIENT;
 
 /**
+ * Real slack held past {@link WALKABLE_FLOOR} before a candidate counts as
+ * accepted — never accept a configuration that clears by a razor's edge.
+ *
+ * Found reviewing PR #330's own scatterDecoupling regression: two crossings
+ * were not directly competing for the same ground (`nearOtherGuardRail`
+ * never fired between them), yet which one got a real bridge still flipped
+ * between an otherwise-identical build and one with an unrelated stall's
+ * spur nudged 2 m — because that crossing's own search sat exactly on the
+ * `WALKABLE_FLOOR` boundary, and an entirely ordinary, already-tolerated
+ * scatter shift (a lamp a few metres out) was enough to tip a probe from
+ * clear to blocked and back. A search whose accept/reject depends on
+ * millimetres of real-world jitter is exactly "shrink to a hard floor and
+ * ship a known-too-close edge" (`CLAUDE.md`'s own words) even though
+ * nothing here is a literal `Math.max` clamp — the margin is the fix, the
+ * same way a structural safety factor is not "cheating" a load calculation.
+ * A candidate that only clears with none of this to spare was never a
+ * bridge worth trusting across a reseed; it falls back to a level crossing
+ * instead, same as one that fails outright.
+ */
+const WALKABLE_MARGIN = 0.5;
+
+/**
  * What the late, real pass needs from the caller: the actual collision
  * world to query, and — the last lever before giving up on a crossing
  * entirely — a way to fell a real, felt tree that turns out to be the one
@@ -669,7 +691,7 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
       Math.min(
         provisionalReach(existing.cx, existing.cz, existing.halfAcross, 1),
         provisionalReach(existing.cx, existing.cz, existing.halfAcross, -1),
-      ) >= WALKABLE_FLOOR
+      ) >= WALKABLE_FLOOR + WALKABLE_MARGIN
     ) {
       return existing;
     }
@@ -713,7 +735,7 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
         // A path crosses this deck in either direction; a ramp missing on
         // one side is a sheer drop approached from that direction, not a
         // usable bridge with merely a worse approach.
-        if (Math.min(reachPos, reachNeg) >= WALKABLE_FLOOR) {
+        if (Math.min(reachPos, reachNeg) >= WALKABLE_FLOOR + WALKABLE_MARGIN) {
           return { crossingIndex: -1, cx: centerX, cz: centerZ, dirX, dirZ, acrossX, acrossZ, halfAcross };
         }
       }
