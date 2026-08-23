@@ -243,18 +243,29 @@ function sampleTsFor(
 
 /**
  * Real-metre spacing {@link denseSampleTs} sweeps a candidate's own width
- * at — never a fixed `t` step, because `t` is a *fraction* of `halfAcross`
- * and this crossing's decks range from `MIN_DECK_HALF_WIDTH` (~1 m) to well
- * past 10 m: a fixed-`t` step that is dense enough for a narrow deck is
- * nowhere near dense enough for a wide one. A first version of this fixed
- * `t` at `0.08` — dense-*sounding*, but on an 11 m-`halfAcross` deck (this
- * crossing's own real, shifted width, this file's own header) that is
- * 0.88 m between samples, comfortably wide enough to still step clean over
- * a 0.5 m-wide stone bench, and did. Half the narrowest thing this file
- * guards against (a `WALL_HALF_WIDTH.wood`-thick post, ~0.22 m half-width,
- * 0.44 m across) leaves genuine margin.
+ * at, and `rampReach`'s own along-stepping matches it — never a fixed `t`
+ * step, because `t` is a *fraction* of `halfAcross` and this crossing's
+ * decks range from `MIN_DECK_HALF_WIDTH` (~1 m) to well past 10 m: a
+ * fixed-`t` step that is dense enough for a narrow deck is nowhere near
+ * dense enough for a wide one. A first version of this fixed `t` at `0.08`
+ * — dense-*sounding*, but on an 11 m-`halfAcross` deck (this crossing's own
+ * real, shifted width, this file's own header) that is 0.88 m between
+ * samples, comfortably wide enough to still step clean over a 3-4 m-wide
+ * stone garden bench, and did.
+ *
+ * **`0.5`, not the `0.2` this was first tried at.** `0.2` genuinely closed
+ * the hole (proven red-then-green against the exact bench above) but cost
+ * real, measured generation time: `check:park-boot` went from 770 ms spent
+ * outside a budgeted slice to 2595 ms, and its worst single `advance()` from
+ * 14.2 ms to 490.9 ms, on a park with only two or three crossings ever
+ * reaching this pass at all. Pass 2 still runs exactly once per accepted
+ * crossing, so `0.5` (`WIDTH_STEP`'s own established density elsewhere in
+ * this file, not a new number) is still a large improvement over the nine
+ * fixed fractions the bug shipped with, while affordable inside a real
+ * frame budget — and still small next to the bench's own few-metre size, so
+ * the same red-then-green case stays green at this coarser step too.
  */
-const DENSE_REAL_STEP = 0.2;
+const DENSE_REAL_STEP = 0.5;
 
 /**
  * A genuinely dense sweep across a candidate's own width, `DENSE_T_STEP`
