@@ -4870,9 +4870,11 @@ export class Hotel implements GameSystem {
    * naps"* (21 Aug 2026; see {@link petBedRoster}).
    *
    * The pet a child is actually watching is the one behind her in the parade,
-   * and `Game.tick` hides that parade for exactly as long as these are up, so
-   * there is one pet on screen at a time rather than a sleeping twin of the
-   * one still following her about. Getting *into* the bed is therefore the
+   * and `Game.tick` takes the parade's *pets* off screen (`setPetsHidden`) for
+   * exactly as long as these are up, so there is one of each animal on screen
+   * rather than a sleeping twin of the one still following her about — her
+   * toys carry on standing there, having no bed to go to. Getting *into* the
+   * bed is therefore the
    * whole point: something has to be seen to happen at the moment she goes to
    * sleep, or a bed that was empty a second ago simply has a pet in it.
    *

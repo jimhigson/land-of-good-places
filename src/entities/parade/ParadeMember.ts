@@ -69,6 +69,8 @@ export class ParadeMember {
   /** The purchase this member *is* — the key everything else identifies it by. */
   readonly uid: string;
   readonly itemId: string;
+  /** The catalogue's own category — `'pet'`, `'toy'`, … See {@link Parade.setPetsHidden}. */
+  readonly kind: ShopItem['kind'];
   readonly displayName: string;
   readonly style: MemberStyle;
   /** World-space node. Origin at the feet, per the asset contract. */
@@ -85,6 +87,18 @@ export class ParadeMember {
    * shrinks instead of chasing the line it has just left.
    */
   readonly target = new Vector3();
+
+  /**
+   * Taken off screen for a moment while still in the line — see
+   * {@link Parade.setPetsHidden}, whose one caller is the hotel suite's nap.
+   *
+   * A flag the member reads rather than an outside write to `root.visible`,
+   * because {@link updatePop} assigns that property every single frame from
+   * the pop-in animation: anything set from outside would be stamped over
+   * within a frame and look like it had been ignored. Same shape, same
+   * reason, as `Player.railRaceFrown`.
+   */
+  hidden = false;
 
   private readonly handle: AssetHandle;
   private readonly creature: CreatureHandle | null;
@@ -126,6 +140,7 @@ export class ParadeMember {
   constructor(uid: string, item: ShopItem) {
     this.uid = uid;
     this.itemId = item.id;
+    this.kind = item.kind;
     this.displayName = item.displayName;
 
     this.handle = item.model();
@@ -317,7 +332,7 @@ export class ParadeMember {
     // and the carried item use, so the whole game pops the same way.
     const eased = 1 + Math.sin(this.pop * Math.PI) * 0.3;
     this.root.scale.setScalar(Math.max(0.001, this.pop * eased));
-    this.root.visible = this.pop > 0.002;
+    this.root.visible = this.pop > 0.002 && !this.hidden;
   }
 
   /** Returns the current hop height in metres, and advances the hop clock. */

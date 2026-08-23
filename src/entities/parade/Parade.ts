@@ -90,6 +90,8 @@ export class Parade implements GameSystem {
 
   private readonly unsubscribe: () => void;
 
+  /** True while every pet in the line is off screen — see {@link setPetsHidden}. */
+  private petsHidden = false;
   private wasAirborne = false;
   private rotateTimer = 0;
   private rotation = 0;
@@ -120,7 +122,7 @@ export class Parade implements GameSystem {
   }
 
   /**
-   * Hide the whole line for a moment — **it is asleep somewhere else.**
+   * Take the **pets** out of the line for a moment — they are asleep in bed.
    *
    * The hotel suite's nap is the one caller (`Game.tick`, off
    * `Hotel.isNapping`). Every pet the player owns has its own bed in that
@@ -129,16 +131,26 @@ export class Parade implements GameSystem {
    * two of the same animal on screen at once, which is half of what Jim
    * reported on 21 Aug 2026.
    *
-   * Deliberately just the group's `visible` flag rather than tearing the line
-   * down: {@link update} keeps running, the members keep following the trail,
-   * and coming back is one flag rather than a rebuild that could put a toy
-   * somewhere it never walked. Re-asserted every frame by the caller (the
-   * setter is free when nothing changed), which is the same shape as
+   * **Pets only, not the whole line**, because it is only pets that the
+   * bedroom has beds for. A teddy has nowhere to have gone, so a teddy that
+   * blinked out of existence for the length of a nap would be a second bug
+   * rather than the fix for the first one; it simply stands there while
+   * everybody sleeps, which is what a toy does. `ParadeMember.kind` is the
+   * catalogue's own category, so this asks the same question `store.ts` and
+   * `Hotel.ownedPetKinds` ask, rather than matching on an id prefix.
+   *
+   * Deliberately a flag on the member rather than a teardown: {@link update}
+   * keeps running, the pets keep following the trail, and coming back is one
+   * flag rather than a rebuild that could put a pet somewhere it never
+   * walked. Re-asserted every frame by the caller, which is the same shape as
    * `Hud.setLookAvailable` next door to it.
    */
-  setHidden(hidden: boolean): void {
-    if (this.group.visible === !hidden) return;
-    this.group.visible = !hidden;
+  setPetsHidden(hidden: boolean): void {
+    if (this.petsHidden === hidden) return;
+    this.petsHidden = hidden;
+    for (const member of [...this.members, ...this.leaving]) {
+      if (member.kind === 'pet') member.hidden = hidden;
+    }
   }
 
   /**
@@ -343,6 +355,9 @@ export class Parade implements GameSystem {
       const catalogue = shopItem(item.id);
       if (!catalogue) continue;
       const member = new ParadeMember(item.uid, catalogue);
+      // A pet bought (or brought back out) mid-nap joins already hidden, like
+      // the rest of its kind — see `setPetsHidden`.
+      if (member.kind === 'pet') member.hidden = this.petsHidden;
       this.group.add(member.root);
       ordered.push(member);
     }

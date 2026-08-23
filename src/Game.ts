@@ -1462,8 +1462,8 @@ export class Game {
     // one of the systems below. While she naps in the hotel suite, every pet
     // she owns is trotting into its own bed in that room — so the parade's
     // copies of those same animals must not also be standing at the bedside.
-    // One owner of "is she asleep", read fresh; see `Parade.setHidden`.
-    this.parade.setHidden(this.world.hotel.isNapping);
+    // One owner of "is she asleep", read fresh; see `Parade.setPetsHidden`.
+    this.parade.setPetsHidden(this.world.hotel.isNapping);
 
     for (const system of this.systems) system.update(this.frameContext);
 
