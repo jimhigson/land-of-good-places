@@ -506,42 +506,61 @@ export class Entrance implements GameSystem {
     signGroup.add(board);
     addOutline(board, 0.02);
 
-    // The plaque: a cream mount recessed into the board's own front face,
-    // with the greeting painted onto a flush plane in front of that — the
-    // same frame/mount/canvas layering `world/hotel/dressing.ts`'s
+    // The plaque: a cream mount recessed into the board's own face, with the
+    // greeting painted onto a flush plane in front of that — the same
+    // frame/mount/canvas layering `world/hotel/dressing.ts`'s
     // `paintedPicture` uses for the hotel's paintings. Each layer pokes a
     // few centimetres past the one behind it (board → mount → text plane) so
     // nothing z-fights and the text sits flush against real wood rather than
     // floating off it on a formula of its own — the exact trap CLAUDE.md's
     // note on painted faces warns against.
     //
+    // Built on **both** faces of the board, not just the one a box's
+    // default winding calls "front": the sign stands astride the path a
+    // player walks in both directions (arriving through the gate, and later
+    // heading back out to it), and a plaque only one soul could ever read is
+    // exactly the kind of bug this file's own doc comment on debug cameras
+    // warns is invisible until someone stands on the wrong side of it. The
+    // second copy is the mirror image of the first — z negated, yawed 180°
+    // — so the text reads correctly rather than backwards from that side.
+    //
     // This is the one board in the park allowed a painted face: see the
     // "deliberate, one-off exception" note on `welcomeSignTexture` itself.
     const plaqueWidth = 3.9;
     const plaqueHeight = plaqueWidth * (WELCOME_SIGN_CANVAS_HEIGHT / WELCOME_SIGN_CANVAS_WIDTH);
-    const mount = decal(
-      new Mesh(
-        new BoxGeometry(plaqueWidth + 0.2, plaqueHeight + 0.2, 0.08),
-        toonMaterial(PALETTE.signBoard),
-      ),
-    );
-    mount.position.set(0, 2.6, 0.06);
-    signGroup.add(mount);
+    const plaqueTexture = welcomeSignTexture(WELCOME_SIGN_TEXT);
 
-    const textPlane = decal(
-      new Mesh(
-        new PlaneGeometry(plaqueWidth, plaqueHeight),
-        toonMaterial(0xffffff, {
-          map: welcomeSignTexture(WELCOME_SIGN_TEXT),
-          // Same self-lift `paintedPicture` gives the hotel's paintings — legible
-          // walking past at dusk, not just at noon.
-          emissive: 0xffffff,
-          emissiveIntensity: 0.18,
-        }),
-      ),
-    );
-    textPlane.position.set(0, 2.6, 0.105);
-    signGroup.add(textPlane);
+    for (const faceSide of [1, -1] as const) {
+      const mount = decal(
+        new Mesh(
+          new BoxGeometry(plaqueWidth + 0.2, plaqueHeight + 0.2, 0.08),
+          toonMaterial(PALETTE.signBoard),
+        ),
+      );
+      mount.position.set(0, 2.6, faceSide * 0.06);
+      signGroup.add(mount);
+
+      const textPlane = decal(
+        new Mesh(
+          new PlaneGeometry(plaqueWidth, plaqueHeight),
+          toonMaterial(0xffffff, {
+            map: plaqueTexture,
+            // Same self-lift `paintedPicture` gives the hotel's paintings — legible
+            // walking past at dusk, not just at noon.
+            emissive: 0xffffff,
+            emissiveIntensity: 0.18,
+          }),
+        ),
+      );
+      textPlane.position.set(0, 2.6, faceSide * 0.105);
+      // The back copy is spun 180° about Y rather than mirrored in X: that
+      // flips the plane's normal (so it still faces outward, away from the
+      // board) *and* its local x-axis together, which is what keeps the
+      // painted words reading left-to-right instead of mirrored for someone
+      // standing on that side.
+      if (faceSide < 0) textPlane.rotation.y = Math.PI;
+      signGroup.add(textPlane);
+    }
 
     // Bulbs along the lintel, like a real fairground arch.
     for (let i = 0; i < 10; i += 1) {
