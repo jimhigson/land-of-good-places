@@ -19,6 +19,7 @@ import {
   type RealWorldQuery,
 } from './bridgeFootprint';
 import { TRACK_CLEARANCE } from './route';
+import { BUILDING_STEP_UP } from '../../core/constants';
 import { terrainHeight } from '../terrain';
 import { PALETTE } from '../../core/palette';
 import { pinkStoneTexture } from '../../core/textures';
@@ -97,6 +98,34 @@ import type { MovingPlatform } from '../building/surfaces';
  * obscure a player walking on it"), high enough to read as a real stone
  * parapet rather than a kerb. */
 const PARAPET_HEIGHT = 0.72;
+
+/**
+ * The hump height (above the local ground beside it) below which the
+ * parapet tapers away — `BUILDING_STEP_UP`: below one step, the hump's
+ * edge is an ordinary kerb a walker can step off, exactly like every other
+ * path edge in the park, and a wing wall there does active harm. Found
+ * live on the canonical seed, first full build of this geometry: the ramp
+ * feet meet ordinary path junctions (the crossing leg merges into the
+ * network right past each foot, `paths.ts` promises nothing further out),
+ * and full-length parapets walled the junction off — 39 poiGraph
+ * waypoints, the whole strip south of the rail, stranded behind a wing
+ * wall standing 0.72 m over a hump that was itself barely ankle height.
+ * Above one step the drop is a real fall onto (eventually) the fenced
+ * rail corridor, and the parapet is load-bearing safety — so the taper is
+ * tied to the game's own step, never a styling choice.
+ */
+const PARAPET_MIN_HUMP = BUILDING_STEP_UP;
+
+/** How the visible parapet fades out as the hump shrinks toward the taper
+ * threshold — full height at {@link PARAPET_MIN_HUMP} (where its collision
+ * wall also starts existing), gone by ankle height. One owner for the
+ * shell geometry so the drawn wall and the collider agree about where a
+ * parapet is. */
+function parapetHeightFor(humpHeight: number): number {
+  const t = (humpHeight - 0.25) / (PARAPET_MIN_HUMP - 0.25);
+  const clamped = t < 0 ? 0 : t > 1 ? 1 : t;
+  return PARAPET_HEIGHT * clamped;
+}
 
 /**
  * Half-span (along the path) of the arch's flat crown — the stretch of
@@ -398,6 +427,9 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   bridgeGroup.add(shellMesh, copingMesh);
 
   // --- collision: the parapet/spandrel walls -------------------------------
+  // Only where the hump stands more than a step above the ground beside it
+  // — see {@link PARAPET_MIN_HUMP}. Below that the edge is an ordinary
+  // kerb, and a wall there severs the path junctions the ramp feet land in.
   const walls: BridgeWall[] = [];
   const wallLine = roadHalf + BRIDGE_WALL_THICKNESS / 2;
   for (const side of [1, -1] as const) {
@@ -408,13 +440,17 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
       const point = frame.worldAt(clamped, wallLine * side, shift);
       const topA = surfaceProfile(previous.x, previous.z, previousAlong);
       const topB = surfaceProfile(point.x, point.z, clamped);
-      walls.push({
-        x1: previous.x,
-        z1: previous.z,
-        x2: point.x,
-        z2: point.z,
-        topHeight: Math.max(topA, topB) + PARAPET_HEIGHT,
-      });
+      const humpA = topA - terrainHeight(previous.x, previous.z);
+      const humpB = topB - terrainHeight(point.x, point.z);
+      if (Math.max(humpA, humpB) > PARAPET_MIN_HUMP) {
+        walls.push({
+          x1: previous.x,
+          z1: previous.z,
+          x2: point.x,
+          z2: point.z,
+          topHeight: Math.max(topA, topB) + PARAPET_HEIGHT,
+        });
+      }
       previous = point;
       previousAlong = clamped;
       if (clamped >= lengthPos) break;
@@ -545,7 +581,12 @@ function buildShellGeometry(
     const bottomMinus = inTunnel
       ? soffit
       : Math.min(terrainHeight(outerMinus.x, outerMinus.z), terrainHeight(roadMinus.x, roadMinus.z)) - 0.5;
-    const parapetTop = surface + PARAPET_HEIGHT;
+    // The parapet tapers out where the hump is barely above the ground —
+    // see `parapetHeightFor`; the collision walls follow the same rule.
+    const humpPlus = surface - terrainHeight(outerPlus.x, outerPlus.z);
+    const humpMinus = surface - terrainHeight(outerMinus.x, outerMinus.z);
+    const parapetTopPlus = surface + parapetHeightFor(humpPlus);
+    const parapetTopMinus = surface + parapetHeightFor(humpMinus);
     const u = along / TEXTURE_METRES;
 
     const ring: Ring = {
@@ -554,28 +595,28 @@ function buildShellGeometry(
         vertex(outerMinus.x, bottomMinus, outerMinus.z, u, bottomMinus / TEXTURE_METRES),
       ],
       outerTop: [
-        vertex(outerPlus.x, parapetTop, outerPlus.z, u, parapetTop / TEXTURE_METRES),
-        vertex(outerMinus.x, parapetTop, outerMinus.z, u, parapetTop / TEXTURE_METRES),
+        vertex(outerPlus.x, parapetTopPlus, outerPlus.z, u, parapetTopPlus / TEXTURE_METRES),
+        vertex(outerMinus.x, parapetTopMinus, outerMinus.z, u, parapetTopMinus / TEXTURE_METRES),
       ],
       innerBottom: [
         vertex(roadPlus.x, surface, roadPlus.z, u, surface / TEXTURE_METRES),
         vertex(roadMinus.x, surface, roadMinus.z, u, surface / TEXTURE_METRES),
       ],
       innerTop: [
-        vertex(roadPlus.x, parapetTop, roadPlus.z, u, parapetTop / TEXTURE_METRES),
-        vertex(roadMinus.x, parapetTop, roadMinus.z, u, parapetTop / TEXTURE_METRES),
+        vertex(roadPlus.x, parapetTopPlus, roadPlus.z, u, parapetTopPlus / TEXTURE_METRES),
+        vertex(roadMinus.x, parapetTopMinus, roadMinus.z, u, parapetTopMinus / TEXTURE_METRES),
       ],
       roadA: vertex(roadPlus.x, surface + 0.02, roadPlus.z, u, roadHalf / TEXTURE_METRES),
       roadB: vertex(roadMinus.x, surface + 0.02, roadMinus.z, u, -roadHalf / TEXTURE_METRES),
       soffitA: inTunnel ? vertex(outerPlus.x, soffit, outerPlus.z, u, halfAcross / TEXTURE_METRES) : null,
       soffitB: inTunnel ? vertex(outerMinus.x, soffit, outerMinus.z, u, -halfAcross / TEXTURE_METRES) : null,
       copingOuter: [
-        copingVertex(outerPlus.x, parapetTop + 0.06, outerPlus.z, u, 0),
-        copingVertex(outerMinus.x, parapetTop + 0.06, outerMinus.z, u, 0),
+        copingVertex(outerPlus.x, parapetTopPlus + 0.06, outerPlus.z, u, 0),
+        copingVertex(outerMinus.x, parapetTopMinus + 0.06, outerMinus.z, u, 0),
       ],
       copingInner: [
-        copingVertex(roadPlus.x, parapetTop + 0.06, roadPlus.z, u, 1),
-        copingVertex(roadMinus.x, parapetTop + 0.06, roadMinus.z, u, 1),
+        copingVertex(roadPlus.x, parapetTopPlus + 0.06, roadPlus.z, u, 1),
+        copingVertex(roadMinus.x, parapetTopMinus + 0.06, roadMinus.z, u, 1),
       ],
     };
 
