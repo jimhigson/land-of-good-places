@@ -39,7 +39,7 @@ import type { MovingPlatform } from '../building/surfaces';
  *
  * - **The road surface is one smooth, continuous hump** — no flat deck, no
  *   stepped ramp treads. The path's own surface rises into a gentle hill
- *   and comes back down ({@link surfaceProfile}, a smootherstep curve with
+ *   and comes back down ({@link surfaceProfile}, a smooth curve with
  *   zero slope at the crown and both feet), so walking it reads as "the
  *   path goes up and over", never "stairs, platform, stairs".
  * - **Exactly as wide as the path it carries** — `roadHalf` is the drawn
@@ -233,13 +233,45 @@ function clamp01(value: number): number {
   return value < 0 ? 0 : value > 1 ? 1 : value;
 }
 
-/** Smootherstep — zero first AND second derivative at both ends, so the
- * hump's crown and both feet blend with no visible crease, and the peak
- * slope stays a mild 1.875× the average grade (comfortably inside what
- * `NavGrid` links as one walking level at its cell pitch). */
-function smootherstep(q: number): number {
-  const t = clamp01(q);
-  return t * t * t * (t * (t * 6 - 15) + 10);
+/**
+ * Fraction of each side's length spent easing the grade in and out — the
+ * hump's slope profile is a cosine-blended trapezoid: zero slope at the
+ * crown and at the foot, a constant grade in the middle, cosine blends
+ * between. Peak slope is `1 / (1 - HUMP_BLEND)` times the average grade
+ * (1.33× at 0.25), and that ratio is the whole reason this is a trapezoid
+ * and not a smootherstep (1.875×): the REAL walking physics lose a slope
+ * that rises faster than `BUILDING_STEP_UP` in one frame — `Player.tick`
+ * samples `WalkSurfaces` with a ceiling one step above her own (damped,
+ * lagging) height, so at `PLAYER_MAX_SPEED` (7.4) under a slow device's
+ * frame clamp (`MAX_FRAME_DELTA`, 1/12 s) a single frame advances
+ * `0.617 m × slope`. A smootherstep's 0.79 peak on the canonical seed's
+ * cramped bridge came to 0.49 m/frame plus the damp lag — right at the
+ * 0.62 m ceiling, and real-browser QA watched her lose the surface at the
+ * steep section, fall into the tunnel and jam against the fence. The
+ * trapezoid's 0.56 peak leaves a third of the ceiling spare at the same
+ * ramp length.
+ */
+const HUMP_BLEND = 0.25;
+
+/**
+ * Normalised drop of the hump profile: 0 at the crown (`q = 0`), 1 at the
+ * foot (`q = 1`), zero slope at both ends, cosine-blended trapezoid slope
+ * in between — see {@link HUMP_BLEND}. The ONE owner of the hump's shape.
+ */
+function profileDrop(q: number): number {
+  const u = clamp01(q);
+  const b = HUMP_BLEND;
+  const total = 1 - b; // integral of the slope shape over [0, 1]
+  let w: number;
+  if (u < b) {
+    w = u / 2 - (b / (2 * Math.PI)) * Math.sin((Math.PI * u) / b);
+  } else if (u <= 1 - b) {
+    w = b / 2 + (u - b);
+  } else {
+    const v = u - (1 - b);
+    w = b / 2 + (1 - 2 * b) + v / 2 + (b / (2 * Math.PI)) * Math.sin((Math.PI * v) / b);
+  }
+  return w / total;
 }
 
 /**
@@ -336,7 +368,7 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // still leave `MIN_SHELL_DEPTH` of masonry over it. Solve the profile for
   // the crown height that guarantees it — see `surfaceProfile`.
   const shorterLength = Math.min(lengthPos, lengthNeg);
-  const dipFraction = smootherstep(ARCH_CLEAR_HALF / Math.max(shorterLength, ARCH_CLEAR_HALF + 0.1));
+  const dipFraction = profileDrop(ARCH_CLEAR_HALF / Math.max(shorterLength, ARCH_CLEAR_HALF + 0.1));
   // surface(edge) = crown − (crown − ground)·dip ≥ crownBase − BRIDGE_DECK_DEPTH + MIN_SHELL_DEPTH
   const needed =
     (crownBase - BRIDGE_DECK_DEPTH + MIN_SHELL_DEPTH - lowestCrownEdgeGroundY * dipFraction) /
@@ -353,7 +385,7 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
     // ground exactly), the same guarantee the old ramp geometry made — see
     // its note on why blending to a single "low end" reference misled a
     // poiGraph probe at the ramp's own low edge.
-    return ground + (crownY - ground) * (1 - smootherstep(q));
+    return ground + (crownY - ground) * (1 - profileDrop(q));
   };
   const heightAt = (x: number, z: number): number => {
     const projected = frame.project(x, z, shift);
