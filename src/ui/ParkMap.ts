@@ -68,6 +68,16 @@ import {
  * (indoors) on a floor other than the one being viewed politely refuses with a
  * little wobble instead of doing something odd.
  *
+ * **A tap that lands on an attraction is the one exception** (GitHub issue
+ * #309): a ride, a stall, the hotel lobby, a garden cart — every one of them
+ * has a collision footprint, which used to be indistinguishable from a wall as
+ * far as this map was concerned, so tapping a ride's plot got the same
+ * "can't walk there" refusal as tapping its fence. `Game.useZoneNear` is
+ * tried before the plain reachability check: if the tap lands on a
+ * registered `InteractZone`, she walks to its stand point and uses it on
+ * arrival — the ordinary walk-up-and-press-E flow, not a second one — and
+ * only a tap that names nothing at all falls through to the old rule.
+ *
  * Pause discipline follows `CuteODex` exactly: opening pauses the park only if
  * it was not already paused by something else, and closing only ever undoes
  * that — the same "every close path restores movement, hop and zoom" rule
@@ -91,6 +101,15 @@ export interface ParkMapDeps {
   walkTo(x: number, y: number, z: number): void;
   /** True while something else already owns the screen (a ride, a mini-game). */
   blocked(): boolean;
+  /**
+   * GitHub issue #309: a tap that landed on an attraction (ride, stall, the
+   * hotel lobby, a garden cart…) — walks her to its stand point and uses it
+   * on arrival, the same walk-up-and-press-E plumbing a chip commit already
+   * uses. Returns false for anything that isn't a real, usable attraction, so
+   * the ordinary reachability check and plain walk below still run for open
+   * ground. Wraps `Game.useZoneNear`.
+   */
+  useAttraction(x: number, y: number, z: number): boolean;
 }
 
 /** Where a place name ended up on the canvas, so the next one can avoid it. */
@@ -374,22 +393,35 @@ export class ParkMap {
       }
       const wx = worldX(localX);
       const wz = worldZ(localZ);
+      const y = this.deps.world.building.surfaces.sample(wx, wz, this.deps.player.position.y);
+      // Issue #309: an attraction's stand point may sit inside its own
+      // collision footprint — a shop counter, a booth — which is exactly what
+      // `isReachable` exists to reject for open ground. Try the attraction
+      // first, so a tap that lands on one walks her there and uses it rather
+      // than being told "can't walk there" for standing on solid scenery.
+      if (this.deps.useAttraction(wx, y, wz)) {
+        this.close();
+        return;
+      }
       if (!this.isReachable(wx, wz)) {
         this.showRefusal(event.clientX, event.clientY, "Can't walk there!");
         return;
       }
-      const y = this.deps.world.building.surfaces.sample(wx, wz, this.deps.player.position.y);
       this.close();
       this.deps.walkTo(wx, y, wz);
       return;
     }
 
     const [wx, wz] = worldPoint;
+    const y = this.deps.world.building.surfaces.sample(wx, wz, this.deps.player.position.y);
+    if (this.deps.useAttraction(wx, y, wz)) {
+      this.close();
+      return;
+    }
     if (!this.isReachable(wx, wz)) {
       this.showRefusal(event.clientX, event.clientY, "Can't walk there!");
       return;
     }
-    const y = this.deps.world.building.surfaces.sample(wx, wz, this.deps.player.position.y);
     this.close();
     this.deps.walkTo(wx, y, wz);
   }

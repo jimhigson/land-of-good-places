@@ -202,7 +202,25 @@ export class Selection implements GameSystem {
   commit(action: ZoneAction): void {
     const zone = this.current;
     if (!zone) return;
+    this.commitZone(zone, action);
+  }
 
+  /**
+   * {@link commit}, for a zone that was never the live selection.
+   *
+   * `ui/ParkMap.ts` is the one caller: a tap on the map names an attraction
+   * directly (by finding it under the tapped point, via `world/interact.ts`'s
+   * `pickInteractZone`) rather than by first standing at it or hovering it, so
+   * there is no `this.current` for {@link commit} to read. The rest of
+   * the machinery — walk if far, run now if close, drop silently if she is
+   * redirected before arriving, re-read the action live so an attraction that
+   * has gone unavailable while she walked simply does nothing — is exactly
+   * {@link commit}'s, because {@link advancePending} looks the zone and its
+   * actions up fresh by id every frame rather than trusting anything cached
+   * here. Nothing before this needed a second "use this attraction" path; this
+   * doesn't invent one either.
+   */
+  commitZone(zone: InteractZone, action: ZoneAction): void {
     if (this.withinReach(zone)) {
       this.pending = null;
       action.run();

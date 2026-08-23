@@ -604,6 +604,13 @@ export function hazardTapeTexture(repeat = 4): CanvasTexture {
    boards any more (family ruling, 28 July 2026) and `signTexture` went with
    them: what a thing is called is DOM text now, so it is simply covered by the
    TEXT RULE's ordinary `--lgp-text-min` like every other word in the game.
+
+   **One deliberate, one-off exception: {@link welcomeSignTexture}.** Jim,
+   23 August 2026, on PR #303's welcome sign: the interact-chip text the board
+   shipped with was not what he asked for — the board itself has to carry
+   real, readable words, painted on, visible on approach rather than after a
+   button press. This is not a reopening of the 28 July ruling for signage in
+   general; it is one board, named by him, that gets its words back.
 --------------------------------------------------------------------------- */
 
 /** Canvas height of the name pill (see {@link nameLabelTexture}). */
@@ -655,6 +662,98 @@ export function nameLabelTexture(name: string, accent: number = PALETTE.markerPi
   texture.colorSpace = SRGBColorSpace;
   texture.anisotropy = 4;
   return texture;
+}
+
+/** Canvas the welcome-sign plaque text is painted at (see {@link welcomeSignTexture}). */
+export const WELCOME_SIGN_CANVAS_WIDTH = 1024;
+export const WELCOME_SIGN_CANVAS_HEIGHT = 380;
+/** Font size the welcome text is painted at inside that canvas. */
+export const WELCOME_SIGN_FONT_PX = 96;
+
+/**
+ * The welcome sign's own painted plaque — see this file's own note above on
+ * why this one board is allowed words when the rest of the park's signage is
+ * DOM text.
+ *
+ * A serif face, deliberately: every other painted or DOM label in the game
+ * uses `--lgp-font` (Baloo 2 / Nunito, the game's rounded playground voice),
+ * and this is the one place asked to read like an actual carved or lettered
+ * sign rather than another UI chip — Georgia/Times as a plain CSS `serif`
+ * fallback stack, no webfont to fetch (ART_DIRECTION's "no external assets").
+ *
+ * Cached by text alone: the greeting is a fixed string, so — like
+ * {@link signTexture} before it — every caller shares one canvas and one GPU
+ * upload rather than each rebuilding its own.
+ */
+export function welcomeSignTexture(text: string): CanvasTexture {
+  return cached(`welcomeSign:${text}`, () => {
+    const width = WELCOME_SIGN_CANVAS_WIDTH;
+    const height = WELCOME_SIGN_CANVAS_HEIGHT;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('2D canvas context unavailable');
+
+    // A cream plaque face, bordered like the hotel's picture mounts
+    // (`world/hotel/dressing.ts`) so it reads as one deliberate object rather
+    // than a sticker.
+    ctx.fillStyle = hexToCss(PALETTE.signBoard);
+    roundedRect(ctx, 0, 0, width, height, 30);
+    ctx.fill();
+
+    ctx.strokeStyle = hexToCss(PALETTE.markerPink);
+    ctx.lineWidth = 14;
+    roundedRect(ctx, 12, 12, width - 24, height - 24, 24);
+    ctx.stroke();
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = hexToCss(PALETTE.ink);
+
+    const maxTextWidth = width - 160;
+    const lines = wrapCanvasText(ctx, text, maxTextWidth, WELCOME_SIGN_FONT_PX);
+    const lineHeight = WELCOME_SIGN_FONT_PX * 1.16;
+    const startY = height / 2 - ((lines.length - 1) * lineHeight) / 2;
+    lines.forEach((line, i) => {
+      ctx.fillText(line, width / 2, startY + i * lineHeight, maxTextWidth);
+    });
+
+    const texture = new CanvasTexture(canvas);
+    texture.colorSpace = SRGBColorSpace;
+    texture.anisotropy = 4;
+    return texture;
+  });
+}
+
+/**
+ * Greedy word-wrap for a canvas string: sets `ctx.font` to the serif welcome
+ * face at `fontPx`, then packs words onto lines no wider than `maxWidth`.
+ * Never shrinks the font to fit — the TEXT RULE forbids that — only breaks
+ * the line, same as `fillText`'s own max-width argument does for a single
+ * line in {@link signTexture}.
+ */
+function wrapCanvasText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+  fontPx: number,
+): string[] {
+  ctx.font = `700 ${fontPx}px Georgia, "Times New Roman", serif`;
+  const words = text.split(' ');
+  const lines: string[] = [];
+  let current = '';
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (current && ctx.measureText(candidate).width > maxWidth) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
 }
 
 /** Soft round blob used for fairy-light glows and the sun/moon halo. */
