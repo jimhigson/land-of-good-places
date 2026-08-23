@@ -1678,8 +1678,14 @@ export const PET_BED_FOOTPRINT_RADIUS = 0.62;
 
 /** Centre-to-centre spacing {@link petBedSlots} tiles pet beds at — comfortably
  *  past the 1.24 m two {@link PET_BED_FOOTPRINT_RADIUS} circles need to clear
- *  each other. */
-const PET_BED_PITCH = 1.3;
+ *  each other.
+ *
+ *  Exported because `Hotel.PET_BEDTIME_RUN_UP` takes half of it: the spot a
+ *  pet stands on to trot into its own bed has to be clear of that bed *and*
+ *  of the next row's, and halfway between the two rows is the only place that
+ *  is. A hand-picked distance there would be a second number to keep in step
+ *  with this one. */
+export const PET_BED_PITCH = 1.3;
 
 /**
  * How far short of the hall doorway's own line (the bedroom's `maxZ` from

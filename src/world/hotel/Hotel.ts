@@ -161,6 +161,7 @@ import {
   SUITE_BEDSIDE_RADIUS,
   petBedSlots,
   PET_BED_FOOTPRINT_RADIUS,
+  PET_BED_PITCH,
   SUITE_DOOR_WIDTH,
   SUITE_PARTITION_HEIGHT,
   type HotelDoorBand,
@@ -218,11 +219,16 @@ const PET_BEDTIME_SECONDS = 0.8;
  * its rows from the north wall *southward* toward the hall door), so a pet
  * arrives from the direction she herself walked in from.
  *
- * Just past a pet bed's own {@link PET_BED_FOOTPRINT_RADIUS}, and a whisker
- * over half the row pitch, so a pet's run-up starts on clear floor rather
- * than inside the next row's canopy.
+ * **Exactly halfway to the next row**, which is the only distance that is
+ * clear of two things at once: its own bed's {@link PET_BED_FOOTPRINT_RADIUS}
+ * (0.62 m) behind it, and the next row's, 0.65 m ahead. A hand-picked 0.7 m
+ * looks fine on an empty floor and stands 0.02 m inside the neighbouring
+ * canopy the moment a child owns enough pets to fill two rows — a small
+ * instance of exactly the "two numbers kept in step by hand" trap CLAUDE.md
+ * opens with, so this is derived from `layout.ts`'s own `PET_BED_PITCH`
+ * rather than typed.
  */
-const PET_BEDTIME_RUN_UP = 0.7;
+const PET_BEDTIME_RUN_UP = PET_BED_PITCH / 2;
 
 /**
  * How high above the mattress top a napping child's own origin (her **feet** —
