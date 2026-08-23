@@ -13,7 +13,7 @@ import { terrainHeight, terrainNormal } from './terrain';
 import { ANCHORS } from './anchors';
 import { PARK_LAYOUT, edgeDistanceAlong } from './parkLayout';
 import { PARK_BOUNDARY } from './boundary';
-import { TRAIN_PLAN } from './train/plan';
+import { TRAIN_PLAN, distanceToRailCorridor } from './train/plan';
 import { STATION_GAP } from './train/fence';
 import { FENCE_OFFSET } from './train/clearance';
 import { DECK_HALF_LENGTH } from './train/bridgeFootprint';
@@ -850,17 +850,26 @@ function crossingFeet(site: CrossingSite): {
   plus: readonly [number, number];
   minus: readonly [number, number];
 } {
-  const reachPlus = site.bridge ? site.rampReachPos + 1.0 : 4.0;
-  const reachMinus = site.bridge ? site.rampReachNeg + 1.0 : 4.0;
+  // A foot must actually stand on its own side: near a pinch (two passes
+  // of the loop a few metres apart) a full-reach foot can overshoot past
+  // the loop's OTHER branch, and every leg joined to it then crosses the
+  // railway somewhere no site exists. Pull the reach in until it does.
+  const foot = (sign: 1 | -1, reach: number): readonly [number, number] => {
+    let r = reach;
+    while (r > 4) {
+      const x = site.x + site.dirX * sign * (DECK_HALF_LENGTH + r);
+      const z = site.z + site.dirZ * sign * (DECK_HALF_LENGTH + r);
+      if (railSideOf(x, z) === sign) return [x, z] as const;
+      r -= 1;
+    }
+    return [
+      site.x + site.dirX * sign * (DECK_HALF_LENGTH + r),
+      site.z + site.dirZ * sign * (DECK_HALF_LENGTH + r),
+    ] as const;
+  };
   return {
-    plus: [
-      site.x + site.dirX * (DECK_HALF_LENGTH + reachPlus),
-      site.z + site.dirZ * (DECK_HALF_LENGTH + reachPlus),
-    ],
-    minus: [
-      site.x - site.dirX * (DECK_HALF_LENGTH + reachMinus),
-      site.z - site.dirZ * (DECK_HALF_LENGTH + reachMinus),
-    ],
+    plus: foot(1, site.bridge ? site.rampReachPos + 1.0 : 4.0),
+    minus: foot(-1, site.bridge ? site.rampReachNeg + 1.0 : 4.0),
   };
 }
 
@@ -884,11 +893,11 @@ function routeLeg(
 ): (readonly [number, number])[] {
   const fromSide = railSideOf(from[0], from[1]);
   const toSide = railSideOf(to[0], to[1]);
-  // Same side: ordinary routing — but still clamped, because the routers
-  // are not rail-aware and a corner can hop the rail and back mid-leg
-  // (measured: a stall connector crossed twice, once *inside* a station's
-  // sealed window, exactly the ground `stationRun` fences).
-  if (fromSide === toSide) return clampToRailSide(manhattanRoute(from, to), fromSide);
+  // Same side: ordinary routing — but still held to its side, because the
+  // routers are not rail-aware and a corner can hop the rail and back
+  // mid-leg (measured: a stall connector crossed twice, once *inside* a
+  // station's sealed window, exactly the ground `stationRun` fences).
+  if (fromSide === toSide) return sameSideLeg(from, to, fromSide);
 
   let best: { site: CrossingSite; near: readonly [number, number]; far: readonly [number, number] } | null = null;
   let bestCost = Infinity;
@@ -914,18 +923,38 @@ function routeLeg(
   const site = best.site;
   return [
     // The ordinary routers know nothing about the railway, so each sub-leg
-    // is clamped to its own side afterwards: a corner that hopped the rail
-    // mid-leg becomes a run along the fence instead (measured: the dodgems
-    // and hotel spurs each crossed the rail *three* times before this).
-    ...clampToRailSide(manhattanRoute(from, best.near), fromSide),
+    // goes through the same side-holding pipeline as a whole same-side leg
+    // (measured: the dodgems and hotel spurs each crossed the rail *three*
+    // times before this, and seed 2's station spur crossed twice more at a
+    // pinch even after its main crossing went via a site).
+    ...sameSideLeg(from, best.near, fromSide),
     // The crossing axis, pinned at the deck's edges and centre so the drawn
     // Catmull-Rom curve runs dead straight over the rail rather than bowing
     // off the deck between two distant feet.
     [site.x + site.dirX * DECK_HALF_LENGTH, site.z + site.dirZ * DECK_HALF_LENGTH] as const,
     [site.x, site.z] as const,
     [site.x - site.dirX * DECK_HALF_LENGTH, site.z - site.dirZ * DECK_HALF_LENGTH] as const,
-    ...clampToRailSide(manhattanRoute(best.far, to), toSide),
+    ...sameSideLeg(best.far, to, toSide),
   ];
+}
+
+/**
+ * One leg held entirely on `side` of the railway: ordinary routing,
+ * side-enforced; where enforcement cannot win — a clamp cannot fix
+ * topology, and when the loop passes twice through the same few metres
+ * (seed 2: two rail passes 9 m apart with a plot in the strip between
+ * them) every direct line pierces the wedge between the passes — the
+ * honest connected route is the one along the fence itself, around the
+ * pinch on the leg's own side ({@link fenceFollowRoute}).
+ */
+function sameSideLeg(
+  from: readonly [number, number],
+  to: readonly [number, number],
+  side: 1 | -1,
+): (readonly [number, number])[] {
+  const direct = enforceRailSide(manhattanRoute(from, to), side);
+  if (!polylineCrossesRail(direct)) return direct;
+  return fenceFollowRoute(from, to, side);
 }
 
 /**
@@ -936,37 +965,128 @@ function routeLeg(
  */
 const RAIL_CLAMP_DISTANCE = 3.5;
 
+/** One point pulled to `side` of the rail at {@link RAIL_CLAMP_DISTANCE}. */
+function clampPoint(x: number, z: number, side: 1 | -1): readonly [number, number] {
+  const route = TRAIN_PLAN.route;
+  const d = route.distanceNear(x, z);
+  const p = route.pointAt(d, clampScratch);
+  const t = route.tangentAt(d, clampTangent);
+  // `side = +1` lies along (tangent.z, -tangent.x) — crossings.ts's own
+  // convention, same as crossingPlan.ts's railSideOf.
+  return [p.x + t.z * side * RAIL_CLAMP_DISTANCE, p.z - t.x * side * RAIL_CLAMP_DISTANCE] as const;
+}
+
 /**
- * Pull every wrong-side point of a routed leg back to `side`, at
- * {@link RAIL_CLAMP_DISTANCE} off the centre line — the repair that keeps a
- * leg whose endpoints share a side from ever actually crossing the railway
- * mid-run. The ordinary routers (`detourAroundBlockers`, `elbowLeg`,
- * `gridDetour`) have never been rail-aware, and making them so was measured
- * (see the HANDOFF's dead-ends) to be either ruinously slow or too fat to
- * thread the narrow strips between rail and boundary; a clamp turns the
- * rare offending corner into a short run along the fence instead.
+ * Hold a whole routed leg on one side of the railway — the repair that
+ * keeps a leg from ever actually crossing it mid-run. The ordinary routers
+ * (`detourAroundBlockers`, `elbowLeg`, `gridDetour`) have never been
+ * rail-aware, and making them so was measured (see the HANDOFF dead-ends)
+ * to be either ruinously slow or too fat to thread the narrow strips
+ * between rail and boundary. Three passes, iterated to a fixed point:
+ *
+ * 1. every wrong-side control point is pulled back to `side`;
+ * 2. any segment that still slips across (sampled every metre — a pair of
+ *    correct-side corners can straddle a narrow dip of the loop, which is
+ *    exactly how one seed-2 spur crossed the railway twice with every
+ *    corner individually "clear") gets a clamped midpoint inserted;
+ * 3. any long segment running near the rail gets midpoints too, because
+ *    the drawn ribbon is a Catmull-Rom through these points, and a sparse
+ *    polyline hugging a bend lets the *curve* cut the corner the polyline
+ *    avoided — control points every couple of metres pin it to the fence.
  */
-function clampToRailSide(
+function enforceRailSide(
   points: readonly (readonly [number, number])[],
   side: 1 | -1,
 ): (readonly [number, number])[] {
-  const route = TRAIN_PLAN.route;
-  return points.map(([x, z]) => {
-    if (railSideOf(x, z) === side) return [x, z] as const;
-    const d = route.distanceNear(x, z);
-    const p = route.pointAt(d, clampScratch);
-    const t = route.tangentAt(d, clampTangent);
-    // `side = +1` lies along (tangent.z, -tangent.x) — crossings.ts's own
-    // convention, same as crossingPlan.ts's railSideOf.
-    return [
-      p.x + t.z * side * RAIL_CLAMP_DISTANCE,
-      p.z - t.x * side * RAIL_CLAMP_DISTANCE,
-    ] as const;
-  });
+  let out = points.map(([x, z]) =>
+    railSideOf(x, z) === side ? ([x, z] as const) : clampPoint(x, z, side),
+  );
+  for (let pass = 0; pass < 6; pass += 1) {
+    let changed = false;
+    const next: (readonly [number, number])[] = [];
+    for (let i = 0; i < out.length; i += 1) {
+      const a = out[i] as readonly [number, number];
+      next.push(a);
+      const b = out[i + 1];
+      if (!b) break;
+      const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (length < 2.5) continue;
+      // Does the segment slip across, or run sparsely near the rail?
+      let slips = false;
+      let nearRail = false;
+      const steps = Math.ceil(length);
+      for (let s = 1; s < steps; s += 1) {
+        const x = a[0] + ((b[0] - a[0]) * s) / steps;
+        const z = a[1] + ((b[1] - a[1]) * s) / steps;
+        if (railSideOf(x, z) !== side) slips = true;
+        if (distanceToRailCorridor(x, z) < RAIL_CLAMP_DISTANCE + 2.5) nearRail = true;
+      }
+      if (slips || (nearRail && length > 4)) {
+        const mx = (a[0] + b[0]) / 2;
+        const mz = (a[1] + b[1]) / 2;
+        const mid =
+          railSideOf(mx, mz) === side && !slips
+            ? ([mx, mz] as const)
+            : clampPoint(mx, mz, side);
+        next.push(mid);
+        changed = true;
+      }
+    }
+    out = next;
+    if (!changed) break;
+  }
+  return out;
 }
 
 const clampScratch = new Vector3();
 const clampTangent = new Vector3();
+
+/** Does the drawn polyline change rail sides anywhere along its length?
+ * Sampled every metre — the same resolution `enforceRailSide` repairs at. */
+function polylineCrossesRail(points: readonly (readonly [number, number])[]): boolean {
+  let side: 1 | -1 | null = null;
+  for (let i = 0; i + 1 < points.length; i += 1) {
+    const a = points[i] as readonly [number, number];
+    const b = points[i + 1] as readonly [number, number];
+    const steps = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1])));
+    for (let s = 0; s <= steps; s += 1) {
+      const x = a[0] + ((b[0] - a[0]) * s) / steps;
+      const z = a[1] + ((b[1] - a[1]) * s) / steps;
+      const here = railSideOf(x, z);
+      if (side !== null && here !== side) return true;
+      side = here;
+    }
+  }
+  return false;
+}
+
+/**
+ * A leg that follows the railway fence, on `side`, from `from`'s stretch of
+ * the loop to `to`'s — the last-resort connected route through a pinch (see
+ * `routeLeg`'s own comment). Walks the shorter way round, one fence point
+ * every ~3 m so the drawn curve genuinely follows the fence line rather
+ * than chording across the very ground this route exists to avoid.
+ */
+function fenceFollowRoute(
+  from: readonly [number, number],
+  to: readonly [number, number],
+  side: 1 | -1,
+): (readonly [number, number])[] {
+  const route = TRAIN_PLAN.route;
+  const dFrom = route.distanceNear(from[0], from[1]);
+  const dTo = route.distanceNear(to[0], to[1]);
+  const forward = route.wrap(dTo - dFrom);
+  const signed = forward <= route.length / 2 ? forward : forward - route.length;
+  const steps = Math.max(1, Math.ceil(Math.abs(signed) / 3));
+  const points: (readonly [number, number])[] = [from];
+  for (let i = 0; i <= steps; i += 1) {
+    const d = route.wrap(dFrom + (signed * i) / steps);
+    const p = route.pointAt(d, clampScratch);
+    points.push(clampPoint(p.x, p.z, side));
+  }
+  points.push(to);
+  return enforceRailSide(points, side);
+}
 
 /** Drops interior points that lie on the same straight run as their
  * neighbours — a 20 m corridor of grid steps collapses to its two ends,
@@ -2261,14 +2381,28 @@ function bestBranchPoint(
   x: number,
   z: number,
 ): readonly [number, number] {
-  const candidates: (readonly [number, number])[] = [];
+  const allCandidates: (readonly [number, number])[] = [];
   for (const route of routes) {
     const point = nearestPointOnRoute(route, x, z);
-    if (point) candidates.push(point);
+    if (point) allCandidates.push(point);
   }
   // The ring is always a legal place to start from, and it is the fallback if
   // no paved route offered a junction outside every plot.
-  candidates.push(nearestRingPoint(ringPoints, x, z));
+  allCandidates.push(nearestRingPoint(ringPoints, x, z));
+
+  // **Branch from the destination's own side of the railway whenever the
+  // network already reaches it.** The first spur to a far-side district
+  // crosses via a planned site (`routeLeg`); every later destination over
+  // there should hang off that district's own paving rather than launch a
+  // second crossing of its own — a nearest-junction choice with no side
+  // awareness sent seed 2's dodgems spur straight through a 9 m pinch
+  // between two rail passes (two rogue crossings), when a same-side branch
+  // point a little further away needed none.
+  const destinationSide = railSideOf(x, z);
+  const sameSide = allCandidates.filter(
+    (candidate) => railSideOf(candidate[0], candidate[1]) === destinationSide,
+  );
+  const candidates = sameSide.length ? sameSide : allCandidates;
 
   let best = candidates[candidates.length - 1] as readonly [number, number];
   let shortest = Infinity;

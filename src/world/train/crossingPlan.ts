@@ -146,6 +146,38 @@ const LEVEL_HALF_WIDTH = 2.6;
 const scratch = new Vector3();
 const sideTangent = new Vector3();
 
+/**
+ * Ground the stations' own structures stand on, *spatially* — the platform,
+ * canopy posts and station furniture live within a few metres of the rail
+ * across the platform window. {@link stationBlocked} already keeps a site
+ * out of that window *along the loop*, but the loop bends back past itself:
+ * on seed 2 a provably-feasible site 190 m away along the rail stood 11 m
+ * from a station's canopy post in space, and the post killed the real
+ * bridge search at the very last half-metre of required ramp. Sampled once,
+ * at module load, from the same plan the stations are built from.
+ */
+const STATION_STRUCTURE_CLEARANCE = 8;
+
+const stationWindowPoints: readonly (readonly [number, number])[] = (() => {
+  const route = TRAIN_PLAN.route;
+  const points: (readonly [number, number])[] = [];
+  const p = new Vector3();
+  for (const station of TRAIN_PLAN.stations) {
+    for (let d = -STATION_GAP; d <= STATION_GAP; d += 2) {
+      route.pointAt(route.wrap(station.distance + d), p);
+      points.push([p.x, p.z]);
+    }
+  }
+  return points;
+})();
+
+function nearStationStructure(x: number, z: number): boolean {
+  for (const [px, pz] of stationWindowPoints) {
+    if (Math.hypot(x - px, z - pz) < STATION_STRUCTURE_CLEARANCE) return true;
+  }
+  return false;
+}
+
 interface Candidate extends CrossingSite {
   /** 0 = square to the track; larger = more oblique (selection prefers small). */
   readonly obliqueness: number;
@@ -184,6 +216,7 @@ function probeReach(
       const z = point.z + dirZ * along * sign + acrossZ * halfWidth * t;
       if (GARDEN_PLAY_BOUNDARY.distanceToEdge(x, z) < boundaryMargin) return false;
       if (!clearOfPlots(x, z, plotMargin)) return false;
+      if (nearStationStructure(x, z)) return false;
       if (along > DECK_HALF_LENGTH) {
         // Past the deck the ramp is ordinary near-ground paving — it may
         // not run inside the rail's own corridor (obliques skirt it).
