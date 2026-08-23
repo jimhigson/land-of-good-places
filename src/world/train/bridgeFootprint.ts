@@ -198,8 +198,48 @@ const SHIFT_FRACTIONS: readonly number[] = [0, 0.35, -0.35, 0.7, -0.7];
  * resolutions `planBridgeFootprints`'s own search and
  * `test/procgen/invariants.ts`'s `everyBridgeIsWalkableAndReachable` use, so
  * nothing the generator calls "clear" can read as a breach to the invariant
- * that re-measures it against the real, built park afterwards. */
+ * that re-measures it against the real, built park afterwards.
+ *
+ * **Fixed `t`s relative to a candidate's own (possibly shifted) centre —
+ * not fixed relative to the crossing's own real touch line.** Found live
+ * on the canonical seed's first real bridge (2026-08-23, once `BRIDGE_RISE`
+ * shrank enough for one to actually build): a candidate accepted at a
+ * lateral shift of roughly a third of its own `halfAcross` puts the
+ * crossing's own touch point — where the drawn path actually meets the
+ * rail, and the one line a shift is required to keep inside the deck (see
+ * `searchDeck`'s own `Math.abs(shift) > halfAcross - MIN_DECK_HALF_WIDTH`
+ * guard) — at `t ≈ 0.38` in that candidate's own frame, squarely between
+ * this list's `0` and `0.45` and tested by *neither*. A lamp base sat
+ * exactly there, 0.09 m inside a walker's real clearance, and nothing here
+ * ever probed the one line guaranteed to carry real foot traffic. See
+ * {@link sampleTsFor}, which is what actually closes the gap — this list
+ * alone is deliberately kept fixed and un-widened, because a genuinely
+ * dense width sweep (checking every `WIDTH_STEP` across a deck that can run
+ * to a `halfGap` of a dozen-plus metres) multiplies the search's own
+ * candidate cost by an order of magnitude for a hole only ever found on the
+ * *one* guaranteed line, not generally across the width. */
 const SAMPLE_TS: readonly number[] = [-1, -0.9, -0.5, -0.45, 0, 0.45, 0.5, 0.9, 1];
+
+/**
+ * {@link SAMPLE_TS}, plus the crossing's own real touch line in *this*
+ * candidate's frame — see that constant's own note for the live bug this
+ * closes. `crossing.x, crossing.z` is guaranteed inside every candidate this
+ * is called for (the shift-acceptance check in `searchDeck` refuses any
+ * shift that would put it outside), so this never adds a point off the
+ * candidate's own deck; it only ever adds the one point every other sample
+ * in the fixed list can legitimately miss.
+ */
+function sampleTsFor(
+  crossing: { x: number; z: number },
+  centerX: number,
+  centerZ: number,
+  acrossX: number,
+  acrossZ: number,
+  halfAcross: number,
+): readonly number[] {
+  const crossingT = ((crossing.x - centerX) * acrossX + (crossing.z - centerZ) * acrossZ) / halfAcross;
+  return [...SAMPLE_TS, crossingT];
+}
 
 /**
  * How much real daylight a probe needs past whatever `real.collision` has
@@ -637,8 +677,9 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
     const idealRampRun = idealRampRunFor(crossing, crossings);
 
     const deckClears = (centerX: number, centerZ: number, halfAcross: number): boolean => {
+      const ts = sampleTsFor(crossing, centerX, centerZ, acrossX, acrossZ, halfAcross);
       for (const along of [-DECK_HALF_LENGTH, DECK_HALF_LENGTH]) {
-        for (const t of SAMPLE_TS) {
+        for (const t of ts) {
           const x = centerX + dirX * along + acrossX * halfAcross * t;
           const z = centerZ + dirZ * along + acrossZ * halfAcross * t;
           if (!searchClear(x, z)) return false;
@@ -658,10 +699,11 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
     ): number => {
       let rampRun = idealRampRun;
       const steps = Math.max(1, Math.ceil(rampRun / WIDTH_STEP));
+      const ts = sampleTsFor(crossing, centerX, centerZ, acrossX, acrossZ, halfAcross);
       for (let i = 1; i <= steps; i += 1) {
         const along = DECK_HALF_LENGTH + (i / steps) * rampRun;
         let blocked = false;
-        for (const t of SAMPLE_TS) {
+        for (const t of ts) {
           const x = centerX + dirX * along * sign + acrossX * halfAcross * t;
           const z = centerZ + dirZ * along * sign + acrossZ * halfAcross * t;
           if (!searchClear(x, z) || nearOtherGuardRail(siblingDecks, x, z, GUARD_RAIL_MARGIN)) {
@@ -852,6 +894,11 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
     const { cx, cz, dirX, dirZ, acrossX, acrossZ, halfAcross } = deck;
     const idealRampRun = idealRampRunFor(crossing, crossings);
     const otherDecks = decks.filter((d) => d.crossingIndex !== crossingIndex);
+    // Same augmented set `deckClears`/`provisionalReach` searched with —
+    // see `sampleTsFor`'s own note. This deck's `(cx, cz)` is already fixed
+    // (pass 1's accepted answer), so this is the one, fixed extra `t` every
+    // sample loop below adds.
+    const ts = sampleTsFor(crossing, cx, cz, acrossX, acrossZ, halfAcross);
 
     // Commit the deck's own footprint — the exact points `deckClears`
     // probed with `searchClear` (felling-considered, non-mutating) during
@@ -860,7 +907,7 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
     // needs that tree gone now — this is the one real fell for the deck
     // itself, matching `clearAt` below's own fell for the ramps.
     for (const along of [-DECK_HALF_LENGTH, DECK_HALF_LENGTH]) {
-      for (const t of SAMPLE_TS) {
+      for (const t of ts) {
         const x = cx + dirX * along + acrossX * halfAcross * t;
         const z = cz + dirZ * along + acrossZ * halfAcross * t;
         commitFell(x, z);
@@ -868,7 +915,7 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
     }
 
     const clearAt = (along: number, sign: 1 | -1): boolean => {
-      for (const t of SAMPLE_TS) {
+      for (const t of ts) {
         const x = cx + dirX * along * sign + acrossX * halfAcross * t;
         const z = cz + dirZ * along * sign + acrossZ * halfAcross * t;
         // The one real fell per crossing (see `commitFell`'s own note) —
