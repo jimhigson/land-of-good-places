@@ -1,4 +1,5 @@
 import type { LevelCrossing } from './crossings';
+import { frameFor, type SpineFrame } from './bridgeSpine';
 import { BRIDGE_RISE, FENCE_OFFSET } from './clearance';
 import { ENTRANCE_RAMP } from '../building/layout';
 import { GARDEN_PLAY_BOUNDARY } from '../boundary';
@@ -181,7 +182,17 @@ function maxLateralShiftFor(crossing: LevelCrossing): number {
  */
 export const MIN_DECK_HALF_WIDTH = PLAYER_RADIUS + 0.3;
 
-/** Coarse step the width search backtracks by. */
+/**
+ * Full thickness of a bridge's own masonry side wall (the spandrel face,
+ * carried up past the road as the parapet). The structural half-width the
+ * search must clear is the paved half-width plus this — the wall stands
+ * just outside the road, so obstacles are probed out to its own outer face,
+ * not merely the paving's edge. One owner: `bridges.ts` builds the wall
+ * meshes and their colliders from this same number.
+ */
+export const BRIDGE_WALL_THICKNESS = 0.3;
+
+/** Coarse step the ramp-reach probes walk by. */
 const WIDTH_STEP = 0.5;
 
 /**
@@ -230,15 +241,13 @@ const SAMPLE_TS: readonly number[] = [-1, -0.9, -0.5, -0.45, 0, 0.45, 0.5, 0.9, 
  * in the fixed list can legitimately miss.
  */
 function sampleTsFor(
+  frame: SpineFrame,
   crossing: { x: number; z: number },
-  centerX: number,
-  centerZ: number,
-  acrossX: number,
-  acrossZ: number,
+  shift: number,
   halfAcross: number,
 ): readonly number[] {
-  const crossingT = ((crossing.x - centerX) * acrossX + (crossing.z - centerZ) * acrossZ) / halfAcross;
-  return [...SAMPLE_TS, crossingT];
+  const crossingT = frame.project(crossing.x, crossing.z, shift).across / halfAcross;
+  return [...SAMPLE_TS, Math.max(-1, Math.min(1, crossingT))];
 }
 
 /**
@@ -340,7 +349,38 @@ export interface BridgeFootprint {
   readonly dirZ: number;
   readonly acrossX: number;
   readonly acrossZ: number;
+  /**
+   * Structural half-width — the outer face of the masonry side walls, what
+   * the search probes obstacles out to. `roadHalf + BRIDGE_WALL_THICKNESS`
+   * on a real footprint; the (much wider) reservation width on a
+   * conservative one.
+   */
   readonly halfAcross: number;
+  /**
+   * Paved half-width — exactly the crossing path's own `pathHalfWidth`
+   * (Jim, 2026-08-23: the bridge is as wide as the path, no wider). The
+   * parapets' inner faces stand here.
+   */
+  readonly roadHalf: number;
+  /**
+   * Standable half-width — how far off the centreline a walker's own
+   * *centre* can really stand between the parapets: `roadHalf` less the
+   * walker's body (`PLAYER_RADIUS`). This is the honest extent
+   * `covers()`/`deckCovers()` report, because "covers" has always meant
+   * "walkable here" to every consumer (NavGrid's exemption, the
+   * invariants' probes) — a wall-to-wall figure would read as promising
+   * standability inside the parapet's own collision reach.
+   */
+  readonly walkHalf: number;
+  /**
+   * The curved local frame the whole bridge is laid out in (the drawn
+   * path's own centreline through the crossing — `bridgeSpine.ts`), plus
+   * the lateral shift the search settled on. `bridges.ts` builds every
+   * mesh, collider and surface through these two rather than re-deriving a
+   * straight frame of its own.
+   */
+  readonly frame: SpineFrame;
+  readonly shift: number;
   /**
    * How far the ramp reaches past the deck on the `sign = +1` side (the
    * direction `dirX`/`dirZ` point) and the `sign = -1` side, kept separate
@@ -458,8 +498,22 @@ function planConservative(crossings: readonly LevelCrossing[]): BridgeFootprint[
       acrossX,
       acrossZ,
       halfAcross: reservedHalfAcross,
+      // A reservation has no road or parapet of its own — the whole
+      // reserved width is what scenery must stay off, so both figures are
+      // the reservation itself. Only `bridges.ts` reads these for real
+      // geometry, and it only ever consumes the *real* pass's footprints.
+      roadHalf: reservedHalfAcross,
+      walkHalf: reservedHalfAcross,
+      frame: frameFor(crossing),
+      shift: 0,
       rampRunPos,
       rampRunNeg,
+      // Straight rectangle on purpose, spine or no spine: this pass's one
+      // job is a conservative superset of wherever the real, curved bridge
+      // can land, and the real frame's own deviation cap
+      // (`bridgeSpine.ts`'s `DEVIATION_CAP`, 3 m) plus the search's own
+      // lateral shift are both comfortably inside the
+      // `maxLateralShiftFor` padding above.
       covers: (x: number, z: number, margin = 0): boolean => {
         const dx = x - cx;
         const dz = z - cz;
@@ -479,13 +533,20 @@ function planConservative(crossings: readonly LevelCrossing[]): BridgeFootprint[
 
 interface DeckPlan {
   readonly crossingIndex: number;
+  /** The shifted frame at `along = 0` — a straight approximation of the
+   * deck used only for the cross-crossing guard-rail exclusion
+   * (`nearOtherGuardRail`); everything about this crossing's own geometry
+   * goes through the frame instead. */
   readonly cx: number;
   readonly cz: number;
   readonly dirX: number;
   readonly dirZ: number;
   readonly acrossX: number;
   readonly acrossZ: number;
+  /** Structural half-width (`roadHalf + BRIDGE_WALL_THICKNESS`). */
   readonly halfAcross: number;
+  /** Lateral shift of the whole frame — the search's dodge lever. */
+  readonly shift: number;
 }
 
 function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): PlannedFootprint[] {
@@ -612,7 +673,10 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
       const dz = z - deck.cz;
       const along = dx * deck.dirX + dz * deck.dirZ;
       const across = dx * deck.acrossX + dz * deck.acrossZ;
-      const railAcross = deck.halfAcross + ACROSS_MARGIN;
+      // The parapet stands at the structural edge itself now (`halfAcross`
+      // already includes the wall's own thickness) — not `ACROSS_MARGIN`
+      // further out, which was the old wide-deck geometry's rail line.
+      const railAcross = deck.halfAcross;
       // Real point-to-segment distance to each of the two rail lines — not
       // "along within span, then across within margin" separately, which
       // reads a point near a rail's own END as safe whenever it clears
@@ -677,18 +741,21 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
     siblingDecks: readonly DeckPlan[],
     existing: DeckPlan | null,
   ): DeckPlan | null => {
-    const dirX = crossing.pathDirX;
-    const dirZ = crossing.pathDirZ;
-    const acrossX = -dirZ;
-    const acrossZ = dirX;
+    const frame = frameFor(crossing);
     const idealRampRun = idealRampRunFor(crossing, crossings);
+    // **The width is not a search lever any more.** Jim, 2026-08-23: the
+    // bridge deck is exactly as wide as the path that crosses it — so the
+    // structural width is the path's own paved width plus the masonry
+    // walls, full stop. The search still backtracks, but only on the
+    // levers that keep that promise: lateral shift (below), tree felling
+    // (`searchClear`), and — last of all — the level-crossing fallback.
+    const halfAcross = crossing.pathHalfWidth + BRIDGE_WALL_THICKNESS;
 
-    const deckClears = (centerX: number, centerZ: number, halfAcross: number): boolean => {
-      const ts = sampleTsFor(crossing, centerX, centerZ, acrossX, acrossZ, halfAcross);
+    const deckClears = (shift: number): boolean => {
+      const ts = sampleTsFor(frame, crossing, shift, halfAcross);
       for (const along of [-DECK_HALF_LENGTH, DECK_HALF_LENGTH]) {
         for (const t of ts) {
-          const x = centerX + dirX * along + acrossX * halfAcross * t;
-          const z = centerZ + dirZ * along + acrossZ * halfAcross * t;
+          const { x, z } = frame.worldAt(along, halfAcross * t, shift);
           if (!searchClear(x, z)) return false;
           if (nearOtherGuardRail(siblingDecks, x, z, GUARD_RAIL_MARGIN)) return false;
         }
@@ -696,23 +763,17 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
       return true;
     };
     // Provisional probe of one ramp side, used only to decide whether a
-    // candidate width/shift is even worth locking in — pass 2 re-measures
-    // the real, final reach with every other crossing's deck fully in place.
-    const provisionalReach = (
-      centerX: number,
-      centerZ: number,
-      halfAcross: number,
-      sign: 1 | -1,
-    ): number => {
-      let rampRun = idealRampRun;
+    // candidate shift is even worth locking in — pass 2 re-measures the
+    // real, final reach with every other crossing's deck fully in place.
+    const provisionalReach = (shift: number, sign: 1 | -1): number => {
+      const rampRun = idealRampRun;
       const steps = Math.max(1, Math.ceil(rampRun / WIDTH_STEP));
-      const ts = sampleTsFor(crossing, centerX, centerZ, acrossX, acrossZ, halfAcross);
+      const ts = sampleTsFor(frame, crossing, shift, halfAcross);
       for (let i = 1; i <= steps; i += 1) {
         const along = DECK_HALF_LENGTH + (i / steps) * rampRun;
         let blocked = false;
         for (const t of ts) {
-          const x = centerX + dirX * along * sign + acrossX * halfAcross * t;
-          const z = centerZ + dirZ * along * sign + acrossZ * halfAcross * t;
+          const { x, z } = frame.worldAt(along * sign, halfAcross * t, shift);
           if (!searchClear(x, z) || nearOtherGuardRail(siblingDecks, x, z, GUARD_RAIL_MARGIN)) {
             debugBridge?.(
               `  ramp ${sign > 0 ? '+' : '-'} blocked at along=${along.toFixed(1)} t=${t.toFixed(2)} (${x.toFixed(1)},${z.toFixed(1)}): ` +
@@ -738,7 +799,7 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
       return rampRun;
     };
 
-    // Keep a still-valid previous answer rather than re-maximising — see
+    // Keep a still-valid previous answer rather than re-searching — see
     // this function's own header for why. `existing` was itself only ever
     // accepted because it once passed exactly these same two checks, so
     // re-running them against the *current* siblings is the whole test: if
@@ -747,81 +808,50 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
     // does not change shape just because something elsewhere did.
     if (
       existing &&
-      deckClears(existing.cx, existing.cz, existing.halfAcross) &&
-      Math.min(
-        provisionalReach(existing.cx, existing.cz, existing.halfAcross, 1),
-        provisionalReach(existing.cx, existing.cz, existing.halfAcross, -1),
-      ) >= WALKABLE_FLOOR + WALKABLE_MARGIN
+      deckClears(existing.shift) &&
+      Math.min(provisionalReach(existing.shift, 1), provisionalReach(existing.shift, -1)) >=
+        WALKABLE_FLOOR + WALKABLE_MARGIN
     ) {
       return existing;
     }
 
-    // Never shrink past the crossing's own self-measured `halfGap` — that
-    // number is not a suggestion, it is the real spread of where the drawn
-    // path's own samples actually touch the rail (`crossings.ts`'s own
-    // note: "an oblique path occupies more corridor than a perpendicular
-    // one, and a fixed gap strands the path's own waypoint samples"). A
-    // deck narrower than that still technically clears real collision —
-    // {@link MIN_DECK_HALF_WIDTH} alone never stops it — but it is a bridge
-    // wide enough for one child standing exactly on the crossing's own
-    // centre line and nobody approaching from anywhere else the path
-    // actually runs, which is not a usable crossing at all. Found live
-    // testing this search, canonical seed: an extremely oblique crossing
-    // (`halfGap` 11.2 m) shrank to a technically-clear 1–2 m sliver and
-    // stranded five waypoints scattered 7–20 m across the very corridor
-    // `halfGap` was measuring in the first place. Below this floor the
-    // search gives up on a bridge here entirely rather than accept a deck
-    // too narrow to be the crossing it is meant to be — see this file's own
-    // header on the fallback that follows.
-    const USABLE_HALF_WIDTH_FLOOR = Math.max(MIN_DECK_HALF_WIDTH, crossing.halfGap);
     const maxShift = maxLateralShiftFor(crossing);
-    // Narrowest first, widening only as a real backtrack — the reverse of
-    // this loop's original direction. QA on PR #330: decks were coming out
-    // 12.9-15.8 m wide for a path only ~4 m across, "a giant plywood table",
-    // because the old loop started at the crossing's own widest offer
-    // (`halfGap + ACROSS_MARGIN`, i.e. the full 2 m collision-safety margin
-    // added on *both* sides) and accepted the very first candidate that
-    // cleared — which is the widest one whenever the widest one clears at
-    // all, so a deck was only ever narrower than that by accident, never by
-    // choice. `USABLE_HALF_WIDTH_FLOOR` (`crossing.halfGap` itself, the
-    // real, self-measured corridor a child's own path actually occupies —
-    // see this floor's own note just above) is already the right *default*
-    // width for a deck that reads as the path it carries, not a discount
-    // rate to fall back on. Widening still happens, exactly the same way
-    // narrowing used to: only when the narrower candidate at this shift
-    // fails real collision, the loop keeps going outward from here.
-    for (
-      let halfAcross = USABLE_HALF_WIDTH_FLOOR;
-      halfAcross <= crossing.halfGap + ACROSS_MARGIN;
-      halfAcross += WIDTH_STEP
-    ) {
-      for (const fraction of SHIFT_FRACTIONS) {
-        const shift = Math.max(-maxShift, Math.min(maxShift, fraction * halfAcross));
-        // The crossing's own touch point — where the real, drawn path meets
-        // the rail — must stay genuinely inside the shifted deck, not just
-        // past its exact edge.
-        if (Math.abs(shift) > halfAcross - MIN_DECK_HALF_WIDTH) continue;
-        const centerX = crossing.x + acrossX * shift;
-        const centerZ = crossing.z + acrossZ * shift;
-        if (!deckClears(centerX, centerZ, halfAcross)) {
-          debugBridge?.(
-            `crossing railD=${crossing.railDistance.toFixed(1)} w=${halfAcross.toFixed(1)} shift=${shift.toFixed(1)}: deck blocked`,
-          );
-          continue;
-        }
-        const reachPos = provisionalReach(centerX, centerZ, halfAcross, 1);
-        const reachNeg = provisionalReach(centerX, centerZ, halfAcross, -1);
-        // Both sides, not the better one — see `WALKABLE_FLOOR`'s own note.
-        // A path crosses this deck in either direction; a ramp missing on
-        // one side is a sheer drop approached from that direction, not a
-        // usable bridge with merely a worse approach.
-        if (Math.min(reachPos, reachNeg) >= WALKABLE_FLOOR + WALKABLE_MARGIN) {
-          return { crossingIndex: -1, cx: centerX, cz: centerZ, dirX, dirZ, acrossX, acrossZ, halfAcross };
-        }
+    for (const fraction of SHIFT_FRACTIONS) {
+      const shift = Math.max(-maxShift, Math.min(maxShift, fraction * halfAcross));
+      // The crossing's own touch point — where the real, drawn path meets
+      // the rail — must stay genuinely inside the shifted deck, not just
+      // past its exact edge.
+      if (Math.abs(shift) > halfAcross - MIN_DECK_HALF_WIDTH) continue;
+      if (!deckClears(shift)) {
         debugBridge?.(
-          `crossing railD=${crossing.railDistance.toFixed(1)} w=${halfAcross.toFixed(1)} shift=${shift.toFixed(1)}: reach +${reachPos.toFixed(1)}/-${reachNeg.toFixed(1)} < ${(WALKABLE_FLOOR + WALKABLE_MARGIN).toFixed(2)}`,
+          `crossing railD=${crossing.railDistance.toFixed(1)} w=${halfAcross.toFixed(1)} shift=${shift.toFixed(1)}: deck blocked`,
         );
+        continue;
       }
+      const reachPos = provisionalReach(shift, 1);
+      const reachNeg = provisionalReach(shift, -1);
+      // Both sides, not the better one — see `WALKABLE_FLOOR`'s own note.
+      // A path crosses this deck in either direction; a ramp missing on
+      // one side is a sheer drop approached from that direction, not a
+      // usable bridge with merely a worse approach.
+      if (Math.min(reachPos, reachNeg) >= WALKABLE_FLOOR + WALKABLE_MARGIN) {
+        const origin = frame.worldAt(0, 0, shift);
+        const at = frame.pointAt(0);
+        return {
+          crossingIndex: -1,
+          cx: origin.x,
+          cz: origin.z,
+          dirX: at.dirX,
+          dirZ: at.dirZ,
+          acrossX: at.acrossX,
+          acrossZ: at.acrossZ,
+          halfAcross,
+          shift,
+        };
+      }
+      debugBridge?.(
+        `crossing railD=${crossing.railDistance.toFixed(1)} w=${halfAcross.toFixed(1)} shift=${shift.toFixed(1)}: reach +${reachPos.toFixed(1)}/-${reachNeg.toFixed(1)} < ${(WALKABLE_FLOOR + WALKABLE_MARGIN).toFixed(2)}`,
+      );
     }
     return null;
   };
@@ -917,14 +947,15 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
     const deck = decks.find((d) => d.crossingIndex === crossingIndex);
     if (!deck) return null; // see this file's own header: fall back to a level crossing
 
-    const { cx, cz, dirX, dirZ, acrossX, acrossZ, halfAcross } = deck;
+    const { cx, cz, dirX, dirZ, acrossX, acrossZ, halfAcross, shift } = deck;
+    const frame = frameFor(crossing);
     const idealRampRun = idealRampRunFor(crossing, crossings);
     const otherDecks = decks.filter((d) => d.crossingIndex !== crossingIndex);
     // Same augmented set `deckClears`/`provisionalReach` searched with —
-    // see `sampleTsFor`'s own note. This deck's `(cx, cz)` is already fixed
+    // see `sampleTsFor`'s own note. This deck's shift is already fixed
     // (pass 1's accepted answer), so this is the one, fixed extra `t` every
     // sample loop below adds.
-    const ts = sampleTsFor(crossing, cx, cz, acrossX, acrossZ, halfAcross);
+    const ts = sampleTsFor(frame, crossing, shift, halfAcross);
 
     // Commit the deck's own footprint — the exact points `deckClears`
     // probed with `searchClear` (felling-considered, non-mutating) during
@@ -934,16 +965,14 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
     // itself, matching `clearAt` below's own fell for the ramps.
     for (const along of [-DECK_HALF_LENGTH, DECK_HALF_LENGTH]) {
       for (const t of ts) {
-        const x = cx + dirX * along + acrossX * halfAcross * t;
-        const z = cz + dirZ * along + acrossZ * halfAcross * t;
+        const { x, z } = frame.worldAt(along, halfAcross * t, shift);
         commitFell(x, z);
       }
     }
 
     const clearAt = (along: number, sign: 1 | -1): boolean => {
       for (const t of ts) {
-        const x = cx + dirX * along * sign + acrossX * halfAcross * t;
-        const z = cz + dirZ * along * sign + acrossZ * halfAcross * t;
+        const { x, z } = frame.worldAt(along * sign, halfAcross * t, shift);
         // The one real fell per crossing (see `commitFell`'s own note) —
         // this deck is already the search's final, kept answer, so a tree
         // felled here is a tree the built park genuinely needed cleared.
@@ -972,6 +1001,12 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
 
     const rampRunPos = rampReach(1);
     const rampRunNeg = rampReach(-1);
+    const roadHalf = crossing.pathHalfWidth;
+    // See the interface's own doc: `covers` promises standability, and the
+    // parapet's collision reach (its wall half-thickness plus the walker's
+    // own body) eats exactly `PLAYER_RADIUS` of the paved width from each
+    // side, measured from the wall's inner face.
+    const walkHalf = Math.max(roadHalf - PLAYER_RADIUS, MIN_DECK_HALF_WIDTH - PLAYER_RADIUS);
 
     return {
       cx,
@@ -981,16 +1016,17 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
       acrossX,
       acrossZ,
       halfAcross,
+      roadHalf,
+      walkHalf,
+      frame,
+      shift,
       rampRunPos,
       rampRunNeg,
       covers: (x: number, z: number, margin = 0): boolean => {
-        const dx = x - cx;
-        const dz = z - cz;
-        const along = dx * dirX + dz * dirZ;
-        const across = dx * acrossX + dz * acrossZ;
-        if (Math.abs(across) > halfAcross + margin) return false;
-        const rampRun = along >= 0 ? rampRunPos : rampRunNeg;
-        return Math.abs(along) <= DECK_HALF_LENGTH + rampRun + margin;
+        const projected = frame.project(x, z, shift);
+        if (Math.abs(projected.across) > walkHalf + margin) return false;
+        const rampRun = projected.along >= 0 ? rampRunPos : rampRunNeg;
+        return Math.abs(projected.along) <= DECK_HALF_LENGTH + rampRun + margin;
       },
     };
   });

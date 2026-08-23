@@ -78,6 +78,11 @@ export function buildRailFence(
    * half-thickness.
    */
   const deckSpanAt = (x: number, z: number, margin: number): number | null => {
+    // NOTE (2026-08-23 humpback rework): the height returned is the
+    // bridge's own LOCAL surface at this point (`heightAt`), not one flat
+    // `deckY` — the hump's surface at the fence line sits below the crown,
+    // and a seam pinned at the crown minus the margin would stand ABOVE a
+    // walker's feet there, blocking her on her own bridge.
     // The *lowest* deck over this point, not the first in list order and
     // — this is the one place in the whole feature that is deliberately
     // NOT `bridgeHeightAt`'s own "tallest, never first" rule, despite
@@ -100,7 +105,9 @@ export function buildRailFence(
     // and "on the lower of two decks" for this to open early for.
     let best: number | null = null;
     for (const bridge of bridges) {
-      if (bridge.deckCovers(x, z, margin) && (best === null || bridge.deckY < best)) best = bridge.deckY;
+      if (!bridge.deckCovers(x, z, margin)) continue;
+      const height = bridge.heightAt(x, z);
+      if (best === null || height < best) best = height;
     }
     return best;
   };

@@ -35,6 +35,33 @@ export interface LevelCrossing {
    * path's own waypoint samples between the compartment walls.
    */
   readonly halfGap: number;
+  /**
+   * Half the paved width of the actual drawn path that crosses here — read
+   * off the path's own centreline samples (`paths.ts`'s `PathSample.
+   * halfWidth`, the same number `addRibbon` paves with), never re-chosen.
+   * Jim's bridge feedback (2026-08-23): *"the bridge deck should be exactly
+   * the same width as the path that crosses it"* — this is the one owner of
+   * that width, so the bridge asks the path rather than sizing itself off
+   * `halfGap` (a fence-gap figure measured along the *rail*, which is why
+   * decks used to come out 12.9–15.8 m wide over a ~4 m path).
+   */
+  readonly pathHalfWidth: number;
+  /**
+   * The drawn path's own centreline through this crossing, ordered along
+   * {@link pathDirX}/{@link pathDirZ}, arc-length-trimmed to a bridge's
+   * plausible reach either side — so a bridge can follow the path's own
+   * gentle curve instead of forcing a rigid straight line through it
+   * (Jim's bridge feedback, 2026-08-23). Empty when no drawn run passes
+   * through the crossing (the hand-sampled gate walk): the bridge then
+   * falls back to the straight line the old geometry always assumed.
+   */
+  readonly spine: readonly SpinePoint[];
+}
+
+/** One point of a crossing's {@link LevelCrossing.spine}. */
+export interface SpinePoint {
+  readonly x: number;
+  readonly z: number;
 }
 
 /** How close a path sample must be to the rail for a side flip between it
@@ -61,6 +88,113 @@ const RUN_BREAK = 3;
  * the site by `paths.ts`, so a miss beyond a few metres is a different
  * crossing (the gate walk's own fixed corridor, mostly), not the site. */
 const SITE_SNAP_TOLERANCE = 8;
+
+/**
+ * A crossing whose nearest drawn-path sample is further away than this has
+ * no drawn run through it at all (the gate walk's hand-sampled corridor,
+ * mostly) — it gets the straight-line fallback spine and the default width
+ * below instead of another run's numbers. Comfortably bigger than the
+ * sample pitch (~0.8 m) and much smaller than the gap to any *other* path.
+ */
+const SPINE_ADOPT_DISTANCE = 3.0;
+
+/**
+ * Paved half-width assumed for a crossing with no drawn run through it —
+ * the gate walk. Matches the widest ordinary spur (`paths.ts` routes at
+ * 2.6–3.2 m wide), because the walk in from the gate is the park's own
+ * front door and should not read narrower than a stall spur.
+ */
+const GATE_WALK_HALF_WIDTH = 1.6;
+
+/** How far along the path, either side of the rail, a crossing's spine is
+ * worth recording — past any bridge's own deck-plus-ramp reach. */
+const SPINE_REACH = 32;
+
+/**
+ * Extract the run of drawn-path centreline samples passing through
+ * `(x, z)`, oriented along `(dirX, dirZ)` and trimmed to
+ * {@link SPINE_REACH} of arc either side. Empty when no run passes close
+ * enough ({@link SPINE_ADOPT_DISTANCE}).
+ */
+function spineThrough(
+  samples: readonly { x: number; z: number; halfWidth: number }[],
+  x: number,
+  z: number,
+  dirX: number,
+  dirZ: number,
+): { spine: SpinePoint[]; halfWidth: number | null } {
+  let bestIndex = -1;
+  let bestDistance = SPINE_ADOPT_DISTANCE;
+  for (let i = 0; i < samples.length; i += 1) {
+    const sample = samples[i] as { x: number; z: number };
+    const d = Math.hypot(sample.x - x, sample.z - z);
+    if (d < bestDistance) {
+      bestDistance = d;
+      bestIndex = i;
+    }
+  }
+  if (bestIndex === -1) return { spine: [], halfWidth: null };
+
+  // Walk outward within the run — the same stride rule `consider` uses to
+  // keep two different paths hugging opposite fence sides from reading as
+  // one (`RUN_BREAK`), PLUS a direction-continuity guard: `pathCentreline`
+  // concatenates every route's own samples, and two routes meeting at a
+  // shared graph node are spatially contiguous (the seam stride is tiny,
+  // so `RUN_BREAK` alone never fires) while the next route can head
+  // straight back the way the first came. Without the guard the walk
+  // folded back on itself at exactly such a seam and produced a spine that
+  // doubled over the crossing (found live, canonical seed, first run of
+  // this extraction: every frame sample beyond the fold sat back on the
+  // rail corridor and the whole bridge search read as blocked). A genuine
+  // fold is a ~180° turn between consecutive ~0.8 m samples; a real
+  // grid-aligned elbow, smoothed by the Catmull-Rom draw, turns a few tens
+  // of degrees per sample at most — so "next stride must not point against
+  // the previous one" (dot > 0) separates the two cleanly.
+  const walk = (step: 1 | -1): SpinePoint[] => {
+    const out: SpinePoint[] = [];
+    let travelled = 0;
+    let previous = samples[bestIndex] as { x: number; z: number };
+    let previousStrideX = 0;
+    let previousStrideZ = 0;
+    for (let i = bestIndex + step; i >= 0 && i < samples.length; i += step) {
+      const sample = samples[i] as { x: number; z: number };
+      const strideX = sample.x - previous.x;
+      const strideZ = sample.z - previous.z;
+      const stride = Math.hypot(strideX, strideZ);
+      if (stride < 0.01) continue; // duplicate point at a route seam
+      if (stride > RUN_BREAK) break;
+      if (previousStrideX !== 0 || previousStrideZ !== 0) {
+        if (strideX * previousStrideX + strideZ * previousStrideZ <= 0) break;
+      }
+      travelled += stride;
+      if (travelled > SPINE_REACH) break;
+      out.push({ x: sample.x, z: sample.z });
+      previous = sample;
+      previousStrideX = strideX;
+      previousStrideZ = strideZ;
+    }
+    return out;
+  };
+  const backward = walk(-1);
+  const forward = walk(1);
+  const centre = samples[bestIndex] as { x: number; z: number };
+  const spine: SpinePoint[] = [...backward.reverse(), { x: centre.x, z: centre.z }, ...forward];
+  if (spine.length < 2) return { spine: [], halfWidth: null };
+
+  // Orient the spine along the crossing's own path direction, so `along`
+  // grows the same way for every consumer. Judged from the LOCAL tangent
+  // at the crossing, not the global endpoints — a long spine can curve far
+  // enough that its endpoints' chord disagrees with the direction the path
+  // actually crosses the rail at.
+  const centreIndex = backward.length;
+  const tangentFrom = spine[Math.max(0, centreIndex - 2)] as SpinePoint;
+  const tangentTo = spine[Math.min(spine.length - 1, centreIndex + 2)] as SpinePoint;
+  if ((tangentTo.x - tangentFrom.x) * dirX + (tangentTo.z - tangentFrom.z) * dirZ < 0) {
+    spine.reverse();
+  }
+  const halfWidth = (samples[bestIndex] as { halfWidth: number }).halfWidth;
+  return { spine, halfWidth };
+}
 
 export function computeCrossings(
   route: TrainRoute,
@@ -121,7 +255,8 @@ export function computeCrossings(
   }
 
   flips.sort((a, b) => a - b);
-  const crossings: LevelCrossing[] = [];
+  type BareCrossing = Omit<LevelCrossing, 'pathHalfWidth' | 'spine'>;
+  const crossings: BareCrossing[] = [];
   let group: number[] = [];
   const emit = () => {
     if (!group.length) return;
@@ -182,9 +317,22 @@ export function computeCrossings(
   emit();
   // The loop wraps: a crossing straddling distance 0 would appear twice.
   if (crossings.length > 1) {
-    const first = crossings[0] as LevelCrossing;
-    const last = crossings[crossings.length - 1] as LevelCrossing;
+    const first = crossings[0] as BareCrossing;
+    const last = crossings[crossings.length - 1] as BareCrossing;
     if (first.railDistance + (route.length - last.railDistance) < CLUSTER_GAP) crossings.pop();
   }
-  return crossings;
+
+  // Enrich each crossing with the drawn path's own width and centreline
+  // through it — see the two fields' own doc comments. Read once, here,
+  // rather than per-bridge later, so every consumer (the footprint search,
+  // the built geometry, the invariants) shares the identical spine.
+  const centreline = pathCentreline();
+  return crossings.map((crossing): LevelCrossing => {
+    const found = spineThrough(centreline, crossing.x, crossing.z, crossing.pathDirX, crossing.pathDirZ);
+    return {
+      ...crossing,
+      pathHalfWidth: found.halfWidth ?? GATE_WALK_HALF_WIDTH,
+      spine: found.spine,
+    };
+  });
 }
