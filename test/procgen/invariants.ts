@@ -66,7 +66,15 @@ import {
 } from '../../src/world/entrance/layout.ts';
 import { ROAD_TILE_METRES } from '../../src/world/entrance/road.ts';
 import { visibleTop } from '../../src/art/style/measure.ts';
-import { CHILD_FOOTPRINT, createKid, TALLEST_CHILD_HEIGHT } from '../../src/art/models/kid.ts';
+import {
+  CHILD_FOOTPRINT,
+  createKid,
+  TALLEST_CHILD_HEIGHT,
+  TALLEST_CHILD_SEATED_HEIGHT,
+} from '../../src/art/models/kid.ts';
+// A leaf module — see its own header — so importing it here cannot fix the
+// park's seed early the way a `trainModel.ts`/`route.ts` import would.
+import { applyRidePose } from '../../src/entities/ridePose.ts';
 import { HAIR_STYLES } from '../../src/art/models/hair.ts';
 import { HAT_KINDS, createHat } from '../../src/art/models/hats.ts';
 // `train/trainDimensions.ts` and `train/clearance.ts` rather than
@@ -79,7 +87,7 @@ import { HAT_KINDS, createHat } from '../../src/art/models/hats.ts';
 // The leaf module is defence against that chain becoming real, not a fix for a
 // live bug. `railRaceFliesClear`'s "reached through the built world, never
 // imported" note below is about `railRace/plan.ts`, which genuinely does.
-import { CAR_FLOOR_Y, LOCO_BODY_TOP_Y, SEAT_Y } from '../../src/world/train/trainDimensions.ts';
+import { CAR_FLOOR_Y, LOCO_BODY_TOP_Y } from '../../src/world/train/trainDimensions.ts';
 import { RIDER_HEADROOM, TRAIN_CLEARANCE_Y } from '../../src/world/train/clearance.ts';
 // A leaf module (imports nothing), so it cannot pin the park's seed the way a
 // static import of `train/route.ts` would — see that constant's own note.
@@ -3064,44 +3072,54 @@ const skyCruiserAlwaysFliesThroughTheCastle: Invariant = (facts) => {
 };
 
 /**
- * The tallest child the park can build, measured once per fork.
+ * The tallest **seated** child the park can build, measured once per fork.
  *
  * Every hair style crossed with every hat, on **real models**, attached the way
  * `WornHat` and `NpcSystem.buildIndividualAvatar` attach them — `hatAnchor.add`
  * at the hat's own natural scale, which is also exactly what the shop
  * catalogue's `model()` hands over. Styles that hide a hat (`hairHidesHat` —
  * mohican's crest) are measured bare, because that is what they render as.
+ * Posed through the game's real `applyRidePose('seated')` before measuring,
+ * exactly as `Player.animate` and (since 2026-08-23) `NpcCharacter.animate`
+ * pose a train rider — a check that re-implements a pose is a check that can
+ * pass a pose the game never renders. Guards `TALLEST_CHILD_SEATED_HEIGHT`
+ * (`kid.ts`) — see that constant's own note for why sitting on this no-knee
+ * rig saves a real but small amount, not half of standing.
  *
  * Lazy rather than at module load, because `createKid` wants the headless
  * canvas shim and that arrives with `buildParkFacts`. ~0.5 s per fork.
  */
-let tallestChildMeasured: { height: number; what: string } | null = null;
+let tallestSeatedChildMeasured: { height: number; what: string } | null = null;
 
-function measureTallestChild(): { height: number; what: string } {
-  if (tallestChildMeasured) return tallestChildMeasured;
+function measureTallestSeatedChild(): { height: number; what: string } {
+  if (tallestSeatedChildMeasured) return tallestSeatedChildMeasured;
   let height = 0;
   let what = '';
+  const pose = (kid: ReturnType<typeof createKid>) =>
+    applyRidePose({ root: kid.root, body: kid.body, head: kid.head, ...kid.limbs! }, 0, 0, 'seated');
   for (const style of HAIR_STYLES) {
     const bare = createKid({ hairStyle: style });
+    pose(bare);
     const bareTop = visibleTop(bare.root);
     if (bareTop > height) {
       height = bareTop;
-      what = `${style}, bare-headed`;
+      what = `${style}, bare-headed, seated`;
     }
     if (bare.hairHidesHat) continue;
     for (const kind of HAT_KINDS) {
       const kid = createKid({ hairStyle: style });
       kid.hatAnchor.add(createHat(kind).root);
       kid.setHatWorn(true);
+      pose(kid);
       const top = visibleTop(kid.root);
       if (top > height) {
         height = top;
-        what = `${style} hair + ${kind} hat`;
+        what = `${style} hair + ${kind} hat, seated`;
       }
     }
   }
-  tallestChildMeasured = { height, what };
-  return tallestChildMeasured;
+  tallestSeatedChildMeasured = { height, what };
+  return tallestSeatedChildMeasured;
 }
 
 /**
@@ -3124,13 +3142,17 @@ function measureTallestChild(): { height: number; what: string } {
  *    that positioned them. `LOCO_BODY_TOP_Y` has to cover what is really there.
  *    (The station canopies live in that same group and are deliberately skipped:
  *    they stand beside the line, they do not travel it.)
- * 2. **The tallest child the park can build**, hair × hats, real models — see
- *    {@link measureTallestChild}. `TALLEST_CHILD_HEIGHT` has to cover it, so
- *    adding a taller hat turns this red instead of quietly lowering a bridge.
- * 3. **Where riders actually are.** `ParkTrain.carryPassengers` stands NPCs on
- *    the carriage floor (`CAR_FLOOR_Y`) and `Player.setRidePose` applies no
- *    seated fold, so the player's feet are on the bench (`SEAT_Y`) and she rides
- *    at full height. The clearance has to cover the worst of the three.
+ * 2. **The tallest child the park can build, seated** — hair × hats, real
+ *    models, posed through the game's own `applyRidePose('seated')` — see
+ *    {@link measureTallestSeatedChild}. `TALLEST_CHILD_SEATED_HEIGHT` has to
+ *    cover it, so adding a taller hat turns this red instead of quietly
+ *    lowering a bridge.
+ * 3. **Where riders actually are.** Both riders sit now (2026-08-23, Jim,
+ *    resolving Decision 8's open question): `ParkTrain.carryPassengers`
+ *    folds `applyRidePose('seated')` onto whoever it carries
+ *    (`NpcCharacter.animate`), and `ParkTrain.updateRider` seats the player
+ *    with her feet on the carriage floor (`CAR_FLOOR_Y`) rather than the
+ *    bench — the same reference an NPC rider uses. One rider term, not two.
  *
  * Then `TRAIN_CLEARANCE_Y` — the published number, from `train/clearance.ts` —
  * is checked against that measured worst case. This is `railRaceFliesClear`'s
@@ -3173,13 +3195,13 @@ const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
     );
   }
 
-  // --- 2. the tallest child the park can build -----------------------------
-  const child = measureTallestChild();
-  if (child.height > TALLEST_CHILD_HEIGHT) {
+  // --- 2. the tallest child the park can build, seated ----------------------
+  const child = measureTallestSeatedChild();
+  if (child.height > TALLEST_CHILD_SEATED_HEIGHT) {
     complaints.push(
-      `TALLEST_CHILD_HEIGHT is ${TALLEST_CHILD_HEIGHT.toFixed(2)} m but a real ` +
-        `${child.what} measures ${child.height.toFixed(3)} m — raise the constant ` +
-        'in kid.ts, because train/clearance.ts sizes a bridge from it',
+      `TALLEST_CHILD_SEATED_HEIGHT is ${TALLEST_CHILD_SEATED_HEIGHT.toFixed(2)} m ` +
+        `but a real ${child.what} measures ${child.height.toFixed(3)} m — raise ` +
+        'the constant in kid.ts, because train/clearance.ts sizes a bridge from it',
     );
   }
 
@@ -3187,7 +3209,9 @@ const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
   //
   // Measured child, not the constant, so a stale constant cannot hide a real
   // rider: this stays honest even if the complaint above is the one that fires.
-  const riderTop = Math.max(CAR_FLOOR_Y, SEAT_Y) + child.height;
+  // Both riders' feet are on the carriage floor now (see the header), so
+  // there is one rider term rather than a `Math.max` across two poses.
+  const riderTop = CAR_FLOOR_Y + child.height;
   const sweptTop = Math.max(builtBodyTop, riderTop);
   if (TRAIN_CLEARANCE_Y < sweptTop) {
     const intrusion = sweptTop - TRAIN_CLEARANCE_Y;
@@ -3195,9 +3219,8 @@ const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
       `TRAIN_CLEARANCE_Y is ${TRAIN_CLEARANCE_Y.toFixed(2)} m but the train sweeps ` +
         `to ${sweptTop.toFixed(2)} m — anything built to that clearance sits ` +
         `${intrusion.toFixed(2)} m inside it. Worst: ` +
-        `built ${builtBodyWhat} ${builtBodyTop.toFixed(2)}, standing NPC rider ` +
-        `${(CAR_FLOOR_Y + child.height).toFixed(2)}, player on the bench ` +
-        `${(SEAT_Y + child.height).toFixed(2)} (${child.what})`,
+        `built ${builtBodyWhat} ${builtBodyTop.toFixed(2)}, seated rider ` +
+        `${riderTop.toFixed(2)} (${child.what})`,
     );
   } else if (TRAIN_CLEARANCE_Y - sweptTop < RIDER_HEADROOM) {
     // Not "is the arithmetic right" — the swept top here is *measured*, so this

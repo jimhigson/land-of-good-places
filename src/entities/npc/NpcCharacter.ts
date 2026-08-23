@@ -11,6 +11,7 @@ import type { GroundSampler } from '../Player';
 import type { Expression } from '../../art/style/faces';
 import { createIntent, clearIntent, type CharacterDriver, type CharacterIntent } from './driver';
 import type { NpcAvatar } from './npcAvatar';
+import { applyRidePose } from '../ridePose';
 
 /**
  * A character that is not the player.
@@ -385,9 +386,12 @@ export class NpcCharacter {
     } else {
       this.move(dt);
     }
+    // Read before the reset below clears it — see `animate`'s own note on
+    // why the seated fold has to be decided here rather than inside it.
+    const seated = this.carriedFlag;
     // The carry is re-asserted every frame; one that is not is over.
     this.carriedFlag = false;
-    this.animate(elapsed);
+    this.animate(elapsed, seated);
   }
 
   /**
@@ -634,7 +638,8 @@ export class NpcCharacter {
   }
 
   /**
-   * The house walk cycle, posed onto the rig.
+   * The house walk cycle, posed onto the rig — or, for a rider `setCarriedPose`
+   * just touched this frame, the game's own seated ride pose instead.
    *
    * Deliberately the same maths as `Player.animate` — bob on each step, squash
    * at the bottom of it, arms and legs in opposition, head lagging a touch —
@@ -643,9 +648,49 @@ export class NpcCharacter {
    *
    * Nothing here hardcodes a joint's rest position; the head's is read off the
    * model at build time, so retuning the kid's proportions carries through.
+   *
+   * **`seated` has to be read before `update` clears `carriedFlag`, not from
+   * the flag itself.** `setCarriedPose` sets `carriedFlag` for the ride to
+   * re-assert every frame it still owns the child, and `update` deliberately
+   * clears it straight after branching on it — "the carry is re-asserted
+   * every frame; one that is not is over" — so that a ride which stops
+   * calling it hands the child back to the ordinary walk cycle on the very
+   * next frame rather than leaving them frozen mid-pose. `animate` always
+   * runs after that reset, so it cannot ask `this.carriedFlag` and has to be
+   * told.
+   *
+   * **Reuses `applyRidePose` rather than a second copy of "holding on,
+   * delighted".** `ridePose.ts`'s own header is explicit about why a pose
+   * hand-copied a second place is exactly the bug the cat bus shipped —
+   * twelve children riding bolt upright with the seat cushions through their
+   * shins, because nothing declared what "seated" meant for them. The train's
+   * own riders get the same fix: one function, called from both the player's
+   * `animate` and this one, is what lets `train/clearance.ts` measure a
+   * pose the game actually renders instead of one only a comment promised.
    */
-  private animate(elapsed: number): void {
+  private animate(elapsed: number, seated = false): void {
     const rig = this.avatar.rig;
+    if (seated) {
+      // No bob, no squash, no walk-cycle lean — she is not walking, she is
+      // riding. Reset to rest before folding the seated pose over it, or a
+      // stride caught mid-frame at the moment she boarded would freeze into
+      // the ride.
+      rig.body.position.y = 0;
+      rig.body.scale.set(1, 1, 1);
+      rig.head.position.y = this.avatar.headBaseY;
+      // `applyRidePose` only ever touches `head.rotation.x`, and only while
+      // waving (`climbWave > 0`, never true here) — a rider who boarded
+      // mid-stride would otherwise keep whatever idle head tilt the walk
+      // cycle last wrote, frozen for the length of the ride.
+      rig.head.rotation.x = 0;
+      rig.head.rotation.z = 0;
+      applyRidePose(rig, 0, elapsed, 'seated');
+      if (this.intent.expression !== this.expression) {
+        this.expression = this.intent.expression;
+        this.avatar.setExpression(this.expression);
+      }
+      return;
+    }
     const gait = this.gait;
     const phase = this.walkPhase;
     const groundY = this.groundAt(this.position.x, this.position.z, this.position.y);

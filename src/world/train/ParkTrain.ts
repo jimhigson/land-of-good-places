@@ -457,9 +457,12 @@ export class ParkTrain implements GameSystem, TrainService {
       const seat = this.seats[seatNumber];
       if (!seat || seat.taken !== 'npc') continue;
 
-      // Children stand in front of the bench rather than sitting on it: they
-      // are posed by their own walk cycle, and a standing child holding on
-      // reads better than a walking one sitting down.
+      // Feet on the carriage floor — same reference as the player's, since
+      // she now sits too (see `updateRider`). `NpcCharacter.animate` reads
+      // back "was I carried this frame" and folds the ride's own seated pose
+      // onto whoever `setCarriedPose` touches below, so the visual sit and
+      // the clearance this height is measured against (train/clearance.ts)
+      // are the same fact, not two.
       this.seatPosition(seat, 0, character.position.y);
       // Hands the child to the ride for this frame — see
       // `NpcCharacter.setCarriedPose`. Writing x/z here and letting their own
@@ -631,7 +634,15 @@ export class ParkTrain implements GameSystem, TrainService {
 
     if (this.playerRiding) {
       // Riding: the train owns the character until they ask to get off.
-      this.seatPosition(seat, SEAT_Y - CAR_FLOOR_Y, player.position.y);
+      //
+      // Feet on the carriage floor, same as an NPC rider — not on the bench
+      // top. `SEAT_Y - CAR_FLOOR_Y` used to be handed here as the lift,
+      // planting her feet on the bench and making her the tallest thing on
+      // the train by the width of the bench (train/clearance.ts's own
+      // finding). She is seated (`Player.ridePosture` defaults to `'seated'`
+      // from `beginRide`, so `applyRidePose` already folds her for it); a
+      // seated child's feet rest on the floor, not the seat.
+      this.seatPosition(seat, 0, player.position.y);
       const car = this.carriages[seat.car];
       player.setRidePose(
         this.seatWorld.x,
