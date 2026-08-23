@@ -1009,7 +1009,6 @@ export class Game {
     return (
       this.shopping.uiOpen ||
       this.world.facePaintStall.uiOpen ||
-      this.world.keychainShop.uiOpen ||
       this.cuteODex.isOpen ||
       this.whatsNew.isOpen ||
       this.miniGames.frozen ||
@@ -1051,7 +1050,6 @@ export class Game {
     return (
       this.shopping.uiOpen ||
       this.world.facePaintStall.uiOpen ||
-      this.world.keychainShop.uiOpen ||
       this.cuteODex.isOpen ||
       this.whatsNew.isOpen ||
       this.miniGames.frozen ||
@@ -1386,7 +1384,6 @@ export class Game {
       this.input.justPressed('menu') &&
       !this.shopping.uiOpen &&
       !this.world.facePaintStall.uiOpen &&
-      !this.world.keychainShop.uiOpen &&
       // The look overlay owns the screen the same way those two do. Without
       // this, Escape — the one key anyone presses to back out of a modal —
       // toggled the pause of the park *behind* the open dialog. `lookOpen`

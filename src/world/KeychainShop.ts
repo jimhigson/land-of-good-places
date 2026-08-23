@@ -12,8 +12,8 @@ import { STALL_PLACEMENTS, STALL_STANDS_BY_ID } from '../minigames/stallPlacemen
 import { Rng } from '../core/mathUtils';
 import { ART } from '../art/style/artPalette';
 import { addOutline, decal, solid, toonMaterial } from '../art/style/materials';
-import { KEYCHAIN_KINDS, createKeychain } from '../art/models/keychains';
-import { pressZone, type InteractZone } from './interact';
+import { KEYCHAIN_KINDS, createKeychain, type KeychainKind } from '../art/models/keychains';
+import { pressAction, type InteractZone, type ZoneAction } from './interact';
 import { highlightObject } from './highlight';
 import { terrainHeight } from './terrain';
 import type { CollisionWorld } from './Collision';
@@ -22,7 +22,6 @@ import type { Player } from '../entities/Player';
 import { gameStore, discoverSecret, type InventoryItem } from '../state';
 import { shopWords } from '../state/wording';
 import { playOpenChime, playSurpriseChime } from '../ui/chime';
-import { KeychainPanel, type KeychainLook } from '../ui/KeychainPanel';
 import { keychainItems, type ShopItem } from './building/shops/catalogue';
 
 /**
@@ -35,14 +34,41 @@ import { keychainItems, type ShopItem } from './building/shops/catalogue';
  * `minigames/stallPlacement.ts` but not one line of code from `minigames/`
  * itself — importing `minigames/` into `world/` would be backwards layering.
  *
- * The one real difference from face paint: a keychain is **collected, not
- * chosen for the moment** — `HANDOFF-keychain-shop.md`'s decisions 2 and 3.
- * Tapping an unowned charm both collects it (`gameStore.buy`, price 0 — see
+ * ## The rack IS the picker (23 August 2026)
+ *
+ * This used to build the display rack purely as set-dressing and open a
+ * separate 2D list panel (`ui/KeychainPanel.ts`) for the actual picking —
+ * two presentations of the same six charms. Jim, having seen a screenshot of
+ * the real rack: *"I like this much better than the menu style - let's keep
+ * it this way for the shop."* So the rack is now the only picker: each charm
+ * already stood on the counter (`buildCart`) is its own
+ * `InteractZone` (GAME_DESIGN.md's SELECTION RULE — `world/Selection.ts`,
+ * `world/Flowers.ts` is the closest existing precedent, a cluster of
+ * individually-tappable things), rainbow-outlined on its own real silhouette
+ * (`highlightObject`), with a chip that reads "Wear the Star!", "Collect the
+ * Heart!" or "Take off the RiPika!" depending on what she owns and wears —
+ * live, the same way the train's platform swaps "Get on" for "Get off".
+ * There is no modal to open any more, so `KeychainShop` no longer has a
+ * `uiOpen`; tapping a charm equips it immediately and `WornKeychain.ts` draws
+ * it on her actual back on the very next frame — better confirmation than
+ * the old panel's stylised preview ever gave, because it is the real thing.
+ *
+ * Six charms this close together on one small cart (≈0.32 m apart) would
+ * ordinarily fail `check:tap-spacing`'s "different actions must sit a
+ * finger apart" rule the moment their chip text differs — which it does,
+ * constantly, as she collects them one by one. The fix is the same one
+ * `tapSpacing.ts` already carves out for two flowers in one bed: every charm
+ * zone declares the same **static** `verb: 'Wear'`, so the check classifies
+ * them as same-action (a harmless-ambiguity warning) even though the live
+ * chip label — built fresh per zone, per frame, in {@link charmActions} — says
+ * something different for each.
+ *
+ * Collected, not chosen for the moment (`HANDOFF-keychain-shop.md`'s
+ * decisions 2 and 3, unchanged by the rack becoming the picker): tapping an
+ * unowned charm both collects it (`gameStore.buy`, price 0 — see
  * `shops/catalogue.ts`'s `keychainStall` entries) and wears it in the same
- * motion; tapping an owned one just wears it; "Take it off" leaves the bag
- * bare. `WornKeychain.ts` draws whichever one is worn on the player's actual
- * back — this file only ever announces a pick through `gameStore`, exactly as
- * `FacePaintStall.pickDesign` does for a design.
+ * motion; tapping an owned one just wears it; tapping the one already worn
+ * takes it off.
  */
 
 // ---------------------------------------------------------------- placement
@@ -57,9 +83,29 @@ const STALL_DEPTH = 1.5;
 /** How close counts as "at the stall" for the proximity/interact check. */
 const REACH = 3.1;
 
+/**
+ * Tap/hit radius for one charm's own zone, in metres — deliberately small (a
+ * charm at the display scale is ~15-20 cm wide); the precise hit test is
+ * {@link highlightObject}'s real silhouette box, so this only sizes the
+ * fallback sphere a hover ray uses when it misses that box, and the coarse
+ * circle `check:tap-spacing` measures separation with.
+ */
+const CHARM_PICK_RADIUS = 0.16;
+
 const SPARKLE_COUNT = 6;
 /** How long the little "got one!" sparkle burst lasts. */
 const SPARKLE_DURATION = 1.1;
+
+/** One charm on the rack: its kind, its catalogue id, the model itself, and where it is in the world. */
+interface RackCharm {
+  readonly kind: KeychainKind;
+  /** `shops/catalogue.ts`'s id for this charm — `keychain.${kind}`. */
+  readonly id: string;
+  readonly root: Group;
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+}
 
 export class KeychainShop implements GameSystem {
   readonly name = 'keychainShop';
@@ -67,25 +113,28 @@ export class KeychainShop implements GameSystem {
 
   private readonly standX: number;
   private readonly standZ: number;
+  private readonly groundY: number;
 
-  private panel: KeychainPanel | null = null;
+  /** Every charm stood on the counter, built once in {@link buildCart}. */
+  private readonly rack: RackCharm[] = [];
+
   private readonly sparkles: Mesh[] = [];
   private readonly sparkleBase: { angle: number; radius: number; rise: number }[] = [];
   private readonly sparkleRng = new Rng(0x1eec4a1);
   private sparkleStartedAt: number | null = null;
+  /** Local (to `this.group`) centre the current sparkle burst radiates from — the charm just picked. */
+  private sparkleOrigin = { x: 0, y: 1.05, z: 0 };
 
   /** `FrameContext.elapsed` as of the last frame — DOM handlers fire between frames. */
   private frameElapsed = 0;
 
   private player: Player | null = null;
 
-  private hint: HTMLElement | null = null;
-
   constructor(collision: CollisionWorld) {
     this.group.name = 'keychainShop';
 
-    const ground = terrainHeight(STALL_X, STALL_Z);
-    this.group.position.set(STALL_X, ground, STALL_Z);
+    this.groundY = terrainHeight(STALL_X, STALL_Z);
+    this.group.position.set(STALL_X, this.groundY, STALL_Z);
     this.group.rotation.y = STALL_FACING;
 
     const stand = STALL_STANDS_BY_ID.get('keychain');
@@ -98,135 +147,100 @@ export class KeychainShop implements GameSystem {
     this.buildSparklePool();
   }
 
-  /**
-   * Builds the stall's HUD into the overlay root. Not done in the
-   * constructor — see `FacePaintStall.mountUi`'s doc comment, which spells
-   * out why: `Hud` clears `#ui-root` on construction, and `World` (so this
-   * stall) is built before the HUD is.
-   */
-  mountUi(uiRoot: HTMLElement): void {
-    if (this.panel) return;
-    this.panel = new KeychainPanel(uiRoot, {
-      onPick: (id) => this.pickKeychain(id),
-      onTakeOff: () => this.takeOff(),
-      onClose: () => this.closePanel(),
-    });
-    this.hint = buildHint(uiRoot);
-    window.addEventListener('keydown', this.onKeyDown);
-  }
-
-  /** True while the picker owns the screen. Mirrors `FacePaintStall.uiOpen`. */
-  get uiOpen(): boolean {
-    return this.panel?.isOpen ?? false;
-  }
-
+  /** True while a ride owns the character — matches every other stall's own gate on its zones. */
   attachPlayer(player: Player): void {
     this.player = player;
   }
 
+  /**
+   * One `InteractZone` per charm on the rack — see this file's own header
+   * for why they can sit this close together and still pass
+   * `check:tap-spacing`.
+   */
   interactZones(): InteractZone[] {
-    return [
-      pressZone(
-        {
-          id: 'stall:keychain',
-          label: 'Keychains!',
-          x: STALL_X,
-          y: terrainHeight(STALL_X, STALL_Z),
-          z: STALL_Z,
-          pickRadius: REACH,
-          standX: this.standX,
-          standZ: this.standZ,
-          // GAME_DESIGN.md's HIGHLIGHT RULE — the cart outlines in rainbow
-          // when it is selected.
-          highlight: highlightObject(this.group),
-        },
-        () => this.requestOpen(),
-        '🔑',
-        // The handoff's own gotcha: without an explicit label the id falls
-        // through `DEFAULT_VERBS`' generic `stall:` prefix to "Play", which
-        // is not what collecting a charm is. `shopWords().verb` matches
-        // `candy.spookyHouse`'s own "Collect!" outside Mayhem.
-        `${shopWords().verb}!`,
-      ),
-    ];
+    return this.rack.map((charm) => this.charmZone(charm));
   }
 
   update(context: FrameContext): void {
-    const { elapsed, input } = context;
-    this.frameElapsed = elapsed;
-
-    this.updateSparkles(elapsed);
-
-    const panel = this.panel;
-    if (!this.player || !panel) return;
-
-    const dx = context.playerPosition.x - this.standX;
-    const dz = context.playerPosition.z - this.standZ;
-    const inRange = Math.hypot(dx, dz) <= REACH;
-
-    setHintVisible(this.hint, inRange && !this.uiOpen);
-
-    if (panel.isOpen) {
-      if (input.justPressed('menu') || input.justPressed('cancel')) this.closePanel();
-    }
+    this.frameElapsed = context.elapsed;
+    this.updateSparkles(context.elapsed);
   }
 
   /**
-   * Opens the picker regardless of range — the deep link's own entry point
-   * (`Game.ts`'s `boardRide` table, `/keychain-stall`), teleporting her to the
-   * stand point first exactly as walking there would have. `Hotel.
-   * requestEnterLobby` is the pattern this follows.
+   * Teleports her to the stand point in front of the rack — the deep link's
+   * own entry point (`Game.ts`'s `boardRide` table, `/keychain-stall`).
+   * There is nothing to "open" any more: standing this close to the cart
+   * selects whichever charm she's nearest to on its own, through the
+   * ordinary SELECTION RULE proximity pick (`interactZones()`, above), the
+   * same as walking there ever did.
    */
   requestOpen(): boolean {
-    if (!this.player || !this.panel || this.uiOpen || this.player.riding) return false;
+    if (!this.player || this.player.riding) return false;
     this.player.teleport(this.standX, this.standZ);
-    this.openPanel();
     return true;
   }
 
   dispose(): void {
-    window.removeEventListener('keydown', this.onKeyDown);
-    this.panel?.dispose();
-    this.hint?.remove();
     disposeGroup(this.group);
   }
 
   // -------------------------------------------------------------- internals
 
-  private readonly onKeyDown = (event: KeyboardEvent): void => {
-    if (event.repeat) return;
-    const panel = this.panel;
-    if (!panel?.isOpen) return;
-    if (panel.handleKey(event.code)) event.preventDefault();
-  };
-
-  private openPanel(): void {
-    const state = gameStore.get();
-    const worn = state.inventory.find((item) => item.uid === state.wornKeychainUid);
-    this.panel?.openWith(keychainItems(), worn?.id ?? '', ownedKeychainIds(state.inventory), playerLook());
-    playOpenChime();
+  private charmZone(charm: RackCharm): InteractZone {
+    return {
+      id: `keychain:${charm.kind}`,
+      label: charm.kind,
+      x: charm.x,
+      y: charm.y,
+      z: charm.z,
+      pickRadius: CHARM_PICK_RADIUS,
+      standX: charm.x,
+      standZ: charm.z,
+      standRadius: REACH,
+      // A single static classification, the same for every charm regardless
+      // of what its live chip actually says — see this file's own header.
+      verb: 'Wear',
+      highlight: highlightObject(charm.root),
+      actions: () => this.charmActions(charm),
+    };
   }
 
-  private closePanel(): void {
-    this.panel?.close();
+  /**
+   * "Wear the Star!" / "Collect the Heart!" / "Take off the RiPika!" — one
+   * chip, evaluated live off the real inventory, exactly the way the train's
+   * platform swaps "Get on" for "Get off" (`ParkTrain.stationActions`).
+   */
+  private charmActions(charm: RackCharm): readonly ZoneAction[] {
+    const item = keychainItems().find((entry) => entry.id === charm.id);
+    if (!item) return [];
+    const shortName = item.displayName.replace(/ Keychain$/, '');
+
+    const state = gameStore.get();
+    const wornId = state.inventory.find((entry) => entry.uid === state.wornKeychainUid)?.id;
+    if (wornId === charm.id) {
+      return pressAction(`Take off the ${shortName}!`, () => this.takeOff(), '🎒');
+    }
+
+    const owned = ownedKeychainIds(state.inventory).has(charm.id);
+    const verb = owned ? 'Wear' : shopWords().verb;
+    return pressAction(`${verb} the ${shortName}!`, () => this.pickKeychain(charm), item.icon);
   }
 
   /**
    * "I want that one" — for an owned charm this only ever wears it; for an
-   * unowned one it collects it first (`gameStore.buy`, price 0) and wears the
-   * copy just bought, the same "it's yours, and it's on you" beat a purchased
-   * jet pack gets (`GameStore.buy`'s own `wornJetpackUid` line).
+   * unowned one it collects it first (`gameStore.buy`, price 0) and wears
+   * the copy just bought, the same "it's yours, and it's on you" beat a
+   * purchased jet pack gets (`GameStore.buy`'s own `wornJetpackUid` line).
    */
-  private pickKeychain(id: string): void {
+  private pickKeychain(charm: RackCharm): void {
     const state = gameStore.get();
-    const existing = state.inventory.find((item) => item.id === id);
+    const existing = state.inventory.find((item) => item.id === charm.id);
     if (existing) {
       gameStore.setWornKeychain(existing.uid);
-      this.syncPanel();
       return;
     }
 
-    const item = keychainItems().find((entry) => entry.id === id);
+    const item = keychainItems().find((entry) => entry.id === charm.id);
     if (!item) return;
     const firstEver = ownedKeychainIds(state.inventory).size === 0;
     const acquisition = gameStore.buy(shopItemToPurchase(item));
@@ -234,26 +248,25 @@ export class KeychainShop implements GameSystem {
 
     gameStore.setWornKeychain(acquisition.item.uid);
     if (firstEver) discoverSecret('secret.keychain');
-    this.spawnSparkles();
+    this.spawnSparkles(charm);
     playSurpriseChime();
-    this.syncPanel();
   }
 
   private takeOff(): void {
     gameStore.setWornKeychain(null);
     playOpenChime();
-    this.syncPanel();
   }
 
-  /** Tells the open panel what she owns/wears now, without a full reopen. */
-  private syncPanel(): void {
-    const state = gameStore.get();
-    const worn = state.inventory.find((item) => item.uid === state.wornKeychainUid);
-    this.panel?.setOwnership(worn?.id ?? '', ownedKeychainIds(state.inventory));
-  }
-
-  private spawnSparkles(): void {
+  private spawnSparkles(charm: RackCharm): void {
     this.sparkleStartedAt = this.frameElapsed;
+    // Bursts from the charm actually picked, not the cart's centre, so a
+    // child can see which one it was — `charm.root.position` is already the
+    // local (to `this.group`) point the sparkle pool's own children share.
+    this.sparkleOrigin = {
+      x: charm.root.position.x,
+      y: charm.root.position.y + 0.16,
+      z: charm.root.position.z,
+    };
     for (let i = 0; i < this.sparkleBase.length; i += 1) {
       this.sparkleBase[i] = {
         angle: this.sparkleRng.range(0, Math.PI * 2),
@@ -263,7 +276,7 @@ export class KeychainShop implements GameSystem {
     }
   }
 
-  /** Same rise-and-fade beat `FacePaintStall.updatePaintingCutscene` draws, over the cart rather than the player. */
+  /** Same rise-and-fade beat `FacePaintStall.updatePaintingCutscene` draws, over the charm just picked. */
   private updateSparkles(elapsed: number): void {
     const startedAt = this.sparkleStartedAt;
     if (startedAt === null) return;
@@ -273,6 +286,7 @@ export class KeychainShop implements GameSystem {
       for (const sparkle of this.sparkles) sparkle.visible = false;
       return;
     }
+    const origin = this.sparkleOrigin;
     for (let i = 0; i < this.sparkles.length; i += 1) {
       const sparkle = this.sparkles[i];
       const base = this.sparkleBase[i];
@@ -281,7 +295,11 @@ export class KeychainShop implements GameSystem {
       const rise = phase * base.rise;
       const fade = Math.sin(phase * Math.PI);
       sparkle.visible = fade > 0.02;
-      sparkle.position.set(Math.cos(base.angle) * base.radius, 1.05 + rise, Math.sin(base.angle) * base.radius);
+      sparkle.position.set(
+        origin.x + Math.cos(base.angle) * base.radius,
+        origin.y + rise,
+        origin.z + Math.sin(base.angle) * base.radius,
+      );
       sparkle.scale.setScalar(0.35 + fade * 0.8);
       sparkle.rotation.y = elapsed * 3 + base.angle;
       const material = sparkle.material as MeshBasicMaterial;
@@ -307,11 +325,23 @@ export class KeychainShop implements GameSystem {
   }
 
   /**
-   * The cart: a little two-wheeled trolley with a counter, and the five real
+   * Local → world, for this stall's own fixed position and yaw — one owner,
+   * shared by {@link buildCollision}'s wall corners and {@link buildCart}'s
+   * per-charm zone positions, rather than the same trig written out twice.
+   */
+  private toWorld(localX: number, localZ: number): [number, number] {
+    const sin = Math.sin(STALL_FACING);
+    const cos = Math.cos(STALL_FACING);
+    return [STALL_X + localX * cos + localZ * sin, STALL_Z - localX * sin + localZ * cos];
+  }
+
+  /**
+   * The cart: a little two-wheeled trolley with a counter, and the six real
    * charm models stood up on it as a display rack — the origin-at-the-base
    * convention `art/models/keychains.ts` was built for means they can stand
-   * here with no offset maths at all, the same courtesy that file's own doc
-   * comment promises a shop shelf.
+   * here with no offset maths at all. This rack is also the shop's whole
+   * picker (see this file's own header): every charm built here is handed
+   * to {@link interactZones} as its own tappable, wearable thing.
    */
   private buildCart(): void {
     const halfWidth = STALL_WIDTH / 2;
@@ -369,19 +399,26 @@ export class KeychainShop implements GameSystem {
     canopyCap.position.set(0, 2.24, -STALL_DEPTH / 2 + 0.15);
     this.group.add(canopyCap);
 
-    // The five charms themselves, stood along the counter as a display rack —
-    // small (they are 20 cm charms; a 1.5x scale keeps them readable from the
-    // fixed camera without dwarfing the cart), spaced evenly, alternating a
-    // slight lean so the row does not read as a static shelf of identical
-    // ranks.
+    // The six charms themselves, stood along the counter as a display
+    // rack — small (they are 20 cm charms; a 1.5x scale keeps them readable
+    // from the fixed camera without dwarfing the cart), spaced evenly,
+    // alternating a slight lean so the row does not read as a static shelf
+    // of identical ranks. Each one's real world position is recorded into
+    // {@link rack} for {@link interactZones} to build a tap target from.
     const rackWidth = STALL_WIDTH - 0.5;
+    const charmLocalY = 0.885;
+    const charmLocalZ = -0.02;
     KEYCHAIN_KINDS.forEach((kind, index) => {
       const handle = createKeychain(kind);
       const t = KEYCHAIN_KINDS.length > 1 ? index / (KEYCHAIN_KINDS.length - 1) : 0.5;
-      handle.root.position.set(-rackWidth / 2 + t * rackWidth, 0.885, -0.02);
+      const localX = -rackWidth / 2 + t * rackWidth;
+      handle.root.position.set(localX, charmLocalY, charmLocalZ);
       handle.root.scale.setScalar(1.5);
       handle.root.rotation.y = (index % 2 === 0 ? 1 : -1) * 0.18;
       this.group.add(handle.root);
+
+      const [x, z] = this.toWorld(localX, charmLocalZ);
+      this.rack.push({ kind, id: `keychain.${kind}`, root: handle.root, x, y: this.groundY + charmLocalY, z });
     });
   }
 
@@ -389,17 +426,11 @@ export class KeychainShop implements GameSystem {
     const halfWidth = STALL_WIDTH / 2 + 0.08;
     const front = STALL_DEPTH / 2 + 0.08;
     const back = -STALL_DEPTH / 2 - 0.08;
-    const sin = Math.sin(STALL_FACING);
-    const cos = Math.cos(STALL_FACING);
-    const toWorld = (lx: number, lz: number): [number, number] => [
-      STALL_X + lx * cos + lz * sin,
-      STALL_Z - lx * sin + lz * cos,
-    ];
 
-    const frontLeft = toWorld(-halfWidth, front);
-    const frontRight = toWorld(halfWidth, front);
-    const backLeft = toWorld(-halfWidth, back);
-    const backRight = toWorld(halfWidth, back);
+    const frontLeft = this.toWorld(-halfWidth, front);
+    const frontRight = this.toWorld(halfWidth, front);
+    const backLeft = this.toWorld(-halfWidth, back);
+    const backRight = this.toWorld(halfWidth, back);
 
     collision.addWall(frontLeft[0], frontLeft[1], frontRight[0], frontRight[1], 0.25);
     collision.addWall(backLeft[0], backLeft[1], backRight[0], backRight[1], 0.25);
@@ -430,46 +461,6 @@ function shopItemToPurchase(item: ShopItem) {
     price: item.price,
     carryable: item.carryable,
   };
-}
-
-/**
- * How the player looks right now, for the picker's preview to wear — the
- * `FacePaintStall.playerLook` twin, minus the face paint this stall does not
- * touch and plus nothing this stall needs to add: `keychainId` is supplied by
- * the panel itself from whichever row is hovered/selected, never from here.
- */
-function playerLook(): KeychainLook {
-  const state = gameStore.get();
-  const hat = state.inventory.find((item) => item.uid === state.wornHatUid);
-  return {
-    skin: state.player.skinColour,
-    hair: state.player.hairColour,
-    hairStyle: state.player.hairStyle,
-    outfit: state.player.outfitColour,
-    outfitArms: state.player.outfitArmsColour,
-    eye: state.player.eyeColour,
-    backpack: state.player.backpackKind,
-    backpackColour: state.player.backpackColour,
-    shoes: state.player.shoeKind,
-    shoesColour: state.player.shoeColour,
-    hatId: hat?.id ?? '',
-    petId: '',
-    glasses: state.player.glassesKind,
-  };
-}
-
-function buildHint(uiRoot: HTMLElement): HTMLElement {
-  const hint = document.createElement('div');
-  hint.className = 'pill keychain-hint';
-  hint.dataset.show = 'false';
-  hint.innerHTML = '<span class="emoji">🔑</span><span>Tap for keychains!</span>';
-  uiRoot.append(hint);
-  return hint;
-}
-
-function setHintVisible(hint: HTMLElement | null, visible: boolean): void {
-  if (!hint) return;
-  hint.dataset.show = visible ? 'true' : 'false';
 }
 
 function disposeGroup(root: Group): void {

@@ -145,7 +145,8 @@ const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
   '/hotel': 'hotelLobby',
   // The keychain stall (#119/#225) — a garden cart on a layout that
   // reshuffles per seed, the same QA problem the hotel and the slide have.
-  // Teleports her to the stand point and opens the picker directly; see
+  // Teleports her to the stand point; the rack itself is the picker, so
+  // standing there is all "opening" it ever takes — see
   // `KeychainShop.requestOpen`.
   '/keychain-stall': 'keychainStall',
   // A guest-floor bathroom (#281, every floor gets one) — same QA problem

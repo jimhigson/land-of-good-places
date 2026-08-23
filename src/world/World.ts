@@ -487,7 +487,8 @@ export class World implements GameSystem {
    */
   mountUi(uiRoot: HTMLElement): void {
     this.facePaintStall.mountUi(uiRoot);
-    this.keychainShop.mountUi(uiRoot);
+    // The keychain stall has no panel of its own any more — the rack itself
+    // is the picker (`world/KeychainShop.ts`'s own header).
   }
 
   /**
