@@ -940,8 +940,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   const { CIRCULAR_PARK_AREA, PARK_AREA_MULTIPLIER } = await import('../../src/world/boundary.ts');
   const { PARK_LAYOUT } = await import('../../src/world/parkLayout.ts');
   const { ANCHORS } = await import('../../src/world/anchors.ts');
-  const { PATH_GRAPH, PLAZA } = await import('../../src/world/paths.ts');
-  const { CatmullRomCurve3 } = await import('three');
+  const { PATH_GRAPH, PLAZA, routeCurve } = await import('../../src/world/paths.ts');
   const { NavGrid, MAX_ROUTE_WAYPOINTS } = await import('../../src/world/NavGrid.ts');
   const { PLAYER_RADIUS } = await import('../../src/core/constants.ts');
   const { CASTLE_WINDOWS, checkCastleWindows, sweptCartHits } = await import(
@@ -1343,12 +1342,11 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   const drawnCentreLine = (
     route: (typeof PATH_GRAPH.edges)[number]['route'],
   ): { length: number; points: [number, number][] } => {
-    const curve = new CatmullRomCurve3(
-      route.points.map(([x, z]) => new Vector3(x, 0, z)),
-      route.closed,
-      'catmullrom',
-      0.4,
-    );
+    // `routeCurve` is the one owner of the drawn shape — the fillet pass in
+    // `paths.ts` means the curve is more than the raw control points now,
+    // and a second hand-rolled CatmullRom here would measure a path the
+    // park no longer draws.
+    const curve = routeCurve(route);
     const length = curve.getLength();
     const steps = Math.max(8, Math.ceil(length / 0.5));
     const points: [number, number][] = [];

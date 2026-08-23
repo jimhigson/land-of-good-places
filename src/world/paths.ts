@@ -105,6 +105,10 @@ const SPUR_STRETCH_ID = stringFromEnv('LGP_SPUR_STRETCH_ID') ?? 'stall.railRacer
  * park — see that function's call site. Zero/default in the game. */
 const DISABLE_INTERCONNECTS = stringFromEnv('LGP_DISABLE_INTERCONNECTS') !== null;
 
+/** Debug hook: log why a spur fell back off the street lattice. Node-only,
+ * zero/default in the game, exactly like the hooks above. */
+const DEBUG_STREETS = stringFromEnv('LGP_DEBUG_STREETS') !== null;
+
 function stringFromEnv(name: string): string | null {
   try {
     const nodeProcess = (globalThis as { process?: { env?: Record<string, string> } }).process;
@@ -1330,7 +1334,819 @@ function collapseCollinear(points: readonly (readonly [number, number])[]): (rea
   return out;
 }
 
+// ---------------------------------------------------------------- streets
+//
+// **The street lattice** (issue #269 rework, 23 August 2026 — Jim, on the
+// previous "axis-aligned" network's top-down view: "that top-down view looks
+// nothing like how we discussed"). The old pipeline routed every spur
+// independently in continuous space (`detourAroundBlockers`) and then folded
+// each diagonal into elbows (`elbowLeg`) — so every corner landed wherever
+// its own diagonal happened to be, and the built network's north-south runs
+// sat on ~19 different x-positions with nothing sharing a street line
+// anywhere. Every segment was axis-aligned; the network still read as
+// organic wandering, because "reads as a grid" is a property of the *set of
+// lines* the segments sit on, not of any one segment's own heading.
+//
+// So routes are now solved ON a fixed lattice first, and the old machinery
+// is kept only as a fallback for ground the lattice genuinely cannot serve
+// (a pocket pinched between rail and boundary too narrow for any lattice
+// node — the same ground `fenceFollowRoute` exists for):
+//
+// - **One grid, fixed pitch** (`STREET_PITCH`, 12 m — Decision 1), anchored
+//   at the plaza so the statue circle's four compass streets (Decision 5)
+//   lie exactly on lattice lines whatever the seed.
+// - **Routing is Dijkstra on the lattice graph** against the same blockers,
+//   boundary and railway screens the old routers used, with a turn penalty
+//   (streets prefer to run straight — `STREET_TURN_PENALTY`) and
+//   terminate-at-network goals (a route stops the moment it reaches paving,
+//   so later routes extend earlier streets instead of paving parallel ones).
+// - **Junctions land only on lattice nodes**, shared exactly (same float
+//   coordinates), so `buildRouteDistanceGraph` sees real crossroads.
+// - **Doors keep their doormats**: a short stub (at most one lattice cell,
+//   elbowed via the node's own street line) connects each destination's
+//   lead point to the lattice — the genuine minority of off-grid metres
+//   Decision 6 allows, alongside the railway's own crossing geometry.
 
+/** Lattice pitch — Decision 1's "grid pitch 12 m". The one big number. */
+const STREET_PITCH = 12;
+
+/** Cells each way from the plaza the lattice extends. ±14 cells is ±168 m,
+ * comfortably past every boundary spline the generator produces (measured
+ * extent on the canonical seed: x -51..83, z -48..58 about a plaza near the
+ * origin); nodes outside the boundary are simply invalid. */
+const LATTICE_HALF_CELLS = 14;
+
+/**
+ * Extra metres a turn costs the street search. Any positive value picks the
+ * fewest-turns route among equal-length Manhattan paths (they are all the
+ * same length, so the penalty is the only tie-breaker that matters); a
+ * larger one also accepts a slightly longer route to avoid zig-zagging.
+ * Half a cell reads well: a street will run straight past one blocked-off
+ * shortcut rather than staircase around it, but never detour a whole block.
+ */
+const STREET_TURN_PENALTY = 6;
+
+/** A stub or connector's metres count a little more than street metres, so
+ * the search prefers walking the lattice over long off-grid connectors. */
+const STUB_COST_FACTOR = 1.25;
+
+/** How far off a lattice node's own cell a stub's off-lattice tail may run.
+ * A stub elbowed via the node's own street line keeps one leg exactly on
+ * the lattice; the other (the tail, along the destination's own x or z) must
+ * stay shorter than the new lattice invariant's own straight-run threshold,
+ * or the stub itself would read as a rogue street line. */
+const STUB_TAIL_LIMIT = 7;
+
+/**
+ * Clearance a street keeps from a plot's **real footprint edge** and from
+ * the boundary: the ribbon's own half-width plus kerb (up to 1.6 + 0.85 for
+ * a 3.2 m street) and a small walking verge. The lattice screens against
+ * real footprints, not `BLOCKERS`' bounding circles, deliberately: a
+ * bounding circle over-approximates a big rectangular anchor by many
+ * metres, and at a fixed 12 m pitch that over-approximation starved the
+ * whole park interior of edges (measured: the first lattice attempt had
+ * almost no valid edges inside the rail loop — the exact ground the
+ * streets exist to serve). The old continuous routers keep their circles;
+ * they weave at arbitrary angles and never needed the precision.
+ */
+const STREET_PLOT_CLEARANCE = 2.6;
+
+/** Distance from a point to a placed plot's own footprint edge (negative
+ * inside). Plots are axis-aligned by construction (`edgeDistanceAlong`'s
+ * own comment). */
+function distanceToPlotEdge(
+  entry: { x: number; z: number; footprint: { kind: 'circle'; radius: number } | { kind: 'rect'; halfX: number; halfZ: number } },
+  x: number,
+  z: number,
+): number {
+  if (entry.footprint.kind === 'circle') {
+    return Math.hypot(x - entry.x, z - entry.z) - entry.footprint.radius;
+  }
+  const dx = Math.abs(x - entry.x) - entry.footprint.halfX;
+  const dz = Math.abs(z - entry.z) - entry.footprint.halfZ;
+  const ox = Math.max(dx, 0);
+  const oz = Math.max(dz, 0);
+  const outside = Math.hypot(ox, oz);
+  return outside > 0 ? outside : Math.max(dx, dz);
+}
+
+/** The placed plots a street must clear — every layout entry except the
+ * fountain (the plaza is paving, not an obstacle). */
+let streetPlotsCache:
+  | readonly { x: number; z: number; footprint: { kind: 'circle'; radius: number } | { kind: 'rect'; halfX: number; halfZ: number } }[]
+  | null = null;
+function streetPlots(): readonly {
+  x: number;
+  z: number;
+  footprint: { kind: 'circle'; radius: number } | { kind: 'rect'; halfX: number; halfZ: number };
+}[] {
+  if (!streetPlotsCache) {
+    streetPlotsCache = [...PARK_LAYOUT.entries.values()]
+      .filter((entry) => entry.id !== 'fountain')
+      .map((entry) => ({ x: entry.x, z: entry.z, footprint: entry.footprint }));
+  }
+  return streetPlotsCache;
+}
+
+/** The arch-foot circles from {@link BLOCKERS} — posts are genuinely round,
+ * so the circle test stays exact for them. */
+let archFootBlockersCache: readonly Blocker[] | null = null;
+function archFootBlockers(): readonly Blocker[] {
+  if (!archFootBlockersCache) {
+    archFootBlockersCache = BLOCKERS.filter((blocker) => blocker.kind === 'archFoot');
+  }
+  return archFootBlockersCache;
+}
+
+/**
+ * True when every ~1.5 m sample of the segment keeps
+ * {@link STREET_PLOT_CLEARANCE} from every plot's real footprint (plots
+ * within `exemptNear` metres of `exemptAt` are skipped — the "arriving at a
+ * destination" allowance, exactly the reasoning `segmentClearOfBlockers`'s
+ * own endpoint exemption encodes), the same clearance from the boundary,
+ * and clear of every arch foot.
+ */
+function streetSegmentClear(
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+  exemptAt: readonly [number, number] | null = null,
+  exemptNear = 0,
+): boolean {
+  const plots = streetPlots();
+  const active = exemptAt
+    ? plots.filter((plot) => distanceToPlotEdge(plot, exemptAt[0], exemptAt[1]) > exemptNear)
+    : plots;
+  const relaxed = exemptAt
+    ? plots.filter((plot) => distanceToPlotEdge(plot, exemptAt[0], exemptAt[1]) <= exemptNear)
+    : [];
+  const length = Math.hypot(bx - ax, bz - az);
+  const steps = Math.max(1, Math.ceil(length / 1.5));
+  for (let s = 0; s <= steps; s += 1) {
+    const t = s / steps;
+    const x = ax + (bx - ax) * t;
+    const z = az + (bz - az) * t;
+    for (const plot of active) {
+      if (distanceToPlotEdge(plot, x, z) < STREET_PLOT_CLEARANCE) return false;
+    }
+    // A destination's own frontage may be walked along, never through.
+    for (const plot of relaxed) {
+      if (distanceToPlotEdge(plot, x, z) < 0.3) return false;
+    }
+    if (PARK_BOUNDARY.distanceToEdge(x, z) < STREET_PLOT_CLEARANCE) return false;
+    for (const foot of archFootBlockers()) {
+      if (Math.hypot(x - foot.x, z - foot.z) < foot.radius) return false;
+    }
+  }
+  return true;
+}
+
+interface LatticeTap {
+  /** Node the tap street reaches, on the compass lattice line. */
+  readonly index: number;
+  /** Where the tap leaves the ring's own drawn circle — one of
+   * {@link RING_COMPASS_POINTS}, which are all ring control points. */
+  readonly rim: readonly [number, number];
+}
+
+interface StreetLattice {
+  readonly count: number;
+  /** World coordinates per node index (invalid nodes still have these). */
+  readonly xs: Float64Array;
+  readonly zs: Float64Array;
+  readonly nodeOk: Uint8Array;
+  readonly side: Int8Array;
+  /** Walkable edge from node to its +x / +z neighbour. */
+  readonly edgeEast: Uint8Array;
+  readonly edgeSouth: Uint8Array;
+  /** The statue ring's four compass streets — Decision 5's only ring
+   * connections, one per compass point that has a reachable node. */
+  readonly taps: readonly LatticeTap[];
+  readonly indexOf: (i: number, j: number) => number;
+  readonly cellOf: (index: number) => readonly [number, number];
+}
+
+/** Everything already paved on the lattice — grown as routes commit. */
+const pavedLatticeNodes = new Set<number>();
+const pavedLatticeEdges = new Set<string>();
+const usedTaps = new Set<number>();
+
+function latticeEdgeKey(a: number, b: number): string {
+  return a < b ? `${a}-${b}` : `${b}-${a}`;
+}
+
+/** True if the segment keeps genuinely clear of the statue circle — streets
+ * never cut through the ring's own ground (the plaza and statue live there,
+ * and the ring must stay a clean circle with exactly four compass taps). */
+function segmentClearOfRing(ax: number, az: number, bx: number, bz: number): boolean {
+  const dx = bx - ax;
+  const dz = bz - az;
+  const lengthSq = dx * dx + dz * dz;
+  const t =
+    lengthSq > 1e-9
+      ? Math.max(0, Math.min(1, ((PLAZA.x - ax) * dx + (PLAZA.z - az) * dz) / lengthSq))
+      : 0;
+  return Math.hypot(PLAZA.x - (ax + dx * t), PLAZA.z - (az + dz * t)) >= RING_RADIUS + 0.5;
+}
+
+/** Rail screen for a lattice edge or stub: every sample stays on `side` and
+ * (for street edges) outside the rail corridor. Stubs pass `0` for
+ * `minDistance` — a station's own lead legitimately stands near the rail. */
+function segmentHoldsRailSide(
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+  side: 1 | -1,
+  minDistance: number,
+): boolean {
+  const length = Math.hypot(bx - ax, bz - az);
+  const steps = Math.max(1, Math.ceil(length / 2));
+  for (let s = 0; s <= steps; s += 1) {
+    const t = s / steps;
+    const info = railInfoAt(ax + (bx - ax) * t, az + (bz - az) * t);
+    if (info.side !== side || info.dist < minDistance) return false;
+  }
+  return true;
+}
+
+let latticeCache: StreetLattice | null = null;
+
+/** The lattice graph, solved once from the same inputs every router uses. */
+function streetLattice(): StreetLattice {
+  if (latticeCache) return latticeCache;
+  const size = LATTICE_HALF_CELLS * 2 + 1;
+  const count = size * size;
+  const indexOf = (i: number, j: number): number =>
+    (i + LATTICE_HALF_CELLS) * size + (j + LATTICE_HALF_CELLS);
+  const cellOf = (index: number): readonly [number, number] => [
+    Math.floor(index / size) - LATTICE_HALF_CELLS,
+    (index % size) - LATTICE_HALF_CELLS,
+  ];
+  const xs = new Float64Array(count);
+  const zs = new Float64Array(count);
+  const nodeOk = new Uint8Array(count);
+  const side = new Int8Array(count);
+  for (let i = -LATTICE_HALF_CELLS; i <= LATTICE_HALF_CELLS; i += 1) {
+    for (let j = -LATTICE_HALF_CELLS; j <= LATTICE_HALF_CELLS; j += 1) {
+      const index = indexOf(i, j);
+      const x = PLAZA.x + i * STREET_PITCH;
+      const z = PLAZA.z + j * STREET_PITCH;
+      xs[index] = x;
+      zs[index] = z;
+      // A node needs room for the ribbon's own paved edge (real footprints,
+      // not bounding circles — see {@link STREET_PLOT_CLEARANCE}), must
+      // stand off the statue circle's ground and out of the rail corridor
+      // (the fence's own wall stands at RAIL_CLAMP_DISTANCE).
+      const clear = streetSegmentClear(x, z, x, z);
+      const inRing = Math.hypot(x - PLAZA.x, z - PLAZA.z) < RING_RADIUS + 1;
+      const rail = railInfoAt(x, z);
+      nodeOk[index] = clear && !inRing && rail.dist >= RAIL_CLAMP_DISTANCE ? 1 : 0;
+      side[index] = rail.side;
+    }
+  }
+  const edgeEast = new Uint8Array(count);
+  const edgeSouth = new Uint8Array(count);
+  const edgeOk = (a: number, b: number): boolean => {
+    if (!nodeOk[a] || !nodeOk[b] || side[a] !== side[b]) return false;
+    const ax = xs[a] as number;
+    const az = zs[a] as number;
+    const bx = xs[b] as number;
+    const bz = zs[b] as number;
+    return (
+      streetSegmentClear(ax, az, bx, bz) &&
+      segmentClearOfRing(ax, az, bx, bz) &&
+      segmentHoldsRailSide(ax, az, bx, bz, side[a] as 1 | -1, RAIL_CLAMP_DISTANCE - 0.1)
+    );
+  };
+  for (let i = -LATTICE_HALF_CELLS; i <= LATTICE_HALF_CELLS; i += 1) {
+    for (let j = -LATTICE_HALF_CELLS; j <= LATTICE_HALF_CELLS; j += 1) {
+      const index = indexOf(i, j);
+      if (i < LATTICE_HALF_CELLS) edgeEast[index] = edgeOk(index, indexOf(i + 1, j)) ? 1 : 0;
+      if (j < LATTICE_HALF_CELLS) edgeSouth[index] = edgeOk(index, indexOf(i, j + 1)) ? 1 : 0;
+    }
+  }
+
+  // The four compass taps (Decision 5: "exactly 4 connections at compass
+  // points"): each walks outward from the ring's rim along its own compass
+  // lattice line to the first valid node with a clear, on-line street
+  // segment between them.
+  const taps: LatticeTap[] = [];
+  const compassDirs: readonly (readonly [number, number])[] = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ];
+  for (const [di, dj] of compassDirs) {
+    const rim: readonly [number, number] = [
+      PLAZA.x + di * RING_RADIUS,
+      PLAZA.z + dj * RING_RADIUS,
+    ];
+    const firstCell = Math.floor(RING_RADIUS / STREET_PITCH) + 1;
+    for (let cell = firstCell; cell <= firstCell + 2; cell += 1) {
+      const i = di * cell;
+      const j = dj * cell;
+      if (Math.abs(i) > LATTICE_HALF_CELLS || Math.abs(j) > LATTICE_HALF_CELLS) break;
+      const index = indexOf(i, j);
+      if (!nodeOk[index]) continue;
+      const nx = xs[index] as number;
+      const nz = zs[index] as number;
+      if (
+        streetSegmentClear(rim[0], rim[1], nx, nz) &&
+        segmentHoldsRailSide(rim[0], rim[1], nx, nz, side[index] as 1 | -1, 0)
+      ) {
+        taps.push({ index, rim });
+        break;
+      }
+    }
+  }
+
+  latticeCache = { count, xs, zs, nodeOk, side, edgeEast, edgeSouth, taps, indexOf, cellOf };
+  return latticeCache;
+}
+
+/** One off-grid connector from a real point onto the lattice. `points` run
+ * node-first, point-last, including both ends. */
+interface StreetStub {
+  readonly node: number;
+  readonly points: readonly (readonly [number, number])[];
+  readonly cost: number;
+}
+
+/**
+ * Every reasonable way to step from `p` onto the lattice: the four
+ * surrounding nodes first, widening one shell if the whole cell is blocked
+ * (the same Chebyshev-shell reasoning `entryCandidates` uses, bounded by
+ * {@link STUB_TAIL_LIMIT} so no stub grows its own rogue street line).
+ * Straight when clear; otherwise elbowed **via the node's own street line**
+ * — the corner shares the node's x (or z), so one leg of the elbow is real
+ * street and only the short tail runs off-grid.
+ */
+function streetStubs(p: readonly [number, number], arrival: boolean): StreetStub[] {
+  const lattice = streetLattice();
+  const pSide = railInfoAt(p[0], p[1]).side;
+  // A destination's own frontage (any plot the point already stands close
+  // to) is exempt from full street clearance — the stub is *arriving*, so
+  // it may run along that plot's face, just never through it.
+  // Sized to cover a doormat's stand-off (1.4 m), its 3.5 m arrival lead
+  // and a plot's own frontage wobble — the ball-pit's slide exit measured
+  // 5.7 m from the plot edge, just past the first (5.6 m) version of this.
+  const exemptNear = arrival ? 7 : 0.5;
+  const legClear = (ax: number, az: number, bx: number, bz: number): boolean =>
+    streetSegmentClear(ax, az, bx, bz, p, exemptNear) &&
+    segmentClearOfRing(ax, az, bx, bz) &&
+    segmentHoldsRailSide(ax, az, bx, bz, pSide, 0);
+
+  const ci = Math.round((p[0] - PLAZA.x) / STREET_PITCH);
+  const cj = Math.round((p[1] - PLAZA.z) / STREET_PITCH);
+  const found: StreetStub[] = [];
+  // Shell 0 is the point's own nearest node — a doormat standing right
+  // beside a street line wants a two-metre stub, not a cell-length one.
+  for (let shell = 0; shell <= 2 && found.length === 0; shell += 1) {
+    for (let di = -shell; di <= shell; di += 1) {
+      for (let dj = -shell; dj <= shell; dj += 1) {
+        if (Math.max(Math.abs(di), Math.abs(dj)) !== shell) continue;
+        const i = ci + di;
+        const j = cj + dj;
+        if (Math.abs(i) > LATTICE_HALF_CELLS || Math.abs(j) > LATTICE_HALF_CELLS) continue;
+        const index = lattice.indexOf(i, j);
+        if (!lattice.nodeOk[index] || lattice.side[index] !== pSide) continue;
+        const nx = lattice.xs[index] as number;
+        const nz = lattice.zs[index] as number;
+        const tail = Math.min(Math.abs(p[0] - nx), Math.abs(p[1] - nz));
+        if (tail > STUB_TAIL_LIMIT) continue;
+        const direct = Math.hypot(p[0] - nx, p[1] - nz);
+        // Straight stub: shortest, slightly diagonal — fine when short.
+        if (direct <= STUB_TAIL_LIMIT + 2 && legClear(nx, nz, p[0], p[1])) {
+          found.push({ node: index, points: [[nx, nz], p], cost: direct * STUB_COST_FACTOR });
+          continue;
+        }
+        // Elbow via the node's own street line: corner shares the node's x
+        // (north-south street) or z (east-west street).
+        const corners: readonly (readonly [number, number])[] = [
+          [nx, p[1]],
+          [p[0], nz],
+        ];
+        for (const corner of corners) {
+          if (
+            legClear(nx, nz, corner[0], corner[1]) &&
+            legClear(corner[0], corner[1], p[0], p[1])
+          ) {
+            const length =
+              Math.hypot(nx - corner[0], nz - corner[1]) +
+              Math.hypot(corner[0] - p[0], corner[1] - p[1]);
+            found.push({
+              node: index,
+              points: [[nx, nz], corner, p],
+              cost: length * STUB_COST_FACTOR + 1,
+            });
+            break;
+          }
+        }
+      }
+    }
+  }
+  found.sort((a, b) => a.cost - b.cost);
+  return found;
+}
+
+/** Direction index of the lattice step from node `a` to node `b`. */
+const LATTICE_DIRS: readonly (readonly [number, number])[] = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+];
+
+/**
+ * Dijkstra over the lattice with a per-turn penalty. `sources` seed the
+ * frontier (a stub's node, at the stub's own cost); `goalCost` returns the
+ * terminal cost of stopping at a node (`Infinity` = not a goal). Returns
+ * the node-index path from the cheapest goal back to its source, or null.
+ */
+function latticeSearch(
+  sources: readonly { node: number; cost: number }[],
+  goalCost: (node: number) => number,
+): number[] | null {
+  const lattice = streetLattice();
+  const states = lattice.count * 5; // 4 arrival directions + "just started"
+  const stateOf = (node: number, dir: number): number => node * 5 + dir + 1;
+  const cost = new Float64Array(states).fill(Infinity);
+  const from = new Int32Array(states).fill(-1);
+  const closed = new Uint8Array(states);
+  const heap = new MinHeap(cost);
+  for (const source of sources) {
+    const state = stateOf(source.node, -1);
+    if (source.cost < (cost[state] as number)) {
+      cost[state] = source.cost;
+      heap.push(state);
+    }
+  }
+  let best = Infinity;
+  let bestState = -1;
+  while (heap.size > 0) {
+    const state = heap.pop();
+    if (closed[state]) continue;
+    closed[state] = 1;
+    const stateCost = cost[state] as number;
+    if (stateCost >= best) break; // nothing cheaper can still be found
+    const node = Math.floor(state / 5);
+    const dirIn = (state % 5) - 1;
+    const terminal = goalCost(node);
+    if (Number.isFinite(terminal) && stateCost + terminal < best) {
+      best = stateCost + terminal;
+      bestState = state;
+    }
+    const [i, j] = lattice.cellOf(node);
+    for (let dir = 0; dir < 4; dir += 1) {
+      const [di, dj] = LATTICE_DIRS[dir] as readonly [number, number];
+      const ni = i + di;
+      const nj = j + dj;
+      if (Math.abs(ni) > LATTICE_HALF_CELLS || Math.abs(nj) > LATTICE_HALF_CELLS) continue;
+      const neighbour = lattice.indexOf(ni, nj);
+      const walkable =
+        dir === 0
+          ? lattice.edgeEast[node]
+          : dir === 1
+            ? lattice.edgeEast[neighbour]
+            : dir === 2
+              ? lattice.edgeSouth[node]
+              : lattice.edgeSouth[neighbour];
+      if (!walkable) continue;
+      const turn = dirIn >= 0 && dirIn !== dir ? STREET_TURN_PENALTY : 0;
+      // A hair's preference for edges already paved, so equal-length routes
+      // ride the existing street rather than pave a parallel one.
+      const reuse = pavedLatticeEdges.has(latticeEdgeKey(node, neighbour)) ? -0.01 : 0;
+      const next = stateCost + STREET_PITCH + turn + reuse;
+      const nextState = stateOf(neighbour, dir);
+      if (next < (cost[nextState] as number)) {
+        cost[nextState] = next;
+        from[nextState] = state;
+        heap.push(nextState);
+      }
+    }
+  }
+  if (bestState === -1) return null;
+  const nodes: number[] = [];
+  for (let state = bestState; state !== -1; state = from[state] as number) {
+    const node = Math.floor(state / 5);
+    if (nodes.length === 0 || nodes[nodes.length - 1] !== node) nodes.push(node);
+  }
+  return nodes.reverse();
+}
+
+/** Marks a lattice node path (and the tap it may have started from) paved. */
+function commitLatticePath(nodes: readonly number[]): void {
+  const lattice = streetLattice();
+  for (let i = 0; i < nodes.length; i += 1) {
+    pavedLatticeNodes.add(nodes[i] as number);
+    if (i > 0) pavedLatticeEdges.add(latticeEdgeKey(nodes[i - 1] as number, nodes[i] as number));
+  }
+  for (const tap of lattice.taps) {
+    if (nodes.length > 0 && nodes[0] === tap.index) usedTaps.add(tap.index);
+  }
+}
+
+/** World points of a lattice node path, collapsed to its corners. */
+function latticePathPoints(nodes: readonly number[]): (readonly [number, number])[] {
+  const lattice = streetLattice();
+  return collapseCollinear(
+    nodes.map((node) => [lattice.xs[node] as number, lattice.zs[node] as number] as const),
+  );
+}
+
+/**
+ * A solved-but-not-yet-committed street route: control points to draw, the
+ * lattice node paths to mark paved **only once the whole composition is
+ * accepted** (a crossing needs two legs, and the interconnection pass can
+ * still reject a route after solving it — paving the lattice for a ribbon
+ * that is never drawn would teach every later route to terminate on
+ * phantom streets), and the compass tap it opens, if any.
+ */
+interface StreetPlan {
+  readonly points: (readonly [number, number])[];
+  readonly paths: readonly (readonly number[])[];
+  readonly tapNode: number | null;
+}
+
+/** Marks a plan's paving real: routes solved after this can terminate on it. */
+function commitStreetPlan(plan: StreetPlan): void {
+  for (const path of plan.paths) commitLatticePath(path);
+  if (plan.tapNode !== null) {
+    tapRimsDrawn.add(plan.tapNode);
+    usedTaps.add(plan.tapNode);
+  }
+}
+
+/**
+ * **The street router: from the paved network to `target`.** The plan's
+ * points run network-first, target-last — the paved end lands exactly on an
+ * already-paved lattice node (a real crossroads) or on one of the ring's
+ * four compass rims — or `null` when the lattice cannot serve this target
+ * (no reachable stub, or the paved network is across the railway; the
+ * caller falls back to a planned crossing or the proven old machinery).
+ */
+function planStreetToNetwork(target: readonly [number, number]): StreetPlan | null {
+  const lattice = streetLattice();
+  const stubs = streetStubs(target, true);
+  if (stubs.length === 0) return null;
+  const tapByNode = new Map<number, LatticeTap>();
+  for (const tap of lattice.taps) tapByNode.set(tap.index, tap);
+  const goalCost = (node: number): number => {
+    if (pavedLatticeNodes.has(node)) return 0;
+    const tap = tapByNode.get(node);
+    if (tap) {
+      return Math.hypot((lattice.xs[node] as number) - tap.rim[0], (lattice.zs[node] as number) - tap.rim[1]);
+    }
+    return Infinity;
+  };
+  const path = latticeSearch(
+    stubs.map((stub) => ({ node: stub.node, cost: stub.cost })),
+    goalCost,
+  );
+  if (!path) return null;
+  // The search ran target-side-out, so the path starts at a stub's node and
+  // ends at the network; flip it network-first and re-attach the stub.
+  const ordered = [...path].reverse();
+  const stub = stubs.find((candidate) => candidate.node === ordered[ordered.length - 1]);
+  if (!stub) return null;
+  const terminal = ordered[0] as number;
+  // A route that terminated at a compass tap (rather than on paving some
+  // earlier route laid) opens that tap: its ribbon starts on the ring's own
+  // rim, which is the tap's whole street until anything else reuses it.
+  const opensTap = tapByNode.get(terminal) !== undefined && !pavedLatticeNodes.has(terminal);
+  const head: (readonly [number, number])[] = opensTap
+    ? [(tapByNode.get(terminal) as LatticeTap).rim]
+    : [];
+  return {
+    points: collapseCollinear([...head, ...latticePathPoints(ordered), ...stub.points.slice(1)]),
+    paths: [path],
+    tapNode: opensTap ? terminal : null,
+  };
+}
+
+/** Compass taps whose rim segment (ring edge to first lattice node) has
+ * already been drawn by some route — {@link ensureCompassTaps} completes
+ * the set at the end. */
+const tapRimsDrawn = new Set<number>();
+
+/**
+ * Street route between two real points (both off-lattice), used by the
+ * interconnection pass and the crossing legs: stubs at both ends, lattice
+ * between. The plan's points run `a`-first.
+ */
+function planStreetBetween(
+  a: readonly [number, number],
+  b: readonly [number, number],
+  arrivalAtA: boolean,
+  arrivalAtB: boolean,
+): StreetPlan | null {
+  const stubsA = streetStubs(a, arrivalAtA);
+  const stubsB = streetStubs(b, arrivalAtB);
+  if (stubsA.length === 0 || stubsB.length === 0) return null;
+  const goalByNode = new Map<number, StreetStub>();
+  for (const stub of stubsB) {
+    const existing = goalByNode.get(stub.node);
+    if (!existing || stub.cost < existing.cost) goalByNode.set(stub.node, stub);
+  }
+  const path = latticeSearch(
+    stubsA.map((stub) => ({ node: stub.node, cost: stub.cost })),
+    (node) => goalByNode.get(node)?.cost ?? Infinity,
+  );
+  if (!path) return null;
+  const startStub = stubsA.find((candidate) => candidate.node === path[0]);
+  const endStub = goalByNode.get(path[path.length - 1] as number);
+  if (!startStub || !endStub) return null;
+  return {
+    points: collapseCollinear([
+      a,
+      ...[...startStub.points].reverse().slice(1), // a's corner (if any), then its node
+      ...latticePathPoints(path).slice(1),
+      ...endStub.points.slice(1, -1), // b's corner, if any
+      b,
+    ]),
+    paths: [path],
+    tapNode: null,
+  };
+}
+
+/**
+ * Street route from the network to a target on the railway's far side, via
+ * a planned crossing site — the lattice version of {@link routeLeg}'s
+ * straddling case: lattice to the near foot, dead straight over the deck,
+ * lattice from the far foot to the target. Tries the best few sites (same
+ * cost model as `routeLeg`); null when no site's both legs solve.
+ */
+function planStreetViaCrossing(target: readonly [number, number]): StreetPlan | null {
+  const candidates = [...CROSSING_SITES, ...LEVEL_CROSSING_SITES]
+    .map((site) => {
+      const feet = crossingFeet(site);
+      const cost =
+        Math.hypot(site.x - target[0], site.z - target[1]) +
+        (site.bridge ? 0 : LEVEL_CROSSING_PENALTY);
+      return { site, feet, cost };
+    })
+    .sort((a, b) => a.cost - b.cost);
+  for (const candidate of candidates.slice(0, 4)) {
+    const site = candidate.site;
+    const plusDeck = [
+      site.x + site.dirX * DECK_HALF_LENGTH,
+      site.z + site.dirZ * DECK_HALF_LENGTH,
+    ] as const;
+    const minusDeck = [
+      site.x - site.dirX * DECK_HALF_LENGTH,
+      site.z - site.dirZ * DECK_HALF_LENGTH,
+    ] as const;
+    // "Which foot is the network's?" is answered by the searches, not by
+    // side arithmetic: the rail's side sign says nothing about which of the
+    // loop's *pockets* the paved network actually occupies — two pockets can
+    // share a sign and still only be walkable via a crossing (that is what
+    // a crossing is for). Try the plus foot as the network end first, then
+    // the minus foot.
+    for (const [near, far, deckFromNear] of [
+      [candidate.feet.plus, candidate.feet.minus, [plusDeck, [site.x, site.z] as const, minusDeck]],
+      [candidate.feet.minus, candidate.feet.plus, [minusDeck, [site.x, site.z] as const, plusDeck]],
+    ] as const) {
+      const nearPlan = planStreetToNetwork(near);
+      if (!nearPlan) continue;
+      const farPlan = planStreetBetween(far, target, false, true);
+      if (!farPlan) continue;
+      return {
+        points: [...nearPlan.points, ...deckFromNear, ...farPlan.points],
+        paths: [...nearPlan.paths, ...farPlan.paths],
+        tapNode: nearPlan.tapNode,
+      };
+    }
+    if (DEBUG_STREETS) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[streets]   crossing site ${site.x.toFixed(1)},${site.z.toFixed(1)}: neither orientation ` +
+          `solved (feet ${candidate.feet.plus[0].toFixed(1)},${candidate.feet.plus[1].toFixed(1)} / ` +
+          `${candidate.feet.minus[0].toFixed(1)},${candidate.feet.minus[1].toFixed(1)})`,
+      );
+    }
+  }
+  return null;
+}
+
+/**
+ * The one entry point the graph builder uses: a street route from the paved
+ * network to `target`, crossing the railway through a planned site when the
+ * network is on the other side, or `null` for the old machinery to handle
+ * (its own fence-follows and double-crossings cover the pockets the lattice
+ * cannot). Commits the winning plan's paving — callers that need to reject
+ * a solved route after seeing it (the interconnection pass) use the plan
+ * functions directly instead.
+ */
+function streetRoute(target: readonly [number, number]): (readonly [number, number])[] | null {
+  const plan = planStreetToNetwork(target) ?? planStreetViaCrossing(target);
+  if (!plan) return null;
+  commitStreetPlan(plan);
+  return plan.points;
+}
+
+/**
+ * Debug-only window onto the solved lattice — read by
+ * `scripts/plot-streets.mts` (an SVG plotter for eyeballing the street
+ * graph without booting a browser). Not used by the game.
+ */
+export function debugStreetLattice(): {
+  nodes: { x: number; z: number; ok: boolean; side: number; paved: boolean }[];
+  edges: { ax: number; az: number; bx: number; bz: number; paved: boolean }[];
+  taps: { x: number; z: number; rimX: number; rimZ: number }[];
+} {
+  const lattice = streetLattice();
+  const nodes: { x: number; z: number; ok: boolean; side: number; paved: boolean }[] = [];
+  const edges: { ax: number; az: number; bx: number; bz: number; paved: boolean }[] = [];
+  for (let index = 0; index < lattice.count; index += 1) {
+    nodes.push({
+      x: lattice.xs[index] as number,
+      z: lattice.zs[index] as number,
+      ok: lattice.nodeOk[index] === 1,
+      side: lattice.side[index] as number,
+      paved: pavedLatticeNodes.has(index),
+    });
+    const [i, j] = lattice.cellOf(index);
+    if (i < LATTICE_HALF_CELLS && lattice.edgeEast[index]) {
+      const other = lattice.indexOf(i + 1, j);
+      edges.push({
+        ax: lattice.xs[index] as number,
+        az: lattice.zs[index] as number,
+        bx: lattice.xs[other] as number,
+        bz: lattice.zs[other] as number,
+        paved: pavedLatticeEdges.has(latticeEdgeKey(index, other)),
+      });
+    }
+    if (j < LATTICE_HALF_CELLS && lattice.edgeSouth[index]) {
+      const other = lattice.indexOf(i, j + 1);
+      edges.push({
+        ax: lattice.xs[index] as number,
+        az: lattice.zs[index] as number,
+        bx: lattice.xs[other] as number,
+        bz: lattice.zs[other] as number,
+        paved: pavedLatticeEdges.has(latticeEdgeKey(index, other)),
+      });
+    }
+  }
+  return {
+    nodes,
+    edges,
+    taps: lattice.taps.map((tap) => ({
+      x: lattice.xs[tap.index] as number,
+      z: lattice.zs[tap.index] as number,
+      rimX: tap.rim[0],
+      rimZ: tap.rim[1],
+    })),
+  };
+}
+
+/**
+ * After every spur is routed: any compass tap no route happened to use
+ * still gets its street (Decision 5 says exactly four connections, and a
+ * circle with three grown streets and one missing gateway reads as an
+ * accident, not a design). Each unused tap is connected to the nearest
+ * paving — usually a street already running through or near its own node.
+ */
+function ensureCompassTaps(edges: PathEdge[]): void {
+  const lattice = streetLattice();
+  for (const tap of lattice.taps) {
+    if (usedTaps.has(tap.index) || tapRimsDrawn.has(tap.index)) continue;
+    let points: (readonly [number, number])[] | null = null;
+    if (pavedLatticeNodes.has(tap.index)) {
+      // A street already runs through the tap's own node: the rim segment
+      // alone completes the connection.
+      points = [
+        tap.rim,
+        [lattice.xs[tap.index] as number, lattice.zs[tap.index] as number] as const,
+      ];
+    } else {
+      const path = latticeSearch([{ node: tap.index, cost: 0 }], (node) =>
+        pavedLatticeNodes.has(node) ? 0 : Infinity,
+      );
+      if (path) {
+        commitLatticePath(path);
+        points = [tap.rim, ...latticePathPoints(path)];
+      }
+    }
+    if (!points) continue; // nothing paved on this side at all — leave it
+    tapRimsDrawn.add(tap.index);
+    usedTaps.add(tap.index);
+    const [di, dj] = [
+      Math.sign(tap.rim[0] - PLAZA.x),
+      Math.sign(tap.rim[1] - PLAZA.z),
+    ];
+    const name =
+      di > 0 ? 'east' : di < 0 ? 'west' : dj > 0 ? 'south' : 'north';
+    edges.push({
+      from: 'ring',
+      to: 'ring',
+      paved: true,
+      route: { name: `street-tap-${name}`, width: 3.0, closed: false, points },
+    });
+  }
+}
 
 /**
  * The network as a *graph* first: named nodes (every place a child might be
@@ -1414,13 +2230,18 @@ function buildGraph(): PathGraph {
         points: [
           [0, 54] as const,
           [0, 30] as const,
-          // routeLeg, since issue #269's grid rule now genuinely binds this
-          // tail (a re-rolled seed put the ring's compass junction 17 m
-          // diagonally from the corridor mouth): the same axis-aligned
-          // routing every spur uses, entering the ring at its compass
-          // point. The corridor itself ([0,54]->[0,30]) stays exactly as
-          // it always was — the ground the cat-bus arrival choreographs.
-          ...routeLeg([0, 27], nearestCompassPoint(0, 27)).slice(1),
+          // The tail joins the street lattice (the reversed street route
+          // runs corridor-mouth-first), entering the ring at a compass tap
+          // when nothing else is paved yet — which, built first, makes this
+          // the park's main avenue for every later spur to terminate on.
+          // The corridor itself ([0,54]->[0,30]) stays exactly as it always
+          // was — the ground the cat-bus arrival choreographs. Falls back
+          // to the old axis-aligned router only if the lattice cannot
+          // reach the corridor mouth at all.
+          ...(streetRoute([0, 27]) ?? routeLeg(nearestCompassPoint(0, 27), [0, 27]))
+            .slice()
+            .reverse()
+            .slice(1),
         ],
       },
     },
@@ -1476,11 +2297,6 @@ function buildGraph(): PathGraph {
   ): void => {
     nodes.push({ id, kind, x: ex, z: ez });
     const already = distanceToRouteNetwork(network(), ex, ez) < 4;
-    // Branch from wherever the *network* comes nearest — an earlier spur is
-    // as good a trunk as the ring. Starting from the nearest ring vertex sent
-    // the west station's spur on a 45 m wander from (-8.7, 5) around three
-    // booths; from the sky cruiser's spur it is a 21 m walk.
-    const start = bestBranchPoint(network(), ex, ez);
     const l = Math.hypot(towardX - ex, towardZ - ez);
     // `past` used to walk a flat 2 m towards the destination regardless of
     // how far the doormat actually stands from the plot's own edge. For a
@@ -1525,9 +2341,29 @@ function buildGraph(): PathGraph {
       const out = Math.hypot(outX, outZ);
       if (out > 1e-6) lead.push([ex + (outX / out) * 3.5, ez + (outZ / out) * 3.5]);
     }
+    // The street lattice serves the spur (network-first, lead-last); the
+    // old continuous router is only the fallback for ground the lattice
+    // cannot reach — a doormat in a pocket with every stub blocked, or a
+    // strip the fence-follow machinery exists for. `bestBranchPoint` is
+    // deliberately not consulted first any more: the lattice search itself
+    // finds the junction giving the shortest real walk, and its junctions
+    // land only on shared street crossroads.
+    const routeTarget = lead.length ? (lead[0] as [number, number]) : ([ex, ez] as const);
+    const streets = streetRoute(routeTarget);
+    if (!streets && DEBUG_STREETS) {
+      const stubs = streetStubs(routeTarget, true);
+      // eslint-disable-next-line no-console
+      console.log(
+        `[streets] fallback for ${id}: target ${routeTarget[0].toFixed(1)},${routeTarget[1].toFixed(1)} ` +
+          `side ${railInfoAt(routeTarget[0], routeTarget[1]).side} stubs ${stubs.length}`,
+      );
+    }
     // See {@link SPUR_STRETCH}: no-op in the game, non-zero only for the test
     // that proves a longer spur leaves distant scenery where it was.
-    const routed = [...routeLeg(start, lead.length ? (lead[0] as [number, number]) : [ex, ez]), ...(lead.length ? [[ex, ez] as readonly [number, number]] : [])];
+    const routed = [
+      ...(streets ?? routeLeg(bestBranchPoint(network(), ex, ez), routeTarget)),
+      ...(lead.length ? [[ex, ez] as readonly [number, number]] : []),
+    ];
     if (SPUR_STRETCH > 0 && id === SPUR_STRETCH_ID && routed.length >= 2) {
       const head = routed[0] as readonly [number, number];
       const tail = routed[routed.length - 1] as readonly [number, number];
@@ -1614,7 +2450,8 @@ function buildGraph(): PathGraph {
     // Via the lead — past the platform's empty end, stepped into the park —
     // so the incoming leg can arrive from any bearing without paving through
     // the canopy posts on the furnished half (see `PlannedStation.leadX`).
-    const start = bestBranchPoint(network(), station.leadX, station.leadZ);
+    const stationLead: readonly [number, number] = [station.leadX, station.leadZ];
+    const stationStreets = streetRoute(stationLead);
     edges.push({
       from: 'ring',
       to: id,
@@ -1624,7 +2461,8 @@ function buildGraph(): PathGraph {
         width: 2.6,
         closed: false,
         points: [
-          ...routeLeg(start, [station.leadX, station.leadZ]),
+          ...(stationStreets ??
+            routeLeg(bestBranchPoint(network(), station.leadX, station.leadZ), stationLead)),
           [station.approachX, station.approachZ],
           [station.standX, station.standZ],
         ],
@@ -1668,6 +2506,11 @@ function buildGraph(): PathGraph {
   // makes most things into branches off a central hub, whereas they should
   // be inter-connected." See {@link addInterconnects}'s own comment for the
   // measured numbers behind it.
+  // Every compass tap that no spur happened to terminate at still gets its
+  // street — Decision 5's "exactly 4 connections at compass points" is a
+  // property of the built ring, not a hope about routing order.
+  ensureCompassTaps(edges);
+
   // Test hook, same pattern as `SPUR_STRETCH_ID` above: zero/default in the
   // game, set only by the invariant that proves `detourRatiosStayReasonable`
   // can actually fail (it re-solves the park with this set, to measure the
@@ -1999,16 +2842,22 @@ function addInterconnects(nodes: PathNode[], edges: PathEdge[]): void {
     const leadB = arrivalLead(b);
     const fromPoint = leadA.length ? (leadA[0] as [number, number]) : ([a.x, a.z] as [number, number]);
     const toPoint = leadB.length ? (leadB[0] as [number, number]) : ([b.x, b.z] as [number, number]);
+    // The street lattice first — a connector is a street like any other,
+    // riding existing lattice lines where they already run. `routeLeg`
+    // (the old clamped continuous router) only when both ends' stubs
+    // cannot reach the lattice; the pair is same-side by the filter
+    // above, so neither can ever hop the railway mid-run. The plan is
+    // committed only *after* the corridor screen accepts it — a rejected
+    // connector must not leave phantom paving for later routes to join.
+    const plan = planStreetBetween(fromPoint, toPoint, true, true);
     const points: (readonly [number, number])[] = [
       ...(leadA.length ? [[a.x, a.z] as [number, number]] : []),
-      // routeLeg, not bare manhattanRoute: the pair is same-side by the
-      // filter above, so this is the clamped ordinary route — a connector
-      // can never hop the railway and back mid-run.
-      ...routeLeg(fromPoint, toPoint),
+      ...(plan ? plan.points : routeLeg(fromPoint, toPoint)),
       ...(leadB.length ? [[b.x, b.z] as [number, number]] : []),
     ];
 
     if (routeCrossesARideCorridor(points)) continue;
+    if (plan) commitStreetPlan(plan);
 
     edges.push({
       from: a.id,
@@ -2318,7 +3167,7 @@ const RAIL_PUSH_WIDEN_STEPS: readonly number[] = [0, 1, 2, 4, 8];
  * `RAIL_CORRIDOR_CLEARANCE` this function targets.
  *
  * A curve-aware re-verification was built and tried here: reconstruct the
- * actual `CatmullRomCurve3` (`makeCurve`, tension 0.4 — identical to what
+ * actual `CatmullRomCurve3` (`routeCurve`, tension 0.4 — identical to what
  * every route in this file is finally rendered with, and to what
  * `poiGraph.ts` samples its waypoints from) for each candidate push and walk
  * its locally-influenced window (three.js's own local support: a segment
@@ -2774,7 +3623,7 @@ export function buildPaths(): Mesh[] {
   const kerb = new GeometryBuilder();
 
   for (const route of ROUTES) {
-    const curve = makeCurve(route.points, route.closed);
+    const curve = routeCurve(route);
     const divisions = Math.max(24, Math.round(curve.getLength() / 0.8));
     addRibbon(surface, curve, route.width, divisions, 0.055);
     addRibbon(kerb, curve, route.width + 0.85, divisions, 0.03);
@@ -2814,10 +3663,105 @@ export function buildPaths(): Mesh[] {
 
 // ---------------------------------------------------------------- internals
 
-function makeCurve(points: readonly (readonly [number, number])[], closed: boolean): CatmullRomCurve3 {
+/** Fillet radius at a street corner — Decision 3: "rounded corners,
+ * 1.5-2 m fillets; square junctions otherwise". */
+const CORNER_FILLET = 1.75;
+
+/** Sampling pitches for {@link drawnPolyline}: dense enough that the
+ * Catmull-Rom the ribbon extruder sweeps hugs the polyline (a Catmull-Rom
+ * through collinear points *is* the straight line), coarse enough to cost
+ * nothing. */
+const STRAIGHT_SAMPLE = 2.5;
+const ARC_SAMPLE = 0.6;
+
+/**
+ * **The one owner of what an open route's drawn centreline looks like**:
+ * dead-straight runs between corners, each corner rounded by a real
+ * {@link CORNER_FILLET} arc — not the old behaviour, where the sparse
+ * control points fed a tension-0.4 Catmull-Rom whose corner rounding grew
+ * with segment length, so a 20 m street corner bowed for many metres and
+ * the whole "axis-aligned" network drew as organic sweeps (Jim, 23 August
+ * 2026: "that top-down view looks nothing like how we discussed"). The
+ * returned points are dense (every couple of metres on straights, ~0.6 m
+ * round each fillet), so the Catmull-Rom built from them cannot depart
+ * from the shape they describe.
+ */
+function drawnPolyline(
+  points: readonly (readonly [number, number])[],
+): (readonly [number, number])[] {
+  // Collapse near-duplicates first — a zero-length leg is a NaN tangent.
+  const src: [number, number][] = [];
+  for (const p of points) {
+    const last = src[src.length - 1];
+    if (last && Math.hypot(p[0] - last[0], p[1] - last[1]) < 0.05) continue;
+    src.push([p[0], p[1]]);
+  }
+  if (src.length < 2) return src;
+
+  const out: [number, number][] = [src[0] as [number, number]];
+  const emitStraightTo = (to: readonly [number, number]): void => {
+    const from = out[out.length - 1] as readonly [number, number];
+    const length = Math.hypot(to[0] - from[0], to[1] - from[1]);
+    if (length < 1e-6) return;
+    const steps = Math.max(1, Math.ceil(length / STRAIGHT_SAMPLE));
+    for (let s = 1; s <= steps; s += 1) {
+      const t = s / steps;
+      out.push([from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t]);
+    }
+  };
+
+  for (let k = 1; k < src.length - 1; k += 1) {
+    const a = src[k - 1] as readonly [number, number];
+    const c = src[k] as readonly [number, number];
+    const b = src[k + 1] as readonly [number, number];
+    const lenIn = Math.hypot(c[0] - a[0], c[1] - a[1]);
+    const lenOut = Math.hypot(b[0] - c[0], b[1] - c[1]);
+    const dirInX = (c[0] - a[0]) / lenIn;
+    const dirInZ = (c[1] - a[1]) / lenIn;
+    const dirOutX = (b[0] - c[0]) / lenOut;
+    const dirOutZ = (b[1] - c[1]) / lenOut;
+    const turn = Math.abs(Math.atan2(dirInX * dirOutZ - dirInZ * dirOutX, dirInX * dirOutX + dirInZ * dirOutZ));
+    if (turn < 0.05) {
+      emitStraightTo(c);
+      continue;
+    }
+    // Clamp the fillet so two nearby corners never eat each other's legs.
+    const fillet = Math.min(CORNER_FILLET, lenIn * 0.45, lenOut * 0.45);
+    const pIn: readonly [number, number] = [c[0] - dirInX * fillet, c[1] - dirInZ * fillet];
+    const pOut: readonly [number, number] = [c[0] + dirOutX * fillet, c[1] + dirOutZ * fillet];
+    emitStraightTo(pIn);
+    // Quadratic Bezier through the corner: a clean constant-ish-radius
+    // rounding for any turn angle, sampled finely enough to read as an arc.
+    const arcLength = fillet * turn; // close enough for choosing a sample count
+    const steps = Math.max(2, Math.ceil(arcLength / ARC_SAMPLE));
+    for (let s = 1; s <= steps; s += 1) {
+      const t = s / steps;
+      const u = 1 - t;
+      out.push([
+        u * u * pIn[0] + 2 * u * t * c[0] + t * t * pOut[0],
+        u * u * pIn[1] + 2 * u * t * c[1] + t * t * pOut[1],
+      ]);
+    }
+  }
+  emitStraightTo(src[src.length - 1] as readonly [number, number]);
+  return out;
+}
+
+/**
+ * **The one Catmull-Rom every consumer of a route's drawn shape builds** —
+ * the ribbon extruder here, the lamp walker (`LampPosts.ts`), the NPC
+ * waypoint seeder (`poiGraph.ts`), the park map (`ParkMap.ts`) and the
+ * procgen facts (`test/procgen/parkFacts.ts`) all ask this instead of each
+ * repeating the `new CatmullRomCurve3(..., 0.4)` incantation over raw
+ * control points — CLAUDE.md's "one owner; everyone else asks", after this
+ * file's fillet pass made the drawn shape more than the control points.
+ * The closed backbone ring keeps its raw points: it is a circle through 32
+ * bearings, and filleting a circle's own samples would only dent it.
+ */
+export function routeCurve(route: RouteDefinition): CatmullRomCurve3 {
+  const points = route.closed ? route.points : drawnPolyline(route.points);
   const vectors = points.map(([x, z]) => new Vector3(x, 0, z));
-  const curve = new CatmullRomCurve3(vectors, closed, 'catmullrom', 0.4);
-  return curve;
+  return new CatmullRomCurve3(vectors, route.closed, 'catmullrom', 0.4);
 }
 
 function recordSamples(curve: CatmullRomCurve3, divisions: number, halfWidth: number): void {

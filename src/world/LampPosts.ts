@@ -20,7 +20,7 @@ import { glowTexture } from '../core/textures';
 import { toonMaterial, outlineGeometry, inkTint } from '../art/style/materials';
 import { clamp01, smoothstep } from '../core/mathUtils';
 import { terrainHeight } from './terrain';
-import { distanceToPath, ROUTES } from './paths';
+import { distanceToPath, ROUTES, routeCurve } from './paths';
 import { ANCHORS } from './anchors';
 import { PARK_LAYOUT } from './parkLayout';
 import { clearOfCruiser, onRideExit } from './Scenery';
@@ -500,7 +500,7 @@ function placeLampPosts(collision: CollisionWorld): (readonly [number, number])[
   let side = 0;
 
   for (const route of ROUTES) {
-    const curve = makeCurve(route.points, route.closed);
+    const curve = routeCurve(route);
     const length = curve.getLength();
     if (length < LAMP_SPACING * 0.5) continue;
 
@@ -636,15 +636,6 @@ function pointToSegment(
   let t = ((x - x1) * dx + (z - z1) * dz) / lengthSquared;
   t = t < 0 ? 0 : t > 1 ? 1 : t;
   return Math.hypot(x - (x1 + dx * t), z - (z1 + dz * t));
-}
-
-function makeCurve(points: readonly (readonly [number, number])[], closed: boolean): CatmullRomCurve3 {
-  return new CatmullRomCurve3(
-    points.map(([x, z]) => new Vector3(x, 0, z)),
-    closed,
-    'catmullrom',
-    0.4,
-  );
 }
 
 /**

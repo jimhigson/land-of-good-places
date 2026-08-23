@@ -1,9 +1,9 @@
-import { CatmullRomCurve3, Vector3 } from 'three';
+import { Vector3 } from 'three';
 import { BUILDING_HALF_X, BUILDING_HALF_Z } from '../../core/constants';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../../world/building/layout';
 import { ANCHORS } from '../../world/anchors';
 import type { CollisionWorld } from '../../world/Collision';
-import { isOnPath, PLAZA, ROUTES, type RouteDefinition } from '../../world/paths';
+import { isOnPath, PLAZA, ROUTES, routeCurve, type RouteDefinition } from '../../world/paths';
 import { STALL_STANDS } from '../../minigames/stallPlacement';
 import { NPC_RADIUS } from '../../core/constants';
 import { TRAIN_PLAN } from '../../world/train/plan';
@@ -270,8 +270,9 @@ function buildSeeds(): NodeSeed[] {
  * short of the end, which is where it started.
  */
 function sampleRoute(route: RouteDefinition): { x: number; z: number; at: number }[] {
-  const vectors = route.points.map(([x, z]) => new Vector3(x, 0, z));
-  const curve = new CatmullRomCurve3(vectors, route.closed, 'catmullrom', 0.4);
+  // `routeCurve` is the one owner of the drawn shape (fillets included) —
+  // sampling anything else would seed waypoints beside the real paving.
+  const curve = routeCurve(route);
   const point = new Vector3();
 
   // The fine chain first: the lane as a child would actually walk it, kept

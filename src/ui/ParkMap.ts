@@ -1,4 +1,4 @@
-import { CatmullRomCurve3, Vector3 } from 'three';
+import { Vector3 } from 'three';
 import { BUILDING_FLOOR_COUNT, BUILDING_HALF_X, BUILDING_HALF_Z, GARDEN_HALF_SIZE, INTERIOR_HALF_X, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, PLAYER_RADIUS } from '../core/constants';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../world/building/layout';
 import { PALETTE, hexToCss } from '../core/palette';
@@ -6,7 +6,7 @@ import { isTouchDevice } from '../core/device';
 import { minTextPx, uiUnitPx } from '../core/uiScale';
 import { gameStore } from '../state';
 import { ANCHORS, type AnchorDefinition, type AnchorFootprint } from '../world/anchors';
-import { PLAZA, ROUTES, type RouteDefinition } from '../world/paths';
+import { PLAZA, ROUTES, routeCurve, type RouteDefinition } from '../world/paths';
 import { STALLS } from '../minigames';
 import type { World } from '../world/World';
 import type { Player } from '../entities/Player';
@@ -638,8 +638,8 @@ export class ParkMap {
   }
 
   private strokeRoute(route: RouteDefinition): void {
-    const vectors = route.points.map(([x, z]) => new Vector3(x, 0, z));
-    const curve = new CatmullRomCurve3(vectors, route.closed, 'catmullrom', 0.4);
+    // The one owner of the drawn shape — the map strokes what the park paves.
+    const curve = routeCurve(route);
     const samples = Math.max(16, Math.round(curve.getLength() / 1.2));
     const points: [number, number][] = [];
     for (let i = 0; i <= samples; i += 1) {
