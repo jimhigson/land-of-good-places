@@ -2730,9 +2730,22 @@ export interface PathSample {
   readonly x: number;
   readonly z: number;
   readonly halfWidth: number;
+  /**
+   * Which drawn route this sample belongs to — a fresh id per
+   * {@link recordSamples} call, i.e. per route curve. Two routes meeting at
+   * a shared graph node are spatially contiguous, so a consumer walking
+   * this array in order (the railway crossings' spine extraction,
+   * `train/crossings.ts`) cannot tell the seam apart by stride alone; a
+   * walk that silently continued across one wandered onto a *different*
+   * path heading a different way (found live, seed 2: a bridge's spine
+   * hair-pinned onto an adjacent route and the bridge's parapets ended up
+   * crisscrossing its own roadway).
+   */
+  readonly run: number;
 }
 
 const samples: PathSample[] = [];
+let nextRun = 0;
 
 /**
  * The drawn network's centreline samples — the ground truth the crossings
@@ -2769,6 +2782,7 @@ export function isOnPath(x: number, z: number, margin = 0): boolean {
  */
 export function buildPaths(): Mesh[] {
   samples.length = 0;
+  nextRun = 0;
 
   const surface = new GeometryBuilder();
   const kerb = new GeometryBuilder();
@@ -2822,9 +2836,11 @@ function makeCurve(points: readonly (readonly [number, number])[], closed: boole
 
 function recordSamples(curve: CatmullRomCurve3, divisions: number, halfWidth: number): void {
   const point = new Vector3();
+  const run = nextRun;
+  nextRun += 1;
   for (let i = 0; i <= divisions; i += 1) {
     curve.getPoint(i / divisions, point);
-    samples.push({ x: point.x, z: point.z, halfWidth });
+    samples.push({ x: point.x, z: point.z, halfWidth, run });
   }
 }
 

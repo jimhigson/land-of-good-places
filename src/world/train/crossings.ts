@@ -117,7 +117,7 @@ const SPINE_REACH = 32;
  * enough ({@link SPINE_ADOPT_DISTANCE}).
  */
 function spineThrough(
-  samples: readonly { x: number; z: number; halfWidth: number }[],
+  samples: readonly { x: number; z: number; halfWidth: number; run: number }[],
   x: number,
   z: number,
   dirX: number,
@@ -150,6 +150,7 @@ function spineThrough(
   // grid-aligned elbow, smoothed by the Catmull-Rom draw, turns a few tens
   // of degrees per sample at most — so "next stride must not point against
   // the previous one" (dot > 0) separates the two cleanly.
+  const run = (samples[bestIndex] as { run: number }).run;
   const walk = (step: 1 | -1): SpinePoint[] => {
     const out: SpinePoint[] = [];
     let travelled = 0;
@@ -157,7 +158,14 @@ function spineThrough(
     let previousStrideX = 0;
     let previousStrideZ = 0;
     for (let i = bestIndex + step; i >= 0 && i < samples.length; i += step) {
-      const sample = samples[i] as { x: number; z: number };
+      const sample = samples[i] as { x: number; z: number; run: number };
+      // Never cross a route boundary — the samples either side of a seam
+      // belong to a DIFFERENT drawn path, however spatially contiguous the
+      // shared graph node makes them (the run id is the authority; the
+      // stride/direction guards below are only a belt for within-run
+      // anomalies). Found live, seed 2: the walk crossed a seam onto an
+      // adjacent route and hair-pinned the spine mid-ramp.
+      if (sample.run !== run) break;
       const strideX = sample.x - previous.x;
       const strideZ = sample.z - previous.z;
       const stride = Math.hypot(strideX, strideZ);

@@ -743,6 +743,16 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
   ): DeckPlan | null => {
     const frame = frameFor(crossing);
     const idealRampRun = idealRampRunFor(crossing, crossings);
+    // NOTE: a ramp may run past the frame's `trustedReach` — beyond the
+    // spine's trimmed end the frame extrapolates straight, and a hump foot
+    // landing on plain lawn past its path's own turn is fine (walkers
+    // route over grass; the old geometry always did this). A cap at the
+    // trusted reach was tried and reverted: on seed 2 every site's
+    // straight promise is pinch-curtailed to ~7 m, the cap starved every
+    // ramp below `WALKABLE_FLOOR`, and the seed lost all three of its
+    // bridges. What actually keeps the extrapolated run honest is the
+    // same rule as everywhere else: the probes below walk it against the
+    // real collision world and truncate on whatever is genuinely there.
     // **The width is not a search lever any more.** Jim, 2026-08-23: the
     // bridge deck is exactly as wide as the path that crosses it — so the
     // structural width is the path's own paved width plus the masonry

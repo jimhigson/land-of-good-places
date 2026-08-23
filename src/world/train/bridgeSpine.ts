@@ -46,6 +46,22 @@ const STEP = 0.5;
  */
 const DEVIATION_CAP = 3.0;
 
+/**
+ * The tightest curve the masonry can follow — the spine is trimmed where
+ * its local radius drops below this. A grid path legitimately turns a
+ * right-angle corner in a couple of metres (radius ~1.3 m once the
+ * Catmull-Rom draw smooths it); a causeway whose road is ~1.3 m either
+ * side of the centreline plus walls cannot turn that tightly without its
+ * own parapets crossing its own roadway (found live, seed 2: exactly
+ * that, walls criss-crossing the centreline mid-ramp, local radius
+ * ~1.3 m). Three metres is comfortably above the self-intersection radius
+ * (the wall stand-off, ~1.75 m) while letting through the gentle 4–6 m
+ * bow the Catmull-Rom draw legitimately puts near a leg's ramp feet — a
+ * 6 m floor trimmed exactly that bow and cost seed 2 all three of its
+ * bridges.
+ */
+const MIN_TURN_RADIUS = 3.0;
+
 export interface FramePoint {
   readonly x: number;
   readonly z: number;
@@ -63,6 +79,20 @@ export class SpineFrame {
   private readonly points: FramePoint[] = [];
   /** `along` of `points[0]` — negative (behind the crossing). */
   private alongMin: number;
+  /**
+   * How far, in arc metres from the crossing, the REAL drawn path is known
+   * to continue in each direction before the recorded spine was trimmed (a
+   * route end, a corner too tight for masonry, a deviation breach) —
+   * `Infinity` for the straight fallback, which promises nothing about a
+   * drawn path and so constrains nothing. Beyond this the frame
+   * extrapolates a straight line the actual path may well have left, so
+   * `bridgeFootprint.ts` caps each ramp's run against it: a hump's foot
+   * must land on the path that carries it, never on extrapolated ground
+   * the path has turned away from (found live, canonical seed: a ramp
+   * extrapolated past its path's turn walled off the path behind it).
+   */
+  private trustedNeg = Infinity;
+  private trustedPos = Infinity;
   constructor(crossing: Pick<LevelCrossing, 'x' | 'z' | 'pathDirX' | 'pathDirZ' | 'spine'>) {
     const dirX = crossing.pathDirX;
     const dirZ = crossing.pathDirZ;
@@ -132,18 +162,35 @@ export class SpineFrame {
       return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t };
     };
 
-    // Deviation trim: keep only the stretch whose lateral distance from the
-    // crossing's straight axis stays under DEVIATION_CAP — measured per
-    // resampled point, walking out from the crossing in each direction and
-    // stopping at the first breach (never resuming past it, so the kept
-    // stretch is contiguous).
+    // Trim, walking out from the crossing in each direction and stopping at
+    // the first breach (never resuming past it, so the kept stretch is
+    // contiguous), on either of two rules:
+    // - deviation: lateral distance from the crossing's straight axis past
+    //   DEVIATION_CAP (see the file header);
+    // - curvature: local radius under MIN_TURN_RADIUS (a corner the
+    //   masonry cannot follow — see that constant).
     const deviation = (p: SpinePoint): number =>
       Math.abs((p.x - crossing.x) * -dirZ + (p.z - crossing.z) * dirX);
+    const radiusAt = (s: number): number => {
+      const a = pointOnRaw(s - 1);
+      const b = pointOnRaw(s);
+      const c = pointOnRaw(s + 1);
+      const ab = Math.hypot(b.x - a.x, b.z - a.z);
+      const bc = Math.hypot(c.x - b.x, c.z - b.z);
+      const ca = Math.hypot(a.x - c.x, a.z - c.z);
+      const area2 = Math.abs((b.x - a.x) * (c.z - a.z) - (b.z - a.z) * (c.x - a.x));
+      if (area2 < 1e-6) return Infinity;
+      return (ab * bc * ca) / (2 * area2);
+    };
+    const keep = (s: number): boolean =>
+      deviation(pointOnRaw(s)) <= DEVIATION_CAP && radiusAt(s) >= MIN_TURN_RADIUS;
     const total = arc[arc.length - 1] as number;
     let sMin = crossingArc;
-    while (sMin - STEP >= 0 && deviation(pointOnRaw(sMin - STEP)) <= DEVIATION_CAP) sMin -= STEP;
+    while (sMin - STEP >= 0 && keep(sMin - STEP)) sMin -= STEP;
     let sMax = crossingArc;
-    while (sMax + STEP <= total && deviation(pointOnRaw(sMax + STEP)) <= DEVIATION_CAP) sMax += STEP;
+    while (sMax + STEP <= total && keep(sMax + STEP)) sMax += STEP;
+    this.trustedNeg = crossingArc - sMin;
+    this.trustedPos = sMax - crossingArc;
 
     this.alongMin = sMin - crossingArc;
     for (let s = sMin; s <= sMax + 1e-6; s += STEP) {
@@ -180,6 +227,12 @@ export class SpineFrame {
         });
       }
     }
+  }
+
+  /** See {@link trustedNeg}/{@link trustedPos}: how far the drawn path is
+   * known to really continue along `sign`. */
+  trustedReach(sign: 1 | -1): number {
+    return sign > 0 ? this.trustedPos : this.trustedNeg;
   }
 
   /** The frame at `along` metres from the crossing (negative = behind),
