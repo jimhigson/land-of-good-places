@@ -715,10 +715,25 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
     // header on the fallback that follows.
     const USABLE_HALF_WIDTH_FLOOR = Math.max(MIN_DECK_HALF_WIDTH, crossing.halfGap);
     const maxShift = maxLateralShiftFor(crossing);
+    // Narrowest first, widening only as a real backtrack — the reverse of
+    // this loop's original direction. QA on PR #330: decks were coming out
+    // 12.9-15.8 m wide for a path only ~4 m across, "a giant plywood table",
+    // because the old loop started at the crossing's own widest offer
+    // (`halfGap + ACROSS_MARGIN`, i.e. the full 2 m collision-safety margin
+    // added on *both* sides) and accepted the very first candidate that
+    // cleared — which is the widest one whenever the widest one clears at
+    // all, so a deck was only ever narrower than that by accident, never by
+    // choice. `USABLE_HALF_WIDTH_FLOOR` (`crossing.halfGap` itself, the
+    // real, self-measured corridor a child's own path actually occupies —
+    // see this floor's own note just above) is already the right *default*
+    // width for a deck that reads as the path it carries, not a discount
+    // rate to fall back on. Widening still happens, exactly the same way
+    // narrowing used to: only when the narrower candidate at this shift
+    // fails real collision, the loop keeps going outward from here.
     for (
-      let halfAcross = crossing.halfGap + ACROSS_MARGIN;
-      halfAcross >= USABLE_HALF_WIDTH_FLOOR;
-      halfAcross -= WIDTH_STEP
+      let halfAcross = USABLE_HALF_WIDTH_FLOOR;
+      halfAcross <= crossing.halfGap + ACROSS_MARGIN;
+      halfAcross += WIDTH_STEP
     ) {
       for (const fraction of SHIFT_FRACTIONS) {
         const shift = Math.max(-maxShift, Math.min(maxShift, fraction * halfAcross));
@@ -921,8 +936,22 @@ function idealRampRunFor(crossing: LevelCrossing, crossings: readonly LevelCross
       Math.hypot(other.x - crossing.x, other.z - crossing.z),
     );
   }
+  // The floor here must be at least {@link WALKABLE_FLOOR} +
+  // {@link WALKABLE_MARGIN}, not `WALKABLE_FLOOR` alone — this is the
+  // distance `searchDeck`'s own probe is capped at (see `provisionalReach`
+  // and `rampReach`: both walk out to exactly `idealRampRunFor`'s answer and
+  // never further), so a floor that stopped at `WALKABLE_FLOOR` made the
+  // acceptance test's own `+ WALKABLE_MARGIN` mathematically unreachable
+  // for any crossing whose spacing pins `rampRunCap` to this floor — the
+  // ceiling was capped a half-metre short of the bar the search demanded to
+  // clear it. Found live: every crossing on the canonical seed with a close
+  // neighbour showed `idealRampRun` landing exactly on the old floor
+  // (7.87 m) while the acceptance test asked for 8.37 m, so `Math.min` of
+  // the two probed sides could never reach it — 0 of 7 crossings got a
+  // bridge, all fell back to level crossings, until this floor rose to
+  // match what accepting a candidate actually requires.
   const rampRunCap = Math.max(
-    BRIDGE_RISE / MAX_RAMP_GRADIENT,
+    WALKABLE_FLOOR + WALKABLE_MARGIN,
     nearestOtherCrossing / 2 - DECK_HALF_LENGTH - RAMP_CLEARANCE,
   );
   return Math.min(BRIDGE_RISE / BRIDGE_RAMP_GRADIENT, rampRunCap);
