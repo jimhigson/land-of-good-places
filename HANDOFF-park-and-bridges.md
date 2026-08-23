@@ -68,19 +68,16 @@ Plus: riders sit; `BRIDGE_RISE` = 4.25 m (real commits on bridge-backtrack,
 
 ## Next
 
-1. `pathsRunOnGridAxes` fails on all 5 seeds — the crossing axes are
-   legitimately diagonal (square to the RAIL, not the world axes) and
-   fence-follow legs curve along the rail. Add a measured exemption:
-   diagonal samples over a bridge footprint / within the rail-corridor
-   band are the railway's own geometry.
-2. Full `test:procgen` (seeds 5/11 included): earlier run also showed
-   seed-11 ride-exit/doormat/detour failures and seed-5 everyPathIsLit —
-   re-measure after the ring rework (layouts re-rolled), fix what remains.
-   Sky Cruiser seed-11 supports = pre-existing issue #301.
-3. Full `npm run build` (unpiped). 4. Browser QA + screenshots (top-down
-   grid + walk two bridges). 5. Update PR #286; reconcile with
-   origin/bridge-backtrack if the other agent pushes (their three findings
-   are already covered here in stronger form).
+1. Await full test:procgen (all 5 seeds) after commit f872859's fixes
+   (site-choice quality backtracking, endpoint-safe clamps, bush reach,
+   measured invariant exemptions for rail/cruiser geometry).
+2. Full `npm run build` (unpiped). 3. Browser QA + screenshots (top-down
+   grid + walk two bridges; scripts/qa-bridges.mts and
+   scripts/qa-walk-bridges.mts are ready, chromium at /opt/pw-browsers
+   works via PLAYWRIGHT_BROWSERS_PATH). 4. Push to grid-aligned-park (PR
+   #286). 5. Follow-up worth filing: bridges carry no lamps (decks are
+   dark at night — everyPathIsLit exempts them; guard-rail lanterns would
+   be the real fix).
 
 ### This round landed (commit b66b66e)
 
