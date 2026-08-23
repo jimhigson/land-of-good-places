@@ -246,7 +246,19 @@ export class World implements GameSystem {
     // CI run. A cat bus hung off `Game` would be visible to no check at all,
     // which is precisely how the original shipped dead and stayed dead for
     // twelve days. See `entrance/ArrivalSequence.ts`.
-    this.entrance = new Entrance(this.collision, options.entrance ?? {});
+    //
+    // `this.train.route` is handed in so the welcome sign can be placed
+    // against the train's own *solved* centre line rather than a coordinate
+    // picked before the loop existed (issue #303 QA) — see
+    // `Entrance.findWelcomeSignSpot`. `this.train` above is built well before
+    // this line for exactly that reason.
+    this.entrance = new Entrance(this.collision, this.train.route, options.entrance ?? {});
+    // The welcome sign's spot is chosen dynamically against the *solved*
+    // train route (see above), which the meadow — planted long before this
+    // line — could not have known about either. Same pattern as the train's
+    // own stations just above: tell the meadow after the fact and let it
+    // replant anything that landed underneath.
+    this.flowers.keepClearOfTapZones(this.entrance.interactZones());
 
     // The other children in the park. Built last, because the waypoint graph
     // they wander is validated against the finished collision world — every
@@ -461,6 +473,7 @@ export class World implements GameSystem {
       ...this.keychainShop.interactZones(),
       ...this.train.interactZones(),
       ...this.flowers.interactZones(),
+      ...this.entrance.interactZones(),
     ];
   }
 
