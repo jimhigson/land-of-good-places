@@ -53,13 +53,6 @@ import {
   PLAYER_RADIUS,
   RIM_OUTSET_START,
 } from '../../src/core/constants.ts';
-// `NavGrid.ts` itself reaches only `core/constants`, `Collision.ts` and two
-// type-only imports (`boundary.ts`, `entities/Player.ts`'s `GroundSampler`,
-// `building/surfaces.ts`'s `LevelConnector`) — no seed-dependent module, so
-// a static import here cannot fix the park's seed early (this file's own
-// header). `TOP_REFERENCE` is the same "start above everything real" probe
-// height `NavGrid`'s own first sample uses.
-import { TOP_REFERENCE } from '../../src/world/NavGrid.ts';
 import {
   ENTRANCE_ANGLE,
   ENTRANCE_BUS_ARRIVE_X,
@@ -3530,6 +3523,22 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
   // it on the real nav lattice rather than a straight geometric line.
   {
     const MARCH_STEP = 0.5;
+    // `NavGrid.ts`'s own `TOP_REFERENCE`, restated rather than imported —
+    // it looks like a leaf (its own direct imports are `core/constants`,
+    // two type-only imports, and `Collision.ts`), but that last one is not
+    // safe: `NavGrid.ts` imports `autoHopClears` from it as a real value,
+    // and `Collision.ts` imports `GARDEN_PLAY_BOUNDARY` from `boundary.ts`
+    // as a real value too, which reads `PARK_SEED` from `parkManifest.ts`
+    // at module load — so a static import of `NavGrid.ts` here pins the
+    // park's seed exactly the way this file's own header warns against
+    // (found live: every non-canonical seed file threw "asked for seed N
+    // but the park built with 20260728" the moment this was imported,
+    // canonical only ever passing because 20260728 already *is* the
+    // default it was pinned to). `WalkSurfaces.sample`'s own contract is
+    // "no more than one step above `y`" with a `ceiling = y + STEP_UP`, so
+    // any `y` comfortably above every real height in the park is exactly
+    // as good as `NavGrid`'s own probe — a plain, un-imported number.
+    const TOP_REFERENCE = 500;
     for (const crossing of facts.world.train.crossings) {
       const bridge = facts.world.train.bridges.find((b) => b.deckCovers(crossing.x, crossing.z));
       if (!bridge) continue;
