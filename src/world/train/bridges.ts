@@ -461,11 +461,17 @@ export function buildBridges(
       const lowY = terrainHeight(farX, farZ);
 
       const rampMesh = new InstancedMesh(new BoxGeometry(deckWidth, 0.16, treadRun + 0.04), deckMaterial, treadCount);
+      // Every tread's own flat surface height, kept for the risers built
+      // just below — each tread is a flat plank at one height (real stair
+      // treads, not a smooth ramp face), so nothing yet fills the vertical
+      // gap between one tread's edge and the next.
+      const treadSurfaceY: number[] = [];
       for (let i = 0; i < treadCount; i += 1) {
         const fromAlong = DECK_HALF_LENGTH + i * treadRun;
         const toAlong = i === treadCount - 1 ? farAlong : DECK_HALF_LENGTH + (i + 1) * treadRun;
         const t = (i + 0.5) / treadCount;
         const y = deckY + (lowY - deckY) * t;
+        treadSurfaceY.push(y);
 
         const platformAlongFrom = sign > 0 ? fromAlong : -toAlong;
         const platformAlongTo = sign > 0 ? toAlong : -fromAlong;
@@ -482,6 +488,36 @@ export function buildBridges(
       rampMesh.castShadow = true;
       rampMesh.receiveShadow = true;
       bridgeGroup.add(rampMesh);
+
+      // Risers — a vertical face at each seam, deck-edge to first tread,
+      // tread to tread, and last tread to the ground, so the ramp reads as
+      // a real staircase (Jim's own steps are built the same way) rather
+      // than a stack of flat planks with daylight between them (QA on PR
+      // #330: "read as venetian blinds from an angle" — true, since nothing
+      // here ever filled that gap before). `treadCount + 1` seams for
+      // `treadCount` treads: the deck's own edge counts as the surface
+      // before the first tread, and the real ground (`lowY`) as the
+      // surface after the last.
+      const riserMesh = new InstancedMesh(new BoxGeometry(deckWidth, 1, 0.06), deckMaterial, treadCount + 1);
+      const riserScale = new Vector3(1, 1, 1);
+      for (let i = 0; i <= treadCount; i += 1) {
+        const seamAlong = (DECK_HALF_LENGTH + i * treadRun) * sign;
+        const before = i === 0 ? deckY : treadSurfaceY[i - 1]!;
+        const after = i === treadCount ? lowY : treadSurfaceY[i]!;
+        // Every instance gets a real matrix, even a near-flat seam — an
+        // `InstancedMesh` index left untouched keeps its default identity
+        // matrix, which is a real, visible unit box sitting at the origin,
+        // not an invisible one; floored rather than skipped so there is
+        // never a stray box to find.
+        const riserHeight = Math.max(Math.abs(after - before), 0.001);
+        riserScale.set(1, riserHeight, 1);
+        position.set(cx + dirX * seamAlong, (before + after) / 2, cz + dirZ * seamAlong);
+        matrix.compose(position, rotation, riserScale);
+        riserMesh.setMatrixAt(i, matrix);
+      }
+      riserMesh.instanceMatrix.needsUpdate = true;
+      riserMesh.castShadow = true;
+      bridgeGroup.add(riserMesh);
 
       // No guard rail down a ramp's own flanks, deliberately, unlike the
       // deck's (above). The deck stands several metres over a moving train
