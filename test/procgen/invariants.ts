@@ -1517,7 +1517,13 @@ const everyPathIsLit: Invariant = (facts) => {
       // at its feet. Lighting the deck itself (guard-rail lanterns, say)
       // is real follow-up work, not something this invariant can conjure
       // by failing the seed.
-      const onBridge = facts.world.train.bridges.some((bridge) => bridge.covers(x, z));
+      const onBridge =
+        facts.world.train.bridges.some((bridge) => bridge.covers(x, z)) ||
+        // The conservative reservation, not just a built deck: the keepout
+        // excludes lamp ground at every measured crossing (level crossings
+        // included), whether or not the real search went on to build there
+        // — ported from the sibling bridge-backtrack fix (76285e3).
+        facts.bridgeReservations.some((footprint) => footprint && footprint.covers(x, z));
       const lit = onBridge || facts.lamps.some(([lx, lz]) => Math.hypot(lx - x, lz - z) < LAMP_REACH);
       run = lit ? 0 : run + step;
       if (run > worst) worst = run;
