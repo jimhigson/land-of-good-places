@@ -11,7 +11,13 @@ import {
   Vector3,
 } from 'three';
 import { PALETTE } from '../../core/palette';
-import { pinkStoneTexture, woodTexture } from '../../core/textures';
+import {
+  pinkStoneTexture,
+  WELCOME_SIGN_CANVAS_HEIGHT,
+  WELCOME_SIGN_CANVAS_WIDTH,
+  welcomeSignTexture,
+  woodTexture,
+} from '../../core/textures';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
 import { terrainHeight } from '../terrain';
 import type { FrameContext, GameSystem } from '../../core/types';
@@ -75,6 +81,13 @@ const WELCOME_SIGN_POST_OFFSETS = [-1.9, 1.9] as const;
 const WELCOME_SIGN_POST_RADIUS = 0.35;
 /** Half the board's own width (it is 4.4 m across), for sampling its far corners. */
 const WELCOME_SIGN_BOARD_HALF_WIDTH = 2.2;
+
+/**
+ * What the board says — the one owner of this string. Both the painted
+ * plaque ({@link Entrance.buildWelcomeSign}) and its interact chip read from
+ * here, so the two can never say something different from each other.
+ */
+const WELCOME_SIGN_TEXT = 'Welcome to the Land of Good Places.';
 
 /**
  * **How far the sign's board and posts must clear the train's centre line.**
@@ -206,14 +219,20 @@ export interface EntranceOptions {
  * posts, its caps, its paw prints and its crossbar, which is what makes it a
  * gate.
  *
- * **There is a welcome sign, just inside it, and it does carry words** — on
- * its interact chip, the same way every other sign in the park says its piece
- * now (`world/interact.ts`). It is the board that used to stand, blank and
- * unreachable, at the dodgems' own doorway on a dead-end path spur that led
- * nowhere a child could read or press (issue #298, Jim playing 18 August
- * 2026). Moved here rather than rebuilt: same posts, same candy-coloured
- * bulbs, same little pennant, just given somewhere to stand and something to
- * say. See {@link buildWelcomeSign}.
+ * **There is a welcome sign, just inside it, and it does carry words** —
+ * painted, on the board itself, readable on approach rather than only after
+ * a button press. That is a deliberate, one-off exception to the 28 July
+ * ruling against painted signage (Jim, 23 August 2026, on PR #303: the board
+ * shipped blank, with the words hiding on its interact chip, which was not
+ * what "make the sign have actual text on it" meant) — see the note on
+ * {@link welcomeSignTexture} in `core/textures.ts` for why this one board
+ * gets to break the rule. The interact chip still says the same words
+ * (`world/interact.ts`), for a player who reads it that way instead. It is
+ * the board that used to stand, blank and unreachable, at the dodgems' own
+ * doorway on a dead-end path spur that led nowhere a child could read or
+ * press (issue #298, Jim playing 18 August 2026). Moved here rather than
+ * rebuilt: same posts, same candy-coloured bulbs, same little pennant, just
+ * given somewhere to stand and something to say. See {@link buildWelcomeSign}.
  */
 export class Entrance implements GameSystem {
   readonly name = 'entrance';
@@ -487,6 +506,43 @@ export class Entrance implements GameSystem {
     signGroup.add(board);
     addOutline(board, 0.02);
 
+    // The plaque: a cream mount recessed into the board's own front face,
+    // with the greeting painted onto a flush plane in front of that — the
+    // same frame/mount/canvas layering `world/hotel/dressing.ts`'s
+    // `paintedPicture` uses for the hotel's paintings. Each layer pokes a
+    // few centimetres past the one behind it (board → mount → text plane) so
+    // nothing z-fights and the text sits flush against real wood rather than
+    // floating off it on a formula of its own — the exact trap CLAUDE.md's
+    // note on painted faces warns against.
+    //
+    // This is the one board in the park allowed a painted face: see the
+    // "deliberate, one-off exception" note on `welcomeSignTexture` itself.
+    const plaqueWidth = 3.9;
+    const plaqueHeight = plaqueWidth * (WELCOME_SIGN_CANVAS_HEIGHT / WELCOME_SIGN_CANVAS_WIDTH);
+    const mount = decal(
+      new Mesh(
+        new BoxGeometry(plaqueWidth + 0.2, plaqueHeight + 0.2, 0.08),
+        toonMaterial(PALETTE.signBoard),
+      ),
+    );
+    mount.position.set(0, 2.6, 0.06);
+    signGroup.add(mount);
+
+    const textPlane = decal(
+      new Mesh(
+        new PlaneGeometry(plaqueWidth, plaqueHeight),
+        toonMaterial(0xffffff, {
+          map: welcomeSignTexture(WELCOME_SIGN_TEXT),
+          // Same self-lift `paintedPicture` gives the hotel's paintings — legible
+          // walking past at dusk, not just at noon.
+          emissive: 0xffffff,
+          emissiveIntensity: 0.18,
+        }),
+      ),
+    );
+    textPlane.position.set(0, 2.6, 0.105);
+    signGroup.add(textPlane);
+
     // Bulbs along the lintel, like a real fairground arch.
     for (let i = 0; i < 10; i += 1) {
       const t = i / 9;
@@ -515,7 +571,7 @@ export class Entrance implements GameSystem {
       standZ: signZ,
       verb: 'Read',
       highlight: highlightObject(signGroup),
-      actions: () => pressAction('Welcome to the Land of Good Places.', () => playOpenChime(), '👋'),
+      actions: () => pressAction(WELCOME_SIGN_TEXT, () => playOpenChime(), '👋'),
     };
   }
 }
