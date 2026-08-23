@@ -1,8 +1,9 @@
-import { Group, Object3D, Raycaster, Vector2 } from 'three';
+import { Group, Object3D, Raycaster, Vector2, Vector3 } from 'three';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { IsoCamera } from '../../core/IsoCamera';
 import type { TapPoint } from '../../core/input/PointerControls';
 import type { CollisionWorld } from '../../world/Collision';
+import type { PetParadeLink } from '../../world/hotel/Hotel';
 import { terrainHeight } from '../../world/terrain';
 import { shopItem } from '../../world/building/shops/catalogue';
 import { gameStore, type GameState, type InventoryItem } from '../../state';
@@ -69,7 +70,17 @@ const MEMBER_RADIUS = 0.22;
 /** Seconds of stagger per place in the line when the hop ripples down it. */
 const HOP_RIPPLE = 0.075;
 
-export class Parade implements GameSystem {
+/**
+ * How close a nap-routed pet has to get to its bed's own run-up spot to
+ * count as arrived — see {@link napWalks}. Tighter than the ordinary
+ * {@link WAYPOINT_RADIUS} equivalent a routed player walk uses (there is no
+ * next leg to flow into here, just one stop), loose enough that the
+ * critically-damped follow spring's own settle never leaves a member
+ * hovering a few centimetres short forever.
+ */
+const NAP_WALK_ARRIVE_RADIUS = 0.35;
+
+export class Parade implements GameSystem, PetParadeLink {
   readonly name = 'parade';
 
   /** Add this to the scene once. Members live in world space inside it. */
@@ -89,6 +100,15 @@ export class Parade implements GameSystem {
   private readonly ndc = new Vector2();
 
   private readonly unsubscribe: () => void;
+
+  /**
+   * One pet, walking to its own bed rather than following the trail — see
+   * {@link beginPetNapWalk}, `Hotel`'s one caller. Keyed by parade uid, not
+   * by member reference, so a stowed-then-repurchased pet (unlikely mid-nap,
+   * but not impossible) can never leave a stale entry pointing at a member
+   * that has since been disposed.
+   */
+  private readonly napWalks = new Map<string, { readonly goal: Vector3; readonly onArrive: () => void }>();
 
   /** True while every pet in the line is off screen — see {@link setPetsHidden}. */
   private petsHidden = false;
@@ -149,8 +169,52 @@ export class Parade implements GameSystem {
     if (this.petsHidden === hidden) return;
     this.petsHidden = hidden;
     for (const member of [...this.members, ...this.leaving]) {
-      if (member.kind === 'pet') member.hidden = hidden;
+      // A pet mid-{@link beginPetNapWalk} owns its own visibility until it
+      // arrives (`driveNapWalk` hides it itself, the instant it does) — this
+      // blanket toggle must not snap it out of sight while it is still
+      // partway across the room, which is exactly the cut this PR fixes.
+      if (member.kind === 'pet' && !this.napWalks.has(member.uid)) member.hidden = hidden;
     }
+  }
+
+  /**
+   * Routes one pet, by parade uid, to a world point for the hotel's nap
+   * rather than the ordinary trail — `Hotel.sendPetsToBed`'s one caller, and
+   * the fix for Jim's *"the pet cuts — it vanishes from the parade and
+   * appears already in its bed"* (23 Aug 2026). The member keeps walking,
+   * and stays visible regardless of {@link setPetsHidden}, until
+   * {@link driveNapWalk} finds it within {@link NAP_WALK_ARRIVE_RADIUS} of
+   * `goal` — at which point it is hidden (the same way every other pet is
+   * during a nap) and `onArrive` fires once.
+   *
+   * The walk itself reuses the ordinary follow — `member.target` is simply
+   * pointed at `goal` instead of a trail sample, and the critically-damped
+   * spring {@link ParadeMember.update} already runs every frame does the
+   * rest: the same easing, the same turn-to-face, the same walk cycle every
+   * other step in the line uses. No second way of moving a pet exists here.
+   *
+   * Returns `false` (and starts nothing) when this uid is not currently a
+   * live pet in the line — stowed, carried in her hands, or simply not
+   * bought yet — which is `Hotel`'s cue to fall back to its own instant
+   * appear-in-bed.
+   */
+  beginPetNapWalk(uid: string, x: number, y: number, z: number, onArrive: () => void): boolean {
+    const member = this.members.find((candidate) => candidate.uid === uid && candidate.kind === 'pet');
+    if (!member) return false;
+    member.hidden = false;
+    this.napWalks.set(uid, { goal: new Vector3(x, y, z), onArrive });
+    return true;
+  }
+
+  /**
+   * Abandons an in-flight {@link beginPetNapWalk}, if this uid has one — the
+   * pet simply resumes following the trail from wherever it had got to, the
+   * same as any member the walk never touched. `Hotel.standPetsDown`'s own
+   * cleanup for a nap that ended before a distant pet's route finished. A
+   * no-op for a uid that already arrived, or was never routed at all.
+   */
+  cancelPetNapWalk(uid: string): void {
+    this.napWalks.delete(uid);
   }
 
   /**
@@ -195,7 +259,9 @@ export class Parade implements GameSystem {
 
     for (const member of this.members) {
       member.setFlying(flying);
-      this.aimAt(member);
+      const walk = this.napWalks.get(member.uid);
+      if (walk) this.driveNapWalk(member, walk);
+      else this.aimAt(member);
       member.update(dt, elapsed);
     }
 
@@ -239,7 +305,44 @@ export class Parade implements GameSystem {
     this.leaving.length = 0;
   }
 
+  /**
+   * The current world position and visibility of one parade member, by
+   * uid — `check:hotel`'s way of proving a nap-routed pet actually walked
+   * (issue #279 round 6) rather than reaching into a private field. `null`
+   * when no such member is currently in the line at all.
+   */
+  petState(uid: string): { readonly x: number; readonly y: number; readonly z: number; readonly visible: boolean } | null {
+    const member = this.members.find((candidate) => candidate.uid === uid && candidate.kind === 'pet');
+    if (!member) return null;
+    const { x, y, z } = member.root.position;
+    return { x, y, z, visible: member.root.visible };
+  }
+
   // -------------------------------------------------------------- internals
+
+  /**
+   * One frame of {@link beginPetNapWalk}: point the member straight at its
+   * bed instead of a trail sample, and — once the spring has actually
+   * carried it there, not merely once it has been asked to — hand it back.
+   *
+   * Reads {@link ParadeMember.root}'s position rather than `target` for the
+   * arrival check on purpose: `target` becomes the goal the instant the walk
+   * starts, so testing against it would call the pet "arrived" on the very
+   * first frame, before it had moved at all — exactly the cut this method
+   * exists to not do.
+   */
+  private driveNapWalk(
+    member: ParadeMember,
+    walk: { readonly goal: Vector3; readonly onArrive: () => void },
+  ): void {
+    member.target.copy(walk.goal);
+    const dx = member.root.position.x - walk.goal.x;
+    const dz = member.root.position.z - walk.goal.z;
+    if (Math.hypot(dx, dz) > NAP_WALK_ARRIVE_RADIUS) return;
+    this.napWalks.delete(member.uid);
+    member.hidden = true;
+    walk.onArrive();
+  }
 
   /**
    * Works out where this member should be standing, and writes it into the
