@@ -68,13 +68,38 @@ Plus: riders sit; `BRIDGE_RISE` = 4.25 m (real commits on bridge-backtrack,
 
 ## Next
 
-1. Measure seeds 2 and 18: bridge counts + check:park. Tune if needed.
-2. test:procgen all 5 seeds; extend invariants (red-then-green):
-   crossings-at-sites-only + station-clear; majority-bridges; keep
-   pathsRunOnGridAxes happy with the (legitimately diagonal) crossing
-   axes — may need a measured exemption for runs over a bridge deck/ramp.
-3. Full npm run build (unpiped). 4. Browser QA + screenshots (top-down
-   grid, walk two bridges). 5. Update PR #286.
+1. `pathsRunOnGridAxes` fails on all 5 seeds — the crossing axes are
+   legitimately diagonal (square to the RAIL, not the world axes) and
+   fence-follow legs curve along the rail. Add a measured exemption:
+   diagonal samples over a bridge footprint / within the rail-corridor
+   band are the railway's own geometry.
+2. Full `test:procgen` (seeds 5/11 included): earlier run also showed
+   seed-11 ride-exit/doormat/detour failures and seed-5 everyPathIsLit —
+   re-measure after the ring rework (layouts re-rolled), fix what remains.
+   Sky Cruiser seed-11 supports = pre-existing issue #301.
+3. Full `npm run build` (unpiped). 4. Browser QA + screenshots (top-down
+   grid + walk two bridges). 5. Update PR #286; reconcile with
+   origin/bridge-backtrack if the other agent pushes (their three findings
+   are already covered here in stronger form).
+
+### This round landed (commit b66b66e)
+
+- True-circle statue ring (spread 0.01 m), radius owned by
+  `parkLayout.RING_RADIUS`; plots keep out of the ring annulus via
+  `validate()`; exactly 4 compass junctions (`RING_COMPASS_POINTS`).
+- `stall.keychain` manifest band moved outside the ring (old band's only
+  remaining ground was inside the fountain basin).
+- `enforceRailSide` enforces corridor clearance, not just side;
+  `fenceFollowRoute` picks the boundary-viable direction;
+  `doubleCrossingLeg` serves pockets whose own side pinches out by
+  crossing the railway twice through planned sites.
+- `STATION_GAP` moved to `train/clearance` (leaf);
+  `crossingsArePlannedAndMostlyBridged` invariant added (station-clear
+  gaps; >=1 bridge when crossings exist; bridges >= level crossings).
+- Rail-solver boundary-margin experiment tried and REVERTED (seed 2's
+  rail stops solving even at 113 m with a 7.5 m rim margin — the layout
+  is too dense; the double-crossing router is the working answer).
+- check:park EXIT 0 on all three required seeds; bridges 2/3, 2/3, 2/2.
 
 ## Numbers to beat / reproduce
 
