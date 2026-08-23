@@ -251,7 +251,16 @@ function sampleTsFor(
  */
 const REAL_CLEARANCE_STRIDE = 0.5;
 
-const REAL_PROBE_RADIUS = PLAYER_RADIUS + REAL_CLEARANCE_STRIDE;
+/**
+ * Exported because it is the *one* definition of "how much daylight the
+ * bridge search demands around a probe point" — `LampPosts.ts` sizes its
+ * own keep-back off this exact figure. A lamp placed clear of a smaller,
+ * hand-copied margin still reads as "blocked" to this search, 0.2 m short
+ * of what it needs — the dominant single cause of blocked ramp reach in PR
+ * #330's traces, and CLAUDE.md's "two definitions of one thing" disease in
+ * its purest form.
+ */
+export const REAL_PROBE_RADIUS = PLAYER_RADIUS + REAL_CLEARANCE_STRIDE;
 
 /**
  * How far a ramp side has to reach before it counts as a genuinely walkable
@@ -426,35 +435,20 @@ function planConservative(crossings: readonly LevelCrossing[]): BridgeFootprint[
     // `maxLateralShiftFor`'s own note.
     const reservedHalfAcross = halfAcross + maxLateralShiftFor(crossing);
 
+    // **The reservation runs the full ideal ramp on both sides, always.**
+    // It used to truncate where the boundary, a plot or the rail's own
+    // curving corridor intersected the *reserved* (maximally padded) width —
+    // but this footprint's one job is keeping movable scatter (trees, lamps,
+    // maze walls) off ground the real, late pass may want, and truncation
+    // only ever *removes* protection: reserving ground that overlaps a plot
+    // or lies outside the boundary is harmless (nothing scatters there
+    // anyway), while a reservation cut short is exactly how a lamp ended up
+    // standing 8 m down a ramp the real pass then needed (canonical seed,
+    // crossing at railDistance 172, 2026-08-23 — and the same disease
+    // `HANDOFF-bridge-backtrack-continue.md` left as its open question).
     const idealRampRun = BRIDGE_RISE / BRIDGE_RAMP_GRADIENT;
-    const truncate = (sign: 1 | -1): number => {
-      const clearAt = (along: number): boolean => {
-        for (const t of SAMPLE_TS) {
-          const x = cx + dirX * along * sign + acrossX * reservedHalfAcross * t;
-          const z = cz + dirZ * along * sign + acrossZ * reservedHalfAcross * t;
-          if (GARDEN_PLAY_BOUNDARY.distanceToEdge(x, z) < RAMP_BOUNDARY_MARGIN) return false;
-          if (!clearOfPlots(x, z, RAMP_PLOT_MARGIN)) return false;
-          if (distanceToRailCorridor(x, z) < FENCE_OFFSET + RAMP_RAIL_MARGIN) return false;
-        }
-        return true;
-      };
-      let rampRun = idealRampRun;
-      const steps = Math.max(1, Math.ceil(rampRun / WIDTH_STEP));
-      for (let i = 1; i <= steps; i += 1) {
-        const along = DECK_HALF_LENGTH + (i / steps) * rampRun;
-        if (!clearAt(along)) {
-          rampRun = Math.max(0, along - DECK_HALF_LENGTH - 1.5);
-          break;
-        }
-      }
-      const BACKOFF_STEP = 0.1;
-      while (rampRun > 0 && !clearAt(DECK_HALF_LENGTH + rampRun)) {
-        rampRun = Math.max(0, rampRun - BACKOFF_STEP);
-      }
-      return rampRun;
-    };
-    const rampRunPos = truncate(1);
-    const rampRunNeg = truncate(-1);
+    const rampRunPos = idealRampRun;
+    const rampRunNeg = idealRampRun;
 
     return {
       cx,
@@ -509,6 +503,19 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
   const realClear = (x: number, z: number): boolean =>
     collision.isClearCircle(x, z, REAL_PROBE_RADIUS) &&
     collision.playBounds.distanceToEdge(x, z) >= REAL_PROBE_RADIUS;
+
+  /** Node-only diagnostics (`LGP_DEBUG_BRIDGE=1 npm run check:park` etc.):
+   * says, per rejected candidate, what actually stopped it — absent in the
+   * browser bundle, and silent without the flag. */
+  const debugBridge = (globalThis as { process?: { env?: Record<string, string> } }).process?.env?.[
+    'LGP_DEBUG_BRIDGE'
+  ]
+    ? (message: string): void => {
+        (globalThis as unknown as { process: { stdout: { write: (s: string) => void } } }).process.stdout.write(
+          `bridge: ${message}\n`,
+        );
+      }
+    : null;
 
   /**
    * **Pass-1 probe: "would this point be clear, felling included" — never
@@ -707,10 +714,21 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
           const x = centerX + dirX * along * sign + acrossX * halfAcross * t;
           const z = centerZ + dirZ * along * sign + acrossZ * halfAcross * t;
           if (!searchClear(x, z) || nearOtherGuardRail(siblingDecks, x, z, GUARD_RAIL_MARGIN)) {
+            debugBridge?.(
+              `  ramp ${sign > 0 ? '+' : '-'} blocked at along=${along.toFixed(1)} t=${t.toFixed(2)} (${x.toFixed(1)},${z.toFixed(1)}): ` +
+                (!collision.isClearCircle(x, z, REAL_PROBE_RADIUS)
+                  ? 'collider'
+                  : collision.playBounds.distanceToEdge(x, z) < REAL_PROBE_RADIUS
+                    ? 'playBounds'
+                    : 'guardRail'),
+            );
             blocked = true;
             break;
           }
           if (distanceToRailCorridor(x, z) < FENCE_OFFSET + RAMP_RAIL_MARGIN) {
+            debugBridge?.(
+              `  ramp ${sign > 0 ? '+' : '-'} blocked at along=${along.toFixed(1)} t=${t.toFixed(2)} (${x.toFixed(1)},${z.toFixed(1)}): rail corridor`,
+            );
             blocked = true;
             break;
           }
@@ -785,7 +803,12 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
         if (Math.abs(shift) > halfAcross - MIN_DECK_HALF_WIDTH) continue;
         const centerX = crossing.x + acrossX * shift;
         const centerZ = crossing.z + acrossZ * shift;
-        if (!deckClears(centerX, centerZ, halfAcross)) continue;
+        if (!deckClears(centerX, centerZ, halfAcross)) {
+          debugBridge?.(
+            `crossing railD=${crossing.railDistance.toFixed(1)} w=${halfAcross.toFixed(1)} shift=${shift.toFixed(1)}: deck blocked`,
+          );
+          continue;
+        }
         const reachPos = provisionalReach(centerX, centerZ, halfAcross, 1);
         const reachNeg = provisionalReach(centerX, centerZ, halfAcross, -1);
         // Both sides, not the better one — see `WALKABLE_FLOOR`'s own note.
@@ -795,6 +818,9 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
         if (Math.min(reachPos, reachNeg) >= WALKABLE_FLOOR + WALKABLE_MARGIN) {
           return { crossingIndex: -1, cx: centerX, cz: centerZ, dirX, dirZ, acrossX, acrossZ, halfAcross };
         }
+        debugBridge?.(
+          `crossing railD=${crossing.railDistance.toFixed(1)} w=${halfAcross.toFixed(1)} shift=${shift.toFixed(1)}: reach +${reachPos.toFixed(1)}/-${reachNeg.toFixed(1)} < ${(WALKABLE_FLOOR + WALKABLE_MARGIN).toFixed(2)}`,
+        );
       }
     }
     return null;

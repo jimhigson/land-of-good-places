@@ -16,6 +16,14 @@ import { PARK_BOUNDARY } from './boundary';
 import { TRAIN_PLAN } from './train/plan';
 import { STATION_GAP } from './train/fence';
 import { FENCE_OFFSET } from './train/clearance';
+import { DECK_HALF_LENGTH } from './train/bridgeFootprint';
+import {
+  CROSSING_SITES,
+  LEVEL_CROSSING_SITES,
+  LEVEL_CROSSING_PENALTY,
+  railSideOf,
+  type CrossingSite,
+} from './train/crossingPlan';
 import { COASTER_PLANS } from './coaster/plan';
 import { RAIL_RACE_PLAN } from './railRace/plan';
 import { archFeet } from './railRace/arch';
@@ -830,6 +838,136 @@ function manhattanRoute(
   return collapseCollinear(pushClearOfRail(collapseCollinear(out)));
 }
 
+/**
+ * The two ends of a crossing site's own straight run — where a leg leaves
+ * ordinary routing, walks the crossing axis (over the future bridge, or
+ * through the level crossing's fence gap), and resumes ordinary routing.
+ * A bridge site's foot sits a stride past the ramp's own feasible reach so
+ * the drawn ribbon runs straight under the whole ramp; a level site's just
+ * far enough past the fence gap that the path arrives square.
+ */
+function crossingFeet(site: CrossingSite): {
+  plus: readonly [number, number];
+  minus: readonly [number, number];
+} {
+  const reachPlus = site.bridge ? site.rampReachPos + 1.0 : 4.0;
+  const reachMinus = site.bridge ? site.rampReachNeg + 1.0 : 4.0;
+  return {
+    plus: [
+      site.x + site.dirX * (DECK_HALF_LENGTH + reachPlus),
+      site.z + site.dirZ * (DECK_HALF_LENGTH + reachPlus),
+    ],
+    minus: [
+      site.x - site.dirX * (DECK_HALF_LENGTH + reachMinus),
+      site.z - site.dirZ * (DECK_HALF_LENGTH + reachMinus),
+    ],
+  };
+}
+
+/**
+ * Route a leg that must respect the railway (Jim, 23 August 2026: the park
+ * is designed around the bridge constraints, not the other way round).
+ *
+ * Endpoints on the same side of the loop route exactly as before. A leg
+ * whose endpoints straddle the railway is routed *through a planned
+ * crossing site* ({@link CROSSING_SITES}): ordinary axis-aligned routing to
+ * the near ramp foot, dead straight along the crossing's own axis over the
+ * rail, ordinary routing onward — so the drawn network only ever meets the
+ * railway where `crossingPlan.ts` proved a bridge fits. Site choice
+ * minimises real walked length, with {@link LEVEL_CROSSING_PENALTY} extra
+ * charged for a level-crossing site so a bridge always wins when one is in
+ * reach.
+ */
+function routeLeg(
+  from: readonly [number, number],
+  to: readonly [number, number],
+): (readonly [number, number])[] {
+  const fromSide = railSideOf(from[0], from[1]);
+  const toSide = railSideOf(to[0], to[1]);
+  // Same side: ordinary routing — but still clamped, because the routers
+  // are not rail-aware and a corner can hop the rail and back mid-leg
+  // (measured: a stall connector crossed twice, once *inside* a station's
+  // sealed window, exactly the ground `stationRun` fences).
+  if (fromSide === toSide) return clampToRailSide(manhattanRoute(from, to), fromSide);
+
+  let best: { site: CrossingSite; near: readonly [number, number]; far: readonly [number, number] } | null = null;
+  let bestCost = Infinity;
+  for (const site of [...CROSSING_SITES, ...LEVEL_CROSSING_SITES]) {
+    const feet = crossingFeet(site);
+    const near = fromSide === 1 ? feet.plus : feet.minus;
+    const far = fromSide === 1 ? feet.minus : feet.plus;
+    const cost =
+      Math.hypot(from[0] - near[0], from[1] - near[1]) +
+      Math.hypot(near[0] - far[0], near[1] - far[1]) +
+      Math.hypot(far[0] - to[0], far[1] - to[1]) +
+      (site.bridge ? 0 : LEVEL_CROSSING_PENALTY);
+    if (cost < bestCost) {
+      bestCost = cost;
+      best = { site, near, far };
+    }
+  }
+  // No site anywhere on the loop (should not happen — the level tier exists
+  // for exactly this): the old behaviour, an ad-hoc crossing wherever the
+  // route lands, is still better than no path at all.
+  if (!best) return manhattanRoute(from, to);
+
+  const site = best.site;
+  return [
+    // The ordinary routers know nothing about the railway, so each sub-leg
+    // is clamped to its own side afterwards: a corner that hopped the rail
+    // mid-leg becomes a run along the fence instead (measured: the dodgems
+    // and hotel spurs each crossed the rail *three* times before this).
+    ...clampToRailSide(manhattanRoute(from, best.near), fromSide),
+    // The crossing axis, pinned at the deck's edges and centre so the drawn
+    // Catmull-Rom curve runs dead straight over the rail rather than bowing
+    // off the deck between two distant feet.
+    [site.x + site.dirX * DECK_HALF_LENGTH, site.z + site.dirZ * DECK_HALF_LENGTH] as const,
+    [site.x, site.z] as const,
+    [site.x - site.dirX * DECK_HALF_LENGTH, site.z - site.dirZ * DECK_HALF_LENGTH] as const,
+    ...clampToRailSide(manhattanRoute(best.far, to), toSide),
+  ];
+}
+
+/**
+ * How far a clamped point stands from the rail centre line: past the fence
+ * (`FENCE_OFFSET`) with a walker's stride of daylight, and just past
+ * `crossings.ts`'s own `TOUCH_DISTANCE` (3.2) so a clamped run does not
+ * smear the measured crossing clusters it was moved to stay out of.
+ */
+const RAIL_CLAMP_DISTANCE = 3.5;
+
+/**
+ * Pull every wrong-side point of a routed leg back to `side`, at
+ * {@link RAIL_CLAMP_DISTANCE} off the centre line — the repair that keeps a
+ * leg whose endpoints share a side from ever actually crossing the railway
+ * mid-run. The ordinary routers (`detourAroundBlockers`, `elbowLeg`,
+ * `gridDetour`) have never been rail-aware, and making them so was measured
+ * (see the HANDOFF's dead-ends) to be either ruinously slow or too fat to
+ * thread the narrow strips between rail and boundary; a clamp turns the
+ * rare offending corner into a short run along the fence instead.
+ */
+function clampToRailSide(
+  points: readonly (readonly [number, number])[],
+  side: 1 | -1,
+): (readonly [number, number])[] {
+  const route = TRAIN_PLAN.route;
+  return points.map(([x, z]) => {
+    if (railSideOf(x, z) === side) return [x, z] as const;
+    const d = route.distanceNear(x, z);
+    const p = route.pointAt(d, clampScratch);
+    const t = route.tangentAt(d, clampTangent);
+    // `side = +1` lies along (tangent.z, -tangent.x) — crossings.ts's own
+    // convention, same as crossingPlan.ts's railSideOf.
+    return [
+      p.x + t.z * side * RAIL_CLAMP_DISTANCE,
+      p.z - t.x * side * RAIL_CLAMP_DISTANCE,
+    ] as const;
+  });
+}
+
+const clampScratch = new Vector3();
+const clampTangent = new Vector3();
+
 /** Drops interior points that lie on the same straight run as their
  * neighbours — a 20 m corridor of grid steps collapses to its two ends,
  * which keeps the Catmull-Rom curve from wobbling at every grid seam. */
@@ -1079,7 +1217,7 @@ function buildGraph(): PathGraph {
     }
     // See {@link SPUR_STRETCH}: no-op in the game, non-zero only for the test
     // that proves a longer spur leaves distant scenery where it was.
-    const routed = [...manhattanRoute(start, lead.length ? (lead[0] as [number, number]) : [ex, ez]), ...(lead.length ? [[ex, ez] as readonly [number, number]] : [])];
+    const routed = [...routeLeg(start, lead.length ? (lead[0] as [number, number]) : [ex, ez]), ...(lead.length ? [[ex, ez] as readonly [number, number]] : [])];
     if (SPUR_STRETCH > 0 && id === SPUR_STRETCH_ID && routed.length >= 2) {
       const head = routed[0] as readonly [number, number];
       const tail = routed[routed.length - 1] as readonly [number, number];
@@ -1176,7 +1314,7 @@ function buildGraph(): PathGraph {
         width: 2.6,
         closed: false,
         points: [
-          ...manhattanRoute(start, [station.leadX, station.leadZ]),
+          ...routeLeg(start, [station.leadX, station.leadZ]),
           [station.approachX, station.approachZ],
           [station.standX, station.standZ],
         ],
@@ -1518,7 +1656,13 @@ function addInterconnects(nodes: PathNode[], edges: PathEdge[]): void {
       const a = destinations[i] as PathNode;
       const b = destinations[j] as PathNode;
       const straight = Math.hypot(a.x - b.x, a.z - b.z);
-      if (straight > 1e-6 && straight <= closeCap) candidates.push({ a, b, straight });
+      if (straight <= 1e-6 || straight > closeCap) continue;
+      // A pair straddling the railway is never "close but unlinked" in the
+      // sense this pass fixes: the walk between them is via a planned
+      // crossing (`routeLeg`), and a direct connector here would either
+      // cross the rail off-site or draw a second, redundant crossing run.
+      if (railSideOf(a.x, a.z) !== railSideOf(b.x, b.z)) continue;
+      candidates.push({ a, b, straight });
     }
   }
   // Nearest pairs first, ties broken by original (deterministic) order.
@@ -1547,7 +1691,10 @@ function addInterconnects(nodes: PathNode[], edges: PathEdge[]): void {
     const toPoint = leadB.length ? (leadB[0] as [number, number]) : ([b.x, b.z] as [number, number]);
     const points: (readonly [number, number])[] = [
       ...(leadA.length ? [[a.x, a.z] as [number, number]] : []),
-      ...manhattanRoute(fromPoint, toPoint),
+      // routeLeg, not bare manhattanRoute: the pair is same-side by the
+      // filter above, so this is the clamped ordinary route — a connector
+      // can never hop the railway and back mid-run.
+      ...routeLeg(fromPoint, toPoint),
       ...(leadB.length ? [[b.x, b.z] as [number, number]] : []),
     ];
 

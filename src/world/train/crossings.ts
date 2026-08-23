@@ -1,6 +1,7 @@
 import type { TrainRoute } from './route';
 import { pathCentreline } from '../paths';
 import { ENTRANCE_GATE_X, ENTRANCE_GATE_Z } from '../entrance/layout';
+import { CROSSING_SITES, LEVEL_CROSSING_SITES } from './crossingPlan';
 import { Vector3 } from 'three';
 
 /**
@@ -36,48 +37,80 @@ export interface LevelCrossing {
   readonly halfGap: number;
 }
 
-/** How close a path sample must come to the rail to count as touching it. */
+/** How close a path sample must be to the rail for a side flip between it
+ * and its neighbour to count as a crossing of the rail. */
 const TOUCH_DISTANCE = 3.2;
 
-/** Two touches this far apart along the loop belong to different crossings. */
+/** Two flips this far apart along the loop belong to different crossings. */
 const CLUSTER_GAP = 8;
 
-/** Touches this close (along the loop) to a platform are the *station's* —
- * its fence gap and platform already own that stretch, and a timber deck
- * under a platform is not a crossing. The station spurs the path graph now
- * grows would otherwise register one at every platform. */
-const STATION_EXCLUSION = 9.5;
+/** Consecutive centreline samples further apart than this belong to
+ * different drawn runs — `pathCentreline()` concatenates every route's own
+ * samples (about 0.8 m apart within a run), so a stride bigger than this is
+ * the seam between one route and the next, never a walkable step. A side
+ * flip is only ever measured *within* one run: two different paths hugging
+ * opposite sides of the fence must not read as a crossing between them
+ * (measured live, canonical seed 2026-08-23: a phantom crossing at
+ * railDistance 214.9 — inside a station's sealed window — minted from a
+ * station spur inside the fence and a stall spur outside it, interleaved by
+ * the old sort-all-touches clustering). */
+const RUN_BREAK = 3;
+
+/** How far (along the loop) a measured crossing may sit from a planned site
+ * and still be recognised as that site — the drawn leg was routed *through*
+ * the site by `paths.ts`, so a miss beyond a few metres is a different
+ * crossing (the gate walk's own fixed corridor, mostly), not the site. */
+const SITE_SNAP_TOLERANCE = 8;
 
 export function computeCrossings(
   route: TrainRoute,
   stationDistances: readonly number[] = [],
 ): LevelCrossing[] {
+  void stationDistances; // crossings are planned station-clear (crossingPlan.ts); kept for callers
   const point = new Vector3();
   const tangent = new Vector3();
-  const touches: { railDistance: number; x: number; z: number; side: number; nearStation: boolean }[] = [];
+
+  /**
+   * Flip events: a single drawn run's consecutive samples landing on
+   * opposite sides of the centre line while at least one of them is within
+   * {@link TOUCH_DISTANCE} of it. This — not the cloud of "touches" the old
+   * clustering collected — is what a crossing *is*: in the strips between
+   * rail and boundary a path legitimately runs beside the fence for tens of
+   * metres, and measuring from raw touch spans smeared one crossing's
+   * halfGap to the 14 m cap and let it swallow the gate walk's own separate
+   * crossing 20 m away.
+   */
+  const flips: number[] = [];
+  let previous: { x: number; z: number; railDistance: number; side: number; perp: number } | null =
+    null;
 
   const consider = (x: number, z: number) => {
     const railDistance = route.distanceNear(x, z);
-    let nearStation = false;
-    for (const station of stationDistances) {
-      const along = Math.abs(route.wrap(railDistance - station + route.length / 2) - route.length / 2);
-      if (along < STATION_EXCLUSION) nearStation = true;
-    }
     route.pointAt(railDistance, point);
-    if (Math.hypot(point.x - x, point.z - z) <= TOUCH_DISTANCE) {
-      route.tangentAt(railDistance, tangent);
-      // Which side of the rail this path sample lies on. A cluster whose
-      // touches sit on BOTH sides is a path genuinely crossing the railway;
-      // one whose touches all share a side is a path running up beside it —
-      // which is what a station's own spur does at the platform.
-      const side = Math.sign(tangent.z * (x - point.x) - tangent.x * (z - point.z)) || 1;
-      touches.push({ railDistance, x: point.x, z: point.z, side, nearStation });
+    route.tangentAt(railDistance, tangent);
+    const perp = Math.hypot(point.x - x, point.z - z);
+    const side = Math.sign(tangent.z * (x - point.x) - tangent.x * (z - point.z)) || 1;
+    const current = { x, z, railDistance, side, perp };
+    if (previous) {
+      const stride = Math.hypot(x - previous.x, z - previous.z);
+      if (
+        stride < RUN_BREAK &&
+        side !== previous.side &&
+        Math.min(perp, previous.perp) <= TOUCH_DISTANCE
+      ) {
+        const half = route.length / 2;
+        const delta = route.wrap(railDistance - previous.railDistance + half) - half;
+        flips.push(route.wrap(previous.railDistance + delta / 2));
+      }
     }
+    previous = current;
   };
 
   for (const sample of pathCentreline()) consider(sample.x, sample.z);
 
-  // The gate walk: from the gate to well inside, sampled every metre.
+  // The gate walk: from the gate to well inside, sampled every metre. Its
+  // first sample stands far from the last path sample, so the RUN_BREAK
+  // stride guard keeps the seam between them from ever reading as a flip.
   const inX = -ENTRANCE_GATE_X / Math.hypot(ENTRANCE_GATE_X, ENTRANCE_GATE_Z);
   const inZ = -ENTRANCE_GATE_Z / Math.hypot(ENTRANCE_GATE_X, ENTRANCE_GATE_Z);
   // Sample the walk deep enough to meet the track however far in this
@@ -87,45 +120,61 @@ export function computeCrossings(
     consider(ENTRANCE_GATE_X + inX * step, ENTRANCE_GATE_Z + inZ * step);
   }
 
-  touches.sort((a, b) => a.railDistance - b.railDistance);
+  flips.sort((a, b) => a - b);
   const crossings: LevelCrossing[] = [];
-  let cluster: typeof touches = [];
-  const flush = () => {
-    if (!cluster.length) return;
-    // A cluster in a station's exclusion zone is the platform's own spur —
-    // unless its touches lie on both sides of the rail, which no boarding
-    // approach does: that is a real crossing that happens to be near a
-    // platform, and suppressing it seals a paved route inside the fence
-    // (seed 2 stranded the rim stall's whole spur exactly that way).
-    const nearStation = cluster.some((touch) => touch.nearStation);
-    const bothSides =
-      cluster.some((touch) => touch.side > 0) && cluster.some((touch) => touch.side < 0);
-    if (nearStation && !bothSides) {
-      cluster = [];
-      return;
+  let group: number[] = [];
+  const emit = () => {
+    if (!group.length) return;
+    const first = group[0] as number;
+    const last = group[group.length - 1] as number;
+    const midDistance = (first + last) / 2;
+    const spread = last - first;
+    const halfGap = Math.min(14, Math.max(4.5, spread / 2 + 3.5));
+    // **Snap to the planned crossing site, whose frame is the one owner of
+    // "where and at what angle does the park cross here"** (crossingPlan.ts
+    // proved a bridge fits in exactly that frame, against the boundary, the
+    // plots and the rail's own curvature). The measured midpoint jitters a
+    // metre or two off the site — flips average over curve wobble — and the
+    // re-derived perpendicular jitters with it; the bridge search's
+    // rail-corridor test sits right at its margin on curved stretches, so
+    // that jitter alone flipped provably-feasible sites into level-crossing
+    // fallbacks (canonical seed, 2026-08-23: sites 172/228 both lost to it).
+    for (const site of [...CROSSING_SITES, ...LEVEL_CROSSING_SITES]) {
+      const along = Math.abs(
+        route.wrap(midDistance - site.railDistance + route.length / 2) - route.length / 2,
+      );
+      if (along <= SITE_SNAP_TOLERANCE) {
+        crossings.push({
+          x: site.x,
+          z: site.z,
+          railDistance: site.railDistance,
+          pathDirX: site.dirX,
+          pathDirZ: site.dirZ,
+          halfGap,
+        });
+        group = [];
+        return;
+      }
     }
-    const mid = cluster[Math.floor(cluster.length / 2)] as (typeof touches)[number];
-    const first = cluster[0] as (typeof touches)[number];
-    const last = cluster[cluster.length - 1] as (typeof touches)[number];
-    const spread = last.railDistance - first.railDistance;
-    const tangent = route.tangentAt(mid.railDistance, new Vector3());
+    const mid = route.pointAt(midDistance, new Vector3());
+    const midTangent = route.tangentAt(midDistance, new Vector3());
     crossings.push({
       x: mid.x,
       z: mid.z,
-      railDistance: mid.railDistance,
-      pathDirX: tangent.z,
-      pathDirZ: -tangent.x,
-      halfGap: Math.min(14, Math.max(4.5, spread / 2 + 3.5)),
+      railDistance: midDistance,
+      pathDirX: midTangent.z,
+      pathDirZ: -midTangent.x,
+      halfGap,
     });
-    cluster = [];
+    group = [];
   };
-  for (const touch of touches) {
-    const last = cluster[cluster.length - 1];
-    if (last && touch.railDistance - last.railDistance > CLUSTER_GAP) flush();
-    cluster.push(touch);
+  for (const flip of flips) {
+    const last = group[group.length - 1];
+    if (last !== undefined && flip - last > CLUSTER_GAP) emit();
+    group.push(flip);
   }
-  flush();
-  // The loop wraps: a cluster straddling distance 0 would appear twice.
+  emit();
+  // The loop wraps: a crossing straddling distance 0 would appear twice.
   if (crossings.length > 1) {
     const first = crossings[0] as LevelCrossing;
     const last = crossings[crossings.length - 1] as LevelCrossing;

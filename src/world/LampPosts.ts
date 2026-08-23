@@ -26,8 +26,8 @@ import { PARK_LAYOUT } from './parkLayout';
 import { clearOfCruiser, onRideExit } from './Scenery';
 import { distanceToRailCorridor, RAIL_CORRIDOR_CLEARANCE } from './train/plan';
 import { isInBridgeFootprint } from './train/bridgeKeepout';
+import { REAL_PROBE_RADIUS } from './train/bridgeFootprint';
 import { STALL_STANDS } from '../minigames/stallPlacement';
-import { PLAYER_RADIUS } from '../core/constants';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from './Collision';
 
@@ -464,8 +464,13 @@ const LAMP_GAP = 4;
 const LAMP_RADIUS = 0.22;
 
 /** How far past a bridge's exact footprint a lamp keeps — see the call site
- * in {@link lampFits} for the reasoning. */
-const LAMP_BRIDGE_MARGIN = LAMP_RADIUS + PLAYER_RADIUS + 0.3;
+ * in {@link lampFits} for the reasoning. `REAL_PROBE_RADIUS` rather than a
+ * hand-assembled `PLAYER_RADIUS + 0.3`: the bridge search probes its ramps
+ * at exactly that radius, so a lamp placed clear of anything smaller still
+ * blocks the search 0.2 m short of what it demands (PR #330's traces found
+ * lamp bases the single dominant cause of blocked ramp reach — a live "two
+ * definitions of one thing"). */
+const LAMP_BRIDGE_MARGIN = LAMP_RADIUS + REAL_PROBE_RADIUS;
 
 /** Top of the finial: base + shaft + housing + cap, with their overlaps. */
 const LAMP_TOP = 3.6;
