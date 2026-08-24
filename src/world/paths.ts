@@ -21,6 +21,7 @@ import {
   CROSSING_SITES,
   LEVEL_CROSSING_SITES,
   LEVEL_CROSSING_PENALTY,
+  SITE_HALF_WIDTH,
   type CrossingSite,
 } from './train/crossingPlan';
 import { COASTER_PLANS } from './coaster/plan';
@@ -1746,6 +1747,42 @@ function pointInSlideCorridor(x: number, z: number): boolean {
   return false;
 }
 
+/**
+ * True when the segment cuts **sideways through a planned bridge site's own
+ * ramp corridor**. A route that crosses the railway HERE becomes the
+ * bridge: a humpback deck flanked by parapet walls running the whole ramp
+ * (`train/bridges.ts`). A street crossing that corridor at an angle slams
+ * into those parapets from the side — 2D-clear at path-solve time, a solid
+ * wall once the bridge is built over it (found on the merged bridge
+ * geometry: an east-west avenue crossed the ferris crossing's ramp and ten
+ * `poiGraph` waypoints along it could no longer be walked to). The
+ * crossing's own chain travels ALONG the axis via its own points, never
+ * through this screen. Level-crossing sites stay flat, so only bridge
+ * sites carry it.
+ */
+function segmentCutsABridgeRamp(ax: number, az: number, bx: number, bz: number): boolean {
+  const length = Math.hypot(bx - ax, bz - az);
+  const steps = Math.max(1, Math.ceil(length / 1.5));
+  for (const site of CROSSING_SITES) {
+    if (!site.bridge) continue;
+    const reachPos = DECK_HALF_LENGTH + site.rampReachPos + 1.5;
+    const reachNeg = DECK_HALF_LENGTH + site.rampReachNeg + 1.5;
+    for (let s = 0; s <= steps; s += 1) {
+      const t = s / steps;
+      const x = ax + (bx - ax) * t;
+      const z = az + (bz - az) * t;
+      const dx = x - site.x;
+      const dz = z - site.z;
+      const along = dx * site.dirX + dz * site.dirZ;
+      const across = -dx * site.dirZ + dz * site.dirX;
+      if (Math.abs(across) <= SITE_HALF_WIDTH + 0.5 && along <= reachPos && along >= -reachNeg) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 /** The Sky Cruiser's pylons have the same relationship to streets as the
  * slide's legs: `LampPosts.ts` lights every ribbon, and a lamp is exactly
  * what steals a pylon's spot (`skyCruiserStandsOnItsOwnSupports`, and
@@ -1830,7 +1867,8 @@ function streetLattice(): StreetLattice {
         (slideCorridorOverlap(ax, az, bx, bz) <= 8 &&
           !pointInSlideCorridor(ax, az) &&
           !pointInSlideCorridor(bx, bz))) &&
-      cruiserCorridorOverlap(ax, az, bx, bz) <= 9
+      cruiserCorridorOverlap(ax, az, bx, bz) <= 9 &&
+      !segmentCutsABridgeRamp(ax, az, bx, bz)
     );
   };
   for (let i = -LATTICE_HALF_CELLS; i <= LATTICE_HALF_CELLS; i += 1) {
@@ -1902,6 +1940,7 @@ function streetLattice(): StreetLattice {
               !segmentHoldsRailSide(p[0], p[1], q[0], q[1], railSide, RAIL_CLAMP_DISTANCE - 0.1)
             )
               return false;
+            if (segmentCutsABridgeRamp(p[0], p[1], q[0], q[1])) return false;
             slideOverlap += slideCorridorOverlap(p[0], p[1], q[0], q[1]);
             slideOverlap += cruiserCorridorOverlap(p[0], p[1], q[0], q[1]);
           }
