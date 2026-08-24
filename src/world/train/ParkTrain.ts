@@ -15,6 +15,7 @@ import { RideCamera } from '../../core/RideCamera';
 import { computeCrossings, type LevelCrossing } from './crossings';
 import { buildRailFence } from './fence';
 import { buildBridges, type Bridge } from './bridges';
+import { BRIDGE_WALL_THICKNESS } from './bridgeFootprint';
 import { SmokePuffs } from './puffs';
 import {
   createCarriage,
@@ -266,11 +267,13 @@ export class ParkTrain implements GameSystem, TrainService {
     this.fallbackCrossings = built.fallbackCrossings;
     this.group.add(built.group);
     for (const rail of built.guardRails) {
-      // A banded collider — `baseHeight` a half-step below the local surface
-      // it guards, exactly `hotel/place.ts`'s overhanging-landing rail.
+      // A masonry parapet/spandrel wall: solid from the ground (blocks a
+      // walker beside the bridge), with an ABSOLUTE top at the local road
+      // surface plus the parapet (stops a walker on the hump stepping over
+      // the side) — see `bridges.ts`'s `BridgeWall`.
       collision.addWall(
-        rail.x1, rail.z1, rail.x2, rail.z2, 0.08,
-        Infinity, false, false, rail.baseHeight, rail.navStamped,
+        rail.x1, rail.z1, rail.x2, rail.z2, BRIDGE_WALL_THICKNESS / 2,
+        rail.topHeight, false, true,
       );
     }
 

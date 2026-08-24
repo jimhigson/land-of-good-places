@@ -28,7 +28,7 @@
  * about the park, not a check on it.
  */
 import { describe, it, beforeAll, expect } from 'vitest';
-import { Box3, InstancedMesh, Matrix4, Mesh, Vector3, type Object3D } from 'three';
+import { Box3, InstancedMesh, Matrix4, Mesh, Raycaster, Vector3, type Object3D } from 'three';
 import {
   buildParkFacts,
   segmentDistance,
@@ -38,6 +38,14 @@ import {
   type ParkFacts,
 } from './parkFacts.ts';
 import { resolveDismount, resolveDismountGroup } from '../../src/world/dismount.ts';
+// Leaf module, safe to import statically: `bridgeSpine.ts`'s ONLY import is
+// a type-only one (from `world/train/crossings`), which erases — no seeded
+// module loads, so this cannot pin the park's seed the way this file's own
+// header warns about. It is imported (rather than restated) because the
+// frame it builds from a crossing's recorded spine is pure geometry, and a
+// second hand-written arc-walk here would be exactly the "two definitions
+// of one thing" disease CLAUDE.md names.
+import { frameFor } from '../../src/world/train/bridgeSpine.ts';
 // Leaf module: reaches only core/constants, core/uiScale and (type-only)
 // world/interact — nothing seeded, so a static import cannot fix the park.
 import {
@@ -4483,20 +4491,17 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
     return Math.hypot(probe.x - x, probe.z - z) < 1e-3;
   };
 
-  // Perpendicular to the crossing's own path direction — the same
-  // `acrossX = -dirZ, acrossZ = dirX` convention `bridgeFootprint.ts` uses
-  // for `halfAcross`, restated here rather than imported (this file's own
-  // header on why seed-dependent modules stay out of static imports).
-  const acrossOf = (crossing: { pathDirX: number; pathDirZ: number }): [number, number] => [
-    -crossing.pathDirZ,
-    crossing.pathDirX,
-  ];
-
   for (const crossing of facts.world.train.crossings) {
     const bridge = facts.world.train.bridges.find((b) => b.deckCovers(crossing.x, crossing.z));
     if (!bridge) continue; // reported by railwayClearanceCoversTheTrainAndItsRiders above
     const deckHeight = heightAt(crossing.x, crossing.z) ?? bridge.deckY;
-    const [acrossX, acrossZ] = acrossOf(crossing);
+    // The bridge follows the drawn path's own centreline through the
+    // crossing (its recorded spine — see `crossings.ts`), so every walk in
+    // here follows the same line: a straight march along `pathDir` would
+    // walk off the flank of a curved bridge mid-hump and read the drop off
+    // its own side as "a step too tall". On a crossing with no spine (the
+    // gate walk) the frame IS the straight line, unchanged.
+    const frame = frameFor(crossing);
 
     if (!facts.reachableFromEntrance(crossing.x, crossing.z, deckHeight)) {
       complaints.push(
@@ -4514,11 +4519,16 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
     // `./plan` → `./route`/`../coaster/plan`, exactly the seed-dependent
     // static-import trap this file's header warns about, so it stays
     // unimported here the same as everywhere else in this function.
-    const WIDTH_STEP = 0.5;
+    // 0.25 m resolution, not the old 0.5 — a deck exactly as wide as its
+    // own path (Jim, 2026-08-23) has a standable half-width well under a
+    // metre, and a half-metre pitch would round it down to a figure the
+    // sweep gate below reads as "too narrow to sweep".
+    const WIDTH_STEP = 0.25;
+    const at0 = frame.pointAt(0);
     let deckHalfAcross = 0;
     for (let w = WIDTH_STEP; w <= 15; w += WIDTH_STEP) {
-      const x = crossing.x + acrossX * w;
-      const z = crossing.z + acrossZ * w;
+      const x = crossing.x + at0.acrossX * w;
+      const z = crossing.z + at0.acrossZ * w;
       if (!bridge.deckCovers(x, z)) break;
       deckHalfAcross = w;
     }
@@ -4555,9 +4565,8 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
     for (const sign of [1, -1] as const) {
       let deckEdge = 0;
       for (let d = 0; d <= 6; d += STEP) {
-        const x = crossing.x + crossing.pathDirX * d * sign;
-        const z = crossing.z + crossing.pathDirZ * d * sign;
-        if (!bridge.deckCovers(x, z)) break;
+        const p = frame.pointAt(d * sign);
+        if (!bridge.deckCovers(p.x, p.z)) break;
         deckEdge = d;
       }
 
@@ -4578,10 +4587,11 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
       // caused — filed as issue #317 rather than silently weakening this
       // check to let seed 18 pass, per this file's own "never weaken an
       // assertion to make a seed pass" rule.
-      if (deckHalfAcross > 0.5) {
+      if (deckHalfAcross > 0.3) {
         for (const t of [-0.9, -0.45, 0, 0.45, 0.9]) {
-          const ex = crossing.x + crossing.pathDirX * deckEdge * sign + acrossX * deckHalfAcross * t;
-          const ez = crossing.z + crossing.pathDirZ * deckEdge * sign + acrossZ * deckHalfAcross * t;
+          const edge = frame.pointAt(deckEdge * sign);
+          const ex = edge.x + edge.acrossX * deckHalfAcross * t;
+          const ez = edge.z + edge.acrossZ * deckHalfAcross * t;
           const eh = heightAt(ex, ez);
           if (eh === null) continue; // off the deck's own built extent — nothing to probe
           if (!standableAt(ex, ez, eh)) {
@@ -4596,9 +4606,8 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
 
       let rampEdge = deckEdge;
       for (let d = deckEdge + STEP; d <= deckEdge + 25; d += STEP) {
-        const x = crossing.x + crossing.pathDirX * d * sign;
-        const z = crossing.z + crossing.pathDirZ * d * sign;
-        if (!bridge.covers(x, z)) break;
+        const p = frame.pointAt(d * sign);
+        if (!bridge.covers(p.x, p.z)) break;
         rampEdge = d;
       }
       const rampReach = rampEdge - deckEdge;
@@ -4632,12 +4641,13 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
       // while its outer edge, `halfAcross` further across at the same
       // `along`, was still 1.385 m past it — real pushback 2.454 m — and
       // this loop's own single centreline probe had no way to see it.
-      // `bridges.ts` builds every ramp tread as a `RectPlatform` at the
-      // deck's own uniform `halfAcross` (no taper), so the same
-      // `deckHalfAcross` measured off the deck above applies here too.
-      for (const t of deckHalfAcross > 0.5 ? [-0.9, -0.45, 0, 0.45, 0.9] : [0]) {
-        const rx = crossing.x + crossing.pathDirX * probeAlong * sign + acrossX * deckHalfAcross * t;
-        const rz = crossing.z + crossing.pathDirZ * probeAlong * sign + acrossZ * deckHalfAcross * t;
+      // `bridges.ts` carries the hump at one uniform standable width for
+      // its whole length (no taper), so the same `deckHalfAcross` measured
+      // off the deck above applies here too.
+      for (const t of deckHalfAcross > 0.3 ? [-0.9, -0.45, 0, 0.45, 0.9] : [0]) {
+        const probe = frame.pointAt(probeAlong * sign);
+        const rx = probe.x + probe.acrossX * deckHalfAcross * t;
+        const rz = probe.z + probe.acrossZ * deckHalfAcross * t;
         const rampHeight = heightAt(rx, rz);
         if (rampHeight === null) continue; // off the ramp's own built width at this t — nothing to probe
         if (!standableAt(rx, rz, rampHeight)) {
@@ -4709,13 +4719,15 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
     for (const crossing of facts.world.train.crossings) {
       const bridge = facts.world.train.bridges.find((b) => b.deckCovers(crossing.x, crossing.z));
       if (!bridge) continue;
+      // Marches the drawn path's own line, not a straight chord — see the
+      // per-crossing `frame` note above.
+      const frame = frameFor(crossing);
 
       const reachOf = (sign: 1 | -1): number => {
         let edge = 0;
         for (let d = 0; d <= 40; d += MARCH_STEP) {
-          const x = crossing.x + crossing.pathDirX * d * sign;
-          const z = crossing.z + crossing.pathDirZ * d * sign;
-          if (!bridge.covers(x, z)) break;
+          const p = frame.pointAt(d * sign);
+          if (!bridge.covers(p.x, p.z)) break;
           edge = d;
         }
         return edge;
@@ -4731,8 +4743,9 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
       let previousAlong = -farNeg;
       let reportedStep = false;
       for (let along = -farNeg; along <= farPos + 1e-6; along += MARCH_STEP) {
-        const x = crossing.x + crossing.pathDirX * along;
-        const z = crossing.z + crossing.pathDirZ * along;
+        const p = frame.pointAt(along);
+        const x = p.x;
+        const z = p.z;
         const bridgeH = heightAt(x, z);
         const groundH = facts.world.building.surfaces.sample(x, z, TOP_REFERENCE);
         const h = bridgeH ?? groundH;
@@ -4766,6 +4779,163 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
     }
   }
 
+  return complaints;
+};
+
+/**
+ * **A bridge is exactly as wide as its own path, and the train's corridor
+ * under it is genuinely open** — the two measurable halves of Jim's
+ * 2026-08-23 bridge feedback, measured off the real, built park.
+ *
+ * 1. **Width.** The old decks came out 12.9–15.8 m wide over a ~4 m path
+ *    ("a giant plywood table"). The standable width of the built bridge —
+ *    walked outward from the crossing with the game's own
+ *    `collision.resolve` until the parapet stops a real, player-sized body
+ *    — must agree with the crossing path's own paved width: no wider than
+ *    the paving (`pathHalfWidth`, read off the same samples the path was
+ *    drawn from), and no narrower than the paving less the walker's own
+ *    body each side (the parapets' collision is what eats that). Both
+ *    bounds are game numbers (`PLAYER_RADIUS`), not generator targets.
+ * 2. **The rail corridor.** The old geometry stood two support beams
+ *    *across the track* (they ran the deck's own length at its outer
+ *    edges — i.e. down the rail line either side of the crossing), which
+ *    the train would drive straight into. Nothing about a `covers()` or
+ *    collider check can see that — it was visible mesh with no collider —
+ *    so this raycasts straight up from the track bed, across the train's
+ *    own swept width (`TRACK_CLEARANCE` either side), through the built
+ *    bridge group: the first thing the ray hits must be at least
+ *    `TRAIN_CLEARANCE_Y` above the route's own ground. And over the
+ *    crossing itself at least one ray must hit *something* — a bridge
+ *    whose arch the rays sail through unhit is a crossing with no bridge
+ *    over it, and this check would otherwise pass vacuously (the "check
+ *    that cannot fail" trap).
+ *
+ * Proven red before green (2026-08-23): run against the pre-rework
+ * geometry, part 1 fails on both canonical bridges (standable width 6.6
+ * and 8.8 m against 2.6 m of paving) and part 2 fails on the support
+ * beams (first hit 0.4–4.3 m over the track bed, worst ray 0.42 m).
+ */
+const bridgesMatchTheirPathAndKeepTheRailClear: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const train = facts.world.train;
+  const route = train.route;
+  const probe = new Vector3();
+  const standableAt = (x: number, z: number, height: number): boolean => {
+    probe.set(x, height, z);
+    facts.world.collision.resolve(probe, PLAYER_RADIUS);
+    return Math.hypot(probe.x - x, probe.z - z) < 1e-3;
+  };
+  const heightAt = (x: number, z: number): number | null => {
+    let best: number | null = null;
+    for (const bridge of train.bridges) {
+      if (!bridge.covers(x, z)) continue;
+      const height = bridge.heightAt(x, z);
+      if (best === null || height > best) best = height;
+    }
+    return best;
+  };
+
+  // Only the bridges' own masonry is judged by the rays — the train
+  // itself (which may legitimately be parked on the line) and the fence
+  // (which legitimately crosses under every bridge) live in the same
+  // scene group and must not read as "something over the track".
+  const bridgesGroup = train.group.getObjectByName('railway-bridges');
+  if (!bridgesGroup) {
+    if (train.bridges.length > 0) {
+      complaints.push(
+        'no "railway-bridges" group in the built train group to raycast — the group ' +
+          'name in bridges.ts has changed and this invariant is measuring nothing',
+      );
+    }
+    return complaints;
+  }
+  bridgesGroup.updateMatrixWorld(true);
+  const raycaster = new Raycaster();
+  const up = new Vector3(0, 1, 0);
+  const rayOrigin = new Vector3();
+  const routePoint = new Vector3();
+  const routeTangent = new Vector3();
+
+  for (const crossing of train.crossings) {
+    const bridge = train.bridges.find((b) => b.deckCovers(crossing.x, crossing.z));
+    if (!bridge) continue;
+    const frame = frameFor(crossing);
+    const at0 = frame.pointAt(0);
+
+    // --- 1. the standable width, against the path's own paved width -------
+    const standableReach = (side: 1 | -1): number => {
+      let reach = 0;
+      for (let w = 0; w <= 9; w += 0.1) {
+        const x = crossing.x + at0.acrossX * w * side;
+        const z = crossing.z + at0.acrossZ * w * side;
+        const height = heightAt(x, z);
+        if (height === null) break; // off the built bridge's own extent
+        if (!standableAt(x, z, height)) break; // the parapet's collision
+        reach = w;
+      }
+      return reach;
+    };
+    const total = standableReach(1) + standableReach(-1);
+    const paved = crossing.pathHalfWidth * 2;
+    const usableFloor = Math.max(0.2, paved - PLAYER_RADIUS * 2 - 0.3);
+    if (total > paved + 0.2) {
+      complaints.push(
+        `the bridge at (${fmt([crossing.x, crossing.z])}) is ${total.toFixed(1)} m of standable ` +
+          `width against a path paved only ${paved.toFixed(1)} m wide — the bridge is wider ` +
+          'than the path it carries',
+      );
+    } else if (total < usableFloor) {
+      complaints.push(
+        `the bridge at (${fmt([crossing.x, crossing.z])}) leaves only ${total.toFixed(2)} m of ` +
+          `standable width on a path paved ${paved.toFixed(1)} m wide — the parapets have ` +
+          'closed over the path itself',
+      );
+    }
+
+    // --- 2. the rail corridor under the bridge is genuinely open ----------
+    let anyHitOverCrossing = false;
+    let worstClearance = Infinity;
+    let worstAt = '';
+    for (let offset = -8; offset <= 8 + 1e-6; offset += 0.5) {
+      const railDistance = route.wrap(crossing.railDistance + offset);
+      route.pointAt(railDistance, routePoint);
+      route.tangentAt(railDistance, routeTangent);
+      const nx = routeTangent.z;
+      const nz = -routeTangent.x;
+      for (const lateral of [-TRACK_CLEARANCE, 0, TRACK_CLEARANCE]) {
+        rayOrigin.set(
+          routePoint.x + nx * lateral,
+          routePoint.y + 0.02,
+          routePoint.z + nz * lateral,
+        );
+        raycaster.set(rayOrigin, up);
+        raycaster.far = TRAIN_CLEARANCE_Y + 6;
+        const hits = raycaster.intersectObject(bridgesGroup, true);
+        const first = hits[0];
+        if (!first) continue;
+        const clearance = first.point.y - routePoint.y;
+        if (Math.abs(offset) <= 1.5) anyHitOverCrossing = true;
+        if (clearance < worstClearance) {
+          worstClearance = clearance;
+          worstAt = `${offset.toFixed(1)} m along the rail, ${lateral.toFixed(1)} m off its centre`;
+        }
+      }
+    }
+    if (worstClearance < TRAIN_CLEARANCE_Y) {
+      complaints.push(
+        `the bridge at (${fmt([crossing.x, crossing.z])}) has built geometry only ` +
+          `${worstClearance.toFixed(2)} m over the track bed (at ${worstAt}) — the train sweeps ` +
+          `to ${TRAIN_CLEARANCE_Y.toFixed(2)} m, so it would drive into or through it`,
+      );
+    }
+    if (!anyHitOverCrossing) {
+      complaints.push(
+        `no built bridge geometry stands over the rail at the crossing at ` +
+          `(${fmt([crossing.x, crossing.z])}) — the rays found nothing to measure, so the ` +
+          'clearance above is vacuous',
+      );
+    }
+  }
   return complaints;
 };
 
@@ -6946,6 +7116,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     railwayClearanceCoversTheTrainAndItsRiders,
   ],
   ['every railway crossing has a bridge you can walk to, onto and across', everyBridgeIsWalkableAndReachable],
+  [
+    'every bridge is as wide as its own path, with the rail corridor open beneath',
+    bridgesMatchTheirPathAndKeepTheRailClear,
+  ],
   [
     'railway crossings are planned — station-clear, and mostly real bridges',
     crossingsArePlannedAndMostlyBridged,

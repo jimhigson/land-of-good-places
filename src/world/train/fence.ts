@@ -78,6 +78,11 @@ export function buildRailFence(
    * half-thickness.
    */
   const deckSpanAt = (x: number, z: number, margin: number): number | null => {
+    // NOTE (2026-08-23 humpback rework): the height returned is the
+    // bridge's own LOCAL surface at this point (`heightAt`), not one flat
+    // `deckY` — the hump's surface at the fence line sits below the crown,
+    // and a seam pinned at the crown minus the margin would stand ABOVE a
+    // walker's feet there, blocking her on her own bridge.
     // The *lowest* deck over this point, not the first in list order and
     // — this is the one place in the whole feature that is deliberately
     // NOT `bridgeHeightAt`'s own "tallest, never first" rule, despite
@@ -100,7 +105,27 @@ export function buildRailFence(
     // and "on the lower of two decks" for this to open early for.
     let best: number | null = null;
     for (const bridge of bridges) {
-      if (bridge.deckCovers(x, z, margin) && (best === null || bridge.deckY < best)) best = bridge.deckY;
+      if (!bridge.deckCovers(x, z, margin)) continue;
+      // The LOWEST surface within the wall's own collision reach of this
+      // point, not just the surface directly above it. The hump slopes:
+      // a walker is stopped by this wall while her body is still `margin`
+      // (the wall's half-thickness plus her own radius) short of the wall
+      // line, where the surface — and so her feet — are genuinely lower
+      // than at the line itself. A seam pinned to the at-the-line height
+      // stood 0.26 m proud of her feet at that approach and jammed her on
+      // her own bridge (real-browser QA, canonical seed, bridge A's south
+      // slope). Ground walkers are unaffected: every sampled surface is
+      // still several metres up.
+      for (const [ox, oz] of [
+        [0, 0],
+        [margin, 0],
+        [-margin, 0],
+        [0, margin],
+        [0, -margin],
+      ] as const) {
+        const height = bridge.heightAt(x + ox, z + oz);
+        if (best === null || height < best) best = height;
+      }
     }
     return best;
   };

@@ -30,6 +30,14 @@ export interface MovingPlatform {
   readonly surfaceY: number;
   /** Does this world-space point sit on the platform? */
   covers(x: number, z: number): boolean;
+  /**
+   * Optional height-varying answer for a platform whose surface is not one
+   * flat level — the railway bridges' smooth hump (a continuous rise and
+   * fall, Jim's 2026-08-23 bridge feedback) is the one user. Only ever
+   * consulted where {@link covers} is true; a platform without it is flat
+   * at {@link surfaceY}, exactly as every platform always was.
+   */
+  surfaceYAt?(x: number, z: number): number;
 }
 
 /**
@@ -147,10 +155,11 @@ export class WalkSurfaces {
       }
     }
 
-    // Lifts and bubbles.
+    // Lifts and bubbles — and the bridges' humps, the one platform kind
+    // whose surface height varies across its own footprint.
     for (const platform of this.platforms) {
       if (!platform.covers(x, z)) continue;
-      const height = platform.surfaceY;
+      const height = platform.surfaceYAt ? platform.surfaceYAt(x, z) : platform.surfaceY;
       if (height <= ceiling && height > best) best = height;
     }
 

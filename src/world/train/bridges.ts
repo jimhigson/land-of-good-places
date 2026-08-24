@@ -1,242 +1,248 @@
-import { BoxGeometry, CylinderGeometry, Group, InstancedMesh, Matrix4, Quaternion, Vector3 } from 'three';
+import {
+  BoxGeometry,
+  BufferAttribute,
+  BufferGeometry,
+  Group,
+  Matrix4,
+  Mesh,
+  Quaternion,
+  Vector3,
+  type Material,
+} from 'three';
 import type { TrainRoute } from './route';
 import type { LevelCrossing } from './crossings';
-import { BRIDGE_RISE } from './clearance';
+import { BRIDGE_DECK_DEPTH, BRIDGE_RISE } from './clearance';
 import {
-  ACROSS_MARGIN,
+  BRIDGE_WALL_THICKNESS,
   DECK_HALF_LENGTH,
   planBridgeFootprints,
+  type BridgeFootprint,
   type RealWorldQuery,
 } from './bridgeFootprint';
+import { TRACK_CLEARANCE } from './route';
+import { BUILDING_STEP_UP } from '../../core/constants';
 import { terrainHeight } from '../terrain';
 import { PALETTE } from '../../core/palette';
+import { pinkStoneTexture } from '../../core/textures';
 import { toonMaterial } from '../../art/style/materials';
 import type { MovingPlatform } from '../building/surfaces';
 
 /**
- * Hump-back wooden bridges over the railway (issue #116, Decision 8).
+ * Hump-back masonry bridges over the railway (issue #116, Decision 8;
+ * reworked to Jim's 2026-08-23 feedback against a reference photo of a real
+ * model-railway humpback bridge kit).
  *
  * The family's ruling of 28 July is that a path crosses the railway on a
- * bridge, never a level crossing. `world/train/crossings.ts` already finds
- * every place a drawn path meets the solved rail loop — this module is only
- * about what gets *built* there: a flat deck standing {@link BRIDGE_RISE}
- * above the ground under the track (so the train clears underneath — air
- * rules inverted from a ride crossing a ride), a walkable ramp up to it on
- * each side, and a fence seam that stays solid at the ground the deck is
- * *not* touching and stands aside only for someone actually up on the deck.
+ * bridge, never a level crossing. `world/train/crossings.ts` finds every
+ * place a drawn path meets the solved rail loop — this module is only about
+ * what gets *built* there, and what gets built is now a genuine humpback
+ * bridge:
  *
- * ## Why the deck and ramps are `MovingPlatform`s, not a new surface kind
+ * - **The road surface is one smooth, continuous hump** — no flat deck, no
+ *   stepped ramp treads. The path's own surface rises into a gentle hill
+ *   and comes back down ({@link surfaceProfile}, a smooth curve with
+ *   zero slope at the crown and both feet), so walking it reads as "the
+ *   path goes up and over", never "stairs, platform, stairs".
+ * - **Exactly as wide as the path it carries** — `roadHalf` is the drawn
+ *   path's own `pathHalfWidth` (`crossings.ts` reads it off the paving
+ *   samples), with only the masonry parapet walls outside it. The old
+ *   geometry keyed its width off `halfGap` (a fence-gap length measured
+ *   along the *rail*) and shipped 12.9–15.8 m decks over ~4 m paths.
+ * - **It follows the path's own curve** — every mesh, collider and height
+ *   answer goes through the crossing's `SpineFrame`
+ *   (`bridgeSpine.ts`), which walks the drawn centreline instead of
+ *   forcing a straight line.
+ * - **A real arched stone tunnel underneath** — the masonry mass carries a
+ *   genuine opening over the rail corridor: short abutment walls, curved
+ *   haunches, and a crown span whose soffit clears the train and its
+ *   riders by the same `TRAIN_CLEARANCE_Y` everything else respects. The
+ *   crown-span soffit is its own mesh named `deck`, which is what
+ *   `test/procgen/invariants.ts` measures the built clearance off — the
+ *   lowest visible vertex of the thing that actually stands over the
+ *   train. Nothing else of the bridge enters the swept rail corridor: the
+ *   old geometry stood two support beams *across the track* (they ran the
+ *   deck's full length at its outer edges — i.e. down the rail line either
+ *   side of the crossing), which is the "walls covering the train track"
+ *   bug of the same feedback round.
+ * - **Pink stone, the park's own** — `pinkStoneTexture`/`PALETTE.stonePink`
+ *   exactly as the garden walls and the rail fence already use, never a
+ *   new colour.
  *
- * `WalkSurfaces` already asks any registered `MovingPlatform` where its top
- * is — the lift, the bubble, the trampoline, every station platform and
- * carriage floor. The deck is flat, so it *is* one, directly. A ramp is not
- * flat, but `hotel/Hotel.ts`'s spiral stair already solved "a walkable slope
- * that is not axis-aligned" the same way a real flight of stairs does: many
- * small flat treads, non-overlapping, tiling the run exactly (`ArcTread`,
- * and its header's warning about what an overlap costs — a step you can
- * climb but never come back down, because `WalkSurfaces.sample` always
- * answers with the *highest* surface within a step). A ramp here is the
- * straight-line version of the same idea: flat strips climbing from the
- * ground to the deck, adjacent, never overlapping.
+ * ## Walkability: one height-varying platform, not stacked treads
  *
- * `building/surfaces.ts`'s `RampDefinition` was Decision 8's other candidate
- * and was rejected there: its footprint is an axis-aligned rectangle and its
- * heights are measured from the building's own local origin, and a bridge
- * sits out in the park at whatever oblique angle procgen's path happened to
- * cross the railway at. Treads rotate with the crossing; a `RampDefinition`
- * cannot.
+ * `WalkSurfaces` asks a registered `MovingPlatform` where its top is; the
+ * old ramps were dozens of small flat platforms (the hotel-stair idiom).
+ * The hump is instead ONE platform per bridge whose `surfaceYAt` answers
+ * the smooth profile — `building/surfaces.ts` grew that optional method
+ * for exactly this. `NavGrid` needs nothing new: a bridge cell already
+ * takes its single level from the sampler, which now reads the smooth
+ * height.
  *
  * ## The fence seam
  *
- * Decision 4 §6 keeps the rail fence's collision `topHeight` at `Infinity`
- * everywhere, on purpose — a *finite, relative* top is exactly what would let
- * a jump clear it (Decision 8's own correction records the near miss). This
- * module never touches that scheme. What it does instead, only for the short
- * run of fence posts that fall directly under a deck, is give that one run
- * an `topIsAbsolute` top pinned just under the deck's own surface — the same
- * mechanism `hotel/place.ts`'s standable props already use to be "solid from
- * the floor, standable from above" at one absolute world height. A walker at
- * ground level, however she got there, is nowhere near that height and stays
- * blocked, exactly as the fence has always blocked her; a walker who climbed
- * the ramp is standing *at* the deck's own Y and clears it. No jump reaches
- * either height from the ground, so the safety rule this exists to protect
- * (Decision 4 §6, keeping feet off the track) is untouched. `ParkTrain`
- * builds the fence with this module's {@link Bridge.deckCovers} in hand, and
- * `fence.ts` is the one place that turns it into the actual wall segments.
+ * Unchanged in mechanism (see `fence.ts`): the rail fence runs on beneath
+ * the bridge, `topIsAbsolute`-pinned just under the *local* road surface
+ * (not one flat deck height — the hump's surface at the fence line is what
+ * a walker's feet are actually at there).
  *
- * ## Guard rails: `baseHeight`, the lobby's own idiom
+ * ## Parapets are walls, and walls are solid
  *
- * The deck and every ramp tread carry a rail along their outer edges so a
- * child cannot step off the side. Each is a banded collider — `baseHeight`
- * pinned a half-step below the local walking surface, exactly the imperial
- * lobby's overhanging landing rail — so it exists for someone standing near
- * that edge and is simply absent for the ground far below. The ramp's own
- * rails are additionally `navStamped`: Decision 8 names this exact hazard —
- * a ramp's edge levels run within a step of the ground beside it for most of
- * its low end, so an un-stamped rail there would leave the lattice free to
- * route sideways through the ramp's own flank onto the lawn it flanks.
+ * Each side wall (spandrel + parapet, one visual piece) gets real collision
+ * for its whole length: full-height walls with an absolute top at the local
+ * road surface plus the parapet, so nobody walks through the masonry from
+ * the lawn and nobody steps off the hump into the air over the train —
+ * CLAUDE.md's "anything that looks solid must be solid".
  */
 
-/** Rise per ramp tread. Comfortably under `BUILDING_STEP_UP` (0.62 m) so
- * consecutive treads always read as one connected walking level. */
-const TREAD_RISE = 0.28;
-
-/** How far below a guard rail's own local surface it starts existing —
- * mirrors `hotel/place.ts`'s landing rail exactly. */
-const GUARD_RAIL_BAND = 0.5;
+/** How high the parapet stands above the local road surface. Low enough
+ * never to hide a walking child (GAME_DESIGN.md's "a small bridge does not
+ * obscure a player walking on it"), high enough to read as a real stone
+ * parapet rather than a kerb. */
+const PARAPET_HEIGHT = 0.72;
 
 /**
- * Safety margin added on top of the worst (highest) ground sampled across a
- * deck's own footprint, before it counts as clearing {@link BRIDGE_RISE}.
- *
- * `check:park`'s invariant 2 measures clearance at wherever a *specific*
- * route actually crosses the rail — which, across a corridor several metres
- * wide, is not always the exact crossing centre a deck's own height is
- * derived from. The terrain wanders (~1.4 m across the whole park), so a
- * deck built to clear only its own centre point missed by hundredths of a
- * metre where a route crossed nearer the corridor's edge. Sampling several
- * points across the deck's width (below) and taking the highest closes most
- * of that gap; this covers what sampling still misses.
+ * The hump height (above the local ground beside it) below which the
+ * parapet tapers away — `BUILDING_STEP_UP`: below one step, the hump's
+ * edge is an ordinary kerb a walker can step off, exactly like every other
+ * path edge in the park, and a wing wall there does active harm. Found
+ * live on the canonical seed, first full build of this geometry: the ramp
+ * feet meet ordinary path junctions (the crossing leg merges into the
+ * network right past each foot, `paths.ts` promises nothing further out),
+ * and full-length parapets walled the junction off — 39 poiGraph
+ * waypoints, the whole strip south of the rail, stranded behind a wing
+ * wall standing 0.72 m over a hump that was itself barely ankle height.
+ * Above one step the drop is a real fall onto (eventually) the fenced
+ * rail corridor, and the parapet is load-bearing safety — so the taper is
+ * tied to the game's own step, never a styling choice.
+ */
+const PARAPET_MIN_HUMP = BUILDING_STEP_UP;
+
+/** How the visible parapet fades out as the hump shrinks toward the taper
+ * threshold — full height at {@link PARAPET_MIN_HUMP} (where its collision
+ * wall also starts existing), gone by ankle height. One owner for the
+ * shell geometry so the drawn wall and the collider agree about where a
+ * parapet is. */
+function parapetHeightFor(humpHeight: number): number {
+  const t = (humpHeight - 0.25) / (PARAPET_MIN_HUMP - 0.25);
+  const clamped = t < 0 ? 0 : t > 1 ? 1 : t;
+  return PARAPET_HEIGHT * clamped;
+}
+
+/**
+ * Half-span (along the path) of the arch's flat crown — the stretch of
+ * soffit that must clear the train at full height, and the extent of the
+ * mesh named `deck` the invariants measure. The train's own swept
+ * half-width (`TRACK_CLEARANCE`) plus a stride, so a slightly oblique or
+ * gently curving rail line under the bridge still keeps every part of the
+ * train under the full-height crown.
+ */
+const ARCH_CLEAR_HALF = TRACK_CLEARANCE + 0.5;
+
+/** Half-span (along the path) of the whole arch opening — abutment inner
+ * faces stand here. `DECK_HALF_LENGTH` clears both fence lines with margin
+ * (its own doc), so the tunnel swallows the entire fenced corridor and the
+ * masonry only ever stands on ground the fence already forbids to feet. */
+const ARCH_SPAN_HALF = DECK_HALF_LENGTH;
+
+/** Minimum masonry left between the road surface and the crown soffit —
+ * the shell can pinch to this where the hump's surface dips toward the
+ * arch's edge, and {@link crownHeightFor} raises the crown if the profile
+ * would pinch it thinner. */
+const MIN_SHELL_DEPTH = 0.05;
+
+/**
+ * Safety margin added on top of the worst (highest) ground sampled across
+ * the crown's own footprint, before it counts as clearing
+ * {@link BRIDGE_RISE} — see the old geometry's note of the same name: a
+ * route can cross the rail anywhere across the corridor, and the terrain
+ * wanders (~1.4 m park-wide), so the crown is derived from the worst
+ * sampled ground, plus this.
  */
 const HEIGHT_MARGIN = 0.15;
 
-const deckMaterial = toonMaterial(PALETTE.woodLight);
-const beamMaterial = toonMaterial(PALETTE.woodDark);
-const postMaterial = toonMaterial(PALETTE.woodDark);
+/** Along-axis sampling pitch of the built shell, metres. */
+const SHELL_STEP = 0.6;
 
-/** How tall a visible deck-rail post stands above the deck — comfortably
- * below a walking child's eye line (never mind obscuring one riding past
- * on the train, GAME_DESIGN.md's "a small bridge does not obscure a player
- * walking on it"), and comfortably above where the real, collision guard
- * rail's own band starts (`GUARD_RAIL_BAND` below the deck). */
-const VISIBLE_RAIL_HEIGHT = 0.7;
+/** Pitch of the parapet collision-wall segments, metres. */
+const WALL_SEGMENT = 2.0;
 
-/** A wall this module wants registered with `CollisionWorld`, deferred so the
- * caller (`ParkTrain`) controls exactly when colliders are added. */
+/**
+ * Built on first use, never at module load: `pinkStoneTexture` paints a
+ * real 2D canvas, and this module is imported (via the train's own leaf
+ * chain) by Node check scripts that never install the headless-canvas shim
+ * and never build a bridge — a module-level call broke `check:space-night`
+ * with `document is not defined` without a single bridge being asked for.
+ */
+let materialsCache: { stone: Material; coping: Material } | null = null;
+function bridgeMaterials(): { stone: Material; coping: Material } {
+  if (!materialsCache) {
+    materialsCache = {
+      stone: toonMaterial(0xffffff, { map: pinkStoneTexture(1, 1) }),
+      coping: toonMaterial(PALETTE.stonePinkLight),
+    };
+  }
+  return materialsCache;
+}
+
+/** Metres of masonry per texture tile — sized so a stone course reads at
+ * about half a metre, the same chunkiness the garden walls carry. */
+const TEXTURE_METRES = 2.4;
+
+/** A wall this module wants registered with `CollisionWorld`, deferred so
+ * the caller (`ParkTrain`) controls exactly when colliders are added.
+ * Solid from the ground with an ABSOLUTE top: the masonry blocks anyone
+ * beside the bridge at ground level, and its top — local road surface plus
+ * parapet — stops anyone on the hump stepping over the side. */
 export interface BridgeWall {
   readonly x1: number;
   readonly z1: number;
   readonly x2: number;
   readonly z2: number;
-  readonly baseHeight: number;
-  readonly navStamped: boolean;
+  /** Absolute world height of the parapet's top over this segment. */
+  readonly topHeight: number;
 }
 
 export interface Bridge {
-  /** World height of the deck's own walking surface. */
+  /** World height of the hump's crown — the highest point of the road. */
   readonly deckY: number;
-  /** True over the deck or either ramp — everything this bridge makes walkable. */
+  /** True over the whole hump — everything this bridge makes walkable. */
   covers(x: number, z: number): boolean;
   /**
-   * True over the deck alone — what the fence seam keys off. `margin`
-   * defaults to `0`, the deck's own exact edge (what `heightAt` and every
-   * ordinary caller wants); `fence.ts` is the one caller that asks with a
-   * margin, because an un-seamed fence run just past that exact edge can
-   * still have its own half-thickness (`TRACK_CLEARANCE`, 1.3 m for the
-   * centre-line run) reach back in and touch a point nominally "on" the
-   * deck — the same class of bug `bridgeKeepout.ts`'s own margin exists
-   * for, found on the same tightly-boundary-capped crossing (issue #116,
-   * seed 11: the un-seamed continuation of the centre-line wall, one
-   * segment past where a severely narrowed deck's width ended, still
-   * reached a probe standing dead centre on the deck).
+   * True over the central span alone (the stretch standing over the rail
+   * corridor) — what the fence seam keys off. `margin` pads outward;
+   * `fence.ts` is the caller that needs one (its walls have their own
+   * half-thickness — see that file).
    */
   deckCovers(x: number, z: number, margin?: number): boolean;
   /**
-   * True over the deck or either ramp, padded `margin` past the bridge's
-   * own **real, final** edge — for a caller built *after* `ParkTrain`
-   * (`World.ts`'s own order) that wants a genuine keepout around this
-   * specific bridge without the padding `train/bridgeKeepout.ts`'s
-   * `isInBridgeFootprint` necessarily carries for callers built *before* a
-   * single bridge exists (see that file's own header).
-   *
-   * `coaster/Coaster.ts`'s pylon search is the one caller: it used to ask
-   * `isInBridgeFootprint`, whose reservation pads a crossing's own width by
-   * `maxLateralShiftFor` — up to the crossing's full `halfGap`, deliberately
-   * generous because the *real* pass has not run yet when the early passes
-   * ask it — plus `ACROSS_MARGIN` and a further `KEEPOUT_MARGIN`. Stacked on
-   * an oblique, wide-`halfGap` crossing that reservation rectangle can run
-   * to several dozen metres wide, and asked *after* the real bridge is
-   * built, it excludes far more ground than the bridge that actually stands
-   * there occupies — found reviewing PR #330, seed 11: a 37 m stretch of the
-   * Sky Cruiser with no legitimate obstacle at all, every candidate along it
-   * rejected by the conservative reservation of a crossing whose *real*
-   * bridge was a fraction of that width. This asks the real, already-built
-   * footprint instead, which is exactly as wide as the deck and ramps this
-   * bridge actually has.
+   * True over the hump padded `margin` past the bridge's own real, final
+   * masonry edge — for a caller built *after* `ParkTrain` (`World.ts`'s own
+   * order) that wants a genuine keepout around this specific bridge.
+   * `coaster/Coaster.ts`'s pylon search is the one caller — see PR #330's
+   * finding on the over-wide early reservation.
    */
   footprintNear(x: number, z: number, margin: number): boolean;
-  /** The continuous (unstepped) height of the bridge's own surface at this
-   * point, for callers that want a smooth answer rather than the discrete
-   * `MovingPlatform` treads a walker actually stands on — `poiGraph`'s
-   * height-aware line-of-sight probe, primarily. Callers must check
-   * {@link covers} first; this is only meaningful there. */
+  /** The smooth, continuous height of the hump's own surface at this point
+   * — the single owner of the profile. Callers must check {@link covers}
+   * first; beyond the hump it clamps to the local terrain. */
   heightAt(x: number, z: number): number;
 }
 
 export interface BuiltBridges {
   readonly group: Group;
   readonly bridges: readonly Bridge[];
-  /** Every deck and tread, ready for `WalkSurfaces.addPlatform`. */
+  /** One height-varying platform per bridge, for `WalkSurfaces.addPlatform`. */
   readonly platforms: readonly MovingPlatform[];
-  /** Every guard rail, ready for `collision.addWall`. */
+  /** Every parapet/spandrel wall, ready for `collision.addWall`. */
   readonly guardRails: readonly BridgeWall[];
   /**
    * Crossings the real, backtracking search (`bridgeFootprint.ts`'s
    * `planReal`) could not find any walkable, collision-clear bridge
-   * configuration for at all — genuinely the last resort, not the common
-   * case (issues #317, #319; `CLAUDE.md`'s "procgen backtracks on
-   * collision"). `fence.ts` opens an ordinary ground-level gap for each of
-   * these instead of seaming a deck over it.
+   * configuration for at all — genuinely the last resort (issues #317,
+   * #319). `fence.ts` opens an ordinary ground-level gap for each of these
+   * instead of seaming a hump over it.
    */
   readonly fallbackCrossings: readonly LevelCrossing[];
-}
-
-/** A flat, oriented rectangle of walking surface — the deck is one of these;
- * so is every ramp tread. */
-class RectPlatform implements MovingPlatform {
-  private readonly cx: number;
-  private readonly cz: number;
-  private readonly dirX: number;
-  private readonly dirZ: number;
-  private readonly acrossX: number;
-  private readonly acrossZ: number;
-  private readonly alongFrom: number;
-  private readonly alongTo: number;
-  private readonly halfAcross: number;
-  readonly surfaceY: number;
-
-  constructor(
-    cx: number,
-    cz: number,
-    dirX: number,
-    dirZ: number,
-    acrossX: number,
-    acrossZ: number,
-    alongFrom: number,
-    alongTo: number,
-    halfAcross: number,
-    surfaceY: number,
-  ) {
-    this.cx = cx;
-    this.cz = cz;
-    this.dirX = dirX;
-    this.dirZ = dirZ;
-    this.acrossX = acrossX;
-    this.acrossZ = acrossZ;
-    this.alongFrom = alongFrom;
-    this.alongTo = alongTo;
-    this.halfAcross = halfAcross;
-    this.surfaceY = surfaceY;
-  }
-
-  covers(x: number, z: number): boolean {
-    const dx = x - this.cx;
-    const dz = z - this.cz;
-    const along = dx * this.dirX + dz * this.dirZ;
-    if (along < this.alongFrom || along >= this.alongTo) return false;
-    const across = dx * this.acrossX + dz * this.acrossZ;
-    return across >= -this.halfAcross && across <= this.halfAcross;
-  }
 }
 
 function clamp01(value: number): number {
@@ -244,22 +250,52 @@ function clamp01(value: number): number {
 }
 
 /**
+ * Fraction of each side's length spent easing the grade in and out — the
+ * hump's slope profile is a cosine-blended trapezoid: zero slope at the
+ * crown and at the foot, a constant grade in the middle, cosine blends
+ * between. Peak slope is `1 / (1 - HUMP_BLEND)` times the average grade
+ * (1.33× at 0.25), and that ratio is the whole reason this is a trapezoid
+ * and not a smootherstep (1.875×): the REAL walking physics lose a slope
+ * that rises faster than `BUILDING_STEP_UP` in one frame — `Player.tick`
+ * samples `WalkSurfaces` with a ceiling one step above her own (damped,
+ * lagging) height, so at `PLAYER_MAX_SPEED` (7.4) under a slow device's
+ * frame clamp (`MAX_FRAME_DELTA`, 1/12 s) a single frame advances
+ * `0.617 m × slope`. A smootherstep's 0.79 peak on the canonical seed's
+ * cramped bridge came to 0.49 m/frame plus the damp lag — right at the
+ * 0.62 m ceiling, and real-browser QA watched her lose the surface at the
+ * steep section, fall into the tunnel and jam against the fence. The
+ * trapezoid's 0.56 peak leaves a third of the ceiling spare at the same
+ * ramp length.
+ */
+const HUMP_BLEND = 0.25;
+
+/**
+ * Normalised drop of the hump profile: 0 at the crown (`q = 0`), 1 at the
+ * foot (`q = 1`), zero slope at both ends, cosine-blended trapezoid slope
+ * in between — see {@link HUMP_BLEND}. The ONE owner of the hump's shape.
+ */
+function profileDrop(q: number): number {
+  const u = clamp01(q);
+  const b = HUMP_BLEND;
+  const total = 1 - b; // integral of the slope shape over [0, 1]
+  let w: number;
+  if (u < b) {
+    w = u / 2 - (b / (2 * Math.PI)) * Math.sin((Math.PI * u) / b);
+  } else if (u <= 1 - b) {
+    w = b / 2 + (u - b);
+  } else {
+    const v = u - (1 - b);
+    w = b / 2 + (1 - 2 * b) + v / 2 + (b / (2 * Math.PI)) * Math.sin((Math.PI * v) / b);
+  }
+  return w / total;
+}
+
+/**
  * The highest bridge surface over `(x, z)`, or `null` off every bridge.
- *
- * **Not** "the first bridge that covers it." Two crossings close enough
- * together (their ramps run up to `BRIDGE_RISE / BRIDGE_RAMP_GRADIENT`,
- * ~18 m, each way) can have one bridge's ramp and a neighbour's deck both
- * genuinely cover the same point, and a fence seam is built against
- * whichever is taller there (`WalkSurfaces.sample` picks the highest
- * surface everywhere else in the park; this is the one place that logic
- * lived outside `WalkSurfaces` and it must not quietly disagree). Picking
- * the first in list order instead of the tallest handed a `poiGraph` probe
- * a ramp's low height at a point a neighbour's much taller deck also
- * claimed — the deck's own fence seam sits well above that height, so the
- * probe read as blocked by a wall a walker actually standing at the height
- * the deck offers would have cleared (found live, issue #116). The single
- * owner both `World.ts` and `check-park.mts` call, so the two can never
- * repeat that disagreement independently.
+ * See the old geometry's note (issue #116): two close crossings can both
+ * cover a point, and every consumer must agree with `WalkSurfaces.sample`'s
+ * "highest surface wins". The single owner both `World.ts` and
+ * `check-park.mts` call.
  */
 export function bridgeHeightAt(bridges: readonly Bridge[], x: number, z: number): number | null {
   let best: number | null = null;
@@ -273,17 +309,8 @@ export function bridgeHeightAt(bridges: readonly Bridge[], x: number, z: number)
 
 /**
  * Builds every bridge the park's crossings need, and the group holding all
- * of their geometry. `route` is currently unused by the geometry itself
- * (every number a bridge needs comes off its own crossing), but kept in the
- * signature to match `buildRailFence`'s and stay available the day a bridge
- * wants to check its own approach against the curve.
- *
- * `real` is the actual, already-mostly-built collision world — `ParkTrain`
- * is constructed after almost everything else in `World` (see `World.ts`'s
- * own build-order comments), so by the time this runs, the boundary, every
- * garden wall and tree, every lamp post, the castle, the hotel and every
- * stall are already real, registered colliders. See `bridgeFootprint.ts`'s
- * own header for why this matters (issues #317, #319).
+ * of their geometry. `real` is the actual, already-mostly-built collision
+ * world — see `bridgeFootprint.ts`'s header (issues #317, #319).
  */
 export function buildBridges(
   _route: TrainRoute,
@@ -297,18 +324,11 @@ export function buildBridges(
   const guardRails: BridgeWall[] = [];
   const fallbackCrossings: LevelCrossing[] = [];
 
-  const matrix = new Matrix4();
-  const rotation = new Quaternion();
-  const axis = new Vector3(0, 1, 0);
-  const position = new Vector3();
-  const scale = new Vector3(1, 1, 1);
-
   // One footprint per crossing, same order — the single owner of every
-  // ground-plane number below, shared with whatever keeps scenery off a
-  // ramp before it exists (`bridgeKeepout.ts`, the early conservative pass).
-  // A `null` entry is a crossing the real, backtracking search found no
-  // walkable, collision-clear bridge for at all — see `BuiltBridges.
-  // fallbackCrossings`'s own note.
+  // ground-plane number below, shared with whatever keeps scenery off the
+  // hump before it exists (`bridgeKeepout.ts`, the early conservative
+  // pass). A `null` entry is a crossing the real, backtracking search found
+  // no walkable, collision-clear bridge for at all.
   const footprints = planBridgeFootprints(crossings, real);
 
   for (let crossingIndex = 0; crossingIndex < crossings.length; crossingIndex += 1) {
@@ -318,271 +338,423 @@ export function buildBridges(
       fallbackCrossings.push(crossing);
       continue;
     }
-    const cx = footprint.cx;
-    const cz = footprint.cz;
-    const dirX = footprint.dirX;
-    const dirZ = footprint.dirZ;
-    const acrossX = footprint.acrossX;
-    const acrossZ = footprint.acrossZ;
-    const halfAcross = footprint.halfAcross;
-    // Guard rails stand further out again than the walkable surface's own
-    // edge — a second margin on top of the first. `ACROSS_MARGIN` keeps a
-    // drawn path's own waypoints off the surface's edge; this keeps them off
-    // a *rail* planted right at that edge, which the surface alone never had
-    // to contend with (see `ACROSS_MARGIN`'s own note).
-    const railHalfAcross = halfAcross + ACROSS_MARGIN;
-    const groundY = terrainHeight(cx, cz);
-    // The deck's own datum is the *worst* (highest) ground sampled across
-    // its full width, not just the crossing's own centre point — see
-    // `HEIGHT_MARGIN`. Any real route may cross the rail anywhere within
-    // this corridor, not only at the point `crossings.ts` picked to
-    // represent it.
-    let worstGroundY = groundY;
-    for (const t of [-1, -0.5, 0, 0.5, 1]) {
-      const sampleX = cx + acrossX * halfAcross * t;
-      const sampleZ = cz + acrossZ * halfAcross * t;
-      worstGroundY = Math.max(worstGroundY, terrainHeight(sampleX, sampleZ));
-    }
-    const deckY = worstGroundY + BRIDGE_RISE + HEIGHT_MARGIN;
-    const yaw = Math.atan2(dirX, dirZ);
-    const deckWidth = halfAcross * 2;
-
-    const bridgeGroup = new Group();
-    bridgeGroup.name = `bridge-${crossing.railDistance.toFixed(1)}`;
-
-    // --- the deck ----------------------------------------------------------
-    const deck = new RectPlatform(
-      cx, cz, dirX, dirZ, acrossX, acrossZ,
-      -DECK_HALF_LENGTH, DECK_HALF_LENGTH, halfAcross, deckY,
-    );
-    platforms.push(deck);
-
-    const deckMesh = new InstancedMesh(new BoxGeometry(deckWidth, 0.16, DECK_HALF_LENGTH * 2), deckMaterial, 1);
-    // Named so `test/procgen/invariants.ts` can find the real, built deck
-    // and measure its own soffit — never `BRIDGE_DECK_DEPTH` (a claim, not
-    // a derivation, by its own doc) and never this box's height literal
-    // restated a second place either.
-    deckMesh.name = 'deck';
-    deckMesh.castShadow = true;
-    deckMesh.receiveShadow = true;
-    rotation.setFromAxisAngle(axis, yaw);
-    position.set(cx, deckY - 0.08, cz);
-    matrix.compose(position, rotation, scale);
-    deckMesh.setMatrixAt(0, matrix);
-    deckMesh.instanceMatrix.needsUpdate = true;
-    bridgeGroup.add(deckMesh);
-
-    // Two support beams under the deck's long edges — the truss a hump-back
-    // bridge reads as standing on.
-    const beamHeight = Math.max(0.4, BRIDGE_RISE - 0.3);
-    const beamMesh = new InstancedMesh(new BoxGeometry(0.22, beamHeight, DECK_HALF_LENGTH * 2), beamMaterial, 2);
-    for (let side = 0; side < 2; side += 1) {
-      const sign = side === 0 ? 1 : -1;
-      const bx = cx + acrossX * (halfAcross - 0.15) * sign;
-      const bz = cz + acrossZ * (halfAcross - 0.15) * sign;
-      position.set(bx, groundY + beamHeight / 2, bz);
-      matrix.compose(position, rotation, scale);
-      beamMesh.setMatrixAt(side, matrix);
-    }
-    beamMesh.instanceMatrix.needsUpdate = true;
-    beamMesh.castShadow = true;
-    bridgeGroup.add(beamMesh);
-
-    // Guard rails along the deck's two long edges.
-    for (let side = 0; side < 2; side += 1) {
-      const sign = side === 0 ? 1 : -1;
-      const railX = cx + acrossX * railHalfAcross * sign;
-      const railZ = cz + acrossZ * railHalfAcross * sign;
-      guardRails.push({
-        x1: railX - dirX * DECK_HALF_LENGTH,
-        z1: railZ - dirZ * DECK_HALF_LENGTH,
-        x2: railX + dirX * DECK_HALF_LENGTH,
-        z2: railZ + dirZ * DECK_HALF_LENGTH,
-        baseHeight: deckY - GUARD_RAIL_BAND,
-        navStamped: false, // the deck sits well above anything beside it
-      });
-    }
-
-    // The same two edges, drawn — a low post-and-rail so the invisible
-    // collision guard above reads as an actual bridge rail rather than an
-    // unmarked ledge. Kept low on purpose (see `VISIBLE_RAIL_HEIGHT`) so it
-    // cannot be what GAME_DESIGN.md's "a small bridge does not obscure a
-    // player walking on it" is worried about.
-    const postsPerSide = Math.max(2, Math.ceil((DECK_HALF_LENGTH * 2) / 1.6) + 1);
-    const postMesh = new InstancedMesh(
-      new CylinderGeometry(0.05, 0.06, VISIBLE_RAIL_HEIGHT, 6),
-      postMaterial,
-      postsPerSide * 2,
-    );
-    const railMesh = new InstancedMesh(
-      new BoxGeometry(0.07, 0.06, DECK_HALF_LENGTH * 2),
-      deckMaterial,
-      2,
-    );
-    let postIndex = 0;
-    for (let side = 0; side < 2; side += 1) {
-      const sign = side === 0 ? 1 : -1;
-      const railX = cx + acrossX * halfAcross * sign;
-      const railZ = cz + acrossZ * halfAcross * sign;
-      for (let p = 0; p < postsPerSide; p += 1) {
-        const along = -DECK_HALF_LENGTH + (p / (postsPerSide - 1)) * (DECK_HALF_LENGTH * 2);
-        position.set(railX + dirX * along, deckY + VISIBLE_RAIL_HEIGHT / 2, railZ + dirZ * along);
-        matrix.compose(position, rotation.identity(), scale);
-        postMesh.setMatrixAt(postIndex, matrix);
-        postIndex += 1;
-      }
-      rotation.setFromAxisAngle(axis, yaw);
-      position.set(railX, deckY + VISIBLE_RAIL_HEIGHT, railZ);
-      matrix.compose(position, rotation, scale);
-      railMesh.setMatrixAt(side, matrix);
-    }
-    postMesh.instanceMatrix.needsUpdate = true;
-    railMesh.instanceMatrix.needsUpdate = true;
-    bridgeGroup.add(postMesh, railMesh);
-
-    // --- the two ramps -------------------------------------------------------
-    const treadCount = Math.max(4, Math.ceil(BRIDGE_RISE / TREAD_RISE));
-
-    for (let side = 0; side < 2; side += 1) {
-      const sign = side === 0 ? 1 : -1;
-      // `footprint.rampRunPos`/`rampRunNeg` already account for how close the
-      // *next* crossing is, and how close the park's own boundary is, on
-      // this specific side — not just the entrance ramp's own gradient. See
-      // `bridgeFootprint.ts`'s own note on `rampRunCap` and on why the two
-      // sides are tracked separately. Read here rather than recomputed, so
-      // the mesh this builds and the ground-plane exclusion `Scenery`/
-      // `LampPosts` already kept off of it (`bridgeKeepout.ts`) can never
-      // disagree about how far a ramp reaches.
-      const rampRun = sign > 0 ? footprint.rampRunPos : footprint.rampRunNeg;
-      const treadRun = rampRun / treadCount;
-      const farAlong = DECK_HALF_LENGTH + rampRun;
-      const farX = cx + dirX * farAlong * sign;
-      const farZ = cz + dirZ * farAlong * sign;
-      const lowY = terrainHeight(farX, farZ);
-
-      const rampMesh = new InstancedMesh(new BoxGeometry(deckWidth, 0.16, treadRun + 0.04), deckMaterial, treadCount);
-      // Every tread's own flat surface height, kept for the risers built
-      // just below — each tread is a flat plank at one height (real stair
-      // treads, not a smooth ramp face), so nothing yet fills the vertical
-      // gap between one tread's edge and the next.
-      const treadSurfaceY: number[] = [];
-      for (let i = 0; i < treadCount; i += 1) {
-        const fromAlong = DECK_HALF_LENGTH + i * treadRun;
-        const toAlong = i === treadCount - 1 ? farAlong : DECK_HALF_LENGTH + (i + 1) * treadRun;
-        const t = (i + 0.5) / treadCount;
-        const y = deckY + (lowY - deckY) * t;
-        treadSurfaceY.push(y);
-
-        const platformAlongFrom = sign > 0 ? fromAlong : -toAlong;
-        const platformAlongTo = sign > 0 ? toAlong : -fromAlong;
-        platforms.push(
-          new RectPlatform(cx, cz, dirX, dirZ, acrossX, acrossZ, platformAlongFrom, platformAlongTo, halfAcross, y),
-        );
-
-        const midAlong = ((fromAlong + toAlong) / 2) * sign;
-        position.set(cx + dirX * midAlong, y - 0.08, cz + dirZ * midAlong);
-        matrix.compose(position, rotation, scale);
-        rampMesh.setMatrixAt(i, matrix);
-      }
-      rampMesh.instanceMatrix.needsUpdate = true;
-      rampMesh.castShadow = true;
-      rampMesh.receiveShadow = true;
-      bridgeGroup.add(rampMesh);
-
-      // Risers — a vertical face at each seam, deck-edge to first tread,
-      // tread to tread, and last tread to the ground, so the ramp reads as
-      // a real staircase (Jim's own steps are built the same way) rather
-      // than a stack of flat planks with daylight between them (QA on PR
-      // #330: "read as venetian blinds from an angle" — true, since nothing
-      // here ever filled that gap before). `treadCount + 1` seams for
-      // `treadCount` treads: the deck's own edge counts as the surface
-      // before the first tread, and the real ground (`lowY`) as the
-      // surface after the last.
-      const riserMesh = new InstancedMesh(new BoxGeometry(deckWidth, 1, 0.06), deckMaterial, treadCount + 1);
-      const riserScale = new Vector3(1, 1, 1);
-      for (let i = 0; i <= treadCount; i += 1) {
-        const seamAlong = (DECK_HALF_LENGTH + i * treadRun) * sign;
-        const before = i === 0 ? deckY : treadSurfaceY[i - 1]!;
-        const after = i === treadCount ? lowY : treadSurfaceY[i]!;
-        // Every instance gets a real matrix, even a near-flat seam — an
-        // `InstancedMesh` index left untouched keeps its default identity
-        // matrix, which is a real, visible unit box sitting at the origin,
-        // not an invisible one; floored rather than skipped so there is
-        // never a stray box to find.
-        const riserHeight = Math.max(Math.abs(after - before), 0.001);
-        riserScale.set(1, riserHeight, 1);
-        position.set(cx + dirX * seamAlong, (before + after) / 2, cz + dirZ * seamAlong);
-        matrix.compose(position, rotation, riserScale);
-        riserMesh.setMatrixAt(i, matrix);
-      }
-      riserMesh.instanceMatrix.needsUpdate = true;
-      riserMesh.castShadow = true;
-      bridgeGroup.add(riserMesh);
-
-      // No guard rail down a ramp's own flanks, deliberately, unlike the
-      // deck's (above). The deck stands several metres over a moving train
-      // and losing the edge there is exactly the fall a bridge exists to
-      // prevent; a ramp is a gentle, ordinary slope over ordinary lawn —
-      // stepping off its side is no different from stepping off any other
-      // path's edge in this park, none of which carry a rail either. It is
-      // also where a straight `poiGraph` chord between two waypoints
-      // sampled off the *real, curved* drawn path is least likely to match
-      // this bridge's own straight, fixed-width rectangle: a rail planted
-      // tight to that rectangle's edge caught a live edge that curved
-      // slightly wide of it (found live, issue #116). The deck does not
-      // have this problem — it is short, so a crossing edge's own curvature
-      // barely has room to drift before it is past the deck entirely.
-    }
-
-    const bridge: Bridge = {
-      deckY,
-      // Not `deck.covers(x, z)` — `RectPlatform` implements the generic
-      // `MovingPlatform` interface, which has no margin parameter and
-      // should not grow one just for this. The deck rectangle's own
-      // geometry (`cx`, `cz`, `dirX`, `dirZ`, `acrossX`, `acrossZ`,
-      // `halfAcross`, `DECK_HALF_LENGTH`) is already in scope here, so the
-      // padded test is restated directly rather than routed through a
-      // second object.
-      deckCovers: (x: number, z: number, margin = 0): boolean => {
-        const dx = x - cx;
-        const dz = z - cz;
-        const along = dx * dirX + dz * dirZ;
-        const across = dx * acrossX + dz * acrossZ;
-        return Math.abs(along) <= DECK_HALF_LENGTH + margin && Math.abs(across) <= halfAcross + margin;
-      },
-      covers: (x: number, z: number): boolean => footprint.covers(x, z),
-      footprintNear: (x: number, z: number, margin: number): boolean => footprint.covers(x, z, margin),
-      // Blends toward the **local** ground under `(x, z)` itself, not a
-      // single "low end" reference sampled once at across = 0 — a ramp is
-      // several metres wide, the terrain it descends onto is not flat
-      // across that width, and a fixed reference disagreed with the real
-      // ground by enough, right at the ramp's own low edge, to graze a
-      // guard rail's `baseHeight` a `poiGraph` probe standing there had no
-      // way to know about (found live: an edge stepping off a ramp exactly
-      // at that seam). Blending to `terrainHeight(x, z)` itself instead
-      // means the two *necessarily* agree in the limit — at `t = 1` this
-      // returns exactly what `groundAt` reports one step outside `covers()`,
-      // because both read the same function.
-      heightAt: (x: number, z: number): number => {
-        const dx = x - cx;
-        const dz = z - cz;
-        const along = dx * dirX + dz * dirZ;
-        if (Math.abs(along) <= DECK_HALF_LENGTH) return deckY;
-        const rampRun = along >= 0 ? footprint.rampRunPos : footprint.rampRunNeg;
-        // `rampRun` can be `0` on a side the boundary truncation floored all
-        // the way down (`bridgeFootprint.ts`'s own note on the gate-walk
-        // crossing) — `covers()` then only ever admits `along` up to exactly
-        // `DECK_HALF_LENGTH` on that side, so this branch should never be
-        // asked about it, but a division by a real `0` here would answer
-        // `NaN` rather than throw, which is a silent wrong answer instead of
-        // a loud one. Guarded rather than trusted.
-        const t = rampRun > 0 ? clamp01((Math.abs(along) - DECK_HALF_LENGTH) / rampRun) : 1;
-        return deckY + (terrainHeight(x, z) - deckY) * t;
-      },
-    };
-    bridges.push(bridge);
-    group.add(bridgeGroup);
+    const built = buildOneBridge(crossing, footprint);
+    bridges.push(built.bridge);
+    platforms.push(built.platform);
+    guardRails.push(...built.walls);
+    group.add(built.group);
   }
 
   return { group, bridges, platforms, guardRails, fallbackCrossings };
+}
+
+interface OneBridge {
+  readonly bridge: Bridge;
+  readonly platform: MovingPlatform;
+  readonly walls: BridgeWall[];
+  readonly group: Group;
+}
+
+function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): OneBridge {
+  const { frame, shift, halfAcross, roadHalf, walkHalf, rampRunPos, rampRunNeg } = footprint;
+  const lengthPos = DECK_HALF_LENGTH + rampRunPos;
+  const lengthNeg = DECK_HALF_LENGTH + rampRunNeg;
+
+  // --- the crown height ----------------------------------------------------
+  // The worst (highest) ground sampled across the crown's own footprint —
+  // any real route may cross the rail anywhere within this corridor, so
+  // every point of the crown span has to clear `BRIDGE_RISE` over the worst
+  // of it, not just the crossing's own centre point.
+  let worstGroundY = -Infinity;
+  let lowestCrownEdgeGroundY = Infinity;
+  for (let along = -ARCH_CLEAR_HALF; along <= ARCH_CLEAR_HALF + 1e-6; along += ARCH_CLEAR_HALF / 2) {
+    for (const t of [-1, -0.5, 0, 0.5, 1]) {
+      const { x, z } = frame.worldAt(along, halfAcross * t, shift);
+      const ground = terrainHeight(x, z);
+      worstGroundY = Math.max(worstGroundY, ground);
+      if (Math.abs(Math.abs(along) - ARCH_CLEAR_HALF) < 1e-6) {
+        lowestCrownEdgeGroundY = Math.min(lowestCrownEdgeGroundY, ground);
+      }
+    }
+  }
+  const crownBase = worstGroundY + BRIDGE_RISE + HEIGHT_MARGIN;
+  // The hump's surface dips a little between the crown (along = 0) and the
+  // arch's clear edge (±ARCH_CLEAR_HALF); the flat crown soffit sits
+  // `BRIDGE_DECK_DEPTH` under the crown, so the surface at that edge must
+  // still leave `MIN_SHELL_DEPTH` of masonry over it. Solve the profile for
+  // the crown height that guarantees it — see `surfaceProfile`.
+  const shorterLength = Math.min(lengthPos, lengthNeg);
+  const dipFraction = profileDrop(ARCH_CLEAR_HALF / Math.max(shorterLength, ARCH_CLEAR_HALF + 0.1));
+  // surface(edge) = crown − (crown − ground)·dip ≥ crownBase − BRIDGE_DECK_DEPTH + MIN_SHELL_DEPTH
+  const needed =
+    (crownBase - BRIDGE_DECK_DEPTH + MIN_SHELL_DEPTH - lowestCrownEdgeGroundY * dipFraction) /
+    (1 - dipFraction);
+  const crownY = Math.max(crownBase, needed);
+  const soffitCrownY = crownBase - BRIDGE_DECK_DEPTH;
+
+  // --- the surface profile — the ONE owner of the hump's shape -------------
+  const surfaceProfile = (x: number, z: number, along: number): number => {
+    const length = along >= 0 ? lengthPos : lengthNeg;
+    const q = length > 0 ? clamp01(Math.abs(along) / length) : 1;
+    const ground = terrainHeight(x, z);
+    // Blends to the *local* ground at the feet by construction (q = 1 →
+    // ground exactly), the same guarantee the old ramp geometry made — see
+    // its note on why blending to a single "low end" reference misled a
+    // poiGraph probe at the ramp's own low edge.
+    return ground + (crownY - ground) * (1 - profileDrop(q));
+  };
+  const heightAt = (x: number, z: number): number => {
+    const projected = frame.project(x, z, shift);
+    return surfaceProfile(x, z, projected.along);
+  };
+
+  // --- the arch soffit -----------------------------------------------------
+  // Flat full-height crown over |along| ≤ ARCH_CLEAR_HALF; a quarter-round
+  // haunch curving down to the springing at |along| = ARCH_SPAN_HALF; solid
+  // masonry (to the ground) beyond. Radius = span difference, so the
+  // haunch meets both neighbours tangent-free but visually round — a
+  // slightly stilted arch, which is what lets a tunnel only 6.4 m wide
+  // still clear a train nearly 4 m tall (a true semicircle of that span
+  // could not).
+  const haunchRadius = ARCH_SPAN_HALF - ARCH_CLEAR_HALF;
+  const springY = soffitCrownY - haunchRadius;
+  const soffitAt = (alongAbs: number): number => {
+    if (alongAbs <= ARCH_CLEAR_HALF) return soffitCrownY;
+    if (alongAbs >= ARCH_SPAN_HALF) return springY;
+    const u = (alongAbs - ARCH_CLEAR_HALF) / haunchRadius;
+    return springY + haunchRadius * Math.sqrt(Math.max(0, 1 - u * u));
+  };
+
+  // --- meshes ---------------------------------------------------------------
+  const bridgeGroup = new Group();
+  // The same name the invariants find this crossing's own group under —
+  // one owner (the crossing's `railDistance`) for both.
+  bridgeGroup.name = `bridge-${crossing.railDistance.toFixed(1)}`;
+
+  // The crown-span soffit — the thing that actually stands over the train,
+  // named `deck` so `test/procgen/invariants.ts` measures the real, built
+  // clearance off its own lowest visible vertex.
+  const at0 = frame.pointAt(0);
+  const origin0 = frame.worldAt(0, 0, shift);
+  const deckMesh = new Mesh(
+    new BoxGeometry(halfAcross * 2, 0.12, ARCH_CLEAR_HALF * 2),
+    bridgeMaterials().stone,
+  );
+  deckMesh.name = 'deck';
+  deckMesh.castShadow = true;
+  deckMesh.receiveShadow = true;
+  const yaw = Math.atan2(at0.dirX, at0.dirZ);
+  const rotation = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), yaw);
+  const matrix = new Matrix4().compose(
+    new Vector3(origin0.x, soffitCrownY + 0.06, origin0.z),
+    rotation,
+    new Vector3(1, 1, 1),
+  );
+  deckMesh.applyMatrix4(matrix);
+  bridgeGroup.add(deckMesh);
+
+  // The masonry shell — road surface, spandrel/parapet walls, coping, the
+  // arch haunches and the abutment faces — one BufferGeometry swept along
+  // the frame so the whole thing follows the path's own curve.
+  const shell = buildShellGeometry(
+    frame,
+    shift,
+    lengthNeg,
+    lengthPos,
+    roadHalf,
+    halfAcross,
+    surfaceProfile,
+    soffitAt,
+    springY,
+  );
+  const shellMesh = new Mesh(shell.stone, bridgeMaterials().stone);
+  shellMesh.castShadow = true;
+  shellMesh.receiveShadow = true;
+  const copingMesh = new Mesh(shell.coping, bridgeMaterials().coping);
+  copingMesh.castShadow = true;
+  bridgeGroup.add(shellMesh, copingMesh);
+
+  // --- collision: the parapet/spandrel walls -------------------------------
+  // Only where the hump stands more than a step above the ground beside it
+  // — see {@link PARAPET_MIN_HUMP}. Below that the edge is an ordinary
+  // kerb, and a wall there severs the path junctions the ramp feet land in.
+  const walls: BridgeWall[] = [];
+  const wallLine = roadHalf + BRIDGE_WALL_THICKNESS / 2;
+  for (const side of [1, -1] as const) {
+    let previous = frame.worldAt(-lengthNeg, wallLine * side, shift);
+    let previousAlong = -lengthNeg;
+    for (let along = -lengthNeg + WALL_SEGMENT; along <= lengthPos + WALL_SEGMENT - 1e-6; along += WALL_SEGMENT) {
+      const clamped = Math.min(along, lengthPos);
+      const point = frame.worldAt(clamped, wallLine * side, shift);
+      const topA = surfaceProfile(previous.x, previous.z, previousAlong);
+      const topB = surfaceProfile(point.x, point.z, clamped);
+      const humpA = topA - terrainHeight(previous.x, previous.z);
+      const humpB = topB - terrainHeight(point.x, point.z);
+      if (Math.max(humpA, humpB) > PARAPET_MIN_HUMP) {
+        walls.push({
+          x1: previous.x,
+          z1: previous.z,
+          x2: point.x,
+          z2: point.z,
+          topHeight: Math.max(topA, topB) + PARAPET_HEIGHT,
+        });
+      }
+      previous = point;
+      previousAlong = clamped;
+      if (clamped >= lengthPos) break;
+    }
+  }
+
+  // --- the walkable surface -------------------------------------------------
+  // One height-varying platform for the whole hump. Its own footprint is
+  // the paved road (parapet inner faces), a little wider than the
+  // *standable* extent `covers()` reports — a walker pressed against the
+  // parapet still has floor under her feet.
+  const platform: MovingPlatform = {
+    surfaceY: crownY,
+    covers: (x: number, z: number): boolean => {
+      const projected = frame.project(x, z, shift);
+      if (Math.abs(projected.across) > roadHalf) return false;
+      const length = projected.along >= 0 ? lengthPos : lengthNeg;
+      return Math.abs(projected.along) <= length;
+    },
+    surfaceYAt: heightAt,
+  };
+
+  const bridge: Bridge = {
+    deckY: crownY,
+    covers: (x: number, z: number): boolean => footprint.covers(x, z),
+    deckCovers: (x: number, z: number, margin = 0): boolean => {
+      const projected = frame.project(x, z, shift);
+      return (
+        Math.abs(projected.along) <= DECK_HALF_LENGTH + margin &&
+        Math.abs(projected.across) <= walkHalf + margin
+      );
+    },
+    // Pads from the real masonry edge, not the standable extent `covers`
+    // reports — the difference is the parapet's own width plus the body
+    // margin `walkHalf` already subtracted.
+    footprintNear: (x: number, z: number, margin: number): boolean =>
+      footprint.covers(x, z, margin + (halfAcross - walkHalf)),
+    heightAt,
+  };
+
+  return { bridge, platform, walls, group: bridgeGroup };
+}
+
+interface ShellGeometry {
+  readonly stone: BufferGeometry;
+  readonly coping: BufferGeometry;
+}
+
+/**
+ * Sweeps the masonry shell along the frame: road top, both spandrel/parapet
+ * walls (outer and inner faces), the arch haunch soffits, and the abutment
+ * faces at the tunnel mouths. Indexed quads; normals computed at the end
+ * (toon shading forgives averaged normals on near-planar strips).
+ */
+function buildShellGeometry(
+  frame: import('./bridgeSpine').SpineFrame,
+  shift: number,
+  lengthNeg: number,
+  lengthPos: number,
+  roadHalf: number,
+  halfAcross: number,
+  surfaceProfile: (x: number, z: number, along: number) => number,
+  soffitAt: (alongAbs: number) => number,
+  springY: number,
+): ShellGeometry {
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+  const copingPositions: number[] = [];
+  const copingUvs: number[] = [];
+  const copingIndices: number[] = [];
+
+  const vertex = (x: number, y: number, z: number, u: number, v: number): number => {
+    positions.push(x, y, z);
+    uvs.push(u, v);
+    return positions.length / 3 - 1;
+  };
+  const copingVertex = (x: number, y: number, z: number, u: number, v: number): number => {
+    copingPositions.push(x, y, z);
+    copingUvs.push(u, v);
+    return copingPositions.length / 3 - 1;
+  };
+  const quad = (into: number[], a: number, b: number, c: number, d: number): void => {
+    into.push(a, b, c, a, c, d);
+  };
+
+  // Ring samples along the hump. Each ring carries the indices of the
+  // previous ring's vertices per strip, so strips join into quads.
+  interface Ring {
+    readonly outerBottom: [number, number]; // [side +1, side -1]
+    readonly outerTop: [number, number];
+    readonly innerBottom: [number, number]; // parapet inner face, at road
+    readonly innerTop: [number, number];
+    readonly roadA: number; // road edge, side +1
+    readonly roadB: number; // road edge, side -1
+    readonly soffitA: number | null; // arch soffit edge, side +1 (across)
+    readonly soffitB: number | null;
+    readonly copingOuter: [number, number];
+    readonly copingInner: [number, number];
+  }
+
+  const alongs: number[] = [];
+  for (let along = -lengthNeg; along < lengthPos; along += SHELL_STEP) alongs.push(along);
+  alongs.push(lengthPos);
+
+  let previous: Ring | null = null;
+  let previousAlong = 0;
+  for (const along of alongs) {
+    const centre = frame.pointAt(along);
+    const world = (across: number): { x: number; z: number } => ({
+      x: centre.x + centre.acrossX * (across + shift),
+      z: centre.z + centre.acrossZ * (across + shift),
+    });
+    const roadPlus = world(roadHalf);
+    const roadMinus = world(-roadHalf);
+    const outerPlus = world(halfAcross);
+    const outerMinus = world(-halfAcross);
+    const surface = surfaceProfile(
+      centre.x + centre.acrossX * shift,
+      centre.z + centre.acrossZ * shift,
+      along,
+    );
+    const inTunnel = Math.abs(along) < ARCH_SPAN_HALF;
+    const soffit = soffitAt(Math.abs(along));
+    const bottomPlus = inTunnel
+      ? soffit
+      : Math.min(terrainHeight(outerPlus.x, outerPlus.z), terrainHeight(roadPlus.x, roadPlus.z)) - 0.5;
+    const bottomMinus = inTunnel
+      ? soffit
+      : Math.min(terrainHeight(outerMinus.x, outerMinus.z), terrainHeight(roadMinus.x, roadMinus.z)) - 0.5;
+    // The parapet tapers out where the hump is barely above the ground —
+    // see `parapetHeightFor`; the collision walls follow the same rule.
+    const humpPlus = surface - terrainHeight(outerPlus.x, outerPlus.z);
+    const humpMinus = surface - terrainHeight(outerMinus.x, outerMinus.z);
+    const parapetTopPlus = surface + parapetHeightFor(humpPlus);
+    const parapetTopMinus = surface + parapetHeightFor(humpMinus);
+    const u = along / TEXTURE_METRES;
+
+    const ring: Ring = {
+      outerBottom: [
+        vertex(outerPlus.x, bottomPlus, outerPlus.z, u, bottomPlus / TEXTURE_METRES),
+        vertex(outerMinus.x, bottomMinus, outerMinus.z, u, bottomMinus / TEXTURE_METRES),
+      ],
+      outerTop: [
+        vertex(outerPlus.x, parapetTopPlus, outerPlus.z, u, parapetTopPlus / TEXTURE_METRES),
+        vertex(outerMinus.x, parapetTopMinus, outerMinus.z, u, parapetTopMinus / TEXTURE_METRES),
+      ],
+      innerBottom: [
+        vertex(roadPlus.x, surface, roadPlus.z, u, surface / TEXTURE_METRES),
+        vertex(roadMinus.x, surface, roadMinus.z, u, surface / TEXTURE_METRES),
+      ],
+      innerTop: [
+        vertex(roadPlus.x, parapetTopPlus, roadPlus.z, u, parapetTopPlus / TEXTURE_METRES),
+        vertex(roadMinus.x, parapetTopMinus, roadMinus.z, u, parapetTopMinus / TEXTURE_METRES),
+      ],
+      roadA: vertex(roadPlus.x, surface + 0.02, roadPlus.z, u, roadHalf / TEXTURE_METRES),
+      roadB: vertex(roadMinus.x, surface + 0.02, roadMinus.z, u, -roadHalf / TEXTURE_METRES),
+      soffitA: inTunnel ? vertex(outerPlus.x, soffit, outerPlus.z, u, halfAcross / TEXTURE_METRES) : null,
+      soffitB: inTunnel ? vertex(outerMinus.x, soffit, outerMinus.z, u, -halfAcross / TEXTURE_METRES) : null,
+      copingOuter: [
+        copingVertex(outerPlus.x, parapetTopPlus + 0.06, outerPlus.z, u, 0),
+        copingVertex(outerMinus.x, parapetTopMinus + 0.06, outerMinus.z, u, 0),
+      ],
+      copingInner: [
+        copingVertex(roadPlus.x, parapetTopPlus + 0.06, roadPlus.z, u, 1),
+        copingVertex(roadMinus.x, parapetTopMinus + 0.06, roadMinus.z, u, 1),
+      ],
+    };
+
+    if (previous) {
+      // Road surface (up).
+      quad(indices, previous.roadB, previous.roadA, ring.roadA, ring.roadB);
+      for (const side of [0, 1] as const) {
+        // Outer wall faces (side 0 faces +across, side 1 faces -across).
+        if (side === 0) {
+          quad(
+            indices,
+            previous.outerBottom[0],
+            ring.outerBottom[0],
+            ring.outerTop[0],
+            previous.outerTop[0],
+          );
+          // Inner parapet face, above the road.
+          quad(indices, previous.innerTop[0], ring.innerTop[0], ring.innerBottom[0], previous.innerBottom[0]);
+        } else {
+          quad(
+            indices,
+            previous.outerBottom[1],
+            previous.outerTop[1],
+            ring.outerTop[1],
+            ring.outerBottom[1],
+          );
+          quad(indices, previous.innerTop[1], previous.innerBottom[1], ring.innerBottom[1], ring.innerTop[1]);
+        }
+        // Coping (parapet top): outer edge to inner edge.
+        quad(
+          copingIndices,
+          previous.copingOuter[side],
+          ring.copingOuter[side],
+          ring.copingInner[side],
+          previous.copingInner[side],
+        );
+      }
+      // Arch haunch soffit (down), full width, only where both rings are in
+      // the tunnel and outside the flat crown span the `deck` box owns.
+      const midAlong = (previousAlong + along) / 2;
+      if (
+        previous.soffitA !== null &&
+        previous.soffitB !== null &&
+        ring.soffitA !== null &&
+        ring.soffitB !== null &&
+        Math.abs(midAlong) >= ARCH_CLEAR_HALF - SHELL_STEP
+      ) {
+        quad(indices, previous.soffitA, previous.soffitB, ring.soffitB, ring.soffitA);
+      }
+      // Abutment faces: the ring where the tunnel begins/ends gets a
+      // vertical quad from the ground to the springing, closing the
+      // masonry face a rider looks at from inside the tunnel.
+      const wasTunnel = Math.abs(previousAlong) < ARCH_SPAN_HALF;
+      const isTunnel = Math.abs(along) < ARCH_SPAN_HALF;
+      if (wasTunnel !== isTunnel) {
+        const edgeRing = isTunnel ? previous : ring;
+        const face = isTunnel ? 1 : -1; // which way the face looks (into the tunnel)
+        const a = edgeRing.outerBottom[0];
+        const b = edgeRing.outerBottom[1];
+        // Rebuild two vertices at the springing height straight above the
+        // bottom pair, then a quad between them.
+        const ax = positions[a * 3] as number;
+        const az = positions[a * 3 + 2] as number;
+        const bx = positions[b * 3] as number;
+        const bz = positions[b * 3 + 2] as number;
+        const groundA = terrainHeight(ax, az) - 0.5;
+        const groundB = terrainHeight(bx, bz) - 0.5;
+        const v0 = vertex(ax, groundA, az, 0, groundA / TEXTURE_METRES);
+        const v1 = vertex(bx, groundB, bz, halfAcross / TEXTURE_METRES, groundB / TEXTURE_METRES);
+        const v2 = vertex(bx, springY, bz, halfAcross / TEXTURE_METRES, springY / TEXTURE_METRES);
+        const v3 = vertex(ax, springY, az, 0, springY / TEXTURE_METRES);
+        if (face > 0) quad(indices, v0, v1, v2, v3);
+        else quad(indices, v0, v3, v2, v1);
+      }
+    }
+    previous = ring;
+    previousAlong = along;
+  }
+
+  const stone = new BufferGeometry();
+  stone.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
+  stone.setAttribute('uv', new BufferAttribute(new Float32Array(uvs), 2));
+  stone.setIndex(indices);
+  stone.computeVertexNormals();
+
+  const coping = new BufferGeometry();
+  coping.setAttribute('position', new BufferAttribute(new Float32Array(copingPositions), 3));
+  coping.setAttribute('uv', new BufferAttribute(new Float32Array(copingUvs), 2));
+  coping.setIndex(copingIndices);
+  coping.computeVertexNormals();
+
+  return { stone, coping };
 }
