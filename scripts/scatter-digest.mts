@@ -32,7 +32,7 @@ import './headless-canvas.mjs';
 import { createHash } from 'node:crypto';
 import { buildHeadlessPark } from './park-harness.mts';
 import { PARK_SEED } from '../src/world/parkManifest.ts';
-import { PATH_GRAPH } from '../src/world/paths.ts';
+import { PATH_GRAPH } from '../src/world/pathGraph.ts';
 
 /**
  * Rounded to a millimetre before hashing.

@@ -1,0 +1,445 @@
+import {
+  BufferAttribute,
+  BufferGeometry,
+  CatmullRomCurve3,
+  Mesh,
+  MeshStandardMaterial,
+  Vector3,
+} from 'three';
+import { PALETTE } from '../core/palette';
+import { pathTexture } from '../core/textures';
+import { terrainHeight, terrainNormal } from './terrain';
+import { buildGraph, PLAZA, type PathGraph, type RouteDefinition } from './paths';
+import { takePrewarmedPathGraph } from './pathsPrewarm';
+
+/**
+ * **The solved walk network and everything drawn from it.**
+ *
+ * Split out of `paths.ts` so the *machinery* (the street lattice, the
+ * routers, the screens) can be imported without solving anything: this
+ * module's own evaluation is what runs the solve, either by taking the graph
+ * `boot/parkGeneration.ts` already drove a slice at a time behind the cat
+ * bus (`pathsPrewarm.ts` — the crossingPrewarm pattern), or by draining the
+ * same generator straight through, which is the path `check:park`,
+ * `test:procgen` and every other Node consumer takes. Two cadences, one
+ * generator, one order — the sliced boot cannot build a different park.
+ */
+
+/** The solved graph — nodes, edges, backbone. One per build, like the park. */
+export const PATH_GRAPH: PathGraph = takePrewarmedPathGraph() ?? buildGraph();
+
+/**
+ * The ribbons actually drawn — the graph's paved edges. Exported so anything
+ * that wants to *draw* the network — the park map — can rebuild the same
+ * centreline from the same generated control points.
+ */
+export const ROUTES: readonly RouteDefinition[] = PATH_GRAPH.edges
+  .filter((edge) => edge.paved)
+  .map((edge) => edge.route);
+
+/**
+ * One straight, grid-axis-aligned stretch of a paved route, long enough to
+ * stand a garden wall beside. See {@link pathBorderSegments}.
+ */
+export interface PathBorderSegment {
+  readonly a: readonly [number, number];
+  readonly b: readonly [number, number];
+  /** Half the paved width here — how far the surface itself reaches from the centreline. */
+  readonly halfWidth: number;
+  /** 0 if this stretch runs along the X axis, PI/2 if along Z. */
+  readonly axisYaw: number;
+}
+
+/** Shorter than this and a straight stretch is too small to anchor a wall against. */
+const MIN_BORDER_SEGMENT_LENGTH = 4;
+
+/**
+ * Off a grid axis by more than this fraction of its own length, a control
+ * segment does not count as "on axis" — matches the tolerance
+ * {@link pathsRunOnGridAxes} (`test/procgen/invariants.ts`) checks the drawn
+ * curve against, so a stretch this function calls on-axis is never one that
+ * invariant would call diagonal, and vice versa.
+ */
+const BORDER_OFF_AXIS_FRACTION = 0.05;
+
+let cachedBorderSegments: readonly PathBorderSegment[] | null = null;
+
+/**
+ * **Straight, grid-axis-aligned stretches of the paved network** — the same
+ * axes the path network itself is built on (issue #269) and the same ones
+ * `pathsRunOnGridAxes` polices, read straight off each route's own control
+ * points rather than re-derived from the drawn curve.
+ *
+ * This is the *one* definition of "on the grid" that wall/scenery placement
+ * gets to use (CLAUDE.md: "two definitions of one thing, kept in step by
+ * hand") — reusing the fact that `paths.ts` already axis-aligns its control
+ * points (see `pathsRunOnGridAxes`'s own comment) rather than a second
+ * generator inventing its own idea of what counts as on-axis.
+ *
+ * The closed backbone ring is excluded outright: it is deliberately a true
+ * circle round the statue (`ringIsATrueCircleRoundTheStatue`), never
+ * axis-aligned, so no stretch of it belongs here — a wall "bordering" the
+ * ring would border a curve, not a grid edge.
+ *
+ * Memoised like `wallPlan` in `Scenery.ts`: the route network is a pure
+ * function of the seeded layout, solved once at module load.
+ */
+export function pathBorderSegments(): readonly PathBorderSegment[] {
+  if (cachedBorderSegments) return cachedBorderSegments;
+  const segments: PathBorderSegment[] = [];
+  for (const route of ROUTES) {
+    if (route.closed) continue; // the ring: a true circle, not a grid edge
+    const halfWidth = route.width / 2;
+    for (let i = 1; i < route.points.length; i += 1) {
+      const [x1, z1] = route.points[i - 1]!;
+      const [x2, z2] = route.points[i]!;
+      const dx = x2 - x1;
+      const dz = z2 - z1;
+      const length = Math.hypot(dx, dz);
+      if (length < MIN_BORDER_SEGMENT_LENGTH) continue;
+      const offAxisX = Math.abs(dz) / length; // deviation if this is meant to run along X
+      const offAxisZ = Math.abs(dx) / length; // deviation if this is meant to run along Z
+      let axisYaw: number;
+      if (offAxisX <= BORDER_OFF_AXIS_FRACTION) axisYaw = 0;
+      else if (offAxisZ <= BORDER_OFF_AXIS_FRACTION) axisYaw = Math.PI / 2;
+      else continue; // a diagonal control segment (a booth's own doorway approach) — not a grid edge
+      segments.push({ a: [x1, z1], b: [x2, z2], halfWidth, axisYaw });
+    }
+  }
+  cachedBorderSegments = segments;
+  return segments;
+}
+
+/** Sampled path centreline, used for scenery placement queries. */
+export interface PathSample {
+  readonly x: number;
+  readonly z: number;
+  readonly halfWidth: number;
+  /**
+   * Which drawn route this sample belongs to — a fresh id per
+   * {@link recordSamples} call, i.e. per route curve. Two routes meeting at
+   * a shared graph node are spatially contiguous, so a consumer walking
+   * this array in order (the railway crossings' spine extraction,
+   * `train/crossings.ts`) cannot tell the seam apart by stride alone; a
+   * walk that silently continued across one wandered onto a *different*
+   * path heading a different way (found live, seed 2: a bridge's spine
+   * hair-pinned onto an adjacent route and the bridge's parapets ended up
+   * crisscrossing its own roadway).
+   */
+  readonly run: number;
+}
+
+const samples: PathSample[] = [];
+let nextRun = 0;
+
+/**
+ * The drawn network's centreline samples — the ground truth the crossings
+ * computation walks (Decision 4: crossings are computed from the solved
+ * curves at boot, so they can never drift off either the track or the path).
+ * Populated by {@link buildPaths}, which Garden runs before the train exists.
+ */
+export function pathCentreline(): readonly PathSample[] {
+  return samples;
+}
+
+/**
+ * Distance from (x, z) to the nearest path *edge*.
+ * Negative means the point is on the paving.
+ */
+export function distanceToPath(x: number, z: number): number {
+  const plazaDistance = Math.hypot(x - PLAZA.x, z - PLAZA.z) - PLAZA.radius;
+  let best = plazaDistance;
+  for (const sample of samples) {
+    const d = Math.hypot(x - sample.x, z - sample.z) - sample.halfWidth;
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+/** True if the point is paved (or within `margin` of paving). */
+export function isOnPath(x: number, z: number, margin = 0): boolean {
+  return distanceToPath(x, z) < margin;
+}
+
+/**
+ * Builds the whole path network as two meshes: a cream kerb and the sandy
+ * surface sitting a few centimetres proud of it.
+ */
+export function buildPaths(): Mesh[] {
+  samples.length = 0;
+  nextRun = 0;
+
+  const surface = new GeometryBuilder();
+  const kerb = new GeometryBuilder();
+
+  for (const route of ROUTES) {
+    const curve = routeCurve(route);
+    const divisions = Math.max(24, Math.round(curve.getLength() / 0.8));
+    addRibbon(surface, curve, route.width, divisions, 0.055);
+    addRibbon(kerb, curve, route.width + 0.85, divisions, 0.03);
+    recordSamples(curve, divisions, route.width / 2);
+  }
+
+  addDisc(surface, PLAZA.x, PLAZA.z, PLAZA.radius, 48, 5, 0.055);
+  addDisc(kerb, PLAZA.x, PLAZA.z, PLAZA.radius + 0.85, 48, 5, 0.03);
+
+  const surfaceMaterial = new MeshStandardMaterial({
+    map: pathTexture(1),
+    roughness: 0.95,
+    metalness: 0,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+  });
+  const kerbMaterial = new MeshStandardMaterial({
+    color: PALETTE.pathEdge,
+    roughness: 0.9,
+    metalness: 0,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
+  });
+
+  const surfaceMesh = new Mesh(surface.build(), surfaceMaterial);
+  surfaceMesh.name = 'path-surface';
+  surfaceMesh.receiveShadow = true;
+
+  const kerbMesh = new Mesh(kerb.build(), kerbMaterial);
+  kerbMesh.name = 'path-kerb';
+  kerbMesh.receiveShadow = true;
+
+  return [kerbMesh, surfaceMesh];
+}
+
+// ---------------------------------------------------------------- internals
+
+/** Fillet radius at a street corner — Decision 3: "rounded corners,
+ * 1.5-2 m fillets; square junctions otherwise". */
+const CORNER_FILLET = 1.75;
+
+/** Sampling pitches for {@link drawnPolyline}: dense enough that the
+ * Catmull-Rom the ribbon extruder sweeps hugs the polyline (a Catmull-Rom
+ * through collinear points *is* the straight line), coarse enough to cost
+ * nothing. */
+const STRAIGHT_SAMPLE = 2.5;
+const ARC_SAMPLE = 0.6;
+
+/**
+ * **The one owner of what an open route's drawn centreline looks like**:
+ * dead-straight runs between corners, each corner rounded by a real
+ * {@link CORNER_FILLET} arc — not the old behaviour, where the sparse
+ * control points fed a tension-0.4 Catmull-Rom whose corner rounding grew
+ * with segment length, so a 20 m street corner bowed for many metres and
+ * the whole "axis-aligned" network drew as organic sweeps (Jim, 23 August
+ * 2026: "that top-down view looks nothing like how we discussed"). The
+ * returned points are dense (every couple of metres on straights, ~0.6 m
+ * round each fillet), so the Catmull-Rom built from them cannot depart
+ * from the shape they describe.
+ */
+function drawnPolyline(
+  points: readonly (readonly [number, number])[],
+): (readonly [number, number])[] {
+  // Collapse near-duplicates first — a zero-length leg is a NaN tangent.
+  const src: [number, number][] = [];
+  for (const p of points) {
+    const last = src[src.length - 1];
+    if (last && Math.hypot(p[0] - last[0], p[1] - last[1]) < 0.05) continue;
+    src.push([p[0], p[1]]);
+  }
+  if (src.length < 2) return src;
+
+  const out: [number, number][] = [src[0] as [number, number]];
+  const emitStraightTo = (to: readonly [number, number]): void => {
+    const from = out[out.length - 1] as readonly [number, number];
+    const length = Math.hypot(to[0] - from[0], to[1] - from[1]);
+    if (length < 1e-6) return;
+    const steps = Math.max(1, Math.ceil(length / STRAIGHT_SAMPLE));
+    for (let s = 1; s <= steps; s += 1) {
+      const t = s / steps;
+      out.push([from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t]);
+    }
+  };
+
+  for (let k = 1; k < src.length - 1; k += 1) {
+    const a = src[k - 1] as readonly [number, number];
+    const c = src[k] as readonly [number, number];
+    const b = src[k + 1] as readonly [number, number];
+    const lenIn = Math.hypot(c[0] - a[0], c[1] - a[1]);
+    const lenOut = Math.hypot(b[0] - c[0], b[1] - c[1]);
+    const dirInX = (c[0] - a[0]) / lenIn;
+    const dirInZ = (c[1] - a[1]) / lenIn;
+    const dirOutX = (b[0] - c[0]) / lenOut;
+    const dirOutZ = (b[1] - c[1]) / lenOut;
+    const turn = Math.abs(Math.atan2(dirInX * dirOutZ - dirInZ * dirOutX, dirInX * dirOutX + dirInZ * dirOutZ));
+    if (turn < 0.05) {
+      emitStraightTo(c);
+      continue;
+    }
+    // Clamp the fillet so two nearby corners never eat each other's legs.
+    const fillet = Math.min(CORNER_FILLET, lenIn * 0.45, lenOut * 0.45);
+    const pIn: readonly [number, number] = [c[0] - dirInX * fillet, c[1] - dirInZ * fillet];
+    const pOut: readonly [number, number] = [c[0] + dirOutX * fillet, c[1] + dirOutZ * fillet];
+    emitStraightTo(pIn);
+    // Quadratic Bezier through the corner: a clean constant-ish-radius
+    // rounding for any turn angle, sampled finely enough to read as an arc.
+    const arcLength = fillet * turn; // close enough for choosing a sample count
+    const steps = Math.max(2, Math.ceil(arcLength / ARC_SAMPLE));
+    for (let s = 1; s <= steps; s += 1) {
+      const t = s / steps;
+      const u = 1 - t;
+      out.push([
+        u * u * pIn[0] + 2 * u * t * c[0] + t * t * pOut[0],
+        u * u * pIn[1] + 2 * u * t * c[1] + t * t * pOut[1],
+      ]);
+    }
+  }
+  emitStraightTo(src[src.length - 1] as readonly [number, number]);
+  return out;
+}
+
+/**
+ * **The one Catmull-Rom every consumer of a route's drawn shape builds** —
+ * the ribbon extruder here, the lamp walker (`LampPosts.ts`), the NPC
+ * waypoint seeder (`poiGraph.ts`), the park map (`ParkMap.ts`) and the
+ * procgen facts (`test/procgen/parkFacts.ts`) all ask this instead of each
+ * repeating the `new CatmullRomCurve3(..., 0.4)` incantation over raw
+ * control points — CLAUDE.md's "one owner; everyone else asks", after this
+ * file's fillet pass made the drawn shape more than the control points.
+ * The closed backbone ring keeps its raw points: it is a circle through 32
+ * bearings, and filleting a circle's own samples would only dent it.
+ */
+export function routeCurve(route: RouteDefinition): CatmullRomCurve3 {
+  const points = route.closed ? route.points : drawnPolyline(route.points);
+  const vectors = points.map(([x, z]) => new Vector3(x, 0, z));
+  return new CatmullRomCurve3(vectors, route.closed, 'catmullrom', 0.4);
+}
+
+function recordSamples(curve: CatmullRomCurve3, divisions: number, halfWidth: number): void {
+  const point = new Vector3();
+  const run = nextRun;
+  nextRun += 1;
+  for (let i = 0; i <= divisions; i += 1) {
+    curve.getPoint(i / divisions, point);
+    samples.push({ x: point.x, z: point.z, halfWidth, run });
+  }
+}
+
+/** Sweeps a flat ribbon of `width` along the curve, draped onto the terrain. */
+function addRibbon(
+  builder: GeometryBuilder,
+  curve: CatmullRomCurve3,
+  width: number,
+  divisions: number,
+  lift: number,
+): void {
+  const half = width / 2;
+  const point = new Vector3();
+  const tangent = new Vector3();
+  let travelled = 0;
+  let previousX = 0;
+  let previousZ = 0;
+
+  for (let i = 0; i <= divisions; i += 1) {
+    const t = i / divisions;
+    curve.getPoint(t, point);
+    curve.getTangent(t, tangent);
+    // Perpendicular on the ground plane.
+    const nx = -tangent.z;
+    const nz = tangent.x;
+    const length = Math.hypot(nx, nz) || 1;
+
+    if (i > 0) travelled += Math.hypot(point.x - previousX, point.z - previousZ);
+    previousX = point.x;
+    previousZ = point.z;
+
+    const lx = point.x + (nx / length) * half;
+    const lz = point.z + (nz / length) * half;
+    const rx = point.x - (nx / length) * half;
+    const rz = point.z - (nz / length) * half;
+
+    // Right edge before left edge: that ordering makes the quads wind
+    // anticlockwise seen from above, so the ribbon faces the sky.
+    const v = travelled / Math.max(1, width);
+    builder.vertex(rx, terrainHeight(rx, rz) + lift, rz, 0, v);
+    builder.vertex(lx, terrainHeight(lx, lz) + lift, lz, 1, v);
+
+    if (i > 0) {
+      const base = builder.vertexCount - 4;
+      builder.quad(base, base + 1, base + 2, base + 3);
+    }
+  }
+}
+
+/** A paved circle (the fountain plaza), built as concentric rings. */
+function addDisc(
+  builder: GeometryBuilder,
+  cx: number,
+  cz: number,
+  radius: number,
+  segments: number,
+  rings: number,
+  lift: number,
+): void {
+  const first = builder.vertexCount;
+  for (let r = 0; r <= rings; r += 1) {
+    const radiusAt = (r / rings) * radius;
+    for (let s = 0; s <= segments; s += 1) {
+      const angle = (s / segments) * Math.PI * 2;
+      const x = cx + Math.cos(angle) * radiusAt;
+      const z = cz + Math.sin(angle) * radiusAt;
+      builder.vertex(x, terrainHeight(x, z) + lift, z, x / 6, z / 6);
+    }
+  }
+  const stride = segments + 1;
+  for (let r = 0; r < rings; r += 1) {
+    for (let s = 0; s < segments; s += 1) {
+      const a = first + r * stride + s;
+      const b = a + 1;
+      const c = a + stride;
+      const d = c + 1;
+      builder.quad(a, b, c, d);
+    }
+  }
+}
+
+/**
+ * Minimal geometry accumulator so the whole path network collapses into a
+ * single draw call per layer.
+ */
+class GeometryBuilder {
+  private readonly positions: number[] = [];
+  private readonly normals: number[] = [];
+  private readonly uvs: number[] = [];
+  private readonly indices: number[] = [];
+  private readonly scratchNormal = new Vector3();
+
+  get vertexCount(): number {
+    return this.positions.length / 3;
+  }
+
+  vertex(x: number, y: number, z: number, u: number, v: number): void {
+    this.positions.push(x, y, z);
+    // Normals come from the terrain function rather than computeVertexNormals():
+    // the plaza fan has degenerate triangles at its centre, which would leave
+    // those vertices with a zero-length normal and a black splodge in the middle
+    // of the paving.
+    const normal = terrainNormal(x, z, this.scratchNormal);
+    this.normals.push(normal.x, normal.y, normal.z);
+    this.uvs.push(u, v);
+  }
+
+  /** Two triangles for a quad given as (a, b) then (c, d) vertex pairs. */
+  quad(a: number, b: number, c: number, d: number): void {
+    this.indices.push(a, b, c, b, d, c);
+  }
+
+  build(): BufferGeometry {
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', new BufferAttribute(new Float32Array(this.positions), 3));
+    geometry.setAttribute('normal', new BufferAttribute(new Float32Array(this.normals), 3));
+    geometry.setAttribute('uv', new BufferAttribute(new Float32Array(this.uvs), 2));
+    geometry.setIndex(this.indices);
+    geometry.computeBoundingSphere();
+    return geometry;
+  }
+}

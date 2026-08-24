@@ -364,6 +364,20 @@ export class TrainRoute {
     return target.set(p.x, terrainHeight(p.x, p.z), p.z);
   }
 
+  /**
+   * The same centre-line point, ground-plane only — no `terrainHeight`.
+   *
+   * `paths.ts`'s `railInfoAt` asks "where is the rail near (x, z)?" thousands
+   * of times while the walk graph solves, and it only ever reads `.x`/`.z` —
+   * but {@link pointAt} pays for a `terrainHeight` sample (a boundary spline
+   * walk) to fill in a `y` nobody looks at. Measured 25.7 ms of the paths
+   * solve's single main-thread block (`check:park-boot`, 2026-08-24) spent
+   * exactly there.
+   */
+  flatPointAt(distance: number, target: Vec2): Vec2 {
+    return this.solved.pointAt(this.wrap(distance), target);
+  }
+
   /** Unit tangent, pointing the way the train travels. Horizontal. */
   tangentAt(distance: number, target = new Vector3()): Vector3 {
     const t = this.solved.tangentAt(this.wrap(distance), this.scratch2);

@@ -5,7 +5,7 @@ export { CollisionWorld } from './Collision';
 export { AnchorPlots } from './AnchorPlots';
 export { Fountain } from './Fountain';
 export { terrainHeight, terrainNormal, groundPoint } from './terrain';
-export { distanceToPath, isOnPath } from './paths';
+export { distanceToPath, isOnPath } from './pathGraph';
 export {
   pickInteractZone,
   ZONE_HEIGHT_TOLERANCE,

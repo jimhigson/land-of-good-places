@@ -90,6 +90,34 @@ became a +50 m zigzag on a many-point route):
   walls "moved" centimetres park-wide from a 2 m bow) → now a random lawn
   point snapped to the nearest border segment.
 
+## The boot pays for the lattice solve in slices, not one block
+
+The lattice rework made `buildGraph()` ~215 ms of one un-sliceable
+module-evaluation block on a CI-speed box — `check:park-boot` FAILED (250 ms
+single-block ceiling; measured 267–339 ms merged with the bridge work, and
+the 1 s unbudgeted-work ceiling went flaky at ~865–1063 ms). Fixed in two
+layers:
+
+- **Cheaper solve**: `boundaryDistanceCached` (half-metre memo over
+  `PARK_BOUNDARY.distanceToEdge`, now also used by `segmentClearOfBoundary`),
+  `TrainRoute.flatPointAt` (railInfoAt only reads x/z — `pointAt` paid a
+  `terrainHeight` boundary walk for a y nobody looked at), a `streetStubs`
+  memo, and `slideEdgeAllowed` computing the slide-corridor overlap once.
+- **Sliced solve** (the crossingPrewarm pattern): `paths.ts` is now the
+  *machinery* (no module-scope solve) exporting `pathGraphSearch()` — a
+  generator yielding between destinations — and `buildGraph()` as its
+  straight-through drain; the solved consts (`PATH_GRAPH`, `ROUTES`,
+  `routeCurve`, `buildPaths`, `pathCentreline`, `distanceToPath`,
+  `pathBorderSegments`…) moved to **`src/world/pathGraph.ts`**, whose module
+  scope takes `pathsPrewarm.ts`'s letterbox or drains the same generator.
+  `boot/parkGeneration.ts` drives the search through `SolveScheduler`
+  ('pathGraph' task) after the crossing sites and imports `pathGraph.ts`
+  last. Import sites for the solved consts changed (~16 files) — machinery
+  symbols (`PLAZA`, types) still come from `./paths`.
+
+After: worst block 107–117 ms, unbudgeted 610–868 ms — both better than the
+bridge tip's own baseline (109/698) and passing consistently.
+
 ## Verified
 
 - `npm run test:procgen`: **423/423, all five seeds, one sitting** —

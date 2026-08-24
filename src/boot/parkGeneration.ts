@@ -281,6 +281,19 @@ export class ParkGeneration {
   private crossingPrewarmModule: typeof import('../world/train/crossingPrewarm') | null = null;
   private crossingScheduler: SolveScheduler | null = null;
   private crossingSitesSolved = false;
+
+  /**
+   * The walk graph itself (`paths.ts`'s `pathGraphSearch`) — every spur,
+   * street and interconnect, solved a destination at a time after the
+   * crossing sites and offered to `pathsPrewarm.ts` before `pathGraph.ts`
+   * (whose import would otherwise run the whole street-lattice solve inside
+   * one frame; check:park-boot measured exactly that lump at ~215 ms against
+   * its 250 ms ceiling after the PR #286 lattice rework).
+   */
+  private pathsModule: typeof import('../world/paths') | null = null;
+  private pathsPrewarmModule: typeof import('../world/pathsPrewarm') | null = null;
+  private pathsScheduler: SolveScheduler | null = null;
+  private pathGraphSolved = false;
   private pathsDone = false;
   private failure: Error | null = null;
 
@@ -385,7 +398,8 @@ export class ParkGeneration {
     return (
       this.overrunSteps +
       (this.trainScheduler?.slicesPastDeadline ?? 0) +
-      (this.crossingScheduler?.slicesPastDeadline ?? 0)
+      (this.crossingScheduler?.slicesPastDeadline ?? 0) +
+      (this.pathsScheduler?.slicesPastDeadline ?? 0)
     );
   }
 
@@ -395,6 +409,7 @@ export class ParkGeneration {
       ...this.overrunByPhase,
       ...(this.trainScheduler?.lateSlicesByTask ?? {}),
       ...(this.crossingScheduler?.lateSlicesByTask ?? {}),
+      ...(this.pathsScheduler?.lateSlicesByTask ?? {}),
     };
   }
 
@@ -510,14 +525,65 @@ export class ParkGeneration {
       return;
     }
 
-    // `paths.ts` last: it reads `SLIDE_PLAN`, so it must not be imported until
-    // the pre-warmed plan is in the letterbox above.
+    // The walk graph, a destination at a time. `paths.ts` is the machinery —
+    // it reads `SLIDE_PLAN` and the crossing plan, so it must not be imported
+    // until both letterboxes above are filled — and solving it here is what
+    // lets `pathGraph.ts` below take a pre-warmed graph instead of blocking a
+    // frame on the whole street-lattice solve.
+    if (!this.pathsModule || !this.pathsPrewarmModule) {
+      this.workingFrames += 1;
+      this.runImport(() =>
+        Promise.all([import('../world/paths'), import('../world/pathsPrewarm')]).then(
+          ([pathsModule, prewarmModule]) => {
+            this.pathsModule = pathsModule;
+            this.pathsPrewarmModule = prewarmModule;
+          },
+        ),
+      );
+      return;
+    }
+    if (!this.pathGraphSolved) {
+      this.advancePathGraph(this.pathsModule, this.pathsPrewarmModule, budgetMs);
+      return;
+    }
+
+    // `pathGraph.ts` last: its module scope takes the pre-warmed graph from
+    // the letterbox just filled (or would re-solve, on the no-prewarm paths).
     this.workingFrames += 1;
     this.runImport(() =>
-      import('../world/paths').then(() => {
+      import('../world/pathGraph').then(() => {
         this.pathsDone = true;
       }),
     );
+  }
+
+  /**
+   * Runs the walk-graph solve through the generic {@link SolveScheduler},
+   * exactly the crossing-sites pattern above: `yield*` the search, post the
+   * result to the letterbox, and let `pathGraph.ts`'s eventual load take it
+   * instead of re-solving.
+   */
+  private advancePathGraph(
+    pathsModule: typeof import('../world/paths'),
+    prewarmModule: typeof import('../world/pathsPrewarm'),
+    budgetMs: number,
+  ): void {
+    this.workingFrames += 1;
+    const scheduler = (this.pathsScheduler ??= new SolveScheduler([
+      {
+        name: 'pathGraph',
+        *start() {
+          const graph = yield* pathsModule.pathGraphSearch();
+          prewarmModule.offerPrewarmedPathGraph(graph);
+        },
+      },
+    ]));
+    scheduler.advance(budgetMs);
+    if (scheduler.failed) {
+      this.failure = scheduler.failed;
+      return;
+    }
+    if (scheduler.done) this.pathGraphSolved = true;
   }
 
   /**

@@ -1,5 +1,5 @@
 import type { TrainRoute } from './route';
-import { pathCentreline } from '../paths';
+import { pathCentreline } from '../pathGraph';
 import { ENTRANCE_GATE_X, ENTRANCE_GATE_Z } from '../entrance/layout';
 import { CROSSING_SITES, LEVEL_CROSSING_SITES } from './crossingPlan';
 import { Vector3 } from 'three';

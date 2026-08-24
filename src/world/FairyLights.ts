@@ -17,7 +17,8 @@ import {
 import { PALETTE } from '../core/palette';
 import { clamp01, Rng, TAU } from '../core/mathUtils';
 import { terrainHeight } from './terrain';
-import { isOnPath, PLAZA } from './paths';
+import { PLAZA } from './paths';
+import { isOnPath } from './pathGraph';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from './Collision';
 

@@ -22,7 +22,7 @@ import { PALETTE } from '../core/palette';
 import { Rng } from '../core/mathUtils';
 import { grassTexture, pinkStoneTexture } from '../core/textures';
 import { terrainHeight } from './terrain';
-import { buildPaths } from './paths';
+import { buildPaths } from './pathGraph';
 import type { CollisionWorld } from './Collision';
 import { isInEntranceGateGap } from './entrance/layout';
 

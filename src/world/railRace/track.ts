@@ -20,7 +20,7 @@ import { addOutline, decal, solid, toonMaterial } from '../../art/style/material
 import { ART } from '../../art/style/artPalette';
 import { duckBarAssetGeometry } from '../../art/models/duckBarAsset';
 import { terrainHeight } from '../terrain';
-import { distanceToPath } from '../paths';
+import { distanceToPath } from '../pathGraph';
 import { archFeet } from './arch';
 import { PARK_LAYOUT } from '../parkLayout';
 import { distanceToRailCorridor } from '../train/plan';

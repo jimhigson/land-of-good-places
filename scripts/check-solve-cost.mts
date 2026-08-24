@@ -91,7 +91,7 @@ const STAGES: readonly Stage[] = [
   // existed. Fed through the one budget formula (8 x measured) exactly like
   // every other row — the 8x is the cross-machine/parallel-load headroom
   // the file header derives, not this row's to trim.
-  { stage: 'paths', load: () => import('../src/world/paths.ts'), measuredMs: 343 },
+  { stage: 'paths', load: () => import('../src/world/pathGraph.ts'), measuredMs: 343 },
 ];
 
 await import('three'); // parse cost lands here, not on the first stage to touch it

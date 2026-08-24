@@ -20,7 +20,7 @@ import { glowTexture } from '../core/textures';
 import { toonMaterial, outlineGeometry, inkTint } from '../art/style/materials';
 import { clamp01, smoothstep } from '../core/mathUtils';
 import { terrainHeight } from './terrain';
-import { distanceToPath, ROUTES, routeCurve } from './paths';
+import { distanceToPath, ROUTES, routeCurve } from './pathGraph';
 import { ANCHORS } from './anchors';
 import { PARK_LAYOUT } from './parkLayout';
 import { clearOfCruiser, onRideExit } from './Scenery';

@@ -20,7 +20,7 @@ import { PALETTE } from '../core/palette';
 import { glowTexture } from '../core/textures';
 import { clamp01, lerp, Rng, smoothstep } from '../core/mathUtils';
 import { terrainHeight } from './terrain';
-import { isOnPath } from './paths';
+import { isOnPath } from './pathGraph';
 import { ANCHORS } from './anchors';
 import { COASTER_PLANS } from './coaster/plan';
 import { CART_ENVELOPE } from './coaster/cart';

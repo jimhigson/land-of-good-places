@@ -954,7 +954,8 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   const { CIRCULAR_PARK_AREA, PARK_AREA_MULTIPLIER } = await import('../../src/world/boundary.ts');
   const { PARK_LAYOUT } = await import('../../src/world/parkLayout.ts');
   const { ANCHORS } = await import('../../src/world/anchors.ts');
-  const { PATH_GRAPH, PLAZA, routeCurve } = await import('../../src/world/paths.ts');
+  const { PLAZA } = await import('../../src/world/paths.ts');
+  const { PATH_GRAPH, routeCurve } = await import('../../src/world/pathGraph.ts');
   const { archFeet } = await import('../../src/world/railRace/arch.ts');
   const { RAIL_RACE_PLAN } = await import('../../src/world/railRace/plan.ts');
   const railRaceArchFeet = [RAIL_RACE_PLAN.walkPastRing, RAIL_RACE_PLAN.raceRing]
@@ -1745,7 +1746,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // The park's own predicates for "is there anything under here", the same three
   // `railRace/track.ts`'s `groundIsClear` asks about a trestle foot. Dynamically
   // imported like everything else seed-dependent in this file.
-  const { distanceToPath } = await import('../../src/world/paths.ts');
+  const { distanceToPath } = await import('../../src/world/pathGraph.ts');
   const { distanceToRailCorridor, clearOfPlots } = await import(
     '../../src/world/train/plan.ts'
   );

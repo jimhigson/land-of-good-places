@@ -31,7 +31,8 @@ import {
 } from './train/plan';
 import { isInBridgeFootprint } from './train/bridgeKeepout';
 import { terrainHeight } from './terrain';
-import { isOnPath, PLAZA, pathBorderSegments, pathCentreline, type PathBorderSegment } from './paths';
+import { PLAZA } from './paths';
+import { isOnPath, pathBorderSegments, pathCentreline, type PathBorderSegment } from './pathGraph';
 import { ANCHORS } from './anchors';
 import { COASTER_PLANS } from './coaster/plan';
 import {
