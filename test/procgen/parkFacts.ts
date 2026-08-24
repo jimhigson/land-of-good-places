@@ -160,6 +160,11 @@ export interface PlotFact {
   readonly x: number;
   readonly z: number;
   readonly boundingRadius: number;
+  /** The real footprint's half-extents (axis-aligned; a circle reports its
+   * radius for both) — what actually stands on the ground, where
+   * `boundingRadius` over-approximates a rectangle by its diagonal. */
+  readonly halfX: number;
+  readonly halfZ: number;
   /**
    * The yaw the solver gave this plot's sign — every plot's, camera-facing
    * or not (`anchors.ts`'s `AnchorDefinition.signYaw` doc). Issue #269:
@@ -427,6 +432,15 @@ export interface ParkFacts {
    * an empty list as a failure rather than as nothing to check.
    */
   readonly archLegs: readonly ArchLegFact[];
+  /**
+   * Both Rail Race rings' finish-arch feet — every post the walk network
+   * treats as a blocker (`paths.ts`'s `BLOCKERS`), including the walk-past
+   * ring's, whose arch is not drawn (`showArch`, #299) and so never appears
+   * in {@link archLegs}. Read off the ride's own solved rings via the same
+   * `archFeet()` the game uses, so an invariant asking "could a street have
+   * stood here?" sees the same ground the router did.
+   */
+  readonly railRaceArchFeet: readonly { x: number; z: number; radius: number }[];
   /**
    * Every duck bar on the race ring, with what the race does at it — see
    * {@link DuckBarFact}. Empty is not a healthy answer: the ring always
@@ -941,6 +955,11 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   const { PARK_LAYOUT } = await import('../../src/world/parkLayout.ts');
   const { ANCHORS } = await import('../../src/world/anchors.ts');
   const { PATH_GRAPH, PLAZA, routeCurve } = await import('../../src/world/paths.ts');
+  const { archFeet } = await import('../../src/world/railRace/arch.ts');
+  const { RAIL_RACE_PLAN } = await import('../../src/world/railRace/plan.ts');
+  const railRaceArchFeet = [RAIL_RACE_PLAN.walkPastRing, RAIL_RACE_PLAN.raceRing]
+    .flatMap((ring) => archFeet(ring))
+    .map((foot) => ({ x: foot.x, z: foot.z, radius: foot.radius }));
   const { NavGrid, MAX_ROUTE_WAYPOINTS } = await import('../../src/world/NavGrid.ts');
   const { PLAYER_RADIUS } = await import('../../src/core/constants.ts');
   const { CASTLE_WINDOWS, checkCastleWindows, sweptCartHits } = await import(
@@ -991,6 +1010,8 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     x: entry.x,
     z: entry.z,
     boundingRadius: entry.boundingRadius,
+    halfX: entry.footprint.kind === 'circle' ? entry.footprint.radius : entry.footprint.halfX,
+    halfZ: entry.footprint.kind === 'circle' ? entry.footprint.radius : entry.footprint.halfZ,
     signYaw: entry.signYaw,
   }));
 
@@ -2150,6 +2171,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     lamps: world.lampPosts.positions.map((p) => [p.x, p.z] as const),
     bridgeReservations,
     plots,
+    railRaceArchFeet,
     entrances,
     catBus,
     hidingTheArrivingBus,

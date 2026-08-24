@@ -978,28 +978,32 @@ const MAX_DIAGONAL_APPROACH = 16;
  * that ordinary curve-sampling jitter on a straight run never counts, tight
  * enough that a genuinely diagonal run cannot hide inside it.
  */
-const pathsRunOnGridAxes: Invariant = (facts) => {
-  const problems: string[] = [];
-  const OFF_AXIS_FRACTION = 0.15;
-
-  // **The railway's own geometry is the grid rule's one measured exception**
-  // (Decision 6's "genuine minority"): a crossing runs square to the TRACK
-  // — which is diagonal to the world axes wherever the loop is — and a
-  // fence-following leg (a pocket pinched between rail and boundary has
-  // nowhere else to walk) curves with the loop. Both are the railway
-  // dictating the shape, exactly as designed (`crossingPlan.ts`); a stepped
-  // zigzag over a bridge deck is the absurdity this exemption avoids.
-  // Measured off the built park: a hop is railway geometry when it sits
-  // over a real bridge's own footprint, or when both its ends hug the rail
-  // corridor (fence-follow legs run at `RAIL_CORRIDOR_CLEARANCE`, 4.2 m;
-  // a level crossing's feet stand `DECK_HALF_LENGTH + 4` ≈ 7.2 m out).
+/**
+ * **The railway's own geometry is the grid rule's one measured exception**
+ * (Decision 6's "genuine minority"): a crossing runs square to the TRACK
+ * — which is diagonal to the world axes wherever the loop is — and a
+ * fence-following leg (a pocket pinched between rail and boundary has
+ * nowhere else to walk) curves with the loop. Both are the railway
+ * dictating the shape, exactly as designed (`crossingPlan.ts`); a stepped
+ * zigzag over a bridge deck is the absurdity this exemption avoids.
+ * Measured off the built park: a hop is railway geometry when it sits
+ * over a real bridge's own footprint, or when both its ends hug the rail
+ * corridor (fence-follow legs run at `RAIL_CORRIDOR_CLEARANCE`, 4.2 m;
+ * a level crossing's feet stand `DECK_HALF_LENGTH + 4` ≈ 7.2 m out).
+ *
+ * Shared by {@link pathsRunOnGridAxes} and {@link streetsShareLatticeLines}
+ * — one owner for "is this hop the railway's shape, not the street plan's".
+ */
+function railwayGeometryTest(
+  facts: ParkFacts,
+): (a: readonly [number, number], b: readonly [number, number]) => boolean {
   const railPoint = new Vector3();
   const nearRail = (x: number, z: number): boolean => {
     const route = facts.world.train.route;
     route.pointAt(route.distanceNear(x, z), railPoint);
     return Math.hypot(railPoint.x - x, railPoint.z - z) <= 8.5;
   };
-  const railwayGeometry = (a: readonly [number, number], b: readonly [number, number]): boolean => {
+  return (a, b) => {
     const midX = (a[0] + b[0]) / 2;
     const midZ = (a[1] + b[1]) / 2;
     for (const bridge of facts.world.train.bridges) {
@@ -1007,6 +1011,14 @@ const pathsRunOnGridAxes: Invariant = (facts) => {
     }
     return nearRail(a[0], a[1]) && nearRail(b[0], b[1]);
   };
+}
+
+const pathsRunOnGridAxes: Invariant = (facts) => {
+  const problems: string[] = [];
+  const OFF_AXIS_FRACTION = 0.15;
+
+  // See {@link railwayGeometryTest} — the grid rule's one measured exception.
+  const railwayGeometry = railwayGeometryTest(facts);
 
   for (const edge of facts.pathEdges) {
     // The ring is deliberately a circle, not a grid loop — see this
@@ -1045,6 +1057,297 @@ const pathsRunOnGridAxes: Invariant = (facts) => {
       }
     }
     flushRun();
+  }
+  return problems;
+};
+
+/**
+ * The street lattice's pitch — Decision 1's "grid pitch 12 m", the same
+ * number `paths.ts`'s `STREET_PITCH` builds with. Duplicated as a literal
+ * deliberately: this invariant asks whether the *built park* sits on a
+ * 12 m lattice, and importing the generator's own constant would make the
+ * check true by definition whenever someone changed the pitch — measuring
+ * the rules that built the park instead of the park (CLAUDE.md's procgen
+ * rule, and the exact "check that cannot fail" disease this file exists
+ * to prevent).
+ */
+const STREET_LATTICE_PITCH = 12;
+
+/**
+ * How long an axis-aligned straight run must be before it counts as a
+ * *street* (and so must sit on a lattice line): door stubs, arrival leads
+ * and fillet transitions are all shorter than this; anything longer is a
+ * run a person would read as a street line on the map.
+ */
+const MIN_STREET_RUN = 8;
+
+/**
+ * How far a street run's own line may sit off the nearest lattice line.
+ * The drawn curve on a straight is exact (dense collinear control points),
+ * so this headroom only has to absorb the fillet's own approach at the
+ * run's two ends — measured worst case across the five seeds: 0.31 m.
+ */
+const STREET_LINE_TOLERANCE = 0.9;
+
+/**
+ * How much of an edge's either end counts as its door approach (see the
+ * exemption list in {@link streetsShareLatticeLines}): the doormat's
+ * stand-off (1.4 m), its 3.5 m arrival lead, the into-the-plot `past`
+ * extension (2 m), the up-to-7 m off-street stub tail and a fillet's own
+ * give. A run must fit entirely inside this reach to be exempt, so no
+ * street-length line can hide in it: the longest exemptable run is by
+ * construction shorter than this constant.
+ */
+const DOOR_APPROACH_REACH = 15;
+
+/**
+ * **Every street sits on the shared 12 m lattice through the plaza** —
+ * the invariant that actually checks "reads as a grid", where
+ * {@link pathsRunOnGridAxes} above only ever bounded one continuous
+ * diagonal's length. The lesson of 23 August 2026 (Jim, on a top-down
+ * screenshot of a park where that older invariant passed clean on every
+ * seed: *"that top-down view looks nothing like how we discussed"*): a
+ * network can be axis-aligned segment by segment and still read as
+ * organic wandering, because "reads as a grid" is a property of the *set
+ * of lines* the segments share — the old elbow-folding router put its
+ * north-south runs on 19 different x-positions with nothing lining up
+ * with anything. So this measures exactly that: every axis-aligned drawn
+ * run long enough to read as a street ({@link MIN_STREET_RUN}) must sit
+ * within {@link STREET_LINE_TOLERANCE} of a lattice line at
+ * {@link STREET_LATTICE_PITCH} through the plaza (the lattice is anchored
+ * there so the statue circle's four compass streets are lattice lines by
+ * construction, whatever the seed).
+ *
+ * Exemptions, all measured shapes rather than escape hatches:
+ * - **Railway geometry** ({@link railwayGeometryTest}) — a crossing's
+ *   ramp corridor and a fence-follow leg take the railway's shape.
+ * - **The gate corridor** — `gate-approach`'s authored `x = 0` run: the
+ *   park gate is a world-fixed landmark (`[0, 54]`, the cat-bus's own
+ *   arrival ground) and the lattice is plaza-anchored, so the corridor
+ *   is on-lattice only by coincidence of seed.
+ * - **`fountain-approach`** — the plaza spoke inside the statue circle,
+ *   deliberately radial.
+ * - **A route's own door approach** ({@link DOOR_APPROACH_REACH}): the
+ *   final metres of an edge run where the *door* is — the doormat, its
+ *   arrival lead and the into-the-plot-mouth extension all sit on the
+ *   destination's own line (Decisions 7/8: one entrance node strictly in
+ *   front, pavement to the doorstep), and a door is only ever on a
+ *   lattice line by coincidence. Bounded: a run must fit *entirely*
+ *   inside the reach to be exempt, so it can never also be street-length
+ *   paving that merely ends at a door.
+ * - **A run threading ground the lattice does not serve**: when *both*
+ *   lattice lines either side of the run are obstructed over the run's own
+ *   span — by a plot's real footprint, the boundary, or the rail corridor,
+ *   measured off the built park — there is no street line for this paving
+ *   to sit on, and threading the gap between plots is the router doing its
+ *   job (the layout solver does not yet keep street lines clear — Decision
+ *   4's joint solve is the eventual owner of removing this case). A run
+ *   with even one clear neighbouring line stays a violation: it could have
+ *   been there, and was not.
+ * - **Station spurs' own platform tails** are *not* name-exempted: their
+ *   fence-follows and platform turns are already railway geometry by
+ *   measurement, and any straight run they keep beyond that is a street
+ *   like any other.
+ */
+const streetsShareLatticeLines: Invariant = (facts) => {
+  const problems: string[] = [];
+  const railwayGeometry = railwayGeometryTest(facts);
+  const plaza = facts.pathNodes.find((node) => node.kind === 'plaza');
+  if (!plaza) {
+    return ['no plaza node in the path graph — cannot anchor the street lattice'];
+  }
+  const offLattice = (coordinate: number, anchor: number): number => {
+    const remainder =
+      ((((coordinate - anchor) % STREET_LATTICE_PITCH) + STREET_LATTICE_PITCH) %
+        STREET_LATTICE_PITCH);
+    return Math.min(remainder, STREET_LATTICE_PITCH - remainder);
+  };
+
+  // Is a straight lattice-line segment obstructed anywhere along the span,
+  // in the built park? Sampled every 2 m. The margins mirror what the
+  // generator itself demands of a street (`paths.ts`: plots at
+  // `STREET_PLOT_CLEARANCE` 2.6, the rail corridor at 4.2, the boundary at
+  // a fallback route's own walkable margin) — a hair under each, so float
+  // noise never flips a genuinely usable line to "blocked", while a line
+  // the generator would refuse anyway never counts as available (calling
+  // it available would make the violation unfixable, not stricter).
+  const railPoint = new Vector3();
+  // The statue circle's ground blocks a street exactly as the generator's
+  // own ring guard does — measured off the built backbone ring's drawn
+  // radius, not off a constant.
+  const backbone = facts.pathEdges.find((edge) => edge.backbone);
+  let ringRadius = 0;
+  if (backbone) {
+    let sum = 0;
+    for (const [x, z] of backbone.points) sum += Math.hypot(x - plaza.x, z - plaza.z);
+    ringRadius = sum / backbone.points.length;
+  }
+  const route = facts.world.train.route;
+  const lineBlocked = (
+    axis: 'x' | 'z',
+    line: number,
+    spanStart: number,
+    spanEnd: number,
+  ): boolean => {
+    const from = Math.min(spanStart, spanEnd);
+    const to = Math.max(spanStart, spanEnd);
+    const steps = Math.max(1, Math.ceil((to - from) / 2));
+    for (let s = 0; s <= steps; s += 1) {
+      const along = from + ((to - from) * s) / steps;
+      const x = axis === 'z' ? line : along;
+      const z = axis === 'z' ? along : line;
+      for (const plot of facts.plots) {
+        const dx = Math.max(Math.abs(x - plot.x) - plot.halfX, 0);
+        const dz = Math.max(Math.abs(z - plot.z) - plot.halfZ, 0);
+        if (Math.hypot(dx, dz) < 2.55) return true;
+      }
+      if (facts.boundary.distanceToEdge(x, z) < 2.55) return true;
+      if (Math.hypot(x - plaza.x, z - plaza.z) < ringRadius + 0.4) return true;
+      route.pointAt(route.distanceNear(x, z), railPoint);
+      if (Math.hypot(railPoint.x - x, railPoint.z - z) < 4.0) return true;
+      // A Rail Race arch foot blocks a street the same way it blocks the
+      // generator: `paths.ts`'s `ARCH_FOOT_MARGIN` (a walkable gap plus
+      // the widest ribbon's own half-width and kerb) keeps paving this far
+      // off every foot, drawn or not — matched to the formula, a hair
+      // under, so a borderline-clear spot never flips the wrong way.
+      const ARCH_FOOT_REACH = PLAYER_RADIUS * 2 + 0.4 + (3.6 / 2 + 0.85) - 0.02;
+      for (const foot of facts.railRaceArchFeet) {
+        if (Math.hypot(x - foot.x, z - foot.z) < foot.radius + ARCH_FOOT_REACH) return true;
+      }
+    }
+    return false;
+  };
+
+  for (const edge of facts.pathEdges) {
+    if (edge.backbone) continue;
+    if (edge.name === 'fountain-approach') continue;
+    const points = edge.points;
+
+    // Arc length at each sample, for the door-approach exemption below.
+    const along: number[] = [0];
+    for (let i = 1; i < points.length; i += 1) {
+      const a = points[i - 1] as readonly [number, number];
+      const b = points[i] as readonly [number, number];
+      along.push((along[i - 1] as number) + Math.hypot(b[0] - a[0], b[1] - a[1]));
+    }
+    const total = along[along.length - 1] as number;
+
+    // Group consecutive same-axis hops into maximal straight runs.
+    let axis: 'x' | 'z' | null = null; // 'x': east-west (constant z); 'z': north-south (constant x)
+    let runStart = 0;
+    const flush = (endIndex: number): void => {
+      if (axis === null || endIndex <= runStart) return;
+      const a = points[runStart] as readonly [number, number];
+      const b = points[endIndex] as readonly [number, number];
+      const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const runAxis = axis;
+      const startAlong = along[runStart] as number;
+      const endAlong = along[endIndex] as number;
+      axis = null;
+      if (length < MIN_STREET_RUN) return;
+      // The door's own approach — see this invariant's header.
+      if (endAlong <= DOOR_APPROACH_REACH || startAlong >= total - DOOR_APPROACH_REACH) return;
+      // The run's own line: mean of the cross-axis coordinate.
+      let sum = 0;
+      for (let i = runStart; i <= endIndex; i += 1) {
+        sum += (points[i] as readonly [number, number])[runAxis === 'z' ? 0 : 1];
+      }
+      const line = sum / (endIndex - runStart + 1);
+      if (edge.name === 'gate-approach' && runAxis === 'z' && Math.abs(line) < 1) return;
+      const anchor = runAxis === 'z' ? plaza.x : plaza.z;
+      const off = offLattice(line, anchor);
+      if (off > STREET_LINE_TOLERANCE) {
+        // Threading ground the lattice does not serve — see this
+        // invariant's exemption list. Both neighbouring lines must be
+        // obstructed over the run's own span for the run to be excused.
+        const rem =
+          ((((line - anchor) % STREET_LATTICE_PITCH) + STREET_LATTICE_PITCH) %
+            STREET_LATTICE_PITCH);
+        const lower = line - rem;
+        const upper = lower + STREET_LATTICE_PITCH;
+        const spanStart = runAxis === 'z' ? a[1] : a[0];
+        const spanEnd = runAxis === 'z' ? b[1] : b[0];
+        // A neighbouring line is *usable* only when the line itself is
+        // clear over the run's span AND the run could actually have joined
+        // it — a short perpendicular connector from at least one of the
+        // run's own ends must also be clear. A locally-clear line walled
+        // off behind a field of rainbow-arch feet (seed 11's rim stall)
+        // is not a street this run declined; it is ground the router
+        // could never reach.
+        const usable = (candidateLine: number): boolean => {
+          if (lineBlocked(runAxis, candidateLine, spanStart, spanEnd)) return false;
+          const joins: (readonly [number, number, number, number])[] =
+            runAxis === 'z'
+              ? [
+                  [line, spanStart, candidateLine, spanStart],
+                  [line, spanEnd, candidateLine, spanEnd],
+                ]
+              : [
+                  [spanStart, line, spanStart, candidateLine],
+                  [spanEnd, line, spanEnd, candidateLine],
+                ];
+          return joins.some(([jax, jaz, jbx, jbz]) => {
+            const steps = Math.max(1, Math.ceil(Math.hypot(jbx - jax, jbz - jaz) / 1.5));
+            for (let s = 0; s <= steps; s += 1) {
+              const t = s / steps;
+              const x = jax + (jbx - jax) * t;
+              const z = jaz + (jbz - jaz) * t;
+              for (const foot of facts.railRaceArchFeet) {
+                const reach = PLAYER_RADIUS * 2 + 0.4 + (3.6 / 2 + 0.85) - 0.02;
+                if (Math.hypot(x - foot.x, z - foot.z) < foot.radius + reach) return false;
+              }
+              for (const plot of facts.plots) {
+                const dx = Math.max(Math.abs(x - plot.x) - plot.halfX, 0);
+                const dz = Math.max(Math.abs(z - plot.z) - plot.halfZ, 0);
+                if (Math.hypot(dx, dz) < 2.55) return false;
+              }
+              if (facts.boundary.distanceToEdge(x, z) < 2.55) return false;
+              if (Math.hypot(x - plaza.x, z - plaza.z) < ringRadius + 0.4) return false;
+              route.pointAt(route.distanceNear(x, z), railPoint);
+              if (Math.hypot(railPoint.x - x, railPoint.z - z) < 4.0) return false;
+            }
+            return true;
+          });
+        };
+        if (!usable(lower) && !usable(upper)) {
+          return;
+        }
+      }
+      if (off > STREET_LINE_TOLERANCE) {
+        problems.push(
+          `${edge.name} runs ${runAxis === 'z' ? 'north-south' : 'east-west'} for ` +
+            `${length.toFixed(1)} m on ${runAxis === 'z' ? 'x' : 'z'} = ${line.toFixed(2)}, ` +
+            `${off.toFixed(2)} m off the nearest ${STREET_LATTICE_PITCH} m lattice line through ` +
+            `the plaza (${plaza.x.toFixed(2)}, ${plaza.z.toFixed(2)}) — a street on its own ` +
+            `private line is what makes the network read as wandering instead of a grid`,
+        );
+      }
+    };
+
+    for (let i = 1; i < points.length; i += 1) {
+      const a = points[i - 1] as readonly [number, number];
+      const b = points[i] as readonly [number, number];
+      const dx = Math.abs(b[0] - a[0]);
+      const dz = Math.abs(b[1] - a[1]);
+      const hop = Math.hypot(dx, dz);
+      if (hop < 1e-6) continue;
+      const hopAxis: 'x' | 'z' | null =
+        dz / hop <= 0.15 ? 'x' : dx / hop <= 0.15 ? 'z' : null;
+      const exempt = railwayGeometry(a, b);
+      if (hopAxis === null || exempt) {
+        flush(i - 1);
+        continue;
+      }
+      if (axis === null) {
+        axis = hopAxis;
+        runStart = i - 1;
+      } else if (axis !== hopAxis) {
+        flush(i - 1);
+        axis = hopAxis;
+        runStart = i - 1;
+      }
+    }
+    flush(points.length - 1);
   }
   return problems;
 };
@@ -6572,6 +6875,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no paved path stops anywhere but a destination', noPathEndsNowhere],
   ['every plot faces exactly the camera axis', buildingsFaceTheCameraAxis],
   ['every paved path runs on grid axes', pathsRunOnGridAxes],
+  ['every street sits on the shared 12 m lattice', streetsShareLatticeLines],
   ['the ring road is one true circle round the statue', ringIsATrueCircleRoundTheStatue],
   ['every place a child can be served is a node in the path graph', everyDestinationIsANode],
   [
