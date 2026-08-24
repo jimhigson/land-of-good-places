@@ -31,7 +31,7 @@ import {
 } from './train/plan';
 import { isInBridgeFootprint } from './train/bridgeKeepout';
 import { terrainHeight } from './terrain';
-import { isOnPath, PLAZA, pathBorderSegments, pathCentreline } from './paths';
+import { isOnPath, PLAZA, pathBorderSegments, pathCentreline, type PathBorderSegment } from './paths';
 import { ANCHORS } from './anchors';
 import { COASTER_PLANS } from './coaster/plan';
 import {
@@ -753,20 +753,39 @@ function buildFoliage(collision: CollisionWorld): {
   const CLIMB_COVER_TARGET = PLAYER_MAX_SPEED * 7;
   const CLIMB_COVER_SALT = 0xc11f0b ^ PARK_SEED;
   {
-    const centreSamples = pathCentreline();
-    for (let i = 0; i < centreSamples.length; i += 12) {
-      const sample = centreSamples[i];
-      if (!sample) continue;
+    // Walked as **fixed ground cells the network passes through**, never as
+    // "every 12th sample of the concatenated centreline": a sample index
+    // slides whenever any earlier route's length changes by half a metre,
+    // which re-rolled cover trees on the far side of the park from a 2 m
+    // spur bow (`test/procgen/scatterDecoupling.test.ts` caught trees
+    // "moving" 90 m). An 8 m cell of absolute ground is the same cell
+    // whatever order or length the routes come in, so a local paving change
+    // can only ever touch the cells it actually runs through.
+    const CLIMB_COVER_CELL = 8;
+    const coverCells = new Map<number, { x: number; z: number }>();
+    for (const sample of pathCentreline()) {
+      const cellX = Math.round(sample.x / CLIMB_COVER_CELL);
+      const cellZ = Math.round(sample.z / CLIMB_COVER_CELL);
+      const cellKey = (cellX + 512) * 4096 + (cellZ + 512);
+      if (!coverCells.has(cellKey)) {
+        coverCells.set(cellKey, { x: cellX * CLIMB_COVER_CELL, z: cellZ * CLIMB_COVER_CELL });
+      }
+    }
+    // Sorted by cell key so even the ORDER cells are considered in is a
+    // function of position alone — planting consults the trees already
+    // planted, so an order that followed the walk would leak route order
+    // into the outcome.
+    for (const [cellKey, cell] of [...coverCells.entries()].sort((a, b) => a[0] - b[0])) {
       const covered = climbableTrees.some(
-        (tree) => Math.hypot(tree.x - sample.x, tree.z - sample.z) < CLIMB_COVER_TARGET,
+        (tree) => Math.hypot(tree.x - cell.x, tree.z - cell.z) < CLIMB_COVER_TARGET,
       );
       if (covered) continue;
       for (let attempt = 0; attempt < 60; attempt += 1) {
-        const rng = candidateRng(CLIMB_COVER_SALT, i * 64 + attempt);
+        const rng = candidateRng(CLIMB_COVER_SALT ^ cellKey, attempt);
         const angle = rng.range(0, TAU);
         const radius = rng.range(6, CLIMB_COVER_TARGET * 0.55);
-        const x = sample.x + Math.cos(angle) * radius;
-        const z = sample.z + Math.sin(angle) * radius;
+        const x = cell.x + Math.cos(angle) * radius;
+        const z = cell.z + Math.sin(angle) * radius;
         if (!isPlantable(x, z, 2.6)) continue;
         // 'lollipop' is the classic big-ball silhouette — the kind whose
         // rolled top ball most often clears CLIMBABLE_MIN_CANOPY_RADIUS —
@@ -1492,7 +1511,28 @@ function pickBorderAnchor(rng: Rng): BorderAnchor | null {
     return { x, z, axisYaw, outward: bearing };
   }
 
-  const seg = rng.pick(segments);
+  // The segment is found by drawing a random point on the lawn and taking
+  // the border segment nearest it — never `rng.pick(segments)`. Picking by
+  // index looked equivalent and was a park-wide coupling in disguise: any
+  // change that split or merged one straight run anywhere renumbered the
+  // whole list, and every candidate's pick shifted one entry over — so a
+  // 2 m bow on one spur nudged garden walls on the far side of the park
+  // (`test/procgen/scatterDecoupling.test.ts`). A nearest-segment lookup
+  // only changes for candidates whose drawn point lands near the paving
+  // that actually changed.
+  const probeAngle = rng.range(0, TAU);
+  const probeDistance = Math.sqrt(rng.unit()) * (edgeRadiusAt(PARK_BOUNDARY, probeAngle) - 4);
+  const probeX = Math.cos(probeAngle) * probeDistance;
+  const probeZ = Math.sin(probeAngle) * probeDistance;
+  let seg = segments[0] as PathBorderSegment;
+  let segDistance = Infinity;
+  for (const candidate of segments) {
+    const d = pointToSegment([probeX, probeZ], candidate.a, candidate.b);
+    if (d < segDistance) {
+      segDistance = d;
+      seg = candidate;
+    }
+  }
   const t = rng.range(0.15, 0.85);
   const px = seg.a[0] + (seg.b[0] - seg.a[0]) * t;
   const pz = seg.a[1] + (seg.b[1] - seg.a[1]) * t;

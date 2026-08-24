@@ -4406,8 +4406,29 @@ function fallbackSpurRoute(
     restoreLatticeState(before);
     const points = snapRunsToLattice(routeLeg(candidate, target));
     const worst = longestOffAxisRun(points);
+    // Metres spent hugging the rail corridor count double: a fence-follow
+    // is exempt from every shape metric, which otherwise makes it read as
+    // the *cleanest* candidate — while its ribbon squeezes the waypoints
+    // seeded along it against the fence (measured: the canonical slide
+    // exit picked a station-tail branch down the rail strip over an open
+    // branch of equal walk, and stranded five waypoints).
+    let railHug = 0;
+    for (let k = 1; k < points.length; k += 1) {
+      const p = points[k - 1] as readonly [number, number];
+      const q = points[k] as readonly [number, number];
+      const hop = Math.hypot(q[0] - p[0], q[1] - p[1]);
+      const steps = Math.max(1, Math.ceil(hop / 2));
+      for (let t = 0; t <= steps; t += 1) {
+        const x = p[0] + ((q[0] - p[0]) * t) / steps;
+        const z = p[1] + ((q[1] - p[1]) * t) / steps;
+        if (railInfoAt(x, z).dist < 6) {
+          railHug += hop / steps;
+        }
+      }
+    }
     const score =
       polylineLength(points) +
+      railHug +
       (carriesAnOffLatticeStreetRun(points) ? 50 : 0) +
       (worst > MAX_OFF_AXIS_RUN ? 100 + (worst - MAX_OFF_AXIS_RUN) * 2 : 0);
     if (score < bestScore) {
