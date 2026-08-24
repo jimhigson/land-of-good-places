@@ -61,8 +61,10 @@ export type KeychainKind = 'ripika' | 'star' | 'strawberry' | 'rainbow' | 'heart
  * (the real one) and the character-creation preview's own mirror of it — for
  * the same reason {@link KEYCHAIN_SWAY_Z} below is: the picker must not show
  * a smaller charm than the one she is about to actually wear. The shop's own
- * display rack (`world/KeychainShop.ts`) is a separate, smaller "1.5x" scale
- * of its own — a display stand, not a worn charm, so it does not use this.
+ * display rack (`world/KeychainShop.ts`'s `RACK_CHARM_SCALE`) is a separate
+ * scale of its own — a display stand, not a worn charm, so it does not use
+ * this, and the two are not meant to match (24 August 2026: Jim asked for the
+ * rack display bigger *again*, independently of this one).
  */
 export const KEYCHAIN_WORN_SCALE = 2.5;
 

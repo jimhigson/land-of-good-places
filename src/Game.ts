@@ -6,7 +6,6 @@ import { InputSystem, PointerControls } from './core/input';
 import { isTouchDevice } from './core/device';
 import {
   BUILDING_FLOOR_COUNT,
-  CAMERA_ZOOM_MAX,
   CAMERA_ZOOM_STEP,
   PLAYER_LONGEST_STEP,
   PLAYER_RADIUS,
@@ -17,6 +16,7 @@ import { FoliageFade, Sky, TreeClimbing, World, skyViewFor, type WorldOptions } 
 import { ENTRANCE_ANGLE, ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from './world/entrance/layout';
 import { arrivalOwnsTheSpawn } from './world/entrance/arrivalSpawn';
 import { arrivalCameraZoom } from './world/entrance/ArrivalSequence';
+import { KEYCHAIN_VIEW_ZOOM } from './world/KeychainShop';
 import { Highlights } from './world/Highlights';
 import { Selection } from './world/Selection';
 import { pickInteractZone, PRIMARY_ACTION, type InteractZone } from './world/interact';
@@ -1453,11 +1453,12 @@ export class Game {
     const arrival = this.world.entrance.arrival;
     if (arrival && !arrival.finished) this.camera.setZoomTarget(arrivalCameraZoom(arrival.phase));
 
-    // The keychain rack's zoomed picker (#331): the camera orbits the rack's
-    // own centre instead of the player while `viewOpen`, at as close a zoom
-    // as the game's own ceiling allows — a garden cart is small enough that
-    // any framing formula derived from its size saturates that ceiling
-    // anyway, so there is no truer number to compute. Re-asserted every
+    // The keychain rack's zoomed picker (#331): the camera orbits a point
+    // between the rack and where she stands (`KeychainShop.viewFocus`)
+    // instead of the player while `viewOpen`, at `KEYCHAIN_VIEW_ZOOM` — a
+    // constant tuned against a real screenshot of this exact composed shot
+    // (see that constant's own doc comment in `KeychainShop.ts`), the same
+    // way the rest of this feature's framing rounds were. Re-asserted every
     // frame for the same reason the arrival's zoom above is: see
     // `IsoCamera.setFocusOverride`'s own doc comment.
     const keychainShopOpen = this.world.keychainShop.viewOpen;
@@ -1468,7 +1469,7 @@ export class Game {
     }
     this.keychainShopWasOpen = keychainShopOpen;
     if (keychainShopOpen) {
-      this.camera.setZoomTarget(CAMERA_ZOOM_MAX);
+      this.camera.setZoomTarget(KEYCHAIN_VIEW_ZOOM);
       this.camera.setFocusOverride(this.world.keychainShop.viewFocus);
     } else {
       this.camera.clearFocusOverride();

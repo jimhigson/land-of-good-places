@@ -12,7 +12,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { PALETTE } from '../core/palette';
 import { STALL_PLACEMENTS, STALL_STANDS_BY_ID } from '../minigames/stallPlacement';
 import { CAMERA_YAW_DEGREES } from '../core/constants';
-import { DEG, Rng, turnTowards } from '../core/mathUtils';
+import { DEG, lerp, Rng, turnTowards } from '../core/mathUtils';
 import { ART } from '../art/style/artPalette';
 import { addOutline, decal, solid, toonMaterial } from '../art/style/materials';
 import { KEYCHAIN_KINDS, createKeychain, type KeychainKind } from '../art/models/keychains';
@@ -143,6 +143,47 @@ import { keychainItems, type ShopItem } from './building/shops/catalogue';
  *   `KEYCHAIN_TURN_RATE`'s own comment — and deliberately eases back to
  *   facing the rack after a beat ({@link SHOW_BACK_SECONDS}) rather than
  *   staying turned, so she is ready-looking for the next charm.
+ *
+ * ## Composed for the shot (24 August 2026)
+ *
+ * The zoom above got the right *things* into frame; Jim's next note was
+ * about *where*: *"make Eleri stand next to the short edge of the table,
+ * looking at the table, and the camera straight-on to the table from a 45º
+ * angle looking down/forward onto it, and the camera at the right distance
+ * so the character and the stall both fit into the view with only a very
+ * small gap around the edge of the screen."* The 45° angle needed no new
+ * work — the park's one camera never turns (`CAMERA_YAW_DEGREES`,
+ * `CAMERA_PITCH_DEGREES`, ARCHITECTURE.md's "One camera angle, forever"), so
+ * this view was always shot at exactly that angle; "straight-on to the
+ * table" is a framing question, not an angle one. What did need work:
+ *
+ * - **The short edge, not the long one.** She used to end up wherever she
+ *   pressed the entry chip from — the long display side, since that is
+ *   where {@link standX}/{@link standZ} (the path network's own walk-up
+ *   point) sits. {@link openView} now teleports her to a second, dedicated
+ *   point ({@link viewStandX}/{@link viewStandZ}, see
+ *   {@link VIEW_STAND_CLEARANCE}'s own doc comment) beside the cart's short
+ *   end every time the view opens, so the composition is the same whether
+ *   she walked up or arrived by deep link (`requestOpen`) — collision does
+ *   not apply while riding, so this is a plain teleport, not a walk.
+ * - **Facing the table, not the camera.** The resting pose used to be a
+ *   fixed "face the camera" angle, with the turn ({@link showBack}) as the
+ *   only moment she faced away. Jim's new framing wants her looking at the
+ *   table instead; {@link facingTable} (solved once, from the new stand
+ *   point towards {@link rackFocus}'s own centre) is the resting target now,
+ *   and {@link updateTurn} eases back to *it* rather than to
+ *   {@link facingCamera}. The turn itself is untouched: it still eases to
+ *   {@link facingCamera} `+ π` — the direction that puts her back, and the
+ *   charm on it, towards the viewer — because that has nothing to do with
+ *   which way she rests.
+ * - **A tighter, two-subject focus and zoom.** {@link rackFocus} used to be
+ *   the rack's own centre alone; it is now pulled part-way towards
+ *   {@link viewStandX}/{@link viewStandZ} ({@link VIEW_FOCUS_PLAYER_WEIGHT}),
+ *   so the shot centres between her and the rack rather than on the rack
+ *   with her off to one side. The zoom moved off the general pinch-zoom
+ *   ceiling (`CAMERA_ZOOM_MAX`) onto its own constant, {@link KEYCHAIN_VIEW_ZOOM}
+ *   — see that constant's own doc comment for why the ceiling itself had to
+ *   move to make room for it.
  */
 
 // ---------------------------------------------------------------- placement
@@ -190,8 +231,8 @@ const BACKDROP_OFFSET = 2.4;
  * The camera is orthographic (ARCHITECTURE.md), so a flat panel's occluding
  * power does not fall off with distance the way a perspective one's would —
  * only whether it is *big enough* matters, not how far back it stands. Sized
- * generously past the widest real frame this game frames anything at
- * (`CAMERA_VIEW_HEIGHT` / `CAMERA_ZOOM_MAX` gives ~6.25 m tall at the zoom
+ * generously past the widest real frame this view itself is ever framed at
+ * (`CAMERA_VIEW_HEIGHT` / `KEYCHAIN_VIEW_ZOOM` gives ~3.5 m tall at the zoom
  * this view holds; width grows with the screen's own aspect ratio, so this
  * errs large rather than tuning to one browser window) — cheap to overshoot,
  * expensive to leave a gap nobody notices until a wide screen finds it.
@@ -227,6 +268,106 @@ const SPARKLE_COUNT = 6;
 /** How long the little "got one!" sparkle burst lasts. */
 const SPARKLE_DURATION = 1.1;
 
+// -------------------------------------------------------- rack composition
+
+/**
+ * How big a charm stands on the rack's own counter — independent of
+ * `art/models/keychains.ts`'s `KEYCHAIN_WORN_SCALE` (the scale a charm gets
+ * once actually worn on the bag; that file's own header explains why the two
+ * do not have to match). Was a bare `1.5`. Jim, 24 August 2026, looking at
+ * the locked shop view: *"the charms displayed on the table should be about
+ * 2.5x their current on-table size."* `1.5 * 2.5 = 3.75` — the same number as
+ * `KEYCHAIN_WORN_SCALE`, but arrived at independently and not derived from it;
+ * a future change to one is not expected to move the other.
+ */
+const RACK_CHARM_SCALE = 3.75;
+
+/**
+ * The rack display grid: three columns, two rows — Jim, 24 August 2026,
+ * confirming the layout once the charms above got too big for one row to
+ * hold: *"six charms total ... 3 columns x 2 rows works."* `KEYCHAIN_KINDS`
+ * reads left-to-right, back-row-then-front-row into this grid (see
+ * {@link KeychainShop.buildCart}).
+ */
+const RACK_COLUMNS = 3;
+const RACK_ROWS = 2;
+
+/**
+ * How far apart the two rows sit, in local metres along the counter's own
+ * depth axis — centred on the same {@link RACK_CENTRE_LOCAL_Z} the old
+ * single row used, so the grid's own centre does not drift from where the
+ * counter (and the backdrop clearance built around it) already expects the
+ * display to sit. Comfortably inside {@link STALL_DEPTH}'s own usable top
+ * (the counter surface itself is `STALL_DEPTH - 0.06` deep) even with
+ * {@link RACK_CHARM_SCALE}'s now-much-larger charms, which is what "grid, not
+ * two rows hanging off the edges" needs.
+ */
+const RACK_ROW_GAP = 0.5;
+
+/** Where the single-row rack used to sit, and where the grid's own depth centres on. */
+const RACK_CENTRE_LOCAL_Z = -0.02;
+
+/**
+ * How far outside the cart's short edge she stands for the locked view's own
+ * composition — **not** {@link KeychainShop.standX}/{@link KeychainShop.standZ}
+ * (the ordinary walk-up point the path network reaches, on the display's long
+ * side). Jim, 24 August 2026: *"make Eleri stand next to the short edge of
+ * the table, looking at the table."* {@link KeychainShop.openView} teleports
+ * her here the instant the view opens, regardless of which side of the cart
+ * she walked up from — so the shot composes the same way every time, not
+ * only when she happened to approach from this side.
+ */
+const VIEW_STAND_CLEARANCE = 0.55;
+
+/**
+ * Which short edge she stands beside: `1` is the local `+X` end. Named
+ * rather than inlined so the choice — picked by eye, against a real
+ * screenshot of this game's one fixed camera angle, for how the shot reads
+ * (PR #331) — is a single flag to flip if it ever needs revisiting, not a
+ * sign buried in the stand-point maths.
+ */
+const VIEW_STAND_SIDE = 1;
+
+/**
+ * How much of the camera's own focus point is pulled from the rack's centre
+ * towards where she stands (0 = centred on the rack alone, 1 = centred on
+ * her alone) — see {@link KeychainShop.buildCart}'s own solving of
+ * {@link KeychainShop.rackFocus}. Not `0.5`: the two subjects are not the
+ * same size on screen (she reads taller and narrower than the rack's own
+ * footprint), so the point that actually balances the *frame's* left/right
+ * margins sits off the geometric midpoint — found by screenshotting the
+ * built view and nudging this until the gap either side of the two subjects
+ * came out even, the same way every constant below it did.
+ */
+const VIEW_FOCUS_PLAYER_WEIGHT = 0.43;
+
+/**
+ * How high above the ground {@link KeychainShop.rackFocus} sits, in metres —
+ * roughly chest height on the standing character and just above the taller
+ * charms' own top, so the frame does not centre low with headroom wasted
+ * above, nor high with feet cut off below.
+ */
+const VIEW_FOCUS_HEIGHT = 1.6;
+
+/**
+ * The zoom the park camera holds for the whole locked view. Its own constant
+ * rather than reaching for the general pinch-zoom ceiling (`CAMERA_ZOOM_MAX`)
+ * the way this view used to: Jim, 24 August 2026, on this exact shot: *"the
+ * camera at the right distance so the character and the stall both fit into
+ * the view with only a very small gap around the edge of the screen."* Tuned
+ * by eye against a real screenshot of the built view, not computed from the
+ * frustum maths — the subject is two separate, oddly-shaped things (her, and
+ * the cart) rather than one bounding sphere the way the cat bus's own
+ * derived zoom (`ArrivalSequence.ts`'s `ARRIVAL_CAMERA_ZOOM`) gets to assume,
+ * so a formula here would only be a screenshot's worth of margin allowance
+ * dressed up as maths. The rack plus the character beside it is a small
+ * subject next to what `CAMERA_ZOOM_MAX` was previously sized for (a person
+ * walking the park), so that ceiling itself had to rise to make room for
+ * this constant — see `CAMERA_ZOOM_MAX`'s own comment — rather than this
+ * view silently getting clamped short of the framing it asked for.
+ */
+export const KEYCHAIN_VIEW_ZOOM = 4.25;
+
 /** One charm on the rack: its kind, its catalogue id, the model itself, and where it is in the world. */
 interface RackCharm {
   readonly kind: KeychainKind;
@@ -260,6 +401,15 @@ export class KeychainShop implements GameSystem {
   private readonly groundY: number;
   /** {@link standX}/{@link standZ}, in the cart's own local frame — how far out in front of it counts as "arrived". */
   private readonly standLocalZ: number;
+
+  /**
+   * Where she stands for the locked view's own composition — beside the
+   * cart's short edge, **not** {@link standX}/{@link standZ} (the ordinary
+   * walk-up point on the display's long side). See {@link VIEW_STAND_CLEARANCE}'s
+   * own doc comment.
+   */
+  private readonly viewStandX: number;
+  private readonly viewStandZ: number;
 
   /** Every charm stood on the counter, built once in {@link buildCart}. */
   private readonly rack: RackCharm[] = [];
@@ -305,23 +455,30 @@ export class KeychainShop implements GameSystem {
    */
   private viewFacing = 0;
 
-  /** Where {@link viewFacing} is currently headed: {@link facingCamera}, or its opposite. */
+  /** Where {@link viewFacing} is currently headed: {@link facingTable}, or {@link facingCamera} plus π. */
   private viewFacingTarget = 0;
 
   /**
-   * Facing the camera — the resting pose while browsing, so a child sees her
-   * face while she decides and her *back* only on the turn that shows off
-   * the charm. Not "facing the rack": the cart sits on the far side of the
-   * stand point from the camera (see {@link buildViewBackdrop}'s own "away"
-   * direction, which points the same way), so a pose that literally faced
-   * the charms would show her back from the very first frame and the turn
-   * Jim asked for would have nothing left to reveal. A plain constant, not
-   * solved from her position — `Player.ts`'s own default spawn facing is
-   * this exact same formula, for the exact same reason: the camera's
-   * direction is fixed for the life of the app (ARCHITECTURE.md), so "facing
-   * it" never depends on where anyone is standing.
+   * Facing away from the camera — not a resting pose any more (see
+   * {@link facingTable} for that), only the turn target {@link showBack} eases
+   * towards: turning to exactly this angle is what puts her *back* — and the
+   * charm just worn on it — towards the viewer. A plain constant, not solved
+   * from her position, for the same reason `Player.ts`'s own default spawn
+   * facing is: the camera's direction is fixed for the life of the app
+   * (ARCHITECTURE.md), so "facing the camera" never depends on where anyone
+   * is standing.
    */
   private readonly facingCamera = CAMERA_YAW_DEGREES * DEG;
+
+  /**
+   * Facing the rack — the resting pose while browsing. Jim, 24 August 2026,
+   * on this exact view's composition: *"looking at the table."* Solved once,
+   * in {@link buildCart}, from {@link viewStandX}/{@link viewStandZ} towards
+   * {@link rackFocus}'s own local centre, so it stays correct however either
+   * point is retuned later rather than a second hand-picked angle drifting
+   * out of step with them.
+   */
+  private facingTable = 0;
 
   /**
    * Elapsed time the current "facing away, showing the charm" beat began, or
@@ -344,6 +501,14 @@ export class KeychainShop implements GameSystem {
     this.standX = stand.x;
     this.standZ = stand.z;
     [, this.standLocalZ] = this.toLocal(this.standX, this.standZ);
+
+    // The locked view's own stand point: beside the cart's short edge
+    // (`VIEW_STAND_SIDE`'s local +X end), out by `VIEW_STAND_CLEARANCE` —
+    // see that constant's own doc comment for why this is not `standX`/`standZ`.
+    [this.viewStandX, this.viewStandZ] = this.toWorld(
+      (VIEW_STAND_SIDE * STALL_WIDTH) / 2 + VIEW_STAND_CLEARANCE,
+      RACK_CENTRE_LOCAL_Z,
+    );
 
     this.buildCart();
     this.buildCollision(collision);
@@ -442,8 +607,16 @@ export class KeychainShop implements GameSystem {
     player.ridePosture = 'walking';
     player.setScriptedWalk(0);
 
-    this.viewFacing = this.facingCamera;
-    this.viewFacingTarget = this.facingCamera;
+    // Composes the shot the same way every time, regardless of which side
+    // of the cart she walked up from to press the chip (or whether a deep
+    // link dropped her at the ordinary `standX`/`standZ` instead) — see
+    // {@link viewStandX}'s own doc comment. Collision does not apply while
+    // riding (`Player.beginRide`'s own doc comment), so this is a plain
+    // teleport, not a walk.
+    player.teleport(this.viewStandX, this.viewStandZ);
+
+    this.viewFacing = this.facingTable;
+    this.viewFacingTarget = this.facingTable;
     this.turnedAt = null;
     player.setRidePose(player.position.x, player.position.y, player.position.z, this.viewFacing);
   }
@@ -475,7 +648,7 @@ export class KeychainShop implements GameSystem {
     if (!player) return;
 
     if (this.turnedAt !== null && context.elapsed - this.turnedAt > SHOW_BACK_SECONDS) {
-      this.viewFacingTarget = this.facingCamera;
+      this.viewFacingTarget = this.facingTable;
       this.turnedAt = null;
     }
 
@@ -484,15 +657,14 @@ export class KeychainShop implements GameSystem {
   }
 
   /**
-   * Teleports her to the stand point and opens the view in one motion — the
-   * deep link's own entry point (`Game.ts`'s `boardRide` table,
-   * `/keychain-stall`). A real walk-up would press the chip after arriving;
-   * this does both at once so the deep link lands on the feature itself
-   * rather than one press short of it.
+   * Opens the view straight away — the deep link's own entry point
+   * (`Game.ts`'s `boardRide` table, `/keychain-stall`). A real walk-up would
+   * press the chip after arriving at `standX`/`standZ`; this skips that,
+   * since {@link openView} itself teleports her to the view's own composed
+   * stand point the instant it opens regardless of where she started from.
    */
   requestOpen(): boolean {
     if (!this.player || this.player.riding) return false;
-    this.player.teleport(this.standX, this.standZ);
     this.beginView();
     return true;
   }
@@ -787,29 +959,35 @@ export class KeychainShop implements GameSystem {
     canopyCap.position.set(0, 2.24, -STALL_DEPTH / 2 + 0.15);
     this.group.add(canopyCap);
 
-    // The six charms themselves, stood along the counter as a display
-    // rack — small (they are 20 cm charms; a 1.5x scale keeps them readable
-    // from the fixed camera without dwarfing the cart), spaced evenly,
-    // alternating a slight lean so the row does not read as a static shelf
-    // of identical ranks. Each one's real world position is recorded into
-    // {@link rack} for {@link interactZones} to build a tap target from.
+    // The six charms themselves, stood on the counter as a display rack —
+    // {@link RACK_COLUMNS} x {@link RACK_ROWS}, at {@link RACK_CHARM_SCALE}
+    // (was one row at a smaller scale — see that constant's own doc comment
+    // for why it grew and needed the second row), alternating a slight lean
+    // so the grid does not read as a static shelf of identical ranks. Each
+    // one's real world position is recorded into {@link rack} for
+    // {@link interactZones} to build a tap target from.
     const rackWidth = STALL_WIDTH - 0.5;
     const charmLocalY = 0.885;
-    const charmLocalZ = -0.02;
     KEYCHAIN_KINDS.forEach((kind, index) => {
       const handle = createKeychain(kind);
-      const t = KEYCHAIN_KINDS.length > 1 ? index / (KEYCHAIN_KINDS.length - 1) : 0.5;
-      const localX = -rackWidth / 2 + t * rackWidth;
-      handle.root.position.set(localX, charmLocalY, charmLocalZ);
-      handle.root.scale.setScalar(1.5);
+      const column = index % RACK_COLUMNS;
+      const row = Math.floor(index / RACK_COLUMNS);
+      const tColumn = RACK_COLUMNS > 1 ? column / (RACK_COLUMNS - 1) : 0.5;
+      const tRow = RACK_ROWS > 1 ? row / (RACK_ROWS - 1) : 0.5;
+      const localX = -rackWidth / 2 + tColumn * rackWidth;
+      const localZ = RACK_CENTRE_LOCAL_Z - RACK_ROW_GAP / 2 + tRow * RACK_ROW_GAP;
+      handle.root.position.set(localX, charmLocalY, localZ);
+      handle.root.scale.setScalar(RACK_CHARM_SCALE);
       handle.root.rotation.y = (index % 2 === 0 ? 1 : -1) * 0.18;
       this.group.add(handle.root);
 
-      const [x, z] = this.toWorld(localX, charmLocalZ);
+      const [x, z] = this.toWorld(localX, localZ);
       // Same lateral offset as the charm itself, but out at the stall's own
-      // proven-clear stand depth — never the counter's own `charmLocalZ`,
-      // which sits inside `buildCollision`'s walls (see `RackCharm.standX`'s
-      // own doc comment).
+      // proven-clear stand depth — never the counter's own `localZ`, which
+      // sits inside `buildCollision`'s walls (see `RackCharm.standX`'s own
+      // doc comment). Both charms in a column share one stand point: the
+      // depth a child stands at to reach the counter does not change row to
+      // row, only which column she is squared up to.
       const [standX, standZ] = this.toWorld(localX, this.standLocalZ);
       this.rack.push({
         kind,
@@ -823,18 +1001,30 @@ export class KeychainShop implements GameSystem {
       });
     });
 
-    // {@link rackFocus}: the six charms' own world centre, solved once here
-    // rather than every frame — they never move afterwards. A touch above
-    // the counter height (not the charms' own y) so the framed shot centres
-    // on the display rather than sitting low with the parasol looming over
-    // an empty top half.
+    // {@link rackFocus}: pulled {@link VIEW_FOCUS_PLAYER_WEIGHT} of the way
+    // from the rack's own world centre (the six charms' average — solved
+    // once here rather than every frame, since they never move afterwards)
+    // towards {@link viewStandX}/{@link viewStandZ}, so the shot centres
+    // between the two subjects Jim asked to both fit in frame, rather than
+    // on the rack alone with her off to one side of it.
     let sumX = 0;
     let sumZ = 0;
     for (const charm of this.rack) {
       sumX += charm.x;
       sumZ += charm.z;
     }
-    this.rackFocus.set(sumX / this.rack.length, this.groundY + 1.05, sumZ / this.rack.length);
+    const rackCentreX = sumX / this.rack.length;
+    const rackCentreZ = sumZ / this.rack.length;
+    const focusX = lerp(rackCentreX, this.viewStandX, VIEW_FOCUS_PLAYER_WEIGHT);
+    const focusZ = lerp(rackCentreZ, this.viewStandZ, VIEW_FOCUS_PLAYER_WEIGHT);
+    this.rackFocus.set(focusX, this.groundY + VIEW_FOCUS_HEIGHT, focusZ);
+
+    // {@link facingTable}: the bearing from her composed stand point to the
+    // rack's own centre — `Player.facing`'s `atan2(x, z)` convention (see
+    // `buildViewBackdrop`'s own doc comment, which uses the same one) — so
+    // "looking at the table" stays correct however either point is retuned,
+    // rather than a hand-picked angle that could drift out of step with them.
+    this.facingTable = Math.atan2(rackCentreX - this.viewStandX, rackCentreZ - this.viewStandZ);
   }
 
   private buildCollision(collision: CollisionWorld): void {
