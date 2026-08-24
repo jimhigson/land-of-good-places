@@ -1486,17 +1486,15 @@ if (fallenPlayer.position.y < 0) {
       }
 
       sleep.run();
-      // Long enough for every pet's trot to finish, well inside the 2.6 s nap.
+      // Long enough for every pet's trot to finish, well inside a nap — which
+      // no longer has any fixed length of its own to be "inside" (see below).
       const NAP_FRAMES = 90;
+      const noInput = { justPressed: () => false, isDown: () => false };
       let sleepingFaceWrong = 0;
       for (let frame = 0; frame < NAP_FRAMES; frame += 1) {
         const elapsed = 16 + frame / 60;
-        hotel.update({ dt: 1 / 60, elapsed } as never);
-        napper.update({
-          dt: 1 / 60,
-          elapsed,
-          input: { justPressed: () => false, isDown: () => false },
-        } as never);
+        hotel.update({ dt: 1 / 60, elapsed, input: noInput } as never);
+        napper.update({ dt: 1 / 60, elapsed, input: noInput } as never);
         if (blinkFace !== null && faceTexture() !== blinkFace) sleepingFaceWrong += 1;
       }
       if (sleepingFaceWrong > 0) {
@@ -1523,6 +1521,31 @@ if (fallenPlayer.position.y < 0) {
           `a napping child's head is at (${(head.x - bedX).toFixed(2)}, ` +
             `${(head.z - bedZ).toFixed(2)}) bed-local — not on the pillow end (z −1.1…−0.35)`,
         );
+      }
+
+      // ---- **the "Z" rises from her head, not her middle** — Jim, 24 Aug
+      // 2026: *"make the z coming from the player come from their heads not
+      // their middle."* Found by name (`hotel.napGlyph.player`, set apart
+      // from a pet bed's own `hotel.napGlyph.pet`) rather than by guessing
+      // which mesh is "closest" — a pet bed can stand close enough to the
+      // player's own bed that proximity alone would prove nothing. Checked
+      // in plan (x/z) only: `y` climbs all through the glyph's rise, so it is
+      // never "at" any one height to compare against.
+      const glyph = hotel.hotelRoot.getObjectByName('hotel.napGlyph.player');
+      if (!glyph) {
+        problems.push('no `hotel.napGlyph.player` mesh was built — the Z-glyph position cannot be checked');
+      } else {
+        const glyphPos = new Vector3();
+        glyph.getWorldPosition(glyphPos);
+        const distanceFromHead = Math.hypot(glyphPos.x - head.x, glyphPos.z - head.z);
+        if (distanceFromHead > 0.3) {
+          problems.push(
+            `the player's own nap-glyph sits ${distanceFromHead.toFixed(2)} m from her head in ` +
+              `plan (glyph at (${glyphPos.x.toFixed(2)}, ${glyphPos.z.toFixed(2)}), head at ` +
+              `(${head.x.toFixed(2)}, ${head.z.toFixed(2)})) — it should rise from her head, not her ` +
+              'middle',
+          );
+        }
       }
 
       // What a straight-down look actually meets: her at the pillow, the
@@ -1602,10 +1625,68 @@ if (fallenPlayer.position.y < 0) {
         }
       }
 
-      // Hand the room back the way the earlier probes left it: one giant tick
-      // outlasts any nap. (Issue #275's "the pets go to sleep too" is probe
-      // 16c's, against a park where she actually owns some.)
-      hotel.update({ dt: 999, elapsed: 0 } as never);
+      // ---- **no timer wakes her.** Jim, 24 Aug 2026: *"make them stay in
+      // the bed until the player gets them out (no timer to wake them up)."*
+      // The old fixed nap was 2.6 s (156 frames at 60 fps, `NAP_FRAMES` above
+      // already covered 90 of them); tick well past that — with no input at
+      // all — and she must still be asleep. A big single `dt` used to finish
+      // the old countdown in one tick; that trick cannot prove *this*, since
+      // proving "no timer" needs the frames actually walked, not skipped.
+      const OLD_NAP_FRAMES = 156;
+      for (let frame = NAP_FRAMES; frame < OLD_NAP_FRAMES + 120; frame += 1) {
+        const elapsed = 16 + frame / 60;
+        hotel.update({ dt: 1 / 60, elapsed, input: noInput } as never);
+        napper.update({ dt: 1 / 60, elapsed, input: noInput } as never);
+      }
+      if (!hotel.isNapping) {
+        problems.push(
+          `a nap ended on its own after ${OLD_NAP_FRAMES + 120} frames of no input at all — naps ` +
+            'must run until she wakes herself, never on a timer',
+        );
+      }
+
+      // ---- **jump wakes her.** `Hotel.update` reads the action directly —
+      // `Player` never sees the press at all, since it returns early for the
+      // whole time she is riding, this nap included — so a mock
+      // `justPressed` answering `true` only for `'jump'` is the real signal,
+      // not a stand-in for it.
+      if (hotel.isNapping) {
+        const jumpPressed = {
+          justPressed: (action: string) => action === 'jump',
+          isDown: () => false,
+        };
+        hotel.update({ dt: 1 / 60, elapsed: 999, input: jumpPressed } as never);
+        if (hotel.isNapping) {
+          problems.push(
+            'pressing jump while napping did not wake her — `Hotel.update` should read it directly',
+          );
+        }
+      }
+      // ---- **and `wakeNap` itself** — the one door both a tap and a click
+      // (`Game.ts`'s `onTap`, checked before anything else it does) actually
+      // reach. `Game.ts` has no headless equivalent this park-only script can
+      // drive, so calling the same primitive directly is the closest this
+      // probe gets to that path; real-browser QA walks the tap and click all
+      // the way from a DOM event. The jump press just now already woke her,
+      // so this re-arms a fresh nap first — `sleep.run()` is the same "Have a
+      // sleep" chip every earlier line in this probe pressed, and `nap()`
+      // sets `napping` synchronously, so no frame needs to pass before
+      // `wakeNap` has something real to end.
+      if (hotel.isNapping) {
+        problems.push('nobody re-armed the nap yet, and it is somehow already running');
+      }
+      sleep.run();
+      if (!hotel.isNapping) {
+        problems.push('re-arming a nap for the `wakeNap` check below did not start one');
+      }
+      hotel.wakeNap();
+      if (hotel.isNapping) {
+        problems.push('`Hotel.wakeNap` did not end an in-progress nap');
+      }
+      // A second call, with nobody napping, must be the harmless no-op both
+      // callers rely on — neither `Game.ts`'s `onTap` nor the jump read in
+      // `update` checks {@link Hotel.isNapping} before calling it.
+      hotel.wakeNap();
       // And her eyes open again.
       tickPlayer(0.2, 20);
       if (blinkFace !== null && faceTexture() === blinkFace) {
@@ -1858,10 +1939,12 @@ function probeCompanionBeds(cast: string, owned: readonly BedCandidate[]): void 
     }
     sleep.run();
 
-    // Sampled well inside `NAP_SECONDS` (2.6 s = 156 frames at 60 fps):
-    // this has to catch the walk while it is still a nap, not read the
-    // state after the nap has ended and handed everything back — the
-    // explicit wake check below is that half.
+    // A nap has no fixed length any more (`Hotel.wakeNap`, issue #279's
+    // follow-up), so this has nothing to be "well inside" of — it just has
+    // to catch the walk while nobody has woken her, which no input at all
+    // (below) guarantees for as many frames as this cares to run. The
+    // explicit wake check ("and out again", below) ends it on purpose once
+    // the walk itself has been proven.
     type Sample = {
       readonly x: number;
       readonly z: number;
@@ -1870,10 +1953,11 @@ function probeCompanionBeds(cast: string, owned: readonly BedCandidate[]): void 
       readonly itemId: string;
     };
     const NAP_WALK_FRAMES = 130;
+    const walkNoInput = { justPressed: () => false, isDown: () => false };
     const samples = new Map<string, Sample[]>(owned.map(({ uid }) => [uid, []]));
     for (let frame = 0; frame < NAP_WALK_FRAMES; frame += 1) {
       const elapsed = frame / 60;
-      walkHotel.update({ dt: 1 / 60, elapsed } as never);
+      walkHotel.update({ dt: 1 / 60, elapsed, input: walkNoInput } as never);
       parade.update({ dt: 1 / 60, elapsed } as never);
       for (const { uid } of owned) {
         const state = parade.petState(uid);
@@ -2000,7 +2084,7 @@ function probeCompanionBeds(cast: string, owned: readonly BedCandidate[]): void 
       if (!bed.asleep) {
         problems.push(
           `the ${who}'s own bed in bedroom ${bedIndex} does not have it asleep in it ` +
-            `${NAP_WALK_FRAMES} frames into a 2.6 s nap — it should have settled by now`,
+            `${NAP_WALK_FRAMES} frames into an ongoing nap — it should have settled by now`,
         );
         continue;
       }
@@ -2094,9 +2178,14 @@ function probeCompanionBeds(cast: string, owned: readonly BedCandidate[]): void 
       }
     }
 
-    // ---- **and out again.** `NAP_SECONDS` is only 2.6 s, so one big
-    // `dt` finishes it; every pet then leaves its bed and rejoins the line.
-    walkHotel.update({ dt: 999, elapsed: 0 } as never);
+    // ---- **and out again.** No timer to wait out any more, so this ends
+    // the nap the same way a tap, a click or the jump key would — through
+    // `wakeNap` itself — and every pet then leaves its bed and rejoins the
+    // line.
+    if (!walkHotel.isNapping) {
+      problems.push(`${cast}: bedroom ${bedIndex}'s nap ended on its own before this explicit wake`);
+    }
+    walkHotel.wakeNap();
     for (let frame = 0; frame < 30; frame += 1) {
       parade.update({ dt: 1 / 60, elapsed: (NAP_WALK_FRAMES + frame) / 60 } as never);
     }
