@@ -242,26 +242,72 @@ const NAP_LIE_HEIGHT = 0.16;
  */
 const NAP_FEET_Z = 0.61;
 
-/** Number of "Z" glyphs rising off one sleeper at a time — enough to read as
- *  a trail (z, Z, ZZZ) without cluttering a small bedroom. See
+/** Number of "Z" glyphs in one sleeper's own burst — enough to read as a
+ *  cluster (z, Z, ZZZ) without cluttering a small bedroom. See
  *  `Hotel.buildNapGlyphs`. */
 const NAP_Z_COUNT = 3;
-/** Seconds one glyph takes to rise from its sleeper and fully fade out. */
-const NAP_Z_CYCLE_SECONDS = 1.8;
-/** How far a glyph climbs over one cycle, metres. */
-const NAP_Z_RISE = 0.8;
+/** Seconds one glyph takes to rise from its sleeper and fully fade out —
+ *  issue #279's second follow-up, Jim 24 Aug 2026: *"live longer"*. Was
+ *  1.8 s; a glyph now lingers most of two seconds longer. */
+const NAP_Z_CYCLE_SECONDS = 3.4;
+/** How far a glyph climbs over one cycle, metres — the same request: *"rise
+ *  much higher"*. Was 0.8 m. */
+const NAP_Z_RISE = 2.4;
 /**
- * Roughly the reclined player's own head height above her feet-anchored
- * root — `nap`'s own doc comment has the real figure (1.33 m behind, 0.30 m
- * up) from `applyReclinedRidePose`; this is deliberately a little higher so
- * the glyphs start clear of the pillow rather than in it.
+ * How tightly one burst's {@link NAP_Z_COUNT} glyphs bunch together at
+ * launch, in seconds between the first and the last — Jim, 24 Aug 2026:
+ * *"appear sporadically in bursts"*, not the old one-at-a-time drip (each
+ * glyph used to be spaced a full {@link NAP_Z_CYCLE_SECONDS} apart, evenly,
+ * forever). Small enough that all three are rising together and read as one
+ * cluster; see {@link NAP_Z_BURST_PERIOD_SECONDS} for the pause between
+ * clusters.
  */
-const NAP_Z_PLAYER_Y = 0.55;
-/** A laid-down pet's own head height above the top of its cushion. */
-const NAP_Z_PET_Y = 0.3;
+const NAP_Z_BURST_SPREAD_SECONDS = 0.6;
+/**
+ * How often one sleeper's burst repeats, in seconds. Chosen so a burst
+ * (launch spread + one glyph's full rise-and-fade) finishes well before the
+ * next one starts — {@link NAP_Z_BURST_SPREAD_SECONDS} + {@link
+ * NAP_Z_CYCLE_SECONDS} ≈ 4 s of glyphs, then a silent ≈4 s pause before the
+ * next cluster — so the rhythm reads as "burst, gap, burst" rather than a
+ * metronome. `Hotel.makeNapGlyphSet` seeds each sleeper's own phase from a
+ * different RNG draw, so the player's bursts and a pet's own do not land in
+ * lockstep either.
+ */
+const NAP_Z_BURST_PERIOD_SECONDS = 8;
+/**
+ * Height of the *starting* point of a glyph's rise above the reclined
+ * player's own forehead (not her feet-anchored root — see
+ * {@link Hotel.buildNapGlyphs}'s `playerAnchor`), metres. Jim, 24 Aug 2026:
+ * *"start about 50cm above their head, not right on the surface of their
+ * body"* — was 0.55 m above the root, which put the glyph right at her own
+ * skin. This is that clearance plus the forehead's own height above the
+ * root, so the glyph is already floating clear of her by roughly half a
+ * metre the moment it spawns, before {@link NAP_Z_RISE} lifts it further.
+ */
+const NAP_Z_PLAYER_Y = 1.05;
+/** The same "already floating, not on the skin" clearance for a laid-down
+ *  pet's own head, above the top of its cushion. */
+const NAP_Z_PET_Y = 0.8;
+/**
+ * Nudges the player's own glyph anchor from the skull's centre out to her
+ * *forehead* — Jim, 24 Aug 2026: *"come from the character's forehead, not
+ * their mid-head."* She lies flat on her back to nap (`applySleepingRidePose`'s
+ * quarter turn), so her local "face forward" axis, which points at whatever is
+ * in front of her standing up, now points straight up in world space, and her
+ * local "up" (toward the crown) now points back toward the pillow, along
+ * world −Z. So her forehead — forward and a little up on her own face,
+ * relative to the skull's centre — sits a touch *higher* (added to world Y)
+ * and a little *less far back toward the pillow* (subtracted from the world
+ * -Z head-height offset below) than the mid-head point the previous round
+ * anchored on. Both are small: a forehead is a few centimetres of face, not
+ * a few centimetres of neck.
+ */
+const NAP_Z_FOREHEAD_UP = 0.09;
+const NAP_Z_FOREHEAD_LESS_BACK = 0.05;
 /** The glyphs' own size and colour — the park's marker-pen ink, matching
- *  `flatStar`'s and `floorChevron`'s self-lit decals. */
-const NAP_Z_SIZE = 0.22;
+ *  `flatStar`'s and `floorChevron`'s self-lit decals. Jim, 24 Aug 2026:
+ *  *"about 2x in size"* — was 0.22 m. */
+const NAP_Z_SIZE = 0.44;
 const NAP_Z_COLOUR = PALETTE.markerSky;
 
 /** How long the lobby celebrates a check-in. Long enough to see, short enough to want again. */
@@ -1974,10 +2020,15 @@ export class Hotel implements GameSystem {
    * Rises and fades every sleeper's own "Z" glyphs while {@link napping} is
    * running, and hides them the instant it stops — see {@link buildNapGlyphs}.
    *
-   * Each glyph loops its own {@link NAP_Z_CYCLE_SECONDS} cycle independently
-   * (via its own `phase`) rather than all three moving together, which is
-   * what makes a sleeper's own trio read as a rising trail instead of one
-   * glyph copy-pasted three times.
+   * Each glyph loops its own {@link NAP_Z_BURST_PERIOD_SECONDS} period
+   * independently (via its own `phase`), spending the first
+   * {@link NAP_Z_CYCLE_SECONDS} of it rising and fading, and the rest sitting
+   * at zero opacity — a silent pause. Because all {@link NAP_Z_COUNT} glyphs
+   * in one sleeper's set launch within {@link NAP_Z_BURST_SPREAD_SECONDS} of
+   * each other (see `phase` in {@link makeNapGlyphSet}) rather than spread
+   * evenly across the whole period the way they used to be, they are
+   * airborne together and idle together: a burst, then a gap, not a steady
+   * one-at-a-time drip.
    */
   private updateNapGlyphs(elapsed: number): void {
     const active = this.napping;
@@ -1989,8 +2040,14 @@ export class Hotel implements GameSystem {
           continue;
         }
         glyph.mesh.visible = true;
-        const cycle = ((elapsed + glyph.phase) % NAP_Z_CYCLE_SECONDS + NAP_Z_CYCLE_SECONDS) % NAP_Z_CYCLE_SECONDS;
-        const t = cycle / NAP_Z_CYCLE_SECONDS;
+        const periodPos =
+          ((elapsed + glyph.phase) % NAP_Z_BURST_PERIOD_SECONDS + NAP_Z_BURST_PERIOD_SECONDS) %
+          NAP_Z_BURST_PERIOD_SECONDS;
+        // Clamped to 1: past its own rise-and-fade, a glyph holds at the top
+        // of its climb with zero opacity (below) for the rest of the pause,
+        // rather than the unclamped ratio ever driving its scale or drift
+        // back up as the period wraps.
+        const t = Math.min(periodPos / NAP_Z_CYCLE_SECONDS, 1);
         const drift = Math.sin(t * Math.PI * 2) * 0.05;
         glyph.mesh.position.set(anchor.x + drift, anchor.y + t * NAP_Z_RISE, anchor.z);
         glyph.mesh.scale.setScalar(lerp(0.6, 1.3, t));
@@ -5104,10 +5161,14 @@ export class Hotel implements GameSystem {
       // `headHeight` is the same feet-to-head distance `NAP_FEET_Z`'s own doc
       // comment already derives the pillow position from (measured, not
       // retyped), so walking the anchor back by it lands on her actual head.
+      // `NAP_Z_FOREHEAD_UP`/`NAP_Z_FOREHEAD_LESS_BACK` then refine that
+      // mid-head point out to her forehead specifically — see their own doc
+      // comment for why lying flat turns "forward on her face" into "up in
+      // world space".
       return {
         x: player.position.x,
-        y: player.position.y + NAP_Z_PLAYER_Y,
-        z: player.position.z - player.model.headHeight,
+        y: player.position.y + NAP_Z_PLAYER_Y + NAP_Z_FOREHEAD_UP,
+        z: player.position.z - player.model.headHeight + NAP_Z_FOREHEAD_LESS_BACK,
       };
     };
     this.napGlyphSleepers.push({
@@ -5150,15 +5211,20 @@ export class Hotel implements GameSystem {
   ): { readonly mesh: Mesh; readonly phase: number }[] {
     const rng = new Rng(seed);
     const set: { mesh: Mesh; phase: number }[] = [];
+    // Every glyph's phase is a launch offset **within one burst window**
+    // (`NAP_Z_BURST_SPREAD_SECONDS`), not spread across the whole period —
+    // `updateNapGlyphs` then repeats that whole window every
+    // `NAP_Z_BURST_PERIOD_SECONDS`. That is what turns three independent
+    // glyphs into one cluster that rises together and goes quiet together,
+    // per-sleeper jitter keeping the three from launching in perfect
+    // lockstep within the burst.
+    const stagger = NAP_Z_BURST_SPREAD_SECONDS / NAP_Z_COUNT;
     for (let i = 0; i < NAP_Z_COUNT; i += 1) {
       const mesh = napZGlyph(NAP_Z_SIZE, NAP_Z_COLOUR);
       mesh.name = name;
       mesh.visible = false;
       this.hotelRoot.add(mesh);
-      // Evenly spread round the cycle, each with its own small jitter, so
-      // three glyphs off the same sleeper read as a staggered trail rather
-      // than three copies of the same one.
-      set.push({ mesh, phase: (i / NAP_Z_COUNT) * NAP_Z_CYCLE_SECONDS + rng.range(0, 0.15) });
+      set.push({ mesh, phase: i * stagger + rng.range(0, stagger * 0.6) });
     }
     return set;
   }
