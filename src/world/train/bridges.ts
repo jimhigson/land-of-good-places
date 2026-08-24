@@ -61,10 +61,16 @@ import type { MovingPlatform } from '../building/surfaces';
  *   genuine opening over the rail corridor: short abutment walls, curved
  *   haunches, and a crown span whose soffit clears the train and its
  *   riders by the same `TRAIN_CLEARANCE_Y` everything else respects. The
- *   crown-span soffit is its own mesh named `deck`, which is what
- *   `test/procgen/invariants.ts` measures the built clearance off — the
- *   lowest visible vertex of the thing that actually stands over the
- *   train. Nothing else of the bridge enters the swept rail corridor: the
+ *   soffit — haunch and crown alike — is one continuous surface swept
+ *   along the frame by {@link buildShellGeometry}; an invisible `deck`
+ *   marker mesh at the same height is all `test/procgen/invariants.ts`
+ *   needs to measure the built clearance (`Box3`/`getObjectByName` both
+ *   ignore `.visible`), so there is nothing drawn twice and no seam
+ *   between two meshes claiming the same span (see that function's own
+ *   note — this used to be a separate, rigidly-transformed box, and Jim's
+ *   2026-08-24 "there's still a big hole in the mesh" was daylight through
+ *   the gap it opened on a curving spine). Nothing else of the bridge
+ *   enters the swept rail corridor: the
  *   old geometry stood two support beams *across the track* (they ran the
  *   deck's full length at its outer edges — i.e. down the rail line either
  *   side of the crossing), which is the "walls covering the train track"
@@ -523,9 +529,16 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // one owner (the crossing's `railDistance`) for both.
   bridgeGroup.name = `bridge-${crossing.railDistance.toFixed(1)}`;
 
-  // The crown-span soffit — the thing that actually stands over the train,
-  // named `deck` so `test/procgen/invariants.ts` measures the real, built
-  // clearance off its own lowest visible vertex.
+  // The crown-span clearance marker — NOT drawn (see below): the swept
+  // shell built past this point is the one owner of everything visible,
+  // flat crown span included, so a second, separately transformed mesh
+  // covering the same span cannot open a seam against it. This box stays
+  // only because `test/procgen/invariants.ts` needs an object literally
+  // named `deck` to measure the built clearance off — `Box3.setFromObject`
+  // and `getObjectByName` both walk the scene graph regardless of
+  // `.visible`, so it still answers that question with the same geometry
+  // the old, rendered version did, at zero draw cost and with nothing left
+  // to fall out of step with the shell beside it.
   const at0 = frame.pointAt(0);
   const origin0 = frame.worldAt(0, 0, shift);
   const deckMesh = new Mesh(
@@ -533,8 +546,7 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
     bridgeMaterials().stone,
   );
   deckMesh.name = 'deck';
-  deckMesh.castShadow = true;
-  deckMesh.receiveShadow = true;
+  deckMesh.visible = false;
   const yaw = Math.atan2(at0.dirX, at0.dirZ);
   const rotation = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), yaw);
   const matrix = new Matrix4().compose(
@@ -659,9 +671,11 @@ interface ShellGeometry {
 
 /**
  * Sweeps the masonry shell along the frame: road top, both spandrel/parapet
- * walls (outer and inner faces), the arch haunch soffits, and the abutment
- * faces at the tunnel mouths. Indexed quads; normals computed at the end
- * (toon shading forgives averaged normals on near-planar strips).
+ * walls (outer and inner faces), the tunnel soffit (flat crown span and
+ * curved haunches alike, one continuous surface — see the soffit-quad note
+ * below), and the abutment faces at the tunnel mouths. Indexed quads;
+ * normals computed at the end (toon shading forgives averaged normals on
+ * near-planar strips).
  */
 function buildShellGeometry(
   frame: import('./bridgeSpine').SpineFrame,
@@ -799,6 +813,17 @@ function buildShellGeometry(
           );
           // Inner parapet face, above the road.
           quad(indices, previous.innerTop[0], ring.innerTop[0], ring.innerBottom[0], previous.innerBottom[0]);
+          // Spandrel underside: the solid stone between the road bed
+          // (`innerBottom`, at the road's own edge) and the soffit/ground
+          // (`outerBottom`, at the masonry's outer edge) had no face
+          // closing its own bottom. Outside the tunnel `outerBottom` sits
+          // underground, so the gap was never seen; inside the tunnel it
+          // is the soffit itself, well below the road, and the gap stood
+          // open — Jim's "there's still a big hole in the mesh"
+          // (2026-08-24): looking up into the tunnel mouth from outside, a
+          // sightline could pass the soffit's own outer edge and the
+          // single-sided road-top plane both, with nothing behind either.
+          quad(indices, previous.innerBottom[0], ring.innerBottom[0], ring.outerBottom[0], previous.outerBottom[0]);
         } else {
           quad(
             indices,
@@ -808,6 +833,7 @@ function buildShellGeometry(
             ring.outerBottom[1],
           );
           quad(indices, previous.innerTop[1], previous.innerBottom[1], ring.innerBottom[1], ring.innerTop[1]);
+          quad(indices, previous.innerBottom[1], previous.outerBottom[1], ring.outerBottom[1], ring.innerBottom[1]);
         }
         // Coping (parapet top): outer edge to inner edge.
         quad(
@@ -818,15 +844,24 @@ function buildShellGeometry(
           previous.copingInner[side],
         );
       }
-      // Arch haunch soffit (down), full width, only where both rings are in
-      // the tunnel and outside the flat crown span the `deck` box owns.
-      const midAlong = (previousAlong + along) / 2;
+      // Tunnel soffit (down) — one continuous swept surface, flat crown and
+      // curved haunch alike, wherever both rings are in the tunnel at all.
+      // `soffitAt` already returns the flat `soffitCrownY` for the crown
+      // span, so this single sweep draws that span too; it used to stop
+      // short of the crown and leave that span to a separately transformed
+      // `deckMesh` box instead, which followed only the frame's tangent at
+      // along=0. On a curving spine the box's straight edges parted company
+      // with this sweep's curved ring at the very seam between them —
+      // measured live, a wedge of daylight through the stonework at both
+      // top corners of the tunnel mouth (Jim, 2026-08-24, "there's still a
+      // big hole in the mesh"). One continuous ring cannot lose a face at a
+      // seam it no longer has (CLAUDE.md: "build the shell as geometry, not
+      // as trimmed angles").
       if (
         previous.soffitA !== null &&
         previous.soffitB !== null &&
         ring.soffitA !== null &&
-        ring.soffitB !== null &&
-        Math.abs(midAlong) >= ARCH_CLEAR_HALF - SHELL_STEP
+        ring.soffitB !== null
       ) {
         quad(indices, previous.soffitA, previous.soffitB, ring.soffitB, ring.soffitA);
       }
