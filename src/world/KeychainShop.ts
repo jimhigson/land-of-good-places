@@ -184,6 +184,35 @@ import { keychainItems, type ShopItem } from './building/shops/catalogue';
  *   ceiling (`CAMERA_ZOOM_MAX`) onto its own constant, {@link KEYCHAIN_VIEW_ZOOM}
  *   — see that constant's own doc comment for why the ceiling itself had to
  *   move to make room for it.
+ *
+ * ## Which side of the table (24 August 2026)
+ *
+ * Jim, on the shot the previous round composed: *"the keyring stall in the
+ * last shot looks basically good, but position the camera so Eleri is on the
+ * far side of the stall, not the near side."* The angle, zoom and tightness
+ * that round tuned were already right and stayed untouched; only
+ * {@link VIEW_STAND_SIDE} flipped, from the local `+X` short edge to the
+ * local `-X` one — see that constant's own doc comment for why one sign is
+ * the whole *intended* fix. Everything downstream of {@link viewStandX}/
+ * {@link viewStandZ} ({@link facingTable}, {@link rackFocus}) is solved
+ * generically off wherever that stand point actually is, so flipping the
+ * side moved the camera to the table's opposite edge without a second
+ * formula to keep in step.
+ *
+ * **Flipping it live turned up a real bug the flag itself never exercised
+ * before.** {@link viewStandX}/{@link viewStandZ}'s own `toWorld` call had
+ * only ever mirrored `STALL_WIDTH / 2` through {@link VIEW_STAND_SIDE},
+ * adding {@link VIEW_STAND_CLEARANCE} unmirrored — invisible while the flag
+ * held `1` (the clearance still pushed further out), but on `-1` it pulled
+ * the *opposite* way, landing her a bare 0.5 m from the rack's centre
+ * (`1.05 − 0.55`) instead of the intended 1.6 m (`1.05 + 0.55`) — close
+ * enough that her own head, now turned to face the camera instead of away
+ * from it (the far side's own facing, `atan2` pointing the other way), stood
+ * in front of four of the six charms on the very first render. See that
+ * call's own doc comment for the fix (mirror the whole sum, not just the
+ * half-width) — confirmed against a real screenshot with all six charms
+ * clear, not just against the maths, per this repo's own "a check can pass
+ * without checking anything" rule.
  */
 
 // ---------------------------------------------------------------- placement
@@ -320,13 +349,24 @@ const RACK_CENTRE_LOCAL_Z = -0.02;
 const VIEW_STAND_CLEARANCE = 0.55;
 
 /**
- * Which short edge she stands beside: `1` is the local `+X` end. Named
- * rather than inlined so the choice — picked by eye, against a real
- * screenshot of this game's one fixed camera angle, for how the shot reads
- * (PR #331) — is a single flag to flip if it ever needs revisiting, not a
- * sign buried in the stand-point maths.
+ * Which short edge she stands beside: `1` is the local `+X` end, `-1` the
+ * local `-X` end. Named rather than inlined so the choice — picked by eye,
+ * against a real screenshot of this game's one fixed camera angle, for how
+ * the shot reads (PR #331) — is a single flag to flip if it ever needs
+ * revisiting, not a sign buried in the stand-point maths.
+ *
+ * `-1`, not `1`: Jim, on the first composed shot (which used `1`): *"position
+ * the camera so Eleri is on the far side of the stall, not the near side"* —
+ * the camera looks past her at the rack instead of past the rack at her.
+ * {@link viewStandX}/{@link viewStandZ} share the rack's own depth
+ * ({@link RACK_CENTRE_LOCAL_Z}) and only differ from the rack's centre by
+ * this flag's sign along local X, so which side reads as "near" the fixed
+ * camera is entirely this sign (the rest of the geometry — angle, zoom,
+ * tightness — is untouched, per {@link facingTable} and {@link rackFocus}
+ * both being solved generically off {@link viewStandX}/{@link viewStandZ}
+ * rather than hard-coded per side).
  */
-const VIEW_STAND_SIDE = 1;
+const VIEW_STAND_SIDE = -1;
 
 /**
  * How much of the camera's own focus point is pulled from the rack's centre
@@ -503,10 +543,24 @@ export class KeychainShop implements GameSystem {
     [, this.standLocalZ] = this.toLocal(this.standX, this.standZ);
 
     // The locked view's own stand point: beside the cart's short edge
-    // (`VIEW_STAND_SIDE`'s local +X end), out by `VIEW_STAND_CLEARANCE` —
-    // see that constant's own doc comment for why this is not `standX`/`standZ`.
+    // (`VIEW_STAND_SIDE`'s local +X end, or the -X end), out by
+    // `VIEW_STAND_CLEARANCE` — see that constant's own doc comment for why
+    // this is not `standX`/`standZ`.
+    //
+    // `VIEW_STAND_SIDE * (STALL_WIDTH / 2 + VIEW_STAND_CLEARANCE)`, **not**
+    // `VIEW_STAND_SIDE * STALL_WIDTH / 2 + VIEW_STAND_CLEARANCE`: the earlier
+    // form only mirrored the half-width through `VIEW_STAND_SIDE`, adding the
+    // clearance unmirrored — harmless while the flag only ever held `1` (it
+    // still pushed further out), but on `-1` it pulls the *opposite* way,
+    // partly cancelling the half-width instead of extending past it. At this
+    // file's actual constants that put her only 0.5 m out (`1.05 - 0.55`)
+    // instead of the intended 1.6 m (`1.05 + 0.55`) — nearly on top of the
+    // rack rather than beside it, which is what briefly turned this into a
+    // literal on-camera face-plant into the charms once the flag was first
+    // flipped for real (PR #331, 24 August 2026). Mirroring the whole sum
+    // keeps the two sides at an equal, correct distance from the cart.
     [this.viewStandX, this.viewStandZ] = this.toWorld(
-      (VIEW_STAND_SIDE * STALL_WIDTH) / 2 + VIEW_STAND_CLEARANCE,
+      VIEW_STAND_SIDE * (STALL_WIDTH / 2 + VIEW_STAND_CLEARANCE),
       RACK_CENTRE_LOCAL_Z,
     );
 
