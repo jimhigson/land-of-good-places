@@ -1,4 +1,5 @@
 import {
+  BoxGeometry,
   CylinderGeometry,
   Group,
   Mesh,
@@ -10,7 +11,8 @@ import {
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PALETTE } from '../core/palette';
 import { STALL_PLACEMENTS, STALL_STANDS_BY_ID } from '../minigames/stallPlacement';
-import { Rng } from '../core/mathUtils';
+import { CAMERA_YAW_DEGREES } from '../core/constants';
+import { DEG, Rng, turnTowards } from '../core/mathUtils';
 import { ART } from '../art/style/artPalette';
 import { addOutline, decal, solid, toonMaterial } from '../art/style/materials';
 import { KEYCHAIN_KINDS, createKeychain, type KeychainKind } from '../art/models/keychains';
@@ -94,6 +96,53 @@ import { keychainItems, type ShopItem } from './building/shops/catalogue';
  * both collects it (`gameStore.buy`, price 0 — see `shops/catalogue.ts`'s
  * `keychainStall` entries) and wears it in the same motion; tapping an owned
  * one just wears it; tapping the one already worn takes it off.
+ *
+ * ## Locked, isolated, and turning to show you (24 August 2026)
+ *
+ * Jim, having seen the zoomed picker live: *"enter the shop, and then the
+ * camera zooms in on the charms on the table, and you click or tap to choose
+ * each one, not that the player moves around like normal outside gameplay
+ * … the player is now non-controllable, but they can turn around to show you
+ * the new charm on their bag when you choose one. So, in view: only the
+ * charms, and the player's model."* Three real gaps against the
+ * just-verified zoom, each fixed the way this codebase already fixes it
+ * elsewhere rather than by inventing a fresh mechanism:
+ *
+ * - **Non-controllable.** {@link openView} hands the character to
+ *   `Player.beginRide()` — the exact same "input, collision and gravity stop
+ *   applying" switch every ride and the cat-bus arrival already use
+ *   (`MiniGameHost.riding`'s own doc comment states the convention), not a
+ *   bespoke input lock. `ridePosture = 'walking'` at zero scripted speed
+ *   ({@link Player.setScriptedWalk}) rather than the default `'seated'`
+ *   posture, because `'seated'` poses her as "holding on, delighted" (arms
+ *   thrown back) — the pose a ride wears, not the pose a girl standing at a
+ *   counter wears. The six charm zones need `selectableWhileRiding: true`
+ *   (see {@link charmZone}) or `Selection.ts`'s own riding gate would block
+ *   the very taps this view exists for. {@link closeView} hands her back
+ *   with `endRide()`. This also retires the third way out the previous round
+ *   documented ("simply walking away") — she cannot wander any more, so the
+ *   ✕ and Esc/cancel are the only two now.
+ * - **Only the charms and her, in shot.** Measured against the real zoomed
+ *   frame: a lamp post, a hedge, a nearby stall and a wandering NPC all sat
+ *   inside it. {@link buildViewBackdrop} pops a screen up round the back of
+ *   the cart — see that method's own doc comment for why a real wall beats
+ *   hiding the world's own systems by hand for everything *behind* the
+ *   subject. It cannot reach a crowd member loitering on the same,
+ *   camera-facing side as the player, so `World.update` also folds the one
+ *   system whose whole job is roaming loose around the park
+ *   (`npcs.group.visible`) away for the same beat — a single, named
+ *   exception, not the fragile "hide everything" this method's own doc
+ *   comment argues against.
+ * - **Turns to show you.** {@link pickKeychain}'s {@link showBack} points
+ *   {@link viewFacingTarget} at the far side of {@link facingCamera}, and
+ *   {@link updateTurn} — run every frame from {@link update} — eases
+ *   {@link viewFacing} towards it with `turnTowards` and writes it onto the
+ *   player via `setRidePose`, the same "the ride drives the pose from
+ *   outside, every frame" contract `ArrivalSequence.ts` already follows for
+ *   its own scripted walk. Deliberately a real turn, not a snap — see
+ *   `KEYCHAIN_TURN_RATE`'s own comment — and deliberately eases back to
+ *   facing the rack after a beat ({@link SHOW_BACK_SECONDS}) rather than
+ *   staying turned, so she is ready-looking for the next charm.
  */
 
 // ---------------------------------------------------------------- placement
@@ -109,13 +158,61 @@ const STALL_DEPTH = 1.5;
 const REACH = 3.1;
 
 /**
- * How far she may drift from the stand point before the zoomed view gives up
- * and closes on its own (see `update`) — looser than {@link REACH} itself, so
- * standing at the very edge of "in reach" does not flicker the view open and
- * shut. One of the view's three ways out, alongside the on-screen ✕ and
- * Esc/cancel — see this file's own header.
+ * How fast she turns to show (or stop showing) the charm on her back, in
+ * radians/second — deliberately much slower than the ordinary walking turn
+ * (`PLAYER_TURN_SPEED`, ~13 rad/s, close enough to a snap that it reads as
+ * instant): Jim asked for a real "turn around to show you" beat, not a flip.
+ * A full 180° turn takes a touch over 0.8 s at this rate.
  */
-const VIEW_EXIT_REACH = REACH + 1.5;
+const KEYCHAIN_TURN_RATE = Math.PI / 0.85;
+
+/**
+ * How long she holds facing away — showing the charm — before turning back
+ * to face the rack, ready for the next pick. Comfortably longer than the
+ * sparkle burst ({@link SPARKLE_DURATION}) so the "got one!" sparkle and the
+ * turn are never fighting for the same beat.
+ */
+const SHOW_BACK_SECONDS = 1.6;
+
+/**
+ * How far behind the counter the pop-up screen stands, in metres along the
+ * camera's own away-from-viewer axis — past the cart's own footprint
+ * (`STALL_WIDTH`/`STALL_DEPTH`, both under 2.2 m) with real clearance, and on
+ * the opposite side from the stand point ({@link KeychainShop.standLocalZ},
+ * which sits on the *camera-facing* side — see {@link KeychainShop.buildViewBackdrop}),
+ * so the two can never collide however either is retuned later.
+ */
+const BACKDROP_OFFSET = 2.4;
+
+/**
+ * How wide and tall the screen is built, in metres.
+ *
+ * The camera is orthographic (ARCHITECTURE.md), so a flat panel's occluding
+ * power does not fall off with distance the way a perspective one's would —
+ * only whether it is *big enough* matters, not how far back it stands. Sized
+ * generously past the widest real frame this game frames anything at
+ * (`CAMERA_VIEW_HEIGHT` / `CAMERA_ZOOM_MAX` gives ~6.25 m tall at the zoom
+ * this view holds; width grows with the screen's own aspect ratio, so this
+ * errs large rather than tuning to one browser window) — cheap to overshoot,
+ * expensive to leave a gap nobody notices until a wide screen finds it.
+ */
+const BACKDROP_WIDTH = 42;
+
+/**
+ * How tall the screen is built, centred on {@link KeychainShop.groundY} itself
+ * (see {@link KeychainShop.buildViewBackdrop} — there is deliberately no
+ * separate "centre height" to tune). Pushing the screen back along the away
+ * axis ({@link BACKDROP_OFFSET}) shifts its apparent position on screen —
+ * the camera is pitched (`CAMERA_PITCH_DEGREES`) — by an amount not worth
+ * deriving by hand and re-checking on every future change to either
+ * constant: massively over-tall, centred where it already visibly stands
+ * (ground level), is robust to that shift in either direction instead of
+ * chasing it with a second number.
+ */
+const BACKDROP_HEIGHT = 24;
+
+/** Thin on purpose — this is a backdrop, not a wall anyone can stand behind. */
+const BACKDROP_THICKNESS = 0.4;
 
 /**
  * Tap/hit radius for one charm's own zone, in metres — deliberately small (a
@@ -197,6 +294,44 @@ export class KeychainShop implements GameSystem {
 
   private closeButton: HTMLElement | null = null;
 
+  /** The pop-up privacy screen round the back of the cart — see {@link buildViewBackdrop}. */
+  private readonly backdrop = new Group();
+
+  /**
+   * The facing (radians, `Player.facing`'s own convention) driven onto the
+   * player every frame while {@link open} — see {@link updateTurn}. Eased
+   * towards {@link viewFacingTarget}, never assigned outright, so the turn
+   * Jim asked for is a real turn and not a snap.
+   */
+  private viewFacing = 0;
+
+  /** Where {@link viewFacing} is currently headed: {@link facingCamera}, or its opposite. */
+  private viewFacingTarget = 0;
+
+  /**
+   * Facing the camera — the resting pose while browsing, so a child sees her
+   * face while she decides and her *back* only on the turn that shows off
+   * the charm. Not "facing the rack": the cart sits on the far side of the
+   * stand point from the camera (see {@link buildViewBackdrop}'s own "away"
+   * direction, which points the same way), so a pose that literally faced
+   * the charms would show her back from the very first frame and the turn
+   * Jim asked for would have nothing left to reveal. A plain constant, not
+   * solved from her position — `Player.ts`'s own default spawn facing is
+   * this exact same formula, for the exact same reason: the camera's
+   * direction is fixed for the life of the app (ARCHITECTURE.md), so "facing
+   * it" never depends on where anyone is standing.
+   */
+  private readonly facingCamera = CAMERA_YAW_DEGREES * DEG;
+
+  /**
+   * Elapsed time the current "facing away, showing the charm" beat began, or
+   * `null` when not mid-beat. Read against {@link SHOW_BACK_SECONDS} in
+   * {@link updateTurn} to know when to turn back. Set from
+   * {@link frameElapsed}, not a fresh clock read — same reason
+   * {@link spawnSparkles} does: DOM handlers fire between frames.
+   */
+  private turnedAt: number | null = null;
+
   constructor(collision: CollisionWorld) {
     this.group.name = 'keychainShop';
 
@@ -213,6 +348,7 @@ export class KeychainShop implements GameSystem {
     this.buildCart();
     this.buildCollision(collision);
     this.buildSparklePool();
+    this.buildViewBackdrop();
   }
 
   /** True while a ride owns the character — matches every other stall's own gate on its zones. */
@@ -257,33 +393,94 @@ export class KeychainShop implements GameSystem {
     setCloseButtonVisible(this.closeButton, this.open);
 
     if (!this.open) return;
-    const { input, playerPosition } = context;
-    const dx = playerPosition.x - this.standX;
-    const dz = playerPosition.z - this.standZ;
-    const wandered = Math.hypot(dx, dz) > VIEW_EXIT_REACH;
-    if (wandered || input.justPressed('menu') || input.justPressed('cancel')) this.closeView();
+    this.updateTurn(context);
+
+    const { input } = context;
+    if (input.justPressed('menu') || input.justPressed('cancel')) this.closeView();
   }
 
   /**
    * Opens the zoomed rack picker — the run body of {@link shopEntryZone}'s
-   * chip. Pure state; the camera move itself lives in `Game.tick`, which
-   * re-derives it every frame from {@link viewOpen}/{@link viewFocus} exactly
-   * the way the cat-bus arrival re-derives its own zoom (see
-   * `IsoCamera.setFocusOverride`'s doc comment).
+   * chip. The camera move itself lives in `Game.tick`, which re-derives it
+   * every frame from {@link viewOpen}/{@link viewFocus} exactly the way the
+   * cat-bus arrival re-derives its own zoom (see `IsoCamera.setFocusOverride`'s
+   * doc comment); this method's own job is everything else the view needs the
+   * instant it opens — see this file's own header, "Locked, isolated, and
+   * turning to show you".
+   *
+   * Guarded on {@link player}, and safe to call with none attached
+   * (`scripts/check-tap-spacing.mts`, `test/procgen/parkFacts.ts` both open
+   * the view headless to read {@link interactZones} back): everything past
+   * the backdrop toggle is about the real character, and there isn't one
+   * there.
    */
   openView(): void {
     this.open = true;
+    // Attached here, not merely shown: real procgen geometry checks
+    // (`test/procgen/invariants.ts`'s Sky Cruiser flight-clearance sweep)
+    // traverse the actual scene graph regardless of `visible`, and a screen
+    // 24 m tall left permanently parented under the cart failed that check
+    // outright — a real mesh a ride can hit, sitting there all the time
+    // whether a child ever opens the picker or not. Parenting it in only
+    // while the view is genuinely open is the fix, not a `visible` flag:
+    // nothing that isn't part of the scene graph can be flown through.
+    this.group.add(this.backdrop);
+
+    const player = this.player;
+    if (!player || player.riding) return;
+
+    // Hands the character over exactly the way every ride and the cat-bus
+    // arrival already do (`MiniGameHost.riding`'s own doc comment states the
+    // convention) — GAME_DESIGN.md's CONTROL rule is about never steering
+    // her like a tank, not about a deliberate "you are in a menu, not
+    // walking around" state, which this codebase already has a mechanism
+    // for. `'walking'`, not the default `'seated'`: `'seated'` poses her as
+    // "holding on, delighted" (arms thrown back), which is a ride's pose,
+    // not a girl standing at a counter's. At zero scripted speed
+    // (`setScriptedWalk`) that posture is simply her ordinary standing idle.
+    player.beginRide();
+    player.ridePosture = 'walking';
+    player.setScriptedWalk(0);
+
+    this.viewFacing = this.facingCamera;
+    this.viewFacingTarget = this.facingCamera;
+    this.turnedAt = null;
+    player.setRidePose(player.position.x, player.position.y, player.position.z, this.viewFacing);
   }
 
   /**
-   * Leaves the zoomed picker and hands the camera back to the ordinary
-   * follow. Three ways in: the on-screen ✕, Esc/cancel, or walking far enough
-   * from the stand point (`update`, above) — the last one is new precisely
-   * because, unlike a paused panel, this view never stops her walking (see
-   * this file's own header on why it deliberately does not pause the park).
+   * Leaves the zoomed picker, folds the backdrop away and hands the
+   * character back. Two ways in now: the on-screen ✕ and Esc/cancel — a
+   * previous round's third way, walking away, is gone along with the free
+   * walking itself (see this file's own header).
    */
   closeView(): void {
     this.open = false;
+    this.backdrop.removeFromParent();
+
+    const player = this.player;
+    if (player?.riding) player.endRide();
+    this.turnedAt = null;
+  }
+
+  /**
+   * Eases {@link viewFacing} towards {@link viewFacingTarget} and writes it
+   * onto the player every frame — the same "the ride drives the pose from
+   * outside, every frame" contract `ArrivalSequence.ts` follows for its own
+   * scripted walk (`Player.setRidePose`'s own doc comment). Also owns the
+   * "hold, then turn back" timing on top of a pick — see {@link turnedAt}.
+   */
+  private updateTurn(context: FrameContext): void {
+    const player = this.player;
+    if (!player) return;
+
+    if (this.turnedAt !== null && context.elapsed - this.turnedAt > SHOW_BACK_SECONDS) {
+      this.viewFacingTarget = this.facingCamera;
+      this.turnedAt = null;
+    }
+
+    this.viewFacing = turnTowards(this.viewFacing, this.viewFacingTarget, KEYCHAIN_TURN_RATE * context.dt);
+    player.setRidePose(player.position.x, player.position.y, player.position.z, this.viewFacing);
   }
 
   /**
@@ -361,6 +558,11 @@ export class KeychainShop implements GameSystem {
       // A single static classification, the same for every charm regardless
       // of what its live chip actually says — see this file's own header.
       verb: 'Wear',
+      // The character is riding for the whole life of this view (see this
+      // file's own header, "Non-controllable") — without this,
+      // `Selection.ts`'s own riding gate would block every one of these taps,
+      // the one thing this view exists for.
+      selectableWhileRiding: true,
       highlight: highlightObject(charm.root),
       actions: () => this.charmActions(charm),
     };
@@ -398,6 +600,7 @@ export class KeychainShop implements GameSystem {
     const existing = state.inventory.find((item) => item.id === charm.id);
     if (existing) {
       gameStore.setWornKeychain(existing.uid);
+      this.showBack();
       return;
     }
 
@@ -411,11 +614,26 @@ export class KeychainShop implements GameSystem {
     if (firstEver) discoverSecret('secret.keychain');
     this.spawnSparkles(charm);
     playSurpriseChime();
+    this.showBack();
   }
 
   private takeOff(): void {
     gameStore.setWornKeychain(null);
     playOpenChime();
+  }
+
+  /**
+   * Jim, 24 August 2026: *"the player is now non-controllable, but they can
+   * turn around to show you the new charm on their bag when you choose
+   * one."* Starts (or refreshes) the "facing away" beat {@link updateTurn}
+   * drives every frame. Refreshing rather than only starting matters for a
+   * quick second pick mid-turn: {@link turnedAt} simply moves to now, so the
+   * hold restarts instead of the turn-back cutting in mid-way through
+   * showing the new charm.
+   */
+  private showBack(): void {
+    this.viewFacingTarget = this.facingCamera + Math.PI;
+    this.turnedAt = this.frameElapsed;
   }
 
   private spawnSparkles(charm: RackCharm): void {
@@ -633,6 +851,73 @@ export class KeychainShop implements GameSystem {
     collision.addWall(backLeft[0], backLeft[1], backRight[0], backRight[1], 0.25);
     collision.addWall(frontLeft[0], frontLeft[1], backLeft[0], backLeft[1], 0.25);
     collision.addWall(frontRight[0], frontRight[1], backRight[0], backRight[1], 0.25);
+  }
+
+  /**
+   * A pop-up screen behind the cart — the "dedicated stripped-down scene"
+   * this feature needs without actually needing a second scene.
+   *
+   * Jim, 24 August 2026, on the just-verified zoom: *"in view: only the
+   * charms, and the player's model."* Measured against the real zoomed shot,
+   * the rack's own garden setting — a lamp post, a hedge, a neighbouring
+   * stall, a wandering NPC — filled a good third of the frame. The camera
+   * never turns (ARCHITECTURE.md, "One camera angle, forever") and is
+   * orthographic, so a single flat panel standing anywhere behind the
+   * subject, facing back along the camera's own fixed direction, occludes
+   * *everything* behind it in that direction — near or far, tall building or
+   * low hedge, it makes no difference, because an orthographic ray does not
+   * converge the way a perspective one does. That is what makes one plank of
+   * geometry the cheap, robust fix here, rather than hiding the world's own
+   * systems by hand: every system this stall does not know the name of would
+   * silently stay visible, which is exactly the "a hole nobody notices"
+   * failure shape CLAUDE.md's "anything that looks solid must be solid" is
+   * about, aimed at a camera frame instead of a collider.
+   *
+   * `CAMERA_YAW_DEGREES` is the same constant every other camera-relative
+   * thing in this codebase already reads (`entrance/arrivalSightline.ts`'s
+   * `TOWARDS_CAMERA`, `Player.ts`'s own default facing) — turned round by π
+   * to point *away* from the camera instead of towards it, then converted
+   * into this stall's own local frame the same way {@link toWorld} does
+   * (`Player.facing`'s `atan2(x, z)` convention: a direction with angle θ is
+   * `(sin θ, cos θ)`, and `rotation.y = θ` turns an object's own local +Z to
+   * point that way — so setting the panel's `rotation.y` to this angle turns
+   * its thin axis, and therefore its wide face, to look straight back down
+   * the camera's own line of sight).
+   *
+   * Offset from the counter along that same away direction
+   * ({@link BACKDROP_OFFSET}) — the opposite side from the stand point, which
+   * sits on the *camera-facing* side (positive {@link standLocalZ}), so
+   * however either number is retuned later the two can never end up
+   * intersecting.
+   *
+   * The mesh itself is built once, here, but {@link backdrop} is deliberately
+   * left **unparented** until {@link openView} actually attaches it, and
+   * {@link closeView} detaches it again — not merely hidden behind
+   * `visible = false`. A screen this tall (`BACKDROP_HEIGHT`) sitting
+   * permanently in the scene graph, even invisible, is real geometry a
+   * procgen sweep can find: `test/procgen/invariants.ts`'s Sky Cruiser
+   * flight-clearance check does exactly that, and did (CI, not a local
+   * check — see this feature's own PR). Attached only while a child could
+   * conceivably be looking at it is also the more honest description of
+   * "pop-up": the rest of the time there is no screen there to trip over,
+   * not an invisible one.
+   */
+  private buildViewBackdrop(): void {
+    const awayFromCameraLocalAngle = CAMERA_YAW_DEGREES * DEG + Math.PI - STALL_FACING;
+    const awayX = Math.sin(awayFromCameraLocalAngle);
+    const awayZ = Math.cos(awayFromCameraLocalAngle);
+
+    const wall = solid(
+      new Mesh(
+        new BoxGeometry(BACKDROP_WIDTH, BACKDROP_HEIGHT, BACKDROP_THICKNESS),
+        toonMaterial(ART.miniLilac),
+      ),
+    );
+    wall.rotation.y = awayFromCameraLocalAngle;
+    wall.position.set(awayX * BACKDROP_OFFSET, 0, awayZ * BACKDROP_OFFSET);
+    this.backdrop.add(wall);
+    // Deliberately not `this.group.add(this.backdrop)` here — see this
+    // method's own doc comment. `openView`/`closeView` own attaching it.
   }
 }
 
