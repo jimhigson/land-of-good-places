@@ -4,6 +4,7 @@ export {
   FLOWER_HEX,
   FLOWER_ICON,
   isEdible,
+  walksInParade,
   wearableSlot,
   type Acquisition,
   type CharacterCreationChoice,

@@ -6,7 +6,7 @@ import type { CollisionWorld } from '../../world/Collision';
 import type { PetBedSpot, PetParadeLink } from '../../world/hotel/Hotel';
 import { terrainHeight } from '../../world/terrain';
 import { shopItem } from '../../world/building/shops/catalogue';
-import { gameStore, type GameState, type InventoryItem } from '../../state';
+import { gameStore, walksInParade, type GameState, type InventoryItem } from '../../state';
 import type { Player } from '../Player';
 import { PlayerTrail } from './trail';
 import { ParadeMember, type BedPhase } from './ParadeMember';
@@ -37,12 +37,15 @@ import { BackpackPeek } from './BackpackPeek';
  * A spring settles each member onto its point, so the line has a lazy, springy
  * lag rather than moving like a train on rails.
  *
- * **Who is in it.** Toys and pets — see `PARADE_KINDS` in the store, which
- * also lists `'balloon'` (for the Cute-o-dex's "can this come out?" question)
- * but is overridden here, since a balloon never walks. Candy floss, ice
- * cream, hats, stickers and eggs cannot walk either, so they stay in the bag
- * where {@link BackpackPeek} gives them something to do. The thing in the
- * player's hands is never also in the parade.
+ * **Who is in it.** Toys and pets alike — `state/store.ts`'s
+ * {@link walksInParade}, which is the *one* answer to "is this a companion?"
+ * in the whole game: this file's own `isOut` asks it, and so does the hotel,
+ * when it works out which of the things she owns gets a bed. (It is narrower
+ * than `PARADE_KINDS`, which also lists `'balloon'` for the Cute-o-dex's "can
+ * this come out?" question; a balloon is held on a string, never walked.)
+ * Candy floss, ice cream, hats, stickers and eggs cannot walk either, so they
+ * stay in the bag where {@link BackpackPeek} gives them something to do. The
+ * thing in the player's hands is never also in the parade.
  */
 
 /** How many walk behind you at once. More than this and the park disappears. */
@@ -140,13 +143,20 @@ export class Parade implements GameSystem, PetParadeLink {
    * of the bed"*: every one of those is what two bodies for one animal looks
    * like from the sofa.
    *
-   * Returns `false`, and starts nothing, when this uid is not a live pet in
+   * Returns `false`, and starts nothing, when this uid is not a live member of
    * the line right now — stowed, carried in her hands, or a bed built before
-   * she owned a matching pet at all. That bed simply stays empty furniture,
-   * which is what it already is between naps.
+   * she owned a matching companion at all. That bed simply stays empty
+   * furniture, which is what it already is between naps.
+   *
+   * **Any member of the line, not only a `kind: 'pet'` one.** Jim, 24 Aug
+   * 2026: *"if they follow the character they get a bed."* Membership of this
+   * array already *is* that question — nothing reaches it that `isOut` did not
+   * pass — so a second `kind === 'pet'` test here could only ever be a
+   * narrower, disagreeing copy of it, and was: it silently refused every
+   * fresh save's own starter companion, RiPika, who is catalogued `'toy'`.
    */
   sendPetToBed(uid: string, bed: PetBedSpot): boolean {
-    const member = this.members.find((candidate) => candidate.uid === uid && candidate.kind === 'pet');
+    const member = this.members.find((candidate) => candidate.uid === uid);
     if (!member) return false;
     member.goToBed(bed);
     return true;
@@ -293,7 +303,7 @@ export class Parade implements GameSystem, PetParadeLink {
     readonly bedPhase: BedPhase | null;
     readonly root: Object3D;
   } | null {
-    const member = this.members.find((candidate) => candidate.uid === uid && candidate.kind === 'pet');
+    const member = this.members.find((candidate) => candidate.uid === uid);
     if (!member) return null;
     const { x, y, z } = member.root.position;
     return {
@@ -465,16 +475,17 @@ export class Parade implements GameSystem, PetParadeLink {
 /**
  * Out of the bag, able to walk, and not the thing in the player's hands.
  *
- * Balloons are excluded outright, regardless of `carriedUid`: a balloon is
- * held above the player on a string (`entities/HeldBalloon.ts`), never walked
- * behind them like a toy or a pet, however many the player owns and however
- * long ago each one stopped being the thing literally in their hands. They
- * are still marked `paradeable` in the store (`PARADE_KINDS` includes
- * `'balloon'`, for the Cute-o-dex's "can this come out with you?" question),
- * so the exclusion belongs here rather than upstream.
+ * "Able to walk" is {@link walksInParade}, in `state/store.ts`, and asking it
+ * rather than restating it here is the point: the hotel's pet beds ask the
+ * same function which of the things she owns is a companion, so the line
+ * behind her and the row of beds waiting for it can no longer disagree about
+ * what a companion is. They did — see that function's own doc comment for the
+ * bug it cost — and a balloon (`PARADE_KINDS` includes it for the Cute-o-dex,
+ * but it is *held* on a string, never walked) is the reason the two questions
+ * are not the same question.
  */
 function isOut(item: InventoryItem, carriedUid: string | null): boolean {
-  return item.paradeable && item.kind !== 'balloon' && !item.stowed && item.uid !== carriedUid;
+  return walksInParade(item.kind) && !item.stowed && item.uid !== carriedUid;
 }
 
 /**

@@ -126,6 +126,32 @@ const REFUSED: Acquisition = { outcome: 'refused' };
 const PARADE_KINDS: ReadonlySet<InventoryKind> = new Set<InventoryKind>(['toy', 'pet', 'balloon']);
 
 /**
+ * Whether this kind of thing **follows the player on its own feet** — the one
+ * answer to "is this a companion?", asked of the {@link InventoryKind} and
+ * nowhere else, exactly as {@link isEdible} and {@link wearableSlot} are.
+ *
+ * {@link PARADE_KINDS} is the wider question the Cute-o-dex asks ("can this
+ * come out with you at all?") and it includes `'balloon'`, which is *held* on
+ * a string above the player rather than walked (`entities/HeldBalloon.ts`).
+ * This is the narrower one: the set of things that actually walk along behind
+ * her, which is what `Parade`'s own `isOut` filters the line down to.
+ *
+ * **Why it is a function here rather than a filter written out at each call
+ * site.** It had two definitions, and they disagreed. `Hotel.ownedCompanions`
+ * asked for `kind === 'pet'` while the parade asked for "paradeable, not a
+ * balloon" — so RiPika, the starter companion every fresh save is granted by
+ * `ui/CharacterCreation.ts`'s `defaultCharacterChoice`, was catalogued as a
+ * `'toy'`, walked behind the child all day, and then got **no bed** at the
+ * hotel: every bed was built with `uid: null` and the nap sent nothing
+ * anywhere. On the actual default save — which is what every real player
+ * starts from — the whole feature did nothing at all (Jim, 24 Aug 2026:
+ * *"if they follow the character they get a bed"*).
+ */
+export function walksInParade(kind: InventoryKind): boolean {
+  return PARADE_KINDS.has(kind) && kind !== 'balloon';
+}
+
+/**
  * Which bit of the player a thing goes on, or `null` for something that is not
  * worn at all.
  *

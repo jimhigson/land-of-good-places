@@ -122,8 +122,13 @@ export class ParadeMember {
   /** The purchase this member *is* — the key everything else identifies it by. */
   readonly uid: string;
   readonly itemId: string;
-  /** The catalogue's own category — `'pet'`, `'toy'`, … Only a pet has a bed
-   *  to go to; see {@link Parade.sendPetToBed}. */
+  /**
+   * The catalogue's own category — `'pet'`, `'toy'`, … Kept for anything that
+   * wants to know *what sort* of companion this is, and deliberately **not**
+   * consulted by the bedtime routine: everything in the line follows the
+   * child, and everything that follows her gets a bed (Jim, 24 Aug 2026). See
+   * `Parade.sendPetToBed`.
+   */
   readonly kind: ShopItem['kind'];
   readonly displayName: string;
   readonly style: MemberStyle;

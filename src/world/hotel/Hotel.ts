@@ -129,7 +129,7 @@ import { HotelLighting, pendantLight } from './lighting';
 import type { ResidentSpec } from '../../entities/npc';
 import { placedEntry } from '../parkLayout';
 import { saveFlags } from '../../state/flags';
-import { gameStore } from '../../state';
+import { gameStore, walksInParade } from '../../state';
 import { ZONE_HEIGHT_TOLERANCE, pressAction, type InteractZone } from '../interact';
 import { FloorFader } from '../building/floorFade';
 import {
@@ -770,7 +770,7 @@ interface Bed {
 }
 
 /**
- * One pet bed, as **furniture** — see {@link Hotel.ownedPets} for `uid`.
+ * One pet bed, as **furniture** — see {@link Hotel.ownedCompanions} for `uid`.
  *
  * There is deliberately no pet in here. This class used to build a second
  * animal per bed and cut it into view at bedtime while the parade hid the real
@@ -4835,13 +4835,14 @@ export class Hotel implements GameSystem {
    *
    * ## How many, and which kind each one is
    *
-   * {@link ownedPets} reads the *whole* inventory once, at construction
+   * {@link ownedCompanions} reads the *whole* inventory once, at construction
    * (the hotel's rooms are built once and a bed count that changed mid-visit
-   * would be a bed that pops) — every `kind: 'pet'` entry, not just the one
-   * currently out of the backpack, because a bed is about *ownership*. If she
-   * owns none yet there is still one bed with a bunny in it, same as before:
-   * an empty pet bed reads as something missing rather than as something to
-   * look forward to.
+   * would be a bed that pops) — every companion that walks behind her, toys
+   * and pets alike (Jim, 24 Aug 2026: *"if they follow the character they get
+   * a bed"*), not just the one currently out of the backpack, because a bed is
+   * about *ownership*. If she owns none yet there is still one bed, same as
+   * before: an empty pet bed reads as something missing rather than as
+   * something to look forward to.
    *
    * ## Laid out row by row, clear of the human furniture and the doorway
    *
@@ -4889,12 +4890,12 @@ export class Hotel implements GameSystem {
    * actually in is ever sent a pet (see {@link sendPetsToBed}).
    */
   private dressPetBeds(shell: Group): void {
-    const pets = this.ownedPets();
+    const companions = this.ownedCompanions();
     for (const bedIndex of [0, 1, 2] as const) {
-      for (const [index, slot] of petBedSlots(pets.length, bedIndex).entries()) {
-        const pet = pets[index];
-        if (pet === undefined) continue;
-        this.placePetBed(shell, slot.x, slot.z, bedIndex, pet.uid);
+      for (const [index, slot] of petBedSlots(companions.length, bedIndex).entries()) {
+        const companion = companions[index];
+        if (companion === undefined) continue;
+        this.placePetBed(shell, slot.x, slot.z, bedIndex, companion.uid);
       }
     }
   }
@@ -4933,20 +4934,42 @@ export class Hotel implements GameSystem {
   }
 
   /**
-   * Every pet she owns, one entry per purchase — *ownership*, not who is
-   * currently out of the backpack, which is {@link paradePetKind} below's
-   * question instead. Falls back to a single bed's worth (`uid: null`) so a
-   * bedroom with no pet bought yet still has a pet bed in it to look forward
-   * to (see {@link dressPetBeds}); nothing ever sleeps in that one, because
-   * there is no pet to sleep in it.
+   * Every **companion** she owns, one entry per purchase — *ownership*, not
+   * who is currently out of the backpack, which is {@link paradePetKind}
+   * below's question instead. Falls back to a single bed's worth (`uid: null`)
+   * so a bedroom with nothing bought yet still has a pet bed in it to look
+   * forward to (see {@link dressPetBeds}); nothing ever sleeps in that one,
+   * because there is nobody to sleep in it.
+   *
+   * ## Whatever follows her gets a bed — asked of the parade, not re-derived
+   *
+   * Jim, 24 Aug 2026, deciding this outright: **"if they follow the character
+   * they get a bed."** So the filter is `state/store.ts`'s
+   * {@link walksInParade} — the *same* function `Parade`'s own `isOut` uses to
+   * decide who is in the line — and not a second, narrower rule written out
+   * here.
+   *
+   * It was one, and it was wrong. This asked for `kind === 'pet'`, which is
+   * the *shop taxonomy*, while the parade asks "does it walk?". **RiPika**,
+   * the starter companion `ui/CharacterCreation.ts`'s
+   * `defaultCharacterChoice()` grants every single fresh save, is catalogued
+   * `kind: 'toy'`. So on the real default save — the state every actual player
+   * of this game is in — `ownedCompanions()` came back empty, every bed in
+   * every bedroom was built with `uid: null`, {@link sendPetsToBed} skipped all
+   * of them, and the whole pet-bed feature did nothing whatsoever while
+   * looking, in code and in every hand-seeded test, entirely correct. Two
+   * definitions of one thing, found by a child and not by a check (CLAUDE.md's
+   * own most common bug); there is now one definition, and `check:hotel`'s
+   * pet-bed probe starts from a real `defaultCharacterChoice()` save so that a
+   * second one cannot come back unnoticed.
    *
    * A real purchase carries its own inventory `uid`, which is the whole key:
-   * it is what lets {@link sendPetsToBed} find that pet's own live body in
-   * the parade. Nothing here needs the *species* any more — the hotel does
-   * not build pets.
+   * it is what lets {@link sendPetsToBed} find that companion's own live body
+   * in the parade. Nothing here needs the *species* — the hotel does not build
+   * animals.
    */
-  private ownedPets(): { readonly uid: string | null }[] {
-    const owned = gameStore.get().inventory.filter((item) => item.kind === 'pet');
+  private ownedCompanions(): { readonly uid: string | null }[] {
+    const owned = gameStore.get().inventory.filter((item) => walksInParade(item.kind));
     if (owned.length === 0) return [{ uid: null }];
     return owned.map((item) => ({ uid: item.uid }));
   }
@@ -5067,7 +5090,7 @@ export class Hotel implements GameSystem {
   /**
    * The kind of pet walking behind her, or a bunny if there is not one yet —
    * the *parade's* question (the breakfast feast's pet reads this), not
-   * {@link ownedPets}' "how many does she own" above.
+   * {@link ownedCompanions}' "how many does she own" above.
    *
    * **The species is in the catalogue `id`, not in `kind`.** An
    * `InventoryItem`'s `kind` is its *category* — `'pet'`, `'toy'`, `'hat'` —
