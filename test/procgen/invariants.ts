@@ -58,6 +58,8 @@ import {
 import {
   BUILDING_STEP_UP,
   CAMERA_FACING_YAW,
+  PATH_KERB_LIFT,
+  PATH_SURFACE_LIFT,
   PLAYER_MAX_SPEED,
   PLAYER_RADIUS,
   RIM_OUTSET_START,
@@ -4940,6 +4942,154 @@ const bridgesMatchTheirPathAndKeepTheRailClear: Invariant = (facts) => {
 };
 
 /**
+ * **The park's own paving goes up and over every bridge — one continuous
+ * path, never a second floor and never a ribbon left lying in the tunnel.**
+ *
+ * Jim, 2026-08-24: *"the 'floor' on the bridge should be the normal path
+ * texture — it should read as a continuous path that goes over a bridge."*
+ * `pathGraph.ts` draws one sandy ribbon and one cream kerb for the whole
+ * park, and `World.ts` lifts the stretch a bridge carries onto that
+ * bridge's own surface (`drapePathsOverBridges`). That is the *only*
+ * mechanism there is, which is exactly why it needs measuring: paths are
+ * drawn before the train has solved a loop, so the untouched ribbon lies on
+ * the terrain — straight through the arch, under the bridge standing over
+ * it.
+ *
+ * Measured off the built meshes' own vertex buffers, never off the drape
+ * call:
+ *
+ * 1. **Every vertex a bridge carries is on that bridge**, at the layer's
+ *    own lift above its surface, to the millimetre. A vertex left on the
+ *    terrain here is the ribbon-through-the-tunnel bug.
+ * 2. **Both layers are carried alike.** The kerb reaches further out than
+ *    the surface it borders, so it is the layer that tears first — the
+ *    first build of this carried 161 surface vertices and only 85 kerb
+ *    ones, splitting the kerb down the middle of every bridge while the
+ *    paving itself looked perfect. So the two counts must agree.
+ * 3. **Nothing is left in the tunnel**: no path vertex inside the deck's
+ *    own span may sit below the built soffit over it.
+ * 4. **It cannot pass vacuously.** A park with bridges must have paving on
+ *    them — zero carried vertices is a finding, not a pass, which is the
+ *    trap every other bridge check here has had to be written against.
+ */
+const theDrawnPathRidesOverEveryBridge: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const bridges = facts.world.train.bridges;
+  if (bridges.length === 0) return complaints;
+
+  const layers: { name: string; mesh: Mesh; lift: number }[] = [];
+  facts.world.garden.group.traverse((object) => {
+    if (!(object instanceof Mesh)) return;
+    if (object.name === 'path-surface') layers.push({ name: object.name, mesh: object, lift: PATH_SURFACE_LIFT });
+    if (object.name === 'path-kerb') layers.push({ name: object.name, mesh: object, lift: PATH_KERB_LIFT });
+  });
+  if (layers.length !== 2) {
+    complaints.push(
+      `expected the garden to hold both drawn path layers to measure, found ` +
+        `${layers.length} (${layers.map((l) => l.name).join(', ') || 'none'}) — the mesh names ` +
+        'in pathGraph.ts have changed and this invariant is measuring nothing',
+    );
+    return complaints;
+  }
+
+  const carried: Record<string, number> = {};
+  for (const { name, mesh, lift } of layers) {
+    const position = mesh.geometry.getAttribute('position');
+    let count = 0;
+    let worstOff = 0;
+    let worstAt: readonly [number, number] = [0, 0];
+    for (let i = 0; i < position.count; i += 1) {
+      const x = position.getX(i);
+      const y = position.getY(i);
+      const z = position.getZ(i);
+      let surface: number | null = null;
+      for (const bridge of bridges) {
+        const here = bridge.pavingHeightAt(x, z);
+        if (here !== null && (surface === null || here > surface)) surface = here;
+      }
+      if (surface === null) continue;
+      count += 1;
+      const off = Math.abs(y - (surface + lift));
+      if (off > worstOff) {
+        worstOff = off;
+        worstAt = [x, z];
+      }
+    }
+    carried[name] = count;
+    // A millimetre: the drape writes the height straight in, so anything
+    // bigger than float noise means a vertex was missed, not rounded.
+    if (worstOff > 0.001) {
+      complaints.push(
+        `the drawn ${name} sits ${worstOff.toFixed(3)} m off the bridge carrying it at ` +
+          `(${fmt(worstAt)}) — the paving is not riding the hump there, it is draped on ` +
+          'whatever was under it when the path was drawn',
+      );
+    }
+  }
+
+  const surfaceCount = carried['path-surface'] ?? 0;
+  const kerbCount = carried['path-kerb'] ?? 0;
+  if (surfaceCount === 0) {
+    complaints.push(
+      `${bridges.length} bridge(s) are built and not one vertex of the drawn paving is on any ` +
+        'of them — the path does not go over the bridges at all, and every check above ' +
+        'passed by having nothing to measure',
+    );
+  } else if (Math.abs(surfaceCount - kerbCount) > surfaceCount * 0.15) {
+    complaints.push(
+      `the bridges carry ${surfaceCount} path-surface vertices but ${kerbCount} path-kerb ones — ` +
+        'the kerb is torn off the paving it borders somewhere over a bridge',
+    );
+  }
+
+  // 3. Nothing left lying in a tunnel — stated where the train is, not
+  //    where the deck is.
+  //
+  //    The test is deliberately anchored to the **rail centre line**, not to
+  //    the deck's own span. A first attempt used `deckCovers` and fired on
+  //    perfectly good paving: the crown's soffit is flat only over
+  //    `ARCH_CLEAR_HALF`, and past that the arch's haunch curves down toward
+  //    its springing, so a hump's road legitimately runs *below* the crown
+  //    soffit's height once it is out over the solid abutment (measured 4.06
+  //    m of road under a 4.18 m soffit, 2.4 m along, with nothing wrong at
+  //    all). Within the train's own swept half-width of the rail there is no
+  //    such ambiguity: paving below the soffit there is paving the train
+  //    would drive through.
+  const railPoint = { x: 0, z: 0 };
+  const route = facts.world.train.route;
+  for (const crossing of facts.world.train.crossings) {
+    const deckMesh = facts.world.train.group
+      .getObjectByName(`bridge-${crossing.railDistance.toFixed(1)}`)
+      ?.getObjectByName('deck');
+    if (!deckMesh) continue;
+    const soffit = new Box3().setFromObject(deckMesh).min.y;
+    const bridge = bridges.find((b) => b.deckCovers(crossing.x, crossing.z));
+    if (!bridge) continue;
+    for (const { name, mesh } of layers) {
+      const position = mesh.geometry.getAttribute('position');
+      for (let i = 0; i < position.count; i += 1) {
+        const x = position.getX(i);
+        const z = position.getZ(i);
+        if (bridge.pavingHeightAt(x, z) === null) continue;
+        route.flatPointAt(route.distanceNear(x, z), railPoint);
+        if (Math.hypot(x - railPoint.x, z - railPoint.z) > TRACK_CLEARANCE) continue;
+        const y = position.getY(i);
+        if (y < soffit) {
+          complaints.push(
+            `the drawn ${name} passes under the bridge at (${fmt([crossing.x, crossing.z])}): a ` +
+              `vertex at (${fmt([x, z])}) sits at ${y.toFixed(2)} m, below the ${soffit.toFixed(2)} m ` +
+              'soffit standing over the track — the path is draped through the tunnel',
+          );
+          break;
+        }
+      }
+    }
+  }
+
+  return complaints;
+};
+
+/**
  * **The railway is crossed on purpose, and mostly on bridges.**
  *
  * Jim, 23 August 2026: the park is designed around the bridge constraints —
@@ -7119,6 +7269,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   [
     'every bridge is as wide as its own path, with the rail corridor open beneath',
     bridgesMatchTheirPathAndKeepTheRailClear,
+  ],
+  [
+    "the park's own paving rides over every bridge, and none is left in a tunnel",
+    theDrawnPathRidesOverEveryBridge,
   ],
   [
     'railway crossings are planned — station-clear, and mostly real bridges',

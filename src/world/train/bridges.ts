@@ -11,7 +11,12 @@ import {
 } from 'three';
 import type { TrainRoute } from './route';
 import type { LevelCrossing } from './crossings';
-import { BRIDGE_DECK_DEPTH, BRIDGE_RISE } from './clearance';
+import {
+  BRIDGE_DECK_DEPTH,
+  BRIDGE_DECK_SLAB,
+  BRIDGE_RISE,
+  BRIDGE_ROAD_BED_DROP,
+} from './clearance';
 import {
   BRIDGE_WALL_THICKNESS,
   DECK_HALF_LENGTH,
@@ -20,7 +25,7 @@ import {
   type RealWorldQuery,
 } from './bridgeFootprint';
 import { TRACK_CLEARANCE } from './route';
-import { BUILDING_STEP_UP } from '../../core/constants';
+import { BUILDING_STEP_UP, PATH_CARRIER_SLACK, PATH_KERB_OVERHANG } from '../../core/constants';
 import { terrainHeight } from '../terrain';
 import { PALETTE } from '../../core/palette';
 import { pinkStoneTexture } from '../../core/textures';
@@ -67,6 +72,28 @@ import type { MovingPlatform } from '../building/surfaces';
  * - **Pink stone, the park's own** — `pinkStoneTexture`/`PALETTE.stonePink`
  *   exactly as the garden walls and the rail fence already use, never a
  *   new colour.
+ *
+ * ## The road a child sees is the park's own path, not a second surface
+ *
+ * Jim, 2026-08-24: *"the 'floor' on the bridge should be the normal path
+ * texture — it should read as a continuous path that goes over a bridge."*
+ * It now literally is the same surface: `pathGraph.ts` draws ONE sandy
+ * ribbon and ONE cream kerb for the whole park, and
+ * `drapePathsOverBridges` lifts the stretch of that ribbon a bridge
+ * carries onto {@link Bridge.pavingHeightAt} instead of the terrain. So
+ * there is no bridge-deck material, no second set of UVs and no seam to
+ * keep in step — the texture, the tiling and the kerb are the same mesh
+ * they are a metre before the ramp foot (CLAUDE.md's "one surface, one
+ * texture", the same fix the hood faces got).
+ *
+ * That also closes the old ribbon-through-the-tunnel bug: paths are drawn
+ * before the train exists, so the ground ribbon used to drape straight
+ * down through the arch while the bridge stood over it. Nothing here
+ * moved; the ribbon did.
+ *
+ * The masonry keeps a road *bed* — the swept shell's own top surface —
+ * `BRIDGE_ROAD_BED_DROP` below the walkable height, exactly the way the
+ * terrain sits below the paving it carries everywhere else in the park.
  *
  * ## Walkability: one height-varying platform, not stacked treads
  *
@@ -144,21 +171,37 @@ const ARCH_CLEAR_HALF = TRACK_CLEARANCE + 0.5;
  * masonry only ever stands on ground the fence already forbids to feet. */
 const ARCH_SPAN_HALF = DECK_HALF_LENGTH;
 
-/** Minimum masonry left between the road surface and the crown soffit —
- * the shell can pinch to this where the hump's surface dips toward the
- * arch's edge, and {@link crownHeightFor} raises the crown if the profile
- * would pinch it thinner. */
-const MIN_SHELL_DEPTH = 0.05;
-
 /**
  * Safety margin added on top of the worst (highest) ground sampled across
  * the crown's own footprint, before it counts as clearing
- * {@link BRIDGE_RISE} — see the old geometry's note of the same name: a
- * route can cross the rail anywhere across the corridor, and the terrain
- * wanders (~1.4 m park-wide), so the crown is derived from the worst
- * sampled ground, plus this.
+ * {@link BRIDGE_RISE}.
+ *
+ * **Sampling error, not a guess at the terrain.** The old note here read
+ * *"a route can cross the rail anywhere across the corridor, and the
+ * terrain wanders (~1.4 m park-wide), so the crown is derived from the
+ * worst sampled ground, plus this"* — but the wander is exactly what the
+ * worst-sampled figure already answers, so a further 0.15 m was a second,
+ * blind allowance for the same thing, and every bridge in the park stood
+ * that much taller than it needed to for it. What a margin here *can*
+ * honestly cover is the gap between the ground at the points sampled and
+ * the highest ground between them, so the sampling below now walks a fixed
+ * {@link GROUND_SAMPLE_STEP} pitch instead of five points per axis, and
+ * this is that residue.
+ *
+ * **Measured on the built park rather than assumed** (canonical seed, both
+ * bridges' own crown footprints): refining the pitch from the old 0.9 m to
+ * 0.3 m moved the worst ground found by **0.0028 m**, and refining it again
+ * to 0.05 m moved it a further **0.0018 m** — under half a centimetre in
+ * total, on terrain the old note was allowing 0.15 m for. So this leaves an
+ * order of magnitude of daylight over everything the sampling can still
+ * miss, which is the honest size for it.
  */
-const HEIGHT_MARGIN = 0.15;
+const HEIGHT_MARGIN = 0.05;
+
+/** Pitch the ground under a crown's own footprint is sampled at — see
+ * {@link HEIGHT_MARGIN}, which is what is left over once this is fine
+ * enough that the worst ground found stops moving. */
+const GROUND_SAMPLE_STEP = 0.3;
 
 /** Along-axis sampling pitch of the built shell, metres. */
 const SHELL_STEP = 0.6;
@@ -226,6 +269,22 @@ export interface Bridge {
    * — the single owner of the profile. Callers must check {@link covers}
    * first; beyond the hump it clamps to the local terrain. */
   heightAt(x: number, z: number): number;
+  /**
+   * **The ground the park's drawn path should be draped on here**, or
+   * `null` where this bridge does not carry the path — what
+   * `pathGraph.ts`'s `drapePathsOverBridges` asks so the one sandy ribbon
+   * runs up and over instead of through the arch.
+   *
+   * Deliberately *not* {@link covers}: that reports where a walker's own
+   * centre can stand, which is the paving less her body radius, and a
+   * ribbon trimmed to that would tear away from both parapets. This
+   * reaches the full masonry width plus the kerb's own overhang
+   * ({@link PATH_KERB_OVERHANG}) instead — the honest question "is the
+   * paving here carried by this bridge?", which is a different question
+   * from "can she stand here?" and so gets its own answer rather than a
+   * padded reuse of that one.
+   */
+  pavingHeightAt(x: number, z: number): number | null;
 }
 
 export interface BuiltBridges {
@@ -308,6 +367,29 @@ export function bridgeHeightAt(bridges: readonly Bridge[], x: number, z: number)
 }
 
 /**
+ * **Where the park's drawn paving sits at `(x, z)`, if a bridge carries it
+ * there** — the highest answer across every bridge, `null` on plain ground.
+ *
+ * The one function `pathGraph.ts`'s `drapePathsOverBridges` asks, and the
+ * paving twin of {@link bridgeHeightAt}: same "highest surface wins" rule
+ * for two bridges that overlap, a different (wider) idea of *covered*. See
+ * {@link Bridge.pavingHeightAt} for why the two questions are not the same
+ * one with a margin on it.
+ */
+export function bridgePavingHeightAt(
+  bridges: readonly Bridge[],
+  x: number,
+  z: number,
+): number | null {
+  let best: number | null = null;
+  for (const bridge of bridges) {
+    const height = bridge.pavingHeightAt(x, z);
+    if (height !== null && (best === null || height > best)) best = height;
+  }
+  return best;
+}
+
+/**
  * Builds every bridge the park's crossings need, and the group holding all
  * of their geometry. `real` is the actual, already-mostly-built collision
  * world — see `bridgeFootprint.ts`'s header (issues #317, #319).
@@ -367,30 +449,40 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // of it, not just the crossing's own centre point.
   let worstGroundY = -Infinity;
   let lowestCrownEdgeGroundY = Infinity;
-  for (let along = -ARCH_CLEAR_HALF; along <= ARCH_CLEAR_HALF + 1e-6; along += ARCH_CLEAR_HALF / 2) {
-    for (const t of [-1, -0.5, 0, 0.5, 1]) {
-      const { x, z } = frame.worldAt(along, halfAcross * t, shift);
+  const alongStep = Math.min(GROUND_SAMPLE_STEP, ARCH_CLEAR_HALF);
+  const acrossStep = Math.min(GROUND_SAMPLE_STEP, halfAcross);
+  for (let along = -ARCH_CLEAR_HALF; along <= ARCH_CLEAR_HALF + 1e-6; along += alongStep) {
+    for (let across = -halfAcross; across <= halfAcross + 1e-6; across += acrossStep) {
+      const { x, z } = frame.worldAt(along, across, shift);
       const ground = terrainHeight(x, z);
       worstGroundY = Math.max(worstGroundY, ground);
-      if (Math.abs(Math.abs(along) - ARCH_CLEAR_HALF) < 1e-6) {
+      if (ARCH_CLEAR_HALF - Math.abs(along) < alongStep) {
         lowestCrownEdgeGroundY = Math.min(lowestCrownEdgeGroundY, ground);
       }
     }
   }
   const crownBase = worstGroundY + BRIDGE_RISE + HEIGHT_MARGIN;
-  // The hump's surface dips a little between the crown (along = 0) and the
-  // arch's clear edge (±ARCH_CLEAR_HALF); the flat crown soffit sits
-  // `BRIDGE_DECK_DEPTH` under the crown, so the surface at that edge must
-  // still leave `MIN_SHELL_DEPTH` of masonry over it. Solve the profile for
-  // the crown height that guarantees it — see `surfaceProfile`.
+  const soffitCrownY = crownBase - BRIDGE_DECK_DEPTH;
+  // The hump's own surface has already begun to fall away by the far edge of
+  // the flat crown span (±ARCH_CLEAR_HALF), and the slab under it does not:
+  // it is flat, because the train needs full height across its whole width.
+  // So the binding point is the crown's EDGE, not its middle — the road
+  // there must still stand `BRIDGE_DECK_DEPTH` over the soffit, or the slab
+  // comes up through the paving. (It did: measured 0.06 m of stone proud of
+  // the roadway on the canonical seed's cramped bridge, where the old solve
+  // only kept the shell's thinnest pinch over the *soffit* and knew nothing
+  // about the slab's own thickness or the road bed under the paving.)
+  //
+  //   surface(edge) = crown − (crown − ground)·dip  ≥  soffitCrownY + BRIDGE_DECK_DEPTH
+  //
+  // solved for `crown`. Note this is the same height `crownBase` would put
+  // the crown at if the road were flat — the dip is the whole reason a real
+  // hump stands higher than the published `BRIDGE_RISE`, and the shorter the
+  // ramps, the more it costs.
   const shorterLength = Math.min(lengthPos, lengthNeg);
   const dipFraction = profileDrop(ARCH_CLEAR_HALF / Math.max(shorterLength, ARCH_CLEAR_HALF + 0.1));
-  // surface(edge) = crown − (crown − ground)·dip ≥ crownBase − BRIDGE_DECK_DEPTH + MIN_SHELL_DEPTH
-  const needed =
-    (crownBase - BRIDGE_DECK_DEPTH + MIN_SHELL_DEPTH - lowestCrownEdgeGroundY * dipFraction) /
-    (1 - dipFraction);
+  const needed = (crownBase - lowestCrownEdgeGroundY * dipFraction) / (1 - dipFraction);
   const crownY = Math.max(crownBase, needed);
-  const soffitCrownY = crownBase - BRIDGE_DECK_DEPTH;
 
   // --- the surface profile — the ONE owner of the hump's shape -------------
   const surfaceProfile = (x: number, z: number, along: number): number => {
@@ -437,7 +529,7 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   const at0 = frame.pointAt(0);
   const origin0 = frame.worldAt(0, 0, shift);
   const deckMesh = new Mesh(
-    new BoxGeometry(halfAcross * 2, 0.12, ARCH_CLEAR_HALF * 2),
+    new BoxGeometry(halfAcross * 2, BRIDGE_DECK_SLAB, ARCH_CLEAR_HALF * 2),
     bridgeMaterials().stone,
   );
   deckMesh.name = 'deck';
@@ -446,7 +538,7 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   const yaw = Math.atan2(at0.dirX, at0.dirZ);
   const rotation = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), yaw);
   const matrix = new Matrix4().compose(
-    new Vector3(origin0.x, soffitCrownY + 0.06, origin0.z),
+    new Vector3(origin0.x, soffitCrownY + BRIDGE_DECK_SLAB / 2, origin0.z),
     rotation,
     new Vector3(1, 1, 1),
   );
@@ -510,6 +602,15 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // the paved road (parapet inner faces), a little wider than the
   // *standable* extent `covers()` reports — a walker pressed against the
   // parapet still has floor under her feet.
+  // Bounding circle for `pavingHeightAt`'s cheap reject, about the crossing
+  // point: the longer ramp, the road's own half-width and the kerb's
+  // overhang, plus the spine's own deviation cap (`bridgeSpine.ts`) since a
+  // curved frame's far foot is not on the straight axis. Generous on
+  // purpose — it only ever has to *contain* the footprint, and `covers`
+  // below is what actually decides.
+  const pavingReachSq =
+    (Math.max(lengthPos, lengthNeg) + roadHalf + PATH_KERB_OVERHANG + PATH_CARRIER_SLACK + 4) ** 2;
+
   const platform: MovingPlatform = {
     surfaceY: crownY,
     covers: (x: number, z: number): boolean => {
@@ -537,6 +638,15 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
     footprintNear: (x: number, z: number, margin: number): boolean =>
       footprint.covers(x, z, margin + (halfAcross - walkHalf)),
     heightAt,
+    pavingHeightAt: (x: number, z: number): number | null => {
+      // Cheap circle reject first: `SpineFrame.project` walks the whole
+      // resampled spine, and this is asked once per vertex of the park's
+      // entire path mesh at boot.
+      if ((x - origin0.x) ** 2 + (z - origin0.z) ** 2 > pavingReachSq) return null;
+      if (!footprint.covers(x, z, roadHalf - walkHalf + PATH_KERB_OVERHANG + PATH_CARRIER_SLACK))
+        return null;
+      return heightAt(x, z);
+    },
   };
 
   return { bridge, platform, walls, group: bridgeGroup };
@@ -621,6 +731,12 @@ function buildShellGeometry(
       centre.z + centre.acrossZ * shift,
       along,
     );
+    // The stone the paving is laid on, not the surface a child walks at —
+    // see `clearance.ts`'s `BRIDGE_ROAD_BED_DROP`, one of the three terms
+    // `BRIDGE_DECK_DEPTH` is now derived from. The parapets' inner faces
+    // start here too,
+    // so no gap opens between the bed and the wall beside it.
+    const roadBed = surface - BRIDGE_ROAD_BED_DROP;
     const inTunnel = Math.abs(along) < ARCH_SPAN_HALF;
     const soffit = soffitAt(Math.abs(along));
     const bottomPlus = inTunnel
@@ -647,15 +763,15 @@ function buildShellGeometry(
         vertex(outerMinus.x, parapetTopMinus, outerMinus.z, u, parapetTopMinus / TEXTURE_METRES),
       ],
       innerBottom: [
-        vertex(roadPlus.x, surface, roadPlus.z, u, surface / TEXTURE_METRES),
-        vertex(roadMinus.x, surface, roadMinus.z, u, surface / TEXTURE_METRES),
+        vertex(roadPlus.x, roadBed, roadPlus.z, u, roadBed / TEXTURE_METRES),
+        vertex(roadMinus.x, roadBed, roadMinus.z, u, roadBed / TEXTURE_METRES),
       ],
       innerTop: [
         vertex(roadPlus.x, parapetTopPlus, roadPlus.z, u, parapetTopPlus / TEXTURE_METRES),
         vertex(roadMinus.x, parapetTopMinus, roadMinus.z, u, parapetTopMinus / TEXTURE_METRES),
       ],
-      roadA: vertex(roadPlus.x, surface + 0.02, roadPlus.z, u, roadHalf / TEXTURE_METRES),
-      roadB: vertex(roadMinus.x, surface + 0.02, roadMinus.z, u, -roadHalf / TEXTURE_METRES),
+      roadA: vertex(roadPlus.x, roadBed, roadPlus.z, u, roadHalf / TEXTURE_METRES),
+      roadB: vertex(roadMinus.x, roadBed, roadMinus.z, u, -roadHalf / TEXTURE_METRES),
       soffitA: inTunnel ? vertex(outerPlus.x, soffit, outerPlus.z, u, halfAcross / TEXTURE_METRES) : null,
       soffitB: inTunnel ? vertex(outerMinus.x, soffit, outerMinus.z, u, -halfAcross / TEXTURE_METRES) : null,
       copingOuter: [

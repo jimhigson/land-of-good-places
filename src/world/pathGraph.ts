@@ -6,6 +6,11 @@ import {
   MeshStandardMaterial,
   Vector3,
 } from 'three';
+import {
+  PATH_KERB_LIFT,
+  PATH_KERB_OVERHANG,
+  PATH_SURFACE_LIFT,
+} from '../core/constants';
 import { PALETTE } from '../core/palette';
 import { pathTexture } from '../core/textures';
 import { terrainHeight, terrainNormal } from './terrain';
@@ -162,6 +167,18 @@ export function isOnPath(x: number, z: number, margin = 0): boolean {
 }
 
 /**
+ * The two drawn layers, kept so {@link drapePathsOverBridges} can lift the
+ * stretches a bridge carries once the bridges exist. Each remembers the lift
+ * it was drawn at, because that is what a re-drape has to reapply over the
+ * new ground.
+ */
+interface DrawnLayer {
+  readonly mesh: Mesh;
+  readonly lift: number;
+}
+let drawnLayers: DrawnLayer[] = [];
+
+/**
  * Builds the whole path network as two meshes: a cream kerb and the sandy
  * surface sitting a few centimetres proud of it.
  */
@@ -175,13 +192,13 @@ export function buildPaths(): Mesh[] {
   for (const route of ROUTES) {
     const curve = routeCurve(route);
     const divisions = Math.max(24, Math.round(curve.getLength() / 0.8));
-    addRibbon(surface, curve, route.width, divisions, 0.055);
-    addRibbon(kerb, curve, route.width + 0.85, divisions, 0.03);
+    addRibbon(surface, curve, route.width, divisions, PATH_SURFACE_LIFT);
+    addRibbon(kerb, curve, route.width + PATH_KERB_OVERHANG * 2, divisions, PATH_KERB_LIFT);
     recordSamples(curve, divisions, route.width / 2);
   }
 
-  addDisc(surface, PLAZA.x, PLAZA.z, PLAZA.radius, 48, 5, 0.055);
-  addDisc(kerb, PLAZA.x, PLAZA.z, PLAZA.radius + 0.85, 48, 5, 0.03);
+  addDisc(surface, PLAZA.x, PLAZA.z, PLAZA.radius, 48, 5, PATH_SURFACE_LIFT);
+  addDisc(kerb, PLAZA.x, PLAZA.z, PLAZA.radius + PATH_KERB_OVERHANG * 2, 48, 5, PATH_KERB_LIFT);
 
   const surfaceMaterial = new MeshStandardMaterial({
     map: pathTexture(1),
@@ -208,7 +225,74 @@ export function buildPaths(): Mesh[] {
   kerbMesh.name = 'path-kerb';
   kerbMesh.receiveShadow = true;
 
+  drawnLayers = [
+    { mesh: kerbMesh, lift: PATH_KERB_LIFT },
+    { mesh: surfaceMesh, lift: PATH_SURFACE_LIFT },
+  ];
+
   return [kerbMesh, surfaceMesh];
+}
+
+/** Half-stride used to read the slope of a bridge's surface for the lifted
+ * vertices' normals — small enough to be local, big enough that the smooth
+ * hump profile actually changes across it. */
+const DRAPE_NORMAL_STEP = 0.35;
+
+/**
+ * **Lifts the stretch of the drawn path a bridge carries onto that bridge.**
+ *
+ * Jim, 2026-08-24: *"the 'floor' on the bridge should be the normal path
+ * texture — it should read as a continuous path that goes over a bridge."*
+ * It is the normal path texture because it is the normal path: this moves
+ * the vertices of the ribbon and kerb {@link buildPaths} already drew, so
+ * the material, the tiling, the kerb and the mesh over a bridge are the
+ * same ones a metre before its ramp foot, with no second surface to keep in
+ * step (CLAUDE.md, "one surface, one texture"). It also stops the ribbon
+ * draping *through* the arch, which is the same bug seen from the other
+ * side — paths are drawn before the train has solved its loop, so the
+ * paving used to lie on the terrain under a bridge that was built over it
+ * afterwards.
+ *
+ * `surfaceAt` is `bridges.ts`'s `bridgePavingHeightAt` bound to the built
+ * bridges — `null` on ordinary ground, the hump's own surface where a
+ * bridge carries the paving. Called by `World.ts` the moment `ParkTrain`
+ * has built its bridges, which is the earliest anything can answer.
+ *
+ * Normals are re-derived from the surface's own slope rather than left at
+ * the terrain's: a hump climbs at up to ~0.56, and a lit ribbon still
+ * shaded as though it were flat lawn reads as a decal rather than a road.
+ */
+export function drapePathsOverBridges(
+  surfaceAt: (x: number, z: number) => number | null,
+): void {
+  for (const { mesh, lift } of drawnLayers) {
+    const position = mesh.geometry.getAttribute('position') as BufferAttribute;
+    const normal = mesh.geometry.getAttribute('normal') as BufferAttribute;
+    let lifted = 0;
+    for (let i = 0; i < position.count; i += 1) {
+      const x = position.getX(i);
+      const z = position.getZ(i);
+      const surface = surfaceAt(x, z);
+      if (surface === null) continue;
+      position.setY(i, surface + lift);
+      lifted += 1;
+      // Slope of the hump here, by central difference through the same
+      // sampler. Off the bridge's own edge the sampler answers `null`, so
+      // fall back to the one-sided difference rather than to flat.
+      const east = surfaceAt(x + DRAPE_NORMAL_STEP, z) ?? surface;
+      const west = surfaceAt(x - DRAPE_NORMAL_STEP, z) ?? surface;
+      const north = surfaceAt(x, z + DRAPE_NORMAL_STEP) ?? surface;
+      const south = surfaceAt(x, z - DRAPE_NORMAL_STEP) ?? surface;
+      const dydx = (east - west) / (2 * DRAPE_NORMAL_STEP);
+      const dydz = (north - south) / (2 * DRAPE_NORMAL_STEP);
+      const length = Math.hypot(dydx, 1, dydz);
+      normal.setXYZ(i, -dydx / length, 1 / length, -dydz / length);
+    }
+    if (lifted === 0) continue;
+    position.needsUpdate = true;
+    normal.needsUpdate = true;
+    mesh.geometry.computeBoundingSphere();
+  }
 }
 
 // ---------------------------------------------------------------- internals

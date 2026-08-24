@@ -120,6 +120,46 @@ export const PLAYER_RADIUS = 0.62;
  */
 export const NPC_RADIUS = 0.5;
 
+// ------------------------------------------------------- the drawn footpath
+//
+// How the park's one path ribbon sits on whatever it is draped over. Owned by
+// `world/pathGraph.ts`, which draws it — but declared here, in a leaf with no
+// imports, because `world/train/bridges.ts` has to build its own road bed to
+// fit under the same ribbon and cannot import `pathGraph.ts`: that module's
+// evaluation *is* the walk-graph solve (see its header), so a bridge module
+// asking it for a float would run the whole park's path solve to get one. Same
+// reasoning as `train/trainDimensions.ts` and `train/clearance.ts`, and the
+// same disease avoided: a hand-copied 0.055 in the bridge builder is exactly
+// CLAUDE.md's "two definitions of one thing, kept in step by hand".
+
+/** How far the sandy path surface is lifted above the ground it is draped on. */
+export const PATH_SURFACE_LIFT = 0.055;
+
+/** How far the cream kerb under it is lifted — deliberately less, so the
+ * surface reads as sitting *on* the kerb rather than z-fighting it. */
+export const PATH_KERB_LIFT = 0.03;
+
+/** How far the kerb reaches out past the paved surface it borders, each
+ * side. Anything that has to carry the path (a bridge deck) has to carry
+ * this much more than the paving's own width, or the kerb tears off at the
+ * edge of the thing carrying it. */
+export const PATH_KERB_OVERHANG = 0.425;
+
+/**
+ * Slack a carrier of the path adds on top of {@link PATH_KERB_OVERHANG}
+ * before deciding a kerb vertex is its own to lift.
+ *
+ * The ribbon's edges are offset along the *drawn curve's* own perpendicular
+ * while a bridge measures across along its resampled spine's, so on a curve
+ * the two disagree by a few millimetres and the kerb's outer edge lands
+ * exactly on the boundary — measured on the canonical seed's first build of
+ * this, 85 of the kerb's 161 covered vertices made the cut and the other
+ * half stayed on the terrain, tearing the kerb in half down the middle of
+ * each bridge. A boundary two decisions land on from opposite sides is not
+ * a boundary; this is the stride that stops it being one.
+ */
+export const PATH_CARRIER_SLACK = 0.25;
+
 /** Full bob cycles per metre travelled — drives the walk animation phase. */
 export const PLAYER_BOB_CYCLES_PER_METRE = 0.42;
 

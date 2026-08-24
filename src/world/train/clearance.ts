@@ -107,16 +107,60 @@ export const RIDER_HEADROOM = 0.4;
 export const TRAIN_CLEARANCE_Y = TRAIN_SWEPT_TOP_Y + RIDER_HEADROOM;
 
 /**
- * The depth of a bridge's own structure — deck planks plus the beams under
- * them — between the surface a child walks on and the soffit a train passes
- * beneath.
+ * Thickness of the crown-span soffit slab a bridge actually builds — the
+ * mesh named `deck` in `world/train/bridges.ts`, the flat ceiling a train
+ * passes under and the one `test/procgen/invariants.ts` measures the built
+ * clearance off.
  *
- * The one number here that is a *claim* rather than a derivation, because
- * nothing in the built park measures a deck's own thickness back. Stated
- * separately, and named, so it is obvious what to reconcile if the real deck
- * geometry (`world/train/bridges.ts`) ever settles on something else.
+ * A plate, not a beam: nothing structural hangs off it, it is the visible
+ * underside of the crown and the rest of the masonry above it is the
+ * spandrel shell the road bed sits in. Kept the same as
+ * {@link BRIDGE_SHELL_MIN} so the two thinnest pieces of the arch read as
+ * one course of stone rather than two different ones.
  */
-export const BRIDGE_DECK_DEPTH = 0.35;
+export const BRIDGE_DECK_SLAB = 0.05;
+
+/**
+ * The thinnest masonry a bridge ever leaves between the top of its
+ * {@link BRIDGE_DECK_SLAB} and the bed its roadway is laid in — the pinch
+ * point, at the far edge of the flat crown span where the hump's own
+ * surface has already started to fall away.
+ */
+export const BRIDGE_SHELL_MIN = 0.05;
+
+/**
+ * How far below the height a bridge reports as *walkable* its masonry road
+ * bed sits — the gap the park's own path ribbon is laid into, so that
+ * walking over a bridge stands you on the same sandy paving as everywhere
+ * else rather than on bare stone (Jim, 2026-08-24). Exactly the relationship
+ * the terrain has with the paving it carries on the flat.
+ */
+export const BRIDGE_ROAD_BED_DROP = 0.06;
+
+/**
+ * The depth of a bridge's own structure between the surface a child walks
+ * on and the soffit a train passes beneath.
+ *
+ * **This used to be the one number in this file that was a claim rather
+ * than a derivation** — 0.35 m, with its own note admitting nothing in the
+ * built park measured a deck's thickness back. It is now the sum of the
+ * three pieces `world/train/bridges.ts` genuinely builds, so the claim is
+ * gone and a retune of any of them moves the clearance with it:
+ *
+ * | | m |
+ * |---|---|
+ * | {@link BRIDGE_DECK_SLAB} — the built crown ceiling | 0.05 |
+ * | {@link BRIDGE_SHELL_MIN} — masonry over it at the pinch | 0.05 |
+ * | {@link BRIDGE_ROAD_BED_DROP} — bed to walkable surface | 0.06 |
+ *
+ * Note what this is *not*: the height a real bridge's crown ends up at.
+ * The road is a hump, so it has already begun to fall away by the edge of
+ * the flat crown span, and `bridges.ts` raises the crown until the *lowest*
+ * road surface over that span still clears the slab — see its own note.
+ * That is a per-bridge solve against the real ramp lengths, and it is what
+ * the old 0.35 was silently standing in for park-wide.
+ */
+export const BRIDGE_DECK_DEPTH = BRIDGE_DECK_SLAB + BRIDGE_SHELL_MIN + BRIDGE_ROAD_BED_DROP;
 
 /**
  * How far a walkable surface must stand above the ground under the track
