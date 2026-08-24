@@ -250,9 +250,19 @@ const NAP_Z_COUNT = 3;
  *  issue #279's second follow-up, Jim 24 Aug 2026: *"live longer"*. Was
  *  1.8 s; a glyph now lingers most of two seconds longer. */
 const NAP_Z_CYCLE_SECONDS = 3.4;
-/** How far a glyph climbs over one cycle, metres — the same request: *"rise
- *  much higher"*. Was 0.8 m. */
-const NAP_Z_RISE = 2.4;
+/**
+ * How far a glyph climbs over one cycle, metres — the same request: *"rise
+ * much higher"*. Was 0.8 m; this is 75% further.
+ *
+ * Capped by the room, not just the request: {@link SUITE}'s own `wallHeight`
+ * is 3 m, her reclined head sits at ~0.7 m, and {@link NAP_Z_PLAYER_Y} +
+ * {@link NAP_Z_FOREHEAD_UP} already spend ~0.55 m of that headroom before a
+ * glyph even starts rising — so a climb picked without checking the ceiling
+ * (an early pass here tried 2.4 m) sends every glyph straight through the
+ * bedroom roof. 1.4 m keeps the highest point (~2.66 m) a genuine ~0.3 m
+ * clear of the 3 m ceiling.
+ */
+const NAP_Z_RISE = 1.4;
 /**
  * How tightly one burst's {@link NAP_Z_COUNT} glyphs bunch together at
  * launch, in seconds between the first and the last — Jim, 24 Aug 2026:
@@ -275,19 +285,22 @@ const NAP_Z_BURST_SPREAD_SECONDS = 0.6;
  */
 const NAP_Z_BURST_PERIOD_SECONDS = 8;
 /**
- * Height of the *starting* point of a glyph's rise above the reclined
- * player's own forehead (not her feet-anchored root — see
- * {@link Hotel.buildNapGlyphs}'s `playerAnchor`), metres. Jim, 24 Aug 2026:
- * *"start about 50cm above their head, not right on the surface of their
- * body"* — was 0.55 m above the root, which put the glyph right at her own
- * skin. This is that clearance plus the forehead's own height above the
- * root, so the glyph is already floating clear of her by roughly half a
- * metre the moment it spawns, before {@link NAP_Z_RISE} lifts it further.
+ * Height of the *starting* point of a glyph's rise above her feet-anchored
+ * root, metres — reclined and lying flat, that root sits at almost exactly
+ * her own head's real world height (measured directly: both ~0.71 m off the
+ * suite floor), so this doubles as "clearance above her head". Jim, 24 Aug
+ * 2026: *"start about 50cm above their head, not right on the surface of
+ * their body"*. Combined with {@link NAP_Z_FOREHEAD_UP} below, a glyph is
+ * already floating a genuine half-metre clear of her the moment it spawns,
+ * before {@link NAP_Z_RISE} lifts it further — and, per that constant's own
+ * doc comment, not so much clearance that the two together leave no
+ * headroom before the ceiling.
  */
-const NAP_Z_PLAYER_Y = 1.05;
+const NAP_Z_PLAYER_Y = 0.46;
 /** The same "already floating, not on the skin" clearance for a laid-down
- *  pet's own head, above the top of its cushion. */
-const NAP_Z_PET_Y = 0.8;
+ *  pet's own head, above the top of its cushion — also ceiling-budgeted
+ *  alongside {@link NAP_Z_RISE}, the same way {@link NAP_Z_PLAYER_Y} is. */
+const NAP_Z_PET_Y = 0.5;
 /**
  * Nudges the player's own glyph anchor from the skull's centre out to her
  * *forehead* — Jim, 24 Aug 2026: *"come from the character's forehead, not
