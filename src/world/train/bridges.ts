@@ -28,7 +28,7 @@ import { TRACK_CLEARANCE } from './route';
 import { BUILDING_STEP_UP, PATH_CARRIER_SLACK, PATH_KERB_OVERHANG } from '../../core/constants';
 import { terrainHeight } from '../terrain';
 import { PALETTE } from '../../core/palette';
-import { pinkStoneTexture } from '../../core/textures';
+import { archStoneTexture, pinkStoneTexture } from '../../core/textures';
 import { toonMaterial } from '../../art/style/materials';
 import type { MovingPlatform } from '../building/surfaces';
 
@@ -78,6 +78,16 @@ import type { MovingPlatform } from '../building/surfaces';
  * - **Pink stone, the park's own** — `pinkStoneTexture`/`PALETTE.stonePink`
  *   exactly as the garden walls and the rail fence already use, never a
  *   new colour.
+ * - **A voussoir ring frames the opening** — the soffit's own draw group
+ *   reads `archStoneTexture` instead of the ordinary wall coursing: large,
+ *   single-course wedge stones with a wide mortar joint, standing out from
+ *   the smaller randomised cobbles around them exactly the way a real
+ *   dressed-stone arch ring stands out from rubble walling. Jim,
+ *   2026-08-24: *"keep the current height but make the tunnel an arch,
+ *   with a texture giving arch stones around the tunnel"* — the height
+ *   (`BRIDGE_RISE` and friends) is untouched; only the opening's own
+ *   material changed. See `archStoneTexture`'s own header for why its
+ *   joints are drawn straight rather than tapered.
  *
  * ## The road a child sees is the park's own path, not a second surface
  *
@@ -222,11 +232,15 @@ const WALL_SEGMENT = 2.0;
  * and never build a bridge — a module-level call broke `check:space-night`
  * with `document is not defined` without a single bridge being asked for.
  */
-let materialsCache: { stone: Material; coping: Material } | null = null;
-function bridgeMaterials(): { stone: Material; coping: Material } {
+let materialsCache: { stone: Material; archStone: Material; coping: Material } | null = null;
+function bridgeMaterials(): { stone: Material; archStone: Material; coping: Material } {
   if (!materialsCache) {
     materialsCache = {
       stone: toonMaterial(0xffffff, { map: pinkStoneTexture(1, 1) }),
+      // The voussoir ring — see `archStoneTexture`'s own header. Same `(1,
+      // 1)` non-repeat as `stone`: the soffit's own UVs (`u` = along/
+      // `TEXTURE_METRES`) are what tiles it, exactly as they tile the wall.
+      archStone: toonMaterial(0xffffff, { map: archStoneTexture(1, 1) }),
       coping: toonMaterial(PALETTE.stonePinkLight),
     };
   }
@@ -571,7 +585,10 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
     soffitAt,
     springY,
   );
-  const shellMesh = new Mesh(shell.stone, bridgeMaterials().stone);
+  // Two materials, one geometry: group 0 (everything but the soffit) reads
+  // `stone`, group 1 (the tunnel soffit `buildShellGeometry` built as its
+  // own contiguous index run) reads `archStone` — the voussoir ring.
+  const shellMesh = new Mesh(shell.stone, [bridgeMaterials().stone, bridgeMaterials().archStone]);
   shellMesh.castShadow = true;
   shellMesh.receiveShadow = true;
   const copingMesh = new Mesh(shell.coping, bridgeMaterials().coping);
@@ -691,6 +708,12 @@ function buildShellGeometry(
   const positions: number[] = [];
   const uvs: number[] = [];
   const indices: number[] = [];
+  // The tunnel soffit's own triangles — kept apart from `indices` so they
+  // land in one contiguous run at the end, ready for a second
+  // `BufferGeometry` group carrying `archStoneTexture` (see the return
+  // below). Same vertex buffer as everything else; only which draw call
+  // reads which indices differs.
+  const voussoirIndices: number[] = [];
   const copingPositions: number[] = [];
   const copingUvs: number[] = [];
   const copingIndices: number[] = [];
@@ -786,8 +809,15 @@ function buildShellGeometry(
       ],
       roadA: vertex(roadPlus.x, roadBed, roadPlus.z, u, roadHalf / TEXTURE_METRES),
       roadB: vertex(roadMinus.x, roadBed, roadMinus.z, u, -roadHalf / TEXTURE_METRES),
-      soffitA: inTunnel ? vertex(outerPlus.x, soffit, outerPlus.z, u, halfAcross / TEXTURE_METRES) : null,
-      soffitB: inTunnel ? vertex(outerMinus.x, soffit, outerMinus.z, u, -halfAcross / TEXTURE_METRES) : null,
+      // `v` spans a flat 0..1 across the whole tunnel width, never scaled by
+      // `TEXTURE_METRES` the way every other surface's `v` is: a voussoir is
+      // ONE course, uninterrupted for the tunnel's full depth, so
+      // `archStoneTexture` must never see more than one vertical repeat of
+      // itself here regardless of how wide the tunnel is — a scaled `v`
+      // reintroduced a phantom horizontal joint partway across every stone
+      // the moment the width exceeded one texture tile.
+      soffitA: inTunnel ? vertex(outerPlus.x, soffit, outerPlus.z, u, 1) : null,
+      soffitB: inTunnel ? vertex(outerMinus.x, soffit, outerMinus.z, u, 0) : null,
       copingOuter: [
         copingVertex(outerPlus.x, parapetTopPlus + 0.06, outerPlus.z, u, 0),
         copingVertex(outerMinus.x, parapetTopMinus + 0.06, outerMinus.z, u, 0),
@@ -863,7 +893,7 @@ function buildShellGeometry(
         ring.soffitA !== null &&
         ring.soffitB !== null
       ) {
-        quad(indices, previous.soffitA, previous.soffitB, ring.soffitB, ring.soffitA);
+        quad(voussoirIndices, previous.soffitA, previous.soffitB, ring.soffitB, ring.soffitA);
       }
       // Abutment faces: the ring where the tunnel begins/ends gets a
       // vertical quad from the ground to the springing, closing the
@@ -895,10 +925,21 @@ function buildShellGeometry(
     previousAlong = along;
   }
 
+  // Two draw groups sharing one vertex buffer: the plain wall/road coursing
+  // first, then the voussoir ring as one contiguous run, so `shellMesh` can
+  // carry `[stone, archStone]` and Three.js reads group 1 with the second
+  // material — the same mechanism `Mesh.geometry.groups` always uses for a
+  // multi-material mesh, never a second, separately-transformed mesh (this
+  // file's own "one surface, one texture" rule).
+  const voussoirStart = indices.length;
+  indices.push(...voussoirIndices);
+
   const stone = new BufferGeometry();
   stone.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
   stone.setAttribute('uv', new BufferAttribute(new Float32Array(uvs), 2));
   stone.setIndex(indices);
+  stone.addGroup(0, voussoirStart, 0);
+  stone.addGroup(voussoirStart, voussoirIndices.length, 1);
   stone.computeVertexNormals();
 
   const coping = new BufferGeometry();
