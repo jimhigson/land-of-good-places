@@ -21,6 +21,7 @@ import {
   type SpaceId,
 } from '../spaces';
 import type { PortalBand } from '../tapSpacing';
+import { petBedFit } from './petBedFit';
 
 /**
  * The Land Hotel's floor plan — rooms as data, in each room's own local
@@ -1645,15 +1646,229 @@ export const SUITE_DOOR_WIDTH = 2.4;
  * side of it, so moving a bed without moving its partition is a bed in a wall;
  * `check:hotel` measures that too.
  */
+// Bedroom1's and bedroom3's spots shifted 3.8 m with their bedrooms when
+// `SUITE.halfX` grew for issue #274 (see the comment there); bedroom2's is
+// untouched, since bedroom2 grew symmetrically about its own centre.
 export const SUITE_BED_SPOTS: readonly (readonly [number, number])[] = [
-  [-6.9, -5.2],
+  [-10.7, -5.2],
   [-0.4, -5.2],
-  [7.2, -5.2],
+  [11.0, -5.2],
 ];
 
 /** Where the bedside tables stand — beside each bed, same reasoning as above. */
-export const SUITE_BEDSIDE_X: readonly number[] = [-5.4, 1.1, 8.7];
+export const SUITE_BEDSIDE_X: readonly number[] = [-9.2, 1.1, 12.5];
 export const SUITE_BEDSIDE_Z = -5.2;
+
+/**
+ * A human bed's own footprint half-extents — `Hotel.dressSuite`'s
+ * `props.place` call and its matching `Plate`, and {@link petBedSlots}'s own
+ * keep-out rectangle around it, all read this rather than each carrying its
+ * own copy of 0.7/1 (found duplicated three ways in review on #279).
+ */
+export const SUITE_BED_HALF_X = 0.7;
+export const SUITE_BED_HALF_Z = 1;
+
+/** A bedside table's own footprint radius — same reasoning as {@link SUITE_BED_HALF_X}. */
+export const SUITE_BEDSIDE_RADIUS = 0.36;
+
+/**
+ * A pet bed's whole footprint radius, **as built** — half its own base, at the
+ * scale {@link petBedFit} sizes it to.
+ *
+ * It used to be the literal `0.62`, which happened to match the raw asset's
+ * base (1.236 m across) but had no mechanism keeping it there, and no
+ * relationship at all to the animal that lies in the bed. See `petBedFit.ts`
+ * for what replaced it and why.
+ */
+export function petBedFootprintRadius(): number {
+  return petBedFit().footprintRadius;
+}
+
+/**
+ * Centre-to-centre spacing {@link petBedSlots} tiles pet beds at — measured,
+ * not chosen: wide enough that two neighbouring beds clear each other at their
+ * widest part *and* that the companions asleep in them clear each other, with
+ * a companion's own walking width of floor left between (`petBedFit.ts`).
+ *
+ * It used to be a flat 1.3 m, derived from the bed's own footprint and never
+ * from the 1.53 m animal lying in it, so two companions in neighbouring rows
+ * overlapped by ~0.19 m at ear and tail — Jim, 23–24 Aug 2026.
+ *
+ * `Hotel.petBedtimeRunUp` takes half of it: the spot a companion stands on to
+ * trot into its own bed has to be clear of that bed *and* of the next row's,
+ * and halfway between the two rows is the only place that is. A hand-picked
+ * distance there would be a second number to keep in step with this one.
+ */
+export function petBedPitch(): number {
+  return petBedFit().pitch;
+}
+
+/**
+ * How far short of the hall doorway's own line (the bedroom's `maxZ` from
+ * {@link clearFloorAround}) the last pet-bed row must stay — a flat safety
+ * margin well past `PLAYER_RADIUS`'s real clearance, chosen so this function
+ * never has to import `place.ts`'s doorway math (and risk the circular
+ * import that would make) just to reason about one specific door.
+ * `HotelProps.place`'s own doorway check (issue #273) is still the real,
+ * load-bearing proof that every placed bed clears it — this is what keeps
+ * {@link petBedSlots} from wasting rows it would only have to throw away.
+ */
+const PET_BED_DOORWAY_MARGIN = 0.6;
+
+/**
+ * The rectangle around a bedroom's own human bed and bedside table (both
+ * {@link SUITE_BED_SPOTS}`[bedIndex]` and {@link SUITE_BEDSIDE_X}`[bedIndex]`)
+ * that a pet bed must stay clear of, widened by {@link petBedFootprintRadius}
+ * so a pet bed's own footprint clears it, not just its centre.
+ *
+ * Takes `bedIndex` rather than always reading bedroom 2 (issue #279's
+ * original shape) because issue #274/#275's follow-up bug (Jim, 18 Aug 2026:
+ * *"the pet didn't get into any bed when I went to sleep"*) traced to every
+ * pet bed living in bedroom 2 alone: a nap taken from bedroom 1 or 3 — the
+ * first bedroom door a child actually reaches from the corridor, per
+ * `Hotel.enterSuite`'s own doc comment — is a solid partition and the fixed
+ * camera's whole field of view away from where any pet lies down, so it
+ * looked exactly like nothing had happened. See {@link petBedSlots}.
+ */
+function humanFurnitureKeepOutX(bedIndex: number): { readonly minX: number; readonly maxX: number } {
+  const [bedX] = SUITE_BED_SPOTS[bedIndex] ?? [0, 0];
+  const bedsideX = SUITE_BEDSIDE_X[bedIndex] ?? 0;
+  const radius = petBedFootprintRadius();
+  return {
+    minX: Math.min(bedX - SUITE_BED_HALF_X, bedsideX - SUITE_BEDSIDE_RADIUS) - radius,
+    maxX: Math.max(bedX + SUITE_BED_HALF_X, bedsideX + SUITE_BEDSIDE_RADIUS) + radius,
+  };
+}
+
+/**
+ * Every pet-bed row's z in `bedIndex`'s own bedroom, tiled from the
+ * bedroom's own north wall down to {@link PET_BED_DOORWAY_MARGIN} short of
+ * the hall doorway — derived from {@link clearFloorAround} rather than the
+ * wall positions themselves (any point in the bedroom's own column gives the
+ * same answer, since nothing inside it subdivides the room further), so a
+ * future move of any wall re-fits every row automatically. The representative
+ * x is the bedroom's own bed — always inside its own bedroom's column by
+ * construction, whichever of the three bedrooms `bedIndex` names.
+ */
+function petBedRowsZ(bedIndex: number): number[] {
+  const [bedX, bedZ] = SUITE_BED_SPOTS[bedIndex] ?? [0, 0];
+  const rect = clearFloorAround(SUITE, bedX, bedZ);
+  const southLimit = rect.maxZ - PET_BED_DOORWAY_MARGIN;
+  const radius = petBedFootprintRadius();
+  const rows: number[] = [];
+  for (
+    let z = rect.minZ + radius + 0.1;
+    z + radius <= southLimit;
+    z += petBedPitch()
+  ) {
+    rows.push(z);
+  }
+  return rows;
+}
+
+/**
+ * Does a pet bed centred at `(x, z)` clear every zone in `doors`? The same
+ * clamped-point-to-rectangle test `place.ts`'s `isClearOfDoorways` uses for
+ * every other prop, reimplemented here (four lines of pure geometry) rather
+ * than imported — `place.ts` already imports {@link doorwayClearanceZones}
+ * *from* this file, so importing back would be circular.
+ *
+ * {@link PET_BED_DOORWAY_MARGIN} only ever bounded the row's own *z*, one
+ * doorway at a flat distance; it stayed blind to a row's *columns*, which
+ * can sit close enough to a doorway's own width to graze its zone on the
+ * diagonal even while comfortably clear on z alone (found on #279's rebase
+ * over #278's widened `DOORWAY_THROUGH_DEPTH`: the innermost west column of
+ * the bedroom's last row, 0.57 m off the door's own edge in x and 0.19 m in
+ * z, at 0.601 m from the zone's corner — inside the bed's own 0.62 m
+ * radius). Checking every candidate against the real zones this room's own
+ * doorways produce is what actually proves the whole footprint clears them,
+ * not just the row that carries it.
+ */
+function clearsDoorways(x: number, z: number, doors: readonly DoorwayZone[]): boolean {
+  const radius = petBedFootprintRadius();
+  return doors.every((door) => {
+    const nearestX = Math.max(door.minX, Math.min(x, door.maxX));
+    const nearestZ = Math.max(door.minZ, Math.min(z, door.maxZ));
+    return Math.hypot(x - nearestX, z - nearestZ) >= radius;
+  });
+}
+
+/**
+ * Enough non-overlapping pet-bed slots for `count` pets, in one bedroom's own
+ * local metres — one per pet the player owns, see `Hotel.dressPetBeds`
+ * (issue #275). **Here, not a hand-typed list in `Hotel.ts`, for the same
+ * reason {@link SUITE_BED_SPOTS} is a list and not a literal in
+ * `Hotel.dressSuite`**: `check:hotel` needs this function too, to prove it
+ * never overlaps, and `store.ts` puts **no ceiling at all** on how many pets
+ * a child can own — a fixed, hand-typed slot list silently started placing
+ * every pet past its own length at the exact same coordinates as the last
+ * slot (issue #275's original review bug: identical overlapping bed and pet
+ * meshes, not graceful degradation).
+ *
+ * `bedIndex` picks which of {@link SUITE_BED_SPOTS}' three bedrooms the row
+ * tiles across — **default 1, the middle bedroom**, exactly the original
+ * (and still primary) behaviour: that room alone was doubled by issue #274
+ * for this. `Hotel.dressPetBeds` passes 0 or 2 for the two side bedrooms —
+ * see the doc comment on {@link humanFurnitureKeepOutX} for why a second
+ * bedroom's worth of calls exists at all now.
+ *
+ * **Capacity is whatever the rooms and {@link petBedPitch} work out to, and
+ * no number here restates it** — ask `petBedSlots(large, bedIndex).length`.
+ * (At the geometry of 24 Aug 2026 that is 10 in the middle bedroom and 2 in
+ * each side one; it was 27 and 3 while a pet bed was still 1.24 m across and
+ * too small for the animal in it.) `check:hotel` derives the same way rather
+ * than carrying a copy, because a copied capacity is a check that goes red
+ * for a bed that got bigger rather than for a generator that broke.
+ *
+ * Tiles every row {@link petBedRowsZ} finds for that bedroom — north of its
+ * own human bed and bedside table, south of them down to short of the hall
+ * doorway — outward from that furniture, west then east, across the
+ * bedroom's own **real** clear floor at each row ({@link clearFloorAround},
+ * never a hand-typed wall position), then drops any candidate
+ * {@link clearsDoorways} rejects. A `count` past a bedroom's own capacity is
+ * capped rather than reusing a slot: nothing drawn is safer than something
+ * drawn twice in the same spot, and a companion with no bed in the room she
+ * chose simply stays standing in the line for the nap, which is what it does
+ * everywhere else in the park.
+ */
+export function petBedSlots(
+  count: number,
+  bedIndex = 1,
+): readonly { readonly x: number; readonly z: number }[] {
+  const keepOut = humanFurnitureKeepOutX(bedIndex);
+  const bedX = (SUITE_BED_SPOTS[bedIndex] ?? [0, 0])[0];
+  const radius = petBedFootprintRadius();
+  const pitch = petBedPitch();
+  const doors = doorwayClearanceZones(SUITE, PLAYER_RADIUS);
+  const slots: { readonly x: number; readonly z: number }[] = [];
+  for (const z of petBedRowsZ(bedIndex)) {
+    const rect = clearFloorAround(SUITE, bedX, z);
+    const west: number[] = [];
+    for (
+      let x = keepOut.minX - radius - 0.05;
+      x - radius >= rect.minX;
+      x -= pitch
+    ) {
+      if (clearsDoorways(x, z, doors)) west.push(x);
+    }
+    const east: number[] = [];
+    for (
+      let x = keepOut.maxX + radius + 0.05;
+      x + radius <= rect.maxX;
+      x += pitch
+    ) {
+      if (clearsDoorways(x, z, doors)) east.push(x);
+    }
+    // Closest to the human furniture first, alternating west and east.
+    const columns = Math.max(west.length, east.length);
+    for (let i = 0; i < columns && slots.length < count; i += 1) {
+      if (west[i] !== undefined) slots.push({ x: west[i]!, z });
+      if (east[i] !== undefined && slots.length < count) slots.push({ x: east[i]!, z });
+    }
+    if (slots.length >= count) break;
+  }
+  return slots.slice(0, count);
+}
 
 /**
  * How tall the suite's internal partitions are.
@@ -1674,9 +1889,37 @@ export const SUITE: HotelRoom = {
   theme: SUITE_THEME,
   originX: HOTEL_ORIGIN_X,
   originZ: HOTEL_SUITE_Z,
-  // Grown from 8 × 6 to hold four rooms. The far corner is 13.6 m from the
-  // origin, well inside `HOTEL_PLAY_RADIUS`'s 24 m.
-  halfX: 11,
+  // Grown from 8 × 6 to hold four rooms, then widened again (issue #274,
+  // 17 Aug 2026: *"the hotel bedroom should be roughly double its current
+  // size"*) so the middle bedroom — the one with the pet's own furniture,
+  // see {@link SUITE.partitions} — could hold a small bed for each pet the
+  // player owns rather than one shared four-poster (issue #275).
+  //
+  // **Width only, and by exactly the middle bedroom's own old width.** The
+  // west and east bedrooms keep their existing footprint and furniture,
+  // simply translated outward by 3.8 m each; every extra metre of the 7.6 m
+  // `halfX` grew by goes to the middle bedroom alone, taking it from 7.6 to
+  // 15.2 m wide — literally double, area included, since its 6.3 m depth is
+  // untouched. Depth was deliberately left alone: the room is one rectangle,
+  // so growing `halfZ` too would have grown the hall, lounge and bathroom's
+  // *depth* by the same amount for free, which is a much bigger change than
+  // "the bedroom" asked for. The far corner is now 17 m from the origin,
+  // still comfortably inside `HOTEL_PLAY_RADIUS`'s 24 m.
+  //
+  // **`halfX` alone still could not be made free of side effects — the room
+  // is one rectangle, so both outer walls move for every row, not just the
+  // bedrooms'.** The bathroom keeps its own old footprint anyway, because
+  // its own dividing wall is deliberately re-anchored to the bedroom1/2
+  // divider it grids with (see `partitions` below) and moves the same 3.8 m
+  // with it. The **lounge did not get an equivalent anchor and genuinely
+  // grew** — both its walls (the bathroom wall on the west, `SUITE`'s own
+  // outer wall on the east) moved away from it — which review on #279 found
+  // `Hotel.dressLounge` had not been redressed for: its furniture was still
+  // at the old fixed coordinates, sitting in the middle of several new bare
+  // metres of floor on both sides. `dressLounge` now redresses that
+  // properly (its own comments explain how) rather than this file adding a
+  // second wall purely to keep the lounge the size it used to be.
+  halfX: 14.8,
   halfZ: 8,
   wallHeight: 3.0,
   // West: back out to the corridor.
@@ -1694,20 +1937,26 @@ export const SUITE: HotelRoom = {
   // to the edge of the space."* `check:hotel` probe 18 now measures every
   // partition end in the hotel against the built walls.
   partitions: [
-    { along: 'x', at: -1.7, from: -11, to: 11, doors: [-6.6, 0, 6.6] },
-    { along: 'x', at: 1.7, from: -11, to: 11, doors: [4.4] },
-    { along: 'z', at: -4.2, from: -8, to: -1.7, doors: [] },
-    { along: 'z', at: 3.4, from: -8, to: -1.7, doors: [] },
-    // The bathroom's own wall — the south half's answer to the bedroom
-    // divider at the same x, so the plan reads as one grid. **Its doorway
-    // opens off the lounge, not the hall** — an en-suite off the living
-    // room — because a hall-side door boxed the pan into corners the fixed
-    // camera cannot see (a 2.2 m partition hides 2.8 m of floor behind it)
-    // or into the door band's own finger of tap clearance; watched in the
-    // browser, not guessed. The door's north jamb lands exactly on the hall
-    // wall's line, so the run's built span is one clean piece from jamb to
-    // south wall.
-    { along: 'z', at: -4.2, from: 1.7, to: 8, doors: [2.9] },
+    { along: 'x', at: -1.7, from: -14.8, to: 14.8, doors: [-10.4, 0, 10.4] },
+    { along: 'x', at: 1.7, from: -14.8, to: 14.8, doors: [4.4] },
+    // Bedroom1/bedroom2 boundary — was x = −4.2, moved 3.8 m west so bedroom2
+    // (east of here) gains that much extra width.
+    { along: 'z', at: -8.0, from: -8, to: -1.7, doors: [] },
+    // Bedroom2/bedroom3 boundary — was x = 3.4, moved 3.8 m east for the
+    // same reason, from the other side.
+    { along: 'z', at: 7.2, from: -8, to: -1.7, doors: [] },
+    // The bathroom's own wall — the south half's answer to the bedroom1/2
+    // divider at the same x, so the plan still reads as one grid; it moved
+    // with that divider (−4.2 → −8.0) rather than staying put, which is what
+    // keeps the bathroom itself exactly the size it always was. **Its
+    // doorway opens off the lounge, not the hall** — an en-suite off the
+    // living room — because a hall-side door boxed the pan into corners the
+    // fixed camera cannot see (a 2.2 m partition hides 2.8 m of floor behind
+    // it) or into the door band's own finger of tap clearance; watched in
+    // the browser, not guessed. The door's north jamb lands exactly on the
+    // hall wall's line, so the run's built span is one clean piece from jamb
+    // to south wall.
+    { along: 'z', at: -8.0, from: 1.7, to: 8, doors: [2.9] },
   ],
   // **One per room.** The suite is four rooms now, and a bedroom with no
   // window is the thing Jim objected to in the first place (*"a room without
@@ -1724,10 +1973,13 @@ export const SUITE: HotelRoom = {
     // apart, and the tap-spacing rule (`world/tapSpacing.ts`) wants a full
     // finger between different actions.
     // `zoneAt` pins "Look out" to the third bedroom's pane: the middle one's
-    // stand spot is blocked (the pet's four-poster lives in that bedroom), so
-    // the default picker slid to the first bedroom's pane — 3.04 m from the
-    // west wall's painting, inside the tap rule's finger.
-    north: { at: [-9.5, -2.9, 9.7], width: 2.2, sill: 1.5, head: 2.6, zoneAt: 9.7 },
+    // stand spot is blocked (the pet beds live in that bedroom — see
+    // `Hotel.dressPetBeds`), so the default picker slid to the first
+    // bedroom's pane — 3.04 m from the west wall's painting, inside the tap
+    // rule's finger. Bedroom1's and bedroom3's panes shifted 3.8 m with their
+    // bedrooms (see `SUITE.halfX`); bedroom2's is untouched, since bedroom2
+    // grew symmetrically about its own centre.
+    north: { at: [-13.3, -2.9, 13.5], width: 2.2, sill: 1.5, head: 2.6, zoneAt: 13.5 },
     // One pane, lighting the bathroom — light only, no zone (see
     // {@link WindowWall.lookZone}). The pair that used to flank the front
     // door (±1.95) could not survive the partitions reaching the west wall:

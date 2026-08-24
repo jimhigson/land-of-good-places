@@ -329,6 +329,15 @@ export class Game {
     this.parade = new Parade(this.player, this.world.collision, this.camera);
     this.engine.scene.add(this.parade.group);
     this.addSystem(this.parade);
+    // The seam a nap uses to send a pet to its own bed — see
+    // `Hotel.PetParadeLink` and `Hotel.sendPetsToBed`, its one caller.
+    // `Parade` satisfies the interface structurally; this is the one place
+    // that holds both a `Parade` and a `Hotel` to introduce them.
+    //
+    // **It is the whole of the wiring, and deliberately one-way.** The parade
+    // owns a pet's body from the line all the way onto the cushion and back;
+    // nothing here hides a pet, moves one, or holds a second copy of one.
+    this.world.hotel.petParade = this.parade;
 
     // Every balloon the player owns and has not stowed, held above them on a
     // bending string — see `entities/HeldBalloon.ts`'s doc comment for why
@@ -389,6 +398,19 @@ export class Game {
 
     this.pointer = new PointerControls(canvas, {
       onTap: (point) => {
+        // A nap ends on her own say-so now, not a timer (issue #279's
+        // follow-up, Jim 24 Aug 2026: *"make them stay in the bed until the
+        // player gets them out … tapping anywhere, clicking anywhere … wakes
+        // them"*). Checked first, the same way the tree's "tap anywhere means
+        // come down" already is below: whatever else the tap might have hit —
+        // a prop to select, a pet to call over, a spot to walk to — is not
+        // what she asked for while she is asleep, so none of it runs.
+        // `Hotel.wakeNap` is a no-op when nobody is actually napping, so this
+        // costs nothing the rest of the time.
+        if (this.world.hotel.isNapping) {
+          this.world.hotel.wakeNap();
+          return;
+        }
         // Up a tree, a tap anywhere means "come down" — it is not a place to
         // walk to, and the character cannot walk while riding the climb
         // anyway (see `Player.riding`).
@@ -1457,6 +1479,13 @@ export class Game {
     this.sky.setView(skyViewFor(this.cameraOverride, this.camera.forward));
     this.world.update(this.frameContext);
 
+    // Nothing between the world and the systems any more. There used to be a
+    // line here taking the parade's pets off screen for the length of a hotel
+    // nap, because the hotel put a *second* copy of each animal in its pet
+    // beds; there is one body per pet now (`Hotel.sendPetsToBed` hands the
+    // parade the bed and the parade's own member walks into it), so there is
+    // nothing to hide and no second system with an opinion about whether a
+    // pet is drawn. See `entities/parade/ParadeMember.ts`.
     for (const system of this.systems) system.update(this.frameContext);
 
     this.updateHud(tick);
