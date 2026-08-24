@@ -94,7 +94,7 @@ import {
   SUITE_BED_HALF_Z,
   SUITE_DOOR_WIDTH,
   petBedSlots,
-  PET_BED_FOOTPRINT_RADIUS,
+  petBedFootprintRadius,
   clearFloorAround,
   doorwayClearanceZones,
   relativeLuminance,
@@ -352,13 +352,11 @@ for (const [index, spot] of SUITE_BED_SPOTS.entries()) {
 // hand-typed, fixed-length slot list placing every pet past its own length
 // at the exact same coordinates as the last slot — identical, overlapping
 // bed and pet meshes, not graceful degradation. This checks the function
-// itself at several counts, including well past the shop's four species —
-// 1 (the fresh-save fallback), 8 (what the review specifically asked to be
-// exercised), 20 (well into the bedroom's real 27-slot capacity — 28 raw
-// tile positions, minus one `clearsDoorways` throws out for grazing the hall
-// doorway's own zone at this room's geometry) and 30 (past that capacity,
-// proving the cap degrades by drawing *fewer* beds than requested rather
-// than by overlapping two of them) — proving by pure
+// itself at several counts, every one of them derived from the generator's
+// own real capacity rather than typed: 1 (the fresh-save fallback — which is
+// now RiPika's, see probe 16b), 2, the bedroom's whole capacity, and three
+// past it (proving the cap degrades by drawing *fewer* beds than requested
+// rather than by overlapping two of them) — proving by pure
 // geometry, for every count, that no two returned slots coincide or
 // overlap, every slot clears the human bed, its bedside table and every
 // doorway, and every slot stays on the bedroom's own real floor (derived
@@ -369,18 +367,31 @@ for (const [index, spot] of SUITE_BED_SPOTS.entries()) {
   const doors = doorwayClearanceZones(SUITE, PLAYER_RADIUS);
   const humanBed = SUITE_BED_SPOTS[1] ?? [0, 0];
   const bedsideX = SUITE_BEDSIDE_X[1] ?? 0;
+  const PET_BED_FOOTPRINT_RADIUS = petBedFootprintRadius();
+  // The middle bedroom's real capacity, asked of the generator rather than
+  // written down here. It used to be the literal 27, which was true only
+  // while a pet bed was 1.24 m across; the beds are now sized from the animal
+  // that lies in them (`petBedFit.ts`) and a copied number would have gone red
+  // for the bed getting *bigger*, which is not a regression. Two beds must
+  // still fit, or the walk probe below has nothing to prove.
+  const capacity = petBedSlots(400).length;
+  if (capacity < 2) {
+    problems.push(
+      `the middle bedroom has room for only ${capacity} pet bed(s) — a child who owns two ` +
+        'companions would watch one of them stand about during the nap',
+    );
+  }
 
-  for (const count of [1, 8, 20, 30]) {
+  for (const count of [1, 2, capacity, capacity + 3]) {
     const slots = petBedSlots(count);
     if (slots.length > count) {
       problems.push(`petBedSlots(${count}) returned ${slots.length} slots — more than asked for`);
       continue;
     }
-    if (slots.length < count && count <= 27) {
+    if (slots.length < count && count <= capacity) {
       problems.push(
         `petBedSlots(${count}) returned only ${slots.length} slots, short of the bedroom's own ` +
-          `27-slot capacity (28 raw tile positions minus one doorway-zone reject) — a slot ` +
-          `generator regression, not real capacity`,
+          `${capacity}-slot capacity — a slot generator regression, not real capacity`,
       );
     }
     for (const [index, slot] of slots.entries()) {

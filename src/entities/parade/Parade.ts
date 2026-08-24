@@ -1,4 +1,5 @@
 import { Group, Object3D, Raycaster, Vector2 } from 'three';
+import { PARADE_MEMBER_RADIUS } from '../../core/constants';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { IsoCamera } from '../../core/IsoCamera';
 import type { TapPoint } from '../../core/input/PointerControls';
@@ -67,8 +68,14 @@ const LEAD_GAP = 1.35;
 /** Base gap between one follower and the next; model height is added to it. */
 const BASE_GAP = 0.7;
 
-/** Collision radius for a follower. Small — they are toys. */
-const MEMBER_RADIUS = 0.22;
+/**
+ * Collision radius for a follower. Small — they are toys.
+ *
+ * Kept in `core/constants.ts` because the hotel's pet-bed spacing has to leave
+ * a companion room to walk between two beds, and that has to be *this* number
+ * rather than a copy of it.
+ */
+const MEMBER_RADIUS = PARADE_MEMBER_RADIUS;
 
 /** Seconds of stagger per place in the line when the hop ripples down it. */
 const HOP_RIPPLE = 0.075;

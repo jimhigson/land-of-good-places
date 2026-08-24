@@ -1,4 +1,4 @@
-import { Box3, Group, Vector3 } from 'three';
+import { Group, Vector3 } from 'three';
 import { clamp, clamp01, TAU, turnTowards } from '../../core/mathUtils';
 import { disposeTree } from '../../art/style/materials';
 import type { AssetHandle, CreatureHandle } from '../../art/style/asset';
@@ -7,6 +7,7 @@ import { createJetpack, type JetpackHandle } from '../../art/models/jetpack';
 import { KID_HEIGHT } from '../../art/models/kid';
 import type { ShopItem } from '../../world/building/shops/catalogue';
 import type { PetBedSpot } from '../../world/hotel/Hotel';
+import { BED_POSE_X, BED_POSE_Y, sleepingBox } from '../../world/hotel/petBedFit';
 
 /**
  * One cute thing walking behind you.
@@ -76,33 +77,6 @@ const BED_ARRIVE_RADIUS = 0.35;
  * itself (`Hotel.NAP_SECONDS`).
  */
 const BED_CLIMB_SECONDS = 0.8;
-
-/**
- * The sleeping pose, as a rotation of the whole model: tipped a quarter turn
- * back about X — which swings the head, and so the pillow end, to −Z — and
- * rolled a quarter turn about its own Y so it lies **on its side** rather than
- * flat on its back.
- *
- * Both quarters matter, and both were measured on the real bed
- * (`art/models/hotelAssets.ts`, `createPetBed`) rather than picked:
- *
- * - Every pet stands {@link PET_RENDER_HEIGHT} = 1.46 m tall, so tipped flat on
- *   its back its own *depth* becomes its height in the bed — 1.09 m for the
- *   kitten, 1.30 m for the puff — against a canopy whose fabric starts at
- *   0.72 m and peaks at 1.27 m. Three of the four pets went through the roof of
- *   their own bed.
- * - Rolled onto its side it is the pet's *width* that stands up instead — 0.67 m
- *   for the bunny, 0.84 m for the kitten, 0.90 m for the mouse — which clears
- *   the canopy, and it is what a sleeping animal actually looks like.
- * - Y is +π/2 rather than −π/2 so the pet's front (and its face) rolls toward
- *   +X, which is the side the fixed iso camera looks from.
- *
- * Three.js applies an `XYZ` Euler as `Rx·Ry·Rz`, so the roll happens in the
- * pet's own frame first and the tip afterwards, which is what keeps the head
- * on the pillow whichever way it is rolled.
- */
-const BED_POSE_X = -Math.PI / 2;
-const BED_POSE_Y = Math.PI / 2;
 
 /** Where a pet is in {@link ParadeMember.goToBed}'s routine. */
 export type BedPhase = 'walking' | 'climbing' | 'asleep';
@@ -526,27 +500,19 @@ export class ParadeMember {
    * Taken in the constructor because that is the one moment the model is at
    * full scale, unposed, and has no lazily-built jet pack in it to inflate the
    * box.
+   *
+   * The measurement itself is `petBedFit.ts`'s {@link sleepingBox}, shared with
+   * the code that sizes the bed off exactly the same box — so a bed can never
+   * be built for one pose while a companion lies down in another.
    */
   private measureSleepOffset(): void {
-    const rotation = this.root.rotation.clone();
-    const scale = this.root.scale.clone();
-    const position = this.root.position.clone();
-    this.root.rotation.set(BED_POSE_X, BED_POSE_Y, 0);
-    this.root.scale.setScalar(1);
-    this.root.position.set(0, 0, 0);
-    this.root.updateMatrixWorld(true);
-    const box = new Box3().setFromObject(this.root);
-    if (!box.isEmpty()) {
-      this.sleepOffset.set(
-        -(box.min.x + box.max.x) / 2,
-        -box.min.y,
-        -(box.min.z + box.max.z) / 2,
-      );
-    }
-    this.root.rotation.copy(rotation);
-    this.root.scale.copy(scale);
-    this.root.position.copy(position);
-    this.root.updateMatrixWorld(true);
+    const box = sleepingBox(this.root);
+    if (box.isEmpty()) return;
+    this.sleepOffset.set(
+      -(box.min.x + box.max.x) / 2,
+      -box.min.y,
+      -(box.min.z + box.max.z) / 2,
+    );
   }
 
   /**

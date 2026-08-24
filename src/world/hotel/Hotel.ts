@@ -79,10 +79,9 @@ import {
   STRAIGHT_WALK_WIDTH,
   type BreakfastKind,
   type LiftDialHandle,
-  PET_BED_CUSHION_RADIUS,
-  PET_BED_CUSHION_TOP,
   type SlidingDoorsHandle,
 } from '../../art/models/hotelAssets';
+import { petBedFit } from './petBedFit';
 import { createRipikaStatue, type RipikaStatueHandle } from '../../art/models/ripikaStatue';
 import { createPet, PET_KINDS, type PetKind } from '../../art/models/pets';
 import { createKeeper, type KeeperHandle } from '../../art/models/keeper';
@@ -160,8 +159,7 @@ import {
   SUITE_BEDSIDE_Z,
   SUITE_BEDSIDE_RADIUS,
   petBedSlots,
-  PET_BED_FOOTPRINT_RADIUS,
-  PET_BED_PITCH,
+  petBedPitch,
   SUITE_DOOR_WIDTH,
   SUITE_PARTITION_HEIGHT,
   type HotelDoorBand,
@@ -204,21 +202,22 @@ const NAP_SECONDS = 2.6;
 const NAP_FADE_SECONDS = 0.7;
 
 /**
- * How far off its own bed, in metres, a pet starts that trot — toward +Z,
- * which in every bedroom is the doorway side of the room (`petBedRowsZ` tiles
- * its rows from the north wall *southward* toward the hall door), so a pet
+ * How far off its own bed, in metres, a companion starts that trot — toward
+ * +Z, which in every bedroom is the doorway side of the room (`petBedRowsZ`
+ * tiles its rows from the north wall *southward* toward the hall door), so it
  * arrives from the direction she herself walked in from.
  *
  * **Exactly halfway to the next row**, which is the only distance that is
- * clear of two things at once: its own bed's {@link PET_BED_FOOTPRINT_RADIUS}
- * (0.62 m) behind it, and the next row's, 0.65 m ahead. A hand-picked 0.7 m
- * looks fine on an empty floor and stands 0.02 m inside the neighbouring
- * canopy the moment a child owns enough pets to fill two rows — a small
- * instance of exactly the "two numbers kept in step by hand" trap CLAUDE.md
- * opens with, so this is derived from `layout.ts`'s own `PET_BED_PITCH`
- * rather than typed.
+ * clear of two things at once: its own bed's footprint behind it, and the next
+ * row's ahead. A hand-picked 0.7 m looks fine on an empty floor and stands
+ * inside the neighbouring canopy the moment a child owns enough companions to
+ * fill two rows — a small instance of exactly the "two numbers kept in step by
+ * hand" trap CLAUDE.md opens with, so this is derived from `layout.ts`'s own
+ * {@link petBedPitch} rather than typed.
  */
-const PET_BEDTIME_RUN_UP = PET_BED_PITCH / 2;
+function petBedtimeRunUp(): number {
+  return petBedPitch() / 2;
+}
 
 /**
  * How high above the mattress top a napping child's own origin (her **feet** —
@@ -4881,13 +4880,17 @@ export class Hotel implements GameSystem {
    * into the bed. A pet with no bed in the room she chose is a pet with
    * nowhere to go.
    *
-   * The two side bedrooms are smaller and hold three beds each rather than
-   * the middle one's 27; a fourth pet gets no bed *there* and simply stays
-   * standing in the line for the nap, which is what a teddy does too. The
-   * three rooms can never be on screen at once (the fixed camera only ever
-   * shows the bedroom she is in), so one pet quietly having a bed in each is
-   * not something a child can catch her out on — and only the room she is
-   * actually in is ever sent a pet (see {@link sendPetsToBed}).
+   * The two side bedrooms are smaller and hold fewer beds than the middle
+   * one; a companion past that room's own capacity gets no bed *there* and
+   * simply stays standing in the line for the nap, which is what it does
+   * everywhere else in the park. `petBedSlots` owns that number — it fell
+   * when the beds grew to fit the animals (`petBedFit.ts`), which is the
+   * right way round: a bed a pet fits in, in a room that holds two of them,
+   * beats three beds nothing fits in. The three rooms can never be on screen
+   * at once (the fixed camera only ever shows the bedroom she is in), so one
+   * companion quietly having a bed in each is not something a child can catch
+   * her out on — and only the room she is actually in is ever sent for (see
+   * {@link sendPetsToBed}).
    */
   private dressPetBeds(shell: Group): void {
     const companions = this.ownedCompanions();
@@ -4907,15 +4910,21 @@ export class Hotel implements GameSystem {
    *  pet that is actually out" from every other case — see
    *  {@link petBedRoster}. */
   private placePetBed(shell: Group, x: number, z: number, bedIndex: number, uid: string | null): void {
-    const bed = createPetBed();
+    // Built at the size the animals actually need — `petBedFit.ts` measured
+    // the longest companion (1.53 m lying) against the raw asset's own
+    // bolster (1.35 m) and works out the factor. Every number below comes off
+    // the handle it hands back, so the bed a child sees, the platform she
+    // bounces on and the height a companion sleeps at are one measurement.
+    const fit = petBedFit();
+    const bed = createPetBed(fit.scale);
     // Solid and standable, like every other flat-topped prop now — QA
     // found it walk-through, and a pet bed is a cushion, which is a thing
     // a child may absolutely bounce onto.
     this.props.place(shell, SUITE, bed.root, {
       x,
       z,
-      radius: PET_BED_FOOTPRINT_RADIUS,
-      top: PET_BED_CUSHION_TOP,
+      radius: fit.footprintRadius,
+      top: bed.cushionTop,
     });
     this.petBedRoster.push({
       x,
@@ -4925,10 +4934,10 @@ export class Hotel implements GameSystem {
       spot: {
         runUpX: SUITE.originX + x,
         runUpY: 0,
-        runUpZ: SUITE.originZ + z + PET_BEDTIME_RUN_UP,
+        runUpZ: SUITE.originZ + z + petBedtimeRunUp(),
         cushionX: SUITE.originX + x,
         cushionZ: SUITE.originZ + z,
-        cushionTop: PET_BED_CUSHION_TOP,
+        cushionTop: bed.cushionTop,
       },
     });
   }
@@ -5050,10 +5059,11 @@ export class Hotel implements GameSystem {
     };
     this.napGlyphSleepers.push({ anchor: playerAnchor, glyphs: this.makeNapGlyphSet(0x50a1) });
 
+    const fit = petBedFit();
     this.petBedRoster.forEach((bed, index) => {
       const worldX = SUITE.originX + bed.x;
       const worldZ = SUITE.originZ + bed.z;
-      const y = PET_BED_CUSHION_TOP + PET_BED_CUSHION_RADIUS * 0.72 + NAP_Z_PET_Y;
+      const y = fit.cushionTop + fit.cushionRadius * 0.72 + NAP_Z_PET_Y;
       this.napGlyphSleepers.push({
         // `null` until this bed's own pet has actually walked over, got in and
         // settled — a "Z" over an empty bed, or over a pet still on its way

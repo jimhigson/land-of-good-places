@@ -678,15 +678,26 @@ export const EGG_PRIZES: readonly ShopItem[] = [
 ];
 
 /**
- * Every catalogue entry there is, on sale or not.
+ * Every catalogue entry there is, on sale or not — the shelves and the egg
+ * prizes in one list.
+ *
+ * Exported because "everything a child can end up owning" is a real question
+ * with real askers: {@link shopItem}'s own index below, and
+ * `world/hotel/petBedFit.ts`, which measures every companion in it to find out
+ * how big a pet bed has to be. A second `[...SHOP_ITEMS, ...EGG_PRIZES]`
+ * written out at a call site is a list that stops being every entry the day a
+ * third table appears.
+ */
+export const ALL_CATALOGUE_ITEMS: readonly ShopItem[] = [...SHOP_ITEMS, ...EGG_PRIZES];
+
+/**
+ * Look-up by id.
  *
  * Built after both tables so that a look-up by id finds egg prizes too — the
  * carried-item system is handed an id and has no idea whether it came off a
  * shelf or out of an egg.
  */
-const BY_ID = new Map<string, ShopItem>(
-  [...SHOP_ITEMS, ...EGG_PRIZES].map((item) => [item.id, item]),
-);
+const BY_ID = new Map<string, ShopItem>(ALL_CATALOGUE_ITEMS.map((item) => [item.id, item]));
 
 export function shopItem(id: string): ShopItem | null {
   return BY_ID.get(id) ?? null;

@@ -21,6 +21,7 @@ import {
   type SpaceId,
 } from '../spaces';
 import type { PortalBand } from '../tapSpacing';
+import { petBedFit } from './petBedFit';
 
 /**
  * The Land Hotel's floor plan — rooms as data, in each room's own local
@@ -1671,21 +1672,36 @@ export const SUITE_BED_HALF_Z = 1;
 export const SUITE_BEDSIDE_RADIUS = 0.36;
 
 /**
- * A pet bed's whole footprint radius — the posts and canopy, not just
- * {@link PET_BED_CUSHION_RADIUS}'s cushion (`art/models/hotelAssets.ts`).
- */
-export const PET_BED_FOOTPRINT_RADIUS = 0.62;
-
-/** Centre-to-centre spacing {@link petBedSlots} tiles pet beds at — comfortably
- *  past the 1.24 m two {@link PET_BED_FOOTPRINT_RADIUS} circles need to clear
- *  each other.
+ * A pet bed's whole footprint radius, **as built** — half its own base, at the
+ * scale {@link petBedFit} sizes it to.
  *
- *  Exported because `Hotel.PET_BEDTIME_RUN_UP` takes half of it: the spot a
- *  pet stands on to trot into its own bed has to be clear of that bed *and*
- *  of the next row's, and halfway between the two rows is the only place that
- *  is. A hand-picked distance there would be a second number to keep in step
- *  with this one. */
-export const PET_BED_PITCH = 1.3;
+ * It used to be the literal `0.62`, which happened to match the raw asset's
+ * base (1.236 m across) but had no mechanism keeping it there, and no
+ * relationship at all to the animal that lies in the bed. See `petBedFit.ts`
+ * for what replaced it and why.
+ */
+export function petBedFootprintRadius(): number {
+  return petBedFit().footprintRadius;
+}
+
+/**
+ * Centre-to-centre spacing {@link petBedSlots} tiles pet beds at — measured,
+ * not chosen: wide enough that two neighbouring beds clear each other at their
+ * widest part *and* that the companions asleep in them clear each other, with
+ * a companion's own walking width of floor left between (`petBedFit.ts`).
+ *
+ * It used to be a flat 1.3 m, derived from the bed's own footprint and never
+ * from the 1.53 m animal lying in it, so two companions in neighbouring rows
+ * overlapped by ~0.19 m at ear and tail — Jim, 23–24 Aug 2026.
+ *
+ * `Hotel.petBedtimeRunUp` takes half of it: the spot a companion stands on to
+ * trot into its own bed has to be clear of that bed *and* of the next row's,
+ * and halfway between the two rows is the only place that is. A hand-picked
+ * distance there would be a second number to keep in step with this one.
+ */
+export function petBedPitch(): number {
+  return petBedFit().pitch;
+}
 
 /**
  * How far short of the hall doorway's own line (the bedroom's `maxZ` from
@@ -1702,7 +1718,7 @@ const PET_BED_DOORWAY_MARGIN = 0.6;
 /**
  * The rectangle around a bedroom's own human bed and bedside table (both
  * {@link SUITE_BED_SPOTS}`[bedIndex]` and {@link SUITE_BEDSIDE_X}`[bedIndex]`)
- * that a pet bed must stay clear of, widened by {@link PET_BED_FOOTPRINT_RADIUS}
+ * that a pet bed must stay clear of, widened by {@link petBedFootprintRadius}
  * so a pet bed's own footprint clears it, not just its centre.
  *
  * Takes `bedIndex` rather than always reading bedroom 2 (issue #279's
@@ -1717,9 +1733,10 @@ const PET_BED_DOORWAY_MARGIN = 0.6;
 function humanFurnitureKeepOutX(bedIndex: number): { readonly minX: number; readonly maxX: number } {
   const [bedX] = SUITE_BED_SPOTS[bedIndex] ?? [0, 0];
   const bedsideX = SUITE_BEDSIDE_X[bedIndex] ?? 0;
+  const radius = petBedFootprintRadius();
   return {
-    minX: Math.min(bedX - SUITE_BED_HALF_X, bedsideX - SUITE_BEDSIDE_RADIUS) - PET_BED_FOOTPRINT_RADIUS,
-    maxX: Math.max(bedX + SUITE_BED_HALF_X, bedsideX + SUITE_BEDSIDE_RADIUS) + PET_BED_FOOTPRINT_RADIUS,
+    minX: Math.min(bedX - SUITE_BED_HALF_X, bedsideX - SUITE_BEDSIDE_RADIUS) - radius,
+    maxX: Math.max(bedX + SUITE_BED_HALF_X, bedsideX + SUITE_BEDSIDE_RADIUS) + radius,
   };
 }
 
@@ -1737,11 +1754,12 @@ function petBedRowsZ(bedIndex: number): number[] {
   const [bedX, bedZ] = SUITE_BED_SPOTS[bedIndex] ?? [0, 0];
   const rect = clearFloorAround(SUITE, bedX, bedZ);
   const southLimit = rect.maxZ - PET_BED_DOORWAY_MARGIN;
+  const radius = petBedFootprintRadius();
   const rows: number[] = [];
   for (
-    let z = rect.minZ + PET_BED_FOOTPRINT_RADIUS + 0.1;
-    z + PET_BED_FOOTPRINT_RADIUS <= southLimit;
-    z += PET_BED_PITCH
+    let z = rect.minZ + radius + 0.1;
+    z + radius <= southLimit;
+    z += petBedPitch()
   ) {
     rows.push(z);
   }
@@ -1767,10 +1785,11 @@ function petBedRowsZ(bedIndex: number): number[] {
  * not just the row that carries it.
  */
 function clearsDoorways(x: number, z: number, doors: readonly DoorwayZone[]): boolean {
+  const radius = petBedFootprintRadius();
   return doors.every((door) => {
     const nearestX = Math.max(door.minX, Math.min(x, door.maxX));
     const nearestZ = Math.max(door.minZ, Math.min(z, door.maxZ));
-    return Math.hypot(x - nearestX, z - nearestZ) >= PET_BED_FOOTPRINT_RADIUS;
+    return Math.hypot(x - nearestX, z - nearestZ) >= radius;
   });
 }
 
@@ -1789,14 +1808,17 @@ function clearsDoorways(x: number, z: number, doors: readonly DoorwayZone[]): bo
  * `bedIndex` picks which of {@link SUITE_BED_SPOTS}' three bedrooms the row
  * tiles across — **default 1, the middle bedroom**, exactly the original
  * (and still primary) behaviour: that room alone was doubled by issue #274
- * for this, and its four rows of seven columns tile out to 28 raw slots —
- * minus whichever ones {@link clearsDoorways} throws out for actually
- * grazing the hall doorway's own zone (one, at the middle bedroom's current
- * geometry: the innermost west column of the southmost row), leaving 27
- * usable — twice what `check:hotel` asks this function to place at once.
- * `Hotel.dressPetBeds` passes 0 or 2 for the two side bedrooms, one slot at
- * a time — see the doc comment on {@link humanFurnitureKeepOutX} for why a
- * second bedroom's worth of calls exists at all now.
+ * for this. `Hotel.dressPetBeds` passes 0 or 2 for the two side bedrooms —
+ * see the doc comment on {@link humanFurnitureKeepOutX} for why a second
+ * bedroom's worth of calls exists at all now.
+ *
+ * **Capacity is whatever the rooms and {@link petBedPitch} work out to, and
+ * no number here restates it** — ask `petBedSlots(large, bedIndex).length`.
+ * (At the geometry of 24 Aug 2026 that is 10 in the middle bedroom and 2 in
+ * each side one; it was 27 and 3 while a pet bed was still 1.24 m across and
+ * too small for the animal in it.) `check:hotel` derives the same way rather
+ * than carrying a copy, because a copied capacity is a check that goes red
+ * for a bed that got bigger rather than for a generator that broke.
  *
  * Tiles every row {@link petBedRowsZ} finds for that bedroom — north of its
  * own human bed and bedside table, south of them down to short of the hall
@@ -1805,10 +1827,9 @@ function clearsDoorways(x: number, z: number, doors: readonly DoorwayZone[]): bo
  * never a hand-typed wall position), then drops any candidate
  * {@link clearsDoorways} rejects. A `count` past a bedroom's own capacity is
  * capped rather than reusing a slot: nothing drawn is safer than something
- * drawn twice in the same spot, and no purchase this game's shop can
- * produce reaches the middle bedroom's 27 (four species, so a genuinely
- * dedicated collector would need to buy the same pet seven times over before
- * a bed failed to appear for one of them).
+ * drawn twice in the same spot, and a companion with no bed in the room she
+ * chose simply stays standing in the line for the nap, which is what it does
+ * everywhere else in the park.
  */
 export function petBedSlots(
   count: number,
@@ -1816,23 +1837,25 @@ export function petBedSlots(
 ): readonly { readonly x: number; readonly z: number }[] {
   const keepOut = humanFurnitureKeepOutX(bedIndex);
   const bedX = (SUITE_BED_SPOTS[bedIndex] ?? [0, 0])[0];
+  const radius = petBedFootprintRadius();
+  const pitch = petBedPitch();
   const doors = doorwayClearanceZones(SUITE, PLAYER_RADIUS);
   const slots: { readonly x: number; readonly z: number }[] = [];
   for (const z of petBedRowsZ(bedIndex)) {
     const rect = clearFloorAround(SUITE, bedX, z);
     const west: number[] = [];
     for (
-      let x = keepOut.minX - PET_BED_FOOTPRINT_RADIUS - 0.05;
-      x - PET_BED_FOOTPRINT_RADIUS >= rect.minX;
-      x -= PET_BED_PITCH
+      let x = keepOut.minX - radius - 0.05;
+      x - radius >= rect.minX;
+      x -= pitch
     ) {
       if (clearsDoorways(x, z, doors)) west.push(x);
     }
     const east: number[] = [];
     for (
-      let x = keepOut.maxX + PET_BED_FOOTPRINT_RADIUS + 0.05;
-      x + PET_BED_FOOTPRINT_RADIUS <= rect.maxX;
-      x += PET_BED_PITCH
+      let x = keepOut.maxX + radius + 0.05;
+      x + radius <= rect.maxX;
+      x += pitch
     ) {
       if (clearsDoorways(x, z, doors)) east.push(x);
     }

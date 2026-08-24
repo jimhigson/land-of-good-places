@@ -120,6 +120,18 @@ export const PLAYER_RADIUS = 0.62;
  */
 export const NPC_RADIUS = 0.5;
 
+/**
+ * A parade follower's collision radius — a toy or a pet walking behind the
+ * child. Small, because they are small.
+ *
+ * Here rather than in `entities/parade/Parade.ts` (which reads it) for the
+ * same reason {@link NPC_RADIUS} is: `world/hotel/petBedFit.ts` needs it to
+ * work out how much floor to leave between two pet beds — the strip a
+ * companion has to walk down to reach its own — and it must be the *same*
+ * number the parade shoves that companion about with, not a second copy of it.
+ */
+export const PARADE_MEMBER_RADIUS = 0.22;
+
 /** Full bob cycles per metre travelled — drives the walk animation phase. */
 export const PLAYER_BOB_CYCLES_PER_METRE = 0.42;
 
