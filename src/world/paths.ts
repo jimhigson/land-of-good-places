@@ -2477,23 +2477,36 @@ function snapRunsToLattice(
   let out: [number, number][] = points.map((p) => [p[0], p[1]] as [number, number]);
   if (out.length < 3) return out;
   const destination = out[out.length - 1] as [number, number];
+  // A hop is on-axis by the same 15% minor/major ratio the invariants
+  // classify with — never by exact float equality: a clamped run's points
+  // wobble by centimetres (`enforceRailSide` clamps each to its own
+  // nearest rail point), and an exact-collinearity test simply never saw
+  // those runs at all (seed 11's building spur carried a 15 m near-axis
+  // clamped leg the snap silently skipped).
+  const hopAxis = (a: readonly [number, number], b: readonly [number, number]): 'x' | 'z' | null => {
+    const dx = Math.abs(b[0] - a[0]);
+    const dz = Math.abs(b[1] - a[1]);
+    const hop = Math.hypot(dx, dz);
+    if (hop < 1e-6) return null;
+    if (dx / hop <= 0.15) return 'x'; // north-south run, x nearly constant
+    if (dz / hop <= 0.15) return 'z'; // east-west run, z nearly constant
+    return null;
+  };
   let i = 1;
   while (i < out.length) {
     const a = out[i - 1] as [number, number];
     const b = out[i] as [number, number];
-    const sameX = Math.abs(a[0] - b[0]) < 1e-6; // north-south run, shared x
-    const sameZ = !sameX && Math.abs(a[1] - b[1]) < 1e-6;
-    if (!sameX && !sameZ) {
+    const axis = hopAxis(a, b);
+    if (axis === null) {
       i += 1;
       continue;
     }
+    const sameX = axis === 'x';
     // Extend to the run's end.
     let end = i;
     while (
       end < out.length - 1 &&
-      (sameX
-        ? Math.abs((out[end + 1] as [number, number])[0] - b[0]) < 1e-6
-        : Math.abs((out[end + 1] as [number, number])[1] - b[1]) < 1e-6)
+      hopAxis(out[end] as [number, number], out[end + 1] as [number, number]) === axis
     ) {
       end += 1;
     }
@@ -2501,7 +2514,12 @@ function snapRunsToLattice(
     const runStart = out[startIdx] as [number, number];
     const runEnd = out[end] as [number, number];
     const length = Math.hypot(runEnd[0] - runStart[0], runEnd[1] - runStart[1]);
-    const shared = sameX ? runStart[0] : runStart[1];
+    // The run's own line: mean of the near-constant coordinate.
+    let sharedSum = 0;
+    for (let k = startIdx; k <= end; k += 1) {
+      sharedSum += (out[k] as [number, number])[sameX ? 0 : 1];
+    }
+    const shared = sharedSum / (end - startIdx + 1);
     const anchor = sameX ? PLAZA.x : PLAZA.z;
     const remainder = ((((shared - anchor) % STREET_PITCH) + STREET_PITCH) % STREET_PITCH);
     const offset = remainder <= STREET_PITCH / 2 ? -remainder : STREET_PITCH - remainder;
