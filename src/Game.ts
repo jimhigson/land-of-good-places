@@ -398,6 +398,19 @@ export class Game {
 
     this.pointer = new PointerControls(canvas, {
       onTap: (point) => {
+        // A nap ends on her own say-so now, not a timer (issue #279's
+        // follow-up, Jim 24 Aug 2026: *"make them stay in the bed until the
+        // player gets them out … tapping anywhere, clicking anywhere … wakes
+        // them"*). Checked first, the same way the tree's "tap anywhere means
+        // come down" already is below: whatever else the tap might have hit —
+        // a prop to select, a pet to call over, a spot to walk to — is not
+        // what she asked for while she is asleep, so none of it runs.
+        // `Hotel.wakeNap` is a no-op when nobody is actually napping, so this
+        // costs nothing the rest of the time.
+        if (this.world.hotel.isNapping) {
+          this.world.hotel.wakeNap();
+          return;
+        }
         // Up a tree, a tap anywhere means "come down" — it is not a place to
         // walk to, and the character cannot walk while riding the climb
         // anyway (see `Player.riding`).

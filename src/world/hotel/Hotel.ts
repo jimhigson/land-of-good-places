@@ -187,17 +187,16 @@ import { spaceAt, SPACE_GARDEN } from '../spaces';
 /** Seconds after a change of space before another may trigger. */
 const SPACE_COOLDOWN = 0.9;
 
-/** How long a nap on a suite bed lasts, in seconds. */
-const NAP_SECONDS = 2.6;
-
 /**
  * How long the room's light and the sleep glyphs take to fade in or out at
  * the edges of a nap, in seconds — the follow-up half of issue #279 (Jim,
  * 18 Aug 2026: *"the lighting should dim when sleeping and the background
  * change to stars and a moon, plus animated z symbols float off the player
- * and all their pets"*). Short enough to read inside {@link NAP_SECONDS}'s
- * own 2.6 s nap, long enough that the room visibly *dims* rather than the
- * lights snapping — see `Hotel.update`'s own easing of {@link napDim}.
+ * and all their pets"*). Short enough that the fade settles well before a
+ * child taps to wake herself back up, long enough that the room visibly
+ * *dims* rather than the lights snapping — see `Hotel.update`'s own easing
+ * of {@link napDim}. A nap itself has no fixed length any more — see
+ * {@link Hotel.wakeNap}.
  */
 const NAP_FADE_SECONDS = 0.7;
 
@@ -1099,14 +1098,22 @@ export class Hotel implements GameSystem {
   private readonly cheerLights: MeshToonMaterial[] = [];
   /** The star over the "yours" door — it lights up once the suite is yours. */
   private yoursStar: Mesh | null = null;
-  private napping = 0;
+  /**
+   * Whether a nap is in progress. **Not a countdown any more** — issue #279's
+   * follow-up, Jim 24 Aug 2026: *"make them stay in the bed until the player
+   * gets them out (no timer to wake them up)."* A nap now runs for as long as
+   * she likes; the only way out is {@link wakeNap}, called from her own
+   * input (a tap, a click, or the `jump` action) rather than from time
+   * passing. See {@link nap}'s doc comment for the whole feature.
+   */
+  private napping = false;
   private nappingAt: Bed | null = null;
   /**
    * How dimmed the hotel's own light rig is right now, 0 (wide awake) to 1
    * (fully settled into a nap) — {@link update} eases this toward
-   * `this.napping > 0 ? 1 : 0` every frame and hands it straight to
+   * `this.napping ? 1 : 0` every frame and hands it straight to
    * {@link lighting}'s own `setNapDim`, so the room dims in and lifts back
-   * out over {@link NAP_FADE_SECONDS} rather than snapping with the timer.
+   * out over {@link NAP_FADE_SECONDS} rather than snapping with the wake.
    * See {@link nap}'s doc comment for the whole feature.
    */
   private napDim = 0;
@@ -1434,7 +1441,7 @@ export class Hotel implements GameSystem {
    * `DayNight` remains the one place that decides what "night" looks like.
    */
   get isNapping(): boolean {
-    return this.napping > 0;
+    return this.napping;
   }
 
   /**
@@ -1900,7 +1907,7 @@ export class Hotel implements GameSystem {
         standRadius: 2.4,
         verb: 'Sleep',
         actions: () =>
-          this.napping > 0 ? [] : pressAction('Have a sleep', () => this.nap(bed), '💤'),
+          this.napping ? [] : pressAction('Have a sleep', () => this.nap(bed), '💤'),
       });
     }
 
@@ -1948,14 +1955,14 @@ export class Hotel implements GameSystem {
    * straight to {@link lighting}'s own `setNapDim` — issue #279's follow-up,
    * *"the lighting should dim when sleeping"*.
    *
-   * Driven off `napping > 0` rather than folded into `nap`'s one-shot call:
+   * Driven off `napping` rather than folded into `nap`'s one-shot call:
    * `nap` only runs once, at the start, and the *un*-dim on waking needs
    * exactly the same easing run in reverse — one continuous fade toward
    * whichever target is live is simpler than a start-side tween and a
    * separate end-side one that has to agree with it.
    */
   private updateNapDim(dt: number): void {
-    const target = this.napping > 0 ? 1 : 0;
+    const target = this.napping ? 1 : 0;
     const step = dt / NAP_FADE_SECONDS;
     this.napDim = target > this.napDim
       ? Math.min(target, this.napDim + step)
@@ -1973,7 +1980,7 @@ export class Hotel implements GameSystem {
    * glyph copy-pasted three times.
    */
   private updateNapGlyphs(elapsed: number): void {
-    const active = this.napping > 0;
+    const active = this.napping;
     for (const sleeper of this.napGlyphSleepers) {
       const anchor = active ? sleeper.anchor() : null;
       for (const glyph of sleeper.glyphs) {
@@ -1996,12 +2003,12 @@ export class Hotel implements GameSystem {
   // ---------------------------------------------------------------- frame
 
   update(context: FrameContext): void {
-    const { dt, elapsed } = context;
+    const { dt, elapsed, input } = context;
     if (this.spaceCooldown > 0) this.spaceCooldown -= dt;
     this.updateOverhangCutaway(context);
     // The nap's own light and sleep glyphs — run unconditionally, like every
     // other always-on frame of this method, so they fade back out correctly
-    // even in the frame `napping` itself hits zero below. The nap's *sky* is
+    // even in the frame {@link wakeNap} ends the nap below. The nap's *sky* is
     // not driven here at all any more — see {@link isNapping}.
     this.updateNapDim(dt);
     // No pet-bed frame here any more: the animals in those beds are the
@@ -2096,22 +2103,14 @@ export class Hotel implements GameSystem {
     const player = this.player;
     if (!player) return;
 
-    if (this.napping > 0 && this.nappingAt) {
-      this.napping -= dt;
-      if (this.napping <= 0) {
-        this.napping = 0;
-        this.nappingAt.blanket.visible = false;
-        this.nappingAt = null;
-        // `endRide` stands the model back up itself and opens her eyes again
-        // (it clears `sleeping`); the group was never pitched (see `nap` — the
-        // posture owns the recline).
-        player.endRide();
-        player.model.setExpression('happy');
-        // The pets get up together too, and go back to being out and about
-        // rather than standing in bed — the other half of `nap`'s issue #275
-        // hookup, and of 21 Aug's bug 1. See `standPetsDown`.
-        this.standPetsDown();
-      }
+    if (this.napping && this.nappingAt) {
+      // No timer here any more — see {@link wakeNap}'s own doc comment for
+      // where the other two wake triggers (a tap, a click) live. `jump` is
+      // read here rather than in `Player` because `Player.update` returns
+      // early for the whole time she is riding (this nap included) and never
+      // reaches its own jump handler at all, so nothing there would ever see
+      // this press regardless of which one runs first in a frame.
+      if (input.justPressed('jump')) this.wakeNap();
       return;
     }
 
@@ -2895,7 +2894,7 @@ export class Hotel implements GameSystem {
    * the same 21 Aug report: a bed stands empty until this moment, and its pet
    * trots into it now, in step with her — see {@link sendPetsToBed}. It does
    * not matter which of the three bedrooms she napped
-   * in; {@link napping} is one room-wide timer already (it is what disables
+   * in; {@link napping} is one room-wide flag already (it is what disables
    * every other bed's own "Have a sleep" chip while it runs), so every pet
    * bed answers to it rather than only the one nearest her.
    *
@@ -2903,11 +2902,14 @@ export class Hotel implements GameSystem {
    * 2026): the light dims, "Z" glyphs rise off her and every pet bed, and the
    * sky visible over the open wall line switches from whatever it was to a
    * real night. None of that is started here: this method only sets the
-   * timer, and {@link update}'s own `updateNapDim` / `updateNapGlyphs` read
+   * flag, and {@link update}'s own `updateNapDim` / `updateNapGlyphs` read
    * `napping` fresh every frame — the same "one flag, several readers" shape
    * the pets' sleep already uses, rather than a second thing this method has
    * to remember to switch on and back off. The sky is the odd one out: it is
    * not this class's own state at all, but `World`'s — see {@link isNapping}.
+   *
+   * **Runs until {@link wakeNap} ends it — no timer.** Jim, 24 Aug 2026:
+   * *"make them stay in the bed until the player gets them out."*
    */
   private nap(bed: Bed): void {
     const player = this.player;
@@ -2917,9 +2919,47 @@ export class Hotel implements GameSystem {
     player.sleeping = true;
     player.setRidePose(bed.x, BED_MATTRESS_TOP + NAP_LIE_HEIGHT, bed.z + NAP_FEET_Z, 0);
     bed.blanket.visible = true;
-    this.napping = NAP_SECONDS;
+    this.napping = true;
     this.nappingAt = bed;
     this.sendPetsToBed(bed.bedIndex);
+  }
+
+  /**
+   * Ends an in-progress nap right now, standing her — and every asleep pet —
+   * back up.
+   *
+   * Issue #279's own follow-up, Jim 24 Aug 2026: *"make them stay in the bed
+   * until the player gets them out (no timer to wake them up). Tapping
+   * anywhere, clicking anywhere, or hitting the jump key wakes them."* There
+   * are exactly two callers, one per half of that sentence:
+   *
+   *  - `Game.ts`'s `onTap` handler, checked before anything else it does —
+   *    a tap or a click, touch and mouse alike, since `PointerControls`
+   *    already folds both into the one `onTap` signal;
+   *  - {@link update}'s own `jump` read, since `Player` never sees that press
+   *    at all while she is riding (this nap included) — see `update`'s own
+   *    comment on why the two cannot race.
+   *
+   * A safe no-op when nobody is actually napping, so both callers can fire it
+   * unconditionally rather than checking {@link isNapping} themselves first
+   * — the same shape `dismissView` already uses for its own "any press"
+   * exit, guarded on `cine.dismissible` rather than on this flag.
+   */
+  wakeNap(): void {
+    const player = this.player;
+    if (!this.napping || !this.nappingAt || !player) return;
+    this.napping = false;
+    this.nappingAt.blanket.visible = false;
+    this.nappingAt = null;
+    // `endRide` stands the model back up itself and opens her eyes again (it
+    // clears `sleeping`); the group was never pitched (see `nap` — the
+    // posture owns the recline).
+    player.endRide();
+    player.model.setExpression('happy');
+    // The pets get up together too, and go back to being out and about
+    // rather than standing in bed — the other half of `nap`'s issue #275
+    // hookup, and of 21 Aug's bug 1. See `standPetsDown`.
+    this.standPetsDown();
   }
 
   // ------------------------------------------------------------- queries
@@ -5055,9 +5095,25 @@ export class Hotel implements GameSystem {
     const playerAnchor = (): { x: number; y: number; z: number } | null => {
       const player = this.player;
       if (!player) return null;
-      return { x: player.position.x, y: player.position.y + NAP_Z_PLAYER_Y, z: player.position.z };
+      // `nap()` pins her position to her *feet* — the foot of the bed,
+      // `setRidePose`'s own `NAP_FEET_Z` — and the sleeping posture swings her
+      // whole body back from there along −Z (see `applySleepingRidePose`'s doc
+      // comment). Anchoring straight on `player.position` therefore floats the
+      // glyphs up from her middle, not her head — Jim, 24 Aug 2026: *"make the
+      // z coming from the player come from their heads not their middle."*
+      // `headHeight` is the same feet-to-head distance `NAP_FEET_Z`'s own doc
+      // comment already derives the pillow position from (measured, not
+      // retyped), so walking the anchor back by it lands on her actual head.
+      return {
+        x: player.position.x,
+        y: player.position.y + NAP_Z_PLAYER_Y,
+        z: player.position.z - player.model.headHeight,
+      };
     };
-    this.napGlyphSleepers.push({ anchor: playerAnchor, glyphs: this.makeNapGlyphSet(0x50a1) });
+    this.napGlyphSleepers.push({
+      anchor: playerAnchor,
+      glyphs: this.makeNapGlyphSet(0x50a1, 'hotel.napGlyph.player'),
+    });
 
     const fit = petBedFit();
     this.petBedRoster.forEach((bed, index) => {
@@ -5070,7 +5126,7 @@ export class Hotel implements GameSystem {
         // there, is the *look* of the bug the walk exists to fix. Asked of the
         // parade, which owns that pet, rather than of a clock in this file.
         anchor: () => (this.petIsAsleep(bed) ? { x: worldX, y, z: worldZ } : null),
-        glyphs: this.makeNapGlyphSet(0x50b1 + index),
+        glyphs: this.makeNapGlyphSet(0x50b1 + index, 'hotel.napGlyph.pet'),
       });
     });
   }
@@ -5081,12 +5137,22 @@ export class Hotel implements GameSystem {
    * in **world** metres every frame, and `hotelRoot` is the only node here
    * with an identity transform. Hidden (`visible = false`) until
    * {@link updateNapGlyphs} first has a live anchor for them.
+   *
+   * `name` distinguishes the player's own trio from a pet bed's — the same
+   * `hotel.<thing>` naming every other built mesh here uses (`hotel.wall`,
+   * `hotel.napBlanket`) — so `check:hotel` can find *her* glyphs specifically
+   * rather than guessing by proximity, which a pet bed standing near her own
+   * bed could easily fool.
    */
-  private makeNapGlyphSet(seed: number): { readonly mesh: Mesh; readonly phase: number }[] {
+  private makeNapGlyphSet(
+    seed: number,
+    name: string,
+  ): { readonly mesh: Mesh; readonly phase: number }[] {
     const rng = new Rng(seed);
     const set: { mesh: Mesh; phase: number }[] = [];
     for (let i = 0; i < NAP_Z_COUNT; i += 1) {
       const mesh = napZGlyph(NAP_Z_SIZE, NAP_Z_COLOUR);
+      mesh.name = name;
       mesh.visible = false;
       this.hotelRoot.add(mesh);
       // Evenly spread round the cycle, each with its own small jitter, so

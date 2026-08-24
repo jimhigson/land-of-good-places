@@ -73,8 +73,10 @@ const BED_ARRIVE_RADIUS = 0.35;
  * Seconds a pet takes to trot off the floor and settle onto its own cushion.
  *
  * Long enough to read as *the pet getting into bed* — the whole point of a
- * nap for a six-year-old — and short enough to finish well inside the nap
- * itself (`Hotel.NAP_SECONDS`).
+ * nap for a six-year-old — and short enough to always finish long before she
+ * could wake herself back up (`Hotel.wakeNap`) — a nap has no fixed length
+ * of its own any more, so there is no upper bound to stay inside of, only a
+ * lower one worth naming.
  */
 const BED_CLIMB_SECONDS = 0.8;
 
