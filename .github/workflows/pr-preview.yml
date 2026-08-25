@@ -87,8 +87,16 @@ jobs:
         with:
           script: |
             const output = `${{ steps.preview.outputs.command-output }}`;
-            const match = output.match(/https:\/\/[a-zA-Z0-9.-]+\.workers\.dev\S*/);
-            const url = match ? match[0] : null;
+            // `wrangler versions upload --preview-alias` prints TWO URLs: the
+            // random version-id hash one first, then a line explicitly
+            // labelled "Version Preview Alias URL:" — the stable one we
+            // actually want. A bare "first workers.dev match" regex silently
+            // grabs the hash line instead, so match the alias line by its
+            // own label first and only fall back to the generic match if
+            // that label isn't present (e.g. --preview-alias missing/failed).
+            const aliasMatch = output.match(/Version Preview Alias URL:\s*(https:\/\/\S+)/);
+            const anyMatch = output.match(/https:\/\/[a-zA-Z0-9.-]+\.workers\.dev\S*/);
+            const url = aliasMatch ? aliasMatch[1] : anyMatch ? anyMatch[0] : null;
             const marker = "<!-- pr-preview-comment -->";
             const body = url
               ? `${marker}\n### 🎡 Preview deployed\n\n[Open the preview](${url})\n\nUpdated automatically on every push to this PR. **Open it in a private/incognito window** — this box has served many dev builds from many ports over its lifetime, and a stale service worker or save from an unrelated earlier visit can silently serve old content with no error (see CLAUDE.md's "A stale service worker will waste your hour").`
