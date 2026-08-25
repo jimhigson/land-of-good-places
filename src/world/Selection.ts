@@ -169,9 +169,23 @@ export class Selection implements GameSystem {
    * A tap landed on the park. Returns true if it selected something — in which
    * case the caller must **not** walk: selecting is free, and a distant tap that
    * both selected and walked would be the accidental-boarding bug in a new hat.
+   *
+   * Riding is deliberately **not** a blanket bail here, same as everywhere else
+   * in this class (see this file's own header and `Game.ts`'s wiring comment) —
+   * {@link pickRay} already runs every candidate through {@link selectable},
+   * which is where `InteractZone.selectableWhileRiding` actually gets enforced.
+   * A flat `|| this.player.riding` here used to skip that check entirely and
+   * make the flag dead for tapping specifically: every existing rider (the
+   * train's "Get off", the hotel lift) only ever needed *proximity* to pick
+   * itself, so nobody tapping it while riding had ever exercised this path —
+   * until `KeychainShop`'s locked view needed to tell six same-distance zones
+   * apart by *where the tap landed*, which proximity alone cannot do (see that
+   * file's own header). `TapNavigator.handleTap` still refuses to walk while
+   * riding, so a tap on a non-selectable zone (or on open ground) while riding
+   * still does nothing, exactly as before.
    */
   handleTap(ndcX: number, ndcY: number): boolean {
-    if (this.deps.blocked() || this.player.riding) return false;
+    if (this.deps.blocked()) return false;
 
     this.ndc.set(ndcX, ndcY);
     this.raycaster.setFromCamera(this.ndc, this.camera.camera);
@@ -425,9 +439,15 @@ export class Selection implements GameSystem {
     return best;
   }
 
-  /** What the mouse is over, or null when there is no mouse or it is over nothing. */
+  /**
+   * What the mouse is over, or null when there is no mouse or it is over
+   * nothing selectable. Not gated on `player.riding` for the same reason
+   * {@link handleTap} isn't — {@link pickRay} already filters through
+   * {@link selectable}, which is the one place `selectableWhileRiding` is
+   * enforced.
+   */
   private hoverPick(zones: readonly InteractZone[]): InteractZone | null {
-    if (!this.hasCursor || this.player.riding) return null;
+    if (!this.hasCursor) return null;
     this.raycaster.setFromCamera(this.ndc, this.camera.camera);
     return this.pickRay(this.raycaster.ray, zones);
   }
