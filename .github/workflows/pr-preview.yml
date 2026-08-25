@@ -98,8 +98,10 @@ jobs:
             const anyMatch = output.match(/https:\/\/[a-zA-Z0-9.-]+\.workers\.dev\S*/);
             const url = aliasMatch ? aliasMatch[1] : anyMatch ? anyMatch[0] : null;
             const marker = "<!-- pr-preview-comment -->";
+            const sha = context.payload.pull_request.head.sha;
+            const shortSha = sha.slice(0, 7);
             const body = url
-              ? `${marker}\n### 🎡 Preview deployed\n\n[Open the preview](${url})\n\nUpdated automatically on every push to this PR. **Open it in a private/incognito window** — this box has served many dev builds from many ports over its lifetime, and a stale service worker or save from an unrelated earlier visit can silently serve old content with no error (see CLAUDE.md's "A stale service worker will waste your hour").`
+              ? `${marker}\n### 🎡 Preview deployed\n\nBuilt from commit [\`${shortSha}\`](${context.payload.repository.html_url}/commit/${sha}).\n\n[Open the preview](${url})\n\nThe URL is stable across every push to this PR, so re-open this exact comment (not an old copy of the link) to make sure the commit hash above matches what you expect. **Open it in a private/incognito window** — this box has served many dev builds from many ports over its lifetime, and a stale service worker or save from an unrelated earlier visit can silently serve old content with no error (see CLAUDE.md's "A stale service worker will waste your hour").`
               : `${marker}\n### 🎡 Preview build finished\n\nBut no preview URL was found in the \`wrangler versions upload\` output — check the [workflow run](${context.payload.repository.html_url}/actions/runs/${context.runId}) for details.`;
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
