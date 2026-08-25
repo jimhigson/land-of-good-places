@@ -1,11 +1,18 @@
 /**
- * A tiny critically-underdamped-or-looser spring, used for every "boing" in
- * the Spooky House: the eye popping out on its stalk, the mouth snapping open,
- * the whole face leaning in for a "boo!".
+ * A tiny critically-underdamped-or-looser spring — a generic one-dimensional
+ * mass-on-a-spring, not tied to any one feature.
+ *
+ * Started in the Spooky House for every "boing" there: the eye popping out on
+ * its stalk, the mouth snapping open, the whole face leaning in for a "boo!".
+ * `entities/WornKeychain.ts` reuses the same class (two of them, one per swing
+ * axis) to drive a keyring's pendulum lean rather than inventing a second spring
+ * — moved here, out of `minigames/spookyHouse/`, once a second feature wanted
+ * it, per this repo's "one owner" rule.
  *
  * A hand-tuned tween can only ever move one way; a spring naturally overshoots
  * and settles, which is what turns "the eye moves out and back" into "the eye
- * *boings*". Cheaper than it sounds — one multiply-add per frame.
+ * *boings*" and a keyring's lean into an actual swing. Cheaper than it sounds —
+ * one multiply-add per frame.
  */
 export class Spring {
   value: number;

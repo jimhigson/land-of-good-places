@@ -44,7 +44,7 @@ export const SECRETS: readonly Secret[] = [
   },
   {
     id: 'secret.keychain',
-    name: 'Charm collector',
+    name: 'Keyring collector',
     icon: '🔑',
     done: 'You collected your first keychain!',
   },

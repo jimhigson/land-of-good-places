@@ -52,6 +52,14 @@ export class IsoCamera {
   private zoomTarget = 1;
 
   /**
+   * A fixed world point the camera orbits instead of the ordinary follow
+   * target, or `null` when nothing is overriding it — see {@link
+   * setFocusOverride}.
+   */
+  private focusOverrideActive = false;
+  private readonly focusOverrideValue = new Vector3();
+
+  /**
    * Where the **world origin** sits on screen, in world units along the
    * screen's own two axes. See {@link skyAnchor}.
    */
@@ -185,6 +193,36 @@ export class IsoCamera {
     this.zoomTarget = clamp(this.zoomTarget + delta, CAMERA_ZOOM_MIN, CAMERA_ZOOM_MAX);
   }
 
+  /** What {@link zoom} is damping towards — read this, not `zoom` itself, to
+   *  save a caller's own zoom before overriding it (`Game.tick`'s keychain-shop
+   *  wiring does exactly this), since `zoom` may still be mid-transition. */
+  get targetZoom(): number {
+    return this.zoomTarget;
+  }
+
+  /**
+   * Overrides what the camera orbits with a fixed world point, in place of
+   * the ordinary player-follow target — for a moment like the keychain rack's
+   * zoomed-in picker (#331), where the thing to frame is a fixed spot in the
+   * world rather than the player. Damped by {@link update} exactly like the
+   * ordinary follow, so entering and leaving eases rather than snaps.
+   *
+   * **Re-assert every frame while it should hold**, exactly as {@link
+   * setZoomTarget} already asks its own callers to: `Game.tick()` re-derives
+   * the whole world's state every frame and would otherwise silently
+   * overwrite this the moment something stopped calling it (CLAUDE.md's
+   * `/view` note is this same trap, biting someone else first).
+   */
+  setFocusOverride(point: Readonly<Vector3>): void {
+    this.focusOverrideValue.copy(point);
+    this.focusOverrideActive = true;
+  }
+
+  /** Hands the follow back to the ordinary player target. */
+  clearFocusOverride(): void {
+    this.focusOverrideActive = false;
+  }
+
   /**
    * Follows `target`, leaning slightly in the direction of travel so the player
    * can see a touch further ahead when they run.
@@ -192,19 +230,32 @@ export class IsoCamera {
   update(context: FrameContext, target: Vector3, velocity: Vector3): void {
     const { dt, input } = context;
 
-    if (input.justPressed('zoomIn')) this.nudgeZoom(CAMERA_ZOOM_STEP);
-    if (input.justPressed('zoomOut')) this.nudgeZoom(-CAMERA_ZOOM_STEP);
+    // Manual pinch/scroll zoom is ignored while a shot is holding its own
+    // framing — it would only be overwritten by the next re-asserted
+    // `setZoomTarget` a moment later anyway, but reading it here too would
+    // mean the frustum visibly jitters for that one frame first.
+    if (!this.focusOverrideActive) {
+      if (input.justPressed('zoomIn')) this.nudgeZoom(CAMERA_ZOOM_STEP);
+      if (input.justPressed('zoomOut')) this.nudgeZoom(-CAMERA_ZOOM_STEP);
+    }
 
     const previousZoom = this.zoomValue;
     this.zoomValue = damp(this.zoomValue, this.zoomTarget, 0.12, dt);
     if (Math.abs(this.zoomValue - previousZoom) > 1e-4) this.applyFrustum();
 
-    this.desiredFocus
-      .copy(target)
-      .addScaledVector(velocity, CAMERA_LOOK_AHEAD)
-      // Aim a little above the player's feet so they sit slightly low on screen,
-      // leaving room to see what you are walking towards.
-      .add(TEMP_LIFT);
+    if (this.focusOverrideActive) {
+      // No look-ahead, no chest-height lift: those are about a walking
+      // player, and the override's own point is already exactly where it
+      // wants the camera to orbit.
+      this.desiredFocus.copy(this.focusOverrideValue);
+    } else {
+      this.desiredFocus
+        .copy(target)
+        .addScaledVector(velocity, CAMERA_LOOK_AHEAD)
+        // Aim a little above the player's feet so they sit slightly low on screen,
+        // leaving room to see what you are walking towards.
+        .add(TEMP_LIFT);
+    }
 
     this.focus.x = damp(this.focus.x, this.desiredFocus.x, CAMERA_FOLLOW_HALF_LIFE, dt);
     this.focus.y = damp(this.focus.y, this.desiredFocus.y, CAMERA_FOLLOW_HALF_LIFE * 2, dt);

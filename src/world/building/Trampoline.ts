@@ -1,6 +1,7 @@
 import { CylinderGeometry, Group, Mesh, TorusGeometry } from 'three';
 import { TRAMPOLINE_MAX_LAUNCH, TRAMPOLINE_MIN_LAUNCH } from '../../core/constants';
 import { PALETTE } from '../../core/palette';
+import { Spring } from '../../core/Spring';
 import { castAndReceive, interiorMaterial } from './parts';
 
 /** Decoration that takes light but does not cast. */
@@ -21,6 +22,11 @@ import {
 /** How long after a bounce a second one still counts as "again!". */
 const COMBO_WINDOW = 2.6;
 
+/** How snappy the pad's squash spring is pulled back towards flat. */
+const SQUASH_STIFFNESS = 190;
+/** How quickly the squash spring's own overshoot dies out. */
+const SQUASH_DAMPING = 12;
+
 /**
  * The trampoline, on the ground floor under a shaft that runs up to deck two.
  *
@@ -32,8 +38,11 @@ export class Trampoline {
   readonly group = new Group();
 
   private readonly pad: Mesh;
-  private squash = 0;
-  private squashVelocity = 0;
+  // A critically-under-damped spring: overshoots once, then settles — the
+  // same `Spring` primitive `entities/WornKeychain.ts`'s pendulum and Spooky
+  // House's "boing" use, one owner instead of a hand-duplicated copy of the
+  // same formula (CLAUDE.md's "one owner; everyone else asks").
+  private readonly squash = new Spring();
   private comboTimer = 0;
   private combo = 0;
 
@@ -89,8 +98,9 @@ export class Trampoline {
   bounce(): number {
     this.combo = this.comboTimer > 0 ? Math.min(this.combo + 1, 2) : 0;
     this.comboTimer = COMBO_WINDOW;
-    this.squash = 0.55;
-    this.squashVelocity = 0;
+    this.squash.value = 0.55;
+    this.squash.velocity = 0;
+    this.squash.target = 0;
     const t = this.combo / 2;
     return TRAMPOLINE_MIN_LAUNCH + (TRAMPOLINE_MAX_LAUNCH - TRAMPOLINE_MIN_LAUNCH) * t;
   }
@@ -98,12 +108,14 @@ export class Trampoline {
   update(dt: number): void {
     if (this.comboTimer > 0) this.comboTimer -= dt;
 
-    // A critically-under-damped spring: overshoots once, then settles.
-    this.squashVelocity += (-this.squash * 190 - this.squashVelocity * 12) * dt;
-    this.squash += this.squashVelocity * dt;
+    this.squash.update(dt, SQUASH_STIFFNESS, SQUASH_DAMPING);
 
-    const scaleY = 1 - this.squash;
-    this.pad.scale.set(1 + this.squash * 0.14, Math.max(0.15, scaleY), 1 + this.squash * 0.14);
-    this.pad.position.y = 0.24 - this.squash * 0.16;
+    const scaleY = 1 - this.squash.value;
+    this.pad.scale.set(
+      1 + this.squash.value * 0.14,
+      Math.max(0.15, scaleY),
+      1 + this.squash.value * 0.14,
+    );
+    this.pad.position.y = 0.24 - this.squash.value * 0.16;
   }
 }

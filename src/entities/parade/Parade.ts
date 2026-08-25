@@ -525,7 +525,7 @@ function stowedIds(state: GameState, visible: readonly InventoryItem[]): string[
     // hit now that the drawer can put any hat on (`ui/InventoryDrawer.ts`).
     //
     // The keychain is the worst of the three to get wrong, because it hangs off
-    // the bag itself: the charm and its own copy climbing out of the mouth
+    // the bag itself: the keyring and its own copy climbing out of the mouth
     // above it would be a hand's width apart.
     if (
       item.uid === state.wornHatUid ||

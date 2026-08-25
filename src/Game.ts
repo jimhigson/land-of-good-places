@@ -16,6 +16,7 @@ import { FoliageFade, Sky, TreeClimbing, World, skyViewFor, type WorldOptions } 
 import { ENTRANCE_ANGLE, ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from './world/entrance/layout';
 import { arrivalOwnsTheSpawn } from './world/entrance/arrivalSpawn';
 import { arrivalCameraZoom } from './world/entrance/ArrivalSequence';
+import { KEYCHAIN_VIEW_ZOOM } from './world/KeychainShop';
 import { Highlights } from './world/Highlights';
 import { Selection } from './world/Selection';
 import { pickInteractZone, PRIMARY_ACTION, type InteractZone } from './world/interact';
@@ -181,6 +182,18 @@ export class Game {
   private lookOpen = false;
   /** Freezes the park while {@link lookOpen} — see `core/overlayPause.ts`. */
   private readonly lookPause = new OverlayPause();
+
+  /**
+   * {@link IsoCamera.zoom} from just before the keychain rack's zoomed view
+   * opened, so closing it can hand back exactly what she had — a manual
+   * pinch/scroll zoom, not necessarily the default — rather than silently
+   * resetting her own choice. Tracked here, not on `KeychainShop`, because
+   * only `Game` may read the camera at all (see `tick`'s own wiring, right
+   * beside the cat-bus arrival's identical re-derive-every-frame zoom).
+   */
+  private keychainShopWasOpen = false;
+  private zoomBeforeKeychainShop = 1;
+
   /** Every sign in the park, as a selectable zone. Built once: signs do not move. */
 
   private readonly uiRoot: HTMLElement;
@@ -316,7 +329,7 @@ export class Game {
 
     // The keychain dangling off her bag, if one has been collected — see
     // `entities/WornKeychain.ts`. Fourth worn slot, same store-subscriber
-    // shape. No `onWornChange`: a charm displaces nothing, so unlike the jet
+    // shape. No `onWornChange`: a keyring displaces nothing, so unlike the jet
     // pack it has nothing to ask the model to put away.
     this.wornKeychain = new WornKeychain(this.player.model.keychainAnchor);
     this.addSystem(this.wornKeychain);
@@ -1031,7 +1044,6 @@ export class Game {
     return (
       this.shopping.uiOpen ||
       this.world.facePaintStall.uiOpen ||
-      this.world.keychainShop.uiOpen ||
       this.cuteODex.isOpen ||
       this.whatsNew.isOpen ||
       this.miniGames.frozen ||
@@ -1073,7 +1085,6 @@ export class Game {
     return (
       this.shopping.uiOpen ||
       this.world.facePaintStall.uiOpen ||
-      this.world.keychainShop.uiOpen ||
       this.cuteODex.isOpen ||
       this.whatsNew.isOpen ||
       this.miniGames.frozen ||
@@ -1408,7 +1419,12 @@ export class Game {
       this.input.justPressed('menu') &&
       !this.shopping.uiOpen &&
       !this.world.facePaintStall.uiOpen &&
-      !this.world.keychainShop.uiOpen &&
+      // The keychain rack's zoomed view reads this same key to close itself
+      // (`KeychainShop.update`, run later this frame via `world.update`) —
+      // without this exclusion Escape would also pause the park behind it,
+      // exactly the bug the two exclusions above this one already guard
+      // against.
+      !this.world.keychainShop.viewOpen &&
       // The look overlay owns the screen the same way those two do. Without
       // this, Escape — the one key anyone presses to back out of a modal —
       // toggled the pause of the park *behind* the open dialog. `lookOpen`
@@ -1458,6 +1474,28 @@ export class Game {
     // be constructed in one.
     const arrival = this.world.entrance.arrival;
     if (arrival && !arrival.finished) this.camera.setZoomTarget(arrivalCameraZoom(arrival.phase));
+
+    // The keychain rack's zoomed picker (#331): the camera orbits a point
+    // between the rack and where she stands (`KeychainShop.viewFocus`)
+    // instead of the player while `viewOpen`, at `KEYCHAIN_VIEW_ZOOM` — a
+    // constant tuned against a real screenshot of this exact composed shot
+    // (see that constant's own doc comment in `KeychainShop.ts`), the same
+    // way the rest of this feature's framing rounds were. Re-asserted every
+    // frame for the same reason the arrival's zoom above is: see
+    // `IsoCamera.setFocusOverride`'s own doc comment.
+    const keychainShopOpen = this.world.keychainShop.viewOpen;
+    if (keychainShopOpen && !this.keychainShopWasOpen) {
+      this.zoomBeforeKeychainShop = this.camera.targetZoom;
+    } else if (!keychainShopOpen && this.keychainShopWasOpen) {
+      this.camera.setZoomTarget(this.zoomBeforeKeychainShop);
+    }
+    this.keychainShopWasOpen = keychainShopOpen;
+    if (keychainShopOpen) {
+      this.camera.setZoomTarget(KEYCHAIN_VIEW_ZOOM);
+      this.camera.setFocusOverride(this.world.keychainShop.viewFocus);
+    } else {
+      this.camera.clearFocusOverride();
+    }
 
     this.camera.update(this.frameContext, this.player.position, this.player.velocity);
     // Straight after the camera moves and before the sky is drawn: the stars,

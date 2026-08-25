@@ -456,6 +456,25 @@ export class World implements GameSystem {
     this.keychainShop.update(context);
     this.flowers.update(context);
     this.dodgems.update(context);
+
+    // The keychain rack's pop-up screen (`KeychainShop.buildViewBackdrop`)
+    // only ever hides the world *behind* the cart — it cannot hide anything
+    // standing, or wandering, on the same camera-facing side as the player,
+    // however wide it is built. Jim, 24 August 2026: "in view: only the
+    // charms, and the player's model" — measured against the real zoomed
+    // shot, a nearby lamp post sat squarely in that camera-facing gap no
+    // width of screen could ever reach (it is beside the player, not behind
+    // her), and a crowd member can wander into the same gap at any moment.
+    // Both fold away for the same beat: the one system whose whole job is
+    // roaming loose around the park, and the one piece of fixed street
+    // furniture this stall's own generous placement (`stallPlacement.ts`)
+    // still turned out to sit close enough to matter. Not a general "hide
+    // everything" — see `buildViewBackdrop`'s own doc comment for why that
+    // is the wrong fix — two named systems, each found by actually looking
+    // at the rendered shot, not guessed in advance.
+    const hideBehindKeychainView = this.keychainShop.viewOpen;
+    this.npcs.group.visible = !hideBehindKeychainView;
+    this.lampPosts.group.visible = !hideBehindKeychainView;
     // Last: the arrival moves the player, and everything above has already had
     // its frame, so nothing overwrites where the sequence just put her. The
     // pose itself was computed above, with the children's; this only re-asserts
@@ -492,6 +511,9 @@ export class World implements GameSystem {
    */
   mountUi(uiRoot: HTMLElement): void {
     this.facePaintStall.mountUi(uiRoot);
+    // The keychain stall still has no 2D panel — the rack itself is the
+    // picker — but the zoomed view it opens into does need its own ✕
+    // (`world/KeychainShop.ts`'s own header).
     this.keychainShop.mountUi(uiRoot);
   }
 

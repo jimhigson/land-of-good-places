@@ -37,7 +37,7 @@ import type { CuteCategory, InventoryKind } from '../../../state';
  * `state/wording.ts`).
  */
 /**
- * Name and blurb for each charm, kept beside the kinds they name.
+ * Name and blurb for each keyring, kept beside the kinds they name.
  *
  * `check:brevity` holds these to a title of 24 characters and a blurb of one
  * sentence of 50 — do not add `KNOWN_LONG` entries to buy room, write shorter.
@@ -60,6 +60,7 @@ const KEYCHAIN_COPY: Record<KeychainKind, { displayName: string; blurb: string; 
     icon: '🌈',
   },
   heart: { displayName: 'Heart Keychain', blurb: 'A little heart bouncing on your bag.', icon: '💗' },
+  rumi: { displayName: 'Rumi Keychain', blurb: 'A tiny Rumi doll, ponytail and all.', icon: '🖤' },
 };
 
 export type ShopId =
@@ -587,7 +588,7 @@ export const SHOP_ITEMS: readonly ShopItem[] = [
     carryable: false,
     model: () => createKeychain(kind),
     // Never held — kept sane rather than zero so a preview that scales by it
-    // cannot collapse the charm to nothing.
+    // cannot collapse the keyring to nothing.
     heldScale: 1,
     rare: false,
   })),

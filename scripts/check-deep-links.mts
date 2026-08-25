@@ -59,13 +59,20 @@ type DeepLinkCheck = {
   assert: (page: Page) => Promise<CheckResult>;
 };
 
+// `uiOpen`/`.keychain-panel` were the 2D list picker (`ui/KeychainPanel.ts`),
+// deleted when the rack itself became the picker (23 August 2026). The rack
+// is now *entered* rather than walked up to keyring by keyring
+// (`world/KeychainShop.ts`'s own header): `requestOpen` teleports to the
+// stand point **and** opens the zoomed view in one motion, so `viewOpen` —
+// and the on-screen ✕, `.keychain-view-close[data-show="true"]` — are what
+// "the deep link actually did the thing" means now.
 const keychainState = (page: Page) =>
   page.evaluate(() => {
     const g = (window as unknown as { game?: any }).game;
     return {
       hasGame: !!g,
-      uiOpen: g?.world?.keychainShop?.uiOpen ?? null,
-      dataOpen: document.querySelector('.keychain-panel')?.getAttribute('data-open') ?? null,
+      viewOpen: g?.world?.keychainShop?.viewOpen ?? null,
+      closeShown: document.querySelector('.keychain-view-close')?.getAttribute('data-show') ?? null,
       playerPos: g?.player?.position ? { x: g.player.position.x, z: g.player.position.z } : null,
     };
   });
@@ -76,10 +83,13 @@ const CHECKS: DeepLinkCheck[] = [
     assert: async (page) => {
       const s = await keychainState(page);
       if (!s.hasGame) return { ok: false, detail: 'window.game never appeared' };
-      if (s.uiOpen !== true || s.dataOpen !== 'true') {
-        return { ok: false, detail: `picker did not open (uiOpen=${s.uiOpen}, data-open=${s.dataOpen})` };
+      if (s.viewOpen !== true || s.closeShown !== 'true') {
+        return {
+          ok: false,
+          detail: `zoomed view did not open (viewOpen=${s.viewOpen}, close button shown=${s.closeShown})`,
+        };
       }
-      return { ok: true, detail: `picker open, player at ${JSON.stringify(s.playerPos)}` };
+      return { ok: true, detail: `zoomed view open, player at ${JSON.stringify(s.playerPos)}` };
     },
   },
 ];

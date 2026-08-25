@@ -83,6 +83,23 @@ spaces.push({
   bands: [hotel.towerDoorBand(), ...world.building.doorBands()],
 });
 
+// The keychain rack's own zoomed picker (#331): six keyrings crowd one small
+// cart and only become their own tappable zones once the cart's single
+// entry zone has opened the camera view (`world.interactZones()` above is
+// the *closed* state — the one entry zone, checked against every other
+// zone in the park exactly as any other stall's would be). The two shapes
+// never coexist in one snapshot (see `world/KeychainShop.ts`'s own header:
+// the six would sit within a finger of a parent zone offering a different
+// action), so the open state is checked as its own space here, the same way
+// each hotel room below gets its own.
+world.keychainShop.openView();
+spaces.push({
+  name: 'the keychain rack, opened',
+  zones: world.keychainShop.interactZones(),
+  bands: [],
+});
+world.keychainShop.closeView();
+
 // Each hotel room, as the game offers it: the hotel's zones are gated on the
 // player's own room, so stand the probe player in each in turn.
 for (const room of ROOMS) {
