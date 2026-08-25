@@ -329,9 +329,14 @@ const RACK_ROWS = 2;
  * display to sit. Comfortably inside {@link STALL_DEPTH}'s own usable top
  * (the counter surface itself is `STALL_DEPTH - 0.06` deep) even with
  * {@link RACK_KEYRING_SCALE}'s now-much-larger keyrings, which is what "grid, not
- * two rows hanging off the edges" needs.
+ * two rows hanging off the edges" needs. Was `0.5`; Jim, 25 August 2026:
+ * *"space them out a bit more on the table in their y dimension (forward and
+ * backward on the table)"* — the counter's local depth axis is what reads as
+ * forward/backward from the fixed camera. `0.75` still leaves the back row
+ * (`RACK_CENTRE_LOCAL_Z - RACK_ROW_GAP / 2` ≈ `-0.40`) well clear of the
+ * canopy pole at `-STALL_DEPTH / 2 + 0.15` = `-0.6`.
  */
-const RACK_ROW_GAP = 0.5;
+const RACK_ROW_GAP = 0.75;
 
 /** Where the single-row rack used to sit, and where the grid's own depth centres on. */
 const RACK_CENTRE_LOCAL_Z = -0.02;
