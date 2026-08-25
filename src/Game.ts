@@ -1466,14 +1466,37 @@ export class Game {
 
     // The arrival's subject is an 18 m bus, and the default framing is sized
     // around a 2.12 m child — so while the bus is what the shot is about, the
-    // camera sits further out. Re-asserted every frame rather than set once,
-    // because this method re-derives the world's state each frame and would
-    // otherwise overwrite it (CLAUDE.md's `/view` note is that trap biting
-    // somebody). The decision itself is `arrivalCameraZoom`, a pure function,
-    // so a check can hold it — `Game` builds a real `WebGLRenderer` and cannot
-    // be constructed in one.
+    // camera sits further out. The decision itself is `arrivalCameraZoom`, a
+    // pure function, so a check can hold it — `Game` builds a real
+    // `WebGLRenderer` and cannot be constructed in one.
+    //
+    // **Asserted only when the value actually changes, not every frame**
+    // (#329). It used to be reasserted unconditionally for as long as
+    // `!arrival.finished`, which holds all the way through the `departing`
+    // phase — several more seconds of the bus unloading stragglers and
+    // driving off, *after* `ArrivalSequence.depart` has already handed her
+    // the controls on its very first frame. Every one of those frames called
+    // `setZoomTarget(arrivalCameraZoom('departing'))`, i.e. `setZoomTarget(1)`
+    // again and again, so any wheel notch, pinch or +/- press landed via
+    // `nudgeZoom` and was silently overwritten on the very next frame — the
+    // mouse wheel read as completely dead for however long the bus took to
+    // empty and pull away, exactly what was reported. `arrivalCameraZoom`
+    // only takes the *phase* and is constant across most of them, so nothing
+    // is lost by writing it once per actual change instead of once per
+    // frame: the bus framing still snaps in for `rolling-in`, still eases
+    // back to 1 the moment `departing` begins (`IsoCamera.update`'s damping
+    // still turns that into a push-in, same as before) — but from that same
+    // frame on, nothing here writes to `zoomTarget` again, so her own
+    // zoom input finally takes effect immediately instead of after the whole
+    // sequence finishes.
     const arrival = this.world.entrance.arrival;
-    if (arrival && !arrival.finished) this.camera.setZoomTarget(arrivalCameraZoom(arrival.phase));
+    if (arrival && !arrival.finished) {
+      const zoom = arrivalCameraZoom(arrival.phase);
+      if (zoom !== this.arrivalZoomApplied) {
+        this.arrivalZoomApplied = zoom;
+        this.camera.setZoomTarget(zoom);
+      }
+    }
 
     // The keychain rack's zoomed picker (#331): the camera orbits a point
     // between the rack and where she stands (`KeychainShop.viewFocus`)
@@ -1560,6 +1583,13 @@ export class Game {
    * one — the first-person rides. The sky pass keeps the park's sky.
    */
   private cameraOverride: import('three').PerspectiveCamera | null = null;
+
+  /**
+   * The arrival's own zoom target, last written to {@link IsoCamera}, so it
+   * can be re-asserted only when it actually **changes** rather than every
+   * single frame. See the call site in {@link tick} for why (#329).
+   */
+  private arrivalZoomApplied: number | null = null;
 
   private render(): void {
     const renderer = this.engine.renderer;

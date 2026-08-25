@@ -179,11 +179,15 @@ export class IsoCamera {
    * long against a default framing built around a two-metre child. Damped by
    * {@link update} exactly like a pinch, so it eases rather than snapping.
    *
-   * Safe to call every frame, and the arrival does: `Game.tick()` re-derives
-   * the whole world's state each frame and silently overwrites anything set
-   * once from outside it (see CLAUDE.md's `/view` note, which is this trap
-   * biting someone). Something that must hold therefore has to be re-asserted,
-   * not assigned.
+   * Safe to call every frame — but a caller that actually *owns* this value
+   * for a while, the way the cat-bus arrival does, should call it only when
+   * its own target changes, not on every tick: this is a plain assignment,
+   * so calling it every frame for as long as some condition holds fights
+   * `nudgeZoom` for that entire span, silently discarding every wheel notch,
+   * pinch or +/- press a player makes in the meantime (#329) — the same trap
+   * CLAUDE.md's `/view` note describes for `DayNight`'s own paused flag,
+   * just one call removed. Re-asserting unconditionally is only safe once
+   * nobody else may legitimately be nudging this same target.
    */
   setZoomTarget(zoom: number): void {
     this.zoomTarget = clamp(zoom, CAMERA_ZOOM_MIN, CAMERA_ZOOM_MAX);
