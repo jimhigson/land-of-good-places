@@ -418,6 +418,21 @@ interface RackKeyring {
   readonly kind: KeychainKind;
   /** `shops/catalogue.ts`'s id for this keyring — `keychain.${kind}`. */
   readonly id: string;
+  /**
+   * The rack's own unscaled wrapper `Group`, added to {@link KeychainShop.group}
+   * and carrying the position/rotation this keyring sits at on the counter —
+   * **not** `AssetHandle.root` (the keychain model itself, which is the
+   * wrapper's one child and carries {@link RACK_KEYRING_SCALE} instead). Kept
+   * unscaled and passed to `highlightObject` so the highlight system's own
+   * `root.scale`-is-never-touched invariant (`rainbowOutline.ts`'s "nothing is
+   * ever scaled") holds for the rack the same way it does for everything else:
+   * scaling the model directly, as this used to, made `Highlights.ts`'s cached
+   * outline shell get built off the keyring's tiny unscaled geometry and then
+   * displayed through a matrix that includes the 3.75x rack scale, ballooning
+   * the rim into a blob (Jim, 25 August 2026). `position`/`y`/`z` below read
+   * off this wrapper, so it is still "where the keyring is" for every other
+   * purpose (sparkles, the tap zone, `rackFocus`).
+   */
   readonly root: Group;
   /** Where the tap has to land — on the counter, inside the cart's own footprint. */
   readonly x: number;
@@ -1042,10 +1057,21 @@ export class KeychainShop implements GameSystem {
       const tRow = RACK_ROWS > 1 ? row / (RACK_ROWS - 1) : 0.5;
       const localX = -rackWidth / 2 + tColumn * rackWidth;
       const localZ = RACK_CENTRE_LOCAL_Z - RACK_ROW_GAP / 2 + tRow * RACK_ROW_GAP;
-      handle.root.position.set(localX, keyringLocalY, localZ);
+      // The wrapper carries the position/rotation this keyring sits at on the
+      // rack and stays unscaled; `handle.root` — the actual model, reset to
+      // identity local position/rotation — carries RACK_KEYRING_SCALE as the
+      // wrapper's one child. See `RackKeyring.root`'s own doc comment for why:
+      // scaling `handle.root` directly (the old code) broke the highlight
+      // shell's own "nothing is ever scaled" invariant and ballooned the
+      // rainbow outline to 3.75x size.
+      const wrapper = new Group();
+      wrapper.position.set(localX, keyringLocalY, localZ);
+      wrapper.rotation.y = (index % 2 === 0 ? 1 : -1) * 0.18;
+      handle.root.position.set(0, 0, 0);
+      handle.root.rotation.set(0, 0, 0);
       handle.root.scale.setScalar(RACK_KEYRING_SCALE);
-      handle.root.rotation.y = (index % 2 === 0 ? 1 : -1) * 0.18;
-      this.group.add(handle.root);
+      wrapper.add(handle.root);
+      this.group.add(wrapper);
 
       const [x, z] = this.toWorld(localX, localZ);
       // Same lateral offset as the keyring itself, but out at the stall's own
@@ -1058,7 +1084,7 @@ export class KeychainShop implements GameSystem {
       this.rack.push({
         kind,
         id: `keychain.${kind}`,
-        root: handle.root,
+        root: wrapper,
         x,
         y: this.groundY + keyringLocalY,
         z,
