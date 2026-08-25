@@ -60,6 +60,16 @@ jobs:
       # Cloudflare-native equivalent of a Vercel/Netlify preview deploy.
       # `preview_urls: true` in wrangler.jsonc is what makes a URL exist for
       # a version that was uploaded but never made the default (live) one.
+      #
+      # `--preview-alias` pins that URL to `pr-<number>-land-of-good-places...`
+      # instead of a fresh random version-id hash on every push. Without it,
+      # each push mints a brand-new hash and the *old* hash keeps serving
+      # forever — Cloudflare never expires a version — so any link handed out
+      # earlier in a PR's life (chat history, an earlier PR comment, a
+      # bookmark) goes on serving genuinely stale code with no error and no
+      # warning. Jim, 25 August 2026, after being handed one such stale link:
+      # "that's on you to fix." One alias per PR means there is only ever one
+      # live URL for that PR, and it always points at the latest push.
       - name: Upload preview version
         id: preview
         uses: cloudflare/wrangler-action@v4
@@ -70,6 +80,7 @@ jobs:
             versions upload
             --message "PR #${{ github.event.pull_request.number }}"
             --tag "pr-${{ github.event.pull_request.number }}"
+            --preview-alias "pr-${{ github.event.pull_request.number }}"
 
       - name: Comment preview link on PR
         uses: actions/github-script@v8
