@@ -61,6 +61,16 @@ jobs:
       # `preview_urls: true` in wrangler.jsonc is what makes a URL exist for
       # a version that was uploaded but never made the default (live) one.
       #
+      # Cloudflare caps "alias name + script name" at 63 characters combined
+      # (validation error 10021) — the full 40-char commit sha plus
+      # "land-of-good-places" blows straight through that, confirmed by a
+      # real failed run on this branch. 7 hex chars is git's own usual
+      # "short sha" length and leaves this comfortably under the limit
+      # (pr-<number>-<7 chars> + "land-of-good-places" is under 40 total).
+      - name: Compute short commit sha
+        id: sha
+        run: echo "short=$(echo '${{ github.event.pull_request.head.sha }}' | cut -c1-7)" >> "$GITHUB_OUTPUT"
+
       # `--preview-alias` pins the URL to `pr-<number>-<short-sha>-...`
       # instead of Cloudflare's own random version-id hash — Jim, 25 August
       # 2026, wanted the real git commit hash visible in the URL, not an
@@ -80,7 +90,7 @@ jobs:
             versions upload
             --message "PR #${{ github.event.pull_request.number }}"
             --tag "pr-${{ github.event.pull_request.number }}"
-            --preview-alias "pr-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}"
+            --preview-alias "pr-${{ github.event.pull_request.number }}-${{ steps.sha.outputs.short }}"
 
       # Cloudflare keeps every uploaded version live at its own URL forever
       # unless something deletes it — that's the exact bug Jim reported
