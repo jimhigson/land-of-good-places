@@ -1,4 +1,5 @@
 import { candidateRng, hashString, Rng, TAU } from '../core/mathUtils';
+import { CAMERA_FACING_YAW } from '../core/constants';
 import {
   BOUNDARY_CLEARANCE,
   GATE_CORRIDOR_HALF_WIDTH,
@@ -60,9 +61,11 @@ export interface PlacedEntry {
   readonly entranceX: number;
   readonly entranceZ: number;
   /**
-   * Sign yaw. Always near +45° — the one angle the fixed camera can read
-   * (ARCHITECTURE.md, "One camera angle, forever") — with a little seeded
-   * variation so a row of signs does not read as billboards.
+   * Sign yaw. Exactly {@link CAMERA_FACING_YAW} (45°, "One camera angle,
+   * forever") — axis-aligned to the camera's own fixed diagonal, not an
+   * arbitrary per-plot rotation (issue #269: every previous build drew this
+   * from a random range, which put most signs off dead-on without any of
+   * them actually reading square to the camera).
    */
   readonly signYaw: number;
 }
@@ -75,6 +78,39 @@ export interface ParkLayout {
 
 /** Walkable clearance kept between any two plots' bounding circles. */
 const CORRIDOR_GAP = 5;
+
+/**
+ * **The statue ring's one radius** (issue #269, Jim: "one central perfect
+ * circle is ok circling the statue") — the fountain plaza's own manifest
+ * radius plus the ring ribbon's half-width, kerb and a walking verge.
+ * Owned here, next to the solver that has to keep plots out of its way,
+ * and read by `paths.ts`'s `solveRing`, which draws the circle at exactly
+ * this radius: one owner, everyone else asks.
+ *
+ * The old ring was a per-bearing profile relaxed around whatever plots the
+ * solver had already dropped nearby — which could never be a circle,
+ * because nothing kept the plots off the circle's own ground. Jim, on the
+ * live preview: "this fails both to draw on a grid, and also to draw a
+ * circle." This is the joint-solve answer: the ring's annulus is a
+ * constraint plots must satisfy ({@link validate}'s ring rule), not ground
+ * they get first grabs on.
+ */
+export const RING_RADIUS = (() => {
+  const fountain = PARK_MANIFEST.find((entry) => entry.id === 'fountain');
+  if (!fountain || fountain.footprint.kind !== 'circle') {
+    throw new Error("park layout: the manifest must contain a circular 'fountain'");
+  }
+  return fountain.footprint.radius + 5.5;
+})();
+
+/** Clear ground kept either side of {@link RING_RADIUS}: the ribbon's own
+ * half-width (1.8), its kerb (0.85) and a walker's stride (0.7) past the
+ * paving. Deliberately no more: a plot standing right off the ring's kerb
+ * is a plot *facing the circle*, which is what a park promenade looks
+ * like — and every half-metre added here multiplies across the ring's
+ * whole circumference into ground the big anchors (and then the railway,
+ * squeezed outward behind them) no longer have. */
+export const RING_PLOT_CLEARANCE = 3.35;
 
 /** Candidate draws per entry before this whole-park attempt is abandoned. */
 const MAX_TRIES = 3000;
@@ -146,14 +182,21 @@ function solve(): ParkLayout {
 }
 
 /**
- * The bearing a camera-facing entry's counter (and so its doormat) faces,
- * from its sign yaw. THE one owner of the formula — `stallPlacement.ts`
- * builds the booth with it and this file places the doormat with it, which
- * is exactly the pair that drifted apart before (two authorities for which
- * side of a booth is the front; reviewer finding 4 on PR #247).
+ * The bearing a camera-facing entry's counter (and so its doormat) faces.
+ * THE one owner of the formula — `stallPlacement.ts` builds the booth with
+ * it and this file places the doormat with it, which is exactly the pair
+ * that drifted apart before (two authorities for which side of a booth is
+ * the front; reviewer finding 4 on PR #247).
+ *
+ * Identity, deliberately (issue #269): `signYaw` is already
+ * {@link CAMERA_FACING_YAW}, the camera's own fixed diagonal, so the
+ * counter faces exactly that — no second, independently-tuned scale factor
+ * (this used to be `signYaw * 0.35`, which pointed the counter at a
+ * different, arbitrary angle from the sign sitting right above it) to drift
+ * out of step with the sign it stands beside.
  */
 export function counterFacing(signYaw: number): number {
-  return signYaw * 0.35;
+  return signYaw;
 }
 
 /** One candidate position, with the spread score it was chosen on. */
@@ -213,7 +256,12 @@ function buildOnce(restart: number): ParkLayout | null {
     // the doormat, the stand and the counter are one line by construction.
     // Everything else faces the park middle, the stable thing paths and the
     // camera both live by.
-    const signYaw = Math.PI * rng.range(0.2, 0.3);
+    //
+    // Every entry's sign — camera-facing or not — turns to exactly
+    // CAMERA_FACING_YAW (issue #269): axis-aligned to the camera's own fixed
+    // diagonal, not drawn from `rng`, so there is no per-seed rotation left
+    // to call "arbitrary."
+    const signYaw = CAMERA_FACING_YAW;
     let dirX: number;
     let dirZ: number;
     if (entry.cameraFacing) {
@@ -318,6 +366,23 @@ function validate(
   }
 
   if (inGateCorridor(x, z, entry.boundingRadius)) return fail('blocks the gate corridor');
+
+  // Keep every plot's bounding circle clear of the statue ring's annulus —
+  // the fountain is solveOrder 0, so it is always already placed when any
+  // other entry validates. (The fountain itself is the ring's centre; the
+  // ring stands RING_RADIUS outside it by construction, so it needs no
+  // check of its own.)
+  if (entry.id !== 'fountain') {
+    const fountainEntry = placed.find((other) => other.id === 'fountain');
+    if (fountainEntry) {
+      const ringGap = Math.abs(
+        Math.hypot(x - fountainEntry.x, z - fountainEntry.z) - RING_RADIUS,
+      );
+      if (ringGap < entry.boundingRadius + RING_PLOT_CLEARANCE) {
+        return fail('stands in the statue ring');
+      }
+    }
+  }
 
   let spread = Infinity;
   for (const other of placed) {

@@ -20,11 +20,13 @@ import { glowTexture } from '../core/textures';
 import { toonMaterial, outlineGeometry, inkTint } from '../art/style/materials';
 import { clamp01, smoothstep } from '../core/mathUtils';
 import { terrainHeight } from './terrain';
-import { distanceToPath, ROUTES } from './paths';
+import { distanceToPath, ROUTES, routeCurve } from './pathGraph';
 import { ANCHORS } from './anchors';
 import { PARK_LAYOUT } from './parkLayout';
 import { clearOfCruiser, onRideExit } from './Scenery';
 import { distanceToRailCorridor, RAIL_CORRIDOR_CLEARANCE } from './train/plan';
+import { isInBridgeFootprint } from './train/bridgeKeepout';
+import { REAL_PROBE_RADIUS } from './train/bridgeFootprint';
 import { STALL_STANDS } from '../minigames/stallPlacement';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from './Collision';
@@ -461,6 +463,15 @@ const LAMP_GAP = 4;
 /** The lamp's own collider radius, as registered below. */
 const LAMP_RADIUS = 0.22;
 
+/** How far past a bridge's exact footprint a lamp keeps — see the call site
+ * in {@link lampFits} for the reasoning. `REAL_PROBE_RADIUS` rather than a
+ * hand-assembled `PLAYER_RADIUS + 0.3`: the bridge search probes its ramps
+ * at exactly that radius, so a lamp placed clear of anything smaller still
+ * blocks the search 0.2 m short of what it demands (PR #330's traces found
+ * lamp bases the single dominant cause of blocked ramp reach — a live "two
+ * definitions of one thing"). */
+const LAMP_BRIDGE_MARGIN = LAMP_RADIUS + REAL_PROBE_RADIUS;
+
 /** Top of the finial: base + shaft + housing + cap, with their overlaps. */
 const LAMP_TOP = 3.6;
 
@@ -489,7 +500,7 @@ function placeLampPosts(collision: CollisionWorld): (readonly [number, number])[
   let side = 0;
 
   for (const route of ROUTES) {
-    const curve = makeCurve(route.points, route.closed);
+    const curve = routeCurve(route);
     const length = curve.getLength();
     if (length < LAMP_SPACING * 0.5) continue;
 
@@ -553,10 +564,23 @@ function lampFits(
     if (Math.hypot(x - entry.x, z - entry.z) < entry.boundingRadius + ANCHOR_MARGIN) return false;
   }
 
-  // Off the railway. This one number also buys the level-crossing decks and
-  // the station platforms, neither of which exists yet when lamps are built
-  // (see `World`) — the corridor is wider than both.
+  // Off the railway. This one number also buys the station platforms, which
+  // do not exist yet when lamps are built (see `World`) — the corridor is
+  // wider than they are. A bridge's own deck and ramps (issue #116) are a
+  // separate check below: unlike a platform they can run well past the
+  // corridor's own width, along whichever path drew them, so one fixed
+  // radius from the centre line cannot cover them.
+  //
+  // A tighter margin than `isInBridgeFootprint`'s own default: that default
+  // is sized for the widest thing `Scenery.ts` builds near a bridge (a
+  // 0.34 m-thick stone wall), but a lamp's own base is a 0.22 m circle
+  // (`LAMP_RADIUS`) — 0.22 + `PLAYER_RADIUS` (0.62) = 0.84 m of genuine
+  // overlap risk, not 0.96 m. The full 2 m default pushed a lamp back far
+  // enough to strand two whole seeds' worth of a bridge-adjacent spur
+  // 25-36 m dark (`everyPathIsLit`, issue #116) for no safety this smaller
+  // margin does not already cover.
   if (distanceToRailCorridor(x, z) < RAIL_CORRIDOR_CLEARANCE) return false;
+  if (isInBridgeFootprint(x, z, LAMP_BRIDGE_MARGIN)) return false;
 
   // And out from under the Sky Cruiser wherever it flies low. The station
   // spurs it now lights (issue #241 spread the plots, so paths follow them
@@ -612,15 +636,6 @@ function pointToSegment(
   let t = ((x - x1) * dx + (z - z1) * dz) / lengthSquared;
   t = t < 0 ? 0 : t > 1 ? 1 : t;
   return Math.hypot(x - (x1 + dx * t), z - (z1 + dz * t));
-}
-
-function makeCurve(points: readonly (readonly [number, number])[], closed: boolean): CatmullRomCurve3 {
-  return new CatmullRomCurve3(
-    points.map(([x, z]) => new Vector3(x, 0, z)),
-    closed,
-    'catmullrom',
-    0.4,
-  );
 }
 
 /**

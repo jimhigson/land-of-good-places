@@ -45,7 +45,7 @@ const STAGES: readonly { readonly name: string; readonly load: () => Promise<unk
   { name: 'train', load: () => import('../src/world/train/plan.ts') },
   { name: 'slide', load: () => import('../src/world/slide/plan.ts') },
   { name: 'railRace', load: () => import('../src/world/railRace/plan.ts') },
-  { name: 'paths', load: () => import('../src/world/paths.ts') },
+  { name: 'paths', load: () => import('../src/world/pathGraph.ts') },
 ];
 
 /** Builds the whole world (scenery, colliders, NavGrid, poiGraph) after the plans. */

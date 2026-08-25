@@ -10,7 +10,7 @@ import {
   SphereGeometry,
   Vector3,
 } from 'three';
-import { PLAYER_RADIUS } from '../core/constants';
+import { PLAYER_MAX_SPEED, PLAYER_RADIUS } from '../core/constants';
 import { edgeRadiusAt, PARK_BOUNDARY, TERRAIN_APRON } from './boundary';
 
 /** How far inside the park's edge anything may be planted. Was `> 55` against a 60 m wall. */
@@ -29,8 +29,10 @@ import {
   distanceToRailCorridor,
   RAIL_CORRIDOR_CLEARANCE,
 } from './train/plan';
+import { isInBridgeFootprint } from './train/bridgeKeepout';
 import { terrainHeight } from './terrain';
-import { isOnPath, PLAZA } from './paths';
+import { PLAZA } from './paths';
+import { isOnPath, pathBorderSegments, pathCentreline, type PathBorderSegment } from './pathGraph';
 import { ANCHORS } from './anchors';
 import { COASTER_PLANS } from './coaster/plan';
 import {
@@ -58,6 +60,7 @@ import {
   pickTreeKind,
   rollTree,
   type InstanceItem,
+  type TreeKind,
   type TreePart,
 } from './treeModel';
 
@@ -378,6 +381,36 @@ export class Scenery {
    * Returns how many plants were actually felled in total, so a caller can
    * tell "the spot is clear now" from "there was nothing here to clear".
    */
+  /**
+   * Non-mutating twin of {@link clearTreesNear} — "would felling here find
+   * anything", not "fell it now". Same matching rule (a tree or bush clump
+   * whose own radius brings it within `radius` of `(x, z)`), zero side
+   * effects.
+   *
+   * Exists for `train/bridgeFootprint.ts`'s search (issues #317, #319,
+   * scatterDecoupling regression found reviewing PR #330): the width/shift
+   * backtracking loop tries many candidates before settling on one, and only
+   * the *winning* candidate should ever actually fell a tree — a rejected
+   * candidate that happened to probe a point near a tree must not remove it,
+   * or which trees end up standing becomes a function of every candidate the
+   * search happened to *consider*, not just the one it *kept*. The search
+   * uses this to ask "is this candidate viable, felling included" without
+   * committing to the fell; the one, final commit for whichever candidate is
+   * actually kept calls {@link clearTreesNear} for real.
+   */
+  hasFellableTreeNear(x: number, z: number, radius: number): boolean {
+    for (let i = 0; i < this.occludersMutable.length; i += 1) {
+      const tree = this.occludersMutable[i]!;
+      const trunk = this.treeColliders[i]!;
+      if (Math.hypot(tree.x - x, tree.z - z) < radius + trunk.radius) return true;
+    }
+    for (let i = 0; i < this.bushesMutable.length; i += 1) {
+      const bush = this.bushesMutable[i]!;
+      if (Math.hypot(bush.x - x, bush.z - z) < radius + bush.radius) return true;
+    }
+    return false;
+  }
+
   clearTreesNear(x: number, z: number, radius: number): number {
     let felled = 0;
     for (let i = this.occludersMutable.length - 1; i >= 0; i -= 1) {
@@ -580,32 +613,25 @@ function buildFoliage(collision: CollisionWorld): {
   // rather than guessed — trees and walls use separate RNG streams, and
   // disabling the wall keep-out left the stranding in place while reverting the
   // budget alone cleared it.
-  while (treeCount < targetTrees && attempts < 180000) {
-    attempts += 1;
-    // This candidate's own stream. Everything below draws from it and nothing
-    // else, so what this attempt proposes depends on `attempts` and the seed —
-    // never on how many earlier candidates happened to be accepted.
-    const rng = candidateRng(TREE_SALT, attempts);
-    const angle = rng.range(0, TAU);
-    // Scaled to the park's reach on the bearing picked, so the lawn is seeded
-    // evenly whether that bearing runs 57 m to the edge or 110 m. A fixed
-    // radius would crowd every tree into the middle of a park this shape.
-    const distance = Math.sqrt(rng.unit()) * (edgeRadiusAt(PARK_BOUNDARY, angle) - 6);
-    const x = Math.cos(angle) * distance;
-    const z = Math.sin(angle) * distance;
-    if (!isPlantable(x, z, 2.6)) continue;
-
-    const kind = pickTreeKind(rng);
+  /**
+   * Every check and every piece of bookkeeping one accepted tree needs —
+   * extracted so the climbable-coverage pass below plants through exactly
+   * the same gate as the main scatter (same spacing, walls, cruiser and
+   * sightline rules, same collider/occluder filing), rather than a second,
+   * driftable copy. `requireClimbable` additionally refuses a rolled tree
+   * whose top ball is too small to climb out of, before any bookkeeping.
+   */
+  const tryPlantTree = (rng: Rng, kind: TreeKind, x: number, z: number, requireClimbable: boolean): boolean => {
     const reach = TREE_REACH[kind];
-    if (planted.some((tree) => Math.hypot(x - tree.x, z - tree.z) < tree.reach + reach)) continue;
+    if (planted.some((tree) => Math.hypot(x - tree.x, z - tree.z) < tree.reach + reach)) return false;
     // The walls are decided before any of this runs, so a tree that would grow
     // into one is simply refused the spot. See `clearOfWalls`/`TREE_WALL_GAP`.
-    if (!clearOfWalls(x, z, reach)) continue;
+    if (!clearOfWalls(x, z, reach)) return false;
     // ...and so is the Sky Cruiser's loop, which dips to boarding height beside
     // its station and would otherwise fly straight through this canopy (#198).
     // Asked here rather than in `isPlantable` because it wants the kind, which
     // is already picked above — so no RNG draw moves to make room for it.
-    if (!clearOfCruiser(x, z, reach, TREE_TOP[kind])) continue;
+    if (!clearOfCruiser(x, z, reach, TREE_TOP[kind])) return false;
     // ...and nor may it stand between the camera and the arriving cat bus. Asked
     // here rather than in `isPlantable` for exactly the reason `clearOfCruiser`
     // above is: it needs the tree's *height*, and the kind — which is what
@@ -613,7 +639,7 @@ function buildFoliage(collision: CollisionWorld): {
     // guessing at the tallest tree the scatter can produce, and a keep-out sized
     // for a tree that never grows there is the same disease as a 10 m disc sized
     // for an 11 m bus. See `entrance/arrivalSightline.ts`.
-    if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + TREE_TOP[kind])) continue;
+    if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + TREE_TOP[kind])) return false;
     planted.push({ x, z, reach });
     const y = terrainHeight(x, z);
 
@@ -622,6 +648,10 @@ function buildFoliage(collision: CollisionWorld): {
     // cat bus's lane plants the very same ones — so a new kind, or a wider
     // canopy, reaches both scenes at once instead of only this one.
     const tree = rollTree(rng, kind, x, y, z);
+    if (requireClimbable && tree.topBallRadius < CLIMBABLE_MIN_CANOPY_RADIUS) {
+      planted.pop();
+      return false;
+    }
     const lean = tree.lean;
 
     // Occlusion bookkeeping for this tree (see `FoliageOccluder`/
@@ -683,6 +713,87 @@ function buildFoliage(collision: CollisionWorld): {
     const colliderId = collision.addCircle(x, z, trunkRadius);
     treeColliders.push({ id: colliderId, radius: trunkRadius });
     treeCount += 1;
+    return true;
+  };
+
+
+  while (treeCount < targetTrees && attempts < 180000) {
+    attempts += 1;
+    // This candidate's own stream. Everything below draws from it and nothing
+    // else, so what this attempt proposes depends on `attempts` and the seed —
+    // never on how many earlier candidates happened to be accepted.
+    const rng = candidateRng(TREE_SALT, attempts);
+    const angle = rng.range(0, TAU);
+    // Scaled to the park's reach on the bearing picked, so the lawn is seeded
+    // evenly whether that bearing runs 57 m to the edge or 110 m. A fixed
+    // radius would crowd every tree into the middle of a park this shape.
+    const distance = Math.sqrt(rng.unit()) * (edgeRadiusAt(PARK_BOUNDARY, angle) - 6);
+    const x = Math.cos(angle) * distance;
+    const z = Math.sin(angle) * distance;
+    if (!isPlantable(x, z, 2.6)) continue;
+
+    if (!tryPlantTree(rng, pickTreeKind(rng), x, z, false)) continue;
+  }
+
+
+  // --- climbable coverage along the paths (Jim, 6 August: "it takes a long
+  // time to find one") ------------------------------------------------------
+  //
+  // The scatter above rolls climbability out of random geometry, so nothing
+  // guarantees the far reaches of the path network end up near a tree a
+  // child can climb — a re-rolled park measured one spur corner 67.6 m from
+  // the nearest (2026-08-23), just past the nine-flat-out-seconds bar the
+  // procgen invariant walks. So: walk the drawn network, and wherever no
+  // climbable tree is within reach, plant one nearby through the exact same
+  // gate as every other tree (`tryPlantTree`), forced to a big-canopy kind
+  // and refused unless the rolled top ball is genuinely climbable.
+  //
+  // The target is deliberately STRICTER than the check: the invariant allows
+  // `PLAYER_MAX_SPEED` x 9 s of walk; the generator aims for 7 s, so ordinary
+  // seed-to-seed wobble lands inside the bar rather than on it.
+  const CLIMB_COVER_TARGET = PLAYER_MAX_SPEED * 7;
+  const CLIMB_COVER_SALT = 0xc11f0b ^ PARK_SEED;
+  {
+    // Walked as **fixed ground cells the network passes through**, never as
+    // "every 12th sample of the concatenated centreline": a sample index
+    // slides whenever any earlier route's length changes by half a metre,
+    // which re-rolled cover trees on the far side of the park from a 2 m
+    // spur bow (`test/procgen/scatterDecoupling.test.ts` caught trees
+    // "moving" 90 m). An 8 m cell of absolute ground is the same cell
+    // whatever order or length the routes come in, so a local paving change
+    // can only ever touch the cells it actually runs through.
+    const CLIMB_COVER_CELL = 8;
+    const coverCells = new Map<number, { x: number; z: number }>();
+    for (const sample of pathCentreline()) {
+      const cellX = Math.round(sample.x / CLIMB_COVER_CELL);
+      const cellZ = Math.round(sample.z / CLIMB_COVER_CELL);
+      const cellKey = (cellX + 512) * 4096 + (cellZ + 512);
+      if (!coverCells.has(cellKey)) {
+        coverCells.set(cellKey, { x: cellX * CLIMB_COVER_CELL, z: cellZ * CLIMB_COVER_CELL });
+      }
+    }
+    // Sorted by cell key so even the ORDER cells are considered in is a
+    // function of position alone — planting consults the trees already
+    // planted, so an order that followed the walk would leak route order
+    // into the outcome.
+    for (const [cellKey, cell] of [...coverCells.entries()].sort((a, b) => a[0] - b[0])) {
+      const covered = climbableTrees.some(
+        (tree) => Math.hypot(tree.x - cell.x, tree.z - cell.z) < CLIMB_COVER_TARGET,
+      );
+      if (covered) continue;
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        const rng = candidateRng(CLIMB_COVER_SALT ^ cellKey, attempt);
+        const angle = rng.range(0, TAU);
+        const radius = rng.range(6, CLIMB_COVER_TARGET * 0.55);
+        const x = cell.x + Math.cos(angle) * radius;
+        const z = cell.z + Math.sin(angle) * radius;
+        if (!isPlantable(x, z, 2.6)) continue;
+        // 'lollipop' is the classic big-ball silhouette — the kind whose
+        // rolled top ball most often clears CLIMBABLE_MIN_CANOPY_RADIUS —
+        // but the roll still decides, and tryPlantTree refuses a runt.
+        if (tryPlantTree(rng, 'lollipop', x, z, true)) break;
+      }
+    }
   }
 
   // --- bushes --------------------------------------------------------------
@@ -747,7 +858,13 @@ function buildFoliage(collision: CollisionWorld): {
     const distance = Math.sqrt(rng.unit()) * (edgeRadiusAt(PARK_BOUNDARY, angle) - 5);
     const x = Math.cos(angle) * distance;
     const z = Math.sin(angle) * distance;
-    if (!isPlantable(x, z, 1.6)) continue;
+    // BUSH_REACH, not the old 1.6: a clump's blobs spread up to 0.85 m off
+    // the accepted centre with radii up to 1.3 m, so the farthest leaf can
+    // stand 2.15 m out — clearing the centre by less lets a blob overlap
+    // the paving by up to 0.55 m (seed 18, 2026-08-23: 0.54 m, caught by
+    // `bushesStandOnOpenGround`). One owner: the same constant the cruiser
+    // check on the next line already uses for exactly this reach.
+    if (!isPlantable(x, z, BUSH_REACH)) continue;
     if (!clearOfCruiser(x, z, BUSH_REACH, BUSH_TOP)) continue;
     if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + BUSH_TOP)) continue;
 
@@ -1028,10 +1145,16 @@ function isPlantable(x: number, z: number, clearance: number): boolean {
 }
 
 /**
- * The rail corridor and the platforms. The dependency used to point the
- * other way — the route was solved against the finished collision world and
- * bent around trees — but the route is a pure pre-scene plan now
- * (`train/plan.ts`), so the trees are the ones that give way.
+ * The rail corridor, the platforms, and every bridge's deck and ramps. The
+ * dependency used to point the other way — the route was solved against the
+ * finished collision world and bent around trees — but the route is a pure
+ * pre-scene plan now (`train/plan.ts`), so the trees are the ones that give
+ * way. The bridge check is the same trick one step further: issue #116's
+ * bridges are pure geometry off that same plan, not yet built either, so
+ * asking `isInBridgeFootprint` costs nothing that was not already being
+ * spent — see that module's own header for why a plant needs to know at all
+ * (a lamp planted well clear of the *old*, narrow corridor still landed on
+ * a ramp's own low end).
  */
 function onRailway(x: number, z: number, clearance: number): boolean {
   const route = TRAIN_PLAN.route;
@@ -1041,6 +1164,7 @@ function onRailway(x: number, z: number, clearance: number): boolean {
   for (const station of TRAIN_PLAN.stations) {
     if (Math.hypot(station.standX - x, station.standZ - z) < 5.2 + clearance) return true;
   }
+  if (isInBridgeFootprint(x, z)) return true;
   return false;
 }
 const railProbe = new Vector3();
@@ -1198,6 +1322,7 @@ function runIsClear(x1: number, z1: number, x2: number, z2: number): boolean {
     const z = z1 + (z2 - z1) * t;
     if (!isPlantable(x, z, 3.2)) return false;
     if (distanceToRailCorridor(x, z) < RAIL_CORRIDOR_CLEARANCE) return false;
+    if (isInBridgeFootprint(x, z)) return false;
     // Seed 5 built a hiding wall across the cruiser's station approach and the
     // ride flew through it (#198). Safe to ask here, unlike `clearOfWalls`:
     // the coaster is solved at module load and knows nothing of this file.
@@ -1305,6 +1430,165 @@ const MAZE_CANDIDATES = 2600;
 const BENCH_CANDIDATES = 4200;
 const BENCH_SALT = 0xbe7c4;
 
+/**
+ * **Where a decorative wall may stand: bordering a path edge or a plot
+ * boundary, on the same grid axis it borders — never freestanding in open
+ * lawn.** (Issue #300, Jim, playing: *"here we see 3 walls placed at
+ * nonsensical locations that make no sense. On the grid layout, the walls
+ * should be at the same orthogonal axes as the path and also be around the
+ * edges of the path where there is nothing else they would collide with —
+ * the point of walls isn't to scatter them at random!"*)
+ *
+ * Before this, both wall generators drew a fully free `(angle, radius)` from
+ * the whole lawn disc and only *afterwards* asked whether the result was
+ * clear of everything — so a run's existence never depended on anything it
+ * was actually next to. The maze's yaw was `rng.pick([0, PI/2]) +
+ * rng.range(-0.12, 0.12)`, so even its own grid intent was jittered off axis
+ * by up to ~6.9 degrees, and the lawn benches picked their yaw fully at
+ * random (`rng.range(0, Math.PI)`) with no grid consideration whatsoever.
+ * Both drew their centre point from the whole disc with no reference to a
+ * path or a plot at all — "clear of everything" is not the same claim as
+ * "next to something", and Jim's three walls satisfied the first while
+ * failing the second.
+ *
+ * A wall picked here instead starts from something real: a straight,
+ * grid-axis stretch of the paved network ({@link pathBorderSegments}) or a
+ * plot's own bounding circle ({@link ANCHORS}), snapped to a cardinal
+ * bearing. Its yaw is read straight off that anchor's own axis — never
+ * jittered — and its centre sits a fixed offset outside the thing it
+ * borders, clear of the isPlantable margin that thing already keeps. The
+ * *safety* checks below (`runIsClear`, `fitsAmong`, `clearOfAnchors`) are
+ * unchanged: this only changes where a candidate's centre and yaw come from,
+ * not what makes one acceptable once proposed.
+ */
+interface BorderAnchor {
+  readonly x: number;
+  readonly z: number;
+  /** 0 or PI/2 — the grid axis the bordered thing itself runs along. */
+  readonly axisYaw: number;
+  /** Direction pointing away from the thing being bordered, so an arm that
+   * extends this way only ever moves further from it, never back across it. */
+  readonly outward: number;
+}
+
+/** Clear of a path's own `isPlantable` margin (3.2 m, `runIsClear`), with
+ * enough left over that the wall still reads as hugging the kerb rather than
+ * standing off in the middle of the lawn. */
+const PATH_BORDER_OFFSET_MIN = 3.6;
+const PATH_BORDER_OFFSET_MAX = 6.5;
+
+/** Clear of a plot's own keepout (`insideAnyAnchor`: boundingRadius + 5.7 m),
+ * with the same "hugs it, doesn't wander off" ceiling as the path case. */
+const PLOT_BORDER_OFFSET_MIN = 6.2;
+const PLOT_BORDER_OFFSET_MAX = 9.5;
+
+const CARDINAL_BEARINGS = [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2] as const;
+
+/**
+ * Draws one candidate anchor from this attempt's own RNG stream — a point
+ * and grid axis taken from a real path edge or a real plot boundary, never
+ * from open lawn. `null` only if the park has neither (never true in
+ * practice; kept honest rather than assuming the network is non-empty).
+ */
+function pickBorderAnchor(rng: Rng): BorderAnchor | null {
+  const segments = pathBorderSegments();
+  const anchorPlots = ANCHORS.length > 0;
+  const anchorPath = segments.length > 0;
+  if (!anchorPlots && !anchorPath) return null;
+  // Paths run through far more of the lawn than the dozen-odd plots do, so
+  // they get the larger share — but plots are still asked often enough that
+  // a garden wall regularly reads as squaring off a building's corner too.
+  const useAPlot = anchorPlots && (!anchorPath || rng.unit() < 0.35);
+
+  if (useAPlot) {
+    const anchor = rng.pick(ANCHORS);
+    const bearing = rng.pick(CARDINAL_BEARINGS);
+    const offset = rng.range(PLOT_BORDER_OFFSET_MIN, PLOT_BORDER_OFFSET_MAX);
+    const distance = anchor.boundingRadius + offset;
+    const x = anchor.position[0] + Math.cos(bearing) * distance;
+    const z = anchor.position[1] + Math.sin(bearing) * distance;
+    // Tangent to the circle at a cardinal bearing is itself cardinal.
+    const axisYaw = bearing % Math.PI === 0 ? Math.PI / 2 : 0;
+    return { x, z, axisYaw, outward: bearing };
+  }
+
+  // The segment is found by drawing a random point on the lawn and taking
+  // the border segment nearest it — never `rng.pick(segments)`. Picking by
+  // index looked equivalent and was a park-wide coupling in disguise: any
+  // change that split or merged one straight run anywhere renumbered the
+  // whole list, and every candidate's pick shifted one entry over — so a
+  // 2 m bow on one spur nudged garden walls on the far side of the park
+  // (`test/procgen/scatterDecoupling.test.ts`). A nearest-segment lookup
+  // only changes for candidates whose drawn point lands near the paving
+  // that actually changed.
+  const probeAngle = rng.range(0, TAU);
+  const probeDistance = Math.sqrt(rng.unit()) * (edgeRadiusAt(PARK_BOUNDARY, probeAngle) - 4);
+  const probeX = Math.cos(probeAngle) * probeDistance;
+  const probeZ = Math.sin(probeAngle) * probeDistance;
+  let seg = segments[0] as PathBorderSegment;
+  let segDistance = Infinity;
+  for (const candidate of segments) {
+    const d = pointToSegment([probeX, probeZ], candidate.a, candidate.b);
+    if (d < segDistance) {
+      segDistance = d;
+      seg = candidate;
+    }
+  }
+  const t = rng.range(0.15, 0.85);
+  const px = seg.a[0] + (seg.b[0] - seg.a[0]) * t;
+  const pz = seg.a[1] + (seg.b[1] - seg.a[1]) * t;
+  const side = rng.pick([1, -1] as const);
+  const perp = seg.axisYaw + Math.PI / 2;
+  const offset = rng.range(PATH_BORDER_OFFSET_MIN, PATH_BORDER_OFFSET_MAX);
+  const distance = seg.halfWidth + offset;
+  const x = px + Math.cos(perp) * side * distance;
+  const z = pz + Math.sin(perp) * side * distance;
+  const outward = side > 0 ? perp : perp + Math.PI;
+  return { x, z, axisYaw: seg.axisYaw, outward };
+}
+
+/**
+ * How far (x, z) is from the nearest thing a wall may legitimately border: a
+ * paved edge, or a plot's own bounding circle. Negative inside either.
+ *
+ * This is the general-purpose backstop {@link pickBorderAnchor} alone cannot
+ * be: an anchor's *corner* is placed a known offset from the border it was
+ * drawn from, but an arm's far *tip* can walk past the end of a short border
+ * segment (see {@link MIN_BORDER_SEGMENT_LENGTH} in `paths.ts` — a segment
+ * only has to clear 4 m, and a maze arm can reach 8.5) and land somewhere no
+ * longer close to that segment, or to anything else. Checking every arm tip
+ * against every border, not just the one it was drawn from, is what catches
+ * that the same way {@link runIsClear} checks a candidate against the whole
+ * park rather than trusting the anchor it started from.
+ */
+function distanceToBorderedThing(x: number, z: number): number {
+  let best = Infinity;
+  for (const seg of pathBorderSegments()) {
+    const d = pointToSegment([x, z], seg.a, seg.b) - seg.halfWidth;
+    if (d < best) best = d;
+  }
+  for (const anchor of ANCHORS) {
+    const d = Math.hypot(x - anchor.position[0], z - anchor.position[1]) - anchor.boundingRadius;
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+/**
+ * No point of a decorative wall may end up further than this from the
+ * nearest path edge or plot boundary — the actual bound {@link
+ * distanceToBorderedThing} is checked against, and the number
+ * `wallsBorderSomethingReal` (`test/procgen/invariants.ts`) proves the built
+ * park never exceeds.
+ *
+ * Generous above the anchor offsets above (path: up to 6.5 m; plot: up to
+ * 9.5 m) so a maze piece's own arms — up to 8.5 m of tangent reach plus 5 m of
+ * outward reach — are not refused for merely being a real L-shape, but tight
+ * enough that "close to a path or a plot", not "somewhere on the lawn", is
+ * what every accepted candidate actually is.
+ */
+const WALL_BORDER_MAX_DISTANCE = 11;
+
 function generateWallMaze(placed: WallRun[]): WallRun[] {
   // Exactly 1.00 m sits ON the measured flight ceiling and fails the boot
   // assert by a float hair - honest heights only.
@@ -1322,21 +1606,28 @@ function generateWallMaze(placed: WallRun[]): WallRun[] {
     // depending on which test refused it, which is precisely how a longer path
     // spur used to relocate a garden wall onto an unrelated kiosk's doorstep.
     const rng = candidateRng(MAZE_SALT, attempts);
-    const angle = rng.range(0, Math.PI * 2);
-    const radius = Math.sqrt(rng.range(13 * 13, 42 * 42));
-    const cx = Math.cos(angle) * radius;
-    const cz = Math.sin(angle) * radius;
+    const anchor = pickBorderAnchor(rng);
+    if (!anchor) continue;
+    const { x: cx, z: cz, axisYaw, outward } = anchor;
     if (cornerPoints.some(([px, pz]) => Math.hypot(cx - px, cz - pz) < MAZE_PIECE_GAP + 12)) {
       continue;
     }
-    const yaw = rng.pick([0, Math.PI / 2] as const) + rng.range(-0.12, 0.12);
+    // One arm hugs the bordered edge (either direction along it); the other
+    // extends outward, away from what it borders, so it only ever opens
+    // further into the lawn and never doubles back across the thing it
+    // anchors to.
+    const armATowards = rng.pick([axisYaw, axisYaw + Math.PI] as const);
     const armA = rng.range(5.5, 8.5);
-    const armB = rng.range(4.5, 7.5);
-    const a2: [number, number] = [cx + Math.cos(yaw) * armA, cz + Math.sin(yaw) * armA];
-    const b2: [number, number] = [
-      cx + Math.cos(yaw + Math.PI / 2) * armB,
-      cz + Math.sin(yaw + Math.PI / 2) * armB,
-    ];
+    const armB = rng.range(3.5, 5.5);
+    const a2: [number, number] = [cx + Math.cos(armATowards) * armA, cz + Math.sin(armATowards) * armA];
+    const b2: [number, number] = [cx + Math.cos(outward) * armB, cz + Math.sin(outward) * armB];
+    // Both tips, not just the anchored corner — see `distanceToBorderedThing`.
+    if (
+      distanceToBorderedThing(a2[0], a2[1]) > WALL_BORDER_MAX_DISTANCE ||
+      distanceToBorderedThing(b2[0], b2[1]) > WALL_BORDER_MAX_DISTANCE
+    ) {
+      continue;
+    }
     if (!runIsClear(cx, cz, a2[0], a2[1]) || !runIsClear(cx, cz, b2[0], b2[1])) continue;
 
     // The L goes down whole or not at all: half a hiding piece is a stub.
@@ -1376,10 +1667,12 @@ function generateStoneRuns(placed: WallRun[]): WallRun[] {
     placed.push(run);
   };
 
-  // Beds: short tangent walls just off the plaza kerb, at seeded bearings.
+  // Beds: short tangent walls just off the plaza kerb, on the plaza's own
+  // cardinal bearings — exactly on grid axis, not jittered off it, for the
+  // same reason the lawn benches below no longer roll a free yaw (issue #300).
   const bedDistance = PLAZA.radius + 3.2;
   for (let i = 0; i < 4; i += 1) {
-    const bearing = (i / 4) * Math.PI * 2 + rng.range(-0.3, 0.3);
+    const bearing = (i / 4) * Math.PI * 2;
     const cx = PLAZA.x + Math.cos(bearing) * bedDistance;
     const cz = PLAZA.z + Math.sin(bearing) * bedDistance;
     const tangent = bearing + Math.PI / 2;
@@ -1400,19 +1693,30 @@ function generateStoneRuns(placed: WallRun[]): WallRun[] {
   // little per seed instead, which "every park is unique" is happy with.
   for (let attempt = 0; attempt < BENCH_CANDIDATES; attempt += 1) {
     const bench = candidateRng(BENCH_SALT ^ PARK_SEED, attempt);
-    const angle = bench.range(0, Math.PI * 2);
-    const radius = Math.sqrt(bench.range(16 * 16, 44 * 44));
-    const cx = Math.cos(angle) * radius;
-    const cz = Math.sin(angle) * radius;
-    const yaw = bench.range(0, Math.PI);
+    // Anchored to a real path edge or plot boundary, on that thing's own grid
+    // axis (issue #300) — not the free `(angle, radius)` position and fully
+    // random `rng.range(0, Math.PI)` yaw this used to roll, which is exactly
+    // what put stonework at nonsensical diagonal angles out among the bushes
+    // with nothing to do with anything nearby.
+    const anchor = pickBorderAnchor(bench);
+    if (!anchor) continue;
+    const { x: cx, z: cz, axisYaw } = anchor;
     // Shorter than the 7-9 m these used to roll. A run that long is a garden
     // wall, and the lawn has very few 9 m stretches that clear every path,
     // plot and now the railway along their whole length — the old length only
     // ever fitted because `runIsClear` sampled five points and stepped over
     // what lay between them. 4.4-6.4 m still reads as stonework to sit on.
     const half = bench.range(2.2, 3.2);
-    const from: [number, number] = [cx - Math.cos(yaw) * half, cz - Math.sin(yaw) * half];
-    const to: [number, number] = [cx + Math.cos(yaw) * half, cz + Math.sin(yaw) * half];
+    const from: [number, number] = [cx - Math.cos(axisYaw) * half, cz - Math.sin(axisYaw) * half];
+    const to: [number, number] = [cx + Math.cos(axisYaw) * half, cz + Math.sin(axisYaw) * half];
+    // Same backstop as the maze arms: a short border segment can still let a
+    // tangent run walk past its end into open lawn.
+    if (
+      distanceToBorderedThing(from[0], from[1]) > WALL_BORDER_MAX_DISTANCE ||
+      distanceToBorderedThing(to[0], to[1]) > WALL_BORDER_MAX_DISTANCE
+    ) {
+      continue;
+    }
     piece += 1;
     consider({ from, to, height: bench.pick([0.8, 0.95] as const), kind: 'stone', piece });
   }

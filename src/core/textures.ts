@@ -300,6 +300,65 @@ export function pinkStoneTexture(repeatX = 4, repeatY = 1): CanvasTexture {
   });
 }
 
+/**
+ * The voussoir ring: large, single-course wedge stones framing a masonry
+ * arch's opening, distinct from the smaller randomised cobbles
+ * {@link pinkStoneTexture} draws everywhere else on the shell — Jim's
+ * 2026-08-24 request, "keep the current height but make the tunnel an
+ * arch, with a texture giving arch stones around the tunnel", once the
+ * humpback bridges' new curved soffit had no visual callout of its own.
+ *
+ * Painted straight onto the tunnel's own soffit (the arch's visible
+ * underside, flat crown and curved haunch alike — see `bridges.ts`) —
+ * never a second mesh standing in front of it (CLAUDE.md's "one surface,
+ * one texture", the hood-face lesson). The joints are drawn dead straight,
+ * parallel to `v` (the tunnel's own depth): a real voussoir's wedge shape
+ * comes from the soffit's own curvature doing the foreshortening as it
+ * sweeps through 3D, not from a taper baked into flat UV space — a
+ * straight joint on a curved haunch already reads as radiating once
+ * rendered, and a taper drawn on top of that would double up and read as
+ * warped instead.
+ *
+ * Same three pink-stone tones {@link pinkStoneTexture} uses
+ * (`PALETTE.stonePink*` — this file's own header: "never a new colour"),
+ * so the ring reads as distinct by scale and joint width, not a fourth
+ * hue.
+ */
+export function archStoneTexture(repeatX = 3, repeatY = 1): CanvasTexture {
+  return cached(`archStone:${repeatX}:${repeatY}`, () => {
+    const size = 256;
+    const { canvas, ctx } = createCanvas(size);
+
+    // Mortar: a wide, dark joint between voussoirs — noticeably wider than
+    // pinkStoneTexture's ordinary coursing gap, so the ring reads as
+    // deliberately dressed stone rather than more rubble.
+    ctx.fillStyle = hexToCss(PALETTE.stonePinkDark);
+    ctx.fillRect(0, 0, size, size);
+
+    const stones = 3;
+    const stoneWidth = size / stones;
+    const mortar = 10;
+
+    for (let i = 0; i < stones; i += 1) {
+      const x = i * stoneWidth;
+      const shade = i % 2 === 0 ? PALETTE.stonePinkLight : PALETTE.stonePink;
+      ctx.fillStyle = hexToCss(shade);
+      roundedRect(ctx, x + mortar / 2, mortar / 2, stoneWidth - mortar, size - mortar, 10);
+      ctx.fill();
+      // Top highlight — the same dome cue `pinkStoneTexture` uses, so the
+      // ring reads as one lit family with the wall around it rather than a
+      // flatter, separately-lit material.
+      ctx.fillStyle = '#ffffff44';
+      roundedRect(ctx, x + mortar / 2 + 4, mortar / 2 + 4, stoneWidth - mortar - 8, size * 0.22, 8);
+      ctx.fill();
+    }
+
+    const texture = finish(canvas, 1);
+    texture.repeat.set(repeatX, repeatY);
+    return texture;
+  });
+}
+
 /** Vertical plank boards with knots, for the wooden hiding walls. */
 export function woodTexture(repeatX = 3, repeatY = 1): CanvasTexture {
   return cached(`wood:${repeatX}:${repeatY}`, () => {

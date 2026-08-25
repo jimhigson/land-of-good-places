@@ -519,8 +519,12 @@ const MIN_UNITS: Readonly<Record<keyof typeof units, number>> = {
   // floor is conservative — the loop is shorter than the cruiser's and a lucky
   // start pose solves in fewer — but comfortably proves it is not done in one
   // lump, which is the regression this exists to catch (its old bespoke solver
-  // was one ~1.1 s block).
-  trainSearch: 100,
+  // was one ~1.1 s block). Lowered 100 -> 60 on 2026-08-23: the statue-ring
+  // layout rule (parkLayout.ts's ring annulus) re-rolled the canonical park
+  // and its rail loop legitimately solves smaller (224.6 m, was 359 —
+  // measured 98 pieces, two under the old floor); 60 still proves
+  // many-pieces without prosecuting a genuinely quicker solve.
+  trainSearch: 60,
   slideSearch: 500,
 };
 for (const [phase, floor] of Object.entries(MIN_UNITS) as [keyof typeof units, number][]) {

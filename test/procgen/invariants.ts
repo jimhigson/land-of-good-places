@@ -28,7 +28,7 @@
  * about the park, not a check on it.
  */
 import { describe, it, beforeAll, expect } from 'vitest';
-import { InstancedMesh, Matrix4, Mesh, Vector3, type Object3D } from 'three';
+import { Box3, InstancedMesh, Matrix4, Mesh, Raycaster, Vector3, type Object3D } from 'three';
 import {
   buildParkFacts,
   segmentDistance,
@@ -38,6 +38,14 @@ import {
   type ParkFacts,
 } from './parkFacts.ts';
 import { resolveDismount, resolveDismountGroup } from '../../src/world/dismount.ts';
+// Leaf module, safe to import statically: `bridgeSpine.ts`'s ONLY import is
+// a type-only one (from `world/train/crossings`), which erases — no seeded
+// module loads, so this cannot pin the park's seed the way this file's own
+// header warns about. It is imported (rather than restated) because the
+// frame it builds from a crossing's recorded spine is pure geometry, and a
+// second hand-written arc-walk here would be exactly the "two definitions
+// of one thing" disease CLAUDE.md names.
+import { frameFor } from '../../src/world/train/bridgeSpine.ts';
 // Leaf module: reaches only core/constants, core/uiScale and (type-only)
 // world/interact — nothing seeded, so a static import cannot fix the park.
 import {
@@ -47,7 +55,15 @@ import {
   zoneBandClearance,
   zoneSeparation,
 } from '../../src/world/tapSpacing.ts';
-import { PLAYER_MAX_SPEED, PLAYER_RADIUS, RIM_OUTSET_START } from '../../src/core/constants.ts';
+import {
+  BUILDING_STEP_UP,
+  CAMERA_FACING_YAW,
+  PATH_KERB_LIFT,
+  PATH_SURFACE_LIFT,
+  PLAYER_MAX_SPEED,
+  PLAYER_RADIUS,
+  RIM_OUTSET_START,
+} from '../../src/core/constants.ts';
 import {
   ENTRANCE_ANGLE,
   ENTRANCE_BUS_ARRIVE_X,
@@ -61,7 +77,15 @@ import {
 } from '../../src/world/entrance/layout.ts';
 import { ROAD_TILE_METRES } from '../../src/world/entrance/road.ts';
 import { visibleTop } from '../../src/art/style/measure.ts';
-import { CHILD_FOOTPRINT, createKid, TALLEST_CHILD_HEIGHT } from '../../src/art/models/kid.ts';
+import {
+  CHILD_FOOTPRINT,
+  createKid,
+  TALLEST_CHILD_HEIGHT,
+  TALLEST_CHILD_SEATED_HEIGHT,
+} from '../../src/art/models/kid.ts';
+// A leaf module — see its own header — so importing it here cannot fix the
+// park's seed early the way a `trainModel.ts`/`route.ts` import would.
+import { applyRidePose } from '../../src/entities/ridePose.ts';
 import { HAIR_STYLES } from '../../src/art/models/hair.ts';
 import { HAT_KINDS, createHat } from '../../src/art/models/hats.ts';
 // `train/trainDimensions.ts` and `train/clearance.ts` rather than
@@ -78,9 +102,8 @@ import {
   CAR_FLOOR_Y,
   CARRIAGE_BODY_HALF_WIDTH,
   LOCO_BODY_TOP_Y,
-  SEAT_Y,
 } from '../../src/world/train/trainDimensions.ts';
-import { RIDER_HEADROOM, TRAIN_CLEARANCE_Y } from '../../src/world/train/clearance.ts';
+import { RIDER_HEADROOM, STATION_GAP, TRAIN_CLEARANCE_Y } from '../../src/world/train/clearance.ts';
 // A leaf module (imports nothing), so it cannot pin the park's seed the way a
 // static import of `train/route.ts` would — see that constant's own note.
 import { TRAIN_MIN_TURN_RADIUS } from '../../src/world/train/turning.ts';
@@ -317,6 +340,110 @@ const wallsClearTheRailway: Invariant = (facts) => {
     }
   }
   return fouls;
+};
+
+/**
+ * **Every decorative wall run actually borders something, on its own grid
+ * axis.** Issue #300, Jim, playing, on `grid-aligned-park`'s own preview:
+ * *"here we see 3 walls placed at nonsensical locations that make no sense.
+ * On the grid layout, the walls should be at the same orthogonal axes as the
+ * path and also be around the edges of the path where there is nothing else
+ * they would collide with — the point of walls isn't to scatter them at
+ * random!"*
+ *
+ * Before the fix, both `Scenery.ts` wall generators drew a candidate's centre
+ * from the whole lawn disc — `(angle, radius)`, fully free — and only
+ * afterwards asked whether the result was *clear* of everything nearby.
+ * "Clear of everything" and "next to something" are different claims, and a
+ * candidate could satisfy the first while utterly failing the second: nothing
+ * ever measured how far a wall ended up from the path or plot it was
+ * supposedly decorating. The lawn benches additionally rolled a fully free
+ * yaw (`rng.range(0, Math.PI)`), so half the time they landed further off a
+ * grid axis than on one.
+ *
+ * Two real, measured claims, neither taken from the generator's own intent —
+ * `ParkFacts.walls` reads `from`/`to` off the built runs, `ParkFacts.pathEdges`
+ * and `ParkFacts.plots` off the built network and layout:
+ *
+ * 1. **Angle.** The path network is itself locked to the global X/Z axes —
+ *    {@link pathsRunOnGridAxes} above proves exactly that of the drawn curve,
+ *    with the closed ring the one deliberate exception, excluded here for the
+ *    same reason it is excluded there ({@link ringIsATrueCircleRoundTheStatue}).
+ *    So "the same orthogonal axis as the nearest path edge" and "a global
+ *    grid axis" are the same claim wherever a wall sits close enough to a
+ *    spur or interconnect to be called bordering it. Measuring against the
+ *    fixed global axis directly — rather than hunting for the one nearby
+ *    curve sample and trusting its local tangent — means a momentary wobble
+ *    in one Catmull-Rom sample near a corner can never be mistaken for the
+ *    thing a wall is meant to match.
+ * 2. **Proximity.** Every point along a wall run ({@link alongRun}, sampled
+ *    every metre) is within reach of the nearest thing it could plausibly be
+ *    bordering — a paved edge's own surface, or a plot's own bounding circle
+ *    — so a whole run stays near what it borders rather than just touching it
+ *    at one lucky corner and trailing off into open lawn.
+ *
+ * `WALL_BORDER_PROXIMITY_TOLERANCE` carries real headroom above the measured
+ * worst case: built and measured across all five CI seeds after the fix, the
+ * furthest any sampled wall point ever sits from the nearest path edge or
+ * plot boundary is 10.96 m (wood, seed 20260728) — comfortably inside the
+ * 14 m here, while still nowhere near what an unconstrained scatter across
+ * the ~90 m-wide lawn disc could produce. `WALL_AXIS_TOLERANCE_DEG` is looser
+ * than the generator's own worst rounding (the tightest `pathBorderSegments`
+ * stretch can be ~2.9 deg off true axis) but far tighter than a genuine
+ * diagonal, which the old bench yaw could put anywhere up to 45 deg off.
+ */
+const WALL_AXIS_TOLERANCE_DEG = 8;
+const WALL_BORDER_PROXIMITY_TOLERANCE = 14;
+
+const wallsBorderTheGridSensibly: Invariant = (facts) => {
+  const problems: string[] = [];
+  // The ring is a deliberate true circle, never a grid edge — see this
+  // invariant's own comment and `pathsRunOnGridAxes` above.
+  const borderEdges = facts.pathEdges.filter((edge) => !edge.backbone);
+
+  const nearestBorderDistance = (point: readonly [number, number]): number => {
+    let nearest = Infinity;
+    for (const edge of borderEdges) {
+      for (let i = 1; i < edge.points.length; i += 1) {
+        const d = pointToSegment(point, edge.points[i - 1]!, edge.points[i]!) - edge.halfWidth;
+        if (d < nearest) nearest = d;
+      }
+    }
+    for (const plot of facts.plots) {
+      const d = Math.hypot(point[0] - plot.x, point[1] - plot.z) - plot.boundingRadius;
+      if (d < nearest) nearest = d;
+    }
+    return nearest;
+  };
+
+  for (const wall of facts.walls) {
+    const dx = wall.to[0] - wall.from[0];
+    const dz = wall.to[1] - wall.from[1];
+    if (Math.hypot(dx, dz) < 1e-6) continue;
+
+    const angleDeg = (Math.atan2(dz, dx) * 180) / Math.PI;
+    const mod90 = ((angleDeg % 90) + 90) % 90;
+    const offAxis = Math.min(mod90, 90 - mod90);
+    if (offAxis > WALL_AXIS_TOLERANCE_DEG) {
+      problems.push(
+        `${wall.kind} run (${fmt(wall.from)}->${fmt(wall.to)}) sits ${offAxis.toFixed(1)} deg off ` +
+          `the park's grid axes — the path network itself runs orthogonal, this wall does not`,
+      );
+    }
+
+    let worstProximity = 0;
+    for (const point of alongRun(wall.from, wall.to, 1)) {
+      worstProximity = Math.max(worstProximity, nearestBorderDistance(point));
+    }
+    if (worstProximity > WALL_BORDER_PROXIMITY_TOLERANCE) {
+      problems.push(
+        `${wall.kind} run (${fmt(wall.from)}->${fmt(wall.to)}) strays ${worstProximity.toFixed(1)} m ` +
+          `from the nearest path edge or plot boundary at its furthest point — bordering nothing`,
+      );
+    }
+  }
+
+  return problems;
 };
 
 /**
@@ -776,6 +903,556 @@ const noPathEndsNowhere: Invariant = (facts) => {
 };
 
 /**
+ * **Every plot's sign faces exactly the camera's own fixed diagonal**
+ * (issue #269).
+ *
+ * `anchors.ts`'s own doc is explicit that this applies to every plot, camera
+ * facing or not: "these all sit near +45 degrees, which is the one fixed
+ * angle the camera ever looks from... a sign facing any other way is one a
+ * child simply cannot read." Before issue #269, "near" meant a fresh random
+ * draw every seed (`parkLayout.ts` drew `Math.PI * rng.range(0.2, 0.3)`) —
+ * never exactly square to the camera, and different on every rebuild.
+ *
+ * `PlotFact.signYaw` is read straight off the solved `PARK_LAYOUT` entry —
+ * not re-derived — and that same field is what a sign's own mesh rotation is
+ * built from everywhere it appears (`minigames/dodgems/plot.ts`'s
+ * `signGroup.rotation.y`, `world/hotel/Hotel.ts`'s `facadeYaw`,
+ * `stallPlacement.ts`'s `counterFacing`), so one measurement here catches
+ * every one of those drifting apart again, the way `parkLayout.ts`'s own
+ * "one owner" doc warns they used to.
+ */
+const buildingsFaceTheCameraAxis: Invariant = (facts) => {
+  const problems: string[] = [];
+  for (const plot of facts.plots) {
+    const drift = Math.abs(plot.signYaw - CAMERA_FACING_YAW);
+    if (drift > 1e-9) {
+      problems.push(
+        `'${plot.id}' has signYaw ${plot.signYaw.toFixed(4)} rad, ${drift.toFixed(4)} rad off ` +
+          `CAMERA_FACING_YAW (${CAMERA_FACING_YAW.toFixed(4)} rad) — not axis-aligned to the camera`,
+      );
+    }
+  }
+  return problems;
+};
+
+/**
+ * Longest continuous stretch of any paved ribbon allowed to run diagonally
+ * rather than along a grid axis (issue #269).
+ *
+ * Not zero, on purpose. Two things legitimately still run at an angle:
+ *
+ * - **A booth's own doorway approach.** `paths.ts`'s `spur()` deliberately
+ *   carries the last few metres of a camera-facing booth's spur along the
+ *   counter's own facing diagonal so the ribbon arrives head-on rather than
+ *   grazing the counter's side wall (see that function's "Arrive HEAD-ON,
+ *   not obliquely" note) — a short, intentional exception to the rule this
+ *   invariant otherwise enforces.
+ * - **A train platform's fixed final approach**, which predates issue #269
+ *   and is out of its scope: the platform turn is authored geometry, not
+ *   part of the axis-aligned trunk network `paths.ts` grows.
+ *
+ * The closed backbone ring is exempt outright, not just tolerated — see
+ * {@link ringIsATrueCircleRoundTheStatue} below. It is not a lapse in this
+ * invariant's coverage: Jim's own follow-up instruction (issue #269, 18
+ * August 2026) is that the ring is deliberately the one route in the network
+ * allowed to be a genuine circle, off grid axes for its entire circumference,
+ * while everything else — every spur, every interconnect — stays on the
+ * grid this invariant polices.
+ *
+ * Measured, not guessed: the canonical seed's longest such stretch (outside
+ * the now-exempt ring) is 11.2 m
+ * (the west station's own platform approach). This is set generously above
+ * that measured worst case — the same shape of bound
+ * {@link TRESTLE_GAP_TOLERANCE} uses — so what actually trips it is a
+ * regression: a long run of the *trunk* network (a ring segment, a spur's
+ * main body) left diagonal, not a legitimate short approach.
+ */
+const MAX_DIAGONAL_APPROACH = 16;
+
+/**
+ * **Every paved ribbon's trunk runs on grid axes** — purely north/south or
+ * purely east/west, never a sustained diagonal (issue #269).
+ *
+ * Measured on the drawn curve (`PathEdgeFact.points`, sampled every ~0.5 m
+ * off the real Catmull-Rom curve `paths.ts` sweeps) — the same ground
+ * {@link noPathEndsNowhere} stands on, and for the same reason:
+ * `paths.ts` axis-aligns its *control* points, and the curve bows a little
+ * rounding each corner, so "runs on grid axes" is stated as a bound on how
+ * far any *continuous* stretch of off-axis travel can run
+ * ({@link MAX_DIAGONAL_APPROACH}), not as "every single 0.5 m hop is
+ * exactly axis-aligned" — a corner's own rounding would fail that trivially
+ * and prove nothing about the shape of the route.
+ *
+ * A hop counts as off-axis when the smaller of its x/z movement is more
+ * than 15% of its own length (~8.6 degrees off a grid axis) — loose enough
+ * that ordinary curve-sampling jitter on a straight run never counts, tight
+ * enough that a genuinely diagonal run cannot hide inside it.
+ */
+/**
+ * **The railway's own geometry is the grid rule's one measured exception**
+ * (Decision 6's "genuine minority"): a crossing runs square to the TRACK
+ * — which is diagonal to the world axes wherever the loop is — and a
+ * fence-following leg (a pocket pinched between rail and boundary has
+ * nowhere else to walk) curves with the loop. Both are the railway
+ * dictating the shape, exactly as designed (`crossingPlan.ts`); a stepped
+ * zigzag over a bridge deck is the absurdity this exemption avoids.
+ * Measured off the built park: a hop is railway geometry when it sits
+ * over a real bridge's own footprint, or when both its ends hug the rail
+ * corridor (fence-follow legs run at `RAIL_CORRIDOR_CLEARANCE`, 4.2 m;
+ * a level crossing's feet stand `DECK_HALF_LENGTH + 4` ≈ 7.2 m out).
+ *
+ * Shared by {@link pathsRunOnGridAxes} and {@link streetsShareLatticeLines}
+ * — one owner for "is this hop the railway's shape, not the street plan's".
+ */
+function railwayGeometryTest(
+  facts: ParkFacts,
+): (a: readonly [number, number], b: readonly [number, number]) => boolean {
+  const railPoint = new Vector3();
+  const nearRail = (x: number, z: number): boolean => {
+    const route = facts.world.train.route;
+    route.pointAt(route.distanceNear(x, z), railPoint);
+    return Math.hypot(railPoint.x - x, railPoint.z - z) <= 8.5;
+  };
+  return (a, b) => {
+    const midX = (a[0] + b[0]) / 2;
+    const midZ = (a[1] + b[1]) / 2;
+    for (const bridge of facts.world.train.bridges) {
+      if (bridge.covers(midX, midZ)) return true;
+    }
+    return nearRail(a[0], a[1]) && nearRail(b[0], b[1]);
+  };
+}
+
+const pathsRunOnGridAxes: Invariant = (facts) => {
+  const problems: string[] = [];
+  const OFF_AXIS_FRACTION = 0.15;
+
+  // See {@link railwayGeometryTest} — the grid rule's one measured exception.
+  const railwayGeometry = railwayGeometryTest(facts);
+
+  for (const edge of facts.pathEdges) {
+    // The ring is deliberately a circle, not a grid loop — see this
+    // invariant's own comment and {@link ringIsATrueCircleRoundTheStatue}.
+    if (edge.backbone) continue;
+    const points = edge.points;
+    let runStart: readonly [number, number] | null = null;
+    let runEnd: readonly [number, number] | null = null;
+
+    const flushRun = (): void => {
+      if (!runStart || !runEnd) return;
+      const runLength = Math.hypot(runEnd[0] - runStart[0], runEnd[1] - runStart[1]);
+      if (runLength > MAX_DIAGONAL_APPROACH) {
+        problems.push(
+          `${edge.name} runs diagonally for ${runLength.toFixed(1)} m, from ${fmt(runStart)} to ` +
+            `${fmt(runEnd)} — longer than a doorway approach or a platform turn should ever need`,
+        );
+      }
+      runStart = null;
+      runEnd = null;
+    };
+
+    for (let i = 1; i < points.length; i += 1) {
+      const a = points[i - 1] as readonly [number, number];
+      const b = points[i] as readonly [number, number];
+      const dx = Math.abs(b[0] - a[0]);
+      const dz = Math.abs(b[1] - a[1]);
+      const hop = Math.hypot(dx, dz);
+      const offAxis =
+        hop > 1e-6 && Math.min(dx, dz) / hop > OFF_AXIS_FRACTION && !railwayGeometry(a, b);
+      if (offAxis) {
+        if (!runStart) runStart = a;
+        runEnd = b;
+      } else {
+        flushRun();
+      }
+    }
+    flushRun();
+  }
+  return problems;
+};
+
+/**
+ * The street lattice's pitch — Decision 1's "grid pitch 12 m", the same
+ * number `paths.ts`'s `STREET_PITCH` builds with. Duplicated as a literal
+ * deliberately: this invariant asks whether the *built park* sits on a
+ * 12 m lattice, and importing the generator's own constant would make the
+ * check true by definition whenever someone changed the pitch — measuring
+ * the rules that built the park instead of the park (CLAUDE.md's procgen
+ * rule, and the exact "check that cannot fail" disease this file exists
+ * to prevent).
+ */
+const STREET_LATTICE_PITCH = 12;
+
+/**
+ * How long an axis-aligned straight run must be before it counts as a
+ * *street* (and so must sit on a lattice line): door stubs, arrival leads
+ * and fillet transitions are all shorter than this; anything longer is a
+ * run a person would read as a street line on the map.
+ */
+const MIN_STREET_RUN = 8;
+
+/**
+ * How far a street run's own line may sit off the nearest lattice line.
+ * The drawn curve on a straight is exact (dense collinear control points),
+ * so this headroom only has to absorb the fillet's own approach at the
+ * run's two ends — measured worst case across the five seeds: 0.31 m.
+ */
+const STREET_LINE_TOLERANCE = 0.9;
+
+/**
+ * How much of an edge's either end counts as its door approach (see the
+ * exemption list in {@link streetsShareLatticeLines}): the doormat's
+ * stand-off (1.4 m), its 3.5 m arrival lead, the into-the-plot `past`
+ * extension (2 m), the up-to-7 m off-street stub tail and a fillet's own
+ * give. A run must fit entirely inside this reach to be exempt, so no
+ * street-length line can hide in it: the longest exemptable run is by
+ * construction shorter than this constant.
+ */
+const DOOR_APPROACH_REACH = 15;
+
+/**
+ * **Every street sits on the shared 12 m lattice through the plaza** —
+ * the invariant that actually checks "reads as a grid", where
+ * {@link pathsRunOnGridAxes} above only ever bounded one continuous
+ * diagonal's length. The lesson of 23 August 2026 (Jim, on a top-down
+ * screenshot of a park where that older invariant passed clean on every
+ * seed: *"that top-down view looks nothing like how we discussed"*): a
+ * network can be axis-aligned segment by segment and still read as
+ * organic wandering, because "reads as a grid" is a property of the *set
+ * of lines* the segments share — the old elbow-folding router put its
+ * north-south runs on 19 different x-positions with nothing lining up
+ * with anything. So this measures exactly that: every axis-aligned drawn
+ * run long enough to read as a street ({@link MIN_STREET_RUN}) must sit
+ * within {@link STREET_LINE_TOLERANCE} of a lattice line at
+ * {@link STREET_LATTICE_PITCH} through the plaza (the lattice is anchored
+ * there so the statue circle's four compass streets are lattice lines by
+ * construction, whatever the seed).
+ *
+ * Exemptions, all measured shapes rather than escape hatches:
+ * - **Railway geometry** ({@link railwayGeometryTest}) — a crossing's
+ *   ramp corridor and a fence-follow leg take the railway's shape.
+ * - **The gate corridor** — `gate-approach`'s authored `x = 0` run: the
+ *   park gate is a world-fixed landmark (`[0, 54]`, the cat-bus's own
+ *   arrival ground) and the lattice is plaza-anchored, so the corridor
+ *   is on-lattice only by coincidence of seed.
+ * - **`fountain-approach`** — the plaza spoke inside the statue circle,
+ *   deliberately radial.
+ * - **A route's own door approach** ({@link DOOR_APPROACH_REACH}): the
+ *   final metres of an edge run where the *door* is — the doormat, its
+ *   arrival lead and the into-the-plot-mouth extension all sit on the
+ *   destination's own line (Decisions 7/8: one entrance node strictly in
+ *   front, pavement to the doorstep), and a door is only ever on a
+ *   lattice line by coincidence. Bounded: a run must fit *entirely*
+ *   inside the reach to be exempt, so it can never also be street-length
+ *   paving that merely ends at a door.
+ * - **A run threading ground the lattice does not serve**: when *both*
+ *   lattice lines either side of the run are obstructed over the run's own
+ *   span — by a plot's real footprint, the boundary, or the rail corridor,
+ *   measured off the built park — there is no street line for this paving
+ *   to sit on, and threading the gap between plots is the router doing its
+ *   job (the layout solver does not yet keep street lines clear — Decision
+ *   4's joint solve is the eventual owner of removing this case). A run
+ *   with even one clear neighbouring line stays a violation: it could have
+ *   been there, and was not.
+ * - **Station spurs' own platform tails** are *not* name-exempted: their
+ *   fence-follows and platform turns are already railway geometry by
+ *   measurement, and any straight run they keep beyond that is a street
+ *   like any other.
+ */
+const streetsShareLatticeLines: Invariant = (facts) => {
+  const problems: string[] = [];
+  const railwayGeometry = railwayGeometryTest(facts);
+  const plaza = facts.pathNodes.find((node) => node.kind === 'plaza');
+  if (!plaza) {
+    return ['no plaza node in the path graph — cannot anchor the street lattice'];
+  }
+  const offLattice = (coordinate: number, anchor: number): number => {
+    const remainder =
+      ((((coordinate - anchor) % STREET_LATTICE_PITCH) + STREET_LATTICE_PITCH) %
+        STREET_LATTICE_PITCH);
+    return Math.min(remainder, STREET_LATTICE_PITCH - remainder);
+  };
+
+  // Is a straight lattice-line segment obstructed anywhere along the span,
+  // in the built park? Sampled every 2 m. The margins mirror what the
+  // generator itself demands of a street (`paths.ts`: plots at
+  // `STREET_PLOT_CLEARANCE` 2.6, the rail corridor at 4.2, the boundary at
+  // a fallback route's own walkable margin) — a hair under each, so float
+  // noise never flips a genuinely usable line to "blocked", while a line
+  // the generator would refuse anyway never counts as available (calling
+  // it available would make the violation unfixable, not stricter).
+  const railPoint = new Vector3();
+  // The statue circle's ground blocks a street exactly as the generator's
+  // own ring guard does — measured off the built backbone ring's drawn
+  // radius, not off a constant.
+  const backbone = facts.pathEdges.find((edge) => edge.backbone);
+  let ringRadius = 0;
+  if (backbone) {
+    let sum = 0;
+    for (const [x, z] of backbone.points) sum += Math.hypot(x - plaza.x, z - plaza.z);
+    ringRadius = sum / backbone.points.length;
+  }
+  const route = facts.world.train.route;
+  const lineBlocked = (
+    axis: 'x' | 'z',
+    line: number,
+    spanStart: number,
+    spanEnd: number,
+  ): boolean => {
+    const from = Math.min(spanStart, spanEnd);
+    const to = Math.max(spanStart, spanEnd);
+    const steps = Math.max(1, Math.ceil((to - from) / 2));
+    for (let s = 0; s <= steps; s += 1) {
+      const along = from + ((to - from) * s) / steps;
+      const x = axis === 'z' ? line : along;
+      const z = axis === 'z' ? along : line;
+      for (const plot of facts.plots) {
+        const dx = Math.max(Math.abs(x - plot.x) - plot.halfX, 0);
+        const dz = Math.max(Math.abs(z - plot.z) - plot.halfZ, 0);
+        if (Math.hypot(dx, dz) < 2.55) return true;
+      }
+      if (facts.boundary.distanceToEdge(x, z) < 2.55) return true;
+      if (Math.hypot(x - plaza.x, z - plaza.z) < ringRadius + 0.4) return true;
+      route.pointAt(route.distanceNear(x, z), railPoint);
+      if (Math.hypot(railPoint.x - x, railPoint.z - z) < 4.0) return true;
+      // A Rail Race arch foot blocks a street the same way it blocks the
+      // generator: `paths.ts`'s `ARCH_FOOT_MARGIN` (a walkable gap plus
+      // the widest ribbon's own half-width and kerb) keeps paving this far
+      // off every foot, drawn or not — matched to the formula, a hair
+      // under, so a borderline-clear spot never flips the wrong way.
+      const ARCH_FOOT_REACH = PLAYER_RADIUS * 2 + 0.4 + (3.6 / 2 + 0.85) - 0.02;
+      for (const foot of facts.railRaceArchFeet) {
+        if (Math.hypot(x - foot.x, z - foot.z) < foot.radius + ARCH_FOOT_REACH) return true;
+      }
+    }
+    return false;
+  };
+
+  for (const edge of facts.pathEdges) {
+    if (edge.backbone) continue;
+    if (edge.name === 'fountain-approach') continue;
+    const points = edge.points;
+
+    // Arc length at each sample, for the door-approach exemption below.
+    const along: number[] = [0];
+    for (let i = 1; i < points.length; i += 1) {
+      const a = points[i - 1] as readonly [number, number];
+      const b = points[i] as readonly [number, number];
+      along.push((along[i - 1] as number) + Math.hypot(b[0] - a[0], b[1] - a[1]));
+    }
+    const total = along[along.length - 1] as number;
+
+    // Group consecutive same-axis hops into maximal straight runs.
+    let axis: 'x' | 'z' | null = null; // 'x': east-west (constant z); 'z': north-south (constant x)
+    let runStart = 0;
+    const flush = (endIndex: number): void => {
+      if (axis === null || endIndex <= runStart) return;
+      const a = points[runStart] as readonly [number, number];
+      const b = points[endIndex] as readonly [number, number];
+      const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const runAxis = axis;
+      const startAlong = along[runStart] as number;
+      const endAlong = along[endIndex] as number;
+      axis = null;
+      if (length < MIN_STREET_RUN) return;
+      // The door's own approach — see this invariant's header.
+      if (endAlong <= DOOR_APPROACH_REACH || startAlong >= total - DOOR_APPROACH_REACH) return;
+      // The run's own line: mean of the cross-axis coordinate.
+      let sum = 0;
+      for (let i = runStart; i <= endIndex; i += 1) {
+        sum += (points[i] as readonly [number, number])[runAxis === 'z' ? 0 : 1];
+      }
+      const line = sum / (endIndex - runStart + 1);
+      if (edge.name === 'gate-approach' && runAxis === 'z' && Math.abs(line) < 1) return;
+      const anchor = runAxis === 'z' ? plaza.x : plaza.z;
+      const off = offLattice(line, anchor);
+      if (off > STREET_LINE_TOLERANCE) {
+        // Threading ground the lattice does not serve — see this
+        // invariant's exemption list. Both neighbouring lines must be
+        // obstructed over the run's own span for the run to be excused.
+        const rem =
+          ((((line - anchor) % STREET_LATTICE_PITCH) + STREET_LATTICE_PITCH) %
+            STREET_LATTICE_PITCH);
+        const lower = line - rem;
+        const upper = lower + STREET_LATTICE_PITCH;
+        const spanStart = runAxis === 'z' ? a[1] : a[0];
+        const spanEnd = runAxis === 'z' ? b[1] : b[0];
+        // A neighbouring line is *usable* only when the line itself is
+        // clear over the run's span AND the run could actually have joined
+        // it — a short perpendicular connector from at least one of the
+        // run's own ends must also be clear. A locally-clear line walled
+        // off behind a field of rainbow-arch feet (seed 11's rim stall)
+        // is not a street this run declined; it is ground the router
+        // could never reach.
+        const usable = (candidateLine: number): boolean => {
+          if (lineBlocked(runAxis, candidateLine, spanStart, spanEnd)) return false;
+          const joins: (readonly [number, number, number, number])[] =
+            runAxis === 'z'
+              ? [
+                  [line, spanStart, candidateLine, spanStart],
+                  [line, spanEnd, candidateLine, spanEnd],
+                ]
+              : [
+                  [spanStart, line, spanStart, candidateLine],
+                  [spanEnd, line, spanEnd, candidateLine],
+                ];
+          return joins.some(([jax, jaz, jbx, jbz]) => {
+            const steps = Math.max(1, Math.ceil(Math.hypot(jbx - jax, jbz - jaz) / 1.5));
+            for (let s = 0; s <= steps; s += 1) {
+              const t = s / steps;
+              const x = jax + (jbx - jax) * t;
+              const z = jaz + (jbz - jaz) * t;
+              for (const foot of facts.railRaceArchFeet) {
+                const reach = PLAYER_RADIUS * 2 + 0.4 + (3.6 / 2 + 0.85) - 0.02;
+                if (Math.hypot(x - foot.x, z - foot.z) < foot.radius + reach) return false;
+              }
+              for (const plot of facts.plots) {
+                const dx = Math.max(Math.abs(x - plot.x) - plot.halfX, 0);
+                const dz = Math.max(Math.abs(z - plot.z) - plot.halfZ, 0);
+                if (Math.hypot(dx, dz) < 2.55) return false;
+              }
+              if (facts.boundary.distanceToEdge(x, z) < 2.55) return false;
+              if (Math.hypot(x - plaza.x, z - plaza.z) < ringRadius + 0.4) return false;
+              route.pointAt(route.distanceNear(x, z), railPoint);
+              if (Math.hypot(railPoint.x - x, railPoint.z - z) < 4.0) return false;
+            }
+            return true;
+          });
+        };
+        if (!usable(lower) && !usable(upper)) {
+          return;
+        }
+      }
+      if (off > STREET_LINE_TOLERANCE) {
+        problems.push(
+          `${edge.name} runs ${runAxis === 'z' ? 'north-south' : 'east-west'} for ` +
+            `${length.toFixed(1)} m on ${runAxis === 'z' ? 'x' : 'z'} = ${line.toFixed(2)}, ` +
+            `${off.toFixed(2)} m off the nearest ${STREET_LATTICE_PITCH} m lattice line through ` +
+            `the plaza (${plaza.x.toFixed(2)}, ${plaza.z.toFixed(2)}) — a street on its own ` +
+            `private line is what makes the network read as wandering instead of a grid`,
+        );
+      }
+    };
+
+    for (let i = 1; i < points.length; i += 1) {
+      const a = points[i - 1] as readonly [number, number];
+      const b = points[i] as readonly [number, number];
+      const dx = Math.abs(b[0] - a[0]);
+      const dz = Math.abs(b[1] - a[1]);
+      const hop = Math.hypot(dx, dz);
+      if (hop < 1e-6) continue;
+      const hopAxis: 'x' | 'z' | null =
+        dz / hop <= 0.15 ? 'x' : dx / hop <= 0.15 ? 'z' : null;
+      const exempt = railwayGeometry(a, b);
+      if (hopAxis === null || exempt) {
+        flush(i - 1);
+        continue;
+      }
+      if (axis === null) {
+        axis = hopAxis;
+        runStart = i - 1;
+      } else if (axis !== hopAxis) {
+        flush(i - 1);
+        axis = hopAxis;
+        runStart = i - 1;
+      }
+    }
+    flush(points.length - 1);
+  }
+  return problems;
+};
+
+/**
+ * How far the drawn backbone ring's radius (measured from the plaza/statue
+ * centre `PLAZA` is built around) may vary from its own mean before it stops
+ * counting as "one true circle" (issue #269 follow-up, Jim, 18 August 2026,
+ * superseding round 2's `ringReadsAsAGrid` — a straight *reversal* of that
+ * invariant's own requirement, not a refinement of it): *"one central perfect
+ * circle is ok circling the statue, and then the rest should be on a grid,
+ * with a fairly high degree of connectivity between the closer nodes in the
+ * graph."*
+ *
+ * Measured, not guessed, fresh on all five procgen seeds after
+ * {@link solveRing} stopped feeding its 32-point, blocker-clearance profile
+ * through axis-alignment: the drawn (sampled-every-~0.5 m Catmull-Rom)
+ * curve's radius from the plaza centre never strays more than **0.27 m**
+ * from its own mean on any seed (0.02 m on the canonical 20260728, 0.27 m on
+ * seed 2, 0.18 m on seed 5, 0.07 m on seed 11, 0.19 m on seed 18) — real
+ * variation, not curve-sampling noise, because the profile still relaxes its
+ * radius slightly per bearing to keep clear of whichever plot sits nearest
+ * at that angle (see {@link solveRing}'s own comment for why a genuinely
+ * fixed radius was tried and reverted). Checked out `paths.ts` as it stood
+ * immediately before this fix (the simplified-then-axis-aligned ~12-vertex
+ * polygon) and re-measured the same way: radius varied by **6.55 m** on the
+ * canonical seed (16.76 m to 29.39 m from plaza centre) and **7.68 m** on
+ * seed 2 (16.42 m to 29.16 m) — more than an order of magnitude past the
+ * true circle's worst case, an axis-aligned polygon being exactly what a
+ * "radius from centre" metric is built to catch. 1 m sits with real
+ * headroom above every true-circle measurement (>3.7x the worst seed) and
+ * far below any polygon's, so what actually trips this is a regression back
+ * toward straight chords, not the profile's own small, legitimate
+ * bearing-to-bearing give.
+ *
+ * Deliberately not derived from a game constant such as `RAIL_CORRIDOR_CLEARANCE`
+ * (`paths.ts`) — that number bounds how close a route may draw to the
+ * railway, a different question from how round this one route's own shape
+ * is, and the two happen to sit in the same file for an unrelated reason
+ * (both guard `paths.ts` output). Forcing a link between them would tie this
+ * invariant to a future rail-clearance change it has nothing to do with.
+ * This *is* the "measure the game" case CLAUDE.md asks for — the mean/max
+ * pair above is measured off the built ring on every seed, the same way
+ * `PLAYER_RADIUS`-derived thresholds are measured off the player.
+ */
+const RING_RADIUS_TOLERANCE = 1;
+
+/**
+ * **The ring road is one true circle round the statue, not a grid loop**
+ * (issue #269 follow-up). Round 2 (issue #319) fixed a wiggly axis-aligned
+ * staircase by simplifying it down to ~12 long straight runs and asserted
+ * exactly the opposite of this — `ringReadsAsAGrid`, "reads as a grid loop,
+ * not a stepped approximation of a circle." Jim's next comment on the same
+ * live preview reversed that requirement outright for this one route: *"one
+ * central perfect circle is ok circling the statue, and then the rest should
+ * be on a grid."* `solveRing` (`paths.ts`) now hands its 32-point,
+ * blocker-clearance profile straight to the backbone's Catmull-Rom curve
+ * instead of axis-aligning it at all — this invariant is the direct
+ * replacement for `ringReadsAsAGrid`, checking the *opposite* shape claim:
+ * that the ring's radius from the plaza centre stays close to constant,
+ * rather than that it turns onto grid axes.
+ *
+ * Scoped to the closed backbone loop (`edge.backbone`) specifically — every
+ * other route in the network (spurs, {@link addInterconnects}'s shortcuts)
+ * is still required to run on grid axes by {@link pathsRunOnGridAxes} above,
+ * unchanged; the statue's ring is the one deliberate exception, not a
+ * loosening of the rule generally.
+ */
+const ringIsATrueCircleRoundTheStatue: Invariant = (facts) => {
+  const problems: string[] = [];
+  const plaza = facts.pathNodes.find((node) => node.kind === 'plaza');
+  if (!plaza) {
+    problems.push('no plaza node in the path graph — cannot check the ring circles the statue');
+    return problems;
+  }
+  for (const edge of facts.pathEdges) {
+    if (!edge.backbone) continue;
+    const radii = edge.points.map(([x, z]) => Math.hypot(x - plaza.x, z - plaza.z));
+    const mean = radii.reduce((sum, r) => sum + r, 0) / radii.length;
+    const maxDeviation = radii.reduce((worst, r) => Math.max(worst, Math.abs(r - mean)), 0);
+    if (maxDeviation > RING_RADIUS_TOLERANCE) {
+      const min = Math.min(...radii);
+      const max = Math.max(...radii);
+      problems.push(
+        `${edge.name}'s radius from the plaza/statue centre (${plaza.x.toFixed(1)}, ${plaza.z.toFixed(1)}) ` +
+          `varies from ${min.toFixed(2)} m to ${max.toFixed(2)} m (${maxDeviation.toFixed(2)} m off its own ` +
+          `${mean.toFixed(2)} m mean) — needs to stay within ${RING_RADIUS_TOLERANCE} m of constant to read as ` +
+          `one true circle round the statue, not a faceted or grid-aligned approximation of one`,
+      );
+    }
+  }
+  return problems;
+};
+
+/**
  * **Every place a child can be served is a node in the graph.**
  *
  * The other half of §5's ruling: the network derives from a graph of *real*
@@ -814,6 +1491,377 @@ const everyDestinationIsANode: Invariant = (facts) => {
   return missing;
 };
 
+/** Destination kinds {@link detourRatiosStayReasonable} measures — real
+ * places a child is going, matching `paths.ts`'s own `addInterconnects`. */
+const DETOUR_DESTINATION_KINDS = new Set(['anchor', 'stall', 'station', 'exit']);
+
+/**
+ * How close a ribbon's own end must land to another ribbon's drawn curve
+ * before {@link buildFactsDistanceGraph} treats it as the same junction.
+ * `parkFacts.ts` resamples every route to ~0.5 m steps (`drawnCentreLine`'s
+ * `steps`), so the true junction point — always exact on the *new* ribbon's
+ * own first/last sample, since Catmull-Rom passes through its own control
+ * points exactly, `t=0`/`t=1` — can sit up to half a sampling step from the
+ * nearest sample on whichever *other* ribbon it branched from. 0.6 m clears
+ * that with real room, while staying far short of the metres of daylight
+ * between any two genuinely unconnected ribbons in this park.
+ */
+const DETOUR_SPLICE_TOLERANCE = 0.6;
+
+/**
+ * Independent shortest-path oracle over the park's **drawn** paved edges
+ * (`facts.pathEdges`, the resampled Catmull-Rom curve — not `paths.ts`'s own
+ * control polylines, and not that module's own graph-building code: this is
+ * a second, separately-written measurement of the same built geometry, per
+ * this file's "measure the built park" rule).
+ *
+ * A ribbon's start/end is a junction onto whichever other ribbon it
+ * branched from, not necessarily one of that ribbon's own drawn samples —
+ * so every edge's two ends are spliced onto the nearest point of every
+ * *other* edge's drawn curve, within {@link DETOUR_SPLICE_TOLERANCE}, before
+ * the graph is built.
+ */
+function buildFactsDistanceGraph(
+  edges: readonly ParkFacts['pathEdges'][number][],
+): { distanceBetween: (ax: number, az: number, bx: number, bz: number) => number } {
+  const polylines: [number, number][][] = edges.map((edge) =>
+    edge.points.map((p) => [p[0], p[1]] as [number, number]),
+  );
+  const closedFlags = edges.map((edge) => edge.backbone);
+
+  const spliceOnto = (targetIdx: number, px: number, pz: number): void => {
+    const pts = polylines[targetIdx] as [number, number][];
+    const segCount = closedFlags[targetIdx] ? pts.length : pts.length - 1;
+    let bestSeg = -1;
+    let bestDistance = DETOUR_SPLICE_TOLERANCE;
+    for (let i = 0; i < segCount; i += 1) {
+      const a = pts[i] as [number, number];
+      const b = pts[(i + 1) % pts.length] as [number, number];
+      if (Math.hypot(px - a[0], pz - a[1]) < 1e-6) return; // already a vertex
+      if (Math.hypot(px - b[0], pz - b[1]) < 1e-6) return;
+      const dx = b[0] - a[0];
+      const dz = b[1] - a[1];
+      const lengthSq = dx * dx + dz * dz;
+      if (lengthSq < 1e-12) continue;
+      const t = Math.max(0, Math.min(1, ((px - a[0]) * dx + (pz - a[1]) * dz) / lengthSq));
+      const projX = a[0] + dx * t;
+      const projZ = a[1] + dz * t;
+      const distance = Math.hypot(px - projX, pz - projZ);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestSeg = i;
+      }
+    }
+    // Insert the *original* point (px, pz), not its projection onto the
+    // segment: it flows in verbatim from the edge it belongs to (see the
+    // call site below), and that same edge already has this exact
+    // coordinate as one of its own points. Splicing in the projection
+    // instead would put two merely-nearby-but-distinct floating-point
+    // values where the graph needs one shared vertex — the two edges would
+    // never actually join, just sit within `DETOUR_SPLICE_TOLERANCE` of
+    // each other, and every shortest path through that junction would have
+    // to detour around the gap via wherever the graph *was* connected.
+    if (bestSeg >= 0) pts.splice(bestSeg + 1, 0, [px, pz]);
+  };
+
+  for (let i = 0; i < polylines.length; i += 1) {
+    const pts = polylines[i] as [number, number][];
+    if (pts.length === 0) continue;
+    const first = pts[0] as [number, number];
+    const last = pts[pts.length - 1] as [number, number];
+    for (let j = 0; j < polylines.length; j += 1) {
+      if (j === i) continue;
+      spliceOnto(j, first[0], first[1]);
+      spliceOnto(j, last[0], last[1]);
+    }
+  }
+
+  const vertexIndex = new Map<string, number>();
+  const vertexCoord: [number, number][] = [];
+  const adjacency: { to: number; weight: number }[][] = [];
+  const vertexKey = (x: number, z: number): string =>
+    `${Math.round(x / 0.05)},${Math.round(z / 0.05)}`;
+  const idOf = (x: number, z: number): number => {
+    const key = vertexKey(x, z);
+    let id = vertexIndex.get(key);
+    if (id === undefined) {
+      id = adjacency.length;
+      vertexIndex.set(key, id);
+      vertexCoord.push([x, z]);
+      adjacency.push([]);
+    }
+    return id;
+  };
+  const addEdge = (aId: number, bId: number, weight: number): void => {
+    if (aId === bId) return;
+    (adjacency[aId] as { to: number; weight: number }[]).push({ to: bId, weight });
+    (adjacency[bId] as { to: number; weight: number }[]).push({ to: aId, weight });
+  };
+  for (let i = 0; i < polylines.length; i += 1) {
+    const pts = polylines[i] as [number, number][];
+    const segCount = closedFlags[i] ? pts.length : pts.length - 1;
+    for (let s = 0; s < segCount; s += 1) {
+      const a = pts[s] as [number, number];
+      const b = pts[(s + 1) % pts.length] as [number, number];
+      const weight = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (weight < 1e-9) continue;
+      addEdge(idOf(a[0], a[1]), idOf(b[0], b[1]), weight);
+    }
+  }
+
+  /**
+   * A destination's own coordinate is a *control* point of its own edge
+   * (`paths.ts`'s `spur`), not necessarily one the curve's arc-length
+   * resampling (`drawnCentreLine`) lands on exactly — Catmull-Rom only
+   * guarantees hitting a curve's very first/last control point exactly, and
+   * a destination's own point is often followed by a "past the doormat"
+   * extension (`spur`'s `past`), pushing it into the interior of the array.
+   * So a query point that isn't already an exact sampled vertex is attached
+   * to the nearest one instead, with the gap added to the walk as a real
+   * (if tiny) leash — the true "last few centimetres of curve-sampling
+   * slack," not a routing shortcut. Capped well under this park's median
+   * destination spacing (13-15 m) so it can never accidentally bridge two
+   * genuinely different, unconnected pieces of paving.
+   */
+  const DESTINATION_ATTACH_TOLERANCE = 5;
+  const attach = (x: number, z: number): { id: number; leash: number } | null => {
+    const exact = vertexIndex.get(vertexKey(x, z));
+    if (exact !== undefined) return { id: exact, leash: 0 };
+    let bestId = -1;
+    let bestDistance = DESTINATION_ATTACH_TOLERANCE;
+    for (let i = 0; i < vertexCoord.length; i += 1) {
+      const [vx, vz] = vertexCoord[i] as [number, number];
+      const d = Math.hypot(x - vx, z - vz);
+      if (d < bestDistance) {
+        bestDistance = d;
+        bestId = i;
+      }
+    }
+    return bestId >= 0 ? { id: bestId, leash: bestDistance } : null;
+  };
+
+  return {
+    distanceBetween(ax, az, bx, bz) {
+      const start = attach(ax, az);
+      const goal = attach(bx, bz);
+      if (!start || !goal) return Infinity;
+      const startId = start.id;
+      const goalId = goal.id;
+      const dist = new Float64Array(adjacency.length).fill(Infinity);
+      dist[startId] = 0;
+      const visited = new Uint8Array(adjacency.length);
+      for (;;) {
+        let curId = -1;
+        let curDist = Infinity;
+        for (let i = 0; i < dist.length; i += 1) {
+          const d = dist[i] as number;
+          if (!visited[i] && d < curDist) {
+            curDist = d;
+            curId = i;
+          }
+        }
+        if (curId === -1) break;
+        if (curId === goalId) return curDist + start.leash + goal.leash;
+        visited[curId] = 1;
+        for (const { to, weight } of adjacency[curId] as { to: number; weight: number }[]) {
+          const next = curDist + weight;
+          if (next < (dist[to] as number)) dist[to] = next;
+        }
+      }
+      return Infinity;
+    },
+  };
+}
+
+/** The built park's own median nearest-neighbour spacing between real
+ * destinations — sizes {@link detourRatiosStayReasonable}'s thresholds off
+ * the park itself, per CLAUDE.md's procgen-threshold rule, rather than a
+ * metre literal that means nothing on a different seed. */
+function medianDestinationSpacing(nodes: readonly { x: number; z: number }[]): number {
+  if (nodes.length < 2) return 0;
+  const gaps: number[] = [];
+  for (let i = 0; i < nodes.length; i += 1) {
+    let best = Infinity;
+    for (let j = 0; j < nodes.length; j += 1) {
+      if (i === j) continue;
+      const a = nodes[i] as { x: number; z: number };
+      const b = nodes[j] as { x: number; z: number };
+      best = Math.min(best, Math.hypot(a.x - b.x, a.z - b.z));
+    }
+    gaps.push(best);
+  }
+  gaps.sort((a, b) => a - b);
+  return gaps[Math.floor(gaps.length / 2)] as number;
+}
+
+/** How many "typical plot hops" apart, straight-line, a pair of
+ * destinations may be and still count as "close" for this invariant —
+ * mirrors `paths.ts`'s own `CONNECTOR_SPACING_CAP_MULTIPLE` exactly, so this
+ * invariant only ever asks the generator to fix what it actually attempts
+ * to fix (see that constant's own comment for why it is 2.0, not a more
+ * generous number: a second, independent constraint — `Scenery.ts`'s hiding
+ * maze — measured against `check:park`'s waypoint-reachability invariant,
+ * not against this one). */
+const DETOUR_CLOSE_CAP_MULTIPLE = 2.0;
+
+/** How many "typical plot hops" of paved distance a pair must be wasting
+ * (paved minus straight-line) before a bad ratio is worth flagging — a
+ * little looser than `paths.ts`'s own `CONNECTOR_MIN_WASTE_MULTIPLE` (1.5),
+ * deliberately: this invariant only cares about *real* wasted walking, and
+ * a pair the generator correctly left unconnected because the absolute
+ * waste was trivial (e.g. two doormats 2 m apart, paved 8 m apart — a
+ * dramatic-looking ratio over a handful of metres) should never trip it. */
+const DETOUR_WASTE_FLOOR_MULTIPLE = 1.5;
+
+/**
+ * **No two close destinations are left with a wildly disproportionate paved
+ * detour between them** (Jim, PR #286, 18 August 2026): "there aren't
+ * enough edges between nodes that are close but currently unlinked, which
+ * makes most things into branches off a central hub, whereas they should be
+ * inter-connected."
+ *
+ * For every pair of real destinations within {@link DETOUR_CLOSE_CAP_MULTIPLE}
+ * plot-hops of each other, straight-line, and losing at least
+ * {@link DETOUR_WASTE_FLOOR_MULTIPLE} plot-hops of paved distance to the
+ * detour (so a merely small-numbers-divide-badly ratio over a trivial
+ * absolute distance is never flagged), the paved distance may not exceed
+ * `DETOUR_RATIO_LIMIT` times the straight-line distance.
+ *
+ * **Proved red, then green** (18 August 2026): with `addInterconnects`
+ * disabled (the hub-and-spoke tree `paths.ts` built before this fix), the
+ * canonical seed's `stall.dodgems`/`station-1` pair (21.0 m straight, 52.3 m
+ * paved) is one of several pairs that clear both the close cap and the
+ * waste floor at a bad ratio, and every seed tested shows several more —
+ * `LGP_DISABLE_INTERCONNECTS=1` reliably fails this invariant everywhere.
+ * Restoring `addInterconnects` measurably improves every one of those
+ * pairs (see `addInterconnects`'s own comment for the mechanism), which is
+ * what the ratio limit below is actually proving held.
+ *
+ * `DETOUR_RATIO_LIMIT = 15` is not the number a network with no other
+ * constraints would earn — it is real headroom (35%+) above the worst ratio
+ * the generator *actually* produces once it also respects two independent,
+ * measured safety limits `addInterconnects`'s own comments document in
+ * full: `CONNECTOR_SPACING_CAP_MULTIPLE` (2.0, kept low so new pavement
+ * can't shift `Scenery.ts`'s hiding-maze placement into stranding an NPC
+ * waypoint — `check:park`'s `poi.stranded`) and the ride-corridor guard
+ * (keeps a connector off the Sky Cruiser's own structural footprint, or a
+ * roadside lamp can starve it of a pylon — `skyCruiserStandsOnItsOwnSupports`).
+ * Both are real, reproduced regressions this branch hit and fixed, not
+ * theoretical caution, and both mean some genuinely close, badly-detoured
+ * pairs are correctly left unconnected because fixing them was measured to
+ * break something else. Measured worst ratio per seed at the generator's
+ * real (safety-constrained) settings: canonical 7.35x
+ * (`building`/`stall.skyCruiser`), seed 2 4.59x, seed 5 11.15x (the worst of
+ * the five — `stall.skyCruiser`/`exit-skyCruiser`, both ends pinned by the
+ * same corridor guard), seed 11 4.50x, seed 18 5.80x. This invariant's job
+ * given that reality is to catch a *regression* — the network going back
+ * towards the fully hub-and-spoke tree — not to assert every seed reaches
+ * an ideal no constraint could ever force it to miss.
+ */
+const DETOUR_RATIO_LIMIT = 15;
+
+/** Does the straight segment a-b pass within the same 4 m clearance of the
+ * BUILT Sky Cruiser's route that `paths.ts`'s `routeCrossesARideCorridor`
+ * refuses connectors at? Sampled every 2 m along the built curve — the
+ * mirror of that screen, measured off the park rather than the plan. */
+function straightSegmentCrossesCruiser(
+  facts: ParkFacts,
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+): boolean {
+  const route = facts.world.coaster.route;
+  const length = route.length;
+  if (!Number.isFinite(length) || length <= 0) return false;
+  const dx = bx - ax;
+  const dz = bz - az;
+  const lengthSq = dx * dx + dz * dz;
+  const point = new Vector3();
+  for (let d = 0; d < length; d += 2) {
+    route.pointAt(d, point);
+    const t = lengthSq > 1e-9 ? Math.max(0, Math.min(1, ((point.x - ax) * dx + (point.z - az) * dz) / lengthSq)) : 0;
+    if (Math.hypot(point.x - (ax + dx * t), point.z - (az + dz * t)) < 4) return true;
+  }
+  return false;
+}
+
+const detourRatiosStayReasonable: Invariant = (facts) => {
+  const destinations = facts.pathNodes.filter((n) => DETOUR_DESTINATION_KINDS.has(n.kind));
+  if (destinations.length < 2) return [];
+
+  const spacing = medianDestinationSpacing(destinations);
+  if (spacing <= 0) return [];
+  const closeCap = spacing * DETOUR_CLOSE_CAP_MULTIPLE;
+  const wasteFloor = spacing * DETOUR_WASTE_FLOOR_MULTIPLE;
+
+  // The *connectivity* graph, not just the paved ribbons: a destination that
+  // already stood within a few metres of the network gets no drawn ribbon
+  // (`paths.ts`'s "connectivity fact, not a ribbon" edges), but that short
+  // unpaved walk is exactly as real as a paved one for "how far does a
+  // child actually have to walk between these two destinations" — the
+  // question this invariant asks. Using paved-only `facts.pathEdges` here
+  // would strand such a destination or force a wildly longer route through
+  // whatever paving happens to also touch its coordinate.
+  const graph = buildFactsDistanceGraph(facts.pathConnectivityEdges);
+  const problems: string[] = [];
+  for (let i = 0; i < destinations.length; i += 1) {
+    for (let j = i + 1; j < destinations.length; j += 1) {
+      const a = destinations[i] as (typeof destinations)[number];
+      const b = destinations[j] as (typeof destinations)[number];
+      const straight = Math.hypot(a.x - b.x, a.z - b.z);
+      if (straight < 1e-6 || straight > closeCap) continue;
+      // A pair with the railway between them is not "close": the crow
+      // flies over the track, the child crosses at a planned bridge or
+      // level crossing (`crossingPlan.ts`), and `paths.ts` deliberately
+      // refuses to draw a direct connector across the rail. Measured off
+      // the solved loop the same way the other railway exemptions are
+      // (2026-08-23, seed 5: ballPit and a station 10.8 m apart across
+      // the tracks, 17x by paving — exactly as designed).
+      const sideOf = (x: number, z: number): number => {
+        const trainRoute = facts.world.train.route;
+        const t = trainRoute.tangentAt(trainRoute.distanceNear(x, z), railTangentScratch);
+        trainRoute.pointAt(trainRoute.distanceNear(x, z), railScratch);
+        return Math.sign(t.z * (x - railScratch.x) - t.x * (z - railScratch.z)) >= 0 ? 1 : -1;
+      };
+      if (sideOf(a.x, a.z) !== sideOf(b.x, b.z)) continue;
+      // Nor is a pair with a ride's own structural corridor between them:
+      // `paths.ts`'s `routeCrossesARideCorridor` deliberately refuses a
+      // connector there (a connector seeds lamps, and a lamp on a pylon
+      // spot cost the Sky Cruiser its supports — that function's own
+      // measured story), so the detour is the designed outcome. Mirrored
+      // here off the BUILT cruiser at the same 4 m clearance (seed 2,
+      // 2026-08-23: the cruiser's own stall and exit, 13.4 m apart with
+      // the ride's loop between them, 17x by paving — as designed).
+      if (straightSegmentCrossesCruiser(facts, a.x, a.z, b.x, b.z)) continue;
+      const paved = graph.distanceBetween(a.x, a.z, b.x, b.z);
+      // Not a real defect: `everyDestinationIsANode` and `noPathEndsNowhere`
+      // already independently prove every destination sits on one connected
+      // graph, so a "disconnected" result here is this invariant's own
+      // splice-reconstruction (`buildFactsDistanceGraph`) missing a junction
+      // within its tolerance, not a park that fails to connect two
+      // destinations. Skipped rather than flagged so an approximation limit
+      // in a second, independently-written measurement doesn't fail a build
+      // over nothing — the ratio check below still runs on every pair this
+      // reconstruction *does* bridge, which is the real signal.
+      if (!Number.isFinite(paved)) continue;
+      const waste = paved - straight;
+      if (waste < wasteFloor) continue;
+      const ratio = paved / straight;
+      if (ratio > DETOUR_RATIO_LIMIT) {
+        problems.push(
+          `'${a.id}' and '${b.id}' are ${straight.toFixed(1)} m apart in a straight line but ` +
+            `${paved.toFixed(1)} m apart by paving (${ratio.toFixed(2)}x, wasting ` +
+            `${waste.toFixed(1)} m) — closer than ${closeCap.toFixed(1)} m ` +
+            `(${DETOUR_CLOSE_CAP_MULTIPLE}x the park's own ${spacing.toFixed(1)} m median ` +
+            `destination spacing) with no direct connector between them`,
+        );
+      }
+    }
+  }
+  return problems;
+};
+
 /** Every path is lit along its whole length. */
 const everyPathIsLit: Invariant = (facts) => {
   const dark: string[] = [];
@@ -822,7 +1870,23 @@ const everyPathIsLit: Invariant = (facts) => {
     let run = 0;
     let worst = 0;
     for (const [x, z] of route.points) {
-      const lit = facts.lamps.some(([lx, lz]) => Math.hypot(lx - x, lz - z) < LAMP_REACH);
+      // A stretch carried by a railway bridge is the bridge's own ground,
+      // not lamp-post verge: `LampPosts` is *required* to keep off the
+      // reserved deck-and-ramp footprint (a lamp base 0.09 m inside a
+      // walker's clearance there is exactly what used to kill real
+      // bridges), so a crossing leg's middle can never hold a post. The
+      // run resets across it — a bridge is its own furniture, lamps stand
+      // at its feet. Lighting the deck itself (guard-rail lanterns, say)
+      // is real follow-up work, not something this invariant can conjure
+      // by failing the seed.
+      const onBridge =
+        facts.world.train.bridges.some((bridge) => bridge.covers(x, z)) ||
+        // The conservative reservation, not just a built deck: the keepout
+        // excludes lamp ground at every measured crossing (level crossings
+        // included), whether or not the real search went on to build there
+        // — ported from the sibling bridge-backtrack fix (76285e3).
+        facts.bridgeReservations.some((footprint) => footprint && footprint.covers(x, z));
+      const lit = onBridge || facts.lamps.some(([lx, lz]) => Math.hypot(lx - x, lz - z) < LAMP_REACH);
       run = lit ? 0 : run + step;
       if (run > worst) worst = run;
     }
@@ -3186,44 +4250,54 @@ const skyCruiserAlwaysFliesThroughTheCastle: Invariant = (facts) => {
 };
 
 /**
- * The tallest child the park can build, measured once per fork.
+ * The tallest **seated** child the park can build, measured once per fork.
  *
  * Every hair style crossed with every hat, on **real models**, attached the way
  * `WornHat` and `NpcSystem.buildIndividualAvatar` attach them — `hatAnchor.add`
  * at the hat's own natural scale, which is also exactly what the shop
  * catalogue's `model()` hands over. Styles that hide a hat (`hairHidesHat` —
  * mohican's crest) are measured bare, because that is what they render as.
+ * Posed through the game's real `applyRidePose('seated')` before measuring,
+ * exactly as `Player.animate` and (since 2026-08-23) `NpcCharacter.animate`
+ * pose a train rider — a check that re-implements a pose is a check that can
+ * pass a pose the game never renders. Guards `TALLEST_CHILD_SEATED_HEIGHT`
+ * (`kid.ts`) — see that constant's own note for why sitting on this no-knee
+ * rig saves a real but small amount, not half of standing.
  *
  * Lazy rather than at module load, because `createKid` wants the headless
  * canvas shim and that arrives with `buildParkFacts`. ~0.5 s per fork.
  */
-let tallestChildMeasured: { height: number; what: string } | null = null;
+let tallestSeatedChildMeasured: { height: number; what: string } | null = null;
 
-function measureTallestChild(): { height: number; what: string } {
-  if (tallestChildMeasured) return tallestChildMeasured;
+function measureTallestSeatedChild(): { height: number; what: string } {
+  if (tallestSeatedChildMeasured) return tallestSeatedChildMeasured;
   let height = 0;
   let what = '';
+  const pose = (kid: ReturnType<typeof createKid>) =>
+    applyRidePose({ root: kid.root, body: kid.body, head: kid.head, ...kid.limbs! }, 0, 0, 'seated');
   for (const style of HAIR_STYLES) {
     const bare = createKid({ hairStyle: style });
+    pose(bare);
     const bareTop = visibleTop(bare.root);
     if (bareTop > height) {
       height = bareTop;
-      what = `${style}, bare-headed`;
+      what = `${style}, bare-headed, seated`;
     }
     if (bare.hairHidesHat) continue;
     for (const kind of HAT_KINDS) {
       const kid = createKid({ hairStyle: style });
       kid.hatAnchor.add(createHat(kind).root);
       kid.setHatWorn(true);
+      pose(kid);
       const top = visibleTop(kid.root);
       if (top > height) {
         height = top;
-        what = `${style} hair + ${kind} hat`;
+        what = `${style} hair + ${kind} hat, seated`;
       }
     }
   }
-  tallestChildMeasured = { height, what };
-  return tallestChildMeasured;
+  tallestSeatedChildMeasured = { height, what };
+  return tallestSeatedChildMeasured;
 }
 
 /**
@@ -3246,13 +4320,17 @@ function measureTallestChild(): { height: number; what: string } {
  *    that positioned them. `LOCO_BODY_TOP_Y` has to cover what is really there.
  *    (The station canopies live in that same group and are deliberately skipped:
  *    they stand beside the line, they do not travel it.)
- * 2. **The tallest child the park can build**, hair × hats, real models — see
- *    {@link measureTallestChild}. `TALLEST_CHILD_HEIGHT` has to cover it, so
- *    adding a taller hat turns this red instead of quietly lowering a bridge.
- * 3. **Where riders actually are.** `ParkTrain.carryPassengers` stands NPCs on
- *    the carriage floor (`CAR_FLOOR_Y`) and `Player.setRidePose` applies no
- *    seated fold, so the player's feet are on the bench (`SEAT_Y`) and she rides
- *    at full height. The clearance has to cover the worst of the three.
+ * 2. **The tallest child the park can build, seated** — hair × hats, real
+ *    models, posed through the game's own `applyRidePose('seated')` — see
+ *    {@link measureTallestSeatedChild}. `TALLEST_CHILD_SEATED_HEIGHT` has to
+ *    cover it, so adding a taller hat turns this red instead of quietly
+ *    lowering a bridge.
+ * 3. **Where riders actually are.** Both riders sit now (2026-08-23, Jim,
+ *    resolving Decision 8's open question): `ParkTrain.carryPassengers`
+ *    folds `applyRidePose('seated')` onto whoever it carries
+ *    (`NpcCharacter.animate`), and `ParkTrain.updateRider` seats the player
+ *    with her feet on the carriage floor (`CAR_FLOOR_Y`) rather than the
+ *    bench — the same reference an NPC rider uses. One rider term, not two.
  *
  * Then `TRAIN_CLEARANCE_Y` — the published number, from `train/clearance.ts` —
  * is checked against that measured worst case. This is `railRaceFliesClear`'s
@@ -3295,13 +4373,13 @@ const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
     );
   }
 
-  // --- 2. the tallest child the park can build -----------------------------
-  const child = measureTallestChild();
-  if (child.height > TALLEST_CHILD_HEIGHT) {
+  // --- 2. the tallest child the park can build, seated ----------------------
+  const child = measureTallestSeatedChild();
+  if (child.height > TALLEST_CHILD_SEATED_HEIGHT) {
     complaints.push(
-      `TALLEST_CHILD_HEIGHT is ${TALLEST_CHILD_HEIGHT.toFixed(2)} m but a real ` +
-        `${child.what} measures ${child.height.toFixed(3)} m — raise the constant ` +
-        'in kid.ts, because train/clearance.ts sizes a bridge from it',
+      `TALLEST_CHILD_SEATED_HEIGHT is ${TALLEST_CHILD_SEATED_HEIGHT.toFixed(2)} m ` +
+        `but a real ${child.what} measures ${child.height.toFixed(3)} m — raise ` +
+        'the constant in kid.ts, because train/clearance.ts sizes a bridge from it',
     );
   }
 
@@ -3309,7 +4387,9 @@ const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
   //
   // Measured child, not the constant, so a stale constant cannot hide a real
   // rider: this stays honest even if the complaint above is the one that fires.
-  const riderTop = Math.max(CAR_FLOOR_Y, SEAT_Y) + child.height;
+  // Both riders' feet are on the carriage floor now (see the header), so
+  // there is one rider term rather than a `Math.max` across two poses.
+  const riderTop = CAR_FLOOR_Y + child.height;
   const sweptTop = Math.max(builtBodyTop, riderTop);
   if (TRAIN_CLEARANCE_Y < sweptTop) {
     const intrusion = sweptTop - TRAIN_CLEARANCE_Y;
@@ -3317,9 +4397,8 @@ const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
       `TRAIN_CLEARANCE_Y is ${TRAIN_CLEARANCE_Y.toFixed(2)} m but the train sweeps ` +
         `to ${sweptTop.toFixed(2)} m — anything built to that clearance sits ` +
         `${intrusion.toFixed(2)} m inside it. Worst: ` +
-        `built ${builtBodyWhat} ${builtBodyTop.toFixed(2)}, standing NPC rider ` +
-        `${(CAR_FLOOR_Y + child.height).toFixed(2)}, player on the bench ` +
-        `${(SEAT_Y + child.height).toFixed(2)} (${child.what})`,
+        `built ${builtBodyWhat} ${builtBodyTop.toFixed(2)}, seated rider ` +
+        `${riderTop.toFixed(2)} (${child.what})`,
     );
   } else if (TRAIN_CLEARANCE_Y - sweptTop < RIDER_HEADROOM) {
     // Not "is the arithmetic right" — the swept top here is *measured*, so this
@@ -3330,6 +4409,778 @@ const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
         `over the train, against the ${RIDER_HEADROOM.toFixed(2)} m ` +
         'train/clearance.ts believes it is leaving',
     );
+  }
+
+  // --- 4. every real bridge deck, over the ground it actually stands over ---
+  //
+  // The promise this file's own header made when #116 was still open: measure
+  // the *built* deck, not `BRIDGE_RISE` (which already has `BRIDGE_DECK_DEPTH`,
+  // a stated claim rather than a derivation, baked into it) and not
+  // `bridge.deckY` restated — the mesh's own lowest visible vertex, the same
+  // way builtBodyTop above is the locomotive's.
+  //
+  // The ground reference is the *route's own* Y at the crossing — the same
+  // "ground under the track" `check-park.mts`'s invariant 2 calls `hit.rail`
+  // — never `WalkSurfaces.sample`. A station platform is a `MovingPlatform`
+  // too, and `sample`'s "highest surface within a step" rule happily answers
+  // with a *platform's* height for a crossing that merely stands near one:
+  // measured live, a crossing 3.6 m from a station read 0.58 m of phantom
+  // extra ground, understating real clearance by exactly that much (issue
+  // #116). The route was solved against the same terrain the deck's own
+  // height is built from, so it is ground either way — just never a
+  // platform's.
+  const clearancePoint = new Vector3();
+  for (const crossing of facts.world.train.crossings) {
+    // A crossing the real, backtracking footprint search (issues #317,
+    // #319) found no walkable, collision-clear bridge for at all falls back
+    // to an ordinary level crossing instead — genuinely rare, the last
+    // resort `bridgeFootprint.ts`'s own header describes. There is no deck
+    // to measure clearance over there by design, not by omission: nothing
+    // stands over the rail at that one spot, so nothing needs the air
+    // `BRIDGE_RISE` reserves for a train passing underneath.
+    if (facts.world.train.fallbackCrossings.includes(crossing)) continue;
+    // The same name `bridges.ts` builds this crossing's own group under —
+    // one owner (the crossing's own `railDistance`) for both.
+    const deckMesh = facts.world.train.group.getObjectByName(
+      `bridge-${crossing.railDistance.toFixed(1)}`,
+    )?.getObjectByName('deck');
+    if (!deckMesh) {
+      complaints.push(
+        `the crossing at (${fmt([crossing.x, crossing.z])}) has no built bridge deck to measure`,
+      );
+      continue;
+    }
+    const soffit = new Box3().setFromObject(deckMesh).min.y;
+    const route = facts.world.train.route;
+    route.pointAt(route.distanceNear(crossing.x, crossing.z), clearancePoint);
+    const groundY = clearancePoint.y;
+    const clearance = soffit - groundY;
+    if (clearance < TRAIN_CLEARANCE_Y) {
+      complaints.push(
+        `the bridge deck at (${fmt([crossing.x, crossing.z])}) leaves only ` +
+          `${clearance.toFixed(2)} m under its own built soffit, against the ` +
+          `${TRAIN_CLEARANCE_Y.toFixed(2)} m the train and its riders sweep to`,
+      );
+    }
+  }
+
+  return complaints;
+};
+
+/**
+ * Every railway crossing's bridge is genuinely walkable and genuinely
+ * reachable (issue #116, Decision 8) — measured against the real, built
+ * bridge and the real nav lattice, never against the plan that placed
+ * either.
+ *
+ * Three questions, in the order a child would meet them:
+ *
+ * 1. **Does a route from the entrance actually reach the deck?** The exact
+ *    question `check:park`'s invariant 1 asks of every attraction, asked
+ *    here of every bridge, at the deck's own height (`reachableFromEntrance`'s
+ *    `goalY` — a ground-level probe would find nothing there at all, which
+ *    is the whole point of a bridge over a level crossing).
+ * 2. **Is the deck itself standable**, at the height a walker on it really
+ *    stands at? A ground-level probe passing here would prove nothing: it
+ *    is exactly the question a level crossing's own probe used to ask, and
+ *    exactly what this feature retired.
+ * 3. **Is each ramp standable partway down its own slope?** — proving the
+ *    climb itself is walkable, not just its two ends, which is where
+ *    #116's own ramp-flank guard rails (since removed) once wedged a
+ *    routable edge without ever touching the deck or the ground.
+ */
+const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const probe = new Vector3();
+  // The *tallest* bridge surface over `(x, z)`, never "the crossing's own
+  // bridge" alone — two crossings close enough together can have one
+  // bridge's ramp and a neighbour's much taller deck both genuinely cover
+  // the same point (`bridges.ts`'s own `bridgeHeightAt` exists for exactly
+  // this and every other caller uses it; this probe reimplements the same
+  // rule locally rather than importing a module that reaches `paths.ts`
+  // into a seed-sensitive test file — see this file's own header on static
+  // imports). Asking the wrong bridge for its height here reproduced the
+  // exact bug `bridgeHeightAt` was written to fix, just inside the checker
+  // instead of the game.
+  const heightAt = (x: number, z: number): number | null => {
+    let best: number | null = null;
+    for (const bridge of facts.world.train.bridges) {
+      if (!bridge.covers(x, z)) continue;
+      const height = bridge.heightAt(x, z);
+      if (best === null || height > best) best = height;
+    }
+    return best;
+  };
+  const standableAt = (x: number, z: number, height: number): boolean => {
+    probe.set(x, height, z);
+    facts.world.collision.resolve(probe, PLAYER_RADIUS);
+    return Math.hypot(probe.x - x, probe.z - z) < 1e-3;
+  };
+
+  for (const crossing of facts.world.train.crossings) {
+    const bridge = facts.world.train.bridges.find((b) => b.deckCovers(crossing.x, crossing.z));
+    if (!bridge) continue; // reported by railwayClearanceCoversTheTrainAndItsRiders above
+    const deckHeight = heightAt(crossing.x, crossing.z) ?? bridge.deckY;
+    // The bridge follows the drawn path's own centreline through the
+    // crossing (its recorded spine — see `crossings.ts`), so every walk in
+    // here follows the same line: a straight march along `pathDir` would
+    // walk off the flank of a curved bridge mid-hump and read the drop off
+    // its own side as "a step too tall". On a crossing with no spine (the
+    // gate walk) the frame IS the straight line, unchanged.
+    const frame = frameFor(crossing);
+
+    if (!facts.reachableFromEntrance(crossing.x, crossing.z, deckHeight)) {
+      complaints.push(
+        `the bridge deck at (${fmt([crossing.x, crossing.z])}) is not reachable ` +
+          'from the entrance on the real nav lattice',
+      );
+    }
+    if (!standableAt(crossing.x, crossing.z, deckHeight)) {
+      complaints.push(`the bridge deck at (${fmt([crossing.x, crossing.z])}) is not itself standable`);
+    }
+
+    // The deck's own real half-width, walked outward empirically off the
+    // built `Bridge` (`deckCovers`) rather than re-imported from
+    // `bridgeFootprint.ts`'s own `halfAcross` — that module reaches
+    // `./plan` → `./route`/`../coaster/plan`, exactly the seed-dependent
+    // static-import trap this file's header warns about, so it stays
+    // unimported here the same as everywhere else in this function.
+    // 0.25 m resolution, not the old 0.5 — a deck exactly as wide as its
+    // own path (Jim, 2026-08-23) has a standable half-width well under a
+    // metre, and a half-metre pitch would round it down to a figure the
+    // sweep gate below reads as "too narrow to sweep".
+    const WIDTH_STEP = 0.25;
+    const at0 = frame.pointAt(0);
+    let deckHalfAcross = 0;
+    for (let w = WIDTH_STEP; w <= 15; w += WIDTH_STEP) {
+      const x = crossing.x + at0.acrossX * w;
+      const z = crossing.z + at0.acrossZ * w;
+      if (!bridge.deckCovers(x, z)) break;
+      deckHalfAcross = w;
+    }
+
+    // A point partway down each ramp — comfortably on the slope, clear of
+    // both the deck and the ordinary ground the ramp joins, so a pass here
+    // proves the climb itself rather than either end of it.
+    //
+    // **Walked to the ramp's own real, built length, never a fixed offset.**
+    // A fixed `6 m` here used to fall straight off a short ramp — the deck's
+    // own two extremes were measured for `everyBridgeIsWalkableAndReachable`
+    // and it never reads the constant `bridgeFootprint.ts`'s `rampRunPos`/
+    // `rampRunNeg` truncate down to, so for a ramp truncated shorter than
+    // that (the gate-walk crossing on seeds 11/18: ~3.5–3.7 m; a boundary-
+    // or plot-cramped ramp on other crossings) the probe landed off the far
+    // end (`bridge.heightAt` returns `null` there) and this loop's own
+    // `continue` read that as "nothing to probe" — exactly the review's
+    // finding on PR #297: **invisible to this check, precisely for the two
+    // hard cases it exists to catch.** Fixed by measuring the real ramp's
+    // own reach off the *built* `Bridge` itself (`covers`/`deckCovers`),
+    // never a re-import of the seed-sensitive planner that built it (this
+    // file's own header on static imports of seed-dependent modules) —
+    // walked outward from the crossing until `deckCovers` first lets go
+    // (the deck's own real half-length, empirically, not the constant) and
+    // then again until `covers` lets go (the ramp's own real far edge), so
+    // the probe below is genuinely 90% of *this specific ramp's* built
+    // length on *this specific side*, whatever `bridgeFootprint.ts` decided
+    // it should be. A ramp side truncated to (near) nothing — the correct
+    // answer on a side nothing ever walks, per that module's own note on
+    // the gate-walk crossing's outward-facing side — has nothing real to
+    // probe either, and is skipped for that reason now, not because the
+    // probe missed it.
+    const STEP = 0.5;
+    for (const sign of [1, -1] as const) {
+      let deckEdge = 0;
+      for (let d = 0; d <= 6; d += STEP) {
+        const p = frame.pointAt(d * sign);
+        if (!bridge.deckCovers(p.x, p.z)) break;
+        deckEdge = d;
+      }
+
+      // **Swept across the deck's own real width at this edge, not just
+      // its centreline.** The centre-point check above only asks whether
+      // the crossing's own track-centre point stands; a deck several
+      // metres wide can have that centre clear while an edge, part-way
+      // along its forward or backward face, is not. Found live extending
+      // PR #297 round 4's width-sweep fix (which closed the identical gap
+      // in `truncateForBoundary`'s ramp-length check) to
+      // `bridgeFootprint.ts`'s own pass-1 deck-width loop: seed 18's
+      // gate-walk crossing has `halfAcross` bottomed out at its hardcoded
+      // 1 m floor, and every point along that deck's own forward edge is
+      // still only 0.108–0.209 m from `GARDEN_PLAY_BOUNDARY` — real
+      // collision pushback up to 0.505 m. Confirmed pre-existing
+      // (identical numbers reproduce against `bridgeFootprint.ts` from
+      // before that round's fix), not something the width-sweep fix
+      // caused — filed as issue #317 rather than silently weakening this
+      // check to let seed 18 pass, per this file's own "never weaken an
+      // assertion to make a seed pass" rule.
+      if (deckHalfAcross > 0.3) {
+        for (const t of [-0.9, -0.45, 0, 0.45, 0.9]) {
+          const edge = frame.pointAt(deckEdge * sign);
+          const ex = edge.x + edge.acrossX * deckHalfAcross * t;
+          const ez = edge.z + edge.acrossZ * deckHalfAcross * t;
+          const eh = heightAt(ex, ez);
+          if (eh === null) continue; // off the deck's own built extent — nothing to probe
+          if (!standableAt(ex, ez, eh)) {
+            complaints.push(
+              `the bridge deck at (${fmt([crossing.x, crossing.z])}) is not standable at ` +
+                `(${fmt([ex, ez])}) — ${(t * 100).toFixed(0)}% across its own ${(deckHalfAcross * 2).toFixed(1)} m ` +
+                `width at the ${sign > 0 ? 'forward' : 'backward'} edge (see issue #317)`,
+            );
+          }
+        }
+      }
+
+      let rampEdge = deckEdge;
+      for (let d = deckEdge + STEP; d <= deckEdge + 25; d += STEP) {
+        const p = frame.pointAt(d * sign);
+        if (!bridge.covers(p.x, p.z)) break;
+        rampEdge = d;
+      }
+      const rampReach = rampEdge - deckEdge;
+      // A real failure, not a skip (found by real-browser QA on PR #330: a
+      // `continue` here let three bridges on the canonical seed alone ship
+      // with a sheer, `BRIDGE_RISE`-tall drop on one side — a 4.7–4.9 m
+      // vertical face where the path ran straight into it — because the
+      // exact bug this probe exists to catch also made it too short to
+      // probe, and "nothing to probe" and "skip" read the same to a loop
+      // that never distinguished them. `bridgeFootprint.ts`'s own search now
+      // requires {@link WALKABLE_FLOOR} on BOTH sides of every deck it
+      // accepts (see that constant's own note), so a real, built bridge
+      // reaching this invariant should never have a side this cramped —
+      // this is CLAUDE.md's own "break every check deliberately and watch it
+      // go red" lesson: a floor that cannot fire on the exact case it was
+      // named for is not a floor.
+      if (rampReach < 1) {
+        complaints.push(
+          `the bridge at (${fmt([crossing.x, crossing.z])}) has no usable ramp on its ` +
+            `${sign > 0 ? 'forward' : 'backward'} side — built reach ${rampReach.toFixed(2)} m, a sheer drop ` +
+            `where the path runs straight into it`,
+        );
+        continue;
+      }
+      const probeAlong = deckEdge + rampReach * 0.9;
+
+      // **Swept across the ramp's own real width, not just its
+      // centreline** — the exact QA finding this round: PR #297,
+      // canonical seed, the crossing at (12.64, 57.02) had its centreline
+      // clearing `GARDEN_PLAY_BOUNDARY` by 0.418 m at the worst point
+      // while its outer edge, `halfAcross` further across at the same
+      // `along`, was still 1.385 m past it — real pushback 2.454 m — and
+      // this loop's own single centreline probe had no way to see it.
+      // `bridges.ts` carries the hump at one uniform standable width for
+      // its whole length (no taper), so the same `deckHalfAcross` measured
+      // off the deck above applies here too.
+      for (const t of deckHalfAcross > 0.3 ? [-0.9, -0.45, 0, 0.45, 0.9] : [0]) {
+        const probe = frame.pointAt(probeAlong * sign);
+        const rx = probe.x + probe.acrossX * deckHalfAcross * t;
+        const rz = probe.z + probe.acrossZ * deckHalfAcross * t;
+        const rampHeight = heightAt(rx, rz);
+        if (rampHeight === null) continue; // off the ramp's own built width at this t — nothing to probe
+        if (!standableAt(rx, rz, rampHeight)) {
+          complaints.push(
+            `the ramp at (${fmt([rx, rz])}), ${probeAlong.toFixed(1)} m out from the crossing at ` +
+              `(${fmt([crossing.x, crossing.z])}), ${(t * 100).toFixed(0)}% across its width — 90% of its real, ` +
+              `built ${rampReach.toFixed(1)} m ramp reach on this side — is not standable`,
+          );
+        }
+      }
+    }
+  }
+
+  // --- ground-to-ground: the whole bridge, not just each ramp alone -------
+  //
+  // Everything above proves a real, built ramp reaches {@link WALKABLE_FLOOR}
+  // on each side *taken separately* — it does not prove a child can actually
+  // walk the bridge, ground to ground, without a step too tall to climb
+  // hiding at the seam between two things that were each individually fine.
+  // Real-browser QA on PR #330 found exactly that: a bridge whose two sides
+  // each "reached" still dropped 4.72 m over 1.5 m at the deck/ramp join —
+  // a 1.73 m single riser, nearly three times {@link BUILDING_STEP_UP}
+  // (0.62 m, the real per-step limit a walking foot obeys — `NavGrid`'s own
+  // `MAX_STEP`) — because nothing had ever walked the join itself as one
+  // continuous line. This marches the bridge's own centreline from where
+  // the real, built ramp meets the ground on one side, across, to where it
+  // meets the ground on the other — `bridge.heightAt` blends all the way to
+  // `terrainHeight` at each ramp's own far edge by construction (its own
+  // header), so marching *to* that edge already reaches genuine ground
+  // without needing to step past it — and fails on the first step too tall
+  // to climb, never a `continue`, per this file's own "a check that cannot
+  // fail" lesson (see the per-side probe above, same PR, same lesson: `if
+  // (rampReach < 1) continue` let three sheer, ramp-less sides through
+  // clean).
+  //
+  // **Bridges only, not a fallback (no-bridge) level crossing** — a level
+  // crossing has nothing built to march across at all, and the only figure
+  // that names its own extent (`crossing.halfGap`) is measured along the
+  // *rail* (`crossings.ts`'s own note), not along `pathDirX`/`pathDirZ`
+  // (this march's own axis, roughly perpendicular to the rail) — the two
+  // are different quantities on different axes, and marching one crossing's
+  // rail-axis spread out along its path-axis direction reaches well past
+  // its own real, reserved corridor into ordinary park territory nothing
+  // promises to keep clear (found live writing this check: it flagged
+  // perfectly ordinary trees and lamps 6–8 m out from three fallback
+  // crossings on the canonical seed as "not standable", which they
+  // genuinely are not, and never needed to be — ordinary scatter, not a
+  // crossing bug). A fallback crossing's own real walkability is
+  // `check-park.mts`'s job (`route.unreachable`, hard-gated), which routes
+  // it on the real nav lattice rather than a straight geometric line.
+  {
+    const MARCH_STEP = 0.5;
+    // `NavGrid.ts`'s own `TOP_REFERENCE`, restated rather than imported —
+    // it looks like a leaf (its own direct imports are `core/constants`,
+    // two type-only imports, and `Collision.ts`), but that last one is not
+    // safe: `NavGrid.ts` imports `autoHopClears` from it as a real value,
+    // and `Collision.ts` imports `GARDEN_PLAY_BOUNDARY` from `boundary.ts`
+    // as a real value too, which reads `PARK_SEED` from `parkManifest.ts`
+    // at module load — so a static import of `NavGrid.ts` here pins the
+    // park's seed exactly the way this file's own header warns against
+    // (found live: every non-canonical seed file threw "asked for seed N
+    // but the park built with 20260728" the moment this was imported,
+    // canonical only ever passing because 20260728 already *is* the
+    // default it was pinned to). `WalkSurfaces.sample`'s own contract is
+    // "no more than one step above `y`" with a `ceiling = y + STEP_UP`, so
+    // any `y` comfortably above every real height in the park is exactly
+    // as good as `NavGrid`'s own probe — a plain, un-imported number.
+    const TOP_REFERENCE = 500;
+    for (const crossing of facts.world.train.crossings) {
+      const bridge = facts.world.train.bridges.find((b) => b.deckCovers(crossing.x, crossing.z));
+      if (!bridge) continue;
+      // Marches the drawn path's own line, not a straight chord — see the
+      // per-crossing `frame` note above.
+      const frame = frameFor(crossing);
+
+      const reachOf = (sign: 1 | -1): number => {
+        let edge = 0;
+        for (let d = 0; d <= 40; d += MARCH_STEP) {
+          const p = frame.pointAt(d * sign);
+          if (!bridge.covers(p.x, p.z)) break;
+          edge = d;
+        }
+        return edge;
+      };
+      const farNeg = reachOf(-1);
+      const farPos = reachOf(1);
+      // Nothing built either side of this crossing at all (both reaches at
+      // zero) — nothing to march, and nothing to fail on here; the per-side
+      // probe above already covers a bridge with no ramp.
+      if (farNeg <= 0 && farPos <= 0) continue;
+
+      let previousHeight: number | null = null;
+      let previousAlong = -farNeg;
+      let reportedStep = false;
+      for (let along = -farNeg; along <= farPos + 1e-6; along += MARCH_STEP) {
+        const p = frame.pointAt(along);
+        const x = p.x;
+        const z = p.z;
+        const bridgeH = heightAt(x, z);
+        const groundH = facts.world.building.surfaces.sample(x, z, TOP_REFERENCE);
+        const h = bridgeH ?? groundH;
+        if (!standableAt(x, z, h)) {
+          complaints.push(
+            `the crossing at (${fmt([crossing.x, crossing.z])}) is not standable ` +
+              `${along.toFixed(1)} m along its own centreline, on the ` +
+              `${bridgeH !== null ? 'bridge' : 'ground'}`,
+          );
+        }
+        if (previousHeight !== null) {
+          const step = Math.abs(h - previousHeight);
+          // One complaint per crossing for this, not one per offending
+          // sample — a genuine sheer drop fails every step downstream of it
+          // too (the march never recovers a "previous" height on solid
+          // ground), and a wall of near-identical complaints obscures the
+          // one real finding rather than describing it.
+          if (step > BUILDING_STEP_UP && !reportedStep) {
+            reportedStep = true;
+            complaints.push(
+              `the crossing at (${fmt([crossing.x, crossing.z])}) has a ${step.toFixed(2)} m step ` +
+                `between ${previousAlong.toFixed(1)} m and ${along.toFixed(1)} m along its own ` +
+                `centreline — too tall for a real walk (BUILDING_STEP_UP is ` +
+                `${BUILDING_STEP_UP.toFixed(2)} m); this is not a walkable crossing, ground to ground`,
+            );
+          }
+        }
+        previousHeight = h;
+        previousAlong = along;
+      }
+    }
+  }
+
+  return complaints;
+};
+
+/**
+ * **A bridge is exactly as wide as its own path, and the train's corridor
+ * under it is genuinely open** — the two measurable halves of Jim's
+ * 2026-08-23 bridge feedback, measured off the real, built park.
+ *
+ * 1. **Width.** The old decks came out 12.9–15.8 m wide over a ~4 m path
+ *    ("a giant plywood table"). The standable width of the built bridge —
+ *    walked outward from the crossing with the game's own
+ *    `collision.resolve` until the parapet stops a real, player-sized body
+ *    — must agree with the crossing path's own paved width: no wider than
+ *    the paving (`pathHalfWidth`, read off the same samples the path was
+ *    drawn from), and no narrower than the paving less the walker's own
+ *    body each side (the parapets' collision is what eats that). Both
+ *    bounds are game numbers (`PLAYER_RADIUS`), not generator targets.
+ * 2. **The rail corridor.** The old geometry stood two support beams
+ *    *across the track* (they ran the deck's own length at its outer
+ *    edges — i.e. down the rail line either side of the crossing), which
+ *    the train would drive straight into. Nothing about a `covers()` or
+ *    collider check can see that — it was visible mesh with no collider —
+ *    so this raycasts straight up from the track bed, across the train's
+ *    own swept width (`TRACK_CLEARANCE` either side), through the built
+ *    bridge group: the first thing the ray hits must be at least
+ *    `TRAIN_CLEARANCE_Y` above the route's own ground. And over the
+ *    crossing itself at least one ray must hit *something* — a bridge
+ *    whose arch the rays sail through unhit is a crossing with no bridge
+ *    over it, and this check would otherwise pass vacuously (the "check
+ *    that cannot fail" trap).
+ *
+ * Proven red before green (2026-08-23): run against the pre-rework
+ * geometry, part 1 fails on both canonical bridges (standable width 6.6
+ * and 8.8 m against 2.6 m of paving) and part 2 fails on the support
+ * beams (first hit 0.4–4.3 m over the track bed, worst ray 0.42 m).
+ */
+const bridgesMatchTheirPathAndKeepTheRailClear: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const train = facts.world.train;
+  const route = train.route;
+  const probe = new Vector3();
+  const standableAt = (x: number, z: number, height: number): boolean => {
+    probe.set(x, height, z);
+    facts.world.collision.resolve(probe, PLAYER_RADIUS);
+    return Math.hypot(probe.x - x, probe.z - z) < 1e-3;
+  };
+  const heightAt = (x: number, z: number): number | null => {
+    let best: number | null = null;
+    for (const bridge of train.bridges) {
+      if (!bridge.covers(x, z)) continue;
+      const height = bridge.heightAt(x, z);
+      if (best === null || height > best) best = height;
+    }
+    return best;
+  };
+
+  // Only the bridges' own masonry is judged by the rays — the train
+  // itself (which may legitimately be parked on the line) and the fence
+  // (which legitimately crosses under every bridge) live in the same
+  // scene group and must not read as "something over the track".
+  const bridgesGroup = train.group.getObjectByName('railway-bridges');
+  if (!bridgesGroup) {
+    if (train.bridges.length > 0) {
+      complaints.push(
+        'no "railway-bridges" group in the built train group to raycast — the group ' +
+          'name in bridges.ts has changed and this invariant is measuring nothing',
+      );
+    }
+    return complaints;
+  }
+  bridgesGroup.updateMatrixWorld(true);
+  const raycaster = new Raycaster();
+  const up = new Vector3(0, 1, 0);
+  const rayOrigin = new Vector3();
+  const routePoint = new Vector3();
+  const routeTangent = new Vector3();
+
+  for (const crossing of train.crossings) {
+    const bridge = train.bridges.find((b) => b.deckCovers(crossing.x, crossing.z));
+    if (!bridge) continue;
+    const frame = frameFor(crossing);
+    const at0 = frame.pointAt(0);
+
+    // --- 1. the standable width, against the path's own paved width -------
+    const standableReach = (side: 1 | -1): number => {
+      let reach = 0;
+      for (let w = 0; w <= 9; w += 0.1) {
+        const x = crossing.x + at0.acrossX * w * side;
+        const z = crossing.z + at0.acrossZ * w * side;
+        const height = heightAt(x, z);
+        if (height === null) break; // off the built bridge's own extent
+        if (!standableAt(x, z, height)) break; // the parapet's collision
+        reach = w;
+      }
+      return reach;
+    };
+    const total = standableReach(1) + standableReach(-1);
+    const paved = crossing.pathHalfWidth * 2;
+    const usableFloor = Math.max(0.2, paved - PLAYER_RADIUS * 2 - 0.3);
+    if (total > paved + 0.2) {
+      complaints.push(
+        `the bridge at (${fmt([crossing.x, crossing.z])}) is ${total.toFixed(1)} m of standable ` +
+          `width against a path paved only ${paved.toFixed(1)} m wide — the bridge is wider ` +
+          'than the path it carries',
+      );
+    } else if (total < usableFloor) {
+      complaints.push(
+        `the bridge at (${fmt([crossing.x, crossing.z])}) leaves only ${total.toFixed(2)} m of ` +
+          `standable width on a path paved ${paved.toFixed(1)} m wide — the parapets have ` +
+          'closed over the path itself',
+      );
+    }
+
+    // --- 2. the rail corridor under the bridge is genuinely open ----------
+    let anyHitOverCrossing = false;
+    let worstClearance = Infinity;
+    let worstAt = '';
+    for (let offset = -8; offset <= 8 + 1e-6; offset += 0.5) {
+      const railDistance = route.wrap(crossing.railDistance + offset);
+      route.pointAt(railDistance, routePoint);
+      route.tangentAt(railDistance, routeTangent);
+      const nx = routeTangent.z;
+      const nz = -routeTangent.x;
+      for (const lateral of [-TRACK_CLEARANCE, 0, TRACK_CLEARANCE]) {
+        rayOrigin.set(
+          routePoint.x + nx * lateral,
+          routePoint.y + 0.02,
+          routePoint.z + nz * lateral,
+        );
+        raycaster.set(rayOrigin, up);
+        raycaster.far = TRAIN_CLEARANCE_Y + 6;
+        const hits = raycaster.intersectObject(bridgesGroup, true);
+        const first = hits[0];
+        if (!first) continue;
+        const clearance = first.point.y - routePoint.y;
+        if (Math.abs(offset) <= 1.5) anyHitOverCrossing = true;
+        if (clearance < worstClearance) {
+          worstClearance = clearance;
+          worstAt = `${offset.toFixed(1)} m along the rail, ${lateral.toFixed(1)} m off its centre`;
+        }
+      }
+    }
+    if (worstClearance < TRAIN_CLEARANCE_Y) {
+      complaints.push(
+        `the bridge at (${fmt([crossing.x, crossing.z])}) has built geometry only ` +
+          `${worstClearance.toFixed(2)} m over the track bed (at ${worstAt}) — the train sweeps ` +
+          `to ${TRAIN_CLEARANCE_Y.toFixed(2)} m, so it would drive into or through it`,
+      );
+    }
+    if (!anyHitOverCrossing) {
+      complaints.push(
+        `no built bridge geometry stands over the rail at the crossing at ` +
+          `(${fmt([crossing.x, crossing.z])}) — the rays found nothing to measure, so the ` +
+          'clearance above is vacuous',
+      );
+    }
+  }
+  return complaints;
+};
+
+/**
+ * **The park's own paving goes up and over every bridge — one continuous
+ * path, never a second floor and never a ribbon left lying in the tunnel.**
+ *
+ * Jim, 2026-08-24: *"the 'floor' on the bridge should be the normal path
+ * texture — it should read as a continuous path that goes over a bridge."*
+ * `pathGraph.ts` draws one sandy ribbon and one cream kerb for the whole
+ * park, and `World.ts` lifts the stretch a bridge carries onto that
+ * bridge's own surface (`drapePathsOverBridges`). That is the *only*
+ * mechanism there is, which is exactly why it needs measuring: paths are
+ * drawn before the train has solved a loop, so the untouched ribbon lies on
+ * the terrain — straight through the arch, under the bridge standing over
+ * it.
+ *
+ * Measured off the built meshes' own vertex buffers, never off the drape
+ * call:
+ *
+ * 1. **Every vertex a bridge carries is on that bridge**, at the layer's
+ *    own lift above its surface, to the millimetre. A vertex left on the
+ *    terrain here is the ribbon-through-the-tunnel bug.
+ * 2. **Both layers are carried alike.** The kerb reaches further out than
+ *    the surface it borders, so it is the layer that tears first — the
+ *    first build of this carried 161 surface vertices and only 85 kerb
+ *    ones, splitting the kerb down the middle of every bridge while the
+ *    paving itself looked perfect. So the two counts must agree.
+ * 3. **Nothing is left in the tunnel**: no path vertex inside the deck's
+ *    own span may sit below the built soffit over it.
+ * 4. **It cannot pass vacuously.** A park with bridges must have paving on
+ *    them — zero carried vertices is a finding, not a pass, which is the
+ *    trap every other bridge check here has had to be written against.
+ */
+const theDrawnPathRidesOverEveryBridge: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const bridges = facts.world.train.bridges;
+  if (bridges.length === 0) return complaints;
+
+  const layers: { name: string; mesh: Mesh; lift: number }[] = [];
+  facts.world.garden.group.traverse((object) => {
+    if (!(object instanceof Mesh)) return;
+    if (object.name === 'path-surface') layers.push({ name: object.name, mesh: object, lift: PATH_SURFACE_LIFT });
+    if (object.name === 'path-kerb') layers.push({ name: object.name, mesh: object, lift: PATH_KERB_LIFT });
+  });
+  if (layers.length !== 2) {
+    complaints.push(
+      `expected the garden to hold both drawn path layers to measure, found ` +
+        `${layers.length} (${layers.map((l) => l.name).join(', ') || 'none'}) — the mesh names ` +
+        'in pathGraph.ts have changed and this invariant is measuring nothing',
+    );
+    return complaints;
+  }
+
+  const carried: Record<string, number> = {};
+  for (const { name, mesh, lift } of layers) {
+    const position = mesh.geometry.getAttribute('position');
+    let count = 0;
+    let worstOff = 0;
+    let worstAt: readonly [number, number] = [0, 0];
+    for (let i = 0; i < position.count; i += 1) {
+      const x = position.getX(i);
+      const y = position.getY(i);
+      const z = position.getZ(i);
+      let surface: number | null = null;
+      for (const bridge of bridges) {
+        const here = bridge.pavingHeightAt(x, z);
+        if (here !== null && (surface === null || here > surface)) surface = here;
+      }
+      if (surface === null) continue;
+      count += 1;
+      const off = Math.abs(y - (surface + lift));
+      if (off > worstOff) {
+        worstOff = off;
+        worstAt = [x, z];
+      }
+    }
+    carried[name] = count;
+    // A millimetre: the drape writes the height straight in, so anything
+    // bigger than float noise means a vertex was missed, not rounded.
+    if (worstOff > 0.001) {
+      complaints.push(
+        `the drawn ${name} sits ${worstOff.toFixed(3)} m off the bridge carrying it at ` +
+          `(${fmt(worstAt)}) — the paving is not riding the hump there, it is draped on ` +
+          'whatever was under it when the path was drawn',
+      );
+    }
+  }
+
+  const surfaceCount = carried['path-surface'] ?? 0;
+  const kerbCount = carried['path-kerb'] ?? 0;
+  if (surfaceCount === 0) {
+    complaints.push(
+      `${bridges.length} bridge(s) are built and not one vertex of the drawn paving is on any ` +
+        'of them — the path does not go over the bridges at all, and every check above ' +
+        'passed by having nothing to measure',
+    );
+  } else if (Math.abs(surfaceCount - kerbCount) > surfaceCount * 0.15) {
+    complaints.push(
+      `the bridges carry ${surfaceCount} path-surface vertices but ${kerbCount} path-kerb ones — ` +
+        'the kerb is torn off the paving it borders somewhere over a bridge',
+    );
+  }
+
+  // 3. Nothing left lying in a tunnel — stated where the train is, not
+  //    where the deck is.
+  //
+  //    The test is deliberately anchored to the **rail centre line**, not to
+  //    the deck's own span. A first attempt used `deckCovers` and fired on
+  //    perfectly good paving: the crown's soffit is flat only over
+  //    `ARCH_CLEAR_HALF`, and past that the arch's haunch curves down toward
+  //    its springing, so a hump's road legitimately runs *below* the crown
+  //    soffit's height once it is out over the solid abutment (measured 4.06
+  //    m of road under a 4.18 m soffit, 2.4 m along, with nothing wrong at
+  //    all). Within the train's own swept half-width of the rail there is no
+  //    such ambiguity: paving below the soffit there is paving the train
+  //    would drive through.
+  const railPoint = { x: 0, z: 0 };
+  const route = facts.world.train.route;
+  for (const crossing of facts.world.train.crossings) {
+    const deckMesh = facts.world.train.group
+      .getObjectByName(`bridge-${crossing.railDistance.toFixed(1)}`)
+      ?.getObjectByName('deck');
+    if (!deckMesh) continue;
+    const soffit = new Box3().setFromObject(deckMesh).min.y;
+    const bridge = bridges.find((b) => b.deckCovers(crossing.x, crossing.z));
+    if (!bridge) continue;
+    for (const { name, mesh } of layers) {
+      const position = mesh.geometry.getAttribute('position');
+      for (let i = 0; i < position.count; i += 1) {
+        const x = position.getX(i);
+        const z = position.getZ(i);
+        if (bridge.pavingHeightAt(x, z) === null) continue;
+        route.flatPointAt(route.distanceNear(x, z), railPoint);
+        if (Math.hypot(x - railPoint.x, z - railPoint.z) > TRACK_CLEARANCE) continue;
+        const y = position.getY(i);
+        if (y < soffit) {
+          complaints.push(
+            `the drawn ${name} passes under the bridge at (${fmt([crossing.x, crossing.z])}): a ` +
+              `vertex at (${fmt([x, z])}) sits at ${y.toFixed(2)} m, below the ${soffit.toFixed(2)} m ` +
+              'soffit standing over the track — the path is draped through the tunnel',
+          );
+          break;
+        }
+      }
+    }
+  }
+
+  return complaints;
+};
+
+/**
+ * **The railway is crossed on purpose, and mostly on bridges.**
+ *
+ * Jim, 23 August 2026: the park is designed around the bridge constraints —
+ * `crossingPlan.ts` decides, before a single path is drawn, where the loop
+ * can genuinely take a bridge (or, rarely, a deliberate level crossing),
+ * and `paths.ts` routes every rail-crossing leg through those sites. This
+ * measures the two consequences that matter on the *built* park:
+ *
+ * 1. **No crossing's fence gap overlaps a station's sealed window.** The
+ *    far side of every platform is fenced shut (`fence.ts`'s `stationRun`),
+ *    so a crossing inside that window is a paved route walking into a wall
+ *    — exactly what stranded 6 waypoints on the canonical seed before the
+ *    crossing plan existed (a spur crossed at railDistance 330.1, 3.6 m
+ *    from a platform).
+ * 2. **Real bridges are the rule, level crossings the exception**
+ *    (Decision 8): at least as many crossings carry a real, built bridge
+ *    as fall back to a level crossing, and — whenever the park has any
+ *    crossing at all — at least one real bridge exists. The second clause
+ *    is what keeps this whole invariant honest: with zero bridges anywhere
+ *    every per-bridge check above passes vacuously (the "check that cannot
+ *    fail" trap), which is precisely the state the three required seeds
+ *    were in (0/7, 0/7, 0/5) before the plan-first rework.
+ *
+ * Thresholds come from the built world (`facts.world.train`) and the
+ * fence's own `STATION_GAP` (a leaf-module constant), never from
+ * `crossingPlan.ts` itself — importing the plan would both pin the seed
+ * (it solves against `PARK_LAYOUT` at module load) and re-measure the
+ * rules instead of the park.
+ */
+const crossingsArePlannedAndMostlyBridged: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const train = facts.world.train;
+  const route = train.route;
+  const crossings = train.crossings;
+  const fallbacks = train.fallbackCrossings;
+
+  for (const crossing of crossings) {
+    for (const station of train.stations) {
+      const along = Math.abs(
+        route.wrap(crossing.railDistance - station.distance + route.length / 2) - route.length / 2,
+      );
+      const needed = STATION_GAP + crossing.halfGap;
+      if (along < needed) {
+        complaints.push(
+          `the crossing at (${fmt([crossing.x, crossing.z])}) opens its fence gap ` +
+            `${along.toFixed(1)} m along the loop from a station platform — its ` +
+            `${crossing.halfGap.toFixed(1)} m half-gap overlaps the station's sealed ` +
+            `±${STATION_GAP} m window, so the far side of this crossing is a fenced wall`,
+        );
+      }
+    }
+  }
+
+  if (crossings.length > 0) {
+    const built = train.bridges.length;
+    if (built === 0) {
+      complaints.push(
+        `the park has ${crossings.length} railway crossing(s) and not one real bridge — ` +
+          'every per-bridge check above is passing vacuously',
+      );
+    } else if (built < fallbacks.length) {
+      complaints.push(
+        `only ${built} of ${crossings.length} railway crossings carry a real bridge ` +
+          `(${fallbacks.length} fell back to level crossings) — Decision 8 wants bridges ` +
+          'the rule and level crossings the rare exception',
+      );
+    }
   }
 
   return complaints;
@@ -4830,6 +6681,9 @@ function nearestPathClearance(facts: ParkFacts, x: number, z: number): number {
  * with nothing saying so. The slide has `theGinormousSlideStandsOnSomething`;
  * this is the same claim for the cruiser.
  */
+const railScratch = new Vector3();
+const railTangentScratch = new Vector3();
+
 const skyCruiserStandsOnItsOwnSupports: Invariant = (facts) => {
   const complaints: string[] = [];
   const coaster = facts.world.coaster;
@@ -4900,11 +6754,47 @@ const skyCruiserStandsOnItsOwnSupports: Invariant = (facts) => {
       longestAt = ats[i]!;
     }
   }
-  const trackPerPylon = coaster.route.length / pylons.count;
+  // Track over ground a pylon could never stand on — the railway corridor,
+  // the paving, a plot, or a stretch too low to need a post — cannot fairly
+  // demand a pylon of its own, so it is discounted from the per-pylon
+  // average, using exactly the same legitimacy set the open-span rule below
+  // measures with (2026-08-23: a re-rolled seed 2 flew 200.3 m of loop with
+  // long stretches over the railway and the statue ring's paving, and the
+  // raw average condemned a ride whose every OPEN stretch was carried fine).
+  let exemptLength = 0;
+  {
+    const groundClearanceHere = facts.cruiserRouteGroundClearance;
+    for (let d = 0; d < Math.floor(coaster.route.length); d += 1) {
+      coaster.route.pointAt(d, point);
+      const overPlot = facts.plots.some(
+        (plot) =>
+          Math.hypot(point.x - plot.x, point.z - plot.z) < plot.boundingRadius + OPEN_SPAN_PLOT_SKIRT,
+      );
+      const overPath = !overPlot && nearestPathClearance(facts, point.x, point.z) < OPEN_SPAN_PATH_CLEARANCE;
+      const overRail = (() => {
+        if (overPlot || overPath) return false;
+        const trainRoute = facts.world.train.route;
+        trainRoute.pointAt(trainRoute.distanceNear(point.x, point.z), railScratch);
+        return Math.hypot(railScratch.x - point.x, railScratch.z - point.z) < 5.5;
+      })();
+      const tooLow =
+        !overPlot &&
+        !overPath &&
+        !overRail &&
+        (groundClearanceHere[
+          ((d % groundClearanceHere.length) + groundClearanceHere.length) % groundClearanceHere.length
+        ] ?? Infinity) < OPEN_SPAN_MIN_PYLON_HEIGHT;
+      if (overPlot || overPath || overRail || tooLow) exemptLength += 1;
+    }
+  }
+  const demandingLength = coaster.route.length - exemptLength;
+  const trackPerPylon = demandingLength / pylons.count;
   if (trackPerPylon > CRUISER_MAX_TRACK_PER_PYLON) {
     complaints.push(
-      `the Sky Cruiser carries ${coaster.route.length.toFixed(1)} m of track on ${pylons.count} ` +
-        `pylons — one every ${trackPerPylon.toFixed(1)} m, over the ` +
+      `the Sky Cruiser carries ${demandingLength.toFixed(1)} m of pylon-demanding track ` +
+        `(${coaster.route.length.toFixed(1)} m loop, ${exemptLength.toFixed(1)} m over ` +
+        `rail/paving/plots/low ground) on ${pylons.count} pylons — one every ` +
+        `${trackPerPylon.toFixed(1)} m, over the ` +
         `${CRUISER_MAX_TRACK_PER_PYLON} m that reads as a ride standing on something. This is the ` +
         'shape of the four-pylons-on-217-m defect.',
     );
@@ -4941,6 +6831,19 @@ const skyCruiserStandsOnItsOwnSupports: Invariant = (facts) => {
           Math.hypot(point.x - plot.x, point.z - plot.z) < plot.boundingRadius + OPEN_SPAN_PLOT_SKIRT,
       );
       const overPath = !overPlot && nearestPathClearance(facts, point.x, point.z) < OPEN_SPAN_PATH_CLEARANCE;
+      // Over the railway corridor — a fourth legitimate reason, measured
+      // off the solved loop (2026-08-23, canonical seed re-rolled by the
+      // statue-ring layout rule: the cruiser paralleled the railway for a
+      // 16 m stretch, and a pylon can no more stand on the track and its
+      // fence box than it can stand on paving). `RAIL_CORRIDOR_CLEARANCE`
+      // is the same "how far must a structure stand off the rail" answer
+      // the pylon search itself lives by (its foot plus that clearance).
+      const overRail = (() => {
+        if (overPlot || overPath) return false;
+        const trainRoute = facts.world.train.route;
+        trainRoute.pointAt(trainRoute.distanceNear(point.x, point.z), railScratch);
+        return Math.hypot(railScratch.x - point.x, railScratch.z - point.z) < 5.5;
+      })();
       // `d` is always a whole number of metres here (both `ats` and this
       // loop's own step are integers), so this is an exact lookup into
       // `cruiserRouteGroundClearance`'s own 1 m sampling — not a re-derivation
@@ -4951,7 +6854,7 @@ const skyCruiserStandsOnItsOwnSupports: Invariant = (facts) => {
         !overPath &&
         (groundClearance[((d % groundClearance.length) + groundClearance.length) % groundClearance.length] ??
           Infinity) < OPEN_SPAN_MIN_PYLON_HEIGHT;
-      if (overPlot || overPath || tooLowToNeedAPost) {
+      if (overPlot || overPath || overRail || tooLowToNeedAPost) {
         contig = 0;
         continue;
       }
@@ -5300,6 +7203,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the Land Hotel stands close to the castle', hotelIsCloseToTheCastle],
   ['no two wall runs cross or crowd each other', wallsDoNotClash],
   ['no wall run stands on the railway', wallsClearTheRailway],
+  ['every wall run sits on a grid axis and actually borders something', wallsBorderTheGridSensibly],
   ['no tree stands on the railway', treesClearTheRailway],
   ['no entrance prop stands on the railway', entrancePropsClearTheRailway],
   ['the train runs through no plot and no stall', trainClearsEveryPlotAndStall],
@@ -5313,7 +7217,15 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no lamp stands in anything', lampsTouchNothing],
   ['every path is lit end to end', everyPathIsLit],
   ['no paved path stops anywhere but a destination', noPathEndsNowhere],
+  ['every plot faces exactly the camera axis', buildingsFaceTheCameraAxis],
+  ['every paved path runs on grid axes', pathsRunOnGridAxes],
+  ['every street sits on the shared 12 m lattice', streetsShareLatticeLines],
+  ['the ring road is one true circle round the statue', ringIsATrueCircleRoundTheStatue],
   ['every place a child can be served is a node in the path graph', everyDestinationIsANode],
+  [
+    'no two close destinations are left with a wildly disproportionate paved detour',
+    detourRatiosStayReasonable,
+  ],
   ['every ride exit is clear ground, reachable from the entrance', rideExitsAreUsable],
   ['the Rail Race exit fits the whole party that arrives on it', railRaceExitFitsTheParty],
   ['the Rail Race flies clear of the railway and stands on clear ground', railRaceFliesClear],
@@ -5376,6 +7288,19 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   [
     'the clearance over the railway covers the train and everyone riding it',
     railwayClearanceCoversTheTrainAndItsRiders,
+  ],
+  ['every railway crossing has a bridge you can walk to, onto and across', everyBridgeIsWalkableAndReachable],
+  [
+    'every bridge is as wide as its own path, with the rail corridor open beneath',
+    bridgesMatchTheirPathAndKeepTheRailClear,
+  ],
+  [
+    "the park's own paving rides over every bridge, and none is left in a tunnel",
+    theDrawnPathRidesOverEveryBridge,
+  ],
+  [
+    'railway crossings are planned — station-clear, and mostly real bridges',
+    crossingsArePlannedAndMostlyBridged,
   ],
   ['the cat bus is actually in the park, at the gate, with everyone aboard', theCatBusIsInThePark],
   ['every child fits in the cat bus seat they are sitting in', childrenFitTheSeatsTheySitIn],

@@ -16,7 +16,7 @@ import { Rng, TAU, clamp01, lerp, smoothstep } from '../core/mathUtils';
 import { toonMaterial } from '../art/style/materials';
 import { createFlowerPickEffect, type FlowerPickEffect } from '../art/effects/flowerSparkle';
 import { terrainHeight } from './terrain';
-import { isOnPath } from './paths';
+import { isOnPath } from './pathGraph';
 import { ANCHORS } from './anchors';
 import { pressZone, type InteractZone } from './interact';
 import { highlightInstance } from './highlight';

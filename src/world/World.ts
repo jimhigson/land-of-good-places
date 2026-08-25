@@ -36,6 +36,8 @@ import { KeychainShop } from './KeychainShop';
 import { Entrance, type EntranceOptions } from './entrance/Entrance';
 import { ARRIVAL_KID_COUNT } from './entrance/ArrivalSequence';
 import { terrainHeight } from './terrain';
+import { bridgeHeightAt, bridgePavingHeightAt } from './train/bridges';
+import { drapePathsOverBridges } from './pathGraph';
 
 export interface WorldOptions {
   /** Passed straight to {@link Entrance} — see `EntranceOptions.arriveByBus`. */
@@ -155,7 +157,18 @@ export class World implements GameSystem {
     // world, so a tree planted across the park edge bends the track rather than
     // growing through it (see `train/route.ts`). Built before the NPCs, so the
     // waypoint graph is validated against its station posts too.
-    this.train = new ParkTrain(this.collision);
+    this.train = new ParkTrain(
+      this.collision,
+      (x, z, radius) => this.scenery.clearTreesNear(x, z, radius),
+      (x, z, radius) => this.scenery.hasFellableTreeNear(x, z, radius),
+    );
+    // The path goes up and over each bridge, rather than a bridge growing its
+    // own separate floor (Jim, 2026-08-24) — and rather than the ground ribbon
+    // draping on through the arch, which is what it did while nothing told it
+    // the bridges existed. `Garden` drew the paving long before the train had
+    // solved a loop, so this is the first moment there is an answer to lift it
+    // onto; the paving is the same mesh either side of the ramp feet.
+    drapePathsOverBridges((x, z) => bridgePavingHeightAt(this.train.bridges, x, z));
     // The platforms and the carriage floors are things you stand on, so they go
     // to the same sampler the lift and the bubble use.
     for (const platform of this.train.platforms()) this.building.surfaces.addPlatform(platform);
@@ -292,6 +305,9 @@ export class World implements GameSystem {
       camera,
       (x, z, y) => this.building.surfaces.sample(x, z, y),
       this.scenery.climbableTrees,
+      // Every railway bridge's own surface height (issue #116, Decision 8) —
+      // `train` is built well above, so every bridge already exists here.
+      (x, z) => bridgeHeightAt(this.train.bridges, x, z),
       this.entrance.arrival ? ARRIVAL_KID_COUNT : 0,
       this.hotel.residents,
     );

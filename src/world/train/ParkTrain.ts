@@ -14,6 +14,8 @@ import { Station } from './station';
 import { RideCamera } from '../../core/RideCamera';
 import { computeCrossings, type LevelCrossing } from './crossings';
 import { buildRailFence } from './fence';
+import { buildBridges, type Bridge } from './bridges';
+import { BRIDGE_WALL_THICKNESS } from './bridgeFootprint';
 import { SmokePuffs } from './puffs';
 import {
   createCarriage,
@@ -121,6 +123,19 @@ export class ParkTrain implements GameSystem, TrainService {
   readonly stops: TrainStop[] = [];
   /** The level crossings — exported so `check:park` knows where feet may cross. */
   readonly crossings: readonly LevelCrossing[] = [];
+  /** The bridge built at every crossing (issue #116, Decision 8) — exported
+   * so `check:park`, `NavGrid` and `PoiGraph` can all route across them. */
+  readonly bridges: readonly Bridge[] = [];
+  /** Every bridge's own deck and ramp treads — folded into {@link platforms}. */
+  private readonly bridgePlatforms: readonly MovingPlatform[] = [];
+  /**
+   * Crossings the real, backtracking footprint search (issues #317, #319)
+   * could not find any walkable bridge for at all — genuinely rare, the
+   * last resort before this class of failure was falling straight through
+   * to a known-too-close edge. `fence.ts` opens an ordinary ground-level
+   * gap for each, exactly the pre-Decision-8 level crossing.
+   */
+  readonly fallbackCrossings: readonly LevelCrossing[] = [];
 
   /**
    * The first-person view from the player's seat (Decision 4 C2), built on
@@ -177,7 +192,11 @@ export class ParkTrain implements GameSystem, TrainService {
   private readonly tangent = new Vector3();
   private readonly seatWorld = new Vector3();
 
-  constructor(collision: CollisionWorld) {
+  constructor(
+    collision: CollisionWorld,
+    clearTreesNear?: (x: number, z: number, radius: number) => number,
+    hasFellableTreeNear?: (x: number, z: number, radius: number) => boolean,
+  ) {
     this.group.name = 'park-train';
     this.collision = collision;
 
@@ -186,12 +205,77 @@ export class ParkTrain implements GameSystem, TrainService {
     this.group.add(this.track.group);
 
     // Level crossings first (they come out of the solved curve and the drawn
-    // paths), then the fence, which leaves a gap at every one of them and at
-    // both stations (whose spots were fixed in `train/plan.ts`).
+    // paths) — each one gets a bridge, below, and the fence gaps only for
+    // boarding at a station now (whose spots were fixed in `train/plan.ts`).
     this.crossings = computeCrossings(
       this.route,
       TRAIN_PLAN.stations.map((station) => station.distance),
     );
+
+    // --- the stations ----------------------------------------------------
+    // Planned in `train/plan.ts` — position, name, everything — before any
+    // scene object existed, so the path graph could take them as nodes. Here
+    // they are only *built* — and built **before** the bridges, not after:
+    // a station's canopy posts are real, registered colliders
+    // (`collision.addCircle`, `radius = 0.22`), and the bridge footprint
+    // search below asks the real collision world for exactly this kind of
+    // thing. Built the other way round, a bridge's own (issues #317, #319)
+    // backtracking search — free, for the first time, to slide a deck
+    // sideways along the crossing — could slide one into a canopy post that
+    // exists in the finished game but did not yet exist in `collision` when
+    // the search ran (found live testing this very search, seed 2: a deck
+    // edge cleared everything the search could see and still landed 0.78 m
+    // from a post the search never got to ask about).
+    for (const planned of TRAIN_PLAN.stations) {
+      const station = new Station(
+        {
+          index: planned.index,
+          name: planned.name,
+          accent: planned.accent,
+          distance: planned.distance,
+        },
+        this.route,
+        collision,
+      );
+      this.stations.push(station);
+      this.group.add(station.group);
+      this.stops.push({
+        index: planned.index,
+        name: planned.name,
+        x: station.standX,
+        z: station.standZ,
+      });
+    }
+
+    // A bridge at every crossing (issue #116, Decision 8) — built before the
+    // fence, which needs to know where every deck stands so it can seam
+    // around it rather than gap for it. See `bridges.ts`'s header.
+    //
+    // `collision` is handed in here as `real` (issues #317, #319) — by this
+    // point in `World`'s own build order, almost everything solid in the
+    // park already exists, so the footprint search backtracks against what
+    // is actually there rather than a couple of hand-picked obstacle
+    // classes. `clearTreesNear` is the same last-resort lever
+    // `coaster/pylons.ts` already uses for its own placement search.
+    const built = buildBridges(this.route, this.crossings, {
+      collision,
+      ...(clearTreesNear ? { clearTreesNear } : {}),
+      ...(hasFellableTreeNear ? { hasFellableTreeNear } : {}),
+    });
+    this.bridges = built.bridges;
+    this.bridgePlatforms = built.platforms;
+    this.fallbackCrossings = built.fallbackCrossings;
+    this.group.add(built.group);
+    for (const rail of built.guardRails) {
+      // A masonry parapet/spandrel wall: solid from the ground (blocks a
+      // walker beside the bridge), with an ABSOLUTE top at the local road
+      // surface plus the parapet (stops a walker on the hump stepping over
+      // the side) — see `bridges.ts`'s `BridgeWall`.
+      collision.addWall(
+        rail.x1, rail.z1, rail.x2, rail.z2, BRIDGE_WALL_THICKNESS / 2,
+        rail.topHeight, false, true,
+      );
+    }
 
     // --- the train itself ----------------------------------------------------
     this.locomotive = createLocomotive();
@@ -232,39 +316,17 @@ export class ParkTrain implements GameSystem, TrainService {
       );
     }
 
-    // --- the stations --------------------------------------------------------
-    // Planned in `train/plan.ts` — position, name, everything — before any
-    // scene object existed, so the path graph could take them as nodes. Here
-    // they are only *built*.
-    for (const planned of TRAIN_PLAN.stations) {
-      const station = new Station(
-        {
-          index: planned.index,
-          name: planned.name,
-          accent: planned.accent,
-          distance: planned.distance,
-        },
+    // --- the fence (Decision 4 §6: keeping feet off the track) -------------
+    // Built last of all the trackside furniture, so it can seam around every
+    // bridge and gap for every platform.
+    this.group.add(
+      buildRailFence(
         this.route,
         collision,
-      );
-      this.stations.push(station);
-      this.group.add(station.group);
-      this.stops.push({
-        index: planned.index,
-        name: planned.name,
-        x: station.standX,
-        z: station.standZ,
-      });
-    }
-
-    // --- the fence (Decision 4 §6: keeping feet off the track) -------------
-    // Built last of all the trackside furniture, because its gaps are defined
-    // by everything above: a gap at every level crossing, and a gap along
-    // every platform so children can board.
-    this.group.add(
-      buildRailFence(this.route, collision, this.crossings, this.stations.map((station) => ({
-        distance: station.distance,
-      }))),
+        this.bridges,
+        this.stations.map((station) => ({ distance: station.distance })),
+        this.fallbackCrossings,
+      ),
     );
 
     // Start standing at the first station, so the first thing a child sees is a
@@ -279,10 +341,12 @@ export class ParkTrain implements GameSystem, TrainService {
     setTrainService(this);
   }
 
-  /** Platforms and carriage floors, for `WalkSurfaces.addPlatform`. */
+  /** Platforms, carriage floors and every bridge deck/tread, for
+   * `WalkSurfaces.addPlatform`. */
   platforms(): MovingPlatform[] {
     const platforms: MovingPlatform[] = this.stations.map((station) => station.asPlatform());
     for (const carriage of this.carriages) platforms.push(carriageFloor(carriage));
+    platforms.push(...this.bridgePlatforms);
     return platforms;
   }
 
@@ -396,9 +460,12 @@ export class ParkTrain implements GameSystem, TrainService {
       const seat = this.seats[seatNumber];
       if (!seat || seat.taken !== 'npc') continue;
 
-      // Children stand in front of the bench rather than sitting on it: they
-      // are posed by their own walk cycle, and a standing child holding on
-      // reads better than a walking one sitting down.
+      // Feet on the carriage floor — same reference as the player's, since
+      // she now sits too (see `updateRider`). `NpcCharacter.animate` reads
+      // back "was I carried this frame" and folds the ride's own seated pose
+      // onto whoever `setCarriedPose` touches below, so the visual sit and
+      // the clearance this height is measured against (train/clearance.ts)
+      // are the same fact, not two.
       this.seatPosition(seat, 0, character.position.y);
       // Hands the child to the ride for this frame — see
       // `NpcCharacter.setCarriedPose`. Writing x/z here and letting their own
@@ -570,7 +637,15 @@ export class ParkTrain implements GameSystem, TrainService {
 
     if (this.playerRiding) {
       // Riding: the train owns the character until they ask to get off.
-      this.seatPosition(seat, SEAT_Y - CAR_FLOOR_Y, player.position.y);
+      //
+      // Feet on the carriage floor, same as an NPC rider — not on the bench
+      // top. `SEAT_Y - CAR_FLOOR_Y` used to be handed here as the lift,
+      // planting her feet on the bench and making her the tallest thing on
+      // the train by the width of the bench (train/clearance.ts's own
+      // finding). She is seated (`Player.ridePosture` defaults to `'seated'`
+      // from `beginRide`, so `applyRidePose` already folds her for it); a
+      // seated child's feet rest on the floor, not the seat.
+      this.seatPosition(seat, 0, player.position.y);
       const car = this.carriages[seat.car];
       player.setRidePose(
         this.seatWorld.x,

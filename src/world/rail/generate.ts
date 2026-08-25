@@ -199,6 +199,13 @@ interface RouteBriefBase {
   /** Half-width of track to keep clear of obstacles and the boundary. */
   readonly corridorRadius: number;
   /**
+   * Half-width kept clear of the boundary specifically — defaults to
+   * {@link corridorRadius}. The train sets it much wider (see
+   * `train/route.ts`'s `TRACK_BOUNDARY_CLEARANCE`): the ground between its
+   * loop and the rim must stay wide enough to actually walk, or not exist.
+   */
+  readonly boundaryMargin?: number;
+  /**
    * How close the track may come to an earlier part of itself.
    *
    * A free-form loop can cross itself, which the old polar coaster solve could
@@ -739,7 +746,10 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
           rejected.collision += 1;
           return null;
         }
-        if (brief.boundary.distanceToEdge(point.x, point.z) < brief.corridorRadius) {
+        if (
+          brief.boundary.distanceToEdge(point.x, point.z) <
+          (brief.boundaryMargin ?? brief.corridorRadius)
+        ) {
           rejected.boundary += 1;
           return null;
         }

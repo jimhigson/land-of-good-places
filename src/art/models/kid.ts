@@ -127,6 +127,42 @@ export const KID_HEIGHT = 2.12;
 export const TALLEST_CHILD_HEIGHT = 2.97;
 
 /**
+ * The height of the **tallest child the park can build, seated** — the same
+ * hair × hat cross product as {@link TALLEST_CHILD_HEIGHT}, but with the
+ * game's own seated ride pose (`entities/ridePose.ts`'s `applyRidePose`,
+ * posture `'seated'`) applied first, and measured with {@link visibleTop} on
+ * the real posed model.
+ *
+ * **Why this is a separate constant rather than a fraction of the standing
+ * one.** This rig has no knee: a seated leg swings from the hip and never
+ * moves the hip itself, so bending it buys *nothing* measured from the
+ * model's own origin — confirmed live, `visibleTop` unchanged to the
+ * millimetre with the legs alone posed forward. The whole of the real
+ * reduction comes from `applyRidePose`'s **forward body lean**
+ * (`RIDE_POSE_BODY_PITCH`), which pivots the torso, head and arms about a
+ * point near the feet and is the only joint in this rig that can lower a
+ * head. That is a small, honest number — **0.054 m** at the tallest
+ * combination — not the half-of-standing a real child's bent knees would
+ * buy, and it is exactly why this exists as its own measured constant
+ * instead of an assumed fraction: guessing "sitting halves you" here would
+ * be **2.97 → 1.5ish**, a number nothing in the built park is anywhere near.
+ *
+ * This is why train riders sitting (2026-08-23, Jim, on GitHub issue #116 /
+ * ARCHITECTURE-DECISIONS.md Decision 8's open question) buys the bridge
+ * search real but modest headroom: the win is mostly that a seated child's
+ * *feet* land on the floor rather than on the bench (`train/clearance.ts`),
+ * not that her seated silhouette is dramatically shorter than her standing
+ * one — this chibi rig's legs are a small fraction of her total height to
+ * begin with.
+ *
+ * **It cannot go stale**, the same way {@link TALLEST_CHILD_HEIGHT} cannot:
+ * `test/procgen/invariants.ts`'s train clearance invariant re-measures the
+ * full hair × hat cross product, seated, on every seed and fails if any real
+ * seated child is taller than this.
+ */
+export const TALLEST_CHILD_SEATED_HEIGHT = 2.92;
+
+/**
  * **How much floor a child actually takes up**, in metres — the diameter of the
  * circle one child occupies, measured on real models across every hair style
  * and every hat.

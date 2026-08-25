@@ -345,6 +345,41 @@ function buildArcTable(a: Vector2Like, c: Vector2Like, b: Vector2Like): ArcTable
   return { distances, total };
 }
 
+/**
+ * How far inside the wall a disembarking child must be before they are
+ * genuinely "in the park" rather than still crossing the gate — the same
+ * z depth `world/entrance/BusJourney.ts`'s own road measures itself against
+ * ("never closer than 0.65 m outside the park... z 52 inside the park").
+ * `ENTRANCE_GATE_Z` (60) is the wall itself; releasing right at it would
+ * hand a child to `WanderDriver.rejoinGraph`, which anchors on whatever
+ * `PoiGraph` node is *nearest* — reachable from outside the wall at all only
+ * by accident, since the graph is built for the park's own interior.
+ */
+const RELEASE_Z = ENTRANCE_GATE_Z - 8;
+
+/**
+ * How far along a child's own arc they have walked when they first cross
+ * {@link RELEASE_Z} — the point past which issue #269 QA hands them to the
+ * normal wander driver instead of continuing the scripted route.
+ *
+ * Walked, not just computed from the curve's shape: two children on the same
+ * route can cross the same z at different arc distances if their curve bows
+ * differently, and the arc table is the one place that already maps "how far
+ * walked" to "where on the curve", so this reuses it rather than re-deriving
+ * a second answer to the same question.
+ */
+function releaseDistanceFor(table: ArcTable, route: WalkRoute): number {
+  for (let index = 0; index < table.distances.length; index += 1) {
+    const t = index / (table.distances.length - 1);
+    const point = bezier(route.from, route.corner, route.to, t);
+    if (point.z <= RELEASE_Z) return table.distances[index]!;
+  }
+  // The curve never reaches RELEASE_Z (should not happen — every route passes
+  // through the gate on its way to a point deep in the park) — fall back to
+  // walking the whole thing rather than releasing nowhere.
+  return table.total;
+}
+
 /** The curve parameter at which this much of the curve has been walked. */
 function tAtDistance(table: ArcTable, distance: number): number {
   if (distance <= 0) return 0;
@@ -408,6 +443,10 @@ const NUDGE_LIMIT = CHILD_FOOTPRINT / 2;
 interface KidWalk {
   readonly route: WalkRoute;
   readonly arc: ArcTable;
+  /** Arc distance at which this child is handed to the normal wander driver
+   * — see {@link releaseDistanceFor}. Short of {@link ArcTable.total}: the
+   * route's tail into the park (issue #269) is never walked by the script. */
+  readonly releaseDistance: number;
   readonly speed: number;
   /** Where this child sits, and how long their walk to the door takes. */
   seat: Group | null;
@@ -526,9 +565,11 @@ export class ArrivalSequence {
           z: end.z - 2.4 - rng() * 5.5 - Math.abs(across) * 1.4,
         },
       };
+      const arc = buildArcTable(route.from, route.corner, route.to);
       walks.push({
         route,
-        arc: buildArcTable(route.from, route.corner, route.to),
+        arc,
+        releaseDistance: releaseDistanceFor(arc, route),
         // The park's own pace, varied by a tenth either way. It is **not** an
         // independent number any more: `KID_WALK_SPEED = 1.5` was 46-75% of
         // what every other child in the park walks at, and it showed.
@@ -963,8 +1004,18 @@ export class ArrivalSequence {
 
     // Distance walked, mapped back onto the curve — so the pace on screen is
     // the pace that was asked for, everywhere along it.
-    const walked = (moving - walk.aisleSeconds) * walk.speed;
-    const progress = clamp01(walked / Math.max(0.5, walk.arc.total));
+    //
+    // **Only as far as `releaseDistance`.** The full curve (`route.to`) still
+    // shapes the bend through the gate — the fan-out spacing that keeps eleven
+    // children from clipping the gate posts or each other is tuned against
+    // that whole shape — but nobody actually walks all the way to `to` any
+    // more (issue #269 QA, Jim's ruling: disembarking children are ordinary
+    // park NPCs from the moment they clear the gate, not a bespoke walk-in).
+    // `rawWalked` decides *when* to hand off; `walked` is clamped so the pose
+    // this frame never overshoots the handoff point itself.
+    const rawWalked = (moving - walk.aisleSeconds) * walk.speed;
+    const releasing = rawWalked >= walk.releaseDistance;
+    const walked = Math.min(rawWalked, walk.releaseDistance);
     const route = walk.route;
     const at = tAtDistance(walk.arc, walked);
     const here = bezier(route.from, route.corner, route.to, at);
@@ -975,14 +1026,22 @@ export class ArrivalSequence {
     const x = here.x + walk.nudgeX;
     const z = here.z + walk.nudgeZ;
     const facing = dx !== 0 || dz !== 0 ? Math.atan2(dx, dz) : BUS_FACING;
-    kid.setScriptedPose(x, terrainHeight(x, z), z, facing, progress >= 1 ? 0 : walk.speed);
+    kid.setScriptedPose(x, terrainHeight(x, z), z, facing, releasing ? 0 : walk.speed);
 
-    // **Handed back inside the park, not at the kerb.** The scripted route runs
-    // all the way through the gate and several metres in, so when the wander
-    // driver takes over it is anchoring on a waypoint that is genuinely nearby
-    // and genuinely reachable — rather than on the far side of a wall the child
-    // is currently standing outside of.
-    if (progress >= 1) this.release(index, dt);
+    // **Handed back the moment they clear the gate, not several metres in.**
+    // `BusArrival.disembark()`'s own doc says the rejoin should happen "the
+    // moment a child steps down, not when the whole sequence ends" — the
+    // walk used to continue scripted (bypassing `NpcSystem`'s collision and
+    // separation entirely — see `attachNpcs`) all the way to a point deep in
+    // the park, which is what let a scripted arrival child and a free
+    // background child pass through each other with only one side's soft,
+    // rate-limited push trying to keep them apart (`check:cat-bus`,
+    // issue #269 QA). `RELEASE_Z` is short of `route.to` precisely so the
+    // rest of the walk — the part that actually crosses paths with the rest
+    // of the crowd — is ordinary `WanderDriver` pathfinding, exactly like any
+    // other child, with the same two-sided collision and separation
+    // everybody else gets.
+    if (releasing) this.release(index, dt);
   }
 
   /** Gives one child back to their own driver, mid-stride. */

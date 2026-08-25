@@ -160,6 +160,17 @@ export interface PlotFact {
   readonly x: number;
   readonly z: number;
   readonly boundingRadius: number;
+  /** The real footprint's half-extents (axis-aligned; a circle reports its
+   * radius for both) — what actually stands on the ground, where
+   * `boundingRadius` over-approximates a rectangle by its diagonal. */
+  readonly halfX: number;
+  readonly halfZ: number;
+  /**
+   * The yaw the solver gave this plot's sign — every plot's, camera-facing
+   * or not (`anchors.ts`'s `AnchorDefinition.signYaw` doc). Issue #269:
+   * should be exactly `CAMERA_FACING_YAW` on every plot, on every seed.
+   */
+  readonly signYaw: number;
 }
 
 /** A place a visitor must be able to stand: a doormat or a stall counter. */
@@ -251,6 +262,13 @@ export interface PathEdgeFact {
   readonly halfWidth: number;
   /** The drawn centre line, every ~0.5 m. */
   readonly points: readonly (readonly [number, number])[];
+  /** False when the destination already stood on the network (`paths.ts`'s
+   * own "connectivity fact, not a ribbon" edges) — no ribbon was drawn, but
+   * the short walk it represents is real. Always `true` in {@link
+   * ParkFacts.pathEdges}, which is paved-only; present so an invariant that
+   * wants the *full* connectivity graph — {@link
+   * ParkFacts.pathConnectivityEdges} — can tell the two kinds of edge apart. */
+  readonly paved: boolean;
 }
 
 /**
@@ -415,6 +433,15 @@ export interface ParkFacts {
    */
   readonly archLegs: readonly ArchLegFact[];
   /**
+   * Both Rail Race rings' finish-arch feet — every post the walk network
+   * treats as a blocker (`paths.ts`'s `BLOCKERS`), including the walk-past
+   * ring's, whose arch is not drawn (`showArch`, #299) and so never appears
+   * in {@link archLegs}. Read off the ride's own solved rings via the same
+   * `archFeet()` the game uses, so an invariant asking "could a street have
+   * stood here?" sees the same ground the router did.
+   */
+  readonly railRaceArchFeet: readonly { x: number; z: number; radius: number }[];
+  /**
    * Every duck bar on the race ring, with what the race does at it — see
    * {@link DuckBarFact}. Empty is not a healthy answer: the ring always
    * schedules bars, and none in the built scene would itself be a bug.
@@ -481,6 +508,26 @@ export interface ParkFacts {
   /** The subset of {@link trees} a child is offered a climb on. */
   readonly climbableTrees: readonly ClimbableTreeFact[];
   readonly lamps: readonly (readonly [number, number])[];
+  /**
+   * The early, conservative reservation `bridgeKeepout.ts` computes for
+   * every railway crossing (`train/bridgeFootprint.ts`'s `planConservative`
+   * — the same thing `Scenery.ts` and `LampPosts.ts` both ask
+   * `isInBridgeFootprint` about before planting), re-derived here rather
+   * than imported statically at this file's own top level for the same
+   * seed-pinning reason `everyBridgeIsWalkableAndReachable` avoids a static
+   * import of `bridgeFootprint.ts` (see that invariant's own header).
+   *
+   * Exists so `everyPathIsLit` can tell a genuinely explained dark stretch
+   * — one standing inside ground a bridge's own ramp legitimately needs,
+   * where nothing could ever have planted a lamp — from an ordinary gap a
+   * scatter generator merely failed to fill. (Ported from the sibling
+   * `bridge-backtrack` fix, commit 76285e3, whose reservation-based
+   * reasoning is broader than "a built bridge covers it": the keepout
+   * excludes lamp ground at level crossings too.)
+   */
+  readonly bridgeReservations: readonly (null | {
+    covers(x: number, z: number, margin?: number): boolean;
+  })[];
   readonly plots: readonly PlotFact[];
   readonly entrances: readonly EntranceFact[];
   /**
@@ -567,6 +614,8 @@ export interface ParkFacts {
   readonly pathNodes: readonly PathNodeFact[];
   /** Its paved edges, each with the ribbon that was drawn for it. */
   readonly pathEdges: readonly PathEdgeFact[];
+  /** Every edge in the graph, paved or not — see {@link PathEdgeFact.paved}. */
+  readonly pathConnectivityEdges: readonly PathEdgeFact[];
   /**
    * The ginormous slide's chute, in **world space**, sampled along what was
    * actually built — not the plan it was built from.
@@ -778,9 +827,10 @@ export interface ParkFacts {
   /**
    * Can the real nav lattice actually route a child here from where she
    * starts? The same question `scripts/check-park.mts` asks of every
-   * attraction, asked here of every ride's exit.
+   * attraction, asked here of every ride's exit. `goalY` defaults to ground
+   * level; pass a bridge's own `heightAt(x, z)` to ask about its deck.
    */
-  readonly reachableFromEntrance: (x: number, z: number) => boolean;
+  readonly reachableFromEntrance: (x: number, z: number, goalY?: number) => boolean;
   readonly buildMs: number;
 }
 
@@ -908,14 +958,25 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
 
   const { world, scene, buildMs, sample } = buildHeadlessPark();
 
+  // Dynamically imported here, after `world` (and so `TRAIN_PLAN`) is
+  // already built for this exact seed — never at this file's own top level,
+  // the seed-pinning trap this file's header already warns about.
+  const { planBridgeFootprints } = await import('../../src/world/train/bridgeFootprint.ts');
+  const bridgeReservations = planBridgeFootprints(world.train.crossings);
+
   const { BOUNDARY_MASONRY_HALF_WIDTH, BOUNDARY_WALL_COLLISION_HALF } = await import(
     '../../src/world/Garden.ts'
   );
   const { CIRCULAR_PARK_AREA, PARK_AREA_MULTIPLIER } = await import('../../src/world/boundary.ts');
   const { PARK_LAYOUT } = await import('../../src/world/parkLayout.ts');
   const { ANCHORS } = await import('../../src/world/anchors.ts');
-  const { PATH_GRAPH, PLAZA } = await import('../../src/world/paths.ts');
-  const { CatmullRomCurve3 } = await import('three');
+  const { PLAZA } = await import('../../src/world/paths.ts');
+  const { PATH_GRAPH, routeCurve } = await import('../../src/world/pathGraph.ts');
+  const { archFeet } = await import('../../src/world/railRace/arch.ts');
+  const { RAIL_RACE_PLAN } = await import('../../src/world/railRace/plan.ts');
+  const railRaceArchFeet = [RAIL_RACE_PLAN.walkPastRing, RAIL_RACE_PLAN.raceRing]
+    .flatMap((ring) => archFeet(ring))
+    .map((foot) => ({ x: foot.x, z: foot.z, radius: foot.radius }));
   const { NavGrid, MAX_ROUTE_WAYPOINTS } = await import('../../src/world/NavGrid.ts');
   const { PLAYER_RADIUS } = await import('../../src/core/constants.ts');
   const { CASTLE_WINDOWS, checkCastleWindows, sweptCartHits } = await import(
@@ -966,6 +1027,9 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     x: entry.x,
     z: entry.z,
     boundingRadius: entry.boundingRadius,
+    halfX: entry.footprint.kind === 'circle' ? entry.footprint.radius : entry.footprint.halfX,
+    halfZ: entry.footprint.kind === 'circle' ? entry.footprint.radius : entry.footprint.halfZ,
+    signYaw: entry.signYaw,
   }));
 
   // The ginormous slide's chute, sampled off the built curve and pushed out
@@ -1327,12 +1391,11 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   const drawnCentreLine = (
     route: (typeof PATH_GRAPH.edges)[number]['route'],
   ): { length: number; points: [number, number][] } => {
-    const curve = new CatmullRomCurve3(
-      route.points.map(([x, z]) => new Vector3(x, 0, z)),
-      route.closed,
-      'catmullrom',
-      0.4,
-    );
+    // `routeCurve` is the one owner of the drawn shape — the fillet pass in
+    // `paths.ts` means the curve is more than the raw control points now,
+    // and a second hand-rolled CatmullRom here would measure a path the
+    // park no longer draws.
+    const curve = routeCurve(route);
     const length = curve.getLength();
     const steps = Math.max(8, Math.ceil(length / 0.5));
     const points: [number, number][] = [];
@@ -1356,6 +1419,26 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     backbone: edge.route.closed,
     halfWidth: edge.route.width / 2,
     points: drawn[index]!.points,
+    paved: true,
+  }));
+
+  // Every edge in the graph, paved or not — an invariant asking "how far
+  // does a child actually have to walk between these two destinations"
+  // needs the unpaved "connectivity fact" edges too (`paths.ts`'s own
+  // phrase): a destination that already stood within a few metres of the
+  // network gets no drawn ribbon, but the short unpaved walk it represents
+  // is exactly as real as a paved one, and dropping it from the graph would
+  // strand that destination or force a wildly longer route through
+  // whatever paving happens to also touch its coordinate.
+  const allDrawn = PATH_GRAPH.edges.map((edge) => drawnCentreLine(edge.route));
+  const pathConnectivityEdges: PathEdgeFact[] = PATH_GRAPH.edges.map((edge, index) => ({
+    name: edge.route.name,
+    from: edge.from,
+    to: edge.to,
+    backbone: edge.route.closed,
+    halfWidth: edge.route.width / 2,
+    points: allDrawn[index]!.points,
+    paved: edge.paved,
   }));
 
   const pathNodes: PathNodeFact[] = PATH_GRAPH.nodes.map((node) => ({
@@ -1401,18 +1484,27 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     .map((node) => ({ id: node.id, x: node.x, z: node.z }));
 
   // The real nav lattice, built exactly as `scripts/check-park.mts` builds
-  // one and as `Game` itself does — the walker's own radius and jump apex —
-  // so "reachable" here means what it means in play.
-  const navGrid = new NavGrid(world.collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT);
+  // one and as `Game` itself does — the walker's own radius and jump apex,
+  // and every railway bridge's own covers() (issue #116, Decision 8), so
+  // "reachable" here means what it means in play, deck included.
+  const navGrid = new NavGrid(world.collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT, undefined, (x, z) =>
+    world.train.bridges.some((bridge) => bridge.covers(x, z)),
+  );
   const routeBuffer = new Float32Array(MAX_ROUTE_WAYPOINTS * 2);
-  const reachableFromEntrance = (x: number, z: number): boolean => {
+  // `goalY` defaults to ground level for every existing caller, which is
+  // every ordinary stand point in the park; a bridge deck sits several
+  // metres above the ground `sample(x, z, 0)` would otherwise find there
+  // (the ceiling test in `WalkSurfaces.sample` excludes anything more than
+  // a step above the `y` it was asked about), so a caller that wants the
+  // deck has to say so.
+  const reachableFromEntrance = (x: number, z: number, goalY = 0): boolean => {
     const count = navGrid.findRoute(
       ENTRANCE_PLAYER_X,
       ENTRANCE_PLAYER_Z,
       sample(ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z, 0),
       x,
       z,
-      sample(x, z, 0),
+      goalY,
       sample,
       routeBuffer,
     );
@@ -1681,7 +1773,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // The park's own predicates for "is there anything under here", the same three
   // `railRace/track.ts`'s `groundIsClear` asks about a trestle foot. Dynamically
   // imported like everything else seed-dependent in this file.
-  const { distanceToPath } = await import('../../src/world/paths.ts');
+  const { distanceToPath } = await import('../../src/world/pathGraph.ts');
   const { distanceToRailCorridor, clearOfPlots } = await import(
     '../../src/world/train/plan.ts'
   );
@@ -2105,7 +2197,9 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     bushes,
     climbableTrees,
     lamps: world.lampPosts.positions.map((p) => [p.x, p.z] as const),
+    bridgeReservations,
     plots,
+    railRaceArchFeet,
     entrances,
     keychainKeyringEntrances,
     catBus,
@@ -2113,6 +2207,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     exits,
     pathNodes,
     pathEdges,
+    pathConnectivityEdges,
     slideChute,
     slideRiderFrame: { local: slideRiderLocal, world: slideRiderWorld },
     slideChuteBands,

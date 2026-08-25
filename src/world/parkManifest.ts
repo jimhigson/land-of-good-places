@@ -348,7 +348,18 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
     cameraFacing: true,
     footprint: { kind: 'circle', radius: 2.6 },
     boundingRadius: 3.4,
-    band: { min: 13, max: 18 },
-    near: { id: 'fountain', min: 4, max: 10 },
+    band: { min: 13, max: 26 },
+    // Just OUTSIDE the statue ring (issue #269: a true circle at
+    // `RING_RADIUS` = fountain radius + 5.5 now runs round the plaza, and
+    // the solver keeps every plot `RING_PLOT_CLEARANCE` off its line). The
+    // old `min: 4, max: 10` predates the ring and stopped being satisfiable
+    // the day it landed: the only ground both inside the ring's clear
+    // annulus and 4-10 m from the fountain's centre is the fountain's own
+    // basin, and the solver dutifully stood the stall in the water
+    // (canonical seed: its stand point spawned against the basin wall and
+    // stranded). 21.5 is the nearest a 3.4 m stall can stand past the ring
+    // line with the ring's own clearance intact — still the stall on the
+    // plaza's doorstep, now facing the circle from without.
+    near: { id: 'fountain', min: 21.5, max: 25 },
   },
 ];
