@@ -121,9 +121,16 @@ jobs:
           LIST_JSON=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/workers/scripts/$SCRIPT_NAME/versions")
           echo "$LIST_JSON" | jq -c '{success, count: (.result.items | length)}'
+          # Print the real shape of one item so a wrong field-path guess is
+          # visible in the log instead of just silently matching zero, per
+          # CLAUDE.md's "a check can pass without checking anything" rule.
+          echo "$LIST_JSON" | jq -c '.result.items[0] // "no items"'
 
+          # The Workers API has changed where it puts `--tag`/`--message`
+          # across versions/products (metadata.tag vs an "annotations" map)
+          # — try both known shapes rather than assuming one.
           OLD_IDS=$(echo "$LIST_JSON" | jq -r --arg tag "$PR_TAG" --arg keep "$KEEP_ID" \
-            '.result.items[]? | select(.metadata.tag == $tag and .id != $keep) | .id')
+            '.result.items[]? | select(((.annotations["workers/tag"] // .metadata.tag // "") == $tag) and .id != $keep) | .id')
 
           if [ -z "$OLD_IDS" ]; then
             echo "No superseded versions found for $PR_TAG (first push on this PR, or tag field didn't match — see the JSON above)."
