@@ -83,7 +83,7 @@ spaces.push({
   bands: [hotel.towerDoorBand(), ...world.building.doorBands()],
 });
 
-// The keychain rack's own zoomed picker (#331): six charms crowd one small
+// The keychain rack's own zoomed picker (#331): six keyrings crowd one small
 // cart and only become their own tappable zones once the cart's single
 // entry zone has opened the camera view (`world.interactZones()` above is
 // the *closed* state — the one entry zone, checked against every other

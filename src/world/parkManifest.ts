@@ -321,7 +321,7 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
   // passed everything: the full `test:procgen` suite clean on all five CI
   // seeds (canonical, 2, 5, 11, 18 — 61/61 each, run individually) *and*
   // `check:park` clean on the canonical seed. Thematically it fits too: a
-  // little charm cart right by the wishing fountain is exactly the kind of
+  // little keyring cart right by the wishing fountain is exactly the kind of
   // thing that stands there. If this ever needs to move again, re-run both
   // gates on all five seeds before trusting a new number — this file's own
   // history says a single-seed pass proves nothing.

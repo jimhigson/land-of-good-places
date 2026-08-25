@@ -19,7 +19,7 @@ import { gameStore, type GameState } from '../state';
  * The keychain dangling off the player's backpack.
  *
  * `WornJetpack.ts`'s twin — a store subscriber rather than something told
- * directly, so "which charm am I wearing?" is a fact about the save rather than
+ * directly, so "which keyring am I wearing?" is a fact about the save rather than
  * a side effect of a button press. Everything that changes it
  * (`gameStore.setWornKeychain`, from the stall's picker or from tapping one in
  * the backpack drawer) needed no line of this file.
@@ -28,22 +28,22 @@ import { gameStore, type GameState } from '../state';
  *
  * `anchor` is the character's `keychainAnchor`, which
  * `art/models/backpacks.ts` moves to the clip point of whichever bag is
- * actually worn (`CHARM_HANGS`) — so switching bags moves the charm with no
+ * actually worn (`KEYRING_HANGS`) — so switching bags moves the keyring with no
  * help from here.
  *
- * Between the anchor and the charm sits a **pivot** that this file owns. The
- * charm models are built origin-at-the-base and standing up (the asset
+ * Between the anchor and the keyring sits a **pivot** that this file owns. The
+ * keyring models are built origin-at-the-base and standing up (the asset
  * contract grants the `'anchor'` origin reading only to `hat.` ids), so hanging
  * one means pushing it *down* by its own measured height and swinging it about
  * the top. Rotating the anchor instead would swing the bag; rotating the
- * charm's own root would spin it about its feet, which is not what a thing on a
+ * keyring's own root would spin it about its feet, which is not what a thing on a
  * string does.
  *
  * ## Size, and why the pivot also lifts
  *
- * The charm is drawn at `KEYCHAIN_WORN_SCALE` (2.5x its modelled ~20cm) —
- * Jim, 22 August 2026. At that size several charms reach further down than
- * their bag's own `CHARM_HANGS` anchor sits above the ground, so
+ * The keyring is drawn at `KEYCHAIN_WORN_SCALE` (2.5x its modelled ~20cm) —
+ * Jim, 22 August 2026. At that size several keyrings reach further down than
+ * their bag's own `KEYRING_HANGS` anchor sits above the ground, so
  * `keychainWornLift` (`art/models/keychains.ts`) nudges the pivot *up* off
  * the bag's exact corner, only as far as the ground makes it — see that
  * function's own doc for the full reasoning. `pivot.position.y` carries that
@@ -64,8 +64,8 @@ import { gameStore, type GameState } from '../state';
  *   forward/back and side-to-side with every stride (`Player.ts`'s own walk
  *   bob feeds this too), so the spring is continually nudged and never quite
  *   settles while she's moving — an actual swing, not a loop.
- * - **Turning**: `charmAnchor` sits off to the side of the character's own
- *   pivot (`CHARM_HANGS`' x), so spinning in place — even with zero
+ * - **Turning**: `keyringAnchor` sits off to the side of the character's own
+ *   pivot (`KEYRING_HANGS`' x), so spinning in place — even with zero
  *   translation — sweeps the anchor through an arc in world space exactly
  *   like a mass on the end of a rotating arm. No separate "is she turning?"
  *   check is needed; the physics already sees it as acceleration.
@@ -73,11 +73,11 @@ import { gameStore, type GameState } from '../state';
  * A teleport (a ride's finish, a door, `/spawn`) is detected the same way
  * `PonytailChain`/`BalloonString` detect one — a one-frame jump bigger than
  * any real footstep — and resets the spring to rest instead of flinging the
- * charm across the anchor's stale-to-fresh gap.
+ * keyring across the anchor's stale-to-fresh gap.
  *
  * ## …plus the idle dangle underneath it
  *
- * The springs alone made a *standing* charm perfectly rigid — frozen at
+ * The springs alone made a *standing* keyring perfectly rigid — frozen at
  * exactly 0° the instant she stops, which read as glued-on rather than hung
  * (Jim, 23 August 2026). So the picker's own gentle two-sine idle sway
  * (`KEYCHAIN_SWAY_*`, the pre-physics motion this file used to have) is
@@ -85,7 +85,7 @@ import { gameStore, type GameState } from '../state';
  * the whole of the motion, a soft ±9° dangle; while she moves the springs'
  * far larger driven swing simply rides on top of it, untouched. One sum, no
  * "is she idle?" state to get stuck on, and the picker and the bag agree
- * about what a hanging charm does when nobody is swinging it.
+ * about what a hanging keyring does when nobody is swinging it.
  */
 
 /** Seconds the pop-in takes, same beat as `WornHat`/`WornJetpack` and a purchase. */
@@ -100,7 +100,7 @@ const SWING_ACCEL_GAIN = 0.045;
 /**
  * Hard clamp on the swing *target* (not the displayed angle — the underdamped
  * spring can overshoot it by roughly 10%), so a hard stop or a bad frame
- * cannot aim the charm anywhere near horizontal, let alone fling it past it.
+ * cannot aim the keyring anywhere near horizontal, let alone fling it past it.
  */
 const SWING_MAX_ANGLE = 0.9;
 /** An anchor jump bigger than this in one frame is a teleport, not real motion. */
@@ -136,7 +136,7 @@ export class WornKeychain implements GameSystem {
     this.unsubscribe = gameStore.subscribe((state) => this.sync(state));
   }
 
-  /** True while there is actually a charm on the bag, this frame. */
+  /** True while there is actually a keyring on the bag, this frame. */
   get isWorn(): boolean {
     return this.handle !== null;
   }
@@ -183,7 +183,7 @@ export class WornKeychain implements GameSystem {
     if (!entry) return;
 
     const handle = entry.model();
-    // Hung from the top: the charm stands up from its own base, so drop it by
+    // Hung from the top: the keyring stands up from its own base, so drop it by
     // its measured height (scaled up to worn size) and the pivot ends up at
     // its ring rather than its feet. `height` is measured off the finished
     // model, never written down.
@@ -196,7 +196,7 @@ export class WornKeychain implements GameSystem {
     this.anchor.add(this.pivot);
     this.handle = handle;
 
-    // A freshly-equipped charm starts hanging straight down, not mid-swing
+    // A freshly-equipped keyring starts hanging straight down, not mid-swing
     // from whatever the last one was doing.
     this.resetSwing();
   }
@@ -233,7 +233,7 @@ export class WornKeychain implements GameSystem {
     if (jump > TELEPORT_DISTANCE) {
       // A ride, a door, a debug spawn — the anchor moved further in one
       // frame than any real step could. Snap to rest rather than fling the
-      // charm across the gap (`PonytailChain`'s `TELEPORT_DISTANCE` is the
+      // keyring across the gap (`PonytailChain`'s `TELEPORT_DISTANCE` is the
       // same idiom for the same reason).
       this.resetSwing();
       return;
@@ -254,7 +254,7 @@ export class WornKeychain implements GameSystem {
 
     // Into the anchor's own local frame, so "sideways" always means relative
     // to whichever way the bag currently faces rather than the world — this
-    // is what makes a turn-in-place swing the charm outward the same way a
+    // is what makes a turn-in-place swing the keyring outward the same way a
     // sideways step does, with no separate handling for either.
     this.anchor.getWorldQuaternion(this.worldQuat).invert();
     this.scratchAccel.set(ax, ay, az).applyQuaternion(this.worldQuat);
@@ -265,7 +265,7 @@ export class WornKeychain implements GameSystem {
     this.swingX.update(dt, SWING_STIFFNESS, SWING_DAMPING);
   }
 
-  /** Hangs the charm straight down and forgets any motion so far, with no catch-up snap. */
+  /** Hangs the keyring straight down and forgets any motion so far, with no catch-up snap. */
   private resetSwing(): void {
     this.anchor.getWorldPosition(this.previousPos);
     this.previousVelocity.set(0, 0, 0);

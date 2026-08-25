@@ -29,7 +29,7 @@ import { keychainItems, type ShopItem } from './building/shops/catalogue';
 
 /**
  * The keychain stall — a little cart in the garden where the player collects
- * charms and picks which one dangles off her backpack.
+ * keyrings and picks which one dangles off her backpack.
  *
  * `world/FacePaintStall.ts`'s sibling, built the same way and for the same
  * reason (see that file's own header): a *garden* stall that hands something
@@ -41,18 +41,18 @@ import { keychainItems, type ShopItem } from './building/shops/catalogue';
  *
  * This used to build the display rack purely as set-dressing and open a
  * separate 2D list panel (`ui/KeychainPanel.ts`) for the actual picking —
- * two presentations of the same six charms. Jim, having seen a screenshot of
+ * two presentations of the same six keyrings. Jim, having seen a screenshot of
  * the real rack: *"I like this much better than the menu style - let's keep
  * it this way for the shop."* So the rack is the only picker, and there is
- * no modal to open: tapping a charm equips it immediately and
+ * no modal to open: tapping a keyring equips it immediately and
  * `WornKeychain.ts` draws it on her actual back on the very next frame —
  * better confirmation than the old panel's stylised preview ever gave,
  * because it is the real thing.
  *
- * **The first cut made every charm its own walk-up `InteractZone`.** Jim,
+ * **The first cut made every keyring its own walk-up `InteractZone`.** Jim,
  * having tried it live: *"Interesting take. You should still be able to
  * 'enter' the shop, but the menu is the camera zooming in on the wares and
- * select by clicking or tapping the one you want."* Six charms 0.32 m apart
+ * select by clicking or tapping the one you want."* Six keyrings 0.32 m apart
  * meant six almost-identical stand points to shuffle between — workable, but
  * fiddlier than every other shop in the park, which is entered once. So the
  * cart is now **one** `InteractZone` ({@link shopEntryZone}, `stall:keychain`
@@ -62,17 +62,17 @@ import { keychainItems, type ShopItem } from './building/shops/catalogue';
  * of opening a panel: the park camera itself glides in on the rack
  * (`Game.tick`, reading {@link viewOpen}/{@link viewFocus} and driving
  * `IsoCamera.setFocusOverride`/`setZoomTarget`), and **only then** do the six
- * charms become their own tappable things ({@link charmZone}) — the exact
+ * keyrings become their own tappable things ({@link keyringZone}) — the exact
  * same `InteractZone`s, rainbow-outlined on their own real silhouette
  * (`highlightObject`) with the live "Wear the Star!"/"Collect the
- * Heart!"/"Take off the RiPika!" chip {@link charmActions} always built, now
+ * Heart!"/"Take off the RiPika!" chip {@link keyringActions} always built, now
  * simply reachable from one spot instead of six. Closing the view
  * ({@link closeView} — the on-screen ✕, Esc/cancel, or simply walking away,
  * `update`'s own job) swaps them back out for the one entry zone and hands
  * the camera back to the ordinary follow.
  *
  * **Why the two zone shapes never coexist.** `interactZones()` returns
- * *either* the one entry zone *or* the six charm zones, never both: they sit
+ * *either* the one entry zone *or* the six keyring zones, never both: they sit
  * on the very same small cart, so a snapshot holding both would fail
  * `check:tap-spacing`'s "different actions must sit a finger apart" rule
  * outright — a tap anywhere near the rack would be within a finger of a zone
@@ -80,19 +80,19 @@ import { keychainItems, type ShopItem } from './building/shops/catalogue';
  * reachability invariant, `keychainStallStandIsUsable`) exercise both real
  * states of this object explicitly — `scripts/check-tap-spacing.mts` opens
  * the view for one snapshot the same way it moves the probe player between
- * hotel rooms; `test/procgen/parkFacts.ts`'s `keychainCharmEntrances` does
+ * hotel rooms; `test/procgen/parkFacts.ts`'s `keychainKeyringEntrances` does
  * the same for the invariant — rather than the checks accidentally seeing
  * only whichever state happens to be default.
  *
  * Within the six-open state, the same tap-spacing problem the previous cut
- * solved still applies and is solved the same way: every charm zone declares
+ * solved still applies and is solved the same way: every keyring zone declares
  * the same **static** `verb: 'Wear'`, so the check classifies them as
  * same-action (a harmless-ambiguity warning) even though the live chip label
- * — built fresh per zone, per frame, in {@link charmActions} — says something
+ * — built fresh per zone, per frame, in {@link keyringActions} — says something
  * different for each.
  *
  * Collected, not chosen for the moment (`HANDOFF-keychain-shop.md`'s
- * decisions 2 and 3, unchanged by any of the above): tapping an unowned charm
+ * decisions 2 and 3, unchanged by any of the above): tapping an unowned keyring
  * both collects it (`gameStore.buy`, price 0 — see `shops/catalogue.ts`'s
  * `keychainStall` entries) and wears it in the same motion; tapping an owned
  * one just wears it; tapping the one already worn takes it off.
@@ -116,13 +116,13 @@ import { keychainItems, type ShopItem } from './building/shops/catalogue';
  *   ({@link Player.setScriptedWalk}) rather than the default `'seated'`
  *   posture, because `'seated'` poses her as "holding on, delighted" (arms
  *   thrown back) — the pose a ride wears, not the pose a girl standing at a
- *   counter wears. The six charm zones need `selectableWhileRiding: true`
- *   (see {@link charmZone}) or `Selection.ts`'s own riding gate would block
+ *   counter wears. The six keyring zones need `selectableWhileRiding: true`
+ *   (see {@link keyringZone}) or `Selection.ts`'s own riding gate would block
  *   the very taps this view exists for. {@link closeView} hands her back
  *   with `endRide()`. This also retires the third way out the previous round
  *   documented ("simply walking away") — she cannot wander any more, so the
  *   ✕ and Esc/cancel are the only two now.
- * - **Only the charms and her, in shot.** Measured against the real zoomed
+ * - **Only the keyrings and her, in shot.** Measured against the real zoomed
  *   frame: a lamp post, a hedge, a nearby stall and a wandering NPC all sat
  *   inside it. {@link buildViewBackdrop} pops a screen up round the back of
  *   the cart — see that method's own doc comment for why a real wall beats
@@ -142,7 +142,7 @@ import { keychainItems, type ShopItem } from './building/shops/catalogue';
  *   its own scripted walk. Deliberately a real turn, not a snap — see
  *   `KEYCHAIN_TURN_RATE`'s own comment — and deliberately eases back to
  *   facing the rack after a beat ({@link SHOW_BACK_SECONDS}) rather than
- *   staying turned, so she is ready-looking for the next charm.
+ *   staying turned, so she is ready-looking for the next keyring.
  *
  * ## Composed for the shot (24 August 2026)
  *
@@ -174,7 +174,7 @@ import { keychainItems, type ShopItem } from './building/shops/catalogue';
  *   and {@link updateTurn} eases back to *it* rather than to
  *   {@link facingCamera}. The turn itself is untouched: it still eases to
  *   {@link facingCamera} `+ π` — the direction that puts her back, and the
- *   charm on it, towards the viewer — because that has nothing to do with
+ *   keyring on it, towards the viewer — because that has nothing to do with
  *   which way she rests.
  * - **A tighter, two-subject focus and zoom.** {@link rackFocus} used to be
  *   the rack's own centre alone; it is now pulled part-way towards
@@ -208,9 +208,9 @@ import { keychainItems, type ShopItem } from './building/shops/catalogue';
  * (`1.05 − 0.55`) instead of the intended 1.6 m (`1.05 + 0.55`) — close
  * enough that her own head, now turned to face the camera instead of away
  * from it (the far side's own facing, `atan2` pointing the other way), stood
- * in front of four of the six charms on the very first render. See that
+ * in front of four of the six keyrings on the very first render. See that
  * call's own doc comment for the fix (mirror the whole sum, not just the
- * half-width) — confirmed against a real screenshot with all six charms
+ * half-width) — confirmed against a real screenshot with all six keyrings
  * clear, not just against the maths, per this repo's own "a check can pass
  * without checking anything" rule.
  */
@@ -228,7 +228,7 @@ const STALL_DEPTH = 1.5;
 const REACH = 3.1;
 
 /**
- * How fast she turns to show (or stop showing) the charm on her back, in
+ * How fast she turns to show (or stop showing) the keyring on her back, in
  * radians/second — deliberately much slower than the ordinary walking turn
  * (`PLAYER_TURN_SPEED`, ~13 rad/s, close enough to a snap that it reads as
  * instant): Jim asked for a real "turn around to show you" beat, not a flip.
@@ -237,7 +237,7 @@ const REACH = 3.1;
 const KEYCHAIN_TURN_RATE = Math.PI / 0.85;
 
 /**
- * How long she holds facing away — showing the charm — before turning back
+ * How long she holds facing away — showing the keyring — before turning back
  * to face the rack, ready for the next pick. Comfortably longer than the
  * sparkle burst ({@link SPARKLE_DURATION}) so the "got one!" sparkle and the
  * turn are never fighting for the same beat.
@@ -285,13 +285,13 @@ const BACKDROP_HEIGHT = 24;
 const BACKDROP_THICKNESS = 0.4;
 
 /**
- * Tap/hit radius for one charm's own zone, in metres — deliberately small (a
- * charm at the display scale is ~15-20 cm wide); the precise hit test is
+ * Tap/hit radius for one keyring's own zone, in metres — deliberately small (a
+ * keyring at the display scale is ~15-20 cm wide); the precise hit test is
  * {@link highlightObject}'s real silhouette box, so this only sizes the
  * fallback sphere a hover ray uses when it misses that box, and the coarse
  * circle `check:tap-spacing` measures separation with.
  */
-const CHARM_PICK_RADIUS = 0.16;
+const KEYRING_PICK_RADIUS = 0.16;
 
 const SPARKLE_COUNT = 6;
 /** How long the little "got one!" sparkle burst lasts. */
@@ -300,8 +300,8 @@ const SPARKLE_DURATION = 1.1;
 // -------------------------------------------------------- rack composition
 
 /**
- * How big a charm stands on the rack's own counter — independent of
- * `art/models/keychains.ts`'s `KEYCHAIN_WORN_SCALE` (the scale a charm gets
+ * How big a keyring stands on the rack's own counter — independent of
+ * `art/models/keychains.ts`'s `KEYCHAIN_WORN_SCALE` (the scale a keyring gets
  * once actually worn on the bag; that file's own header explains why the two
  * do not have to match). Was a bare `1.5`. Jim, 24 August 2026, looking at
  * the locked shop view: *"the charms displayed on the table should be about
@@ -309,11 +309,11 @@ const SPARKLE_DURATION = 1.1;
  * `KEYCHAIN_WORN_SCALE`, but arrived at independently and not derived from it;
  * a future change to one is not expected to move the other.
  */
-const RACK_CHARM_SCALE = 3.75;
+const RACK_KEYRING_SCALE = 3.75;
 
 /**
  * The rack display grid: three columns, two rows — Jim, 24 August 2026,
- * confirming the layout once the charms above got too big for one row to
+ * confirming the layout once the keyrings above got too big for one row to
  * hold: *"six charms total ... 3 columns x 2 rows works."* `KEYCHAIN_KINDS`
  * reads left-to-right, back-row-then-front-row into this grid (see
  * {@link KeychainShop.buildCart}).
@@ -328,7 +328,7 @@ const RACK_ROWS = 2;
  * counter (and the backdrop clearance built around it) already expects the
  * display to sit. Comfortably inside {@link STALL_DEPTH}'s own usable top
  * (the counter surface itself is `STALL_DEPTH - 0.06` deep) even with
- * {@link RACK_CHARM_SCALE}'s now-much-larger charms, which is what "grid, not
+ * {@link RACK_KEYRING_SCALE}'s now-much-larger keyrings, which is what "grid, not
  * two rows hanging off the edges" needs.
  */
 const RACK_ROW_GAP = 0.5;
@@ -384,7 +384,7 @@ const VIEW_FOCUS_PLAYER_WEIGHT = 0.43;
 /**
  * How high above the ground {@link KeychainShop.rackFocus} sits, in metres —
  * roughly chest height on the standing character and just above the taller
- * charms' own top, so the frame does not centre low with headroom wasted
+ * keyrings' own top, so the frame does not centre low with headroom wasted
  * above, nor high with feet cut off below.
  */
 const VIEW_FOCUS_HEIGHT = 1.6;
@@ -408,10 +408,10 @@ const VIEW_FOCUS_HEIGHT = 1.6;
  */
 export const KEYCHAIN_VIEW_ZOOM = 4.25;
 
-/** One charm on the rack: its kind, its catalogue id, the model itself, and where it is in the world. */
-interface RackCharm {
+/** One keyring on the rack: its kind, its catalogue id, the model itself, and where it is in the world. */
+interface RackKeyring {
   readonly kind: KeychainKind;
-  /** `shops/catalogue.ts`'s id for this charm — `keychain.${kind}`. */
+  /** `shops/catalogue.ts`'s id for this keyring — `keychain.${kind}`. */
   readonly id: string;
   readonly root: Group;
   /** Where the tap has to land — on the counter, inside the cart's own footprint. */
@@ -419,11 +419,11 @@ interface RackCharm {
   readonly y: number;
   readonly z: number;
   /**
-   * Where a child's feet actually go to reach this charm — out in front of
+   * Where a child's feet actually go to reach this keyring — out in front of
    * the cart, same as every stall's stand point, **not** {@link x}/{@link z}:
    * those sit on the counter, inside `buildCollision`'s own walls, and a
    * zone whose stand point is somewhere solid is a zone `check:park` rightly
-   * refuses to certify as reachable. Offset sideways per charm (see
+   * refuses to certify as reachable. Offset sideways per keyring (see
    * {@link KeychainShop.buildCart}) so proximity naturally favours whichever
    * one she's actually stood in front of, at the same depth the stall's own
    * `STALL_STANDS_BY_ID` point already proved clear.
@@ -451,14 +451,14 @@ export class KeychainShop implements GameSystem {
   private readonly viewStandX: number;
   private readonly viewStandZ: number;
 
-  /** Every charm stood on the counter, built once in {@link buildCart}. */
-  private readonly rack: RackCharm[] = [];
+  /** Every keyring stood on the counter, built once in {@link buildCart}. */
+  private readonly rack: RackKeyring[] = [];
 
   private readonly sparkles: Mesh[] = [];
   private readonly sparkleBase: { angle: number; radius: number; rise: number }[] = [];
   private readonly sparkleRng = new Rng(0x1eec4a1);
   private sparkleStartedAt: number | null = null;
-  /** Local (to `this.group`) centre the current sparkle burst radiates from — the charm just picked. */
+  /** Local (to `this.group`) centre the current sparkle burst radiates from — the keyring just picked. */
   private sparkleOrigin = { x: 0, y: 1.05, z: 0 };
 
   /** `FrameContext.elapsed` as of the last frame — DOM handlers fire between frames. */
@@ -477,7 +477,7 @@ export class KeychainShop implements GameSystem {
 
   /**
    * World point the camera orbits while {@link viewOpen} — the rack's own
-   * centre, averaged across the six charms once in {@link buildCart} (they
+   * centre, averaged across the six keyrings once in {@link buildCart} (they
    * do not move afterwards, so this is solved once rather than every frame).
    */
   private readonly rackFocus = new Vector3();
@@ -502,7 +502,7 @@ export class KeychainShop implements GameSystem {
    * Facing away from the camera — not a resting pose any more (see
    * {@link facingTable} for that), only the turn target {@link showBack} eases
    * towards: turning to exactly this angle is what puts her *back* — and the
-   * charm just worn on it — towards the viewer. A plain constant, not solved
+   * keyring just worn on it — towards the viewer. A plain constant, not solved
    * from her position, for the same reason `Player.ts`'s own default spawn
    * facing is: the camera's direction is fixed for the life of the app
    * (ARCHITECTURE.md), so "facing the camera" never depends on where anyone
@@ -521,7 +521,7 @@ export class KeychainShop implements GameSystem {
   private facingTable = 0;
 
   /**
-   * Elapsed time the current "facing away, showing the charm" beat began, or
+   * Elapsed time the current "facing away, showing the keyring" beat began, or
    * `null` when not mid-beat. Read against {@link SHOW_BACK_SECONDS} in
    * {@link updateTurn} to know when to turn back. Set from
    * {@link frameElapsed}, not a fresh clock read — same reason
@@ -556,7 +556,7 @@ export class KeychainShop implements GameSystem {
     // file's actual constants that put her only 0.5 m out (`1.05 - 0.55`)
     // instead of the intended 1.6 m (`1.05 + 0.55`) — nearly on top of the
     // rack rather than beside it, which is what briefly turned this into a
-    // literal on-camera face-plant into the charms once the flag was first
+    // literal on-camera face-plant into the keyrings once the flag was first
     // flipped for real (PR #331, 24 August 2026). Mirroring the whole sum
     // keeps the two sides at an equal, correct distance from the cart.
     [this.viewStandX, this.viewStandZ] = this.toWorld(
@@ -597,13 +597,13 @@ export class KeychainShop implements GameSystem {
   }
 
   /**
-   * Either the one "enter the shop" zone, or the six charms — never both at
+   * Either the one "enter the shop" zone, or the six keyrings — never both at
    * once. See this file's own header for why, and `scripts/check-tap-spacing.mts`
    * / `test/procgen/parkFacts.ts` for how both states get checked even though
    * a single snapshot only ever shows one.
    */
   interactZones(): InteractZone[] {
-    return this.open ? this.rack.map((charm) => this.charmZone(charm)) : [this.shopEntryZone()];
+    return this.open ? this.rack.map((keyring) => this.keyringZone(keyring)) : [this.shopEntryZone()];
   }
 
   update(context: FrameContext): void {
@@ -731,7 +731,7 @@ export class KeychainShop implements GameSystem {
   /**
    * The whole cart — the one "enter the shop" trigger (see this file's own
    * header). Standing this close and pressing E, or tapping the rack, opens
-   * the zoomed picker; the six charms are not their own zones again until it
+   * the zoomed picker; the six keyrings are not their own zones again until it
    * does. `highlight` names the whole group so the rainbow outline (and the
    * tap hit-test, which prefers a named object's real bounding box over
    * `pickRadius`) reads as "the cart", not a plain circle floating over it.
@@ -739,7 +739,7 @@ export class KeychainShop implements GameSystem {
   private shopEntryZone(): InteractZone {
     return {
       id: 'stall:keychain',
-      label: 'Charm Rack!',
+      label: 'Keyring Rack!',
       x: STALL_X,
       y: this.groundY,
       z: STALL_Z,
@@ -751,7 +751,7 @@ export class KeychainShop implements GameSystem {
       actions: () =>
         !this.player || this.player.riding
           ? []
-          : pressAction('See the charms!', () => this.beginView(), '🔑'),
+          : pressAction('See the keyrings!', () => this.beginView(), '🔑'),
     };
   }
 
@@ -763,7 +763,7 @@ export class KeychainShop implements GameSystem {
 
   // -------------------------------------------------------------- internals
 
-  private charmZone(charm: RackCharm): InteractZone {
+  private keyringZone(keyring: RackKeyring): InteractZone {
     return {
       // `stall:` prefixed, not `keychain:`, so `parkFacts.ts`'s `entrances`
       // (which filters on that prefix — every other stall's zone id starts
@@ -772,16 +772,16 @@ export class KeychainShop implements GameSystem {
       // reads them back. A bare `keychain:${kind}` id silently fell outside
       // that filter and made the whole rack invisible to the reachability
       // invariant — caught by CI, not locally.
-      id: `stall:keychain:${charm.kind}`,
-      label: charm.kind,
-      x: charm.x,
-      y: charm.y,
-      z: charm.z,
-      pickRadius: CHARM_PICK_RADIUS,
-      standX: charm.standX,
-      standZ: charm.standZ,
+      id: `stall:keychain:${keyring.kind}`,
+      label: keyring.kind,
+      x: keyring.x,
+      y: keyring.y,
+      z: keyring.z,
+      pickRadius: KEYRING_PICK_RADIUS,
+      standX: keyring.standX,
+      standZ: keyring.standZ,
       standRadius: REACH,
-      // A single static classification, the same for every charm regardless
+      // A single static classification, the same for every keyring regardless
       // of what its live chip actually says — see this file's own header.
       verb: 'Wear',
       // The character is riding for the whole life of this view (see this
@@ -789,8 +789,8 @@ export class KeychainShop implements GameSystem {
       // `Selection.ts`'s own riding gate would block every one of these taps,
       // the one thing this view exists for.
       selectableWhileRiding: true,
-      highlight: highlightObject(charm.root),
-      actions: () => this.charmActions(charm),
+      highlight: highlightObject(keyring.root),
+      actions: () => this.keyringActions(keyring),
     };
   }
 
@@ -799,38 +799,38 @@ export class KeychainShop implements GameSystem {
    * chip, evaluated live off the real inventory, exactly the way the train's
    * platform swaps "Get on" for "Get off" (`ParkTrain.stationActions`).
    */
-  private charmActions(charm: RackCharm): readonly ZoneAction[] {
-    const item = keychainItems().find((entry) => entry.id === charm.id);
+  private keyringActions(keyring: RackKeyring): readonly ZoneAction[] {
+    const item = keychainItems().find((entry) => entry.id === keyring.id);
     if (!item) return [];
     const shortName = item.displayName.replace(/ Keychain$/, '');
 
     const state = gameStore.get();
     const wornId = state.inventory.find((entry) => entry.uid === state.wornKeychainUid)?.id;
-    if (wornId === charm.id) {
+    if (wornId === keyring.id) {
       return pressAction(`Take off the ${shortName}!`, () => this.takeOff(), '🎒');
     }
 
-    const owned = ownedKeychainIds(state.inventory).has(charm.id);
+    const owned = ownedKeychainIds(state.inventory).has(keyring.id);
     const verb = owned ? 'Wear' : shopWords().verb;
-    return pressAction(`${verb} the ${shortName}!`, () => this.pickKeychain(charm), item.icon);
+    return pressAction(`${verb} the ${shortName}!`, () => this.pickKeychain(keyring), item.icon);
   }
 
   /**
-   * "I want that one" — for an owned charm this only ever wears it; for an
+   * "I want that one" — for an owned keyring this only ever wears it; for an
    * unowned one it collects it first (`gameStore.buy`, price 0) and wears
    * the copy just bought, the same "it's yours, and it's on you" beat a
    * purchased jet pack gets (`GameStore.buy`'s own `wornJetpackUid` line).
    */
-  private pickKeychain(charm: RackCharm): void {
+  private pickKeychain(keyring: RackKeyring): void {
     const state = gameStore.get();
-    const existing = state.inventory.find((item) => item.id === charm.id);
+    const existing = state.inventory.find((item) => item.id === keyring.id);
     if (existing) {
       gameStore.setWornKeychain(existing.uid);
       this.showBack();
       return;
     }
 
-    const item = keychainItems().find((entry) => entry.id === charm.id);
+    const item = keychainItems().find((entry) => entry.id === keyring.id);
     if (!item) return;
     const firstEver = ownedKeychainIds(state.inventory).size === 0;
     const acquisition = gameStore.buy(shopItemToPurchase(item));
@@ -838,7 +838,7 @@ export class KeychainShop implements GameSystem {
 
     gameStore.setWornKeychain(acquisition.item.uid);
     if (firstEver) discoverSecret('secret.keychain');
-    this.spawnSparkles(charm);
+    this.spawnSparkles(keyring);
     playSurpriseChime();
     this.showBack();
   }
@@ -855,22 +855,22 @@ export class KeychainShop implements GameSystem {
    * drives every frame. Refreshing rather than only starting matters for a
    * quick second pick mid-turn: {@link turnedAt} simply moves to now, so the
    * hold restarts instead of the turn-back cutting in mid-way through
-   * showing the new charm.
+   * showing the new keyring.
    */
   private showBack(): void {
     this.viewFacingTarget = this.facingCamera + Math.PI;
     this.turnedAt = this.frameElapsed;
   }
 
-  private spawnSparkles(charm: RackCharm): void {
+  private spawnSparkles(keyring: RackKeyring): void {
     this.sparkleStartedAt = this.frameElapsed;
-    // Bursts from the charm actually picked, not the cart's centre, so a
-    // child can see which one it was — `charm.root.position` is already the
+    // Bursts from the keyring actually picked, not the cart's centre, so a
+    // child can see which one it was — `keyring.root.position` is already the
     // local (to `this.group`) point the sparkle pool's own children share.
     this.sparkleOrigin = {
-      x: charm.root.position.x,
-      y: charm.root.position.y + 0.16,
-      z: charm.root.position.z,
+      x: keyring.root.position.x,
+      y: keyring.root.position.y + 0.16,
+      z: keyring.root.position.z,
     };
     for (let i = 0; i < this.sparkleBase.length; i += 1) {
       this.sparkleBase[i] = {
@@ -881,7 +881,7 @@ export class KeychainShop implements GameSystem {
     }
   }
 
-  /** Same rise-and-fade beat `FacePaintStall.updatePaintingCutscene` draws, over the charm just picked. */
+  /** Same rise-and-fade beat `FacePaintStall.updatePaintingCutscene` draws, over the keyring just picked. */
   private updateSparkles(elapsed: number): void {
     const startedAt = this.sparkleStartedAt;
     if (startedAt === null) return;
@@ -932,7 +932,7 @@ export class KeychainShop implements GameSystem {
   /**
    * Local → world, for this stall's own fixed position and yaw — one owner,
    * shared by {@link buildCollision}'s wall corners and {@link buildCart}'s
-   * per-charm zone positions, rather than the same trig written out twice.
+   * per-keyring zone positions, rather than the same trig written out twice.
    */
   private toWorld(localX: number, localZ: number): [number, number] {
     const sin = Math.sin(STALL_FACING);
@@ -951,10 +951,10 @@ export class KeychainShop implements GameSystem {
 
   /**
    * The cart: a little two-wheeled trolley with a counter, and the six real
-   * charm models stood up on it as a display rack — the origin-at-the-base
+   * keyring models stood up on it as a display rack — the origin-at-the-base
    * convention `art/models/keychains.ts` was built for means they can stand
    * here with no offset maths at all. This rack is also the shop's whole
-   * picker (see this file's own header): every charm built here is handed
+   * picker (see this file's own header): every keyring built here is handed
    * to {@link interactZones} as its own tappable, wearable thing.
    */
   private buildCart(): void {
@@ -1013,15 +1013,15 @@ export class KeychainShop implements GameSystem {
     canopyCap.position.set(0, 2.24, -STALL_DEPTH / 2 + 0.15);
     this.group.add(canopyCap);
 
-    // The six charms themselves, stood on the counter as a display rack —
-    // {@link RACK_COLUMNS} x {@link RACK_ROWS}, at {@link RACK_CHARM_SCALE}
+    // The six keyrings themselves, stood on the counter as a display rack —
+    // {@link RACK_COLUMNS} x {@link RACK_ROWS}, at {@link RACK_KEYRING_SCALE}
     // (was one row at a smaller scale — see that constant's own doc comment
     // for why it grew and needed the second row), alternating a slight lean
     // so the grid does not read as a static shelf of identical ranks. Each
     // one's real world position is recorded into {@link rack} for
     // {@link interactZones} to build a tap target from.
     const rackWidth = STALL_WIDTH - 0.5;
-    const charmLocalY = 0.885;
+    const keyringLocalY = 0.885;
     KEYCHAIN_KINDS.forEach((kind, index) => {
       const handle = createKeychain(kind);
       const column = index % RACK_COLUMNS;
@@ -1030,16 +1030,16 @@ export class KeychainShop implements GameSystem {
       const tRow = RACK_ROWS > 1 ? row / (RACK_ROWS - 1) : 0.5;
       const localX = -rackWidth / 2 + tColumn * rackWidth;
       const localZ = RACK_CENTRE_LOCAL_Z - RACK_ROW_GAP / 2 + tRow * RACK_ROW_GAP;
-      handle.root.position.set(localX, charmLocalY, localZ);
-      handle.root.scale.setScalar(RACK_CHARM_SCALE);
+      handle.root.position.set(localX, keyringLocalY, localZ);
+      handle.root.scale.setScalar(RACK_KEYRING_SCALE);
       handle.root.rotation.y = (index % 2 === 0 ? 1 : -1) * 0.18;
       this.group.add(handle.root);
 
       const [x, z] = this.toWorld(localX, localZ);
-      // Same lateral offset as the charm itself, but out at the stall's own
+      // Same lateral offset as the keyring itself, but out at the stall's own
       // proven-clear stand depth — never the counter's own `localZ`, which
-      // sits inside `buildCollision`'s walls (see `RackCharm.standX`'s own
-      // doc comment). Both charms in a column share one stand point: the
+      // sits inside `buildCollision`'s walls (see `RackKeyring.standX`'s own
+      // doc comment). Both keyrings in a column share one stand point: the
       // depth a child stands at to reach the counter does not change row to
       // row, only which column she is squared up to.
       const [standX, standZ] = this.toWorld(localX, this.standLocalZ);
@@ -1048,7 +1048,7 @@ export class KeychainShop implements GameSystem {
         id: `keychain.${kind}`,
         root: handle.root,
         x,
-        y: this.groundY + charmLocalY,
+        y: this.groundY + keyringLocalY,
         z,
         standX,
         standZ,
@@ -1056,16 +1056,16 @@ export class KeychainShop implements GameSystem {
     });
 
     // {@link rackFocus}: pulled {@link VIEW_FOCUS_PLAYER_WEIGHT} of the way
-    // from the rack's own world centre (the six charms' average — solved
+    // from the rack's own world centre (the six keyrings' average — solved
     // once here rather than every frame, since they never move afterwards)
     // towards {@link viewStandX}/{@link viewStandZ}, so the shot centres
     // between the two subjects Jim asked to both fit in frame, rather than
     // on the rack alone with her off to one side of it.
     let sumX = 0;
     let sumZ = 0;
-    for (const charm of this.rack) {
-      sumX += charm.x;
-      sumZ += charm.z;
+    for (const keyring of this.rack) {
+      sumX += keyring.x;
+      sumZ += keyring.z;
     }
     const rackCentreX = sumX / this.rack.length;
     const rackCentreZ = sumZ / this.rack.length;
@@ -1210,7 +1210,7 @@ function buildCloseButton(uiRoot: HTMLElement, onClose: () => void): HTMLElement
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'shop-close';
-  button.setAttribute('aria-label', 'Close the charm rack');
+  button.setAttribute('aria-label', 'Close the keyring rack');
   button.textContent = '✕';
   button.addEventListener('click', () => {
     button.blur();

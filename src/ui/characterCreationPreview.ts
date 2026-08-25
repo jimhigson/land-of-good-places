@@ -81,7 +81,7 @@ export interface PreviewChoice {
   readonly hatId: string;
   readonly petId: string;
   /**
-   * Which charm hangs off the bag, or `''` for none — bare and non-optional
+   * Which keyring hangs off the bag, or `''` for none — bare and non-optional
    * for the same reason `hatId`/`petId` are: this is a shop-item id, and the
    * empty string is the established "nothing chosen" sentinel for one, not a
    * second convention next to it.
@@ -297,13 +297,13 @@ export class CharacterPreview {
   private kid: KidHandle | null = null;
   private pet: Object3D | null = null;
   /**
-   * The worn charm's swing point — owned by the preview itself, not by the
+   * The worn keyring's swing point — owned by the preview itself, not by the
    * per-choice `character` group, for the same reason `stage` is: `update()`
    * throws the whole character away and rebuilds it on every tap, and a sway
    * that reset to zero on every keystroke would never look like it was
    * swinging. Reparented onto the fresh `kid.keychainAnchor` each rebuild
    * (`Object3D.add` moves an object between parents on its own); cleared
-   * first so a charm that was removed does not linger as a stale child.
+   * first so a keyring that was removed does not linger as a stale child.
    * `entities/WornKeychain.ts` is the real thing's twin — same pivot idea,
    * same sway numbers (`art/models/keychains.ts`'s `KEYCHAIN_SWAY_*`), so the
    * picker does not show a different dangle than the one she walks away with.
@@ -511,12 +511,12 @@ export class CharacterPreview {
     if (choice.glasses) kid.glassesAnchor.add(createGlasses(choice.glasses).root);
 
     // The worn keychain, hung exactly the way `entities/WornKeychain.ts` hangs
-    // the real one: the charm models stand up from their own base (the asset
+    // the real one: the keyring models stand up from their own base (the asset
     // contract grants the `'anchor'` origin reading only to `hat.` ids), so it
     // is dropped by its own measured `height` (at `KEYCHAIN_WORN_SCALE`, and
     // lifted the same `keychainWornLift` amount off the bag's exact corner)
     // and swung about the top rather than about its feet — the picker must
-    // not show a smaller charm than the one she is about to actually wear.
+    // not show a smaller keyring than the one she is about to actually wear.
     // `keychainPivot` is cleared first — see its own doc comment for why it
     // is not part of the per-choice `character` group.
     this.keychainPivot.clear();
@@ -730,10 +730,10 @@ export class CharacterPreview {
         // absent, and `expandByObject` does not check visibility — a box drawn
         // round all five would frame a RiPika head nobody can see.
         //
-        // Plus the keychain pivot, when a charm is worn: `charmAnchor` is a
+        // Plus the keychain pivot, when a keyring is worn: `keyringAnchor` is a
         // sibling of the bag parts under `body` (`art/models/backpacks.ts`),
         // not a descendant of any one of them, so `expandByObject` on the bag
-        // alone would never see a dangling charm and the keychain stall's own
+        // alone would never see a dangling keyring and the keychain stall's own
         // picker would crop the very thing it exists to show.
         box = this.measure(
           ...kid.backpackParts.filter((part) => part.mesh.visible).map((part) => part.mesh),

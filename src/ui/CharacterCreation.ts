@@ -1273,7 +1273,7 @@ export class CharacterCreation {
       hatId: this.hatId ?? '',
       petId: this.petId,
       glasses: this.glasses,
-      // The creator has no keychain tab — charms are collected at the garden
+      // The creator has no keychain tab — keyrings are collected at the garden
       // stall, never chosen here — so this is always "none", same sentinel
       // `hatId`/`petId` use above.
       keychainId: '',

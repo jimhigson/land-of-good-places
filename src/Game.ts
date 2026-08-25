@@ -329,7 +329,7 @@ export class Game {
 
     // The keychain dangling off her bag, if one has been collected — see
     // `entities/WornKeychain.ts`. Fourth worn slot, same store-subscriber
-    // shape. No `onWornChange`: a charm displaces nothing, so unlike the jet
+    // shape. No `onWornChange`: a keyring displaces nothing, so unlike the jet
     // pack it has nothing to ask the model to put away.
     this.wornKeychain = new WornKeychain(this.player.model.keychainAnchor);
     this.addSystem(this.wornKeychain);

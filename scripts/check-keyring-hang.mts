@@ -2,13 +2,13 @@
  * **Every backpack shape hangs a keychain on itself, not in mid-air.**
  *
  * ```
- * npm run check:charm-hang
+ * npm run check:keyring-hang
  * ```
  *
- * `backpacks.ts`'s `CHARM_HANGS` says where a charm clips on for each of the
+ * `backpacks.ts`'s `KEYRING_HANGS` says where a keyring clips on for each of the
  * five authored bags, and `entities/WornKeychain.ts` hangs one there. A number
  * that misses the bag is invisible in code review and in a diff — it looks like
- * every other number in the table — and shows up only as a charm floating a
+ * every other number in the table — and shows up only as a keyring floating a
  * hand's width off a six-year-old's rucksack.
  *
  * That is not hypothetical. The original keychain work measured **one** offset
@@ -19,8 +19,8 @@
  * looked fine. This script is the ratchet so the sixth shape cannot repeat it.
  *
  * It measures the *built* bags — every visible vertex of the parts that shape
- * actually shows — and asks how far the charm anchor is from the nearest one.
- * It never re-derives `CHARM_HANGS` from the geometry, which would only prove
+ * actually shows — and asks how far the keyring anchor is from the nearest one.
+ * It never re-derives `KEYRING_HANGS` from the geometry, which would only prove
  * the table agrees with itself.
  */
 import '../scripts/headless-canvas.mjs';
@@ -30,15 +30,15 @@ import { toonMaterial } from '../src/art/style/materials.ts';
 import { buildBackpacks, BACKPACK_KINDS } from '../src/art/models/backpacks.ts';
 
 /**
- * How far a charm anchor may sit from the nearest bit of its bag, in metres.
+ * How far a keyring anchor may sit from the nearest bit of its bag, in metres.
  *
  * Not zero, and not the table's own precision: an anchor is meant to sit just
- * *proud* of the surface so the charm's ring is not buried in it, and
+ * *proud* of the surface so the keyring's ring is not buried in it, and
  * `visiblePoints` samples vertices rather than the continuous surface, so a
  * point genuinely on a rounded flank still reads a couple of centimetres from
  * the nearest sampled vertex. The five healthy shapes measure 0.015-0.042 m.
  *
- * 0.08 m is where a charm stops touching the bag at all — twice the worst
+ * 0.08 m is where a keyring stops touching the bag at all — twice the worst
  * healthy shape, and well inside the 0.122 m the broken `heart` measured, so
  * this catches that class of error with room for ordinary authoring drift.
  */
@@ -59,7 +59,7 @@ for (const kind of BACKPACK_KINDS) {
   // Through `setKind`, not the constructor's default: this is the path a child
   // switching bags in the creator actually takes, and the anchor has to move.
   rig.setKind(kind);
-  const anchor = rig.charmAnchor.position;
+  const anchor = rig.keyringAnchor.position;
 
   let nearest = Infinity;
   for (const part of rig.parts) {
@@ -79,21 +79,21 @@ for (const kind of BACKPACK_KINDS) {
       `${anchor.z.toFixed(2)})  ${nearest.toFixed(3)} m from the bag`,
   );
   if (!Number.isFinite(nearest)) {
-    complaints.push(`${kind} built no visible geometry to hang a charm on`);
+    complaints.push(`${kind} built no visible geometry to hang a keyring on`);
   } else if (nearest > TOLERANCE) {
     complaints.push(
-      `${kind}'s charm anchor is ${nearest.toFixed(3)} m from the nearest bit of the bag, ` +
+      `${kind}'s keyring anchor is ${nearest.toFixed(3)} m from the nearest bit of the bag, ` +
         `over the ${TOLERANCE} m tolerance — a keychain clipped there hangs in mid-air. ` +
-        `Fix the '${kind}' row of CHARM_HANGS in src/art/models/backpacks.ts.`,
+        `Fix the '${kind}' row of KEYRING_HANGS in src/art/models/backpacks.ts.`,
     );
   }
 }
 
 console.log(rows.join('\n'));
 if (complaints.length > 0) {
-  console.error(`\nCHARM HANG: ${complaints.length} problem(s)\n${complaints.join('\n')}`);
+  console.error(`\nKEYRING HANG: ${complaints.length} problem(s)\n${complaints.join('\n')}`);
   process.exit(1);
 }
 console.log(
-  `charm hang: all ${BACKPACK_KINDS.length} backpack shapes clip a keychain to real geometry. ✓`,
+  `keyring hang: all ${BACKPACK_KINDS.length} backpack shapes clip a keychain to real geometry. ✓`,
 );

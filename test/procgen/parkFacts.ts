@@ -484,11 +484,11 @@ export interface ParkFacts {
   readonly plots: readonly PlotFact[];
   readonly entrances: readonly EntranceFact[];
   /**
-   * The keychain rack's six charm stand points, specifically — **not**
+   * The keychain rack's six keyring stand points, specifically — **not**
    * included in {@link entrances} above.
    *
    * `KeychainShop.interactZones()` returns *either* the cart's one entry zone
-   * *or* the six per-charm zones, never both (they sit on the same small
+   * *or* the six per-keyring zones, never both (they sit on the same small
    * cart, and a snapshot holding both would fail `check:tap-spacing` outright
    * — see `world/KeychainShop.ts`'s own header). `entrances` is built from
    * `world.interactZones()` in the shop's ordinary, closed, default state, so
@@ -498,7 +498,7 @@ export interface ParkFacts {
    * player between hotel rooms to see each one's own zones in turn, so the
    * six real stand points a child reaches once inside stay checked.
    */
-  readonly keychainCharmEntrances: readonly EntranceFact[];
+  readonly keychainKeyringEntrances: readonly EntranceFact[];
   /**
    * **The cat bus, as actually found in the built scene graph.** `null` if
    * there is no node named `cat-bus` anywhere in it.
@@ -1309,12 +1309,12 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
       .map((zone) => ({ id: zone.id, x: zone.standX, z: zone.standZ })),
   ];
 
-  // The six charm stand points, read with the rack's own zoomed view opened
-  // — see {@link ParkFacts.keychainCharmEntrances}'s own doc comment for why
+  // The six keyring stand points, read with the rack's own zoomed view opened
+  // — see {@link ParkFacts.keychainKeyringEntrances}'s own doc comment for why
   // `entrances` above cannot carry these. Closed again immediately after:
   // nothing later in this function should see the shop mid-browse.
   world.keychainShop.openView();
-  const keychainCharmEntrances: EntranceFact[] = world.keychainShop
+  const keychainKeyringEntrances: EntranceFact[] = world.keychainShop
     .interactZones()
     .filter((zone) => zone.id.startsWith('stall:keychain:'))
     .map((zone) => ({ id: zone.id, x: zone.standX, z: zone.standZ }));
@@ -2107,7 +2107,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     lamps: world.lampPosts.positions.map((p) => [p.x, p.z] as const),
     plots,
     entrances,
-    keychainCharmEntrances,
+    keychainKeyringEntrances,
     catBus,
     hidingTheArrivingBus,
     exits,

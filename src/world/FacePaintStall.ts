@@ -702,7 +702,7 @@ function playerLook(): FacePaintLook {
     hatId: worn?.id ?? '',
     petId: '',
     glasses: state.player.glassesKind,
-    // The camera never leaves the face here, so a worn charm is never
+    // The camera never leaves the face here, so a worn keyring is never
     // actually in shot — populated for real anyway, rather than left `''`,
     // because this function's whole point is "how she really looks", and a
     // preview that quietly drops what she is wearing on her bag is exactly

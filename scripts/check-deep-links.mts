@@ -61,7 +61,7 @@ type DeepLinkCheck = {
 
 // `uiOpen`/`.keychain-panel` were the 2D list picker (`ui/KeychainPanel.ts`),
 // deleted when the rack itself became the picker (23 August 2026). The rack
-// is now *entered* rather than walked up to charm by charm
+// is now *entered* rather than walked up to keyring by keyring
 // (`world/KeychainShop.ts`'s own header): `requestOpen` teleports to the
 // stand point **and** opens the zoomed view in one motion, so `viewOpen` —
 // and the on-screen ✕, `.keychain-view-close[data-show="true"]` — are what
