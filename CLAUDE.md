@@ -235,9 +235,10 @@ flight at once, because they will be on several ports.
 When handing Jim a Cloudflare Workers preview link (`wrangler versions
 upload --preview-alias`'s `pr-<number>-<commit-sha>-land-of-good-places.blockstack.workers.dev`
 — a new URL every push, with the real git commit hash in it so it's
-traceable to a specific commit; the *previous* push's version is deleted by
-the same workflow, so an old link 404s instead of quietly serving stale
-code), append the feature's deep-link path exactly as you would for
+traceable to a specific commit; old versions are **not** deleted — Cloudflare
+rejects this repo's token for that — so always pull the URL fresh from the
+PR's current "Deploy PR preview" comment/check, never reuse or guess an
+older one), append the feature's deep-link path exactly as you would for
 `localhost` — the same
 `origin/main..HEAD` build sitting behind a different host is still a park
 he has to find his way around blind on a root URL. Before opening a PR (or
