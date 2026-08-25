@@ -49,6 +49,10 @@ import {
  * walks there first (the ordinary routed walk — no second movement path) and it
  * runs on arrival, re-read from the zone's live action list so that a train
  * which has pulled out in the meantime simply does nothing.
+ *
+ * While riding, "standing at the thing" is judged differently — see
+ * {@link ridingInReach}: a `selectableWhileRiding` zone always runs *now*,
+ * because a riding character cannot walk anywhere to begin with.
  */
 
 /**
@@ -235,7 +239,7 @@ export class Selection implements GameSystem {
    * doesn't invent one either.
    */
   commitZone(zone: InteractZone, action: ZoneAction): void {
-    if (this.withinReach(zone)) {
+    if (this.withinReach(zone) || this.ridingInReach(zone)) {
       this.pending = null;
       action.run();
       this.deps.flash(zone);
@@ -397,6 +401,38 @@ export class Selection implements GameSystem {
     const { position } = this.player;
     if (Math.abs(position.y - zone.y) > ZONE_HEIGHT_TOLERANCE) return false;
     return Math.hypot(position.x - zone.standX, position.z - zone.standZ) <= standRadiusOf(zone);
+  }
+
+  /**
+   * {@link commitZone}'s second way of counting as "already there" — a
+   * `selectableWhileRiding` zone, while riding, is always in reach.
+   *
+   * `standX`/`standZ` on a zone like this describe the ordinary *walk-up*
+   * point (`world/train/station.ts`'s platform, `KeychainShop.ts`'s
+   * counter-front points) — a place `TapNavigator` routes a **walking**
+   * character to. A riding character is not walking anywhere: `beginRide()`
+   * hands her to the ride/view for exactly this reason, and
+   * `TapNavigator.navigateTo` refuses outright while `player.riding` is true
+   * (its own doc comment). So when `withinReach` says no for a zone the ride
+   * itself opted into offering, the honest reading is not "walk closer" —
+   * there is nowhere to walk to and no way to get there — it is "she's
+   * exactly where the ride put her; that's what counts as reach here."
+   * Without this, `commitZone` would queue a walk that can never start, time
+   * out after {@link COMMIT_TIMEOUT}, and equip nothing — the exact shape of
+   * the bug `KeychainShop.ts`'s locked keyring picker hit (PR #331): she is
+   * teleported to one fixed point for the whole view, and every one of the
+   * six keyrings' own walk-up points sit 3.2-3.9 m from it, well outside
+   * their `standRadius`.
+   *
+   * Scoped to `selectableWhileRiding` zones specifically, not "riding, full
+   * stop": that flag is already the one place in this codebase that decides
+   * which zones are meant to be actionable mid-ride at all (see
+   * `InteractZone.selectableWhileRiding`'s own doc comment) — a zone that
+   * never opted in still needs a real, impossible-while-riding walk, exactly
+   * as before.
+   */
+  private ridingInReach(zone: InteractZone): boolean {
+    return this.player.riding && (zone.selectableWhileRiding ?? false);
   }
 
   /**

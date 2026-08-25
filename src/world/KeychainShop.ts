@@ -787,7 +787,14 @@ export class KeychainShop implements GameSystem {
       // The character is riding for the whole life of this view (see this
       // file's own header, "Non-controllable") — without this,
       // `Selection.ts`'s own riding gate would block every one of these taps,
-      // the one thing this view exists for.
+      // the one thing this view exists for. `standX`/`standZ` above sit on
+      // the counter's ordinary long-side walk-up point (3.2-3.9 m from where
+      // she is actually locked, on the short edge — see {@link viewStandX}'s
+      // own doc comment), well outside `standRadius`; that is deliberately
+      // fine, because `Selection.commitZone` treats any `selectableWhileRiding`
+      // zone as already "in reach" while riding, rather than trying to queue
+      // a walk `TapNavigator` would refuse anyway (see that method's own doc
+      // comment).
       selectableWhileRiding: true,
       highlight: highlightObject(keyring.root),
       actions: () => this.keyringActions(keyring),
