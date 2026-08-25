@@ -419,6 +419,11 @@ export class World implements GameSystem {
     // — invisible in practice, since every doorway crossing already happens
     // behind a closed iris (see `Building.changeSpace`).
     this.dayNight.setIndoors(this.playerInAnyInterior);
+    // The nap's own sky, over `DayNight.setIndoors`'s frozen backdrop — see
+    // `DayNight.setNapSkyOverride`'s own doc comment (PR #279's follow-up,
+    // 18 Aug 2026: the hotel's nap sky has to be the real sky shader at
+    // night-time uniforms, not a separate hand-built moon and stars).
+    this.dayNight.setNapSkyOverride(this.hotel.isNapping);
     this.dayNight.update(context);
 
     // Fan the time-of-day out to everything that changes with it. Systems read
@@ -467,6 +472,25 @@ export class World implements GameSystem {
     this.keychainShop.update(context);
     this.flowers.update(context);
     this.dodgems.update(context);
+
+    // The keychain rack's pop-up screen (`KeychainShop.buildViewBackdrop`)
+    // only ever hides the world *behind* the cart — it cannot hide anything
+    // standing, or wandering, on the same camera-facing side as the player,
+    // however wide it is built. Jim, 24 August 2026: "in view: only the
+    // charms, and the player's model" — measured against the real zoomed
+    // shot, a nearby lamp post sat squarely in that camera-facing gap no
+    // width of screen could ever reach (it is beside the player, not behind
+    // her), and a crowd member can wander into the same gap at any moment.
+    // Both fold away for the same beat: the one system whose whole job is
+    // roaming loose around the park, and the one piece of fixed street
+    // furniture this stall's own generous placement (`stallPlacement.ts`)
+    // still turned out to sit close enough to matter. Not a general "hide
+    // everything" — see `buildViewBackdrop`'s own doc comment for why that
+    // is the wrong fix — two named systems, each found by actually looking
+    // at the rendered shot, not guessed in advance.
+    const hideBehindKeychainView = this.keychainShop.viewOpen;
+    this.npcs.group.visible = !hideBehindKeychainView;
+    this.lampPosts.group.visible = !hideBehindKeychainView;
     // Last: the arrival moves the player, and everything above has already had
     // its frame, so nothing overwrites where the sequence just put her. The
     // pose itself was computed above, with the children's; this only re-asserts
@@ -503,6 +527,9 @@ export class World implements GameSystem {
    */
   mountUi(uiRoot: HTMLElement): void {
     this.facePaintStall.mountUi(uiRoot);
+    // The keychain stall still has no 2D panel — the rack itself is the
+    // picker — but the zoomed view it opens into does need its own ✕
+    // (`world/KeychainShop.ts`'s own header).
     this.keychainShop.mountUi(uiRoot);
   }
 

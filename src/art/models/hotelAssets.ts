@@ -633,8 +633,16 @@ export interface PetBedHandle extends AssetHandle {
  * of it. For the same reason the pillow is propped on the bolster rim rather
  * than laid on the cushion: it leaves the whole {@link PET_BED_CUSHION_RADIUS}
  * disc clear, so the poser gets a circle to work with instead of a crescent.
+ *
+ * **`scale` is how it got bigger still.** The GLB is authored once, and the
+ * bolster it was authored at (1.35 m front to back) is still shorter than
+ * every companion that lies in it (1.47–1.53 m), which is Jim's *"the beds are
+ * also still too small"* of 23–24 Aug 2026. `world/hotel/petBedFit.ts`
+ * measures the animals and the bolster and works out the factor; the caller
+ * passes it in, and everything this handle reports comes back scaled to match,
+ * so nothing downstream has to remember to multiply.
  */
-export function createPetBed(): PetBedHandle {
+export function createPetBed(scale = 1): PetBedHandle {
   const { root, meshes } = assemble('hotel.petBed', [
     'petbed-base',
     'petbed-cushion',
@@ -646,11 +654,17 @@ export function createPetBed(): PetBedHandle {
     'petbed-toy',
     'petbed-toy-eye',
   ]);
+  root.scale.setScalar(scale);
+  // Every number this handle reports is the *built* bed's, scale included —
+  // an asset that says "my cushion is at 0.30 m" while standing 1.25× bigger
+  // than that is the two-definitions bug with the copy inside the asset
+  // itself. `visibleBounds` measures in `root`'s own frame, so the scale has
+  // to be applied to the height here rather than being picked up from it.
   return {
     root,
-    height: measuredHeight(root),
-    cushionTop: PET_BED_CUSHION_TOP,
-    cushionRadius: PET_BED_CUSHION_RADIUS,
+    height: measuredHeight(root) * scale,
+    cushionTop: PET_BED_CUSHION_TOP * scale,
+    cushionRadius: PET_BED_CUSHION_RADIUS * scale,
     toy: required(meshes, 'petbed-toy'),
     dispose: () => disposeTree(root),
   };

@@ -37,7 +37,7 @@ import type { CuteCategory, InventoryKind } from '../../../state';
  * `state/wording.ts`).
  */
 /**
- * Name and blurb for each charm, kept beside the kinds they name.
+ * Name and blurb for each keyring, kept beside the kinds they name.
  *
  * `check:brevity` holds these to a title of 24 characters and a blurb of one
  * sentence of 50 — do not add `KNOWN_LONG` entries to buy room, write shorter.
@@ -60,6 +60,7 @@ const KEYCHAIN_COPY: Record<KeychainKind, { displayName: string; blurb: string; 
     icon: '🌈',
   },
   heart: { displayName: 'Heart Keychain', blurb: 'A little heart bouncing on your bag.', icon: '💗' },
+  rumi: { displayName: 'Rumi Keychain', blurb: 'A tiny Rumi doll, ponytail and all.', icon: '🖤' },
 };
 
 export type ShopId =
@@ -587,7 +588,7 @@ export const SHOP_ITEMS: readonly ShopItem[] = [
     carryable: false,
     model: () => createKeychain(kind),
     // Never held — kept sane rather than zero so a preview that scales by it
-    // cannot collapse the charm to nothing.
+    // cannot collapse the keyring to nothing.
     heldScale: 1,
     rare: false,
   })),
@@ -678,15 +679,26 @@ export const EGG_PRIZES: readonly ShopItem[] = [
 ];
 
 /**
- * Every catalogue entry there is, on sale or not.
+ * Every catalogue entry there is, on sale or not — the shelves and the egg
+ * prizes in one list.
+ *
+ * Exported because "everything a child can end up owning" is a real question
+ * with real askers: {@link shopItem}'s own index below, and
+ * `world/hotel/petBedFit.ts`, which measures every companion in it to find out
+ * how big a pet bed has to be. A second `[...SHOP_ITEMS, ...EGG_PRIZES]`
+ * written out at a call site is a list that stops being every entry the day a
+ * third table appears.
+ */
+export const ALL_CATALOGUE_ITEMS: readonly ShopItem[] = [...SHOP_ITEMS, ...EGG_PRIZES];
+
+/**
+ * Look-up by id.
  *
  * Built after both tables so that a look-up by id finds egg prizes too — the
  * carried-item system is handed an id and has no idea whether it came off a
  * shelf or out of an egg.
  */
-const BY_ID = new Map<string, ShopItem>(
-  [...SHOP_ITEMS, ...EGG_PRIZES].map((item) => [item.id, item]),
-);
+const BY_ID = new Map<string, ShopItem>(ALL_CATALOGUE_ITEMS.map((item) => [item.id, item]));
 
 export function shopItem(id: string): ShopItem | null {
   return BY_ID.get(id) ?? null;

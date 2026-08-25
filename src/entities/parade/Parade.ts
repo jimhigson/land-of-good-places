@@ -1,14 +1,16 @@
 import { Group, Object3D, Raycaster, Vector2 } from 'three';
+import { PARADE_MEMBER_RADIUS } from '../../core/constants';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { IsoCamera } from '../../core/IsoCamera';
 import type { TapPoint } from '../../core/input/PointerControls';
 import type { CollisionWorld } from '../../world/Collision';
+import type { PetBedSpot, PetParadeLink } from '../../world/hotel/Hotel';
 import { terrainHeight } from '../../world/terrain';
 import { shopItem } from '../../world/building/shops/catalogue';
-import { gameStore, type GameState, type InventoryItem } from '../../state';
+import { gameStore, walksInParade, type GameState, type InventoryItem } from '../../state';
 import type { Player } from '../Player';
 import { PlayerTrail } from './trail';
-import { ParadeMember } from './ParadeMember';
+import { ParadeMember, type BedPhase } from './ParadeMember';
 import { BackpackPeek } from './BackpackPeek';
 
 /**
@@ -36,12 +38,15 @@ import { BackpackPeek } from './BackpackPeek';
  * A spring settles each member onto its point, so the line has a lazy, springy
  * lag rather than moving like a train on rails.
  *
- * **Who is in it.** Toys and pets — see `PARADE_KINDS` in the store, which
- * also lists `'balloon'` (for the Cute-o-dex's "can this come out?" question)
- * but is overridden here, since a balloon never walks. Candy floss, ice
- * cream, hats, stickers and eggs cannot walk either, so they stay in the bag
- * where {@link BackpackPeek} gives them something to do. The thing in the
- * player's hands is never also in the parade.
+ * **Who is in it.** Toys and pets alike — `state/store.ts`'s
+ * {@link walksInParade}, which is the *one* answer to "is this a companion?"
+ * in the whole game: this file's own `isOut` asks it, and so does the hotel,
+ * when it works out which of the things she owns gets a bed. (It is narrower
+ * than `PARADE_KINDS`, which also lists `'balloon'` for the Cute-o-dex's "can
+ * this come out?" question; a balloon is held on a string, never walked.)
+ * Candy floss, ice cream, hats, stickers and eggs cannot walk either, so they
+ * stay in the bag where {@link BackpackPeek} gives them something to do. The
+ * thing in the player's hands is never also in the parade.
  */
 
 /** How many walk behind you at once. More than this and the park disappears. */
@@ -63,13 +68,19 @@ const LEAD_GAP = 1.35;
 /** Base gap between one follower and the next; model height is added to it. */
 const BASE_GAP = 0.7;
 
-/** Collision radius for a follower. Small — they are toys. */
-const MEMBER_RADIUS = 0.22;
+/**
+ * Collision radius for a follower. Small — they are toys.
+ *
+ * Kept in `core/constants.ts` because the hotel's pet-bed spacing has to leave
+ * a companion room to walk between two beds, and that has to be *this* number
+ * rather than a copy of it.
+ */
+const MEMBER_RADIUS = PARADE_MEMBER_RADIUS;
 
 /** Seconds of stagger per place in the line when the hop ripples down it. */
 const HOP_RIPPLE = 0.075;
 
-export class Parade implements GameSystem {
+export class Parade implements GameSystem, PetParadeLink {
   readonly name = 'parade';
 
   /** Add this to the scene once. Members live in world space inside it. */
@@ -120,6 +131,72 @@ export class Parade implements GameSystem {
   }
 
   /**
+   * **Send one pet to its own bed** — the hotel suite's nap, by way of
+   * `Hotel.sendPetsToBed`, is the only caller.
+   *
+   * The member itself does the rest ({@link ParadeMember.goToBed}): it walks
+   * to the bed's run-up spot on the ordinary follow spring — {@link update}
+   * points its `target` there instead of at a trail sample, which is the only
+   * thing this class changes — and then climbs in and lies down under its own
+   * steam.
+   *
+   * **There is one body.** The pet a child has been watching walk behind her
+   * is the pet that walks to the bed, climbs in and sleeps in it; the hotel
+   * builds no stand-in, nothing is hidden, nothing is handed over, and no
+   * second system has an opinion about where that animal is or whether it is
+   * drawn. That is the whole fix for Jim's 23 Aug 2026 report — the pet
+   * *"phases in and out of existence on alternating frames, no smooth
+   * animation and then morphs into a totally different pet, who then clips out
+   * of the bed"*: every one of those is what two bodies for one animal looks
+   * like from the sofa.
+   *
+   * Returns `false`, and starts nothing, when this uid is not a live member of
+   * the line right now — stowed, carried in her hands, or a bed built before
+   * she owned a matching companion at all. That bed simply stays empty
+   * furniture, which is what it already is between naps.
+   *
+   * **Any member of the line, not only a `kind: 'pet'` one.** Jim, 24 Aug
+   * 2026: *"if they follow the character they get a bed."* Membership of this
+   * array already *is* that question — nothing reaches it that `isOut` did not
+   * pass — so a second `kind === 'pet'` test here could only ever be a
+   * narrower, disagreeing copy of it, and was: it silently refused every
+   * fresh save's own starter companion, RiPika, who is catalogued `'toy'`.
+   */
+  sendPetToBed(uid: string, bed: PetBedSpot): boolean {
+    const member = this.members.find((candidate) => candidate.uid === uid);
+    if (!member) return false;
+    member.goToBed(bed);
+    return true;
+  }
+
+  /**
+   * The nap is over, or ended early: this pet stands back up wherever its
+   * routine had got to and rejoins the line. A no-op for a uid that was never
+   * sent to bed, so `Hotel.standPetsDown` can call it for every bed it owns
+   * without tracking which ones it actually used.
+   */
+  wakePetFromBed(uid: string): void {
+    for (const member of this.members) {
+      if (member.uid === uid) member.getOutOfBed();
+    }
+  }
+
+  /**
+   * How far through its bedtime routine this pet is **in `bed`**, or `null`
+   * when it is not going to bed at all or is in one of its own other beds —
+   * the question `Hotel`'s "Z" glyphs and `check:hotel` both ask, without
+   * either of them reaching into a member.
+   *
+   * Matched on the spot object the hotel handed over, not on coordinates:
+   * one pet has a bed in each of the three bedrooms, and only the one it
+   * actually walked to may claim it.
+   */
+  petBedPhase(uid: string, bed: PetBedSpot): BedPhase | null {
+    const member = this.members.find((candidate) => candidate.uid === uid);
+    return member?.bedSpot === bed ? (member?.bedPhase ?? null) : null;
+  }
+
+  /**
    * The HUD's "Look" pill, by way of `Game.applyLiveLook`: `player.model` has
    * just been rebuilt, so whoever `peek` had reached into the old
    * `backpackAnchor` for is gone with it. `peek` already reads the anchor
@@ -161,7 +238,13 @@ export class Parade implements GameSystem {
 
     for (const member of this.members) {
       member.setFlying(flying);
-      this.aimAt(member);
+      // A pet on its way to bed aims at its bed's own run-up spot instead of
+      // at a trail sample. That is the *only* difference: the same spring,
+      // the same easing, the same turn-to-face and the same walk cycle carry
+      // it there, so there is no second way of moving a pet in this game.
+      const bed = member.bedSpot;
+      if (bed) member.target.set(bed.runUpX, bed.runUpY, bed.runUpZ);
+      else this.aimAt(member);
       member.update(dt, elapsed);
     }
 
@@ -203,6 +286,42 @@ export class Parade implements GameSystem {
     for (const member of this.leaving) member.dispose();
     this.members.length = 0;
     this.leaving.length = 0;
+  }
+
+  /**
+   * Everything `check:hotel` needs to know about one pet's own live body, by
+   * uid — where it is, whether it is drawn, **which model it actually is**
+   * and how far through its bedtime routine it has got. `null` when no such
+   * pet is currently in the line at all.
+   *
+   * `itemId` is here because "the pet in the bed is the pet she owns" used to
+   * be un-askable from outside: the hotel built a second animal of its own
+   * and a probe reading that one could not tell a bunny standing in for a
+   * kitten from the kitten itself. `root` is the real node, so a probe can
+   * take its own `Box3` and ask whether the animal fits in the bed rather
+   * than trusting an offset.
+   */
+  petState(uid: string): {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+    readonly visible: boolean;
+    readonly itemId: string;
+    readonly bedPhase: BedPhase | null;
+    readonly root: Object3D;
+  } | null {
+    const member = this.members.find((candidate) => candidate.uid === uid);
+    if (!member) return null;
+    const { x, y, z } = member.root.position;
+    return {
+      x,
+      y,
+      z,
+      visible: member.root.visible,
+      itemId: member.itemId,
+      bedPhase: member.bedPhase,
+      root: member.root,
+    };
   }
 
   // -------------------------------------------------------------- internals
@@ -363,16 +482,17 @@ export class Parade implements GameSystem {
 /**
  * Out of the bag, able to walk, and not the thing in the player's hands.
  *
- * Balloons are excluded outright, regardless of `carriedUid`: a balloon is
- * held above the player on a string (`entities/HeldBalloon.ts`), never walked
- * behind them like a toy or a pet, however many the player owns and however
- * long ago each one stopped being the thing literally in their hands. They
- * are still marked `paradeable` in the store (`PARADE_KINDS` includes
- * `'balloon'`, for the Cute-o-dex's "can this come out with you?" question),
- * so the exclusion belongs here rather than upstream.
+ * "Able to walk" is {@link walksInParade}, in `state/store.ts`, and asking it
+ * rather than restating it here is the point: the hotel's pet beds ask the
+ * same function which of the things she owns is a companion, so the line
+ * behind her and the row of beds waiting for it can no longer disagree about
+ * what a companion is. They did — see that function's own doc comment for the
+ * bug it cost — and a balloon (`PARADE_KINDS` includes it for the Cute-o-dex,
+ * but it is *held* on a string, never walked) is the reason the two questions
+ * are not the same question.
  */
 function isOut(item: InventoryItem, carriedUid: string | null): boolean {
-  return item.paradeable && item.kind !== 'balloon' && !item.stowed && item.uid !== carriedUid;
+  return walksInParade(item.kind) && !item.stowed && item.uid !== carriedUid;
 }
 
 /**
@@ -405,7 +525,7 @@ function stowedIds(state: GameState, visible: readonly InventoryItem[]): string[
     // hit now that the drawer can put any hat on (`ui/InventoryDrawer.ts`).
     //
     // The keychain is the worst of the three to get wrong, because it hangs off
-    // the bag itself: the charm and its own copy climbing out of the mouth
+    // the bag itself: the keyring and its own copy climbing out of the mouth
     // above it would be a hand's width apart.
     if (
       item.uid === state.wornHatUid ||

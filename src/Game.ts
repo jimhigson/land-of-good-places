@@ -16,6 +16,7 @@ import { FoliageFade, Sky, TreeClimbing, World, skyViewFor, type WorldOptions } 
 import { ENTRANCE_ANGLE, ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from './world/entrance/layout';
 import { arrivalOwnsTheSpawn } from './world/entrance/arrivalSpawn';
 import { arrivalCameraZoom } from './world/entrance/ArrivalSequence';
+import { KEYCHAIN_VIEW_ZOOM } from './world/KeychainShop';
 import { Highlights } from './world/Highlights';
 import { Selection } from './world/Selection';
 import { pickInteractZone, PRIMARY_ACTION, type InteractZone } from './world/interact';
@@ -181,6 +182,18 @@ export class Game {
   private lookOpen = false;
   /** Freezes the park while {@link lookOpen} — see `core/overlayPause.ts`. */
   private readonly lookPause = new OverlayPause();
+
+  /**
+   * {@link IsoCamera.zoom} from just before the keychain rack's zoomed view
+   * opened, so closing it can hand back exactly what she had — a manual
+   * pinch/scroll zoom, not necessarily the default — rather than silently
+   * resetting her own choice. Tracked here, not on `KeychainShop`, because
+   * only `Game` may read the camera at all (see `tick`'s own wiring, right
+   * beside the cat-bus arrival's identical re-derive-every-frame zoom).
+   */
+  private keychainShopWasOpen = false;
+  private zoomBeforeKeychainShop = 1;
+
   /** Every sign in the park, as a selectable zone. Built once: signs do not move. */
 
   private readonly uiRoot: HTMLElement;
@@ -316,7 +329,7 @@ export class Game {
 
     // The keychain dangling off her bag, if one has been collected — see
     // `entities/WornKeychain.ts`. Fourth worn slot, same store-subscriber
-    // shape. No `onWornChange`: a charm displaces nothing, so unlike the jet
+    // shape. No `onWornChange`: a keyring displaces nothing, so unlike the jet
     // pack it has nothing to ask the model to put away.
     this.wornKeychain = new WornKeychain(this.player.model.keychainAnchor);
     this.addSystem(this.wornKeychain);
@@ -329,6 +342,15 @@ export class Game {
     this.parade = new Parade(this.player, this.world.collision, this.camera);
     this.engine.scene.add(this.parade.group);
     this.addSystem(this.parade);
+    // The seam a nap uses to send a pet to its own bed — see
+    // `Hotel.PetParadeLink` and `Hotel.sendPetsToBed`, its one caller.
+    // `Parade` satisfies the interface structurally; this is the one place
+    // that holds both a `Parade` and a `Hotel` to introduce them.
+    //
+    // **It is the whole of the wiring, and deliberately one-way.** The parade
+    // owns a pet's body from the line all the way onto the cushion and back;
+    // nothing here hides a pet, moves one, or holds a second copy of one.
+    this.world.hotel.petParade = this.parade;
 
     // Every balloon the player owns and has not stowed, held above them on a
     // bending string — see `entities/HeldBalloon.ts`'s doc comment for why
@@ -392,6 +414,19 @@ export class Game {
 
     this.pointer = new PointerControls(canvas, {
       onTap: (point) => {
+        // A nap ends on her own say-so now, not a timer (issue #279's
+        // follow-up, Jim 24 Aug 2026: *"make them stay in the bed until the
+        // player gets them out … tapping anywhere, clicking anywhere … wakes
+        // them"*). Checked first, the same way the tree's "tap anywhere means
+        // come down" already is below: whatever else the tap might have hit —
+        // a prop to select, a pet to call over, a spot to walk to — is not
+        // what she asked for while she is asleep, so none of it runs.
+        // `Hotel.wakeNap` is a no-op when nobody is actually napping, so this
+        // costs nothing the rest of the time.
+        if (this.world.hotel.isNapping) {
+          this.world.hotel.wakeNap();
+          return;
+        }
         // Up a tree, a tap anywhere means "come down" — it is not a place to
         // walk to, and the character cannot walk while riding the climb
         // anyway (see `Player.riding`).
@@ -1012,7 +1047,6 @@ export class Game {
     return (
       this.shopping.uiOpen ||
       this.world.facePaintStall.uiOpen ||
-      this.world.keychainShop.uiOpen ||
       this.cuteODex.isOpen ||
       this.whatsNew.isOpen ||
       this.miniGames.frozen ||
@@ -1054,7 +1088,6 @@ export class Game {
     return (
       this.shopping.uiOpen ||
       this.world.facePaintStall.uiOpen ||
-      this.world.keychainShop.uiOpen ||
       this.cuteODex.isOpen ||
       this.whatsNew.isOpen ||
       this.miniGames.frozen ||
@@ -1389,7 +1422,12 @@ export class Game {
       this.input.justPressed('menu') &&
       !this.shopping.uiOpen &&
       !this.world.facePaintStall.uiOpen &&
-      !this.world.keychainShop.uiOpen &&
+      // The keychain rack's zoomed view reads this same key to close itself
+      // (`KeychainShop.update`, run later this frame via `world.update`) —
+      // without this exclusion Escape would also pause the park behind it,
+      // exactly the bug the two exclusions above this one already guard
+      // against.
+      !this.world.keychainShop.viewOpen &&
       // The look overlay owns the screen the same way those two do. Without
       // this, Escape — the one key anyone presses to back out of a modal —
       // toggled the pause of the park *behind* the open dialog. `lookOpen`
@@ -1431,14 +1469,59 @@ export class Game {
 
     // The arrival's subject is an 18 m bus, and the default framing is sized
     // around a 2.12 m child — so while the bus is what the shot is about, the
-    // camera sits further out. Re-asserted every frame rather than set once,
-    // because this method re-derives the world's state each frame and would
-    // otherwise overwrite it (CLAUDE.md's `/view` note is that trap biting
-    // somebody). The decision itself is `arrivalCameraZoom`, a pure function,
-    // so a check can hold it — `Game` builds a real `WebGLRenderer` and cannot
-    // be constructed in one.
+    // camera sits further out. The decision itself is `arrivalCameraZoom`, a
+    // pure function, so a check can hold it — `Game` builds a real
+    // `WebGLRenderer` and cannot be constructed in one.
+    //
+    // **Asserted only when the value actually changes, not every frame**
+    // (#329). It used to be reasserted unconditionally for as long as
+    // `!arrival.finished`, which holds all the way through the `departing`
+    // phase — several more seconds of the bus unloading stragglers and
+    // driving off, *after* `ArrivalSequence.depart` has already handed her
+    // the controls on its very first frame. Every one of those frames called
+    // `setZoomTarget(arrivalCameraZoom('departing'))`, i.e. `setZoomTarget(1)`
+    // again and again, so any wheel notch, pinch or +/- press landed via
+    // `nudgeZoom` and was silently overwritten on the very next frame — the
+    // mouse wheel read as completely dead for however long the bus took to
+    // empty and pull away, exactly what was reported. `arrivalCameraZoom`
+    // only takes the *phase* and is constant across most of them, so nothing
+    // is lost by writing it once per actual change instead of once per
+    // frame: the bus framing still snaps in for `rolling-in`, still eases
+    // back to 1 the moment `departing` begins (`IsoCamera.update`'s damping
+    // still turns that into a push-in, same as before) — but from that same
+    // frame on, nothing here writes to `zoomTarget` again, so her own
+    // zoom input finally takes effect immediately instead of after the whole
+    // sequence finishes.
     const arrival = this.world.entrance.arrival;
-    if (arrival && !arrival.finished) this.camera.setZoomTarget(arrivalCameraZoom(arrival.phase));
+    if (arrival && !arrival.finished) {
+      const zoom = arrivalCameraZoom(arrival.phase);
+      if (zoom !== this.arrivalZoomApplied) {
+        this.arrivalZoomApplied = zoom;
+        this.camera.setZoomTarget(zoom);
+      }
+    }
+
+    // The keychain rack's zoomed picker (#331): the camera orbits a point
+    // between the rack and where she stands (`KeychainShop.viewFocus`)
+    // instead of the player while `viewOpen`, at `KEYCHAIN_VIEW_ZOOM` — a
+    // constant tuned against a real screenshot of this exact composed shot
+    // (see that constant's own doc comment in `KeychainShop.ts`), the same
+    // way the rest of this feature's framing rounds were. Re-asserted every
+    // frame for the same reason the arrival's zoom above is: see
+    // `IsoCamera.setFocusOverride`'s own doc comment.
+    const keychainShopOpen = this.world.keychainShop.viewOpen;
+    if (keychainShopOpen && !this.keychainShopWasOpen) {
+      this.zoomBeforeKeychainShop = this.camera.targetZoom;
+    } else if (!keychainShopOpen && this.keychainShopWasOpen) {
+      this.camera.setZoomTarget(this.zoomBeforeKeychainShop);
+    }
+    this.keychainShopWasOpen = keychainShopOpen;
+    if (keychainShopOpen) {
+      this.camera.setZoomTarget(KEYCHAIN_VIEW_ZOOM);
+      this.camera.setFocusOverride(this.world.keychainShop.viewFocus);
+    } else {
+      this.camera.clearFocusOverride();
+    }
 
     this.camera.update(this.frameContext, this.player.position, this.player.velocity);
     // Straight after the camera moves and before the sky is drawn: the stars,
@@ -1460,6 +1543,13 @@ export class Game {
     this.sky.setView(skyViewFor(this.cameraOverride, this.camera.forward));
     this.world.update(this.frameContext);
 
+    // Nothing between the world and the systems any more. There used to be a
+    // line here taking the parade's pets off screen for the length of a hotel
+    // nap, because the hotel put a *second* copy of each animal in its pet
+    // beds; there is one body per pet now (`Hotel.sendPetsToBed` hands the
+    // parade the bed and the parade's own member walks into it), so there is
+    // nothing to hide and no second system with an opinion about whether a
+    // pet is drawn. See `entities/parade/ParadeMember.ts`.
     for (const system of this.systems) system.update(this.frameContext);
 
     this.updateHud(tick);
@@ -1496,6 +1586,13 @@ export class Game {
    * one — the first-person rides. The sky pass keeps the park's sky.
    */
   private cameraOverride: import('three').PerspectiveCamera | null = null;
+
+  /**
+   * The arrival's own zoom target, last written to {@link IsoCamera}, so it
+   * can be re-asserted only when it actually **changes** rather than every
+   * single frame. See the call site in {@link tick} for why (#329).
+   */
+  private arrivalZoomApplied: number | null = null;
 
   private render(): void {
     const renderer = this.engine.renderer;

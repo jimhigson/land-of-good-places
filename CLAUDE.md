@@ -233,8 +233,13 @@ flight at once, because they will be on several ports.
 
 **The same rule applies to PR preview URLs, not just local dev servers.**
 When handing Jim a Cloudflare Workers preview link (`wrangler versions
-upload`'s `<hash>-land-of-good-places.blockstack.workers.dev`), append the
-feature's deep-link path exactly as you would for `localhost` — the same
+upload --preview-alias`'s `pr-<number>-<commit-sha>-land-of-good-places.blockstack.workers.dev`
+— a new URL every push, with the real git commit hash in it so it's
+traceable to a specific commit; old versions are **not** deleted — Cloudflare
+rejects this repo's token for that — so always pull the URL fresh from the
+PR's current "Deploy PR preview" comment/check, never reuse or guess an
+older one), append the feature's deep-link path exactly as you would for
+`localhost` — the same
 `origin/main..HEAD` build sitting behind a different host is still a park
 he has to find his way around blind on a root URL. Before opening a PR (or
 before handing a preview link over if the PR is already open), check
@@ -641,7 +646,7 @@ not the review state.
 **When telling Jim a PR is ready to look at, never hand him a bare PR
 link.** A PR page is a diff and a comment thread — it does not show him the
 feature. Give the Cloudflare Workers deploy-preview URL with the feature's
-own deep link appended (`https://<hash>-land-of-good-places.blockstack.workers.dev/rail-race`,
+own deep link appended (`https://pr-280-a1b2c3d-land-of-good-places.blockstack.workers.dev/rail-race`,
 not just `.../pull/280`), exactly per this file's own "hand over the URL of
 the thing itself" rule above. Pull the preview URL from that PR's "Deploy PR
 preview" check run (or its posted comment) rather than guessing one.

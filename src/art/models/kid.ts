@@ -909,14 +909,14 @@ export function createKid(options: KidOptions = {}): KidHandle {
 
   // Where a worn keychain hangs. Comes from the bag's own rig, per shape, and
   // moves when she switches bags — `backpacks.ts` owns the number because it
-  // owns the shapes (see `CHARM_HANGS`). A separate anchor from
-  // `backpackAnchor`, which is the bag's *mouth*: a charm hung there would
+  // owns the shapes (see `KEYRING_HANGS`). A separate anchor from
+  // `backpackAnchor`, which is the bag's *mouth*: a keyring hung there would
   // dangle over a peeking creature's head (`BackpackPeek`).
   //
   // `backpack: false` (the pet-shop display kids) leaves this an unparented
   // `Group` at the origin, exactly as `backpackAnchor` does — a real object to
   // hand back rather than `undefined`, with nothing to hang off.
-  const keychainAnchor = backpackRig?.charmAnchor ?? new Group();
+  const keychainAnchor = backpackRig?.keyringAnchor ?? new Group();
 
   // --- head --------------------------------------------------------------------
   // Everything below is authored at `× HEAD`. The pivot came *down* from 1.34 to

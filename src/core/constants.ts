@@ -120,6 +120,18 @@ export const PLAYER_RADIUS = 0.62;
  */
 export const NPC_RADIUS = 0.5;
 
+/**
+ * A parade follower's collision radius — a toy or a pet walking behind the
+ * child. Small, because they are small.
+ *
+ * Here rather than in `entities/parade/Parade.ts` (which reads it) for the
+ * same reason {@link NPC_RADIUS} is: `world/hotel/petBedFit.ts` needs it to
+ * work out how much floor to leave between two pet beds — the strip a
+ * companion has to walk down to reach its own — and it must be the *same*
+ * number the parade shoves that companion about with, not a second copy of it.
+ */
+export const PARADE_MEMBER_RADIUS = 0.22;
+
 // ------------------------------------------------------- the drawn footpath
 //
 // How the park's one path ribbon sits on whatever it is draped over. Owned by
@@ -456,9 +468,19 @@ export const CAMERA_MIN_VIEW_WIDTH = 11;
  * means "a bit further out", so it drops to 0.42 to keep a proper overview, and
  * the ceiling rises because a close-up of a character is worth having now that
  * there is something to look at up close.
+ *
+ * Raised again, 2.4 → 4.6, for `world/KeychainShop.ts`'s locked view: Jim's
+ * "character and stall both fit with only a small gap" framing for that shot
+ * (`KEYCHAIN_VIEW_ZOOM`) needs a closer view than a person standing in the
+ * open park was ever framed at, and that view drives the camera through this
+ * same clamped `setZoomTarget`, not a bypass of it (see that constant's own
+ * doc comment) — so the general ceiling had to rise to let it through rather
+ * than silently capping the shot short. The side effect — a player can now
+ * pinch/scroll a little closer everywhere, not only in this one view — is
+ * the same trade the previous rise already made, in the same direction.
  */
 export const CAMERA_ZOOM_MIN = 0.42;
-export const CAMERA_ZOOM_MAX = 2.4;
+export const CAMERA_ZOOM_MAX = 4.6;
 export const CAMERA_ZOOM_STEP = 0.16;
 
 /** Distance the camera sits back from its target (affects clipping only). */

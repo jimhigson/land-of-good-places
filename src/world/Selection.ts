@@ -49,6 +49,10 @@ import {
  * walks there first (the ordinary routed walk — no second movement path) and it
  * runs on arrival, re-read from the zone's live action list so that a train
  * which has pulled out in the meantime simply does nothing.
+ *
+ * While riding, "standing at the thing" is judged differently — see
+ * {@link ridingInReach}: a `selectableWhileRiding` zone always runs *now*,
+ * because a riding character cannot walk anywhere to begin with.
  */
 
 /**
@@ -169,9 +173,23 @@ export class Selection implements GameSystem {
    * A tap landed on the park. Returns true if it selected something — in which
    * case the caller must **not** walk: selecting is free, and a distant tap that
    * both selected and walked would be the accidental-boarding bug in a new hat.
+   *
+   * Riding is deliberately **not** a blanket bail here, same as everywhere else
+   * in this class (see this file's own header and `Game.ts`'s wiring comment) —
+   * {@link pickRay} already runs every candidate through {@link selectable},
+   * which is where `InteractZone.selectableWhileRiding` actually gets enforced.
+   * A flat `|| this.player.riding` here used to skip that check entirely and
+   * make the flag dead for tapping specifically: every existing rider (the
+   * train's "Get off", the hotel lift) only ever needed *proximity* to pick
+   * itself, so nobody tapping it while riding had ever exercised this path —
+   * until `KeychainShop`'s locked view needed to tell six same-distance zones
+   * apart by *where the tap landed*, which proximity alone cannot do (see that
+   * file's own header). `TapNavigator.handleTap` still refuses to walk while
+   * riding, so a tap on a non-selectable zone (or on open ground) while riding
+   * still does nothing, exactly as before.
    */
   handleTap(ndcX: number, ndcY: number): boolean {
-    if (this.deps.blocked() || this.player.riding) return false;
+    if (this.deps.blocked()) return false;
 
     this.ndc.set(ndcX, ndcY);
     this.raycaster.setFromCamera(this.ndc, this.camera.camera);
@@ -221,7 +239,7 @@ export class Selection implements GameSystem {
    * doesn't invent one either.
    */
   commitZone(zone: InteractZone, action: ZoneAction): void {
-    if (this.withinReach(zone)) {
+    if (this.withinReach(zone) || this.ridingInReach(zone)) {
       this.pending = null;
       action.run();
       this.deps.flash(zone);
@@ -386,6 +404,38 @@ export class Selection implements GameSystem {
   }
 
   /**
+   * {@link commitZone}'s second way of counting as "already there" — a
+   * `selectableWhileRiding` zone, while riding, is always in reach.
+   *
+   * `standX`/`standZ` on a zone like this describe the ordinary *walk-up*
+   * point (`world/train/station.ts`'s platform, `KeychainShop.ts`'s
+   * counter-front points) — a place `TapNavigator` routes a **walking**
+   * character to. A riding character is not walking anywhere: `beginRide()`
+   * hands her to the ride/view for exactly this reason, and
+   * `TapNavigator.navigateTo` refuses outright while `player.riding` is true
+   * (its own doc comment). So when `withinReach` says no for a zone the ride
+   * itself opted into offering, the honest reading is not "walk closer" —
+   * there is nowhere to walk to and no way to get there — it is "she's
+   * exactly where the ride put her; that's what counts as reach here."
+   * Without this, `commitZone` would queue a walk that can never start, time
+   * out after {@link COMMIT_TIMEOUT}, and equip nothing — the exact shape of
+   * the bug `KeychainShop.ts`'s locked keyring picker hit (PR #331): she is
+   * teleported to one fixed point for the whole view, and every one of the
+   * six keyrings' own walk-up points sit 3.2-3.9 m from it, well outside
+   * their `standRadius`.
+   *
+   * Scoped to `selectableWhileRiding` zones specifically, not "riding, full
+   * stop": that flag is already the one place in this codebase that decides
+   * which zones are meant to be actionable mid-ride at all (see
+   * `InteractZone.selectableWhileRiding`'s own doc comment) — a zone that
+   * never opted in still needs a real, impossible-while-riding walk, exactly
+   * as before.
+   */
+  private ridingInReach(zone: InteractZone): boolean {
+    return this.player.riding && (zone.selectableWhileRiding ?? false);
+  }
+
+  /**
    * The nearest selectable zone the player is standing at, or null.
    *
    * Higher {@link InteractZone.selectRank} wins outright — the old "an
@@ -425,9 +475,15 @@ export class Selection implements GameSystem {
     return best;
   }
 
-  /** What the mouse is over, or null when there is no mouse or it is over nothing. */
+  /**
+   * What the mouse is over, or null when there is no mouse or it is over
+   * nothing selectable. Not gated on `player.riding` for the same reason
+   * {@link handleTap} isn't — {@link pickRay} already filters through
+   * {@link selectable}, which is the one place `selectableWhileRiding` is
+   * enforced.
+   */
   private hoverPick(zones: readonly InteractZone[]): InteractZone | null {
-    if (!this.hasCursor || this.player.riding) return null;
+    if (!this.hasCursor) return null;
     this.raycaster.setFromCamera(this.ndc, this.camera.camera);
     return this.pickRay(this.raycaster.ray, zones);
   }

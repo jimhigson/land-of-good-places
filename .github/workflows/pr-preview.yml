@@ -60,6 +60,22 @@ jobs:
       # Cloudflare-native equivalent of a Vercel/Netlify preview deploy.
       # `preview_urls: true` in wrangler.jsonc is what makes a URL exist for
       # a version that was uploaded but never made the default (live) one.
+      #
+      # Cloudflare caps "alias name + script name" at 63 characters combined
+      # (validation error 10021) — the full 40-char commit sha plus
+      # "land-of-good-places" blows straight through that, confirmed by a
+      # real failed run on this branch. 7 hex chars is git's own usual
+      # "short sha" length and leaves this comfortably under the limit
+      # (pr-<number>-<7 chars> + "land-of-good-places" is under 40 total).
+      - name: Compute short commit sha
+        id: sha
+        run: echo "short=$(echo '${{ github.event.pull_request.head.sha }}' | cut -c1-7)" >> "$GITHUB_OUTPUT"
+
+      # `--preview-alias` pins the URL to `pr-<number>-<short-sha>-...`
+      # instead of Cloudflare's own random version-id hash — Jim, 25 August
+      # 2026, wanted the real git commit hash visible in the URL, not an
+      # opaque Cloudflare-internal one, and a genuinely new URL on every
+      # push (never one shared/reused link).
       - name: Upload preview version
         id: preview
         uses: cloudflare/wrangler-action@v4
@@ -70,17 +86,39 @@ jobs:
             versions upload
             --message "PR #${{ github.event.pull_request.number }}"
             --tag "pr-${{ github.event.pull_request.number }}"
+            --preview-alias "pr-${{ github.event.pull_request.number }}-${{ steps.sha.outputs.short }}"
+
+      # Cloudflare keeps every uploaded version live at its own URL forever
+      # (confirmed: the Workers REST API's version-delete endpoint returns
+      # 405 "wrong auth scheme" for this repo's token, and nothing has
+      # granted it the extra permission that might fix that). Jim, 25 August
+      # 2026, decided this is fine: "I don't care about the delete just make
+      # sure all urls are unique and don't give me old ones." So this repo
+      # does NOT try to clean up old versions — only ever hand out the URL
+      # from the *current* push's own "Deploy PR preview" check/comment,
+      # never reuse or guess an older one (see CLAUDE.md's own preview-link
+      # rules above).
 
       - name: Comment preview link on PR
         uses: actions/github-script@v8
         with:
           script: |
             const output = `${{ steps.preview.outputs.command-output }}`;
-            const match = output.match(/https:\/\/[a-zA-Z0-9.-]+\.workers\.dev\S*/);
-            const url = match ? match[0] : null;
+            // `wrangler versions upload --preview-alias` prints TWO URLs: the
+            // random version-id hash one first, then a line explicitly
+            // labelled "Version Preview Alias URL:" — the stable one we
+            // actually want. A bare "first workers.dev match" regex silently
+            // grabs the hash line instead, so match the alias line by its
+            // own label first and only fall back to the generic match if
+            // that label isn't present (e.g. --preview-alias missing/failed).
+            const aliasMatch = output.match(/Version Preview Alias URL:\s*(https:\/\/\S+)/);
+            const anyMatch = output.match(/https:\/\/[a-zA-Z0-9.-]+\.workers\.dev\S*/);
+            const url = aliasMatch ? aliasMatch[1] : anyMatch ? anyMatch[0] : null;
             const marker = "<!-- pr-preview-comment -->";
+            const sha = context.payload.pull_request.head.sha;
+            const shortSha = sha.slice(0, 7);
             const body = url
-              ? `${marker}\n### 🎡 Preview deployed\n\n[Open the preview](${url})\n\nUpdated automatically on every push to this PR. **Open it in a private/incognito window** — this box has served many dev builds from many ports over its lifetime, and a stale service worker or save from an unrelated earlier visit can silently serve old content with no error (see CLAUDE.md's "A stale service worker will waste your hour").`
+              ? `${marker}\n### 🎡 Preview deployed\n\n[Open the preview](${url})\n\nBuilt from commit [\`${shortSha}\`](${context.payload.repository.html_url}/commit/${sha}) — a fresh URL every push, so this link is only ever current while it's the *newest* comment on this PR. **Open it in a private/incognito window** — this box has served many dev builds from many ports over its lifetime, and a stale service worker or save from an unrelated earlier visit can silently serve old content with no error (see CLAUDE.md's "A stale service worker will waste your hour").`
               : `${marker}\n### 🎡 Preview build finished\n\nBut no preview URL was found in the \`wrangler versions upload\` output — check the [workflow run](${context.payload.repository.html_url}/actions/runs/${context.runId}) for details.`;
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
