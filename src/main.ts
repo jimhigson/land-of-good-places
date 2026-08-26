@@ -206,7 +206,15 @@ type DeepLink =
    * the bus and put me in the park" is most of what was asked for and is worth
    * honouring; she just starts wherever an ordinary game would.
    */
-  | { readonly kind: 'spawn'; readonly spawn: DebugSpawnParams | null };
+  | { readonly kind: 'spawn'; readonly spawn: DebugSpawnParams | null }
+  /**
+   * `/bridge` — stand on a humpback railway bridge, on whatever seed this is.
+   * Its own kind rather than a `RIDE_DEEP_LINKS` entry because a bridge is not
+   * a stall and there is nothing to board; and not a `/spawn?pos=` because a
+   * deck's coordinates are a function of the seed, so a hard-coded pair would
+   * be wrong on the next park. `Game.enterBridgeSpawn` asks the built world.
+   */
+  | { readonly kind: 'bridge' };
 
 /**
  * Matches this load's URL against every developer deep link, in the order they
@@ -219,6 +227,7 @@ function parseDeepLink(pathname: string, search: string): DeepLink | null {
   const view = parseDebugView(pathname, search);
   if (view) return { kind: 'view', view };
   if (pathname === '/spawn') return { kind: 'spawn', spawn: parseDebugSpawn(search) };
+  if (pathname === '/bridge') return { kind: 'bridge' };
   return null;
 }
 
@@ -872,6 +881,20 @@ async function finishLaunch(
             deepLink.spawn.z,
             deepLink.spawn.y,
             deepLink.spawn.facing,
+          );
+        }
+        break;
+      case 'bridge':
+        // Fails *loud*, like `/rail-race` above and for the same reason (PR
+        // #314): a park with no bridges is exactly the thing this link exists
+        // to check, and silently opening at the ordinary spawn is how "I
+        // opened and no bridges" became a bug report nobody could reproduce.
+        if (!game.enterBridgeSpawn()) {
+          console.error(
+            'Land of Good Places: /bridge found no railway bridge in this park — the crossing ' +
+              'plan built none, so there is nothing to stand on. This is the failure issue #339 ' +
+              'was about; check world.train.bridges and test/procgen/invariants.ts\'s ' +
+              '"every crossing on a site the planner proved bridgeable still carries its bridge".',
           );
         }
         break;

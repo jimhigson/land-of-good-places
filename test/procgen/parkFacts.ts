@@ -528,6 +528,25 @@ export interface ParkFacts {
   readonly bridgeReservations: readonly (null | {
     covers(x: number, z: number, margin?: number): boolean;
   })[];
+  /**
+   * **Where `train/crossingPlanSolve.ts` proved, before a single path was
+   * drawn, that a real bridge fits** — `CROSSING_SITES`, by rail distance.
+   *
+   * The plan is a *proof obligation*, not a placement rule, which is why
+   * reading it here does not break this file's "measure the park, never the
+   * rules that built it" law: the planner marched the built loop against the
+   * built layout and asserted a bridge is buildable at each of these
+   * distances. An invariant may therefore hold the built park to it — a
+   * crossing standing on one of these and carrying no bridge is a promise
+   * the park broke, not a rule it was merely supposed to follow.
+   *
+   * Dynamically imported with everything else here, after the seed is fixed.
+   */
+  readonly plannedBridgeSiteDistances: readonly number[];
+  /** The same, for the planner's rare deliberate level-crossing tier
+   * (`LEVEL_CROSSING_SITES`) — so an invariant can tell "the planner chose a
+   * level crossing here" from "nobody planned this crossing at all". */
+  readonly plannedLevelSiteDistances: readonly number[];
   readonly plots: readonly PlotFact[];
   readonly entrances: readonly EntranceFact[];
   /**
@@ -963,6 +982,12 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // the seed-pinning trap this file's header already warns about.
   const { planBridgeFootprints } = await import('../../src/world/train/bridgeFootprint.ts');
   const bridgeReservations = planBridgeFootprints(world.train.crossings);
+
+  const { CROSSING_SITES, LEVEL_CROSSING_SITES } = await import(
+    '../../src/world/train/crossingPlan.ts'
+  );
+  const plannedBridgeSiteDistances = CROSSING_SITES.map((site) => site.railDistance);
+  const plannedLevelSiteDistances = LEVEL_CROSSING_SITES.map((site) => site.railDistance);
 
   const { BOUNDARY_MASONRY_HALF_WIDTH, BOUNDARY_WALL_COLLISION_HALF } = await import(
     '../../src/world/Garden.ts'
@@ -2198,6 +2223,8 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     climbableTrees,
     lamps: world.lampPosts.positions.map((p) => [p.x, p.z] as const),
     bridgeReservations,
+    plannedBridgeSiteDistances,
+    plannedLevelSiteDistances,
     plots,
     railRaceArchFeet,
     entrances,
