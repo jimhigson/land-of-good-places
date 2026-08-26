@@ -81,6 +81,7 @@
  * `window.game`, so it wants the dev server rather than `vite preview`
  * (`main.ts` only publishes that handle under `import.meta.env.DEV`).
  */
+import { writeSync } from 'node:fs';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { PLAYER_MAX_SPEED, PLAYER_RADIUS } from '../src/core/constants.ts';
 
@@ -216,9 +217,16 @@ const fouls: string[] = [];
  * Each case here boots a whole park in a software-rendered Chromium, so a run
  * is minutes long; a check that says nothing until it is finished is
  * indistinguishable from a check that has hung, and somebody will kill it.
+ *
+ * `writeSync`, not `console.log`, and that is the difference between the
+ * paragraph above being true and being a wish: Node block-buffers stdout the
+ * moment it is not a terminal, so a run whose output is redirected to a file
+ * or piped into CI's log shows **nothing at all** until 4 KB has piled up —
+ * which for this check is most of the way through. Writing straight to fd 1
+ * lands every line the instant it is produced, on a pipe as on a tty.
  */
 function say(line: string): void {
-  console.log(line);
+  writeSync(1, `${line}\n`);
 }
 
 /**
