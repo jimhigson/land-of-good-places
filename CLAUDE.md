@@ -355,6 +355,12 @@ everything else keeps moving underneath it.
 
 ## A stale service worker will waste your hour
 
+**This section is about an agent's own local dev server, never about a real
+player on the deployed site.** If a real person is stuck on stale content on
+`landofgoodplaces.blockstack.ing`, that is the bug described in "How a
+deployed park notices it is out of date" above, not this one — go fix the
+update mechanism, do not hand them a console command from here.
+
 This is a PWA, but as of 1 August the dev-mode service worker is **off by
 default** (`vite.config.ts`'s `devOptions.enabled`) — a plain `npm run dev`
 no longer registers one at all, so a fresh port just shows the current files,
@@ -403,6 +409,27 @@ every build (`vite.config.ts`'s `versionFilePlugin`, straight into `dist/`,
 never a tracked file) from the current commit; the poll is only a *trigger*
 for the existing `onNeedRefresh` → `UpdateGate` flow, not a second update
 path — pressing "Take me there!" still does exactly what it always did.
+
+**If this mechanism does not get a real player onto a new deploy on its
+own, that is a bug in the app, full stop — never a known quirk to route
+around.** Jim, 26 August 2026, after being told to open devtools and run
+`serviceWorker.getRegistrations()`/`caches.delete()` by hand on the live
+site: *"I don't care what CLAUDE.md documents, write into that [doc] not
+to use this as an excuse and a failure to reload is an unambiguous bug in
+the app... I'm not going to type commands to work around your bugs."* He
+is right, and the line below is the one that made that mistake possible:
+it let an agent read "known failure mode" as "acceptable failure mode."
+It is not. A player — Jim, Eleri, anyone else who ever opens this game —
+must never be handed a console command, an incognito-window instruction,
+or any other manual step to see the deploy that is supposed to already be
+live. If `version.txt`'s poll, the SW update check it triggers, or
+`UpdateGate` itself is not reliably getting a real open tab onto the new
+build, root-cause and fix *that*, with the same zero-tolerance standard
+this file already holds CI to — do not note it here as a thing to expect.
+The next section's console commands are for an **agent's own local dev
+server** while building a feature, never for a real player on the
+deployed site; if you catch yourself about to hand one to Jim, that is the
+signal the real bug is still open.
 
 ## Two definitions of one thing, kept in step by hand
 
