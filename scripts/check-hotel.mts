@@ -72,6 +72,7 @@ import {
   PLAYER_SPRINT_MULTIPLIER,
 } from '../src/core/constants.ts';
 import { damp } from '../src/core/mathUtils.ts';
+import { BLINK_DURATION } from '../src/art/style/faceLife.ts';
 import {
   ROOMS,
   BREAKFAST,
@@ -1407,8 +1408,9 @@ if (fallenPlayer.position.y < 0) {
 // the game makes one** — tick her awake until the ordinary blink cycle swaps
 // it in, and keep that texture — then assert the face wears exactly that one,
 // on every frame of the nap, and goes back to its resting face on waking.
-// A held expression and a natural blink are the same texture, so the "held"
-// half is what the many frames prove.
+// A held expression and a natural blink are the same texture, so **only a
+// count of frames can tell them apart**, never one instant: see the wake probe
+// at the end of this block, and #343 for the run of `main` that proved it.
 {
   const napCamera = new IsoCamera();
   const napper = quietly(
@@ -1679,6 +1681,17 @@ if (fallenPlayer.position.y < 0) {
       if (!hotel.isNapping) {
         problems.push('re-arming a nap for the `wakeNap` check below did not start one');
       }
+      // Her eyes are held shut by a flag, not by a one-shot call — see
+      // `Player.sleeping`. Assert it is *up* while she naps, so the "and it is
+      // down again after waking" test below is describing something that was
+      // ever true: a `sleeping` that never went up would clear the wake test
+      // without checking anything.
+      if (!napper.sleeping) {
+        problems.push(
+          '`Player.sleeping` is false during a nap — the flag that holds a napping child’s ' +
+            'eyes shut was never raised, so nothing below can prove it cleared',
+        );
+      }
       hotel.wakeNap();
       if (hotel.isNapping) {
         problems.push('`Hotel.wakeNap` did not end an in-progress nap');
@@ -1687,10 +1700,64 @@ if (fallenPlayer.position.y < 0) {
       // callers rely on — neither `Game.ts`'s `onTap` nor the jump read in
       // `update` checks {@link Hotel.isNapping} before calling it.
       hotel.wakeNap();
-      // And her eyes open again.
-      tickPlayer(0.2, 20);
-      if (blinkFace !== null && faceTexture() === blinkFace) {
-        problems.push('a woken child still has her eyes shut — the sleeping face never cleared');
+      // ---- **and her eyes open again** — asked in a way a blink cannot
+      // answer wrongly.
+      //
+      // This used to be one instant: tick 0.2 s past the wake and fail if the
+      // face was wearing `blinkFace`. It could not work, and on 26 August 2026
+      // it held `main` red (#343). **A blink and a nap are the same picture** —
+      // not by accident but by construction, since a nap holds the eyes shut by
+      // resting the face on `'blink'` (`Player.sleeping`). One frame therefore
+      // cannot say which of the two put that texture there, and it reported "a
+      // woken child still has her eyes shut" whenever an ordinary blink landed
+      // on the frame it happened to look at: 3.04% of runs, measured over
+      // 200 000 replays of this exact frame timeline, and reproduced at 1
+      // failure in 48 real runs of `check:hotel` before the fix.
+      //
+      // Two questions instead, and a blink can answer neither wrongly:
+      //
+      //  * **the flag that actually pins the face is down.** `sleeping` is the
+      //    mechanism; the texture is only its symptom. The probe just above
+      //    proved the flag was *up* through the nap, so this is describing
+      //    something that was ever true.
+      //  * **her face goes back to its resting one, and stays there.** Counted
+      //    over a window far longer than a blink, not sampled at a point: a
+      //    blink lasts `BLINK_DURATION` and blinks are `BLINK_GAP_MIN` apart
+      //    (`faceLife.ts` owns both numbers — imported here, never copied), so
+      //    at most one can interrupt a 2 s window, while a face still pinned to
+      //    *anything* — the sleeping blink, or a one-shot expression nothing
+      //    ever cleared — misses every frame of it. The two answers are ~113 of
+      //    120 and 0 of 120, which is not a threshold anything can drift
+      //    across.
+      if (napper.sleeping) {
+        problems.push(
+          '`Player.sleeping` is still true after `Hotel.wakeNap` — the flag that pins a napping ' +
+            "child's face to the sleeping one never cleared, so her eyes stay shut wherever she " +
+            'walks next',
+        );
+      }
+      const WAKE_WINDOW_FRAMES = 120;
+      // One blink, rounded up to whole frames, plus the frame it can be caught
+      // part-way through at each end.
+      const BLINK_FRAMES = Math.ceil(BLINK_DURATION * 60) + 2;
+      let restingAfterWaking = 0;
+      let shutAfterWaking = 0;
+      let otherAfterWaking = 0;
+      for (let frame = 0; frame < WAKE_WINDOW_FRAMES; frame += 1) {
+        tickPlayer(1 / 60, 20 + frame / 60);
+        const now = faceTexture();
+        if (now === restingFace) restingAfterWaking += 1;
+        else if (blinkFace !== null && now === blinkFace) shutAfterWaking += 1;
+        else otherAfterWaking += 1;
+      }
+      if (restingAfterWaking < WAKE_WINDOW_FRAMES - BLINK_FRAMES) {
+        problems.push(
+          `a woken child wore her resting face on only ${restingAfterWaking} of ` +
+            `${WAKE_WINDOW_FRAMES} frames (${(WAKE_WINDOW_FRAMES / 60).toFixed(1)} s) after ` +
+            `waking — ${shutAfterWaking} shut-eyed, ${otherAfterWaking} on some third face — ` +
+            `and one ordinary blink can account for at most ${BLINK_FRAMES} of them, so her face ` +
+            'never came back from the nap',
+        );
       }
       scene.remove(napper.group);
     }

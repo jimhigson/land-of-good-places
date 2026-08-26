@@ -1,3 +1,4 @@
+import { createRandom } from '../../core/mathUtils';
 import type { Expression } from './faces';
 
 /**
@@ -18,8 +19,14 @@ import type { Expression } from './faces';
  * changed. Every copy of this got that right; a fifth one might not.
  */
 
-/** How long the eyes stay shut. Any longer and they look sleepy, not blinking. */
-const BLINK_DURATION = 0.11;
+/**
+ * How long the eyes stay shut. Any longer and they look sleepy, not blinking.
+ *
+ * Exported because a check that wants to tell a blink from a nap needs to know
+ * how long a blink can possibly last, and a hand-copied `0.11` in a script is
+ * the "two definitions of one thing" bug CLAUDE.md opens with. One owner.
+ */
+export const BLINK_DURATION = 0.11;
 
 /** The gap between blinks: this much, plus up to this much again. */
 const BLINK_GAP_MIN = 2.6;
@@ -44,7 +51,30 @@ export interface BlinkClock {
   expressionFor(dt: number, resting: Expression): Expression;
 }
 
-export function createBlinkClock(random: () => number = Math.random): BlinkClock {
+/**
+ * The stream a clock draws from when its caller does not hand it one — and it
+ * is **seeded**, like everything else in this park.
+ *
+ * The default used to be `Math.random`, and this file's own doc comment above
+ * already knew why that was a hazard: a park that blinks differently every run
+ * is a park that cannot be traced. Only `wanderDriver` and `waypointDriver`
+ * ever acted on it, because only they were traced by a check at the time. The
+ * player's clock kept the unseeded default, and on 26 August 2026 that held
+ * `main` red (#343): `check:hotel` asked "are her eyes shut?" one instant after
+ * waking her, an ordinary blink answered yes on 3% of runs, and the check
+ * reported a child who never woke up.
+ *
+ * So the seed lives here rather than at the four call sites that would each
+ * have to remember it. What the randomness is actually *for* is
+ * de-synchronising faces built together — a car of toys or a crowd of children
+ * blinking in unison is considerably more unsettling than none of them blinking
+ * at all — and one shared stream does that just as well as entropy does, since
+ * consecutive clocks still start at unrelated phases. It simply starts at the
+ * same place every run.
+ */
+const blinkPhases = createRandom(0x62_6c_6e_6b);
+
+export function createBlinkClock(random: () => number = blinkPhases): BlinkClock {
   // Randomised rather than starting from a fixed value, which matters wherever
   // faces are built together: a car of toys or a crowd of children blinking in
   // unison is considerably more unsettling than none of them blinking at all.
