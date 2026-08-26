@@ -480,6 +480,10 @@ await runCase('after keychain view', async (page) => {
   }
   await page.keyboard.press('Escape');
   await page.waitForTimeout(1500);
+  // She is left standing at the view's own composed stand point, which sits a
+  // full `REACH` from the cart by construction — so every one of the eight
+  // directions below has more than {@link MIN_METRES} of room before anything
+  // solid, whichever way the seed put the stall.
   await walkEveryWay(page, 'after keychain view');
 });
 
