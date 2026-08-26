@@ -119,6 +119,8 @@ plus a tap × 3 boot paths, exit 0.
   under SwiftShader at 320×240. Budget for it; it does complete. `npm run
   check:walking` takes 15–25 min here for the same reason.
 - Node 26 via `scripts/with-node` or `/root/.nvm/versions/node/v26.7.0/bin`.
-- `node_modules` in this worktree is a **symlink** to the parent checkout's.
-  `.gitignore` says `node_modules/` with a trailing slash, which does not match
-  a symlink, so it shows up as untracked — never `git add -A` here.
+- This worktree has **no `node_modules`**. Symlink the parent checkout's in to
+  work here: `ln -sfn /home/user/land-of-good-places/node_modules node_modules`
+  — and take it out again before you finish. `.gitignore` says `node_modules/`
+  with a trailing slash, which does not match a *symlink*, so while it is there
+  git reports it as untracked. Never `git add -A` in this repo anyway.
