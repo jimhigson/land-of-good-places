@@ -130,6 +130,17 @@ const WALKABLE_IN_DEADLINE = PLAYER_MAX_SPEED * (MAX_HOLD_MS / 1000);
 const POLL_MS = 150;
 
 /**
+ * Ground speed, in m/s, below which she counts as standing still.
+ *
+ * A hundredth of walking pace: far below anything a frame of real movement
+ * produces, far above float dust. See {@link settle}.
+ */
+const STANDSTILL_SPEED = PLAYER_MAX_SPEED / 100;
+
+/** Longest {@link settle} waits for that standstill. */
+const SETTLE_MS = 3000;
+
+/**
  * **The keys a child is told to use, written out here rather than read from
  * the game.**
  *
@@ -193,6 +204,8 @@ type PlayerState = {
   readonly moveY: number | null;
   /** `InputSystem.moveAmount` — how hard the merged movement stick is pushed. */
   readonly moveAmount: number | null;
+  /** Ground speed in m/s, so a measurement can wait for a real standstill. */
+  readonly speed: number | null;
 };
 
 const fouls: string[] = [];
@@ -208,6 +221,24 @@ function say(line: string): void {
   console.log(line);
 }
 
+/**
+ * Waits until she has actually stopped moving, and reports where that is.
+ *
+ * Every measurement in this file is a *delta*, so every one of them is wrong if
+ * it starts while she is still coasting from the last one. Bounded, so a
+ * character genuinely stuck in motion fails the caller rather than hanging it.
+ */
+async function settle(page: Page): Promise<PlayerState> {
+  let state = await readPlayer(page);
+  let waitedMs = 0;
+  while (waitedMs < SETTLE_MS && (state.speed ?? 0) > STANDSTILL_SPEED) {
+    await page.waitForTimeout(POLL_MS);
+    waitedMs += POLL_MS;
+    state = await readPlayer(page);
+  }
+  return state;
+}
+
 function readPlayer(page: Page): Promise<PlayerState> {
   return page.evaluate(() => {
     const game = (window as unknown as { game?: any }).game;
@@ -219,6 +250,7 @@ function readPlayer(page: Page): Promise<PlayerState> {
       moveX: game?.input?.moveX ?? null,
       moveY: game?.input?.moveY ?? null,
       moveAmount: game?.input?.moveAmount ?? null,
+      speed: player?.velocity ? Math.hypot(player.velocity.x, player.velocity.z) : null,
     } as PlayerState;
   });
 }
@@ -243,7 +275,9 @@ async function waitForGame(page: Page, timeoutMs: number): Promise<void> {
  * would look like a second, unrelated bug.
  */
 async function walkOnce(page: Page, code: string): Promise<{ metres: number; detail: string }> {
-  const before = await readPlayer(page);
+  // From rest, for the same reason {@link tapToMove} does: a delta measured
+  // while she is still coasting from the previous press is that press's.
+  const before = await settle(page);
   if (!before.place) {
     return { metres: Number.NaN, detail: 'the player had no position to read at all' };
   }
@@ -272,8 +306,6 @@ async function walkOnce(page: Page, code: string): Promise<{ metres: number; det
     `to ${during.place?.x.toFixed(2)},${during.place?.z.toFixed(2)}; ` +
     `stick mid-press ${during.moveX ?? '?'},${during.moveY ?? '?'} ` +
     `amount ${during.moveAmount ?? '?'}; riding=${during.riding})`;
-  // Let the deceleration finish so the next press starts from a standstill.
-  await page.waitForTimeout(400);
   return { metres, detail };
 }
 
@@ -325,10 +357,23 @@ async function walkEveryWay(page: Page, label: string): Promise<void> {
  * guard) is part of what is under test.
  */
 async function tapToMove(page: Page, label: string): Promise<void> {
-  const before = await readPlayer(page);
+  // **Standstill first, or this measures the last key press.** She has just
+  // been walked eight times; `PLAYER_DECELERATION` needs frames, not
+  // milliseconds, to bring her to rest, and at a software renderer's frame rate
+  // the fixed settle after a key release can be two frames. Coasting 0.62 m
+  // into the poll below would score a pass with the tap doing nothing at all —
+  // a check green because it cannot fail.
+  const before = await settle(page);
   const viewport = page.viewportSize();
   if (!before.place || !viewport) {
     fouls.push(`${label}: tap-to-move could not be measured (no position or no viewport)`);
+    return;
+  }
+  if ((before.speed ?? 0) > STANDSTILL_SPEED) {
+    fouls.push(
+      `${label}: could not get her to a standstill before the tap ` +
+        `(still ${before.speed?.toFixed(3)} m/s after ${SETTLE_MS} ms), so the tap could not be measured`,
+    );
     return;
   }
   // Well below the horizon and off to one side, so the ray lands on open
