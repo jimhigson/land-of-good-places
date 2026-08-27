@@ -99,6 +99,22 @@ export const SITE_SNAP_TOLERANCE = 8;
 const SPINE_ADOPT_DISTANCE = 3.0;
 
 /**
+ * How far along a candidate run, either side of a crossing, its heading is
+ * checked against the crossing's own axis before it may donate that run as
+ * the crossing's spine — see {@link spineThrough}.
+ *
+ * Comfortably past `bridgeFootprint.ts`'s minimum walkable ramp run: the
+ * question being asked is "could a ramp be laid along this", and a path that
+ * turns away inside the ramp's own length cannot carry one.
+ */
+const SPINE_STRAIGHT_REACH = 12;
+
+/** Two runs whose straightness differs by less than this are equally straight,
+ * and the nearer one wins. Just enough to absorb the smoothed draw's own
+ * wobble between two legs that are both genuinely straight across. */
+const SPINE_STRAIGHTNESS_TIE = 0.05;
+
+/**
  * Paved half-width assumed for a crossing with no drawn run through it —
  * the gate walk. Matches the widest ordinary spur (`paths.ts` routes at
  * 2.6–3.2 m wide), because the walk in from the gate is the park's own
@@ -123,18 +139,82 @@ function spineThrough(
   dirX: number,
   dirZ: number,
 ): { spine: SpinePoint[]; halfWidth: number | null } {
+  // **The run that CROSSES here, not merely the one that passes closest.**
+  //
+  // Nearest-sample-wins was right while at most one drawn run came near a
+  // crossing. It stopped being right the moment the walk in from the gate was
+  // routed through a planned site (issue #339). On the canonical seed two
+  // drawn runs pass within a metre of site 172 — the avenue, dead straight
+  // over it, and a stall spur that touches the site and turns west three
+  // metres later, *along* the railway. The spur's nearest sample sat 0.23 m
+  // from the site's centre against the avenue's 0.32 m, so it won by 9 cm and
+  // the bridge took its centreline for a spine.
+  //
+  // What that built: both ramps blocked by the rail corridor at the very
+  // first probe, so `rampRunPos`/`rampRunNeg` came back ~0 and the park got a
+  // five-metre deck standing 4.2 m in the air over 0.2 m of terrain, with no
+  // way up to it from either end. It rendered correctly, it had a collider,
+  // and it was unwalkable — `check:park` found it as five waypoints "in a
+  // pocket of the garden graph nobody can walk to", which is the only reason
+  // anybody found it at all.
+  //
+  // So the run is chosen by **how straight it stays across the crossing**,
+  // over the reach a ramp actually needs, and not by which sample happens to
+  // land nearest the centre. That is the property a bridge is built out of: a
+  // path that turns away inside the ramp's own run cannot carry a ramp,
+  // whatever its distance to the centre is. Distance only breaks ties.
+  const dirLength = Math.hypot(dirX, dirZ) || 1;
+
+  /** Worst |cos| between this run's local heading and the crossing's own axis,
+   * over {@link SPINE_STRAIGHT_REACH} of the run either side of `index`. 1 is
+   * dead straight across; 0 is turning square away. */
+  const straightnessAt = (index: number): number => {
+    const run = (samples[index] as { run: number }).run;
+    let worst = 1;
+    for (const step of [1, -1] as const) {
+      let travelled = 0;
+      let previous = samples[index] as { x: number; z: number };
+      for (let i = index + step; i >= 0 && i < samples.length; i += step) {
+        const sample = samples[i] as { x: number; z: number; run: number };
+        if (sample.run !== run) break;
+        const strideX = sample.x - previous.x;
+        const strideZ = sample.z - previous.z;
+        const stride = Math.hypot(strideX, strideZ);
+        if (stride < 0.01) continue;
+        if (stride > RUN_BREAK) break;
+        worst = Math.min(
+          worst,
+          Math.abs((strideX * dirX + strideZ * dirZ) / (stride * dirLength)),
+        );
+        travelled += stride;
+        if (travelled >= SPINE_STRAIGHT_REACH) break;
+        previous = sample;
+      }
+    }
+    return worst;
+  };
+
   let bestIndex = -1;
   let bestDistance = SPINE_ADOPT_DISTANCE;
+  let bestStraightness = -1;
   for (let i = 0; i < samples.length; i += 1) {
     const sample = samples[i] as { x: number; z: number };
-    const d = Math.hypot(sample.x - x, sample.z - z);
-    if (d < bestDistance) {
-      bestDistance = d;
-      bestIndex = i;
+    const distance = Math.hypot(sample.x - x, sample.z - z);
+    if (distance >= SPINE_ADOPT_DISTANCE) continue;
+    const straightness = straightnessAt(i);
+    if (straightness < bestStraightness - SPINE_STRAIGHTNESS_TIE) continue;
+    if (
+      straightness <= bestStraightness + SPINE_STRAIGHTNESS_TIE &&
+      distance >= bestDistance &&
+      bestIndex !== -1
+    ) {
+      continue;
     }
+    bestStraightness = Math.max(bestStraightness, straightness);
+    bestDistance = distance;
+    bestIndex = i;
   }
   if (bestIndex === -1) return { spine: [], halfWidth: null };
-
   // Walk outward within the run — the same stride rule `consider` uses to
   // keep two different paths hugging opposite fence sides from reading as
   // one (`RUN_BREAK`), PLUS a direction-continuity guard: `pathCentreline`
