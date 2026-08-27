@@ -30,6 +30,7 @@ import { CharacterCreation, ContinueOrRestart, DevBadge, defaultCharacterChoice 
 import { gameStore } from './state';
 import { saveFlags } from './state/flags';
 import { clearSave, loadSave, type SaveFile } from './state/save';
+import { canAdoptWithoutAsking, noteAdopting, watchForFirstTouch } from './update-adoption';
 import { startVersionCheck } from './version-check';
 import { askForOrientationOnFirstGesture } from './core/deviceOrientationLook';
 
@@ -917,9 +918,26 @@ async function finishLaunch(
  */
 function setupUpdateGate(uiRoot: HTMLElement): void {
   const gate = new UpdateGate(uiRoot);
+  watchForFirstTouch();
+  const takeIt = (): void => {
+    noteAdopting();
+    updateSW(true);
+  };
   const updateSW = registerSW({
+    // Register now rather than on the window `load` event (workbox's default).
+    // "Am I even the right build?" is not a question to ask after every image
+    // and font has finished arriving: the sooner the answer comes back, the
+    // smaller the window in which this page pulls lazy chunks that the incoming
+    // worker is about to sweep out of the precache — see `update-adoption.ts`.
+    immediate: true,
     onNeedRefresh: () => {
-      gate.show(() => updateSW(true));
+      // The whole of issue #341 is this branch. A reload cannot promote a
+      // waiting service worker, so on a page nobody has touched yet we take the
+      // new build without asking; once she is playing, the gate waits for its
+      // button as it always has, because a swap means a reload and a reload
+      // mid-ride loses the ride.
+      if (canAdoptWithoutAsking()) gate.showAndGo(takeIt);
+      else gate.show(takeIt);
     },
     onRegisterError: (error: unknown) => {
       console.error('Land of Good Places: service worker registration failed.', error);
@@ -930,7 +948,7 @@ function setupUpdateGate(uiRoot: HTMLElement): void {
   // deploy. Note that pressing its button really does reload the page.
   if (import.meta.env.DEV) {
     (window as unknown as { __triggerUpdateGate: () => void }).__triggerUpdateGate = () =>
-      gate.show(() => updateSW(true));
+      gate.show(takeIt);
   }
   // `version.txt` only exists in a real build (`vite.config.ts`'s
   // `versionFilePlugin`), so polling for it in dev would just be a 404 every
