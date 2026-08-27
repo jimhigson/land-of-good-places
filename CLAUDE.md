@@ -670,15 +670,35 @@ PR. Post the review as a comment instead and **state the verdict plainly in
 the first line** ("Verdict: changes requested"). The Overseer reads the text,
 not the review state.
 
-**When telling Jim a PR is ready to look at, never hand him a bare PR
-link.** A PR page is a diff and a comment thread — it does not show him the
-feature. Give the Cloudflare Workers deploy-preview URL with the feature's
-own deep link appended (`https://pr-280-a1b2c3d-land-of-good-places.blockstack.workers.dev/rail-race`,
-not just `.../pull/280`), exactly per this file's own "hand over the URL of
-the thing itself" rule above. Pull the preview URL from that PR's "Deploy PR
-preview" check run (or its posted comment) rather than guessing one.
+**Never give Jim a link to a PR. Give the deploy preview, always.** Jim,
+26 August 2026: *"I want preview links. Add to CLAUDE.md to never give links
+to PRs, only preview deploys."* This is absolute, and it is not the earlier
+"unless he asks" version — a `github.com/.../pull/NNN` URL does not belong in
+a message to Jim at all. A PR page is a diff and a comment thread; it does not
+show him the feature, and he does not merge by clicking one (the Overseer
+merges through its own workflow).
 
-**Do not include the PR link at all unless Jim explicitly asks for it.** He
-merges through the Overseer's own workflow, not by clicking a GitHub link —
-the preview+deep-link is the whole message. Only add the bare PR link when he
-names it directly ("give me the PR link", "what's the PR for X").
+What to send instead: the Cloudflare Workers deploy-preview URL with the
+feature's own deep link appended —
+`https://pr-280-a1b2c3d-land-of-good-places.blockstack.workers.dev/rail-race`,
+never `.../pull/280` — exactly per this file's own "hand over the URL of the
+thing itself" rule above. **Pull the preview URL from that PR's "Deploy PR
+preview" check run or its posted comment; never construct one by hand.** The
+posted comment is regenerated on every push and always names the newest
+build, so the newest such comment is the only trustworthy source.
+
+Referring to a PR by *number* in prose ("#340 adds the `/bridge` link") is
+fine and often necessary — it is the clickable `github.com` URL that is
+banned. If a preview genuinely does not exist for something (a CI-only
+change, a workflow edit, a docs commit), say so plainly rather than
+substituting a PR link to fill the gap.
+
+**One caveat found the hard way, 26 August 2026:** this sandbox's egress
+policy returns **403 for `*.workers.dev`**, for `curl` as well as for a
+headless browser, so an agent here **cannot verify a preview URL it hands
+over**. Two links were given to Jim that failed on him before this was
+understood. So: take the URL from the PR's own preview comment (never
+assemble it), and if you have not been able to load it yourself, say that
+in the same breath rather than implying you checked it. The live domain
+`landofgoodplaces.blockstack.ing` *is* reachable by `curl` from here, so
+anything already merged can and should be verified for real.
