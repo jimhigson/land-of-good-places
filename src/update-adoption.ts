@@ -42,6 +42,19 @@
  * card and stays there. Deciding *in the page*, where we know whether anyone is
  * playing, is the difference between a swap that is followed by an immediate
  * reload and a swap that is not followed by anything.
+ *
+ * ## What a swap can actually break, measured
+ *
+ * Every dynamic `import()` in `src/` is a **boot-time** one: `main.ts`'s `Game`
+ * chunk, and `boot/parkGeneration.ts`'s generation slices. Nothing lazy-loads
+ * once the park is up. So a tab that has finished booting already holds all of
+ * its code and cannot be hurt by the incoming worker sweeping the old build out
+ * of the precache; the only vulnerable tab is one still booting — which, on the
+ * path below, is the tab that is about to reload anyway. (And the gate sits at
+ * `z-index: 200` over the boot splash's 10, so even a chunk that vanishes in
+ * that gap is behind the card rather than in front of a child.) If a ride or a
+ * mini-game is ever made to lazy-load, this paragraph stops being true and the
+ * rule above has to be re-argued.
  */
 
 /**
