@@ -13,7 +13,13 @@ import {
 } from './core/constants';
 import type { FrameContext, GameSystem } from './core/types';
 import { FoliageFade, Sky, TreeClimbing, World, skyViewFor, type WorldOptions } from './world';
-import { ENTRANCE_ANGLE, ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from './world/entrance/layout';
+import {
+  ENTRANCE_ANGLE,
+  ENTRANCE_GATE_X,
+  ENTRANCE_GATE_Z,
+  ENTRANCE_PLAYER_X,
+  ENTRANCE_PLAYER_Z,
+} from './world/entrance/layout';
 import { arrivalOwnsTheSpawn } from './world/entrance/arrivalSpawn';
 import { arrivalCameraZoom } from './world/entrance/ArrivalSequence';
 import { KEYCHAIN_VIEW_ZOOM } from './world/KeychainShop';
@@ -1323,6 +1329,57 @@ export class Game {
     if (y === undefined) this.player.teleport(x, z, yaw);
     else this.player.teleportTo(x, y, z, yaw);
     this.camera.snapTo(this.player.position);
+  }
+
+  /**
+   * `/bridge` — stand her on a humpback railway bridge, whichever seed this
+   * is. Issue #339.
+   *
+   * `/spawn?pos=x,z` can already do this if you happen to know a deck's
+   * coordinates, and `/view` can look at one. Neither is any use for the
+   * question actually being asked — *is there a bridge, and does it feel like
+   * a bridge to walk over?* — because a bridge's coordinates are a function
+   * of the seed, so the link has to be re-derived by hand for every park.
+   * That cost is paid on every round of feedback, which is exactly what
+   * CLAUDE.md's deep-link rule exists to stop.
+   *
+   * Picks the bridge **nearest the park entrance**, so the link is stable for
+   * a given seed and lands on the one a player would meet first. Stands her on
+   * the crown of the deck (`bridge.deckY` plus a whisker, so the first frame's
+   * ground resolve settles her onto the deck rather than through it), facing
+   * along the deck so both parapets and the track below are in shot.
+   *
+   * Returns false — and changes nothing — when this park built no bridges at
+   * all, so the URL degrades to an ordinary spawn and says so, rather than
+   * teleporting her to the origin and looking like the park is broken.
+   */
+  enterBridgeSpawn(): boolean {
+    const bridges = this.world.train.bridges;
+    if (bridges.length === 0) return false;
+    const crossings = this.world.train.crossings;
+    let best: { x: number; z: number; y: number; facing: number } | null = null;
+    let bestDistance = Infinity;
+    for (const crossing of crossings) {
+      const bridge = bridges.find((candidate) => candidate.deckCovers(crossing.x, crossing.z));
+      if (!bridge) continue;
+      const distance = Math.hypot(crossing.x - ENTRANCE_GATE_X, crossing.z - ENTRANCE_GATE_Z);
+      if (distance >= bestDistance) continue;
+      bestDistance = distance;
+      best = {
+        x: crossing.x,
+        z: crossing.z,
+        // The deck's own height at this exact point, from the bridge itself —
+        // never `deckY` restated, which is the crown of the hump and not
+        // necessarily over the crossing's own centre.
+        y: bridge.heightAt(crossing.x, crossing.z),
+        // Along the deck, not across it: across it she would be looking at a
+        // parapet from 30 cm away.
+        facing: Math.atan2(crossing.pathDirX, crossing.pathDirZ),
+      };
+    }
+    if (!best) return false;
+    this.enterDebugSpawn(best.x, best.z, best.y, best.facing);
+    return true;
   }
 
   start(): void {

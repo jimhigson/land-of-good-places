@@ -5211,6 +5211,101 @@ const crossingsArePlannedAndMostlyBridged: Invariant = (facts) => {
  * its passengers, and is standing at the gate rather than at the origin.
  */
 /**
+ * **A crossing standing on ground the planner proved bridgeable really
+ * carries a bridge — and at least one crossing does.** Issue #339.
+ *
+ * `crossingsArePlannedAndMostlyBridged` above counts bridges against
+ * fallbacks, which catches a park that built none at all. It does not,
+ * despite its name, ever consult the plan — so it cannot see the failure
+ * that actually reaches a player: **a crossing quietly sliding off a site
+ * `crossingPlanSolve.ts` had already proved a bridge fits on.** That module
+ * exists precisely to make that impossible ahead of time; this asks whether
+ * the promise was kept afterwards, on the built park.
+ *
+ * It is the check issue #339 went looking for, and it is not vacuous: a
+ * whole class of "the browser built no bridges" failures — the crossing-plan
+ * letterbox (`train/crossingPrewarm.ts`) handing back an empty plan, the
+ * sliced solve in `boot/parkGeneration.ts` finishing early, `paths.ts`
+ * losing its crossing-site lattice edges — all land as *zero crossings on a
+ * planned bridge site*, which clause 1 below reports by name rather than by
+ * silently making every per-bridge loop in this file iterate over nothing.
+ *
+ * Two clauses:
+ *
+ * 1. **The plan reached the park at all.** If the planner proved any bridge
+ *    site (`plannedBridgeSiteDistances`), at least one built crossing stands
+ *    on one. A park whose crossings have all drifted off-plan is a park
+ *    whose crossing plan did not arrive — the exact shape of a prewarm
+ *    letterbox that came back empty, and the state in which every other
+ *    bridge invariant here passes by iterating over nothing.
+ * 2. **A crossing on a proven site is bridged.** `bridgeFootprint.ts`'s late,
+ *    real, backtracking search is allowed to fall back to a level crossing
+ *    where a genuine obstacle arrived after planning — but not on ground the
+ *    planner measured as clear against the boundary, the plots, the stations
+ *    and the rail's own corridor. That regression has happened before and was
+ *    found by eye rather than by a check: `crossings.ts`'s own comment records
+ *    the canonical seed losing "sites 172/228 both" to a re-derived
+ *    perpendicular jittering a metre or two off the site.
+ *
+ * A crossing that never stood on a planned bridge site is **not** this
+ * invariant's business, and is deliberately not complained about: the walk
+ * in from the gate is a fixed corridor rather than a routed leg, so it meets
+ * the loop wherever the loop happens to be, and on the canonical seed that
+ * is `railDistance` 148.8 — 46° off square, unbridgeable, and correctly a
+ * level crossing. Whether the park's front door *should* be exempt from the
+ * plan is a design question (issue #339's own finding), not something this
+ * file can assert its way out of.
+ *
+ * Matching is by rail distance, not by position: `crossings.ts` copies a
+ * snapped site's `railDistance` across verbatim, so a crossing that really is
+ * a planned site carries that site's exact number. The tolerance below is
+ * therefore floating-point slack, not a search radius.
+ */
+const SITE_IDENTITY_TOLERANCE = 0.01;
+
+const everyProvenBridgeSiteKeepsItsBridge: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const train = facts.world.train;
+  const planned = facts.plannedBridgeSiteDistances;
+  if (planned.length === 0) return complaints;
+
+  const onPlannedSite = train.crossings.filter((crossing) =>
+    planned.some((d) => Math.abs(d - crossing.railDistance) <= SITE_IDENTITY_TOLERANCE),
+  );
+
+  if (onPlannedSite.length === 0) {
+    complaints.push(
+      `the crossing planner proved ${planned.length} bridge site(s) on this loop ` +
+        `(at railDistance ${planned.map((d) => d.toFixed(1)).join(', ')}) and not one of the ` +
+        `park's ${train.crossings.length} built crossing(s) stands on any of them ` +
+        `(they sit at ${train.crossings.map((c) => c.railDistance.toFixed(1)).join(', ') || 'nowhere — there are none'}) — ` +
+        'the crossing plan did not reach the park, so every per-bridge check here is ' +
+        'iterating over nothing',
+    );
+    return complaints;
+  }
+
+  for (const crossing of onPlannedSite) {
+    // Measured off the built world twice over: the crossing is in
+    // `fallbackCrossings` (the search gave up), or `bridges` holds nothing
+    // whose deck stands over it (the search claimed a bridge that is not
+    // there). Either way the promise the plan made was not kept.
+    const gaveUp = train.fallbackCrossings.includes(crossing);
+    const deckOverIt = train.bridges.some((bridge) => bridge.deckCovers(crossing.x, crossing.z));
+    if (gaveUp || !deckOverIt) {
+      complaints.push(
+        `the crossing at (${fmt([crossing.x, crossing.z])}), railDistance ` +
+          `${crossing.railDistance.toFixed(1)}, stands on a site the crossing planner proved a ` +
+          `bridge fits on, and ${gaveUp ? 'the bridge search fell back to a level crossing' : 'no built bridge deck covers it'} — ` +
+          `the park has ${train.bridges.length} bridge(s) for ${train.crossings.length} crossing(s)`,
+      );
+    }
+  }
+
+  return complaints;
+};
+
+/**
  * **Is there actually a hole in the wall at the gate?**
  *
  * Issue #195. `isInEntranceGateGap` sat in `entrance/layout.ts` from the day the
@@ -7301,6 +7396,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   [
     'railway crossings are planned — station-clear, and mostly real bridges',
     crossingsArePlannedAndMostlyBridged,
+  ],
+  [
+    'every crossing on a site the planner proved bridgeable still carries its bridge',
+    everyProvenBridgeSiteKeepsItsBridge,
   ],
   ['the cat bus is actually in the park, at the gate, with everyone aboard', theCatBusIsInThePark],
   ['every child fits in the cat bus seat they are sitting in', childrenFitTheSeatsTheySitIn],
