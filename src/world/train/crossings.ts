@@ -87,7 +87,7 @@ const RUN_BREAK = 3;
  * and still be recognised as that site — the drawn leg was routed *through*
  * the site by `paths.ts`, so a miss beyond a few metres is a different
  * crossing (the gate walk's own fixed corridor, mostly), not the site. */
-const SITE_SNAP_TOLERANCE = 8;
+export const SITE_SNAP_TOLERANCE = 8;
 
 /**
  * A crossing whose nearest drawn-path sample is further away than this has
@@ -97,6 +97,22 @@ const SITE_SNAP_TOLERANCE = 8;
  * sample pitch (~0.8 m) and much smaller than the gap to any *other* path.
  */
 const SPINE_ADOPT_DISTANCE = 3.0;
+
+/**
+ * How far along a candidate run, either side of a crossing, its heading is
+ * checked against the crossing's own axis before it may donate that run as
+ * the crossing's spine — see {@link spineThrough}.
+ *
+ * Comfortably past `bridgeFootprint.ts`'s minimum walkable ramp run: the
+ * question being asked is "could a ramp be laid along this", and a path that
+ * turns away inside the ramp's own length cannot carry one.
+ */
+const SPINE_STRAIGHT_REACH = 12;
+
+/** Two runs whose straightness differs by less than this are equally straight,
+ * and the nearer one wins. Just enough to absorb the smoothed draw's own
+ * wobble between two legs that are both genuinely straight across. */
+const SPINE_STRAIGHTNESS_TIE = 0.05;
 
 /**
  * Paved half-width assumed for a crossing with no drawn run through it —
@@ -123,18 +139,82 @@ function spineThrough(
   dirX: number,
   dirZ: number,
 ): { spine: SpinePoint[]; halfWidth: number | null } {
+  // **The run that CROSSES here, not merely the one that passes closest.**
+  //
+  // Nearest-sample-wins was right while at most one drawn run came near a
+  // crossing. It stopped being right the moment the walk in from the gate was
+  // routed through a planned site (issue #339). On the canonical seed two
+  // drawn runs pass within a metre of site 172 — the avenue, dead straight
+  // over it, and a stall spur that touches the site and turns west three
+  // metres later, *along* the railway. The spur's nearest sample sat 0.23 m
+  // from the site's centre against the avenue's 0.32 m, so it won by 9 cm and
+  // the bridge took its centreline for a spine.
+  //
+  // What that built: both ramps blocked by the rail corridor at the very
+  // first probe, so `rampRunPos`/`rampRunNeg` came back ~0 and the park got a
+  // five-metre deck standing 4.2 m in the air over 0.2 m of terrain, with no
+  // way up to it from either end. It rendered correctly, it had a collider,
+  // and it was unwalkable — `check:park` found it as five waypoints "in a
+  // pocket of the garden graph nobody can walk to", which is the only reason
+  // anybody found it at all.
+  //
+  // So the run is chosen by **how straight it stays across the crossing**,
+  // over the reach a ramp actually needs, and not by which sample happens to
+  // land nearest the centre. That is the property a bridge is built out of: a
+  // path that turns away inside the ramp's own run cannot carry a ramp,
+  // whatever its distance to the centre is. Distance only breaks ties.
+  const dirLength = Math.hypot(dirX, dirZ) || 1;
+
+  /** Worst |cos| between this run's local heading and the crossing's own axis,
+   * over {@link SPINE_STRAIGHT_REACH} of the run either side of `index`. 1 is
+   * dead straight across; 0 is turning square away. */
+  const straightnessAt = (index: number): number => {
+    const run = (samples[index] as { run: number }).run;
+    let worst = 1;
+    for (const step of [1, -1] as const) {
+      let travelled = 0;
+      let previous = samples[index] as { x: number; z: number };
+      for (let i = index + step; i >= 0 && i < samples.length; i += step) {
+        const sample = samples[i] as { x: number; z: number; run: number };
+        if (sample.run !== run) break;
+        const strideX = sample.x - previous.x;
+        const strideZ = sample.z - previous.z;
+        const stride = Math.hypot(strideX, strideZ);
+        if (stride < 0.01) continue;
+        if (stride > RUN_BREAK) break;
+        worst = Math.min(
+          worst,
+          Math.abs((strideX * dirX + strideZ * dirZ) / (stride * dirLength)),
+        );
+        travelled += stride;
+        if (travelled >= SPINE_STRAIGHT_REACH) break;
+        previous = sample;
+      }
+    }
+    return worst;
+  };
+
   let bestIndex = -1;
   let bestDistance = SPINE_ADOPT_DISTANCE;
+  let bestStraightness = -1;
   for (let i = 0; i < samples.length; i += 1) {
     const sample = samples[i] as { x: number; z: number };
-    const d = Math.hypot(sample.x - x, sample.z - z);
-    if (d < bestDistance) {
-      bestDistance = d;
-      bestIndex = i;
+    const distance = Math.hypot(sample.x - x, sample.z - z);
+    if (distance >= SPINE_ADOPT_DISTANCE) continue;
+    const straightness = straightnessAt(i);
+    if (straightness < bestStraightness - SPINE_STRAIGHTNESS_TIE) continue;
+    if (
+      straightness <= bestStraightness + SPINE_STRAIGHTNESS_TIE &&
+      distance >= bestDistance &&
+      bestIndex !== -1
+    ) {
+      continue;
     }
+    bestStraightness = Math.max(bestStraightness, straightness);
+    bestDistance = distance;
+    bestIndex = i;
   }
   if (bestIndex === -1) return { spine: [], halfWidth: null };
-
   // Walk outward within the run — the same stride rule `consider` uses to
   // keep two different paths hugging opposite fence sides from reading as
   // one (`RUN_BREAK`), PLUS a direction-continuity guard: `pathCentreline`
@@ -250,16 +330,54 @@ export function computeCrossings(
 
   for (const sample of pathCentreline()) consider(sample.x, sample.z);
 
-  // The gate walk: from the gate to well inside, sampled every metre. Its
-  // first sample stands far from the last path sample, so the RUN_BREAK
+  // **The esplanade: the arch to wherever the drawn network takes over.**
+  // Its first sample stands far from the last path sample, so the RUN_BREAK
   // stride guard keeps the seam between them from ever reading as a flip.
+  //
+  // This used to march a flat 32 m straight in from the arch on the radial,
+  // regardless of what was drawn there, and that is what put a level crossing
+  // at the park's own front door and kept it there. `paths.ts`'s gate
+  // corridor now stops short of the railway and hands the walk to the street
+  // lattice, which crosses only at a planned site (issue #339) — but a hand-
+  // sampled straight line ploughing on to `z = 28` still flipped sides at the
+  // track, so `computeCrossings` minted the crossing anyway: a fence gap and a
+  // timber deck at a place no path goes any more. Measured on the canonical
+  // seed with the reroute in and this still at 32 m: three crossings, the
+  // front-door one at railDistance 148.5 with nothing walking over it.
+  //
+  // The honest span is the bit of the walk that really is un-drawn: from the
+  // arch to the first point where the drawn network is under her feet. Beyond
+  // that the drawn route is the walk, and `pathCentreline()` above has already
+  // measured it. The march still runs its full 32 m when nothing drawn comes
+  // near — a seed whose network stops short of the gate is exactly the case
+  // the old 32 m was raised to 32 m for.
   const inX = -ENTRANCE_GATE_X / Math.hypot(ENTRANCE_GATE_X, ENTRANCE_GATE_Z);
   const inZ = -ENTRANCE_GATE_Z / Math.hypot(ENTRANCE_GATE_X, ENTRANCE_GATE_Z);
-  // Sample the walk deep enough to meet the track however far in this
-  // seed's loop dips — 14 m missed the crossing entirely on seeds whose
-  // gate-side dip sat low, sealing the gate outside the fence.
+  const drawn = pathCentreline();
+  const onDrawnPath = (x: number, z: number): boolean => {
+    for (const sample of drawn) {
+      if (Math.hypot(sample.x - x, sample.z - z) <= sample.halfWidth + 0.4) return true;
+    }
+    return false;
+  };
+  //
+  // **The march overlaps the drawn ribbon rather than stopping dead at it.**
+  // A side flip is only ever measured between two *consecutive* samples, and
+  // the drawn ribbon's samples are a different run — so a loop crossing in the
+  // seam between the last esplanade sample and the ribbon's own first point
+  // would be invisible to both, and the fence would seal with no gap where a
+  // child walks. Found on seed 11 before the railway was told to keep off the
+  // walk in (`train/route.ts`): the loop cut `x = 0` at `z = 54.3`, six metres
+  // in from the arch, in exactly that seam.
+  const ESPLANADE_OVERLAP = 4;
+  let sinceDrawn = -1;
   for (let step = 0; step <= 32; step += 1) {
-    consider(ENTRANCE_GATE_X + inX * step, ENTRANCE_GATE_Z + inZ * step);
+    const x = ENTRANCE_GATE_X + inX * step;
+    const z = ENTRANCE_GATE_Z + inZ * step;
+    if (sinceDrawn >= 0) sinceDrawn += 1;
+    else if (step > 0 && onDrawnPath(x, z)) sinceDrawn = 0;
+    if (sinceDrawn > ESPLANADE_OVERLAP) break;
+    consider(x, z);
   }
 
   flips.sort((a, b) => a - b);

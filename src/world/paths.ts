@@ -926,6 +926,21 @@ function routeLeg(
 
   const build = (candidate: (typeof candidates)[number]): (readonly [number, number])[] => {
     const site = candidate.site;
+    // **The deck is walked in the direction this leg travels.** A site's
+    // `dir` points from its minus foot to its plus foot and knows nothing
+    // about who is crossing it, so emitting `+dir, centre, -dir` always —
+    // which is what this did until issue #339 — is right for a leg arriving
+    // from the minus side and exactly backwards for one arriving from the
+    // plus side. The route then walked to the near foot, teleported to the
+    // *far* end of the deck, came back over the rail to the near end, and
+    // set off again: a visible about-turn on the bridge itself. It stayed
+    // hidden because every leg that had ever used a bridge site happened to
+    // approach from the minus side; the gate walk, rerouted onto a planned
+    // site by this same issue, is the first to arrive from the other one.
+    // Measured on the canonical seed before the fix: `(-27.12, 54.86) ->
+    // (-21.29, 33.07) -> (-22.12, 36.16) -> (-22.94, 39.25) -> (-17.11,
+    // 17.46)` — 22 m south, 6 m back north over the deck, then south again.
+    const nearSign = fromSide;
     return [
       // The ordinary routers know nothing about the railway, so each sub-leg
       // goes through the same side-holding pipeline as a whole same-side leg
@@ -936,9 +951,15 @@ function routeLeg(
       // The crossing axis, pinned at the deck's edges and centre so the drawn
       // Catmull-Rom curve runs dead straight over the rail rather than bowing
       // off the deck between two distant feet.
-      [site.x + site.dirX * DECK_HALF_LENGTH, site.z + site.dirZ * DECK_HALF_LENGTH] as const,
+      [
+        site.x + site.dirX * nearSign * DECK_HALF_LENGTH,
+        site.z + site.dirZ * nearSign * DECK_HALF_LENGTH,
+      ] as const,
       [site.x, site.z] as const,
-      [site.x - site.dirX * DECK_HALF_LENGTH, site.z - site.dirZ * DECK_HALF_LENGTH] as const,
+      [
+        site.x - site.dirX * nearSign * DECK_HALF_LENGTH,
+        site.z - site.dirZ * nearSign * DECK_HALF_LENGTH,
+      ] as const,
       ...sameSideLeg(candidate.far, to, toSide),
     ];
   };
@@ -3122,6 +3143,336 @@ export interface PathGraph {
  * mutated in exactly the order {@link buildGraph}'s straight-through drain
  * mutates it, so the cadence cannot move a single route.
  */
+/**
+ * **The protected gate corridor: where it starts, where it may end, and why
+ * it now ends short of the railway.**
+ *
+ * The walk in from the gate is the one leg of the network that is *authored*
+ * rather than routed: a straight run down `x = 0` from just inside the arch,
+ * over the ground `ArrivalSequence` choreographs the cat bus's children
+ * across. Everything else meets the railway only at a site
+ * `train/crossingPlanSolve.ts` proved a bridge fits on — this one leg met it
+ * wherever the loop happened to be.
+ *
+ * On the canonical seed that was `railDistance` 148.8, 46 deg off square,
+ * with both bridge ramps running straight back along the track:
+ * unbridgeable, so the park's own front door got the one flat level crossing
+ * in it, 19.8 m from where the bus drops her, while the two real bridges
+ * stood 25.7 m and 80.5 m away down side spurs. Jim, 26 August 2026: *"I
+ * opened and no bridges."* He was describing the park accurately (#339).
+ *
+ * So the corridor now stops **before** the rail and hands the rest of the
+ * walk to the street lattice, which can only cross at a planned site. The
+ * arrival's own ground — the arch, the esplanade, the bus stop, everywhere
+ * the disembarking crowd walks — is north of the loop on every seed swept,
+ * so it keeps its authored corridor; only the stretch *past* the railway
+ * changes, and only on the seeds where the loop is in the way at all.
+ */
+const GATE_CORRIDOR_START_Z = 54;
+
+/** How far in the authored corridor runs when the loop is nowhere near it —
+ * the pre-#339 value, unchanged, and still the answer on three of the five
+ * swept seeds. */
+const GATE_CORRIDOR_INNER_Z = 30;
+
+/**
+ * Daylight the corridor's mouth keeps from the rail centre line.
+ *
+ * Not a taste number: the corridor is a 3.2 m ribbon, so its own edge stands
+ * 1.6 m off its centre, and `RAIL_CLAMP_DISTANCE` (4.2 m) is how close the
+ * lattice lets any street's centre come to the track. A mouth inside that is
+ * a path drawn on the railway.
+ */
+const GATE_CORRIDOR_RAIL_STANDOFF = RAIL_CLAMP_DISTANCE + 1.6;
+
+/** Cached so the callers below cannot disagree, and so the stub search is
+ * not repeated. */
+let gateCorridorDeepestCache: readonly [number, number] | null = null;
+
+/**
+ * **The deepest the authored corridor could run on this seed's park.**
+ *
+ * Walks in from {@link GATE_CORRIDOR_START_Z} and takes the last point on
+ * `x = 0` that is both still on the gate's own side of the loop and a full
+ * {@link GATE_CORRIDOR_RAIL_STANDOFF} clear of the track.
+ *
+ * Whether the street lattice can actually *reach* the mouth is deliberately
+ * not asked here. It was, at first — but `gateApproachSearch` already tries
+ * both routers from every candidate mouth and keeps the walk that measures
+ * best, so asking twice bought nothing and cost a `streetStubs` search on
+ * every 20 cm of the scan.
+ *
+ * When the loop is nowhere near the corridor this returns
+ * {@link GATE_CORRIDOR_INNER_Z} — the pre-#339 answer, unchanged, and still
+ * the answer on three of the five swept seeds.
+ */
+function gateCorridorDeepestMouth(): readonly [number, number] {
+  if (gateCorridorDeepestCache) return gateCorridorDeepestCache;
+  const gateSide = railInfoAt(0, GATE_CORRIDOR_START_Z).side;
+  const full = [0, GATE_CORRIDOR_INNER_Z] as const;
+  const steps = Math.round((GATE_CORRIDOR_START_Z - GATE_CORRIDOR_INNER_Z) / 0.2);
+  // **Only a corridor the loop actually cuts across gets shortened.** A
+  // corridor that merely passes near the track keeps its authored length, so
+  // three of the five swept seeds build precisely the park they built before
+  // this change — the fix is for the walk that meets the railway, and a seed
+  // whose walk does not meet it has nothing here to fix.
+  let crossesAt = -1;
+  for (let step = 0; step <= steps; step += 1) {
+    const z = GATE_CORRIDOR_START_Z - step * 0.2;
+    if (railInfoAt(0, z).side !== gateSide) {
+      crossesAt = z;
+      break;
+    }
+  }
+  if (crossesAt < 0) {
+    gateCorridorDeepestCache = full;
+    return full;
+  }
+  let deepest: readonly [number, number] = [0, GATE_CORRIDOR_START_Z] as const;
+  for (let step = 0; step <= steps; step += 1) {
+    const z = GATE_CORRIDOR_START_Z - step * 0.2;
+    if (z <= crossesAt) break;
+    if (railInfoAt(0, z).dist < GATE_CORRIDOR_RAIL_STANDOFF) break;
+    deepest = [0, z] as const;
+  }
+  gateCorridorDeepestCache = deepest;
+  return deepest;
+}
+
+/**
+ * The point the lattice is asked to reach from a given corridor mouth.
+ *
+ * Three metres past the mouth when the corridor runs its full length — the
+ * way the pre-#339 code asked for `[0, 27]` past `[0, 30]`, so the street's
+ * own stub has somewhere to arrive from — and the mouth itself when the loop
+ * cut the corridor short, because three metres further would be three metres
+ * nearer the track than the standoff the mouth was chosen for.
+ */
+function gateCorridorHandover(mouth: readonly [number, number]): readonly [number, number] {
+  if (mouth[1] <= GATE_CORRIDOR_INNER_Z + 1e-6) return [mouth[0], mouth[1] - 3] as const;
+  return mouth;
+}
+
+/** How much of a walk is walked twice: at every corner sharper than a right
+ * angle and a half, the shorter of the two legs meeting there is ground the
+ * walker covers, turns round, and covers again. */
+const ABOUT_TURN_COSINE = Math.cos((135 * Math.PI) / 180);
+
+function retracedLength(points: readonly (readonly [number, number])[]): number {
+  let retraced = 0;
+  for (let i = 2; i < points.length; i += 1) {
+    const a = points[i - 2] as readonly [number, number];
+    const b = points[i - 1] as readonly [number, number];
+    const c = points[i] as readonly [number, number];
+    const inX = b[0] - a[0];
+    const inZ = b[1] - a[1];
+    const outX = c[0] - b[0];
+    const outZ = c[1] - b[1];
+    const inLength = Math.hypot(inX, inZ);
+    const outLength = Math.hypot(outX, outZ);
+    if (inLength < 1e-6 || outLength < 1e-6) continue;
+    const cosine = (inX * outX + inZ * outZ) / (inLength * outLength);
+    if (cosine > ABOUT_TURN_COSINE) continue;
+    retraced += Math.min(inLength, outLength);
+  }
+  return retraced;
+}
+
+/** A retraced metre is charged this many ordinary metres. High enough that
+ * the avenue will happily walk a good deal further round to avoid doubling
+ * back on itself, which is what a park path looks like and a shortest-path
+ * solve does not. */
+const RETRACE_PENALTY = 8;
+
+/**
+ * **The park's main avenue: authored corridor from the arch, then a solved
+ * street to one of the ring's four gateways.**
+ *
+ * Two decisions here are made by *trying them and measuring the walk*, not by
+ * arithmetic — because both of them only became decisions at all once the
+ * walk started crossing the railway on a bridge (issue #339), and the obvious
+ * answer to each is wrong on a seed:
+ *
+ * - **How far the authored corridor runs.** Its deepest legal end
+ *   ({@link gateCorridorDeepestMouth}) is right on the canonical seed and
+ *   badly wrong on seed 5, where the bridge the walk wants stands with its
+ *   ramp foot *north* of the gate: marching 13 m in and then 16 m back out to
+ *   reach that foot is a 29 m out-and-back where 5 m of walking would do.
+ * - **Which of the ring's four gateways it arrives at.** The nearest one to
+ *   the gate was free while the walk came straight down `x = 0`; coming off a
+ *   bridge ramp it is not. On the canonical seed the ramp runs 15 m past the
+ *   north gateway's latitude before it levels out, so the walk overshot and
+ *   hooked 4.8 m back on itself to reach a gateway it had already gone by.
+ *   The west gateway is straight ahead of the same ramp.
+ *
+ * Scored on the walk itself: every about-turn costs the ground that gets
+ * retraced, at {@link RETRACE_PENALTY} times its length, and total length
+ * breaks the tie. Backtracking on a decision until one works is how the rest
+ * of the procgen behaves (CLAUDE.md, Jim, 22 August 2026); a corridor length
+ * and a gateway are just two more decisions.
+ *
+ * Both routers commit lattice paving as their sub-legs solve, so every try
+ * runs from the same snapshot and only the winner's paving is allowed to
+ * stand — see {@link latticeStateSnapshot}.
+ */
+function* gateApproachSearch(
+  progress: number,
+): Generator<number, { points: (readonly [number, number])[]; progress: number }, void> {
+  const before = latticeStateSnapshot();
+  let best: {
+    points: (readonly [number, number])[];
+    score: number;
+    retraced: number;
+    state: LatticeStateSnapshot;
+  } | null = null;
+  for (const mouth of gateCorridorMouthCandidates()) {
+    // **The longest authored corridor is tried first and kept if it works.**
+    // Shortening it further is a change to the ground the cat-bus arrival
+    // choreographs, so it is only worth making when the walk the longer
+    // corridor produces actually doubles back on itself — and each further
+    // candidate is another five network solves inside the ride's frame
+    // budget (`check:park-boot`).
+    if (best && best.retraced < 0.05) break;
+    for (const solver of gateApproachSolvers(mouth)) {
+      // **One candidate per slice.** Each of these is a whole network solve,
+      // and `boot/parkGeneration.ts` spreads this generator over the cat-bus
+      // ride's frames against an 8 ms budget — running the lot inside one step
+      // put 77.6 ms into a single `advance()` and `check:park-boot` said so.
+      yield (progress += 1);
+      restoreLatticeState(before);
+      const points = solver.solve();
+      if (points.length < 2) continue;
+      const retraced = retracedLength(points);
+      const score = retraced * RETRACE_PENALTY + polylineLength(points);
+      if (DEBUG_STREETS) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[avenue] mouth (${mouth[0].toFixed(2)},${mouth[1].toFixed(2)}) via ${solver.name}: ` +
+            `length ${polylineLength(points).toFixed(1)} retraced ${retraced.toFixed(1)} ` +
+            `score ${score.toFixed(1)}`,
+        );
+      }
+      // **The street grid wins outright when it does not double back.** It is
+      // the pre-#339 answer and the grid-aligned park's whole point (#286), so
+      // a park must not quietly stop using its own streets to save a couple of
+      // metres of walking — measured on seed 2, where the lattice's answer and
+      // an axis-aligned one differ by 2.1 m. What it may not do is buy the grid
+      // with an about-turn: on seed 5 the lattice route walks 13.5 m of ground
+      // twice, and the axis-aligned route to the same gateway walks none.
+      // This candidate's own paving is already committed and is the paving
+      // that stands, so there is nothing to restore before returning.
+      if (solver.gridded && retraced < 0.05) return { points, progress };
+      if (best && score >= best.score) continue;
+      best = { points, score, retraced, state: latticeStateSnapshot() };
+    }
+  }
+  if (!best) {
+    // Nothing solved at all — keep the pre-#339 shape rather than no avenue.
+    restoreLatticeState(before);
+    const mouth = gateCorridorDeepestMouth();
+    return {
+      points: assembleGateApproach(
+        mouth,
+        routeLeg(gateCorridorHandover(mouth), nearestCompassPoint(0, GATE_CORRIDOR_INNER_Z - 3)),
+      ),
+      progress,
+    };
+  }
+  restoreLatticeState(best.state);
+  return { points: best.points, progress };
+}
+
+/**
+ * The corridor lengths worth trying. Exactly one when the loop is nowhere
+ * near the corridor — that is the pre-#339 park, and it must not move — and
+ * otherwise the deepest legal end, the arch end (no corridor at all, the walk
+ * routed from the gate node itself), and the midpoint between them.
+ */
+function gateCorridorMouthCandidates(): readonly (readonly [number, number])[] {
+  const deepest = gateCorridorDeepestMouth();
+  if (deepest[1] <= GATE_CORRIDOR_INNER_Z + 1e-6) return [deepest];
+  const candidates: (readonly [number, number])[] = [deepest];
+  const midpoint = (deepest[1] + GATE_CORRIDOR_START_Z) / 2;
+  if (midpoint - deepest[1] > 2) candidates.push([0, midpoint] as const);
+  if (GATE_CORRIDOR_START_Z - deepest[1] > 2) {
+    candidates.push([0, GATE_CORRIDOR_START_Z] as const);
+  }
+  return candidates;
+}
+
+/** One candidate avenue, and whether it was drawn on the street grid. */
+interface GateApproachSolver {
+  readonly name: string;
+  readonly gridded: boolean;
+  readonly solve: () => (readonly [number, number])[];
+}
+
+/**
+ * Every way of getting from one corridor mouth to the ring: the gridded
+ * street lattice, and the axis-aligned router aimed at each of the ring's
+ * four gateways in turn.
+ *
+ * Which gateway used to be settled by `nearestCompassPoint`, and that was free
+ * while the walk came straight down `x = 0`. Coming off a bridge ramp it is
+ * not: on the canonical seed the ramp runs 15 m past the north gateway's
+ * latitude before it levels out, so the walk overshot and hooked 4.8 m back
+ * on itself to reach a gateway it had already gone by, while the west gateway
+ * lies straight ahead of the same ramp. So all four are tried and the walk is
+ * measured — see {@link gateApproachPoints}.
+ */
+function gateApproachSolvers(mouth: readonly [number, number]): readonly GateApproachSolver[] {
+  const handover = gateCorridorHandover(mouth);
+  return [
+    {
+      name: 'street grid',
+      gridded: true,
+      solve: () => {
+        const street = streetRoute(handover);
+        return street ? assembleGateApproach(mouth, [...street].reverse()) : [];
+      },
+    },
+    ...RING_COMPASS_POINTS.map((gateway) => ({
+      name: `gateway (${gateway[0].toFixed(1)},${gateway[1].toFixed(1)})`,
+      gridded: false,
+      solve: () => assembleGateApproach(mouth, routeLeg(handover, gateway)),
+    })),
+  ];
+}
+
+/**
+ * Stitch the authored corridor onto a solved tail, dropping the seam's own
+ * dead end.
+ *
+ * `solved` runs handover-first. Its own first point *is* the handover, so it
+ * is dropped; and the mouth goes with it whenever the tail's next point
+ * stands back up the corridor rather than on from it — otherwise corridor and
+ * tail walk the same stretch of `x = 0` twice, out and back, leaving a
+ * dead-end stub on the end of the park's main avenue (measured on the
+ * canonical seed: the corridor ran to `(0, 50.4)` and the tail's first real
+ * point was `(0, 54.48)`, a 4 m about-turn).
+ */
+function assembleGateApproach(
+  mouth: readonly [number, number],
+  solved: readonly (readonly [number, number])[],
+): (readonly [number, number])[] {
+  const start = [0, GATE_CORRIDOR_START_Z] as const;
+  const tail = solved.slice(1);
+  const rejoin = tail[0];
+  const backUpTheCorridor =
+    rejoin !== undefined && Math.abs(rejoin[0] - mouth[0]) < 1.5 && rejoin[1] >= mouth[1] - 0.05;
+  const corridor: (readonly [number, number])[] =
+    backUpTheCorridor || Math.abs(mouth[1] - start[1]) < 0.05 ? [] : [mouth];
+  const points = [start, ...corridor, ...tail];
+  // Drop repeats the stitching can produce (a mouth that is its own handover,
+  // a tail whose first point is the gate node) — a zero-length segment has no
+  // direction, and every consumer downstream takes directions off this list.
+  return points.filter((point, index) => {
+    if (index === 0) return true;
+    const previous = points[index - 1] as readonly [number, number];
+    return Math.hypot(point[0] - previous[0], point[1] - previous[1]) > 0.05;
+  });
+}
+
 export function* pathGraphSearch(): Generator<number, PathGraph, void> {
   let progress = 0;
   const ringPoints = solveRing();
@@ -3131,6 +3482,12 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
     { id: 'gate', kind: 'gate', x: 0, z: 54 },
     { id: 'plaza', kind: 'plaza', x: PLAZA.x, z: PLAZA.z },
   ];
+  // Solved before the edge table is assembled, because it is the one edge whose
+  // solve is a search over candidates rather than a single route — see
+  // {@link gateApproachSearch}, which yields between them.
+  const gateApproach = yield* gateApproachSearch(progress);
+  progress = gateApproach.progress;
+
   const edges: PathEdge[] = [
     // The backbone, as an edge from itself to itself: everything hangs off it.
     { from: 'ring', to: 'ring', paved: true, route: ring },
@@ -3156,22 +3513,7 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
         name: 'gate-approach',
         width: 3.2,
         closed: false,
-        points: [
-          [0, 54] as const,
-          [0, 30] as const,
-          // The tail joins the street lattice (the reversed street route
-          // runs corridor-mouth-first), entering the ring at a compass tap
-          // when nothing else is paved yet — which, built first, makes this
-          // the park's main avenue for every later spur to terminate on.
-          // The corridor itself ([0,54]->[0,30]) stays exactly as it always
-          // was — the ground the cat-bus arrival choreographs. Falls back
-          // to the old axis-aligned router only if the lattice cannot
-          // reach the corridor mouth at all.
-          ...(streetRoute([0, 27]) ?? routeLeg(nearestCompassPoint(0, 27), [0, 27]))
-            .slice()
-            .reverse()
-            .slice(1),
-        ],
+        points: gateApproach.points,
       },
     },
     // From the ring to the plaza edge nearest the gate side, so the two
