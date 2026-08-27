@@ -87,7 +87,7 @@ const RUN_BREAK = 3;
  * and still be recognised as that site — the drawn leg was routed *through*
  * the site by `paths.ts`, so a miss beyond a few metres is a different
  * crossing (the gate walk's own fixed corridor, mostly), not the site. */
-const SITE_SNAP_TOLERANCE = 8;
+export const SITE_SNAP_TOLERANCE = 8;
 
 /**
  * A crossing whose nearest drawn-path sample is further away than this has
@@ -280,10 +280,23 @@ export function computeCrossings(
     }
     return false;
   };
+  //
+  // **The march overlaps the drawn ribbon rather than stopping dead at it.**
+  // A side flip is only ever measured between two *consecutive* samples, and
+  // the drawn ribbon's samples are a different run — so a loop crossing in the
+  // seam between the last esplanade sample and the ribbon's own first point
+  // would be invisible to both, and the fence would seal with no gap where a
+  // child walks. Found on seed 11 before the railway was told to keep off the
+  // walk in (`train/route.ts`): the loop cut `x = 0` at `z = 54.3`, six metres
+  // in from the arch, in exactly that seam.
+  const ESPLANADE_OVERLAP = 4;
+  let sinceDrawn = -1;
   for (let step = 0; step <= 32; step += 1) {
     const x = ENTRANCE_GATE_X + inX * step;
     const z = ENTRANCE_GATE_Z + inZ * step;
-    if (step > 0 && onDrawnPath(x, z)) break;
+    if (sinceDrawn >= 0) sinceDrawn += 1;
+    else if (step > 0 && onDrawnPath(x, z)) sinceDrawn = 0;
+    if (sinceDrawn > ESPLANADE_OVERLAP) break;
     consider(x, z);
   }
 

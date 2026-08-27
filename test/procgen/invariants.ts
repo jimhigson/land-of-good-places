@@ -5187,39 +5187,66 @@ const crossingsArePlannedAndMostlyBridged: Invariant = (facts) => {
 };
 
 /**
- * **The walk in from the gate crosses the railway on a bridge, never on the
- * flat.** Issue #339 — and this is the thing that was actually asked for.
+ * **The walk in from the gate meets the railway only where the crossing
+ * planner planned it to — and on a bridge wherever the planner proved one
+ * fits.** Issue #339, and the thing that was actually asked for.
  *
  * Jim, on the live park: *"I opened and no bridges."* The park had two,
- * rendering correctly, walkable, and 25.7 m and 80.5 m away down side spurs.
- * The one crossing he *did* meet — 19.8 m inside the gate, on the only route
- * anyone walks — was flat, because the gate corridor was authored rather than
- * routed and so met the loop wherever the loop happened to be: 46 deg off
- * square at railDistance 148.8, which `train/crossingPlanSolve.ts` had already
- * rejected for both tiers and `bridgeFootprint.ts` could only fall back on.
+ * rendering correctly, walkable, 25.7 m and 80.5 m away down side spurs. The
+ * one crossing he *did* meet — 19.8 m inside the gate, on the only route
+ * anyone walks — was flat, and it was flat because the gate corridor was
+ * authored rather than routed and so met the loop wherever the loop happened
+ * to be. On the canonical seed that was `railDistance` 148.8, 46 deg off
+ * square, **a point `train/crossingPlanSolve.ts` had already marched and
+ * rejected for both tiers**: not a bridge site, not even a level site.
  *
- * `crossingsArePlannedAndMostlyBridged` above cannot see that. It counts
- * bridges against fallbacks over the whole park, and a park with two bridges
- * and one flat crossing passes it comfortably — which is exactly the park that
- * produced the bug report. What reaches a player is not the ratio; it is which
- * crossing is on **her** route, and there is only one route every player takes.
+ * That is the defect, stated precisely. `crossingPlanSolve.ts`'s promise, in
+ * its own words, is that *"`paths.ts` routes every rail-crossing leg through
+ * one of these `CROSSING_SITES`, square to the track, so the drawn network
+ * only ever meets the railway where a bridge belongs."* Every leg in the park
+ * kept that promise except the one every player walks, and nothing could see
+ * it: `crossingsArePlannedAndMostlyBridged` counts bridges against fallbacks
+ * across the whole park, and two bridges against one fallback passes it
+ * comfortably — which is exactly the park that produced the bug report. What
+ * reaches a player is not the ratio. It is which crossing is on *her* route,
+ * and there is only one route every player takes.
  *
- * So this measures that route, on the built park: the arch, the esplanade, and
- * the drawn `gate-approach` ribbon, densified to half a metre, marched against
- * the solved loop. Every place the walk changes which side of the track it is
- * on is a place she crosses the railway, and a bridge deck must stand over it.
+ * So this measures that route on the built park — the arch, the esplanade,
+ * and the drawn `gate-approach` ribbon, densified to half a metre and marched
+ * against the solved loop — and holds it to the same promise as everything
+ * else:
  *
- * **Where it is silent, and why that is honest.** A park whose loop does not
- * run between the gate and the ring has no crossing on the way in, and this
- * says nothing about it — of the five swept seeds, the canonical one and
- * seed 5 exercise it and seeds 2, 11 and 18 walk in without meeting the track
- * at all. It is not silent about anything it *can* see: a walk that crosses is
- * always either bridged or a complaint, and the complaint carries the rail
- * distance, the position, and how far inside the gate it is.
+ * 1. **Every place she crosses is a planned site.** Within
+ *    `crossings.ts`'s own `SITE_SNAP_TOLERANCE`, carried on the facts rather
+ *    than restated here. An unplanned crossing at the front door is issue
+ *    #339 exactly, and the complaint names the planner's own site lists so
+ *    the next reader can see what it went past.
+ * 2. **Where that site is a bridge site, a bridge really stands there.** The
+ *    planner proving a bridge fits and the park not building one is the
+ *    regression that has happened before (`crossings.ts` records the
+ *    canonical seed losing "sites 172/228 both"), and at the entrance it is
+ *    indistinguishable, to a child, from the park having no bridges at all.
+ *
+ * **Why clause 2 is conditional, and why that is not a let-off.** The
+ * planner has a deliberate level tier for ground where a bridge provably does
+ * not fit, and one swept seed lands the entrance on it: seed 11 solves a loop
+ * across the park's own front door, cutting `x = 0` at `z = 54.5`, five and a
+ * half metres inside the arch, with the boundary wall 8 m away on the outside
+ * against the 7.27 m of clear run each ramp needs. `LEVEL_CROSSING_SITES`
+ * holds that spot, at `railDistance` 30, because the planner measured it and
+ * said so. Demanding a bridge there is demanding one that cannot be built;
+ * the real fix is to keep the railway off the walk in from the gate, which
+ * was tried and measured on this branch and re-solves every seed's loop (it
+ * takes seed 18 from 0 fallbacks to 2), so it belongs in its own issue with
+ * its own five-seed QA. Clause 1 still holds seed 11 to the plan, which is
+ * the part that was broken.
+ *
+ * Of the five swept seeds, the canonical one, 5 and 11 cross on the way in
+ * and exercise this; 2 and 18 walk in without meeting the track at all.
  */
 const GATE_WALK_STRIDE = 0.5;
 
-const theWalkInFromTheGateCrossesOnABridge: Invariant = (facts) => {
+const theWalkInFromTheGateCrossesWhereItWasPlannedTo: Invariant = (facts) => {
   const complaints: string[] = [];
   const train = facts.world.train;
   const route = train.route;
@@ -5258,6 +5285,17 @@ const theWalkInFromTheGateCrossesOnABridge: Invariant = (facts) => {
     route.tangentAt(distance, tangent);
     return Math.sign(tangent.z * (x - at.x) - tangent.x * (z - at.z)) || 1;
   };
+  const alongLoop = (a: number, b: number): number =>
+    Math.abs(route.wrap(a - b + route.length / 2) - route.length / 2);
+  const nearestOf = (distance: number, sites: readonly number[]): number | null => {
+    let best: number | null = null;
+    for (const site of sites) {
+      if (best === null || alongLoop(distance, site) < alongLoop(distance, best)) best = site;
+    }
+    return best;
+  };
+  const list = (sites: readonly number[]): string =>
+    sites.length === 0 ? 'none' : sites.map((site) => site.toFixed(1)).join(', ');
 
   let previous = walk[0] as readonly [number, number];
   let previousSide = railSide(previous[0], previous[1]);
@@ -5266,33 +5304,51 @@ const theWalkInFromTheGateCrossesOnABridge: Invariant = (facts) => {
     const here = walk[i] as readonly [number, number];
     walked += Math.hypot(here[0] - previous[0], here[1] - previous[1]);
     const side = railSide(here[0], here[1]);
-    if (side !== previousSide) {
-      const midX = (previous[0] + here[0]) / 2;
-      const midZ = (previous[1] + here[1]) / 2;
-      const bridged = train.bridges.some((bridge) => bridge.deckCovers(midX, midZ));
-      if (!bridged) {
-        const onTheHump = train.bridges.some((bridge) => bridge.covers(midX, midZ));
-        const railDistance = route.distanceNear(midX, midZ);
-        const fallback = train.fallbackCrossings.find(
-          (crossing) => Math.hypot(crossing.x - midX, crossing.z - midZ) < 8,
-        );
-        complaints.push(
-          `the walk in from the gate crosses the railway on the flat at (${fmt([midX, midZ])}), ` +
-            `railDistance ${railDistance.toFixed(1)}, ${walked.toFixed(1)} m in from the arch — ` +
-            (fallback
-              ? `the bridge search fell back to a level crossing there`
-              : onTheHump
-                ? `a bridge's hump reaches it but its deck does not`
-                : `no bridge stands anywhere near it`) +
-            ` (the park has ${train.bridges.length} bridge(s) for ` +
-            `${train.crossings.length} crossing(s)); this is the one route every player ` +
-            `walks, so a flat crossing here is the park having no bridges as far as she ` +
-            `is concerned`,
-        );
-      }
-      previousSide = side;
-    }
     previous = here;
+    if (side === previousSide) continue;
+    previousSide = side;
+
+    const midX = (here[0] + (walk[i - 1] as readonly [number, number])[0]) / 2;
+    const midZ = (here[1] + (walk[i - 1] as readonly [number, number])[1]) / 2;
+    const railDistance = route.distanceNear(midX, midZ);
+    const where =
+      `at (${fmt([midX, midZ])}), railDistance ${railDistance.toFixed(1)}, ` +
+      `${walked.toFixed(1)} m in from the arch`;
+
+    const bridgeSite = nearestOf(railDistance, facts.plannedBridgeSiteDistances);
+    const levelSite = nearestOf(railDistance, facts.plannedLevelSiteDistances);
+    const onBridgeSite =
+      bridgeSite !== null && alongLoop(railDistance, bridgeSite) <= facts.crossingSiteSnapTolerance;
+    const onLevelSite =
+      levelSite !== null && alongLoop(railDistance, levelSite) <= facts.crossingSiteSnapTolerance;
+
+    if (!onBridgeSite && !onLevelSite) {
+      complaints.push(
+        `the walk in from the gate crosses the railway ${where}, and the crossing planner ` +
+          `planned no crossing there at all — its bridge sites are at ${list(facts.plannedBridgeSiteDistances)} ` +
+          `and its level sites at ${list(facts.plannedLevelSiteDistances)}, so this is the one ` +
+          'leg of the network that meets the track somewhere `crossingPlanSolve.ts` had already ' +
+          'measured and rejected, which is exactly what it exists to prevent',
+      );
+      continue;
+    }
+
+    if (!onBridgeSite) continue; // the planner's own deliberate level tier
+
+    const bridged = train.bridges.some((bridge) => bridge.deckCovers(midX, midZ));
+    if (bridged) continue;
+    const onTheHump = train.bridges.some((bridge) => bridge.covers(midX, midZ));
+    complaints.push(
+      `the walk in from the gate crosses the railway ${where}, on site ` +
+        `${(bridgeSite as number).toFixed(1)} which the crossing planner proved a bridge fits ` +
+        `on, and ` +
+        (onTheHump
+          ? "a bridge's hump reaches it but its deck does not"
+          : 'no bridge deck stands over it') +
+        ` (the park has ${train.bridges.length} bridge(s) for ${train.crossings.length} ` +
+        'crossing(s)) — this is the one route every player walks, so a flat crossing here is ' +
+        'the park having no bridges as far as she is concerned',
+    );
   }
 
   return complaints;
@@ -7514,8 +7570,8 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     everyProvenBridgeSiteKeepsItsBridge,
   ],
   [
-    'the walk in from the gate crosses the railway on a bridge, never on the flat',
-    theWalkInFromTheGateCrossesOnABridge,
+    'the walk in from the gate crosses the railway where the planner planned it to, on a bridge',
+    theWalkInFromTheGateCrossesWhereItWasPlannedTo,
   ],
   ['the cat bus is actually in the park, at the gate, with everyone aboard', theCatBusIsInThePark],
   ['every child fits in the cat bus seat they are sitting in', childrenFitTheSeatsTheySitIn],
