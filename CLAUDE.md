@@ -693,6 +693,39 @@ banned. If a preview genuinely does not exist for something (a CI-only
 change, a workflow edit, a docs commit), say so plainly rather than
 substituting a PR link to fill the gap.
 
+**Every preview link carries one sentence saying what to look at — and if
+there is nothing to look at, do not send the link.** Jim, 27 August 2026,
+after being sent a preview of a service-worker fix and finding a game that
+looked exactly like production: *"all you gave me was a link that looks
+exactly the same as prod with literally nothing for me to check. Stop
+wasting my time."* He was right. Opening a link, hunting for a difference,
+and finding none is worse than being told nothing at all — it spends his
+attention and returns nothing.
+
+So, two rules, both absolute:
+
+- **One sentence, before the link, naming the thing he will see and where.**
+  Not what the PR does — what is different on screen and how to get to it.
+  "Walk in from the gate; you now cross the railway on a bridge instead of
+  a flat crossing" is a sentence. "Fixes the keyring outline" is not: it
+  says nothing about what he is looking for or where to stand.
+- **If the change is invisible or unplayable, send no link at all.** A CI
+  check, a workflow edit, a seeded RNG, a regression test, a docs commit, a
+  service-worker fix whose whole point is that a fresh visit looks
+  identical — none of these has anything for him to see. Say in one line
+  what changed and that there is nothing to look at. Do not manufacture a
+  link so the message has one in it.
+
+The tell that you are about to break this: you are writing "load it and
+then reload" or "you won't see anything but…". If you cannot finish the
+sentence "you will see X when you do Y", there is nothing to send.
+
+Bear in mind that a *fresh* preview URL is a browser profile he has never
+visited, so anything that only manifests for a returning player (a stale
+cache, a save, an installed service worker) is by construction invisible
+there. Those get verified by an agent's own measurement and reported as a
+result, never handed to him as something to check.
+
 **One caveat found the hard way, 26 August 2026:** this sandbox's egress
 policy returns **403 for `*.workers.dev`**, for `curl` as well as for a
 headless browser, so an agent here **cannot verify a preview URL it hands
