@@ -3193,15 +3193,14 @@ let gateCorridorDeepestCache: readonly [number, number] | null = null;
  * **The deepest the authored corridor could run on this seed's park.**
  *
  * Walks in from {@link GATE_CORRIDOR_START_Z} and takes the last point on
- * `x = 0` that is all three of: still on the gate's own side of the loop, a
- * full {@link GATE_CORRIDOR_RAIL_STANDOFF} clear of the track, and a point
- * the street lattice can reach with a stub.
+ * `x = 0` that is both still on the gate's own side of the loop and a full
+ * {@link GATE_CORRIDOR_RAIL_STANDOFF} clear of the track.
  *
- * That last clause is the one that matters and the one that is easy to leave
- * out. `streetRoute` returns `null` for a target it cannot stub onto, and the
- * caller then falls back to `routeLeg`'s ordinary routing — which *is* still
- * crossing-plan-aware, but is not gridded, so a mouth chosen by arithmetic
- * alone quietly changes which router draws the park's main avenue.
+ * Whether the street lattice can actually *reach* the mouth is deliberately
+ * not asked here. It was, at first — but `gateApproachSearch` already tries
+ * both routers from every candidate mouth and keeps the walk that measures
+ * best, so asking twice bought nothing and cost a `streetStubs` search on
+ * every 20 cm of the scan.
  *
  * When the loop is nowhere near the corridor this returns
  * {@link GATE_CORRIDOR_INNER_Z} — the pre-#339 answer, unchanged, and still
@@ -3234,7 +3233,7 @@ function gateCorridorDeepestMouth(): readonly [number, number] {
     const z = GATE_CORRIDOR_START_Z - step * 0.2;
     if (z <= crossesAt) break;
     if (railInfoAt(0, z).dist < GATE_CORRIDOR_RAIL_STANDOFF) break;
-    if (streetStubs([0, z] as const, false).length > 0) deepest = [0, z] as const;
+    deepest = [0, z] as const;
   }
   gateCorridorDeepestCache = deepest;
   return deepest;
@@ -3316,15 +3315,30 @@ const RETRACE_PENALTY = 8;
  * runs from the same snapshot and only the winner's paving is allowed to
  * stand — see {@link latticeStateSnapshot}.
  */
-function gateApproachPoints(): (readonly [number, number])[] {
+function* gateApproachSearch(
+  progress: number,
+): Generator<number, { points: (readonly [number, number])[]; progress: number }, void> {
   const before = latticeStateSnapshot();
   let best: {
     points: (readonly [number, number])[];
     score: number;
+    retraced: number;
     state: LatticeStateSnapshot;
   } | null = null;
   for (const mouth of gateCorridorMouthCandidates()) {
+    // **The longest authored corridor is tried first and kept if it works.**
+    // Shortening it further is a change to the ground the cat-bus arrival
+    // choreographs, so it is only worth making when the walk the longer
+    // corridor produces actually doubles back on itself — and each further
+    // candidate is another five network solves inside the ride's frame
+    // budget (`check:park-boot`).
+    if (best && best.retraced < 0.05) break;
     for (const solver of gateApproachSolvers(mouth)) {
+      // **One candidate per slice.** Each of these is a whole network solve,
+      // and `boot/parkGeneration.ts` spreads this generator over the cat-bus
+      // ride's frames against an 8 ms budget — running the lot inside one step
+      // put 77.6 ms into a single `advance()` and `check:park-boot` said so.
+      yield (progress += 1);
       restoreLatticeState(before);
       const points = solver.solve();
       if (points.length < 2) continue;
@@ -3347,22 +3361,25 @@ function gateApproachPoints(): (readonly [number, number])[] {
       // twice, and the axis-aligned route to the same gateway walks none.
       // This candidate's own paving is already committed and is the paving
       // that stands, so there is nothing to restore before returning.
-      if (solver.gridded && retraced < 0.05) return points;
+      if (solver.gridded && retraced < 0.05) return { points, progress };
       if (best && score >= best.score) continue;
-      best = { points, score, state: latticeStateSnapshot() };
+      best = { points, score, retraced, state: latticeStateSnapshot() };
     }
   }
   if (!best) {
     // Nothing solved at all — keep the pre-#339 shape rather than no avenue.
     restoreLatticeState(before);
     const mouth = gateCorridorDeepestMouth();
-    return assembleGateApproach(
-      mouth,
-      routeLeg(gateCorridorHandover(mouth), nearestCompassPoint(0, GATE_CORRIDOR_INNER_Z - 3)),
-    );
+    return {
+      points: assembleGateApproach(
+        mouth,
+        routeLeg(gateCorridorHandover(mouth), nearestCompassPoint(0, GATE_CORRIDOR_INNER_Z - 3)),
+      ),
+      progress,
+    };
   }
   restoreLatticeState(best.state);
-  return best.points;
+  return { points: best.points, progress };
 }
 
 /**
@@ -3465,6 +3482,12 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
     { id: 'gate', kind: 'gate', x: 0, z: 54 },
     { id: 'plaza', kind: 'plaza', x: PLAZA.x, z: PLAZA.z },
   ];
+  // Solved before the edge table is assembled, because it is the one edge whose
+  // solve is a search over candidates rather than a single route — see
+  // {@link gateApproachSearch}, which yields between them.
+  const gateApproach = yield* gateApproachSearch(progress);
+  progress = gateApproach.progress;
+
   const edges: PathEdge[] = [
     // The backbone, as an edge from itself to itself: everything hangs off it.
     { from: 'ring', to: 'ring', paved: true, route: ring },
@@ -3490,7 +3513,7 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
         name: 'gate-approach',
         width: 3.2,
         closed: false,
-        points: gateApproachPoints(),
+        points: gateApproach.points,
       },
     },
     // From the ring to the plaza edge nearest the gate side, so the two
