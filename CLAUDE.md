@@ -652,17 +652,36 @@ live question in it, do not send it.
 Raise with `gh pr create`. **Do not merge your own work** — every PR gets two
 peer reviews plus QA, and the Overseer merges.
 
-**One standing exception, and it is one PR wide.** Jim, 21 August 2026, on
-issue #320: the `/spawn` deep link PR is **pre-approved to merge the moment it
-passes QA** — it does not wait for his personal merge sign-off, because it is
-developer tooling rather than anything in the park. It still gets the normal
-code review and the normal real-browser QA first; only the "wait for Jim"
-step is waived, and only for that PR. **This is not a general loosening.**
-Every other PR — including a later change *to* `/spawn` — goes through the
-usual gate. Do not read this paragraph as licence to self-merge anything on
-the grounds that it is "only tooling"; if you are asking whether yours
-qualifies, it does not, because the only PR that qualifies is the one Jim
-named.
+**Anything invisible to a player: merge it as soon as a QA agent has looked
+at it. Do not ask Jim.** Jim, 27 August 2026: *"for anything invisible, just
+merge it now so long as a qa agent already looked at it"*, and, the same
+minute: *"I can't approve what I can't see."* That is the whole reasoning —
+asking him to sign off on a change with nothing on screen spends his
+attention and gives him no way to judge it. The approval was never real.
+
+**Invisible** means a player would not notice it: a check script, a CI
+workflow, a seeded RNG, a regression test, a lockfile, a docs or comment
+change, a refactor with no behavioural change, a service-worker or caching
+fix whose whole point is that a fresh visit looks identical, a deep link
+only a developer types. If in doubt, ask whether you could write the
+one-sentence "you will see X when you do Y" that the preview-link rule
+above demands — if you cannot, it is invisible, so merge it rather than
+sending him a link he cannot judge.
+
+**Visible changes still wait for Jim**, and still get their preview link
+plus that sentence. Anything a child could see in the park — geometry,
+layout, colour, animation, UI, controls, a new item — is his call, however
+small and however confident you are.
+
+The bar before an invisible merge is unchanged in every other respect: the
+normal code review, real CI green on the actual head commit (not a local
+run), and **a QA agent having actually looked** — which for an invisible
+change means having measured the thing it claims to fix, not merely having
+watched `tsc` pass. A check that was never broken deliberately and watched
+go red has not been QA'd, whatever the exit code says.
+
+This supersedes the earlier one-PR-wide `/spawn` exception (issue #320,
+21 August 2026), which is now just an instance of this rule.
 
 **Reviewers:** `gh pr review --request-changes` will be refused — every agent
 commits as the same GitHub user, so GitHub thinks you are reviewing your own
