@@ -410,6 +410,21 @@ never a tracked file) from the current commit; the poll is only a *trigger*
 for the existing `onNeedRefresh` → `UpdateGate` flow, not a second update
 path — pressing "Take me there!" still does exactly what it always did.
 
+**And the page adopts a waiting build itself, on a reload.** `prompt` mode
+parks a downloaded build in the browser's `waiting` state, and **a reload
+cannot promote it** — the tab being reloaded is still a client of the old
+worker for the whole navigation, so the old one is never the last client to
+go. That is issue #341, and it is why a real player sat on a months-old
+bundle through reload after reload while the gate correctly re-offered every
+time. So `src/update-adoption.ts` owns one question — *has anyone touched
+this page yet?* — and on a page nobody has, `UpdateGate` presses its own
+button. Once she is playing, it waits to be asked, because a swap means a
+reload and a reload mid-ride loses the ride; that is also why `skipWaiting`
+stays **false** in `vite.config.ts` (it would swap the precache under a
+playing page, and the park generates through a dozen lazy imports that would
+then 404). `npm run check:update-adoption` drives two real builds and one
+persistent Chromium profile through exactly that, both directions.
+
 **If this mechanism does not get a real player onto a new deploy on its
 own, that is a bug in the app, full stop — never a known quirk to route
 around.** Jim, 26 August 2026, after being told to open devtools and run
