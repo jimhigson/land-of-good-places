@@ -40,7 +40,26 @@ cross the railway on a bridge.
 | 11 | 4 / 2 / **2**, entrance on a level fallback at d=30 | 3 / 2 / **1**, entrance never meets the rail |
 | 18 | 3 / 3 / 0, entrance never meets the rail | identical to `main` |
 
-## Still to do when this was written
+5. **`crossings.ts` — a bridge takes its spine from the path that CROSSES it.**
+   Nearest-sample-wins picked a stall spur that touches site 172 and turns west
+   three metres later; the bridge ramped along the railway, both ramps were
+   blocked at the first probe, and the park got a five-metre deck 4.2 m in the
+   air with no way up. `check:park` caught it as five stranded waypoints. The
+   run is now chosen by how straight it stays across the crossing over 12 m.
 
-- invariant `the walk in from the gate crosses the railway on a bridge`
-- `npm run build`, `npm run test:procgen`, real-browser QA, screenshots, PR
+## Invariant
+
+`the walk in from the gate crosses the railway where the planner planned it to,
+on a bridge` (`test/procgen/invariants.ts`). Proven able to fail twice — see the
+commit message on 7a0a568.
+
+## The one seed the entrance cannot be bridged on
+
+Seed 11 solves a loop across the park's own front door: it cuts `x = 0` at
+`z = 54.5`, 5.5 m inside the arch, with the boundary wall 8 m away against the
+7.27 m of clear run each ramp needs. `LEVEL_CROSSING_SITES` holds that spot
+(railDistance 30) because the planner measured it and said a bridge does not
+fit. Keeping the railway off the walk in was **built and measured** on this
+branch (a keep-out in `train/route.ts`'s `trainObstacles`) and re-solves *every*
+seed's loop — it takes seed 18 from 0 fallbacks to 2 — so it was reverted and
+belongs in its own issue.
