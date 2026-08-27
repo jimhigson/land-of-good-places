@@ -5187,6 +5187,118 @@ const crossingsArePlannedAndMostlyBridged: Invariant = (facts) => {
 };
 
 /**
+ * **The walk in from the gate crosses the railway on a bridge, never on the
+ * flat.** Issue #339 — and this is the thing that was actually asked for.
+ *
+ * Jim, on the live park: *"I opened and no bridges."* The park had two,
+ * rendering correctly, walkable, and 25.7 m and 80.5 m away down side spurs.
+ * The one crossing he *did* meet — 19.8 m inside the gate, on the only route
+ * anyone walks — was flat, because the gate corridor was authored rather than
+ * routed and so met the loop wherever the loop happened to be: 46 deg off
+ * square at railDistance 148.8, which `train/crossingPlanSolve.ts` had already
+ * rejected for both tiers and `bridgeFootprint.ts` could only fall back on.
+ *
+ * `crossingsArePlannedAndMostlyBridged` above cannot see that. It counts
+ * bridges against fallbacks over the whole park, and a park with two bridges
+ * and one flat crossing passes it comfortably — which is exactly the park that
+ * produced the bug report. What reaches a player is not the ratio; it is which
+ * crossing is on **her** route, and there is only one route every player takes.
+ *
+ * So this measures that route, on the built park: the arch, the esplanade, and
+ * the drawn `gate-approach` ribbon, densified to half a metre, marched against
+ * the solved loop. Every place the walk changes which side of the track it is
+ * on is a place she crosses the railway, and a bridge deck must stand over it.
+ *
+ * **Where it is silent, and why that is honest.** A park whose loop does not
+ * run between the gate and the ring has no crossing on the way in, and this
+ * says nothing about it — of the five swept seeds, the canonical one and
+ * seed 5 exercise it and seeds 2, 11 and 18 walk in without meeting the track
+ * at all. It is not silent about anything it *can* see: a walk that crosses is
+ * always either bridged or a complaint, and the complaint carries the rail
+ * distance, the position, and how far inside the gate it is.
+ */
+const GATE_WALK_STRIDE = 0.5;
+
+const theWalkInFromTheGateCrossesOnABridge: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const train = facts.world.train;
+  const route = train.route;
+
+  const approach = facts.pathEdges.find((edge) => edge.name === 'gate-approach');
+  if (!approach) {
+    complaints.push(
+      'the park drew no `gate-approach` ribbon, so there is no walk in from the gate to ' +
+        'measure — every clause below is passing over an empty list',
+    );
+    return complaints;
+  }
+
+  // The arch first, then the drawn ribbon: the few metres between the two are
+  // the esplanade, which nothing draws, and they are part of the walk.
+  const corners: (readonly [number, number])[] = [
+    [ENTRANCE_GATE_X, ENTRANCE_GATE_Z],
+    ...approach.points,
+  ];
+  const walk: (readonly [number, number])[] = [corners[0] as readonly [number, number]];
+  for (let i = 1; i < corners.length; i += 1) {
+    const a = corners[i - 1] as readonly [number, number];
+    const b = corners[i] as readonly [number, number];
+    const span = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const steps = Math.max(1, Math.ceil(span / GATE_WALK_STRIDE));
+    for (let step = 1; step <= steps; step += 1) {
+      walk.push([a[0] + ((b[0] - a[0]) * step) / steps, a[1] + ((b[1] - a[1]) * step) / steps]);
+    }
+  }
+
+  const at = new Vector3();
+  const tangent = new Vector3();
+  const railSide = (x: number, z: number): number => {
+    const distance = route.distanceNear(x, z);
+    route.pointAt(distance, at);
+    route.tangentAt(distance, tangent);
+    return Math.sign(tangent.z * (x - at.x) - tangent.x * (z - at.z)) || 1;
+  };
+
+  let previous = walk[0] as readonly [number, number];
+  let previousSide = railSide(previous[0], previous[1]);
+  let walked = 0;
+  for (let i = 1; i < walk.length; i += 1) {
+    const here = walk[i] as readonly [number, number];
+    walked += Math.hypot(here[0] - previous[0], here[1] - previous[1]);
+    const side = railSide(here[0], here[1]);
+    if (side !== previousSide) {
+      const midX = (previous[0] + here[0]) / 2;
+      const midZ = (previous[1] + here[1]) / 2;
+      const bridged = train.bridges.some((bridge) => bridge.deckCovers(midX, midZ));
+      if (!bridged) {
+        const onTheHump = train.bridges.some((bridge) => bridge.covers(midX, midZ));
+        const railDistance = route.distanceNear(midX, midZ);
+        const fallback = train.fallbackCrossings.find(
+          (crossing) => Math.hypot(crossing.x - midX, crossing.z - midZ) < 8,
+        );
+        complaints.push(
+          `the walk in from the gate crosses the railway on the flat at (${fmt([midX, midZ])}), ` +
+            `railDistance ${railDistance.toFixed(1)}, ${walked.toFixed(1)} m in from the arch — ` +
+            (fallback
+              ? `the bridge search fell back to a level crossing there`
+              : onTheHump
+                ? `a bridge's hump reaches it but its deck does not`
+                : `no bridge stands anywhere near it`) +
+            ` (the park has ${train.bridges.length} bridge(s) for ` +
+            `${train.crossings.length} crossing(s)); this is the one route every player ` +
+            `walks, so a flat crossing here is the park having no bridges as far as she ` +
+            `is concerned`,
+        );
+      }
+      previousSide = side;
+    }
+    previous = here;
+  }
+
+  return complaints;
+};
+
+/**
  * **Is the cat bus actually in the park?**
  *
  * This is the invariant the repo did not have, and its absence is the whole
@@ -7400,6 +7512,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   [
     'every crossing on a site the planner proved bridgeable still carries its bridge',
     everyProvenBridgeSiteKeepsItsBridge,
+  ],
+  [
+    'the walk in from the gate crosses the railway on a bridge, never on the flat',
+    theWalkInFromTheGateCrossesOnABridge,
   ],
   ['the cat bus is actually in the park, at the gate, with everyone aboard', theCatBusIsInThePark],
   ['every child fits in the cat bus seat they are sitting in', childrenFitTheSeatsTheySitIn],
