@@ -250,16 +250,41 @@ export function computeCrossings(
 
   for (const sample of pathCentreline()) consider(sample.x, sample.z);
 
-  // The gate walk: from the gate to well inside, sampled every metre. Its
-  // first sample stands far from the last path sample, so the RUN_BREAK
+  // **The esplanade: the arch to wherever the drawn network takes over.**
+  // Its first sample stands far from the last path sample, so the RUN_BREAK
   // stride guard keeps the seam between them from ever reading as a flip.
+  //
+  // This used to march a flat 32 m straight in from the arch on the radial,
+  // regardless of what was drawn there, and that is what put a level crossing
+  // at the park's own front door and kept it there. `paths.ts`'s gate
+  // corridor now stops short of the railway and hands the walk to the street
+  // lattice, which crosses only at a planned site (issue #339) — but a hand-
+  // sampled straight line ploughing on to `z = 28` still flipped sides at the
+  // track, so `computeCrossings` minted the crossing anyway: a fence gap and a
+  // timber deck at a place no path goes any more. Measured on the canonical
+  // seed with the reroute in and this still at 32 m: three crossings, the
+  // front-door one at railDistance 148.5 with nothing walking over it.
+  //
+  // The honest span is the bit of the walk that really is un-drawn: from the
+  // arch to the first point where the drawn network is under her feet. Beyond
+  // that the drawn route is the walk, and `pathCentreline()` above has already
+  // measured it. The march still runs its full 32 m when nothing drawn comes
+  // near — a seed whose network stops short of the gate is exactly the case
+  // the old 32 m was raised to 32 m for.
   const inX = -ENTRANCE_GATE_X / Math.hypot(ENTRANCE_GATE_X, ENTRANCE_GATE_Z);
   const inZ = -ENTRANCE_GATE_Z / Math.hypot(ENTRANCE_GATE_X, ENTRANCE_GATE_Z);
-  // Sample the walk deep enough to meet the track however far in this
-  // seed's loop dips — 14 m missed the crossing entirely on seeds whose
-  // gate-side dip sat low, sealing the gate outside the fence.
+  const drawn = pathCentreline();
+  const onDrawnPath = (x: number, z: number): boolean => {
+    for (const sample of drawn) {
+      if (Math.hypot(sample.x - x, sample.z - z) <= sample.halfWidth + 0.4) return true;
+    }
+    return false;
+  };
   for (let step = 0; step <= 32; step += 1) {
-    consider(ENTRANCE_GATE_X + inX * step, ENTRANCE_GATE_Z + inZ * step);
+    const x = ENTRANCE_GATE_X + inX * step;
+    const z = ENTRANCE_GATE_Z + inZ * step;
+    if (step > 0 && onDrawnPath(x, z)) break;
+    consider(x, z);
   }
 
   flips.sort((a, b) => a - b);
