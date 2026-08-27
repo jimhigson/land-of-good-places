@@ -74,6 +74,7 @@
     "check:park-boot": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-park-boot.mts",
     "check:arrival-completes": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-arrival-completes.mts",
     "check:arrival-starts": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-arrival-starts.mts",
+    "check:update-adoption": "node --no-warnings scripts/check-update-adoption.mts",
     "check:deep-links": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-deep-links.mts",
     "check:walking": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-walking.mts",
     "check:frame-time": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-frame-time.mts"

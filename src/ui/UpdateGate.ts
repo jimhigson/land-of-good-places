@@ -122,6 +122,26 @@ export class UpdateGate {
     this.button.focus();
   }
 
+  /**
+   * Raises the gate **and presses its own button** — the returning-player path
+   * (issue #341).
+   *
+   * A plain reload cannot promote a waiting service worker (see
+   * `update-adoption.ts` for why), so on a page nobody has touched yet the page
+   * presses the button itself: same card, same copy, same one code path
+   * forwards, just with no six-year-old required in the middle of it. She sees
+   * the balloon and "Getting it…" for as long as the swap takes, and then the
+   * new park.
+   *
+   * Deliberately the same `show`/`go` pair a finger goes through rather than a
+   * shortcut past them: two ways into an update is how you end up with one of
+   * them rotting.
+   */
+  showAndGo(onRefresh: () => void): void {
+    this.show(onRefresh);
+    this.go();
+  }
+
   dispose(): void {
     window.clearTimeout(this.reloadFallback);
     window.removeEventListener('keydown', this.onKey, true);

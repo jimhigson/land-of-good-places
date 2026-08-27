@@ -20,6 +20,16 @@ declare const process: { readonly env: Readonly<Record<string, string | undefine
  * hand a brand-new visitor right now.
  */
 const APP_VERSION = (() => {
+  // `APP_VERSION=<something>` overrides the commit. Only one thing sets it:
+  // `scripts/check-update-adoption.mts`, which has to mint **two** builds that
+  // differ from a single working tree — the same source built twice is byte
+  // identical, so without this there would be no second build to update *to*,
+  // and the check would be testing the current commit against itself. Because
+  // the version is inlined into the bundle (`__APP_VERSION__` below), giving it
+  // a different value is enough to change every hashed filename, which is
+  // exactly what that check measures.
+  const override = process.env.APP_VERSION;
+  if (override) return override;
   try {
     return execSync('git rev-parse HEAD').toString().trim();
   } catch {
@@ -61,12 +71,22 @@ function versionFilePlugin(version: string): Plugin {
  * unannounced reload can land mid-ride (the slide, the ferris wheel, a
  * mini-game) and lose a moment nobody asked to lose. `prompt` instead leaves
  * the new worker "waiting" until something calls `updateSW()`, which is what
- * lets `src/main.ts` show the friendly "🎈 a new version is ready" toast
- * (`src/ui/UpdateToast.ts`) and only reload when the child taps Refresh.
- * `injectRegister: false` because that toast needs the `onNeedRefresh`
+ * lets `src/main.ts` raise the full-screen "A brand new park!" gate
+ * (`src/ui/UpdateGate.ts`) rather than reloading out of nowhere.
+ * `injectRegister: false` because that gate needs the `onNeedRefresh`
  * callback, which means registering the service worker ourselves from
  * `virtual:pwa-register` instead of letting the plugin inject its own
  * registration script — doing both would register twice.
+ *
+ * **Who calls `updateSW()` is decided in the page, not here** — see
+ * `src/update-adoption.ts`. On a page nobody has touched yet (a returning
+ * player who has just reloaded, which is the only way most people ever see an
+ * update) the gate presses its own button, because a reload on its own
+ * **cannot** promote a waiting worker and that left real players on a
+ * months-old bundle for ever, issue #341. Once somebody is playing, it waits
+ * to be asked. That is the whole reason the two flags below stay false: the
+ * *timing* of the swap is a decision only the page has the facts for, and the
+ * worker skipping waiting by itself takes it away.
  */
 export default defineConfig({
   server: {
@@ -131,12 +151,16 @@ export default defineConfig({
         // the actual mechanism `prompt` mode relies on. A new service worker
         // installs but sits in the browser's "waiting" state — not
         // `clientsClaim`ing the open tab, not told to `skipWaiting` — until
-        // `UpdateToast`'s Refresh button calls `updateSW(true)`, which posts
-        // `SKIP_WAITING` to it. Leaving either of these `true` makes the new
-        // worker take over the instant it is downloaded, in the background,
-        // regardless of `registerType`, which quietly defeats the toast: the
-        // callback would still fire, but the swap it is meant to be asking
-        // permission for would already have happened.
+        // something calls `updateSW(true)`, which posts `SKIP_WAITING` to it.
+        // Leaving either of these `true` makes the new worker take over the
+        // instant it is downloaded, in the background, regardless of
+        // `registerType`, which quietly defeats the gate: the callback would
+        // still fire, but the swap it is meant to be asking permission for
+        // would already have happened — under a page that is *playing*, whose
+        // next lazy `import()` would then 404 out of a precache that no longer
+        // has it. `scripts/check-update-adoption.mts` fails if either of these
+        // is turned on, and fails just as loudly if the page stops adopting a
+        // waiting build on a plain reload. Both halves, one check.
         clientsClaim: false,
         skipWaiting: false,
       },
