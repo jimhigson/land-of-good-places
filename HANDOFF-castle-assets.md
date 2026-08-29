@@ -19,6 +19,8 @@ and is how the bridge and hotel assets were actually built.
 | `castle.glb` | 128 KB of a 200 KB budget; regenerating is byte-identical |
 | Renders | `art/renders/castle/` — **twelve** shots incl. an assembled hall, `throne-beam.png` and `lineup.png` (all ten in elevation against both scale posts) |
 | Sizes published | §2 below, measured off the mesh |
+| **Furniture child-scaled** | ✅ **§2.10** — `BENCH_SEAT` 0.55 → **0.36**, `TABLE_TOP` 1.05 → **0.675**, throne seat 0.88 → **0.36**. Jim's ruling of 29 Aug. **Awaiting the Engineer's acceptance — they are that side's §4.4 constants** |
+| Gates | `blend:castle` 0, `.glb` byte-identical on re-run, `tsc` 0, full `npm run build` 0 (incl. `check:park-boot`, `check:castle`, `check:character-parity`), `test:procgen` 453 passed |
 | Colour | **not mine** — the Engineer's, per their §4.1 |
 | Batch 2 (their §4.6) | not started |
 | Base | rebased onto `origin/main` **after #370 merged** — `castleFabric.ts` is now present and read, §2.9 |
@@ -73,8 +75,8 @@ should fail rather than the park being wrong.
 | Constant | **Value** | How to re-derive it |
 | --- | --- | --- |
 | `SCONCE_CUP_OFFSET` | **(0.000, 0.285, 0.2475)** m ⚠️ **moved — was 0.3025** | `visibleBounds` of the `sconce-cup` node: x centre, **top** z, z centre. It is the middle of the cup's *mouth* — the flame's foot, not the cup's centroid. |
-| `TABLE_TOP` | **1.050** m | `visibleBounds(table).top` |
-| `BENCH_SEAT` | **0.550** m | `visibleBounds(bench).top` |
+| `TABLE_TOP` | **0.675** m ⚠️ **moved — was 1.050. Needs your ruling, §2.10** | `visibleBounds(table).top` |
+| `BENCH_SEAT` | **0.360** m ⚠️ **moved — was 0.550. Needs your ruling, §2.10** | `visibleBounds(bench).top` |
 | Armour keep-out radius | **0.5052** m ⚠️ **corrected — was 0.638** | `max(hypot(x, z))` over every emitted vertex, i.e. about the **origin**, which is where a keep-out disc is centred. The old 0.638 was the half-diagonal about the *footprint centre*, which is a different point — the armour grounds a sword, so its origin is 0.040 m off centre. Still inside your 0.650. |
 | Throne total on your dais | **3.05** m ⚠️ **was 3.10** | 2.75 + your 0.30. 3.10 stood **2 cm through your 3.08 m `BEAM_UNDERSIDE`** — see §2.4 |
 | Chest hinge axis | at the `chest-lid` node's own origin | it is the only non-identity node in the file; `lid.rotation.x` opens it |
@@ -338,6 +340,145 @@ built **1.01 m wide against your 1.10 m allowance**, 8% under. That is real but
 it is nothing like the sconce's 32%, and mass is not what is wrong with the
 armour — height is, and height is capped by the ceiling. Left alone on purpose.
 
+### 2.10 The furniture is child-scaled — `TABLE_TOP` and `BENCH_SEAT` moved
+
+**This is a renegotiation of two of your §4.4 constants and it needs your
+acceptance. Nothing is landed behind your back** — the figures are cut into the
+build so there is a rendered frame to argue from, exactly as the tapestry's
+0.12 → 0.26 was, because on this ticket a picture has beaten a paragraph every
+single time.
+
+**Jim's ruling, 29 August**, having seen `lineup.png` and chosen it
+deliberately: child-scale the furniture. *"Eleri can sit on the bench, sit on
+the throne, and reach the food on the table."*
+
+| Constant | Was | **Now** | What it is |
+| --- | --- | --- | --- |
+| `BENCH_SEAT` | 0.550 | **0.360** | `KID_HIP_HEIGHT`, exactly |
+| `TABLE_TOP` | 1.050 | **0.675** | midway hip → shoulder |
+| Throne seat (yours by implication, not a named constant) | 0.880 | **0.360** | the same hip; your dais does the raising |
+
+**Nothing else moves.** Widths, lengths, the throne's 2.75 m, the 0.30 m dais,
+`SCONCE_CUP_OFFSET`, the 0.5052 m keep-out, tapestry 0.26, `SCONCE_MOUNT_Y`,
+`SCONCE_HEADROOM`, `BEAM_UNDERSIDE` — all untouched. The whole change is
+vertical, so the throne still totals 3.05 m on your dais under the 3.08 m beam,
+and the armour is deliberately left alone (§2.8: it is capped by your ceiling
+and cannot loom, which is recorded and accepted).
+
+#### The rig, measured, not asserted
+
+Two new constants in `kid.ts`, measured off a real `createKid()` and
+**re-measured against the built rig by `check:character-parity`** so they cannot
+drift. `npm run measure:kid-landmarks` prints the full set.
+
+| Landmark | Height | |
+| --- | --- | --- |
+| Hip pivot — **the whole leg** | **0.36 m** | `KID_HIP_HEIGHT`, new |
+| Hands, hanging at rest | 0.40 m | |
+| Arm pivot | 0.72 m | the arm is **0.32 m** long |
+| Reach, arm straight up | **1.04 m** | `KID_REACH_HEIGHT`, new |
+| Shoulders | 0.99 m | `KID_SHOULDER_HEIGHT`, existing |
+
+**Why these had to exist before the furniture could be right.** `kid.ts`
+published a total height and a shoulder height and nothing else, so anything
+sizing furniture for a child had no landmark below her neck to work from and
+reached for adult proportions scaled down by eye. There was no other way to cut
+it. That is the root cause of this whole section, and it is now closed.
+
+#### Why 0.36, and why it is not a matter of taste
+
+**This rig has no knee** — your own `TALLEST_CHILD_SEATED_HEIGHT` doc comment
+says so. The whole leg is one segment swinging from one point. Sat on a seat of
+height `H` her feet land at `H − 0.36`, and **there is no joint anywhere that
+can take up the difference**. So 0.36 m is not "about right", it is *the one
+seat height at which a child's feet reach the floor*. At 0.55 they hung 0.19 m
+clear of it.
+
+#### Why 0.675 — bracketed from both sides, and it nearly picks itself
+
+- **Above:** she reaches **1.04 m**. The table was built at **1.05 m**. The
+  feast was not awkwardly high, it was *one centimetre above the highest a child
+  can reach* — and fourteen goblets were asserted onto it by a check that was
+  entirely correct in its own terms. To put a hand flat on a top rather than paw
+  at its edge it wants to be at or below the arm pivot, 0.72 m.
+- **Below:** sat on the bench, her thigh lies at seat height and is ~0.12 m
+  thick, so a 0.14 m slab's top must clear ~0.62 m or she cannot get her legs
+  under.
+
+That leaves **0.62–0.72**, and the hip/shoulder midpoint — Jim's own "roughly
+between hip and shoulder" — is 0.675, inside it. Two derivations aimed at
+different things agreeing on a number neither targeted is the best evidence
+available that it is right.
+
+#### Your own park corroborates, and the castle was the outlier
+
+| | |
+| --- | --- |
+| Hotel breakfast table (`world/hotel/Hotel.ts`) | **0.74 m** |
+| Hotel chair (`CHAIR_SEAT_Y`) | **0.42 m** |
+| Hotel sofa (`SOFA_SEAT_TOP`) | **0.50 m** |
+| Castle table / bench, as built | 1.05 / 0.55 |
+
+The house scale for furniture a child uses is 0.4–0.75 m. Nothing else in the
+park is anywhere near 1.05.
+
+**If you would rather have 0.42 m** — the hotel chair's line, 0.06 m above the
+hip — say so and it is one constant. It costs her feet touching the floor, and
+it buys consistency with a piece the family has already seen and accepted. I
+went with the rig because the rig's answer here is exact and the consistency
+argument is not, but it is a genuine call and it is yours.
+
+#### The assertion that was missing, and now exists
+
+`check_contract` asked *"is it the size the Engineer asked for"* and the answer
+was **yes, to the centimetre**. A contract check cannot catch a wrong contract.
+`check_child_can_use_it` asks the other question, against the child rather than
+the request, and is proved red against the real batch-1 geometry:
+
+```
+bench: the seat measures 0.550 m against a 0.36 m hip. This rig has no knee,
+so her feet hang by the whole difference — a seat she cannot sit on is a shelf.
+
+table: the top measures 1.050 m and a child reaches 1.04 m. **The feast on it
+would be literally out of reach.** This is the assertion batch 1 did not have.
+```
+
+#### What you need to do
+
+1. **Rule on 0.675 and 0.360.** If you accept, your `check:castle` assertion 3
+   should compare the measured mesh against these rather than against 1.05 and
+   0.55 — please land the assertion rather than re-typing the numbers, same as
+   `SCONCE_CUP_OFFSET`.
+2. **Your child-posing code moves with it.** These are the constants you pose
+   children against, and a child posed at 0.55 on a 0.36 bench now floats.
+3. **The dais is now load-bearing for the throne's grandeur**, not just its
+   height. A child climbs it and then sits at her own hip height, which is what
+   makes a throne a throne. If the dais changes, tell me.
+
+### 2.11 Three more found by looking, none by a check
+
+The tally on this asset is now **eight faults, eight found in a picture, zero
+found by an assertion.** Do not judge this asset from the build alone.
+
+7. **The bench stopped being a bench.** At 0.36 m a 2.80 m plank on two 0.14 m
+   stubs read as a shelf beside the table's heavy trestles — every measurement
+   correct. Recognisability beats proportion, so the ends are 0.34 m boards now,
+   with a stretcher, and a slab thickened to 0.13. No constant changed.
+8. **The throne's cushion was stacked on top of its seat**, putting a child's
+   weight at **0.54 m** — 0.18 m above her hip, the exact fault being fixed —
+   while the assertion measured the *plank* and passed. Third instance on this
+   ticket of a check describing something other than the thing that matters
+   (§2.4's throne through the beam, §2.2's keep-out about the wrong point). The
+   wood is now built *down* from the sitting surface, and the check measures the
+   cushion.
+9. **The lineup could not answer the question it was being asked.** The posts
+   give total height, which settles "does the armour loom" and cannot settle
+   "can she sit on it" — those are landmarks part-way up her. `lineup.png` now
+   draws rules across the row at the **hip (red)**, **shoulder (amber)** and
+   **reach (blue)**, all read from `kid.ts`. A seat belongs on the red line, a
+   table between red and amber. Taken of batch 1, this shot would have shown the
+   table top above the *blue* one.
+
 ---
 
 ## 3. What the build asserts about itself
@@ -447,8 +588,13 @@ afford.
 
 ## 7. Open, and waiting on the Engineer
 
-Nothing here blocks batch 1 landing; all of it is seam work.
+Item 0 blocks; the rest is seam work and none of it blocks batch 1 landing.
 
+0. **Rule on `TABLE_TOP` 0.675 and `BENCH_SEAT` 0.360** (§2.10) — the one thing
+   actually blocking. They are your constants, you pose children against them,
+   and `lineup.png` is the argument. The fallback if you want park consistency
+   over the rig's exact answer is 0.42 (the hotel chair's line); it costs her
+   feet touching the floor.
 1. **The throne's 3 cm** (§2.4). 2.75 m of throne on their 0.30 m dais, or
    2.80 m on a 0.25 m dais — their call, one constant either way.
 2. **Export `BEAM_UNDERSIDE`, `CASTLE_CEILING_CLEAR` and the dais height as
