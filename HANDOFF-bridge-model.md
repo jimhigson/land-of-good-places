@@ -44,7 +44,7 @@ when that lands, the blend goes back up and the silhouette follows for free.
 0.45 m puts the coping's top 1.37 m over the road at the crown. At the park's
 45° camera a sight line grazing the near parapet has fallen below the road by
 the time it reaches a child, so she is not occluded at all — I checked the
-geometry, it is in `PARAPET_ARC_RISE`'s own note. Going much past this starts
+geometry, it is in `PARAPET_CROWN_LIFT`'s own note. Going much past this starts
 eating her from the game's own view, and *"a small bridge does not obscure a
 player walking on it"* is absolute. Do not raise it without deciding that rule
 is being traded.
@@ -99,7 +99,7 @@ owner: `bridges.ts` asks it where the soffit is, and it asks itself where each
 voussoir goes, so the stone a child sees and the hole a train goes through
 cannot be two different arches.
 
-**The parapet top line** has one owner too, `parapetTopFor` in `bridges.ts` —
+**The parapet top line** has one owner too, `parapetHeightFor` in `bridges.ts` —
 the shell draws it, the collision walls stop at it, the coping sits on it. A
 collider left at the un-arced height would have let a child climb the drawn
 stone and step over the side.
@@ -109,6 +109,32 @@ Recessed *inward* only: `halfAcross` is the width the footprint search proved
 clear, so the wall may get thinner than it, never fatter. The outer wall still
 runs half a metre under the terrain, which is what stops a bridge floating over
 its own ground, and that stays.
+
+## The parapet interface with the Engineer: resolved, they won
+
+We each specified an arc and never confirmed it. Both peaked at 0.45 m at the
+crown and both vanished at the feet — so they agreed at exactly the two places
+anyone would spot-check — and diverged by up to **3.2 cm** across the middle of
+each ramp, because mine was keyed on distance along the ramp and theirs on the
+hump's own height above the ground.
+
+Mine was deleted, not retuned. Height-above-ground is the honest variable: it
+handles sloping ground under a ramp, and it tracks `HUMP_BLEND` for free, so
+when #358 lands and the blend returns to 0.25 the top line follows the new road
+shape with nobody remembering this exists. `parapetHeightFor` is the single
+owner; the Blender preview models the same formula.
+
+## The two render questions, answered
+
+- **The springing was a real mesh gap.** The piers were always there (the outer
+  wall runs from the springing to half a metre under the terrain) but there was
+  no *impost* — the projecting course an arch is built off — so pier and
+  spandrel read as one flat face. Now laid, four per bridge, a fourth copy of a
+  stone already in the kit.
+- **The flat-wall tunnel was the render setup.** `buildShellGeometry` has always
+  swept one continuous soffit mouth to mouth; my first preview simply had no
+  barrel in it, so it showed two spandrels with daylight between them. Preview
+  now builds the barrel and reads as a passage.
 
 ## Renders (`art/renders/`)
 
