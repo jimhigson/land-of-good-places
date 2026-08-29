@@ -289,11 +289,15 @@ SHOTS = [
 LAYOUTS = {
     "armour": {"plinth-block": (0.0, 0.0, 0.0)},
     "tapestry": {},
+    # The four feast props are each authored about the origin, so a shot of
+    # them together has to spread them out. A row, not a huddle: the question
+    # this picture answers is "are these four things telling each other
+    # apart", and overlapping silhouettes are exactly what stops it doing so.
     "feast": {
-        "feast-goblet": (-0.55, 0.15, 0.0),
-        "feast-roast": (0.0, -0.30, 0.0),
-        "feast-loaf": (0.50, 0.20, 0.0),
-        "feast-pie": (0.95, -0.25, 0.0),
+        "feast-goblet": (-0.72, 0.0, 0.0),
+        "feast-roast": (-0.24, 0.0, 0.0),
+        "feast-loaf": (0.24, 0.0, 0.0),
+        "feast-pie": (0.72, 0.0, 0.0),
     },
 }
 
@@ -414,8 +418,6 @@ def main() -> None:
             floor = standin("preview-floor", (span, span, 0.2), (0.0, 0.0, -0.1), 0xF0A3C1)
             floor.hide_render = False
             shown = shown + [floor]
-        if stem == "feast":
-            floor.location = (0.0, 0.0, cb.TABLE_TOP - 0.1)
         bpy.context.view_layer.update()
         frame(shown, azimuth, elevation, camera, pad)
         bpy.context.scene.render.filepath = os.path.join(OUT, f"{stem}.png")
