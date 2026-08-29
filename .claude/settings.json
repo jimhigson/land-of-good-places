@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "jq -n --rawfile doc \"$CLAUDE_PROJECT_DIR/STANDING-LOOPS.md\" '{hookSpecificOutput:{hookEventName:\"SessionStart\",additionalContext:$doc}}' 2>/dev/null || true",
+            "command": "jq -n --arg doc \"$(awk '/^<!-- SESSION-BRIEF-END -->/{exit} {print}' \"$CLAUDE_PROJECT_DIR/STANDING-LOOPS.md\")\" '{hookSpecificOutput:{hookEventName:\"SessionStart\",additionalContext:$doc}}' 2>/dev/null || true",
             "timeout": 10
           }
         ]

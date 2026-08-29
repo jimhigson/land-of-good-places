@@ -427,48 +427,17 @@ everything else keeps moving underneath it.
 
 ## A stale service worker will waste your hour
 
-**This section is about an agent's own local dev server, never about a real
-player on the deployed site.** If a real person is stuck on stale content on
-`landofgoodplaces.blockstack.ing`, that is the bug described in "How a
-deployed park notices it is out of date" above, not this one — go fix the
-update mechanism, do not hand them a console command from here.
+If the game is behaving as though your edits do not exist — a field you just
+added looks like it has vanished from your own class — **use the
+`stale-dev-server` skill**. It covers the stale worker left on your port by an
+earlier session, the broken Vite HMR module graph after a branch switch, and
+why `npm run preview` is the only honest test of the shipped worker.
 
-This is a PWA, but as of 1 August the dev-mode service worker is **off by
-default** (`vite.config.ts`'s `devOptions.enabled`) — a plain `npm run dev`
-no longer registers one at all, so a fresh port just shows the current files,
-like any other Vite project. Confirmed by measurement on 6 August: loading a
-dev server in a clean browser profile gives `getRegistrations().length === 0`
-and no caches, in a page where `isSecureContext` is `true` and a worker could
-therefore perfectly well have registered.
+This is about an agent's own local dev server, never a real player. A real
+person stuck on stale content on `landofgoodplaces.blockstack.ing` is the bug
+in "How a deployed park notices it is out of date" below — go fix the update
+mechanism, do not hand them a console command.
 
-**`npm run preview` is where a worker is expected, and where you test one.**
-It serves the real `dist/` build with the real generated `sw.js` and precache
-manifest. A dev-mode worker never could test the shipped one: `globPatterns`
-precaches the *built* output, and dev has no built output to precache — so it
-cached a different set of files by a different mechanism than the one that
-reaches a phone. `VITE_PWA_DEV=1 npm run dev` still forces one on for the rare
-job of poking the registration plumbing under HMR, but do not mistake it for a
-test of what ships.
-
-**A worker already installed on that port from an earlier session is still
-live.** Turning the default off stops *new* ones being minted; it cannot
-unregister one some tab registered last week, before this change, or under
-`preview`, or from another agent's dev server on a port you have since
-reused. That one keeps serving old JS to you, so your code changes silently
-do not appear and a field you just added looks like it has vanished from your
-own class. The cure is unchanged — in the page console:
-
-```js
-navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister()));
-caches.keys().then(ks => ks.forEach(k => caches.delete(k)));
-```
-
-then hard-reload. If the game is behaving as though your edits do not exist
-and you are on a plain `npm run dev` with no service worker running, suspect a
-broken Vite HMR state instead — swapping many files at once under a *running*
-dev server (a `git checkout`, a branch switch) can leave its module graph
-inconsistent (`Failed to reload ...` in the console). Killing and restarting
-the dev server fixes that in seconds; it is not worth debugging.
 
 ## How a deployed park notices it is out of date
 
@@ -573,26 +542,12 @@ So, for anything a child can walk up to:
 
 ## A face on a worn thing goes in its own UV texture, not a floating patch
 
-RiPika's and Trilla's hood faces (`hoodShell.ts`/`hats.ts`) were built as a
-separate decal mesh floating just in front of the hood's own dome. It was
-wound the opposite way round from the dome, so its normals pointed at the
-wearer's skull and `MeshToonMaterial`'s `FrontSide` culled it: invisible in
-the running game while the mesh, the texture and the code all looked correct
-on inspection, and *unfixable* by moving it further out — the first fix
-tried, padding the stand-off distance, could not have worked, because the
-mesh was never being drawn at all. Found the hard way (31 July 2026) by
-casting a ray in from outside and finding it hit nothing. Fixed by baking the
-face texture directly into the wearable's own UV mapping instead of a second
-mesh — a second mesh that has to be positioned right, every time, is a second
-place for exactly this kind of bug to hide.
+Paint a worn item's face (or any flat appliqué) into that item's own UV space.
+Never add a second mesh positioned by a formula that has to track the first
+one's surface. Full account of the bug this came from, and why the obvious fix
+could not have worked, is in `src/art/models/CLAUDE.md`, which loads whenever
+you work in that directory.
 
-**When a worn item needs a painted face (or any flat appliqué), paint it into
-that item's own UV space. Do not add a second mesh positioned by a formula
-that has to track the first one's surface.** One surface, one texture: there
-is then no second formula that can fall out of sync when the first one
-changes. This does not conflict with ART_DIRECTION.md §7's "nothing is
-sculpted, the face is flat appliqué" rule — only *where* the flat texture
-lives changes, not the no-sculpting principle.
 
 ## Handoff files
 

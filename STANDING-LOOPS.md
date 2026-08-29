@@ -28,6 +28,25 @@ needs re-confirming at least weekly.
 | Hourly at :07 | `7 * * * *` | check in with tasks done and still to do since last update, continue working if not yet complete |
 | Hourly at :23 | `23 * * * *` | Fable Architect sub-agent does review of repo code to date, produces a report, the Overseer delegates actioning of this report, and writes it into design docs |
 
+## Daily quiet hours (summary)
+
+Development pauses over the expensive part of the day and resumes when tokens
+are cheaper. These two are **also session-only** and must be re-armed
+alongside the loops above.
+
+| Cadence | Cron | Task |
+| --- | --- | --- |
+| Daily 12:40 | `40 12 * * *` | **Landing call** — tell in-flight agents to reach a safe, shippable state |
+| Daily 12:48 | `48 12 * * *` | **Pause** — harvest, merge what is green, stop agents, delete the three loops above |
+| Daily 19:00 | `0 19 * * *` | **Resume** — ask before re-arming the loops, then restart the top-priority work |
+
+Those three lines are a summary. **Before arming, pausing or resuming, read
+the rest of `STANDING-LOOPS.md`** — it carries what each job must actually do,
+why each loop exists, and what else to restore. Everything below this line is
+deliberately not injected into every session.
+
+<!-- SESSION-BRIEF-END -->
+
 ## Daily quiet hours
 
 Development pauses over the expensive part of the day and resumes when

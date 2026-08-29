@@ -56,4 +56,6 @@ coverage/
 .claude/*
 # ...but the project hook config is shared, not personal
 !.claude/settings.json
+# ...and so are project skills — lazily-loaded guidance, versioned with the code
+!.claude/skills/
 
