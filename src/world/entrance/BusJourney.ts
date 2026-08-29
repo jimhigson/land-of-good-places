@@ -1647,7 +1647,7 @@ export class BusJourney {
 
     // Full road speed throughout: the bus is always driving, whether looping or
     // making its final approach, so the wheels never stop turning.
-    this.bus.animate(dt, this.animationSeconds, BUS_SPEED);
+    this.bus.animate(dt, BUS_SPEED);
     this.exciteRiders(this.animationSeconds);
 
     // **The cut between inside and outside.** During the loop the five-beat shot

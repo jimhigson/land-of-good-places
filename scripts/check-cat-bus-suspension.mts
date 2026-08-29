@@ -641,7 +641,7 @@ for (let frame = 0; frame < SECONDS / DT; frame += 1) {
   else speed = Math.min(6, (elapsed - 38) * 2);
   if (elapsed > 44) root.rotation.y += 0.35 * DT;
 
-  bus.animate(DT, elapsed, speed);
+  bus.animate(DT, speed);
   root.updateMatrixWorld(true);
 
   peakHeave = Math.max(peakHeave, Math.abs(chassis.position.y - CAT_BUS_RIDE_LIFT));

@@ -28,8 +28,8 @@ import { drapeStripeUvs, tigerStripeTexture } from './tigerStripes';
  *
  * An original design — a pastel toy minibus with a cat's face on the front,
  * not a copy of any existing cartoon catbus: one body (no legs), a painted
- * face rather than a lit-in-the-dark grin, triangular ears on the roof, a
- * curled tail at the back and paw-print livery down the flanks. Built from the
+ * face rather than a lit-in-the-dark grin, triangular ears on the roof and
+ * paw-print livery down the flanks. Built from the
  * same chunky-primitive-plus-toon-material kit as every other vehicle in the
  * park (compare `minigames/dodgems/car.ts`) so it drops straight into the
  * house style.
@@ -262,8 +262,8 @@ export const CAT_BUS_LONGEST_WALK_TO_DOOR = CABIN_LENGTH_FROM_SEATS + BODY_WIDTH
  *
  * **These are the bodywork, not the silhouette, and the difference is real.**
  * A `Box3` round the built model measures **6.45 x 5.38 x 18.16**; the bodywork
- * is **5.28 x 5.21 x 15.83**. The tail curls 1.24 m off the back, the face and
- * whiskers stand 1.09 m off the front, and the open door swings 1.17 m out to
+ * is **5.28 x 5.21 x 15.83**. The face and whiskers stand 1.09 m off the front,
+ * the wheels sit outboard of the flanks, and the open door swings 1.17 m out to
  * the side. Anything leaving room for the bus must leave room for *those*, so
  * `arrivalSightline.ts` pads by a whole bus length rather than a half and
  * `check:cat-bus` measures the built box against what it assumed — because a
@@ -816,8 +816,15 @@ export interface CatBusHandle {
    * park's arrival builds another that nobody climbs inside.
    */
   setCutaway(open: boolean): void;
-  /** Spins the wheels and gives the tail a gentle idle swish. */
-  animate(dt: number, elapsed: number, speed: number): void;
+  /**
+   * Spins the wheels and drives the suspension bob.
+   *
+   * Takes no wall-clock time: the only thing that ever wanted it was the
+   * tail's idle swish, and the tail is gone (#379). Everything left is driven
+   * by *distance travelled* instead, which is why the bus stops bouncing when
+   * it stops moving.
+   */
+  animate(dt: number, speed: number): void;
   dispose(): void;
 }
 
@@ -870,7 +877,6 @@ export function createCatBus(): CatBusHandle {
   const wheelMaterial = toonMaterial(PALETTE.ink);
   const hubMaterial = toonMaterial(PALETTE.markerLemon);
   const pawMaterial = toonMaterial(PALETTE.stonePinkDark);
-  const tailMaterial = toonMaterial(bodyColour);
   const bumperMaterial = toonMaterial(PALETTE.woodLight);
 
   // **The sprung body.** Everything a passenger can see or sit on hangs off
@@ -1523,40 +1529,6 @@ export function createCatBus(): CatBusHandle {
     }
   }
 
-  // --- tail ------------------------------------------------------------------
-  // A gentle curl of three stacked, shrinking blobs, leaning to one side —
-  // nothing in this park is perfectly plumb or perfectly symmetrical.
-  // Rooted at `cabinBackZ` for the same reason the bumper is: written against
-  // `-BODY_LENGTH / 2`, the tail grew out of a point 0.88 m behind the bus, so
-  // the cat's tail was not attached to the cat. Less obvious than the bumper
-  // because a curling tail is *meant* to stand off the bodywork, which is
-  // precisely why it would have stayed.
-  const tail = new Group();
-  tail.name = 'tail';
-  tail.position.set(0.18 * DETAIL, BODY_BOTTOM_Y + BODY_HEIGHT * 0.58, cabinBackZ + 0.05 * DETAIL);
-  chassis.add(tail);
-
-  let tailCursor = new Group();
-  tail.add(tailCursor);
-  tailCursor.rotation.x = -0.3;
-  const tailSegments: Group[] = [];
-  for (let i = 0; i < 3; i += 1) {
-    const segRadius = (0.16 - i * 0.03) * DETAIL;
-    const seg = solid(new Mesh(new SphereGeometry(segRadius, 12, 10), tailMaterial));
-    seg.scale.set(1, 1, 1.4);
-    tailCursor.add(seg);
-    tailSegments.push(tailCursor);
-
-    const next = new Group();
-    next.position.z = -segRadius * 1.7;
-    next.rotation.x = -0.55;
-    tailCursor.add(next);
-    tailCursor = next;
-  }
-  const tailTip = solid(new Mesh(new SphereGeometry(0.13 * DETAIL, 12, 10), tailMaterial));
-  tailCursor.add(tailTip);
-  addOutline(tailTip, 0.012 * DETAIL);
-
   // --- who is riding inside ---------------------------------------------------
   // A child of the chassis, so anybody seated in here travels with the bus and
   // nothing has to re-position them every frame.
@@ -1664,7 +1636,7 @@ export function createCatBus(): CatBusHandle {
       lowerBodyOutline.visible = !open;
     },
 
-    animate(dt: number, elapsed: number, speed: number): void {
+    animate(dt: number, speed: number): void {
       // **Rolling, not spinning at a rate somebody liked the look of.** The
       // wheel covers `speed * dt` metres of road, so it turns through exactly
       // that over its own radius. The old `* 3.1` was a factor tuned by eye
@@ -1742,11 +1714,6 @@ export function createCatBus(): CatBusHandle {
       chassis.rotation.x = -pitch;
       chassis.rotation.z = roll;
 
-      // A lazy idle swish, faster and wider whenever the bus is moving — reads
-      // as "happy", especially while it is pulling away at the end.
-      const swishSpeed = lerp(0.9, 2.6, clamp01(Math.abs(speed) / 6));
-      tail.rotation.y = Math.sin(elapsed * swishSpeed) * 0.5;
-      tail.rotation.z = 0.12 + Math.sin(elapsed * swishSpeed * 0.7 + 1.1) * 0.08;
     },
 
     dispose(): void {
@@ -1763,7 +1730,6 @@ export function createCatBus(): CatBusHandle {
       wheelMaterial.dispose();
       hubMaterial.dispose();
       pawMaterial.dispose();
-      tailMaterial.dispose();
       bumperMaterial.dispose();
       faceTexture?.dispose();
       faceMaterial.dispose();
