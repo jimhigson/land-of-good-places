@@ -157,3 +157,32 @@ removed once the PR merges.
 
 Known unrelated finding for its own issue: **sweep seed 3 fails to generate**
 (`RailRouteUnsolvable`, all 96 attempts dead-end). Pre-existing on `main`.
+
+## Review round 2 (29 Aug) — all blockers closed, restyle in
+
+Reference image finally arrived at
+`<scratchpad>/park-map-reference.png` (Getty stock — never commit it).
+Key thing the prose description missed: **the reference has NO outlines**.
+Flat shapes, darker tones of the same hue instead. Icons all redrawn.
+
+Blockers closed:
+1. **Phone labels** — four causes: icon size ignored map scale; one candidate
+   position per label; long names on one line; canvas locked square in a boxed
+   card. Now 13/14 desktop, 9/14 portrait, 7/14 landscape (was 12/7/4).
+   **Not solved, improved** — 14 names cannot fit at 380px with the TEXT rule.
+   Icon size and label count trade directly. A pannable/zoomable map is the
+   real answer and should be its own issue.
+2. **Assertion 2 was vacuous** — comment claimed independence, code did a
+   round-trip. Anchors now compare against `scene.getObjectByName('anchor:<id>')`.
+   New `--mutate=entrance` fires at 8.90-16.91 m. Stall/fountain/station
+   branches still share their owner and now say so.
+3. **Rides drawn at their booths** (22.0 m worst) — rule was inverted. Ride
+   now wins at `anchor.position`; duplicate booth dropped; real footprint
+   drawn faint underneath.
+
+Smaller: planeToCanvas delegates to the projection; labels test against icon
+boxes (solid core only — reserving full sprite boxes starved them to 7/14);
+trees spread by minimum spacing.
+
+All green: build 0, procgen 443/443, check red on all four mutations.
+Screenshots `v2-*` under `park-map-334/` on `qa-screenshots`.
