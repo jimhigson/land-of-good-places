@@ -366,6 +366,53 @@ several tickets' worth of work in subsystems this branch does not touch.
 made it visible, and fixing the planner retires the symptom on every seed at
 once instead of moving the measurement somewhere it does not yet show.
 
+### I took option 2, implemented it, and it does NOT fix seed 2
+
+Recording this against myself, because a recommendation that turned out wrong is
+worth more written down than quietly dropped.
+
+The separation constraint is landed and is correct: each site as the oriented
+rectangle its bridge will really fill, `MIN_BRIDGE_HALF_LENGTH` (published by
+`bridgeFootprint.ts`, not restated) by its proven `halfWidth`, separating-axis
+test between kept sites. **Bridge counts across canonical and all four sweeps
+are unchanged** — 2/2, 1/3, 2/3, 2/4, 1/2 — so nothing loses a bridge to it.
+
+**It never fires on seed 2, because seed 2 has no bridge sites to separate:**
+
+| seed | proven bridge sites |
+| --- | --- |
+| canonical 20260728 | 4 |
+| 5 | 3 |
+| 11 | 3 |
+| 18 | 1 |
+| **2** | **0** |
+
+All seven of seed 2's kept sites are `level`. Every bridge that exists on that
+seed is **opportunistic** — built by the late `planReal` pass on a crossing
+planned as a *level* crossing. That is why two of them collided: they were never
+planned as a pair, because they were never planned as bridges at all.
+
+**This is the biggest finding of the session.** `crossingPlanSolve.ts`'s whole
+premise is *"the drawn network only ever meets the railway where a bridge
+belongs"*, written to replace an old discover-it-afterwards order that measured
+**0 bridges buildable on all three required seeds**. On seed 2 that premise is
+silently inactive, and the old order is what is actually running. A seed that
+proves no bridge sites and then builds a perfectly good 28.5 m bridge anyway
+suggests `bridgeCandidateAt`'s probe is too strict rather than the ground being
+genuinely unusable — but that is unproven and is now #392's re-scoped question.
+
+**So seed 2's assertion still fails, honestly, and this branch still needs a
+decision.** What has changed is that the reason is now understood three layers
+down rather than one.
+
+## Seed 15 — a candidate for WIDENING the suite later
+
+Not a swap. Once its two path-lattice failures (`every paved path runs on grid
+axes`, `every street sits on the shared 12 m lattice`) are somebody's ticket,
+seed 15 is worth **adding**: it carries **2 of 2 crossings bridged, both 36.5 m**,
+which is better long-bridge coverage than seed 2 has ever had. Widening beats
+swapping — it adds honest coverage instead of moving the measurement.
+
 ### Why it blocks: absolute tops on a ramp the walker is climbing
 
 The parapet's top is **absolute** world Y at the local road surface. At the
