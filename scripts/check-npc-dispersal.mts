@@ -426,10 +426,20 @@ const worstSpread = samples.reduce((a, b) => (b.rms < a.rms ? b : a));
  * Spread is different. It is an average over a dozen points, and a dozen points
  * measured at one instant is a noisy estimator — children crossing the park to
  * a dozen different attractions all pass through the middle of it, so there are
- * moments when a perfectly-dispersed crowd reads low. Seed 18 does exactly
- * that: 39% at t=160s while heading for seven distinct attractions whose own
- * spread is 97% of a uniform scatter, so the attractions were not clustered and
- * neither, over the run, were the children.
+ * moments when a perfectly-dispersed crowd reads low.
+ *
+ * **Be clear about how much work this is doing: none of the five seeds needs
+ * it.** Under the old worst-single-sample rule they read 53%, 64%, 66%, 64% and
+ * 57%, so every one of them clears the 50% bar either way. What the mean buys
+ * is margin on the canonical seed, which sits **three points** above the bar on
+ * its worst sample and comfortably clear on its mean — and three points of
+ * headroom in a check that blocks the build is thin enough to go red on an
+ * unlucky afternoon rather than on a regression.
+ *
+ * (An earlier version of this comment justified the change with seed 18 reading
+ * 39%. That was true when it was written and is not any more — merging each
+ * ride with its own ticket booth moved that seed to 57%. The argument was
+ * re-checked rather than left standing on a number that had quietly expired.)
  *
  * Taking the mean is **not** a loosened bar — the 50% threshold is untouched.
  * It is the same quantity estimated properly instead of from one frame. The
@@ -443,7 +453,18 @@ const worstVariety = samples.reduce((a, b) =>
 );
 const meanVariety =
   samples.reduce((total, sample) => total + sample.distinctDestinations, 0) / samples.length;
-/** How many places there are to go from the garden — the honest denominator. */
+/**
+ * How many places there are to go from the garden.
+ *
+ * **State-dependent, and worth knowing about.** `destinationsIn` filters the
+ * castle's shops out while the castle is full, so this reads 10 or 17 depending
+ * on what the last frame happened to look like, which moves the variety bar
+ * between 4 and 6. It changes no verdict today — the five seeds average 7.8–8.9
+ * — but it means this is a *snapshot* of the pool rather than the fixed size of
+ * it, and a future change that made the castle full more often would quietly
+ * raise the bar rather than lower it. Sampled after the run for that reason:
+ * the bar should never be read from a frame in the middle of one.
+ */
 const destinationPool = (
   world.npcs as unknown as { planner: { destinationsIn: (s: string) => unknown[] } }
 ).planner.destinationsIn(SPACE_GARDEN).length;
