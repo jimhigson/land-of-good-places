@@ -132,6 +132,7 @@ const STRIPED = new Set([
   'cat-bus-shell-upper',
   'cat-bus-back-wall',
   'cat-bus-door-panel',
+  'cat-bus-roof',
 ]);
 
 /** The words painted since this was last called, and by whom. */

@@ -616,6 +616,15 @@ export const CAT_BUS_ARCH_GAP =
  * about what a real bus body does and slow enough for a six-year-old to see it
  * happen. Damping ratio comes out at 0.55: under-damped on purpose, so a bump
  * gives two or three visible oscillations rather than one dead thud.
+ *
+ * **It is integrated with semi-implicit Euler, which depends on `Loop`'s
+ * `MAX_FRAME_DELTA` and should say so.** Explicit integration of a spring this
+ * stiff diverges above `dt` of about 0.2 s, where it would flap between the
+ * clamps every frame instead of oscillating. That is unreachable only because
+ * `Loop` clamps a frame to `MAX_FRAME_DELTA` = 1/12 s, measured stable there
+ * (worst heave 0.033 m at 1/12 against 0.032 m at 1/60). The dependency is
+ * real and silent: raise `MAX_FRAME_DELTA` past ~0.2 and this breaks with
+ * nothing pointing back here, so this sentence is the pointer.
  */
 const SPRING_RATE = 46;
 const SPRING_DAMPING = 7.4;
@@ -987,13 +996,28 @@ export function createCatBus(): CatBusHandle {
   /** Kept for the handful of places below that positioned off the old body. */
   const body = { position: { z: bodyCentreZ } };
 
-  // A paler roof cap, rounded, so the bus doesn't read as a single flat-topped
-  // box — every shop and ride in this park gets a bobble or a cap on top.
+  // A rounded roof cap, so the bus doesn't read as a single flat-topped box —
+  // every shop and ride in this park gets a bobble or a cap on top.
+  //
+  // **Striped, and it is the single most important surface to stripe.** It was
+  // left in the roof's own pale lemon at first, on the reasoning that a paler
+  // cap breaks up the silhouette. That reasoning is from a side elevation
+  // again: from the game's isometric camera, looking *down* at the bus, the
+  // roof is the **largest surface on the vehicle by a wide margin**, so a
+  // striped body under an unstriped roof read as a cream loaf with a striped
+  // skirt rather than as a tiger. The ears keep `roofMaterial`.
+  //
+  // It costs one `striped.push`, because the drape unwrap already covers it:
+  // `v` is `|x| + max(0, spineY - y)`, and the roof stands above `spineY`, so
+  // its own `v` is just `|x|` — continuous with the flank it meets at the eaves,
+  // with no seam and no second parameter to keep in step.
   const roof = solid(
-    new Mesh(new RoundedBoxGeometry(BODY_WIDTH * 0.94, 0.34 * DETAIL, cabinLength * 0.92, 4, 0.16 * DETAIL), roofMaterial),
+    new Mesh(new RoundedBoxGeometry(BODY_WIDTH * 0.94, 0.34 * DETAIL, cabinLength * 0.92, 4, 0.16 * DETAIL), stripedMaterial),
   );
+  roof.name = 'cat-bus-roof';
   roof.position.set(0, BODY_BOTTOM_Y + BODY_HEIGHT + 0.05 * DETAIL, body.position.z);
   chassis.add(roof);
+  striped.push({ mesh: roof, at: roof.position });
   addOutline(roof, 0.016 * DETAIL);
 
   // --- the face ---------------------------------------------------------------
@@ -1681,8 +1705,8 @@ export function createCatBus(): CatBusHandle {
         const mesh = object as Partial<Mesh>;
         mesh.geometry?.dispose();
       });
-      bodyMaterial.dispose();
-    stripedMaterial.dispose();
+        bodyMaterial.dispose();
+      stripedMaterial.dispose();
       roofMaterial.dispose();
       trimMaterial.dispose();
       earInnerMaterial.dispose();
