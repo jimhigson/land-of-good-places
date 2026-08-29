@@ -86,8 +86,18 @@ the Overseer rather than signing it off.
 
 ## Committing
 
-- Commit as soon as a coherent chunk compiles. Do not save one big commit for
-  the end — the API drops connections and an uncommitted branch dies with you.
+- **Commit after every meaningful edit.** Not every coherent chunk, not every
+  compiling milestone — every edit that would be annoying to redo. A commit is
+  cheap; re-deriving a change you already reasoned your way to is not.
+- Do not save one big commit for the end. The API drops connections and an
+  uncommitted branch dies with you. On 29 August 2026 three engineers were
+  killed mid-response thirteen times in one morning by streaming failures
+  alone; every one of them resumed without losing work, and the only reason
+  is that their edits were already committed. The two that had nothing
+  committed when they died had to start their step again.
+- It does not matter that a commit is small, or that the branch history ends
+  up long. Nobody has ever been harmed by a granular history on a feature
+  branch; plenty of work has been lost to a tidy one that never got made.
 - Never `git add -A` or `git add .`. Name the files you mean.
 - `.claude/` is gitignored; worktree gitlinks must never reach `main`.
 
