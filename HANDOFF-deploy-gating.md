@@ -58,17 +58,35 @@ Somebody needs to confirm which state is intended.
 
 ### 2. GitHub Actions billing has failed for this account — private repos cannot run ANY job
 
-Every job in the private fixture repo `jimhigson/lgp-deploy-gating-proof` is
-refused before it starts, with the annotation:
+**This is a real account-level limit, not an artefact of how I am provoking
+runs.** It is not a fork, not a disabled runner, not a deliberately unbillable
+context. Every job in the private fixture repo `jimhigson/lgp-deploy-gating-proof`
+is refused before it starts, with the annotation:
 
 > The job was not started because recent account payments have failed or your
 > spending limit needs to be increased.
 
-The public `land-of-good-places` is unaffected (public repos get free minutes),
-which is why its 16-minute builds keep running. **The corollary is the
-dangerous part: the moment `land-of-good-places` were made private, all CI on
-this project would stop dead.** That is a live, unrelated infrastructure
-problem, and it is what actually blocks the last verification below.
+Reproduced at 21:50 (runs `33277080310`, `33277085176`) and again at ~23:00
+(run `33279324990`) — over an hour apart, so it is persistent, not transient.
+I have not touched billing and will not.
+
+**Scope, which is the part that decides whether PRs in flight are at risk:**
+the block applies to **private** repositories. `land-of-good-places` is
+currently **public** (finding 1), so it draws on the free unlimited public
+allowance and **its CI is unaffected**. Evidence that CI is healthy there right
+now: run `33278187056` "Build and checks" ran 22:17:10 -> 22:33:09 (15m59s,
+success) and `33278187055` Deploy ran 22:17:37 -> 22:33:47 (16m10s, success),
+both well after the block was first observed.
+
+**So: PRs in flight are fine — but only for as long as the repo stays public.**
+The two findings are coupled, and that coupling is the real hazard:
+
+> If anyone "corrects" finding 1 by making `land-of-good-places` private
+> without first fixing the billing in finding 2, **all CI on this project stops
+> dead**, immediately and for every PR.
+
+Both levers are Jim's. Neither is mine, and neither is a thing to fix in
+passing.
 
 ## What the first engineer's cited proof does and does not show
 
@@ -89,14 +107,92 @@ means the gate blocked it, whereas a publish job that reaches the billing
 refusal means the gate **allowed** it and only the runner was denied. That is a
 clean discriminator for allow-vs-block that costs nothing.
 
+## The observability trick that makes all of this free
+
+GitHub evaluates a job's `if:` **before** allocating a runner. Under the billing
+block that yields a clean two-valued read-out of the gate's decision, at zero
+minutes:
+
+| publish job shows | the gate decided |
+|---|---|
+| **`skipped`** (0 s, no annotation) | **blocked** — `if:` was false, no runner ever requested |
+| **`failure`** with the billing annotation | **allowed** — `if:` was true, runner requested and then denied |
+
+Every result below is read that way. It proves *job selection* — which is the
+whole of the gating logic. It cannot prove anything about what a job **does**
+once running, which is exactly where the remaining gap is.
+
+## Demonstrations, all in `jimhigson/lgp-deploy-gating-proof`
+
+| # | scenario | check run -> conclusion | Deploy run | publish job | verdict |
+|---|---|---|---|---|---|
+| 1 | check **fails** | `33277080310` -> `failure` | `33277085176` | **skipped** | blocked ✔ |
+| 1b | check **fails** (independent repeat) | `33279324990` -> `failure` | `33279327878` | **skipped** | blocked ✔ |
+| 2 | check **cancelled** | `33279189449` -> `cancelled` | `33279202067` | **skipped** | blocked ✔ |
+| 3 | check **effectively never ran** | `33279408661` -> `skipped` | `33279416987` | **skipped** | blocked ✔ |
+| 4 | **`workflow_dispatch`** (manual rescue) | n/a — no payload | `33279362814` | **failure (billing)** = *selected* | allowed ✔ |
+
+Demonstration 2 is the one the brief cares most about, and it needed a trick of
+its own: under the billing block a run is refused within ~3 s, too fast to
+cancel by hand. So the check jobs were pointed at `runs-on: [self-hosted,
+never-serviced]` — a label no runner serves. **Queued jobs consume no minutes**,
+so the run sat `queued` indefinitely, was cancelled deliberately, and settled
+`cancelled`. That is a genuine `cancelled` conclusion reaching the gate, and the
+publish job skipped on it. This is the timeout case: a job that hits
+`timeout-minutes` reports `cancelled` too, and it is now proven to block.
+
+Demonstration 4 also confirms the other half of the `if:` — on dispatch the
+`blocked` job was correctly **skipped**, so a manual rescue does not produce a
+spurious red "publish blocked".
+
+Demonstration 3 additionally settles a question the brief asked: a workflow run
+whose jobs are all skipped reports conclusion **`skipped`**, not `success`, so
+it blocks. Good — and it also means a `success` conclusion cannot be
+manufactured without a runner, which is what closes off the last gap below.
+
+## The honest gap: the success path is NOT proven
+
+**Unverifiable by me, and I am not working around it.** What is missing is the
+half of the success path that needs a job to actually *execute*:
+
+- that the publish job, once allowed, checks out and publishes the **triggering
+  sha** rather than the default branch's newer HEAD, and
+- the measured runtime of the new job.
+
+Proving it needs one successful run of the fixture, which needs runner minutes,
+which needs either the billing fixed or a repo made public. Routes considered
+and rejected:
+
+- **Making a repo public** — forbidden, and rightly. Not attempted.
+- **Registering a self-hosted runner** (free, unbilled) — attempted; the
+  download and configure step was **denied by the permission classifier**. Not
+  worked around.
+- **Running it in `land-of-good-places` itself** — impossible before merge:
+  `workflow_run` only ever fires from the **default branch's** copy of the
+  workflow file, so this cannot be exercised from a PR branch at all.
+
+The predecessor had already built the right fixture for it: `deploy.yml` in the
+proof repo carries a `sleep 75` first step, and `deploy-unpinned.yml` is a
+byte-identical control with the `ref:` pin removed. Push a commit, let the check
+pass, push a second commit during the 75 s window, and the pinned deploy should
+print the *first* sha while the control prints the second. **That is the
+experiment to run the moment there are minutes.** It is one push once CI works.
+
+Until then, the sha pinning rests on reading
+`ref: ${{ github.event.workflow_run.head_sha || github.ref }}` and on the
+`Say which commit is being published` step, which prints the resolved sha
+alongside the expected one and is the receipt if it ever disagrees. **State
+this as an open gap in the PR; do not claim the success path was demonstrated.**
+
 ## Status
 
 - [x] worktree + `npm ci` (exit 0)
 - [x] `deploy.yml` rewritten, committed, rebased onto `d3bdbacc`
-- [x] proof: blocked-on-failure (run 33277085176, deploy job skipped)
-- [ ] proof: blocked-on-cancelled
-- [ ] proof: allowed-on-success with the correct sha — **blocked on finding 2**
-- [ ] gates: `tsc --noEmit`, full unpiped `npm run build`, `npm run test:procgen`
+- [x] proof: blocked-on-failure (x2), blocked-on-cancelled, blocked-on-skipped
+- [x] proof: `workflow_dispatch` still allowed through
+- [ ] proof: allowed-on-success with the correct sha — **blocked on finding 2, escalated**
+- [x] gate: `npx tsc --noEmit` exit **0**
+- [ ] gates: full unpiped `npm run build`, `npm run test:procgen`
 - [ ] PR
 
 ## Do not retry
