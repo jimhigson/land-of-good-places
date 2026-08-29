@@ -21,6 +21,7 @@ and is how the bridge and hotel assets were actually built.
 | Sizes published | §2 below, measured off the mesh |
 | Colour | **not mine** — the Engineer's, per their §4.1 |
 | Batch 2 (their §4.6) | not started |
+| Base | rebased onto `origin/main` **after #370 merged** — `castleFabric.ts` is now present and read, §2.9 |
 
 ## 1. How to run it
 
@@ -201,6 +202,46 @@ combination. So the 2.60 m armour is half a metre over an ordinary child and
 described. Both posts are now drawn in the hall shots, both read from `kid.ts`.
 The 2.60 m is your contract figure and I have not changed it; but if it was
 chosen to loom, it does not, and that is your call to revisit.
+
+### 2.9 Rebased onto #370 — two of the three fallbacks are now real reads
+
+The Engineer's interior merged to `main` while this branch was open, so
+`src/world/building/castleFabric.ts` now exists here. The promise §2.5 made —
+that these figures start reading their module the day it lands — **was kept by
+the machinery without anyone editing it**, which is the whole point of having
+written it as a fallback rather than a typed number:
+
+```
+mount  from src/world/building/castleFabric.ts's SCONCE_MOUNT_Y     2.10 m
+budget from src/world/building/castleFabric.ts's SCONCE_HEADROOM    0.60 m
+```
+
+Both agree exactly with the figures reconcile entry 2 gave, so nothing moved —
+but they are now *derived* rather than *believed*, and a change on their side
+will now reach this build instead of silently disagreeing with it.
+
+**The third is still a fallback, and it is open item 2 in §7.** `BEAM_UNDERSIDE`
+is a derived expression (`CASTLE_CEILING_CLEAR - BEAM_DEPTH`), not
+`export const NAME = <number>;`, so `ts_const`'s regex cannot read it. The build
+now says so in those words rather than claiming the module is absent:
+
+```
+clear headroom 3.08 m, from the fallback — castleFabric.ts exists but
+`BEAM_UNDERSIDE` is a derived expression ... so it cannot be read
+```
+
+3.08 is right — the Engineer's own `check:castle` prints *"BEAM_UNDERSIDE agrees
+with the mesh at 3.080 m"* — so the value is not in doubt, only its provenance.
+**One `export const BEAM_UNDERSIDE_M = 3.08;` on their side closes it.**
+
+`check:castle` runs in the `build` chain on this branch and passes. Note its own
+second line: *"props: NOT CHECKED — batch 1 is not wired yet"*. Nothing yet
+measures a batch-1 prop in the game; this build's `check_contract()` is still
+the only thing that does.
+
+And the line in its output worth reading twice, because it is §2.8's finding
+stated by the Engineer's own check: *"all clear of a **2.97 m** child under a
+**3.30 m** ceiling"*. That is 0.33 m, and it is the whole loom budget.
 
 ### 2.7 Node list — one `STYLES` entry needed per name
 
