@@ -1371,14 +1371,30 @@ S1/S5/S14 and Review 2 §4; and, in full: `src/world/building/layout.ts`,
 > garden↔castle. This needs an invariant proven red by disabling the lift, not
 > an inspection.
 >
-> **4. Portal triggers use `bandCrossed`, not §3's `trigger: Region`.** The
-> memo specifies a region sampled once a frame. That is the tunnellable
-> version, and CLAUDE.md now carries the bug it caused: *"a trigger band
-> sampled once a frame has exactly the same hole [as a wall without
-> sub-stepping] pointed the other way. Ask what she crossed, not where she
-> landed."* `world/tapSpacing.ts`'s `bandCrossed`, against
-> `Player.previousPosition`, is the one owner of that question, and both the
-> castle's doorways and the hotel's already use it.
+> **4. Portal triggers must use `bandCrossed`, not §3's `trigger: Region` —
+> and the castle does not yet.** The memo specifies a region sampled once a
+> frame. That is the tunnellable version, and CLAUDE.md now carries the bug it
+> caused: *"a trigger band sampled once a frame has exactly the same hole [as a
+> wall without sub-stepping] pointed the other way. Ask what she crossed, not
+> where she landed."* `world/tapSpacing.ts`'s `bandCrossed`, against
+> `Player.previousPosition`, is the one owner of that question.
+>
+> **Only the hotel uses it.** `Hotel.checkDoorways` asks `bandCrossed`;
+> `Building.checkDoorways` still asks **`bandContains`** against the player's
+> current position alone (`Building.ts`, the two calls in `checkDoorways`), so
+> the castle's front door and its exit are both still sampled once a frame and
+> both still steppable-over at a sprint. S1 did not change this and was not
+> meant to — it is a behaviour fix, not a refactor.
+>
+> **Converting the castle's doorways to `bandCrossed` is outstanding work and
+> belongs to S2**, whose author owns the whole of `building/` and is replacing
+> these triggers with portal ends anyway. Every portal S2 creates must be
+> `bandCrossed` from the start; the two `bandContains` calls it replaces must
+> not be carried across. *(Corrected 29 Aug 2026: this item previously claimed
+> both buildings already used `bandCrossed`. They do not, and a decision record
+> that tells its own next author their outstanding work is already done is
+> exactly the two-definitions-out-of-step failure this file keeps warning
+> about.)*
 >
 > **And the shape of S1 changed, for the better.** §6 has S1 extracting a
 > `SpaceManager` from the castle's three transitions into

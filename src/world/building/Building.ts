@@ -662,10 +662,11 @@ export class Building implements GameSystem {
       onArrived: () => this.controls.flash(),
     });
 
-    // Last, because its teardown hook closes the stair menu and stops the
-    // stair ride, so it cannot be built before the ride it stops. Both of
-    // those lines die in S2 with `StairRide` and `StairMenu`, and the hook
-    // goes with them.
+    // The teardown hook is a closure, so it resolves `this.stairRide` when a
+    // transition runs rather than now — this does not have to be built after
+    // the stair ride, and nothing breaks if it moves. Both of the hook's
+    // statements die in S2 with `StairRide` and `StairMenu`, and the hook goes
+    // with them.
     this.spaces = new SpaceManager(controls, () => {
       this.controls.closeStairMenu();
       this.stairRide.stop(false);

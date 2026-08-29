@@ -10,17 +10,37 @@
  * transitions still fire.
  */
 import { chromium } from 'playwright-core';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 
 const port = process.argv[2] ?? '5383';
 const outDir = process.argv[3] ?? 'shots';
 const label = process.argv[4] ?? 'after';
 mkdirSync(outDir, { recursive: true });
 
-const CHROME =
-  process.env.QA_CHROME ??
-  `${process.env.HOME}/Library/Caches/ms-playwright/chromium-1234/chrome-mac-arm64/` +
-    'Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
+/**
+ * Playwright's cache holds one directory per browser build (`chromium-1234`),
+ * and the number changes whenever the pinned version does — so it is found
+ * rather than typed. `QA_CHROME` overrides for anything unusual.
+ */
+function findChrome() {
+  if (process.env.QA_CHROME) return process.env.QA_CHROME;
+  const cache = `${process.env.HOME}/Library/Caches/ms-playwright`;
+  const builds = readdirSync(cache)
+    .filter((name) => /^chromium-\d+$/.test(name))
+    // Highest build number wins — the most recently pinned one.
+    .sort((a, b) => Number(b.split('-')[1]) - Number(a.split('-')[1]));
+  for (const build of builds) {
+    const exe =
+      `${cache}/${build}/chrome-mac-arm64/` +
+      'Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
+    if (existsSync(exe)) return exe;
+  }
+  throw new Error(
+    `no playwright chromium found under ${cache} — set QA_CHROME to a browser binary`,
+  );
+}
+
+const CHROME = findChrome();
 
 const save = {
   v: 1,
@@ -96,9 +116,15 @@ const walkedOut = await page.evaluate(async () => {
   const band = b.doorBands()[1]; // castleExitBand
   const p = g.player;
   // A `PortalBand` is a centre, a yaw and two half-extents — not a min/max box.
-  // Stand `halfAcross + 1.5` short of it on the inside and step across, the way
-  // a child walks out: `checkDoorways` asks what she *crossed*, so the walk has
-  // to be a real sequence of positions rather than one jump over the band.
+  // Stand `halfAcross + 1.5` short of it on the inside and step across.
+  //
+  // The castle's `checkDoorways` uses `bandContains`, so it only needs the
+  // player to be *inside* the band on some frame it happens to sample — but
+  // the walk is stepped anyway, in small increments, because that is the
+  // stricter of the two: it satisfies `bandContains` and would also satisfy
+  // `bandCrossed`, which S2 is expected to convert these triggers to (see
+  // ARCHITECTURE-DECISIONS Decision 3's 29 Aug addendum, item 4). One jump
+  // over the band would pass today and start failing the day it converts.
   const step = 0.3;
   p.teleportTo(band.centreX, band.y, band.centreZ - band.halfAcross - 1.5, 0);
   await new Promise((r) => setTimeout(r, 1500));
