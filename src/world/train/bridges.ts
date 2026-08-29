@@ -794,11 +794,19 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // this frame's (see that constant's own note — it is what stops the kerb
   // tearing in half down the bridge).
   //
-  // The `min` is the part that makes this a fix rather than a re-tuning: the
-  // stone is the single authority on where the paving ends, so however these
-  // constants move in future, lifted paving can never reach past the masonry
-  // that has to hold it up. Before, the two were independent sums off the same
-  // crossing and drifted 0.375 m apart.
+  // **The `min` does not bind on today's constants, and that is fine.**
+  // `PATH_CARRIER_SLACK` (0.25) is less than `BRIDGE_WALL_THICKNESS` (0.3) and
+  // `halfAcross` is exactly `roadHalf + BRIDGE_WALL_THICKNESS`, so the first
+  // term always wins and the lift already stops 0.05 m inside the stone. What
+  // actually fixed issue #349 was redefining `roadHalf` to include the kerb
+  // (above) and dropping the second `PATH_KERB_OVERHANG` this pad used to add
+  // on top of it — not this clamp.
+  //
+  // It is kept as a guard against constant drift: it is the only thing tying
+  // the lift to the masonry at all, so if `PATH_CARRIER_SLACK` ever grows past
+  // the wall's thickness, paving still cannot reach past the stone that has to
+  // hold it up. Before, the two were independent sums off the same crossing
+  // with nothing relating them, and they drifted 0.375 m apart.
   const pavingHalf = Math.min(roadHalf + PATH_CARRIER_SLACK, halfAcross);
 
   const platform: MovingPlatform = {
