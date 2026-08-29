@@ -241,6 +241,16 @@ interface LabelBox {
   readonly bottom: number;
 }
 
+/** A name that found room: where it goes, and the box it reserved. */
+interface LabelPlacement {
+  readonly lines: readonly string[];
+  readonly px: number;
+  readonly py: number;
+  readonly size: number;
+  readonly lineHeight: number;
+  readonly box: LabelBox;
+}
+
 interface FloorFeature {
   readonly x: number;
   readonly z: number;
@@ -1146,16 +1156,22 @@ export class ParkMap {
     // something, and is reported by name in `dataset.missingLabels`.
     this.drawnLabelNames = [];
     this.missingLabelNames = [];
+    const placements: { placement: LabelPlacement; anchorX: number; anchorY: number }[] = [];
     for (const item of placed) {
-      let done = false;
+      let placement: LabelPlacement | null = null;
       for (const [lx, ly] of this.labelCandidates(item)) {
-        if (this.drawLabel(item.label, lx, ly, item)) {
-          done = true;
-          break;
-        }
+        placement = this.placeLabel(item.label, lx, ly);
+        if (placement) break;
       }
-      (done ? this.drawnLabelNames : this.missingLabelNames).push(item.label);
+      if (placement) placements.push({ placement, anchorX: item.px, anchorY: item.py });
+      (placement ? this.drawnLabelNames : this.missingLabelNames).push(item.label);
     }
+    // Every leader first, then every name — so no line can be stroked across a
+    // finished name. See `placeLabel`.
+    for (const { placement, anchorX, anchorY } of placements) {
+      this.drawLabelLeader(placement, anchorX, anchorY);
+    }
+    for (const { placement } of placements) this.paintLabel(placement);
 
     // --- the player ----------------------------------------------------------
     if (!this.indoor) {
@@ -1196,13 +1212,20 @@ export class ParkMap {
     const above = item.py - item.size * 0.44 - minTextPx() * 1.2;
     const shoulder = item.size * 0.55;
     const step = minTextPx() * 1.35;
-    // Enough rungs to reach the top and bottom of the canvas from anywhere in
-    // it; `drawLabel` clamps anything that overshoots, so an over-long ladder
-    // costs a few failed collision tests and nothing else.
-    const rungs = Math.max(2, Math.ceil(this.canvasCssHeight / step));
+    // Sideways as well as up and down, because which way the paper is spare
+    // depends on the screen: a portrait phone leaves 357 px of band above and
+    // below the park, and a landscape phone leaves 320 px to its left and
+    // right (park drawn 306x270 in a 626x270 canvas). A ladder that only
+    // marched vertically used the first and ignored the second.
+    const sideStep = step * 1.6; // names are wider than they are tall
+    // Enough rungs to cross the canvas from anywhere in it; `drawLabel` clamps
+    // anything that overshoots, so an over-long ladder costs a few failed
+    // collision tests and nothing else.
+    const rungs = Math.max(2, Math.ceil(Math.max(this.canvasCssHeight / step, this.canvasCssWidth / sideStep)));
     const out: (readonly [number, number])[] = [];
     for (let rung = 0; rung <= rungs; rung += 1) {
       const drop = rung * step;
+      const push = shoulder + rung * sideStep;
       out.push(
         [item.px, below + drop],
         [item.px, above - drop],
@@ -1210,6 +1233,10 @@ export class ParkMap {
         [item.px + shoulder, below + drop],
         [item.px - shoulder, above - drop],
         [item.px + shoulder, above - drop],
+        // Level with the picture and pushed out to the side — the rung that
+        // reaches a landscape phone's spare paper.
+        [item.px - push, item.py - minTextPx() * 0.6],
+        [item.px + push, item.py - minTextPx() * 0.6],
       );
     }
     return out;
@@ -1444,12 +1471,22 @@ export class ParkMap {
    * helps nobody. Draw order is therefore priority order — the big attractions
    * in `ANCHORS` are drawn before the smaller features.
    */
-  private drawLabel(
-    text: string,
-    px: number,
-    py: number,
-    anchor?: { readonly px: number; readonly py: number },
-  ): boolean {
+  /**
+   * Where a name would go, if it fits — measured and reserved, not painted.
+   *
+   * Split from the painting (see {@link paintLabel}) so the outdoor map can do
+   * **all** its placement first, then every leader line, then every name last.
+   * Drawn in one pass instead, a later attraction's leader line was stroked
+   * across an earlier attraction's finished name: measured on an 844x390
+   * phone, The Spooky House's leader took the final "l" off "Space Ferris
+   * Wheel". Text last means nothing can be drawn over it.
+   *
+   * Returns `null` when the name would land on top of something already there;
+   * its picture is still drawn, and an unreadable pile of overlapping words
+   * helps nobody. Draw order is priority order — the big attractions in
+   * `ANCHORS` are placed before the smaller features.
+   */
+  private placeLabel(text: string, px: number, py: number): LabelPlacement | null {
     const ctx = this.ctx;
     ctx.save();
     const size = minTextPx();
@@ -1461,6 +1498,7 @@ export class ParkMap {
     const lineHeight = size * 1.15;
     const halfWidth = Math.max(...lines.map((line) => ctx.measureText(line).width)) / 2 + 2;
     const height = lineHeight * lines.length;
+    ctx.restore();
 
     // Keep the whole name on the canvas. An attraction near the park's edge
     // sits near the canvas edge too, and a centred label then runs off the
@@ -1484,47 +1522,67 @@ export class ParkMap {
         box.top < other.bottom &&
         box.bottom > other.top,
     );
-    if (collides) {
-      ctx.restore();
-      return false;
-    }
+    if (collides) return null;
     this.labelBoxes.push(box);
+    return { lines, px, py, size, lineHeight, box };
+  }
 
-    // A name that had to go and sit out in the letterbox needs to say which
-    // picture it belongs to; one that is tucked under its own icon plainly
-    // already does, and a line there would be clutter. Drawn from the picture
-    // to the *nearest point on the name's box*, so it stops at the words
-    // rather than running through them, and drawn before the text so the
-    // white halo below covers where they meet.
-    if (anchor) {
-      const nearX = Math.min(Math.max(anchor.px, box.left), box.right);
-      const nearY = Math.min(Math.max(anchor.py, box.top), box.bottom);
-      if (Math.hypot(nearX - anchor.px, nearY - anchor.py) > size) {
-        ctx.save();
-        ctx.lineCap = 'round';
-        ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-        ctx.lineWidth = Math.max(3, 0.16 * uiUnitPx());
-        ctx.beginPath();
-        ctx.moveTo(anchor.px, anchor.py);
-        ctx.lineTo(nearX, nearY);
-        ctx.stroke();
-        ctx.strokeStyle = MAP_PALETTE.grey;
-        ctx.lineWidth = Math.max(1.2, 0.06 * uiUnitPx());
-        ctx.stroke();
-        ctx.restore();
-      }
-    }
+  /**
+   * A leader line from a picture to the name that had to go and sit out in the
+   * spare paper, drawn only when the name is far enough away that which
+   * picture it belongs to is not already obvious — a line under a name tucked
+   * beneath its own icon is clutter.
+   *
+   * Stops at the **nearest point on the name's box**, so it never runs into
+   * the words, and it is stroked before any text is painted.
+   */
+  private drawLabelLeader(placement: LabelPlacement, anchorX: number, anchorY: number): void {
+    const { box, size } = placement;
+    const nearX = Math.min(Math.max(anchorX, box.left), box.right);
+    const nearY = Math.min(Math.max(anchorY, box.top), box.bottom);
+    if (Math.hypot(nearX - anchorX, nearY - anchorY) <= size) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.lineWidth = Math.max(3, 0.16 * uiUnitPx());
+    ctx.beginPath();
+    ctx.moveTo(anchorX, anchorY);
+    ctx.lineTo(nearX, nearY);
+    ctx.stroke();
+    ctx.strokeStyle = MAP_PALETTE.grey;
+    ctx.lineWidth = Math.max(1.2, 0.06 * uiUnitPx());
+    ctx.stroke();
+    ctx.restore();
+  }
 
+  /** Paints a name that {@link placeLabel} already found room for. */
+  private paintLabel(placement: LabelPlacement): void {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.font = `700 ${placement.size}px 'Baloo 2', 'Nunito', 'Trebuchet MS', 'Segoe UI', system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
     ctx.lineWidth = 3;
     ctx.strokeStyle = 'rgba(255,255,255,0.9)';
     ctx.fillStyle = hexToCss(PALETTE.ink);
-    for (let i = 0; i < lines.length; i += 1) {
-      const line = lines[i] as string;
-      const ly = py + i * lineHeight;
-      ctx.strokeText(line, px, ly);
-      ctx.fillText(line, px, ly);
+    for (let i = 0; i < placement.lines.length; i += 1) {
+      const line = placement.lines[i] as string;
+      const ly = placement.py + i * placement.lineHeight;
+      ctx.strokeText(line, placement.px, ly);
+      ctx.fillText(line, placement.px, ly);
     }
     ctx.restore();
+  }
+
+  /**
+   * Place and paint in one go — the indoor floor plan, which has few enough
+   * pins that it has never needed a leader line or a second pass.
+   */
+  private drawLabel(text: string, px: number, py: number): boolean {
+    const placement = this.placeLabel(text, px, py);
+    if (!placement) return false;
+    this.paintLabel(placement);
     return true;
   }
 
