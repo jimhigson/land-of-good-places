@@ -471,8 +471,18 @@ export class Game {
       // curtain opening/closing, during which the transition renders to the
       // park's own canvas and a pinch there always worked, before and after
       // this guard.
+      // **`parkMap.isOpen` added for #359**, which gives the map its own
+      // pinch-to-zoom. `PointerControls` recognises pinch on a window-level
+      // capture listener (deliberately — see its own note, so a finger resting
+      // on a HUD button cannot break the gesture), which means two fingers on
+      // the *open map overlay* are still seen here. Without this guard a pinch
+      // meant for the map would zoom the map **and** silently drift the park
+      // camera's `zoomTarget` underneath it, to jump the moment the map
+      // closed. That is `onWheelZoom`'s `cameraOverride` failure exactly, and
+      // #359 would have introduced a fresh instance of it rather than
+      // inheriting one.
       onPinch: (delta) => {
-        if (this.cameraOverride || this.miniGames.hidesPark) return;
+        if (this.cameraOverride || this.miniGames.hidesPark || this.parkMap.isOpen) return;
         this.camera.nudgeZoom(delta * CAMERA_ZOOM_STEP * 6);
       },
       // The wheel is the mouse equivalent of pinch (issue #242): same call,

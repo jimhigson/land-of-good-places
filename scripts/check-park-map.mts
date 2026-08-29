@@ -8,6 +8,12 @@
  * npm run check:park-map -- --mutate=stretch    # prove assertion 3 can fail
  * npm run check:park-map -- --mutate=entrance   # ... at the rides' queues
  * npm run check:park-map -- --mutate=gateway    # ... at the gate and the bus
+ * npm run check:park-map -- --mutate=zoom-axis  # prove assertion 5 can fail
+ * npm run check:park-map -- --mutate=clamp-loose  # prove assertion 6 can fail
+ * npm run check:park-map -- --mutate=clamp-tight  # prove assertion 7 can fail
+ * npm run check:park-map -- --mutate=clamp-letterbox # the blank-map bug itself
+ * npm run check:park-map -- --mutate=focal        # zoom stops pinning
+ * npm run check:park-map -- --mutate=pan-sign     # drag goes the wrong way
  * ```
  *
  * #234 is the reason this exists, and it is worth stating exactly, because it
@@ -20,7 +26,10 @@
  * So this measures the map the way the map is actually built — through
  * `outdoorParkMapProjection`, the one function `ParkMap` is allowed to get its
  * viewport from, and `parkMapFeatures`, the one list it draws — against the
- * park `buildHeadlessPark()` really generated. Three assertions:
+ * park `buildHeadlessPark()` really generated. Seven assertions — 1-3 on the
+ * default framing, 4-7 once #359 let the child zoom and pan, and the note
+ * above `viewSamples` sets out which zoom properties are genuinely falsifiable
+ * and which are structural and therefore written down instead of tested:
  *
  * 1. **Nothing is clipped.** Every vertex of `PARK_BOUNDARY.outline()` lands
  *    inside the canvas, at every canvas size from a small phone to a desktop.
@@ -88,6 +97,20 @@
  *    scale and bearing are preserved" means as a measurement, and it catches a
  *    stretched or rotated projection, which assertions 1 and 2 both survive.
  *
+ *    **Assertion 3 only ever runs on the default framing**, which is why 5
+ *    exists. Measured: `--mutate=zoom-axis` (zoom applied to one axis) raises
+ *    **180 of the 225 sampled views** — every view except the 45 at zoom 1,
+ *    where the shear is exactly a no-op by construction. `180 = 225 - 45` is
+ *    the number that demonstrates it.
+ *
+ *    An earlier version of this note claimed "140 under assertion 5 and zero
+ *    under assertion 3". The zero was true but **not evidence**: `zoom-axis`
+ *    is only applied inside `projectionForView`, and assertion 3 calls
+ *    `projectionFor`, so it could never have seen the mutation whatever the
+ *    zoom did. Quoting a number that a wiring detail guaranteed is the same
+ *    error as quoting a count you expected rather than the one on screen —
+ *    caught in review of #372.
+ *
  * ### Thresholds
  *
  * Taken from the game, per CLAUDE.md, never from this file's own convenience:
@@ -104,7 +127,10 @@
  *
  * Every assertion has a `--mutate` mode that breaks the thing it describes
  * while leaving the rest of the map correct — `viewport` reinstates the 66 m
- * square that caused #234, `position` nudges one attraction, `stretch` scales
+ * square that caused #234, `clamp-letterbox` reinstates the pan clamp that let
+ * a landscape phone be dragged to a completely blank map, `focal` and
+ * `pan-sign` break the two gesture formulae, `position` nudges one attraction,
+ * `stretch` scales
  * one axis, **`entrance` draws every ride at its queue rather than at the
  * ride** — the exact class of error the vacuous version of assertion 2 could
  * not see and the scene-graph comparison now can — and **`gateway` swaps the
@@ -120,9 +146,17 @@ import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../src/world/building/layo
 import { STALL_PLACEMENTS } from '../src/minigames/stallPlacement.ts';
 import { parkMapFeatures, type MapFeature } from '../src/ui/parkMapContent.ts';
 import {
+  MAP_EDGE_MARGIN_M,
+  MAP_MAX_ZOOM,
+  MAP_MIN_ZOOM,
+  clampMapView,
+  defaultMapView,
   frameExtent,
   outdoorParkMapProjection,
+  pannedBy,
+  zoomedAboutPoint,
   type MapProjection,
+  type MapView,
 } from '../src/ui/parkMapProjection.ts';
 import {
   ENTRANCE_BUS_DOOR_X,
@@ -162,10 +196,21 @@ const CANVAS_SIZES: readonly (readonly [number, number, string])[] = [
 
 const mutateArg = process.argv.find((a) => a.startsWith('--mutate'));
 const mutation = mutateArg ? (mutateArg.split('=')[1] ?? 'position') : null;
-if (mutation && !['viewport', 'position', 'stretch', 'entrance', 'gateway'].includes(mutation)) {
-  console.error(
-    `Unknown --mutate=${mutation}. Use viewport, position, stretch, entrance or gateway.`,
-  );
+const MUTATIONS = [
+  'viewport',
+  'position',
+  'stretch',
+  'entrance',
+  'gateway',
+  'zoom-axis',
+  'clamp-loose',
+  'clamp-tight',
+  'clamp-letterbox',
+  'focal',
+  'pan-sign',
+] as const;
+if (mutation && !MUTATIONS.includes(mutation as (typeof MUTATIONS)[number])) {
+  console.error(`Unknown --mutate=${mutation}. Use one of: ${MUTATIONS.join(', ')}.`);
   process.exit(2);
 }
 
@@ -198,6 +243,289 @@ function projectionFor(width: number, height: number): MapProjection {
       (py - honest.originPxY) / (honest.scale * squash),
     ],
   };
+}
+
+// ------------------------------------------------------- zoom and pan (#359)
+
+/**
+ * **What is actually falsifiable once the map zooms, and what is not.**
+ *
+ * Worth stating before the code, because the obvious extension is a check that
+ * cannot fail. `toPlane(toCanvas(p))` is the exact inverse of `toCanvas` for
+ * **any** invertible affine map — same closure, same constants — so a
+ * "position round-trips at every zoom" assertion would return `0.0000` at
+ * every zoom by construction, and running the existing assertion 2 over a grid
+ * of twenty views would be the same comparison twenty times rather than
+ * twenty comparisons. Assertion 2 is in fact **projection-independent**: it
+ * reduces to "the content list agrees with the scene graph", which is a real
+ * cross-check and is why it stays, but it learns nothing from zoom. Padding it
+ * out would have bought a bigger number and no more truth.
+ *
+ * Two more properties are **structural, not testable**, and are written down
+ * here instead of being asserted:
+ *
+ * - *What is drawn and what a tap inverts cannot diverge.* `ParkMap` holds one
+ *   `MapProjection` per render and both `planeToCanvas` and `canvasToPlane`
+ *   delegate to it. There is no second path to compare against, so a check
+ *   would be comparing a thing to itself. It is guaranteed by there being one
+ *   owner, which is the property to defend in review, not in a test.
+ * - *Zoom and pan cannot introduce a second transform.* They are inputs to
+ *   `outdoorParkMapProjection`, which multiplies one scale and moves one
+ *   origin. Same reason.
+ *
+ * What genuinely can fail, and is asserted below:
+ *
+ * 4. **Zoom 1 is exactly the map #353 shipped.** Four review rounds bought that
+ *    framing; a default view that quietly differed would regress it.
+ * 5. **Uniform scale at every zoom.** Apply zoom per-axis and the park shears —
+ *    invisible to a round-trip, caught by measuring x-scale against z-scale.
+ * 6. **The clamp never reveals blank paper.** At any zoom, from any centre, the
+ *    canvas must stay inside the region zoom 1 frames.
+ * 7. **The clamp never strands an attraction.** Every feature must be
+ *    reachable — centring on it must actually put it on screen — at every
+ *    zoom. A clamp tightened to fix 6 breaks 7, which is exactly why both are
+ *    here.
+ */
+
+/** Zoom levels sampled. The ends matter most; the middle catches sign errors. */
+const ZOOM_SAMPLES = [MAP_MIN_ZOOM, 1.5, 2, 3, MAP_MAX_ZOOM];
+
+/** Float slop for a pixel comparison that is exact when it is right. */
+const VIEW_EPSILON_PX = 0.5;
+
+/**
+ * The least park the map may show, as a fraction of the canvas.
+ *
+ * **Derived from measurement with real margin, not chosen as a round number.**
+ * The first version was `0.12`, justified by a comment that was true only of
+ * the views this file happened to sample — and `viewSamples` was missing NE
+ * and SW, which is where the lobed park's emptiest bounding-box corner is. Add
+ * those two offsets and change nothing else and the check went **red on
+ * correct, unmutated code at 11.8%**. The assertion was passing because of
+ * which directions were tried, which is the same defect as the clamp bug it
+ * was written to catch, one level down. Caught in review of PR #372.
+ *
+ * Two independent sweeps of the honest, unmutated code:
+ *
+ * - the reviewer's: 110 canvas sizes x 1600 views -> worst **7.4%**
+ * - mine: 150 canvas sizes x 30,000 views -> worst **9.03%** (360x320, zoom 4,
+ *   panned hard NE)
+ *
+ * The floor is taken from the **lower** of the two, halved: 3%. That is ~2.5x
+ * clear of anything correct code produces, so adding a pan direction or a
+ * canvas size cannot make it cry wolf — and `--mutate=clamp-letterbox` still
+ * reports **0.0%**, so the bug it exists to catch fails it by the entire
+ * margin. A check that fires spuriously is one nobody reads.
+ *
+ * 3-10% is a corner of the blob at maximum zoom and it looks perfectly fine on
+ * screen; the property being defended is "never *nothing*", not "always full".
+ */
+const MIN_LAWN_FRACTION = 0.03;
+
+/**
+ * How much of the canvas is inside the real park boundary, by grid sample.
+ *
+ * Uses `PARK_BOUNDARY.outline()` — the same 512-point polygon the map draws and
+ * the terrain is built from — rather than the extent rectangle, so a view
+ * parked over the extent's empty corner is correctly counted as blank.
+ */
+function canvasLawnFraction(
+  projection: MapProjection,
+  width: number,
+  height: number,
+): number {
+  const steps = 12;
+  let inside = 0;
+  let total = 0;
+  for (let i = 0; i < steps; i += 1) {
+    for (let j = 0; j < steps; j += 1) {
+      const px = ((i + 0.5) / steps) * width;
+      const py = ((j + 0.5) / steps) * height;
+      const [wx, wz] = projection.toPlane(px, py);
+      total += 1;
+      if (pointInPolygon(wx, wz, outline)) inside += 1;
+    }
+  }
+  return total === 0 ? 0 : inside / total;
+}
+
+/** Standard ray-crossing test. */
+function pointInPolygon(
+  x: number,
+  z: number,
+  polygon: readonly (readonly [number, number])[],
+): boolean {
+  let hit = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+    const a = polygon[i] as readonly [number, number];
+    const b = polygon[j] as readonly [number, number];
+    if (a[1] > z !== b[1] > z && x < ((b[0] - a[0]) * (z - a[1])) / (b[1] - a[1]) + a[0]) {
+      hit = !hit;
+    }
+  }
+  return hit;
+}
+
+/**
+ * A grid of views: every sampled zoom, panned hard to each corner and edge as
+ * well as centred. Deliberately asks for centres far outside the legal range —
+ * `clampMapView` is the thing under test, so it must be handed values that
+ * would break it if it did nothing.
+ */
+function viewSamples(width: number, height: number): { label: string; view: MapView }[] {
+  const base = defaultMapView(width, height);
+  const reach = 400; // metres — far beyond any legal pan, on purpose
+  const offsets: readonly (readonly [number, number, string])[] = [
+    [0, 0, 'centred'],
+    [-reach, 0, 'panned west'],
+    [reach, 0, 'panned east'],
+    [0, -reach, 'panned north'],
+    [0, reach, 'panned south'],
+    [-reach, -reach, 'panned NW'],
+    [reach, reach, 'panned SE'],
+    // **NE and SW were missing, and NE is the worst case.** The park is a
+    // lobed blob inside a rectangular extent, and its emptiest bounding-box
+    // corner is to the north-east — so the two offsets most likely to find a
+    // sparse view were the two not sampled. Omitting the worst case is
+    // backwards, and it meant assertion 6 passed partly because of which
+    // directions were tried rather than because the code cleared the bar.
+    // Caught in review of PR #372.
+    [reach, -reach, 'panned NE'],
+    [-reach, reach, 'panned SW'],
+  ];
+  const samples: { label: string; view: MapView }[] = [];
+  for (const zoom of ZOOM_SAMPLES) {
+    for (const [dx, dz, where] of offsets) {
+      samples.push({
+        label: `zoom ${zoom}x ${where}`,
+        view: { zoom, centreX: base.centreX + dx, centreZ: base.centreZ + dz },
+      });
+    }
+  }
+  return samples;
+}
+
+/**
+ * The projection for a view, with `--mutate` applied.
+ *
+ * `clamp-loose` and `clamp-tight` are applied here rather than inside the
+ * module so the honest module stays honest while the check exercises a broken
+ * one — the same shape as `viewport` and `stretch` above.
+ */
+function projectionForView(width: number, height: number, view: MapView): MapProjection {
+  if (mutation === 'clamp-loose') {
+    // No clamping at all: pan wherever asked, off the park into blank paper.
+    const base = outdoorParkMapProjection(width, height);
+    const scale = base.scale * view.zoom;
+    const originPxX = base.canvasWidth / 2 - view.centreX * scale;
+    const originPxY = base.canvasHeight / 2 - view.centreZ * scale;
+    return {
+      scale,
+      originPxX,
+      originPxY,
+      canvasWidth: base.canvasWidth,
+      canvasHeight: base.canvasHeight,
+      toCanvas: (x, z) => [originPxX + x * scale, originPxY + z * scale],
+      toPlane: (px, py) => [(px - originPxX) / scale, (py - originPxY) / scale],
+    };
+  }
+  if (mutation === 'clamp-letterbox') {
+    // **The exact bug PR #372's review found**, reinstated: clamp against the
+    // world rectangle zoom 1 *frames* rather than against the park. Because
+    // `frameExtent` fits the smaller axis, that rectangle is mostly empty
+    // letterbox on any canvas whose aspect differs from the park's, so at high
+    // zoom the view can sit entirely in the blank band.
+    //
+    // This mutation exists because the assertion that replaced it must be
+    // shown to catch it. The *previous* version of assertion 6 measured escape
+    // against this same rectangle, so it agreed with this code by construction
+    // and reported `0.00 m` while the map went completely blank.
+    const base = outdoorParkMapProjection(width, height);
+    const zoom = Math.min(MAP_MAX_ZOOM, Math.max(MAP_MIN_ZOOM, view.zoom));
+    const [lminX, lminZ] = base.toPlane(0, 0);
+    const [lmaxX, lmaxZ] = base.toPlane(base.canvasWidth, base.canvasHeight);
+    const halfX = base.canvasWidth / 2 / (base.scale * zoom);
+    const halfZ = base.canvasHeight / 2 / (base.scale * zoom);
+    const old = (v: number, lo: number, hi: number): number =>
+      lo >= hi ? (lo + hi) / 2 : Math.min(hi, Math.max(lo, v));
+    const scale = base.scale * zoom;
+    const centreX = old(view.centreX, lminX + halfX, lmaxX - halfX);
+    const centreZ = old(view.centreZ, lminZ + halfZ, lmaxZ - halfZ);
+    const originPxX = base.canvasWidth / 2 - centreX * scale;
+    const originPxY = base.canvasHeight / 2 - centreZ * scale;
+    return {
+      scale,
+      originPxX,
+      originPxY,
+      canvasWidth: base.canvasWidth,
+      canvasHeight: base.canvasHeight,
+      toCanvas: (x, z) => [originPxX + x * scale, originPxY + z * scale],
+      toPlane: (px, py) => [(px - originPxX) / scale, (py - originPxY) / scale],
+    };
+  }
+  if (mutation === 'clamp-tight') {
+    // Zoom, but never pan: the centre is pinned to the default framing, so
+    // anything not near the middle of the park can never be brought on screen.
+    const base = defaultMapView(width, height);
+    return outdoorParkMapProjection(width, height, { ...base, zoom: view.zoom });
+  }
+  const honest = outdoorParkMapProjection(width, height, view);
+  if (mutation !== 'zoom-axis') return honest;
+  // Zoom applied to one axis only. At zoom 1 this is a no-op, so the check
+  // stays green on the default framing and goes red only once the child zooms
+  // — which is precisely the bug a zoom-1-only check could not see.
+  const squash = 1 / view.zoom ** 0.5;
+  return {
+    ...honest,
+    toCanvas: (x, z) => [
+      honest.originPxX + x * honest.scale,
+      honest.originPxY + z * honest.scale * squash,
+    ],
+    toPlane: (px, py) => [
+      (px - honest.originPxX) / honest.scale,
+      (py - honest.originPxY) / (honest.scale * squash),
+    ],
+  };
+}
+
+/**
+ * `zoomedAboutPoint` and `pannedBy` under mutation.
+ *
+ * **These are separate derived formulae, not the one affine map**, which is
+ * why they get real assertions rather than the "structural, cannot drift"
+ * note that covers `toCanvas`/`toPlane`. PR #372's review proved the point by
+ * gutting the focal pinning and, separately, flipping the pan sign: the map
+ * zoomed about the wrong point and dragged the wrong way, and
+ * `check:park-map` stayed **fully green** both times. My own vacuity argument
+ * was right about the round-trip and wrong about these two, and this is where
+ * the distinction actually had to be drawn.
+ */
+function zoomAboutUnderTest(
+  view: MapView,
+  nextZoom: number,
+  focalPxX: number,
+  focalPxY: number,
+  width: number,
+  height: number,
+): MapView {
+  if (mutation === 'focal') {
+    // Ignore the focal point: zoom about the canvas centre, so whatever the
+    // child was pinching on slides away under her fingers.
+    return clampMapView({ ...view, zoom: nextZoom }, width, height);
+  }
+  return zoomedAboutPoint(view, nextZoom, focalPxX, focalPxY, width, height);
+}
+
+function panUnderTest(
+  view: MapView,
+  dxPx: number,
+  dyPx: number,
+  width: number,
+  height: number,
+): MapView {
+  // Drag the map the wrong way — the single most likely sign error here.
+  if (mutation === 'pan-sign') return pannedBy(view, -dxPx, -dyPx, width, height);
+  return pannedBy(view, dxPx, dyPx, width, height);
 }
 
 // --------------------------------------------------------------- the park
@@ -486,6 +814,270 @@ notes.push(
   notes.push(
     `conformality: worst bearing error ${worstBearingDeg.toFixed(3)}°, ` +
       `scale spread ${(spread * 100).toFixed(3)}% over ${checkedFeatures.length} features`,
+  );
+}
+
+// --- 4. zoom 1 is exactly the map that shipped ------------------------------
+
+{
+  for (const [width, height, name] of CANVAS_SIZES) {
+    const shipped = outdoorParkMapProjection(width, height);
+    const viaView = projectionForView(width, height, defaultMapView(width, height));
+    const drift = Math.max(
+      Math.abs(shipped.scale - viaView.scale) * 100,
+      Math.abs(shipped.originPxX - viaView.originPxX),
+      Math.abs(shipped.originPxY - viaView.originPxY),
+    );
+    if (drift > VIEW_EPSILON_PX) {
+      failures.push(
+        `DEFAULT VIEW DRIFTED on ${name} ${width}x${height}: the map at zoom 1 no longer ` +
+          `matches the projection with no view at all — scale ${viaView.scale.toFixed(4)} vs ` +
+          `${shipped.scale.toFixed(4)}, origin (${viaView.originPxX.toFixed(1)}, ` +
+          `${viaView.originPxY.toFixed(1)}) vs (${shipped.originPxX.toFixed(1)}, ` +
+          `${shipped.originPxY.toFixed(1)}). Zoom must not change the framing four review ` +
+          'rounds settled on (#334/#234).',
+      );
+    }
+  }
+  notes.push(`zoom-1 equivalence: default view matches the shipped framing at all ${CANVAS_SIZES.length} sizes`);
+}
+
+// --- 5, 6, 7. the map holds together at every zoom and pan -------------------
+
+{
+  let worstSpread = 0;
+  let worstSpreadWhere = '';
+  let worstLawnFraction = 1;
+  let worstLawnWhere = '';
+  let worstStrandedPx = 0;
+  let worstStrandedWhere = '';
+  let viewsChecked = 0;
+
+  for (const [width, height, name] of CANVAS_SIZES) {
+    for (const { label, view } of viewSamples(width, height)) {
+      const projection = projectionForView(width, height, view);
+      viewsChecked += 1;
+
+      // --- 5. uniform scale. Measured per axis from the projection itself,
+      // which is what a per-axis zoom breaks and a round-trip cannot see.
+      const [x0, y0] = projection.toCanvas(0, 0);
+      const [x1, y1] = projection.toCanvas(100, 100);
+      const pxPerMetreX = Math.abs(x1 - x0) / 100;
+      const pxPerMetreZ = Math.abs(y1 - y0) / 100;
+      const spread =
+        Math.max(pxPerMetreX, pxPerMetreZ) > 0
+          ? Math.abs(pxPerMetreX - pxPerMetreZ) / Math.max(pxPerMetreX, pxPerMetreZ)
+          : 0;
+      if (spread > worstSpread) {
+        worstSpread = spread;
+        worstSpreadWhere = `${name} ${label}`;
+      }
+      if (spread > SCALE_SPREAD_TOLERANCE) {
+        failures.push(
+          `SCALE NOT UNIFORM at ${label} on ${name} ${width}x${height}: ` +
+            `${pxPerMetreX.toFixed(4)} px/m across but ${pxPerMetreZ.toFixed(4)} px/m down — ` +
+            `a spread of ${(spread * 100).toFixed(2)}%, tolerance ` +
+            `${(SCALE_SPREAD_TOLERANCE * 100).toFixed(2)}%. The park shears as it zooms.`,
+        );
+      }
+
+      // --- 6. THE CHILD CAN ALWAYS SEE SOME PARK.
+      //
+      // **This measures the outcome, not the rule**, and that distinction is
+      // the whole reason it was rewritten. The first version compared the
+      // visible rectangle against the region zoom 1 frames — the same
+      // rectangle `clampMapView` was clamping to — so it agreed with the code
+      // by construction and reported `0.00 m` while an 844x390 landscape phone
+      // at zoom 4 could be dragged to a **completely blank** map. It was not
+      // vacuous (`clamp-loose` was honestly red) but it measured the wrong
+      // region, and it permitted exactly the outcome its own failure string
+      // described. Found in review of PR #372.
+      //
+      // So: sample the canvas on a grid and ask how much of it is inside the
+      // real `PARK_BOUNDARY` polygon. A clamp that lets the view slide into
+      // the letterbox fails this no matter which rectangle it clamped to,
+      // because the question is now "is there park on screen" rather than "did
+      // the clamp obey itself".
+      const lawn = canvasLawnFraction(projection, width, height);
+      if (lawn < worstLawnFraction) {
+        worstLawnFraction = lawn;
+        worstLawnWhere = `${name} ${label}`;
+      }
+      if (lawn < MIN_LAWN_FRACTION) {
+        failures.push(
+          `BLANK MAP at ${label} on ${name} ${width}x${height}: only ` +
+            `${(lawn * 100).toFixed(1)}% of the canvas is park (minimum ` +
+            `${(MIN_LAWN_FRACTION * 100).toFixed(0)}%). The child can pan until there is ` +
+            'little or nothing to look at.',
+        );
+      }
+    }
+
+    // --- 7. the clamp never strands an attraction. Centre on each feature in
+    // turn: if the clamp is too tight, the far corners can never be reached.
+    for (const zoom of ZOOM_SAMPLES) {
+      for (const feature of checkedFeatures) {
+        const projection = projectionForView(width, height, {
+          zoom,
+          centreX: feature.x,
+          centreZ: feature.z,
+        });
+        const [px, py] = projection.toCanvas(feature.x, feature.z);
+        const outside = Math.max(-px, px - width, -py, py - height, 0);
+        if (outside > worstStrandedPx) {
+          worstStrandedPx = outside;
+          worstStrandedWhere = `${feature.id} at zoom ${zoom}x on ${name}`;
+        }
+        if (outside > VIEW_EPSILON_PX) {
+          failures.push(
+            `STRANDED "${feature.id}" at zoom ${zoom}x on ${name} ${width}x${height}: centring ` +
+              `the map on it still leaves it ${outside.toFixed(1)} px off the canvas, so there ` +
+              'is no view in which the child can see it. The pan clamp is too tight.',
+          );
+        }
+      }
+    }
+  }
+
+  notes.push(
+    `zoom uniformity: worst scale spread ${(worstSpread * 100).toFixed(3)}%` +
+      (worstSpreadWhere ? ` (${worstSpreadWhere})` : '') +
+      `, over ${viewsChecked} views`,
+  );
+  notes.push(
+    `pan clamp: worst canvas coverage ${(worstLawnFraction * 100).toFixed(1)}% park` +
+      (worstLawnWhere ? ` (${worstLawnWhere})` : '') +
+      `, minimum ${(MIN_LAWN_FRACTION * 100).toFixed(0)}%`,
+  );
+  notes.push(
+    `reachability: worst stranding ${worstStrandedPx.toFixed(2)} px` +
+      (worstStrandedWhere ? ` (${worstStrandedWhere})` : '') +
+      `, ${checkedFeatures.length} features x ${ZOOM_SAMPLES.length} zooms`,
+  );
+}
+
+// --- 8. the gesture formulae do what they say --------------------------------
+
+/**
+ * **Zoom pins the point under the finger; a drag moves the map with it.**
+ *
+ * Both are derived formulae with no other owner, and both were silently broken
+ * by the reviewer of PR #372 without a single assertion noticing. Four lines
+ * each, and they are the difference between "the castle stays under your
+ * thumb" being a claim in a comment and being a fact.
+ *
+ * **Sampled only where the clamp provably cannot bind — and that precondition
+ * is computed here, not asserted in prose.** It matters: the first version
+ * sampled at zoom 2 and went red on a 700x300 landscape, because at that zoom
+ * the park's *width* still fits the canvas, so `clampMapView` correctly pins
+ * the x axis and a horizontal drag correctly does nothing. The formula was
+ * right and the test was wrong.
+ *
+ * An earlier comment here quoted fixed metre figures for that margin. They
+ * were stale the moment the clamp changed, so the numbers are gone and the
+ * condition is evaluated instead: a view is only used if the visible span is
+ * strictly inside the park's span on **both** axes, which is exactly when a
+ * pan or a zoom cannot be clamped. `usableViews` in the note below is the
+ * count that actually got measured, so a change that silently skipped
+ * everything would show up as a zero rather than as a green.
+ */
+{
+  let worstFocalPx = 0;
+  let worstFocalWhere = '';
+  let worstPanPx = 0;
+  let worstPanWhere = '';
+  let usableViews = 0;
+
+  const contentSpanX =
+    PARK_BOUNDARY.extent.maxX - PARK_BOUNDARY.extent.minX + 2 * MAP_EDGE_MARGIN_M;
+  const contentSpanZ =
+    PARK_BOUNDARY.extent.maxZ - PARK_BOUNDARY.extent.minZ + 2 * MAP_EDGE_MARGIN_M;
+
+  for (const [width, height, name] of CANVAS_SIZES) {
+    const start = defaultMapView(width, height);
+    const baseScale = outdoorParkMapProjection(width, height).scale;
+
+    for (const zoom of [2, 2.5, 3, MAP_MAX_ZOOM]) {
+      // The clamp can only be inactive if the view is smaller than the park on
+      // both axes, with a little room to move inside it.
+      const visibleX = width / (baseScale * zoom);
+      const visibleZ = height / (baseScale * zoom);
+      const slackX = contentSpanX - visibleX;
+      const slackZ = contentSpanZ - visibleZ;
+      // Need room for the largest probe drag (40 px) in world metres.
+      const needed = 40 / (baseScale * zoom);
+      if (slackX <= needed * 2 || slackZ <= needed * 2) continue;
+      usableViews += 1;
+
+      const roomy = clampMapView({ ...start, zoom }, width, height);
+
+      for (const [fx, fy] of [
+        [width * 0.5, height * 0.5],
+        [width * 0.45, height * 0.45],
+        [width * 0.55, height * 0.55],
+      ] as const) {
+        const before = projectionForView(width, height, roomy);
+        const [worldX, worldZ] = before.toPlane(fx, fy);
+        for (const nextZoom of [zoom * 0.9, zoom * 1.05]) {
+          if (nextZoom < MAP_MIN_ZOOM || nextZoom > MAP_MAX_ZOOM) continue;
+          const after = zoomAboutUnderTest(roomy, nextZoom, fx, fy, width, height);
+          const [px, py] = projectionForView(width, height, after).toCanvas(worldX, worldZ);
+          const drift = Math.hypot(px - fx, py - fy);
+          if (drift > worstFocalPx) {
+            worstFocalPx = drift;
+            worstFocalWhere = `${name} ${zoom}x->${nextZoom.toFixed(2)}x about (${fx.toFixed(0)}, ${fy.toFixed(0)})`;
+          }
+          if (drift > 1) {
+            failures.push(
+              `ZOOM DID NOT PIN THE FOCAL POINT on ${name} ${width}x${height}: zooming ` +
+                `${zoom}x -> ${nextZoom.toFixed(2)}x about (${fx.toFixed(0)}, ${fy.toFixed(0)}) ` +
+                `moved the world point under it by ${drift.toFixed(1)} px. Whatever the child ` +
+                'is pinching on must stay under her fingers.',
+            );
+          }
+        }
+      }
+
+      for (const [dx, dy] of [[40, 0], [0, 40], [-30, 25]] as const) {
+        const before = projectionForView(width, height, roomy);
+        const probeX = width / 2;
+        const probeY = height / 2;
+        const [worldX, worldZ] = before.toPlane(probeX, probeY);
+        const after = panUnderTest(roomy, dx, dy, width, height);
+        const [px, py] = projectionForView(width, height, after).toCanvas(worldX, worldZ);
+        const drift = Math.hypot(px - (probeX + dx), py - (probeY + dy));
+        if (drift > worstPanPx) {
+          worstPanPx = drift;
+          worstPanWhere = `${name} ${zoom}x drag (${dx}, ${dy})`;
+        }
+        if (drift > 1) {
+          failures.push(
+            `DRAG MOVED THE MAP WRONG on ${name} ${width}x${height} at ${zoom}x: dragging by ` +
+              `(${dx}, ${dy}) px should carry the world point under the finger to ` +
+              `(${(probeX + dx).toFixed(0)}, ${(probeY + dy).toFixed(0)}) but it landed at ` +
+              `(${px.toFixed(0)}, ${py.toFixed(0)}) — out by ${drift.toFixed(1)} px. The map ` +
+              'drags the wrong way or the wrong distance.',
+          );
+        }
+      }
+    }
+  }
+
+  if (usableViews === 0) {
+    failures.push(
+      'ASSERTION 8 MEASURED NOTHING: no sampled view had room to pan or zoom without the ' +
+        'clamp binding, so the gesture formulae were never exercised.',
+    );
+  }
+
+  notes.push(
+    `zoom focal pinning: worst drift ${worstFocalPx.toFixed(2)} px` +
+      (worstFocalWhere ? ` (${worstFocalWhere})` : '') +
+      `, over ${usableViews} unclamped views`,
+  );
+  notes.push(
+    `drag tracking: worst drift ${worstPanPx.toFixed(2)} px` +
+      (worstPanWhere ? ` (${worstPanWhere})` : ''),
   );
 }
 
