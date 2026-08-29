@@ -146,6 +146,17 @@ the shared toolkit — primitives, scene plumbing, planar UVs, and `ts_const`,
 which reads a number out of the game's TypeScript rather than letting a Blender
 script keep its own copy of it.
 
+**Not every kit uses it yet, and that is a known debt rather than a choice.**
+`blendkit.py` arrived with the castle (29 August 2026); `hotel_build.py` and
+`bridge_stones_build.py` predate it and each carry their own `ts_const`,
+`reset_scene`, `emit` and `box`. Three copies of the same four functions is
+this repo's most common bug in its purest form. They were left alone
+deliberately — both have a shipped `.glb` whose bytes are asserted by its
+`pack:` step, so re-pointing them means re-verifying two binaries for no
+visible change — but **a new kit must import `blendkit`, never copy from a
+neighbour.** Folding the other two in is worth doing on its own PR, where the
+only question asked is whether the bytes still match.
+
 | Kit | Build | Bytes | What it is |
 | --- | --- | --- | --- |
 | `kid.glb` | `npm run blend:kid` | — | the child rig, round-tripped |
