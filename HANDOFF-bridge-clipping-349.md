@@ -806,3 +806,113 @@ number.
 - `npx tsc --noEmit` 0, `npm run typecheck:test` 0. **`npm run test:procgen` is
   red on purpose** until the generator fix above lands.
 - Rebased onto `44cf7065`. Three-dot stat is 9 files, all mine.
+
+---
+
+# CLOSED (2026-08-29). Read this before reopening any of it.
+
+PR #352 is **closed, not merged**. Its premise died and nothing in it survives
+on its own. Everything below is measured, not argued.
+
+## Why it closed
+
+#374 (merged as #375) tied `MAX_RAMP_GRADIENT` to what a sprinting child can
+actually climb. At the shipped `BRIDGE_LENGTH_SCALE = 0.6` that makes the
+constant unsatisfiable: **every seed builds NO bridges at all** — every crossing
+falls back to a level crossing. Three independent invariants said so rather than
+passing quietly:
+
+```
+crossingsArePlannedAndMostlyBridged: the park has 5 railway crossing(s) and not
+one real bridge — every per-bridge check above is passing vacuously
+
+nothingHangsIntoTheTunnel: no bridge was tested — every crossing on this seed
+fell back to a level crossing, so this invariant proved nothing
+
+everyCopingStoneSitsOnItsWall: no bridge coping was tested … so this proved
+nothing
+```
+
+and the `[proven-site cover]` line added on #374 printed **"the planner proved
+NO bridge sites on this seed"** five times, announcing the cause on its very
+next use. Below the cap a crossing does not get a steeper bridge — **it gets no
+bridge**. The trade is length against *existence*, not length against safety.
+
+## The coupling — the finding that killed the re-scope
+
+The obvious rescue was to ship the length-independent work and let the
+shortening follow. **It does not decompose.** Attributed by mutation, never by
+reasoning:
+
+| mutation | result | conclusion |
+| --- | --- | --- |
+| `PARAPET_CROWN_LIFT = 0` | seed 2 still fails both | the arc is **not** implicated |
+| `bridgeRoadHalfFor` → `main`'s `pathHalfWidth` | seed 2's *reachability* failure clears; the **original** paving bug returns | the **widening** is the cause |
+| invariant + fact alone, on `main`'s geometry | **red on all five seeds** | the invariant cannot ship without the widening |
+
+So the widened road breaks seed 2 at `main`'s full ramp length (*"the bridge
+deck at (-2.2, -47.0) is not reachable from the entrance on the real nav
+lattice"*), while the invariant that guards the paving bug is red without the
+widening. **The invariant, the road-width fix and the shortening are one piece
+of work.** `main` itself is green on seed 2, so all of this is introduced.
+
+And the parapet work — arc, `parapetHeightFor`'s arc term, and the colliders
+reading `parapetTopFor` — **is already on `main`**, absorbed by #360's stone kit
+during the rebase. There was never a separable collider PR left to raise.
+
+## The trap that produced all of it
+
+**Every measurement in this file above the #374 sections was taken on the
+22.03 m bridges.** That includes the "no seed lost a bridge to the 0.85 m of
+extra width" table, which reads reassuring and **does not cover `main`'s 36.7 m
+geometry at all**. The road-width fix was developed, measured and reviewed
+entirely against the shortened bridge and then assumed to be length-independent.
+It is not.
+
+**If you take any number out of this file, check which geometry it was measured
+on first.**
+
+## The likely fix shape, for whoever writes the length PR
+
+`pavingHeightAt` decides where paving stops using the analytic frame
+(`footprint.covers`, an `across` measured on a curved spine), while the masonry
+is *drawn* as a polyline of straight chords. On the outside of a curve the
+chords sit inside the true arc, so a point the frame calls "inside" can be
+outside the drawn triangles — which is why the escape grows with ramp length
+(0.371 m on the short bridge, **0.513 m** on `main`'s longer one) and why it
+shows on the long geometry but not the short.
+
+**#360 already solved exactly this class for the coping**: `buildCopingRun`
+stopped asking the smooth `parapetHeightFor` where to seat a stone and now seats
+on a published `ShellGeometry.parapetLine` — the drawn polyline itself. Do the
+same here: publish the shell's own plan edge and have `pavingHeightAt` test
+against it. One surface, one authority.
+
+## ⚠️ The fall rig in the scratchpad OVER-COUNTS. Do not revive it as-is.
+
+`tmp-fallsim-349.mts` drives `Player.update`'s vertical loop with frames pinned
+at `MAX_FRAME_DELTA`. It correctly reproduces the pre-#374 falls on exactly
+seeds 2 and 18 — and it is **wrong on descents**.
+
+Going downhill the damped height legitimately lags *above* the ground, so the
+real player goes briefly airborne and lands on the ramp ~0.5 m below. That is
+normal and harmless. The rig counts it as a fall, and its "how far under her own
+deck she ends up" figure then measures **deck minus terrain** (2.7–3.4 m)
+instead of where she actually lands, because **the landing is never simulated**.
+The tell: every spurious event sits at exactly `FALL_THRESHOLD` on the
+descending side, and it reports falls at `BRIDGE_LENGTH_SCALE` 1.0 with the
+derived gradient — i.e. on merged `main`, where the validated rig measures zero.
+
+**The validated rig belongs to PR #375's reviewer.** Route safety verdicts
+there. Do not build a third.
+
+## What is worth keeping from this branch
+
+The measurements, the diagnosis and this file. The code is superseded:
+
+- the paving-clip fix and its invariant — correct in intent, but must be rebuilt
+  against the drawn polyline and measured at full length;
+- the shortening — awaiting Jim's number (20% keeps his pronounced hump, 25%
+  costs it, 35% and 40% yield no bridges anywhere; **#358 would buy back all of
+  it**, and is the lever worth pulling first);
+- everything else already shipped in #360, #366 or #375.
