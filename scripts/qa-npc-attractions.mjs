@@ -130,7 +130,14 @@ for (let i = 0; i < SAMPLES; i += 1) {
     };
   });
   for (const b of sample.bubbles) {
-    if (b.startsWith("I'm going to the")) announcements.add(b);
+    // "I'm going to ..." — NOT "...to the", which was the original filter and
+    // could only ever see the articled branch of `announcementFor`. The
+    // un-articled half ("I'm going to Dodgems", "I'm going to The Castle") was
+    // structurally invisible to this script, so the very bug it was meant to
+    // catch — an attraction taking the wrong article — could not have been seen
+    // by it. A QA script that can only observe the case that works is worse
+    // than none, because it reports success.
+    if (b.startsWith("I'm going to ")) announcements.add(b);
     else sawChat = true;
   }
   rows.push({ t: (i * EVERY_MS) / 1000, ...sample });
