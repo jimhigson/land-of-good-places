@@ -74,9 +74,15 @@ The control column is pre-fix behaviour and runs on every invocation:
 > surface at x=-37.19: the deck is at y=7.376 but the sampler returned -0.159,
 > 7.535 m below her own feet — she falls through it.
 
-The check itself was also run against **pre-fix source** (`origin/main` in a
-detached worktree, harness + sim copied in, `src/` untouched): **exit 1**, all
-three assertions firing, ending
+**Be precise about which red run means what.** The `neither` column above *is*
+pre-fix behaviour, it runs on every invocation, and the #378 reviewer reproduced
+it independently on a rig sharing no code with this one (same ceiling 0.512,
+same first failure). That is the evidence about the player.
+
+Copying the harness onto **pre-fix source** (`origin/main` detached, `src/`
+untouched) also exits 1 — but at *every* gradient including 0.100, because with
+`onStep` absent the argument is ignored and the "after" column degenerates. That
+proves the hook is missing, which is a different and weaker claim:
 
 > FAIL: the measured ceiling 0.000 does not bracket the predicted 1.676 (next
 > gradient tried: 0.100). The ground sample is no longer following the movement
@@ -86,12 +92,22 @@ three assertions firing, ending
 
 ## What was deliberately NOT changed
 
-`SPRINT_PEAK_GRADE_BUDGET` keeps its value of 0.512, because
+`SPRINT_PEAK_GRADE_BUDGET` keeps its **value**, because
 `MAX_RAMP_GRADIENT = SPRINT_PEAK_GRADE_BUDGET * (1 - HUMP_BLEND)` and raising it
 **re-plans every bridge on every seed** (#349 measured crossing counts moving on
 four of five seeds). That is separately measured gameplay work, not a side
 effect of a physics fix. Its comment now records the measurement and the
 available headroom instead of describing #358 as unfixed.
+
+**It is now a frozen literal rather than a live derivation** (#378 review). It
+used to compute from `PLAYER_HEIGHT_DAMP_HALF_LIFE`, which meant a number whose
+only remaining job is how smoothly she is *drawn* still silently sized every
+ramp in the park: nudging it 0.04 → 0.06 for feel would have moved the budget to
+0.414 and `MAX_RAMP_GRADIENT` to 0.311. The literal is the **exact double** the
+old expression produced — verified `Object.is` — not a tidy `0.512`, because
+`MAX_RAMP_GRADIENT` feeds `SITE_RAMP_FLOOR`, a *threshold* deciding whether a
+crossing site proves, so even 1e-4 of rounding could flip a marginal site and
+re-plan a seed. `MAX_RAMP_GRADIENT` is unchanged at `0.38408066070351693`.
 
 **The old model is written down in two places.** Whoever raises the budget must
 also relax `CLIMB_BUDGET` in `test/procgen/invariants.ts` (~line 5079) in the
