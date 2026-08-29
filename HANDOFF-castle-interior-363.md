@@ -16,10 +16,11 @@ read and reconcile against. Everything else is context.
 | Fabric work (mine) | ✅ first pass — flagstone floors, coursed walls, timber wall-plate |
 | `/castle?deck=N` deep link | ✅ added; there was no way to reach the interior at all |
 | First Artist batch | requested, awaiting the Artist's own sizes |
-| Check that can fail | ✅ `check:castle`, wired into `npm run build`, **went red on its first run and caught a real bug** (§6) |
+| Check that can fail | ✅ `check:castle`, wired into `npm run build`. Went red on its first run and caught a real bug — then **review found two more ways it could not fail**, both now fixed and both proved red (§6). It measures the built mesh; it does not yet measure any prop, and says so on every run. |
 | Screenshots to Jim | ✅ sent, storeys 0–2 |
 | Lighting / torches | not started — next |
-| Props | blocked on the Artist's batch 1 |
+| Props | blocked on the Artist's batch 1 — **and the three assertions that guard them are not written yet** (§6) |
+| Floor legibility | ⚠️ open. Review walked the middle of the hall and read it as a pink tiled patio: tones within a few percent, the "worn" flags invisible, joints on a regular grid. Deck 1 is worse — mint stones with pink joints, because the mortar hue is baked into the map while the stone hue comes from the storey tint. **Bundled with Jim's per-storey-tint ruling, because the fix depends on which way he goes.** |
 
 ### Two things found the hard way, both by looking at a rendered frame
 
