@@ -52,7 +52,7 @@ import type { ClimbableTreeSeed } from '../../world/Scenery';
  * shared budget, handed to every driver, keeps a lucky run of coin flips from
  * putting half the crowd up in the branches at the same time.
  */
-const MAX_CONCURRENT_CLIMBERS = 3;
+export const MAX_CONCURRENT_CLIMBERS = 3;
 
 /**
  * How many children may be on the railway — riding or walking to a platform —
@@ -64,14 +64,14 @@ const MAX_CONCURRENT_CLIMBERS = 3;
  * always has somebody on it and a child waiting on a platform has company,
  * never so many that the platform *is* the park.
  */
-const MAX_CONCURRENT_RIDERS = 4;
+export const MAX_CONCURRENT_RIDERS = 4;
 
 /**
  * How many children may be mid-chat across the whole park at once (see the
  * chatting block in `wanderDriver.ts`) — the brief's "at most one or two",
  * so standing still reads as being noticed rather than being mobbed.
  */
-const MAX_CONCURRENT_CHATTERS = 2;
+export const MAX_CONCURRENT_CHATTERS = 2;
 
 /**
  * The children who were already in the park when you arrived.
@@ -128,7 +128,7 @@ const MAX_CONCURRENT_CHATTERS = 2;
  * rate.
  */
 const NPC_DENSITY_PER_SQUARE_METRE = 12 / CIRCULAR_PARK_AREA;
-const NPC_COUNT = Math.round(NPC_DENSITY_PER_SQUARE_METRE * PARK_BOUNDARY.area);
+export const NPC_COUNT = Math.round(NPC_DENSITY_PER_SQUARE_METRE * PARK_BOUNDARY.area);
 
 /** …and two of them brought something. */
 const PET_COUNT = 2;
@@ -1198,7 +1198,12 @@ export class NpcSystem implements GameSystem {
         driver.portalTaken();
       }
 
-      if (spaceAt(character.position.x, character.position.z) === SPACE_CASTLE) inside += 1;
+      // Counted by **presence or intent**: a child already indoors, or one who
+      // has chosen a shop and is on their way to the door. Counting only those
+      // actually inside let six of them arrive where the cap said four —
+      // everybody who chose while the room was empty was already committed.
+      const here = spaceAt(character.position.x, character.position.z) === SPACE_CASTLE;
+      if (here || driver.destinationSpace === SPACE_CASTLE) inside += 1;
     }
     this.planner.setInsideCount(inside);
   }

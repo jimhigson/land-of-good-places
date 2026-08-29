@@ -88,7 +88,7 @@ const PLANS_PER_FRAME = 2;
  * children into one room: issue #350's own symptom, reintroduced by its own
  * fix.
  */
-const MAX_INSIDE = 4;
+export const MAX_INSIDE = 4;
 
 /**
  * Longest a child will pursue one destination before giving up on it.

@@ -295,7 +295,7 @@ function paintedOrVisitingCount(): number {
  * child who is painted but has no decal slot free would just be an invisible
  * design, which is worse than not offering them a turn yet.
  */
-const MAX_CONCURRENT_PAINTED = 4;
+export const MAX_CONCURRENT_PAINTED = 4;
 
 /** Chance a child who has reached the front of the queue actually goes in. */
 const PAINT_VISIT_CHANCE = 0.4;

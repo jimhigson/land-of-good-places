@@ -240,6 +240,18 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
     this.journey.portalTaken();
   }
 
+  /**
+   * Which space this child is *heading for* — not where they are.
+   *
+   * `NpcSystem` needs it to cap the castle by **presence rather than by
+   * choice**: a child who has decided on the Hat Shop and is halfway to the
+   * door is as good as inside, and counting only those already indoors let six
+   * arrive where the cap said four.
+   */
+  get destinationSpace(): string | null {
+    return this.journey.destination?.space ?? null;
+  }
+
   /** …and its id, which is what `check:npc-dispersal` counts distinct ones of. */
   get destinationId(): string | null {
     return this.journey.destination?.id ?? null;

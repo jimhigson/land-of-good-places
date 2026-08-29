@@ -120,6 +120,14 @@ import { InputSystem } from '../src/core/input/InputSystem.ts';
 import { WanderDriver } from '../src/entities/npc/wanderDriver.ts';
 import { JourneyPlanner } from '../src/entities/npc/journey.ts';
 import { PARK_BOUNDARY } from '../src/world/boundary.ts';
+import {
+  MAX_CONCURRENT_CHATTERS,
+  MAX_CONCURRENT_CLIMBERS,
+  MAX_CONCURRENT_RIDERS,
+} from '../src/entities/npc/NpcSystem.ts';
+import { MAX_CONCURRENT_PAINTED } from '../src/entities/npc/activities/facePaintVisit.ts';
+import { MAX_INSIDE } from '../src/entities/npc/journey.ts';
+import { SPACE_GARDEN, spaceAt } from '../src/world/spaces.ts';
 import { PARK_SEED } from '../src/world/parkManifest.ts';
 import type { FrameContext } from '../src/core/types.ts';
 
@@ -161,11 +169,32 @@ const MAX_CLUMP_FRACTION = 1 / 3;
  */
 const MIN_DISTINCT_DESTINATIONS_FRACTION = 0.25;
 /**
- * At least this share of the crowd must be free rather than held by an
- * activity. See assertion 4 in the file comment: this is what stops "measure
- * only the free children" from becoming a way to excuse a parked crowd.
+ * The fewest children that can be out in the garden and free while every
+ * whole-park cap is simultaneously full — **derived from those caps**, never
+ * chosen.
+ *
+ * This is assertion 4, and it is what stops "measure only the free children in
+ * the garden" from becoming a way to excuse a parked crowd. The earlier version
+ * was a flat half of the crowd, which a review pointed out had **one child of
+ * headroom** (the caps then summed to 13 against a bar of 12) in a check that
+ * blocks the build — and adding the castle would have made it unsatisfiable
+ * outright.
+ *
+ * Deriving it fixes both problems at once. If somebody raises a cap, this moves
+ * with it instead of going red for a reason that has nothing to do with
+ * dispersal; and if the caps are ever raised past the crowd itself, the
+ * assertion below says so in those words rather than failing obscurely.
+ *
+ * It still has real teeth: it is precisely "no more children are held or indoors
+ * than the caps allow", so a regression parking twenty of the twenty-four on a
+ * station platform fails it.
  */
-const MIN_FREE_FRACTION = 0.5;
+const HELD_AT_MOST =
+  MAX_CONCURRENT_CLIMBERS +
+  MAX_CONCURRENT_RIDERS +
+  MAX_CONCURRENT_PAINTED +
+  MAX_CONCURRENT_CHATTERS +
+  MAX_INSIDE;
 
 // ---------------------------------------------------------------- the park
 
@@ -183,9 +212,29 @@ const world = park.world;
  */
 const kids = world.npcs.all.filter((c) => c.driver instanceof WanderDriver);
 
-/** The children the journey system is steering right now. See the file comment. */
-function freeKids(): typeof kids {
-  return kids.filter((k) => !(k.driver as WanderDriver).occupied);
+/**
+ * The children this check measures: **out in the garden**, and not held by an
+ * activity.
+ *
+ * The garden test is load-bearing and was learned twice. The handoff records
+ * the first time — measuring across `world.npcs.all` gave an RMS of ~420 m
+ * that was entirely about the hotel's seven residents six hundred metres away.
+ * The second time was this PR's own castle work reintroducing it: children
+ * walking into the castle stand at interior coordinates ~600 m off, and the
+ * check went from 37 m to **276 m and still "passed"** — 476% of a uniform
+ * scatter, which should have been impossible and was the loudest possible sign
+ * the number had stopped meaning anything.
+ *
+ * "Are the park's children spread across the park" is a question about the
+ * children who are *in* the park. A child in a shop is somewhere on purpose,
+ * exactly like one on the train.
+ */
+function measuredKids(): typeof kids {
+  return kids.filter(
+    (k) =>
+      !(k.driver as WanderDriver).occupied &&
+      spaceAt(k.position.x, k.position.z) === SPACE_GARDEN,
+  );
 }
 
 if (mutate) {
@@ -241,7 +290,7 @@ function largestClump(group: typeof kids): number {
 }
 
 function measure(t: number): Sample {
-  const free = freeKids();
+  const free = measuredKids();
   if (free.length === 0) {
     return { t, rms: 0, largestClump: 0, distinctDestinations: 0, free: 0 };
   }
@@ -314,14 +363,21 @@ const worstVariety = samples.reduce((a, b) =>
 );
 const worstFree = samples.reduce((a, b) => (b.free < a.free ? b : a));
 
-const minimumFree = Math.ceil(kids.length * MIN_FREE_FRACTION);
+const minimumFree = kids.length - HELD_AT_MOST;
 check(
-  worstFree.free >= minimumFree,
-  `only ${worstFree.free} of ${kids.length} children were free to walk at t=${worstFree.t.toFixed(0)}s ` +
-    `(the rest held by an activity — the train, a climb, a chat, the paint stall), fewer than the ` +
-    `${minimumFree} this check needs to be measuring anything. Either an activity is holding the ` +
-    'crowd far longer than it should, or the dispersal numbers below are about a handful of children ' +
-    'and mean nothing',
+  minimumFree > 0,
+  `the whole-park caps now sum to ${HELD_AT_MOST}, which is not fewer than the ${kids.length} ` +
+    'children in the park, so every child could legitimately be held or indoors at once and this ' +
+    'check can no longer prove anything about dispersal. Lower a cap, or raise NPC_DENSITY',
+);
+check(
+  minimumFree <= 0 || worstFree.free >= minimumFree,
+  `only ${worstFree.free} of ${kids.length} children were out in the garden and free to walk at ` +
+    `t=${worstFree.t.toFixed(0)}s, fewer than the ${minimumFree} that must be, given the whole-park ` +
+    `caps allow at most ${HELD_AT_MOST} to be held or indoors (${MAX_CONCURRENT_CLIMBERS} climbing, ` +
+    `${MAX_CONCURRENT_RIDERS} on the railway, ${MAX_CONCURRENT_PAINTED} being painted, ` +
+    `${MAX_CONCURRENT_CHATTERS} chatting, ${MAX_INSIDE} in the castle). Something is holding children ` +
+    'past its own cap, or the dispersal numbers below are about a handful of children and mean nothing',
 );
 
 const minimumRms = UNIFORM_RMS * MIN_SPREAD_FRACTION;
@@ -375,8 +431,9 @@ notes.push(
     `t=${worstVariety.t.toFixed(0)}s (needs >= ${minimumDestinations})`,
 );
 notes.push(
-  `fewest free (activity not holding them): ${worstFree.free} at t=${worstFree.t.toFixed(0)}s ` +
-    `(needs >= ${minimumFree} of ${kids.length})`,
+  `fewest measured (in the garden, no activity holding them): ${worstFree.free} at ` +
+    `t=${worstFree.t.toFixed(0)}s (needs >= ${minimumFree} of ${kids.length}; caps allow ` +
+    `${HELD_AT_MOST} held or indoors)`,
 );
 for (const note of notes) console.log(`  ${note}`);
 
