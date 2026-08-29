@@ -55,17 +55,82 @@ and the game is live in about 40 seconds.
   `preview_urls: true` explicitly. If you ever add another route, keep those.
   Verified afterwards: both hostnames return 200 for `/`,
   `/manifest.webmanifest`, `/sw.js`, and a deep link (SPA fallback).
-- 2026-08-29 — **the site silently stopped moving.** `deploy.yml` had
-  `cancel-in-progress: true`, so a merge landing during a deploy *cancelled*
-  it. Because this workflow is also what publishes, the live site sat on
-  `0a5f0380` while `main` was five commits ahead — and a cancelled run is a
-  grey tick, so nothing anywhere was red. Found only because Jim said
-  "Deployed still has the old cat bus", and unstuck by hand with
-  `gh workflow run deploy.yml`. Fixed two ways: deploys now **queue**
-  (`cancel-in-progress: false` — a deploy is a publish step, not a CI check,
-  so the last one must always run), and `npm run check:live-version` +
-  `.github/workflows/live-version.yml` now ask the live site what commit it is
-  serving after every Deploy run *however it ended*, on a half-hourly cron, and
-  on demand — opening a GitHub issue when it is behind. **If you are ever
-  wondering again whether live is current, that is one command:**
-  `npm run check:live-version`.
+- 2026-08-29 — **the site silently stopped moving, and we misdiagnosed it
+  twice.** Live sat on `0a5f0380` while `main` was five commits ahead. Nothing
+  was red. Found only because Jim said "Deployed still has the old cat bus",
+  and unstuck by hand with `gh workflow run deploy.yml`.
+
+  **The real cause was the job timeout, not concurrency.** `deploy.yml` had
+  `timeout-minutes: 15`, and **GitHub reports a job timeout as `cancelled`** —
+  identical, in the run list, to a concurrency cancellation. Job durations,
+  start to end:
+
+  | run | duration | conclusion | |
+  |---|---|---|---|
+  | 33261937341 | 15m02s | cancelled | timeout |
+  | 33264088797 | 15m07s | cancelled | timeout |
+  | 33267247275 | 15m15s | cancelled | timeout |
+  | 33273801404 | 15m15s | cancelled | timeout |
+  | 33269930221 | 14m59s | **success** | one second under the cap |
+  | 33273766100 | 1m04s | cancelled | genuinely superseded by a merge |
+
+  **Read the duration, not the conclusion.** A concurrency cancellation dies in
+  ~1-2 minutes, when the next merge lands. A timeout dies at exactly the cap.
+  Both were happening; only the timeout killed runs that had no successor to
+  finish the job for them, so only the timeout could leave the site stale.
+
+  The cap was below the work: the `Build` step runs the whole `npm run build`
+  chain, and its sibling job — `procgen-invariants.yml`'s "Build and checks",
+  the *identical* chain — measured 14m59s, 15m49s and 15m52s the same evening
+  under a 30-minute budget. Deploy did that chain **plus** publishing on 15.
+  Raised to 30 to match the sibling, plus headroom for the publish.
+
+  Fixed three ways:
+  1. `timeout-minutes: 15` → `30`. This is what restores deploys.
+  2. `cancel-in-progress: false` — a deploy is a publish step, not a CI check,
+     so the last one must always run. Real, but the secondary cause.
+  3. `npm run check:live-version` + `.github/workflows/live-version.yml` ask
+     the live site what commit it is serving, after every Deploy run *however
+     it ended*, on a half-hourly cron, and on demand — opening a GitHub issue
+     when it is behind. **This is the one that would have caught it**, because
+     it is cause-agnostic: it never asks whether a run succeeded, only what is
+     served. It is also what makes a generous timeout safe, since a timeout is
+     no longer silent.
+
+  **If you are ever wondering again whether live is current, that is one
+  command:** `npm run check:live-version`.
+
+- 2026-08-29 — **open question: should the deploy job run the check suite at
+  all?** Measured, not assumed:
+
+  - `npx vite build` alone, locally: **191 ms** (`✓ built in 191ms`, 36
+    precache entries, `dist/sw.js` written). The artefact this job exists to
+    publish takes a fifth of a second to produce.
+  - `npm run build` — the 47-step chain in front of it: **~15 minutes** in CI.
+  - `procgen-invariants.yml` triggers on `push: branches: [main]`, so that
+    identical chain **already runs on every commit that deploys**, concurrently,
+    in a job with its own 30-minute budget.
+
+  So the publish step spends ~15 minutes re-running QA that is running anyway,
+  on the same commit, to build something that takes 191 ms. That is what put
+  the runtime against the ceiling, and raising the cap only buys time until the
+  chain grows again.
+
+  **But the naive fix is a coverage cut, so it was not made here.** Today, if
+  `npm run build` fails, `wrangler deploy` is skipped — "a broken build never
+  ships", recorded in this file on 2026-07-26. Swapping the step for
+  `npx vite build` keeps compile errors blocking a publish but lets a failing
+  *check* (`check:park`, `check:cat-bus`, …) ship. CLAUDE.md is explicit that a
+  check which stops covering something must say so audibly; doing it quietly to
+  save 15 minutes is exactly the trade this repo keeps regretting.
+
+  **The version that loses nothing:** trigger `deploy.yml` from
+  `workflow_run` of "Procgen invariants" **completed + success** on `main`
+  instead of from `push`, and have it do `npx vite build` + `wrangler deploy`.
+  The full gate still blocks publishing — it just does it once instead of
+  twice — and a deploy becomes ~1-2 minutes, dominated by `npm ci`. The care
+  needed: a `workflow_run` job checks out the default branch's HEAD by default,
+  so it must check out the triggering run's own sha explicitly, or it will
+  publish something other than the commit that passed. Not done tonight because
+  getting it wrong means no deploys at all; worth its own PR and its own
+  review.
