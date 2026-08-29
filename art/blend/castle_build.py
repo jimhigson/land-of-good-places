@@ -121,11 +121,19 @@ BLEND = os.path.join(REPO, "art", "blend", "castle.blend")
 # 0.22 m below the slab. The Engineer built it on 29 August, after this file's
 # first pass, and their §4.4 states the rule that came with it:
 #
-#   > Anything standing within 1.25 m of a wall must clear 3.08 m
-#   > (`BEAM_UNDERSIDE`), not 3.30 m. Out in the room it is still 3.30 m.
+#   > Anything standing within 0.40 m of a wall must clear 3.08 m
+#   > (`BEAM_UNDERSIDE`), not 3.30 m. Beyond 0.40 m it is the full 3.30 m.
 #
-# **Every floor asset here is checked against the tighter one**, and that is a
-# deliberate choice rather than an oversight of the 1.25 m proviso. Not all of
+# **That band was 1.25 m when this file first read it, and the Engineer shrank
+# it to 0.40 m on 29 August** (their reconcile entry 2) by moving the wall-plate
+# flush with the wall — a change made to stop the plate hiding the sconces, with
+# the extra headroom as a side effect. It is strictly *more* room than this file
+# was built to, so nothing already built can have broken by it; it is recorded
+# here because the opposite mistake — someone finding the old 1.25 m and
+# shortening a prop to fit a band that no longer exists — is the expensive one.
+#
+# **Every floor asset here is checked against the tighter one anyway**, and that
+# is a deliberate choice rather than an oversight of the proviso. Not all of
 # these stand against a wall, but all of them *may*: eight suits of armour are
 # specified "back to a wall", the throne stands at the end of the hall, and the
 # chest and benches go wherever the room wants them. An asset that only fits in
@@ -185,6 +193,62 @@ def read_ceiling_clear():
 
 
 CEILING_CLEAR, CEILING_FROM = read_ceiling_clear()
+
+# The sconce's own two-number contract, `castleFabric.ts`'s, added by the
+# Engineer in reconcile entry 2 on 29 August.
+#
+# `SCONCE_MOUNT_Y` (2.10 m) is where the back plate lands on the wall.
+# `SCONCE_HEADROOM` (0.60 m) is **how much of a sconce may stand above that
+# point** before the perimeter wall-plate starts eating it, and it is the budget
+# the Engineer's own `check:castle` asserts the plate's sightline against.
+#
+# This exists because of a fault the pictures found and no assertion could:
+# every sconce in the first hall renders was **inside a tapestry**, so the
+# images the sconce's size was judged from were not showing a sconce at all.
+# Chasing that turned up the near-miss underneath it — at the game's 38° camera
+# the sightline grazing the plate's inner-bottom edge landed on the wall at
+# almost exactly 2.10 m, i.e. right at the mount. The Engineer moved the plate
+# flush and published these two numbers so the near-miss becomes a build
+# failure rather than a thing somebody notices in a screenshot with forty
+# instances already placed. 0.60 is deliberately generous against the ~0.46 m
+# the sconce was asked for, so a sconce growing a little cannot silently vanish
+# behind a timber.
+#
+# **Both are plain `export const NAME = <number>;` in `castleFabric.ts`**, so
+# unlike the headroom above these will genuinely be read the day that module
+# lands on this branch — the promise is keepable rather than aspirational.
+SCONCE_MOUNT_Y_FALLBACK = 2.10
+SCONCE_HEADROOM_FALLBACK = 0.60
+FABRIC_MODULE = "src/world/building/castleFabric.ts"
+
+
+def read_fabric_const(name: str, fallback: float):
+    """One of the Engineer's `castleFabric.ts` literals, or the contract figure.
+
+    Same three-state shape as :func:`read_ceiling_clear`, and for the same
+    reason: **"their module is not here yet" and "their module is here and this
+    constant cannot be read" mean opposite things**, and a fallback that reports
+    the two identically is a check describing something other than what it
+    checked. The first is the expected state of this branch; the second is a
+    seam that has moved and wants a person.
+    """
+    if not os.path.exists(os.path.join(REPO, FABRIC_MODULE)):
+        return fallback, f"the Engineer's contract (reconcile 2) — {FABRIC_MODULE} is not on this branch yet"
+    try:
+        return ts_const(FABRIC_MODULE, name), f"{FABRIC_MODULE}'s {name}"
+    except AssertionError:
+        return (
+            fallback,
+            f"the fallback — {FABRIC_MODULE} exists but `{name}` is no longer a "
+            "plain `export const NAME = <number>;` and cannot be read. That is a "
+            "seam that has moved: tell the Engineer rather than retyping it here",
+        )
+
+
+SCONCE_MOUNT_Y, SCONCE_MOUNT_FROM = read_fabric_const("SCONCE_MOUNT_Y", SCONCE_MOUNT_Y_FALLBACK)
+SCONCE_HEADROOM, SCONCE_HEADROOM_FROM = read_fabric_const(
+    "SCONCE_HEADROOM", SCONCE_HEADROOM_FALLBACK
+)
 
 TALLEST_CHILD = ts_const("src/art/models/kid.ts", "TALLEST_CHILD_HEIGHT")
 # A child with ordinary hair and no hat — the figure to judge everyday scale
@@ -868,6 +932,52 @@ def sconce_offset():
     return (centre.x, hi.z, -centre.y)
 
 
+def check_sconce_headroom() -> str:
+    """Assert the sconce fits inside the Engineer's `SCONCE_HEADROOM`.
+
+    **The quantity is "how far above the mount does this reach", not "how tall
+    is it".** A sconce's origin is the point on the wall the back plate lands
+    on, and the plate hangs *below* that as well as standing above it — the
+    bracket runs −0.174..+0.174 and the cup sits above. Nothing below the mount
+    can be occluded by a timber up at the wall-plate, so asserting the asset's
+    full 0.46 m height against a 0.60 m budget would be checking a number the
+    constraint does not care about, and it would go on passing while a sconce
+    that had grown entirely upward disappeared. `hi.z` is the reach that has to
+    survive, so `hi.z` is what is asserted.
+
+    Same disease, same treatment as the throne: that check compared the bare
+    mesh against the headroom while the thing that had to clear was the mesh
+    *plus its dais*, and it passed a finial 2 cm through a beam. Here the trap
+    is one axis over — measuring the whole extent rather than the half of it
+    that is in the way.
+
+    The flame is the Engineer's and is not in this mesh, so what is printed
+    alongside is the budget **left** above the cup's mouth. Forty flames that
+    fit the cup and then poke through the plate would be exactly as wrong as a
+    sconce that did, and this file cannot assert it — so it hands over the
+    number rather than the reassurance.
+    """
+    lo, hi = collection_bounds("sconce")
+    assert hi.z <= SCONCE_HEADROOM + 1e-3, (
+        f"the sconce reaches {hi.z:.3f} m above its mount and the Engineer's "
+        f"SCONCE_HEADROOM is {SCONCE_HEADROOM:.2f} m ({SCONCE_HEADROOM_FROM}) — at "
+        f"{SCONCE_MOUNT_Y:.2f} m on the wall its top would be at "
+        f"{SCONCE_MOUNT_Y + hi.z:.3f} m, inside the perimeter wall-plate, and all "
+        "forty of them would be hidden behind a timber"
+    )
+    mouth = sconce_offset()[1]
+    return (
+        f"  sconce headroom: reaches {hi.z:.3f} m above a {SCONCE_MOUNT_Y:.2f} m mount "
+        f"(top at {SCONCE_MOUNT_Y + hi.z:.3f} m) against a {SCONCE_HEADROOM:.2f} m budget "
+        f"— {SCONCE_HEADROOM - hi.z:.3f} m spare\n"
+        f"    mount from {SCONCE_MOUNT_FROM}\n"
+        f"    budget from {SCONCE_HEADROOM_FROM}\n"
+        f"    the Engineer's flame stands on the cup's mouth at {mouth:.4f} m above the "
+        f"mount, so it has {SCONCE_HEADROOM - mouth:.3f} m of budget above it before the "
+        "wall-plate — not asserted here, because the flame is not in this mesh"
+    )
+
+
 # =============================================================================
 # A6 — the throne
 # =============================================================================
@@ -1456,6 +1566,8 @@ def main() -> None:
         f"({offset[0]:.4f}, {offset[1]:.4f}, {offset[2]:.4f})"
         "\n    — the centre of the cup's mouth, where the Engineer's flame stands."
     )
+    print()
+    print(check_sconce_headroom())
     print(f"\n  TABLE_TOP = {TABLE_TOP:.3f}   BENCH_SEAT = {BENCH_SEAT:.3f}")
     print(f"  clear headroom {CEILING_CLEAR:.2f} m, from {CEILING_FROM}")
     print(f"  tallest child {TALLEST_CHILD:.3f} m, from src/art/models/kid.ts")
