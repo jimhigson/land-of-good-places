@@ -103,6 +103,94 @@ export function frameExtent(
 }
 
 /**
+ * **How far in the child has zoomed, and what she is looking at.** Issue #359.
+ *
+ * `zoom: 1` is exactly the map #334 shipped — the whole park framed, nothing
+ * clipped. Above 1 it magnifies about {@link MapView.centreX}/`centreZ`.
+ *
+ * **This is the only shape zoom and pan take.** They are not a second
+ * transform composed on top of the projection; they are two more inputs *to*
+ * it, and they reach the world-to-pixel maths solely by changing `scale` and
+ * the origin inside {@link frameExtent}. That is deliberate and it is the
+ * whole design: #234 was one viewport constant drifting out of step with the
+ * shape it described, and three rounds of review on #353 went into making this
+ * module the single owner of that arithmetic. A `ctx.translate`/`ctx.scale`
+ * wrapped round the renderer would re-create the second definition — the map
+ * would draw at one transform while `toPlane`, and therefore every tap, used
+ * another, and the fidelity check would keep passing while taps landed in the
+ * wrong place.
+ */
+export interface MapView {
+  /** 1 = whole park. Clamped to [{@link MAP_MIN_ZOOM}, {@link MAP_MAX_ZOOM}]. */
+  readonly zoom: number;
+  /** The world point held at the centre of the canvas. */
+  readonly centreX: number;
+  readonly centreZ: number;
+}
+
+/**
+ * Zoom 1 is "the whole park" and there is deliberately nothing below it: the
+ * park is the world, and pulling back further would frame empty space and
+ * shrink the names, which is the problem this issue exists to solve.
+ */
+export const MAP_MIN_ZOOM = 1;
+
+/**
+ * The far end, chosen from the constraint rather than by taste: at 4x, a 380 px
+ * phone canvas covers about a quarter of the park's width, which is the point
+ * at which every name in view has room at the TEXT rule's minimum size. Going
+ * further would mean panning a long way to find anything.
+ */
+export const MAP_MAX_ZOOM = 4;
+
+/** The default view: the whole park, centred as #334 framed it. */
+export function defaultMapView(canvasWidth: number, canvasHeight: number): MapView {
+  const base = frameExtent(PARK_BOUNDARY.extent, canvasWidth, canvasHeight);
+  const [centreX, centreZ] = base.toPlane(base.canvasWidth / 2, base.canvasHeight / 2);
+  return { zoom: MAP_MIN_ZOOM, centreX, centreZ };
+}
+
+/**
+ * Pulls a view back inside what the map is allowed to show.
+ *
+ * **The child can never pan off the park into blank paper.** The region she may
+ * explore is exactly the region zoom 1 frames — the park plus its lawn margin,
+ * letterboxing included — so at any zoom the visible rectangle is clamped to
+ * sit inside it. At `zoom === 1` the permitted interval collapses to a single
+ * point, so the default view is pinned to the framed centre and this reduces
+ * to precisely the projection #334 shipped. That equivalence is asserted by
+ * `check:park-map`, not merely claimed here.
+ */
+export function clampMapView(
+  view: MapView,
+  canvasWidth: number,
+  canvasHeight: number,
+): MapView {
+  const base = frameExtent(PARK_BOUNDARY.extent, canvasWidth, canvasHeight);
+  const zoom = Math.min(MAP_MAX_ZOOM, Math.max(MAP_MIN_ZOOM, view.zoom));
+
+  // The world rectangle zoom 1 shows, letterboxing and all.
+  const [baseMinX, baseMinZ] = base.toPlane(0, 0);
+  const [baseMaxX, baseMaxZ] = base.toPlane(base.canvasWidth, base.canvasHeight);
+
+  // Half the world span still visible once magnified.
+  const halfX = base.canvasWidth / 2 / (base.scale * zoom);
+  const halfZ = base.canvasHeight / 2 / (base.scale * zoom);
+
+  const clampAxis = (value: number, lo: number, hi: number): number => {
+    // At zoom 1 `lo` and `hi` meet; float noise can cross them by an epsilon.
+    if (lo >= hi) return (lo + hi) / 2;
+    return Math.min(hi, Math.max(lo, value));
+  };
+
+  return {
+    zoom,
+    centreX: clampAxis(view.centreX, baseMinX + halfX, baseMaxX - halfX),
+    centreZ: clampAxis(view.centreZ, baseMinZ + halfZ, baseMaxZ - halfZ),
+  };
+}
+
+/**
  * **The outdoor map's viewport.** The only way `ParkMap` is allowed to get one.
  *
  * This exists so that `ParkMap` has no *choice* to make about what to frame,
@@ -120,8 +208,29 @@ export function frameExtent(
 export function outdoorParkMapProjection(
   canvasWidth: number,
   canvasHeight: number,
+  view?: MapView,
 ): MapProjection {
-  return frameExtent(PARK_BOUNDARY.extent, canvasWidth, canvasHeight);
+  const base = frameExtent(PARK_BOUNDARY.extent, canvasWidth, canvasHeight);
+  if (!view) return base;
+
+  // Zoom and pan reach the transform *only* here, and only by multiplying the
+  // scale and re-centring the origin. Same one-line affine map as before, same
+  // `toCanvas`/`toPlane` pair derived from it — so a tap still inverts exactly
+  // what was drawn, at any zoom. See the note on `MapView`.
+  const { zoom, centreX, centreZ } = clampMapView(view, canvasWidth, canvasHeight);
+  const scale = base.scale * zoom;
+  const originPxX = base.canvasWidth / 2 - centreX * scale;
+  const originPxY = base.canvasHeight / 2 - centreZ * scale;
+
+  return {
+    scale,
+    originPxX,
+    originPxY,
+    canvasWidth: base.canvasWidth,
+    canvasHeight: base.canvasHeight,
+    toCanvas: (x, z) => [originPxX + x * scale, originPxY + z * scale],
+    toPlane: (px, py) => [(px - originPxX) / scale, (py - originPxY) / scale],
+  };
 }
 
 /**
