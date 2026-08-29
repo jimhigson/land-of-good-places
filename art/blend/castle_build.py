@@ -1673,6 +1673,72 @@ def check_origins() -> str:
     return "\n".join(rows)
 
 
+def check_tapestry_hangs() -> str:
+    """Assert the tapestry, **hung at the Engineer's rail height**, actually fits.
+
+    ## Why this function exists
+
+    `TAPESTRY_RAIL_Y` was read from `castleAssets.ts` and then **used by
+    nothing** — `grep` found the assignment, the comment, and no third line. The
+    read worked; it simply proved nothing, and it would not have failed if
+    somebody moved the rail. A read that looks like a check and is not is the
+    exact fault this file spends four hundred lines guarding other people
+    against, and it had one of its own.
+
+    Unlike every other assertion here, the quantity is **not a property of the
+    mesh**. A tapestry's origin is its hang point with all geometry below it
+    (the documented balloon exception), so the asset is correct at *any* rail
+    height and there is nothing about it alone to assert. What the rail height
+    governs is where the cloth ends up **once hung** — and that is a real
+    constraint with two ends:
+
+    - the rail must not go up through the timber wall-plate, and
+    - the hem must not pool on the floor.
+
+    Both are the Engineer's numbers meeting the Artist's geometry, which is what
+    this seam is for. Move `CASTLE_TAPESTRY_RAIL_Y` to 3.2 and the first fails;
+    move it to 2.3 and the second does. Verified against the shipped GLB before
+    this was trusted: pole top 2.970 m and hem 0.502 m at a 2.90 m rail; at 3.20
+    the ceiling assertion fires, at 2.30 the floor one does.
+
+    **One caveat, printed rather than hidden.** `CEILING_CLEAR` is the one
+    figure here that is *not* currently a live read: neither
+    `castleFabric.ts`'s `BEAM_UNDERSIDE` nor `castleAssets.ts`'s
+    `CASTLE_CEILING_CLEAR` is a plain `export const NAME = <number>;` — both are
+    derived expressions — so `read_ceiling_clear` returns
+    `CEILING_CLEAR_FALLBACK`. It happens to equal the real 3.08, which is
+    exactly what makes it worth saying out loud: this assertion would go on
+    passing against a stale 3.08 if the wall-plate moved. `CEILING_FROM` is
+    printed beside the number for that reason, and fixing the seam is the
+    Engineer's, noted at `CEILING_SOURCES`.
+    """
+    cloth_lo, _ = collection_bounds("tapestry")
+    _, rail_hi = collection_bounds("tapestryrail")
+
+    top = TAPESTRY_RAIL_Y + rail_hi.z
+    hem = TAPESTRY_RAIL_Y + cloth_lo.z
+
+    assert top <= CEILING_CLEAR + 1e-3, (
+        f"hung at {TAPESTRY_RAIL_Y:.2f} m ({TAPESTRY_RAIL_FROM}) the rail's top reaches "
+        f"{top:.3f} m, above the {CEILING_CLEAR:.2f} m clear headroom ({CEILING_FROM}). "
+        "The rail would be inside the perimeter wall-plate. Lower the Engineer's "
+        "constant or thin the pole — do not leave them disagreeing"
+    )
+    assert hem > 0.0, (
+        f"hung at {TAPESTRY_RAIL_Y:.2f} m ({TAPESTRY_RAIL_FROM}) the cloth's hem reaches "
+        f"{hem:.3f} m, which is through the floor. A tapestry that pools on the flagstones "
+        "is a tapestry the Engineer has hung too low for the drop this asset was built with"
+    )
+
+    return (
+        f"  tapestry hangs: rail at {TAPESTRY_RAIL_Y:.2f} m ({TAPESTRY_RAIL_FROM})\n"
+        f"    top of pole {top:.3f} m against a {CEILING_CLEAR:.2f} m ceiling "
+        f"— {CEILING_CLEAR - top:.3f} m spare\n"
+        f"    ceiling from {CEILING_FROM}\n"
+        f"    hem lands at {hem:.3f} m above the floor, from a {-cloth_lo.z:.3f} m drop"
+    )
+
+
 def check_child_can_use_it() -> str:
     """**Can a child actually sit on it, and reach across it?**
 
@@ -1934,6 +2000,8 @@ def main() -> None:
     )
     print()
     print(check_sconce_headroom())
+    print()
+    print(check_tapestry_hangs())
     print("\n  can a child use it? (measured mesh against kid.ts's own landmarks)")
     print(check_child_can_use_it())
     print(f"\n  TABLE_TOP = {TABLE_TOP:.3f}   BENCH_SEAT = {BENCH_SEAT:.3f}")
