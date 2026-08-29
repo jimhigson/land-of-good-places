@@ -23,6 +23,7 @@ import {
   planBridgeFootprints,
   type BridgeFootprint,
   type RealWorldQuery,
+  HUMP_BLEND,
 } from './bridgeFootprint';
 import { TRACK_CLEARANCE } from './route';
 import { BUILDING_STEP_UP, PATH_CARRIER_SLACK, PATH_KERB_OVERHANG } from '../../core/constants';
@@ -419,25 +420,12 @@ function clamp01(value: number): number {
   return value < 0 ? 0 : value > 1 ? 1 : value;
 }
 
-/**
- * Fraction of each side's length spent easing the grade in and out — the
- * hump's slope profile is a cosine-blended trapezoid: zero slope at the
- * crown and at the foot, a constant grade in the middle, cosine blends
- * between. Peak slope is `1 / (1 - HUMP_BLEND)` times the average grade
- * (1.33× at 0.25), and that ratio is the whole reason this is a trapezoid
- * and not a smootherstep (1.875×): the REAL walking physics lose a slope
- * that rises faster than `BUILDING_STEP_UP` in one frame — `Player.tick`
- * samples `WalkSurfaces` with a ceiling one step above her own (damped,
- * lagging) height, so at `PLAYER_MAX_SPEED` (7.4) under a slow device's
- * frame clamp (`MAX_FRAME_DELTA`, 1/12 s) a single frame advances
- * `0.617 m × slope`. A smootherstep's 0.79 peak on the canonical seed's
- * cramped bridge came to 0.49 m/frame plus the damp lag — right at the
- * 0.62 m ceiling, and real-browser QA watched her lose the surface at the
- * steep section, fall into the tunnel and jam against the fence. The
- * trapezoid's 0.56 peak leaves a third of the ceiling spare at the same
- * ramp length.
- */
-export const HUMP_BLEND = 0.25;
+// `HUMP_BLEND` now lives in `bridgeFootprint.ts`, because the footprint
+// planner needs it to work out how steep a ramp of a given length really gets
+// (see `MAX_RAMP_GRADIENT`) and `bridges.ts` already imports from there — the
+// other direction would be a cycle. Re-exported so its many references here
+// and in the invariants keep resolving.
+export { HUMP_BLEND };
 
 /**
  * Normalised drop of the hump profile: 0 at the crown (`q = 0`), 1 at the

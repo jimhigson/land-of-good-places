@@ -658,3 +658,30 @@ export const PLAYER_HEIGHT_DAMP_HALF_LIFE = 0.04;
  * her down on the ground that was already under it.
  */
 export const FALL_THRESHOLD = 0.5;
+
+/**
+ * **The steepest slope a sprinting child can climb without losing the surface
+ * under her** — the hard ceiling every walkable ramp in the park is built to.
+ *
+ * One clamped frame ({@link MAX_FRAME_DELTA}, a slow phone) carries her
+ * {@link PLAYER_LONGEST_STEP}. `WalkSurfaces.sample` will not return a built
+ * surface more than {@link BUILDING_STEP_UP} above the height she is *damped*
+ * to, and that damp lags: it keeps `2^(-dt / half-life)` of the gap each frame,
+ * so climbing steadily the lag settles at `r / (1 - r)` = 0.309x the per-frame
+ * climb. She must clear her own climb **plus** her lag, so the usable climb is
+ * `BUILDING_STEP_UP / 1.309` = 0.474 m per frame — a grade of **0.512**, not
+ * the 0.620/0.925 = 0.670 the step-up alone suggests.
+ *
+ * **This is a physics limitation being written into geometry, not a fact about
+ * ramps.** `CollisionWorld.resolveMovement` already sub-steps *lateral*
+ * movement so a long frame cannot carry a child through a wall; the *vertical*
+ * ground sample does not sub-step, and that asymmetry is issue #358. Fix #358
+ * and this budget becomes generous rather than binding, and the park may build
+ * steeper, shorter ramps again. Nobody should read the ramp arithmetic that
+ * depends on this as intrinsic to bridges — it is the shape of a bug elsewhere.
+ */
+export const SPRINT_PEAK_GRADE_BUDGET = (() => {
+  const retention = Math.pow(2, -MAX_FRAME_DELTA / PLAYER_HEIGHT_DAMP_HALF_LIFE);
+  const lag = retention / (1 - retention);
+  return BUILDING_STEP_UP / (1 + lag) / PLAYER_LONGEST_STEP;
+})();
