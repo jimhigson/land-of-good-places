@@ -36,6 +36,13 @@ gh api repos/jimhigson/land-of-good-places/actions/runs/<id>/jobs \
 Both causes are fixed here: `timeout-minutes: 30` (matching the sibling job that
 runs the identical chain) and `cancel-in-progress: false`.
 
+**Tested forward, not just fitted to past runs.** Run `33274588322` (a manual
+dispatch for `254484d2`, job started `20:52:17Z`) was predicted **in advance** to
+die at ~`21:07:17Z`; it was cancelled at `21:07:30Z`, inside `Build`, both deploy
+steps `skipped`. Nothing was racing it — empty concurrency group — so the
+concurrency explanation required it to succeed. At that moment the site was not
+merely stale, it **could not deploy at all**, and had not been able to for hours.
+
 ## Open question, measured, deliberately left for its own PR
 
 `npx vite build` alone is **191 ms**; the 47-step chain in front of it is ~15
