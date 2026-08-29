@@ -1335,6 +1335,65 @@ S1/S5/S14 and Review 2 §4; and, in full: `src/world/building/layout.ts`,
 `core/constants.ts` (building block), `entities/npc/poiGraph.ts`,
 `NpcSystem.ts`, `ui/StairMenu.ts` consumers, and `ParkMap.ts`'s deck usage.
 
+> **Addendum, 29 August 2026 — four corrections, made while implementing S1
+> (issue #377). Read these before acting on anything below.** The memo is a
+> month old and three things have landed since that it could not have known
+> about. Recorded as notes rather than edits, because a decision log quietly
+> rewritten hides how the decision changed.
+>
+> **1. "The scattered stairs are the game" is superseded** (§4, the Glass lift
+> row). Jim, 29 August: *"there are too many ways between the floors right
+> now. Let's reduce it to just the lift"*, and *"disjoint spaces without
+> overlap … an elevator only to get between them."* **The lift is the only
+> route between floors.** Stairs, escalators, `StairRide` and `StairMenu` are
+> deleted outright rather than reworked into portal flavours — §3's stairs and
+> escalator flavours and §4's "sanctioned easy mode" reasoning go with them.
+> The trampoline, bubble and helter-skelter survive as **rides that return you
+> to the floor you started on** (Overseer ruling, 29 August): they are
+> attractions, not transport, and a ride that puts you back where you began is
+> not a way between floors. Whether the bubble also *moves* to the roof is
+> Jim's call and is open.
+>
+> **2. "The floor fader is deleted" (§2) is only half true.** `FloorFader` has
+> a second live consumer that did not exist in July: `hotel/Hotel.ts`'s
+> `overhangFader`, which ghosts the lobby's gallery mass. The castle's *use* of
+> it goes; the file survives and should move out of `building/`, since it is no
+> longer the castle's.
+>
+> **3. "The split migrates zero NPC behaviour" (§4, the NPCs paragraph) is now
+> false.** It was true when written and #355 and #362 landed afterwards:
+> children now walk into the castle through `npc/portals.ts`'s `castlePortals`
+> and visit the shops on decks 0, 1 and 2 (`npc/attractions.ts`'s
+> `castleAttractions`), routing on a castle `NavGrid` lattice. **The split
+> therefore does migrate NPC behaviour, and it is #377's hard requirement: a
+> child sent to a floor-2 shop must be able to leave it.** NPC floor changes
+> become lift portal hops, the same shape `castlePortals` already gives
+> garden↔castle. This needs an invariant proven red by disabling the lift, not
+> an inspection.
+>
+> **4. Portal triggers use `bandCrossed`, not §3's `trigger: Region`.** The
+> memo specifies a region sampled once a frame. That is the tunnellable
+> version, and CLAUDE.md now carries the bug it caused: *"a trigger band
+> sampled once a frame has exactly the same hole [as a wall without
+> sub-stepping] pointed the other way. Ask what she crossed, not where she
+> landed."* `world/tapSpacing.ts`'s `bandCrossed`, against
+> `Player.previousPosition`, is the one owner of that question, and both the
+> castle's doorways and the hotel's already use it.
+>
+> **And the shape of S1 changed, for the better.** §6 has S1 extracting a
+> `SpaceManager` from the castle's three transitions into
+> `building/spaces.ts`. But **the hotel, built after this memo, independently
+> grew the whole mechanism** — `Hotel.changeSpace`, `boundTo(room)`,
+> `stepThroughDoor`, and `travelTo(room)`, commented *"the lift's portal hop —
+> same shape as a door, wrapped in its own iris"*, which is §4's castle lift
+> already written and shipped. `hotel/layout.ts`'s `HotelRoom` is §5's
+> per-floor plan record, already existing; `world/spaces.ts` already resolves
+> six hotel rooms positionally. So S1 was not "invent a `SpaceManager`" but
+> "make the one that already exists explicit and delete the castle's second
+> copy", and it lives at **`world/SpaceManager.ts`**, not under `building/`,
+> because it is not castle-only. Jim's *"make the castle internals work like
+> the hotel internals"* turns out to be literal instruction, not analogy.
+
 ### The ruling, in one paragraph
 
 **Yes: split. One floor = one space.** Each castle floor becomes its own
