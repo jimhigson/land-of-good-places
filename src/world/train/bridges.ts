@@ -184,6 +184,48 @@ function parapetHeightFor(humpHeight: number): number {
 }
 
 /**
+ * **How much taller the parapet stands at the crown than at the feet — the
+ * pronounced hump, put where it costs nothing.**
+ *
+ * Jim, 2026-08-29, asked for *"a more pronounced 'hump' shape to the
+ * bridge"*. The obvious way to give him one is to arc the road, and the
+ * Engineer's measurement of the 40%-shorter bridge says that is exactly what
+ * cannot be done: peak slope is already at 69% of the height a sprinting
+ * child climbs in one clamped frame, and 79% is a figure real-browser QA has
+ * watched her fall through the deck at. Arcing the *drawn* road above the
+ * *walkable* one is refused outright for a different and better reason —
+ * CLAUDE.md's "anything that looks solid must be solid" — because a child on
+ * the crown would sink into stone she can see.
+ *
+ * But **the hump a player reads from beside a bridge is the parapet top line
+ * and the coping on it, and nothing walks on those.** So they get the arc and
+ * the road does not. Nothing walkable is misrepresented: the road surface, the
+ * platform and the collider all still answer the same gentle profile they
+ * always did.
+ *
+ * **Why 0.45 and not more.** GAME_DESIGN.md: a small bridge does not obscure a
+ * player walking on it. At the crown this stands the coping's top
+ * `PARAPET_HEIGHT + this + COPING_STAND` = 1.37 m over the road. The park's
+ * camera looks down at about 45°, so a sight line grazing the near parapet has
+ * fallen 1.9 m — the road's own half-width — by the time it reaches her, i.e.
+ * below the road: she is not occluded at all from the game's own view. In a
+ * pure side elevation half a metre of a 1.86 m child still stands clear above
+ * the coping, which is what a child on a real humpback bridge looks like.
+ * Going much past this starts eating her from the game's camera too.
+ */
+const PARAPET_ARC_RISE = 0.45;
+
+/**
+ * The parapet's extra arc at `q` (0 at the crown, 1 at a ramp foot) — a cosine
+ * dome, so it is flat-topped at the crown and lands tangent at the feet rather
+ * than meeting the ordinary parapet at a visible kink.
+ */
+function parapetArcFor(q: number): number {
+  const u = clamp01(q);
+  return PARAPET_ARC_RISE * (0.5 + 0.5 * Math.cos(Math.PI * u));
+}
+
+/**
  * Half-span (along the path) of the arch's flat crown — the stretch of
  * soffit that must clear the train at full height, and the extent of the
  * mesh named `deck` the invariants measure. The train's own swept
@@ -250,6 +292,25 @@ const GROUND_SAMPLE_STEP = 0.3;
 
 /** Along-axis sampling pitch of the built shell, metres. */
 const SHELL_STEP = 0.6;
+
+/**
+ * Height of one masonry course on the bridge's outer flank.
+ *
+ * Chunky, and deliberately larger than the coursing `pinkStoneTexture` paints
+ * on the same wall: this is geometry, and geometry that reads at the distance
+ * the texture already covers would only be a second, more expensive copy of
+ * it. What the texture cannot do is survive into a silhouette or catch a
+ * shadow, and at 0.7 m a course does both from right across the park.
+ */
+const COURSE_HEIGHT = 0.7;
+
+/**
+ * How far alternate courses are recessed **inward** from the wall's own outer
+ * face. Inward is not an aesthetic choice: `halfAcross` is the width the
+ * footprint search proved clear, so the wall may get thinner than it but never
+ * fatter.
+ */
+const COURSE_RECESS = 0.06;
 
 /** Pitch of the parapet collision-wall segments, metres. */
 const WALL_SEGMENT = 2.0;
@@ -611,6 +672,22 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // The masonry shell — road surface, spandrel/parapet walls, coping, the
   // arch haunches and the abutment faces — one BufferGeometry swept along
   // the frame so the whole thing follows the path's own curve.
+  // **The single owner of where the top of the parapet is.** The shell draws
+  // it, the collision walls stop at it, and the modelled coping sits on it —
+  // three answers that used to be computed in three places and now cannot
+  // disagree (CLAUDE.md: "two definitions of one thing, kept in step by hand").
+  // The arc is the pronounced hump, put on the one part of the bridge nobody
+  // walks on — see `PARAPET_ARC_RISE`.
+  const parapetTopFor = (surface: number, outerX: number, outerZ: number, along: number): number => {
+    const parapet = parapetHeightFor(surface - terrainHeight(outerX, outerZ));
+    if (parapet <= 0) return surface;
+    const length = along >= 0 ? lengthPos : lengthNeg;
+    const q = length > 0 ? clamp01(Math.abs(along) / length) : 1;
+    // Scaled by how much parapet there is, so the arc dies with the wall at a
+    // tapered ramp foot instead of leaving a floating hump of coping there.
+    return surface + parapet + parapetArcFor(q) * (parapet / PARAPET_HEIGHT);
+  };
+
   const shell = buildShellGeometry(
     frame,
     shift,
@@ -618,9 +695,11 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
     lengthPos,
     roadHalf,
     halfAcross,
+    crownY,
     surfaceProfile,
     soffitAt,
     springY,
+    parapetTopFor,
   );
   // Two materials, one geometry: group 0 (everything but the soffit) reads
   // `stone`, group 1 (the tunnel soffit `buildShellGeometry` built as its
@@ -647,12 +726,11 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
     const outer = frame.worldAt(along, halfAcross * side, shift);
     const centre = frame.worldAt(along, 0, shift);
     const surface = surfaceProfile(centre.x, centre.z, along);
-    const parapet = parapetHeightFor(surface - terrainHeight(outer.x, outer.z));
     // Nothing to cap where the parapet has tapered to less than the coping's
     // own thickness — see `parapetHeightFor`. The stone follows the wall; it
     // never asserts one that is not there.
-    if (parapet < COPING_HEIGHT) return null;
-    return surface + parapet;
+    if (parapetHeightFor(surface - terrainHeight(outer.x, outer.z)) < COPING_HEIGHT) return null;
+    return parapetTopFor(surface, outer.x, outer.z, along);
   };
 
   const ringMesh = new Mesh(
@@ -691,7 +769,13 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
           z1: previous.z,
           x2: point.x,
           z2: point.z,
-          topHeight: Math.max(topA, topB) + PARAPET_HEIGHT,
+          // The drawn parapet's own top, arc included — not `+ PARAPET_HEIGHT`
+          // recomputed here. A collider that stopped at the un-arced height
+          // would let a child climb the drawn stone and step over it.
+          topHeight: Math.max(
+            parapetTopFor(topA, previous.x, previous.z, previousAlong),
+            parapetTopFor(topB, point.x, point.z, clamped),
+          ),
         });
       }
       previous = point;
@@ -775,9 +859,11 @@ function buildShellGeometry(
   lengthPos: number,
   roadHalf: number,
   halfAcross: number,
+  crownY: number,
   surfaceProfile: (x: number, z: number, along: number) => number,
   soffitAt: (alongAbs: number) => number,
   springY: number,
+  parapetTopFor: (surface: number, outerX: number, outerZ: number, along: number) => number,
 ): ShellGeometry {
   const positions: number[] = [];
   const uvs: number[] = [];
@@ -811,6 +897,9 @@ function buildShellGeometry(
   interface Ring {
     readonly outerBottom: [number, number]; // [side +1, side -1]
     readonly outerTop: [number, number];
+    /** The coursed outer face: per side, two vertex indices per course (its
+     * own top and bottom, at its own recess). See {@link COURSE_HEIGHT}. */
+    readonly courses: [number[], number[]];
     readonly innerBottom: [number, number]; // parapet inner face, at road
     readonly innerTop: [number, number];
     readonly roadA: number; // road edge, side +1
@@ -824,6 +913,54 @@ function buildShellGeometry(
   const alongs: number[] = [];
   for (let along = -lengthNeg; along < lengthPos; along += SHELL_STEP) alongs.push(along);
   alongs.push(lengthPos);
+
+  // --- the course levels ----------------------------------------------------
+  //
+  // **The flank is coursed masonry, not one smooth face.** The outer wall runs
+  // from the parapet top all the way down to half a metre under the terrain,
+  // which is right and stays — it is what stops a bridge floating over its own
+  // ground with a seam. But drawn as a single quad it reads, at a child's eye
+  // height at the ramp foot, as a bare embankment with a thin strip of parapet
+  // balanced on it: Jim's *"the bridge also doesn't look great"*, 2026-08-29.
+  //
+  // So the face is stepped into courses at **fixed world heights** — every
+  // course is genuinely level, right along the bridge and across both flanks,
+  // the way a real coursed wall is. Levels are anchored on the crown so the top
+  // course lands square under the coping rather than wherever the arithmetic
+  // finished.
+  //
+  // Alternate courses are recessed `COURSE_RECESS` inward. Inward, never
+  // outward: `halfAcross` is the width the footprint search actually cleared
+  // (`bridgeFootprint.ts`), and a course proud of it would put masonry on
+  // ground nothing checked. So the widest the wall ever gets is exactly what
+  // it was before, and the coursing is cut *into* that envelope.
+  //
+  // Every ring carries the same number of course vertices even where the wall
+  // is short, each clamped into that ring's own top and bottom. The degenerate
+  // (zero-height) courses that leaves cost two vertices and draw nothing; the
+  // alternative — a per-ring course count — makes the strip between two
+  // neighbouring rings unjoinable, which is a hole in the mesh, which is the
+  // one thing this bridge has already been reported for twice.
+  let highestTop = -Infinity;
+  let lowestBottom = Infinity;
+  for (const along of alongs) {
+    const centre = frame.pointAt(along);
+    const cx = centre.x + centre.acrossX * shift;
+    const cz = centre.z + centre.acrossZ * shift;
+    const surface = surfaceProfile(cx, cz, along);
+    for (const side of [1, -1] as const) {
+      const outer = frame.worldAt(along, halfAcross * side, shift);
+      highestTop = Math.max(highestTop, parapetTopFor(surface, outer.x, outer.z, along));
+      lowestBottom = Math.min(lowestBottom, terrainHeight(outer.x, outer.z) - 0.5);
+    }
+  }
+  lowestBottom = Math.min(lowestBottom, soffitAt(0) - 0.5);
+  const courseLevels: number[] = [];
+  for (let y = crownY; y > lowestBottom - COURSE_HEIGHT; y -= COURSE_HEIGHT) {
+    if (y <= highestTop + COURSE_HEIGHT) courseLevels.push(y);
+  }
+  if (courseLevels.length < 2) courseLevels.push(lowestBottom);
+  const courseCount = courseLevels.length - 1;
 
   let previous: Ring | null = null;
   let previousAlong = 0;
@@ -858,11 +995,29 @@ function buildShellGeometry(
       : Math.min(terrainHeight(outerMinus.x, outerMinus.z), terrainHeight(roadMinus.x, roadMinus.z)) - 0.5;
     // The parapet tapers out where the hump is barely above the ground —
     // see `parapetHeightFor`; the collision walls follow the same rule.
-    const humpPlus = surface - terrainHeight(outerPlus.x, outerPlus.z);
-    const humpMinus = surface - terrainHeight(outerMinus.x, outerMinus.z);
-    const parapetTopPlus = surface + parapetHeightFor(humpPlus);
-    const parapetTopMinus = surface + parapetHeightFor(humpMinus);
+    const parapetTopPlus = parapetTopFor(surface, outerPlus.x, outerPlus.z, along);
+    const parapetTopMinus = parapetTopFor(surface, outerMinus.x, outerMinus.z, along);
     const u = along / TEXTURE_METRES;
+
+    // The coursed outer face for this ring — two vertices per course, at that
+    // course's own recess, clamped into this ring's own wall. See the course
+    // levels above.
+    const buildCourses = (topY: number, bottomY: number, side: 1 | -1): number[] => {
+      const column: number[] = [];
+      for (let course = 0; course < courseCount; course += 1) {
+        const recess = course % 2 === 0 ? 0 : COURSE_RECESS;
+        const face = frame.worldAt(along, (halfAcross - recess) * side, shift);
+        const levelTop = courseLevels[course] as number;
+        const levelBottom = courseLevels[course + 1] as number;
+        const yTop = Math.min(topY, Math.max(bottomY, levelTop));
+        const yBottom = Math.min(topY, Math.max(bottomY, levelBottom));
+        column.push(
+          vertex(face.x, yTop, face.z, u, yTop / TEXTURE_METRES),
+          vertex(face.x, yBottom, face.z, u, yBottom / TEXTURE_METRES),
+        );
+      }
+      return column;
+    };
 
     const ring: Ring = {
       outerBottom: [
@@ -872,6 +1027,10 @@ function buildShellGeometry(
       outerTop: [
         vertex(outerPlus.x, parapetTopPlus, outerPlus.z, u, parapetTopPlus / TEXTURE_METRES),
         vertex(outerMinus.x, parapetTopMinus, outerMinus.z, u, parapetTopMinus / TEXTURE_METRES),
+      ],
+      courses: [
+        buildCourses(parapetTopPlus, bottomPlus, 1),
+        buildCourses(parapetTopMinus, bottomMinus, -1),
       ],
       innerBottom: [
         vertex(roadPlus.x, roadBed, roadPlus.z, u, roadBed / TEXTURE_METRES),
@@ -909,15 +1068,11 @@ function buildShellGeometry(
       // Road surface (up).
       quad(indices, previous.roadB, previous.roadA, ring.roadA, ring.roadB);
       for (const side of [0, 1] as const) {
-        // Outer wall faces (side 0 faces +across, side 1 faces -across).
+        // Inner parapet face, and the spandrel underside. The outer face is
+        // no longer one quad from bottom to top — it is the coursed column
+        // built below, so that a 15 m flank reads as stonework rather than as
+        // a smooth embankment (see the course levels above).
         if (side === 0) {
-          quad(
-            indices,
-            previous.outerBottom[0],
-            ring.outerBottom[0],
-            ring.outerTop[0],
-            previous.outerTop[0],
-          );
           // Inner parapet face, above the road.
           quad(indices, previous.innerTop[0], ring.innerTop[0], ring.innerBottom[0], previous.innerBottom[0]);
           // Spandrel underside: the solid stone between the road bed
@@ -932,16 +1087,31 @@ function buildShellGeometry(
           // single-sided road-top plane both, with nothing behind either.
           quad(indices, previous.innerBottom[0], ring.innerBottom[0], ring.outerBottom[0], previous.outerBottom[0]);
         } else {
-          quad(
-            indices,
-            previous.outerBottom[1],
-            previous.outerTop[1],
-            ring.outerTop[1],
-            ring.outerBottom[1],
-          );
           quad(indices, previous.innerTop[1], previous.innerBottom[1], ring.innerBottom[1], ring.innerTop[1]);
           quad(indices, previous.innerBottom[1], previous.outerBottom[1], ring.outerBottom[1], ring.innerBottom[1]);
         }
+        // The coursed outer face: one quad per course, plus the horizontal
+        // reveal between a course and the recessed one under it. That reveal
+        // is the whole point — it is the shadow line that makes the flank read
+        // as masonry from the ground, and it is real geometry, so it survives
+        // into the silhouette instead of living in a texture.
+        const before = previous.courses[side];
+        const now = ring.courses[side];
+        for (let course = 0; course < courseCount; course += 1) {
+          const bt = before[course * 2] as number;
+          const bb = before[course * 2 + 1] as number;
+          const nt = now[course * 2] as number;
+          const nb = now[course * 2 + 1] as number;
+          if (side === 0) quad(indices, bb, nb, nt, bt);
+          else quad(indices, bb, bt, nt, nb);
+          if (course + 1 < courseCount) {
+            const bnt = before[(course + 1) * 2] as number;
+            const nnt = now[(course + 1) * 2] as number;
+            if (side === 0) quad(indices, bb, bnt, nnt, nb);
+            else quad(indices, bb, nb, nnt, bnt);
+          }
+        }
+
         // Coping (parapet top): outer edge to inner edge.
         quad(
           copingIndices,

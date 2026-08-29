@@ -288,9 +288,33 @@ export function buildVoussoirRing(
     }
   }
 
+  // --- the imposts ---------------------------------------------------------
+  // A projecting block at each springing, the course an arch is built off. Two
+  // per mouth, four per bridge.
+  //
+  // Without them the arch springs straight out of a plain wall, and the eye
+  // reads the piers either side as part of the same flat face rather than as
+  // what is holding the arch up — noted on the first render pass. A real
+  // bridge always has this band, and it is the cheapest possible way to make
+  // the arch look supported: one more copy of a stone already in the kit.
+  const imposts: Matrix4[] = [];
+  for (const side of [1, -1] as const) {
+    for (const end of [1, -1] as const) {
+      const { along, y } = curve.at(end * curve.arcHalf);
+      const point = frame.pointAt(along);
+      const world = frame.worldAt(along, side * halfAcross, shift);
+      // Lying along the frame, level, with its top at the springing — the arch
+      // starts exactly where this stone stops.
+      const up = new Vector3(0, 1, 0);
+      const forward = new Vector3(point.dirX, 0, point.dirZ);
+      imposts.push(basisAt(up, forward, new Vector3(world.x, y - COPING_HEIGHT, world.z)));
+    }
+  }
+
   const geometries = [
     bakeInstances(bridgeStoneGeometry('voussoir'), voussoirs),
     bakeInstances(bridgeStoneGeometry('keystone'), keystones),
+    bakeInstances(bridgeStoneGeometry('coping'), imposts),
   ];
   return mergeBaked(geometries);
 }
