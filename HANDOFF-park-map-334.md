@@ -145,3 +145,15 @@ view; label collision-avoidance in `drawLabel` at `minTextPx()`.
    (`--strictPort`, kill by PID). No chrome-devtools MCP.
 6. Screenshots onto the `qa-screenshots` orphan branch; PR via `gh pr create`
    referencing both issues. **Do not merge.**
+
+## DONE — PR #353 raised, not merged
+
+All deliverables complete. Build exit 0, procgen 443/443, check green and
+proven red three ways, screenshots on `qa-screenshots` under `park-map-334/`.
+
+Dev servers 27758 and 31291 both killed; `eng-334-before` and `eng-334-shots`
+worktrees removed. This worktree (`eng-334`) is the only one left and can be
+removed once the PR merges.
+
+Known unrelated finding for its own issue: **sweep seed 3 fails to generate**
+(`RailRouteUnsolvable`, all 96 attempts dead-end). Pre-existing on `main`.
