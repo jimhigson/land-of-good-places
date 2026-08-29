@@ -52,3 +52,52 @@ baseline to compare against is `ec74974`, not `main`.
 Instrumenting `carriesAnOffLatticeStreetRun` in the *measure* worktree to see
 the offending run — its axis, length, how far off the lattice line it sits, and
 why `planStreetBetween` returned null for this pair.
+
+## The fix (committed)
+
+Two commits in `src/world/paths.ts`, inside `addInterconnects`:
+
+1. `ac6324c` — **the disproportion escape**. `latticeHonestWalk =
+   |dx| + |dz| + 2 * STREET_PITCH`: a lattice-respecting route only turns at
+   right angles (Manhattan) and needs at most one street pitch of dog-leg at
+   each end to get on and off a line. A paved alternative longer than that is
+   not tidiness, it is a failure to connect. No typed ratio anywhere.
+   `carriesAnOffLatticeStreetRun` yields when `paved > latticeHonestWalk`.
+2. `719c705` — the **slide-corridor** screen yields too, but only when the
+   escape has fired *and* one end of the pair stands inside the corridor.
+   Discovered by measurement: relaxing the off-lattice rule alone does not
+   fix seed 11, because the connector is then refused by
+   `slideOverlap > 8`. You leave the ginormous slide underneath its own
+   chute, so `exit-ginormousSlide` is inside the leg corridor by
+   construction and its own mandatory spur already paves there — the same
+   doorstep exemption the cruiser screen already grants. 20.3 m of the
+   23.4 m connector is in the corridor because *both* ends are.
+3. `c1a4816` — a `[escape]` trace line under `LGP_DEBUG_STREETS`.
+
+## Measured
+
+`npx vitest run`, whole suite:
+- `origin/main` + fix: **443 passed, 0 failed**
+- `ec74974` (#352) + fix: **448 passed, 0 failed** — the blocker is cleared.
+
+Connectors drawn, per seed, before → after (`tmp-connectors.mts`, uncommitted
+scratch listing `connector-*` routes off the built park):
+
+| seed | on `main` | main+fix | on #352 | #352+fix |
+| --- | --- | --- | --- | --- |
+| canonical | 3 | **4** (+ballPit–exit-ginormousSlide) | 3 | **4** (same pair) |
+| 2 | 5 | 5 | 6 | 6 |
+| 5 | 3 | 3 | 3 | 3 |
+| 11 | 3 | **4** (+building–stall.skyCruiser) | 2 | **3** (+ballPit–exit-ginormousSlide) |
+| 18 | 4 | 4 | 4 | 4 |
+
+So the escape draws **one** extra connector on two of five seeds and changes
+nothing on the other three — it is not a general loosening.
+
+## Still to do
+
+- `npm run build` unpiped, exit code checked.
+- Visual QA: headless playwright-core, production build, port 5361, before/
+  after screenshots of the seed 11 ball pit / slide exit area; screenshots
+  onto `qa-screenshots`.
+- PR referencing #361, noting it unblocks #352.
