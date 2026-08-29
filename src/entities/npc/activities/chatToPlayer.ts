@@ -214,6 +214,25 @@ export class ChatToPlayer implements Activity {
   }
 
   /**
+   * Drops the chat because the child has been frozen — issue #362.
+   *
+   * A marked child's `update` is never called, and `endChat` is the only thing
+   * that releases the shared chat slot, so a child frozen mid-chat would hold
+   * one of only {@link MAX_CONCURRENT_CHATTERS} slots for as long as they were
+   * marked — up to a whole 70 s castle visit — with nobody able to see the chat
+   * that was supposedly happening. Exactly the leak `budget.ts`'s header warns
+   * about, reached by a new route.
+   *
+   * Deliberately not `endChat`: there is no `rejoinGraph` to do, because the
+   * child is not rejoining anything. They are standing still in another room.
+   */
+  releaseForFreeze(): void {
+    this.slot.release();
+    this.state = 'none';
+    this.line = null;
+  }
+
+  /**
    * Ends a chat, whatever state it got to — abandoned mid-approach or a
    * completed goodbye. The shared budget slot is freed exactly once by
    * `BudgetSlot`, whichever way out this is.

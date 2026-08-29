@@ -11,23 +11,40 @@
  * Issue #362, Jim: *"if they have entered the big building, we don't simulate
  * inside rooms the player isn't in, we just mark which NPCs are in there."*
  *
- * The performance case for that is weak and this file should say so plainly:
- * measured before the work was designed, simulating every off-space NPC costs
- * **0.147 ms a frame** — about 0.9% of a 60 Hz budget. Nobody should build a
- * level-of-detail system for that, and nobody did.
+ * **The honest justification is that he asked for it, plus a modest cost
+ * saving.** That is worth stating flatly, because an earlier version of this
+ * comment claimed something better and untrue, and a header is exactly where
+ * the next agent reads a claim as settled fact.
  *
- * The case that matters is **correctness**, and it was paid for in #350.
- * Children who walk into the castle stand at interior coordinates six hundred
- * metres from the park, and while they were live agents there, every
- * measurement over "the crowd" had to remember to exclude them. One did not:
- * the dispersal check read an RMS of **276 m — 476% of a uniform scatter over
- * the whole park — and passed**. An impossible number going green means the
- * metric had stopped meaning anything. `check:jitter` caught the same root from
- * the other side, as an 810 m single-frame step.
+ * What it costs: simulating every NPC the player cannot see was measured, before
+ * any of this was designed, at **0.147 ms a frame** — about 0.9% of a 60 Hz
+ * budget, essentially all of it the seven hotel residents, who are off-space for
+ * a whole session. Real, small, and not on its own a reason to build anything.
  *
- * Marking presence deletes that whole class: a marked NPC does not move, so
- * there is nothing for a distant coordinate to corrupt. This check is what
- * keeps it deleted.
+ * ### What this does NOT do, despite an earlier claim here that it did
+ *
+ * This file used to argue that marking presence *deleted a class of bug* — that
+ * indoor NPCs at coordinates six hundred metres away had corrupted crowd
+ * measurements (`check:npc-dispersal` once read an RMS of 276 m, 476% of a
+ * uniform scatter, and passed) and that freezing them removed the cause.
+ *
+ * That does not survive checking, and it was checked in review rather than
+ * here:
+ *
+ * - `check-npc-dispersal.mts` already filters its crowd by `SPACE_GARDEN`. That
+ *   filter is what fixed the 276 m reading, and it fixed it before this change
+ *   existed.
+ * - `check-npc-jitter.mts` already instruments `stepThroughDoor` to re-baseline
+ *   across a portal, which is what stopped the 810 m single-frame step.
+ * - And freezing a body does not remove it from a *positional* census at all: a
+ *   marked child still stands at x≈600, so anything that measures every
+ *   character's position still has to know about them. Not moving is not the
+ *   same as not being there.
+ *
+ * So this change removes no bug class. It stops NPCs advancing in rooms nobody
+ * is looking at, which is what was asked for and is a simplification worth
+ * having; it is not a correctness fix, and this check exists to keep the
+ * behaviour honest rather than to guard a class of defect it does not close.
  *
  * ## What is measured, off the running simulation
  *
@@ -86,6 +103,20 @@ import type { FrameContext } from '../src/core/types.ts';
 import type { NpcCharacter } from '../src/entities/npc/NpcCharacter.ts';
 
 const mutate = process.argv.includes('--mutate');
+/**
+ * A second mutation, kept because this check *failed* it once.
+ *
+ * It leaves the mark in place and the horizontal position untouched, and lifts
+ * every marked character 5 cm a frame. Over the run that is 900 m of ascent,
+ * and the first version of this file reported "0 occurrences (none)" and passed,
+ * because assertion 1 measured `hypot(dx, dz)` and never looked at `y`.
+ *
+ * Vertical is the axis this design actually worries about — the freeze is gated
+ * on `isAirborne` so nobody is frozen mid-fall, and `check:hotel` has fired with
+ * seven residents at −16.5 m. A red mode that only exists to prove the check can
+ * see that axis is worth its ten lines.
+ */
+const mutateVertical = process.argv.includes('--mutate-vertical');
 
 const DT = 1 / 60;
 const RUN_SECONDS = Number(process.env['SECONDS'] ?? 300);
@@ -106,6 +137,18 @@ const world = park.world;
 const npcs = world.npcs;
 const all = npcs.all;
 
+if (mutateVertical) {
+  const system = npcs as unknown as {
+    markWhoIsElsewhere: () => void;
+    elsewhere: Set<NpcCharacter>;
+  };
+  const real = system.markWhoIsElsewhere.bind(system);
+  system.markWhoIsElsewhere = () => {
+    real();
+    for (const character of system.elsewhere) character.position.y += 0.05;
+  };
+}
+
 // --- 4. where everybody starts, before a single frame is stepped -----------
 const spawnedOutside = all
   .filter((c) => c.driver.name === 'wander')
@@ -124,10 +167,12 @@ const check = (ok: boolean, message: string): void => {
 };
 
 const lastX = new Map<NpcCharacter, number>();
+const lastY = new Map<NpcCharacter, number>();
 const lastZ = new Map<NpcCharacter, number>();
 const lastSpace = new Map<NpcCharacter, string>();
 for (const c of all) {
   lastX.set(c, c.position.x);
+  lastY.set(c, c.position.y);
   lastZ.set(c, c.position.z);
   lastSpace.set(c, spaceAt(c.position.x, c.position.z));
 }
@@ -171,6 +216,7 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
       // A crossing legitimately moves a body a long way — that is the portal.
       // Re-baseline rather than reading the step as simulation.
       lastX.set(character, character.position.x);
+      lastY.set(character, character.position.y);
       lastZ.set(character, character.position.z);
       continue;
     }
@@ -187,11 +233,27 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
       }
     }
 
-    // 1. nobody in an interior the player is not in moves
-    if (space !== playerSpace && space !== SPACE_GARDEN) {
+    // 1. nobody in an interior the player is not in moves.
+    //
+    // Same `isAirborne` exclusion assertion 2 uses. They disagreed once —
+    // 2 excluded airborne characters and 1 did not — which is a latent spurious
+    // red: a character legitimately still falling onto its floor is not marked,
+    // so it is *expected* to move, and flagging that would fail the build for
+    // the mechanism working.
+    if (space !== playerSpace && space !== SPACE_GARDEN && !character.isAirborne) {
       const dx = character.position.x - (lastX.get(character) ?? 0);
+      const dy = character.position.y - (lastY.get(character) ?? 0);
       const dz = character.position.z - (lastZ.get(character) ?? 0);
-      const moved = Math.hypot(dx, dz);
+      // **All three axes.** An earlier version measured only x and z, and a
+      // review broke it in the most pointed way available: a mutation that kept
+      // the mark and the horizontal position intact while adding 5 cm to `y`
+      // each frame floated every frozen NPC **900 m upwards** over the run, and
+      // this check reported "0 occurrences" and passed. Vertical is the one axis
+      // this design actually frets about — the freeze is gated on `isAirborne`
+      // precisely because a body frozen mid-fall stays under its own floor, and
+      // `check:hotel` has fired with seven residents at −16.5 m — so leaving it
+      // out was measuring everything except the thing most likely to go wrong.
+      const moved = Math.hypot(dx, dy, dz);
       if (moved > 0) {
         frozenMoveCount += 1;
         if (moved > worstFrozenMove) {
@@ -203,6 +265,7 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
     }
 
     lastX.set(character, character.position.x);
+    lastY.set(character, character.position.y);
     lastZ.set(character, character.position.z);
   }
 }
@@ -220,7 +283,8 @@ check(
 check(
   frozenMoveCount === 0,
   `${frozenMoveCount} times a character inside a space the player is not in moved anyway — worst ` +
-    `${worstFrozenMove.toFixed(4)} m by ${worstFrozenWho} at frame ${worstFrozenAt}. A marked NPC ` +
+    `${worstFrozenMove.toFixed(4)} m by ${worstFrozenWho} at frame ${worstFrozenAt} ` +
+    `(measured on all three axes). A marked NPC ` +
     'is not stepped at all, so any movement means something is still simulating them (#362)',
 );
 
@@ -257,7 +321,11 @@ check(
 
 // ------------------------------------------------------------------- report
 
-console.log(`${all.length} NPCs, player in ${playerSpace}${mutate ? ', --mutate: nobody marked' : ''}`);
+console.log(
+  `${all.length} NPCs, player in ${playerSpace}` +
+    (mutate ? ', --mutate: nobody marked' : '') +
+    (mutateVertical ? ', --mutate-vertical: marked NPCs lifted 5 cm a frame' : ''),
+);
 notes.push(`ran ${RUN_SECONDS}s (${FRAMES} frames) at ${DT.toFixed(4)} s/frame`);
 notes.push(`frames with somebody marked elsewhere: ${markedFrames} of ${FRAMES}`);
 notes.push(`crossings: ${totalIn} in, ${totalOut} out`);

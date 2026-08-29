@@ -1321,6 +1321,11 @@ export class NpcSystem implements GameSystem {
       // the interiors, so that is what is marked.
       if (space === SPACE_GARDEN) continue;
       if (character.isAirborne) continue;
+      // Newly frozen: hand back anything shared before they stop being
+      // stepped. A child frozen mid-chat would otherwise hold one of the two
+      // chat slots for their whole visit, because the only release lives in the
+      // `update` they no longer get.
+      if (!this.elsewhere.has(character)) this.wanderDrivers[i]?.releaseForFreeze();
       this.elsewhere.add(character);
     }
   }
@@ -1356,12 +1361,16 @@ export class NpcSystem implements GameSystem {
         continue;
       }
 
-      this.visitRemaining.delete(character);
+      // Nothing to send them out through: keep the (expired) visit rather than
+      // deleting it, so this is retried rather than silently restarting the
+      // timer from full every frame.
       if (!out) continue;
+      this.visitRemaining.delete(character);
       character.stepThroughDoor(out.farX, out.farY, out.farZ, out.farFacing);
-      driver.portalTaken();
-      // …and they have finished with the shop they went in for, or they would
-      // turn round on the doorstep and go back in for it.
+      // `finishedIndoors` abandons the journey outright, which resets the plan
+      // as `portalTaken` would and then some — so calling both was redundant.
+      // They have finished with the shop they went in for, or they would turn
+      // round on the doorstep and go back in for it.
       driver.finishedIndoors();
     }
   }

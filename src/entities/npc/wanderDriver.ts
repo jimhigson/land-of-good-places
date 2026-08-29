@@ -241,6 +241,17 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
   }
 
   /**
+   * "You are about to stop being simulated." Hands back anything shared that
+   * this child is holding — issue #362.
+   *
+   * Only the chat today: it is the one activity whose budget slot is released
+   * from inside `update`, which a frozen child never reaches.
+   */
+  releaseForFreeze(): void {
+    this.chat.releaseForFreeze();
+  }
+
+  /**
    * "You have finished in there." Drops the current trip so the next frame
    * chooses somewhere new — issue #362.
    *
