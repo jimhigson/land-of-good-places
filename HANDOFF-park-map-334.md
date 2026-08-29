@@ -258,3 +258,52 @@ with its door here. That makes it the stable point of the pair.
   exists to ask, because for most of the game there is no bus.
 
 New mutation `--mutate=gateway` swaps the two, a 9 m error on both.
+
+### Round 4 result — done, pushed, not merged
+
+16 features. Everything green: `tsc` 0, `build` 0 unpiped, procgen 443/443,
+`check:park-map` green and red on **all five** mutations (`viewport`,
+`position`, `stretch`, `entrance`, `gateway`).
+
+**Label counts, read off `dataset.labelCount` / `dataset.featureCount`:**
+
+| | before (of 14) | now (of 16) |
+|---|---|---|
+| desktop 1440 | 13 | **14** |
+| phone 390 | 11 | **11** |
+| phone 320 | 7 | **8** |
+| landscape | 8 | **8** |
+
+Two features added and **no existing name was lost** — the absolute count went
+up or held at every size. Both new features sit alone on the park's southern
+edge where nothing else competes.
+
+The one name that does not fit is **"Cat Bus 67" at desktop and landscape**.
+The gate and the bus stop are 9 m apart, which is ~31 px at desktop scale
+against icons ~30-51 px wide, so "The Gates" takes the space under the bus and
+the bus has nowhere left. It is present at 390 px and 320 px. Reported to the
+Overseer rather than rebalanced.
+
+Also seen and **not** fixed here (folded into #359, same class as the
+reviewer's "Ball Pit labels the wrong thing" note): in landscape "The Gates"
+is placed at an outermost candidate ~90 px from the gate, reading as a label
+for empty path.
+
+**Round 3 CSS blocker fixed**: `.parkmap` gives up its horizontal padding under
+34rem. Measured after: card, canvas and hint all **0 px overflow** at 390, 320,
+landscape and desktop. `qa-park-map.mjs` now screenshots the **viewport**, not
+`.parkmap-card` — capturing the element is why this was invisible for two
+rounds.
+
+Also done from round 3's non-blocking list: castle scene lookup fails loudly
+instead of `??`-ing back to the plot; the wrong-*field*-vs-wrong-*constant*
+clause added to assertion 2's note; every `--mutate` mode now in the header's
+copy-pasteable list.
+
+Dev server 89352 (port 5334) killed. Screenshots `v4-*` on `qa-screenshots`
+under `park-map-334/`, four sizes x two seeds, zero page errors.
+
+**Next: issue #359** — pannable/zoomable map, as a second PR stacked on this
+branch. Zoom/pan must be expressed *through* `outdoorParkMapProjection()`, not
+as a second transform; reuse the game's existing gesture handling; the fidelity
+check must hold across the zoom range and at panned offsets.
