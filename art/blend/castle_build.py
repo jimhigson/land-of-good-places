@@ -399,7 +399,7 @@ class Requested:
 BENCH_SEAT = CHILD_HIP
 BENCH_LENGTH = 2.80
 BENCH_WIDTH = 0.60
-BENCH_SLAB = 0.10
+BENCH_SLAB = 0.13
 
 # `TABLE_TOP` is bracketed from both sides by the rig, and the bracket is narrow
 # enough that it very nearly picks the number itself:
@@ -1094,7 +1094,19 @@ THRONE_HEIGHT = 2.75
 # is what a dais is for, and the 2.75 m back does the framing. A seat at hip
 # height on top of a step you have to mount reads as more ceremonial than a
 # chest-height ledge she can only look at, not less.
+# **`THRONE_SEAT` is the surface she sits on — the top of the cushion, not the
+# top of the wood under it.** The first child-scaled cut got this wrong and the
+# render caught it: the seat plank was put at the hip and the 0.18 m cushion
+# then stacked *on top of it*, so the surface a child actually lands on was at
+# 0.54 m and her feet dangled 0.18 m after all. The assertion passed, because it
+# was measuring the plank — the same shape of mistake as the throne that stood
+# 2 cm through the beam while a check on its bare mesh reported it clear
+# (handoff §2.4). A seat's height is the height of the thing your weight rests
+# on. So the wood is built *down* from this line, not up from the floor.
 THRONE_SEAT = CHILD_HIP
+THRONE_CUSHION_H = 0.12
+#: Top of the bare wooden seat, under the cushion.
+THRONE_DECK = THRONE_SEAT - THRONE_CUSHION_H
 THRONE_WIDTH = 1.60
 THRONE_DEPTH = 1.20
 
@@ -1134,15 +1146,15 @@ def build_throne() -> None:
 
     half_w = THRONE_WIDTH * 0.5
     half_d = THRONE_DEPTH * 0.5
-    seat_t = 0.14
+    seat_t = 0.10
 
     wood.at(*flat_top_box(THRONE_WIDTH, THRONE_DEPTH * 0.86, seat_t, 0.04, 1),
-            z=THRONE_SEAT - seat_t * 0.5)
+            z=THRONE_DECK - seat_t * 0.5)
     for sx in (-1.0, 1.0):
         for sy in (-1.0, 1.0):
-            wood.at(*rounded_box(0.16, 0.16, THRONE_SEAT - seat_t, 0.03, 1),
+            wood.at(*rounded_box(0.16, 0.16, THRONE_DECK - seat_t, 0.03, 1),
                     x=sx * (half_w - 0.12), y=sy * (half_d - 0.20),
-                    z=(THRONE_SEAT - seat_t) * 0.5)
+                    z=(THRONE_DECK - seat_t) * 0.5)
 
     for sx in (-1.0, 1.0):
         # The arms, at the height a *seated child's* arms are.
@@ -1193,8 +1205,11 @@ def build_throne() -> None:
     wood.add(*extrude_outline(outline, 0.14, centre=(0.0, shoulder + 0.30)),
              matrix=place(y=half_d - 0.14))
 
-    cushion.at(*rounded_box(THRONE_WIDTH - 0.24, THRONE_DEPTH * 0.70, 0.18, 0.07, 1),
-               z=THRONE_SEAT + 0.09)
+    # Its **top** is `THRONE_SEAT`, so the cushion fills the gap between the deck
+    # and the line a child's weight rests on rather than sitting proud of it.
+    cushion.at(*rounded_box(THRONE_WIDTH - 0.24, THRONE_DEPTH * 0.70,
+                            THRONE_CUSHION_H, 0.05, 1),
+               z=THRONE_SEAT - THRONE_CUSHION_H * 0.5)
     # The back cushion stops at the shoulder step, and that is the whole
     # point. At 1.10 m tall it covered the panel from the seat to 2.21 m and
     # hid the spire behind it — so the review render showed an armchair with a
@@ -1315,9 +1330,27 @@ def build_bench() -> None:
     slab = BENCH_SLAB
     bench.at(*flat_top_box(BENCH_WIDTH, BENCH_LENGTH, slab, 0.03, 1), z=BENCH_SEAT - slab * 0.5)
     for sy in (-1.0, 1.0):
-        y = sy * (BENCH_LENGTH * 0.5 - 0.42)
-        bench.at(*rounded_box(BENCH_WIDTH * 0.82, 0.14, BENCH_SEAT - slab, 0.03, 1),
+        y = sy * (BENCH_LENGTH * 0.5 - 0.46)
+        # **Solid board ends, not stub legs**, and this is the fix the first
+        # child-scaled render asked for rather than a flourish. Dropping the
+        # seat from 0.55 m to 0.36 m left a 2.80 m plank standing on two 0.14 m
+        # sticks, and in `lineup.png` it stopped reading as a bench: beside the
+        # table's heavy trestles it was a shelf, or a kerb. Nothing was wrong
+        # with its measurements — this is Jim's recognisability rule, and the
+        # only thing that could have caught it is looking at the picture.
+        #
+        # A refectory bench is a plank on two **boards**, so the ends are now
+        # boards: 0.34 m along the bench instead of 0.14, echoing the trestles
+        # on the table it belongs to. Free, too — the height is untouched and
+        # width and length are the Engineer's, so this spends none of anyone's
+        # allowance and changes no constant.
+        bench.at(*rounded_box(BENCH_WIDTH * 0.86, 0.34, BENCH_SEAT - slab, 0.03, 1),
                  y=y, z=(BENCH_SEAT - slab) * 0.5)
+    # A stretcher tying the two boards together, low down — the same piece that
+    # makes the table read as heavy, at the bench's scale. There is only 0.23 m
+    # of room under the seat, so it is small, but it turns two separate boards
+    # into one object.
+    bench.at(*rounded_box(0.16, BENCH_LENGTH - 1.30, 0.09, 0.03, 1), z=0.085)
     bench.emit(coll)
 
 
@@ -1604,14 +1637,34 @@ def check_child_can_use_it() -> str:
         "she backs onto it and her feet reach the floor"
     )
 
-    throne_seat = THRONE_SEAT + DAIS_HEIGHT
-    assert THRONE_SEAT <= CHILD_HIP + 0.02, (
-        f"throne: the seat is {THRONE_SEAT:.3f} m above its own base against a "
+    # **Measure the surface she sits on, which is the cushion, not the plank.**
+    # This assertion was written against `THRONE_SEAT` and passed while the
+    # cushion stacked 0.18 m on top of the plank and put the real sitting
+    # surface at 0.54 m — a check describing something other than the thing that
+    # matters, which is this file's oldest recurring bug (§2.4's throne through
+    # the beam, and the armour keep-out taken about the wrong point).
+    #
+    # `y < 0.20` keeps the seat cushion and drops the back one, which starts at
+    # y = 0.28. Two cushions share a node because the Engineer's `STYLES` table
+    # takes one entry per node name, so they cannot be separated — but they can
+    # be told apart by where they are, and that is a measurement rather than an
+    # assumption about which was emitted first.
+    seat_cushion_top = max(
+        (obj.matrix_world @ v.co).z
+        for obj in bpy.data.collections["throne"].objects
+        if obj.type == "MESH" and obj.name == "throne-cushion"
+        for v in obj.data.vertices
+        if (obj.matrix_world @ v.co).y < 0.20
+    )
+    assert abs(seat_cushion_top - CHILD_HIP) < 0.02, (
+        f"throne: a child's weight would rest at {seat_cushion_top:.3f} m — the top of "
+        f"the cushion, not the {THRONE_SEAT:.3f} m plank under it — against a "
         f"{CHILD_HIP:.2f} m hip. The Engineer's brief calls this 'a destination — "
         "children should want to sit on it', which it cannot be if she cannot get on it."
     )
+    throne_seat = seat_cushion_top + DAIS_HEIGHT
     rows.append(
-        f"    throne seat {THRONE_SEAT:.3f} m + {DAIS_HEIGHT:.2f} m dais = {throne_seat:.3f} m — "
+        f"    throne seat {seat_cushion_top:.3f} m (cushion top) + {DAIS_HEIGHT:.2f} m dais = {throne_seat:.3f} m — "
         "she climbs the dais, then sits at her own hip height"
     )
 

@@ -651,6 +651,39 @@ def main() -> None:
                           (-2.4, BACKDROP_Y, cb.CEILING_CLEAR * 0.5), 0xFFC2D8))
     lineup.append(standin("lineup-plate", (25.0, 0.5, 0.22),
                           (-2.4, BACKDROP_Y - 0.3, cb.CEILING_CLEAR + 0.11), 0xB5836A))
+
+    # --- the three lines that answer Jim's question --------------------------
+    #
+    # The posts say how *tall* a child is, and that was enough while the
+    # question was "does the armour loom". It is not enough for "can she sit on
+    # it and reach the food", because both of those are about landmarks part-way
+    # up her, not about her total height — and against a chibi rig those
+    # landmarks are nowhere an adult's intuition puts them. Half a metre up a
+    # 2.12 m child is not her waist, it is above her shoulders.
+    #
+    # So the three heights that decide whether furniture works are drawn as
+    # rules straight across the row, behind everything, at the same scale as
+    # the assets:
+    #
+    #   hip      — a seat at this line is one she can back onto, feet down
+    #   shoulder — a surface above this line she is peering over
+    #   reach    — a surface above this line she cannot touch at all
+    #
+    # Read the picture by asking where each asset's top surface crosses them:
+    # the bench slab should sit **on** the hip line, and the table top should
+    # sit **between** the hip and shoulder lines and clearly below reach. When
+    # this shot was taken of batch 1, the table top was above the reach line.
+    #
+    # Every value is `cb.`-read from `kid.ts` through the build script — no
+    # copy here, for the reason a typed 1.86 m post cost this ticket a whole
+    # round of judgement.
+    for height, colour, tag in (
+        (cb.CHILD_HIP, 0xE8564F, "hip"),
+        (cb.CHILD_SHOULDER, 0xE8A33D, "shoulder"),
+        (cb.CHILD_REACH, 0x5B8DEF, "reach"),
+    ):
+        lineup.append(standin(f"lineup-rule-{tag}", (25.0, 0.06, 0.035),
+                              (-2.4, BACKDROP_Y - 0.62, height), colour))
     for obj in lineup:
         obj.hide_render = False
     bpy.context.view_layer.update()
@@ -661,6 +694,9 @@ def main() -> None:
     print(f"  wrote lineup.png ({lineup_aspect[0]}x{lineup_aspect[1]}) — every batch-1 asset "
           f"in elevation against a {cb.CHILD_HEIGHT:.2f} m child and a {cb.TALLEST_CHILD:.2f} m "
           "one in the tallest hat")
+    print(f"    rules across the row: hip {cb.CHILD_HIP:.2f} m (red), "
+          f"shoulder {cb.CHILD_SHOULDER:.2f} m (amber), reach {cb.CHILD_REACH:.2f} m (blue) — "
+          "a seat belongs on the red line, a table between red and amber")
 
     print(f"  the pale post in the hall shots is {cb.CHILD_HEIGHT:.2f} m — a child, "
           f"for scale; the darker one is {cb.TALLEST_CHILD:.2f} m, a child in the "
