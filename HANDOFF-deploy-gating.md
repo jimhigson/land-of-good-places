@@ -1,19 +1,76 @@
 # HANDOFF — deploy stops re-running the checks
 
-Branch `fix/deploy-skips-duplicate-checks`, worktree `.claude/worktrees/deploy-gating-2`.
+Branch `fix/deploy-skips-duplicate-checks`, **PR #397**, worktree
+`.claude/worktrees/deploy-gating-2` (removed on finishing — everything is
+pushed; recreate with `git worktree add .claude/worktrees/<name>
+fix/deploy-skips-duplicate-checks`).
 Spec: `DEPLOY_NOTES.md` on `main`, entry 2026-08-29, "the version that loses nothing".
+
+## STATUS: #397 is DELIBERATELY NOT MERGED. It waits on one thing: Actions billing.
+
+The Overseer's ruling, 30 August: three of the four gating demonstrations are
+proven and recorded, but **demonstration 3 — that the publish job checks out the
+*triggering* sha rather than the default branch's newer HEAD — is untested, and
+that is precisely the failure that would be silent.** A wrong-sha publish looks
+exactly like a successful deploy: green tick, run completed, site serving the
+wrong commit. We spent an evening on a pipeline that failed while looking fine;
+we are not replacing it with one whose most dangerous property is unverified.
+
+It is blocked on an *account*, not on the code. See "Two account-level
+findings". Jim has been told both. **Do not attempt to unblock it yourself** —
+not by changing repository visibility, not by touching billing, not by
+configuring runners.
+
+**When there are minutes, this is one push.** The fixture is armed; the exact
+steps are in its README and repeated below.
+
+## THREE THINGS A SUCCESSOR MUST NOT MISS
+
+1. **Do not delete `jimhigson/lgp-deploy-gating-proof`** until #397 merges *and*
+   the sha-pinning experiment has run. Its runs are the PR's cited evidence;
+   deleting it breaks every link in the PR body. The Overseer has told Jim the
+   same.
+2. **`procgen-invariants.yml`'s `name:` and its unfiltered `push: branches:
+   [main]` are now load-bearing for DEPLOYS.** `workflow_run` matches a
+   workflow's *name*, not its filename. Rename that workflow, or add a `paths:`
+   filter to its push trigger, and `deploy.yml` silently stops being triggered —
+   no run, so nothing red, and publishing just quietly stops. That is a coupling
+   nobody would guess from reading either file, which is why both files now say
+   so in comments. The backstop is `live-version.yml`'s half-hourly cron.
+3. **Demonstration 3 and the publish duration are unproven.** Say so wherever
+   you describe this work. Do not let them quietly become "verified" through
+   retelling.
+
+## Reusable technique: getting a genuinely `cancelled` run for free
+
+Worth keeping beyond this ticket. To test how something reacts to a `cancelled`
+workflow run — the case that matters, because **a job that hits
+`timeout-minutes` reports as `cancelled`, indistinguishably from a concurrency
+kill** — you need a run that really settles `cancelled`, and you usually cannot
+win the race to cancel one by hand.
+
+Park its jobs on a `runs-on` label no runner serves:
+
+```yaml
+runs-on: [self-hosted, never-serviced]
+```
+
+The run then sits `queued` **indefinitely**, so you can cancel it whenever you
+like and it settles genuinely `cancelled`. **Queued jobs consume no minutes**,
+so this costs nothing and works even with Actions billing blocked.
+
+Its companion: **GitHub evaluates a job's `if:` before allocating a runner**, so
+job *selection* is observable for free. Under a billing block that gives a clean
+two-valued read-out — `skipped` means the gate blocked the job; `failure` with a
+billing annotation means the gate *allowed* it and only the runner was denied.
+Between them, an entire gating design can be proved without minutes. What they
+cannot show is what a job *does* once running — which is exactly where
+demonstration 3 sits.
 
 Second engineer on this branch (the first hung and was stopped). Its worktree
 `.claude/worktrees/deploy-gating` was clean, fully pushed at `617c9267`, and has
 been removed. Nothing was lost. Rebased onto `origin/main` (`d3bdbacc`) — clean,
 diff is still only `deploy.yml` + this file.
-
-## Where the fixture lives — DO NOT DELETE IT YET
-
-`jimhigson/lgp-deploy-gating-proof` (private). Its README now records every
-demonstration and, step by step, **the one experiment still outstanding**. Its
-runs are the cited evidence in the PR, so deleting it breaks those links.
-Delete only after this PR merges *and* the sha-pinning experiment has run.
 
 ## The change (unchanged from the first engineer — it is sound)
 
@@ -114,22 +171,11 @@ means the gate blocked it, whereas a publish job that reaches the billing
 refusal means the gate **allowed** it and only the runner was denied. That is a
 clean discriminator for allow-vs-block that costs nothing.
 
-## The observability trick that makes all of this free
-
-GitHub evaluates a job's `if:` **before** allocating a runner. Under the billing
-block that yields a clean two-valued read-out of the gate's decision, at zero
-minutes:
-
-| publish job shows | the gate decided |
-|---|---|
-| **`skipped`** (0 s, no annotation) | **blocked** — `if:` was false, no runner ever requested |
-| **`failure`** with the billing annotation | **allowed** — `if:` was true, runner requested and then denied |
-
-Every result below is read that way. It proves *job selection* — which is the
-whole of the gating logic. It cannot prove anything about what a job **does**
-once running, which is exactly where the remaining gap is.
-
 ## Demonstrations, all in `jimhigson/lgp-deploy-gating-proof`
+
+Read the publish job per the two-valued rule in "Reusable technique" above:
+**`skipped`** = the gate blocked it; **`failure`** + billing annotation = the
+gate allowed it and only the runner was denied.
 
 | # | scenario | check run -> conclusion | Deploy run | publish job | verdict |
 |---|---|---|---|---|---|
