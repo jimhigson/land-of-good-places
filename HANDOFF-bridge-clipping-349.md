@@ -167,6 +167,109 @@ Remove it once #352 is merged.
 
 ---
 
+# THE REMAINING LUMP — named (2026-08-29)
+
+Jim, on the PR preview: *"it is better but there's still a big lump of 'stuff'
+clipping into the bridge."*
+
+**Verdict: there is no foreign mesh clipping into either bridge. The "lump" is
+the bridge's own ramp.**
+
+Three candidates were ruled out by measurement, not argument:
+
+1. **Paving escaping ALONG the spine at the ramp feet** — the case the first
+   fix's measurement excluded by construction, and the leading hypothesis.
+   **Ruled out.** All 13 escaping vertices on `bridge-172.0` (4 on
+   `bridge-266.0`) sit at exactly `h = 0.030` / `0.055` above the terrain —
+   precisely `PATH_KERB_LIFT` and `PATH_SURFACE_LIFT`. That paving is draped
+   flat on the ground and is indistinguishable from ordinary path. The original
+   "not visible" call was right, but it had been reached by argument; this is
+   the measurement.
+2. **The `deck` clearance marker rendering.** Ruled out: `deckMesh.visible =
+   false` (`bridges.ts`).
+3. **Foreign geometry inside the masonry.** A 53×53 ray fan from the camera
+   that produced the suspicious frame, against visible meshes only (the park's
+   NPC name labels are `Sprite`s and `Sprite.raycast` dereferences
+   `raycaster.camera`, which a bare `Raycaster` has not got — that is why the
+   first attempt threw). Then every vertex of each suspect tested against the
+   bridge's own **plan triangles**, not its bounding box.
+
+   Bounding-box overlap is worthless here and nearly sent me down a false
+   trail: it reported 52 "overlapping" meshes on one bridge, including the
+   terrain and four `finish-rainbow-leg-*-inner` legs, purely because terrain
+   and instanced scenery have park-sized bounds and the box contains the arch
+   void. Against the real masonry plan, **the only things inside are
+   `track-ballast`, `track-rail-left` and `track-rail-right`, at y 0.16–0.40**
+   — the railway running under the arch, exactly where it should be.
+
+**What Jim is actually looking at.** At a child's eye height at the foot of the
+ramp (`/tmp/qa349b/look-bridge1720-footneg19.png`) the ramp reads as a huge
+sandy wedge flaring out across the grass, with only thin pink parapet strips on
+top and no modelled stone flank. It is 15.16 m long and rises 4.06 m. It does
+not *clip into* the bridge — it **is** the bridge, and it looks like a pile of
+sand somebody parked a bridge on.
+
+That is exactly what Jim's redesign brief describes and exactly what it fixes:
+40% shorter, steeper, with modelled stonework up the flanks and around the
+arch. **The lump is not a bug to fix before the redesign; it is the reason for
+the redesign.** The acceptance test stands unchanged — after the redesign,
+re-run this same plan-triangle scan and it must still find only the track.
+
+---
+
+# ⚠️ A WALK-PHYSICS TUNNELLING DEFECT, FOR ITS OWN ISSUE
+
+**Not a bridge bug. The Overseer is raising this separately; these are the
+figures.**
+
+A frame-rate-dependent ceiling in the walk physics is silently dictating the
+shape of the park's architecture.
+
+`Player.tick` samples `WalkSurfaces` with a ceiling one `BUILDING_STEP_UP`
+(0.620 m) above her own damped, lagging height. In one clamped frame
+(`MAX_FRAME_DELTA` = 1/12 s) she advances `PLAYER_MAX_SPEED / 12` = **0.617 m**
+horizontally, so she rises `0.617 × slope`. Exceed 0.620 m and **she loses the
+surface and falls through the deck.**
+
+Measured history, from `bridges.ts`'s own `HUMP_BLEND` note:
+
+| peak slope | rise per clamped frame | % of the 0.620 ceiling | outcome |
+| --- | --- | --- | --- |
+| 0.56 | 0.345 m | 56% | ships today, works |
+| **0.79** | 0.487 m | **79%** | **real-browser QA: fell through the deck into the tunnel, jammed against the fence** |
+| 0.693 (Jim's 40%) | 0.428 m | 69% | untested, between the two |
+
+And sprinting is worse, because `PLAYER_SPRINT_MULTIPLIER` is 1.5:
+
+```
+7.4 m/s × 1.5 × (1/12 s) × 0.693  =  0.641 m   >   0.620 m ceiling
+```
+
+**A sprinting child on a 40%-shorter bridge can fall through the deck.**
+
+Three things make this worth fixing at source rather than designing around:
+
+- **It is frame-rate dependent.** The same bridge is safe at 60 fps and lethal
+  on a slow device that hits the frame clamp. That is the classic tunnelling
+  shape, and the project has form: `HANDOFF-no-tunnelling.md` and
+  `scripts/measure-wall-tunnelling.mts` solved the same class for *walls* by
+  sub-stepping. `CollisionWorld.resolveMovement` already sub-steps lateral
+  movement (`PLAYER_LONGEST_STEP` 0.925 m, `SUBSTEP_FOOTPRINT_FRACTION`,
+  `MAX_SUBSTEPS` 16) — **the vertical surface sample does not.** That
+  asymmetry is the defect.
+- **It is invisible in the code that suffers from it.** Nothing in
+  `bridges.ts` declares "peak slope must stay under 1.005"; it is buried in a
+  constant's doc comment, discovered once by a QA session watching a child fall
+  into a tunnel.
+- **Jim has just asked for steep, cartoonish geometry.** This ceiling says no,
+  for reasons that are an implementation artefact rather than a design choice.
+
+Fixing it (sub-stepping the ground sample the way lateral movement already is)
+would remove the only constraint standing between Jim's brief and the shape he
+asked for.
+
+---
+
 # DIMENSIONAL CONTRACT — bridge redesign (for the 3D Artist)
 
 **Status: numbers derived and committed. Placement verification still running.**

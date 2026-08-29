@@ -28,6 +28,12 @@ const pathOf = (o: Object3D): string => {
   return parts.join('/');
 };
 
+// Meshes only. The park's NPC name labels are Sprites, and Sprite.raycast
+// dereferences `raycaster.camera`, which a bare Raycaster has not got.
+const meshes: Mesh[] = [];
+scene.traverse((o) => { if (o instanceof Mesh && o.visible) meshes.push(o); });
+console.log(`raycasting against ${meshes.length} visible meshes`);
+
 const seen = new Map<string, { hits: number; near: number; far: number; ymin: number; ymax: number }>();
 const ray = new Raycaster();
 ray.far = 60;
@@ -40,7 +46,7 @@ for (let iy = -N; iy <= N; iy += 1) {
     const ay = (iy / N) * 0.40;
     const dir = forward.clone().addScaledVector(right, ax).addScaledVector(up, ay).normalize();
     ray.set(origin, dir);
-    for (const hit of ray.intersectObjects(scene.children, true)) {
+    for (const hit of ray.intersectObjects(meshes, false)) {
       const o = hit.object;
       if (!(o instanceof Mesh)) continue;
       if (!o.visible) continue;
@@ -81,7 +87,7 @@ for (let iy = -N; iy <= N; iy += 1) {
       .addScaledVector(right, (ix / N) * 0.55)
       .addScaledVector(up, (iy / N) * 0.40).normalize();
     ray.set(origin, dir);
-    for (const hit of ray.intersectObjects(scene.children, true)) {
+    for (const hit of ray.intersectObjects(meshes, false)) {
       const o = hit.object;
       if (!(o instanceof Mesh) || !o.visible) continue;
       let n: Object3D | null = o; let own = false;
