@@ -134,3 +134,37 @@ and the game is live in about 40 seconds.
   publish something other than the commit that passed. Not done tonight because
   getting it wrong means no deploys at all; worth its own PR and its own
   review.
+
+  **Why this is worth doing properly rather than raising the cap again.**
+  "Build and checks" measured **15m52s against its own 30-minute cap** the same
+  evening. It is on the same treadmill: the chain grew from 46 steps to 47
+  during the single PR that fixed this, and every step added pushes both jobs
+  towards their ceilings. Raising a number buys months, not a fix.
+
+  The two jobs are not equally dangerous when they lose that race, and the
+  asymmetry is the whole argument:
+
+  - **"Build and checks" fails loudly.** It is a required check, so a red run
+    blocks the merge. Somebody is stopped, immediately, and looks.
+  - **The deploy fails silently.** It publishes nothing, reports `cancelled`,
+    and strands the live site — which is how a five-commit-stale park reached a
+    six-year-old before it reached CI.
+
+  So the check suite hitting its cap costs an hour of annoyance; the deploy
+  hitting its cap costs a day and is found by Jim. Removing the duplication
+  fixes the dangerous one outright: the deploy stops running the chain at all,
+  and its runtime stops being a function of how much QA we have written.
+
+- 2026-08-29 — **the prediction that confirmed the diagnosis.** With the timeout
+  theory in hand but not yet proven, a deploy for `254484d2` was dispatched by
+  hand: run `33274588322`, job started `20:52:17Z`. It was written down **in
+  advance** that the run would die at ~`21:07:17Z` if the theory held, and
+  publish normally if it did not. It was cancelled at `21:07:30Z` — thirteen
+  seconds out — inside `Build`, with both `Deploy to Cloudflare Workers` steps
+  `skipped`.
+
+  The arithmetic (`start + cap`) is trivial; the falsifiable part is the
+  *mechanism*. **That dispatch had nothing racing it** — no merge, no second
+  run, an empty concurrency group — so under the concurrency explanation it was
+  obliged to succeed. It did not. At that point the site was not merely stale:
+  it was **unable to deploy at all**, and had been for hours.
