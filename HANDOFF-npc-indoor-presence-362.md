@@ -99,3 +99,59 @@ This counts `character.update` only. `syncTransform`, `crowd.commit`, `updateLab
 `updateBubbles` also loop over every character regardless of space, and in a browser they carry
 render-side cost that Node does not show. So 0.147 ms is a **lower bound** on what presence-marking
 saves, not the whole of it — but not by an order of magnitude.
+
+## Constraint 2 — what the hotel depends on (29 Aug)
+
+**One rule can serve both.** No split needed. The reasoning, and the one hazard that had to be
+ruled out empirically:
+
+`check:hotel` fails any character below `FLOOR_OF_THE_WORLD`, and its own header records that
+regression firing with *"all seven residents at −16.5 m"*. Residents start at the park's terrain
+height and `NpcCharacter.settle` walks them onto a floor plate 600 m away, so if settling needed
+frames, freezing from frame 0 would strand them under their own floor. Measured:
+
+```
+t=0     Suki=0.00 Otto=0.00 Nell=0.00 Bram=0.00 Pip=0.00 Moss=0.00 Wisp=0.00
+t=10s   Suki=0.00 Otto=0.00 Nell=0.00 Bram=0.00 Pip=0.00 Moss=0.00 Wisp=0.00
+```
+
+Already settled at t=0 and never move vertically — the hotel's floors are at y=0. So the hazard is
+not live **today**, but it is live *in principle*: `ResidentSpec.floorY` exists precisely because a
+space can put its floor somewhere else, and that comment warns a body starting below its floor
+"falls for ever". So the freeze is gated on the character being **grounded**, not applied blindly
+from frame 0. Cheap insurance against a hotel floor ever moving off zero.
+
+Other consumers of NPC state, all checked: `World` hands `npcs.riders` to the train (in-space
+concern), `TreeClimbing` iterates `npcs.all` (park only), `check-hotel` reads
+`hotel.residents[].waypoints` — the **spec**, not the live body, so freezing the body cannot
+affect it.
+
+## PART 2 — the design
+
+**Presence, not simulation.** Each frame `NpcSystem` derives the player's space with `spaceAt`.
+A character in a different space is *present but not stepped*: no `character.update`, no
+`avatar.tick`, and skipped in `separate()`. **The body is left exactly where it is** — nothing is
+moved, so there is no teleport and no wall-pop when the player walks in; they resume from where
+they stood. That is the acceptance test and the design satisfies it by construction rather than by
+a correction step.
+
+One thing the naive version gets wrong, and the fix:
+
+> A frozen child inside the castle can never walk out, because walking out is simulation. With
+> `MAX_INSIDE` counting presence, four children would go in, freeze, and the door would close for
+> the rest of the session — the park slowly draining.
+
+So a frozen child keeps **one number**: how long until they are done in there. When it expires they
+are returned to the portal's far side in the garden — a presence-level event, not a simulated walk.
+That is still "just mark which NPCs are in there"; it is what stops the marker being a black hole.
+
+Hotel residents have no such timer: they *live* there, so being marked present indefinitely is the
+correct behaviour for them and matches what the hotel already assumes.
+
+### The invariant (`scripts/check-npc-presence.mts`)
+
+1. **No character in a space the player is not in ever moves.** Position delta is exactly zero
+   while off-space. Deleting the freeze makes this fail immediately — that is the `--mutate`.
+2. **Presence counts are consistent across a crossing, both ways.** The number marked inside equals
+   the number whose `spaceAt` says inside, every frame; and a child who crosses in and later out is
+   counted exactly once in each direction, so the marker cannot leak or double-count.
