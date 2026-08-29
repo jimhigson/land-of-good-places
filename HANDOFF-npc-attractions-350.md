@@ -375,3 +375,69 @@ eighteen real names.
 **Left for a separate issue (do not widen this PR)**: `Yara`/`Kiko` finishing 0.14 m apart, inside
 `NPC_RADIUS * 2`. Not reproduced or investigated here — it was noted in passing by the sandbox
 run and is a `check:npc-separation` question, not a dispersal one.
+
+---
+
+## Review round 1 — three blockers, all fixed (29 Aug)
+
+**Blocker 1: the castle never fired.** Every castle-side piece shipped as unreachable code —
+children spawn only on garden waypoints and `reachableFrom` was same-space-only, so no child
+could choose a shop. Reviewer's census: `[["garden",14400]]`, 14400 of 14400 samples outdoors.
+
+Fixed with `entities/npc/portals.ts`: a cross-space journey is two legs (walk to the door, step
+through, walk to the shop). Both thresholds derived from the building's own
+`castleEntranceBand()`/`castleExitBand()` — the same functions the *player's* crossing uses — and
+both landing spots from `enterInterior`/`leaveInterior`. `Journey` cannot move a body, so it
+raises `portalRequest` and `NpcSystem` carries it out; same split as `TreeClimbing`/`climbPhase`.
+
+New census after the fix:
+
+```
+space census: [["garden",1189],["castle",251]]
+distinct shop destinations ever chosen: 7 (all of them)
+peak children inside at one sample: 4 (cap 4)
+children who were ever inside: 10 of 24 over ten minutes
+```
+
+**It is now permanently guarded**, not proven by a scratch script: `check:npc-dispersal`
+assertion 4 fails if no child goes inside or no shop is ever chosen.
+
+**Blocker 2: `trace-npc-driver` still read the deleted `targetNode`.** `scripts/` is outside both
+tsconfigs so `tsc` could not see it, and it failed *silently*: `Math.round(undefined * 4096) & 0xffffffff`
+is `0`, so the fingerprint went on hashing while having stopped covering where any child is going.
+Now mixed via `mixText`, a separate function so a future non-number cannot fail the same way.
+Hash `f16d70d1` → `2cdba2c3`; deliberately not asserted anywhere, so nothing to regenerate.
+
+**Blocker 3: "I'm going to the Ice Cream".** Nineteen names, not eighteen. The `/s$/` heuristic
+got "Candy Floss" right and "Ice Cream" wrong — two strings that look alike. Article choice is now
+an `articled` field on `Attraction` with an explicit `NO_ARTICLE` set keyed by stable id. The QA
+script's filter matched `"I'm going to the"` so it could only ever see the working branch; fixed,
+and all three branches are now observed in the browser.
+
+### Also fixed
+
+- `TrainTrip`'s `!service` exit missed `slot.release()`.
+- **Assertion 4 re-derived from the caps** (`NPC_COUNT - sum(caps)`) instead of a flat half, which
+  had one child of headroom before the castle and would have been unsatisfiable after it.
+- **The castle work reintroduced the 600 m dead end**: indoor children pushed the crowd RMS to
+  276 m and it still "passed" at 476% of uniform. The check now measures garden children only.
+- `MAX_INSIDE` now bounds **presence**, not choice — six were arriving where the cap said four.
+- Three near-duplicate attractions merged: a ride's entrance and its own ticket booth are one
+  place ("Dodgems" / "Dodgems!"). Matched on normalised name **and** proximity, because "The
+  Castle" and "Sky Cruiser" sit 11 m apart and are genuinely different.
+- Spread and variety are now asserted **sustained across the run** rather than on the worst single
+  sample. Thresholds untouched; a dozen points at one instant is a noisy estimator and children
+  crossing to different attractions all pass through the middle of the park.
+- `check:jitter` correctly caught the portal as an 810 m own-step. Re-baselined on the *declared*
+  door step exactly as a train carry already is — an undeclared 600 m jump still fails.
+
+### Numbers now
+
+Five seeds, mean spread 67–80% of uniform (bar 50%), variety 7.8–8.9 of 10 (bar 4), worst clump
+3–6 of 24 (bar 8). `--mutate` fails **all four**: spread 42%, clump 15, variety 1.0, no castle.
+
+`tsc` clean · `test:procgen` 443/443 · `npm run build` **exit 0** · browser 0 console errors.
+
+**Honest limit**: headless Chromium runs this park at well under a frame a second, so the browser
+numbers establish *it renders, the bubbles read correctly, children reach the castle, and nothing
+errors* — they are **not** independent corroboration of the dispersal statistics. Node is.
