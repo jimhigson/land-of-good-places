@@ -914,9 +914,29 @@ function buildShellGeometry(
     readonly copingInner: [number, number];
   }
 
+  // **Rings spread evenly over the bridge, not a fixed step with a remainder.**
+  // Stepping by `SHELL_STEP` and then pushing `lengthPos` leaves a final
+  // segment of whatever is left over — length `(lengthPos + lengthNeg) mod
+  // SHELL_STEP`, which is arbitrarily small and, on the shortened bridges, was
+  // 0.027 m on the canonical seed's `bridge-226.0`. That stub is harmless in
+  // the swept shell (a thin quad) and *not* harmless downstream:
+  // `bridgeStonework.ts`'s `buildCopingRun` lays one stone per segment and
+  // scales it by `(length - COPING_JOINT) / (COPING_LENGTH - COPING_JOINT)`,
+  // so a segment shorter than the 0.05 m joint scales the stone by a
+  // **negative** factor — it turns inside out, its base stops following the
+  // wall, and #360's coping invariant caught it floating 0.033 m over the
+  // parapet on four of the five seeds.
+  //
+  // Dividing the span into a whole number of equal steps keeps every segment
+  // within a quarter of `SHELL_STEP` of it and cannot produce a degenerate
+  // one, so the stub cannot come back the next time a bridge changes length.
+  // Fixed here rather than guarded in `buildCopingRun` because the sliver ring
+  // is this function's own artefact, and every consumer of `parapetLine`
+  // inherits it.
   const alongs: number[] = [];
-  for (let along = -lengthNeg; along < lengthPos; along += SHELL_STEP) alongs.push(along);
-  alongs.push(lengthPos);
+  const spanTotal = lengthPos + lengthNeg;
+  const ringSteps = Math.max(1, Math.round(spanTotal / SHELL_STEP));
+  for (let i = 0; i <= ringSteps; i += 1) alongs.push(-lengthNeg + (spanTotal * i) / ringSteps);
 
   // --- the course levels ----------------------------------------------------
   //
