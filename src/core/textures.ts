@@ -833,6 +833,168 @@ export function glowTexture(colour = 0xffffff): CanvasTexture {
   });
 }
 
+/**
+ * The two maps that turn the castle's inside from a painted box into masonry
+ * (issue #363). Both are **tiled in metres**, which is not a coincidence and
+ * is the reason they can be this simple.
+ *
+ * `extrudePlan` builds the decks and the walls with `ExtrudeGeometry`, whose
+ * default UV generator emits *world* coordinates: a slab's top face gets
+ * `(x, y)` straight out of the plan, and a wall's side face gets
+ * `(distance along the wall, extrusion height)`. Both are already in metres
+ * before we lay the geometry down. So a caller says how many metres one tile
+ * of the drawing should cover and `repeat` is simply its reciprocal — there is
+ * no per-mesh UV fixing anywhere, and a wall and the floor it meets agree at
+ * the skirting for free.
+ *
+ * The colours are the ones the castle **facade** already stands in out in the
+ * garden (`buildingWall` cream, the `stonePink*` family): walking through the
+ * front door must not swap material worlds. Per this file's own rule, no new
+ * colour is invented here.
+ */
+
+/** Metres of wall one tile of {@link castleCoursingTexture} covers. */
+export const CASTLE_COURSE_TILE_METRES = 4.8;
+/** Metres of floor one tile of {@link castleFlagstoneTexture} covers. */
+export const CASTLE_FLAG_TILE_METRES = 6;
+
+/**
+ * Coursed ashlar for the castle's inside walls: four courses of big dressed
+ * blocks, staggered, with a wide mortar joint.
+ *
+ * Blocks are **1.6 m × 1.2 m** — storybook-huge, and deliberately so. The
+ * solid wall band is only 2.15 m tall, so a child sees not quite two courses
+ * of it; at a realistic 0.4 m the same wall would be five courses of speckle
+ * that reads as wallpaper from the 38° camera. §4's "recognisable beats
+ * measured" applied to a texture.
+ */
+export function castleCoursingTexture(): CanvasTexture {
+  return cached('castleCoursing', () => {
+    const size = 256;
+    const { canvas, ctx } = createCanvas(size);
+    const rng = new Rng(0xca5713);
+
+    // Mortar first, as the whole background: every joint is then simply the
+    // gap left between blocks, and no joint can go missing at a tile seam.
+    ctx.fillStyle = hexToCss(PALETTE.stonePinkDark);
+    ctx.fillRect(0, 0, size, size);
+
+    const courses = 4;
+    const courseHeight = size / courses;
+    const blockWidth = size / 3;
+    const joint = 5;
+    const tones = [PALETTE.buildingWall, PALETTE.blossomWhite, PALETTE.stonePinkLight];
+
+    for (let course = 0; course < courses; course += 1) {
+      // Half-block stagger on alternate courses — the thing that stops four
+      // rows of blocks reading as a grid of tiles.
+      const offset = course % 2 === 0 ? 0 : blockWidth / 2;
+      const y = course * courseHeight;
+      for (let col = -1; col <= 3; col += 1) {
+        const x = col * blockWidth + offset;
+        ctx.fillStyle = hexToCss(rng.pick(tones));
+        roundedRect(
+          ctx,
+          x + joint,
+          y + joint,
+          blockWidth - joint * 2,
+          courseHeight - joint * 2,
+          7,
+        );
+        ctx.fill();
+        // A light top edge and a shaded bottom one: the block reads as having
+        // a thickness, which is what says "cut stone" rather than "painted
+        // rectangle". Cheap, and it survives the toon ramp because it is a
+        // colour difference in the map, not a lighting one.
+        ctx.fillStyle = '#ffffff55';
+        roundedRect(ctx, x + joint + 4, y + joint + 3, blockWidth - joint * 2 - 8, 7, 3);
+        ctx.fill();
+        ctx.fillStyle = '#00000010';
+        roundedRect(
+          ctx,
+          x + joint + 4,
+          y + courseHeight - joint - 8,
+          blockWidth - joint * 2 - 8,
+          5,
+          3,
+        );
+        ctx.fill();
+      }
+    }
+
+    const texture = finish(canvas, 1);
+    const repeat = 1 / CASTLE_COURSE_TILE_METRES;
+    texture.repeat.set(repeat, repeat);
+    return texture;
+  });
+}
+
+/**
+ * Flagstones for the castle's inside floors: a four-by-four of big irregular
+ * flags, 1.5 m across, with the odd worn one.
+ *
+ * The floor plate is 60 × 44 m and is the largest single surface anywhere in
+ * the game. Flat pink over 2 640 m² is most of what made the room read as a
+ * warehouse; giving it a joint pattern is the cheapest large change available
+ * — one shared texture, no extra draw call, no extra triangle.
+ */
+export function castleFlagstoneTexture(): CanvasTexture {
+  return cached('castleFlagstone', () => {
+    const size = 256;
+    const { canvas, ctx } = createCanvas(size);
+    const rng = new Rng(0xf1a65);
+
+    ctx.fillStyle = hexToCss(PALETTE.stonePinkDark);
+    ctx.fillRect(0, 0, size, size);
+
+    const flags = 4;
+    const cell = size / flags;
+    const joint = 4;
+    const tones = [PALETTE.stonePinkLight, PALETTE.blossomWhite, PALETTE.buildingWall];
+
+    for (let row = 0; row < flags; row += 1) {
+      for (let col = 0; col < flags; col += 1) {
+        // Each flag is nudged and shrunk by its own seeded amount, so no two
+        // are the same size and the joints wander like laid stone rather than
+        // ruling a grid. Seeded, so the floor is identical on every reload.
+        const jx = rng.range(-1.5, 1.5);
+        const jy = rng.range(-1.5, 1.5);
+        const shrink = rng.range(0, 2.5);
+        ctx.fillStyle = hexToCss(rng.pick(tones));
+        roundedRect(
+          ctx,
+          col * cell + joint + jx + shrink,
+          row * cell + joint + jy + shrink,
+          cell - joint * 2 - shrink * 2,
+          cell - joint * 2 - shrink * 2,
+          6,
+        );
+        ctx.fill();
+        // One flag in five is worn pale in the middle, as though a few
+        // centuries of children have crossed it. It is the sort of detail
+        // nobody is meant to notice and everybody would miss.
+        if (rng.range(0, 1) > 0.8) {
+          ctx.fillStyle = '#ffffff40';
+          roundedRect(
+            ctx,
+            col * cell + cell * 0.28,
+            row * cell + cell * 0.28,
+            cell * 0.44,
+            cell * 0.44,
+            8,
+          );
+          ctx.fill();
+        }
+      }
+    }
+
+    const texture = finish(canvas, 1);
+    const repeat = 1 / CASTLE_FLAG_TILE_METRES;
+    texture.repeat.set(repeat, repeat);
+    return texture;
+  });
+}
+
 /** Frees every cached texture. Only needed when tearing the game down. */
 export function disposeTextureCache(): void {
   for (const texture of cache.values()) texture.dispose();

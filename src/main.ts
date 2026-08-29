@@ -215,7 +215,20 @@ type DeepLink =
    * deck's coordinates are a function of the seed, so a hard-coded pair would
    * be wrong on the next park. `Game.enterBridgeSpawn` asks the built world.
    */
-  | { readonly kind: 'bridge' };
+  | { readonly kind: 'bridge' }
+  /**
+   * `/castle`, `/castle?deck=N` — inside the castle, on that storey (#363).
+   *
+   * Its own kind for the same reason `/bridge` is: there is nothing to board,
+   * so it is not a `RIDE_DEEP_LINKS` entry. And it deliberately is **not** a
+   * `/spawn?pos=`, which is the trap this link exists to close — the
+   * interior's coordinates are fixed and perfectly typeable, but being inside
+   * the castle is a *space*, not a position, and `/spawn` drops her at the
+   * coordinate with the interior still switched off. CLAUDE.md already says
+   * this about hotel rooms ("for an interior, use the `/hotel…` links"); the
+   * castle simply had no such link until now.
+   */
+  | { readonly kind: 'castle'; readonly deck: number };
 
 /**
  * Matches this load's URL against every developer deep link, in the order they
@@ -229,7 +242,24 @@ function parseDeepLink(pathname: string, search: string): DeepLink | null {
   if (view) return { kind: 'view', view };
   if (pathname === '/spawn') return { kind: 'spawn', spawn: parseDebugSpawn(search) };
   if (pathname === '/bridge') return { kind: 'bridge' };
+  if (pathname === '/castle') return { kind: 'castle', deck: parseCastleDeck(search) };
   return null;
+}
+
+/**
+ * `/castle?deck=N`'s storey. Defaults to the ground floor, which is the great
+ * hall and the thing anyone typing `/castle` wants to see.
+ *
+ * A number that will not parse falls back to 0 rather than failing the boot —
+ * these are typed by hand, and the range check lives in
+ * `Building.enterCastleSpawn`, which is the only thing that knows how many
+ * storeys there are.
+ */
+function parseCastleDeck(search: string): number {
+  const raw = new URLSearchParams(search).get('deck');
+  if (raw === null) return 0;
+  const deck = Number(raw);
+  return Number.isFinite(deck) ? Math.trunc(deck) : 0;
 }
 
 /** What `/view` needs to drop a debug camera into the built park. See {@link parseDebugView}. */
@@ -896,6 +926,18 @@ async function finishLaunch(
               'plan built none, so there is nothing to stand on. This is the failure issue #339 ' +
               'was about; check world.train.bridges and test/procgen/invariants.ts\'s ' +
               '"every crossing on a site the planner proved bridgeable still carries its bridge".',
+          );
+        }
+        break;
+      case 'castle':
+        // Loud, like `/bridge` and `/rail-race`: a deck that does not exist
+        // must not quietly show the ground floor, or "floor 9 looks the same
+        // as floor 0" becomes a bug report about decoration.
+        if (!game.enterCastleSpawn(deepLink.deck)) {
+          console.error(
+            `Land of Good Places: /castle?deck=${deepLink.deck} could not be entered — the ` +
+              'castle has no such storey (there are BUILDING_FLOOR_COUNT of them, 0 up), or the ' +
+              'player did not exist yet. See Building.enterCastleSpawn.',
           );
         }
         break;

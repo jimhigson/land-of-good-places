@@ -31,7 +31,7 @@ export function createThing(options?: ThingOptions): AssetHandle;
 
 | Convention | Rule |
 | --- | --- |
-| **Units** | 1 unit = 1 metre. The player kid is **1.86 m** tall (matches `CharacterModel.height`). |
+| **Units** | 1 unit = 1 metre. The player kid is **2.12 m** tall (`KID_HEIGHT`, `src/art/models/kid.ts`), and **2.97 m** in the tallest hair and hat (`TALLEST_CHILD_HEIGHT`, same file). **Import them; never type them.** |
 | **Origin** | At the **feet / base**, centred on X and Z. `root.position.y = groundHeight` must sit it on the ground with no fudge. |
 | **Facing** | Forward is **+Z**. `root.rotation.y = 0` means "looking at the camera in the default 45° iso view". Rotate the root only. |
 | **Up** | +Y. Nothing is authored lying down. |
@@ -42,6 +42,25 @@ export function createThing(options?: ThingOptions): AssetHandle;
 | **Materials** | `toonMaterial()` / `softMaterial()` from `art/style/materials.ts`. Never `MeshBasicMaterial` for anything solid. |
 | **Randomness** | Seeded `Rng` from `src/core/mathUtils.ts`. Never `Math.random()` in a builder — the park must look the same on reload. |
 | **Textures** | Canvas-drawn only, cached by key (follow `src/core/textures.ts`). Budget below. |
+
+> **Both numbers were wrong here until 29 August 2026**, and this table said
+> **1.86 m** — the pre-restyle height, which `ART_DIRECTION.md` §4 had already
+> recorded as superseded on the same day the models grew. Nothing detected it,
+> because a wrong number in a contract is not a failing test; it is a fact
+> everyone builds on.
+>
+> It did real damage. A Blender render script typed the same 1.86 into the
+> **scale post** its author stands beside every asset to judge its size — so the
+> reference object in the picture was a quarter too short, and every human and
+> agent who looked at those renders drew a confident wrong conclusion. A 2.60 m
+> suit of armour was judged "towering" while actually being **shorter than a
+> child in a tall hat**.
+>
+> The rule that follows is not "be careful with this number". It is: **an asset
+> script must read a height out of `src/art/models/kid.ts` at build time, the
+> way `art/blend/hotel_build.py` already reads `TALLEST_CHILD_HEIGHT` and
+> `RIDER_HEADROOM`.** A typed copy in a `.py` file is invisible to `tsc`, to
+> every check, and to the reader of the picture it distorts.
 
 **Texture budget:** face patches 512², body/decal maps 256², tiling world maps
 512² max, sign boards 512×288. Target: under 40 distinct canvas textures in the

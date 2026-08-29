@@ -1,6 +1,6 @@
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
 import { CylinderGeometry, Group, Mesh, Vector3, type PerspectiveCamera } from 'three';
-import { BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, BUILDING_STEP_UP, INTERIOR_HALF_X, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, SLIDE_SPEED } from '../../core/constants';
+import { BUILDING_FLOOR_COUNT, BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, BUILDING_STEP_UP, INTERIOR_HALF_X, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, SLIDE_SPEED } from '../../core/constants';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z, deckY } from './layout';
 import { bandContains, type PortalBand } from '../tapSpacing';
 import { GIANT_SLIDE_SPEED, SLIDE_PLAN } from '../slide/plan';
@@ -914,6 +914,59 @@ export class Building implements GameSystem {
     // a child there and their first sight of the roomiest place in the game is
     // the back of a wall.
     player.teleportTo(worldX(0), BUILDING_BASE_Y, worldZ(INTERIOR_HALF_Z - 6.5), Math.PI);
+  }
+
+  /**
+   * **`/castle` and `/castle?deck=N`** — put the player inside the castle, on
+   * the storey named, without walking her across the park and through the door
+   * (issue #363).
+   *
+   * The same QA problem `/hotel` and `/slide` were added for, and worse here
+   * than for either: `/spawn?pos=600,0.73,600` lands on the interior's
+   * coordinates and shows **nothing at all**, because being inside this
+   * building is not a position. `interiorRoot` is hidden, the play bounds are
+   * the garden's and the cutaway has no deck to fade to, so a coordinate
+   * inside the castle gets you the empty space where a castle would be. That
+   * is a genuinely confusing way to fail, and it cost this ticket a screenshot
+   * round to discover.
+   *
+   * So this goes through {@link enterInterior} — the door's own code, not a
+   * reimplementation of it — and only then climbs. Everything the door does
+   * (visibility, play bounds, the fact of being `inside`) therefore happens
+   * exactly once, in one place, and a change to the door transition cannot
+   * leave this link behind.
+   *
+   * Returns false if the deck asked for does not exist, so `main.ts` can fail
+   * loudly rather than silently showing the ground floor and letting somebody
+   * report that floor 9 looks identical to floor 0.
+   */
+  enterCastleSpawn(deck: number): boolean {
+    const player = this.player;
+    if (!player) return false;
+    if (!Number.isInteger(deck) || deck < 0 || deck >= BUILDING_FLOOR_COUNT) return false;
+    // **Through `changeSpace`, not straight to `enterInterior`.** The first cut
+    // called `enterInterior()` on its own and photographed an empty sky: the
+    // interior really was switched on and the player really was standing in it,
+    // but the *camera* was still out over the garden, because it is
+    // `changeSpace` that irises and calls `snapCamera`. Being inside is a
+    // camera, a set of play bounds and a cutaway deck as much as it is a
+    // position — so this takes the whole door sequence rather than the one part
+    // of it that looked like the important one.
+    this.changeSpace(() => {
+      this.enterInterior();
+      if (deck > 0) {
+        // `enterInterior` has already put her on the ground floor's own good
+        // viewing spot; carry that x/z straight up rather than writing a second
+        // one down here, so the two can never drift apart.
+        player.teleportTo(
+          player.position.x,
+          BUILDING_BASE_Y + deck * BUILDING_FLOOR_HEIGHT,
+          player.position.z,
+          Math.PI,
+        );
+      }
+    });
+    return true;
   }
 
   private leaveInterior(): void {

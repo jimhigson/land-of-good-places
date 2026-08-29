@@ -7,6 +7,7 @@ import {
   Path,
   Shape,
   type Material,
+  type Texture,
 } from 'three';
 import { PALETTE } from '../../core/palette';
 import { toonMaterial } from '../../art/style/materials';
@@ -31,8 +32,8 @@ import type { Region } from './layout';
  * sites do not have to change and is deliberately ignored — under toon shading
  * the ramp, not a roughness value, decides how a surface shades.
  */
-export function softMaterial(colour: number, _roughness = 0.68): MeshToonMaterial {
-  return toonMaterial(colour);
+export function softMaterial(colour: number, _roughness = 0.68, map?: Texture): MeshToonMaterial {
+  return toonMaterial(colour, map ? { map } : {});
 }
 
 /**
@@ -46,8 +47,18 @@ export function softMaterial(colour: number, _roughness = 0.68): MeshToonMateria
  * Kept low: the toon ramp's darkest band already sits at 0.42, and piling
  * emissive on top of that flattens the four bands into one flat sticker.
  */
-export function interiorMaterial(colour: number, _roughness = 0.72): MeshToonMaterial {
-  return toonMaterial(colour, { emissive: colour, emissiveIntensity: INTERIOR_LIFT });
+export function interiorMaterial(
+  colour: number,
+  _roughness = 0.72,
+  map?: Texture,
+): MeshToonMaterial {
+  return toonMaterial(colour, {
+    emissive: colour,
+    emissiveIntensity: INTERIOR_LIFT,
+    // `exactOptionalPropertyTypes` is on: an optional property is omitted,
+    // never handed `undefined`.
+    ...(map ? { map } : {}),
+  });
 }
 
 const INTERIOR_LIFT = 0.16;
