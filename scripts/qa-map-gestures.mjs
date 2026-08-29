@@ -78,11 +78,38 @@ async function openMap(page) {
   await page.waitForTimeout(600);
 }
 
-const touch = (cdp, type, points) =>
+/**
+ * **Every touch carries an explicit `timestamp`, and that is not a detail.**
+ *
+ * A definite tap is a `pointerdown`/`pointerup` pair inside 600 ms
+ * (`src/core/input/tapGesture.ts`). Headless Chromium cannot express that by
+ * dispatch timing: with the park rendering behind the map overlay, the main
+ * thread is saturated and each `Input.dispatchTouchEvent` takes **2.0-3.1 s**
+ * to land, measured repeatedly here — so two events dispatched 80 ms apart
+ * arrive stamped ~2.8 s apart and every tap in this harness would read as a
+ * long considered press. That would be the *measurement* failing, not the map.
+ *
+ * `timestamp` (TimeSinceEpoch, seconds) is what Chrome puts on the event, and
+ * therefore what `event.timeStamp` reports to the page. Supplying it models a
+ * tap that really did take 80 ms of a child's wall clock, independent of how
+ * long this machine took to deliver it — which is the thing a phone does and
+ * this harness otherwise cannot.
+ */
+const touch = (cdp, type, points, seconds) =>
   cdp.send('Input.dispatchTouchEvent', {
     type,
+    timestamp: seconds,
     touchPoints: points.map((p, i) => ({ x: p.x, y: p.y, id: i, radiusX: 12, radiusY: 12, force: 1 })),
   });
+
+/** A fresh gesture clock, in seconds since the epoch, as CDP wants it. */
+const gestureClock = () => {
+  let at = Date.now() / 1000;
+  return (advanceMs = 0) => {
+    at += advanceMs / 1000;
+    return at;
+  };
+};
 
 for (const size of SIZES) {
   const context = await browser.newContext({
@@ -123,23 +150,26 @@ for (const size of SIZES) {
   row.backdrop = bd ? `${Math.round(bd.x)},${Math.round(bd.y)}` : 'none (card fills screen)';
 
   if (bd) {
-    // --- test 1: definite tap on the backdrop ------------------------------
-    await touch(cdp, 'touchStart', [bd]);
-    await page.waitForTimeout(80);
+    // --- test 1: a definite tap on the backdrop ----------------------------
+    // Down, then up 80 ms later in the same spot: what a child's tap is.
+    const tapAt = gestureClock();
+    await touch(cdp, 'touchStart', [bd], tapAt());
+    // Read between the two halves: this is the assertion that fails on the
+    // unfixed build, where the map is already gone before the finger lifts.
     row.closedOnPointerDown = !(await isOpen(page));
-    await touch(cdp, 'touchEnd', []);
-    await page.waitForTimeout(200);
+    await touch(cdp, 'touchEnd', [], tapAt(80));
+    await page.waitForTimeout(300);
     row.closedAfterTap = !(await isOpen(page));
 
     // --- test 2: a drag that begins on the backdrop ------------------------
     await openMap(page);
-    await touch(cdp, 'touchStart', [bd]);
+    const dragAt = gestureClock();
+    await touch(cdp, 'touchStart', [bd], dragAt());
     for (let i = 1; i <= 8; i += 1) {
-      await touch(cdp, 'touchMove', [{ x: bd.x + i * 9, y: bd.y + i * 4 }]);
-      await page.waitForTimeout(16);
+      await touch(cdp, 'touchMove', [{ x: bd.x + i * 9, y: bd.y + i * 4 }], dragAt(16));
     }
-    await touch(cdp, 'touchEnd', []);
-    await page.waitForTimeout(250);
+    await touch(cdp, 'touchEnd', [], dragAt(16));
+    await page.waitForTimeout(300);
     row.survivedBackdropDrag = await isOpen(page);
   } else {
     row.closedOnPointerDown = null;
@@ -154,22 +184,31 @@ for (const size of SIZES) {
   const ccx = c.x + c.w / 2;
   const ccy = c.y + c.h / 2;
   const zoomBefore = s2.zoom;
-  await touch(cdp, 'touchStart', [
-    { x: ccx - 30, y: ccy },
-    { x: ccx + 30, y: ccy },
-  ]);
+  const pinchAt = gestureClock();
+  await touch(
+    cdp,
+    'touchStart',
+    [
+      { x: ccx - 30, y: ccy },
+      { x: ccx + 30, y: ccy },
+    ],
+    pinchAt(),
+  );
   for (let i = 1; i <= 12; i += 1) {
     const spread = 30 + i * 10;
-    await touch(cdp, 'touchMove', [
-      { x: ccx - spread, y: ccy },
-      { x: ccx + spread, y: ccy },
-    ]);
-    await page.waitForTimeout(20);
+    await touch(
+      cdp,
+      'touchMove',
+      [
+        { x: ccx - spread, y: ccy },
+        { x: ccx + spread, y: ccy },
+      ],
+      pinchAt(20),
+    );
   }
-  await touch(cdp, 'touchEnd', [{ x: ccx + 150, y: ccy }]);
-  await page.waitForTimeout(60);
-  await touch(cdp, 'touchEnd', []);
-  await page.waitForTimeout(250);
+  await touch(cdp, 'touchEnd', [{ x: ccx + 150, y: ccy }], pinchAt(20));
+  await touch(cdp, 'touchEnd', [], pinchAt(20));
+  await page.waitForTimeout(300);
   const s3 = await mapState(page);
   row.pinchKeptOpen = s3.open;
   row.pinchZoom = `${zoomBefore.toFixed(2)}->${s3.zoom.toFixed(2)}`;

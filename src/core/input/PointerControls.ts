@@ -281,7 +281,8 @@ export class PointerControls {
     this.pointers.set(event.pointerId, {
       x: event.clientX,
       y: event.clientY,
-      ...tapCandidate(event.clientX, event.clientY),
+      // `event.timeStamp`, not `performance.now()` — see `TapCandidate`.
+      ...tapCandidate(event.clientX, event.clientY, event.timeStamp),
       startedOnCanvas,
       // A pointer that didn't start on the canvas can never itself be a tap
       // — see `ActivePointer.startedOnCanvas` — but it still fully counts
@@ -331,7 +332,7 @@ export class PointerControls {
     if (pointer?.startedOnCanvas) capture(this.canvas, event.pointerId, false);
     if (this.pointers.size < 2) this.pinchDistance = 0;
     if (!pointer || pointer.disqualified) return;
-    const now = performance.now();
+    const now = event.timeStamp;
     // Down and up in the same place, soon enough: `tapGesture.ts`'s one
     // definition of a definite tap, shared with the park map.
     if (!completesTap(pointer, event.clientX, event.clientY, now)) return;

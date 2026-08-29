@@ -35,10 +35,24 @@ export const TAP_MAX_MILLISECONDS = 600;
 export interface TapCandidate {
   readonly startX: number;
   readonly startY: number;
+  /**
+   * **`event.timeStamp`, not `performance.now()`.** Both are on the same clock,
+   * but `timeStamp` is when the browser *created* the event and `now()` is when
+   * our handler finally ran. In a game with a 3D park rendering behind the
+   * overlay those differ by a lot: measured here on a paused map, a `pointerup`
+   * dispatched 80 ms after its `pointerdown` reached the listener **2205 ms**
+   * later. Timing a tap by when we got round to it turns a busy frame into "not
+   * a tap", which is a six-year-old pressing the screen and nothing happening —
+   * the failure mode this whole file exists to avoid.
+   */
   readonly startTime: number;
 }
 
-/** Records the start of a possible tap. */
+/**
+ * Records the start of a possible tap. Pass `event.timeStamp`; the default is
+ * only for callers that have no event (tests, and the map's fallback when a
+ * gesture is reconstructed mid-flight).
+ */
 export function tapCandidate(x: number, y: number, startTime = performance.now()): TapCandidate {
   return { startX: x, startY: y, startTime };
 }
@@ -63,6 +77,7 @@ export function completesTap(
   y: number,
   now = performance.now(),
 ): boolean {
+  // `now` should be the lifting event's own `timeStamp` — see `startTime`.
   if (tapDriftedTooFar(candidate, x, y)) return false;
   return now - candidate.startTime <= TAP_MAX_MILLISECONDS;
 }

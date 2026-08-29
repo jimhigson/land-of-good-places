@@ -351,6 +351,16 @@ export class ParkMap {
   private gestureStart: TapCandidate | null = null;
   /** Features on screen at the current zoom — the honest label denominator. */
   private visibleFeatureCount = 0;
+  /**
+   * Which names were painted, and which were dropped, on the last render.
+   *
+   * Both lists come from the renderer's own placement loop, so QA reads names
+   * off the DOM rather than eyeballing a screenshot: "four attractions lose
+   * their labels" is only actionable if it says *which* four. Counting painted
+   * text runs from outside cannot do it — a long name is drawn as two lines.
+   */
+  private drawnLabelNames: string[] = [];
+  private missingLabelNames: string[] = [];
   private canvasCssWidth = 0;
   private canvasCssHeight = 0;
   /** Rebuilt every render; see `drawLabel`. */
@@ -641,7 +651,11 @@ export class ParkMap {
       this.backdropTap = null;
       return;
     }
-    this.backdropTap = { ...tapCandidate(event.clientX, event.clientY), pointerId: event.pointerId };
+    this.backdropTap = {
+      // `event.timeStamp`, not `performance.now()` — see `TapCandidate`.
+      ...tapCandidate(event.clientX, event.clientY, event.timeStamp),
+      pointerId: event.pointerId,
+    };
   };
 
   private readonly onBackdropPointerMove = (event: PointerEvent): void => {
@@ -650,7 +664,9 @@ export class ParkMap {
     // Travelled: this is a drag, and a drag that began on the backdrop must
     // leave the map alone. Measured from where it began, never summed per
     // frame, so a slow drift still counts.
-    if (!completesTap(candidate, event.clientX, event.clientY)) this.backdropTap = null;
+    if (!completesTap(candidate, event.clientX, event.clientY, event.timeStamp)) {
+      this.backdropTap = null;
+    }
   };
 
   private readonly onBackdropPointerUp = (event: PointerEvent): void => {
@@ -660,7 +676,7 @@ export class ParkMap {
     // Up on the backdrop too, not merely down on it — lifting over the card
     // after sliding off the margin is not a tap on the margin.
     if (event.target !== this.root) return;
-    if (!completesTap(candidate, event.clientX, event.clientY)) return;
+    if (!completesTap(candidate, event.clientX, event.clientY, event.timeStamp)) return;
     this.close();
   };
 
@@ -697,7 +713,7 @@ export class ParkMap {
     if (this.mapPointers.size === 1) {
       this.gestureMoved = false;
       const point = this.canvasPoint(event);
-      this.gestureStart = tapCandidate(point.x, point.y);
+      this.gestureStart = tapCandidate(point.x, point.y, event.timeStamp);
     }
     if (this.mapPointers.size === 2) {
       // Two fingers: a pinch, and neither finger is a tap any more.
@@ -758,7 +774,7 @@ export class ParkMap {
     // `hadTwo` covers lifting one finger of a pinch: the second lift must not
     // walk her.
     if (wasDrag || hadTwo) return;
-    if (started && !completesTap(started, point.x, point.y)) return;
+    if (started && !completesTap(started, point.x, point.y, event.timeStamp)) return;
     this.onCanvasTap(event);
   }
 
@@ -959,6 +975,10 @@ export class ParkMap {
     // two numbers read off the DOM rather than one read and one remembered.
     // The remembered one is what went wrong last time.
     this.canvas.dataset.featureCount = String(this.indoor ? 0 : this.visibleFeatureCount);
+    // By name, so a report can say which attraction lost its name rather than
+    // only how many did.
+    this.canvas.dataset.labelNames = JSON.stringify(this.drawnLabelNames);
+    this.canvas.dataset.missingLabels = JSON.stringify(this.missingLabelNames);
   }
 
   private renderOutdoor(): void {
@@ -1120,39 +1140,21 @@ export class ParkMap {
       placed.push({ px: fx, py: fy, size, label });
     }
     this.visibleFeatureCount = visibleFeatures;
-    // Under the picture by preference, above it if that spot is taken. A name
-    // that simply cannot be placed is still dropped rather than written over
-    // something, but trying the second spot is what turns most of the drops
-    // back into readable names on a phone.
-    // Try the name in several places round its own picture before giving up:
-    // under it, over it, then shouldered left and right. Every extra candidate
-    // turns a dropped name back into a readable one, which matters most on a
-    // phone where the park is small and everything is close together.
+    // Under the picture by preference, above it if that spot is taken, then
+    // marching outward until the paper runs out — see `labelCandidates`. A
+    // name that still cannot be placed is dropped rather than written over
+    // something, and is reported by name in `dataset.missingLabels`.
+    this.drawnLabelNames = [];
+    this.missingLabelNames = [];
     for (const item of placed) {
-      const below = item.py + item.size * 0.46;
-      const above = item.py - item.size * 0.44 - minTextPx() * 1.2;
-      const shoulder = item.size * 0.55;
-      const step = minTextPx() * 1.35;
-      const candidates: readonly (readonly [number, number])[] = [
-        [item.px, below],
-        [item.px, above],
-        [item.px - shoulder, below],
-        [item.px + shoulder, below],
-        [item.px - shoulder, above],
-        [item.px + shoulder, above],
-        // Then further out, which is what turns a tall canvas into names
-        // rather than blank lawn: on a portrait phone the park is
-        // width-limited, so there is spare height and nothing else wanting it.
-        [item.px, below + step],
-        [item.px, above - step],
-        [item.px - shoulder, below + step],
-        [item.px + shoulder, below + step],
-        [item.px, below + step * 2],
-        [item.px, above - step * 2],
-      ];
-      for (const [lx, ly] of candidates) {
-        if (this.drawLabel(item.label, lx, ly)) break;
+      let done = false;
+      for (const [lx, ly] of this.labelCandidates(item)) {
+        if (this.drawLabel(item.label, lx, ly, item)) {
+          done = true;
+          break;
+        }
       }
+      (done ? this.drawnLabelNames : this.missingLabelNames).push(item.label);
     }
 
     // --- the player ----------------------------------------------------------
@@ -1160,6 +1162,57 @@ export class ParkMap {
       const { x, z } = this.deps.player.position;
       this.drawPlayerMarker(x, z);
     }
+  }
+
+  /**
+   * Where a name may go, best spot first.
+   *
+   * Under the picture, then over it, then shouldered left and right — and then
+   * the same six rungs again, stepped further and further out until the
+   * candidates have reached the edge of the canvas.
+   *
+   * **The far rungs are how the map uses the paper it has.** The projection is
+   * uniform (a metre across is a metre down, and it must stay that way or every
+   * bearing on the map becomes a lie), so on a portrait phone the park is
+   * width-limited and the canvas is left with large blank bands: measured at
+   * 390x844, the park draws 380x336 px inside a 380x693 px canvas — **357 px,
+   * 52% of the paper, empty**. There is no honest way to fill that with *park*
+   * — filling the height would mean showing 92 m of a 190 m-wide park, so half
+   * the park would be off the map at the default zoom, which is the opposite of
+   * what a map is for. But there is an honest way to fill it with **names**,
+   * which is the thing that was actually scarce: a name that has nowhere to sit
+   * beside its picture goes out into the band, with a leader line back to the
+   * picture it belongs to (see `drawLabel`).
+   *
+   * The ladder is generated rather than listed so its reach follows the canvas.
+   * It used to be twelve hand-written positions stopping two steps out, which
+   * on a portrait phone stopped well short of the empty band.
+   */
+  private labelCandidates(item: { px: number; py: number; size: number }): readonly (readonly [
+    number,
+    number,
+  ])[] {
+    const below = item.py + item.size * 0.46;
+    const above = item.py - item.size * 0.44 - minTextPx() * 1.2;
+    const shoulder = item.size * 0.55;
+    const step = minTextPx() * 1.35;
+    // Enough rungs to reach the top and bottom of the canvas from anywhere in
+    // it; `drawLabel` clamps anything that overshoots, so an over-long ladder
+    // costs a few failed collision tests and nothing else.
+    const rungs = Math.max(2, Math.ceil(this.canvasCssHeight / step));
+    const out: (readonly [number, number])[] = [];
+    for (let rung = 0; rung <= rungs; rung += 1) {
+      const drop = rung * step;
+      out.push(
+        [item.px, below + drop],
+        [item.px, above - drop],
+        [item.px - shoulder, below + drop],
+        [item.px + shoulder, below + drop],
+        [item.px - shoulder, above - drop],
+        [item.px + shoulder, above - drop],
+      );
+    }
+    return out;
   }
 
   /** The map's features for the park as it stands — see `parkMapContent.ts`. */
@@ -1391,7 +1444,12 @@ export class ParkMap {
    * helps nobody. Draw order is therefore priority order — the big attractions
    * in `ANCHORS` are drawn before the smaller features.
    */
-  private drawLabel(text: string, px: number, py: number): boolean {
+  private drawLabel(
+    text: string,
+    px: number,
+    py: number,
+    anchor?: { readonly px: number; readonly py: number },
+  ): boolean {
     const ctx = this.ctx;
     ctx.save();
     const size = minTextPx();
@@ -1431,6 +1489,31 @@ export class ParkMap {
       return false;
     }
     this.labelBoxes.push(box);
+
+    // A name that had to go and sit out in the letterbox needs to say which
+    // picture it belongs to; one that is tucked under its own icon plainly
+    // already does, and a line there would be clutter. Drawn from the picture
+    // to the *nearest point on the name's box*, so it stops at the words
+    // rather than running through them, and drawn before the text so the
+    // white halo below covers where they meet.
+    if (anchor) {
+      const nearX = Math.min(Math.max(anchor.px, box.left), box.right);
+      const nearY = Math.min(Math.max(anchor.py, box.top), box.bottom);
+      if (Math.hypot(nearX - anchor.px, nearY - anchor.py) > size) {
+        ctx.save();
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+        ctx.lineWidth = Math.max(3, 0.16 * uiUnitPx());
+        ctx.beginPath();
+        ctx.moveTo(anchor.px, anchor.py);
+        ctx.lineTo(nearX, nearY);
+        ctx.stroke();
+        ctx.strokeStyle = MAP_PALETTE.grey;
+        ctx.lineWidth = Math.max(1.2, 0.06 * uiUnitPx());
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
 
     ctx.lineWidth = 3;
     ctx.strokeStyle = 'rgba(255,255,255,0.9)';
