@@ -225,6 +225,18 @@ assertion to make a seed pass — swap the seed and write down why.
 is not optional. It complements `check:park`, which owns whether the park
 *works*; this owns whether its furniture is *placed sanely*.
 
+**A green build is not a green repo.** `test:procgen` is **not in the `build`
+chain** — that chain is 16 steps and this is not one of them. `npm run build`
+can exit 0 while all five seeds fail. **Run both before every push**; they do
+not cover each other.
+
+On 29 August a branch named an interior mesh `castle-wall-plate-0`, which
+matched the pattern `parkFacts.ts` uses to find the castle's *exterior*
+stonework. A slide-clearance invariant silently began measuring the wrong
+mesh, `castleMasonryTopY` jumped 10.29 m → 14.83 m, and every seed failed —
+while `npm run build` stayed honestly green, because it never ran the suite
+that could see it.
+
 ## Procgen backtracks on collision, always
 
 Jim, 22 August 2026, on the bridge planner clamping to a hard-coded minimum
