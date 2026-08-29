@@ -464,6 +464,40 @@ Measured before/after draw calls and triangles go here, from
 `renderer.info`, on deck 0 with everything on. If the delta is not tiny, the
 torches lose their lights and keep their emissive.
 
+### The design to build, decided but not yet written
+
+**v1 is flames with no lights at all**, and that is a deliberate reading of the
+brief rather than a corner cut. The whole cost of "warm and flickering" can be
+paid by an emissive material:
+
+- **Flames**: one `InstancedMesh` of squashed cones per storey, ~40 of them,
+  `toonMaterial(flame, { emissive, emissiveIntensity })`, `castShadow = false`,
+  `receiveShadow = false` (a self-lit thing is a decal by §7's table). **One
+  draw call per storey, no lights, nothing in the shadow pass.**
+- **Flicker**: one `update(dt)` writing **one** `emissiveIntensity` per storey.
+  Not per instance — a single material shared by all forty flames, so the whole
+  wall breathes together. No geometry touched, no material recompiled, no
+  uniform array. This is as close to free as a per-frame effect gets.
+- **Then measure**, and only then decide about `PointLight`s. If emissive alone
+  reads as torchlight on stone, the lights never get added and the answer to
+  #251 is that this feature cost nothing.
+
+**Where a flame goes.** `SCONCE_MOUNT_Y` 2.10 m (mine) + the Artist's published
+cup-mouth offset (0.000, 0.285, 0.3025) puts the flame's base at **2.385 m**,
+0.3025 m out from the wall face. Until batch 1 lands, that offset has to be
+typed into `castleFabric.ts` — which is the two-definitions trap, so it is
+marked provisional there and `check:castle` gains assertion 4 against the
+built mesh the day the sconce arrives. **Do not let that TODO survive the
+batch-1 wiring.**
+
+**The trap to avoid, which cost this branch an hour already.** Do not parent
+`PointLight`s into a deck's floor group and assume the cutaway will switch them
+off. The fader shows every storey **up to** the current one, not just the
+current one, so lights parented per-storey would accumulate — six on the ground
+floor becomes thirty by the roof. If lights are ever added they must be a fixed
+pool of six that is *moved* to the storey the player is on, driven off
+`Building.currentDeck`.
+
 *(Measurements go here.)*
 
 ---
