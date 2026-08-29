@@ -625,3 +625,63 @@ export const MAX_FRAME_DELTA = 1 / 12;
  * it to be walked into safely.
  */
 export const PLAYER_LONGEST_STEP = PLAYER_MAX_SPEED * PLAYER_SPRINT_MULTIPLIER * MAX_FRAME_DELTA;
+
+/**
+ * Half-life, in seconds, of the exponential damp `Player.update` runs the
+ * character's height through so walking the gentle hills is not jittery.
+ *
+ * **It decides how steep a slope the game can have, which is why it lives here
+ * rather than as a literal at the one call site.** `Player.update` hands
+ * `this.position.y` — the *damped, lagging* height — to the ground sampler, and
+ * `WalkSurfaces.sample` will not return a surface more than
+ * {@link BUILDING_STEP_UP} above that. Climbing steadily, the damp never
+ * catches up: it keeps `2^(-dt / this)` of the gap each frame, so at a clamped
+ * {@link MAX_FRAME_DELTA} the lag settles at 0.309x the per-frame climb and a
+ * sprinting child must clear her own climb *plus* that lag. The usable budget
+ * is therefore `BUILDING_STEP_UP / 1.309` = 0.474 m per frame, not 0.620 m —
+ * a peak grade of 0.512 against {@link PLAYER_LONGEST_STEP}.
+ *
+ * `test/procgen/invariants.ts` reads it to hold every bridge to that budget.
+ * Nobody may copy the number: a second 0.04 written down somewhere else is how
+ * this term went missing from the bridge redesign's arithmetic in the first
+ * place, and a child fell through a deck for it (issue #358).
+ */
+export const PLAYER_HEIGHT_DAMP_HALF_LIFE = 0.04;
+
+/**
+ * Drop further than this below the surface under your feet and you start
+ * falling.
+ *
+ * One owner: `Player` and `NpcCharacter` each used to declare their own
+ * identical copy, and `test/procgen/invariants.ts` needs the same number to
+ * decide whether losing a bridge deck actually drops a child or merely sets
+ * her down on the ground that was already under it.
+ */
+export const FALL_THRESHOLD = 0.5;
+
+/**
+ * **The steepest slope a sprinting child can climb without losing the surface
+ * under her** — the hard ceiling every walkable ramp in the park is built to.
+ *
+ * One clamped frame ({@link MAX_FRAME_DELTA}, a slow phone) carries her
+ * {@link PLAYER_LONGEST_STEP}. `WalkSurfaces.sample` will not return a built
+ * surface more than {@link BUILDING_STEP_UP} above the height she is *damped*
+ * to, and that damp lags: it keeps `2^(-dt / half-life)` of the gap each frame,
+ * so climbing steadily the lag settles at `r / (1 - r)` = 0.309x the per-frame
+ * climb. She must clear her own climb **plus** her lag, so the usable climb is
+ * `BUILDING_STEP_UP / 1.309` = 0.474 m per frame — a grade of **0.512**, not
+ * the 0.620/0.925 = 0.670 the step-up alone suggests.
+ *
+ * **This is a physics limitation being written into geometry, not a fact about
+ * ramps.** `CollisionWorld.resolveMovement` already sub-steps *lateral*
+ * movement so a long frame cannot carry a child through a wall; the *vertical*
+ * ground sample does not sub-step, and that asymmetry is issue #358. Fix #358
+ * and this budget becomes generous rather than binding, and the park may build
+ * steeper, shorter ramps again. Nobody should read the ramp arithmetic that
+ * depends on this as intrinsic to bridges — it is the shape of a bug elsewhere.
+ */
+export const SPRINT_PEAK_GRADE_BUDGET = (() => {
+  const retention = Math.pow(2, -MAX_FRAME_DELTA / PLAYER_HEIGHT_DAMP_HALF_LIFE);
+  const lag = retention / (1 - retention);
+  return BUILDING_STEP_UP / (1 + lag) / PLAYER_LONGEST_STEP;
+})();

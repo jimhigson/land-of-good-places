@@ -1,5 +1,6 @@
 import { Vector3 } from 'three';
 import {
+  FALL_THRESHOLD,
   PLAYER_BOB_CYCLES_PER_METRE,
   PLAYER_BOB_HEIGHT,
   PLAYER_TURN_SPEED,
@@ -71,9 +72,6 @@ const GRAVITY = 17;
  * mover doing the whole job alone is allowed to do it faster, not just more.
  */
 const SCRIPTED_ENCOUNTER_SPEED_FACTOR = 2.4;
-
-/** Drop further than this below the surface under your feet and you fall. */
-const FALL_THRESHOLD = 0.5;
 
 export class NpcCharacter {
   readonly avatar: NpcAvatar;

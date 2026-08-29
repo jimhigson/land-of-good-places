@@ -58,8 +58,12 @@ import {
 import {
   BUILDING_STEP_UP,
   CAMERA_FACING_YAW,
+  FALL_THRESHOLD,
+  MAX_FRAME_DELTA,
   PATH_KERB_LIFT,
   PATH_SURFACE_LIFT,
+  PLAYER_HEIGHT_DAMP_HALF_LIFE,
+  PLAYER_LONGEST_STEP,
   PLAYER_MAX_SPEED,
   PLAYER_RADIUS,
   RIM_OUTSET_START,
@@ -5024,7 +5028,55 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
   // `check-park.mts`'s job (`route.unreachable`, hard-gated), which routes
   // it on the real nav lattice rather than a straight geometric line.
   {
-    const MARCH_STEP = 0.5;
+    // **The march is the player's own longest stride, not a survey step.**
+    //
+    // This check was blind to a real, reproducible fall for as long as it
+    // marched at 0.5 m and compared each step against `BUILDING_STEP_UP`
+    // alone. Both halves of that were wrong, and each one on its own was
+    // enough to hide the bug:
+    //
+    // 1. **0.5 m is not a step she ever takes.** One clamped frame
+    //    (`MAX_FRAME_DELTA`, 1/12 s — a slow phone, and the ceiling the engine
+    //    itself clamps to) advances a *sprinting* child
+    //    `PLAYER_MAX_SPEED × PLAYER_SPRINT_MULTIPLIER × MAX_FRAME_DELTA` =
+    //    {@link PLAYER_LONGEST_STEP}, 0.925 m. Sampling at 0.5 m measured a
+    //    climb she never makes in one piece and reported 54% of the real one.
+    // 2. **`BUILDING_STEP_UP` is not the budget.** `Player.update` passes
+    //    `this.position.y` — *last* frame's damped, lagging height — into the
+    //    ground sample, and `WalkSurfaces.sample` rejects any surface above
+    //    `that + BUILDING_STEP_UP`. Climbing steadily, `damp(y, groundY,
+    //    0.04, dt)` never catches up: it retains
+    //    `2^(-MAX_FRAME_DELTA / 0.04)` = 0.236 of the gap each frame, so the
+    //    lag settles at `retention / (1 - retention)` = 0.309 × the per-frame
+    //    climb. She must clear her *own* climb **plus** her lag, so the real
+    //    budget is `BUILDING_STEP_UP / 1.309` = 0.474 m, not 0.620 m.
+    //
+    // Miss the lag and a 0.495 m climb reads as 80% of budget and safe; count
+    // it and the same frame needs 0.632 m against 0.620 m and she loses the
+    // surface, goes airborne and drops through her own deck into the tunnel.
+    // That is not hypothetical: browser QA of PR #352 fell through on 6 of 32
+    // sprinted runs, `bridge-262.0` 4 times out of 4 in one direction, ending
+    // 3.85 m under the deck and staying there.
+    //
+    // **Scanned as a sliding window at a fine step, not marched in strides.**
+    // Sampling every 0.925 m would make the answer depend on where the march
+    // happened to start — a phase offset could straddle the steep stretch and
+    // miss it. Every fine sample is compared with the point one full stride
+    // ahead of it instead, so a steep metre is caught wherever it falls.
+    //
+    // The whole term is the game's own: `PLAYER_LONGEST_STEP`,
+    // `MAX_FRAME_DELTA` and `BUILDING_STEP_UP` are the engine's constants, and
+    // 0.04 is `Player.update`'s own damp half-life. None of it is a generator
+    // target, and none of it may be loosened to make a bridge pass — the
+    // bridge is what gives way.
+    const SAMPLES_PER_STRIDE = 8;
+    const MARCH_STEP = PLAYER_LONGEST_STEP / SAMPLES_PER_STRIDE;
+    /** What `damp` keeps of the gap across one clamped frame. */
+    const DAMP_RETENTION = Math.pow(2, -MAX_FRAME_DELTA / PLAYER_HEIGHT_DAMP_HALF_LIFE);
+    /** Steady-state lag, as a multiple of the per-frame climb. */
+    const DAMP_LAG = DAMP_RETENTION / (1 - DAMP_RETENTION);
+    /** The climb one sprinted clamped frame may make and still be sampled. */
+    const CLIMB_BUDGET = BUILDING_STEP_UP / (1 + DAMP_LAG);
     // `NavGrid.ts`'s own `TOP_REFERENCE`, restated rather than imported —
     // it looks like a leaf (its own direct imports are `core/constants`,
     // two type-only imports, and `Collision.ts`), but that last one is not
@@ -5064,9 +5116,11 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
       // probe above already covers a bridge with no ramp.
       if (farNeg <= 0 && farPos <= 0) continue;
 
-      let previousHeight: number | null = null;
-      let previousAlong = -farNeg;
-      let reportedStep = false;
+      // Walk the whole centreline once, keeping the profile, so the sheer-step
+      // check and the sprint-climb window below both read the same heights.
+      const alongs: number[] = [];
+      const heights: number[] = [];
+      const exposure: number[] = [];
       for (let along = -farNeg; along <= farPos + 1e-6; along += MARCH_STEP) {
         const p = frame.pointAt(along);
         const x = p.x;
@@ -5081,25 +5135,78 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
               `${bridgeH !== null ? 'bridge' : 'ground'}`,
           );
         }
-        if (previousHeight !== null) {
-          const step = Math.abs(h - previousHeight);
-          // One complaint per crossing for this, not one per offending
-          // sample — a genuine sheer drop fails every step downstream of it
-          // too (the march never recovers a "previous" height on solid
-          // ground), and a wall of near-identical complaints obscures the
-          // one real finding rather than describing it.
-          if (step > BUILDING_STEP_UP && !reportedStep) {
-            reportedStep = true;
-            complaints.push(
-              `the crossing at (${fmt([crossing.x, crossing.z])}) has a ${step.toFixed(2)} m step ` +
-                `between ${previousAlong.toFixed(1)} m and ${along.toFixed(1)} m along its own ` +
-                `centreline — too tall for a real walk (BUILDING_STEP_UP is ` +
-                `${BUILDING_STEP_UP.toFixed(2)} m); this is not a walkable crossing, ground to ground`,
-            );
-          }
+        alongs.push(along);
+        heights.push(h);
+        // **How far she would actually drop if she lost this surface.**
+        // `WalkSurfaces.sample` starts from the terrain and only ever raises
+        // its answer with decks, ramps and platforms — the terrain itself is
+        // never filtered against the ceiling. So losing the deck does not put
+        // her inside the scenery; it puts her on the ground beneath it. Near a
+        // ramp foot the deck lies *on* that ground, so losing it is a
+        // no-op — which is why the exposure below is part of the question and
+        // not a let-off. Sampled with an absurdly low reference so every
+        // built surface is rejected and bare terrain is what comes back
+        // (`terrainHeight` itself must not be imported here — it reaches
+        // `parkManifest` and would pin every seed to the default park).
+        const terrainH = facts.world.building.surfaces.sample(x, z, -1e6);
+        exposure.push(h - terrainH);
+      }
+
+      // A sheer face — a wall or a drop between two neighbouring samples.
+      // One complaint per crossing, not one per offending sample: a genuine
+      // sheer drop fails every step downstream of it too, and a wall of
+      // near-identical complaints obscures the one real finding.
+      let reportedStep = false;
+      for (let i = 1; i < heights.length; i += 1) {
+        const step = Math.abs((heights[i] as number) - (heights[i - 1] as number));
+        if (step > BUILDING_STEP_UP && !reportedStep) {
+          reportedStep = true;
+          complaints.push(
+            `the crossing at (${fmt([crossing.x, crossing.z])}) has a ${step.toFixed(2)} m step ` +
+              `between ${(alongs[i - 1] as number).toFixed(1)} m and ` +
+              `${(alongs[i] as number).toFixed(1)} m along its own ` +
+              `centreline — too tall for a real walk (BUILDING_STEP_UP is ` +
+              `${BUILDING_STEP_UP.toFixed(2)} m); this is not a walkable crossing, ground to ground`,
+          );
         }
-        previousHeight = h;
-        previousAlong = along;
+      }
+
+      // **One sprinted clamped frame.** The worst climb over any stride-long
+      // window, wherever it falls, against the budget her own damp lag leaves
+      // her.
+      let worstClimb = 0;
+      let worstAt = 0;
+      let worstDrop = 0;
+      for (let i = 0; i + SAMPLES_PER_STRIDE < heights.length; i += 1) {
+        const climb = (heights[i + SAMPLES_PER_STRIDE] as number) - (heights[i] as number);
+        // Only where losing the surface would genuinely drop her. Below
+        // `FALL_THRESHOLD` the game does not even call it a fall.
+        const drop = Math.min(exposure[i] as number, exposure[i + SAMPLES_PER_STRIDE] as number);
+        if (drop <= FALL_THRESHOLD) continue;
+        if (climb > worstClimb) {
+          worstClimb = climb;
+          worstAt = alongs[i] as number;
+          worstDrop = drop;
+        }
+      }
+      if (worstClimb > CLIMB_BUDGET) {
+        const needed = worstClimb * (1 + DAMP_LAG);
+        complaints.push(
+          `the crossing at (${fmt([crossing.x, crossing.z])}) climbs ` +
+            `${worstClimb.toFixed(3)} m in one sprinted frame, ` +
+            `${worstAt.toFixed(1)} m along its own centreline — a child running up it ` +
+            `on a slow device falls through her own deck. One clamped frame ` +
+            `(${MAX_FRAME_DELTA.toFixed(4)} s) carries her ` +
+            `${PLAYER_LONGEST_STEP.toFixed(3)} m, and WalkSurfaces.sample only reaches ` +
+            `BUILDING_STEP_UP (${BUILDING_STEP_UP.toFixed(2)} m) above her own damped ` +
+            `height, which lags ${DAMP_LAG.toFixed(3)} x the climb behind her — so she ` +
+            `needs ${needed.toFixed(3)} m of a ${BUILDING_STEP_UP.toFixed(2)} m reach and ` +
+            `loses the surface. The budget is ${CLIMB_BUDGET.toFixed(3)} m per frame ` +
+            `(peak grade ${(CLIMB_BUDGET / PLAYER_LONGEST_STEP).toFixed(3)}); this one ` +
+            `needs grade ${(worstClimb / PLAYER_LONGEST_STEP).toFixed(3)}. The deck stands ` +
+            `${worstDrop.toFixed(2)} m over the ground there, so that is how far she drops ` +
+            `— through the deck, into the tunnel`,
+        );
       }
     }
   }
@@ -5689,22 +5796,34 @@ const theWalkInFromTheGateCrossesWhereItWasPlannedTo: Invariant = (facts) => {
  * exists precisely to make that impossible ahead of time; this asks whether
  * the promise was kept afterwards, on the built park.
  *
- * It is the check issue #339 went looking for, and it is not vacuous: a
- * whole class of "the browser built no bridges" failures — the crossing-plan
- * letterbox (`train/crossingPrewarm.ts`) handing back an empty plan, the
- * sliced solve in `boot/parkGeneration.ts` finishing early, `paths.ts`
- * losing its crossing-site lattice edges — all land as *zero crossings on a
- * planned bridge site*, which clause 1 below reports by name rather than by
- * silently making every per-bridge loop in this file iterate over nothing.
+ * It is the check issue #339 went looking for: a whole class of "the browser
+ * built no bridges" failures — the crossing-plan letterbox
+ * (`train/crossingPrewarm.ts`) handing back an empty plan, the sliced solve in
+ * `boot/parkGeneration.ts` finishing early, `paths.ts` losing its crossing-site
+ * lattice edges — all land as *the park's crossings standing on none of the
+ * planned sites*, which clause 1 below reports by name rather than by silently
+ * making every per-bridge loop in this file iterate over nothing.
+ *
+ * **How much it covers varies by seed, and it says so on every run** — see the
+ * `[proven-site cover]` line it prints. Since #374 tied `MAX_RAMP_GRADIENT` to
+ * what a sprinting child can actually climb, fewer sites are provable: across
+ * the five seeds the crossings this invariant examines fell from 8 to 4, and on
+ * **seed 2 `plannedBridgeSiteDistances` is empty**, so the whole check
+ * early-returns and asserts nothing at all. That is not a defect — a park with
+ * no proven bridge sites has no promise to keep — but a check that quietly
+ * stops checking must announce it, or the next reader takes green for cover.
  *
  * Two clauses:
  *
- * 1. **The plan reached the park at all.** If the planner proved any bridge
- *    site (`plannedBridgeSiteDistances`), at least one built crossing stands
- *    on one. A park whose crossings have all drifted off-plan is a park
- *    whose crossing plan did not arrive — the exact shape of a prewarm
- *    letterbox that came back empty, and the state in which every other
- *    bridge invariant here passes by iterating over nothing.
+ * 1. **The plan reached the park at all.** If the planner made any sites, at
+ *    least one built crossing stands on one of them. **Every planned site
+ *    counts, bridge and level alike**: this clause asks whether the plan
+ *    arrived, and `paths.ts` routes legs where the park needs to cross and
+ *    takes whichever site is nearest — so a bridge site on a stretch no leg
+ *    wants goes unused, and the plan has still arrived perfectly. Demanding a
+ *    crossing on a *bridge* site conflated the two, and called seed 18's
+ *    perfectly on-plan park (crossings on planned level sites 104.0 and 238.0)
+ *    a plan that never arrived.
  * 2. **A crossing on a proven site is bridged.** `bridgeFootprint.ts`'s late,
  *    real, backtracking search is allowed to fall back to a level crossing
  *    where a genuine obstacle arrived after planning — but not on ground the
@@ -5734,16 +5853,58 @@ const everyProvenBridgeSiteKeepsItsBridge: Invariant = (facts) => {
   const complaints: string[] = [];
   const train = facts.world.train;
   const planned = facts.plannedBridgeSiteDistances;
-  if (planned.length === 0) return complaints;
 
-  const onPlannedSite = train.crossings.filter((crossing) =>
-    planned.some((d) => Math.abs(d - crossing.railDistance) <= SITE_IDENTITY_TOLERANCE),
-  );
+  // **Say how far this check reaches, every run.** Its cover is a function of
+  // how many sites the planner could prove, which #374 changed — so a silent
+  // pass can mean "every promise kept" or "there were no promises". Printing
+  // the reach is what stops the second being read as the first, the way
+  // `check:castle` announces its missing-prop assertions on every run.
+  const announce = (examined: number): void => {
+    const detail =
+      planned.length === 0
+        ? 'the planner proved NO bridge sites on this seed, so this invariant asserts nothing'
+        : `${examined} of ${train.crossings.length} built crossing(s) stand on one of ` +
+          `${planned.length} proven bridge site(s)` +
+          (examined === 0 ? ' — so clause 2 asserts nothing' : '');
+    // `process.stderr` rather than `console.log`: vitest's default reporter
+    // hides console output from *passing* tests, and a coverage note nobody
+    // sees unless they already suspected something is worth nothing.
+    process.stderr.write(`[proven-site cover] ${detail}\n`);
+  };
 
-  if (onPlannedSite.length === 0) {
+  if (planned.length === 0) {
+    announce(0);
+    return complaints;
+  }
+
+  const onSite = (crossing: { railDistance: number }, sites: readonly number[]): boolean =>
+    sites.some((d) => Math.abs(d - crossing.railDistance) <= SITE_IDENTITY_TOLERANCE);
+
+  // **Clause 1 asks whether the plan arrived, so it must count every site the
+  // plan made — level as well as bridge.**
+  //
+  // It used to demand a built crossing on a *bridge* site specifically, which
+  // conflates two different things: "the plan reached the park" (what this
+  // clause is for, and what the prewarm-letterbox class of failure breaks) and
+  // "some leg chose to cross at a bridge site" (which nothing promises).
+  // `paths.ts` routes legs where the park needs to cross and takes whichever
+  // site is nearest; if no leg happens to want the stretch a bridge site sits
+  // on, that site goes unused, and the plan has still arrived perfectly.
+  //
+  // Found on seed 18 once {@link MAX_RAMP_GRADIENT} started refusing ramps too
+  // steep to sprint up (#374): the seed's proven bridge sites fell from three
+  // to one, at railDistance 176.0, and its two built crossings sit on the
+  // planned *level* sites 104.0 and 238.0 — exactly on plan, and this clause
+  // called it "the crossing plan did not reach the park". Widening it to every
+  // planned site keeps the failure it exists for — an empty or lost plan puts
+  // no crossing on any site at all — while no longer asserting a promise the
+  // router never made.
+  const allPlanned = [...planned, ...facts.plannedLevelSiteDistances];
+  if (!train.crossings.some((crossing) => onSite(crossing, allPlanned))) {
     complaints.push(
-      `the crossing planner proved ${planned.length} bridge site(s) on this loop ` +
-        `(at railDistance ${planned.map((d) => d.toFixed(1)).join(', ')}) and not one of the ` +
+      `the crossing planner proved ${planned.length} bridge site(s) and ` +
+        `${facts.plannedLevelSiteDistances.length} level site(s) on this loop ` +
+        `(at railDistance ${allPlanned.map((d) => d.toFixed(1)).join(', ')}) and not one of the ` +
         `park's ${train.crossings.length} built crossing(s) stands on any of them ` +
         `(they sit at ${train.crossings.map((c) => c.railDistance.toFixed(1)).join(', ') || 'nowhere — there are none'}) — ` +
         'the crossing plan did not reach the park, so every per-bridge check here is ' +
@@ -5751,6 +5912,9 @@ const everyProvenBridgeSiteKeepsItsBridge: Invariant = (facts) => {
     );
     return complaints;
   }
+
+  const onPlannedSite = train.crossings.filter((crossing) => onSite(crossing, planned));
+  announce(onPlannedSite.length);
 
   for (const crossing of onPlannedSite) {
     // Measured off the built world twice over: the crossing is in

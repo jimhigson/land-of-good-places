@@ -6,7 +6,7 @@ import { GARDEN_PLAY_BOUNDARY } from '../boundary';
 import { clearOfPlots } from '../parkLayout';
 import { distanceToRailCorridor } from './plan';
 import type { CollisionWorld } from '../Collision';
-import { PLAYER_RADIUS } from '../../core/constants';
+import { PLAYER_RADIUS, SPRINT_PEAK_GRADE_BUDGET } from '../../core/constants';
 
 /**
  * The bridge's own footprint in the ground plane (issue #116, Decision 8) —
@@ -78,20 +78,58 @@ export const BRIDGE_RAMP_GRADIENT =
 export const DECK_HALF_LENGTH = FENCE_OFFSET + 1.2;
 
 /**
- * The steepest a ramp may ever be forced to, when two crossings land close
- * enough together that {@link BRIDGE_RAMP_GRADIENT} would overlap them —
- * see {@link planBridgeFootprints}'s `rampRunCap`.
+ * Fraction of each side's length spent easing the grade in and out — the
+ * hump's slope profile is a cosine-blended trapezoid: zero slope at the crown
+ * and at the foot, a constant grade in the middle, cosine blends between.
  *
- * Derived, not chosen: `NavGrid` links two lattice nodes as one walking
- * level whenever they are within `BUILDING_STEP_UP` (0.62 m) of each other,
- * sampled every `NavGrid`'s own 0.5 m cell — so a slope stays walkable up to
- * `BUILDING_STEP_UP / CELL` ≈ 1.24. Capping here at half that leaves a full
- * doubling of margin before a cramped bridge could ever stop reading as one
- * connected level, while still being visibly steeper than the ordinary
- * grade — exactly the "cramped, so it's a steep hump" a child would expect
- * two close bridges to look like.
+ * **Peak slope is `1 / (1 - HUMP_BLEND)` times the average grade** (1.33x at
+ * 0.25), and that ratio is the whole reason this is a trapezoid and not a
+ * smootherstep (1.875x): the peak is what the walk physics actually judge, so
+ * a shape with a tall peak spends the whole of
+ * {@link SPRINT_PEAK_GRADE_BUDGET} on a moment of the ramp. A smootherstep's
+ * 0.79 peak on the canonical seed's cramped bridge put her over the ceiling,
+ * and real-browser QA watched her lose the surface at the steep section, fall
+ * into the tunnel and jam against the fence.
+ *
+ * Lives here rather than in `bridges.ts` (which re-exports it) because
+ * {@link MAX_RAMP_GRADIENT} below needs it to turn a peak budget into an
+ * average grade, and `bridges.ts` already imports from this file — the other
+ * direction would be an import cycle.
  */
-export const MAX_RAMP_GRADIENT = 0.6;
+export const HUMP_BLEND = 0.25;
+
+/**
+ * **The steepest a ramp may ever be forced to** — when two crossings land close
+ * enough together that {@link BRIDGE_RAMP_GRADIENT} would overlap them, and,
+ * through {@link WALKABLE_FLOOR}, the shortest ramp that still counts as a
+ * walkable approach at all.
+ *
+ * **Derived from the player, not from the nav lattice.** It used to be a flat
+ * `0.6`, justified against `NavGrid`'s ~1.24 linking slope — which is the wrong
+ * authority twice over: `NavGrid` decides whether an *NPC router* thinks two
+ * nodes are one level, and it says nothing about whether a *child* can run up
+ * the thing. The real ceiling is {@link SPRINT_PEAK_GRADE_BUDGET}: past it a
+ * sprinting player on a slow device loses the deck under her feet and falls
+ * through it into the tunnel.
+ *
+ * That budget is on the hump's **peak**, and a ramp's quoted grade is its
+ * *average* — the cosine-blended trapezoid peaks at `1 / (1 - HUMP_BLEND)`
+ * times it — so the average is discounted by that factor here.
+ *
+ * **What the old 0.6 actually shipped.** `WALKABLE_FLOOR` is
+ * `BRIDGE_RISE / this`, so 0.6 let the planner truncate a ramp to 6.77 m
+ * (7.25 m with its acceptance slack) and call it done. Measured on the built
+ * park, seeds 2 and 18 had bridges whose ramps stood at exactly that floor —
+ * 48% of the ideal run, a realised grade of **0.560** against a peak budget of
+ * 0.512 — and browser QA of PR #352 duly fell through 6 sprinted runs out of
+ * 32. This is CLAUDE.md's own "never shrink to a floor and accept a result that
+ * still doesn't clear", with the floor itself as the thing that did not clear.
+ *
+ * A crossing that cannot be given a ramp this long now falls back to a level
+ * crossing, which is the existing, safe alternative — a slightly duller park is
+ * the correct trade against a child falling through a bridge.
+ */
+export const MAX_RAMP_GRADIENT = SPRINT_PEAK_GRADE_BUDGET * (1 - HUMP_BLEND);
 
 /** Buffer, past the deck itself, a capped ramp always keeps clear of the
  * next crossing's own corridor — never flush against it. */

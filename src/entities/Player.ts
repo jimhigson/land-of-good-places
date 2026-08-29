@@ -4,7 +4,9 @@ import {
   PLAYER_ACCELERATION,
   PLAYER_BOB_CYCLES_PER_METRE,
   PLAYER_BOB_HEIGHT,
+  FALL_THRESHOLD,
   PLAYER_DECELERATION,
+  PLAYER_HEIGHT_DAMP_HALF_LIFE,
   PLAYER_MAX_SPEED,
   PLAYER_RADIUS,
   PLAYER_SPRINT_MULTIPLIER,
@@ -127,9 +129,6 @@ export {
  * the way.
  */
 const AUTO_HOP_LOOKAHEAD = 0.5;
-
-/** Drop further than this below the surface under your feet and you fall. */
-const FALL_THRESHOLD = 0.5;
 
 /**
  * ---------------------------------------------------------------------------
@@ -1124,7 +1123,11 @@ export class Player implements GameSystem {
     } else {
       this.wornJetpack?.setThrust(0);
       // Damp onto the ground so walking over the gentle hills isn't jittery.
-      this.position.y = damp(this.position.y, groundY, 0.04, dt);
+      // The half-life is a shared constant, not a literal: it sets how far
+      // behind the ground this height lags on a climb, and so how steep a
+      // slope the park is allowed to build — see its own note, and the
+      // sprint-climb budget in `everyBridgeIsWalkableAndReachable`.
+      this.position.y = damp(this.position.y, groundY, PLAYER_HEIGHT_DAMP_HALF_LIFE, dt);
     }
     this.hopClearance = hopHeight;
 

@@ -23,6 +23,7 @@ import {
   planBridgeFootprints,
   type BridgeFootprint,
   type RealWorldQuery,
+  HUMP_BLEND,
 } from './bridgeFootprint';
 import { TRACK_CLEARANCE } from './route';
 import { BUILDING_STEP_UP, PATH_CARRIER_SLACK, PATH_KERB_OVERHANG } from '../../core/constants';
@@ -419,25 +420,12 @@ function clamp01(value: number): number {
   return value < 0 ? 0 : value > 1 ? 1 : value;
 }
 
-/**
- * Fraction of each side's length spent easing the grade in and out — the
- * hump's slope profile is a cosine-blended trapezoid: zero slope at the
- * crown and at the foot, a constant grade in the middle, cosine blends
- * between. Peak slope is `1 / (1 - HUMP_BLEND)` times the average grade
- * (1.33× at 0.25), and that ratio is the whole reason this is a trapezoid
- * and not a smootherstep (1.875×): the REAL walking physics lose a slope
- * that rises faster than `BUILDING_STEP_UP` in one frame — `Player.tick`
- * samples `WalkSurfaces` with a ceiling one step above her own (damped,
- * lagging) height, so at `PLAYER_MAX_SPEED` (7.4) under a slow device's
- * frame clamp (`MAX_FRAME_DELTA`, 1/12 s) a single frame advances
- * `0.617 m × slope`. A smootherstep's 0.79 peak on the canonical seed's
- * cramped bridge came to 0.49 m/frame plus the damp lag — right at the
- * 0.62 m ceiling, and real-browser QA watched her lose the surface at the
- * steep section, fall into the tunnel and jam against the fence. The
- * trapezoid's 0.56 peak leaves a third of the ceiling spare at the same
- * ramp length.
- */
-export const HUMP_BLEND = 0.25;
+// `HUMP_BLEND` now lives in `bridgeFootprint.ts`, because the footprint
+// planner needs it to work out how steep a ramp of a given length really gets
+// (see `MAX_RAMP_GRADIENT`) and `bridges.ts` already imports from there — the
+// other direction would be a cycle. Re-exported so its many references here
+// and in the invariants keep resolving.
+export { HUMP_BLEND };
 
 /**
  * Normalised drop of the hump profile: 0 at the crown (`q = 0`), 1 at the
@@ -926,9 +914,29 @@ function buildShellGeometry(
     readonly copingInner: [number, number];
   }
 
+  // **Rings spread evenly over the bridge, not a fixed step with a remainder.**
+  // Stepping by `SHELL_STEP` and then pushing `lengthPos` leaves a final
+  // segment of whatever is left over — length `(lengthPos + lengthNeg) mod
+  // SHELL_STEP`, which is arbitrarily small and, on the shortened bridges, was
+  // 0.027 m on the canonical seed's `bridge-226.0`. That stub is harmless in
+  // the swept shell (a thin quad) and *not* harmless downstream:
+  // `bridgeStonework.ts`'s `buildCopingRun` lays one stone per segment and
+  // scales it by `(length - COPING_JOINT) / (COPING_LENGTH - COPING_JOINT)`,
+  // so a segment shorter than the 0.05 m joint scales the stone by a
+  // **negative** factor — it turns inside out, its base stops following the
+  // wall, and #360's coping invariant caught it floating 0.033 m over the
+  // parapet on four of the five seeds.
+  //
+  // Dividing the span into a whole number of equal steps keeps every segment
+  // within a quarter of `SHELL_STEP` of it and cannot produce a degenerate
+  // one, so the stub cannot come back the next time a bridge changes length.
+  // Fixed here rather than guarded in `buildCopingRun` because the sliver ring
+  // is this function's own artefact, and every consumer of `parapetLine`
+  // inherits it.
   const alongs: number[] = [];
-  for (let along = -lengthNeg; along < lengthPos; along += SHELL_STEP) alongs.push(along);
-  alongs.push(lengthPos);
+  const spanTotal = lengthPos + lengthNeg;
+  const ringSteps = Math.max(1, Math.round(spanTotal / SHELL_STEP));
+  for (let i = 0; i <= ringSteps; i += 1) alongs.push(-lengthNeg + (spanTotal * i) / ringSteps);
 
   // --- the course levels ----------------------------------------------------
   //
