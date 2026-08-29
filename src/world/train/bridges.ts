@@ -837,6 +837,30 @@ interface ShellGeometry {
    * of one thing" this file keeps being bitten by. One owner: whatever the
    * sweep drew.
    */
+  /**
+   * **The outer face of the masonry, in plan, as the sweep actually drew it** —
+   * one entry per ring, `[x, z]` on each side.
+   *
+   * The same medicine `parapetLine` above is for the coping, applied to the
+   * paving. `pavingHeightAt` used to decide where lifted paving stops by asking
+   * the *analytic* frame (`footprint.covers`, an `across` measured on a curved
+   * spine), while the stone is **drawn** as a polyline of straight chords
+   * between these points. On the outside of a curve a chord sits inside the arc
+   * it approximates, so a point the frame calls "inside the bridge" can be
+   * outside the triangles that were really drawn — and the error grows with
+   * ramp length, because a longer ramp accumulates more curve: measured
+   * **0.371 m** of paving hanging past the stone on a 22 m bridge against
+   * **0.513 m** on a 36.7 m one.
+   *
+   * That length-dependence is why the bug survived a whole PR's worth of
+   * measurement: it was all taken on the short geometry. One owner now — the
+   * paving is lifted exactly where this polygon says there is stone under it.
+   */
+  readonly planEdge: readonly {
+    readonly plus: readonly [number, number];
+    readonly minus: readonly [number, number];
+  }[];
+
   readonly parapetLine: readonly {
     readonly along: number;
     /** Parapet top, world height, `[side +1, side -1]`. */
@@ -872,6 +896,7 @@ function buildShellGeometry(
   const uvs: number[] = [];
   const indices: number[] = [];
   const parapetLine: { along: number; top: [number, number]; surface: number }[] = [];
+  const planEdge: { plus: [number, number]; minus: [number, number] }[] = [];
   // The tunnel soffit's own triangles — kept apart from `indices` so they
   // land in one contiguous run at the end, ready for a second
   // `BufferGeometry` group carrying `archStoneTexture` (see the return
@@ -1193,6 +1218,7 @@ function buildShellGeometry(
       }
     }
     parapetLine.push({ along, top: [parapetTopPlus, parapetTopMinus], surface });
+    planEdge.push({ plus: [outerPlus.x, outerPlus.z], minus: [outerMinus.x, outerMinus.z] });
     previous = ring;
     previousAlong = along;
   }
@@ -1220,5 +1246,5 @@ function buildShellGeometry(
   coping.setIndex(copingIndices);
   coping.computeVertexNormals();
 
-  return { stone, coping, parapetLine };
+  return { stone, coping, parapetLine, planEdge };
 }
