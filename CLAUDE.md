@@ -113,9 +113,14 @@ the Overseer rather than signing it off.
 
 ## Committing
 
-- **Commit after every meaningful edit.** Not every coherent chunk, not every
-  compiling milestone — every edit that would be annoying to redo. A commit is
-  cheap; re-deriving a change you already reasoned your way to is not.
+- **Commit after every meaningful edit, and push.** Not every coherent chunk,
+  not every compiling milestone — every edit that would be annoying to redo. A
+  commit is cheap; re-deriving a change you already reasoned your way to is not.
+- **Push, don't just commit.** A local-only commit still dies with the
+  worktree, and — just as costly — it is **invisible to the Overseer**, who
+  watches pushed branches to tell a working agent from a dead one. On 29
+  August an engineer committed diligently for 52 minutes without pushing and
+  was chased as missing while it was in fact fine. Push after every commit.
 - Do not save one big commit for the end. The API drops connections and an
   uncommitted branch dies with you. On 29 August 2026 three engineers were
   killed mid-response thirteen times in one morning by streaming failures
