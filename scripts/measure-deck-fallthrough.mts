@@ -73,6 +73,23 @@
  *
  * The two fixes are therefore not additive but **interdependent**, and anyone
  * tempted to revert "the redundant-looking one" should read this table first.
+ *
+ * ### What "proved red" does and does not mean here
+ *
+ * Worth being precise about, because there are two different red runs and only
+ * one of them is evidence about the *player*.
+ *
+ * Copying this file onto pre-fix source and running it exits 1 at **every**
+ * gradient, including 0.100. That is not a pre-fix player falling through a
+ * gentle deck: with `onStep` absent from `resolveMovement` the extra argument
+ * is simply ignored, so `groundY` is never resampled and the "after" column
+ * degenerates. It proves the hook is missing — a useful thing to know, and not
+ * the same claim.
+ *
+ * **The genuine pre-fix demonstration is the `neither` column**, which exists
+ * on both trees and is run on every invocation. It puts the ceiling at 0.512
+ * and its first failure at gradient 0.550, 12 fps — independently reproduced
+ * by the #378 reviewer on a rig sharing no code with this one.
  */
 import { Vector3 } from 'three';
 import { CollisionWorld, MAX_SUBSTEPS } from '../src/world/Collision.ts';

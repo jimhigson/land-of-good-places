@@ -17,8 +17,14 @@
  * happens to produce, which is precisely why the deterministic rig is the
  * proof and this is the sanity check.
  *
- * It drives the real keyboard, reads `window.game` (DEV only), and reports the
- * worst gap between where the bridge deck is and where she actually stood.
+ * It drives the real keyboard, reads `window.game`, and reports the worst gap
+ * between where the bridge deck is and where she actually stood.
+ *
+ * **It needs a `vite` dev server, not `vite preview`.** `window.game` is only
+ * exposed under `import.meta.env.DEV` (`main.ts`), so against a production
+ * build this exits 1 with *"is this a DEV build?"* — which looks like a
+ * failure and is not one. Said here because it cost the #378 reviewer a round
+ * trip.
  */
 import { chromium } from 'playwright-core';
 import { mkdirSync } from 'node:fs';
