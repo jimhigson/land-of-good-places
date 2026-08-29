@@ -101,3 +101,19 @@ nothing on the other three — it is not a general loosening.
   after screenshots of the seed 11 ball pit / slide exit area; screenshots
   onto `qa-screenshots`.
 - PR referencing #361, noting it unblocks #352.
+
+## Done
+
+- **PR #366** raised (`fix/connector-detour-361` → `main`), referencing #361 and
+  noting it unblocks #352. Not merged — the Overseer merges.
+- Screenshots on `qa-screenshots` under `issue-361/` (before/after crop, close,
+  oblique, park-wide). Both preview servers (5361, 5362) killed by PID.
+- Worktrees still in place: `.claude/worktrees/eng-361` (this branch),
+  `.claude/worktrees/eng-361-measure` (detached, used to build `origin/main`,
+  `ec74974` and `ec74974`+fix), `.claude/worktrees/eng-361-qa`. Remove them once
+  #366 is merged; they each carry their own `node_modules` (issue #356).
+
+To re-take the measurement, the two scratch scripts were
+`tmp-connectors.mts` (lists `connector-*` routes off `buildParkFacts(seed)`) and
+`tmp-qa-361.mjs` (playwright shots); both deleted, both trivial to rewrite —
+they are three lines each and are described in the PR body.
