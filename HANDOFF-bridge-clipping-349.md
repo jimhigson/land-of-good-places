@@ -215,6 +215,86 @@ arch. **The lump is not a bug to fix before the redesign; it is the reason for
 the redesign.** The acceptance test stands unchanged — after the redesign,
 re-run this same plan-triangle scan and it must still find only the track.
 
+## The ramp-skirt hypothesis — half right, and the half that matters is "by design"
+
+The Overseer, from the Artist's `art/renders/bridge-iso.png`: each ramp is a
+solid wedge whose side wall flares to the ground, and the lump may be the
+ramp's own road-bed skirt, path-coloured, escaping the masonry.
+
+Checked against the generator rather than adopted. **The skirt is real, is
+deliberate, and is stone — not escaped paving:**
+
+- `buildShellGeometry`'s outer wall runs from `parapetTop` down to
+  `bottomPlus/bottomMinus` = `min(terrain at the outer face, terrain at the
+  road edge) − 0.5`, i.e. **buried half a metre in the ground**, for every ring
+  along the whole ramp. So yes — a continuous solid flank the length of the
+  approach. The Artist's model matches what is generated.
+- It is drawn from the `stone` material (pink park stone), not the path. The
+  sandy appearance in `look-bridge1720-footneg19.png` is the **draped path on
+  the ramp's top surface**, filling the frame because that camera looks
+  straight up the ramp from below; the stone flanks are edge-on and read as
+  thin pink lines.
+- The grey plane on the orbit angles is the **tunnel soffit seen through the
+  arch**, not geometry through the flank. `soffitA`/`soffitB` are `null`
+  outside `ARCH_SPAN_HALF` and the soffit quad needs both rings non-null, so
+  the sweep cannot extend past the tunnel mouth. My "slices out the flank"
+  reading of that frame was wrong.
+
+**So the skirt is not a defect to fix — but it is exactly why the bridge reads
+as a lump**, and it is the thing the redesign should reshape. It sits across
+both of us: I own how far it extends and how it meets the terrain, the Artist
+owns how it is modelled. **Artist: the new mesh should keep a skirt** (the
+bridge must not float), but it wants modelled stone coursing up the flank
+rather than one smooth face, and it gets 48% shorter for free at 40%.
+
+## Can a pronounced hump sit over a gentler walkable surface?
+
+**Yes — but not by splitting the road surface, and the Overseer's read of the
+rule needs one correction.**
+
+Splitting them is the thing to refuse. The drawn road and the walk surface come
+from one owner today (`surfaceProfile` feeds `heightAt`, the shell's road top,
+and the path drape alike). If the drawn road arced higher than the walk
+surface, a child walking the crown would sink **into** the drawn stone — her
+feet inside the road she can see. That is not a near-miss on CLAUDE.md's
+"anything that looks solid must be solid"; it is the rule's centre. The
+Overseer's read was that the rule is about geometry you fall through or walk
+into — correct, and this *is* walking into it. So: **one owner for the road,
+always.**
+
+But the hump you *read* as a hump is not the road. From beside the bridge — the
+angle every one of these screenshots was taken from, and the angle a child
+walking up to it sees — the silhouette is the **parapet top line and its
+coping**, and those are not walkable. `parapetHeightFor(hump)` already varies
+parapet height along the ramp, so the mechanism exists.
+
+**Recommendation: arc the parapet and coping strongly; keep the road gentler.**
+Nothing walkable is misrepresented, nothing solid-looking is passable, and the
+silhouette Jim asked for is exactly the part that is free to exaggerate.
+
+Two things make this easier than it sounds:
+
+- **The rise/length ratio does most of the work for nothing.** The same 4.06 m
+  rise over 22.03 m instead of 36.72 m is a far humpier bridge before anyone
+  shapes anything.
+- **`HUMP_BLEND` 0.15 rather than 0.10.** I over-corrected in the contract
+  above: 0.10 flattens the ramps more than is needed. Peak = average / (1 −
+  blend), so at the 40% average of 0.520:
+
+  | blend | peak | walking, % of 0.620 ceiling | sprinting |
+  | --- | --- | --- | --- |
+  | 0.25 (today) | 0.693 | 69% | **0.641 — over** |
+  | 0.15 | **0.612** | 61% | 0.566 — safe |
+  | 0.10 | 0.578 | 58% | 0.535 — safe |
+
+  **0.15 is the pick**: sprint-safe with margin, and it keeps noticeably more
+  of the eased crown-and-foot shape than 0.10. It is a smaller change to the
+  profile than the contract first proposed, so less of the shape Jim asked for
+  is given away.
+
+If the walk-physics ceiling below is fixed at source, none of this trimming is
+needed at all and the blend can stay at 0.25.
+
 ---
 
 # ⚠️ A WALK-PHYSICS TUNNELLING DEFECT, FOR ITS OWN ISSUE
@@ -372,8 +452,10 @@ straighter ramp and a crisper break at the crown — which reads as *more*
 bridge-like, not less, and does not fight "a more pronounced hump" (that comes
 from the rise/length ratio, which improves).
 
-**Recommendation: take the 40%, set `HUMP_BLEND = 0.10`.** I own that constant
-and will make the change. The Artist does not need to model around it — but
+**Recommendation: take the 40%, set `HUMP_BLEND = 0.15`** (revised down from
+0.10 — see "Can a pronounced hump sit over a gentler walkable surface?" above:
+0.15 is sprint-safe with margin while giving away less of the eased shape Jim
+asked for). I own that constant and will make the change. The Artist does not need to model around it — but
 should know the ramps are near-straight with a short ease at each end, not a
 long smooth curve.
 
