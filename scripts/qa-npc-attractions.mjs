@@ -88,6 +88,8 @@ const rows = [];
 const SAMPLES = Number(process.env.QA_SAMPLES ?? 120);
 const EVERY_MS = 2000;
 const announcements = new Set();
+const shopsSeen = new Set();
+const everIndoors = new Set();
 let sawChat = false;
 
 for (let i = 0; i < SAMPLES; i += 1) {
@@ -99,6 +101,9 @@ for (let i = 0; i < SAMPLES; i += 1) {
       .map((k) => k.driver.chatBubbleText)
       .filter((t) => typeof t === 'string' && t.length > 0);
     const free = kids.filter((k) => !k.driver.occupied);
+    // Issue #350's castle requirement, watched in the browser rather than only
+    // in Node: children ~600 m away are indoors.
+    const indoors = kids.filter((k) => Math.abs(k.position.x) > 300);
     const dests = new Set(free.map((k) => k.driver.destinationId).filter(Boolean));
     // Densest disc of 8 m, the same shape the Node check measures.
     let clump = 0;
@@ -126,6 +131,13 @@ for (let i = 0; i < SAMPLES; i += 1) {
       clump,
       rms: Math.sqrt(sum / (free.length || 1)),
       bubbles,
+      indoors: indoors.length,
+      indoorNames: indoors.map((k) => k.name),
+      shopDests: [
+        ...new Set(
+          kids.map((k) => k.driver.destinationId).filter((d) => d && d.startsWith('shop:')),
+        ),
+      ],
       names: free.slice(0, 4).map((k) => `${k.name}->${k.driver.destinationName ?? '-'}`),
     };
   });
@@ -140,11 +152,13 @@ for (let i = 0; i < SAMPLES; i += 1) {
     if (b.startsWith("I'm going to ")) announcements.add(b);
     else sawChat = true;
   }
+  for (const d of sample.shopDests) shopsSeen.add(d);
+  for (const n of sample.indoorNames) everIndoors.add(n);
   rows.push({ t: (i * EVERY_MS) / 1000, ...sample });
   if (i % 10 === 0) {
     console.log(
       `t=${String(rows.at(-1).t).padStart(3)}s kids=${sample.kids} free=${sample.free} ` +
-        `dests=${sample.dests} clump=${sample.clump} rms=${sample.rms.toFixed(1)} ` +
+        `dests=${sample.dests} indoors=${sample.indoors} clump=${sample.clump} rms=${sample.rms.toFixed(1)} ` +
         `bubbles=${JSON.stringify(sample.bubbles)}`,
     );
   }
@@ -165,6 +179,8 @@ console.log('\n--- summary (after t=60s) ---');
 console.log(`worst clump (8.2 m disc): ${worstClump} of ${rows.at(-1).kids} children`);
 console.log(`worst RMS spread: ${worstRms.toFixed(1)} m`);
 console.log(`fewest distinct destinations: ${fewestDests}`);
+console.log(`children seen inside the castle: ${everIndoors.size} ${JSON.stringify([...everIndoors])}`);
+console.log(`castle shops chosen: ${shopsSeen.size} ${JSON.stringify([...shopsSeen])}`);
 console.log(`distinct announcements seen: ${announcements.size}`);
 for (const a of announcements) console.log(`   "${a}"`);
 console.log(`a chat bubble (not an announcement) was seen: ${sawChat}`);
