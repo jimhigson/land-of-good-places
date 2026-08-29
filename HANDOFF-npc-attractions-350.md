@@ -174,3 +174,87 @@ Nothing in `src/`. On the branch:
 
 - Measuring dispersal over `world.npcs.all` unfiltered is useless: the 7 hotel residents sit ~600 m
   away in another space and swamp every statistic (RMS ~420 m, dominated entirely by them).
+
+---
+
+## The attraction list — where each destination comes from (29 Aug)
+
+Settled by reading. **Three existing owners; write no fourth list** (CLAUDE.md "one owner").
+
+### Outdoors (space `garden`)
+
+- **`ANCHORS`** — `src/world/anchors.ts`. `AnchorDefinition` has `entrance: readonly [x, z]`
+  (world coords, where the path spur arrives and the sign stands) and **`signTitle: string`**,
+  which is the display name to say out loud. This is the right field: it is the words on the
+  sign the child is walking towards.
+- **`STALL_STANDS`** — `src/minigames/stallPlacement.ts`. `StallStand = { id, x, z }`, world
+  coords, derived from the booth's position and facing. **It carries no display name.** The
+  names live in `src/minigames/stalls.ts` as `StallDefinition.title` ('Dodgems!', 'Water
+  Fight!', 'Sky Cruiser', 'The Rail Race!', 'The Spooky House', 'Space Ferris Wheel'), keyed by
+  the same stall id. So a stall destination is `STALL_STANDS` joined to the stall definitions
+  by id — join, do not retype.
+
+Note `poiGraph.ts` already seeds nodes from exactly these two plus the plaza ring and the
+train stations, so the attraction list and the waypoint graph agree by construction.
+
+### Inside the castle (space = the interior)
+
+**`SHOP_UNITS`** — `src/world/building/layout.ts` (~line 705). `ShopUnitDefinition` =
+`{ id, deck, x, z, yaw, title, glyph, accent }`, where **`x`/`z` are LOCAL to the deck** and
+`title` is the display name ('Toy Shop', 'Balloon Shop', 'Candy Floss', 'Ice Cream',
+'Hat Shop', 'Sticker Pet', …). Seven of them, on decks 0–2, along the north and west walls.
+
+Local → world, all from `layout.ts`:
+
+- `deckY(index) = BUILDING_BASE_Y + index * BUILDING_FLOOR_HEIGHT` (line 91)
+- `interiorWorldX(localX) = INTERIOR_ORIGIN_X + localX` (line ~97)
+- `interiorWorldZ(localZ) = INTERIOR_ORIGIN_Z + localZ` (line ~101)
+
+**But do not do that conversion by hand either.** `src/world/building/shops/Shops.ts` already
+exports the joined, converted result: **`ShopStand = { id, title, glyph, greeting, accent,
+deck, x, z, y }`** with the comments "World position of the spot in front of the counter" and
+"World height of the deck it is on" — i.e. exactly the destination record this feature needs,
+already standing a child at the counter (`SHOP_STAND_Z = 2.4 * SHOP_SCALE_XZ` in front, so the
+child is not inside the counter). **Use `ShopStand`.** Next step: confirm how `Shops` exposes
+its stands (a getter on the `Shops` instance vs a module-level export) and reach it from
+`NpcSystem` the way the rest of the game does.
+
+Interior destinations are therefore multi-deck, which matters for routing: a child walking to
+the Hat Shop on deck 2 needs `NavGrid`'s level connectors (`WalkSurfaces.connectors` — the
+lobby stair), which `Game.ts:392` already passes into the player's own `NavGrid`.
+
+## The routing plan, and the NavGrid trap (29 Aug)
+
+`NavGrid` is constructed exactly once, in `Game.ts:392`:
+
+```ts
+this.navGrid = new NavGrid(
+  this.world.collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT,
+  () => this.world.building.surfaces.connectors,
+  (x, z) => this.world.train.bridges.some((b) => b.covers(x, z)),
+);
+```
+
+`findRoute(startX, startZ, startY, goalX, goalZ, goalY, sample, out)` writes x,z pairs into
+`out` and returns the count; `lastRouteReachedGoal` / `lastRouteEndY` report the ending.
+`TapNavigator` is the player's consumer: `WAYPOINT_RADIUS = 0.7`, `REPLAN_ATTEMPTS = 1`,
+`SHORTFALL_TOLERANCE = 1.6`, route buffer `new Float32Array(MAX_ROUTE_WAYPOINTS * 2)`.
+
+**The trap, now confirmed in the source.** `ensureLattice` (line 428) reads
+`const boundary = this.collision.playBounds` and rebuilds whenever
+`builtBoundary !== boundary || builtRevision !== collision.revision`. `playBounds` is a single
+mutable on `CollisionWorld` (`Collision.ts:418`, `setPlayBounds` at 445) that is **swapped when
+the player changes space**. So a shared `NavGrid`:
+
+1. would rebuild its whole lattice every time the player walks in or out of the castle, and
+2. worse, would be *wrong* — park children would plan on the castle's lattice while the player
+   is indoors.
+
+`rebuild(boundary, sample)` already takes the boundary as a parameter, so the fix is small and
+keeps ONE pathfinder implementation (requirement 2): give `NavGrid` an **optional boundary
+override** provider, defaulting to `collision.playBounds` so the player's own instance is
+byte-for-byte unchanged, and let `NpcSystem` hold one `NavGrid` per space pinned to that
+space's boundary. Do NOT write a second router.
+
+Cost note: A* over the park lattice for 24 children needs a per-frame plan budget (plan a few
+per frame, not all at once) — `npm run check:solve-cost` is in the build and will notice.
