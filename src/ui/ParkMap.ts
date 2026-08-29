@@ -11,7 +11,7 @@ import { ROUTES, routeCurve } from '../world/pathGraph';
 import { STALLS } from '../minigames';
 import { MAP_PALETTE, drawIcon } from './parkMapArt';
 import { parkMapFeatures, type MapFeature } from './parkMapContent';
-import { frameExtent, frameHalfExtent } from './parkMapProjection';
+import { frameHalfExtent, outdoorParkMapProjection } from './parkMapProjection';
 import type { World } from '../world/World';
 import type { Player } from '../entities/Player';
 import { SLIDE_PLAN } from '../world/slide/plan';
@@ -541,7 +541,7 @@ export class ParkMap {
     // fall off the edge of the map whatever shape the seed rolled.
     const projection = this.indoor
       ? frameHalfExtent(INTERIOR_HALF_X + 6, INTERIOR_HALF_Z + 4, this.canvasCssWidth, this.canvasCssHeight)
-      : frameExtent(PARK_BOUNDARY.extent, this.canvasCssWidth, this.canvasCssHeight);
+      : outdoorParkMapProjection(this.canvasCssWidth, this.canvasCssHeight);
     this.scale = projection.scale;
     this.originPxX = projection.originPxX;
     this.originPxY = projection.originPxY;

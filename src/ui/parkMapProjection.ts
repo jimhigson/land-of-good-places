@@ -1,4 +1,4 @@
-import type { BoundaryExtent } from '../world/boundary';
+import { PARK_BOUNDARY, type BoundaryExtent } from '../world/boundary';
 
 /**
  * **World metres to map pixels, and back.** The one owner of the park map's
