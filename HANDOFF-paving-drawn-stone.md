@@ -16,6 +16,46 @@ not granted, so this branch has had **no visual QA**.
 leaves the branch" at the bottom. Do not start the 35% bridge shortening off this
 — it was gated on this landing.
 
+---
+
+## REUSABLE RECIPE: "what is this collider, and who made it?"
+
+Keep this. It answered in one run a question two engineers had spent a session on.
+
+**Do not walk `park.scene` to identify a blocker.** Much of what stops a walker
+has no scene node at all — every bridge parapet is registered straight into the
+collision world by `ParkTrain.ts`'s `guardRails` loop and draws nothing of its
+own, and scenery is instanced besides. A scene-graph search for these returns
+empty *however carefully it is done*, and the emptiness looks like a bug in the
+search rather than a wrong question.
+
+Interrogate the collision world instead, and make the colliders carry their own
+provenance:
+
+1. `import` `Collision.ts` and wrap `CollisionWorld.prototype.addCircle` /
+   `addWall` **before the park is built**.
+2. In each wrapper, call through, then record `new Error().stack` against every
+   collider object newly appended to the private arrays.
+3. Build the park. TypeScript `private` is erased at runtime, so
+   `world.collision as unknown as { circles, walls }` reads them straight out.
+4. Probe your point with the same circle-vs-collider overlap test
+   `isClearCircle` uses, and print the birth certificate of everything that
+   overlaps.
+
+`scripts/probe-seed2-blocker.mts` is a working copy.
+
+**Then prove authorship, do not infer it.** "A parapet is near the failure" is
+not "this is *bridge 1's* parapet". Project each candidate segment onto *both*
+candidate owners' frames and see which one it sits at `±wallLine` in. That is
+what turned a plausible story into a fact here.
+
+**Trap already paid for**: `object.position` is the node's offset inside its
+parent group, not its park position — `updateMatrixWorld()` then
+`getWorldPosition()`. This matters only for the scene-graph route, which is the
+route you should not be taking.
+
+---
+
 Worktree `.claude/worktrees/eng-paving`. Its `node_modules` is a **symlink** to
 `eng-349`'s (deps identical); it shows as untracked because gitignore matches
 directories, not symlinks. **Never `git add` it.**
