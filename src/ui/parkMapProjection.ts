@@ -103,6 +103,28 @@ export function frameExtent(
 }
 
 /**
+ * **The outdoor map's viewport.** The only way `ParkMap` is allowed to get one.
+ *
+ * This exists so that `ParkMap` has no *choice* to make about what to frame,
+ * and therefore no opportunity to make the choice #234 was: a constant that
+ * used to mean "the edge of the park" and silently stopped. The renderer asks
+ * for a canvas-sized viewport; which region of the world that covers is
+ * settled here, from `PARK_BOUNDARY` and nothing else.
+ *
+ * It is also what makes `scripts/check-park-map.mts`'s coverage assertion
+ * worth anything. A check that framed the extent itself and then confirmed the
+ * extent fits would be arithmetic marking its own homework; calling *this*
+ * asks the real question — does the viewport the map actually uses contain the
+ * whole park? — so re-introducing a hard-coded radius here turns the check red.
+ */
+export function outdoorParkMapProjection(
+  canvasWidth: number,
+  canvasHeight: number,
+): MapProjection {
+  return frameExtent(PARK_BOUNDARY.extent, canvasWidth, canvasHeight);
+}
+
+/**
  * Frames a plain half-extent box about the origin — the indoor floor plan,
  * which really is a centred rectangle and has no boundary spline to ask.
  */
