@@ -7,9 +7,30 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# **Queue deploys; never cancel one.** `cancel-in-progress: true` here meant a
+# second merge landing while the first deploy was still running *killed* it —
+# and because this workflow is the only thing that publishes the site, the newer
+# run could finish while the older one's cancellation left nothing behind but an
+# ordinary-looking grey "cancelled" tick.
+#
+# This is the **secondary** cause of the 29 August 2026 outage, not the headline.
+# The headline is the job timeout below: GitHub reports a timeout as `cancelled`
+# too, so the two are indistinguishable in the run list and we spent hours
+# reading one as the other. The tell is duration — a concurrency cancellation
+# dies in ~1-2 minutes, when the next merge lands; a timeout dies at exactly the
+# cap. Both were happening; only the timeout was killing runs with no successor.
+#
+# A deploy is a **publish step, not a CI check**: unlike a test run, the last one
+# must always actually run. So the group queues instead.
+#
+# GitHub still only keeps **one** run pending per group — a third merge arriving
+# replaces the *pending* second one — which is fine and in fact what we want:
+# the pending run that survives is the newest commit, and it contains the one it
+# displaced. What must never be cancelled is the run that is already *deploying*,
+# and that is exactly what `cancel-in-progress: false` protects.
 concurrency:
   group: deploy-main
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -18,7 +39,35 @@ jobs:
   deploy:
     name: Build and deploy to Cloudflare Workers
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # **15 minutes was below what this job actually takes, and GitHub reports a
+    # job timeout as `cancelled`** — indistinguishable, in the run list, from the
+    # concurrency cancellation above. That is the real reason the site stopped
+    # moving on 29 August 2026. Measured that evening, job start to job end:
+    #
+    #   33261937341  15m02s  cancelled  <- timeout
+    #   33264088797  15m07s  cancelled  <- timeout
+    #   33267247275  15m15s  cancelled  <- timeout
+    #   33273801404  15m15s  cancelled  <- timeout
+    #   33269930221  14m59s  success    <- 1 second under the cap
+    #
+    # Four deaths clustered at 15m02-15m15 — at the limit, not at a merge — and
+    # the single success beat the cap by a second. Every deploy was a coin toss.
+    #
+    # The cause is the `Build` step below running the whole `npm run build`
+    # chain, whose sibling job (procgen-invariants.yml's "Build and checks",
+    # the identical chain) measured 14m59s, 15m49s and 15m52s the same evening
+    # and is given **30 minutes** for it. This job does that chain *plus*
+    # publishing, on a 15-minute budget. So: match the sibling's 30 and let the
+    # publish live inside the same headroom.
+    #
+    # A generous timeout is only safe because staleness is now detected
+    # independently of *why* a deploy failed — see live-version.yml. Before that
+    # existed, a timeout was silent, which is what made this so expensive.
+    #
+    # The durable fix is not a bigger number: it is for this job to stop
+    # re-running a 15-minute QA suite that has already run on the same commit.
+    # See DEPLOY_NOTES.md, 2026-08-29, for the measurement and the proposal.
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v7

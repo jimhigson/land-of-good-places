@@ -183,9 +183,7 @@ import { HotelLift } from './HotelLift';
 import { HotelCinematic, type Shot } from './cinematic';
 import { PLAZA } from '../paths';
 import { spaceAt, SPACE_GARDEN } from '../spaces';
-
-/** Seconds after a change of space before another may trigger. */
-const SPACE_COOLDOWN = 0.9;
+import { SpaceManager } from '../SpaceManager';
 
 /**
  * How long the room's light and the sleep glyphs take to fade in or out at
@@ -995,8 +993,11 @@ export class Hotel implements GameSystem {
   private readonly lift: HotelLift;
   private player: Player | null = null;
   private inside = false;
-  private changingSpace = false;
-  private spaceCooldown = 0;
+  /**
+   * The change-of-space dance, shared with the castle and owned by neither.
+   * See `world/SpaceManager.ts`.
+   */
+  private readonly spaces: SpaceManager;
 
   /**
    * The lobby's gallery-and-landing mass, and the fader that ghosts it.
@@ -1221,6 +1222,7 @@ export class Hotel implements GameSystem {
   ) {
     this.collision = collision;
     this.controls = controls;
+    this.spaces = new SpaceManager(controls);
     this.surfaces = surfaces;
     this.deps = deps;
     // ------------------------------------------------------------ the tower
@@ -1568,7 +1570,7 @@ export class Hotel implements GameSystem {
     this.inside = true;
     this.hotelRoot.visible = true;
     this.boundTo(room);
-    this.spaceCooldown = SPACE_COOLDOWN;
+    this.spaces.holdOff();
   }
 
   /**
@@ -1579,8 +1581,8 @@ export class Hotel implements GameSystem {
    */
   requestEnterLobby(): boolean {
     const player = this.player;
-    if (!player || player.riding || this.changingSpace || this.inside) return false;
-    this.changeSpace(() => this.enterLobby());
+    if (!player || player.riding || this.spaces.isChanging || this.inside) return false;
+    this.spaces.changeTo(() => this.enterLobby());
     return true;
   }
 
@@ -1598,10 +1600,10 @@ export class Hotel implements GameSystem {
    */
   requestEnterBathroom(room: HotelRoom = BREAKFAST): boolean {
     const player = this.player;
-    if (!player || player.riding || this.changingSpace || this.inside) return false;
+    if (!player || player.riding || this.spaces.isChanging || this.inside) return false;
     const bathroom = this.bathrooms.get(room);
     if (!bathroom) return false;
-    this.changeSpace(() => this.enterFloorBathroom(room, bathroom));
+    this.spaces.changeTo(() => this.enterFloorBathroom(room, bathroom));
     return true;
   }
 
@@ -1615,8 +1617,8 @@ export class Hotel implements GameSystem {
    */
   requestEnterBreakfast(): boolean {
     const player = this.player;
-    if (!player || player.riding || this.changingSpace || this.inside) return false;
-    this.changeSpace(() => this.enterBreakfastRoom());
+    if (!player || player.riding || this.spaces.isChanging || this.inside) return false;
+    this.spaces.changeTo(() => this.enterBreakfastRoom());
     return true;
   }
 
@@ -1632,8 +1634,8 @@ export class Hotel implements GameSystem {
    */
   requestEnterSuite(): boolean {
     const player = this.player;
-    if (!player || player.riding || this.changingSpace || this.inside) return false;
-    this.changeSpace(() => this.enterSuite());
+    if (!player || player.riding || this.spaces.isChanging || this.inside) return false;
+    this.spaces.changeTo(() => this.enterSuite());
     return true;
   }
 
@@ -2074,7 +2076,7 @@ export class Hotel implements GameSystem {
 
   update(context: FrameContext): void {
     const { dt, elapsed, input } = context;
-    if (this.spaceCooldown > 0) this.spaceCooldown -= dt;
+    this.spaces.update(dt);
     this.updateOverhangCutaway(context);
     // The nap's own light and sleep glyphs — run unconditionally, like every
     // other always-on frame of this method, so they fade back out correctly
@@ -2184,13 +2186,13 @@ export class Hotel implements GameSystem {
       return;
     }
 
-    if (!this.changingSpace && !player.riding) this.checkDoorways(player);
+    if (!this.spaces.isChanging && !player.riding) this.checkDoorways(player);
 
     // Nobody falls out of the world. Every doorway is a portal or a wall, but
     // the proof is a backstop rather than an audit of doorways: anything that
     // still slips a trigger — a cooldown window, a dropped frame, a door not
     // written yet — lands back in the room it fell from, not in the void.
-    if (this.inside && !this.changingSpace && player.position.y < -2) {
+    if (this.inside && !this.spaces.isChanging && player.position.y < -2) {
       const room = this.currentRoom() ?? LOBBY;
       player.teleportTo(room.originX, 0, room.originZ, Math.PI);
       this.controls.snapCamera();
@@ -2271,14 +2273,14 @@ export class Hotel implements GameSystem {
    * against wall tunnelling, asked of the same segment.
    */
   private checkDoorways(player: Player): void {
-    if (this.spaceCooldown > 0) return;
+    if (this.spaces.settling) return;
     const { x, z } = player.position;
     const fromX = player.previousPosition.x;
     const fromZ = player.previousPosition.z;
 
     if (!this.inside) {
       if (bandCrossed(this.towerDoorBand(), fromX, fromZ, x, z)) {
-        this.changeSpace(() => this.enterLobby());
+        this.spaces.changeTo(() => this.enterLobby());
       }
       return;
     }
@@ -2294,7 +2296,7 @@ export class Hotel implements GameSystem {
     };
 
     if (room === LOBBY && walkedThrough('exit')) {
-      this.changeSpace(() => this.leaveToPark());
+      this.spaces.changeTo(() => this.leaveToPark());
       return;
     }
     if (room === CORRIDOR && walkedThrough('suite-door')) {
@@ -2319,24 +2321,13 @@ export class Hotel implements GameSystem {
         return;
       }
       if (walkedThrough('suite-portal')) {
-        this.changeSpace(() => this.stepThroughDoor(SUITE, -SUITE.halfX + 1.6, 0, Math.PI / 2));
+        this.spaces.changeTo(() => this.stepThroughDoor(SUITE, -SUITE.halfX + 1.6, 0, Math.PI / 2));
       }
       return;
     }
     if (room === SUITE && walkedThrough('corridor-door')) {
-      this.changeSpace(() => this.stepThroughDoor(CORRIDOR, CORRIDOR.halfX - 1.6, 0, -Math.PI / 2));
+      this.spaces.changeTo(() => this.stepThroughDoor(CORRIDOR, CORRIDOR.halfX - 1.6, 0, -Math.PI / 2));
     }
-  }
-
-  private changeSpace(midpoint: () => void): void {
-    this.changingSpace = true;
-    this.controls.cancelWalk();
-    this.controls.iris(() => {
-      midpoint();
-      this.controls.snapCamera();
-      this.changingSpace = false;
-      this.spaceCooldown = SPACE_COOLDOWN;
-    });
   }
 
   private enterLobby(): void {
@@ -2441,7 +2432,10 @@ export class Hotel implements GameSystem {
 
   /** The lift's portal hop — same shape as a door, wrapped in its own iris. */
   private travelTo(room: HotelRoom): void {
-    this.controls.iris(() => {
+    // `hop`, not `changeTo` — no `isChanging` flag and no `cancelWalk`, which
+    // is what this always did. See `SpaceManager.hop` for why the difference
+    // is preserved rather than tidied here.
+    this.spaces.hop(() => {
       const player = this.player;
       if (player) {
         // Behind the closed iris, like every other space change — posing
@@ -2453,8 +2447,6 @@ export class Hotel implements GameSystem {
         player.setRidePose(x, 0, z, Math.PI / 2);
       }
       this.boundTo(room);
-      this.controls.snapCamera();
-      this.spaceCooldown = SPACE_COOLDOWN;
     });
   }
 
@@ -2675,7 +2667,7 @@ export class Hotel implements GameSystem {
     );
     player.model.setExpression('sad');
     this.refusing = REFUSE_SECONDS;
-    // Deliberately NOT `spaceCooldown` here: that gate silences the whole of
+    // Deliberately NOT `SpaceManager.holdOff` here: that gate silences the whole of
     // `checkDoorways`, and granting it on refusal was precisely the hole that
     // let a second push through the doorway unchecked. The wall is the lock;
     // `refusing` alone stops the words repeating every frame.
@@ -2688,8 +2680,8 @@ export class Hotel implements GameSystem {
    */
   private enterSuiteThroughDoor(): void {
     const player = this.player;
-    if (!player || player.riding || this.changingSpace) return;
-    this.changeSpace(() => this.stepThroughDoor(SUITE, -SUITE.halfX + 1.6, 0, Math.PI / 2));
+    if (!player || player.riding || this.spaces.isChanging) return;
+    this.spaces.changeTo(() => this.stepThroughDoor(SUITE, -SUITE.halfX + 1.6, 0, Math.PI / 2));
   }
 
   /**

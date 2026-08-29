@@ -1,3 +1,5 @@
+import { VERSION_FILE_PATH } from './version-file';
+
 const CHECK_INTERVAL_MS = 2 * 60 * 1000;
 
 /**
@@ -24,7 +26,7 @@ export function startVersionCheck(): void {
 
     let latest: string;
     try {
-      const response = await fetch('/version.txt', { cache: 'no-store' });
+      const response = await fetch(VERSION_FILE_PATH, { cache: 'no-store' });
       if (!response.ok) return;
       latest = (await response.text()).trim();
     } catch {

@@ -125,6 +125,40 @@ async function runInFreshBrowser(run: (page: Page) => Promise<void>): Promise<st
   return pageErrors;
 }
 
+/**
+ * **Is anything actually serving `BASE`?** — asked once, before any deep link.
+ *
+ * Without this the whole run reports `ERR_CONNECTION_REFUSED` **per deep link**,
+ * which reads as "these deep links are broken" and is a genuinely misleading
+ * way to say "your dev server is somewhere else". It cost a real half-hour: the
+ * author of #388 read it as a failure of the link they had just added, on a run
+ * where every link was fine and the server was on another port.
+ *
+ * CLAUDE.md requires every agent to run its dev server on **its own** port, so
+ * reaching this check on the default is the *expected* case for anybody
+ * following the rules, not an exotic one. The fix is to say which of the two
+ * things went wrong, and how to point it at the right place.
+ */
+try {
+  const browser = await chromium.launch({ channel: 'chromium', headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 15000 });
+  } finally {
+    await browser.close().catch(() => {});
+  }
+} catch (error) {
+  console.error(
+    `check:deep-links: nothing is serving ${BASE} — so this run tested no deep link at all.\n\n` +
+      `  ${String((error as Error)?.message ?? error).split('\n')[0]}\n\n` +
+      `This is a reachability failure, not a deep-link failure. Start a dev server on your own\n` +
+      `port (CLAUDE.md: never assume a default port is free) and point the check at it:\n\n` +
+      `  npm run dev -- --port 5911 --strictPort\n` +
+      `  CHECK_DEEP_LINKS_URL=http://127.0.0.1:5911 npm run check:deep-links\n`,
+  );
+  process.exit(1);
+}
+
 for (const check of CHECKS) {
   said.push(`--- ${check.path} ---`);
 

@@ -3,6 +3,7 @@ import { CylinderGeometry, Group, Mesh, Vector3, type PerspectiveCamera } from '
 import { BUILDING_FLOOR_COUNT, BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, BUILDING_STEP_UP, INTERIOR_HALF_X, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, SLIDE_SPEED } from '../../core/constants';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z, deckY } from './layout';
 import { bandContains, type PortalBand } from '../tapSpacing';
+import { SpaceManager } from '../SpaceManager';
 import { GIANT_SLIDE_SPEED, SLIDE_PLAN } from '../slide/plan';
 import { LANDING_DROP, slideLandingSpot } from '../slide/landing';
 import { buildSlideSupports, planSlideLegs, type SlideLeg } from '../slide/supports';
@@ -158,9 +159,6 @@ const CHASE_EYE = { x: 0, y: 1.62, z: 4.35 } as const;
 function slopeOf(tangent: Vector3): number {
   return Math.atan2(-tangent.y, Math.hypot(tangent.x, tangent.z));
 }
-
-/** Seconds after a change of space before another one may be triggered. */
-const SPACE_COOLDOWN = 0.9;
 
 /**
  * How hard the balls are thrown when a rider lands in them.
@@ -507,9 +505,13 @@ export class Building implements GameSystem {
   private inside = false;
   /** The deck the player is currently standing on, or `null` off any deck. */
   private currentDeck: number | null = null;
-  /** True from the moment an iris starts closing until the space has changed. */
-  private changingSpace = false;
-  private spaceCooldown = 0;
+  /**
+   * The change-of-space dance — iris, teleport, camera snap, cooldown — which
+   * this building shares with the hotel and no longer owns a copy of. See
+   * `world/SpaceManager.ts`. Assigned in the constructor because it needs
+   * `controls`, and its teardown hook needs `stairRide`.
+   */
+  private readonly spaces: SpaceManager;
 
   private readonly point = new Vector3();
   private readonly tangent = new Vector3();
@@ -676,6 +678,16 @@ export class Building implements GameSystem {
       playerY: () => this.player?.position.y ?? BUILDING_BASE_Y,
       onArrived: () => this.controls.flash(),
     });
+
+    // The teardown hook is a closure, so it resolves `this.stairRide` when a
+    // transition runs rather than now — this does not have to be built after
+    // the stair ride, and nothing breaks if it moves. Both of the hook's
+    // statements die in S2 with `StairRide` and `StairMenu`, and the hook goes
+    // with them.
+    this.spaces = new SpaceManager(controls, () => {
+      this.controls.closeStairMenu();
+      this.stairRide.stop(false);
+    });
   }
 
   /** True while the player is in the building's own space. */
@@ -818,7 +830,7 @@ export class Building implements GameSystem {
    */
   requestBoardSlide(withGrownUp: boolean): boolean {
     const player = this.player;
-    if (!player || player.riding || this.ride || this.changingSpace) return false;
+    if (!player || player.riding || this.ride || this.spaces.isChanging) return false;
     this.grownUpComing = withGrownUp;
     this.startGiantSlide(player);
     return true;
@@ -834,7 +846,7 @@ export class Building implements GameSystem {
     const { dt, elapsed } = context;
     this.elapsed = elapsed;
 
-    if (this.spaceCooldown > 0) this.spaceCooldown -= dt;
+    this.spaces.update(dt);
 
     this.liftRide.update(dt);
     this.bubble.update(dt, elapsed);
@@ -858,7 +870,7 @@ export class Building implements GameSystem {
 
     if (this.ride) {
       this.advanceRide(dt, player);
-    } else if (!this.changingSpace && !player.riding) {
+    } else if (!this.spaces.isChanging && !player.riding) {
       this.handleTrampoline(player);
       this.handleEscalator(player, dt);
       this.checkRideTriggers(player);
@@ -889,33 +901,20 @@ export class Building implements GameSystem {
    * while nobody can see, open it again.
    */
   private checkDoorways(player: Player): void {
-    if (this.spaceCooldown > 0) return;
+    if (this.spaces.settling) return;
     if (Math.abs(player.position.y - BUILDING_BASE_Y) > 1.6) return;
     const { x, z } = player.position;
 
     if (!this.inside) {
       if (bandContains(castleEntranceBand(), x, z)) {
-        this.changeSpace(() => this.enterInterior());
+        this.spaces.changeTo(() => this.enterInterior());
       }
       return;
     }
 
     if (bandContains(castleExitBand(), x, z)) {
-      this.changeSpace(() => this.leaveInterior());
+      this.spaces.changeTo(() => this.leaveInterior());
     }
-  }
-
-  private changeSpace(midpoint: () => void): void {
-    this.changingSpace = true;
-    this.controls.cancelWalk();
-    this.controls.closeStairMenu();
-    this.stairRide.stop(false);
-    this.controls.iris(() => {
-      midpoint();
-      this.controls.snapCamera();
-      this.changingSpace = false;
-      this.spaceCooldown = SPACE_COOLDOWN;
-    });
   }
 
   private enterInterior(): void {
@@ -964,15 +963,15 @@ export class Building implements GameSystem {
     const player = this.player;
     if (!player) return false;
     if (!Number.isInteger(deck) || deck < 0 || deck >= BUILDING_FLOOR_COUNT) return false;
-    // **Through `changeSpace`, not straight to `enterInterior`.** The first cut
+    // **Through `spaces.changeTo`, not straight to `enterInterior`.** The first cut
     // called `enterInterior()` on its own and photographed an empty sky: the
     // interior really was switched on and the player really was standing in it,
     // but the *camera* was still out over the garden, because it is
-    // `changeSpace` that irises and calls `snapCamera`. Being inside is a
+    // `SpaceManager` that irises and calls `snapCamera`. Being inside is a
     // camera, a set of play bounds and a cutaway deck as much as it is a
     // position — so this takes the whole door sequence rather than the one part
     // of it that looked like the important one.
-    this.changeSpace(() => {
+    this.spaces.changeTo(() => {
       this.enterInterior();
       // `enterInterior` has already put her on the ground floor's own good
       // viewing spot; `at` overrides where, `deck` overrides how high, and
@@ -1091,7 +1090,7 @@ export class Building implements GameSystem {
    * you out over the park. From a child's seat it is one continuous whoosh.
    */
   private startGiantSlide(player: Player): void {
-    this.changeSpace(() => {
+    this.spaces.changeTo(() => {
       this.exitToGarden();
 
       // The grown-up rides in the garden, so they have to be in the garden —
@@ -1396,7 +1395,7 @@ export class Building implements GameSystem {
       this.interiorRoot.add(this.grownUp.root);
       this.grownUp.root.rotation.x = 0;
       this.placeGrownUp();
-      this.spaceCooldown = SPACE_COOLDOWN;
+      this.spaces.holdOff();
       this.slideShots.reset();
       this.liveRideCamera = null;
       this.onRideChange?.(false);
@@ -1428,7 +1427,7 @@ export class Building implements GameSystem {
    * a chip pressed from across the room walks her there first.
    */
   openStairs(deck: number): void {
-    if (!this.inside || this.ride || this.changingSpace) return;
+    if (!this.inside || this.ride || this.spaces.isChanging) return;
     const player = this.player;
     if (!player || player.riding) return;
     // The deck she is actually standing on, not the one the chip was drawn for:
@@ -1449,7 +1448,7 @@ export class Building implements GameSystem {
    * the doorway does not.
    */
   useToilets(): void {
-    if (!this.inside || this.ride || this.changingSpace) return;
+    if (!this.inside || this.ride || this.spaces.isChanging) return;
     const player = this.player;
     if (!player || player.riding) return;
     const localX = player.position.x - INTERIOR_ORIGIN_X;
@@ -1461,7 +1460,7 @@ export class Building implements GameSystem {
 
   /** "Come with me!" / "never mind" — the grown-up follows, or stops. */
   askGrownUp(): void {
-    if (!this.inside || this.ride || this.changingSpace) return;
+    if (!this.inside || this.ride || this.spaces.isChanging) return;
     const player = this.player;
     if (!player || player.riding) return;
     this.grownUpComing = !this.grownUpComing;

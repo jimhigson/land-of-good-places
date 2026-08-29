@@ -358,7 +358,7 @@ const SUBSTEP_FOOTPRINT_FRACTION = 0.5;
  * times a full sprint (11.1 m/s) is 0.93 m, and against the park's thinnest
  * collider that is three sub-steps.
  */
-const MAX_SUBSTEPS = 16;
+export const MAX_SUBSTEPS = 16;
 
 export class CollisionWorld {
   private readonly circles: CircleCollider[] = [];
@@ -711,6 +711,25 @@ export class CollisionWorld {
    * she had jumped clear of at any point in it, `escorting`/`corrected` if she
    * was pushed at all. `Player`'s escort latch reads them exactly as it did
    * when there was only ever one sub-step.
+   *
+   * ### `onStep` — the vertical half of the same idea (#358)
+   *
+   * Walls were sub-stepped; the **ground sample was not**, and that asymmetry
+   * was its own tunnel, pointed downwards. `Player` samples the walking
+   * surface once per frame, at the end of the whole movement, so a deck that
+   * rises faster than one sample can follow is simply not found and she drops
+   * through it — the same "a collider she overlaps at neither end of the step
+   * is never asked about" failure, with `WalkSurfaces` in the role of the
+   * resolver.
+   *
+   * `onStep` is called with `position` after each sub-step's `resolve` — so at
+   * the mover's real, corrected location — which lets the caller walk its own
+   * per-point query along the very same pieces this already cuts the movement
+   * into. **That is the point of putting it here**: the decomposition stays in
+   * one place, so the vertical question can never be asked at a different
+   * granularity from the lateral one, or quietly stop being asked at all. A
+   * caller that passes nothing (every NPC, `nudge`) takes exactly the code
+   * path it took before, including the single-`resolve` fast path.
    */
   resolveMovement(
     position: Vector3,
@@ -719,6 +738,7 @@ export class CollisionWorld {
     radius: number,
     clearance = 0,
     dt = Infinity,
+    onStep?: (position: Vector3) => void,
   ): { clearedWall: boolean; escorting: boolean; corrected: boolean } {
     const distance = Math.hypot(deltaX, deltaZ);
     const limit = this.maxSafeStep(radius);
@@ -728,7 +748,9 @@ export class CollisionWorld {
     if (!(distance > limit)) {
       position.x += deltaX;
       position.z += deltaZ;
-      return this.resolve(position, radius, clearance, dt);
+      const result = this.resolve(position, radius, clearance, dt);
+      onStep?.(position);
+      return result;
     }
 
     const steps = Math.min(Math.ceil(distance / limit), MAX_SUBSTEPS);
@@ -743,6 +765,7 @@ export class CollisionWorld {
       position.x += stepX;
       position.z += stepZ;
       const result = this.resolve(position, radius, clearance, stepDt);
+      onStep?.(position);
       clearedWall = clearedWall || result.clearedWall;
       escorting = escorting || result.escorting;
       corrected = corrected || result.corrected;
