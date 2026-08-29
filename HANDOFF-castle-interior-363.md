@@ -351,9 +351,15 @@ torches lose their lights and keep their emissive.
 7. `npx tsc --noEmit`, `npm run test:procgen`, full unpiped `npm run build`.
 8. PR referencing #363. **Do not merge.**
 
-Screenshots: headless `playwright-core`, production build, **port 5363**,
+Screenshots: headless `playwright-core`, production build, **port 5463**,
 `--strictPort`, killed by PID. Hosted on the `qa-screenshots` branch, linked
 by raw URL. Not the chrome-devtools MCP.
+
+**Not 5363, despite the ticket naming it.** Checked before starting: PID
+81373, a vite from `.claude/worktrees/review-353-r3`, has held 5363 since
+13:09 today — a Reviewer agent's server, not mine, and not mine to kill.
+`--strictPort` would have made this loud; asking first made it silent. 5463
+verified free at the same moment.
 
 ---
 
