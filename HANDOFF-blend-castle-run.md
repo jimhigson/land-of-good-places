@@ -65,3 +65,49 @@ Overseer's call whether that is in scope for #388.
       passes on #368 too, with byte-identical numbers.
 
 Nothing in either branch was changed. It runs clean.
+
+---
+
+## Second run — `feat/castle-great-hall-furniture` at `d3fc9ecc`
+
+Requested by the Overseer because the branch moved and gained `check_tapestry_hangs`,
+which came out of the finding above. **`npm run blend:castle` → exit 0.**
+
+### `check_tapestry_hangs` — fires, passes, and can genuinely fail
+
+Printed on the passing run:
+
+```
+  tapestry hangs: rail at 2.90 m (src/art/models/castleAssets.ts's CASTLE_TAPESTRY_RAIL_Y)
+    top of pole 2.970 m against a 3.08 m ceiling — 0.110 m spare
+    ceiling from the fallback — …BEAM_UNDERSIDE is a derived expression…
+    hem lands at 0.502 m above the floor, from a 2.398 m drop
+```
+
+Both ends were **watched failing**, by editing `CASTLE_TAPESTRY_RAIL_Y` in
+`castleAssets.ts` — i.e. through the real `ts_const` seam, not by poking the Python:
+
+- rail **3.2** → exit **1**: `hung at 3.20 m … the rail's top reaches 3.270 m, above the
+  3.08 m clear headroom … The rail would be inside the perimeter wall-plate.`
+- rail **2.3** → exit **1**: `hung at 2.30 m … the cloth's hem reaches -0.098 m, which is
+  through the floor.`
+
+Both edits reverted; tree clean. `TAPESTRY_RAIL_Y` is now load-bearing — the finding is closed.
+
+Arithmetic independently confirmed off the shipped GLB: `tapestryrail-pole` tops at
++0.0700 (2.90 + 0.07 = 2.970) and `tapestry-fringe` bottoms at −2.3984 (2.90 − 2.3984 = 0.502).
+
+### Re-confirmed after the branch moved
+
+- `castle.glb` sha256 `ba0156ad…` and `castleGlb.ts` sha256 `d00220ab…` — **unchanged**,
+  still byte-identical to the committed bytes before and after a rebuild.
+- `bench-plank` top **0.3600**, `table-top` top **0.6750**, measured off the GLB.
+- cup-mouth 1 mm assertions still pass at 0.0 mm error.
+
+### Correction accepted (issue #395, not mine)
+
+`CEILING_CLEAR` = 3.08 is the **fallback**, not a live read — neither `BEAM_UNDERSIDE` nor
+`CASTLE_CEILING_CLEAR` is a plain `export const NAME = <number>;`. It equals the truth today
+and would keep passing if the wall-plate moved. The script says so on every run, in the line
+above and in the failure message quoted at rail 3.2. So the ceiling *end* of
+`check_tapestry_hangs` is only as fresh as that typed 3.08.
