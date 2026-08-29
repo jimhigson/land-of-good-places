@@ -7,9 +7,25 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# **Queue deploys; never cancel one.** `cancel-in-progress: true` here meant a
+# second merge landing while the first deploy was still running *killed* it —
+# and because this workflow is the only thing that publishes the site, the newer
+# run could finish while the older one's cancellation left nothing behind but an
+# ordinary-looking grey "cancelled" tick. On 29 August 2026 the live site sat on
+# `0a5f0380` while `main` was five commits ahead, with no failure surfaced
+# anywhere; it was found because Jim said "Deployed still has the old cat bus".
+#
+# A deploy is a **publish step, not a CI check**: unlike a test run, the last one
+# must always actually run. So the group queues instead.
+#
+# GitHub still only keeps **one** run pending per group — a third merge arriving
+# replaces the *pending* second one — which is fine and in fact what we want:
+# the pending run that survives is the newest commit, and it contains the one it
+# displaced. What must never be cancelled is the run that is already *deploying*,
+# and that is exactly what `cancel-in-progress: false` protects.
 concurrency:
   group: deploy-main
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
