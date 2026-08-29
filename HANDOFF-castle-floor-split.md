@@ -4,8 +4,7 @@
 `.claude/worktrees/castle-floor-split`, off `origin/main` @ `95832181`.
 **Port 5383** if a dev server is needed. No chrome-devtools MCP.
 
-**State: research complete, nothing built. Reported to the Overseer and
-waiting on two answers (see "Open questions").** Do not start S2.
+**State: S1 built, verified and green. Ready for PR. S2 not started.**
 
 ## The task
 
@@ -142,6 +141,52 @@ bands); NPC lift portals; `ParkMap`, `interactZones.ts`, `constants.ts`.
 portal removed the portal graph does *not* connect, so the green case is
 proved to mean something. Paste the geometry it was proved against with the
 transcript (CLAUDE.md: a red-run transcript goes stale).
+
+### S1 result — all green
+
+| Gate | Baseline (`95832181`) | Branch | |
+| --- | --- | --- | --- |
+| `check:crowd` trace | `2cdba2c3` | `2cdba2c3` | identical |
+| `check:ride-camera` trace | `6dc5cff1` | `6dc5cff1` | identical |
+| `npm run build` | — | exit **0** | own marker, unpiped |
+| `npm run test:procgen` | — | exit **0**, 453 tests / 14 files | not in build chain |
+| Three transitions | 3/3 PASS | 3/3 PASS | `scripts/qa-space-transitions.mjs` |
+
+**On the second hash.** The build chain prints *two* `trace=` lines and I had
+only baselined one. `check:ride-camera`'s `6dc5cff1` **is printed, not
+asserted** — nothing in `trace-ride-camera.mts` compares it to a stored value,
+so it could have drifted silently, and the giant-slide launch is one of the
+three transitions this PR touches. Baselined it against a detached
+`origin/main` worktree rather than assume. It matches. *(Worth a follow-up
+ticket: a reported-only trace hash in a check script is a check that cannot
+fail.)*
+
+**On the screenshots.** `scripts/qa-space-transitions.mjs` both photographs and
+**asserts** each transition — `playerIsInside` must actually flip. Its first
+run went red on door-out on *both* trees, with one console error; the cause was
+my harness reading `band.minZ` off a `PortalBand`, which has `centreX/centreZ/
+halfAlong/halfAcross/yaw` and no min/max at all, so it teleported the player to
+`NaN`. Fixed to use the real fields; 3/3 on both trees and the console error
+went with it. Recorded because "the check was wrong, not the code" is the
+claim most worth being able to re-check.
+
+## Ruled since this file was written
+
+- **Attractions (Overseer, 29 Aug):** keep all three, demoted to rides that
+  return you where you started. Delete the pure transport — escalators, tap
+  stairs, `StairRide`, `StairMenu`. **The bubble stays where it is**: moving it
+  to the roof is a design change, not a demotion, and is Jim's call. Still
+  unanswered.
+- **#380 — the castle is three floors, not five (Jim, 29 Aug).** Ground = the
+  mall (the shops, today scattered over decks 0, 1 and 2, gathered onto one
+  floor); middle = the great hall (#368's furniture, which currently has
+  nowhere of its own); roof = a roof garden, still the ginormous slide's
+  launch point. *"The simplification would make it feel less empty."*
+  **S2 targets three spaces, three lift stops, three panel destinations.**
+  The teeth are in consolidating the shops: #355 joins children's castle
+  destinations to `Shops.stands` by id and #362 marks them present indoors, so
+  consolidation must not strand a child or orphan a destination — that is what
+  the connectivity invariant is for. S1 is unaffected; it is a pure refactor.
 
 ## Open questions — asked, not yet answered
 
