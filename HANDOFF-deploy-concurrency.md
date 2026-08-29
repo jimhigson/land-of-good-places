@@ -84,5 +84,19 @@ what version is *served* rather than whether the last run succeeded — a
 run-status check would have reported all-clear through the whole five-commit
 stale period.
 
-Post-rebase re-runs of `npm run build` and `npm run test:procgen` were in flight
-at the last checkpoint; their exit codes go in a PR comment.
+**Post-rebase gates all green**, run locally on the rebased tree, unpiped, exit
+codes read from the markers rather than from the wrapper (the wrapper's own exit
+code is the trailing `echo`'s, which is always 0 — do not trust it):
+
+- `npx tsc --noEmit` → **0**
+- `npm run build` → **0** (`BUILD2 EXIT: 0`, build2.log line 1244)
+- `npm run test:procgen` → **0**, 14 files / 453 tests
+
+CI on the rebased branch: Procgen invariants pass (3m23s), A reload gets the new
+build pass (59s), Deploy PR preview pass (41s), Build and checks still running.
+
+**Trap for whoever comes next:** the scratchpad at
+`/tmp/claude-501/.../scratchpad/` is shared between agents and filenames are not
+agent-unique. A stale `procgen2.log` from another agent, hours old, briefly
+looked like 4 failing tests of mine. Check mtimes before believing a log you did
+not just watch being written.
