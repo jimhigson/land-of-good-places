@@ -31,6 +31,11 @@ npm run render:castle    # review pictures into art/renders/castle/
 
 - `art/blend/castle_build.py` is the **authoring source**. `castle.blend` is a
   generated artefact — edit the Python, never the file.
+- **`castle.glb` regenerates byte-identical; `castle.blend` does not.** Blender
+  writes a byte or two of its own into the `.blend` on every save, so a build
+  leaves that one file dirty in `git status` and nothing else. Ignore it —
+  `git checkout art/blend/castle.blend`. The file that ships is the `.glb`, and
+  that one is reproducible, which is the property worth having.
 - `art/blend/blendkit.py` is the shared toolkit (primitives, scene plumbing,
   `ts_const`, planar UVs). New Blender scripts import it; `hotel_build.py` and
   `bridge_stones_build.py` are deliberately grandfathered, because both have a
