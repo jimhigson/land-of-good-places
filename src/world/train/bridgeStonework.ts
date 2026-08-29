@@ -39,20 +39,38 @@ import {
  *
  * A genuine arch dips at the edge of the clear span, and the crown has to rise
  * by that dip, because the old crown sat *exactly* on `TRAIN_CLEARANCE_Y` with
- * nothing spare. Three shapes were costed against that (the dip measured at
- * `ARCH_CLEAR_HALF`):
+ * nothing spare: the train's headroom is measured where the arch is *lowest*
+ * over the track, not at its crown.
  *
- * | shape | rise/span | extra crown |
- * | --- | --- | --- |
- * | semicircle | 0.50 | +0.554 m |
- * | three-centred, dip 0.35 | 0.38 | **+0.35 m** |
- * | three-centred, dip 0.10 | 0.26 | +0.10 m |
+ * **And the crown rising is not free** — it is deck height, and deck height on
+ * a bridge 40% shorter is ramp slope. The Engineer's dimensional contract
+ * (`HANDOFF-bridge-clipping-349.md`, #349) measures a 40%-shorter bridge's
+ * peak slope at 0.693, which costs 0.428 m of climb in one clamped frame
+ * against `BUILDING_STEP_UP`'s 0.620 m ceiling — 69% of it, where 79% is a
+ * figure real-browser QA has watched a running child fall through. So every
+ * centimetre this shape asks for is spent out of a budget that is already
+ * short, and it was costed rather than chosen:
  *
- * The middle one. It is continuously curved — no flat segment, no tangent
- * break — visibly arched, and cheap enough that a 40%-shorter bridge still
- * comes in under `MAX_RAMP_GRADIENT` with room to spare. The semicircle is the
- * storybook ideal and would have spent the whole of that margin for 0.2 m more
- * curvature.
+ * | shape | arch rise/span | deck rise | peak slope | % of the fall-through ceiling |
+ * | --- | --- | --- | --- | --- |
+ * | flat crown (what it was) | — | 4.060 | 0.693 | 69% |
+ * | three-centred, dip 0.10 | 0.26 | 4.160 | 0.710 | 71% |
+ * | **three-centred, dip 0.18** | **0.30** | **4.240** | **0.723** | **72%** |
+ * | three-centred, dip 0.25 | 0.33 | 4.310 | 0.735 | 73% |
+ * | three-centred, dip 0.35 | 0.38 | 4.410 | 0.752 | 75% |
+ * | semicircle | 0.50 | 4.614 | 0.787 | 78% |
+ *
+ * **Dip 0.18.** A rise/span of 0.30 is a textbook segmental arch — nobody will
+ * look at it and see a flat lintel — and it buys that for three points of a
+ * ten-point margin. The semicircle is the storybook ideal and would have spent
+ * the entire margin, landing on the number QA has already seen break.
+ *
+ * This is deliberately **one tunable**, so the trade stays visible: if the
+ * Engineer's fix for the fall-through buys slope margin back, raise it and the
+ * arch gets rounder for free; if it does not, drop it to 0.10 and the arch is
+ * still an arch. Re-run `npm run blend:bridge-stones` after either — the
+ * authored voussoir is cut for the haunch radius this number decides, and
+ * `bridges.ts` throws at load if the two stop agreeing.
  *
  * The derivation is two tangent-continuous circular arcs: a big crown radius
  * `R1` chosen to give exactly {@link ARCH_CROWN_DIP} at the clear span, and a
@@ -67,7 +85,7 @@ import {
  * thing it costs the bridge. See this file's header for what the alternatives
  * were and what each was worth.
  */
-export const ARCH_CROWN_DIP = 0.35;
+export const ARCH_CROWN_DIP = 0.18;
 
 /** The tunnel's shape at one bridge, in the frame's own (along, height) plane. */
 export interface ArchCurve {

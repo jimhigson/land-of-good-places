@@ -33,15 +33,15 @@ RENDERS = os.path.join(REPO, "art", "renders")
 # Measured off `main`, not invented — see HANDOFF-bridge-model.md's table.
 ARCH_SPAN_HALF = 3.2       # DECK_HALF_LENGTH = FENCE_OFFSET + 1.2
 ARCH_CLEAR_HALF = 1.8      # TRACK_CLEARANCE + 0.5
-ARCH_CROWN_DIP = 0.35      # the chosen three-centred arch's dip at the clear span
-TRAIN_CLEARANCE_Y = 3.87
+ARCH_CROWN_DIP = 0.18      # the chosen three-centred arch's dip at the clear span
+TRAIN_CLEARANCE_Y = 3.90
 BRIDGE_DECK_DEPTH = 0.16
 HEIGHT_MARGIN = 0.05
 ROAD_HALF = 1.6            # canonical seed's first bridge
 WALL_THICKNESS = 0.3
 PARAPET_HEIGHT = 0.72
 HUMP_BLEND = 0.25
-RAMP_RUN = 7.76            # 40% shorter than main's ~15.0 m
+RAMP_RUN = 7.814           # the Engineer's contract: 15.157 -> 7.814 (#349)
 
 COPING_LENGTH = 0.86
 VOUSSOIR_PITCH = 0.42

@@ -127,7 +127,7 @@ export const KEYSTONE_PROUD = 0.34;
  * so `bridges.ts` asserts they agree at build time rather than leaving a
  * comment promising it.
  */
-export const VOUSSOIR_TAPER_RADIUS = 2.239;
+export const VOUSSOIR_TAPER_RADIUS = 1.746;
 
 /** Every part name the authored kit contains. */
 export type BridgeStonePart = 'coping' | 'voussoir' | 'keystone';
