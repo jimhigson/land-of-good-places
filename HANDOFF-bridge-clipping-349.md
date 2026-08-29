@@ -606,3 +606,104 @@ invariant raycasts it every seed.
   neighbours rise 4 m — the kerb tears down the length of the bridge. That tear
   is the exact failure `PATH_CARRIER_SLACK` was added to stop; re-introducing it
   is a regression, not a fix. The road has to get wider, not the test narrower.
+
+---
+
+# RESUMED 2026-08-29 (third session) — rebased twice, unblocked, shipped
+
+## Rebases
+
+1. Onto `fff26f5` (#366's connector escape + #355's NPC attraction work) —
+   **clean, no conflicts**.
+2. Onto `a85b9cf` (#360's stone kit) — **one conflict in `bridges.ts`, in the
+   one hunk PR #360's author predicted**, resolved as they described:
+   - `HUMP_BLEND`: kept **0.15** with the provisional-for-#358 note, and kept
+     `main`'s `export` (`scripts/dump-bridge-constants.mts` imports it).
+   - Parapet collider `topHeight`: took **`main`'s `parapetTopFor(...)`**, which
+     reads the drawn parapet's own arced top, over my
+     `+ parapetHeightFor(...)`. Same intent, `main`'s is the better owner.
+   - `PARAPET_CROWN_LIFT`: the duplicate is the `TS2451` both sides warned
+     about. Kept **one** exported declaration, `main`'s fuller doc comment,
+     moved up to precede `parapetHeightFor` so there is no TDZ.
+
+**No latent revert.** `git diff --stat origin/main...HEAD` (three dots — two
+dots is misleading, see CLAUDE.md `18141ba`) is 5 files: this handoff,
+`bridgeFootprint.ts`, `bridges.ts`, `invariants.ts`, `parkFacts.ts`.
+`git diff a85b9cf..HEAD -- art/ src/art/ src/world/train/bridgeStonework.ts` is
+**empty** — the `.blend`, the GLB, `bridgeStonework.ts`, the build/export/render
+scripts and the five renders are byte-untouched. Every line this branch removes
+from `bridges.ts` is one this branch added.
+
+## The seed 11 blocker is gone
+
+#366 merged the connector escape. Seed 11's disproportionate-detour invariant is
+**green on top of it with the 22 m bridges**, measured here rather than inferred
+from the #361 engineer's pre-merge run.
+
+## A real defect the stone kit's invariant caught — sliver rings
+
+After rebasing onto #360, `everyCopingStoneSitsOnItsWall` went **red on four of
+the five seeds**: 1–2 blocks per bridge floating 0.031–0.035 m above their own
+parapet. **This was mine and it was real**, not a tolerance problem.
+
+`buildShellGeometry` sampled its rings with
+`for (along = -lengthNeg; along < lengthPos; along += SHELL_STEP)` and then
+`alongs.push(lengthPos)`, leaving a final segment of `(span mod SHELL_STEP)` —
+**0.027 m** on the canonical seed's `bridge-226.0` once `BRIDGE_LENGTH_SCALE`
+shortened the bridges. `buildCopingRun` lays one stone per segment and scales it
+by `(length - COPING_JOINT) / (COPING_LENGTH - COPING_JOINT)`; with
+`COPING_JOINT` = 0.05 a 0.027 m segment scales the stone by a **negative**
+factor. It turns inside out, its base stops following the wall, and it floats.
+
+Diagnosed by dumping every coping vertex against the `wallTop` triangles: on a
+bad block the base's uphill end sat at gap **0.0000** and its downhill end at
+**+0.0326**, i.e. the stone was laid nearly level across a wall falling at 1.2 —
+not a sampling artefact.
+
+**Fixed at the source** (`491ddb1`): divide the span into a whole number of
+equal steps, so every segment is within a quarter of `SHELL_STEP` and none can
+go degenerate. Fixed in `bridges.ts` rather than guarded in `buildCopingRun`
+because the sliver ring is `buildShellGeometry`'s own artefact and every
+consumer of `parapetLine` inherits it. Coping complaints: 2 → **0** on the
+canonical seed, all seeds green.
+
+## Green, all of it
+
+- `npm run test:procgen`: **14 files / 458 tests passed, exit 0** — includes
+  seed 11's detour invariant and #360's coping invariant.
+- `npx tsc --noEmit`: exit 0. `npm run build` (unpiped, redirected): **exit 0**.
+- **One flake worth knowing**: `check:park-boot` failed once at 21.5 ms against
+  its 20.0 ms ceiling while the box was loaded. Its own line said *"0 work units
+  in 21.5 ms"* — the slice did no generator work at all, so it was scheduler
+  contention, not code. Re-ran clean twice (16.4 ms, 17.4 ms). If you see it,
+  read the work-units line before believing it.
+
+## Bridge placement, five seeds, unchanged by the ring fix
+
+| seed | crossings | bridges | fallbacks |
+| --- | --- | --- | --- |
+| canonical | 5 | 4 | 1 |
+| 2 | 3 | 2 | 1 |
+| 5 | 4 | 3 | 1 |
+| 11 | 5 | 3 | 2 |
+| 18 | 3 | 3 | 0 |
+
+## Jim's acceptance test — shot, and it passes
+
+`qa-screenshots` branch, `issue-349-final/` (47 frames). `BEFORE-*` is `main` at
+`a85b9cf` — **the stone kit is already in the before**, so the pair isolates the
+40%, not the Artist's modelling.
+
+`BEFORE-bridge1720-footneg19.png` vs `AFTERSAMECAM-bridge1720-footneg19.png`,
+identical camera, is the pair: before, a sandy embankment fills the middle of
+the frame with two thin pink parapet strips on top. After, **there is no
+embankment in that frame at all** — the bridge is compact pink coursed masonry
+with a modelled arch, and the ground in front of the camera is plain grass and
+path. `AFTER-bridge2260-orbit315.png` is the best single view of the result: a
+humpback with a voussoir ring, modelled coping, and the railway running through
+the arch where it belongs.
+
+## Scratch tooling deleted
+
+The twelve `tmp-*-349` files are removed from the branch. They are still in the
+history (`59a0591` and neighbours) if a measurement needs reproducing.
