@@ -130,23 +130,108 @@ interface CreatureHandle extends AssetHandle {
 
 ---
 
-## Authored in Blender — world geometry kits
+## Authored geometry — the Blender kits
 
-Not `AssetHandle` factories: these are **kits of repeating units** that a
-generator places itself. They still obey the shared contract above (metres,
-origin at the base centred on X/Z, +Z forward, +Y up, `scale` 1, size baked
-into the geometry, one named node per part), and they ship through the same
-`.glb` pipeline as the kid, the cart, the duck bar and the hotel.
+Most of this game is built from primitives in TypeScript. A few things are not,
+because they are *architecture* rather than props: shapes with tracery, mitres,
+mouldings and coursed stone that a `BoxGeometry` cannot express and a reader
+cannot follow. Those are modelled in Blender, exported to glTF, and packed into
+a base64 module so the game imports geometry the same way it imports anything
+else.
 
-| # | Asset | Parts | Notes |
+**The Python is the authoring source. The `.blend` is a build artefact.** Edit
+`art/blend/<kit>_build.py` and re-run; never open the `.blend` and save over it,
+because the next run will discard whatever you did. `art/blend/blendkit.py` is
+the shared toolkit — primitives, scene plumbing, planar UVs, and `ts_const`,
+which reads a number out of the game's TypeScript rather than letting a Blender
+script keep its own copy of it.
+
+**Not every kit uses it yet, and that is a known debt rather than a choice.**
+`blendkit.py` arrived with the castle (29 August 2026); `hotel_build.py` and
+`bridge_stones_build.py` predate it and each carry their own `ts_const`,
+`reset_scene`, `emit` and `box`. Three copies of the same four functions is
+this repo's most common bug in its purest form. They were left alone
+deliberately — both have a shipped `.glb` whose bytes are asserted by its
+`pack:` step, so re-pointing them means re-verifying two binaries for no
+visible change — but **a new kit must import `blendkit`, never copy from a
+neighbour.** Folding the other two in is worth doing on its own PR, where the
+only question asked is whether the bytes still match.
+
+| Kit | Build | Bytes | What it is |
 | --- | --- | --- | --- |
-| 32 | **Bridge stonework** (`src/art/models/bridgeStones.ts`) | `coping`, `voussoir`, `keystone` | The humpback railway bridges' modelled stone — Jim, 2026-08-29: *"modelled stoneworks (not just textures) around the tops of the walls, a genuine arch-shaped tunnel with modelled archway masonry around its edge"*. Authored by `art/blend/bridge_stones_build.py` → `art/blend/bridgeStones.blend` → `npm run blend:bridge-stones` → `src/art/assets/bridgeStones.glb` (9.2 KB) → `bridgeStonesGlb.ts`. `src/world/train/bridgeStonework.ts` places them: a voussoir ring round each tunnel mouth, laid on the *same* three-centred arch curve the tunnel is cut to, and a coping run along both parapets, each baked into one `BufferGeometry` per bridge. **`bridgeStones.ts` owns every dimension** and the Blender script reads them back out of it with `ts_const` — one definition, not two. Renders: `art/renders/bridge-{iso,arch,coping,silhouette}.png`. |
+| `kid.glb` | `npm run blend:kid` | — | the child rig, round-tripped |
+| `cart.glb` | `npm run blend:cart` | — | the rail-race cart |
+| `duckbar.glb` | `npm run blend:duckbar` | — | the duck bar |
+| `hotel.glb` | `npm run blend:hotel` | 640 KB | the hotel's 19 interior factories |
+| `bridgeStones.glb` | `npm run blend:bridge-stones` | 9.2 KB | the railway bridges' coping, voussoirs and keystone |
+| `castle.glb` | `npm run blend:castle` | 128 KB | the castle interior, batch 1 — 23 nodes, 4 342 triangles |
+
+**Two shapes of kit, and the difference matters.** Some are *models* a placer
+puts down whole (the castle's furniture, the hotel's fittings); some are **kits
+of repeating units a generator assembles itself** (the bridge stonework). Both
+obey the shared contract above — metres, origin at the base centred on X/Z, +Z
+forward, +Y up, `scale` 1, size baked into the geometry, one named node per
+part — and both ship through the same `.glb` pipeline. They differ only in who
+decides where the pieces go.
+
+### 32 — Bridge stonework (`src/art/models/bridgeStones.ts`)
+
+Parts: `coping`, `voussoir`, `keystone`. The humpback railway bridges' modelled
+stone — Jim, 2026-08-29: *"modelled stoneworks (not just textures) around the
+tops of the walls, a genuine arch-shaped tunnel with modelled archway masonry
+around its edge"*. `art/blend/bridge_stones_build.py` →
+`art/blend/bridgeStones.blend` → `src/art/assets/bridgeStones.glb` →
+`bridgeStonesGlb.ts`. `src/world/train/bridgeStonework.ts` places them: a
+voussoir ring round each tunnel mouth, laid on the *same* three-centred arch
+curve the tunnel is cut to, and a coping run along both parapets, each baked
+into one `BufferGeometry` per bridge. **`bridgeStones.ts` owns every dimension**
+and the Blender script reads them back out of it with `ts_const` — one
+definition, not two. Renders: `art/renders/bridge-{iso,arch,coping,silhouette}.png`.
 
 **Why a kit and not a model.** A bridge here is solved per crossing — variable
 span, two variable ramps, a crown height solved against the terrain — and it
 follows the drawn path's own curve. No rigid `.glb` can be that. Anything else
 in the park with the same shape (fence runs, wall coursing, path edging) should
 follow this route rather than inventing a third one.
+
+### 33 — Castle interior, batch 1 (issue #363)
+
+Ten assets, built for the castle-interior Engineer against a written size
+contract: **armour, plinth, tapestry, tapestry rail, sconce, throne, table,
+bench, feast props, chest.** `art/blend/castle_build.py` is the source;
+`HANDOFF-castle-assets.md` §2 is the reconciliation log — the measured sizes,
+`SCONCE_CUP_OFFSET`, `TABLE_TOP`, `BENCH_SEAT` and the armour's keep-out radius,
+each one measured off the built mesh and printed on every run.
+
+Three rules this kit is built to, all of them learned from something that went
+wrong before:
+
+- **The GLB carries geometry and nothing else.** No colour, no material, no
+  texture. `castleAssets.ts` owns every colour in a `STYLES` table keyed by node
+  name, and a node with no entry throws at load rather than rendering grey.
+  A `.glb` that carries its own colours is a second palette nobody can grep.
+- **Nothing is measured twice.** Every size in the contract is asserted against
+  the emitted vertices, so the document and the mesh cannot drift apart in
+  silence — which is this repo's most common bug, and the reason the Engineer's
+  own check re-derives the same numbers independently. It is the same rule the
+  bridge kit follows with `ts_const`, pointed the other way: there, the
+  TypeScript owns the number and Blender reads it; here, the mesh owns the
+  number and both documents are checked against it.
+- **`npm run render:castle` reads the geometry from the `.blend` and the colours
+  from `castleAssets.ts`, and copies neither.** It writes review pictures to
+  `art/renders/castle/`. This exists because the bridge kit's *build* script
+  read its constants from TypeScript properly while its *render* script
+  hand-copied them: the two drifted, and five committed renders were of a bridge
+  that was not on the branch. A picture of the wrong thing is exactly as
+  convincing as a picture of the right one, so no renderer here gets its own
+  copy of anything.
+
+**Look at the renders.** Four faults in batch 1 passed every assertion and were
+obvious the moment somebody looked: a sword modelled *through* the skirt it hung
+beside, a tapestry whose depth allowance made it a flat rectangle, a throne that
+read as an armchair, and one render that was a picture of its own preview floor.
+A build can prove an asset is the right size. Only a picture can say whether it
+is the right shape.
 
 ---
 

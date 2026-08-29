@@ -67,6 +67,9 @@
     "blend:bridge-stones": "blender --background --factory-startup --python-exit-code 1 --python art/blend/bridge_stones_build.py && blender --background --factory-startup --python-exit-code 1 --python art/blend/bridge_stones_export.py && npm run pack:bridge-stones",
     "pack:hotel": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/pack-hotel-asset.mts",
     "blend:hotel": "blender --background --factory-startup --python-exit-code 1 --python art/blend/hotel_build.py && blender --background --factory-startup --python-exit-code 1 --python art/blend/hotel_export.py && npm run pack:hotel",
+    "pack:castle": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/pack-castle-asset.mts",
+    "blend:castle": "blender --background --factory-startup --python-exit-code 1 --python art/blend/castle_build.py && blender --background --factory-startup --python-exit-code 1 --python art/blend/castle_export.py && npm run pack:castle",
+    "render:castle": "blender --background --factory-startup --python-exit-code 1 --python art/blend/castle_render.py",
     "check:wall-tunnelling": "node --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-wall-tunnelling.mts",
     "check:deck-fallthrough": "node --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-deck-fallthrough.mts",
     "check:all": "npm run build && npm run test:procgen && npm run check:wall-tunnelling",
@@ -88,7 +91,8 @@
     "check:walking": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-walking.mts",
     "check:frame-time": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-frame-time.mts",
     "check:park-map": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-park-map.mts",
-    "check:cat-bus-suspension": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-cat-bus-suspension.mts"
+    "check:cat-bus-suspension": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-cat-bus-suspension.mts",
+    "measure:kid-landmarks": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-kid-landmarks.mts"
   },
   "dependencies": {
     "three": "^0.185.1"

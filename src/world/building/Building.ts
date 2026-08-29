@@ -959,7 +959,7 @@ export class Building implements GameSystem {
    * loudly rather than silently showing the ground floor and letting somebody
    * report that floor 9 looks identical to floor 0.
    */
-  enterCastleSpawn(deck: number): boolean {
+  enterCastleSpawn(deck: number, at?: { readonly x: number; readonly z: number }): boolean {
     const player = this.player;
     if (!player) return false;
     if (!Number.isInteger(deck) || deck < 0 || deck >= BUILDING_FLOOR_COUNT) return false;
@@ -973,14 +973,25 @@ export class Building implements GameSystem {
     // of it that looked like the important one.
     this.spaces.changeTo(() => {
       this.enterInterior();
-      if (deck > 0) {
-        // `enterInterior` has already put her on the ground floor's own good
-        // viewing spot; carry that x/z straight up rather than writing a second
-        // one down here, so the two can never drift apart.
+      // `enterInterior` has already put her on the ground floor's own good
+      // viewing spot; `at` overrides where, `deck` overrides how high, and
+      // anything not given carries that spot's own value straight through
+      // rather than being written down a second time here.
+      if (deck > 0 || at) {
+        // `at` is in the **interior's own metres** — the frame `layout.ts`,
+        // `dressing.ts` and every prop placer work in, and the frame anybody
+        // reading a coordinate off `castleFurniture.ts` or a keep-out list will
+        // type. `teleportTo` takes world coordinates, and the interior sits at
+        // `INTERIOR_ORIGIN_X/Z`, so it has to be converted.
+        //
+        // Getting this wrong does not fail: it teleports her to the same
+        // numbers out in the park, several hundred metres away, and the shot
+        // comes back a picture of grass with the castle nowhere in it. Caught
+        // by looking at the first screenshot rather than by trusting the link.
         player.teleportTo(
-          player.position.x,
+          at ? worldX(at.x) : player.position.x,
           BUILDING_BASE_Y + deck * BUILDING_FLOOR_HEIGHT,
-          player.position.z,
+          at ? worldZ(at.z) : player.position.z,
           Math.PI,
         );
       }

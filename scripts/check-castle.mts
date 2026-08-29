@@ -35,7 +35,22 @@ import {
 } from '../src/core/constants.ts';
 import { castleCoursingTexture, castleFlagstoneTexture } from '../src/core/textures.ts';
 import { BuildingShell } from '../src/world/building/Shell.ts';
-import { deckIsSolid, TOP_DECK } from '../src/world/building/layout.ts';
+import {
+  BUILDING_SHAFTS,
+  deckIsSolid,
+  regionContains,
+  TOP_DECK,
+} from '../src/world/building/layout.ts';
+import {
+  CASTLE_BENCH_SEAT,
+  CASTLE_PLINTH_TOP,
+  CASTLE_SCONCE_CUP,
+  CASTLE_TABLE_TOP,
+} from '../src/art/models/castleAssets.ts';
+import {
+  CASTLE_GREAT_HALL_DECK,
+  castleFurnitureGroupName,
+} from '../src/world/building/castleFurniture.ts';
 import {
   BEAM_UNDERSIDE,
   BEAM_WIDTH,
@@ -886,6 +901,264 @@ let coursedWallsInScene = 0;
 }
 
 // ---------------------------------------------------------------------------
+// 9. Nothing stands where a shaft's own structure comes down.
+// ---------------------------------------------------------------------------
+
+/**
+ * **A prop may not stand inside one of the building's shafts, on any storey.**
+ *
+ * `deckIsSolid` answers a different question — *is there floor here* — and on
+ * deck 0 it answers "yes" everywhere, because the ground floor has no holes in
+ * it. But a shaft is not only a hole: it is a **stair, an escalator, a bubble
+ * tube, a trampoline or a helter-skelter**, and those structures come all the
+ * way down to the floor a child walks in on. So the ground floor has no hole
+ * and is still not free plan.
+ *
+ * This was found by looking at a screenshot, not by a check. The great hall's
+ * feast benches were placed clear of every keep-out in `keepOutsFor(0)` and
+ * `check:castle` was green three assertions deep — and the helter-skelter came
+ * down through them, because `keepOutsFor` only adds the helter's disc on
+ * `HELTER_DECK` (2), which is where you *get on*, not where the tube is. The
+ * east bench was inside `HELTER_SHAFT` and the shot showed a slide growing out
+ * of the dinner table.
+ *
+ * It is its own assertion rather than part of §6's keep-out loop because it is
+ * a different fact about the building — `BUILDING_SHAFTS` is the owner, and
+ * asking it costs nothing. It is deliberately *not* `DECK_HOLES`, which
+ * additionally folds in every shop's **sunken forecourt**: a lowered floor a
+ * prop may perfectly well stand on, and asking that list this question gives
+ * 186 false failures.
+ *
+ * Wall furniture is exempt on the same measured basis §6 uses: a tapestry flat
+ * against a wall cannot be inside a shaft in any meaningful sense, and the
+ * shafts do not touch the walls.
+ */
+let shaftProps = 0;
+let shaftTests = 0;
+const shaftStoreys = new Set<number>();
+for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
+  for (const { label, box } of placedOn(deck)) {
+    if (box.min.y > TALLEST_CHILD_HEIGHT) continue;
+    if (reachFromWall(box) <= WALL_FURNITURE_REACH) continue;
+    shaftProps += 1;
+    shaftStoreys.add(deck);
+    for (const shaft of BUILDING_SHAFTS) {
+      shaftTests += 1;
+      // Five by five over the prop's real footprint, so a prop whose corner
+      // alone reaches into a shaft is caught — that is exactly how the bench
+      // got in, and sampling the centre would have missed it.
+      let inside = 0;
+      for (let i = 0; i <= 4; i += 1) {
+        for (let j = 0; j <= 4; j += 1) {
+          const x = box.min.x + ((box.max.x - box.min.x) * i) / 4;
+          const z = box.min.z + ((box.max.z - box.min.z) * j) / 4;
+          if (regionContains(shaft.region, x, z)) inside += 1;
+        }
+      }
+      if (inside === 0) continue;
+      fail(
+        `shafts: deck ${deck} '${label}' stands in the '${shaft.id}' shaft ` +
+          `(${inside}/25 of its footprint). That shaft's structure comes down through this ` +
+          `storey whether or not the floor has a hole in it, so the prop is inside it.`,
+      );
+      break;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 10. Every figure the asset contract publishes, against the built furniture.
+// ---------------------------------------------------------------------------
+
+/**
+ * **`HANDOFF-castle-interior-363.md` §4.4's protocol, with teeth** — the third
+ * of the three prop assertions this file spent a fortnight announcing it did
+ * not have.
+ *
+ * §4.4 lists the numbers the 3D Artist and the Engineer must agree on exactly,
+ * and its rule is that neither side copies the other's figure by hand: every
+ * one is either exported from the game or **measured off the built mesh and
+ * asserted against the reported one**. §3 above is already this shape applied
+ * to the Engineer's own `BEAM_UNDERSIDE`. This is the same shape pointed at the
+ * Artist's figures.
+ *
+ * ## It measures the furniture where it was placed, not the file it came from
+ *
+ * The weak version re-reads `castle.glb` and compares it to `castleAssets.ts`,
+ * which re-derives the same quantity from the same bytes by the same route and
+ * can only ever agree with itself. This walks the great hall `dressCastle`
+ * actually built and measures the table standing in it — so it also catches a
+ * placement that is right about the geometry and wrong about what it did with
+ * it.
+ *
+ * ## Own geometry, never descendants
+ *
+ * `addOutline` attaches the inverted hull as a **child** of the mesh it
+ * outlines, scaled outward by the outline's thickness. So `Box3.setFromObject`
+ * on the table reports 0.693 m for a 0.675 m table: the 18 mm is
+ * `table-top`'s own outline, drawn behind it and invisible from in front.
+ * Measuring that would fail every published figure by its outline thickness and
+ * send somebody hunting for a bug in the asset.
+ */
+
+/** The world-space box of one named node's **own** geometry, outline excluded. */
+function surfaceOf(root: Object3D, name: string): Box3 | null {
+  const node = root.getObjectByName(name);
+  if (!node) return null;
+  const mesh = node as Object3D & {
+    isMesh?: boolean;
+    geometry?: { boundingBox: Box3 | null; computeBoundingBox(): void };
+  };
+  if (mesh.isMesh !== true || !mesh.geometry) return null;
+  mesh.geometry.computeBoundingBox();
+  const local = mesh.geometry.boundingBox;
+  if (!local) return null;
+  node.updateMatrixWorld(true);
+  return local.clone().applyMatrix4(node.matrixWorld);
+}
+
+/** Every node of a given name in the built tree, own geometry only. */
+function allSurfacesOf(root: Object3D, name: string): Box3[] {
+  const found: Box3[] = [];
+  root.traverse((object) => {
+    if (object.name !== name) return;
+    const mesh = object as Object3D & {
+      isMesh?: boolean;
+      geometry?: { boundingBox: Box3 | null; computeBoundingBox(): void };
+    };
+    if (mesh.isMesh !== true || !mesh.geometry) return;
+    mesh.geometry.computeBoundingBox();
+    const local = mesh.geometry.boundingBox;
+    if (!local) return;
+    object.updateMatrixWorld(true);
+    found.push(local.clone().applyMatrix4(object.matrixWorld));
+  });
+  return found;
+}
+
+/**
+ * How far two figures that are meant to be the *same number* may differ.
+ *
+ * A millimetre. This is not a fit with slack in it — a table top and the height
+ * the feast is stood at are one quantity, and anything above float noise means
+ * two definitions have drifted.
+ */
+const CONTRACT_TOLERANCE = 1e-3;
+
+const hallFloor = new Group();
+dressCastle(CASTLE_GREAT_HALL_DECK, hallFloor);
+hallFloor.updateMatrixWorld(true);
+
+const hall = hallFloor.getObjectByName(castleFurnitureGroupName(CASTLE_GREAT_HALL_DECK));
+let contractChecked = 0;
+
+if (!hall) {
+  fail(
+    `contract: deck ${CASTLE_GREAT_HALL_DECK} built no ` +
+      `'${castleFurnitureGroupName(CASTLE_GREAT_HALL_DECK)}' group, so batch 1's furniture is in ` +
+      `no scene and nothing below measured anything. This is the state PR #368 was in for a ` +
+      `fortnight — bytes that regenerate perfectly and no player who can see them — and it must ` +
+      `not be reachable silently.`,
+  );
+} else {
+  for (const { node, published, name, whatStandsOnIt } of [
+    {
+      node: 'table-top',
+      published: CASTLE_TABLE_TOP,
+      name: 'CASTLE_TABLE_TOP',
+      whatStandsOnIt: 'the feast',
+    },
+    {
+      node: 'bench-plank',
+      published: CASTLE_BENCH_SEAT,
+      name: 'CASTLE_BENCH_SEAT',
+      whatStandsOnIt: 'a sitting child',
+    },
+  ]) {
+    const surface = surfaceOf(hall, node);
+    if (!surface) {
+      fail(`contract: the great hall contains no '${node}' to measure ${name} against.`);
+      continue;
+    }
+    contractChecked += 1;
+    if (Math.abs(surface.max.y - published) > CONTRACT_TOLERANCE) {
+      fail(
+        `contract: ${name} publishes ${published.toFixed(4)} m but the '${node}' standing in the ` +
+          `great hall measures ${surface.max.y.toFixed(4)} m. ${whatStandsOnIt} is placed from ` +
+          `the published figure, so these being different is that thing floating or sunk by ` +
+          `${((surface.max.y - published) * -1000).toFixed(0)} mm.`,
+      );
+    }
+  }
+
+  // The figure agreeing with the mesh is only half of it. §4.4's reason for
+  // caring is that "a table that is 3 cm short leaves fourteen goblets
+  // floating" — so this measures the goblets, which is the fault itself rather
+  // than the number behind it. A placement that reads the right constant and
+  // then adds an offset of its own fails here and passes everything above.
+  const tableTop = surfaceOf(hall, 'table-top');
+  if (tableTop) {
+    for (const kind of ['goblet', 'roast', 'loaf', 'pie']) {
+      for (const prop of allSurfacesOf(hall, `feast-${kind}`)) {
+        contractChecked += 1;
+        const gap = prop.min.y - tableTop.max.y;
+        if (Math.abs(gap) > CONTRACT_TOLERANCE) {
+          fail(
+            `contract: a '${kind}' sits ${(gap * 1000).toFixed(0)} mm ` +
+              `${gap > 0 ? 'above' : 'below'} the table it is laid on — its base is at ` +
+              `${prop.min.y.toFixed(4)} m and the table top measures ` +
+              `${tableTop.max.y.toFixed(4)} m.`,
+          );
+        }
+      }
+    }
+  }
+
+  // The same question asked of the knight on his plinth, which is the other
+  // place in this room where one authored asset stands on another.
+  const plinth = surfaceOf(hall, 'plinth-block');
+  if (plinth) {
+    contractChecked += 1;
+    if (Math.abs(plinth.max.y - CASTLE_PLINTH_TOP) > CONTRACT_TOLERANCE) {
+      fail(
+        `contract: CASTLE_PLINTH_TOP publishes ${CASTLE_PLINTH_TOP.toFixed(4)} m and the built ` +
+          `plinth measures ${plinth.max.y.toFixed(4)} m.`,
+      );
+    }
+    for (const armour of allSurfacesOf(hall, 'armour-plate')) {
+      contractChecked += 1;
+      const gap = armour.min.y - plinth.max.y;
+      if (Math.abs(gap) > CONTRACT_TOLERANCE) {
+        fail(
+          `contract: a suit of armour stands ${(gap * 1000).toFixed(0)} mm ` +
+            `${gap > 0 ? 'above' : 'below'} its own plinth.`,
+        );
+      }
+    }
+  }
+}
+
+// `castleLighting.ts` owns where a flame sits and the sconce is authored to
+// land on it. This is the assertion behind that sentence. The direction of this
+// contract was reversed by #376 precisely because the old arrangement — the
+// Artist reports, the Engineer types "provisionally" — went stale within a day,
+// and the reconciliation log had to say out loud that the typed copy must not
+// be used.
+for (const [axis, measured, owned] of [
+  ['out from the wall', CASTLE_SCONCE_CUP.out, CASTLE_TORCH_CUP.out],
+  ['up from the mount', CASTLE_SCONCE_CUP.up, CASTLE_TORCH_CUP.up],
+] as const) {
+  contractChecked += 1;
+  if (Math.abs(measured - owned) > CONTRACT_TOLERANCE) {
+    fail(
+      `contract: the authored sconce's cup mouth measures ${measured.toFixed(4)} m ${axis} and ` +
+        `castleLighting.ts places the flame at ${owned.toFixed(4)} m. Every torch in the castle ` +
+        `would burn ${(Math.abs(measured - owned) * 100).toFixed(1)} cm off its own cup.`,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 if (failures.length > 0) {
   console.error(`\ncheck:castle — ${failures.length} failure(s):\n`);
@@ -918,4 +1191,17 @@ console.log(
     `child, ${exemptFlat} floor treatment under ${FLOOR_TREATMENT_MAX_HEIGHT} m tall, ` +
     `${exemptWall} wall furniture within ${WALL_FURNITURE_REACH} m of its wall. All three ` +
     `exemptions are measured off the object, never taken from its name.`,
+);
+console.log(
+  `check:castle shafts OK — ${shaftProps} floor-standing props on ${shaftStoreys.size} storey(s) ` +
+    `tested against the building's shafts, ${shaftTests} prop-shaft comparisons, none inside one. ` +
+    `A shaft's structure comes down through every storey even where the floor is solid, which ` +
+    `deckIsSolid does not say. Every figure here is counted, not the size of a list.`,
+);
+console.log(
+  `check:castle contract OK — ${contractChecked} published figures measured against the ` +
+    `furniture standing in the great hall: TABLE_TOP ${CASTLE_TABLE_TOP.toFixed(3)} m, ` +
+    `BENCH_SEAT ${CASTLE_BENCH_SEAT.toFixed(3)} m, PLINTH_TOP ${CASTLE_PLINTH_TOP.toFixed(3)} m, ` +
+    `and the sconce's cup on the flame's own placement. Every one measured off the built object, ` +
+    `outline excluded, never re-read from the file it came from.`,
 );
