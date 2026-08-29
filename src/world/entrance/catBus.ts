@@ -362,7 +362,176 @@ export const CAT_BUS_ROOF_COLOUR = new Color(PALETTE.flowerYellow)
 /** Thickness of the posts between one window and the next. */
 const PILLAR_Z = 0.26;
 
-const WHEEL_RADIUS = BODY_BOTTOM_Y * 0.86;
+/**
+ * **How much bigger the wheels are than they were drawn.**
+ *
+ * Jim, 29 August 2026: *"cat bus wheels should be double current size."* (The
+ * ask arrived first as "50% larger" and was corrected to 2x before any of it
+ * was built; issue #364 carries both.) One factor, named, so that the radius,
+ * the track width, the arch gap and the check that guards them all move
+ * together if it is ever retuned again.
+ *
+ * His standing scale ruling is what makes this right rather than a problem to
+ * be minimised: **recognisability beats proportion**, and geometry that would
+ * be implausible on a real vehicle is fine so long as it works. A 2.13 m tall
+ * wheel reads, at a glance, as a big friendly wheel.
+ */
+export const CAT_BUS_WHEEL_SCALE = 2;
+
+const WHEEL_RADIUS = BODY_BOTTOM_Y * 0.86 * CAT_BUS_WHEEL_SCALE;
+/**
+ * Tyre width, unchanged from the original drawing.
+ *
+ * Deliberately *not* scaled with the radius. Scaled, a wheel 2x across would be
+ * 1.49 m thick and the bus would be three metres wider still for no gain; left
+ * alone, the tyre comes out 2.13 m tall and 0.73 m wide — a 2.9:1 ratio, which
+ * is very nearly what a real road tyre measures. The wheel got bigger, not
+ * fatter.
+ */
+const WHEEL_WIDTH = 0.34 * DETAIL;
+
+/**
+ * How far the outline shells stand proud of the bodywork they hang on.
+ *
+ * `addOutline` pushes a copy of the geometry out along its normals by exactly
+ * this, so **the bus's true outer surface is this much further out than
+ * `BODY_WIDTH / 2`**. Anything asked to stand clear of the bus has to clear the
+ * outline too, or it clears the box and clips the line drawn round it — which
+ * is a 4 cm error and precisely the size of gap nobody notices until it is on
+ * screen.
+ */
+const OUTLINE_THICKNESS = 0.02 * DETAIL;
+
+/**
+ * **The wheels stand entirely outboard of the bodywork, and that is the whole
+ * answer to "does a 2x wheel end up inside the bus?".**
+ *
+ * At the old radius the wheels were half-buried in the flanks: centre at
+ * `BODY_WIDTH / 2 - 0.05 * DETAIL`, so the inboard face sat at x 2.16 — a good
+ * 0.32 m *inside* the cabin's inner wall at 2.48. That was invisible and
+ * harmless while the tyre only reached y 1.05, because everything it passed
+ * through down there is the solid lower shell.
+ *
+ * Doubled, it reaches **y 2.133**, which is 1.34 m above the cabin floor and
+ * 9 cm outboard of the cushions. A black cylinder would have stood in the bus
+ * beside the passengers, and the ride's interior camera looks straight at it.
+ *
+ * Raising the ride height cannot fix that. The window sill is derived from
+ * `BODY_BOTTOM_Y`, so `sill - wheelTop` is exactly `BODY_BOTTOM_Y - 0.62`
+ * however high the bus is lifted — every centimetre of arch you buy is a
+ * centimetre added to the step a six-year-old has to make getting off, and
+ * clearing the *floor* would need `BODY_BOTTOM_Y ~= 1.96`, chest-high on a
+ * 2.12 m child.
+ *
+ * So the wheels move out instead, and the clearance is then **guaranteed by
+ * lateral separation rather than by a height a downstroke can eat**. Nothing
+ * about the floor, the seats, the door, the step or the route changes. It also
+ * happens to be what a toy looks like.
+ *
+ * Derived from the widest thing on the axle — the fender, not the tyre — so it
+ * is the *whole* assembly that clears, not just the rubber.
+ */
+const WHEEL_CLEARANCE = 0.08;
+/** How far the mudguard overhangs the tyre, each side. */
+const FENDER_TUBE = WHEEL_WIDTH / 2 + 0.06;
+/** Half the track: where a wheel's centre plane sits, either side. */
+const WHEEL_X = BODY_WIDTH / 2 + OUTLINE_THICKNESS + WHEEL_CLEARANCE + FENDER_TUBE;
+/** Front axle first, then rear. Where the wheels were before, unchanged. */
+const WHEEL_Z = [BODY_LENGTH * 0.28, -BODY_LENGTH * 0.3] as const;
+const WHEELBASE = (WHEEL_Z[0] ?? 0) - (WHEEL_Z[1] ?? 0);
+
+/**
+ * **How big the bus is across the wheels** — for anything leaving room for it.
+ *
+ * {@link CAT_BUS_WIDTH} is, and stays, the *bodywork*: its own docblock is
+ * emphatic that the bodywork and the silhouette are different numbers and that
+ * confusing them is how a 10 m keep-out came to be sized for an 11 m bus. The
+ * wheels used to stand 0.26 m proud of the flanks and nothing accounted for it;
+ * doubled and moved outboard they stand a good deal further, and a road sized
+ * on the bodywork would have a bus driving down it with its tyres in the grass.
+ *
+ * So this exists rather than a second copy of the sum appearing in `road.ts`.
+ */
+export const CAT_BUS_TRACK_WIDTH = 2 * (WHEEL_X + FENDER_TUBE);
+
+/**
+ * **How far the sprung body may move, and the one place those limits live.**
+ *
+ * Jim, 29 August 2026: the bus *"should bob up and down while it drives on its
+ * suspension to look more realistic"*.
+ *
+ * These are hard clamps applied in `animate`, not hopes about what the spring
+ * will do. That matters because the arch gap below is *derived from them*: if
+ * the body could drop further than it says here, it would drive a fender down
+ * onto a tyre, and "the wheels do not intersect the body" would be false at the
+ * bottom of a bump rather than at rest — which is exactly the failure a still
+ * frame cannot show and `check:cat-bus-suspension` exists to catch.
+ *
+ * Heave in metres; pitch and roll in radians. Deliberately small: the whole
+ * effect is 10 cm and a degree, because a bus that visibly lurches reads as
+ * broken rather than sprung.
+ */
+export const CAT_BUS_MAX_HEAVE = 0.1;
+export const CAT_BUS_MAX_PITCH = 0.018;
+export const CAT_BUS_MAX_ROLL = 0.022;
+
+/**
+ * The gap between a tyre and the mudguard over it, **at rest**.
+ *
+ * Derived from the travel above rather than picked, and by the worst case a
+ * wheel can actually see: full heave, plus the pitch contribution at whichever
+ * axle is furthest from the centre, plus the roll contribution at the track.
+ * The 1.35 is the margin over that — the bus never quite bottoms out, which is
+ * how a suspension is supposed to be set up.
+ *
+ * The fender rides on the **chassis**, so this gap genuinely opens and closes
+ * as the bus bobs. That is what makes the suspension visible from outside at
+ * all, and it is what the check measures.
+ */
+const WORST_BODY_DROP_AT_A_WHEEL =
+  CAT_BUS_MAX_HEAVE +
+  CAT_BUS_MAX_PITCH * Math.max(...WHEEL_Z.map(Math.abs)) +
+  CAT_BUS_MAX_ROLL * WHEEL_X;
+export const CAT_BUS_ARCH_GAP = WORST_BODY_DROP_AT_A_WHEEL * 1.35;
+
+/**
+ * The spring itself: stiffness and damping, as a plain second-order system.
+ *
+ * `sqrt(46)` is 6.8 rad/s — a bob a shade over one cycle a second, which is
+ * about what a real bus body does and slow enough for a six-year-old to see it
+ * happen. Damping ratio comes out at 0.55: under-damped on purpose, so a bump
+ * gives two or three visible oscillations rather than one dead thud.
+ */
+const SPRING_RATE = 46;
+const SPRING_DAMPING = 7.4;
+
+/**
+ * The road surface, as a height in metres at a distance travelled.
+ *
+ * **A function of *where the bus is*, not of what time it is** — that one
+ * choice is the difference between a suspension and a decoration. A fixed sine
+ * on `elapsed` keeps bobbing while the bus stands at the kerb with its door
+ * open, which is exactly the "box sliding along" the brief rules out; sampled
+ * on distance, the bobbing stops dead when the bus stops, resumes when it pulls
+ * away, and gets busier the faster it goes, all for free and all correct.
+ *
+ * Three incommensurable sine terms rather than a noise table: no repeat a
+ * player could learn, nothing to allocate, and it is smooth, which a sampled
+ * table is not without interpolation. Total amplitude 0.10 m — the road through
+ * the park is tarmac, not a farm track.
+ *
+ * The rear axle samples this one wheelbase behind the front, so **the back of
+ * the bus hits the same bump the front just did**, a wheelbase later. That
+ * lag is most of what reads as "a real vehicle" rather than "a body on a
+ * spring", and it costs one subtraction.
+ */
+function roadHeightAt(distance: number): number {
+  return (
+    Math.sin(distance * 0.83) * 0.055 +
+    Math.sin(distance * 1.97 + 1.7) * 0.032 +
+    Math.sin(distance * 4.31 + 3.9) * 0.014
+  );
+}
 
 /**
  * The top of the bus above its own origin — **ear tips included**, per
