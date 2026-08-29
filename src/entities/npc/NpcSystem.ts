@@ -32,6 +32,10 @@ import { NpcCharacter } from './NpcCharacter';
 import { characterModelAvatar, type NpcAvatar } from './npcAvatar';
 import { WaypointDriver, type Waypoint } from './waypointDriver';
 import { PoiGraph } from './poiGraph';
+import { JourneyPlanner } from './journey';
+import { castleAttractions, gardenAttractions, type Attraction } from './attractions';
+import type { LevelConnector } from '../../world/building/surfaces';
+import type { ShopStand } from '../../world/building/shops/Shops';
 import { createPetBlob, PET_BODY_NODE, PET_HEAD_NODE } from './petBlob';
 import { WanderDriver, type ClimberBudget } from './wanderDriver';
 // Chatting (see the additive block in wanderDriver.ts): the shared budget
@@ -403,6 +407,13 @@ export class NpcSystem implements GameSystem {
   private readonly kids: KidCrowd;
   private readonly pets: InstancedCrowd;
   private readonly graph: PoiGraph;
+  /**
+   * Where the children go and how they get there — issue #350.
+   *
+   * Shared by every child: it owns one `NavGrid` per space and the per-frame
+   * budget that stops a cohort of simultaneous arrivals planning at once.
+   */
+  private readonly planner: JourneyPlanner;
   private readonly characters: NpcCharacter[] = [];
   private readonly petList: Pet[] = [];
   /** One-off `CharacterModel`s built by `buildIndividualAvatar` — disposed by hand in `dispose()`,
@@ -474,6 +485,19 @@ export class NpcSystem implements GameSystem {
     // own seeded streams, so hosting them cannot shift a single roll the park's
     // own twelve children make.
     residents: readonly ResidentSpec[] = [],
+    /**
+     * The declared ways between levels — `WalkSurfaces.connectors`, the same
+     * closure `Game.ts` hands the player's own `NavGrid`. A child walking to
+     * the Hat Shop on deck 2 climbs the lobby stair to get there, so their
+     * lattice needs the connectors as much as the player's does.
+     */
+    connectors: () => readonly LevelConnector[] = () => [],
+    /**
+     * The castle's shops, as destinations — `Shops.stands`, which already
+     * carries a title and a world x/z/y at the spot in front of each counter.
+     * Jim asked for these by name: "This can include things inside the castle."
+     */
+    shopStands: readonly ShopStand[] = [],
   ) {
     this.camera = camera;
     this.arrivingByBus = arrivingByBus;
@@ -515,6 +539,27 @@ export class NpcSystem implements GameSystem {
     let nameCursor = 0;
 
     this.graph = new PoiGraph(collision, bridgeHeightAt);
+
+    // The park has hills and a railway bridge, so an attraction's height is
+    // sampled rather than assumed — see `attractions.ts`. Falls back to a flat
+    // park when there is no sampler, which is only the case in a test harness
+    // that never built a building.
+    const sample: GroundSampler = groundSampler ?? (() => 0);
+    const attractions: Attraction[] = [
+      ...gardenAttractions(sample),
+      ...castleAttractions(shopStands),
+    ];
+    this.planner = new JourneyPlanner(
+      collision,
+      sample,
+      connectors,
+      // `bridgeCovers` is the same question `bridgeHeightAt` answers, asked as
+      // a boolean: a point is over a bridge exactly when the bridge has a
+      // surface height there. Derived rather than passed separately so the two
+      // can never disagree about where a deck is.
+      (x, z) => bridgeHeightAt(x, z) !== null,
+      attractions,
+    );
     this.kids = new KidCrowd(NPC_COUNT);
     this.group.add(this.kids.crowd.group);
 
@@ -578,6 +623,7 @@ export class NpcSystem implements GameSystem {
 
       const driver = new WanderDriver({
         graph: this.graph,
+        planner: this.planner,
         rng: new Rng(NPC_SEED + i * 977),
         startNode: node.index,
         pace: rng.range(0.85, 1.12),
@@ -747,6 +793,12 @@ export class NpcSystem implements GameSystem {
 
     this.frame += 1;
     this.playerPosition.copy(context.playerPosition);
+
+    // Hand out this frame's route-planning budget before anybody is stepped.
+    // Twenty-four children arriving in the same second would otherwise run
+    // twenty-four A* searches in one frame; two of them do, and the rest ask
+    // again next frame while standing still looking at what they walked to.
+    this.planner.beginFrame();
 
     // The player's hop is the cue for the giggle-hop. Reading the action rather
     // than the Player keeps this system's only dependency the collision world.

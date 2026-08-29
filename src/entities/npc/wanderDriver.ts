@@ -3,6 +3,8 @@ import { createBlinkClock, type BlinkClock } from '../../art/style/faceLife';
 import { clamp01 } from '../../core/mathUtils';
 import { RUN_INTENT, type CharacterDriver, type CharacterIntent, type DriverContext } from './driver';
 import type { PoiGraph } from './poiGraph';
+import { spaceAt } from '../../world/spaces';
+import { Journey, type JourneyPlanner } from './journey';
 // The things a child does instead of wandering. See `activities/activity.ts`
 // for what an `Activity` is and why it has the shape it has; this file keeps
 // only the wander core and the small amount of glue that runs them.
@@ -18,37 +20,58 @@ import type { ChatBudget } from './chatActivity';
 import type { ClimbableTreeSeed } from '../../world/Scenery';
 
 /**
- * A child with somewhere to be.
+ * A child with somewhere to be — and, since issue #350, somewhere in
+ * particular.
  *
  * This is the only driver the game ships with, and it is a behaviour script
- * rather than anything clever: walk to the next waypoint, and when you get
- * there decide what to do next. Everything that makes it read as a child rather
- * than as a patrolling guard is in the decisions:
+ * rather than anything clever: **pick an attraction, walk there on the
+ * player's own pathfinding, and when you arrive pick another one.**
+ * Everything that makes it read as a child rather than as a patrolling guard
+ * is in the decisions around that:
  *
- * - **Never turn straight back.** A child who retraces their steps looks lost.
- *   The previous waypoint is only chosen again at a dead end.
- * - **Stop at the good bits.** Waypoints marked interesting — the fountain, the
- *   ball pit lip, the door of the big building — earn a pause, and during a
- *   pause the child looks around instead of standing to attention.
+ * - **Stop at the good bits.** You have walked all the way to the Space Ferris
+ *   Wheel; you look at it. An arrival earns a pause, and during a pause the
+ *   child looks around instead of standing to attention.
  * - **Sometimes run.** A whole park of children moving at one speed looks like
- *   a screensaver. A fifth of legs are run at, chosen per leg so the change of
- *   pace happens at a corner, where it looks intentional.
+ *   a screensaver. A fifth of trips are run, chosen per trip so the change of
+ *   pace happens where a child has just decided something.
+ * - **Say where you are going.** One time in five, out loud, in the same
+ *   speech bubble a chat uses — "I'm going to the Dodgems!".
  * - **Notice the player.** Come near and a child may wave; hop near one and
  *   they will hop back. That is the entire social system and it is worth more
  *   than it costs.
+ *
+ * ## What used to be here, and why it is gone
+ *
+ * Until #350 this walked a **non-backtracking random walk** on {@link PoiGraph}:
+ * `chooseNext()` took a uniformly random neighbour of the current node that was
+ * not the previous one, and `target` meant *the next waypoint, one edge away*.
+ * There was no destination anywhere in the system.
+ *
+ * That is why the whole crowd ended up in one place. A random walk is
+ * diffusive: its occupancy converges on a distribution proportional to node
+ * degree and dwell time, and the plaza has the highest of both — six ring
+ * nodes packed inside the kerb, mutually visible, every one of them
+ * `interesting` and so worth a 0.62-chance pause. Jim, 27 August 2026: *"on
+ * entering the park, all the NPCs gather in one place quite soon — I guess this
+ * is their pathfinding getting stuck."* True in the most literal way: there was
+ * no pathfinding to get stuck, because nobody was going anywhere.
+ *
+ * The random walk is **deleted**, not disabled — `chooseNext`, `target`,
+ * `current` and `previous` are gone, and {@link Journey} is the one owner of
+ * where a child is headed. `PoiGraph` survives for the one job it is still the
+ * right answer to: choosing somewhere a child can legitimately *stand* at
+ * spawn.
  *
  * Everything random comes from a seeded {@link Rng}, so the park behaves the
  * same on every reload — which matters far more than it sounds when you are
  * trying to reproduce "that kid got stuck by the west wall".
  */
 
-/** How close counts as having arrived at a waypoint. */
-const ARRIVE_RADIUS = 0.9;
-
-/** Chance of stopping to look at something interesting. */
+/** Chance of stopping to look at the attraction you have just walked to. */
 const PAUSE_CHANCE = 0.62;
 
-/** Chance a given leg is run rather than walked. */
+/** Chance a given trip is run rather than walked. */
 const RUN_CHANCE = 0.2;
 
 /** Chance of a little hop on arriving somewhere good. */
@@ -64,8 +87,11 @@ const WAVE_DURATION = 1.8;
 const WAVE_COOLDOWN = 9;
 const HOP_COOLDOWN = 1.1;
 
-/** Longest a child will push at a waypoint before giving up and re-choosing. */
-const LEG_TIMEOUT = 14;
+// The old `ARRIVE_RADIUS` and `LEG_TIMEOUT` lived here. Both moved into
+// `journey.ts` with the thing they governed: arriving is now measured against
+// the destination (`DESTINATION_RADIUS`, plus the player's own
+// `ARRIVE_RADIUS`/`WAYPOINT_RADIUS` for the waypoints in between), and the
+// give-up timer is per trip (`JOURNEY_TIMEOUT`) rather than per edge.
 
 // Re-exported so the climb's consumers (`world/TreeClimbing.ts`,
 // `NpcSystem.ts`) do not have to care that it moved into `activities/`.
@@ -82,6 +108,8 @@ export {
 
 export interface WanderOptions {
   readonly graph: PoiGraph;
+  /** Shared by every child: one `NavGrid` per space, and a per-frame plan budget. */
+  readonly planner: JourneyPlanner;
   readonly rng: Rng;
   /** Index of the waypoint the child starts on. */
   readonly startNode: number;
@@ -121,13 +149,14 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
   private readonly chat: ChatToPlayer;
   private readonly paint: FacePaintVisit;
 
-  private current: number;
-  private target: number;
-  private previous: number;
+  /** Where this child is going, and the route there. The one owner. */
+  private readonly journey: Journey;
+  private readonly planner: JourneyPlanner;
+  /** Scratch for {@link Journey.steer}'s answer. One per child, never per frame. */
+  private readonly move = { x: 0, z: 0 };
 
   private pausing = false;
   private pauseRemaining = 0;
-  private legElapsed = 0;
   private running = false;
 
   private lookYaw: number | null = null;
@@ -145,11 +174,10 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
 
   constructor(options: WanderOptions) {
     this.graph = options.graph;
+    this.planner = options.planner;
     this.rng = options.rng;
     this.pace = options.pace ?? 1;
-    this.current = options.startNode;
-    this.previous = options.startNode;
-    this.target = options.startNode;
+    this.journey = new Journey(this.rng);
     this.blinkClock = createBlinkClock(() => this.rng.range(0, 1));
     // Activities are constructed exactly where their state used to be
     // initialised, because several of them draw from this child's seeded
@@ -162,9 +190,11 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
     // about the train, so it can be built anywhere in here.
     this.train = new TrainTrip();
     // Stagger the first decision so the whole park does not set off in step.
+    // The first destination is chosen on the first frame the child is actually
+    // steered, rather than here: choosing needs a position, to know which space
+    // the child is standing in, and there is no `DriverContext` at construction.
     this.pausing = true;
     this.pauseRemaining = this.rng.range(0, 2.5);
-    this.chooseNext();
 
     // Stagger the first face-paint roll too, and start tracking the head at
     // whatever waypoint this child spawned on.
@@ -183,9 +213,14 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
     this.activities = [this.bus, this.climb, this.chat, this.train, this.paint];
   }
 
-  /** Where this child is heading, for debugging and for the pet to follow. */
-  get targetNode(): number {
-    return this.target;
+  /** What this child is walking to, by name — for debugging and for checks. */
+  get destinationName(): string | null {
+    return this.journey.destination?.name ?? null;
+  }
+
+  /** …and its id, which is what `check:npc-dispersal` counts distinct ones of. */
+  get destinationId(): string | null {
+    return this.journey.destination?.id ?? null;
   }
 
   // The climb's public surface, read by `world/TreeClimbing.ts`. Delegated
@@ -241,7 +276,11 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
    * the player.
    */
   get chatBubbleText(): string | null {
-    return this.chat.bubbleText;
+    // A chat wins: it is a conversation with the player, and it is the thing
+    // they are standing there waiting for. The announcement is the fallback,
+    // so "I'm going to the Hat Shop" goes out through the one bubble path
+    // `NpcSystem.updateBubbles` already reads rather than a second one.
+    return this.chat.bubbleText ?? this.journey.bubbleText;
   }
 
   /** The seat this child is in, if any. `ParkTrain` reads this every frame —
@@ -259,6 +298,12 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
     // riding or up a tree: an activity holding the whole intent never reaches
     // the expression line at the bottom of this method.
     this.blinkingNow = this.blinkClock.expressionFor(dt, 'neutral') === 'blink';
+    // Above the activities for the same reason the blink is: an announcement
+    // must expire whether the child is walking, up a tree or on the train. A
+    // bubble that froze for a whole train circuit is exactly the leak the
+    // `hopRequest`/`waveAmount` note below describes, pointed at the speech
+    // bubble instead of at the arm.
+    this.journey.tick(dt);
 
     // Where a painted child's face is, for the stall to hang their decal near.
     // Above the activities rather than inside the visit, because a climb or a
@@ -276,7 +321,7 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
 
       hold = this.offerFrame(false, context, intent);
 
-      if (hold === null) this.updateWander(context, intent, dt);
+      if (hold === null) this.updateJourney(context, intent, dt);
     }
 
     // `'intent'` and `'child'` hold the whole intent, so the social tail below
@@ -398,62 +443,75 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
    * see {@link Rejoin} and HANDOFF-activity.md.
    */
   rejoinGraph(context: DriverContext, how: Rejoin): void {
-    if (how !== 'inPlace') {
-      // Rejoin at whatever waypoint is nearest, which from a station platform
-      // is the ring road, and from the paint stall is the path outside it.
-      const nearest = this.graph.nearest(context.position.x, context.position.z);
-      if (nearest) {
-        this.current = nearest.index;
-        this.previous = nearest.index;
-        if (how === 'full') this.target = nearest.index;
-      }
-    }
-    this.chooseNext();
-    if (how === 'full') {
-      this.pausing = false;
-      this.legElapsed = 0;
-    }
+    // The three {@link Rejoin} variants used to differ in which waypoint the
+    // child was anchored back onto — nearest, nearest-and-retarget, or none at
+    // all. With a destination instead of a waypoint chain there is nothing to
+    // anchor: a child who has just got off the train simply wants somewhere to
+    // go, and `NavGrid` will plan a route from wherever they are actually
+    // standing. So the distinction collapses to the one thing it still means —
+    // whether the child resumes an interrupted pause or gets straight on with
+    // it — which is what `'full'` always signified.
+    //
+    // The old anchoring existed because a random walk had to be *on* a node to
+    // take an edge from it, and a child let go on a station platform was not on
+    // one. That constraint is gone with the walk.
+    this.journey.abandon();
+    this.chooseDestination(context);
+    if (how === 'full') this.pausing = false;
   }
 
   // ---------------------------------------------------------------- internals
 
-  /** Walk to the next waypoint, or stand at this one and look around. */
-  private updateWander(context: DriverContext, intent: CharacterIntent, dt: number): void {
-    const node = this.graph.node(this.target);
-
+  /**
+   * Walk towards the chosen attraction, or stand at one and look around.
+   *
+   * The whole of the old random walk lived here. What replaced it is shorter,
+   * because the hard part — which way round a tree, which side of the railway
+   * — is now `NavGrid`'s, and it is the *player's* `NavGrid`, so a child takes
+   * the route the player would have taken.
+   */
+  private updateJourney(context: DriverContext, intent: CharacterIntent, dt: number): void {
     if (this.pausing) {
       this.pauseRemaining -= dt;
       this.updateLook(context, dt);
       if (this.pauseRemaining <= 0) {
         this.pausing = false;
-        this.chooseNext();
+        this.chooseDestination(context);
       }
       return;
     }
 
-    if (!node) return;
+    // No destination yet — the first frame of this child's life, or the frame
+    // after one was abandoned. Choose and start next frame; a child who has
+    // just decided something is allowed to take a beat over it.
+    if (!this.journey.underway) {
+      this.chooseDestination(context);
+      return;
+    }
 
-    this.legElapsed += dt;
-    const dx = node.x - context.position.x;
-    const dz = node.z - context.position.z;
-    const distance = Math.hypot(dx, dz);
+    const arrived = this.journey.steer(
+      // Derived from where the child is, never remembered: a child who has
+      // just walked through the castle door is in the castle, and the space
+      // is the only thing that decides which lattice their route is planned
+      // on. Same rule `PoiNode.space` follows, for the same reason.
+      spaceAt(context.position.x, context.position.z),
+      context.position.x,
+      context.position.z,
+      context.position.y,
+      dt,
+      this.planner,
+      this.move,
+    );
 
-    if (distance <= ARRIVE_RADIUS) {
+    if (arrived) {
       this.arrive(context);
-    } else {
-      const speed = this.running ? RUN_INTENT : 1;
-      const scale = (speed * this.pace) / distance;
-      intent.moveX = dx * scale;
-      intent.moveZ = dz * scale;
+      return;
     }
 
-    // A child who has been walking at the same waypoint for a quarter of a
-    // minute is stuck on something the edge test did not catch. Re-choosing is
-    // a cheaper and far less visible fix than a rescue teleport.
-    if (this.legElapsed > LEG_TIMEOUT) {
-      this.current = this.target;
-      this.chooseNext();
-    }
+    const speed = this.running ? RUN_INTENT : 1;
+    const scale = speed * this.pace;
+    intent.moveX = this.move.x * scale;
+    intent.moveZ = this.move.z * scale;
   }
 
   /** Waves at the player, and copies their hops. */
@@ -501,10 +559,6 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
   }
 
   private arrive(context: DriverContext): void {
-    this.previous = this.current;
-    this.current = this.target;
-    this.legElapsed = 0;
-
     // An activity may claim the arrival itself — climbing a tree takes
     // priority over the ordinary pause at this waypoint, being its own "stop
     // and look around" moment, just a more memorable one.
@@ -513,8 +567,12 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
       if (activity?.onArrive?.(this, context)) return;
     }
 
-    const node = this.graph.node(this.current);
-    if (node?.interesting && this.rng.chance(PAUSE_CHANCE)) {
+    // No `interesting` test any more: every destination is an attraction, so
+    // arriving anywhere at all is arriving somewhere worth a look. That test
+    // used to be what made the plaza a trap — a dense patch of `interesting`
+    // nodes paid the pause over and over — and with one pause per *trip*
+    // rather than per waypoint it cannot pool anybody.
+    if (this.rng.chance(PAUSE_CHANCE)) {
       this.pausing = true;
       this.pauseRemaining = this.rng.range(1.4, 4.2);
       this.lookRemaining = 0;
@@ -522,19 +580,24 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
       return;
     }
 
-    this.chooseNext();
+    this.chooseDestination(context);
   }
 
-  /** Picks the next waypoint: any neighbour but the one just left. */
-  private chooseNext(): void {
-    const node = this.graph.node(this.current);
-    if (!node || node.neighbours.length === 0) return;
-
-    const options = node.neighbours.filter((index) => index !== this.previous);
-    const pool = options.length > 0 ? options : node.neighbours;
-    this.target = pool[this.rng.int(0, pool.length - 1)] ?? this.current;
+  /**
+   * Picks somewhere new to go, and rolls whether this trip is run.
+   *
+   * The run roll is per *trip* rather than per leg now. A leg was one edge of
+   * the waypoint graph — a few seconds — so changing pace at every corner read
+   * as a child skipping about; a trip can be most of the way across the park,
+   * so the same roll now means "this child is in a hurry to get there", which
+   * is the more legible version of the same charm.
+   */
+  private chooseDestination(context: DriverContext): void {
+    this.journey.chooseDestination(
+      spaceAt(context.position.x, context.position.z),
+      this.planner,
+    );
     this.running = this.rng.chance(RUN_CHANCE);
-    this.legElapsed = 0;
   }
 
 }
