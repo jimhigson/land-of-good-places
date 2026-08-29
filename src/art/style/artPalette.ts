@@ -256,27 +256,19 @@ export const ART = {
    */
   castleIron: 0x8a93a6,
   /**
-   * **Live coals** in a brazier and under a hearth's logs.
-   *
-   * Sits between the park's existing `jetpackFlame` (0xffb45c) and
-   * `flowerRed` (0xff8f8f): hotter and deeper than the flame that stands above
-   * it, so a bed of coals reads as the *source* of the fire rather than as more
-   * of it. Pulled towards cream like everything else here — an honest ember
-   * orange is neon, and neon is the one thing §5 rules out outright.
-   */
-  castleEmber: 0xf07a4a,
-  /**
    * **Tapestry cloth** — the woven ground a picture is dyed into.
    *
    * A deep rose that is unmistakably *cloth* next to the pink stone it hangs
-   * on: `PALETTE.stonePinkDark` (0xf0a3c1) is the masonry, and a hanging in
-   * that colour disappears into the wall behind it. Two steps down and two
-   * steps warmer, so the tapestry is the first thing the eye finds on a wall
-   * and the wall is still pink.
+   * on. `PALETTE.stonePinkDark` (0xf0a3c1) is the park's own masonry, and a
+   * hanging in that colour disappears into the wall behind it; this is two
+   * steps down and two steps warmer, so the tapestry is the first thing the
+   * eye finds on a wall and the wall is still pink.
+   *
+   * It is the **ground**, not the picture: the heraldry is a canvas texture
+   * multiplied over this, so a tapestry in shadow is a darker tapestry rather
+   * than a grey rectangle.
    */
   castleTapestry: 0xc4577f,
-  /** The tapestry's second dye, for the border and the field behind a charge. */
-  castleTapestryDeep: 0x9c3f66,
 
   // --- effects ---------------------------------------------------------------
   /**
