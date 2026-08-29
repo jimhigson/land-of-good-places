@@ -1382,6 +1382,18 @@ export class Game {
     return true;
   }
 
+  /**
+   * `/castle?deck=N` — inside the castle, on that storey, on the first frame.
+   *
+   * A thin forward to `Building.enterCastleSpawn`, which is where the
+   * knowledge lives: being inside the castle is a *space*, not a coordinate,
+   * so only the building can put her in one. See that method for why
+   * `/spawn?pos=` cannot do this.
+   */
+  enterCastleSpawn(deck: number): boolean {
+    return this.world.building.enterCastleSpawn(deck);
+  }
+
   start(): void {
     if (this.started) return;
     this.started = true;
