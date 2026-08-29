@@ -2915,12 +2915,16 @@ kbd {
   .parkmap-canvas-wrap {
     margin: 0.25rem 0.25rem 0;
     border-radius: 0.75rem;
-    /* The park is wider than it is deep, so on a portrait phone the map is
-       always width-limited: extra height adds blank lawn, not scale. Cap it
-       just above the park's own proportions, leaving room for the names that
-       sit under the outermost attractions and no more. */
-    flex: none;
-    aspect-ratio: 5 / 6;
+    /* Take every pixel the card has left.
+
+       An earlier version capped this at the park's own proportions, on the
+       reasoning that a width-limited map gains no *scale* from extra height.
+       True, and beside the point: it gains room for NAMES, which is what is
+       actually scarce. The cap left 237 px of a 390 px phone's card doing
+       nothing while 6 of 14 attractions went unlabelled. A 320 px phone has
+       no slack to give and simply keeps what it has. */
+    flex: 1;
+    min-height: 0;
   }
 }
 

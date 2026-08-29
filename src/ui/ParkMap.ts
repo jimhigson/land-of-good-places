@@ -601,6 +601,11 @@ export class ParkMap {
       this.titleEl.textContent = 'Map of the Park';
       this.renderOutdoor();
     }
+    // How many names actually got placed, for QA to read off the DOM.
+    // Counting painted text runs from outside over-counts, because a long name
+    // is drawn as two lines — which is exactly how a "9 of 14" was reported to
+    // a reviewer who had correctly measured 8.
+    this.canvas.dataset.labelCount = String(this.labelBoxes.length);
   }
 
   private renderOutdoor(): void {
@@ -753,6 +758,7 @@ export class ParkMap {
       const below = item.py + item.size * 0.46;
       const above = item.py - item.size * 0.44 - minTextPx() * 1.2;
       const shoulder = item.size * 0.55;
+      const step = minTextPx() * 1.35;
       const candidates: readonly (readonly [number, number])[] = [
         [item.px, below],
         [item.px, above],
@@ -760,6 +766,15 @@ export class ParkMap {
         [item.px + shoulder, below],
         [item.px - shoulder, above],
         [item.px + shoulder, above],
+        // Then further out, which is what turns a tall canvas into names
+        // rather than blank lawn: on a portrait phone the park is
+        // width-limited, so there is spare height and nothing else wanting it.
+        [item.px, below + step],
+        [item.px, above - step],
+        [item.px - shoulder, below + step],
+        [item.px + shoulder, below + step],
+        [item.px, below + step * 2],
+        [item.px, above - step * 2],
       ];
       for (const [lx, ly] of candidates) {
         if (this.drawLabel(item.label, lx, ly)) break;
