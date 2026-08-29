@@ -165,6 +165,144 @@ feedback can be acted on without a fresh `npm install` (the shared checkout's
 `node_modules` lacks `vitest`/`playwright-core`, so this worktree has its own).
 Remove it once #352 is merged.
 
+---
+
+# DIMENSIONAL CONTRACT — bridge redesign (for the 3D Artist)
+
+**Status: numbers derived and committed. Placement verification still running.**
+
+Jim's brief: *"shorter and steeper… modelled stoneworks (not just textures)
+around the tops of the walls, a genuine arch-shaped tunnel with modelled
+archway masonry around its edge, 40% shorter than currently made (also will
+need to be steeper for this) and a more pronounced 'hump' shape… there should
+be just a bridge with nothing clipping inside it."*
+
+Jim's ruling on steepness (via Overseer): *"it is ok for the gradient to be
+quite steep — we are building a cartoonish game here, not a real physics
+simulation — if it would not be plausible in real life I don't mind."*
+**Plausibility is waived. Playability is not.** Do not re-litigate this; do not
+lengthen the bridge to make the slope believable.
+
+Every number below is derived from the park's own constants, not chosen.
+
+## 1. Fixed — you cannot move these
+
+| what | value | set by |
+| --- | --- | --- |
+| **Deck rise** above ground under the track | **4.060 m** | `BRIDGE_RISE` = `TRAIN_CLEARANCE_Y` (3.900) + `BRIDGE_DECK_DEPTH` (0.160) |
+| `TRAIN_CLEARANCE_Y` | 3.900 m | `TRAIN_SWEPT_TOP_Y` (3.500) + `RIDER_HEADROOM` (0.400) |
+| **Flat deck span** across the rail | **6.400 m** | `DECK_HALF_LENGTH` × 2 = (`FENCE_OFFSET` 2.0 + 1.2) × 2 — must clear both fence lines |
+| **Arch opening width** (along the rail) | **3.600 m** | `ARCH_CLEAR_HALF` × 2 = (`TRACK_CLEARANCE` 1.3 + 0.5) × 2 |
+| **Arch opening height** (soffit over track bed) | **3.900 m** | `TRAIN_CLEARANCE_Y` |
+| **Tunnel length** (mouth to mouth, across the rail) | **6.400 m** | `ARCH_SPAN_HALF` = `DECK_HALF_LENGTH` |
+| Parapet height above the road | 0.720 m | `PARAPET_HEIGHT` |
+| Parapet/spandrel wall thickness | 0.300 m | `BRIDGE_WALL_THICKNESS` |
+
+**The rise and the arch opening are hard.** They are the train's own swept
+envelope plus its riders' headroom. A shorter bridge does not get a smaller
+arch — the train is the same size.
+
+**Deck width is per-bridge**, from the path it carries (my #349 fix):
+`roadHalf = pathHalfWidth + PATH_KERB_OVERHANG`. On the canonical seed:
+`bridge-172.0` road **4.05 m** wide (overall 4.65 m including both parapets);
+`bridge-266.0` road **3.45 m** (overall 4.05 m). Model to proportions, not to
+one absolute width.
+
+## 2. Length and slope — the 40%
+
+| | now | 40% shorter |
+| --- | --- | --- |
+| total length | 36.715 m | **22.029 m** |
+| flat deck span | 6.400 m | 6.400 m (fixed) |
+| ramp run each side | 15.157 m | **7.814 m** |
+| average gradient | 0.268 (15.0°) | **0.520 (27.5°)** |
+| **peak** slope | 0.357 (19.6°) | **0.693 (34.7°)** |
+
+The hump is a cosine-blended trapezoid, so **peak slope is
+`1/(1 - HUMP_BLEND)` = 1.333× the average**, not equal to it. The peak is the
+number that matters for playability.
+
+The 40% comes almost entirely out of the ramps, because the 6.4 m deck span is
+pinned by the fence lines. Ramps go 15.16 m → 7.81 m, near halving.
+
+**Good news on the "more pronounced hump":** it comes free. Same 4.06 m rise
+over 22 m instead of 36.7 m is a visibly humpier bridge without any extra
+shaping.
+
+## 3. ⚠️ THE ONE COLLISION — peak slope vs the walk physics
+
+**This is a decision for Jim, flagged rather than silently compromised.**
+
+`Player.tick` samples `WalkSurfaces` with a ceiling one `BUILDING_STEP_UP`
+(0.620 m) above her own damped height. In one clamped frame
+(`MAX_FRAME_DELTA` = 1/12 s) she advances `7.4/12` = **0.617 m** horizontally,
+so she rises `0.617 × slope` — and if that exceeds 0.620 m she **loses the
+surface**.
+
+This is not theoretical. `bridges.ts`'s `HUMP_BLEND` comment records it:
+
+- peak **0.56** → 0.345 m/frame (56% of ceiling) — **shipped, works**
+- peak **0.79** → 0.487 m/frame (79% of ceiling) — **real-browser QA watched
+  her lose the surface at the steep section, fall into the tunnel and jam
+  against the fence**
+
+**40% shorter gives peak 0.693 → 0.428 m/frame = 69% of the ceiling.** That
+sits between the known-good and the known-broken, nearer the broken one.
+
+And **sprinting breaks it outright**: `PLAYER_SPRINT_MULTIPLIER` is 1.5, so a
+sprinted clamped frame covers `7.4 × 1.5 / 12` = 0.925 m, rising
+`0.925 × 0.693` = **0.641 m — over the 0.620 m ceiling.** A sprinting child on
+a 40%-shorter bridge can fall through the deck into the tunnel.
+
+### The fix, and it costs nothing
+
+**Lower `HUMP_BLEND` from 0.25 to 0.10.** The peak multiplier falls from
+1.333 to 1.111, so at the *same* 40%-shorter length:
+
+- peak slope **0.578** (was 0.693)
+- 0.357 m/frame walking = **58% of ceiling** — level with the proven-safe 0.56
+- 0.535 m/frame sprinting — **under** the 0.620 ceiling
+
+So **Jim gets his full 40% with no compromise**, by flattening the eased
+transitions rather than lengthening the bridge. A lower blend means a
+straighter ramp and a crisper break at the crown — which reads as *more*
+bridge-like, not less, and does not fight "a more pronounced hump" (that comes
+from the rise/length ratio, which improves).
+
+**Recommendation: take the 40%, set `HUMP_BLEND = 0.10`.** I own that constant
+and will make the change. The Artist does not need to model around it — but
+should know the ramps are near-straight with a short ease at each end, not a
+long smooth curve.
+
+For reference, the NavGrid ceiling (NPC routing) is `BUILDING_STEP_UP / CELL` =
+**1.240**, and today's generator cap `MAX_RAMP_GRADIENT` is 0.600. Average
+gradient 0.520 sits **under both**, so the 40% needs no waiver on either — NPCs
+will still route over it. The walk-physics peak above is the only binding
+constraint.
+
+## 4. What the Artist owns
+
+- **Coping stones along the wall tops** — modelled, not textured. Sit on the
+  0.300 m wall, standing to 0.720 m above the road.
+- **Voussoir masonry around the tunnel mouth** — a real arch ring around a
+  3.600 m wide × 3.900 m high opening, both mouths, 6.400 m apart.
+- **The hump as sculpted form.** Near-straight ramps at 0.520 average with a
+  short cosine ease at crown and foot (`HUMP_BLEND` 0.10).
+- Pink park stone (`PALETTE.stonePink` / `pinkStoneTexture`), as the garden
+  walls and rail fence already use. Never a new colour.
+
+**Nothing may enter the arch opening** — that volume is the train's, and an
+invariant raycasts it every seed.
+
+## 5. Still to verify (mine, in flight)
+
+- Footprint search still places a bridge at every planned site on all five
+  seeds at 22 m. A shorter bridge should be *easier* to place — expected to
+  improve, verifying rather than assuming.
+- Traversal measured on the built park, not just arithmetic.
+
+---
+
 ## Left to do, in order (the original plan, all now done)
 
 1. Give the ribbon and the masonry one owner for where the paving ends. Intended
