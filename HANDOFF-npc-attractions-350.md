@@ -338,3 +338,40 @@ somewhere else to be. The fix mirrors the existing `BudgetSlot`/`ActivityBudget`
 rather than inventing a second one — claimed when the child commits to walking to a station
 (walking there is part of the trip), released on every exit, `'allow'` when no budget is handed
 over, matching the climb.
+
+---
+
+## DONE (29 Aug) — what shipped
+
+All five requirements met; three clumping mechanisms fixed, not one.
+
+**Root causes, in the order they were found**
+
+1. The random walk's diffusive stationary distribution pooling on the plaza. Deleted, replaced by
+   real destinations on the player's own `NavGrid`.
+2. A route that stopped short in the crowd at the gate, pushed at for the whole 75 s
+   `JOURNEY_TIMEOUT`. Fixed by a bounded re-plan + a stuck detector derived from `NPC_WALK_SPEED`.
+3. `TrainTrip` had no concurrency budget — 20 of 24 children on the railway at once. Capped at 4,
+   mirroring the existing `BudgetSlot` pattern.
+
+**Numbers (canonical seed, `check:npc-dispersal`)**
+
+| | worst RMS spread | worst clump (8.2 m disc) | distinct destinations |
+| --- | --- | --- | --- |
+| fixed | 37.3 m (64% of uniform) | 6 of 24 | >= 9 |
+| `--mutate` (all sent to one attraction) | 15.7 m (27%) | 15 of 18 free | 1 |
+
+Five seeds green (canonical, 2, 5, 11, 18) at 58-69% of uniform against a 50% bar.
+`tsc` clean, `npm run test:procgen` 443/443, `npm run build` exit 0 (unpiped).
+
+**Browser QA** — headless Chromium, `/spawn?pos=0,0&facing=45`, player left standing so the chat
+path is live. 24 children, 20 free, 11 distinct destinations, worst clump 4, RMS 42-45 m, **0
+console errors** on both the production build (5350) and dev (5351). Both servers killed by PID.
+
+**One bug the browser caught that no Node check could**: the bubble read *"I'm going to the The
+Castle"* — half the park's signs are already articled. Fixed in `announce()`, checked against all
+eighteen real names.
+
+**Left for a separate issue (do not widen this PR)**: `Yara`/`Kiko` finishing 0.14 m apart, inside
+`NPC_RADIUS * 2`. Not reproduced or investigated here — it was noted in passing by the sandbox
+run and is a `check:npc-separation` question, not a dispersal one.
