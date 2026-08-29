@@ -1227,19 +1227,64 @@ export function createCatBus(): CatBusHandle {
   // bodywork instead of looking at it from the front — and small enough that
   // nobody had ever noticed, which is why it is worth fixing now that there is
   // a check that would have to be loosened to let it pass.
+  // **Two treads, because the bob is what sets how high the top one is.**
+  //
+  // The sprung body rests `CAT_BUS_RIDE_LIFT` up so its chin clears the road at
+  // the bottom of a bump, and raising the bob until it reads on screen raised
+  // that lift with it — from 0.28 m to 0.64 m, which put the single tread this
+  // used to be 1.26 m above the pavement. That is a drop of 59% of a 2.12 m
+  // child's height off the last step of a bus, which is not a step, it is a
+  // fall.
+  //
+  // So a second tread hangs below the first, and **how low it may hang is
+  // derived rather than picked**: the body can drop by heave, plus pitch at
+  // this z, plus roll at this x, and the tread has to still be above the road
+  // at the bottom of all three at once. Derived that way it tracks the clamps —
+  // raise the bob again and the lower tread rises out of its way by itself,
+  // rather than becoming a plough that `check:cat-bus-suspension` §5 catches
+  // only after somebody wonders why the bus is grounding.
+  //
+  // The *top* tread does not move: it is still hung from the body's underside
+  // at `BODY_BOTTOM_Y`, so the floor, the doorway, the sill and every boarding
+  // measurement are exactly as they were.
   const stepHeight = 0.1 * DETAIL;
-  const step = solid(
-    new Mesh(
-      new RoundedBoxGeometry(0.5 * DETAIL, stepHeight, DOOR_WIDTH * 0.8, 2, 0.04 * DETAIL),
-      bumperMaterial,
-    ),
+  const stepWidth = 0.5 * DETAIL;
+  const stepDepth = DOOR_WIDTH * 0.8;
+  const stepX = -(BODY_WIDTH / 2 + 0.16 * DETAIL);
+  const stepZ = doorGroup.position.z + DOOR_WIDTH / 2;
+  /** How far the road stays clear of the lowest tread at full deflection. */
+  const STEP_ROAD_CLEARANCE = 0.06;
+  // **At the tread's furthest corner, not at its centre.** Pitch and roll are
+  // rotations, so what they cost grows with the lever arm — and the corner of a
+  // 1.10 m by 1.66 m slab is 0.55 m further out in x and 0.83 m further along
+  // in z than the point it is positioned by. Derived from the centre this came
+  // out 0.05 m optimistic and the check duly reported the bodywork reaching
+  // y=0.010 where 0.06 was intended: not a failure, but the derivation being
+  // wrong is the interesting part, exactly as it was for the arch gap.
+  const worstDropAtDoor =
+    CAT_BUS_MAX_HEAVE +
+    CAT_BUS_MAX_PITCH * (Math.abs(stepZ) + stepDepth / 2) +
+    CAT_BUS_MAX_ROLL * (Math.abs(stepX) + stepWidth / 2);
+  const lowestTreadUnderside =
+    STEP_ROAD_CLEARANCE + worstDropAtDoor - CAT_BUS_RIDE_LIFT;
+  const stepGeometry = new RoundedBoxGeometry(
+    stepWidth,
+    stepHeight,
+    stepDepth,
+    2,
+    0.04 * DETAIL,
   );
-  step.position.set(
-    -(BODY_WIDTH / 2 + 0.16 * DETAIL),
-    BODY_BOTTOM_Y - stepHeight / 2,
-    doorGroup.position.z + DOOR_WIDTH / 2,
-  );
-  chassis.add(step);
+  function addTread(treadTop: number): Mesh {
+    const tread = solid(new Mesh(stepGeometry, bumperMaterial));
+    tread.name = 'cat-bus-step';
+    tread.position.set(stepX, treadTop - stepHeight / 2, stepZ);
+    chassis.add(tread);
+    return tread;
+  }
+  // The upper tread is the one everything below positions off — it is the one
+  // that has always been "the step".
+  const step = addTread(BODY_BOTTOM_Y);
+  addTread(lowestTreadUnderside + stepHeight);
 
   // --- bumpers ---------------------------------------------------------------
   // **`cabinBackZ`, not `-BODY_LENGTH / 2`** — and that difference is Jim's
