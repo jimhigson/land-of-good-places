@@ -1031,8 +1031,17 @@ export class BusJourney {
    */
   private pointTheInsideCamera(): void {
     this.bus.root.updateMatrixWorld(true);
-    this.worldEye.copy(this.insideEye).applyMatrix4(this.bus.root.matrixWorld);
-    this.worldAim.copy(this.insideAim).applyMatrix4(this.bus.root.matrixWorld);
+    // **Through the chassis, not the root** (#364). The chassis is the sprung
+    // body: it heaves, pitches and rolls on the suspension while the wheels
+    // stay on the road. Pushed through `root` instead, this lens would sit
+    // perfectly still inside a cabin that was visibly moving around it — which
+    // reads as the seats bouncing rather than the bus, and is the "passengers
+    // stay rigid" fault wearing a camera. `insideEye` and `insideAim` are
+    // written in the vehicle's own space, and the chassis sits at the origin of
+    // that space at rest, so nothing about them changes.
+    const ride = this.bus.chassis.matrixWorld;
+    this.worldEye.copy(this.insideEye).applyMatrix4(ride);
+    this.worldAim.copy(this.insideAim).applyMatrix4(ride);
     this.camera.position.copy(this.worldEye);
     this.camera.lookAt(this.worldAim);
   }

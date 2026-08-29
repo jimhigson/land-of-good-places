@@ -79,7 +79,7 @@
 
 import { CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES } from '../../core/constants';
 import { terrainHeight } from '../terrain';
-import { CAT_BUS_LENGTH, CAT_BUS_TOP, CAT_BUS_WIDTH } from './catBus';
+import { CAT_BUS_LENGTH, CAT_BUS_TOP, CAT_BUS_TRACK_WIDTH } from './catBus';
 import {
   ENTRANCE_BUS_ARRIVE_X,
   ENTRANCE_BUS_DOOR_X,
@@ -134,8 +134,8 @@ const RUN_TO_X = Math.max(ENTRANCE_BUS_ARRIVE_X, ENTRANCE_BUS_DOOR_X) + CAT_BUS_
  * the bus's own footprint, where the projection is meaningless and the answer
  * is simply *yes* — which is what clamping `back` at zero says.
  */
-const BUS_FAR_Z = ENTRANCE_BUS_STOP_Z - CAT_BUS_WIDTH;
-const BUS_NEAR_Z = ENTRANCE_BUS_STOP_Z + CAT_BUS_WIDTH;
+const BUS_FAR_Z = ENTRANCE_BUS_STOP_Z - CAT_BUS_TRACK_WIDTH;
+const BUS_NEAR_Z = ENTRANCE_BUS_STOP_Z + CAT_BUS_TRACK_WIDTH;
 
 /**
  * The ground the bus stands on — the height its silhouette starts from.
