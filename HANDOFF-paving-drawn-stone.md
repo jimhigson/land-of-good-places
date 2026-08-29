@@ -77,6 +77,51 @@ collider with no scene node of its own. **Next attempt should interrogate the
 collision world directly rather than the scene graph** — find what
 `collision.isClearCircle` refuses at (12.4, −44.0) and work back to its owner.
 
+## THE OBJECT IS NAMED: the bridge's own parapet wall
+
+**Proved 29 Aug** by `scripts/probe-seed2-blocker.mts` (throwaway diagnostic,
+delete before the PR lands if it is not wanted).
+
+**The recipe — reuse this, it is the instrument that worked.** The scene graph
+is the wrong place to look (instanced scenery has no node). Instead, wrap
+`CollisionWorld.prototype.addCircle`/`addWall` **before the park is built** and
+record `new Error().stack` against each collider object as it is pushed onto
+the private `circles`/`walls` arrays (TS `private` is erased at runtime, so
+`world.collision as unknown as { circles, walls }` reads them fine). Then walk
+the centreline, test the same circle-vs-collider overlap `isClearCircle` uses,
+and print the birth certificate of everything that overlaps. One run named it.
+
+The blocker at (12.4, −44.0) is a **wall, half-thickness 0.15, top 2.98
+absolute**, registered at `ParkTrain.ts:274` — which is the
+`for (const rail of built.guardRails)` loop, i.e. **the bridge's own masonry
+parapet/spandrel wall**, added with `topIsAbsolute = true`.
+
+That fits every measurement already taken:
+
+- it ignores `ACROSS_MARGIN`, because the parapet is placed by the **real**
+  pass, not by the conservative reservation;
+- it moves exactly one step when `bridgeRoadHalfFor` changes, because the
+  parapet is placed **at the road's half-width** — widen the road and the
+  parapet moves with it;
+- the push-out is one solid object with a 0.71 m worst case, because it is one
+  wall segment, not a scatter of scenery.
+
+The two segments involved are `(12.99, −41.17)→(12.65, −43.10)` (top 3.94) and
+`(12.65, −43.10)→(12.31, −45.07)` (top 2.98) — consecutive parapet segments
+stepping down the ramp.
+
+### Why it blocks: absolute tops on a ramp the walker is climbing
+
+The parapet's top is **absolute** world Y at the local road surface. At the
+ramp foot the walker's feet are near ground level while the parapet segment
+beside her still tops out at 2.98 m, so it is solid to her. That is correct
+behaviour for a parapet *beside* the road. The failure is that at −14.2 m the
+segment is not beside the walking line — the probe point sits essentially *on*
+the segment (overlap 0.71 m against a 0.15 m half-thickness). **Still to prove:
+whether the parapet is mis-placed onto the centreline, or the centreline
+`frameFor` walks diverges from the road the parapet was built around.** Do not
+state a cause until that is measured.
+
 The original hypothesis, retained so nobody re-derives it:
 
 ## (dead) Conservative-width hypothesis
