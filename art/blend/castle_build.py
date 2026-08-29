@@ -300,6 +300,21 @@ HEIGHT_TOLERANCE = 0.02
 # assertion can see the throne at all.
 DAIS_HEIGHT = 0.30
 
+# The height the tapestry rail hangs at, from the Engineer's §4.4. Typed for
+# `DAIS_HEIGHT`'s reason and with `DAIS_HEIGHT`'s caveat: they build the wall,
+# nothing here can measure it, and `castleFabric.ts` does not export it — the
+# two constants it does export (`SCONCE_MOUNT_Y`, `SCONCE_HEADROOM`) are read
+# properly above. Asked for in §7 of the handoff along with the dais.
+#
+# It lives here rather than in `castle_render.py`, which is where it used to
+# be, because the render script had the sconce's mount height typed beside it
+# as a second copy of a number this file now reads from the game. Two scripts
+# with their own copies of one figure is the bridge kit's bug exactly: its
+# build script read the constants properly, its render script hand-copied
+# them, they drifted, and five committed renders were of a bridge that was not
+# on the branch.
+TAPESTRY_RAIL_Y = 2.90
+
 
 class Requested:
     """One row of the Engineer's §4.3 table.

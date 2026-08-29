@@ -321,8 +321,14 @@ def hall_composition():
     size that moves moves the preview with it instead of quietly rendering a
     composition that no longer exists.
     """
-    rail_y = 2.90       # the Engineer's, contract §4.4
-    sconce_y = 2.10     # the Engineer's, contract §4.4
+    # Both from `castle_build`, which owns every number this file draws with.
+    # `SCONCE_MOUNT_Y` it *reads* out of the Engineer's `castleFabric.ts` the
+    # day that module lands; the rail height they do not export, so it is typed
+    # once, there, and flagged. Neither is typed here any more — they were, and
+    # a render script with its own copy of a build script's constant is the one
+    # mistake this file's own docstring is about.
+    rail_y = cb.TAPESTRY_RAIL_Y
+    sconce_y = cb.SCONCE_MOUNT_Y
     wall_y = 6.4        # the preview wall's inner face (Blender +Y)
     half_table = cb.TABLE_LENGTH * 0.5
 
@@ -530,6 +536,131 @@ def main() -> None:
     bpy.context.scene.render.filepath = os.path.join(OUT, "throne-beam.png")
     bpy.ops.render.render(write_still=True)
     print("  wrote throne-beam.png")
+
+    # --- every asset in a row, in elevation, against both posts -----------
+    #
+    # **The shot that answers "is this the right size", which nothing here
+    # answered before.** Three separate things were wrong with judging scale
+    # off the shots above, and they compound:
+    #
+    # 1. The posts were **typed at 1.86 m** and believed to come from
+    #    `TALLEST_CHILD`. A child is 2.12 m, or 2.97 m hatted, so every
+    #    silhouette in batch 1 was sized against a post a quarter short. That
+    #    is fixed, but fixing the number does not re-do the judgements made
+    #    against the old one — this shot is how they get re-done.
+    # 2. The per-asset shots have **no post at all**, and they are the shots
+    #    each asset is actually judged from.
+    # 3. The hall shots have both posts but at 38°, where **height is
+    #    foreshortened and depth reads as height**. An armour 8 m upstage of a
+    #    post cannot be compared with it by eye at that angle, whatever the
+    #    ortho camera guarantees about scale.
+    #
+    # So: a flat elevation, everything at the same depth, standing on one
+    # floor, with the two posts at the left where the eye starts. Elevation
+    # because it is the only projection in which two heights side by side can
+    # be read off against each other; ortho because a perspective one would
+    # reintroduce the problem it is here to remove.
+    for obj in bpy.data.objects:
+        if obj.type == "MESH":
+            obj.hide_render = True
+    for obj in (dais, beam, elevation_child, floor, wall, child, tall_child, plate):
+        obj.hide_render = True
+
+    # **A wide shot gets a wide frame.** Every other render here is square,
+    # which is right for one object; a 20 m row of them in a square frame is a
+    # letterbox strip with 60% of the image empty and each asset a thumbnail —
+    # a picture too small to judge from is the same failure as a picture of the
+    # wrong thing, just less obvious. Restored afterwards so the frame size
+    # cannot leak into a later shot.
+    lineup_aspect = (1800, 500)
+    was = (bpy.context.scene.render.resolution_x, bpy.context.scene.render.resolution_y)
+    bpy.context.scene.render.resolution_x, bpy.context.scene.render.resolution_y = lineup_aspect
+
+    # **The backdrop goes behind everything, and that took two goes.** The
+    # first version put the wall slab at y +0.5, and the throne — whose back
+    # leans back to y +0.55 — had its spire *inside the wall*. The render came
+    # out with a red armchair and a gold finial floating on its own above it,
+    # i.e. a picture of the exact fault the throne was reshaped to fix, caused
+    # entirely by the preview. That is fault 5 of the handoff happening again
+    # with a wall in place of a tapestry, in the shot written to stop it: a
+    # preview is scenery plus assets, and the scenery can hide the asset no
+    # matter which prop it is made of. So the backdrop is now behind the
+    # deepest thing in the row (the 6 m table), and in an ortho elevation that
+    # costs nothing — depth is not visible, only height is, which is the whole
+    # reason this projection was chosen.
+    BACKDROP_Y = 3.6
+
+    # Long things are yawed to lie **along** the row. The table is 6 m deep and
+    # the bench 2.8 m, so end-on they are a trestle and a stub — a silhouette
+    # review that shows two assets end-on is not reviewing their silhouettes.
+    YAWED = {"table-top", "table-legs", "bench-plank"}
+
+    lineup_floor = standin("lineup-floor", (25.0, 8.0, 0.2), (-2.4, 1.2, -0.1), 0xF0A3C1)
+    lineup = [lineup_floor]
+    # The two posts first, because a reader scans left to right and the
+    # reference belongs before the things it is a reference for.
+    for x, height, colour in (
+        (-13.8, cb.CHILD_HEIGHT, 0x7FE3C0),
+        (-12.8, cb.TALLEST_CHILD, 0x4FBF9B),
+    ):
+        lineup.append(standin(f"lineup-post-{height:.2f}", (0.42, 0.42, height),
+                              (x, 0.0, height * 0.5), colour))
+
+    # (x, parts, lift) — `lift` is what the asset stands on, and every value
+    # comes from the same constant `check_contract` adds to the mesh before
+    # asserting it against the headroom. So this picture cannot show a throne
+    # at a height the build is not checking. Wall assets hang at their mount.
+    for x, parts, lift in (
+        (-11.0, ("plinth-block",), 0.0),
+        (-11.0, ("armour-plate", "armour-trim", "armour-visor", "armour-plume"), 0.25),
+        (-8.6, ("throne-frame", "throne-gold", "throne-cushion"), cb.DAIS_HEIGHT),
+        (-6.2, ("bench-plank",), 0.0),
+        (-2.0, ("table-top", "table-legs"), 0.0),
+        (-3.0, ("feast-goblet",), cb.TABLE_TOP),
+        (-1.9, ("feast-roast",), cb.TABLE_TOP),
+        (-1.0, ("feast-pie",), cb.TABLE_TOP),
+        (2.0, ("chest-body", "chest-bands", "chest-lid"), 0.0),
+        (3.2, ("feast-loaf",), 0.0),
+        (5.8, ("tapestry-cloth", "tapestry-fringe", "tapestryrail-pole"), cb.TAPESTRY_RAIL_Y),
+        (8.8, ("sconce-bracket", "sconce-cup"), cb.SCONCE_MOUNT_Y),
+    ):
+        for part in parts:
+            obj = bpy.data.objects[part]
+            obj.hide_render = False
+            # **Add to the authored origin, never assign over it.** `chest-lid`
+            # is the one node in this file with a deliberate non-identity
+            # origin — it *is* the hinge axis, which is why no offset formula
+            # exists to drift. Assigning `location` outright throws that away,
+            # and the first render of this shot had the lid sunk 0.52 m into
+            # the chest, reading as a slightly odd box. `hall_composition`
+            # already adds rather than assigns, for exactly this reason.
+            base = Vector(home[part])
+            obj.location = Vector((x, 0.0, lift)) + base
+            if part in YAWED:
+                obj.rotation_mode = "XYZ"
+                obj.rotation_euler = (0.0, 0.0, math.radians(90.0))
+            lineup.append(obj)
+    # The throne's dais is the Engineer's, not this asset's, so it is a
+    # stand-in — at the height `check_contract` adds to the throne's own.
+    lineup.append(standin("lineup-dais", (2.2, 1.4, cb.DAIS_HEIGHT),
+                          (-8.6, 0.0, cb.DAIS_HEIGHT * 0.5), 0xC2708F))
+    # The wall the two wall-assets hang on, and the wall-plate above it — so
+    # the sconce's headroom, which the build now asserts, is a thing you can
+    # see rather than only a number in the log.
+    lineup.append(standin("lineup-wall", (25.0, 0.3, cb.CEILING_CLEAR),
+                          (-2.4, BACKDROP_Y, cb.CEILING_CLEAR * 0.5), 0xFFC2D8))
+    lineup.append(standin("lineup-plate", (25.0, 0.5, 0.22),
+                          (-2.4, BACKDROP_Y - 0.3, cb.CEILING_CLEAR + 0.11), 0xB5836A))
+    for obj in lineup:
+        obj.hide_render = False
+    bpy.context.view_layer.update()
+    frame(lineup, 0.0, 2.0, camera, 1.04)
+    bpy.context.scene.render.filepath = os.path.join(OUT, "lineup.png")
+    bpy.ops.render.render(write_still=True)
+    bpy.context.scene.render.resolution_x, bpy.context.scene.render.resolution_y = was
+    print(f"  wrote lineup.png ({lineup_aspect[0]}x{lineup_aspect[1]}) — every batch-1 asset "
+          f"in elevation against a {cb.CHILD_HEIGHT:.2f} m child and a {cb.TALLEST_CHILD:.2f} m "
+          "one in the tallest hat")
 
     print(f"  the pale post in the hall shots is {cb.CHILD_HEIGHT:.2f} m — a child, "
           f"for scale; the darker one is {cb.TALLEST_CHILD:.2f} m, a child in the "
