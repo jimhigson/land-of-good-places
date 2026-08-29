@@ -323,7 +323,7 @@ export function createThing(options?: ThingOptions): AssetHandle;
 
 | Rule | Detail |
 | --- | --- |
-| **Units** | 1 unit = 1 metre. The player kid is **1.86 m**. |
+| **Units** | 1 unit = 1 metre. The player kid is **2.12 m** (`KID_HEIGHT`), **2.97 m** in the tallest hair and hat (`TALLEST_CHILD_HEIGHT`) — both in `src/art/models/kid.ts`. **Import them; never type them** (see §4, and the note in `ASSET_MANIFEST.md`). |
 | **Origin** | At the **feet / base**, centred on X and Z. `root.position.y = groundHeight` must seat it with no fudge factor. Balloons are the exception: their origin is the **bottom of the string**, i.e. the hand-hold point, so `kid.holdAnchor.add(balloon.root)` needs no offset. |
 | **Facing** | Forward is **+Z**. `root.rotation.y = 0` faces the camera in the default view. Rotate the root only. |
 | **Scale** | Leave `root.scale` at 1 — it is reserved for gameplay squash-and-stretch. Bake size into geometry. |
