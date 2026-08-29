@@ -6,6 +6,8 @@
  * npm run check:park-map -- --mutate=viewport   # prove assertion 1 can fail
  * npm run check:park-map -- --mutate=position   # prove assertion 2 can fail
  * npm run check:park-map -- --mutate=stretch    # prove assertion 3 can fail
+ * npm run check:park-map -- --mutate=entrance   # ... at the rides' queues
+ * npm run check:park-map -- --mutate=gateway    # ... at the gate and the bus
  * ```
  *
  * #234 is the reason this exists, and it is worth stating exactly, because it
@@ -49,12 +51,25 @@
  *      earlier version of this comment lumped the castle in with the anchors
  *      while the code returned `BUILDING_CENTRE` and never touched the scene —
  *      the same over-broad claim, in miniature, caught in re-review.
- *    - **Stalls, the fountain and stations** — truth still comes from the same
- *      owner the content list read, because no separately-positioned scene
- *      object exists to ask. For these the assertion proves the *projection*
- *      round-trips and that every drawn feature has a real owner and a
- *      resolvable id; it does **not** independently prove the content list
- *      chose the right field. Stated here rather than dressed up.
+ *    - **The entrance gate** — truth is `park-gate-arch`, the crossbar
+ *      `Entrance.ts` stands over the gap in the boundary wall. Genuine
+ *      independence, and it earned its keep on the first run: the obvious
+ *      name `entrance-arch` is already the castle's own front-door arch, so
+ *      the check measured the park gate against the castle and reported the
+ *      map 65.65 m out. A real name collision, found by the assertion rather
+ *      than by reading.
+ *    - **Stalls, the fountain, stations and the cat bus** — truth still comes
+ *      from the same owner the content list read, because no
+ *      separately-positioned scene object exists to ask. For these the
+ *      assertion proves the *projection* round-trips and that every drawn
+ *      feature has a real owner and a resolvable id; it does **not**
+ *      independently prove the content list chose the right field. Stated
+ *      here rather than dressed up.
+ *
+ *      The cat bus is in this group for a reason peculiar to it: for most of
+ *      a save **there is no bus in the world at all**, so there is nothing to
+ *      ask. That is also why the map draws the *stop* rather than the vehicle
+ *      — see `parkMapContent.ts`'s note on the `catBus` feature.
  * 3. **The map is conformal.** Between every pair of features, the bearing on
  *    the map matches the bearing in the world, and the map-metres-per-world-
  *    metre ratio is the same for all pairs. That is what "relative position,
@@ -78,10 +93,11 @@
  * Every assertion has a `--mutate` mode that breaks the thing it describes
  * while leaving the rest of the map correct — `viewport` reinstates the 66 m
  * square that caused #234, `position` nudges one attraction, `stretch` scales
- * one axis, and **`entrance` draws every ride at its queue rather than at the
- * ride**, which is the exact class of error the vacuous version of assertion 2
- * could not see and the scene-graph comparison now can. Each was run and each
- * goes red; the messages are in the PR.
+ * one axis, **`entrance` draws every ride at its queue rather than at the
+ * ride** — the exact class of error the vacuous version of assertion 2 could
+ * not see and the scene-graph comparison now can — and **`gateway` swaps the
+ * entrance arch with the cat bus stop**, the plausible-looking 9 m error at
+ * the way in. Each was run and each goes red; the messages are in the PR.
  */
 
 import { PLAYER_RADIUS } from '../src/core/constants.ts';
@@ -96,6 +112,12 @@ import {
   outdoorParkMapProjection,
   type MapProjection,
 } from '../src/ui/parkMapProjection.ts';
+import {
+  ENTRANCE_BUS_DOOR_X,
+  ENTRANCE_BUS_STOP_Z,
+  ENTRANCE_GATE_X,
+  ENTRANCE_GATE_Z,
+} from '../src/world/entrance/layout.ts';
 import { buildHeadlessPark } from './park-harness.mts';
 
 // --------------------------------------------------------------- thresholds
@@ -128,8 +150,10 @@ const CANVAS_SIZES: readonly (readonly [number, number, string])[] = [
 
 const mutateArg = process.argv.find((a) => a.startsWith('--mutate'));
 const mutation = mutateArg ? (mutateArg.split('=')[1] ?? 'position') : null;
-if (mutation && !['viewport', 'position', 'stretch', 'entrance'].includes(mutation)) {
-  console.error(`Unknown --mutate=${mutation}. Use viewport, position, stretch or entrance.`);
+if (mutation && !['viewport', 'position', 'stretch', 'entrance', 'gateway'].includes(mutation)) {
+  console.error(
+    `Unknown --mutate=${mutation}. Use viewport, position, stretch, entrance or gateway.`,
+  );
   process.exit(2);
 }
 
@@ -189,13 +213,35 @@ const features = (() => {
 // `--mutate=entrance`: every ride drawn at its path entrance instead of at
 // itself. Applied after the list is built, so it exercises assertion 2's
 // scene-graph branch specifically.
+// `--mutate=gateway`: the gate and the cat bus swapped. This is the mistake
+// that is easy to make by eye — they are 9 m apart on the same axis and both
+// "at the entrance", so a map that drew the arch on the kerb and the bus in the
+// gateway would look entirely plausible and be wrong by 9 m, fourteen times the
+// tolerance. Exercises both new branches of assertion 2 at once: the gate's
+// against the arch standing in the scene, the bus's against `layout.ts`.
+function swapGateAndBus(list: readonly MapFeature[]): readonly MapFeature[] {
+  const gate = list.find((f) => f.kind === 'gate');
+  const bus = list.find((f) => f.kind === 'catBus');
+  if (!gate || !bus) {
+    console.error('--mutate=gateway: no gate or cat bus on the map to swap.');
+    process.exit(2);
+  }
+  return list.map((f) => {
+    if (f === gate) return { ...f, x: bus.x, z: bus.z };
+    if (f === bus) return { ...f, x: gate.x, z: gate.z };
+    return f;
+  });
+}
+
 const checkedFeatures = mutation === 'entrance'
   ? features.map((f) => {
       if (f.kind !== 'anchor') return f;
       const anchor = ANCHORS_BY_ID[f.id as keyof typeof ANCHORS_BY_ID];
       return anchor ? { ...f, x: anchor.entrance[0], z: anchor.entrance[1] } : f;
     })
-  : features;
+  : mutation === 'gateway'
+    ? swapGateAndBus(features)
+    : features;
 
 /**
  * Where each feature really is, re-derived from the module that owns it rather
@@ -233,6 +279,35 @@ function truePosition(feature: MapFeature): readonly [number, number] | null {
   if (feature.kind === 'station') {
     const station = stations.find((s) => s.id === feature.id);
     return station ? [station.x, station.z] : null;
+  }
+  if (feature.kind === 'gate') {
+    // The arch that actually stands in the park, read out of the finished
+    // scene graph: `Entrance.ts` builds a half-torus crossbar spanning the
+    // opening and centred on it, and names it `entrance-arch` for this. Real
+    // independence, like `castle-walls` — a map that drew the gate at the bus
+    // stop, at the shelter or at the wall's radius rather than at the gap in
+    // it is caught here.
+    return scenePosition('park-gate-arch') ?? [ENTRANCE_GATE_X, ENTRANCE_GATE_Z];
+  }
+  if (feature.kind === 'catBus') {
+    // Truth is `layout.ts`, the same owner the content list read — the honest
+    // status, stated rather than dressed up, exactly as for stalls and
+    // stations above.
+    //
+    // **There is no scene object to ask, and that is the point of the
+    // feature.** `Entrance.ts` builds the arrival only when one is due, and
+    // disposes the bus once it has driven off past `ENTRANCE_BUS_VANISH_X`, so
+    // for most of a save no bus exists anywhere in the world. The map
+    // therefore marks the *stop* — where the bus's door comes to rest, dead in
+    // front of the gate — which is permanent and owned. See the note on the
+    // `catBus` feature in `parkMapContent.ts`.
+    //
+    // So this branch proves the projection round-trips and that the drawn bus
+    // is at the stop `layout.ts` names; it does not independently prove that
+    // the stop is the right field to have chosen. What it does catch is drift:
+    // move `ENTRANCE_BUS_STOP_Z` or the kerb and leave the map behind, and
+    // this goes red.
+    return [ENTRANCE_BUS_DOOR_X, ENTRANCE_BUS_STOP_Z];
   }
   return null;
 }
