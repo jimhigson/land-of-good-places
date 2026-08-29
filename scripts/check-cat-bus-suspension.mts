@@ -14,13 +14,14 @@
  *
  * ## Why "at rest" is not good enough, in one number
  *
- * A tyre 2.13 m tall and a mudguard 0.35 m above it clear each other by 0.35 m
+ * A tyre 2.13 m tall and a mudguard 0.69 m above it clear each other by 0.69 m
  * standing still. The body drops up to `CAT_BUS_MAX_HEAVE` on a bump, tips up
- * to `CAT_BUS_MAX_PITCH` about the middle — which is another 0.086 m at the rear
- * axle — and leans `CAT_BUS_MAX_ROLL`, another 0.070 m out at the track. Add
- * them and the arch has 0.256 m of the 0.345 m eaten at the worst corner. That
+ * to `CAT_BUS_MAX_PITCH` about the middle — another 0.133 m at the rear axle —
+ * and leans `CAT_BUS_MAX_ROLL`, another 0.161 m out at the track. Add them and
+ * **0.53 m of that 0.69 m is eaten at the worst corner**, leaving 0.159 m. That
  * margin is real but it is not large, and every one of those three limits is a
- * number somebody could raise later while looking only at how it feels.
+ * number somebody could raise later while looking only at how it feels — as
+ * indeed happened, when the bob was raised eight-fold to make it visible.
  *
  * So this measures the **built meshes at the corners of the travel envelope**,
  * and separately drives the real `animate()` hard enough to prove the envelope
@@ -38,7 +39,6 @@ import './headless-canvas.mjs';
 import { Box3, Mesh, Object3D, Vector3 } from 'three';
 import {
   CAT_BUS_ARCH_GAP,
-  CAT_BUS_FLOOR_Y,
   CAT_BUS_MAX_HEAVE,
   CAT_BUS_MAX_PITCH,
   CAT_BUS_MAX_ROLL,
@@ -91,6 +91,71 @@ function worldVertices(object: Object3D): Vector3[] {
     }
   });
   return points;
+}
+
+/**
+ * A mesh's **surface**, sampled — not just the corners of it.
+ *
+ * **Vertices are not a surface, and measuring them instead of one hid a real
+ * hole for two shapes running.** The mudguard is now a single `ExtrudeGeometry`
+ * swept round the wheel, and an extrusion carries vertices only on its two end
+ * caps: there is not one vertex anywhere on the tyre's own centre plane, which
+ * is precisely where a mudguard is nearest the tyre it covers. Measured at the
+ * vertices the tightest gap came out *larger* than the arch gap the shape was
+ * built with — the check could no longer see the closest point at all, and it
+ * still said OK.
+ *
+ * It had only ever worked by luck: `RoundedBoxGeometry`, which the plates used,
+ * happens to carry interior vertices across each face. Swap in any shape that
+ * does not and the assertion quietly stops describing anything, which is this
+ * repo's oldest bug (CLAUDE.md, "A check can pass without checking anything").
+ *
+ * So every triangle is sampled on a barycentric grid as well as at its corners.
+ * Returned in the mesh's **own** space, with its matrix, so the poses below can
+ * transform a fixed set of points twenty-seven times rather than re-deriving
+ * them.
+ */
+const BARYCENTRIC_STEPS = 4;
+interface SampledMesh {
+  readonly mesh: Mesh;
+  readonly points: readonly Vector3[];
+}
+
+function localSurfaceSamples(object: Object3D): SampledMesh[] {
+  const sampled: SampledMesh[] = [];
+  object.traverse((child) => {
+    const mesh = child as Mesh;
+    if (!(mesh as Partial<Mesh>).isMesh) return;
+    const position = mesh.geometry.getAttribute('position');
+    if (!position) return;
+    const index = mesh.geometry.getIndex();
+    const count = index ? index.count : position.count;
+    const at = (i: number): number => (index ? index.getX(i) : i);
+    const points: Vector3[] = [];
+    const a = new Vector3();
+    const b = new Vector3();
+    const c = new Vector3();
+    for (let i = 0; i + 2 < count; i += 3) {
+      a.fromBufferAttribute(position, at(i));
+      b.fromBufferAttribute(position, at(i + 1));
+      c.fromBufferAttribute(position, at(i + 2));
+      for (let u = 0; u <= BARYCENTRIC_STEPS; u += 1) {
+        for (let v = 0; u + v <= BARYCENTRIC_STEPS; v += 1) {
+          const wu = u / BARYCENTRIC_STEPS;
+          const wv = v / BARYCENTRIC_STEPS;
+          points.push(
+            new Vector3(
+              a.x * (1 - wu - wv) + b.x * wu + c.x * wv,
+              a.y * (1 - wu - wv) + b.y * wu + c.y * wv,
+              a.z * (1 - wu - wv) + b.z * wu + c.z * wv,
+            ),
+          );
+        }
+      }
+    }
+    sampled.push({ mesh, points });
+  });
+  return sampled;
 }
 
 const wheels = collect(root, 'cat-bus-wheel') as Mesh[];
@@ -270,28 +335,67 @@ note(
 // ------------------------------- 3. no wheel is inside the bus, at any pose
 
 /**
- * The cabin's inner wall. A wheel inboard of this and above the floor is a
- * black cylinder standing in the bus beside the passengers, which is exactly
- * what doubling the radius would have caused had the wheels stayed where they
- * were: at the old track the tyre's inboard face was at x 2.16 against an inner
- * wall at 2.48, harmless at 0.53 m of radius and 1.34 m into the cabin at 1.07.
+ * **The branch's headline claim, measured against the bus that got built.**
+ *
+ * The whole design argument for #364 is *"the wheels stand entirely outboard of
+ * the bodywork, and that is the whole answer"* — the clearance is guaranteed by
+ * lateral separation rather than by a ride height a downstroke can eat. This is
+ * where that is either true or not.
+ *
+ * **It used to assert against a number typed into this file**, `CAT_BUS_WIDTH /
+ * 2 - 0.16`, which is 0.19 m more permissive than the bodywork's real outer
+ * surface. The review fooled it in one line: `WHEEL_CLEARANCE` from 0.08 to
+ * -0.25 drives each tyre 0.185 m into the flank of the bus, and this printed
+ * `OK (10 measurements)` with a wheel sunk a fifth of a metre into the
+ * passenger cabin. A constant standing in for a surface is the same disease as
+ * a comment promising two numbers agree.
+ *
+ * So it asks the built shells where their surface is, at **every pose** — the
+ * shells roll and heave, the tyres do not, and it is at full roll that a flank
+ * leans furthest over a wheel. And it asks with `distanceToTyre`, which knows
+ * the wheel is a *cylinder*: a flat comparison of x would have to be told which
+ * heights and which z to bother about, and would be wrong at the top of the
+ * body, where the bodywork genuinely does lean out past the tyre's inner face
+ * and there is no tyre up there to hit.
  */
-const INNER_WALL_X = CAT_BUS_WIDTH / 2 - 0.16;
-for (const tyre of tyres) {
-  const inboard = worldVertices(tyre.mesh)
-    .filter((p) => p.y > CAT_BUS_FLOOR_Y)
-    .reduce((least, p) => Math.min(least, Math.abs(p.x)), Infinity);
-  check(
-    inboard > INNER_WALL_X,
-    `a wheel reaches x=${inboard.toFixed(3)} above the cabin floor, inboard of the inner wall at ${INNER_WALL_X.toFixed(3)} — it is standing inside the bus`,
-  );
+const shellNames = ['cat-bus-shell-lower', 'cat-bus-shell-upper'] as const;
+const bodywork = shellNames.flatMap((name) => {
+  const shell = root.getObjectByName(name);
+  if (!shell) {
+    failures.push(`the bus has no '${name}' — the bodywork's surface cannot be measured, so nothing is checking the wheels are outside it`);
+    return [];
+  }
+  return localSurfaceSamples(shell);
+});
+
+let worstBodyworkGap = Infinity;
+let worstBodyworkPose = '';
+const scratchPoint = new Vector3();
+for (const p of posesToTest()) {
+  pose(p.heave, p.pitch, p.roll);
+  for (const { mesh, points } of bodywork) {
+    for (const local of points) {
+      scratchPoint.copy(local).applyMatrix4(mesh.matrixWorld);
+      for (const tyre of tyres) {
+        const gap = distanceToTyre(tyre, scratchPoint);
+        if (gap < worstBodyworkGap) {
+          worstBodyworkGap = gap;
+          worstBodyworkPose = p.label;
+        }
+      }
+    }
+  }
 }
-const closestTyreX = tyres.reduce(
-  (least, tyre) => Math.min(least, worldVertices(tyre.mesh).reduce((m, p) => Math.min(m, Math.abs(p.x)), Infinity)),
-  Infinity,
+pose(0, 0, 0);
+check(
+  worstBodyworkGap > 0,
+  `the bodywork reaches ${(-worstBodyworkGap).toFixed(4)} m INSIDE a tyre at "${worstBodyworkPose}" — there is a wheel standing in the bus, which is the one thing doubling the wheels had to avoid`,
 );
 note(
-  `tyres clear the cabin's inner wall by ${(closestTyreX - INNER_WALL_X).toFixed(3)} m; track ${CAT_BUS_TRACK_WIDTH.toFixed(2)} m over a ${CAT_BUS_WIDTH.toFixed(2)} m body`,
+  `closest the bodywork's own surface comes to a tyre, over the whole envelope: ${worstBodyworkGap.toFixed(4)} m, at "${worstBodyworkPose}"`,
+);
+note(
+  `track ${CAT_BUS_TRACK_WIDTH.toFixed(2)} m over a ${CAT_BUS_WIDTH.toFixed(2)} m body`,
 );
 
 // ------------------------------ 3b. the tyres are on the road, not the verge
@@ -350,18 +454,34 @@ function pose(heave: number, pitch: number, roll: number): void {
   root.updateMatrixWorld(true);
 }
 
+/** Each mudguard's surface, in its own space, sampled once. */
+const guardSurfaces = guards.map(({ fender, tyre }) => ({
+  tyre,
+  sampled: localSurfaceSamples(fender),
+}));
+
+/** The tightest a mudguard comes to its tyre at one pose. */
+function tightestGuardGap(heave: number, pitch: number, roll: number): number {
+  pose(heave, pitch, roll);
+  let tightest = Infinity;
+  for (const { tyre, sampled } of guardSurfaces) {
+    for (const { mesh, points } of sampled) {
+      for (const local of points) {
+        scratchPoint.copy(local).applyMatrix4(mesh.matrixWorld);
+        tightest = Math.min(tightest, distanceToTyre(tyre, scratchPoint));
+      }
+    }
+  }
+  return tightest;
+}
+
 let worstGap = Infinity;
 let worstPose = '';
 for (const p of posesToTest()) {
-  pose(p.heave, p.pitch, p.roll);
-  for (const { fender, tyre } of guards) {
-    for (const point of worldVertices(fender)) {
-      const gap = distanceToTyre(tyre, point);
-      if (gap < worstGap) {
-        worstGap = gap;
-        worstPose = p.label;
-      }
-    }
+  const gap = tightestGuardGap(p.heave, p.pitch, p.roll);
+  if (gap < worstGap) {
+    worstGap = gap;
+    worstPose = p.label;
   }
 }
 check(
@@ -371,6 +491,32 @@ check(
 note(
   `tightest mudguard-to-tyre gap over the whole travel envelope: ${worstGap.toFixed(4)} m, at "${worstPose}" (arch gap at rest ${CAT_BUS_ARCH_GAP.toFixed(4)} m)`,
 );
+
+/**
+ * **The mudguards ride the sprung body, so the gap opens and closes.**
+ *
+ * `catBus.ts` says *"the fender rides on the chassis, so this gap genuinely
+ * opens and closes as the bus bobs — that is what makes the suspension visible
+ * from outside"*. Nothing was checking it, and the review proved the sentence
+ * unguarded by moving `chassis.add(fender)` to `axles.add(fender)`: the arch
+ * then hangs off the axle beside the wheel, moves with it, and every clearance
+ * assertion above stays green while the one visible symptom of the whole
+ * feature quietly disappears.
+ *
+ * Two poses is all it takes. On the chassis the gap differs by twice the heave
+ * between them; on the axles it is the same number twice.
+ */
+const gapAtTop = tightestGuardGap(CAT_BUS_MAX_HEAVE, 0, 0);
+const gapAtBottom = tightestGuardGap(-CAT_BUS_MAX_HEAVE, 0, 0);
+const gapSwing = Math.abs(gapAtTop - gapAtBottom);
+check(
+  gapSwing > CAT_BUS_MAX_HEAVE,
+  `the mudguard-to-tyre gap only changes by ${gapSwing.toFixed(5)} m between full bump and full droop (a chassis-mounted arch swings well over ${CAT_BUS_MAX_HEAVE.toFixed(2)} m; one bolted to the axle swings nothing at all) — the mudguards are not riding the sprung body, so the suspension is invisible from outside however far the chassis moves`,
+);
+note(
+  `mudguard-to-tyre gap swings ${gapAtBottom.toFixed(3)}..${gapAtTop.toFixed(3)} m across the bob — ${gapSwing.toFixed(3)} m of visible travel`,
+);
+pose(0, 0, 0);
 
 // ----------------------------- 5. nothing on the sprung body touches the road
 

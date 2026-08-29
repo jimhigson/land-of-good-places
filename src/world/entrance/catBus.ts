@@ -1424,7 +1424,19 @@ export function createCatBus(): CatBusHandle {
       // guards rather than by its own coordinates.
       const fender = new Group();
       fender.name = 'cat-bus-fender';
-      fender.position.set(x, WHEEL_RADIUS, z);
+      // **`- CAT_BUS_RIDE_LIFT`, and leaving it out was a real bug.** The
+      // wheels hang off `axles`, which sits on the road; the fender hangs off
+      // `chassis`, which rests `CAT_BUS_RIDE_LIFT` higher up. Placed at plain
+      // `WHEEL_RADIUS` in the chassis's own space it therefore came out that
+      // much *above* the wheel it guards — 0.64 m of daylight at rest, an arch
+      // floating level with the windows rather than sitting over a tyre, which
+      // is its own contribution to the fender not reading as a mudguard.
+      //
+      // Invisible in the source because both numbers are called the wheel's
+      // radius and only one of them is in the wheel's frame. Found by the
+      // clearance check reporting a tightest gap *larger* than the arch gap it
+      // was built with, which is not a thing a correct arch can do.
+      fender.position.set(x, WHEEL_RADIUS - CAT_BUS_RIDE_LIFT, z);
       chassis.add(fender);
       // The bumper's timber colour, matching the stub axle it shares a corner
       // with — reads as chassis furniture rather than as bodywork, which the
