@@ -186,3 +186,21 @@ trees spread by minimum spacing.
 
 All green: build 0, procgen 443/443, check red on all four mutations.
 Screenshots `v2-*` under `park-map-334/` on `qa-screenshots`.
+
+## Re-review round 3 (29 Aug) — all four items done
+
+1. **Castle branch of assertion 2** now reads `castle-walls` from the scene.
+   NB `anchor:building` would be **wrong** — that is the plot, 3.54 m from the
+   masonry; it would fail a correct map.
+2. **drawCoaster** drew closed ellipses over the mountain. Back arcs ->
+   mountains -> front arcs, so the track goes behind the peak.
+3. **Phone space** — the 237px of free card was real. Claiming it alone did
+   NOTHING (8/14 either way): height was never the constraint, horizontal
+   crowding round each icon was. Only paid once labels got 12 candidate
+   positions reaching out to 2 text-heights. Both halves needed.
+4. **Count corrected**: was 8/14 not 9 — I had been counting painted text
+   runs, and a wrapped name paints as two lines. Canvas now carries
+   `dataset.labelCount` from `labelBoxes.length`; read it, don't infer it.
+
+Now 13/14 desktop, 11/14 at 390px, 7/14 at 320px, 8/14 landscape.
+Screenshots `v3-*`. Build 0, procgen 443/443, check red on all four mutations.
