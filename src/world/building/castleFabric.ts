@@ -229,7 +229,27 @@ export function buildCeilingBeams(deck: number): InstancedMesh | null {
     softMaterial(PALETTE.woodDark, 0.8),
     Math.max(1, spots.length),
   );
-  beams.name = `castle-wall-plate-${deck}`;
+  // **`castle-timber-`, never `castle-wall-`.** `test/procgen/parkFacts.ts`
+  // measures the top of the castle's stonework by matching every mesh in the
+  // scene against `/^(castle-wall-|crenellations$)/`, and feeds it to the
+  // invariant that the ginormous slide leaves over the battlements. This mesh
+  // was called `castle-wall-plate-N` for one afternoon and fell straight into
+  // that pattern: an interior timber 4.5 m higher than the real parapet was
+  // read as the castle's stonework, `castleMasonryTopY` jumped 10.29 → 14.83 m,
+  // and `npm run test:procgen` failed on all five seeds.
+  //
+  // The fix is this name, not a narrower pattern. That prefix is **deliberately
+  // permissive**: the facade already has four bands (`-lower`, `-upper`,
+  // `-window`, `-lintel`), two of them added long after the invariant was
+  // written, and they were picked up for free. Enumerating them instead would
+  // make the check fail *unsafe* — a fifth band would be silently excluded, the
+  // measured masonry top would read low, and a slide that really does clip the
+  // battlements would pass. Over-measuring only ever costs a false failure;
+  // under-measuring costs a child hitting a wall.
+  //
+  // So: **nothing built for the castle's inside may take a `castle-wall-`
+  // name.** `check:castle` asserts exactly that, so this cannot recur silently.
+  beams.name = `castle-timber-plate-${deck}`;
   // Never a shadow caster. Issue #251 has the shadow pass at 57% of draw
   // calls, and a timber pressed against the ceiling it is lit through would
   // buy a stripe of acne rather than a shadow.

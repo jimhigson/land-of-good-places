@@ -81,8 +81,18 @@ const matrix = new Matrix4();
 const localBounds = new Box3();
 const worldBounds = new Box3();
 let beamsChecked = 0;
-/** The lowest point of any built timber, measured. Compared with the constant. */
+/**
+ * The lowest and **highest** underside across every built timber.
+ *
+ * Both, not just the lowest, because a single `Math.min` has a blind spot a
+ * reviewer found: one segment of 380 hung *too high* would leave the minimum
+ * untouched and pass green. The dangerous direction is caught per-instance by
+ * the headroom clause, so this was cosmetic — but a range costs one extra
+ * variable and closes it, and `BEAM_UNDERSIDE` is supposed to describe **every**
+ * timber, not the worst one.
+ */
 let lowestBuilt = Infinity;
+let highestBuilt = -Infinity;
 
 /**
  * How many points across a segment's own footprint are tested for solid slab.
@@ -137,6 +147,7 @@ for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
     worldBounds.copy(localBounds).applyMatrix4(matrix);
     beamsChecked += 1;
     lowestBuilt = Math.min(lowestBuilt, worldBounds.min.y);
+    highestBuilt = Math.max(highestBuilt, worldBounds.min.y);
 
     // --- the segment is fixed to slab that exists, across its whole length ---
     for (let sx = 0; sx < FOOTPRINT_SAMPLES; sx += 1) {
@@ -186,16 +197,69 @@ for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
  * own constant. The same shape of check covers the Artist's `TABLE_TOP`,
  * `BENCH_SEAT` and `SCONCE_CUP_OFFSET` when batch 1 lands.
  */
-if (Number.isFinite(lowestBuilt) && Math.abs(lowestBuilt - BEAM_UNDERSIDE) > 1e-6) {
+for (const [label, measured] of [
+  ['lowest', lowestBuilt],
+  ['highest', highestBuilt],
+] as const) {
+  if (!Number.isFinite(measured)) continue;
+  if (Math.abs(measured - BEAM_UNDERSIDE) <= 1e-6) continue;
   fail(
-    `BEAM_UNDERSIDE says the timbers hang to ${BEAM_UNDERSIDE.toFixed(3)} m, but the built ` +
-      `mesh measures ${lowestBuilt.toFixed(3)} m. The Artist sizes wall-standing props ` +
-      `against that constant — fix the constant or fix the geometry.`,
+    `BEAM_UNDERSIDE says the timbers hang to ${BEAM_UNDERSIDE.toFixed(3)} m, but the ` +
+      `${label} built underside measures ${measured.toFixed(3)} m. The Artist sizes ` +
+      `wall-standing props against that constant — fix the constant or fix the geometry.`,
   );
 }
 
 // ---------------------------------------------------------------------------
-// 4. NOT YET WRITTEN — and said out loud, because the contract depends on it.
+// 4. Nothing built for the inside may claim an exterior masonry name.
+// ---------------------------------------------------------------------------
+
+/**
+ * The pattern `test/procgen/parkFacts.ts` uses to find the castle's stonework,
+ * copied here **on purpose** — the one place in this file that repeats a value
+ * rather than importing it.
+ *
+ * Importing it would be better and is not available: it is an inline literal
+ * inside a function in a test-only module, and exporting it would mean editing
+ * a shared invariant file to satisfy a checker. So it is duplicated, and this
+ * comment is the mitigation: if `parkFacts.ts` ever widens its pattern, widen
+ * this one. The failure mode of the copy drifting is a false *pass* here
+ * followed by a real `test:procgen` failure, which is loud and diagnosable —
+ * the opposite way round from the bug this exists to prevent.
+ */
+const EXTERIOR_MASONRY_PATTERN = /^(castle-wall-|crenellations$)/;
+
+/**
+ * **A `castle-wall-` name on an interior mesh silently breaks a safety
+ * invariant, and `npm run build` cannot see it.**
+ *
+ * `parkFacts.ts` measures the top of the castle's stonework by matching that
+ * pattern across the *whole scene*, and the ginormous-slide clearance invariant
+ * is built on the result. The wall-plate was called `castle-wall-plate-N` for
+ * one afternoon: an interior timber 4.5 m above the real parapet was read as
+ * the battlements, `castleMasonryTopY` jumped 10.29 → 14.83 m, and
+ * `test:procgen` failed on all five seeds — while `npm run build` stayed green,
+ * because that suite is gated separately in CI and is not in the build chain.
+ *
+ * The pattern is deliberately permissive (the facade has four bands and gained
+ * two of them after it was written), so the interior is what must stay clear of
+ * it. This makes that a rule with teeth rather than a comment.
+ */
+for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
+  const built = buildCeilingBeams(deck);
+  if (!built) continue;
+  if (!EXTERIOR_MASONRY_PATTERN.test(built.name)) continue;
+  fail(
+    `naming: '${built.name}' is an interior mesh whose name matches the pattern ` +
+      `parkFacts.ts uses to find the castle's exterior stonework ` +
+      `(${String(EXTERIOR_MASONRY_PATTERN)}). It will be measured as the battlements and ` +
+      `will break the ginormous-slide clearance invariant in test:procgen, which ` +
+      `npm run build does not run. Name interior parts 'castle-timber-', not 'castle-wall-'.`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 5. NOT YET WRITTEN — and said out loud, because the contract depends on it.
 // ---------------------------------------------------------------------------
 
 /**
@@ -227,7 +291,7 @@ if (Number.isFinite(lowestBuilt) && Math.abs(lowestBuilt - BEAM_UNDERSIDE) > 1e-
  */
 const PROP_ASSERTIONS_PENDING =
   'props: NOT CHECKED — batch 1 is not wired yet, so nothing here measures a prop. ' +
-  'See the note above assertion 4. Placement is the only protection props get, and it ' +
+  'See the note above assertion 5. Placement is the only protection props get, and it ' +
   'is not yet enforced.';
 
 // ---------------------------------------------------------------------------

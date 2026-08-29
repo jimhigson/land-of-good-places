@@ -462,6 +462,33 @@ measures a prop. Placement is the only protection props get, and it is not
 yet enforced.
 ```
 
+### A green build is not a green repo
+
+**`npm run test:procgen` is not in the build chain**, and it caught a
+regression this branch shipped that `npm run build` could not see.
+
+The wall-plate was named `castle-wall-plate-N`. `test/procgen/parkFacts.ts`
+measures the top of the castle's stonework by matching
+`/^(castle-wall-|crenellations$)/` across the **whole scene**, and the
+ginormous-slide clearance invariant is built on the result. So an interior
+timber 4.5 m above the real parapet was read as the battlements,
+`castleMasonryTopY` jumped **10.29 → 14.83 m**, and all five seeds failed —
+with a completely honest green build, because CI gates that suite separately.
+
+**The fix is the name, not a narrower pattern**, and the evidence is concrete:
+the facade has **four** `castle-wall-*` bands (`-lower`, `-upper`, `-window`,
+`-lintel`) and gained two of them long after the invariant was written, picking
+them up for free. Enumerating them instead would make the check fail *unsafe* —
+a fifth band would be silently excluded, the measured masonry top would read
+low, and a slide that really does clip the battlements would pass.
+Over-measuring costs a false failure; under-measuring costs a child hitting a
+wall. So the interior is what stays clear of the pattern, and `check:castle`
+asserts it (`naming: ... is an interior mesh whose name matches ...`), proved
+red at exit 1 by putting the old name back.
+
+**Run `npm run test:procgen` as well as `npm run build` before every push on
+this branch.** They do not cover each other.
+
 ### Two more ways it could not fail, both found by review
 
 Both were the same disease, and the one this file's own header forbids: **the
