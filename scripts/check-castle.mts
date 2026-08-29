@@ -23,12 +23,19 @@
  * Run: `npm run check:castle`
  */
 import { Box3, InstancedMesh, Matrix4 } from 'three';
-import { BUILDING_FLOOR_COUNT } from '../src/core/constants.ts';
+import {
+  BUILDING_FLOOR_COUNT,
+  CAMERA_PITCH_DEGREES,
+  INTERIOR_HALF_X,
+  INTERIOR_HALF_Z,
+} from '../src/core/constants.ts';
 import { deckIsSolid, TOP_DECK } from '../src/world/building/layout.ts';
 import {
   BEAM_UNDERSIDE,
   buildCeilingBeams,
   CASTLE_CEILING_CLEAR,
+  SCONCE_HEADROOM,
+  SCONCE_MOUNT_Y,
 } from '../src/world/building/castleFabric.ts';
 import { TALLEST_CHILD_HEIGHT } from '../src/art/models/kid.ts';
 
@@ -211,7 +218,74 @@ for (const [label, measured] of [
 }
 
 // ---------------------------------------------------------------------------
-// 4. Nothing built for the inside may claim an exterior masonry name.
+// 4. The wall-plate must not hide the wall torches under it.
+// ---------------------------------------------------------------------------
+
+/**
+ * **A timber standing proud of a wall casts a sightline shadow down it**, and
+ * the wall torches live in exactly that band.
+ *
+ * At the game's fixed `CAMERA_PITCH_DEGREES`, the ray grazing the plate's
+ * room-side edge meets the wall `edgeDistance × tan(pitch)` below the plate's
+ * underside. Everything above that point is hidden behind the timber. The first
+ * build put the plate 0.9 m off the wall and 0.70 m wide, which hid the wall
+ * from **2.10 m upward** — `SCONCE_MOUNT_Y` to within 3 mm, so all forty
+ * torches would have been invisible. The 3D Artist caught it by looking; this
+ * is what stops it coming back.
+ *
+ * The edge distance is **measured off the built mesh**, not taken from
+ * `PLATE_INSET` and `BEAM_WIDTH`, for the same reason as everything else in
+ * this file. The camera angle is imported from `constants.ts`, its owner — if
+ * the park ever tilts, this assertion tilts with it and says so.
+ */
+{
+  const pitch = (CAMERA_PITCH_DEGREES * Math.PI) / 180;
+  const sconceTop = SCONCE_MOUNT_Y + SCONCE_HEADROOM;
+  const plate = buildCeilingBeams(0);
+  if (!plate) {
+    fail('sightline: deck 0 built no wall-plate to measure.');
+  } else {
+    plate.geometry.computeBoundingBox();
+    const geometryBox = plate.geometry.boundingBox;
+    if (!geometryBox) {
+      fail('sightline: the wall-plate geometry has no bounding box to measure.');
+    } else {
+      // The run along the north wall (most negative Z) is representative: every
+      // run is the same box, and the walls are symmetric. Its room-side edge is
+      // its **greatest** Z.
+      let edgeDistance = 0;
+      let underside = Infinity;
+      for (let i = 0; i < plate.count; i += 1) {
+        plate.getMatrixAt(i, matrix);
+        worldBounds.copy(geometryBox).applyMatrix4(matrix);
+        // Distance from the wall face this segment is fixed to, whichever of
+        // the four it is: the box's far edge measured from the wall plane.
+        const fromNorth = worldBounds.max.z + INTERIOR_HALF_Z;
+        const fromSouth = INTERIOR_HALF_Z - worldBounds.min.z;
+        const fromWest = worldBounds.max.x + INTERIOR_HALF_X;
+        const fromEast = INTERIOR_HALF_X - worldBounds.min.x;
+        edgeDistance = Math.max(
+          edgeDistance,
+          Math.min(fromNorth, fromSouth, fromWest, fromEast),
+        );
+        underside = Math.min(underside, worldBounds.min.y);
+      }
+      const hiddenAbove = underside - edgeDistance * Math.tan(pitch);
+      if (hiddenAbove < sconceTop) {
+        fail(
+          `sightline: the wall-plate stands ${edgeDistance.toFixed(3)} m off the wall, so at ` +
+            `${CAMERA_PITCH_DEGREES}° it hides the wall above ${hiddenAbove.toFixed(3)} m. A ` +
+            `sconce mounted at ${SCONCE_MOUNT_Y.toFixed(2)} m reaches ` +
+            `${sconceTop.toFixed(2)} m and would be behind the timber. Narrow the plate, ` +
+            `bring it flush to the wall, or lower SCONCE_MOUNT_Y.`,
+        );
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 5. Nothing built for the inside may claim an exterior masonry name.
 // ---------------------------------------------------------------------------
 
 /**
@@ -259,7 +333,7 @@ for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
 }
 
 // ---------------------------------------------------------------------------
-// 5. NOT YET WRITTEN — and said out loud, because the contract depends on it.
+// 6. NOT YET WRITTEN — and said out loud, because the contract depends on it.
 // ---------------------------------------------------------------------------
 
 /**
@@ -291,7 +365,7 @@ for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
  */
 const PROP_ASSERTIONS_PENDING =
   'props: NOT CHECKED — batch 1 is not wired yet, so nothing here measures a prop. ' +
-  'See the note above assertion 5. Placement is the only protection props get, and it ' +
+  'See the note above assertion 6. Placement is the only protection props get, and it ' +
   'is not yet enforced.';
 
 // ---------------------------------------------------------------------------

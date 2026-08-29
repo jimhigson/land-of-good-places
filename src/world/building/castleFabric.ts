@@ -104,8 +104,40 @@ export function castleWallMaterial(colour: number) {
  * is ART_DIRECTION §4's "recognisable beats measured" pointed at a cross
  * section.
  */
-const BEAM_WIDTH = 0.7;
+const BEAM_WIDTH = 0.4;
 const BEAM_DEPTH = 0.22;
+
+/**
+ * **0.70 m wide was right about chunkiness and wrong about torches.**
+ *
+ * A plate that stands out from the wall casts a *sightline* shadow down it: at
+ * the game's `CAMERA_PITCH_DEGREES` (38°), the ray grazing the plate's
+ * room-side edge lands on the wall `edgeDistance × tan(38°)` below the plate.
+ * At 0.9 m inset and 0.7 m wide that edge is 1.25 m out, and the wall is hidden
+ * from **2.10 m upward** — which is {@link SCONCE_MOUNT_Y} to within 3 mm. The
+ * 3D Artist spotted it before forty torches were placed under a beam that would
+ * have hidden every one of them.
+ *
+ * So the plate is now **flush with the wall and narrower**: 0.40 m wide, its
+ * back face on the wall face ({@link PLATE_INSET} is derived from the width, so
+ * the two cannot drift). The hidden band starts at 2.77 m, comfortably above a
+ * sconce. That costs some of the chunkiness the 0.70 m width was chosen for,
+ * and the trade is deliberate: Jim named lighting explicitly, and a torch you
+ * cannot see is worth less than a timber that reads slightly slimmer. A
+ * wall-plate flush against its wall is also what one actually is.
+ */
+export const SCONCE_MOUNT_Y = 2.1;
+
+/**
+ * How tall a wall sconce is allowed to be, measured up from
+ * {@link SCONCE_MOUNT_Y}.
+ *
+ * The budget the plate's sightline is checked against, and therefore a **number
+ * the 3D Artist must build inside** — published in the contract. Deliberately
+ * generous against the ~0.46 m asked for, so that a sconce growing a little
+ * does not silently vanish behind a timber.
+ */
+export const SCONCE_HEADROOM = 0.6;
 
 /**
  * How low the beams hang: 3.08 m, which is {@link TALLEST_CHILD_HEIGHT} plus
@@ -127,12 +159,13 @@ export const BEAM_UNDERSIDE = CASTLE_CEILING_CLEAR - BEAM_DEPTH;
 const BEAM_SEGMENT = 2;
 
 /**
- * How far in from the wall face the plate sits, in metres.
+ * How far in from the wall face the plate's **centre** sits, in metres.
  *
- * Far enough that it is a timber *on* the wall rather than a stripe painted
- * into the corner, and not so far that it starts to overhang the room.
+ * Half its own width, so its back face is flush with the wall and the two
+ * numbers cannot drift apart. See {@link BEAM_WIDTH} for why it is flush rather
+ * than standing proud: a plate that overhangs hides the torches under it.
  */
-const PLATE_INSET = 0.9;
+const PLATE_INSET = BEAM_WIDTH / 2;
 
 /**
  * **A timber wall-plate round the top of the room**, on corbels — the castle's
