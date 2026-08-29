@@ -1,6 +1,12 @@
 import { ANCHORS } from '../world/anchors';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../world/building/layout';
 import { STALL_PLACEMENTS } from '../minigames/stallPlacement';
+import {
+  ENTRANCE_BUS_DOOR_X,
+  ENTRANCE_BUS_STOP_Z,
+  ENTRANCE_GATE_X,
+  ENTRANCE_GATE_Z,
+} from '../world/entrance/layout';
 
 /**
  * **What is on the park map, and where.** GitHub issues #334 and #234.
@@ -30,7 +36,14 @@ import { STALL_PLACEMENTS } from '../minigames/stallPlacement';
  */
 
 /** What kind of thing a feature is, which decides how it is drawn. */
-export type MapFeatureKind = 'anchor' | 'stall' | 'station' | 'fountain' | 'castle';
+export type MapFeatureKind =
+  | 'anchor'
+  | 'stall'
+  | 'station'
+  | 'fountain'
+  | 'castle'
+  | 'gate'
+  | 'catBus';
 
 export interface MapFeature {
   /**
@@ -97,6 +110,50 @@ export function parkMapFeatures(facts: ParkMapFacts): readonly MapFeature[] {
   // plot centre — `layout.ts` nudges the building in from the plot, and the
   // facade is the thing a child sees and walks to.
   features.push({ id: 'building', kind: 'castle', x: BUILDING_CENTRE_X, z: BUILDING_CENTRE_Z });
+
+  // --- the way in ---------------------------------------------------------
+  // Jim, 29 August: "put the cat bus on too, near the entrance gates, and also
+  // the gates themselves." High in the list because these are the two things a
+  // child arrives at and leaves by — the map's only fixed point of reference
+  // that is the same on every visit — and because they stand alone on the
+  // park's southern edge, where nothing else is competing for the space.
+  //
+  // Both read from `world/entrance/layout.ts`, the one owner of entrance
+  // geometry, joined by id like everything else here. `layout.ts` imports only
+  // `core/constants` and `core/mathUtils`, so this module stays headless and
+  // `check:park-map` still runs on plain Node.
+
+  // The centre of the gap cut in the boundary wall, which is where `Entrance.ts`
+  // stands the arch: two posts on the wall's tangent and a crossbar over the
+  // middle. The wall radius alone would not do — a gate is a point on a ring,
+  // not the ring.
+  features.push({ id: 'entranceGate', kind: 'gate', x: ENTRANCE_GATE_X, z: ENTRANCE_GATE_Z });
+
+  /**
+   * **The cat bus is drawn at its stop, not wherever it currently is** — and
+   * that is forced rather than preferred.
+   *
+   * The bus is not park furniture. `Entrance.ts` builds the arrival only when
+   * one is due; the bus rolls in along the kerb from `ENTRANCE_BUS_ARRIVE_X`,
+   * and once it has driven off past `ENTRANCE_BUS_VANISH_X` it is disposed. For
+   * nearly all of a save there is **no bus in the world at all**, so "where it
+   * is now" is undefined most of the time and no check could ever pin it. Its
+   * route is a line, not a point.
+   *
+   * What is permanent, owned and checkable is the stop — and a picture of a bus
+   * marking a bus stop is exactly what a paper map does. `ENTRANCE_BUS_DOOR_X`
+   * names where the bus's **door** comes to rest, dead in front of the gate,
+   * which is both the half a child cares about and the stable half: the door is
+   * the fixed target and `ArrivalSequence` works the vehicle's centre back from
+   * it through `bus.doorDrop`, so a longer bus still stops with its door here.
+   *
+   * This lands 9 m *outside* the boundary wall, on the road, which is correct
+   * and deliberate: a bus is not a park vehicle, and it parking inside the park
+   * is the exact thing Jim objected to on 7 August 2026 (#195). It is still
+   * inside the map's viewport, which frames `PARK_BOUNDARY.extent` — the
+   * boundary bulges past z = 71 either side of the gate.
+   */
+  features.push({ id: 'catBus', kind: 'catBus', x: ENTRANCE_BUS_DOOR_X, z: ENTRANCE_BUS_STOP_Z });
 
   for (const anchor of ANCHORS) {
     if (anchor.id === 'building') continue;
