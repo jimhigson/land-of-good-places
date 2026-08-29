@@ -66,6 +66,27 @@ name: Deploy
 #    pull request. `branches: [main]` filters on the triggering run's head
 #    branch, and the `if` additionally requires that run's own event to be
 #    `push`, so a PR's green checks cannot publish anything.
+#
+# ## The third trap: the gate that never fires at all
+#
+# `workflows: [Procgen invariants]` matches on the **workflow's `name:`**, not
+# its filename. Rename `procgen-invariants.yml`'s `name:`, or narrow its `push`
+# trigger (a `paths:` filter would do it), and this workflow simply stops being
+# triggered. Nothing goes red — there is no run to be red. Deploys just quietly
+# cease, which is the exact shape of the 29 August outage.
+#
+# Two things guard that, and the second is the one to rely on:
+#
+#   * `procgen-invariants.yml` carries a matching comment saying its `name:` and
+#     its unfiltered `push: branches: [main]` are load-bearing for deploys.
+#     A comment is a reminder, not a guarantee.
+#   * **`live-version.yml` runs on a half-hourly cron and asks the live site what
+#     commit it is serving**, opening an issue when it is behind. It never asks
+#     whether a run succeeded, so it cannot be fooled by a run that does not
+#     exist. That is the real backstop for this whole design, and it is why
+#     gating on another workflow is a safe thing to do here at all.
+#
+# If you are ever unsure: `npm run check:live-version`.
 on:
   workflow_run:
     workflows: [Procgen invariants]
