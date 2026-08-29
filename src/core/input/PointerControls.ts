@@ -13,7 +13,13 @@
  * Works with a mouse too, deliberately: click-to-walk is genuinely nicer than
  * WASD on a trackpad, and it means the whole touch path can be tested on a
  * desktop without emulation.
+ *
+ * **What counts as a tap lives in `tapGesture.ts`, not here** — the park map's
+ * canvas and its dimmed backdrop have to answer the same question, and three
+ * different answers to it is what shipped Jim's "as soon as I touch the screen
+ * the map closes".
  */
+import { completesTap, tapCandidate, tapDriftedTooFar, type TapCandidate } from './tapGesture';
 
 /** A point on the canvas in normalised device coordinates, ready for a camera ray. */
 export interface ScreenPoint {
@@ -62,9 +68,6 @@ export interface PointerControlsOptions {
   onWheelZoom(notches: number): void;
 }
 
-/** Longer than this and it was a considered press, not a tap. */
-const TAP_MAX_MILLISECONDS = 600;
-
 /**
  * A second tap within this long of the first counts as a double-tap ("run
  * there") rather than two separate walks. Generous enough for small fingers,
@@ -74,19 +77,11 @@ const DOUBLE_TAP_MAX_MILLISECONDS = 350;
 
 /**
  * How far apart, in CSS pixels, the two taps of a double-tap may land and
- * still count as "the same spot". Looser than {@link TAP_MAX_DRIFT} because
+ * still count as "the same spot". Looser than `tapGesture.ts`'s
+ * `TAP_MAX_DRIFT_PX` because
  * it is measured between two independent touches, not one finger's wobble.
  */
 const DOUBLE_TAP_MAX_DRIFT = 40;
-
-/**
- * How far a finger may slide and still count as a tap, in CSS pixels.
- *
- * Generous, because it has to be: a six-year-old's tap on a phone routinely
- * travels ten pixels, and the cost of being too strict is a tap that silently
- * does nothing.
- */
-const TAP_MAX_DRIFT = 18;
 
 /**
  * Pinch sensitivity. A gesture that doubles the finger separation moves the zoom
@@ -151,12 +146,9 @@ export function wheelNotches(event: WheelEvent): number {
   return -pixels / WHEEL_NOTCH_PIXELS;
 }
 
-interface ActivePointer {
+interface ActivePointer extends TapCandidate {
   x: number;
   y: number;
-  readonly startX: number;
-  readonly startY: number;
-  readonly startTime: number;
   /**
    * True only if this pointer's very first event actually hit our own
    * canvas — see "Why window, not the canvas" above `attach`. A finger that
@@ -289,9 +281,7 @@ export class PointerControls {
     this.pointers.set(event.pointerId, {
       x: event.clientX,
       y: event.clientY,
-      startX: event.clientX,
-      startY: event.clientY,
-      startTime: performance.now(),
+      ...tapCandidate(event.clientX, event.clientY),
       startedOnCanvas,
       // A pointer that didn't start on the canvas can never itself be a tap
       // — see `ActivePointer.startedOnCanvas` — but it still fully counts
@@ -319,7 +309,8 @@ export class PointerControls {
     pointer.x = event.clientX;
     pointer.y = event.clientY;
 
-    if (Math.hypot(event.clientX - pointer.startX, event.clientY - pointer.startY) > TAP_MAX_DRIFT) {
+    // The shared definition, not a local one — see `tapGesture.ts`.
+    if (tapDriftedTooFar(pointer, event.clientX, event.clientY)) {
       pointer.disqualified = true;
     }
 
@@ -341,7 +332,9 @@ export class PointerControls {
     if (this.pointers.size < 2) this.pinchDistance = 0;
     if (!pointer || pointer.disqualified) return;
     const now = performance.now();
-    if (now - pointer.startTime > TAP_MAX_MILLISECONDS) return;
+    // Down and up in the same place, soon enough: `tapGesture.ts`'s one
+    // definition of a definite tap, shared with the park map.
+    if (!completesTap(pointer, event.clientX, event.clientY, now)) return;
 
     const rect = this.canvas.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
