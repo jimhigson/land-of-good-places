@@ -97,3 +97,35 @@ code is the opposite, fixed by #282. Should be closed or rewritten. Not touched.
 Build 0, procgen 453/453, tsc clean. Dev server 93228 killed. Screenshots on
 `qa-screenshots` under `park-map-zoom-359/`. Worktree `eng-359` can be removed
 once #372 merges. **Do not merge.**
+
+## Round 2 of review (#372) — all four addressed
+
+1. **Pan clamp was broken and the check agreed with it by construction.**
+   `clampMapView` bounded by the rectangle zoom 1 *frames*; `frameExtent` fits
+   the smaller axis, so that rectangle is mostly letterbox and at zoom 4 the
+   view fitted inside the empty band — blank map. Now clamps to the park's
+   extent + lawn margin, centring rather than clamping when content < view
+   (which is what preserves zoom 1). Assertion 6 rewritten to sample the canvas
+   against the real boundary polygon: **measures the outcome, not the rule**.
+   `--mutate=clamp-letterbox` reinstates the bug → `0.0% of the canvas is park`.
+   Live repro at 844x390 zoom 4 after three drags: **36.7% lawn**.
+2. **`zoomedAboutPoint`/`pannedBy` were untested and are NOT structural** — my
+   vacuity argument was right about the round-trip and wrong about these.
+   Assertion 8 added; `--mutate=focal` and `--mutate=pan-sign` red.
+   NB it caught a bug in the *test* first: at zoom 2 on 700x300 the park's
+   width still fits, so pinning x is correct. Sample at MAP_MAX_ZOOM only.
+3. **Wheel `deltaMode`**: `wheelNotches()` exported from PointerControls and
+   reused. The hand-copied constant left the normalisation behind.
+4. **`setPointerCapture`**: now `capture()`. It was the first line of the
+   handler, so a throw silently killed the whole gesture.
+
+Corrected the "140 vs zero" claim: the zero was a wiring artefact
+(`zoom-axis` only applies in `projectionForView`; assertion 3 uses
+`projectionFor`). The real number is **140 of 175 views = 175 − 35 at zoom 1**.
+
+#244: premise is backwards, but do NOT close — its *Fix* section (move the
+guard into `nudgeZoom`, assert every input path) is undone, and this PR adds a
+third caller-side condition. Retitle to the residue.
+
+11 mutations red, green green. Build 0, procgen 453/453, tsc clean.
+Dev server 23734 killed. **Do not merge.**
