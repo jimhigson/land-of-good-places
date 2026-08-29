@@ -8,7 +8,7 @@ import { Journey, type JourneyPlanner } from './journey';
 // The things a child does instead of wandering. See `activities/activity.ts`
 // for what an `Activity` is and why it has the shape it has; this file keeps
 // only the wander core and the small amount of glue that runs them.
-import type { Activity, ActivityHold, ActivityHost, Rejoin } from './activities/activity';
+import type { Activity, ActivityBudget, ActivityHold, ActivityHost, Rejoin } from './activities/activity';
 import { TreeClimb, type ClimbPhase, type ClimberBudget } from './activities/treeClimb';
 import { BusArrival } from './activities/busArrival';
 import { TrainTrip } from './activities/trainTrip';
@@ -119,6 +119,11 @@ export interface WanderOptions {
   readonly climbableTrees?: readonly ClimbableTreeSeed[];
   /** Shared across every child, to keep the whole-park total gentle. */
   readonly climberBudget?: ClimberBudget;
+  /**
+   * Shared across every child, so the railway carries a few of them rather
+   * than most of the park at once — issue #350. See `TrainTrip`'s own note.
+   */
+  readonly riderBudget?: ActivityBudget;
   /** Shared across every child, so standing still draws one or two chatters, not a mob. */
   readonly chatBudget?: ChatBudget;
   /**
@@ -188,7 +193,7 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
     this.bus = new BusArrival(options.arrivesByBus ?? false);
     // The trip draws nothing from the stream until the first time it wonders
     // about the train, so it can be built anywhere in here.
-    this.train = new TrainTrip();
+    this.train = new TrainTrip(options.riderBudget);
     // Stagger the first decision so the whole park does not set off in step.
     // The first destination is chosen on the first frame the child is actually
     // steered, rather than here: choosing needs a position, to know which space

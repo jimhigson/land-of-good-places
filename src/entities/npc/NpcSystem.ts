@@ -38,6 +38,7 @@ import type { LevelConnector } from '../../world/building/surfaces';
 import type { ShopStand } from '../../world/building/shops/Shops';
 import { createPetBlob, PET_BODY_NODE, PET_HEAD_NODE } from './petBlob';
 import { WanderDriver, type ClimberBudget } from './wanderDriver';
+import type { ActivityBudget } from './activities/activity';
 // Chatting (see the additive block in wanderDriver.ts): the shared budget
 // that caps how many children may be mid-chat at once, and the speed below
 // which the player counts as "stood still" for that same block.
@@ -51,6 +52,18 @@ import type { ClimbableTreeSeed } from '../../world/Scenery';
  * putting half the crowd up in the branches at the same time.
  */
 const MAX_CONCURRENT_CLIMBERS = 3;
+
+/**
+ * How many children may be on the railway — riding or walking to a platform —
+ * at once. Issue #350.
+ *
+ * The train had no cap at all, so every child rolled for it independently and
+ * twenty of the twenty-four ended up at a station together. Four is the same
+ * order as the climb's three and the paint stall's four: enough that the train
+ * always has somebody on it and a child waiting on a platform has company,
+ * never so many that the platform *is* the park.
+ */
+const MAX_CONCURRENT_RIDERS = 4;
 
 /**
  * How many children may be mid-chat across the whole park at once (see the
@@ -565,6 +578,7 @@ export class NpcSystem implements GameSystem {
 
     const spawnNodes = this.graph.spawnNodes();
     const climberBudget: ClimberBudget = { active: 0, max: MAX_CONCURRENT_CLIMBERS };
+    const riderBudget: ActivityBudget = { active: 0, max: MAX_CONCURRENT_RIDERS };
 
     for (let i = 0; i < NPC_COUNT; i += 1) {
       const node = spawnNodes[Math.floor((i / NPC_COUNT) * spawnNodes.length)];
@@ -629,6 +643,7 @@ export class NpcSystem implements GameSystem {
         pace: rng.range(0.85, 1.12),
         climbableTrees,
         climberBudget,
+        riderBudget,
         chatBudget: this.chatBudget,
         arrivesByBus: i < this.arrivingByBus,
       });
