@@ -164,11 +164,11 @@ const FEATURE_ICON_SIZE: Readonly<Record<MapFeature['kind'], number>> = {
  * genuinely large building, a station hut is small.
  */
 const FEATURE_ICON_MAX_METRES: Readonly<Record<MapFeature['kind'], number>> = {
-  castle: 26,
-  anchor: 18,
-  stall: 11,
-  fountain: 11,
-  station: 9,
+  castle: 27,
+  anchor: 20,
+  stall: 15,
+  fountain: 13,
+  station: 11,
 };
 
 /** An icon's drawn size: legible on the screen, honest about the park. */
@@ -697,6 +697,10 @@ export class ParkMap {
     // this is, so the ground the ride actually occupies is on the map even
     // where the icon over-covers or under-covers it.
     ctx.save();
+    // Faint, not solid: this is a hint that the ride occupies ground, not a
+    // shape competing with the picture standing on it. Drawn opaque it read
+    // as a rendering glitch — a dark square with a ride sitting in it.
+    ctx.globalAlpha = 0.28;
     ctx.fillStyle = MAP_PALETTE.lawnDeep;
     for (const feature of features) {
       if (feature.kind !== 'anchor' && feature.kind !== 'castle') continue;
@@ -709,7 +713,9 @@ export class ParkMap {
       } else {
         const halfW = anchor.footprint.halfX * this.scale;
         const halfH = anchor.footprint.halfZ * this.scale;
-        ctx.rect(ax - halfW, ay - halfH, halfW * 2, halfH * 2);
+        const radius = Math.min(halfW, halfH) * 0.35;
+        if (ctx.roundRect) ctx.roundRect(ax - halfW, ay - halfH, halfW * 2, halfH * 2, radius);
+        else ctx.rect(ax - halfW, ay - halfH, halfW * 2, halfH * 2);
       }
       ctx.fill();
     }
