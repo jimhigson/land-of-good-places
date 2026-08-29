@@ -222,6 +222,54 @@ export const ART = {
    */
   spookyGreen: 0x447357,
 
+  // --- the castle's interior dressing (#363) --------------------------------
+  /**
+   * **Polished steel** — a suit of armour, a chandelier's wheel, a torch's
+   * bracket, a halberd's blade.
+   *
+   * The park has no metal colour, and the two nearest existing ones are both
+   * wrong for it: `statueStone` (0xd3cacb) is *carved rock*, warm and chalky,
+   * and armour painted in it reads as a garden ornament; `glassTint`
+   * (0xcdeeff) is ice and has no weight at all. This is a pale pewter with a
+   * clear blue cast — the same trick `statueStone` plays with rose, pointed
+   * the other way, so steel and stone stand next to each other in one room and
+   * are obviously two different materials rather than two greys.
+   *
+   * Bright, and deliberately so. ART_DIRECTION §2's metalness rule is absolute
+   * (`metalness` stays 0, everything is matte painted wood), so "metal" here
+   * has to be carried entirely by hue and value against the four-band toon
+   * ramp. A dark steel bands into mud on the shadow side; this one keeps three
+   * distinguishable bands, which is what actually reads as a polished plate.
+   */
+  castleSteel: 0xc6d2e2,
+  /**
+   * **Black iron** — the parts of a fitting that are wrought rather than
+   * polished: a torch bracket's strap, a brazier's legs, a chandelier's chain,
+   * a visor slit, a portcullis.
+   *
+   * Never black, per §5 — this is `castleSteel` taken a long way down and
+   * warmed slightly, and it sits comfortably above `PALETTE.ink` (0x4a3a52),
+   * which is the floor for every colour in this file. It is the *outline*
+   * colour's neighbour, not its twin: ink-tinting an outline round something
+   * already this dark would be a black line, which §4 bans, so the iron parts
+   * take a thinner outline or none.
+   */
+  castleIron: 0x8a93a6,
+  /**
+   * **Tapestry cloth** — the woven ground a picture is dyed into.
+   *
+   * A deep rose that is unmistakably *cloth* next to the pink stone it hangs
+   * on. `PALETTE.stonePinkDark` (0xf0a3c1) is the park's own masonry, and a
+   * hanging in that colour disappears into the wall behind it; this is two
+   * steps down and two steps warmer, so the tapestry is the first thing the
+   * eye finds on a wall and the wall is still pink.
+   *
+   * It is the **ground**, not the picture: the heraldry is a canvas texture
+   * multiplied over this, so a tapestry in shadow is a darker tapestry rather
+   * than a grey rectangle.
+   */
+  castleTapestry: 0xc4577f,
+
   // --- effects ---------------------------------------------------------------
   /**
    * The park's rainbow, inner band first. Used by the hop ring.

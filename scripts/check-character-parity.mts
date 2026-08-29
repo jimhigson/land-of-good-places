@@ -63,7 +63,14 @@ import {
   type BufferGeometry,
 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { createKid, KID_BODY_PARTS, type KidBodyPart, type KidHandle } from '../src/art/models/kid.ts';
+import {
+  createKid,
+  KID_BODY_PARTS,
+  KID_HIP_HEIGHT,
+  KID_REACH_HEIGHT,
+  type KidBodyPart,
+  type KidHandle,
+} from '../src/art/models/kid.ts';
 import { kidAssetPartNames } from '../src/art/models/kidAsset.ts';
 import { readGlbParts } from '../src/art/style/glb.ts';
 import { visibleTop } from '../src/art/style/measure.ts';
@@ -113,6 +120,17 @@ const NORMAL_TOLERANCE = {
   ordinary: (0.05 * Math.PI) / 180,
   fanApex: (1.2 * Math.PI) / 180,
 } as const;
+
+/**
+ * How far a published rig landmark may sit from the joint it names, in metres.
+ *
+ * Looser than {@link TOLERANCE} because these are **published to two decimal
+ * places on purpose** — they are quoted in handoffs, argued over between the
+ * Artist and the Engineer, and cut into furniture in another language. 5 mm is
+ * tight enough that a real retune of the rig (a longer leg, a raised shoulder)
+ * goes red, and loose enough that rounding 0.3600 to 0.36 does not.
+ */
+const LANDMARK_TOLERANCE = 0.005;
 
 const failures: string[] = [];
 const notes: string[] = [];
@@ -519,6 +537,55 @@ check(
   `hatAnchorHeight: ${authored.hatAnchorHeight} against ${procedural.hatAnchorHeight}`,
 );
 notes.push(`  height ${heightAfter.toFixed(4)} m, hat anchor ${authored.hatAnchorHeight.toFixed(4)} m`);
+
+// ------------------------------------------- 3b. the sit-and-reach landmarks
+
+/**
+ * **`KID_HIP_HEIGHT` and `KID_REACH_HEIGHT` must still describe this rig.**
+ *
+ * Both are *furniture* constants: the castle's bench, throne and banqueting
+ * table are cut from them (`art/blend/castle_build.py` `ts_const`s them out of
+ * `kid.ts`), and the hotel will want them too. A constant that sizes something
+ * in another file, in another language, is exactly the copy this repo keeps
+ * getting wrong — so it is re-measured here rather than believed.
+ *
+ * Measured the way the numbers were derived in the first place: the hip is the
+ * leg pivot's world height, and the reach is the arm pivot's world height plus
+ * the arm's own length (pivot down to the hand's origin). Both off the real
+ * built kid, neither reconstructed from the literals in `kid.ts` that place
+ * them — a check that rebuilds its expectation out of the thing it is checking
+ * cannot fail.
+ */
+function jointHeight(kid: KidHandle, name: string): number {
+  const joint = kid.root.getObjectByName(name);
+  if (!joint) throw new Error(`check:character-parity: no node named '${name}'.`);
+  kid.root.updateMatrixWorld(true);
+  return joint.getWorldPosition(new Vector3()).y;
+}
+
+for (const side of ['l', 'r']) {
+  const hip = jointHeight(authored, `leg-pivot-${side}`);
+  check(
+    Math.abs(hip - KID_HIP_HEIGHT) <= LANDMARK_TOLERANCE,
+    `KID_HIP_HEIGHT says ${KID_HIP_HEIGHT} m but leg-pivot-${side} is at ${hip.toFixed(4)} m. ` +
+      `A seat is cut from this number — the castle's bench and throne are at hip height so a ` +
+      `child's feet reach the floor — so fix the constant, and re-cut the furniture that reads it.`,
+  );
+}
+
+const armPivot = jointHeight(authored, 'arm-pivot-l');
+const handRest = jointHeight(authored, 'hand-l');
+const reach = armPivot + (armPivot - handRest);
+check(
+  Math.abs(reach - KID_REACH_HEIGHT) <= LANDMARK_TOLERANCE,
+  `KID_REACH_HEIGHT says ${KID_REACH_HEIGHT} m but the arm pivots at ${armPivot.toFixed(4)} m ` +
+    `with a ${(armPivot - handRest).toFixed(4)} m arm, reaching ${reach.toFixed(4)} m. ` +
+    `Anything she has to reach the top of is sized from this.`,
+);
+notes.push(
+  `  hip ${jointHeight(authored, 'leg-pivot-l').toFixed(4)} m, ` +
+    `hands rest at ${handRest.toFixed(4)} m, reach ${reach.toFixed(4)} m`,
+);
 
 // ------------------------------------------------------ 4. the silhouette sweep
 
