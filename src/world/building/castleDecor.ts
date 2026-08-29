@@ -9,6 +9,7 @@ import {
   Mesh,
   PlaneGeometry,
   Quaternion,
+  SphereGeometry,
   Vector3,
 } from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -79,7 +80,10 @@ export function castleDecorGroupName(deck: number): string {
 }
 
 export function dressCastle(deck: number, floor: Group): void {
-  if (deck >= TOP_DECK) return;
+  if (deck >= TOP_DECK) {
+    dressRoofGarden(deck, floor);
+    return;
+  }
 
   const group = new Group();
   group.name = castleDecorGroupName(deck);
@@ -676,5 +680,156 @@ function crateGeometry(): BufferGeometry {
   }
   const first = parts[0];
   if (!first) throw new Error('castleDecor: the crate built nothing.');
+  return mergeGeometries(parts, false) ?? first;
+}
+
+
+// ------------------------------------------------------------ roof garden
+
+/**
+ * **The roof garden** (issue #380).
+ *
+ * Jim has cut the castle to three floors with one purpose each — a mall, a
+ * great hall, and *a roof garden above the park* — on the reasoning that *"the
+ * simplification would make it feel less empty."* The roof already had ten
+ * benches and a view; a garden is what turns that into somewhere to be.
+ *
+ * Everything here is a primitive and a `PALETTE` colour: troughs, shrubs and
+ * flower heads, three instanced meshes and nothing else. The park's own flower
+ * system (`world/Flowers.ts`) is a 400-strong wind-animated field sized for open
+ * grass, and lifting it onto a 60 × 44 m roof would be a per-frame vertex cost
+ * for a planter box. This is the cheap half of the same idea: the flowers do not
+ * move, because at this camera height nobody can tell, and a roof terrace that
+ * costs three draw calls can exist on every storey the split later gives us.
+ *
+ * ## It is laid round the parapet, not scattered over the plate
+ *
+ * The roof is the launch point for the ginormous slide and the way off the lift,
+ * so its middle is circulation and must stay clear. A garden round the edge also
+ * happens to be what a real roof terrace is — the planting goes where the view
+ * is — and it keeps every trough within reach of a child leaning on the parapet.
+ */
+function dressRoofGarden(deck: number, floor: Group): void {
+  const group = new Group();
+  group.name = castleDecorGroupName(deck);
+  const blocked = keepOutsFor(deck);
+  const rng = new Rng(0x9007 + deck);
+
+  const spots: { x: number; z: number; yaw: number }[] = [];
+  const inset = 2.3;
+  const step = 3.6;
+  const consider = (x: number, z: number, yaw: number): void => {
+    if (!deckIsSolid(deck, x, z)) return;
+    if (blocked.some((k) => Math.hypot(x - k.x, z - k.z) < k.radius + PLAYER_RADIUS + 1.4)) return;
+    spots.push({ x, z, yaw });
+  };
+  for (let x = -INTERIOR_HALF_X + step; x < INTERIOR_HALF_X - step / 2; x += step) {
+    consider(x, -INTERIOR_HALF_Z + inset, 0);
+    consider(x, INTERIOR_HALF_Z - inset, 0);
+  }
+  for (let z = -INTERIOR_HALF_Z + step; z < INTERIOR_HALF_Z - step / 2; z += step) {
+    consider(-INTERIOR_HALF_X + inset, z, Math.PI / 2);
+    consider(INTERIOR_HALF_X - inset, z, Math.PI / 2);
+  }
+  if (spots.length === 0) return;
+
+  const TROUGH_LENGTH = 2.6;
+  const TROUGH_HEIGHT = 0.5;
+  const troughs = new InstancedMesh(
+    troughGeometry(TROUGH_LENGTH, TROUGH_HEIGHT),
+    softMaterial(PALETTE.stonePinkLight, 0.8),
+    spots.length,
+  );
+  troughs.name = `castle-roof-troughs-${deck}`;
+  troughs.castShadow = false;
+  troughs.receiveShadow = true;
+
+  // Three or four plants per trough, and a flower head on most of them. Both
+  // counts are seeded, so the roof is the same garden on every reload.
+  const perTrough = 4;
+  const shrubs = new InstancedMesh(
+    new SphereGeometry(0.34, 10, 8),
+    softMaterial(PALETTE.leafMid, 0.72),
+    spots.length * perTrough,
+  );
+  shrubs.name = `castle-roof-shrubs-${deck}`;
+  shrubs.castShadow = false;
+  shrubs.receiveShadow = true;
+
+  const heads = new InstancedMesh(
+    new SphereGeometry(0.13, 8, 6),
+    // One flower colour per roof rather than per head: a second colour is a
+    // second material is a second draw call. Yellow rather than the seeded pick
+    // the first version made, because two of the three colours it could land on
+    // were within a shade of the roof's own pink paving and the flowers
+    // disappeared into it — a randomness that can choose invisibility is not
+    // variety, it is a coin flip on whether the feature exists.
+    softMaterial(PALETTE.flowerYellow, 0.7),
+    spots.length * perTrough,
+  );
+  heads.name = `castle-roof-flowers-${deck}`;
+  decal(heads);
+  heads.receiveShadow = true;
+
+  const matrix = new Matrix4();
+  const rotation = new Quaternion();
+  const axis = new Vector3(0, 1, 0);
+  const unit = new Vector3(1, 1, 1);
+  const scale = new Vector3();
+  const position = new Vector3();
+  let plant = 0;
+  spots.forEach((spot, index) => {
+    rotation.setFromAxisAngle(axis, spot.yaw);
+    position.set(spot.x, 0, spot.z);
+    matrix.compose(position, rotation, unit);
+    troughs.setMatrixAt(index, matrix);
+
+    const along = new Vector3(Math.cos(spot.yaw), 0, -Math.sin(spot.yaw));
+    for (let i = 0; i < perTrough; i += 1) {
+      const t = (i + 0.5) / perTrough - 0.5;
+      const size = rng.range(0.8, 1.25);
+      position
+        .set(spot.x, TROUGH_HEIGHT + 0.14, spot.z)
+        .addScaledVector(along, t * (TROUGH_LENGTH - 0.5));
+      scale.setScalar(size);
+      matrix.compose(position, rotation, scale);
+      shrubs.setMatrixAt(plant, matrix);
+      // Above the shrub's own crown (0.34 m at size 1), not level with it — a
+      // flower head buried inside its bush is a flower head nobody ever sees,
+      // which the first roof render showed plainly.
+      position.y += 0.42 * size;
+      matrix.compose(position, rotation, unit);
+      heads.setMatrixAt(plant, matrix);
+      plant += 1;
+    }
+  });
+  troughs.instanceMatrix.needsUpdate = true;
+  shrubs.instanceMatrix.needsUpdate = true;
+  heads.instanceMatrix.needsUpdate = true;
+
+  group.add(troughs, shrubs, heads);
+  floor.add(group);
+}
+
+/** A planter trough: an open box, four low walls round a soil bed. */
+function troughGeometry(length: number, height: number): BufferGeometry {
+  const depth = 0.8;
+  const wall = 0.12;
+  const parts: BufferGeometry[] = [];
+  for (const [sx, sz, dx, dz] of [
+    [length, wall, 0, (depth - wall) / 2],
+    [length, wall, 0, -(depth - wall) / 2],
+    [wall, depth, (length - wall) / 2, 0],
+    [wall, depth, -(length - wall) / 2, 0],
+  ] as const) {
+    const side = new BoxGeometry(sx, height, sz);
+    side.translate(dx, height / 2, dz);
+    parts.push(side);
+  }
+  const soil = new BoxGeometry(length - wall * 2, 0.08, depth - wall * 2);
+  soil.translate(0, height - 0.04, 0);
+  parts.push(soil);
+  const first = parts[0];
+  if (!first) throw new Error('castleDecor: the planter trough built nothing.');
   return mergeGeometries(parts, false) ?? first;
 }
