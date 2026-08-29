@@ -4224,6 +4224,14 @@ function* addInterconnects(
     // that invariant would flag is a pair this escape reaches first.
     const latticeHonestWalk = Math.abs(a.x - b.x) + Math.abs(a.z - b.z) + 2 * STREET_PITCH;
     const detourIsDisproportionate = paved > latticeHonestWalk;
+    if (DEBUG_STREETS && detourIsDisproportionate) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[escape] ${a.id}-${b.id}: ${straight.toFixed(1)} m apart, ${paved.toFixed(1)} m by paving ` +
+          `(${(paved / straight).toFixed(2)}x) against a lattice-honest ${latticeHonestWalk.toFixed(1)} m — ` +
+          'the structure screens yield',
+      );
+    }
 
     // A fallback connector that would draw its own private street line is
     // dropped rather than drawn: it is optional paving, and the lattice
