@@ -260,15 +260,31 @@ export const CAT_BUS_LONGEST_WALK_TO_DOOR = CABIN_LENGTH_FROM_SEATS + BODY_WIDTH
  * "Two definitions of one thing, kept in step by hand") in its plainest form:
  * the derivation was right, it simply had no way to be asked.
  *
- * **These are the bodywork, not the silhouette, and the difference is real.**
- * A `Box3` round the built model measures **6.45 x 5.38 x 18.16**; the bodywork
- * is **5.28 x 5.21 x 15.83**. The face and whiskers stand 1.09 m off the front,
- * the wheels sit outboard of the flanks, and the open door swings 1.17 m out to
- * the side. Anything leaving room for the bus must leave room for *those*, so
- * `arrivalSightline.ts` pads by a whole bus length rather than a half and
- * `check:cat-bus` measures the built box against what it assumed — because a
- * constant claiming to be the whole vehicle while describing only its box is
- * how a 10 m keep-out came to be sized for an 11 m bus in the first place.
+ * **These are derived design figures, not a measurement of the built model,
+ * and the difference runs both ways.** Measured on the model this file builds
+ * (29 Aug 2026, tail removed): a `Box3` round it is **7.30 x 6.00 x 14.45**
+ * with the door shut and **8.20** wide with it open; the bodywork — the two
+ * shell bands plus the cat's face — is **5.57 x 5.13 x 14.33**.
+ *
+ * Against that, `CAT_BUS_LENGTH` (15.83) is 1.5 m *longer* than the bodywork it
+ * names, so it is safe to reserve space with; but `CAT_BUS_WIDTH` (5.28) is
+ * *narrower* than the vehicle really is at every point that matters. The face
+ * and whiskers stand 1.43 m off the front of the shells; the wheels reach 3.65
+ * from the centreline, 1.01 m outboard of this constant's own half-width; and
+ * the open door reaches 4.55, a further 1.91 m out. Anything leaving room for
+ * the bus must leave room for *those* — which is why `arrivalSightline.ts` pads
+ * by a whole bus length rather than a half and takes {@link CAT_BUS_TRACK_WIDTH}
+ * across, not this.
+ *
+ * **Nothing checks these numbers against the built model.** `check:cat-bus`
+ * imports the destination, the route number and the seat count from here and
+ * nothing else: it samples the *drawn* box against the park boundary, so it
+ * catches a bus that grows outwards into the fence but would not notice these
+ * constants drifting from the mesh. `check:bus-journey` asserts every part
+ * touches the bodywork, which is a different question again. Re-measure rather
+ * than trusting the figures above if you are about to rely on them — a constant
+ * claiming to be the whole vehicle while describing only its box is how a 10 m
+ * keep-out came to be sized for an 11 m bus in the first place.
  */
 export const CAT_BUS_LENGTH = BODY_LENGTH;
 export const CAT_BUS_WIDTH = BODY_WIDTH;
