@@ -103,6 +103,25 @@ current space, per-space root visibility, `setPlayBounds`, iris + teleport +
    follow-up PR rather than smuggling a rewrite into a refactor.
 3. Nothing else. No portal table, no floor spaces, no deletions.
 
+#### The parity baseline — taken before any edit
+
+```
+commit    2c8593042a357fe49e2bc839f87c81dcb339e2c0   (src/ identical to origin/main 95832181)
+command   npm run check:crowd   (scripts/trace-npc-driver.mts)
+result    frames=90000 children=12
+          covered climbs=12 trips=85 chats=292 paints=4 waves=63845 hops=362
+          trace=2cdba2c3
+          wedged-visitor painted=4/4 fourth-painted t=100.7s
+```
+
+**`trace=2cdba2c3` is the S1 pass/fail, not supporting evidence.** A seeded
+25-minute trace of the whole crowd; if the hash moves, S1 changed behaviour and
+is not a refactor. Recorded here *with the commit it was taken at* because this
+project has twice had a proof transcript go stale when the thing underneath it
+moved — a hash with no commit beside it cannot be re-derived honestly. If you
+are picking this up and the tree has moved, re-take the baseline at the merge
+base rather than trusting this number.
+
 **Proof it changed nothing:** full unpiped `npm run build` (the chain runs
 `check:castle`, `check:hotel`, `check:npc-presence`, `check:waypoints`,
 `check:park`), `npm run test:procgen` separately (**not in the build chain**),
