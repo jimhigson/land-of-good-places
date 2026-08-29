@@ -2904,6 +2904,28 @@ kbd {
    back every pixel of margin, border and radius. Measured in PR #353's review
    at 4 of 14 names painted; see `drawLabel` and `wrapLabel`. */
 @media (max-width: 34rem) {
+  /* **The container gives up its margin; the card does not outgrow it.**
+     `.parkmap` is a centred grid with 0.75rem of padding, so a card sized to
+     100vw/100dvh inside it is 24px wider and 24px taller than the content box
+     it has to fit — it centres, and hangs 12-15px off every edge. Measured at
+     390x844 in review of PR #353: the card ran (15,15)->(405,859), the canvas'
+     right edge sat 10px off-screen, and the hint line telling a child how to
+     close the map was sliced in half by the bottom of the display. At 320px
+     the hint's second line was off-screen entirely.
+
+     This is the clipped-label bug the canvas already fixes internally,
+     reappearing one level up at the viewport — and it was invisible for two
+     review rounds because the QA screenshots captured `.parkmap-card`, which
+     renders in the card's own coordinate space and so cannot show it.
+     `scripts/qa-park-map.mjs` now captures the viewport for that reason.
+
+     Zeroing the horizontal padding and keeping only the safe-area insets is
+     what makes full-bleed actually full-bleed. The insets stay because they
+     are doing a real job on a notched phone. */
+  .parkmap {
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  }
+
   .parkmap-card {
     width: 100vw;
     height: 100vh;

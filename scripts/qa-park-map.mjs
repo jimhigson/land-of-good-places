@@ -81,10 +81,15 @@ for (const size of SIZES) {
   // One extra frame so the canvas has painted.
   await page.waitForTimeout(1200);
 
+  // **The viewport, not `.parkmap-card`.** Both earlier review rounds
+  // screenshotted the card element, which renders in the card's own coordinate
+  // space — so a card that overflows the screen looks perfect in the capture
+  // and is sliced in half on the phone. That is exactly what happened: the
+  // map's close hint ran off the bottom of a 390px display for two rounds
+  // without a single screenshot being able to show it. A viewport capture is
+  // what a child actually sees, including anything hanging off the edge.
   const file = `${outDir}/${tag}-${size.name}${seed ? `-seed${seed}` : ''}.png`;
-  const card = await page.$('.parkmap-card');
-  if (card) await card.screenshot({ path: file });
-  else await page.screenshot({ path: file });
+  await page.screenshot({ path: file });
 
   // Both numbers come off `dataset`, written by the renderer from the lists it
   // actually drew. Counting painted text runs from outside double-counts a

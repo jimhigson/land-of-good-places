@@ -50,7 +50,19 @@
  *      the two are 3.54 m apart and the plot would be the wrong answer. An
  *      earlier version of this comment lumped the castle in with the anchors
  *      while the code returned `BUILDING_CENTRE` and never touched the scene —
- *      the same over-broad claim, in miniature, caught in re-review.
+ *      the same over-broad claim, in miniature, caught in re-review. A missing
+ *      `castle-walls` now **fails** rather than falling back, because a silent
+ *      fallback here restores the vacuous version without changing the output.
+ *
+ *      **What the scene-graph branches buy, precisely**: they catch the map
+ *      reading the wrong *field* — the plot instead of the masonry, the queue
+ *      instead of the ride — which is the error that actually happens and the
+ *      one no round-trip can see. They do not catch a wrong *constant* shared
+ *      by the map and the park alike: if `BUILDING_CENTRE` itself were wrong,
+ *      the castle would stand in the wrong place and the map would faithfully
+ *      draw it there. That is a different check's job (`check:park`), and the
+ *      distinction is worth keeping straight, because "measured against the
+ *      scene" sounds like it covers both and does not.
  *    - **The entrance gate** — truth is `park-gate-arch`, the crossbar
  *      `Entrance.ts` stands over the gap in the boundary wall. Genuine
  *      independence, and it earned its keep on the first run: the obvious
@@ -260,7 +272,25 @@ function scenePosition(name: string): readonly [number, number] | null {
 function truePosition(feature: MapFeature): readonly [number, number] | null {
   if (feature.kind === 'castle') {
     // The masonry, not the plot — see the note on assertion 2 above.
-    return scenePosition('castle-walls') ?? [BUILDING_CENTRE_X, BUILDING_CENTRE_Z];
+    //
+    // **No `??` fallback here, deliberately.** Falling back to
+    // `BUILDING_CENTRE` would turn this branch back into the round-trip it
+    // used to be, silently: the assertion would still print `0.0000` and still
+    // prove nothing, which is the exact failure mode review caught the first
+    // time. A missing `castle-walls` is a real problem — the castle did not
+    // build, or was renamed — so it is a failure, loudly, with the name in it.
+    const walls = scenePosition('castle-walls');
+    if (!walls) {
+      failures.push(
+        'NO SCENE OBJECT "castle-walls": the castle\'s masonry is not in the built ' +
+          'scene, so assertion 2 cannot measure the castle against anything ' +
+          'independent. Either the castle failed to build or the group was renamed — ' +
+          `do not fall back to BUILDING_CENTRE (${BUILDING_CENTRE_X.toFixed(2)}, ` +
+          `${BUILDING_CENTRE_Z.toFixed(2)}), which is the plot and 3.54 m from the walls.`,
+      );
+      return null;
+    }
+    return walls;
   }
   if (feature.kind === 'anchor') {
     // The real Group `AnchorPlots` put in the scene, read out of the finished
