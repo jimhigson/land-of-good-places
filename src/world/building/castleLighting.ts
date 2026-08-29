@@ -16,6 +16,7 @@ import {
   BUILDING_WALL_THICKNESS,
   INTERIOR_HALF_X,
   INTERIOR_HALF_Z,
+  PLAYER_RADIUS,
 } from '../../core/constants';
 import { PALETTE } from '../../core/palette';
 import { ART } from '../../art/style/artPalette';
@@ -125,7 +126,23 @@ export const CASTLE_TORCH_CUP = { out: 0.2475, up: 0.285 } as const;
  * `check:castle` measures the built flame against both the headroom and the
  * plate's real sightline, so this cannot quietly stop fitting.
  */
-const FLAME_HEIGHT = SCONCE_HEADROOM - CASTLE_TORCH_CUP.up - 0.01;
+/**
+ * The largest a single flame's seeded size jitter may make it.
+ *
+ * **This constant exists because `check:castle` went red the first time it ran**
+ * and the failure was mine: {@link FLAME_HEIGHT} was derived exactly to fill
+ * {@link SCONCE_HEADROOM}, and then every instance was multiplied by up to 1.14
+ * to stop forty identical flames looking like forty identical flames. So the
+ * tallest flame on every storey stood 2.73 m against a 2.70 m budget — a budget
+ * *published to the 3D Artist*, who is sizing a sconce to it.
+ *
+ * The jitter is now part of the derivation rather than applied after it. The
+ * arithmetic was never the problem; having two steps that each looked right on
+ * its own was.
+ */
+const FLAME_SCALE_MAX = 1.14;
+
+const FLAME_HEIGHT = (SCONCE_HEADROOM - CASTLE_TORCH_CUP.up - 0.01) / FLAME_SCALE_MAX;
 
 /**
  * How wide a flame is at its base.
@@ -136,6 +153,14 @@ const FLAME_HEIGHT = SCONCE_HEADROOM - CASTLE_TORCH_CUP.up - 0.01;
  * painted toy flame (ART_DIRECTION §1), and it is seen from ten metres.
  */
 const FLAME_RADIUS = 0.155;
+
+/**
+ * How far a torch and its soot reach along the wall from their anchor.
+ *
+ * Half the soot mark's width, which is the widest of the four meshes an anchor
+ * places — so this is what has to clear a keep-out, not the anchor point.
+ */
+const TORCH_REACH = 0.5;
 
 /** Roughly how far apart torches sit round the perimeter. */
 const TORCH_SPACING = 5.2;
@@ -183,7 +208,19 @@ export function castleTorchAnchors(deck: number): WallAnchor[] {
     // Nothing on a wall that has no floor under it to stand and look at it
     // from. Asked of the deck that was built rather than of the hole list.
     if (!deckIsSolid(deck, anchor.x + anchor.out.x, anchor.z + anchor.out.z)) return;
-    if (blocked.some((k) => Math.hypot(anchor.x - k.x, anchor.z - k.z) < k.radius)) return;
+    // The **same margin `check:castle` measures against**, plus the bracket's
+    // own reach off the wall. It was bare `k.radius` until the check found two
+    // torches a few centimetres inside a shop's queue: a builder that clears a
+    // keep-out by less than the checker demands is a check that fails on a good
+    // day and a torch behind a shop sign on a bad one.
+    if (
+      blocked.some(
+        (k) =>
+          Math.hypot(anchor.x - k.x, anchor.z - k.z) < k.radius + PLAYER_RADIUS + TORCH_REACH,
+      )
+    ) {
+      return;
+    }
     anchors.push(anchor);
   };
 
@@ -421,7 +458,7 @@ export class CastleFire {
           z: anchor.z + anchor.out.z * CASTLE_TORCH_CUP.out,
           // A row of forty identical flames reads as a row of forty identical
           // flames. Seeded, so it is the same wall on every reload.
-          scale: rng.range(0.86, 1.14),
+          scale: rng.range(2 - FLAME_SCALE_MAX, FLAME_SCALE_MAX),
         });
       });
       brackets.instanceMatrix.needsUpdate = true;

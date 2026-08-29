@@ -12,11 +12,12 @@ import {
   Vector3,
 } from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { INTERIOR_HALF_X, INTERIOR_HALF_Z } from '../../core/constants';
+import { INTERIOR_HALF_X, INTERIOR_HALF_Z, PLAYER_RADIUS } from '../../core/constants';
 import { PALETTE } from '../../core/palette';
 import { Rng } from '../../core/mathUtils';
 import { decal, solid, toonMaterial } from '../../art/style/materials';
 import { createPet } from '../../art/models/pets';
+import { TALLEST_CHILD_HEIGHT } from '../../art/models/kid';
 import {
   castleArmsTexture,
   castleBannerTexture,
@@ -305,15 +306,27 @@ function coatOfArms(): Mesh {
  * are recognised from the fragment of them this camera can see.
  */
 function portcullis(): InstancedMesh {
-  const bottom = 3.0;
+  // **Both of these numbers were set by `check:castle` going red**, and both
+  // failures were real. The grille first hung to 2.84 m at the spike tips —
+  // 13 cm into a hatted child — because the shaft was placed in the safe band
+  // and the points were then hung *below* it, which is two steps that each look
+  // right on their own. And it stood flush with the wall, where the ceiling is
+  // BEAM_UNDERSIDE rather than the full 3.30 m, so it reached into the timber.
+  //
+  // So the whole assembly, points included, lives inside `[bottom, top]`, and
+  // it hangs in the door reveal rather than on the wall face — which is also
+  // where a real portcullis drops.
+  const bottom = TALLEST_CHILD_HEIGHT + 0.05;
   const top = CASTLE_CEILING_CLEAR;
   const span = INTERIOR_DOOR_MAX_X - INTERIOR_DOOR_MIN_X;
   const bars = 9;
+  const POINT_HEIGHT = 0.16;
 
-  const shaft = new BoxGeometry(0.09, top - bottom, 0.09);
-  const point = new CylinderGeometry(0, 0.075, 0.16, 4);
+  const shaft = new BoxGeometry(0.09, top - bottom - POINT_HEIGHT, 0.09);
+  shaft.translate(0, POINT_HEIGHT / 2, 0);
+  const point = new CylinderGeometry(0, 0.075, POINT_HEIGHT, 4);
   point.rotateX(Math.PI);
-  point.translate(0, -(top - bottom) / 2 - 0.08, 0);
+  point.translate(0, -(top - bottom - POINT_HEIGHT) / 2, 0);
   const geometry = mergeGeometries([shaft, point], false) ?? shaft;
 
   const grille = new InstancedMesh(geometry, softMaterial(PALETTE.ink, 0.7), bars);
@@ -327,7 +340,7 @@ function portcullis(): InstancedMesh {
   const position = new Vector3();
   for (let i = 0; i < bars; i += 1) {
     const x = INTERIOR_DOOR_MIN_X + (span * (i + 0.5)) / bars;
-    position.set(x, (top + bottom) / 2, INTERIOR_HALF_Z - 0.22);
+    position.set(x, (top + bottom) / 2, INTERIOR_HALF_Z - PORTCULLIS_INSET);
     matrix.compose(position, identity, unit);
     grille.setMatrixAt(i, matrix);
   }
@@ -606,7 +619,13 @@ function cornerClutter(deck: number, rng: Rng): InstancedMesh | null {
     if (!deckIsSolid(deck, x, z)) continue;
     if (!deckIsSolid(deck, x + 1.2, z) || !deckIsSolid(deck, x - 1.2, z)) continue;
     if (!deckIsSolid(deck, x, z + 1.2) || !deckIsSolid(deck, x, z - 1.2)) continue;
-    if (blocked.some((k) => Math.hypot(x - k.x, z - k.z) < k.radius + 0.8)) continue;
+    // `+ 0.8` here let a crate land 6 cm inside a shop's queue radius, which
+    // `check:castle` caught: the builder tested a *point* while the check
+    // measures the crate's real box, and a crate's half-diagonal is 0.65 m.
+    // So the builder now clears what the checker demands, plus the crate.
+    if (blocked.some((k) => Math.hypot(x - k.x, z - k.z) < k.radius + PLAYER_RADIUS + 1.1)) {
+      continue;
+    }
     if (spots.some((s) => Math.hypot(x - s.x, z - s.z) < 1.4)) continue;
     spots.push({ x, z, yaw: rng.range(-0.5, 0.5), size: rng.range(0.62, 0.92) });
   }
@@ -632,6 +651,15 @@ function cornerClutter(deck: number, rng: Rng): InstancedMesh | null {
   crates.instanceMatrix.needsUpdate = true;
   return crates;
 }
+
+/**
+ * How far into the room the grille hangs.
+ *
+ * Clear of the 0.40 m band in which the timber wall-plate, not the slab, is the
+ * ceiling — see {@link portcullis}. A tenth of a metre of margin on top,
+ * because the plate's width is not a constant this module can import.
+ */
+const PORTCULLIS_INSET = 0.7;
 
 /** A crate: a box with battens across it, so it is not a plain cube. */
 function crateGeometry(): BufferGeometry {
