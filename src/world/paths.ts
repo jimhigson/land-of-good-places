@@ -4251,7 +4251,22 @@ function* addInterconnects(
       const b = points[i] as readonly [number, number];
       slideOverlap += slideCorridorOverlap(a[0], a[1], b[0], b[1]);
     }
-    if (slideOverlap > 8) {
+    // ...with the same escape, and only where the corridor is not something
+    // this connector *chose* to run along: you leave the ginormous slide
+    // underneath its own chute, so `exit-ginormousSlide` stands inside the
+    // leg corridor by construction, and its own mandatory spur already
+    // paves and lamps that ground. This is the doorstep exemption the ride
+    // corridor screen above already grants, held to the pairs the escape
+    // has judged disproportionate — a cross-park shortcut that merely ends
+    // at the exit still gets nothing. Seed 11 is exactly this shape: 20.3 m
+    // of the 23.4 m connector lies in the corridor because both ends do.
+    // The proof it is safe is measured on the built park, not asserted
+    // here: `theGinormousSlideStandsOnSomething` counts the legs that
+    // actually got placed, on all five seeds.
+    const corridorIsADoorstep =
+      detourIsDisproportionate &&
+      (pointInSlideCorridor(a.x, a.z) || pointInSlideCorridor(b.x, b.z));
+    if (slideOverlap > 8 && !corridorIsADoorstep) {
       if (DEBUG_STREETS) {
         // eslint-disable-next-line no-console
         console.log(`[connect] ${a.id}-${b.id}: rejected, runs along the slide corridor`);
