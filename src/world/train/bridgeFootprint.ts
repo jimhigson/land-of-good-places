@@ -62,18 +62,13 @@ import { PATH_KERB_OVERHANG, PLAYER_RADIUS, SPRINT_PEAK_GRADE_BUDGET } from '../
  */
 
 /**
- * Bridge ramps climb at the same steepness the park's own front steps do —
- * derived from `ENTRANCE_RAMP`, never a separately chosen number, so a
- * retune of the entrance moves the bridges with it rather than leaving two
- * "how steep is a ramp here" answers to drift apart.
- */
-export const BRIDGE_RAMP_GRADIENT =
-  Math.abs(ENTRANCE_RAMP.yTo - ENTRANCE_RAMP.yFrom) / Math.abs(ENTRANCE_RAMP.to - ENTRANCE_RAMP.from);
-
-/**
  * Half-length of the deck along the crossing direction — has to clear both
  * fence lines (each {@link FENCE_OFFSET} out from the rail centre) with a
  * little margin so the deck's own edge does not sit flush on a fence post.
+ *
+ * **This is the part of a bridge that cannot shrink.** The tunnel has to
+ * swallow the whole fenced corridor, so when {@link BRIDGE_LENGTH_SCALE}
+ * shortens a bridge, every metre comes out of the ramps.
  */
 export const DECK_HALF_LENGTH = FENCE_OFFSET + 1.2;
 
@@ -97,6 +92,59 @@ export const DECK_HALF_LENGTH = FENCE_OFFSET + 1.2;
  * direction would be an import cycle.
  */
 export const HUMP_BLEND = 0.25;
+
+/**
+ * The grade the park's own front steps climb at.
+ *
+ * Bridges used to be built at exactly this, so a retune of the entrance moved
+ * them with it. **They are not any more** — see {@link BRIDGE_RAMP_GRADIENT} —
+ * but it is still what "gentle" means here, and it is still the length a bridge
+ * is measured as a fraction *of*, so it stays derived rather than restated.
+ */
+const ENTRANCE_MATCHED_GRADIENT =
+  Math.abs(ENTRANCE_RAMP.yTo - ENTRANCE_RAMP.yFrom) / Math.abs(ENTRANCE_RAMP.to - ENTRANCE_RAMP.from);
+
+/**
+ * **How long a bridge is, as a fraction of the gentle entrance-matched one** —
+ * Jim, 2026-08-29: *"I'd like the bridges to be shorter and steeper… 40%
+ * shorter than currently made (also will need to be steeper for this)"*.
+ *
+ * Expressed as a fraction of the entrance-matched length rather than as a flat
+ * metre figure so the entrance and the bridges still move together: a bridge is
+ * a *compressed* version of the park's own gentle grade, which keeps one owner
+ * for what gentle means.
+ *
+ * **The shortening is capped by {@link MAX_RAMP_GRADIENT}, not by taste.** Past
+ * that cap a crossing does not get a steeper bridge — it gets no bridge, and
+ * falls back to a level crossing (#374). So this constant trades bridge
+ * *count* for bridge *length*, and the honest way to choose it is to measure
+ * both on the built park rather than to pick a percentage.
+ */
+export const BRIDGE_LENGTH_SCALE = 0.6;
+
+/**
+ * **How steep a bridge ramp climbs**, on average.
+ *
+ * Derived, not chosen: the ramp run left once {@link BRIDGE_LENGTH_SCALE} has
+ * been applied to the entrance-matched length and the un-shrinkable
+ * {@link DECK_HALF_LENGTH} deck has been taken out of it.
+ *
+ * **This deliberately no longer equals the entrance's own grade.** That
+ * reasoning still holds for *gentleness* — which is why
+ * {@link ENTRANCE_MATCHED_GRADIENT} is still what this derives from — but Jim
+ * asked for bridges specifically steeper than the front steps, so the two are
+ * now one owner and a stated relationship rather than one shared number.
+ *
+ * The steepness that decides whether a child can run over it is not this
+ * average but the hump's **peak**, `1 / (1 - HUMP_BLEND)` times it — see
+ * {@link MAX_RAMP_GRADIENT}, which is the cap this is held under.
+ */
+export const BRIDGE_RAMP_GRADIENT = (() => {
+  const gentleRampRun = BRIDGE_RISE / ENTRANCE_MATCHED_GRADIENT;
+  const gentleTotal = DECK_HALF_LENGTH * 2 + gentleRampRun * 2;
+  const shortenedRampRun = (gentleTotal * BRIDGE_LENGTH_SCALE - DECK_HALF_LENGTH * 2) / 2;
+  return BRIDGE_RISE / shortenedRampRun;
+})();
 
 /**
  * **The steepest a ramp may ever be forced to** — when two crossings land close

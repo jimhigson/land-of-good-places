@@ -21,7 +21,7 @@ import {
 import { TRACK_CLEARANCE } from './src/world/train/route.ts';
 import { BUILDING_STEP_UP, PLAYER_RADIUS } from './src/core/constants.ts';
 
-const HUMP_BLEND = 0.25; // bridges.ts
+const HUMP_BLEND = 0.15; // bridges.ts
 const ARCH_CLEAR_HALF = TRACK_CLEARANCE + 0.5;
 const PEAK = 1 / (1 - HUMP_BLEND); // trapezoid peak-slope multiplier
 

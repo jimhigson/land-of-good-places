@@ -161,6 +161,50 @@ import type { MovingPlatform } from '../building/surfaces';
 export const PARAPET_HEIGHT = 0.72;
 
 /**
+ * **Extra parapet height at the crown, on top of {@link PARAPET_HEIGHT} —
+ * where the pronounced hump actually comes from.**
+ *
+ * Jim asked for *"a more pronounced 'hump' shape to the bridge"*, and the
+ * obvious way to give it to him — arcing the road harder — is the one way
+ * that is not allowed: the road is one owner for what is drawn *and* what is
+ * walked (`surfaceProfile` feeds `heightAt`, the shell's road top and the
+ * path drape alike), so bending the drawn road above the walk surface would
+ * put a child's feet inside the stone she can see. That is the centre of
+ * CLAUDE.md's "anything that looks solid must be solid", not a near miss.
+ *
+ * The silhouette a child actually reads as "hump", though, is not the road —
+ * from beside the bridge it is the **parapet top line and its coping**, and
+ * a parapet is not walkable. So the arc goes there, where exaggerating it
+ * misrepresents nothing: the parapet grows with how high the hump stands
+ * beneath it, peaking over the crown and tapering away at the feet, so its
+ * top line bows above the road's own profile rather than running parallel to
+ * it.
+ *
+ * This is also what carries the hump while `HUMP_BLEND` is trimmed for issue
+ * #358 (see its note): the road is gentler than it wants to be, and the
+ * parapet is what keeps the bridge looking like a humpback anyway.
+ *
+ * **Keyed on the hump's own height, not on distance along the ramp.** Those are
+ * near enough the same thing on level ground and are not the same thing at all
+ * on a slope, where a fraction-along-the-ramp arc would lift the parapet just
+ * as high over a stretch where the bridge is barely off the ground. It also
+ * means the arc tracks `HUMP_BLEND` for free: when issue #358 lands and the
+ * blend goes back to 0.25, the top line follows the new road shape without
+ * anyone remembering to retune this.
+ *
+ * **Why 0.45 and not more.** GAME_DESIGN.md: a small bridge does not obscure a
+ * player walking on it. At the crown this stands the coping's top
+ * `PARAPET_HEIGHT + this + COPING_STAND` = 1.37 m over the road. The park's
+ * camera looks down at about 45°, so a sight line grazing the near parapet has
+ * fallen 1.9 m — the road's own half-width — by the time it reaches her, i.e.
+ * below the road: she is not occluded at all from the game's own view. In a
+ * pure side elevation half a metre of a 1.86 m child still stands clear above
+ * the coping, which is what a child on a real humpback bridge looks like.
+ * Going much past this starts eating her from the game's camera too.
+ */
+export const PARAPET_CROWN_LIFT = 0.45;
+
+/**
  * The hump height (above the local ground beside it) below which the
  * parapet tapers away — `BUILDING_STEP_UP`: below one step, the hump's
  * edge is an ordinary kerb a walker can step off, exactly like every other
@@ -192,44 +236,6 @@ function parapetHeightFor(humpHeight: number): number {
   const arc = clamp01(humpHeight / BRIDGE_RISE);
   return (PARAPET_HEIGHT + PARAPET_CROWN_LIFT * arc) * taper;
 }
-
-/**
- * **How much taller the parapet stands at the crown than at the feet — the
- * pronounced hump, put where it costs nothing.**
- *
- * Jim, 2026-08-29, asked for *"a more pronounced 'hump' shape to the bridge"*.
- * The obvious way to give him one is to arc the road, and the Engineer's
- * measurement of the 40%-shorter bridge says that is exactly what cannot be
- * done: a sprinting child at the intended blend already rises past
- * `BUILDING_STEP_UP` in one clamped frame and falls through the deck (issue
- * #358). Arcing the *drawn* road above the *walkable* one is refused for a
- * different and better reason — CLAUDE.md's "anything that looks solid must be
- * solid" — because a child on the crown would sink into stone she can see.
- *
- * But **the hump a player reads from beside a bridge is the parapet top line
- * and the coping on it, and nothing walks on those.** So they get the arc and
- * the road does not. Nothing walkable is misrepresented: the road surface, the
- * platform and the collider all still answer the same profile they always did.
- *
- * **Keyed on the hump's own height, not on distance along the ramp.** Those are
- * near enough the same thing on level ground and are not the same thing at all
- * on a slope, where a fraction-along-the-ramp arc would lift the parapet just
- * as high over a stretch where the bridge is barely off the ground. It also
- * means the arc tracks `HUMP_BLEND` for free: when issue #358 lands and the
- * blend goes back to 0.25, the top line follows the new road shape without
- * anyone remembering to retune this.
- *
- * **Why 0.45 and not more.** GAME_DESIGN.md: a small bridge does not obscure a
- * player walking on it. At the crown this stands the coping's top
- * `PARAPET_HEIGHT + this + COPING_STAND` = 1.37 m over the road. The park's
- * camera looks down at about 45°, so a sight line grazing the near parapet has
- * fallen 1.9 m — the road's own half-width — by the time it reaches her, i.e.
- * below the road: she is not occluded at all from the game's own view. In a
- * pure side elevation half a metre of a 1.86 m child still stands clear above
- * the coping, which is what a child on a real humpback bridge looks like.
- * Going much past this starts eating her from the game's camera too.
- */
-export const PARAPET_CROWN_LIFT = 0.45;
 
 /**
  * Half-span (along the path) of the arch's flat crown — the stretch of
@@ -758,8 +764,10 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
           x2: point.x,
           z2: point.z,
           // The drawn parapet's own top, arc included — not `+ PARAPET_HEIGHT`
-          // recomputed here. A collider that stopped at the un-arced height
-          // would let a child climb the drawn stone and step over it.
+          // recomputed here. Now that the parapet arcs over the crown (see
+          // {@link PARAPET_CROWN_LIFT}) a constant here would leave the
+          // collider shorter than the stone a child can see, and she could hop
+          // a wall that is visibly still in front of her.
           topHeight: Math.max(
             parapetTopFor(topA, previous.x, previous.z),
             parapetTopFor(topB, point.x, point.z),
