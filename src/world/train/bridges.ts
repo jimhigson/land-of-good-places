@@ -178,30 +178,41 @@ const PARAPET_MIN_HUMP = BUILDING_STEP_UP;
  * shell geometry so the drawn wall and the collider agree about where a
  * parapet is. */
 function parapetHeightFor(humpHeight: number): number {
+  // Taper to nothing at the feet, where the hump is barely above the ground
+  // and a wall would sever the path junctions the ramps land in.
   const t = (humpHeight - 0.25) / (PARAPET_MIN_HUMP - 0.25);
-  const clamped = t < 0 ? 0 : t > 1 ? 1 : t;
-  return PARAPET_HEIGHT * clamped;
+  const taper = t < 0 ? 0 : t > 1 ? 1 : t;
+  // …and grow with how high the hump stands, so the parapet's own top line
+  // arcs *above* the road's profile instead of running parallel to it.
+  const arc = clamp01(humpHeight / BRIDGE_RISE);
+  return (PARAPET_HEIGHT + PARAPET_CROWN_LIFT * arc) * taper;
 }
 
 /**
  * **How much taller the parapet stands at the crown than at the feet — the
  * pronounced hump, put where it costs nothing.**
  *
- * Jim, 2026-08-29, asked for *"a more pronounced 'hump' shape to the
- * bridge"*. The obvious way to give him one is to arc the road, and the
- * Engineer's measurement of the 40%-shorter bridge says that is exactly what
- * cannot be done: peak slope is already at 69% of the height a sprinting
- * child climbs in one clamped frame, and 79% is a figure real-browser QA has
- * watched her fall through the deck at. Arcing the *drawn* road above the
- * *walkable* one is refused outright for a different and better reason —
- * CLAUDE.md's "anything that looks solid must be solid" — because a child on
- * the crown would sink into stone she can see.
+ * Jim, 2026-08-29, asked for *"a more pronounced 'hump' shape to the bridge"*.
+ * The obvious way to give him one is to arc the road, and the Engineer's
+ * measurement of the 40%-shorter bridge says that is exactly what cannot be
+ * done: a sprinting child at the intended blend already rises past
+ * `BUILDING_STEP_UP` in one clamped frame and falls through the deck (issue
+ * #358). Arcing the *drawn* road above the *walkable* one is refused for a
+ * different and better reason — CLAUDE.md's "anything that looks solid must be
+ * solid" — because a child on the crown would sink into stone she can see.
  *
  * But **the hump a player reads from beside a bridge is the parapet top line
  * and the coping on it, and nothing walks on those.** So they get the arc and
  * the road does not. Nothing walkable is misrepresented: the road surface, the
- * platform and the collider all still answer the same gentle profile they
- * always did.
+ * platform and the collider all still answer the same profile they always did.
+ *
+ * **Keyed on the hump's own height, not on distance along the ramp.** Those are
+ * near enough the same thing on level ground and are not the same thing at all
+ * on a slope, where a fraction-along-the-ramp arc would lift the parapet just
+ * as high over a stretch where the bridge is barely off the ground. It also
+ * means the arc tracks `HUMP_BLEND` for free: when issue #358 lands and the
+ * blend goes back to 0.25, the top line follows the new road shape without
+ * anyone remembering to retune this.
  *
  * **Why 0.45 and not more.** GAME_DESIGN.md: a small bridge does not obscure a
  * player walking on it. At the crown this stands the coping's top
@@ -213,17 +224,7 @@ function parapetHeightFor(humpHeight: number): number {
  * the coping, which is what a child on a real humpback bridge looks like.
  * Going much past this starts eating her from the game's camera too.
  */
-const PARAPET_ARC_RISE = 0.45;
-
-/**
- * The parapet's extra arc at `q` (0 at the crown, 1 at a ramp foot) — a cosine
- * dome, so it is flat-topped at the crown and lands tangent at the feet rather
- * than meeting the ordinary parapet at a visible kink.
- */
-function parapetArcFor(q: number): number {
-  const u = clamp01(q);
-  return PARAPET_ARC_RISE * (0.5 + 0.5 * Math.cos(Math.PI * u));
-}
+const PARAPET_CROWN_LIFT = 0.45;
 
 /**
  * Half-span (along the path) of the arch's flat crown — the stretch of
@@ -677,16 +678,9 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // three answers that used to be computed in three places and now cannot
   // disagree (CLAUDE.md: "two definitions of one thing, kept in step by hand").
   // The arc is the pronounced hump, put on the one part of the bridge nobody
-  // walks on — see `PARAPET_ARC_RISE`.
-  const parapetTopFor = (surface: number, outerX: number, outerZ: number, along: number): number => {
-    const parapet = parapetHeightFor(surface - terrainHeight(outerX, outerZ));
-    if (parapet <= 0) return surface;
-    const length = along >= 0 ? lengthPos : lengthNeg;
-    const q = length > 0 ? clamp01(Math.abs(along) / length) : 1;
-    // Scaled by how much parapet there is, so the arc dies with the wall at a
-    // tapered ramp foot instead of leaving a floating hump of coping there.
-    return surface + parapet + parapetArcFor(q) * (parapet / PARAPET_HEIGHT);
-  };
+  // walks on — see `PARAPET_CROWN_LIFT`.
+  const parapetTopFor = (surface: number, outerX: number, outerZ: number): number =>
+    surface + parapetHeightFor(surface - terrainHeight(outerX, outerZ));
 
   const shell = buildShellGeometry(
     frame,
@@ -735,7 +729,7 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
     // own thickness — see `parapetHeightFor`. The stone follows the wall; it
     // never asserts one that is not there.
     if (parapetHeightFor(surface - terrainHeight(outer.x, outer.z)) < COPING_HEIGHT) return null;
-    return parapetTopFor(surface, outer.x, outer.z, along);
+    return parapetTopFor(surface, outer.x, outer.z);
   };
 
   const ringMesh = new Mesh(
@@ -780,8 +774,8 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
           // recomputed here. A collider that stopped at the un-arced height
           // would let a child climb the drawn stone and step over it.
           topHeight: Math.max(
-            parapetTopFor(topA, previous.x, previous.z, previousAlong),
-            parapetTopFor(topB, point.x, point.z, clamped),
+            parapetTopFor(topA, previous.x, previous.z),
+            parapetTopFor(topB, point.x, point.z),
           ),
         });
       }
@@ -870,7 +864,7 @@ function buildShellGeometry(
   surfaceProfile: (x: number, z: number, along: number) => number,
   soffitAt: (alongAbs: number) => number,
   springY: number,
-  parapetTopFor: (surface: number, outerX: number, outerZ: number, along: number) => number,
+  parapetTopFor: (surface: number, outerX: number, outerZ: number) => number,
 ): ShellGeometry {
   const positions: number[] = [];
   const uvs: number[] = [];
@@ -957,7 +951,7 @@ function buildShellGeometry(
     const surface = surfaceProfile(cx, cz, along);
     for (const side of [1, -1] as const) {
       const outer = frame.worldAt(along, halfAcross * side, shift);
-      highestTop = Math.max(highestTop, parapetTopFor(surface, outer.x, outer.z, along));
+      highestTop = Math.max(highestTop, parapetTopFor(surface, outer.x, outer.z));
       lowestBottom = Math.min(lowestBottom, terrainHeight(outer.x, outer.z) - 0.5);
     }
   }
@@ -1002,8 +996,8 @@ function buildShellGeometry(
       : Math.min(terrainHeight(outerMinus.x, outerMinus.z), terrainHeight(roadMinus.x, roadMinus.z)) - 0.5;
     // The parapet tapers out where the hump is barely above the ground —
     // see `parapetHeightFor`; the collision walls follow the same rule.
-    const parapetTopPlus = parapetTopFor(surface, outerPlus.x, outerPlus.z, along);
-    const parapetTopMinus = parapetTopFor(surface, outerMinus.x, outerMinus.z, along);
+    const parapetTopPlus = parapetTopFor(surface, outerPlus.x, outerPlus.z);
+    const parapetTopMinus = parapetTopFor(surface, outerMinus.x, outerMinus.z);
     const u = along / TEXTURE_METRES;
 
     // The coursed outer face for this ring — two vertices per course, at that

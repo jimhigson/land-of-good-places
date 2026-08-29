@@ -41,7 +41,8 @@ ROAD_HALF = 1.6            # canonical seed's first bridge
 WALL_THICKNESS = 0.3
 PARAPET_HEIGHT = 0.72
 HUMP_BLEND = 0.15          # the Engineer's sprint-safe trim (provisional)
-PARAPET_ARC_RISE = 0.45    # the pronounced hump, on the part nobody walks on
+PARAPET_CROWN_LIFT = 0.45  # the pronounced hump, on the part nobody walks on
+BRIDGE_RISE = 4.060
 COURSE_HEIGHT = 0.7
 COURSE_RECESS = 0.09
 COPING_HEIGHT = 0.28
@@ -147,9 +148,13 @@ def parapet_top_y(along: float) -> float:
     parapet and the coping, which nobody walks on, while the road underneath
     stays gentle enough that a sprinting child keeps her footing.
     """
-    q = min(1.0, abs(along) / RAMP_RUN_TOTAL)
-    arc = PARAPET_ARC_RISE * (0.5 + 0.5 * math.cos(math.pi * q))
-    return road_y(along) + PARAPET_HEIGHT + arc
+    road = road_y(along)
+    # Keyed on the hump's own height above the ground, exactly as
+    # `bridges.ts`'s `parapetHeightFor` is — not on distance along the ramp.
+    # Those are near enough the same on level ground and not the same at all on
+    # a slope, and only this one tracks a change to HUMP_BLEND for free.
+    arc = min(1.0, road / BRIDGE_RISE)
+    return road + PARAPET_HEIGHT + PARAPET_CROWN_LIFT * arc
 
 
 RAMP_RUN_TOTAL = ARCH_SPAN_HALF + RAMP_RUN
