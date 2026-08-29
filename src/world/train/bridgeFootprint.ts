@@ -425,6 +425,32 @@ const WALKABLE_FLOOR = BRIDGE_RISE / MAX_RAMP_GRADIENT;
 const WALKABLE_MARGIN = 0.5;
 
 /**
+ * **The ramp every accepted bridge achieves on _both_ sides** — the floor plus
+ * its margin, as one published figure.
+ *
+ * Exported because it is not only the footprint search's own acceptance bar:
+ * the *site* planner (`crossingPlanSolve.ts`) has to know it too, both to give
+ * a site credit for enough ramp and to refuse to propose two crossings so close
+ * together that two bridges cannot physically occupy them. That module used to
+ * restate `BRIDGE_RISE / MAX_RAMP_GRADIENT + 0.5` by hand, which is the same
+ * two-descriptions-of-one-object shape as #349's parapet reach, one layer up.
+ */
+export const MIN_RAMP_RUN = WALKABLE_FLOOR + WALKABLE_MARGIN;
+
+/**
+ * **Half the length of the shortest bridge this codebase will ever accept** —
+ * its deck's own half-length plus the ramp it must achieve on that side.
+ *
+ * Two bridges whose ramps run at each other therefore need
+ * `2 * MIN_BRIDGE_HALF_LENGTH` between them. Nothing enforced that until #392:
+ * seed 2 planned two crossings **20.83 m** apart needing **28.54 m**, and the
+ * footprint search discovered the conflict far too late to do anything but drop
+ * one of them — after, in the #349 case, having built one bridge straight
+ * through the other's parapet.
+ */
+export const MIN_BRIDGE_HALF_LENGTH = DECK_HALF_LENGTH + MIN_RAMP_RUN;
+
+/**
  * What the late, real pass needs from the caller: the actual collision
  * world to query, and — the last lever before giving up on a crossing
  * entirely — a way to fell a real, felt tree that turns out to be the one
@@ -957,7 +983,7 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
       existing &&
       deckClears(existing.shift) &&
       Math.min(provisionalReach(existing.shift, 1), provisionalReach(existing.shift, -1)) >=
-        WALKABLE_FLOOR + WALKABLE_MARGIN
+        MIN_RAMP_RUN
     ) {
       return existing;
     }
@@ -982,7 +1008,7 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
       // A path crosses this deck in either direction; a ramp missing on
       // one side is a sheer drop approached from that direction, not a
       // usable bridge with merely a worse approach.
-      if (Math.min(reachPos, reachNeg) >= WALKABLE_FLOOR + WALKABLE_MARGIN) {
+      if (Math.min(reachPos, reachNeg) >= MIN_RAMP_RUN) {
         const origin = frame.worldAt(0, 0, shift);
         const at = frame.pointAt(0);
         return {
@@ -1005,7 +1031,7 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
         };
       }
       debugBridge?.(
-        `crossing railD=${crossing.railDistance.toFixed(1)} w=${halfAcross.toFixed(1)} shift=${shift.toFixed(1)}: reach +${reachPos.toFixed(1)}/-${reachNeg.toFixed(1)} < ${(WALKABLE_FLOOR + WALKABLE_MARGIN).toFixed(2)}`,
+        `crossing railD=${crossing.railDistance.toFixed(1)} w=${halfAcross.toFixed(1)} shift=${shift.toFixed(1)}: reach +${reachPos.toFixed(1)}/-${reachNeg.toFixed(1)} < ${MIN_RAMP_RUN.toFixed(2)}`,
       );
     }
     return null;
@@ -1223,7 +1249,7 @@ function idealRampRunFor(crossing: LevelCrossing, crossings: readonly LevelCross
   // bridge, all fell back to level crossings, until this floor rose to
   // match what accepting a candidate actually requires.
   const rampRunCap = Math.max(
-    WALKABLE_FLOOR + WALKABLE_MARGIN,
+    MIN_RAMP_RUN,
     nearestOtherCrossing / 2 - DECK_HALF_LENGTH - RAMP_CLEARANCE,
   );
   return Math.min(BRIDGE_RISE / BRIDGE_RAMP_GRADIENT, rampRunCap);
