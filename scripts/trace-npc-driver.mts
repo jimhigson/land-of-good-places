@@ -114,13 +114,15 @@ function straightLinePlanner(graph: PoiGraph): RoutePlanner {
     beginFrame: () => {},
     destinationsIn: (space: SpaceId) =>
       space === SPACE_GARDEN ? attractions : [],
-    plan: (_space, _startX, _startZ, _startY, goal, out) => {
+    plan: (_space, _startX, _startZ, _startY, goalX, goalZ, _goalY, out) => {
       // One waypoint: the goal itself. `Journey` treats the last waypoint as
       // the destination, which is exactly right when the line is clear.
-      out[0] = goal.x;
-      out[1] = goal.z;
+      out[0] = goalX;
+      out[1] = goalZ;
       return 1;
     },
+    // No doors in a synthetic 5x5 grid; everything is one space.
+    portalToward: () => null,
   };
 }
 

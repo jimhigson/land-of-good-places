@@ -16,6 +16,7 @@ import type { Rng } from '../../core/mathUtils';
 import { NPC_WALK_SPEED } from './NpcCharacter';
 import type { Attraction } from './attractions';
 import { announcementFor, reachableFrom } from './attractions';
+import { castlePortals, portalToward, type Portal } from './portals';
 
 /**
  * A child's trip to somewhere in particular — issue #350.
@@ -76,6 +77,18 @@ import { announcementFor, reachableFrom } from './attractions';
  * steering at the destination in the meantime, and they have only just stopped.
  */
 const PLANS_PER_FRAME = 2;
+
+/**
+ * How many children may be inside the castle at once.
+ *
+ * The same order as the other whole-park caps — three climbers, four riders,
+ * four being painted — and for the same reason. The castle's seven shops are a
+ * third of every destination in the game, so without a cap a third of the park
+ * would be indoors, which empties the park the player is standing in and piles
+ * children into one room: issue #350's own symptom, reintroduced by its own
+ * fix.
+ */
+const MAX_INSIDE = 4;
 
 /**
  * Longest a child will pursue one destination before giving up on it.
@@ -186,12 +199,16 @@ function boundaryFor(space: SpaceId): ParkBoundary | null {
 export interface RoutePlanner {
   beginFrame(): void;
   destinationsIn(space: SpaceId): Attraction[];
+  /** The door that gets a child in `from` toward `goal`, or `null`. */
+  portalToward(from: SpaceId, goal: SpaceId): Portal | null;
   plan(
     space: SpaceId,
     startX: number,
     startZ: number,
     startY: number,
-    goal: Attraction,
+    goalX: number,
+    goalZ: number,
+    goalY: number,
     out: Float32Array,
   ): number;
 }
@@ -203,6 +220,21 @@ export interface RoutePlanner {
 export class JourneyPlanner implements RoutePlanner {
   private readonly grids = new Map<SpaceId, NavGrid | null>();
   private budget = PLANS_PER_FRAME;
+  private readonly portals: Portal[];
+  /**
+   * How many children are inside the castle right now — **counted**, not
+   * booked.
+   *
+   * `NpcSystem` recounts it every frame from where the children actually are.
+   * That is deliberate and it is the same lesson `budget.ts`'s header teaches
+   * from the other direction: a claimed-and-released slot leaks the moment one
+   * exit forgets to release, and a leaked slot is indistinguishable from the
+   * feature being switched off. A child can leave the castle by walking out, by
+   * a journey timing out, or by any activity that rejoins them elsewhere — three
+   * exits, and a fourth the day somebody adds one. A number recomputed from the
+   * world cannot drift from it.
+   */
+  private insideCount = 0;
 
   private readonly collision: CollisionWorld;
   private readonly sample: GroundSampler;
@@ -223,6 +255,16 @@ export class JourneyPlanner implements RoutePlanner {
     this.connectors = connectors;
     this.bridgeCovers = bridgeCovers;
     this.attractions = attractions;
+    this.portals = castlePortals(sample);
+  }
+
+  /** See {@link insideCount} — called once a frame by `NpcSystem`. */
+  setInsideCount(count: number): void {
+    this.insideCount = count;
+  }
+
+  portalToward(from: SpaceId, goal: SpaceId): Portal | null {
+    return portalToward(this.portals, from, goal);
   }
 
   /** Called once a frame by `NpcSystem`, before any child is updated. */
@@ -261,9 +303,24 @@ export class JourneyPlanner implements RoutePlanner {
     return grid;
   }
 
-  /** Everywhere a child standing in `space` may choose to go. */
+  /**
+   * Everywhere a child standing in `space` may choose to go.
+   *
+   * Somewhere else in this space, or somewhere one door away — but the door
+   * closes once {@link MAX_INSIDE} children are already in there. Without that
+   * the park empties: every child rolls for the castle independently and the
+   * seven shops are a third of everywhere there is to go, which is the same
+   * trap the train fell into (issue #350's third cause) with the same symptom,
+   * a crowd all in one place. A child indoors may always choose the garden, so
+   * the cap can only ever slow the way in, never trap anybody inside.
+   */
   destinationsIn(space: SpaceId): Attraction[] {
-    return this.attractions.filter((a) => reachableFrom(space, a));
+    const full = this.insideCount >= MAX_INSIDE;
+    return this.attractions.filter((a) => {
+      if (!reachableFrom(space, a, this.portals)) return false;
+      if (full && a.space !== space && a.space === SPACE_CASTLE) return false;
+      return true;
+    });
   }
 
   /**
@@ -279,14 +336,16 @@ export class JourneyPlanner implements RoutePlanner {
     startX: number,
     startZ: number,
     startY: number,
-    goal: Attraction,
+    goalX: number,
+    goalZ: number,
+    goalY: number,
     out: Float32Array,
   ): number {
     if (this.budget <= 0) return -1;
     const grid = this.gridFor(space);
     if (!grid) return 0;
     this.budget -= 1;
-    return grid.findRoute(startX, startZ, startY, goal.x, goal.z, goal.y, this.sample, out);
+    return grid.findRoute(startX, startZ, startY, goalX, goalZ, goalY, this.sample, out);
   }
 }
 
@@ -312,6 +371,21 @@ export class Journey {
 
   private elapsed = 0;
 
+  /**
+   * The door this child is walking to, when the destination is in another
+   * space. `null` for an ordinary trip across the park.
+   *
+   * A cross-space journey is two legs: walk to the door, step through, walk to
+   * the shop. Only the first is a route — the step is a portal, and `Journey`
+   * cannot perform it because a driver may not move a body. It asks instead:
+   * {@link portalRequest} goes up through `WanderDriver` for `NpcSystem` to
+   * carry out, exactly the way `TreeClimbing` reads `climbPhase` and does the
+   * posing. The driver owns the decision; the system owns the character.
+   */
+  private via: Portal | null = null;
+  /** Set on arriving at a door; cleared once `NpcSystem` has done the step. */
+  private pendingPortal: Portal | null = null;
+
   /** Where this child was when progress was last checked, and how long ago. */
   private progressX = 0;
   private progressZ = 0;
@@ -335,6 +409,27 @@ export class Journey {
   /** Where they are going — read by the dispersal check and for debugging. */
   get destination(): Attraction | null {
     return this.goal;
+  }
+
+  /** "Put me down on the other side of this door." See {@link via}. */
+  get portalRequest(): Portal | null {
+    return this.pendingPortal;
+  }
+
+  /**
+   * `NpcSystem` has carried out the step. The next frame re-plans from where
+   * the child now actually is, in their new space.
+   */
+  portalTaken(): void {
+    this.pendingPortal = null;
+    this.via = null;
+    this.planned = false;
+    this.routeLength = 0;
+    this.routeIndex = 0;
+    // A fresh side of the door is a fresh chance to get somewhere, so the
+    // re-plan budget is restored: the walk that remains is a different walk.
+    this.replansLeft = REPLAN_ATTEMPTS;
+    this.sinceProgressCheck = 0;
   }
 
   /** True once there is a destination and a route to it. */
@@ -365,6 +460,8 @@ export class Journey {
     }
 
     this.goal = pick;
+    this.via = pick ? planner.portalToward(space, pick.space) : null;
+    this.pendingPortal = null;
     this.planned = false;
     this.replansLeft = REPLAN_ATTEMPTS;
     this.routeLength = 0;
@@ -381,6 +478,8 @@ export class Journey {
   /** Drops the current trip — an activity has taken the child somewhere else. */
   abandon(): void {
     this.goal = null;
+    this.via = null;
+    this.pendingPortal = null;
     this.planned = false;
     this.routeLength = 0;
     this.routeIndex = 0;
@@ -417,12 +516,21 @@ export class Journey {
     move.z = 0;
     const goal = this.goal;
     if (!goal) return true;
+    // Waiting for `NpcSystem` to step us through: stand still, do not re-plan.
+    if (this.pendingPortal) return false;
 
     this.elapsed += dt;
     if (this.elapsed > JOURNEY_TIMEOUT) return true;
 
+    // Through a door, the immediate target is the door itself. `aim` is what
+    // every test below measures against, so one substitution covers arrival,
+    // the stuck detector and the shortfall re-plan alike.
+    const aim = this.via
+      ? { x: this.via.nearX, z: this.via.nearZ, y: this.via.nearY }
+      : { x: goal.x, z: goal.z, y: goal.y };
+
     if (!this.planned) {
-      const count = planner.plan(space, x, z, y, goal, this.route);
+      const count = planner.plan(space, x, z, y, aim.x, aim.z, aim.y, this.route);
       // -1 is "the frame is out of budget": hold still and ask again. 0 is a
       // real answer — there is no route — so give up on this destination and
       // let the caller choose another.
@@ -460,10 +568,19 @@ export class Journey {
       }
     }
 
-    // Arrived? Measured against the destination itself, not the last waypoint:
+    // Arrived? Measured against what we are aiming at, not the last waypoint:
     // a route that stopped short still counts if it stopped close enough, and
     // one that overshot the tolerance has not.
-    if (Math.hypot(goal.x - x, goal.z - z) <= DESTINATION_RADIUS) return true;
+    if (Math.hypot(aim.x - x, aim.z - z) <= DESTINATION_RADIUS) {
+      // At a door rather than at the destination: ask to be stepped through,
+      // and keep the journey alive — the shop on the other side is still where
+      // this child is going.
+      if (this.via) {
+        this.pendingPortal = this.via;
+        return false;
+      }
+      return true;
+    }
 
     // Advance past every waypoint already behind us. `WAYPOINT_RADIUS` is the
     // player's own "passed the corner" figure — see `TapNavigator`.
@@ -486,8 +603,8 @@ export class Journey {
       return false;
     }
 
-    const targetX = this.route[this.routeIndex * 2] ?? goal.x;
-    const targetZ = this.route[this.routeIndex * 2 + 1] ?? goal.z;
+    const targetX = this.route[this.routeIndex * 2] ?? aim.x;
+    const targetZ = this.route[this.routeIndex * 2 + 1] ?? aim.z;
     const dx = targetX - x;
     const dz = targetZ - z;
     const distance = Math.hypot(dx, dz);
@@ -498,7 +615,13 @@ export class Journey {
       // Standing on the last waypoint is only arriving if the last waypoint is
       // the destination. When the route stopped short it is not, and the honest
       // move is another attempt from here.
-      if (Math.hypot(goal.x - x, goal.z - z) <= DESTINATION_RADIUS) return true;
+      if (Math.hypot(aim.x - x, aim.z - z) <= DESTINATION_RADIUS) {
+        if (this.via) {
+          this.pendingPortal = this.via;
+          return false;
+        }
+        return true;
+      }
       if (this.replansLeft <= 0) return true;
       this.replansLeft -= 1;
       this.planned = false;

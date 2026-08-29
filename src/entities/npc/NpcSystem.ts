@@ -39,6 +39,7 @@ import type { ShopStand } from '../../world/building/shops/Shops';
 import { createPetBlob, PET_BODY_NODE, PET_HEAD_NODE } from './petBlob';
 import { WanderDriver, type ClimberBudget } from './wanderDriver';
 import type { ActivityBudget } from './activities/activity';
+import { SPACE_CASTLE, spaceAt } from '../../world/spaces';
 // Chatting (see the additive block in wanderDriver.ts): the shared budget
 // that caps how many children may be mid-chat at once, and the speed below
 // which the player counts as "stood still" for that same block.
@@ -814,6 +815,7 @@ export class NpcSystem implements GameSystem {
     // twenty-four A* searches in one frame; two of them do, and the rest ask
     // again next frame while standing still looking at what they walked to.
     this.planner.beginFrame();
+    this.stepChildrenThroughDoors();
 
     // The player's hop is the cue for the giggle-hop. Reading the action rather
     // than the Player keeps this system's only dependency the collision world.
@@ -1168,6 +1170,39 @@ export class NpcSystem implements GameSystem {
    * already does — the shared chat budget already caps how many are ever
    * showing at once, so there is no clutter to guard against here.
    */
+  /**
+   * Carries out any door-step a driver has asked for, and recounts how many
+   * children are inside the castle — issue #350.
+   *
+   * The driver decides *that* a child goes through a door; only this owns the
+   * characters, so only this may move one. Same split as `TreeClimbing`, which
+   * reads `climbPhase` off the driver and does the posing itself.
+   *
+   * The count is taken here, from where the children actually are, rather than
+   * booked in and out. `budget.ts`'s header is about exactly this: a slot
+   * released on only one of several exits leaks, and a leaked slot is
+   * indistinguishable from the feature being off. A child leaves the castle by
+   * walking out, by a journey timing out, or by any activity that rejoins them
+   * — a number recomputed from the world cannot drift from it.
+   */
+  private stepChildrenThroughDoors(): void {
+    let inside = 0;
+    for (let i = 0; i < this.characters.length; i += 1) {
+      const character = this.characters[i];
+      const driver = this.wanderDrivers[i];
+      if (!character || !driver) continue;
+
+      const portal = driver.portalRequest;
+      if (portal) {
+        character.stepThroughDoor(portal.farX, portal.farY, portal.farZ, portal.farFacing);
+        driver.portalTaken();
+      }
+
+      if (spaceAt(character.position.x, character.position.z) === SPACE_CASTLE) inside += 1;
+    }
+    this.planner.setInsideCount(inside);
+  }
+
   private updateBubbles(): void {
     const camera = this.camera;
 

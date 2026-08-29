@@ -5,6 +5,7 @@ import { RUN_INTENT, type CharacterDriver, type CharacterIntent, type DriverCont
 import type { PoiGraph } from './poiGraph';
 import { spaceAt } from '../../world/spaces';
 import { Journey, type RoutePlanner } from './journey';
+import type { Portal } from './portals';
 // The things a child does instead of wandering. See `activities/activity.ts`
 // for what an `Activity` is and why it has the shape it has; this file keeps
 // only the wander core and the small amount of glue that runs them.
@@ -221,6 +222,22 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
   /** What this child is walking to, by name — for debugging and for checks. */
   get destinationName(): string | null {
     return this.journey.destination?.name ?? null;
+  }
+
+  /**
+   * "Put me down on the other side of this door", or `null`.
+   *
+   * Read every frame by `NpcSystem`, which owns the characters and so is the
+   * only thing that may move one — the same shape as `TreeClimbing` reading
+   * `climbPhase` and doing the posing. A driver decides; it does not teleport.
+   */
+  get portalRequest(): Portal | null {
+    return this.journey.portalRequest;
+  }
+
+  /** `NpcSystem` has carried out the step; plan again from the far side. */
+  portalTaken(): void {
+    this.journey.portalTaken();
   }
 
   /** …and its id, which is what `check:npc-dispersal` counts distinct ones of. */

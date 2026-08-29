@@ -3,6 +3,7 @@ import { STALLS } from '../../minigames/stalls';
 import { STALL_STANDS_BY_ID } from '../../minigames/stallPlacement';
 import type { ShopStand } from '../../world/building/shops/Shops';
 import { SPACE_GARDEN, spaceAt, type SpaceId } from '../../world/spaces';
+import { portalToward, type Portal } from './portals';
 import type { GroundSampler } from '../Player';
 import { TOP_REFERENCE } from '../../world/NavGrid';
 
@@ -212,17 +213,22 @@ export function castleAttractions(stands: readonly ShopStand[]): Attraction[] {
  * True if a child standing in `space` may choose `attraction` as their next
  * destination.
  *
- * Today: only somewhere in the space they are already in. Getting between
- * spaces is a *portal*, not a walk — `poiGraph.ts` says the same thing about
- * its edges, and for the same reason: the garden and the castle interior are
- * six hundred metres apart with nothing but empty world in between, so a route
- * planned across the gap would be a very long stroll through nothing. A child
- * who is indoors visits the shops; a child outdoors visits the park. The
- * castle's children are the ones the player meets when they go in, which is
- * when it matters.
+ * Somewhere in this space, or somewhere one **portal** away — see
+ * `portals.ts`. Getting between spaces is a step through a door, never a walk
+ * across the six hundred metres of empty world that separates their
+ * coordinates; `poiGraph.ts` says the same about its own edges.
+ *
+ * This used to be same-space-only, and that was the bug: it made every castle
+ * destination unreachable for every child in the game, because children spawn
+ * only on garden waypoints. Jim asked for the castle by name.
  */
-export function reachableFrom(space: SpaceId, attraction: Attraction): boolean {
-  return attraction.space === space;
+export function reachableFrom(
+  space: SpaceId,
+  attraction: Attraction,
+  portals: readonly Portal[] = [],
+): boolean {
+  if (attraction.space === space) return true;
+  return portalToward(portals, space, attraction.space) !== null;
 }
 
 /** True for the garden — the space the park's own crowd lives in. */
