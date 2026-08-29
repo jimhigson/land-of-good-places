@@ -23,15 +23,18 @@
  * Run: `npm run check:castle`
  */
 import './headless-canvas.mjs';
-import { Box3, Group, InstancedMesh, Matrix4, Vector3, type Object3D } from 'three';
+import { Box3, Group, InstancedMesh, Matrix4, Mesh, Vector3, type Object3D, type Texture } from 'three';
 import {
   BUILDING_FLOOR_COUNT,
+  BUILDING_FLOOR_HEIGHT,
   BUILDING_WALL_THICKNESS,
   CAMERA_PITCH_DEGREES,
   INTERIOR_HALF_X,
   INTERIOR_HALF_Z,
   PLAYER_RADIUS,
 } from '../src/core/constants.ts';
+import { castleCoursingTexture, castleFlagstoneTexture } from '../src/core/textures.ts';
+import { BuildingShell } from '../src/world/building/Shell.ts';
 import { deckIsSolid, TOP_DECK } from '../src/world/building/layout.ts';
 import {
   BEAM_UNDERSIDE,
@@ -522,10 +525,21 @@ let propsChecked = 0;
 let exemptFlat = 0;
 let exemptOverhead = 0;
 let exemptWall = 0;
+/**
+ * Storeys that actually yielded decoration — **counted, not assumed.**
+ *
+ * The summary line used to report this figure as `BUILDING_FLOOR_COUNT`, which
+ * is the number of storeys the loop *visits*, not the number it found anything
+ * on. That is the same shape of defect assertion 8 exists to close: a constant
+ * printed where a reader will take it for a measurement, and therefore a figure
+ * that stays reassuringly at 5 on the day `dressCastle` stops placing anything.
+ */
+let storeysDressed = 0;
 
 for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
   const blocked = keepOutsFor(deck);
   const placed = placedOn(deck);
+  if (placed.length > 0) storeysDressed += 1;
 
   for (const { label, box } of placed) {
     propsChecked += 1;
@@ -711,6 +725,167 @@ for (let deck = 0; deck < TOP_DECK; deck += 1) {
 }
 
 // ---------------------------------------------------------------------------
+// 8. The castle a child walks into — measured on the assembled scene graph.
+// ---------------------------------------------------------------------------
+
+/**
+ * **Everything above this line calls a builder itself and measures what came
+ * back. None of it asks whether the running game ever puts that mesh in the
+ * scene.**
+ *
+ * Assertions 1–5 call `buildCeilingBeams(deck)`; 6 and 7 dress a fresh `Group`
+ * with `CastleFire` and `dressCastle`. All of them are measuring real
+ * `Object3D`s, which is this file's governing rule and is right — but the thing
+ * they measure is a *factory's return value*, and `BuildingShell` is what
+ * decides whether any of it reaches the room.
+ *
+ * That gap was proved, not guessed (`HANDOFF-castle-visibility.md`, 29 August
+ * 2026). With two mutations in `Shell.ts` — `void beams;` in place of
+ * `floor.add(beams)`, and `interiorMaterial(...)` in place of
+ * `isCastleFloor ? castleFloorMaterial(colour) : ...` — the game had no ceiling
+ * timbers anywhere and no flagstones at all, and this script still printed
+ * `check:castle OK — 416 ceiling-beam segments across 4 enclosed storeys` and
+ * exited 0. It would have blessed a castle with no ceiling and no floor, which
+ * is very nearly what a QA report claimed to be looking at.
+ *
+ * So this section builds the thing the game builds — a real
+ * `BuildingShell('interior')` — and **counts what it finds in the tree**. Every
+ * number it contributes to the summary is a count of a mesh that was found, so
+ * a mesh that stops being added, a material that stops being applied, or a plate
+ * parented to the wrong storey makes a printed number go down rather than
+ * leaving it untouched.
+ *
+ * The one thing it deliberately does not do is re-derive the plate's position:
+ * it asks whether the mesh is *where the storey it was found in puts it*, which
+ * is `deck × BUILDING_FLOOR_HEIGHT` above the underside assertion 3 already
+ * measured. A plate added to floor 2's group is then a failure that names the
+ * storey it landed in.
+ */
+
+/** The `map` a mesh's material actually carries, or `null`. Arrays never occur here. */
+function mapOf(object: Object3D): Texture | null {
+  if (!(object instanceof Mesh)) return null;
+  const material = object.material;
+  if (Array.isArray(material)) return null;
+  return (material as { map?: Texture | null }).map ?? null;
+}
+
+function findInFloor(floor: Object3D, name: string): Object3D | null {
+  let found: Object3D | null = null;
+  floor.traverse((child) => {
+    if (found === null && child.name === name) found = child;
+  });
+  return found;
+}
+
+/** Storeys whose ceiling timbers **and** flagstone floor were both found in the tree. */
+let storeysSeen = 0;
+/** Wall-plate segments counted in the assembled shell, not in a factory's return value. */
+let platedSegmentsInScene = 0;
+let flagstonedDecksInScene = 0;
+let coursedWallsInScene = 0;
+
+{
+  const shell = new BuildingShell('interior');
+  shell.group.updateWorldMatrix(false, true);
+  const flagstones = castleFlagstoneTexture();
+  const coursing = castleCoursingTexture();
+  const shellBounds = new Box3();
+
+  if (shell.floorGroups.length !== BUILDING_FLOOR_COUNT) {
+    fail(
+      `scene: BuildingShell('interior') built ${shell.floorGroups.length} storeys, not the ` +
+        `${BUILDING_FLOOR_COUNT} the game expects.`,
+    );
+  }
+
+  for (let deck = 0; deck < shell.floorGroups.length; deck += 1) {
+    const floor = shell.floorGroups[deck];
+    if (!floor) continue;
+    const enclosed = deck < TOP_DECK;
+
+    // --- the floor a child stands on is flagstoned -------------------------
+    const slab = findInFloor(floor, `deck-${deck}`);
+    if (!slab) {
+      fail(`scene: storey ${deck} has no 'deck-${deck}' slab anywhere in the built shell.`);
+    } else if (enclosed) {
+      if (mapOf(slab) === flagstones) {
+        flagstonedDecksInScene += 1;
+      } else {
+        fail(
+          `scene: the deck-${deck} slab in the built shell carries no flagstone map — ` +
+            `castleFloorMaterial's texture never reached the floor a child stands on, so ` +
+            `storey ${deck} renders as a flat untextured plate. Nothing above this line can ` +
+            `see that, because nothing above this line looks at the scene.`,
+        );
+      }
+    }
+
+    // --- and the walls round it are coursed --------------------------------
+    if (enclosed) {
+      const walls = findInFloor(floor, `walls-${deck}`);
+      if (!walls) {
+        fail(`scene: storey ${deck} is enclosed but has no 'walls-${deck}' mesh in the shell.`);
+      } else if (mapOf(walls) === coursing) {
+        coursedWallsInScene += 1;
+      } else {
+        fail(
+          `scene: the walls-${deck} mesh in the built shell carries no coursing map — ` +
+            `castleWallMaterial's ashlar never reached storey ${deck}'s walls.`,
+        );
+      }
+    }
+
+    // --- and there is a ceiling over it ------------------------------------
+    const plate = findInFloor(floor, `castle-timber-plate-${deck}`);
+    if (!enclosed) {
+      if (plate) {
+        fail(
+          `scene: storey ${deck} is the open roof terrace, but a wall-plate ` +
+            `'castle-timber-plate-${deck}' was found under it.`,
+        );
+      }
+      continue;
+    }
+    if (!plate) {
+      fail(
+        `scene: storey ${deck} is an enclosed storey with no ceiling — ` +
+          `'castle-timber-plate-${deck}' was built but never added to the shell, so the room ` +
+          `has no timbers in it however many segments buildCeilingBeams returns.`,
+      );
+      continue;
+    }
+    if (!(plate instanceof InstancedMesh) || plate.count === 0) {
+      fail(`scene: storey ${deck}'s wall-plate is in the tree but carries no instances.`);
+      continue;
+    }
+
+    // `setFromObject` walks the instance matrices *and* every parent transform,
+    // so this is the box in world space — the storey offset included.
+    shellBounds.setFromObject(plate);
+    const expected = deck * BUILDING_FLOOR_HEIGHT + BEAM_UNDERSIDE;
+    if (Math.abs(shellBounds.min.y - expected) > 1e-3) {
+      fail(
+        `scene: storey ${deck}'s wall-plate hangs to ${shellBounds.min.y.toFixed(3)} m in the ` +
+          `assembled shell, but storey ${deck} puts its ceiling at ${expected.toFixed(3)} m — ` +
+          `it is parented to the wrong floor group.`,
+      );
+      continue;
+    }
+
+    platedSegmentsInScene += plate.count;
+    if (slab && mapOf(slab) === flagstones) storeysSeen += 1;
+  }
+
+  if (storeysSeen === 0) {
+    fail(
+      'scene: not one enclosed storey in the built castle has both a ceiling and a flagstone ' +
+        'floor. The summary line has nothing true to report.',
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 if (failures.length > 0) {
   console.error(`\ncheck:castle — ${failures.length} failure(s):\n`);
@@ -719,15 +894,26 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
+// **Every number in these three lines is counted, never a constant dressed up as
+// a finding.** The first line used to say "across ${TOP_DECK} enclosed storeys",
+// which was a constant printed as though something had gone and looked — so it
+// read identically on a castle with no ceiling at all. `storeysSeen`,
+// `platedSegmentsInScene`, `flagstonedDecksInScene` and `coursedWallsInScene` are
+// incremented only when a mesh was found in a built `BuildingShell('interior')`,
+// and `storeysDressed` only when a storey actually yielded placed decoration, so
+// each of them goes down when the castle does.
 console.log(
-  `check:castle OK — ${beamsChecked} ceiling-beam segments across ${TOP_DECK} enclosed ` +
-    `storeys, all fixed to real slab across their whole measured footprint, all clear of a ` +
+  `check:castle OK — ${beamsChecked} ceiling-beam segments built, and in an assembled ` +
+    `BuildingShell('interior') ${storeysSeen} storeys were found with both a ceiling and a ` +
+    `flagstone floor (${platedSegmentsInScene} plate segments in the tree, ` +
+    `${flagstonedDecksInScene} flagstoned decks, ${coursedWallsInScene} coursed wall runs). ` +
+    `Every segment is fixed to real slab across its whole measured footprint and clear of a ` +
     `${TALLEST_CHILD} m child under a ${CASTLE_CEILING_CLEAR.toFixed(2)} m ceiling, and ` +
     `BEAM_UNDERSIDE agrees with the mesh at ${BEAM_UNDERSIDE.toFixed(3)} m.`,
 );
 console.log(
   `check:castle props OK — ${propsChecked} placed instances measured across ` +
-    `${BUILDING_FLOOR_COUNT} storeys, none in a walkable route or on a shop stand and none ` +
+    `${storeysDressed} storeys, none in a walkable route or on a shop stand and none ` +
     `through a ceiling. Route-exempt: ${exemptOverhead} entirely above a ${TALLEST_CHILD} m ` +
     `child, ${exemptFlat} floor treatment under ${FLOOR_TREATMENT_MAX_HEIGHT} m tall, ` +
     `${exemptWall} wall furniture within ${WALL_FURNITURE_REACH} m of its wall. All three ` +
