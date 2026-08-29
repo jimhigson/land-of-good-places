@@ -301,3 +301,40 @@ Fix: give `Journey` a bounded replan (the same idea as `REPLAN_ATTEMPTS`) plus a
 detector** derived from `NPC_WALK_SPEED` — a child who has covered far less ground than walking
 would have covered has a route that is not working, and wants a new decision now rather than in
 seventy-five seconds.
+
+---
+
+## A THIRD clumping mechanism, and nobody had spotted it (29 Aug)
+
+Neither issue #350 nor the sandbox investigation found this. It came out of the dispersal check
+demanding that most of the crowd be free to walk.
+
+**`TrainTrip` has no concurrency budget.** In `activities/trainTrip.ts` the `'none'` case rolls
+`TRAIN_CHANCE = 0.55` every `TRAIN_INTERVAL_MIN..MAX` (22–70 s), per child, independently, with
+nothing capping how many may go at once. Every other activity in the park has such a cap —
+`MAX_CONCURRENT_CLIMBERS`, `MAX_CONCURRENT_CHATTERS`, `MAX_CONCURRENT_PAINTED` — and the train is
+the one that does not.
+
+Measured on the canonical seed, instrumenting which activity holds each child:
+
+```
+t=60s   free (no activity holding them) = 4 of 24
+```
+
+**Twenty of the park's twenty-four children were on the train or walking to a station at the same
+moment.** That is a station platform with most of the park standing on it, and it is exactly the
+report — "all the NPCs gather in one place quite soon" — arrived at by a completely different
+route from the random walk.
+
+So #350 had **three** mechanisms, not the two the handoff originally listed:
+
+1. the random walk's diffusive stationary distribution pooling on the plaza (the main one);
+2. the bus cohort's shortfall-route jam at the gate (found by this check, fixed by the bounded
+   re-plan and stuck detector);
+3. the uncapped train, above.
+
+Fixing only the first would have left the crowd pooling at the station having been given
+somewhere else to be. The fix mirrors the existing `BudgetSlot`/`ActivityBudget` pattern exactly
+rather than inventing a second one — claimed when the child commits to walking to a station
+(walking there is part of the trip), released on every exit, `'allow'` when no budget is handed
+over, matching the climb.
