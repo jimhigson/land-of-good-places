@@ -186,7 +186,51 @@ export function gardenAttractions(sample: GroundSampler): Attraction[] {
     });
   }
 
-  return attractions;
+  return mergeSameNamed(attractions);
+}
+
+/**
+ * How close two same-named attractions have to be to be the same place.
+ *
+ * Generous, because the two entries are a ride's *entrance* and that ride's own
+ * *ticket booth*: on the canonical park the Space Ferris Wheel's are 5.8 m
+ * apart and the Dodgems' 13.1 m. Distance alone cannot do this job — "The
+ * Castle" and "Sky Cruiser" sit 11 m apart and are emphatically two different
+ * places to go — which is why the name has to agree as well.
+ */
+const SAME_PLACE = 20;
+
+/**
+ * Drops the second of any two attractions that are plainly the same thing.
+ *
+ * `ANCHORS` and `STALLS` overlap: a ride has a plot with a sign at its entrance
+ * *and* a booth you buy a ticket at, and both are seeded. To a child those are
+ * one place. Left in, they were also **inconsistently named** — "Dodgems" from
+ * the sign and "Dodgems!" from the booth — so the same destination could be
+ * announced two different ways, and `check:npc-dispersal` counted one place as
+ * two distinct destinations.
+ *
+ * Matched on the name, normalised for case and punctuation, *and* on being
+ * close by. Both conditions are needed and neither is sufficient: two rides can
+ * be neighbours, and two far-apart things could in principle share a name.
+ *
+ * The **anchor wins**, because anchors are added first and an anchor's entrance
+ * is where the path spur arrives and the sign stands — the place a child walks
+ * to. `poiGraph.ts` does exactly this with its own `MERGE_DISTANCE`, for the
+ * same reason and with the same first-one-wins rule.
+ */
+function mergeSameNamed(attractions: readonly Attraction[]): Attraction[] {
+  const normalise = (name: string): string => name.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const kept: Attraction[] = [];
+  for (const candidate of attractions) {
+    const duplicate = kept.some(
+      (existing) =>
+        normalise(existing.name) === normalise(candidate.name) &&
+        Math.hypot(existing.x - candidate.x, existing.z - candidate.z) <= SAME_PLACE,
+    );
+    if (!duplicate) kept.push(candidate);
+  }
+  return kept;
 }
 
 /**
