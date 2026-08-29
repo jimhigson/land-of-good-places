@@ -1,14 +1,17 @@
 import { Vector3 } from 'three';
-import { BUILDING_FLOOR_COUNT, BUILDING_HALF_X, BUILDING_HALF_Z, GARDEN_HALF_SIZE, INTERIOR_HALF_X, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, PLAYER_RADIUS } from '../core/constants';
-import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../world/building/layout';
+import { BUILDING_FLOOR_COUNT, INTERIOR_HALF_X, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, PLAYER_RADIUS } from '../core/constants';
 import { PALETTE, hexToCss } from '../core/palette';
 import { isTouchDevice } from '../core/device';
 import { minTextPx, uiUnitPx } from '../core/uiScale';
 import { gameStore } from '../state';
-import { ANCHORS, type AnchorDefinition, type AnchorFootprint } from '../world/anchors';
+import { ANCHORS_BY_ID } from '../world/anchors';
+import { PARK_BOUNDARY } from '../world/boundary';
 import { PLAZA, type RouteDefinition } from '../world/paths';
 import { ROUTES, routeCurve } from '../world/pathGraph';
 import { STALLS } from '../minigames';
+import { MAP_PALETTE, drawIcon } from './parkMapArt';
+import { parkMapFeatures, type MapFeature } from './parkMapContent';
+import { frameExtent, frameHalfExtent } from './parkMapProjection';
 import type { World } from '../world/World';
 import type { Player } from '../entities/Player';
 import { SLIDE_PLAN } from '../world/slide/plan';
@@ -89,11 +92,58 @@ const PLAYER_MARKER_COLOUR = PALETTE.markerPink;
 const REACHABLE_TOLERANCE_SQ = 0.05 * 0.05;
 
 /**
- * Anchors whose ride already has a fairground stall standing in for its ticket
- * booth (`minigames/stalls.ts`) — the stall's own pin already names the ride, so
- * the anchor is drawn as a footprint only, rather than doubling up the label.
+ * Names for the two booths whose own copy lives inside a three.js module
+ * (`world/FacePaintStall.ts`, `world/KeychainShop.ts`) as an interact-zone
+ * label rather than in a data table the map can read. Map captions, in the
+ * same spirit as the map's other captions — short enough to sit under a small
+ * picture on a phone. Everything else on the map gets its name from the owner
+ * that already holds it, joined on id in {@link featureCopy}.
  */
-const ANCHORS_WITH_STALL_ENTRY = new Set(['ferrisWheel', 'dodgems', 'waterFight']);
+const MAP_ONLY_TITLES: Readonly<Record<string, string>> = {
+  facePaint: 'Face Painting',
+  keychain: 'Keyrings',
+};
+
+/**
+ * How many of the park's real trees to draw.
+ *
+ * The park plants hundreds; drawing all of them would bury the attractions in
+ * foliage and lose the reference's "generous empty lawn between attractions"
+ * composition entirely. So the biggest ones are drawn — a real subset of real
+ * trees, chosen by the radius the park itself gave them, never a scatter of
+ * invented ones. Which trees appear is therefore still a fact about the park.
+ */
+const MAP_TREE_COUNT = 26;
+
+/**
+ * How big each kind of thing is drawn, in `uiUnitPx()` units.
+ *
+ * A hierarchy rather than one size: the castle and the hotel are the landmarks
+ * a child orients by and are drawn biggest, rides next, small furniture
+ * smallest. In `uiUnitPx` so the whole map grows with GAME_DESIGN.md's
+ * UI-SCALE rule — the icons get bigger on a phone exactly as the text does,
+ * rather than staying a fixed pixel size that only suits a desktop.
+ *
+ * Note these are *drawing* sizes and deliberately not the attraction's true
+ * footprint: the reference's idiom is a chunky recognisable object, and a
+ * to-scale plan view of a ticket booth is a dot nobody can read. The
+ * **position** stays exact — which is the half that has to be true for the map
+ * to be navigable, and the half `check:park-map` pins.
+ */
+const FEATURE_ICON_SIZE: Readonly<Record<MapFeature['kind'], number>> = {
+  castle: 4.4,
+  anchor: 3.4,
+  stall: 2.9,
+  fountain: 2.4,
+  station: 2.2,
+};
+
+/** Which drawing a feature gets. Stations and the fountain share one each. */
+function iconKey(feature: MapFeature): string {
+  if (feature.kind === 'station') return 'station';
+  if (feature.kind === 'fountain') return 'fountain';
+  return feature.id;
+}
 
 export interface ParkMapDeps {
   readonly world: World;
@@ -485,11 +535,16 @@ export class ParkMap {
     this.downButton.disabled = this.viewingDeck <= 0;
     this.syncCanvasSize();
 
-    const halfW = this.indoor ? INTERIOR_HALF_X + 6 : GARDEN_HALF_SIZE + 4;
-    const halfH = this.indoor ? INTERIOR_HALF_Z + 4 : GARDEN_HALF_SIZE + 4;
-    this.scale = Math.min(this.canvasCssWidth / (2 * halfW), this.canvasCssHeight / (2 * halfH));
-    this.originPxX = this.canvasCssWidth / 2;
-    this.originPxY = this.canvasCssHeight / 2;
+    // The viewport, from `parkMapProjection.ts` — the one owner of the
+    // world-to-canvas transform, and the thing #234 was a bug in. Outdoors it
+    // frames the real boundary's own extent, so nothing the park generated can
+    // fall off the edge of the map whatever shape the seed rolled.
+    const projection = this.indoor
+      ? frameHalfExtent(INTERIOR_HALF_X + 6, INTERIOR_HALF_Z + 4, this.canvasCssWidth, this.canvasCssHeight)
+      : frameExtent(PARK_BOUNDARY.extent, this.canvasCssWidth, this.canvasCssHeight);
+    this.scale = projection.scale;
+    this.originPxX = projection.originPxX;
+    this.originPxY = projection.originPxY;
 
     if (this.indoor) {
       this.titleEl.textContent = `Map: ${floorLabelText(this.viewingDeck)}`;
@@ -506,50 +561,67 @@ export class ParkMap {
     const h = this.canvasCssHeight;
     ctx.clearRect(0, 0, w, h);
 
-    // --- terrain + boundary --------------------------------------------------
-    const [cx, cy] = this.planeToCanvas(0, 0);
-    ctx.fillStyle = hexToCss(PALETTE.grassLight);
+    // --- the paper the park is drawn on -------------------------------------
+    ctx.fillStyle = MAP_PALETTE.paper;
+    ctx.fillRect(0, 0, w, h);
+
+    // --- the lawn: the park's REAL outline ----------------------------------
+    // `PARK_BOUNDARY.outline()` is the same 512-point closed polygon the
+    // terrain, the boundary wall and the player's clamp are all built from —
+    // so the island of grass on this map is the shape of the park that was
+    // generated, not a circle standing in for one (issues #234, #334).
+    const outline = PARK_BOUNDARY.outline();
+    ctx.save();
     ctx.beginPath();
-    ctx.arc(cx, cy, GARDEN_HALF_SIZE * this.scale, 0, Math.PI * 2);
+    const [o0x, o0z] = outline[0] ?? [0, 0];
+    const [os0, os1] = this.planeToCanvas(o0x, o0z);
+    ctx.moveTo(os0, os1);
+    for (let i = 1; i < outline.length; i += 1) {
+      const [ox, oz] = outline[i] as readonly [number, number];
+      const [opx, opy] = this.planeToCanvas(ox, oz);
+      ctx.lineTo(opx, opy);
+    }
+    ctx.closePath();
+    // A soft drop shadow under the whole island, so the lawn sits on the
+    // paper the same way each object sits on the lawn.
+    ctx.save();
+    ctx.translate(0, Math.max(2, 0.12 * uiUnitPx()));
+    ctx.fillStyle = 'rgba(58, 51, 64, 0.10)';
     ctx.fill();
-    ctx.strokeStyle = hexToCss(PALETTE.stonePinkDark);
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(cx, cy, (GARDEN_HALF_SIZE - 2) * this.scale, 0, Math.PI * 2);
+    ctx.restore();
+    ctx.fillStyle = MAP_PALETTE.lawn;
+    ctx.fill();
+    ctx.strokeStyle = MAP_PALETTE.lawnEdge;
+    ctx.lineWidth = Math.max(2, 0.14 * uiUnitPx());
     ctx.stroke();
+    // Everything else is clipped to the lawn, so a path or a tree can never
+    // spill onto the paper outside the park.
+    ctx.clip();
+
+    // --- the real trees, thinned to the biggest few -------------------------
+    for (const tree of this.mapTrees()) {
+      const [tx, ty] = this.planeToCanvas(tree.x, tree.z);
+      drawIcon(ctx, 'tree', tx, ty, 1.5 * uiUnitPx(), MAP_PALETTE.lawnDeep);
+    }
 
     // --- paths, rebuilt from the same control points the real path network
-    // uses (world/paths.ts), so this can never draw a path that has moved.
-    ctx.strokeStyle = hexToCss(PALETTE.pathSand);
+    // uses (world/pathGraph.ts), so this can never draw a path that has moved,
+    // now as the reference's broad cream ribbons.
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     for (const route of ROUTES) this.strokeRoute(route);
 
-    // --- fountain plaza --------------------------------------------------
+    // --- the fountain plaza, a wider circle of the same paving --------------
     const [px, py] = this.planeToCanvas(PLAZA.x, PLAZA.z);
-    ctx.fillStyle = hexToCss(PALETTE.pathSand);
+    ctx.fillStyle = MAP_PALETTE.path;
     ctx.beginPath();
     ctx.arc(px, py, PLAZA.radius * this.scale, 0, Math.PI * 2);
     ctx.fill();
-    const fountain = this.deps.world.fountain;
-    const [fx, fy] = this.planeToCanvas(fountain.centre.x, fountain.centre.z);
-    ctx.fillStyle = hexToCss(PALETTE.waterTop);
-    ctx.beginPath();
-    ctx.arc(fx, fy, fountain.rimRadius * this.scale, 0, Math.PI * 2);
-    ctx.fill();
-    this.drawGlyph('⛲', fx, fy, uiUnitPx());
+    ctx.strokeStyle = MAP_PALETTE.pathEdge;
+    ctx.lineWidth = Math.max(1.5, 0.08 * uiUnitPx());
+    ctx.stroke();
 
-    // --- ride plots, straight from the anchor table -----------------------
-    for (const anchor of ANCHORS) this.drawAnchor(anchor);
-
-    // --- stalls -------------------------------------------------------------
-    for (const stall of STALLS) {
-      const [sx, sz] = stall.position;
-      const [cx2, cy2] = this.planeToCanvas(sx, sz);
-      this.drawPin(cx2, cy2, stall.glyph, stall.title, hexToCss(stall.accent));
-    }
-
-    // --- the train loop and its stations ------------------------------------
+    // --- the train loop -----------------------------------------------------
     const trainRoute = this.deps.world.train.route;
     const trainPoints: [number, number][] = [];
     const trainProbe = new Vector3();
@@ -557,36 +629,78 @@ export class ParkMap {
       trainRoute.pointAt((i / 140) * trainRoute.length, trainProbe);
       trainPoints.push([trainProbe.x, trainProbe.z]);
     }
-    this.strokeCurvePoints(
-      trainPoints,
-      true,
-      hexToCss(PALETTE.markerLemon),
-      2.2,
-      [7, 6],
-    );
-    for (const station of this.deps.world.train.stations) {
-      const [stx, sty] = this.planeToCanvas(station.standX, station.standZ);
-      this.drawPin(stx, sty, '🚉', station.name, hexToCss(PALETTE.markerLemon));
-    }
+    this.strokeCurvePoints(trainPoints, true, MAP_PALETTE.grey, 1.8, [7, 6]);
 
-    // --- the castle, drawn at its real facade footprint ---------------------
-    this.drawRect(
-      BUILDING_CENTRE_X,
-      BUILDING_CENTRE_Z,
-      BUILDING_HALF_X,
-      BUILDING_HALF_Z,
-      hexToCss(PALETTE.buildingWall),
-      hexToCss(PALETTE.buildingTrim),
-    );
-    const [bx, by] = this.planeToCanvas(BUILDING_CENTRE_X, BUILDING_CENTRE_Z);
-    this.drawGlyph('🏰', bx, by, 1.2 * uiUnitPx());
-    this.drawLabel('The Big Building', bx, by + 0.9 * uiUnitPx());
+    ctx.restore();
+
+    // --- every attraction: its own little picture, and its name -------------
+    // Positions come from `parkMapContent.ts` and nowhere else, so what is
+    // drawn here is exactly what `check:park-map` measures.
+    for (const feature of this.features()) {
+      const [fx, fy] = this.planeToCanvas(feature.x, feature.z);
+      const { label, accent } = this.featureCopy(feature);
+      const size = FEATURE_ICON_SIZE[feature.kind] * uiUnitPx();
+      drawIcon(ctx, iconKey(feature), fx, fy, size, accent);
+      this.drawLabel(label, fx, fy + size * 0.5);
+    }
 
     // --- the player ----------------------------------------------------------
     if (!this.indoor) {
       const { x, z } = this.deps.player.position;
       this.drawPlayerMarker(x, z);
     }
+  }
+
+  /** The map's features for the park as it stands — see `parkMapContent.ts`. */
+  private features(): readonly MapFeature[] {
+    const fountain = this.deps.world.fountain;
+    return parkMapFeatures({
+      stations: this.deps.world.train.stations.map((station) => ({
+        id: `station:${station.name}`,
+        x: station.standX,
+        z: station.standZ,
+      })),
+      fountain: { x: fountain.centre.x, z: fountain.centre.z },
+    });
+  }
+
+  /**
+   * The biggest {@link MAP_TREE_COUNT} trees the park actually planted.
+   *
+   * Sorted by the radius the foliage scatter gave each one, so the map shows
+   * the landmarks a child would steer by rather than every shrub. Real trees
+   * throughout — the abandoned `stylized-map` branch scattered invented ones,
+   * which is a picture of a park rather than a picture of *this* park.
+   */
+  private mapTrees(): readonly { readonly x: number; readonly z: number }[] {
+    return [...this.deps.world.scenery.foliageOccluders]
+      .sort((a, b) => b.radius - a.radius)
+      .slice(0, MAP_TREE_COUNT);
+  }
+
+  /**
+   * A feature's name and accent colour, from whichever module already owns
+   * them — never restated here. The join is on `id`, so a renamed ride is
+   * renamed on the map with no second edit.
+   */
+  private featureCopy(feature: MapFeature): { label: string; accent: string } {
+    if (feature.kind === 'castle' || feature.kind === 'anchor') {
+      const anchor = ANCHORS_BY_ID[feature.id as keyof typeof ANCHORS_BY_ID];
+      if (anchor) return { label: anchor.signTitle, accent: hexToCss(anchor.accent) };
+    }
+    if (feature.kind === 'stall') {
+      const stall = STALLS.find((candidate) => candidate.id === feature.id);
+      if (stall) return { label: stall.title, accent: hexToCss(stall.accent) };
+      const title = MAP_ONLY_TITLES[feature.id];
+      if (title) return { label: title, accent: MAP_PALETTE.mustard };
+    }
+    if (feature.kind === 'station') {
+      // `parkMapContent` carries the id it was handed; the name is after the
+      // one colon it was built with.
+      return { label: feature.id.slice('station:'.length), accent: MAP_PALETTE.grey };
+    }
+    if (feature.kind === 'fountain') return { label: 'Fountain', accent: MAP_PALETTE.water };
+    return { label: feature.id, accent: MAP_PALETTE.mustard };
   }
 
   private renderIndoor(): void {
@@ -648,7 +762,12 @@ export class ParkMap {
       const p = curve.getPoint(t);
       points.push([p.x, p.z]);
     }
-    this.strokeCurvePoints(points, route.closed, hexToCss(PALETTE.pathSand), route.width * 0.7);
+    // A broad cream ribbon with a soft edge under it — the reference's
+    // connective tissue. Two strokes rather than a stroke-and-fill so the
+    // ribbon keeps a constant width along the whole curve; the widths are the
+    // route's own `width`, so a path the park paved wider is drawn wider.
+    this.strokeCurvePoints(points, route.closed, MAP_PALETTE.pathEdge, route.width * 1.02);
+    this.strokeCurvePoints(points, route.closed, MAP_PALETTE.path, route.width * 0.82);
   }
 
   private strokeCurvePoints(
@@ -675,46 +794,6 @@ export class ParkMap {
     if (closed) ctx.closePath();
     ctx.stroke();
     ctx.restore();
-  }
-
-  private drawAnchor(anchor: AnchorDefinition): void {
-    // The castle is drawn separately at its real, nudged-in facade footprint
-    // (see `renderOutdoor`) rather than its reserved plot, so it is skipped here.
-    if (anchor.id === 'building') return;
-
-    const [ax, az] = anchor.position;
-    const accent = hexToCss(anchor.accent);
-    this.drawFootprint(ax, az, anchor.footprint, hexToCss(PALETTE.buildingWall), accent);
-
-    // A ride with its own fairground stall gets its name from that stall's pin
-    // instead (drawn separately, below) — one label per ride, not two.
-    if (ANCHORS_WITH_STALL_ENTRY.has(anchor.id)) return;
-
-    const [ex, ez] = anchor.entrance;
-    const [cx, cy] = this.planeToCanvas(ex, ez);
-    this.drawPin(cx, cy, anchor.glyph, anchor.signTitle, accent);
-  }
-
-  private drawFootprint(
-    x: number,
-    z: number,
-    footprint: AnchorFootprint,
-    fill: string,
-    stroke: string,
-  ): void {
-    if (footprint.kind === 'circle') {
-      const [cx, cy] = this.planeToCanvas(x, z);
-      const ctx = this.ctx;
-      ctx.fillStyle = fill;
-      ctx.strokeStyle = stroke;
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      ctx.arc(cx, cy, footprint.radius * this.scale, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      return;
-    }
-    this.drawRect(x, z, footprint.halfX, footprint.halfZ, fill, stroke);
   }
 
   private drawRect(
