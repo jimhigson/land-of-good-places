@@ -358,7 +358,7 @@ const SUBSTEP_FOOTPRINT_FRACTION = 0.5;
  * times a full sprint (11.1 m/s) is 0.93 m, and against the park's thinnest
  * collider that is three sub-steps.
  */
-const MAX_SUBSTEPS = 16;
+export const MAX_SUBSTEPS = 16;
 
 export class CollisionWorld {
   private readonly circles: CircleCollider[] = [];

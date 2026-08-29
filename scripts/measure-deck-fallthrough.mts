@@ -75,7 +75,7 @@
  * tempted to revert "the redundant-looking one" should read this table first.
  */
 import { Vector3 } from 'three';
-import { CollisionWorld } from '../src/world/Collision.ts';
+import { CollisionWorld, MAX_SUBSTEPS } from '../src/world/Collision.ts';
 import { circleBoundary } from '../src/world/boundary.ts';
 import { WalkSurfaces } from '../src/world/building/surfaces.ts';
 import { terrainHeight } from '../src/world/terrain.ts';
@@ -124,18 +124,73 @@ const RUN_SECONDS = 6;
  */
 const LOST_MARGIN = 0.05;
 
+/**
+ * The collider world every run and every prediction uses — one owner, so the
+ * sub-step length the sweep is *measured* under and the one it is *predicted*
+ * from cannot come apart.
+ */
+function buildCollision(): CollisionWorld {
+  const collision = new CollisionWorld();
+  collision.setPlayBounds(circleBoundary(4000));
+  // Far from the walk; present only to set the sub-step length, exactly as the
+  // park's own thinnest collider does. An empty collider world would give an
+  // infinite `maxSafeStep`, one sub-step, and a measurement of a fix that is
+  // not the one that ships.
+  collision.addWall(2000, -50, 2000, 50, PARK_THINNEST_HALF_WIDTH, 1, false);
+  return collision;
+}
+
 /** The deck's own surface, and the ground truth every verdict is read against. */
 function deckSurfaceAt(base: number, gradient: number, x: number): number {
   const along = Math.min(Math.max(x - RAMP_X0, 0), RAMP_LENGTH);
   return base + gradient * along;
 }
 
-function covers(x: number, z: number): boolean {
-  return (
-    x >= RAMP_X0 - 0.001 &&
-    x <= RAMP_X0 + RAMP_LENGTH + 0.001 &&
-    Math.abs(z - RAMP_Z) <= RAMP_HALF_WIDTH
-  );
+/**
+ * **A hole in the deck, part-way up.** Zero width is the plain deck.
+ *
+ * Sub-stepping the sample introduced a failure mode the single end-of-frame
+ * sample could not have: `reference` moves *down* as well as up, so a sub-step
+ * that lands in a hole narrower than one frame's travel drops the reference to
+ * the terrain, and the deck on the far side is then more than
+ * `BUILDING_STEP_UP` above it and is never re-found for the rest of the frame.
+ * She reaches the ground ~15 m below and stays there.
+ *
+ * The #378 reviewer found this, then checked it against the **real** park —
+ * 171,256 frames over both bridge decks at 16 bearings, and 3.08M frames over
+ * the interior decks where the real holes are — and it does not occur: today's
+ * geometry has no hole narrow enough, and the interiors came out marginally
+ * better than pre-fix. So it is **latent, not live**, and is not a defect
+ * today.
+ *
+ * It is swept anyway because #358 exists to let the park build *steeper and
+ * shorter*, and whoever raises {@link SPRINT_PEAK_GRADE_BUDGET} changes exactly
+ * the geometry that bounds it. Measured beats inferred, and this is three lines.
+ *
+ * **Read the two columns as a comparison, not as absolutes.** The reviewer's
+ * rig measured 0 pre-fix; this one measures a nonzero pre-fix because it keeps
+ * marching *across* the hole rather than ending the run at it, so a pre-fix
+ * player who steps over the gap and samples once on the far side can also miss.
+ * The signal both rigs agree on, and the one that matters, is that the holed
+ * deck is **worse after the fix than before it** — which is the whole reason
+ * the row exists.
+ * If it ever bites, `reference = Math.max(reference, groundY)` looks right:
+ * `WalkSurfaces.sample` has no lower bound (`best` only ever rises), so holding
+ * the reference high still finds surfaces below it, while `groundY` stays the
+ * raw last-sub-step answer so walking off a real edge still drops her.
+ */
+const HOLE_WIDTHS = [0, 0.1, 0.3, 0.5];
+/** Far enough up the ramp that she is at full speed when she reaches it. */
+const HOLE_AT = RAMP_LENGTH * 0.5;
+
+function coversWith(holeWidth: number, x: number, z: number): boolean {
+  if (Math.abs(z - RAMP_Z) > RAMP_HALF_WIDTH) return false;
+  if (x < RAMP_X0 - 0.001 || x > RAMP_X0 + RAMP_LENGTH + 0.001) return false;
+  if (holeWidth > 0) {
+    const along = x - RAMP_X0;
+    if (along >= HOLE_AT && along < HOLE_AT + holeWidth) return false;
+  }
+  return true;
 }
 
 interface Outcome {
@@ -173,10 +228,14 @@ interface Config {
   uphill: boolean;
   groundSubstepping: boolean;
   groundReference: 'surface' | 'damped';
+  /** 0 is the plain deck. See {@link HOLE_WIDTHS}. */
+  holeWidth: number;
 }
 
 function run(config: Config, outcome: Outcome): void {
-  const { gradient, delta, phase, sprint, uphill, groundSubstepping, groundReference } = config;
+  const { gradient, delta, phase, sprint, uphill, groundSubstepping, groundReference, holeWidth } =
+    config;
+  const covers = (x: number, z: number) => coversWith(holeWidth, x, z);
 
   // The deck sits clear above the terrain, so losing it is unambiguous: the
   // only thing under it is ground several metres down.
@@ -189,10 +248,7 @@ function run(config: Config, outcome: Outcome): void {
     surfaceYAt: (x) => deckSurfaceAt(base, gradient, x),
   });
 
-  const collision = new CollisionWorld();
-  collision.setPlayBounds(circleBoundary(4000));
-  // Far from the walk; present only to set the sub-step length. See above.
-  collision.addWall(2000, -50, 2000, 50, PARK_THINNEST_HALF_WIDTH, 1, false);
+  const collision = buildCollision();
 
   const player = new SimPlayer(collision, {
     ground: (x, z, y) => surfaces.sample(x, z, y),
@@ -213,7 +269,11 @@ function run(config: Config, outcome: Outcome): void {
   for (let frame = 0; frame < frames; frame += 1) {
     player.step(delta, dirX, 0, sprint);
     const { x, z } = player.position;
-    if (!covers(x, z)) break; // walked off the end of the deck; nothing to judge
+    // Walked off the end of the deck. Over a hole she is still "on" the deck
+    // as far as this loop is concerned, which is the point: the question is
+    // whether the surface is found again on the far side.
+    if (x < RAMP_X0 || x > RAMP_X0 + RAMP_LENGTH) break;
+    if (!covers(x, z)) continue;
 
     const deck = deckSurfaceAt(base, gradient, x);
     const gap = deck - player.groundY;
@@ -233,7 +293,7 @@ function run(config: Config, outcome: Outcome): void {
   }
 }
 
-function measure(variant: Variant): Map<number, Outcome> {
+function measure(variant: Variant, holeWidth = 0): Map<number, Outcome> {
   const { groundSubstepping, groundReference } = variant;
   const byGradient = new Map<number, Outcome>();
   for (const gradient of GRADIENTS) {
@@ -243,12 +303,50 @@ function measure(variant: Variant): Map<number, Outcome> {
         for (const sprint of [true, false])
           for (const uphill of [true, false])
             run(
-              { gradient, delta, phase, sprint, uphill, groundSubstepping, groundReference },
+              {
+                gradient,
+                delta,
+                phase,
+                sprint,
+                uphill,
+                groundSubstepping,
+                groundReference,
+                holeWidth,
+              },
               outcome,
             );
     byGradient.set(gradient, outcome);
   }
   return byGradient;
+}
+
+/**
+ * The hole sweep, at one ordinary gradient — this is about the hole, not the
+ * slope. Reported, and asserted only against **getting worse**, because the
+ * behaviour is latent rather than live (see {@link HOLE_WIDTHS}).
+ */
+const HOLE_GRADIENT = 0.3;
+
+function measureHole(variant: Variant, holeWidth: number): Outcome {
+  const outcome: Outcome = { lost: 0, runs: 0, worstGap: 0, firstMessage: null };
+  const { groundSubstepping, groundReference } = variant;
+  for (const delta of DELTAS)
+    for (const phase of PHASES)
+      for (const sprint of [true, false])
+        run(
+          {
+            gradient: HOLE_GRADIENT,
+            delta,
+            phase,
+            sprint,
+            uphill: true,
+            groundSubstepping,
+            groundReference,
+            holeWidth,
+          },
+          outcome,
+        );
+  return outcome;
 }
 
 /** The steepest gradient with no lost surface anywhere in the sweep. */
@@ -274,21 +372,38 @@ const after = results[3]!.byGradient;
  * granularity sits just *after* a jump: 12 fps covers 0.925 m in 3 sub-steps of
  * 0.308 m, while 15 fps covers 0.740 m in only 2, of 0.370 m. Sweeping the
  * clamp alone would have measured the wrong ceiling and called it the answer.
+ *
+ * **The decomposition is asked of the real `CollisionWorld`, never re-derived
+ * here.** `SUBSTEP_FOOTPRINT_FRACTION` and {@link MAX_SUBSTEPS} are
+ * `Collision.ts`'s to own; a hand-copied `0.5` and `16` in this file would be a
+ * guard that silently stops guarding the moment either moves — and this one
+ * feeds the assertion whose whole job is to notice the sample ceasing to ride
+ * the sub-steps.
  */
 function substepLengthAt(delta: number): number {
   const distance = PLAYER_MAX_SPEED * PLAYER_SPRINT_MULTIPLIER * delta;
-  const limit = 0.5 * (PARK_THINNEST_HALF_WIDTH + PLAYER_RADIUS);
-  const steps = distance > limit ? Math.min(Math.ceil(distance / limit), 16) : 1;
+  const limit = buildCollision().maxSafeStep(PLAYER_RADIUS);
+  const steps = distance > limit ? Math.min(Math.ceil(distance / limit), MAX_SUBSTEPS) : 1;
   return distance / steps;
 }
 
-const worstSubstep = Math.max(...DELTAS.map(substepLengthAt));
+const substepLengths = DELTAS.map(substepLengthAt);
+const worstSubstep = Math.max(...substepLengths);
+const worstDelta = DELTAS[substepLengths.indexOf(worstSubstep)]!;
 const predicted = BUILDING_STEP_UP / worstSubstep;
+
+// If the cap ever binds, the pieces are silently longer than `maxSafeStep` and
+// the predicted ceiling above is a fiction. Say so rather than report it.
+const cappedAt = DELTAS.filter(
+  (d) =>
+    Math.ceil((PLAYER_MAX_SPEED * PLAYER_SPRINT_MULTIPLIER * d) / buildCollision().maxSafeStep(PLAYER_RADIUS)) >
+    MAX_SUBSTEPS,
+);
 
 console.log('\nCan a long frame carry the player through the deck she is walking up? (#358)\n');
 console.log(
   `  worst sub-step over the frame rates swept: ${worstSubstep.toFixed(3)} m ` +
-    `(at ${(1 / DELTAS[DELTAS.map(substepLengthAt).indexOf(worstSubstep)]!).toFixed(0)} fps), ` +
+    `(at ${(1 / worstDelta).toFixed(0)} fps), ` +
     `against the park's thinnest ${PARK_THINNEST_HALF_WIDTH} m collider`,
 );
 console.log(
@@ -316,6 +431,25 @@ for (const { variant, byGradient } of results) {
 }
 console.log();
 
+// --- the hole sweep ---------------------------------------------------------
+// Latent, not live: today's park has no hole narrow enough, verified on the
+// real bridge and interior decks by the #378 reviewer. Measured here so it
+// stays bounded as the park is allowed to build steeper and shorter.
+console.log(`  a hole in the deck, at gradient ${HOLE_GRADIENT} (see HOLE_WIDTHS):\n`);
+console.log('    hole width    before: lost/runs      after: lost/runs');
+const holeRows = HOLE_WIDTHS.map((w) => ({
+  width: w,
+  before: measureHole(VARIANTS[0]!, w),
+  after: measureHole(VARIANTS[3]!, w),
+}));
+for (const row of holeRows) {
+  console.log(
+    `    ${row.width.toFixed(2).padStart(10)}    ${String(row.before.lost).padStart(6)}/${String(row.before.runs).padEnd(6)}    ` +
+      `${String(row.after.lost).padStart(6)}/${String(row.after.runs).padEnd(6)}`,
+  );
+}
+console.log();
+
 const firstBefore = GRADIENTS.map((g) => before.get(g)!.firstMessage).find((m) => m !== null);
 if (firstBefore) console.log(`  the control's first failure:\n    ${firstBefore}\n`);
 
@@ -332,6 +466,30 @@ console.log(
 );
 
 let failed = false;
+
+// 0. The sub-step cap must not bind at any rate swept. If it did, the pieces
+//    would be longer than `maxSafeStep` and `predicted` would be a fiction the
+//    assertions below are measured against.
+if (cappedAt.length) {
+  failed = true;
+  console.error(
+    `FAIL: MAX_SUBSTEPS (${MAX_SUBSTEPS}) binds at ` +
+      `${cappedAt.map((d) => `${(1 / d).toFixed(0)} fps`).join(', ')}, so the sub-steps are ` +
+      `longer than maxSafeStep and the predicted ceiling above does not hold.`,
+  );
+}
+
+// 0b. The unholed deck must stay clean. The holed rows are reported, not
+//     asserted against zero — they are a known latent bound, and asserting
+//     zero there would fail today for a reason nobody is fixing today.
+const solidRow = holeRows.find((r) => r.width === 0)!;
+if (solidRow.after.lost > 0) {
+  failed = true;
+  console.error(
+    `FAIL: the deck with NO hole in it lost the surface on ` +
+      `${solidRow.after.lost} of ${solidRow.after.runs} runs at gradient ${HOLE_GRADIENT}.`,
+  );
+}
 
 // 1. Every gradient inside the park-independent floor must be safe. This is
 //    the assertion that protects real geometry: anything built to `floor` is
