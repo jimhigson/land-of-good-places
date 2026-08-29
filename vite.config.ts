@@ -2,6 +2,7 @@ import { execSync } from 'child_process';
 import { writeFileSync } from 'fs';
 import { defineConfig, type Plugin } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
+import { VERSION_FILE_NAME } from './src/version-file';
 
 // No `@types/node` in this project (a browser game has no business seeing
 // `process`, `Buffer`, `require`, etc as ambient globals in `src/`) — the
@@ -41,13 +42,18 @@ const APP_VERSION = (() => {
  * Writes `version.txt` straight into the build output, not `public/` — it is
  * generated fresh every build, not hand-authored, so it has no business being
  * a tracked source file that could go stale between commits.
+ *
+ * The name comes from `src/version-file.ts`, which is also what
+ * `src/version-check.ts` polls and what `scripts/check-live-version.mts`
+ * fetches off the live site: one owner, so the writer and the readers cannot
+ * drift apart.
  */
 function versionFilePlugin(version: string): Plugin {
   return {
     name: 'land-of-good-places-version-file',
     apply: 'build',
     writeBundle(options) {
-      writeFileSync(`${options.dir ?? 'dist'}/version.txt`, version);
+      writeFileSync(`${options.dir ?? 'dist'}/${VERSION_FILE_NAME}`, version);
     },
   };
 }
