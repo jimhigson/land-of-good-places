@@ -50,7 +50,36 @@ Worst push-out 0.71 m in both cases, so it is one solid object, not the bridge.
 whatever places it is keyed off the bridge footprint, and at the wide setting it
 lands overlapping the bridge's own covered extent at the ramp foot.
 
-## Hypothesis — NOT yet proved, do not write it up as fact
+## Hypothesis — **TESTED AND DEAD.** Do not spend time on it again.
+
+`ACROSS_MARGIN` was varied **alone**, 2.0 → 3.0 → 1.0, re-probing each time
+(0.25 m steps, so the span is resolved four times finer than the table above):
+
+| `ACROSS_MARGIN` | blocked span |
+| --- | --- |
+| 2.0 (shipped) | −16.00 … −14.25 |
+| 3.0 | −16.00 … −14.25 |
+| 1.0 | −16.00 … −14.25 |
+
+**Identical to the sample.** The conservative footprint's width is *not* what
+places this object, so the `isInBridgeFootprint` / `halfGap + ACROSS_MARGIN`
+story below is wrong. It remains true that `bridgeRoadHalfFor` — the **real**
+pass's width — does move it (−16.5…−15.0 narrow vs −16.0…−14.5 wide, the same
+push-out sequence displaced by one 0.5 m step), so the lever is somewhere on the
+real-pass side, not the reservation side.
+
+Also attempted and inconclusive: naming the object by walking `park.scene` for
+anything within 3 m of (12.4, −44.0) in **world** space (`updateMatrixWorld`
+then `getWorldPosition` — local `.position` is useless here, it reports the
+node's offset inside its parent group). Nothing named came back, which most
+likely means the blocker is an **instanced** mesh (scenery is instanced) or a
+collider with no scene node of its own. **Next attempt should interrogate the
+collision world directly rather than the scene graph** — find what
+`collision.isClearCircle` refuses at (12.4, −44.0) and work back to its owner.
+
+The original hypothesis, retained so nobody re-derives it:
+
+## (dead) Conservative-width hypothesis
 
 `bridgeKeepout.ts`'s `isInBridgeFootprint` reads the **conservative** footprint
 pass, whose width is seeded `halfAcross = crossing.halfGap + ACROSS_MARGIN`
