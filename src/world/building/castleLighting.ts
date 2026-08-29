@@ -110,7 +110,24 @@ const WALL_FACE_X = INTERIOR_HALF_X - BUILDING_WALL_THICKNESS / 2;
  * definition left to go stale, and `check:castle` measures the sconce against
  * this when batch 1 is wired.
  */
-export const CASTLE_TORCH_CUP = { out: 0.2475, up: 0.285 } as const;
+/**
+ * How far the cup stands off the wall. **Split out of {@link CASTLE_TORCH_CUP}
+ * as a plain number so `art/blend/castle_build.py` can read it** (#368 wiring).
+ *
+ * The sentence above says the sconce "is authored to land on this number", and
+ * until this split that was true only in the sense that a person had checked.
+ * `ts_const` reads exactly one grammar — `export const NAME = <number>;` — so
+ * an object literal is unreadable to the asset side, and the Artist had no
+ * choice but to type the figure. Two numbers that match because somebody
+ * compared them are this repo's most-cited bug; two numbers where one is *read*
+ * cannot drift. **Keep both of these plain numeric exports.**
+ */
+export const CASTLE_TORCH_CUP_OUT = 0.2475;
+
+/** How far the cup's mouth stands above the mount. See {@link CASTLE_TORCH_CUP_OUT}. */
+export const CASTLE_TORCH_CUP_UP = 0.285;
+
+export const CASTLE_TORCH_CUP = { out: CASTLE_TORCH_CUP_OUT, up: CASTLE_TORCH_CUP_UP } as const;
 
 /**
  * How tall a flame is.

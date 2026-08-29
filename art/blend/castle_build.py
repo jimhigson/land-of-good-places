@@ -250,6 +250,38 @@ SCONCE_HEADROOM, SCONCE_HEADROOM_FROM = read_fabric_const(
     "SCONCE_HEADROOM", SCONCE_HEADROOM_FALLBACK
 )
 
+# The Engineer's `castleAssets.ts` — the module that owns the two numbers this
+# file used to type, plus the sconce's cup offset that `castleLighting.ts` owns.
+#
+# **This is the seam PR #368 asked for and could not have.** Until the game had
+# a castle asset module there was nowhere to read a dais height from, so
+# `DAIS_HEIGHT` and `TAPESTRY_RAIL_Y` below were typed with a comment saying
+# they should be `ts_const`'d "the moment `castleAssets.ts` exists". It exists.
+ASSETS_MODULE = "src/art/models/castleAssets.ts"
+LIGHTING_MODULE = "src/world/building/castleLighting.ts"
+
+
+def read_engineer_const(module: str, name: str, fallback: float):
+    """One of the Engineer's literals, or the contract figure, plus provenance.
+
+    Same three-state shape as :func:`read_fabric_const`, and for the same
+    reason: **"their module is not here yet" and "their module is here and this
+    constant cannot be read" mean opposite things**, and a fallback reporting
+    the two identically is a check describing something other than what it
+    checked.
+    """
+    if not os.path.exists(os.path.join(REPO, module)):
+        return fallback, f"the Engineer's contract — {module} is not on this branch yet"
+    try:
+        return ts_const(module, name), f"{module}'s {name}"
+    except AssertionError:
+        return (
+            fallback,
+            f"the fallback — {module} exists but `{name}` is no longer a plain "
+            "`export const NAME = <number>;` and cannot be read. That is a seam "
+            "that has moved: tell the Engineer rather than retyping it here",
+        )
+
 TALLEST_CHILD = ts_const("src/art/models/kid.ts", "TALLEST_CHILD_HEIGHT")
 # A child with ordinary hair and no hat — the figure to judge everyday scale
 # against, where `TALLEST_CHILD` is the worst case the ceiling checks use.
@@ -317,7 +349,10 @@ HEIGHT_TOLERANCE = 0.02
 # is that it appears exactly once, is printed on every run beside the throne's
 # measured height and the resulting total, and is the reason the ceiling
 # assertion can see the throne at all.
-DAIS_HEIGHT = 0.30
+DAIS_HEIGHT_FALLBACK = 0.30
+DAIS_HEIGHT, DAIS_HEIGHT_FROM = read_engineer_const(
+    ASSETS_MODULE, "CASTLE_DAIS_HEIGHT", DAIS_HEIGHT_FALLBACK
+)
 
 # The height the tapestry rail hangs at, from the Engineer's §4.4. Typed for
 # `DAIS_HEIGHT`'s reason and with `DAIS_HEIGHT`'s caveat: they build the wall,
@@ -332,7 +367,24 @@ DAIS_HEIGHT = 0.30
 # build script read the constants properly, its render script hand-copied
 # them, they drifted, and five committed renders were of a bridge that was not
 # on the branch.
-TAPESTRY_RAIL_Y = 2.90
+TAPESTRY_RAIL_Y_FALLBACK = 2.90
+TAPESTRY_RAIL_Y, TAPESTRY_RAIL_FROM = read_engineer_const(
+    ASSETS_MODULE, "CASTLE_TAPESTRY_RAIL_Y", TAPESTRY_RAIL_Y_FALLBACK
+)
+
+# Where the fire sits, which decides where the cup is cut. `castleLighting.ts`
+# owns this (#376 reversed the contract's direction deliberately: the flame is
+# built there, so the sconce is authored to land on it rather than the other way
+# round). It was an object literal and therefore unreadable to `ts_const`; the
+# Engineer split it into two plain numeric exports so this read is possible.
+SCONCE_CUP_OUT_FALLBACK = 0.2475
+SCONCE_CUP_UP_FALLBACK = 0.285
+SCONCE_CUP_OUT, SCONCE_CUP_OUT_FROM = read_engineer_const(
+    LIGHTING_MODULE, "CASTLE_TORCH_CUP_OUT", SCONCE_CUP_OUT_FALLBACK
+)
+SCONCE_CUP_UP, SCONCE_CUP_UP_FROM = read_engineer_const(
+    LIGHTING_MODULE, "CASTLE_TORCH_CUP_UP", SCONCE_CUP_UP_FALLBACK
+)
 
 
 class Requested:
@@ -1062,6 +1114,30 @@ def check_sconce_headroom() -> str:
         f"{SCONCE_MOUNT_Y + hi.z:.3f} m, inside the perimeter wall-plate, and all "
         "forty of them would be hidden behind a timber"
     )
+    # --- and the cup is where the Engineer's fire is, not merely near it ----
+    #
+    # `castleLighting.ts` owns where a flame sits (#376 reversed this contract's
+    # direction on purpose: the flame is built there, so the sconce is authored
+    # to land on it). That sentence was true only in the sense that a person had
+    # compared two numbers, because the constant was an object literal and
+    # `ts_const` cannot read one. The Engineer split it into two plain numeric
+    # exports so this assertion is possible — and an assertion is what turns
+    # "authored to land on it" into a fact about the build rather than a claim.
+    #
+    # The tolerance is a millimetre: these two figures are meant to be the *same
+    # number*, not a fit with slack in it.
+    offset = sconce_offset()
+    for measured, wanted, axis, source in (
+        (offset[2], SCONCE_CUP_OUT, "out from the wall", SCONCE_CUP_OUT_FROM),
+        (offset[1], SCONCE_CUP_UP, "up from the mount", SCONCE_CUP_UP_FROM),
+    ):
+        assert abs(measured - wanted) < 1e-3, (
+            f"the cup's mouth measures {measured:.4f} m {axis} and the Engineer's "
+            f"flame is placed at {wanted:.4f} m ({source}). Forty flames would hang "
+            f"{abs(measured - wanted) * 100:.1f} cm off their own cups. Move the "
+            "geometry or renegotiate the constant — do not leave them differing"
+        )
+
     mouth = sconce_offset()[1]
     return (
         f"  sconce headroom: reaches {hi.z:.3f} m above a {SCONCE_MOUNT_Y:.2f} m mount "
@@ -1071,7 +1147,9 @@ def check_sconce_headroom() -> str:
         f"    budget from {SCONCE_HEADROOM_FROM}\n"
         f"    the Engineer's flame stands on the cup's mouth at {mouth:.4f} m above the "
         f"mount, so it has {SCONCE_HEADROOM - mouth:.3f} m of budget above it before the "
-        "wall-plate — not asserted here, because the flame is not in this mesh"
+        "wall-plate — not asserted here, because the flame is not in this mesh\n"
+        f"    cup mouth agrees with the flame's own placement: out {offset[2]:.4f} m "
+        f"({SCONCE_CUP_OUT_FROM}), up {offset[1]:.4f} m ({SCONCE_CUP_UP_FROM})"
     )
 
 
