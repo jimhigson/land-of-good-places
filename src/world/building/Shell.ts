@@ -46,6 +46,7 @@ import {
   softMaterial,
 } from './parts';
 import { segmentsMinusGaps } from '../wallRuns';
+import { buildCeilingBeams, castleFloorMaterial, castleWallMaterial } from './castleFabric';
 import {
   DECK_HOLES,
   ENTRANCE_MAX_X,
@@ -187,6 +188,8 @@ export class BuildingShell {
         floor.add(buildTrimBand(plan, deck));
         floor.add(buildCornerPillars(plan));
         for (const mesh of buildWindows(plan, deck)) floor.add(mesh);
+        const beams = buildCeilingBeams(deck);
+        if (beams) floor.add(beams);
       } else {
         buildRoofTerrace(plan, floor);
       }
@@ -218,9 +221,15 @@ function buildDeck(plan: ShellPlan, deck: number): Mesh {
     }
   }
 
+  // `plan.holes` is true only for the interior — the facade out in the garden
+  // is a solid block and takes none of this. The roof terrace is genuinely
+  // outdoors, so it keeps its plain pink paving rather than being flagged.
+  const isCastleFloor = plan.holes && deck !== TOP_DECK;
+  const colour =
+    deck === TOP_DECK && plan.holes ? PALETTE.stonePinkLight : storeyColours(deck).floor;
   const mesh = new Mesh(
     extrudePlan([slab], BUILDING_SLAB),
-    interiorMaterial(deck === TOP_DECK && plan.holes ? PALETTE.stonePinkLight : storeyColours(deck).floor, 0.82),
+    isCastleFloor ? castleFloorMaterial(colour) : interiorMaterial(colour, 0.82),
   );
   mesh.receiveShadow = true;
   // Only the ground slab casts: the ones above it are hidden by the cutaway
@@ -298,10 +307,14 @@ function storeyColours(deck: number): StoreyColours {
 }
 
 function buildWalls(plan: ShellPlan, deck: number, height: number): Mesh {
+  const colour = storeyColours(deck).wall;
   const mesh = castAndReceive(
     new Mesh(
       extrudePlan(wallShapes(plan, deck), height),
-      softMaterial(storeyColours(deck).wall, 0.78),
+      // Coursed stone inside the castle; the facade keeps its flat paint,
+      // which is what makes it read as one storybook mass from across the
+      // park rather than as a wall with a texture on it.
+      plan.holes ? castleWallMaterial(colour) : softMaterial(colour, 0.78),
     ),
   );
   mesh.name = `walls-${deck}`;
