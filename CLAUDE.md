@@ -702,25 +702,32 @@ origin main` and rebase onto it — a branch built on a stale base can silently
 carry an already-fixed bug back in (PR #311 rebuilt the disco ball at its old
 position because it branched before PR #306, which moved it, had merged).
 
-**Read `git diff --stat origin/main..HEAD` immediately before every push, and
-account for every file in it. Anything you did not touch is a revert waiting
-to ship.**
+**Check your diff before every push — with three dots, not two:**
 
-On 29 August two branches were found carrying **latent reverts** — deletions
-of files their authors had never opened, because their base predated that
-day's squash merges. One would have destroyed an entire ticket: nineteen
-files, another agent's `.blend`, its build/export/render scripts, five
-renders, and 394 lines cut out of `bridges.ts`.
+```
+git diff --stat origin/main...HEAD
+```
 
-**Nothing else catches this.** On that branch `tsc` was clean, the full
-`npm run build` exited 0, its own new checks were green and its browser QA
-passed. Every signal said healthy. Only the stat showed it.
+Account for every file. A deletion there is one **you** made, and if you did
+not mean to make it, it is a revert about to ship.
 
-**One rebase is not a durable answer.** That agent had already rebased
-correctly earlier the same day; the revert crept back in when `main` moved
-again while it was still building. `main` moved four times that day. Read the
-stat immediately before pushing or opening a PR, every time — not once at the
-start.
+**Use three dots. Two dots will lie to you**, and on 29 August it lied to
+three agents in a row. `origin/main..HEAD` (two dots) diffs the two commits,
+so every file added to `main` since you branched appears as a **deletion in
+your branch** — 48 files on one branch that had touched 10. Two of those
+agents reported a catastrophic latent revert; one Overseer broadcast the
+alarm fleet-wide and wrote this very section wrongly before checking. There
+was nothing there. `origin/main...HEAD` (three dots) diffs from the merge
+base and shows only what you actually changed — which is also what GitHub
+merges, so it is the honest question.
+
+Rebasing makes the two agree, which is why rebasing "fixed" the phantom and
+made it look real. **Rebase because your base is stale, not because a
+two-dot stat frightened you.**
+
+The residue of truth: a badly resolved conflict during a rebase *can* delete
+someone else's work, and then the deletion is yours and three-dot shows it.
+That is what you are looking for.
 
 ## Editing this file
 
