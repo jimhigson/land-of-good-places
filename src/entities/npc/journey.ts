@@ -401,7 +401,34 @@ export class Journey {
       this.planned = true;
       this.routeLength = count;
       this.routeIndex = 0;
+      // Fresh plan, fresh progress baseline: a child who has just been given a
+      // new route has not failed to make progress along it yet.
+      this.progressX = x;
+      this.progressZ = z;
+      this.sinceProgressCheck = 0;
       if (count === 0) return true;
+    }
+
+    // Are we actually getting anywhere? See {@link STUCK_WINDOW} — this is the
+    // guard on the bug where eleven children pushed at a route that had stopped
+    // short in the gateway for seventy-five seconds. Checked before the
+    // waypoint advance so a child wedged *on* a waypoint is caught too.
+    this.sinceProgressCheck += dt;
+    if (this.sinceProgressCheck >= STUCK_WINDOW) {
+      const moved = Math.hypot(x - this.progressX, z - this.progressZ);
+      this.progressX = x;
+      this.progressZ = z;
+      this.sinceProgressCheck = 0;
+      if (moved < NPC_WALK_SPEED * STUCK_WINDOW * STUCK_FRACTION) {
+        // Ask again from where we actually got to — which is what fixed it
+        // every time the old timeout eventually forced the same thing, only
+        // seventy-two seconds sooner. Out of attempts means this destination is
+        // not working out; arriving is the caller's cue to choose another.
+        if (this.replansLeft <= 0) return true;
+        this.replansLeft -= 1;
+        this.planned = false;
+        return false;
+      }
     }
 
     // Arrived? Measured against the destination itself, not the last waypoint:
@@ -418,7 +445,17 @@ export class Journey {
       this.routeIndex += 1;
     }
 
-    if (this.routeIndex >= this.routeLength) return true;
+    // The route ran out and the destination is still not underfoot: it stopped
+    // short. `NavGrid.findRoute` is explicit that it may — it ends at the
+    // closest reachable point — and `TapNavigator` handles the same case the
+    // same way. Re-plan from here rather than declaring an arrival somewhere
+    // the child never got to.
+    if (this.routeIndex >= this.routeLength) {
+      if (this.replansLeft <= 0) return true;
+      this.replansLeft -= 1;
+      this.planned = false;
+      return false;
+    }
 
     const targetX = this.route[this.routeIndex * 2] ?? goal.x;
     const targetZ = this.route[this.routeIndex * 2 + 1] ?? goal.z;
@@ -428,7 +465,16 @@ export class Journey {
 
     // The last waypoint is the destination, so reaching it at the tighter
     // `ARRIVE_RADIUS` is arriving.
-    if (this.routeIndex === this.routeLength - 1 && distance <= ARRIVE_RADIUS) return true;
+    if (this.routeIndex === this.routeLength - 1 && distance <= ARRIVE_RADIUS) {
+      // Standing on the last waypoint is only arriving if the last waypoint is
+      // the destination. When the route stopped short it is not, and the honest
+      // move is another attempt from here.
+      if (Math.hypot(goal.x - x, goal.z - z) <= DESTINATION_RADIUS) return true;
+      if (this.replansLeft <= 0) return true;
+      this.replansLeft -= 1;
+      this.planned = false;
+      return false;
+    }
     if (distance < 1e-4) return false;
 
     move.x = dx / distance;
