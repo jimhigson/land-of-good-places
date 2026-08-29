@@ -105,6 +105,9 @@ function liveHost(): string {
   return domain;
 }
 
+/** Marks an expectation that can be re-asked of the remote as `main` moves. */
+const REMOTE_HEAD = 'git ls-remote origin HEAD';
+
 /** The commit the live site *ought* to be serving. */
 function expectedVersion(): { sha: string; source: string } {
   const flag = process.argv.slice(2).find((arg) => arg.startsWith('--expect='));
@@ -150,7 +153,7 @@ async function readLiveVersion(url: string): Promise<Reading> {
 
 const host = liveHost();
 const url = `https://${host}${VERSION_FILE_PATH}`;
-const expected = expectedVersion();
+let expected = expectedVersion();
 
 const startedAt = Date.now();
 let attempts = 0;
@@ -178,6 +181,12 @@ for (;;) {
       `retrying (publishing takes about 40 s once a build has passed)\n`,
   );
   await new Promise((resolve) => setTimeout(resolve, INTERVAL_MS));
+  // Re-ask the remote what its head is, unless the caller pinned one. Somebody
+  // merging again while this polls would otherwise leave it waiting for a commit
+  // the site has already, correctly, moved past — a check going red because the
+  // world moved on is the same disease as one that cannot fail, pointed the
+  // other way.
+  if (expected.source === REMOTE_HEAD) expected = expectedVersion();
 }
 
 const elapsedMs = Date.now() - startedAt;
