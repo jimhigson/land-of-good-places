@@ -86,6 +86,52 @@ unwrap — u runs along the bus, v runs from the spine down over the roof and fl
 — so one tiling canvas texture covers the lower shell, upper shell, pillars, back
 wall and door with stripes at a single consistent world size and no second mesh.
 
+## Round 2 — answering the review (PR #369)
+
+Rebased onto current `origin/main` (clean; one `package.json` conflict, both
+scripts kept). `npm run test:procgen` **453/453**. `npm run build` **exit 0**.
+
+### The three blockers, all done
+
+1. **Bob 2.6 px → 13.4 px.** Two causes, and only one was the clamp. Clamps
+   raised (heave 0.08→0.20, pitch 0.014→0.028, roll 0.018→0.05) *and* the road
+   profile's wavelengths re-derived from `WHEELBASE`: they were near-antiphase
+   against the 9.2 m wheelbase, so the axles cancelled each other's heave and
+   only pitch survived. One term is now a wheelbase long (both axles in phase =
+   pure heave), one two wheelbases (antiphase = pure pitch).
+   Live-game measured: **0.3308 m p2p moving, 0.0000 parked**. Scale confirmed
+   at **40.3–40.8 px/m** off the tyre's 2.133 m silhouette in the same frames.
+2. **Mudguard = one `ExtrudeGeometry` annular sector**, arc 1.6→2.6 rad. One
+   mesh, one outline. Judged from the arrival camera.
+3. **Check measures the real bodywork.** Both review fools now red.
+
+### Three bugs the check found that reading did not
+
+- **Fenders rode 0.64 m above their wheels**: placed at `WHEEL_RADIUS` in the
+  *chassis* frame while wheels are at `WHEEL_RADIUS` in the *axles* frame. Fixed
+  with `- CAT_BUS_RIDE_LIFT`.
+- **The check could not see an extruded arc**: no vertices on the tyre's centre
+  plane. Now barycentric surface sampling.
+- **Surface sampling still could not see the shells**: `RoundedBoxGeometry`
+  tessellates flat faces so coarsely the 12.9 m shell has no vertex within a
+  metre of an axle. Shells are boxes — measured as boxes, with the *tyre*
+  transformed into the shell's frame.
+
+### Traps for a successor
+
+- **The old `bob-*.png` burst showed a PARKED bus with a panning camera.** The
+  static welcome sign moves pixel-for-pixel with the tyre through all ten
+  frames. A parked bus correctly does not bob, so those frames could never have
+  shown one. Fire the burst on `speed > 1.5` (`scripts/qa-cat-bus-364.mjs`
+  does not; the temporary probe script did).
+- **Raising the bob raises `CAT_BUS_RIDE_LIFT`, which raises the step.** Hence
+  the second tread + stringer. Pitch costs ride lift at ~7.9 m/rad (the chin's
+  lever arm), heave at 1:1 — so pitch is the expensive one to raise.
+- **Removing the heave clamp alone trips nothing** — the road uses 87% of it.
+  To prove the clamp red you must roughen the road too.
+- `check:park-boot` flake (#324) **measured this time**: interleaved A/B,
+  branch 2/5 failures vs clean `origin/main` 2/5, same magnitudes. Not us.
+
 ## State — complete, PR raised
 
 - [x] Worktree + `npm ci`
