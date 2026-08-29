@@ -422,6 +422,23 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
     return this.blinkingNow;
   }
 
+  /**
+   * True when an activity — the bus, a climb, a chat, the train, the paint
+   * stall — currently owns this child, so the journey is not steering them.
+   *
+   * Read by `check-npc-dispersal.mts`, which measures whether the *destination*
+   * mechanism spreads the crowd out and so must not count children the game has
+   * deliberately put somewhere: ten children waiting on a station platform are
+   * standing together on purpose, and a clump of passengers is a queue for a
+   * train rather than the pooling issue #350 was raised about.
+   */
+  get occupied(): boolean {
+    for (let i = 0; i < this.activities.length; i += 1) {
+      if (this.activities[i]?.busy) return true;
+    }
+    return false;
+  }
+
   /** True if any activity other than `asking` is mid-something. */
   othersBusy(asking: Activity): boolean {
     for (let i = 0; i < this.activities.length; i += 1) {
