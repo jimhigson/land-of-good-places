@@ -11,6 +11,7 @@ import { ROUTES, routeCurve } from '../world/pathGraph';
 import { STALLS } from '../minigames';
 import { ENTRANCE_GATE_HALF_WIDTH } from '../world/entrance/layout';
 import { CAT_BUS_LENGTH, CAT_BUS_ROUTE_NUMBER } from '../world/entrance/catBus';
+import { capture, wheelNotches } from '../core/input/PointerControls';
 import { MAP_PALETTE, drawIcon } from './parkMapArt';
 import { parkMapFeatures, type MapFeature } from './parkMapContent';
 import {
@@ -102,14 +103,6 @@ import {
 const PLAYER_MARKER_COLOUR = PALETTE.markerPink;
 const REACHABLE_TOLERANCE_SQ = 0.05 * 0.05;
 
-/**
- * Pixels of wheel travel treated as one notch of map zoom (#359).
- *
- * Matches `core/input/PointerControls.ts`'s own notch size, so a trackpad
- * flick over the map feels like the same gesture that zooms the park — the two
- * are separate zooms of separate things and must not *feel* separate.
- */
-const WHEEL_NOTCH_PX = 100;
 
 /**
  * Names for the two booths whose own copy lives inside a three.js module
@@ -579,7 +572,11 @@ export class ParkMap {
   }
 
   private onCanvasPointerDown(event: PointerEvent): void {
-    this.canvas.setPointerCapture(event.pointerId);
+    // Via `PointerControls.capture`, which swallows the `NotFoundError` a
+    // released or synthesised pointer throws. Called raw it threw for the
+    // reviewer of #372, and because it was the first line the rest of this
+    // handler never ran — a pan or pinch silently failed to start.
+    capture(this.canvas, event.pointerId, true);
     this.mapPointers.set(event.pointerId, this.canvasPoint(event));
     if (this.mapPointers.size === 1) {
       this.gestureMoved = false;
@@ -646,9 +643,7 @@ export class ParkMap {
 
   private onCanvasPointerLost(event: PointerEvent): void {
     this.mapPointers.delete(event.pointerId);
-    if (this.canvas.hasPointerCapture(event.pointerId)) {
-      this.canvas.releasePointerCapture(event.pointerId);
-    }
+    capture(this.canvas, event.pointerId, false);
     if (this.mapPointers.size < 2) this.pinchStartDistance = 0;
     if (this.mapPointers.size === 0) this.gestureStart = null;
   }
@@ -660,7 +655,10 @@ export class ParkMap {
     const rect = this.canvas.getBoundingClientRect();
     // One notch is a fixed ratio rather than a fixed step, so zooming feels
     // the same at every level — the same reason the camera's own zoom damps.
-    const factor = Math.exp((-event.deltaY / WHEEL_NOTCH_PX) * 0.2);
+    // `wheelNotches` from PointerControls, not a hand-divided deltaY: it is
+    // the one owner of "how much is one notch", including the deltaMode
+    // normalisation a line-mode (Firefox) or page-mode wheel needs.
+    const factor = Math.exp(wheelNotches(event) * 0.2);
     this.setView(
       zoomedAboutPoint(
         this.currentView(),

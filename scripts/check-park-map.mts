@@ -11,6 +11,9 @@
  * npm run check:park-map -- --mutate=zoom-axis  # prove assertion 5 can fail
  * npm run check:park-map -- --mutate=clamp-loose  # prove assertion 6 can fail
  * npm run check:park-map -- --mutate=clamp-tight  # prove assertion 7 can fail
+ * npm run check:park-map -- --mutate=clamp-letterbox # the blank-map bug itself
+ * npm run check:park-map -- --mutate=focal        # zoom stops pinning
+ * npm run check:park-map -- --mutate=pan-sign     # drag goes the wrong way
  * ```
  *
  * #234 is the reason this exists, and it is worth stating exactly, because it
@@ -96,10 +99,17 @@
  *
  *    **Assertion 3 only ever runs on the default framing**, which is why 5
  *    exists. Measured: `--mutate=zoom-axis` (zoom applied to one axis) raises
- *    **140** failures under assertion 5 and **zero** under assertion 3 — the
- *    shear is a no-op at zoom 1 by construction and appears only as the child
- *    zooms in. A check that stopped at the default view would have been blind
- *    to it, which is #234's own shape one level up.
+ *    **140 of the 175 sampled views** — every view except the 35 at zoom 1,
+ *    where the shear is exactly a no-op by construction. `140 = 175 - 35` is
+ *    the number that demonstrates it.
+ *
+ *    An earlier version of this note claimed "140 under assertion 5 and zero
+ *    under assertion 3". The zero was true but **not evidence**: `zoom-axis`
+ *    is only applied inside `projectionForView`, and assertion 3 calls
+ *    `projectionFor`, so it could never have seen the mutation whatever the
+ *    zoom did. Quoting a number that a wiring detail guaranteed is the same
+ *    error as quoting a count you expected rather than the one on screen —
+ *    caught in review of #372.
  *
  * ### Thresholds
  *
@@ -117,7 +127,10 @@
  *
  * Every assertion has a `--mutate` mode that breaks the thing it describes
  * while leaving the rest of the map correct — `viewport` reinstates the 66 m
- * square that caused #234, `position` nudges one attraction, `stretch` scales
+ * square that caused #234, `clamp-letterbox` reinstates the pan clamp that let
+ * a landscape phone be dragged to a completely blank map, `focal` and
+ * `pan-sign` break the two gesture formulae, `position` nudges one attraction,
+ * `stretch` scales
  * one axis, **`entrance` draws every ride at its queue rather than at the
  * ride** — the exact class of error the vacuous version of assertion 2 could
  * not see and the scene-graph comparison now can — and **`gateway` swaps the

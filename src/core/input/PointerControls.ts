@@ -125,6 +125,14 @@ const DOM_DELTA_LINE = 1;
 const DOM_DELTA_PAGE = 2;
 
 /**
+ * Exported for `ui/ParkMap.ts` (#359), which has its own wheel-to-zoom on the
+ * map overlay. It first hand-copied `WHEEL_NOTCH_PIXELS` and divided by it
+ * directly, which left this normalisation behind: measured live, five
+ * Firefox line-mode notches moved the map's zoom to 1.03 where five
+ * pixel-mode notches reached 2.80. A copied number that leaves its owner's
+ * logic behind is this repo's most common bug, so the function is shared
+ * rather than the constant.
+ *
  * Normalises a wheel/trackpad event to a signed "notch count" — see
  * {@link WHEEL_NOTCH_PIXELS}. Positive means "zoom in": wheel-up (and a
  * trackpad two-finger scroll up) is a *negative* `deltaY` by platform
@@ -133,7 +141,7 @@ const DOM_DELTA_PAGE = 2;
  * is deliberately no separate case for it here. Guessing at "natural" from
  * inside the page would be guessing at something the platform already solved.
  */
-function wheelNotches(event: WheelEvent): number {
+export function wheelNotches(event: WheelEvent): number {
   const pixels =
     event.deltaMode === DOM_DELTA_LINE
       ? event.deltaY * WHEEL_LINE_PIXELS
@@ -409,12 +417,17 @@ function preventDefault(event: Event): void {
  * over the HUD before lifting, which is the difference between a tap near the
  * clock pill working and silently doing nothing.
  *
+ * Exported for `ui/ParkMap.ts` (#359), which called `setPointerCapture` raw
+ * and inherited exactly the throw this documents — and worse, called it
+ * *first*, so when it threw the rest of the handler never ran and a pan or
+ * pinch silently failed to start.
+ *
  * The try/catch is not defensive padding: `setPointerCapture` throws
  * `NotFoundError` whenever the id is not an *active* pointer, and a tap quick
  * enough to have already been released — or one synthesised by a test — is
  * exactly that. Losing the capture is harmless; losing the tap is not.
  */
-function capture(canvas: HTMLCanvasElement, pointerId: number, take: boolean): void {
+export function capture(canvas: HTMLCanvasElement, pointerId: number, take: boolean): void {
   try {
     if (take) canvas.setPointerCapture(pointerId);
     else canvas.releasePointerCapture(pointerId);
