@@ -304,6 +304,68 @@ replacement must be chosen for having *comparable long-bridge geometry*, not
 merely for being green — otherwise the swap quietly throws away the coverage
 that caught the original bug.
 
+### THE SWAP IS BLOCKED: no green seed exists to swap to
+
+**Scanned 18 seeds against the full invariant suite. Not one is green.**
+
+| seed | bridges | longest | full-suite failures |
+| --- | --- | --- | --- |
+| 4 | 2/3 | 36.5 m | 2 |
+| 6 | 1/2 | 28.5 m | 5 |
+| 9 | 1/1 | 29.0 m | 3 |
+| 12 | 2/7 | 36.5 m | 5 |
+| 13 | 1/1 | 36.5 m | 1 |
+| 14 | 2/3 | 36.5 m | 2 |
+| **15** | **2/2** | **36.5 m** | **2** |
+| 16 | 1/2 | 28.5 m | 4 |
+| 20 | 1/1 | 36.5 m | 4 |
+| 21 | 4/4 | 31.5 m | 4 |
+| 22 | 3/5 | 28.5 m | 3 |
+| 26 | — | — | 5 |
+| 27 | — | — | 4 |
+| 28 | — | — | 3 |
+| 29 | — | — | 2 |
+| 30 | — | — | 4 |
+| 3, 8, 10, 24, 25 | — | — | park failed to build at all |
+
+Seed 15 is the best candidate on geometry by some way — **2 of 2 crossings carry
+a bridge and both are 36.5 m**, which is *better* long-bridge coverage than seed
+2 ever had. Its two failures are `every paved path runs on grid axes` and `every
+street sits on the shared 12 m lattice`. **Neither has anything to do with
+bridges.**
+
+**What this actually means.** The five seeds in the suite (canonical, 2, 5, 11,
+18) are not merely a sample — they appear to be the only seeds known to be
+green, and the invariant suite is in practice *fitted to them*. Every unsampled
+seed exposes 1–5 genuine generator defects in unrelated subsystems (path grid
+and street lattice, the Rail Race duck bar failing to slow a rider, the Sky
+Cruiser never entering the castle, spurs branching off nothing, a ferris
+connector 64x longer by paving than in a straight line).
+
+So "swap the seed" cannot be executed as a small change here: **there is nothing
+green to swap to.** Doing it would mean either taking a seed with 1–2 unrelated
+red invariants (trading one red for two, and hiding real defects behind a
+different seed), or first fixing the defects that seed exposes — which is
+several tickets' worth of work in subsystems this branch does not touch.
+
+**This is a finding, not a refusal.** The options, for the Overseer:
+
+1. **Land #349 with seed 2 red**, on the strength of #392 documenting exactly
+   why (the assertion is right; the seed is geometrically over-subscribed).
+   Zero-tolerance says no, which is why this is not just done.
+2. **Fix #392 first** — teach the site planner a pairwise separation
+   constraint. Then seed 2 stops proposing two crossings 20.83 m apart, both get
+   bridges, and the assertion passes honestly with no swap at all. This is the
+   *correct* fix and it makes the problem disappear rather than relocating it.
+   It moves sites on every seed, so it is its own ticket with its own sweep.
+3. **Swap to seed 15 and fix its two grid/lattice failures** as part of that
+   swap. Bounded, but it is path-network work, unrelated to bridges, and it
+   would ride in on a bridge PR.
+
+**Recommendation: option 2.** #392 is the real defect; this branch's fix is what
+made it visible, and fixing the planner retires the symptom on every seed at
+once instead of moving the measurement somewhere it does not yet show.
+
 ### Why it blocks: absolute tops on a ramp the walker is climbing
 
 The parapet's top is **absolute** world Y at the local road surface. At the
