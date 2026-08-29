@@ -310,6 +310,31 @@ export class NavGrid {
    * which is every space but the park itself.
    */
   private readonly bridgeCovers: (x: number, z: number) => boolean;
+  /**
+   * The one space this grid plans in, or `null` to follow the player.
+   *
+   * `collision.playBounds` is a **single mutable** (`Collision.ts`'s
+   * `setPlayBounds`) that is swapped as the *player* changes space — the
+   * garden's boundary out in the park, a circle round the interior origin when
+   * they walk into the castle, another when they enter a hotel room. The
+   * player's own `NavGrid` wants exactly that, because the player is who it
+   * plans for, so `null` is the default and `Game.ts`'s instance is unchanged.
+   *
+   * Nobody else can use it. Issue #350 gives the park's children real
+   * destinations planned on this same pathfinder, and a grid that followed
+   * `playBounds` would be wrong twice over: it would rebuild its whole lattice
+   * every time the player crossed a threshold, and — much worse — it would
+   * plan a *park* child's walk on the *castle's* lattice for as long as the
+   * player was indoors. Two spaces, two grids, each pinned to the boundary of
+   * the space it plans in.
+   *
+   * This is deliberately not a second pathfinder. It is the same class, the
+   * same lattice, the same A*; the only thing a caller may vary is which
+   * space's floor it is laid over. Requirement 2 of #350 is that children walk
+   * on "the same pathfinding as the player", and sharing the implementation is
+   * the only way that stays true as the pathfinder changes.
+   */
+  private readonly pinnedBoundary: ParkBoundary | null;
 
   constructor(
     collision: CollisionWorld,
@@ -330,12 +355,15 @@ export class NavGrid {
     connectors: () => readonly LevelConnector[] = () => [],
     /** See {@link bridgeCovers}. */
     bridgeCovers: (x: number, z: number) => boolean = () => false,
+    /** See {@link pinnedBoundary}. */
+    pinnedBoundary: ParkBoundary | null = null,
   ) {
     this.collision = collision;
     this.walkerRadius = walkerRadius;
     this.hopApex = hopApex;
     this.connectors = connectors;
     this.bridgeCovers = bridgeCovers;
+    this.pinnedBoundary = pinnedBoundary;
   }
 
   /**
@@ -426,7 +454,9 @@ export class NavGrid {
    * space the walker is in. Returns false if there is no usable lattice at all.
    */
   private ensureLattice(sample: GroundSampler): boolean {
-    const boundary = this.collision.playBounds;
+    // See {@link pinnedBoundary}: `null` means "wherever the player is", which
+    // is what the player's own grid wants and what this has always done.
+    const boundary = this.pinnedBoundary ?? this.collision.playBounds;
 
     if (
       this.built &&
