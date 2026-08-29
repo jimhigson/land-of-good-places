@@ -309,6 +309,20 @@ export class Entrance implements GameSystem {
     // pink-stone material family so the gate reads as part of the boundary,
     // not a separate prop dropped in front of it.
     const crossbar = new Mesh(new TorusGeometry(halfWidth, 0.28, 10, 24, Math.PI), capMaterial);
+    // Named so `scripts/check-park-map.mts` can ask the *scene* where the gate
+    // stands, rather than re-reading the constant the park map already read.
+    // The crossbar spans the opening and is centred on it, so its world
+    // position is the gate — independent truth for the map's `gate` feature.
+    //
+    // **`park-gate-`, not just `entrance-`, and that is not fussiness.** The
+    // obvious name `entrance-arch` is already taken, by the archway over the
+    // castle's own front door in `building/facade.ts`. `getObjectByName` walks
+    // the scene and returns the *first* match, and the castle is added under
+    // `anchor-plots` before the entrance group is added at all — so the check
+    // silently measured the park gate against the castle door and reported the
+    // map 65.65 m wrong. Caught the same hour the check was written, which is
+    // the argument for scene names being qualified by what owns them.
+    crossbar.name = 'park-gate-arch';
     const archGround = terrainHeight(ENTRANCE_GATE_X, ENTRANCE_GATE_Z);
     crossbar.position.set(ENTRANCE_GATE_X, archGround + postHeight + 0.15, ENTRANCE_GATE_Z);
     crossbar.rotation.z = Math.PI;

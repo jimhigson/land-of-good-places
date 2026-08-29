@@ -2770,7 +2770,12 @@ kbd {
   --shop-accent: var(--lgp-mint);
   position: relative;
   width: min(32.5rem, 96vw);
-  max-height: min(42.5rem, 92vh);
+  /* A definite height, not a cap. The canvas below is `flex: 1`, so this is
+     what lets it claim the leftover space instead of collapsing to a square:
+     on a portrait phone the map used to draw 325x325 inside an 844px-tall
+     screen, and 14 names at the TEXT rule's minimum size simply do not fit in
+     that box — measured at 4 of 14 painted (PR #353 review). */
+  height: min(42.5rem, 92vh);
   display: flex;
   flex-direction: column;
   background: var(--lgp-cream);
@@ -2833,13 +2838,17 @@ kbd {
   border-radius: 1.125rem;
   overflow: hidden;
   background: var(--lgp-sky);
-  /* Outdoors the park reads roughly square; indoors the floor plate is wider
-     than it is deep. Set in `ParkMap.render()` via `dataset.mode`. */
-  aspect-ratio: 1 / 1;
+  /* No aspect ratio outdoors: take whatever height the card has left. The
+     projection fits the park by its tighter axis whatever the shape, so extra
+     height is never distortion — it is room for names. */
+  min-height: 0;
 }
 
 .parkmap-canvas-wrap[data-mode='indoor'] {
+  /* Indoors the floor plate really is wider than it is deep, and there are
+     far fewer labels, so a fixed plate reads better than a stretched one. */
   aspect-ratio: 72 / 52;
+  flex: none;
 }
 
 .parkmap-canvas {
@@ -2883,6 +2892,103 @@ kbd {
   100% {
     transform: translate(-50%, -100%) rotate(0deg) scale(1);
     opacity: 0;
+  }
+}
+
+/* On a phone the map takes the whole screen.
+
+   Not cosmetic: the map has ~14 names to place, and how many of them fit is
+   decided by canvas pixels. Boxed at 96vw inside a rounded card the portrait
+   canvas was 325 px across, where a name at the TEXT rule's minimum size is a
+   third of the width — most names collided and were dropped. Full-bleed buys
+   back every pixel of margin, border and radius. Measured in PR #353's review
+   at 4 of 14 names painted; see `drawLabel` and `wrapLabel`. */
+@media (max-width: 34rem) {
+  /* **The container gives up its margin; the card does not outgrow it.**
+     `.parkmap` is a centred grid with 0.75rem of padding, so a card sized to
+     100vw/100dvh inside it is 24px wider and 24px taller than the content box
+     it has to fit — it centres, and hangs 12-15px off every edge. Measured at
+     390x844 in review of PR #353: the card ran (15,15)->(405,859), the canvas'
+     right edge sat 10px off-screen, and the hint line telling a child how to
+     close the map was sliced in half by the bottom of the display. At 320px
+     the hint's second line was off-screen entirely.
+
+     This is the clipped-label bug the canvas already fixes internally,
+     reappearing one level up at the viewport — and it was invisible for two
+     review rounds because the QA screenshots captured `.parkmap-card`, which
+     renders in the card's own coordinate space and so cannot show it.
+     `scripts/qa-park-map.mjs` now captures the viewport for that reason.
+
+     Zeroing the horizontal padding and keeping only the safe-area insets is
+     what makes full-bleed actually full-bleed. The insets stay because they
+     are doing a real job on a notched phone. */
+  .parkmap {
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  }
+
+  /* **`100%`, not `100vw`/`100dvh` — the card fills its container rather than
+     the screen.** Those two are the same number only when the safe-area insets
+     are zero, and a notched iPhone is exactly where they are not. `.parkmap`
+     above reserves `env(safe-area-inset-top/bottom)`, so a card asking for
+     `100dvh` inside it is the full screen height *plus* those insets, and
+     overflows by their sum. Substituted at 390x844 with real iPhone insets
+     (59 top, 34 bottom): the card ran 0,59 -> 390,903 and the hint line
+     telling a child how to close the map sat 59 px **past the bottom of the
+     display — not clipped, gone**. With `100%` it is 0,59 -> 390,810 and the
+     hint is fully visible, with the label count unchanged at 11.
+
+     **Headless Chromium reports every `env(safe-area-inset-*)` as 0**, so no
+     screenshot-based check can see this class of bug by default — the same
+     blind spot as the card-element capture last round, one layer in.
+     `scripts/qa-park-map.mjs --insets` now substitutes real device insets to
+     close it. This is the fix that keeps horizontal padding at zero, so no
+     canvas width and therefore no names are lost. */
+  .parkmap-card {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .parkmap-canvas-wrap {
+    margin: 0.25rem 0.25rem 0;
+    border-radius: 0.75rem;
+    /* Take every pixel the card has left.
+
+       An earlier version capped this at the park's own proportions, on the
+       reasoning that a width-limited map gains no *scale* from extra height.
+       True, and beside the point: it gains room for NAMES, which is what is
+       actually scarce. The cap left 237 px of a 390 px phone's card doing
+       nothing while 6 of 14 attractions went unlabelled. A 320 px phone has
+       no slack to give and simply keeps what it has. */
+    flex: 1;
+    min-height: 0;
+  }
+}
+
+/* A phone held sideways is the tightest case there is: 390 px of height, of
+   which the title block and the hint line were taking 157, leaving the map
+   202 px tall and 4 names of 14 painted. The chrome is the first thing to go —
+   the title says "Map of the Park" above a picture of the park, and the hint
+   repeats what a tap already teaches. */
+@media (max-height: 30rem) {
+  .parkmap-card .shop-head {
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+  }
+
+  .parkmap-card .shop-glyph,
+  .parkmap-card .shop-greeting,
+  .parkmap-card .shop-hint {
+    display: none;
+  }
+
+  .parkmap-card .shop-title {
+    font-size: var(--lgp-text-min);
+  }
+
+  .parkmap-canvas-wrap {
+    margin: 0.25rem;
   }
 }
 

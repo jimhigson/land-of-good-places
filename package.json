@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run check:text && npm run check:shop-spacing && npm run check:gondola-sightline && npm run check:hop-clearance && tsc --noEmit && npm run typecheck:test && npm run check:brevity && npm run check:assets && npm run check:hat-fit && npm run check:glasses-fit && npm run check:hood-face && npm run check:baked-face && npm run check:character-parity && npm run check:hair && npm run check:crowd && npm run check:ride-camera && npm run check:slide-rider && npm run check:orientation && npm run check:sky-view && npm run check:space-night && npm run check:waypoints && npm run check:park && npm run check:solve-cost && npm run check:jitter && npm run check:hotel && npm run check:tap-spacing && npm run check:nav-routes && npm run check:rail-race && npm run check:cart-shape && npm run check:tie-frame && npm run check:cruiser-solves && npm run check:cruiser-turn-radius && npm run check:cruiser-clearance && npm run check:castle-window && npm run check:backpack-peek && npm run check:statue-occlusion && npm run check:keyring-hang && npm run check:climb-wave && npm run check:cat-bus && npm run check:bus-journey && npm run check:park-boot && npm run check:arrival-completes && vite build",
+    "build": "npm run check:text && npm run check:shop-spacing && npm run check:gondola-sightline && npm run check:hop-clearance && tsc --noEmit && npm run typecheck:test && npm run check:brevity && npm run check:assets && npm run check:hat-fit && npm run check:glasses-fit && npm run check:hood-face && npm run check:baked-face && npm run check:character-parity && npm run check:hair && npm run check:crowd && npm run check:ride-camera && npm run check:slide-rider && npm run check:orientation && npm run check:sky-view && npm run check:space-night && npm run check:waypoints && npm run check:park && npm run check:park-map && npm run check:solve-cost && npm run check:jitter && npm run check:hotel && npm run check:tap-spacing && npm run check:nav-routes && npm run check:rail-race && npm run check:cart-shape && npm run check:tie-frame && npm run check:cruiser-solves && npm run check:cruiser-turn-radius && npm run check:cruiser-clearance && npm run check:castle-window && npm run check:backpack-peek && npm run check:statue-occlusion && npm run check:keyring-hang && npm run check:climb-wave && npm run check:cat-bus && npm run check:bus-journey && npm run check:park-boot && npm run check:arrival-completes && vite build",
     "check:text": "node scripts/check-text-sizes.mjs",
     "check:brevity": "node --import ./scripts/ts-extension-resolver-register.mjs scripts/check-copy-brevity.mts",
     "check:hat-fit": "node --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-hat-fit.mts",
@@ -82,7 +82,8 @@
     "check:update-adoption": "node --no-warnings scripts/check-update-adoption.mts",
     "check:deep-links": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-deep-links.mts",
     "check:walking": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-walking.mts",
-    "check:frame-time": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-frame-time.mts"
+    "check:frame-time": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-frame-time.mts",
+    "check:park-map": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-park-map.mts"
   },
   "dependencies": {
     "three": "^0.185.1"
