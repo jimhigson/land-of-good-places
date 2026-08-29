@@ -91,6 +91,54 @@ export const KID_HEAD_HEIGHT = 1.36;
 export const KID_SHOULDER_HEIGHT = 0.99;
 
 /**
+ * **Height of the hip pivot above the feet, in metres** — and therefore the
+ * height of a seat this rig can actually sit on.
+ *
+ * Measured off a built kid (`leg-pivot-l`/`leg-pivot-r`'s world position,
+ * 0.3600), not derived from the numbers that place it, per this repo's first
+ * commandment. `npm run measure:kid-landmarks` prints it back.
+ *
+ * **This rig has no knee** — see {@link TALLEST_CHILD_SEATED_HEIGHT} — so the
+ * whole leg is this one segment swinging from this one point, and that makes
+ * this number sharper than the equivalent on a human. Sat on a seat of height
+ * `H`, her feet land at `H - KID_HIP_HEIGHT`. So **0.36 m is the one seat
+ * height at which a child's feet reach the floor**: above it they dangle, and
+ * they dangle by the whole excess, because there is no knee to take any of it
+ * up. A 0.55 m bench leaves them 0.19 m short of a floor her leg cannot reach.
+ *
+ * Exported for the same reason {@link KID_SHOULDER_HEIGHT} is — something in
+ * the park is built *on this line* and was otherwise guessing at it. There, the
+ * cat bus's window sill; here, the castle's bench, throne and banqueting table
+ * (`art/blend/castle_build.py`, which `ts_const`s this file). Those three were
+ * first cut at adult proportions scaled down by eye — a 0.55 m bench seat and a
+ * 1.05 m table top — against a chibi child whose hip is at 0.36 m and whose
+ * hands only reach 1.04 m at full stretch. She could not sit on the bench and
+ * could not reach the food on the table, and nothing said so, because no number
+ * describing her *body* below the shoulders existed to check them against.
+ *
+ * `check:character-parity` re-measures it against the built kid, so this cannot
+ * quietly drift from the rig it describes.
+ */
+export const KID_HIP_HEIGHT = 0.36;
+
+/**
+ * **How far a hand reaches above the floor at full stretch**, in metres.
+ *
+ * Measured: the arm pivot sits at 0.72 m and the hand hangs to 0.40 m, so the
+ * arm is **0.32 m** long and a raised hand tops out at 1.04 m. Chibi
+ * proportions again — more than half of a 2.12 m child is head, and the arms
+ * are shorter than most of the things a room might ask her to reach.
+ *
+ * Here so that "can she reach it?" is a comparison rather than a judgement
+ * call. The castle's banqueting table was built with its top at **1.05 m**,
+ * one centimetre above this: the feast on it was not merely awkward, it was
+ * unreachable, and it took a rendered lineup rather than any check to notice.
+ *
+ * `check:character-parity` re-measures it against the built kid.
+ */
+export const KID_REACH_HEIGHT = 1.04;
+
+/**
  * Total height in metres, measured to the top of the hair.
  *
  * The **default** style's height. Since hair styles landed, a kid's real height

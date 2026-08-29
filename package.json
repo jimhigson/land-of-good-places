@@ -88,7 +88,8 @@
     "check:deep-links": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-deep-links.mts",
     "check:walking": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-walking.mts",
     "check:frame-time": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-frame-time.mts",
-    "check:park-map": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-park-map.mts"
+    "check:park-map": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-park-map.mts",
+    "measure:kid-landmarks": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-kid-landmarks.mts"
   },
   "dependencies": {
     "three": "^0.185.1"
