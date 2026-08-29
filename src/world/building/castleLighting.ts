@@ -521,8 +521,13 @@ export class CastleFire {
     if (spots.length === 0) return;
 
     // --- the fire itself: two instanced meshes, no lights ---------------
+    // The cone is *painted* amber and *emits* a deeper red — see
+    // {@link ART.castleFlameDeep}. Emitting its own colour at 1.75 clipped both
+    // the red and the green channel and left a flat lemon yellow with no fire
+    // in it; a redder emissive at the same intensity lands on hot orange-red
+    // and gives the cream core something to be the middle of.
     const outer = toonMaterial(PALETTE.slideChuteDeep, {
-      emissive: PALETTE.slideChuteDeep,
+      emissive: ART.castleFlameDeep,
       emissiveIntensity: FLAME_BASE_EMISSIVE,
     });
     const core = toonMaterial(ART.jetpackFlameCore, {
