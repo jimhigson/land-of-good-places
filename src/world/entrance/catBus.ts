@@ -2,8 +2,10 @@ import {
   Color,
   ConeGeometry,
   CylinderGeometry,
+  ExtrudeGeometry,
   Group,
   Mesh,
+  Shape,
   SphereGeometry,
 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
@@ -440,33 +442,51 @@ const FENDER_THICKNESS = 0.11;
 /** How far each plate's outline shell stands proud of it — including inwards. */
 const FENDER_OUTLINE_THICKNESS = 0.012 * DETAIL;
 /**
- * How far round the wheel the mudguard reaches, and in how many plates.
+ * How far round the wheel the mudguard reaches, **as one swept arc**.
  *
- * **Plates, not a torus, and that was found by measuring rather than by
- * reading.** The mudguard started as a half-`TorusGeometry`, which is the
- * obvious shape for it — and a torus's tube has to be at least half the wheel's
- * width (0.36 m) to cover the tyre, while the arch gap is 0.35 m. So the tube's
+ * ## Not a torus, and that was found by measuring rather than by reading
+ *
+ * The mudguard started as a half-`TorusGeometry`, which is the obvious shape
+ * for it — and a torus's tube has to be at least half the wheel's width
+ * (0.36 m) to cover the tyre, while the arch gap was 0.35 m. So the tube's
  * innermost surface sat 0.12 m *inside* the tyre it was supposed to clear: a
  * mudguard driven through its own wheel, at rest, before the suspension moved
  * at all. Nothing about it looked wrong in the source.
  *
- * A flat plate's inner face is at a fixed radius by construction, and its width
- * is a free parameter rather than the same number as its clearance — so this
- * shape simply cannot have that bug. Its ends stand `1/cos(half the plate's
- * arc)` further out, which is away from the wheel, so they cannot either.
+ * What that bug actually needed was a shape whose **inner surface is at a
+ * fixed radius by construction, with its width a free parameter rather than
+ * the same number as its clearance**. An extruded annular sector is exactly
+ * that, and so was the arc of flat plates that replaced the torus first.
  *
- * **Eight plates over 1.6 rad, not five over 2.44**, and both numbers were set
- * by looking at it. Five plates left visible gaps between them and the arc
- * reached 70 degrees down either side, so the end plates stood out almost
- * horizontally: on screen it read as a row of little fins bolted to the bus
- * rather than as a mudguard over a wheel. Eight overlapping plates across 92
- * degrees cap the top of the tyre and read as one curved thing, which is what
- * `OVERLAP` below is for.
+ * ## And not plates either, which took two goes to see
+ *
+ * The plates were tuned twice — five over 2.44 rad, then eight over 1.6 — and
+ * both times from a side elevation, where they duly read as a curve. **The
+ * game never looks at the bus from the side.** It looks *down* at it from an
+ * isometric camera about 30 m up, and from there a 92-degree arc capping the
+ * top of the tyre is seen almost edge-on: what is on screen is eight plate
+ * *edges* stacked one behind another, each with its own ink outline, which
+ * reads as a little stack of planks — a pallet bolted to the flank, not an
+ * arch over a wheel. The review found it by rendering the arrival and looking,
+ * and the second retune had moved the problem rather than removed it.
+ *
+ * So: **one mesh, one outline, one silhouette.** An `ExtrudeGeometry` of an
+ * annular sector is a genuine swept arc, so there are no internal edges to
+ * count from any angle, and its single ink outline draws the arch's own
+ * profile instead of eight parallel lines across it.
+ *
+ * And the arc **widens to 2.6 rad (149 degrees)**, down past the hub on both
+ * sides rather than capping the crown. Seen from above that is the half of the
+ * change that matters: an arc that reaches below the wheel's centre presents
+ * its curvature to a camera looking down, where one that stops at 46 degrees
+ * either side of top has almost none to present.
+ *
+ * Judged from the game's own isometric camera this time, not from a side
+ * elevation. That is the actual lesson here and it is why it is written down.
  */
-/** How much longer each plate is than its share of the arc, so none show a gap. */
-const FENDER_OVERLAP = 1.35;
-const FENDER_ARC = 1.6;
-const FENDER_PLATES = 8;
+const FENDER_ARC = 2.6;
+/** How many segments the swept arc is tessellated into. Smooth, not faceted. */
+const FENDER_ARC_SEGMENTS = 32;
 /** Half the track: where a wheel's centre plane sits, either side. */
 const WHEEL_X = BODY_WIDTH / 2 + OUTLINE_THICKNESS + WHEEL_CLEARANCE + FENDER_HALF_WIDTH;
 /** Front axle first, then rear. Where the wheels were before, unchanged. */
@@ -1351,18 +1371,33 @@ export function createCatBus(): CatBusHandle {
   // than stopping in mid-air.
   const stubLength = WHEEL_X - BODY_WIDTH / 2 + WALL_THICKNESS;
   const stubGeometry = new CylinderGeometry(WHEEL_RADIUS * 0.16, WHEEL_RADIUS * 0.16, stubLength, 8);
-  // The mudguard, as an arc of flat plates whose **inner faces all sit at
-  // exactly `WHEEL_RADIUS + CAT_BUS_ARCH_GAP`** — see `FENDER_ARC` for why this
-  // is not the torus it obviously wants to be.
-  const fenderPlateGeometry = new RoundedBoxGeometry(
-    FENDER_HALF_WIDTH * 2,
-    FENDER_THICKNESS,
-    (WHEEL_RADIUS + CAT_BUS_ARCH_GAP) * (FENDER_ARC / FENDER_PLATES) * FENDER_OVERLAP,
-    2,
-    0.04 * DETAIL,
+  // The mudguard: one swept arc whose **inner surface sits at exactly
+  // `WHEEL_RADIUS + CAT_BUS_ARCH_GAP` all the way round** — see `FENDER_ARC`
+  // for why this is neither the torus nor the row of plates it has been.
+  //
+  // Drawn as a flat annular sector in the shape's own xy plane and extruded
+  // along its z, then turned a quarter turn about y so that the extrusion runs
+  // along the wheel's axle and the sector stands up in the bus's yz plane.
+  const fenderInnerRadius = WHEEL_RADIUS + CAT_BUS_ARCH_GAP;
+  const fenderOuterRadius = fenderInnerRadius + FENDER_THICKNESS;
+  const fenderArcFrom = Math.PI / 2 - FENDER_ARC / 2;
+  const fenderArcTo = Math.PI / 2 + FENDER_ARC / 2;
+  const fenderSection = new Shape();
+  fenderSection.moveTo(
+    Math.cos(fenderArcFrom) * fenderInnerRadius,
+    Math.sin(fenderArcFrom) * fenderInnerRadius,
   );
+  fenderSection.absarc(0, 0, fenderInnerRadius, fenderArcFrom, fenderArcTo, false);
+  fenderSection.absarc(0, 0, fenderOuterRadius, fenderArcTo, fenderArcFrom, true);
+  fenderSection.closePath();
+  const fenderGeometry = new ExtrudeGeometry(fenderSection, {
+    depth: FENDER_HALF_WIDTH * 2,
+    bevelEnabled: false,
+    curveSegments: FENDER_ARC_SEGMENTS,
+  });
+  // Extrusion runs 0..depth, so it is centred here rather than at every corner.
+  fenderGeometry.translate(0, 0, -FENDER_HALF_WIDTH);
   const wheels: Mesh[] = [];
-  const fenders: Group[] = [];
   for (const side of [-1, 1] as const) {
     for (const z of WHEEL_Z) {
       const x = side * WHEEL_X;
@@ -1385,30 +1420,21 @@ export function createCatBus(): CatBusHandle {
       stub.position.set(x - side * stubLength / 2, WHEEL_RADIUS, z);
       axles.add(stub);
 
-      // A group at the wheel's centre, so each plate is placed by an angle
-      // round the wheel and a single radius rather than by its own coordinates.
+      // A group at the wheel's centre, so the arch is placed by the wheel it
+      // guards rather than by its own coordinates.
       const fender = new Group();
       fender.name = 'cat-bus-fender';
       fender.position.set(x, WHEEL_RADIUS, z);
       chassis.add(fender);
-      fenders.push(fender);
-      for (let plate = 0; plate < FENDER_PLATES; plate += 1) {
-        const angle = ((plate + 0.5) / FENDER_PLATES - 0.5) * FENDER_ARC;
-        // The bumper's timber colour, matching the stub axle it shares a corner
-        // with — read as chassis furniture rather than as bodywork, which the
-        // roof's pale lemon made them look like.
-        const panel = solid(new Mesh(fenderPlateGeometry, bumperMaterial));
-        // The plate's own +y is radially outward, so its inner face lands on the
-        // arch radius when its centre is half a thickness beyond it.
-        panel.position.set(
-          0,
-          Math.cos(angle) * (WHEEL_RADIUS + CAT_BUS_ARCH_GAP + FENDER_THICKNESS / 2),
-          Math.sin(angle) * (WHEEL_RADIUS + CAT_BUS_ARCH_GAP + FENDER_THICKNESS / 2),
-        );
-        panel.rotation.x = -angle;
-        fender.add(panel);
-        addOutline(panel, FENDER_OUTLINE_THICKNESS);
-      }
+      // The bumper's timber colour, matching the stub axle it shares a corner
+      // with — reads as chassis furniture rather than as bodywork, which the
+      // roof's pale lemon made it look like.
+      const arch = solid(new Mesh(fenderGeometry, bumperMaterial));
+      arch.rotation.y = Math.PI / 2;
+      fender.add(arch);
+      // One outline for the whole arch. Eight plates meant eight outlines, and
+      // from above they read as eight lines ruled across a plank stack.
+      addOutline(arch, FENDER_OUTLINE_THICKNESS);
     }
   }
 
