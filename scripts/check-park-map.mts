@@ -135,9 +135,12 @@ import { parkMapFeatures, type MapFeature } from '../src/ui/parkMapContent.ts';
 import {
   MAP_MAX_ZOOM,
   MAP_MIN_ZOOM,
+  clampMapView,
   defaultMapView,
   frameExtent,
   outdoorParkMapProjection,
+  pannedBy,
+  zoomedAboutPoint,
   type MapProjection,
   type MapView,
 } from '../src/ui/parkMapProjection.ts';
@@ -443,6 +446,46 @@ function projectionForView(width: number, height: number, view: MapView): MapPro
       (py - honest.originPxY) / (honest.scale * squash),
     ],
   };
+}
+
+/**
+ * `zoomedAboutPoint` and `pannedBy` under mutation.
+ *
+ * **These are separate derived formulae, not the one affine map**, which is
+ * why they get real assertions rather than the "structural, cannot drift"
+ * note that covers `toCanvas`/`toPlane`. PR #372's review proved the point by
+ * gutting the focal pinning and, separately, flipping the pan sign: the map
+ * zoomed about the wrong point and dragged the wrong way, and
+ * `check:park-map` stayed **fully green** both times. My own vacuity argument
+ * was right about the round-trip and wrong about these two, and this is where
+ * the distinction actually had to be drawn.
+ */
+function zoomAboutUnderTest(
+  view: MapView,
+  nextZoom: number,
+  focalPxX: number,
+  focalPxY: number,
+  width: number,
+  height: number,
+): MapView {
+  if (mutation === 'focal') {
+    // Ignore the focal point: zoom about the canvas centre, so whatever the
+    // child was pinching on slides away under her fingers.
+    return clampMapView({ ...view, zoom: nextZoom }, width, height);
+  }
+  return zoomedAboutPoint(view, nextZoom, focalPxX, focalPxY, width, height);
+}
+
+function panUnderTest(
+  view: MapView,
+  dxPx: number,
+  dyPx: number,
+  width: number,
+  height: number,
+): MapView {
+  // Drag the map the wrong way — the single most likely sign error here.
+  if (mutation === 'pan-sign') return pannedBy(view, -dxPx, -dyPx, width, height);
+  return pannedBy(view, dxPx, dyPx, width, height);
 }
 
 // --------------------------------------------------------------- the park
@@ -870,6 +913,102 @@ notes.push(
     `reachability: worst stranding ${worstStrandedPx.toFixed(2)} px` +
       (worstStrandedWhere ? ` (${worstStrandedWhere})` : '') +
       `, ${checkedFeatures.length} features x ${ZOOM_SAMPLES.length} zooms`,
+  );
+}
+
+// --- 8. the gesture formulae do what they say --------------------------------
+
+/**
+ * **Zoom pins the point under the finger; a drag moves the map with it.**
+ *
+ * Both are derived formulae with no other owner, and both were silently broken
+ * by the reviewer of PR #372 without a single assertion noticing. Four lines
+ * each, and they are the difference between "the castle stays under your
+ * thumb" being a claim in a comment and being a fact.
+ *
+ * **Sampled at maximum zoom, where the clamp provably cannot bind.** That
+ * matters: the first version of this assertion sampled at zoom 2 and went red
+ * on a 700x300 landscape phone, because at that zoom the park's *width* still
+ * fits the canvas entirely, so `clampMapView` correctly pins the x axis and a
+ * horizontal drag correctly does nothing. The formula was right and the test
+ * was wrong. At `MAP_MAX_ZOOM` the visible span is smaller than the park on
+ * both axes at every canvas size here (checked: worst is 45.5 m visible
+ * against 89 m of park), so a drag must move the map by exactly the drag and
+ * any failure is the formula's.
+ */
+{
+  let worstFocalPx = 0;
+  let worstFocalWhere = '';
+  let worstPanPx = 0;
+  let worstPanWhere = '';
+
+  for (const [width, height, name] of CANVAS_SIZES) {
+    // Centred and fully zoomed in: far from every clamp edge, so the formulae
+    // are what is being measured.
+    const roomy = clampMapView(
+      { ...defaultMapView(width, height), zoom: MAP_MAX_ZOOM },
+      width,
+      height,
+    );
+
+    for (const [fx, fy] of [
+      [width * 0.5, height * 0.5],
+      [width * 0.4, height * 0.45],
+      [width * 0.6, height * 0.55],
+    ] as const) {
+      const before = projectionForView(width, height, roomy);
+      const [worldX, worldZ] = before.toPlane(fx, fy);
+      // Zoom *out* a little, which stays inside the range and keeps the view
+      // clear of the clamp.
+      for (const nextZoom of [MAP_MAX_ZOOM * 0.8, MAP_MAX_ZOOM * 0.9]) {
+        const after = zoomAboutUnderTest(roomy, nextZoom, fx, fy, width, height);
+        const [px, py] = projectionForView(width, height, after).toCanvas(worldX, worldZ);
+        const drift = Math.hypot(px - fx, py - fy);
+        if (drift > worstFocalPx) {
+          worstFocalPx = drift;
+          worstFocalWhere = `${name} focal (${fx.toFixed(0)}, ${fy.toFixed(0)}) to ${nextZoom.toFixed(1)}x`;
+        }
+        if (drift > 1) {
+          failures.push(
+            `ZOOM DID NOT PIN THE FOCAL POINT on ${name} ${width}x${height}: zooming to ` +
+              `${nextZoom.toFixed(1)}x about (${fx.toFixed(0)}, ${fy.toFixed(0)}) moved the world ` +
+              `point under it by ${drift.toFixed(1)} px. Whatever the child is pinching on must ` +
+              'stay under her fingers.',
+          );
+        }
+      }
+    }
+
+    for (const [dx, dy] of [[40, 0], [0, 40], [-30, 25]] as const) {
+      const before = projectionForView(width, height, roomy);
+      const probeX = width / 2;
+      const probeY = height / 2;
+      const [worldX, worldZ] = before.toPlane(probeX, probeY);
+      const after = panUnderTest(roomy, dx, dy, width, height);
+      const [px, py] = projectionForView(width, height, after).toCanvas(worldX, worldZ);
+      const drift = Math.hypot(px - (probeX + dx), py - (probeY + dy));
+      if (drift > worstPanPx) {
+        worstPanPx = drift;
+        worstPanWhere = `${name} drag (${dx}, ${dy})`;
+      }
+      if (drift > 1) {
+        failures.push(
+          `DRAG MOVED THE MAP WRONG on ${name} ${width}x${height}: dragging by (${dx}, ${dy}) px ` +
+            `should carry the world point under the finger to (${(probeX + dx).toFixed(0)}, ` +
+            `${(probeY + dy).toFixed(0)}) but it landed at (${px.toFixed(0)}, ${py.toFixed(0)}) — ` +
+            `out by ${drift.toFixed(1)} px. The map drags the wrong way or the wrong distance.`,
+        );
+      }
+    }
+  }
+
+  notes.push(
+    `zoom focal pinning: worst drift ${worstFocalPx.toFixed(2)} px` +
+      (worstFocalWhere ? ` (${worstFocalWhere})` : ''),
+  );
+  notes.push(
+    `drag tracking: worst drift ${worstPanPx.toFixed(2)} px` +
+      (worstPanWhere ? ` (${worstPanWhere})` : ''),
   );
 }
 
