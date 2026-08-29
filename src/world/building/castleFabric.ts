@@ -28,10 +28,16 @@ import { TALLEST_CHILD_HEIGHT } from '../../art/models/kid';
  *
  * The floor plate is 60 × 44 m — 2 640 m², the largest single surface
  * anywhere in the game — and it was one flat colour. So was 208 m of wall
- * per storey. Two shared canvas textures fix both, and cost **no extra draw
- * calls and no extra triangles at all**: they hang off meshes that were
- * already being drawn. The beams are the only new geometry here, and they
- * are one `InstancedMesh` per storey.
+ * per storey.
+ *
+ * **The two textures are genuinely free**: no extra draw calls and no extra
+ * triangles, because they hang off meshes that were already being drawn.
+ *
+ * **The wall-plate is not, and the first version of this comment implied it
+ * was.** Measured: **+4 geometries, +4 draw calls, 4 560 triangles, and 0 in
+ * the shadow pass.** That is cheap — one instanced mesh per enclosed storey,
+ * none of it shadow-casting — but it is not nothing, and a performance claim
+ * that rounds itself down is how a budget stops meaning anything.
  *
  * ## The colours are the facade's, deliberately
  *

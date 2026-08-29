@@ -22,7 +22,7 @@
  *
  * Run: `npm run check:castle`
  */
-import { InstancedMesh, Matrix4, Vector3 } from 'three';
+import { Box3, InstancedMesh, Matrix4 } from 'three';
 import { BUILDING_FLOOR_COUNT } from '../src/core/constants.ts';
 import { deckIsSolid, TOP_DECK } from '../src/world/building/layout.ts';
 import {
@@ -78,8 +78,26 @@ if (CASTLE_CEILING_CLEAR <= TALLEST_CHILD) {
  * builder getting it wrong.
  */
 const matrix = new Matrix4();
-const position = new Vector3();
+const localBounds = new Box3();
+const worldBounds = new Box3();
 let beamsChecked = 0;
+/** The lowest point of any built timber, measured. Compared with the constant. */
+let lowestBuilt = Infinity;
+
+/**
+ * How many points across a segment's own footprint are tested for solid slab.
+ *
+ * The centre alone is not enough and that was a real hole in this file: the
+ * builder rejects a segment unless its centre **and both ends** are over slab,
+ * so a checker that only sampled the centre passed 28 segments the builder
+ * would never have placed. A reviewer proved it by deleting the builder's hole
+ * test outright — 408 segments instead of 380, and this script said OK.
+ *
+ * So the footprint is sampled from the **measured** world-space box of each
+ * placed instance rather than from any knowledge of how long a segment is. A
+ * change to `BEAM_SEGMENT` moves the sampling with it.
+ */
+const FOOTPRINT_SAMPLES = 5;
 
 for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
   const beams: InstancedMesh | null = buildCeilingBeams(deck);
@@ -97,40 +115,120 @@ for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
     continue;
   }
 
+  // **The geometry's own box, not the constants it was built from.** This is
+  // the difference between measuring and re-deriving, and the whole reason the
+  // previous version of this file could not fail: it computed a half-depth as
+  // `(CASTLE_CEILING_CLEAR - BEAM_UNDERSIDE) / 2`, which is algebraically
+  // `BEAM_DEPTH / 2` whatever geometry was actually built. Swapping two
+  // `BoxGeometry` arguments made every timber 0.70 m deep, hanging 37 cm
+  // through a hatted child, and the check stayed green.
+  beams.geometry.computeBoundingBox();
+  const geometryBox = beams.geometry.boundingBox;
+  if (!geometryBox) {
+    fail(`beams: deck ${deck} beam geometry has no bounding box to measure.`);
+    continue;
+  }
+
   for (let i = 0; i < beams.count; i += 1) {
     beams.getMatrixAt(i, matrix);
-    position.setFromMatrixPosition(matrix);
+    // `Box3.applyMatrix4` transforms all eight corners, so this is correct for
+    // the yawed runs along Z as well as the ones along X.
+    localBounds.copy(geometryBox);
+    worldBounds.copy(localBounds).applyMatrix4(matrix);
     beamsChecked += 1;
+    lowestBuilt = Math.min(lowestBuilt, worldBounds.min.y);
 
-    if (!deckIsSolid(deck + 1, position.x, position.z)) {
-      fail(
-        `beams: deck ${deck} beam segment ${i} sits at (${position.x.toFixed(2)}, ` +
-          `${position.z.toFixed(2)}), where deck ${deck + 1} has a hole — it is fixed to a ` +
-          `ceiling that is not there.`,
-      );
+    // --- the segment is fixed to slab that exists, across its whole length ---
+    for (let sx = 0; sx < FOOTPRINT_SAMPLES; sx += 1) {
+      for (let sz = 0; sz < FOOTPRINT_SAMPLES; sz += 1) {
+        const tx = FOOTPRINT_SAMPLES === 1 ? 0.5 : sx / (FOOTPRINT_SAMPLES - 1);
+        const tz = FOOTPRINT_SAMPLES === 1 ? 0.5 : sz / (FOOTPRINT_SAMPLES - 1);
+        const x = worldBounds.min.x + (worldBounds.max.x - worldBounds.min.x) * tx;
+        const z = worldBounds.min.z + (worldBounds.max.z - worldBounds.min.z) * tz;
+        if (deckIsSolid(deck + 1, x, z)) continue;
+        fail(
+          `beams: deck ${deck} segment ${i} covers (${x.toFixed(2)}, ${z.toFixed(2)}), ` +
+            `where deck ${deck + 1} has a hole — part of it is fixed to a ceiling that is ` +
+            `not there.`,
+        );
+        sx = FOOTPRINT_SAMPLES;
+        break;
+      }
     }
 
-    // Under the ceiling, not through it, and above nothing that walks.
-    // Half-depths come off `BEAM_UNDERSIDE` and the ceiling rather than being
-    // typed, so a change to the beam's cross-section moves the assertion with
-    // it instead of quietly loosening it.
-    const halfDepth = (CASTLE_CEILING_CLEAR - BEAM_UNDERSIDE) / 2;
-    const top = position.y + halfDepth;
-    if (top > CASTLE_CEILING_CLEAR + 1e-6) {
+    // --- and it is under the ceiling and over a child's head ---------------
+    if (worldBounds.max.y > CASTLE_CEILING_CLEAR + 1e-6) {
       fail(
-        `beams: deck ${deck} beam segment ${i} reaches ${top.toFixed(3)} m, above the ` +
-          `${CASTLE_CEILING_CLEAR.toFixed(3)} m ceiling — it is inside the slab above it.`,
+        `beams: deck ${deck} segment ${i} reaches ${worldBounds.max.y.toFixed(3)} m, above ` +
+          `the ${CASTLE_CEILING_CLEAR.toFixed(3)} m ceiling — it is inside the slab above it.`,
       );
     }
-    const bottom = position.y - halfDepth;
-    if (bottom < TALLEST_CHILD) {
+    if (worldBounds.min.y < TALLEST_CHILD) {
       fail(
-        `beams: deck ${deck} beam segment ${i} hangs down to ${bottom.toFixed(3)} m, which ` +
-          `the tallest child (${TALLEST_CHILD} m, art/models/kid.ts) would walk into.`,
+        `beams: deck ${deck} segment ${i} hangs down to ${worldBounds.min.y.toFixed(3)} m, ` +
+          `which the tallest child (${TALLEST_CHILD} m, art/models/kid.ts) would walk into.`,
       );
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// 3. The published constant equals the built thing.
+// ---------------------------------------------------------------------------
+
+/**
+ * `BEAM_UNDERSIDE` is the number the 3D Artist is told to size wall-standing
+ * props against (`HANDOFF-castle-interior-363.md` §4.4). A constant that says
+ * 3.08 while the timber actually hangs to 2.60 is the contract lying to the
+ * Artist, so it is checked against the mesh rather than trusted.
+ *
+ * This is the "reported figure equals measured figure" assertion, applied to my
+ * own constant. The same shape of check covers the Artist's `TABLE_TOP`,
+ * `BENCH_SEAT` and `SCONCE_CUP_OFFSET` when batch 1 lands.
+ */
+if (Number.isFinite(lowestBuilt) && Math.abs(lowestBuilt - BEAM_UNDERSIDE) > 1e-6) {
+  fail(
+    `BEAM_UNDERSIDE says the timbers hang to ${BEAM_UNDERSIDE.toFixed(3)} m, but the built ` +
+      `mesh measures ${lowestBuilt.toFixed(3)} m. The Artist sizes wall-standing props ` +
+      `against that constant — fix the constant or fix the geometry.`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 4. NOT YET WRITTEN — and said out loud, because the contract depends on it.
+// ---------------------------------------------------------------------------
+
+/**
+ * **Nothing in this file measures a decorative prop, because there are none
+ * yet.** Batch 1 has not been wired into the game.
+ *
+ * This is stated here, and printed on every run, because
+ * `HANDOFF-castle-interior-363.md` §5 tells the 3D Artist that props get no
+ * colliders and that "placement is the only protection there is" — and a
+ * contract that promises a guard which does not exist is worse than one that
+ * admits it does not. §6 of that document briefly claimed these were written.
+ * They were not. Both have been corrected.
+ *
+ * The three that land with batch 1:
+ *
+ * 1. **No prop intersects a walkable route or a shop stand** — measured XZ
+ *    footprint against `dressing.ts`'s `keepOutsFor(deck)` inflated by
+ *    `PLAYER_RADIUS`, *and* against the paths children actually walk between
+ *    the door and the seven shop stands (`castleAttractions`), not only the
+ *    destination discs.
+ * 2. **No prop pierces the ceiling** — measured `visibleBounds(root).top` plus
+ *    its floor height against `CASTLE_CEILING_CLEAR`, or against
+ *    `BEAM_UNDERSIDE` for anything within 1.25 m of a wall. This is the one
+ *    that settles the throne's two readings (3.10 m total, or 3.40 m).
+ * 3. **Every reported figure equals its measured figure** — `TABLE_TOP`,
+ *    `BENCH_SEAT`, `SCONCE_CUP_OFFSET` off the handle against `visibleBounds`.
+ *    Assertion 3 above is this same shape, applied to my own `BEAM_UNDERSIDE`,
+ *    and is the working proof that the pattern catches things.
+ */
+const PROP_ASSERTIONS_PENDING =
+  'props: NOT CHECKED — batch 1 is not wired yet, so nothing here measures a prop. ' +
+  'See the note above assertion 4. Placement is the only protection props get, and it ' +
+  'is not yet enforced.';
 
 // ---------------------------------------------------------------------------
 
@@ -143,6 +241,8 @@ if (failures.length > 0) {
 
 console.log(
   `check:castle OK — ${beamsChecked} ceiling-beam segments across ${TOP_DECK} enclosed ` +
-    `storeys, all fixed to real slab, all clear of a ${TALLEST_CHILD} m child under a ` +
-    `${CASTLE_CEILING_CLEAR.toFixed(2)} m ceiling.`,
+    `storeys, all fixed to real slab across their whole measured footprint, all clear of a ` +
+    `${TALLEST_CHILD} m child under a ${CASTLE_CEILING_CLEAR.toFixed(2)} m ceiling, and ` +
+    `BEAM_UNDERSIDE agrees with the mesh at ${BEAM_UNDERSIDE.toFixed(3)} m.`,
 );
+console.log(`check:castle ${PROP_ASSERTIONS_PENDING}`);

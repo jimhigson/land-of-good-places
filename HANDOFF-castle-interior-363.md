@@ -433,8 +433,77 @@ typed `2.97` instead of importing `TALLEST_CHILD_HEIGHT` from `kid.ts`, its
 owner. It now imports it, and derives the timber's half-depth from
 `BEAM_UNDERSIDE` rather than repeating the cross-section.
 
-Assertions 1 and 2 are in; assertion 4 (reported figure vs measured figure)
-lands with the Artist's batch 1, which is what it measures.
+### What is actually written, and what is not
+
+**Corrected 29 Aug after review.** This section previously said "assertions 1
+and 2 are in". **They were not**, and nothing in `check:castle` measured a prop
+at all. That claim mattered more than a documentation slip, because §5 tells
+the Artist that props get no colliders and that *placement is the only
+protection there is* — so the contract promised a guard that did not exist.
+
+| Assertion | State |
+| --- | --- |
+| Headroom figure is above the tallest child | written |
+| Wall-plate fixed to real slab across its **whole measured footprint** | written |
+| Wall-plate under the ceiling and over a child's head, from **measured geometry** | written |
+| `BEAM_UNDERSIDE` equals the built mesh | written |
+| **1. No prop intersects a walkable route or a shop stand** | **NOT written** |
+| **2. No prop pierces the ceiling** (settles the throne's two readings) | **NOT written** |
+| **3. Reported figure equals measured figure, for the Artist's numbers** | **NOT written** |
+
+The three missing ones land with batch 1, which is what they measure.
+`check:castle` now **prints their absence on every run** rather than letting a
+green line imply cover it does not give:
+
+```
+check:castle props: NOT CHECKED — batch 1 is not wired yet, so nothing here
+measures a prop. Placement is the only protection props get, and it is not
+yet enforced.
+```
+
+### Two more ways it could not fail, both found by review
+
+Both were the same disease, and the one this file's own header forbids: **the
+checker re-derived the thing it was checking instead of measuring it.**
+
+**It sampled the segment's centre only.** The builder rejects a segment unless
+its centre *and both ends* are over slab. Deleting the builder's hole test
+outright produced 408 segments instead of 380 and the check still said OK — the
+28 extra being exactly those whose *ends* overhang a shaft. It now takes each
+placed instance's **measured world-space box** and samples a 5x5 grid over its
+real footprint, so it follows `BEAM_SEGMENT` if that ever changes.
+
+**It computed the timber's half-depth as `(CASTLE_CEILING_CLEAR -
+BEAM_UNDERSIDE) / 2`** — algebraically `BEAM_DEPTH / 2`, *whatever geometry was
+actually built*. Swapping two `BoxGeometry` arguments made every timber 0.70 m
+deep, hanging to 2.60 m, 37 cm through a hatted child, with the check green. It
+now calls `geometry.computeBoundingBox()` and transforms that box by each
+instance matrix.
+
+Proved red, both, before trusting either green:
+
+```
+$ # solidRun replaced with `return true`
+check:castle — 28 failure(s):
+  x beams: deck 0 segment 15 covers (0.50, -20.93), where deck 1 has a hole —
+    part of it is fixed to a ceiling that is not there.
+exit 1
+
+$ # BoxGeometry(BEAM_SEGMENT, BEAM_WIDTH, BEAM_DEPTH) — two args swapped
+check:castle — 761 failure(s):
+  x beams: deck 0 segment 0 reaches 3.540 m, above the 3.300 m ceiling.
+  x beams: deck 0 segment 0 hangs down to 2.840 m, which the tallest child
+    (2.97 m) would walk into.
+  x BEAM_UNDERSIDE says the timbers hang to 3.080 m, but the built mesh
+    measures 2.840 m. The Artist sizes wall-standing props against that
+    constant — fix the constant or fix the geometry.
+exit 1
+```
+
+The last of those is the real prize: it is assertion 3's shape — reported
+figure against measured figure — working on my own constant, which is the
+evidence that the pattern will catch the Artist's `TABLE_TOP` and
+`SCONCE_CUP_OFFSET` when they arrive.
 
 ---
 
