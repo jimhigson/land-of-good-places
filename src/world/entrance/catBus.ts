@@ -20,6 +20,7 @@ import { angleDelta, clamp, clamp01, lerp } from '../../core/mathUtils';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
 import { applyStaticBakedFace, type FacePaintOptions } from '../../art/style/faces';
 import { blob } from '../../art/style/asset';
+import { drapeStripeUvs, tigerStripeTexture } from './tigerStripes';
 
 /**
  * The cat bus.
@@ -658,6 +659,30 @@ export function createCatBus(): CatBusHandle {
 
   const bodyColour = CAT_BUS_BODY_COLOUR;
   const bodyMaterial = toonMaterial(bodyColour);
+  /**
+   * **The tiger-striped bodywork.**
+   *
+   * `0xffffff` rather than `bodyColour`, because `MeshToonMaterial` multiplies
+   * its colour by its map and the map already carries the bodywork's own cream
+   * as the ground the stripes are painted on. Tinted as well as mapped, the
+   * flanks would come out cream-squared — a bus a shade darker than its own
+   * door, for no reason anybody would ever find.
+   *
+   * `bodyMaterial` stays, and stays the same flat cream: the pillars between
+   * the panes, which share one geometry between ten posts and so cannot each
+   * have their own unwrap, keep it. They read as window frames, and a tiger
+   * does not have stripes on its windows.
+   */
+  const stripedMaterial = toonMaterial(0xffffff, { map: tigerStripeTexture() });
+  /**
+   * Every mesh that gets stripes, with where its own origin sits on the bus.
+   *
+   * Collected as they are built and unwrapped in one pass at the end, rather
+   * than each unwrapping itself inline, so there is exactly one place that
+   * knows the drape's parameters — the spine height and where the flanks give
+   * way to the end caps — instead of six call sites each repeating them.
+   */
+  const striped: { mesh: Mesh; at: { x: number; y: number; z: number } }[] = [];
   const roofColour = CAT_BUS_ROOF_COLOUR;
   const roofMaterial = toonMaterial(roofColour);
   const trimMaterial = toonMaterial(PALETTE.stonePink);
@@ -733,7 +758,7 @@ export function createCatBus(): CatBusHandle {
   const lowerBody = solid(
     new Mesh(
       new RoundedBoxGeometry(BODY_WIDTH, WINDOW_SILL_Y - BODY_BOTTOM_Y, cabinLength, 4, 0.22 * DETAIL),
-      bodyMaterial,
+      stripedMaterial,
     ),
   );
   // Named, because a check has to be able to find the cabin's own volume to ask
@@ -742,6 +767,7 @@ export function createCatBus(): CatBusHandle {
   lowerBody.name = 'cat-bus-shell-lower';
   lowerBody.position.set(0, (BODY_BOTTOM_Y + WINDOW_SILL_Y) / 2, bodyCentreZ);
   chassis.add(lowerBody);
+  striped.push({ mesh: lowerBody, at: lowerBody.position });
   // Kept, because this shell is the only part of the lower body a camera inside
   // the cabin can see at all — see `setCutaway`.
   const lowerBodyOutline = addOutline(lowerBody, 0.02 * DETAIL);
@@ -750,12 +776,13 @@ export function createCatBus(): CatBusHandle {
   const upperBody = solid(
     new Mesh(
       new RoundedBoxGeometry(BODY_WIDTH, bodyTopY - WINDOW_HEAD_Y, cabinLength, 4, 0.22 * DETAIL),
-      bodyMaterial,
+      stripedMaterial,
     ),
   );
   upperBody.name = 'cat-bus-shell-upper';
   upperBody.position.set(0, (WINDOW_HEAD_Y + bodyTopY) / 2, bodyCentreZ);
   chassis.add(upperBody);
+  striped.push({ mesh: upperBody, at: upperBody.position });
   addOutline(upperBody, 0.02 * DETAIL);
 
   // The back of the bus is closed — you look in through the sides, not through
@@ -764,11 +791,12 @@ export function createCatBus(): CatBusHandle {
   const backWall = solid(
     new Mesh(
       new RoundedBoxGeometry(BODY_WIDTH, windowBandHeight, PILLAR_Z * DETAIL, 3, 0.08 * DETAIL),
-      bodyMaterial,
+      stripedMaterial,
     ),
   );
   backWall.position.set(0, (WINDOW_SILL_Y + WINDOW_HEAD_Y) / 2, cabinBackZ + (PILLAR_Z * DETAIL) / 2);
   chassis.add(backWall);
+  striped.push({ mesh: backWall, at: backWall.position });
 
   // Pillars between one window and the next, at the row boundaries — so the
   // posts land between children rather than across their faces.
@@ -984,10 +1012,22 @@ export function createCatBus(): CatBusHandle {
   chassis.add(doorGroup);
 
   const doorPanel = solid(
-    new Mesh(new RoundedBoxGeometry(0.06 * DETAIL, DOOR_HEIGHT, DOOR_WIDTH, 2, 0.08 * DETAIL), bodyMaterial),
+    new Mesh(new RoundedBoxGeometry(0.06 * DETAIL, DOOR_HEIGHT, DOOR_WIDTH, 2, 0.08 * DETAIL), stripedMaterial),
   );
   doorPanel.position.set(0, DOOR_HEIGHT / 2, DOOR_WIDTH / 2);
   doorGroup.add(doorPanel);
+  // Unwrapped in the pose it holds when **shut** — `doorGroup` is a hinge, so
+  // the panel's own origin moves as it swings, and stripes that were a function
+  // of where the door currently is would slide about as it opened. Shut is the
+  // pose they have to line up with the flank in.
+  striped.push({
+    mesh: doorPanel,
+    at: {
+      x: doorGroup.position.x + doorPanel.position.x,
+      y: doorGroup.position.y + doorPanel.position.y,
+      z: doorGroup.position.z + doorPanel.position.z,
+    },
+  });
   addOutline(doorPanel, 0.014 * DETAIL);
 
   // **The door's window is in the same band as every other window**, and it was
@@ -1262,6 +1302,22 @@ export function createCatBus(): CatBusHandle {
     }
   }
 
+  // --- tiger stripes ---------------------------------------------------------
+  // **One pass, one owner of the drape's parameters.** Every striped mesh's UVs
+  // are rewritten from where its vertices sit on the *vehicle*, so a stripe is
+  // the same width in metres on the header band as on the door as on the flank,
+  // and the pattern runs unbroken across three separate meshes. See
+  // `tigerStripes.ts` for the unwrap and for why this is a texture rather than
+  // thirty applied shells.
+  //
+  // Deliberately after every `addOutline` above: `outlineGeometry` welds
+  // vertices, and welding takes UVs into account, so re-mapping first would
+  // quietly change which vertices merge and therefore the normals the outline
+  // is extruded along.
+  for (const { mesh, at } of striped) {
+    drapeStripeUvs(mesh, at, bodyTopY, cabinBackZ, cabinBackZ + cabinLength);
+  }
+
   // --- height ----------------------------------------------------------------
   // Measured to the **actual top**, ear tips included, per ART_DIRECTION §7's
   // asset contract — not to the roof, which would crop a name label. One
@@ -1403,6 +1459,7 @@ export function createCatBus(): CatBusHandle {
         mesh.geometry?.dispose();
       });
       bodyMaterial.dispose();
+    stripedMaterial.dispose();
       roofMaterial.dispose();
       trimMaterial.dispose();
       earInnerMaterial.dispose();
