@@ -53,6 +53,16 @@ const seed = args[3] ?? '';
  * `0.75rem` above 34rem and zero below it. Worth knowing, not this PR's.)
  */
 const simulateInsets = process.argv.includes('--insets');
+
+/**
+ * `--zoom=N` drives the map's own wheel-zoom to roughly N x before measuring
+ * (#359), so label counts can be reported against the zoom they were taken at.
+ * Driven through a real wheel event on the canvas rather than by reaching into
+ * the instance: it exercises the gesture path a child actually uses, so a
+ * broken listener shows up as a count that never changes.
+ */
+const zoomArg = process.argv.find((a) => a.startsWith('--zoom='));
+const targetZoom = zoomArg ? Number(zoomArg.split('=')[1]) : 1;
 const PORTRAIT_INSETS = { top: 59, bottom: 34 };
 const LANDSCAPE_INSETS = { top: 0, bottom: 21 };
 
@@ -133,6 +143,28 @@ for (const size of SIZES) {
   // One extra frame so the canvas has painted.
   await page.waitForTimeout(1200);
 
+  if (targetZoom > 1) {
+    const box = await page.evaluate(() => {
+      const c = document.querySelector('.parkmap-canvas');
+      if (!c) return null;
+      const r = c.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    });
+    if (box) {
+      // One notch is exp(0.2); step until the canvas reports the target zoom.
+      for (let i = 0; i < 60; i += 1) {
+        const now = await page.evaluate(
+          () => Number(document.querySelector('.parkmap-canvas')?.dataset.zoom ?? 1),
+        );
+        if (now >= targetZoom - 0.01) break;
+        await page.mouse.move(box.x, box.y);
+        await page.mouse.wheel(0, -100);
+        await page.waitForTimeout(30);
+      }
+      await page.waitForTimeout(400);
+    }
+  }
+
   // **The viewport, not `.parkmap-card`.** Both earlier review rounds
   // screenshotted the card element, which renders in the card's own coordinate
   // space — so a card that overflows the screen looks perfect in the capture
@@ -169,6 +201,7 @@ for (const size of SIZES) {
       h: Math.round(rect.height),
       labels: Number(canvas.dataset.labelCount ?? -1),
       features: Number(canvas.dataset.featureCount ?? -1),
+      zoom: Number(canvas.dataset.zoom ?? 1),
       off: {
         card: offScreen('.parkmap-card'),
         canvas: offScreen('.parkmap-canvas'),
@@ -189,10 +222,11 @@ await browser.close();
 for (const r of results) {
   const c = r.canvas;
   const off = c ? `card ${c.off.card} canvas ${c.off.canvas} hint ${c.off.hint}` : 'n/a';
+  const zoomText = c ? `zoom ${c.zoom.toFixed(2)}x` : '';
   console.log(
     `${r.size.padEnd(10)} canvas ${c ? `${c.w}x${c.h}`.padEnd(9) : 'n/a'}` +
       `  labels ${c ? `${c.labels}/${c.features}`.padEnd(6) : 'n/a'}` +
-      `  off-screen px: ${off.padEnd(40)}  errors ${r.errors}`,
+      `  ${zoomText.padEnd(11)}  off-screen px: ${off.padEnd(40)}  errors ${r.errors}`,
   );
 }
 console.log(
