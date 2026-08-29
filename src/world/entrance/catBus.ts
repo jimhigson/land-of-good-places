@@ -1318,17 +1318,44 @@ export function createCatBus(): CatBusHandle {
     2,
     0.04 * DETAIL,
   );
+  // One group, because the treads and the stringer that carries them are one
+  // thing — and because `check:bus-journey` asks whether every top-level part
+  // of the bus touches the bodywork, which is the question it should ask.
+  const stepGroup = new Group();
+  stepGroup.name = 'cat-bus-step';
+  chassis.add(stepGroup);
   function addTread(treadTop: number): Mesh {
     const tread = solid(new Mesh(stepGeometry, bumperMaterial));
-    tread.name = 'cat-bus-step';
+    tread.name = 'cat-bus-step-tread';
     tread.position.set(stepX, treadTop - stepHeight / 2, stepZ);
-    chassis.add(tread);
+    stepGroup.add(tread);
     return tread;
   }
   // The upper tread is the one everything below positions off — it is the one
   // that has always been "the step".
   const step = addTread(BODY_BOTTOM_Y);
   addTread(lowestTreadUnderside + stepHeight);
+
+  // **The stringer, and `check:bus-journey` is why it exists.** The lower tread
+  // hangs below the bodywork's own lowest point, so on its own it is a slab of
+  // timber floating 0.04 m under the bus attached to nothing — which is exactly
+  // the *"strange block floating off the back of it"* Jim reported about the
+  // rear bumper, and the check that was written for that duly caught this one
+  // before anybody saw it.
+  //
+  // A grouped part would have satisfied the box test on the upper tread's
+  // behalf, and that would have been gaming it: the lower tread would still
+  // have been drawn hanging in mid-air. So there is a real panel joining the
+  // treads to the body's underside, the way a bus's step well actually is.
+  const riserHeight = BODY_BOTTOM_Y - lowestTreadUnderside;
+  const riser = solid(
+    new Mesh(
+      new RoundedBoxGeometry(stepWidth, riserHeight, 0.16 * DETAIL, 2, 0.03 * DETAIL),
+      bumperMaterial,
+    ),
+  );
+  riser.position.set(stepX, lowestTreadUnderside + riserHeight / 2, stepZ - stepDepth / 2 + 0.08 * DETAIL);
+  stepGroup.add(riser);
 
   // --- bumpers ---------------------------------------------------------------
   // **`cabinBackZ`, not `-BODY_LENGTH / 2`** — and that difference is Jim's
