@@ -5543,6 +5543,89 @@ const theDrawnPathRidesOverEveryBridge: Invariant = (facts) => {
 };
 
 /**
+ * **Paving a bridge holds up in mid-air has stone under it** (issue #349).
+ *
+ * Jim, playing `main` just after the entrance bridge landed: *"on entering the
+ * park and walking straight to the first bridge, there is some weird item
+ * clipping into the bridge"* — sandy, path-coloured geometry projecting out
+ * through the masonry below deck level, a flat wedge out of the near spandrel
+ * beside the arch.
+ *
+ * It was the drawn path itself. `bridges.ts` decides which path vertices a
+ * bridge lifts onto its hump, and `bridgeFootprint.ts` decides how far out the
+ * masonry is swept, and the two were independent sums off the same crossing:
+ * the lift reached `roadHalf + PATH_KERB_OVERHANG + PATH_CARRIER_SLACK` while
+ * the stone stopped at `roadHalf + BRIDGE_WALL_THICKNESS`, so up to 0.375 m of
+ * paving hung 4 m in the air past the parapet with nothing beneath it. The
+ * quad joining it back down to the un-lifted terrain vertex beside it is the
+ * wedge in the screenshot. CLAUDE.md's "two definitions of one thing, kept in
+ * step by hand", and neither of the two existing bridge-width invariants could
+ * see it: one measures where a *walker* can stand (inside the parapets, so it
+ * never looks outside them), the other that the paving rides the hump at the
+ * right *height* (which this paving did — that was the problem).
+ *
+ * So this asks the one question neither did: of the paving each bridge lifts
+ * clear of the ground, is any of it outside that bridge's own masonry in plan?
+ * Measured off the built park — the real drawn path meshes against the real
+ * swept shell triangles ({@link ParkFacts.bridgePaving}) — never against
+ * either module's own arithmetic, which is exactly what agreed with itself
+ * while disagreeing with the other.
+ *
+ * **Deliberately about paving held in the air, not paving past the outline.**
+ * `pavingHeightAt` pads along the spine as well as across it, so it claims
+ * paving a metre or so beyond the last of the masonry at each ramp foot —
+ * where the hump has already come back down to the terrain and the paving is
+ * simply lying on the ground, which is correct and invisible. Judging every
+ * claimed vertex against the plan outline reports 1.27 m of "overhang" there
+ * on the canonical seed and would have had to be loosened to go green; the
+ * defect is specifically paving with *daylight* under it.
+ *
+ * Proven red before green (2026-08-29): against the pre-fix geometry it fires
+ * on both canonical bridges — see the fix's own PR for the message.
+ */
+const bridgePavingIsCarriedByItsOwnMasonry: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const built = facts.world.train.bridges.length;
+  if (built === 0) return complaints;
+
+  if (facts.bridgePaving.length !== built) {
+    complaints.push(
+      `the park built ${built} bridge(s) but ${facts.bridgePaving.length} were measured for ` +
+        'paving overhang — the "railway-bridges" group no longer holds one child group per ' +
+        'built bridge, and this invariant is measuring the wrong stone',
+    );
+    return complaints;
+  }
+
+  // Without this the whole check passes vacuously on a park whose paving the
+  // bridges never claimed at all — the "check that cannot fail" trap, and the
+  // state a `pavingHeightAt` that returned `null` everywhere would leave it in.
+  const totalLifted = facts.bridgePaving.reduce((sum, b) => sum + b.liftedClearOfGround, 0);
+  if (totalLifted === 0) {
+    complaints.push(
+      `${built} bridge(s) are built and not one vertex of the drawn paving is lifted clear of ` +
+        'the ground by any of them — no bridge is carrying its path, and the overhang check ' +
+        'below has nothing to measure',
+    );
+    return complaints;
+  }
+
+  for (const bridge of facts.bridgePaving) {
+    if (bridge.unsupported === 0) continue;
+    complaints.push(
+      `${bridge.name} lifts ${bridge.unsupported} of its ${bridge.liftedClearOfGround} carried ` +
+        `paving vertices past its own masonry: the worst (${bridge.worstLayer}) sits ` +
+        `${bridge.worstOverhang.toFixed(3)} m outside the stone in plan at ` +
+        `(${fmt([bridge.worstAt[0], bridge.worstAt[2]])}), ` +
+        `${bridge.worstAboveGround.toFixed(2)} m above the ground under it — that paving is ` +
+        'hanging in mid-air past the parapet, and it is what clips through the masonry',
+    );
+  }
+
+  return complaints;
+};
+
+/**
  * **The railway is crossed on purpose, and mostly on bridges.**
  *
  * Jim, 23 August 2026: the park is designed around the bridge constraints —
@@ -8054,6 +8137,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   [
     "the park's own paving rides over every bridge, and none is left in a tunnel",
     theDrawnPathRidesOverEveryBridge,
+  ],
+  [
+    "every bridge's carried paving has its own masonry under it",
+    bridgePavingIsCarriedByItsOwnMasonry,
   ],
   [
     'railway crossings are planned — station-clear, and mostly real bridges',

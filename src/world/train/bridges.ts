@@ -778,6 +778,27 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   const pavingReachSq =
     (Math.max(lengthPos, lengthNeg) + roadHalf + PATH_KERB_OVERHANG + PATH_CARRIER_SLACK + 4) ** 2;
 
+  // **Where the stone really is, in plan** — the polygon the sweep drew, taken
+  // from `shell.planEdge` rather than re-derived from the frame. Built once per
+  // bridge; `pavingHeightAt` below asks it instead of asking `footprint.covers`
+  // what the analytic `across` says. Even-odd ray crossing over the ring points
+  // down one side and back up the other, which is exactly the outline of the
+  // quads that were emitted.
+  const edge = shell.planEdge;
+  const outline: [number, number][] = [
+    ...edge.map((r) => r.plus as [number, number]),
+    ...[...edge].reverse().map((r) => r.minus as [number, number]),
+  ];
+  const insideDrawnStone = (x: number, z: number): boolean => {
+    let inside = false;
+    for (let i = 0, j = outline.length - 1; i < outline.length; j = i, i += 1) {
+      const [xi, zi] = outline[i] as [number, number];
+      const [xj, zj] = outline[j] as [number, number];
+      if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
+    }
+    return inside;
+  };
+
   const platform: MovingPlatform = {
     surfaceY: crownY,
     covers: (x: number, z: number): boolean => {
@@ -810,8 +831,11 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
       // resampled spine, and this is asked once per vertex of the park's
       // entire path mesh at boot.
       if ((x - origin0.x) ** 2 + (z - origin0.z) ** 2 > pavingReachSq) return null;
-      if (!footprint.covers(x, z, roadHalf - walkHalf + PATH_KERB_OVERHANG + PATH_CARRIER_SLACK))
-        return null;
+      // The stone is the single authority on where carried paving ends. Asking
+      // the drawn outline rather than the frame's `across` is what stops lifted
+      // paving hanging past the masonry on a curve — see
+      // {@link ShellGeometry.planEdge}.
+      if (!insideDrawnStone(x, z)) return null;
       return heightAt(x, z);
     },
   };
