@@ -42,8 +42,33 @@ said "Deployed still has the old cat bus".
 Deliberately **not** in the `build` chain: it makes a network call and asserts
 something about production, so it would go red on every PR of a stale branch.
 
+## Red proof (29 Aug 2026, live head `958321815761759823c4596bc47bc2cb716c2953`)
+
+Both failure paths were watched going red, not assumed. **The transcript below
+is only meaningful against that live sha** — once `main` moves and a deploy
+lands, `--expect=0a5f0380…` is still wrong and still fails, but the "live says"
+line will read differently.
+
+1. Wrong expected commit —
+   `LIVE_VERSION_TIMEOUT_MS=12000 LIVE_VERSION_INTERVAL_MS=5000 npm run check:live-version -- --expect=0a5f0380000000000000000000000000000000ff`
+   → **exit 1**, printing `live … 958321815761759823c4596bc47bc2cb716c2953`
+   against `wanted 0a5f0380…`, after 3 attempts / 10.2 s.
+2. Unreachable host — `wrangler.jsonc`'s custom-domain pattern temporarily
+   patched to `not-the-park.blockstack.ing` (reverted with `git checkout --`)
+   → **exit 1**, `unreadable — request failed: fetch failed`. This also proves
+   the hostname really is read from `wrangler.jsonc` and not hard-coded.
+
+Green run for contrast: exit 0, "landofgoodplaces.blockstack.ing is serving
+958321815761759823c4596bc47bc2cb716c2953 … 1 attempt(s), 0.1 s".
+
+## Gates
+
+- `npx tsc --noEmit` → **0**
+- `npm run build` (unpiped, exit code read directly) → see final report
+- `npm run test:procgen` → see final report
+- Build chain parsed, not grepped: 46 steps on both this branch and
+  `origin/main`, byte-identical; `check:live-version` deliberately absent from it.
+
 ## Status
 
-See git log on this branch. Gates to run before PR: `npx tsc --noEmit`, full
-unpiped `npm run build`, `npm run test:procgen`, plus a demonstrated **red** run
-of `check:live-version`.
+Workflow fix, check script, and `live-version.yml` all committed and pushed.
