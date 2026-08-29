@@ -30,6 +30,14 @@ import { terrainHeight } from '../terrain';
 import { PALETTE } from '../../core/palette';
 import { archStoneTexture, pinkStoneTexture } from '../../core/textures';
 import { toonMaterial } from '../../art/style/materials';
+import {
+  ARCH_CROWN_DIP,
+  archCurve,
+  buildCopingRun,
+  buildVoussoirRing,
+  haunchRadius,
+} from './bridgeStonework';
+import { COPING_HEIGHT, VOUSSOIR_TAPER_RADIUS } from '../../art/models/bridgeStones';
 import type { MovingPlatform } from '../building/surfaces';
 
 /**
@@ -58,10 +66,14 @@ import type { MovingPlatform } from '../building/surfaces';
  *   (`bridgeSpine.ts`), which walks the drawn centreline instead of
  *   forcing a straight line.
  * - **A real arched stone tunnel underneath** — the masonry mass carries a
- *   genuine opening over the rail corridor: short abutment walls, curved
- *   haunches, and a crown span whose soffit clears the train and its
- *   riders by the same `TRAIN_CLEARANCE_Y` everything else respects. The
- *   soffit — haunch and crown alike — is one continuous surface swept
+ *   genuine opening over the rail corridor: short abutment walls and a
+ *   **three-centred arch**, continuously curved from crown to springing
+ *   (`bridgeStonework.ts`, the one owner of that shape), whose soffit
+ *   clears the train and its riders by the same `TRAIN_CLEARANCE_Y`
+ *   everything else respects. It replaced a flat crown span with
+ *   quarter-round haunches, which had a tangent break at the join and read
+ *   flat from the mouth — Jim, 2026-08-29: *"a genuine arch-shaped
+ *   tunnel"*. The soffit is one continuous surface swept
  *   along the frame by {@link buildShellGeometry}; an invisible `deck`
  *   marker mesh at the same height is all `test/procgen/invariants.ts`
  *   needs to measure the built clearance (`Box3`/`getObjectByName` both
@@ -78,16 +90,16 @@ import type { MovingPlatform } from '../building/surfaces';
  * - **Pink stone, the park's own** — `pinkStoneTexture`/`PALETTE.stonePink`
  *   exactly as the garden walls and the rail fence already use, never a
  *   new colour.
- * - **A voussoir ring frames the opening** — the soffit's own draw group
- *   reads `archStoneTexture` instead of the ordinary wall coursing: large,
- *   single-course wedge stones with a wide mortar joint, standing out from
- *   the smaller randomised cobbles around them exactly the way a real
- *   dressed-stone arch ring stands out from rubble walling. Jim,
- *   2026-08-24: *"keep the current height but make the tunnel an arch,
- *   with a texture giving arch stones around the tunnel"* — the height
- *   (`BRIDGE_RISE` and friends) is untouched; only the opening's own
- *   material changed. See `archStoneTexture`'s own header for why its
- *   joints are drawn straight rather than tapered.
+ * - **A modelled voussoir ring frames each mouth, and modelled coping caps
+ *   both parapets** — real geometry from `art/blend/bridgeStones.blend`, not
+ *   a painted stripe. Jim, 2026-08-24, asked for *"a texture giving arch
+ *   stones around the tunnel"*; on 2026-08-29, looking at it, he asked
+ *   instead for *"modelled stoneworks (not just textures) around the tops of
+ *   the walls"* and *"modelled archway masonry around its edge"*. A texture
+ *   contributes nothing to a silhouette, and a silhouette is most of what a
+ *   six-year-old reads a stone bridge by. `archStoneTexture` stays on the
+ *   soffit *inside* the tunnel, where it is the coursing of the barrel
+ *   rather than a stand-in for the ring.
  *
  * ## The road a child sees is the park's own path, not a second surface
  *
@@ -186,6 +198,23 @@ const ARCH_CLEAR_HALF = TRACK_CLEARANCE + 0.5;
  * (its own doc), so the tunnel swallows the entire fenced corridor and the
  * masonry only ever stands on ground the fence already forbids to feet. */
 const ARCH_SPAN_HALF = DECK_HALF_LENGTH;
+
+/**
+ * The authored voussoir is cut as a wedge for one particular ring radius
+ * (`bridgeStones.ts`'s `VOUSSOIR_TAPER_RADIUS`); the arch this module builds
+ * derives its own haunch radius from the two spans above. They have to be the
+ * same number, and a comment saying so is not a mechanism — so it is checked,
+ * once, at module load, and says which number moved.
+ */
+const authoredRadius = haunchRadius(ARCH_CLEAR_HALF, ARCH_SPAN_HALF);
+if (Math.abs(authoredRadius - VOUSSOIR_TAPER_RADIUS) > 0.005) {
+  throw new Error(
+    `bridges: the arch's haunch radius is ${authoredRadius.toFixed(3)} m but the ` +
+      `voussoir in the kit is cut for ${VOUSSOIR_TAPER_RADIUS} m. Set ` +
+      `VOUSSOIR_TAPER_RADIUS in src/art/models/bridgeStones.ts to ` +
+      `${authoredRadius.toFixed(3)} and re-run \`npm run blend:bridge-stones\`.`,
+  );
+}
 
 /**
  * Safety margin added on top of the worst (highest) ground sampled across
@@ -481,7 +510,13 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
       }
     }
   }
-  const crownBase = worstGroundY + BRIDGE_RISE + HEIGHT_MARGIN;
+  // `ARCH_CROWN_DIP` on top, because the soffit is now an arch rather than a
+  // flat plate: `BRIDGE_RISE` is the air the train needs, and an arch delivers
+  // that at the *edge* of the clear span, where it has already dipped by that
+  // much below its own crown. Without this term a genuine arch would have
+  // eaten the clearance it was drawn inside. See `bridgeStonework.ts` for what
+  // the three candidate arch shapes cost.
+  const crownBase = worstGroundY + BRIDGE_RISE + HEIGHT_MARGIN + ARCH_CROWN_DIP;
   const soffitCrownY = crownBase - BRIDGE_DECK_DEPTH;
   // The hump's own surface has already begun to fall away by the far edge of
   // the flat crown span (±ARCH_CLEAR_HALF), and the slab under it does not:
@@ -521,21 +556,17 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   };
 
   // --- the arch soffit -----------------------------------------------------
-  // Flat full-height crown over |along| ≤ ARCH_CLEAR_HALF; a quarter-round
-  // haunch curving down to the springing at |along| = ARCH_SPAN_HALF; solid
-  // masonry (to the ground) beyond. Radius = span difference, so the
-  // haunch meets both neighbours tangent-free but visually round — a
-  // slightly stilted arch, which is what lets a tunnel only 6.4 m wide
-  // still clear a train nearly 4 m tall (a true semicircle of that span
-  // could not).
-  const haunchRadius = ARCH_SPAN_HALF - ARCH_CLEAR_HALF;
-  const springY = soffitCrownY - haunchRadius;
-  const soffitAt = (alongAbs: number): number => {
-    if (alongAbs <= ARCH_CLEAR_HALF) return soffitCrownY;
-    if (alongAbs >= ARCH_SPAN_HALF) return springY;
-    const u = (alongAbs - ARCH_CLEAR_HALF) / haunchRadius;
-    return springY + haunchRadius * Math.sqrt(Math.max(0, 1 - u * u));
-  };
+  // A genuine three-centred arch, continuously curved from crown to
+  // springing — `bridgeStonework.ts` owns the shape, and the voussoir ring
+  // built below is laid on that same curve, so the stone a child sees and
+  // the hole a train goes through cannot be two different arches.
+  //
+  // It replaces a flat crown span with quarter-round haunches, which had a
+  // tangent break at the join and read flat from the mouth. Jim,
+  // 2026-08-29: *"a genuine arch-shaped tunnel"*.
+  const arch = archCurve(ARCH_CLEAR_HALF, ARCH_SPAN_HALF, soffitCrownY);
+  const springY = arch.springY;
+  const soffitAt = (alongAbs: number): number => arch.soffitAt(alongAbs);
 
   // --- meshes ---------------------------------------------------------------
   const bridgeGroup = new Group();
@@ -563,8 +594,14 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   deckMesh.visible = false;
   const yaw = Math.atan2(at0.dirX, at0.dirZ);
   const rotation = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), yaw);
+  // Sat at the arch's **binding** height — its crown less `ARCH_CROWN_DIP`,
+  // the lowest the soffit gets anywhere over the train's swept width — not at
+  // the crown itself. The invariants measure the built clearance off this box,
+  // and a marker at the crown would report the roomiest point of an arch as if
+  // it were the tightest, which is exactly the "a check can pass without
+  // checking anything" failure CLAUDE.md catalogues.
   const matrix = new Matrix4().compose(
-    new Vector3(origin0.x, soffitCrownY + BRIDGE_DECK_SLAB / 2, origin0.z),
+    new Vector3(origin0.x, soffitCrownY - ARCH_CROWN_DIP + BRIDGE_DECK_SLAB / 2, origin0.z),
     rotation,
     new Vector3(1, 1, 1),
   );
@@ -591,9 +628,46 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   const shellMesh = new Mesh(shell.stone, [bridgeMaterials().stone, bridgeMaterials().archStone]);
   shellMesh.castShadow = true;
   shellMesh.receiveShadow = true;
-  const copingMesh = new Mesh(shell.coping, bridgeMaterials().coping);
+  // The parapet's own flat top face, flush with the wall. It used to be the
+  // whole of the "coping" — a two-triangle strip 6 cm proud, which reads as a
+  // painted line and vanishes in silhouette. It is now just the face that
+  // stops the wall being open at the top; the coping proper is modelled stone,
+  // laid on it below.
+  const wallTopMesh = new Mesh(shell.coping, bridgeMaterials().coping);
+  wallTopMesh.castShadow = true;
+  bridgeGroup.add(shellMesh, wallTopMesh);
+
+  // --- the modelled stonework ----------------------------------------------
+  // Jim, 2026-08-29: *"modelled stoneworks (not just textures) around the tops
+  // of the walls"*, and *"modelled archway masonry around its edge"*. Both are
+  // authored in Blender (`art/blend/bridge_stones_build.py`) and baked here
+  // into one geometry apiece, so a bridge wearing sixty-odd stones still costs
+  // two draw calls rather than sixty.
+  const parapetTopAt = (along: number, side: 1 | -1): number | null => {
+    const outer = frame.worldAt(along, halfAcross * side, shift);
+    const centre = frame.worldAt(along, 0, shift);
+    const surface = surfaceProfile(centre.x, centre.z, along);
+    const parapet = parapetHeightFor(surface - terrainHeight(outer.x, outer.z));
+    // Nothing to cap where the parapet has tapered to less than the coping's
+    // own thickness — see `parapetHeightFor`. The stone follows the wall; it
+    // never asserts one that is not there.
+    if (parapet < COPING_HEIGHT) return null;
+    return surface + parapet;
+  };
+
+  const ringMesh = new Mesh(
+    buildVoussoirRing(frame, shift, halfAcross, arch),
+    bridgeMaterials().coping,
+  );
+  ringMesh.castShadow = true;
+  ringMesh.receiveShadow = true;
+  const copingMesh = new Mesh(
+    buildCopingRun(frame, shift, roadHalf + BRIDGE_WALL_THICKNESS / 2, lengthNeg, lengthPos, parapetTopAt),
+    bridgeMaterials().coping,
+  );
   copingMesh.castShadow = true;
-  bridgeGroup.add(shellMesh, copingMesh);
+  copingMesh.receiveShadow = true;
+  bridgeGroup.add(ringMesh, copingMesh);
 
   // --- collision: the parapet/spandrel walls -------------------------------
   // Only where the hump stands more than a step above the ground beside it
@@ -818,13 +892,16 @@ function buildShellGeometry(
       // the moment the width exceeded one texture tile.
       soffitA: inTunnel ? vertex(outerPlus.x, soffit, outerPlus.z, u, 1) : null,
       soffitB: inTunnel ? vertex(outerMinus.x, soffit, outerMinus.z, u, 0) : null,
+      // Flush with the parapet top, not 6 cm proud of it: this is the wall's
+      // own top *face* now, and the coping that stands on it is modelled
+      // stone (`bridgeStonework.ts`), not this strip.
       copingOuter: [
-        copingVertex(outerPlus.x, parapetTopPlus + 0.06, outerPlus.z, u, 0),
-        copingVertex(outerMinus.x, parapetTopMinus + 0.06, outerMinus.z, u, 0),
+        copingVertex(outerPlus.x, parapetTopPlus, outerPlus.z, u, 0),
+        copingVertex(outerMinus.x, parapetTopMinus, outerMinus.z, u, 0),
       ],
       copingInner: [
-        copingVertex(roadPlus.x, parapetTopPlus + 0.06, roadPlus.z, u, 1),
-        copingVertex(roadMinus.x, parapetTopMinus + 0.06, roadMinus.z, u, 1),
+        copingVertex(roadPlus.x, parapetTopPlus, roadPlus.z, u, 1),
+        copingVertex(roadMinus.x, parapetTopMinus, roadMinus.z, u, 1),
       ],
     };
 
