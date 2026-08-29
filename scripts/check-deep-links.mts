@@ -45,6 +45,7 @@
  * `data-open` CSS transition resolve at all).
  */
 import { chromium, type Page } from 'playwright-core';
+import { worldX, worldZ } from '../src/world/building/layout.ts';
 
 const BASE = (process.env.CHECK_DEEP_LINKS_URL ?? 'http://127.0.0.1:5173').replace(/\/$/, '');
 const SHOT_DIR = process.env.CHECK_DEEP_LINKS_SHOTS ?? '/tmp/check-deep-links';
@@ -77,7 +78,73 @@ const keychainState = (page: Page) =>
     };
   });
 
+/**
+ * Where `/castle?at=` is asked to stand, in the **interior's own metres** — the
+ * frame `layout.ts` and every castle prop placer work in. This is the great
+ * hall's throne end (#388), which is the link Jim was given.
+ */
+const CASTLE_AT = { x: 10, z: -15 };
+
+/** How far from the asked-for spot still counts as having arrived. */
+const CASTLE_TOLERANCE = 1.5;
+
 const CHECKS: DeepLinkCheck[] = [
+  {
+    // **This target exists because of a bug it would have caught.** `at` is in
+    // the interior's own metres and `teleportTo` takes world coordinates, so
+    // the first cut of this link teleported to (10, −15) *in the park* — six
+    // hundred metres from the castle — and the screenshot came back a picture
+    // of grass. Nothing could see it: `/castle` returned true, the game booted
+    // clean, `enterInterior` really had run, and no check measured where she
+    // actually ended up. It was found by looking at the first screenshot.
+    //
+    // So the assertion re-does the conversion independently: `worldX`/`worldZ`
+    // are imported from the game's own module and compared against the player's
+    // real position, which is a check that cannot pass by agreeing with itself.
+    path: `/castle?deck=0&at=${CASTLE_AT.x},${CASTLE_AT.z}`,
+    assert: async (page) => {
+      const want = { x: worldX(CASTLE_AT.x), z: worldZ(CASTLE_AT.z) };
+      // `changeSpace` irises: `enterCastleSpawn` is called after `window.game`
+      // exists and the teleport lands inside a transition, so the state has to
+      // be waited for rather than read in the same tick the keychain check can
+      // use. Ten seconds is the transition plus a wide margin.
+      await page
+        .waitForFunction(
+          () => ((window as unknown as { game?: any }).game)?.world?.building?.inside === true,
+          undefined,
+          { timeout: 10000 },
+        )
+        .catch(() => {});
+      const s = await page.evaluate(() => {
+        const g = (window as unknown as { game?: any }).game;
+        return {
+          hasGame: !!g,
+          inside: g?.world?.building?.inside ?? null,
+          playerPos: g?.player?.position
+            ? { x: g.player.position.x, z: g.player.position.z }
+            : null,
+        };
+      });
+      if (!s.hasGame) return { ok: false, detail: 'window.game never appeared' };
+      if (s.inside !== true) {
+        return { ok: false, detail: `the castle interior was not entered (inside=${s.inside})` };
+      }
+      if (!s.playerPos) return { ok: false, detail: 'the player had no position' };
+      const off = Math.hypot(s.playerPos.x - want.x, s.playerPos.z - want.z);
+      if (off > CASTLE_TOLERANCE) {
+        return {
+          ok: false,
+          detail:
+            `asked to stand at interior (${CASTLE_AT.x}, ${CASTLE_AT.z}) = world ` +
+            `(${want.x.toFixed(1)}, ${want.z.toFixed(1)}), but the player is at ` +
+            `(${s.playerPos.x.toFixed(1)}, ${s.playerPos.z.toFixed(1)}) — ${off.toFixed(1)} m off. ` +
+            `If that distance is about the interior origin's own, 'at' is being used as a world ` +
+            `coordinate instead of an interior one.`,
+        };
+      }
+      return { ok: true, detail: `inside the castle, ${off.toFixed(2)} m from the asked-for spot` };
+    },
+  },
   {
     path: '/keychain-stall',
     assert: async (page) => {
