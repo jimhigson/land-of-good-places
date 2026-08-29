@@ -5,6 +5,7 @@ import {
   Group,
   Mesh,
   SphereGeometry,
+  TorusGeometry,
 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PALETTE, hexToCss } from '../../core/palette';
@@ -15,7 +16,7 @@ import {
   WIDEST_CHILD_FOOTPRINT,
 } from '../../art/models/kid';
 import { RIDER_HEADROOM } from '../train/clearance';
-import { clamp01, lerp } from '../../core/mathUtils';
+import { angleDelta, clamp, clamp01, lerp } from '../../core/mathUtils';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
 import { applyStaticBakedFace, type FacePaintOptions } from '../../art/style/faces';
 import { blob } from '../../art/style/asset';
@@ -575,6 +576,20 @@ export interface CatBusHandle {
   readonly root: Group;
   readonly height: number;
   /**
+   * **The sprung body** — everything except the wheels and their axles.
+   *
+   * This is what heaves, pitches and rolls on the suspension, and `cabin` is a
+   * child of it, so anything riding inside rides the springs for free.
+   *
+   * Exposed because **a camera inside the bus has to bob with the bus.** The
+   * ride's interior shot places its lens by a fixed point in the vehicle's own
+   * space and pushes it through a matrix; through `root`'s matrix it would sit
+   * dead still while the cabin around it moved, which reads as the *seats*
+   * bouncing rather than the bus — worse than no bob at all, and exactly the
+   * "passengers stay rigid" failure the brief warns about, wearing a lens.
+   */
+  readonly chassis: Group;
+  /**
    * Where anyone riding inside is parented — a child of the chassis, so a
    * passenger put in here travels with the bus for free rather than being
    * re-positioned every frame by a formula that has to track it.
@@ -665,9 +680,24 @@ export function createCatBus(): CatBusHandle {
   const tailMaterial = toonMaterial(bodyColour);
   const bumperMaterial = toonMaterial(PALETTE.woodLight);
 
+  // **The sprung body.** Everything a passenger can see or sit on hangs off
+  // this, including `cabin` and the twelve seats — so when it bobs, the
+  // children in it bob with it, without a single line of code re-positioning
+  // anybody. A bus that bobs while its passengers stay rigid looks worse than
+  // no bob at all, and the cheapest way to make that impossible is for there to
+  // be no second thing to keep in step.
   const chassis = new Group();
   chassis.name = 'chassis';
   root.add(chassis);
+
+  // **The unsprung half**: wheels, hubs and stub axles, which stay on the road
+  // while the body moves over them. A sibling of the chassis rather than a
+  // child of it, because that is the whole mechanism — a wheel parented to a
+  // bobbing body would bob with it, which is a bus hopping rather than a bus on
+  // springs, and would put the tyres through the tarmac on every downstroke.
+  const axles = new Group();
+  axles.name = 'axles';
+  root.add(axles);
 
   // --- main body -------------------------------------------------------------
   // Stops short of the very front — the face sphere below picks up from there —
@@ -1089,22 +1119,71 @@ export function createCatBus(): CatBusHandle {
     }
   }
 
-  // --- wheels --------------------------------------------------------------
-  const wheelGeometry = new CylinderGeometry(WHEEL_RADIUS, WHEEL_RADIUS, 0.34 * DETAIL, 14);
-  const hubGeometry = new CylinderGeometry(WHEEL_RADIUS * 0.42, WHEEL_RADIUS * 0.42, 0.36 * DETAIL, 10);
+  // --- wheels, on their own axles ------------------------------------------
+  // Twice the radius they were drawn at (`CAT_BUS_WHEEL_SCALE`), standing
+  // outboard of every part of the bodywork (`WHEEL_X`), on a group that does
+  // **not** bob. Three parts to each corner, and each is there for a reason:
+  //
+  //  - the tyre and its hub, on `axles`, planted on the road;
+  //  - a **stub axle** reaching in under the flank, also on `axles`, so a wheel
+  //    held off at arm's length is visibly held by something rather than
+  //    floating beside the bus;
+  //  - a **mudguard** over the top, on the `chassis`, so the gap between it and
+  //    the tyre opens and closes as the body moves. That gap is the suspension,
+  //    seen from outside, and it is what `check:cat-bus-suspension` measures.
+  const wheelGeometry = new CylinderGeometry(WHEEL_RADIUS, WHEEL_RADIUS, WHEEL_WIDTH, 18);
+  const hubGeometry = new CylinderGeometry(
+    WHEEL_RADIUS * 0.42,
+    WHEEL_RADIUS * 0.42,
+    WHEEL_WIDTH * 1.06,
+    12,
+  );
+  // Reaches from the wheel's centre plane inboard to well under the bodywork,
+  // so whichever way you look at the bus it disappears into the flank rather
+  // than stopping in mid-air.
+  const stubLength = WHEEL_X - BODY_WIDTH / 2 + WALL_THICKNESS;
+  const stubGeometry = new CylinderGeometry(WHEEL_RADIUS * 0.16, WHEEL_RADIUS * 0.16, stubLength, 8);
+  // A half-torus: the ring stands in the bus's YZ plane (hence the quarter turn
+  // about Y) and the tube runs across it, so `arc = PI` is precisely the top
+  // half — a mudguard, not a wheel-shaped hoop.
+  const fenderGeometry = new TorusGeometry(
+    WHEEL_RADIUS + CAT_BUS_ARCH_GAP,
+    FENDER_TUBE,
+    8,
+    22,
+    Math.PI,
+  );
   const wheels: Mesh[] = [];
-  for (const x of [-(BODY_WIDTH / 2 - 0.05 * DETAIL), BODY_WIDTH / 2 - 0.05 * DETAIL]) {
-    for (const z of [BODY_LENGTH * 0.28, -BODY_LENGTH * 0.3]) {
+  const fenders: Mesh[] = [];
+  for (const side of [-1, 1] as const) {
+    for (const z of WHEEL_Z) {
+      const x = side * WHEEL_X;
+
       const wheel = solid(new Mesh(wheelGeometry, wheelMaterial));
+      wheel.name = 'cat-bus-wheel';
       wheel.rotation.z = Math.PI / 2;
       wheel.position.set(x, WHEEL_RADIUS, z);
-      chassis.add(wheel);
+      axles.add(wheel);
       wheels.push(wheel);
 
       const hub = decal(new Mesh(hubGeometry, hubMaterial));
+      hub.name = 'cat-bus-hub';
       hub.rotation.z = Math.PI / 2;
       hub.position.copy(wheel.position);
-      chassis.add(hub);
+      axles.add(hub);
+
+      const stub = solid(new Mesh(stubGeometry, bumperMaterial));
+      stub.rotation.z = Math.PI / 2;
+      stub.position.set(x - side * stubLength / 2, WHEEL_RADIUS, z);
+      axles.add(stub);
+
+      const fender = solid(new Mesh(fenderGeometry, roofMaterial));
+      fender.name = 'cat-bus-fender';
+      fender.rotation.y = Math.PI / 2;
+      fender.position.set(x, WHEEL_RADIUS, z);
+      chassis.add(fender);
+      fenders.push(fender);
+      addOutline(fender, 0.014 * DETAIL);
     }
   }
 
@@ -1200,9 +1279,24 @@ export function createCatBus(): CatBusHandle {
   let doorOpenAmount = 0;
   let wheelSpin = 0;
 
+  // --- suspension state -------------------------------------------------------
+  /** How far the bus has driven, in metres. The clock the road is sampled on. */
+  let distanceTravelled = 0;
+  /** Body height above rest at each axle, and how fast it is moving. */
+  let frontOffset = 0;
+  let frontVelocity = 0;
+  let rearOffset = 0;
+  let rearVelocity = 0;
+  /** Smoothed longitudinal and lateral accelerations, m/s^2. */
+  let smoothedAlong = 0;
+  let smoothedAcross = 0;
+  let lastSpeed = 0;
+  let lastYaw = root.rotation.y;
+
   return {
     root,
     height,
+    chassis,
     cabin,
     driverSeat,
     passengerSeat,
@@ -1219,8 +1313,82 @@ export function createCatBus(): CatBusHandle {
     },
 
     animate(dt: number, elapsed: number, speed: number): void {
-      wheelSpin += speed * dt * 3.1;
+      // **Rolling, not spinning at a rate somebody liked the look of.** The
+      // wheel covers `speed * dt` metres of road, so it turns through exactly
+      // that over its own radius. The old `* 3.1` was a factor tuned by eye
+      // against a 0.53 m wheel; left alone, a 1.07 m wheel would have gone
+      // round twice as fast as the road beneath it and the bus would have read
+      // as permanently skidding.
+      wheelSpin += (speed * dt) / WHEEL_RADIUS;
       for (const wheel of wheels) wheel.rotation.x = wheelSpin;
+
+      // --- the suspension -----------------------------------------------------
+      //
+      // Two corner springs — one per axle — driven by the road under that axle,
+      // plus the load that gets thrown forward, back and sideways as the bus
+      // drives. Heave and pitch fall out of the two of them; roll is its own
+      // term because there is no third spring to derive it from.
+      const step = Math.max(dt, 1e-4);
+      distanceTravelled += Math.abs(speed) * dt;
+
+      // How hard the bus is accelerating or braking, smoothed hard. The callers
+      // hand over a *measured* speed (`ArrivalSequence` divides a distance by a
+      // timeline, `BusJourney` passes a constant), so the raw difference is
+      // spiky and a spike straight into a spring is a visible twitch.
+      const rawAlong = (speed - lastSpeed) / step;
+      lastSpeed = speed;
+      const smoothing = clamp01(step * 6);
+      smoothedAlong = lerp(smoothedAlong, rawAlong, smoothing);
+
+      // Cornering, read off the bus's own heading rather than asked for. Yaw
+      // rate times speed is the lateral acceleration a passenger feels, which
+      // is the thing that leans a body — a bus leans hard round a tight corner
+      // at 5 m/s and not at all doing the same corner stationary, and this gets
+      // that right without anybody passing a steering angle in.
+      // `angleDelta` rather than a subtraction, because both callers can step
+      // the heading across the +/-PI seam — `BusJourney` sets it with `lookAt`,
+      // which writes a quaternion and lets the Euler come out wherever it comes
+      // out — and a 2*PI jump straight into a spring is a lurch.
+      const yawDelta = angleDelta(lastYaw, root.rotation.y);
+      lastYaw = root.rotation.y;
+      const rawAcross = (yawDelta / step) * speed;
+      smoothedAcross = lerp(smoothedAcross, rawAcross, smoothing);
+
+      // Where each axle's spring is being pushed to: the road under it, plus
+      // load transfer. Accelerating squats the tail and lifts the nose; braking
+      // does the opposite. `LOAD_TRANSFER` is in metres per m/s^2.
+      const LOAD_TRANSFER = 0.02;
+      const frontTarget =
+        roadHeightAt(distanceTravelled) - smoothedAlong * LOAD_TRANSFER;
+      const rearTarget =
+        roadHeightAt(distanceTravelled - WHEELBASE) + smoothedAlong * LOAD_TRANSFER;
+
+      frontVelocity += (SPRING_RATE * (frontTarget - frontOffset) - SPRING_DAMPING * frontVelocity) * dt;
+      rearVelocity += (SPRING_RATE * (rearTarget - rearOffset) - SPRING_DAMPING * rearVelocity) * dt;
+      frontOffset += frontVelocity * dt;
+      rearOffset += rearVelocity * dt;
+
+      // **Clamped, and the clamp is load-bearing.** `CAT_BUS_ARCH_GAP` is
+      // derived from these three limits, so a body that could exceed them would
+      // drive a mudguard down onto a tyre. A spring integrated frame by frame
+      // can overshoot — a long frame, a step change in speed — and "it usually
+      // does not" is not a mechanism.
+      const heave = clamp((frontOffset + rearOffset) / 2, -CAT_BUS_MAX_HEAVE, CAT_BUS_MAX_HEAVE);
+      // Nose-up is positive, so it is front minus rear.
+      const pitch = clamp(
+        (frontOffset - rearOffset) / WHEELBASE,
+        -CAT_BUS_MAX_PITCH,
+        CAT_BUS_MAX_PITCH,
+      );
+      const roll = clamp(-smoothedAcross * 0.012, -CAT_BUS_MAX_ROLL, CAT_BUS_MAX_ROLL);
+
+      chassis.position.y = heave;
+      // Rotation about x lifts the nose when `pitch` is positive: a point at
+      // +z moves down by `z * sin(pitch)`, so the sign is flipped here to make
+      // "positive pitch = nose up" true, which is what the two targets above
+      // assume.
+      chassis.rotation.x = -pitch;
+      chassis.rotation.z = roll;
 
       // A lazy idle swish, faster and wider whenever the bus is moving — reads
       // as "happy", especially while it is pulling away at the end.
