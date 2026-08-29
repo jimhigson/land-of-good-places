@@ -707,3 +707,102 @@ the arch where it belongs.
 
 The twelve `tmp-*-349` files are removed from the branch. They are still in the
 history (`59a0591` and neighbours) if a measurement needs reproducing.
+
+---
+
+# ⚠️ NO VALUE OF `BRIDGE_LENGTH_SCALE` MAKES THE SEEDS GREEN (2026-08-29)
+
+**The sprint blocker is not caused by the shortening, and cannot be fixed by
+un-shortening.** Measured, not argued.
+
+## 1. The reviewer's 0.682 is a MINIMUM, not a maximum
+
+The Overseer was right to distrust the table. `BRIDGE_LENGTH_SCALE` is a
+*length* ratio (0.6 × 36.72 m = 22.03 m), so a **larger** scale is a **longer,
+gentler** bridge. Safety therefore reads `scale ≥ x`, and the reviewer's
+suggested 0.65 is **below** its own 0.682 bound. Its prose and its table
+disagree, and the table's heading is the wrong way round.
+
+From its own model: `grade ≤ 0.512 × (1 − 0.15)` = 0.4352, so ramp run
+`≥ 4.06 / 0.4352` = 9.329 m, total `≥ 25.06 m`, **scale ≥ 0.6825**.
+
+## 2. But the formula over-predicts, so neither number was the real answer
+
+The built park is about 10% kinder than the closed form, because the worst
+*window* climb averages over 0.925 m while the formula takes the instantaneous
+peak. Canonical seed, blend 0.15:
+
+| scale | designed peak | measured worst window grade | ratio |
+| --- | --- | --- | --- |
+| 0.600 | 0.611 | 0.566 | 0.926 |
+| 0.650 | 0.547 | 0.494 | 0.903 |
+| 0.700 | 0.495 | 0.454 | 0.917 |
+
+So on the canonical seed 0.65 measures *safe* (+3.6%) where the formula calls
+it unsafe. **Do not settle this by arithmetic in either direction — measure.**
+
+## 3. And it does not matter, because the binding failure is scale-invariant
+
+Worst sprinted-frame climb, all five seeds, blend 0.15, budget 0.474 m:
+
+| scale | canonical | seed 2 | seed 5 | seed 11 | seed 18 |
+| --- | --- | --- | --- | --- | --- |
+| 0.65 | 0.456 ok | **0.525** | 0.431 ok | **0.510** | **0.512** |
+| 0.70 | 0.419 ok | **0.525** | 0.412 ok | **0.511** | **0.512** |
+| 0.75 | 0.388 ok | **0.525** | 0.412 ok | **0.512** | 0.374 ok |
+| 0.80 | 0.361 ok | **0.525** | **0.508** | **0.518** | **0.512** |
+
+Seed 2's `bridge-82.0` reports **0.5250 at every one of those scales**,
+identical to four decimals. Lengthening the bridge does not touch it.
+
+**At scale 1.00 — `main`'s own gentle, un-shortened bridge — seeds 2 and 18
+still fail.** So this is a **pre-existing defect on `main`**, exposed by the
+repaired invariant, not introduced by this PR.
+
+## 4. The mechanism: the hump is laid out on a run it does not get
+
+Profile dump, seed 2 `bridge-82.0`, scale 0.70 (`tmp-foot-349.mts`, in the
+scratchpad):
+
+```
+along     deck   terrain  deck-terrain  climb over next stride
+-13.00   0.038    0.038     0.000     0.016
+-11.50   0.064    0.064     0.000     0.017
+-10.23   0.090    0.088     0.003     0.238
+ -9.88   0.129    0.094     0.035     0.386
+ -9.76   0.155    0.096     0.059     0.426
+ -8.67     ...      ...     0.560     0.525   <- worst
+```
+
+The deck lies **exactly on the terrain** — equal to the millimetre — for the
+first ~2.8 m of the ramp, and the hump only starts where it leaves the ground.
+So the climb from ground level to the crown happens over a **shorter run than
+the one the grade was designed for**, and the realised grade overshoots the
+designed peak: 0.568 measured against a designed peak of 0.495.
+
+Lengthening the bridge buries *more* of the ramp foot in the rising ground and
+leaves the exposed part just as steep. That is exactly why the number does not
+move.
+
+## 5. What actually fixes it
+
+The generator must lay the hump over the run it **really has above ground**,
+not the nominal one — or push the ramp foot out until the *realised* grade
+meets the budget. That is CLAUDE.md's own "procgen backtracks on collision"
+rule applied to grade instead of to overlap: measure what was built, and if it
+does not clear, make a different decision rather than shipping the nominal
+number.
+
+**This is a generator change, and it is the real fix.** It is not a
+`BRIDGE_LENGTH_SCALE` value, and it is not `HUMP_BLEND`.
+
+## 6. State of the branch
+
+- The repaired invariant is committed and **red at 0.600**, with the drop
+  distance in the message (3.92 m / 3.97 m on the deep cases).
+- `BRIDGE_LENGTH_SCALE` is **left at 0.6** deliberately — the Overseer's
+  instruction was not to pick it, and no value is green, so picking one would
+  only disguise the finding.
+- `npx tsc --noEmit` 0, `npm run typecheck:test` 0. **`npm run test:procgen` is
+  red on purpose** until the generator fix above lands.
+- Rebased onto `44cf7065`. Three-dot stat is 9 files, all mine.
