@@ -55,6 +55,13 @@ Overseer's call whether that is in scope for #388.
 
 ## Still to do
 
-- [x] run on #388
-- [ ] run on #368 (`art/castle-interior-assets`) — its `castle_build.py` has neither
-      the cup assertion nor the two reads, so #368 merging alone leaves them unexercised
+- [x] run on #388 — exit 0
+- [x] run on #368 (`art/castle-interior-assets`) — **exit 0**, and the GLB/TS it emits is
+      the *same* sha256 as #388's, so #388's added lines are checks only and move no
+      geometry. #368's `castle_build.py` has neither the cup assertion nor the two
+      `ts_const` reads (its `DAIS_HEIGHT` is a typed `0.30`), so **merging #368 alone
+      leaves all three of the flagged assertions unexercised** — they arrive with #388.
+      Everything else (child-scale, sconce headroom, ceiling, origins, budget) runs and
+      passes on #368 too, with byte-identical numbers.
+
+Nothing in either branch was changed. It runs clean.
