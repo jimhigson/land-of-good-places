@@ -70,7 +70,7 @@ const ROUNDEL_RADIUS = 6;
 /** Nothing is placed within this of something a child needs to walk to. */
 const KEEP_OUT = 2.6;
 
-interface KeepOut {
+export interface KeepOut {
   readonly x: number;
   readonly z: number;
   readonly radius: number;
@@ -218,8 +218,17 @@ function buildBenches(deck: number, blocked: readonly KeepOut[], isRoof: boolean
 
 // --------------------------------------------------------------- keep-outs
 
-/** Everywhere a child has to be able to stand, walk to, or ride from. */
-function keepOutsFor(deck: number): KeepOut[] {
+/**
+ * Everywhere a child has to be able to stand, walk to, or ride from.
+ *
+ * **Exported (issue #376) so the castle's decoration and `check:castle` both
+ * ask this one list rather than growing their own.** Castle props get no
+ * colliders at all — indoor collision is height-blind, so a collider on deck 0
+ * would block that square metre on all five storeys — which means placement is
+ * the only protection a prop gets and a second copy of these discs is the whole
+ * ballgame. See `HANDOFF-castle-interior-363.md` §5.
+ */
+export function keepOutsFor(deck: number): KeepOut[] {
   const blocked: KeepOut[] = [
     // The stairs pad and the lane in front of it.
     { x: STAIR_STAND_X, z: STAIR_STAND_Z, radius: 4.4 },

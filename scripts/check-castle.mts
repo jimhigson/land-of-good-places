@@ -22,22 +22,33 @@
  *
  * Run: `npm run check:castle`
  */
-import { Box3, InstancedMesh, Matrix4 } from 'three';
+import './headless-canvas.mjs';
+import { Box3, Group, InstancedMesh, Matrix4, Vector3, type Object3D } from 'three';
 import {
   BUILDING_FLOOR_COUNT,
+  BUILDING_WALL_THICKNESS,
   CAMERA_PITCH_DEGREES,
   INTERIOR_HALF_X,
   INTERIOR_HALF_Z,
+  PLAYER_RADIUS,
 } from '../src/core/constants.ts';
 import { deckIsSolid, TOP_DECK } from '../src/world/building/layout.ts';
 import {
   BEAM_UNDERSIDE,
+  BEAM_WIDTH,
   buildCeilingBeams,
   CASTLE_CEILING_CLEAR,
   SCONCE_HEADROOM,
   SCONCE_MOUNT_Y,
 } from '../src/world/building/castleFabric.ts';
 import { TALLEST_CHILD_HEIGHT } from '../src/art/models/kid.ts';
+import {
+  CASTLE_TORCH_CUP,
+  CastleFire,
+  castleTorchAnchors,
+} from '../src/world/building/castleLighting.ts';
+import { dressCastle } from '../src/world/building/castleDecor.ts';
+import { keepOutsFor } from '../src/world/building/dressing.ts';
 
 const failures: string[] = [];
 
@@ -333,40 +344,371 @@ for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
 }
 
 // ---------------------------------------------------------------------------
-// 6. NOT YET WRITTEN — and said out loud, because the contract depends on it.
+// 6. Every piece of decoration, measured where it was actually placed.
 // ---------------------------------------------------------------------------
 
 /**
- * **Nothing in this file measures a decorative prop, because there are none
- * yet.** Batch 1 has not been wired into the game.
+ * **These are the three assertions this file spent a fortnight announcing it
+ * did not have** (issue #376). The note that used to stand here said, on every
+ * run, that nothing in `check:castle` measured a prop — which mattered, because
+ * `HANDOFF-castle-interior-363.md` §5 tells the 3D Artist that castle props get
+ * no colliders and that *placement is the only protection there is.* A contract
+ * promising a guard that does not exist is worse than one that admits it.
  *
- * This is stated here, and printed on every run, because
- * `HANDOFF-castle-interior-363.md` §5 tells the 3D Artist that props get no
- * colliders and that "placement is the only protection there is" — and a
- * contract that promises a guard which does not exist is worse than one that
- * admits it does not. §6 of that document briefly claimed these were written.
- * They were not. Both have been corrected.
+ * They measure the decoration built by `castleLighting.ts` and `castleDecor.ts`
+ * — flames, brackets, soot, braziers, banners, paintings, the rug, the
+ * portcullis, the crates, the woodpile, the cat and the mouse — **instance by
+ * instance, off each one's own world-space box.** An `InstancedMesh` is
+ * expanded through its `instanceMatrix`, because that is where a bug would
+ * hide: a mesh whose geometry is fine and whose fortieth matrix is not.
  *
- * The three that land with batch 1:
- *
- * 1. **No prop intersects a walkable route or a shop stand** — measured XZ
- *    footprint against `dressing.ts`'s `keepOutsFor(deck)` inflated by
- *    `PLAYER_RADIUS`, *and* against the paths children actually walk between
- *    the door and the seven shop stands (`castleAttractions`), not only the
- *    destination discs.
- * 2. **No prop pierces the ceiling** — measured `visibleBounds(root).top` plus
- *    its floor height against `CASTLE_CEILING_CLEAR`, or against
- *    `BEAM_UNDERSIDE` for anything within 1.25 m of a wall. This is the one
- *    that settles the throne's two readings (3.10 m total, or 3.40 m).
- * 3. **Every reported figure equals its measured figure** — `TABLE_TOP`,
- *    `BENCH_SEAT`, `SCONCE_CUP_OFFSET` off the handle against `visibleBounds`.
- *    Assertion 3 above is this same shape, applied to my own `BEAM_UNDERSIDE`,
- *    and is the working proof that the pattern catches things.
+ * The authored batch-1 and batch-2 assets are not wired into the game yet (PR
+ * #368 ships bytes and no placement code — see `HANDOFF-castle-interior-376.md`
+ * §0). When they are, they land inside these same three assertions for free,
+ * because nothing below knows or asks what a prop *is*.
  */
-const PROP_ASSERTIONS_PENDING =
-  'props: NOT CHECKED — batch 1 is not wired yet, so nothing here measures a prop. ' +
-  'See the note above assertion 6. Placement is the only protection props get, and it ' +
-  'is not yet enforced.';
+
+interface Placed {
+  readonly label: string;
+  readonly box: Box3;
+}
+
+/**
+ * Every placed thing on a storey, as a world-space box each.
+ *
+ * Walks the built group rather than asking the builders what they placed, which
+ * is this file's governing rule. Anything with no drawable geometry contributes
+ * nothing, and an unnamed mesh is labelled by its parent so a failure message
+ * still says where to look.
+ */
+function placedOn(deck: number): Placed[] {
+  const floor = new Group();
+  new CastleFire().dress(deck, floor);
+  dressCastle(deck, floor);
+  floor.updateMatrixWorld(true);
+
+  const found: Placed[] = [];
+  const geometryBox = new Box3();
+  const instanceMatrix = new Matrix4();
+
+  floor.traverse((object: Object3D) => {
+    const mesh = object as InstancedMesh & { isMesh?: boolean; isInstancedMesh?: boolean };
+    if (mesh.isMesh !== true && mesh.isInstancedMesh !== true) return;
+    if (!mesh.geometry) return;
+    mesh.geometry.computeBoundingBox();
+    const local = mesh.geometry.boundingBox;
+    if (!local) return;
+
+    const label = mesh.name || `${mesh.parent?.name ?? 'unnamed'} child`;
+
+    if (mesh.isInstancedMesh === true) {
+      for (let i = 0; i < mesh.count; i += 1) {
+        mesh.getMatrixAt(i, instanceMatrix);
+        // The instance matrix is in the mesh's own space; the mesh may sit
+        // inside a positioned group (the mouse hole, the hearthside), so the
+        // world matrix has to be applied on top of it or every one of those
+        // measures at the origin.
+        instanceMatrix.premultiply(mesh.matrixWorld);
+        found.push({
+          label: `${label}[${i}]`,
+          box: geometryBox.copy(local).applyMatrix4(instanceMatrix).clone(),
+        });
+      }
+      return;
+    }
+
+    found.push({
+      label,
+      box: geometryBox.copy(local).applyMatrix4(mesh.matrixWorld).clone(),
+    });
+  });
+
+  return found;
+}
+
+/** How far a box's nearest point is from a point on the floor plan. */
+function planDistance(box: Box3, x: number, z: number): number {
+  const dx = Math.max(box.min.x - x, 0, x - box.max.x);
+  const dz = Math.max(box.min.z - z, 0, z - box.max.z);
+  return Math.hypot(dx, dz);
+}
+
+/**
+ * Flat floor treatment — a rug, a runner — cannot obstruct anybody, and is
+ * exempted from the walkable-route assertion **by measuring how tall it is**
+ * rather than by knowing what it is called. A name-based exemption is a hole
+ * somebody widens later; a 6 cm threshold is a fact about the object.
+ */
+const FLOOR_TREATMENT_MAX_HEIGHT = 0.1;
+
+/**
+ * How far wall furniture may stand off its wall — **the published rule, reused
+ * rather than a new threshold invented here.**
+ *
+ * `HANDOFF-castle-interior-363.md` §5 rule 1: *"Tapestries, sconces, banners
+ * and shields project at most 0.45 m from the wall face — less than the wall's
+ * own thickness, so nothing narrows a route."* That is exactly the exemption
+ * assertion 1 needs, and it already has a reason attached to it, so it is the
+ * one used. A coat of arms 6 cm proud of a wall above a doorway is not an
+ * obstruction in that doorway, and the measurement that says so is how far it
+ * sticks out — not what it is called.
+ */
+const WALL_FURNITURE_REACH = 0.45;
+
+/**
+ * The inner faces of the four walls, which is what a prop stands off.
+ *
+ * `INTERIOR_HALF_X` is the wall's **centreline**, not its room-side surface:
+ * `Shell.ts` extrudes each wall run from `halfX - HALF_WALL` to
+ * `halfX + HALF_WALL`. So a tapestry hanging on the wall touches
+ * `WALL_FACE_X`, 0.225 m in from `INTERIOR_HALF_X`, and that is the plane its
+ * projection has to be measured from. `castleLighting.ts` derives its torch
+ * anchors from the identical expression, which is why the torches sit on the
+ * masonry rather than 22 cm inside it.
+ */
+const WALL_FACE_X = INTERIOR_HALF_X - BUILDING_WALL_THICKNESS / 2;
+const WALL_FACE_Z = INTERIOR_HALF_Z - BUILDING_WALL_THICKNESS / 2;
+
+/** How far a box's furthest edge reaches from the nearest wall face. */
+function reachFromWall(box: Box3): number {
+  return Math.min(
+    box.max.z + WALL_FACE_Z,
+    WALL_FACE_Z - box.min.z,
+    box.max.x + WALL_FACE_X,
+    WALL_FACE_X - box.min.x,
+  );
+}
+
+/**
+ * The band in which the wall-plate, not the slab, is the ceiling.
+ *
+ * This **was** a hand-copied `0.4`, with a comment explaining that
+ * `BEAM_WIDTH` was private to `castleFabric.ts` and arguing the duplicate was
+ * the lesser evil. It was not: `BEAM_WIDTH` was one `export` keyword away from
+ * being importable, and it is now exported and imported here. The plate is
+ * flush with its wall, so the band it owns is exactly its width — asking its
+ * owner means a check that keeps checking the day somebody widens the beam,
+ * rather than silently measuring a band that no longer exists.
+ */
+const PLATE_BAND = BEAM_WIDTH;
+
+/**
+ * The plate's room-side edge — the plane the ceiling assertion asks a prop
+ * about.
+ *
+ * **This is deliberately not `WALL_FACE_X`, and the difference is not a
+ * slip.** The two assertions in this section ask two different questions about
+ * two different planes:
+ *
+ * - assertion 1 asks *how far does this thing stick out into the room*, which
+ *   is measured from the masonry's room-side surface, `WALL_FACE_X`;
+ * - assertion 2 asks *is this thing under the timber*, and the timber is not
+ *   on the masonry's surface. `castleFabric.ts` puts the plate's centre at
+ *   `INTERIOR_HALF_X - PLATE_INSET`, i.e. `BEAM_WIDTH / 2` in from the wall
+ *   **centreline**, so the band it roofs runs from `INTERIOR_HALF_X` inward by
+ *   `BEAM_WIDTH` — a shade further into the room than the wall face is, and
+ *   the plate's own back half is buried in the masonry.
+ *
+ * So this is derived from `INTERIOR_HALF_X` on purpose, matching where the
+ * plate is actually built. A reviewer read the two as an inconsistency, which
+ * is fair: they were half a wall thickness apart with nothing saying why. Now
+ * each plane is named for the thing it is the surface of, and this note is the
+ * why.
+ */
+const PLATE_ROOM_EDGE_X = INTERIOR_HALF_X - PLATE_BAND;
+const PLATE_ROOM_EDGE_Z = INTERIOR_HALF_Z - PLATE_BAND;
+
+let propsChecked = 0;
+let exemptFlat = 0;
+let exemptOverhead = 0;
+let exemptWall = 0;
+
+for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
+  const blocked = keepOutsFor(deck);
+  const placed = placedOn(deck);
+
+  for (const { label, box } of placed) {
+    propsChecked += 1;
+    const size = new Vector3();
+    box.getSize(size);
+
+    // --- 1. nothing stands in a route a child walks, or on a shop stand ----
+    //
+    // Two measured exemptions, both of which are statements about the object
+    // rather than about its name. Something entirely above a hatted child
+    // cannot be walked into (the portcullis's teeth hang in exactly that band
+    // on purpose), and something flatter than an ankle is paint on the floor.
+    //
+    // `reachFromWall` is a `Math.min` of four **signed** terms, so a box lying
+    // entirely beyond one wall face gets a *negative* reach and would sail
+    // through the wall-furniture exemption below on a comparison that reads as
+    // if it were checking the opposite. No instance does that today (this
+    // guard has never fired), and that is exactly when to close it: a silent
+    // exemption waiting for a future placement to fall into is the shape of
+    // bug this file exists to prevent. Clamping to zero would hide it; failing
+    // says which prop, and a prop that far into the masonry is worth knowing
+    // about on its own account.
+    const reach = reachFromWall(box);
+    if (box.min.y > TALLEST_CHILD_HEIGHT) {
+      exemptOverhead += 1;
+    } else if (size.y <= FLOOR_TREATMENT_MAX_HEIGHT) {
+      exemptFlat += 1;
+    } else if (reach < 0) {
+      fail(
+        `props: deck ${deck} '${label}' has a reach from the wall of ${reach.toFixed(3)} m — it ` +
+          `lies entirely past a wall face, inside or beyond the masonry. A negative reach is ` +
+          `not wall furniture; it would be silently exempted from the keep-out check below ` +
+          `because that test is '<= ${WALL_FURNITURE_REACH}'. Place it in the room.`,
+      );
+    } else if (reach <= WALL_FURNITURE_REACH) {
+      exemptWall += 1;
+    } else {
+      for (const keepOut of blocked) {
+        const gap = planDistance(box, keepOut.x, keepOut.z);
+        if (gap >= keepOut.radius + PLAYER_RADIUS) continue;
+        fail(
+          `props: deck ${deck} '${label}' comes within ${gap.toFixed(2)} m of the keep-out at ` +
+            `(${keepOut.x.toFixed(1)}, ${keepOut.z.toFixed(1)}) r${keepOut.radius.toFixed(1)}, ` +
+            `which needs ${(keepOut.radius + PLAYER_RADIUS).toFixed(2)} m. Castle props get no ` +
+            `colliders — a child NPC walks straight through this rather than round it.`,
+        );
+        break;
+      }
+    }
+
+    // --- 2. and nothing pierces the ceiling -------------------------------
+    //
+    // Two ceilings, and the tighter one is easy to miss: the timber wall-plate
+    // hangs to BEAM_UNDERSIDE within 0.40 m of a wall, so a prop pushed back
+    // against the wall has 22 cm less room than one out in the room.
+    const nearWall =
+      Math.max(Math.abs(box.min.x), Math.abs(box.max.x)) > PLATE_ROOM_EDGE_X ||
+      Math.max(Math.abs(box.min.z), Math.abs(box.max.z)) > PLATE_ROOM_EDGE_Z;
+    const ceiling = nearWall ? BEAM_UNDERSIDE : CASTLE_CEILING_CLEAR;
+    if (box.max.y > ceiling + 1e-6) {
+      fail(
+        `props: deck ${deck} '${label}' reaches ${box.max.y.toFixed(3)} m, above the ` +
+          `${ceiling.toFixed(2)} m ceiling ${nearWall ? `within ${PLATE_BAND.toFixed(2)} m of a wall` : 'in the room'}.`,
+      );
+    }
+  }
+}
+
+
+// ---------------------------------------------------------------------------
+// 7. A torch's fire, its bracket and its soot mark are all on the same torch.
+// ---------------------------------------------------------------------------
+
+/**
+ * **The reported-versus-measured assertion, pointed at the thing most likely to
+ * drift.** Four separate meshes are placed from one anchor list — the bracket,
+ * the flame, the flame's core and the soot mark above it — and they are in four
+ * different draw calls with four different geometries. Nothing but this says
+ * they agree.
+ *
+ * It also measures the flame against the two limits that decide whether a torch
+ * is *visible at all*: `SCONCE_HEADROOM`, the budget published to the 3D
+ * Artist, and the wall-plate's real sightline at the game's camera pitch — the
+ * fault the Artist caught by looking, before forty torches were placed under a
+ * timber that would have hidden every one.
+ */
+for (let deck = 0; deck < TOP_DECK; deck += 1) {
+  const anchors = castleTorchAnchors(deck);
+  const floor = new Group();
+  new CastleFire().dress(deck, floor);
+  floor.updateMatrixWorld(true);
+
+  const brackets = floor.getObjectByName(`castle-torch-bracket-${deck}`) as InstancedMesh | undefined;
+  const soot = floor.getObjectByName(`castle-soot-${deck}`) as InstancedMesh | undefined;
+
+  if (anchors.length === 0) {
+    fail(`torches: deck ${deck} is an enclosed storey with nowhere at all to put a torch.`);
+    continue;
+  }
+  if (!brackets || !soot) {
+    fail(`torches: deck ${deck} has ${anchors.length} anchors but no brackets and/or no soot.`);
+    continue;
+  }
+  if (brackets.count !== anchors.length || soot.count !== anchors.length) {
+    fail(
+      `torches: deck ${deck} has ${anchors.length} anchors, ${brackets.count} brackets and ` +
+        `${soot.count} soot marks. They are placed from one list and must be one each.`,
+    );
+    continue;
+  }
+
+  const bracketMatrix = new Matrix4();
+  const sootMatrix = new Matrix4();
+  const bracketAt = new Vector3();
+  const sootAt = new Vector3();
+  for (let i = 0; i < anchors.length; i += 1) {
+    brackets.getMatrixAt(i, bracketMatrix);
+    soot.getMatrixAt(i, sootMatrix);
+    bracketAt.setFromMatrixPosition(bracketMatrix);
+    sootAt.setFromMatrixPosition(sootMatrix);
+
+    // Same place on the plan, and the stain above the fire rather than below.
+    const drift = Math.hypot(bracketAt.x - sootAt.x, bracketAt.z - sootAt.z);
+    if (drift > 0.1) {
+      fail(
+        `torches: deck ${deck} torch ${i} has its soot mark ${drift.toFixed(2)} m away from its ` +
+          `bracket on the plan. They are placed from the same anchor and must not drift.`,
+      );
+    }
+    if (sootAt.y <= bracketAt.y + CASTLE_TORCH_CUP.up) {
+      fail(
+        `torches: deck ${deck} torch ${i} has its soot mark at ${sootAt.y.toFixed(2)} m, at or ` +
+          `below its own flame at ${(bracketAt.y + CASTLE_TORCH_CUP.up).toFixed(2)} m. Soot ` +
+          `rises.`,
+      );
+    }
+  }
+
+  // --- and the fire fits in the budget the timber leaves it ---------------
+  const flames = floor.getObjectByName(`castle-flame-${deck}`) as InstancedMesh | undefined;
+  if (!flames) {
+    fail(`torches: deck ${deck} built brackets but no flames to put in them.`);
+    continue;
+  }
+  flames.geometry.computeBoundingBox();
+  const flameBox = flames.geometry.boundingBox;
+  if (!flameBox) {
+    fail(`torches: deck ${deck} flame geometry has no bounding box to measure.`);
+    continue;
+  }
+  const flameMatrix = new Matrix4();
+  const flameWorld = new Box3();
+  const sootBox = new Box3();
+  soot.geometry.computeBoundingBox();
+  const sootLocal = soot.geometry.boundingBox;
+  let highestWallFlame = -Infinity;
+  let highestSoot = -Infinity;
+  for (let i = 0; i < anchors.length; i += 1) {
+    flames.getMatrixAt(i, flameMatrix);
+    flameWorld.copy(flameBox).applyMatrix4(flameMatrix);
+    highestWallFlame = Math.max(highestWallFlame, flameWorld.max.y);
+    if (!sootLocal) continue;
+    soot.getMatrixAt(i, sootMatrix);
+    sootBox.copy(sootLocal).applyMatrix4(sootMatrix);
+    highestSoot = Math.max(highestSoot, sootBox.max.y);
+  }
+
+  const sconceTop = SCONCE_MOUNT_Y + SCONCE_HEADROOM;
+  if (highestWallFlame > sconceTop) {
+    fail(
+      `torches: deck ${deck}'s tallest wall flame reaches ${highestWallFlame.toFixed(3)} m, past ` +
+        `the ${sconceTop.toFixed(2)} m budget SCONCE_HEADROOM publishes to the 3D Artist. Either ` +
+        `the flame is too tall or the published budget is wrong — do not leave them disagreeing.`,
+    );
+  }
+  if (highestSoot > BEAM_UNDERSIDE) {
+    fail(
+      `torches: deck ${deck}'s soot reaches ${highestSoot.toFixed(3)} m, past the timber at ` +
+        `${BEAM_UNDERSIDE.toFixed(2)} m — its top would be sliced off by a beam, which reads as ` +
+        `a broken texture rather than as a stain.`,
+    );
+  }
+}
 
 // ---------------------------------------------------------------------------
 
@@ -383,4 +725,11 @@ console.log(
     `${TALLEST_CHILD} m child under a ${CASTLE_CEILING_CLEAR.toFixed(2)} m ceiling, and ` +
     `BEAM_UNDERSIDE agrees with the mesh at ${BEAM_UNDERSIDE.toFixed(3)} m.`,
 );
-console.log(`check:castle ${PROP_ASSERTIONS_PENDING}`);
+console.log(
+  `check:castle props OK — ${propsChecked} placed instances measured across ` +
+    `${BUILDING_FLOOR_COUNT} storeys, none in a walkable route or on a shop stand and none ` +
+    `through a ceiling. Route-exempt: ${exemptOverhead} entirely above a ${TALLEST_CHILD} m ` +
+    `child, ${exemptFlat} floor treatment under ${FLOOR_TREATMENT_MAX_HEIGHT} m tall, ` +
+    `${exemptWall} wall furniture within ${WALL_FURNITURE_REACH} m of its wall. All three ` +
+    `exemptions are measured off the object, never taken from its name.`,
+);
