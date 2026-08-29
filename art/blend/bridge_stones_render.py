@@ -1,25 +1,46 @@
 """Assembles a whole bridge out of the kit and renders it, for the eye.
 
-    blender --background --factory-startup --python art/blend/bridge_stones_render.py
+    npm run render:bridge
 
 ``bridge_stones_build.py`` makes three stones. Three stones tell you nothing
 about whether a *bridge* reads right, which is the only question Jim asked, so
-this builds the thing they are for: a 40%-shorter humpback with a three-centred
-arch, a modelled voussoir ring round the mouth and a modelled coping run over
-both parapets — and looks at it from the game's own 45° camera.
+this builds the thing they are for: a humpback with a three-centred arch, a
+modelled voussoir ring round the mouth and a modelled coping run over both
+parapets — and looks at it from the game's own 45 degree camera.
 
 It is a **preview**, not a shipped asset. The park builds this geometry itself
-(`src/world/train/bridges.ts`), swept along each crossing's own curve; this
-file exists so the shape could be judged before that code was written, and so
-it can be re-judged when a number moves. The arch maths below is deliberately
-the same derivation `bridges.ts` uses — if the two ever disagree, the render is
-the one that is wrong, because the park is what a child sees.
+(`src/world/train/bridges.ts`), swept along each crossing's own curve.
+
+## Every number here comes from the game. None is typed in.
+
+This file used to carry its own copy of the bridge's dimensions, and peer
+review of PR #360 found that the copies had already drifted: the committed
+renders were built with ``HUMP_BLEND`` 0.15 against the branch's 0.25,
+``COURSE_RECESS`` 0.09 against 0.06, and a ramp run taken from a different
+branch entirely. Five renders of a bridge the game does not build — offered as
+evidence of what it looks like.
+
+That is CLAUDE.md's "two definitions of one thing, kept in step by hand", and
+it is the same failure this branch had already fixed once in the parapet arc.
+So the numbers are now *asked for*: ``scripts/dump-bridge-constants.mts``
+imports the game's own modules, evaluates them and prints JSON, and this reads
+it. A regex could not have done it — ``BRIDGE_RAMP_GRADIENT`` is an expression
+over ``ENTRANCE_RAMP``, ``BRIDGE_RISE`` a sum across three modules, and
+``profileDrop`` a function, which is why that one arrives as a sampled table
+and is interpolated rather than reimplemented here.
+
+**This preview therefore shows whatever bridge this branch builds.** On
+`art/bridge-model` alone that is the full-length one, ~36.7 m: the 40%
+shortening lives in the Engineer's #352, not here. Merge the two and re-run,
+and the same script draws the short one with nothing edited.
 
 Renders land in ``art/renders/`` as the project already does.
 """
 
+import json
 import math
 import os
+import subprocess
 
 import bmesh
 import bpy
@@ -29,28 +50,54 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 BLEND = os.path.join(REPO, "art", "blend", "bridgeStones.blend")
 RENDERS = os.path.join(REPO, "art", "renders")
 
-# --- the bridge this preview builds -----------------------------------------
-# Measured off `main`, not invented — see HANDOFF-bridge-model.md's table.
-ARCH_SPAN_HALF = 3.2       # DECK_HALF_LENGTH = FENCE_OFFSET + 1.2
-ARCH_CLEAR_HALF = 1.8      # TRACK_CLEARANCE + 0.5
-ARCH_CROWN_DIP = 0.18      # the chosen three-centred arch's dip at the clear span
-TRAIN_CLEARANCE_Y = 3.90
-BRIDGE_DECK_DEPTH = 0.16
-HEIGHT_MARGIN = 0.05
-ROAD_HALF = 1.6            # canonical seed's first bridge
-WALL_THICKNESS = 0.3
-PARAPET_HEIGHT = 0.72
-HUMP_BLEND = 0.15          # the Engineer's sprint-safe trim (provisional)
-PARAPET_CROWN_LIFT = 0.45  # the pronounced hump, on the part nobody walks on
-BRIDGE_RISE = 4.060
-COURSE_HEIGHT = 0.7
-COURSE_RECESS = 0.09
-COPING_HEIGHT = 0.28
-RAMP_RUN = 7.814           # the Engineer's contract: 15.157 -> 7.814 (#349)
 
-COPING_LENGTH = 0.86
-VOUSSOIR_PITCH = 0.42
-KEYSTONE_PITCH = 0.8
+def game_constants() -> dict:
+    """The bridge's real dimensions, straight out of the game's own modules.
+
+    Runs ``npm run dump:bridge-constants`` and parses its JSON. Deliberately a
+    subprocess rather than a checked-in generated file: a file is one more
+    thing that can be stale, and staleness is the entire bug this replaces.
+    """
+    out = subprocess.run(
+        ["npm", "run", "--silent", "dump:bridge-constants"],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return json.loads(out[out.index("{"):])
+
+
+K = game_constants()
+
+ARCH_SPAN_HALF = K["ARCH_SPAN_HALF"]
+ARCH_CLEAR_HALF = K["ARCH_CLEAR_HALF"]
+ARCH_CROWN_DIP = K["ARCH_CROWN_DIP"]
+TRAIN_CLEARANCE_Y = K["TRAIN_CLEARANCE_Y"]
+BRIDGE_DECK_DEPTH = K["BRIDGE_DECK_DEPTH"]
+BRIDGE_RISE = K["BRIDGE_RISE"]
+WALL_THICKNESS = K["BRIDGE_WALL_THICKNESS"]
+PARAPET_HEIGHT = K["PARAPET_HEIGHT"]
+PARAPET_CROWN_LIFT = K["PARAPET_CROWN_LIFT"]
+COURSE_HEIGHT = K["COURSE_HEIGHT"]
+COURSE_RECESS = K["COURSE_RECESS"]
+COPING_HEIGHT = K["COPING_HEIGHT"]
+COPING_LENGTH = K["COPING_LENGTH"]
+VOUSSOIR_PITCH = K["VOUSSOIR_PITCH"]
+KEYSTONE_PITCH = K["KEYSTONE_PITCH"]
+RAMP_RUN = K["idealRampRun"]
+PROFILE = K["profile"]
+
+# `bridges.ts`'s own sampling-error margin on the worst ground under a crown.
+# Not in the dump because it is private to the crown solve and means nothing
+# without it; the preview stands on flat ground, where it is simply a constant
+# lift of the whole bridge.
+HEIGHT_MARGIN = 0.05
+
+# The canonical seed's first bridge. Deck width is genuinely per-bridge — it is
+# the path's own drawn width — so a preview has to pick one, and the Engineer's
+# contract names this as the figure to model proportions against.
+ROAD_HALF = 1.6
 
 HALF_ACROSS = ROAD_HALF + WALL_THICKNESS
 SOFFIT_CROWN = TRAIN_CLEARANCE_Y + HEIGHT_MARGIN + ARCH_CROWN_DIP  # above ground
@@ -58,7 +105,7 @@ CROWN_ROAD = SOFFIT_CROWN + BRIDGE_DECK_DEPTH
 
 
 # =============================================================================
-# The arch — the same three-centred derivation `bridges.ts` uses
+# The arch - the same three-centred derivation `bridgeStonework.ts` uses
 # =============================================================================
 
 R1 = (ARCH_CLEAR_HALF ** 2 + ARCH_CROWN_DIP ** 2) / (2 * ARCH_CROWN_DIP)
@@ -122,18 +169,18 @@ def ring_stones():
 
 
 def profile_drop(q: float) -> float:
-    """`bridges.ts`'s `profileDrop`, verbatim: 0 at the crown, 1 at the foot."""
+    """`bridges.ts`'s `profileDrop`, **interpolated from the game's own samples**
+    rather than reimplemented here — see this file's header. A second copy of
+    the hump's shape is exactly the class of drift that made the last set of
+    renders wrong.
+    """
     u = min(1.0, max(0.0, q))
-    b = HUMP_BLEND
-    total = 1 - b
-    if u < b:
-        w = u / 2 - (b / (2 * math.pi)) * math.sin(math.pi * u / b)
-    elif u <= 1 - b:
-        w = b / 2 + (u - b)
-    else:
-        v = u - (1 - b)
-        w = b / 2 + (1 - 2 * b) + v / 2 + (b / (2 * math.pi)) * math.sin(math.pi * v / b)
-    return w / total
+    x = u * (len(PROFILE) - 1)
+    i = int(x)
+    if i >= len(PROFILE) - 1:
+        return PROFILE[-1]
+    t = x - i
+    return PROFILE[i] + (PROFILE[i + 1] - PROFILE[i]) * t
 
 
 def road_y(along: float) -> float:
@@ -465,19 +512,29 @@ def setup_render():
     return cam
 
 
+# Each shot is (position, aim, lens, frames-the-whole-bridge?). The last flag
+# is why these are not plain coordinates: the bridge's length is now read from
+# the game rather than typed in, so it changes when `HUMP_BLEND` or the ramp
+# gradient does, and a camera parked at a fixed distance would slide off the
+# end of it. Whole-bridge shots pull back in proportion to the length; shots
+# about the tunnel mouth do not, because the mouth is the same size either way.
 SHOTS = {
-    # The game's own 45° iso view, from the side a walker approaches on.
-    "bridge-iso": ((15.0, -15.0, 12.0), (0.0, 0.0, 2.0), 45.0),
+    # The game's own 45 degree iso view, from the side a walker approaches on.
+    "bridge-iso": ((15.0, -15.0, 12.0), (0.0, 0.0, 2.0), 45.0, True),
     # Square on the tunnel mouth: the arch and its ring.
-    "bridge-arch": ((0.9, -16.0, 2.4), (0.0, 0.0, 2.6), 42.0),
+    "bridge-arch": ((0.9, -16.0, 2.4), (0.0, 0.0, 2.6), 42.0, False),
     # Straight along the deck: the coping run over the hump.
-    "bridge-coping": ((-14.0, -3.4, 6.4), (2.0, 0.0, 3.4), 45.0),
-    # A child's eye height at the ramp foot — the view the flank was reworked
+    "bridge-coping": ((-14.0, -3.4, 6.4), (2.0, 0.0, 3.4), 45.0, True),
+    # A child's eye height at the ramp foot - the view the flank was reworked
     # for. If the coursing does not read from here it does not read at all.
-    "bridge-flank": ((-9.5, -7.0, 1.2), (0.5, -2.6, 2.4), 40.0),
+    "bridge-flank": ((-9.5, -7.0, 1.2), (0.5, -2.6, 2.4), 40.0, False),
     # Flat side elevation: the hump silhouette and the arch together.
-    "bridge-silhouette": ((0.0, -48.0, 5.4), (0.0, 0.0, 2.4), 60.0),
+    "bridge-silhouette": ((0.0, -48.0, 5.4), (0.0, 0.0, 2.4), 60.0, True),
 }
+
+# The length the shot positions above were framed against. Only ever used as
+# the denominator of that proportion - never as a bridge dimension.
+SHOT_REFERENCE_LENGTH = 22.03
 
 
 def main() -> None:
@@ -494,8 +551,10 @@ def main() -> None:
           f"average ramp gradient {CROWN_ROAD / RAMP_RUN:.3f}")
 
     os.makedirs(RENDERS, exist_ok=True)
-    for name, (pos, target, lens) in SHOTS.items():
-        cam.location = Vector(pos)
+    span = 2 * RAMP_RUN_TOTAL
+    for name, (pos, target, lens, whole) in SHOTS.items():
+        scale = span / SHOT_REFERENCE_LENGTH if whole else 1.0
+        cam.location = Vector(pos) * scale
         cam.data.lens = lens
         look_at(cam, Vector(target))
         path = os.path.join(RENDERS, f"{name}.png")

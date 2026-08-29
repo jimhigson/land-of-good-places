@@ -153,7 +153,7 @@ import type { MovingPlatform } from '../building/surfaces';
  * never to hide a walking child (GAME_DESIGN.md's "a small bridge does not
  * obscure a player walking on it"), high enough to read as a real stone
  * parapet rather than a kerb. */
-const PARAPET_HEIGHT = 0.72;
+export const PARAPET_HEIGHT = 0.72;
 
 /**
  * The hump height (above the local ground beside it) below which the
@@ -224,7 +224,7 @@ function parapetHeightFor(humpHeight: number): number {
  * the coping, which is what a child on a real humpback bridge looks like.
  * Going much past this starts eating her from the game's camera too.
  */
-const PARAPET_CROWN_LIFT = 0.45;
+export const PARAPET_CROWN_LIFT = 0.45;
 
 /**
  * Half-span (along the path) of the arch's flat crown — the stretch of
@@ -234,13 +234,13 @@ const PARAPET_CROWN_LIFT = 0.45;
  * gently curving rail line under the bridge still keeps every part of the
  * train under the full-height crown.
  */
-const ARCH_CLEAR_HALF = TRACK_CLEARANCE + 0.5;
+export const ARCH_CLEAR_HALF = TRACK_CLEARANCE + 0.5;
 
 /** Half-span (along the path) of the whole arch opening — abutment inner
  * faces stand here. `DECK_HALF_LENGTH` clears both fence lines with margin
  * (its own doc), so the tunnel swallows the entire fenced corridor and the
  * masonry only ever stands on ground the fence already forbids to feet. */
-const ARCH_SPAN_HALF = DECK_HALF_LENGTH;
+export const ARCH_SPAN_HALF = DECK_HALF_LENGTH;
 
 /**
  * The authored voussoir is cut as a wedge for one particular ring radius
@@ -303,7 +303,7 @@ const SHELL_STEP = 0.6;
  * it. What the texture cannot do is survive into a silhouette or catch a
  * shadow, and at 0.7 m a course does both from right across the park.
  */
-const COURSE_HEIGHT = 0.7;
+export const COURSE_HEIGHT = 0.7;
 
 /**
  * How far alternate courses are recessed **inward** from the wall's own outer
@@ -311,7 +311,7 @@ const COURSE_HEIGHT = 0.7;
  * footprint search proved clear, so the wall may get thinner than it but never
  * fatter.
  */
-const COURSE_RECESS = 0.06;
+export const COURSE_RECESS = 0.06;
 
 /** Pitch of the parapet collision-wall segments, metres. */
 const WALL_SEGMENT = 2.0;
@@ -437,14 +437,14 @@ function clamp01(value: number): number {
  * trapezoid's 0.56 peak leaves a third of the ceiling spare at the same
  * ramp length.
  */
-const HUMP_BLEND = 0.25;
+export const HUMP_BLEND = 0.25;
 
 /**
  * Normalised drop of the hump profile: 0 at the crown (`q = 0`), 1 at the
  * foot (`q = 1`), zero slope at both ends, cosine-blended trapezoid slope
  * in between — see {@link HUMP_BLEND}. The ONE owner of the hump's shape.
  */
-function profileDrop(q: number): number {
+export function profileDrop(q: number): number {
   const u = clamp01(q);
   const b = HUMP_BLEND;
   const total = 1 - b; // integral of the slope shape over [0, 1]
