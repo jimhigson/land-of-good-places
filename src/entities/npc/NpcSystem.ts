@@ -39,7 +39,7 @@ import type { ShopStand } from '../../world/building/shops/Shops';
 import { createPetBlob, PET_BODY_NODE, PET_HEAD_NODE } from './petBlob';
 import { WanderDriver, type ClimberBudget } from './wanderDriver';
 import type { ActivityBudget } from './activities/activity';
-import { SPACE_CASTLE, spaceAt } from '../../world/spaces';
+import { SPACE_CASTLE, SPACE_GARDEN, spaceAt } from '../../world/spaces';
 // Chatting (see the additive block in wanderDriver.ts): the shared budget
 // that caps how many children may be mid-chat at once, and the speed below
 // which the player counts as "stood still" for that same block.
@@ -65,6 +65,19 @@ export const MAX_CONCURRENT_CLIMBERS = 3;
  * never so many that the platform *is* the park.
  */
 export const MAX_CONCURRENT_RIDERS = 4;
+
+/**
+ * How long a child stays in the castle when the player is not in there with
+ * them — issue #362.
+ *
+ * Long enough to read as a visit rather than a bounce off the door, short
+ * enough that the four indoor places keep turning over and the park does not
+ * quietly lose four children for a session. Only ever used while the child is
+ * a marker rather than an agent: with the player inside, they walk out on their
+ * own like anybody else.
+ */
+const VISIT_MIN = 25;
+const VISIT_MAX = 70;
 
 /**
  * How many children may be mid-chat across the whole park at once (see the
@@ -474,6 +487,25 @@ export class NpcSystem implements GameSystem {
    * instance of exactly this.
    */
   private readonly elsewhere = new Set<NpcCharacter>();
+  /**
+   * How much longer each marked-indoors child stays in there — issue #362.
+   *
+   * The one number a frozen child keeps, and the thing that stops the mark
+   * being a black hole. A marked child is not simulated, so they cannot *walk*
+   * out; without this, four children would step into the castle, freeze, and
+   * `MAX_INSIDE` would hold the door shut for the rest of the session while the
+   * park slowly drained.
+   *
+   * Not a simulation and not a route: one countdown, then they are put back
+   * outside the front door — the same spot `leaveInterior` puts the player, so
+   * they emerge where somebody leaving the castle emerges.
+   *
+   * Keyed on the character and **deleted whenever they are not marked indoors**,
+   * so it self-heals rather than needing an exit to remember to clear it.
+   * Hotel residents never get an entry: they *live* in their rooms, and being
+   * marked present indefinitely is the correct behaviour for them.
+   */
+  private readonly visitRemaining = new Map<NpcCharacter, number>();
   private frame = 0;
   /**
    * Set by `attachPlayer`, once the player exists — `null` for the handful of
@@ -839,6 +871,7 @@ export class NpcSystem implements GameSystem {
     this.planner.beginFrame();
     this.stepChildrenThroughDoors();
     this.markWhoIsElsewhere();
+    this.updateIndoorVisits(dt);
 
     // The player's hop is the cue for the giggle-hop. Reading the action rather
     // than the Player keeps this system's only dependency the collision world.
@@ -1267,6 +1300,47 @@ export class NpcSystem implements GameSystem {
       if (spaceAt(character.position.x, character.position.z) === playerSpace) continue;
       if (character.isAirborne) continue;
       this.elsewhere.add(character);
+    }
+  }
+
+  /**
+   * Counts down each marked-indoors child's visit and sends them home when it
+   * ends. See {@link visitRemaining} for why this exists at all.
+   *
+   * Only park children (`WanderDriver`) are ever given a timer. A resident on a
+   * `WaypointDriver` belongs to their room, so "still in there" is not a state
+   * to recover from.
+   */
+  private updateIndoorVisits(dt: number): void {
+    const out = this.planner.portalToward(SPACE_CASTLE, SPACE_GARDEN);
+    for (let i = 0; i < this.characters.length; i += 1) {
+      const character = this.characters[i];
+      const driver = this.wanderDrivers[i];
+      if (!character || !driver) continue;
+
+      // Not marked-and-indoors: no visit to time. Covers the case that matters
+      // most — the player walking in, which un-marks everybody in there and
+      // hands them straight back to ordinary simulation, timer forgotten.
+      const indoors = spaceAt(character.position.x, character.position.z) === SPACE_CASTLE;
+      if (!indoors || !this.elsewhere.has(character)) {
+        this.visitRemaining.delete(character);
+        continue;
+      }
+
+      const left =
+        (this.visitRemaining.get(character) ?? driver.rng.range(VISIT_MIN, VISIT_MAX)) - dt;
+      if (left > 0) {
+        this.visitRemaining.set(character, left);
+        continue;
+      }
+
+      this.visitRemaining.delete(character);
+      if (!out) continue;
+      character.stepThroughDoor(out.farX, out.farY, out.farZ, out.farFacing);
+      driver.portalTaken();
+      // …and they have finished with the shop they went in for, or they would
+      // turn round on the doorstep and go back in for it.
+      driver.finishedIndoors();
     }
   }
 
