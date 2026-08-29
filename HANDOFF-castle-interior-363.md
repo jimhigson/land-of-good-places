@@ -348,6 +348,33 @@ somebody building to the stricter number for no reason.
 | `SCONCE_MOUNT_Y` | 2.10 m | Where the back plate lands. Unchanged. |
 | `SCONCE_HEADROOM` | **0.60 m** | **A sconce must fit inside this, measured up from the mount.** It is the budget the plate's sightline is checked against; deliberately generous against the ~0.46 m asked for, so a sconce growing a little does not silently vanish behind a timber. |
 
+**Entry 3 — for whoever replaces the castle Artist.** Its session was lost on
+29 Aug; its work is pushed and PR #368 carries its answers, so nothing is gone.
+Two things are outstanding on that side, and both are small:
+
+1. **The render script's scale post still types the child's height.** It says
+   1.86 m under a comment claiming the figure came from `TALLEST_CHILD`. The
+   real numbers are 2.12 m, and 2.97 m hatted. That post is the reference object
+   every render is judged against, so while it is wrong **every size judgement
+   made from those pictures is wrong** — a 2.60 m suit of armour was called
+   towering while being shorter than a child in a tall hat.
+
+   **Do not simply retype it as 2.97.** Read it out of `src/art/models/kid.ts`
+   at asset-build time, the way `art/blend/hotel_build.py` already reads
+   `TALLEST_CHILD_HEIGHT` and `RIDER_HEADROOM`. That pattern exists in this repo
+   precisely so a `.py` cannot drift from the game — and a typed copy there is
+   invisible to `tsc` and to every check.
+
+   I have fixed the two source documents (`ASSET_MANIFEST.md`,
+   `ART_DIRECTION.md`) that told the Artist 1.86 in the first place. Once the
+   render script is on a branch I can see, `check:castle` gains an assertion
+   that its scale post equals the imported constant — the reported-vs-measured
+   shape already used three times on this branch.
+
+2. **Re-judge the batch-1 silhouettes against a correct post.** Every size
+   decision so far was made against one a quarter too short. The armour is the
+   one most likely to need to grow.
+
 ### 4.6 Batch 2 — queued, not yet requested
 
 Fireplace chimneypiece, chandelier, barrel, sack, cauldron, helmet on a
