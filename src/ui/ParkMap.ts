@@ -13,6 +13,7 @@ import { ENTRANCE_GATE_HALF_WIDTH } from '../world/entrance/layout';
 import { CAT_BUS_LENGTH, CAT_BUS_ROUTE_NUMBER } from '../world/entrance/catBus';
 import { capture, wheelNotches } from '../core/input/PointerControls';
 import {
+  TAP_MAX_DRIFT_PX,
   completesTap,
   tapCandidate,
   tapDriftedTooFar,
@@ -469,9 +470,8 @@ export class ParkMap {
 
     this.hint = document.createElement('p');
     this.hint.className = 'shop-hint';
-    this.hint.textContent = isTouchDevice()
-      ? 'Tap where to go, or tap outside to close.'
-      : 'Click where to go · Esc or M to close.';
+    // Text set in `updateHint`, from the layout that actually rendered — see
+    // there for why it cannot be settled here.
 
     this.card.append(head, this.floorRow, this.canvasWrap, this.hint);
     this.root.append(this.card);
@@ -571,6 +571,50 @@ export class ParkMap {
     if (next < 0 || next > TOP_DECK) return;
     this.viewingDeck = next;
     this.render();
+  }
+
+  // ------------------------------------------------------------- the hint
+
+  /**
+   * **Is there any dimmed backdrop to tap?** Measured, not assumed.
+   *
+   * On a phone in portrait the card is full-bleed — `.parkmap-card` is
+   * `100%` of an unpadded container below 34rem — so there is no margin
+   * around it and nothing outside to tap. The hint nevertheless read "Tap
+   * where to go, or tap outside to close" on every screen, which told a
+   * six-year-old to do something impossible and is most likely why Jim's
+   * report reads as intermittent: in portrait he could not hit the backdrop at
+   * all, while landscape surrounds the card with a wide margin.
+   *
+   * Layout metrics rather than `getBoundingClientRect`, deliberately:
+   * `.parkmap-card` opens with a `shop-pop` scale animation, and a
+   * transform-aware rect measured on the opening frame reports a card smaller
+   * than the one that settles — which would claim a backdrop that is about to
+   * vanish. `offsetWidth`/`clientWidth` are untransformed layout, so this
+   * reads the same on the first frame as on the last.
+   *
+   * And a threshold rather than "greater than zero": a two-pixel seam is not
+   * something to tell a child to aim at. It is
+   * `TAP_MAX_DRIFT_PX` either side — a tap allowed to wander that far needs at
+   * least that much band to land in — so it is derived from the same one
+   * definition of a tap the backdrop listener uses, not a fresh guess.
+   */
+  private hasTappableBackdrop(): boolean {
+    const slackX = this.root.clientWidth - this.card.offsetWidth;
+    const slackY = this.root.clientHeight - this.card.offsetHeight;
+    // The card is centred, so each side gets half the slack.
+    return Math.max(slackX, slackY) / 2 >= TAP_MAX_DRIFT_PX;
+  }
+
+  /** The truth about how to close this map, on the screen it is actually on. */
+  private updateHint(): void {
+    if (!isTouchDevice()) {
+      this.hint.textContent = 'Click where to go · Esc or M to close.';
+      return;
+    }
+    this.hint.textContent = this.hasTappableBackdrop()
+      ? 'Tap where to go, or tap outside to close.'
+      : 'Tap where to go, or tap ✕ to close.';
   }
 
   // ---------------------------------------------------------- the backdrop
@@ -881,6 +925,10 @@ export class ParkMap {
     this.floorRow.hidden = !this.indoor;
     this.upButton.disabled = this.viewingDeck >= TOP_DECK;
     this.downButton.disabled = this.viewingDeck <= 0;
+    // Before the canvas is measured: the hint is a card row, and what it says
+    // depends on the card's own layout, which `render` re-runs on every resize
+    // and rotation.
+    this.updateHint();
     this.syncCanvasSize();
 
     // The viewport, from `parkMapProjection.ts` — the one owner of the
