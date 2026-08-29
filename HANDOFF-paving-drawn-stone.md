@@ -110,6 +110,66 @@ The two segments involved are `(12.99, −41.17)→(12.65, −43.10)` (top 3.94)
 `(12.65, −43.10)→(12.31, −45.07)` (top 2.98) — consecutive parapet segments
 stepping down the ramp.
 
+### ROOT CAUSE (proved): `nearOtherGuardRail` models a 6.4 m rail that is really ~22 m
+
+Seed 2 has **two** bridges: index 0 over our crossing (−2.19, −46.97), index 1
+over (15.35, −35.74). Their ramps run at each other.
+
+Authorship of the blocking segment was **proved, not inferred**, by projecting
+every registered parapet onto *both* crossings' frames. Bridge 0's own parapets
+sit at `across = ±1.87` in bridge 0's frame; the wandering run that crosses the
+walked centreline sits at `across = ±1.87` **in bridge 1's frame** — that is
+bridge 1's own `wallLine`, so bridge 1 built it:
+
+| bridge 0 along | across (b0) | top | owner | in bridge 1's frame |
+| --- | --- | --- | --- | --- |
+| −16.30 | −1.47 | 3.94 | 1 | 6.75 / −1.87 |
+| **−15.00** | **+0.11** | **2.98** | 0+1 | **8.73 / −1.88** |
+| −13.98 | +1.80 | 2.03 | 0+1 | 10.73 / −1.88 |
+
+**Bridge 1's ramp parapet runs straight across bridge 0's ramp**, crossing the
+walked centreline at `across = +0.11` — dead on the walking line. Its top is
+still 2.98 m absolute there because that point is high up bridge 1's own ramp,
+so it is solid to a walker whose feet are at ~2.4 m climbing bridge 0.
+
+`planReal` **does** have a cross-crossing exclusion, `nearOtherGuardRail`, and
+it is the thing that failed. It models a neighbour's guard rail as running only
+the deck's own span:
+
+```ts
+const alongClamped = Math.max(-DECK_HALF_LENGTH, Math.min(DECK_HALF_LENGTH, along));
+```
+
+`DECK_HALF_LENGTH = FENCE_OFFSET + 1.2 = 3.2 m`, so the modelled rail is 6.4 m
+long. The real parapet loop in `bridges.ts` runs `-lengthNeg … +lengthPos` —
+**the deck and both ramps** — gated only by `PARAPET_MIN_HUMP`. Measured, they
+reach `along ±11.27` and beyond: ~22 m, not 6.4 m.
+
+The blocking segment is at bridge 1's `along +8.73`, i.e. **5.53 m past the end
+of the rail `nearOtherGuardRail` believes in**. Clamping gives `dAlong = 5.53`,
+so `hypot(dAlong, dAcross)` is far outside `GUARD_RAIL_MARGIN` (0.08 +
+`REAL_PROBE_RADIUS`) and the check reports "no nearby guard rail". Bridge 0 then
+plans its ramp straight through a wall that is about to be built.
+
+**The comment above that check — "never a ramp: see that file's own
+`railHalfAcross`" — is stale.** It describes an older geometry in which parapets
+really did stop at the deck. They have not for some time; the measurement above
+is against the built park.
+
+This also explains both surviving observations exactly:
+
+- **`bridgeRoadHalfFor` moves it** because `railAcross = deck.halfAcross`
+  = `roadHalf + BRIDGE_WALL_THICKNESS`. Widen the road and bridge 1's parapet
+  slides laterally, moving where it cuts bridge 0's centreline — one 0.5 m step.
+- **`ACROSS_MARGIN` does not**, because it belongs to the conservative
+  reservation, which places no parapets at all.
+
+### The fix
+
+`DeckPlan` must carry the neighbour's **real** parapet extent (its
+`rampRunPos`/`rampRunNeg`) and `nearOtherGuardRail` must clamp `along` to that
+rather than to `DECK_HALF_LENGTH`.
+
 ### Why it blocks: absolute tops on a ramp the walker is climbing
 
 The parapet's top is **absolute** world Y at the local road surface. At the
