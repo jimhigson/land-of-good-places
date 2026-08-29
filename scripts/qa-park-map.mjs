@@ -62,10 +62,12 @@ for (const size of SIZES) {
     timeout: 120000,
   });
 
-  // The park generates through a dozen lazy imports; wait for the HUD rather
-  // than a fixed sleep.
-  await page.waitForSelector('.hud-menu-items, .pill--map', { timeout: 180000 });
-  await page.waitForTimeout(2500);
+  // The park generates through a dozen lazy imports; wait for the map pill to
+  // exist rather than for a fixed sleep. `attached`, not `visible` — it lives
+  // in the HUD's menu drawer, which is collapsed until it is opened, so
+  // waiting for visibility waits forever.
+  await page.waitForSelector('.pill--map', { state: 'attached', timeout: 180000 });
+  await page.waitForTimeout(3000);
 
   await page.keyboard.press('m');
   await page.waitForSelector('.parkmap[data-open="true"]', { timeout: 30000 });
