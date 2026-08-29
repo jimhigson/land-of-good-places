@@ -73,14 +73,34 @@ view; label collision-avoidance in `drawLabel` at `minTextPx()`.
 
 ## Decisions
 
-_(record each as it is made)_
-
 - **D1** — one PR closes #334 and #234.
+- **D2 — take `origin/stylized-map`'s icons, drop its geometry.** Reviewed in
+  full. Split verdict:
+  - **Keep `ICONS` / `drawIcon`** (~430 of its 606 lines): one flat-shaded
+    vector drawing per attraction — castle, hotel, ball pit, ferris wheel,
+    dodgems, water fight, sky cruiser, rail racer, spooky house, fountain,
+    station, tree. Bold dark outline, two or three flat fills, no gradients.
+    That is exactly Jim's "each building should have a drawing of it", already
+    written and in the right idiom. Re-using it is cheaper and better than
+    redrawing thirteen icons, and it is original art, not traced.
+  - **Drop `buildBlobBoundary` and `scatterTrees`.** `buildBlobBoundary`
+    *invents* a park outline from content positions plus three sine harmonics.
+    It never reads `PARK_BOUNDARY` at all. That is precisely CLAUDE.md's "two
+    definitions of one thing" disease — a second, fictional park shape drawn
+    where the real one belongs — and it satisfies #334's "not a circle" while
+    leaving #234 entirely unfixed. `scatterTrees` likewise invents trees rather
+    than drawing the ones the park placed.
+  - **Decisive fact**: `origin/stylized-map` never touched `render()`'s
+    viewport, still `GARDEN_HALF_SIZE + 4`. **The ~35 m clip of #234 is still
+    present on that branch.** So it cannot be merged as-is regardless.
+- **D3 — the map's geometry comes from `PARK_BOUNDARY`.** Ground shape is
+  `PARK_BOUNDARY.outline()`; viewport is sized from `PARK_BOUNDARY.extent`
+  (not `maxRadius` — the shape is not centred on the origin, so a radius
+  cannot frame it without slack on one side and a clip on the other).
 
 ## Next steps
 
-1. Review `origin/stylized-map`'s `parkMapArt.ts`; either build on it or write
-   down plainly why not.
+1. ~~Review prior work~~ — done, see D2.
 2. Draw the boundary from `PARK_BOUNDARY.outline()`; size the viewport from
    `PARK_BOUNDARY.extent`.
 3. Per-attraction drawings, anchored to true positions, labelled.
