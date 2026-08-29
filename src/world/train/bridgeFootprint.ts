@@ -6,7 +6,7 @@ import { GARDEN_PLAY_BOUNDARY } from '../boundary';
 import { clearOfPlots } from '../parkLayout';
 import { distanceToRailCorridor } from './plan';
 import type { CollisionWorld } from '../Collision';
-import { PLAYER_RADIUS, SPRINT_PEAK_GRADE_BUDGET } from '../../core/constants';
+import { PATH_KERB_OVERHANG, PLAYER_RADIUS, SPRINT_PEAK_GRADE_BUDGET } from '../../core/constants';
 
 /**
  * The bridge's own footprint in the ground plane (issue #116, Decision 8) —
@@ -230,6 +230,46 @@ export const MIN_DECK_HALF_WIDTH = PLAYER_RADIUS + 0.3;
  */
 export const BRIDGE_WALL_THICKNESS = 0.3;
 
+/**
+ * **The half-width of the road a bridge carries — the one owner (issue
+ * #349).**
+ *
+ * The *drawn* path is wider than its paved surface: `pathGraph.ts` draws the
+ * cream kerb {@link PATH_KERB_OVERHANG} proud of the sandy surface on each
+ * side, so what a child sees as "the path" is `pathHalfWidth +
+ * PATH_KERB_OVERHANG` across. A bridge built to `pathHalfWidth` alone is
+ * 0.425 m per side too narrow to carry the path it is carrying, and the kerb
+ * was never going to land on stone.
+ *
+ * That is what issue #349 was: `bridges.ts` lifted path vertices out to
+ * `roadHalf + PATH_KERB_OVERHANG + PATH_CARRIER_SLACK` while the masonry was
+ * only swept to `roadHalf + BRIDGE_WALL_THICKNESS`, so up to 0.375 m of
+ * paving hung in mid-air past the parapet at the hump's own height — the
+ * sandy wedge poking out of the spandrel in Jim's screenshot. The two numbers
+ * were derived independently from the same crossing and nothing held them
+ * together: CLAUDE.md's "two definitions of one thing, kept in step by hand".
+ *
+ * So the road is defined **once, here, as the drawn paving's own width**, and
+ * everything else is measured off it: the parapets' inner faces stand at this
+ * line, {@link BridgeFootprint.halfAcross} is this plus the wall, and
+ * `bridges.ts`'s `pavingHeightAt` clamps its lift test to that `halfAcross`.
+ * The stone is then the single authority on where the paving ends, and the
+ * kerb's outer edge sits a full `BRIDGE_WALL_THICKNESS` *inside* it rather
+ * than 0.125 m outside.
+ *
+ * Note this widens the deck by 0.85 m overall, which the footprint search has
+ * to find room for — see `planReal`, and the invariant
+ * `plannedBridgeSiteDistances` that proves no crossing lost its bridge to a
+ * level crossing because of it.
+ *
+ * Jim's 2026-08-23 ruling "the bridge is as wide as the path, no wider" is
+ * unchanged and is exactly what this expresses; only *which* width counts as
+ * "the path" is corrected, from the paving alone to the paving as drawn.
+ */
+export function bridgeRoadHalfFor(crossing: LevelCrossing): number {
+  return crossing.pathHalfWidth + PATH_KERB_OVERHANG;
+}
+
 /** Coarse step the ramp-reach probes walk by. */
 const WIDTH_STEP = 0.5;
 
@@ -395,15 +435,15 @@ export interface BridgeFootprint {
    */
   readonly halfAcross: number;
   /**
-   * Paved half-width — exactly the crossing path's own `pathHalfWidth`
-   * (Jim, 2026-08-23: the bridge is as wide as the path, no wider). The
-   * parapets' inner faces stand here.
+   * Paved half-width — the **drawn** path's own half-width, kerb included
+   * ({@link bridgeRoadHalfFor}; Jim, 2026-08-23: the bridge is as wide as the
+   * path, no wider). The parapets' inner faces stand here.
    */
   readonly roadHalf: number;
   /**
    * Standable half-width — how far off the centreline a walker's own
-   * *centre* can really stand between the parapets: `roadHalf` less the
-   * walker's body (`PLAYER_RADIUS`). This is the honest extent
+   * *centre* can really stand between the parapets: {@link roadHalf} less
+   * the walker's body (`PLAYER_RADIUS`). This is the honest extent
    * `covers()`/`deckCovers()` report, because "covers" has always meant
    * "walkable here" to every consumer (NavGrid's exemption, the
    * invariants' probes) — a wall-to-wall figure would read as promising
@@ -797,7 +837,7 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
     // walls, full stop. The search still backtracks, but only on the
     // levers that keep that promise: lateral shift (below), tree felling
     // (`searchClear`), and — last of all — the level-crossing fallback.
-    const halfAcross = crossing.pathHalfWidth + BRIDGE_WALL_THICKNESS;
+    const halfAcross = bridgeRoadHalfFor(crossing) + BRIDGE_WALL_THICKNESS;
 
     const deckClears = (shift: number): boolean => {
       const ts = sampleTsFor(frame, crossing, shift, halfAcross);
@@ -1050,7 +1090,7 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
 
     const rampRunPos = rampReach(1);
     const rampRunNeg = rampReach(-1);
-    const roadHalf = crossing.pathHalfWidth;
+    const roadHalf = bridgeRoadHalfFor(crossing);
     const walkHalf = walkHalfFor(crossing);
 
     return {
@@ -1086,7 +1126,7 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
  * fits.
  */
 function walkHalfFor(crossing: LevelCrossing): number {
-  return Math.max(crossing.pathHalfWidth - PLAYER_RADIUS, MIN_DECK_HALF_WIDTH - PLAYER_RADIUS);
+  return Math.max(bridgeRoadHalfFor(crossing) - PLAYER_RADIUS, MIN_DECK_HALF_WIDTH - PLAYER_RADIUS);
 }
 
 /** Capped by how close the *next* crossing is — two crossings closer

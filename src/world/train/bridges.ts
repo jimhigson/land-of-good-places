@@ -26,7 +26,7 @@ import {
   HUMP_BLEND,
 } from './bridgeFootprint';
 import { TRACK_CLEARANCE } from './route';
-import { BUILDING_STEP_UP, PATH_CARRIER_SLACK, PATH_KERB_OVERHANG } from '../../core/constants';
+import { BUILDING_STEP_UP, PATH_CARRIER_SLACK } from '../../core/constants';
 import { terrainHeight } from '../terrain';
 import { PALETTE } from '../../core/palette';
 import { archStoneTexture, pinkStoneTexture } from '../../core/textures';
@@ -58,8 +58,12 @@ import type { MovingPlatform } from '../building/surfaces';
  *   zero slope at the crown and both feet), so walking it reads as "the
  *   path goes up and over", never "stairs, platform, stairs".
  * - **Exactly as wide as the path it carries** — `roadHalf` is the drawn
- *   path's own `pathHalfWidth` (`crossings.ts` reads it off the paving
- *   samples), with only the masonry parapet walls outside it. The old
+ *   path's own half-width, kerb included (`bridgeRoadHalfFor`: the
+ *   `pathHalfWidth` `crossings.ts` reads off the paving samples, plus the
+ *   `PATH_KERB_OVERHANG` the kerb is drawn proud of it), with only the
+ *   masonry parapet walls outside it. Kerb included because that is what a
+ *   child sees as "the path", and a deck built to the paving alone left the
+ *   kerb hanging off the side — issue #349. The old
  *   geometry keyed its width off `halfGap` (a fence-gap length measured
  *   along the *rail*) and shipped 12.9–15.8 m decks over ~4 m paths.
  * - **It follows the path's own curve** — every mesh, collider and height
@@ -389,12 +393,16 @@ export interface Bridge {
    *
    * Deliberately *not* {@link covers}: that reports where a walker's own
    * centre can stand, which is the paving less her body radius, and a
-   * ribbon trimmed to that would tear away from both parapets. This
-   * reaches the full masonry width plus the kerb's own overhang
-   * ({@link PATH_KERB_OVERHANG}) instead — the honest question "is the
-   * paving here carried by this bridge?", which is a different question
-   * from "can she stand here?" and so gets its own answer rather than a
-   * padded reuse of that one.
+   * ribbon trimmed to that would tear away from both parapets. This asks
+   * the honest question "is the paving here carried by this bridge?",
+   * which is a different question from "can she stand here?" and so gets
+   * its own answer rather than a padded reuse of that one.
+   *
+   * **Never reaches past the masonry** (issue #349): the road is the drawn
+   * paving's own width now (`bridgeRoadHalfFor`, kerb included) and the
+   * across limit is clamped to the shell's own `halfAcross`, so anything
+   * this lifts has stone under it. It used to be an independent sum that
+   * drifted 0.375 m outside the parapet.
    */
   pavingHeightAt(x: number, z: number): number | null;
 }
@@ -776,7 +784,22 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // purpose — it only ever has to *contain* the footprint, and `covers`
   // below is what actually decides.
   const pavingReachSq =
-    (Math.max(lengthPos, lengthNeg) + roadHalf + PATH_KERB_OVERHANG + PATH_CARRIER_SLACK + 4) ** 2;
+    (Math.max(lengthPos, lengthNeg) + roadHalf + PATH_CARRIER_SLACK + 4) ** 2;
+
+  // **How far across the lift reaches — clamped to the masonry (issue #349).**
+  // `roadHalf` is now the drawn paving's own half-width, kerb included
+  // (`bridgeRoadHalfFor`), so the kerb's outer edge lands on the road itself
+  // and the only thing still wanted is `PATH_CARRIER_SLACK`'s stride past it,
+  // for the millimetre disagreement between the ribbon's perpendicular and
+  // this frame's (see that constant's own note — it is what stops the kerb
+  // tearing in half down the bridge).
+  //
+  // The `min` is the part that makes this a fix rather than a re-tuning: the
+  // stone is the single authority on where the paving ends, so however these
+  // constants move in future, lifted paving can never reach past the masonry
+  // that has to hold it up. Before, the two were independent sums off the same
+  // crossing and drifted 0.375 m apart.
+  const pavingHalf = Math.min(roadHalf + PATH_CARRIER_SLACK, halfAcross);
 
   const platform: MovingPlatform = {
     surfaceY: crownY,
@@ -810,8 +833,7 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
       // resampled spine, and this is asked once per vertex of the park's
       // entire path mesh at boot.
       if ((x - origin0.x) ** 2 + (z - origin0.z) ** 2 > pavingReachSq) return null;
-      if (!footprint.covers(x, z, roadHalf - walkHalf + PATH_KERB_OVERHANG + PATH_CARRIER_SLACK))
-        return null;
+      if (!footprint.covers(x, z, pavingHalf - walkHalf)) return null;
       return heightAt(x, z);
     },
   };
