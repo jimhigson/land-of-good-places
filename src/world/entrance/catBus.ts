@@ -2,8 +2,10 @@ import {
   Color,
   ConeGeometry,
   CylinderGeometry,
+  ExtrudeGeometry,
   Group,
   Mesh,
+  Shape,
   SphereGeometry,
 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
@@ -15,10 +17,11 @@ import {
   WIDEST_CHILD_FOOTPRINT,
 } from '../../art/models/kid';
 import { RIDER_HEADROOM } from '../train/clearance';
-import { clamp01, lerp } from '../../core/mathUtils';
+import { angleDelta, clamp, clamp01, lerp } from '../../core/mathUtils';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
 import { applyStaticBakedFace, type FacePaintOptions } from '../../art/style/faces';
 import { blob } from '../../art/style/asset';
+import { drapeStripeUvs, tigerStripeTexture } from './tigerStripes';
 
 /**
  * The cat bus.
@@ -362,7 +365,342 @@ export const CAT_BUS_ROOF_COLOUR = new Color(PALETTE.flowerYellow)
 /** Thickness of the posts between one window and the next. */
 const PILLAR_Z = 0.26;
 
-const WHEEL_RADIUS = BODY_BOTTOM_Y * 0.86;
+/**
+ * **How much bigger the wheels are than they were drawn.**
+ *
+ * Jim, 29 August 2026: *"cat bus wheels should be double current size."* (The
+ * ask arrived first as "50% larger" and was corrected to 2x before any of it
+ * was built; issue #364 carries both.) One factor, named, so that the radius,
+ * the track width, the arch gap and the check that guards them all move
+ * together if it is ever retuned again.
+ *
+ * His standing scale ruling is what makes this right rather than a problem to
+ * be minimised: **recognisability beats proportion**, and geometry that would
+ * be implausible on a real vehicle is fine so long as it works. A 2.13 m tall
+ * wheel reads, at a glance, as a big friendly wheel.
+ */
+export const CAT_BUS_WHEEL_SCALE = 2;
+
+const WHEEL_RADIUS = BODY_BOTTOM_Y * 0.86 * CAT_BUS_WHEEL_SCALE;
+/**
+ * Tyre width, unchanged from the original drawing.
+ *
+ * Deliberately *not* scaled with the radius. Scaled, a wheel 2x across would be
+ * 1.49 m thick and the bus would be three metres wider still for no gain; left
+ * alone, the tyre comes out 2.13 m tall and 0.73 m wide — a 2.9:1 ratio, which
+ * is very nearly what a real road tyre measures. The wheel got bigger, not
+ * fatter.
+ */
+const WHEEL_WIDTH = 0.34 * DETAIL;
+
+/**
+ * How far the outline shells stand proud of the bodywork they hang on.
+ *
+ * `addOutline` pushes a copy of the geometry out along its normals by exactly
+ * this, so **the bus's true outer surface is this much further out than
+ * `BODY_WIDTH / 2`**. Anything asked to stand clear of the bus has to clear the
+ * outline too, or it clears the box and clips the line drawn round it — which
+ * is a 4 cm error and precisely the size of gap nobody notices until it is on
+ * screen.
+ */
+const OUTLINE_THICKNESS = 0.02 * DETAIL;
+
+/**
+ * **The wheels stand entirely outboard of the bodywork, and that is the whole
+ * answer to "does a 2x wheel end up inside the bus?".**
+ *
+ * At the old radius the wheels were half-buried in the flanks: centre at
+ * `BODY_WIDTH / 2 - 0.05 * DETAIL`, so the inboard face sat at x 2.16 — a good
+ * 0.32 m *inside* the cabin's inner wall at 2.48. That was invisible and
+ * harmless while the tyre only reached y 1.05, because everything it passed
+ * through down there is the solid lower shell.
+ *
+ * Doubled, it reaches **y 2.133**, which is 1.34 m above the cabin floor and
+ * 9 cm outboard of the cushions. A black cylinder would have stood in the bus
+ * beside the passengers, and the ride's interior camera looks straight at it.
+ *
+ * Raising the ride height cannot fix that. The window sill is derived from
+ * `BODY_BOTTOM_Y`, so `sill - wheelTop` is exactly `BODY_BOTTOM_Y - 0.62`
+ * however high the bus is lifted — every centimetre of arch you buy is a
+ * centimetre added to the step a six-year-old has to make getting off, and
+ * clearing the *floor* would need `BODY_BOTTOM_Y ~= 1.96`, chest-high on a
+ * 2.12 m child.
+ *
+ * So the wheels move out instead, and the clearance is then **guaranteed by
+ * lateral separation rather than by a height a downstroke can eat**. Nothing
+ * about the floor, the seats, the door, the step or the route changes. It also
+ * happens to be what a toy looks like.
+ *
+ * Derived from the widest thing on the axle — the fender, not the tyre — so it
+ * is the *whole* assembly that clears, not just the rubber.
+ */
+const WHEEL_CLEARANCE = 0.08;
+/** Half the mudguard's width: it overhangs the tyre by 0.06 m on each side. */
+const FENDER_HALF_WIDTH = WHEEL_WIDTH / 2 + 0.06;
+/** How thick the mudguard's plates are, radially. */
+const FENDER_THICKNESS = 0.11;
+/** How far each plate's outline shell stands proud of it — including inwards. */
+const FENDER_OUTLINE_THICKNESS = 0.012 * DETAIL;
+/**
+ * How far round the wheel the mudguard reaches, **as one swept arc**.
+ *
+ * ## Not a torus, and that was found by measuring rather than by reading
+ *
+ * The mudguard started as a half-`TorusGeometry`, which is the obvious shape
+ * for it — and a torus's tube has to be at least half the wheel's width
+ * (0.36 m) to cover the tyre, while the arch gap was 0.35 m. So the tube's
+ * innermost surface sat 0.12 m *inside* the tyre it was supposed to clear: a
+ * mudguard driven through its own wheel, at rest, before the suspension moved
+ * at all. Nothing about it looked wrong in the source.
+ *
+ * What that bug actually needed was a shape whose **inner surface is at a
+ * fixed radius by construction, with its width a free parameter rather than
+ * the same number as its clearance**. An extruded annular sector is exactly
+ * that, and so was the arc of flat plates that replaced the torus first.
+ *
+ * ## And not plates either, which took two goes to see
+ *
+ * The plates were tuned twice — five over 2.44 rad, then eight over 1.6 — and
+ * both times from a side elevation, where they duly read as a curve. **The
+ * game never looks at the bus from the side.** It looks *down* at it from an
+ * isometric camera about 30 m up, and from there a 92-degree arc capping the
+ * top of the tyre is seen almost edge-on: what is on screen is eight plate
+ * *edges* stacked one behind another, each with its own ink outline, which
+ * reads as a little stack of planks — a pallet bolted to the flank, not an
+ * arch over a wheel. The review found it by rendering the arrival and looking,
+ * and the second retune had moved the problem rather than removed it.
+ *
+ * So: **one mesh, one outline, one silhouette.** An `ExtrudeGeometry` of an
+ * annular sector is a genuine swept arc, so there are no internal edges to
+ * count from any angle, and its single ink outline draws the arch's own
+ * profile instead of eight parallel lines across it.
+ *
+ * And the arc **widens to 2.6 rad (149 degrees)**, down past the hub on both
+ * sides rather than capping the crown. Seen from above that is the half of the
+ * change that matters: an arc that reaches below the wheel's centre presents
+ * its curvature to a camera looking down, where one that stops at 46 degrees
+ * either side of top has almost none to present.
+ *
+ * Judged from the game's own isometric camera this time, not from a side
+ * elevation. That is the actual lesson here and it is why it is written down.
+ */
+const FENDER_ARC = 2.6;
+/** How many segments the swept arc is tessellated into. Smooth, not faceted. */
+const FENDER_ARC_SEGMENTS = 32;
+/** Half the track: where a wheel's centre plane sits, either side. */
+const WHEEL_X = BODY_WIDTH / 2 + OUTLINE_THICKNESS + WHEEL_CLEARANCE + FENDER_HALF_WIDTH;
+/** Front axle first, then rear. Where the wheels were before, unchanged. */
+const WHEEL_Z = [BODY_LENGTH * 0.28, -BODY_LENGTH * 0.3] as const;
+const WHEELBASE = (WHEEL_Z[0] ?? 0) - (WHEEL_Z[1] ?? 0);
+
+/**
+ * **How big the bus is across the wheels** — for anything leaving room for it.
+ *
+ * {@link CAT_BUS_WIDTH} is, and stays, the *bodywork*: its own docblock is
+ * emphatic that the bodywork and the silhouette are different numbers and that
+ * confusing them is how a 10 m keep-out came to be sized for an 11 m bus. The
+ * wheels used to stand 0.26 m proud of the flanks and nothing accounted for it;
+ * doubled and moved outboard they stand a good deal further, and a road sized
+ * on the bodywork would have a bus driving down it with its tyres in the grass.
+ *
+ * So this exists rather than a second copy of the sum appearing in `road.ts`.
+ */
+export const CAT_BUS_TRACK_WIDTH = 2 * (WHEEL_X + FENDER_HALF_WIDTH);
+
+/**
+ * **How far the sprung body may move, and the one place those limits live.**
+ *
+ * Jim, 29 August 2026: the bus *"should bob up and down while it drives on its
+ * suspension to look more realistic"*.
+ *
+ * These are hard clamps applied in `animate`, not hopes about what the spring
+ * will do. That matters because the arch gap below is *derived from them*: if
+ * the body could drop further than it says here, it would drive a fender down
+ * onto a tyre, and "the wheels do not intersect the body" would be false at the
+ * bottom of a bump rather than at rest — which is exactly the failure a still
+ * frame cannot show and `check:cat-bus-suspension` exists to catch.
+ *
+ * Heave in metres; pitch and roll in radians.
+ *
+ * **Sized in pixels on the screen, not in metres on the bus.** The first cut
+ * of this was 0.08 m and 0.014 rad, defended in this very docblock as
+ * *"10 cm and a degree, because a bus that visibly lurches reads as broken
+ * rather than sprung"*. That is the right instinct for a driving game seen
+ * from the cab and the wrong one here: the park is seen from ~30 m up, and
+ * that clamp — which the road only ever half used — came out at **0.0645 m
+ * peak to peak, about 2 px**. Sampled frame by frame through a real arrival it
+ * was arithmetically a suspension and perceptually a rigid bus, and the review
+ * found it by measuring the running game rather than by reading this file.
+ *
+ * As tuned the drive-in heaves **0.3298 m peak to peak**, which is **10.3 px**
+ * in the arrival camera, and body-against-wheel measures **11.3 px** as a
+ * projected screen offset. It reads as a clean swell of about one and a half
+ * cycles at ~0.7 Hz.
+ *
+ * **How to measure this, because the obvious way is wrong.** Pixels here mean
+ * *project the point through the live render camera every frame and subtract*.
+ * They do not mean "metres times a scale read off the picture": the scale is
+ * different in every camera phase (31.1 px/m at the arrival camera, 41.9 px/m
+ * after hand-over — the arrival camera sits further back), so multiplying one
+ * phase's metres by another phase's scale silently mixes two moments. That is
+ * exactly how this docblock first claimed 13.4 px.
+ *
+ * And **do not derive the scale from the tyre's silhouette**, which is the
+ * trap under that one. A tyre is a *cylinder*, not a flat vertical ruler: seen
+ * from an isometric camera its 0.74 m of axial width foreshortens into the
+ * screen's vertical axis and pads the silhouette well beyond the 2.133 m disc,
+ * so `silhouette / diameter` overstates the vertical scale by about a third
+ * (86-87 px suggests ~41 px/m where the camera's real answer is 31.1). Two
+ * plausible measurements of the same frame, disagreeing by 35%, and only the
+ * one that goes through the camera matrix is answering the question asked.
+ *
+ * These numbers are Jim's standing ruling that **recognisability beats
+ * proportion** applied to motion instead of to size — the same ruling that
+ * gave this bus 2.13 m wheels. A real coach does not lean like this. A big
+ * friendly cartoon cat pulling away from the kerb does.
+ *
+ * The three are not interchangeable, and the exchange rate is why they are not
+ * all simply doubled again:
+ *
+ * - **heave** costs {@link CAT_BUS_RIDE_LIFT} 1:1;
+ * - **pitch** costs it `NOSE_Z` = ~7.9 m per radian, because the cat's chin
+ *   hangs 7.9 m in front of the centre and a nose-down bump is what puts it
+ *   through the road. So pitch buys the most visible motion per radian *and*
+ *   the most ride height per radian, and it is deliberately the one held back;
+ * - **roll** costs `FACE_RADIUS` and only ever shows on a corner, which is
+ *   `BusJourney` and not the arrival.
+ */
+export const CAT_BUS_MAX_HEAVE = 0.2;
+export const CAT_BUS_MAX_PITCH = 0.028;
+export const CAT_BUS_MAX_ROLL = 0.05;
+
+/**
+ * **How much higher the sprung body rests than it is drawn** — the ride height
+ * the doubled wheels bought.
+ *
+ * This is not decoration and it is not a taste call. The cat's face is a
+ * squashed sphere whose chin hangs to **y = 0.14 m**, 7.86 m forward of the
+ * bus's centre. Pitch the body nose-down by `CAT_BUS_MAX_PITCH` and that point
+ * drops 0.11 m; add full heave and a full lean and it is 0.30 m below where it
+ * started, which is 0.16 m *under the road*. The bus would plough its own chin
+ * through the tarmac on the first bump — and this was found by
+ * `check:cat-bus-suspension` reporting `y=-0.1597`, not by looking at it, which
+ * is the entire argument for having the check.
+ *
+ * So the body rests high enough that the worst pose still clears. Derived from
+ * the three limits above at the furthest, lowest point of the vehicle, with 15%
+ * over, rather than picked — raise a limit and this rises with it.
+ *
+ * **It is applied to the chassis, so it is invisible to everything inside the
+ * bus.** `CAT_BUS_FLOOR_Y`, `CAT_BUS_SEAT_Y` and `CAT_BUS_CABIN_CEILING_Y` are
+ * all in the body's own space and none of them changes; the seats, the driver,
+ * the twelve children and the ride's interior camera all move together and none
+ * of them can tell. What does change is how far it is down from the step to the
+ * pavement, from 0.51 m to 0.78 m — which is the honest consequence of fitting
+ * wheels twice the size, and is what a bus with big wheels looks like.
+ */
+const NOSE_Z = BODY_LENGTH / 2 - FACE_RADIUS * 0.62 + FACE_RADIUS * 0.6;
+export const CAT_BUS_RIDE_LIFT =
+  (CAT_BUS_MAX_HEAVE + CAT_BUS_MAX_PITCH * NOSE_Z + CAT_BUS_MAX_ROLL * FACE_RADIUS) * 1.15;
+
+/**
+ * The gap between a tyre and the mudguard over it, **at rest**.
+ *
+ * Derived from the travel above rather than picked, and by the worst case a
+ * wheel can actually see: full heave, plus the pitch contribution at whichever
+ * axle is furthest from the centre, plus the roll contribution at the track.
+ * The 1.35 is the margin over that — the bus never quite bottoms out, which is
+ * how a suspension is supposed to be set up.
+ *
+ * The fender rides on the **chassis**, so this gap genuinely opens and closes
+ * as the bus bobs. That is what makes the suspension visible from outside at
+ * all, and it is what the check measures.
+ *
+ * The outline shell is added on rather than ignored: `addOutline` pushes a copy
+ * of each plate out along its normals, and on a plate's *inner* face "out" is
+ * towards the tyre. Left out of the sum it ate a third of the margin, and
+ * `check:cat-bus-suspension` duly reported the tightest gap as 0.029 m where
+ * the derivation promised 0.071 — a small number, but the derivation being
+ * wrong is the interesting part, not the size of the error.
+ */
+const WORST_BODY_DROP_AT_A_WHEEL =
+  CAT_BUS_MAX_HEAVE +
+  CAT_BUS_MAX_PITCH * Math.max(...WHEEL_Z.map(Math.abs)) +
+  CAT_BUS_MAX_ROLL * WHEEL_X;
+export const CAT_BUS_ARCH_GAP =
+  WORST_BODY_DROP_AT_A_WHEEL * 1.35 + FENDER_OUTLINE_THICKNESS;
+
+/**
+ * The spring itself: stiffness and damping, as a plain second-order system.
+ *
+ * `sqrt(46)` is 6.8 rad/s — a bob a shade over one cycle a second, which is
+ * about what a real bus body does and slow enough for a six-year-old to see it
+ * happen. Damping ratio comes out at 0.55: under-damped on purpose, so a bump
+ * gives two or three visible oscillations rather than one dead thud.
+ *
+ * **It is integrated with semi-implicit Euler, which depends on `Loop`'s
+ * `MAX_FRAME_DELTA` and should say so.** Explicit integration of a spring this
+ * stiff diverges above `dt` of about 0.2 s, where it would flap between the
+ * clamps every frame instead of oscillating. That is unreachable only because
+ * `Loop` clamps a frame to `MAX_FRAME_DELTA` = 1/12 s, measured stable there
+ * (worst heave 0.033 m at 1/12 against 0.032 m at 1/60). The dependency is
+ * real and silent: raise `MAX_FRAME_DELTA` past ~0.2 and this breaks with
+ * nothing pointing back here, so this sentence is the pointer.
+ */
+const SPRING_RATE = 46;
+const SPRING_DAMPING = 7.4;
+
+/**
+ * The road surface, as a height in metres at a distance travelled.
+ *
+ * **A function of *where the bus is*, not of what time it is** — that one
+ * choice is the difference between a suspension and a decoration. A fixed sine
+ * on `elapsed` keeps bobbing while the bus stands at the kerb with its door
+ * open, which is exactly the "box sliding along" the brief rules out; sampled
+ * on distance, the bobbing stops dead when the bus stops, resumes when it pulls
+ * away, and gets busier the faster it goes, all for free and all correct.
+ *
+ * The rear axle samples this one wheelbase behind the front, so **the back of
+ * the bus hits the same bump the front just did**, a wheelbase later. That
+ * lag is most of what reads as "a real vehicle" rather than "a body on a
+ * spring", and it costs one subtraction.
+ *
+ * ## The wavelengths are measured in wheelbases, and that is the whole trick
+ *
+ * Because of that lag, **what a bump turns into depends entirely on how it
+ * compares with the wheelbase**, and the first cut of this file did not know
+ * that. Its three terms were incommensurable numbers picked to avoid a
+ * repeat — `0.83`, `1.97`, `4.31` rad/m — and the longest of them happened to
+ * land at 7.6 m against a 9.2 m wheelbase, which is very nearly antiphase. So
+ * the two axles pushed *against* each other: the difference (pitch) saturated
+ * its clamp while the average (heave) very nearly cancelled, and the bus
+ * managed 0.0645 m of bob — about 2 px — on a road with 0.11 m of bump in it.
+ * The amplitude was not the only thing that was too small: most of what there
+ * was was being thrown away.
+ *
+ * So the terms are derived from {@link WHEELBASE} instead of picked:
+ *
+ * - a wave **one wheelbase long** puts both axles at the same point on it, so
+ *   it is a pure **heave** input — the body lifts and drops flat, which is the
+ *   motion Jim actually asked for. At 6 m/s it comes in at 0.65 Hz, a lazy
+ *   bounce a six-year-old can watch happen;
+ * - a wave **two wheelbases long** puts the axles exactly antiphase, so it is
+ *   a pure **pitch** input — the nose and tail see-saw, 0.33 Hz;
+ * - a third of a wheelbase adds fine texture, and lands near the spring's own
+ *   6.8 rad/s so it reads as the road rather than as the body.
+ *
+ * They are still mutually irrational once the phases are in, so there is no
+ * pattern to learn; they are simply aimed now. Total amplitude 0.245 m: the
+ * road through the park is still tarmac, but this is a cartoon.
+ */
+const HEAVE_WAVE = (Math.PI * 2) / WHEELBASE;
+function roadHeightAt(distance: number): number {
+  return (
+    Math.sin(distance * HEAVE_WAVE) * 0.135 +
+    Math.sin(distance * HEAVE_WAVE * 0.5 + 1.7) * 0.075 +
+    Math.sin(distance * HEAVE_WAVE * 3 + 3.9) * 0.035
+  );
+}
 
 /**
  * The top of the bus above its own origin — **ear tips included**, per
@@ -372,7 +710,8 @@ const WHEEL_RADIUS = BODY_BOTTOM_Y * 0.86;
  * constant so that something deciding what may stand in front of the bus can
  * ask before there is a bus to ask.
  */
-export const CAT_BUS_TOP = BODY_BOTTOM_Y + BODY_HEIGHT + (0.28 + 0.56 / 2) * DETAIL;
+export const CAT_BUS_TOP =
+  CAT_BUS_RIDE_LIFT + BODY_BOTTOM_Y + BODY_HEIGHT + (0.28 + 0.56 / 2) * DETAIL;
 
 /**
  * The doorway, sized by the child who walks down out of it.
@@ -405,6 +744,20 @@ export function buildPawPrint(material: ReturnType<typeof toonMaterial>): Group 
 export interface CatBusHandle {
   readonly root: Group;
   readonly height: number;
+  /**
+   * **The sprung body** — everything except the wheels and their axles.
+   *
+   * This is what heaves, pitches and rolls on the suspension, and `cabin` is a
+   * child of it, so anything riding inside rides the springs for free.
+   *
+   * Exposed because **a camera inside the bus has to bob with the bus.** The
+   * ride's interior shot places its lens by a fixed point in the vehicle's own
+   * space and pushes it through a matrix; through `root`'s matrix it would sit
+   * dead still while the cabin around it moved, which reads as the *seats*
+   * bouncing rather than the bus — worse than no bob at all, and exactly the
+   * "passengers stay rigid" failure the brief warns about, wearing a lens.
+   */
+  readonly chassis: Group;
   /**
    * Where anyone riding inside is parented — a child of the chassis, so a
    * passenger put in here travels with the bus for free rather than being
@@ -474,6 +827,30 @@ export function createCatBus(): CatBusHandle {
 
   const bodyColour = CAT_BUS_BODY_COLOUR;
   const bodyMaterial = toonMaterial(bodyColour);
+  /**
+   * **The tiger-striped bodywork.**
+   *
+   * `0xffffff` rather than `bodyColour`, because `MeshToonMaterial` multiplies
+   * its colour by its map and the map already carries the bodywork's own cream
+   * as the ground the stripes are painted on. Tinted as well as mapped, the
+   * flanks would come out cream-squared — a bus a shade darker than its own
+   * door, for no reason anybody would ever find.
+   *
+   * `bodyMaterial` stays, and stays the same flat cream: the pillars between
+   * the panes, which share one geometry between ten posts and so cannot each
+   * have their own unwrap, keep it. They read as window frames, and a tiger
+   * does not have stripes on its windows.
+   */
+  const stripedMaterial = toonMaterial(0xffffff, { map: tigerStripeTexture() });
+  /**
+   * Every mesh that gets stripes, with where its own origin sits on the bus.
+   *
+   * Collected as they are built and unwrapped in one pass at the end, rather
+   * than each unwrapping itself inline, so there is exactly one place that
+   * knows the drape's parameters — the spine height and where the flanks give
+   * way to the end caps — instead of six call sites each repeating them.
+   */
+  const striped: { mesh: Mesh; at: { x: number; y: number; z: number } }[] = [];
   const roofColour = CAT_BUS_ROOF_COLOUR;
   const roofMaterial = toonMaterial(roofColour);
   const trimMaterial = toonMaterial(PALETTE.stonePink);
@@ -496,9 +873,28 @@ export function createCatBus(): CatBusHandle {
   const tailMaterial = toonMaterial(bodyColour);
   const bumperMaterial = toonMaterial(PALETTE.woodLight);
 
+  // **The sprung body.** Everything a passenger can see or sit on hangs off
+  // this, including `cabin` and the twelve seats — so when it bobs, the
+  // children in it bob with it, without a single line of code re-positioning
+  // anybody. A bus that bobs while its passengers stay rigid looks worse than
+  // no bob at all, and the cheapest way to make that impossible is for there to
+  // be no second thing to keep in step.
   const chassis = new Group();
   chassis.name = 'chassis';
+  // At rest before anything animates it, so a bus nobody has called `animate`
+  // on — the park's parked one, a check, the character creator's backdrop —
+  // still stands at its proper ride height rather than sitting on its axles.
+  chassis.position.y = CAT_BUS_RIDE_LIFT;
   root.add(chassis);
+
+  // **The unsprung half**: wheels, hubs and stub axles, which stay on the road
+  // while the body moves over them. A sibling of the chassis rather than a
+  // child of it, because that is the whole mechanism — a wheel parented to a
+  // bobbing body would bob with it, which is a bus hopping rather than a bus on
+  // springs, and would put the tyres through the tarmac on every downstroke.
+  const axles = new Group();
+  axles.name = 'axles';
+  root.add(axles);
 
   // --- main body -------------------------------------------------------------
   // Stops short of the very front — the face sphere below picks up from there —
@@ -534,7 +930,7 @@ export function createCatBus(): CatBusHandle {
   const lowerBody = solid(
     new Mesh(
       new RoundedBoxGeometry(BODY_WIDTH, WINDOW_SILL_Y - BODY_BOTTOM_Y, cabinLength, 4, 0.22 * DETAIL),
-      bodyMaterial,
+      stripedMaterial,
     ),
   );
   // Named, because a check has to be able to find the cabin's own volume to ask
@@ -543,6 +939,7 @@ export function createCatBus(): CatBusHandle {
   lowerBody.name = 'cat-bus-shell-lower';
   lowerBody.position.set(0, (BODY_BOTTOM_Y + WINDOW_SILL_Y) / 2, bodyCentreZ);
   chassis.add(lowerBody);
+  striped.push({ mesh: lowerBody, at: lowerBody.position });
   // Kept, because this shell is the only part of the lower body a camera inside
   // the cabin can see at all — see `setCutaway`.
   const lowerBodyOutline = addOutline(lowerBody, 0.02 * DETAIL);
@@ -551,12 +948,13 @@ export function createCatBus(): CatBusHandle {
   const upperBody = solid(
     new Mesh(
       new RoundedBoxGeometry(BODY_WIDTH, bodyTopY - WINDOW_HEAD_Y, cabinLength, 4, 0.22 * DETAIL),
-      bodyMaterial,
+      stripedMaterial,
     ),
   );
   upperBody.name = 'cat-bus-shell-upper';
   upperBody.position.set(0, (WINDOW_HEAD_Y + bodyTopY) / 2, bodyCentreZ);
   chassis.add(upperBody);
+  striped.push({ mesh: upperBody, at: upperBody.position });
   addOutline(upperBody, 0.02 * DETAIL);
 
   // The back of the bus is closed — you look in through the sides, not through
@@ -565,11 +963,13 @@ export function createCatBus(): CatBusHandle {
   const backWall = solid(
     new Mesh(
       new RoundedBoxGeometry(BODY_WIDTH, windowBandHeight, PILLAR_Z * DETAIL, 3, 0.08 * DETAIL),
-      bodyMaterial,
+      stripedMaterial,
     ),
   );
+  backWall.name = 'cat-bus-back-wall';
   backWall.position.set(0, (WINDOW_SILL_Y + WINDOW_HEAD_Y) / 2, cabinBackZ + (PILLAR_Z * DETAIL) / 2);
   chassis.add(backWall);
+  striped.push({ mesh: backWall, at: backWall.position });
 
   // Pillars between one window and the next, at the row boundaries — so the
   // posts land between children rather than across their faces.
@@ -618,13 +1018,28 @@ export function createCatBus(): CatBusHandle {
   /** Kept for the handful of places below that positioned off the old body. */
   const body = { position: { z: bodyCentreZ } };
 
-  // A paler roof cap, rounded, so the bus doesn't read as a single flat-topped
-  // box — every shop and ride in this park gets a bobble or a cap on top.
+  // A rounded roof cap, so the bus doesn't read as a single flat-topped box —
+  // every shop and ride in this park gets a bobble or a cap on top.
+  //
+  // **Striped, and it is the single most important surface to stripe.** It was
+  // left in the roof's own pale lemon at first, on the reasoning that a paler
+  // cap breaks up the silhouette. That reasoning is from a side elevation
+  // again: from the game's isometric camera, looking *down* at the bus, the
+  // roof is the **largest surface on the vehicle by a wide margin**, so a
+  // striped body under an unstriped roof read as a cream loaf with a striped
+  // skirt rather than as a tiger. The ears keep `roofMaterial`.
+  //
+  // It costs one `striped.push`, because the drape unwrap already covers it:
+  // `v` is `|x| + max(0, spineY - y)`, and the roof stands above `spineY`, so
+  // its own `v` is just `|x|` — continuous with the flank it meets at the eaves,
+  // with no seam and no second parameter to keep in step.
   const roof = solid(
-    new Mesh(new RoundedBoxGeometry(BODY_WIDTH * 0.94, 0.34 * DETAIL, cabinLength * 0.92, 4, 0.16 * DETAIL), roofMaterial),
+    new Mesh(new RoundedBoxGeometry(BODY_WIDTH * 0.94, 0.34 * DETAIL, cabinLength * 0.92, 4, 0.16 * DETAIL), stripedMaterial),
   );
+  roof.name = 'cat-bus-roof';
   roof.position.set(0, BODY_BOTTOM_Y + BODY_HEIGHT + 0.05 * DETAIL, body.position.z);
   chassis.add(roof);
+  striped.push({ mesh: roof, at: roof.position });
   addOutline(roof, 0.016 * DETAIL);
 
   // --- the face ---------------------------------------------------------------
@@ -785,10 +1200,23 @@ export function createCatBus(): CatBusHandle {
   chassis.add(doorGroup);
 
   const doorPanel = solid(
-    new Mesh(new RoundedBoxGeometry(0.06 * DETAIL, DOOR_HEIGHT, DOOR_WIDTH, 2, 0.08 * DETAIL), bodyMaterial),
+    new Mesh(new RoundedBoxGeometry(0.06 * DETAIL, DOOR_HEIGHT, DOOR_WIDTH, 2, 0.08 * DETAIL), stripedMaterial),
   );
+  doorPanel.name = 'cat-bus-door-panel';
   doorPanel.position.set(0, DOOR_HEIGHT / 2, DOOR_WIDTH / 2);
   doorGroup.add(doorPanel);
+  // Unwrapped in the pose it holds when **shut** — `doorGroup` is a hinge, so
+  // the panel's own origin moves as it swings, and stripes that were a function
+  // of where the door currently is would slide about as it opened. Shut is the
+  // pose they have to line up with the flank in.
+  striped.push({
+    mesh: doorPanel,
+    at: {
+      x: doorGroup.position.x + doorPanel.position.x,
+      y: doorGroup.position.y + doorPanel.position.y,
+      z: doorGroup.position.z + doorPanel.position.z,
+    },
+  });
   addOutline(doorPanel, 0.014 * DETAIL);
 
   // **The door's window is in the same band as every other window**, and it was
@@ -865,19 +1293,91 @@ export function createCatBus(): CatBusHandle {
   // bodywork instead of looking at it from the front — and small enough that
   // nobody had ever noticed, which is why it is worth fixing now that there is
   // a check that would have to be loosened to let it pass.
+  // **Two treads, because the bob is what sets how high the top one is.**
+  //
+  // The sprung body rests `CAT_BUS_RIDE_LIFT` up so its chin clears the road at
+  // the bottom of a bump, and raising the bob until it reads on screen raised
+  // that lift with it — from 0.28 m to 0.64 m, which put the single tread this
+  // used to be 1.26 m above the pavement. That is a drop of 59% of a 2.12 m
+  // child's height off the last step of a bus, which is not a step, it is a
+  // fall.
+  //
+  // So a second tread hangs below the first, and **how low it may hang is
+  // derived rather than picked**: the body can drop by heave, plus pitch at
+  // this z, plus roll at this x, and the tread has to still be above the road
+  // at the bottom of all three at once. Derived that way it tracks the clamps —
+  // raise the bob again and the lower tread rises out of its way by itself,
+  // rather than becoming a plough that `check:cat-bus-suspension` §5 catches
+  // only after somebody wonders why the bus is grounding.
+  //
+  // The *top* tread does not move: it is still hung from the body's underside
+  // at `BODY_BOTTOM_Y`, so the floor, the doorway, the sill and every boarding
+  // measurement are exactly as they were.
   const stepHeight = 0.1 * DETAIL;
-  const step = solid(
+  const stepWidth = 0.5 * DETAIL;
+  const stepDepth = DOOR_WIDTH * 0.8;
+  const stepX = -(BODY_WIDTH / 2 + 0.16 * DETAIL);
+  const stepZ = doorGroup.position.z + DOOR_WIDTH / 2;
+  /** How far the road stays clear of the lowest tread at full deflection. */
+  const STEP_ROAD_CLEARANCE = 0.06;
+  // **At the tread's furthest corner, not at its centre.** Pitch and roll are
+  // rotations, so what they cost grows with the lever arm — and the corner of a
+  // 1.10 m by 1.66 m slab is 0.55 m further out in x and 0.83 m further along
+  // in z than the point it is positioned by. Derived from the centre this came
+  // out 0.05 m optimistic and the check duly reported the bodywork reaching
+  // y=0.010 where 0.06 was intended: not a failure, but the derivation being
+  // wrong is the interesting part, exactly as it was for the arch gap.
+  const worstDropAtDoor =
+    CAT_BUS_MAX_HEAVE +
+    CAT_BUS_MAX_PITCH * (Math.abs(stepZ) + stepDepth / 2) +
+    CAT_BUS_MAX_ROLL * (Math.abs(stepX) + stepWidth / 2);
+  const lowestTreadUnderside =
+    STEP_ROAD_CLEARANCE + worstDropAtDoor - CAT_BUS_RIDE_LIFT;
+  const stepGeometry = new RoundedBoxGeometry(
+    stepWidth,
+    stepHeight,
+    stepDepth,
+    2,
+    0.04 * DETAIL,
+  );
+  // One group, because the treads and the stringer that carries them are one
+  // thing — and because `check:bus-journey` asks whether every top-level part
+  // of the bus touches the bodywork, which is the question it should ask.
+  const stepGroup = new Group();
+  stepGroup.name = 'cat-bus-step';
+  chassis.add(stepGroup);
+  function addTread(treadTop: number): Mesh {
+    const tread = solid(new Mesh(stepGeometry, bumperMaterial));
+    tread.name = 'cat-bus-step-tread';
+    tread.position.set(stepX, treadTop - stepHeight / 2, stepZ);
+    stepGroup.add(tread);
+    return tread;
+  }
+  // The upper tread is the one everything below positions off — it is the one
+  // that has always been "the step".
+  const step = addTread(BODY_BOTTOM_Y);
+  addTread(lowestTreadUnderside + stepHeight);
+
+  // **The stringer, and `check:bus-journey` is why it exists.** The lower tread
+  // hangs below the bodywork's own lowest point, so on its own it is a slab of
+  // timber floating 0.04 m under the bus attached to nothing — which is exactly
+  // the *"strange block floating off the back of it"* Jim reported about the
+  // rear bumper, and the check that was written for that duly caught this one
+  // before anybody saw it.
+  //
+  // A grouped part would have satisfied the box test on the upper tread's
+  // behalf, and that would have been gaming it: the lower tread would still
+  // have been drawn hanging in mid-air. So there is a real panel joining the
+  // treads to the body's underside, the way a bus's step well actually is.
+  const riserHeight = BODY_BOTTOM_Y - lowestTreadUnderside;
+  const riser = solid(
     new Mesh(
-      new RoundedBoxGeometry(0.5 * DETAIL, stepHeight, DOOR_WIDTH * 0.8, 2, 0.04 * DETAIL),
+      new RoundedBoxGeometry(stepWidth, riserHeight, 0.16 * DETAIL, 2, 0.03 * DETAIL),
       bumperMaterial,
     ),
   );
-  step.position.set(
-    -(BODY_WIDTH / 2 + 0.16 * DETAIL),
-    BODY_BOTTOM_Y - stepHeight / 2,
-    doorGroup.position.z + DOOR_WIDTH / 2,
-  );
-  chassis.add(step);
+  riser.position.set(stepX, lowestTreadUnderside + riserHeight / 2, stepZ - stepDepth / 2 + 0.08 * DETAIL);
+  stepGroup.add(riser);
 
   // --- bumpers ---------------------------------------------------------------
   // **`cabinBackZ`, not `-BODY_LENGTH / 2`** — and that difference is Jim's
@@ -920,22 +1420,106 @@ export function createCatBus(): CatBusHandle {
     }
   }
 
-  // --- wheels --------------------------------------------------------------
-  const wheelGeometry = new CylinderGeometry(WHEEL_RADIUS, WHEEL_RADIUS, 0.34 * DETAIL, 14);
-  const hubGeometry = new CylinderGeometry(WHEEL_RADIUS * 0.42, WHEEL_RADIUS * 0.42, 0.36 * DETAIL, 10);
+  // --- wheels, on their own axles ------------------------------------------
+  // Twice the radius they were drawn at (`CAT_BUS_WHEEL_SCALE`), standing
+  // outboard of every part of the bodywork (`WHEEL_X`), on a group that does
+  // **not** bob. Three parts to each corner, and each is there for a reason:
+  //
+  //  - the tyre and its hub, on `axles`, planted on the road;
+  //  - a **stub axle** reaching in under the flank, also on `axles`, so a wheel
+  //    held off at arm's length is visibly held by something rather than
+  //    floating beside the bus;
+  //  - a **mudguard** over the top, on the `chassis`, so the gap between it and
+  //    the tyre opens and closes as the body moves. That gap is the suspension,
+  //    seen from outside, and it is what `check:cat-bus-suspension` measures.
+  const wheelGeometry = new CylinderGeometry(WHEEL_RADIUS, WHEEL_RADIUS, WHEEL_WIDTH, 18);
+  const hubGeometry = new CylinderGeometry(
+    WHEEL_RADIUS * 0.42,
+    WHEEL_RADIUS * 0.42,
+    WHEEL_WIDTH * 1.06,
+    12,
+  );
+  // Reaches from the wheel's centre plane inboard to well under the bodywork,
+  // so whichever way you look at the bus it disappears into the flank rather
+  // than stopping in mid-air.
+  const stubLength = WHEEL_X - BODY_WIDTH / 2 + WALL_THICKNESS;
+  const stubGeometry = new CylinderGeometry(WHEEL_RADIUS * 0.16, WHEEL_RADIUS * 0.16, stubLength, 8);
+  // The mudguard: one swept arc whose **inner surface sits at exactly
+  // `WHEEL_RADIUS + CAT_BUS_ARCH_GAP` all the way round** — see `FENDER_ARC`
+  // for why this is neither the torus nor the row of plates it has been.
+  //
+  // Drawn as a flat annular sector in the shape's own xy plane and extruded
+  // along its z, then turned a quarter turn about y so that the extrusion runs
+  // along the wheel's axle and the sector stands up in the bus's yz plane.
+  const fenderInnerRadius = WHEEL_RADIUS + CAT_BUS_ARCH_GAP;
+  const fenderOuterRadius = fenderInnerRadius + FENDER_THICKNESS;
+  const fenderArcFrom = Math.PI / 2 - FENDER_ARC / 2;
+  const fenderArcTo = Math.PI / 2 + FENDER_ARC / 2;
+  const fenderSection = new Shape();
+  fenderSection.moveTo(
+    Math.cos(fenderArcFrom) * fenderInnerRadius,
+    Math.sin(fenderArcFrom) * fenderInnerRadius,
+  );
+  fenderSection.absarc(0, 0, fenderInnerRadius, fenderArcFrom, fenderArcTo, false);
+  fenderSection.absarc(0, 0, fenderOuterRadius, fenderArcTo, fenderArcFrom, true);
+  fenderSection.closePath();
+  const fenderGeometry = new ExtrudeGeometry(fenderSection, {
+    depth: FENDER_HALF_WIDTH * 2,
+    bevelEnabled: false,
+    curveSegments: FENDER_ARC_SEGMENTS,
+  });
+  // Extrusion runs 0..depth, so it is centred here rather than at every corner.
+  fenderGeometry.translate(0, 0, -FENDER_HALF_WIDTH);
   const wheels: Mesh[] = [];
-  for (const x of [-(BODY_WIDTH / 2 - 0.05 * DETAIL), BODY_WIDTH / 2 - 0.05 * DETAIL]) {
-    for (const z of [BODY_LENGTH * 0.28, -BODY_LENGTH * 0.3]) {
+  for (const side of [-1, 1] as const) {
+    for (const z of WHEEL_Z) {
+      const x = side * WHEEL_X;
+
       const wheel = solid(new Mesh(wheelGeometry, wheelMaterial));
+      wheel.name = 'cat-bus-wheel';
       wheel.rotation.z = Math.PI / 2;
       wheel.position.set(x, WHEEL_RADIUS, z);
-      chassis.add(wheel);
+      axles.add(wheel);
       wheels.push(wheel);
 
       const hub = decal(new Mesh(hubGeometry, hubMaterial));
+      hub.name = 'cat-bus-hub';
       hub.rotation.z = Math.PI / 2;
       hub.position.copy(wheel.position);
-      chassis.add(hub);
+      axles.add(hub);
+
+      const stub = solid(new Mesh(stubGeometry, bumperMaterial));
+      stub.rotation.z = Math.PI / 2;
+      stub.position.set(x - side * stubLength / 2, WHEEL_RADIUS, z);
+      axles.add(stub);
+
+      // A group at the wheel's centre, so the arch is placed by the wheel it
+      // guards rather than by its own coordinates.
+      const fender = new Group();
+      fender.name = 'cat-bus-fender';
+      // **`- CAT_BUS_RIDE_LIFT`, and leaving it out was a real bug.** The
+      // wheels hang off `axles`, which sits on the road; the fender hangs off
+      // `chassis`, which rests `CAT_BUS_RIDE_LIFT` higher up. Placed at plain
+      // `WHEEL_RADIUS` in the chassis's own space it therefore came out that
+      // much *above* the wheel it guards — 0.64 m of daylight at rest, an arch
+      // floating level with the windows rather than sitting over a tyre, which
+      // is its own contribution to the fender not reading as a mudguard.
+      //
+      // Invisible in the source because both numbers are called the wheel's
+      // radius and only one of them is in the wheel's frame. Found by the
+      // clearance check reporting a tightest gap *larger* than the arch gap it
+      // was built with, which is not a thing a correct arch can do.
+      fender.position.set(x, WHEEL_RADIUS - CAT_BUS_RIDE_LIFT, z);
+      chassis.add(fender);
+      // The bumper's timber colour, matching the stub axle it shares a corner
+      // with — reads as chassis furniture rather than as bodywork, which the
+      // roof's pale lemon made it look like.
+      const arch = solid(new Mesh(fenderGeometry, bumperMaterial));
+      arch.rotation.y = Math.PI / 2;
+      fender.add(arch);
+      // One outline for the whole arch. Eight plates meant eight outlines, and
+      // from above they read as eight lines ruled across a plank stack.
+      addOutline(arch, FENDER_OUTLINE_THICKNESS);
     }
   }
 
@@ -1014,6 +1598,22 @@ export function createCatBus(): CatBusHandle {
     }
   }
 
+  // --- tiger stripes ---------------------------------------------------------
+  // **One pass, one owner of the drape's parameters.** Every striped mesh's UVs
+  // are rewritten from where its vertices sit on the *vehicle*, so a stripe is
+  // the same width in metres on the header band as on the door as on the flank,
+  // and the pattern runs unbroken across three separate meshes. See
+  // `tigerStripes.ts` for the unwrap and for why this is a texture rather than
+  // thirty applied shells.
+  //
+  // Deliberately after every `addOutline` above: `outlineGeometry` welds
+  // vertices, and welding takes UVs into account, so re-mapping first would
+  // quietly change which vertices merge and therefore the normals the outline
+  // is extruded along.
+  for (const { mesh, at } of striped) {
+    drapeStripeUvs(mesh, at, bodyTopY, cabinBackZ, cabinBackZ + cabinLength);
+  }
+
   // --- height ----------------------------------------------------------------
   // Measured to the **actual top**, ear tips included, per ART_DIRECTION §7's
   // asset contract — not to the roof, which would crop a name label. One
@@ -1031,9 +1631,24 @@ export function createCatBus(): CatBusHandle {
   let doorOpenAmount = 0;
   let wheelSpin = 0;
 
+  // --- suspension state -------------------------------------------------------
+  /** How far the bus has driven, in metres. The clock the road is sampled on. */
+  let distanceTravelled = 0;
+  /** Body height above rest at each axle, and how fast it is moving. */
+  let frontOffset = 0;
+  let frontVelocity = 0;
+  let rearOffset = 0;
+  let rearVelocity = 0;
+  /** Smoothed longitudinal and lateral accelerations, m/s^2. */
+  let smoothedAlong = 0;
+  let smoothedAcross = 0;
+  let lastSpeed = 0;
+  let lastYaw = root.rotation.y;
+
   return {
     root,
     height,
+    chassis,
     cabin,
     driverSeat,
     passengerSeat,
@@ -1050,8 +1665,82 @@ export function createCatBus(): CatBusHandle {
     },
 
     animate(dt: number, elapsed: number, speed: number): void {
-      wheelSpin += speed * dt * 3.1;
+      // **Rolling, not spinning at a rate somebody liked the look of.** The
+      // wheel covers `speed * dt` metres of road, so it turns through exactly
+      // that over its own radius. The old `* 3.1` was a factor tuned by eye
+      // against a 0.53 m wheel; left alone, a 1.07 m wheel would have gone
+      // round twice as fast as the road beneath it and the bus would have read
+      // as permanently skidding.
+      wheelSpin += (speed * dt) / WHEEL_RADIUS;
       for (const wheel of wheels) wheel.rotation.x = wheelSpin;
+
+      // --- the suspension -----------------------------------------------------
+      //
+      // Two corner springs — one per axle — driven by the road under that axle,
+      // plus the load that gets thrown forward, back and sideways as the bus
+      // drives. Heave and pitch fall out of the two of them; roll is its own
+      // term because there is no third spring to derive it from.
+      const step = Math.max(dt, 1e-4);
+      distanceTravelled += Math.abs(speed) * dt;
+
+      // How hard the bus is accelerating or braking, smoothed hard. The callers
+      // hand over a *measured* speed (`ArrivalSequence` divides a distance by a
+      // timeline, `BusJourney` passes a constant), so the raw difference is
+      // spiky and a spike straight into a spring is a visible twitch.
+      const rawAlong = (speed - lastSpeed) / step;
+      lastSpeed = speed;
+      const smoothing = clamp01(step * 6);
+      smoothedAlong = lerp(smoothedAlong, rawAlong, smoothing);
+
+      // Cornering, read off the bus's own heading rather than asked for. Yaw
+      // rate times speed is the lateral acceleration a passenger feels, which
+      // is the thing that leans a body — a bus leans hard round a tight corner
+      // at 5 m/s and not at all doing the same corner stationary, and this gets
+      // that right without anybody passing a steering angle in.
+      // `angleDelta` rather than a subtraction, because both callers can step
+      // the heading across the +/-PI seam — `BusJourney` sets it with `lookAt`,
+      // which writes a quaternion and lets the Euler come out wherever it comes
+      // out — and a 2*PI jump straight into a spring is a lurch.
+      const yawDelta = angleDelta(lastYaw, root.rotation.y);
+      lastYaw = root.rotation.y;
+      const rawAcross = (yawDelta / step) * speed;
+      smoothedAcross = lerp(smoothedAcross, rawAcross, smoothing);
+
+      // Where each axle's spring is being pushed to: the road under it, plus
+      // load transfer. Accelerating squats the tail and lifts the nose; braking
+      // does the opposite. `LOAD_TRANSFER` is in metres per m/s^2.
+      const LOAD_TRANSFER = 0.02;
+      const frontTarget =
+        roadHeightAt(distanceTravelled) - smoothedAlong * LOAD_TRANSFER;
+      const rearTarget =
+        roadHeightAt(distanceTravelled - WHEELBASE) + smoothedAlong * LOAD_TRANSFER;
+
+      frontVelocity += (SPRING_RATE * (frontTarget - frontOffset) - SPRING_DAMPING * frontVelocity) * dt;
+      rearVelocity += (SPRING_RATE * (rearTarget - rearOffset) - SPRING_DAMPING * rearVelocity) * dt;
+      frontOffset += frontVelocity * dt;
+      rearOffset += rearVelocity * dt;
+
+      // **Clamped, and the clamp is load-bearing.** `CAT_BUS_ARCH_GAP` is
+      // derived from these three limits, so a body that could exceed them would
+      // drive a mudguard down onto a tyre. A spring integrated frame by frame
+      // can overshoot — a long frame, a step change in speed — and "it usually
+      // does not" is not a mechanism.
+      const heave = clamp((frontOffset + rearOffset) / 2, -CAT_BUS_MAX_HEAVE, CAT_BUS_MAX_HEAVE);
+      // Nose-up is positive, so it is front minus rear.
+      const pitch = clamp(
+        (frontOffset - rearOffset) / WHEELBASE,
+        -CAT_BUS_MAX_PITCH,
+        CAT_BUS_MAX_PITCH,
+      );
+      const roll = clamp(-smoothedAcross * 0.012, -CAT_BUS_MAX_ROLL, CAT_BUS_MAX_ROLL);
+
+      chassis.position.y = CAT_BUS_RIDE_LIFT + heave;
+      // Rotation about x lifts the nose when `pitch` is positive: a point at
+      // +z moves down by `z * sin(pitch)`, so the sign is flipped here to make
+      // "positive pitch = nose up" true, which is what the two targets above
+      // assume.
+      chassis.rotation.x = -pitch;
+      chassis.rotation.z = roll;
 
       // A lazy idle swish, faster and wider whenever the bus is moving — reads
       // as "happy", especially while it is pulling away at the end.
@@ -1065,7 +1754,8 @@ export function createCatBus(): CatBusHandle {
         const mesh = object as Partial<Mesh>;
         mesh.geometry?.dispose();
       });
-      bodyMaterial.dispose();
+        bodyMaterial.dispose();
+      stripedMaterial.dispose();
       roofMaterial.dispose();
       trimMaterial.dispose();
       earInnerMaterial.dispose();

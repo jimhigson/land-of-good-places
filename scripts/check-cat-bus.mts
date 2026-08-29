@@ -119,6 +119,22 @@ const wordsPainted: { text: string; canvas: unknown }[] = [];
   };
 }
 
+/**
+ * The bodywork meshes that carry the tiger-stripe map (#364).
+ *
+ * Listed by the names `catBus.ts` gives them rather than inferred, so a
+ * *fifth* mapped surface appearing on the bus — a face patch worn in front of
+ * it, say — is a failure here rather than something quietly absorbed into "the
+ * striped bodywork".
+ */
+const STRIPED = new Set([
+  'cat-bus-shell-lower',
+  'cat-bus-shell-upper',
+  'cat-bus-back-wall',
+  'cat-bus-door-panel',
+  'cat-bus-roof',
+]);
+
 /** The words painted since this was last called, and by whom. */
 function paintedWords(): readonly { text: string; canvas: unknown }[] {
   return wordsPainted;
@@ -947,10 +963,23 @@ check(
   const faceBus = createCatBus();
   faceBus.root.updateMatrixWorld(true);
 
-  // Every mesh in the bus carrying a painted texture. `catBus.ts` has exactly
-  // one — the cat's face — on both the floating-patch build and the baked one,
-  // which is what lets this find "the thing with the face on it" without being
-  // told which mesh that is.
+  // Every mesh in the bus carrying a painted texture, and — separately — every
+  // one carrying a **face**.
+  //
+  // This used to be one list. It asserted "the bus has exactly one painted
+  // surface" and then took `painted[0]` as the face, which worked only for as
+  // long as the face was the single mapped thing on the vehicle. #364 painted
+  // tiger stripes into the bodywork's own UV space, which is four more mapped
+  // surfaces and is the *right* way to do stripes — the same one-surface-one-
+  // texture rule the face itself follows. The old assertion would have refused
+  // it, and, worse, `painted[0]` would then have been a flank: every face
+  // assertion below would have gone on measuring the side of the bus and
+  // reporting confidently about it.
+  //
+  // So the question is asked properly now. **The number that must be one is the
+  // number of surfaces carrying a face**, which is what CLAUDE.md's rule is
+  // actually about, and `isBakedFaceMesh` answers it directly rather than by a
+  // proxy that happened to be true.
   const painted: Mesh[] = [];
   faceBus.root.traverse((node) => {
     const mesh = node as Mesh;
@@ -958,22 +987,29 @@ check(
     const material = mesh.material as { map?: unknown } | undefined;
     if (material && material.map) painted.push(mesh);
   });
+  const faceSurfaces = painted.filter((mesh) => isBakedFaceMesh(mesh));
 
   check(
-    painted.length === 1,
-    `the bus carries ${painted.length} painted surfaces where it should carry exactly one, the cat's ` +
-      'face — a second one is a second place for a face to be in the wrong position',
+    faceSurfaces.length === 1,
+    `the bus carries ${faceSurfaces.length} face-bearing surfaces where it should carry exactly one, ` +
+      "the cat's own — a second one is a second place for a face to be in the wrong position",
+  );
+  // A face that is *not* on a baked surface would show up as a mapped mesh that
+  // is neither the face nor a stripe. Named so the failure says which.
+  const mysteryMaps = painted.filter(
+    (mesh) => !isBakedFaceMesh(mesh) && !STRIPED.has(mesh.name),
+  );
+  check(
+    mysteryMaps.length === 0,
+    `${mysteryMaps.length} painted surface(s) on the bus are neither the baked face nor the striped ` +
+      `bodywork: ${mysteryMaps.map((mesh) => mesh.name || '(unnamed)').join(', ')} — a patch worn in ` +
+      'front of the bus rather than its own UV map (CLAUDE.md: one surface, one texture)',
   );
 
-  // **Every** painted surface, not just the first one traversal happens to
-  // reach: a check decided by traversal order reports on something other than
-  // what it is describing.
-  for (const mesh of painted) {
-    check(
-      isBakedFaceMesh(mesh),
-      "the surface carrying the cat's face was not written by the baked-face path — it is a patch " +
-        'worn in front of the bus rather than the bus’s own UV map (CLAUDE.md: one surface, one texture)',
-    );
+  // **Every** face surface, not just the first one traversal happens to reach:
+  // a check decided by traversal order reports on something other than what it
+  // is describing.
+  for (const mesh of faceSurfaces) {
     // `solid()` marks a real, shadow-casting part of the vehicle; `decal()`
     // marks something stuck on the outside of one. A face that is a decal is by
     // definition not the bodywork, whatever its coordinates say.
@@ -984,7 +1020,7 @@ check(
     );
   }
 
-  const faceMesh = painted[0];
+  const faceMesh = faceSurfaces[0];
   if (faceMesh) {
     const faceBox = new Box3().setFromObject(faceMesh);
 
