@@ -93,14 +93,15 @@ scripts kept). `npm run test:procgen` **453/453**. `npm run build` **exit 0**.
 
 ### The three blockers, all done
 
-1. **Bob 2.6 px → 13.4 px.** Two causes, and only one was the clamp. Clamps
+1. **Bob ~2 px → 10.3 px.** Two causes, and only one was the clamp. Clamps
    raised (heave 0.08→0.20, pitch 0.014→0.028, roll 0.018→0.05) *and* the road
    profile's wavelengths re-derived from `WHEELBASE`: they were near-antiphase
    against the 9.2 m wheelbase, so the axles cancelled each other's heave and
    only pitch survived. One term is now a wheelbase long (both axles in phase =
    pure heave), one two wheelbases (antiphase = pure pitch).
-   Live-game measured: **0.3308 m p2p moving, 0.0000 parked**. Scale confirmed
-   at **40.3–40.8 px/m** off the tyre's 2.133 m silhouette in the same frames.
+   Live-game measured: **0.3298 m p2p moving, 0.0000 parked** — **10.3 px** in
+   the arrival camera, and **11.3 px** body-against-wheel as a projected screen
+   offset. Reads as ~1.5 cycles of swell at ~0.7 Hz.
 2. **Mudguard = one `ExtrudeGeometry` annular sector**, arc 1.6→2.6 rad. One
    mesh, one outline. Judged from the arrival camera.
 3. **Check measures the real bodywork.** Both review fools now red.
@@ -119,6 +120,15 @@ scripts kept). `npm run test:procgen` **453/453**. `npm run build` **exit 0**.
 
 ### Traps for a successor
 
+- **Pixels must be projected through the live camera, not multiplied by a
+  scale read off a picture.** I first reported 13.4 px by multiplying the
+  *arrival-phase* heave by the *post-hand-over* px/m — two different moments;
+  the arrival camera sits further back (31.1 px/m vs 41.9). Under that sat a
+  second trap: **a tyre's silhouette is not a vertical ruler.** It is a
+  cylinder, so under an isometric camera its 0.74 m of axial width foreshortens
+  into screen-vertical and pads the silhouette past the 2.133 m disc —
+  `silhouette / diameter` gave ~41 px/m where the camera's real answer is 31.1,
+  a 35% overstatement. Expose the render camera and project.
 - **The old `bob-*.png` burst showed a PARKED bus with a panning camera.** The
   static welcome sign moves pixel-for-pixel with the tyre through all ten
   frames. A parked bus correctly does not bob, so those frames could never have

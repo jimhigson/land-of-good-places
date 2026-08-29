@@ -526,12 +526,33 @@ export const CAT_BUS_TRACK_WIDTH = 2 * (WHEEL_X + FENDER_HALF_WIDTH);
  * of this was 0.08 m and 0.014 rad, defended in this very docblock as
  * *"10 cm and a degree, because a bus that visibly lurches reads as broken
  * rather than sprung"*. That is the right instinct for a driving game seen
- * from the cab and the wrong one here: the park is seen from ~30 m up, where a
- * vertical metre is about **40 screen pixels**, so 0.08 m of clamp — which the
- * road only ever half used — came out at **2.5 px peak to peak**. Sampled
- * frame by frame through a real arrival it was arithmetically a suspension and
- * perceptually a rigid bus, and the review found it by measuring the running
- * game rather than by reading this file.
+ * from the cab and the wrong one here: the park is seen from ~30 m up, and
+ * that clamp — which the road only ever half used — came out at **0.0645 m
+ * peak to peak, about 2 px**. Sampled frame by frame through a real arrival it
+ * was arithmetically a suspension and perceptually a rigid bus, and the review
+ * found it by measuring the running game rather than by reading this file.
+ *
+ * As tuned the drive-in heaves **0.3298 m peak to peak**, which is **10.3 px**
+ * in the arrival camera, and body-against-wheel measures **11.3 px** as a
+ * projected screen offset. It reads as a clean swell of about one and a half
+ * cycles at ~0.7 Hz.
+ *
+ * **How to measure this, because the obvious way is wrong.** Pixels here mean
+ * *project the point through the live render camera every frame and subtract*.
+ * They do not mean "metres times a scale read off the picture": the scale is
+ * different in every camera phase (31.1 px/m at the arrival camera, 41.9 px/m
+ * after hand-over — the arrival camera sits further back), so multiplying one
+ * phase's metres by another phase's scale silently mixes two moments. That is
+ * exactly how this docblock first claimed 13.4 px.
+ *
+ * And **do not derive the scale from the tyre's silhouette**, which is the
+ * trap under that one. A tyre is a *cylinder*, not a flat vertical ruler: seen
+ * from an isometric camera its 0.74 m of axial width foreshortens into the
+ * screen's vertical axis and pads the silhouette well beyond the 2.133 m disc,
+ * so `silhouette / diameter` overstates the vertical scale by about a third
+ * (86-87 px suggests ~41 px/m where the camera's real answer is 31.1). Two
+ * plausible measurements of the same frame, disagreeing by 35%, and only the
+ * one that goes through the camera matrix is answering the question asked.
  *
  * These numbers are Jim's standing ruling that **recognisability beats
  * proportion** applied to motion instead of to size — the same ruling that
@@ -653,8 +674,9 @@ const SPRING_DAMPING = 7.4;
  * land at 7.6 m against a 9.2 m wheelbase, which is very nearly antiphase. So
  * the two axles pushed *against* each other: the difference (pitch) saturated
  * its clamp while the average (heave) very nearly cancelled, and the bus
- * reached 2.5 px of bob on a road with 0.11 m of bump in it. The amplitude was
- * not the only thing that was too small — most of it was being thrown away.
+ * managed 0.0645 m of bob — about 2 px — on a road with 0.11 m of bump in it.
+ * The amplitude was not the only thing that was too small: most of what there
+ * was was being thrown away.
  *
  * So the terms are derived from {@link WHEELBASE} instead of picked:
  *
