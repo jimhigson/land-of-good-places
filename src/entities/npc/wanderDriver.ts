@@ -241,6 +241,29 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
   }
 
   /**
+   * "You are about to stop being simulated." Hands back anything shared that
+   * this child is holding — issue #362.
+   *
+   * Only the chat today: it is the one activity whose budget slot is released
+   * from inside `update`, which a frozen child never reaches.
+   */
+  releaseForFreeze(): void {
+    this.chat.releaseForFreeze();
+  }
+
+  /**
+   * "You have finished in there." Drops the current trip so the next frame
+   * chooses somewhere new — issue #362.
+   *
+   * Called by `NpcSystem` when a child who has been marked present inside the
+   * castle has been there long enough. Without it they would step out of the
+   * door still wanting the Hat Shop, re-plan, and walk straight back in.
+   */
+  finishedIndoors(): void {
+    this.journey.abandon();
+  }
+
+  /**
    * Which space this child is *heading for* — not where they are.
    *
    * `NpcSystem` needs it to cap the castle by **presence rather than by

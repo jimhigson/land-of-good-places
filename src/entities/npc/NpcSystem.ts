@@ -39,7 +39,7 @@ import type { ShopStand } from '../../world/building/shops/Shops';
 import { createPetBlob, PET_BODY_NODE, PET_HEAD_NODE } from './petBlob';
 import { WanderDriver, type ClimberBudget } from './wanderDriver';
 import type { ActivityBudget } from './activities/activity';
-import { SPACE_CASTLE, spaceAt } from '../../world/spaces';
+import { SPACE_CASTLE, SPACE_GARDEN, spaceAt } from '../../world/spaces';
 // Chatting (see the additive block in wanderDriver.ts): the shared budget
 // that caps how many children may be mid-chat at once, and the speed below
 // which the player counts as "stood still" for that same block.
@@ -65,6 +65,19 @@ export const MAX_CONCURRENT_CLIMBERS = 3;
  * never so many that the platform *is* the park.
  */
 export const MAX_CONCURRENT_RIDERS = 4;
+
+/**
+ * How long a child stays in the castle when the player is not in there with
+ * them — issue #362.
+ *
+ * Long enough to read as a visit rather than a bounce off the door, short
+ * enough that the four indoor places keep turning over and the park does not
+ * quietly lose four children for a session. Only ever used while the child is
+ * a marker rather than an agent: with the player inside, they walk out on their
+ * own like anybody else.
+ */
+const VISIT_MIN = 25;
+const VISIT_MAX = 70;
 
 /**
  * How many children may be mid-chat across the whole park at once (see the
@@ -452,6 +465,50 @@ export class NpcSystem implements GameSystem {
   /** Character indices, kept sorted nearest-first every frame. */
   private readonly labelOrder: number[] = [];
   private readonly playerPosition = new Vector3();
+  /**
+   * Which NPCs are somewhere the player is not — issue #362.
+   *
+   * Jim: *"if they have entered the big building, we don't simulate inside
+   * rooms the player isn't in, we just mark which NPCs are in there."* This is
+   * the mark. A character in here is **present but not stepped**: their body
+   * stays exactly where it stood, and nothing about them is simulated until the
+   * player walks into the space they are in.
+   *
+   * Rebuilt every frame from `spaceAt`, never bookkept, for the reason
+   * `budget.ts`'s header gives about slots that leak: a flag set on entering a
+   * space and cleared on leaving it has as many ways to go wrong as there are
+   * ways out, and there are several. A set recomputed from where the characters
+   * actually are cannot disagree with where they actually are.
+   *
+   * Deliberately **not** castle-specific. The ticket was prompted by the
+   * castle, but the words are general and so is the problem: the seven hotel
+   * residents live 600–1100 m away in three more spaces and were being
+   * simulated for the whole session, which is the larger and more permanent
+   * instance of exactly this.
+   */
+  private readonly elsewhere = new Set<NpcCharacter>();
+  /** Who was marked on the *previous* frame — see the guard in
+   *  {@link markWhoIsElsewhere}, which needs a transition, not a state. */
+  private readonly wasElsewhere = new Set<NpcCharacter>();
+  /**
+   * How much longer each marked-indoors child stays in there — issue #362.
+   *
+   * The one number a frozen child keeps, and the thing that stops the mark
+   * being a black hole. A marked child is not simulated, so they cannot *walk*
+   * out; without this, four children would step into the castle, freeze, and
+   * `MAX_INSIDE` would hold the door shut for the rest of the session while the
+   * park slowly drained.
+   *
+   * Not a simulation and not a route: one countdown, then they are put back
+   * outside the front door — the same spot `leaveInterior` puts the player, so
+   * they emerge where somebody leaving the castle emerges.
+   *
+   * Keyed on the character and **deleted whenever they are not marked indoors**,
+   * so it self-heals rather than needing an exit to remember to clear it.
+   * Hotel residents never get an entry: they *live* in their rooms, and being
+   * marked present indefinitely is the correct behaviour for them.
+   */
+  private readonly visitRemaining = new Map<NpcCharacter, number>();
   private frame = 0;
   /**
    * Set by `attachPlayer`, once the player exists — `null` for the handful of
@@ -816,6 +873,8 @@ export class NpcSystem implements GameSystem {
     // again next frame while standing still looking at what they walked to.
     this.planner.beginFrame();
     this.stepChildrenThroughDoors();
+    this.markWhoIsElsewhere();
+    this.updateIndoorVisits(dt);
 
     // The player's hop is the cue for the giggle-hop. Reading the action rather
     // than the Player keeps this system's only dependency the collision world.
@@ -834,6 +893,11 @@ export class NpcSystem implements GameSystem {
     for (let i = 0; i < this.characters.length; i += 1) {
       const character = this.characters[i];
       if (!character) continue;
+
+      // Somewhere the player is not: marked present, not simulated (#362).
+      // Left exactly where they stood, so walking in on them shows them where
+      // they were rather than teleporting or popping them into place.
+      if (this.elsewhere.has(character)) continue;
 
       // Children a long way off think every other frame, and think twice as
       // hard when they do. Nobody has ever noticed a distant child deciding to
@@ -924,9 +988,13 @@ export class NpcSystem implements GameSystem {
     for (let a = 0; a < this.characters.length; a += 1) {
       const first = this.characters[a];
       if (!first) continue;
+      // A frozen character is furniture: nothing pushes them and they push
+      // nothing. Skipping the outer one early also keeps this O(n^2) loop off
+      // the seven hotel residents entirely.
+      if (this.elsewhere.has(first)) continue;
       for (let b = a + 1; b < this.characters.length; b += 1) {
         const second = this.characters[b];
-        if (!second) continue;
+        if (!second || this.elsewhere.has(second)) continue;
         first.separateFrom(second, SEPARATION, maxPush);
       }
     }
@@ -1206,6 +1274,133 @@ export class NpcSystem implements GameSystem {
       if (here || driver.destinationSpace === SPACE_CASTLE) inside += 1;
     }
     this.planner.setInsideCount(inside);
+  }
+
+  /**
+   * Works out who is somewhere the player is not, and marks them.
+   *
+   * Two conditions, both needed:
+   *
+   * - **A different space from the player's**, derived with `spaceAt` — the
+   *   same function `PoiNode.space`, the journey planner and the portals all
+   *   use. One owner for "which place is this", so nothing can hold a second
+   *   opinion.
+   * - **Grounded.** A character still falling onto their own floor has not
+   *   finished arriving, and freezing them mid-drop would leave them under it
+   *   for ever. `check:hotel` fails anybody below `FLOOR_OF_THE_WORLD` and has
+   *   fired before with all seven residents at −16.5 m. Today the hotel's
+   *   floors are at y=0 and nobody ever falls, so this costs nothing; it is
+   *   here because `ResidentSpec.floorY` exists precisely so a space can put
+   *   its floor somewhere else, and its own comment warns that a body starting
+   *   below its floor "falls for ever".
+   */
+  private markWhoIsElsewhere(): void {
+    const playerSpace = spaceAt(this.playerPosition.x, this.playerPosition.z);
+    // Last frame's set, kept so "newly frozen" can actually be detected — see
+    // the guard below. Swapped rather than allocated: this runs every frame.
+    this.wasElsewhere.clear();
+    for (const character of this.elsewhere) this.wasElsewhere.add(character);
+    this.elsewhere.clear();
+    for (let i = 0; i < this.characters.length; i += 1) {
+      const character = this.characters[i];
+      if (!character) continue;
+      const space = spaceAt(character.position.x, character.position.z);
+      if (space === playerSpace) continue;
+      // **Interiors only. The park's own crowd is never frozen.**
+      //
+      // Jim's words are "we don't simulate inside *rooms* the player isn't
+      // in", and the garden is not a room. Marking it too was tried and backed
+      // out, for two reasons found by measuring rather than by argument:
+      //
+      // 1. It buys nothing. The measured cost of simulating everybody the
+      //    player cannot see is 0.147 ms a frame, and essentially all of it is
+      //    the seven hotel residents, who are off-space for the *whole
+      //    session*. The garden crowd is only ever off-space for the minute or
+      //    two somebody spends indoors.
+      // 2. It is not free of risk. `ParkTrain.carryPassengers` writes a rider's
+      //    position from outside `NpcSystem` every frame, so a frozen child on
+      //    a moving train would be carried along while nothing else about them
+      //    advanced — a body moving with no simulation behind it, which is the
+      //    same class of inconsistency this whole change exists to remove.
+      //
+      // What this is *not*: a correctness fix. An earlier version of this
+      // comment claimed the narrowing captured "the entire correctness payoff",
+      // because indoor NPCs at coordinates six hundred metres away had corrupted
+      // crowd measurements. That does not survive checking:
+      // `check-npc-dispersal.mts` already filters its crowd by `SPACE_GARDEN`
+      // and *that* is what fixed the 276 m RMS reading; `check-npc-jitter.mts`
+      // already re-baselines across `stepThroughDoor`; and freezing a body does
+      // not remove it from a positional census at all — a marked child still
+      // stands at x≈600. Not moving is not the same as not being there.
+      //
+      // So the reason to mark interiors and not the garden is only the two
+      // points above: the garden buys nothing and carries the train hazard.
+      if (space === SPACE_GARDEN) continue;
+      if (character.isAirborne) continue;
+      // Newly frozen this frame: hand back anything shared before they stop
+      // being stepped. A child frozen mid-chat would otherwise hold one of the
+      // two chat slots for their whole visit, because the only release lives in
+      // the `update` they no longer get.
+      //
+      // Tested against **last** frame's set, not `this.elsewhere` — that is
+      // cleared at the top of this method, so `!this.elsewhere.has(...)` was
+      // always true and the transition test was dead: 18,194 calls over 7,200
+      // frames where a working guard gives single digits. Harmless only because
+      // `BudgetSlot.release()` is idempotent, and it read as though it worked,
+      // so the next non-idempotent thing added here would have run at 60 Hz.
+      if (!this.wasElsewhere.has(character)) this.wanderDrivers[i]?.releaseForFreeze();
+      this.elsewhere.add(character);
+    }
+  }
+
+  /**
+   * Counts down each marked-indoors child's visit and sends them home when it
+   * ends. See {@link visitRemaining} for why this exists at all.
+   *
+   * Only park children (`WanderDriver`) are ever given a timer. A resident on a
+   * `WaypointDriver` belongs to their room, so "still in there" is not a state
+   * to recover from.
+   */
+  private updateIndoorVisits(dt: number): void {
+    const out = this.planner.portalToward(SPACE_CASTLE, SPACE_GARDEN);
+    for (let i = 0; i < this.characters.length; i += 1) {
+      const character = this.characters[i];
+      const driver = this.wanderDrivers[i];
+      if (!character || !driver) continue;
+
+      // Not marked-and-indoors: no visit to time. Covers the case that matters
+      // most — the player walking in, which un-marks everybody in there and
+      // hands them straight back to ordinary simulation, timer forgotten.
+      const indoors = spaceAt(character.position.x, character.position.z) === SPACE_CASTLE;
+      if (!indoors || !this.elsewhere.has(character)) {
+        this.visitRemaining.delete(character);
+        continue;
+      }
+
+      const left =
+        (this.visitRemaining.get(character) ?? driver.rng.range(VISIT_MIN, VISIT_MAX)) - dt;
+      if (left > 0) {
+        this.visitRemaining.set(character, left);
+        continue;
+      }
+
+      // Nothing to send them out through: keep the (expired) visit rather than
+      // deleting it, so this is retried rather than silently restarting the
+      // timer from full every frame.
+      if (!out) continue;
+      this.visitRemaining.delete(character);
+      character.stepThroughDoor(out.farX, out.farY, out.farZ, out.farFacing);
+      // `finishedIndoors` abandons the journey outright, which resets the plan
+      // as `portalTaken` would and then some — so calling both was redundant.
+      // They have finished with the shop they went in for, or they would turn
+      // round on the doorstep and go back in for it.
+      driver.finishedIndoors();
+    }
+  }
+
+  /** Who is present-but-not-simulated right now. Read by `check:npc-presence`. */
+  get markedElsewhere(): readonly NpcCharacter[] {
+    return [...this.elsewhere];
   }
 
   private updateBubbles(): void {
