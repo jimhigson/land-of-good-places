@@ -40,7 +40,11 @@ HEIGHT_MARGIN = 0.05
 ROAD_HALF = 1.6            # canonical seed's first bridge
 WALL_THICKNESS = 0.3
 PARAPET_HEIGHT = 0.72
-HUMP_BLEND = 0.25
+HUMP_BLEND = 0.15          # the Engineer's sprint-safe trim (provisional)
+PARAPET_ARC_RISE = 0.45    # the pronounced hump, on the part nobody walks on
+COURSE_HEIGHT = 0.7
+COURSE_RECESS = 0.09
+COPING_HEIGHT = 0.28
 RAMP_RUN = 7.814           # the Engineer's contract: 15.157 -> 7.814 (#349)
 
 COPING_LENGTH = 0.86
@@ -78,6 +82,18 @@ def arch_at(s: float):
         along = C2_ALONG + R2 * math.sin(theta)
         y = SPRING_Y + R2 * math.cos(theta)
     return sign * along, y, sign * math.sin(theta), math.cos(theta)
+
+
+def soffit_at(along_abs: float) -> float:
+    """`bridges.ts`'s `soffitAt` — the arch's height, by |along|."""
+    if along_abs <= 0:
+        return SOFFIT_CROWN
+    if along_abs >= ARCH_SPAN_HALF:
+        return SPRING_Y
+    if along_abs <= ARCH_CLEAR_HALF:
+        return SOFFIT_CROWN - (R1 - math.sqrt(max(0.0, R1 * R1 - along_abs ** 2)))
+    dx = along_abs - C2_ALONG
+    return SPRING_Y + math.sqrt(max(0.0, R2 * R2 - dx * dx))
 
 
 def ring_stones():
@@ -122,6 +138,18 @@ def profile_drop(q: float) -> float:
 def road_y(along: float) -> float:
     q = min(1.0, abs(along) / RAMP_RUN_TOTAL)
     return CROWN_ROAD * (1 - profile_drop(q))
+
+
+def parapet_top_y(along: float) -> float:
+    """`bridges.ts`'s `parapetTopFor`: the road, the parapet, and the arc.
+
+    The arc is the whole answer to "a more pronounced hump" — it goes on the
+    parapet and the coping, which nobody walks on, while the road underneath
+    stays gentle enough that a sprinting child keeps her footing.
+    """
+    q = min(1.0, abs(along) / RAMP_RUN_TOTAL)
+    arc = PARAPET_ARC_RISE * (0.5 + 0.5 * math.cos(math.pi * q))
+    return road_y(along) + PARAPET_HEIGHT + arc
 
 
 RAMP_RUN_TOTAL = ARCH_SPAN_HALF + RAMP_RUN
@@ -180,7 +208,7 @@ def spandrel(coll):
     verts = []
     faces = []
     for a in alongs:
-        top = road_y(a) + PARAPET_HEIGHT
+        top = parapet_top_y(a)
         verts.append((a, 0.0, -1.0))
         verts.append((a, 0.0, top))
     for i in range(steps):
@@ -189,9 +217,74 @@ def spandrel(coll):
     outline = new_mesh("spandrel", verts, faces, coll)
 
     solid = outline.modifiers.new("solid", "SOLIDIFY")
-    solid.thickness = WALL_THICKNESS
+    # The *recessed* course line is the base wall; the proud courses below
+    # stand back out to the full `WALL_THICKNESS`. Modelling it this way round
+    # rather than cutting insets out of a full-thickness wall renders the same
+    # and is a fraction of the geometry — what matters is that the widest the
+    # wall ever gets is still exactly `WALL_THICKNESS`.
+    solid.thickness = WALL_THICKNESS - 2 * COURSE_RECESS
     solid.offset = 0.0
     return outline
+
+
+def courses(coll, side):
+    """The coursed outer flank — levelled bands, alternate ones recessed.
+
+    `bridges.ts` builds this into the swept shell itself; here it is a separate
+    slab per course, which renders the same and is far less code. What matters
+    for judging it is that the course heights and the recess are the same
+    numbers, and that they are level right along the bridge.
+    """
+    y_face = side * (ROAD_HALF + WALL_THICKNESS / 2)
+    level = CROWN_ROAD
+    index = 0
+    while level > -1.0:
+        if index % 2 != 0:
+            level -= COURSE_HEIGHT
+            index += 1
+            continue
+        top, bottom = level, level - COURSE_HEIGHT
+        verts, faces, base = [], [], 0
+        steps = 120
+        for i in range(steps + 1):
+            a = -RAMP_RUN_TOTAL + i * (2 * RAMP_RUN_TOTAL / steps)
+            wall_top = parapet_top_y(a)
+            # The wall's own bottom: under the terrain out on the ramps, but
+            # the soffit itself inside the tunnel — a course must stop at the
+            # arch, not run across the opening. `bridges.ts` gets this for free
+            # because the courses are part of the swept shell, whose bottom is
+            # already the soffit there; the preview has to say it out loud.
+            if abs(a) < ARCH_SPAN_HALF:
+                wall_bottom = soffit_at(abs(a))
+            else:
+                wall_bottom = -1.0
+            t = min(wall_top, max(wall_bottom, top))
+            b = min(wall_top, max(wall_bottom, bottom))
+            # Never *skip* a sample where the course has been clamped away —
+            # emit a degenerate (zero-height) pair instead. Skipping leaves the
+            # strip's remaining pairs adjacent in the vertex list but not in
+            # `a`, so the next quad bridges the gap: the first attempt at this
+            # drew flat bars straight across the tunnel mouth. `bridges.ts`
+            # keeps every ring's course count fixed for exactly this reason.
+            near = y_face + side * (WALL_THICKNESS / 2 - COURSE_RECESS)
+            verts += [(a, near, b), (a, near, t)]
+        for i in range(len(verts) // 2 - 1):
+            q = i * 2
+            faces.append((q, q + 2, q + 3, q + 1))
+        if faces:
+            band = new_mesh(f"course{side}.{index}", verts, faces, coll)
+            thick = band.modifiers.new("solid", "SOLIDIFY")
+            # Straddle the base face rather than offsetting to one side: a
+            # solidify's offset follows the strip's own normals, and a strip
+            # built from a vertex list can wind either way, so half the courses
+            # were being pushed *into* the wall and vanishing. Doubling the
+            # thickness and centring it stands the band proud whichever way the
+            # normals point, and the half inside the wall is never seen.
+            thick.thickness = 2 * COURSE_RECESS
+            thick.offset = 0.0
+        level -= COURSE_HEIGHT
+        index += 1
+        base += 0
 
 
 def arch_cutter(coll):
@@ -273,15 +366,24 @@ def build_preview():
                   f"ring{side}.{index}")
 
         # --- the coping run along this parapet
+        courses(coll, side)
+
+        # --- the imposts: the course each arch springs from
+        for end in (1, -1):
+            along, y, _, _ = arch_at(end * ARC_HALF)
+            m = (Matrix.Translation((along, face_y, y - COPING_HEIGHT))
+                 @ Matrix.Rotation(math.pi / 2, 4, "Z"))
+            place("coping", coll, m, f"impost{side}.{end}")
+
         length = 2 * RAMP_RUN_TOTAL
         count = max(1, int(length / COPING_LENGTH))
         step = length / count
         for i in range(count):
             a = -RAMP_RUN_TOTAL + step * (i + 0.5)
-            top = road_y(a) + PARAPET_HEIGHT
+            top = parapet_top_y(a)
             # Tilt each block onto the local grade, so the run flows over the
             # hump instead of stepping up it.
-            slope = (road_y(a + 0.2) - road_y(a - 0.2)) / 0.4
+            slope = (parapet_top_y(a + 0.2) - parapet_top_y(a - 0.2)) / 0.4
             tilt = math.atan(slope)
             m = (Matrix.Translation((a, side * (ROAD_HALF + WALL_THICKNESS / 2), top))
                  @ Matrix.Rotation(math.pi / 2, 4, "Z")
@@ -301,6 +403,23 @@ def build_preview():
         b = i * 2
         faces.append((b, b + 1, b + 3, b + 2))
     new_mesh("road", verts, faces, coll, "pathSand")
+
+    # --- the barrel: the tunnel's own ceiling, mouth to mouth.
+    # Without it the preview shows two separate spandrels with daylight
+    # between them, and the arch reads as a hole in a flat wall rather than as
+    # somewhere a train goes. `bridges.ts` sweeps this surface for real.
+    steps = 96
+    verts = []
+    faces = []
+    for i in range(steps + 1):
+        s_arc = -ARC_HALF + i * (2 * ARC_HALF / steps)
+        a, y, _, _ = arch_at(s_arc)
+        verts.append((a, -HALF_ACROSS, y))
+        verts.append((a, HALF_ACROSS, y))
+    for i in range(steps):
+        b = i * 2
+        faces.append((b, b + 1, b + 3, b + 2))
+    new_mesh("barrel", verts, faces, coll)
 
     # --- the ground, for the silhouette
     g = 30.0
@@ -348,8 +467,11 @@ SHOTS = {
     "bridge-arch": ((0.9, -16.0, 2.4), (0.0, 0.0, 2.6), 42.0),
     # Straight along the deck: the coping run over the hump.
     "bridge-coping": ((-14.0, -3.4, 6.4), (2.0, 0.0, 3.4), 45.0),
+    # A child's eye height at the ramp foot — the view the flank was reworked
+    # for. If the coursing does not read from here it does not read at all.
+    "bridge-flank": ((-9.5, -7.0, 1.2), (0.5, -2.6, 2.4), 40.0),
     # Flat side elevation: the hump silhouette and the arch together.
-    "bridge-silhouette": ((0.0, -46.0, 5.2), (0.0, 0.0, 2.6), 68.0),
+    "bridge-silhouette": ((0.0, -48.0, 5.4), (0.0, 0.0, 2.4), 60.0),
 }
 
 
