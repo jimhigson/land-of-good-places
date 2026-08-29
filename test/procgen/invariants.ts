@@ -5796,22 +5796,34 @@ const theWalkInFromTheGateCrossesWhereItWasPlannedTo: Invariant = (facts) => {
  * exists precisely to make that impossible ahead of time; this asks whether
  * the promise was kept afterwards, on the built park.
  *
- * It is the check issue #339 went looking for, and it is not vacuous: a
- * whole class of "the browser built no bridges" failures — the crossing-plan
- * letterbox (`train/crossingPrewarm.ts`) handing back an empty plan, the
- * sliced solve in `boot/parkGeneration.ts` finishing early, `paths.ts`
- * losing its crossing-site lattice edges — all land as *zero crossings on a
- * planned bridge site*, which clause 1 below reports by name rather than by
- * silently making every per-bridge loop in this file iterate over nothing.
+ * It is the check issue #339 went looking for: a whole class of "the browser
+ * built no bridges" failures — the crossing-plan letterbox
+ * (`train/crossingPrewarm.ts`) handing back an empty plan, the sliced solve in
+ * `boot/parkGeneration.ts` finishing early, `paths.ts` losing its crossing-site
+ * lattice edges — all land as *the park's crossings standing on none of the
+ * planned sites*, which clause 1 below reports by name rather than by silently
+ * making every per-bridge loop in this file iterate over nothing.
+ *
+ * **How much it covers varies by seed, and it says so on every run** — see the
+ * `[proven-site cover]` line it prints. Since #374 tied `MAX_RAMP_GRADIENT` to
+ * what a sprinting child can actually climb, fewer sites are provable: across
+ * the five seeds the crossings this invariant examines fell from 8 to 4, and on
+ * **seed 2 `plannedBridgeSiteDistances` is empty**, so the whole check
+ * early-returns and asserts nothing at all. That is not a defect — a park with
+ * no proven bridge sites has no promise to keep — but a check that quietly
+ * stops checking must announce it, or the next reader takes green for cover.
  *
  * Two clauses:
  *
- * 1. **The plan reached the park at all.** If the planner proved any bridge
- *    site (`plannedBridgeSiteDistances`), at least one built crossing stands
- *    on one. A park whose crossings have all drifted off-plan is a park
- *    whose crossing plan did not arrive — the exact shape of a prewarm
- *    letterbox that came back empty, and the state in which every other
- *    bridge invariant here passes by iterating over nothing.
+ * 1. **The plan reached the park at all.** If the planner made any sites, at
+ *    least one built crossing stands on one of them. **Every planned site
+ *    counts, bridge and level alike**: this clause asks whether the plan
+ *    arrived, and `paths.ts` routes legs where the park needs to cross and
+ *    takes whichever site is nearest — so a bridge site on a stretch no leg
+ *    wants goes unused, and the plan has still arrived perfectly. Demanding a
+ *    crossing on a *bridge* site conflated the two, and called seed 18's
+ *    perfectly on-plan park (crossings on planned level sites 104.0 and 238.0)
+ *    a plan that never arrived.
  * 2. **A crossing on a proven site is bridged.** `bridgeFootprint.ts`'s late,
  *    real, backtracking search is allowed to fall back to a level crossing
  *    where a genuine obstacle arrived after planning — but not on ground the
@@ -5841,7 +5853,29 @@ const everyProvenBridgeSiteKeepsItsBridge: Invariant = (facts) => {
   const complaints: string[] = [];
   const train = facts.world.train;
   const planned = facts.plannedBridgeSiteDistances;
-  if (planned.length === 0) return complaints;
+
+  // **Say how far this check reaches, every run.** Its cover is a function of
+  // how many sites the planner could prove, which #374 changed — so a silent
+  // pass can mean "every promise kept" or "there were no promises". Printing
+  // the reach is what stops the second being read as the first, the way
+  // `check:castle` announces its missing-prop assertions on every run.
+  const announce = (examined: number): void => {
+    const detail =
+      planned.length === 0
+        ? 'the planner proved NO bridge sites on this seed, so this invariant asserts nothing'
+        : `${examined} of ${train.crossings.length} built crossing(s) stand on one of ` +
+          `${planned.length} proven bridge site(s)` +
+          (examined === 0 ? ' — so clause 2 asserts nothing' : '');
+    // `process.stderr` rather than `console.log`: vitest's default reporter
+    // hides console output from *passing* tests, and a coverage note nobody
+    // sees unless they already suspected something is worth nothing.
+    process.stderr.write(`[proven-site cover] ${detail}\n`);
+  };
+
+  if (planned.length === 0) {
+    announce(0);
+    return complaints;
+  }
 
   const onSite = (crossing: { railDistance: number }, sites: readonly number[]): boolean =>
     sites.some((d) => Math.abs(d - crossing.railDistance) <= SITE_IDENTITY_TOLERANCE);
@@ -5880,6 +5914,7 @@ const everyProvenBridgeSiteKeepsItsBridge: Invariant = (facts) => {
   }
 
   const onPlannedSite = train.crossings.filter((crossing) => onSite(crossing, planned));
+  announce(onPlannedSite.length);
 
   for (const crossing of onPlannedSite) {
     // Measured off the built world twice over: the crossing is in

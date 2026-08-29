@@ -42,6 +42,14 @@
  */
 declare const process: {
   readonly env: Record<string, string | undefined>;
+  /**
+   * Just `write`, for an invariant that has to say how much it covered on a
+   * run that *passed*. Vitest's default reporter shows `console.log` from
+   * failing tests only, so a coverage note written that way is invisible in
+   * exactly the case it exists for — see `everyProvenBridgeSiteKeepsItsBridge`
+   * and its `[proven-site cover]` line.
+   */
+  readonly stderr: { write(text: string): void };
 };
 
 /**
