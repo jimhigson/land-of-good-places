@@ -78,6 +78,12 @@ const STRIPE_CANVAS = 512;
 /**
  * The stripes in one tile, as fractions of it.
  *
+ * Roughly a fifth of a tile wide each — **twice what they were first drawn at**,
+ * which came out as a fine pinstripe: at 6 m to the tile a 0.04 stripe is 0.24 m
+ * on a 15.8 m bus, and at the distance the arrival's camera actually sits from
+ * it that reads as corrugation rather than as a tiger. Sized against the frame
+ * a player sees, not against the canvas.
+ *
  * Hand-placed rather than evenly spaced, because evenly spaced stripes read as
  * a barcode: a tiger's are irregular, and irregular is the whole difference
  * between "striped" and "corrugated". `wander` and `phase` bend each stripe as
@@ -85,12 +91,12 @@ const STRIPE_CANVAS = 512;
  * the tile's top edge meets its bottom.
  */
 const STRIPES: readonly { at: number; width: number; wander: number; phase: number; taper: number }[] = [
-  { at: 0.06, width: 0.052, wander: 0.030, phase: 0.0, taper: 0.42 },
-  { at: 0.24, width: 0.038, wander: 0.020, phase: 2.1, taper: 0.55 },
-  { at: 0.37, width: 0.060, wander: 0.036, phase: 4.0, taper: 0.34 },
-  { at: 0.55, width: 0.034, wander: 0.024, phase: 1.2, taper: 0.60 },
-  { at: 0.69, width: 0.056, wander: 0.032, phase: 5.1, taper: 0.40 },
-  { at: 0.87, width: 0.042, wander: 0.018, phase: 3.3, taper: 0.50 },
+  { at: 0.06, width: 0.105, wander: 0.030, phase: 0.0, taper: 0.42 },
+  { at: 0.26, width: 0.076, wander: 0.020, phase: 2.1, taper: 0.55 },
+  { at: 0.41, width: 0.120, wander: 0.036, phase: 4.0, taper: 0.34 },
+  { at: 0.60, width: 0.068, wander: 0.024, phase: 1.2, taper: 0.60 },
+  { at: 0.75, width: 0.112, wander: 0.032, phase: 5.1, taper: 0.40 },
+  { at: 0.91, width: 0.084, wander: 0.018, phase: 3.3, taper: 0.50 },
 ];
 
 /** How many steps each stripe's outline is drawn in, down the tile. */

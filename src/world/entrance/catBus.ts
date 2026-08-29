@@ -436,7 +436,7 @@ const WHEEL_CLEARANCE = 0.08;
 /** Half the mudguard's width: it overhangs the tyre by 0.06 m on each side. */
 const FENDER_HALF_WIDTH = WHEEL_WIDTH / 2 + 0.06;
 /** How thick the mudguard's plates are, radially. */
-const FENDER_THICKNESS = 0.16;
+const FENDER_THICKNESS = 0.11;
 /** How far each plate's outline shell stands proud of it — including inwards. */
 const FENDER_OUTLINE_THICKNESS = 0.012 * DETAIL;
 /**
@@ -454,9 +454,19 @@ const FENDER_OUTLINE_THICKNESS = 0.012 * DETAIL;
  * is a free parameter rather than the same number as its clearance — so this
  * shape simply cannot have that bug. Its ends stand `1/cos(half the plate's
  * arc)` further out, which is away from the wheel, so they cannot either.
+ *
+ * **Eight plates over 1.6 rad, not five over 2.44**, and both numbers were set
+ * by looking at it. Five plates left visible gaps between them and the arc
+ * reached 70 degrees down either side, so the end plates stood out almost
+ * horizontally: on screen it read as a row of little fins bolted to the bus
+ * rather than as a mudguard over a wheel. Eight overlapping plates across 92
+ * degrees cap the top of the tyre and read as one curved thing, which is what
+ * `OVERLAP` below is for.
  */
-const FENDER_ARC = 2.44;
-const FENDER_PLATES = 5;
+/** How much longer each plate is than its share of the arc, so none show a gap. */
+const FENDER_OVERLAP = 1.35;
+const FENDER_ARC = 1.6;
+const FENDER_PLATES = 8;
 /** Half the track: where a wheel's centre plane sits, either side. */
 const WHEEL_X = BODY_WIDTH / 2 + OUTLINE_THICKNESS + WHEEL_CLEARANCE + FENDER_HALF_WIDTH;
 /** Front axle first, then rear. Where the wheels were before, unchanged. */
@@ -1255,7 +1265,7 @@ export function createCatBus(): CatBusHandle {
   const fenderPlateGeometry = new RoundedBoxGeometry(
     FENDER_HALF_WIDTH * 2,
     FENDER_THICKNESS,
-    (WHEEL_RADIUS + CAT_BUS_ARCH_GAP) * (FENDER_ARC / FENDER_PLATES) * 1.06,
+    (WHEEL_RADIUS + CAT_BUS_ARCH_GAP) * (FENDER_ARC / FENDER_PLATES) * FENDER_OVERLAP,
     2,
     0.04 * DETAIL,
   );
@@ -1292,7 +1302,10 @@ export function createCatBus(): CatBusHandle {
       fenders.push(fender);
       for (let plate = 0; plate < FENDER_PLATES; plate += 1) {
         const angle = ((plate + 0.5) / FENDER_PLATES - 0.5) * FENDER_ARC;
-        const panel = solid(new Mesh(fenderPlateGeometry, roofMaterial));
+        // The bumper's timber colour, matching the stub axle it shares a corner
+        // with — read as chassis furniture rather than as bodywork, which the
+        // roof's pale lemon made them look like.
+        const panel = solid(new Mesh(fenderPlateGeometry, bumperMaterial));
         // The plate's own +y is radially outward, so its inner face lands on the
         // arch radius when its centre is half a thickness beyond it.
         panel.position.set(
