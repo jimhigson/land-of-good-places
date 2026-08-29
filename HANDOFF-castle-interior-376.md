@@ -15,12 +15,16 @@ still live and still binding.** Read it first.
 | | |
 | --- | --- |
 | Brainstorm and contract published | ✅ §2, §4 |
-| Torch flames, soot, braziers, hearth fire | ⬜ |
-| Banners, pennants, rug, runner, coat of arms, portcullis | ⬜ |
-| Wonky portrait, dragon painting, mouse hole, cat, woodpile, crates | ⬜ |
-| Armour turned to watch you | ⬜ blocked — needs batch 1 wired |
-| The three prop assertions in `check:castle` | ⬜ |
-| Screenshots to Jim | ⬜ |
+| Torch flames, soot, braziers, hearth fire | ✅ `castleLighting.ts` |
+| Banners, rug, coat of arms, portcullis | ✅ `castleDecor.ts` |
+| Wonky portrait, dragon painting, mouse hole, cat, woodpile, crates | ✅ `castleDecor.ts` |
+| **Roof garden (#380)** | ✅ troughs, shrubs, flowers round the parapet |
+| Pennants, carpet runner | ⬜ **cut, deliberately** — see §2 |
+| Armour turned to watch you | ⬜ blocked — needs batch 1 wired, which nobody owns |
+| The three prop assertions in `check:castle` | ✅ red first, four real bugs, §6 |
+| Screenshots to the Overseer | ✅ hall and roof |
+| Cost measured | ✅ §5 |
+| Ruling on the child-scale renegotiation | ✅ §8 |
 
 ### Two facts about the state of the world that change the plan
 
@@ -255,7 +259,50 @@ per-storey handles are what `update` writes to.
 Ordering matters for the same reason: flames are added inside `dressDeck`,
 which `Building` calls **before** `fader.addLayer`.
 
-*(Measured `renderer.info` before/after goes here.)*
+### Measured
+
+Off the built scene, not off `renderer.info` — and the difference is worth
+stating, because it is a weaker measurement in one way and a stronger one in
+another. The production build exposes no renderer handle (`window.game` is
+`import.meta.env.DEV`-only), so what is counted here is **every drawable this
+feature adds to a storey's floor group, and every triangle in it**. That is an
+upper bound on the draw calls: it counts a mesh the frustum may cull, and it
+does not know about the renderer's own batching. It is also exact about the two
+numbers that actually mattered.
+
+| Storey | Draw calls added | Triangles added |
+| --- | --- | --- |
+| 0 (great hall) | 37 | 16 916 |
+| 1 | 14 | 3 366 |
+| 2 | 14 | 3 534 |
+| 3 | 13 | 3 504 |
+| 4 (roof garden) | 3 | 19 388 |
+| **Total** | **81** | **46 708** |
+
+**Shadow casters added: 0. Lights added: 0.** Those are the two the design was
+about, and both are exactly what it promised. Issue #251 has the shadow pass at
+57% of draw calls, so a feature that adds nothing to it costs nothing there —
+**the answer to #251 for the castle's lighting is that it was free.**
+
+Three notes on the numbers that a summary would hide:
+
+- **Only one storey is drawn at full weight.** The cutaway fades every storey
+  above the player, so the 37 is what a child standing in the great hall pays,
+  not a total.
+- **Deck 0's 37 is high because of the cat and the mouse.** `pets.ts` builds a
+  creature out of about fifteen separate meshes, and reusing it means taking
+  that shape as it is. It is worth it — no new asset, no commission, and two
+  characters Eleri already knows — but it is two thirds of that storey's draw
+  calls for two of its objects, and it is the first thing to look at if the
+  castle ever needs a frame back.
+- **The roof's 19 388 triangles come from 504 shrub and flower instances in 3
+  draw calls.** Both spheres were dropped a segment ring after the first
+  measurement (10×8 → 8×6, 8×6 → 6×4), which halved that figure and is invisible
+  on a 0.34 m bush.
+- **The pets were the only 8 shadow casters this feature added**, because
+  `pets.ts` builds for daylight in the park. They are taken out of the pass by
+  walking the built tree, so a pet gaining a part is covered without anybody
+  remembering.
 
 ---
 
@@ -277,3 +324,155 @@ and the red message is quoted.
    reported-versus-measured shape pointed at my own code.
 
 *(Red output goes here.)*
+
+
+---
+
+## 8. Ruling: the child-scale renegotiation (batch 1, PR #368)
+
+**I accept all three of the Artist's figures.** `BENCH_SEAT` 0.550 → **0.360**,
+`TABLE_TOP` 1.050 → **0.675**, throne seat 0.880 → **0.360**. The named 0.42
+fallback is **declined**. One condition, in §8.2, and it is not optional.
+
+### 8.1 Why
+
+- **It is derived from measured landmarks in the rig's owner, not from an eye.**
+  That is the standard every other number on this branch is held to, and the
+  Artist's own root-cause finding is the decisive part: **`kid.ts` published no
+  landmark below the neck**, so batch 1 could not have been cut any way other
+  than adult-proportions-by-eye. The fix for that is the landmark, and once the
+  landmark exists the furniture follows from it. Declining the figures would be
+  keeping a guess in preference to a measurement because the guess arrived
+  first.
+- **The no-knee argument makes 0.36 exact rather than approximate,** and that is
+  a much stronger claim than "0.36 looks right". A rig with no knee joint has
+  *one* seat height at which its feet reach the floor; every other value is a
+  choice between dangling feet and legs through the floor. There is nothing to
+  trade off, so there is nothing to compromise on.
+- **`KID_REACH_HEIGHT` 1.04 against a table top of 1.05 settles it on its own.**
+  A table one centimetre above the highest a child can reach is not a
+  proportion I get to have an opinion about — it is the exact failure Jim's
+  ruling was about, stated as a number. It is also, note, the *same shape of
+  fault* as this branch's own flame overrun: a figure derived correctly and then
+  invalidated by a second step nobody re-checked.
+- **0.675 is bracketed from both sides and two independent derivations land
+  inside the bracket.** A number with a floor (~0.62, thighs under a 0.14 m
+  slab) and a ceiling (~0.72, a hand laid flat) is a far better answer than a
+  number with neither.
+
+### 8.2 Why the 0.42 fallback is declined, and it is not a close call
+
+The fallback is offered as *park consistency* — the hotel chair's line. But the
+hotel's furniture was built **before any below-neck landmark existed either**.
+So 0.42 is not consistency with a measurement; it is consistency with the same
+guess, made in a different file. Citing 0.74/0.42/0.50 as corroboration proves
+the castle's 1.05/0.55 were outliers — which I accept, and which argues *for*
+the change — but it cannot also serve as evidence that 0.42 is right, because
+nothing measured a child against it.
+
+If park consistency turns out to matter more than a child's feet reaching the
+floor, that is **Jim's call and not mine**, and it should be taken on the hotel
+and the castle together rather than by holding one room back.
+
+### 8.3 The condition
+
+**`KID_HIP_HEIGHT` and `KID_REACH_HEIGHT` must be read out of `kid.ts` at
+asset-build time, the way `art/blend/hotel_build.py` already reads
+`TALLEST_CHILD_HEIGHT` and `RIDER_HEADROOM`. Not typed into the `.py`.**
+
+This is outstanding item 1 of `HANDOFF-castle-interior-363.md` §4.5 entry 3 —
+the render script's scale post says 1.86 m under a comment claiming it came from
+`TALLEST_CHILD_HEIGHT`, and the real figure is 2.97. Every size judgement made
+against that post was wrong, and a 2.60 m suit of armour was called *towering*
+while being shorter than a child in a tall hat.
+
+Accepting two new hand-typed constants into the same script would replace one
+stale number with three. The pattern exists in this repo precisely so a `.py`
+cannot drift from the game, and a typed copy there is invisible to `tsc` and to
+every check we have. **`check_child_can_use_it` is excellent and does not cover
+this**: it would go on asserting, correctly and forever, that the furniture
+matches the numbers the script was given.
+
+Second, smaller: `check_child_can_use_it` has to run where `npm run build` runs
+it. A Blender-side assertion that only fires when somebody regenerates the
+`.glb` is not a gate on the repo.
+
+### 8.4 Furniture built to be climbed on is a third collision category, and it is mine
+
+The Artist is right to raise it and right that it is mine. Recording the rule
+here so it survives into #377's collider pass:
+
+> **A bench, a throne seat and a table top are things a child is *meant* to get
+> onto. A blocking collider on one turns the single object built to be sat on
+> into a wall.** They take a **jump-on plate**, the way `hotel/place.ts` already
+> places props, and never a blocking body.
+
+That has a consequence for `check:castle` that is worth writing down before
+somebody hits it: **assertion 1 would currently fail a bench**, because a bench
+is a solid object standing in a room where children walk, which is exactly what
+that assertion exists to catch. It must gain a fourth exemption when batch 1 is
+wired — and, like the other three, a **measured** one rather than a named one:
+
+> Something whose measured top surface is at or below `KID_HIP_HEIGHT` plus a
+> step is furniture a child steps onto, not an obstacle she walks into.
+
+That criterion is available today only because the Artist published
+`KID_HIP_HEIGHT`. Before this renegotiation there was no measurable way to state
+the difference between "a bench" and "a low wall", which is worth noticing: the
+landmark buys the *check* something as well as the furniture.
+
+---
+
+## 9. What #380 changes about this list, and what it does not
+
+Jim has cut the castle to three floors — **mall / great hall / roof garden**.
+This branch lands before that, on the five-deck castle, so:
+
+- **The roof garden is built** (§2 gained it; `dressRoofGarden`). It is the one
+  piece of #380 that is additive rather than a rearrangement, so it was worth
+  doing now.
+- **The hall dressing is currently on deck 0** — hearth, cat, woodpile,
+  portcullis, coat of arms — because deck 0 is where the front door is. Under
+  #380 those belong on the **middle** floor with the throne and the feast table,
+  and the ground floor becomes the mall. **That is a one-line move**: they are
+  all inside `if (deck === 0)` in `dressCastle`, deliberately, so whoever lands
+  #380 changes one condition rather than hunting placements.
+- **Banners, torches, soot, paintings, crates and the rug are per-storey and
+  need no change at all.** They are placed off `castleTorchAnchors(deck)` and
+  `keepOutsFor(deck)`, both of which follow the plan wherever it goes.
+- **Nothing here decorates a stair or an escalator**, which #377 and #380 are
+  deleting.
+
+### Revisions to §2 and §4 that #380 justifies
+
+- **More fire and more cloth in the great hall, less on the mall floor.** A mall
+  wants shopfront character, and shops already bring their own. Once the floors
+  have identities, `storeyHeraldry` should become *hall* heraldry rather than a
+  per-deck cycle.
+- **Batch 2's B14 chandelier and B15 bell become hall-only**, which removes the
+  awkwardness in §4.3: they only ever had two legal places to hang, and both are
+  in the hall.
+- **The roof garden wants one batch-2 asset it does not have**: something to sit
+  *at* rather than on. A parasol or an arbour. Not requested yet — the roof
+  reads as a garden already, and it is better to see it with the family first.
+
+---
+
+## 10. Known gaps, in the order I would pick them up
+
+1. **Batch 1 is still not wired into the game and nobody owns it** (§0). This is
+   the biggest single thing missing from the castle: the throne, the table, the
+   armour and the tapestries exist as bytes in `castle.glb` and are in no scene.
+2. **The armour turned to watch you, and its dropped gauntlet**, blocked on (1).
+   One yaw value once there is an armour to yaw.
+3. **Pennants and the carpet runner, cut.** The runner's honest route is door →
+   lift, which #377 is about to make the *only* route — so it is worth doing
+   *after* that lands, when it is wayfinding rather than decoration. Pennants
+   lost to the draw-call budget against a second heraldry texture, and would be
+   better spent on the hall once it exists.
+4. **Colliders**, once #377's split hands them back. In priority order: the
+   **braziers** (a fire a child can stand inside is the only genuinely wrong one
+   here), then the **crates** and the **woodpile** and the **hearth**. The
+   banners, soot, arms, paintings, portcullis and rug want none — they are wall
+   and floor treatment. The **cat and the mouse want none either**: walking
+   through the cat is better than a child being bounced off it.

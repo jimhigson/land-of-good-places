@@ -510,6 +510,7 @@ function mouseHole(deck: number, anchors: readonly WallAnchor[]): Group | null {
   group.add(arch);
 
   const mouse = createPet('mouse');
+  quietShadows(mouse.root);
   const sizer = new Group();
   sizer.name = 'castle-mousehole-sizer';
   // Two thirds of the hole's height, so it plainly fits in the doorway it is
@@ -551,6 +552,7 @@ function hearthside(): Group {
   group.name = 'castle-hearthside';
 
   const cat = createPet('kitten');
+  quietShadows(cat.root);
   const sizer = new Group();
   sizer.name = 'castle-cat-sizer';
   // A cat curled on a flagstone is about half a metre of cat.
@@ -684,6 +686,25 @@ function crateGeometry(): BufferGeometry {
 }
 
 
+/**
+ * Takes a reused asset out of the shadow pass.
+ *
+ * `pets.ts` builds a creature to walk about the park in daylight, so its parts
+ * are `solid()` and cast shadows. Measured, the cat and the mouse were the
+ * **only** eight shadow casters this whole feature added — everything else here
+ * is instanced and already `castShadow = false` — and issue #251 has the shadow
+ * pass at 57% of draw calls. A cat asleep on a flagstone under a fixed indoor
+ * key light gains almost nothing from its own shadow.
+ *
+ * The handles are untouched: this walks the built tree, so a pet gaining a part
+ * is covered without anybody remembering.
+ */
+function quietShadows(root: Group): void {
+  root.traverse((object) => {
+    (object as Mesh).castShadow = false;
+  });
+}
+
 // ------------------------------------------------------------ roof garden
 
 /**
@@ -748,7 +769,7 @@ function dressRoofGarden(deck: number, floor: Group): void {
   // counts are seeded, so the roof is the same garden on every reload.
   const perTrough = 4;
   const shrubs = new InstancedMesh(
-    new SphereGeometry(0.34, 10, 8),
+    new SphereGeometry(0.34, 8, 6),
     softMaterial(PALETTE.leafMid, 0.72),
     spots.length * perTrough,
   );
@@ -757,7 +778,7 @@ function dressRoofGarden(deck: number, floor: Group): void {
   shrubs.receiveShadow = true;
 
   const heads = new InstancedMesh(
-    new SphereGeometry(0.13, 8, 6),
+    new SphereGeometry(0.13, 6, 4),
     // One flower colour per roof rather than per head: a second colour is a
     // second material is a second draw call. Yellow rather than the seeded pick
     // the first version made, because two of the three colours it could land on
