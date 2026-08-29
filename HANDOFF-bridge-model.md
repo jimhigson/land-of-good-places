@@ -33,7 +33,7 @@ clipping inside it as part of the park scenery."**
 **1. The silhouette is a triangle, not a hump — and the lever is the road's.**
 With `HUMP_BLEND` trimmed to 0.15 for sprint safety, the ramps are very nearly
 straight lines, so the bridge's outline is a pyramid with a domed top. My
-`PARAPET_ARC_RISE` of 0.45 m is real curvature but it is 0.45 m against a
+`PARAPET_CROWN_LIFT` of 0.45 m is real curvature but it is 0.45 m against a
 4.24 m rise: it is a bow, not a hump. **If Jim looks at this and says it still
 is not humped enough, the answer is the road's blend, not more parapet arc** —
 see point 2 for why I cannot simply raise mine. The Overseer records that the
