@@ -691,8 +691,15 @@ live question in it, do not send it.
 
 ## PRs
 
-Raise with `gh pr create`. **Do not merge your own work** — every PR gets two
-peer reviews plus QA, and the Overseer merges.
+Raise with `gh pr create`. **Do not merge your own work** — every PR gets
+**one** peer review plus QA, and the Overseer merges.
+
+One reviewer, not two. Jim's ruling, first given 1 August 2026 and confirmed
+29 August: a second reviewer on the same diff bought nothing the first had
+not already found, and cost a whole agent. Spend that agent on the next
+ticket instead. If a diff is genuinely too large or too risky for one
+reviewer to hold, that is a sign to split the PR, not to add a second pair
+of eyes to an unsplittable one.
 
 **Anything invisible to a player: merge it as soon as a QA agent has looked
 at it. Do not ask Jim.** Jim, 27 August 2026: *"for anything invisible, just
