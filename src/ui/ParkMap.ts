@@ -11,7 +11,7 @@ import { ROUTES, routeCurve } from '../world/pathGraph';
 import { STALLS } from '../minigames';
 import { MAP_PALETTE, drawIcon } from './parkMapArt';
 import { parkMapFeatures, type MapFeature } from './parkMapContent';
-import { frameHalfExtent, outdoorParkMapProjection } from './parkMapProjection';
+import { frameHalfExtent, outdoorParkMapProjection, type MapProjection } from './parkMapProjection';
 import type { World } from '../world/World';
 import type { Player } from '../entities/Player';
 import { SLIDE_PLAN } from '../world/slide/plan';
@@ -114,6 +114,15 @@ const MAP_ONLY_TITLES: Readonly<Record<string, string>> = {
  * invented ones. Which trees appear is therefore still a fact about the park.
  */
 const MAP_TREE_COUNT = 26;
+
+/**
+ * Closest two drawn trees may be, in metres of park.
+ *
+ * Chosen so 26 trees can still be found on every seed while spreading them
+ * right across an ~80 m park rather than clumping wherever the foliage scatter
+ * rolled its biggest canopies.
+ */
+const MAP_TREE_SPACING_M = 11;
 
 /**
  * How big each kind of thing is drawn, in `uiUnitPx()` units.
@@ -260,9 +269,8 @@ export class ParkMap {
   private viewingDeck = 0;
   private playerDeck: number | null = null;
 
+  private projection: MapProjection = frameHalfExtent(1, 1, 1, 1);
   private scale = 1;
-  private originPxX = 0;
-  private originPxY = 0;
   private canvasCssWidth = 0;
   private canvasCssHeight = 0;
   /** Rebuilt every render; see `drawLabel`. */
@@ -546,13 +554,22 @@ export class ParkMap {
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
-  /** World (outdoor) or interior-local (indoor) metres -> canvas CSS pixels. */
+  /**
+   * World (outdoor) or interior-local (indoor) metres -> canvas CSS pixels.
+   *
+   * Delegates to the live `MapProjection` rather than repeating its arithmetic.
+   * These two used to be a second copy of `toCanvas`/`toPlane` — correct, but
+   * the same shape of thing as the bug this whole PR is about, and the check
+   * measures the projection, so the renderer had better be using it.
+   */
   private planeToCanvas(x: number, z: number): [number, number] {
-    return [this.originPxX + x * this.scale, this.originPxY + z * this.scale];
+    const [px, py] = this.projection.toCanvas(x, z);
+    return [px, py];
   }
 
   private canvasToPlane(px: number, py: number): [number, number] {
-    return [(px - this.originPxX) / this.scale, (py - this.originPxY) / this.scale];
+    const [x, z] = this.projection.toPlane(px, py);
+    return [x, z];
   }
 
   private render(): void {
@@ -571,9 +588,8 @@ export class ParkMap {
     const projection = this.indoor
       ? frameHalfExtent(INTERIOR_HALF_X + 6, INTERIOR_HALF_Z + 4, this.canvasCssWidth, this.canvasCssHeight)
       : outdoorParkMapProjection(this.canvasCssWidth, this.canvasCssHeight);
+    this.projection = projection;
     this.scale = projection.scale;
-    this.originPxX = projection.originPxX;
-    this.originPxY = projection.originPxY;
 
     if (this.indoor) {
       this.titleEl.textContent = `Map: ${floorLabelText(this.viewingDeck)}`;
@@ -754,9 +770,22 @@ export class ParkMap {
    * which is a picture of a park rather than a picture of *this* park.
    */
   private mapTrees(): readonly { readonly x: number; readonly z: number }[] {
-    return [...this.deps.world.scenery.foliageOccluders]
-      .sort((a, b) => b.radius - a.radius)
-      .slice(0, MAP_TREE_COUNT);
+    // Biggest first, but never two within `MAP_TREE_SPACING_M` of each other.
+    // Taking the top 26 by radius alone was spatially biased: wherever the
+    // scatter happened to roll big trees, the map grew a forest, and the rest
+    // of the park was bare lawn (found in review of PR #353). Enforcing a
+    // spacing spreads them over the park while still only ever drawing trees
+    // the park really planted.
+    const chosen: { readonly x: number; readonly z: number }[] = [];
+    const bySize = [...this.deps.world.scenery.foliageOccluders].sort((a, b) => b.radius - a.radius);
+    for (const tree of bySize) {
+      if (chosen.length >= MAP_TREE_COUNT) break;
+      const clear = chosen.every(
+        (other) => Math.hypot(other.x - tree.x, other.z - tree.z) >= MAP_TREE_SPACING_M,
+      );
+      if (clear) chosen.push({ x: tree.x, z: tree.z });
+    }
+    return chosen;
   }
 
   /**
