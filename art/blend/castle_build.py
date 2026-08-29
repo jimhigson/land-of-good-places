@@ -736,9 +736,43 @@ def build_tapestry_rail() -> None:
 # A5 — the wall-torch sconce (no flame; the Engineer builds fire)
 # =============================================================================
 
-SCONCE_REACH = 0.28
-SCONCE_CUP_RADIUS = 0.10
+# **Built to the full 0.34 m width allowance, and the trade that pays for it.**
+#
+# The first cut came in at 0.23 m against 0.34 — 32% under, the only asset here
+# meaningfully under in the dimension that governs whether a thing reads. Close
+# up (`sconce.png`) it was a nicely made little bracket. In the assembled hall,
+# at the game's iso camera, all forty of them were dark smudges on a pink wall
+# that you had to already know were there. That is the most-repeated object in
+# this room failing at the only distance anybody sees it from, and ART_DIRECTION
+# §4 is explicit that shapes are judged at gameplay distance, not close up.
+#
+# Jim's standing rule is the licence here: *"it doesn't matter if things are a
+# realistic size, only that they are easily recognisable as what they are."* A
+# torch bracket with a 34 cm fire bowl is not a plausible piece of ironwork. It
+# is a thing a six-year-old identifies instantly from across the hall, which is
+# the whole job.
+#
+# The width comes out of the cup, because the cup is what says "fire goes here"
+# — so the cup grows to the allowance and **the reach comes in to pay for the
+# depth**: 0.42 m of depth allowance has to cover the reach plus the cup's own
+# outer radius, and a bowl that wide cannot also hang 0.28 m off the wall. The
+# reach drops 0.28 → 0.225, which **moves `SCONCE_CUP_OFFSET`'s Z from 0.3025 to
+# ~0.2475**. That is a published number the Engineer has provisionally typed
+# into `castleFabric.ts`, so it is flagged in §2.2 and §2.6 of the handoff. The
+# cup's *mouth height* is deliberately unchanged at 0.2850 — the rim profile and
+# the cup's mounting height are untouched — so only the one component moves.
+SCONCE_REACH = 0.225
+SCONCE_CUP_RADIUS = 0.147
 SCONCE_CUP_RIM_Z = 0.21
+# The back plate, widened with the cup. A 34 cm bowl on a 13 cm plate reads as a
+# bowl balanced on a nail; the plate is the part that says the thing is *bolted
+# to the wall*, and at this distance it is a silhouette, not a detail.
+SCONCE_PLATE_WIDTH = 0.20
+SCONCE_PLATE_HEIGHT = 0.34
+# No thin parts (ART_DIRECTION §4). The arm and strut were 28 and 20 mm, which
+# is a wire at 20 m; they carry a bowl twice the size now and should look it.
+SCONCE_ARM_RADIUS = 0.034
+SCONCE_STRUT_RADIUS = 0.026
 
 
 def build_sconce() -> None:
@@ -766,24 +800,30 @@ def build_sconce() -> None:
     cup = Part("sconce-cup")
 
     # Back plate against the stone, with two bolt heads.
-    iron.at(*rounded_box(0.13, 0.045, 0.34, 0.025, 1), y=0.0, z=0.0)
+    iron.at(*rounded_box(SCONCE_PLATE_WIDTH, 0.045, SCONCE_PLATE_HEIGHT, 0.025, 1),
+            y=0.0, z=0.0)
     for z in (-0.12, 0.12):
-        iron.at(*icosphere(0.028, 1), y=-0.022, z=z)
+        iron.at(*icosphere(0.032, 1), y=-0.022, z=z)
     # The arm, sloping up and out, and a scroll strut under it.
     iron.add(*sweep_path(
         [(0.0, -0.01, -0.07), (0.0, -SCONCE_REACH * 0.55, -0.02), (0.0, -SCONCE_REACH, 0.15)],
-        0.028, sides=4, up=(1.0, 0.0, 0.0), closed=False,
+        SCONCE_ARM_RADIUS, sides=4, up=(1.0, 0.0, 0.0), closed=False,
     ))
     iron.add(*sweep_path(
         [(0.0, -0.01, -0.15), (0.0, -SCONCE_REACH * 0.40, -0.12), (0.0, -SCONCE_REACH * 0.62, -0.03)],
-        0.020, sides=4, up=(1.0, 0.0, 0.0), closed=False,
+        SCONCE_STRUT_RADIUS, sides=4, up=(1.0, 0.0, 0.0), closed=False,
     ))
 
+    # The bowl. Its profile is written in **multiples of the radius**, not in
+    # centimetres, so widening the cup widens its stem and its foot with it —
+    # the first draft had the stem typed as 0.070 and 0.055, and scaling the
+    # radius alone would have left a 34 cm bowl on a 7 cm stalk.
+    r = SCONCE_CUP_RADIUS
     cup.at(*revolve([
-        (0.0, 0.0), (0.070, 0.0), (SCONCE_CUP_RADIUS, SCONCE_CUP_RIM_Z - 0.10),
-        (SCONCE_CUP_RADIUS * 1.15, SCONCE_CUP_RIM_Z - 0.06),
-        (SCONCE_CUP_RADIUS * 0.98, SCONCE_CUP_RIM_Z - 0.055),
-        (0.055, 0.02), (0.0, 0.02),
+        (0.0, 0.0), (r * 0.70, 0.0), (r, SCONCE_CUP_RIM_Z - 0.10),
+        (r * 1.15, SCONCE_CUP_RIM_Z - 0.06),
+        (r * 0.98, SCONCE_CUP_RIM_Z - 0.055),
+        (r * 0.55, 0.02), (0.0, 0.02),
     ], segments=10), y=-SCONCE_REACH, z=0.13)
 
     seat_against_wall(iron, cup)
@@ -821,7 +861,10 @@ def sconce_offset():
 # A6 — the throne
 # =============================================================================
 
-THRONE_HEIGHT = 2.80
+# 2.75, not 2.80 — see the `throne` row of `CONTRACT`. 2.75 + the Engineer's
+# 0.30 m dais = 3.05 m, which clears the 3.08 m wall-plate. At 2.80 it was
+# 3.10 m and stood 2 cm through the beam.
+THRONE_HEIGHT = 2.75
 THRONE_SEAT = 0.88
 THRONE_WIDTH = 1.60
 THRONE_DEPTH = 1.20
