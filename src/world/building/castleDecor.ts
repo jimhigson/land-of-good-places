@@ -31,6 +31,7 @@ import { softMaterial } from './parts';
 import { BEAM_UNDERSIDE, CASTLE_CEILING_CLEAR } from './castleFabric';
 import { CASTLE_HEARTH, castleTorchAnchors, type WallAnchor } from './castleLighting';
 import { DECK_ROUNDEL, keepOutsFor } from './dressing';
+import { dressGreatHall, isTapestryBay } from './castleFurniture';
 import {
   deckIsSolid,
   INTERIOR_DOOR_MAX_X,
@@ -105,6 +106,12 @@ export function dressCastle(deck: number, floor: Group): void {
     group.add(hearthside());
   }
 
+  // Batch 1's authored furniture — the throne, the feast, the tapestries, the
+  // armour and the chest (#368). Inside this group on purpose: `check:castle`'s
+  // prop assertions walk what `dressCastle` builds, so everything placed there
+  // is measured for free and nothing has to remember to add it.
+  dressGreatHall(deck, group);
+
   const hole = mouseHole(deck, anchors);
   if (hole) group.add(hole);
 
@@ -176,7 +183,14 @@ const BANNER_TOP = BEAM_UNDERSIDE - 0.06;
  * hang cloth either.
  */
 function bannerRun(deck: number, anchors: readonly WallAnchor[]): InstancedMesh | null {
-  const spots = betweenNeighbours(anchors);
+  // A bay the great hall has hung a tapestry in is taken, and a banner behind a
+  // 3.2 m sheet of cloth is a draw call nobody will ever see. `castleFurniture`
+  // owns which bays those are and this asks — the alternative, two files each
+  // with their own list of wall positions, is exactly how the 3D Artist ended
+  // up with forty sconces inside their own tapestries.
+  const spots = betweenNeighbours(anchors).filter(
+    (spot) => !isTapestryBay(deck, spot.x, spot.z),
+  );
   if (spots.length === 0) return null;
 
   const { field, device } = storeyHeraldry(deck);

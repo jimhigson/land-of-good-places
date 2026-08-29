@@ -299,6 +299,14 @@ export const CASTLE_TABLE_TOP = surfaceTop(['table-top']);
 export const CASTLE_BENCH_SEAT = surfaceTop(['bench-plank']);
 
 /**
+ * **The top of the armour's plinth, in metres — the surface a knight stands
+ * on.** Measured off the emitted geometry, so it is 0.250 and not the 0.270 the
+ * dressed group reports; see {@link surfaceTop} for why those differ and which
+ * one a thing standing on it wants.
+ */
+export const CASTLE_PLINTH_TOP = surfaceTop(['plinth-block']);
+
+/**
  * **Where a sconce's cup mouth sits, relative to the back plate on the wall** —
  * `out` away from the wall along the bracket's own +Z, `up` from the mount.
  *
