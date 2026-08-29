@@ -202,10 +202,11 @@ this as an open gap in the PR; do not claim the success path was demonstrated.**
       unfiltered `push` trigger are load-bearing for deploys. `deploy.yml`'s
       header had *claimed* that comment existed; this makes the claim true
       rather than leaving a comment asserting something absent.
-- [x] gate: `npx tsc --noEmit` exit **0**
-- [ ] gates: full unpiped `npm run build`, `npm run test:procgen` — re-running
-      on the rebased base; first run failed only on the #324 park-boot flake
-- [ ] PR
+- [x] gates on the rebased base, quiet machine, unpiped: `npm ci` **0**,
+      `npx tsc --noEmit` **0**, `npm run build` **0**, `npm run test:procgen`
+      **0** (14 files, 453 tests)
+- [x] #324 quiet-machine repro posted to the issue
+- [x] **PR #397** raised. Do not merge — Overseer merges, after one review + QA.
 
 ## `check:park-boot` — the flake, and what was actually done about it
 
