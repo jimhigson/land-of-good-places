@@ -702,6 +702,26 @@ origin main` and rebase onto it — a branch built on a stale base can silently
 carry an already-fixed bug back in (PR #311 rebuilt the disco ball at its old
 position because it branched before PR #306, which moved it, had merged).
 
+**Read `git diff --stat origin/main..HEAD` immediately before every push, and
+account for every file in it. Anything you did not touch is a revert waiting
+to ship.**
+
+On 29 August two branches were found carrying **latent reverts** — deletions
+of files their authors had never opened, because their base predated that
+day's squash merges. One would have destroyed an entire ticket: nineteen
+files, another agent's `.blend`, its build/export/render scripts, five
+renders, and 394 lines cut out of `bridges.ts`.
+
+**Nothing else catches this.** On that branch `tsc` was clean, the full
+`npm run build` exited 0, its own new checks were green and its browser QA
+passed. Every signal said healthy. Only the stat showed it.
+
+**One rebase is not a durable answer.** That agent had already rebased
+correctly earlier the same day; the revert crept back in when `main` moved
+again while it was still building. `main` moved four times that day. Read the
+stat immediately before pushing or opening a PR, every time — not once at the
+start.
+
 ## Editing this file
 
 When Jim asks for a change to CLAUDE.md itself, edit it and push straight to
