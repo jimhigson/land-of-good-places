@@ -49,7 +49,7 @@ This means the answer to the ticket's "check whether the hotel residents should 
 same design" is almost certainly **yes** — they are the larger and more permanent case, not an
 edge case.
 
-### The correctness argument (my own #350 finding)
+### The correctness argument (my own #350 finding) — **SUPERSEDED, see line 222: this is wrong**
 
 Indoor children as full agents in a distant coordinate space is what let the crowd RMS reach
 **276 m at 476% of a uniform scatter while the check still passed**, and it is the same root as
@@ -77,7 +77,7 @@ the space that character was standing in. No stubbing, so the park measured is t
              the player cannot see
 ```
 
-### The honest reading: the performance case is weak, the correctness case is strong
+### The honest reading: the performance case is weak, the correctness case is strong — **SUPERSEDED, see line 222: the second half is wrong**
 
 **0.147 ms a frame is about 0.9% of a 60 Hz budget.** Proportionally it looks big — a quarter of
 all character-update time — but absolutely it is nearly nothing, and `separate()` at 0.2% is
