@@ -4718,19 +4718,33 @@ const everyCopingStoneSitsOnItsWall: Invariant = (facts) => {
     let offWall = 0;
     const blocks = copingPos.count / perBlock;
     for (let block = 0; block < blocks; block += 1) {
-      // The block's lowest vertex is on its base, and on a tilted block it is
-      // the downhill corner — the first place a badly-placed stone lifts off.
+      // **The centre of the block's base face**, not a corner of it. A corner
+      // sits on the very edge of the parapet-top quad it belongs to, so on a
+      // curving spine the plan projection can land it on the *neighbouring*
+      // quad instead — which is at a slightly different height, and reads as a
+      // 3 cm error on a stone that is in fact seated perfectly (measured, seed
+      // 5, one block of eighty). The base centre is mid-quad and on the wall
+      // line, so it belongs to exactly one triangle and there is nothing to
+      // straddle. Loosening the tolerance instead would have been this file's
+      // own forbidden move: never weaken an assertion to make a seed pass.
       let lowest = Infinity;
-      let at = -1;
+      for (let k = 0; k < perBlock; k += 1) {
+        lowest = Math.min(lowest, copingPos.getY(block * perBlock + k));
+      }
+      let x = 0;
+      let z = 0;
+      let onBase = 0;
       for (let k = 0; k < perBlock; k += 1) {
         const i = block * perBlock + k;
-        if (copingPos.getY(i) < lowest) {
-          lowest = copingPos.getY(i);
-          at = i;
-        }
+        if (copingPos.getY(i) - lowest > 1e-3) continue;
+        x += copingPos.getX(i);
+        z += copingPos.getZ(i);
+        onBase += 1;
       }
-      const x = copingPos.getX(at);
-      const z = copingPos.getZ(at);
+      if (onBase === 0) continue;
+      x /= onBase;
+      z /= onBase;
+
       const surface = wallTopAt(x, z);
       if (surface === null) {
         offWall += 1;

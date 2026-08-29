@@ -368,21 +368,39 @@ export function buildCopingRun(
       const parapetB = (b.top[side] as number) - b.surface;
       if (Math.min(parapetA, parapetB) < COPING_HEIGHT) continue;
 
-      const along = (a.along + b.along) / 2;
-      const point = frame.pointAt(along);
-      const world = frame.worldAt(along, wallLine * sign, shift);
+      // Placed on the **chord between the two ring points**, not on the
+      // tangent at the segment's midpoint. The drawn wall quad *is* that
+      // chord; on a curving spine a block laid along the midpoint tangent cuts
+      // across it and its ends lift off (found on seeds 2 and 5 — up to
+      // 0.173 m, and three blocks projecting off the quad strip entirely).
+      // Laying the stone on the same two points the quad is built from makes
+      // it coincide with the wall by construction rather than by proximity.
+      const wallA = frame.worldAt(a.along, wallLine * sign, shift);
+      const wallB = frame.worldAt(b.along, wallLine * sign, shift);
       const topA = a.top[side] as number;
       const topB = b.top[side] as number;
-      const slope = (topB - topA) / span;
-      const top = (topA + topB) / 2;
 
-      const forward = new Vector3(point.dirX, slope, point.dirZ);
-      const up = new Vector3(-point.dirX * slope, 1, -point.dirZ * slope);
-      const matrix = basisAt(up, forward, new Vector3(world.x, top - COPING_SINK, world.z));
+      const forward = new Vector3(wallB.x - wallA.x, topB - topA, wallB.z - wallA.z);
+      const length = forward.length();
+      if (length < 1e-6) continue;
+      // "Up" is perpendicular to the chord, in the vertical plane containing
+      // it — so the block's own base plane is the chord.
+      const flat = Math.hypot(forward.x, forward.z) || 1;
+      const slope = forward.y / flat;
+      const up = new Vector3((-forward.x / flat) * slope, 1, (-forward.z / flat) * slope);
+
+      const matrix = basisAt(
+        up,
+        forward,
+        new Vector3(
+          (wallA.x + wallB.x) / 2,
+          (topA + topB) / 2 - COPING_SINK,
+          (wallA.z + wallB.z) / 2,
+        ),
+      );
       // The block is shortened by the joint, then scaled to this segment. The
       // joint is taken in the block's own local length so it stays the same
       // visible gap whatever the segment measures.
-      const length = Math.hypot(span, topB - topA);
       matrix.scale(new Vector3(1, 1, (length - COPING_JOINT) / (COPING_LENGTH - COPING_JOINT)));
       matrices.push(matrix);
     }
