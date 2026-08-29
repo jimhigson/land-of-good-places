@@ -5843,14 +5843,34 @@ const everyProvenBridgeSiteKeepsItsBridge: Invariant = (facts) => {
   const planned = facts.plannedBridgeSiteDistances;
   if (planned.length === 0) return complaints;
 
-  const onPlannedSite = train.crossings.filter((crossing) =>
-    planned.some((d) => Math.abs(d - crossing.railDistance) <= SITE_IDENTITY_TOLERANCE),
-  );
+  const onSite = (crossing: { railDistance: number }, sites: readonly number[]): boolean =>
+    sites.some((d) => Math.abs(d - crossing.railDistance) <= SITE_IDENTITY_TOLERANCE);
 
-  if (onPlannedSite.length === 0) {
+  // **Clause 1 asks whether the plan arrived, so it must count every site the
+  // plan made — level as well as bridge.**
+  //
+  // It used to demand a built crossing on a *bridge* site specifically, which
+  // conflates two different things: "the plan reached the park" (what this
+  // clause is for, and what the prewarm-letterbox class of failure breaks) and
+  // "some leg chose to cross at a bridge site" (which nothing promises).
+  // `paths.ts` routes legs where the park needs to cross and takes whichever
+  // site is nearest; if no leg happens to want the stretch a bridge site sits
+  // on, that site goes unused, and the plan has still arrived perfectly.
+  //
+  // Found on seed 18 once {@link MAX_RAMP_GRADIENT} started refusing ramps too
+  // steep to sprint up (#374): the seed's proven bridge sites fell from three
+  // to one, at railDistance 176.0, and its two built crossings sit on the
+  // planned *level* sites 104.0 and 238.0 — exactly on plan, and this clause
+  // called it "the crossing plan did not reach the park". Widening it to every
+  // planned site keeps the failure it exists for — an empty or lost plan puts
+  // no crossing on any site at all — while no longer asserting a promise the
+  // router never made.
+  const allPlanned = [...planned, ...facts.plannedLevelSiteDistances];
+  if (!train.crossings.some((crossing) => onSite(crossing, allPlanned))) {
     complaints.push(
-      `the crossing planner proved ${planned.length} bridge site(s) on this loop ` +
-        `(at railDistance ${planned.map((d) => d.toFixed(1)).join(', ')}) and not one of the ` +
+      `the crossing planner proved ${planned.length} bridge site(s) and ` +
+        `${facts.plannedLevelSiteDistances.length} level site(s) on this loop ` +
+        `(at railDistance ${allPlanned.map((d) => d.toFixed(1)).join(', ')}) and not one of the ` +
         `park's ${train.crossings.length} built crossing(s) stands on any of them ` +
         `(they sit at ${train.crossings.map((c) => c.railDistance.toFixed(1)).join(', ') || 'nowhere — there are none'}) — ` +
         'the crossing plan did not reach the park, so every per-bridge check here is ' +
@@ -5858,6 +5878,8 @@ const everyProvenBridgeSiteKeepsItsBridge: Invariant = (facts) => {
     );
     return complaints;
   }
+
+  const onPlannedSite = train.crossings.filter((crossing) => onSite(crossing, planned));
 
   for (const crossing of onPlannedSite) {
     // Measured off the built world twice over: the crossing is in
