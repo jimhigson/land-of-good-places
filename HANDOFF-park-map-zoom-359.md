@@ -67,3 +67,33 @@ landed in the wrong place. #234 was exactly one such second definition.
   off the DOM — never from counting painted text runs, which double-counts a
   wrapped name.
 - `git diff --stat origin/main...HEAD` — **three dots**.
+
+## DONE — PR #372 raised, not merged
+
+All five items complete. Label counts (visible denominator):
+
+| | zoom 1 | zoom 2 | zoom 4 |
+|---|---|---|---|
+| desktop | 14/16 | 12/12 | **4/4** |
+| phone 390 | 11/16 | 12/15 | **4/4** |
+| phone 320 | 8/16 | 8/13 | **4/4** |
+| landscape | 8/16 | 11/14 | **7/7** |
+
+Every visible name is drawn at max zoom, at every size. Zoom 1 unchanged from
+#353 by construction (assertion 4).
+
+Check: 7 assertions, 175 views, all 8 mutations red. Key measurement —
+`--mutate=zoom-axis` raises **140** failures under assertion 5 and **0** under
+assertion 3, proving the zoom grid catches a class the default-framing check
+was structurally blind to.
+
+Deliberately NOT asserted (structural, written into the file instead): the
+round-trip at zoom (exact for any affine map), and drawn-vs-inverted agreement
+(one MapProjection, no second path).
+
+Found: **#244 is stale** — it says the wheel is guarded and pinch is not; the
+code is the opposite, fixed by #282. Should be closed or rewritten. Not touched.
+
+Build 0, procgen 453/453, tsc clean. Dev server 93228 killed. Screenshots on
+`qa-screenshots` under `park-map-zoom-359/`. Worktree `eng-359` can be removed
+once #372 merges. **Do not merge.**
