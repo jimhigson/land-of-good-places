@@ -98,6 +98,41 @@ view; label collision-avoidance in `drawLabel` at `minTextPx()`.
   (not `maxRadius` — the shape is not centred on the origin, so a radius
   cannot frame it without slack on one side and a clip on the other).
 
+- **D4 — no reference image was ever available.** Neither issue has one
+  attached (checked the bodies, the comments and the whole repo: nothing).
+  #334's own body says the image "will be attached by whoever picks this up".
+  The art was built from the Overseer's written description of it. **Asked Jim
+  for the file on 29 Aug.** If you are picking this up, get it before
+  re-styling anything.
+- **D5 — there is no image-generation tool in this environment.** No diffusion
+  model, no text-to-SVG service, no image MCP. Available: Blender MCP (3D, one
+  instance, Jim's Mac only), headless Chromium via `playwright-core`, Node, and
+  hand-authored vector code. So the icons are hand-written Canvas 2D paths in
+  `parkMapArt.ts` — which is also the form that fits this repo (deterministic,
+  diffable, themeable, no binary asset to keep in step).
+
+## Status
+
+- Map rewired: lawn is `PARK_BOUNDARY.outline()`, viewport is
+  `outdoorParkMapProjection` (the one owner), paths are the real `ROUTES` as
+  cream ribbons, trees are the park's own biggest `foliageOccluders`, and every
+  attraction is a drawing of itself plus its label.
+- `npm run check:park-map` is written, wired into `build`, and **green**:
+  worst boundary overshoot 0.00 px over 5 canvas sizes x 512 vertices; worst
+  position error 0.0000 m against independently re-derived truth (tolerance
+  0.62 m = `PLAYER_RADIUS`); bearing error 0.000°, scale spread 0.000%.
+- **Proven red three ways** — messages quoted in the PR body:
+  - `--mutate=viewport` (reinstates the old 66 m square): *"CLIPPED on square
+    (520x520): the park's outline falls up to 102.7 px (26.1 m) outside the map
+    canvas. The boundary runs 59.7-101.4 m and spans x -86.5..92.1, z
+    -84.5..71.8 m."* This reproduces #234 exactly, and the 59.7-101.4 m figure
+    it measures is the same one the issue quotes.
+  - `--mutate=position`: *"MISPLACED "railRacer" (stall) ... the map draws it
+    at (-8.33, 47.38) m but the park put it at (-11.33, 47.38) m — out by 3.00
+    m, tolerance 0.62 m (PLAYER_RADIUS)."*
+  - `--mutate=stretch`: *"SCALE NOT UNIFORM: map pixels per world metre ranges
+    3.5354..3.6827 ... a spread of 4.00%, tolerance 0.10%."*
+
 ## Next steps
 
 1. ~~Review prior work~~ — done, see D2.
