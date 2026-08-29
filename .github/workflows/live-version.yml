@@ -1,0 +1,173 @@
+name: Live version
+
+# **Does the live park serve the newest commit on main?**
+#
+# On 29 August 2026 it did not: the site sat on `0a5f0380` while `main` was five
+# commits ahead. `deploy.yml` carried `cancel-in-progress: true`, so a merge
+# landing during a deploy cancelled it — and a cancelled run is a grey tick, not
+# a red one. Nothing anywhere said the site had stopped moving. It was found by
+# Jim, days later: "Deployed still has the old cat bus".
+#
+# `deploy.yml` now queues instead of cancelling, which removes that cause. This
+# workflow is the part that does not rely on having guessed the cause right.
+#
+# **Why it is not a step at the end of `deploy.yml`.** A cancelled run executes
+# none of its own steps, so a post-deploy verification step is structurally
+# unable to observe the exact failure this exists for. Only something running
+# *outside* the deploy can see a deploy that never happened. Hence the three
+# triggers below: after every Deploy run *however it ended*, on a schedule (so a
+# site that goes stale for any other reason — a failed publish, an expired
+# Cloudflare token, a wedged edge cache — is noticed within the hour rather than
+# by a person), and by hand.
+#
+# Note that `workflow_run` always runs the copy of this file on the default
+# branch, so this trigger only starts working once merged.
+on:
+  workflow_run:
+    workflows: [Deploy]
+    types: [completed]
+  schedule:
+    # Every half hour. The site is expected to be current within ~40 s of a
+    # merge, so half an hour is already a very generous grace period.
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+# NOT `deploy-main`. Sharing that group would make GitHub cancel a *pending*
+# deploy the moment one of these queued behind it — a check quietly killing the
+# publish it exists to watch. This gets its own group, and waits for the deploy
+# politely instead (see the first step).
+concurrency:
+  group: live-version
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  # Reading whether a deploy is currently in flight.
+  actions: read
+  # Opening/closing the "live site is stale" issue — this is the bit that puts
+  # the failure in front of a person instead of into a log nobody reads.
+  issues: write
+
+jobs:
+  live-version:
+    name: Live site is serving the newest commit
+    runs-on: ubuntu-latest
+    # Generous: most of this is waiting out a deploy that is legitimately mid-build.
+    timeout-minutes: 40
+    steps:
+      # A deploy runs the whole `npm run build` gate before it publishes, so
+      # "main is ahead of live" is the *normal, correct* state for tens of
+      # minutes after a merge. Failing during that window would be a flaky
+      # check, and flaky is failing (CLAUDE.md). So wait the deploy out first,
+      # and only then ask the question.
+      - name: Wait for any deploy already in flight
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const started = Date.now();
+            const LIMIT_MS = 30 * 60 * 1000;
+            for (;;) {
+              const busy = [];
+              for (const status of ['queued', 'in_progress', 'waiting', 'pending']) {
+                const { data } = await github.rest.actions.listWorkflowRuns({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  workflow_id: 'deploy.yml',
+                  status,
+                });
+                busy.push(...data.workflow_runs.map((run) => `${run.id} (${status})`));
+              }
+              if (busy.length === 0) {
+                core.info(`No deploy in flight after ${Math.round((Date.now() - started) / 1000)}s.`);
+                return;
+              }
+              if (Date.now() - started > LIMIT_MS) {
+                // Deliberately not a failure of *this* check: a deploy stuck for
+                // half an hour is its own problem, with its own red run.
+                core.warning(`Deploy still in flight after 30 min: ${busy.join(', ')}. Checking anyway.`);
+                return;
+              }
+              core.info(`Deploy in flight: ${busy.join(', ')} — waiting.`);
+              await new Promise((resolve) => setTimeout(resolve, 30_000));
+            }
+
+      - name: Checkout
+        # Depth 1 is enough: the commit to expect is read live from the remote
+        # with `git ls-remote origin HEAD`, not from local history.
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26
+
+      # No `npm ci`. The check imports node builtins, `src/version-file.ts` and
+      # the repo's own extension resolver — nothing from node_modules — so the
+      # whole job is a few seconds plus whatever it spends waiting.
+      - name: Is the live site serving the head of main?
+        id: check
+        run: npm run check:live-version
+
+      - name: Say so, loudly, where a person will see it
+        if: failure() && steps.check.outcome == 'failure'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const marker = '<!-- live-version-stale -->';
+            const runUrl = `${context.payload.repository.html_url}/actions/runs/${context.runId}`;
+            const body = `${marker}\n**The live site is not serving the newest commit on \`main\`.**\n\n` +
+              `This is the "Deployed still has the old cat bus" failure: the park quietly stops ` +
+              `moving while \`main\` goes on ahead, and every preview and deploy after it is ` +
+              `describing a build nobody can see.\n\n` +
+              `The exact commits it saw are in the [failing run](${runUrl}).\n\n` +
+              `To republish by hand: \`gh workflow run deploy.yml\`. This issue closes itself ` +
+              `on the next run that finds the site current again.`;
+            const { data: open } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            });
+            const existing = open.find((issue) => (issue.body ?? '').includes(marker));
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body: `Still stale as of [this run](${runUrl}).`,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: 'Live site is stale — the deployed park is behind `main`',
+                body,
+              });
+            }
+
+      - name: Close the stale-site issue if the site has caught up
+        if: success()
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const marker = '<!-- live-version-stale -->';
+            const { data: open } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            });
+            for (const issue of open.filter((i) => (i.body ?? '').includes(marker))) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `The live site is serving the head of \`main\` again — closing.`,
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed',
+              });
+            }
