@@ -17,6 +17,60 @@ is waived; playability is not.
 Acceptance test, his words: **"there should be just a bridge with nothing
 clipping inside it as part of the park scenery."**
 
+## Peer review of PR #360 — three blockers, all closed
+
+**1. Double-arc merge hazard — was already fixed, and is now proved.** `d90c780`
+deleted my arc and adopted #352's `parapetHeightFor` verbatim. Both branches
+carry one `PARAPET_CROWN_LIFT = 0.45` and a byte-identical function. The merge
+was *performed* in a scratch worktree, not argued: `bridges.ts` conflicts in one
+hunk, both sides saying the same thing two ways, and the keep-both resolution the
+review feared is a **compile error** (`TS2451: Cannot redeclare block-scoped
+variable`), not a silent 2.10 m. Resolved: tsc exit 0, parapet 1.17 m + 0.20 m
+coping = 1.37 m. Merged-tree procgen 452 passed / 1 failed, and that one is
+#352's own pre-existing seed-11 detour blocker — confirmed failing identically on
+`bridge-paving-clip` alone.
+
+**2. Renders were of a different bridge.** The render script hand-copied
+constants the build script has always read properly. `scripts/dump-bridge-
+constants.mts` now imports the game's modules, evaluates them and prints JSON;
+the Python reads it as a subprocess. `profileDrop` arrives as a sampled table and
+is interpolated rather than reimplemented. The preview draws **36.71 m**, which is
+what this branch builds — the 40% is #352's. Cameras scale with the bridge's own
+length so the shots survive the merge.
+
+**3. The lump is the paving, not the flank.** Correct, and my PR body overstated
+it. The masonry flank is the two thin strips at the deck edges; the mound Jim
+called "a pile of sand" is the path ribbon over the ramp. Coursing the flank
+cannot fix that complaint. The fix is #352's shortening plus whatever the paving
+itself needs. The coursing still earns its place for the child's-eye view at a
+ramp foot, but it is not the answer to the lump.
+
+**Triangles.** Clean `origin/main`: 1,138 tris / 3 draws per bridge. This branch:
+10,770 / 5 — 9.5×, higher than the 8.4× reviewed because the coping fix raised
+block count 70 → 98. Against #251's own 3,181,346 scene-graph triangles, four
+bridges add 38,528 = **+1.2%**; draw calls +8, or +16 with the shadow pass, of
+~540. Affordable: #251's overshoot is dominated by 2,224 meshes and 11,290
+instances, not by bridges. The lever if ever needed is the stones' one-segment
+chamfer, roughly 40% of the kit's triangles.
+
+**The coping was floating, and it was real.** Verified by plan-projecting onto
+the `wallTop` triangles and reading height barycentrically — not by a ray, which
+against a single-sided shell cannot tell "nothing there" from "facing away", the
+reason the reviewer rightly called their own check inconclusive. Bases stood up
+to **0.246 m** above their own parapet. Cause: `buildCopingRun` asked the smooth
+`parapetHeightFor` where to put a stone while the drawn wall is a polyline
+sampled every `SHELL_STEP`; near a ramp foot the taper runs its whole range
+inside one 0.6 m step. Fixed by publishing `ShellGeometry.parapetLine` and
+seating the coping on it, one block per segment. The invariant then found two
+more on curved seeds — both "tangent where the wall is a chord" — now also fixed.
+Seating is exact on all five seeds.
+
+**`COPING_OVERHANG` 0.11 → 0.** It broke this branch's own reason for recessing
+courses inward. The arithmetic admits nothing else: inner ≥ `roadHalf` and outer
+≤ `halfAcross` forces width ≤ `BRIDGE_WALL_THICKNESS`. The voussoir ring keeps
+0.20 m proud and now says why — it stands only over ground the fence already
+forbids to feet, which a coping running the whole length over lawn does not.
+
 ## Status: complete, PR raised, not merged
 
 - [x] kit modelled in Blender, rendered, judged
@@ -26,7 +80,9 @@ clipping inside it as part of the park scenery."**
 - [x] `ASSET_MANIFEST.md` entry
 - [x] procgen invariant, broken deliberately and watched go red
 - [x] `npm run build` exit 0, `npx tsc --noEmit` exit 0, `npm run test:procgen`
-      448 passed / 14 files
+      **453 passed / 14 files**
+- [x] second invariant, `everyCopingStoneSitsOnItsWall`, and the real defect it
+      found
 
 ## ⚠️ THREE THINGS THAT ARE NOT MINE TO CLOSE
 
