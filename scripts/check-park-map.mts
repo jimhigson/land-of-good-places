@@ -8,6 +8,9 @@
  * npm run check:park-map -- --mutate=stretch    # prove assertion 3 can fail
  * npm run check:park-map -- --mutate=entrance   # ... at the rides' queues
  * npm run check:park-map -- --mutate=gateway    # ... at the gate and the bus
+ * npm run check:park-map -- --mutate=zoom-axis  # prove assertion 5 can fail
+ * npm run check:park-map -- --mutate=clamp-loose  # prove assertion 6 can fail
+ * npm run check:park-map -- --mutate=clamp-tight  # prove assertion 7 can fail
  * ```
  *
  * #234 is the reason this exists, and it is worth stating exactly, because it
@@ -20,7 +23,10 @@
  * So this measures the map the way the map is actually built — through
  * `outdoorParkMapProjection`, the one function `ParkMap` is allowed to get its
  * viewport from, and `parkMapFeatures`, the one list it draws — against the
- * park `buildHeadlessPark()` really generated. Three assertions:
+ * park `buildHeadlessPark()` really generated. Seven assertions — 1-3 on the
+ * default framing, 4-7 once #359 let the child zoom and pan, and the note
+ * above `viewSamples` sets out which zoom properties are genuinely falsifiable
+ * and which are structural and therefore written down instead of tested:
  *
  * 1. **Nothing is clipped.** Every vertex of `PARK_BOUNDARY.outline()` lands
  *    inside the canvas, at every canvas size from a small phone to a desktop.
@@ -87,6 +93,13 @@
  *    metre ratio is the same for all pairs. That is what "relative position,
  *    scale and bearing are preserved" means as a measurement, and it catches a
  *    stretched or rotated projection, which assertions 1 and 2 both survive.
+ *
+ *    **Assertion 3 only ever runs on the default framing**, which is why 5
+ *    exists. Measured: `--mutate=zoom-axis` (zoom applied to one axis) raises
+ *    **140** failures under assertion 5 and **zero** under assertion 3 — the
+ *    shear is a no-op at zoom 1 by construction and appears only as the child
+ *    zooms in. A check that stopped at the default view would have been blind
+ *    to it, which is #234's own shape one level up.
  *
  * ### Thresholds
  *
