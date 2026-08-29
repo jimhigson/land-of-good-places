@@ -858,6 +858,7 @@ export function createCatBus(): CatBusHandle {
       stripedMaterial,
     ),
   );
+  backWall.name = 'cat-bus-back-wall';
   backWall.position.set(0, (WINDOW_SILL_Y + WINDOW_HEAD_Y) / 2, cabinBackZ + (PILLAR_Z * DETAIL) / 2);
   chassis.add(backWall);
   striped.push({ mesh: backWall, at: backWall.position });
@@ -1078,6 +1079,7 @@ export function createCatBus(): CatBusHandle {
   const doorPanel = solid(
     new Mesh(new RoundedBoxGeometry(0.06 * DETAIL, DOOR_HEIGHT, DOOR_WIDTH, 2, 0.08 * DETAIL), stripedMaterial),
   );
+  doorPanel.name = 'cat-bus-door-panel';
   doorPanel.position.set(0, DOOR_HEIGHT / 2, DOOR_WIDTH / 2);
   doorGroup.add(doorPanel);
   // Unwrapped in the pose it holds when **shut** — `doorGroup` is a hinge, so
