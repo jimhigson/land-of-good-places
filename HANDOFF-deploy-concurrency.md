@@ -71,4 +71,18 @@ Green run for contrast: exit 0, "landofgoodplaces.blockstack.ing is serving
 
 ## Status
 
-Workflow fix, check script, and `live-version.yml` all committed and pushed.
+**PR #386 open.** Workflow fix, check script and `live-version.yml` all pushed;
+rebased onto `origin/main` after two PRs merged mid-session (clean, three-dot
+diff shows only my 9 files, and the build chain parsed identical to main at 47
+steps including main's new `check:deck-fallthrough`).
+
+The Overseer reproduced the defect live while this was being written:
+`gh run list --workflow=deploy.yml` showed **three of the last five deploys
+cancelled**, none marked as a failure anywhere, including the player-movement
+fix `20c54f86` killed by the merge a minute after it. This is why the check asks
+what version is *served* rather than whether the last run succeeded — a
+run-status check would have reported all-clear through the whole five-commit
+stale period.
+
+Post-rebase re-runs of `npm run build` and `npm run test:procgen` were in flight
+at the last checkpoint; their exit codes go in a PR comment.
