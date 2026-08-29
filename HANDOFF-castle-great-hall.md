@@ -212,6 +212,25 @@ it follows the hearth rather than the hall. **That is the one piece that will
 not silently split** — and it is also the tell, because if the hall moves alone
 the bench stays behind with the fire and the hall loses it.
 
+- **The ceiling `castle_build.py` asserts against is a typed fallback —
+  [issue #395](https://github.com/jimhigson/land-of-good-places/issues/395).**
+  `read_ceiling_clear()` resolves neither of its two sources, because both
+  `castleFabric.ts`'s `BEAM_UNDERSIDE` and `castleAssets.ts`'s
+  `CASTLE_CEILING_CLEAR` are **derived expressions** and `ts_const` reads only
+  `export const NAME = <number>;`. So every ceiling assertion on the asset side
+  runs against a typed 3.08.
+
+  **It currently equals the true value, which is what makes it dangerous.**
+  The wall-plate has already moved once (0.9 m inset → flush, which is what
+  changed the band from 1.25 m to 0.40 m). Next time it moves, `castleFabric.ts`
+  updates, `check:castle` follows because it measures the built mesh, and the
+  Python goes on asserting 3.08 forever — passing assets that no longer fit.
+
+  `check_tapestry_hangs()`, added on this branch, depends on it: 110 mm of
+  margin measured against a number nobody maintains. It prints `CEILING_FROM`
+  beside the figure so the provenance is visible, which is the right minimum and
+  is **not** a fix. Owner is whoever owns `castleFabric.ts` (#376 / PR #385);
+  suggested shape is in the issue.
 - **`npm run blend:castle` has not been re-run** on this branch. The three
   `ts_const` conversions were proved readable against the exact regex lifted
   from `blendkit.py`, but the Blender-side assertion they now drive has not
