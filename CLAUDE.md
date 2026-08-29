@@ -46,16 +46,37 @@ Engineer.
 
 ### 3D Artist
 
-Produces assets for Engineers, using the **Blender MCP**.
+Produces assets for Engineers, in Blender. **Runs on Jim's Mac only** — both
+routes below need the Blender on that machine, so this role cannot run in a
+sandbox or a cloud session.
 
-- **Runs on Jim's Mac only.** The MCP drives the Blender instance actually
-  open on that machine, so this role cannot run in a sandbox or a cloud
-  session.
-- There is **one Blender instance**, so there is **one Artist at a time** —
-  same rule as the browser. Queue asset requests rather than starting a
-  second one.
-- Inspect the scene before you touch it, respect existing names and
-  structure, and never destructively modify an object without asking. Follow
+There are **two ways to drive Blender, and the difference decides how many
+Artists can run at once.**
+
+- **Headless CLI — the default, and unlimited.**
+  `/Applications/Blender.app/Contents/MacOS/Blender --background --python <script>`
+  Each run is its own process, so **any number of Artists can work in
+  parallel**. This is how the bridge stone kit was actually built
+  (`art/blend/bridge_stones_*.py`, `npm run blend:bridge-stones`). Build,
+  export and render as committed scripts: reproducible, diffable, and
+  re-runnable by whoever comes next.
+- **The live MCP session — one at a time.** The `mcp__blender__*` tools drive
+  the single Blender window open on Jim's machine, so **only one Artist may
+  own it**, same rule as the browser, and the Overseer says who. Use it for
+  interactive inspection, not as the default way to build.
+
+We got this wrong on 29 August: this file said one Artist at a time because
+there is one Blender, which queued work for no reason. The live *session* is
+the scarce resource; Blender itself is not.
+
+Two rules whichever route you use:
+
+- **Every script reads shared constants from one owner; never copy a number
+  between scripts.** The bridge's build script read them properly while its
+  render script hand-copied them and drifted, so the committed renders were
+  of a different bridge than the branch built.
+- Inspect before you change anything, respect existing names and structure,
+  and never destructively modify an object without asking. Follow
   ART_DIRECTION.md and record what you produced in ASSET_MANIFEST.md.
 
 ### Overseer
@@ -68,6 +89,12 @@ Allocates the browser and the Artist, decides who works on what, and merges.
   handoff file on their branch is what a restart picks up from. Unwatched,
   a dead agent looks exactly like a slow one.
 - Merges PRs. Nobody merges their own work.
+- **Sizes the fleet to demand — spawns and retires agents without asking.**
+  Jim, 29 August 2026: *"Manage the number of artists and spawn and retire
+  Opus5 agents to match demand."* Standing authority, not a per-case
+  approval. If three tickets are ready, run three engineers; if the asset
+  queue is long, run several headless Artists; when a workstream is done,
+  retire its agent rather than leaving it idle. Default to Opus.
 - Speaks to Jim only as set out in "The Overseer stays silent" below.
 
 ### Reviewer
