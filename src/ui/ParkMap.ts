@@ -9,6 +9,8 @@ import { PARK_BOUNDARY } from '../world/boundary';
 import { PLAZA, type RouteDefinition } from '../world/paths';
 import { ROUTES, routeCurve } from '../world/pathGraph';
 import { STALLS } from '../minigames';
+import { ENTRANCE_GATE_HALF_WIDTH } from '../world/entrance/layout';
+import { CAT_BUS_LENGTH, CAT_BUS_ROUTE_NUMBER } from '../world/entrance/catBus';
 import { MAP_PALETTE, drawIcon } from './parkMapArt';
 import { parkMapFeatures, type MapFeature } from './parkMapContent';
 import { frameHalfExtent, outdoorParkMapProjection, type MapProjection } from './parkMapProjection';
@@ -145,6 +147,11 @@ const FEATURE_ICON_SIZE: Readonly<Record<MapFeature['kind'], number>> = {
   stall: 2.9,
   fountain: 2.4,
   station: 2.2,
+  // The gate and the bus are the way in, so they are drawn at ride size rather
+  // than furniture size — a child looking for "where I came in" should find it
+  // as easily as she finds a ride.
+  gate: 3.2,
+  catBus: 3.2,
 };
 
 /**
@@ -169,6 +176,13 @@ const FEATURE_ICON_MAX_METRES: Readonly<Record<MapFeature['kind'], number>> = {
   stall: 15,
   fountain: 13,
   station: 11,
+  // These two are the only entries taken from the thing itself rather than
+  // estimated, because both are already measured constants: the arch is
+  // `ENTRANCE_GATE_HALF_WIDTH` either side of centre, and the bus is
+  // `CAT_BUS_LENGTH` long. A picture no wider than the real thing cannot
+  // over-claim ground, which is what this cap is for.
+  gate: ENTRANCE_GATE_HALF_WIDTH * 2,
+  catBus: CAT_BUS_LENGTH,
 };
 
 /** An icon's drawn size: legible on the screen, honest about the park. */
@@ -850,6 +864,13 @@ export class ParkMap {
       return { label: feature.id.slice('station:'.length), accent: MAP_PALETTE.grey };
     }
     if (feature.kind === 'fountain') return { label: 'Fountain', accent: MAP_PALETTE.water };
+    if (feature.kind === 'gate') return { label: 'The Gates', accent: MAP_PALETTE.stone };
+    // The bus's own owned strings are its destination blind ("Land of Good
+    // Places" — the park's name, useless as a caption on a map *of* the park)
+    // and its route number, which is joined in here rather than restated.
+    if (feature.kind === 'catBus') {
+      return { label: `Cat Bus ${CAT_BUS_ROUTE_NUMBER}`, accent: MAP_PALETTE.mustard };
+    }
     return { label: feature.id, accent: MAP_PALETTE.mustard };
   }
 

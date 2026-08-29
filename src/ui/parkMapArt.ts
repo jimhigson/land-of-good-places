@@ -88,6 +88,14 @@ export const MAP_PALETTE = {
   leafDeep: '#3d612c',
   trunk: '#6b4a2f',
 
+  // The boundary wall and its gate arch are pink stone in the park
+  // (`core/palette.ts`'s `stonePink` family). Carried over here so the gate on
+  // the map is recognisably the thing a child just walked through, in this
+  // map's slightly quieter register.
+  stone: '#e9b4c9',
+  stoneDeep: '#cf92aa',
+  stoneLight: '#f7d9e4',
+
   ink: '#3f3a34',
 } as const;
 
@@ -605,6 +613,132 @@ function drawKeychainCart(ctx: CanvasRenderingContext2D, cx: number, cy: number,
 }
 
 /**
+ * **The entrance arch**, drawn front-on: two pink-stone posts with domed caps
+ * and a round crossbar over the gap, which is exactly what `Entrance.ts` builds
+ * — a pair of cylinders on the wall's tangent, sphere caps, and a half-torus
+ * spanning them. A child who has walked in through it should recognise it.
+ *
+ * The crossbar is a filled half-annulus rather than a stroked arc, so the whole
+ * icon stays flat shapes with no outline strokes, per the reference.
+ *
+ * Knows only how to paint an arch. Where the arch goes is
+ * `parkMapContent.ts`'s `entranceGate` feature and nothing else.
+ */
+function drawEntranceGate(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number): void {
+  const postHalf = 0.075;
+  const postX = 0.325;
+  const springY = -0.1; // where the posts stop and the arch springs from
+  const outer = postX + postHalf;
+  const inner = postX - postHalf;
+
+  // The gap read as paving between the posts, so the gate is a way *through*
+  // rather than a wall.
+  box(ctx, cx, cy, size, MAP_PALETTE.path, -inner, springY, inner * 2, 0.45);
+
+  for (const side of [-1, 1] as const) {
+    // Flat face, then a darker sliver down the inner edge: the same light
+    // direction the rest of the set is shaded to.
+    box(ctx, cx, cy, size, MAP_PALETTE.stone, side * postX - postHalf, springY, postHalf * 2, 0.45);
+    box(
+      ctx, cx, cy, size, MAP_PALETTE.stoneDeep,
+      side > 0 ? postX + postHalf * 0.45 : -postX - postHalf,
+      springY, postHalf * 0.55, 0.45,
+    );
+  }
+
+  // The arch: outer edge over, inner edge back, filled as one band.
+  ctx.beginPath();
+  ctx.arc(cx, cy + springY * size, outer * size, Math.PI, 0, false);
+  ctx.arc(cx, cy + springY * size, inner * size, 0, Math.PI, true);
+  ctx.closePath();
+  ctx.fillStyle = MAP_PALETTE.stone;
+  ctx.fill();
+
+  // Domed caps on the posts, as in the park.
+  for (const side of [-1, 1] as const) {
+    ctx.beginPath();
+    ctx.ellipse(cx + side * postX * size, cy + springY * size, postHalf * 1.25 * size, postHalf * 0.9 * size, 0, 0, Math.PI * 2);
+    ctx.fillStyle = MAP_PALETTE.stoneLight;
+    ctx.fill();
+  }
+
+  // The gate's paw print, which the real posts carry.
+  const pawY = -0.34;
+  disc(ctx, cx, cy, size, MAP_PALETTE.stoneDeep, 0, pawY + 0.035, 0.055);
+  for (const toe of [-0.062, -0.021, 0.021, 0.062] as const) {
+    disc(ctx, cx, cy, size, MAP_PALETTE.stoneDeep, toe, pawY - 0.045, 0.026);
+  }
+}
+
+/**
+ * **The cat bus**, side-on with its face turned to the reader.
+ *
+ * Cream body and a yellow roof, as `catBus.ts` builds it
+ * (`CAT_BUS_BODY_COLOUR` is `pathEdge`, the roof a lightened `flowerYellow`),
+ * plus the ears, whiskers and route number that make it a cat and not a coach.
+ *
+ * Drawn nose-right, which is the direction it faces at the stop — but that is a
+ * drawing decision only. Where the bus goes on the map is the `catBus` feature
+ * in `parkMapContent.ts`, and it is the bus *stop*, for the reasons set out
+ * there.
+ */
+function drawCatBus(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number): void {
+  const bodyTop = -0.16;
+  const bodyBottom = 0.26;
+
+  // Wheels first, so the body sits over them.
+  for (const wx of [-0.26, 0.24] as const) {
+    disc(ctx, cx, cy, size, MAP_PALETTE.greyDeep, wx, bodyBottom + 0.02, 0.085);
+    disc(ctx, cx, cy, size, MAP_PALETTE.greyLight, wx, bodyBottom + 0.02, 0.036);
+  }
+
+  // Ears, behind the head so they read as sticking up out of it.
+  for (const [ex, tip] of [[0.24, 0.16], [0.42, 0.34]] as const) {
+    poly(ctx, cx, cy, size, MAP_PALETTE.creamDeep, [
+      [ex, -0.24], [tip, -0.46], [ex + 0.13, -0.22],
+    ]);
+  }
+
+  // Body: cream flank, darker skirt below the windows.
+  box(ctx, cx, cy, size, MAP_PALETTE.cream, -0.44, bodyTop, 0.86, bodyBottom - bodyTop);
+  box(ctx, cx, cy, size, MAP_PALETTE.creamDeep, -0.44, 0.14, 0.86, bodyBottom - 0.14);
+  // Roof, in the bus's own yellow.
+  box(ctx, cx, cy, size, MAP_PALETTE.mustard, -0.44, bodyTop, 0.86, 0.07);
+
+  // Windows: three down the flank, plus the door as a gap in the skirt.
+  for (const wx of [-0.4, -0.24, -0.08] as const) {
+    box(ctx, cx, cy, size, MAP_PALETTE.tealLight, wx, -0.06, 0.13, 0.15);
+  }
+  box(ctx, cx, cy, size, MAP_PALETTE.teal, 0.09, -0.06, 0.09, 0.3);
+
+  // The face, on the front of the bus.
+  disc(ctx, cx, cy, size, MAP_PALETTE.cream, 0.33, -0.02, 0.22);
+  disc(ctx, cx, cy, size, MAP_PALETTE.ink, 0.26, -0.08, 0.032);
+  disc(ctx, cx, cy, size, MAP_PALETTE.ink, 0.4, -0.08, 0.032);
+  poly(ctx, cx, cy, size, MAP_PALETTE.stoneDeep, [
+    [0.305, 0.02], [0.355, 0.02], [0.33, 0.055],
+  ]);
+
+  // Whiskers — the one place a line is the shape, as with the fountain's jets.
+  ctx.save();
+  ctx.strokeStyle = MAP_PALETTE.greyLight;
+  ctx.lineWidth = size * 0.018;
+  ctx.lineCap = 'round';
+  for (const side of [-1, 1] as const) {
+    for (const dy of [-0.02, 0.03] as const) {
+      ctx.beginPath();
+      ctx.moveTo(cx + (0.33 + side * 0.06) * size, cy + (0.03 + dy) * size);
+      ctx.lineTo(cx + (0.33 + side * 0.2) * size, cy + (0.01 + dy * 1.6) * size);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+
+  // Route 67's destination blind — a cream slot on the yellow roof.
+  box(ctx, cx, cy, size, MAP_PALETTE.paper, -0.32, -0.145, 0.24, 0.05);
+}
+
+/**
  * One drawing per attraction, keyed by the id `parkMapContent.ts` hands over —
  * an `AnchorId`, a stall id, or `station`/`fountain`/`tree`.
  */
@@ -623,6 +757,9 @@ export const ICONS: Readonly<Record<string, IconDrawer>> = {
   spaceFerrisWheel: drawFerrisWheel,
   facePaint: drawFacePaint,
   keychain: drawKeychainCart,
+  // the way in
+  entranceGate: drawEntranceGate,
+  catBus: drawCatBus,
   // furniture
   fountain: drawFountain,
   station: drawStation,
