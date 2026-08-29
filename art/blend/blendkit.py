@@ -145,7 +145,17 @@ class Part:
         smooth: bool = True,
         sharp_deg: float = 46.0,
         weld: bool = True,
+        location=None,
     ) -> bpy.types.Object:
+        """Emit this part as a named object.
+
+        ``location`` is the **one** deliberate departure from "every object
+        leaves Blender at an identity transform": a part whose node origin has
+        to be somewhere specific — a hinge axis a lid turns about. The
+        vertices are then authored relative to that point, and the node carries
+        the offset, so a caller rotating the node needs no pivot arithmetic.
+        The export script allows a pure translation here and nothing else.
+        """
         mesh = bpy.data.meshes.new(self.name)
         mesh.from_pydata(self.verts, [], self.faces)
         mesh.validate(verbose=False)
@@ -186,6 +196,8 @@ class Part:
                     layer.data[loop_index].uv = corners[step] if corners else (0.02, 0.02)
 
         obj = bpy.data.objects.new(self.name, mesh)
+        if location is not None:
+            obj.location = location
         coll.objects.link(obj)
         return obj
 
