@@ -36,7 +36,7 @@
  * silently stopped working fails here rather than passing with room to spare.
  */
 import './headless-canvas.mjs';
-import { Box3, Mesh, Object3D, Vector3 } from 'three';
+import { Box3, Matrix4, Mesh, Object3D, Vector3 } from 'three';
 import {
   CAT_BUS_ARCH_GAP,
   CAT_BUS_MAX_HEAVE,
@@ -350,37 +350,103 @@ note(
  * passenger cabin. A constant standing in for a surface is the same disease as
  * a comment promising two numbers agree.
  *
- * So it asks the built shells where their surface is, at **every pose** — the
- * shells roll and heave, the tyres do not, and it is at full roll that a flank
- * leans furthest over a wheel. And it asks with `distanceToTyre`, which knows
- * the wheel is a *cylinder*: a flat comparison of x would have to be told which
- * heights and which z to bother about, and would be wrong at the top of the
- * body, where the bodywork genuinely does lean out past the tyre's inner face
- * and there is no tyre up there to hit.
+ * So it asks the built shells where they are, at **every pose** — the shells
+ * roll and heave, the tyres do not, and it is at full roll that a flank leans
+ * furthest over a wheel.
+ *
+ * ## And it asks the shell's *box*, not its vertices, which took two goes
+ *
+ * The obvious way round — sample the shells' surfaces and ask `distanceToTyre`
+ * about each point — was written first and **did not catch the fool either**.
+ * `RoundedBoxGeometry` tessellates its flat faces astonishingly coarsely: the
+ * lower shell is 12.9 m long and carries **not one vertex within a metre of
+ * either axle**, so the sampling had nothing local to the wheel to interpolate
+ * between and reported the flank a comfortable 0.0971 m clear of a tyre that
+ * was 0.185 m inside it.
+ *
+ * A shell *is* a box, so the exact question is whether any point of the tyre is
+ * inside that box — and a box needs no tessellation to answer it. Each shell's
+ * extent is measured once in its own frame (the chassis moves above it, so the
+ * local box does not change), and each pose transforms the **tyre's** surface
+ * into that frame, which is the finely faceted side of the pair and the side
+ * that can be sampled honestly.
+ *
+ * Conservative in the right direction: it treats the bodywork as the solid box
+ * it is drawn as, so a wheel poking into a window aperture counts as a wheel in
+ * the bus, which it is.
  */
 const shellNames = ['cat-bus-shell-lower', 'cat-bus-shell-upper'] as const;
+
+/** An object's extent in **its own** frame, children and outline shells and all. */
+function localBox(object: Object3D): Box3 {
+  const box = new Box3();
+  const toLocal = new Matrix4().copy(object.matrixWorld).invert();
+  const point = new Vector3();
+  object.traverse((child) => {
+    const mesh = child as Mesh;
+    if (!(mesh as Partial<Mesh>).isMesh) return;
+    const position = mesh.geometry.getAttribute('position');
+    if (!position) return;
+    for (let i = 0; i < position.count; i += 1) {
+      point
+        .fromBufferAttribute(position, i)
+        .applyMatrix4(mesh.matrixWorld)
+        .applyMatrix4(toLocal);
+      box.expandByPoint(point);
+    }
+  });
+  return box;
+}
+
+/** How far outside a box a point is. Negative is inside, by the shallowest face. */
+function distanceOutsideBox(box: Box3, point: Vector3): number {
+  const outside = Math.hypot(
+    Math.max(box.min.x - point.x, 0, point.x - box.max.x),
+    Math.max(box.min.y - point.y, 0, point.y - box.max.y),
+    Math.max(box.min.z - point.z, 0, point.z - box.max.z),
+  );
+  if (outside > 0) return outside;
+  return -Math.min(
+    point.x - box.min.x,
+    box.max.x - point.x,
+    point.y - box.min.y,
+    box.max.y - point.y,
+    point.z - box.min.z,
+    box.max.z - point.z,
+  );
+}
+
 const bodywork = shellNames.flatMap((name) => {
   const shell = root.getObjectByName(name);
   if (!shell) {
-    failures.push(`the bus has no '${name}' — the bodywork's surface cannot be measured, so nothing is checking the wheels are outside it`);
+    failures.push(`the bus has no '${name}' — the bodywork cannot be measured, so nothing is checking the wheels are outside it`);
     return [];
   }
-  return localSurfaceSamples(shell);
+  return [{ shell, box: localBox(shell) }];
 });
+/** The tyres' own surfaces — the finely faceted half of the pair. */
+const tyreSurfaces = tyres.map((tyre) => localSurfaceSamples(tyre.mesh));
 
 let worstBodyworkGap = Infinity;
 let worstBodyworkPose = '';
 const scratchPoint = new Vector3();
+const toShell = new Matrix4();
 for (const p of posesToTest()) {
   pose(p.heave, p.pitch, p.roll);
-  for (const { mesh, points } of bodywork) {
-    for (const local of points) {
-      scratchPoint.copy(local).applyMatrix4(mesh.matrixWorld);
-      for (const tyre of tyres) {
-        const gap = distanceToTyre(tyre, scratchPoint);
-        if (gap < worstBodyworkGap) {
-          worstBodyworkGap = gap;
-          worstBodyworkPose = p.label;
+  for (const { shell, box } of bodywork) {
+    toShell.copy(shell.matrixWorld).invert();
+    for (const surface of tyreSurfaces) {
+      for (const { mesh, points } of surface) {
+        for (const local of points) {
+          scratchPoint
+            .copy(local)
+            .applyMatrix4(mesh.matrixWorld)
+            .applyMatrix4(toShell);
+          const gap = distanceOutsideBox(box, scratchPoint);
+          if (gap < worstBodyworkGap) {
+            worstBodyworkGap = gap;
+            worstBodyworkPose = p.label;
+          }
         }
       }
     }
@@ -389,10 +455,10 @@ for (const p of posesToTest()) {
 pose(0, 0, 0);
 check(
   worstBodyworkGap > 0,
-  `the bodywork reaches ${(-worstBodyworkGap).toFixed(4)} m INSIDE a tyre at "${worstBodyworkPose}" — there is a wheel standing in the bus, which is the one thing doubling the wheels had to avoid`,
+  `a tyre reaches ${(-worstBodyworkGap).toFixed(4)} m INSIDE the bodywork at "${worstBodyworkPose}" — there is a wheel standing in the bus, which is the one thing doubling the wheels had to avoid`,
 );
 note(
-  `closest the bodywork's own surface comes to a tyre, over the whole envelope: ${worstBodyworkGap.toFixed(4)} m, at "${worstBodyworkPose}"`,
+  `closest a tyre comes to the built bodywork, over the whole envelope: ${worstBodyworkGap.toFixed(4)} m, at "${worstBodyworkPose}"`,
 );
 note(
   `track ${CAT_BUS_TRACK_WIDTH.toFixed(2)} m over a ${CAT_BUS_WIDTH.toFixed(2)} m body`,
