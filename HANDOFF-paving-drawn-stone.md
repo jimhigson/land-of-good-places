@@ -1,5 +1,21 @@
 # HANDOFF — paving follows the drawn stone (branch `fix/paving-follows-drawn-stone`)
 
+## Current state, 29 Aug — PR #391 open, NOT mergeable
+
+Rebased onto `origin/main` at 62318f05. `npm run build` **exit 0**;
+`npm run test:procgen` **exit 1** at **457 / 458** — the one failure is seed 2's
+bridge count, explained in full below, and it is a *different* failure from the
+one this branch was handed over with. The standability bug is fixed.
+
+**Worktree is `.claude/worktrees/bridge-seed2`** — the predecessor's `eng-paving`
+worktree was deleted by someone else's cleanup mid-session (nothing was lost; it
+was clean at the pushed tip). No dev server was started; the shared Chrome was
+not granted, so this branch has had **no visual QA**.
+
+**The next decision is the Overseer's**, not the next engineer's: see "Where that
+leaves the branch" at the bottom. Do not start the 35% bridge shortening off this
+— it was gated on this landing.
+
 Worktree `.claude/worktrees/eng-paving`. Its `node_modules` is a **symlink** to
 `eng-349`'s (deps identical); it shows as untracked because gitignore matches
 directories, not symlinks. **Never `git add` it.**
