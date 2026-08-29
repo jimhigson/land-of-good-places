@@ -9,6 +9,7 @@ import { PALETTE } from '../../core/palette';
 import { castleCoursingTexture, castleFlagstoneTexture } from '../../core/textures';
 import { interiorMaterial, softMaterial } from './parts';
 import { deckIsSolid, TOP_DECK } from './layout';
+import { TALLEST_CHILD_HEIGHT } from '../../art/models/kid';
 
 /**
  * **The castle's inside, as fabric** (issue #363).
@@ -82,9 +83,36 @@ export function castleWallMaterial(colour: number) {
 
 /** How far apart the beams march along the hall, in metres. */
 const BEAM_PITCH = 4;
-/** A beam's cross-section: chunky, per ART_DIRECTION §1. */
-const BEAM_WIDTH = 0.45;
-const BEAM_DEPTH = 0.4;
+/**
+ * A beam's cross-section — **wide and shallow, and that is the whole design.**
+ *
+ * The first cut was 0.45 wide by 0.40 deep, which `check:castle` immediately
+ * failed: it hung to 2.90 m and {@link TALLEST_CHILD_HEIGHT} is 2.97, so the
+ * tallest child in the game walked through every beam in the room with her hat.
+ *
+ * There is not much room to give. The ceiling is only
+ * {@link CASTLE_CEILING_CLEAR} (3.30 m) and a tall child needs 2.97 of it, so a
+ * beam gets 0.33 m to live in and no more. Rather than shave the depth until a
+ * beam is a pencil line, the beam gets its bulk **across** instead of **down**:
+ * 0.70 m wide by 0.22 m deep, hanging to {@link BEAM_UNDERSIDE}. Seen from the
+ * 38° camera you are looking at a ceiling timber's *width* far more than its
+ * depth, so a wide shallow beam reads chunkier than a narrow deep one — which
+ * is ART_DIRECTION §4's "recognisable beats measured" pointed at a cross
+ * section.
+ */
+const BEAM_WIDTH = 0.7;
+const BEAM_DEPTH = 0.22;
+
+/**
+ * How low the beams hang: 3.08 m, which is {@link TALLEST_CHILD_HEIGHT} plus
+ * 11 cm.
+ *
+ * Exported because `check:castle` asserts it against the built matrices, and
+ * because it is the ceiling for **anything else that ever hangs in this room**
+ * — a chandelier, a banner, a hanging sign. Ask for this number; do not write
+ * 3.08 down a second time.
+ */
+export const BEAM_UNDERSIDE = CASTLE_CEILING_CLEAR - BEAM_DEPTH;
 /**
  * Beams are cut into segments this long so a beam can stop at the edge of a
  * hole in the ceiling above it rather than sailing across the open shaft.
@@ -117,13 +145,26 @@ const BEAM_SEGMENT = 2;
  * moves takes the beams with it, for free, and no second copy of the hole
  * plan exists here to fall out of step.
  *
+ * ## They clear the tallest child in the game
+ *
+ * Not the *average* one. `TALLEST_CHILD_HEIGHT` is every hair style crossed
+ * with every hat, measured on the real models, and it is 2.97 m against a
+ * 3.30 m ceiling — so a beam has 33 cm to exist in. See {@link BEAM_DEPTH}.
+ *
  * Returns `null` for the roof terrace, which is outdoors and has no ceiling.
  */
 export function buildCeilingBeams(deck: number): InstancedMesh | null {
   if (deck >= TOP_DECK) return null;
 
   const above = deck + 1;
-  const y = CASTLE_CEILING_CLEAR - BEAM_DEPTH / 2;
+  const y = BEAM_UNDERSIDE + BEAM_DEPTH / 2;
+  if (BEAM_UNDERSIDE <= TALLEST_CHILD_HEIGHT) {
+    throw new Error(
+      `castleFabric: beams would hang to ${BEAM_UNDERSIDE.toFixed(2)} m, at or below the ` +
+        `tallest child (${TALLEST_CHILD_HEIGHT} m). Make BEAM_DEPTH shallower, or raise the ` +
+        `storey — do not ship a ceiling children walk through.`,
+    );
+  }
   const spots: { x: number; z: number }[] = [];
 
   // Start half a pitch in from the wall, so the run is symmetric about the

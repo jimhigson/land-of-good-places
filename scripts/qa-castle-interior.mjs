@@ -27,61 +27,28 @@ const CHROME =
   `${process.env.HOME}/Library/Caches/ms-playwright/chromium-1234/chrome-mac-arm64/` +
     'Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 
-/** Deck 0's walking surface — `layout.ts`'s `BUILDING_BASE_Y`. */
-const DECK0_Y = 0.7284378351569356;
-const OX = 600;
-const OZ = 600;
-
-/** Straight into the park, past character creation and the cat bus. */
-const save = {
-  v: 1,
-  at: Date.now(),
-  purchases: 0,
-  game: {
-    parkName: 'QA Park',
-    mode: 'sandbox',
-    money: 500,
-    player: { name: 'Eleri' },
-    world: { timeOfDay: 600, dayCount: 0, lightsOn: false },
-    inventory: [],
-    carriedUid: null,
-  },
-  flags: { createdCharacter: true, arrivedByBus: true, hotelKey: true, dexPrizeSeen: true },
-};
-
-const browser = await chromium.launch({
-  executablePath: CHROME,
-  args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
-});
-const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
-const errors = [];
-page.on('console', (m) => {
-  if (m.type() === 'error') errors.push(m.text());
-});
-page.on('pageerror', (e) => errors.push(String(e)));
-await page.addInitScript((file) => {
-  window.localStorage.setItem('lgp:save', JSON.stringify(file));
-}, save);
-
-/** Where to stand, and what each shot is meant to show. */
+/**
+ * Where to stand, and what each shot is meant to show.
+ *
+ * `/castle?deck=N` (added by this branch) is the only way in: `/spawn?pos=`
+ * lands on the interior's coordinates with the interior still switched off —
+ * see `Building.enterCastleSpawn`.
+ */
 const shots = [
-  { name: 'great-hall', x: OX, z: OZ + 14, facing: 0, note: 'in from the front door' },
-  { name: 'floor-and-wall', x: OX - 20, z: OZ - 14, facing: 135, note: 'north-west corner' },
-  { name: 'ceiling-beams', x: OX + 16, z: OZ + 4, facing: 250, note: 'east side, up the hall' },
-  { name: 'deck-1', x: OX, z: OZ, facing: 0, note: 'first floor', deck: 1 },
+  { name: 'great-hall', deck: 0, note: 'ground floor, in from the door' },
+  { name: 'deck-1', deck: 1, note: 'first floor' },
+  { name: 'deck-2', deck: 2, note: 'second floor' },
 ];
 
 for (const shot of shots) {
-  const y = DECK0_Y + (shot.deck ?? 0) * 3.6;
-  const url =
-    `http://localhost:${port}/spawn` +
-    `?pos=${shot.x},${y.toFixed(3)},${shot.z}&facing=${shot.facing}`;
+  const url = `http://localhost:${port}/castle?deck=${shot.deck}`;
   await page.goto(url, { waitUntil: 'load' });
-  // The park generates through a dozen lazy imports; give it time to settle
-  // rather than photographing a half-built room and reporting it as the room.
-  await page.waitForTimeout(9000);
+  // The park generates through a dozen lazy imports, and the door transition
+  // irises; give it time rather than photographing a half-built room and
+  // reporting it as the room.
+  await page.waitForTimeout(11000);
   await page.screenshot({ path: `${outDir}/castle-${shot.name}.png` });
-  console.log(`${shot.name.padEnd(16)} ${shot.note.padEnd(24)} ${url}`);
+  console.log(`${shot.name.padEnd(14)} ${shot.note.padEnd(28)} ${url}`);
 }
 
 if (errors.length) {
