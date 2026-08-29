@@ -358,8 +358,17 @@ export function buildCopingRun(
     for (let i = 0; i + 1 < parapetLine.length; i += 1) {
       const a = parapetLine[i] as (typeof parapetLine)[number];
       const b = parapetLine[i + 1] as (typeof parapetLine)[number];
+      // **Guarded at the joint, not at zero.** The scale below is
+      // `(length - COPING_JOINT) / (COPING_LENGTH - COPING_JOINT)`, so it does
+      // not degenerate at 0 — it goes through zero and turns **negative** at
+      // `COPING_JOINT`, which flips the stone inside out and leaves its base no
+      // longer following the wall. A `1e-6` guard lets every segment between
+      // those two bounds through. `buildShellGeometry` no longer emits a
+      // segment that short (it divides the span evenly rather than leaving a
+      // remainder), but the two are separate modules and only this one knows
+      // where its own arithmetic breaks down.
       const span = b.along - a.along;
-      if (span <= 1e-6) continue;
+      if (span <= COPING_JOINT) continue;
 
       // Nothing to cap where the parapet has tapered to less than the coping's
       // own thickness — at *either* end, so a block is never laid straddling

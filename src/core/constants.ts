@@ -625,3 +625,25 @@ export const MAX_FRAME_DELTA = 1 / 12;
  * it to be walked into safely.
  */
 export const PLAYER_LONGEST_STEP = PLAYER_MAX_SPEED * PLAYER_SPRINT_MULTIPLIER * MAX_FRAME_DELTA;
+
+/**
+ * Half-life, in seconds, of the exponential damp `Player.update` runs the
+ * character's height through so walking the gentle hills is not jittery.
+ *
+ * **It decides how steep a slope the game can have, which is why it lives here
+ * rather than as a literal at the one call site.** `Player.update` hands
+ * `this.position.y` — the *damped, lagging* height — to the ground sampler, and
+ * `WalkSurfaces.sample` will not return a surface more than
+ * {@link BUILDING_STEP_UP} above that. Climbing steadily, the damp never
+ * catches up: it keeps `2^(-dt / this)` of the gap each frame, so at a clamped
+ * {@link MAX_FRAME_DELTA} the lag settles at 0.309x the per-frame climb and a
+ * sprinting child must clear her own climb *plus* that lag. The usable budget
+ * is therefore `BUILDING_STEP_UP / 1.309` = 0.474 m per frame, not 0.620 m —
+ * a peak grade of 0.512 against {@link PLAYER_LONGEST_STEP}.
+ *
+ * `test/procgen/invariants.ts` reads it to hold every bridge to that budget.
+ * Nobody may copy the number: a second 0.04 written down somewhere else is how
+ * this term went missing from the bridge redesign's arithmetic in the first
+ * place, and a child fell through a deck for it (issue #358).
+ */
+export const PLAYER_HEIGHT_DAMP_HALF_LIFE = 0.04;
