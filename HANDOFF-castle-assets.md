@@ -559,6 +559,29 @@ them.
 
 ---
 
+### 2.12 Which of these will want a collider once #377 lands
+
+Indoor collision is **height-blind** today, which is why batch 1 gets no
+colliders at all. #377 makes the castle floors disjoint spaces with the lift as
+the only route between them, and that hands props real colliders. Nothing to
+change now — but the list is worth writing down while the shapes are fresh,
+because **the child-scaling changes which answer is right for four of them**.
+
+| Asset | Wants a collider? | Why |
+| --- | --- | --- |
+| **Bench** | **Climb-on, not block** | At 0.36 m it is now exactly hip height and the *point* is that she sits on it. A blocking collider here would be a bug: it turns the one piece of furniture built to be sat on into a wall. Whatever "you can stand on this" support exists, this is its first customer. |
+| **Table** | **Climb-on top, block the legs** | The hotel already has the precedent and a comment saying so — `Hotel.ts`: *"TABLE_TOP: a jump onto the breakfast table works, and should."* At 0.675 m, standing on this one is a 0.315 m step up from the bench, which a six-year-old will absolutely try. |
+| **Throne** | **Climb-on the seat** | Same as the bench, and more so: the brief calls it *"a destination — children should want to sit on it"*. The dais needs to be climbable too, or the seat is unreachable and the whole re-cut is wasted. |
+| **Armour + plinth** | **Block** | 2.85 m of solid thing. The keep-out disc is already measured: **0.5052 m** about the origin (§2.2), so the number exists and should be read rather than re-derived. |
+| **Chest** | **Block, or climb-on** | 0.91 m is above her reach-down but a fine thing to clamber onto. Ask Jim — this is a play-feel call, not a technical one. |
+| **Tapestry, rail, sconce** | **None** | Wall furniture, all above 2.10 m, none reachable. |
+| **Feast** | **None** | Props on a surface. |
+
+**The one thing to get right:** three of these are *furniture a child is meant to
+get onto*, and that is a new category for this park's indoor collision. Sizing
+them to her hip is what makes it worth doing — a 0.55 m bench she could not sit
+on did not need a climb-on collider, and a 0.36 m one does.
+
 ## 5. Next
 
 Batch 2, your §4.6, in the order I judge reads best per unit of work:
