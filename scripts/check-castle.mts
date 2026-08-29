@@ -35,6 +35,7 @@ import {
 import { deckIsSolid, TOP_DECK } from '../src/world/building/layout.ts';
 import {
   BEAM_UNDERSIDE,
+  BEAM_WIDTH,
   buildCeilingBeams,
   CASTLE_CEILING_CLEAR,
   SCONCE_HEADROOM,
@@ -454,7 +455,17 @@ const FLOOR_TREATMENT_MAX_HEIGHT = 0.1;
  */
 const WALL_FURNITURE_REACH = 0.45;
 
-/** The inner faces of the four walls, which is what a prop stands off. */
+/**
+ * The inner faces of the four walls, which is what a prop stands off.
+ *
+ * `INTERIOR_HALF_X` is the wall's **centreline**, not its room-side surface:
+ * `Shell.ts` extrudes each wall run from `halfX - HALF_WALL` to
+ * `halfX + HALF_WALL`. So a tapestry hanging on the wall touches
+ * `WALL_FACE_X`, 0.225 m in from `INTERIOR_HALF_X`, and that is the plane its
+ * projection has to be measured from. `castleLighting.ts` derives its torch
+ * anchors from the identical expression, which is why the torches sit on the
+ * masonry rather than 22 cm inside it.
+ */
 const WALL_FACE_X = INTERIOR_HALF_X - BUILDING_WALL_THICKNESS / 2;
 const WALL_FACE_Z = INTERIOR_HALF_Z - BUILDING_WALL_THICKNESS / 2;
 
@@ -471,15 +482,41 @@ function reachFromWall(box: Box3): number {
 /**
  * The band in which the wall-plate, not the slab, is the ceiling.
  *
- * `BEAM_WIDTH` is private to `castleFabric.ts` and the plate is flush with the
- * wall, so this is the published figure from the contract
- * (`HANDOFF-castle-interior-363.md` §4.5 entry 2). It is a **duplicate**, and
- * it is the second one in this file — see the note on
- * `EXTERIOR_MASONRY_PATTERN` for why that is sometimes the lesser evil. The
- * mitigation is the same: over-stating it costs a false failure, under-stating
- * it costs a prop inside a beam, so it is stated generously.
+ * This **was** a hand-copied `0.4`, with a comment explaining that
+ * `BEAM_WIDTH` was private to `castleFabric.ts` and arguing the duplicate was
+ * the lesser evil. It was not: `BEAM_WIDTH` was one `export` keyword away from
+ * being importable, and it is now exported and imported here. The plate is
+ * flush with its wall, so the band it owns is exactly its width — asking its
+ * owner means a check that keeps checking the day somebody widens the beam,
+ * rather than silently measuring a band that no longer exists.
  */
-const PLATE_BAND = 0.4;
+const PLATE_BAND = BEAM_WIDTH;
+
+/**
+ * The plate's room-side edge — the plane the ceiling assertion asks a prop
+ * about.
+ *
+ * **This is deliberately not `WALL_FACE_X`, and the difference is not a
+ * slip.** The two assertions in this section ask two different questions about
+ * two different planes:
+ *
+ * - assertion 1 asks *how far does this thing stick out into the room*, which
+ *   is measured from the masonry's room-side surface, `WALL_FACE_X`;
+ * - assertion 2 asks *is this thing under the timber*, and the timber is not
+ *   on the masonry's surface. `castleFabric.ts` puts the plate's centre at
+ *   `INTERIOR_HALF_X - PLATE_INSET`, i.e. `BEAM_WIDTH / 2` in from the wall
+ *   **centreline**, so the band it roofs runs from `INTERIOR_HALF_X` inward by
+ *   `BEAM_WIDTH` — a shade further into the room than the wall face is, and
+ *   the plate's own back half is buried in the masonry.
+ *
+ * So this is derived from `INTERIOR_HALF_X` on purpose, matching where the
+ * plate is actually built. A reviewer read the two as an inconsistency, which
+ * is fair: they were half a wall thickness apart with nothing saying why. Now
+ * each plane is named for the thing it is the surface of, and this note is the
+ * why.
+ */
+const PLATE_ROOM_EDGE_X = INTERIOR_HALF_X - PLATE_BAND;
+const PLATE_ROOM_EDGE_Z = INTERIOR_HALF_Z - PLATE_BAND;
 
 let propsChecked = 0;
 let exemptFlat = 0;
@@ -501,11 +538,29 @@ for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
     // rather than about its name. Something entirely above a hatted child
     // cannot be walked into (the portcullis's teeth hang in exactly that band
     // on purpose), and something flatter than an ankle is paint on the floor.
+    //
+    // `reachFromWall` is a `Math.min` of four **signed** terms, so a box lying
+    // entirely beyond one wall face gets a *negative* reach and would sail
+    // through the wall-furniture exemption below on a comparison that reads as
+    // if it were checking the opposite. No instance does that today (this
+    // guard has never fired), and that is exactly when to close it: a silent
+    // exemption waiting for a future placement to fall into is the shape of
+    // bug this file exists to prevent. Clamping to zero would hide it; failing
+    // says which prop, and a prop that far into the masonry is worth knowing
+    // about on its own account.
+    const reach = reachFromWall(box);
     if (box.min.y > TALLEST_CHILD_HEIGHT) {
       exemptOverhead += 1;
     } else if (size.y <= FLOOR_TREATMENT_MAX_HEIGHT) {
       exemptFlat += 1;
-    } else if (reachFromWall(box) <= WALL_FURNITURE_REACH) {
+    } else if (reach < 0) {
+      fail(
+        `props: deck ${deck} '${label}' has a reach from the wall of ${reach.toFixed(3)} m — it ` +
+          `lies entirely past a wall face, inside or beyond the masonry. A negative reach is ` +
+          `not wall furniture; it would be silently exempted from the keep-out check below ` +
+          `because that test is '<= ${WALL_FURNITURE_REACH}'. Place it in the room.`,
+      );
+    } else if (reach <= WALL_FURNITURE_REACH) {
       exemptWall += 1;
     } else {
       for (const keepOut of blocked) {
@@ -527,13 +582,13 @@ for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
     // hangs to BEAM_UNDERSIDE within 0.40 m of a wall, so a prop pushed back
     // against the wall has 22 cm less room than one out in the room.
     const nearWall =
-      INTERIOR_HALF_X - Math.max(Math.abs(box.min.x), Math.abs(box.max.x)) < PLATE_BAND ||
-      INTERIOR_HALF_Z - Math.max(Math.abs(box.min.z), Math.abs(box.max.z)) < PLATE_BAND;
+      Math.max(Math.abs(box.min.x), Math.abs(box.max.x)) > PLATE_ROOM_EDGE_X ||
+      Math.max(Math.abs(box.min.z), Math.abs(box.max.z)) > PLATE_ROOM_EDGE_Z;
     const ceiling = nearWall ? BEAM_UNDERSIDE : CASTLE_CEILING_CLEAR;
     if (box.max.y > ceiling + 1e-6) {
       fail(
         `props: deck ${deck} '${label}' reaches ${box.max.y.toFixed(3)} m, above the ` +
-          `${ceiling.toFixed(2)} m ceiling ${nearWall ? 'within 0.40 m of a wall' : 'in the room'}.`,
+          `${ceiling.toFixed(2)} m ceiling ${nearWall ? `within ${PLATE_BAND.toFixed(2)} m of a wall` : 'in the room'}.`,
       );
     }
   }

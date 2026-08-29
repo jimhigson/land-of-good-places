@@ -28,7 +28,7 @@ import {
   type CastlePainting,
 } from '../../core/textures';
 import { softMaterial } from './parts';
-import { BEAM_UNDERSIDE, CASTLE_CEILING_CLEAR } from './castleFabric';
+import { BEAM_UNDERSIDE, BEAM_WIDTH, CASTLE_CEILING_CLEAR } from './castleFabric';
 import { CASTLE_HEARTH, castleTorchAnchors, type WallAnchor } from './castleLighting';
 import { DECK_ROUNDEL, keepOutsFor } from './dressing';
 import {
@@ -659,13 +659,26 @@ function cornerClutter(deck: number, rng: Rng): InstancedMesh | null {
 }
 
 /**
- * How far into the room the grille hangs.
+ * How far into the room the grille hangs, measured from the wall face to the
+ * **centre** of a bar.
  *
- * Clear of the 0.40 m band in which the timber wall-plate, not the slab, is the
- * ceiling — see {@link portcullis}. A tenth of a metre of margin on top,
- * because the plate's width is not a constant this module can import.
+ * It must clear the band in which the timber wall-plate, not the slab, is the
+ * ceiling — see {@link portcullis} — and that band is exactly
+ * {@link BEAM_WIDTH}, because the plate is flush with its wall. So it is asked
+ * for rather than written down: the old comment here said "the plate's width is
+ * not a constant this module can import", which was never true — it was one
+ * `export` keyword away, and the copy has now been replaced by the import.
+ *
+ * The margin past the band is generous rather than minimal (a bar is only
+ * 0.09 m deep, so 0.05 m would clear it) because a grille that hangs clearly
+ * into the room reads as a portcullis from the game camera, where one hugging
+ * the lintel reads as a smudge. It is a real constraint, not a comment:
+ * `check:castle` measures the grille against the near-wall ceiling, and the
+ * grille's top is *at* `CASTLE_CEILING_CLEAR`, so pulling this back inside the
+ * plate band fails that assertion rather than silently sinking the teeth into
+ * a beam.
  */
-const PORTCULLIS_INSET = 0.7;
+const PORTCULLIS_INSET = BEAM_WIDTH + 0.3;
 
 /** A crate: a box with battens across it, so it is not a plain cube. */
 function crateGeometry(): BufferGeometry {

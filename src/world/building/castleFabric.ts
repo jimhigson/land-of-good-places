@@ -103,8 +103,15 @@ export function castleWallMaterial(colour: number) {
  * depth, so a wide shallow beam reads chunkier than a narrow deep one — which
  * is ART_DIRECTION §4's "recognisable beats measured" pointed at a cross
  * section.
+ *
+ * **Exported because two other places need this exact number and were both
+ * writing `0.4` down by hand**: `check:castle`'s ceiling assertion (the band
+ * near a wall in which the plate, not the slab, is the ceiling) and
+ * `castleDecor.ts`'s `PORTCULLIS_INSET` (how far in the grille must hang to
+ * clear that band). Both carried comments saying they could not import it.
+ * They can. Ask for this number; do not write 0.4 down a third time.
  */
-const BEAM_WIDTH = 0.4;
+export const BEAM_WIDTH = 0.4;
 const BEAM_DEPTH = 0.22;
 
 /**
