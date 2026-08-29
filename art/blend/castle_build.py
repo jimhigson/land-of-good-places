@@ -257,6 +257,25 @@ TALLEST_CHILD = ts_const("src/art/models/kid.ts", "TALLEST_CHILD_HEIGHT")
 # **1.86** in two places, and it was wrong by a quarter of a child.
 CHILD_HEIGHT = ts_const("src/art/models/kid.ts", "KID_HEIGHT")
 
+# --- the landmarks the furniture is cut from ---------------------------------
+#
+# `CHILD_HEIGHT` and `TALLEST_CHILD` answer "does it fit under the ceiling".
+# These three answer the question batch 1 got wrong: **can a child use it.**
+#
+# All three are read from `kid.ts` and asserted against the built rig by
+# `check:character-parity`, so there is no copy of any of them here to go stale
+# — which is the whole reason they were added to `kid.ts` rather than measured
+# once and typed into this file. See that module's doc comments.
+#
+# Batch 1 was cut before any of them existed, from adult furniture proportions
+# scaled down by eye, and there was no other way to cut it: the only published
+# number describing a child was her total height. This rig is chibi and defeats
+# that intuition completely — her whole leg is 0.36 m and her whole arm 0.32 m,
+# because more than half of her is head.
+CHILD_HIP = ts_const("src/art/models/kid.ts", "KID_HIP_HEIGHT")
+CHILD_SHOULDER = ts_const("src/art/models/kid.ts", "KID_SHOULDER_HEIGHT")
+CHILD_REACH = ts_const("src/art/models/kid.ts", "KID_REACH_HEIGHT")
+
 
 def deg(x: float) -> float:
     return math.radians(x)
@@ -362,6 +381,55 @@ class Requested:
         self.dais = dais
 
 
+# --- child-scaled, on Jim's ruling of 29 August -------------------------------
+#
+# **These two are the Engineer's §4.4 constants and this is a proposal, not a
+# fait accompli** — published in the handoff's reconciliation log the way the
+# tapestry's 0.12 → 0.26 was, and pending their acceptance. They are cut here
+# so there is a rendered frame to argue from, because that is what won the
+# tapestry.
+#
+# `BENCH_SEAT` is the hip pivot, exactly, and the argument is not a matter of
+# taste. **This rig has no knee** (`kid.ts`, `TALLEST_CHILD_SEATED_HEIGHT`): the
+# whole leg is one segment swinging from one point 0.36 m up. Sat on a seat of
+# height H her feet land at H − 0.36, and there is no joint anywhere that can
+# take up the difference. So 0.36 is not "about right", it is **the one seat
+# height at which a child's feet reach the floor**, and the old 0.55 left them
+# hanging 0.19 m clear of it.
+BENCH_SEAT = CHILD_HIP
+BENCH_LENGTH = 2.80
+BENCH_WIDTH = 0.60
+BENCH_SLAB = 0.10
+
+# `TABLE_TOP` is bracketed from both sides by the rig, and the bracket is narrow
+# enough that it very nearly picks the number itself:
+#
+# * **Above**, she has to reach across it. Her arm pivots at 0.72 m and is
+#   0.32 m long, so `CHILD_REACH` is 1.04 m — and the table was built at
+#   **1.05 m**. The feast was not awkwardly high, it was *one centimetre above
+#   the highest a child can reach*, and every assertion on it passed. To put a
+#   hand flat on a top rather than paw at its edge, the top wants to be at or
+#   below the pivot itself, 0.72 m.
+# * **Below**, she has to get her legs under it while sat on the bench. Her
+#   thigh lies at seat height and is about 0.12 m thick, so the slab's
+#   underside must clear ~0.48 m, which with a 0.14 m slab puts the top above
+#   ~0.62 m.
+#
+# That leaves 0.62–0.72 m, and the midpoint of the hip and the shoulder —
+# Jim's own "roughly between hip and shoulder" — is (0.36 + 0.99) / 2 = 0.675,
+# which lands inside it. Two independent derivations agreeing on a number
+# neither was aimed at is the best evidence available that it is the right one.
+#
+# The shipped park corroborates: the hotel's own breakfast table is 0.74 m
+# (`world/hotel/Hotel.ts`), its chairs 0.42 m and its sofas 0.50 m. The house
+# scale for furniture a child uses is 0.4–0.75 m. The castle's 1.05 m and
+# 0.55 m were the outliers, and nothing else in the park is near them.
+TABLE_TOP = round((CHILD_HIP + CHILD_SHOULDER) * 0.5, 3)
+TABLE_LENGTH = 6.00
+TABLE_WIDTH = 2.20
+TABLE_SLAB = 0.14
+
+
 CONTRACT = {
     # A1 — the star of the room, and **it does not tower the way this comment
     # used to claim.** It read "2.60 m beside a 1.86 m child"; the real figures,
@@ -417,8 +485,22 @@ CONTRACT = {
     # instead of assumed. The day the dais grows a step, this fails.
     "throne": Requested(1.60, 2.75, 1.20, "1, deck 0, on a 0.30 m dais",
                         dais=DAIS_HEIGHT),
-    "table": Requested(2.20, 1.05, 6.00, "long axis along the game's +Z"),
-    "bench": Requested(0.60, 0.55, 2.80, "4, both sides of the table"),
+    # A7 / A8 — **child-scaled on Jim's ruling of 29 August, and this is a
+    # proposal to the Engineer, not a done deal.** `TABLE_TOP` and `BENCH_SEAT`
+    # are their §4.4 constants and they pose children against both, so the
+    # figures are published in the handoff's reconciliation log for their
+    # acceptance the way the tapestry's 0.12 → 0.26 was. They are cut here
+    # because what won the tapestry was a rendered frame rather than a
+    # paragraph, and `lineup.png` is that frame.
+    #
+    # The heights are no longer typed at all: they come from `kid.ts`'s own
+    # landmarks, above. A table at 1.05 m stood 0.06 m above a child's
+    # shoulders and **0.01 m above the highest she can reach**; a bench at
+    # 0.55 m stood 0.19 m above her hip on a rig with no knee to take it up.
+    # Widths and lengths are the Engineer's and are untouched — the whole
+    # change is vertical.
+    "table": Requested(2.20, TABLE_TOP, 6.00, "long axis along the game's +Z"),
+    "bench": Requested(0.60, BENCH_SEAT, 2.80, "4, both sides of the table"),
     "feast": Requested(0.45, 0.45, 0.45, "goblet, roast, loaf, pie — bucket-sized",
                        exact=False, stands_on="table"),
     "chest": Requested(1.20, 0.90, 0.80, "lid on its own hinge node"),
@@ -1001,9 +1083,32 @@ def check_sconce_headroom() -> str:
 # 0.30 m dais = 3.05 m, which clears the 3.08 m wall-plate. At 2.80 it was
 # 3.10 m and stood 2 cm through the beam.
 THRONE_HEIGHT = 2.75
-THRONE_SEAT = 0.88
+# The seat is the child's hip, for `BENCH_SEAT`'s reason exactly — a seat she
+# cannot get onto is not a seat. The Engineer's tier-2 note calls the throne
+# *"a destination — children should want to sit on it"*, and at 0.88 m (plus
+# their 0.30 m dais, so 1.18 m off the floor) it stood at her chest.
+#
+# **The grandeur is not lost, it moves to where it belongs.** What makes a
+# throne a throne is that you *climb* to it and are then framed by something
+# far taller than you — so the Engineer's 0.30 m dais does the raising, which
+# is what a dais is for, and the 2.75 m back does the framing. A seat at hip
+# height on top of a step you have to mount reads as more ceremonial than a
+# chest-height ledge she can only look at, not less.
+THRONE_SEAT = CHILD_HIP
 THRONE_WIDTH = 1.60
 THRONE_DEPTH = 1.20
+
+# Where a child sat on this throne actually is, so the carving can be built
+# around her rather than around an imagined adult. Both measured from the seat:
+# everything above her hip travels with her when she sits, because the hip is
+# the only joint between the two.
+THRONE_SITTER_SHOULDER = THRONE_SEAT + (CHILD_SHOULDER - CHILD_HIP)
+THRONE_SITTER_TOP = THRONE_SEAT + (CHILD_HEIGHT - CHILD_HIP)
+
+# How far the arms stand above the seat. A local shape number, not a shared
+# one: it is this rig's seated elbow, ~0.20 m up, from a 0.32 m arm whose hands
+# hang only 0.04 m above the hip. See `build_throne`.
+THRONE_ARM_RISE = 0.20
 
 
 def build_throne() -> None:
@@ -1040,10 +1145,18 @@ def build_throne() -> None:
                     z=(THRONE_SEAT - seat_t) * 0.5)
 
     for sx in (-1.0, 1.0):
+        # The arms, at the height a *seated child's* arms are.
+        #
+        # Her hands hang to 0.40 m against a 0.36 m hip, so seated they fall
+        # only 0.04 m above the seat and her elbow is ~0.20 m above it — this
+        # rig's arms are 0.32 m long in total. The old rail sat 0.40 m above the
+        # seat, which is above her shoulder line, so it was a rail she would
+        # have had to reach *up* to. Low, chunky and clearly a pair of arms.
         wood.at(*rounded_box(0.16, THRONE_DEPTH * 0.80, 0.15, 0.05, 1),
-                x=sx * (half_w - 0.08), z=THRONE_SEAT + 0.40)
-        wood.at(*rounded_box(0.14, 0.14, 0.38, 0.04, 1),
-                x=sx * (half_w - 0.08), y=-half_d + 0.22, z=THRONE_SEAT + 0.19)
+                x=sx * (half_w - 0.08), z=THRONE_SEAT + THRONE_ARM_RISE)
+        wood.at(*rounded_box(0.14, 0.14, THRONE_ARM_RISE, 0.04, 1),
+                x=sx * (half_w - 0.08), y=-half_d + 0.22,
+                z=THRONE_SEAT + THRONE_ARM_RISE * 0.5)
 
     # The back, and it is the whole asset.
     #
@@ -1055,7 +1168,14 @@ def build_throne() -> None:
     # Two silhouettes, one of them at twice the height of the other, and a
     # six-year-old names the second one instantly.
     back_top = THRONE_HEIGHT - 0.24
-    shoulder = THRONE_SEAT + 0.50
+    # **The step is now at the shoulders it is named for.** It was `seat + 0.50`
+    # — a number picked to look right above an 0.88 m seat, and once the seat
+    # came down to the hip it would have carried the whole carving down with it
+    # for no reason. It is where a child sitting here actually is instead, so
+    # the broad part frames her shoulders and the spire starts above them. That
+    # is the entire silhouette (see the comment above), and it is now tied to
+    # the sitter rather than to the seat.
+    shoulder = THRONE_SITTER_SHOULDER
     spire_w = half_w * 0.62
     outline = [
         (-half_w, THRONE_SEAT),
@@ -1080,8 +1200,16 @@ def build_throne() -> None:
     # hid the spire behind it — so the review render showed an armchair with a
     # small hat, which is exactly the shape the redesign was meant to fix. A
     # throne's spire has to be *bare wood above the sitter's head*.
-    cushion.at(*rounded_box(THRONE_WIDTH - 0.40, 0.12, 0.62, 0.06, 1),
-               y=half_d - 0.26, z=THRONE_SEAT + 0.36)
+    #
+    # Now that the step is the sitter's own shoulder line, "stops at the
+    # shoulder step" can be built rather than hand-fitted: it runs from just
+    # clear of the seat cushion up to the step, whatever the step turns out to
+    # be. The 0.62 that used to be here was measured against an 0.88 m seat by
+    # eye and would have floated once the seat moved.
+    back_pad_foot = THRONE_SEAT + 0.10
+    back_pad_h = shoulder - back_pad_foot
+    cushion.at(*rounded_box(THRONE_WIDTH - 0.40, 0.12, back_pad_h, 0.06, 1),
+               y=half_d - 0.26, z=back_pad_foot + back_pad_h * 0.5)
 
     gold.at(*icosphere(0.12, 1), z=THRONE_HEIGHT - 0.12)
     gold.at(*cone(0.075, 0.18, sides=6), z=THRONE_HEIGHT - 0.18)
@@ -1115,17 +1243,18 @@ def build_throne() -> None:
 # A7 / A8 — the banqueting table and its benches
 # =============================================================================
 
-TABLE_TOP = 1.05
-TABLE_LENGTH = 6.00
-TABLE_WIDTH = 2.20
-TABLE_SLAB = 0.14
-BENCH_SEAT = 0.55
-BENCH_LENGTH = 2.80
-BENCH_WIDTH = 0.60
 
 
 def build_table() -> None:
-    """Six metres of trestle table, top at exactly 1.05 m.
+    """Six metres of trestle table, top at `TABLE_TOP` — a child's own height.
+
+    Six metres long and 2.2 m across, and now only 0.675 m high. **That is a
+    deliberately odd-looking table and it is the correct one**: this is a
+    banqueting table for chibi six-year-olds whose shoulders are at 0.99 m, and
+    a hall full of them at a 1.05 m table was a hall of heads peering over an
+    edge at food none of them could reach. Length and width are unchanged, so
+    it reads at a glance exactly as it did — the silhouette that says
+    "banqueting table" is the long heavy slab on trestles, not its height.
 
     The long axis runs along −Y, i.e. the game's +Z, so the Engineer's
     `rotation.y` alone aims it down the hall.
@@ -1162,15 +1291,28 @@ def build_table() -> None:
 
 
 def build_bench() -> None:
-    """A plain heavy bench, seat at exactly 0.55 m, 2.80 m long.
+    """A plain heavy bench, seat at `BENCH_SEAT` — the child's hip, 2.80 m long.
 
     Reported back to the Engineer so a child model can be posed sitting on it,
     and asserted against the measured top by their check for the same reason
-    the table's is.
+    the table's is. Their §4.4 asks for this number so that *"a child model can
+    be posed sitting"*, which makes it a **function** rather than a style
+    choice, and at 0.55 m that function did not work: she could climb the bench
+    but not sit on it.
+
+    **The one real risk in dropping it to 0.36 m is that a 2.80 m plank 0.36 m
+    off the ground stops reading as a bench and starts reading as a kerb**, and
+    Jim's standing rule is that recognisability beats proportion. Two things
+    pay for it, both visible in `lineup.png`, which is where this was judged:
+    the slab stays a chunky 0.10 m rather than thinning with the height, so the
+    seat still has heft; and the legs are inset panels rather than sticks, so
+    the gap under the seat still reads as a gap. Length and width are the
+    Engineer's and are unchanged — a bench is a long low thing you sit on, and
+    it is longer and lower now, not smaller.
     """
     coll = collection("bench")
     bench = Part("bench-plank")
-    slab = 0.10
+    slab = BENCH_SLAB
     bench.at(*flat_top_box(BENCH_WIDTH, BENCH_LENGTH, slab, 0.03, 1), z=BENCH_SEAT - slab * 0.5)
     for sy in (-1.0, 1.0):
         y = sy * (BENCH_LENGTH * 0.5 - 0.42)
@@ -1420,6 +1562,84 @@ def check_origins() -> str:
     return "\n".join(rows)
 
 
+def check_child_can_use_it() -> str:
+    """**Can a child actually sit on it, and reach across it?**
+
+    The assertion that was missing, and whose absence is the whole of Jim's
+    29 August ruling. Batch 1 passed every check in this file while being
+    furniture a six-year-old could not use: `check_contract` asked *"is it the
+    size the Engineer asked for"* and the answer was yes, exactly, to the
+    centimetre — because the requested size was itself the mistake. A contract
+    check cannot catch a wrong contract. Nothing here asked the other question.
+
+    So this one measures the built mesh against the **child**, not against the
+    request, and the two figures it uses come from `kid.ts` rather than from
+    anything in this file:
+
+    * **A seat is at the hip.** This rig has no knee, so a seat above
+      `CHILD_HIP` leaves her feet hanging by the whole excess — there is no
+      joint to take any of it up. Asserted tightly, because a seat is either
+      the right height or it is a shelf.
+    * **A surface she uses must be under `CHILD_REACH`.** Her arm is 0.32 m
+      long on a 0.72 m pivot, so 1.04 m is the ceiling on anything she has to
+      put a hand on. The table was built at **1.05 m**: the feast stood one
+      centimetre above the highest a child can reach, and fourteen goblets were
+      asserted onto it by a check that was, in its own terms, correct.
+
+    Deliberately not a blanket rule over every asset — a tapestry is not for
+    reaching and an armour is meant to be looked up at. It names the three
+    pieces whose *function* is to be used, which is exactly the list the
+    Engineer poses children against.
+    """
+    rows = []
+
+    seat_top = collection_bounds("bench")[1].z
+    assert abs(seat_top - CHILD_HIP) < 0.02, (
+        f"bench: the seat measures {seat_top:.3f} m against a {CHILD_HIP:.2f} m hip. "
+        "This rig has no knee, so her feet hang by the whole difference — a seat "
+        "she cannot sit on is a shelf. Size it from `kid.ts`, not by eye."
+    )
+    rows.append(
+        f"    bench seat  {seat_top:.3f} m = her hip ({CHILD_HIP:.2f} m) — "
+        "she backs onto it and her feet reach the floor"
+    )
+
+    throne_seat = THRONE_SEAT + DAIS_HEIGHT
+    assert THRONE_SEAT <= CHILD_HIP + 0.02, (
+        f"throne: the seat is {THRONE_SEAT:.3f} m above its own base against a "
+        f"{CHILD_HIP:.2f} m hip. The Engineer's brief calls this 'a destination — "
+        "children should want to sit on it', which it cannot be if she cannot get on it."
+    )
+    rows.append(
+        f"    throne seat {THRONE_SEAT:.3f} m + {DAIS_HEIGHT:.2f} m dais = {throne_seat:.3f} m — "
+        "she climbs the dais, then sits at her own hip height"
+    )
+
+    table_top = collection_bounds("table")[1].z
+    assert table_top < CHILD_REACH, (
+        f"table: the top measures {table_top:.3f} m and a child reaches "
+        f"{CHILD_REACH:.2f} m. **The feast on it would be literally out of reach.** "
+        "This is the assertion batch 1 did not have."
+    )
+    assert table_top < CHILD_SHOULDER, (
+        f"table: the top measures {table_top:.3f} m, above a child's "
+        f"{CHILD_SHOULDER:.2f} m shoulders — she is a head peering over an edge."
+    )
+    assert table_top > seat_top + 0.20, (
+        f"table: the top is {table_top:.3f} m and the bench seat {seat_top:.3f} m. "
+        "Sat down, her thighs would not fit under it."
+    )
+    rows.append(
+        f"    table top   {table_top:.3f} m — under her shoulders ({CHILD_SHOULDER:.2f} m) "
+        f"and {CHILD_REACH - table_top:.2f} m under her reach ({CHILD_REACH:.2f} m)"
+    )
+    rows.append(
+        f"    sat on the bench, the top is {table_top - seat_top:.3f} m above the seat, "
+        "and her hands rest 0.04 m above it"
+    )
+    return "\n".join(rows)
+
+
 def check_contract() -> str:
     """Assert the emitted geometry against the Engineer's requested sizes.
 
@@ -1583,7 +1803,14 @@ def main() -> None:
     )
     print()
     print(check_sconce_headroom())
+    print("\n  can a child use it? (measured mesh against kid.ts's own landmarks)")
+    print(check_child_can_use_it())
     print(f"\n  TABLE_TOP = {TABLE_TOP:.3f}   BENCH_SEAT = {BENCH_SEAT:.3f}")
+    print(
+        f"    — proposed to the Engineer, from a {CHILD_HIP:.2f} m hip, "
+        f"{CHILD_SHOULDER:.2f} m shoulders and a {CHILD_REACH:.2f} m reach. "
+        "Their §4.4 constants: see the handoff's reconciliation log."
+    )
     print(f"  clear headroom {CEILING_CLEAR:.2f} m, from {CEILING_FROM}")
     print(f"  tallest child {TALLEST_CHILD:.3f} m, from src/art/models/kid.ts")
     print(f"\n  {len(bpy.data.objects)} nodes, {total_triangles()} triangles total")
