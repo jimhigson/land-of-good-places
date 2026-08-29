@@ -58,6 +58,7 @@ import {
 import {
   BUILDING_STEP_UP,
   CAMERA_FACING_YAW,
+  FALL_THRESHOLD,
   MAX_FRAME_DELTA,
   PATH_KERB_LIFT,
   PATH_SURFACE_LIFT,
@@ -5119,6 +5120,7 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
       // check and the sprint-climb window below both read the same heights.
       const alongs: number[] = [];
       const heights: number[] = [];
+      const exposure: number[] = [];
       for (let along = -farNeg; along <= farPos + 1e-6; along += MARCH_STEP) {
         const p = frame.pointAt(along);
         const x = p.x;
@@ -5135,6 +5137,19 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
         }
         alongs.push(along);
         heights.push(h);
+        // **How far she would actually drop if she lost this surface.**
+        // `WalkSurfaces.sample` starts from the terrain and only ever raises
+        // its answer with decks, ramps and platforms — the terrain itself is
+        // never filtered against the ceiling. So losing the deck does not put
+        // her inside the scenery; it puts her on the ground beneath it. Near a
+        // ramp foot the deck lies *on* that ground, so losing it is a
+        // no-op — which is why the exposure below is part of the question and
+        // not a let-off. Sampled with an absurdly low reference so every
+        // built surface is rejected and bare terrain is what comes back
+        // (`terrainHeight` itself must not be imported here — it reaches
+        // `parkManifest` and would pin every seed to the default park).
+        const terrainH = facts.world.building.surfaces.sample(x, z, -1e6);
+        exposure.push(h - terrainH);
       }
 
       // A sheer face — a wall or a drop between two neighbouring samples.
@@ -5161,11 +5176,17 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
       // her.
       let worstClimb = 0;
       let worstAt = 0;
+      let worstDrop = 0;
       for (let i = 0; i + SAMPLES_PER_STRIDE < heights.length; i += 1) {
         const climb = (heights[i + SAMPLES_PER_STRIDE] as number) - (heights[i] as number);
+        // Only where losing the surface would genuinely drop her. Below
+        // `FALL_THRESHOLD` the game does not even call it a fall.
+        const drop = Math.min(exposure[i] as number, exposure[i + SAMPLES_PER_STRIDE] as number);
+        if (drop <= FALL_THRESHOLD) continue;
         if (climb > worstClimb) {
           worstClimb = climb;
           worstAt = alongs[i] as number;
+          worstDrop = drop;
         }
       }
       if (worstClimb > CLIMB_BUDGET) {
@@ -5182,7 +5203,9 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
             `needs ${needed.toFixed(3)} m of a ${BUILDING_STEP_UP.toFixed(2)} m reach and ` +
             `loses the surface. The budget is ${CLIMB_BUDGET.toFixed(3)} m per frame ` +
             `(peak grade ${(CLIMB_BUDGET / PLAYER_LONGEST_STEP).toFixed(3)}); this one ` +
-            `needs grade ${(worstClimb / PLAYER_LONGEST_STEP).toFixed(3)}`,
+            `needs grade ${(worstClimb / PLAYER_LONGEST_STEP).toFixed(3)}. The deck stands ` +
+            `${worstDrop.toFixed(2)} m over the ground there, so that is how far she drops ` +
+            `— through the deck, into the tunnel`,
         );
       }
     }

@@ -4,6 +4,7 @@ import {
   PLAYER_ACCELERATION,
   PLAYER_BOB_CYCLES_PER_METRE,
   PLAYER_BOB_HEIGHT,
+  FALL_THRESHOLD,
   PLAYER_DECELERATION,
   PLAYER_HEIGHT_DAMP_HALF_LIFE,
   PLAYER_MAX_SPEED,
@@ -128,9 +129,6 @@ export {
  * the way.
  */
 const AUTO_HOP_LOOKAHEAD = 0.5;
-
-/** Drop further than this below the surface under your feet and you fall. */
-const FALL_THRESHOLD = 0.5;
 
 /**
  * ---------------------------------------------------------------------------

@@ -647,3 +647,14 @@ export const PLAYER_LONGEST_STEP = PLAYER_MAX_SPEED * PLAYER_SPRINT_MULTIPLIER *
  * place, and a child fell through a deck for it (issue #358).
  */
 export const PLAYER_HEIGHT_DAMP_HALF_LIFE = 0.04;
+
+/**
+ * Drop further than this below the surface under your feet and you start
+ * falling.
+ *
+ * One owner: `Player` and `NpcCharacter` each used to declare their own
+ * identical copy, and `test/procgen/invariants.ts` needs the same number to
+ * decide whether losing a bridge deck actually drops a child or merely sets
+ * her down on the ground that was already under it.
+ */
+export const FALL_THRESHOLD = 0.5;
