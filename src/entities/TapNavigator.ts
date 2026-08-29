@@ -52,7 +52,13 @@ import type { GroundSampler, Player } from './Player';
  */
 
 /** Close enough to have arrived, in metres. Roughly one shoulder width. */
-const ARRIVE_RADIUS = 0.55;
+/**
+ * Exported since #350: the park's children now walk a `NavGrid` route with the
+ * same two radii the player does, rather than a copy of the numbers. Both mean
+ * exactly what their comments say for a child as much as for the player — one
+ * owner, so tuning how a walk flows round a corner tunes it for everybody.
+ */
+export const ARRIVE_RADIUS = 0.55;
 
 /**
  * Close enough to have passed a corner and be getting on with the next leg.
@@ -62,7 +68,7 @@ const ARRIVE_RADIUS = 0.55;
  * it fine and she pecks at every corner; leave it this loose and she flows
  * round them, which is what the string-pulling in `NavGrid` is for.
  */
-const WAYPOINT_RADIUS = 0.7;
+export const WAYPOINT_RADIUS = 0.7;
 
 /** Inside this distance the walk eases off, so nobody skids past the marker. */
 const SLOW_RADIUS = 2.2;

@@ -310,6 +310,10 @@ export class World implements GameSystem {
       (x, z) => bridgeHeightAt(this.train.bridges, x, z),
       this.entrance.arrival ? ARRIVAL_KID_COUNT : 0,
       this.hotel.residents,
+      // The ways between the castle's decks, and the castle's shops as places
+      // to go (issue #350). The building is built far above, so both exist.
+      () => this.building.surfaces.connectors,
+      this.building.shops.stands,
     );
 
     // …and now that both exist, introduce them. `Entrance` is built before

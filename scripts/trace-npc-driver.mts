@@ -64,6 +64,9 @@ import {
   type CharacterIntent,
 } from '../src/entities/npc/driver.ts';
 import type { PoiGraph, PoiNode } from '../src/entities/npc/poiGraph.ts';
+import type { RoutePlanner } from '../src/entities/npc/journey.ts';
+import type { Attraction } from '../src/entities/npc/attractions.ts';
+import { SPACE_GARDEN, type SpaceId } from '../src/world/spaces.ts';
 import {
   WanderDriver,
   paintedNpcFaces,
@@ -79,6 +82,49 @@ const WALK_SPEED = 1.85;
 /** One child is pinned to the spot, so every walk timeout and stuck-sidestep
  *  in the file gets exercised instead of being dead code in the trace. */
 const WEDGED_CHILD = 3;
+
+/**
+ * A {@link RoutePlanner} that routes in straight lines.
+ *
+ * This trace drives real `WanderDriver`s with **no `CollisionWorld`** — see the
+ * file header: collision is not what a driver decides — so there is nothing for
+ * a `NavGrid` to lay a lattice over. A straight line is the honest answer in a
+ * park with nothing in it, and it keeps this trace about what it has always
+ * been about: the *decisions* (where next, run or walk, pause or press on, and
+ * whether the activity budgets hold), not the geometry of getting there.
+ *
+ * The destinations are the graph's own `interesting` nodes, so a child in this
+ * trace still walks to somewhere that means something, and the wedge scenario
+ * still has somewhere to be wedged on the way to.
+ */
+function straightLinePlanner(graph: PoiGraph): RoutePlanner {
+  const attractions: Attraction[] = [];
+  for (const node of graph.nodes) {
+    if (!node.interesting) continue;
+    attractions.push({
+      id: `poi:${node.index}`,
+      name: `Waypoint ${node.index}`,
+      x: node.x,
+      z: node.z,
+      y: 0,
+      space: SPACE_GARDEN,
+    });
+  }
+  return {
+    beginFrame: () => {},
+    destinationsIn: (space: SpaceId) =>
+      space === SPACE_GARDEN ? attractions : [],
+    plan: (_space, _startX, _startZ, _startY, goalX, goalZ, _goalY, out) => {
+      // One waypoint: the goal itself. `Journey` treats the last waypoint as
+      // the destination, which is exactly right when the line is clear.
+      out[0] = goalX;
+      out[1] = goalZ;
+      return 1;
+    },
+    // No doors in a synthetic 5x5 grid; everything is one space.
+    portalToward: () => null,
+  };
+}
 
 // --- a park to walk around ---------------------------------------------------
 //
@@ -128,6 +174,9 @@ function buildGraph(): PoiGraph {
       return best;
     },
     spawnNodes: () => nodes,
+    // The real `PoiGraph` exposes this, and `straightLinePlanner` reads it to
+    // find the interesting nodes to send children to.
+    nodes,
   } as unknown as PoiGraph;
 }
 
@@ -210,6 +259,7 @@ interface Coverage {
 
 function run(coverage: Coverage): string {
   const graph = buildGraph();
+  const planner = straightLinePlanner(graph);
   const tickTrain = installTrain();
   registerFacePaintStall(9, -9, 8.2, -8.6);
 
@@ -224,6 +274,7 @@ function run(coverage: Coverage): string {
     children.push({
       driver: new WanderDriver({
         graph,
+        planner,
         rng: new Rng(4242 + i * 977),
         startNode,
         pace: layout.range(0.86, 1.12),
@@ -248,6 +299,24 @@ function run(coverage: Coverage): string {
   const mix = (value: number) => {
     hash ^= Math.round(value * 4096) & 0xffffffff;
     hash = Math.imul(hash, 16777619) >>> 0;
+  };
+  /**
+   * Mixes a string — a child's destination id — into the same hash.
+   *
+   * Needed because #350 replaced `targetNode` (a number, the next waypoint one
+   * edge away) with a destination identified by id. Passing a string through
+   * `mix` would have been worse than useless: `Math.round(undefined * 4096) &
+   * 0xffffffff` is `0`, so the xor contributes nothing and the fingerprint goes
+   * on hashing happily while having silently stopped covering **where any child
+   * is going** — which is the entire subject of that issue. That is exactly
+   * what happened, and it is why this is a separate function rather than a cast.
+   */
+  const mixText = (value: string | null) => {
+    if (value === null) {
+      mix(-1);
+      return;
+    }
+    for (let i = 0; i < value.length; i += 1) mix(value.charCodeAt(i));
   };
 
   for (let frame = 0; frame < FRAMES; frame += 1) {
@@ -308,7 +377,8 @@ function run(coverage: Coverage): string {
       mix(child.intent.lookAt ?? 99);
       mix(child.intent.hop ? 1 : 0);
       mix(EXPRESSIONS.indexOf(child.intent.expression));
-      mix(child.driver.targetNode);
+      // The destination, by id — the thing this trace exists to notice changing.
+      mixText(child.driver.destinationId);
       mix(child.driver.trainSeat ?? -1);
       mix(child.driver.climbPhase === null ? -1 : PHASES.indexOf(child.driver.climbPhase));
       mix(child.driver.chatBubbleText === null ? -1 : child.driver.chatBubbleText.length);
@@ -375,6 +445,7 @@ const PHASES = ['up', 'peek', 'down'];
  */
 function runWedge(): { painted: number; fourthPaintedAt: number } {
   const graph = buildGraph();
+  const planner = straightLinePlanner(graph);
   registerFacePaintStall(9, -9, 8.2, -8.6);
   const layout = new Rng(20260728);
 
@@ -388,6 +459,7 @@ function runWedge(): { painted: number; fourthPaintedAt: number } {
       // thing that can hold a slot.
       driver: new WanderDriver({
         graph,
+        planner,
         rng: new Rng(4242 + i * 977),
         startNode,
         pace: layout.range(0.86, 1.12),
@@ -448,8 +520,19 @@ const WEDGE_FRAMES = 18_000;
 
 /** The child who sets off for the stall first, and is pinned so they never get
  *  there. Deliberately not `WEDGED_CHILD` — that one is busy being wedged on
- *  the way to a station, in a park this scenario does not build. */
-const WEDGED_VISITOR = 8;
+ *  the way to a station, in a park this scenario does not build.
+ *
+ *  Re-picked from 8 to 0 for issue #350, which is what the script's own
+ *  "Re-pick WEDGED_VISITOR" message asks for and **not** a weakened assertion:
+ *  the bar (`WEDGE_MUST_OUTLAST`) is untouched. Giving children real
+ *  destinations changed which of them happens to reach the stall first, so 8
+ *  stopped being an early visitor and pinning it no longer delayed anybody —
+ *  the run went green while proving nothing, which is exactly what that guard
+ *  exists to catch. Swept all twelve: 0 pins the fourth paint out to t=100.7s
+ *  and 9 to t=83.7s, everyone else leaves it at t≈37-40s. 0 is the clearest
+ *  margin over the sixty-second bar. Every candidate painted 4/4, so the C1
+ *  property itself never regressed. */
+const WEDGED_VISITOR = 0;
 
 /** Every slot the stall has (`MAX_CONCURRENT_PAINTED`). The number that has to
  *  still be reachable with one child wedged. */

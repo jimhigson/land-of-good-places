@@ -108,6 +108,30 @@ function nearStation(x: number, z: number): string {
   return '';
 }
 
+// A child stepping through the castle's door is the *other* declared write —
+// issue #350. It is a genuine jump: the garden and the castle interior are six
+// hundred metres apart, so crossing between them is a portal rather than a walk
+// (`entities/npc/portals.ts`), and one frame legitimately moves a child that
+// far. Re-baselined here exactly as a train carry is, and for the same reason:
+// this checker's question is "did something move a child while their own
+// movement code fought it", and a declared step through a door is neither
+// undeclared nor fought.
+//
+// Note what this does NOT do: it re-baselines only on the frame
+// `stepThroughDoor` is actually called. A child who jumped six hundred metres
+// any other way still fails, which is the whole point — the exemption is tied
+// to the declaration, not to the distance or to the child.
+for (let i = 0; i < characters.length; i += 1) {
+  const character = characters[i]!;
+  const step = character.stepThroughDoor.bind(character);
+  const index = i;
+  character.stepThroughDoor = (x: number, y: number, z: number, facing: number) => {
+    step(x, y, z, facing);
+    carriedX[index] = character.position.x;
+    carriedZ[index] = character.position.z;
+  };
+}
+
 // The train is the one thing outside `NpcSystem` that writes a child's x/z, so
 // its write is where "somebody else moved them" ends and "they moved
 // themselves" begins.

@@ -188,6 +188,32 @@ export class NpcCharacter {
     this.avatar.rig.root.rotation.y = facing;
   }
 
+  /**
+   * Steps this child through a door, into another space — issue #350.
+   *
+   * The garden and the castle's interior are six hundred metres apart, so this
+   * is a jump rather than a move, and everything that remembers *continuity*
+   * has to be told: `previousPosition` (or the next frame reads the crossing as
+   * six hundred metres of speed and the legs blur), the velocity, and the
+   * airborne state. `setClimbPose` gets the first of those right for the same
+   * reason and it is the model here.
+   *
+   * Called by `NpcSystem` on a `portalRequest` from the driver. Not `scripted`:
+   * the child is an ordinary walker on both sides of the door and wants
+   * collision and separation the whole way — it is only the single frame of
+   * arriving that is unusual.
+   */
+  stepThroughDoor(x: number, y: number, z: number, facing: number): void {
+    this.position.set(x, y, z);
+    this.previousPosition.copy(this.position);
+    this.velocity.set(0, 0, 0);
+    this.verticalVelocity = 0;
+    this.airborne = false;
+    this.facing = facing;
+    this.avatar.rig.root.position.copy(this.position);
+    this.avatar.rig.root.rotation.y = facing;
+  }
+
   /** Gives the character back to the wander driver, standing wherever it now is. */
   endClimb(): void {
     this.climbingFlag = false;
