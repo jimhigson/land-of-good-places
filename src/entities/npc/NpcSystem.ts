@@ -452,6 +452,28 @@ export class NpcSystem implements GameSystem {
   /** Character indices, kept sorted nearest-first every frame. */
   private readonly labelOrder: number[] = [];
   private readonly playerPosition = new Vector3();
+  /**
+   * Which NPCs are somewhere the player is not — issue #362.
+   *
+   * Jim: *"if they have entered the big building, we don't simulate inside
+   * rooms the player isn't in, we just mark which NPCs are in there."* This is
+   * the mark. A character in here is **present but not stepped**: their body
+   * stays exactly where it stood, and nothing about them is simulated until the
+   * player walks into the space they are in.
+   *
+   * Rebuilt every frame from `spaceAt`, never bookkept, for the reason
+   * `budget.ts`'s header gives about slots that leak: a flag set on entering a
+   * space and cleared on leaving it has as many ways to go wrong as there are
+   * ways out, and there are several. A set recomputed from where the characters
+   * actually are cannot disagree with where they actually are.
+   *
+   * Deliberately **not** castle-specific. The ticket was prompted by the
+   * castle, but the words are general and so is the problem: the seven hotel
+   * residents live 600–1100 m away in three more spaces and were being
+   * simulated for the whole session, which is the larger and more permanent
+   * instance of exactly this.
+   */
+  private readonly elsewhere = new Set<NpcCharacter>();
   private frame = 0;
   /**
    * Set by `attachPlayer`, once the player exists — `null` for the handful of
@@ -816,6 +838,7 @@ export class NpcSystem implements GameSystem {
     // again next frame while standing still looking at what they walked to.
     this.planner.beginFrame();
     this.stepChildrenThroughDoors();
+    this.markWhoIsElsewhere();
 
     // The player's hop is the cue for the giggle-hop. Reading the action rather
     // than the Player keeps this system's only dependency the collision world.
@@ -834,6 +857,11 @@ export class NpcSystem implements GameSystem {
     for (let i = 0; i < this.characters.length; i += 1) {
       const character = this.characters[i];
       if (!character) continue;
+
+      // Somewhere the player is not: marked present, not simulated (#362).
+      // Left exactly where they stood, so walking in on them shows them where
+      // they were rather than teleporting or popping them into place.
+      if (this.elsewhere.has(character)) continue;
 
       // Children a long way off think every other frame, and think twice as
       // hard when they do. Nobody has ever noticed a distant child deciding to
@@ -924,9 +952,13 @@ export class NpcSystem implements GameSystem {
     for (let a = 0; a < this.characters.length; a += 1) {
       const first = this.characters[a];
       if (!first) continue;
+      // A frozen character is furniture: nothing pushes them and they push
+      // nothing. Skipping the outer one early also keeps this O(n^2) loop off
+      // the seven hotel residents entirely.
+      if (this.elsewhere.has(first)) continue;
       for (let b = a + 1; b < this.characters.length; b += 1) {
         const second = this.characters[b];
-        if (!second) continue;
+        if (!second || this.elsewhere.has(second)) continue;
         first.separateFrom(second, SEPARATION, maxPush);
       }
     }
@@ -1206,6 +1238,41 @@ export class NpcSystem implements GameSystem {
       if (here || driver.destinationSpace === SPACE_CASTLE) inside += 1;
     }
     this.planner.setInsideCount(inside);
+  }
+
+  /**
+   * Works out who is somewhere the player is not, and marks them.
+   *
+   * Two conditions, both needed:
+   *
+   * - **A different space from the player's**, derived with `spaceAt` — the
+   *   same function `PoiNode.space`, the journey planner and the portals all
+   *   use. One owner for "which place is this", so nothing can hold a second
+   *   opinion.
+   * - **Grounded.** A character still falling onto their own floor has not
+   *   finished arriving, and freezing them mid-drop would leave them under it
+   *   for ever. `check:hotel` fails anybody below `FLOOR_OF_THE_WORLD` and has
+   *   fired before with all seven residents at −16.5 m. Today the hotel's
+   *   floors are at y=0 and nobody ever falls, so this costs nothing; it is
+   *   here because `ResidentSpec.floorY` exists precisely so a space can put
+   *   its floor somewhere else, and its own comment warns that a body starting
+   *   below its floor "falls for ever".
+   */
+  private markWhoIsElsewhere(): void {
+    const playerSpace = spaceAt(this.playerPosition.x, this.playerPosition.z);
+    this.elsewhere.clear();
+    for (let i = 0; i < this.characters.length; i += 1) {
+      const character = this.characters[i];
+      if (!character) continue;
+      if (spaceAt(character.position.x, character.position.z) === playerSpace) continue;
+      if (character.isAirborne) continue;
+      this.elsewhere.add(character);
+    }
+  }
+
+  /** Who is present-but-not-simulated right now. Read by `check:npc-presence`. */
+  get markedElsewhere(): readonly NpcCharacter[] {
+    return [...this.elsewhere];
   }
 
   private updateBubbles(): void {
