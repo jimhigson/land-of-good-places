@@ -8,6 +8,13 @@ Second engineer on this branch (the first hung and was stopped). Its worktree
 been removed. Nothing was lost. Rebased onto `origin/main` (`d3bdbacc`) — clean,
 diff is still only `deploy.yml` + this file.
 
+## Where the fixture lives — DO NOT DELETE IT YET
+
+`jimhigson/lgp-deploy-gating-proof` (private). Its README now records every
+demonstration and, step by step, **the one experiment still outstanding**. Its
+runs are the cited evidence in the PR, so deleting it breaks those links.
+Delete only after this PR merges *and* the sha-pinning experiment has run.
+
 ## The change (unchanged from the first engineer — it is sound)
 
 `deploy.yml`: trigger `push` -> `workflow_run` of **"Procgen invariants"**,
@@ -191,9 +198,33 @@ this as an open gap in the PR; do not claim the success path was demonstrated.**
 - [x] proof: blocked-on-failure (x2), blocked-on-cancelled, blocked-on-skipped
 - [x] proof: `workflow_dispatch` still allowed through
 - [ ] proof: allowed-on-success with the correct sha — **blocked on finding 2, escalated**
+- [x] second edit: `procgen-invariants.yml` now says its `name:` and its
+      unfiltered `push` trigger are load-bearing for deploys. `deploy.yml`'s
+      header had *claimed* that comment existed; this makes the claim true
+      rather than leaving a comment asserting something absent.
 - [x] gate: `npx tsc --noEmit` exit **0**
-- [ ] gates: full unpiped `npm run build`, `npm run test:procgen`
+- [ ] gates: full unpiped `npm run build`, `npm run test:procgen` — re-running
+      on the rebased base; first run failed only on the #324 park-boot flake
 - [ ] PR
+
+## `check:park-boot` — the flake, and what was actually done about it
+
+First full build exited **1** at `check:park-boot` (25.0 ms advance against an
+8 ms budget). Per CLAUDE.md, flaky is failing, so this was not waved through:
+
+- **3/3 pass** on this branch on a quiet machine.
+- **2/2 pass** on `origin/main` (literal `git checkout --detach origin/main` in
+  this worktree, then back).
+- This branch touches **no runtime source at all** —
+  `git diff --name-only origin/main...HEAD` is two workflow files and this
+  handoff — so it is not capable of moving a timing check.
+
+That is issue **#324**, open, titled "possibly sandbox-contention-sensitive,
+needs a quiet-machine repro". The failing run happened while CI polling ran in
+parallel on a box carrying ~150 worktrees, and the passes happened when it was
+idle — which is a quiet-machine repro, so **post this to #324**; it is the
+evidence that ticket is asking for. Root-causing #324 is its own ticket and its
+own agent, not this PR.
 
 ## Do not retry
 
