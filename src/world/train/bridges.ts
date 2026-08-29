@@ -20,6 +20,7 @@ import {
 import {
   BRIDGE_WALL_THICKNESS,
   DECK_HALF_LENGTH,
+  parapetReachFor,
   planBridgeFootprints,
   type BridgeFootprint,
   type RealWorldQuery,
@@ -538,8 +539,11 @@ interface OneBridge {
 
 function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): OneBridge {
   const { frame, shift, halfAcross, roadHalf, walkHalf, rampRunPos, rampRunNeg } = footprint;
-  const lengthPos = DECK_HALF_LENGTH + rampRunPos;
-  const lengthNeg = DECK_HALF_LENGTH + rampRunNeg;
+  // Asked of `bridgeFootprint.ts` rather than recomputed here: the
+  // cross-crossing guard-rail exclusion clamps to this exact figure, and a
+  // second copy of the formula is the bug #349 actually was.
+  const lengthPos = parapetReachFor(rampRunPos);
+  const lengthNeg = parapetReachFor(rampRunNeg);
 
   // --- the crown height ----------------------------------------------------
   // The worst (highest) ground sampled across the crown's own footprint —

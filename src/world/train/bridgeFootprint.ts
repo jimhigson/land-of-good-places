@@ -73,6 +73,32 @@ import { PATH_KERB_OVERHANG, PLAYER_RADIUS, SPRINT_PEAK_GRADE_BUDGET } from '../
 export const DECK_HALF_LENGTH = FENCE_OFFSET + 1.2;
 
 /**
+ * **How far a bridge's parapet really reaches along its own frame**, on the
+ * side whose ramp runs `rampRun` past the deck — the deck's own half-length
+ * plus that ramp.
+ *
+ * *One definition, published and consumed*, in the same shape as
+ * `ShellGeometry.planEdge` on this branch. `bridges.ts` draws its parapet run
+ * from `-parapetReachFor(rampRunNeg)` to `+parapetReachFor(rampRunPos)`, and
+ * `planReal`'s cross-crossing exclusion ({@link planBridgeFootprints}'s
+ * `nearOtherGuardRail`) clamps to the very same figure. They must agree, and
+ * the only way to be sure they agree is for there to be one of them.
+ *
+ * They did not agree before (#349). The exclusion clamped to
+ * {@link DECK_HALF_LENGTH} alone, modelling a neighbour's rail as 6.4 m long
+ * when the built thing is more like 22 m, on the strength of a comment saying
+ * parapets were built along the deck and "never a ramp" — true of an older
+ * geometry, stale for years. Seed 2 built two bridges whose ramps run at each
+ * other, and bridge 1's parapet came down across bridge 0's walked centreline
+ * at `across = +0.11`, 8.73 m along its own frame: five and a half metres past
+ * the end of the rail the exclusion believed in, and so completely invisible to
+ * it. A walker climbing bridge 0's ramp hit a 2.98 m wall standing in the road.
+ */
+export function parapetReachFor(rampRun: number): number {
+  return DECK_HALF_LENGTH + rampRun;
+}
+
+/**
  * Fraction of each side's length spent easing the grade in and out — the
  * hump's slope profile is a cosine-blended trapezoid: zero slope at the crown
  * and at the foot, a constant grade in the middle, cosine blends between.
@@ -629,6 +655,24 @@ interface DeckPlan {
   readonly halfAcross: number;
   /** Lateral shift of the whole frame — the search's dodge lever. */
   readonly shift: number;
+  /**
+   * The deck's own curved frame, so {@link nearOtherGuardRail} can project a
+   * probe onto a neighbour the way that neighbour is actually laid out.
+   *
+   * The straight `cx`/`dirX` approximation above is fine over the deck's own
+   * ±3.2 m, which is all the exclusion used to look at. It is not fine over a
+   * parapet that runs 11 m up a curved spine, where extrapolating the tangent
+   * puts the modelled rail metres from the built one — so the exclusion asks
+   * the frame instead, and the straight fields stay for pass 2's own use.
+   */
+  readonly frame: SpineFrame;
+  /**
+   * How far this deck's ramps reach past it, and so — through
+   * {@link parapetReachFor} — how far its parapet really runs. Carried on the
+   * plan because a *sibling* has to know it: see {@link parapetReachFor}.
+   */
+  readonly rampRunPos: number;
+  readonly rampRunNeg: number;
 }
 
 function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): PlannedFootprint[] {
@@ -733,9 +777,9 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
   // actually build a walkable ramp for.
   /**
    * True near a *different* crossing's own guard rail — the real, physical
-   * wall `bridges.ts` stands along each long edge of a deck (never a ramp:
-   * see that file's own `railHalfAcross`), at `halfAcross + ACROSS_MARGIN`
-   * out, running the deck's own `DECK_HALF_LENGTH` span. It is not a real,
+   * wall `bridges.ts` stands along each long edge of the hump, **deck and both
+   * ramps alike**, out at the structural edge and running
+   * {@link parapetReachFor} either way. It is not a real,
    * queryable collider yet at plan time — `ParkTrain` only calls
    * `collision.addWall` for every bridge's guard rails once this whole
    * search has returned — so it needs the same synthetic treatment as the
@@ -751,10 +795,14 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
     margin: number,
   ): boolean => {
     for (const deck of otherDecks) {
-      const dx = x - deck.cx;
-      const dz = z - deck.cz;
-      const along = dx * deck.dirX + dz * deck.dirZ;
-      const across = dx * deck.acrossX + dz * deck.acrossZ;
+      // Projected onto the neighbour's own curved frame, shift included — the
+      // line its parapet is actually built along (`bridges.ts` lays every wall
+      // segment with `frame.worldAt(along, wallLine * side, shift)`). The old
+      // straight projection off `cx`/`dirX` was adequate only because the
+      // clamp below never looked more than 3.2 m from the deck centre; over a
+      // parapet's real 11 m reach a tangent extrapolation misses a curved
+      // bridge by metres.
+      const { along, across } = deck.frame.project(x, z, deck.shift);
       // The parapet stands at the structural edge itself now (`halfAcross`
       // already includes the wall's own thickness) — not `ACROSS_MARGIN`
       // further out, which was the old wide-deck geometry's rail line.
@@ -770,7 +818,14 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
       // `DECK_HALF_LENGTH + margin`, and its `across` alone was too, even
       // though neither excess was on its own enough to put the *point* that
       // far from the *segment*.
-      const alongClamped = Math.max(-DECK_HALF_LENGTH, Math.min(DECK_HALF_LENGTH, along));
+      // **The rail's real span, asked of the one thing that defines it.** Not
+      // `±DECK_HALF_LENGTH`: the parapet runs the whole hump, deck and both
+      // ramps, and clamping to the deck alone is what let seed 2's two bridges
+      // plan their ramps through each other (#349 — see `parapetReachFor`).
+      const alongClamped = Math.max(
+        -parapetReachFor(deck.rampRunNeg),
+        Math.min(parapetReachFor(deck.rampRunPos), along),
+      );
       const dAlong = along - alongClamped;
       for (const sign of [1, -1] as const) {
         const dAcross = across - sign * railAcross;
@@ -940,6 +995,13 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
           acrossZ: at.acrossZ,
           halfAcross,
           shift,
+          frame,
+          // Pass 1's own provisional reaches — the best answer available at
+          // the moment this candidate is accepted, and the same figures pass 2
+          // starts from. A sibling reading them models this parapet at the
+          // length this deck currently believes it will be.
+          rampRunPos: reachPos,
+          rampRunNeg: reachNeg,
         };
       }
       debugBridge?.(
