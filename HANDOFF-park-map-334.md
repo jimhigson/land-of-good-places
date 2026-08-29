@@ -204,3 +204,57 @@ Screenshots `v2-*` under `park-map-334/` on `qa-screenshots`.
 
 Now 13/14 desktop, 11/14 at 390px, 7/14 at 320px, 8/14 landscape.
 Screenshots `v3-*`. Build 0, procgen 443/443, check red on all four mutations.
+
+## Round 4 (29 Aug) — Jim: "put the cat bus on too, near the entrance gates,
+## and also the gates themselves"
+
+Session handed over after the previous engineer was dropped. Worktree `eng-334`
+was intact and clean at `2337678`; `node_modules` present, no `npm ci` needed.
+
+### The real owners — found, and this is the whole ticket
+
+Both positions come from **`src/world/entrance/layout.ts`**, which is the one
+module that owns entrance geometry and is deliberately dependency-free (it
+imports only `core/constants` and `core/mathUtils`), so `parkMapContent.ts`
+stays headless and the check still runs on plain Node.
+
+- **The gate** — `ENTRANCE_GATE_X` / `ENTRANCE_GATE_Z`, i.e.
+  `cos/sin(ENTRANCE_ANGLE) * ENTRANCE_WALL_RADIUS` = **(0, 60)**, the centre of
+  the gap cut in the boundary wall. `Entrance.ts` builds the arch there: two
+  posts on the wall's tangent at `±ENTRANCE_GATE_HALF_WIDTH` (4.3 m) and a
+  torus crossbar at exactly `(ENTRANCE_GATE_X, ENTRANCE_GATE_Z)`.
+- **The cat bus** — `ENTRANCE_BUS_DOOR_X` / `ENTRANCE_BUS_STOP_Z` = **(0, 69)**,
+  9 m outside the wall on the kerb. See "what the bus's position means" below.
+
+### What "the cat bus's position" means on a map — decided
+
+**The map draws the cat bus at its stop: where its door comes to rest, dead in
+front of the gate.** Not where the bus currently is.
+
+That is forced, not preferred. The bus is not park furniture — `Entrance.ts`
+builds `ArrivalSequence` only when `arrivalIsDue()`, the bus rolls in from
+`ENTRANCE_BUS_ARRIVE_X`, and once it has driven off past
+`ENTRANCE_BUS_VANISH_X` it is disposed. For nearly the whole of a save there is
+no bus in the world at all, so "wherever it currently is" is undefined most of
+the time and could never be asserted. A route is not a point either.
+
+What *is* permanent, owned and checkable is the stop, and a map marking a bus
+stop with a picture of the bus is what a paper map does. `ENTRANCE_BUS_DOOR_X`
+is specifically "where the bus's **door** stops", which is the half a child
+cares about — it is what `ArrivalSequence` parks the bus by, working the
+vehicle's centre back from it via `bus.doorDrop`, so a longer bus still stops
+with its door here. That makes it the stable point of the pair.
+
+### Check truth sources
+
+- **gate** — genuine scene-graph truth: the arch crossbar, which `Entrance.ts`
+  positions, named `entrance-arch` for the purpose. Same pattern as
+  `castle-walls`. A map that read the bus stop, the wall radius or the shelter
+  instead is caught.
+- **cat bus** — `layout.ts`, the same owner the content list read. Stated
+  plainly, exactly as the stall/fountain/station branches already are: it
+  proves the projection round-trips and the feature resolves, not that the
+  content list picked the right field. No separately-positioned scene object
+  exists to ask, because for most of the game there is no bus.
+
+New mutation `--mutate=gateway` swaps the two, a 9 m error on both.
