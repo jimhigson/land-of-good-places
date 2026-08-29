@@ -187,10 +187,31 @@ is what 0.675 / 0.360 bought.
   **interior's own metres**. Its first version teleported to those numbers as
   *world* coordinates and photographed a field several hundred metres away —
   `worldX`/`worldZ` are the conversion.
-- **The hall is on deck 0**, matching `castleDecor.ts`'s own `deck === 0` block
-  so the throne and the only fireplace are in one room. #380 moves it to the
-  middle floor: change `CASTLE_GREAT_HALL_DECK`, and `castleDecor.ts`'s block,
-  together.
+### ⚠️ For whoever lands #380: two constants move **together**, not one
+
+The great hall is on **deck 0**, upheld by the Overseer against #380's "middle
+floor", because `castleDecor.ts` already puts the hearth, the coat of arms and
+the portcullis behind `if (deck === 0)` — and a throne on a different storey
+from the castle's only fireplace reads as two half-rooms rather than one room.
+
+**When #380 moves the hall, these two must move in the same commit:**
+
+| Where | What |
+| --- | --- |
+| `castleFurniture.ts` | `CASTLE_GREAT_HALL_DECK` — the throne, feast, tapestries, armour, chest |
+| `castleDecor.ts`, in `dressCastle` | the `if (deck === 0)` block — coat of arms, portcullis, **hearthside** |
+
+Move one and not the other and the castle has a throne room with no fireplace
+and a fireplace in a corridor, on two different floors, with **every check
+still green** — nothing measures "these are the same room", and nothing can,
+because that is a judgement rather than a quantity.
+
+The fireside bench in `castleFurniture.ts` is guarded: it is placed from
+`CASTLE_HEARTH`'s own constant and only when `deck === CASTLE_HEARTH.deck`, so
+it follows the hearth rather than the hall. **That is the one piece that will
+not silently split** — and it is also the tell, because if the hall moves alone
+the bench stays behind with the fire and the hall loses it.
+
 - **`npm run blend:castle` has not been re-run** on this branch. The three
   `ts_const` conversions were proved readable against the exact regex lifted
   from `blendkit.py`, but the Blender-side assertion they now drive has not
