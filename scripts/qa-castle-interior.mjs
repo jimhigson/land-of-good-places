@@ -4,16 +4,14 @@
  *   node scripts/qa-castle-interior.mjs <port> <outDir>
  *
  * Runs the **production build** in a real headless browser, stands the player
- * on the castle's ground floor, and photographs the room from a few angles so
- * Jim can see the fabric arriving rather than read a description of it.
+ * inside the castle, and photographs the room storey by storey so Jim can see
+ * the work arriving rather than read a description of it.
  *
- * The interior lives at `INTERIOR_ORIGIN_X/Z` = (600, 600) with deck 0's
- * walking surface at `BUILDING_BASE_Y`. `/spawn` is given the **three-number**
- * `pos=x,y,z` form on purpose: the two-number form samples the terrain under
- * the coordinate, and the terrain under the interior is the plaza disc a metre
- * *below* the deck, so a two-number spawn would drop the player through her
- * own floor. CLAUDE.md names this case exactly — "for a deck, a bridge, a
- * castle floor".
+ * `/castle?deck=N` (added on this branch) is the only way in. `/spawn?pos=`
+ * cannot do it: the interior's coordinates are fixed and perfectly typeable,
+ * but being inside the castle is a *space*, not a position — `interiorRoot` is
+ * hidden and the play bounds are the garden's — so a spawn at (600, 0.73, 600)
+ * photographs an empty sky. See `Building.enterCastleSpawn`.
  */
 import { chromium } from 'playwright-core';
 import { mkdirSync } from 'node:fs';
@@ -27,13 +25,38 @@ const CHROME =
   `${process.env.HOME}/Library/Caches/ms-playwright/chromium-1234/chrome-mac-arm64/` +
     'Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 
-/**
- * Where to stand, and what each shot is meant to show.
- *
- * `/castle?deck=N` (added by this branch) is the only way in: `/spawn?pos=`
- * lands on the interior's coordinates with the interior still switched off —
- * see `Building.enterCastleSpawn`.
- */
+/** Straight into the park, past character creation and the cat bus. */
+const save = {
+  v: 1,
+  at: Date.now(),
+  purchases: 0,
+  game: {
+    parkName: 'QA Park',
+    mode: 'sandbox',
+    money: 500,
+    player: { name: 'Eleri' },
+    world: { timeOfDay: 600, dayCount: 0, lightsOn: false },
+    inventory: [],
+    carriedUid: null,
+  },
+  flags: { createdCharacter: true, arrivedByBus: true, hotelKey: true, dexPrizeSeen: true },
+};
+
+const browser = await chromium.launch({
+  executablePath: CHROME,
+  args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+});
+const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+const errors = [];
+page.on('console', (m) => {
+  if (m.type() === 'error') errors.push(m.text());
+});
+page.on('pageerror', (e) => errors.push(String(e)));
+await page.addInitScript((file) => {
+  window.localStorage.setItem('lgp:save', JSON.stringify(file));
+}, save);
+
+/** Which storey each shot is of, and what it is meant to show. */
 const shots = [
   { name: 'great-hall', deck: 0, note: 'ground floor, in from the door' },
   { name: 'deck-1', deck: 1, note: 'first floor' },

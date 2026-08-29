@@ -81,8 +81,6 @@ export function castleWallMaterial(colour: number) {
 
 // ------------------------------------------------------------------- beams
 
-/** How far apart the beams march along the hall, in metres. */
-const BEAM_PITCH = 4;
 /**
  * A beam's cross-section — **wide and shallow, and that is the whole design.**
  *
@@ -123,75 +121,111 @@ export const BEAM_UNDERSIDE = CASTLE_CEILING_CLEAR - BEAM_DEPTH;
 const BEAM_SEGMENT = 2;
 
 /**
- * **Timber beams across the ceiling.** A hall reads as a hall from its
- * ceiling, and this room had nothing up there at all.
+ * How far in from the wall face the plate sits, in metres.
  *
- * They run **across the short span** (along Z), the way a real hall's do,
- * marching every {@link BEAM_PITCH} metres down the long axis.
+ * Far enough that it is a timber *on* the wall rather than a stripe painted
+ * into the corner, and not so far that it starts to overhang the room.
+ */
+const PLATE_INSET = 0.9;
+
+/**
+ * **A timber wall-plate round the top of the room**, on corbels — the castle's
+ * roof structure, read from the only angle this camera can show it from.
+ *
+ * ## Why this is not a ceiling full of beams, which is what it started as
+ *
+ * The first cut ran beams straight across the hall every 4 m, the way a real
+ * hall's do. Photographed in the running game it was plainly wrong, and the
+ * reason is the **cutaway**: the storey above you is faded out so you can see
+ * in, so there is no ceiling for a beam to be fixed to. Fifteen timbers hung
+ * in mid-air over an open room, cut across the floor at the camera's 38° and
+ * hid the flagstones and the roundel behind a set of floating planks. It is a
+ * good illustration of a rule this repo keeps re-learning: the thing looked
+ * correct in the code and in the geometry, and only a rendered frame could say
+ * it was wrong.
+ *
+ * A wall-plate has the same job — say "this room is built of timber, and it has
+ * a top" — from a position the cutaway does not delete: **against the wall**,
+ * where a child's eye already is, crossing nothing and hiding nothing.
  *
  * ## They stop at the holes, and that is the whole subtlety
  *
- * The ceiling of storey `deck` is the underside of storey `deck + 1`'s slab,
- * and that slab is punched through by the stairs, the escalator, the lift,
- * the trampoline, the bubble and the helter-skelter (`DECK_HOLES`). A beam
- * drawn straight across one of those would hang in mid-air over an open
- * shaft with nothing holding it up, and would be visible from the storey
- * above looking down.
+ * The plate is fixed to the underside of the slab above, and that slab is
+ * punched through by the stairs, the escalator, the lift, the trampoline, the
+ * bubble and the helter-skelter (`DECK_HOLES`) — several of which reach the
+ * wall. A run of plate over one of those is fixed to a ceiling that is not
+ * there.
  *
- * So each beam is laid as short segments and **every segment asks the deck
+ * So the plate is laid as short segments and **every segment asks the deck
  * above whether there is actually a slab there** (`deckIsSolid`) — measuring
- * the floor that was built rather than re-deriving the hole list, which is
- * this repo's standing rule for exactly this kind of question. A shaft that
- * moves takes the beams with it, for free, and no second copy of the hole
- * plan exists here to fall out of step.
+ * the floor that was built rather than re-deriving the hole list, which is this
+ * repo's standing rule for exactly this kind of question. A shaft that moves
+ * takes the plate with it, for free, and no second copy of the hole plan lives
+ * here to fall out of step.
  *
- * ## They clear the tallest child in the game
+ * ## It clears the tallest child in the game
  *
  * Not the *average* one. `TALLEST_CHILD_HEIGHT` is every hair style crossed
  * with every hat, measured on the real models, and it is 2.97 m against a
- * 3.30 m ceiling — so a beam has 33 cm to exist in. See {@link BEAM_DEPTH}.
+ * 3.30 m ceiling — so the plate has 33 cm to exist in. See {@link BEAM_DEPTH}.
  *
- * Returns `null` for the roof terrace, which is outdoors and has no ceiling.
+ * One `InstancedMesh` per storey. Returns `null` for the roof terrace, which is
+ * outdoors and has no ceiling to plate.
  */
 export function buildCeilingBeams(deck: number): InstancedMesh | null {
   if (deck >= TOP_DECK) return null;
 
-  const above = deck + 1;
-  const y = BEAM_UNDERSIDE + BEAM_DEPTH / 2;
   if (BEAM_UNDERSIDE <= TALLEST_CHILD_HEIGHT) {
     throw new Error(
-      `castleFabric: beams would hang to ${BEAM_UNDERSIDE.toFixed(2)} m, at or below the ` +
-        `tallest child (${TALLEST_CHILD_HEIGHT} m). Make BEAM_DEPTH shallower, or raise the ` +
-        `storey — do not ship a ceiling children walk through.`,
+      `castleFabric: the wall-plate would hang to ${BEAM_UNDERSIDE.toFixed(2)} m, at or below ` +
+        `the tallest child (${TALLEST_CHILD_HEIGHT} m). Make BEAM_DEPTH shallower, or raise ` +
+        `the storey — do not ship a ceiling children walk through.`,
     );
   }
-  const spots: { x: number; z: number }[] = [];
 
-  // Start half a pitch in from the wall, so the run is symmetric about the
-  // middle of the hall rather than crowding one end.
-  for (let x = -INTERIOR_HALF_X + BEAM_PITCH / 2; x < INTERIOR_HALF_X; x += BEAM_PITCH) {
+  const above = deck + 1;
+  const y = BEAM_UNDERSIDE + BEAM_DEPTH / 2;
+  const spots: { x: number; z: number; alongZ: boolean }[] = [];
+
+  /** Keeps a segment on solid slab at both ends as well as in the middle. */
+  const solidRun = (x: number, z: number, alongZ: boolean): boolean => {
+    const half = BEAM_SEGMENT / 2;
+    const dx = alongZ ? 0 : half;
+    const dz = alongZ ? half : 0;
+    return (
+      deckIsSolid(above, x, z) &&
+      deckIsSolid(above, x - dx, z - dz) &&
+      deckIsSolid(above, x + dx, z + dz)
+    );
+  };
+
+  // The two long walls, running along X.
+  for (const z of [-INTERIOR_HALF_Z + PLATE_INSET, INTERIOR_HALF_Z - PLATE_INSET]) {
+    for (let x = -INTERIOR_HALF_X + BEAM_SEGMENT / 2; x < INTERIOR_HALF_X; x += BEAM_SEGMENT) {
+      if (solidRun(x, z, false)) spots.push({ x, z, alongZ: false });
+    }
+  }
+  // The two short walls, running along Z. Started one segment in from each end
+  // so the runs meet at the corner rather than crossing through it.
+  for (const x of [-INTERIOR_HALF_X + PLATE_INSET, INTERIOR_HALF_X - PLATE_INSET]) {
     for (
-      let z = -INTERIOR_HALF_Z + BEAM_SEGMENT / 2;
-      z < INTERIOR_HALF_Z;
+      let z = -INTERIOR_HALF_Z + PLATE_INSET + BEAM_SEGMENT / 2;
+      z < INTERIOR_HALF_Z - PLATE_INSET;
       z += BEAM_SEGMENT
     ) {
-      // Both ends as well as the middle, so a segment never pokes out over
-      // the lip of a hole it is only just clear of.
-      if (!deckIsSolid(above, x, z)) continue;
-      if (!deckIsSolid(above, x, z - BEAM_SEGMENT / 2)) continue;
-      if (!deckIsSolid(above, x, z + BEAM_SEGMENT / 2)) continue;
-      spots.push({ x, z });
+      if (solidRun(x, z, true)) spots.push({ x, z, alongZ: true });
     }
   }
 
   const beams = new InstancedMesh(
-    new BoxGeometry(BEAM_WIDTH, BEAM_DEPTH, BEAM_SEGMENT),
+    // Authored running along X; the Z runs are the same box, yawed.
+    new BoxGeometry(BEAM_SEGMENT, BEAM_DEPTH, BEAM_WIDTH),
     softMaterial(PALETTE.woodDark, 0.8),
     Math.max(1, spots.length),
   );
-  beams.name = `castle-ceiling-beams-${deck}`;
+  beams.name = `castle-wall-plate-${deck}`;
   // Never a shadow caster. Issue #251 has the shadow pass at 57% of draw
-  // calls, and a beam pressed against the ceiling it is lit through would
+  // calls, and a timber pressed against the ceiling it is lit through would
   // buy a stripe of acne rather than a shadow.
   beams.castShadow = false;
   beams.receiveShadow = true;
@@ -199,9 +233,11 @@ export function buildCeilingBeams(deck: number): InstancedMesh | null {
 
   const matrix = new Matrix4();
   const rotation = new Quaternion();
+  const axis = new Vector3(0, 1, 0);
   const scale = new Vector3(1, 1, 1);
   const position = new Vector3();
   spots.forEach((spot, index) => {
+    rotation.setFromAxisAngle(axis, spot.alongZ ? Math.PI / 2 : 0);
     position.set(spot.x, y, spot.z);
     matrix.compose(position, rotation, scale);
     beams.setMatrixAt(index, matrix);

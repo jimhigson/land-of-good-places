@@ -944,18 +944,28 @@ export class Building implements GameSystem {
     const player = this.player;
     if (!player) return false;
     if (!Number.isInteger(deck) || deck < 0 || deck >= BUILDING_FLOOR_COUNT) return false;
-    this.enterInterior();
-    if (deck > 0) {
-      // `enterInterior` has already put her on the ground floor's own good
-      // viewing spot; carry that x/z straight up rather than writing a second
-      // one down here, so the two can never drift apart.
-      player.teleportTo(
-        player.position.x,
-        BUILDING_BASE_Y + deck * BUILDING_FLOOR_HEIGHT,
-        player.position.z,
-        Math.PI,
-      );
-    }
+    // **Through `changeSpace`, not straight to `enterInterior`.** The first cut
+    // called `enterInterior()` on its own and photographed an empty sky: the
+    // interior really was switched on and the player really was standing in it,
+    // but the *camera* was still out over the garden, because it is
+    // `changeSpace` that irises and calls `snapCamera`. Being inside is a
+    // camera, a set of play bounds and a cutaway deck as much as it is a
+    // position — so this takes the whole door sequence rather than the one part
+    // of it that looked like the important one.
+    this.changeSpace(() => {
+      this.enterInterior();
+      if (deck > 0) {
+        // `enterInterior` has already put her on the ground floor's own good
+        // viewing spot; carry that x/z straight up rather than writing a second
+        // one down here, so the two can never drift apart.
+        player.teleportTo(
+          player.position.x,
+          BUILDING_BASE_Y + deck * BUILDING_FLOOR_HEIGHT,
+          player.position.z,
+          Math.PI,
+        );
+      }
+    });
     return true;
   }
 
