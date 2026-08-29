@@ -118,7 +118,7 @@ jobs:
             const sha = context.payload.pull_request.head.sha;
             const shortSha = sha.slice(0, 7);
             const body = url
-              ? `${marker}\n### 🎡 Preview deployed\n\n[Open the preview](${url})\n\nBuilt from commit [\`${shortSha}\`](${context.payload.repository.html_url}/commit/${sha}) — a fresh URL every push, so this link is only ever current while it's the *newest* comment on this PR. **Open it in a private/incognito window** — this box has served many dev builds from many ports over its lifetime, and a stale service worker or save from an unrelated earlier visit can silently serve old content with no error (see CLAUDE.md's "A stale service worker will waste your hour").`
+              ? `${marker}\n### 🎡 Preview deployed\n\n[Open the preview](${url})\n\nBuilt from commit [\`${shortSha}\`](${context.payload.repository.html_url}/commit/${sha}) — a fresh URL every push, so this link is only ever current while it's the *newest* comment on this PR.`
               : `${marker}\n### 🎡 Preview build finished\n\nBut no preview URL was found in the \`wrangler versions upload\` output — check the [workflow run](${context.payload.repository.html_url}/actions/runs/${context.runId}) for details.`;
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
