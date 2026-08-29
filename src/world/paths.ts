@@ -4260,17 +4260,28 @@ function* addInterconnects(
       slideOverlap += slideCorridorOverlap(a[0], a[1], b[0], b[1]);
     }
     // ...with the same escape, and only where the corridor is not something
-    // this connector *chose* to run along: you leave the ginormous slide
-    // underneath its own chute, so `exit-ginormousSlide` stands inside the
-    // leg corridor by construction, and its own mandatory spur already
-    // paves and lamps that ground. This is the doorstep exemption the ride
-    // corridor screen above already grants, held to the pairs the escape
-    // has judged disproportionate — a cross-park shortcut that merely ends
-    // at the exit still gets nothing. Seed 11 is exactly this shape: 20.3 m
-    // of the 23.4 m connector lies in the corridor because both ends do.
-    // The proof it is safe is measured on the built park, not asserted
-    // here: `theGinormousSlideStandsOnSomething` counts the legs that
-    // actually got placed, on all five seeds.
+    // this connector *chose* to run along. When a destination stands inside
+    // the leg corridor, that ground is already paved and lamped by its own
+    // mandatory spur, so a connector arriving there adds no marginal risk —
+    // the doorstep exemption the ride-corridor screen above already grants,
+    // held here to pairs the escape has judged disproportionate. A
+    // cross-park shortcut that merely *ends* at the slide exit still gets
+    // nothing (seed 2's `building`-`exit-ginormousSlide` clears the escape
+    // and is refused here, because neither end is in the corridor).
+    //
+    // Which destinations those are is **measured, never assumed**. Where
+    // the exit lands relative to the chute is a per-seed fact: seed 11 puts
+    // `exit-ginormousSlide` inside the corridor, with 20.3 m of a 23.4 m
+    // connector in it because *both* ends are; seed 2 puts it outside. So
+    // this asks `pointInSlideCorridor` about the park that was built rather
+    // than reasoning from where a slide exit "must" be.
+    //
+    // The proof it is safe is likewise measured on the built park:
+    // `theGinormousSlideStandsOnSomething` counts the legs that actually
+    // got placed, on all five seeds. **Read that margin before widening
+    // this**: on the #352 base seed 11's chute stands on 3 legs against a
+    // floor of 3, with and without this exemption. It costs no leg — and
+    // there is none spare.
     const corridorIsADoorstep =
       detourIsDisproportionate &&
       (pointInSlideCorridor(a.x, a.z) || pointInSlideCorridor(b.x, b.z));

@@ -117,3 +117,17 @@ To re-take the measurement, the two scratch scripts were
 `tmp-connectors.mts` (lists `connector-*` routes off `buildParkFacts(seed)`) and
 `tmp-qa-361.mjs` (playwright shots); both deleted, both trivial to rewrite —
 they are three lines each and are described in the PR body.
+
+## For whoever touches the ginormous slide next
+
+Reviewer measurement on PR #366, on the #352 base: **seed 11's chute stands on
+3 legs against a floor of 3 — exactly on its own limit, with and without this
+PR's corridor exemption.** The exemption costs no leg. But there is no margin
+left there, so anything that widens the slide-corridor exemption (or adds
+paving near the chute) must count legs on seed 11 before and after, not trust a
+green suite.
+
+Also corrected here after review: the slide exit is **not** inside its leg
+corridor "by construction" — seed 2 puts it outside. The code was always right
+(it asks `pointInSlideCorridor` about the built park); only the comment
+overclaimed, and it now says so.
