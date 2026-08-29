@@ -111,26 +111,80 @@ BLEND = os.path.join(REPO, "art", "blend", "castle.blend")
 
 # The two numbers the game owns and this file must ask for.
 #
-# `CEILING_CLEAR` is the Engineer's, derived in `castleAssets.ts` from the
-# building's own storey height and slab thickness; it is read here rather than
-# typed because a prop through the ceiling is not stylisation, it is a bug, and
-# the day the storey height moves this build should either follow it or stop.
 # `TALLEST_CHILD` is `kid.ts`'s, guarded by an invariant that re-measures every
 # hair style crossed with every hat on every seed.
 #
-# **Until the Engineer's file exists, `CEILING_CLEAR` falls back to the value
-# their contract states.** That fallback is a stated, temporary thing with a
-# loud print, not a silent default — the moment `castleAssets.ts` lands, this
-# reads it and any disagreement between us becomes a failed build instead of a
-# prop through a ceiling.
-CEILING_CLEAR_FALLBACK = 3.30
-CEILING_SOURCE = "src/art/models/castleAssets.ts"
-try:
-    CEILING_CLEAR = ts_const(CEILING_SOURCE, "CASTLE_CEILING_CLEAR")
-    CEILING_FROM = CEILING_SOURCE
-except (FileNotFoundError, AssertionError):
-    CEILING_CLEAR = CEILING_CLEAR_FALLBACK
-    CEILING_FROM = "the Engineer's contract, §4.4 (their module not on this branch yet)"
+# `CEILING_CLEAR` is the Engineer's, and **there are two ceilings in this room;
+# the tighter one governs.** `CASTLE_CEILING_CLEAR` (3.30 m) is the slab
+# underside out in the middle of the hall. `BEAM_UNDERSIDE` (3.08 m) is the
+# perimeter timber wall-plate, which runs round every wall 0.9 m in and hangs
+# 0.22 m below the slab. The Engineer built it on 29 August, after this file's
+# first pass, and their §4.4 states the rule that came with it:
+#
+#   > Anything standing within 1.25 m of a wall must clear 3.08 m
+#   > (`BEAM_UNDERSIDE`), not 3.30 m. Out in the room it is still 3.30 m.
+#
+# **Every floor asset here is checked against the tighter one**, and that is a
+# deliberate choice rather than an oversight of the 1.25 m proviso. Not all of
+# these stand against a wall, but all of them *may*: eight suits of armour are
+# specified "back to a wall", the throne stands at the end of the hall, and the
+# chest and benches go wherever the room wants them. An asset that only fits in
+# the middle of the floor is an asset carrying an unwritten placement rule, and
+# an unwritten placement rule is the "two definitions kept in step by hand" bug
+# with one of the definitions missing. Shortening a prop is cheap; discovering
+# in a screenshot that somebody pushed the throne back a metre is not.
+#
+# **Until the Engineer's modules exist, this falls back to 3.08 from their
+# contract.** The fallback is stated, printed loudly, and deliberately the
+# *tight* number rather than the loose one, so the day it is wrong it is wrong
+# in the direction that leaves a gap rather than the direction that puts a
+# finial through a beam. It used to be 3.30, which was the loose number and,
+# by 29 August, a superseded one as well.
+CEILING_CLEAR_FALLBACK = 3.08
+# In tightest-first order. Whichever of these resolves first wins; they are two
+# readings of one room and the wall-plate is the one every asset must survive.
+CEILING_SOURCES = (
+    ("src/world/building/castleFabric.ts", "BEAM_UNDERSIDE"),
+    ("src/art/models/castleAssets.ts", "CASTLE_CEILING_CLEAR"),
+)
+
+
+def read_ceiling_clear():
+    """The headroom to assert against, and a sentence saying where it came from.
+
+    Distinguishes the two reasons a read can fail, because they mean opposite
+    things. **The module not existing yet** is the expected state on this
+    branch and falls back quietly-but-loudly. **The module existing while the
+    constant cannot be read** is a seam that has moved, and the note says so by
+    name rather than blending into the same message — a fallback that cannot
+    tell "not here yet" from "here and unreadable" is a check reporting success
+    about something it is not describing.
+    """
+    for path, name in CEILING_SOURCES:
+        if not os.path.exists(os.path.join(REPO, path)):
+            continue
+        try:
+            return ts_const(path, name), f"{path}'s {name}"
+        except AssertionError:
+            # `ts_const` only reads `export const NAME = <number>;`. Both of
+            # these constants are currently *derived* — `BEAM_UNDERSIDE =
+            # CASTLE_CEILING_CLEAR - BEAM_DEPTH` — so the regex will not match
+            # them even once the file lands. That is a real thing to fix at the
+            # seam, not here: asked of the Engineer in §2.5 of the handoff.
+            return (
+                CEILING_CLEAR_FALLBACK,
+                f"the fallback — {path} exists but `{name}` is a derived "
+                "expression, not `export const NAME = <number>;`, so it cannot "
+                "be read. See handoff §2.5",
+            )
+    return (
+        CEILING_CLEAR_FALLBACK,
+        "the Engineer's contract, §4.4 (neither of their modules is on this "
+        "branch yet)",
+    )
+
+
+CEILING_CLEAR, CEILING_FROM = read_ceiling_clear()
 
 TALLEST_CHILD = ts_const("src/art/models/kid.ts", "TALLEST_CHILD_HEIGHT")
 
@@ -164,6 +218,19 @@ def place(x=0.0, y=0.0, z=0.0, rx=0.0, ry=0.0, rz=0.0) -> Matrix:
 
 HEIGHT_TOLERANCE = 0.02
 
+# The height of the throne's dais. **The Engineer builds it; this file cannot
+# measure it**, so unlike every other number in the contract it is a figure
+# typed from their §4.3 rather than read off a mesh — the one such number here,
+# and called out as one so it is not mistaken for a measurement.
+#
+# It is typed because there is no better option *yet*, not because typing it is
+# fine. The moment `castleAssets.ts` exists this should be `ts_const`'d like the
+# headroom is, and the ask is in §2.5 of the handoff. Until then the mitigation
+# is that it appears exactly once, is printed on every run beside the throne's
+# measured height and the resulting total, and is the reason the ceiling
+# assertion can see the throne at all.
+DAIS_HEIGHT = 0.30
+
 
 class Requested:
     """One row of the Engineer's §4.3 table.
@@ -176,43 +243,94 @@ class Requested:
     and a goblet, a roast and a pie are obviously not all the same height — is
     a maximum, and asserting it as exact would be a check that forced four
     different objects to be one size for no reason anybody wanted.
+
+    ``stands_on`` and ``dais`` are the ceiling check's half of it, and they
+    exist because of a bug this table had for a week. Almost nothing in this
+    room stands on the floor it is checked against: the armour stands on a
+    plinth, the feast stands on the table, and the throne stands on a dais the
+    Engineer builds. The ceiling assertion used to compare the **bare mesh**
+    against the headroom, so a 2.80 m throne on a 0.30 m dais passed a 3.08 m
+    check while standing 3.10 m into a 3.08 m beam. The check read correctly,
+    carried real numbers in its message, and was describing something other
+    than the thing that has to clear.
+
+    So the mount height is now part of the request rather than prose in a
+    docstring, and it comes from whichever of two places can be *measured*:
+
+    * ``stands_on`` names another asset **in this file**, and its measured top
+      is the mount height. Nothing is typed — if the table is retuned to
+      1.02 m, the goblets standing on it are re-checked at 1.02 m on the next
+      build, with no second number to update.
+    * ``dais`` is a height the **Engineer** builds and this file does not, so
+      there is no mesh here to measure and it has to be a number. It is the
+      only such number in the table, and it is one the two handoffs both
+      state.
     """
 
-    def __init__(self, width, height, depth, note="", exact=True):
+    def __init__(self, width, height, depth, note="", exact=True,
+                 stands_on=None, dais=0.0):
         self.width = width
         self.height = height
         self.depth = depth
         self.note = note
         self.exact = exact
+        self.stands_on = stands_on
+        self.dais = dais
 
 
 CONTRACT = {
     # A1 — the star of the room. 2.60 m beside a 1.86 m child, on purpose.
-    "armour": Requested(1.10, 2.60, 0.80, "8 across decks 0–3, back to a wall"),
+    "armour": Requested(1.10, 2.60, 0.80, "8 across decks 0–3, back to a wall",
+                        stands_on="plinth"),
     # A2 — a plain chamfered stone block, separate so it can be left off where
     # a step would trip somebody.
     "plinth": Requested(1.30, 0.25, 1.00, "one per armour"),
     # A3 — rail at 2.90 m, hem at 0.50 m, so the drop is exactly 2.40 m.
-    # **0.28 m deep, not the contract's 0.12 m — a renegotiation, logged.**
-    # At 0.12 the cloth cannot be modelled as cloth: the thickness alone is
-    # 0.04 of it, leaving ±0.04 of wave across a 3.2 m sheet, which the first
-    # review render showed as a completely flat maroon rectangle. The
-    # Engineer's own §5 rule is that wall furniture projects **at most 0.45 m**
-    # (less than the wall's own thickness), so 0.28 is comfortably inside the
-    # rule the 0.12 was presumably a guess at. Asked for in §4.5 of the reply
-    # handoff; if it is refused, this one number changes and the wave with it.
-    "tapestry": Requested(3.20, 2.40, 0.28, "hangs from the rail; 6 of them"),
+    # **0.26 m deep, not the contract's original 0.12 m — a renegotiation, and
+    # the Engineer has approved it** (their §4.5, reconciliation entry 1:
+    # "Approved. Change it."). At 0.12 the cloth cannot be modelled as cloth:
+    # the thickness alone is 0.04 of it, leaving ±0.04 of wave across a 3.2 m
+    # sheet, which the first review render showed as a completely flat maroon
+    # rectangle. The Engineer's own §5 rule is that wall furniture projects **at
+    # most 0.45 m** (less than the wall's own thickness), so 0.26 is comfortably
+    # inside the rule the 0.12 was presumably a guess at.
+    #
+    # **0.26 and not 0.28.** The allowance enforced here and the number asked
+    # for in the handoff were briefly 0.28 and 0.26 — two documents disagreeing
+    # by 2 cm, which is exactly the failure the reconciliation section exists to
+    # prevent, committed inside the section that prevents it. The Engineer
+    # signed off "0.26", so 0.26 is what the build holds this to; there is now
+    # no slack that only one of the two documents knows about.
+    "tapestry": Requested(3.20, 2.40, 0.26, "hangs from the rail; 6 of them"),
     # A4 — wider than the cloth it carries.
     "tapestryrail": Requested(3.60, 0.14, 0.14, "centred on its own axis"),
     # A5 — no flame: the Engineer builds fire.
     "sconce": Requested(0.34, 0.46, 0.42, "~40, instanced, back plate on the wall"),
-    # A6 — the Engineer asked for 2.80 against a 3.00 allowance, to keep
-    # headroom over the 0.30 m dais they build under it. Built to 2.80.
-    "throne": Requested(1.60, 2.80, 1.20, "1, deck 0, on a 0.30 m dais"),
+    # A6 — the one asset the wall-plate actually caught, and the reason
+    # `stands_on`/`dais` exist at all.
+    #
+    # The Engineer asked for 2.80 against a 3.00 allowance, to keep headroom
+    # over the 0.30 m dais they build under it, and 2.80 + 0.30 = 3.10 sat
+    # 0.20 m under the 3.30 m ceiling they were writing against. Then they
+    # built the perimeter wall-plate and the headroom near a wall became
+    # 3.08 — so the throne at the end of the hall stood **2 cm through a
+    # beam**, and the assertion that should have said so was comparing the
+    # bare 2.80 m mesh against it and passing.
+    #
+    # **2.75, not 2.80.** 2.75 + 0.30 = 3.05, which clears the wall-plate by
+    # 0.03 m. Five centimetres off a 2.75 m throne is invisible — the
+    # silhouette is the step from shoulder to spire, not the last 2% of its
+    # height — and the alternative costs the Engineer a rebuild of the dais.
+    # If they would rather keep 2.80 m of throne and shave the dais to 0.25,
+    # that is a one-line change here and the build will confirm it either way,
+    # which is the point: 0.03 m is thin, and it is now *asserted* thin
+    # instead of assumed. The day the dais grows a step, this fails.
+    "throne": Requested(1.60, 2.75, 1.20, "1, deck 0, on a 0.30 m dais",
+                        dais=DAIS_HEIGHT),
     "table": Requested(2.20, 1.05, 6.00, "long axis along the game's +Z"),
     "bench": Requested(0.60, 0.55, 2.80, "4, both sides of the table"),
     "feast": Requested(0.45, 0.45, 0.45, "goblet, roast, loaf, pie — bucket-sized",
-                       exact=False),
+                       exact=False, stands_on="table"),
     "chest": Requested(1.20, 0.90, 0.80, "lid on its own hinge node"),
 }
 
@@ -1154,14 +1272,38 @@ def check_contract() -> str:
         assert size.y <= want.depth + 1e-3, (
             f"{name}: {size.y:.3f} m deep against an allowance of {want.depth:.2f} m"
         )
+        mount_note = ""
         if ORIGIN_FAMILY[name] == "FLOOR":
-            assert hi.z < CEILING_CLEAR, (
-                f"{name} stands {hi.z:.3f} m tall and the clear headroom is "
+            # **Assert the height that actually has to clear, not the mesh's
+            # own.** Almost nothing here stands on the floor: the armour stands
+            # on the plinth, the feast stands on the table, the throne stands on
+            # the Engineer's dais. Comparing the bare mesh against the headroom
+            # is a check on a quantity nobody builds — it passed a 2.80 m throne
+            # against 3.08 m of headroom while the thing stood at 3.10 m.
+            #
+            # `stands_on` is resolved by **measuring** the asset underneath, so
+            # the mount is a build result rather than a second copy of a number:
+            # retune the table and the goblets are re-checked at the new top on
+            # the same run.
+            mount = want.dais
+            if want.stands_on is not None:
+                _, under = collection_bounds(want.stands_on)
+                mount += under.z
+            top = hi.z + mount
+            if mount:
+                mount_note = (
+                    f" — {hi.z:.3f} m of asset on {mount:.3f} m of mount"
+                )
+            assert top < CEILING_CLEAR, (
+                f"{name} stands {hi.z:.3f} m tall on a {mount:.3f} m mount"
+                f"{' (' + want.stands_on + ', measured)' if want.stands_on else ' (dais)'}"
+                f", so its top is at {top:.3f} m, and the clear headroom is "
                 f"{CEILING_CLEAR:.2f} m ({CEILING_FROM}) — it would go through the ceiling"
             )
         rows.append(
             f"  {name:<14} {size.x:5.2f} × {got_h:5.2f} × {size.y:5.2f} m "
-            f"(asked {want.width:.2f} × {want.height:.2f} × {want.depth:.2f})  {want.note}"
+            f"(asked {want.width:.2f} × {want.height:.2f} × {want.depth:.2f})  "
+            f"{want.note}{mount_note}"
         )
     # The armour's keep-out is a disc, not a box, so the figure that actually
     # feeds the Engineer's check is the half-diagonal of its footprint.
