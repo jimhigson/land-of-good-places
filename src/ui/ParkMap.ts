@@ -138,6 +138,35 @@ const FEATURE_ICON_SIZE: Readonly<Record<MapFeature['kind'], number>> = {
   station: 2.2,
 };
 
+/**
+ * The most park, in metres, any one picture may cover.
+ *
+ * **Why a second limit exists.** `FEATURE_ICON_SIZE` is in `uiUnitPx()`, which
+ * tracks the *screen* so icons stay tappable and legible under GAME_DESIGN.md's
+ * UI-SCALE rule. The map's `scale` tracks the *canvas*. Those two are
+ * independent, and on a small canvas they diverge badly: measured in review of
+ * PR #353, one stall icon covered 18 m of park on a desktop and **47 m** in
+ * phone landscape. At 47 m everything overlapped everything, `drawLabel`
+ * discarded the losers, and a phone drew 4 of 14 names — a picture with no
+ * name, against Jim's explicit "(still labelled)".
+ *
+ * So an icon is the smaller of "what the screen wants" and "what the park can
+ * spare". These figures are the real thing's own rough extent: the castle is a
+ * genuinely large building, a station hut is small.
+ */
+const FEATURE_ICON_MAX_METRES: Readonly<Record<MapFeature['kind'], number>> = {
+  castle: 26,
+  anchor: 18,
+  stall: 11,
+  fountain: 11,
+  station: 9,
+};
+
+/** An icon's drawn size: legible on the screen, honest about the park. */
+function featureIconPx(kind: MapFeature['kind'], scale: number): number {
+  return Math.min(FEATURE_ICON_SIZE[kind] * uiUnitPx(), FEATURE_ICON_MAX_METRES[kind] * scale);
+}
+
 /** Which drawing a feature gets. Stations and the fountain share one each. */
 function iconKey(feature: MapFeature): string {
   if (feature.kind === 'station') return 'station';
@@ -642,16 +671,58 @@ export class ParkMap {
     // "The Castle" read as "The C" behind the ball pit. Labels are also the
     // thing that must stay legible when the park is crowded, so they get the
     // last word on every pixel they need.
-    const placed: { feature: MapFeature; px: number; py: number; size: number; label: string }[] = [];
-    for (const feature of this.features()) {
+    const features = this.features();
+
+    // A ride's real footprint, as a patch of worn grass under its picture.
+    // The picture is a chunky storybook object and deliberately not to scale;
+    // this is, so the ground the ride actually occupies is on the map even
+    // where the icon over-covers or under-covers it.
+    ctx.save();
+    ctx.fillStyle = MAP_PALETTE.lawnDeep;
+    for (const feature of features) {
+      if (feature.kind !== 'anchor' && feature.kind !== 'castle') continue;
+      const anchor = ANCHORS_BY_ID[feature.id as keyof typeof ANCHORS_BY_ID];
+      if (!anchor) continue;
+      const [ax, ay] = this.planeToCanvas(feature.x, feature.z);
+      ctx.beginPath();
+      if (anchor.footprint.kind === 'circle') {
+        ctx.ellipse(ax, ay, anchor.footprint.radius * this.scale, anchor.footprint.radius * this.scale, 0, 0, Math.PI * 2);
+      } else {
+        const halfW = anchor.footprint.halfX * this.scale;
+        const halfH = anchor.footprint.halfZ * this.scale;
+        ctx.rect(ax - halfW, ay - halfH, halfW * 2, halfH * 2);
+      }
+      ctx.fill();
+    }
+    ctx.restore();
+
+    const placed: { px: number; py: number; size: number; label: string }[] = [];
+    for (const feature of features) {
       const [fx, fy] = this.planeToCanvas(feature.x, feature.z);
       const { label, accent } = this.featureCopy(feature);
-      const size = FEATURE_ICON_SIZE[feature.kind] * uiUnitPx();
+      const size = featureIconPx(feature.kind, this.scale);
       drawIcon(ctx, iconKey(feature), fx, fy, size, accent);
-      placed.push({ feature, px: fx, py: fy, size, label });
+      // Reserve the picture's own box, so a *later* name cannot be written
+      // across it — labels used to test only against other labels, which is
+      // why "The Castle" painted straight over the Ball Pit.
+      this.labelBoxes.push({
+        left: fx - size * 0.42,
+        right: fx + size * 0.42,
+        top: fy - size * 0.5,
+        bottom: fy + size * 0.46,
+      });
+      placed.push({ px: fx, py: fy, size, label });
     }
+    // Under the picture by preference, above it if that spot is taken. A name
+    // that simply cannot be placed is still dropped rather than written over
+    // something, but trying the second spot is what turns most of the drops
+    // back into readable names on a phone.
     for (const item of placed) {
-      this.drawLabel(item.label, item.px, item.py + item.size * 0.5);
+      const below = item.py + item.size * 0.5;
+      const above = item.py - item.size * 0.56 - minTextPx();
+      if (!this.drawLabel(item.label, item.px, below)) {
+        this.drawLabel(item.label, item.px, above);
+      }
     }
 
     // --- the player ----------------------------------------------------------
@@ -870,7 +941,7 @@ export class ParkMap {
    * helps nobody. Draw order is therefore priority order — the big attractions
    * in `ANCHORS` are drawn before the smaller features.
    */
-  private drawLabel(text: string, px: number, py: number): void {
+  private drawLabel(text: string, px: number, py: number): boolean {
     const ctx = this.ctx;
     ctx.save();
     const size = minTextPx();
@@ -907,7 +978,7 @@ export class ParkMap {
     );
     if (collides) {
       ctx.restore();
-      return;
+      return false;
     }
     this.labelBoxes.push(box);
 
@@ -917,6 +988,7 @@ export class ParkMap {
     ctx.fillStyle = hexToCss(PALETTE.ink);
     ctx.fillText(text, px, py);
     ctx.restore();
+    return true;
   }
 
   private drawPlayerMarker(planeX: number, planeZ: number): void {

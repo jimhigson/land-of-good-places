@@ -22,15 +22,33 @@
  *
  * 1. **Nothing is clipped.** Every vertex of `PARK_BOUNDARY.outline()` lands
  *    inside the canvas, at every canvas size from a small phone to a desktop.
- * 2. **Every attraction is where the park put it.** Each feature is projected
- *    to a pixel and read back out to metres, then compared against a position
- *    re-derived *independently* from the module that owns it — `anchors.ts`,
- *    `stallPlacement.ts`, the built `World`'s fountain and stations. This is
- *    the half that makes the map navigable rather than merely pretty, and it
- *    is deliberately not a round-trip through the same list twice: a
- *    round-trip of an affine map is exact by construction and would be a check
- *    that cannot fail (CLAUDE.md, "a check can pass without checking
- *    anything").
+ * 2. **Every attraction is where the park put it** — measured, wherever it can
+ *    be, against **the object that actually stands in the scene**.
+ *
+ *    This assertion's comment used to claim its truth positions were "derived
+ *    independently" and were "deliberately not a round-trip through the same
+ *    list twice". That was **false**, and PR #353's review caught it: every
+ *    branch read the same module and the same field `parkMapContent.ts` had
+ *    written, so the whole thing was an affine round-trip, exact by
+ *    construction — which is exactly why it reported `0.0000` rather than
+ *    float noise. It could not have failed, and it did not catch three rides
+ *    being drawn up to 22 m from where they stand. A comment asserting the
+ *    opposite of what the code does is the disease CLAUDE.md's "a check can
+ *    pass without checking anything" section is about, so it is worth being
+ *    plain about what each branch is worth now:
+ *
+ *    - **Anchors and the castle** — truth is `scene.getObjectByName('anchor:<id>')`,
+ *      the real `Group` the park built, read out of the finished scene graph.
+ *      This is genuine independence: `AnchorPlots` positions that group itself,
+ *      so a map that picked the wrong field (the entrance rather than the
+ *      centre, say — a 6-14 m error) is caught. These are the attractions, so
+ *      this is where the assertion earns its keep.
+ *    - **Stalls, the fountain and stations** — truth still comes from the same
+ *      owner the content list read, because no separately-positioned scene
+ *      object exists to ask. For these the assertion proves the *projection*
+ *      round-trips and that every drawn feature has a real owner and a
+ *      resolvable id; it does **not** independently prove the content list
+ *      chose the right field. Stated here rather than dressed up.
  * 3. **The map is conformal.** Between every pair of features, the bearing on
  *    the map matches the bearing in the world, and the map-metres-per-world-
  *    metre ratio is the same for all pairs. That is what "relative position,
@@ -54,12 +72,16 @@
  * Every assertion has a `--mutate` mode that breaks the thing it describes
  * while leaving the rest of the map correct — `viewport` reinstates the 66 m
  * square that caused #234, `position` nudges one attraction, `stretch` scales
- * one axis. Each was run and each goes red; the messages are in the PR.
+ * one axis, and **`entrance` draws every ride at its queue rather than at the
+ * ride**, which is the exact class of error the vacuous version of assertion 2
+ * could not see and the scene-graph comparison now can. Each was run and each
+ * goes red; the messages are in the PR.
  */
 
 import { PLAYER_RADIUS } from '../src/core/constants.ts';
 import { PARK_BOUNDARY } from '../src/world/boundary.ts';
-import { ANCHORS_BY_ID } from '../src/world/anchors.ts';
+import { ANCHORS_BY_ID, anchorGroupName, type AnchorId } from '../src/world/anchors.ts';
+import { Vector3 } from 'three';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../src/world/building/layout.ts';
 import { STALL_PLACEMENTS } from '../src/minigames/stallPlacement.ts';
 import { parkMapFeatures, type MapFeature } from '../src/ui/parkMapContent.ts';
@@ -100,8 +122,8 @@ const CANVAS_SIZES: readonly (readonly [number, number, string])[] = [
 
 const mutateArg = process.argv.find((a) => a.startsWith('--mutate'));
 const mutation = mutateArg ? (mutateArg.split('=')[1] ?? 'position') : null;
-if (mutation && !['viewport', 'position', 'stretch'].includes(mutation)) {
-  console.error(`Unknown --mutate=${mutation}. Use viewport, position or stretch.`);
+if (mutation && !['viewport', 'position', 'stretch', 'entrance'].includes(mutation)) {
+  console.error(`Unknown --mutate=${mutation}. Use viewport, position, stretch or entrance.`);
   process.exit(2);
 }
 
@@ -158,6 +180,17 @@ const features = (() => {
   return list.map((f) => (f === victim ? { ...f, x: f.x + 3 } : f));
 })();
 
+// `--mutate=entrance`: every ride drawn at its path entrance instead of at
+// itself. Applied after the list is built, so it exercises assertion 2's
+// scene-graph branch specifically.
+const checkedFeatures = mutation === 'entrance'
+  ? features.map((f) => {
+      if (f.kind !== 'anchor') return f;
+      const anchor = ANCHORS_BY_ID[f.id as keyof typeof ANCHORS_BY_ID];
+      return anchor ? { ...f, x: anchor.entrance[0], z: anchor.entrance[1] } : f;
+    })
+  : features;
+
 /**
  * Where each feature really is, re-derived from the module that owns it rather
  * than read back out of the list under test. See assertion 2's note above:
@@ -166,8 +199,18 @@ const features = (() => {
 function truePosition(feature: MapFeature): readonly [number, number] | null {
   if (feature.kind === 'castle') return [BUILDING_CENTRE_X, BUILDING_CENTRE_Z];
   if (feature.kind === 'anchor') {
+    // The real Group `AnchorPlots` put in the scene, read out of the finished
+    // scene graph — genuinely independent of the table `parkMapContent.ts`
+    // read. This is the branch that can actually fail.
+    const group = park.scene.getObjectByName(anchorGroupName(feature.id as AnchorId));
+    if (group) {
+      group.updateWorldMatrix(true, false);
+      const world = new Vector3();
+      group.getWorldPosition(world);
+      return [world.x, world.z];
+    }
     const anchor = ANCHORS_BY_ID[feature.id as keyof typeof ANCHORS_BY_ID];
-    return anchor ? anchor.entrance : null;
+    return anchor ? anchor.position : null;
   }
   if (feature.kind === 'stall') {
     const placement = STALL_PLACEMENTS[feature.id as keyof typeof STALL_PLACEMENTS];
@@ -227,7 +270,7 @@ let worstPositionM = 0;
 let worstPositionId = '';
 for (const [width, height, name] of CANVAS_SIZES) {
   const projection = projectionFor(width, height);
-  for (const feature of features) {
+  for (const feature of checkedFeatures) {
     const truth = truePosition(feature);
     if (!truth) {
       failures.push(`NO TRUTH SOURCE for map feature "${feature.id}" (${feature.kind}).`);
@@ -251,7 +294,7 @@ for (const [width, height, name] of CANVAS_SIZES) {
   }
 }
 notes.push(
-  `position fidelity: ${features.length} features, worst error ${worstPositionM.toFixed(4)} m` +
+  `position fidelity: ${checkedFeatures.length} features, worst error ${worstPositionM.toFixed(4)} m` +
     (worstPositionId ? ` (${worstPositionId})` : '') +
     `, tolerance ${POSITION_TOLERANCE_M.toFixed(2)} m`,
 );
@@ -264,10 +307,10 @@ notes.push(
   let worstBearingPair = '';
   let minRatio = Infinity;
   let maxRatio = 0;
-  for (let i = 0; i < features.length; i += 1) {
-    for (let j = i + 1; j < features.length; j += 1) {
-      const a = features[i] as MapFeature;
-      const b = features[j] as MapFeature;
+  for (let i = 0; i < checkedFeatures.length; i += 1) {
+    for (let j = i + 1; j < checkedFeatures.length; j += 1) {
+      const a = checkedFeatures[i] as MapFeature;
+      const b = checkedFeatures[j] as MapFeature;
       const worldDist = Math.hypot(b.x - a.x, b.z - a.z);
       if (worldDist < 1) continue; // two things all but on top of each other
       const [ax, ay] = projection.toCanvas(a.x, a.z);
@@ -305,7 +348,7 @@ notes.push(
   }
   notes.push(
     `conformality: worst bearing error ${worstBearingDeg.toFixed(3)}°, ` +
-      `scale spread ${(spread * 100).toFixed(3)}% over ${features.length} features`,
+      `scale spread ${(spread * 100).toFixed(3)}% over ${checkedFeatures.length} features`,
   );
 }
 
