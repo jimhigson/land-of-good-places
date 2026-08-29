@@ -1018,3 +1018,371 @@ function roundedRect(
   ctx.arcTo(x, y, x + width, y, r);
   ctx.closePath();
 }
+
+/**
+ * **Paint for the castle's inside** (issue #376).
+ *
+ * Jim, looking at the merged interior: *"still feels very sparse … mostly empty
+ * rooms right now."* Most of what follows is answering that with a canvas
+ * rather than with geometry, because a picture on a flat quad is the cheapest
+ * thing in the game that a child will actually stop and look at.
+ *
+ * These are **decals, not tiling maps**, so unlike {@link castleCoursingTexture}
+ * and {@link castleFlagstoneTexture} they build their `CanvasTexture` by hand
+ * instead of going through `finish()`: `finish` sets `RepeatWrapping`, which on
+ * a single quad wraps the edge of a picture round onto its opposite side and
+ * puts a seam down a portrait's face. `ClampToEdgeWrapping` is the default and
+ * is what these want.
+ *
+ * All are 256², which is ART_DIRECTION §3's decal budget.
+ */
+
+const DECAL_SIZE = 256;
+
+/** A decal texture: no repeat, no wrap, no seam. */
+function decalTexture(canvas: HTMLCanvasElement): CanvasTexture {
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.anisotropy = 4;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+/**
+ * The smoke stain above a torch.
+ *
+ * A soft plume, widest at the top, with a hard-ish core just above the flame —
+ * which is what soot actually does, and more usefully is what reads as soot
+ * from ten metres at 38°. Drawn in **white with alpha**, because the mesh's
+ * material carries the colour: one texture then works over cream stone and over
+ * the storey tints without a second canvas per colourway.
+ */
+export function castleSootTexture(): CanvasTexture {
+  return cached('castleSoot', () => {
+    const { canvas, ctx } = createCanvas(DECAL_SIZE);
+    const rng = new Rng(0x5007);
+    const mid = DECAL_SIZE / 2;
+
+    // The plume: a stack of circles that widen and fade as they rise. Drawn
+    // from the bottom up so the densest part is where the flame licks the wall.
+    const puffs = 26;
+    for (let i = 0; i < puffs; i += 1) {
+      const t = i / (puffs - 1);
+      // y = 0 is the top of the canvas and the top of the stain.
+      const y = DECAL_SIZE * (1 - t) * 0.96;
+      const radius = 26 + t * 74;
+      const alpha = (1 - t) * 0.5 + 0.04;
+      const gradient = ctx.createRadialGradient(
+        mid + rng.range(-12, 12),
+        y,
+        0,
+        mid,
+        y,
+        radius,
+      );
+      gradient.addColorStop(0, `rgba(255,255,255,${alpha.toFixed(3)})`);
+      gradient.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, y - radius, DECAL_SIZE, radius * 2);
+    }
+
+    // A few flecks, so the edge of the plume is not a perfect airbrush.
+    for (let i = 0; i < 40; i += 1) {
+      const t = rng.range(0, 1);
+      ctx.fillStyle = `rgba(255,255,255,${(0.3 * (1 - t)).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(
+        mid + rng.range(-1, 1) * (24 + t * 62),
+        DECAL_SIZE * (1 - t),
+        rng.range(2, 7),
+        0,
+        Math.PI * 2,
+      );
+      ctx.fill();
+    }
+
+    return decalTexture(canvas);
+  });
+}
+
+/** The heraldry the castle's cloth is painted with. */
+export type CastleDevice = 'dragon' | 'star' | 'heart';
+
+/**
+ * A banner: a bold field, a chevron and one big device.
+ *
+ * **Three shapes and two colours, and no more than that.** A banner is seen at
+ * ten metres from a 38° camera and mostly in the top third of frame, where it
+ * is also the thing furthest from the eye. Everything that made earlier drafts
+ * look "detailed" — a border, a motto, quartering — turned to mush at that size
+ * and cost the silhouette, which is the only part that survives. §4's
+ * "recognisable beats measured", applied to a picture.
+ */
+export function castleBannerTexture(field: number, device: CastleDevice): CanvasTexture {
+  return cached(`castleBanner:${field}:${device}`, () => {
+    const { canvas, ctx } = createCanvas(DECAL_SIZE);
+    const mid = DECAL_SIZE / 2;
+
+    ctx.fillStyle = hexToCss(field);
+    ctx.fillRect(0, 0, DECAL_SIZE, DECAL_SIZE);
+
+    // A chevron across the top third, in cream: it stops a long cloth reading
+    // as one flat rectangle when only its top half is above a child's eyeline.
+    ctx.fillStyle = hexToCss(PALETTE.blossomWhite);
+    ctx.beginPath();
+    ctx.moveTo(0, 44);
+    ctx.lineTo(mid, 96);
+    ctx.lineTo(DECAL_SIZE, 44);
+    ctx.lineTo(DECAL_SIZE, 78);
+    ctx.lineTo(mid, 130);
+    ctx.lineTo(0, 78);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = hexToCss(PALETTE.blossomWhite);
+    drawDevice(ctx, device, mid, 178, 58);
+
+    return decalTexture(canvas);
+  });
+}
+
+/**
+ * The coat of arms over the front door: the same devices on a shield outline.
+ *
+ * Shares {@link drawDevice} with the banners on purpose — a castle whose door
+ * carries a different dragon from its cloth is a castle with two heraldries.
+ */
+export function castleArmsTexture(field: number, device: CastleDevice): CanvasTexture {
+  return cached(`castleArms:${field}:${device}`, () => {
+    const { canvas, ctx } = createCanvas(DECAL_SIZE);
+    const mid = DECAL_SIZE / 2;
+
+    // The shield: square-shouldered, curving to a point. Drawn as alpha so the
+    // quad it lives on has no visible corners.
+    ctx.beginPath();
+    ctx.moveTo(24, 20);
+    ctx.lineTo(DECAL_SIZE - 24, 20);
+    ctx.lineTo(DECAL_SIZE - 24, 132);
+    ctx.quadraticCurveTo(DECAL_SIZE - 24, 216, mid, DECAL_SIZE - 14);
+    ctx.quadraticCurveTo(24, 216, 24, 132);
+    ctx.closePath();
+
+    ctx.fillStyle = hexToCss(PALETTE.woodDark);
+    ctx.fill();
+    ctx.save();
+    ctx.clip();
+    ctx.fillStyle = hexToCss(field);
+    ctx.fillRect(14, 30, DECAL_SIZE - 28, DECAL_SIZE - 30);
+    ctx.fillStyle = hexToCss(PALETTE.blossomWhite);
+    drawDevice(ctx, device, mid, 128, 66);
+    ctx.restore();
+
+    return decalTexture(canvas);
+  });
+}
+
+/**
+ * One heraldic device, centred on `(cx, cy)` and `size` across.
+ *
+ * The dragon is four shapes — body, neck, head, wing — and that is the whole
+ * animal. Anything more disappears at the size it is actually seen.
+ */
+function drawDevice(
+  ctx: CanvasRenderingContext2D,
+  device: CastleDevice,
+  cx: number,
+  cy: number,
+  size: number,
+): void {
+  if (device === 'star') {
+    ctx.beginPath();
+    for (let i = 0; i < 10; i += 1) {
+      const angle = (i / 10) * Math.PI * 2 - Math.PI / 2;
+      const radius = i % 2 === 0 ? size : size * 0.44;
+      const x = cx + Math.cos(angle) * radius;
+      const y = cy + Math.sin(angle) * radius;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fill();
+    return;
+  }
+
+  if (device === 'heart') {
+    const r = size * 0.52;
+    ctx.beginPath();
+    ctx.arc(cx - r * 0.55, cy - r * 0.3, r * 0.62, 0, Math.PI * 2);
+    ctx.arc(cx + r * 0.55, cy - r * 0.3, r * 0.62, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(cx - r * 1.12, cy - r * 0.14);
+    ctx.lineTo(cx, cy + r * 1.16);
+    ctx.lineTo(cx + r * 1.12, cy - r * 0.14);
+    ctx.closePath();
+    ctx.fill();
+    return;
+  }
+
+  // A dragon, sitting up, wing out, looking to the left.
+  const s = size / 60;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + 8 * s, 26 * s, 20 * s, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Neck and head.
+  ctx.beginPath();
+  ctx.moveTo(cx - 6 * s, cy - 4 * s);
+  ctx.lineTo(cx - 30 * s, cy - 34 * s);
+  ctx.lineTo(cx - 14 * s, cy - 36 * s);
+  ctx.lineTo(cx + 6 * s, cy - 8 * s);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(cx - 30 * s, cy - 38 * s, 15 * s, 10 * s, -0.4, 0, Math.PI * 2);
+  ctx.fill();
+  // Wing, and the tail.
+  ctx.beginPath();
+  ctx.moveTo(cx + 4 * s, cy - 6 * s);
+  ctx.lineTo(cx + 40 * s, cy - 40 * s);
+  ctx.lineTo(cx + 34 * s, cy - 2 * s);
+  ctx.lineTo(cx + 44 * s, cy + 6 * s);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(cx + 18 * s, cy + 18 * s);
+  ctx.lineTo(cx + 52 * s, cy + 34 * s);
+  ctx.lineTo(cx + 18 * s, cy + 30 * s);
+  ctx.closePath();
+  ctx.fill();
+}
+
+/** Which picture hangs in a frame on the castle wall. */
+export type CastlePainting = 'lady' | 'dragon' | 'knight';
+
+/**
+ * A painting for a frame on the wall.
+ *
+ * Deliberately naive — flat shapes on a flat ground, the way a child paints a
+ * person. It is a picture *in the world*, so it must not out-render the world
+ * it hangs in: a realistic portrait in this park reads as a photograph
+ * somebody has taped to a toy castle.
+ */
+export function castlePaintingTexture(subject: CastlePainting): CanvasTexture {
+  return cached(`castlePainting:${subject}`, () => {
+    const { canvas, ctx } = createCanvas(DECAL_SIZE);
+    const mid = DECAL_SIZE / 2;
+
+    const ground = subject === 'dragon' ? PALETTE.skyDayBottom : PALETTE.stonePinkDark;
+    ctx.fillStyle = hexToCss(ground);
+    ctx.fillRect(0, 0, DECAL_SIZE, DECAL_SIZE);
+
+    if (subject === 'dragon') {
+      // Hills, then the dragon over them, so the animal is plainly in front.
+      ctx.fillStyle = hexToCss(PALETTE.leafDeep);
+      ctx.beginPath();
+      ctx.ellipse(60, DECAL_SIZE + 20, 120, 96, 0, 0, Math.PI * 2);
+      ctx.ellipse(210, DECAL_SIZE + 34, 110, 90, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = hexToCss(PALETTE.leafMid);
+      drawDevice(ctx, 'dragon', mid + 6, 116, 70);
+      // One eye, because a face with an eye is a face.
+      ctx.fillStyle = hexToCss(PALETTE.ink);
+      ctx.beginPath();
+      ctx.arc(mid - 32, 68, 6, 0, Math.PI * 2);
+      ctx.fill();
+      return decalTexture(canvas);
+    }
+
+    // A portrait: shoulders, head, hair, and a hat if it is the knight.
+    const bodyColour = subject === 'knight' ? PALETTE.buildingTrimDeep : PALETTE.blossomPink;
+    ctx.fillStyle = hexToCss(bodyColour);
+    ctx.beginPath();
+    ctx.ellipse(mid, DECAL_SIZE + 42, 104, 128, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = hexToCss(PALETTE.hair);
+    ctx.beginPath();
+    ctx.ellipse(mid, 118, 70, 78, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = hexToCss(PALETTE.skin);
+    ctx.beginPath();
+    ctx.ellipse(mid, 128, 52, 60, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = hexToCss(PALETTE.ink);
+    for (const dx of [-20, 20]) {
+      ctx.beginPath();
+      ctx.arc(mid + dx, 124, 7, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.strokeStyle = hexToCss(PALETTE.ink);
+    ctx.lineWidth = 5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(mid, 148, 18, 0.2, Math.PI - 0.2);
+    ctx.stroke();
+
+    ctx.fillStyle = hexToCss(PALETTE.cheek);
+    for (const dx of [-36, 36]) {
+      ctx.beginPath();
+      ctx.arc(mid + dx, 146, 11, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    if (subject === 'knight') {
+      ctx.fillStyle = hexToCss(PALETTE.stonePinkLight);
+      roundedRect(ctx, mid - 62, 44, 124, 34, 12);
+      ctx.fill();
+    }
+
+    return decalTexture(canvas);
+  });
+}
+
+/**
+ * The big round rug that goes on the roundel.
+ *
+ * Concentric bands with a scalloped inner ring, so it reads as woven from
+ * directly overhead — which, at 38° over a floor, is roughly how it is seen.
+ * Non-tiling: it is one disc, and a repeat would put a seam across its middle.
+ */
+export function castleRugTexture(): CanvasTexture {
+  return cached('castleRug', () => {
+    const size = 512;
+    const { canvas, ctx } = createCanvas(size);
+    const mid = size / 2;
+
+    const bands: readonly [number, number][] = [
+      [0.5, PALETTE.blossomPink],
+      [0.44, PALETTE.buildingTrimDeep],
+      [0.4, PALETTE.blossomWhite],
+      [0.3, PALETTE.markerLilac],
+      [0.12, PALETTE.flowerYellow],
+    ];
+    for (const [radius, colour] of bands) {
+      ctx.fillStyle = hexToCss(colour);
+      ctx.beginPath();
+      ctx.arc(mid, mid, size * radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // A ring of scallops round the pale band: the one detail that stops five
+    // concentric circles reading as a dartboard.
+    ctx.fillStyle = hexToCss(PALETTE.markerPink);
+    for (let i = 0; i < 24; i += 1) {
+      const angle = (i / 24) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.arc(
+        mid + Math.cos(angle) * size * 0.35,
+        mid + Math.sin(angle) * size * 0.35,
+        size * 0.035,
+        0,
+        Math.PI * 2,
+      );
+      ctx.fill();
+    }
+
+    return decalTexture(canvas);
+  });
+}

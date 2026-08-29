@@ -36,6 +36,8 @@ import { Trampoline } from './Trampoline';
 import { WalkSurfaces } from './surfaces';
 import { buildingInteractZones } from './interactZones';
 import { dressDeck } from './dressing';
+import { CastleFire } from './castleLighting';
+import { dressCastle } from './castleDecor';
 import type { InteractZone } from '../interact';
 import { softMaterial } from './parts';
 import {
@@ -473,6 +475,16 @@ export class Building implements GameSystem {
   private readonly trampoline = new Trampoline();
   private readonly bubble = new Bubble();
   private readonly fader = new FloorFader();
+
+  /**
+   * Every torch, brazier and hearth in the castle, and the one number per
+   * storey that makes them flicker (issue #376).
+   *
+   * Owned here rather than by `dressing.ts` because it is the only piece of the
+   * decoration with a per-frame life. It is dressed in **before** the fader
+   * claims materials, which is load-bearing — see `castleLighting.ts`.
+   */
+  private readonly castleFire = new CastleFire();
   private readonly grownUp = new GrownUp();
   private readonly toilets: Toilets;
   private readonly helterSkelter: SlideRide;
@@ -555,7 +567,12 @@ export class Building implements GameSystem {
     addRideEntrances(this.shell.floorGroups);
     // Roundels, planters and benches, so sixty metres of floor plate reads as a
     // place rather than a car park. Must be before the fader claims materials.
-    this.shell.floorGroups.forEach((floor, deck) => dressDeck(deck, floor));
+    this.shell.floorGroups.forEach((floor, deck) => {
+      dressDeck(deck, floor);
+      // Fire, cloth, paint and the things that reward looking twice (#376).
+      this.castleFire.dress(deck, floor);
+      dressCastle(deck, floor);
+    });
     this.interiorRoot.add(this.grownUp.root);
     this.placeGrownUp();
 
@@ -825,6 +842,9 @@ export class Building implements GameSystem {
     this.trampoline.update(dt);
     this.toilets.update(dt, elapsed, this.toiletOccupied());
     this.ballPit.update(dt, elapsed);
+    // Deliberately above the `!player` return: the fire burns whether or not
+    // anybody is standing in the room, which is also what makes it screenshot.
+    this.castleFire.update(elapsed);
 
     const player = this.player;
     if (!player) return;
