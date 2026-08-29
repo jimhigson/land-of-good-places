@@ -548,6 +548,33 @@ red at exit 1 by putting the old name back.
 **Run `npm run test:procgen` as well as `npm run build` before every push on
 this branch.** They do not cover each other.
 
+### ⚠️ The hole assertion is armed but **not currently exercised**
+
+**Read this before concluding the check has rotted.** Deleting `solidRun`'s body
+on the geometry as it ships today gives **416 segments and exit 0** — the check
+stays green.
+
+That is not a regression, and the logic is intact. The plate is now **flush**
+with the wall (`PLATE_INSET = BEAM_WIDTH / 2` = 0.20 m, against 0.90 m before
+the sightline fix), so it never reaches far enough into the room to meet a
+shaft: 0 of 416 segments sit over a hole by centre or by full footprint, and
+therefore the hole test currently rejects nothing. There is nothing left for
+deleting it to change.
+
+**To arm it you must move the plate back as well**: `PLATE_INSET = 0.9` *and*
+`solidRun → return true` gives 28 footprint failures (plus 1 sightline), exit 1.
+
+So this assertion guards a **future** change rather than today's build — which
+is exactly when it will matter, because the plate moving off the wall is the
+one edit that would put it over a shaft again. But it is currently vacuous for
+the shipped geometry, and saying so is the point: **I previously wrote that
+deleting the hole test "still fires at 28 failures", and that was a stale claim
+about a measurement** — true of the 0.9 m geometry, untrue the moment the plate
+moved flush. A replacement who tried it and got exit 0 would reasonably have
+concluded the check had rotted. It is the same species of fault as the Artist's
+1.86 m scale post and my own two-dot diff readings: the number was right once,
+and nothing announced when it stopped being.
+
 ### Two more ways it could not fail, both found by review
 
 Both were the same disease, and the one this file's own header forbids: **the
@@ -570,10 +597,12 @@ instance matrix.
 Proved red, both, before trusting either green:
 
 ```
-$ # solidRun replaced with `return true`
-check:castle — 28 failure(s):
+$ # solidRun replaced with `return true` — AND the plate moved back off the
+$ # wall to PLATE_INSET = 0.9. Both are needed; see the warning below.
+check:castle — 29 failure(s):
   x beams: deck 0 segment 15 covers (0.50, -20.93), where deck 1 has a hole —
-    part of it is fixed to a ceiling that is not there.
+    part of it is fixed to a ceiling that is not there.        [x28]
+  x sightline: the wall-plate stands 1.250 m off the wall ...    [x1]
 exit 1
 
 $ # BoxGeometry(BEAM_SEGMENT, BEAM_WIDTH, BEAM_DEPTH) — two args swapped
