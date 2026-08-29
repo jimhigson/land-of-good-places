@@ -1,7 +1,7 @@
 # HANDOFF — the bridge, remodelled (3D Artist)
 
 Branch `art/bridge-model`, worktree `.claude/worktrees/bridge-model`, off
-`origin/main`.
+`origin/main`. Paired with the Engineer on `bridge-paving-clip` (#349, PR #352).
 
 ## The brief (Jim, 2026-08-29)
 
@@ -10,114 +10,142 @@ Branch `art/bridge-model`, worktree `.claude/worktrees/bridge-model`, off
 > 40% shorter than currently made (also will need to be steeper for this) and
 > a more pronounced 'hump' shape to the bridge.
 
-And, the same day, via the Overseer:
+Plus, the same day: *"it is ok for the gradient to be quite steep — we are
+building a cartoonish game here, not a real physics simulation."* Plausibility
+is waived; playability is not.
 
-> it is ok for the gradient to be quite steep — we are building a cartoonish
-> game here, not a real physics simulation — if it would not be plausible in
-> real life I don't mind
+Acceptance test, his words: **"there should be just a bridge with nothing
+clipping inside it as part of the park scenery."**
 
-So: exaggerate the form, not the interface. `ASSET_MANIFEST.md`'s contract and
-the Engineer's dimensional contract still bind.
+## Status: complete, PR raised, not merged
 
-## Ownership split with the Engineer (`bridge-paving-clip`, issue #349, PR #352)
+- [x] kit modelled in Blender, rendered, judged
+- [x] shipped through the existing GLB pipeline
+- [x] genuine three-centred arch + modelled ring + coping + imposts + coursing
+- [x] parapet arc (the pronounced hump)
+- [x] `ASSET_MANIFEST.md` entry
+- [x] procgen invariant, broken deliberately and watched go red
+- [x] `npm run build` exit 0, `npx tsc --noEmit` exit 0, `npm run test:procgen`
+      448 passed / 14 files
 
-- **They own** span, rise, ramp gradient, deck width, arch opening dimensions,
-  wall height, placement, and the clipping bug.
-- **I own** the mesh: coping stones, arch masonry, the hump as sculpted form.
+## ⚠️ THREE THINGS THAT ARE NOT MINE TO CLOSE
 
-Their handoff (`HANDOFF-bridge-clipping-349.md` on `bridge-paving-clip`) is
-**complete for the clipping fix but carries no dimensional contract yet** as of
-the time I started. Numbers below are therefore *my measurement of `main`*, to
-be reconciled when their contract lands.
+**1. The silhouette is a triangle, not a hump — and the lever is the road's.**
+With `HUMP_BLEND` trimmed to 0.15 for sprint safety, the ramps are very nearly
+straight lines, so the bridge's outline is a pyramid with a domed top. My
+`PARAPET_ARC_RISE` of 0.45 m is real curvature but it is 0.45 m against a
+4.24 m rise: it is a bow, not a hump. **If Jim looks at this and says it still
+is not humped enough, the answer is the road's blend, not more parapet arc** —
+see point 2 for why I cannot simply raise mine. The Overseer records that the
+0.15 trim is provisional pending a fix to the underlying walk-physics defect;
+when that lands, the blend goes back up and the silhouette follows for free.
 
-## Numbers measured off `main` (not invented)
+**2. The parapet arc is capped by an absolute GAME_DESIGN rule, not by taste.**
+0.45 m puts the coping's top 1.37 m over the road at the crown. At the park's
+45° camera a sight line grazing the near parapet has fallen below the road by
+the time it reaches a child, so she is not occluded at all — I checked the
+geometry, it is in `PARAPET_ARC_RISE`'s own note. Going much past this starts
+eating her from the game's own view, and *"a small bridge does not obscure a
+player walking on it"* is absolute. Do not raise it without deciding that rule
+is being traded.
 
-| | value | source |
-| --- | --- | --- |
-| `BRIDGE_RISE` | 4.03 m | `TRAIN_CLEARANCE_Y` 3.87 + `BRIDGE_DECK_DEPTH` 0.16 |
-| `BRIDGE_RAMP_GRADIENT` | 0.268 | `ENTRANCE_RAMP` 0.75 / 2.8 |
-| ideal ramp run, each side | 15.0 m | rise / gradient |
-| `DECK_HALF_LENGTH` = `ARCH_SPAN_HALF` | 3.2 m | `FENCE_OFFSET` 2.0 + 1.2 |
-| `ARCH_CLEAR_HALF` | 1.8 m | `TRACK_CLEARANCE` 1.3 + 0.5 |
-| **total bridge length today** | **~36.5 m** | 2×3.2 + 2×15.0 |
-| **40% shorter** | **~21.9 m** | Jim's ask |
-| ⇒ ramp run each side | 7.76 m | (21.9 − 6.4) / 2 |
-| ⇒ average ramp gradient | **0.52** | 4.03 / 7.76 |
+**3. The arch's dip spends the Engineer's collision margin.** A curved crown
+must rise by its own dip, because clearance is measured where the arch is
+lowest over the track. That is deck height, and deck height on a 40%-shorter
+bridge is ramp slope. `ARCH_CROWN_DIP` is deliberately **one tunable** with a
+costed table beside it in `bridgeStonework.ts`:
 
-`MAX_RAMP_GRADIENT` is 0.60, so **40% shorter fits under the existing cap**
-with room to spare. Peak slope on the trapezoid profile is 1.333× average =
-0.69, which costs 0.617 × 0.69 = 0.43 m of height per worst-case frame against
-`BUILDING_STEP_UP`'s 0.62 ceiling — still a third of the ceiling spare, i.e.
-the walkability argument in `bridges.ts`'s `HUMP_BLEND` note still holds.
-**Jim's 40% is achievable; nothing here has to be compromised for it.**
+| shape | arch rise/span | deck rise | peak slope | % of fall-through ceiling |
+| --- | --- | --- | --- | --- |
+| flat crown (before) | — | 4.060 | 0.693 | 69% |
+| dip 0.10 | 0.26 | 4.160 | 0.710 | 71% |
+| **dip 0.18 (shipped)** | **0.30** | **4.240** | **0.723** | **72%** |
+| dip 0.35 | 0.38 | 4.410 | 0.752 | 75% |
+| semicircle | 0.50 | 4.614 | 0.787 | 78% |
 
-## The arch: what "genuine" costs
+79% is the figure real-browser QA has watched a running child fall through at.
+**If the walk-physics fix buys margin back, raise the dip and the arch gets
+rounder for free.** Re-run `npm run blend:bridge-stones` after changing it —
+the authored voussoir is cut for the haunch radius that number decides, and
+`bridges.ts` throws at module load if the two stop agreeing.
 
-The soffit today is a **flat crown** over |along| ≤ 1.8 with quarter-round
-haunches — a tangent break, and it reads flat from the mouth. A genuine arch
-dips at the crown edge, and the crown must rise by that dip to keep the train's
-clearance, since `soffitCrownY` sits *exactly* on `TRAIN_CLEARANCE_Y` today.
+## What was built
 
-Costed three shapes (dip measured at |along| = `ARCH_CLEAR_HALF`):
+**The kit** (`art/blend/bridge_stones_build.py` → `bridgeStones.blend` →
+`bridge_stones_export.py` → `src/art/assets/bridgeStones.glb`, 9.2 KB →
+`npm run pack:bridge-stones`). Three stones: `coping`, `voussoir`, `keystone`.
+Same route as the kid, cart, duck bar and hotel — no second pipeline.
 
-| shape | rise/span | extra crown height |
-| --- | --- | --- |
-| semicircle, R = 3.2 | 0.50 | **+0.554 m** |
-| three-centred, dip 0.35 | 0.38 | **+0.35 m** |
-| three-centred, dip 0.10 | 0.26 | +0.10 m |
+**Why a kit, not a bridge model.** A bridge here is solved per crossing —
+variable span, two variable ramps, a crown solved against the terrain — and it
+follows the drawn path's own curve through `SpineFrame`. No rigid `.glb` can be
+that. `bridgeStonework.ts` bakes many transformed copies of each authored
+geometry into one `BufferGeometry` per bridge: authored shape, one draw call,
+and the sweep still follows the curve.
 
-**Chosen: three-centred, dip 0.35 m.** Continuously curved (no flat segment,
-no tangent break), visibly arched, and only 0.35 m of extra crown — which the
-gradient budget above absorbs (0.52 → 0.56 average). A semicircle would be the
-storybook ideal but pushes the average gradient to 0.59, flush against
-`MAX_RAMP_GRADIENT`, for 0.2 m of extra crown; not worth spending the
-Engineer's entire margin on.
+**Every stone is placed individually through the frame, and stands proud of the
+face it decorates.** Both deliberate. A rigid ring on a curving spine parts
+company with the swept spandrel exactly the way the old `deckMesh` box did
+(*"there's still a big hole in the mesh"*), and a stone standing proud of solid
+stone can be millimetres out without ever opening daylight.
 
-Derivation, crown radius `R1` and haunch radius `R2`, tangent-continuous:
+**`src/art/models/bridgeStones.ts` owns every dimension**; the Blender script
+reads them back with `ts_const`, as `hotel_build.py` reads `kid.ts`. One
+definition, not two agreeing by comment.
+
+**The arch** is three-centred — two tangent-continuous circular arcs, no flat
+segment, no tangent break. `bridgeStonework.ts`'s `archCurve` is the single
+owner: `bridges.ts` asks it where the soffit is, and it asks itself where each
+voussoir goes, so the stone a child sees and the hole a train goes through
+cannot be two different arches.
+
+**The parapet top line** has one owner too, `parapetTopFor` in `bridges.ts` —
+the shell draws it, the collision walls stop at it, the coping sits on it. A
+collider left at the un-arced height would have let a child climb the drawn
+stone and step over the side.
+
+**The flank is coursed** — levelled bands, alternate ones recessed 6 cm.
+Recessed *inward* only: `halfAcross` is the width the footprint search proved
+clear, so the wall may get thinner than it, never fatter. The outer wall still
+runs half a metre under the terrain, which is what stops a bridge floating over
+its own ground, and that stays.
+
+## Renders (`art/renders/`)
+
+`bridge-iso` (the game's 45°), `bridge-arch` (ring + keystone square on),
+`bridge-flank` (**a child's eye at the ramp foot — the shot the coursing is
+for**), `bridge-coping` (the run over the hump), `bridge-silhouette`.
+
+Rebuild them with
+`blender --background --factory-startup --python art/blend/bridge_stones_render.py`.
+The preview assembles a whole bridge from the kit using the *same* arch and
+hump maths the game does; if the two ever disagree, the render is the one that
+is wrong.
+
+## Two preview-only bugs worth not re-finding
+
+- A strip that **skips** a clamped-away sample bridges the gap to the next one.
+  It drew flat bars straight across the tunnel mouth. `bridges.ts` is immune by
+  construction — every ring keeps the same course count and emits degenerate
+  pairs instead.
+- A `SOLIDIFY` offset follows the strip's own winding, so half the courses were
+  pushed *into* the wall and vanished. Straddle the face instead.
+
+## The invariant
+
+`nothingHangsIntoTheTunnel` in `test/procgen/invariants.ts`. Fires rays **up**
+from the rail, across the train's swept width, and looks at what it hits first
+— the real built stone, not the invisible `deck` marker, which is a claim
+`bridges.ts` makes about its own arch. Broken deliberately it goes red on all
+five seeds:
 
 ```
-R1  = (ARCH_CLEAR_HALF² + d²) / (2d)          = 4.804   (d = 0.35)
-φ1  = asin(ARCH_CLEAR_HALF / R1)              = 22.0°
-R2  = (ARCH_SPAN_HALF − ARCH_CLEAR_HALF) / (1 − sin φ1) = 2.239
-springing = soffitCrownY − d − R2·cos φ1      = soffitCrownY − 2.426
+bridge-172.0 leaves only 3.87 m of air over the rail against the 3.90 m the
+train and its riders sweep to — lowest built stone is shell at (-19.8, 35.3)
 ```
-
-The `deck` marker mesh the invariants measure moves down to `soffitCrownY − d`
-— the arch's real binding point — so the clearance check stays honest.
-
-## The pipeline route
-
-Followed the **cart/hotel GLB route**, not a second one:
-`art/blend/bridge_stones_build.py` → `art/blend/bridgeStones.blend` →
-`art/blend/bridge_stones_export.py` → `src/art/assets/bridgeStones.glb` →
-`npm run pack:bridge-stones` → `src/art/assets/bridgeStonesGlb.ts`.
-
-**Why a kit of three stones and not a whole bridge model:** the bridge is
-per-crossing parametric — variable span, variable ramp lengths, and it follows
-the drawn path's own curve through `SpineFrame`. A single rigid `.glb` cannot
-be that. So Blender authors the *repeating units* — one coping block, one
-voussoir, one keystone — and `bridges.ts` bakes many transformed copies of each
-authored geometry into one `BufferGeometry` per bridge (one draw call, no
-per-stone `Mesh`).
-
-Placing each stone individually through the frame, rather than one rigid ring,
-is deliberate: on a curved spine a rigid ring would part company with the
-swept spandrel exactly the way the old `deckMesh` box did (Jim's "there's still
-a big hole in the mesh"). Each stone also stands **proud** of the spandrel
-face, so it is an appliqué on solid stone — a placement error can never open
-daylight.
-
-`src/art/models/bridgeStones.ts` is the **single owner** of the kit's numbers;
-the Blender script reads them back out of it with `ts_const`, exactly as
-`hotel_build.py` reads `kid.ts`.
-
-## Status
-
-- [x] Blender MCP confirmed live (default scene: Cube/Camera/Light, untouched)
-- [ ] kit modelled + rendered
-- [ ] arch curve + rings + coping wired into `bridges.ts`
-- [ ] `ASSET_MANIFEST.md` entry, PR
 
 ## Do not touch
 
-`Untitled.blend` in the repo root is Jim's.
+`Untitled.blend` in the repo root is Jim's. The live Blender instance is
+shared — every script here runs `--background --factory-startup` so it can
+never reach into it.
