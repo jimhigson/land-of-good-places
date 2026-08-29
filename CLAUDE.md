@@ -133,6 +133,26 @@ the Overseer rather than signing it off.
 - Never `git add -A` or `git add .`. Name the files you mean.
 - `.claude/` is gitignored; worktree gitlinks must never reach `main`.
 
+## A check that never runs is worse than a check that fails
+
+**If you touch the `build` chain in `package.json`, verify it by parsing the
+`scripts` object — never by grepping the file.**
+
+```
+node -e "console.log(Object.keys(require('./package.json').scripts))"
+```
+
+On 29 August a rebase conflict on the `build` line was resolved with
+`--ours`, which took `main`'s whole chain and **silently dropped a new
+`check:castle` step**. It looked resolved: the diff stat was clean, the file
+parsed, and `grep check:castle` matched — because `check:castle-window` was
+already there. The check would simply never have run, and a green build would
+have said so proudly.
+
+**Script names are prefixes of each other**, so grep is structurally unable to
+answer this: `test:procgen` matches `test:procgen:watch` on `main` today.
+Parse the object and look for the name you expect.
+
 ## Zero tolerance for CI failure
 
 **ZERO failures in CI are acceptable.** A failure in CI is just as serious
