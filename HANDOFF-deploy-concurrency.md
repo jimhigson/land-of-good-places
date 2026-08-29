@@ -99,6 +99,12 @@ line will read differently.
 Green run for contrast: exit 0, "landofgoodplaces.blockstack.ing is serving
 958321815761759823c4596bc47bc2cb716c2953 … 1 attempt(s), 0.1 s".
 
+3. **The strongest one — full default window, nothing faked.** Run against the
+   genuinely stranded site with no `--expect` and no shortened timeout: exit
+   **1** after "171.1 s over 18 attempt(s), well past the ~40 s publishing
+   takes". This is the check exactly as CI runs it, and it is the one that
+   demonstrates the grace period does not paper over a real staleness.
+
 ## Gates
 
 - `npx tsc --noEmit` → **0**
