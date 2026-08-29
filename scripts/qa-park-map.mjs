@@ -23,8 +23,15 @@ const seed = process.argv[5] ?? '';
 
 mkdirSync(outDir, { recursive: true });
 
+/**
+ * The four sizes the PR reports label counts at. 320 px is the narrowest phone
+ * worth supporting and is where names are scarcest; landscape is the other
+ * extreme, a short wide card.
+ */
 const SIZES = [
   { name: 'phone', width: 390, height: 844 },
+  { name: 'phone320', width: 320, height: 568 },
+  { name: 'landscape', width: 844, height: 390 },
   { name: 'desktop', width: 1440, height: 900 },
 ];
 
@@ -79,10 +86,19 @@ for (const size of SIZES) {
   if (card) await card.screenshot({ path: file });
   else await page.screenshot({ path: file });
 
+  // Both numbers come off `dataset`, written by the renderer from the lists it
+  // actually drew. Counting painted text runs from outside double-counts a
+  // wrapped name and once produced a "9 of 14" that was really 8.
   const measured = await page.evaluate(() => {
     const canvas = document.querySelector('.parkmap-canvas');
-    const rect = canvas?.getBoundingClientRect();
-    return rect ? { w: Math.round(rect.width), h: Math.round(rect.height) } : null;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    return {
+      w: Math.round(rect.width),
+      h: Math.round(rect.height),
+      labels: Number(canvas.dataset.labelCount ?? -1),
+      features: Number(canvas.dataset.featureCount ?? -1),
+    };
   });
 
   results.push({ size: size.name, file, canvas: measured, errors: errors.length });
@@ -92,5 +108,9 @@ for (const size of SIZES) {
 
 await browser.close();
 for (const r of results) {
-  console.log(`${r.size.padEnd(8)} ${r.file}  canvas ${r.canvas ? `${r.canvas.w}x${r.canvas.h}` : 'n/a'}  errors ${r.errors}`);
+  const c = r.canvas;
+  console.log(
+    `${r.size.padEnd(10)} ${r.file.padEnd(44)} canvas ${c ? `${c.w}x${c.h}` : 'n/a'}` +
+      `  labels ${c ? `${c.labels}/${c.features}` : 'n/a'}  errors ${r.errors}`,
+  );
 }

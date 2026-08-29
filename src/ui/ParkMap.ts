@@ -620,6 +620,10 @@ export class ParkMap {
     // is drawn as two lines — which is exactly how a "9 of 14" was reported to
     // a reviewer who had correctly measured 8.
     this.canvas.dataset.labelCount = String(this.labelBoxes.length);
+    // The denominator, from the same list the renderer drew — so "11 of 16" is
+    // two numbers read off the DOM rather than one read and one remembered.
+    // The remembered one is what went wrong last time.
+    this.canvas.dataset.featureCount = String(this.indoor ? 0 : this.features().length);
   }
 
   private renderOutdoor(): void {
