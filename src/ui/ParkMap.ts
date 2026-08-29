@@ -275,6 +275,8 @@ export class ParkMap {
   private canvasCssHeight = 0;
   /** Rebuilt every render; see `drawLabel`. */
   private readonly labelBoxes: LabelBox[] = [];
+  /** The pictures' own solid cores, so no name is written across one. */
+  private readonly iconBoxes: LabelBox[] = [];
 
   private readonly deps: ParkMapDeps;
 
@@ -575,6 +577,7 @@ export class ParkMap {
   private render(): void {
     // Fresh page, fresh list of where the labels ended up (see `drawLabel`).
     this.labelBoxes.length = 0;
+    this.iconBoxes.length = 0;
     this.canvasWrap.dataset.mode = this.indoor ? 'indoor' : 'outdoor';
     this.floorRow.hidden = !this.indoor;
     this.upButton.disabled = this.viewingDeck >= TOP_DECK;
@@ -721,11 +724,14 @@ export class ParkMap {
       // Reserve the picture's own box, so a *later* name cannot be written
       // across it — labels used to test only against other labels, which is
       // why "The Castle" painted straight over the Ball Pit.
-      this.labelBoxes.push({
-        left: fx - size * 0.42,
-        right: fx + size * 0.42,
-        top: fy - size * 0.5,
-        bottom: fy + size * 0.46,
+      // The picture's solid core only. A sprite's box is mostly air at the
+      // corners, and reserving the whole of it starved the labels: measured at
+      // 7 names of 14 on a desktop, worse than the bug being fixed.
+      this.iconBoxes.push({
+        left: fx - size * 0.3,
+        right: fx + size * 0.3,
+        top: fy - size * 0.42,
+        bottom: fy + size * 0.4,
       });
       placed.push({ px: fx, py: fy, size, label });
     }
@@ -733,11 +739,24 @@ export class ParkMap {
     // that simply cannot be placed is still dropped rather than written over
     // something, but trying the second spot is what turns most of the drops
     // back into readable names on a phone.
+    // Try the name in several places round its own picture before giving up:
+    // under it, over it, then shouldered left and right. Every extra candidate
+    // turns a dropped name back into a readable one, which matters most on a
+    // phone where the park is small and everything is close together.
     for (const item of placed) {
-      const below = item.py + item.size * 0.5;
-      const above = item.py - item.size * 0.56 - minTextPx();
-      if (!this.drawLabel(item.label, item.px, below)) {
-        this.drawLabel(item.label, item.px, above);
+      const below = item.py + item.size * 0.46;
+      const above = item.py - item.size * 0.44 - minTextPx() * 1.2;
+      const shoulder = item.size * 0.55;
+      const candidates: readonly (readonly [number, number])[] = [
+        [item.px, below],
+        [item.px, above],
+        [item.px - shoulder, below],
+        [item.px + shoulder, below],
+        [item.px - shoulder, above],
+        [item.px + shoulder, above],
+      ];
+      for (const [lx, ly] of candidates) {
+        if (this.drawLabel(item.label, lx, ly)) break;
       }
     }
 
@@ -978,27 +997,27 @@ export class ParkMap {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
 
-    const halfWidth = ctx.measureText(text).width / 2 + 2;
+    const lines = this.wrapLabel(text, size);
+    const lineHeight = size * 1.15;
+    const halfWidth = Math.max(...lines.map((line) => ctx.measureText(line).width)) / 2 + 2;
+    const height = lineHeight * lines.length;
+
     // Keep the whole name on the canvas. An attraction near the park's edge
     // sits near the canvas edge too, and a centred label then runs off the
-    // side — "Sunny Side Halt" lost its last word this way. Sliding the text
-    // back in is right where dropping it would not be: the name is the thing a
-    // child is reading, and it still points at its own picture.
-    const centreX = Math.min(
+    // side — "Sunny Side Halt" lost its last word this way.
+    px = Math.min(
       Math.max(px, halfWidth + 2),
       Math.max(halfWidth + 2, this.canvasCssWidth - halfWidth - 2),
     );
-    const clampedY = Math.min(py, Math.max(0, this.canvasCssHeight - size * 1.25));
-    px = centreX;
-    py = clampedY;
+    py = Math.min(Math.max(py, 0), Math.max(0, this.canvasCssHeight - height));
 
     const box: LabelBox = {
       left: px - halfWidth,
       right: px + halfWidth,
       top: py,
-      bottom: py + size * 1.2,
+      bottom: py + height,
     };
-    const collides = this.labelBoxes.some(
+    const collides = [...this.labelBoxes, ...this.iconBoxes].some(
       (other) =>
         box.left < other.right &&
         box.right > other.left &&
@@ -1013,11 +1032,48 @@ export class ParkMap {
 
     ctx.lineWidth = 3;
     ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-    ctx.strokeText(text, px, py);
     ctx.fillStyle = hexToCss(PALETTE.ink);
-    ctx.fillText(text, px, py);
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i] as string;
+      const ly = py + i * lineHeight;
+      ctx.strokeText(line, px, ly);
+      ctx.fillText(line, px, ly);
+    }
     ctx.restore();
     return true;
+  }
+
+  /**
+   * Breaks a long name onto two lines when it is wide for the canvas.
+   *
+   * On a portrait phone the map is only ~325 px across, and "Space Ferris
+   * Wheel" at the TEXT rule's minimum size is most of that — so laid out on
+   * one line, most names overlapped something and were dropped, measured at 4
+   * of 14 painted. Split at the space nearest the middle, a name is about half
+   * as wide and fits beside its neighbours. Nothing is abbreviated: a
+   * six-year-old gets the whole name either way, which is the point of Jim's
+   * "(still labelled)".
+   */
+  private wrapLabel(text: string, size: number): readonly string[] {
+    const ctx = this.ctx;
+    const maxWidth = this.canvasCssWidth * 0.34;
+    if (ctx.measureText(text).width <= maxWidth) return [text];
+    const words = text.split(' ');
+    if (words.length < 2) return [text];
+    // The split closest to halfway, so neither line is a stray word.
+    let best = 1;
+    let bestGap = Infinity;
+    for (let i = 1; i < words.length; i += 1) {
+      const left = ctx.measureText(words.slice(0, i).join(' ')).width;
+      const right = ctx.measureText(words.slice(i).join(' ')).width;
+      const gap = Math.abs(left - right);
+      if (gap < bestGap) {
+        bestGap = gap;
+        best = i;
+      }
+    }
+    void size;
+    return [words.slice(0, best).join(' '), words.slice(best).join(' ')];
   }
 
   private drawPlayerMarker(planeX: number, planeZ: number): void {

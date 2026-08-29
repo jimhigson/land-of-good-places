@@ -2770,7 +2770,12 @@ kbd {
   --shop-accent: var(--lgp-mint);
   position: relative;
   width: min(32.5rem, 96vw);
-  max-height: min(42.5rem, 92vh);
+  /* A definite height, not a cap. The canvas below is `flex: 1`, so this is
+     what lets it claim the leftover space instead of collapsing to a square:
+     on a portrait phone the map used to draw 325x325 inside an 844px-tall
+     screen, and 14 names at the TEXT rule's minimum size simply do not fit in
+     that box — measured at 4 of 14 painted (PR #353 review). */
+  height: min(42.5rem, 92vh);
   display: flex;
   flex-direction: column;
   background: var(--lgp-cream);
@@ -2833,13 +2838,17 @@ kbd {
   border-radius: 1.125rem;
   overflow: hidden;
   background: var(--lgp-sky);
-  /* Outdoors the park reads roughly square; indoors the floor plate is wider
-     than it is deep. Set in `ParkMap.render()` via `dataset.mode`. */
-  aspect-ratio: 1 / 1;
+  /* No aspect ratio outdoors: take whatever height the card has left. The
+     projection fits the park by its tighter axis whatever the shape, so extra
+     height is never distortion — it is room for names. */
+  min-height: 0;
 }
 
 .parkmap-canvas-wrap[data-mode='indoor'] {
+  /* Indoors the floor plate really is wider than it is deep, and there are
+     far fewer labels, so a fixed plate reads better than a stretched one. */
   aspect-ratio: 72 / 52;
+  flex: none;
 }
 
 .parkmap-canvas {
@@ -2883,6 +2892,55 @@ kbd {
   100% {
     transform: translate(-50%, -100%) rotate(0deg) scale(1);
     opacity: 0;
+  }
+}
+
+/* On a phone the map takes the whole screen.
+
+   Not cosmetic: the map has ~14 names to place, and how many of them fit is
+   decided by canvas pixels. Boxed at 96vw inside a rounded card the portrait
+   canvas was 325 px across, where a name at the TEXT rule's minimum size is a
+   third of the width — most names collided and were dropped. Full-bleed buys
+   back every pixel of margin, border and radius. Measured in PR #353's review
+   at 4 of 14 names painted; see `drawLabel` and `wrapLabel`. */
+@media (max-width: 34rem) {
+  .parkmap-card {
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .parkmap-canvas-wrap {
+    margin: 0.25rem 0.25rem 0;
+    border-radius: 0.75rem;
+  }
+}
+
+/* A phone held sideways is the tightest case there is: 390 px of height, of
+   which the title block and the hint line were taking 157, leaving the map
+   202 px tall and 4 names of 14 painted. The chrome is the first thing to go —
+   the title says "Map of the Park" above a picture of the park, and the hint
+   repeats what a tap already teaches. */
+@media (max-height: 30rem) {
+  .parkmap-card .shop-head {
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+  }
+
+  .parkmap-card .shop-glyph,
+  .parkmap-card .shop-greeting,
+  .parkmap-card .shop-hint {
+    display: none;
+  }
+
+  .parkmap-card .shop-title {
+    font-size: var(--lgp-text-min);
+  }
+
+  .parkmap-canvas-wrap {
+    margin: 0.25rem;
   }
 }
 
