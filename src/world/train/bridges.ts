@@ -851,25 +851,10 @@ interface ShellGeometry {
   readonly stone: BufferGeometry;
   readonly coping: BufferGeometry;
   /**
-   * **The parapet top line the shell actually drew**, one entry per ring:
-   * `[side +1, side -1]` world heights at that `along`.
-   *
-   * Handed to `bridgeStonework.ts`'s `buildCopingRun` so the modelled coping
-   * sits on the wall that *exists* rather than on the wall the formula
-   * describes. Those are not the same thing: the drawn wall is this polyline,
-   * sampled every `SHELL_STEP`, and near a ramp foot `parapetHeightFor`
-   * collapses across its whole taper window inside a single 0.6 m step. Asking
-   * the continuous function where to put a stone put blocks up to **0.505 m**
-   * above the stone they were supposed to be sitting on (measured, canonical
-   * seed, both bridges) — invisible in code, and exactly the "two definitions
-   * of one thing" this file keeps being bitten by. One owner: whatever the
-   * sweep drew.
-   */
-  /**
    * **The outer face of the masonry, in plan, as the sweep actually drew it** —
    * one entry per ring, `[x, z]` on each side.
    *
-   * The same medicine `parapetLine` above is for the coping, applied to the
+   * The same medicine `parapetLine` below is for the coping, applied to the
    * paving. `pavingHeightAt` used to decide where lifted paving stops by asking
    * the *analytic* frame (`footprint.covers`, an `across` measured on a curved
    * spine), while the stone is **drawn** as a polyline of straight chords
@@ -889,6 +874,21 @@ interface ShellGeometry {
     readonly minus: readonly [number, number];
   }[];
 
+  /**
+   * **The parapet top line the shell actually drew**, one entry per ring:
+   * `[side +1, side -1]` world heights at that `along`.
+   *
+   * Handed to `bridgeStonework.ts`'s `buildCopingRun` so the modelled coping
+   * sits on the wall that *exists* rather than on the wall the formula
+   * describes. Those are not the same thing: the drawn wall is this polyline,
+   * sampled every `SHELL_STEP`, and near a ramp foot `parapetHeightFor`
+   * collapses across its whole taper window inside a single 0.6 m step. Asking
+   * the continuous function where to put a stone put blocks up to **0.505 m**
+   * above the stone they were supposed to be sitting on (measured, canonical
+   * seed, both bridges) — invisible in code, and exactly the "two definitions
+   * of one thing" this file keeps being bitten by. One owner: whatever the
+   * sweep drew.
+   */
   readonly parapetLine: readonly {
     readonly along: number;
     /** Parapet top, world height, `[side +1, side -1]`. */
