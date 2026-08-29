@@ -156,10 +156,16 @@ const startedAt = Date.now();
 let attempts = 0;
 let last: Reading = {};
 
-// A deploy takes ~40 s, so a disagreement found in the first seconds after a
-// merge is a race, not a defect. Poll for the whole window before calling it,
-// and only then go red — a check that fails while the answer is still on its
+// Publishing is quick once a build has passed (DEPLOY_NOTES.md: live "in about
+// 40 seconds") but not instant, and the edge takes a moment more — so a
+// disagreement seen in the first seconds is a race, not a defect. Poll the whole
+// window before calling it: a check that fails while the answer is still on its
 // way is a flaky check, and flaky is failing (CLAUDE.md).
+//
+// The much longer wait — a deploy still grinding through the 46-step build gate,
+// during which main is *correctly* ahead of live for tens of minutes — is not
+// handled here. `.github/workflows/live-version.yml` waits that out before it
+// ever starts this script.
 for (;;) {
   attempts++;
   last = await readLiveVersion(url);
@@ -169,15 +175,15 @@ for (;;) {
   process.stderr.write(
     `${NAME}: attempt ${attempts} after ${(elapsed / 1000).toFixed(0)} s — ` +
       `live says ${last.version ?? `<${last.problem}>`}, want ${expected.sha}; ` +
-      `retrying (a deploy takes about 40 s)\n`,
+      `retrying (publishing takes about 40 s once a build has passed)\n`,
   );
   await new Promise((resolve) => setTimeout(resolve, INTERVAL_MS));
 }
 
 const elapsedMs = Date.now() - startedAt;
 const elapsedS = (elapsedMs / 1000).toFixed(1);
-/** How long a deploy actually takes end to end (DEPLOY_NOTES.md: "about 40 seconds"). */
-const TYPICAL_DEPLOY_MS = 40_000;
+/** How long publishing takes once the build has passed (DEPLOY_NOTES.md: "about 40 seconds"). */
+const TYPICAL_PUBLISH_MS = 40_000;
 
 if (last.version === expected.sha) {
   console.log(
@@ -188,14 +194,15 @@ if (last.version === expected.sha) {
   console.error(`${NAME}: FAILED — the live site is not serving the newest commit.`);
   console.error(`  live (${url}): ${last.version ?? `unreadable — ${last.problem}`}`);
   console.error(`  wanted:        ${expected.sha}  (from ${expected.source})`);
-  // Say honestly how long it actually waited. Quoting "well past the ~40 s a
-  // deploy takes" after a 25 s run — which a shortened `LIVE_VERSION_TIMEOUT_MS`
-  // makes easy — would be a claim the run does not support.
+  // Say honestly how long it actually waited. Quoting "well past the ~40 s
+  // publishing takes" after a 25 s run — which a shortened
+  // `LIVE_VERSION_TIMEOUT_MS` makes easy — would be a claim the run does not
+  // support.
   console.error(
-    elapsedMs >= TYPICAL_DEPLOY_MS
-      ? `  gave it ${elapsedS} s over ${attempts} attempt(s), well past the ~40 s a deploy takes.`
+    elapsedMs >= TYPICAL_PUBLISH_MS
+      ? `  gave it ${elapsedS} s over ${attempts} attempt(s), well past the ~40 s publishing takes.`
       : `  gave it ${elapsedS} s over ${attempts} attempt(s) — a shortened window ` +
-          `(LIVE_VERSION_TIMEOUT_MS), less than the ~40 s a deploy normally takes.`,
+          `(LIVE_VERSION_TIMEOUT_MS), less than the ~40 s publishing normally takes.`,
   );
   console.error('');
   console.error('  This is exactly the shape of "Deployed still has the old cat bus":');

@@ -55,3 +55,17 @@ and the game is live in about 40 seconds.
   `preview_urls: true` explicitly. If you ever add another route, keep those.
   Verified afterwards: both hostnames return 200 for `/`,
   `/manifest.webmanifest`, `/sw.js`, and a deep link (SPA fallback).
+- 2026-08-29 — **the site silently stopped moving.** `deploy.yml` had
+  `cancel-in-progress: true`, so a merge landing during a deploy *cancelled*
+  it. Because this workflow is also what publishes, the live site sat on
+  `0a5f0380` while `main` was five commits ahead — and a cancelled run is a
+  grey tick, so nothing anywhere was red. Found only because Jim said
+  "Deployed still has the old cat bus", and unstuck by hand with
+  `gh workflow run deploy.yml`. Fixed two ways: deploys now **queue**
+  (`cancel-in-progress: false` — a deploy is a publish step, not a CI check,
+  so the last one must always run), and `npm run check:live-version` +
+  `.github/workflows/live-version.yml` now ask the live site what commit it is
+  serving after every Deploy run *however it ended*, on a half-hourly cron, and
+  on demand — opening a GitHub issue when it is behind. **If you are ever
+  wondering again whether live is current, that is one command:**
+  `npm run check:live-version`.
