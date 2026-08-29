@@ -4199,10 +4199,41 @@ function* addInterconnects(
       restoreLatticeState(beforeConnector);
       continue;
     }
+    // **The disproportion escape** (issue #361). Both screens below drop
+    // paving on the principle that a *shortcut* never outranks the park's
+    // own structure. That principle holds right up to the point where the
+    // structure-respecting alternative stops being a detour and becomes a
+    // walk round the park: seed 11 put `ballPit` and `exit-ginormousSlide`
+    // 14.1 m apart and 238.7 m apart by paving — 17x — and a six-year-old
+    // who can see the slide exit from the ball pit is not walking that.
+    //
+    // The line between "tidy" and "absurd" is taken from the park's own
+    // geometry, never a typed ratio (issue #292's lesson): a route that
+    // respects the lattice only ever turns at right angles, so it costs at
+    // worst the **Manhattan** distance between the pair, plus up to one
+    // whole `STREET_PITCH` of dog-leg at each end to get onto a lattice
+    // line and back off it at the door. That sum is the longest walk the
+    // lattice can honestly ask for. A paved alternative longer than it is
+    // not paying for tidiness; it is a failure to connect, and the pair is
+    // better served by paving that breaks a rule than by no paving at all.
+    //
+    // It cannot fire where the network is merely imperfect: the pair has
+    // already had to clear `CONNECTOR_RATIO_THRESHOLD` and `minWaste` to
+    // reach here at all, and by construction this bound is far tighter
+    // than `detourRatiosStayReasonable`'s own 15x trip — so every pair
+    // that invariant would flag is a pair this escape reaches first.
+    const latticeHonestWalk = Math.abs(a.x - b.x) + Math.abs(a.z - b.z) + 2 * STREET_PITCH;
+    const detourIsDisproportionate = paved > latticeHonestWalk;
+
     // A fallback connector that would draw its own private street line is
     // dropped rather than drawn: it is optional paving, and the lattice
     // rule outranks a shortcut (see {@link carriesAnOffLatticeStreetRun}).
-    if (!plan && carriesAnOffLatticeStreetRun(points)) {
+    // Unless the walk it saves is disproportionate, above — a single 15 m
+    // line off the lattice reads as a shortcut through a corner; 238 m of
+    // walking reads as a broken park. The one it draws is still held to
+    // `streetsShareLatticeLines`' own exemptions in the built park, which
+    // is what proves the escape stayed the size of a shortcut.
+    if (!plan && !detourIsDisproportionate && carriesAnOffLatticeStreetRun(points)) {
       if (DEBUG_STREETS) {
         // eslint-disable-next-line no-console
         console.log(`[connect] ${a.id}-${b.id}: rejected, off-lattice street run`);
