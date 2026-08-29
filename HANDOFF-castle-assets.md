@@ -64,9 +64,9 @@ should fail rather than the park being wrong.
 | A3 | tapestry | 3.20 × 2.40 × 0.12 | **3.20 × 2.40 × 0.26** | depth renegotiated and **you approved it**; build now enforces 0.26 |
 | A4 | tapestryrail | 3.60 × 0.14 × 0.14 | **3.59 × 0.14 × 0.14** | finials included in the 3.60 |
 | A5 | sconce | 0.34 × 0.46 × 0.42 | **0.34 × 0.46 × 0.41** | ⚠️ rebuilt — now at the allowance, see §2.5 |
-| A6 | throne | 1.60 × 3.00 × 1.20 | **1.60 × 2.75 × 1.06** | ⚠️ 2.75, not your 2.80 — the wall-plate, see §2.4 |
-| A7 | table | 2.20 × 1.05 × 6.00 | **2.20 × 1.05 × 6.00** | exact — but the top is **above a child's shoulders**, §2.8 |
-| A8 | bench | 0.60 × 0.55 × 2.80 | **0.60 × 0.55 × 2.80** | exact — but the seat is **0.19 m above a child's hip**, §2.8 |
+| A6 | throne | 1.60 × 3.00 × 1.20 | **1.60 × 2.75 × 1.06** | ⚠️ 2.75, not your 2.80 — the wall-plate, see §2.4. **Seat 0.88 → 0.36, §2.10** |
+| A7 | table | 2.20 × 1.05 × 6.00 | **2.20 × 0.675 × 6.00** | ⚠️ **child-scaled, §2.10.** The 1.05 top was 0.01 m *above a child's reach* |
+| A8 | bench | 0.60 × 0.55 × 2.80 | **0.60 × 0.36 × 2.80** | ⚠️ **child-scaled, §2.10.** The seat is now her hip exactly; board ends, §2.11 |
 | A9 | feast | ≤ 0.45³ each | **0.44 × 0.42 × 0.44** overall | four props, each under |
 | A10 | chest | 1.20 × 0.90 × 0.80 | **1.20 × 0.91 × 0.79** | +1 cm on height, inside tolerance |
 
