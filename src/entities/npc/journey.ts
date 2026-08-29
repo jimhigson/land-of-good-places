@@ -13,6 +13,7 @@ import type { CollisionWorld } from '../../world/Collision';
 import type { GroundSampler } from '../Player';
 import type { LevelConnector } from '../../world/building/surfaces';
 import type { Rng } from '../../core/mathUtils';
+import { NPC_WALK_SPEED } from './NpcCharacter';
 import type { Attraction } from './attractions';
 import { reachableFrom } from './attractions';
 
@@ -110,6 +111,46 @@ const ANNOUNCE_CHANCE = 0.2;
  * than a demand for the exact spot.
  */
 const DESTINATION_RADIUS = 1.8;
+
+/**
+ * How many times a child will re-plan before giving up on a destination.
+ *
+ * `TapNavigator` allows the player one (`REPLAN_ATTEMPTS`), and this is the
+ * same idea for the same reason: `findRoute` does not promise to reach the
+ * goal — it ends at the closest reachable point and reports that through
+ * `lastRouteReachedGoal` — so a route planned through a crowded gateway
+ * legitimately stops short, and the answer is to ask again from where you
+ * actually got to.
+ *
+ * Two rather than the player's one, because a child is jostled by twenty-three
+ * siblings (`NpcSystem.separate`) and the player is jostled by nobody. Bounded
+ * either way: a child who cannot get there after two honest attempts wants
+ * somewhere else to go, not an infinite loop of A*.
+ */
+const REPLAN_ATTEMPTS = 2;
+
+/**
+ * How often to ask "are we actually getting anywhere?", and how little
+ * progress counts as no.
+ *
+ * This exists because of a real bug, found by `check-npc-dispersal.mts` before
+ * it was even wired into the build: eleven children walked off the cat bus,
+ * got as far as the gate, and **stood there for seventy-five seconds** — the
+ * whole of {@link JOURNEY_TIMEOUT} — before the timeout forced a re-plan that
+ * then worked immediately from the very same spot. Their route had stopped
+ * short in the crowd, and pushing at its dead end is not something any test on
+ * position alone could see: they were in the right place, facing the right
+ * way, and going nowhere.
+ *
+ * The bar is taken from {@link NPC_WALK_SPEED} rather than typed in, and
+ * deliberately so: issue #232 exists because `trace-npc-driver` hard-coded a
+ * `WALK_SPEED` that then went stale. A child genuinely walking covers
+ * `NPC_WALK_SPEED * STUCK_WINDOW`; a quarter of that is a generous allowance
+ * for being shoved about, squeezing past a sibling, or rounding a tight corner,
+ * and still nowhere near "standing still".
+ */
+const STUCK_WINDOW = 3;
+const STUCK_FRACTION = 0.25;
 
 /** Boundaries by space — see the file comment. `null` for anywhere unplanned. */
 function boundaryFor(space: SpaceId): ParkBoundary | null {
@@ -237,8 +278,15 @@ export class Journey {
   private routeIndex = 0;
   /** True once a plan has been made for {@link goal}; false while waiting. */
   private planned = false;
+  /** Re-plans left before this destination is abandoned. See {@link REPLAN_ATTEMPTS}. */
+  private replansLeft = REPLAN_ATTEMPTS;
 
   private elapsed = 0;
+
+  /** Where this child was when progress was last checked, and how long ago. */
+  private progressX = 0;
+  private progressZ = 0;
+  private sinceProgressCheck = 0;
 
   /** "I'm going to the Dodgems!", while it is still up. */
   private announcement: string | null = null;
@@ -289,9 +337,11 @@ export class Journey {
 
     this.goal = pick;
     this.planned = false;
+    this.replansLeft = REPLAN_ATTEMPTS;
     this.routeLength = 0;
     this.routeIndex = 0;
     this.elapsed = 0;
+    this.sinceProgressCheck = 0;
 
     if (pick && this.rng.chance(ANNOUNCE_CHANCE)) {
       this.announcement = `I'm going to the ${pick.name}`;
