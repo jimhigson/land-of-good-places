@@ -1,10 +1,79 @@
 name: Deploy
 
-# Builds the game and publishes dist/ to Cloudflare Workers (static assets)
-# on every push to main. Can also be run by hand from the Actions tab.
+# Publishes `dist/` to Cloudflare Workers (static assets) for a commit on `main`
+# **that has already passed the full check gate**.
+#
+# ## Why this is not triggered by `push`
+#
+# It used to be, and it ran `npm run build` — the 47-step check chain — before
+# publishing. Measured on 29 August 2026:
+#
+#   * `npx vite build`, the artefact this job exists to produce:   **191 ms**
+#   * `npm run build`, the chain in front of it, in CI:            **~16 min**
+#
+# and that identical chain was *already running on the same commit*, at the same
+# time, in `procgen-invariants.yml`'s "Build and checks". So ~99.98% of the
+# deploy's runtime was QA being done twice.
+#
+# That was not merely wasteful, it was the outage. `timeout-minutes: 15` sat
+# below what the chain takes, and **GitHub reports a job timeout as
+# `cancelled`** — indistinguishable in the run list from a concurrency
+# cancellation. Four runs died at 15m02-15m15s and one succeeded by a single
+# second; the live site sat stale for hours with nothing red anywhere.
+#
+# Run **33276145194** (`62318f05`, the merge of the PR that raised the cap to
+# 30) is the whole argument in one job, step by step:
+#
+#   Set up job + Checkout + Set up Node + npm ci   21:28:07 -> 21:28:25    18 s
+#   Build   (`npm run build` — the duplicated QA)  21:28:25 -> 21:44:13  15m48s
+#   Deploy to Cloudflare Workers (`wrangler`)      21:44:13 -> 21:44:28    15 s
+#   ------------------------------------------------------------------------
+#   whole job                                      21:28:07 -> 21:44:30  16m23s
+#
+# **96% of that job is the middle line, and the middle line had already passed,
+# green, on `62318f05`, in the sibling workflow.** The cap of 30 is comfortable
+# for it today; it was comfortable at 15 too, until the chain quietly grew past
+# it and every deploy became a coin toss. It went 46 steps -> 47 during the
+# single PR that fixed the timeout. Raising a number buys months, not a fix.
+#
+# ## What replaces it, without losing the gate
+#
+# `workflow_run` on **"Procgen invariants"**. That workflow runs on every push
+# to `main`, and it is strictly *more* gate than this job used to apply: both of
+# its jobs must be green — "Build and checks" (`pnpm run build`: `tsc`, every
+# `check:*`, then `vite build`) **and** "Procgen invariants"
+# (`pnpm run test:procgen`), which the old deploy never ran at all.
+#
+# **A failing check still blocks the publish.** It blocks it earlier and harder:
+# the publish job's `if` requires `conclusion == 'success'`, so a `failure`,
+# `cancelled`, `timed_out`, `action_required` or `skipped` gate never reaches
+# `wrangler deploy`. "A broken build never ships" (DEPLOY_NOTES.md, 2026-07-26)
+# is unchanged; only the *number of times* the gate runs changed, from two to
+# one.
+#
+# And a blocked publish is not silent — see the `blocked` job at the bottom.
+#
+# ## The two traps in `workflow_run`, and what is done about them
+#
+# 1. **It runs the default branch's copy of this file, against the default
+#    branch's HEAD, not the commit that passed.** Left alone, this job would
+#    happily publish a *different* commit from the one the checks went green on
+#    — and `vite.config.ts` stamps `dist/version.txt` from `git rev-parse HEAD`,
+#    so `check:live-version` would then report a sha that never passed a gate.
+#    The `Checkout` step therefore pins `github.event.workflow_run.head_sha`
+#    explicitly.
+# 2. **It fires for the check workflow's *other* triggers too**, including every
+#    pull request. `branches: [main]` filters on the triggering run's head
+#    branch, and the `if` additionally requires that run's own event to be
+#    `push`, so a PR's green checks cannot publish anything.
 on:
-  push:
+  workflow_run:
+    workflows: [Procgen invariants]
+    types: [completed]
     branches: [main]
+  # Manual recovery. This is how the site was rescued twice on 29 August 2026,
+  # so it must keep working when everything else is confused: it publishes the
+  # ref it is dispatched on, with no gate of its own, exactly as before.
   workflow_dispatch:
 
 # **Queue deploys; never cancel one.** `cancel-in-progress: true` here meant a
@@ -13,21 +82,15 @@ on:
 # run could finish while the older one's cancellation left nothing behind but an
 # ordinary-looking grey "cancelled" tick.
 #
-# This is the **secondary** cause of the 29 August 2026 outage, not the headline.
-# The headline is the job timeout below: GitHub reports a timeout as `cancelled`
-# too, so the two are indistinguishable in the run list and we spent hours
-# reading one as the other. The tell is duration — a concurrency cancellation
-# dies in ~1-2 minutes, when the next merge lands; a timeout dies at exactly the
-# cap. Both were happening; only the timeout was killing runs with no successor.
-#
 # A deploy is a **publish step, not a CI check**: unlike a test run, the last one
-# must always actually run. So the group queues instead.
+# must always actually run. So the group queues instead. GitHub still only keeps
+# **one** run pending per group — a third arrival replaces the *pending* second
+# one — which is what we want: the survivor is the newest commit, and it
+# contains the one it displaced. What must never be cancelled is the run that is
+# already *deploying*, and that is what `cancel-in-progress: false` protects.
 #
-# GitHub still only keeps **one** run pending per group — a third merge arriving
-# replaces the *pending* second one — which is fine and in fact what we want:
-# the pending run that survives is the newest commit, and it contains the one it
-# displaced. What must never be cancelled is the run that is already *deploying*,
-# and that is exactly what `cancel-in-progress: false` protects.
+# This matters far less now that the job is ~1 minute rather than ~16, but a
+# short job is not a zero-length one, so the protection stays.
 concurrency:
   group: deploy-main
   cancel-in-progress: false
@@ -39,38 +102,48 @@ jobs:
   deploy:
     name: Build and deploy to Cloudflare Workers
     runs-on: ubuntu-latest
-    # **15 minutes was below what this job actually takes, and GitHub reports a
-    # job timeout as `cancelled`** — indistinguishable, in the run list, from the
-    # concurrency cancellation above. That is the real reason the site stopped
-    # moving on 29 August 2026. Measured that evening, job start to job end:
+    # Publish only when the gate went green on this exact commit — or when a
+    # human asked for it by hand.
     #
-    #   33261937341  15m02s  cancelled  <- timeout
-    #   33264088797  15m07s  cancelled  <- timeout
-    #   33267247275  15m15s  cancelled  <- timeout
-    #   33273801404  15m15s  cancelled  <- timeout
-    #   33269930221  14m59s  success    <- 1 second under the cap
+    # Every other `workflow_run` conclusion (`failure`, `cancelled`, `timed_out`,
+    # `skipped`, `action_required`, `neutral`, `stale`) falls through to the
+    # `blocked` job below rather than here. `cancelled` is called out because
+    # that is the one that hid the 29 August outage: a timed-out check reports as
+    # `cancelled`, so treating "not failure" as "fine to ship" would publish on
+    # the back of checks that never finished.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.conclusion == 'success')
+    # The job should now take **about 35 seconds**: this used to spend 15m48s of
+    # its 16m23s re-running QA, and what is left is exactly the other two lines
+    # of the breakdown above — 18 s of checkout/node/install, a 191 ms `vite
+    # build`, and a 15 s `wrangler deploy`.
     #
-    # Four deaths clustered at 15m02-15m15 — at the limit, not at a merge — and
-    # the single success beat the cap by a second. Every deploy was a coin toss.
-    #
-    # The cause is the `Build` step below running the whole `npm run build`
-    # chain, whose sibling job (procgen-invariants.yml's "Build and checks",
-    # the identical chain) measured 14m59s, 15m49s and 15m52s the same evening
-    # and is given **30 minutes** for it. This job does that chain *plus*
-    # publishing, on a 15-minute budget. So: match the sibling's 30 and let the
-    # publish live inside the same headroom.
-    #
-    # A generous timeout is only safe because staleness is now detected
-    # independently of *why* a deploy failed — see live-version.yml. Before that
-    # existed, a timeout was silent, which is what made this so expensive.
-    #
-    # The durable fix is not a bigger number: it is for this job to stop
-    # re-running a 15-minute QA suite that has already run on the same commit.
-    # See DEPLOY_NOTES.md, 2026-08-29, for the measurement and the proposal.
+    # **The cap nonetheless stays at 30 and must not be lowered to "fit".** A
+    # too-tight cap is what caused the 29 August outage: `timeout-minutes: 15`
+    # sat just under what the job actually took, and **GitHub reports a job
+    # timeout as `cancelled`** — indistinguishable in the run list from a
+    # concurrency kill, so the site sat stale for hours with nothing red
+    # anywhere. A generous cap costs nothing when the job is healthy and is the
+    # only thing standing between us and that failure mode repeating. The real
+    # win here is not a smaller number: it is that this job's runtime is **no
+    # longer a function of how much QA we have written**, so it cannot drift
+    # back up towards the ceiling as checks are added.
     timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # **The load-bearing line of this file.** A `workflow_run` job defaults
+          # to the default branch's HEAD, which is *not* necessarily the commit
+          # whose checks passed — if two merges land close together, that default
+          # publishes the newer, unvetted one. Pin the triggering sha.
+          #
+          # On `workflow_dispatch` there is no `workflow_run` payload, so this
+          # falls back to `github.ref` — the ref the human dispatched, i.e. the
+          # pre-existing manual-recovery behaviour, unchanged.
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
 
       - name: Set up pnpm
         # Version comes from `packageManager` in package.json, so there is one
@@ -85,11 +158,33 @@ jobs:
 
       - name: Install dependencies
         # Registry hiccups are common enough to be worth retrying; the retry
-        # counts live in `.npmrc`, which pnpm reads.
+        # counts live in `.npmrc`, which pnpm reads. This is now the *slowest*
+        # step in the job by a wide margin.
         run: pnpm install --frozen-lockfile
 
-      - name: Build
-        run: pnpm run build
+      - name: Say which commit is being published
+        # Cheap, and it is the receipt. `dist/version.txt` is written from
+        # `git rev-parse HEAD` by `vite.config.ts`, and `check:live-version`
+        # fetches that file from the live site — so this line, the built
+        # artefact and the live check must all agree, and any disagreement means
+        # the `ref:` above went wrong.
+        run: |
+          echo "Triggering check run: ${{ github.event.workflow_run.html_url || 'n/a (manual dispatch)' }}"
+          echo "Publishing commit:    $(git rev-parse HEAD)"
+          echo "Expected sha:         ${{ github.event.workflow_run.head_sha || github.sha }}"
+
+      - name: Build the artefact
+        # **Deliberately `vite build` and not `pnpm run build`.** The check chain
+        # in `pnpm run build` is not skipped, it has already run — in full, on
+        # this exact sha — in the "Procgen invariants" workflow this job is
+        # gated on. Running it a second time is what put this job against its
+        # timeout. See the header.
+        #
+        # If you ever change this back to `pnpm run build`, change the trigger
+        # back to `push` in the same edit: the two go together, and the pairing
+        # that must never exist is "publishes without the chain having run
+        # anywhere".
+        run: pnpm exec vite build
 
       # `wrangler deploy` is idempotent, so a flaky-network failure is safe to
       # retry: attempt 2 only runs if attempt 1 failed.
@@ -109,3 +204,81 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy
+
+  # **A blocked publish must not be a silent one.**
+  #
+  # Without this job, a check run that failed or was cancelled would produce a
+  # Deploy run whose only job was skipped: a grey tick, which is precisely the
+  # signal that let the site sit five commits stale while nobody noticed. So the
+  # blocked case gets its own job that says what happened, out loud.
+  #
+  # It is loud *selectively*, because "loud about everything" is how a signal
+  # gets ignored. Two cases:
+  #
+  #   * The blocked commit is **still the head of `main`** — nothing else is
+  #     coming to publish it, so the site is about to go stale. Fail red.
+  #   * `main` has **already moved past it** — normal when merges land close
+  #     together (`procgen-invariants.yml` uses `cancel-in-progress: true`, so a
+  #     superseded push's checks are *supposed* to be cancelled). The newer
+  #     commit's own gate will publish, and if it too is blocked, this same job
+  #     fires for it and by then it *is* head. Log a notice, pass.
+  #
+  # Either way `live-version.yml` runs afterwards (it triggers on every
+  # completed Deploy run, however it ended) and opens an issue if the live site
+  # is genuinely behind. This job is the fast, specific signal; that one is the
+  # slow, cause-agnostic backstop.
+  blocked:
+    name: Publish blocked — the checks did not pass
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion != 'success'
+    permissions:
+      contents: read
+    steps:
+      - name: Is the blocked commit still the head of main?
+        uses: actions/github-script@v8
+        env:
+          BLOCKED_SHA: ${{ github.event.workflow_run.head_sha }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          CHECK_RUN_URL: ${{ github.event.workflow_run.html_url }}
+        with:
+          script: |
+            const sha = process.env.BLOCKED_SHA;
+            const conclusion = process.env.CONCLUSION;
+            const url = process.env.CHECK_RUN_URL;
+
+            const { data: main } = await github.rest.repos.getBranch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: 'main',
+            });
+            const head = main.commit.sha;
+
+            // `cancelled` is deliberately not treated as benign. A job that hits
+            // `timeout-minutes` reports as `cancelled`, identically to one killed
+            // by concurrency — that ambiguity is exactly what hid the 29 August
+            // 2026 outage for hours. Anything that is not `success` blocks.
+            const detail =
+              `Checks for \`${sha}\` ended as \`${conclusion}\`, so nothing was published.\n` +
+              `Check run: ${url}\n` +
+              `Head of main is \`${head}\`.`;
+
+            if (sha === head) {
+              core.setFailed(
+                `${detail}\n\n` +
+                `This commit is the head of \`main\` and no later commit is coming to ` +
+                `publish it, so the live site will now fall behind. Fix the checks and ` +
+                `merge, or publish by hand with \`gh workflow run deploy.yml\` once you ` +
+                `know why they failed. Confirm with \`pnpm run check:live-version\`.`,
+              );
+              return;
+            }
+
+            core.notice(
+              `${detail}\n\n` +
+              `\`main\` has already moved on, so this push was superseded — the newer ` +
+              `commit's own checks will publish. Not failing the run for it.`,
+            );
