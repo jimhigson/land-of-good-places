@@ -751,7 +751,14 @@ function dressRoofGarden(deck: number, floor: Group): void {
 
   const spots: { x: number; z: number; yaw: number }[] = [];
   const inset = 2.3;
-  const step = 3.6;
+  // A trough is `TROUGH_LENGTH` (2.6 m) long, so this is what decides whether
+  // the parapet reads as *planted* or as a row of separate boxes with a metre
+  // of bare paving between each. At 3.6 it was the latter, and "the roof garden
+  // still reads sparse" was the reviewer's note — on the one floor whose whole
+  // purpose is to answer the sparseness complaint that opened #376. 3.2 leaves
+  // a 0.6 m gap: a border with breaks in it rather than a dotted line. It costs
+  // no draw calls at all, because every trough is an instance of the same mesh.
+  const step = 3.2;
   const consider = (x: number, z: number, yaw: number): void => {
     if (!deckIsSolid(deck, x, z)) return;
     if (blocked.some((k) => Math.hypot(x - k.x, z - k.z) < k.radius + PLAYER_RADIUS + 1.4)) return;
@@ -778,9 +785,29 @@ function dressRoofGarden(deck: number, floor: Group): void {
   troughs.castShadow = false;
   troughs.receiveShadow = true;
 
-  // Three or four plants per trough, and a flower head on most of them. Both
-  // counts are seeded, so the roof is the same garden on every reload.
-  const perTrough = 4;
+  /**
+   * Plants per trough. **Seven, in two staggered rows, not four in a line.**
+   *
+   * Four evenly spaced balls down the middle of a 2.6 m box is a row of balls;
+   * it does not read as planting, and at the game camera a roof of them reads
+   * as sparse — which is exactly what the review said. Seven overlapping ones
+   * offset either side of the trough's centre line read as a bed, because a
+   * bed is a thing with no gaps you can see the soil through.
+   *
+   * **This is free.** Every plant is another instance of the same sphere in the
+   * same `InstancedMesh`: no new geometry, no new material, no new draw call
+   * and nothing added to the shadow pass (these are already
+   * `castShadow = false`). The whole roof garden is still three draw calls.
+   */
+  const perTrough = 7;
+  /**
+   * How far a plant sits either side of the trough's long axis.
+   *
+   * The soil bed is `depth - wall * 2` = 0.56 m across, so ±0.13 keeps every
+   * shrub's centre over soil while its 0.34 m crown spills over the rim, the
+   * way a planted trough does.
+   */
+  const ROW_OFFSET = 0.13;
   const shrubs = new InstancedMesh(
     new SphereGeometry(0.34, 8, 6),
     softMaterial(PALETTE.leafMid, 0.72),
@@ -819,12 +846,19 @@ function dressRoofGarden(deck: number, floor: Group): void {
     troughs.setMatrixAt(index, matrix);
 
     const along = new Vector3(Math.cos(spot.yaw), 0, -Math.sin(spot.yaw));
+    const across = new Vector3(Math.sin(spot.yaw), 0, Math.cos(spot.yaw));
     for (let i = 0; i < perTrough; i += 1) {
       const t = (i + 0.5) / perTrough - 0.5;
       const size = rng.range(0.8, 1.25);
+      // `- 0.9` rather than `- 0.5`: the run has to shorten as the plants get
+      // denser, or the outermost one leaves the trough. It also keeps the
+      // furthest plant inside the clearance `consider` above tested at the
+      // trough's *centre* — 0.73 m out plus a 0.43 m crown against 1.4 m of
+      // margin — so a denser trough cannot creep into a keep-out.
       position
         .set(spot.x, TROUGH_HEIGHT + 0.14, spot.z)
-        .addScaledVector(along, t * (TROUGH_LENGTH - 0.5));
+        .addScaledVector(along, t * (TROUGH_LENGTH - 0.9))
+        .addScaledVector(across, i % 2 === 0 ? ROW_OFFSET : -ROW_OFFSET);
       scale.setScalar(size);
       matrix.compose(position, rotation, scale);
       shrubs.setMatrixAt(plant, matrix);
