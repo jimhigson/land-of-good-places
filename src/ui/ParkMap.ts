@@ -12,6 +12,12 @@ import { STALLS } from '../minigames';
 import { ENTRANCE_GATE_HALF_WIDTH } from '../world/entrance/layout';
 import { CAT_BUS_LENGTH, CAT_BUS_ROUTE_NUMBER } from '../world/entrance/catBus';
 import { capture, wheelNotches } from '../core/input/PointerControls';
+import {
+  completesTap,
+  tapCandidate,
+  tapDriftedTooFar,
+  type TapCandidate,
+} from '../core/input/tapGesture';
 import { MAP_PALETTE, drawIcon } from './parkMapArt';
 import { parkMapFeatures, type MapFeature } from './parkMapContent';
 import {
@@ -312,6 +318,13 @@ export class ParkMap {
    */
   private view: MapView | null = null;
 
+  /**
+   * The finger currently down on the dimmed backdrop, if it is still a
+   * candidate for a definite tap. `null` the moment it drifts far enough to be
+   * a drag, or a second finger joins it — see the listener wiring above.
+   */
+  private backdropTap: (TapCandidate & { readonly pointerId: number }) | null = null;
+
   /** Live pointers on the map canvas, for drag-to-pan and pinch-to-zoom. */
   private readonly mapPointers = new Map<number, { x: number; y: number }>();
   /** Finger separation when the current pinch began, in canvas pixels. */
@@ -327,8 +340,14 @@ export class ParkMap {
    * six-year-old's tap is not still.
    */
   private gestureMoved = false;
-  /** Where the current one-finger gesture began, for the drag-slop test. */
-  private gestureStart: { x: number; y: number } | null = null;
+  /**
+   * Where and when the current one-finger gesture began, for the drag-slop and
+   * time tests. In canvas pixels, and a `TapCandidate` so the canvas answers
+   * "was that a tap?" with `tapGesture.ts`'s definition rather than a second
+   * one — it used to use 8 px and no time limit at all while tap-to-walk in the
+   * park used 18 px and 600 ms.
+   */
+  private gestureStart: TapCandidate | null = null;
   /** Features on screen at the current zoom — the honest label denominator. */
   private visibleFeatureCount = 0;
   private canvasCssWidth = 0;
@@ -357,10 +376,21 @@ export class ParkMap {
     this.root = document.createElement('div');
     this.root.className = 'parkmap';
     this.root.dataset.open = 'false';
-    // Tapping the dimmed backdrop is a "no thanks", same as every other panel.
-    this.root.addEventListener('pointerdown', (event) => {
-      if (event.target === this.root) this.close();
-    });
+    // **A definite tap on the dimmed backdrop is a "no thanks" — a press is
+    // not.** This used to close on `pointerdown` alone, which is the bug Jim
+    // reported on 29 August 2026: on landscape, tablet and desktop the map
+    // vanished before his finger lifted, and a finger that landed in the
+    // margin and then moved — the start of a pinch, or a pan, or a
+    // six-year-old steadying her thumb — dismissed it instantly. Measured
+    // before the fix at 390x844/844x390/768x1024/1440x900: closed on
+    // `pointerdown` at every viewport that has a backdrop at all.
+    //
+    // Down *and* up on the backdrop itself, within `tapGesture.ts`'s drift and
+    // time window — the same definition tap-to-walk uses, not a second one.
+    this.root.addEventListener('pointerdown', this.onBackdropPointerDown);
+    this.root.addEventListener('pointermove', this.onBackdropPointerMove);
+    this.root.addEventListener('pointerup', this.onBackdropPointerUp);
+    this.root.addEventListener('pointercancel', this.onBackdropPointerLost);
 
     this.card = document.createElement('div');
     this.card.className = 'parkmap-card';
@@ -491,6 +521,7 @@ export class ParkMap {
     // in reads as the map being broken. Gesture state goes with it, so a
     // finger lifted outside the canvas cannot leave a pinch half-started.
     this.view = null;
+    this.backdropTap = null;
     this.mapPointers.clear();
     this.pinchStartDistance = 0;
     this.gestureMoved = false;
@@ -542,17 +573,58 @@ export class ParkMap {
     this.render();
   }
 
-  // --------------------------------------------------------- pan and zoom
+  // ---------------------------------------------------------- the backdrop
 
   /**
-   * How far a pointer may travel and still count as a tap, in CSS pixels.
+   * A press on the dimmed margin around the card starts a *candidate* tap and
+   * nothing else. Only `pointerup` can close the map, and only if the finger
+   * never went anywhere.
    *
-   * Generous on purpose. A six-year-old pressing a phone with her thumb moves
-   * several pixels doing it, and a tap that silently became a pan — walking
-   * her nowhere and sliding the map instead — is far more confusing than a pan
-   * that needed a slightly firmer drag.
+   * Scoped to `event.target === this.root`: a finger that came down on the
+   * card, the canvas, or a button is not on the backdrop at all, and must not
+   * arm this even though its event bubbles through here.
    */
-  private static readonly DRAG_SLOP_PX = 8;
+  private readonly onBackdropPointerDown = (event: PointerEvent): void => {
+    if (event.target !== this.root) {
+      // Something inside the card has it. Any tap candidate we were holding is
+      // no longer the only finger down, so it is not a tap any more.
+      this.backdropTap = null;
+      return;
+    }
+    // A second finger on the backdrop is a pinch that happened to start wide,
+    // not two taps. Neither is a tap after this.
+    if (this.backdropTap) {
+      this.backdropTap = null;
+      return;
+    }
+    this.backdropTap = { ...tapCandidate(event.clientX, event.clientY), pointerId: event.pointerId };
+  };
+
+  private readonly onBackdropPointerMove = (event: PointerEvent): void => {
+    const candidate = this.backdropTap;
+    if (!candidate || candidate.pointerId !== event.pointerId) return;
+    // Travelled: this is a drag, and a drag that began on the backdrop must
+    // leave the map alone. Measured from where it began, never summed per
+    // frame, so a slow drift still counts.
+    if (!completesTap(candidate, event.clientX, event.clientY)) this.backdropTap = null;
+  };
+
+  private readonly onBackdropPointerUp = (event: PointerEvent): void => {
+    const candidate = this.backdropTap;
+    this.backdropTap = null;
+    if (!candidate || candidate.pointerId !== event.pointerId) return;
+    // Up on the backdrop too, not merely down on it — lifting over the card
+    // after sliding off the margin is not a tap on the margin.
+    if (event.target !== this.root) return;
+    if (!completesTap(candidate, event.clientX, event.clientY)) return;
+    this.close();
+  };
+
+  private readonly onBackdropPointerLost = (event: PointerEvent): void => {
+    if (this.backdropTap?.pointerId === event.pointerId) this.backdropTap = null;
+  };
+
+  // --------------------------------------------------------- pan and zoom
 
   /** Canvas-relative pixel for a pointer event. */
   private canvasPoint(event: PointerEvent): { x: number; y: number } {
@@ -580,7 +652,8 @@ export class ParkMap {
     this.mapPointers.set(event.pointerId, this.canvasPoint(event));
     if (this.mapPointers.size === 1) {
       this.gestureMoved = false;
-      this.gestureStart = this.canvasPoint(event);
+      const point = this.canvasPoint(event);
+      this.gestureStart = tapCandidate(point.x, point.y);
     }
     if (this.mapPointers.size === 2) {
       // Two fingers: a pinch, and neither finger is a tap any more.
@@ -622,10 +695,8 @@ export class ParkMap {
     if (Math.hypot(dx, dy) > 0 && !this.gestureMoved) {
       // Measured from where the gesture started, not summed per frame, so a
       // slow drift over many small moves still becomes a drag.
-      const start = this.gestureStart ?? previous;
-      if (Math.hypot(point.x - start.x, point.y - start.y) > ParkMap.DRAG_SLOP_PX) {
-        this.gestureMoved = true;
-      }
+      const start = this.gestureStart ?? tapCandidate(previous.x, previous.y);
+      if (tapDriftedTooFar(start, point.x, point.y)) this.gestureMoved = true;
     }
     if (this.gestureMoved) {
       this.setView(pannedBy(this.currentView(), dx, dy, this.canvasCssWidth, this.canvasCssHeight));
@@ -635,10 +706,16 @@ export class ParkMap {
   private onCanvasPointerUp(event: PointerEvent): void {
     const wasDrag = this.gestureMoved;
     const hadTwo = this.mapPointers.size >= 2;
+    const started = this.gestureStart;
+    const point = this.canvasPoint(event);
     this.onCanvasPointerLost(event);
-    // A tap only when this gesture never became a pan or a pinch. `hadTwo`
-    // covers lifting one finger of a pinch: the second lift must not walk her.
-    if (!wasDrag && !hadTwo) this.onCanvasTap(event);
+    // A tap only when this gesture never became a pan or a pinch, and only
+    // when down-and-up make a definite tap by `tapGesture.ts`'s one definition.
+    // `hadTwo` covers lifting one finger of a pinch: the second lift must not
+    // walk her.
+    if (wasDrag || hadTwo) return;
+    if (started && !completesTap(started, point.x, point.y)) return;
+    this.onCanvasTap(event);
   }
 
   private onCanvasPointerLost(event: PointerEvent): void {
