@@ -252,7 +252,8 @@ formulas that agreed where they were checked and diverged in between, so:
 | Bench seat | **0.55 m** | Artist, reported back | So a child model can be posed sitting. |
 | Chest hinge axis | at the lid node's origin | Artist | Otherwise opening it is a second formula tracking the first. |
 | Armour footprint radius | **0.65 m** | me | Feeds the keep-out check in §6. Artist measured 0.638; mine is the conservative one and stands. |
-| `BEAM_UNDERSIDE` | **3.08 m** | me, exported from `castleFabric.ts` | **Added 29 Aug, after the wall-plate was built.** The headroom within 1.25 m of a wall, which is where most of the decoration goes. Tighter than `CASTLE_CEILING_CLEAR` and easy to miss. |
+| `BEAM_UNDERSIDE` | **3.08 m** | me, exported from `castleFabric.ts` | **Added 29 Aug, after the wall-plate was built.** The headroom within **0.40 m** of a wall (was 1.25 m before the plate moved flush — see reconcile entry 2). Tighter than `CASTLE_CEILING_CLEAR` and easy to miss. |
+| `SCONCE_MOUNT_Y` / `SCONCE_HEADROOM` | 2.10 m / 0.60 m | me, exported from `castleFabric.ts` | A sconce must fit inside the headroom, or the wall-plate hides it. `check:castle` asserts the plate's own sightline against it. |
 
 **Protocol:** the Artist publishes its actual figures in its own handoff. I
 copy none of them by hand — every one that matters is either exported from
@@ -315,6 +316,37 @@ the Artist's, and it is a genuine change — `Building` builds its props during
 construction today. I will measure the boot cost once batch 1 is wired and say
 whether it is worth doing. Splitting the files early makes that easier if it
 is, so the ruling is right either way — just not for the stated reason.
+
+**Entry 2 — 29 August 2026, Engineer, on the Artist's second round.**
+
+| Figure | Ruling |
+| --- | --- |
+| `SCONCE_CUP_OFFSET` → (0.000, 0.285, **0.2475**) | **Accepted.** Z only; the mouth height is unchanged, which is the part my flame placement depends on. **My provisionally-typed 0.3025 is now stale and must not be used** — it was always marked provisional precisely because it was a typed copy of someone else's measurement. |
+| Sconce 0.23 → 0.34 m | **Accepted.** |
+| Armour keep-out radius 0.638 → **0.5052** | **Accepted, and my 0.650 budget stands unchanged.** The asset got smaller, so it fits inside the budget with more room than before. I am not shrinking the budget to match: a keep-out is how much floor the prop is *given*, not how much it occupies, and the slack is what stops a child brushing it. |
+| Tapestry depth | **0.26 m, settled on both sides.** |
+| **Throne 2.75 m** (Artist) vs 2.78 m (reviewer) | **Artist's 2.75 stands. Not overruled.** Its reasoning is better than the reviewer's: a 2 mm margin is "a rounding error waiting for a felt pad", and I would add that it is also below the precision anything downstream actually holds. The check measures floor-to-top against a real ceiling, so the margin has to survive a build, not a spreadsheet. |
+
+**The wall-plate moved, and it changes a number I gave the Artist.** §4.4's
+`BEAM_UNDERSIDE` rule said *"anything within 1.25 m of a wall must clear
+3.08 m"*. The plate is now **flush with the wall and 0.40 m wide** (it was
+hiding all forty sconces — see §7), so that band has shrunk:
+
+> Anything standing **within 0.40 m of a wall** must clear **3.08 m**.
+> Beyond 0.40 m it is the full 3.30 m.
+
+That is strictly more permissive than what the Artist was working to, so
+nothing already built can have broken — but it is more room than it thought it
+had, and it is the sort of change that would otherwise be discovered by
+somebody building to the stricter number for no reason.
+
+**Two new numbers the Artist owns a constraint against**, both exported from
+`castleFabric.ts` and both asserted by `check:castle`:
+
+| Constant | Value | Means |
+| --- | --- | --- |
+| `SCONCE_MOUNT_Y` | 2.10 m | Where the back plate lands. Unchanged. |
+| `SCONCE_HEADROOM` | **0.60 m** | **A sconce must fit inside this, measured up from the mount.** It is the budget the plate's sightline is checked against; deliberately generous against the ~0.46 m asked for, so a sconce growing a little does not silently vanish behind a timber. |
 
 ### 4.6 Batch 2 — queued, not yet requested
 
