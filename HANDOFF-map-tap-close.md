@@ -1,39 +1,61 @@
-# HANDOFF: map tap-to-close (fix/map-tap-to-close)
+# HANDOFF: map tap-to-close (fix/map-tap-to-close) — COMPLETE, PR raised
 
 Jim: *"Deployed map isn't zoomable by pinching. As soon as I touch the screen
 the map closes. Should be a definite tap to close."*
 
-The **pinch half was already fixed** on `254484d2` — confirmed again in my own
-before-measurements (pinch reaches 4.00x at every viewport and never closes the
-map). What is left is the **close-on-`pointerdown`** half, plus two things QA
-found while confirming it.
+**The pinch half was already fixed** on `254484d2` — re-confirmed in my own
+before-measurements: pinch reaches 4.00x at all four viewports and never closes
+the map, on unmodified `main`. **The close-on-touch half was not**, and is what
+this branch fixes, plus two things QA found while confirming it.
 
-## Measured BEFORE (dev server 5390, real CDP touch, `scripts/qa-map-gestures.mjs`)
+## What changed
 
-```
-phone-portrait   canvas 380x693  labels 11/16  backdrop none (card fills screen)
-phone-landscape  canvas 626x270  labels  8/16  backdrop 49,195   closedOnDown TRUE  dragKeptOpen FALSE
-tablet           canvas 601x693  labels 15/16  backdrop 30,512   closedOnDown TRUE  dragKeptOpen FALSE
-desktop          canvas 657x654  labels 14/16  backdrop 182,450  closedOnDown TRUE  dragKeptOpen FALSE
-```
-Pinch: 1.00 -> 4.00x, map stayed open, at all four. Hint text at all four
-(including portrait, which has no backdrop): "Tap where to go, or tap outside
-to close."
+1. `src/core/input/tapGesture.ts` (NEW) — the one definition of "a tap":
+   18 px drift, 600 ms, timed by `event.timeStamp`. `PointerControls`
+   (tap-to-walk) and both of `ParkMap`'s surfaces read it.
+2. `ParkMap` backdrop closes on a **definite tap** — down and up on the
+   backdrop, inside that window — not on `pointerdown`. The map canvas drops
+   its private 8 px/no-time-limit rule for the same one.
+3. The hint asks the **layout** whether a tappable backdrop exists and says
+   "tap ✕ to close" when it does not (phone portrait is full-bleed).
+4. The label ladder is generated from the canvas and marches out along
+   whichever axis has spare paper, with a leader line back to the picture;
+   placement is split from painting so all text is drawn last.
 
-Park extent spanX 178.5 m, spanZ 156.4 m (+6 m margin each side). Portrait
-draws the park at 380x336 inside a 380x693 canvas — **357 px, 52% of the
-paper, blank**.
+## Measured, identical harness (`scripts/qa-map-gestures.mjs`), dev server 5390
 
-## Plan
+| viewport | backdrop | closes on pointerdown | closes on definite tap | drag from backdrop keeps open | pinch keeps open / zoom | labels |
+|---|---|---|---|---|---|---|
+| 390x844 before | none (full-bleed) | n/a | n/a | n/a | yes 1.00->4.00 | 11/16 |
+| 390x844 after | none (full-bleed) | n/a | ✕ closes: yes | n/a | yes 1.00->4.00 | **16/16** |
+| 844x390 before | 49,195 | **YES (bug)** | yes | **no (bug)** | yes 1.00->4.00 | 8/16 |
+| 844x390 after | 49,195 | no | yes | yes | yes 1.00->4.00 | **16/16** |
+| 768x1024 before | 30,512 | **YES (bug)** | yes | **no (bug)** | yes 1.00->4.00 | 15/16 |
+| 768x1024 after | 30,512 | no | yes | yes | yes 1.00->4.00 | **16/16** |
+| 1440x900 before | 182,450 | **YES (bug)** | yes | **no (bug)** | yes 1.00->4.00 | 14/16 |
+| 1440x900 after | 182,450 | no | yes | yes | yes 1.00->4.00 | **16/16** |
 
-1. **Shared tap definition** — `src/core/input/tapGesture.ts` (NEW): 18 px
-   drift, 600 ms, three predicates. `PointerControls` now imports it instead of
-   owning its own copy. DONE, tsc clean.
-2. `ParkMap` backdrop: definite tap (down+up on the root, within drift/time),
-   and its canvas uses the same constants instead of `DRAG_SLOP_PX = 8`.
-3. Hint derived from the real layout (is there a backdrop gap?), not a
-   breakpoint guess.
-4. Portrait labels: use the blank letterbox bands for names.
+Tap-to-walk on the map canvas still fires at all four (it gained a 600 ms
+window when it took the shared definition) — `canvasTap true`.
 
-Dev server: port 5390, `--strictPort`. Kill by PID only.
-QA harness committed at `scripts/qa-map-gestures.mjs` (not in the build).
+Portrait names dropped before, by name off `dataset.missingLabels`: The Spooky
+House, Sky Cruiser, The Rail Race!, The Land Hotel, **and Bluebell Halt**
+(QA counted four; it is five). After: none, at all four viewports.
+
+## Gates
+
+`npx tsc --noEmit` 0 · `npm run build` 0 (unpiped) · `npm run test:procgen` 0
+(453 tests). First build attempt failed on `check:park-boot` — the known
+load-dependent flake #324, with my dev server running; passed twice on its own
+and the full build passed once the server was stopped.
+
+## Notes for whoever picks this up
+
+* Screenshots: `/tmp/lgp-map-qa/` (`before-*`, `after-*`, `shot-*`).
+* **Headless Chromium delivers touch ~2.0-3.1 s apart on this page** — the main
+  thread is saturated by the park rendering behind the overlay. A tap harness
+  that relies on dispatch timing therefore measures every tap as a long press.
+  `qa-map-gestures.mjs` passes CDP's `timestamp` on each touch instead, which
+  is what Chrome puts on `event.timeStamp`. Do not "fix" that back.
+* Dev server was port 5390, `--strictPort`, killed by PID (7482/7501). Nothing
+  of Jim's was touched.
