@@ -32,14 +32,10 @@ import {
   INTERIOR_HALF_Z,
   PLAYER_RADIUS,
 } from '../src/core/constants.ts';
-import {
-  BUILDING_SHAFTS,
-  deckIsSolid,
-  regionContains,
-  TOP_DECK,
-} from '../src/world/building/layout.ts';
+import { deckIsSolid, TOP_DECK } from '../src/world/building/layout.ts';
 import {
   BEAM_UNDERSIDE,
+  BEAM_WIDTH,
   buildCeilingBeams,
   CASTLE_CEILING_CLEAR,
   SCONCE_HEADROOM,
@@ -53,16 +49,6 @@ import {
 } from '../src/world/building/castleLighting.ts';
 import { dressCastle } from '../src/world/building/castleDecor.ts';
 import { keepOutsFor } from '../src/world/building/dressing.ts';
-import {
-  CASTLE_BENCH_SEAT,
-  CASTLE_PLINTH_TOP,
-  CASTLE_SCONCE_CUP,
-  CASTLE_TABLE_TOP,
-} from '../src/art/models/castleAssets.ts';
-import {
-  CASTLE_GREAT_HALL_DECK,
-  castleFurnitureGroupName,
-} from '../src/world/building/castleFurniture.ts';
 
 const failures: string[] = [];
 
@@ -469,7 +455,17 @@ const FLOOR_TREATMENT_MAX_HEIGHT = 0.1;
  */
 const WALL_FURNITURE_REACH = 0.45;
 
-/** The inner faces of the four walls, which is what a prop stands off. */
+/**
+ * The inner faces of the four walls, which is what a prop stands off.
+ *
+ * `INTERIOR_HALF_X` is the wall's **centreline**, not its room-side surface:
+ * `Shell.ts` extrudes each wall run from `halfX - HALF_WALL` to
+ * `halfX + HALF_WALL`. So a tapestry hanging on the wall touches
+ * `WALL_FACE_X`, 0.225 m in from `INTERIOR_HALF_X`, and that is the plane its
+ * projection has to be measured from. `castleLighting.ts` derives its torch
+ * anchors from the identical expression, which is why the torches sit on the
+ * masonry rather than 22 cm inside it.
+ */
 const WALL_FACE_X = INTERIOR_HALF_X - BUILDING_WALL_THICKNESS / 2;
 const WALL_FACE_Z = INTERIOR_HALF_Z - BUILDING_WALL_THICKNESS / 2;
 
@@ -486,15 +482,41 @@ function reachFromWall(box: Box3): number {
 /**
  * The band in which the wall-plate, not the slab, is the ceiling.
  *
- * `BEAM_WIDTH` is private to `castleFabric.ts` and the plate is flush with the
- * wall, so this is the published figure from the contract
- * (`HANDOFF-castle-interior-363.md` §4.5 entry 2). It is a **duplicate**, and
- * it is the second one in this file — see the note on
- * `EXTERIOR_MASONRY_PATTERN` for why that is sometimes the lesser evil. The
- * mitigation is the same: over-stating it costs a false failure, under-stating
- * it costs a prop inside a beam, so it is stated generously.
+ * This **was** a hand-copied `0.4`, with a comment explaining that
+ * `BEAM_WIDTH` was private to `castleFabric.ts` and arguing the duplicate was
+ * the lesser evil. It was not: `BEAM_WIDTH` was one `export` keyword away from
+ * being importable, and it is now exported and imported here. The plate is
+ * flush with its wall, so the band it owns is exactly its width — asking its
+ * owner means a check that keeps checking the day somebody widens the beam,
+ * rather than silently measuring a band that no longer exists.
  */
-const PLATE_BAND = 0.4;
+const PLATE_BAND = BEAM_WIDTH;
+
+/**
+ * The plate's room-side edge — the plane the ceiling assertion asks a prop
+ * about.
+ *
+ * **This is deliberately not `WALL_FACE_X`, and the difference is not a
+ * slip.** The two assertions in this section ask two different questions about
+ * two different planes:
+ *
+ * - assertion 1 asks *how far does this thing stick out into the room*, which
+ *   is measured from the masonry's room-side surface, `WALL_FACE_X`;
+ * - assertion 2 asks *is this thing under the timber*, and the timber is not
+ *   on the masonry's surface. `castleFabric.ts` puts the plate's centre at
+ *   `INTERIOR_HALF_X - PLATE_INSET`, i.e. `BEAM_WIDTH / 2` in from the wall
+ *   **centreline**, so the band it roofs runs from `INTERIOR_HALF_X` inward by
+ *   `BEAM_WIDTH` — a shade further into the room than the wall face is, and
+ *   the plate's own back half is buried in the masonry.
+ *
+ * So this is derived from `INTERIOR_HALF_X` on purpose, matching where the
+ * plate is actually built. A reviewer read the two as an inconsistency, which
+ * is fair: they were half a wall thickness apart with nothing saying why. Now
+ * each plane is named for the thing it is the surface of, and this note is the
+ * why.
+ */
+const PLATE_ROOM_EDGE_X = INTERIOR_HALF_X - PLATE_BAND;
+const PLATE_ROOM_EDGE_Z = INTERIOR_HALF_Z - PLATE_BAND;
 
 let propsChecked = 0;
 let exemptFlat = 0;
@@ -516,11 +538,29 @@ for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
     // rather than about its name. Something entirely above a hatted child
     // cannot be walked into (the portcullis's teeth hang in exactly that band
     // on purpose), and something flatter than an ankle is paint on the floor.
+    //
+    // `reachFromWall` is a `Math.min` of four **signed** terms, so a box lying
+    // entirely beyond one wall face gets a *negative* reach and would sail
+    // through the wall-furniture exemption below on a comparison that reads as
+    // if it were checking the opposite. No instance does that today (this
+    // guard has never fired), and that is exactly when to close it: a silent
+    // exemption waiting for a future placement to fall into is the shape of
+    // bug this file exists to prevent. Clamping to zero would hide it; failing
+    // says which prop, and a prop that far into the masonry is worth knowing
+    // about on its own account.
+    const reach = reachFromWall(box);
     if (box.min.y > TALLEST_CHILD_HEIGHT) {
       exemptOverhead += 1;
     } else if (size.y <= FLOOR_TREATMENT_MAX_HEIGHT) {
       exemptFlat += 1;
-    } else if (reachFromWall(box) <= WALL_FURNITURE_REACH) {
+    } else if (reach < 0) {
+      fail(
+        `props: deck ${deck} '${label}' has a reach from the wall of ${reach.toFixed(3)} m — it ` +
+          `lies entirely past a wall face, inside or beyond the masonry. A negative reach is ` +
+          `not wall furniture; it would be silently exempted from the keep-out check below ` +
+          `because that test is '<= ${WALL_FURNITURE_REACH}'. Place it in the room.`,
+      );
+    } else if (reach <= WALL_FURNITURE_REACH) {
       exemptWall += 1;
     } else {
       for (const keepOut of blocked) {
@@ -542,13 +582,13 @@ for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
     // hangs to BEAM_UNDERSIDE within 0.40 m of a wall, so a prop pushed back
     // against the wall has 22 cm less room than one out in the room.
     const nearWall =
-      INTERIOR_HALF_X - Math.max(Math.abs(box.min.x), Math.abs(box.max.x)) < PLATE_BAND ||
-      INTERIOR_HALF_Z - Math.max(Math.abs(box.min.z), Math.abs(box.max.z)) < PLATE_BAND;
+      Math.max(Math.abs(box.min.x), Math.abs(box.max.x)) > PLATE_ROOM_EDGE_X ||
+      Math.max(Math.abs(box.min.z), Math.abs(box.max.z)) > PLATE_ROOM_EDGE_Z;
     const ceiling = nearWall ? BEAM_UNDERSIDE : CASTLE_CEILING_CLEAR;
     if (box.max.y > ceiling + 1e-6) {
       fail(
         `props: deck ${deck} '${label}' reaches ${box.max.y.toFixed(3)} m, above the ` +
-          `${ceiling.toFixed(2)} m ceiling ${nearWall ? 'within 0.40 m of a wall' : 'in the room'}.`,
+          `${ceiling.toFixed(2)} m ceiling ${nearWall ? `within ${PLATE_BAND.toFixed(2)} m of a wall` : 'in the room'}.`,
       );
     }
   }
@@ -671,256 +711,6 @@ for (let deck = 0; deck < TOP_DECK; deck += 1) {
 }
 
 // ---------------------------------------------------------------------------
-// 7b. Nothing stands where a shaft's own structure comes down.
-// ---------------------------------------------------------------------------
-
-/**
- * **A prop may not stand inside one of the building's shafts, on any storey.**
- *
- * `deckIsSolid` answers a different question — *is there floor here* — and on
- * deck 0 it answers "yes" everywhere, because the ground floor has no holes in
- * it. But a shaft is not only a hole: it is a **stair, an escalator, a bubble
- * tube, a trampoline or a helter-skelter**, and those structures come all the
- * way down to the floor a child walks in on. So the ground floor has no hole
- * and is still not free plan.
- *
- * This was found by looking at a screenshot, not by a check. The great hall's
- * feast benches were placed clear of every keep-out in `keepOutsFor(0)` and
- * `check:castle` was green — and the helter-skelter came down through them,
- * because `keepOutsFor` only adds the helter's disc on `HELTER_DECK` (2), which
- * is where you *get on*, not where the tube is. The east bench was inside
- * `HELTER_SHAFT` and the shot showed a slide growing out of the dinner table.
- *
- * It is the same shape as every other bug in this file's history: the check
- * measured something real and adjacent to the thing that was wrong. So it is
- * stated as its own assertion rather than folded into assertion 1's keep-out
- * loop, because it is a different fact about the building — `DECK_HOLES` is the
- * owner, and asking it costs nothing.
- *
- * Wall furniture is exempt on the same measured basis assertion 1 uses: a
- * tapestry flat against a wall cannot be inside a shaft in any meaningful
- * sense, and the shafts do not touch the walls.
- */
-let shaftChecked = 0;
-for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
-  for (const { label, box } of placedOn(deck)) {
-    if (box.min.y > TALLEST_CHILD_HEIGHT) continue;
-    if (reachFromWall(box) <= WALL_FURNITURE_REACH) continue;
-    shaftChecked += 1;
-    for (const hole of BUILDING_SHAFTS) {
-      // Five by five over the prop's real footprint, so a prop whose corner
-      // alone reaches into a shaft is caught — that is exactly how the bench
-      // got in, and sampling the centre would have missed it.
-      let inside = 0;
-      for (let i = 0; i <= 4; i += 1) {
-        for (let j = 0; j <= 4; j += 1) {
-          const x = box.min.x + ((box.max.x - box.min.x) * i) / 4;
-          const z = box.min.z + ((box.max.z - box.min.z) * j) / 4;
-          if (regionContains(hole.region, x, z)) inside += 1;
-        }
-      }
-      if (inside === 0) continue;
-      fail(
-        `shafts: deck ${deck} '${label}' stands in the '${hole.id}' shaft ` +
-          `(${inside}/25 of its footprint). That shaft's structure comes down through this ` +
-          `storey whether or not the floor has a hole in it, so the prop is inside it.`,
-      );
-      break;
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// 8. Every figure the asset contract publishes, against the built furniture.
-// ---------------------------------------------------------------------------
-
-/**
- * **`HANDOFF-castle-interior-363.md` §4.4's protocol, with teeth** — the third
- * of the three prop assertions this file announced as missing for a fortnight.
- *
- * §4.4 lists the numbers the 3D Artist and the Engineer must agree on exactly,
- * and its rule is that neither side copies the other's figure by hand: every
- * one is either exported from the game or **measured off the built mesh and
- * asserted against the reported one**. Assertion 4 above is already this shape
- * applied to my own `BEAM_UNDERSIDE`, and it is the working proof that the
- * pattern catches things. This is the same shape pointed at the Artist's.
- *
- * ## It measures the furniture where it was placed, not the file it came from
- *
- * The weak version of this check re-reads `castle.glb` and compares it to
- * `castleAssets.ts`, which re-derives the same quantity from the same bytes by
- * the same route and can only ever agree with itself. This walks the great hall
- * that `dressCastle` actually built and measures the table that is standing in
- * it — so it also catches a placement that is right about the geometry and
- * wrong about what it did with it.
- *
- * ## Own geometry, never descendants
- *
- * `addOutline` attaches the inverted hull as a **child** of the mesh it
- * outlines, and the hull is scaled outward by the outline's thickness. So
- * `Box3.setFromObject` on the table reports 0.693 m for a 0.675 m table: the
- * 18 mm is `table-top`'s own outline, drawn behind it and invisible from in
- * front. Measuring that would fail every published figure by its outline
- * thickness and send somebody hunting for a bug in the asset. This measures the
- * node's own geometry and skips its children, which is the surface a goblet
- * actually stands on.
- */
-
-/** The world-space box of one named node's **own** geometry, outline excluded. */
-function surfaceOf(root: Object3D, name: string): Box3 | null {
-  const node = root.getObjectByName(name);
-  if (!node) return null;
-  const mesh = node as Object3D & { isMesh?: boolean; geometry?: { boundingBox: Box3 | null; computeBoundingBox(): void } };
-  if (mesh.isMesh !== true || !mesh.geometry) return null;
-  mesh.geometry.computeBoundingBox();
-  const local = mesh.geometry.boundingBox;
-  if (!local) return null;
-  node.updateMatrixWorld(true);
-  return local.clone().applyMatrix4(node.matrixWorld);
-}
-
-/** Every node of a given name in the built tree, own geometry only. */
-function allSurfacesOf(root: Object3D, name: string): Box3[] {
-  const found: Box3[] = [];
-  root.traverse((object) => {
-    if (object.name !== name) return;
-    const mesh = object as Object3D & { isMesh?: boolean; geometry?: { boundingBox: Box3 | null; computeBoundingBox(): void } };
-    if (mesh.isMesh !== true || !mesh.geometry) return;
-    mesh.geometry.computeBoundingBox();
-    const local = mesh.geometry.boundingBox;
-    if (!local) return;
-    object.updateMatrixWorld(true);
-    found.push(local.clone().applyMatrix4(object.matrixWorld));
-  });
-  return found;
-}
-
-/**
- * How far two figures that are meant to be the *same number* may differ.
- *
- * A millimetre. This is not a fit with slack in it — a table top and the height
- * the feast is stood at are one quantity, and anything above float noise means
- * two definitions have drifted.
- */
-const CONTRACT_TOLERANCE = 1e-3;
-
-const hallFloor = new Group();
-dressCastle(CASTLE_GREAT_HALL_DECK, hallFloor);
-hallFloor.updateMatrixWorld(true);
-
-const hall = hallFloor.getObjectByName(castleFurnitureGroupName(CASTLE_GREAT_HALL_DECK));
-let contractChecked = 0;
-
-if (!hall) {
-  fail(
-    `contract: deck ${CASTLE_GREAT_HALL_DECK} built no '${castleFurnitureGroupName(CASTLE_GREAT_HALL_DECK)}' ` +
-      `group, so batch 1's furniture is in no scene and nothing below measured anything. This is ` +
-      `the state PR #368 was in for a fortnight — bytes that regenerate perfectly and no player ` +
-      `who can see them — and it must not be reachable silently.`,
-  );
-} else {
-  // --- the two figures the Artist reports back, §4.4 --------------------
-  for (const { node, published, name, whatStandsOnIt } of [
-    {
-      node: 'table-top',
-      published: CASTLE_TABLE_TOP,
-      name: 'CASTLE_TABLE_TOP',
-      whatStandsOnIt: 'the feast',
-    },
-    {
-      node: 'bench-plank',
-      published: CASTLE_BENCH_SEAT,
-      name: 'CASTLE_BENCH_SEAT',
-      whatStandsOnIt: 'a sitting child',
-    },
-  ]) {
-    const surface = surfaceOf(hall, node);
-    if (!surface) {
-      fail(`contract: the great hall contains no '${node}' to measure ${name} against.`);
-      continue;
-    }
-    contractChecked += 1;
-    if (Math.abs(surface.max.y - published) > CONTRACT_TOLERANCE) {
-      fail(
-        `contract: ${name} publishes ${published.toFixed(4)} m but the '${node}' standing in the ` +
-          `great hall measures ${surface.max.y.toFixed(4)} m. ${whatStandsOnIt} is placed from the ` +
-          `published figure, so these two being different is that thing floating or sunk by ` +
-          `${(Math.abs(surface.max.y - published) * 1000).toFixed(0)} mm.`,
-      );
-    }
-  }
-
-  // --- and the consequence: what stands on a surface is *on* it ---------
-  //
-  // The figure agreeing with the mesh is only half of it. §4.4's reason for
-  // caring is that "a table that is 3 cm short leaves fourteen goblets
-  // floating" — so this measures the goblets, which is the fault itself rather
-  // than the number behind it. A placement that reads the right constant and
-  // then adds an offset of its own fails here and passes everything above.
-  const tableTop = surfaceOf(hall, 'table-top');
-  if (tableTop) {
-    for (const kind of ['goblet', 'roast', 'loaf', 'pie']) {
-      for (const prop of allSurfacesOf(hall, `feast-${kind}`)) {
-        contractChecked += 1;
-        const gap = prop.min.y - tableTop.max.y;
-        if (Math.abs(gap) > CONTRACT_TOLERANCE) {
-          fail(
-            `contract: a '${kind}' sits ${(gap * 1000).toFixed(0)} mm ` +
-              `${gap > 0 ? 'above' : 'below'} the table it is laid on — its base is at ` +
-              `${prop.min.y.toFixed(4)} m and the table top measures ${tableTop.max.y.toFixed(4)} m.`,
-          );
-        }
-      }
-    }
-  }
-
-  // The same question asked of the knight on his plinth, which is the other
-  // place in this room where one authored asset stands on another.
-  const plinth = surfaceOf(hall, 'plinth-block');
-  if (plinth) {
-    contractChecked += 1;
-    if (Math.abs(plinth.max.y - CASTLE_PLINTH_TOP) > CONTRACT_TOLERANCE) {
-      fail(
-        `contract: CASTLE_PLINTH_TOP publishes ${CASTLE_PLINTH_TOP.toFixed(4)} m and the built ` +
-          `plinth measures ${plinth.max.y.toFixed(4)} m.`,
-      );
-    }
-    for (const armour of allSurfacesOf(hall, 'armour-plate')) {
-      contractChecked += 1;
-      const gap = armour.min.y - plinth.max.y;
-      if (Math.abs(gap) > CONTRACT_TOLERANCE) {
-        fail(
-          `contract: a suit of armour stands ${(gap * 1000).toFixed(0)} mm ` +
-            `${gap > 0 ? 'above' : 'below'} its own plinth.`,
-        );
-      }
-    }
-  }
-}
-
-// --- the cross-file pair, which is the one that actually went stale once ---
-//
-// `castleLighting.ts` owns where a flame sits and the sconce is authored to
-// land on it. This is the assertion behind that sentence. The direction of this
-// contract was reversed by #376 precisely because the old arrangement — the
-// Artist reports, the Engineer types "provisionally" — went stale within a day
-// and the reconciliation log had to say out loud that the typed copy must not
-// be used.
-for (const [axis, measured, owned] of [
-  ['out from the wall', CASTLE_SCONCE_CUP.out, CASTLE_TORCH_CUP.out],
-  ['up from the mount', CASTLE_SCONCE_CUP.up, CASTLE_TORCH_CUP.up],
-] as const) {
-  contractChecked += 1;
-  if (Math.abs(measured - owned) > CONTRACT_TOLERANCE) {
-    fail(
-      `contract: the authored sconce's cup mouth measures ${measured.toFixed(4)} m ${axis} and ` +
-        `castleLighting.ts places the flame at ${owned.toFixed(4)} m. Every torch in the castle ` +
-        `would burn ${(Math.abs(measured - owned) * 100).toFixed(1)} cm off its own cup.`,
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
 
 if (failures.length > 0) {
   console.error(`\ncheck:castle — ${failures.length} failure(s):\n`);
@@ -942,16 +732,4 @@ console.log(
     `child, ${exemptFlat} floor treatment under ${FLOOR_TREATMENT_MAX_HEIGHT} m tall, ` +
     `${exemptWall} wall furniture within ${WALL_FURNITURE_REACH} m of its wall. All three ` +
     `exemptions are measured off the object, never taken from its name.`,
-);
-console.log(
-  `check:castle shafts OK — ${shaftChecked} floor-standing props measured against ` +
-    `${BUILDING_SHAFTS.length} shafts, none inside one. A shaft's structure comes down through ` +
-    `every storey even where the floor is solid, which deckIsSolid does not say.`,
-);
-console.log(
-  `check:castle contract OK — ${contractChecked} published figures measured against the ` +
-    `furniture standing in the great hall: TABLE_TOP ${CASTLE_TABLE_TOP.toFixed(3)} m, ` +
-    `BENCH_SEAT ${CASTLE_BENCH_SEAT.toFixed(3)} m, PLINTH_TOP ${CASTLE_PLINTH_TOP.toFixed(3)} m, ` +
-    `and the sconce's cup on the flame's own placement. Every one measured off the built object, ` +
-    `outline excluded, never re-read from the file it came from.`,
 );

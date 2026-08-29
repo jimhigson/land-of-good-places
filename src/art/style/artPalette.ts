@@ -186,6 +186,30 @@ export const ART = {
   jetpackFlame: 0xffb45c,
   jetpackFlameCore: 0xffe9a8,
 
+  // --- castle fire ------------------------------------------------------------
+  /**
+   * The **emissive** a castle torch burns with — deliberately deeper and redder
+   * than the amber the cone is painted in.
+   *
+   * This is a colour for light, not for pigment, and it exists because an
+   * emissive term is *multiplied and then clipped*. The torches were emitting
+   * `PALETTE.slideChuteDeep` (0xf0a52f) at 1.75, which is `(1.00, 1.00, 0.32)`
+   * once the red and green channels have saturated — a flat lemon yellow with
+   * no red left in it at all, sitting inside a core clipped to pure white. From
+   * the game camera that is a small pale cream dot, which is what a reviewer
+   * reported seeing and what "make it hotter" is asking to fix. It is also
+   * ART_DIRECTION §5's "never washed out" and §6's objection to ACES
+   * desaturating bright colours towards white, arrived at from the other
+   * direction.
+   *
+   * At the same 1.75 this lands on `(1.00, 0.45, 0.43)` — a hot orange-red. The
+   * flame then has somewhere to go: red-orange sheath, cream core, which is a
+   * *fire*, where two clipped yellows stacked on each other were a smudge.
+   * Bright and saturated, softened towards cream rather than white, and it
+   * would look right on a plastic toy.
+   */
+  castleFlameDeep: 0xd4413e,
+
   // --- glasses ----------------------------------------------------------------
   /**
    * Sunglasses, star glasses and heart glasses for the character creator

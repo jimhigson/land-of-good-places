@@ -114,13 +114,14 @@ const WALL_FACE_X = INTERIOR_HALF_X - BUILDING_WALL_THICKNESS / 2;
  * How far the cup stands off the wall. **Split out of {@link CASTLE_TORCH_CUP}
  * as a plain number so `art/blend/castle_build.py` can read it** (#368 wiring).
  *
- * The sentence above says the sconce "is authored to land on this number", and
+ * The comment above says the sconce "is authored to land on this number", and
  * until this split that was true only in the sense that a person had checked.
  * `ts_const` reads exactly one grammar — `export const NAME = <number>;` — so
- * an object literal is unreadable to the asset side, and the Artist had no
+ * an object literal is unreadable to the asset side and the Artist had no
  * choice but to type the figure. Two numbers that match because somebody
  * compared them are this repo's most-cited bug; two numbers where one is *read*
- * cannot drift. **Keep both of these plain numeric exports.**
+ * cannot drift. `castle_build.py` now asserts its measured cup mouth against
+ * these to a millimetre. **Keep both plain numeric exports.**
  */
 export const CASTLE_TORCH_CUP_OUT = 0.2475;
 
@@ -538,8 +539,13 @@ export class CastleFire {
     if (spots.length === 0) return;
 
     // --- the fire itself: two instanced meshes, no lights ---------------
+    // The cone is *painted* amber and *emits* a deeper red — see
+    // {@link ART.castleFlameDeep}. Emitting its own colour at 1.75 clipped both
+    // the red and the green channel and left a flat lemon yellow with no fire
+    // in it; a redder emissive at the same intensity lands on hot orange-red
+    // and gives the cream core something to be the middle of.
     const outer = toonMaterial(PALETTE.slideChuteDeep, {
-      emissive: PALETTE.slideChuteDeep,
+      emissive: ART.castleFlameDeep,
       emissiveIntensity: FLAME_BASE_EMISSIVE,
     });
     const core = toonMaterial(ART.jetpackFlameCore, {

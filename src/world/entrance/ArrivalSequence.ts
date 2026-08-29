@@ -692,7 +692,7 @@ export class ArrivalSequence {
       this.seatKids();
     }
 
-    this.bus.animate(dt, context.elapsed, this.busSpeed);
+    this.bus.animate(dt, this.busSpeed);
 
     if (this.phaseTime >= duration) {
       this.phaseTime = 0;
