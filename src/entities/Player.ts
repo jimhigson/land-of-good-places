@@ -332,6 +332,27 @@ export class Player implements GameSystem {
   readonly velocity = new Vector3();
 
   /**
+   * **The height the ground sampler is asked from — the surface she is
+   * actually standing on, not the height she is drawn at.**
+   *
+   * `position.y` is *damped* towards the ground (see the damp at the end of
+   * `update`) so walking over the gentle hills is not jittery. That damping is
+   * presentation: it is a smoothed picture of where her feet are. It used to
+   * also be the height handed to `WalkSurfaces.sample`, and that conflation
+   * was half of #358 — climbing steadily the damp never catches up, so the
+   * "no more than one `BUILDING_STEP_UP` above you" rule was measured from a
+   * height that lagged 0.309x the climb behind her, and a third of her
+   * step-up allowance was spent on the lag before the slope got any.
+   *
+   * Keeping the physics query height separate costs one number and removes
+   * the lag from the budget entirely: the surface she stood on last frame is
+   * a fact, and it is the honest thing to ask "can she reach the next bit of
+   * ground from here?" about. The damp is untouched and still does its only
+   * real job, which is that she is *drawn* smoothly.
+   */
+  private groundHeight = 0;
+
+  /**
    * Where the ground is. Left `null` the character walks on the terrain; the
    * building swaps in its own so the decks, stairs, lift and bubble are solid.
    */
@@ -577,6 +598,7 @@ export class Player implements GameSystem {
 
     this.position.copy(spawn);
     this.position.y = terrainHeight(spawn.x, spawn.z);
+    this.groundHeight = this.position.y;
     this.previousPosition.copy(this.position);
     this.group.position.copy(this.position);
   }
@@ -668,6 +690,10 @@ export class Player implements GameSystem {
   teleportTo(x: number, y: number, z: number, facing?: number): void {
     this.position.set(x, y, z);
     this.previousPosition.copy(this.position);
+    // Collapsed onto the destination for exactly the reason `previousPosition`
+    // is: a sampling reference carried across a 848 m change of space is a
+    // reference to a surface in the world she just left.
+    this.groundHeight = y;
     this.velocity.set(0, 0, 0);
     this.verticalVelocity = 0;
     this.airborne = false;
@@ -831,6 +857,7 @@ export class Player implements GameSystem {
   setRidePose(x: number, y: number, z: number, facing: number, pitch = 0): void {
     this.position.set(x, y, z);
     this.previousPosition.copy(this.position);
+    this.groundHeight = y;
     this.facingAngle = facing;
     this.group.position.copy(this.position);
     this.group.rotation.y = facing;
@@ -979,6 +1006,35 @@ export class Player implements GameSystem {
     // unaffected and stays exactly as crisp as before. `dt` is shared out
     // among the sub-steps, so the escort still moves at the same metres per
     // second and the latch below still sees the same escort it always did.
+    // --- the ground sample rides the same sub-steps (#358) -------------------
+    // The lateral sub-stepping above stops a long frame carrying her *through*
+    // a wall. Sampling the ground once, at the end of that whole movement, let
+    // a long frame carry her *through the deck she is walking up* — the same
+    // bug on the other axis, and the reason a steep ramp was unclimbable
+    // rather than merely steep.
+    //
+    // `WalkSurfaces.sample` will not hand back a surface more than
+    // `BUILDING_STEP_UP` above the height it is asked from. Asked once per
+    // frame, that ceiling has to cover the *whole* frame's climb — 0.925 m of
+    // travel at `MAX_FRAME_DELTA` on a sprint — so a slope steeper than about
+    // half simply stopped being found, and she got the terrain far below
+    // instead and fell. Asked once per sub-step, with each answer becoming the
+    // height the next one is asked from, the same rule applies to each short
+    // piece instead: she *follows* the surface up, the way she has always
+    // followed it laterally past walls.
+    //
+    // This is emphatically not a weakening of the step-up rule — it is applied
+    // more often, at a finer grain, and never relaxed. A genuine discontinuity
+    // (a deck edge, a wall top) is still a single sub-step's jump and is still
+    // rejected exactly as before, which is what keeps her from climbing things
+    // she should not.
+    //
+    // Airborne she is not following any surface, so the reference stays her
+    // own height and the last sub-step's answer is the one used — identical to
+    // the single end-of-frame sample this replaced.
+    const following = !this.airborne;
+    let reference = following ? this.groundHeight : this.position.y;
+    let groundY = reference;
     const { clearedWall, escorting, corrected } = this.collision.resolveMovement(
       this.position,
       this.velocity.x * dt,
@@ -986,6 +1042,10 @@ export class Player implements GameSystem {
       PLAYER_RADIUS,
       this.hopClearance,
       dt,
+      (at) => {
+        groundY = this.groundAt(at.x, at.z, reference);
+        if (following) reference = groundY;
+      },
     );
 
     // An escort runs until the pushing stops, not until it goes quiet.
@@ -1029,8 +1089,6 @@ export class Player implements GameSystem {
         this.velocity.z = derivedZ;
       }
     }
-
-    const groundY = this.groundAt(this.position.x, this.position.z, this.position.y);
 
     // Walk off the edge of a deck — or over one of the shafts inside the big
     // building — and the surface under your feet drops away. Start falling.
@@ -1130,6 +1188,9 @@ export class Player implements GameSystem {
       this.position.y = damp(this.position.y, groundY, PLAYER_HEIGHT_DAMP_HALF_LIFE, dt);
     }
     this.hopClearance = hopHeight;
+    // Next frame's sampling reference: the surface she is on, not the damped
+    // height she is drawn at. See `groundHeight`.
+    this.groundHeight = groundY;
 
     // A little sparkle the moment the jump actually carries her over a wall's
     // footprint, rather than every frame she's above it.

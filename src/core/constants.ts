@@ -630,21 +630,28 @@ export const PLAYER_LONGEST_STEP = PLAYER_MAX_SPEED * PLAYER_SPRINT_MULTIPLIER *
  * Half-life, in seconds, of the exponential damp `Player.update` runs the
  * character's height through so walking the gentle hills is not jittery.
  *
- * **It decides how steep a slope the game can have, which is why it lives here
- * rather than as a literal at the one call site.** `Player.update` hands
+ * **It used to decide how steep a slope the game could have. Since #358 it does
+ * not, and that is the point of the fix.** `Player.update` handed
  * `this.position.y` — the *damped, lagging* height — to the ground sampler, and
  * `WalkSurfaces.sample` will not return a surface more than
- * {@link BUILDING_STEP_UP} above that. Climbing steadily, the damp never
- * catches up: it keeps `2^(-dt / this)` of the gap each frame, so at a clamped
- * {@link MAX_FRAME_DELTA} the lag settles at 0.309x the per-frame climb and a
- * sprinting child must clear her own climb *plus* that lag. The usable budget
- * is therefore `BUILDING_STEP_UP / 1.309` = 0.474 m per frame, not 0.620 m —
- * a peak grade of 0.512 against {@link PLAYER_LONGEST_STEP}.
+ * {@link BUILDING_STEP_UP} above what it is asked from. Climbing steadily the
+ * damp never catches up: it keeps `2^(-dt / this)` of the gap each frame, so at
+ * a clamped {@link MAX_FRAME_DELTA} the lag settled at 0.309x the per-frame
+ * climb, and a sprinting child had to clear her own climb *plus* that lag — a
+ * third of her step-up allowance spent on a smoothing filter.
  *
- * `test/procgen/invariants.ts` reads it to hold every bridge to that budget.
- * Nobody may copy the number: a second 0.04 written down somewhere else is how
- * this term went missing from the bridge redesign's arithmetic in the first
- * place, and a child fell through a deck for it (issue #358).
+ * `Player` now keeps `groundHeight`, the surface she is actually standing on,
+ * and asks the sampler from **that**. This half-life is once again only what it
+ * says it is: how smoothly she is *drawn*, and it is no longer read by anything
+ * that decides what the park may build — {@link SPRINT_PEAK_GRADE_BUDGET} was
+ * a `Math.pow` away from this number until #358 and is now a frozen literal,
+ * precisely so that changing this cannot re-plan a bridge behind your back.
+ *
+ * **It is still a feel change on a physics value, so measure it.** A longer
+ * half-life makes her height lag further behind the ground, which is visible on
+ * the steep bits and shows up in `npm run check:deck-fallthrough` as a changed
+ * `true-surface reference only` row — that row is the one that still depends on
+ * this. The ceiling of the shipping configuration does not.
  */
 export const PLAYER_HEIGHT_DAMP_HALF_LIFE = 0.04;
 
@@ -661,27 +668,88 @@ export const FALL_THRESHOLD = 0.5;
 
 /**
  * **The steepest slope a sprinting child can climb without losing the surface
- * under her** — the hard ceiling every walkable ramp in the park is built to.
+ * under her** — the ceiling every walkable ramp in the park is built to.
  *
- * One clamped frame ({@link MAX_FRAME_DELTA}, a slow phone) carries her
- * {@link PLAYER_LONGEST_STEP}. `WalkSurfaces.sample` will not return a built
- * surface more than {@link BUILDING_STEP_UP} above the height she is *damped*
- * to, and that damp lags: it keeps `2^(-dt / half-life)` of the gap each frame,
- * so climbing steadily the lag settles at `r / (1 - r)` = 0.309x the per-frame
- * climb. She must clear her own climb **plus** her lag, so the usable climb is
- * `BUILDING_STEP_UP / 1.309` = 0.474 m per frame — a grade of **0.512**, not
- * the 0.620/0.925 = 0.670 the step-up alone suggests.
+ * ### What this number was, and why it is no longer the truth (#358)
  *
- * **This is a physics limitation being written into geometry, not a fact about
- * ramps.** `CollisionWorld.resolveMovement` already sub-steps *lateral*
- * movement so a long frame cannot carry a child through a wall; the *vertical*
- * ground sample does not sub-step, and that asymmetry is issue #358. Fix #358
- * and this budget becomes generous rather than binding, and the park may build
- * steeper, shorter ramps again. Nobody should read the ramp arithmetic that
- * depends on this as intrinsic to bridges — it is the shape of a bug elsewhere.
+ * It used to be **0.512**, and that figure was the shape of a bug rather than a
+ * fact about ramps. `Player` sampled the walking surface once per frame, at the
+ * end of the whole frame's movement, asked from her *damped* height: so the
+ * whole of one clamped frame's climb ({@link PLAYER_LONGEST_STEP}) had to fit
+ * inside {@link BUILDING_STEP_UP} **plus** the damp's 0.309x lag, giving
+ * `0.62 / 1.309 / 0.925` = 0.512. Past it a sprinting child fell through the
+ * deck she was running across, and real browser QA watched it happen.
+ *
+ * That is fixed. The ground sample now rides the same sub-steps
+ * `CollisionWorld.resolveMovement` already cut lateral movement into, and is
+ * asked from the surface she is standing on rather than the damped height she
+ * is drawn at. **Measured** by `scripts/measure-deck-fallthrough.mts` — real
+ * `WalkSurfaces.sample`, 27 gradients x 5 frame rates x 64 start phases x
+ * walk/sprint x up/down, against a control that reproduces the old behaviour:
+ *
+ * ```
+ *   neither (as shipped before #358)   0.512
+ *   sub-stepping only                  0.512
+ *   true-surface reference only        0.670
+ *   both (what ships now)              1.670
+ * ```
+ *
+ * **Sub-stepping alone buys nothing**, and that is worth knowing before anyone
+ * reverts the half that looks redundant: asked from the damped height, every
+ * sub-step asks from the *same frozen number*, so the last one lands where the
+ * single end-of-frame sample landed and answers identically. The two fixes are
+ * interdependent, not additive.
+ *
+ * 1.670 matches the derived prediction of 1.676 — `BUILDING_STEP_UP` over the
+ * worst sub-step (0.370 m, at 15 fps, against the park's thinnest 0.18 m
+ * collider). The **park-independent floor**, if the park ever contained nothing
+ * thin enough to force a sub-step at all, is `BUILDING_STEP_UP /
+ * PLAYER_LONGEST_STEP` = **0.670** — still above the old ceiling, because the
+ * damp lag no longer eats a third of the allowance.
+ *
+ * ### Why the value is still 0.512
+ *
+ * Because {@link MAX_RAMP_GRADIENT} is derived from it, and raising it re-plans
+ * **every bridge on every seed** — more crossing sites prove out, `paths.ts`
+ * reroutes, and the whole park's layout moves (measured on #349: crossing
+ * counts changed on four of five seeds). That is a deliberate, separately
+ * measured piece of work with real gameplay consequences, not a side effect of
+ * a physics fix, so #358 deliberately leaves the number alone and only removes
+ * the reason it had to be this low.
+ *
+ * **Whoever raises it**: the headroom is real and measured — anything up to
+ * 0.670 is safe on any park whatever, and up to ~1.67 on this one — but re-run
+ * `npm run check:deck-fallthrough` and the procgen invariants against the
+ * geometry you actually end up with, because the safe ceiling is a function of
+ * the park's thinnest collider and would fall if that ever got fatter.
+ *
+ * ### Why it is a frozen literal and not the arithmetic that produced it
+ *
+ * It used to be computed live:
+ *
+ * ```ts
+ * const retention = Math.pow(2, -MAX_FRAME_DELTA / PLAYER_HEIGHT_DAMP_HALF_LIFE);
+ * const lag = retention / (1 - retention);
+ * return BUILDING_STEP_UP / (1 + lag) / PLAYER_LONGEST_STEP;
+ * ```
+ *
+ * That arithmetic is **obsolete** — it models one ground sample per frame taken
+ * from the damped height, and #358 made both halves of that untrue. Left live,
+ * it was worse than merely wrong: it meant {@link PLAYER_HEIGHT_DAMP_HALF_LIFE},
+ * a number whose entire remaining job is how smoothly the character is *drawn*,
+ * still silently sized every ramp in the park. Nudging it from 0.04 to 0.06 for
+ * feel would have moved this budget to 0.414 and `MAX_RAMP_GRADIENT` to 0.311,
+ * re-planning every bridge on every seed as a side effect of an animation
+ * tweak. Freezing it cuts that wire.
+ *
+ * The literal is the exact double the old expression produced, **not** a tidy
+ * 0.512, and deliberately so: `MAX_RAMP_GRADIENT` feeds `SITE_RAMP_FLOOR`,
+ * which is a *threshold* deciding whether a crossing site proves at all, so
+ * even a 1e-4 rounding could flip a marginal site and silently re-plan a seed.
+ * Frozen bit-identically, #358 provably changes no geometry anywhere.
+ *
+ * Change this number when you mean to change the park, and measure the bridges
+ * when you do — that is issue #382's job, not something to arrive at by
+ * arithmetic drift.
  */
-export const SPRINT_PEAK_GRADE_BUDGET = (() => {
-  const retention = Math.pow(2, -MAX_FRAME_DELTA / PLAYER_HEIGHT_DAMP_HALF_LIFE);
-  const lag = retention / (1 - retention);
-  return BUILDING_STEP_UP / (1 + lag) / PLAYER_LONGEST_STEP;
-})();
+export const SPRINT_PEAK_GRADE_BUDGET = 0.5121075476046892;

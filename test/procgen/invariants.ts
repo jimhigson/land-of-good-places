@@ -5077,6 +5077,29 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
     const DAMP_LAG = DAMP_RETENTION / (1 - DAMP_RETENTION);
     /** The climb one sprinted clamped frame may make and still be sampled. */
     const CLIMB_BUDGET = BUILDING_STEP_UP / (1 + DAMP_LAG);
+    // ⚠️ **Since #358 this is deliberately CONSERVATIVE — it is stricter than
+    // the player it describes.** Both terms above were true of the player as
+    // she was: one ground sample per frame, taken at the end of the whole
+    // frame's movement, asked from her damped height. Neither is true now. The
+    // sample rides the same sub-steps `CollisionWorld.resolveMovement` cuts
+    // lateral movement into, and is asked from the surface she is standing on,
+    // so the rule that actually binds is `BUILDING_STEP_UP` per *sub-step*
+    // (0.370 m at worst) rather than per stride, and the damp lag is not in
+    // the arithmetic at all. Measured ceiling 0.512 → 1.670:
+    // `npm run check:deck-fallthrough`.
+    //
+    // It is left as it is on purpose, and it is safe to: a bound stricter than
+    // reality can only ever refuse geometry that would in fact have worked,
+    // never pass geometry that falls. Relaxing it is inseparable from raising
+    // `SPRINT_PEAK_GRADE_BUDGET`, which re-plans every bridge on every seed
+    // (see that constant's own note), and that is separately measured gameplay
+    // work rather than a side effect of a physics fix.
+    //
+    // **Whoever raises the budget: this is the second place the old model is
+    // written down, and it must move in the same PR** — the invariant would
+    // otherwise keep refusing exactly the steeper ramps that change is meant
+    // to allow, and the tell would be a bridge that fails here while
+    // `check:deck-fallthrough` says the same slope is walkable.
     // `NavGrid.ts`'s own `TOP_REFERENCE`, restated rather than imported —
     // it looks like a leaf (its own direct imports are `core/constants`,
     // two type-only imports, and `Collision.ts`), but that last one is not
