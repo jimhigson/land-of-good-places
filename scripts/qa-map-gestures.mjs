@@ -172,10 +172,37 @@ for (const size of SIZES) {
     await page.waitForTimeout(300);
     row.survivedBackdropDrag = await isOpen(page);
   } else {
+    // Phone portrait is full-bleed: there is no backdrop, which is exactly why
+    // the hint must not tell a child to tap outside. The close path there is
+    // the cross, so that is what gets demonstrated instead.
     row.closedOnPointerDown = null;
     row.closedAfterTap = null;
     row.survivedBackdropDrag = null;
+    const cross = await page.evaluate(() => {
+      const r = document.querySelector('.parkmap-card .shop-close')?.getBoundingClientRect();
+      return r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
+    });
+    if (cross) {
+      const at = gestureClock();
+      await touch(cdp, 'touchStart', [cross], at());
+      await touch(cdp, 'touchEnd', [], at(80));
+      await page.waitForTimeout(300);
+      row.closedByCross = !(await isOpen(page));
+    }
   }
+
+  // --- test 4: tap-to-walk on the canvas still fires -----------------------
+  // The canvas tap gained a 600 ms window with the shared definition; this is
+  // the regression guard that a definite tap on open lawn still commits the
+  // walk (which closes the map) rather than being rejected as a long press.
+  await openMap(page);
+  const s4 = await mapState(page);
+  const walkAt = gestureClock();
+  const spot = { x: s4.canvas.x + s4.canvas.w / 2, y: s4.canvas.y + s4.canvas.h / 2 };
+  await touch(cdp, 'touchStart', [spot], walkAt());
+  await touch(cdp, 'touchEnd', [], walkAt(90));
+  await page.waitForTimeout(400);
+  row.canvasTapActed = !(await isOpen(page));
 
   // --- test 3: pinch on the canvas ----------------------------------------
   await openMap(page);
@@ -230,6 +257,8 @@ for (const r of rows) {
       ` closedOnDown ${String(r.closedOnPointerDown).padEnd(5)}` +
       ` closedAfterTap ${String(r.closedAfterTap).padEnd(5)}` +
       ` dragKeptOpen ${String(r.survivedBackdropDrag).padEnd(5)}` +
-      ` pinchOpen ${String(r.pinchKeptOpen).padEnd(5)} zoom ${r.pinchZoom} errors ${r.errors}`,
+      ` pinchOpen ${String(r.pinchKeptOpen).padEnd(5)} zoom ${r.pinchZoom}` +
+      ` cross ${String(r.closedByCross ?? 'n/a').padEnd(5)} canvasTap ${String(r.canvasTapActed).padEnd(5)}` +
+      ` errors ${r.errors}`,
   );
 }
