@@ -421,7 +421,7 @@ export class World implements GameSystem {
   update(context: FrameContext): void {
     // Read before `building.update()` runs this frame, so it is a frame behind
     // — invisible in practice, since every doorway crossing already happens
-    // behind a closed iris (see `Building.changeSpace`).
+    // behind a closed iris (see `world/SpaceManager.ts`).
     this.dayNight.setIndoors(this.playerInAnyInterior);
     // The nap's own sky, over `DayNight.setIndoors`'s frozen backdrop — see
     // `DayNight.setNapSkyOverride`'s own doc comment (PR #279's follow-up,
