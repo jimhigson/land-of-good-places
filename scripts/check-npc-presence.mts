@@ -35,10 +35,17 @@
  * player standing in the garden — which is where a player spends nearly all of
  * a session, and the only configuration in which anybody *is* elsewhere.
  *
- * 1. **Nobody in another space ever moves.** Frame to frame, every character
- *    whose space is not the player's must have moved **exactly zero**. Not
- *    "nearly zero": a marked character is not stepped at all, so any movement
- *    whatsoever is something still simulating them.
+ * 1. **Nobody in an interior the player is not in ever moves.** Frame to frame,
+ *    every character inside a space that is not the garden and not the player's
+ *    must have moved **exactly zero**. Not "nearly zero": a marked character is
+ *    not stepped at all, so any movement whatsoever is something still
+ *    simulating them.
+ *
+ *    Interiors only, and the garden crowd deliberately excluded — see
+ *    `NpcSystem.markWhoIsElsewhere` for why that scope was measured into
+ *    existence rather than argued: freezing the park while the player is
+ *    indoors buys ~nothing and collides with `ParkTrain.carryPassengers`,
+ *    which writes a rider's position from outside `NpcSystem`.
  * 2. **The mark agrees with the world.** Every frame, the set `NpcSystem` marked
  *    must be exactly the set whose `spaceAt` says they are elsewhere (grounded
  *    ones, which is all of them here). A mark that has drifted from the world is
@@ -169,7 +176,8 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
     }
 
     // 2. the mark agrees with the world
-    const shouldBeMarked = space !== playerSpace && !character.isAirborne;
+    const shouldBeMarked =
+      space !== playerSpace && space !== SPACE_GARDEN && !character.isAirborne;
     if (!mutate && shouldBeMarked !== marked.has(character)) {
       markDisagreements += 1;
       if (!firstDisagreement) {
@@ -179,8 +187,8 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
       }
     }
 
-    // 1. nobody elsewhere moves
-    if (space !== playerSpace) {
+    // 1. nobody in an interior the player is not in moves
+    if (space !== playerSpace && space !== SPACE_GARDEN) {
       const dx = character.position.x - (lastX.get(character) ?? 0);
       const dz = character.position.z - (lastZ.get(character) ?? 0);
       const moved = Math.hypot(dx, dz);
@@ -211,7 +219,7 @@ check(
 
 check(
   frozenMoveCount === 0,
-  `${frozenMoveCount} times a character in a space the player is not in moved anyway — worst ` +
+  `${frozenMoveCount} times a character inside a space the player is not in moved anyway — worst ` +
     `${worstFrozenMove.toFixed(4)} m by ${worstFrozenWho} at frame ${worstFrozenAt}. A marked NPC ` +
     'is not stepped at all, so any movement means something is still simulating them (#362)',
 );

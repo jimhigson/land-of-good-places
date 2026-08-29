@@ -1297,7 +1297,29 @@ export class NpcSystem implements GameSystem {
     for (let i = 0; i < this.characters.length; i += 1) {
       const character = this.characters[i];
       if (!character) continue;
-      if (spaceAt(character.position.x, character.position.z) === playerSpace) continue;
+      const space = spaceAt(character.position.x, character.position.z);
+      if (space === playerSpace) continue;
+      // **Interiors only. The park's own crowd is never frozen.**
+      //
+      // Jim's words are "we don't simulate inside *rooms* the player isn't
+      // in", and the garden is not a room. Marking it too was tried and backed
+      // out, for two reasons found by measuring rather than by argument:
+      //
+      // 1. It buys nothing. The measured cost of simulating everybody the
+      //    player cannot see is 0.147 ms a frame, and essentially all of it is
+      //    the seven hotel residents, who are off-space for the *whole
+      //    session*. The garden crowd is only ever off-space for the minute or
+      //    two somebody spends indoors.
+      // 2. It is not free of risk. `ParkTrain.carryPassengers` writes a rider's
+      //    position from outside `NpcSystem` every frame, so a frozen child on
+      //    a moving train would be carried along while nothing else about them
+      //    advanced — a body moving with no simulation behind it, which is the
+      //    same class of inconsistency this whole change exists to remove.
+      //
+      // The entire correctness payoff — indoor NPCs at coordinates six hundred
+      // metres away corrupting every measurement over "the crowd" — comes from
+      // the interiors, so that is what is marked.
+      if (space === SPACE_GARDEN) continue;
       if (character.isAirborne) continue;
       this.elsewhere.add(character);
     }

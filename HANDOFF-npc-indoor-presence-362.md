@@ -155,3 +155,64 @@ correct behaviour for them and matches what the hotel already assumes.
 2. **Presence counts are consistent across a crossing, both ways.** The number marked inside equals
    the number whose `spaceAt` says inside, every frame; and a child who crosses in and later out is
    counted exactly once in each direction, so the marker cannot leak or double-count.
+
+## Scope narrowed from "any space" to "any INTERIOR space" (29 Aug)
+
+The Overseer said go general — any space the player is not in. Built that, measured it, and
+backed it out to **interiors only**. The park's own crowd is never frozen. Two reasons, both
+found by measuring rather than by argument:
+
+1. **It buys nothing.** The 0.147 ms/frame is essentially all seven hotel residents, who are
+   off-space for the *whole session*. The garden crowd is only off-space for the minute or two
+   somebody spends indoors.
+2. **It is not free of risk.** `ParkTrain.carryPassengers` writes a rider's position from outside
+   `NpcSystem` every frame. A frozen child on a moving train would be carried along while nothing
+   else about them advanced — a body moving with no simulation behind it, which is the same class
+   of inconsistency this change exists to remove.
+
+Still general in the sense that matters: it is **not castle-only**, and it covers the hotel
+residents, which are the larger and more permanent case. And it is Jim's words closely — *"we
+don't simulate inside **rooms** the player isn't in"*; the garden is not a room.
+
+## A QA measurement that was worthless, and how it was caught
+
+The first acceptance run reported *"worst position jump across the crossing: 0.0000 m"*. That
+number was junk: headless Chromium renders this park at well under a frame a second, and the
+script waited a fixed 500 ms after moving the player — **less than one frame**, so nothing had
+been stepped between the two snapshots. It was "proving" the property by measuring nothing, which
+is the exact failure CLAUDE.md's "a check can pass without checking anything" section describes,
+committed by me in my own QA script.
+
+Caught because `marked=8` did not match the design (it should have been ~30 with the player
+inside), which only showed up because the number was checked against what it *should* be rather
+than accepted for being green.
+
+Fixed: the script now polls until the mark actually responds, which is proof a frame ran.
+
+## Final numbers
+
+`check:npc-presence`, 300 s, player in the garden:
+
+```
+  frames with somebody marked elsewhere: 18000 of 18000
+  crossings: 17 in, 15 out
+  movement by characters in another space: 0 occurrences (none)
+  mark/world disagreements: 0 character-frames
+  park children spawned outside the garden: 0 (none)
+```
+
+`--mutate` (mark removed): **81005** movements, worst 0.2161 m — assertion 1 red.
+
+Browser, real frames:
+
+```
+worst drift over 6s while frozen:            0.0000 m
+the mark responded to the player moving in:  true
+worst position jump across the crossing:     0.1250 m  (Aiko)
+most any of them moved in the 6s after:      4.000 m
+console errors:                              0
+```
+
+The 0.125 m is **one frame of ordinary walking** at `NPC_WALK_SPEED` — her first step after being
+handed back to simulation, not a pop. There is no teleport and no wall-pop: she is exactly where
+she was standing, and then she walks.
