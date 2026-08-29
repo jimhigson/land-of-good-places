@@ -41,7 +41,7 @@ were 3.2 cm apart everywhere in between.
 > realistic size, only that they are easily recognisable as what they are."
 
 So these are sized for **legibility from the game's isometric camera**, not for
-a tape measure: the suit of armour is 2.60 m beside a 1.86 m child, and a
+a tape measure: the suit of armour is 2.60 m beside a 2.12 m child, and a
 goblet is the size of a bucket. **Do not "correct" these toward realism** —
 that is the brief being undone, not a bug being fixed.
 
@@ -284,7 +284,13 @@ class Requested:
 
 
 CONTRACT = {
-    # A1 — the star of the room. 2.60 m beside a 1.86 m child, on purpose.
+    # A1 — the star of the room, and **it does not tower the way this comment
+    # used to claim.** It read "2.60 m beside a 1.86 m child"; the real figures,
+    # printed on every run from `kid.ts`, are a 2.12 m child and a 2.97 m child
+    # in the tallest hat — so the armour is half a metre over an ordinary child
+    # and *shorter* than a hatted one. The height is the Engineer's contract
+    # figure and stays until they say otherwise, but see the handoff: nobody
+    # should re-judge this silhouette against the number that was here before.
     "armour": Requested(1.10, 2.60, 0.80, "8 across decks 0–3, back to a wall",
                         stands_on="plinth"),
     # A2 — a plain chamfered stone block, separate so it can be left off where
