@@ -17,7 +17,7 @@ and is how the bridge and hotel assets were actually built.
 | --- | --- |
 | Batch 1 (their §4.3, all ten assets) | ✅ built, exported, packed, rendered |
 | `castle.glb` | 128 KB of a 200 KB budget; regenerating is byte-identical |
-| Renders | `art/renders/castle/` — **eleven** shots incl. an assembled hall and `throne-beam.png` |
+| Renders | `art/renders/castle/` — **twelve** shots incl. an assembled hall, `throne-beam.png` and `lineup.png` (all ten in elevation against both scale posts) |
 | Sizes published | §2 below, measured off the mesh |
 | Colour | **not mine** — the Engineer's, per their §4.1 |
 | Batch 2 (their §4.6) | not started |
@@ -56,14 +56,14 @@ should fail rather than the park being wrong.
 
 | # | Asset | Asked | **Built** | Note |
 | --- | --- | --- | --- | --- |
-| A1 | armour | 1.10 × 2.60 × 0.80 | **1.01 × 2.60 × 0.78** | under on width and depth |
+| A1 | armour | 1.10 × 2.60 × 0.80 | **1.01 × 2.60 × 0.78** | under on width and depth; **2.85 m on its plinth is 0.12 m *shorter* than a hatted child — see §2.8** |
 | A2 | plinth | 1.30 × 0.25 × 1.00 | **1.30 × 0.25 × 1.00** | exact |
 | A3 | tapestry | 3.20 × 2.40 × 0.12 | **3.20 × 2.40 × 0.26** | depth renegotiated and **you approved it**; build now enforces 0.26 |
 | A4 | tapestryrail | 3.60 × 0.14 × 0.14 | **3.59 × 0.14 × 0.14** | finials included in the 3.60 |
 | A5 | sconce | 0.34 × 0.46 × 0.42 | **0.34 × 0.46 × 0.41** | ⚠️ rebuilt — now at the allowance, see §2.5 |
 | A6 | throne | 1.60 × 3.00 × 1.20 | **1.60 × 2.75 × 1.06** | ⚠️ 2.75, not your 2.80 — the wall-plate, see §2.4 |
-| A7 | table | 2.20 × 1.05 × 6.00 | **2.20 × 1.05 × 6.00** | exact |
-| A8 | bench | 0.60 × 0.55 × 2.80 | **0.60 × 0.55 × 2.80** | exact |
+| A7 | table | 2.20 × 1.05 × 6.00 | **2.20 × 1.05 × 6.00** | exact — but the top is **above a child's shoulders**, §2.8 |
+| A8 | bench | 0.60 × 0.55 × 2.80 | **0.60 × 0.55 × 2.80** | exact — but the seat is **0.19 m above a child's hip**, §2.8 |
 | A9 | feast | ≤ 0.45³ each | **0.44 × 0.42 × 0.44** overall | four props, each under |
 | A10 | chest | 1.20 × 0.90 × 0.80 | **1.20 × 0.91 × 0.79** | +1 cm on height, inside tolerance |
 
@@ -232,6 +232,70 @@ were added to `ART` because the park had no metal at all and its two nearest
 greys are carved rock and ice: `castleSteel`, `castleIron`, `castleTapestry`.
 Use them or don't — that block in `artPalette.ts` is the only file we both
 touch, so it is the merge conflict to expect.
+
+### 2.8 The batch-1 re-judgement against a true post — and what it found
+
+Your reconcile entry 3 asked for every batch-1 silhouette to be re-judged now
+the post is honest. Done, and the answer is not the one either of us expected.
+
+**The post is now read, not typed.** `castle_build.py` `ts_const`s `KID_HEIGHT`
+and `TALLEST_CHILD_HEIGHT` out of `kid.ts`, `castle_render.py` draws both from
+those, and the script **prints the figures it drew with** on every run, so a
+reference object that lies cannot do so silently again. There is a new
+`lineup.png`: all ten assets in flat ortho elevation, one depth, one floor,
+both posts at the left. The per-asset shots have no post at all and the hall
+shots are at 38° where height foreshortens — neither could settle a size
+question, which is why this shot exists.
+
+**The finding is not about any one asset. Batch 1 was sized for a person with
+adult proportions, and this rig is chibi.** Measured off a real `createKid()`,
+not derived from the numbers that place it:
+
+| Rig landmark | Height |
+| --- | --- |
+| Total (default style) | 2.12 m |
+| **Shoulders** (`KID_SHOULDER_HEIGHT`, guarded by `check:bus-journey`) | **0.99 m** |
+| Head pivot | 1.36 m |
+| **Hands, hanging at rest** | **0.40 m** |
+| **Hip pivot — the whole leg is this long** | **0.36 m** |
+
+More than half a child (1.13 m of 2.12) is head. Against that rig:
+
+| Asset | Built | The rig figure it has to work with | Verdict |
+| --- | --- | --- | --- |
+| **Bench** | seat **0.55 m** | hip **0.36 m** | **0.19 m above her hip.** She climbs it, she does not sit on it, and her feet hang 0.55 m clear of a floor her leg cannot reach. Your §4.4 asks for this number so *"a child model can be posed sitting"* — that is a function, not a style choice. |
+| **Table** | top **1.05 m** | shoulders **0.99 m**, hands **0.40 m** | **The tabletop is above her shoulders.** A child standing at the feast table is a head peering over the edge with the food out of reach. |
+| **Throne** | seat (cushion base) **0.88 m**, +0.30 m dais = **1.18 m** | hip **0.36 m** | Chest-height on her. Your tier-2 note is *"a destination — children should want to sit on it"*; as built she cannot get onto it. |
+| **Armour** | 2.60 m + 0.25 m plinth = **2.85 m** | tallest child **2.97 m** | **0.12 m shorter than a hatted child.** |
+
+**On the armour specifically, since it was flagged as the likeliest to grow: it
+cannot meaningfully grow, and that is a fact about your room, not my asset.**
+Against the wall it must clear `BEAM_UNDERSIDE` 3.08 m, so on the 0.25 m plinth
+the armour's ceiling is **2.83 m** — 0.23 m of growth, which spends the entire
+margin to stand 0.11 m over a hatted child. Out in the room at 3.30 m the best
+case is 3.05 m of armour, 0.33 m of loom, and no margin at all.
+
+Generalised, which is the part worth your time:
+
+> The tallest child is **2.97 m**. Your ceiling is **3.08 m** at the walls and
+> **3.30 m** in the room. **Every floor-standing prop in the castle has between
+> 0.11 m and 0.33 m of headroom above a child in a party hat.** Nothing in this
+> room can loom over one, whatever it is or however it is built.
+
+§3's *"the knight should loom"* and §3's two hard limits are in direct conflict,
+and the limits win. Either the room gets taller or "looming" comes off the
+brief. **It is yours either way** — I have changed no contract figure, and
+nothing above blocks batch 1 landing.
+
+I have deliberately **not** resized the table, bench or throne. All three are
+your §4.3 figures, two of them (`TABLE_TOP`, `BENCH_SEAT`) are constants you
+pose children against, and re-cutting them is a bigger change than this PR was
+scoped for. Figures are above; the ruling is the Overseer's and yours.
+
+One thing I did *not* change and want on the record as considered: the armour is
+built **1.01 m wide against your 1.10 m allowance**, 8% under. That is real but
+it is nothing like the sconce's 32%, and mass is not what is wrong with the
+armour — height is, and height is capped by the ceiling. Left alone on purpose.
 
 ---
 
