@@ -377,10 +377,7 @@ function levelCandidateAt(railDistance: number): Candidate | null {
  *
  * {@link SITE_SPACING} measures separation *along the loop*, which is a
  * clutter rule and cannot answer this: the railway winds, so two crossings a
- * long way apart around the loop can be a few metres apart in the park. Seed 2
- * planned exactly that — two crossings **20.83 m** apart in world space, needing
- * `2 x MIN_BRIDGE_HALF_LENGTH = 28.54 m` — and nothing checked it, because the
- * only separation test there was measured the wrong distance (#392).
+ * long way apart around the loop can be a few metres apart in the park.
  *
  * Each site is treated as the oriented rectangle its bridge will really fill:
  * {@link MIN_BRIDGE_HALF_LENGTH} along the crossing direction (deck plus the
@@ -392,6 +389,23 @@ function levelCandidateAt(railDistance: number): Candidate | null {
  * This is deliberately about *footprints*, not centres. Two bridges side by
  * side, parallel and laterally offset, do not overlap and are perfectly fine; a
  * plain centre-distance rule would have banned them.
+ *
+ * ## What it does NOT do, and this matters
+ *
+ * **It does not fix the seed 2 collision that motivated #392, and it cannot.**
+ * Its caller gates it on `candidate.bridge`, so it only ever compares two
+ * *proven bridge sites* — and seed 2 proves **zero** of those (canonical proves
+ * 4, seeds 5 and 11 three each, seed 18 one). All seven of seed 2's planned
+ * sites are level ones, and the two bridges that collided there were built
+ * opportunistically by `bridgeFootprint.ts`'s late `planReal` pass on crossings
+ * planned as *level* crossings. There was never a pair of bridge sites for this
+ * to reason about.
+ *
+ * **Measured, it fires zero times across the canonical seed and all four sweep
+ * seeds**, and bridge counts are identical with and without it. It is a guard
+ * on trust: correct by construction, and untested by any seed we build. #392
+ * carries the re-scoped question — why seed 2 proves no bridge sites at all,
+ * which is the defect that actually let two bridges collide.
  */
 function footprintsOverlap(a: Candidate, b: Candidate): boolean {
   const axes = [
