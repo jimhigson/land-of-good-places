@@ -636,12 +636,22 @@ export class ParkMap {
     // --- every attraction: its own little picture, and its name -------------
     // Positions come from `parkMapContent.ts` and nowhere else, so what is
     // drawn here is exactly what `check:park-map` measures.
+    // Two passes, and the order matters. Every picture is drawn first, then
+    // every name on top — drawing each name straight after its own picture
+    // let the *next* attraction's picture paint over the last one's name, so
+    // "The Castle" read as "The C" behind the ball pit. Labels are also the
+    // thing that must stay legible when the park is crowded, so they get the
+    // last word on every pixel they need.
+    const placed: { feature: MapFeature; px: number; py: number; size: number; label: string }[] = [];
     for (const feature of this.features()) {
       const [fx, fy] = this.planeToCanvas(feature.x, feature.z);
       const { label, accent } = this.featureCopy(feature);
       const size = FEATURE_ICON_SIZE[feature.kind] * uiUnitPx();
       drawIcon(ctx, iconKey(feature), fx, fy, size, accent);
-      this.drawLabel(label, fx, fy + size * 0.5);
+      placed.push({ feature, px: fx, py: fy, size, label });
+    }
+    for (const item of placed) {
+      this.drawLabel(item.label, item.px, item.py + item.size * 0.5);
     }
 
     // --- the player ----------------------------------------------------------
@@ -869,6 +879,19 @@ export class ParkMap {
     ctx.textBaseline = 'top';
 
     const halfWidth = ctx.measureText(text).width / 2 + 2;
+    // Keep the whole name on the canvas. An attraction near the park's edge
+    // sits near the canvas edge too, and a centred label then runs off the
+    // side — "Sunny Side Halt" lost its last word this way. Sliding the text
+    // back in is right where dropping it would not be: the name is the thing a
+    // child is reading, and it still points at its own picture.
+    const centreX = Math.min(
+      Math.max(px, halfWidth + 2),
+      Math.max(halfWidth + 2, this.canvasCssWidth - halfWidth - 2),
+    );
+    const clampedY = Math.min(py, Math.max(0, this.canvasCssHeight - size * 1.25));
+    px = centreX;
+    py = clampedY;
+
     const box: LabelBox = {
       left: px - halfWidth,
       right: px + halfWidth,
