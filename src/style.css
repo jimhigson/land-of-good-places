@@ -2926,10 +2926,26 @@ kbd {
     padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
   }
 
+  /* **`100%`, not `100vw`/`100dvh` — the card fills its container rather than
+     the screen.** Those two are the same number only when the safe-area insets
+     are zero, and a notched iPhone is exactly where they are not. `.parkmap`
+     above reserves `env(safe-area-inset-top/bottom)`, so a card asking for
+     `100dvh` inside it is the full screen height *plus* those insets, and
+     overflows by their sum. Substituted at 390x844 with real iPhone insets
+     (59 top, 34 bottom): the card ran 0,59 -> 390,903 and the hint line
+     telling a child how to close the map sat 59 px **past the bottom of the
+     display — not clipped, gone**. With `100%` it is 0,59 -> 390,810 and the
+     hint is fully visible, with the label count unchanged at 11.
+
+     **Headless Chromium reports every `env(safe-area-inset-*)` as 0**, so no
+     screenshot-based check can see this class of bug by default — the same
+     blind spot as the card-element capture last round, one layer in.
+     `scripts/qa-park-map.mjs --insets` now substitutes real device insets to
+     close it. This is the fix that keeps horizontal padding at zero, so no
+     canvas width and therefore no names are lost. */
   .parkmap-card {
-    width: 100vw;
-    height: 100vh;
-    height: 100dvh;
+    width: 100%;
+    height: 100%;
     border: 0;
     border-radius: 0;
   }

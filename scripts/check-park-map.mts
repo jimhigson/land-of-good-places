@@ -313,11 +313,30 @@ function truePosition(feature: MapFeature): readonly [number, number] | null {
   if (feature.kind === 'gate') {
     // The arch that actually stands in the park, read out of the finished
     // scene graph: `Entrance.ts` builds a half-torus crossbar spanning the
-    // opening and centred on it, and names it `entrance-arch` for this. Real
+    // opening and centred on it, and names it `park-gate-arch` for this. Real
     // independence, like `castle-walls` — a map that drew the gate at the bus
     // stop, at the shelter or at the wall's radius rather than at the gap in
     // it is caught here.
-    return scenePosition('park-gate-arch') ?? [ENTRANCE_GATE_X, ENTRANCE_GATE_Z];
+    //
+    // **No `??` fallback, and this branch is where that matters most.**
+    // `[ENTRANCE_GATE_X, ENTRANCE_GATE_Z]` is byte-identical to the scene
+    // value, so a fallback would make a rename completely invisible: the
+    // assertion would go on printing `0.0000` while measuring the constant
+    // against itself. A rename is not hypothetical here — naming this
+    // `entrance-arch` collided with the castle's own front-door arch and had
+    // to be changed, which is precisely the event a silent fallback hides.
+    const arch = scenePosition('park-gate-arch');
+    if (!arch) {
+      failures.push(
+        'NO SCENE OBJECT "park-gate-arch": the entrance arch is not in the built ' +
+          'scene, so assertion 2 cannot measure the gate against anything independent. ' +
+          'Either the entrance failed to build or the crossbar was renamed — do not ' +
+          `fall back to ENTRANCE_GATE_X/Z (${ENTRANCE_GATE_X.toFixed(2)}, ` +
+          `${ENTRANCE_GATE_Z.toFixed(2)}), which is the very constant under test.`,
+      );
+      return null;
+    }
+    return arch;
   }
   if (feature.kind === 'catBus') {
     // Truth is `layout.ts`, the same owner the content list read — the honest

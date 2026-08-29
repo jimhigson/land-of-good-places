@@ -2,7 +2,7 @@
  * Screenshots the park map for PR review — issues #334 and #234. Not part of
  * the build.
  *
- *   node scripts/qa-park-map.mjs <port> <outDir> <tag> [seed]
+ *   node scripts/qa-park-map.mjs <port> <outDir> <tag> [seed] [--insets]
  *
  * Opens `/spawn` (skipping character creation and the cat bus), presses `M`,
  * waits for the map overlay, and captures it at a phone and a desktop size.
@@ -16,10 +16,35 @@
 import { chromium } from 'playwright-core';
 import { mkdirSync } from 'node:fs';
 
-const port = process.argv[2] ?? '5334';
-const outDir = process.argv[3] ?? 'qa-out';
-const tag = process.argv[4] ?? 'after';
-const seed = process.argv[5] ?? '';
+const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+const port = args[0] ?? '5334';
+const outDir = args[1] ?? 'qa-out';
+const tag = args[2] ?? 'after';
+const seed = args[3] ?? '';
+
+/**
+ * **`--insets` simulates a notched phone's safe-area insets.**
+ *
+ * Headless Chromium reports every `env(safe-area-inset-*)` as **0**. That is a
+ * blind spot no screenshot can see past: a layout that overflows only once the
+ * insets are non-zero looks perfect in every capture and is broken on the
+ * device. It is the same species as capturing `.parkmap-card` instead of the
+ * viewport — the measurement cannot express the bug — and it cost PR #353 a
+ * round: `.parkmap-card` at `100dvh` inside a container padded by the insets
+ * overflowed by their sum, putting the map's close hint 59 px off the bottom
+ * of an iPhone while headless measured 0 px overflow.
+ *
+ * `env()` cannot be assigned from script, so this substitutes the same values
+ * into the one declaration that consumes them. That makes it a **simulation of
+ * the inset arithmetic, not a device test** — it proves the layout maths, and
+ * says nothing about how a real iPhone rounds `dvh`. Stated plainly because
+ * the distinction is the whole reason to be careful here.
+ *
+ * iPhone 14 Pro portrait: 59 px top, 34 px bottom.
+ */
+const simulateInsets = process.argv.includes('--insets');
+const INSET_TOP = 59;
+const INSET_BOTTOM = 34;
 
 mkdirSync(outDir, { recursive: true });
 
@@ -74,6 +99,20 @@ for (const size of SIZES) {
   // in the HUD's menu drawer, which is collapsed until it is opened, so
   // waiting for visibility waits forever.
   await page.waitForSelector('.pill--map', { state: 'attached', timeout: 180000 });
+
+  if (simulateInsets) {
+    // Substituted into `.parkmap`'s own declaration, the single place the
+    // insets are consumed. `!important` because it stands in for the media
+    // query's own value. After navigation, because a style tag needs a
+    // document. See the note on `simulateInsets` for what this does and does
+    // not prove.
+    await page.addStyleTag({
+      content:
+        `.parkmap { padding-top: ${INSET_TOP}px !important;` +
+        ` padding-bottom: ${INSET_BOTTOM}px !important; }`,
+    });
+  }
+
   await page.waitForTimeout(3000);
 
   await page.keyboard.press('m');
@@ -98,11 +137,33 @@ for (const size of SIZES) {
     const canvas = document.querySelector('.parkmap-canvas');
     if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
+    // How far anything that matters hangs off the screen. Measured here, every
+    // run, rather than in a throwaway script — the two bugs this PR shipped
+    // and fixed were both "something is off the edge and the capture cannot
+    // show it", so the number belongs in the standing output.
+    const offScreen = (selector) => {
+      const el = document.querySelector(selector);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      // A hidden element (landscape hides the hint) reports an empty rect.
+      if (r.width === 0 && r.height === 0) return 'hidden';
+      return Math.round(
+        Math.max(0, -r.left, -r.top, r.right - innerWidth, r.bottom - innerHeight) * 10,
+      ) / 10;
+    };
     return {
       w: Math.round(rect.width),
       h: Math.round(rect.height),
       labels: Number(canvas.dataset.labelCount ?? -1),
       features: Number(canvas.dataset.featureCount ?? -1),
+      off: {
+        card: offScreen('.parkmap-card'),
+        canvas: offScreen('.parkmap-canvas'),
+        // The close hint is a `.shop-hint` inside the map card (ParkMap.ts
+        // reuses the shop's class). Scoped to the card, or this would find the
+        // shop's own hint if a shop overlay happened to exist.
+        hint: offScreen('.parkmap-card .shop-hint'),
+      },
     };
   });
 
@@ -114,8 +175,15 @@ for (const size of SIZES) {
 await browser.close();
 for (const r of results) {
   const c = r.canvas;
+  const off = c ? `card ${c.off.card} canvas ${c.off.canvas} hint ${c.off.hint}` : 'n/a';
   console.log(
-    `${r.size.padEnd(10)} ${r.file.padEnd(44)} canvas ${c ? `${c.w}x${c.h}` : 'n/a'}` +
-      `  labels ${c ? `${c.labels}/${c.features}` : 'n/a'}  errors ${r.errors}`,
+    `${r.size.padEnd(10)} canvas ${c ? `${c.w}x${c.h}`.padEnd(9) : 'n/a'}` +
+      `  labels ${c ? `${c.labels}/${c.features}`.padEnd(6) : 'n/a'}` +
+      `  off-screen px: ${off.padEnd(40)}  errors ${r.errors}`,
   );
 }
+console.log(
+  simulateInsets
+    ? `\nsafe-area insets SIMULATED at ${INSET_TOP}px top / ${INSET_BOTTOM}px bottom.`
+    : '\nsafe-area insets are 0 in headless Chromium — re-run with --insets for a notched phone.',
+);
