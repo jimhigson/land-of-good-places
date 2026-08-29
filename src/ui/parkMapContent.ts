@@ -60,14 +60,25 @@ export interface ParkMapFacts {
 }
 
 /**
- * Anchors whose ride already has a fairground booth standing in for its ticket
- * office. The booth is what a child walks up to, so the booth is what gets the
- * picture and the name; drawing the plot as well would put two labels on one
- * ride. Moved here from `ParkMap` so the check sees the same de-duplication the
- * renderer does rather than a second copy of the rule.
+ * Booths that are a ride's ticket office rather than an attraction of their
+ * own, keyed by stall id.
+ *
+ * **This used to be the other way round, and it was a bug** (found in review of
+ * PR #353). The map skipped these three *rides* and drew each one's picture at
+ * its ticket booth instead, on the reasoning that the booth is what a child
+ * walks up to. But a booth stands well clear of the ride it sells for, so the
+ * ride was drawn a long way from where it is: dodgems **22.0 m** out,
+ * waterFight 20.9 m, ferrisWheel 13.4 m — 35x the 0.62 m the fidelity check
+ * holds everything else to, and further than an icon is wide.
+ *
+ * Jim's requirement on this ticket is that the map "accurately reflect park
+ * geometry", so the ride wins: the picture goes on the ride, at the ride's own
+ * position, and the duplicate booth is left off rather than labelled twice.
+ * `ParkMap` also draws the anchor's real footprint under it, so the ride's true
+ * extent on the ground is visible whatever size the picture is drawn at.
  */
-export const ANCHORS_WITH_STALL_ENTRY: ReadonlySet<string> = new Set([
-  'ferrisWheel',
+export const STALLS_DUPLICATING_A_RIDE: ReadonlySet<string> = new Set([
+  'spaceFerrisWheel',
   'dodgems',
   'waterFight',
 ]);
@@ -89,14 +100,17 @@ export function parkMapFeatures(facts: ParkMapFacts): readonly MapFeature[] {
 
   for (const anchor of ANCHORS) {
     if (anchor.id === 'building') continue;
-    if (ANCHORS_WITH_STALL_ENTRY.has(anchor.id)) continue;
-    // The entrance, not the plot centre: it is where the path arrives, where
-    // the sign stands, and where a tap on the map should take her.
-    const [x, z] = anchor.entrance;
+    // The ride's own centre, which is what the picture depicts and what its
+    // footprint is drawn around. Not the entrance: the entrance is where the
+    // path arrives, several metres off the ride itself, and a picture of a
+    // ferris wheel standing on its queue rather than on the wheel is the same
+    // class of error as the booth substitution above.
+    const [x, z] = anchor.position;
     features.push({ id: anchor.id, kind: 'anchor', x, z });
   }
 
   for (const [id, placement] of Object.entries(STALL_PLACEMENTS)) {
+    if (STALLS_DUPLICATING_A_RIDE.has(id)) continue;
     const [x, z] = placement.position;
     features.push({ id, kind: 'stall', x, z });
   }
