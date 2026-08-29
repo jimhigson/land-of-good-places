@@ -500,13 +500,38 @@ export const CAT_BUS_TRACK_WIDTH = 2 * (WHEEL_X + FENDER_HALF_WIDTH);
  * bottom of a bump rather than at rest — which is exactly the failure a still
  * frame cannot show and `check:cat-bus-suspension` exists to catch.
  *
- * Heave in metres; pitch and roll in radians. Deliberately small: the whole
- * effect is 10 cm and a degree, because a bus that visibly lurches reads as
- * broken rather than sprung.
+ * Heave in metres; pitch and roll in radians.
+ *
+ * **Sized in pixels on the screen, not in metres on the bus.** The first cut
+ * of this was 0.08 m and 0.014 rad, defended in this very docblock as
+ * *"10 cm and a degree, because a bus that visibly lurches reads as broken
+ * rather than sprung"*. That is the right instinct for a driving game seen
+ * from the cab and the wrong one here: the park is seen from ~30 m up, where a
+ * vertical metre is about **40 screen pixels**, so 0.08 m of clamp — which the
+ * road only ever half used — came out at **2.5 px peak to peak**. Sampled
+ * frame by frame through a real arrival it was arithmetically a suspension and
+ * perceptually a rigid bus, and the review found it by measuring the running
+ * game rather than by reading this file.
+ *
+ * These numbers are Jim's standing ruling that **recognisability beats
+ * proportion** applied to motion instead of to size — the same ruling that
+ * gave this bus 2.13 m wheels. A real coach does not lean like this. A big
+ * friendly cartoon cat pulling away from the kerb does.
+ *
+ * The three are not interchangeable, and the exchange rate is why they are not
+ * all simply doubled again:
+ *
+ * - **heave** costs {@link CAT_BUS_RIDE_LIFT} 1:1;
+ * - **pitch** costs it `NOSE_Z` = ~7.9 m per radian, because the cat's chin
+ *   hangs 7.9 m in front of the centre and a nose-down bump is what puts it
+ *   through the road. So pitch buys the most visible motion per radian *and*
+ *   the most ride height per radian, and it is deliberately the one held back;
+ * - **roll** costs `FACE_RADIUS` and only ever shows on a corner, which is
+ *   `BusJourney` and not the arrival.
  */
-export const CAT_BUS_MAX_HEAVE = 0.08;
-export const CAT_BUS_MAX_PITCH = 0.014;
-export const CAT_BUS_MAX_ROLL = 0.018;
+export const CAT_BUS_MAX_HEAVE = 0.2;
+export const CAT_BUS_MAX_PITCH = 0.028;
+export const CAT_BUS_MAX_ROLL = 0.05;
 
 /**
  * **How much higher the sprung body rests than it is drawn** — the ride height
@@ -585,22 +610,44 @@ const SPRING_DAMPING = 7.4;
  * on distance, the bobbing stops dead when the bus stops, resumes when it pulls
  * away, and gets busier the faster it goes, all for free and all correct.
  *
- * Three incommensurable sine terms rather than a noise table: no repeat a
- * player could learn, nothing to allocate, and it is smooth, which a sampled
- * table is not without interpolation. Total amplitude 0.056 m — the road
- * through the park is tarmac, not a farm track, and an input that on its own
- * reached the clamps would give a flat-topped bob rather than a sprung one.
- *
  * The rear axle samples this one wheelbase behind the front, so **the back of
  * the bus hits the same bump the front just did**, a wheelbase later. That
  * lag is most of what reads as "a real vehicle" rather than "a body on a
  * spring", and it costs one subtraction.
+ *
+ * ## The wavelengths are measured in wheelbases, and that is the whole trick
+ *
+ * Because of that lag, **what a bump turns into depends entirely on how it
+ * compares with the wheelbase**, and the first cut of this file did not know
+ * that. Its three terms were incommensurable numbers picked to avoid a
+ * repeat — `0.83`, `1.97`, `4.31` rad/m — and the longest of them happened to
+ * land at 7.6 m against a 9.2 m wheelbase, which is very nearly antiphase. So
+ * the two axles pushed *against* each other: the difference (pitch) saturated
+ * its clamp while the average (heave) very nearly cancelled, and the bus
+ * reached 2.5 px of bob on a road with 0.11 m of bump in it. The amplitude was
+ * not the only thing that was too small — most of it was being thrown away.
+ *
+ * So the terms are derived from {@link WHEELBASE} instead of picked:
+ *
+ * - a wave **one wheelbase long** puts both axles at the same point on it, so
+ *   it is a pure **heave** input — the body lifts and drops flat, which is the
+ *   motion Jim actually asked for. At 6 m/s it comes in at 0.65 Hz, a lazy
+ *   bounce a six-year-old can watch happen;
+ * - a wave **two wheelbases long** puts the axles exactly antiphase, so it is
+ *   a pure **pitch** input — the nose and tail see-saw, 0.33 Hz;
+ * - a third of a wheelbase adds fine texture, and lands near the spring's own
+ *   6.8 rad/s so it reads as the road rather than as the body.
+ *
+ * They are still mutually irrational once the phases are in, so there is no
+ * pattern to learn; they are simply aimed now. Total amplitude 0.245 m: the
+ * road through the park is still tarmac, but this is a cartoon.
  */
+const HEAVE_WAVE = (Math.PI * 2) / WHEELBASE;
 function roadHeightAt(distance: number): number {
   return (
-    Math.sin(distance * 0.83) * 0.03 +
-    Math.sin(distance * 1.97 + 1.7) * 0.018 +
-    Math.sin(distance * 4.31 + 3.9) * 0.008
+    Math.sin(distance * HEAVE_WAVE) * 0.135 +
+    Math.sin(distance * HEAVE_WAVE * 0.5 + 1.7) * 0.075 +
+    Math.sin(distance * HEAVE_WAVE * 3 + 3.9) * 0.035
   );
 }
 
