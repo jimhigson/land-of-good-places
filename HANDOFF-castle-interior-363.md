@@ -13,10 +13,35 @@ read and reconcile against. Everything else is context.
 | | |
 | --- | --- |
 | Contract published | ✅ (§4 below) |
-| Fabric work (mine) | not started |
+| Fabric work (mine) | ✅ first pass — flagstone floors, coursed walls, timber wall-plate |
+| `/castle?deck=N` deep link | ✅ added; there was no way to reach the interior at all |
 | First Artist batch | requested, awaiting the Artist's own sizes |
-| Check that can fail | designed (§6), not written |
-| Screenshots to Jim | none yet |
+| Check that can fail | ✅ `check:castle`, wired into `npm run build`, **went red on its first run and caught a real bug** (§6) |
+| Screenshots to Jim | ✅ sent, storeys 0–2 |
+| Lighting / torches | not started — next |
+| Props | blocked on the Artist's batch 1 |
+
+### Two things found the hard way, both by looking at a rendered frame
+
+1. **You could not reach the castle interior at all.** `/spawn?pos=600,0.73,600`
+   photographs an empty sky: being inside is a *space*, not a position.
+   `/castle?deck=N` now exists, and goes through `changeSpace` — the door's own
+   sequence — because a first cut that called `enterInterior()` directly
+   switched the room on and left the camera out over the garden.
+2. **Ceiling beams fight the cutaway.** Cross-hall beams were the obvious
+   reading of the brainstorm and were wrong: the storey above is faded out so
+   you can see in, so there is no ceiling for them to hang from, and fifteen
+   timbers floated over the room hiding the floor. Replaced with a perimeter
+   wall-plate, which does the same job from somewhere the cutaway does not
+   delete. **The code and the geometry both looked right; only the frame
+   said otherwise.**
+
+### One open question for Jim
+
+Each storey tints the stone with its own colour (the existing "layer cake"), so
+floor 1's flagstones come out mint green. It is consistent with what the family
+liked before, but a castle arguably wants **one** stone the whole way up. Not
+changed either way pending a ruling.
 
 ---
 
@@ -305,7 +330,33 @@ them:
 before trusting any of them green.** A check that has never been red is worse
 than no check.
 
-*(Red-run transcripts go here.)*
+### It went red on its first run, before it ever went green
+
+Assertion 3 fired 1 232 times, and it was not a contrived break — it was a real
+bug I had just written and could not see:
+
+```
+check:castle — 1232 failure(s):
+
+  ✗ beams: deck 0 beam segment 0 hangs down to 2.900 m, which the tallest
+    child (2.97 m) would walk into.
+```
+
+The timbers were 0.40 m deep under a 3.30 m ceiling, and
+`TALLEST_CHILD_HEIGHT` is 2.97. Fixed by giving the timber its bulk **across**
+instead of **down** — 0.70 × 0.22 — which also reads chunkier from a 38°
+camera, where you see a timber's width far more than its depth.
+`buildCeilingBeams` now throws rather than shipping a ceiling children walk
+through, and there are only 33 cm between the ceiling and a tall child, so that
+is the entire budget for anything that ever hangs in this room.
+
+**The check's own first draft carried the same disease it exists to catch**: it
+typed `2.97` instead of importing `TALLEST_CHILD_HEIGHT` from `kid.ts`, its
+owner. It now imports it, and derives the timber's half-depth from
+`BEAM_UNDERSIDE` rather than repeating the cross-section.
+
+Assertions 1 and 2 are in; assertion 4 (reported figure vs measured figure)
+lands with the Artist's batch 1, which is what it measures.
 
 ---
 
