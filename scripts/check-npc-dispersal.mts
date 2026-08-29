@@ -160,6 +160,12 @@ const MAX_CLUMP_FRACTION = 1 / 3;
  * with the cast rather than being a count typed in here.
  */
 const MIN_DISTINCT_DESTINATIONS_FRACTION = 0.25;
+/**
+ * At least this share of the crowd must be free rather than held by an
+ * activity. See assertion 4 in the file comment: this is what stops "measure
+ * only the free children" from becoming a way to excuse a parked crowd.
+ */
+const MIN_FREE_FRACTION = 0.5;
 
 // ---------------------------------------------------------------- the park
 
@@ -288,7 +294,7 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
   if (process.env['TRACE']) {
     console.log(
       `  t=${String(m.t.toFixed(0)).padStart(3)}s rms=${m.rms.toFixed(1)} ` +
-        `clump=${m.largestClump} dests=${m.distinctDestinations}`,
+        `clump=${m.largestClump} dests=${m.distinctDestinations} free=${m.free}`,
     );
   }
 }
@@ -306,12 +312,24 @@ const worstClump = samples.reduce((a, b) => (b.largestClump > a.largestClump ? b
 const worstVariety = samples.reduce((a, b) =>
   b.distinctDestinations < a.distinctDestinations ? b : a,
 );
+const worstFree = samples.reduce((a, b) => (b.free < a.free ? b : a));
+
+const minimumFree = Math.ceil(kids.length * MIN_FREE_FRACTION);
+check(
+  worstFree.free >= minimumFree,
+  `only ${worstFree.free} of ${kids.length} children were free to walk at t=${worstFree.t.toFixed(0)}s ` +
+    `(the rest held by an activity — the train, a climb, a chat, the paint stall), fewer than the ` +
+    `${minimumFree} this check needs to be measuring anything. Either an activity is holding the ` +
+    'crowd far longer than it should, or the dispersal numbers below are about a handful of children ' +
+    'and mean nothing',
+);
 
 const minimumRms = UNIFORM_RMS * MIN_SPREAD_FRACTION;
 check(
   worstSpread.rms >= minimumRms,
   `the crowd's RMS radius fell to ${worstSpread.rms.toFixed(2)} m at t=${worstSpread.t.toFixed(0)}s, ` +
-    `below ${minimumRms.toFixed(2)} m — ${(MIN_SPREAD_FRACTION * 100).toFixed(0)}% of the ` +
+    `across the ${worstSpread.free} free children, below ${minimumRms.toFixed(2)} m — ` +
+    `${(MIN_SPREAD_FRACTION * 100).toFixed(0)}% of the ` +
     `${UNIFORM_RMS.toFixed(2)} m a uniform scatter over this park's own area ` +
     `(${PARK_BOUNDARY.area.toFixed(0)} m², equivalent radius ${PARK_EQUIVALENT_RADIUS.toFixed(1)} m) ` +
     'would have. The children are pooling instead of going places — issue #350',
@@ -320,7 +338,7 @@ check(
 const maximumClump = Math.floor(kids.length * MAX_CLUMP_FRACTION);
 check(
   worstClump.largestClump <= maximumClump,
-  `${worstClump.largestClump} of ${kids.length} children were within ${CLUMP_RADIUS.toFixed(1)} m of ` +
+  `${worstClump.largestClump} of ${worstClump.free} free children were within ${CLUMP_RADIUS.toFixed(1)} m of ` +
     `one another at t=${worstClump.t.toFixed(0)}s (a tenth of the park's width), more than the ` +
     `${maximumClump} a third of the crowd allows — that is the clump issue #350 was raised for`,
 );
@@ -330,7 +348,7 @@ check(
   worstVariety.distinctDestinations >= minimumDestinations,
   `the crowd was heading for only ${worstVariety.distinctDestinations} distinct attraction(s) at ` +
     `t=${worstVariety.t.toFixed(0)}s, fewer than the ${minimumDestinations} expected of ` +
-    `${kids.length} children — they may be spread out, but not because each is going somewhere ` +
+    `${worstVariety.free} free children — they may be spread out, but not because each is going somewhere ` +
     'of their own, so the mechanism this check exists for is not what did it',
 );
 
@@ -355,6 +373,10 @@ notes.push(
 notes.push(
   `fewest distinct destinations: ${worstVariety.distinctDestinations} at ` +
     `t=${worstVariety.t.toFixed(0)}s (needs >= ${minimumDestinations})`,
+);
+notes.push(
+  `fewest free (activity not holding them): ${worstFree.free} at t=${worstFree.t.toFixed(0)}s ` +
+    `(needs >= ${minimumFree} of ${kids.length})`,
 );
 for (const note of notes) console.log(`  ${note}`);
 
