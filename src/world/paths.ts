@@ -4199,10 +4199,49 @@ function* addInterconnects(
       restoreLatticeState(beforeConnector);
       continue;
     }
+    // **The disproportion escape** (issue #361). Both screens below drop
+    // paving on the principle that a *shortcut* never outranks the park's
+    // own structure. That principle holds right up to the point where the
+    // structure-respecting alternative stops being a detour and becomes a
+    // walk round the park: seed 11 put `ballPit` and `exit-ginormousSlide`
+    // 14.1 m apart and 238.7 m apart by paving — 17x — and a six-year-old
+    // who can see the slide exit from the ball pit is not walking that.
+    //
+    // The line between "tidy" and "absurd" is taken from the park's own
+    // geometry, never a typed ratio (issue #292's lesson): a route that
+    // respects the lattice only ever turns at right angles, so it costs at
+    // worst the **Manhattan** distance between the pair, plus up to one
+    // whole `STREET_PITCH` of dog-leg at each end to get onto a lattice
+    // line and back off it at the door. That sum is the longest walk the
+    // lattice can honestly ask for. A paved alternative longer than it is
+    // not paying for tidiness; it is a failure to connect, and the pair is
+    // better served by paving that breaks a rule than by no paving at all.
+    //
+    // It cannot fire where the network is merely imperfect: the pair has
+    // already had to clear `CONNECTOR_RATIO_THRESHOLD` and `minWaste` to
+    // reach here at all, and by construction this bound is far tighter
+    // than `detourRatiosStayReasonable`'s own 15x trip — so every pair
+    // that invariant would flag is a pair this escape reaches first.
+    const latticeHonestWalk = Math.abs(a.x - b.x) + Math.abs(a.z - b.z) + 2 * STREET_PITCH;
+    const detourIsDisproportionate = paved > latticeHonestWalk;
+    if (DEBUG_STREETS && detourIsDisproportionate) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[escape] ${a.id}-${b.id}: ${straight.toFixed(1)} m apart, ${paved.toFixed(1)} m by paving ` +
+          `(${(paved / straight).toFixed(2)}x) against a lattice-honest ${latticeHonestWalk.toFixed(1)} m — ` +
+          'the structure screens yield',
+      );
+    }
+
     // A fallback connector that would draw its own private street line is
     // dropped rather than drawn: it is optional paving, and the lattice
     // rule outranks a shortcut (see {@link carriesAnOffLatticeStreetRun}).
-    if (!plan && carriesAnOffLatticeStreetRun(points)) {
+    // Unless the walk it saves is disproportionate, above — a single 15 m
+    // line off the lattice reads as a shortcut through a corner; 238 m of
+    // walking reads as a broken park. The one it draws is still held to
+    // `streetsShareLatticeLines`' own exemptions in the built park, which
+    // is what proves the escape stayed the size of a shortcut.
+    if (!plan && !detourIsDisproportionate && carriesAnOffLatticeStreetRun(points)) {
       if (DEBUG_STREETS) {
         // eslint-disable-next-line no-console
         console.log(`[connect] ${a.id}-${b.id}: rejected, off-lattice street run`);
@@ -4220,7 +4259,33 @@ function* addInterconnects(
       const b = points[i] as readonly [number, number];
       slideOverlap += slideCorridorOverlap(a[0], a[1], b[0], b[1]);
     }
-    if (slideOverlap > 8) {
+    // ...with the same escape, and only where the corridor is not something
+    // this connector *chose* to run along. When a destination stands inside
+    // the leg corridor, that ground is already paved and lamped by its own
+    // mandatory spur, so a connector arriving there adds no marginal risk —
+    // the doorstep exemption the ride-corridor screen above already grants,
+    // held here to pairs the escape has judged disproportionate. A
+    // cross-park shortcut that merely *ends* at the slide exit still gets
+    // nothing (seed 2's `building`-`exit-ginormousSlide` clears the escape
+    // and is refused here, because neither end is in the corridor).
+    //
+    // Which destinations those are is **measured, never assumed**. Where
+    // the exit lands relative to the chute is a per-seed fact: seed 11 puts
+    // `exit-ginormousSlide` inside the corridor, with 20.3 m of a 23.4 m
+    // connector in it because *both* ends are; seed 2 puts it outside. So
+    // this asks `pointInSlideCorridor` about the park that was built rather
+    // than reasoning from where a slide exit "must" be.
+    //
+    // The proof it is safe is likewise measured on the built park:
+    // `theGinormousSlideStandsOnSomething` counts the legs that actually
+    // got placed, on all five seeds. **Read that margin before widening
+    // this**: on the #352 base seed 11's chute stands on 3 legs against a
+    // floor of 3, with and without this exemption. It costs no leg — and
+    // there is none spare.
+    const corridorIsADoorstep =
+      detourIsDisproportionate &&
+      (pointInSlideCorridor(a.x, a.z) || pointInSlideCorridor(b.x, b.z));
+    if (slideOverlap > 8 && !corridorIsADoorstep) {
       if (DEBUG_STREETS) {
         // eslint-disable-next-line no-console
         console.log(`[connect] ${a.id}-${b.id}: rejected, runs along the slide corridor`);
