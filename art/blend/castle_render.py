@@ -349,17 +349,33 @@ def hall_composition():
         places.append((f"feast-{name}", (x, y, cb.TABLE_TOP), 0.0))
 
     # Armours against the back wall, on their plinths, facing into the room.
-    for x in (-5.2, 5.2):
+    for x in (-8.0, 8.0):
         places.append(("plinth-block", (x, wall_y - 0.7, 0.0), 0.0))
         for part in ("armour-plate", "armour-trim", "armour-visor", "armour-plume"):
             places.append((part, (x, wall_y - 0.7, 0.25), 0.0))
 
     # Two tapestries flanking the throne, on the wall, at the contracted rail
-    # height — and the sconces between them at theirs.
-    for x in (-2.6, 2.6):
+    # height — and the sconces on the **bare wall between them**.
+    #
+    # **The previous composition hid every sconce inside a tapestry**, and it
+    # took a review to notice. Tapestries centred on ±2.6 are 3.20 m wide, so
+    # they covered x −4.2..−1.0 and +1.0..+4.2; the sconces were at ±1.2 and
+    # ±4.0, i.e. all four inside that cloth, at a height (2.10 m) inside its
+    # 0.50–2.90 m drop. The hall shots have therefore been showing **no
+    # sconces at all** while appearing to show four, which is a large part of
+    # why they read as "dark smudges you have to look for" — a preview that
+    # answers a question about an asset it is not actually displaying is the
+    # picture-shaped version of a check that passes without checking anything.
+    #
+    # So the wall is now laid out so nothing is behind anything: tapestries on
+    # ±3.6 (covering ±2.0..±5.2), armours moved out to ±8.0, and the sconces
+    # in the two clear bands — ±1.2 between the throne and the tapestries, and
+    # ±6.4 between the tapestries and the armours.
+    tapestry_x = 3.6
+    for x in (-tapestry_x, tapestry_x):
         for part in ("tapestry-cloth", "tapestry-fringe", "tapestryrail-pole"):
             places.append((part, (x, wall_y, rail_y), 0.0))
-    for x in (-4.0, -1.2, 1.2, 4.0):
+    for x in (-6.4, -1.2, 1.2, 6.4):
         for part in ("sconce-bracket", "sconce-cup"):
             places.append((part, (x, wall_y, sconce_y), 0.0))
 
@@ -443,22 +459,83 @@ def main() -> None:
         clones.append(clone)
     floor = standin("hall-floor", (22.0, 18.0, 0.3), (0.0, 0.0, -0.15), 0xF0A3C1)
     wall = standin("hall-wall", (22.0, 0.45, 3.3), (0.0, 6.625, 1.65), 0xFFC2D8)
-    # A child-height post, so the scale rule can be judged rather than asserted.
-    # `TALLEST_CHILD` is `kid.ts`'s and comes through `castle_build`.
-    child = standin("scale-child", (0.42, 0.42, 1.86), (3.0, -4.4, 0.93), 0x7FE3C0)
-    for extra in (floor, wall, child):
+    # Child-height posts, so the scale rule can be judged rather than asserted.
+    #
+    # **There are two, and the number used to be typed and wrong.** The comment
+    # here said the post came from `TALLEST_CHILD` via `castle_build` and then
+    # typed `1.86` — the exact "comment promising two numbers agree" that this
+    # repo hits more than any other bug, sitting in the one file whose job is to
+    # not mislead about scale. A child in this game is **2.12 m** plain
+    # (`KID_HEIGHT`) and **2.97 m** in the tallest hair-and-hat combination
+    # (`TALLEST_CHILD_HEIGHT`). Both now come from `kid.ts` through
+    # `castle_build`, and both are drawn, because the honest answer to "how big
+    # is this next to a child" in a game with hats this big is a range.
+    #
+    # It matters for more than tidiness: the armour was sized "2.60 m beside a
+    # 1.86 m child", i.e. believed to tower. Against the real figures it is
+    # shorter than a child in a tall hat. Flagged in the handoff — the sizes are
+    # the Engineer's contract and not mine to change unilaterally, but nobody
+    # should re-judge that silhouette against a post that is a quarter short.
+    child = standin("scale-child", (0.42, 0.42, cb.CHILD_HEIGHT),
+                    (3.0, -4.4, cb.CHILD_HEIGHT * 0.5), 0x7FE3C0)
+    tall_child = standin("scale-child-tallest", (0.42, 0.42, cb.TALLEST_CHILD),
+                         (3.9, -4.4, cb.TALLEST_CHILD * 0.5), 0x4FBF9B)
+    for extra in (floor, wall, child, tall_child):
         extra.hide_render = False
     bpy.context.view_layer.update()
+    # **The wall-plate, at the height the build asserts against.** Without it
+    # there was no picture anywhere of the constraint that actually governs the
+    # tallest asset in the room, and the throne stood 2 cm through it for a week
+    # with every assertion green. `cb.CEILING_CLEAR` is the same value
+    # `check_contract` uses, so this cannot drift from the number being checked
+    # — and if the Engineer's module lands with a different one, the beam in the
+    # picture moves with it.
+    plate = standin("hall-wall-plate", (22.0, 0.70, 0.22),
+                    (0.0, 6.4 - 0.9, cb.CEILING_CLEAR + 0.11), 0xB5836A)
+    plate.hide_render = False
     for stem, azimuth, elevation, pad in (
         ("hall", 16.0, GAME_ELEVATION, 1.06),
         ("hall-low", 8.0, 16.0, 1.06),
     ):
-        frame(clones + [floor, wall, child], azimuth, elevation, camera, pad)
+        frame(clones + [floor, wall, child, tall_child, plate],
+              azimuth, elevation, camera, pad)
         bpy.context.scene.render.filepath = os.path.join(OUT, f"{stem}.png")
         bpy.ops.render.render(write_still=True)
         print(f"  wrote {stem}.png")
 
-    print(f"  the green post in the hall shots is 1.86 m — a child, for scale")
+    # --- the throne under the beam, in elevation --------------------------
+    #
+    # The one shot that answers the question the build now asserts: does the
+    # throne, on the Engineer's dais, clear the wall-plate? Straight on and
+    # square, because a 3 cm gap judged from a 38° camera is a guess. The dais
+    # is the Engineer's and drawn as a stand-in at the height `CONTRACT` uses.
+    for obj in clones:
+        obj.hide_render = True
+    dais = standin("throne-dais", (2.6, 2.2, cb.DAIS_HEIGHT),
+                   (0.0, 0.0, cb.DAIS_HEIGHT * 0.5), 0xC2708F)
+    beam = standin("throne-beam", (4.0, 0.70, 0.22),
+                   (0.0, 0.0, cb.CEILING_CLEAR + 0.11), 0xB5836A)
+    throne_parts = []
+    for part in ("throne-frame", "throne-gold", "throne-cushion"):
+        obj = bpy.data.objects[part]
+        obj.hide_render = False
+        obj.location = (0.0, 0.0, cb.DAIS_HEIGHT)
+        throne_parts.append(obj)
+    elevation_child = standin("scale-child-elevation", (0.42, 0.42, cb.TALLEST_CHILD),
+                              (1.9, 0.0, cb.TALLEST_CHILD * 0.5), 0x4FBF9B)
+    for extra in (dais, beam, elevation_child):
+        extra.hide_render = False
+    bpy.context.view_layer.update()
+    frame(throne_parts + [dais, beam, elevation_child], 0.0, 2.0, camera, 1.18)
+    bpy.context.scene.render.filepath = os.path.join(OUT, "throne-beam.png")
+    bpy.ops.render.render(write_still=True)
+    print("  wrote throne-beam.png")
+
+    print(f"  the pale post in the hall shots is {cb.CHILD_HEIGHT:.2f} m — a child, "
+          f"for scale; the darker one is {cb.TALLEST_CHILD:.2f} m, a child in the "
+          "tallest hat")
+    print(f"  throne-beam.png: the throne on the Engineer's {cb.DAIS_HEIGHT:.2f} m "
+          f"dais under the {cb.CEILING_CLEAR:.2f} m wall-plate")
     print(f"  renders in {OUT}\n")
 
 

@@ -187,6 +187,11 @@ def read_ceiling_clear():
 CEILING_CLEAR, CEILING_FROM = read_ceiling_clear()
 
 TALLEST_CHILD = ts_const("src/art/models/kid.ts", "TALLEST_CHILD_HEIGHT")
+# A child with ordinary hair and no hat — the figure to judge everyday scale
+# against, where `TALLEST_CHILD` is the worst case the ceiling checks use.
+# Read, not typed, for the reason the whole file exists: this one was typed as
+# **1.86** in two places, and it was wrong by a quarter of a child.
+CHILD_HEIGHT = ts_const("src/art/models/kid.ts", "KID_HEIGHT")
 
 
 def deg(x: float) -> float:
