@@ -298,6 +298,24 @@ function run(coverage: Coverage): string {
     hash ^= Math.round(value * 4096) & 0xffffffff;
     hash = Math.imul(hash, 16777619) >>> 0;
   };
+  /**
+   * Mixes a string — a child's destination id — into the same hash.
+   *
+   * Needed because #350 replaced `targetNode` (a number, the next waypoint one
+   * edge away) with a destination identified by id. Passing a string through
+   * `mix` would have been worse than useless: `Math.round(undefined * 4096) &
+   * 0xffffffff` is `0`, so the xor contributes nothing and the fingerprint goes
+   * on hashing happily while having silently stopped covering **where any child
+   * is going** — which is the entire subject of that issue. That is exactly
+   * what happened, and it is why this is a separate function rather than a cast.
+   */
+  const mixText = (value: string | null) => {
+    if (value === null) {
+      mix(-1);
+      return;
+    }
+    for (let i = 0; i < value.length; i += 1) mix(value.charCodeAt(i));
+  };
 
   for (let frame = 0; frame < FRAMES; frame += 1) {
     const elapsed = frame * DT;
@@ -357,7 +375,8 @@ function run(coverage: Coverage): string {
       mix(child.intent.lookAt ?? 99);
       mix(child.intent.hop ? 1 : 0);
       mix(EXPRESSIONS.indexOf(child.intent.expression));
-      mix(child.driver.targetNode);
+      // The destination, by id — the thing this trace exists to notice changing.
+      mixText(child.driver.destinationId);
       mix(child.driver.trainSeat ?? -1);
       mix(child.driver.climbPhase === null ? -1 : PHASES.indexOf(child.driver.climbPhase));
       mix(child.driver.chatBubbleText === null ? -1 : child.driver.chatBubbleText.length);

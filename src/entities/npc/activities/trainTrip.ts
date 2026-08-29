@@ -115,6 +115,14 @@ export class TrainTrip implements Activity {
     if (!service) {
       // No train in this world (or it has gone away mid-ride).
       this.seat = null;
+      // Every exit gives the slot back. Unreachable today — a world without a
+      // train never lets a child claim one in the first place — but this is
+      // precisely the shape `budget.ts` warns about in its header: "a slot
+      // claimed on the way in and released on only one of the three ways out
+      // leaks, and a leaked slot is indistinguishable from the feature being
+      // switched off". `release()` is idempotent so that every exit can simply
+      // call it and stop thinking about it; this one was not.
+      this.slot.release();
       this.mode = 'none';
       return false;
     }
