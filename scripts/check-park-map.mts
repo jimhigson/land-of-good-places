@@ -99,8 +99,8 @@
  *
  *    **Assertion 3 only ever runs on the default framing**, which is why 5
  *    exists. Measured: `--mutate=zoom-axis` (zoom applied to one axis) raises
- *    **140 of the 175 sampled views** — every view except the 35 at zoom 1,
- *    where the shear is exactly a no-op by construction. `140 = 175 - 35` is
+ *    **180 of the 225 sampled views** — every view except the 45 at zoom 1,
+ *    where the shear is exactly a no-op by construction. `180 = 225 - 45` is
  *    the number that demonstrates it.
  *
  *    An earlier version of this note claimed "140 under assertion 5 and zero
@@ -146,6 +146,7 @@ import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../src/world/building/layo
 import { STALL_PLACEMENTS } from '../src/minigames/stallPlacement.ts';
 import { parkMapFeatures, type MapFeature } from '../src/ui/parkMapContent.ts';
 import {
+  MAP_EDGE_MARGIN_M,
   MAP_MAX_ZOOM,
   MAP_MIN_ZOOM,
   clampMapView,
@@ -295,14 +296,31 @@ const VIEW_EPSILON_PX = 0.5;
 /**
  * The least park the map may show, as a fraction of the canvas.
  *
- * Not zero — "at least one pixel of lawn" would pass on a view showing a single
- * green corner, which is not a map. 12% is below anything the honest clamp
- * produces at any sampled view (measured worst is far higher) and far above the
- * 0% the broken clamp allowed, so it fails the bug without being a tripwire on
- * ordinary framing. The park is a lobed blob inside a rectangular extent, so
- * some genuinely lawn-free corner at high zoom is expected and fine.
+ * **Derived from measurement with real margin, not chosen as a round number.**
+ * The first version was `0.12`, justified by a comment that was true only of
+ * the views this file happened to sample — and `viewSamples` was missing NE
+ * and SW, which is where the lobed park's emptiest bounding-box corner is. Add
+ * those two offsets and change nothing else and the check went **red on
+ * correct, unmutated code at 11.8%**. The assertion was passing because of
+ * which directions were tried, which is the same defect as the clamp bug it
+ * was written to catch, one level down. Caught in review of PR #372.
+ *
+ * Two independent sweeps of the honest, unmutated code:
+ *
+ * - the reviewer's: 110 canvas sizes x 1600 views -> worst **7.4%**
+ * - mine: 150 canvas sizes x 30,000 views -> worst **9.03%** (360x320, zoom 4,
+ *   panned hard NE)
+ *
+ * The floor is taken from the **lower** of the two, halved: 3%. That is ~2.5x
+ * clear of anything correct code produces, so adding a pan direction or a
+ * canvas size cannot make it cry wolf — and `--mutate=clamp-letterbox` still
+ * reports **0.0%**, so the bug it exists to catch fails it by the entire
+ * margin. A check that fires spuriously is one nobody reads.
+ *
+ * 3-10% is a corner of the blob at maximum zoom and it looks perfectly fine on
+ * screen; the property being defended is "never *nothing*", not "always full".
  */
-const MIN_LAWN_FRACTION = 0.12;
+const MIN_LAWN_FRACTION = 0.03;
 
 /**
  * How much of the canvas is inside the real park boundary, by grid sample.
@@ -365,6 +383,15 @@ function viewSamples(width: number, height: number): { label: string; view: MapV
     [0, reach, 'panned south'],
     [-reach, -reach, 'panned NW'],
     [reach, reach, 'panned SE'],
+    // **NE and SW were missing, and NE is the worst case.** The park is a
+    // lobed blob inside a rectangular extent, and its emptiest bounding-box
+    // corner is to the north-east — so the two offsets most likely to find a
+    // sparse view were the two not sampled. Omitting the worst case is
+    // backwards, and it meant assertion 6 passed partly because of which
+    // directions were tried rather than because the code cleared the bar.
+    // Caught in review of PR #372.
+    [reach, -reach, 'panned NE'],
+    [-reach, reach, 'panned SW'],
   ];
   const samples: { label: string; view: MapView }[] = [];
   for (const zoom of ZOOM_SAMPLES) {
@@ -939,85 +966,114 @@ notes.push(
  * each, and they are the difference between "the castle stays under your
  * thumb" being a claim in a comment and being a fact.
  *
- * **Sampled at maximum zoom, where the clamp provably cannot bind.** That
- * matters: the first version of this assertion sampled at zoom 2 and went red
- * on a 700x300 landscape phone, because at that zoom the park's *width* still
- * fits the canvas entirely, so `clampMapView` correctly pins the x axis and a
- * horizontal drag correctly does nothing. The formula was right and the test
- * was wrong. At `MAP_MAX_ZOOM` the visible span is smaller than the park on
- * both axes at every canvas size here (checked: worst is 45.5 m visible
- * against 89 m of park), so a drag must move the map by exactly the drag and
- * any failure is the formula's.
+ * **Sampled only where the clamp provably cannot bind — and that precondition
+ * is computed here, not asserted in prose.** It matters: the first version
+ * sampled at zoom 2 and went red on a 700x300 landscape, because at that zoom
+ * the park's *width* still fits the canvas, so `clampMapView` correctly pins
+ * the x axis and a horizontal drag correctly does nothing. The formula was
+ * right and the test was wrong.
+ *
+ * An earlier comment here quoted fixed metre figures for that margin. They
+ * were stale the moment the clamp changed, so the numbers are gone and the
+ * condition is evaluated instead: a view is only used if the visible span is
+ * strictly inside the park's span on **both** axes, which is exactly when a
+ * pan or a zoom cannot be clamped. `usableViews` in the note below is the
+ * count that actually got measured, so a change that silently skipped
+ * everything would show up as a zero rather than as a green.
  */
 {
   let worstFocalPx = 0;
   let worstFocalWhere = '';
   let worstPanPx = 0;
   let worstPanWhere = '';
+  let usableViews = 0;
+
+  const contentSpanX =
+    PARK_BOUNDARY.extent.maxX - PARK_BOUNDARY.extent.minX + 2 * MAP_EDGE_MARGIN_M;
+  const contentSpanZ =
+    PARK_BOUNDARY.extent.maxZ - PARK_BOUNDARY.extent.minZ + 2 * MAP_EDGE_MARGIN_M;
 
   for (const [width, height, name] of CANVAS_SIZES) {
-    // Centred and fully zoomed in: far from every clamp edge, so the formulae
-    // are what is being measured.
-    const roomy = clampMapView(
-      { ...defaultMapView(width, height), zoom: MAP_MAX_ZOOM },
-      width,
-      height,
-    );
+    const start = defaultMapView(width, height);
+    const baseScale = outdoorParkMapProjection(width, height).scale;
 
-    for (const [fx, fy] of [
-      [width * 0.5, height * 0.5],
-      [width * 0.4, height * 0.45],
-      [width * 0.6, height * 0.55],
-    ] as const) {
-      const before = projectionForView(width, height, roomy);
-      const [worldX, worldZ] = before.toPlane(fx, fy);
-      // Zoom *out* a little, which stays inside the range and keeps the view
-      // clear of the clamp.
-      for (const nextZoom of [MAP_MAX_ZOOM * 0.8, MAP_MAX_ZOOM * 0.9]) {
-        const after = zoomAboutUnderTest(roomy, nextZoom, fx, fy, width, height);
+    for (const zoom of [2, 2.5, 3, MAP_MAX_ZOOM]) {
+      // The clamp can only be inactive if the view is smaller than the park on
+      // both axes, with a little room to move inside it.
+      const visibleX = width / (baseScale * zoom);
+      const visibleZ = height / (baseScale * zoom);
+      const slackX = contentSpanX - visibleX;
+      const slackZ = contentSpanZ - visibleZ;
+      // Need room for the largest probe drag (40 px) in world metres.
+      const needed = 40 / (baseScale * zoom);
+      if (slackX <= needed * 2 || slackZ <= needed * 2) continue;
+      usableViews += 1;
+
+      const roomy = clampMapView({ ...start, zoom }, width, height);
+
+      for (const [fx, fy] of [
+        [width * 0.5, height * 0.5],
+        [width * 0.45, height * 0.45],
+        [width * 0.55, height * 0.55],
+      ] as const) {
+        const before = projectionForView(width, height, roomy);
+        const [worldX, worldZ] = before.toPlane(fx, fy);
+        for (const nextZoom of [zoom * 0.9, zoom * 1.05]) {
+          if (nextZoom < MAP_MIN_ZOOM || nextZoom > MAP_MAX_ZOOM) continue;
+          const after = zoomAboutUnderTest(roomy, nextZoom, fx, fy, width, height);
+          const [px, py] = projectionForView(width, height, after).toCanvas(worldX, worldZ);
+          const drift = Math.hypot(px - fx, py - fy);
+          if (drift > worstFocalPx) {
+            worstFocalPx = drift;
+            worstFocalWhere = `${name} ${zoom}x->${nextZoom.toFixed(2)}x about (${fx.toFixed(0)}, ${fy.toFixed(0)})`;
+          }
+          if (drift > 1) {
+            failures.push(
+              `ZOOM DID NOT PIN THE FOCAL POINT on ${name} ${width}x${height}: zooming ` +
+                `${zoom}x -> ${nextZoom.toFixed(2)}x about (${fx.toFixed(0)}, ${fy.toFixed(0)}) ` +
+                `moved the world point under it by ${drift.toFixed(1)} px. Whatever the child ` +
+                'is pinching on must stay under her fingers.',
+            );
+          }
+        }
+      }
+
+      for (const [dx, dy] of [[40, 0], [0, 40], [-30, 25]] as const) {
+        const before = projectionForView(width, height, roomy);
+        const probeX = width / 2;
+        const probeY = height / 2;
+        const [worldX, worldZ] = before.toPlane(probeX, probeY);
+        const after = panUnderTest(roomy, dx, dy, width, height);
         const [px, py] = projectionForView(width, height, after).toCanvas(worldX, worldZ);
-        const drift = Math.hypot(px - fx, py - fy);
-        if (drift > worstFocalPx) {
-          worstFocalPx = drift;
-          worstFocalWhere = `${name} focal (${fx.toFixed(0)}, ${fy.toFixed(0)}) to ${nextZoom.toFixed(1)}x`;
+        const drift = Math.hypot(px - (probeX + dx), py - (probeY + dy));
+        if (drift > worstPanPx) {
+          worstPanPx = drift;
+          worstPanWhere = `${name} ${zoom}x drag (${dx}, ${dy})`;
         }
         if (drift > 1) {
           failures.push(
-            `ZOOM DID NOT PIN THE FOCAL POINT on ${name} ${width}x${height}: zooming to ` +
-              `${nextZoom.toFixed(1)}x about (${fx.toFixed(0)}, ${fy.toFixed(0)}) moved the world ` +
-              `point under it by ${drift.toFixed(1)} px. Whatever the child is pinching on must ` +
-              'stay under her fingers.',
+            `DRAG MOVED THE MAP WRONG on ${name} ${width}x${height} at ${zoom}x: dragging by ` +
+              `(${dx}, ${dy}) px should carry the world point under the finger to ` +
+              `(${(probeX + dx).toFixed(0)}, ${(probeY + dy).toFixed(0)}) but it landed at ` +
+              `(${px.toFixed(0)}, ${py.toFixed(0)}) — out by ${drift.toFixed(1)} px. The map ` +
+              'drags the wrong way or the wrong distance.',
           );
         }
       }
     }
+  }
 
-    for (const [dx, dy] of [[40, 0], [0, 40], [-30, 25]] as const) {
-      const before = projectionForView(width, height, roomy);
-      const probeX = width / 2;
-      const probeY = height / 2;
-      const [worldX, worldZ] = before.toPlane(probeX, probeY);
-      const after = panUnderTest(roomy, dx, dy, width, height);
-      const [px, py] = projectionForView(width, height, after).toCanvas(worldX, worldZ);
-      const drift = Math.hypot(px - (probeX + dx), py - (probeY + dy));
-      if (drift > worstPanPx) {
-        worstPanPx = drift;
-        worstPanWhere = `${name} drag (${dx}, ${dy})`;
-      }
-      if (drift > 1) {
-        failures.push(
-          `DRAG MOVED THE MAP WRONG on ${name} ${width}x${height}: dragging by (${dx}, ${dy}) px ` +
-            `should carry the world point under the finger to (${(probeX + dx).toFixed(0)}, ` +
-            `${(probeY + dy).toFixed(0)}) but it landed at (${px.toFixed(0)}, ${py.toFixed(0)}) — ` +
-            `out by ${drift.toFixed(1)} px. The map drags the wrong way or the wrong distance.`,
-        );
-      }
-    }
+  if (usableViews === 0) {
+    failures.push(
+      'ASSERTION 8 MEASURED NOTHING: no sampled view had room to pan or zoom without the ' +
+        'clamp binding, so the gesture formulae were never exercised.',
+    );
   }
 
   notes.push(
     `zoom focal pinning: worst drift ${worstFocalPx.toFixed(2)} px` +
-      (worstFocalWhere ? ` (${worstFocalWhere})` : ''),
+      (worstFocalWhere ? ` (${worstFocalWhere})` : '') +
+      `, over ${usableViews} unclamped views`,
   );
   notes.push(
     `drag tracking: worst drift ${worstPanPx.toFixed(2)} px` +

@@ -129,3 +129,24 @@ third caller-side condition. Retitle to the residue.
 
 11 mutations red, green green. Build 0, procgen 453/453, tsc clean.
 Dev server 23734 killed. **Do not merge.**
+
+## Round 3 (approval follow-up) — sampling bias in assertion 6, fixed
+
+`MIN_LAWN_FRACTION = 0.12` passed because of *which offsets were sampled*.
+`viewSamples` omitted **NE and SW**, and NE is where the lobed park's emptiest
+bounding-box corner is. Adding them, changing nothing else, turned the check
+**red on correct code at 11.8%** — the same defect as the clamp bug it was
+written to catch, one level down.
+
+- NE and SW added; sample grid 175 -> **225 views**.
+- Floor derived from two sweeps of honest code: reviewer's 110 sizes x 1600
+  views -> 7.4%; mine 150 sizes x 30,000 views -> 9.03%. Floor = lower, halved
+  = **3%**. ~2.5x clear of correct code; `clamp-letterbox` still **0.0%**.
+- Assertion 8 no longer quotes metre figures that go stale: it **computes**
+  whether the clamp can bind and only measures views where it cannot, now
+  across four zooms (2, 2.5, 3, max) rather than one. Reports
+  `over N unclamped views`, and fails loudly if N is 0.
+- `zoom-axis` figure corrected again for the new grid: **180 of 225 = 225 - 45**
+  at zoom 1.
+
+11 mutations red, green green. Build 0, procgen 453/453, tsc clean.
