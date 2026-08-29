@@ -1305,16 +1305,49 @@ def check_contract() -> str:
             f"(asked {want.width:.2f} × {want.height:.2f} × {want.depth:.2f})  "
             f"{want.note}{mount_note}"
         )
-    # The armour's keep-out is a disc, not a box, so the figure that actually
-    # feeds the Engineer's check is the half-diagonal of its footprint.
-    lo, hi = collection_bounds("armour")
-    radius = math.hypot(hi.x - lo.x, hi.y - lo.y) * 0.5
-    assert radius <= 0.65 + 1e-3, (
-        f"the armour's footprint half-diagonal is {radius:.3f} m and the Engineer's "
-        "keep-out radius is 0.65 m — eight of these go against walls children walk past"
-    )
-    rows.append(f"  armour keep-out radius needed: {radius:.3f} m (their allowance 0.650)")
+    rows.append(f"  armour keep-out radius needed: {armour_keep_out():.4f} m "
+                "(their allowance 0.650)")
     return "\n".join(rows)
+
+
+def armour_keep_out() -> float:
+    """The armour's keep-out radius, **about its origin**, from the vertices.
+
+    A placer's keep-out disc is centred on the **origin** — `check_origins`
+    says so eighty lines up, in the comment that explains why a FLOOR asset's
+    footprint is allowed to be lopsided. So the radius that feeds the
+    Engineer's check is the distance from the origin to the furthest vertex in
+    plan, and nothing else.
+
+    This used to be ``hypot(hi.x - lo.x, hi.y - lo.y) * 0.5`` — the
+    half-diagonal of the footprint AABB, which is the radius about the
+    **footprint's centre**. Those two are the same number only for an asset
+    that is symmetric about its origin, and this file deliberately stopped
+    requiring that: the armour grounds a sword in front of its feet, so its Y
+    range is −0.3500..+0.4293 and its footprint centre sits 0.040 m off the
+    origin. The old figure came out 0.638 and the true one is 0.505.
+
+    0.638 was the conservative error and both are inside the Engineer's 0.650,
+    so nothing was ever mis-placed — but a footprint-centred half-diagonal
+    **understates** the origin-centred radius exactly when an asset is lopsided,
+    which is the freedom the FLOOR check was relaxed to allow. The one shape
+    that would break it is the one shape this file is now free to make. Taking
+    the max over the vertices is correct by construction under any future shape,
+    which a formula over an AABB is not.
+    """
+    furthest = 0.0
+    for obj in bpy.data.collections["armour"].objects:
+        if obj.type != "MESH":
+            continue
+        for v in obj.data.vertices:
+            world = obj.matrix_world @ v.co
+            furthest = max(furthest, math.hypot(world.x, world.y))
+    assert furthest <= 0.65 + 1e-3, (
+        f"the armour reaches {furthest:.4f} m from its own origin in plan and the "
+        "Engineer's keep-out radius is 0.65 m — eight of these go against walls "
+        "children walk past"
+    )
+    return furthest
 
 
 # =============================================================================
