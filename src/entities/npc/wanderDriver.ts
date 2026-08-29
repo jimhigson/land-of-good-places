@@ -4,7 +4,7 @@ import { clamp01 } from '../../core/mathUtils';
 import { RUN_INTENT, type CharacterDriver, type CharacterIntent, type DriverContext } from './driver';
 import type { PoiGraph } from './poiGraph';
 import { spaceAt } from '../../world/spaces';
-import { Journey, type JourneyPlanner } from './journey';
+import { Journey, type RoutePlanner } from './journey';
 // The things a child does instead of wandering. See `activities/activity.ts`
 // for what an `Activity` is and why it has the shape it has; this file keeps
 // only the wander core and the small amount of glue that runs them.
@@ -109,7 +109,7 @@ export {
 export interface WanderOptions {
   readonly graph: PoiGraph;
   /** Shared by every child: one `NavGrid` per space, and a per-frame plan budget. */
-  readonly planner: JourneyPlanner;
+  readonly planner: RoutePlanner;
   readonly rng: Rng;
   /** Index of the waypoint the child starts on. */
   readonly startNode: number;
@@ -156,7 +156,7 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
 
   /** Where this child is going, and the route there. The one owner. */
   private readonly journey: Journey;
-  private readonly planner: JourneyPlanner;
+  private readonly planner: RoutePlanner;
   /** Scratch for {@link Journey.steer}'s answer. One per child, never per frame. */
   private readonly move = { x: 0, z: 0 };
 

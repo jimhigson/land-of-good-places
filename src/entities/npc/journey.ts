@@ -168,10 +168,39 @@ function boundaryFor(space: SpaceId): ParkBoundary | null {
 }
 
 /**
+ * What a {@link Journey} needs from the world in order to go somewhere.
+ *
+ * An interface rather than the class directly, because a driver's *decisions*
+ * are testable without a park. `scripts/trace-npc-driver.mts` drives real
+ * `WanderDriver`s over a synthetic 5x5 waypoint grid with **no
+ * `CollisionWorld` at all** — its own header says so: "no collision, because
+ * collision is not what a driver decides" — and building a `NavGrid` lattice
+ * needs a collision world and a park boundary. That script asks whether a
+ * child gets wedged and whether the activity budgets hold, and neither
+ * question wants a quarter of a million lattice cells behind it.
+ *
+ * So the shipping implementation is {@link JourneyPlanner} below, and a
+ * checker may hand over a simpler one. The driver cannot tell, which is the
+ * point.
+ */
+export interface RoutePlanner {
+  beginFrame(): void;
+  destinationsIn(space: SpaceId): Attraction[];
+  plan(
+    space: SpaceId,
+    startX: number,
+    startZ: number,
+    startY: number,
+    goal: Attraction,
+    out: Float32Array,
+  ): number;
+}
+
+/**
  * Every child's shared route planner: one `NavGrid` per space, and a per-frame
  * budget so a crowd of arrivals cannot stall a frame between them.
  */
-export class JourneyPlanner {
+export class JourneyPlanner implements RoutePlanner {
   private readonly grids = new Map<SpaceId, NavGrid | null>();
   private budget = PLANS_PER_FRAME;
 
@@ -320,7 +349,7 @@ export class Journey {
    * *next* place, and because a child who announces a destination they then
    * fail to plan a route to has told the player something untrue.
    */
-  chooseDestination(space: SpaceId, planner: JourneyPlanner): void {
+  chooseDestination(space: SpaceId, planner: RoutePlanner): void {
     const options = planner.destinationsIn(space);
     if (options.length === 0) {
       this.goal = null;
@@ -381,7 +410,7 @@ export class Journey {
     z: number,
     y: number,
     dt: number,
-    planner: JourneyPlanner,
+    planner: RoutePlanner,
     move: { x: number; z: number },
   ): boolean {
     move.x = 0;
