@@ -139,10 +139,33 @@ risk). Bridges built, before → after, identical on every seed:
 Note `npm install` was needed in the worktree: the shared checkout's
 `node_modules` has no `vitest` and no `playwright-core`.
 
-**Left**: full `npm run build`, headless before/after screenshots (port 5341),
-PR.
+**Build**: `npm run build` exit 0 (unpiped), `npx tsc --noEmit` exit 0,
+`npm run typecheck:test` exit 0.
 
-## Left to do, in order (original)
+**Visual QA**: headless Chromium against a production `vite preview` on port
+5341 (`--strictPort`, killed by PID; both servers stopped). Before/after on the
+`qa-screenshots` branch under `issue-349/`. The clearest pair is
+`*-deck-along.png`: on `main` a sandy stripe runs the length of the parapet's
+outer top edge — the overhanging paving — and it is gone after.
+
+Two traps worth knowing if you redo this:
+- **`window.game` is DEV-only** (`main.ts` guards it behind
+  `import.meta.env.DEV`), so a QA script modelled on `qa-petbed.mjs` will hang
+  forever waiting for it against a `vite preview` build. Wait on the canvas.
+- Headless Chromium needs `--use-gl=angle --use-angle=swiftshader
+  --enable-unsafe-swiftshader`, and on this Mac the binary is
+  `chromium-1234/chrome-mac-arm64/Google Chrome for Testing.app/...`.
+
+**PR #352**, all four CI checks green (Build and checks, Procgen invariants,
+A reload gets the new build, Deploy PR preview). Not merged — the Overseer
+merges. This is a *visible* change, so per CLAUDE.md it waits for Jim.
+
+**Worktree deliberately left in place** at `.claude/worktrees/eng-349` so review
+feedback can be acted on without a fresh `npm install` (the shared checkout's
+`node_modules` lacks `vitest`/`playwright-core`, so this worktree has its own).
+Remove it once #352 is merged.
+
+## Left to do, in order (the original plan, all now done)
 
 1. Give the ribbon and the masonry one owner for where the paving ends. Intended
    shape: the bridge's road is the **drawn paving's** half-width
