@@ -418,7 +418,26 @@ function paintings(deck: number, anchors: readonly WallAnchor[], rng: Rng): Grou
 
   // Hung between torches, like the banners, and from the same list — a picture
   // over a torch would be a picture on fire.
-  const spots = betweenNeighbours(anchors).filter((_, index) => index % 3 === 1);
+  // Every third bay, then **any bay the great hall has hung a tapestry in**.
+  //
+  // Applied *after* the `% 3` step on purpose, so it is a provable no-op on
+  // today's geometry — the nearest painting to a tapestry on the same wall is
+  // 24.91 m — and stays correct when that stops being true. Painting selection
+  // is an **index into a list ordered by the torch layout**, and #377 is about
+  // to move that layout; the day the indices shift, a painting lands in a bay
+  // and vanishes with nothing to announce it.
+  //
+  // It vanishes rather than clashes because these are the *same* midpoints the
+  // banners use, so a painting in a tapestry bay is **concentric** with 3.2 m
+  // of cloth, not beside it: the tapestry stands 0.253 m proud of the wall and
+  // the canvas 0.095 m, putting the picture 158 mm behind the cloth's own front
+  // face. Forced onto the bays and photographed, the frame is pixel-identical
+  // to the frame without them — three paintings gone without trace, including
+  // the 4°-wonky one this function's own comment calls the whole reason it
+  // exists.
+  const spots = betweenNeighbours(anchors)
+    .filter((_, index) => index % 3 === 1)
+    .filter((spot) => !isTapestryBay(deck, spot.x, spot.z));
   const subjects: readonly CastlePainting[] = ['lady', 'dragon', 'knight'];
 
   spots.slice(0, 3).forEach((spot, index) => {
