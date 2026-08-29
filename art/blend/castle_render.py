@@ -319,17 +319,22 @@ def hall_composition():
     """
     rail_y = 2.90       # the Engineer's, contract §4.4
     sconce_y = 2.10     # the Engineer's, contract §4.4
-    wall_y = 2.4        # where the preview's stand-in wall sits (Blender +Y)
+    wall_y = 6.4        # the preview wall's inner face (Blender +Y)
     half_table = cb.TABLE_LENGTH * 0.5
 
     places = [
         # (object, location, yaw°)
         ("table-top", (0.0, 0.0, 0.0), 0.0),
         ("table-legs", (0.0, 0.0, 0.0), 0.0),
-        ("throne-frame", (0.0, -half_table - 1.9, 0.30), 180.0),
-        ("throne-gold", (0.0, -half_table - 1.9, 0.30), 180.0),
-        ("throne-cushion", (0.0, -half_table - 1.9, 0.30), 180.0),
     ]
+    # **The throne goes at the head of the table, looking down it.** The first
+    # composition put it at the near end yawed away from the camera, which
+    # showed the one asset whose whole point is its front from behind. It sits
+    # on the Engineer's own 0.30 m dais.
+    for part in ("throne-frame", "throne-gold", "throne-cushion"):
+        places.append((part, (0.0, half_table + 1.5, 0.30), 180.0))
+    places.append(("plinth-block", (0.0, half_table + 1.5, 0.0), 0.0))
+
     for sx in (-1.0, 1.0):
         for sy in (-1.0, 1.0):
             places.append(("bench-plank", (sx * 1.85, sy * 1.55, 0.0), 0.0))
@@ -338,19 +343,24 @@ def hall_composition():
         ("goblet", "roast", "loaf", "pie"),
     ):
         places.append((f"feast-{name}", (x, y, cb.TABLE_TOP), 0.0))
-    for x in (-4.6, 4.6):
+
+    # Armours against the back wall, on their plinths, facing into the room.
+    for x in (-5.2, 5.2):
         places.append(("plinth-block", (x, wall_y - 0.7, 0.0), 0.0))
         for part in ("armour-plate", "armour-trim", "armour-visor", "armour-plume"):
             places.append((part, (x, wall_y - 0.7, 0.25), 0.0))
-    places.append(("tapestry-cloth", (0.0, wall_y, rail_y), 0.0))
-    places.append(("tapestry-fringe", (0.0, wall_y, rail_y), 0.0))
-    places.append(("tapestryrail-pole", (0.0, wall_y, rail_y), 0.0))
+
+    # Two tapestries flanking the throne, on the wall, at the contracted rail
+    # height — and the sconces between them at theirs.
     for x in (-2.6, 2.6):
-        places.append(("sconce-bracket", (x, wall_y, sconce_y), 0.0))
-        places.append(("sconce-cup", (x, wall_y, sconce_y), 0.0))
-    places.append(("chest-body", (-6.6, -1.0, 0.0), 24.0))
-    places.append(("chest-bands", (-6.6, -1.0, 0.0), 24.0))
-    places.append(("chest-lid", (-6.6, -1.0, 0.0), 24.0))
+        for part in ("tapestry-cloth", "tapestry-fringe", "tapestryrail-pole"):
+            places.append((part, (x, wall_y, rail_y), 0.0))
+    for x in (-4.0, -1.2, 1.2, 4.0):
+        for part in ("sconce-bracket", "sconce-cup"):
+            places.append((part, (x, wall_y, sconce_y), 0.0))
+
+    for part in ("chest-body", "chest-bands", "chest-lid"):
+        places.append((part, (-6.8, 0.4, 0.0), 24.0))
     return places
 
 
@@ -396,7 +406,12 @@ def main() -> None:
                 obj.location = (0.0, 0.0, ARMOUR_LIFT[1])
         floor = None
         if stem in ("armour", "throne", "chest", "feast"):
-            floor = standin("preview-floor", (7.0, 7.0, 0.2), (0.0, 0.0, -0.1), 0xF0A3C1)
+            # Sized to the asset, not a fixed slab. A 7 m floor under a 1.6 m
+            # throne made the throne look like a dining chair in a hall, which
+            # is a fact about the preview rather than about the asset — and
+            # the whole job of these pictures is to not mislead about scale.
+            span = max(2.6, max(o.dimensions.x for o in shown) * 2.2)
+            floor = standin("preview-floor", (span, span, 0.2), (0.0, 0.0, -0.1), 0xF0A3C1)
             floor.hide_render = False
             shown = shown + [floor]
         if stem == "feast":
@@ -424,11 +439,11 @@ def main() -> None:
         clone.hide_render = False
         bpy.context.scene.collection.objects.link(clone)
         clones.append(clone)
-    floor = standin("hall-floor", (20.0, 16.0, 0.3), (0.0, 0.0, -0.15), 0xF0A3C1)
-    wall = standin("hall-wall", (20.0, 0.45, 3.3), (0.0, 2.65, 1.65), 0xFFC2D8)
+    floor = standin("hall-floor", (22.0, 18.0, 0.3), (0.0, 0.0, -0.15), 0xF0A3C1)
+    wall = standin("hall-wall", (22.0, 0.45, 3.3), (0.0, 6.625, 1.65), 0xFFC2D8)
     # A child-height post, so the scale rule can be judged rather than asserted.
     # `TALLEST_CHILD` is `kid.ts`'s and comes through `castle_build`.
-    child = standin("scale-child", (0.42, 0.42, 1.86), (2.2, -4.6, 0.93), 0x7FE3C0)
+    child = standin("scale-child", (0.42, 0.42, 1.86), (3.0, -4.4, 0.93), 0x7FE3C0)
     for extra in (floor, wall, child):
         extra.hide_render = False
     bpy.context.view_layer.update()

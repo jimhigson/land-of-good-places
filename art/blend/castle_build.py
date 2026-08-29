@@ -193,7 +193,15 @@ CONTRACT = {
     # a step would trip somebody.
     "plinth": Requested(1.30, 0.25, 1.00, "one per armour"),
     # A3 — rail at 2.90 m, hem at 0.50 m, so the drop is exactly 2.40 m.
-    "tapestry": Requested(3.20, 2.40, 0.12, "hangs from the rail; 6 of them"),
+    # **0.28 m deep, not the contract's 0.12 m — a renegotiation, logged.**
+    # At 0.12 the cloth cannot be modelled as cloth: the thickness alone is
+    # 0.04 of it, leaving ±0.04 of wave across a 3.2 m sheet, which the first
+    # review render showed as a completely flat maroon rectangle. The
+    # Engineer's own §5 rule is that wall furniture projects **at most 0.45 m**
+    # (less than the wall's own thickness), so 0.28 is comfortably inside the
+    # rule the 0.12 was presumably a guess at. Asked for in §4.5 of the reply
+    # handoff; if it is refused, this one number changes and the wave with it.
+    "tapestry": Requested(3.20, 2.40, 0.28, "hangs from the rail; 6 of them"),
     # A4 — wider than the cloth it carries.
     "tapestryrail": Requested(3.60, 0.14, 0.14, "centred on its own axis"),
     # A5 — no flame: the Engineer builds fire.
@@ -411,11 +419,16 @@ def build_armour() -> None:
         plate.at(*ellipsoid(ARMOUR_PAULDRON_RX, 0.19, 0.17, 1), x=x, z=shoulder_z)
         plate.at(*rounded_box(0.17, 0.17, 0.34, 0.06, 1), x=x, z=shoulder_z - 0.26)
         trim.at(*ellipsoid(0.11, 0.09, 0.08, 1), x=x, y=-0.03, z=shoulder_z - 0.43)
-        # The forearms angle in toward the sword's grip in front of the body.
-        plate.at(*rounded_box(0.15, 0.15, 0.30, 0.05, 1), x=x * 0.66, y=-0.13,
-                 z=shoulder_z - 0.58)
+        # The forearms angle in **and forward** onto the sword's grip. The
+        # first render had them hanging at the sides and the blade buried in
+        # the skirt behind them, which read as a suit of armour standing next
+        # to a sword rather than holding one — the pose is most of what makes
+        # this asset say "on guard".
+        plate.at(*rounded_box(0.15, 0.15, 0.30, 0.05, 1), x=x * 0.62, y=-0.24,
+                 z=shoulder_z - 0.55)
         # Gauntlet, a mitten. Fingers at this size are four triangles of mush.
-        plate.at(*ellipsoid(0.11, 0.12, 0.10, 1), x=x * 0.42, y=-0.20, z=shoulder_z - 0.74)
+        plate.at(*ellipsoid(0.10, 0.10, 0.10, 1), x=x * 0.40, y=-0.34,
+                 z=shoulder_z - 0.70)
 
     # --- gorget and helm ---------------------------------------------------
     trim.at(*revolve([(0.0, 0.0), (0.24, 0.0), (0.22, ARMOUR_GORGET), (0.0, ARMOUR_GORGET)],
@@ -456,10 +469,17 @@ def build_armour() -> None:
         (-0.055, guard_z),
         (-0.055, 0.14),
     ]
-    plate.at(*extrude_outline(blade, 0.035, centre=(0.0, guard_z * 0.5)), y=-0.22)
-    trim.at(*box(0.40, 0.07, 0.055), y=-0.22, z=guard_z + 0.03)
-    trim.at(*tube(0.042, 0.13, sides=6), y=-0.22, z=guard_z + 0.055)
-    trim.at(*icosphere(0.058, 1), y=-0.22, z=guard_z + 0.20)
+    # y = −0.38 is the whole of the depth budget spent deliberately: it puts
+    # the blade's back face 1.2 cm clear of the fauld's 0.35 m radius, and the
+    # gauntlets that grip it are what the remaining 6 cm of the Engineer's
+    # 0.80 m allowance goes on. At −0.22 the blade ran *through* the skirt,
+    # which the front elevation showed immediately and no amount of reading
+    # the code would have.
+    sword_y = -0.38
+    plate.at(*extrude_outline(blade, 0.035, centre=(0.0, guard_z * 0.5)), y=sword_y)
+    trim.at(*box(0.40, 0.07, 0.055), y=sword_y, z=guard_z + 0.03)
+    trim.at(*tube(0.042, 0.13, sides=6), y=sword_y, z=guard_z + 0.055)
+    trim.at(*icosphere(0.058, 1), y=sword_y, z=guard_z + 0.20)
 
     for part in (plate, trim, dark, plume):
         part.emit(coll)
@@ -495,7 +515,7 @@ def build_plinth() -> None:
 
 TAPESTRY_WIDTH = 3.20
 TAPESTRY_DROP = 2.40
-TAPESTRY_FRINGE = 0.16
+TAPESTRY_FRINGE = 0.22
 RAIL_LENGTH = 3.60
 RAIL_RADIUS = 0.07
 
@@ -524,14 +544,15 @@ def build_tapestry() -> None:
 
     cloth = Part("tapestry-cloth")
     verts, faces = hanging_cloth(
-        # 0.04 thick and a 0.03 billow: the Engineer's depth allowance is
-        # 0.12 m and a hanging spends it twice over — once on the cloth's own
-        # thickness and once on the wave either side of it — so the wave is
-        # tuned against the allowance, not chosen for the look and checked
-        # afterwards. It is still enough to give the toon ramp two shading
-        # changes per metre, which is all it was ever for.
-        TAPESTRY_WIDTH, TAPESTRY_DROP - TAPESTRY_FRINGE, 0.04,
-        cols=8, rows=6, billow=0.03, sag=0.06,
+        # 0.05 thick with a 0.09 billow. A hanging spends its depth allowance
+        # twice — once on the cloth's own thickness, once on the wave either
+        # side of it — and the first pass, tuned to a 0.12 m allowance, came
+        # out of the render a dead flat rectangle. Nine centimetres is what it
+        # takes for the toon ramp to actually band a 3.2 m sheet from the
+        # game's camera; below that the waves exist in the mesh and not in the
+        # picture, which is the only place they were ever for.
+        TAPESTRY_WIDTH, TAPESTRY_DROP - TAPESTRY_FRINGE, 0.05,
+        cols=10, rows=6, billow=0.09, sag=0.10,
     )
     # The UV frame is the *requested* rectangle, not the billowed geometry's
     # own bounds — so the picture the Engineer paints lands in the same place
@@ -541,15 +562,26 @@ def build_tapestry() -> None:
     cloth.add(verts, faces, uvs=planar_uvs(verts, faces, lo, hi))
 
     fringe = Part("tapestry-fringe")
-    tassels = 13
+    # A **valance** along the top and **beaded tassels** along the hem. The
+    # first version was 13 thin spikes, which rendered as a row of teeth: a
+    # fringe is short, fat and ends in a bead, and it is the bead that reads
+    # from ten metres. The valance is the cheaper half of the same job — one
+    # band across the top turns a rectangle of cloth into a *hanging*.
+    fringe.at(*rounded_box(TAPESTRY_WIDTH * 0.99, 0.10, 0.16, 0.03, 1), z=-0.10)
+    tassels = 11
     for i in range(tassels):
         u = (i + 0.5) / tassels
-        x = (u - 0.5) * TAPESTRY_WIDTH * 0.95
-        # The tassels follow the hem's own wave, which is what makes the
-        # fringe read as attached to the cloth rather than as a separate comb.
-        wave = math.sin(u * TAU * 1.5) * 0.028
-        fringe.at(*cone(0.028, -TAPESTRY_FRINGE, sides=4), x=x, y=wave,
-                  z=-(TAPESTRY_DROP - TAPESTRY_FRINGE) + 0.01)
+        x = (u - 0.5) * TAPESTRY_WIDTH * 0.94
+        # The tassels follow the hem's own wave, which is what makes the fringe
+        # read as attached to the cloth rather than as a separate comb.
+        wave = math.sin(u * TAU * 1.5) * 0.09
+        hem = -(TAPESTRY_DROP - TAPESTRY_FRINGE) + 0.02
+        # The bead's underside is the lowest point of the whole asset, so it
+        # is what has to land on the contracted 2.40 m drop — the cord above
+        # it is sized from that, not the other way round.
+        fringe.at(*tube(0.030, -TAPESTRY_FRINGE * 0.80, sides=5), x=x, y=wave, z=hem)
+        fringe.at(*ellipsoid(0.048, 0.048, 0.058, 1), x=x, y=wave,
+                  z=hem - TAPESTRY_FRINGE * 0.82)
 
     seat_against_wall(cloth, fringe)
     cloth.emit(coll)
@@ -716,24 +748,43 @@ def build_throne() -> None:
         wood.at(*rounded_box(0.14, 0.14, 0.38, 0.04, 1),
                 x=sx * (half_w - 0.08), y=-half_d + 0.22, z=THRONE_SEAT + 0.19)
 
-    # The back: a tall panel drawn to a point, with two shoulders.
+    # The back, and it is the whole asset.
+    #
+    # **The first version read as an armchair** — a broad panel from the seat
+    # to shoulder height with a shallow arch on top, which is a comfortable
+    # chair and not a throne, and no amount of gold on it changed that. What
+    # makes a throne is the step: broad where somebody's shoulders go, then
+    # *narrowing* into a tall spire drawn to a point well above their head.
+    # Two silhouettes, one of them at twice the height of the other, and a
+    # six-year-old names the second one instantly.
     back_top = THRONE_HEIGHT - 0.24
+    shoulder = THRONE_SEAT + 0.50
+    spire_w = half_w * 0.62
     outline = [
         (-half_w, THRONE_SEAT),
         (half_w, THRONE_SEAT),
-        (half_w, back_top - 0.62),
-        (half_w * 0.52, back_top - 0.12),
+        (half_w, shoulder),
+        (spire_w, shoulder + 0.22),
+        (spire_w, back_top - 0.55),
+        (spire_w * 0.42, back_top - 0.16),
         (0.0, back_top),
-        (-half_w * 0.52, back_top - 0.12),
-        (-half_w, back_top - 0.62),
+        (-spire_w * 0.42, back_top - 0.16),
+        (-spire_w, back_top - 0.55),
+        (-spire_w, shoulder + 0.22),
+        (-half_w, shoulder),
     ]
-    wood.add(*extrude_outline(outline, 0.14, centre=(0.0, THRONE_SEAT + 0.8)),
+    wood.add(*extrude_outline(outline, 0.14, centre=(0.0, shoulder + 0.30)),
              matrix=place(y=half_d - 0.14))
 
     cushion.at(*rounded_box(THRONE_WIDTH - 0.24, THRONE_DEPTH * 0.70, 0.18, 0.07, 1),
                z=THRONE_SEAT + 0.09)
-    cushion.at(*rounded_box(THRONE_WIDTH - 0.32, 0.12, 1.10, 0.07, 1),
-               y=half_d - 0.26, z=THRONE_SEAT + 0.78)
+    # The back cushion stops at the shoulder step, and that is the whole
+    # point. At 1.10 m tall it covered the panel from the seat to 2.21 m and
+    # hid the spire behind it — so the review render showed an armchair with a
+    # small hat, which is exactly the shape the redesign was meant to fix. A
+    # throne's spire has to be *bare wood above the sitter's head*.
+    cushion.at(*rounded_box(THRONE_WIDTH - 0.40, 0.12, 0.62, 0.06, 1),
+               y=half_d - 0.26, z=THRONE_SEAT + 0.36)
 
     gold.at(*icosphere(0.12, 1), z=THRONE_HEIGHT - 0.12)
     gold.at(*cone(0.075, 0.18, sides=6), z=THRONE_HEIGHT - 0.18)
@@ -743,16 +794,21 @@ def build_throne() -> None:
         # three of the four size failures in this file came from, every one
         # of them a ball or a fringe added after the shape it decorates was
         # already exactly as wide as it was allowed to be.
-        gold.at(*icosphere(0.09, 1), x=sx * (half_w - 0.09), y=half_d - 0.14,
-                z=back_top - 0.60)
+        # Crockets on the shoulder step, where the broad back becomes the
+        # spire — the one place on the silhouette the eye stops.
+        gold.at(*icosphere(0.10, 1), x=sx * (half_w - 0.10), y=half_d - 0.14,
+                z=shoulder + 0.06)
         gold.at(*icosphere(0.07, 1), x=sx * (half_w - 0.08), y=-half_d + 0.16,
                 z=THRONE_SEAT + 0.46)
     # A little sunburst on the back panel: five rays, the one flourish that
     # says "this is the important chair" without another 400 triangles.
+    # A sunburst up the spire: the one flourish that says "this is the
+    # important chair" without another 400 triangles. On the spire rather
+    # than behind the sitter's head, where a cushion covers it.
     for i in range(5):
         t = (i - 2) / 2.0
-        gold.at(*ellipsoid(0.085, 0.03, 0.085, 1), x=t * 0.34, y=half_d - 0.22,
-                z=THRONE_SEAT + 1.30)
+        gold.at(*ellipsoid(0.07, 0.03, 0.07, 1), x=t * 0.20, y=half_d - 0.22,
+                z=back_top - 0.62 + abs(t) * -0.05)
 
     for part in (wood, gold, cushion):
         part.emit(coll)
@@ -973,6 +1029,31 @@ def collection_bounds(name: str):
     return lo, hi
 
 
+
+def footprint_bounds(name: str, band: float = 0.05):
+    """XY bounds of the vertices that actually touch the floor.
+
+    ``band`` is how thick "touching" is. 5 cm catches a foot, a plinth's base
+    and a table leg's pad, and excludes everything the asset is *holding* —
+    which is the distinction that makes this a useful check rather than an
+    awkward one.
+    """
+    coll = bpy.data.collections[name]
+    lo = [1e9, 1e9]
+    hi = [-1e9, -1e9]
+    for obj in coll.objects:
+        if obj.type != "MESH":
+            continue
+        for v in obj.data.vertices:
+            world = obj.matrix_world @ v.co
+            if world.z <= band:
+                for i in range(2):
+                    lo[i] = min(lo[i], world[i])
+                    hi[i] = max(hi[i], world[i])
+    assert lo[0] < 1e8, f"{name} has no geometry within {band} m of the floor"
+    return lo, hi
+
+
 def check_origins() -> str:
     """Assert every asset's origin really is where this file's docstring says.
 
@@ -992,9 +1073,32 @@ def check_origins() -> str:
                 f"{name} is a FLOOR asset and its lowest vertex is at z = {lo.z:+.4f}, "
                 "not 0 — it would float or sink by exactly that much in the game"
             )
-            assert abs(lo.x + hi.x) < 0.02 and abs(lo.y + hi.y) < 0.06, (
-                f"{name} is a FLOOR asset and is not centred on its own base: "
-                f"x centre {(lo.x + hi.x) * 0.5:+.3f}, y centre {(lo.y + hi.y) * 0.5:+.3f}"
+            # ASSET_MANIFEST says "centred on X and Z". **On X that is exact
+            # and load-bearing**: everything here can be put against a wall or
+            # yawed to face down a hall, and an asset off-centre across its
+            # own facing is an asset that drifts sideways every time the placer
+            # rotates it.
+            assert abs(lo.x + hi.x) < 0.02, (
+                f"{name} is off-centre on X by {(lo.x + hi.x) * 0.5:+.4f} m"
+            )
+            # **On depth it is not exact, and pretending otherwise costs
+            # shapes.** A suit of armour grounds a sword in front of its feet;
+            # a chest's lock boss stands proud of its front; a throne's arms
+            # reach forward. All three are lopsided in Y and all three stand
+            # squarely on their own origin, which is the property that actually
+            # matters — a placer's keep-out disc is centred on the origin, so
+            # what must be true is that the origin is *inside the footprint*,
+            # not that the footprint is symmetric about it. An earlier version
+            # of this check asserted the symmetry and its first act was to
+            # demand the sword be put back inside the skirt it had just been
+            # moved out of, which is a check driving the art rather than
+            # guarding it.
+            foot_lo, foot_hi = footprint_bounds(name)
+            assert foot_lo[0] <= 0.0 <= foot_hi[0] and foot_lo[1] <= 0.0 <= foot_hi[1], (
+                f"{name}'s origin is outside its own footprint "
+                f"(x {foot_lo[0]:+.3f}..{foot_hi[0]:+.3f}, y {foot_lo[1]:+.3f}..{foot_hi[1]:+.3f}) "
+                "— it would stand beside the point the placer puts it on, and its "
+                "keep-out disc would be centred on empty floor"
             )
         elif family == "WALL":
             assert abs(hi.y) < 0.006, (
