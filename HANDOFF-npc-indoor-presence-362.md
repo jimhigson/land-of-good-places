@@ -216,3 +216,65 @@ console errors:                              0
 The 0.125 m is **one frame of ordinary walking** at `NPC_WALK_SPEED` — her first step after being
 handed back to simulation, not a pop. There is no teleport and no wall-pop: she is exactly where
 she was standing, and then she walks.
+
+---
+
+## ADDENDUM, 29 Aug — the correctness claim above is WRONG. Read this before believing it.
+
+The section headed *"the performance case is weak, the correctness case is strong"* is wrong, and
+so is every place above where this document says marking presence removes a class of bug. It is
+left in place because a handoff is a log and rewriting history hides how the mistake was made —
+but **do not act on it**. Corrected by review on PR #371:
+
+- `check-npc-dispersal.mts` **already** filters its crowd by `SPACE_GARDEN`. That filter is what
+  fixed the 276 m / 476%-of-uniform RMS reading, and it did so before this ticket existed.
+- `check-npc-jitter.mts` **already** re-baselines across `stepThroughDoor`, which is what stopped
+  the 810 m single-frame step.
+- And the point I should have reached unaided: **freezing a body does not remove it from a
+  positional census.** A marked child still stands at x≈600. *Not moving is not the same as not
+  being there.*
+
+So this change removes **no** bug class. Its honest justification is: **Jim asked for it
+directly**, and it saves the measured **0.147 ms a frame**. It is a simplification, not a
+correctness fix. The `check-npc-presence.mts` header and the PR body now say exactly that, and so
+does `markWhoIsElsewhere` itself — that third copy was the one doing load-bearing work as the
+justification for the narrowing, and it is the copy a future agent actually meets.
+
+The narrowing to interiors still stands, on its own two reasons, neither of which is correctness:
+the garden buys nothing (0.147 ms is essentially all seven hotel residents), and freezing it
+collides with `ParkTrain.carryPassengers`, which writes a rider's position from outside
+`NpcSystem`.
+
+**Pattern worth carrying forward:** three claims of mine failed on checking this session — this
+one, the two-dot diff stat, and my own QA measuring a 500 ms interval at sub-1-fps. All three were
+claims about things I had not measured myself but which felt right.
+
+## Also fixed in that round
+
+- **Assertion 1 ignored the `y` axis** — `hypot(dx, dz)` — while the whole freeze is gated on
+  `isAirborne` and this document spends a paragraph on `floorY` and `check:hotel` firing at
+  −16.5 m. A review mutation that lifted every marked NPC 5 cm a frame floated them **900 m** and
+  the check passed. Now all three axes, with that mutation kept as a permanent `--mutate-vertical`
+  red mode (168,583 occurrences) so the ability to see the axis is provable.
+- **The `releaseForFreeze` transition guard was dead.** `markWhoIsElsewhere` clears `elsewhere` at
+  the top, so `!this.elsewhere.has(...)` was always true: **18,194 calls over 7,200 frames**. Now
+  tested against the previous frame's set — **9 calls** over the same run. Harmless only because
+  `BudgetSlot.release()` is idempotent, and it read as though it worked.
+
+## Known holes, not closed
+
+1. **Assertion 1 re-baselines on any space change without asking whether a portal was used.**
+   Shunting each marked resident between `hotel.lobby` and `hotel.breakfast` every frame —
+   hundreds of metres per frame with no simulation behind it — yields `crossings: 54021 in, 15
+   out`, `movement: 0 occurrences (none)` and **`npc presence OK`**. The tell is printed and no
+   assertion reads it. Cheap fix: bound the crossing count, or reuse `check-npc-jitter.mts`'s
+   `stepThroughDoor` hook so a crossing only counts when a portal actually ran.
+2. **The invariant never puts the player inside**, so the un-freeze path — the one Jim will
+   actually look at — is covered by no assertion in the build. A reviewer measured it at a true
+   1/60 (three in/out passes, twenty single-frame threshold flickers, worst re-entry move
+   **0.1006 m**, exactly 0.0000 m while frozen, no teleport or wall-pop), so the property holds;
+   it is simply guarded by a throwaway script rather than by CI.
+3. **`/castle` visual QA** owed once #370 lands — the browser pass reaches the interior by
+   standing the player beside a frozen child, which is what `NpcSystem` keys on, so the
+   measurements are sound but `interiorRoot` is off and the screenshots are not a picture of the
+   room.

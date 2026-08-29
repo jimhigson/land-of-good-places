@@ -487,6 +487,9 @@ export class NpcSystem implements GameSystem {
    * instance of exactly this.
    */
   private readonly elsewhere = new Set<NpcCharacter>();
+  /** Who was marked on the *previous* frame — see the guard in
+   *  {@link markWhoIsElsewhere}, which needs a transition, not a state. */
+  private readonly wasElsewhere = new Set<NpcCharacter>();
   /**
    * How much longer each marked-indoors child stays in there — issue #362.
    *
@@ -1293,6 +1296,10 @@ export class NpcSystem implements GameSystem {
    */
   private markWhoIsElsewhere(): void {
     const playerSpace = spaceAt(this.playerPosition.x, this.playerPosition.z);
+    // Last frame's set, kept so "newly frozen" can actually be detected — see
+    // the guard below. Swapped rather than allocated: this runs every frame.
+    this.wasElsewhere.clear();
+    for (const character of this.elsewhere) this.wasElsewhere.add(character);
     this.elsewhere.clear();
     for (let i = 0; i < this.characters.length; i += 1) {
       const character = this.characters[i];
@@ -1316,16 +1323,32 @@ export class NpcSystem implements GameSystem {
       //    advanced — a body moving with no simulation behind it, which is the
       //    same class of inconsistency this whole change exists to remove.
       //
-      // The entire correctness payoff — indoor NPCs at coordinates six hundred
-      // metres away corrupting every measurement over "the crowd" — comes from
-      // the interiors, so that is what is marked.
+      // What this is *not*: a correctness fix. An earlier version of this
+      // comment claimed the narrowing captured "the entire correctness payoff",
+      // because indoor NPCs at coordinates six hundred metres away had corrupted
+      // crowd measurements. That does not survive checking:
+      // `check-npc-dispersal.mts` already filters its crowd by `SPACE_GARDEN`
+      // and *that* is what fixed the 276 m RMS reading; `check-npc-jitter.mts`
+      // already re-baselines across `stepThroughDoor`; and freezing a body does
+      // not remove it from a positional census at all — a marked child still
+      // stands at x≈600. Not moving is not the same as not being there.
+      //
+      // So the reason to mark interiors and not the garden is only the two
+      // points above: the garden buys nothing and carries the train hazard.
       if (space === SPACE_GARDEN) continue;
       if (character.isAirborne) continue;
-      // Newly frozen: hand back anything shared before they stop being
-      // stepped. A child frozen mid-chat would otherwise hold one of the two
-      // chat slots for their whole visit, because the only release lives in the
-      // `update` they no longer get.
-      if (!this.elsewhere.has(character)) this.wanderDrivers[i]?.releaseForFreeze();
+      // Newly frozen this frame: hand back anything shared before they stop
+      // being stepped. A child frozen mid-chat would otherwise hold one of the
+      // two chat slots for their whole visit, because the only release lives in
+      // the `update` they no longer get.
+      //
+      // Tested against **last** frame's set, not `this.elsewhere` — that is
+      // cleared at the top of this method, so `!this.elsewhere.has(...)` was
+      // always true and the transition test was dead: 18,194 calls over 7,200
+      // frames where a working guard gives single digits. Harmless only because
+      // `BudgetSlot.release()` is idempotent, and it read as though it worked,
+      // so the next non-idempotent thing added here would have run at 60 Hz.
+      if (!this.wasElsewhere.has(character)) this.wanderDrivers[i]?.releaseForFreeze();
       this.elsewhere.add(character);
     }
   }
