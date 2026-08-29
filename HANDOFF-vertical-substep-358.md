@@ -119,7 +119,16 @@ deck the harness itself built — not by whether she ever left the ground.
 - `check:hop-clearance` and `check:wall-tunnelling` (350k runs) byte-identical
   to `origin/main`, PIDs and timings aside — the sim extension is
   behaviour-preserving for its existing callers.
-- `npm run build`, `npm run test:procgen`: see the PR.
+- `npm run build` exit **0** (`BUILD_EXIT=0`, read from the chain's own marker,
+  unpiped) with `check:deck-fallthrough` passing inside it.
+- `npm run test:procgen` exit **0**, 453 passed / 14 files.
+- Browser: `node scripts/qa-deck-fallthrough-358.mjs 5380 <out>` — 59 frames
+  genuinely over a deck across 8 runs, worst **0.022 m** below the surface,
+  walking and sprinting, descending the ramps and staying on them. Dev server
+  on 5380 `--strictPort`, killed by PID.
+  **Its first version was a vacuous green** — she never got on a bridge, every
+  sample found no deck, worst stayed 0.000 and it printed OK. The `covered`
+  frame counter now fails the run when it measures nothing.
 - `check:wall-tunnelling` is **not** in the build chain (it lives in `check:all`,
   which CI does not run), so the lateral half of this bug class is currently
   proved only by hand. Not changed here; worth someone's ticket.
