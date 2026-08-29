@@ -40,11 +40,21 @@ const seed = args[3] ?? '';
  * says nothing about how a real iPhone rounds `dvh`. Stated plainly because
  * the distinction is the whole reason to be careful here.
  *
- * iPhone 14 Pro portrait: 59 px top, 34 px bottom.
+ * **Orientation-aware, because the insets are.** A notched iPhone held
+ * upright reserves 59 px at the top for the notch and 34 px at the bottom for
+ * the home indicator. Turned on its side the notch moves to a *side* — top
+ * becomes 0 and the home indicator shrinks to 21 px. Feeding portrait numbers
+ * to a landscape viewport invents an overflow that no device would ever show,
+ * which is worse than not simulating at all: a QA tool that reports false
+ * positives gets ignored, and then it cannot report the true ones either.
+ *
+ * (The left/right insets a landscape notch also reserves are not simulated,
+ * because `.parkmap` does not consume them — its horizontal padding is a fixed
+ * `0.75rem` above 34rem and zero below it. Worth knowing, not this PR's.)
  */
 const simulateInsets = process.argv.includes('--insets');
-const INSET_TOP = 59;
-const INSET_BOTTOM = 34;
+const PORTRAIT_INSETS = { top: 59, bottom: 34 };
+const LANDSCAPE_INSETS = { top: 0, bottom: 21 };
 
 mkdirSync(outDir, { recursive: true });
 
@@ -62,6 +72,7 @@ const SIZES = [
 
 const browser = await chromium.launch();
 const results = [];
+const appliedInsets = new Map();
 
 for (const size of SIZES) {
   const context = await browser.newContext({
@@ -106,11 +117,13 @@ for (const size of SIZES) {
     // query's own value. After navigation, because a style tag needs a
     // document. See the note on `simulateInsets` for what this does and does
     // not prove.
+    const insets = size.width > size.height ? LANDSCAPE_INSETS : PORTRAIT_INSETS;
     await page.addStyleTag({
       content:
-        `.parkmap { padding-top: ${INSET_TOP}px !important;` +
-        ` padding-bottom: ${INSET_BOTTOM}px !important; }`,
+        `.parkmap { padding-top: ${insets.top}px !important;` +
+        ` padding-bottom: ${insets.bottom}px !important; }`,
     });
+    appliedInsets.set(size.name, insets);
   }
 
   await page.waitForTimeout(3000);
@@ -184,6 +197,7 @@ for (const r of results) {
 }
 console.log(
   simulateInsets
-    ? `\nsafe-area insets SIMULATED at ${INSET_TOP}px top / ${INSET_BOTTOM}px bottom.`
+    ? '\nsafe-area insets SIMULATED (orientation-aware): ' +
+      [...appliedInsets].map(([n, i]) => `${n} ${i.top}/${i.bottom}`).join(', ')
     : '\nsafe-area insets are 0 in headless Chromium — re-run with --insets for a notched phone.',
 );
