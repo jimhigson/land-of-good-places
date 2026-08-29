@@ -960,7 +960,7 @@ export class Building implements GameSystem {
    * loudly rather than silently showing the ground floor and letting somebody
    * report that floor 9 looks identical to floor 0.
    */
-  enterCastleSpawn(deck: number): boolean {
+  enterCastleSpawn(deck: number, at?: { readonly x: number; readonly z: number }): boolean {
     const player = this.player;
     if (!player) return false;
     if (!Number.isInteger(deck) || deck < 0 || deck >= BUILDING_FLOOR_COUNT) return false;
@@ -974,14 +974,15 @@ export class Building implements GameSystem {
     // of it that looked like the important one.
     this.changeSpace(() => {
       this.enterInterior();
-      if (deck > 0) {
-        // `enterInterior` has already put her on the ground floor's own good
-        // viewing spot; carry that x/z straight up rather than writing a second
-        // one down here, so the two can never drift apart.
+      // `enterInterior` has already put her on the ground floor's own good
+      // viewing spot; `at` overrides where, `deck` overrides how high, and
+      // anything not given carries that spot's own value straight through
+      // rather than being written down a second time here.
+      if (deck > 0 || at) {
         player.teleportTo(
-          player.position.x,
+          at ? at.x : player.position.x,
           BUILDING_BASE_Y + deck * BUILDING_FLOOR_HEIGHT,
-          player.position.z,
+          at ? at.z : player.position.z,
           Math.PI,
         );
       }

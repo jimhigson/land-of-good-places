@@ -1400,8 +1400,8 @@ export class Game {
    * so only the building can put her in one. See that method for why
    * `/spawn?pos=` cannot do this.
    */
-  enterCastleSpawn(deck: number): boolean {
-    return this.world.building.enterCastleSpawn(deck);
+  enterCastleSpawn(deck: number, at?: { readonly x: number; readonly z: number }): boolean {
+    return this.world.building.enterCastleSpawn(deck, at);
   }
 
   start(): void {

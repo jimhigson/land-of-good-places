@@ -228,7 +228,21 @@ type DeepLink =
    * this about hotel rooms ("for an interior, use the `/hotel…` links"); the
    * castle simply had no such link until now.
    */
-  | { readonly kind: 'castle'; readonly deck: number };
+  | {
+      readonly kind: 'castle';
+      readonly deck: number;
+      /**
+       * `at=x,z` — where on that storey to stand, in the interior's own metres.
+       *
+       * The interior's coordinates are fixed rather than seeded, so they really
+       * are typeable, and the great hall's furniture (#368) is 20 m from the
+       * door. Without this, handing somebody a link to the throne means handing
+       * them directions to walk, which CLAUDE.md's deep-link rule exists to
+       * stop. It stays *inside* `/castle` rather than becoming a `/spawn?pos=`
+       * for the reason above: the space has to be entered first.
+       */
+      readonly at?: { readonly x: number; readonly z: number };
+    };
 
 /**
  * Matches this load's URL against every developer deep link, in the order they
@@ -242,7 +256,7 @@ function parseDeepLink(pathname: string, search: string): DeepLink | null {
   if (view) return { kind: 'view', view };
   if (pathname === '/spawn') return { kind: 'spawn', spawn: parseDebugSpawn(search) };
   if (pathname === '/bridge') return { kind: 'bridge' };
-  if (pathname === '/castle') return { kind: 'castle', deck: parseCastleDeck(search) };
+  if (pathname === '/castle') return parseCastleLink(search);
   return null;
 }
 
@@ -255,6 +269,27 @@ function parseDeepLink(pathname: string, search: string): DeepLink | null {
  * `Building.enterCastleSpawn`, which is the only thing that knows how many
  * storeys there are.
  */
+function parseCastleLink(search: string): DeepLink {
+  const deck = parseCastleDeck(search);
+  const raw = new URLSearchParams(search).get('at');
+  const at = parseSpawnPoint(raw);
+  // Assigned rather than spread — under `exactOptionalPropertyTypes` an
+  // optional property may be missing but never explicitly `undefined`. Same
+  // shape as `parseDebugSpawn`.
+  const link: { kind: 'castle'; deck: number; at?: { x: number; z: number } } = {
+    kind: 'castle',
+    deck,
+  };
+  if (at) link.at = { x: at.x, z: at.z };
+  else if (raw !== null) {
+    console.warn(
+      `Land of Good Places: /castle could not read at=${raw} — expected "x,z" in the ` +
+        "interior's own metres. Standing on the storey's default viewing spot instead.",
+    );
+  }
+  return link;
+}
+
 function parseCastleDeck(search: string): number {
   const raw = new URLSearchParams(search).get('deck');
   if (raw === null) return 0;
@@ -933,7 +968,7 @@ async function finishLaunch(
         // Loud, like `/bridge` and `/rail-race`: a deck that does not exist
         // must not quietly show the ground floor, or "floor 9 looks the same
         // as floor 0" becomes a bug report about decoration.
-        if (!game.enterCastleSpawn(deepLink.deck)) {
+        if (!game.enterCastleSpawn(deepLink.deck, deepLink.at)) {
           console.error(
             `Land of Good Places: /castle?deck=${deepLink.deck} could not be entered — the ` +
               'castle has no such storey (there are BUILDING_FLOOR_COUNT of them, 0 up), or the ' +
