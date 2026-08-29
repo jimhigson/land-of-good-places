@@ -5,7 +5,6 @@ import {
   Group,
   Mesh,
   SphereGeometry,
-  TorusGeometry,
 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PALETTE, hexToCss } from '../../core/palette';
@@ -434,10 +433,32 @@ const OUTLINE_THICKNESS = 0.02 * DETAIL;
  * is the *whole* assembly that clears, not just the rubber.
  */
 const WHEEL_CLEARANCE = 0.08;
-/** How far the mudguard overhangs the tyre, each side. */
-const FENDER_TUBE = WHEEL_WIDTH / 2 + 0.06;
+/** Half the mudguard's width: it overhangs the tyre by 0.06 m on each side. */
+const FENDER_HALF_WIDTH = WHEEL_WIDTH / 2 + 0.06;
+/** How thick the mudguard's plates are, radially. */
+const FENDER_THICKNESS = 0.16;
+/** How far each plate's outline shell stands proud of it — including inwards. */
+const FENDER_OUTLINE_THICKNESS = 0.012 * DETAIL;
+/**
+ * How far round the wheel the mudguard reaches, and in how many plates.
+ *
+ * **Plates, not a torus, and that was found by measuring rather than by
+ * reading.** The mudguard started as a half-`TorusGeometry`, which is the
+ * obvious shape for it — and a torus's tube has to be at least half the wheel's
+ * width (0.36 m) to cover the tyre, while the arch gap is 0.35 m. So the tube's
+ * innermost surface sat 0.12 m *inside* the tyre it was supposed to clear: a
+ * mudguard driven through its own wheel, at rest, before the suspension moved
+ * at all. Nothing about it looked wrong in the source.
+ *
+ * A flat plate's inner face is at a fixed radius by construction, and its width
+ * is a free parameter rather than the same number as its clearance — so this
+ * shape simply cannot have that bug. Its ends stand `1/cos(half the plate's
+ * arc)` further out, which is away from the wheel, so they cannot either.
+ */
+const FENDER_ARC = 2.44;
+const FENDER_PLATES = 5;
 /** Half the track: where a wheel's centre plane sits, either side. */
-const WHEEL_X = BODY_WIDTH / 2 + OUTLINE_THICKNESS + WHEEL_CLEARANCE + FENDER_TUBE;
+const WHEEL_X = BODY_WIDTH / 2 + OUTLINE_THICKNESS + WHEEL_CLEARANCE + FENDER_HALF_WIDTH;
 /** Front axle first, then rear. Where the wheels were before, unchanged. */
 const WHEEL_Z = [BODY_LENGTH * 0.28, -BODY_LENGTH * 0.3] as const;
 const WHEELBASE = (WHEEL_Z[0] ?? 0) - (WHEEL_Z[1] ?? 0);
@@ -454,7 +475,7 @@ const WHEELBASE = (WHEEL_Z[0] ?? 0) - (WHEEL_Z[1] ?? 0);
  *
  * So this exists rather than a second copy of the sum appearing in `road.ts`.
  */
-export const CAT_BUS_TRACK_WIDTH = 2 * (WHEEL_X + FENDER_TUBE);
+export const CAT_BUS_TRACK_WIDTH = 2 * (WHEEL_X + FENDER_HALF_WIDTH);
 
 /**
  * **How far the sprung body may move, and the one place those limits live.**
@@ -473,9 +494,38 @@ export const CAT_BUS_TRACK_WIDTH = 2 * (WHEEL_X + FENDER_TUBE);
  * effect is 10 cm and a degree, because a bus that visibly lurches reads as
  * broken rather than sprung.
  */
-export const CAT_BUS_MAX_HEAVE = 0.1;
-export const CAT_BUS_MAX_PITCH = 0.018;
-export const CAT_BUS_MAX_ROLL = 0.022;
+export const CAT_BUS_MAX_HEAVE = 0.08;
+export const CAT_BUS_MAX_PITCH = 0.014;
+export const CAT_BUS_MAX_ROLL = 0.018;
+
+/**
+ * **How much higher the sprung body rests than it is drawn** — the ride height
+ * the doubled wheels bought.
+ *
+ * This is not decoration and it is not a taste call. The cat's face is a
+ * squashed sphere whose chin hangs to **y = 0.14 m**, 7.86 m forward of the
+ * bus's centre. Pitch the body nose-down by `CAT_BUS_MAX_PITCH` and that point
+ * drops 0.11 m; add full heave and a full lean and it is 0.30 m below where it
+ * started, which is 0.16 m *under the road*. The bus would plough its own chin
+ * through the tarmac on the first bump — and this was found by
+ * `check:cat-bus-suspension` reporting `y=-0.1597`, not by looking at it, which
+ * is the entire argument for having the check.
+ *
+ * So the body rests high enough that the worst pose still clears. Derived from
+ * the three limits above at the furthest, lowest point of the vehicle, with 15%
+ * over, rather than picked — raise a limit and this rises with it.
+ *
+ * **It is applied to the chassis, so it is invisible to everything inside the
+ * bus.** `CAT_BUS_FLOOR_Y`, `CAT_BUS_SEAT_Y` and `CAT_BUS_CABIN_CEILING_Y` are
+ * all in the body's own space and none of them changes; the seats, the driver,
+ * the twelve children and the ride's interior camera all move together and none
+ * of them can tell. What does change is how far it is down from the step to the
+ * pavement, from 0.51 m to 0.78 m — which is the honest consequence of fitting
+ * wheels twice the size, and is what a bus with big wheels looks like.
+ */
+const NOSE_Z = BODY_LENGTH / 2 - FACE_RADIUS * 0.62 + FACE_RADIUS * 0.6;
+export const CAT_BUS_RIDE_LIFT =
+  (CAT_BUS_MAX_HEAVE + CAT_BUS_MAX_PITCH * NOSE_Z + CAT_BUS_MAX_ROLL * FACE_RADIUS) * 1.15;
 
 /**
  * The gap between a tyre and the mudguard over it, **at rest**.
@@ -489,12 +539,20 @@ export const CAT_BUS_MAX_ROLL = 0.022;
  * The fender rides on the **chassis**, so this gap genuinely opens and closes
  * as the bus bobs. That is what makes the suspension visible from outside at
  * all, and it is what the check measures.
+ *
+ * The outline shell is added on rather than ignored: `addOutline` pushes a copy
+ * of each plate out along its normals, and on a plate's *inner* face "out" is
+ * towards the tyre. Left out of the sum it ate a third of the margin, and
+ * `check:cat-bus-suspension` duly reported the tightest gap as 0.029 m where
+ * the derivation promised 0.071 — a small number, but the derivation being
+ * wrong is the interesting part, not the size of the error.
  */
 const WORST_BODY_DROP_AT_A_WHEEL =
   CAT_BUS_MAX_HEAVE +
   CAT_BUS_MAX_PITCH * Math.max(...WHEEL_Z.map(Math.abs)) +
   CAT_BUS_MAX_ROLL * WHEEL_X;
-export const CAT_BUS_ARCH_GAP = WORST_BODY_DROP_AT_A_WHEEL * 1.35;
+export const CAT_BUS_ARCH_GAP =
+  WORST_BODY_DROP_AT_A_WHEEL * 1.35 + FENDER_OUTLINE_THICKNESS;
 
 /**
  * The spring itself: stiffness and damping, as a plain second-order system.
@@ -519,8 +577,9 @@ const SPRING_DAMPING = 7.4;
  *
  * Three incommensurable sine terms rather than a noise table: no repeat a
  * player could learn, nothing to allocate, and it is smooth, which a sampled
- * table is not without interpolation. Total amplitude 0.10 m — the road through
- * the park is tarmac, not a farm track.
+ * table is not without interpolation. Total amplitude 0.056 m — the road
+ * through the park is tarmac, not a farm track, and an input that on its own
+ * reached the clamps would give a flat-topped bob rather than a sprung one.
  *
  * The rear axle samples this one wheelbase behind the front, so **the back of
  * the bus hits the same bump the front just did**, a wheelbase later. That
@@ -529,9 +588,9 @@ const SPRING_DAMPING = 7.4;
  */
 function roadHeightAt(distance: number): number {
   return (
-    Math.sin(distance * 0.83) * 0.055 +
-    Math.sin(distance * 1.97 + 1.7) * 0.032 +
-    Math.sin(distance * 4.31 + 3.9) * 0.014
+    Math.sin(distance * 0.83) * 0.03 +
+    Math.sin(distance * 1.97 + 1.7) * 0.018 +
+    Math.sin(distance * 4.31 + 3.9) * 0.008
   );
 }
 
@@ -543,7 +602,8 @@ function roadHeightAt(distance: number): number {
  * constant so that something deciding what may stand in front of the bus can
  * ask before there is a bus to ask.
  */
-export const CAT_BUS_TOP = BODY_BOTTOM_Y + BODY_HEIGHT + (0.28 + 0.56 / 2) * DETAIL;
+export const CAT_BUS_TOP =
+  CAT_BUS_RIDE_LIFT + BODY_BOTTOM_Y + BODY_HEIGHT + (0.28 + 0.56 / 2) * DETAIL;
 
 /**
  * The doorway, sized by the child who walks down out of it.
@@ -713,6 +773,10 @@ export function createCatBus(): CatBusHandle {
   // be no second thing to keep in step.
   const chassis = new Group();
   chassis.name = 'chassis';
+  // At rest before anything animates it, so a bus nobody has called `animate`
+  // on — the park's parked one, a check, the character creator's backdrop —
+  // still stands at its proper ride height rather than sitting on its axles.
+  chassis.position.y = CAT_BUS_RIDE_LIFT;
   root.add(chassis);
 
   // **The unsprung half**: wheels, hubs and stub axles, which stay on the road
@@ -1183,18 +1247,18 @@ export function createCatBus(): CatBusHandle {
   // than stopping in mid-air.
   const stubLength = WHEEL_X - BODY_WIDTH / 2 + WALL_THICKNESS;
   const stubGeometry = new CylinderGeometry(WHEEL_RADIUS * 0.16, WHEEL_RADIUS * 0.16, stubLength, 8);
-  // A half-torus: the ring stands in the bus's YZ plane (hence the quarter turn
-  // about Y) and the tube runs across it, so `arc = PI` is precisely the top
-  // half — a mudguard, not a wheel-shaped hoop.
-  const fenderGeometry = new TorusGeometry(
-    WHEEL_RADIUS + CAT_BUS_ARCH_GAP,
-    FENDER_TUBE,
-    8,
-    22,
-    Math.PI,
+  // The mudguard, as an arc of flat plates whose **inner faces all sit at
+  // exactly `WHEEL_RADIUS + CAT_BUS_ARCH_GAP`** — see `FENDER_ARC` for why this
+  // is not the torus it obviously wants to be.
+  const fenderPlateGeometry = new RoundedBoxGeometry(
+    FENDER_HALF_WIDTH * 2,
+    FENDER_THICKNESS,
+    (WHEEL_RADIUS + CAT_BUS_ARCH_GAP) * (FENDER_ARC / FENDER_PLATES) * 1.06,
+    2,
+    0.04 * DETAIL,
   );
   const wheels: Mesh[] = [];
-  const fenders: Mesh[] = [];
+  const fenders: Group[] = [];
   for (const side of [-1, 1] as const) {
     for (const z of WHEEL_Z) {
       const x = side * WHEEL_X;
@@ -1217,13 +1281,27 @@ export function createCatBus(): CatBusHandle {
       stub.position.set(x - side * stubLength / 2, WHEEL_RADIUS, z);
       axles.add(stub);
 
-      const fender = solid(new Mesh(fenderGeometry, roofMaterial));
+      // A group at the wheel's centre, so each plate is placed by an angle
+      // round the wheel and a single radius rather than by its own coordinates.
+      const fender = new Group();
       fender.name = 'cat-bus-fender';
-      fender.rotation.y = Math.PI / 2;
       fender.position.set(x, WHEEL_RADIUS, z);
       chassis.add(fender);
       fenders.push(fender);
-      addOutline(fender, 0.014 * DETAIL);
+      for (let plate = 0; plate < FENDER_PLATES; plate += 1) {
+        const angle = ((plate + 0.5) / FENDER_PLATES - 0.5) * FENDER_ARC;
+        const panel = solid(new Mesh(fenderPlateGeometry, roofMaterial));
+        // The plate's own +y is radially outward, so its inner face lands on the
+        // arch radius when its centre is half a thickness beyond it.
+        panel.position.set(
+          0,
+          Math.cos(angle) * (WHEEL_RADIUS + CAT_BUS_ARCH_GAP + FENDER_THICKNESS / 2),
+          Math.sin(angle) * (WHEEL_RADIUS + CAT_BUS_ARCH_GAP + FENDER_THICKNESS / 2),
+        );
+        panel.rotation.x = -angle;
+        fender.add(panel);
+        addOutline(panel, FENDER_OUTLINE_THICKNESS);
+      }
     }
   }
 
@@ -1438,7 +1516,7 @@ export function createCatBus(): CatBusHandle {
       );
       const roll = clamp(-smoothedAcross * 0.012, -CAT_BUS_MAX_ROLL, CAT_BUS_MAX_ROLL);
 
-      chassis.position.y = heave;
+      chassis.position.y = CAT_BUS_RIDE_LIFT + heave;
       // Rotation about x lifts the nose when `pitch` is positive: a point at
       // +z moves down by `z * sin(pitch)`, so the sign is flipped here to make
       // "positive pitch = nose up" true, which is what the two targets above
