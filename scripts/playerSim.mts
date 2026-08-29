@@ -14,15 +14,32 @@
  * accelerate → step + `resolve` → escort latch → velocity read-back →
  * auto-hop lookahead → vertical integration → `hopClearance`.
  *
- * Two things are deliberately left out, because neither script has them:
- * uneven ground (everything here stands on y = 0) and the fall-off-a-deck
- * check that goes with it.
+ * Uneven ground is **opt-in**: pass a `ground` sampler and the full vertical
+ * half of `Player.update` runs too — the sub-stepped surface follow, the
+ * fall-off-a-deck check, gravity, **the landing**, and the height damp. Pass
+ * nothing and everything stands on y = 0 exactly as it always did, which is
+ * what the two wall harnesses want and is byte-for-byte the old behaviour.
+ *
+ * ### Why the landing is not optional (#358, and a rig that got this wrong)
+ *
+ * A rig built for the bridge work drove the vertical loop but never simulated
+ * the landing, and so **over-counted on descents**: going downhill the damped
+ * height legitimately lags *above* the ground, the player goes briefly
+ * airborne and lands again half a metre down the ramp, and that is normal and
+ * harmless. Counting it as a fall reports failures on geometry that is fine —
+ * its tell was spurious events sitting at exactly `FALL_THRESHOLD` on the
+ * descending side. `step` below integrates all the way through the landing for
+ * that reason, and callers should judge safety by whether she **kept the
+ * surface** (see `lostSurface`), not by whether she ever left the ground.
  */
 import { Vector3 } from 'three';
 import type { CollisionWorld } from '../src/world/Collision.ts';
+import { damp } from '../src/core/mathUtils.ts';
 import {
+  FALL_THRESHOLD,
   PLAYER_ACCELERATION,
   PLAYER_DECELERATION,
+  PLAYER_HEIGHT_DAMP_HALF_LIFE,
   PLAYER_MAX_SPEED,
   PLAYER_RADIUS,
   PLAYER_SPRINT_MULTIPLIER,
@@ -68,9 +85,32 @@ function approach(current: Vector3, target: Vector3, maxDelta: number): void {
  */
 export type HopProbe = (probe: Vector3) => boolean;
 
+/**
+ * `WalkSurfaces.sample`'s shape: the highest walkable surface at (x, z) that is
+ * no more than one step above `y`. Pass the **real** one — the whole value of
+ * this rig is that it asks the shipping sampler, not a model of it.
+ */
+export type GroundSampler = (x: number, z: number, y: number) => number;
+
 export interface SimOptions {
   hopProbe?: HopProbe;
   radius?: number;
+  /**
+   * Uneven ground. Omitted, everything stands on y = 0 and the vertical loop
+   * is the flat-world one the wall harnesses have always used.
+   */
+  ground?: GroundSampler;
+  /**
+   * **The vertical control (#358).** `false` reproduces the single
+   * end-of-frame ground sample `Player` used before this landed: one
+   * `sample` call at the position the whole frame's movement ended at, asked
+   * from her *damped* height. That is what let a long frame carry a sprinting
+   * child straight through a deck she was walking up. Kept, and kept
+   * exercised by `measure-deck-fallthrough.mts`, for the same reason
+   * `substepping: false` is kept: a fix nobody can demonstrate the absence of
+   * is a fix nobody can defend later.
+   */
+  groundSubstepping?: boolean;
   /**
    * **The control.** `false` reproduces the single-step integration `Player`
    * used before substepping landed — `position += velocity·dt`, then one
@@ -111,10 +151,19 @@ export class SimPlayer {
    */
   lastOvershoot = 0;
 
+  /**
+   * The surface she is standing on — `Player.groundHeight`, the height the
+   * sampler is asked from. Distinct from `position.y`, which is damped.
+   */
+  groundHeight = 0;
+  /** Last frame's sampled ground under her feet. */
+  groundY = 0;
   private readonly collision: CollisionWorld;
   private readonly hopProbe: HopProbe;
   readonly radius: number;
   private readonly substepping: boolean;
+  private readonly ground: GroundSampler | null;
+  private readonly groundSubstepping: boolean;
 
   private readonly moveDirection = new Vector3();
   private readonly desired = new Vector3();
@@ -125,6 +174,23 @@ export class SimPlayer {
     this.hopProbe = options.hopProbe ?? (() => false);
     this.radius = options.radius ?? PLAYER_RADIUS;
     this.substepping = options.substepping ?? true;
+    this.ground = options.ground ?? null;
+    this.groundSubstepping = options.groundSubstepping ?? true;
+  }
+
+  /**
+   * Stand her on the surface at (x, z), the way `Player.teleportTo` does —
+   * position, sampling reference and damped height all collapsed onto the
+   * ground together, so a run does not begin with a manufactured lag.
+   */
+  placeOnGround(x: number, z: number): void {
+    const y = this.ground ? this.ground(x, z, Infinity) : 0;
+    this.position.set(x, y, z);
+    this.previousPosition.copy(this.position);
+    this.groundHeight = y;
+    this.groundY = y;
+    this.airborne = false;
+    this.verticalVelocity = 0;
   }
 
   /**
@@ -147,6 +213,16 @@ export class SimPlayer {
     const deltaX = this.velocity.x * dt;
     const deltaZ = this.velocity.z * dt;
 
+    // `Player.update`'s ground sample, riding the same sub-steps. `following`
+    // and `reference` mirror it name for name.
+    const following = !this.airborne;
+    let reference = following ? this.groundHeight : this.position.y;
+    let groundY = reference;
+    const onStep = (at: Vector3): void => {
+      groundY = this.sampleGround(at.x, at.z, reference);
+      if (following) reference = groundY;
+    };
+
     let result;
     if (this.substepping) {
       result = this.collision.resolveMovement(
@@ -156,6 +232,7 @@ export class SimPlayer {
         this.radius,
         this.hopClearance,
         dt,
+        this.groundSubstepping ? onStep : undefined,
       );
     } else {
       this.position.x += deltaX;
@@ -196,15 +273,46 @@ export class SimPlayer {
       this.airborne = true;
     }
 
+    // The pre-#358 vertical: one sample, at the end of the whole frame's
+    // movement, asked from her damped height. This is the control.
+    if (!this.groundSubstepping || !this.substepping) {
+      groundY = this.sampleGround(this.position.x, this.position.z, this.position.y);
+    }
+    this.groundY = groundY;
+
+    if (!this.airborne && this.position.y - groundY > FALL_THRESHOLD) {
+      this.airborne = true;
+      this.verticalVelocity = 0;
+    }
+
+    let hopHeight = 0;
     if (this.airborne) {
       this.verticalVelocity -= GRAVITY * dt;
       this.position.y += this.verticalVelocity * dt;
-      if (this.position.y <= 0) {
-        this.position.y = 0;
+      // The landing. Its absence is what made the earlier rig over-count.
+      if (this.position.y <= groundY) {
+        this.position.y = groundY;
         this.verticalVelocity = 0;
         this.airborne = false;
       }
+      hopHeight = this.position.y - groundY;
+    } else {
+      this.position.y = damp(this.position.y, groundY, PLAYER_HEIGHT_DAMP_HALF_LIFE, dt);
     }
-    this.hopClearance = this.position.y;
+    this.hopClearance = hopHeight;
+    this.groundHeight = groundY;
+  }
+
+  /**
+   * The ground under a point, from the caller's sampler — or the flat y = 0
+   * world when there isn't one.
+   *
+   * Whether the answer is the *right* one is deliberately the harness's
+   * question, not this class's: only the harness knows where it put the deck,
+   * and comparing `groundY` against that ground truth is the one statement of
+   * the failure that a legitimate descent cannot trip.
+   */
+  private sampleGround(x: number, z: number, expected: number): number {
+    return this.ground ? this.ground(x, z, expected) : 0;
   }
 }
