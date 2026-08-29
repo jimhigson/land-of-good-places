@@ -278,6 +278,21 @@ assertion reporting success about something it is not describing.** So: break
 every check deliberately and watch it go red before you trust it green, and read
 the failure message — it should carry real numbers, not `NaN` or `Infinity`.
 
+**When a check stops covering something, it must say so on every run — and
+you must confirm anyone can hear it.** `check:castle` prints that no prop is
+measured yet; `everyProvenBridgeSiteKeepsItsBridge` prints how many crossings
+its clause actually covers, including "asserts nothing" on the seeds where
+that is true. A green line that implies cover it does not give is how the
+next agent inherits a false belief.
+
+**Write those notes to `process.stderr`, not `console.log`.** Vitest's default
+reporter shows console output from **failing** tests only, so a coverage note
+written the obvious way is invisible in exactly the case it exists for — a
+passing run. It appears under `--reporter=verbose`, which nobody passes. Found
+on 29 August by writing one, seeing nothing, and checking rather than
+assuming. An announcement nobody can hear is the same disease as a check that
+cannot fail, one layer out.
+
 **A red-run transcript is a measurement, and measurements go stale.** When you
 write "proved red, here is the output", **paste the geometry or input it was
 proved against with it.** On 29 August a check was honestly proved red at 28
