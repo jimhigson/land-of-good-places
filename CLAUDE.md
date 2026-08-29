@@ -153,6 +153,17 @@ have said so proudly.
 answer this: `test:procgen` matches `test:procgen:watch` on `main` today.
 Parse the object and look for the name you expect.
 
+**`rerere.enabled` is `true` in this repo, and it will replay a stale
+resolution without telling you.** On 29 August an engineer rebasing a second
+time had its *earlier* `build`-chain resolution replayed automatically — a
+resolution recorded before `check:castle` existed, so it silently dropped a
+step that had merged in between. It happened to match what was wanted that
+time, which is luck rather than correctness.
+
+So when a rebase touches the `build` chain, **rebuild the resolution
+deterministically from `main`'s step list and insert your own step into it**,
+rather than accepting what git hands back. Then parse and compare.
+
 ## Zero tolerance for CI failure
 
 **ZERO failures in CI are acceptable.** A failure in CI is just as serious
