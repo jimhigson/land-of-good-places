@@ -705,6 +705,10 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // `stone`, group 1 (the tunnel soffit `buildShellGeometry` built as its
   // own contiguous index run) reads `archStone` — the voussoir ring.
   const shellMesh = new Mesh(shell.stone, [bridgeMaterials().stone, bridgeMaterials().archStone]);
+  // Named, like every other drawn part of a bridge, because
+  // `nothingHangsIntoTheTunnel` reports *which* mesh it found overhead and
+  // "unnamed mesh" is a worse bug report than no bug report.
+  shellMesh.name = 'shell';
   shellMesh.castShadow = true;
   shellMesh.receiveShadow = true;
   // The parapet's own flat top face, flush with the wall. It used to be the
@@ -713,6 +717,7 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // stops the wall being open at the top; the coping proper is modelled stone,
   // laid on it below.
   const wallTopMesh = new Mesh(shell.coping, bridgeMaterials().coping);
+  wallTopMesh.name = 'wallTop';
   wallTopMesh.castShadow = true;
   bridgeGroup.add(shellMesh, wallTopMesh);
 
@@ -737,12 +742,14 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
     buildVoussoirRing(frame, shift, halfAcross, arch),
     bridgeMaterials().coping,
   );
+  ringMesh.name = 'archRing';
   ringMesh.castShadow = true;
   ringMesh.receiveShadow = true;
   const copingMesh = new Mesh(
     buildCopingRun(frame, shift, roadHalf + BRIDGE_WALL_THICKNESS / 2, lengthNeg, lengthPos, parapetTopAt),
     bridgeMaterials().coping,
   );
+  copingMesh.name = 'coping';
   copingMesh.castShadow = true;
   copingMesh.receiveShadow = true;
   bridgeGroup.add(ringMesh, copingMesh);
