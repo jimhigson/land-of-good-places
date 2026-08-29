@@ -37,12 +37,18 @@
  *    pass without checking anything" section is about, so it is worth being
  *    plain about what each branch is worth now:
  *
- *    - **Anchors and the castle** — truth is `scene.getObjectByName('anchor:<id>')`,
- *      the real `Group` the park built, read out of the finished scene graph.
- *      This is genuine independence: `AnchorPlots` positions that group itself,
- *      so a map that picked the wrong field (the entrance rather than the
- *      centre, say — a 6-14 m error) is caught. These are the attractions, so
- *      this is where the assertion earns its keep.
+ *    - **Anchors** — truth is `scene.getObjectByName('anchor:<id>')`, the real
+ *      `Group` the park built, read out of the finished scene graph. This is
+ *      genuine independence: `AnchorPlots` positions that group itself, so a
+ *      map that picked the wrong field (the entrance rather than the centre,
+ *      say — an 8.9-16.9 m error) is caught.
+ *    - **The castle** — truth is the `castle-walls` group, the masonry that
+ *      actually stands in the park. Deliberately **not** `anchor:building`:
+ *      that is the reserved *plot*, and the castle is nudged in from it, so
+ *      the two are 3.54 m apart and the plot would be the wrong answer. An
+ *      earlier version of this comment lumped the castle in with the anchors
+ *      while the code returned `BUILDING_CENTRE` and never touched the scene —
+ *      the same over-broad claim, in miniature, caught in re-review.
  *    - **Stalls, the fountain and stations** — truth still comes from the same
  *      owner the content list read, because no separately-positioned scene
  *      object exists to ask. For these the assertion proves the *projection*
@@ -196,19 +202,26 @@ const checkedFeatures = mutation === 'entrance'
  * than read back out of the list under test. See assertion 2's note above:
  * this independence is the whole reason the assertion can fail.
  */
+function scenePosition(name: string): readonly [number, number] | null {
+  const object = park.scene.getObjectByName(name);
+  if (!object) return null;
+  object.updateWorldMatrix(true, false);
+  const world = new Vector3();
+  object.getWorldPosition(world);
+  return [world.x, world.z];
+}
+
 function truePosition(feature: MapFeature): readonly [number, number] | null {
-  if (feature.kind === 'castle') return [BUILDING_CENTRE_X, BUILDING_CENTRE_Z];
+  if (feature.kind === 'castle') {
+    // The masonry, not the plot — see the note on assertion 2 above.
+    return scenePosition('castle-walls') ?? [BUILDING_CENTRE_X, BUILDING_CENTRE_Z];
+  }
   if (feature.kind === 'anchor') {
     // The real Group `AnchorPlots` put in the scene, read out of the finished
     // scene graph — genuinely independent of the table `parkMapContent.ts`
     // read. This is the branch that can actually fail.
-    const group = park.scene.getObjectByName(anchorGroupName(feature.id as AnchorId));
-    if (group) {
-      group.updateWorldMatrix(true, false);
-      const world = new Vector3();
-      group.getWorldPosition(world);
-      return [world.x, world.z];
-    }
+    const scene = scenePosition(anchorGroupName(feature.id as AnchorId));
+    if (scene) return scene;
     const anchor = ANCHORS_BY_ID[feature.id as keyof typeof ANCHORS_BY_ID];
     return anchor ? anchor.position : null;
   }

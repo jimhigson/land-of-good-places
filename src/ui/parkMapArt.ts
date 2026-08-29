@@ -240,33 +240,55 @@ function drawFerrisWheel(ctx: CanvasRenderingContext2D, cx: number, cy: number, 
   disc(ctx, cx, cy, size, MAP_PALETTE.greyDeep, 0, 0, 0.055);
 }
 
-/** The rail race — a track looping a grey mountain, straight from the idiom. */
+/**
+ * The rail race — a track looping a grey mountain.
+ *
+ * **Draw order is the whole icon.** Drawn as two complete ellipses on top of
+ * the mountain (the first version) the track reads as stray wireframe rings
+ * lying across a grey pyramid — the one picture on the map a six-year-old
+ * would ask what was wrong with. A loop only reads as *going round* something
+ * if its back half is hidden: so the far arc goes down first, then the
+ * mountain over it, then the near arc.
+ */
 function drawCoaster(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number): void {
-  // Two peaks, the smaller behind and to the right.
+  const track = (from: number, to: number, ex: number, ey: number, rx: number, ry: number, tilt: number): void => {
+    ctx.beginPath();
+    ctx.ellipse(cx + ex * size, cy + ey * size, rx * size, ry * size, tilt, from, to);
+    ctx.stroke();
+  };
+
+  ctx.save();
+  ctx.strokeStyle = MAP_PALETTE.ink;
+  ctx.lineWidth = size * 0.035;
+  ctx.lineCap = 'round';
+
+  // Back half of both loops — the part that passes behind the peaks.
+  track(Math.PI, Math.PI * 2, -0.12, 0.12, 0.42, 0.2, -0.15);
+  track(Math.PI, Math.PI * 2, 0.16, -0.04, 0.28, 0.15, 0.3);
+
+  // The mountains, over the back arcs.
   poly(ctx, cx, cy, size, MAP_PALETTE.greyDeep, [
     [0.1, 0.42], [0.3, -0.16], [0.5, 0.42],
   ]);
   poly(ctx, cx, cy, size, MAP_PALETTE.grey, [
     [-0.46, 0.42], [-0.1, -0.44], [0.26, 0.42],
   ]);
-  // Lit facet, the no-outline way of giving the peak an edge.
   poly(ctx, cx, cy, size, MAP_PALETTE.greyLight, [
     [-0.1, -0.44], [0.26, 0.42], [0.02, 0.42],
   ]);
-  // The track: two loops round the mountain, dark like the reference's.
-  ctx.save();
-  ctx.strokeStyle = MAP_PALETTE.ink;
-  ctx.lineWidth = size * 0.035;
-  ctx.beginPath();
-  ctx.ellipse(cx - size * 0.12, cy + size * 0.12, size * 0.42, size * 0.2, -0.15, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.ellipse(cx + size * 0.16, cy - size * 0.04, size * 0.28, size * 0.15, 0.3, 0, Math.PI * 2);
-  ctx.stroke();
+
+  // Front half of both loops, over the mountains.
+  track(0, Math.PI, -0.12, 0.12, 0.42, 0.2, -0.15);
+  track(0, Math.PI, 0.16, -0.04, 0.28, 0.15, 0.3);
   ctx.restore();
-  // A little train of carriages on the near rail.
-  box(ctx, cx, cy, size, MAP_PALETTE.brick, -0.34, 0.2, 0.11, 0.07);
-  box(ctx, cx, cy, size, MAP_PALETTE.teal, -0.21, 0.22, 0.11, 0.07);
+
+  // A train of carriages on the near rail.
+  poly(ctx, cx, cy, size, MAP_PALETTE.brick, [
+    [-0.36, 0.26], [-0.24, 0.26], [-0.24, 0.33], [-0.36, 0.33],
+  ]);
+  poly(ctx, cx, cy, size, MAP_PALETTE.teal, [
+    [-0.21, 0.28], [-0.09, 0.28], [-0.09, 0.35], [-0.21, 0.35],
+  ]);
 }
 
 function drawSpookyHouse(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number): void {
