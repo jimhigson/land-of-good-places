@@ -188,6 +188,9 @@ const MUTATIONS = [
   'zoom-axis',
   'clamp-loose',
   'clamp-tight',
+  'clamp-letterbox',
+  'focal',
+  'pan-sign',
 ] as const;
 if (mutation && !MUTATIONS.includes(mutation as (typeof MUTATIONS)[number])) {
   console.error(`Unknown --mutate=${mutation}. Use one of: ${MUTATIONS.join(', ')}.`);
@@ -274,6 +277,62 @@ const ZOOM_SAMPLES = [MAP_MIN_ZOOM, 1.5, 2, 3, MAP_MAX_ZOOM];
 const VIEW_EPSILON_PX = 0.5;
 
 /**
+ * The least park the map may show, as a fraction of the canvas.
+ *
+ * Not zero — "at least one pixel of lawn" would pass on a view showing a single
+ * green corner, which is not a map. 12% is below anything the honest clamp
+ * produces at any sampled view (measured worst is far higher) and far above the
+ * 0% the broken clamp allowed, so it fails the bug without being a tripwire on
+ * ordinary framing. The park is a lobed blob inside a rectangular extent, so
+ * some genuinely lawn-free corner at high zoom is expected and fine.
+ */
+const MIN_LAWN_FRACTION = 0.12;
+
+/**
+ * How much of the canvas is inside the real park boundary, by grid sample.
+ *
+ * Uses `PARK_BOUNDARY.outline()` — the same 512-point polygon the map draws and
+ * the terrain is built from — rather than the extent rectangle, so a view
+ * parked over the extent's empty corner is correctly counted as blank.
+ */
+function canvasLawnFraction(
+  projection: MapProjection,
+  width: number,
+  height: number,
+): number {
+  const steps = 12;
+  let inside = 0;
+  let total = 0;
+  for (let i = 0; i < steps; i += 1) {
+    for (let j = 0; j < steps; j += 1) {
+      const px = ((i + 0.5) / steps) * width;
+      const py = ((j + 0.5) / steps) * height;
+      const [wx, wz] = projection.toPlane(px, py);
+      total += 1;
+      if (pointInPolygon(wx, wz, outline)) inside += 1;
+    }
+  }
+  return total === 0 ? 0 : inside / total;
+}
+
+/** Standard ray-crossing test. */
+function pointInPolygon(
+  x: number,
+  z: number,
+  polygon: readonly (readonly [number, number])[],
+): boolean {
+  let hit = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+    const a = polygon[i] as readonly [number, number];
+    const b = polygon[j] as readonly [number, number];
+    if (a[1] > z !== b[1] > z && x < ((b[0] - a[0]) * (z - a[1])) / (b[1] - a[1]) + a[0]) {
+      hit = !hit;
+    }
+  }
+  return hit;
+}
+
+/**
  * A grid of views: every sampled zoom, panned hard to each corner and edge as
  * well as centred. Deliberately asks for centres far outside the legal range —
  * `clampMapView` is the thing under test, so it must be handed values that
@@ -317,6 +376,40 @@ function projectionForView(width: number, height: number, view: MapView): MapPro
     const scale = base.scale * view.zoom;
     const originPxX = base.canvasWidth / 2 - view.centreX * scale;
     const originPxY = base.canvasHeight / 2 - view.centreZ * scale;
+    return {
+      scale,
+      originPxX,
+      originPxY,
+      canvasWidth: base.canvasWidth,
+      canvasHeight: base.canvasHeight,
+      toCanvas: (x, z) => [originPxX + x * scale, originPxY + z * scale],
+      toPlane: (px, py) => [(px - originPxX) / scale, (py - originPxY) / scale],
+    };
+  }
+  if (mutation === 'clamp-letterbox') {
+    // **The exact bug PR #372's review found**, reinstated: clamp against the
+    // world rectangle zoom 1 *frames* rather than against the park. Because
+    // `frameExtent` fits the smaller axis, that rectangle is mostly empty
+    // letterbox on any canvas whose aspect differs from the park's, so at high
+    // zoom the view can sit entirely in the blank band.
+    //
+    // This mutation exists because the assertion that replaced it must be
+    // shown to catch it. The *previous* version of assertion 6 measured escape
+    // against this same rectangle, so it agreed with this code by construction
+    // and reported `0.00 m` while the map went completely blank.
+    const base = outdoorParkMapProjection(width, height);
+    const zoom = Math.min(MAP_MAX_ZOOM, Math.max(MAP_MIN_ZOOM, view.zoom));
+    const [lminX, lminZ] = base.toPlane(0, 0);
+    const [lmaxX, lmaxZ] = base.toPlane(base.canvasWidth, base.canvasHeight);
+    const halfX = base.canvasWidth / 2 / (base.scale * zoom);
+    const halfZ = base.canvasHeight / 2 / (base.scale * zoom);
+    const old = (v: number, lo: number, hi: number): number =>
+      lo >= hi ? (lo + hi) / 2 : Math.min(hi, Math.max(lo, v));
+    const scale = base.scale * zoom;
+    const centreX = old(view.centreX, lminX + halfX, lmaxX - halfX);
+    const centreZ = old(view.centreZ, lminZ + halfZ, lmaxZ - halfZ);
+    const originPxX = base.canvasWidth / 2 - centreX * scale;
+    const originPxY = base.canvasHeight / 2 - centreZ * scale;
     return {
       scale,
       originPxX,
@@ -671,18 +764,13 @@ notes.push(
 {
   let worstSpread = 0;
   let worstSpreadWhere = '';
-  let worstEscapeM = 0;
-  let worstEscapeWhere = '';
+  let worstLawnFraction = 1;
+  let worstLawnWhere = '';
   let worstStrandedPx = 0;
   let worstStrandedWhere = '';
   let viewsChecked = 0;
 
   for (const [width, height, name] of CANVAS_SIZES) {
-    // The world rectangle zoom 1 frames — the region the child may explore.
-    const base = outdoorParkMapProjection(width, height);
-    const [baseMinX, baseMinZ] = base.toPlane(0, 0);
-    const [baseMaxX, baseMaxZ] = base.toPlane(base.canvasWidth, base.canvasHeight);
-
     for (const { label, view } of viewSamples(width, height)) {
       const projection = projectionForView(width, height, view);
       viewsChecked += 1;
@@ -710,25 +798,34 @@ notes.push(
         );
       }
 
-      // --- 6. the clamp never reveals anything outside the zoom-1 region.
-      const [seenMinX, seenMinZ] = projection.toPlane(0, 0);
-      const [seenMaxX, seenMaxZ] = projection.toPlane(width, height);
-      const escape = Math.max(
-        baseMinX - seenMinX,
-        seenMaxX - baseMaxX,
-        baseMinZ - seenMinZ,
-        seenMaxZ - baseMaxZ,
-        0,
-      );
-      if (escape > worstEscapeM) {
-        worstEscapeM = escape;
-        worstEscapeWhere = `${name} ${label}`;
+      // --- 6. THE CHILD CAN ALWAYS SEE SOME PARK.
+      //
+      // **This measures the outcome, not the rule**, and that distinction is
+      // the whole reason it was rewritten. The first version compared the
+      // visible rectangle against the region zoom 1 frames — the same
+      // rectangle `clampMapView` was clamping to — so it agreed with the code
+      // by construction and reported `0.00 m` while an 844x390 landscape phone
+      // at zoom 4 could be dragged to a **completely blank** map. It was not
+      // vacuous (`clamp-loose` was honestly red) but it measured the wrong
+      // region, and it permitted exactly the outcome its own failure string
+      // described. Found in review of PR #372.
+      //
+      // So: sample the canvas on a grid and ask how much of it is inside the
+      // real `PARK_BOUNDARY` polygon. A clamp that lets the view slide into
+      // the letterbox fails this no matter which rectangle it clamped to,
+      // because the question is now "is there park on screen" rather than "did
+      // the clamp obey itself".
+      const lawn = canvasLawnFraction(projection, width, height);
+      if (lawn < worstLawnFraction) {
+        worstLawnFraction = lawn;
+        worstLawnWhere = `${name} ${label}`;
       }
-      if (escape > VIEW_EPSILON_PX / projection.scale) {
+      if (lawn < MIN_LAWN_FRACTION) {
         failures.push(
-          `PANNED OFF THE PARK at ${label} on ${name} ${width}x${height}: the map shows ` +
-            `${escape.toFixed(1)} m beyond what zoom 1 frames — the child can drag the park ` +
-            'off the screen into blank paper. `clampMapView` is not holding.',
+          `BLANK MAP at ${label} on ${name} ${width}x${height}: only ` +
+            `${(lawn * 100).toFixed(1)}% of the canvas is park (minimum ` +
+            `${(MIN_LAWN_FRACTION * 100).toFixed(0)}%). The child can pan until there is ` +
+            'little or nothing to look at.',
         );
       }
     }
@@ -765,8 +862,9 @@ notes.push(
       `, over ${viewsChecked} views`,
   );
   notes.push(
-    `pan clamp: worst escape beyond the zoom-1 region ${worstEscapeM.toFixed(2)} m` +
-      (worstEscapeWhere ? ` (${worstEscapeWhere})` : ''),
+    `pan clamp: worst canvas coverage ${(worstLawnFraction * 100).toFixed(1)}% park` +
+      (worstLawnWhere ? ` (${worstLawnWhere})` : '') +
+      `, minimum ${(MIN_LAWN_FRACTION * 100).toFixed(0)}%`,
   );
   notes.push(
     `reachability: worst stranding ${worstStrandedPx.toFixed(2)} px` +

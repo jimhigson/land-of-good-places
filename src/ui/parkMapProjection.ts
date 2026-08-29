@@ -169,24 +169,42 @@ export function clampMapView(
   const base = frameExtent(PARK_BOUNDARY.extent, canvasWidth, canvasHeight);
   const zoom = Math.min(MAP_MAX_ZOOM, Math.max(MAP_MIN_ZOOM, view.zoom));
 
-  // The world rectangle zoom 1 shows, letterboxing and all.
-  const [baseMinX, baseMinZ] = base.toPlane(0, 0);
-  const [baseMaxX, baseMaxZ] = base.toPlane(base.canvasWidth, base.canvasHeight);
+  // **The park, not the framing.** This used to clamp against the world
+  // rectangle zoom 1 *frames*, which was wrong in a way that only appeared
+  // once you zoomed: `frameExtent` fits the smaller axis, so on any canvas
+  // whose aspect differs from the park's, that rectangle is mostly empty
+  // letterbox. At zoom 4 on an 844x390 landscape phone the visible window fits
+  // entirely inside the empty band, so three ordinary drags produced a
+  // completely blank map — no park at all. Found in review of PR #372.
+  //
+  // The region the child may explore is the **park's own extent** plus the
+  // lawn margin the map draws, which is the same rectangle `frameExtent` is
+  // given and contains no letterbox by construction.
+  const contentMinX = PARK_BOUNDARY.extent.minX - MAP_EDGE_MARGIN_M;
+  const contentMaxX = PARK_BOUNDARY.extent.maxX + MAP_EDGE_MARGIN_M;
+  const contentMinZ = PARK_BOUNDARY.extent.minZ - MAP_EDGE_MARGIN_M;
+  const contentMaxZ = PARK_BOUNDARY.extent.maxZ + MAP_EDGE_MARGIN_M;
 
   // Half the world span still visible once magnified.
   const halfX = base.canvasWidth / 2 / (base.scale * zoom);
   const halfZ = base.canvasHeight / 2 / (base.scale * zoom);
 
-  const clampAxis = (value: number, lo: number, hi: number): number => {
-    // At zoom 1 `lo` and `hi` meet; float noise can cross them by an epsilon.
-    if (lo >= hi) return (lo + hi) / 2;
-    return Math.min(hi, Math.max(lo, value));
+  /**
+   * Keeps the visible span inside the content span — and **centres instead of
+   * clamping when the content is smaller than the view**, which is what makes
+   * zoom 1 come out exactly as #353 shipped it. At zoom 1 the constrained axis
+   * fits exactly (`half === content half`) and the slack axis is larger than
+   * the content, so both axes centre and the framing is the default one.
+   */
+  const fit = (value: number, lo: number, hi: number, half: number): number => {
+    if (half * 2 >= hi - lo) return (lo + hi) / 2;
+    return Math.min(hi - half, Math.max(lo + half, value));
   };
 
   return {
     zoom,
-    centreX: clampAxis(view.centreX, baseMinX + halfX, baseMaxX - halfX),
-    centreZ: clampAxis(view.centreZ, baseMinZ + halfZ, baseMaxZ - halfZ),
+    centreX: fit(view.centreX, contentMinX, contentMaxX, halfX),
+    centreZ: fit(view.centreZ, contentMinZ, contentMaxZ, halfZ),
   };
 }
 
