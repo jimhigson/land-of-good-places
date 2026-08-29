@@ -250,7 +250,8 @@ formulas that agreed where they were checked and diverged in between, so:
 | Table top | **1.05 m** | Artist, reported back | A9 sits on it. I will assert the measured top equals the reported number. |
 | Bench seat | **0.55 m** | Artist, reported back | So a child model can be posed sitting. |
 | Chest hinge axis | at the lid node's origin | Artist | Otherwise opening it is a second formula tracking the first. |
-| Armour footprint radius | **0.65 m** | me | Feeds the keep-out check in §6. |
+| Armour footprint radius | **0.65 m** | me | Feeds the keep-out check in §6. Artist measured 0.638; mine is the conservative one and stands. |
+| `BEAM_UNDERSIDE` | **3.08 m** | me, exported from `castleFabric.ts` | **Added 29 Aug, after the wall-plate was built.** The headroom within 1.25 m of a wall, which is where most of the decoration goes. Tighter than `CASTLE_CEILING_CLEAR` and easy to miss. |
 
 **Protocol:** the Artist publishes its actual figures in its own handoff. I
 copy none of them by hand — every one that matters is either exported from
@@ -261,7 +262,58 @@ has hit more than any other.
 
 ### 4.5 Reconciliation log
 
-*(Empty. First entry goes here the moment the Artist publishes its sizes.)*
+**Entry 1 — 29 August 2026, Engineer, on the Artist's published batch-1 figures.**
+
+| Figure | Artist | Me | Ruling |
+| --- | --- | --- | --- |
+| `SCONCE_CUP_OFFSET` | (0.000, 0.285, 0.3025) m, game frame, cup-mouth centre | not specified — I asked for it | **Accepted.** Exactly the form asked for, and measured off the mesh with the Blender→glTF conversion done in code beside the measurement rather than described in prose, which is the only version of that conversion that cannot rot. |
+| `TABLE_TOP` | 1.050 | 1.05 | **Agreed.** |
+| `BENCH_SEAT` | 0.550 | 0.55 | **Agreed.** |
+| Armour keep-out radius | 0.638 measured | 0.650 budgeted | **Keep 0.650.** Mine is the larger, so it is the conservative one and the asset fits inside it with 12 mm to spare. No change either side. |
+| Throne height | 3.10 m "on your dais, 0.20 m of ceiling to spare" | asked for 2.80 m + 0.30 m dais | **Accepted, on one reading — stated here so it cannot stay ambiguous.** I read 3.10 as the **total including the 0.30 m dais**, i.e. throne geometry of 2.80 m, which is what I asked for and which leaves 0.20 m under the 3.30 m ceiling. The other reading (3.10 m of throne *on top of* the dais) is 3.40 m and does not fit. `check:castle` assertion 2 measures floor-to-top and will go red if the second reading is the true one — which is the right way for this to be settled, rather than by either of us being sure. |
+| **Tapestry depth 0.12 → 0.26 m** | requested | 0.12 specified | **Approved. Change it.** See below. |
+
+**On the tapestry: yes, 0.26 m.** Three reasons, in order of weight. It is
+inside my own 0.45 m wall-furniture rule (§5 rule 1) with 0.19 m to spare, so
+it cannot narrow a route. The reason given is a **rendered frame** — the first
+render came out a flat rectangle — and a picture beats a specification about
+whether a thing reads as cloth; that is the same lesson the floating ceiling
+beams taught me on this branch three hours ago. And 0.12 m was a number I
+guessed at while writing a contract with no cloth in front of me, which is
+exactly the sort of number that should give way. The rail (A4) can stay at
+0.14 m: a cloth sagging away from its pole genuinely does stand proud of it.
+
+**New constraint the Artist must have, which did not exist when the contract
+was written.** The perimeter timber wall-plate I have since built hangs to
+**3.08 m**, not 3.30 m, and it runs round every wall 0.9 m in. So:
+
+> Anything standing **within 1.25 m of a wall** must clear **3.08 m**
+> (`BEAM_UNDERSIDE`), not 3.30 m. Out in the room it is still 3.30 m.
+
+That affects the armour (2.85 m with plinth — fine, it is against a wall) and
+would affect any tall prop pushed back against the wall. `check:castle` gains
+this as an assertion when batch 1 lands.
+
+**On the `.glb` budget split — I agree with the Overseer's ruling, with one
+correction to the reasoning, because I own the loading side.**
+
+Batch 2 gets its own `.glb`. Splitting is right and the budget should not be
+raised to fit whatever arrives.
+
+But **it will not "let the interior load in stages"**, and nobody should plan
+around that. `src/art/style/glb.ts` is a synchronous reader, and every asset
+module parses its own bytes at *import* time (`const parts = readGlbParts(...)`
+at module scope, as `hotelAssets.ts` does). The bytes are base64 in the main
+bundle, so both files are downloaded and parsed at boot whether or not a child
+ever walks into the castle. Two files instead of one splits that work in half
+and then does both halves anyway; the total is identical.
+
+The real lever is a **dynamic import** of the castle's asset module, so the
+castle's bytes are fetched when the castle is first entered. That is mine, not
+the Artist's, and it is a genuine change — `Building` builds its props during
+construction today. I will measure the boot cost once batch 1 is wired and say
+whether it is worth doing. Splitting the files early makes that easier if it
+is, so the ruling is right either way — just not for the stated reason.
 
 ### 4.6 Batch 2 — queued, not yet requested
 
