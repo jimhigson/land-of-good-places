@@ -642,8 +642,16 @@ export const PLAYER_LONGEST_STEP = PLAYER_MAX_SPEED * PLAYER_SPRINT_MULTIPLIER *
  *
  * `Player` now keeps `groundHeight`, the surface she is actually standing on,
  * and asks the sampler from **that**. This half-life is once again only what it
- * says it is: how smoothly she is *drawn*. Change it freely for feel; it no
- * longer has a say in what the park may build.
+ * says it is: how smoothly she is *drawn*, and it is no longer read by anything
+ * that decides what the park may build — {@link SPRINT_PEAK_GRADE_BUDGET} was
+ * a `Math.pow` away from this number until #358 and is now a frozen literal,
+ * precisely so that changing this cannot re-plan a bridge behind your back.
+ *
+ * **It is still a feel change on a physics value, so measure it.** A longer
+ * half-life makes her height lag further behind the ground, which is visible on
+ * the steep bits and shows up in `npm run check:deck-fallthrough` as a changed
+ * `true-surface reference only` row — that row is the one that still depends on
+ * this. The ceiling of the shipping configuration does not.
  */
 export const PLAYER_HEIGHT_DAMP_HALF_LIFE = 0.04;
 
@@ -699,7 +707,7 @@ export const FALL_THRESHOLD = 0.5;
  * PLAYER_LONGEST_STEP` = **0.670** — still above the old ceiling, because the
  * damp lag no longer eats a third of the allowance.
  *
- * ### Why the value below is still 0.512
+ * ### Why the value is still 0.512
  *
  * Because {@link MAX_RAMP_GRADIENT} is derived from it, and raising it re-plans
  * **every bridge on every seed** — more crossing sites prove out, `paths.ts`
@@ -714,9 +722,34 @@ export const FALL_THRESHOLD = 0.5;
  * `npm run check:deck-fallthrough` and the procgen invariants against the
  * geometry you actually end up with, because the safe ceiling is a function of
  * the park's thinnest collider and would fall if that ever got fatter.
+ *
+ * ### Why it is a frozen literal and not the arithmetic that produced it
+ *
+ * It used to be computed live:
+ *
+ * ```ts
+ * const retention = Math.pow(2, -MAX_FRAME_DELTA / PLAYER_HEIGHT_DAMP_HALF_LIFE);
+ * const lag = retention / (1 - retention);
+ * return BUILDING_STEP_UP / (1 + lag) / PLAYER_LONGEST_STEP;
+ * ```
+ *
+ * That arithmetic is **obsolete** — it models one ground sample per frame taken
+ * from the damped height, and #358 made both halves of that untrue. Left live,
+ * it was worse than merely wrong: it meant {@link PLAYER_HEIGHT_DAMP_HALF_LIFE},
+ * a number whose entire remaining job is how smoothly the character is *drawn*,
+ * still silently sized every ramp in the park. Nudging it from 0.04 to 0.06 for
+ * feel would have moved this budget to 0.414 and `MAX_RAMP_GRADIENT` to 0.311,
+ * re-planning every bridge on every seed as a side effect of an animation
+ * tweak. Freezing it cuts that wire.
+ *
+ * The literal is the exact double the old expression produced, **not** a tidy
+ * 0.512, and deliberately so: `MAX_RAMP_GRADIENT` feeds `SITE_RAMP_FLOOR`,
+ * which is a *threshold* deciding whether a crossing site proves at all, so
+ * even a 1e-4 rounding could flip a marginal site and silently re-plan a seed.
+ * Frozen bit-identically, #358 provably changes no geometry anywhere.
+ *
+ * Change this number when you mean to change the park, and measure the bridges
+ * when you do — that is issue #382's job, not something to arrive at by
+ * arithmetic drift.
  */
-export const SPRINT_PEAK_GRADE_BUDGET = (() => {
-  const retention = Math.pow(2, -MAX_FRAME_DELTA / PLAYER_HEIGHT_DAMP_HALF_LIFE);
-  const lag = retention / (1 - retention);
-  return BUILDING_STEP_UP / (1 + lag) / PLAYER_LONGEST_STEP;
-})();
+export const SPRINT_PEAK_GRADE_BUDGET = 0.5121075476046892;
