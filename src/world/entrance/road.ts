@@ -1,7 +1,7 @@
 import type { BufferAttribute, BufferGeometry } from 'three';
 import { toonMaterial } from '../../art/style/materials';
 import { roadTexture } from '../../core/textures';
-import { CAT_BUS_TRACK_WIDTH } from './catBus';
+import { CAT_BUS_WIDTH } from './catBus';
 
 /**
  * **The road the cat bus arrives on — one road, in two scenes.**
@@ -33,14 +33,22 @@ import { CAT_BUS_TRACK_WIDTH } from './catBus';
  * verge of about half a bus-width in total is a lane a bus only just belongs on,
  * and it moves on its own if the bus is ever resized again.
  *
- * **Across the wheels, not across the bodywork** (#364). The wheels doubled in
- * size and moved outboard, so the vehicle is now 7.31 m wide where its body is
- * 5.28 m; a carriageway sized on the body would have had the bus driving down
- * it with a tyre in the grass on either side. `CAT_BUS_TRACK_WIDTH` is the
- * bus's own answer to "how much room do I need", which is the question a road
- * is asking.
+ * **Still the bodywork, and #364 is why that is worth a paragraph.** The
+ * wheels doubled and moved outboard, so the vehicle now measures 7.25 m across
+ * its tyres against a 5.28 m body, and the obvious response — derive this from
+ * `CAT_BUS_TRACK_WIDTH` instead — was made and reverted. It gives a 9.75 m
+ * carriageway, and **the gate arch the road drives through is 8.6 m wide**:
+ * five procgen seeds went red at once with *"the road is not going through the
+ * arch, it is spilling across the park"* and the roadside walls of the journey
+ * lane standing 0.43 m inside their own carriageway.
+ *
+ * It was also unnecessary. The track is 7.25 m and this road is 7.78 m, so the
+ * tyres run on tarmac with 0.26 m to spare either side — narrower verges than
+ * the paragraph above describes, but a bus that fits. That margin is asserted
+ * in `check:cat-bus-suspension` rather than left as a sentence here, because a
+ * sentence promising two numbers agree is not a mechanism.
  */
-export const ROAD_HALF_WIDTH = CAT_BUS_TRACK_WIDTH / 2 + 1.25;
+export const ROAD_HALF_WIDTH = CAT_BUS_WIDTH / 2 + 1.25;
 
 /**
  * How many metres of road one tile of {@link roadTexture} covers, along its

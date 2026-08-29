@@ -48,6 +48,7 @@ import {
   CAT_BUS_WIDTH,
   createCatBus,
 } from '../src/world/entrance/catBus.ts';
+import { ROAD_HALF_WIDTH } from '../src/world/entrance/road.ts';
 
 const failures: string[] = [];
 const notes: string[] = [];
@@ -292,6 +293,26 @@ const closestTyreX = tyres.reduce(
 note(
   `tyres clear the cabin's inner wall by ${(closestTyreX - INNER_WALL_X).toFixed(3)} m; track ${CAT_BUS_TRACK_WIDTH.toFixed(2)} m over a ${CAT_BUS_WIDTH.toFixed(2)} m body`,
 );
+
+// ------------------------------ 3b. the tyres are on the road, not the verge
+
+/**
+ * **The bus fits the road it drives down.**
+ *
+ * `ROAD_HALF_WIDTH` is derived from the *bodywork*, and deliberately: sized on
+ * the track instead it comes out at 9.75 m and will not go through the 8.6 m
+ * gate arch, which took five procgen seeds red the once it was tried. So the
+ * fit is a coincidence of two numbers rather than a derivation — 7.25 m of
+ * track inside 7.78 m of tarmac — and coincidences of that shape are this
+ * repo's most expensive bug. Asserted here so it cannot quietly stop being
+ * true the next time either number moves.
+ */
+const verge = ROAD_HALF_WIDTH - CAT_BUS_TRACK_WIDTH / 2;
+check(
+  verge > 0,
+  `the bus is ${CAT_BUS_TRACK_WIDTH.toFixed(2)} m across its wheels on a ${(ROAD_HALF_WIDTH * 2).toFixed(2)} m road — it drives with ${(-verge).toFixed(2)} m of tyre in the grass on each side`,
+);
+note(`verge either side of the tyres: ${verge.toFixed(3)} m of a ${(ROAD_HALF_WIDTH * 2).toFixed(2)} m carriageway`);
 
 // ---------------- 4. the mudguards clear the tyres across the WHOLE bob range
 
