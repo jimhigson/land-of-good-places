@@ -76,8 +76,69 @@ export interface Attraction {
   readonly z: number;
   /** Which level. See the file comment — the castle is three decks of shops. */
   readonly y: number;
+  /**
+   * Does this name take "the" in front of it? See {@link NO_ARTICLE}.
+   *
+   * Data rather than a rule, because **English article choice is not derivable
+   * from the spelling** and the first attempt at deriving it shipped a bug:
+   * a `/s$/` test gave "I'm going to Candy Floss" correctly and "I'm going to
+   * the Ice Cream" incorrectly, and the two strings look alike. A field the
+   * joins below fill in is checkable; a regex over a display name is a guess
+   * that reads fine in eighteen cases and wrong in the nineteenth.
+   */
+  readonly articled: boolean;
   /** Derived from the coordinates, never authored — same rule as `PoiNode`. */
   readonly space: SpaceId;
+}
+
+/**
+ * The attractions whose names take **no** "the", by id.
+ *
+ * Ids rather than names, because an id is a stable key and a sign's wording is
+ * not. Three kinds of name end up here and they are all ordinary English:
+ *
+ * - **plurals** — "Dodgems", "Stickers & Pets", "Surprise Eggs";
+ * - **mass nouns** — "Ice Cream", "Candy Floss". You go to Ice Cream the way
+ *   you go to Lunch, not the way you go to the Ball Pit.
+ *
+ * Names that already begin with "The" — "The Castle", "The Land Hotel", "The
+ * Spooky House", "The Rail Race!" — are **not** listed here: they are handled
+ * by {@link announcementFor}, because that fact *is* visible in the string and
+ * so does not need saying twice.
+ *
+ * A new attraction defaults to taking "the", which is right far more often
+ * than not. `scripts/check-npc-dispersal.mts` prints every attraction's finished
+ * line in its report and fails on a doubled article, so a new name that reads
+ * wrong is seen rather than shipped.
+ */
+const NO_ARTICLE: ReadonlySet<string> = new Set([
+  'anchor:dodgems',
+  'stall:dodgems',
+  'shop:iceCream',
+  'shop:candyFloss',
+  'shop:stickerPet',
+  'shop:surpriseEgg',
+]);
+
+/** True when `id`'s name reads naturally with "the" in front of it. */
+function articledFor(id: string): boolean {
+  return !NO_ARTICLE.has(id);
+}
+
+/**
+ * "I'm going to the Ball Pit" / "I'm going to Dodgems" / "I'm going to The
+ * Castle" — Jim's line, with exactly one article.
+ *
+ * Half the park's signs are already articled, so pasting the template straight
+ * on gave "I'm going to the The Castle", which the browser QA pass caught on
+ * screen. The names are not the place to fix that: "The Castle" is what is
+ * painted on the sign, and the sign is right. The sentence bends instead.
+ */
+export function announcementFor(attraction: Attraction): string {
+  if (/^the\s/i.test(attraction.name)) return `I'm going to ${attraction.name}`;
+  return attraction.articled
+    ? `I'm going to the ${attraction.name}`
+    : `I'm going to ${attraction.name}`;
 }
 
 /**
@@ -94,13 +155,15 @@ export function gardenAttractions(sample: GroundSampler): Attraction[] {
   for (const anchor of ANCHORS) {
     const x = anchor.entrance[0];
     const z = anchor.entrance[1];
+    const id = `anchor:${anchor.id}`;
     attractions.push({
-      id: `anchor:${anchor.id}`,
+      id,
       name: anchor.signTitle,
       x,
       z,
       y: sample(x, z, TOP_REFERENCE),
       space: spaceAt(x, z),
+      articled: articledFor(id),
     });
   }
 
@@ -110,13 +173,15 @@ export function gardenAttractions(sample: GroundSampler): Attraction[] {
     // than sent a child to (0, 0).
     const stand = STALL_STANDS_BY_ID.get(stall.id);
     if (!stand) continue;
+    const id = `stall:${stall.id}`;
     attractions.push({
-      id: `stall:${stall.id}`,
+      id,
       name: stall.title,
       x: stand.x,
       z: stand.z,
       y: sample(stand.x, stand.z, TOP_REFERENCE),
       space: spaceAt(stand.x, stand.z),
+      articled: articledFor(id),
     });
   }
 
@@ -139,6 +204,7 @@ export function castleAttractions(stands: readonly ShopStand[]): Attraction[] {
     z: stand.z,
     y: stand.y,
     space: spaceAt(stand.x, stand.z),
+    articled: articledFor(`shop:${stand.id}`),
   }));
 }
 

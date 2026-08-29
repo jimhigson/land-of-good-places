@@ -15,7 +15,7 @@ import type { LevelConnector } from '../../world/building/surfaces';
 import type { Rng } from '../../core/mathUtils';
 import { NPC_WALK_SPEED } from './NpcCharacter';
 import type { Attraction } from './attractions';
-import { reachableFrom } from './attractions';
+import { announcementFor, reachableFrom } from './attractions';
 
 /**
  * A child's trip to somewhere in particular — issue #350.
@@ -291,33 +291,6 @@ export class JourneyPlanner implements RoutePlanner {
 }
 
 /**
- * "I'm going to the X" — with only one "the".
- *
- * Jim asked for the line in exactly those words, but half the park's names are
- * *already* articled: the anchors' signs say "The Castle", "The Land Hotel",
- * and the stalls' say "The Spooky House" and "The Rail Race!". Pasting the
- * template straight on gives **"I'm going to the The Castle"**, which is what
- * the browser QA pass caught on screen — a bubble a six-year-old reads, and
- * she is learning to read, so it matters more here than it would anywhere
- * else.
- *
- * The names are not the place to fix this: "The Castle" is what is painted on
- * the sign, and the sign is right. It is the sentence that has to bend.
- *
- * A few names are also plurals or exclamations that want no article at all —
- * "Dodgems!", "Stickers & Pets", "Surprise Eggs" — so the rule is: keep the
- * name exactly as its sign has it, and only add "the" when the name does not
- * already begin with one and reads as a singular thing.
- */
-function announce(name: string): string {
-  if (/^the\s/i.test(name)) return `I'm going to ${name}`;
-  // A plural or a shout needs no article: "I'm going to Dodgems!" is how a
-  // child says it, and "I'm going to the Stickers & Pets" is not English.
-  if (/s$|s!$|!$/.test(name)) return `I'm going to ${name}`;
-  return `I'm going to the ${name}`;
-}
-
-/**
  * One child's current trip: where they are going, the route there, and how far
  * along it they are.
  *
@@ -400,7 +373,7 @@ export class Journey {
     this.sinceProgressCheck = 0;
 
     if (pick && this.rng.chance(ANNOUNCE_CHANCE)) {
-      this.announcement = announce(pick.name);
+      this.announcement = announcementFor(pick);
       this.announceRemaining = ANNOUNCE_SECONDS;
     }
   }
