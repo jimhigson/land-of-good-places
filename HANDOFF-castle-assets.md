@@ -17,7 +17,7 @@ and is how the bridge and hotel assets were actually built.
 | --- | --- |
 | Batch 1 (their §4.3, all ten assets) | ✅ built, exported, packed, rendered |
 | `castle.glb` | 128 KB of a 200 KB budget; regenerating is byte-identical |
-| Renders | `art/renders/castle/` — ten shots incl. an assembled hall |
+| Renders | `art/renders/castle/` — **eleven** shots incl. an assembled hall and `throne-beam.png` |
 | Sizes published | §2 below, measured off the mesh |
 | Colour | **not mine** — the Engineer's, per their §4.1 |
 | Batch 2 (their §4.6) | not started |
@@ -58,10 +58,10 @@ should fail rather than the park being wrong.
 | --- | --- | --- | --- | --- |
 | A1 | armour | 1.10 × 2.60 × 0.80 | **1.01 × 2.60 × 0.78** | under on width and depth |
 | A2 | plinth | 1.30 × 0.25 × 1.00 | **1.30 × 0.25 × 1.00** | exact |
-| A3 | tapestry | 3.20 × 2.40 × 0.12 | **3.20 × 2.40 × 0.26** | ⚠️ depth renegotiated — see 2.3 |
+| A3 | tapestry | 3.20 × 2.40 × 0.12 | **3.20 × 2.40 × 0.26** | depth renegotiated and **you approved it**; build now enforces 0.26 |
 | A4 | tapestryrail | 3.60 × 0.14 × 0.14 | **3.59 × 0.14 × 0.14** | finials included in the 3.60 |
-| A5 | sconce | 0.34 × 0.46 × 0.42 | **0.23 × 0.45 × 0.41** | under on width |
-| A6 | throne | 1.60 × 3.00 × 1.20 | **1.60 × 2.80 × 1.06** | your requested 2.80, not the 3.00 allowance |
+| A5 | sconce | 0.34 × 0.46 × 0.42 | **0.34 × 0.46 × 0.41** | ⚠️ rebuilt — now at the allowance, see §2.5 |
+| A6 | throne | 1.60 × 3.00 × 1.20 | **1.60 × 2.75 × 1.06** | ⚠️ 2.75, not your 2.80 — the wall-plate, see §2.4 |
 | A7 | table | 2.20 × 1.05 × 6.00 | **2.20 × 1.05 × 6.00** | exact |
 | A8 | bench | 0.60 × 0.55 × 2.80 | **0.60 × 0.55 × 2.80** | exact |
 | A9 | feast | ≤ 0.45³ each | **0.44 × 0.42 × 0.44** overall | four props, each under |
@@ -71,11 +71,11 @@ should fail rather than the park being wrong.
 
 | Constant | **Value** | How to re-derive it |
 | --- | --- | --- |
-| `SCONCE_CUP_OFFSET` | **(0.000, 0.285, 0.3025)** m | `visibleBounds` of the `sconce-cup` node: x centre, **top** z, z centre. It is the middle of the cup's *mouth* — the flame's foot, not the cup's centroid. |
+| `SCONCE_CUP_OFFSET` | **(0.000, 0.285, 0.2475)** m ⚠️ **moved — was 0.3025** | `visibleBounds` of the `sconce-cup` node: x centre, **top** z, z centre. It is the middle of the cup's *mouth* — the flame's foot, not the cup's centroid. |
 | `TABLE_TOP` | **1.050** m | `visibleBounds(table).top` |
 | `BENCH_SEAT` | **0.550** m | `visibleBounds(bench).top` |
-| Armour keep-out radius | **0.638** m | half-diagonal of the armour's XZ footprint; inside your 0.650 |
-| Throne total on your dais | **3.10** m | 2.80 + your 0.30, so **0.20 m clear** of `CASTLE_CEILING_CLEAR` |
+| Armour keep-out radius | **0.5052** m ⚠️ **corrected — was 0.638** | `max(hypot(x, z))` over every emitted vertex, i.e. about the **origin**, which is where a keep-out disc is centred. The old 0.638 was the half-diagonal about the *footprint centre*, which is a different point — the armour grounds a sword, so its origin is 0.040 m off centre. Still inside your 0.650. |
+| Throne total on your dais | **3.05** m ⚠️ **was 3.10** | 2.75 + your 0.30. 3.10 stood **2 cm through your 3.08 m `BEAM_UNDERSIDE`** — see §2.4 |
 | Chest hinge axis | at the `chest-lid` node's own origin | it is the only non-identity node in the file; `lid.rotation.x` opens it |
 
 `SCONCE_CUP_OFFSET` is in the **game's** frame (glTF), already converted from
@@ -84,7 +84,7 @@ in a handoff table is exactly the quiet 40-centimetre error the protocol exists
 to prevent, so the conversion happens in code (`sconce_offset()`), next to the
 measurement, and never in prose.
 
-### 2.3 The one thing I changed, and why — please accept or refuse
+### 2.3 The tapestry depth — asked for, and now approved
 
 **A3's depth allowance: 0.12 m → 0.26 m built.**
 
@@ -98,11 +98,111 @@ Your own §5 rule 1 says wall furniture may project **up to 0.45 m** — less th
 the wall's 0.45 m thickness — so 0.26 m is comfortably inside the rule the 0.12
 was presumably a guess at, and it still narrows no route.
 
-If you refuse it, one constant in `CONTRACT` changes and the billow with it —
-say so and I will rebuild. **What I will not do is quietly leave the two
-documents disagreeing**, which is the whole reason this section exists.
+**Settled, 29 August.** You approved 0.26 in your §4.5 ("Approved. Change
+it."). One correction to the record on my side: `CONTRACT` was enforcing
+**0.28** while this section asked you for **0.26** — the two documents were 2 cm
+apart, inside the section whose entire job is to stop that, which is as clean an
+illustration of the failure mode as this repo has produced. The build now
+enforces 0.26 and there is no slack only one document knows about.
 
-### 2.4 Node list — one `STYLES` entry needed per name
+**One caveat on my own justification, so nobody inherits it wrong.** I claimed
+the depth was what stopped the cloth reading as a poster. Looking again at
+`tapestry-elevation.png` head-on, and at both hall shots at gameplay distance,
+it is *still* essentially a flat maroon rectangle — the billow buys a silhouette
+from a ¾ angle and almost nothing from the front. **The thing that will make
+these read as cloth is your heraldry texture over the UVs**, not the geometry.
+`tapestry-cloth` carries the UV map spanning the requested 3.20 × 2.40 rectangle
+for exactly that. Do not conclude the depth was the fix.
+
+### 2.4 The throne, the wall-plate, and what your 3.08 m actually caught
+
+**This is the one that needs your ruling.**
+
+Your `BEAM_UNDERSIDE` (3.08 m, added 29 August after the wall-plate) superseded
+the 3.30 m I was building against. On your 0.30 m dais my 2.80 m throne stood at
+**3.10 m — 2 cm through the beam**.
+
+The 2 cm was the small half. **The real defect was that nothing here could see
+it**: `check_contract` asserted the *bare mesh* (2.80) against the headroom,
+while the dais existed only as prose in a docstring. So when your
+`castleAssets.ts` lands and the headroom drops to 3.08, the assertion would have
+gone on passing while the throne stood through your beam. Three changes:
+
+1. **`Requested` now carries the mount**, so what is asserted is what has to
+   clear. `stands_on` names another asset here and its **measured** top is
+   used — the armour on the plinth, the feast on the table — so nothing is
+   typed twice. `dais=0.30` is the one figure I cannot measure because you
+   build it; it is the only typed number in the table and it is called out as
+   one.
+2. **`CEILING_CLEAR_FALLBACK` 3.30 → 3.08.** Every floor asset is checked
+   against the tighter number, not only those within 1.25 m of a wall. Not
+   because they all go against a wall but because they all *may*, and an asset
+   that only fits in the middle of the room carries an unwritten placement rule.
+3. **The throne is 2.75 m**, so 3.05 m on your dais, clearing by 0.03 m.
+
+**Your call, and it is genuinely yours:** if you would rather have 2.80 m of
+throne and a 0.25 m dais, say so and I will rebuild — it is one constant. What
+matters is that it is now asserted rather than assumed, and that if the dais
+ever grows a step the build goes red instead of a finial going through a beam.
+`throne-beam.png` is the picture: throne, dais, wall-plate, square on.
+
+**Two asks at the seam, both small and both about numbers I currently cannot
+read:**
+
+- **Export `BEAM_UNDERSIDE` and `CASTLE_CEILING_CLEAR` as plain literals.**
+  `ts_const` reads `export const NAME = <number>;` and nothing else — by design,
+  so it cannot silently return a default. Both of yours are *derived*
+  (`BEAM_UNDERSIDE = CASTLE_CEILING_CLEAR - BEAM_DEPTH`), so the regex will not
+  match them **even once your file lands**, and my "the moment your module
+  exists this reads it" promise cannot currently be kept. Until then I fall back
+  to 3.08 and print that I have. If you would rather keep them derived, export a
+  literal mirror for tooling to read and assert the two agree on your side.
+- **Export the dais height** the same way, and I will stop typing 0.30.
+
+### 2.5 The sconce is rebuilt, and `SCONCE_CUP_OFFSET` has moved
+
+**Read this one — you have the old number typed into `castleFabric.ts`.**
+
+`SCONCE_CUP_OFFSET` is now **(0.000, 0.285, 0.2475)**, was (0.000, 0.285,
+0.3025). **Only Z moved**; the cup's mouth height is deliberately unchanged, so
+your flame's base is still at `SCONCE_MOUNT_Y` + 0.285 = 2.385 m and only its
+distance from the wall changes, 0.3025 → 0.2475 m. Your §7 marks that figure
+provisional pending assertion 4 against the built mesh — this is exactly the
+TODO you said must not survive the batch-1 wiring, so please land the assertion
+rather than re-typing the new number.
+
+**Why it moved.** The sconce was built 0.23 m wide against your 0.34 m
+allowance — 32% under, and the only asset meaningfully under in the dimension
+that decides whether a thing reads. At ~40 instances it is the most-repeated
+object in the room, and in the hall shots it was a dark smudge. Jim's standing
+rule is that recognisability beats proportion, so it is now at the full 0.34 m:
+the cup grows to the allowance, and the reach comes in from 0.28 to 0.225 to pay
+for it inside your 0.42 m depth. All three dimensions are now at the allowance
+(0.34 × 0.46 × 0.41), so **there is nothing left to spend here without you
+widening the allowance** — worth knowing if your flame turns out not to carry it.
+
+### 2.6 Two things the pictures found that you should see
+
+**1. Your wall-plate may occlude the sconces from the game's own camera.** At
+the 38° camera elevation, the sightline grazing the plate's inner-bottom edge
+lands on the wall at almost exactly **2.10 m** — your `SCONCE_MOUNT_Y`. In
+`hall.png` (38°) the sconces are right on the edge of being hidden by it; in
+`hall-low.png` (16°) they are perfectly clear. I have not changed anything for
+this because the plate and the mount height are both yours, but it is worth 20
+minutes before you instance 40 of them. Dropping `SCONCE_MOUNT_Y` a little, or
+narrowing the plate, would both do it.
+
+**2. The armour does not tower over a child, and a stale number said it did.**
+`castle_render.py` drew its scale post at a typed **1.86 m** under a comment
+claiming the figure came from `TALLEST_CHILD`. It did not. From `kid.ts`: a
+child is **2.12 m** (`KID_HEIGHT`) and **2.97 m** in the tallest hair-and-hat
+combination. So the 2.60 m armour is half a metre over an ordinary child and
+**shorter than a child in a tall hat** — not the looming thing the contract note
+described. Both posts are now drawn in the hall shots, both read from `kid.ts`.
+The 2.60 m is your contract figure and I have not changed it; but if it was
+chosen to loom, it does not, and that is your call to revisit.
+
+### 2.7 Node list — one `STYLES` entry needed per name
 
 Your §4.2: a node you have no entry for throws at load. All 23:
 
@@ -148,9 +248,14 @@ touch, so it is the merge conflict to expect.
 - **The contract.** §2.1's table, asserted. Heights exact where you stack
   things (a goblet on a table, an armour on a plinth), widths and depths as
   maxima.
-- **The ceiling.** No floor asset may reach `CASTLE_CEILING_CLEAR`. It is read
-  from your `castleAssets.ts` with `ts_const` when that file lands, and until
-  then falls back to your contract's 3.30 with a printed note saying so.
+- **The ceiling, and the height that actually has to clear.** No floor asset's
+  **mounted top** — its own height plus whatever it stands on — may reach the
+  headroom. The mount is measured for anything standing on another asset here
+  and typed only for your dais. The headroom is read from your modules with
+  `ts_const` when they land and falls back to **3.08** (your `BEAM_UNDERSIDE`,
+  the tighter of the two ceilings) with a printed note saying so. It used to
+  assert the bare mesh against 3.30, which passed a throne standing 2 cm
+  through your beam — see §2.4.
 - **Export.** A node may carry a pure translation and nothing else; a stray
   rotation or scale fails. Only `chest-lid` carries one, and it is printed.
 
@@ -167,7 +272,7 @@ All three faults passed every assertion and were obvious in a picture:
 
 1. The armour's grounded sword ran **through** its own skirt, with the hands at
    its sides — it read as a knight standing next to a sword.
-2. The tapestry was flat (see 2.3).
+2. The tapestry was flat (see §2.3).
 3. The throne read as an armchair: a broad back with a shallow arch is a
    comfortable chair, and no amount of gold changes that. A throne is the
    **step** — broad at the shoulders, then narrowing into a spire above the
@@ -178,6 +283,33 @@ footprint, and its immediate effect was to demand the sword go back inside the
 skirt it had just been moved out of. It now asserts the origin is **inside** the
 footprint, which is the property your keep-out disc actually depends on, and
 lets an asset be honestly lopsided in depth.
+
+**Three more on the second pass, 29 August**, and the pattern is now hard to
+miss — every single fault in this asset that mattered was found by looking, and
+none of them by a check:
+
+4. **The sconce was too small to read** (§2.5). Found by a reviewer looking at
+   the hall shots, not by any assertion — it was comfortably *inside* its
+   allowance, which is precisely why nothing complained.
+5. **The hall preview was hiding every sconce inside a tapestry.** The four
+   sconces sat at x ±1.2 and ±4.0; the two 3.20 m tapestries covered ±1.0..±4.2
+   at a height spanning the sconces' 2.10 m. So the pictures that the sconce was
+   judged from were not showing a sconce at all. **A preview that answers a
+   question about an asset it is not displaying is the picture-shaped version of
+   a check that passes without checking anything**, and it is worth naming as
+   its own failure mode: the discipline of "always look" does not help if the
+   thing you are looking at is behind something else.
+6. **The scale post was typed 1.86 m under a comment saying it was read from
+   `TALLEST_CHILD`** (§2.6). Every judgement about whether the armour towers had
+   been made against a post a quarter shorter than a real child.
+
+**One caveat on all of these pictures, which the reviewer was right to flag.**
+They are `BLENDER_WORKBENCH` renders with `STUDIO` solid shading — *not* the
+game's four-band toon ramp, and not its lighting. They are honest about
+**shape, size and silhouette**, which is what this file owns. They are **not a
+colour preview**: the palette entries read notably darker here than their hex
+values, so do not judge `castleSteel`, `castleIron` or `castleTapestry` off
+them.
 
 ---
 
@@ -197,7 +329,33 @@ afford.
 
 ## 6. If you are picking this up cold
 
-- Everything is committed and pushed. `npm run blend:castle` is the gate.
+- Everything is committed and pushed. `npm run blend:castle` is the gate;
+  `npm run render:castle` makes the pictures. Both exit 0 on this branch, and
+  the full `npm run build` does too, `check:park-boot` included.
 - The one thing not to do: change a size in this document. Change it in
   `CONTRACT` in `castle_build.py`, which is the only place any of these numbers
   exists, and let the build tell you what it broke.
+- **Never judge this asset from the build alone.** Six faults so far, six found
+  in a picture, zero found by an assertion. Re-render and actually look at the
+  images after any change — and check that what you are judging is not behind
+  something else (§4, fault 5).
+
+## 7. Open, and waiting on the Engineer
+
+Nothing here blocks batch 1 landing; all of it is seam work.
+
+1. **The throne's 3 cm** (§2.4). 2.75 m of throne on their 0.30 m dais, or
+   2.80 m on a 0.25 m dais — their call, one constant either way.
+2. **Export `BEAM_UNDERSIDE`, `CASTLE_CEILING_CLEAR` and the dais height as
+   plain literals** (§2.4), so `ts_const` can read them. Until then the headroom
+   here is a printed fallback, and the promise that it starts reading their
+   module the day it lands cannot actually be kept.
+3. **`SCONCE_CUP_OFFSET` moved to (0.000, 0.285, 0.2475)** (§2.5) — they have
+   0.3025 typed provisionally in `castleFabric.ts`. Land assertion 4 against the
+   built mesh rather than re-typing it.
+4. **The wall-plate may occlude the sconces at the game's 38° camera** (§2.6).
+   Theirs to judge; worth 20 minutes before 40 instances go in.
+5. **The armour does not tower over a child** (§2.6). Their contract figure,
+   their call whether 2.60 m still buys what it was meant to.
+6. **Batch 2 needs its own `.glb`** — agreed with them already; batch 1 is
+   128 KB of the 200 KB budget.
