@@ -112,6 +112,21 @@ export interface SimOptions {
    */
   groundSubstepping?: boolean;
   /**
+   * **The other half of #358, controlled separately so the two can be told
+   * apart.** `'damped'` asks the sampler from `position.y` — the smoothed
+   * height she is *drawn* at, which lags 0.309x the climb behind her on a
+   * steady ascent — which is what `Player` used to do. `'surface'` (the
+   * default, and what ships) asks from `groundHeight`, the surface she is
+   * actually standing on.
+   *
+   * Sub-stepping and the reference height are independent fixes and it is a
+   * measurable question which of them mattered, so they are separate flags
+   * rather than one "pre-fix" switch. Answering that from the code rather than
+   * from a measurement is how the damp term went missing from the bridge
+   * arithmetic in the first place.
+   */
+  groundReference?: 'surface' | 'damped';
+  /**
    * **The control.** `false` reproduces the single-step integration `Player`
    * used before substepping landed — `position += velocity·dt`, then one
    * `resolve` — which is what let a stuttering frame carry her clean through a
@@ -164,6 +179,7 @@ export class SimPlayer {
   private readonly substepping: boolean;
   private readonly ground: GroundSampler | null;
   private readonly groundSubstepping: boolean;
+  private readonly groundReference: 'surface' | 'damped';
 
   private readonly moveDirection = new Vector3();
   private readonly desired = new Vector3();
@@ -176,6 +192,7 @@ export class SimPlayer {
     this.substepping = options.substepping ?? true;
     this.ground = options.ground ?? null;
     this.groundSubstepping = options.groundSubstepping ?? true;
+    this.groundReference = options.groundReference ?? 'surface';
   }
 
   /**
@@ -215,8 +232,12 @@ export class SimPlayer {
 
     // `Player.update`'s ground sample, riding the same sub-steps. `following`
     // and `reference` mirror it name for name.
-    const following = !this.airborne;
-    let reference = following ? this.groundHeight : this.position.y;
+    // Airborne she follows no surface; on the damped reference there is no
+    // surface height to carry, so in both cases the reference stays put and
+    // only the last sub-step's answer is used.
+    const damped = this.groundReference === 'damped';
+    const following = !this.airborne && !damped;
+    let reference = this.airborne || damped ? this.position.y : this.groundHeight;
     let groundY = reference;
     const onStep = (at: Vector3): void => {
       groundY = this.sampleGround(at.x, at.z, reference);
@@ -276,7 +297,7 @@ export class SimPlayer {
     // The pre-#358 vertical: one sample, at the end of the whole frame's
     // movement, asked from her damped height. This is the control.
     if (!this.groundSubstepping || !this.substepping) {
-      groundY = this.sampleGround(this.position.x, this.position.z, this.position.y);
+      groundY = this.sampleGround(this.position.x, this.position.z, reference);
     }
     this.groundY = groundY;
 

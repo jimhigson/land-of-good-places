@@ -680,9 +680,17 @@ export const FALL_THRESHOLD = 0.5;
  * walk/sprint x up/down, against a control that reproduces the old behaviour:
  *
  * ```
- *   ceiling before (single end-of-frame sample, damped height): 0.512
- *   ceiling after  (sample rides the sub-steps, true surface):  1.670
+ *   neither (as shipped before #358)   0.512
+ *   sub-stepping only                  0.512
+ *   true-surface reference only        0.670
+ *   both (what ships now)              1.670
  * ```
+ *
+ * **Sub-stepping alone buys nothing**, and that is worth knowing before anyone
+ * reverts the half that looks redundant: asked from the damped height, every
+ * sub-step asks from the *same frozen number*, so the last one lands where the
+ * single end-of-frame sample landed and answers identically. The two fixes are
+ * interdependent, not additive.
  *
  * 1.670 matches the derived prediction of 1.676 — `BUILDING_STEP_UP` over the
  * worst sub-step (0.370 m, at 15 fps, against the park's thinnest 0.18 m

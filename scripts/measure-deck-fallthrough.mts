@@ -51,9 +51,28 @@
  *   phase tests nothing — the fall-through is a coincidence between where a
  *   frame boundary falls and where the geometry is.
  *
- * Every case runs **twice**: once with `groundSubstepping: false`, the pre-fix
- * single end-of-frame sample and the control, and once with it on, which is
- * what ships.
+ * Every case runs against **four** variants, because #358 changed two things
+ * and which of them mattered is a measurable question:
+ *
+ * ```
+ *   neither (as shipped before #358)   0.512
+ *   sub-stepping only                  0.512
+ *   true-surface reference only        0.670
+ *   both (what ships now)              1.670
+ * ```
+ *
+ * **Sub-stepping the ground sample, on its own, buys exactly nothing.** That
+ * is not a defect in it — it is the whole point of the second change. Asked
+ * from `position.y`, every sub-step asks from the *same frozen height*, so the
+ * last one lands where the single end-of-frame sample landed and gives the
+ * same answer; cutting the movement finer cannot help when the thing being
+ * measured from never moves. Only once the reference is the surface she is
+ * standing on, and so climbs with her, does a finer cut buy anything — and
+ * then it buys a great deal, because each short piece gets the whole of
+ * `BUILDING_STEP_UP` to itself.
+ *
+ * The two fixes are therefore not additive but **interdependent**, and anyone
+ * tempted to revert "the redundant-looking one" should read this table first.
  */
 import { Vector3 } from 'three';
 import { CollisionWorld } from '../src/world/Collision.ts';
@@ -129,6 +148,23 @@ interface Outcome {
   firstMessage: string | null;
 }
 
+/**
+ * The two independent halves of the fix, so the sweep can say which of them
+ * did the work rather than crediting both.
+ */
+interface Variant {
+  readonly label: string;
+  readonly groundSubstepping: boolean;
+  readonly groundReference: 'surface' | 'damped';
+}
+
+const VARIANTS: readonly Variant[] = [
+  { label: 'neither (as shipped before #358)', groundSubstepping: false, groundReference: 'damped' },
+  { label: 'sub-stepping only', groundSubstepping: true, groundReference: 'damped' },
+  { label: 'true-surface reference only', groundSubstepping: false, groundReference: 'surface' },
+  { label: 'both (what ships now)', groundSubstepping: true, groundReference: 'surface' },
+];
+
 interface Config {
   gradient: number;
   delta: number;
@@ -136,10 +172,11 @@ interface Config {
   sprint: boolean;
   uphill: boolean;
   groundSubstepping: boolean;
+  groundReference: 'surface' | 'damped';
 }
 
 function run(config: Config, outcome: Outcome): void {
-  const { gradient, delta, phase, sprint, uphill, groundSubstepping } = config;
+  const { gradient, delta, phase, sprint, uphill, groundSubstepping, groundReference } = config;
 
   // The deck sits clear above the terrain, so losing it is unambiguous: the
   // only thing under it is ground several metres down.
@@ -160,6 +197,7 @@ function run(config: Config, outcome: Outcome): void {
   const player = new SimPlayer(collision, {
     ground: (x, z, y) => surfaces.sample(x, z, y),
     groundSubstepping,
+    groundReference,
   });
 
   // Start a phase-shifted fraction of one long step back from the ramp's foot
@@ -195,7 +233,8 @@ function run(config: Config, outcome: Outcome): void {
   }
 }
 
-function measure(groundSubstepping: boolean): Map<number, Outcome> {
+function measure(variant: Variant): Map<number, Outcome> {
+  const { groundSubstepping, groundReference } = variant;
   const byGradient = new Map<number, Outcome>();
   for (const gradient of GRADIENTS) {
     const outcome: Outcome = { lost: 0, runs: 0, worstGap: 0, firstMessage: null };
@@ -203,7 +242,10 @@ function measure(groundSubstepping: boolean): Map<number, Outcome> {
       for (const phase of PHASES)
         for (const sprint of [true, false])
           for (const uphill of [true, false])
-            run({ gradient, delta, phase, sprint, uphill, groundSubstepping }, outcome);
+            run(
+              { gradient, delta, phase, sprint, uphill, groundSubstepping, groundReference },
+              outcome,
+            );
     byGradient.set(gradient, outcome);
   }
   return byGradient;
@@ -219,8 +261,9 @@ function ceiling(results: Map<number, Outcome>): number {
   return best;
 }
 
-const before = measure(false);
-const after = measure(true);
+const results = VARIANTS.map((variant) => ({ variant, byGradient: measure(variant) }));
+const before = results[0]!.byGradient;
+const after = results[3]!.byGradient;
 
 /**
  * The sub-step length a given frame delta actually produces — the lateral
@@ -264,11 +307,14 @@ for (const gradient of GRADIENTS) {
 
 const beforeCeiling = ceiling(before);
 const afterCeiling = ceiling(after);
-console.log(
-  `\n  steepest deck with no fall-through anywhere in the sweep:\n` +
-    `    before (single end-of-frame sample, damped height): ${beforeCeiling.toFixed(3)}\n` +
-    `    after  (sample rides the sub-steps, true surface):  ${afterCeiling.toFixed(3)}\n`,
-);
+
+// Which half of the fix did the work? Both were changed at once, so the answer
+// has to be measured rather than assumed.
+console.log('\n  steepest deck with no fall-through anywhere in the sweep:\n');
+for (const { variant, byGradient } of results) {
+  console.log(`    ${variant.label.padEnd(34)} ${ceiling(byGradient).toFixed(3)}`);
+}
+console.log();
 
 const firstBefore = GRADIENTS.map((g) => before.get(g)!.firstMessage).find((m) => m !== null);
 if (firstBefore) console.log(`  the control's first failure:\n    ${firstBefore}\n`);
