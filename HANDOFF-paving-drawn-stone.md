@@ -164,11 +164,89 @@ This also explains both surviving observations exactly:
 - **`ACROSS_MARGIN` does not**, because it belongs to the conservative
   reservation, which places no parapets at all.
 
-### The fix
+### The fix (landed)
 
-`DeckPlan` must carry the neighbour's **real** parapet extent (its
-`rampRunPos`/`rampRunNeg`) and `nearOtherGuardRail` must clamp `along` to that
-rather than to `DECK_HALF_LENGTH`.
+`parapetReachFor(rampRun)` is now the **one owner** of a bridge's parapet reach.
+`bridges.ts` draws its parapet run from it (`lengthPos`/`lengthNeg`); `planReal`'s
+`nearOtherGuardRail` clamps to it. They cannot disagree any more. `DeckPlan`
+carries the neighbour's `frame`, `rampRunPos` and `rampRunNeg` so a sibling can
+ask; the exclusion also projects onto the neighbour's **curved frame** instead of
+extrapolating a tangent, which was fine over ±3.2 m and is not over 11 m.
+
+**Proved load-bearing by desynchronising it** (the Overseer's ask): restore the
+`DECK_HALF_LENGTH` clamp, keep everything else including the frame projection,
+and seed 2's original failure returns *verbatim* — "the crossing at (−2.2, −47.0)
+is not standable −14.2 m along its own centreline". The frame-projection change
+alone fixes nothing; the clamp is what does the work.
+
+## THE REMAINING FAILURE IS A DIFFERENT ONE, AND IT IS REAL
+
+**Do not treat this as the old bug returning.** The standability failure is gone
+on all five seeds. Seed 2 now fails a *different* assertion:
+
+> only 1 of 3 railway crossings carry a real bridge (2 fell back to level
+> crossings)
+
+Full suite: **388 / 389**, the single failure above. The other four seeds are
+completely unaffected.
+
+### Why: these two crossings genuinely cannot both have a bridge
+
+With the exclusion telling the truth, bridge 0's `+` ramp truncates at **6.2 m**
+against a floor of **11.07 m**, blocked at (12.1, −45.2) — which is 0.25 m from
+the real parapet endpoint (12.31, −45.07) measured off the built park. **The
+exclusion is firing on a wall that is genuinely there.**
+
+The floor is not arbitrary:
+
+```
+WALKABLE_FLOOR = BRIDGE_RISE / MAX_RAMP_GRADIENT          (= 10.57 m)
+MAX_RAMP_GRADIENT = SPRINT_PEAK_GRADE_BUDGET * (1 - HUMP_BLEND)
+```
+
+So each bridge needs `DECK_HALF_LENGTH + 10.57 + 0.5 = 14.27 m` of half-length.
+The two crossings are `hypot(17.54, 11.23) = 20.83 m` apart, and two ramps
+facing each other need `28.54 m`. **They are ~7.7 m short of fitting.** The old
+code "fitted" them only by building one straight through the other's wall.
+
+### Two fixes tried and MEASURED DEAD — do not redo either
+
+1. **Narrow the exclusion to the walkable band.** The samples run to the
+   *structural* edge (`halfAcross`), but `covers()` only promises `walkHalf`, so
+   two bridges whose masonry abuts are arguably fine. Implemented in all three
+   sample loops (`deckClears`, `provisionalReach`, pass 2's `clearAt`).
+   **Result: no change at all — still 1 of 3.** The neighbour's parapet
+   intrudes into bridge 0's *walkable* band too, not merely its structural
+   edge. Reverted, because a weaker exclusion that buys nothing is strictly
+   worse.
+2. **Unfreeze the gradient budget** (`MAX_RAMP_GRADIENT` from #378's 1.670
+   ceiling instead of the frozen `SPRINT_PEAK_GRADE_BUDGET`). **Result: worse,
+   and instructive.** The railway replans entirely — seed 2 goes from 3
+   crossings to **5** — and it reintroduces the exact failure the frozen budget
+   exists to prevent: *"the crossing at (19.5, −36.5) climbs 0.785 m in one
+   sprinted frame … she needs 1.028 m of a 0.62 m reach and loses the surface …
+   through the deck, into the tunnel"*. This is a direct warning for the
+   shortening ticket: **raising that budget is not free, and it moves sites.**
+
+A third option is arithmetically ruled out without needing a run: making the
+planner co-adapt so bridge 1 yields ground cannot work either, because
+`2 x 14.27 = 28.54 > 20.83`. **One of these two crossings must fall back.** It
+is not a scheduling problem; there is not enough ground.
+
+### Where that leaves the branch — a decision for the Overseer
+
+Seed 2 genuinely supports only one bridge among these crossings at the current
+gradient. The invariant's expectation is therefore unsatisfiable on seed 2
+*without* the bug. This is exactly the case CLAUDE.md names: **"Never weaken an
+assertion to make a seed pass — swap the seed and write down why."** The
+assertion is right; the seed is now known to be geometrically over-subscribed.
+
+The complication, and why this was not done unilaterally: **seed 2 is the seed
+that carries the 36.7 m bridges** this whole branch exists to fix (#352 died by
+measuring only 22 m geometry, where the error is 0.371 m instead of 0.513 m). A
+replacement must be chosen for having *comparable long-bridge geometry*, not
+merely for being green — otherwise the swap quietly throws away the coverage
+that caught the original bug.
 
 ### Why it blocks: absolute tops on a ramp the walker is climbing
 
