@@ -54,10 +54,38 @@ contributor on this seed — do not chase it first.
 
 ## Changed so far
 
-Nothing committed but this file. Working tree carries one **temporary** debug
-`console.log` in `src/world/train/bridges.ts` (guarded by `LGP_BRIDGE_DEBUG`) and
-a scratch `tmp-measure.mts` at the worktree root — both to be deleted, neither
-committed.
+Rebased onto `origin/main` @ `e71f80a` (clean; main had only moved by a CLAUDE.md
+commit). Worktree is now `.claude/worktrees/eng-349`.
+
+The previous agent's temporary `LGP_BRIDGE_DEBUG` `console.log` and its
+`tmp-measure.mts` were **never committed**, so they did not survive onto the
+branch — nothing to delete. `git diff origin/main...HEAD` is this file alone.
+
+## Measurement reproduced (2026-08-29) — and the measure itself corrected
+
+The handoff's figures reproduce **exactly**, but only once the measure asks the
+right question. Measuring "every vertex `pavingHeightAt` claims, against the
+shell's plan triangles" gives `worst = 1.269 / 1.334 m` — and those worst
+vertices sit at `y ≈ 0.01`, at the **ramp feet**, where `heightAt` has clamped
+the hump back down to the terrain. Paving lying on the ground past the end of
+the masonry is not the bug and is not visible; `pavingHeightAt`'s `covers()`
+margin pads the *along* extent as well as the across one, which is where that
+1.3 m comes from.
+
+Restrict to vertices genuinely lifted clear of the ground
+(`y - terrainHeight(x, z) > 0.1`) and the handoff's numbers come back:
+
+```
+bridge-172.0  floating outside masonry = 56, worst 0.371 m
+              at (-20.45, 4.35, 38.71), 4.11 m over terrain
+bridge-266.0  floating outside masonry = 54, worst 0.125 m
+              at (-1.06, 0.11, -12.52)
+```
+
+**So the invariant to write is "paving a bridge has lifted clear of the ground
+has masonry under it", not "…is inside the plan footprint".** The second version
+fails on harmless ramp-foot paving and would have to be fudged to go green —
+exactly the shape of assertion CLAUDE.md warns about.
 
 ## Left to do, in order
 
