@@ -267,6 +267,16 @@ assertion reporting success about something it is not describing.** So: break
 every check deliberately and watch it go red before you trust it green, and read
 the failure message — it should carry real numbers, not `NaN` or `Infinity`.
 
+**A red-run transcript is a measurement, and measurements go stale.** When you
+write "proved red, here is the output", **paste the geometry or input it was
+proved against with it.** On 29 August a check was honestly proved red at 28
+failures; an unrelated fix two commits later moved the geometry so the mutation
+no longer reached the case, and the same command gave exit 0. The assertion was
+still armed — arming it again needed the *old* geometry restored too — but a
+replacement following the documented reproduction would have got a green run and
+reasonably concluded the check had rotted. The number was right once, and
+nothing announced when it stopped being.
+
 - **A squash merge silently reverts branches that predate it.**
   `merge-base --is-ancestor` says *no* — the commits no longer exist under those
   hashes — so nothing warns you, and it shows up only as unexplained files in
