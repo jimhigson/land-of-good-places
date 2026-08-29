@@ -65,11 +65,11 @@ await page.addInitScript((file) => {
  */
 const shots = [
   { name: 'great-hall', deck: 0, note: 'ground floor, in from the door' },
-  { name: 'hall-approach', deck: 0, at: '15,-2', note: 'looking up the hall at the throne' },
-  { name: 'hall-feast', deck: 0, at: '15,-5.5', note: 'at the feast table' },
-  { name: 'hall-table-reach', deck: 0, at: '17.5,-9', note: 'beside the table, child eye height' },
-  { name: 'hall-throne', deck: 0, at: '15,-15', note: 'at the foot of the dais' },
-  { name: 'hall-armour', deck: 0, at: '10,-14', note: 'the knight on his plinth' },
+  { name: 'hall-approach', deck: 0, at: '10,-2', note: 'looking up the hall at the throne' },
+  { name: 'hall-feast', deck: 0, at: '10,-5.5', note: 'at the feast table' },
+  { name: 'hall-table-reach', deck: 0, at: '12.5,-9', note: 'beside the table, child eye height' },
+  { name: 'hall-throne', deck: 0, at: '10,-15', note: 'at the foot of the dais' },
+  { name: 'hall-armour', deck: 0, at: '5,-14', note: 'the knight on his plinth' },
   { name: 'hall-fireside', deck: 0, at: '-14,-16', note: 'the bench by the hearth' },
   { name: 'deck-1', deck: 1, note: 'first floor' },
   { name: 'deck-2', deck: 2, note: 'second floor' },
