@@ -111,6 +111,26 @@ interface CreatureHandle extends AssetHandle {
 
 ---
 
+## Authored in Blender — world geometry kits
+
+Not `AssetHandle` factories: these are **kits of repeating units** that a
+generator places itself. They still obey the shared contract above (metres,
+origin at the base centred on X/Z, +Z forward, +Y up, `scale` 1, size baked
+into the geometry, one named node per part), and they ship through the same
+`.glb` pipeline as the kid, the cart, the duck bar and the hotel.
+
+| # | Asset | Parts | Notes |
+| --- | --- | --- | --- |
+| 32 | **Bridge stonework** (`src/art/models/bridgeStones.ts`) | `coping`, `voussoir`, `keystone` | The humpback railway bridges' modelled stone — Jim, 2026-08-29: *"modelled stoneworks (not just textures) around the tops of the walls, a genuine arch-shaped tunnel with modelled archway masonry around its edge"*. Authored by `art/blend/bridge_stones_build.py` → `art/blend/bridgeStones.blend` → `npm run blend:bridge-stones` → `src/art/assets/bridgeStones.glb` (9.2 KB) → `bridgeStonesGlb.ts`. `src/world/train/bridgeStonework.ts` places them: a voussoir ring round each tunnel mouth, laid on the *same* three-centred arch curve the tunnel is cut to, and a coping run along both parapets, each baked into one `BufferGeometry` per bridge. **`bridgeStones.ts` owns every dimension** and the Blender script reads them back out of it with `ts_const` — one definition, not two. Renders: `art/renders/bridge-{iso,arch,coping,silhouette}.png`. |
+
+**Why a kit and not a model.** A bridge here is solved per crossing — variable
+span, two variable ramps, a crown height solved against the terrain — and it
+follows the drawn path's own curve. No rigid `.glb` can be that. Anything else
+in the park with the same shape (fence runs, wall coursing, path edging) should
+follow this route rather than inventing a third one.
+
+---
+
 ## Open questions for the Architect / Builder
 
 1. **Material switch.** Artist recommends `MeshToonMaterial` + a shared 4-step

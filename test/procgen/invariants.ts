@@ -77,6 +77,7 @@ import {
 } from '../../src/world/entrance/layout.ts';
 import { ROAD_TILE_METRES } from '../../src/world/entrance/road.ts';
 import { visibleTop } from '../../src/art/style/measure.ts';
+import { COPING_SINK, bridgeStoneGeometry } from '../../src/art/models/bridgeStones.ts';
 import {
   CHILD_FOOTPRINT,
   createKid,
@@ -4489,6 +4490,304 @@ const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
  *    #116's own ramp-flank guard rails (since removed) once wedged a
  *    routable edge without ever touching the deck or the ground.
  */
+/**
+ * **The masonry a bridge really builds leaves the train its air — measured by
+ * firing rays up at it from the rail, not by reading a marker.**
+ *
+ * The sibling invariant above measures the invisible box named `deck`. That box
+ * is a *claim*: `bridges.ts` positions it at what it believes the tightest point
+ * of its own arch is. Until 2026-08-29 the two were trivially the same thing,
+ * because the soffit over the train was flat. It is now a genuine three-centred
+ * arch (`bridgeStonework.ts`), so the soffit *varies* across the span the train
+ * uses, the marker sits at one particular height on that curve, and "is the
+ * marker in the right place on the curve" became a real question that a marker
+ * cannot answer about itself.
+ *
+ * Worse, the bridge has since grown modelled stone — a voussoir ring round each
+ * mouth, imposts at the springings, coping on the parapets, courses on the
+ * flank. Every one of those is placed by a formula, every one is new, and not
+ * one of them is described by the `deck` box at all. A stone hung a little too
+ * far into the opening would be invisible to every check in this file.
+ *
+ * So this asks the geometry instead. From under the rail, at points across the
+ * train's own swept width, it fires a ray **straight up** and looks at what it
+ * hits first. That first hit is the real underside of the bridge at that point —
+ * arch barrel, spandrel, or a voussoir that should not be there. If it is
+ * lower than `TRAIN_CLEARANCE_Y` over the ground, the train hits it.
+ *
+ * The ray is the technique CLAUDE.md records from the hood-face bug, used the
+ * other way round: there, casting a ray in from outside proved a mesh was never
+ * being drawn. Here it proves what is really overhead, on a mesh nobody can
+ * measure by reading, and it is the only kind of check that could have caught
+ * the wedge of daylight and the bars-across-the-tunnel that this geometry has
+ * already produced twice while looking correct in code.
+ *
+ * Jim's own acceptance test for the redesign was one sentence — *"there should
+ * be just a bridge with nothing clipping inside it"* — and this is the half of
+ * it that points at the tunnel.
+ */
+const nothingHangsIntoTheTunnel: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const raycaster = new Raycaster();
+  const from = new Vector3();
+  const here = new Vector3();
+  const ahead = new Vector3();
+  const up = new Vector3(0, 1, 0);
+  let bridgesTested = 0;
+
+  const route = facts.world.train.route;
+
+  for (const crossing of facts.world.train.crossings) {
+    if (facts.world.train.fallbackCrossings.includes(crossing)) continue;
+    const group = facts.world.train.group.getObjectByName(
+      `bridge-${crossing.railDistance.toFixed(1)}`,
+    );
+    if (!group) continue;
+    bridgesTested += 1;
+
+    let worst = Infinity;
+    let worstAt = '';
+    const centre = route.distanceNear(crossing.x, crossing.z);
+    // Along the rail, through the whole tunnel and a stride past each mouth,
+    // so a stone hung just inside a mouth is inside the sampled range.
+    for (let d = -4.0; d <= 4.0 + 1e-6; d += 0.4) {
+      route.pointAt(centre + d, here);
+      route.pointAt(centre + d + 0.1, ahead);
+      let tx = ahead.x - here.x;
+      let tz = ahead.z - here.z;
+      const norm = Math.hypot(tx, tz) || 1;
+      tx /= norm;
+      tz /= norm;
+      // Across the train's own swept half-width — the same `TRACK_CLEARANCE`
+      // the rest of this file measures rail clearance with, never a figure of
+      // this invariant's own.
+      for (let across = -TRACK_CLEARANCE; across <= TRACK_CLEARANCE + 1e-6; across += 0.325) {
+        const x = here.x + -tz * across;
+        const z = here.z + tx * across;
+        const ground = here.y;
+        from.set(x, ground + 0.05, z);
+        raycaster.set(from, up);
+        raycaster.far = 40;
+        const hits = raycaster.intersectObject(group, true);
+        // `deck` is the invisible marker, and `intersectObject` does not care
+        // about `.visible` — skipping it is the whole point of measuring the
+        // drawn stone instead of the claim.
+        const hit = hits.find((candidate) => candidate.object.name !== 'deck');
+        if (!hit) continue;
+        const air = hit.point.y - ground;
+        if (air < worst) {
+          worst = air;
+          worstAt = `${hit.object.name || 'unnamed mesh'} at (${fmt([x, z])})`;
+        }
+      }
+    }
+
+    if (worst === Infinity) {
+      complaints.push(
+        `no bridge masonry at all overhead anywhere along the rail under ` +
+          `bridge-${crossing.railDistance.toFixed(1)} — a ray fired up from the ` +
+          'track hit nothing, so either the bridge is not over its own crossing ' +
+          'or this invariant is measuring the wrong group',
+      );
+      continue;
+    }
+    if (worst < TRAIN_CLEARANCE_Y) {
+      complaints.push(
+        `bridge-${crossing.railDistance.toFixed(1)} leaves only ${worst.toFixed(2)} m ` +
+          `of air over the rail against the ${TRAIN_CLEARANCE_Y.toFixed(2)} m the train ` +
+          `and its riders sweep to — lowest built stone is ${worstAt}`,
+      );
+    }
+  }
+
+  if (bridgesTested === 0) {
+    complaints.push(
+      'no bridge was tested — every crossing on this seed fell back to a level ' +
+        'crossing, or the built group names have changed, so this invariant proved nothing',
+    );
+  }
+
+  return complaints;
+};
+
+/**
+ * **Every modelled coping stone sits on the wall it caps — no stone floating
+ * over a gap, none sunk into the parapet, none hanging off the end of it.**
+ *
+ * The coping is authored geometry repeated along a line by a formula
+ * (`bridgeStonework.ts`'s `buildCopingRun`), and the formula samples the
+ * parapet's height at each block's *centre* while the block itself is 0.86 m
+ * long. On a ramp at peak grade that is a real hazard: the ends can lift off
+ * what the centre was measured against. It also has to stop cleanly where the
+ * parapet tapers out at a ramp foot, and "stop cleanly" is precisely the sort
+ * of edge that is one `<=` away from leaving a stone in mid-air.
+ *
+ * **Measured by plan projection, not by a ray, and that is the point.** A
+ * downward ray only reports a surface whose normals face the ray, so against a
+ * single-sided shell it can come back empty on perfectly good geometry and
+ * `!hit` reads identically to "nothing there" — a check that cannot fail is
+ * this file's oldest recorded disease, and peer review of PR #360 correctly
+ * called an earlier raycast on this exact question *inconclusive* rather than
+ * passing. So this drops each coping vertex onto the `wallTop` mesh's own
+ * triangles in plan and reads the height off barycentrically: no normals
+ * involved, no material side, and a vertex over no triangle at all is a
+ * complaint rather than a silent skip.
+ *
+ * Jim's acceptance test for the redesign was *"there should be just a bridge
+ * with nothing clipping inside it"*. `nothingHangsIntoTheTunnel` is the half of
+ * that pointing at the tunnel; this is the half pointing at the parapet.
+ */
+const everyCopingStoneSitsOnItsWall: Invariant = (facts) => {
+  const complaints: string[] = [];
+  let bridgesTested = 0;
+
+  for (const crossing of facts.world.train.crossings) {
+    if (facts.world.train.fallbackCrossings.includes(crossing)) continue;
+    const group = facts.world.train.group.getObjectByName(
+      `bridge-${crossing.railDistance.toFixed(1)}`,
+    );
+    if (!group) continue;
+    const coping = group.getObjectByName('coping');
+    const wallTop = group.getObjectByName('wallTop');
+    if (!(coping instanceof Mesh) || !(wallTop instanceof Mesh)) {
+      complaints.push(
+        `bridge-${crossing.railDistance.toFixed(1)} is missing its 'coping' or ` +
+          "'wallTop' mesh — the names bridges.ts builds them under have changed " +
+          'and this invariant is measuring nothing',
+      );
+      continue;
+    }
+    bridgesTested += 1;
+
+    // The parapet's own top face, as plan triangles with their heights.
+    const top = wallTop.geometry;
+    const topPos = top.getAttribute('position');
+    const topIndex = top.getIndex();
+    if (!topPos || !topIndex) continue;
+
+    /** Height of the parapet's top face at `(x, z)`, or null if not over it. */
+    const wallTopAt = (x: number, z: number): number | null => {
+      for (let t = 0; t < topIndex.count; t += 3) {
+        const ia = topIndex.getX(t);
+        const ib = topIndex.getX(t + 1);
+        const ic = topIndex.getX(t + 2);
+        const ax = topPos.getX(ia);
+        const az = topPos.getZ(ia);
+        const bx = topPos.getX(ib);
+        const bz = topPos.getZ(ib);
+        const cx = topPos.getX(ic);
+        const cz = topPos.getZ(ic);
+        const area = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz);
+        if (Math.abs(area) < 1e-12) continue;
+        const u = ((bz - cz) * (x - cx) + (cx - bx) * (z - cz)) / area;
+        const v = ((cz - az) * (x - cx) + (ax - cx) * (z - cz)) / area;
+        const w = 1 - u - v;
+        if (u < -1e-6 || v < -1e-6 || w < -1e-6) continue;
+        return u * topPos.getY(ia) + v * topPos.getY(ib) + w * topPos.getY(ic);
+      }
+      return null;
+    };
+
+    const copingPos = coping.geometry.getAttribute('position');
+    if (!copingPos) continue;
+
+    // **Measure each block's base, not every vertex.** A coping block is
+    // tilted onto the local grade, and near a ramp foot the parapet's own top
+    // line is very steep indeed — the wall is collapsing through its taper
+    // while the road merely descends. Comparing a *tilted block's top face*
+    // against the wall vertically beneath it therefore reads high by up to
+    // 0.12 m on perfectly seated stone: the top face is displaced along the
+    // slope, so it is over wall that is lower than the wall its own base sits
+    // on. That is trigonometry, not daylight. The base is the honest question,
+    // and it is exact: a seated block's lowest vertices sit `COPING_SINK`
+    // below the drawn top, to the millimetre.
+    const perBlock = bridgeStoneGeometry('coping').getAttribute('position')?.count ?? 0;
+    if (perBlock === 0 || copingPos.count % perBlock !== 0) {
+      complaints.push(
+        `bridge-${crossing.railDistance.toFixed(1)}: its coping mesh has ` +
+          `${copingPos.count} vertices, not a whole number of ${perBlock}-vertex ` +
+          'authored blocks — the bake has changed shape and this is measuring nothing',
+      );
+      continue;
+    }
+
+    const tolerance = 0.02;
+    let worstFloat = 0;
+    let worstAt = '';
+    let floating = 0;
+    let offWall = 0;
+    const blocks = copingPos.count / perBlock;
+    for (let block = 0; block < blocks; block += 1) {
+      // **The centre of the block's base face**, not a corner of it. A corner
+      // sits on the very edge of the parapet-top quad it belongs to, so on a
+      // curving spine the plan projection can land it on the *neighbouring*
+      // quad instead — which is at a slightly different height, and reads as a
+      // 3 cm error on a stone that is in fact seated perfectly (measured, seed
+      // 5, one block of eighty). The base centre is mid-quad and on the wall
+      // line, so it belongs to exactly one triangle and there is nothing to
+      // straddle. Loosening the tolerance instead would have been this file's
+      // own forbidden move: never weaken an assertion to make a seed pass.
+      let lowest = Infinity;
+      for (let k = 0; k < perBlock; k += 1) {
+        lowest = Math.min(lowest, copingPos.getY(block * perBlock + k));
+      }
+      let x = 0;
+      let z = 0;
+      let onBase = 0;
+      for (let k = 0; k < perBlock; k += 1) {
+        const i = block * perBlock + k;
+        if (copingPos.getY(i) - lowest > 1e-3) continue;
+        x += copingPos.getX(i);
+        z += copingPos.getZ(i);
+        onBase += 1;
+      }
+      if (onBase === 0) continue;
+      x /= onBase;
+      z /= onBase;
+
+      const surface = wallTopAt(x, z);
+      if (surface === null) {
+        offWall += 1;
+        continue;
+      }
+      // Seated means exactly `COPING_SINK` below the drawn top. Above that is
+      // a floating stone; well below it is a stone buried in its own wall.
+      const gap = lowest - (surface - COPING_SINK);
+      if (Math.abs(gap) > tolerance) {
+        floating += 1;
+        if (Math.abs(gap) > Math.abs(worstFloat)) {
+          worstFloat = gap;
+          worstAt = `(${fmt([x, z])})`;
+        }
+      }
+    }
+
+    if (floating > 0) {
+      complaints.push(
+        `bridge-${crossing.railDistance.toFixed(1)}: ${floating} of its ${blocks} coping ` +
+          `blocks are not seated on their own parapet — worst is ${worstFloat.toFixed(3)} m ` +
+          `${worstFloat > 0 ? 'above' : 'below'} where it should sit, at ${worstAt}. ` +
+          'A coping block should rest exactly COPING_SINK below the drawn wall top.',
+      );
+    }
+    if (offWall > 0) {
+      complaints.push(
+        `bridge-${crossing.railDistance.toFixed(1)}: ${offWall} of its ${blocks} coping ` +
+          'blocks sit over no parapet top at all — the run has walked off the wall it caps',
+      );
+    }
+  }
+
+  if (bridgesTested === 0) {
+    complaints.push(
+      'no bridge coping was tested — every crossing on this seed fell back to a ' +
+        'level crossing, or the built mesh names have changed, so this proved nothing',
+    );
+  }
+
+  return complaints;
+};
+
 const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
   const complaints: string[] = [];
   const probe = new Vector3();
@@ -7553,6 +7852,14 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     railwayClearanceCoversTheTrainAndItsRiders,
   ],
   ['every railway crossing has a bridge you can walk to, onto and across', everyBridgeIsWalkableAndReachable],
+  [
+    'nothing a bridge builds hangs into its own tunnel, measured by ray from the rail',
+    nothingHangsIntoTheTunnel,
+  ],
+  [
+    'every modelled coping stone sits on the wall it caps',
+    everyCopingStoneSitsOnItsWall,
+  ],
   [
     'every bridge is as wide as its own path, with the rail corridor open beneath',
     bridgesMatchTheirPathAndKeepTheRailClear,
