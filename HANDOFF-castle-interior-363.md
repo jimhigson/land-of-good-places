@@ -343,11 +343,37 @@ Additional rules for castle decoration specifically:
 2. **Floor furniture obeys the existing keep-outs**, plus a new one round the
    doorway *lane* rather than just the doorway disc: children walk in and keep
    walking.
-3. **Children's destinations (#355, #362) come first.** Anything indoors that
+3. **Two facts established 29 Aug, both of which change the plan.**
+
+   **Indoor collision is height-blind.** `registerInteriorCollision` walls the
+   shell once and it holds on every storey at once, because collision has no
+   idea what height you are at. So a collider added for a prop on deck 0 would
+   block that same square metre on **all five decks** — a suit of armour in the
+   great hall would be an invisible wall in the middle of floor 3. Therefore
+   **decorative props get no colliders at all.** That is not a compromise, it
+   is the only correct answer here, and it removes a whole class of bug.
+
+   **But it means placement is the only protection there is.** With no
+   collider, a child NPC walks *through* a suit of armour rather than round it:
+   props do not appear in the lattice `journey.ts` routes on, so nothing steers
+   her round them. A prop in a walking route is therefore a visible fault, not
+   a stuck child — which is worse in one way (it always happens) and better in
+   another (nobody gets trapped).
+
+   **#355's castle destinations are the seven shop stands** and nothing else —
+   `castleAttractions()` maps `Shops.stands` straight through, on decks 0, 1
+   and 2. Those are *already* covered by `dressing.ts`'s `shopKeepOut`, counter
+   and three serving spots and queue radius included, so reusing `keepOutsFor`
+   protects them for free. What is **not** yet covered is the route between the
+   door and a shop: `check:castle` assertion 1 must test props against the
+   paths children actually walk, not only against the destination discs. That
+   is the form it takes when batch 1 lands.
+
+4. **Children's destinations (#362) come first.** Anything indoors that
    a child NPC routes to gets a keep-out before a prop is placed near it. If
    #362 lands after this, its destinations must be added to `keepOutsFor` —
    noted here so whoever picks that up sees it.
-4. **Hanging things clear a hatted child**: bottom of any hanging asset ≥
+5. **Hanging things clear a hatted child**: bottom of any hanging asset ≥
    `TALLEST_CHILD_HEIGHT + RIDER_HEADROOM` (2.97 + 0.40 = 3.37 m)… which is
    *above* my 3.30 m ceiling. So: **nothing hangs low enough to walk into.**
    Chandeliers and banners hang in the 3.0–3.3 m band and are therefore only
