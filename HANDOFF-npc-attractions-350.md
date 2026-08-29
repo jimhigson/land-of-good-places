@@ -258,3 +258,46 @@ space's boundary. Do NOT write a second router.
 
 Cost note: A* over the park lattice for 24 children needs a per-frame plan budget (plan a few
 per frame, not all at once) — `npm run check:solve-cost` is in the build and will notice.
+
+---
+
+## A SECOND, REAL BUG, found by the dispersal check (29 Aug)
+
+The check paid for itself before it was even wired in.
+
+Watching three bus children at 5 s intervals:
+
+```
+t= 15 Ethan(-10,49)bus=0 d=Dodgems | Rumi(-8,47)bus=0 d=Dodgems | Cleo(-7,48)bus=0 d=Ball Pit
+t= 30 Ethan(-18,39)      d=Dodgems | Rumi(-21,41)      d=Dodgems | Cleo(-20,39)      d=Ball Pit
+t= 50 Ethan(-18,39)      d=Dodgems | Rumi(-21,42)      d=Dodgems | Cleo(-20,39)      d=Ball Pit
+t= 70 Ethan(-18,40)      d=Dodgems | Rumi(-21,43)      d=Dodgems | Cleo(-21,41)      d=Ball Pit
+t= 75 Ethan(-21,49)      d=Dodgems | Rumi(-23,49)      d=Dodgems | Cleo(-23,48)      d=Ball Pit
+t= 85 Ethan(-38,40)      d=Dodgems | Rumi(-39,37)      d=Dodgems | Cleo(-19,24)      d=Ball Pit
+```
+
+Eleven children get off the bus at t≈15, walk to about (-20, 40), and **stop dead there from
+t=30 to t=75**. The destination never changes in that window, so `steer` is never returning
+"arrived" and `chooseDestination` is never being called. At t=75 they all move off at once and
+walk straight to their attractions.
+
+**t=75 is `JOURNEY_TIMEOUT`.** They were pushing at a dead route for the whole timeout, and the
+replan that the timeout forces works immediately from the very same spot.
+
+Diagnosis: `NavGrid.findRoute` does not promise to reach the goal — it ends at the closest
+reachable point and says so via `lastRouteReachedGoal`. A route planned at t≈15, from the gate
+with ten other children in the way, **stops short**. The child walks to the end of it and then
+neither arrival test fires: the destination is still forty metres away, and the last waypoint is
+one they cannot quite settle on because ten siblings are jostling them off it
+(`NpcSystem.separate`). So they push, and push, until the timeout.
+
+`TapNavigator` already has exactly this problem and already answers it — `planRoute` reads
+`lastRouteReachedGoal` and has `REPLAN_ATTEMPTS = 1`. The child driver had neither. **This is
+the "pathfinding getting stuck" Jim's report guessed at** — it was not the cause of the original
+clumping (there was no pathfinding at all then), but it is real now, and it would have shipped a
+crowd that bunches at the gate for the first minute of every session.
+
+Fix: give `Journey` a bounded replan (the same idea as `REPLAN_ATTEMPTS`) plus a **stuck
+detector** derived from `NPC_WALK_SPEED` — a child who has covered far less ground than walking
+would have covered has a route that is not working, and wants a new decision now rather than in
+seventy-five seconds.
