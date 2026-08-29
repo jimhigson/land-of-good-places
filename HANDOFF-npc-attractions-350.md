@@ -44,11 +44,49 @@ Two candidate clumping mechanisms identified so far, both in that file:
    disperses that initial clump only very slowly — which matches "on **entering** the park … quite
    soon".
 
-Not yet ruled out: whether the railway/bridge work in #348 split the park's `PoiGraph` component.
-`markReachable` (poiGraph.ts ~line 470–527) keeps **only the largest connected component per space**
-and marks the rest unreachable; if the railway corridor now cuts the park in two, every child is
-confined to one side. **This is the next thing to check** (dump component sizes; compare against
-`311ad89^`).
+### SETTLED (29 Aug): #348 did NOT split the park. Not the cause.
+
+`scripts/diag-poi-components.mts` (throwaway, delete with the other diag) on the canonical seed,
+rebased onto `origin/main` (`e71f80a`, i.e. *after* #348):
+
+```
+total nodes=237, components=1
+  space=garden     components=[237]  reachable=237/237
+garden reachable extent x=[-48.9,81.2] z=[-51.5,56.2]
+garden interesting reachable=22
+```
+
+**One component. Nothing stranded. No comparison against `311ad89^` needed** — a graph that is
+already whole cannot have been severed. Cross that candidate off; do not re-derive it.
+
+Two things that dump *did* establish, both load-bearing for the fix:
+
+- **The `PoiGraph` has no castle-interior nodes at all** — all 237 are `garden`. So requirement (4)
+  (castle interiors as destinations) cannot ride on the POI graph. The attraction list and the
+  routing have to handle the interior space themselves.
+- Only **22** reachable `interesting` nodes in the whole garden, against 237 nodes.
+
+### The actual root cause
+
+There is no destination, so there is no force pulling children apart — and a **non-backtracking
+random walk is diffusive**, so its occupancy converges to a stationary distribution proportional to
+node degree, *weighted by dwell time*. Both weights point at the same place:
+
+- **Degree**: the plaza ring is 6 nodes packed inside `PLAZA.radius`, mutually visible and also
+  visible to every route that lands on the plaza — by far the highest-degree region in the graph.
+- **Dwell**: `arrive()` gives an `interesting` node a `PAUSE_CHANCE = 0.62` chance of a 1.4–4.2 s
+  pause (mean ~2.8 s). All 6 plaza ring nodes are `interesting`, out of only 22 in the park.
+
+So children random-walk into the plaza, and once there they pause repeatedly and leave slowly. That
+is the clump. The bus cohort (11 of 24 dumped at the gate by `ArrivalSequence`) sets the *initial*
+clump and a diffusive walk disperses it only very slowly, which is why Jim sees it "quite soon on
+entering the park" — but the steady-state clumping is the random walk's own stationary distribution,
+not the bus.
+
+**This is a design absence, not a broken line.** Nothing is stuck; the mechanism has no notion of
+going anywhere, so it cannot help but pool. The fix is the one Jim asked for — give every child a
+real destination and a real route — and it therefore *replaces* the random walk rather than
+patching it.
 
 ### Measurement (headless, canonical seed)
 
