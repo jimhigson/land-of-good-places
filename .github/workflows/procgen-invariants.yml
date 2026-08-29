@@ -8,6 +8,25 @@ name: Procgen invariants
 # This is a required check on main. Any change to the procedural generation is
 # expected to extend `test/procgen/invariants.ts` in the same PR — see
 # CLAUDE.md, "Expanding the procedural generation".
+#
+# ## Two things here are load-bearing for DEPLOYS, not just for this check
+#
+# `deploy.yml` triggers on `workflow_run` of this workflow, so publishing the
+# live site now depends on this file in two specific ways:
+#
+#  1. **The `name:` above.** `workflow_run` matches on a workflow's *name*, not
+#     its filename. Rename it and `deploy.yml` stops being triggered at all —
+#     and nothing goes red, because there is no run to be red. Deploys just
+#     quietly stop, which is the exact shape of the 29 August 2026 outage.
+#  2. **`push: branches: [main]`, unfiltered.** Adding a `paths:` filter here
+#     would mean a commit touching only unfiltered paths never runs this
+#     workflow, never triggers `deploy.yml`, and never reaches the live site.
+#
+# Change either and change `deploy.yml` in the same edit. The backstop if
+# somebody does not is `live-version.yml`, which asks the live site what commit
+# it is serving on a half-hourly cron and opens an issue when it is behind — it
+# never asks whether a run succeeded, so it cannot be fooled by a run that does
+# not exist.
 on:
   pull_request:
   push:
