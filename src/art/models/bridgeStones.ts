@@ -23,8 +23,15 @@ import { markShared } from '../style/materials';
  * rigid `.glb` can be that. So Blender authors the **repeating units** — one
  * coping block, one voussoir, one keystone — and `world/train/bridges.ts`
  * bakes many transformed copies of each authored geometry into one
- * `BufferGeometry` per bridge. One draw call per bridge, authored shape, and
- * the sweep still follows the curve.
+ * `BufferGeometry` **per kind of stone** — so a bridge wearing sixty-odd stones
+ * pays two draw calls (ring, coping) rather than sixty, keeps the authored
+ * shape, and still follows the curve.
+ *
+ * Not *one* draw call per bridge: this header claimed that until peer review of
+ * PR #360 counted five (`shell` ×2 material groups, `wallTop`, `archRing`,
+ * `coping`), against three before. `bridges.ts`'s own note — "two draw calls
+ * rather than sixty" — was the accurate one. A header that overstates its own
+ * saving is how a budget gets believed instead of measured.
  *
  * Each stone is placed *individually* through the frame rather than as one
  * rigid ring, and each stands **proud** of the masonry face it decorates. Both
@@ -61,10 +68,39 @@ export const COPING_LENGTH = 0.86;
  * nothing is ever seen *through* the run: the parapet stands solid behind it. */
 export const COPING_JOINT = 0.05;
 
-/** How far the coping overhangs the parapet, each side. The overhang is what
- * makes a capped wall read as capped in silhouette — a flush cap reads as a
- * wall that simply stops. */
-export const COPING_OVERHANG = 0.11;
+/**
+ * How far the coping overhangs the parapet, each side. **Zero, and it is the
+ * only value that can be.**
+ *
+ * An overhang is what makes a capped wall read as capped, and this shipped at
+ * 0.11 m for exactly that reason. Peer review of PR #360 pointed out it broke
+ * the rule this same branch cites for recessing the flank courses *inward* —
+ * `halfAcross` is the width `bridgeFootprint.ts`'s search actually proved
+ * clear, so nothing may stand outside it. The coping stood 0.11 m proud of it
+ * along the bridge's whole length, over lawn where trees and lamps legitimately
+ * stand, at 1.09–1.37 m up where a canopy is.
+ *
+ * The arithmetic leaves no room to negotiate. The coping must sit within the
+ * band between the roadway and the cleared edge, which is exactly one
+ * `BRIDGE_WALL_THICKNESS` wide:
+ *
+ * ```
+ * inner edge >= roadHalf   and   outer edge <= halfAcross = roadHalf + 0.30
+ *   => width <= 0.30 = BRIDGE_WALL_THICKNESS
+ *   => overhang = 0
+ * ```
+ *
+ * Any outward overhang leaves the cleared footprint; any inward one hangs over
+ * the roadway at a walking child's shoulder height, which is the *other* half
+ * of Jim's acceptance test (*"nothing clipping inside it"*). So the block is
+ * exactly as wide as the wall it caps, and the capping read comes from
+ * {@link COPING_TOP_INSET}'s weathering slope and the joints instead — which
+ * is what the reviewer was already reading it by from the deck.
+ *
+ * The voussoir ring is deliberately **not** held to this, and stays proud —
+ * see {@link VOUSSOIR_PROUD}.
+ */
+export const COPING_OVERHANG = 0;
 
 /** Total height of a coping block. */
 export const COPING_HEIGHT = 0.28;
@@ -86,7 +122,22 @@ export const COPING_TOP_INSET = 0.05;
 /** Radial depth of one voussoir: inner (intrados) face to outer face. */
 export const VOUSSOIR_DEPTH = 0.45;
 
-/** How far a voussoir stands proud of the spandrel face it rings. */
+/**
+ * How far a voussoir stands proud of the spandrel face it rings.
+ *
+ * **This one is allowed outside `halfAcross`, and {@link COPING_OVERHANG} is
+ * not, for a reason that is about the ground underneath rather than about the
+ * stone.** A coping runs the bridge's whole length, most of it over open lawn
+ * where the footprint search's clearance is the only thing keeping a tree or a
+ * lamp out of it. The ring exists only at the two tunnel mouths, inside
+ * `ARCH_SPAN_HALF` — and that span is chosen (see `bridges.ts`) so that *"the
+ * masonry only ever stands on ground the fence already forbids to feet"*. The
+ * 0.20 m it oversails is over the fenced rail corridor, where nothing is
+ * planted and nobody walks.
+ *
+ * It also has to stand proud to be a ring at all: flush with the spandrel it
+ * would be a painted stripe again, which is the thing being fixed.
+ */
 export const VOUSSOIR_PROUD = 0.2;
 
 /** How far a voussoir is sunk into that face — never zero, so the ring can

@@ -333,39 +333,57 @@ export function buildCopingRun(
   frame: SpineFrame,
   shift: number,
   wallLine: number,
-  lengthNeg: number,
-  lengthPos: number,
-  parapetTopAt: (along: number, side: 1 | -1) => number | null,
+  parapetLine: readonly {
+    readonly along: number;
+    readonly top: readonly [number, number];
+    readonly surface: number;
+  }[],
 ): BufferGeometry {
+  if (parapetLine.length < 2) return new BufferGeometry();
+
+  // **One block per shell segment**, rather than a run at the authored
+  // `COPING_LENGTH`. The drawn parapet top is a polyline, and a rigid block
+  // laid across one of its kinks cannot sit flush on both halves — measured at
+  // up to 9.4 cm of daylight near a ramp foot, where the taper kinks hardest.
+  // A block that spans exactly one straight segment has no kink inside it to
+  // lift off, so it is flush by construction rather than by tolerance.
+  //
+  // `COPING_LENGTH` therefore stops being the pitch and becomes what it always
+  // really was: the proportion the stone is modelled at. Each block is scaled
+  // along its own length to the segment it caps.
   const matrices: Matrix4[] = [];
-  const total = lengthNeg + lengthPos;
-  const pitch = COPING_LENGTH;
-  const count = Math.max(1, Math.round(total / pitch));
-  const step = total / count;
-  // The joint is the authored gap; the block itself is shorter than its pitch
-  // by exactly that, so a run laid at `step` shows an even joint throughout
-  // even after `step` has been nudged off `COPING_LENGTH` to fit the parapet.
-  const scaleAlong = (step - COPING_JOINT) / (COPING_LENGTH - COPING_JOINT);
 
-  for (const side of [1, -1] as const) {
-    for (let i = 0; i < count; i += 1) {
-      const along = -lengthNeg + step * (i + 0.5);
-      const top = parapetTopAt(along, side);
-      if (top === null) continue;
+  for (const side of [0, 1] as const) {
+    const sign = side === 0 ? 1 : -1;
+    for (let i = 0; i + 1 < parapetLine.length; i += 1) {
+      const a = parapetLine[i] as (typeof parapetLine)[number];
+      const b = parapetLine[i + 1] as (typeof parapetLine)[number];
+      const span = b.along - a.along;
+      if (span <= 1e-6) continue;
 
+      // Nothing to cap where the parapet has tapered to less than the coping's
+      // own thickness — at *either* end, so a block is never laid straddling
+      // the spot where the wall runs out.
+      const parapetA = (a.top[side] as number) - a.surface;
+      const parapetB = (b.top[side] as number) - b.surface;
+      if (Math.min(parapetA, parapetB) < COPING_HEIGHT) continue;
+
+      const along = (a.along + b.along) / 2;
       const point = frame.pointAt(along);
-      const world = frame.worldAt(along, wallLine * side, shift);
-      // The local grade, measured off the parapet top itself rather than
-      // re-derived from the hump profile — one owner for "how steep is it
-      // here", and it stays right wherever the parapet is tapering.
-      const behind = parapetTopAt(along - step / 2, side);
-      const ahead = parapetTopAt(along + step / 2, side);
-      const slope = behind !== null && ahead !== null ? (ahead - behind) / step : 0;
+      const world = frame.worldAt(along, wallLine * sign, shift);
+      const topA = a.top[side] as number;
+      const topB = b.top[side] as number;
+      const slope = (topB - topA) / span;
+      const top = (topA + topB) / 2;
 
       const forward = new Vector3(point.dirX, slope, point.dirZ);
       const up = new Vector3(-point.dirX * slope, 1, -point.dirZ * slope);
       const matrix = basisAt(up, forward, new Vector3(world.x, top - COPING_SINK, world.z));
-      matrix.scale(new Vector3(1, 1, scaleAlong));
+      // The block is shortened by the joint, then scaled to this segment. The
+      // joint is taken in the block's own local length so it stays the same
+      // visible gap whatever the segment measures.
+      const length = Math.hypot(span, topB - topA);
+      matrix.scale(new Vector3(1, 1, (length - COPING_JOINT) / (COPING_LENGTH - COPING_JOINT)));
       matrices.push(matrix);
     }
   }

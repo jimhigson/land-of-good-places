@@ -37,7 +37,7 @@ import {
   buildVoussoirRing,
   haunchRadius,
 } from './bridgeStonework';
-import { COPING_HEIGHT, VOUSSOIR_TAPER_RADIUS } from '../../art/models/bridgeStones';
+import { VOUSSOIR_TAPER_RADIUS } from '../../art/models/bridgeStones';
 import type { MovingPlatform } from '../building/surfaces';
 
 /**
@@ -721,17 +721,6 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // authored in Blender (`art/blend/bridge_stones_build.py`) and baked here
   // into one geometry apiece, so a bridge wearing sixty-odd stones still costs
   // two draw calls rather than sixty.
-  const parapetTopAt = (along: number, side: 1 | -1): number | null => {
-    const outer = frame.worldAt(along, halfAcross * side, shift);
-    const centre = frame.worldAt(along, 0, shift);
-    const surface = surfaceProfile(centre.x, centre.z, along);
-    // Nothing to cap where the parapet has tapered to less than the coping's
-    // own thickness — see `parapetHeightFor`. The stone follows the wall; it
-    // never asserts one that is not there.
-    if (parapetHeightFor(surface - terrainHeight(outer.x, outer.z)) < COPING_HEIGHT) return null;
-    return parapetTopFor(surface, outer.x, outer.z);
-  };
-
   const ringMesh = new Mesh(
     buildVoussoirRing(frame, shift, halfAcross, arch),
     bridgeMaterials().coping,
@@ -740,7 +729,9 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   ringMesh.castShadow = true;
   ringMesh.receiveShadow = true;
   const copingMesh = new Mesh(
-    buildCopingRun(frame, shift, roadHalf + BRIDGE_WALL_THICKNESS / 2, lengthNeg, lengthPos, parapetTopAt),
+    // Fed the shell's own drawn parapet line, not the formula behind it — see
+    // `ShellGeometry.parapetLine`.
+    buildCopingRun(frame, shift, roadHalf + BRIDGE_WALL_THICKNESS / 2, shell.parapetLine),
     bridgeMaterials().coping,
   );
   copingMesh.name = 'coping';
@@ -843,6 +834,29 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
 interface ShellGeometry {
   readonly stone: BufferGeometry;
   readonly coping: BufferGeometry;
+  /**
+   * **The parapet top line the shell actually drew**, one entry per ring:
+   * `[side +1, side -1]` world heights at that `along`.
+   *
+   * Handed to `bridgeStonework.ts`'s `buildCopingRun` so the modelled coping
+   * sits on the wall that *exists* rather than on the wall the formula
+   * describes. Those are not the same thing: the drawn wall is this polyline,
+   * sampled every `SHELL_STEP`, and near a ramp foot `parapetHeightFor`
+   * collapses across its whole taper window inside a single 0.6 m step. Asking
+   * the continuous function where to put a stone put blocks up to **0.505 m**
+   * above the stone they were supposed to be sitting on (measured, canonical
+   * seed, both bridges) — invisible in code, and exactly the "two definitions
+   * of one thing" this file keeps being bitten by. One owner: whatever the
+   * sweep drew.
+   */
+  readonly parapetLine: readonly {
+    readonly along: number;
+    /** Parapet top, world height, `[side +1, side -1]`. */
+    readonly top: readonly [number, number];
+    /** The road surface at that ring — so a consumer can tell how much parapet
+     * there actually is here without re-deriving the taper. */
+    readonly surface: number;
+  }[];
 }
 
 /**
@@ -869,6 +883,7 @@ function buildShellGeometry(
   const positions: number[] = [];
   const uvs: number[] = [];
   const indices: number[] = [];
+  const parapetLine: { along: number; top: [number, number]; surface: number }[] = [];
   // The tunnel soffit's own triangles — kept apart from `indices` so they
   // land in one contiguous run at the end, ready for a second
   // `BufferGeometry` group carrying `archStoneTexture` (see the return
@@ -1169,6 +1184,7 @@ function buildShellGeometry(
         else quad(indices, v0, v3, v2, v1);
       }
     }
+    parapetLine.push({ along, top: [parapetTopPlus, parapetTopMinus], surface });
     previous = ring;
     previousAlong = along;
   }
@@ -1196,5 +1212,5 @@ function buildShellGeometry(
   coping.setIndex(copingIndices);
   coping.computeVertexNormals();
 
-  return { stone, coping };
+  return { stone, coping, parapetLine };
 }
