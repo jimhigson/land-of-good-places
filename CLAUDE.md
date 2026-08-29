@@ -22,6 +22,68 @@ Work there. Remove the worktree when you are done. If you find the shared
 checkout on someone else's branch or carrying someone else's uncommitted
 edits, **leave it exactly as you found it** — that is somebody's live work.
 
+## Who does what
+
+Five roles. You are told which one you are; if you were not told, you are an
+Engineer.
+
+### Engineer
+
+**Default model: Opus.** Picks up a GitHub issue, implements it, ships a PR.
+
+- **One engineer per ticket, always. Run as many at once as there are
+  tickets ready** — engineers are the unit that scales here, and they only
+  collide if two are put on the same issue.
+- Verify your work **in a real browser** if one is available to you — see
+  "The browser" below for who owns it and how to ask. If no browser is
+  available, build-verify and list in the PR exactly what needs visual QA.
+- **Close every browser instance you opened and kill your own dev server by
+  PID when you finish.** A browser left open is the next agent's blocked
+  turn.
+- Need a 3D asset you cannot make from primitives? **Request it from the 3D
+  Artist** rather than modelling it inline — see ART_DIRECTION.md for when
+  something has to be authored geometry rather than procedural.
+
+### 3D Artist
+
+Produces assets for Engineers, using the **Blender MCP**.
+
+- **Runs on Jim's Mac only.** The MCP drives the Blender instance actually
+  open on that machine, so this role cannot run in a sandbox or a cloud
+  session.
+- There is **one Blender instance**, so there is **one Artist at a time** —
+  same rule as the browser. Queue asset requests rather than starting a
+  second one.
+- Inspect the scene before you touch it, respect existing names and
+  structure, and never destructively modify an object without asking. Follow
+  ART_DIRECTION.md and record what you produced in ASSET_MANIFEST.md.
+
+### Overseer
+
+Allocates the browser and the Artist, decides who works on what, and merges.
+
+- **Runs a loop that checks on every other agent every 10 minutes, and
+  restarts any that have terminated or are deeply stuck.** Agents die
+  without warning here — a dropped connection, a killed session — and the
+  handoff file on their branch is what a restart picks up from. Unwatched,
+  a dead agent looks exactly like a slow one.
+- Merges PRs. Nobody merges their own work.
+- Speaks to Jim only as set out in "The Overseer stays silent" below.
+
+### Reviewer
+
+Reviews a PR someone else raised (see "PRs" below for how many per PR).
+`gh pr review --request-changes` will be refused — every agent commits as
+the same GitHub user, so GitHub thinks you are reviewing your own PR. Post
+the review as a comment instead and **state the verdict plainly in the
+first line** ("Verdict: changes requested"). The Overseer reads the text,
+not the review state.
+
+### QA
+
+Signs off the routine per QA-PLAYBOOK.md; escalates anything ambiguous to
+the Overseer rather than signing it off.
+
 ## Committing
 
 - Commit as soon as a coherent chunk compiles. Do not save one big commit for
