@@ -979,10 +979,20 @@ export class Building implements GameSystem {
       // anything not given carries that spot's own value straight through
       // rather than being written down a second time here.
       if (deck > 0 || at) {
+        // `at` is in the **interior's own metres** — the frame `layout.ts`,
+        // `dressing.ts` and every prop placer work in, and the frame anybody
+        // reading a coordinate off `castleFurniture.ts` or a keep-out list will
+        // type. `teleportTo` takes world coordinates, and the interior sits at
+        // `INTERIOR_ORIGIN_X/Z`, so it has to be converted.
+        //
+        // Getting this wrong does not fail: it teleports her to the same
+        // numbers out in the park, several hundred metres away, and the shot
+        // comes back a picture of grass with the castle nowhere in it. Caught
+        // by looking at the first screenshot rather than by trusting the link.
         player.teleportTo(
-          at ? at.x : player.position.x,
+          at ? worldX(at.x) : player.position.x,
           BUILDING_BASE_Y + deck * BUILDING_FLOOR_HEIGHT,
-          at ? at.z : player.position.z,
+          at ? worldZ(at.z) : player.position.z,
           Math.PI,
         );
       }

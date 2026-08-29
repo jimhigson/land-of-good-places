@@ -194,7 +194,27 @@ const UPPER_DECKS = [1, 2, 3, 4] as const;
  * The fixed shafts. `DECK_HOLES` (below, defined after `SHOP_UNITS` so it can
  * fold in each shop's sunken forecourt too) starts from this list.
  */
-const BASE_DECK_HOLES: readonly DeckHole[] = [
+/**
+ * **The fixed shafts, and what makes them a different thing from a hole.**
+ *
+ * Exported (issue #368) because a shaft is not only an absence of floor: each
+ * one carries a *structure* — a stair, an escalator, a bubble tube, a
+ * trampoline, a helter-skelter — and that structure comes **all the way down**,
+ * through storeys whose floor is perfectly solid. `deckIsSolid` cannot say so
+ * and is not meant to: it answers "is there floor here", and on deck 0 the
+ * answer is always yes.
+ *
+ * So anything placing props needs this list separately from {@link DECK_HOLES},
+ * which additionally folds in every shop's **sunken forecourt** — a lowered
+ * floor that a prop may perfectly well stand on, and which is why asking
+ * `DECK_HOLES` this question gives 186 false failures.
+ *
+ * Found by looking at a screenshot: the great hall's feast benches cleared
+ * every keep-out and `check:castle` was green, and the helter-skelter came down
+ * through the dinner table. `keepOutsFor` only guards the helter's disc on
+ * `HELTER_DECK`, which is where a child gets *on*, not where the tube is.
+ */
+export const BUILDING_SHAFTS: readonly DeckHole[] = [
   { id: 'stairwell', region: STAIRWELL, decks: UPPER_DECKS },
   { id: 'escalator', region: ESCALATOR_WELL, decks: UPPER_DECKS },
   { id: 'bubble', region: BUBBLE_SHAFT, decks: UPPER_DECKS },
@@ -923,7 +943,7 @@ function shopForecourtRamp(unit: ShopUnitDefinition): RampDefinition {
 /**
  * Every fixed shaft, plus a hole for each recessed shop's forecourt.
  *
- * Declared here, after `SHOP_UNITS`, rather than back where `BASE_DECK_HOLES`
+ * Declared here, after `SHOP_UNITS`, rather than back where `BUILDING_SHAFTS`
  * is: it folds `SHOP_UNITS` in, so it has to be assigned after that constant
  * exists. `deckIsSolid` (defined earlier in the file) still resolves this
  * correctly regardless of where it sits in the file — it only reads
@@ -931,7 +951,7 @@ function shopForecourtRamp(unit: ShopUnitDefinition): RampDefinition {
  * initialising.
  */
 export const DECK_HOLES: readonly DeckHole[] = [
-  ...BASE_DECK_HOLES,
+  ...BUILDING_SHAFTS,
   ...SHOP_UNITS.filter(shopHasForecourt).map((unit) => ({
     id: `shop-forecourt-${unit.id}`,
     region: shopForecourtRegion(unit),

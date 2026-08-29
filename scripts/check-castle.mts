@@ -32,7 +32,12 @@ import {
   INTERIOR_HALF_Z,
   PLAYER_RADIUS,
 } from '../src/core/constants.ts';
-import { deckIsSolid, TOP_DECK } from '../src/world/building/layout.ts';
+import {
+  BUILDING_SHAFTS,
+  deckIsSolid,
+  regionContains,
+  TOP_DECK,
+} from '../src/world/building/layout.ts';
 import {
   BEAM_UNDERSIDE,
   buildCeilingBeams,
@@ -666,6 +671,66 @@ for (let deck = 0; deck < TOP_DECK; deck += 1) {
 }
 
 // ---------------------------------------------------------------------------
+// 7b. Nothing stands where a shaft's own structure comes down.
+// ---------------------------------------------------------------------------
+
+/**
+ * **A prop may not stand inside one of the building's shafts, on any storey.**
+ *
+ * `deckIsSolid` answers a different question — *is there floor here* — and on
+ * deck 0 it answers "yes" everywhere, because the ground floor has no holes in
+ * it. But a shaft is not only a hole: it is a **stair, an escalator, a bubble
+ * tube, a trampoline or a helter-skelter**, and those structures come all the
+ * way down to the floor a child walks in on. So the ground floor has no hole
+ * and is still not free plan.
+ *
+ * This was found by looking at a screenshot, not by a check. The great hall's
+ * feast benches were placed clear of every keep-out in `keepOutsFor(0)` and
+ * `check:castle` was green — and the helter-skelter came down through them,
+ * because `keepOutsFor` only adds the helter's disc on `HELTER_DECK` (2), which
+ * is where you *get on*, not where the tube is. The east bench was inside
+ * `HELTER_SHAFT` and the shot showed a slide growing out of the dinner table.
+ *
+ * It is the same shape as every other bug in this file's history: the check
+ * measured something real and adjacent to the thing that was wrong. So it is
+ * stated as its own assertion rather than folded into assertion 1's keep-out
+ * loop, because it is a different fact about the building — `DECK_HOLES` is the
+ * owner, and asking it costs nothing.
+ *
+ * Wall furniture is exempt on the same measured basis assertion 1 uses: a
+ * tapestry flat against a wall cannot be inside a shaft in any meaningful
+ * sense, and the shafts do not touch the walls.
+ */
+let shaftChecked = 0;
+for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
+  for (const { label, box } of placedOn(deck)) {
+    if (box.min.y > TALLEST_CHILD_HEIGHT) continue;
+    if (reachFromWall(box) <= WALL_FURNITURE_REACH) continue;
+    shaftChecked += 1;
+    for (const hole of BUILDING_SHAFTS) {
+      // Five by five over the prop's real footprint, so a prop whose corner
+      // alone reaches into a shaft is caught — that is exactly how the bench
+      // got in, and sampling the centre would have missed it.
+      let inside = 0;
+      for (let i = 0; i <= 4; i += 1) {
+        for (let j = 0; j <= 4; j += 1) {
+          const x = box.min.x + ((box.max.x - box.min.x) * i) / 4;
+          const z = box.min.z + ((box.max.z - box.min.z) * j) / 4;
+          if (regionContains(hole.region, x, z)) inside += 1;
+        }
+      }
+      if (inside === 0) continue;
+      fail(
+        `shafts: deck ${deck} '${label}' stands in the '${hole.id}' shaft ` +
+          `(${inside}/25 of its footprint). That shaft's structure comes down through this ` +
+          `storey whether or not the floor has a hole in it, so the prop is inside it.`,
+      );
+      break;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 8. Every figure the asset contract publishes, against the built furniture.
 // ---------------------------------------------------------------------------
 
@@ -877,6 +942,11 @@ console.log(
     `child, ${exemptFlat} floor treatment under ${FLOOR_TREATMENT_MAX_HEIGHT} m tall, ` +
     `${exemptWall} wall furniture within ${WALL_FURNITURE_REACH} m of its wall. All three ` +
     `exemptions are measured off the object, never taken from its name.`,
+);
+console.log(
+  `check:castle shafts OK — ${shaftChecked} floor-standing props measured against ` +
+    `${BUILDING_SHAFTS.length} shafts, none inside one. A shaft's structure comes down through ` +
+    `every storey even where the floor is solid, which deckIsSolid does not say.`,
 );
 console.log(
   `check:castle contract OK — ${contractChecked} published figures measured against the ` +

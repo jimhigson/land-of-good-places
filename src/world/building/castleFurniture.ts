@@ -19,6 +19,7 @@ import {
   type FeastProp,
 } from '../../art/models/castleAssets';
 import { castleFloorMaterial } from './castleFabric';
+import { BUILDING_SHAFTS, regionContains } from './layout';
 import { CASTLE_HEARTH, castleTorchAnchors, type WallAnchor } from './castleLighting';
 
 /**
@@ -170,6 +171,17 @@ const TABLE_FROM_THRONE = 10;
 /** How far the benches sit from the table's own axis. */
 const BENCH_OFFSET = 1.85;
 
+/**
+ * The bench's own half-extents, and how far along the table each pair sits.
+ *
+ * Named rather than inlined because {@link feastIsClearOfShafts} has to predict
+ * the footprint {@link feast} will build, and two copies of that arithmetic is
+ * the bug this whole file's header is about.
+ */
+const BENCH_HALF_WIDTH = 0.3;
+const BENCH_HALF_LENGTH = 1.4;
+const BENCH_ALONG = 1.55;
+
 /** The dais the throne stands on: broad enough to step onto from any side. */
 const DAIS_HALF_X = 1.6;
 const DAIS_HALF_Z = 1.2;
@@ -201,9 +213,8 @@ export function dressGreatHall(deck: number, floor: Group): void {
   const group = new Group();
   group.name = castleFurnitureGroupName(deck);
 
-  // The hall's axis: the middle bay of the three, so the throne is centred on
-  // its own tapestry by construction rather than by two numbers that agree.
-  const centre = bays[1] as WallAnchor;
+  const centre = hallAxis(bays);
+  if (!centre) return;
   const wallZ = centre.z;
   // Into the room, away from whichever wall the bay is on.
   const inward = centre.out.z;
@@ -248,6 +259,64 @@ export function dressGreatHall(deck: number, floor: Group): void {
   group.add(chest.root);
 
   floor.add(group);
+}
+
+/**
+ * Which bay the hall is laid out on — **chosen by testing, not typed.**
+ *
+ * The middle of the three is preferred, because a throne centred among its
+ * tapestries with one either side is the composition a great hall wants. But a
+ * bay is only usable if the feast that runs down its axis clears the
+ * building's shafts, and the middle one **does not**: the helter-skelter's tube
+ * comes down through `HELTER_SHAFT` (x 16.5–23.5) and the middle bay's eastern
+ * benches stand at x 16.50–17.10, inside it.
+ *
+ * That was not caught by `keepOutsFor` — which guards the helter's disc on the
+ * deck a child gets *on* at, not the deck the tube passes through — and it was
+ * not caught by `deckIsSolid`, which correctly says the ground floor has no
+ * holes. It was caught by looking at a screenshot and finding a slide growing
+ * out of the dinner table, and it is now `check:castle`'s shaft assertion.
+ *
+ * So this asks rather than assumes, and it keeps asking: when #377 removes the
+ * helter-skelter the middle bay becomes usable again and the hall re-centres
+ * itself with no edit here. A typed axis would have had to be remembered.
+ */
+function hallAxis(bays: readonly WallAnchor[]): WallAnchor | null {
+  // Middle first, then out to the sides — best composition that actually fits.
+  const order = [1, 0, 2].filter((i) => i < bays.length);
+  for (const index of order) {
+    const bay = bays[index];
+    if (bay && feastIsClearOfShafts(bay)) return bay;
+  }
+  return null;
+}
+
+/**
+ * Would the feast laid on this bay's axis stand inside one of the building's
+ * shafts?
+ *
+ * Measures the footprint the feast will actually occupy — the table's own
+ * half-width plus the benches beyond it, and the benches' full run — against
+ * {@link BUILDING_SHAFTS}. Deliberately the *same* arithmetic {@link feast}
+ * uses, from the same constants, so a change to the bench offset moves this
+ * test with it rather than leaving it describing an older layout.
+ */
+function feastIsClearOfShafts(bay: WallAnchor): boolean {
+  const axisX = bay.x;
+  const tableZ = bay.z + bay.out.z * (THRONE_FROM_WALL + TABLE_FROM_THRONE);
+  // The benches reach further than the table on both axes.
+  const halfX = BENCH_OFFSET + BENCH_HALF_WIDTH;
+  const halfZ = BENCH_ALONG + BENCH_HALF_LENGTH;
+  for (const shaft of BUILDING_SHAFTS) {
+    for (let i = 0; i <= 4; i += 1) {
+      for (let j = 0; j <= 4; j += 1) {
+        const x = axisX - halfX + (halfX * 2 * i) / 4;
+        const z = tableZ - halfZ + (halfZ * 2 * j) / 4;
+        if (regionContains(shaft.region, x, z)) return false;
+      }
+    }
+  }
+  return true;
 }
 
 /** One tapestry: cloth and rail, both hung from {@link CASTLE_TAPESTRY_RAIL_Y}. */
@@ -324,7 +393,7 @@ function feast(x: number, z: number): Object3D[] {
   // Two benches a side rather than one 6 m one: the asset is 2.80 m, and four
   // of them is what the contract asked for.
   for (const side of [-1, 1]) {
-    for (const along of [-1.55, 1.55]) {
+    for (const along of [-BENCH_ALONG, BENCH_ALONG]) {
       const bench = createCastleBench();
       bench.root.position.set(x + side * BENCH_OFFSET, 0, z + along);
       out.push(bench.root);
