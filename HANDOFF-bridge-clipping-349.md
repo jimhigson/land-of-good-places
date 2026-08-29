@@ -87,7 +87,62 @@ has masonry under it", not "…is inside the plan footprint".** The second versi
 fails on harmless ramp-foot paving and would have to be fudged to go green —
 exactly the shape of assertion CLAUDE.md warns about.
 
-## Left to do, in order
+## Done (2026-08-29)
+
+**The fix** (`d8bc1c5`). `bridgeRoadHalfFor(crossing)` in `bridgeFootprint.ts` is
+now the single owner of the road's width — `pathHalfWidth + PATH_KERB_OVERHANG`,
+the *drawn* paving including its kerb. `halfAcross`, `walkHalfFor` and the deck
+search all measure off it. In `bridges.ts`, `pavingHeightAt`'s across limit is
+`Math.min(roadHalf + PATH_CARRIER_SLACK, halfAcross)` — the `min` is what makes
+the stone the single authority, so the two numbers cannot drift apart again
+however the constants move.
+
+`PATH_KERB_OVERHANG` is no longer imported by `bridges.ts` at all, which is the
+structural point: the module that lifts the paving no longer does its own
+kerb arithmetic.
+
+**Measurement, built canonical park** — floating paving outside its own bridge's
+masonry plan:
+
+| bridge | before | after |
+| --- | --- | --- |
+| `bridge-172.0` | 56 vertices, worst 0.371 m | **0, worst 0** |
+| `bridge-266.0` | 54 vertices, worst 0.125 m | **0, worst 0** |
+
+**The invariant** (`36e0f5f`, `3f32667`): `bridgePavingIsCarriedByItsOwnMasonry`
+in `invariants.ts`, fed by `BridgePavingFact` in `parkFacts.ts` (the measurement
+lives in the fact because it needs `terrainHeight`, which only a dynamic import
+may reach). Guards the vacuous case where no bridge lifts any paving at all.
+
+Broken deliberately (re-widening the lift test off the clamp) it says:
+
+```
+bridge-172.0 lifts 8 of its 162 carried paving vertices past its own masonry:
+the worst (path-surface) sits 0.361 m outside the stone in plan at (-21.2, 43.2),
+2.87 m above the ground under it — that paving is hanging in mid-air past the
+parapet, and it is what clips through the masonry
+```
+
+**Five seeds**: `npm run test:procgen` → 448 passed / 14 files, exit 0.
+
+**No seed lost a bridge** to the 0.85 m of extra width (the handoff's flagged
+risk). Bridges built, before → after, identical on every seed:
+
+| seed | crossings | bridges | fallbacks |
+| --- | --- | --- | --- |
+| canonical | 2 | 2 → 2 | 0 → 0 |
+| 2 | 4 | 3 → 3 | 1 → 1 |
+| 5 | 4 | 3 → 3 | 1 → 1 |
+| 11 | 4 | 2 → 2 | 2 → 2 |
+| 18 | 3 | 3 → 3 | 0 → 0 |
+
+Note `npm install` was needed in the worktree: the shared checkout's
+`node_modules` has no `vitest` and no `playwright-core`.
+
+**Left**: full `npm run build`, headless before/after screenshots (port 5341),
+PR.
+
+## Left to do, in order (original)
 
 1. Give the ribbon and the masonry one owner for where the paving ends. Intended
    shape: the bridge's road is the **drawn paving's** half-width
