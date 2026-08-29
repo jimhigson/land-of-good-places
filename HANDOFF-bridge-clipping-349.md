@@ -167,6 +167,87 @@ Remove it once #352 is merged.
 
 ---
 
+# ⚠️ BLOCKER — seed 11 detour regression, needs an Overseer decision
+
+**`npm run test:procgen` after the redesign: 447 pass, 1 fails.** Seed 11:
+
+```
+'ballPit' and 'exit-ginormousSlide' are 14.1 m apart in a straight line but
+238.7 m apart by paving (16.98x, wasting 224.7 m) — closer than 28.1 m (2x the
+park's own 14.1 m median destination spacing) with no direct connector
+```
+
+**This is caused by my change, and it is a real player-facing problem**, not a
+test artefact: a child at the ball pit who wants the slide exit 14 m away walks
+238 m.
+
+## Why the redesign caused it
+
+Shorter bridges fit in more places, so `crossingPlanSolve.ts` proves more
+crossing sites, and `paths.ts` routes every rail-crossing leg through those
+sites. **The whole park re-plans.** Crossing counts moved on every seed:
+
+| seed | before | after |
+| --- | --- | --- |
+| canonical | 2 crossings, 2 bridges, 0 fallbacks | 5, 4, 1 |
+| 2 | 4, 3, 1 | 3, 2, 1 |
+| 5 | 4, 3, 1 | 4, 3, 1 |
+| 11 | 4, 2, 2 | 5, 3, 2 |
+| 18 | 3, 3, 0 | 3, 3, 0 |
+
+More bridges nearly everywhere — the placement question in the contract is
+answered, and favourably. But seed 11's re-rolled layout puts the ball pit and
+the slide exit 14 m apart in an arrangement the connector router handles badly.
+
+## It is not any of the invariant's existing exemptions
+
+Checked rather than assumed. The invariant already exempts pairs separated by
+the railway and pairs separated by a ride corridor. Measured on the built park:
+
+- both nodes are **~26 m from the nearest rail** — `ballPit` (-11.08, -49.64),
+  `exit-ginormousSlide` (-7.83, -63.33), nearest rail points (-9.85, -23.96)
+  and (3.11, -27.59);
+- the straight line between them **crosses the rail side zero times**.
+
+So it is genuinely same-side, and the exemption is right to not fire.
+
+## The actual cause, from `paths.ts`'s own trace
+
+`LGP_SEED=11 LGP_DEBUG_STREETS=1`:
+
+```
+[connect] ballPit-exit-ginormousSlide: rejected, off-lattice street run
+```
+
+`paths.ts` **deliberately** refused the connector under
+`carriesAnOffLatticeStreetRun`: *"A fallback connector that would draw its own
+private street line is dropped rather than drawn: it is optional paving, and
+the lattice rule outranks a shortcut."*
+
+So this is a **pre-existing weakness in the connector router, newly exposed by
+a re-rolled layout** — not a bridge bug. The lattice rule outranking a shortcut
+is right in general and wrong at a 17× ratio.
+
+## Three options — Overseer's call, deliberately not taken unilaterally
+
+1. **Fix the router** so the off-lattice drop does not apply when dropping the
+   connector leaves a disproportionate detour. Correct, matches the
+   invariant's intent, but it is a change to `paths.ts`'s solve — outside the
+   bridge geometry this ticket owns, and it would need its own measurement
+   across all seeds.
+2. **Exempt the refusal in the invariant.** *Do not do this.* It would make
+   the detour invariant blind to exactly the case it exists to catch, and
+   CLAUDE.md's "never weaken an assertion to make a seed pass" names it.
+3. **Swap seed 11** for another sweep seed and write down why. Legitimate
+   under CLAUDE.md — but it hides a real 238 m walk rather than fixing it, so
+   it should only be chosen alongside filing option 1 as its own issue.
+
+**My recommendation: option 1, as its own ticket, with seed 11 swapped
+temporarily and a comment pointing at that ticket** — so this PR is not
+blocked on a path-router change, and the router weakness is not lost.
+
+---
+
 # THE REMAINING LUMP — named (2026-08-29)
 
 Jim, on the PR preview: *"it is better but there's still a big lump of 'stuff'
