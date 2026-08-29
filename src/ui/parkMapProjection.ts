@@ -191,6 +191,71 @@ export function clampMapView(
 }
 
 /**
+ * Slides the view by a drag, in canvas pixels.
+ *
+ * The world moves *with* the finger, so dragging right reveals what is to the
+ * left — which means the centre moves the opposite way. Expressed in world
+ * metres by dividing by the live scale, so a drag covers the same amount of
+ * park per pixel however far in the child has zoomed.
+ */
+export function pannedBy(
+  view: MapView,
+  dxPx: number,
+  dyPx: number,
+  canvasWidth: number,
+  canvasHeight: number,
+): MapView {
+  const projection = outdoorParkMapProjection(canvasWidth, canvasHeight, view);
+  return clampMapView(
+    {
+      zoom: view.zoom,
+      centreX: view.centreX - dxPx / projection.scale,
+      centreZ: view.centreZ - dyPx / projection.scale,
+    },
+    canvasWidth,
+    canvasHeight,
+  );
+}
+
+/**
+ * Zooms to `nextZoom` while pinning the world point under a focal pixel.
+ *
+ * This is what makes pinch and wheel feel like the map rather than a slider:
+ * the castle stays under the finger that is pinching on it. Without it the
+ * view zooms about the canvas centre and whatever the child was looking at
+ * slides away, which reads as the map fighting her.
+ *
+ * Derived rather than tuned: solve `toCanvas(world) === focal` for the new
+ * centre at the new scale. Because it goes through the same one projection,
+ * the pinned point is pinned exactly, not approximately.
+ */
+export function zoomedAboutPoint(
+  view: MapView,
+  nextZoom: number,
+  focalPxX: number,
+  focalPxY: number,
+  canvasWidth: number,
+  canvasHeight: number,
+): MapView {
+  const before = outdoorParkMapProjection(canvasWidth, canvasHeight, view);
+  const [worldX, worldZ] = before.toPlane(focalPxX, focalPxY);
+
+  const base = frameExtent(PARK_BOUNDARY.extent, canvasWidth, canvasHeight);
+  const zoom = Math.min(MAP_MAX_ZOOM, Math.max(MAP_MIN_ZOOM, nextZoom));
+  const scale = base.scale * zoom;
+
+  return clampMapView(
+    {
+      zoom,
+      centreX: worldX + (base.canvasWidth / 2 - focalPxX) / scale,
+      centreZ: worldZ + (base.canvasHeight / 2 - focalPxY) / scale,
+    },
+    canvasWidth,
+    canvasHeight,
+  );
+}
+
+/**
  * **The outdoor map's viewport.** The only way `ParkMap` is allowed to get one.
  *
  * This exists so that `ParkMap` has no *choice* to make about what to frame,

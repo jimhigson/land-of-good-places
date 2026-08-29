@@ -13,7 +13,16 @@ import { ENTRANCE_GATE_HALF_WIDTH } from '../world/entrance/layout';
 import { CAT_BUS_LENGTH, CAT_BUS_ROUTE_NUMBER } from '../world/entrance/catBus';
 import { MAP_PALETTE, drawIcon } from './parkMapArt';
 import { parkMapFeatures, type MapFeature } from './parkMapContent';
-import { frameHalfExtent, outdoorParkMapProjection, type MapProjection } from './parkMapProjection';
+import {
+  clampMapView,
+  defaultMapView,
+  frameHalfExtent,
+  outdoorParkMapProjection,
+  pannedBy,
+  zoomedAboutPoint,
+  type MapProjection,
+  type MapView,
+} from './parkMapProjection';
 import type { World } from '../world/World';
 import type { Player } from '../entities/Player';
 import { SLIDE_PLAN } from '../world/slide/plan';
@@ -92,6 +101,15 @@ import {
 
 const PLAYER_MARKER_COLOUR = PALETTE.markerPink;
 const REACHABLE_TOLERANCE_SQ = 0.05 * 0.05;
+
+/**
+ * Pixels of wheel travel treated as one notch of map zoom (#359).
+ *
+ * Matches `core/input/PointerControls.ts`'s own notch size, so a trackpad
+ * flick over the map feels like the same gesture that zooms the park — the two
+ * are separate zooms of separate things and must not *feel* separate.
+ */
+const WHEEL_NOTCH_PX = 100;
 
 /**
  * Names for the two booths whose own copy lives inside a three.js module
@@ -285,6 +303,39 @@ export class ParkMap {
 
   private projection: MapProjection = frameHalfExtent(1, 1, 1, 1);
   private scale = 1;
+
+  /**
+   * How far in the child has zoomed and what she is looking at (#359).
+   *
+   * `null` means "not chosen yet" — the first render frames the whole park via
+   * `defaultMapView`, which needs a canvas size and so cannot be settled in a
+   * field initialiser. Reset to `null` on close, so the map always opens
+   * showing the whole park rather than wherever she left it: a six-year-old
+   * who opens the map to find out where she is wants the overview, and a map
+   * that reopens zoomed into a corner reads as broken.
+   *
+   * Outdoor only. The indoor floor plan has one screen's worth of building and
+   * nothing to pan to.
+   */
+  private view: MapView | null = null;
+
+  /** Live pointers on the map canvas, for drag-to-pan and pinch-to-zoom. */
+  private readonly mapPointers = new Map<number, { x: number; y: number }>();
+  /** Finger separation when the current pinch began, in canvas pixels. */
+  private pinchStartDistance = 0;
+  /** Zoom when the current pinch began — pinch is relative to it, not cumulative. */
+  private pinchStartZoom = 1;
+  /**
+   * Set once a gesture has moved far enough to be a drag rather than a tap.
+   *
+   * Without this, panning the map would also walk the child to wherever her
+   * finger came to rest — the tap-to-walk plumbing of #309/#315 fires on
+   * pointer *up*. The threshold is in CSS pixels and generous, because a
+   * six-year-old's tap is not still.
+   */
+  private gestureMoved = false;
+  /** Where the current one-finger gesture began, for the drag-slop test. */
+  private gestureStart: { x: number; y: number } | null = null;
   private canvasCssWidth = 0;
   private canvasCssHeight = 0;
   /** Rebuilt every render; see `drawLabel`. */
@@ -376,7 +427,19 @@ export class ParkMap {
     const ctx = this.canvas.getContext('2d');
     if (!ctx) throw new Error('ParkMap: 2D canvas context unavailable');
     this.ctx = ctx;
-    this.canvas.addEventListener('pointerdown', (event) => this.onCanvasTap(event));
+    // **Tap fires on pointer *up*, not down (#359).** It used to fire on
+    // `pointerdown`, which cannot coexist with drag-to-pan: the walk would be
+    // committed before the child had moved her finger far enough for the
+    // gesture to be recognised as a pan. `onCanvasPointerUp` runs the same tap
+    // handler, but only when the gesture never became a drag.
+    this.canvas.addEventListener('pointerdown', (event) => this.onCanvasPointerDown(event));
+    this.canvas.addEventListener('pointermove', (event) => this.onCanvasPointerMove(event));
+    this.canvas.addEventListener('pointerup', (event) => this.onCanvasPointerUp(event));
+    this.canvas.addEventListener('pointercancel', (event) => this.onCanvasPointerLost(event));
+    // `{ passive: false }`: the wheel must zoom the map, never scroll the page
+    // behind it. Scoped to the map's own canvas, so the shop and the Cute-o-dex
+    // keep scrolling normally — the same rule `PointerControls` follows.
+    this.canvas.addEventListener('wheel', (event) => this.onCanvasWheel(event), { passive: false });
     this.canvasWrap.append(this.canvas);
 
     this.hint = document.createElement('p');
@@ -428,6 +491,15 @@ export class ParkMap {
     this.open = false;
     this.root.dataset.open = 'false';
     this.button.dataset.active = 'false';
+    // Next open frames the whole park again (#359). A child opening the map
+    // wants to know where she is; reopening zoomed into the corner she left it
+    // in reads as the map being broken. Gesture state goes with it, so a
+    // finger lifted outside the canvas cannot leave a pinch half-started.
+    this.view = null;
+    this.mapPointers.clear();
+    this.pinchStartDistance = 0;
+    this.gestureMoved = false;
+    this.gestureStart = null;
     if (this.pausedByUs) {
       this.pausedByUs = false;
       gameStore.setPaused(false);
@@ -473,6 +545,142 @@ export class ParkMap {
     if (next < 0 || next > TOP_DECK) return;
     this.viewingDeck = next;
     this.render();
+  }
+
+  // --------------------------------------------------------- pan and zoom
+
+  /**
+   * How far a pointer may travel and still count as a tap, in CSS pixels.
+   *
+   * Generous on purpose. A six-year-old pressing a phone with her thumb moves
+   * several pixels doing it, and a tap that silently became a pan — walking
+   * her nowhere and sliding the map instead — is far more confusing than a pan
+   * that needed a slightly firmer drag.
+   */
+  private static readonly DRAG_SLOP_PX = 8;
+
+  /** Canvas-relative pixel for a pointer event. */
+  private canvasPoint(event: PointerEvent): { x: number; y: number } {
+    const rect = this.canvas.getBoundingClientRect();
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  }
+
+  /** The live view, framing the whole park until the child moves it. */
+  private currentView(): MapView {
+    if (!this.view) this.view = defaultMapView(this.canvasCssWidth, this.canvasCssHeight);
+    return this.view;
+  }
+
+  private setView(next: MapView): void {
+    this.view = clampMapView(next, this.canvasCssWidth, this.canvasCssHeight);
+    this.render();
+  }
+
+  private onCanvasPointerDown(event: PointerEvent): void {
+    this.canvas.setPointerCapture(event.pointerId);
+    this.mapPointers.set(event.pointerId, this.canvasPoint(event));
+    if (this.mapPointers.size === 1) {
+      this.gestureMoved = false;
+      this.gestureStart = this.canvasPoint(event);
+    }
+    if (this.mapPointers.size === 2) {
+      // Two fingers: a pinch, and neither finger is a tap any more.
+      this.gestureMoved = true;
+      this.pinchStartDistance = this.pointerSeparation();
+      this.pinchStartZoom = this.currentView().zoom;
+    }
+  }
+
+  private onCanvasPointerMove(event: PointerEvent): void {
+    const previous = this.mapPointers.get(event.pointerId);
+    if (!previous) return;
+    const point = this.canvasPoint(event);
+    this.mapPointers.set(event.pointerId, point);
+
+    // The floor plan is one screen of building; nothing to pan to.
+    if (this.indoor) return;
+
+    if (this.mapPointers.size >= 2) {
+      const distance = this.pointerSeparation();
+      if (this.pinchStartDistance > 0 && distance > 0) {
+        const centre = this.pointerCentre();
+        this.setView(
+          zoomedAboutPoint(
+            this.currentView(),
+            this.pinchStartZoom * (distance / this.pinchStartDistance),
+            centre.x,
+            centre.y,
+            this.canvasCssWidth,
+            this.canvasCssHeight,
+          ),
+        );
+      }
+      return;
+    }
+
+    const dx = point.x - previous.x;
+    const dy = point.y - previous.y;
+    if (Math.hypot(dx, dy) > 0 && !this.gestureMoved) {
+      // Measured from where the gesture started, not summed per frame, so a
+      // slow drift over many small moves still becomes a drag.
+      const start = this.gestureStart ?? previous;
+      if (Math.hypot(point.x - start.x, point.y - start.y) > ParkMap.DRAG_SLOP_PX) {
+        this.gestureMoved = true;
+      }
+    }
+    if (this.gestureMoved) {
+      this.setView(pannedBy(this.currentView(), dx, dy, this.canvasCssWidth, this.canvasCssHeight));
+    }
+  }
+
+  private onCanvasPointerUp(event: PointerEvent): void {
+    const wasDrag = this.gestureMoved;
+    const hadTwo = this.mapPointers.size >= 2;
+    this.onCanvasPointerLost(event);
+    // A tap only when this gesture never became a pan or a pinch. `hadTwo`
+    // covers lifting one finger of a pinch: the second lift must not walk her.
+    if (!wasDrag && !hadTwo) this.onCanvasTap(event);
+  }
+
+  private onCanvasPointerLost(event: PointerEvent): void {
+    this.mapPointers.delete(event.pointerId);
+    if (this.canvas.hasPointerCapture(event.pointerId)) {
+      this.canvas.releasePointerCapture(event.pointerId);
+    }
+    if (this.mapPointers.size < 2) this.pinchStartDistance = 0;
+    if (this.mapPointers.size === 0) this.gestureStart = null;
+  }
+
+  private onCanvasWheel(event: WheelEvent): void {
+    if (this.indoor) return;
+    // Always, so the page never scrolls under a wheel that landed on the map.
+    event.preventDefault();
+    const rect = this.canvas.getBoundingClientRect();
+    // One notch is a fixed ratio rather than a fixed step, so zooming feels
+    // the same at every level — the same reason the camera's own zoom damps.
+    const factor = Math.exp((-event.deltaY / WHEEL_NOTCH_PX) * 0.2);
+    this.setView(
+      zoomedAboutPoint(
+        this.currentView(),
+        this.currentView().zoom * factor,
+        event.clientX - rect.left,
+        event.clientY - rect.top,
+        this.canvasCssWidth,
+        this.canvasCssHeight,
+      ),
+    );
+  }
+
+  private pointerSeparation(): number {
+    const [a, b] = [...this.mapPointers.values()];
+    if (!a || !b) return 0;
+    return Math.hypot(b.x - a.x, b.y - a.y);
+  }
+
+  private pointerCentre(): { x: number; y: number } {
+    const [a, b] = [...this.mapPointers.values()];
+    if (!a || !b) return { x: this.canvasCssWidth / 2, y: this.canvasCssHeight / 2 };
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
   }
 
   // ------------------------------------------------------------------ tap
@@ -604,7 +812,7 @@ export class ParkMap {
     // fall off the edge of the map whatever shape the seed rolled.
     const projection = this.indoor
       ? frameHalfExtent(INTERIOR_HALF_X + 6, INTERIOR_HALF_Z + 4, this.canvasCssWidth, this.canvasCssHeight)
-      : outdoorParkMapProjection(this.canvasCssWidth, this.canvasCssHeight);
+      : outdoorParkMapProjection(this.canvasCssWidth, this.canvasCssHeight, this.currentView());
     this.projection = projection;
     this.scale = projection.scale;
 
