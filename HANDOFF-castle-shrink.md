@@ -138,8 +138,27 @@ four shafts and the perimeter ceiling beams.
 | `pnpm run check:shop-spacing` | 0 |
 | `pnpm run check:tap-spacing` | 0 |
 
-**Environment note:** the `pnpm` on `PATH` via fnm is broken here (its shim
-errors with a shell syntax error). `/opt/homebrew/bin/pnpm` 12.1.0 works.
+**Environment note:** ~~the `pnpm` on `PATH` via fnm is broken here (its shim
+errors with a shell syntax error). `/opt/homebrew/bin/pnpm` 12.1.0 works.~~
+
+**Correction (Overseer, 30 Aug) — struck rather than deleted, because the
+wrong version number is the whole lesson.** Just type `pnpm`. Do not
+hard-code `/opt/homebrew/bin/pnpm`, and the gates above were **not** run on
+12.1.0.
+
+- `/opt/homebrew/bin/pnpm` is **11.20.0**, not 12.1.0. It ran the pinned
+  commands correctly because **pnpm 10+ re-executes itself as the
+  `packageManager` version in `package.json` before doing any work**. What I
+  observed was the version switch working, not the binary's own version.
+- The genuinely broken one was the **fnm** pnpm 11.5.0 at the front of
+  `PATH`: it fetched 12.1.0 but never ran the postinstall that writes the
+  real binary, leaving a 282-byte prose placeholder the shell tried to parse
+  — hence `syntax error near unexpected token ')'`. **That is now fixed on
+  the machine** (fnm's pnpm upgraded to 11.24.0), so a plain `pnpm` resolves
+  per project from one shell.
+- **`pnpm --version` cannot tell you which version will actually run.** It is
+  a fast path that never consults the pin. That is how this was mis-diagnosed
+  twice, including by me above — I read `12.1.0` off it and believed it.
 
 ## Screenshots
 
