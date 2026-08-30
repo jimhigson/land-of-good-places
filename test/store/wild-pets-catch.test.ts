@@ -10,7 +10,7 @@ import { gameStore } from '../../src/state';
 import { shopItem } from '../../src/world/building/shops/catalogue';
 import type { IsoCamera } from '../../src/core/IsoCamera';
 import type { FrameContext } from '../../src/core/types';
-import type { InputSystem } from '../../src/core/InputSystem';
+import type { InputSystem } from '../../src/core/input';
 
 /**
  * **Catching a wild one, and the two promises that make the chase fair.**
