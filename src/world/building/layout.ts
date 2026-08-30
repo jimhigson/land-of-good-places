@@ -909,8 +909,24 @@ const MARKET_ROW_SEPARATION = Math.max(
 /** Clear floor down the middle of the market. */
 export const MARKET_AISLE_WIDTH = MARKET_ROW_SEPARATION - MARKET_STALL;
 
-/** The perimeter ceiling beam's own width — no stall stands under one. */
-const MARKET_BEAM_INSET = 0.8;
+/**
+ * How far the north row stands off the north wall.
+ *
+ * The perimeter ceiling beam is 0.8 m of it — no stall stands under one. The
+ * rest is the **hearth**, which sits in that wall with its fire and its
+ * woodpile, and whose props `check:castle` measures against every shop's
+ * queue keep-out. Anchored flush inside the beam the north row's serving
+ * spots came within 3.62 m of the fire where the keep-out needs 4.62; 1.8 m
+ * off the wall clears it by 0.6 m.
+ *
+ * Measured, not chosen: `scripts/measure-market-floor.mts` rasterises the
+ * stall footprints, but the *keep-out* is a 4 m disc at three spots along each
+ * counter, which is a bigger thing than the stall — and it was `check:castle`
+ * that said so, on the built room. `CASTLE_HEARTH` cannot be imported here
+ * (`castleLighting.ts` imports this file), so the figure is written out with
+ * this note rather than derived.
+ */
+const MARKET_BEAM_INSET = 1.8;
 
 /** Centre of the stall in column `col` of row `row`. Row 0 is the north row. */
 export function marketCell(row: number, col: number): [number, number] {

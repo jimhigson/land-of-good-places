@@ -460,7 +460,7 @@ for (const stall of [3.6, 3.2, 2.8]) {
   const ROW_SEP = Math.max(STALL + WALK_AISLE, TAP_SEP);
   const PITCH_X = STALL + WALK_AISLE;
   const originX = minX + STALL / 2;
-  const originZ = minZ + STALL / 2;
+  const originZ = minZ - 0.8 + 1.8 + STALL / 2;
   console.log(
     `\nProposed market: stall ${STALL} m, along-row pitch ${PITCH_X.toFixed(2)} m, ` +
       `row separation ${ROW_SEP.toFixed(2)} m (aisle ${(ROW_SEP - STALL).toFixed(2)} m)`,
@@ -469,15 +469,84 @@ for (const stall of [3.6, 3.2, 2.8]) {
   for (let row = 0; row < 2; row += 1) {
     const z = originZ + row * ROW_SEP;
     const line: string[] = [];
-    for (let col = 0; col < 4; col += 1) {
+    for (let col = 0; col < 6; col += 1) {
       const x = originX + col * PITCH_X;
       const ok = cellIsClear(x, z, STALL / 2);
       if (ok) clearCount += 1;
-      line.push(`(${x.toFixed(2)}, ${z.toFixed(2)}) ${ok ? 'clear' : 'BLOCKED by ' + [...new Set(whatBlocks(x, z, STALL))].join('/')}`);
+      line.push(`c${col} ${ok ? 'clear' : 'X:' + [...new Set(whatBlocks(x, z, STALL))].slice(0,2).join('/')}`);
     }
     console.log(`  row ${row}: ${line.join('  |  ')}`);
   }
-  console.log(`  -> ${clearCount} of 8 cells clear; seven stalls need seven.`);
+  console.log(`  -> ${clearCount} of 12 cells clear; seven stalls need seven.`);
+}
+
+/**
+ * **Sweep for a grid offset that seats seven stalls with their keep-outs.**
+ *
+ * The footprint sweep above was not enough, and that is the lesson of this
+ * script: a stall's *footprint* is 2.8 m square, but the thing that has to
+ * clear the room is its **queue keep-out** — a 4 m disc at each of three spots
+ * along the counter (`shopKeepOut`, `dressing.ts`), which `check:castle`
+ * measures against every fixed prop. Seven cells were clear by footprint and
+ * only six once the hearth's fire was measured against the keep-out, which
+ * `check:castle` caught on the built room and this had not.
+ *
+ * So the keep-out is modelled here now. Sweeps the grid's origin and reports
+ * offsets that seat all seven.
+ */
+{
+  const STALL = 2.8;
+  const SCALE = 0.8;
+  const KEEP_R = 2.6 + 1.4;
+  const CHECK_MARGIN = 0.62; // check:castle demands radius + this
+  const WALK = 2 * PLAYER_RADIUS + 1.2;
+  const PITCH = STALL + WALK;
+  const ROW_SEP = Math.max(PITCH, 2.3 + 2.3 + 1.13);
+
+  // Fixed props the keep-out must clear: the hearth's fire and woodpile.
+  const HEARTH = { x: -14 * Math.SQRT1_2, z: -INTERIOR_HALF_Z + 0.85 };
+
+  const seats = (offX: number, offZ: number): { row: number; col: number }[] => {
+    const ok: { row: number; col: number }[] = [];
+    for (let row = 0; row < 2; row += 1) {
+      for (let col = 0; col < 6; col += 1) {
+        const x = minX + STALL / 2 + offX + col * PITCH;
+        const z = minZ + STALL / 2 + offZ + row * ROW_SEP;
+        if (!cellIsClear(x, z, STALL / 2)) continue;
+        // Three keep-out spots along the counter, facing into the aisle.
+        const face = row === 0 ? 1 : -1;
+        let clean = true;
+        for (const along of [-1.8, 0, 1.8]) {
+          const sx = x + along * SCALE;
+          const sz = z + face * 2 * SCALE;
+          if (Math.hypot(sx - HEARTH.x, sz - HEARTH.z) < KEEP_R + CHECK_MARGIN) clean = false;
+        }
+        if (clean) ok.push({ row, col });
+      }
+    }
+    return ok;
+  };
+
+  let best: { n: number; offX: number; offZ: number; cells: { row: number; col: number }[] } | null = null;
+  for (let a = 0; a <= 40; a += 1) {
+    for (let b = 0; b <= 40; b += 1) {
+      const offX = (a / 40) * PITCH;
+      const offZ = (b / 40) * ROW_SEP;
+      const cells = seats(offX, offZ);
+      if (!best || cells.length > best.n) best = { n: cells.length, offX, offZ, cells };
+      if (best.n >= 7) break;
+    }
+    if (best && best.n >= 7) break;
+  }
+  console.log('\nSweep with the queue keep-out modelled:');
+  if (best) {
+    console.log(`  best ${best.n} seat(s) at offset (${best.offX.toFixed(2)}, ${best.offZ.toFixed(2)})`);
+    for (const c of best.cells) {
+      const x = minX + STALL / 2 + best.offX + c.col * PITCH;
+      const z = minZ + STALL / 2 + best.offZ + c.row * ROW_SEP;
+      console.log(`      row ${c.row} col ${c.col} -> (${x.toFixed(2)}, ${z.toFixed(2)})`);
+    }
+  }
 }
 
 console.log(`\nDecks: ${TOP_DECK + 1}. Every figure above is one plan, because collision is height-blind.`);

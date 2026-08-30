@@ -267,6 +267,52 @@ is the next piece of work.
   radius is comfortable, but the aisle-side serving spots are what to verify.
 - Screenshots **standing in an aisle at player height**, not overhead.
 
+## MARKET STATUS — built, and `check:castle` is RED. Read this before touching it.
+
+The market is implemented and derives from the plate (`marketCell`,
+`MARKET_PITCH_X`, `MARKET_ROW_SEPARATION` in `layout.ts`). It does **not** yet
+seat all seven shops, and I did not force it to.
+
+**37 failures, all from one stall.** Every one is against the queue keep-out of
+the single cell **row 0, col 1** at `(-13.77, -12.35)`, whose three keep-out
+spots sit at `x = -14.2, -12.8, -11.3, z = -10.8`. What they hit:
+
+| prop | measured | needs |
+|---|---|---|
+| `castle-hearth-logs-0[0]` | 4.05 m | 4.62 m |
+| `castle-flame-0[20..22]` | 3.89-4.29 m | 4.62 m |
+| `castle-flamecore-0[20..22]` | 4.03-4.44 m | 4.62 m |
+| NPC children (20 of them) | 4.29-4.52 m | 4.62 m |
+
+**The lesson, and why the probe missed it:** a stall's *footprint* is 2.8 m
+square, but the thing that must clear the room is its **queue keep-out** — a
+4.0 m disc at each of three spots along the counter (`shopKeepOut`). Seven
+cells are clear by footprint; only six are clear once the keep-out is measured.
+`check:castle` caught it on the built room. The probe now models the keep-out
+too, but its hearth position is approximate — **`check:castle` is the oracle,
+not the probe.**
+
+**Capacity, measured:** the north strip is 11.8 m deep (north wall to the shaft
+band). Two rows of stalls plus the aisle need 8.53 m of that, leaving 3.27 m of
+slack — not enough to also clear the hearth's fire, which reaches about 4.6 m
+into the room. Moving the north row south by 1 m bought only 0.27 m of
+clearance, so no offset fixes it: the sweep confirms **6 of 7**.
+
+### The decision I did not take on my own
+
+Two ways out, both needing a ruling:
+
+1. **Move the hearth** (or its fire/woodpile) a metre or two west along the
+   north wall. It is great-hall furniture and #388 was reviewed on its layout,
+   so per the Overseer this is not mine to move unasked.
+2. **Two aisles instead of one** — a shorter north row plus a second pair of
+   rows in the south strip, which is free apart from the roundel and the
+   toilets. More work, and it splits the market in two.
+
+**Do not** shrink the shop keep-out to make the seventh fit. It is 4.0 m
+because that is the counter, the serving spot and room to queue; the counter
+got smaller but the queue did not.
+
 ## Coordination
 
 - **#401** (remove the bubble) is untouched by this and frees a 2.1 m circle;
