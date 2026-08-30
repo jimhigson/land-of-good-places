@@ -63,6 +63,8 @@ export class Hud {
   private lookHandler: (() => void) | null = null;
   /** See {@link setLookAvailable}. Starts true: she spawns on her own feet. */
   private lookAvailable = true;
+  /** See {@link setMenuAvailable}. Starts true: she spawns on her own feet. */
+  private menuAvailable = true;
   private promptText: string | null = null;
   private hintOpen = false;
 
@@ -249,6 +251,48 @@ export class Hud {
     if (this.lookAvailable === available) return;
     this.lookAvailable = available;
     this.lookButton.style.display = available ? '' : 'none';
+  }
+
+  /**
+   * Whether the menu is offered at all — the button **and** everything behind
+   * it. False while an attraction has her (issue #404).
+   *
+   * Jim, 30 August 2026: *"There are times when the menu button is not
+   * appropriate, nor the map. The menu button should only show during normal
+   * gameplay. It should hide during attractions."*
+   *
+   * ## Why this hides the drawer and not the button
+   *
+   * `this.menu` is the button *and* `hud-menu-items`, and `hud-menu-items` is
+   * where every panel that wants a pill mounts one by name — `ParkMap` and
+   * `CuteODex` both append into it from outside this file. Hiding the parent
+   * therefore takes the map away with the button, which is the other half of
+   * what Jim asked for, and takes away **any pill added there in future**
+   * without that pill's author knowing this rule exists. Hiding
+   * `this.menuButton` alone would have left the drawer's own contents as a
+   * second thing to remember, and the map would have had to be told
+   * separately — two definitions of "not now", kept in step by hand.
+   *
+   * The map was *already* refused mid-ride (`ParkMap.openMap`'s `blocked()`
+   * dependency, and the `M` key goes through the same `toggle`). What changes
+   * is that its pill is no longer sitting there pressable and inert: a button
+   * that does nothing when a six-year-old presses it reads as the game being
+   * broken. So it hides rather than greys out — the same choice the money
+   * pill and the "Look" pill already make.
+   *
+   * An open menu is **closed** on the way in, before it is hidden. `menuOpen`
+   * left true behind a hidden element is a drawer sitting open on the frame
+   * the ride ends, which is not what "the ride is over" should look like.
+   *
+   * Called every frame from `Game.tick`, so it short-circuits when nothing has
+   * changed — same shape as {@link setLookAvailable}, and for the same reason:
+   * re-asserting a derived fact every frame is what stops it drifting.
+   */
+  setMenuAvailable(available: boolean): void {
+    if (this.menuAvailable === available) return;
+    this.menuAvailable = available;
+    if (!available) this.setMenuOpen(false);
+    this.menu.style.display = available ? '' : 'none';
   }
 
   /**

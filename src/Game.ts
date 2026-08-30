@@ -56,6 +56,7 @@ import { gameStore, type CharacterCreationChoice } from './state';
 import type { SavedPlace } from './state/save';
 import { localToWorld, SPACE_GARDEN } from './world/spaces';
 import { OverlayPause } from './core/overlayPause';
+import { attractionOwnsTheScreen } from './core/attraction';
 
 /**
  * Where a brand-new player starts: **the park edge, at the gate, where the cat
@@ -551,7 +552,12 @@ export class Game {
       world: this.world,
       player: this.player,
       walkTo: (x, y, z) => this.tapNavigator.navigateTo(x, y, z),
-      blocked: () => this.miniGames.frozen || this.player.riding,
+      // The same question the HUD's own menu asks every frame, through the same
+      // one owner — see `core/attraction.ts`. It was written out longhand here
+      // and would have been written out longhand a second time in `tick` for
+      // #404, which is how "the map refuses but its pill is still there" gets
+      // to be a thing.
+      blocked: () => this.attractionHasHer(),
       // Issue #309: a map tap that lands on an attraction (a ride, a stall, the
       // hotel lobby, a garden cart…) walks her to its stand point and uses it
       // on arrival, instead of the old flat refusal a solid collider used to
@@ -1053,6 +1059,24 @@ export class Game {
   }
 
   /**
+   * True while an **attraction** has her — a ride posing the character, or a
+   * curtain mini-game with the park frozen behind it. See `core/attraction.ts`
+   * for why both terms are read back rather than set, and where the line
+   * between a ride and a transition is drawn.
+   *
+   * Narrower than {@link uiOwnsTheScreen}, deliberately: that one also counts
+   * the panels a child opened *from* the menu (a shop, the Cute-o-dex, the
+   * what's-new card), and the menu button has no business vanishing because
+   * somebody used it.
+   */
+  private attractionHasHer(): boolean {
+    return attractionOwnsTheScreen({
+      riding: this.player.riding,
+      miniGameFrozen: this.miniGames.frozen,
+    });
+  }
+
+  /**
    * True while a panel, a book, a ride or a mini-game owns the screen.
    *
    * One definition, shared by the action button, the sign reader and the
@@ -1457,6 +1481,12 @@ export class Game {
     // reasoning. Cheap enough to re-assert every frame; the setter itself
     // short-circuits when nothing changed.
     this.hud.setLookAvailable(!this.player.riding && !this.treeClimbing.playerClimbing);
+    // "The menu button should only show during normal gameplay. It should hide
+    // during attractions" (#404). Re-derived every frame from the ride's own
+    // grip on the character rather than announced by each ride, so a ride
+    // written next year cannot forget to give the button back — see
+    // `core/attraction.ts`. The setter short-circuits when nothing changed.
+    this.hud.setMenuAvailable(!this.attractionHasHer());
     // Re-derived every frame, like the shop's and the face-paint stall's.
     this.syncLookPaused();
 
