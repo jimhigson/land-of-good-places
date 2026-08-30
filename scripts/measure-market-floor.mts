@@ -249,4 +249,235 @@ for (const stall of [5.6, 4.8, 4.0, 3.6, 3.2]) {
   }
 }
 
+/**
+ * **The market block: two rows of stalls facing each other across an aisle.**
+ *
+ * The centred lattice above lands six contiguous cells and seven are needed,
+ * so this sweeps the lattice's origin over one whole pitch in both axes and
+ * asks, for every offset, what the best *pair of adjacent rows* is. A pair of
+ * rows is the thing that makes a market rather than a scatter: you walk down
+ * between them and a stall faces you from either side.
+ *
+ * Reported as an offset from the centred lattice so the result stays a
+ * property of the plate — `layout.ts` can take the pitch and the offset and
+ * re-lay the market at any plate size.
+ */
+function cellIsClear(x: number, z: number, half: number): boolean {
+  for (let dx = -half; dx <= half + 1e-9; dx += CELL) {
+    for (let dz = -half; dz <= half + 1e-9; dz += CELL) {
+      const i = Math.floor((x + dx - minX) / CELL);
+      const j = Math.floor((z + dz - minZ) / CELL);
+      if (i < 0 || j < 0 || i >= cols || j >= rows || !free[j]![i]) return false;
+    }
+  }
+  return true;
+}
+
+function bestMarketBlock(stall: number, aisle: number) {
+  const pitch = stall + aisle;
+  const half = stall / 2;
+  const steps = 24;
+  let best: {
+    total: number;
+    offX: number;
+    offZ: number;
+    rowA: number;
+    rowB: number;
+    xsA: number[];
+    xsB: number[];
+  } | null = null;
+
+  for (let sx = 0; sx < steps; sx += 1) {
+    for (let sz = 0; sz < steps; sz += 1) {
+      const offX = (sx / steps) * pitch;
+      const offZ = (sz / steps) * pitch;
+      // Every lattice column and row that fits on the plate at this offset.
+      const xs: number[] = [];
+      for (let x = minX + half + offX; x <= maxX - half + 1e-9; x += pitch) xs.push(x);
+      const zs: number[] = [];
+      for (let z = minZ + half + offZ; z <= maxZ - half + 1e-9; z += pitch) zs.push(z);
+
+      for (let r = 0; r + 1 < zs.length; r += 1) {
+        const zA = zs[r]!;
+        const zB = zs[r + 1]!;
+        const xsA = xs.filter((x) => cellIsClear(x, zA, half));
+        const xsB = xs.filter((x) => cellIsClear(x, zB, half));
+        const total = xsA.length + xsB.length;
+        if (!best || total > best.total) {
+          best = { total, offX, offZ, rowA: zA, rowB: zB, xsA, xsB };
+        }
+      }
+    }
+  }
+  return best;
+}
+
+console.log('\nBest pair of facing rows — the market block:');
+for (const stall of [4.0, 3.6, 3.2]) {
+  const b = bestMarketBlock(stall, AISLE);
+  if (!b) continue;
+  const pitch = stall + AISLE;
+  console.log(
+    `  stall ${stall.toFixed(1)} m, pitch ${pitch.toFixed(2)} m -> ${b.total} stall(s) in two rows` +
+      (b.total >= 7 ? '   <= SEVEN FIT' : ''),
+  );
+  console.log(`      lattice offset (${b.offX.toFixed(2)}, ${b.offZ.toFixed(2)}) from the plate's low corner`);
+  console.log(`      row A z=${b.rowA.toFixed(2)}: x = ${b.xsA.map((v) => v.toFixed(2)).join(', ')}`);
+  console.log(`      row B z=${b.rowB.toFixed(2)}: x = ${b.xsB.map((v) => v.toFixed(2)).join(', ')}`);
+  console.log(`      aisle centre z = ${((b.rowA + b.rowB) / 2).toFixed(2)}, clear width ${AISLE.toFixed(2)} m`);
+}
+
+/**
+ * **What is standing in this cell?**
+ *
+ * A cell count is not actionable — "six of seven" needs a name before anything
+ * can move. Names every obstacle that overlaps a stall footprint, so the
+ * blocker can be argued about rather than guessed at.
+ */
+function whatBlocks(x: number, z: number, stall: number): string[] {
+  const half = stall / 2;
+  const hit: string[] = [];
+  for (const b of boxes) {
+    if (
+      x + half > b.minX - CLEAR &&
+      x - half < b.maxX + CLEAR &&
+      z + half > b.minZ - CLEAR &&
+      z - half < b.maxZ + CLEAR
+    ) {
+      hit.push(b.name);
+    }
+  }
+  for (const d of discs) {
+    const nearX = Math.max(x - half, Math.min(d.x, x + half));
+    const nearZ = Math.max(z - half, Math.min(d.z, z + half));
+    if (Math.hypot(nearX - d.x, nearZ - d.z) < d.radius + CLEAR) hit.push(d.name);
+  }
+  if (x - half < minX || x + half > maxX || z - half < minZ || z + half > maxZ) hit.push('off-plate');
+  return hit;
+}
+
+// The cell that keeps the market at six: row A's middle column.
+for (const [x, z, stall] of [
+  [-12.07, -12.7, 3.6],
+  [0.01, -12.7, 3.6],
+  [6.05, -6.66, 3.6],
+  [6.05, -12.7, 3.6],
+] as const) {
+  const hit = whatBlocks(x, z, stall);
+  console.log(
+    `\nCell (${x.toFixed(2)}, ${z.toFixed(2)}) at ${stall} m: ` +
+      (hit.length === 0 ? 'CLEAR' : `blocked by ${[...new Set(hit)].join(', ')}`),
+  );
+}
+
+/**
+ * **The tightest compact market block that holds seven stalls.**
+ *
+ * The pair-of-rows search above reaches seven only by counting a cell 24 m
+ * east of the others, which is a scatter and not a market. This searches
+ * **rectangular windows of the lattice** — adjacent rows by adjacent columns —
+ * and reports the smallest window that contains seven clear cells, so the
+ * stalls are actually within sight of each other down one aisle.
+ *
+ * Two or three rows: two rows is one aisle, three rows is two aisles, and a
+ * real market has either.
+ */
+function compactBlock(stall: number, aisle: number) {
+  const pitch = stall + aisle;
+  const half = stall / 2;
+  const steps = 16;
+  let best: { span: number; rows: number; cols: number; cells: { x: number; z: number }[] } | null =
+    null;
+
+  for (let sx = 0; sx < steps; sx += 1) {
+    for (let sz = 0; sz < steps; sz += 1) {
+      const xs: number[] = [];
+      for (let x = minX + half + (sx / steps) * pitch; x <= maxX - half + 1e-9; x += pitch) xs.push(x);
+      const zs: number[] = [];
+      for (let z = minZ + half + (sz / steps) * pitch; z <= maxZ - half + 1e-9; z += pitch) zs.push(z);
+
+      const clear = zs.map((z) => xs.map((x) => cellIsClear(x, z, half)));
+
+      for (let r0 = 0; r0 < zs.length; r0 += 1) {
+        for (const rowCount of [2, 3]) {
+          if (r0 + rowCount > zs.length) continue;
+          for (let c0 = 0; c0 < xs.length; c0 += 1) {
+            for (let colCount = 2; c0 + colCount <= xs.length; colCount += 1) {
+              const cells: { x: number; z: number }[] = [];
+              for (let r = r0; r < r0 + rowCount; r += 1) {
+                for (let c = c0; c < c0 + colCount; c += 1) {
+                  if (clear[r]![c]) cells.push({ x: xs[c]!, z: zs[r]! });
+                }
+              }
+              if (cells.length < 7) continue;
+              // Span of the window itself — smaller is tighter, so more of the
+              // market is in one frame.
+              const span = (colCount - 1) * pitch + (rowCount - 1) * pitch;
+              if (!best || span < best.span) {
+                best = { span, rows: rowCount, cols: colCount, cells: cells.slice(0, 7) };
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return best;
+}
+
+console.log('\nTightest compact block holding seven stalls:');
+for (const stall of [3.6, 3.2, 2.8]) {
+  const b = compactBlock(stall, AISLE);
+  const pitch = stall + AISLE;
+  if (!b) {
+    console.log(`  stall ${stall.toFixed(1)} m, pitch ${pitch.toFixed(2)} m -> NO compact block holds seven`);
+    continue;
+  }
+  const xs = b.cells.map((c) => c.x);
+  const zs = b.cells.map((c) => c.z);
+  console.log(
+    `  stall ${stall.toFixed(1)} m, pitch ${pitch.toFixed(2)} m -> ${b.rows} row(s) x ${b.cols} col(s), ` +
+      `footprint ${(Math.max(...xs) - Math.min(...xs) + stall).toFixed(2)} x ${(Math.max(...zs) - Math.min(...zs) + stall).toFixed(2)} m`,
+  );
+  for (const c of b.cells) console.log(`        (${c.x.toFixed(2)}, ${c.z.toFixed(2)})`);
+}
+
+/**
+ * **The proposed market, verified cell by cell.**
+ *
+ * Two rows of four anchored at the plate's inside north-west corner. The
+ * along-row pitch is the walking aisle; the **row separation is wider**,
+ * because two stalls facing each other across an aisle put their tap targets
+ * nose to nose and `check:tap-spacing` needs `TAP_FINGER_METRES` between them.
+ * Both numbers come from the game.
+ */
+{
+  const STALL = 2.8;
+  const WALK_AISLE = 2 * PLAYER_RADIUS + 1.2;
+  // Tap points sit 1.15 m in front of each stall's centre (interactZones), so
+  // two facing stalls' targets are `sep - 2.3` apart.
+  const TAP_SEP = 2.3 + 2.3 + 1.13;
+  const ROW_SEP = Math.max(STALL + WALK_AISLE, TAP_SEP);
+  const PITCH_X = STALL + WALK_AISLE;
+  const originX = minX + STALL / 2;
+  const originZ = minZ + STALL / 2;
+  console.log(
+    `\nProposed market: stall ${STALL} m, along-row pitch ${PITCH_X.toFixed(2)} m, ` +
+      `row separation ${ROW_SEP.toFixed(2)} m (aisle ${(ROW_SEP - STALL).toFixed(2)} m)`,
+  );
+  let clearCount = 0;
+  for (let row = 0; row < 2; row += 1) {
+    const z = originZ + row * ROW_SEP;
+    const line: string[] = [];
+    for (let col = 0; col < 4; col += 1) {
+      const x = originX + col * PITCH_X;
+      const ok = cellIsClear(x, z, STALL / 2);
+      if (ok) clearCount += 1;
+      line.push(`(${x.toFixed(2)}, ${z.toFixed(2)}) ${ok ? 'clear' : 'BLOCKED by ' + [...new Set(whatBlocks(x, z, STALL))].join('/')}`);
+    }
+    console.log(`  row ${row}: ${line.join('  |  ')}`);
+  }
+  console.log(`  -> ${clearCount} of 8 cells clear; seven stalls need seven.`);
+}
+
 console.log(`\nDecks: ${TOP_DECK + 1}. Every figure above is one plan, because collision is height-blind.`);
