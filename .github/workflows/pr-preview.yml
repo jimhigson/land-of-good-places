@@ -39,21 +39,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
           node-version: 26
-          cache: npm
+          cache: pnpm
 
       - name: Install dependencies
         # Registry hiccups are common enough to be worth retrying — same
-        # reasoning as deploy.yml.
-        run: npm ci --fetch-retries=5 --fetch-retry-maxtimeout=120000
+        # reasoning as deploy.yml; the counts live in `.npmrc`.
+        run: pnpm install --frozen-lockfile
 
       # Client bundle only — see the on: comment above for why the check
       # suite is deliberately not run here.
       - name: Build
-        run: npx vite build
+        run: pnpm exec vite build
 
       # `wrangler versions upload` publishes a new Worker *version* with its
       # own preview URL, without promoting it to production traffic — the

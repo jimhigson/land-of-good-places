@@ -20,8 +20,8 @@ The Overseer has final say on every merge; QA sign-off covers the routine.
 
 ## How to run a QA pass
 
-1. `npm ci` (if worktree) and `npm run build` — must be green, zero TS errors.
-2. `npm run dev`, open ONE Chrome page via the chrome-devtools MCP tools.
+1. `pnpm install --frozen-lockfile` (if worktree) and `pnpm run build` — must be green, zero TS errors.
+2. `pnpm run dev`, open ONE Chrome page via the chrome-devtools MCP tools.
    Test on desktop viewport AND an emulated touch phone (390×844).
 3. Console must stay clean (no errors or warnings) through the whole pass.
 4. BROWSER HYGIENE: one page max; close it and kill the dev server when done.

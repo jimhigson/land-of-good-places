@@ -271,7 +271,7 @@ ARCHITECTURE-DECISIONS.md Decision 2.
     the graph's dead nodes being mistaken for the player's map.
   - **The three dead seeds are gone**, along with the `indoors` flag that lied
     about them, and the graph now drops any waypoint stranded off the main
-    path network and says so. `npm run check:waypoints` fails the build on a
+    path network and says so. `pnpm run check:waypoints` fails the build on a
     new one. **S2 no longer has this to clean up.**
   - **What is genuinely left: NPCs cannot get inside.** That is a *portal*
     problem, not a navigation one — crossing the threshold is a 600 m

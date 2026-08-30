@@ -2,7 +2,7 @@
 
 The style bible. If you are about to add anything the player can see, read this
 first. Reference implementations live in `art/models/`; you can look at all of
-them at once by running `npm run dev` and opening **`/art-samples.html`**.
+them at once by running `pnpm run dev` and opening **`/art-samples.html`**.
 
 The client is Eleri, age 6. The bar is not "looks nice" — it is **"CUTE!"** said
 out loud on sight.
@@ -167,7 +167,7 @@ Three things it costs, all cheap:
 Make it **opt-in** per object: something with no face keeps its flat-colour
 material and its exact geometry, and pays nothing.
 
-`npm run check:hood-face` holds this in place. It casts a ray in from outside at
+`pnpm run check:hood-face` holds this in place. It casts a ray in from outside at
 each painted feature and checks what the camera would actually hit — which an
 inside-out surface fails, and which measuring where the vertices *are* does not.
 

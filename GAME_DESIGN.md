@@ -152,8 +152,8 @@ Unless the grown-ups turn on **Mayhem mode**…
   cannot creep back: a rule nothing measures is a rule that rots, and this
   codebase has been bitten four times by exactly that.
 
-  *The check exists: `npm run check:brevity`
-  (`scripts/check-copy-brevity.mts`), run inside `npm run build`. It measures
+  *The check exists: `pnpm run check:brevity`
+  (`scripts/check-copy-brevity.mts`), run inside `pnpm run build`. It measures
   `whatsnew.json`, the shop catalogue's `displayName` and `blurb`, and the
   anchor signs' `signTitle` and `signSubtitle` — 102 pieces of copy, walked
   from the modules the game itself imports, so a new shop item is covered the
@@ -792,7 +792,7 @@ Other dodgems have cute drivers — sometimes RiPika drives one.
    the file the ferris wheel's look control was originally modelled on,
    which is exactly how the error propagated. That control is now
    `core/rideLook.ts`, read by `core/RideCamera.ts` — the corrected signs
-   are there, in one place, gated by `npm run check:ride-camera`. Apply the same correction there, and
+   are there, in one place, gated by `pnpm run check:ride-camera`. Apply the same correction there, and
    check nothing else copied `steering.ts` before it was fixed.
 2. **The car cannot keep turning** — with the keyboard it sticks at a
    minimum and maximum angle instead of rotating freely, so you cannot

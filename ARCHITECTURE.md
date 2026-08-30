@@ -274,7 +274,7 @@ satisfies it, it drops in.
 
 ### The contract is checked
 
-`npm run check:assets` (part of `npm run build`) builds every asset the shop
+`pnpm run check:assets` (part of `pnpm run build`) builds every asset the shop
 catalogue sells plus every character, hat, pet, balloon and prop, measures the
 finished object with `art/style/measure.ts`'s `visibleBounds`, and compares it
 against what the `AssetHandle` declares: total height, base at the origin, and

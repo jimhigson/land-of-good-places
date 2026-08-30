@@ -684,7 +684,7 @@ reviewing that as an area in its own right, because it is now load-bearing:
 three of tonight's bugs were found by measurement rather than by reading, and
 two fixes were only trusted because a script proved them.
 
-**Clean, and working.** `npm run build` runs `check:text` then `tsc` then
+**Clean, and working.** `pnpm run build` runs `check:text` then `tsc` then
 `check:assets`. Both pass on main: no text below the minimum, 81 assets
 measured, 32 carrying recorded drift with the worst at +0.077 m. The
 `KNOWN_DRIFT` ratchet is doing its job — the pet entries were *removed* rather
