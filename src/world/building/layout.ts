@@ -912,10 +912,11 @@ const FACE_EAST = Math.PI / 2;
  * and a forecourt is a hole too. `hat` and `iceCream` are placed so their
  * forecourts stop clear of it in Z; `toy` is on deck 0, which never has holes.
  */
-const SURPRISE_EGG_X = -10.95;
-const BALLOON_X = -2.51;
-const CANDY_FLOSS_X = 5.93;
-const STICKER_PET_X = 16.21;
+const SURPRISE_EGG_X = -5.22;
+
+const CANDY_FLOSS_X = 5.06;
+const STICKER_PET_X = 15.34;
+const HAT_X = -15.5;
 
 /**
  * West-wall units, spaced along Z. `hat` joined them for #403.
@@ -935,9 +936,9 @@ const STICKER_PET_X = 16.21;
  *   found this — it could not have, before #403 rewrote it to compare real
  *   rectangles instead of intervals along one wall at a time.
  */
-const HAT_Z = -9.5;
-const TOY_Z = 0.2;
-const ICE_CREAM_Z = 9.9;
+const BALLOON_Z = -5;
+const TOY_Z = 1.6;
+const ICE_CREAM_Z = 10.04;
 
 export const SHOP_UNITS: readonly ShopUnitDefinition[] = [
   {
@@ -953,9 +954,9 @@ export const SHOP_UNITS: readonly ShopUnitDefinition[] = [
   {
     id: 'balloon',
     deck: 0,
-    x: BALLOON_X,
-    z: NORTH_WALL_Z,
-    yaw: FACE_SOUTH,
+    x: WEST_WALL_X,
+    z: BALLOON_Z,
+    yaw: FACE_EAST,
     title: 'Balloon Shop',
     glyph: '🎈',
     accent: PALETTE.markerSky,
@@ -983,9 +984,9 @@ export const SHOP_UNITS: readonly ShopUnitDefinition[] = [
   {
     id: 'hat',
     deck: 2,
-    x: WEST_WALL_X,
-    z: HAT_Z,
-    yaw: FACE_EAST,
+    x: HAT_X,
+    z: NORTH_WALL_Z,
+    yaw: FACE_SOUTH,
     title: 'Hat Shop',
     glyph: '🎩',
     accent: PALETTE.markerLilac,

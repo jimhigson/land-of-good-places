@@ -60,13 +60,13 @@ const TOILET_ROOM = {
 };
 
 const units = [
-  { id: 'toy', deck: 0, x: WEST_WALL_X, z: 0.2, wall: 'west' },
-  { id: 'balloon', deck: 0, x: -2.51, z: NORTH_WALL_Z, wall: 'north' },
-  { id: 'candyFloss', deck: 1, x: 5.93, z: NORTH_WALL_Z, wall: 'north' },
-  { id: 'iceCream', deck: 1, x: WEST_WALL_X, z: 9.9, wall: 'west' },
-  { id: 'hat', deck: 2, x: WEST_WALL_X, z: -9.5, wall: 'west' },
-  { id: 'stickerPet', deck: 2, x: 16.21, z: NORTH_WALL_Z, wall: 'north' },
-  { id: 'surpriseEgg', deck: 3, x: -10.95, z: NORTH_WALL_Z, wall: 'north' },
+  { id: 'toy', deck: 0, x: WEST_WALL_X, z: 1.6, wall: 'west' },
+  { id: 'balloon', deck: 0, x: WEST_WALL_X, z: -5, wall: 'west' },
+  { id: 'candyFloss', deck: 1, x: 5.06, z: NORTH_WALL_Z, wall: 'north' },
+  { id: 'iceCream', deck: 1, x: WEST_WALL_X, z: 10.04, wall: 'west' },
+  { id: 'hat', deck: 2, x: -15.5, z: NORTH_WALL_Z, wall: 'north' },
+  { id: 'stickerPet', deck: 2, x: 15.34, z: NORTH_WALL_Z, wall: 'north' },
+  { id: 'surpriseEgg', deck: 3, x: -5.22, z: NORTH_WALL_Z, wall: 'north' },
 ];
 
 function hasForecourt(unit) {
@@ -181,6 +181,24 @@ for (const unit of units) {
   if (!forecourt) continue;
   for (const [name, shaft] of Object.entries(shafts)) {
     if (overlaps(forecourt, shaft)) fail(`${unit.id}'s forecourt opens into the ${name} shaft`);
+  }
+}
+
+// 5. A forecourt must not open under a perimeter ceiling beam: the beam below
+//    it is fixed to a slab that is not there. `check:castle`'s assertion 2
+//    measures this on the built scene; this catches it before the build runs.
+const BEAM_HALF = 0.4;
+const beamLines = [
+  { minX: -INTERIOR_HALF_X, maxX: INTERIOR_HALF_X, minZ: -INTERIOR_HALF_Z, maxZ: -INTERIOR_HALF_Z + BEAM_HALF * 2 },
+  { minX: -INTERIOR_HALF_X, maxX: INTERIOR_HALF_X, minZ: INTERIOR_HALF_Z - BEAM_HALF * 2, maxZ: INTERIOR_HALF_Z },
+  { minX: -INTERIOR_HALF_X, maxX: -INTERIOR_HALF_X + BEAM_HALF * 2, minZ: -INTERIOR_HALF_Z, maxZ: INTERIOR_HALF_Z },
+  { minX: INTERIOR_HALF_X - BEAM_HALF * 2, maxX: INTERIOR_HALF_X, minZ: -INTERIOR_HALF_Z, maxZ: INTERIOR_HALF_Z },
+];
+for (const unit of units) {
+  const { forecourt } = rects(unit);
+  if (!forecourt) continue;
+  for (const beam of beamLines) {
+    if (overlaps(forecourt, beam)) fail(`${unit.id}'s forecourt opens under a perimeter ceiling beam`);
   }
 }
 

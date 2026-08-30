@@ -31,6 +31,7 @@ import {
   TOILET_DECK,
   TOILET_ROOM,
   TOP_DECK,
+  BUILDING_SHAFTS,
   onPlate,
   shopHasForecourt,
   shopLocalToBuilding,
@@ -81,7 +82,29 @@ import {
  * without being the thing you are standing on when you arrive.
  */
 const ROUNDEL_X = onPlate(-6);
-const ROUNDEL_Z = onPlate(12);
+/**
+ * Far enough south that the whole disc clears the shaft band (#403).
+ *
+ * `onPlate(12)` would have been 8.49, and at radius 6 that put the roundel's
+ * north edge 0.27 m inside the escalator well — `check:castle`'s shaft
+ * assertion caught the rug there on all four lower decks. The shafts sit in a
+ * band across the middle of the plate and they did **not** shrink, so on a
+ * 31 m-deep floor the roundel no longer has a scaled position available: it
+ * has to be placed against the band's own south edge instead.
+ *
+ * `BUILDING_SHAFTS` is measured rather than a number typed here, so a shaft
+ * moving pushes the roundel rather than silently overlapping it. There is
+ * 12.3 m between the band and the south wall and the disc is 12 m across, so
+ * this is a genuinely tight fit — see HANDOFF-castle-shrink.md.
+ */
+const ROUNDEL_Z = (() => {
+  const bandSouthEdge = Math.max(
+    ...BUILDING_SHAFTS.map(({ region }) =>
+      region.kind === 'rect' ? region.maxZ : region.z + region.radius,
+    ),
+  );
+  return bandSouthEdge + 0.7 + 6;
+})();
 /**
  * Authored size, deliberately **not** scaled with the plate (#403).
  *

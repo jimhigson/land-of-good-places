@@ -31,6 +31,7 @@ import {
   INTERIOR_DOOR_MIN_X,
   LIFT_DOOR_MAX_Z,
   LIFT_DOOR_MIN_Z,
+  onPlate,
   TOP_DECK,
 } from './layout';
 import { keepOutsFor } from './dressing';
@@ -285,7 +286,7 @@ function spread(min: number, max: number): number[] {
  * Against the north wall, west of the middle — across the hall from the front
  * door, so it is what a child walks *towards*.
  */
-export const CASTLE_HEARTH = { deck: 0, x: -14, z: -WALL_FACE_Z + 0.55 } as const;
+export const CASTLE_HEARTH = { deck: 0, x: onPlate(-14), z: -WALL_FACE_Z + 0.55 } as const;
 
 /** Where the braziers stand: the open middle of the plate, on the lower decks. */
 const BRAZIER_SPOTS: readonly { readonly x: number; readonly z: number }[] = [
@@ -293,7 +294,7 @@ const BRAZIER_SPOTS: readonly { readonly x: number; readonly z: number }[] = [
   { x: -20, z: -14 },
   { x: 4, z: -16 },
   { x: 22, z: 16 },
-];
+].map(({ x, z }) => ({ x: onPlate(x), z: onPlate(z) }));
 
 // ------------------------------------------------------------- geometry
 
