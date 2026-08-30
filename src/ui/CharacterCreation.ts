@@ -271,7 +271,7 @@ const HAT_OPTIONS: readonly ShopItem[] = itemsForShop('hat');
  * then the sticker & pet shop's three pets.
  */
 const PET_OPTIONS: readonly ShopItem[] = [
-  shopItem('toy.ripika'),
+  shopItem('pet.ripika'),
   ...itemsForShop('stickerPet').filter((item) => item.kind === 'pet'),
 ].filter((item): item is ShopItem => item !== null);
 
@@ -726,7 +726,7 @@ export class CharacterCreation {
         this.petId = item.id;
         this.refreshPreview('pet');
       },
-      'toy.ripika',
+      'pet.ripika',
     );
 
     // --- the tab strip ----------------------------------------------------

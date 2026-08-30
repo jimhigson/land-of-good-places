@@ -6,7 +6,7 @@ import { createBiscuit } from '../../../art/models/biscuit';
 import { createBalloon } from '../../../art/models/balloons';
 import { createHat } from '../../../art/models/hats';
 import { createJetpack } from '../../../art/models/jetpack';
-import { createPet, PUFF_DISPLAY_NAME } from '../../../art/models/pets';
+import { createPet, PET_KINDS, PUFF_DISPLAY_NAME, type PetKind } from '../../../art/models/pets';
 import {
   createCandyFloss,
   createIceCream,
@@ -111,15 +111,35 @@ const ICE_SCOOPS = {
 
 export const SHOP_ITEMS: readonly ShopItem[] = [
   // ------------------------------------------------------------------- toys
+  /**
+   * **RiPika, and she is a pet.**
+   *
+   * She was `toy.ripika`, `kind: 'toy'`, `category: 'toy'` — while being the
+   * companion every player starts with and the first entry in the character
+   * creator's *starting pet* list. Jim ruled on 30 August 2026 that the id
+   * should say what she is.
+   *
+   * `shopId` stays `'toy'`: she is a pet, but she is still bought at the toy
+   * shop, and moving stock between shops is a different change nobody asked
+   * for. `petKindsForShop` reads the *species* off the id, so this entry does
+   * not put her in the sticker & pet shop's pen.
+   *
+   * **Saves written before the rename keep her**: they carry an item whose id
+   * is `toy.ripika`, and `state/save.ts`'s `renameRipikaToPet` — the `1 → 2`
+   * step behind {@link SAVE_VERSION} — rewrites it, in the inventory *and* in
+   * the Cute-o-dex, on load. Nothing is lost and nobody starts again. If you
+   * are here because a returning save is behaving oddly, that migration is
+   * where to look, not this entry.
+   */
   {
-    id: 'toy.ripika',
+    id: 'pet.ripika',
     shopId: 'toy',
     displayName: 'RiPika',
     blurb: 'The electric yellow mouse!',
     icon: '⚡',
     price: 40,
-    kind: 'toy',
-    category: 'toy',
+    kind: 'pet',
+    category: 'pet',
     carryable: true,
     model: () => createRipika(),
     heldScale: 0.3,
@@ -596,6 +616,30 @@ export const SHOP_ITEMS: readonly ShopItem[] = [
 
 export function itemsForShop(shopId: ShopId): ShopItem[] {
   return SHOP_ITEMS.filter((item) => item.shopId === shopId);
+}
+
+/**
+ * The pet species a given shop actually **sells**.
+ *
+ * `PET_KINDS` answers a different question — *which pet bodies can `pets.ts`
+ * build?* — and the two stopped being the same list the moment RiPika became a
+ * {@link PetKind} while still being sold as `pet.ripika` in the toy shop. A
+ * display that iterates `PET_KINDS` is therefore advertising stock its shop
+ * does not carry, which is what the sticker & pet shop's pen did the first time
+ * this was tried.
+ *
+ * Reading the species off the id's tail is the same move
+ * `Hotel.paradePetKind()` makes, and for the same reason: **the species lives
+ * in the catalogue `id`, not in `kind`** (`kind` is the category — `'pet'`,
+ * `'toy'`). So a pet the shop gains tomorrow shows up in its own pen the day it
+ * is added, with no second list to keep in step.
+ */
+export function petKindsForShop(shopId: ShopId): PetKind[] {
+  const known: readonly string[] = PET_KINDS;
+  return itemsForShop(shopId)
+    .filter((item) => item.kind === 'pet')
+    .map((item) => item.id.slice(item.id.lastIndexOf('.') + 1))
+    .filter((species): species is PetKind => known.includes(species));
 }
 
 /**

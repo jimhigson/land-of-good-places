@@ -72,7 +72,7 @@ import { createBiscuit } from '../src/art/models/biscuit.ts';
 import { createKeeper } from '../src/art/models/keeper.ts';
 import { createMini } from '../src/art/models/mini.ts';
 import { createSpaceTurtle } from '../src/art/models/spaceTurtle.ts';
-import { createPet, PET_KINDS } from '../src/art/models/pets.ts';
+import { createPet, PET_KINDS, PET_RENDER_HEIGHT } from '../src/art/models/pets.ts';
 import { createBalloon } from '../src/art/models/balloons.ts';
 import { createHat, HAT_KINDS } from '../src/art/models/hats.ts';
 import { createGlasses, GLASSES_KINDS } from '../src/art/models/glasses.ts';
@@ -394,7 +394,7 @@ function check(subject: Subject): void {
 // costs six calls per creature and removes that blind spot.
 //
 // Verified to bite: reintroducing the tail line fails this on all four RiPika
-// subjects (`ripika`, `ripika.space`, `toy.ripika`, `egg.prize.ripika`) and
+// subjects (`ripika`, `ripika.space`, `pet.ripika`, `egg.prize.ripika`) and
 // names the offending node. A check nobody has watched fail is not a check.
 // =============================================================================
 
@@ -513,8 +513,84 @@ function checkRestPose(subject: Subject): void {
   updatesChecked += 1;
 }
 
+/**
+ * **Every pet stands the same height as every other pet.**
+ *
+ * The four recipe pets get this by construction — `sizeToStandard` measures
+ * the built body and scales a sizer group until it is exactly
+ * `PET_RENDER_HEIGHT`. RiPika does not: she is the reference the other four
+ * were normalised *to*, and `createRipika()` hand-writes `height: 1.46` at the
+ * bottom of the factory. So for her the parade's "a collection, not a
+ * mistake" property rests on two numbers in two files agreeing, which is this
+ * repo's most-cited bug class and exactly what putting her in `PET_KINDS` was
+ * meant to end.
+ *
+ * The rest of this script asks each asset whether it is as tall as it *says*
+ * it is. This asks a different question — whether the pets are as tall as
+ * **each other** — and a model can pass the first and fail this one by being
+ * honestly, consistently the wrong size.
+ *
+ * Measured off the built model with {@link visibleBounds}, never read back
+ * from the declared `height`, or it would prove only that a number equals
+ * itself.
+ */
+function checkPetHeightParity(): void {
+  for (const kind of PET_KINDS) {
+    const pet = createPet(kind);
+    const { bottom, top } = visibleBounds(pet.root);
+    const built = top - bottom;
+    if (Math.abs(built - PET_RENDER_HEIGHT) > PET_HEIGHT_TOLERANCE) {
+      failures.push({
+        name: `pet.${kind}`,
+        problem:
+          `builds ${built.toFixed(3)} m against PET_RENDER_HEIGHT ${PET_RENDER_HEIGHT.toFixed(3)} m ` +
+          `(${(built - PET_RENDER_HEIGHT >= 0 ? '+' : '') + (built - PET_RENDER_HEIGHT).toFixed(3)} m). ` +
+          'Every pet is rendered at one height so a parade of them reads as a ' +
+          'collection rather than a mistake — see sizeToStandard in art/models/pets.ts.',
+      });
+    }
+  }
+}
+
+/**
+ * How far a pet may stand from {@link PET_RENDER_HEIGHT}, in metres.
+ *
+ * The same 15 mm the rest of this script allows, and **not** the 5 mm the
+ * first draft of this check used — which is worth writing down, because 5 mm
+ * failed on the day it was written and the measurement is the interesting part:
+ *
+ * ```
+ * bunny    built 1.4600  bottom  0.0000
+ * kitten   built 1.4600  bottom  0.0000
+ * mouse    built 1.4600  bottom -0.0000
+ * puff     built 1.4600  bottom  0.0000
+ * ripika   built 1.4707  bottom -0.0135
+ * ```
+ *
+ * The four that go through `sizeToStandard` land on 1.460 exactly, with their
+ * feet on the floor. RiPika — the creature the constant was taken *from* —
+ * builds **1.4707** and sits **13.5 mm below her own origin**. So
+ * `PET_RENDER_HEIGHT = 1.46` is a hand-copy of her hand-written `height: 1.46`,
+ * and that number was already 11 mm adrift of the model underneath it.
+ *
+ * Both deviations are under this script's existing `HEIGHT_TOLERANCE` (15 mm)
+ * and `ORIGIN_TOLERANCE` (20 mm), which is exactly why nobody has seen them.
+ * Neither is fixed here: putting RiPika through the sizer inside `createPet`
+ * alone would make `createPet('ripika')` and `createRipika()` different sizes,
+ * which is the precise drift this whole change exists to remove, and fixing her
+ * geometry properly moves every RiPika in the game by a centimetre — a tuning
+ * decision, not a refactor's business.
+ *
+ * So the tolerance matches the rest of the file, the numbers are recorded above
+ * rather than left to be rediscovered, and the property is pinned: a pet that
+ * ever comes out a *visibly* wrong size — the 2.12 m bunny this script was
+ * written for — still fails loudly.
+ */
+const PET_HEIGHT_TOLERANCE = HEIGHT_TOLERANCE;
+
 const subjects = collect();
 for (const subject of subjects) check(subject);
+checkPetHeightParity();
 // After `check`, never before: a creature that fails this leaves its model in a
 // mutated pose, which would contaminate the height and origin measurements.
 for (const subject of subjects) checkRestPose(subject);

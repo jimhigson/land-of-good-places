@@ -20,7 +20,7 @@ import { walksInParade } from '../../state';
  * | `pet.puff` | 1.30 m × **1.53 m** |
  * | `pet.mouse` | 1.06 m × 1.52 m |
  * | `pet.kitten` | 1.09 m × 1.50 m |
- * | `toy.ripika` | 1.12 m × 1.49 m |
+ * | `pet.ripika` | 1.12 m × 1.49 m |
  * | `pet.bunny` | 0.80 m × 1.47 m |
  * | the bed's own bolster rim | 1.37 m × **1.35 m** |
  *

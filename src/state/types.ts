@@ -142,7 +142,7 @@ export const FLOWER_COLOURS = ['yellow', 'red', 'blue', 'violet', 'pink', 'white
 export type FlowerColour = (typeof FLOWER_COLOURS)[number];
 
 export interface CuteThing {
-  /** Stable id, e.g. `toy.ripika`. Used as the Cute-o-dex key. */
+  /** Stable id, e.g. `pet.ripika`. Used as the Cute-o-dex key. */
   readonly id: string;
   readonly name: string;
   readonly category: CuteCategory;
@@ -205,7 +205,7 @@ export interface GameTime {
 export interface InventoryItem {
   /** Unique per purchase — `${id}#${n}`. This is what `carriedUid` points at. */
   readonly uid: string;
-  /** Catalogue id, e.g. `toy.ripika`. Shared by every copy the player owns. */
+  /** Catalogue id, e.g. `pet.ripika`. Shared by every copy the player owns. */
   readonly id: string;
   readonly kind: InventoryKind;
   readonly displayName: string;
