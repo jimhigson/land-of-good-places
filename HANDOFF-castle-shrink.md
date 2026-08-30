@@ -188,6 +188,85 @@ frame (visible as a pink wash in the deck-1 shot). `floorFade`'s radius is in
 metres and did not scale, so it covers roughly twice the share of a half-area
 plate. Not a correctness bug and not in scope; worth its own issue.
 
+## SUPERSEDED: the shops become a market (Jim, 30 Aug)
+
+He rejected all three options for the `toy`-on-a-near-wall problem and gave a
+better one, verbatim:
+
+> *"Come up with an aisle-based market-like layout with the stalls in a grid,
+> not all against the back wall."*
+
+So: **keep the half-area shrink, keep all seven shops, and redesign them as a
+market.** Do not move `toy` to a near wall, do not shrink to 0.65x, do not drop
+a shop. The constraint was never "too many shops" — it was "shops may only live
+on walls", which made the problem 1-D. A grid uses the *floor*.
+
+### What is measured and true (`scripts/measure-market-floor.mts`)
+
+Run it; it reads obstacles off `BUILDING_SHAFTS`, `TOILET_ROOM`, `DECK_ROUNDEL`
+and the **assembled** great-hall furniture group rather than re-deriving them.
+
+- Plate inside the perimeter ceiling beams: **40.83 x 29.51 m**.
+- **Free floor: 685.6 m² of 1204.9 m² — 57%.** Folding in 47 obstacle boxes
+  (41 of them great-hall furniture) and 3 discs.
+- Largest single clear rectangle: **19.50 x 8.00 m** at `x[-20.41, -0.91]
+  z[-11.51, -3.51]` — the north-west quadrant.
+
+**One plan, not five.** Indoor collision is height-blind, so seven stalls on
+five storeys is a single 2D packing problem: floor used on any deck is blocked
+on every deck. That is what defeated the wall layout and it governs the market
+too.
+
+### The answer: a plate-wide lattice, not one block
+
+A market does not have to fit inside the largest clear rectangle. Lay a grid
+over the whole plate and stand stalls in whichever cells are clear — which is
+also what makes it **derive from the plate** instead of from seven typed
+positions, so a future resize re-lays the market for free.
+
+With an aisle of `2 * PLAYER_RADIUS + 1.2 = 2.44 m` (two children passing):
+
+| stall | pitch | clear cells |
+|---|---|---|
+| 5.6 m (today's counter width) | 8.04 m | 3 |
+| 4.8 m | 7.24 m | 2 |
+| 4.0 m | 6.44 m | 3 |
+| **3.6 m** | **6.04 m** | **10** |
+| 3.2 m | 5.64 m | 10 |
+
+**Seven stalls fit at 3.6 m with three cells to spare.** At today's 5.6 m
+counter only three do — so the stalls do have to become stalls. That means
+`SHOP_SCALE_XZ` drops from 1.6, which **reverses the 26 July "shops must
+dominate their rooms" decision**. Amend that docblock, do not delete it: it was
+right about a shopfront in a warehouse and this is a different object.
+
+### The shape the cells actually make (3.6 m lattice)
+
+    z = -12.08   x = -18.12,          -6.04
+    z =  -6.04   x = -18.12, -12.08,  -6.04,  0.00
+    z =  +6.04   x = -18.12
+    z = +12.08   x = -18.12                    ... and (18.12, +/-12.08) east
+
+The north-west block is the market: **a row of four at z = -6.04 and a row of
+two at z = -12.08, facing each other across an east-west aisle at z ~ -9.** Six
+stalls contiguous, so **one more is needed** for seven — either free the
+`(-12.08, -12.08)` cell (blocked by great-hall furniture; check what) or sweep
+the lattice origin. The lattice is currently centred on the plate; a small
+origin offset is very likely to land a seventh contiguous cell, and that sweep
+is the next piece of work.
+
+### Still to do
+
+- Sweep the lattice origin for the most contiguous cells; pick the market block.
+- Stalls **face into the aisle**, serving spot on the aisle side.
+- Re-shape `check:shop-spacing` for a grid — it currently reasons in terms of
+  "along a wall" and "into the room", which a free-standing stall does not have.
+  It was already rewritten once for #403 to compare real rectangles; this is the
+  same kind of change again.
+- `check:tap-spacing` must still pass: stalls 6.04 m apart with a 2.3 m pick
+  radius is comfortable, but the aisle-side serving spots are what to verify.
+- Screenshots **standing in an aisle at player height**, not overhead.
+
 ## Coordination
 
 - **#401** (remove the bubble) is untouched by this and frees a 2.1 m circle;
