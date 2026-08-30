@@ -104,8 +104,8 @@ if (CASTLE_CEILING_CLEAR <= TALLEST_CHILD) {
 
 /**
  * A beam is fixed to the underside of the slab above it. Where that slab is
- * punched through — the stairs, the escalator, the lift, the trampoline, the
- * bubble, the helter-skelter — a beam would hang from nothing, and would be
+ * punched through — the stairs, the escalator, the lift, the trampoline
+ * and the helter-skelter — a beam would hang from nothing, and would be
  * visible from the storey above as a plank across an open shaft.
  *
  * `buildCeilingBeams` already asks `deckIsSolid` before placing a segment.
@@ -909,8 +909,8 @@ let coursedWallsInScene = 0;
  *
  * `deckIsSolid` answers a different question — *is there floor here* — and on
  * deck 0 it answers "yes" everywhere, because the ground floor has no holes in
- * it. But a shaft is not only a hole: it is a **stair, an escalator, a bubble
- * tube, a trampoline or a helter-skelter**, and those structures come all the
+ * it. But a shaft is not only a hole: it is a **stair, an escalator, a
+ * trampoline or a helter-skelter**, and those structures come all the
  * way down to the floor a child walks in on. So the ground floor has no hole
  * and is still not free plan.
  *

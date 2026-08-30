@@ -389,10 +389,6 @@ export const LIFT_SPEED = 7;
 /** Seconds the character takes to step into the car, and to step back out. */
 export const LIFT_BOARD_SECONDS = 0.5;
 
-/** Floating bubble: metres per second, and seconds it waits at each end. */
-export const BUBBLE_SPEED = 1.5;
-export const BUBBLE_DWELL = 3.6;
-
 /** Escalator carry speed, metres per second along the ramp. */
 export const ESCALATOR_SPEED = 1.1;
 

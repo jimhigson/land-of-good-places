@@ -139,7 +139,7 @@ function planFor(kind: ShellKind): ShellPlan {
 /**
  * The tower itself: five decks, their walls, the roof and the front door.
  *
- * Each deck is one extruded slab with its stair, escalator, bubble, trampoline
+ * Each deck is one extruded slab with its stair, escalator, trampoline
  * and helter-skelter shafts punched straight through it, so however many holes a
  * floor has it still costs a single draw call. Walls work the same way: a run of
  * plan rectangles with the doorways left out as gaps, all extruded together.

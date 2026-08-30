@@ -35,8 +35,6 @@ import type { World } from '../world/World';
 import type { Player } from '../entities/Player';
 import { SLIDE_PLAN } from '../world/slide/plan';
 import {
-  BUBBLE_X,
-  BUBBLE_Z,
   GROWN_UP_X,
   GROWN_UP_Z,
   HELTER_DECK,
@@ -81,7 +79,7 @@ import {
  *   ride plot, the train loop and its stations, the stalls, and a marker for the
  *   player showing position and facing.
  * - **Indoors**: the current floor's plan — shop units, the stairs/lift/
- *   escalator/bubble/trampoline/helter-skelter, the toilets, the roof pavilion —
+ *   escalator/trampoline/helter-skelter, the toilets, the roof pavilion —
  *   with buttons and the arrow keys to look at other floors. Opens on the
  *   player's own floor.
  *
@@ -269,7 +267,6 @@ const FLOOR_FEATURES: readonly FloorFeature[] = (() => {
     // The escalator shaft is the same XZ footprint on every deck it serves —
     // ground floor up to the roof.
     { x: -12.05, z: 0.2, glyph: '⬆️', label: 'Escalator', decks: everyDeck },
-    { x: BUBBLE_X, z: BUBBLE_Z, glyph: '🫧', label: 'Bubble', decks: everyDeck },
     { x: TRAMPOLINE_X, z: TRAMPOLINE_Z, glyph: '🤸', label: 'Trampoline', decks: [0] },
     { x: HELTER_ENTRY_X, z: HELTER_ENTRY_Z, glyph: '🌀', label: 'Helter-skelter', decks: [HELTER_DECK] },
     { x: TOILET_STAND_X, z: TOILET_STAND_Z, glyph: '🚻', label: 'Toilets', decks: [TOILET_DECK] },

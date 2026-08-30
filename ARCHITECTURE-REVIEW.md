@@ -76,15 +76,16 @@ one out.
 
 Measured against `DECK_HOLES`: `TRAMPOLINE_SHAFT` (r 2.5, decks 1–2) and
 `HELTER_SHAFT` (7 × 7 m, decks 1–2) are permanently open with no guard of
-any kind. `BUBBLE_SHAFT` leaves a 0.2 m annulus and is fully open whenever
-the bubble is elsewhere. `layout.ts:36` states as an absolute invariant that
+any kind. (`BUBBLE_SHAFT`, a third, left a 0.2 m annulus and was fully open
+whenever the bubble was elsewhere — the bubble and its shaft were removed on
+30 August 2026, issue #377, so that one is now solid floor.) `layout.ts:36` states as an absolute invariant that
 every hole is fully spanned — it is not, and the next builder who trusts it
 will place a bench across a shaft.
 
 ### S6–S13, S15 (P2) Hygiene
 
 Shadow-casting on interior fittings and objects inside holes, against
-ARCHITECTURE.md:180 (`Toilets`, `Trampoline`, `Bubble`, `GlassLift`,
+ARCHITECTURE.md:180 (`Toilets`, `Trampoline`, `GlassLift`,
 `BallPit`, and a floor **mat** casting onto the floor it lies on).
 Per-frame allocations — `Escalators.placeSteps` allocates 16 objects per
 frame forever, including while the player is 890 m away in the garden.

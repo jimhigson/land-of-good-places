@@ -257,7 +257,7 @@ export class Game {
     this.player = new Player(this.world.collision, this.camera, spawn);
     this.engine.scene.add(this.player.group);
     // The building owns "how high is the ground?" from here on, so that its
-    // decks, stairs, lift and bubble are all walkable.
+    // decks, stairs and lift are all walkable.
     this.world.attachPlayer(this.player);
     // A save written inside the hotel restores into its room, not the plaza:
     // rooms are true spaces, so being there is a position plus this adoption.
@@ -1007,7 +1007,7 @@ export class Game {
    *
    * Three systems want this list now — tap-to-move, the action button and the
    * highlight system — and it is several hundred freshly-allocated zones,
-   * because a couple of them move (the lift, the bubble) and the flowers come
+   * because a couple of them move (the lift, the trampoline) and the flowers come
    * and go. Building it three times a frame was pure waste; the memo is keyed on
    * the frame counter, so everything inside one frame provably sees the same
    * list, and a tap arriving between frames sees the most recent one.

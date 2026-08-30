@@ -206,7 +206,7 @@ answers it with the highest walkable surface at a point that is within one step
 (`BUILDING_STEP_UP`) *below the walker's feet* — which is what makes the same
 `(x, z)` mean "deck three" or "the grass" depending on where you came from.
 `Player.groundSampler` is swapped to it in the `Game` constructor. Multi-storey
-floors, stairs, escalators, the lift, the floating bubble and falling through a
+floors, stairs, escalators, the lift and falling through a
 hole are all consequences of that one rule; there is no physics engine.
 
 A moving platform only has to implement `MovingPlatform` (`surfaceY` + `covers`)

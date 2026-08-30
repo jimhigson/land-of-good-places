@@ -18,7 +18,6 @@ import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type Player } from '../../entitie
 import type { StairDirection } from '../../ui/StairMenu';
 
 import { BallPit } from './BallPit';
-import { Bubble } from './Bubble';
 import { Escalators } from './Escalators';
 import { FloorFader } from './floorFade';
 import { GlassLift } from './GlassLift';
@@ -250,10 +249,14 @@ export interface InteriorControls {
  * ## The rest of it
  *
  * Five levels, and the top one is the **roof** — genuinely outdoors, open to the
- * sky, where the ginormous slide launches from. Six ways between them: the tap
+ * sky, where the ginormous slide launches from. Five ways between them: the tap
  * stairs, an escalator per storey, a glass lift on the outside wall, a
- * trampoline, a floating bubble and a helter-skelter. Seven shops with proper
+ * trampoline and a helter-skelter. Seven shops with proper
  * room to breathe, and the toilets on deck one.
+ *
+ * There were six until the floating bubble was removed (issue #377) — Jim:
+ * "remove it and keep only the lift, it's the only one that works very well".
+ * Reducing the rest to just the lift is #377's remaining work.
  *
  * Two things make it work without a physics engine:
  *
@@ -471,7 +474,6 @@ export class Building implements GameSystem {
   private readonly lift: GlassLift;
   private readonly liftRide: LiftRide;
   private readonly trampoline = new Trampoline();
-  private readonly bubble = new Bubble();
   private readonly fader = new FloorFader();
 
   /**
@@ -561,7 +563,6 @@ export class Building implements GameSystem {
 
     const ground = this.shell.floorGroups[0];
     if (ground) ground.add(this.trampoline.group);
-    this.interiorRoot.add(this.bubble.group);
 
     this.helterSkelter = buildHelterSkelter();
     this.interiorRoot.add(this.helterSkelter.group);
@@ -580,11 +581,10 @@ export class Building implements GameSystem {
 
     // Walkable surfaces that are not part of a deck.
     this.surfaces.addPlatform(this.lift);
-    this.surfaces.addPlatform(this.bubble);
     this.surfaces.addPlatform(this.trampoline);
 
     registerInteriorCollision(collision);
-    // The trampoline well, the helter-skelter shaft and the bubble's shaft
+    // The trampoline well and the helter-skelter shaft
     // (architecture review S14) — none of these had a rail or a collider of
     // any kind. See `ShaftGuards.ts` for why they get two different shapes.
     buildShaftGuards(this.shell.floorGroups, collision);
@@ -728,7 +728,7 @@ export class Building implements GameSystem {
 
   /**
    * Everything in the building a finger can point at, with the two moving ones
-   * (the lift's doors, the bubble) at wherever they currently are.
+   * (the lift's doors, the trampoline pad) at wherever they currently are.
    *
    * Rebuilt per call rather than cached — it is a handful of object literals and
    * it is only ever called on a tap.
@@ -745,7 +745,6 @@ export class Building implements GameSystem {
 
   interactZones(): InteractZone[] {
     return buildingInteractZones({
-      bubbleSurfaceY: this.bubble.surfaceY,
       trampolineSurfaceY: this.trampoline.surfaceY,
       doorstepY: this.surfaces.sample(
         facadeX(1.5),
@@ -849,7 +848,6 @@ export class Building implements GameSystem {
     this.spaces.update(dt);
 
     this.liftRide.update(dt);
-    this.bubble.update(dt, elapsed);
     this.escalators.update(dt);
     this.trampoline.update(dt);
     this.toilets.update(dt, elapsed, this.toiletOccupied());
