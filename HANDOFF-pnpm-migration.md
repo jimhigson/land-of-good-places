@@ -61,23 +61,53 @@ deliberately.
 |---|---|
 | `pnpm install --frozen-lockfile` | **0** |
 | `pnpm exec tsc --noEmit` | **0** |
-| full 47-step `build` | *running* |
-| `test:procgen` (not in chain) | todo |
-| `check:castle`, `check:park` | todo |
-| `blend:castle` → `pack:castle` round trip | todo |
+| full 47-step `build` | **0** |
+| `test:procgen` (not in chain) | **0** — 458 tests, 14 files |
+| `check:castle` | **0** |
+| `check:park` | **0** — 19/19 attractions, 240/240 waypoints |
+| `blend:castle` → `pack:castle` round trip | **0** |
 
 **Build chain compared by name, not count** — captured from
 `git show origin/main:package.json` vs this branch, package-manager-agnostic:
 **47 vs 47, none dropped, none added, order identical.** A count alone would
 not catch a substitution.
 
+**And 47 steps *executed*, which is a different claim.** pnpm echoes each
+script body as a `$ ` line, so every named step was matched to its own body
+in the log: 45 that way, `vite build` by `✓ built in 428ms` plus `dist/`
+artifacts, and `tsc --noEmit` positionally — it sits in a `&&` chain and the
+steps after it ran, which is only possible if it exited 0. `check:park-boot`
+passed inside the chain, so the #324 flake did not appear.
+
+`blend:castle` rewrote `art/blend/castle.blend` (Blender always does; not
+caused by this change) and it was reverted. The *shipped* asset came back
+byte-identical to `origin/main`.
+
+## The disk saving, measured
+
+`du` **cannot see it on macOS.** pnpm's install log says packages are
+*cloned*, not hardlinked: on APFS it uses copy-on-write `clonefile`, which
+shares physical blocks but gives every file its own inode. So `du -csh`
+across two worktrees reports 358 MB — 179 + 179, apparently no sharing at
+all — and would have made this look like a failure. Measure free space
+instead:
+
+| | |
+|---|---|
+| `du` per worktree (misleading) | 179 MB |
+| **true marginal cost of a second worktree** | **7 MB** |
+| npm's cost for the same worktree | 179 MB, unshared |
+| second-worktree install time | **1.35 s** |
+
+**96% off per additional worktree.** At the 169-worktree peak in #400:
+npm ≈ 30 GB, pnpm ≈ 1.3 GB.
+
+The shared store at `~/Library/pnpm/store` is 10 GB, but it is a one-time
+cost shared across every project on the machine, and `pnpm store prune`
+reclaims whatever is unreferenced.
+
 ## Still owed
 
-- Measure the disk saving with a second throwaway worktree (`du -csh` across
-  both `node_modules` — a single `du` invocation dedupes hardlinks, which is
-  what makes the sharing visible). Deferred until the build finishes;
-  `check:park-boot` is a load-dependent flake (#324) and a concurrent install
-  would risk inducing it.
 - PR referencing #400, quoting Jim's ruling.
 - **Merge authority granted** for this PR only, when everything is genuinely
   green. Then prove the site still publishes with `pnpm run check:live-version`
