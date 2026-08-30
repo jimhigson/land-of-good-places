@@ -226,3 +226,120 @@ claim most worth being able to re-check.
   resolution from `main`'s step list and verify by
   `node -e "console.log(Object.keys(require('./package.json').scripts))"`.
 - Diffs with three dots: `git diff --stat origin/main...HEAD`.
+
+---
+
+# S2 — THE SPLIT. Plan of record, 30 Aug 2026.
+
+**Branch changed.** S2 is being built on **`feat/castle-floors-half-area`**
+(worktree `.claude/worktrees/castle-shrink`), not on a branch of its own. Jim,
+30 Aug: *"fold this requirement into that work, make it the top priority, above
+all else"* and *"all its work is important so don't drop any, but also don't
+delay this split for one second more"*. So the halved plate, the market and the
+rewritten `check:shop-spacing` all ship; the split simply goes first, and where
+it forces the market to move, the market moves.
+
+Dev server port **5413**, `--strictPort`, killed by PID.
+
+## The shape: three spaces, one world
+
+| floor | space id | purpose |
+| --- | --- | --- |
+| 0 | `castle.mall` | **The mall.** All seven market stalls, the toilets, the front door, the lift alcove. |
+| 1 | `castle.hall` | **The great hall.** Throne, dais, feast table, benches, hearth, knights — #368/#388's furniture, which today shares deck 0 with the market and has nowhere of its own. |
+| 2 | `castle.roof` | **The roof garden.** Open sky, parapet, pavilion, planters, benches, the trampoline, the grown-up, and the **ginormous slide's launch pad** — non-negotiable. #410's wild pets and long grass land here. |
+
+Floor *k* lives at `(INTERIOR_ORIGIN_X + FLOOR_SPACE_SPACING * k, INTERIOR_ORIGIN_Z)`
+with `FLOOR_SPACE_SPACING = 300`. The mall keeps `(600, 600)`, so the front
+door's numbers barely move. Per-space radius 120 m — comfortably containing a
+21.2 x 15.6 m half-plate and its 46 m play bounds, and 300 apart so two can
+never be confused. `spaceAt` resolves the castle by x-band exactly as it
+already resolves the six hotel rooms by z-band.
+
+**Not a new architecture — the hotel's, applied to the castle**, which is
+literally what Jim asked for. `Building` grows the same four methods `Hotel`
+already has: `currentFloor()` (from `spaceAt`), `boundTo(floor)`,
+`stepThroughDoor(...)`, `travelTo(floor)`. `SpaceManager.changeTo`/`hop` get
+unified, as that file's own docblock asks S2 to do.
+
+`layout.ts` grows a `CastleFloor` record — `space`, `originX/originZ`,
+`halfX/halfZ`, `clearHeight`, `liftZ` — the direct analogue of `HotelRoom`.
+Three of them, and `BUILDING_FLOOR_COUNT` becomes 3.
+
+## Device by device — what I agree with in Decision 3 §4, and what I do not
+
+| device | Decision 3 §4 | my ruling | why |
+| --- | --- | --- | --- |
+| Tap stairs, `StairRide`, `ui/StairMenu` | delete | **agree, delete** | Pure transport plus a menu. Decision 3's replacement (walk up real steps, iris, walk off the top) is itself dead now: the lift is the only route, so there is no stair portal to build. |
+| Escalators | **keep** as a portal flavour | **disagree — delete** | Decision 3 kept them as a *route*, and a route that is not the lift is exactly what Jim removed. An escalator that returns you where you started is nonsense, and it is the mall look the family complained about. `Escalators.ts`, `ESCALATOR_WELL`, `escalatorRamp`, `handleEscalator` all go. |
+| Glass lift | keep; car/shaft deleted, `floors()`/`go(n)` seam kept | **agree** — and it is now the whole of inter-floor travel | `HotelLift.ts` is the shipped reference for exactly this: press N, iris, doors open in N's own space, no car ever travels. `ui/LiftPanel.ts` is untouched — it was written against the seam for this. Every floor's alcove at the same local spot. |
+| Trampoline | tap-and-go portal *up a floor* | **disagree — keep it, as a toy, not a route** | Strip `TRAMPOLINE_SHAFT` and leave a plain trampoline that bounces you and puts you back down on the same floor. That is what a six-year-old thinks a trampoline is, and it costs no fun. Proposed home: the **roof garden** (open sky, nothing to bang your head on). Say if you would rather it stood in the mall. |
+| Bubble | keep as the way onto the roof | **moot** | Already deleted by #401; Decision 3 correction 5 says it is not coming back. Nothing to do. |
+| Helter-skelter | ride portal, floor 2 → ground | **delete — and this is the one that loses real fun, so I am flagging it rather than doing it quietly** | With three floors the only helter that makes sense is roof→mall, which is a second inter-floor route: the thing Jim removed. Making it return you to the roof means a helix that goes down and puts you back up, which reads as broken. And the roof *already* has the ginormous slide as its down-and-out ride — one great slide off the roof beats two competing ones. **If Jim wants it kept, the honest option is a stand-alone same-floor helix in the great hall with its own steps inside it — but that reintroduces climbing geometry and is a design job, not part of the split.** My recommendation: delete now, file an issue for a same-floor slide in the hall. |
+| Ginormous slide | unchanged | **agree, and preserved** | Already a cross-space ride. Its launch simply lives in the roof-garden space. |
+| Toilets | move with a floor | **the mall** | They belong beside the shops; a child in a market needs them. |
+| Shaft guards | delete wholesale | **agree** | There are no shafts left at all. |
+| Floor fader | "deleted" | **only the castle's use of it** | Correction 2: `FloorFader` has a live hotel consumer (`overhangFader`). The file survives; the castle's layers and `Shops.setVisibleDeck` go, replaced by per-space root visibility. |
+| `DECK_HOLES`, `deckIsSolid`, `BUILDING_SHAFTS` | delete | **agree** | And this dissolves the brief's `keepOutsFor`-does-not-include-`BUILDING_SHAFTS` bug — five occurrences across four agents this week — by removing the concept of a shaft entirely. A real win, not tidying. |
+
+## Why this is worth doing beyond tidiness — the PR's strongest argument
+
+**Indoor collision is height-blind.** A shop counter on one deck is an
+invisible wall on every other deck, and `check:castle` cannot see it: it tests
+props against keep-outs, not colliders against another deck's furniture. The
+branch's previous engineer hit exactly this — a stall over the great hall's
+feast table would wall off the hall below, verifiable only by hand. **After the
+split no two floors share a plan, so that entire bug class is impossible by
+construction.** It also unblocks #376: castle props can finally have real
+colliders, which they were denied for precisely this reason.
+
+## What the split makes easier, not harder — NPCs
+
+Correction 5 stands: children *do* reach castle shops now (`npc/portals.ts`,
+`npc/attractions.ts`, `check:npc-presence`). But consolidating all seven shops
+onto the mall means **every castle attraction is in one space**, reachable
+through the existing garden↔castle portal, with no NPC lift-riding at all. The
+"child stranded on a floor she cannot leave" risk goes away rather than being
+managed.
+
+## What is at risk, stated rather than traded away
+
+- **The helter-skelter** — above. Needs a ruling.
+- **`MARKET_BEAM_INSET = 1.8` and `MARKET_SOUTH_Z`'s `+1.6`** — both were
+  *measured* to clear the hearth's fire and the stairwell's 4.2 m pick radius,
+  **on the same deck**. With the hall on its own floor and the stairwell gone,
+  both constraints vanish. So the market is re-laid as the **three rows x four
+  columns** block this branch already measured as fitting seven stalls
+  (21.72 x 15.68 m at a 3.6 m stall) — two aisles with stalls down both sides, a
+  market proper. That is the market *moving*, which was always the plan, not
+  the market being dropped.
+
+## The boot validator — `scripts/check-castle-floors.mts`
+
+Into the `build` chain (currently **47** steps, parsed from `package.json`, not
+grepped; it becomes 48), after `check:castle`. It asserts, on the **built**
+world:
+
+1. the portal graph connects the garden to all three floors **and back**, using
+   only the portals actually registered;
+2. every arrival point samples to walkable ground in its own space, within
+   `BUILDING_STEP_UP`;
+3. no arrival sits inside any trigger band, with `PLAYER_RADIUS` of margin;
+4. the three floors do not overlap — no two plates-plus-`INTERIOR_PLAY_RADIUS`
+   intersect, and `spaceAt` round-trips every plate corner to its own floor;
+5. the ginormous slide's entry is in the roof space and its stand point is
+   walkable.
+
+**Proved red by four deliberate mutations**, each recorded with the geometry it
+was proved against (CLAUDE.md: a red-run transcript goes stale): remove the lift
+portal (1 fails); push an arrival 1 m into a wall (2); move an arrival inside
+its own trigger (3); set `FLOOR_SPACE_SPACING` to 40 (4).
+
+## Commit order — so nothing is lost on the way
+
+1. three-floor table (`spaces.ts`, `layout.ts`, `CastleFloor`), no behaviour change;
+2. `Shell` + `surfaces` build three disjoint plates; door portal to the mall; lift portal the only inter-floor route;
+3. the deletions (stairs, escalator, `StairRide`, `StairMenu`, `ShaftGuards`, holes, shafts);
+4. contents move: market to the mall, hall furniture to floor 1, roof dressing to floor 2;
+5. the boot validator, proved red;
+6. `check:castle` / `check:shop-spacing` / `check:tap-spacing` / `ParkMap` / `interactZones` re-shaped for three floors; screenshots at player height of each floor and of the lift moving.
