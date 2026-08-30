@@ -15,7 +15,13 @@ and the game is live in about 40 seconds.
   over GitHub Pages because it serves from the **root** of a domain, which the
   PWA wants (Pages would give a `/land-of-good-places/` sub-path, needing a
   Vite `base` and a scoped service worker).
-- **Repo:** <https://github.com/jimhigson/land-of-good-places> (private).
+- **Repo:** <https://github.com/jimhigson/land-of-good-places> — **public**,
+  and deliberately so. Jim made it public because a private repo was running
+  the account out of GitHub Actions minutes. **Do not make it private without
+  first sorting the Actions billing**: private repos draw on a paid allowance
+  that is currently exhausted, so flipping the switch stops every workflow on
+  this project dead — no builds, no checks, no deploys — and the runs report
+  as `startup_failure` rather than saying why.
 - **CI:** `.github/workflows/deploy.yml` — on push to `main`: `npm ci`,
   `npm run build`, `wrangler deploy`. Re-running it is safe (idempotent).
 - **Secrets:** `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` both set.
@@ -26,6 +32,9 @@ and the game is live in about 40 seconds.
   import committed.
 - 2026-07-26 — private GitHub repo `jimhigson/land-of-good-places` created,
   `origin` set, `main` pushed.
+- Since then — **repo switched to public** to stop the fleet exhausting the
+  account's GitHub Actions minutes; public repos get the free allowance. The
+  line above records how it started, not how it is. See **Repo** at the top.
 - 2026-07-26 — `CLOUDFLARE_ACCOUNT_ID` secret set on the repo
   (`d3b7d07b806dc96e2d8127fae736a0fd`).
 - 2026-07-26 — `wrangler.jsonc` + `.github/workflows/deploy.yml` + `README.md`
