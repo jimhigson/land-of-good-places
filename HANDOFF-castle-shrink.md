@@ -364,6 +364,66 @@ give a reason to climb — and it is Jim's, not mine. It also collides with
 #377/#380 (three floors, lift-only). Worth asking him directly: *would you
 rather all seven stalls on one floor and fewer reasons to climb?*
 
+## NEXT: all seven stalls on one floor — the mall (Jim, 30 Aug)
+
+He took "all on one floor" over leaving them spread and over a hybrid, knowing
+it costs a reason to climb. **Not yet implemented.** What is measured so far:
+
+### The assumption that has to be stated
+
+**#380 has not landed.** `origin/main` is `a45ca8e6` and
+`BUILDING_FLOOR_COUNT` is still **5**; there is no "mall" floor in the code and
+nothing named mall anywhere in `src/`. So "put the market on the mall" cannot
+be done literally yet. The choice is either to wait for #380 or to pick the
+deck that becomes the mall and move all seven there now. **Do not guess which
+deck silently** — say which, and why, in the PR.
+
+### The constraint that changes, and the one that does not
+
+- **Changes:** `keepOutsFor(deck)` only folds in shops *on that deck*. Today
+  the hearth and the great hall are deck 0 props tested against deck 0's
+  keep-outs, which is what forced the two-aisle split. Move every shop off
+  deck 0 and `keepOutsFor(0)` has no shop keep-outs left, so that conflict
+  **disappears**.
+- **Does not change:** a shop counter is a **collider**, and indoor collision
+  is height-blind. A stall on deck 1 standing over the great hall's feast
+  table puts an invisible wall across the hall on deck 0. **The check will not
+  catch this** — it tests props against keep-outs, not counters against other
+  decks' furniture. Anyone doing this work must verify it by hand, or the
+  market will quietly wall off the hall.
+
+### Measured: seven do fit in one block
+
+`scripts/measure-market-floor.mts`, on the post-rebase four-shaft castle:
+
+| stall | block | footprint | cells |
+|---|---|---|---|
+| 3.6 m | 3 rows x 4 cols | 21.72 x 15.68 m | 7 |
+| 3.2 m | 3 rows x 4 cols | 20.12 x 14.48 m | 7 |
+
+Three rows is **two aisles with stalls down both sides** — a market proper,
+and better than one long row. Note the cell at `(-0.49, -0.88)`: that is the
+**floating bubble's old shaft**, freed by #377. So the bubble's removal did
+free a cell after all — just not one on either of the current two-aisle rows,
+which is why the earlier sweep showed no change.
+
+### Still to answer before building it
+
+- **Which deck**, and whether to wait for #380.
+- **What happens to the decks the shops leave.** Emptying three floors to fill
+  one is how the castle came to feel sparse in the first place. Decks 2 and 3
+  would keep only benches, the roundel and their shafts. **That is a finding
+  for Jim, not something to absorb quietly** — he may want something to
+  replace them.
+- **Counter colliders over the great hall** — see above. Verify by hand.
+- Screenshots at aisle height, and an honest verdict, to the same standard.
+
+### Coordination
+
+**#410** (wild pets on the roof garden) is open and green; its author says its
+derived placement is designed to absorb the smaller roof and the market but
+has **not** verified that. **Do not rebase onto it — it rebases onto us.**
+
 ## Coordination
 
 - **#401** (remove the bubble) is untouched by this and frees a 2.1 m circle;
