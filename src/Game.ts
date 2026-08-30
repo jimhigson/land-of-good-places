@@ -5,7 +5,6 @@ import { IsoCamera } from './core/IsoCamera';
 import { InputSystem, PointerControls } from './core/input';
 import { isTouchDevice } from './core/device';
 import {
-  BUILDING_FLOOR_COUNT,
   CAMERA_ZOOM_STEP,
   PLAYER_LONGEST_STEP,
   PLAYER_RADIUS,
@@ -45,9 +44,7 @@ import { CharacterCreation, CuteODex, Hud, LiftPanel, ScreenControls, TapBurst, 
 import { ActionChips } from './ui/ActionChips';
 import { ParkMap } from './ui/ParkMap';
 import { RaceHud } from './ui/RaceHud';
-import { StairMenu, type StairDirection } from './ui/StairMenu';
 import { Transitions } from './ui/Transitions';
-import { playOpenChime } from './ui/chime';
 import { MiniGameHost } from './minigames';
 import { createRideHud, type RideHud } from './minigames/ferrisWheel/hud';
 import { Shopping } from './Shopping';
@@ -145,7 +142,6 @@ export class Game {
   /** The Rail Race's countdown, lap and result card — and its hold pad. */
   readonly raceHud: RaceHud;
   readonly transitions: Transitions;
-  readonly stairMenu: StairMenu;
   readonly liftPanel: LiftPanel;
   readonly hotelLiftPanel: LiftPanel;
   readonly parade: Parade;
@@ -171,7 +167,6 @@ export class Game {
   private timeScale = 1;
   /** Game time, accumulated at `timeScale`, for every animation phase. */
   private elapsed = 0;
-  private stairMenuDeck = 0;
   /** Per-frame memo for {@link currentZones}. -1 so the first call always builds. */
   private zoneCacheFrame = -1;
   private zoneCache: readonly InteractZone[] = [];
@@ -582,10 +577,6 @@ export class Game {
     uiRoot.appendChild(this.ferrisHudHost);
 
     this.transitions = new Transitions(uiRoot);
-    this.stairMenu = new StairMenu(uiRoot, {
-      onChoose: (direction) => this.takeStairs(direction),
-      onClose: () => undefined,
-    });
 
 
     // The fairground stalls. Walking up to one and pressing interact hands the
@@ -655,8 +646,7 @@ export class Game {
       this.world.building.liftPanel,
       () =>
         (this.uiOwnsTheScreen() && !this.player.riding) ||
-        this.parkMap.isOpen ||
-        this.stairMenu.isOpen,
+        this.parkMap.isOpen,
     );
     this.addSystem(this.liftPanel);
 
@@ -669,8 +659,7 @@ export class Game {
       this.world.hotel.liftPanel,
       () =>
         (this.uiOwnsTheScreen() && !this.player.riding) ||
-        this.parkMap.isOpen ||
-        this.stairMenu.isOpen,
+        this.parkMap.isOpen,
     );
     this.addSystem(this.hotelLiftPanel);
 
@@ -1111,7 +1100,6 @@ export class Game {
     return (
       this.uiOwnsTheScreen() ||
       this.parkMap.isOpen ||
-      this.stairMenu.isOpen ||
       gameStore.get().paused
     );
   }
@@ -1132,7 +1120,6 @@ export class Game {
       this.whatsNew.isOpen ||
       this.miniGames.frozen ||
       this.parkMap.isOpen ||
-      this.stairMenu.isOpen ||
       gameStore.get().paused
     );
   }
@@ -1156,34 +1143,16 @@ export class Game {
       iris: (midpoint) => this.transitions.irisWipe(midpoint),
       flash: () => this.transitions.flash(),
       snapCamera: () => this.camera.snapTo(this.player.position),
-      openStairMenu: (deck) => this.openStairMenu(deck),
       // The building owns the shop geometry; `Shopping` owns the panel. This is
       // the one place the two meet — see `Shopping.openShopById`.
       openShop: (unitId) => this.shopping.openShopById(unitId),
-      closeStairMenu: () => this.stairMenu.close(),
     };
   }
 
-  private openStairMenu(deck: number): void {
-    if (this.stairMenu.isOpen || this.player.riding) return;
-    this.stairMenuDeck = deck;
-    playOpenChime();
-    const canClimb = deck < BUILDING_FLOOR_COUNT - 1;
-    const canDescend = deck > 0;
-    this.stairMenu.show({
-      floorLabel: floorName(deck),
-      canClimb,
-      canDescend,
-      // A greyed-out button that still names a floor reads as a bug. Say where
-      // it goes only when it goes anywhere.
-      upLabel: canClimb ? `up to ${floorName(deck + 1).toLowerCase()}` : 'this is the top!',
-      downLabel: canDescend ? `down to ${floorName(deck - 1).toLowerCase()}` : 'you are at the bottom',
-    });
-  }
-
-  private takeStairs(direction: StairDirection): void {
-    this.world.building.takeStairs(this.stairMenuDeck, direction);
-  }
+  // `openStairMenu` and `takeStairs` stood here, with the Climb / Descend
+  // menu they drove. The lift is the only way between floors now (#377), and
+  // it has a control panel of its own that the family designed — see
+  // GAME_DESIGN.md's "Riding the lift".
 
   /**
    * "Look" pill in the HUD menu (`Hud.ts`). Mounts `CharacterCreation`
@@ -1459,7 +1428,6 @@ export class Game {
     this.tapBurst.dispose();
     this.raceHud.dispose();
     this.screenControls.dispose();
-    this.stairMenu.dispose();
     this.transitions.dispose();
     this.world.dispose();
     this.player.dispose();
@@ -1521,11 +1489,6 @@ export class Game {
       // full-screen overlay. `M` is handled inside `ParkMap` itself.
       if (this.input.justPressed('menu') || this.input.justPressed('cancel')) {
         this.parkMap.close();
-      }
-    } else if (this.stairMenu.isOpen) {
-      // The stairs menu has the screen: Escape backs out without choosing.
-      if (this.input.justPressed('menu')) {
-        this.stairMenu.close();
       }
     } else if (
       this.input.justPressed('menu') &&
@@ -1772,13 +1735,6 @@ function resolveSpawn(place: SavedPlace | undefined): Vector3 {
   const world = localToWorld(place.space, place.x, place.y, place.z);
   if (!world) return DEFAULT_SPAWN;
   return new Vector3(world.x, world.y, world.z);
-}
-
-/** What to call each level, for the stairs menu. */
-function floorName(deck: number): string {
-  if (deck <= 0) return 'Ground floor';
-  if (deck >= BUILDING_FLOOR_COUNT - 1) return 'The roof';
-  return `Floor ${deck}`;
 }
 
 interface MutableFrameContext {

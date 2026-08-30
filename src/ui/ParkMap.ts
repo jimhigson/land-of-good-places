@@ -1,4 +1,5 @@
 import { Vector3 } from 'three';
+import { floorName } from '../world/building/liftRide';
 import { BUILDING_FLOOR_COUNT, INTERIOR_HALF_X, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, PLAYER_RADIUS } from '../core/constants';
 import { PALETTE, hexToCss } from '../core/palette';
 import { isTouchDevice } from '../core/device';
@@ -37,9 +38,6 @@ import { SLIDE_PLAN } from '../world/slide/plan';
 import {
   GROWN_UP_X,
   GROWN_UP_Z,
-  HELTER_DECK,
-  HELTER_ENTRY_X,
-  HELTER_ENTRY_Z,
   LIFT_CAR_X,
   LIFT_CAR_Z,
   ROOF_PAVILION_HALF_X,
@@ -47,8 +45,6 @@ import {
   ROOF_PAVILION_X,
   ROOF_PAVILION_Z,
   SHOP_UNITS,
-  STAIR_STAND_X,
-  STAIR_STAND_Z,
   TOILET_DECK,
   TOILET_STAND_X,
   TOILET_STAND_Z,
@@ -262,13 +258,11 @@ interface FloorFeature {
 const FLOOR_FEATURES: readonly FloorFeature[] = (() => {
   const everyDeck = Array.from({ length: BUILDING_FLOOR_COUNT }, (_, i) => i);
   return [
-    { x: STAIR_STAND_X, z: STAIR_STAND_Z, glyph: '🪜', label: 'Stairs', decks: everyDeck },
+    // The lift is on every floor, and since #377 it is the **only** thing that
+    // is: the stairs, the escalator and the helter-skelter are gone, and the
+    // trampoline has moved to the roof garden as a toy rather than a way up.
     { x: LIFT_CAR_X, z: LIFT_CAR_Z, glyph: '🛗', label: 'Lift', decks: everyDeck },
-    // The escalator shaft is the same XZ footprint on every deck it serves —
-    // ground floor up to the roof.
-    { x: -12.05, z: 0.2, glyph: '⬆️', label: 'Escalator', decks: everyDeck },
-    { x: TRAMPOLINE_X, z: TRAMPOLINE_Z, glyph: '🤸', label: 'Trampoline', decks: [0] },
-    { x: HELTER_ENTRY_X, z: HELTER_ENTRY_Z, glyph: '🌀', label: 'Helter-skelter', decks: [HELTER_DECK] },
+    { x: TRAMPOLINE_X, z: TRAMPOLINE_Z, glyph: '🤸', label: 'Trampoline', decks: [TOP_DECK] },
     { x: TOILET_STAND_X, z: TOILET_STAND_Z, glyph: '🚻', label: 'Toilets', decks: [TOILET_DECK] },
     {
       x: SLIDE_PLAN.entryX,
@@ -514,8 +508,10 @@ export class ParkMap {
     if (this.deps.blocked()) return;
 
     this.indoor = this.deps.world.building.playerIsInside;
-    const { x, y, z } = this.deps.player.position;
-    this.playerDeck = this.indoor ? this.deps.world.building.surfaces.deckAt(x, z, y) : null;
+    const { x, z } = this.deps.player.position;
+    this.playerDeck = this.indoor
+      ? this.deps.world.building.surfaces.floorAt(x, z)?.index ?? null
+      : null;
     this.viewingDeck = this.playerDeck ?? 0;
 
     this.open = true;
@@ -1658,9 +1654,11 @@ export class ParkMap {
   }
 }
 
-/** Matches `Game.ts`'s own `floorName`, so the map and the stairs menu agree. */
+/**
+ * What a floor is called — **from `floors.ts`, the one table**, so the map, the
+ * lift panel and the HUD pill cannot disagree. All three used to carry their
+ * own `deck <= 0 ? 'Ground floor' : …` ladder.
+ */
 function floorLabelText(deck: number): string {
-  if (deck <= 0) return 'Ground floor';
-  if (deck >= BUILDING_FLOOR_COUNT - 1) return 'The roof';
-  return `Floor ${deck}`;
+  return floorName(deck);
 }

@@ -213,12 +213,8 @@ export interface InteriorControls {
   flash(): void;
   /** Put the camera exactly on the player, with no travelling. */
   snapCamera(): void;
-  /** Show the Climb / Descend menu for a deck. */
-  openStairMenu(deck: number): void;
   /** Open shop unit `unitId`'s purchase panel — `Shopping` owns it, not us. */
   openShop(unitId: string): void;
-  /** Take the stairs menu down again — the player has left, or is riding. */
-  closeStairMenu(): void;
 }
 
 /**
