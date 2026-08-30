@@ -21,7 +21,22 @@
  * and its aisle is the whole point. So this now asserts the things a market
  * has and a parade of shopfronts does not — that the aisle is walkable, that
  * every serving spot is *in* its aisle rather than behind its own stall, and
- * that no stall stands in a shaft or the toilets.
+ * that no stall stands in the toilets.
+ *
+ * ## And then the floors split (#377/#380), which is the fourth reshaping
+ *
+ * The market ran as **two** aisles because the great hall's hearth and the
+ * stairwell's pick radius were on the same deck as it and had to be worked
+ * around. Both are somewhere else now — the hall is its own space and the
+ * stairwell does not exist — so it is one aisle of four stalls facing three,
+ * and the shaft clause is deleted because there are no shafts.
+ *
+ * The clause that replaces it is the one that matters most now: **every stall
+ * is on the same floor.** They were on decks 0, 1, 2 and 3, which is why no
+ * floor ever showed more than two of them and the grid read as a kiosk rather
+ * than a market. That was invisible to every assertion here, because
+ * height-blind collision made the deck irrelevant to spacing — so the check
+ * happily proved a well-spaced market that a child could never see.
  *
  * **The lesson worth keeping: seven cells were clear by footprint and six were
  * clear once the queue keep-out was measured.** A check that cannot express
@@ -48,32 +63,37 @@ const ROW_SEP = Math.max(PITCH_X, SHOP_PICK + SHOP_PICK + TAP_FINGER);
 const AISLE = ROW_SEP - STALL;
 const BEAM = 0.8;
 
-const ESCALATOR_MAX_Z = 0.2 * PLATE_SHRINK + 3.1;
-const NORTH_Z = -INTERIOR_HALF_Z + 1.8 + STALL / 2;
-const SOUTH_Z = ESCALATOR_MAX_Z + 1.6 + STALL / 2;
+/** `MALL_DECK` — every stall is on it. */
+const MALL_DECK = 0;
+/** `MARKET_CENTRE_Z`: the aisle runs a little north of the middle. */
+const CENTRE_Z = -2;
+const ROW_Z = [CENTRE_Z - ROW_SEP / 2, CENTRE_Z + ROW_SEP / 2];
+/** `MARKET_ROW_LENGTHS` — four stalls facing three. */
+const ROW_LENGTHS = [4, 3];
 
-const cell = (aisle, row, col) => [
-  -INTERIOR_HALF_X + BEAM + STALL / 2 + col * PITCH_X,
-  (aisle === 'north' ? NORTH_Z : SOUTH_Z) + row * ROW_SEP,
-];
+/** Each row centred on the plate independently, mirroring `marketCell`. */
+const cell = (row, col) => {
+  const span = (ROW_LENGTHS[row] - 1) * PITCH_X;
+  return [-span / 2 + col * PITCH_X, ROW_Z[row]];
+};
 
 /** The seating plan, mirroring `MARKET_PLAN`. */
 const plan = [
-  { id: 'toy', deck: 0, seat: ['north', 0, 0] },
-  { id: 'balloon', deck: 0, seat: ['north', 1, 0] },
-  { id: 'candyFloss', deck: 1, seat: ['north', 1, 1] },
-  { id: 'iceCream', deck: 1, seat: ['north', 1, 2] },
-  { id: 'hat', deck: 2, seat: ['north', 1, 3] },
-  { id: 'stickerPet', deck: 2, seat: ['south', 0, 0] },
-  { id: 'surpriseEgg', deck: 3, seat: ['south', 1, 0] },
+  { id: 'toy', deck: MALL_DECK, seat: [0, 0] },
+  { id: 'balloon', deck: MALL_DECK, seat: [0, 1] },
+  { id: 'candyFloss', deck: MALL_DECK, seat: [0, 2] },
+  { id: 'iceCream', deck: MALL_DECK, seat: [0, 3] },
+  { id: 'hat', deck: MALL_DECK, seat: [1, 0] },
+  { id: 'stickerPet', deck: MALL_DECK, seat: [1, 1] },
+  { id: 'surpriseEgg', deck: MALL_DECK, seat: [1, 2] },
 ];
 
 const units = plan.map((u) => {
-  const [aisle, row, col] = u.seat;
-  const [x, z] = cell(aisle, row, col);
-  // Row 0 faces +Z into its aisle; row 1 faces -Z.
+  const [row, col] = u.seat;
+  const [x, z] = cell(row, col);
+  // Row 0 stands north of the aisle and faces +Z into it; row 1 faces -Z.
   const face = row === 0 ? 1 : -1;
-  return { ...u, aisle, row, col, x, z, face };
+  return { ...u, row, col, x, z, face };
 });
 
 const stallRect = (u) => ({
@@ -109,7 +129,7 @@ console.log(
 );
 for (const u of units) {
   console.log(
-    `  ${u.id.padEnd(12)} deck ${u.deck}  ${u.aisle} aisle r${u.row}c${u.col}  ` +
+    `  ${u.id.padEnd(12)} floor ${u.deck}  r${u.row}c${u.col}  ` +
       `${fmt(stallRect(u))}  faces ${u.face > 0 ? '+Z' : '-Z'}`,
   );
 }
@@ -131,18 +151,34 @@ for (let i = 0; i < units.length; i += 1) {
 }
 
 // 2. The aisle is walkable: two children abreast between facing rows.
-for (const aisle of ['north', 'south']) {
-  const r0 = units.filter((u) => u.aisle === aisle && u.row === 0);
-  const r1 = units.filter((u) => u.aisle === aisle && u.row === 1);
+{
+  const r0 = units.filter((u) => u.row === 0);
+  const r1 = units.filter((u) => u.row === 1);
   if (!r0.length || !r1.length) {
-    fail(`the ${aisle} aisle has stalls on only one side — that is a parade, not an aisle`);
-    continue;
-  }
-  const gap = Math.min(...r1.map((u) => u.z - STALL / 2)) - Math.max(...r0.map((u) => u.z + STALL / 2));
-  if (gap < 2 * PLAYER_RADIUS) {
-    fail(`the ${aisle} aisle is ${gap.toFixed(2)} m — a child is ${(2 * PLAYER_RADIUS).toFixed(2)} m across`);
+    fail('the market has stalls on only one side — that is a parade, not an aisle');
   } else {
-    console.log(`\n  ${aisle} aisle walkable: ${gap.toFixed(2)} m clear`);
+    const gap =
+      Math.min(...r1.map((u) => u.z - STALL / 2)) - Math.max(...r0.map((u) => u.z + STALL / 2));
+    if (gap < 2 * PLAYER_RADIUS) {
+      fail(`the aisle is ${gap.toFixed(2)} m — a child is ${(2 * PLAYER_RADIUS).toFixed(2)} m across`);
+    } else {
+      console.log(`\n  aisle walkable: ${gap.toFixed(2)} m clear`);
+    }
+  }
+}
+
+// 2b. **Every stall is on the same floor.** The clause that would have caught
+//     the market nobody could see: seven stalls spread over four decks are
+//     perfectly spaced and never appear together in a frame.
+{
+  const floors = [...new Set(units.map((u) => u.deck))];
+  if (floors.length !== 1) {
+    fail(
+      `the market is spread over ${floors.length} floors (${floors.join(', ')}) — no floor shows ` +
+        `more than a couple of stalls, which is a kiosk, not a market`,
+    );
+  } else {
+    console.log(`  all ${units.length} stalls on floor ${floors[0]}: one room, one market`);
   }
 }
 
@@ -193,23 +229,28 @@ for (const u of units) {
   }
 }
 
-// 6. No stall stands in a shaft or in the toilets.
-const shafts = {
-  stairwell: { minX: -23.05 * PLATE_SHRINK - 2.45, maxX: -23.05 * PLATE_SHRINK + 2.45, minZ: 0.2 * PLATE_SHRINK - 2.9, maxZ: 0.2 * PLATE_SHRINK + 2.5 },
-  escalator: { minX: -12.05 * PLATE_SHRINK - 1.55, maxX: -12.05 * PLATE_SHRINK + 1.55, minZ: 0.2 * PLATE_SHRINK - 3.1, maxZ: ESCALATOR_MAX_Z },
-  trampoline: { minX: 8 * PLATE_SHRINK - 2.5, maxX: 8 * PLATE_SHRINK + 2.5, minZ: 0.4 * PLATE_SHRINK - 2.5, maxZ: 0.4 * PLATE_SHRINK + 2.5 },
-  helter: { minX: 20 * PLATE_SHRINK - 3.5, maxX: 20 * PLATE_SHRINK + 3.5, minZ: -6.4 * PLATE_SHRINK - 3.1, maxZ: -6.4 * PLATE_SHRINK + 3.9 },
-  toilets: { minX: INTERIOR_HALF_X - 6 - 7.4, maxX: INTERIOR_HALF_X - 6, minZ: INTERIOR_HALF_Z - 0.5 - 7.1, maxZ: INTERIOR_HALF_Z - 0.5 },
+// 6. No stall stands in the toilets.
+//
+//    The four shafts — stairwell, escalator, trampoline, helter — were listed
+//    here too. All four are gone with #377: there is nothing left on the mall
+//    for a stall to stand inside except the loo.
+const fixtures = {
+  toilets: {
+    minX: INTERIOR_HALF_X - 6 - 7.4,
+    maxX: INTERIOR_HALF_X - 6,
+    minZ: INTERIOR_HALF_Z - 0.5 - 7.1,
+    maxZ: INTERIOR_HALF_Z - 0.5,
+  },
 };
 for (const u of units) {
-  for (const [name, s] of Object.entries(shafts)) {
+  for (const [name, s] of Object.entries(fixtures)) {
     if (overlaps(stallRect(u), s)) fail(`${u.id} stands in the ${name}`);
   }
 }
 
 console.log(
   failures === 0
-    ? `\nPASS: ${units.length} stalls, two walkable aisles, every serving spot in its aisle.`
+    ? `\nPASS: ${units.length} stalls on one floor, one walkable aisle, every serving spot in it.`
     : `\n${failures} FAILURE(S)`,
 );
 process.exit(failures === 0 ? 0 : 1);
