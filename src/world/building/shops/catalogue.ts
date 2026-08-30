@@ -124,10 +124,12 @@ export const SHOP_ITEMS: readonly ShopItem[] = [
    * for. `petKindsForShop` reads the *species* off the id, so this entry does
    * not put her in the sticker & pet shop's pen.
    *
-   * **This loses her for every existing save, deliberately and with no
-   * migration** — Jim's explicit choice over the migrating alternative. See the
-   * PR body: a save written before this carries an item whose id is
-   * `toy.ripika`, and nothing in the catalogue answers to that any more.
+   * **Saves written before the rename keep her**: they carry an item whose id
+   * is `toy.ripika`, and `state/save.ts`'s `renameRipikaToPet` — the `1 → 2`
+   * step behind {@link SAVE_VERSION} — rewrites it, in the inventory *and* in
+   * the Cute-o-dex, on load. Nothing is lost and nobody starts again. If you
+   * are here because a returning save is behaving oddly, that migration is
+   * where to look, not this entry.
    */
   {
     id: 'pet.ripika',
