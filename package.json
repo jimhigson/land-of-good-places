@@ -96,7 +96,8 @@
     "measure:kid-landmarks": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-kid-landmarks.mts"
   },
   "dependencies": {
-    "three": "^0.185.1"
+    "three": "^0.185.1",
+    "workbox-window": "^7.4.1"
   },
   "devDependencies": {
     "@types/three": "^0.185.0",

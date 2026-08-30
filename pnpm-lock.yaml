@@ -112,6 +112,9 @@ importers:
       three:
         specifier: ^0.185.1
         version: 0.185.1
+      workbox-window:
+        specifier: ^7.4.1
+        version: 7.4.1
     devDependencies:
       '@types/three':
         specifier: ^0.185.0
