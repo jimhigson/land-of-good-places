@@ -549,4 +549,84 @@ for (const stall of [3.6, 3.2, 2.8]) {
   }
 }
 
+/**
+ * **Two aisles (Jim's ruling, via the Overseer).**
+ *
+ * One row against a wall with a gangway in front is a shopping parade; two
+ * aisles is a market. The north aisle is what fits beside the hearth, and the
+ * south strip takes the rest. The hearth, the roundel and the toilets are all
+ * **obstacles to design around, not to move**.
+ *
+ * Tests both the footprint *and* the queue keep-out, because the keep-out is
+ * the thing that actually bound the north aisle: seven cells were clear by
+ * footprint and six once the queue was measured.
+ */
+{
+  const STALL = 2.8;
+  const SCALE = 0.8;
+  const KEEP = 2.6 + 1.4 + 0.62; // shopKeepOut radius + check:castle's margin
+  const WALK = 2 * PLAYER_RADIUS + 1.2;
+  const PITCH = STALL + WALK;
+  const ROW_SEP = Math.max(PITCH, 2.3 + 2.3 + 1.13);
+
+  /** Fixed things a stall's queue may not crowd. Measured, not assumed. */
+  const fixedPoints: { name: string; x: number; z: number }[] = [];
+  // The hearth's fire and woodpile, as check:castle sees them.
+  for (let k = -1; k <= 1; k += 1) {
+    fixedPoints.push({ name: 'hearth', x: -14 * Math.SQRT1_2 + k * 0.9, z: -INTERIOR_HALF_Z + 0.6 });
+  }
+  // The roundel's planter ring — fixed geometry, not scattered dressing.
+  for (let i = 0; i < 10; i += 1) {
+    const a = (i / 10) * Math.PI * 2;
+    fixedPoints.push({
+      name: 'planter',
+      x: DECK_ROUNDEL.x + Math.cos(a) * (DECK_ROUNDEL.radius - 0.9),
+      z: DECK_ROUNDEL.z + Math.sin(a) * (DECK_ROUNDEL.radius - 0.9),
+    });
+  }
+
+  const seatOk = (x: number, z: number, face: number): boolean => {
+    if (!cellIsClear(x, z, STALL / 2)) return false;
+    for (const along of [-1.8, 0, 1.8]) {
+      const sx = x + along * SCALE;
+      const sz = z + face * 2 * SCALE;
+      for (const f of fixedPoints) if (Math.hypot(sx - f.x, sz - f.z) < KEEP) return false;
+      // The queue may not stand in the toilets either.
+      if (sx > TOILET_ROOM.minX - 1 && sx < TOILET_ROOM.maxX + 1 && sz > TOILET_ROOM.minZ - 1 && sz < TOILET_ROOM.maxZ + 1) return false;
+    }
+    return true;
+  };
+
+  const report = (label: string, rowZ: readonly number[]) => {
+    const seats: { x: number; z: number; face: number }[] = [];
+    for (let r = 0; r < rowZ.length; r += 1) {
+      const z = rowZ[r]!;
+      const face = r === 0 ? 1 : -1;
+      const line: string[] = [];
+      for (let col = 0; col < 8; col += 1) {
+        const x = minX + STALL / 2 + col * PITCH;
+        if (x + STALL / 2 > maxX) break;
+        const ok = seatOk(x, z, face);
+        if (ok) seats.push({ x, z, face });
+        line.push(`c${col}:${ok ? 'Y' : '.'}`);
+      }
+      console.log(`  ${label} row ${r} z=${z.toFixed(2)} face ${face > 0 ? '+Z' : '-Z'}  ${line.join(' ')}`);
+    }
+    return seats;
+  };
+
+  console.log('\nTwo aisles — Y is a seat that clears both footprint and queue:');
+  const northZ0 = minZ + 1.0 + STALL / 2;
+  const north = report('north', [northZ0, northZ0 + ROW_SEP]);
+  // South aisle: as far south as it can go while its back row clears the
+  // shaft band, then the second row toward the south wall.
+  const southZ0 = 3.24 + 1.0 + STALL / 2;
+  const south = report('south', [southZ0, southZ0 + ROW_SEP]);
+  console.log(`  -> north ${north.length} seat(s), south ${south.length} seat(s), total ${north.length + south.length}`);
+  if (north.length + south.length >= 7) {
+    console.log('  SEVEN OR MORE SEAT. Cells:');
+    for (const s2 of [...north, ...south]) console.log(`      (${s2.x.toFixed(2)}, ${s2.z.toFixed(2)}) face ${s2.face > 0 ? '+Z' : '-Z'}`);
+  }
+}
+
 console.log(`\nDecks: ${TOP_DECK + 1}. Every figure above is one plan, because collision is height-blind.`);

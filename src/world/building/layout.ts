@@ -928,52 +928,99 @@ export const MARKET_AISLE_WIDTH = MARKET_ROW_SEPARATION - MARKET_STALL;
  */
 const MARKET_BEAM_INSET = 1.8;
 
-/** Centre of the stall in column `col` of row `row`. Row 0 is the north row. */
-export function marketCell(row: number, col: number): [number, number] {
+/**
+ * # Two aisles, not one (Jim's ruling, 30 August)
+ *
+ * One row of stalls with a gangway in front of it is a shopping parade. Two
+ * aisles is a market: a child walking out of one has somewhere to *discover*
+ * rather than a line she has walked along once.
+ *
+ * The second aisle is also what makes seven stalls fit without moving
+ * anything. The north aisle holds five, because the **hearth** stands in the
+ * north wall and a stall's queue keep-out — a 4 m disc at each of three spots
+ * along the counter — may not crowd its fire. That is not a threshold to
+ * lower: the counter got smaller when the shops became stalls, but a child
+ * standing and waiting did not. The fireplace therefore interrupts the north
+ * row, which is the charming part, and the two stalls it displaces move south.
+ *
+ * The hearth, the deck roundel and the toilets are all obstacles this design
+ * goes *around*. The great hall sits on deck 0 precisely because the castle's
+ * only fireplace is there (#388), so shifting the fire to seat a stall would
+ * quietly erode the reason the hall is where it is.
+ *
+ * ## Both aisles derive from the same two rules
+ *
+ * Along a row: `MARKET_PITCH_X`, from `PLAYER_RADIUS`. Across an aisle:
+ * `MARKET_ROW_SEPARATION`, from `TAP_FINGER_METRES` — because two stalls
+ * facing each other put their tap targets nose to nose, and that binds before
+ * the walking width does. Neither number is re-derived by hand for the second
+ * aisle.
+ */
+
+/** North aisle: one stall-depth in from the wall, clear of the hearth. */
+const MARKET_NORTH_Z = -INTERIOR_HALF_Z + MARKET_BEAM_INSET + MARKET_STALL / 2;
+
+/**
+ * South aisle: clear of the shaft band, measured off the band's own south
+ * edge rather than typed, so a shaft moving pushes the market rather than
+ * silently standing in it.
+ */
+const MARKET_SOUTH_Z = ESCALATOR_WELL.maxZ + 1 + MARKET_STALL / 2;
+
+/** Centre of the stall in column `col`, row `row`, of aisle `aisle`. */
+export function marketCell(aisle: 'north' | 'south', row: number, col: number): [number, number] {
+  const z0 = aisle === 'north' ? MARKET_NORTH_Z : MARKET_SOUTH_Z;
   return [
-    -INTERIOR_HALF_X + MARKET_BEAM_INSET + MARKET_STALL / 2 + col * MARKET_PITCH_X,
-    -INTERIOR_HALF_Z + MARKET_BEAM_INSET + MARKET_STALL / 2 + row * MARKET_ROW_SEPARATION,
+    -INTERIOR_HALF_X + 0.8 + MARKET_STALL / 2 + col * MARKET_PITCH_X,
+    z0 + row * MARKET_ROW_SEPARATION,
   ];
 }
 
-/** Middle of the aisle, for anything that wants to run down it. */
-export const MARKET_AISLE_Z =
-  -INTERIOR_HALF_Z + MARKET_BEAM_INSET + MARKET_STALL / 2 + MARKET_ROW_SEPARATION / 2;
+/** Middle of each aisle, for anything that wants to run down one. */
+export const MARKET_AISLE_Z = [
+  MARKET_NORTH_Z + MARKET_ROW_SEPARATION / 2,
+  MARKET_SOUTH_Z + MARKET_ROW_SEPARATION / 2,
+] as const;
 
 /**
- * A stall faces **into the aisle**, so a child walking it can see what each
+ * A stall faces **into its aisle**, so a child walking it can see what each
  * one sells and the serving spot is on the side she is standing.
  *
  * Unit-local +Z is "into the room" for a wall unit and "into the aisle" for a
- * stall — which is the same thing as far as `shopLocalToBuilding`, the till
- * spot and the keep-out are concerned, so none of them had to learn about
- * markets.
+ * stall — the same thing as far as `shopLocalToBuilding`, the till spot and
+ * the keep-out are concerned, so none of them had to learn about markets.
  */
 const FACE_SOUTH = 0;
 const FACE_NORTH = Math.PI;
 
 /**
- * Which cell each shop stands in, north row first, skipping the hearth's.
- *
- * A plain list because it is a *seating plan*, not a formula: which shop gets
- * which pitch is a thing a six-year-old should be allowed to have an opinion
+ * Which pitch each shop has. A **seating plan**, not a formula: which shop
+ * gets which stall is a thing a six-year-old should be allowed an opinion
  * about, and it should be editable without touching any arithmetic.
+ *
+ * Every seat below is verified clear of both the stall footprint *and* the
+ * queue keep-out by `scripts/measure-market-floor.mts`, and then on the built
+ * room by `check:castle`. The gaps in the north row are the hearth's.
  */
-const MARKET_PLAN: readonly (readonly [number, number])[] = [
-  [0, 0],
-  [0, 1],
-  // [0, 2] is the great hall's fireside bench, by the hearth.
-  [0, 3],
-  [1, 0],
-  [1, 1],
-  [1, 2],
-  [1, 3],
+const MARKET_PLAN: readonly (readonly ['north' | 'south', number, number])[] = [
+  // The north row is mostly fireplace: columns 1 and 2 are the hearth's fire
+  // and woodpile, and column 3's queue stood where the great hall's children
+  // gather (`check:castle`, 21 failures against that one pitch), so it moved
+  // to the far row. One stall, a fire, and then the aisle.
+  ['north', 0, 0],
+  ['north', 1, 0],
+  ['north', 1, 1],
+  ['north', 1, 2],
+  ['north', 1, 3],
+  ['south', 0, 0],
+  ['south', 1, 0],
 ];
 
 function stall(index: number): { x: number; z: number; yaw: number } {
-  const seat = MARKET_PLAN[index] ?? [1, 0];
-  const [row, col] = seat;
-  const [x, z] = marketCell(row, col);
+  const seat = MARKET_PLAN[index];
+  if (!seat) throw new Error(`market: shop ${index} has no pitch — MARKET_PLAN is short`);
+  const [aisle, row, col] = seat;
+  const [x, z] = marketCell(aisle, row, col);
   return { x, z, yaw: row === 0 ? FACE_SOUTH : FACE_NORTH };
 }
 
