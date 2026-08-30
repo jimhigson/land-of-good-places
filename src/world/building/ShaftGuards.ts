@@ -3,9 +3,6 @@ import { PALETTE } from '../../core/palette';
 import { interiorMaterial } from './parts';
 import type { CollisionWorld } from '../Collision';
 import {
-  BUBBLE_SHAFT,
-  BUBBLE_X,
-  BUBBLE_Z,
   HELTER_SHAFT,
   TRAMPOLINE_SHAFT,
   TRAMPOLINE_X,
@@ -15,10 +12,11 @@ import {
 } from './layout';
 
 /**
- * Guard rails and colliders for the three shafts architecture review S14
- * found with no rails and no colliders at all: `TRAMPOLINE_SHAFT` and
- * `HELTER_SHAFT` (decks 1-2), and `BUBBLE_SHAFT` (decks 1-4, wherever the
- * bubble itself is not currently docked).
+ * Guard rails and colliders for the shafts architecture review S14 found with
+ * no rails and no colliders at all: `TRAMPOLINE_SHAFT` and `HELTER_SHAFT`,
+ * both decks 1-2. There was a third, `BUBBLE_SHAFT` on decks 1-4, until the
+ * floating bubble was removed (issue #377) — that shaft is gone with it, so
+ * the middle of those decks is solid floor and needs no rail.
  *
  * Two different situations, two different treatments:
  *
@@ -29,8 +27,8 @@ import {
  *   ceiling, all the way round — the same shape `GlassLift`'s three fixed
  *   sides take, just closed on all four here since there is no door.
  *
- * - The trampoline and the bubble are the opposite: both are boarded by
- *   walking straight onto them (`Trampoline.covers`, `Bubble.covers`), so a
+ * - The trampoline is the opposite: it is boarded by walking straight onto it
+ *   (`Trampoline.covers`), so a
  *   collider that is solid on every deck at once (collision is height-blind —
  *   `layout.ts:36`) would seal the ride shut on the one deck it is legitimate
  *   on, along with every deck it is not. A rail at real guard-rail height
@@ -49,7 +47,6 @@ const RAIL_TOP_HEIGHT = 1.05;
 
 export function buildShaftGuards(floorGroups: readonly Group[], collision: CollisionWorld): void {
   addCircularGuard(floorGroups, [1, 2], TRAMPOLINE_X, TRAMPOLINE_Z, TRAMPOLINE_SHAFT.radius, collision);
-  addCircularGuard(floorGroups, [1, 2, 3, 4], BUBBLE_X, BUBBLE_Z, BUBBLE_SHAFT.radius, collision);
   addRectangularGuard(floorGroups, [1, 2], HELTER_SHAFT, collision);
 }
 

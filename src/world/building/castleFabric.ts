@@ -197,8 +197,8 @@ const PLATE_INSET = BEAM_WIDTH / 2;
  * ## They stop at the holes, and that is the whole subtlety
  *
  * The plate is fixed to the underside of the slab above, and that slab is
- * punched through by the stairs, the escalator, the lift, the trampoline, the
- * bubble and the helter-skelter (`DECK_HOLES`) — several of which reach the
+ * punched through by the stairs, the escalator, the lift, the trampoline
+ * and the helter-skelter (`DECK_HOLES`) — several of which reach the
  * wall. A run of plate over one of those is fixed to a ceiling that is not
  * there.
  *

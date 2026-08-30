@@ -20,7 +20,7 @@ import type { HighlightTarget } from './highlight';
  * chips (or the key it names) is pressed.
  *
  * Zones are rebuilt on demand rather than cached, because several of them move
- * (the lift doors follow the car, the bubble is wherever the bubble is) and
+ * (the lift doors follow the car, the trampoline pad rides its own bounce) and
  * because `actions` is evaluated live: "Get on" and "Get off" are the same
  * train, one second apart.
  */
@@ -52,7 +52,7 @@ export interface InteractZone {
    * exactly one thing (see `world/Selection.ts`).
    *
    * Omitted entirely by the things you use by *arriving* rather than by
-   * pressing: the trampoline, the bubble, the slides, the front door. They have
+   * pressing: the trampoline, the slides, the front door. They have
    * never had a prompt and this does not give them one.
    */
   readonly actions?: () => readonly ZoneAction[];

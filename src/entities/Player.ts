@@ -278,7 +278,7 @@ const PICK_WALK_AWAY = 0.38;
  * height `y`.
  *
  * The default is `terrainHeight`, but the building installs its own so that
- * decks, stairs, escalators, lifts and the floating bubble all become walkable
+ * decks, stairs, escalators and lifts all become walkable
  * without the player knowing anything about them. Passing the walker's current
  * height is what lets the same point mean "deck three" or "the grass" depending
  * on where they came from.
@@ -354,7 +354,7 @@ export class Player implements GameSystem {
 
   /**
    * Where the ground is. Left `null` the character walks on the terrain; the
-   * building swaps in its own so the decks, stairs, lift and bubble are solid.
+   * building swaps in its own so the decks, stairs and lift are solid.
    */
   groundSampler: GroundSampler | null = null;
 

@@ -170,7 +170,7 @@ export class World implements GameSystem {
     // onto; the paving is the same mesh either side of the ramp feet.
     drapePathsOverBridges((x, z) => bridgePavingHeightAt(this.train.bridges, x, z));
     // The platforms and the carriage floors are things you stand on, so they go
-    // to the same sampler the lift and the bubble use.
+    // to the same sampler the lift uses.
     for (const platform of this.train.platforms()) this.building.surfaces.addPlatform(platform);
     // …and they are tap targets, which the meadow — planted before the loop
     // was solved — must keep its pickable blooms out of (the tap-spacing

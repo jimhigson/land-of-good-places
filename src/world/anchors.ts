@@ -84,7 +84,7 @@ export const ANCHORS: readonly AnchorDefinition[] = [
     glyph: '\u{1F3F0}',
     accent: PALETTE.markerSky,
     notes:
-      'Multi-floor castle: glass lift, escalators, stairs, trampoline, bubble ' +
+      'Multi-floor castle: glass lift, escalators, stairs, trampoline ' +
       'and the top of the ginormous slide. The slide exits towards the ballPit ' +
       'anchor, which the layout solver keeps within reach (see parkManifest).',
   }),

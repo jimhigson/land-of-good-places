@@ -19,7 +19,7 @@ import {
 } from './layout';
 
 /**
- * A platform that moves — the lift car, the floating bubble.
+ * A platform that moves — the lift car, the trampoline pad.
  *
  * The sampler asks it, every time, where its top surface is and whether a point
  * is standing on it. That is the whole of the "moving platform physics" in this
@@ -155,7 +155,7 @@ export class WalkSurfaces {
       }
     }
 
-    // Lifts and bubbles — and the bridges' humps, the one platform kind
+    // Lifts — and the bridges' humps, the one platform kind
     // whose surface height varies across its own footprint.
     for (const platform of this.platforms) {
       if (!platform.covers(x, z)) continue;

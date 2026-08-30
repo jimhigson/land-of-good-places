@@ -46,7 +46,7 @@ import { terrainHeight } from '../terrain';
  * The one rule that must not be broken: **every hole in a deck has to be fully
  * spanned by a ramp or platform, with solid deck at both ends — or, where it
  * is walked onto directly rather than crossed (the trampoline well, the
- * bubble's shaft, the helter-skelter), fully guarded by a rail and a
+ * helter-skelter), fully guarded by a rail and a
  * matching collider (see `ShaftGuards.ts`).** Otherwise a child walking
  * towards the stairs drops through the floor instead.
  *
@@ -165,13 +165,17 @@ export interface DeckHole {
 }
 
 /**
- * The five vertical shafts.
+ * The four vertical shafts.
  *
  * They sit in a band across the middle of the plate so the north and south
  * strips stay clear for shop units and the toilets, and there is always a
  * corridor several metres wide between two shafts. With sixty metres of floor to
  * play with they are now genuinely spread out — the old plan had the stairs, the
- * escalator, the bubble and the trampoline crammed into twenty.
+ * escalator and the trampoline crammed into twenty.
+ *
+ * There were five until the floating bubble was removed (issue #377): its
+ * shaft was a 2.1 m circle at (-1.5, 0), and the middle of decks 1-4 is now
+ * plain solid floor.
  */
 export const STAIRWELL = rect(-25.5, -20.6, -2.7, 2.7);
 /**
@@ -183,7 +187,6 @@ export const STAIRWELL = rect(-25.5, -20.6, -2.7, 2.7);
  * because player radius held them back by 0.22 m, and NPC radius by half that.
  */
 export const ESCALATOR_WELL = rect(-13.6, -10.5, -2.9, 3.3);
-export const BUBBLE_SHAFT = circle(-1.5, 0, 2.1);
 export const TRAMPOLINE_SHAFT = circle(8, 0.4, 2.5);
 /** East side: the helter-skelter winds down this one. */
 export const HELTER_SHAFT = rect(16.5, 23.5, -9.5, -2.5);
@@ -198,8 +201,8 @@ const UPPER_DECKS = [1, 2, 3, 4] as const;
  * **The fixed shafts, and what makes them a different thing from a hole.**
  *
  * Exported (issue #368) because a shaft is not only an absence of floor: each
- * one carries a *structure* — a stair, an escalator, a bubble tube, a
- * trampoline, a helter-skelter — and that structure comes **all the way down**,
+ * one carries a *structure* — a stair, an escalator, a trampoline, a
+ * helter-skelter — and that structure comes **all the way down**,
  * through storeys whose floor is perfectly solid. `deckIsSolid` cannot say so
  * and is not meant to: it answers "is there floor here", and on deck 0 the
  * answer is always yes.
@@ -217,7 +220,6 @@ const UPPER_DECKS = [1, 2, 3, 4] as const;
 export const BUILDING_SHAFTS: readonly DeckHole[] = [
   { id: 'stairwell', region: STAIRWELL, decks: UPPER_DECKS },
   { id: 'escalator', region: ESCALATOR_WELL, decks: UPPER_DECKS },
-  { id: 'bubble', region: BUBBLE_SHAFT, decks: UPPER_DECKS },
   // The trampoline only throws you as high as deck 2, and the helter-skelter
   // starts there too — so neither shaft needs to pierce the upper decks.
   { id: 'trampoline', region: TRAMPOLINE_SHAFT, decks: [1, 2] },
@@ -581,10 +583,6 @@ export function allRamps(): RampDefinition[] {
 export const TRAMPOLINE_X = TRAMPOLINE_SHAFT.x;
 export const TRAMPOLINE_Z = TRAMPOLINE_SHAFT.z;
 export const TRAMPOLINE_RADIUS = 1.7;
-
-export const BUBBLE_X = BUBBLE_SHAFT.x;
-export const BUBBLE_Z = BUBBLE_SHAFT.z;
-export const BUBBLE_RADIUS = 1.9;
 
 /**
  * The helter-skelter: an oval helix down the east shaft, from deck 2 to the

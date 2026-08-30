@@ -1,9 +1,6 @@
 import { PRIMARY_ACTION, pressAction, pressZone, type InteractZone, type ZoneAction } from '../interact';
 import { SLIDE_PLAN } from '../slide/plan';
 import {
-  BUBBLE_RADIUS,
-  BUBBLE_X,
-  BUBBLE_Z,
   GROWN_UP_X,
   GROWN_UP_Z,
   HELTER_DECK,
@@ -45,8 +42,6 @@ import { BUILDING_FLOOR_COUNT, BUILDING_HALF_Z } from '../../core/constants';
  */
 
 export interface BuildingZoneState {
-  /** Current top surface of the floating bubble, in world units. */
-  readonly bubbleSurfaceY: number;
   /** Current top surface of the trampoline pad, in world units. */
   readonly trampolineSurfaceY: number;
   /** Ground height at the facade's front door, out in the garden. */
@@ -139,17 +134,6 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
     standZ: worldZ(TRAMPOLINE_Z),
     // Landing on it is the interaction, so it offers no chip — and, by the
     // SELECTION RULE, is never outlined either.
-  });
-
-  zones.push({
-    id: 'bubble',
-    label: 'Floating bubble',
-    x: worldX(BUBBLE_X),
-    y: state.bubbleSurfaceY,
-    z: worldZ(BUBBLE_Z),
-    pickRadius: BUBBLE_RADIUS + 0.4,
-    standX: worldX(BUBBLE_X),
-    standZ: worldZ(BUBBLE_Z),
   });
 
   zones.push({

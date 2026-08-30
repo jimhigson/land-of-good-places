@@ -53,7 +53,7 @@ import { PLAYER_RADIUS } from '../../core/constants';
  *
  * The game *does* support moving platforms — `WalkSurfaces` asks every
  * registered platform where its surface is, every frame, which is how the lift
- * and the bubble carry you (ARCHITECTURE.md). The carriages register as
+ * carries you (ARCHITECTURE.md). The carriages register as
  * platforms too, so standing on a stopped train is solid ground and nobody
  * falls through the floor.
  *
