@@ -3,11 +3,11 @@ import {
   BALL_PIT_RADIUS,
   BALL_PIT_X,
   BALL_PIT_Z,
+  BUILDING_BASE_Y,
   BUILDING_CENTRE_X,
   BUILDING_CENTRE_Z,
+  CASTLE_MASONRY_TOP,
   CASTLE_TOWERS,
-  TOP_DECK,
-  deckY,
   distanceOutsideTower,
 } from '../building/layout';
 import {
@@ -233,8 +233,24 @@ const CRUISER_AIR = 5.5;
  */
 const CRUISER_OVERLAP = CORRIDOR_RADIUS + 0.75;
 
+/**
+ * How far the chute's centreline starts **above the facade's battlements**.
+ *
+ * The figure that used to fall out of `deckY(TOP_DECK)`: a five-storey interior
+ * put the start at 14.40 m over the plinth and the stonework tops out at
+ * 9.85 m, so the chute rode 4.55 m above it and its underside cleared by the
+ * 3.44 m that `theGinormousSlideLeavesOverTheBattlements` holds open.
+ *
+ * It is written down now instead of emerging, because the deck index it used to
+ * come from stopped meaning "as high as the castle" the moment the floors
+ * became separate spaces (#377/#380) — `TOP_DECK` fell from 4 to 2 and the
+ * chute dropped 7.2 m into solid stone on every seed. See
+ * `layout.ts`'s `CASTLE_MASONRY_TOP`.
+ */
+const BATTLEMENT_AIR = 4.55;
+
 /** Where the rider's eyeline starts, and where it ends up. */
-const START_Y = deckY(TOP_DECK);
+const START_Y = BUILDING_BASE_Y + CASTLE_MASONRY_TOP + BATTLEMENT_AIR;
 const END_Y = terrainHeight(BALL_PIT_X, BALL_PIT_Z) + 0.9;
 const SLIDE_DROP = START_Y - END_Y;
 
@@ -322,8 +338,9 @@ const ROOF_ENTRY_X = 20;
  * point is that it reads as being *at* the edge.
  *
  * **This is interior-local and cannot move the garden chute.** `START_Y` is
- * `deckY(TOP_DECK)` and the ride's start pose comes from the facade's south
- * wall via `doorPoses()`; neither reads this. That separation is what lets the
+ * measured off the facade's own battlements (`CASTLE_MASONRY_TOP`) and the
+ * ride's start pose comes from the facade's south wall via `doorPoses()`;
+ * neither reads this. That separation is what lets the
  * boarding point go to the edge without touching the 3.44 m of air over the
  * battlements that `theGinormousSlideLeavesOverTheBattlements` holds open.
  */

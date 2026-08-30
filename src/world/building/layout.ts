@@ -271,6 +271,47 @@ export const ENTRANCE_MAX_X = 4;
 export const LIFT_DOOR_MIN_Z = 3.5;
 export const LIFT_DOOR_MAX_Z = 6.5;
 
+// ------------------------------------------------------- the facade's height
+
+/**
+ * **How tall the castle in the garden is** — its wall, its battlements, and
+ * the top of its stonework.
+ *
+ * These live here rather than in `Shell.ts` for exactly the reason
+ * {@link CASTLE_TOWERS} does, one section below: two things need them and the
+ * dependency only runs one way. `Shell.ts` builds the battlements;
+ * `slide/solve.ts` has to launch the ginormous slide *over* them. The slide
+ * plan already imports this file, and `Shell.ts` imports the plan, so
+ * `Shell.ts` cannot be the owner without making a cycle.
+ *
+ * ## Why the slide's launch height had to stop being a deck index
+ *
+ * `solve.ts` used to take its start height from `deckY(TOP_DECK)` — the
+ * interior's topmost storey. That was never *about* the interior: it was a
+ * proxy for "as high as the castle is", and it only worked because a
+ * five-storey interior happened to be taller than the facade's battlements.
+ *
+ * When the floors became separate spaces (#377/#380) the interior stopped
+ * having five stacked storeys and `TOP_DECK` fell from 4 to 2, taking 7.2 m
+ * off the slide's launch height with it. The chute came down **3.76 m inside
+ * solid battlements**, on every seed, and `test:procgen` caught it on all five.
+ * Nothing about the facade had changed; the number the facade's clearance
+ * depended on lived in a different building.
+ *
+ * GAME_DESIGN 30c is explicit that the inside never has to agree with the
+ * outside's shape, so a figure about the *outside* must not be derived from the
+ * inside's floor count. It is derived from the outside now.
+ */
+export const CASTLE_WALL_HEIGHT = 8.8;
+export const CASTLE_MERLON_HEIGHT = 1.05;
+
+/**
+ * The top of the facade's stonework, facade-local — what the ginormous slide
+ * has to clear, and what `test/procgen`'s `castleMasonryTopY` measures off the
+ * built mesh.
+ */
+export const CASTLE_MASONRY_TOP = CASTLE_WALL_HEIGHT + CASTLE_MERLON_HEIGHT;
+
 // ------------------------------------------------------------ corner towers
 
 /**

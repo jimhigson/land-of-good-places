@@ -47,6 +47,7 @@ import {
 import { segmentsMinusGaps } from '../wallRuns';
 import { buildCeilingBeams, castleFloorMaterial, castleWallMaterial } from './castleFabric';
 import { FLOOR_SPACE_SPACING } from './floors';
+import { CASTLE_MERLON_HEIGHT, CASTLE_WALL_HEIGHT } from './layout';
 import {
   ENTRANCE_MAX_X,
   ENTRANCE_MIN_X,
@@ -708,11 +709,11 @@ function buildInteriorPlaza(): Group {
 const CASTLE_DOOR_HEIGHT = 3.6;
 /** Total height of the curtain wall, battlement included. One number, one
  * colour, the whole way round — which is what stops it reading as storeys. */
-const CASTLE_WALL_HEIGHT = 8.8;
+
 
 const CASTLE_MERLON_WIDTH = 0.85;
 const CASTLE_MERLON_DEPTH = 0.5;
-const CASTLE_MERLON_HEIGHT = 1.05;
+
 const CASTLE_MERLON_PITCH = 1.7;
 
 // TOWER_RADIUS, TOWER_HEIGHT, TOWER_ROOF_HEIGHT, TOWER_ROOF_OVERHANG and
