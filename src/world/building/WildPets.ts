@@ -236,6 +236,7 @@ export class WildPets {
     }
 
     this.updateAnnouncement(dt);
+    this.sizeAnnouncement();
   }
 
   /**
@@ -282,10 +283,17 @@ export class WildPets {
     return zones;
   }
 
-  /** Sizes the announcement on screen. Separate from `update` because it must
-   *  run after the camera has settled for the frame — the same split
-   *  `NpcSystem` makes for its chat bubbles. */
-  updateScreenSize(): void {
+  /**
+   * Sizes the announcement on screen, in world units that come out the same
+   * number of pixels at any camera distance — the TEXT/UI-SCALE rule, and the
+   * whole reason {@link SpeechBubble} wants a camera rather than a scale.
+   *
+   * Called from `update` rather than exposed for `Game` to remember, the same
+   * way `Hotel` drives its receptionist's bubble. One frame of camera lag on a
+   * line of text nobody is reading mid-turn is not worth a second wiring point
+   * that a future system can forget to call.
+   */
+  private sizeAnnouncement(): void {
     const one = this.announcing;
     if (!one || this.announceLeft <= 0) return;
     this.bubble.sprite.position.set(one.x, PET_TOP + 0.5, one.z);
