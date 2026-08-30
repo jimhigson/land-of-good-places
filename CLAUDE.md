@@ -464,6 +464,16 @@ line to add** in `RIDE_DEEP_LINKS`, and worth adding rather than writing
 directions. Say plainly which URL shows which thing when several are in
 flight at once, because they will be on several ports.
 
+**Never mention a PR to Jim without its deployed preview URL.** Not the PR
+number, not the branch name, not "it's green and waiting" — the link, every
+time, in every status update as well as when the work first lands. A PR
+number is a thing he has to go and look up before he can judge anything;
+the preview is the work itself. Pull the URL fresh from the PR's current
+"Deploy PR preview" comment or check — the sha in it changes on every push,
+so a link from an earlier update is already stale. If a PR genuinely has
+nothing to look at (a CI or tooling change), say that in as many words
+rather than quietly omitting the link.
+
 **The same rule applies to PR preview URLs, not just local dev servers.**
 When handing Jim a Cloudflare Workers preview link (`wrangler versions
 upload --preview-alias`'s `pr-<number>-<commit-sha>-land-of-good-places.blockstack.workers.dev`
