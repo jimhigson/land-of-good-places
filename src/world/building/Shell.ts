@@ -41,14 +41,13 @@ import {
   extrudePlan,
   glassMaterial,
   interiorMaterial,
-  planHole,
   planRect,
   softMaterial,
 } from './parts';
 import { segmentsMinusGaps } from '../wallRuns';
 import { buildCeilingBeams, castleFloorMaterial, castleWallMaterial } from './castleFabric';
+import { FLOOR_SPACE_SPACING } from './floors';
 import {
-  DECK_HOLES,
   ENTRANCE_MAX_X,
   ENTRANCE_MIN_X,
   ENTRANCE_RAMP,
@@ -176,11 +175,26 @@ export class BuildingShell {
     for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
       const floor = new Group();
       floor.name = `${this.group.name}-floor-${deck}`;
-      floor.position.y = deck * BUILDING_FLOOR_HEIGHT;
+      // **Sideways, not upwards.** This was `position.y = deck *
+      // BUILDING_FLOOR_HEIGHT` — five slabs stacked in one coordinate system,
+      // told apart by height. Since #377/#380 each floor is its own space, so
+      // each group steps `FLOOR_SPACE_SPACING` along +X instead and every
+      // floor's walking surface sits at the same `y`.
+      //
+      // Everything *inside* a floor group is untouched by that: a prop at
+      // floor-local (x, z) is still at floor-local (x, z), which is why the
+      // dressing, the shops, the toilets and `check:castle` all index by deck
+      // exactly as before. The offset is the group's, not theirs — the same
+      // reason moving the whole interior six hundred metres cost almost no
+      // code, applied one level down.
+      floor.position.x = deck * FLOOR_SPACE_SPACING;
       this.floorGroups.push(floor);
       this.group.add(floor);
 
       floor.add(buildDeck(plan, deck));
+      // A plaza disc per floor, because each floor now floats over its own
+      // patch of nothing. There used to be one for the whole stack.
+      floor.add(buildInteriorPlaza());
 
       if (deck < plan.enclosedDecks) {
         floor.add(buildWalls(plan, deck, BUILDING_PARAPET));
@@ -197,7 +211,6 @@ export class BuildingShell {
 
     const ground = this.floorGroups[0];
     if (ground) buildInteriorPorch(plan, ground);
-    this.group.add(buildInteriorPlaza());
   }
 }
 
@@ -214,12 +227,11 @@ function outerZ(plan: ShellPlan): number {
 function buildDeck(plan: ShellPlan, deck: number): Mesh {
   const ox = outerX(plan);
   const oz = outerZ(plan);
+  // **No holes.** Every floor is one unbroken slab now: the shafts the stairs,
+  // the escalator, the trampoline and the helter-skelter needed are gone with
+  // them, and the lift does not travel through anything. `parts.ts`'s
+  // `planHole` lost its last caller with them.
   const slab = planRect(-ox, ox, -oz, oz);
-  if (plan.holes) {
-    for (const hole of DECK_HOLES) {
-      if (hole.decks.includes(deck)) slab.holes.push(planHole(hole.region));
-    }
-  }
 
   // `plan.holes` is true only for the interior — the facade out in the garden
   // is a solid block and takes none of this. The roof terrace is genuinely

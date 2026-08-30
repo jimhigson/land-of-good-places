@@ -26,7 +26,7 @@ import { castleSootTexture } from '../../core/textures';
 import { softMaterial } from './parts';
 import { BEAM_UNDERSIDE, SCONCE_HEADROOM, SCONCE_MOUNT_Y } from './castleFabric';
 import {
-  deckIsSolid,
+  insideInterior,
   INTERIOR_DOOR_MAX_X,
   INTERIOR_DOOR_MIN_X,
   LIFT_DOOR_MAX_Z,
@@ -226,7 +226,7 @@ export function castleTorchAnchors(deck: number): WallAnchor[] {
   const consider = (anchor: WallAnchor): void => {
     // Nothing on a wall that has no floor under it to stand and look at it
     // from. Asked of the deck that was built rather than of the hole list.
-    if (!deckIsSolid(deck, anchor.x + anchor.out.x, anchor.z + anchor.out.z)) return;
+    if (!insideInterior(anchor.x + anchor.out.x, anchor.z + anchor.out.z)) return;
     // The **same margin `check:castle` measures against**, plus the bracket's
     // own reach off the wall. It was bare `k.radius` until the check found two
     // torches a few centimetres inside a shop's queue: a builder that clears a
@@ -486,7 +486,7 @@ export class CastleFire {
 
     // --- braziers, for the middle of the plate that no wall torch reaches --
     const standing = BRAZIER_SPOTS.filter(
-      (spot) => deck < 3 && deckIsSolid(deck, spot.x, spot.z) && clearOfKeepOuts(deck, spot),
+      (spot) => deck < 3 && insideInterior(spot.x, spot.z) && clearOfKeepOuts(deck, spot),
     );
     if (standing.length > 0) {
       const braziers = new InstancedMesh(

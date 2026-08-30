@@ -434,6 +434,17 @@ export const LIFT_LOBBY_REACH = 4;
 export interface RampDefinition {
   readonly id: string;
   readonly space: 'interior' | 'garden';
+  /**
+   * Restricts an `interior` ramp to one floor.
+   *
+   * Every castle floor shares the same floor-local plan, so an interior ramp
+   * applies on all three unless it says otherwise — which is right for the lift
+   * pit, since each floor has its own alcove at the same spot. The **porch** is
+   * the exception: only the mall has a front door, and without this a child on
+   * the great hall or the roof garden would find a metre of walkable floor
+   * outside the south wall and walk off the plate onto it.
+   */
+  readonly onlyFloor?: number;
   readonly footprint: RectRegion;
   readonly axis: 'x' | 'z';
   readonly from: number;
@@ -475,6 +486,7 @@ export const FACADE_THRESHOLD: RampDefinition = {
 export const INTERIOR_PORCH: RampDefinition = {
   id: 'interior-porch',
   space: 'interior',
+  onlyFloor: MALL_DECK,
   footprint: rect(
     INTERIOR_DOOR_MIN_X - 1,
     INTERIOR_DOOR_MAX_X + 1,

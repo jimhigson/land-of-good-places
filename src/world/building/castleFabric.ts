@@ -8,7 +8,7 @@ import {
 import { PALETTE } from '../../core/palette';
 import { castleCoursingTexture, castleFlagstoneTexture } from '../../core/textures';
 import { interiorMaterial, softMaterial } from './parts';
-import { deckIsSolid, TOP_DECK } from './layout';
+import { insideInterior, TOP_DECK } from './layout';
 import { TALLEST_CHILD_HEIGHT } from '../../art/models/kid';
 
 /**
@@ -194,20 +194,18 @@ const PLATE_INSET = BEAM_WIDTH / 2;
  * a top" — from a position the cutaway does not delete: **against the wall**,
  * where a child's eye already is, crossing nothing and hiding nothing.
  *
- * ## They stop at the holes, and that is the whole subtlety
+ * ## It used to stop at the holes; there are no holes now
  *
- * The plate is fixed to the underside of the slab above, and that slab is
- * punched through by the stairs, the escalator, the lift, the trampoline
- * and the helter-skelter (`DECK_HOLES`) — several of which reach the
- * wall. A run of plate over one of those is fixed to a ceiling that is not
- * there.
+ * The plate is fixed to the underside of this storey's ceiling, and that
+ * ceiling used to be punched through by the stairs, the escalator, the lift,
+ * the trampoline and the helter-skelter — several of which reached the wall, so
+ * a run of plate over one of them was fixed to a ceiling that was not there.
+ * Each segment therefore had to ask `deckIsSolid` about the deck above.
  *
- * So the plate is laid as short segments and **every segment asks the deck
- * above whether there is actually a slab there** (`deckIsSolid`) — measuring
- * the floor that was built rather than re-deriving the hole list, which is this
- * repo's standing rule for exactly this kind of question. A shaft that moves
- * takes the plate with it, for free, and no second copy of the hole plan lives
- * here to fall out of step.
+ * Since the floors became separate spaces (#377/#380) there is no deck above
+ * and no shaft anywhere: a storey's ceiling is unbroken from wall to wall. The
+ * segments stay — they are still what keeps the run on the plate — but the
+ * question each one asks is now simply whether it is over the floor at all.
  *
  * ## It clears the tallest child in the game
  *
@@ -229,19 +227,18 @@ export function buildCeilingBeams(deck: number): InstancedMesh | null {
     );
   }
 
-  const above = deck + 1;
   const y = BEAM_UNDERSIDE + BEAM_DEPTH / 2;
   const spots: { x: number; z: number; alongZ: boolean }[] = [];
 
-  /** Keeps a segment on solid slab at both ends as well as in the middle. */
+  /** Keeps a segment over the floor plate at both ends as well as in the middle. */
   const solidRun = (x: number, z: number, alongZ: boolean): boolean => {
     const half = BEAM_SEGMENT / 2;
     const dx = alongZ ? 0 : half;
     const dz = alongZ ? half : 0;
     return (
-      deckIsSolid(above, x, z) &&
-      deckIsSolid(above, x - dx, z - dz) &&
-      deckIsSolid(above, x + dx, z + dz)
+      insideInterior(x, z) &&
+      insideInterior(x - dx, z - dz) &&
+      insideInterior(x + dx, z + dz)
     );
   };
 

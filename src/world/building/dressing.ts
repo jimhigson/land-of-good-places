@@ -15,23 +15,17 @@ import { Rng, TAU } from '../../core/mathUtils';
 import { SLIDE_PLAN } from '../slide/plan';
 import { interiorMaterial, softMaterial } from './parts';
 import {
-  deckIsSolid,
+  insideInterior,
   regionContains,
   GROWN_UP_X,
   GROWN_UP_Z,
-  HELTER_DECK,
-  HELTER_ENTRY_X,
-  HELTER_ENTRY_Z,
   ROOF_PAVILION_X,
   ROOF_PAVILION_Z,
   SHOP_SCALE_XZ,
   SHOP_UNITS,
-  STAIR_STAND_X,
-  STAIR_STAND_Z,
   TOILET_DECK,
   TOILET_ROOM,
   TOP_DECK,
-  BUILDING_SHAFTS,
   onPlate,
   shopHasForecourt,
   shopLocalToBuilding,
@@ -83,28 +77,20 @@ import {
  */
 const ROUNDEL_X = onPlate(-6);
 /**
- * Far enough south that the whole disc clears the shaft band (#403).
+ * The roundel sits in the southern half of the floor, between the market and
+ * the door.
  *
- * `onPlate(12)` would have been 8.49, and at radius 6 that put the roundel's
- * north edge 0.27 m inside the escalator well — `check:castle`'s shaft
- * assertion caught the rug there on all four lower decks. The shafts sit in a
- * band across the middle of the plate and they did **not** shrink, so on a
- * 31 m-deep floor the roundel no longer has a scaled position available: it
- * has to be placed against the band's own south edge instead.
+ * It used to be pinned to the **south edge of the shaft band**, measured off
+ * `BUILDING_SHAFTS`, and the note here recorded how tight that was: 12.3 m of
+ * floor for a 12 m disc, because the shafts sat in a band across the middle of
+ * the plate and had not shrunk with it. The band is gone with the shafts, so
+ * the disc has room again and can simply be placed.
  *
- * `BUILDING_SHAFTS` is measured rather than a number typed here, so a shaft
- * moving pushes the roundel rather than silently overlapping it. There is
- * 12.3 m between the band and the south wall and the disc is 12 m across, so
- * this is a genuinely tight fit — see HANDOFF-castle-shrink.md.
+ * South of the market's aisle rather than centred, so a child walks in through
+ * the front door, across the roundel, and *into* the market — the rug leads her
+ * to the stalls rather than sitting behind them.
  */
-const ROUNDEL_Z = (() => {
-  const bandSouthEdge = Math.max(
-    ...BUILDING_SHAFTS.map(({ region }) =>
-      region.kind === 'rect' ? region.maxZ : region.z + region.radius,
-    ),
-  );
-  return bandSouthEdge + 0.7 + 6;
-})();
+const ROUNDEL_Z = INTERIOR_HALF_Z - 0.8 - 6;
 /**
  * Authored size, deliberately **not** scaled with the plate (#403).
  *
@@ -230,9 +216,9 @@ function buildBenches(deck: number, blocked: readonly KeepOut[], isRoof: boolean
     const x = rng.range(-INTERIOR_HALF_X + 3, INTERIOR_HALF_X - 3);
     const z = rng.range(-INTERIOR_HALF_Z + 3, INTERIOR_HALF_Z - 3);
     // Never over a hole, and never within one step of the lip of one either.
-    if (!deckIsSolid(deck, x, z)) continue;
-    if (!deckIsSolid(deck, x + 1.4, z) || !deckIsSolid(deck, x - 1.4, z)) continue;
-    if (!deckIsSolid(deck, x, z + 1.4) || !deckIsSolid(deck, x, z - 1.4)) continue;
+    if (!insideInterior(x, z)) continue;
+    if (!insideInterior(x + 1.4, z) || !insideInterior(x - 1.4, z)) continue;
+    if (!insideInterior(x, z + 1.4) || !insideInterior(x, z - 1.4)) continue;
     if (blocked.some((k) => Math.hypot(x - k.x, z - k.z) < k.radius)) continue;
     if (spots.some((s) => Math.hypot(x - s.x, z - s.z) < 5)) continue;
     spots.push({ x, z, yaw: rng.pick([0, Math.PI / 2]) });
@@ -278,7 +264,6 @@ function buildBenches(deck: number, blocked: readonly KeepOut[], isRoof: boolean
 export function keepOutsFor(deck: number): KeepOut[] {
   const blocked: KeepOut[] = [
     // The stairs pad and the lane in front of it.
-    { x: STAIR_STAND_X, z: STAIR_STAND_Z, radius: 4.4 },
     // The lift lobby, on the east wall.
     { x: INTERIOR_HALF_X - 2, z: 5, radius: 4 },
     // The roundel and its planters.
@@ -297,9 +282,7 @@ export function keepOutsFor(deck: number): KeepOut[] {
     );
   }
 
-  if (deck === HELTER_DECK) {
-    blocked.push({ x: HELTER_ENTRY_X, z: HELTER_ENTRY_Z, radius: 4 });
-  }
+
 
   if (deck === TOILET_DECK) {
     blocked.push({

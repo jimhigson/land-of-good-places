@@ -19,7 +19,7 @@ import {
   type FeastProp,
 } from '../../art/models/castleAssets';
 import { castleFloorMaterial } from './castleFabric';
-import { BUILDING_SHAFTS, regionContains } from './layout';
+
 import { CASTLE_HEARTH, castleTorchAnchors, type WallAnchor } from './castleLighting';
 
 /**
@@ -214,8 +214,6 @@ const BENCH_OFFSET = 1.85;
  * the footprint {@link feast} will build, and two copies of that arithmetic is
  * the bug this whole file's header is about.
  */
-const BENCH_HALF_WIDTH = 0.3;
-const BENCH_HALF_LENGTH = 1.4;
 const BENCH_ALONG = 1.55;
 
 
@@ -298,59 +296,35 @@ export function dressGreatHall(deck: number, floor: Group): void {
  * Which bay the hall is laid out on — **chosen by testing, not typed.**
  *
  * The middle of the three is preferred, because a throne centred among its
- * tapestries with one either side is the composition a great hall wants. But a
- * bay is only usable if the feast that runs down its axis clears the
- * building's shafts, and the middle one **does not**: the helter-skelter's tube
- * comes down through `HELTER_SHAFT` (x 16.5–23.5) and the middle bay's eastern
- * benches stand at x 16.50–17.10, inside it.
+ * tapestries with one either side is the composition a great hall wants.
  *
- * That was not caught by `keepOutsFor` — which guards the helter's disc on the
- * deck a child gets *on* at, not the deck the tube passes through — and it was
- * not caught by `deckIsSolid`, which correctly says the ground floor has no
- * holes. It was caught by looking at a screenshot and finding a slide growing
- * out of the dinner table, and it is now `check:castle`'s shaft assertion.
+ * **And it now gets it.** The middle bay used to be rejected: the
+ * helter-skelter's tube came down through `HELTER_SHAFT` (x 16.5–23.5) and the
+ * middle bay's eastern benches stood at x 16.50–17.10, inside it — a slide
+ * growing out of the dinner table, found by looking at a screenshot because
+ * `keepOutsFor` guarded the helter's disc on the deck a child got *on* at,
+ * not the deck the tube passed through.
  *
- * So this asks rather than assumes, and it keeps asking: when #377 removes the
- * helter-skelter the middle bay becomes usable again and the hall re-centres
- * itself with no edit here. A typed axis would have had to be remembered.
+ * The version of this function that stood here ended with a prediction:
+ * *"when #377 removes the helter-skelter the middle bay becomes usable again
+ * and the hall re-centres itself with no edit here. A typed axis would have had
+ * to be remembered."* #377 has removed it — along with every other shaft — and
+ * that is exactly what happened. The `feastIsClearOfShafts` test it guarded
+ * itself with is gone with the shafts it tested against; the preference order
+ * it wrapped is all that was ever needed once there is nothing in the way.
  */
 function hallAxis(bays: readonly WallAnchor[]): WallAnchor | null {
-  // Middle first, then out to the sides — best composition that actually fits.
+  // Middle first, then out to the sides — best composition, and now nothing
+  // can refuse it.
   const order = [1, 0, 2].filter((i) => i < bays.length);
   for (const index of order) {
     const bay = bays[index];
-    if (bay && feastIsClearOfShafts(bay)) return bay;
+    if (bay) return bay;
   }
   return null;
 }
 
-/**
- * Would the feast laid on this bay's axis stand inside one of the building's
- * shafts?
- *
- * Measures the footprint the feast will actually occupy — the table's own
- * half-width plus the benches beyond it, and the benches' full run — against
- * {@link BUILDING_SHAFTS}. Deliberately the *same* arithmetic {@link feast}
- * uses, from the same constants, so a change to the bench offset moves this
- * test with it rather than leaving it describing an older layout.
- */
-function feastIsClearOfShafts(bay: WallAnchor): boolean {
-  const axisX = bay.x;
-  const tableZ = bay.z + bay.out.z * (THRONE_FROM_WALL + TABLE_FROM_THRONE);
-  // The benches reach further than the table on both axes.
-  const halfX = BENCH_OFFSET + BENCH_HALF_WIDTH;
-  const halfZ = BENCH_ALONG + BENCH_HALF_LENGTH;
-  for (const shaft of BUILDING_SHAFTS) {
-    for (let i = 0; i <= 4; i += 1) {
-      for (let j = 0; j <= 4; j += 1) {
-        const x = axisX - halfX + (halfX * 2 * i) / 4;
-        const z = tableZ - halfZ + (halfZ * 2 * j) / 4;
-        if (regionContains(shaft.region, x, z)) return false;
-      }
-    }
-  }
-  return true;
-}
+
 
 /** One tapestry: cloth and rail, both hung from {@link CASTLE_TAPESTRY_RAIL_Y}. */
 function tapestry(bay: WallAnchor): Object3D[] {

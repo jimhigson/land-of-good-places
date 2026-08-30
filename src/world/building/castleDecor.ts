@@ -33,7 +33,7 @@ import { CASTLE_HEARTH, castleTorchAnchors, type WallAnchor } from './castleLigh
 import { DECK_ROUNDEL, keepOutsFor } from './dressing';
 import { dressGreatHall, isTapestryBay } from './castleFurniture';
 import {
-  deckIsSolid,
+  insideInterior,
   INTERIOR_DOOR_MAX_X,
   INTERIOR_DOOR_MIN_X,
   TOP_DECK,
@@ -655,9 +655,9 @@ function cornerClutter(deck: number, rng: Rng): InstancedMesh | null {
     // rather than merely a wall.
     const x = (rng.range(0, 1) < 0.5 ? -1 : 1) * rng.range(INTERIOR_HALF_X - 7, INTERIOR_HALF_X - 2);
     const z = (rng.range(0, 1) < 0.5 ? -1 : 1) * rng.range(INTERIOR_HALF_Z - 7, INTERIOR_HALF_Z - 2);
-    if (!deckIsSolid(deck, x, z)) continue;
-    if (!deckIsSolid(deck, x + 1.2, z) || !deckIsSolid(deck, x - 1.2, z)) continue;
-    if (!deckIsSolid(deck, x, z + 1.2) || !deckIsSolid(deck, x, z - 1.2)) continue;
+    if (!insideInterior(x, z)) continue;
+    if (!insideInterior(x + 1.2, z) || !insideInterior(x - 1.2, z)) continue;
+    if (!insideInterior(x, z + 1.2) || !insideInterior(x, z - 1.2)) continue;
     // `+ 0.8` here let a crate land 6 cm inside a shop's queue radius, which
     // `check:castle` caught: the builder tested a *point* while the check
     // measures the crate's real box, and a crate's half-diagonal is 0.65 m.
@@ -793,7 +793,7 @@ function dressRoofGarden(deck: number, floor: Group): void {
   // no draw calls at all, because every trough is an instance of the same mesh.
   const step = 3.2;
   const consider = (x: number, z: number, yaw: number): void => {
-    if (!deckIsSolid(deck, x, z)) return;
+    if (!insideInterior(x, z)) return;
     if (blocked.some((k) => Math.hypot(x - k.x, z - k.z) < k.radius + PLAYER_RADIUS + 1.4)) return;
     spots.push({ x, z, yaw });
   };
