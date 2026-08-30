@@ -40,6 +40,7 @@ const INTERIOR_HALF_X = 30 * PLATE_SHRINK; // 21.213
 const INTERIOR_HALF_Z = 22 * PLATE_SHRINK; // 15.556
 const NORTH_WALL_Z = -INTERIOR_HALF_Z + 0.5;
 const WEST_WALL_X = -INTERIOR_HALF_X + 0.5;
+const EAST_WALL_X = INTERIOR_HALF_X - 0.5;
 
 const SHOP_SCALE_XZ = 1.6;
 const COUNTER_HALF_X = 1.75 * SHOP_SCALE_XZ; // 2.8
@@ -60,10 +61,10 @@ const TOILET_ROOM = {
 };
 
 const units = [
-  { id: 'toy', deck: 0, x: WEST_WALL_X, z: 1.6, wall: 'west' },
-  { id: 'balloon', deck: 0, x: WEST_WALL_X, z: -5, wall: 'west' },
+  { id: 'toy', deck: 0, x: EAST_WALL_X, z: -1.5, wall: 'east' },
+  { id: 'balloon', deck: 0, x: WEST_WALL_X, z: -6.5, wall: 'west' },
   { id: 'candyFloss', deck: 1, x: 5.06, z: NORTH_WALL_Z, wall: 'north' },
-  { id: 'iceCream', deck: 1, x: WEST_WALL_X, z: 10.04, wall: 'west' },
+  { id: 'iceCream', deck: 1, x: WEST_WALL_X, z: 9.9, wall: 'west' },
   { id: 'hat', deck: 2, x: -15.5, z: NORTH_WALL_Z, wall: 'north' },
   { id: 'stickerPet', deck: 2, x: 15.34, z: NORTH_WALL_Z, wall: 'north' },
   { id: 'surpriseEgg', deck: 3, x: -5.22, z: NORTH_WALL_Z, wall: 'north' },
@@ -86,10 +87,13 @@ function rects(unit) {
     unit.wall === 'north'
       ? { minX: unit.x - half, maxX: unit.x + half }
       : { minZ: unit.z - half, maxZ: unit.z + half };
+  const sign = unit.wall === 'east' ? -1 : 1;
   const into = (near, far) =>
     unit.wall === 'north'
       ? { minZ: unit.z + near, maxZ: unit.z + far }
-      : { minX: unit.x + near, maxX: unit.x + far };
+      : sign > 0
+        ? { minX: unit.x + near, maxX: unit.x + far }
+        : { minX: unit.x - far, maxX: unit.x - near };
 
   const counter = { ...along(COUNTER_HALF_X), ...into(0, COUNTER_DEPTH) };
   const forecourt = hasForecourt(unit)
@@ -204,7 +208,7 @@ for (const unit of units) {
 
 if (failures === 0) {
   const gaps = [];
-  for (const wall of ['north', 'west']) {
+  for (const wall of ['north', 'west', 'east']) {
     const onWall = units
       .filter((u) => u.wall === wall)
       .sort((a, b) => (wall === 'north' ? a.x - b.x : a.z - b.z));

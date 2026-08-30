@@ -836,6 +836,21 @@ export interface ShopUnitDefinition {
 
 const NORTH_WALL_Z = -INTERIOR_HALF_Z + 0.5;
 const WEST_WALL_X = -INTERIOR_HALF_X + 0.5;
+/**
+ * The east wall — a **near** wall, and used for exactly one unit (#403).
+ *
+ * Rule 2 below says the camera looks in along +X+Z, so a unit here is partly
+ * behind its own parapet. That is a real cost and it is taken knowingly:
+ * seven shops at their authored clearances do not fit the far walls of a
+ * 42.43 x 31.11 m plate, and `toy` is the least-bad one to move — it is on
+ * deck 0, so it has no sunken forecourt to cut a hole for, and its counter is
+ * 2.8 m rather than 4.64 m. See HANDOFF-castle-shrink.md for the packing
+ * proof, and #403 for Jim's call on whether this or a smaller shrink is the
+ * better trade.
+ */
+const EAST_WALL_X = INTERIOR_HALF_X - 0.5;
+/** A unit on the east wall looks west. */
+const FACE_WEST = -Math.PI / 2;
 /** A unit on the north wall looks back into the room, i.e. down +Z. */
 const FACE_SOUTH = 0;
 /** A unit on the west wall looks east. */
@@ -919,7 +934,7 @@ const STICKER_PET_X = 15.34;
 const HAT_X = -15.5;
 
 /**
- * West-wall units, spaced along Z. `hat` joined them for #403.
+ * West-wall units, spaced along Z. `balloon` joined them for #403.
  *
  * Two things constrain this run and neither did before, so the numbers are not
  * a scaling of anything:
@@ -936,17 +951,17 @@ const HAT_X = -15.5;
  *   found this — it could not have, before #403 rewrote it to compare real
  *   rectangles instead of intervals along one wall at a time.
  */
-const BALLOON_Z = -5;
-const TOY_Z = 1.6;
-const ICE_CREAM_Z = 10.04;
+const BALLOON_Z = -6.5;
+const TOY_Z = -1.5;
+const ICE_CREAM_Z = 9.9;
 
 export const SHOP_UNITS: readonly ShopUnitDefinition[] = [
   {
     id: 'toy',
     deck: 0,
-    x: WEST_WALL_X,
+    x: EAST_WALL_X,
     z: TOY_Z,
-    yaw: FACE_EAST,
+    yaw: FACE_WEST,
     title: 'Toy Shop',
     glyph: '🧸',
     accent: PALETTE.markerPink,
