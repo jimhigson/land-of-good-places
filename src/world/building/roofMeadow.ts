@@ -5,7 +5,6 @@ import {
   Group,
   InstancedMesh,
   Matrix4,
-  PlaneGeometry,
   Quaternion,
   Vector3,
 } from 'three';
@@ -74,7 +73,7 @@ const PARAPET_INSET = 3.9;
 
 /** Grid pitch of the meadow, in metres. Every cell is one turf quad and one
  *  tuft, so this is simultaneously the density of both. */
-export const MEADOW_CELL = 1.2;
+export const MEADOW_CELL = 1.05;
 
 /**
  * How tall a blade stands.
@@ -89,6 +88,18 @@ export const MEADOW_CELL = 1.2;
  * On a 2.12 m child it comes to just above the knee.
  */
 export const MEADOW_GRASS_HEIGHT = 0.85;
+
+/**
+ * Sides on a turf disc, and the radius that follows from it.
+ *
+ * The radius is **derived**: a disc has to reach a cell's furthest corner
+ * (`MEADOW_CELL × √2 ÷ 2`) along its *flat edge*, which sits at
+ * `R × cos(π / segments)` — so `R` is that corner distance divided back out,
+ * plus a couple of centimetres of slack. Writing it as a literal is what put a
+ * grid of pink specks through the first lawn.
+ */
+const TURF_SEGMENTS = 16;
+const TURF_RADIUS = ((MEADOW_CELL * Math.SQRT2) / 2 / Math.cos(Math.PI / TURF_SEGMENTS)) + 0.02;
 
 /** How many separate patches of long grass. */
 const PATCH_COUNT = 3;
@@ -445,15 +456,41 @@ export function buildBurrows(deck: number): Group | null {
  */
 function tuftGeometry(): BufferGeometry {
   const blades: BufferGeometry[] = [];
-  for (let i = 0; i < 5; i += 1) {
-    const angle = (i / 5) * Math.PI * 2 + 0.4;
-    const lean = 0.22 + (i % 2) * 0.16;
-    const height = MEADOW_GRASS_HEIGHT * (i % 2 === 0 ? 1 : 0.78);
-    const blade = new CylinderGeometry(0.022, 0.062, height, 4);
+  // Seeded here, not passed in: every clump shares one geometry (that is what
+  // keeps the meadow to one draw call), so this randomness runs **once** and
+  // must be identical on every reload — ART_DIRECTION §7's no-`Math.random()`
+  // rule.
+  const rng = new Rng(0x6a55c1);
+  const count = 7;
+  for (let i = 0; i < count; i += 1) {
+    // **Jittered, not evenly radial.** Three shapes failed before this one:
+    //
+    // 1. Thin blades leaning 0.22–0.38 rad read as a *wire tripod* — a little
+    //    spider standing on a lawn.
+    // 2. Chunky, near-upright and seven of them within 0.1 m of the centre
+    //    fused into a solid cone: a field of tiny fir trees.
+    // 3. Five *evenly spaced* angles with matched leans made a symmetrical
+    //    fan — which from the game camera is a row of little **teepees**.
+    // 4. Jittering the bearings fixed the teepee but leaning them up to
+    //    0.62 rad and starting them up to 0.26 m apart splayed each clump into
+    //    a **spiky starburst** — a field of thistles, or caltrops.
+    //
+    // A real clump is lopsided *and mostly upright*: blades at uneven
+    // bearings, springing from close together, most standing nearly straight
+    // with one or two arching over, and no two the same height. So the jitter
+    // stays (it is what killed the teepee) and the splay comes back in.
+    const angle = (i / count) * Math.PI * 2 + rng.range(-0.55, 0.55);
+    const lean = rng.range(0.05, 0.3);
+    const height = MEADOW_GRASS_HEIGHT * rng.range(0.76, 1.16);
+    // A cone, not a tapered cylinder: a flat top face however small is a
+    // speck of specular in a field of hundreds.
+    const blade = new CylinderGeometry(0, rng.range(0.062, 0.1), height, 5);
+    blade.scale(1.3, 1, 0.55);
     blade.translate(0, height / 2, 0);
     blade.rotateZ(lean);
     blade.rotateY(angle);
-    blade.translate(Math.cos(angle) * 0.13, 0, -Math.sin(angle) * 0.13);
+    const spread = rng.range(0.05, 0.16);
+    blade.translate(Math.cos(angle) * spread, 0, -Math.sin(angle) * spread);
     blades.push(blade);
   }
   const first = blades[0];
@@ -477,11 +514,29 @@ export function buildRoofMeadow(deck: number): Group | null {
   const group = new Group();
   group.name = `castle-roof-meadow-${deck}`;
 
-  const turfGeometry = new PlaneGeometry(MEADOW_CELL * 1.5, MEADOW_CELL * 1.5);
+  /**
+   * **A disc, not a square — and sized off its *inradius*, not its radius.**
+   *
+   * Square turf tiles gave the lawn a stair-stepped edge that read as an
+   * unfinished tilemap and threw away the wobbly patch outline the region goes
+   * to the trouble of computing. Discs scallop instead of stepping.
+   *
+   * The sizing then went wrong in a way worth writing down. A cell's furthest
+   * corner is `MEADOW_CELL × √2 ÷ 2` = 0.849 m away, so a 0.852 m radius looks
+   * like it covers — but an `InstancedMesh` disc is a **polygon**, and a
+   * 12-gon's flat edge sits at `R × cos(15°)` = 0.823 m. That 26 mm shortfall
+   * showed up on screen as a **regular grid of pink specks** through the lawn:
+   * the paving, seen through the diagonal gaps between neighbouring tiles.
+   *
+   * So the radius is derived from the coverage it has to give
+   * ({@link TURF_SEGMENTS} and the half-diagonal), never guessed — the polygon
+   * count and the radius can no longer disagree.
+   */
+  const turfGeometry = new CircleGeometry(TURF_RADIUS, TURF_SEGMENTS);
   turfGeometry.rotateX(-Math.PI / 2);
   const turf = new InstancedMesh(
     turfGeometry,
-    softMaterial(PALETTE.grassDark, 0.8),
+    softMaterial(PALETTE.leafDeep, 0.8),
     meadow.cells.length,
   );
   turf.name = `castle-roof-turf-${deck}`;
@@ -490,7 +545,7 @@ export function buildRoofMeadow(deck: number): Group | null {
 
   const tufts = new InstancedMesh(
     tuftGeometry(),
-    softMaterial(PALETTE.grass, 0.75),
+    softMaterial(PALETTE.grassLight, 0.75),
     meadow.cells.length,
   );
   tufts.name = `castle-roof-grass-${deck}`;
@@ -517,9 +572,9 @@ export function buildRoofMeadow(deck: number): Group | null {
     // read as wallpaper.
     rotation.setFromAxisAngle(axis, rng.range(0, Math.PI * 2));
     position.set(
-      cell.x + rng.range(-MEADOW_CELL * 0.3, MEADOW_CELL * 0.3),
+      cell.x + rng.range(-MEADOW_CELL * 0.44, MEADOW_CELL * 0.44),
       0.03,
-      cell.z + rng.range(-MEADOW_CELL * 0.3, MEADOW_CELL * 0.3),
+      cell.z + rng.range(-MEADOW_CELL * 0.44, MEADOW_CELL * 0.44),
     );
     const size = rng.range(0.82, 1.18);
     scale.set(size, rng.range(0.86, 1.14), size);
