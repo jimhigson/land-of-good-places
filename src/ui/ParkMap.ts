@@ -12,6 +12,13 @@ import { STALLS } from '../minigames';
 import { ENTRANCE_GATE_HALF_WIDTH } from '../world/entrance/layout';
 import { CAT_BUS_LENGTH, CAT_BUS_ROUTE_NUMBER } from '../world/entrance/catBus';
 import { capture, wheelNotches } from '../core/input/PointerControls';
+import {
+  TAP_MAX_DRIFT_PX,
+  completesTap,
+  tapCandidate,
+  tapDriftedTooFar,
+  type TapCandidate,
+} from '../core/input/tapGesture';
 import { MAP_PALETTE, drawIcon } from './parkMapArt';
 import { parkMapFeatures, type MapFeature } from './parkMapContent';
 import {
@@ -234,6 +241,16 @@ interface LabelBox {
   readonly bottom: number;
 }
 
+/** A name that found room: where it goes, and the box it reserved. */
+interface LabelPlacement {
+  readonly lines: readonly string[];
+  readonly px: number;
+  readonly py: number;
+  readonly size: number;
+  readonly lineHeight: number;
+  readonly box: LabelBox;
+}
+
 interface FloorFeature {
   readonly x: number;
   readonly z: number;
@@ -312,6 +329,13 @@ export class ParkMap {
    */
   private view: MapView | null = null;
 
+  /**
+   * The finger currently down on the dimmed backdrop, if it is still a
+   * candidate for a definite tap. `null` the moment it drifts far enough to be
+   * a drag, or a second finger joins it — see the listener wiring above.
+   */
+  private backdropTap: (TapCandidate & { readonly pointerId: number }) | null = null;
+
   /** Live pointers on the map canvas, for drag-to-pan and pinch-to-zoom. */
   private readonly mapPointers = new Map<number, { x: number; y: number }>();
   /** Finger separation when the current pinch began, in canvas pixels. */
@@ -327,10 +351,26 @@ export class ParkMap {
    * six-year-old's tap is not still.
    */
   private gestureMoved = false;
-  /** Where the current one-finger gesture began, for the drag-slop test. */
-  private gestureStart: { x: number; y: number } | null = null;
+  /**
+   * Where and when the current one-finger gesture began, for the drag-slop and
+   * time tests. In canvas pixels, and a `TapCandidate` so the canvas answers
+   * "was that a tap?" with `tapGesture.ts`'s definition rather than a second
+   * one — it used to use 8 px and no time limit at all while tap-to-walk in the
+   * park used 18 px and 600 ms.
+   */
+  private gestureStart: TapCandidate | null = null;
   /** Features on screen at the current zoom — the honest label denominator. */
   private visibleFeatureCount = 0;
+  /**
+   * Which names were painted, and which were dropped, on the last render.
+   *
+   * Both lists come from the renderer's own placement loop, so QA reads names
+   * off the DOM rather than eyeballing a screenshot: "four attractions lose
+   * their labels" is only actionable if it says *which* four. Counting painted
+   * text runs from outside cannot do it — a long name is drawn as two lines.
+   */
+  private drawnLabelNames: string[] = [];
+  private missingLabelNames: string[] = [];
   private canvasCssWidth = 0;
   private canvasCssHeight = 0;
   /** Rebuilt every render; see `drawLabel`. */
@@ -357,10 +397,21 @@ export class ParkMap {
     this.root = document.createElement('div');
     this.root.className = 'parkmap';
     this.root.dataset.open = 'false';
-    // Tapping the dimmed backdrop is a "no thanks", same as every other panel.
-    this.root.addEventListener('pointerdown', (event) => {
-      if (event.target === this.root) this.close();
-    });
+    // **A definite tap on the dimmed backdrop is a "no thanks" — a press is
+    // not.** This used to close on `pointerdown` alone, which is the bug Jim
+    // reported on 29 August 2026: on landscape, tablet and desktop the map
+    // vanished before his finger lifted, and a finger that landed in the
+    // margin and then moved — the start of a pinch, or a pan, or a
+    // six-year-old steadying her thumb — dismissed it instantly. Measured
+    // before the fix at 390x844/844x390/768x1024/1440x900: closed on
+    // `pointerdown` at every viewport that has a backdrop at all.
+    //
+    // Down *and* up on the backdrop itself, within `tapGesture.ts`'s drift and
+    // time window — the same definition tap-to-walk uses, not a second one.
+    this.root.addEventListener('pointerdown', this.onBackdropPointerDown);
+    this.root.addEventListener('pointermove', this.onBackdropPointerMove);
+    this.root.addEventListener('pointerup', this.onBackdropPointerUp);
+    this.root.addEventListener('pointercancel', this.onBackdropPointerLost);
 
     this.card = document.createElement('div');
     this.card.className = 'parkmap-card';
@@ -439,9 +490,8 @@ export class ParkMap {
 
     this.hint = document.createElement('p');
     this.hint.className = 'shop-hint';
-    this.hint.textContent = isTouchDevice()
-      ? 'Tap where to go, or tap outside to close.'
-      : 'Click where to go · Esc or M to close.';
+    // Text set in `updateHint`, from the layout that actually rendered — see
+    // there for why it cannot be settled here.
 
     this.card.append(head, this.floorRow, this.canvasWrap, this.hint);
     this.root.append(this.card);
@@ -491,6 +541,7 @@ export class ParkMap {
     // in reads as the map being broken. Gesture state goes with it, so a
     // finger lifted outside the canvas cannot leave a pinch half-started.
     this.view = null;
+    this.backdropTap = null;
     this.mapPointers.clear();
     this.pinchStartDistance = 0;
     this.gestureMoved = false;
@@ -542,17 +593,108 @@ export class ParkMap {
     this.render();
   }
 
-  // --------------------------------------------------------- pan and zoom
+  // ------------------------------------------------------------- the hint
 
   /**
-   * How far a pointer may travel and still count as a tap, in CSS pixels.
+   * **Is there any dimmed backdrop to tap?** Measured, not assumed.
    *
-   * Generous on purpose. A six-year-old pressing a phone with her thumb moves
-   * several pixels doing it, and a tap that silently became a pan — walking
-   * her nowhere and sliding the map instead — is far more confusing than a pan
-   * that needed a slightly firmer drag.
+   * On a phone in portrait the card is full-bleed — `.parkmap-card` is
+   * `100%` of an unpadded container below 34rem — so there is no margin
+   * around it and nothing outside to tap. The hint nevertheless read "Tap
+   * where to go, or tap outside to close" on every screen, which told a
+   * six-year-old to do something impossible and is most likely why Jim's
+   * report reads as intermittent: in portrait he could not hit the backdrop at
+   * all, while landscape surrounds the card with a wide margin.
+   *
+   * Layout metrics rather than `getBoundingClientRect`, deliberately:
+   * `.parkmap-card` opens with a `shop-pop` scale animation, and a
+   * transform-aware rect measured on the opening frame reports a card smaller
+   * than the one that settles — which would claim a backdrop that is about to
+   * vanish. `offsetWidth`/`clientWidth` are untransformed layout, so this
+   * reads the same on the first frame as on the last.
+   *
+   * And a threshold rather than "greater than zero": a two-pixel seam is not
+   * something to tell a child to aim at. It is
+   * `TAP_MAX_DRIFT_PX` either side — a tap allowed to wander that far needs at
+   * least that much band to land in — so it is derived from the same one
+   * definition of a tap the backdrop listener uses, not a fresh guess.
    */
-  private static readonly DRAG_SLOP_PX = 8;
+  private hasTappableBackdrop(): boolean {
+    const slackX = this.root.clientWidth - this.card.offsetWidth;
+    const slackY = this.root.clientHeight - this.card.offsetHeight;
+    // The card is centred, so each side gets half the slack.
+    return Math.max(slackX, slackY) / 2 >= TAP_MAX_DRIFT_PX;
+  }
+
+  /** The truth about how to close this map, on the screen it is actually on. */
+  private updateHint(): void {
+    if (!isTouchDevice()) {
+      this.hint.textContent = 'Click where to go · Esc or M to close.';
+      return;
+    }
+    this.hint.textContent = this.hasTappableBackdrop()
+      ? 'Tap where to go, or tap outside to close.'
+      : 'Tap where to go, or tap ✕ to close.';
+  }
+
+  // ---------------------------------------------------------- the backdrop
+
+  /**
+   * A press on the dimmed margin around the card starts a *candidate* tap and
+   * nothing else. Only `pointerup` can close the map, and only if the finger
+   * never went anywhere.
+   *
+   * Scoped to `event.target === this.root`: a finger that came down on the
+   * card, the canvas, or a button is not on the backdrop at all, and must not
+   * arm this even though its event bubbles through here.
+   */
+  private readonly onBackdropPointerDown = (event: PointerEvent): void => {
+    if (event.target !== this.root) {
+      // Something inside the card has it. Any tap candidate we were holding is
+      // no longer the only finger down, so it is not a tap any more.
+      this.backdropTap = null;
+      return;
+    }
+    // A second finger on the backdrop is a pinch that happened to start wide,
+    // not two taps. Neither is a tap after this.
+    if (this.backdropTap) {
+      this.backdropTap = null;
+      return;
+    }
+    this.backdropTap = {
+      // `event.timeStamp`, not `performance.now()` — see `TapCandidate`.
+      ...tapCandidate(event.clientX, event.clientY, event.timeStamp),
+      pointerId: event.pointerId,
+    };
+  };
+
+  private readonly onBackdropPointerMove = (event: PointerEvent): void => {
+    const candidate = this.backdropTap;
+    if (!candidate || candidate.pointerId !== event.pointerId) return;
+    // Travelled: this is a drag, and a drag that began on the backdrop must
+    // leave the map alone. Measured from where it began, never summed per
+    // frame, so a slow drift still counts.
+    if (!completesTap(candidate, event.clientX, event.clientY, event.timeStamp)) {
+      this.backdropTap = null;
+    }
+  };
+
+  private readonly onBackdropPointerUp = (event: PointerEvent): void => {
+    const candidate = this.backdropTap;
+    this.backdropTap = null;
+    if (!candidate || candidate.pointerId !== event.pointerId) return;
+    // Up on the backdrop too, not merely down on it — lifting over the card
+    // after sliding off the margin is not a tap on the margin.
+    if (event.target !== this.root) return;
+    if (!completesTap(candidate, event.clientX, event.clientY, event.timeStamp)) return;
+    this.close();
+  };
+
+  private readonly onBackdropPointerLost = (event: PointerEvent): void => {
+    if (this.backdropTap?.pointerId === event.pointerId) this.backdropTap = null;
+  };
+
+  // --------------------------------------------------------- pan and zoom
 
   /** Canvas-relative pixel for a pointer event. */
   private canvasPoint(event: PointerEvent): { x: number; y: number } {
@@ -580,7 +722,8 @@ export class ParkMap {
     this.mapPointers.set(event.pointerId, this.canvasPoint(event));
     if (this.mapPointers.size === 1) {
       this.gestureMoved = false;
-      this.gestureStart = this.canvasPoint(event);
+      const point = this.canvasPoint(event);
+      this.gestureStart = tapCandidate(point.x, point.y, event.timeStamp);
     }
     if (this.mapPointers.size === 2) {
       // Two fingers: a pinch, and neither finger is a tap any more.
@@ -622,10 +765,8 @@ export class ParkMap {
     if (Math.hypot(dx, dy) > 0 && !this.gestureMoved) {
       // Measured from where the gesture started, not summed per frame, so a
       // slow drift over many small moves still becomes a drag.
-      const start = this.gestureStart ?? previous;
-      if (Math.hypot(point.x - start.x, point.y - start.y) > ParkMap.DRAG_SLOP_PX) {
-        this.gestureMoved = true;
-      }
+      const start = this.gestureStart ?? tapCandidate(previous.x, previous.y);
+      if (tapDriftedTooFar(start, point.x, point.y)) this.gestureMoved = true;
     }
     if (this.gestureMoved) {
       this.setView(pannedBy(this.currentView(), dx, dy, this.canvasCssWidth, this.canvasCssHeight));
@@ -635,10 +776,16 @@ export class ParkMap {
   private onCanvasPointerUp(event: PointerEvent): void {
     const wasDrag = this.gestureMoved;
     const hadTwo = this.mapPointers.size >= 2;
+    const started = this.gestureStart;
+    const point = this.canvasPoint(event);
     this.onCanvasPointerLost(event);
-    // A tap only when this gesture never became a pan or a pinch. `hadTwo`
-    // covers lifting one finger of a pinch: the second lift must not walk her.
-    if (!wasDrag && !hadTwo) this.onCanvasTap(event);
+    // A tap only when this gesture never became a pan or a pinch, and only
+    // when down-and-up make a definite tap by `tapGesture.ts`'s one definition.
+    // `hadTwo` covers lifting one finger of a pinch: the second lift must not
+    // walk her.
+    if (wasDrag || hadTwo) return;
+    if (started && !completesTap(started, point.x, point.y, event.timeStamp)) return;
+    this.onCanvasTap(event);
   }
 
   private onCanvasPointerLost(event: PointerEvent): void {
@@ -804,6 +951,10 @@ export class ParkMap {
     this.floorRow.hidden = !this.indoor;
     this.upButton.disabled = this.viewingDeck >= TOP_DECK;
     this.downButton.disabled = this.viewingDeck <= 0;
+    // Before the canvas is measured: the hint is a card row, and what it says
+    // depends on the card's own layout, which `render` re-runs on every resize
+    // and rotation.
+    this.updateHint();
     this.syncCanvasSize();
 
     // The viewport, from `parkMapProjection.ts` — the one owner of the
@@ -834,6 +985,10 @@ export class ParkMap {
     // two numbers read off the DOM rather than one read and one remembered.
     // The remembered one is what went wrong last time.
     this.canvas.dataset.featureCount = String(this.indoor ? 0 : this.visibleFeatureCount);
+    // By name, so a report can say which attraction lost its name rather than
+    // only how many did.
+    this.canvas.dataset.labelNames = JSON.stringify(this.drawnLabelNames);
+    this.canvas.dataset.missingLabels = JSON.stringify(this.missingLabelNames);
   }
 
   private renderOutdoor(): void {
@@ -995,46 +1150,96 @@ export class ParkMap {
       placed.push({ px: fx, py: fy, size, label });
     }
     this.visibleFeatureCount = visibleFeatures;
-    // Under the picture by preference, above it if that spot is taken. A name
-    // that simply cannot be placed is still dropped rather than written over
-    // something, but trying the second spot is what turns most of the drops
-    // back into readable names on a phone.
-    // Try the name in several places round its own picture before giving up:
-    // under it, over it, then shouldered left and right. Every extra candidate
-    // turns a dropped name back into a readable one, which matters most on a
-    // phone where the park is small and everything is close together.
+    // Under the picture by preference, above it if that spot is taken, then
+    // marching outward until the paper runs out — see `labelCandidates`. A
+    // name that still cannot be placed is dropped rather than written over
+    // something, and is reported by name in `dataset.missingLabels`.
+    this.drawnLabelNames = [];
+    this.missingLabelNames = [];
+    const placements: { placement: LabelPlacement; anchorX: number; anchorY: number }[] = [];
     for (const item of placed) {
-      const below = item.py + item.size * 0.46;
-      const above = item.py - item.size * 0.44 - minTextPx() * 1.2;
-      const shoulder = item.size * 0.55;
-      const step = minTextPx() * 1.35;
-      const candidates: readonly (readonly [number, number])[] = [
-        [item.px, below],
-        [item.px, above],
-        [item.px - shoulder, below],
-        [item.px + shoulder, below],
-        [item.px - shoulder, above],
-        [item.px + shoulder, above],
-        // Then further out, which is what turns a tall canvas into names
-        // rather than blank lawn: on a portrait phone the park is
-        // width-limited, so there is spare height and nothing else wanting it.
-        [item.px, below + step],
-        [item.px, above - step],
-        [item.px - shoulder, below + step],
-        [item.px + shoulder, below + step],
-        [item.px, below + step * 2],
-        [item.px, above - step * 2],
-      ];
-      for (const [lx, ly] of candidates) {
-        if (this.drawLabel(item.label, lx, ly)) break;
+      let placement: LabelPlacement | null = null;
+      for (const [lx, ly] of this.labelCandidates(item)) {
+        placement = this.placeLabel(item.label, lx, ly);
+        if (placement) break;
       }
+      if (placement) placements.push({ placement, anchorX: item.px, anchorY: item.py });
+      (placement ? this.drawnLabelNames : this.missingLabelNames).push(item.label);
     }
+    // Every leader first, then every name — so no line can be stroked across a
+    // finished name. See `placeLabel`.
+    for (const { placement, anchorX, anchorY } of placements) {
+      this.drawLabelLeader(placement, anchorX, anchorY);
+    }
+    for (const { placement } of placements) this.paintLabel(placement);
 
     // --- the player ----------------------------------------------------------
     if (!this.indoor) {
       const { x, z } = this.deps.player.position;
       this.drawPlayerMarker(x, z);
     }
+  }
+
+  /**
+   * Where a name may go, best spot first.
+   *
+   * Under the picture, then over it, then shouldered left and right — and then
+   * the same six rungs again, stepped further and further out until the
+   * candidates have reached the edge of the canvas.
+   *
+   * **The far rungs are how the map uses the paper it has.** The projection is
+   * uniform (a metre across is a metre down, and it must stay that way or every
+   * bearing on the map becomes a lie), so on a portrait phone the park is
+   * width-limited and the canvas is left with large blank bands: measured at
+   * 390x844, the park draws 380x336 px inside a 380x693 px canvas — **357 px,
+   * 52% of the paper, empty**. There is no honest way to fill that with *park*
+   * — filling the height would mean showing 92 m of a 190 m-wide park, so half
+   * the park would be off the map at the default zoom, which is the opposite of
+   * what a map is for. But there is an honest way to fill it with **names**,
+   * which is the thing that was actually scarce: a name that has nowhere to sit
+   * beside its picture goes out into the band, with a leader line back to the
+   * picture it belongs to (see `drawLabel`).
+   *
+   * The ladder is generated rather than listed so its reach follows the canvas.
+   * It used to be twelve hand-written positions stopping two steps out, which
+   * on a portrait phone stopped well short of the empty band.
+   */
+  private labelCandidates(item: { px: number; py: number; size: number }): readonly (readonly [
+    number,
+    number,
+  ])[] {
+    const below = item.py + item.size * 0.46;
+    const above = item.py - item.size * 0.44 - minTextPx() * 1.2;
+    const shoulder = item.size * 0.55;
+    const step = minTextPx() * 1.35;
+    // Sideways as well as up and down, because which way the paper is spare
+    // depends on the screen: a portrait phone leaves 357 px of band above and
+    // below the park, and a landscape phone leaves 320 px to its left and
+    // right (park drawn 306x270 in a 626x270 canvas). A ladder that only
+    // marched vertically used the first and ignored the second.
+    const sideStep = step * 1.6; // names are wider than they are tall
+    // Enough rungs to cross the canvas from anywhere in it; `drawLabel` clamps
+    // anything that overshoots, so an over-long ladder costs a few failed
+    // collision tests and nothing else.
+    const rungs = Math.max(2, Math.ceil(Math.max(this.canvasCssHeight / step, this.canvasCssWidth / sideStep)));
+    const out: (readonly [number, number])[] = [];
+    for (let rung = 0; rung <= rungs; rung += 1) {
+      const drop = rung * step;
+      const push = shoulder + rung * sideStep;
+      out.push(
+        [item.px, below + drop],
+        [item.px, above - drop],
+        [item.px - shoulder, below + drop],
+        [item.px + shoulder, below + drop],
+        [item.px - shoulder, above - drop],
+        [item.px + shoulder, above - drop],
+        // Level with the picture and pushed out to the side — the rung that
+        // reaches a landscape phone's spare paper.
+        [item.px - push, item.py - minTextPx() * 0.6],
+        [item.px + push, item.py - minTextPx() * 0.6],
+      );
+    }
+    return out;
   }
 
   /** The map's features for the park as it stands — see `parkMapContent.ts`. */
@@ -1266,7 +1471,22 @@ export class ParkMap {
    * helps nobody. Draw order is therefore priority order — the big attractions
    * in `ANCHORS` are drawn before the smaller features.
    */
-  private drawLabel(text: string, px: number, py: number): boolean {
+  /**
+   * Where a name would go, if it fits — measured and reserved, not painted.
+   *
+   * Split from the painting (see {@link paintLabel}) so the outdoor map can do
+   * **all** its placement first, then every leader line, then every name last.
+   * Drawn in one pass instead, a later attraction's leader line was stroked
+   * across an earlier attraction's finished name: measured on an 844x390
+   * phone, The Spooky House's leader took the final "l" off "Space Ferris
+   * Wheel". Text last means nothing can be drawn over it.
+   *
+   * Returns `null` when the name would land on top of something already there;
+   * its picture is still drawn, and an unreadable pile of overlapping words
+   * helps nobody. Draw order is priority order — the big attractions in
+   * `ANCHORS` are placed before the smaller features.
+   */
+  private placeLabel(text: string, px: number, py: number): LabelPlacement | null {
     const ctx = this.ctx;
     ctx.save();
     const size = minTextPx();
@@ -1278,6 +1498,7 @@ export class ParkMap {
     const lineHeight = size * 1.15;
     const halfWidth = Math.max(...lines.map((line) => ctx.measureText(line).width)) / 2 + 2;
     const height = lineHeight * lines.length;
+    ctx.restore();
 
     // Keep the whole name on the canvas. An attraction near the park's edge
     // sits near the canvas edge too, and a centred label then runs off the
@@ -1301,22 +1522,67 @@ export class ParkMap {
         box.top < other.bottom &&
         box.bottom > other.top,
     );
-    if (collides) {
-      ctx.restore();
-      return false;
-    }
+    if (collides) return null;
     this.labelBoxes.push(box);
+    return { lines, px, py, size, lineHeight, box };
+  }
 
+  /**
+   * A leader line from a picture to the name that had to go and sit out in the
+   * spare paper, drawn only when the name is far enough away that which
+   * picture it belongs to is not already obvious — a line under a name tucked
+   * beneath its own icon is clutter.
+   *
+   * Stops at the **nearest point on the name's box**, so it never runs into
+   * the words, and it is stroked before any text is painted.
+   */
+  private drawLabelLeader(placement: LabelPlacement, anchorX: number, anchorY: number): void {
+    const { box, size } = placement;
+    const nearX = Math.min(Math.max(anchorX, box.left), box.right);
+    const nearY = Math.min(Math.max(anchorY, box.top), box.bottom);
+    if (Math.hypot(nearX - anchorX, nearY - anchorY) <= size) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.lineWidth = Math.max(3, 0.16 * uiUnitPx());
+    ctx.beginPath();
+    ctx.moveTo(anchorX, anchorY);
+    ctx.lineTo(nearX, nearY);
+    ctx.stroke();
+    ctx.strokeStyle = MAP_PALETTE.grey;
+    ctx.lineWidth = Math.max(1.2, 0.06 * uiUnitPx());
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /** Paints a name that {@link placeLabel} already found room for. */
+  private paintLabel(placement: LabelPlacement): void {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.font = `700 ${placement.size}px 'Baloo 2', 'Nunito', 'Trebuchet MS', 'Segoe UI', system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
     ctx.lineWidth = 3;
     ctx.strokeStyle = 'rgba(255,255,255,0.9)';
     ctx.fillStyle = hexToCss(PALETTE.ink);
-    for (let i = 0; i < lines.length; i += 1) {
-      const line = lines[i] as string;
-      const ly = py + i * lineHeight;
-      ctx.strokeText(line, px, ly);
-      ctx.fillText(line, px, ly);
+    for (let i = 0; i < placement.lines.length; i += 1) {
+      const line = placement.lines[i] as string;
+      const ly = placement.py + i * placement.lineHeight;
+      ctx.strokeText(line, placement.px, ly);
+      ctx.fillText(line, placement.px, ly);
     }
     ctx.restore();
+  }
+
+  /**
+   * Place and paint in one go — the indoor floor plan, which has few enough
+   * pins that it has never needed a leader line or a second pass.
+   */
+  private drawLabel(text: string, px: number, py: number): boolean {
+    const placement = this.placeLabel(text, px, py);
+    if (!placement) return false;
+    this.paintLabel(placement);
     return true;
   }
 
