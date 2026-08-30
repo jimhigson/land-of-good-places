@@ -63,8 +63,6 @@ import {
   facadeX,
   facadeZ,
   regionContains,
-  worldX,
-  worldZ,
 } from './layout';
 
 const RIDER_LIFT = 0.06;
@@ -998,30 +996,39 @@ export class Building implements GameSystem {
     // camera, a set of play bounds and a cutaway deck as much as it is a
     // position — so this takes the whole door sequence rather than the one part
     // of it that looked like the important one.
+    const floor = CASTLE_FLOORS[deck];
+    if (!floor) return false;
+    // **Through `spaces.changeTo`, not straight to the arrival.** The first cut
+    // called `enterInterior()` on its own and photographed an empty sky: the
+    // interior really was switched on and the player really was standing in it,
+    // but the *camera* was still out over the garden, because it is
+    // `SpaceManager` that irises and calls `snapCamera`. Being inside is a
+    // camera and a set of play bounds as much as it is a position — so this
+    // takes the whole door sequence rather than the one part of it that looked
+    // like the important one.
     this.spaces.changeTo(() => {
-      this.enterInterior();
-      // `enterInterior` has already put her on the ground floor's own good
-      // viewing spot; `at` overrides where, `deck` overrides how high, and
-      // anything not given carries that spot's own value straight through
-      // rather than being written down a second time here.
-      if (deck > 0 || at) {
-        // `at` is in the **interior's own metres** — the frame `layout.ts`,
-        // `dressing.ts` and every prop placer work in, and the frame anybody
-        // reading a coordinate off `castleFurniture.ts` or a keep-out list will
-        // type. `teleportTo` takes world coordinates, and the interior sits at
-        // `INTERIOR_ORIGIN_X/Z`, so it has to be converted.
-        //
-        // Getting this wrong does not fail: it teleports her to the same
-        // numbers out in the park, several hundred metres away, and the shot
-        // comes back a picture of grass with the castle nowhere in it. Caught
-        // by looking at the first screenshot rather than by trusting the link.
-        player.teleportTo(
-          at ? worldX(at.x) : player.position.x,
-          BUILDING_BASE_Y + deck * BUILDING_FLOOR_HEIGHT,
-          at ? worldZ(at.z) : player.position.z,
-          Math.PI,
-        );
-      }
+      // **`stepThroughDoor`, not a teleport by height.** This used to call
+      // `enterInterior()` and then raise her by `deck * BUILDING_FLOOR_HEIGHT`,
+      // because the storeys were stacked and height was what picked one. Since
+      // the split it is the *floor* that picks one, and `stepThroughDoor` is
+      // the same method the front door and the lift arrive through — so this
+      // link cannot drift from them, which is what the note it replaces was
+      // asking for.
+      //
+      // `at` is in the **floor's own metres** — the frame `layout.ts`,
+      // `dressing.ts` and every prop placer work in, and the frame anybody
+      // reading a coordinate off `castleFurniture.ts` will type.
+      //
+      // Getting that wrong does not fail: it stands her at the same numbers
+      // relative to a different floor, hundreds of metres away, and the shot
+      // comes back a picture of nothing. Caught by looking at the first
+      // screenshot rather than by trusting the link.
+      this.stepThroughDoor(
+        floor,
+        at ? at.x : 0,
+        at ? at.z : floor.halfZ - 6.5,
+        Math.PI,
+      );
     });
     return true;
   }
