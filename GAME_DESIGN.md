@@ -1458,7 +1458,7 @@ Rough order of construction, each step playable:
 - **Aim:** the game deploys autonomously and is viewable on Jim's phone
   throughout the day as features are added. The Deploy Manager agent is
   responsible for this end-to-end — there must always be a working live URL.
-- Code lives in a **private GitHub repo** (created with `gh`)
+- Code lives in a **public GitHub repo** (created with `gh`)
 - Deploys automatically on merge to `main`, to **Cloudflare Workers**
   (static assets) — or GitHub Pages if that turns out simpler
 - After each build milestone, the latest game is deployed to the live URL

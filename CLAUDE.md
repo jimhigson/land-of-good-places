@@ -415,17 +415,13 @@ pick your own and pass it explicitly (`vite --port <yours> --strictPort`).
 Vite just picks the next free port for you and every note you take about
 "my server is on 5260" quietly goes stale.
 
-**When handing the user a URL to test, tell them to open it in a private/
-incognito window, every time.** A port with no *currently running* collision
-is not the same as a port nobody's *browser* has ever visited — this machine
-has been running dev servers, from many agents, across many sessions, for
-days, and port numbers get reused constantly. A stale service worker or save
-from some completely unrelated earlier session can be sitting on a "fresh"
-port already, silently serving old content with no error of any kind (found
-the hard way, 1 August, three times on three different "fresh" ports in one
-afternoon). A private window has guaranteed-empty storage regardless of that
-history — it is the only actually reliable answer, cheaper than any amount of
-cache-clearing forensics.
+**Never tell the user to open a URL in a private or incognito window.**
+Jim's standing rule: *the user, including devs, is required to do NO SPECIAL
+ACTION EVER to get the new version.* A reload getting stale content is a bug
+in the app, and #341 fixed it — `A reload gets the new build` is the CI check
+that guards the regression. If you hit stale content on a reused port, that
+is a defect to report, not a workaround to hand over. **Pick a port nobody
+else is using** (`--strictPort`) so the question does not arise.
 
 **Hand over the URL of the thing itself, never just the root.** If the feature
 has a deep link, give `http://localhost:<port>/rail-race`, not
