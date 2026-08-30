@@ -209,7 +209,7 @@ export const BUILDING_HALF_Z = 9;
  * transitions you into the building's *own space*, which lives at
  * (INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z), six hundred metres from the park and
  * therefore utterly separate from it. Nothing about the two spaces is
- * continuous, which is the whole point: the interior floor plate is 60 x 44 m
+ * continuous, which is the whole point: the interior floor plate is 42 x 31 m
  * inside a shell that is 24 x 18 m outside.
  *
  * Six hundred is chosen to be far past TERRAIN_RADIUS *and* past FOG_FAR, so
@@ -219,9 +219,45 @@ export const BUILDING_HALF_Z = 9;
 export const INTERIOR_ORIGIN_X = 600;
 export const INTERIOR_ORIGIN_Z = 600;
 
-/** Interior half-extents in metres — a roomy 60 x 44 m floor plate. */
-export const INTERIOR_HALF_X = 30;
-export const INTERIOR_HALF_Z = 22;
+/**
+ * How much of the authored 60 x 44 m plate the castle actually uses (#403).
+ *
+ * **Half the floor *area*, which is `1/√2` off each side — not half the
+ * width.** Jim was asked which he meant and answered directly: halving each
+ * dimension quarters the area and he declined it. So 60 x 44 m becomes
+ * 42.43 x 31.11 m, and the same furniture stands in half the floor.
+ *
+ * ## Why the room is being made smaller after being made bigger on purpose
+ *
+ * `world/building/dressing.ts` records the reasoning that produced the 60 m
+ * plate, and it was right about the problem: the family asked for floors two
+ * to three times wider *and* for a world that feels closer and fuller, and
+ * *"sixty metres of one flat pink colour is not roominess, it is an empty car
+ * park"*. That diagnosis stands. What is being revised is only the **remedy**.
+ * Twice the answer has been to add decoration to the plate — the roundel and
+ * its planters, then the great hall — and twice Jim has come back and said the
+ * castle still feels sparse (issues #376, the roof-garden QA, and now #403).
+ * Three complaints is enough evidence that decoration alone does not get
+ * there, so this time the floor comes to the furniture instead.
+ *
+ * Nothing about the "bigger on the inside" trick changes: 42 m of interior
+ * still lives inside a 24 m shell, which is still the joke. The room is
+ * simply no longer *so* much bigger that its own contents get lost in it.
+ *
+ * ## What derives from this, and what has to be told
+ *
+ * The half-extents below, and — through {@link INTERIOR_HALF_X} and
+ * {@link INTERIOR_HALF_Z} — every wall, the coursing, the wall-plate, the
+ * lift shaft, the torch spread, the shop walls and the park map's drawing.
+ * Anything **authored as an absolute interior-local coordinate** cannot
+ * derive from it and is moved by `layout.ts`'s `onPlate()` instead; that
+ * function's doc lists what had to be told rather than deriving.
+ */
+export const INTERIOR_PLATE_SHRINK = Math.SQRT1_2;
+
+/** Interior half-extents in metres — a 42.43 x 31.11 m floor plate. */
+export const INTERIOR_HALF_X = 30 * INTERIOR_PLATE_SHRINK;
+export const INTERIOR_HALF_Z = 22 * INTERIOR_PLATE_SHRINK;
 
 /** How far the interior's plaza floor sits below the ground-floor deck. */
 export const INTERIOR_PLAZA_DROP = 1.2;
