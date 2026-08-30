@@ -19,8 +19,8 @@
  * Not in the `build` chain, for the same reason `check:deep-links` and
  * `check:walking` are not: it needs a server to talk to.
  *
- *   npm run dev -- --port 5405 --strictPort     # in one terminal
- *   node scripts/qa-hud-during-rides.mjs http://127.0.0.1:5405 /tmp/hud-404
+ *   pnpm run dev --port 5405 --strictPort        # in one terminal
+ *   pnpm run qa:hud-during-rides http://127.0.0.1:5405 /tmp/hud-404
  */
 import { chromium } from 'playwright-core';
 import { mkdirSync } from 'node:fs';
@@ -38,9 +38,21 @@ const VIEWPORTS = [
 const VIS = `(selector) => {
   const el = document.querySelector(selector);
   if (!el) return 'missing';
+  // **The whole chain is scanned for \`display:none\` before anything else is
+  // reported, and that ordering is load-bearing.** Returning on the nearest
+  // hidden ancestor of any kind made this probe unable to tell the two
+  // implementations apart: \`.hud-menu-items\` is \`visibility: hidden\` whenever
+  // the drawer is merely *closed*, and it sits between the map pill and the
+  // \`.hud-menu\` that the ride-hide actually sets \`display: none\` on. So an
+  // implementation that hid only \`.pill--menu\` still reported the map pill as
+  // "hidden" — hidden because the drawer was shut, which it would have been
+  // anyway. Caught by running mutation 2 (hide the button, not the drawer)
+  // against this script and watching it stay green.
+  for (let at = el; at; at = at.parentElement) {
+    if (getComputedStyle(at).display === 'none') return 'hidden(display:none)';
+  }
   for (let at = el; at; at = at.parentElement) {
     const s = getComputedStyle(at);
-    if (s.display === 'none') return 'hidden(display:none)';
     if (s.visibility === 'hidden') return 'hidden(visibility)';
     if (s.opacity === '0') return 'hidden(opacity)';
   }
@@ -67,10 +79,35 @@ async function state(page) {
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * `page.evaluate`, tolerant of the page navigating underneath it.
+ *
+ * A dev server reloads the tab whenever a file changes, and this script is
+ * most often run *while* somebody is editing — including, deliberately, when
+ * mutating the source to prove the script can fail. A reload mid-poll throws
+ * "Execution context was destroyed", which is not a result about the game at
+ * all. Retrying is correct here and only here: the overall `waitFor` deadline
+ * still bounds it, so a page that genuinely never comes back still fails.
+ *
+ * Anything else is rethrown — swallowing every error is how a check stops
+ * being able to fail.
+ */
+async function evaluateThroughReloads(page, fn) {
+  try {
+    return await page.evaluate(fn);
+  } catch (error) {
+    const message = String(error?.message ?? error);
+    if (message.includes('Execution context was destroyed') || message.includes('navigating')) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
 async function waitFor(page, fn, timeout = 60000) {
   const until = Date.now() + timeout;
   while (Date.now() < until) {
-    if (await page.evaluate(fn)) return true;
+    if (await evaluateThroughReloads(page, fn)) return true;
     await wait(200);
   }
   return false;
@@ -160,8 +197,12 @@ for (const r of results) {
     r.before.menuButton === 'visible' &&
     r.before.mapPill === 'visible' &&
     r.during.riding === true &&
-    r.during.menuButton.startsWith('hidden') &&
-    r.during.mapPill.startsWith('hidden') &&
+    // `display:none` specifically, not merely "hidden": the map pill is inside
+    // a drawer that is `visibility: hidden` whenever it is closed, so
+    // `startsWith('hidden')` passed on an implementation that hid the button
+    // and left the drawer up. This is the assertion that tells them apart.
+    r.during.menuButton === 'hidden(display:none)' &&
+    r.during.mapPill === 'hidden(display:none)' &&
     r.during.drawerOpen === 'false' &&
     r.after.menuButton === 'visible' &&
     r.after.mapPill === 'visible';

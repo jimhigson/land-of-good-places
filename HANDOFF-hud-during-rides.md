@@ -103,3 +103,29 @@ so the drawer still carries the map away with it. Browser run **6/6 pass** again
 shots in `/tmp/hud-404-rebased`. Mutation still red (3 FAILs).
 
 CI: all four checks green, `mergeStateStatus: CLEAN`. Ready for the Overseer.
+
+## A gate that passed for the wrong reason (30 Aug, post-rebase)
+
+Re-running **mutation 2** — hide `.pill--menu` instead of `.hud-menu` — against
+`qa:hud-during-rides` after the rebase, it **stayed green**. The in-process
+`check:hud-during-rides` failed it correctly; the browser one did not.
+
+Cause: the probe returned on the *nearest* hidden ancestor of any kind.
+`.hud-menu-items` is `visibility: hidden` whenever the drawer is merely
+**closed**, and it sits between the map pill and the `.hud-menu` that carries
+the ride-hide's `display: none`. So the map pill read "hidden" either way —
+hidden because the drawer was shut, which it would have been anyway. The
+assertion `during.mapPill.startsWith('hidden')` could not tell the two
+implementations apart.
+
+Fixed by scanning the **whole chain for `display:none` first**, and asserting
+`during.mapPill === 'hidden(display:none)'` exactly. Now:
+
+- mutation 2 applied → **6/6 FAIL**, `mapPill: hidden(visibility)`
+- reverted → **6/6 PASS**, `mapPill: hidden(display:none)`
+
+Also hardened `waitFor` against "Execution context was destroyed": a dev-server
+HMR reload mid-poll is not a result about the game, and this script is normally
+run while source is being edited (that is how it gets proved red). Only that one
+error is retried, inside the existing deadline; everything else rethrows. Two
+clean back-to-back runs after the fix.
