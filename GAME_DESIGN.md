@@ -103,7 +103,7 @@ Unless the grown-ups turn on **Mayhem mode**…
   `Shopping` and `TreeClimbing` are all deleted: one system, not five. The
   train's auto-boarding and alighting-by-walking are gone.
   *Two consequences worth knowing:* things you use by **arriving** rather than
-  by pressing — the trampoline, the bubble, the slides, the front door — have
+  by pressing — the trampoline, the slides, the front door — have
   no actions and so are no longer outlined at all; and a tap that lands on a
   thing no longer walks you to it, so tapping a stall selects it and tapping
   its chip is what sets off the walk.
@@ -323,6 +323,19 @@ rides in it.
 - **Stairs**
 - **Silly ways:** a trampoline that bounces you up, a slide to whoosh down,
   and a floating bubble that carries you up
+
+**Superseded, 29-30 August 2026 — the lift is the only way between floors.**
+Jim, having played it: *"there are too many ways between the floors right
+now. Let's reduce it to just the lift"*, and then, of the bubble
+specifically: *"Yeah I think remove it and keep only the lift. It's the only
+one that works very well. Remove from docs too."* The original ask above is
+left standing because it is what the family asked for and this file is that
+record — but it is no longer what is being built. **The floating bubble is
+removed** (issue #377): it carried you up through the middle of the castle
+with no control to find, which is exactly what "works very well" is
+measuring against. The trampoline and the helter-skelter survive as *rides
+that put you back where you started*, not as transport. See
+ARCHITECTURE-DECISIONS.md, Decision 3's addendum, correction 5.
 
 ### Riding the lift (27 July 2026 — BUG/usability, queued)
 
@@ -1070,7 +1083,7 @@ Rough order of construction, each step playable:
 2. **The garden** — terrain, paths, trees/bushes, wooden and pink stone
    walls, wishing fountain, day/night cycle
 3. **The building** — floors, glass lift, escalators, stairs, trampoline,
-   slide, bubble; the ginormous slide + ball pit
+   slide; the ginormous slide + ball pit
 4. **Shops & money** — all seven shops, buying, the infinite purse
 5. **Collection** — the parade of cute things, backpack peeking, Cute-o-dex,
    bedroom shelves
@@ -1404,7 +1417,7 @@ Rough order of construction, each step playable:
     one continuous interior — `WalkSurfaces` samples the highest walkable
     surface within a step of your feet across all decks, the floor-fader
     hides decks above you for the cutaway view, and the lift, escalators,
-    stairs, bubble, helter-skelter, ginormous slide and ball pit are all
+    stairs, helter-skelter, ginormous slide and ball pit are all
     built as things that physically span between deck heights. Splitting the
     floors changes what every one of those *is*. It also interacts with the
     just-landed shaft guards and the deck-hole invariant in `layout.ts`. The

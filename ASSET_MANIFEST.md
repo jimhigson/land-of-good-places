@@ -106,7 +106,7 @@ interface CreatureHandle extends AssetHandle {
 | 14 | Dodgem car + arena | M | Car ~1.3 m, chunky bumper torus, pole + ceiling grid. Plus the **fake wooden tree** (wobble + apples + leaves + surprised bird). |
 | 15 | Water gun + splash FX | M | Very big water gun prop; splash sprites; drippy-hair overlay; rainbow arc. |
 | 16 | Wishing fountain | M | Exists (`src/world/Fountain.ts`). Wants a coin + sparkle burst. |
-| 17 | Building exterior + floors | L | Tall pastel tower, glass lift shaft, escalators, stairs, trampoline, bubble. |
+| 17 | Building exterior + floors | L | Tall pastel tower, glass lift shaft, escalators, stairs, trampoline. (The floating bubble was removed on 30 August 2026, issue #377.) |
 | 18 | Ginormous slide + ball pit | L | Swept tube; ball pit = instanced spheres. |
 | 19 | Candy floss / ice cream / egg / hat / sticker items | M | ~24 small held props. All ≤ 0.3 m, all with the same `heldOffset`. |
 | 20 | Pet followers (bunny, kitten, mouse) | M | Also the "cute animal" player options — one rig, three skins. |

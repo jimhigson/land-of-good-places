@@ -365,8 +365,8 @@ person to touch procgen has a number to move rather than an anecdote.
 
 The family's ruling of 28 July is that paths cross the railway on **bridges,
 never level crossings**. A bridge registers itself as a walkable surface with an
-arbitrary **`covers(x, z)` predicate**, in the idiom `Bubble.covers`,
-`GlassLift.covers` and `Trampoline.covers` already use, and `WalkSurfaces`
+arbitrary **`covers(x, z)` predicate**, in the idiom `GlassLift.covers` and
+`Trampoline.covers` already use, and `WalkSurfaces`
 answers with the deck's height where it covers.
 
 **`NavGrid` remains a single-layer 2D lattice.** This is worth stating flatly
@@ -1351,8 +1351,8 @@ S1/S5/S14 and Review 2 §4; and, in full: `src/world/building/layout.ts`,
 > The trampoline, bubble and helter-skelter survive as **rides that return you
 > to the floor you started on** (Overseer ruling, 29 August): they are
 > attractions, not transport, and a ride that puts you back where you began is
-> not a way between floors. Whether the bubble also *moves* to the roof is
-> Jim's call and is open.
+> not a way between floors. **The bubble is the exception, and it is now
+> gone entirely** — see correction 5.
 >
 > **2. "The floor fader is deleted" (§2) is only half true.** `FloorFader` has
 > a second live consumer that did not exist in July: `hotel/Hotel.ts`'s
@@ -1409,6 +1409,24 @@ S1/S5/S14 and Review 2 §4; and, in full: `src/world/building/layout.ts`,
 > copy", and it lives at **`world/SpaceManager.ts`**, not under `building/`,
 > because it is not castle-only. Jim's *"make the castle internals work like
 > the hotel internals"* turns out to be literal instruction, not analogy.
+>
+> **5. The floating bubble is removed outright (30 August 2026).** Correction 1
+> above left one thing open — whether the bubble survives as the hop to the
+> roof. It does not. Jim: *"Yeah I think remove it and keep only the lift. It's
+> the only one that works very well. Remove from docs too."* So the class, its
+> constants, its interact zone, its map marker, its shaft and its guard rail
+> are all gone (issue #377), and §3's `'bubble'` portal flavour and §4's
+> "kept as the way onto the roof" row are corrected in place with a pointer
+> back here. Two consequences the next author needs:
+>
+> - **`BUBBLE_SHAFT` was a shaft, not only a hole** — a row in
+>   `BUILDING_SHAFTS`, which `DECK_HOLES` spreads. Removing it makes the 2.1 m
+>   circle at castle-local (-1.5, 0) **solid floor on decks 1-4**. That space is
+>   now free: nothing reserves it, and the deck 1-4 guard rail that ringed it is
+>   gone with it. S2 inherits four shafts, not five.
+> - **§8's family question 1** ("should the bubble be the special way up to the
+>   roof?") is answered, in the negative, by the removal. Do not re-ask it.
+>   The roof is reached by the lift.
 
 ### The ruling, in one paragraph
 
@@ -1533,7 +1551,7 @@ interface PortalEnd {
 }
 interface Portal {
   id: string;
-  flavor: 'door' | 'stairs' | 'escalator' | 'trampoline' | 'bubble' | 'ride';
+  flavor: 'door' | 'stairs' | 'escalator' | 'trampoline' | 'ride';
   a: PortalEnd;
   b: PortalEnd;
   oneWay?: boolean;                // trampolines, the rides
@@ -1571,7 +1589,6 @@ launch pattern — real motion in space A, iris, real motion in space B:
 - **Trampoline** (31g): tap → walk to pad → squash + `Player.launch` → iris
   at the apex → arrive falling onto a marked landing pad one floor up.
   One-way. No shaft, no combo timing, no hole.
-- **Bubble**: the same upward pattern, floatier — see §4 for where it goes.
 - **Ride** (helter-skelter, ginormous slide): board → iris → the chute
   carries you in the destination space. The ginormous slide *already works
   exactly like this* and keeps its code path; the helter's helix moves to
@@ -1588,7 +1605,7 @@ launch pattern — real motion in space A, iris, real motion in space B:
 | Escalators | **Kept as a portal flavour.** Belt visuals and carry nudge survive on the half-ramps; the storey-spanning ramp and its well (`ESCALATOR_WELL`, S5's subject) go. |
 | **Glass lift** | **Kept — and this ruling changed while the memo was being written.** The 27 July family addendum ("Riding the lift", on `main` at `8f66095`) specifies: call panel styled as a toy elevator panel, lift comes quickly, auto-board, panel lists floors, straight to floor N. Under the split the lift becomes the castle's one **any-floor portal** and the panel is its UI: press floor N → auto-board → doors close (the iris, diegetic) → doors open in floor N's lift alcove. The `GlassLift` car/shaft state machine, `callTo`, dwell timers, `MovingPlatform` duty and shaft collision are all deleted — "comes quickly, never make a child wait" is satisfied trivially because nothing real has to travel. Every floor space has its lift alcove at the same local spot (a lift that wanders would read as broken). The panel must be built against a two-method seam — `floors(): FloorInfo[]`, `go(n: number)` — as the family note itself demands; anyone building the "lift call panel" Anytime item **before** S2 lands must target that seam (backed by today's `GlassLift`) or the work is thrown away. The lift does not undermine 5.3's exploration: it is the sanctioned easy mode, the scattered stairs are the game. |
 | Trampoline | **Tap-and-go portal** (31g). Pad + landing pad, no shaft. |
-| Bubble | **Kept as the way onto the roof** (floor 3 ↔ roof): step in, it lifts, iris, it settles onto the roof and opens. The most magical hop gets the most magical device. Family question 1 confirms. |
+| Bubble | **Removed, 29 August 2026** — see correction 5 in the addendum above. Jim: *"remove it and keep only the lift. It's the only one that works very well."* The July ruling here was "kept as the way onto the roof"; it was never built that way, and the bubble as it actually shipped — a sphere that drifts between decks with no control to find — is what he judged. Family question 1 (§8) is answered by its removal. |
 | Helter-skelter | **Ride portal, floor 2 → ground floor**, helix standing in the Great Hall (§5). |
 | Ginormous slide | **Unchanged.** Already a cross-space ride; its start simply lives in the roof space. Grown-up logic untouched. |
 | Toilets | Move with floor 1, untouched otherwise. The queued privacy-roof item's note "match the cutaway fade" should be read as "fade the lid" — the cutaway itself will be gone. |
