@@ -453,17 +453,44 @@ export class WildPets {
     return Math.hypot(one.x - this.playerXZ.x, one.z - this.playerXZ.z);
   }
 
-  /** A burrow that is not the one it is standing on, so "dives into a
-   *  different one" is true by construction. */
+  /**
+   * The nearest burrow that is **not** the one it is standing on, so "dives
+   * into a different one" is true by construction.
+   *
+   * The first version of this never returned anything at all:
+   *
+   * ```ts
+   * let bestDistance = -1;
+   * …
+   * if (distance > bestDistance) continue;   // every distance > -1
+   * ```
+   *
+   * — so it `continue`d on every burrow and handed back `null` forever. The
+   * creature could therefore never enter `leaving`, never dive, and never make
+   * room for the next one: with a population cap of {@link POPULATION}, the
+   * roof filled up with four animals within the first fifteen seconds and then
+   * stayed **completely static for the rest of the session**. Half of the
+   * feature — "dives into a different one and is removed, new ones emerge" —
+   * simply did not run.
+   *
+   * Nothing on screen said so: four wild pets roaming a meadow is exactly what
+   * it is supposed to look like, and it takes a minute of standing still to
+   * notice that they are the same four. It was found by deliberately deleting
+   * the dive gate and watching the test that guards it **stay green** — the
+   * mutation could not fail a test whose subject was already dead code. The
+   * measurement that settled it: 200 simulated seconds with the player 200 m
+   * away produced 4 creatures and **0 departures**.
+   */
   private burrowAwayFrom(one: WildOne): Burrow | null {
     let best: Burrow | null = null;
-    let bestDistance = -1;
+    let bestDistance = Infinity;
     for (const burrow of this.burrows) {
       const distance = Math.hypot(one.x - burrow.x, one.z - burrow.z);
       // Anything it is practically standing on is "the one it came out of".
+      // Burrows are at least `BURROW_SPACING` apart, so this can only ever
+      // exclude the hole underfoot.
       if (distance < 2) continue;
-      if (distance > bestDistance) continue;
-      if (bestDistance < 0 || distance < bestDistance) {
+      if (distance < bestDistance) {
         bestDistance = distance;
         best = burrow;
       }
