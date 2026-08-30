@@ -207,10 +207,29 @@ function buildPlanterRing(deck: number): Group {
  * plan moves: anything hand-placed goes stale the first time a shaft shifts a
  * metre, and a bench floating in a stairwell is a bench a child falls through.
  */
-function buildBenches(deck: number, blocked: readonly KeepOut[], isRoof: boolean): InstancedMesh {
+export interface BenchSpot {
+  readonly x: number;
+  readonly z: number;
+  readonly yaw: number;
+}
+
+/**
+ * Where this deck's benches stand — **one list, asked twice**.
+ *
+ * Exported for the same reason {@link keepOutsFor} is. The roof's long grass
+ * (`roofMeadow.ts`) has to keep off the benches, and a bench is placed by a
+ * seeded rejection sample rather than written down anywhere, so the only two
+ * ways for the meadow to know where they are were to re-run the sample (a
+ * second copy of the seed, the wanted count and every rejection rule, silently
+ * wrong the first time any one of them changes) or to ask. It asks.
+ *
+ * Deterministic and cheap — a few hundred rejections against a handful of
+ * discs — so it is called fresh at both sites rather than cached.
+ */
+export function deckBenchSpots(deck: number, blocked: readonly KeepOut[], isRoof: boolean): BenchSpot[] {
   const rng = new Rng(9100 + deck * 37);
   const wanted = isRoof ? 10 : 8;
-  const spots: { x: number; z: number; yaw: number }[] = [];
+  const spots: BenchSpot[] = [];
 
   for (let attempt = 0; attempt < 500 && spots.length < wanted; attempt += 1) {
     const x = rng.range(-INTERIOR_HALF_X + 3, INTERIOR_HALF_X - 3);
@@ -223,6 +242,15 @@ function buildBenches(deck: number, blocked: readonly KeepOut[], isRoof: boolean
     if (spots.some((s) => Math.hypot(x - s.x, z - s.z) < 5)) continue;
     spots.push({ x, z, yaw: rng.pick([0, Math.PI / 2]) });
   }
+  return spots;
+}
+
+/** How far from a bench's centre nothing else may grow. Half its 2.2 m length,
+ *  plus room to sit down without a face full of grass. */
+export const BENCH_CLEAR_RADIUS = 2.2;
+
+function buildBenches(deck: number, blocked: readonly KeepOut[], isRoof: boolean): InstancedMesh {
+  const spots = deckBenchSpots(deck, blocked, isRoof);
 
   const benches = new InstancedMesh(
     new BoxGeometry(2.2, 0.44, 0.72),
