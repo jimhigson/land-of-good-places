@@ -68,8 +68,27 @@ export const SAVE_KEY = 'lgp:save';
  * Bumped **only** for a change tolerance cannot absorb — a field whose meaning
  * changes, or a restructure. Adding a field is not one of those; see the note
  * at the top of this file.
+ *
+ * ## v2 — RiPika became a pet, and v1 saves are rewritten on load
+ *
+ * `toy.ripika` became `pet.ripika` with `kind: 'pet'` (30 August 2026). An id
+ * is the one thing tolerance cannot absorb: `readInventoryItem` rebuilds an
+ * item from the save file rather than from the catalogue, so a v1 save's
+ * RiPika *survives* being read — and then `Parade`'s
+ * `if (!catalogue) continue` silently skips her forever, because nothing in
+ * the catalogue answers to `toy.ripika` any more. The result was a pet a child
+ * could see in her Cute-o-dex, could not use, and could not re-collect, while
+ * `pet.ripika` sat undiscovered beside it.
+ *
+ * Jim, 30 August 2026: *"just migrate it on load. Not that big of a deal
+ * really."* So {@link renameRipikaToPet} rewrites it, and **nothing is lost**:
+ * a returning child's RiPika still walks behind her, can still be carried, and
+ * her Cute-o-dex still shows her as found.
+ *
+ * This is the first entry the table was built for, which is the point of
+ * having had it since v1.
  */
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 
 /**
  * Where the player was standing — a **space id plus a position local to that
@@ -201,9 +220,73 @@ export interface SaveFile {
  * whether saves are worth migrating. A step takes the raw parsed object at
  * version `n` and returns it at version `n + 1`; it may throw, and throwing
  * means the same thing as a missing step — unreadable, offer a fresh start.
+ *
+ * `1 → 2` is the first entry, and it is exactly the case the table was built
+ * for: a catalogue id changed under saves that already existed.
  */
 const MIGRATIONS: Readonly<Record<number, (old: Record<string, unknown>) => Record<string, unknown>>> =
-  {};
+  {
+    1: renameRipikaToPet,
+  };
+
+/** The id RiPika was sold under until 30 August 2026. */
+const V1_RIPIKA_ID = 'toy.ripika';
+const RIPIKA_ID = 'pet.ripika';
+
+/**
+ * v1 → v2: RiPika stops being a toy.
+ *
+ * **Both registers, not just the inventory.** What she *is* lives in
+ * `game.inventory`; whether she has been *found* lives in `game.collection`,
+ * a separate map keyed by catalogue id whose entries carry the id a second
+ * time inside themselves. Migrating the inventory alone would leave her
+ * walking behind a child whose Cute-o-dex still filed her under Toys and
+ * showed `pet.ripika` as never discovered — the same ghost in a smaller form,
+ * which is the whole failure this step exists to avoid.
+ *
+ * So three things move, in both places: the **id**, the **kind** (`'toy'` →
+ * `'pet'`, which is what makes `Hotel.paradePetKind` see her and give her a
+ * bed) and the **category** (which is the Cute-o-dex's grouping).
+ *
+ * **The `uid` is deliberately left alone.** It reads `toy.ripika#1` afterwards,
+ * which is untidy and completely safe: a uid is opaque — nothing parses a
+ * species out of it, `paradePetKind` reads `item.id` — and `carriedUid`,
+ * `wornHatUid` and their siblings are *pointers* to it. Rewriting it would
+ * mean finding and rewriting every pointer in the same breath, which is a real
+ * chance of dropping the thing in her hands to tidy a string nobody sees.
+ *
+ * `egg.prize.ripika` — "Tiny RiPika", the surprise-egg prize — is a different
+ * catalogue entry that did not move, and the exact-id match leaves it alone.
+ *
+ * Written defensively because it runs on whatever is in a browser: every field
+ * is checked before it is touched, and a save with no inventory, no collection
+ * or no RiPika passes through unchanged rather than throwing.
+ */
+function renameRipikaToPet(old: Record<string, unknown>): Record<string, unknown> {
+  const game = old['game'];
+  if (!isRecord(game)) return { ...old, v: 2 };
+
+  const nextGame: Record<string, unknown> = { ...game };
+
+  const inventory = game['inventory'];
+  if (Array.isArray(inventory)) {
+    nextGame['inventory'] = inventory.map((entry) => {
+      if (!isRecord(entry) || entry['id'] !== V1_RIPIKA_ID) return entry;
+      return { ...entry, id: RIPIKA_ID, kind: 'pet', category: 'pet' };
+    });
+  }
+
+  const collection = game['collection'];
+  if (isRecord(collection) && collection[V1_RIPIKA_ID] !== undefined) {
+    const { [V1_RIPIKA_ID]: found, ...rest } = collection;
+    nextGame['collection'] = {
+      ...rest,
+      [RIPIKA_ID]: isRecord(found) ? { ...found, id: RIPIKA_ID, category: 'pet' } : found,
+    };
+  }
+
+  return { ...old, v: 2, game: nextGame };
+}
 
 // --------------------------------------------------------------- writing
 
