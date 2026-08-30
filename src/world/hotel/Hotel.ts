@@ -5266,8 +5266,20 @@ export class Hotel implements GameSystem {
    * and the species is the second half of ids like `pet.bunny`. So this
    * matches the id's tail against `PET_KINDS`, which means a pet the shop
    * gains tomorrow is recognised here the day it is added, with no table to
-   * keep in step. A `toy.ripika` in the parade is deliberately not a match:
-   * it is paradeable, but it is a toy and it does not sleep.
+   * keep in step.
+   *
+   * **RiPika now matches, and that is a behaviour change, not a tidy-up.**
+   * This comment used to end "a `toy.ripika` in the parade is deliberately not
+   * a match: it is paradeable, but it is a toy and it does not sleep." She is
+   * `pet.ripika` with `kind: 'pet'` as of 30 August 2026, so the companion
+   * every player starts with is now the one the breakfast feast seats and the
+   * one that walks to a hotel bed at nap time — where before, a child whose
+   * only companion was her starter RiPika got a *bunny* in the bed she had
+   * never owned, because this fell through to its default.
+   *
+   * The beds were already sized for her: `petBedFit.ts` measures every
+   * companion in the catalogue, and hers was always the largest footprint in
+   * the table (1.12 m × 1.49 m). So nothing here had to grow to let her in.
    */
   private paradePetKind(): PetKind {
     for (const item of gameStore.get().inventory) {

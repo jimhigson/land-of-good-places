@@ -409,7 +409,7 @@ function stickerPetShop(): Fitout {
   detail.add(bedding);
 
   // **What this shop sells, not what `pets.ts` can build.** Those were the same
-  // list until RiPika became a `PetKind` while still being sold as `toy.ripika`
+  // list until RiPika became a `PetKind` while still being sold as `pet.ripika`
   // in the toy shop — at which point iterating `PET_KINDS` here put a fifth pet
   // in a pen sized for four, advertising stock this counter does not carry.
   const stocked = petKindsForShop('stickerPet');

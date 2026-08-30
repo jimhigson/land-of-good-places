@@ -182,7 +182,7 @@ export interface SaveFile {
    * `uid` unique.
    *
    * Saved because it has to be: without it a restored game restarts the
-   * counter at zero and the very next purchase mints `toy.ripika#1` a second
+   * counter at zero and the very next purchase mints `pet.ripika#1` a second
    * time, colliding with a uid a restored item is already holding — and
    * `carriedUid` / `wornHatUid` point at uids.
    */

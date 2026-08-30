@@ -394,7 +394,7 @@ function check(subject: Subject): void {
 // costs six calls per creature and removes that blind spot.
 //
 // Verified to bite: reintroducing the tail line fails this on all four RiPika
-// subjects (`ripika`, `ripika.space`, `toy.ripika`, `egg.prize.ripika`) and
+// subjects (`ripika`, `ripika.space`, `pet.ripika`, `egg.prize.ripika`) and
 // names the offending node. A check nobody has watched fail is not a check.
 // =============================================================================
 

@@ -621,7 +621,7 @@ export function itemsForShop(shopId: ShopId): ShopItem[] {
  *
  * `PET_KINDS` answers a different question — *which pet bodies can `pets.ts`
  * build?* — and the two stopped being the same list the moment RiPika became a
- * {@link PetKind} while still being sold as `toy.ripika` in the toy shop. A
+ * {@link PetKind} while still being sold as `pet.ripika` in the toy shop. A
  * display that iterates `PET_KINDS` is therefore advertising stock its shop
  * does not carry, which is what the sticker & pet shop's pen did the first time
  * this was tried.

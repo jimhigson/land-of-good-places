@@ -175,7 +175,7 @@ function sizeToStandard(sizer: Group, body: Group): void {
 
 /**
  * The name RiPika answers to. One string, here, because she is now reachable
- * two ways — `createPet('ripika')` and the catalogue's `toy.ripika` — and two
+ * two ways — `createPet('ripika')` and the catalogue's `pet.ripika` — and two
  * hand-typed display names is exactly how the two drift apart.
  */
 export const RIPIKA_DISPLAY_NAME = 'RiPika';
@@ -190,7 +190,7 @@ export function createPet(kind: PetKind): PetHandle {
    * **RiPika is a pet, and there is one RiPika.**
    *
    * She was always an ownable companion — the character creator's starting-pet
-   * list is literally `[shopItem('toy.ripika'), …the pet shop's pets]`, and she
+   * list is literally `[shopItem('pet.ripika'), …the pet shop's pets]`, and she
    * walks in the parade like any of them. What she was *not* was a
    * {@link PetKind}, so every system that asked "what pets are there?" got four
    * answers and quietly left out the one every player actually starts with.
