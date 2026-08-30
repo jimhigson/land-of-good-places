@@ -343,3 +343,86 @@ its own trigger (3); set `FLOOR_SPACE_SPACING` to 40 (4).
 4. contents move: market to the mall, hall furniture to floor 1, roof dressing to floor 2;
 5. the boot validator, proved red;
 6. `check:castle` / `check:shop-spacing` / `check:tap-spacing` / `ParkMap` / `interactZones` re-shaped for three floors; screenshots at player height of each floor and of the lift moving.
+
+---
+
+## S2 STATUS — built, green, and **not yet walked in a browser**
+
+Branch `feat/castle-floors-half-area`, worktree `.claude/worktrees/castle-shrink`.
+
+### Gates, all run unpiped, exit codes read
+
+| gate | exit | note |
+| --- | --- | --- |
+| `pnpm exec tsc --noEmit` | **0** | |
+| `pnpm exec tsc --noEmit -p tsconfig.test.json` | **0** | |
+| `pnpm run build` | **0** | 49 steps, parsed from `package.json`, never grepped |
+| `pnpm run test:procgen` | **0** | 465 passed, 15 files, **0 skipped** |
+| `pnpm run check:castle` | **0** | |
+| `pnpm run check:castle-floors` | **0** | new; see below |
+| `pnpm run check:shop-spacing` | **0** | re-shaped for one aisle on the mall |
+| `pnpm run check:tap-spacing` | **0** | |
+| `pnpm run check:park`, `check:park-boot` | **0** | in the build chain |
+
+`check:park-boot` went red once **under load** (a build running beside it) and
+passed alone and in the clean build — the #324 flake, exactly as briefed.
+
+### The boot validator, proved red four ways
+
+`scripts/check-castle-floors.mts`, inserted after `check:castle`; the chain went
+48 → **49** steps. Geometry it was proved against, from its own green line:
+
+> 3 floors 300 m apart (The mall, The great hall, The roof garden), 8 portals.
+
+1. **lift portals removed** → 4 failures: both upper floors unreachable *and*
+   unable to get back. *"That is a child stranded on a floor she cannot leave."*
+2. **lift arrival moved off the plate** → 6 failures, each naming the surface it
+   found (−0.472 m) against the floor it wanted (0.728 m).
+3. **door arrival landed on its own exit band** → the ping-pong clause fires by
+   name, plus the arrival clause.
+4. **`FLOOR_SPACE_SPACING` 300 → 40** → the overlap clause fires for all three
+   pairs, every plate corner resolves to the wrong floor, and arrivals report
+   landing in `castle.mall` while claiming `castle.hall`.
+
+**One honest note.** The first attempt at mutation 2 moved the arrival 4 m east
+and produced **no failure**. That was the mutation being wrong, not the check:
+`LIFT_STAND_X + 4 = 24.11` is still inside `LIFT_SHAFT` (21.21–24.61), which
+`LIFT_PIT` floors, so she was standing on the alcove floor and the check was
+right to pass her. Re-chosen to move off the plate. A mutation that fails to go
+red is a claim about the check that has to be run down.
+
+### The bug `test:procgen` caught that the build could not
+
+`slide/solve.ts` had `START_Y = deckY(TOP_DECK)`. That was never about the
+interior — it was a proxy for "as high as the castle is", working only because a
+five-storey interior happened to out-top the facade's battlements. `TOP_DECK`
+fell 4 → 2 and took **7.2 m** off the launch height: the chute crossed the
+castle's south wall **3.76 m inside solid battlements, on every seed**, with
+nothing cutting a hole. `pnpm run build` stayed green throughout, because
+`test:procgen` is not in the chain.
+
+Fixed at the root: `CASTLE_WALL_HEIGHT`/`CASTLE_MERLON_HEIGHT` moved from
+`Shell.ts` to `layout.ts` (the move `CASTLE_TOWERS` already made, for the same
+cycle reason), and `START_Y = BUILDING_BASE_Y + CASTLE_MASONRY_TOP +
+BATTLEMENT_AIR`. GAME_DESIGN 30c: the inside never has to agree with the
+outside's shape, so a figure about the outside must not derive from the inside's
+floor count.
+
+### WHAT IS NOT DONE — read this before merging
+
+**Nobody has watched this run.** I have not been granted the chrome-devtools
+MCP, and CLAUDE.md is explicit that an agent who has not been told it owns the
+browser must not drive it. So the three required screenshots — each floor at
+player height, and the lift moving between them — **do not exist**, and the
+three things only a rendered frame can answer are unverified:
+
+1. every floor reachable by lift, nothing stranded (asserted by the validator on
+   the portal graph; *not* observed);
+2. the great hall still reads as a hall now it has a floor to itself;
+3. **the ginormous slide still launches from the roof garden** — the validator
+   asserts the pad is in the roof space, on the plate and on walkable ground,
+   and `test:procgen` asserts the chute clears the battlements, but nobody has
+   ridden it.
+
+This is a gate, not a formality: the branch is pre-approved for merge and must
+still not be merged until somebody has looked.
