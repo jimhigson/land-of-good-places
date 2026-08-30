@@ -5,11 +5,36 @@ Dev server port **5406** (`vite --port 5406 --strictPort`), kill by PID.
 
 ## Two environment traps, both paid for
 
-1. **`pnpm` on PATH is the wrong one.** `which pnpm` resolves to an fnm shim
+1. ~~**`pnpm` on PATH is the wrong one.** `which pnpm` resolves to an fnm shim
    (v11.5.0) which tries to self-install the pinned 12.1.0 and hands you a
    broken bin: `syntax error near unexpected token ')'` from a shell script
    that is actually an error message. **Use `/opt/homebrew/bin/pnpm`** — it
-   spawns 12.1.0 correctly ("Done in 457ms using pnpm v12.1.0").
+   spawns 12.1.0 correctly ("Done in 457ms using pnpm v12.1.0").~~
+
+   **CORRECTED, 30 Aug — just type `pnpm`. Do not hard-code the Homebrew
+   path; that advice was mine and it is now wrong.**
+
+   The breakage was real but my explanation of the fix was not. Homebrew's
+   pnpm is **11.20.0**, not 12.1.0. It ran the pinned commands correctly
+   because **pnpm 10+ re-executes itself as the `packageManager` version**
+   before doing any work — I saw the switch happen and credited the binary
+   for what the pin was doing.
+
+   The genuinely broken one was the fnm pnpm at the front of `PATH`. pnpm 12
+   ships as a native binary written over a placeholder by a postinstall step;
+   11.5.0 fetched 12.1.0 and never ran that step, leaving a 282-byte prose
+   placeholder where the Mach-O belongs — so the shell parses English. Both
+   downloads sit in the store side by side, one 33 MB and one a text file.
+   The `using pnpm v11.5.0` line I read was 11.5.0 running *as itself* in the
+   shared checkout, which is on a stale branch with no `packageManager` field
+   at all: no pin, no switch. **The fnm pnpm is now upgraded to 11.24.0 and a
+   plain `pnpm` resolves per project.**
+
+   Carry this: **`pnpm --version` cannot tell you which version will run.**
+   Check `npm_config_user_agent` from inside the project instead —
+   `pnpm exec node -e "console.log(process.env.npm_config_user_agent)"`
+   printed `pnpm/12.1.0`, which is how PR A's gates are known to have run
+   under 12.1.0 rather than assumed to have.
 2. **The build chain is 47 steps, not 48.** Counted by parsing
    `package.json` (`scripts.build.split('&&').length`), as CLAUDE.md's own
    "a check that never runs" section requires. CLAUDE.md also says 47.
