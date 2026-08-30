@@ -6,7 +6,7 @@ import { GARDEN_PLAY_BOUNDARY } from '../boundary';
 import { clearOfPlots } from '../parkLayout';
 import { distanceToRailCorridor } from './plan';
 import type { CollisionWorld } from '../Collision';
-import { PLAYER_RADIUS, SPRINT_PEAK_GRADE_BUDGET } from '../../core/constants';
+import { PATH_KERB_OVERHANG, PLAYER_RADIUS, SPRINT_PEAK_GRADE_BUDGET } from '../../core/constants';
 
 /**
  * The bridge's own footprint in the ground plane (issue #116, Decision 8) —
@@ -62,20 +62,41 @@ import { PLAYER_RADIUS, SPRINT_PEAK_GRADE_BUDGET } from '../../core/constants';
  */
 
 /**
- * Bridge ramps climb at the same steepness the park's own front steps do —
- * derived from `ENTRANCE_RAMP`, never a separately chosen number, so a
- * retune of the entrance moves the bridges with it rather than leaving two
- * "how steep is a ramp here" answers to drift apart.
- */
-export const BRIDGE_RAMP_GRADIENT =
-  Math.abs(ENTRANCE_RAMP.yTo - ENTRANCE_RAMP.yFrom) / Math.abs(ENTRANCE_RAMP.to - ENTRANCE_RAMP.from);
-
-/**
  * Half-length of the deck along the crossing direction — has to clear both
  * fence lines (each {@link FENCE_OFFSET} out from the rail centre) with a
  * little margin so the deck's own edge does not sit flush on a fence post.
+ *
+ * **This is the part of a bridge that cannot shrink.** The tunnel has to
+ * swallow the whole fenced corridor, so any future shortening of a bridge
+ * takes every metre out of the ramps.
  */
 export const DECK_HALF_LENGTH = FENCE_OFFSET + 1.2;
+
+/**
+ * **How far a bridge's parapet really reaches along its own frame**, on the
+ * side whose ramp runs `rampRun` past the deck — the deck's own half-length
+ * plus that ramp.
+ *
+ * *One definition, published and consumed*, in the same shape as
+ * `ShellGeometry.planEdge` on this branch. `bridges.ts` draws its parapet run
+ * from `-parapetReachFor(rampRunNeg)` to `+parapetReachFor(rampRunPos)`, and
+ * `planReal`'s cross-crossing exclusion ({@link planBridgeFootprints}'s
+ * `nearOtherGuardRail`) clamps to the very same figure. They must agree, and
+ * the only way to be sure they agree is for there to be one of them.
+ *
+ * They did not agree before (#349). The exclusion clamped to
+ * {@link DECK_HALF_LENGTH} alone, modelling a neighbour's rail as 6.4 m long
+ * when the built thing is more like 22 m, on the strength of a comment saying
+ * parapets were built along the deck and "never a ramp" — true of an older
+ * geometry, stale for years. Seed 2 built two bridges whose ramps run at each
+ * other, and bridge 1's parapet came down across bridge 0's walked centreline
+ * at `across = +0.11`, 8.73 m along its own frame: five and a half metres past
+ * the end of the rail the exclusion believed in, and so completely invisible to
+ * it. A walker climbing bridge 0's ramp hit a 2.98 m wall standing in the road.
+ */
+export function parapetReachFor(rampRun: number): number {
+  return DECK_HALF_LENGTH + rampRun;
+}
 
 /**
  * Fraction of each side's length spent easing the grade in and out — the
@@ -97,6 +118,15 @@ export const DECK_HALF_LENGTH = FENCE_OFFSET + 1.2;
  * direction would be an import cycle.
  */
 export const HUMP_BLEND = 0.25;
+
+/**
+ * Bridge ramps climb at the same steepness the park's own front steps do —
+ * derived from `ENTRANCE_RAMP`, never a separately chosen number, so a
+ * retune of the entrance moves the bridges with it rather than leaving two
+ * "how steep is a ramp here" answers to drift apart.
+ */
+export const BRIDGE_RAMP_GRADIENT =
+  Math.abs(ENTRANCE_RAMP.yTo - ENTRANCE_RAMP.yFrom) / Math.abs(ENTRANCE_RAMP.to - ENTRANCE_RAMP.from);
 
 /**
  * **The steepest a ramp may ever be forced to** — when two crossings land close
@@ -230,6 +260,46 @@ export const MIN_DECK_HALF_WIDTH = PLAYER_RADIUS + 0.3;
  */
 export const BRIDGE_WALL_THICKNESS = 0.3;
 
+/**
+ * **The half-width of the road a bridge carries — the one owner (issue
+ * #349).**
+ *
+ * The *drawn* path is wider than its paved surface: `pathGraph.ts` draws the
+ * cream kerb {@link PATH_KERB_OVERHANG} proud of the sandy surface on each
+ * side, so what a child sees as "the path" is `pathHalfWidth +
+ * PATH_KERB_OVERHANG` across. A bridge built to `pathHalfWidth` alone is
+ * 0.425 m per side too narrow to carry the path it is carrying, and the kerb
+ * was never going to land on stone.
+ *
+ * That is what issue #349 was: `bridges.ts` lifted path vertices out to
+ * `roadHalf + PATH_KERB_OVERHANG + PATH_CARRIER_SLACK` while the masonry was
+ * only swept to `roadHalf + BRIDGE_WALL_THICKNESS`, so up to 0.375 m of
+ * paving hung in mid-air past the parapet at the hump's own height — the
+ * sandy wedge poking out of the spandrel in Jim's screenshot. The two numbers
+ * were derived independently from the same crossing and nothing held them
+ * together: CLAUDE.md's "two definitions of one thing, kept in step by hand".
+ *
+ * So the road is defined **once, here, as the drawn paving's own width**, and
+ * everything else is measured off it: the parapets' inner faces stand at this
+ * line, {@link BridgeFootprint.halfAcross} is this plus the wall, and
+ * `bridges.ts`'s `pavingHeightAt` clamps its lift test to that `halfAcross`.
+ * The stone is then the single authority on where the paving ends, and the
+ * kerb's outer edge sits a full `BRIDGE_WALL_THICKNESS` *inside* it rather
+ * than 0.125 m outside.
+ *
+ * Note this widens the deck by 0.85 m overall, which the footprint search has
+ * to find room for — see `planReal`, and the invariant
+ * `plannedBridgeSiteDistances` that proves no crossing lost its bridge to a
+ * level crossing because of it.
+ *
+ * Jim's 2026-08-23 ruling "the bridge is as wide as the path, no wider" is
+ * unchanged and is exactly what this expresses; only *which* width counts as
+ * "the path" is corrected, from the paving alone to the paving as drawn.
+ */
+export function bridgeRoadHalfFor(crossing: LevelCrossing): number {
+  return crossing.pathHalfWidth + PATH_KERB_OVERHANG;
+}
+
 /** Coarse step the ramp-reach probes walk by. */
 const WIDTH_STEP = 0.5;
 
@@ -355,6 +425,32 @@ const WALKABLE_FLOOR = BRIDGE_RISE / MAX_RAMP_GRADIENT;
 const WALKABLE_MARGIN = 0.5;
 
 /**
+ * **The ramp every accepted bridge achieves on _both_ sides** — the floor plus
+ * its margin, as one published figure.
+ *
+ * Exported because it is not only the footprint search's own acceptance bar:
+ * the *site* planner (`crossingPlanSolve.ts`) has to know it too, both to give
+ * a site credit for enough ramp and to refuse to propose two crossings so close
+ * together that two bridges cannot physically occupy them. That module used to
+ * restate `BRIDGE_RISE / MAX_RAMP_GRADIENT + 0.5` by hand, which is the same
+ * two-descriptions-of-one-object shape as #349's parapet reach, one layer up.
+ */
+export const MIN_RAMP_RUN = WALKABLE_FLOOR + WALKABLE_MARGIN;
+
+/**
+ * **Half the length of the shortest bridge this codebase will ever accept** —
+ * its deck's own half-length plus the ramp it must achieve on that side.
+ *
+ * Two bridges whose ramps run at each other therefore need
+ * `2 * MIN_BRIDGE_HALF_LENGTH` between them. Nothing enforced that until #392:
+ * seed 2 planned two crossings **20.83 m** apart needing **28.54 m**, and the
+ * footprint search discovered the conflict far too late to do anything but drop
+ * one of them — after, in the #349 case, having built one bridge straight
+ * through the other's parapet.
+ */
+export const MIN_BRIDGE_HALF_LENGTH = DECK_HALF_LENGTH + MIN_RAMP_RUN;
+
+/**
  * What the late, real pass needs from the caller: the actual collision
  * world to query, and — the last lever before giving up on a crossing
  * entirely — a way to fell a real, felt tree that turns out to be the one
@@ -395,15 +491,15 @@ export interface BridgeFootprint {
    */
   readonly halfAcross: number;
   /**
-   * Paved half-width — exactly the crossing path's own `pathHalfWidth`
-   * (Jim, 2026-08-23: the bridge is as wide as the path, no wider). The
-   * parapets' inner faces stand here.
+   * Paved half-width — the **drawn** path's own half-width, kerb included
+   * ({@link bridgeRoadHalfFor}; Jim, 2026-08-23: the bridge is as wide as the
+   * path, no wider). The parapets' inner faces stand here.
    */
   readonly roadHalf: number;
   /**
    * Standable half-width — how far off the centreline a walker's own
-   * *centre* can really stand between the parapets: `roadHalf` less the
-   * walker's body (`PLAYER_RADIUS`). This is the honest extent
+   * *centre* can really stand between the parapets: {@link roadHalf} less
+   * the walker's body (`PLAYER_RADIUS`). This is the honest extent
    * `covers()`/`deckCovers()` report, because "covers" has always meant
    * "walkable here" to every consumer (NavGrid's exemption, the
    * invariants' probes) — a wall-to-wall figure would read as promising
@@ -585,6 +681,24 @@ interface DeckPlan {
   readonly halfAcross: number;
   /** Lateral shift of the whole frame — the search's dodge lever. */
   readonly shift: number;
+  /**
+   * The deck's own curved frame, so {@link nearOtherGuardRail} can project a
+   * probe onto a neighbour the way that neighbour is actually laid out.
+   *
+   * The straight `cx`/`dirX` approximation above is fine over the deck's own
+   * ±3.2 m, which is all the exclusion used to look at. It is not fine over a
+   * parapet that runs 11 m up a curved spine, where extrapolating the tangent
+   * puts the modelled rail metres from the built one — so the exclusion asks
+   * the frame instead, and the straight fields stay for pass 2's own use.
+   */
+  readonly frame: SpineFrame;
+  /**
+   * How far this deck's ramps reach past it, and so — through
+   * {@link parapetReachFor} — how far its parapet really runs. Carried on the
+   * plan because a *sibling* has to know it: see {@link parapetReachFor}.
+   */
+  readonly rampRunPos: number;
+  readonly rampRunNeg: number;
 }
 
 function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): PlannedFootprint[] {
@@ -689,9 +803,9 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
   // actually build a walkable ramp for.
   /**
    * True near a *different* crossing's own guard rail — the real, physical
-   * wall `bridges.ts` stands along each long edge of a deck (never a ramp:
-   * see that file's own `railHalfAcross`), at `halfAcross + ACROSS_MARGIN`
-   * out, running the deck's own `DECK_HALF_LENGTH` span. It is not a real,
+   * wall `bridges.ts` stands along each long edge of the hump, **deck and both
+   * ramps alike**, out at the structural edge and running
+   * {@link parapetReachFor} either way. It is not a real,
    * queryable collider yet at plan time — `ParkTrain` only calls
    * `collision.addWall` for every bridge's guard rails once this whole
    * search has returned — so it needs the same synthetic treatment as the
@@ -707,10 +821,14 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
     margin: number,
   ): boolean => {
     for (const deck of otherDecks) {
-      const dx = x - deck.cx;
-      const dz = z - deck.cz;
-      const along = dx * deck.dirX + dz * deck.dirZ;
-      const across = dx * deck.acrossX + dz * deck.acrossZ;
+      // Projected onto the neighbour's own curved frame, shift included — the
+      // line its parapet is actually built along (`bridges.ts` lays every wall
+      // segment with `frame.worldAt(along, wallLine * side, shift)`). The old
+      // straight projection off `cx`/`dirX` was adequate only because the
+      // clamp below never looked more than 3.2 m from the deck centre; over a
+      // parapet's real 11 m reach a tangent extrapolation misses a curved
+      // bridge by metres.
+      const { along, across } = deck.frame.project(x, z, deck.shift);
       // The parapet stands at the structural edge itself now (`halfAcross`
       // already includes the wall's own thickness) — not `ACROSS_MARGIN`
       // further out, which was the old wide-deck geometry's rail line.
@@ -726,7 +844,14 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
       // `DECK_HALF_LENGTH + margin`, and its `across` alone was too, even
       // though neither excess was on its own enough to put the *point* that
       // far from the *segment*.
-      const alongClamped = Math.max(-DECK_HALF_LENGTH, Math.min(DECK_HALF_LENGTH, along));
+      // **The rail's real span, asked of the one thing that defines it.** Not
+      // `±DECK_HALF_LENGTH`: the parapet runs the whole hump, deck and both
+      // ramps, and clamping to the deck alone is what let seed 2's two bridges
+      // plan their ramps through each other (#349 — see `parapetReachFor`).
+      const alongClamped = Math.max(
+        -parapetReachFor(deck.rampRunNeg),
+        Math.min(parapetReachFor(deck.rampRunPos), along),
+      );
       const dAlong = along - alongClamped;
       for (const sign of [1, -1] as const) {
         const dAcross = across - sign * railAcross;
@@ -797,7 +922,7 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
     // walls, full stop. The search still backtracks, but only on the
     // levers that keep that promise: lateral shift (below), tree felling
     // (`searchClear`), and — last of all — the level-crossing fallback.
-    const halfAcross = crossing.pathHalfWidth + BRIDGE_WALL_THICKNESS;
+    const halfAcross = bridgeRoadHalfFor(crossing) + BRIDGE_WALL_THICKNESS;
 
     const deckClears = (shift: number): boolean => {
       const ts = sampleTsFor(frame, crossing, shift, halfAcross);
@@ -858,7 +983,7 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
       existing &&
       deckClears(existing.shift) &&
       Math.min(provisionalReach(existing.shift, 1), provisionalReach(existing.shift, -1)) >=
-        WALKABLE_FLOOR + WALKABLE_MARGIN
+        MIN_RAMP_RUN
     ) {
       return existing;
     }
@@ -883,7 +1008,7 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
       // A path crosses this deck in either direction; a ramp missing on
       // one side is a sheer drop approached from that direction, not a
       // usable bridge with merely a worse approach.
-      if (Math.min(reachPos, reachNeg) >= WALKABLE_FLOOR + WALKABLE_MARGIN) {
+      if (Math.min(reachPos, reachNeg) >= MIN_RAMP_RUN) {
         const origin = frame.worldAt(0, 0, shift);
         const at = frame.pointAt(0);
         return {
@@ -896,10 +1021,17 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
           acrossZ: at.acrossZ,
           halfAcross,
           shift,
+          frame,
+          // Pass 1's own provisional reaches — the best answer available at
+          // the moment this candidate is accepted, and the same figures pass 2
+          // starts from. A sibling reading them models this parapet at the
+          // length this deck currently believes it will be.
+          rampRunPos: reachPos,
+          rampRunNeg: reachNeg,
         };
       }
       debugBridge?.(
-        `crossing railD=${crossing.railDistance.toFixed(1)} w=${halfAcross.toFixed(1)} shift=${shift.toFixed(1)}: reach +${reachPos.toFixed(1)}/-${reachNeg.toFixed(1)} < ${(WALKABLE_FLOOR + WALKABLE_MARGIN).toFixed(2)}`,
+        `crossing railD=${crossing.railDistance.toFixed(1)} w=${halfAcross.toFixed(1)} shift=${shift.toFixed(1)}: reach +${reachPos.toFixed(1)}/-${reachNeg.toFixed(1)} < ${MIN_RAMP_RUN.toFixed(2)}`,
       );
     }
     return null;
@@ -1050,7 +1182,7 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
 
     const rampRunPos = rampReach(1);
     const rampRunNeg = rampReach(-1);
-    const roadHalf = crossing.pathHalfWidth;
+    const roadHalf = bridgeRoadHalfFor(crossing);
     const walkHalf = walkHalfFor(crossing);
 
     return {
@@ -1086,7 +1218,7 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
  * fits.
  */
 function walkHalfFor(crossing: LevelCrossing): number {
-  return Math.max(crossing.pathHalfWidth - PLAYER_RADIUS, MIN_DECK_HALF_WIDTH - PLAYER_RADIUS);
+  return Math.max(bridgeRoadHalfFor(crossing) - PLAYER_RADIUS, MIN_DECK_HALF_WIDTH - PLAYER_RADIUS);
 }
 
 /** Capped by how close the *next* crossing is — two crossings closer
@@ -1117,7 +1249,7 @@ function idealRampRunFor(crossing: LevelCrossing, crossings: readonly LevelCross
   // bridge, all fell back to level crossings, until this floor rose to
   // match what accepting a candidate actually requires.
   const rampRunCap = Math.max(
-    WALKABLE_FLOOR + WALKABLE_MARGIN,
+    MIN_RAMP_RUN,
     nearestOtherCrossing / 2 - DECK_HALF_LENGTH - RAMP_CLEARANCE,
   );
   return Math.min(BRIDGE_RISE / BRIDGE_RAMP_GRADIENT, rampRunCap);

@@ -4,7 +4,8 @@ import { BRIDGE_RISE, FENCE_OFFSET } from './clearance';
 import {
   BRIDGE_RAMP_GRADIENT,
   DECK_HALF_LENGTH,
-  MAX_RAMP_GRADIENT,
+  MIN_BRIDGE_HALF_LENGTH,
+  MIN_RAMP_RUN,
 } from './bridgeFootprint';
 import { STATION_GAP } from './fence';
 import { GARDEN_PLAY_BOUNDARY } from '../boundary';
@@ -89,7 +90,7 @@ export interface CrossingSite {
  * acceptance bar leaves the late, real pass nothing to spend on the small
  * obstacles (a lamp base, a bush trunk) that legitimately arrive later.
  */
-export const SITE_RAMP_FLOOR = BRIDGE_RISE / MAX_RAMP_GRADIENT + 0.5 + 1.0;
+export const SITE_RAMP_FLOOR = MIN_RAMP_RUN + 1.0;
 
 /** The most ramp a site ever needs credit for — the shallow, ideal grade,
  * the same run the real pass starts from. */
@@ -371,6 +372,61 @@ function levelCandidateAt(railDistance: number): Candidate | null {
   };
 }
 
+/**
+ * **Would two bridges built on these sites occupy the same ground?**
+ *
+ * {@link SITE_SPACING} measures separation *along the loop*, which is a
+ * clutter rule and cannot answer this: the railway winds, so two crossings a
+ * long way apart around the loop can be a few metres apart in the park.
+ *
+ * Each site is treated as the oriented rectangle its bridge will really fill:
+ * {@link MIN_BRIDGE_HALF_LENGTH} along the crossing direction (deck plus the
+ * ramp every accepted bridge must achieve, asked of `bridgeFootprint.ts` rather
+ * than restated here) by its own proven `halfWidth` across. Overlap is the
+ * separating-axis test on the four face normals — exact for two rectangles, and
+ * it costs nothing at this scale.
+ *
+ * This is deliberately about *footprints*, not centres. Two bridges side by
+ * side, parallel and laterally offset, do not overlap and are perfectly fine; a
+ * plain centre-distance rule would have banned them.
+ *
+ * ## What it does NOT do, and this matters
+ *
+ * **It does not fix the seed 2 collision that motivated #392, and it cannot.**
+ * Its caller gates it on `candidate.bridge`, so it only ever compares two
+ * *proven bridge sites* — and seed 2 proves **zero** of those (canonical proves
+ * 4, seeds 5 and 11 three each, seed 18 one). All seven of seed 2's planned
+ * sites are level ones, and the two bridges that collided there were built
+ * opportunistically by `bridgeFootprint.ts`'s late `planReal` pass on crossings
+ * planned as *level* crossings. There was never a pair of bridge sites for this
+ * to reason about.
+ *
+ * **Measured, it fires zero times across the canonical seed and all four sweep
+ * seeds**, and bridge counts are identical with and without it. It is a guard
+ * on trust: correct by construction, and untested by any seed we build. #392
+ * carries the re-scoped question — why seed 2 proves no bridge sites at all,
+ * which is the defect that actually let two bridges collide.
+ */
+function footprintsOverlap(a: Candidate, b: Candidate): boolean {
+  const axes = [
+    [a.dirX, a.dirZ],
+    [-a.dirZ, a.dirX],
+    [b.dirX, b.dirZ],
+    [-b.dirZ, b.dirX],
+  ] as const;
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+  for (const [axX, axZ] of axes) {
+    // Each rectangle's own extent on this axis, and the gap between centres.
+    const extent = (c: Candidate): number =>
+      Math.abs((c.dirX * axX + c.dirZ * axZ) * MIN_BRIDGE_HALF_LENGTH) +
+      Math.abs((-c.dirZ * axX + c.dirX * axZ) * c.halfWidth);
+    // A single axis on which they are apart proves they do not overlap.
+    if (Math.abs(dx * axX + dz * axZ) >= extent(a) + extent(b)) return false;
+  }
+  return true;
+}
+
 function selectSpaced(candidates: readonly Candidate[]): CrossingSite[] {
   const route = TRAIN_PLAN.route;
   const scored = [...candidates].sort(
@@ -387,7 +443,23 @@ function selectSpaced(candidates: readonly Candidate[]): CrossingSite[] {
             route.length / 2,
         ) < SITE_SPACING,
     );
-    if (!tooClose) kept.push(candidate);
+    // Bridge sites only: two level crossings are paint on the ground and may
+    // sit as close as the loop rule allows.
+    const collides =
+      candidate.bridge && kept.some((other) => other.bridge && footprintsOverlap(candidate, other));
+    if (collides && !tooClose && (globalThis as { process?: { env?: Record<string, string> } }).process?.env?.['LGP_DEBUG_BRIDGE']) {
+      (globalThis as unknown as { process: { stdout: { write: (s: string) => void } } }).process.stdout.write(
+        `site: bridge candidate at railD=${candidate.railDistance.toFixed(1)} (${candidate.x.toFixed(1)}, ${candidate.z.toFixed(1)}) rejected -- footprint overlaps a kept bridge site\n`,
+      );
+    }
+    if (!tooClose && !collides) kept.push(candidate);
+  }
+  if ((globalThis as { process?: { env?: Record<string, string> } }).process?.env?.['LGP_DEBUG_BRIDGE']) {
+    for (const k of kept) {
+      (globalThis as unknown as { process: { stdout: { write: (s: string) => void } } }).process.stdout.write(
+        `site: kept ${k.bridge ? 'BRIDGE' : 'level '} railD=${k.railDistance.toFixed(1)} at (${k.x.toFixed(2)}, ${k.z.toFixed(2)}) dir=(${k.dirX.toFixed(2)}, ${k.dirZ.toFixed(2)}) halfW=${k.halfWidth.toFixed(2)}\n`,
+      );
+    }
   }
   kept.sort((a, b) => a.railDistance - b.railDistance);
   return kept.map(({ obliqueness: _obliqueness, ...site }) => site);

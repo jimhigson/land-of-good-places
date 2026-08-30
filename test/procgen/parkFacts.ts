@@ -15,7 +15,7 @@
  * suite owns the invariants about whether the park's scattered furniture is
  * *placed sanely*, and holds them across many seeds with no allowances at all.
  */
-import { Box3, Vector3 } from 'three';
+import { Box3, Mesh, Vector3 } from 'three';
 import { createKid } from '../../src/art/models/kid.ts';
 import { HAIR_STYLES } from '../../src/state/types.ts';
 import { createCatBus } from '../../src/world/entrance/catBus.ts';
@@ -412,6 +412,47 @@ export interface CameraTrackingFact {
   readonly standOff: number;
 }
 
+/**
+ * **Paving one bridge has lifted clear of the ground, measured against that
+ * bridge's own built masonry** (issue #349).
+ *
+ * Measured here rather than in an invariant for the ordinary reason: deciding
+ * whether a vertex was genuinely *lifted* needs `terrainHeight`, which reaches
+ * `parkManifest` through `boundary.ts` and so can only be imported
+ * dynamically, after the seed is fixed — an invariant is synchronous and a
+ * static import of it there is the 76-silent-skips trap.
+ *
+ * **Why "lifted clear of the ground" and not "inside the plan footprint".**
+ * `pavingHeightAt` pads its `covers()` test along the spine as well as across
+ * it, so it legitimately claims paving a metre or so past the end of the
+ * masonry at each ramp foot — where `heightAt` has already clamped the hump
+ * back down to the terrain, so the paving is lying on the ground exactly as it
+ * should. Judging every claimed vertex against the plan outline reports 1.27 m
+ * of "overhang" there and would have to be fudged to go green. The defect
+ * issue #349 is actually about is paving held up *in mid-air* with no stone
+ * under it, so that is what this measures: a vertex counts only once it stands
+ * clear of the ground beneath it.
+ */
+export interface BridgePavingFact {
+  /** The built bridge group's own name, `bridge-<railDistance>`. */
+  readonly name: string;
+  /** Drawn-path vertices this bridge lifts clear of the ground under them. */
+  readonly liftedClearOfGround: number;
+  /** How many of those have no masonry beneath them in plan. */
+  readonly unsupported: number;
+  /**
+   * How far the worst unsupported vertex lies outside this bridge's own
+   * masonry outline, in metres of plan distance. Zero on a healthy park.
+   */
+  readonly worstOverhang: number;
+  /** Where that vertex is, `[x, y, z]`. */
+  readonly worstAt: readonly [number, number, number];
+  /** How far it stands above the terrain beneath it, metres. */
+  readonly worstAboveGround: number;
+  /** Which drawn layer it belongs to — `path-surface` or `path-kerb`. */
+  readonly worstLayer: string;
+}
+
 export interface ParkFacts {
   readonly seed: number;
   readonly world: World;
@@ -543,6 +584,11 @@ export interface ParkFacts {
    * Dynamically imported with everything else here, after the seed is fixed.
    */
   readonly plannedBridgeSiteDistances: readonly number[];
+  /**
+   * One entry per built bridge: how far the paving it lifts hangs past its
+   * own masonry. See {@link BridgePavingFact}.
+   */
+  readonly bridgePaving: readonly BridgePavingFact[];
   /** The same, for the planner's rare deliberate level-crossing tier
    * (`LEVEL_CROSSING_SITES`) — so an invariant can tell "the planner chose a
    * level crossing here" from "nobody planned this crossing at all". */
@@ -2194,6 +2240,141 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     ),
   };
 
+  // See `BridgePavingFact`: paving each bridge lifts clear of the ground,
+  // against that bridge's own built masonry in plan (issue #349).
+  const bridgePaving: BridgePavingFact[] = [];
+  {
+    const bridgesGroup = world.train.group.getObjectByName('railway-bridges');
+    const layers: { name: string; mesh: Mesh }[] = [];
+    world.garden.group.traverse((object) => {
+      if (!(object instanceof Mesh)) return;
+      if (object.name === 'path-surface' || object.name === 'path-kerb') {
+        layers.push({ name: object.name, mesh: object });
+      }
+    });
+
+    if (bridgesGroup && layers.length > 0) {
+      bridgesGroup.updateMatrixWorld(true);
+
+      // The masonry outline, as flat triangles in the ground plane. The
+      // invisible `deck` marker mesh is skipped: it is a clearance probe for
+      // `railwayClearanceCoversTheTrainAndItsRiders` to measure the soffit
+      // with, not stone anything could rest on.
+      const corner = new Vector3();
+      const planOf = (bridgeGroup: import('three').Object3D): number[][] => {
+        const triangles: number[][] = [];
+        bridgeGroup.traverse((object) => {
+          if (!(object instanceof Mesh) || object.name === 'deck') return;
+          const position = object.geometry.getAttribute('position');
+          const index = object.geometry.getIndex();
+          const count = index ? index.count : position.count;
+          const planAt = (slot: number): [number, number] => {
+            const v = index ? index.getX(slot) : slot;
+            corner.set(position.getX(v), position.getY(v), position.getZ(v));
+            corner.applyMatrix4(object.matrixWorld);
+            return [corner.x, corner.z];
+          };
+          for (let i = 0; i + 2 < count; i += 3) {
+            const [ax, az] = planAt(i);
+            const [bx, bz] = planAt(i + 1);
+            const [cx, cz] = planAt(i + 2);
+            triangles.push([
+              ax, az, bx, bz, cx, cz,
+              Math.min(ax, bx, cx), Math.max(ax, bx, cx),
+              Math.min(az, bz, cz), Math.max(az, bz, cz),
+            ]);
+          }
+        });
+        return triangles;
+      };
+
+      const inside = (px: number, pz: number, t: number[]): boolean => {
+        const [ax, az, bx, bz, cx, cz] = t as [number, number, number, number, number, number];
+        const d1 = (px - bx) * (az - bz) - (ax - bx) * (pz - bz);
+        const d2 = (px - cx) * (bz - cz) - (bx - cx) * (pz - cz);
+        const d3 = (px - ax) * (cz - az) - (cx - ax) * (pz - az);
+        return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
+      };
+      const edge = (px: number, pz: number, x1: number, z1: number, x2: number, z2: number): number => {
+        const dx = x2 - x1;
+        const dz = z2 - z1;
+        const lenSq = dx * dx + dz * dz;
+        let t = lenSq > 0 ? ((px - x1) * dx + (pz - z1) * dz) / lenSq : 0;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        return Math.hypot(px - (x1 + t * dx), pz - (z1 + t * dz));
+      };
+      const outside = (px: number, pz: number, triangles: number[][]): number => {
+        for (const t of triangles) {
+          if (px >= t[6]! && px <= t[7]! && pz >= t[8]! && pz <= t[9]! && inside(px, pz, t)) return 0;
+        }
+        let best = Infinity;
+        for (const t of triangles) {
+          const dx = px < t[6]! ? t[6]! - px : px > t[7]! ? px - t[7]! : 0;
+          const dz = pz < t[8]! ? t[8]! - pz : pz > t[9]! ? pz - t[9]! : 0;
+          if (Math.hypot(dx, dz) >= best) continue;
+          const d = Math.min(
+            edge(px, pz, t[0]!, t[1]!, t[2]!, t[3]!),
+            edge(px, pz, t[2]!, t[3]!, t[4]!, t[5]!),
+            edge(px, pz, t[4]!, t[5]!, t[0]!, t[1]!),
+          );
+          if (d < best) best = d;
+        }
+        return best;
+      };
+
+      // A vertex counts as "lifted clear" once it stands this far above the
+      // ground under it. Well over the drape's own lift (`PATH_SURFACE_LIFT`
+      // is 0.055) so paving merely draped on the terrain never registers, and
+      // far under anything a child could fall off.
+      const CLEAR_OF_GROUND = 0.1;
+
+      const bridges = world.train.bridges;
+      const groups = bridgesGroup.children;
+      for (let i = 0; i < bridges.length; i += 1) {
+        const bridge = bridges[i]!;
+        const bridgeGroup = groups[i];
+        if (!bridgeGroup) continue;
+        const triangles = planOf(bridgeGroup);
+        let liftedClearOfGround = 0;
+        let unsupported = 0;
+        let worstOverhang = 0;
+        let worstAt: readonly [number, number, number] = [0, 0, 0];
+        let worstAboveGround = 0;
+        let worstLayer = '';
+        for (const { name, mesh } of layers) {
+          const position = mesh.geometry.getAttribute('position');
+          for (let v = 0; v < position.count; v += 1) {
+            const x = position.getX(v);
+            const z = position.getZ(v);
+            if (bridge.pavingHeightAt(x, z) === null) continue;
+            const y = position.getY(v);
+            const aboveGround = y - terrainHeight(x, z);
+            if (aboveGround <= CLEAR_OF_GROUND) continue;
+            liftedClearOfGround += 1;
+            const over = outside(x, z, triangles);
+            if (over <= 1e-6) continue;
+            unsupported += 1;
+            if (over > worstOverhang) {
+              worstOverhang = over;
+              worstAt = [x, y, z];
+              worstAboveGround = aboveGround;
+              worstLayer = name;
+            }
+          }
+        }
+        bridgePaving.push({
+          name: bridgeGroup.name,
+          liftedClearOfGround,
+          unsupported,
+          worstOverhang,
+          worstAt,
+          worstAboveGround,
+          worstLayer,
+        });
+      }
+    }
+  }
+
   // See `ParkFacts.cruiserRouteGroundClearance`'s own comment: how high the
   // built loop stands above the terrain under it, sampled every metre, so an
   // invariant can tell a genuinely-low stretch (the station boarding dip)
@@ -2230,6 +2411,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     lamps: world.lampPosts.positions.map((p) => [p.x, p.z] as const),
     bridgeReservations,
     plannedBridgeSiteDistances,
+    bridgePaving,
     plannedLevelSiteDistances,
     crossingSiteSnapTolerance: SITE_SNAP_TOLERANCE,
     plots,

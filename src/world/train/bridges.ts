@@ -20,6 +20,7 @@ import {
 import {
   BRIDGE_WALL_THICKNESS,
   DECK_HALF_LENGTH,
+  parapetReachFor,
   planBridgeFootprints,
   type BridgeFootprint,
   type RealWorldQuery,
@@ -538,8 +539,11 @@ interface OneBridge {
 
 function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): OneBridge {
   const { frame, shift, halfAcross, roadHalf, walkHalf, rampRunPos, rampRunNeg } = footprint;
-  const lengthPos = DECK_HALF_LENGTH + rampRunPos;
-  const lengthNeg = DECK_HALF_LENGTH + rampRunNeg;
+  // Asked of `bridgeFootprint.ts` rather than recomputed here: the
+  // cross-crossing guard-rail exclusion clamps to this exact figure, and a
+  // second copy of the formula is the bug #349 actually was.
+  const lengthPos = parapetReachFor(rampRunPos);
+  const lengthNeg = parapetReachFor(rampRunNeg);
 
   // --- the crown height ----------------------------------------------------
   // The worst (highest) ground sampled across the crown's own footprint —
@@ -778,6 +782,27 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   const pavingReachSq =
     (Math.max(lengthPos, lengthNeg) + roadHalf + PATH_KERB_OVERHANG + PATH_CARRIER_SLACK + 4) ** 2;
 
+  // **Where the stone really is, in plan** — the polygon the sweep drew, taken
+  // from `shell.planEdge` rather than re-derived from the frame. Built once per
+  // bridge; `pavingHeightAt` below asks it instead of asking `footprint.covers`
+  // what the analytic `across` says. Even-odd ray crossing over the ring points
+  // down one side and back up the other, which is exactly the outline of the
+  // quads that were emitted.
+  const edge = shell.planEdge;
+  const outline: [number, number][] = [
+    ...edge.map((r) => r.plus as [number, number]),
+    ...[...edge].reverse().map((r) => r.minus as [number, number]),
+  ];
+  const insideDrawnStone = (x: number, z: number): boolean => {
+    let inside = false;
+    for (let i = 0, j = outline.length - 1; i < outline.length; j = i, i += 1) {
+      const [xi, zi] = outline[i] as [number, number];
+      const [xj, zj] = outline[j] as [number, number];
+      if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
+    }
+    return inside;
+  };
+
   const platform: MovingPlatform = {
     surfaceY: crownY,
     covers: (x: number, z: number): boolean => {
@@ -810,8 +835,11 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
       // resampled spine, and this is asked once per vertex of the park's
       // entire path mesh at boot.
       if ((x - origin0.x) ** 2 + (z - origin0.z) ** 2 > pavingReachSq) return null;
-      if (!footprint.covers(x, z, roadHalf - walkHalf + PATH_KERB_OVERHANG + PATH_CARRIER_SLACK))
-        return null;
+      // The stone is the single authority on where carried paving ends. Asking
+      // the drawn outline rather than the frame's `across` is what stops lifted
+      // paving hanging past the masonry on a curve — see
+      // {@link ShellGeometry.planEdge}.
+      if (!insideDrawnStone(x, z)) return null;
       return heightAt(x, z);
     },
   };
@@ -822,6 +850,30 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
 interface ShellGeometry {
   readonly stone: BufferGeometry;
   readonly coping: BufferGeometry;
+  /**
+   * **The outer face of the masonry, in plan, as the sweep actually drew it** —
+   * one entry per ring, `[x, z]` on each side.
+   *
+   * The same medicine `parapetLine` below is for the coping, applied to the
+   * paving. `pavingHeightAt` used to decide where lifted paving stops by asking
+   * the *analytic* frame (`footprint.covers`, an `across` measured on a curved
+   * spine), while the stone is **drawn** as a polyline of straight chords
+   * between these points. On the outside of a curve a chord sits inside the arc
+   * it approximates, so a point the frame calls "inside the bridge" can be
+   * outside the triangles that were really drawn — and the error grows with
+   * ramp length, because a longer ramp accumulates more curve: measured
+   * **0.371 m** of paving hanging past the stone on a 22 m bridge against
+   * **0.513 m** on a 36.7 m one.
+   *
+   * That length-dependence is why the bug survived a whole PR's worth of
+   * measurement: it was all taken on the short geometry. One owner now — the
+   * paving is lifted exactly where this polygon says there is stone under it.
+   */
+  readonly planEdge: readonly {
+    readonly plus: readonly [number, number];
+    readonly minus: readonly [number, number];
+  }[];
+
   /**
    * **The parapet top line the shell actually drew**, one entry per ring:
    * `[side +1, side -1]` world heights at that `along`.
@@ -872,6 +924,7 @@ function buildShellGeometry(
   const uvs: number[] = [];
   const indices: number[] = [];
   const parapetLine: { along: number; top: [number, number]; surface: number }[] = [];
+  const planEdge: { plus: [number, number]; minus: [number, number] }[] = [];
   // The tunnel soffit's own triangles — kept apart from `indices` so they
   // land in one contiguous run at the end, ready for a second
   // `BufferGeometry` group carrying `archStoneTexture` (see the return
@@ -1193,6 +1246,7 @@ function buildShellGeometry(
       }
     }
     parapetLine.push({ along, top: [parapetTopPlus, parapetTopMinus], surface });
+    planEdge.push({ plus: [outerPlus.x, outerPlus.z], minus: [outerMinus.x, outerMinus.z] });
     previous = ring;
     previousAlong = along;
   }
@@ -1220,5 +1274,5 @@ function buildShellGeometry(
   coping.setIndex(copingIndices);
   coping.computeVertexNormals();
 
-  return { stone, coping, parapetLine };
+  return { stone, coping, parapetLine, planEdge };
 }

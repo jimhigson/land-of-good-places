@@ -5543,6 +5543,89 @@ const theDrawnPathRidesOverEveryBridge: Invariant = (facts) => {
 };
 
 /**
+ * **Paving a bridge holds up in mid-air has stone under it** (issue #349).
+ *
+ * Jim, playing `main` just after the entrance bridge landed: *"on entering the
+ * park and walking straight to the first bridge, there is some weird item
+ * clipping into the bridge"* — sandy, path-coloured geometry projecting out
+ * through the masonry below deck level, a flat wedge out of the near spandrel
+ * beside the arch.
+ *
+ * It was the drawn path itself. `bridges.ts` decides which path vertices a
+ * bridge lifts onto its hump, and `bridgeFootprint.ts` decides how far out the
+ * masonry is swept, and the two were independent sums off the same crossing:
+ * the lift reached `roadHalf + PATH_KERB_OVERHANG + PATH_CARRIER_SLACK` while
+ * the stone stopped at `roadHalf + BRIDGE_WALL_THICKNESS`, so up to 0.375 m of
+ * paving hung 4 m in the air past the parapet with nothing beneath it. The
+ * quad joining it back down to the un-lifted terrain vertex beside it is the
+ * wedge in the screenshot. CLAUDE.md's "two definitions of one thing, kept in
+ * step by hand", and neither of the two existing bridge-width invariants could
+ * see it: one measures where a *walker* can stand (inside the parapets, so it
+ * never looks outside them), the other that the paving rides the hump at the
+ * right *height* (which this paving did — that was the problem).
+ *
+ * So this asks the one question neither did: of the paving each bridge lifts
+ * clear of the ground, is any of it outside that bridge's own masonry in plan?
+ * Measured off the built park — the real drawn path meshes against the real
+ * swept shell triangles ({@link ParkFacts.bridgePaving}) — never against
+ * either module's own arithmetic, which is exactly what agreed with itself
+ * while disagreeing with the other.
+ *
+ * **Deliberately about paving held in the air, not paving past the outline.**
+ * `pavingHeightAt` pads along the spine as well as across it, so it claims
+ * paving a metre or so beyond the last of the masonry at each ramp foot —
+ * where the hump has already come back down to the terrain and the paving is
+ * simply lying on the ground, which is correct and invisible. Judging every
+ * claimed vertex against the plan outline reports 1.27 m of "overhang" there
+ * on the canonical seed and would have had to be loosened to go green; the
+ * defect is specifically paving with *daylight* under it.
+ *
+ * Proven red before green (2026-08-29): against the pre-fix geometry it fires
+ * on both canonical bridges — see the fix's own PR for the message.
+ */
+const bridgePavingIsCarriedByItsOwnMasonry: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const built = facts.world.train.bridges.length;
+  if (built === 0) return complaints;
+
+  if (facts.bridgePaving.length !== built) {
+    complaints.push(
+      `the park built ${built} bridge(s) but ${facts.bridgePaving.length} were measured for ` +
+        'paving overhang — the "railway-bridges" group no longer holds one child group per ' +
+        'built bridge, and this invariant is measuring the wrong stone',
+    );
+    return complaints;
+  }
+
+  // Without this the whole check passes vacuously on a park whose paving the
+  // bridges never claimed at all — the "check that cannot fail" trap, and the
+  // state a `pavingHeightAt` that returned `null` everywhere would leave it in.
+  const totalLifted = facts.bridgePaving.reduce((sum, b) => sum + b.liftedClearOfGround, 0);
+  if (totalLifted === 0) {
+    complaints.push(
+      `${built} bridge(s) are built and not one vertex of the drawn paving is lifted clear of ` +
+        'the ground by any of them — no bridge is carrying its path, and the overhang check ' +
+        'below has nothing to measure',
+    );
+    return complaints;
+  }
+
+  for (const bridge of facts.bridgePaving) {
+    if (bridge.unsupported === 0) continue;
+    complaints.push(
+      `${bridge.name} lifts ${bridge.unsupported} of its ${bridge.liftedClearOfGround} carried ` +
+        `paving vertices past its own masonry: the worst (${bridge.worstLayer}) sits ` +
+        `${bridge.worstOverhang.toFixed(3)} m outside the stone in plan at ` +
+        `(${fmt([bridge.worstAt[0], bridge.worstAt[2]])}), ` +
+        `${bridge.worstAboveGround.toFixed(2)} m above the ground under it — that paving is ` +
+        'hanging in mid-air past the parapet, and it is what clips through the masonry',
+    );
+  }
+
+  return complaints;
+};
+
+/**
  * **The railway is crossed on purpose, and mostly on bridges.**
  *
  * Jim, 23 August 2026: the park is designed around the bridge constraints —
@@ -5557,14 +5640,53 @@ const theDrawnPathRidesOverEveryBridge: Invariant = (facts) => {
  *    — exactly what stranded 6 waypoints on the canonical seed before the
  *    crossing plan existed (a spur crossed at railDistance 330.1, 3.6 m
  *    from a platform).
- * 2. **Real bridges are the rule, level crossings the exception**
- *    (Decision 8): at least as many crossings carry a real, built bridge
- *    as fall back to a level crossing, and — whenever the park has any
- *    crossing at all — at least one real bridge exists. The second clause
- *    is what keeps this whole invariant honest: with zero bridges anywhere
- *    every per-bridge check above passes vacuously (the "check that cannot
- *    fail" trap), which is precisely the state the three required seeds
- *    were in (0/7, 0/7, 0/5) before the plan-first rework.
+ * 2. **At least one real bridge exists** whenever the park has any crossing
+ *    at all. This is what keeps the whole invariant honest: with zero
+ *    bridges anywhere every per-bridge check above passes vacuously (the
+ *    "check that cannot fail" trap), which is precisely the state the three
+ *    required seeds were in (0/7, 0/7, 0/5) before the plan-first rework.
+ *
+ * **What this deliberately no longer asserts, and why** (#349/#392). It used
+ * to demand `built >= fallbacks.length` — "real bridges are the rule". That
+ * counts the *plan's ambition*, not the park, and CLAUDE.md's rule for this
+ * file is to measure the park that was built, never the rules that built it.
+ * Two things make it indefensible:
+ *
+ * - **Its green state on seed 2 was only ever reachable through a defect.**
+ *   That seed's two bridges "fitted" solely because the footprint search
+ *   modelled a neighbour's parapet as 6.4 m long when the built thing is
+ *   ~22 m, so one bridge was built straight through the other's wall. Fixing
+ *   that (#349) made the park honest and this clause went red. Measured:
+ *   `check:park` on seed 2 reports **33 stranded waypoints on `main` and 3
+ *   with the fix** — the "passing" arrangement was stranding thirty
+ *   waypoints, and the three that remain are on `main` too.
+ * - **It asserts a promise the planner never made.** Seed 2 proves *zero*
+ *   bridge sites (canonical proves 4, seeds 5/11 three each, seed 18 one);
+ *   all seven of its planned sites are level ones. Demanding bridges there
+ *   demands something `crossingPlanSolve.ts` explicitly declined to promise.
+ *
+ * This is the same correction {@link everyProvenBridgeSiteKeepsItsBridge}
+ * already made to its own clause 1 on seed 18 (#374), for the same reason and
+ * in the same words: it stopped "asserting a promise the router never made".
+ *
+ * The promise that *is* made is still enforced, and by the invariant that
+ * owns it: every proven bridge site keeps its bridge
+ * ({@link everyProvenBridgeSiteKeepsItsBridge}). And the #349 defect itself
+ * is caught — red on `main`, green here — by
+ * {@link everyBridgeIsWalkableAndReachable}, which found it in the first
+ * place. Restating either here would be a second copy of a check, which is
+ * the shape of bug this very ticket was about.
+ *
+ * **A real gap this leaves, deliberately unfilled** (see the issue): nothing
+ * asks whether a *level* crossing is walkable. Every per-bridge check in this
+ * file iterates `train.bridges` and skips it. A first attempt at closing that
+ * here — `standableNear` at the crossing point — went red on five seeds and
+ * was wrong twice over: a bridge crossing's point is up on the deck, not on
+ * the ground under the arch, and a level crossing's point sits on the track
+ * centre-line, which `check:park` separately *requires* to be unstandable
+ * (`0/266 centre-line points standable`). Asking it properly means deciding
+ * what "walkable across a level crossing" means in height and offset, and a
+ * half-thought assertion is worse than a missing one.
  *
  * Thresholds come from the built world (`facts.world.train`) and the
  * fence's own `STATION_GAP` (a leaf-module constant), never from
@@ -5572,12 +5694,11 @@ const theDrawnPathRidesOverEveryBridge: Invariant = (facts) => {
  * (it solves against `PARK_LAYOUT` at module load) and re-measure the
  * rules instead of the park.
  */
-const crossingsArePlannedAndMostlyBridged: Invariant = (facts) => {
+const crossingsArePlannedAndWalkable: Invariant = (facts) => {
   const complaints: string[] = [];
   const train = facts.world.train;
   const route = train.route;
   const crossings = train.crossings;
-  const fallbacks = train.fallbackCrossings;
 
   for (const crossing of crossings) {
     for (const station of train.stations) {
@@ -5596,20 +5717,11 @@ const crossingsArePlannedAndMostlyBridged: Invariant = (facts) => {
     }
   }
 
-  if (crossings.length > 0) {
-    const built = train.bridges.length;
-    if (built === 0) {
-      complaints.push(
-        `the park has ${crossings.length} railway crossing(s) and not one real bridge — ` +
-          'every per-bridge check above is passing vacuously',
-      );
-    } else if (built < fallbacks.length) {
-      complaints.push(
-        `only ${built} of ${crossings.length} railway crossings carry a real bridge ` +
-          `(${fallbacks.length} fell back to level crossings) — Decision 8 wants bridges ` +
-          'the rule and level crossings the rare exception',
-      );
-    }
+  if (crossings.length > 0 && train.bridges.length === 0) {
+    complaints.push(
+      `the park has ${crossings.length} railway crossing(s) and not one real bridge — ` +
+        'every per-bridge check above is passing vacuously',
+    );
   }
 
   return complaints;
@@ -5634,9 +5746,11 @@ const crossingsArePlannedAndMostlyBridged: Invariant = (facts) => {
  * one of these `CROSSING_SITES`, square to the track, so the drawn network
  * only ever meets the railway where a bridge belongs."* Every leg in the park
  * kept that promise except the one every player walks, and nothing could see
- * it: `crossingsArePlannedAndMostlyBridged` counts bridges against fallbacks
- * across the whole park, and two bridges against one fallback passes it
- * comfortably — which is exactly the park that produced the bug report. What
+ * it: `crossingsArePlannedAndWalkable` asks nothing about *which* crossing a
+ * route uses (and, until #349, the clause it did have counted bridges against
+ * fallbacks across the whole park, which two bridges against one fallback
+ * passed comfortably) — which is exactly the park that produced the bug
+ * report. What
  * reaches a player is not the ratio. It is which crossing is on *her* route,
  * and there is only one route every player takes.
  *
@@ -5811,9 +5925,8 @@ const theWalkInFromTheGateCrossesWhereItWasPlannedTo: Invariant = (facts) => {
  * **A crossing standing on ground the planner proved bridgeable really
  * carries a bridge — and at least one crossing does.** Issue #339.
  *
- * `crossingsArePlannedAndMostlyBridged` above counts bridges against
- * fallbacks, which catches a park that built none at all. It does not,
- * despite its name, ever consult the plan — so it cannot see the failure
+ * `crossingsArePlannedAndWalkable` above catches a park that built no bridge
+ * at all. It does not ever consult the plan — so it cannot see the failure
  * that actually reaches a player: **a crossing quietly sliding off a site
  * `crossingPlanSolve.ts` had already proved a bridge fits on.** That module
  * exists precisely to make that impossible ahead of time; this asks whether
@@ -8056,8 +8169,12 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     theDrawnPathRidesOverEveryBridge,
   ],
   [
+    "every bridge's carried paving has its own masonry under it",
+    bridgePavingIsCarriedByItsOwnMasonry,
+  ],
+  [
     'railway crossings are planned — station-clear, and mostly real bridges',
-    crossingsArePlannedAndMostlyBridged,
+    crossingsArePlannedAndWalkable,
   ],
   [
     'every crossing on a site the planner proved bridgeable still carries its bridge',
