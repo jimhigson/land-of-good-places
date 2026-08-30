@@ -964,8 +964,14 @@ const MARKET_NORTH_Z = -INTERIOR_HALF_Z + MARKET_BEAM_INSET + MARKET_STALL / 2;
  * South aisle: clear of the shaft band, measured off the band's own south
  * edge rather than typed, so a shaft moving pushes the market rather than
  * silently standing in it.
+ *
+ * The 1.6 m rather than 1.0 is the **stairs' tap target**, not taste: the
+ * stairwell's pick radius is 4.2 m — deliberately wide, because a stairwell is
+ * the one thing a child should hit without aiming — and at 1.0 m the south
+ * aisle's first stall came 0.68 m inside it where `TAP_FINGER_METRES` needs
+ * 1.13. `check:tap-spacing` caught it; the extra 0.6 m clears it by 0.05 m.
  */
-const MARKET_SOUTH_Z = ESCALATOR_WELL.maxZ + 1 + MARKET_STALL / 2;
+const MARKET_SOUTH_Z = ESCALATOR_WELL.maxZ + 1.6 + MARKET_STALL / 2;
 
 /** Centre of the stall in column `col`, row `row`, of aisle `aisle`. */
 export function marketCell(aisle: 'north' | 'south', row: number, col: number): [number, number] {
