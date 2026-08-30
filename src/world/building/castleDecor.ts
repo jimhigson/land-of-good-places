@@ -31,7 +31,7 @@ import { softMaterial } from './parts';
 import { BEAM_UNDERSIDE, BEAM_WIDTH, CASTLE_CEILING_CLEAR } from './castleFabric';
 import { CASTLE_HEARTH, castleTorchAnchors, type WallAnchor } from './castleLighting';
 import { DECK_ROUNDEL, keepOutsFor } from './dressing';
-import { buildRoofMeadow } from './roofMeadow';
+import { buildBurrows, buildRoofMeadow } from './roofMeadow';
 import { dressGreatHall, isTapestryBay } from './castleFurniture';
 import {
   HALL_DECK,
@@ -920,11 +920,15 @@ function dressRoofGarden(deck: number, floor: Group): void {
 
   group.add(troughs, shrubs, heads);
 
-  // The long grass the wild animals live in (#406). Added last so it is drawn
-  // over the paving rather than under it, and inside this group so
-  // `check:castle` measures it along with everything else on the roof.
+  // The long grass the wild animals live in, and the holes they come out of
+  // (#406). Added last so they are drawn over the paving rather than under it,
+  // and inside this group so `check:castle` measures them along with
+  // everything else on the roof — which is how the first meadow was caught
+  // growing through the helter-skelter shaft.
   const meadow = buildRoofMeadow(deck);
   if (meadow) group.add(meadow);
+  const burrows = buildBurrows(deck);
+  if (burrows) group.add(burrows);
 
   floor.add(group);
 }

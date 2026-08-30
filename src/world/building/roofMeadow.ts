@@ -10,7 +10,7 @@ import {
   Vector3,
 } from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { INTERIOR_HALF_X, INTERIOR_HALF_Z } from '../../core/constants';
+import { INTERIOR_HALF_X, INTERIOR_HALF_Z, PLAYER_RADIUS } from '../../core/constants';
 import { PALETTE } from '../../core/palette';
 import { Rng } from '../../core/mathUtils';
 import { softMaterial } from './parts';
@@ -119,6 +119,19 @@ export interface RoofMeadow {
   readonly cells: readonly MeadowCell[];
   /** True if this world-XZ point is inside the long grass. */
   contains(x: number, z: number): boolean;
+  /**
+   * How much room this point has before it reaches anything the garden must
+   * keep off — a keep-out, a bench, the parapet — in metres, negative inside.
+   *
+   * Exposed because **the grass and the burrows need the same measurement at
+   * two different thresholds**. A tuft reaches about half a metre and the
+   * meadow's own {@link KEEP_OUT_MARGIN} covers it; a burrow mound is
+   * {@link BURROW_RADIUS} across and `check:castle` measures a prop's whole
+   * footprint against `radius + PLAYER_RADIUS`, which the meadow's margin does
+   * not cover. Handing out the number rather than a second copy of the rule is
+   * what stops those two drifting.
+   */
+  clearanceAt(x: number, z: number): number;
 }
 
 const meadowCache = new Map<number, RoofMeadow>();
@@ -221,6 +234,7 @@ function findMeadow(deck: number): RoofMeadow {
 
   return {
     cells,
+    clearanceAt: clearance,
     // Asked of a creature's live position, which is never on a grid point, so
     // it must be the *shape* test and not a cell lookup — but it must also
     // agree with `cells`, which is why both go through the same `contains`
@@ -278,16 +292,75 @@ export function roofBurrows(deck: number): readonly Burrow[] {
   const cached = burrowCache.get(deck);
   if (cached) return cached;
 
-  const cells = roofMeadow(deck).cells;
+  const meadow = roofMeadow(deck);
+  const cells = meadow.cells;
   const chosen: Burrow[] = [];
-  // Walked in the meadow's own deterministic cell order, so the burrows are in
-  // the same place on every reload — ART_DIRECTION §7's seeded-randomness rule
-  // applies to placement as much as to geometry.
-  for (const cell of cells) {
-    if (chosen.length >= BURROW_COUNT) break;
-    if (chosen.some((b) => Math.hypot(cell.x - b.x, cell.z - b.z) < BURROW_SPACING)) continue;
-    if (insideAnyShaft(cell.x, cell.z)) continue;
-    chosen.push({ x: cell.x, z: cell.z });
+  /**
+   * A burrow needs more room than the grass around it does.
+   *
+   * `check:castle` measures a **prop's whole footprint** against
+   * `keep-out radius + PLAYER_RADIUS`, and a mound is
+   * {@link BURROW_RADIUS} across where a grass tuft reaches about half that.
+   * The meadow's own {@link KEEP_OUT_MARGIN} is sized for the tuft, so the
+   * first burrow run put a mound 8.18 m from the pavilion's 8 m keep-out when
+   * 8.62 m was wanted — caught by `check:castle`, which is the third time this
+   * check has caught this feature.
+   *
+   * Asking {@link RoofMeadow.clearanceAt} rather than re-deriving the rule is
+   * the point: one measurement, two thresholds, and no second copy of the
+   * keep-out list to fall out of step.
+   */
+  const needed = BURROW_RADIUS + PLAYER_RADIUS;
+  const eligible = cells.filter(
+    (cell) => meadow.clearanceAt(cell.x, cell.z) >= needed && !insideAnyShaft(cell.x, cell.z),
+  );
+
+  /**
+   * **Farthest-point selection, not first-fit.**
+   *
+   * Walking the meadow's cells in their own order and taking the first that
+   * clears its neighbours is the obvious loop, and it put all five burrows in
+   * one corner: cells are generated `x` ascending, so the greedy pass fills the
+   * westernmost patch and never reaches the others. Measured — the five landed
+   * in x ∈ [-9.6, 1.2], on a plate 60 m across.
+   *
+   * That matters more than tidiness. Deck 4 is the floor with no shops, no
+   * shafts and no hall, and #407's engineer still calls it *"a flat lilac
+   * plain"*; five holes huddled in one quarter leave three quarters of it
+   * exactly as empty as before. Spreading them is most of what makes the deck
+   * feel inhabited, and it is also what makes a creature's walk from one
+   * burrow to another cross the roof rather than shuffle across a corner.
+   *
+   * So: start at the roomiest cell, then repeatedly take the eligible cell
+   * **farthest from everything chosen so far**. Deterministic, no seed needed,
+   * and it naturally lands one burrow per patch before doubling up.
+   */
+  let first: { x: number; z: number } | null = null;
+  let bestRoom = -Infinity;
+  for (const cell of eligible) {
+    const room = meadow.clearanceAt(cell.x, cell.z);
+    if (room > bestRoom) {
+      bestRoom = room;
+      first = cell;
+    }
+  }
+  if (first) chosen.push({ x: first.x, z: first.z });
+
+  while (chosen.length < BURROW_COUNT) {
+    let pick: { x: number; z: number } | null = null;
+    let bestDistance = -Infinity;
+    for (const cell of eligible) {
+      let nearest = Infinity;
+      for (const b of chosen) nearest = Math.min(nearest, Math.hypot(cell.x - b.x, cell.z - b.z));
+      if (nearest > bestDistance) {
+        bestDistance = nearest;
+        pick = cell;
+      }
+    }
+    // Nothing left that is far enough from what is already down. Fewer, better
+    // spaced burrows beat two holes in the same patch of grass.
+    if (!pick || bestDistance < BURROW_SPACING) break;
+    chosen.push({ x: pick.x, z: pick.z });
   }
 
   burrowCache.set(deck, chosen);
