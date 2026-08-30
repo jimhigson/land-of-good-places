@@ -29,19 +29,26 @@ separately.
 4. Hotel corridor statue row spacing fitted for any N.
 5. `check:assets` proves every pet is the same height as every other pet.
 
-## The thing a reviewer must not miss
+## The save migration (settled, after two reversals)
 
-**Existing saves get a ghost RiPika, not a clean loss.** Measured:
+Jim ruled three ways in sequence: no migration → discard the save entirely →
+**migrate on load**. The final answer is migrate, and it is implemented.
 
-- `save.ts readInventoryItem()` does **not** validate ids against the
-  catalogue — it rebuilds from the save file, so `toy.ripika` survives.
-- `Parade.ts:440` `if (!catalogue) continue` — so she is silently skipped.
-- A returning save never re-runs character creation, so no replacement.
+- `SAVE_VERSION` 1 → 2, first entry in the `MIGRATIONS` table.
+  **A version stamp already existed** (`v`, checked by `migrate()`), so
+  detection uses it rather than sniffing for `toy.ripika`.
+- **Both registers**: `game.inventory` *and* `game.collection`. The Cute-o-dex
+  is a separate map keyed by catalogue id, whose entries carry the id again
+  inside themselves. Inventory-only would leave her filed under Toys with
+  `pet.ripika` undiscovered.
+- **The uid is deliberately not rewritten** — `carriedUid` and friends point
+  at it.
+- `egg.prize.ripika` is a different entry and must stay untouched; a test
+  pins that so this cannot become a substring rename.
 
-She keeps a RiPika in her Cute-o-dex that can never appear. Jim ruled "no
-migration"; this outcome is stated at the top of the PR body so the ruling is
-made against what actually happens. **If it is reversed, the fix is one entry
-in `save.ts`'s existing `MIGRATIONS` table.**
+Proved against a real v1 blob in `test/store/save-migration-ripika.test.ts`
+(7 tests, CI runs it). Mutations: inventory-only → 1 failed (`the old key must
+be gone`); no step at all → 7 failed.
 
 ## Findings worth carrying
 
@@ -71,8 +78,8 @@ goes stale — re-prove if the pets change):
 ## Status
 
 - [x] Core change, consumers, rename, docs, new check
-- [x] tsc 0, tsc:test 0, build 0 (47 steps), test:procgen 0 (458 tests)
+- [x] Save migration v1 -> v2, both registers, 7 tests, 2 mutations red
+- [x] tsc 0, tsc:test 0, build 0 (47 steps), test:procgen 0 (465 tests)
 - [x] PR #409 open
 - [ ] CI green on head commit
 - [ ] Review + QA
-- [ ] Jim's call on the ghost-save outcome
