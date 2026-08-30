@@ -1129,17 +1129,16 @@ export class Game {
    *
    * Every one of these is something the building genuinely needs and genuinely
    * does not own: the camera has to be *snapped* rather than followed when a
-   * child changes space, the clock has to run fast while the stairs carry them,
-   * and the iris has to be closed over both.
+   * child changes space, and the iris has to be closed over it.
+   *
+   * It used to carry `walkTo`, `setTimeScale` and `setWhoosh` as well, for the
+   * stair ride's 3.5x time-scaled walk with speed-lines. The stairs are gone
+   * (#377) and so are all three — `Game` keeps `setTimeScale` for Decision 2's
+   * queue skip, which owns it now.
    */
   private interiorControls(): InteriorControls {
     return {
-      walkTo: (x, y, z, handlers) => this.tapNavigator.navigateTo(x, y, z, handlers),
       cancelWalk: () => this.tapNavigator.cancel(),
-      setTimeScale: (scale) => {
-        this.timeScale = scale;
-      },
-      setWhoosh: (on) => this.transitions.setWhoosh(on),
       iris: (midpoint) => this.transitions.irisWipe(midpoint),
       flash: () => this.transitions.flash(),
       snapCamera: () => this.camera.snapTo(this.player.position),
