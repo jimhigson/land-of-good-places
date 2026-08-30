@@ -159,14 +159,50 @@ export function isTapestryBay(deck: number, x: number, z: number): boolean {
   );
 }
 
+/** The dais the throne stands on: broad enough to step onto from any side. */
+const DAIS_HALF_X = 1.6;
+const DAIS_HALF_Z = 1.2;
+
+/** Half the feast table's own length. Authored size; it does not scale. */
+const TABLE_HALF_LENGTH = 3;
+/**
+ * Clear floor between the dais and the table — the approach itself.
+ *
+ * A child's collision diameter is 1.24 m, so this is "two can pass abreast",
+ * which is the least a hall's approach can be and still be one.
+ */
+const FEAST_APPROACH = 1.5;
+
 /**
  * How far down the hall the feast table's centre sits from the throne.
  *
  * The table is 6 m long and the throne's dais is 2.4 m deep, so this leaves a
  * clear approach between the two — the space a child walks up to reach the
  * throne, which is the whole point of putting a throne at the end of a hall.
+ *
+ * ## Shortened from 10 m for #403, and this one is a judgement call
+ *
+ * Halving the plate's *area* left the ground floor 31.11 m deep instead of 44,
+ * and the shafts that cross its middle did not shrink: the helter-skelter's
+ * tube now reaches within 7.93 m of the north wall. At 10 m the feast's
+ * benches stood at 15.75 m from that wall — past every shaft's north edge —
+ * and `feastIsClearOfShafts` rejected **all three** bays, so `dressGreatHall`
+ * returned early and built no hall at all. `check:castle`'s contract
+ * assertion is what said so, out loud, rather than a hall quietly vanishing.
+ *
+ * Nothing here was made smaller to fix it: the throne, the dais, the table and
+ * the benches are all the sizes the Artist authored. What closed is the *gap*
+ * between the dais and the table, which is the same thing the shop run did and
+ * is the density Jim asked for. 5.7 m is the shortest that still keeps a real
+ * approach: the dais reaches 1.2 m from the throne, the table reaches 3 m back
+ * towards it, leaving **1.5 m of clear floor** to walk up — a child is 1.24 m
+ * across, so two can still pass. Any less and the table is on the dais.
+ *
+ * If #377 removes the helter-skelter, the constraint that forced this goes
+ * with it and the hall can lengthen again. Do not lower this further to fit
+ * something new in; move the something instead.
  */
-const TABLE_FROM_THRONE = 10;
+const TABLE_FROM_THRONE = DAIS_HALF_Z + TABLE_HALF_LENGTH + FEAST_APPROACH;
 
 /** How far the benches sit from the table's own axis. */
 const BENCH_OFFSET = 1.85;
@@ -182,9 +218,6 @@ const BENCH_HALF_WIDTH = 0.3;
 const BENCH_HALF_LENGTH = 1.4;
 const BENCH_ALONG = 1.55;
 
-/** The dais the throne stands on: broad enough to step onto from any side. */
-const DAIS_HALF_X = 1.6;
-const DAIS_HALF_Z = 1.2;
 
 /**
  * Where the throne stands, measured back from the end wall.
