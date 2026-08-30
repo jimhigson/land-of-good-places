@@ -20,7 +20,7 @@ import { createBiscuit } from '../../../art/models/biscuit';
 import { createBalloon, type BalloonHandle } from '../../../art/models/balloons';
 import { createHat, hatDisplayScale, HAT_KINDS, HAT_STAND_SPACING } from '../../../art/models/hats';
 import { createJetpack } from '../../../art/models/jetpack';
-import { createPet, PET_KINDS, type PetHandle } from '../../../art/models/pets';
+import { createPet, type PetHandle } from '../../../art/models/pets';
 import {
   createCandyFloss,
   createIceCream,
@@ -29,7 +29,7 @@ import {
   createSurpriseEgg,
 } from '../../../art/models/shopItems';
 import { COUNTER_TOP_Y, SHELF_Z } from './kiosk';
-import type { ShopId } from './catalogue';
+import { petKindsForShop, type ShopId } from './catalogue';
 
 /**
  * What each of the seven shops actually *sells*, standing on its shelves.
@@ -408,9 +408,14 @@ function stickerPetShop(): Fitout {
   bedding.position.set(centreX, COUNTER_TOP_Y + 0.02, centreZ);
   detail.add(bedding);
 
-  const pets: PetHandle[] = PET_KINDS.map((kind, index) => {
+  // **What this shop sells, not what `pets.ts` can build.** Those were the same
+  // list until RiPika became a `PetKind` while still being sold as `toy.ripika`
+  // in the toy shop — at which point iterating `PET_KINDS` here put a fifth pet
+  // in a pen sized for four, advertising stock this counter does not carry.
+  const stocked = petKindsForShop('stickerPet');
+  const pets: PetHandle[] = stocked.map((kind, index) => {
     const pet = createPet(kind);
-    const angle = (index / PET_KINDS.length) * TAU + 0.6;
+    const angle = (index / stocked.length) * TAU + 0.6;
     place(
       pet.root,
       centreX + Math.cos(angle) * 0.26,

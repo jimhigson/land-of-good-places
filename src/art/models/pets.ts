@@ -16,6 +16,7 @@ import { sharedFacePatch } from '../style/sharedFace';
 import { paintFace, type Expression, type FacePaintOptions } from '../style/faces';
 import { applyWalk, blob, type CreatureHandle } from '../style/asset';
 import { createPuffNotes, createSongScheduler, playPuffMelody } from '../effects/puffSong';
+import { createRipika } from './ripika';
 
 /**
  * The little pets in the sticker & pet shop's pen — and, once the parade exists
@@ -30,14 +31,22 @@ import { createPuffNotes, createSongScheduler, playPuffMelody } from '../effects
  * with the same code it drives RiPika with. There is no follow or AI logic in
  * here — assets never contain it (ART_DIRECTION.md §7).
  */
-export type PetKind = 'bunny' | 'kitten' | 'mouse' | 'puff';
+export type PetKind = 'bunny' | 'kitten' | 'mouse' | 'puff' | 'ripika';
 
-export const PET_KINDS: readonly PetKind[] = ['bunny', 'kitten', 'mouse', 'puff'];
+export const PET_KINDS: readonly PetKind[] = ['bunny', 'kitten', 'mouse', 'puff', 'ripika'];
 
-/** The recipe-driven kinds — the singing puff is different enough in body plan
- *  (one ball, no ears, no tail) that it gets its own builder below instead of
- *  a fifth column in this table. */
-type RecipeKind = Exclude<PetKind, 'puff'>;
+/**
+ * The recipe-driven kinds. Two of the five are built elsewhere and are excluded
+ * here rather than given a column in {@link RECIPES}:
+ *
+ * - the **singing puff** is a different body plan (one ball, no ears, no tail),
+ *   and has its own builder further down this file;
+ * - **RiPika** is a whole authored character with limbs, a tail and a
+ *   colourway, and is built by `createRipika()` in `ripika.ts` — the same one
+ *   function the toy shop, the parade, the fountain statue and the ferris
+ *   wheel already call.
+ */
+type RecipeKind = Exclude<PetKind, 'puff' | 'ripika'>;
 
 interface PetRecipe {
   readonly fur: number;
@@ -164,10 +173,42 @@ function sizeToStandard(sizer: Group, body: Group): void {
   sizer.position.y = -bottom * scale;
 }
 
+/**
+ * The name RiPika answers to. One string, here, because she is now reachable
+ * two ways — `createPet('ripika')` and the catalogue's `toy.ripika` — and two
+ * hand-typed display names is exactly how the two drift apart.
+ */
+export const RIPIKA_DISPLAY_NAME = 'RiPika';
+
 export function createPet(kind: PetKind): PetHandle {
   if (kind === 'puff') {
     const puff = createPuffCreature({ variant: 'pet' });
     return { ...puff, kind: 'puff', displayName: PUFF_DISPLAY_NAME };
+  }
+
+  /**
+   * **RiPika is a pet, and there is one RiPika.**
+   *
+   * She was always an ownable companion — the character creator's starting-pet
+   * list is literally `[shopItem('toy.ripika'), …the pet shop's pets]`, and she
+   * walks in the parade like any of them. What she was *not* was a
+   * {@link PetKind}, so every system that asked "what pets are there?" got four
+   * answers and quietly left out the one every player actually starts with.
+   *
+   * Delegating rather than re-describing her is the whole point: no second
+   * body, no second colourway, no second set of proportions to keep in step.
+   * The pet in the grass, the toy on the shop shelf, the statue in the fountain
+   * and the passenger in the ferris wheel are all `createRipika()`.
+   *
+   * **She needs no {@link sizeToStandard}.** She is not exempt from it — she is
+   * the reference the other four were normalised *to*, and already builds to
+   * exactly {@link PET_RENDER_HEIGHT}. That is a fact about her geometry rather
+   * than a promise, so `check:assets` asserts it for every kind in
+   * {@link PET_KINDS} rather than leaving it to this comment.
+   */
+  if (kind === 'ripika') {
+    const ripika = createRipika();
+    return { ...ripika, kind: 'ripika', displayName: RIPIKA_DISPLAY_NAME };
   }
 
   const recipe = RECIPES[kind];

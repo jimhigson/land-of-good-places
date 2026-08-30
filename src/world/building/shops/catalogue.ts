@@ -6,7 +6,7 @@ import { createBiscuit } from '../../../art/models/biscuit';
 import { createBalloon } from '../../../art/models/balloons';
 import { createHat } from '../../../art/models/hats';
 import { createJetpack } from '../../../art/models/jetpack';
-import { createPet, PUFF_DISPLAY_NAME } from '../../../art/models/pets';
+import { createPet, PET_KINDS, PUFF_DISPLAY_NAME, type PetKind } from '../../../art/models/pets';
 import {
   createCandyFloss,
   createIceCream,
@@ -596,6 +596,30 @@ export const SHOP_ITEMS: readonly ShopItem[] = [
 
 export function itemsForShop(shopId: ShopId): ShopItem[] {
   return SHOP_ITEMS.filter((item) => item.shopId === shopId);
+}
+
+/**
+ * The pet species a given shop actually **sells**.
+ *
+ * `PET_KINDS` answers a different question — *which pet bodies can `pets.ts`
+ * build?* — and the two stopped being the same list the moment RiPika became a
+ * {@link PetKind} while still being sold as `toy.ripika` in the toy shop. A
+ * display that iterates `PET_KINDS` is therefore advertising stock its shop
+ * does not carry, which is what the sticker & pet shop's pen did the first time
+ * this was tried.
+ *
+ * Reading the species off the id's tail is the same move
+ * `Hotel.paradePetKind()` makes, and for the same reason: **the species lives
+ * in the catalogue `id`, not in `kind`** (`kind` is the category — `'pet'`,
+ * `'toy'`). So a pet the shop gains tomorrow shows up in its own pen the day it
+ * is added, with no second list to keep in step.
+ */
+export function petKindsForShop(shopId: ShopId): PetKind[] {
+  const known: readonly string[] = PET_KINDS;
+  return itemsForShop(shopId)
+    .filter((item) => item.kind === 'pet')
+    .map((item) => item.id.slice(item.id.lastIndexOf('.') + 1))
+    .filter((species): species is PetKind => known.includes(species));
 }
 
 /**
