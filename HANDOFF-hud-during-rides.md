@@ -84,3 +84,22 @@ than rolling a second document of its own. `check:slide-rider`,
 - [x] Browser QA proved red too: the `Game.tick` line commented out → 6/6 FAIL, `menuButton: visible` mid-ride
 - [x] `tsc` 0, `npm run build` 0, `npm run test:procgen` 0 (458 passed)
 - [x] Browser: 6/6 pass, before/during/after shots in `/tmp/hud-404-final`
+
+## Rebased onto `main` @ `5ba4a28b` (30 Aug)
+
+`main` moved under this branch — #402 (pnpm), #398 (`ParkMap.ts`), #401 (bubble
+removed), #397. One conflict, `package.json`'s `build` line, resolved by
+**rebuilding from `main`'s step list** — its 47 `pnpm run` steps taken verbatim
+and `check:hud-during-rides` spliced in after `check:park-map` — then parsed
+back: **48** steps, none undefined, no duplicates, no `npm run` left anywhere in
+`scripts`. `rerere` recorded the resolution *after* it was built, not before.
+
+`pnpm-lock.yaml` taken from `main` untouched (`git diff origin/main -- pnpm-lock.yaml`
+is empty). `node_modules` deleted, `pnpm install --frozen-lockfile` (pnpm 12.1.0).
+
+Re-verified after the rebase, not just re-gated: `ParkMap` still mounts its pill
+with `container.querySelector('.hud-menu-items')` (`ParkMap.ts:392`) post-#398,
+so the drawer still carries the map away with it. Browser run **6/6 pass** again,
+shots in `/tmp/hud-404-rebased`. Mutation still red (3 FAILs).
+
+CI: all four checks green, `mergeStateStatus: CLEAN`. Ready for the Overseer.
