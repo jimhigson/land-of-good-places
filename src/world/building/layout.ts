@@ -925,6 +925,15 @@ export const MARKET_AISLE_WIDTH = MARKET_ROW_SEPARATION - MARKET_STALL;
  * that said so, on the built room. `CASTLE_HEARTH` cannot be imported here
  * (`castleLighting.ts` imports this file), so the figure is written out with
  * this note rather than derived.
+ *
+ * **Re-measured after rebasing onto the bubble's removal (#377).** The castle
+ * this was first tuned against had five shafts; it now has four. Walked back
+ * down: 1.4 is green, 1.2 fails with one complaint. So the binding figure is
+ * now 1.4 and **1.8 carries 0.4 m of deliberate slack** — kept rather than
+ * tightened, because the 0.4 m buys nothing except standing a market stall's
+ * queue closer to an open fire, and because the crowd of children the queue
+ * has to clear is placed by the NPC system rather than fixed here. Do not
+ * read 1.8 as the measured minimum; the measured minimum is 1.4.
  */
 const MARKET_BEAM_INSET = 1.8;
 
