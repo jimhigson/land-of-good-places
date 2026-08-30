@@ -135,6 +135,23 @@ and the game is live in about 40 seconds.
   getting it wrong means no deploys at all; worth its own PR and its own
   review.
 
+  **The coupling this creates, which nobody would guess from reading either
+  file.** `workflow_run` matches a workflow by its **`name:`**, not by its
+  filename. So once `deploy.yml` is triggered this way, two things in
+  `procgen-invariants.yml` become load-bearing for *publishing*:
+
+  1. its `name: Procgen invariants` — rename it and no Deploy run is ever
+     created again;
+  2. its unfiltered `push: branches: [main]` trigger — add a `paths:` filter
+     and any commit outside those paths silently stops publishing.
+
+  Either change looks completely harmless in review, and neither goes red: no
+  Deploy run is *created*, so there is no failure to notice — publishing just
+  quietly stops while every check stays green. Both files carry a comment
+  saying so. The real backstop is `live-version.yml`'s half-hourly cron, which
+  asks the live site what it is actually serving rather than whether a run
+  succeeded, and opens an issue when it falls behind.
+
   **Why this is worth doing properly rather than raising the cap again.**
   "Build and checks" measured **15m52s against its own 30-minute cap** the same
   evening. It is on the same treadmill: the chain grew from 46 steps to 47
