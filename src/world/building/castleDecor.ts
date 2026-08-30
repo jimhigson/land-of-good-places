@@ -33,6 +33,7 @@ import { CASTLE_HEARTH, castleTorchAnchors, type WallAnchor } from './castleLigh
 import { DECK_ROUNDEL, keepOutsFor } from './dressing';
 import { dressGreatHall, isTapestryBay } from './castleFurniture';
 import {
+  HALL_DECK,
   insideInterior,
   INTERIOR_DOOR_MAX_X,
   INTERIOR_DOOR_MIN_X,
@@ -100,7 +101,13 @@ export function dressCastle(deck: number, floor: Group): void {
   const clutter = cornerClutter(deck, rng);
   if (clutter) group.add(clutter);
 
-  if (deck === 0) {
+  // **The hall's own fabric, on the hall's own floor.** This was `deck === 0`,
+  // beside the market, and `castleFurniture.ts` pinned the great hall to deck 0
+  // for exactly that reason: a throne on a different storey from the only
+  // fireplace in the castle reads as two half-rooms rather than one whole one.
+  // Both moved together when the floors split (#380), which is what the note
+  // over `CASTLE_GREAT_HALL_DECK` promised would happen.
+  if (deck === HALL_DECK) {
     group.add(coatOfArms());
     group.add(portcullis());
     group.add(hearthside());
@@ -523,7 +530,9 @@ function mouseHole(deck: number, anchors: readonly WallAnchor[]): Group | null {
   // The mouse lives on the ground floor's quietest wall: the one furthest from
   // the door. Picked from the anchor list so it is always on a real wall.
   const spot = anchors.find((a) => a.out.z === 1 && a.x < -8);
-  if (!spot || deck !== 0) return null;
+  // The mouse lives in the great hall, with the fireplace — a mouse hole in a
+  // shopping mall is a different joke.
+  if (!spot || deck !== HALL_DECK) return null;
 
   const group = new Group();
   group.name = `castle-mousehole-${deck}`;

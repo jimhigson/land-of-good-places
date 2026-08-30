@@ -1,3 +1,4 @@
+import { HALL_DECK } from './layout';
 import { BoxGeometry, Group, Mesh, type Object3D } from 'three';
 import { PALETTE } from '../../art/style/bridge';
 import { addOutline, solid } from '../../art/style/materials';
@@ -33,17 +34,19 @@ import { CASTLE_HEARTH, castleTorchAnchors, type WallAnchor } from './castleLigh
  * ## Where the hall is, and why it is one constant
  *
  * Issue #380 gives the castle three floors with jobs — ground is the mall,
- * **middle is the great hall**, roof is a garden — but that split has not landed
- * and the building still has five storeys. So the hall goes on the deck that
- * already has a hall's *fabric* on it: `castleDecor.ts` puts the hearth, the
- * coat of arms and the portcullis behind `if (deck === 0)`, and a throne on a
- * different storey from the only fireplace in the castle would read as two
- * half-rooms rather than one whole one.
+ * **middle is the great hall**, roof is a garden. **That split has now landed**
+ * (#377/#380), so the hall has moved off the ground floor and onto the middle
+ * one, which is a floor of its own with nothing else on it.
  *
- * {@link CASTLE_GREAT_HALL_DECK} is therefore a single constant, and moving the
- * hall when #380 lands is changing it. That is the same one-line promise
- * `castleDecor.ts` makes about its own `deck === 0` block, deliberately, so the
- * two move together rather than one being found later on the wrong floor.
+ * It was on deck 0 because that was the deck that already had a hall's
+ * *fabric*: `castleDecor.ts` put the hearth, the coat of arms and the
+ * portcullis behind `if (deck === 0)`, and a throne on a different storey from
+ * the only fireplace in the castle would have read as two half-rooms rather
+ * than one whole one. The note here promised that moving the hall would be
+ * changing {@link CASTLE_GREAT_HALL_DECK}, and that `castleDecor.ts`'s own
+ * block would move with it so the two could not be separated. **Both happened,
+ * and it was one line each** — which is the whole argument for having written
+ * the constant down rather than typing `0` in four places.
  *
  * ## The layout is derived from the wall, not typed against it
  *
@@ -84,7 +87,7 @@ import { CASTLE_HEARTH, castleTorchAnchors, type WallAnchor } from './castleLigh
  * line that moves. It is deliberately the same value as `castleDecor.ts`'s hall
  * block so the throne and the fireplace cannot end up on different floors.
  */
-export const CASTLE_GREAT_HALL_DECK = 0;
+export const CASTLE_GREAT_HALL_DECK = HALL_DECK;
 
 /** Everything this file adds to a storey, so the check can find it. */
 export function castleFurnitureGroupName(deck: number): string {
