@@ -68,15 +68,15 @@ gh secret set CLOUDFLARE_API_TOKEN --repo jimhigson/land-of-good-places
 
 ```sh
 pnpm run build
-pnpm exec wrangler login                       # once, opens a browser
-pnpm exec wrangler deploy                      # uses wrangler.jsonc
+pnpm dlx wrangler login                       # once, opens a browser
+pnpm dlx wrangler deploy                      # uses wrangler.jsonc
 ```
 
 Or with a token instead of a browser login — handy for scripts and agents:
 
 ```sh
 pnpm run build
-CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=… pnpm exec wrangler deploy
+CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=… pnpm dlx wrangler deploy
 ```
 
 To re-run a deploy without pushing anything:
@@ -89,5 +89,5 @@ With no Cloudflare credentials at all you can still put a build online, on a
 throwaway preview account that prints a claim URL:
 
 ```sh
-pnpm exec wrangler deploy dist --temporary --name land-of-good-places
+pnpm dlx wrangler deploy dist --temporary --name land-of-good-places
 ```

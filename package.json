@@ -95,6 +95,13 @@
     "check:cat-bus-suspension": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-cat-bus-suspension.mts",
     "measure:kid-landmarks": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-kid-landmarks.mts"
   },
+  "pnpm": {
+    "//": "cloudflare/wrangler-action installs wrangler itself at deploy time (as it did under npm), which pulls esbuild and workerd. pnpm 10+ blocks postinstall scripts unless named here, and wrangler does not run without them — deploy.yml only runs on push to main, so an unlisted one fails *after* merge with the site silently stale.",
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "workerd"
+    ]
+  },
   "dependencies": {
     "three": "^0.185.1",
     "workbox-window": "^7.4.1"

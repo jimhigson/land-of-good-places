@@ -30,8 +30,11 @@ pnpm install --frozen-lockfile
 
 **This project is on pnpm** (pinned by `packageManager` in `package.json` —
 do not run `npm`, which would write a `package-lock.json` nobody wants). Use
-`pnpm run <script>` and `pnpm exec <tool>` where you would have typed
-`npm run` and `npx`.
+`pnpm run <script>` where you would have typed `npm run`. For `npx`, the
+replacement depends on whether the tool is a dependency: `pnpm exec <tool>`
+runs one that **is** installed (`vite`, `tsc`, `playwright-core`), and
+`pnpm dlx <tool>` fetches one that is **not** (`wrangler`). `npx` did both,
+so it never made you choose; `pnpm exec` on an undeclared tool just fails.
 
 **Do not symlink another worktree's `node_modules`.** That trick is written
 down in several older handoffs, and it made sense when a fresh worktree meant
