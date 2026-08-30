@@ -46,6 +46,47 @@ hardlinked from one content-addressable store at
 of symlinks rather than another full copy, and `pnpm install` in a fresh
 worktree takes seconds. Just run the install.
 
+### Just type `pnpm`. It picks its own version.
+
+**Do not hunt for a "correct" pnpm binary and do not hard-code a path.** Any
+pnpm 10 or newer reads `packageManager` from `package.json` and *re-executes
+itself as the pinned version*, downloading it if need be
+(`manage-package-manager-versions`, on by default since pnpm 10). That is
+per-project and per-directory, so this repo's `pnpm@12.1.0` and some other
+repo's `pnpm@10.x` both come out right from the same shell. It is also the
+mechanism the pnpm maintainers offer **in place of corepack**, which matters
+here because **corepack was removed from Node.js in v25** and Jim is on 25.6.1
+— `corepack: not found` is expected, not a fault, and installing it standalone
+would be walking backwards.
+
+The version you *invoke* is therefore near enough irrelevant; only the version
+that ends up running matters. Check the latter, never the former:
+
+```
+pnpm exec node -e "console.log(process.env.npm_config_user_agent)"
+```
+
+`pnpm --version` is a lie for this purpose — it is a fast path that prints the
+launcher's own version without ever consulting the pin.
+
+**The broken shim, and how to recognise it.** Two agents lost time to this on
+30 Aug. pnpm 12 ships as a native binary that a postinstall script writes over
+a placeholder file; a pnpm launcher too old to run that build step downloads
+pnpm 12 and leaves the placeholder in place. Exec'ing it feeds English prose to
+`/bin/sh`:
+
+```
+.../Library/pnpm/store/v11/links/@/pnpm/12.1.0/<hash>/.../pnpm: line 4:
+  syntax error near unexpected token `)'
+```
+
+That is not a corrupt store and not a repo problem — it means **the first
+`pnpm` on your `PATH` is too old**. Fix it by upgrading that launcher
+(`npm install -g pnpm@latest`), not by reaching past it to another binary.
+`/opt/homebrew/bin/pnpm` is a workaround, not the answer, and it is **not**
+12.1.0 — it is 11.20.0 that self-switches to 12.1.0, which is exactly what
+yours should be doing too.
+
 ## Who does what
 
 Five roles. You are told which one you are; if you were not told, you are an

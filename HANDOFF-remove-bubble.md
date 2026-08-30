@@ -69,10 +69,18 @@ which is empty.
 
 Two things a replacement will otherwise lose an hour to:
 
-- **`pnpm` on this machine is ambiguous.** `which -a pnpm` gives two. The
+- ~~**`pnpm` on this machine is ambiguous.** `which -a pnpm` gives two. The
   first on `PATH` (the fnm shim) is a **broken stub** that dies with a shell
   syntax error out of pnpm's own store. Use **`/opt/homebrew/bin/pnpm`**,
-  which is 12.1.0 and matches `packageManager`.
+  which is 12.1.0 and matches `packageManager`.~~ **Corrected 30 Aug —
+  `/opt/homebrew/bin/pnpm` is 11.20.0, not 12.1.0.** It only *looked* like
+  12.1.0 because pnpm 10+ self-switches to the pinned version before running;
+  the version checked was existence, not identity. The stub was the
+  fnm-installed pnpm **11.5.0**, too old to build pnpm 12's native binary,
+  so it left a placeholder text file where the binary should be. Fixed at
+  source by upgrading it (`npm install -g pnpm@latest` → 11.24.0). Plain
+  `pnpm` is now correct; do not hard-code a path. See CLAUDE.md,
+  "Just type `pnpm`. It picks its own version."
 - `node_modules` was stale npm; deleted and reinstalled with
   `pnpm install --frozen-lockfile`. It left the lockfile untouched, as it must.
 
