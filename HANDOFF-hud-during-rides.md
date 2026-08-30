@@ -66,11 +66,21 @@ expression:
 `scripts/check-hud-during-rides.mts`, wired into the `build` chain as
 `check:hud-during-rides`. Proven red by mutation — transcript in the PR.
 
-## Status
+`scripts/qa-hud-during-rides.mjs` (`npm run qa:hud-during-rides <url> <outdir>`)
+is the browser half — the wiring the in-process check says out loud it cannot
+see. Boards all three named rides at phone and desktop widths.
 
-- [x] Seam identified
-- [ ] Implementation
-- [ ] Check + red mutation
-- [ ] Gates
-- [ ] Browser verification
-- [ ] PR
+`scripts/headless-dom.mjs` gained element listeners, a one-class
+`querySelector` and `contains`, so the check presses the real button rather
+than rolling a second document of its own. `check:slide-rider`,
+`check:bus-journey` and `check:ride-camera` all still exit 0.
+
+## Status — done, PR open
+
+- [x] Seam identified (`Player.beginRide` → `Player.riding`)
+- [x] Implementation (`core/attraction.ts`, `Hud.setMenuAvailable`, `Game.tick`)
+- [x] `check:hud-during-rides`, in the build chain (48 steps, parsed not grepped)
+- [x] Proved red twice: setter no-op → 3 FAILs; hide the button only → the map-pill FAIL alone
+- [x] Browser QA proved red too: the `Game.tick` line commented out → 6/6 FAIL, `menuButton: visible` mid-ride
+- [x] `tsc` 0, `npm run build` 0, `npm run test:procgen` 0 (458 passed)
+- [x] Browser: 6/6 pass, before/during/after shots in `/tmp/hud-404-final`
