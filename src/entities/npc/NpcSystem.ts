@@ -279,7 +279,7 @@ const ELERI: PinnedKidSpec = {
   outfit: PALETTE.outfit,
   shoe: ART.heartPink,
   hat: 'ripikaHat',
-  petItemId: 'toy.ripika',
+  petItemId: 'pet.ripika',
   // No eye override: the crowd's own default variant (0) already bakes
   // `ART.kidEye`, a warm violet — exactly what nobody asked her to have but
   // everyone else in the park already wears by default.

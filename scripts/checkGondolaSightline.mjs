@@ -47,7 +47,7 @@ const RIDERS = [
   { id: 'pet.kitten', top: 1.46, width: 0.814, depth: 1.061 },
   { id: 'pet.mouse', top: 1.46, width: 0.866, depth: 1.01 },
   { id: 'pet.puff', top: 1.46, width: 1.201, depth: 1.264 },
-  { id: 'toy.ripika', top: 1.48, width: 1.206, depth: 0.86 },
+  { id: 'pet.ripika', top: 1.48, width: 1.206, depth: 0.86 },
   { id: 'toy.biscuit', top: 1.16, width: 0.984, depth: 0.892 },
   { id: 'toy.star', top: 0.37, width: 0.378, depth: 0.312 },
   // A balloon's origin is the bottom of its string, so it is tied to the

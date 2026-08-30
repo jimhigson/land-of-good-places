@@ -111,15 +111,33 @@ const ICE_SCOOPS = {
 
 export const SHOP_ITEMS: readonly ShopItem[] = [
   // ------------------------------------------------------------------- toys
+  /**
+   * **RiPika, and she is a pet.**
+   *
+   * She was `toy.ripika`, `kind: 'toy'`, `category: 'toy'` — while being the
+   * companion every player starts with and the first entry in the character
+   * creator's *starting pet* list. Jim ruled on 30 August 2026 that the id
+   * should say what she is.
+   *
+   * `shopId` stays `'toy'`: she is a pet, but she is still bought at the toy
+   * shop, and moving stock between shops is a different change nobody asked
+   * for. `petKindsForShop` reads the *species* off the id, so this entry does
+   * not put her in the sticker & pet shop's pen.
+   *
+   * **This loses her for every existing save, deliberately and with no
+   * migration** — Jim's explicit choice over the migrating alternative. See the
+   * PR body: a save written before this carries an item whose id is
+   * `toy.ripika`, and nothing in the catalogue answers to that any more.
+   */
   {
-    id: 'toy.ripika',
+    id: 'pet.ripika',
     shopId: 'toy',
     displayName: 'RiPika',
     blurb: 'The electric yellow mouse!',
     icon: '⚡',
     price: 40,
-    kind: 'toy',
-    category: 'toy',
+    kind: 'pet',
+    category: 'pet',
     carryable: true,
     model: () => createRipika(),
     heldScale: 0.3,
