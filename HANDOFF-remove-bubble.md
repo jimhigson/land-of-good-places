@@ -33,3 +33,39 @@ charm* called "bubble" (`src/art/models/backpacks.ts`, `state/types.ts`,
 `BUILDING_SHAFTS`, which `DECK_HOLES` spreads. Removing it makes a 2.1 m
 circle at local (-1.5, 0) **solid floor on decks 1-4** rather than an open
 well, and takes the deck 1-4 guard rail with it. No hole is left behind.
+
+## Verified (30 Aug 2026)
+
+Measured on the **built tree**, not the diff — headless Chrome on a dev
+server, `/castle?deck=N&at=-1.5,0`:
+
+- `floating-bubble` named objects in the scene graph: **0**. The only
+  `bubble` names left are 25 NPC `speech-bubble` sprites.
+- `shaft-guard-rail` groups: **4** (trampoline decks 1-2, helter decks 1-2).
+  It was 8: `addCircularGuard(..., [1,2,3,4], BUBBLE_*)` built the other four.
+- `WalkSurfaces.sample` at world (598.5, 600) on all five decks returns
+  exactly that deck's height (0.728 / 4.328 / 7.928 / 11.528 / 15.128) —
+  solid floor, no fall-through, on every storey.
+- Interact zones: `lift-0` … `lift-4` all present at those five heights; no
+  `bubble` zone. **Every floor is still reachable by the lift**; nothing is
+  stranded.
+- Screenshot standing on the old bubble spot, deck 2: plain flagstone. No
+  hole, no orphaned rail. It *is* a bare patch of floor now — worth telling
+  Jim, it may want dressing.
+
+Exit codes, all **0**: `npx tsc --noEmit`, `npm run build` (unpiped),
+`npm run test:procgen` (14 files, 458 tests), `check:castle`, `check:park`,
+`check:park-boot`, `check:deck-fallthrough`, `check:park-map`,
+`check:hop-clearance`, `check:tap-spacing`, `check:nav-routes`.
+
+## Doc mentions
+
+18 found across the docs. **12 changed** (GAME_DESIGN 4, ARCH-DECISIONS 5 +
+a new correction 5, ARCHITECTURE 1, ARCH-REVIEW 2, ASSET_MANIFEST 1).
+**Left alone deliberately:** the `bubble` *backpack charm*
+(GAME_DESIGN.md:269, ASSET_MANIFEST row 22), the NPC *speech* bubble
+(GAME_DESIGN.md:970), and the purely historical July prose in
+ARCHITECTURE-DECISIONS (the §6 S2 plan line, the "one uniform pitch" cost
+argument, the sources-read file list, §8's family question as originally
+asked) — a decision log records what was decided then, and correction 5
+now says what changed.
