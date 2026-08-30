@@ -1,5 +1,6 @@
 import {
   BufferGeometry,
+  CircleGeometry,
   CylinderGeometry,
   Group,
   InstancedMesh,
@@ -154,13 +155,7 @@ function findMeadow(deck: number): RoofMeadow {
     // roof and `check:castle` said so, which is the check doing exactly the
     // job it was written for. A region test rather than a distance, because a
     // shaft is a rectangle or a circle and there is no radius to subtract.
-    for (const shaft of BUILDING_SHAFTS) {
-      for (const dx of SHAFT_PROBE) {
-        for (const dz of SHAFT_PROBE) {
-          if (regionContains(shaft.region, x + dx, z + dz)) return -1;
-        }
-      }
-    }
+    if (insideAnyShaft(x, z)) return -1;
     let best = Math.min(
       INTERIOR_HALF_X - PARAPET_INSET - Math.abs(x),
       INTERIOR_HALF_Z - PARAPET_INSET - Math.abs(z),
@@ -232,6 +227,136 @@ function findMeadow(deck: number): RoofMeadow {
     // and the same `clearance`.
     contains: (x, z) => clearance(x, z) > 0 && contains(x, z),
   };
+}
+
+// ------------------------------------------------------------------- burrows
+
+/**
+ * How many burrows the long grass has.
+ *
+ * Five, against a live population of four (see `WildPets.ts`): there must
+ * always be at least one hole that is *not* the one a creature came out of,
+ * because the whole shape of the thing is "pops out of one, dives into a
+ * different one". Four burrows and four creatures could deadlock into every
+ * hole being spoken for.
+ */
+const BURROW_COUNT = 5;
+
+/** How far apart two burrows must be. Far enough that a creature crossing
+ *  between them is a *journey* a child can watch and cut off, rather than a
+ *  hop. Also stops two holes reading as one wide patch of bare earth. */
+const BURROW_SPACING = 6;
+
+/** The mound's outer radius — what a creature aims at, and what the grass and
+ *  the tap target are sized from. */
+export const BURROW_RADIUS = 0.85;
+
+export interface Burrow {
+  readonly x: number;
+  readonly z: number;
+}
+
+const burrowCache = new Map<number, readonly Burrow[]>();
+
+/**
+ * Where the burrows are — derived from the meadow, never typed.
+ *
+ * Same discipline as the meadow itself: these come out of {@link roofMeadow}'s
+ * own cells, so a burrow is always *in* the long grass by construction rather
+ * than by a coordinate somebody checked once. When #407 shrinks the roof and
+ * drops a market into it, the meadow moves and the burrows move with it.
+ *
+ * **Deliberately re-tested against `BUILDING_SHAFTS` here**, even though
+ * `roofMeadow` already excludes them. A burrow is a hole a creature walks
+ * *into*, so it is the one piece of this feature where being inside a shaft
+ * would be a creature vanishing into the helter-skelter rather than a tuft of
+ * grass clipping a wall — and this is the third fault of exactly that shape in
+ * two days (the great-hall feast table, #401's bubble, my own first meadow).
+ * The cost is a few dozen point tests at construction.
+ */
+export function roofBurrows(deck: number): readonly Burrow[] {
+  const cached = burrowCache.get(deck);
+  if (cached) return cached;
+
+  const cells = roofMeadow(deck).cells;
+  const chosen: Burrow[] = [];
+  // Walked in the meadow's own deterministic cell order, so the burrows are in
+  // the same place on every reload — ART_DIRECTION §7's seeded-randomness rule
+  // applies to placement as much as to geometry.
+  for (const cell of cells) {
+    if (chosen.length >= BURROW_COUNT) break;
+    if (chosen.some((b) => Math.hypot(cell.x - b.x, cell.z - b.z) < BURROW_SPACING)) continue;
+    if (insideAnyShaft(cell.x, cell.z)) continue;
+    chosen.push({ x: cell.x, z: cell.z });
+  }
+
+  burrowCache.set(deck, chosen);
+  return chosen;
+}
+
+/** True if this point (or its immediate surroundings) is in one of the
+ *  building's vertical shafts. Shared by the meadow and the burrows. */
+function insideAnyShaft(x: number, z: number): boolean {
+  for (const shaft of BUILDING_SHAFTS) {
+    for (const dx of SHAFT_PROBE) {
+      for (const dz of SHAFT_PROBE) {
+        if (regionContains(shaft.region, x + dx, z + dz)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Draws the burrows: a ring of turned earth with a dark mouth in it.
+ *
+ * Two instanced meshes for however many holes there are. The mouth is a flat
+ * disc rather than a modelled tunnel — at this camera you never see into it,
+ * and a creature is hidden by the grass long before it reaches the hole.
+ */
+export function buildBurrows(deck: number): Group | null {
+  const burrows = roofBurrows(deck);
+  if (burrows.length === 0) return null;
+
+  const group = new Group();
+  group.name = `castle-roof-burrows-${deck}`;
+
+  const mounds = new InstancedMesh(
+    // Wider at the bottom than the top: a heap of earth, not a plant pot.
+    new CylinderGeometry(BURROW_RADIUS * 0.72, BURROW_RADIUS, 0.24, 12),
+    softMaterial(PALETTE.barkDark, 0.85),
+    burrows.length,
+  );
+  mounds.name = `castle-roof-burrow-mounds-${deck}`;
+  mounds.castShadow = false;
+  mounds.receiveShadow = true;
+
+  const mouthGeometry = new CircleGeometry(BURROW_RADIUS * 0.52, 14);
+  mouthGeometry.rotateX(-Math.PI / 2);
+  const mouths = new InstancedMesh(mouthGeometry, softMaterial(PALETTE.ink, 0.9), burrows.length);
+  mouths.name = `castle-roof-burrow-mouths-${deck}`;
+  mouths.castShadow = false;
+  mouths.receiveShadow = false;
+
+  const matrix = new Matrix4();
+  const flat = new Quaternion();
+  const position = new Vector3();
+  const unit = new Vector3(1, 1, 1);
+  burrows.forEach((burrow, index) => {
+    position.set(burrow.x, 0.12, burrow.z);
+    matrix.compose(position, flat, unit);
+    mounds.setMatrixAt(index, matrix);
+    // Just proud of the mound's flat top (0.24), so it reads as a hole in the
+    // earth rather than z-fighting with it.
+    position.set(burrow.x, 0.245, burrow.z);
+    matrix.compose(position, flat, unit);
+    mouths.setMatrixAt(index, matrix);
+  });
+  mounds.instanceMatrix.needsUpdate = true;
+  mouths.instanceMatrix.needsUpdate = true;
+
+  group.add(mounds, mouths);
+  return group;
 }
 
 // ------------------------------------------------------------------ geometry

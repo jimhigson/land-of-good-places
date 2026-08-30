@@ -1,7 +1,7 @@
 import { PALETTE } from '../../../core/palette';
 import { Rng } from '../../../core/mathUtils';
 import type { AssetHandle } from '../../../art/style/asset';
-import { createRipika } from '../../../art/models/ripika';
+import { createRipika, WILD_RIPIKA_PALETTE } from '../../../art/models/ripika';
 import { createBiscuit } from '../../../art/models/biscuit';
 import { createBalloon } from '../../../art/models/balloons';
 import { createHat } from '../../../art/models/hats';
@@ -83,7 +83,7 @@ export interface ShopItem {
    * `Record<ShopId, …>` tables in `fitouts.ts`/`Shops.ts` never have to know
    * about a shop that doesn't physically exist.
    */
-  readonly shopId: ShopId | 'spookyHouse' | 'keychainStall';
+  readonly shopId: ShopId | 'spookyHouse' | 'keychainStall' | 'roofGarden';
   readonly displayName: string;
   /** One cheerful line under the name in the purchase panel. */
   readonly blurb: string;
@@ -542,6 +542,40 @@ export const SHOP_ITEMS: readonly ShopItem[] = [
     carryable: true,
     model: () => createPet('puff'),
     heldScale: 0.45,
+    rare: false,
+  },
+
+  /**
+   * **The wild RiPika, caught in the roof garden's long grass** (issue #406).
+   *
+   * Not for sale anywhere — `shopId: 'roofGarden'` is not a real shop unit, the
+   * same trick `candy.spookyHouse` uses for the one sweet you can only find.
+   * She exists in the catalogue because **the pet she catches must be the pet
+   * she owns**: the parade, the Cute-o-dex, the hotel bed and the ferris wheel
+   * all take a catalogue id, so a caught animal with no entry would be a
+   * creature the rest of the game could not talk about.
+   *
+   * A separate entry from `pet.ripika` rather than a flag on it, because they
+   * are genuinely two different-looking animals a child can own at once — and
+   * `model` proves they are not two different *bodies*: it is the same
+   * `createRipika()`, handed {@link WILD_RIPIKA_PALETTE}.
+   *
+   * `displayName` is plain "RiPika" and not "Wild RiPika" on purpose: the
+   * announcement reads *"a wild {displayName} appears!"*, and the other way
+   * round it says "a wild Wild RiPika appears!".
+   */
+  {
+    id: 'pet.ripikaWild',
+    shopId: 'roofGarden',
+    displayName: 'RiPika',
+    blurb: 'A mossy green one, from the long grass!',
+    icon: '🌿',
+    price: 0,
+    kind: 'pet',
+    category: 'pet',
+    carryable: true,
+    model: () => createRipika({ palette: WILD_RIPIKA_PALETTE }),
+    heldScale: 0.3,
     rare: false,
   },
 
