@@ -1,141 +1,87 @@
 # HANDOFF — wild pets on the roof garden (issue #406)
 
 Branch `feat/wild-pets-roof-garden`, worktree `.claude/worktrees/wild-pets`.
-Dev server port **5406** (`vite --port 5406 --strictPort`), kill by PID.
+**Stacked on `feat/ripika-is-a-pet` (PR #409)** — that one must merge first.
+Dev server port **5406**, killed by PID when done.
 
-## Two environment traps, both paid for
+## Environment
 
-1. ~~**`pnpm` on PATH is the wrong one.** `which pnpm` resolves to an fnm shim
-   (v11.5.0) which tries to self-install the pinned 12.1.0 and hands you a
-   broken bin: `syntax error near unexpected token ')'` from a shell script
-   that is actually an error message. **Use `/opt/homebrew/bin/pnpm`** — it
-   spawns 12.1.0 correctly ("Done in 457ms using pnpm v12.1.0").~~
+Just type `pnpm`; it resolves per project. `pnpm --version` cannot tell you
+which version runs — check `npm_config_user_agent`. Build chain is **47**
+steps, parsed not grepped; `test:procgen` is **not** in it, run it separately.
 
-   **CORRECTED, 30 Aug — just type `pnpm`. Do not hard-code the Homebrew
-   path; that advice was mine and it is now wrong.**
+## What is built
 
-   The breakage was real but my explanation of the fix was not. Homebrew's
-   pnpm is **11.20.0**, not 12.1.0. It ran the pinned commands correctly
-   because **pnpm 10+ re-executes itself as the `packageManager` version**
-   before doing any work — I saw the switch happen and credited the binary
-   for what the pin was doing.
+- **`roofMeadow.ts`** — the long grass and the burrows. Region and burrow
+  placement are both *derived* (clearance scoring + farthest-point), so #407's
+  smaller roof and its market should move them rather than break them.
+- **`WildPets.ts`** — emergence, roaming, the flee rule, the dive gate,
+  catching, and the announcement.
+- **`Building.ts`** — constructs it, updates it above the `!player` return,
+  and puts its zones first in `interactZones()`.
+- **`catalogue.ts`** — `pet.ripikaWild`, `shopId: 'roofGarden'` (not a real
+  shop, same trick as `candy.spookyHouse`).
+- **`store.ts`** — `catchWildPet`, `collectFlower`'s sibling.
+- **`test/store/wild-pets-catch.test.ts`** — 9 tests, in CI.
 
-   The genuinely broken one was the fnm pnpm at the front of `PATH`. pnpm 12
-   ships as a native binary written over a placeholder by a postinstall step;
-   11.5.0 fetched 12.1.0 and never ran that step, leaving a 282-byte prose
-   placeholder where the Mach-O belongs — so the shell parses English. Both
-   downloads sit in the store side by side, one 33 MB and one a text file.
-   The `using pnpm v11.5.0` line I read was 11.5.0 running *as itself* in the
-   shared checkout, which is on a stale branch with no `packageManager` field
-   at all: no pin, no switch. **The fnm pnpm is now upgraded to 11.24.0 and a
-   plain `pnpm` resolves per project.**
+## The two bugs worth knowing about
 
-   Carry this: **`pnpm --version` cannot tell you which version will run.**
-   Check `npm_config_user_agent` from inside the project instead —
-   `pnpm exec node -e "console.log(process.env.npm_config_user_agent)"`
-   printed `pnpm/12.1.0`, which is how PR A's gates are known to have run
-   under 12.1.0 rather than assumed to have.
-2. **The build chain is 47 steps, not 48.** Counted by parsing
-   `package.json` (`scripts.build.split('&&').length`), as CLAUDE.md's own
-   "a check that never runs" section requires. CLAUDE.md also says 47.
+1. **`burrowAwayFrom` returned `null` for every creature.**
+   `let bestDistance = -1` with `if (distance > bestDistance) continue` skips
+   every hole. Nothing ever left, the population hit its cap of four in fifteen
+   seconds and stood static for the session — half the feature dead. **Nothing
+   on screen said so**; four pets roaming is what it should look like.
+   Measured: 200 s with the player far away gave 4 creatures, **0 departures**.
+   Now 16 and 13.
+2. **The test guarding the dive gate was dead code**, which is why (1) lived.
+   Deleting the gate left it green. That is the tell — a mutation cannot fail a
+   test whose subject never runs.
 
-## Where every piece lives
+There is now a second test pinning the *opposite* direction (creatures must
+cycle), because a gate that froze everything forever would pass the first one
+alone, and very nearly did.
 
-- Roof garden: `src/world/building/castleDecor.ts` → `dressRoofGarden`.
-  Roof plate 60 × 44 m (`INTERIOR_HALF_X/Z` = 30/22).
-- Keep-outs: `keepOutsFor(deck)` in `dressing.ts`.
-- **Shafts: `BUILDING_SHAFTS` + `regionContains` in `layout.ts`.** Not in
-  `keepOutsFor`. A shaft's structure comes down through *every* storey; the
-  helter-skelter shaft is under the roof garden and the first meadow grew
-  straight through it. `check:castle` caught it.
-- Pets: `src/art/models/pets.ts`. `src/entities/npc/petBlob.ts` is the third
-  body plan, marked for deletion, still used by `NpcSystem.ts:760`.
-- The pattern to copy for a living population: `src/world/Flowers.ts`.
-- Owning: `gameStore.collectFlower` in `store.ts` is the "found, free, not
-  from a shop" precedent.
-- Hook-up: `Building` is a `GameSystem` — `update()` :845, `interactZones()`
-  :746, decor built :576.
+## Four wrong grass shapes, all of which read fine in the file
 
-## Findings that change the design
+Only visible by looking at it running:
 
-### RiPika is already an ownable companion — via the catalogue, not `PetKind`
+1. thin leaning blades → a wire tripod, a spider on a lawn
+2. chunky + upright + 7 close together → fused into a cone: tiny fir trees
+3. evenly spaced angles, matched leans → symmetrical fan: teepees
+4. jittered bearings but leaning to 0.62 and spread to 0.26 → spiky thistles
 
-- The starter "pet" **is `toy.ripika`** — `kind: 'toy'`, `category: 'toy'`,
-  `model: () => createRipika()`. `CharacterCreation.ts:273`:
-  `PET_OPTIONS = [shopItem('toy.ripika'), ...itemsForShop('stickerPet')…]`.
-- So the game's real "thing that walks behind you" abstraction is
-  **`ShopItem`/`InventoryItem` keyed by catalogue id**, not `PetKind`.
-  `PET_KINDS` is an *art* enum: which bodies `pets.ts` knows how to build.
-- **`createRipika()` already returns `height: 1.46` — exactly
-  `PET_RENDER_HEIGHT`.** `pets.ts`'s docblock says RiPika is the reference the
-  pets were normalised to. So making her a pet costs nothing in size;
-  `sizeToStandard` would scale her by 1.0.
-- Her head is already shared one-definition via `buildRipikaHead(scale)` —
-  the hat, the backpack and the keychain all take it. Unaffected by any of this.
+And the turf: square tiles stair-stepped; discs fixed that, but a 12-gon's
+**inradius** (0.823 m) is less than a cell's half-diagonal (0.849 m), which put
+a regular grid of **pink specks** through the lawn. `TURF_RADIUS` is derived
+from the segment count now.
 
-### The `PET_KINDS` consumers, and what a fifth member does to each
+## Numbers, and where they came from
 
-| Consumer | Effect of a 5th kind |
-| --- | --- |
-| `fitouts.ts:411` pet-shop pen | 5 pets on a circle sized for 4. `check:shop-spacing` is in the chain — **must be run** |
-| `Hotel.ts:4363` | `PET_KINDS.forEach` placing pets — needs enough spots |
-| `Hotel.ts:5254` | parses `pet.<species>` id tails against `PET_KINDS`. **RiPika's id is `toy.ripika`, so this would not find her** |
-| `gondola.ts:910` | `PET_KINDS[i % len]` for 3 ferris-wheel tub chairs — safe, but changes which pets ride |
-| `check-asset-contract.mts:241` | asserts `pet.${kind}` for every kind — a new `pet.ripika` key gets measured |
-| `petBedFit.ts` | measures every companion to size hotel pet beds; RiPika has limbs and a tail, so a wider footprint |
+`PLAYER_MAX_SPEED` is 7.4 m/s. Burst **6.5** (just under her walk, so a burst
+outruns her briefly and a chase always closes), cruise **3.0**, alternating —
+average ~3.4. Flee **80 %** at destination-choice. Catch radius **2.2 m**.
+`SAFE_DIVE_RANGE` **9 m**. Time above ground **35–60 s**, respawn **3–6 s**,
+population **4**, burrows **5**.
 
-**The crux is the catalogue id.** `toy.ripika` → `pet.ripika` is a
-save-breaking change: `state/save.ts` stores inventory by id and the
-Cute-o-dex is keyed by it. Every existing save's starter pet would vanish.
-That decision deserves its own PR and its own review.
+## Not done / open
 
-## Scope decision: split into two PRs
-
-**PR A — RiPika becomes a pet** (the refactor, on its own).
-**PR B — wild pets on the roof** (grass, burrows, roaming, catching), on top.
-
-Cleanly separable *in that order*: B wants to iterate the catchable kinds, and
-if A has landed that is just `PET_KINDS`. A does not need B at all. Splitting
-also keeps a save-format decision out from under a feature diff, and three
-other branches (#401/#403/#405) are live in this area.
-
-## Numbers chosen for the chase (report to Overseer, not yet built)
-
-`PLAYER_MAX_SPEED` is **7.4 m/s** (sprint ×1.5 = 11.1).
-
-- Creature burst **6.5 m/s** (0.88 × player walk) — "quite quickly", but she
-  always closes even without sprinting.
-- Cruise **3.0 m/s**, with pauses. Average ≈ 3.5 m/s, under half her walk.
-  Non-constant speed is what makes it read alive *and* winnable.
-- Destination choice: **80 %** away from the player, 20 % free — at
-  destination-choice time, per Jim.
-- Catch radius **2.2 m**, off tap-to-walk arrival, so imprecise tapping wins.
-
-## Burrow lifecycle (chosen shape, to be confirmed)
-
-- 5 burrows in the meadow, ≥ 6 m apart. Max 4 creatures out at once.
-- A creature must be out **35–60 s** before it may dive at all.
-- **It never begins a dive while the player is within 9 m.** This is the one
-  that makes "no failure state" literally true from her point of view: while
-  she is chasing, it cannot leave. Closing distance is always progress.
-- The dive is telegraphed — walk to burrow, then **1.2 s** of wiggle-and-look.
-  Coming inside 9 m during the wiggle aborts it and it bolts again.
-- Next emergence **3–6 s** later, so the next attempt is seconds away.
-
-## Announcement
-
-Jim's exact wording: **"a wild x appears!"** — his casing, his `!`. Name comes
-from the one existing source (`PetHandle.displayName` /
-`PUFF_DISPLAY_NAME = 'Trilla'`), never a second table. Must obey
-GAME_DESIGN's TEXT/UI-SCALE rule. Several at once: **one line that replaces
-the last**, so a child never has three to read.
+- **Not QA'd by a QA agent.** I looked at it in a headless browser and have
+  screenshots; that is an engineer's check, not a QA verdict.
+- **Not rebased onto #407** (still open). The meadow's derivation is *designed*
+  to absorb the smaller roof and the market — **verify that rather than assume
+  it**, it is the claim the design makes.
+- `petBlob.ts` is still there and still used by `NpcSystem.ts:760`. Deleting it
+  is #406's stated aim and is not done — it is a separate change and would have
+  made this diff much larger.
+- Two pets of the same kind can be out at once (uniform random over 5 kinds).
+  Not wrong, but a "prefer a kind not already out" rule would read better.
 
 ## Status
 
-- [x] Research: issue, CLAUDE.md, GAME_DESIGN #21/#30h, ART_DIRECTION §7
-- [x] **Long grass — built, committed, pushed** (`roofMeadow.ts`)
-      `tsc` 0, `check:castle` 0
-- [ ] Roaming
-- [ ] Burrows + catching + announcement
-- [ ] RiPika refactor (recommend separate PR)
-- [ ] Delete `petBlob.ts`, point `NpcSystem` at `createPet`
+- [x] Long grass, burrows, roaming, flee, dive gate, catching, announcement
+- [x] Wild RiPika colourway — verified distinct: `#ffd63f` vs `#5fc86b`
+- [x] tsc 0, tsc:test 0, build 0 (47 steps), test:procgen 0 (16 files, 474)
+- [x] `check:castle` 0
+- [x] Two mutations red, one test each, restored green
+- [ ] PR opened
+- [ ] Review + QA
