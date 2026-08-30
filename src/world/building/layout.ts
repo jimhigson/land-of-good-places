@@ -912,15 +912,32 @@ const FACE_EAST = Math.PI / 2;
  * and a forecourt is a hole too. `hat` and `iceCream` are placed so their
  * forecourts stop clear of it in Z; `toy` is on deck 0, which never has holes.
  */
-const SURPRISE_EGG_X = -15.5;
-const BALLOON_X = -7.06;
-const CANDY_FLOSS_X = 1.38;
-const STICKER_PET_X = 11.66;
+const SURPRISE_EGG_X = -10.95;
+const BALLOON_X = -2.51;
+const CANDY_FLOSS_X = 5.93;
+const STICKER_PET_X = 16.21;
 
-/** West-wall units, spaced along Z. `hat` joined them for #403; see above. */
-const HAT_Z = -8.5;
-const TOY_Z = 0.5;
-const ICE_CREAM_Z = 9;
+/**
+ * West-wall units, spaced along Z. `hat` joined them for #403.
+ *
+ * Two things constrain this run and neither did before, so the numbers are not
+ * a scaling of anything:
+ *
+ * - **The stairwell.** It is a hole on decks 1-4 reaching east to `x = -15.59`
+ *   across `z ∈ [-2.96, 3.24]`, and a forecourt is a hole too. That splits the
+ *   west wall into a northern and a southern segment with about 11.5 m each —
+ *   room for exactly one forecourted unit apiece (`hat`, `iceCream`). `toy` is
+ *   on deck 0, which never has holes, so it takes the strip between them.
+ * - **The north-west corner.** `surpriseEgg`'s forecourt runs 4.64 m west of
+ *   its centre and `hat`'s runs 4.64 m north of its own; on the 60 m plate
+ *   they were nowhere near each other, and on this one they met in the corner.
+ *   `surpriseEgg` moved east until the two are disjoint. `check:shop-spacing`
+ *   found this — it could not have, before #403 rewrote it to compare real
+ *   rectangles instead of intervals along one wall at a time.
+ */
+const HAT_Z = -9.5;
+const TOY_Z = 0.2;
+const ICE_CREAM_Z = 9.9;
 
 export const SHOP_UNITS: readonly ShopUnitDefinition[] = [
   {
