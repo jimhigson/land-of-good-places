@@ -35,6 +35,8 @@ class StubElement {
     this.textContent = '';
     /** Recorded, not interpreted — see {@link StubElement.setAttribute}. */
     this.attributes = {};
+    /** Recorded so {@link StubElement.click} can drive the real handler. */
+    this.listeners = new Map();
   }
 
   /**
@@ -91,8 +93,72 @@ class StubElement {
     return { left: 0, top: 0, width: viewport.width, height: viewport.height, right: viewport.width, bottom: viewport.height };
   }
 
-  addEventListener() {}
-  removeEventListener() {}
+  /**
+   * True when `node` is this element or anywhere beneath it.
+   *
+   * `ui/Hud.ts`'s "tap anywhere else puts the menu away" listener asks this of
+   * every press, and it is also how a check answers the only question a player
+   * actually has about a HUD element — *is it on the screen?* — off the tree
+   * that was really built, rather than off the setter that was really called.
+   */
+  contains(node) {
+    for (let at = node; at; at = at.parent) if (at === this) return true;
+    return false;
+  }
+
+  /**
+   * The one selector form the UI layer actually uses on an element: a single
+   * class (`ParkMap`/`CuteODex` find the HUD's drawer with
+   * `.hud-menu-items`), or an `#id`, or a bare tag.
+   *
+   * Deliberately not a selector engine. Anything more elaborate than this is a
+   * sign the code under test wants a real browser, not a stub.
+   */
+  querySelector(selector) {
+    const matches = (element) => {
+      if (selector.startsWith('.')) {
+        return String(element.className).split(/\s+/).includes(selector.slice(1));
+      }
+      if (selector.startsWith('#')) return element.id === selector.slice(1);
+      return element.tagName === selector.toUpperCase();
+    };
+    for (const child of this.children) {
+      if (matches(child)) return child;
+      const deeper = child.querySelector(selector);
+      if (deeper) return deeper;
+    }
+    return null;
+  }
+
+  /**
+   * Element listeners are **recorded**, not dropped, so {@link StubElement.click}
+   * can drive a real handler. `window`'s bus has always worked this way (see
+   * {@link dispatch}); an element's did not, which meant a check could only
+   * ever poke a component's API and never press its buttons.
+   */
+  addEventListener(type, handler) {
+    const bucket = this.listeners.get(String(type)) ?? [];
+    bucket.push(handler);
+    this.listeners.set(String(type), bucket);
+  }
+
+  removeEventListener(type, handler) {
+    const bucket = this.listeners.get(String(type));
+    if (!bucket) return;
+    const at = bucket.indexOf(handler);
+    if (at >= 0) bucket.splice(at, 1);
+  }
+
+  /** A real press, through whatever handler the component registered. */
+  click() {
+    for (const handler of [...(this.listeners.get('click') ?? [])]) {
+      handler({ type: 'click', target: this, stopPropagation() {}, preventDefault() {} });
+    }
+  }
+
+  /** Components blur a pill after pressing it; nothing here has focus to lose. */
+  blur() {}
+  focus() {}
 }
 
 /** The size a tap is measured against — moved by {@link setViewport}. */
