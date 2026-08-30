@@ -4360,11 +4360,33 @@ export class Hotel implements GameSystem {
     // is what carries the footprint — Jim's "the statues … you can clip
     // through are weird" — and the pet standing on it needs none of its own,
     // since anything that can reach the pet is already stopped by the plinth.
+    /**
+     * **The row's spacing is fitted, not typed.**
+     *
+     * It was `-7.5 + index * 5`, which is centred for exactly four pets and
+     * silently walks off the end for five: RiPika joining `PET_KINDS` put a
+     * plinth at x = 12.5 in a corridor whose wall is at 11.
+     *
+     * The row is fitted to {@link STATUE_ROW_HALF_SPAN} rather than to
+     * `CORRIDOR.halfX`, because the wall is not the binding constraint — the
+     * **doorway clearance zones** are, and they reach much further in than the
+     * masonry does. Fitting to `halfX` minus the plinth put the outermost pair
+     * at ±9.45 and `check:hotel` refused it: *"2 prop(s) block a doorway's
+     * clearance zone"*. So the span is the one the four-statue row already
+     * occupied and which that check already passes, and everything else is
+     * derived from it.
+     *
+     * Returns exactly 5 for four pets, so this is a no-op for the layout as it
+     * stood, and shrinks only as far as it must when there are more.
+     */
+    const PLINTH_RADIUS = 0.95;
+    const STATUE_ROW_HALF_SPAN = 7.5;
+    const step = Math.min(5, (2 * STATUE_ROW_HALF_SPAN) / (PET_KINDS.length - 1));
     PET_KINDS.forEach((kind, index) => {
       const plinth = solid(
-        new Mesh(new CylinderGeometry(0.85, 0.95, 0.4, 16), softMaterial(PALETTE.stonePink)),
+        new Mesh(new CylinderGeometry(0.85, PLINTH_RADIUS, 0.4, 16), softMaterial(PALETTE.stonePink)),
       );
-      const x = -7.5 + index * 5;
+      const x = (index - (PET_KINDS.length - 1) / 2) * step;
       const z = -CORRIDOR.halfZ + 1.4;
       // Top 0.4: the plinth's own height (`y` only centres the cylinder), so
       // a jump lands her on the plinth beside the pet — pure six-year-old.
