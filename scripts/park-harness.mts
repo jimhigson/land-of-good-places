@@ -62,19 +62,14 @@ function inertInteriorControls(): InteriorControls {
   };
   const refuseIris = refuse('iris');
   return {
-    walkTo: refuse('walkTo'),
     cancelWalk: refuse('cancelWalk'),
-    setTimeScale: refuse('setTimeScale'),
-    setWhoosh: refuse('setWhoosh'),
     iris: (midpoint) => {
       refuseIris();
       midpoint();
     },
     flash: refuse('flash'),
     snapCamera: refuse('snapCamera'),
-    openStairMenu: refuse('openStairMenu'),
     openShop: refuse('openShop'),
-    closeStairMenu: refuse('closeStairMenu'),
   };
 }
 
