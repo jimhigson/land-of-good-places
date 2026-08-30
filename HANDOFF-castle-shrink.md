@@ -267,7 +267,7 @@ is the next piece of work.
   radius is comfortable, but the aisle-side serving spots are what to verify.
 - Screenshots **standing in an aisle at player height**, not overhead.
 
-## MARKET STATUS — built, and `check:castle` is RED. Read this before touching it.
+## MARKET STATUS — built, all gates green. Superseded section below kept for the record.
 
 The market is implemented and derives from the plate (`marketCell`,
 `MARKET_PITCH_X`, `MARKET_ROW_SEPARATION` in `layout.ts`). It does **not** yet
@@ -312,6 +312,57 @@ Two ways out, both needing a ruling:
 **Do not** shrink the shop keep-out to make the seventh fit. It is 4.0 m
 because that is the counter, the serving spot and room to queue; the counter
 got smaller but the queue did not.
+
+## THE MARKET AS BUILT — and the honest verdict
+
+**Two aisles, seven stalls, every gate green.** North aisle five, south aisle
+two. Both laid out by the same two rules: along-row pitch from `PLAYER_RADIUS`,
+row separation from `TAP_FINGER_METRES`. Nothing that belongs to someone else
+moved — the hearth, the roundel, the toilets and the great hall are all
+obstacles the design goes around.
+
+The north row is mostly fireplace. Columns 1 and 2 are the hearth's fire and
+woodpile; column 3's queue stood where the great hall's children gather (21
+`check:castle` failures against that one pitch), so it moved to the far row.
+One stall, a fire, then the aisle.
+
+Two constants had to be measured rather than chosen, and both were found by a
+check rather than by reasoning:
+
+- `MARKET_BEAM_INSET = 1.8` — the north row's queue reached the hearth's fire
+  at 1.0. `check:castle`.
+- `MARKET_SOUTH_Z`'s `+1.6` — the south aisle's first stall sat 0.68 m inside
+  the stairwell's deliberately-wide 4.2 m pick radius at 1.0.
+  `check:tap-spacing`.
+
+### Gates
+
+`tsc` 0 · `pnpm run build` 0 (47 steps, unpiped) · `test:procgen` 0 (458/458) ·
+`check:castle` 0 (all four sections) · `check:tap-spacing` 0 ·
+`check:shop-spacing` 0 (rewritten for a grid).
+
+### Honest verdict: it is a grid, and it is not yet a market
+
+Screenshots on `qa-screenshots` under `403-market/`, at aisle height.
+
+The aisle **works**. Standing between the toy stall and the balloon stall on
+deck 0, with the fire off to one side, is exactly the arrangement Jim
+described, and it reads far better than the row of shopfronts did. The stall
+faces the child, the serving spot is in the aisle, the shopping prompt comes up
+where it should.
+
+**But it does not read as a market, and the reason is not the layout.** The
+seven shops are on **four different decks** — 2, 2, 2, 1 — so no floor ever
+shows more than two stalls. Deck 2's south aisle is one stall alone in a
+corner; that is a kiosk, not a market. The grid is a **plan-level** fix, and it
+had to be, because collision is height-blind and all seven footprints share one
+plan. What it cannot do is put them in one **frame**.
+
+**To read as a market the stalls have to be on the same floor.** That is a
+design decision about which deck each shop lives on — deliberately spread, to
+give a reason to climb — and it is Jim's, not mine. It also collides with
+#377/#380 (three floors, lift-only). Worth asking him directly: *would you
+rather all seven stalls on one floor and fewer reasons to climb?*
 
 ## Coordination
 
