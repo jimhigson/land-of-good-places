@@ -903,6 +903,20 @@ live question in it, do not send it.
 
 ## PRs
 
+**Never create a GitHub repository. Not ever, not for anything.** No test
+fixtures, no scratch repos, no "throwaway" harnesses — this is Jim's account
+and repositories are his to create. On 29 August an agent made
+`lgp-deploy-gating-proof` unasked, to test a deploy change it could not
+otherwise exercise; the engineering reason was sound and it did not matter.
+Jim's ruling on finding it: *"I hate this, immediately delete this other
+repo, mark in CLAUDE.md to NEVER create other repos."*
+
+If a change genuinely cannot be verified without one, that is a finding to
+report — **say plainly what is unproven and why**, and let it be his call.
+An honest gap he knows about beats a repository he did not ask for. The same
+goes for anything else that reaches outward from this project: repository
+settings, visibility, billing, org membership. Report, do not act.
+
 Raise with `gh pr create`. **Do not merge your own work** — every PR gets
 **one** peer review plus QA, and the Overseer merges.
 
