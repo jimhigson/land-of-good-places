@@ -9,8 +9,9 @@
  * ## What this measures, and what it deliberately does not
  *
  * It builds the **real `ui/Hud.ts`** — not a copy of its rules, not a re-stated
- * assertion about what it ought to do — under a small DOM of this file's own,
- * then asks the one question a player asks: *walking up the tree from the menu
+ * assertion about what it ought to do — under `scripts/headless-dom.mjs`, the
+ * same stub `check:slide-rider`, `check:bus-journey` and `check:ride-camera`
+ * already run their own UI against, then asks the one question a player asks: *walking up the tree from the menu
  * button, is anything hiding it?* The answer is computed by walking the actual
  * parent chain the `Hud` built with `append`, so an implementation that hides
  * the wrong element, or hides the button but leaves the drawer's pills
@@ -49,121 +50,34 @@
  * drawer and the stand-in map pill as visible mid-ride. Transcript on the PR
  * for #404.
  */
+import { installHeadlessDom, overlayElement } from './headless-dom.mjs';
 import { attractionOwnsTheScreen } from '../src/core/attraction.ts';
 
-// ------------------------------------------------------------------ the DOM
+installHeadlessDom();
 
-/**
- * The smallest document `ui/Hud.ts` can be built against.
- *
- * Deliberately dumb: it records structure (`append` builds a real parent
- * chain) and the two things the hide actually uses (`style.display`, and the
- * `dataset` the open/closed drawer is written to). Everything else — layout,
- * cascade, events — is a no-op, and the doc comment above says so out loud.
- */
-class FakeElement {
-  tagName: string;
-  className = '';
-  id = '';
-  innerHTML = '';
-  textContent = '';
-  readonly style: Record<string, string> = {};
-  readonly dataset: Record<string, string> = {};
-  readonly attributes = new Map<string, string>();
-  readonly children: FakeElement[] = [];
-  parentNode: FakeElement | null = null;
-  readonly classes = new Set<string>();
-
-  constructor(tagName: string) {
-    this.tagName = tagName;
-  }
-
-  get classList() {
-    return {
-      add: (name: string) => void this.classes.add(name),
-      remove: (name: string) => void this.classes.delete(name),
-      contains: (name: string) => this.classes.has(name),
-    };
-  }
-
-  setAttribute(name: string, value: string): void {
-    this.attributes.set(name, value);
-  }
-
-  getAttribute(name: string): string | null {
-    return this.attributes.get(name) ?? null;
-  }
-
-  private readonly listeners = new Map<string, ((event: unknown) => void)[]>();
-
-  addEventListener(type: string, handler: (event: unknown) => void): void {
-    const existing = this.listeners.get(type);
-    if (existing) existing.push(handler);
-    else this.listeners.set(type, [handler]);
-  }
-
-  removeEventListener(): void {}
-
-  /**
-   * A real press, through the real handler the `Hud` registered — not a poke at
-   * its private state. This is what makes "a menu that was open" in the test
-   * below the same menu a child would have opened.
-   */
-  click(): void {
-    for (const handler of this.listeners.get('click') ?? []) {
-      handler({ stopPropagation: () => {}, target: this });
-    }
-  }
-
-  blur(): void {}
-
-  append(...nodes: FakeElement[]): void {
-    for (const node of nodes) {
-      node.parentNode = this;
-      this.children.push(node);
-    }
-  }
-
-  contains(node: FakeElement): boolean {
-    for (let at: FakeElement | null = node; at; at = at.parentNode) if (at === this) return true;
-    return false;
-  }
-
-  /** Only the one form `ParkMap`/`CuteODex` actually use: a single class. */
-  querySelector(selector: string): FakeElement | null {
-    const wanted = selector.replace(/^\./, '');
-    for (const child of this.children) {
-      if (child.className.split(/\s+/).includes(wanted)) return child;
-      const deeper = child.querySelector(selector);
-      if (deeper) return deeper;
-    }
-    return null;
-  }
-}
+// After the DOM, always: `ui/Hud.ts` builds elements in its constructor, and
+// `scripts/headless-dom.mjs` is what there is to build them out of. It is the
+// same stub `check:slide-rider`, `check:bus-journey` and `check:ride-camera`
+// already run their UI against — one owner, extended (element listeners, a
+// one-class `querySelector`, `contains`) rather than a second document of this
+// file's own, which is exactly the two-definitions trap this repo keeps paying
+// for.
+const { Hud } = await import('../src/ui/Hud.ts');
 
 /**
  * The player's question, answered off the tree the `Hud` actually built: from
  * this element up to the root, is anything set to `display: none`?
+ *
+ * Deliberately **not** "did `setMenuAvailable` set a flag". An implementation
+ * that hides the wrong element, or hides the button and leaves the drawer's
+ * pills up, fails here.
  */
-function hiddenByAnAncestor(element: FakeElement): boolean {
-  for (let at: FakeElement | null = element; at; at = at.parentNode) {
-    if (at.style['display'] === 'none') return true;
+function hiddenByAnAncestor(element: any): boolean {
+  for (let at = element; at; at = at.parent) {
+    if (at.style?.display === 'none') return true;
   }
   return false;
 }
-
-const documentShim = {
-  createElement: (tag: string) => new FakeElement(tag),
-  addEventListener: () => {},
-  removeEventListener: () => {},
-};
-(globalThis as unknown as { document: unknown }).document = documentShim;
-
-// The `Hud` import must come *after* the shim is installed: it touches
-// `document` inside its constructor, not at module scope, but a future edit
-// that adds a module-scope `document.createElement` would otherwise fail
-// confusingly rather than being caught here.
-const { Hud } = await import('../src/ui/Hud.ts');
 
 // ------------------------------------------------------------- the assertions
 
@@ -196,7 +110,7 @@ for (const [riding, miniGameFrozen, expected] of [
 }
 
 // 2. The real HUD, with a pill mounted the way `ParkMap` mounts its own.
-const root = new FakeElement('div');
+const root = overlayElement();
 const hud = new Hud(root as unknown as HTMLElement);
 
 const drawer = root.querySelector('.hud-menu-items');
@@ -207,7 +121,7 @@ if (!drawer) {
   );
   process.exit(1);
 }
-const mapPill = new FakeElement('button');
+const mapPill = document.createElement('button') as any;
 mapPill.className = 'pill pill--map';
 drawer.append(mapPill);
 
