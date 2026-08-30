@@ -16,11 +16,14 @@
  * that place" — and a save that does not know where she was standing still
  * knows her name, her hat, her Cute-o-dex and her whole parade.
  *
- * When Decision 3 lands, `SpaceManager` (`world/building/spaces.ts`) becomes
- * the authority on which space the player is in, and this table grows one entry
- * per floor. `castle` then stops resolving, {@link localToWorld} returns `null`
- * for it, and a save written tonight spawns tomorrow's player on the plaza with
- * everything else intact. That is the intended failure, not an oversight.
+ * **Decision 3 has now landed** (#377/#380). The castle is three disjoint
+ * floors — `world/building/floors.ts` owns the table — and this file simply
+ * folds them in beside the hotel's rooms. The old single `castle` id is gone,
+ * exactly as the paragraph that used to stand here predicted: a save written
+ * before the split names a space that no longer exists, {@link localToWorld}
+ * returns `null` for it, and that player spawns on the plaza **with her name,
+ * her hat, her Cute-o-dex and her whole parade intact**. That is the intended
+ * failure, and it is the reason this file was written a week early.
  */
 
 import {
@@ -32,11 +35,8 @@ import {
   HOTEL_OCEAN_Z,
   HOTEL_ORIGIN_X,
   HOTEL_SUITE_Z,
-  INTERIOR_HALF_X,
-  INTERIOR_HALF_Z,
-  INTERIOR_ORIGIN_X,
-  INTERIOR_ORIGIN_Z,
 } from '../core/constants';
+import { CASTLE_FLOORS, castleFloorAt } from './building/floors';
 import { BUILDING_BASE_Y } from './building/layout';
 
 /**
@@ -53,13 +53,25 @@ export type SpaceId = string;
 export const SPACE_GARDEN: SpaceId = 'garden';
 
 /**
- * Everything inside the big building, all five decks of it.
+ * **The castle's three floors — each its own space**, disjoint and hundreds of
+ * metres apart, joined only by the lift (Jim's ruling on #377/#380, and the
+ * same shape as the hotel below).
  *
- * One space today because the decks share one coordinate system and are told
- * apart by height. Decision 3 replaces this single id with one per floor; see
- * the file comment for what that does to an old save.
+ * Re-exported rather than declared: `world/building/floors.ts` is the one owner
+ * of which floors exist, what they are called and where they stand, because the
+ * castle's own plan needs the same table and a second copy of it here would be
+ * this repo's commonest bug. That file imports nothing but `core/constants`,
+ * which is what keeps it out of this module's own import cycle.
+ *
+ * There was a single `castle` id until 30 August 2026, covering all five stacked
+ * decks at once; see the file comment for what its disappearance does to a save
+ * written before then.
  */
-export const SPACE_CASTLE: SpaceId = 'castle';
+export {
+  SPACE_CASTLE_HALL,
+  SPACE_CASTLE_MALL,
+  SPACE_CASTLE_ROOF,
+} from './building/floors';
 
 /**
  * The Land Hotel's rooms — each one **its own space** (Jim's ruling on issue
@@ -109,9 +121,14 @@ const HOTEL_ROOM_Z: readonly (readonly [SpaceId, number])[] = [
 
 const ORIGINS: Readonly<Record<SpaceId, SpaceOrigin>> = {
   [SPACE_GARDEN]: { x: 0, y: 0, z: 0 },
-  // The interior's own floor-plate origin: its ground-floor deck height, and
-  // the same pair `world/building/layout.ts`'s `worldX`/`worldZ` add.
-  [SPACE_CASTLE]: { x: INTERIOR_ORIGIN_X, y: BUILDING_BASE_Y, z: INTERIOR_ORIGIN_Z },
+  // Every castle floor stands at the same height — they are not stacked any
+  // more, so `BUILDING_BASE_Y` is simply the floor you walk on, on all three.
+  ...Object.fromEntries(
+    CASTLE_FLOORS.map((floor) => [
+      floor.space,
+      { x: floor.originX, y: BUILDING_BASE_Y, z: floor.originZ },
+    ]),
+  ),
   ...Object.fromEntries(
     HOTEL_ROOM_Z.map(([space, z]) => [space, { x: HOTEL_ORIGIN_X, y: HOTEL_FLOOR_Y, z }]),
   ),
@@ -119,16 +136,6 @@ const ORIGINS: Readonly<Record<SpaceId, SpaceOrigin>> = {
 
 /** Rooms are ~30 m across; anywhere within this of a room's origin is in it. */
 const HOTEL_ROOM_RADIUS = 70;
-
-/**
- * How far past the interior's floor plate still counts as being in it.
- *
- * Generous — the roof terrace overhangs, and anybody who walks off the edge of
- * deck zero lands on the plaza disc below — but nowhere near the 600 m to the
- * garden, so the two can never be confused. Decision 3 specifies a per-space
- * radius of 120 m for the same test; this is that test, one space early.
- */
-const CASTLE_RADIUS = Math.max(INTERIOR_HALF_X, INTERIOR_HALF_Z) + 90;
 
 /**
  * Which space a world position is in — **purely positional**, exactly as
@@ -140,9 +147,12 @@ const CASTLE_RADIUS = Math.max(INTERIOR_HALF_X, INTERIOR_HALF_Z) + 90;
  * player changes rooms.
  */
 export function spaceAt(x: number, z: number): SpaceId {
-  const dx = x - INTERIOR_ORIGIN_X;
-  const dz = z - INTERIOR_ORIGIN_Z;
-  if (dx * dx + dz * dz <= CASTLE_RADIUS * CASTLE_RADIUS) return SPACE_CASTLE;
+  // `castleFloorAt` owns the castle's own radius test, so "which floor am I
+  // on?" is asked in exactly one place — `Building` asks it directly all the
+  // time, and a second copy of the arithmetic here is how the floor pill and
+  // the play bounds would come to disagree.
+  const floor = castleFloorAt(x, z);
+  if (floor) return floor.space;
   for (const [space, roomZ] of HOTEL_ROOM_Z) {
     const hx = x - HOTEL_ORIGIN_X;
     const hz = z - roomZ;

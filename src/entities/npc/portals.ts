@@ -7,7 +7,7 @@ import {
 } from '../../world/building/layout';
 import { castleEntranceBand, castleExitBand } from '../../world/building/Building';
 import { BUILDING_HALF_Z, INTERIOR_HALF_Z } from '../../core/constants';
-import { SPACE_CASTLE, SPACE_GARDEN, type SpaceId } from '../../world/spaces';
+import { SPACE_CASTLE_MALL, SPACE_GARDEN, type SpaceId } from '../../world/spaces';
 
 /**
  * How a child gets from one space to another — issue #350.
@@ -98,7 +98,7 @@ export function castlePortals(
     {
       id: 'portal:castle-in',
       from: SPACE_GARDEN,
-      to: SPACE_CASTLE,
+      to: SPACE_CASTLE_MALL,
       nearX: gardenDoorX,
       nearZ: gardenDoorZ,
       nearY: sample(gardenDoorX, gardenDoorZ, BUILDING_BASE_Y + 1),
@@ -110,7 +110,7 @@ export function castlePortals(
     },
     {
       id: 'portal:castle-out',
-      from: SPACE_CASTLE,
+      from: SPACE_CASTLE_MALL,
       to: SPACE_GARDEN,
       nearX: outBand.centreX,
       nearZ: outBand.centreZ,
