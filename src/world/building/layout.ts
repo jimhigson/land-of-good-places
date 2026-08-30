@@ -17,7 +17,6 @@ export const BUILDING_CENTRE_X =
 export const BUILDING_CENTRE_Z =
   FACADE_ANCHOR.z - (FACADE_ANCHOR.z / FACADE_LENGTH) * BUILDING_CENTRE_NUDGE;
 import {
-  BUILDING_FLOOR_COUNT,
   BUILDING_FLOOR_HEIGHT,
   BUILDING_HALF_X,
   BUILDING_HALF_Z,
@@ -32,6 +31,7 @@ import {
   INTERIOR_PLAZA_DROP,
   PLAYER_RADIUS,
 } from '../../core/constants';
+import { CASTLE_HALL, CASTLE_MALL, CASTLE_ROOF } from './floors';
 import { TAP_FINGER_METRES } from '../tapSpacing';
 import { terrainHeight } from '../terrain';
 
@@ -87,8 +87,24 @@ export const BUILDING_BASE_Y = highestTerrainUnderFootprint() + BUILDING_PLINTH;
  */
 export const INTERIOR_GROUND_Y = BUILDING_BASE_Y - INTERIOR_PLAZA_DROP;
 
-/** Index of the topmost deck. It is the roof terrace, and it is outdoors. */
-export const TOP_DECK = BUILDING_FLOOR_COUNT - 1;
+/**
+ * The three floors by name, so nothing has to type a bare `0`, `1` or `2`.
+ *
+ * `world/building/floors.ts` is the one owner of what the floors *are*; these
+ * are just its indices under the names the rest of this file already uses.
+ */
+export const MALL_DECK = CASTLE_MALL.index;
+export const HALL_DECK = CASTLE_HALL.index;
+
+/**
+ * Index of the topmost floor. It is the roof garden, and it is outdoors.
+ *
+ * It no longer means "the top of a stack" — the floors are disjoint spaces —
+ * only "the one with sky over it". Everything that used to ask `deck ===
+ * TOP_DECK` to mean "is this outdoors?" should ask the floor's own `roofed`
+ * flag instead; this survives for the builders that genuinely index by storey.
+ */
+export const TOP_DECK = CASTLE_ROOF.index;
 
 /** World height of deck `index`. */
 export function deckY(index: number): number {
@@ -204,135 +220,32 @@ export function regionContains(region: Region, x: number, z: number): boolean {
   return dx * dx + dz * dz <= region.radius * region.radius;
 }
 
-/** A hole cut through the listed decks. */
-export interface DeckHole {
-  readonly id: string;
-  readonly region: Region;
-  readonly decks: readonly number[];
-}
-
 /**
- * The four vertical shafts.
+ * **There are no shafts, and no holes, any more.**
  *
- * They sit in a band across the middle of the plate so the north and south
- * strips stay clear for shop units and the toilets, and there is always a
- * corridor several metres wide between two shafts.
+ * `DeckHole`, `BUILDING_SHAFTS`, `DECK_HOLES`, `deckIsSolid`, `STAIRWELL`,
+ * `ESCALATOR_WELL`, `TRAMPOLINE_SHAFT` and `HELTER_SHAFT` all stood here until
+ * the floors became separate spaces (#377/#380). A shaft is a hole through a
+ * slab so that something can travel between two storeys, and there are no two
+ * storeys left to travel between: the lift is the only way between floors, and
+ * it does not move anything through a hole — it changes which space you are in.
  *
- * There were five until the floating bubble was removed (issue #377): its
- * shaft was a 2.1 m circle at (-1.5, 0), and the middle of decks 1-4 is now
- * plain solid floor.
+ * This is the single largest deletion in the split and the one with the
+ * longest tail of consequences, all good:
  *
- * Their anchors came in with the plate when it halved its area (#403), so the
- * band is tighter than it was — the shafts are the same size and there is less
- * nothing between them, which is the change working as intended. The bubble's
- * removal gives some of that back in the middle. Both together are the figure
- * to watch if anything is ever added to this band.
+ * - **The `keepOutsFor` / `BUILDING_SHAFTS` trap is gone by construction.**
+ *   Prop placers had to consult `BUILDING_SHAFTS` *separately* from
+ *   `DECK_HOLES`, because a shaft is not only an absence of floor — it also
+ *   carries a structure down through storeys whose floor is perfectly solid.
+ *   Five different agents missed that in one week, and it is how the
+ *   helter-skelter came down through the great hall's dinner table while
+ *   `check:castle` stayed green. There is now nothing to remember.
+ * - **The deck-fallthrough invariant has nothing left to prove.** Every hole
+ *   had to be fully spanned by a ramp or fully guarded by a rail and a
+ *   collider, or a child walking towards the stairs dropped through the floor.
+ *   That was two of the last three P0s (architecture review S5 and S14).
+ * - **`ShaftGuards.ts` is deleted outright** — there is nothing to guard.
  */
-/**
- * The staircase's own axis: the line the switchback turns on.
- *
- * **One anchor for the whole staircase** (#403). `STAIRWELL` and both flights
- * are laid out from here, so the well can no longer be a different width from
- * the ramps that span it — the two used to be four typed numbers each, kept
- * equal by hand, and halving the plate is exactly the change that pulls two
- * such copies apart. See `onPlate`'s "scale anchors, never parts".
- */
-const STAIR_AXIS_X = onPlate(-23.05);
-/** Each flight's width; the two together are the well's. Authored size. */
-const STAIR_FLIGHT_HALF_X = 2.45 / 2;
-/** The middle of the staircase's run, along Z. */
-const STAIR_AXIS_Z = onPlate(0.2);
-/** Half the flights' run. The stairs are as long as they always were. */
-const STAIR_RUN_HALF_Z = 3.1;
-
-export const STAIRWELL = rect(
-  STAIR_AXIS_X - STAIR_FLIGHT_HALF_X * 2,
-  STAIR_AXIS_X + STAIR_FLIGHT_HALF_X * 2,
-  STAIR_AXIS_Z - 2.9,
-  STAIR_AXIS_Z + 2.5,
-);
-/**
- * Matches the escalator ramp's own footprint (`escalatorRamp`, below)
- * exactly, the same way `STAIRWELL` matches `stairFlights` — so the well is
- * never wider than the ramp that spans it. It used to be 0.6 m wider down
- * each side (architecture review S5): two 0.6 x 5.4 m open slots through the
- * slab, outside the balustrade, on every upper deck — nobody fell only
- * because player radius held them back by 0.22 m, and NPC radius by half that.
- *
- * Both now come off `ESCALATOR_AXIS_X`/`_Z` rather than off two copies of the
- * same four numbers (#403).
- */
-const ESCALATOR_AXIS_X = onPlate(-12.05);
-const ESCALATOR_AXIS_Z = onPlate(0.2);
-const ESCALATOR_HALF_X = 1.55;
-const ESCALATOR_RUN_HALF_Z = 3.1;
-export const ESCALATOR_WELL = rect(
-  ESCALATOR_AXIS_X - ESCALATOR_HALF_X,
-  ESCALATOR_AXIS_X + ESCALATOR_HALF_X,
-  ESCALATOR_AXIS_Z - ESCALATOR_RUN_HALF_Z,
-  ESCALATOR_AXIS_Z + ESCALATOR_RUN_HALF_Z,
-);
-export const TRAMPOLINE_SHAFT = circle(onPlate(8), onPlate(0.4), 2.5);
-/**
- * East side: the helter-skelter winds down this one.
- *
- * Anchored on the helix's own centre (`HELTER_CENTRE_*`, below) rather than on
- * four typed numbers, so the shaft, the chute inside it and the pad you get on
- * from all move together (#403).
- */
-export const HELTER_CENTRE_X = onPlate(20);
-export const HELTER_CENTRE_Z = onPlate(-6.4);
-export const HELTER_SHAFT = rect(
-  HELTER_CENTRE_X - 3.5,
-  HELTER_CENTRE_X + 3.5,
-  HELTER_CENTRE_Z - 3.1,
-  HELTER_CENTRE_Z + 3.9,
-);
-
-const UPPER_DECKS = [1, 2, 3, 4] as const;
-
-/**
- * The fixed shafts. `DECK_HOLES` (below, defined after `SHOP_UNITS` so it can
- * fold in each shop's sunken forecourt too) starts from this list.
- */
-/**
- * **The fixed shafts, and what makes them a different thing from a hole.**
- *
- * Exported (issue #368) because a shaft is not only an absence of floor: each
- * one carries a *structure* — a stair, an escalator, a trampoline, a
- * helter-skelter — and that structure comes **all the way down**,
- * through storeys whose floor is perfectly solid. `deckIsSolid` cannot say so
- * and is not meant to: it answers "is there floor here", and on deck 0 the
- * answer is always yes.
- *
- * So anything placing props needs this list separately from {@link DECK_HOLES},
- * which additionally folds in every shop's **sunken forecourt** — a lowered
- * floor that a prop may perfectly well stand on, and which is why asking
- * `DECK_HOLES` this question gives 186 false failures.
- *
- * Found by looking at a screenshot: the great hall's feast benches cleared
- * every keep-out and `check:castle` was green, and the helter-skelter came down
- * through the dinner table. `keepOutsFor` only guards the helter's disc on
- * `HELTER_DECK`, which is where a child gets *on*, not where the tube is.
- */
-export const BUILDING_SHAFTS: readonly DeckHole[] = [
-  { id: 'stairwell', region: STAIRWELL, decks: UPPER_DECKS },
-  { id: 'escalator', region: ESCALATOR_WELL, decks: UPPER_DECKS },
-  // The trampoline only throws you as high as deck 2, and the helter-skelter
-  // starts there too — so neither shaft needs to pierce the upper decks.
-  { id: 'trampoline', region: TRAMPOLINE_SHAFT, decks: [1, 2] },
-  { id: 'helter', region: HELTER_SHAFT, decks: [1, 2] },
-];
-
-/** True if deck `index` is solid at this local point. Deck 0 never has holes. */
-export function deckIsSolid(index: number, x: number, z: number): boolean {
-  if (index <= 0) return true;
-  for (const hole of DECK_HOLES) {
-    if (!hole.decks.includes(index)) continue;
-    if (regionContains(hole.region, x, z)) return false;
-  }
-  return true;
-}
 
 /** Is this interior-local point on the floor plate at all? */
 export function insideInterior(localX: number, localZ: number, margin = 0): boolean {
@@ -575,97 +488,24 @@ export const INTERIOR_PORCH: RampDefinition = {
   yTo: 0,
 };
 
-/** Half-floor landing height, shared by both flights of a switchback. */
-const HALF_RISE = BUILDING_FLOOR_HEIGHT / 2;
-
-/** The two flights that carry you from deck `k` to deck `k + 1`. */
-export function stairFlights(deck: number): readonly [RampDefinition, RampDefinition] {
-  const bottom = deck * BUILDING_FLOOR_HEIGHT;
-  return [
-    {
-      id: `stair-${deck}-a`,
-      space: 'interior',
-      footprint: rect(
-        STAIR_AXIS_X - STAIR_FLIGHT_HALF_X * 2,
-        STAIR_AXIS_X,
-        STAIR_AXIS_Z - STAIR_RUN_HALF_Z,
-        STAIR_AXIS_Z + STAIR_RUN_HALF_Z,
-      ),
-      axis: 'z',
-      from: STAIR_AXIS_Z + STAIR_RUN_HALF_Z,
-      to: STAIR_AXIS_Z - 2.6,
-      yFrom: bottom,
-      yTo: bottom + HALF_RISE,
-    },
-    {
-      id: `stair-${deck}-b`,
-      space: 'interior',
-      footprint: rect(
-        STAIR_AXIS_X,
-        STAIR_AXIS_X + STAIR_FLIGHT_HALF_X * 2,
-        STAIR_AXIS_Z - STAIR_RUN_HALF_Z,
-        STAIR_AXIS_Z + 2.7,
-      ),
-      axis: 'z',
-      from: STAIR_AXIS_Z - 2.6,
-      to: STAIR_AXIS_Z + 2.7,
-      yFrom: bottom + HALF_RISE,
-      yTo: bottom + BUILDING_FLOOR_HEIGHT,
-    },
-  ];
-}
-
 /**
- * Where a child stands to tap the stairs, on any deck. Solid floor, both ways.
+ * **The stairs and the escalator are gone**, with `stairFlights`,
+ * `stairRoute`, `STAIR_STAND_X/Z`, `escalatorRamp` and
+ * `ESCALATOR_DIRECTION_Z`.
  *
- * Derived from the staircase rather than typed (#403): the authored pair were
- * `(-23.05, 5.2)`, which is the axis and 1.9 m clear of the flight's south end
- * — arithmetic that was true and written nowhere, so shrinking the plate would
- * have stood a child inside the stairwell.
- */
-export const STAIR_STAND_X = STAIR_AXIS_X;
-export const STAIR_STAND_Z = STAIR_AXIS_Z + STAIR_RUN_HALF_Z + 1.9;
-
-/**
- * The route the stair ride walks, from deck `deck` up to `deck + 1`.
+ * Jim, 29 August 2026: *"there are too many ways between the floors right now.
+ * Let's reduce it to just the lift."* Decision 3 had proposed keeping the
+ * escalator as a portal *flavour* — you would ride half a flight, the iris
+ * would blink, and you would step off the other half in the next space. That
+ * is superseded: a route that is not the lift is exactly what was removed, and
+ * an escalator that returned you where you started would be nonsense. It was
+ * also, in the family's own words, the mall look they complained about.
  *
- * Returned as plain interior-local waypoints rather than as a spline, because
- * the ride steers the character through the ordinary tap-to-move navigator: it
- * is a *walk*, with the real walk cycle and the real surface sampler under its
- * feet, only with the world running at three and a half times speed. Reverse the
- * list and it is the way down.
+ * The tap stairs took `StairRide` (a 3.5x time-scaled walk with a whoosh) and
+ * `ui/StairMenu.ts` (a Climb / Descend menu) with them. Neither is a loss: the
+ * lift is one press, it never makes a child wait, and it is the route the
+ * family designed themselves (GAME_DESIGN.md, "Riding the lift").
  */
-export function stairRoute(deck: number): readonly (readonly [number, number])[] {
-  const [flightA, flightB] = stairFlights(deck);
-  const centreA = (flightA.footprint.minX + flightA.footprint.maxX) / 2;
-  const centreB = (flightB.footprint.minX + flightB.footprint.maxX) / 2;
-  return [
-    [centreA, STAIR_STAND_Z],
-    [centreA, flightA.from - 0.4],
-    [centreA, flightA.to],
-    [centreB, flightB.from],
-    [centreB, flightB.to - 0.3],
-    [centreB, STAIR_STAND_Z],
-  ];
-}
-
-/** The single up escalator from deck `k` to deck `k + 1`. Real ones are 30°. */
-export function escalatorRamp(deck: number): RampDefinition {
-  const bottom = deck * BUILDING_FLOOR_HEIGHT;
-  return {
-    id: `escalator-${deck}`,
-    space: 'interior',
-    footprint: ESCALATOR_WELL,
-    axis: 'z',
-    from: ESCALATOR_AXIS_Z + ESCALATOR_RUN_HALF_Z,
-    to: ESCALATOR_AXIS_Z - ESCALATOR_RUN_HALF_Z,
-    yFrom: bottom,
-    yTo: bottom + BUILDING_FLOOR_HEIGHT,
-  };
-}
-
-/** Direction an escalator carries you, on the ground plane. */
-export const ESCALATOR_DIRECTION_Z = -1;
 
 /** The floor of the lift shaft, so nobody falls out of the bottom of it. */
 export const LIFT_PIT: RampDefinition = {
@@ -686,39 +526,47 @@ export function allRamps(): RampDefinition[] {
     INTERIOR_PORCH,
     LIFT_PIT,
   ];
-  for (let deck = 0; deck < TOP_DECK; deck += 1) {
-    ramps.push(...stairFlights(deck), escalatorRamp(deck));
-  }
-  ramps.push(...shopForecourtRamps());
   return ramps;
 }
 
 // ----------------------------------------------------------- fun machinery
 
-export const TRAMPOLINE_X = TRAMPOLINE_SHAFT.x;
-export const TRAMPOLINE_Z = TRAMPOLINE_SHAFT.z;
+/**
+ * **The trampoline, on the roof garden — a toy now, not a way upstairs.**
+ *
+ * Decision 3 §4 had it as a one-way portal: tap, walk to the pad, launch, iris
+ * at the apex, land on a marked pad one floor up. That is transport, and
+ * transport is the lift's. Jim's ruling leaves the trampoline as what a
+ * six-year-old already thinks a trampoline is — you bounce, and you come back
+ * down where you started. No shaft, no hole, no landing pad, nothing to guard.
+ *
+ * It stands on the roof garden, where there is open sky above it and nothing
+ * to bang your head on, beside the long grass and the burrows.
+ */
+export const TRAMPOLINE_X = onPlate(8);
+export const TRAMPOLINE_Z = onPlate(0.4);
 export const TRAMPOLINE_RADIUS = 1.7;
 
 /**
- * The helter-skelter: an oval helix down the east shaft, from deck 2 to the
- * ground floor. Oval rather than circular because the shaft is not square, and
- * 1.75 turns because that gives a 15° slope — steep enough to whoosh, gentle
- * enough that the chute never looks like a fireman's pole.
- */
-export const HELTER_DECK = 2;
-/**
- * Where you stand to get on; the chute mouth itself is a touch further east.
+ * **The helter-skelter is deleted** (#377), with `HELTER_DECK`,
+ * `HELTER_ENTRY_X/Z`, `HELTER_MOUTH_X`, `HELTER_CENTRE_X/Z`, `HELTER_SEMI_X/Z`
+ * and its shaft.
  *
- * Both measured **west from the shaft's own edge** rather than typed (#403).
- * The authored 15.4 sat 1.1 m clear of a shaft that started at 16.5; halving
- * the plate moved the shaft's edge and would have left the boarding pad
- * hanging over the hole a child is meant to be standing beside.
+ * It was a ride *and* a route — an oval helix from deck 2 down to the ground
+ * floor — and with three floors the only version of it that still made sense
+ * was roof-garden-to-mall, which is a second way between floors and therefore
+ * precisely what Jim removed. Making it return you to the floor you started on
+ * would have meant a helix that goes down and then puts you back up, which
+ * reads as broken.
+ *
+ * Jim, asked directly, 30 August 2026: *"yeah I don't care about that - just
+ * delete it, it never really worked anyway."*
+ *
+ * **That last clause is the part worth keeping.** If a slide inside the castle
+ * is ever wanted again it should be designed, not resurrected: the original had
+ * problems of its own, and the roof garden already has the ginormous slide as
+ * its down-and-out ride. One great slide off the roof beats two competing ones.
  */
-export const HELTER_ENTRY_X = HELTER_SHAFT.minX - 1.1;
-export const HELTER_ENTRY_Z = HELTER_CENTRE_Z + 0.4;
-export const HELTER_MOUTH_X = HELTER_SHAFT.minX - 0.3;
-export const HELTER_SEMI_X = 1.7;
-export const HELTER_SEMI_Z = 2.1;
 
 /**
  * Where you step on to ride the ginormous slide is `SLIDE_PLAN.entryX/entryZ`.
@@ -739,7 +587,12 @@ export const GROWN_UP_Z = onPlate(14);
  * Good manners are part of the game (GAME_DESIGN.md): using one flushes, and
  * then runs the tap while you wash your hands.
  */
-export const TOILET_DECK = 1;
+/**
+ * **On the mall**, beside the market. They were on deck 1 while the castle had
+ * five storeys of scattered shops; a child in a market is exactly who needs
+ * them, and the great hall and the roof garden are not places for a loo.
+ */
+export const TOILET_DECK = MALL_DECK;
 
 /**
  * The room's authored size. It does **not** shrink with the plate (#403): a
@@ -910,96 +763,45 @@ const MARKET_ROW_SEPARATION = Math.max(
 export const MARKET_AISLE_WIDTH = MARKET_ROW_SEPARATION - MARKET_STALL;
 
 /**
- * How far the north row stands off the north wall.
+ * # One aisle, seven stalls, all on the mall (#380)
  *
- * The perimeter ceiling beam is 0.8 m of it — no stall stands under one. The
- * rest is the **hearth**, which sits in that wall with its fire and its
- * woodpile, and whose props `check:castle` measures against every shop's
- * queue keep-out. Anchored flush inside the beam the north row's serving
- * spots came within 3.62 m of the fire where the keep-out needs 4.62; 1.8 m
- * off the wall clears it by 0.6 m.
+ * The market used to be split across two aisles on four different decks, and
+ * the previous engineer's own verdict was the honest one: *"it is a grid, and
+ * it is not yet a market … no floor ever shows more than two stalls."* That
+ * was not a layout failure. Indoor collision was height-blind, so all seven
+ * footprints shared one plan whatever deck they stood on, and the grid was the
+ * only fix available at plan level. What it could not do was put them in one
+ * **frame**.
  *
- * Measured, not chosen: `scripts/measure-market-floor.mts` rasterises the
- * stall footprints, but the *keep-out* is a 4 m disc at three spots along each
- * counter, which is a bigger thing than the stall — and it was `check:castle`
- * that said so, on the built room. `CASTLE_HEARTH` cannot be imported here
- * (`castleLighting.ts` imports this file), so the figure is written out with
- * this note rather than derived.
+ * Jim chose the answer, knowing it costs a reason to climb: **all seven on one
+ * floor, and that floor is the mall.**
  *
- * **Re-measured after rebasing onto the bubble's removal (#377).** The castle
- * this was first tuned against had five shafts; it now has four. Walked back
- * down: 1.4 is green, 1.2 fails with one complaint. So the binding figure is
- * now 1.4 and **1.8 carries 0.4 m of deliberate slack** — kept rather than
- * tightened, because the 0.4 m buys nothing except standing a market stall's
- * queue closer to an open fire, and because the crowd of children the queue
- * has to clear is placed by the NPC system rather than fixed here. Do not
- * read 1.8 as the measured minimum; the measured minimum is 1.4.
- */
-const MARKET_BEAM_INSET = 1.8;
-
-/**
- * # Two aisles, not one (Jim's ruling, 30 August)
+ * ## Two constraints vanished with the split, and neither was traded away
  *
- * One row of stalls with a gangway in front of it is a shopping parade. Two
- * aisles is a market: a child walking out of one has somewhere to *discover*
- * rather than a line she has walked along once.
+ * Both of the tuned constants this file used to carry were measured against
+ * things that only existed because the market shared a deck with something
+ * else:
  *
- * The second aisle is also what makes seven stalls fit without moving
- * anything. The north aisle holds five, because the **hearth** stands in the
- * north wall and a stall's queue keep-out — a 4 m disc at each of three spots
- * along the counter — may not crowd its fire. That is not a threshold to
- * lower: the counter got smaller when the shops became stalls, but a child
- * standing and waiting did not. The fireplace therefore interrupts the north
- * row, which is the charming part, and the two stalls it displaces move south.
+ * - `MARKET_BEAM_INSET = 1.8` was measured off the **great hall's hearth**,
+ *   whose fire reached about 4.6 m into the room and crowded the north row's
+ *   queue keep-out. The hearth is on the great hall now, which is its own
+ *   space. There is no fire on the mall.
+ * - `MARKET_SOUTH_Z`'s `+1.6` was measured off the **stairwell's** deliberately
+ *   wide 4.2 m pick radius. There is no stairwell anywhere.
  *
- * The hearth, the deck roundel and the toilets are all obstacles this design
- * goes *around*. The great hall sits on deck 0 precisely because the castle's
- * only fireplace is there (#388), so shifting the fire to seat a stall would
- * quietly erode the reason the hall is where it is.
+ * So the market is re-laid rather than relaxed: **two rows facing each other
+ * across a single aisle, four stalls and three.** That is a market a child
+ * walks *down*, with something on both sides of her the whole way, and it is
+ * what the two-aisle split was a workaround for.
  *
- * ## Both aisles derive from the same two rules
- *
- * Along a row: `MARKET_PITCH_X`, from `PLAYER_RADIUS`. Across an aisle:
- * `MARKET_ROW_SEPARATION`, from `TAP_FINGER_METRES` — because two stalls
- * facing each other put their tap targets nose to nose, and that binds before
- * the walking width does. Neither number is re-derived by hand for the second
- * aisle.
+ * Everything still derives from the plate and from the game's own numbers —
+ * along a row from `PLAYER_RADIUS`, across the aisle from `TAP_FINGER_METRES`
+ * — so resizing the castle re-lays the market for free.
  */
 
-/** North aisle: one stall-depth in from the wall, clear of the hearth. */
-const MARKET_NORTH_Z = -INTERIOR_HALF_Z + MARKET_BEAM_INSET + MARKET_STALL / 2;
-
 /**
- * South aisle: clear of the shaft band, measured off the band's own south
- * edge rather than typed, so a shaft moving pushes the market rather than
- * silently standing in it.
- *
- * The 1.6 m rather than 1.0 is the **stairs' tap target**, not taste: the
- * stairwell's pick radius is 4.2 m — deliberately wide, because a stairwell is
- * the one thing a child should hit without aiming — and at 1.0 m the south
- * aisle's first stall came 0.68 m inside it where `TAP_FINGER_METRES` needs
- * 1.13. `check:tap-spacing` caught it; the extra 0.6 m clears it by 0.05 m.
- */
-const MARKET_SOUTH_Z = ESCALATOR_WELL.maxZ + 1.6 + MARKET_STALL / 2;
-
-/** Centre of the stall in column `col`, row `row`, of aisle `aisle`. */
-export function marketCell(aisle: 'north' | 'south', row: number, col: number): [number, number] {
-  const z0 = aisle === 'north' ? MARKET_NORTH_Z : MARKET_SOUTH_Z;
-  return [
-    -INTERIOR_HALF_X + 0.8 + MARKET_STALL / 2 + col * MARKET_PITCH_X,
-    z0 + row * MARKET_ROW_SEPARATION,
-  ];
-}
-
-/** Middle of each aisle, for anything that wants to run down one. */
-export const MARKET_AISLE_Z = [
-  MARKET_NORTH_Z + MARKET_ROW_SEPARATION / 2,
-  MARKET_SOUTH_Z + MARKET_ROW_SEPARATION / 2,
-] as const;
-
-/**
- * A stall faces **into its aisle**, so a child walking it can see what each
- * one sells and the serving spot is on the side she is standing.
+ * A stall faces **into the aisle**, so a child walking down it can see what
+ * each one sells and the serving spot is on the side she is standing.
  *
  * Unit-local +Z is "into the room" for a wall unit and "into the aisle" for a
  * stall — the same thing as far as `shopLocalToBuilding`, the till spot and
@@ -1009,44 +811,79 @@ const FACE_SOUTH = 0;
 const FACE_NORTH = Math.PI;
 
 /**
+ * Where the market's aisle runs, in floor-local Z.
+ *
+ * A little north of the middle: the front door is in the south wall, so a
+ * child walks *into* the aisle rather than arriving beside it, and the south
+ * strip stays clear as the room she enters before the market starts.
+ */
+const MARKET_CENTRE_Z = -2;
+
+/** The two rows, either side of the aisle. */
+const MARKET_ROW_Z = [
+  MARKET_CENTRE_Z - MARKET_ROW_SEPARATION / 2,
+  MARKET_CENTRE_Z + MARKET_ROW_SEPARATION / 2,
+] as const;
+
+/** How many stalls stand in each row. Four and three, north row first. */
+const MARKET_ROW_LENGTHS = [4, 3] as const;
+
+/**
+ * Centre of the stall in column `col` of row `row`, floor-local.
+ *
+ * Each row is centred on the plate independently, so the shorter row sits
+ * symmetrically against the longer one instead of trailing off one end.
+ */
+export function marketCell(row: number, col: number): [number, number] {
+  const count = MARKET_ROW_LENGTHS[row] ?? 1;
+  const span = (count - 1) * MARKET_PITCH_X;
+  return [-span / 2 + col * MARKET_PITCH_X, MARKET_ROW_Z[row] ?? MARKET_CENTRE_Z];
+}
+
+/** The middle of the aisle, for anything that wants to run down it. */
+export const MARKET_AISLE_Z = MARKET_CENTRE_Z;
+
+/**
  * Which pitch each shop has. A **seating plan**, not a formula: which shop
  * gets which stall is a thing a six-year-old should be allowed an opinion
  * about, and it should be editable without touching any arithmetic.
- *
- * Every seat below is verified clear of both the stall footprint *and* the
- * queue keep-out by `scripts/measure-market-floor.mts`, and then on the built
- * room by `check:castle`. The gaps in the north row are the hearth's.
  */
-const MARKET_PLAN: readonly (readonly ['north' | 'south', number, number])[] = [
-  // The north row is mostly fireplace: columns 1 and 2 are the hearth's fire
-  // and woodpile, and column 3's queue stood where the great hall's children
-  // gather (`check:castle`, 21 failures against that one pitch), so it moved
-  // to the far row. One stall, a fire, and then the aisle.
-  ['north', 0, 0],
-  ['north', 1, 0],
-  ['north', 1, 1],
-  ['north', 1, 2],
-  ['north', 1, 3],
-  ['south', 0, 0],
-  ['south', 1, 0],
+const MARKET_PLAN: readonly (readonly [number, number])[] = [
+  [0, 0],
+  [0, 1],
+  [0, 2],
+  [0, 3],
+  [1, 0],
+  [1, 1],
+  [1, 2],
 ];
 
 function stall(index: number): { x: number; z: number; yaw: number } {
   const seat = MARKET_PLAN[index];
   if (!seat) throw new Error(`market: shop ${index} has no pitch — MARKET_PLAN is short`);
-  const [aisle, row, col] = seat;
-  const [x, z] = marketCell(aisle, row, col);
+  const [row, col] = seat;
+  const [x, z] = marketCell(row, col);
+  // Row 0 stands north of the aisle and looks south into it; row 1 stands
+  // south of it and looks north. Both therefore face the child walking
+  // between them, which is the whole point of an aisle.
   return { x, z, yaw: row === 0 ? FACE_SOUTH : FACE_NORTH };
 }
 
+
+/**
+ * **All seven, on the mall.** They were spread over decks 0, 1, 2 and 3, which
+ * is what made a market impossible to see: no floor ever showed more than two
+ * stalls. `MALL_DECK` rather than a typed `0` at seven call sites, so the
+ * market moves floor in one edit if it ever should.
+ */
 export const SHOP_UNITS: readonly ShopUnitDefinition[] = [
-  { id: 'toy', deck: 0, ...stall(0), title: 'Toy Shop', glyph: '🧸', accent: PALETTE.markerPink },
-  { id: 'balloon', deck: 0, ...stall(1), title: 'Balloon Shop', glyph: '🎈', accent: PALETTE.markerSky },
-  { id: 'candyFloss', deck: 1, ...stall(2), title: 'Candy Floss', glyph: '🍬', accent: PALETTE.blossomPink },
-  { id: 'iceCream', deck: 1, ...stall(3), title: 'Ice Cream', glyph: '🍦', accent: PALETTE.markerMint },
-  { id: 'hat', deck: 2, ...stall(4), title: 'Hat Shop', glyph: '🎩', accent: PALETTE.markerLilac },
-  { id: 'stickerPet', deck: 2, ...stall(5), title: 'Stickers & Pets', glyph: '🐹', accent: PALETTE.markerLemon },
-  { id: 'surpriseEgg', deck: 3, ...stall(6), title: 'Surprise Eggs', glyph: '🥚', accent: PALETTE.flowerViolet },
+  { id: 'toy', deck: MALL_DECK, ...stall(0), title: 'Toy Shop', glyph: '🧸', accent: PALETTE.markerPink },
+  { id: 'balloon', deck: MALL_DECK, ...stall(1), title: 'Balloon Shop', glyph: '🎈', accent: PALETTE.markerSky },
+  { id: 'candyFloss', deck: MALL_DECK, ...stall(2), title: 'Candy Floss', glyph: '🍬', accent: PALETTE.blossomPink },
+  { id: 'iceCream', deck: MALL_DECK, ...stall(3), title: 'Ice Cream', glyph: '🍦', accent: PALETTE.markerMint },
+  { id: 'hat', deck: MALL_DECK, ...stall(4), title: 'Hat Shop', glyph: '🎩', accent: PALETTE.markerLilac },
+  { id: 'stickerPet', deck: MALL_DECK, ...stall(5), title: 'Stickers & Pets', glyph: '🐹', accent: PALETTE.markerLemon },
+  { id: 'surpriseEgg', deck: MALL_DECK, ...stall(6), title: 'Surprise Eggs', glyph: '🥚', accent: PALETTE.flowerViolet },
 ];
 
 /** Scene-graph name for a shop unit's anchor group. */
@@ -1205,44 +1042,13 @@ export function shopForecourtRegion(unit: ShopUnitDefinition): RectRegion {
   );
 }
 
-/** The flat "landing" ramp that fills a shop's forecourt hole. */
-function shopForecourtRamp(unit: ShopUnitDefinition): RampDefinition {
-  const y = unit.deck * BUILDING_FLOOR_HEIGHT - SHOP_RECESS_DEPTH;
-  return {
-    id: `shop-forecourt-${unit.id}`,
-    space: 'interior',
-    footprint: shopForecourtRegion(unit),
-    axis: 'z',
-    from: 0,
-    to: 1,
-    yFrom: y,
-    yTo: y,
-  };
-}
 
 /**
- * Every fixed shaft, plus a hole for each recessed shop's forecourt.
- *
- * Declared here, after `SHOP_UNITS`, rather than back where `BUILDING_SHAFTS`
- * is: it folds `SHOP_UNITS` in, so it has to be assigned after that constant
- * exists. `deckIsSolid` (defined earlier in the file) still resolves this
- * correctly regardless of where it sits in the file — it only reads
- * `DECK_HOLES` when *called*, by which point the whole module has finished
- * initialising.
+ * `DECK_HOLES` and `shopForecourtRamps()` stood here. Both are gone with the
+ * shafts: there are no holes in any floor, and `shopHasForecourt` has answered
+ * `false` for every unit since the shops became market stalls (a sunken pit
+ * round a stall in the middle of an aisle is a trip hazard, not a shopfront).
  */
-export const DECK_HOLES: readonly DeckHole[] = [
-  ...BUILDING_SHAFTS,
-  ...SHOP_UNITS.filter(shopHasForecourt).map((unit) => ({
-    id: `shop-forecourt-${unit.id}`,
-    region: shopForecourtRegion(unit),
-    decks: [unit.deck],
-  })),
-];
-
-/** Every recessed shop's forecourt ramp, folded into `allRamps()`. */
-export function shopForecourtRamps(): readonly RampDefinition[] {
-  return SHOP_UNITS.filter(shopHasForecourt).map(shopForecourtRamp);
-}
 
 // --------------------------------------------------------------- ball pit
 

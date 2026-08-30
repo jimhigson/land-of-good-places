@@ -358,10 +358,31 @@ export const HOTEL_PLAY_RADIUS = 30;
 /** Radius of the interior's soft boundary, mirroring GARDEN_PLAY_RADIUS. */
 export const INTERIOR_PLAY_RADIUS = 46;
 
-/** Number of walkable decks. Deck 0 is the ground floor, deck 4 is the roof. */
-export const BUILDING_FLOOR_COUNT = 5;
+/**
+ * Number of walkable castle floors: **three**, and they are not stacked.
+ *
+ * Jim, 29 August 2026: *"the castle also has too many floors and the floors
+ * aren't distinct enough … Maybe just three — mall on the floor, something
+ * else in the middle, and the roof."* So floor 0 is the mall, floor 1 the
+ * great hall and floor 2 the roof garden, and each is **its own space at its
+ * own origin** — `world/building/floors.ts` is the table, and the only reason
+ * the count also lives here is that `core/constants.ts` may not import from
+ * `world/`.
+ *
+ * There were five until 30 August. Two of the three the family lost were
+ * mall-like floors of scattered shops; what they got back is three floors that
+ * each mean something, which was the whole of #380's argument.
+ */
+export const BUILDING_FLOOR_COUNT = 3;
 
-/** Deck-to-deck rise in metres. */
+/**
+ * Floor-to-floor rise in metres.
+ *
+ * Still meaningful after the split, but for a **smaller** reason than before:
+ * the floors no longer stack, so nothing is at `k * BUILDING_FLOOR_HEIGHT` any
+ * more. It survives as the storey height the walls, glass band and window rows
+ * are built to, and as the rise the lift's indicator counts through.
+ */
 export const BUILDING_FLOOR_HEIGHT = 3.6;
 
 /** How far the ground floor sits above the highest terrain under the footprint. */
