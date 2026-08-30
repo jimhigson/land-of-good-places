@@ -1,43 +1,177 @@
 # HANDOFF — castle floors, half the area (#403)
 
 Branch `feat/castle-floors-half-area`, worktree `.claude/worktrees/castle-shrink`.
-Dev server port **5404** (`--strictPort`), kill by PID only.
+Dev server port **5404** (`--strictPort`), killed by PID when done.
+
+**Status: complete, PR open, all gates green.** This file is the record of what
+was found, because most of it is not visible in the diff.
 
 ## The ask
 
 Jim, 30 Aug: *"The floors inside the castle are still too sparse. Make them half
 their current size to increase the feature density."*
 
-Clarified: **half the AREA**, not half each dimension. 60 m plate → ~42 m.
-He explicitly declined halving the linear dimension (that would quarter it).
+Clarified: **half the AREA**, not half each dimension. He was asked directly and
+declined halving the linear dimension, which would have quartered the area.
 
 ## The numbers
 
-`src/core/constants.ts`:
-- `INTERIOR_HALF_X = 30` → `21.2` (60 m → 42.4 m)
-- `INTERIOR_HALF_Z = 22` → `15.6` (44 m → 31.2 m)
+`INTERIOR_PLATE_SHRINK = Math.SQRT1_2` in `src/core/constants.ts`.
 
-Both scaled by 1/√2 = 0.7071. Area 2640 m² → 1323 m², ratio 0.501.
+| | before | after |
+|---|---|---|
+| plate | 60.00 x 44.00 m | **42.43 x 31.11 m** |
+| area | 2640 m² | **1323 m²** (0.501x) |
 
-## Rules I am working under
+Measured off the built scene by `check:shop-spacing`, which prints the plate it
+computed, and confirmed by `check:castle` building 4 flagstoned decks.
 
-- **Never relax a keep-out to make it fit.** If furniture no longer fits that is
-  a finding for the Overseer, not a threshold to edit.
-- `dressing.ts`'s docblock records why the plate was *widened* ("sixty metres of
-  one flat pink colour is not roominess, it is an empty car park"). I am
-  reversing part of that decision — amend the docblock with why, do not delete
-  their reasoning.
-- Prefer one owning constant; report anything hard-coding a position instead of
-  deriving it.
+## The one-line summary for a reviewer
 
-## Status
+Halving the area does **not** fit the castle's existing floor plan. Six things
+had to be re-placed, and the reason is always the same: the plate shrank and the
+furniture did not, so every clearance that used to be comfortable is now binding.
+None of them were made to fit by relaxing a threshold.
 
-- [x] worktree created
-- [ ] survey of hard-coded positions
-- [ ] the change
-- [ ] gates
-- [ ] before/after screenshots
+## Every hard-coded position the resize exposed
 
-## Findings so far
+These all typed an absolute interior-local coordinate instead of deriving one.
+Each is a place a future resize will hit again.
 
-(none yet)
+1. `STAIRWELL` and `stairFlights` typed the same four numbers twice. Now both
+   come off `STAIR_AXIS_X` / `STAIR_AXIS_Z`.
+2. `ESCALATOR_WELL` and `escalatorRamp`, the same pairing.
+3. `HELTER_ENTRY_X = 15.4` against a shaft edge at 16.5 — a 1.1 m gap held by
+   arithmetic written down nowhere. Now `HELTER_SHAFT.minX - 1.1`.
+4. `STAIR_STAND_Z = 5.2` against a flight ending at 3.3, likewise.
+5. `TOILET_STAND/PAN/BASIN` — three absolute points inside a fourth absolute
+   rectangle. Now offsets from the room's own centre.
+6. `BRAZIER_SPOTS` — four absolute points, two of which (`22,16` and `-20,-14`)
+   fell outside the new walls entirely.
+7. `CASTLE_HEARTH.x = -14`.
+8. `ROOF_PAVILION_X/Z`, `GROWN_UP_X/Z`, the deck roundel's centre.
+9. `Toilets.ts` built its open front at `maxZ` outright — correct only while the
+   room was in the north-east corner.
+10. `scripts/checkShopSpacing.mjs` hand-copies `INTERIOR_HALF_X/Z`, every shop
+    position and `TOILET_ROOM`. Deliberate and documented, but it meant the
+    resize had to be typed twice.
+
+## The rule that matters: scale anchors, never parts
+
+`onPlate()` multiplies a **position**, never an extent. Applied naively to
+`stairFlights` — scaling each flight's own rect — the two flights overlap by
+0.72 m and leave 0.36 m of open slot down each side of the stairwell. That is
+architecture review S5's bug rebuilt from scratch. A composite is scaled once,
+at its anchor.
+
+## What did not fit, and what was done about it
+
+**Nothing below was resolved by shrinking furniture or relaxing a clearance.**
+
+### The shop run — the big one
+
+Clearances are authored sizes and do not scale: a counter is 2.8 m either side
+of centre and a forecourt 4.64 m, whatever the room is.
+
+- Five north-wall units need **46.72 m**. Even at the bare minimum with the
+  documented flat 1 m dropped (not on offer) they need 42.72 m. The north wall
+  is **42.43 m**. Five do not fit at any spacing.
+- Four fit in 30.84 m of centre span, and there is 32.34 m between the west
+  perimeter ceiling beam and the east one. 1.5 m of slack.
+- That 1.5 m is not enough to move the westmost forecourt clear of the west
+  wall's own northern segment, so **the west wall's north segment is
+  unusable while four units are on the north wall**.
+- The west wall's *middle* is the stairs' own 4.2 m tap target
+  (`check:tap-spacing` proved it), so no shop can go there either.
+
+Net: the two far walls hold **six** units and there are **seven**. `toy` moved
+to the **east wall** — a *near* wall, so it is partly behind its own parapet.
+It was chosen because it is deck 0 (no sunken forecourt, so no hole in the slab)
+and its counter is 2.8 m rather than 4.64 m.
+
+**This is the one thing in the PR that is a visible regression and Jim's call.**
+If he would rather keep all seven shops on the far walls, the plate cannot halve
+its area — a shrink to about 0.65x would.
+
+### The toilets
+
+The north strip cannot carry four shops *and* a 7.4 m room on a 42.43 m wall.
+Moved to the south-east, and `Toilets.ts` gained a `TOILET_FRONT_Z` sign so its
+open front still faces into the room. The room and its fittings are unchanged in
+size.
+
+### The deck roundel
+
+`onPlate(12)` put the rug 0.27 m inside the escalator well on all four lower
+decks. The shafts sit in a band across the middle and did **not** shrink, so on
+a 31.11 m-deep floor no scaled position exists. It now measures
+`BUILDING_SHAFTS` and sits against the band's south edge. 12.3 m of floor for a
+12 m disc — genuinely tight.
+
+### The great hall
+
+At 10 m from the throne the feast's benches stood 15.75 m from the north wall,
+past every shaft's north edge. All three bays were rejected and `dressGreatHall`
+built **no hall at all**; `check:castle`'s contract assertion is what said so.
+`TABLE_FROM_THRONE` is now `DAIS_HALF_Z + TABLE_HALF_LENGTH + FEAST_APPROACH`
+= 5.7 m. Every object keeps its authored size; only the gap closes, leaving
+1.5 m of clear approach — two children abreast.
+
+## Checks strengthened (not weakened)
+
+`checkShopSpacing.mjs` was rewritten to compare real interior-local
+**rectangles** instead of intervals along one wall. It immediately found `hat`
+and `surpriseEgg` meeting in the north-west corner — a conflict the interval
+form was structurally unable to see, since it only ever compared units sharing
+a wall. It now also tests every unit against the plate, the toilet room, the
+four shafts and the perimeter ceiling beams.
+
+## Gates (all under pnpm, after rebase onto e7d915d4)
+
+| gate | exit |
+|---|---|
+| `pnpm exec tsc --noEmit` | 0 |
+| `pnpm run build` (47 top-level steps, unpiped) | 0 |
+| `pnpm run test:procgen` | 0 — 458 passed, 14 files |
+| `pnpm run check:castle` | 0 — all 4 sections OK |
+| `pnpm run check:park` | 0 |
+| `pnpm run check:shop-spacing` | 0 |
+| `pnpm run check:tap-spacing` | 0 |
+
+**Environment note:** the `pnpm` on `PATH` via fnm is broken here (its shim
+errors with a shell syntax error). `/opt/homebrew/bin/pnpm` 12.1.0 works.
+
+## Screenshots
+
+`scripts/qa-castle-shrink.mjs <port> <outDir> <halfX> <halfZ>` — standing points
+are given as **fractions of the half-extent**, so the same call photographs the
+same *place in the room* before and after. A fixed metre offset would have
+photographed the middle of the old room and the edge of the new one.
+
+Before: `… 30 22`. After: `… 21.2132 15.5563`.
+
+## Honest verdict
+
+**Decks 0-3: yes, clearly denser.** Ground floor especially — the same camera
+that used to frame a bubble, a trampoline and a lot of pink now holds the feast
+table, a knight, a shop, the roundel and four benches at once.
+
+**Deck 4 (the roof): still reads sparse.** It is smaller, but it is a flat lilac
+plain with benches scattered on it and the shrink has not fixed that. The roof
+is the one floor with no shops, no shafts through it and no hall — it has the
+least furniture to concentrate. If Jim comes back a fourth time it will be about
+this floor.
+
+## Known follow-up, not fixed here
+
+On the upper decks the deck above now fades over a much larger fraction of the
+frame (visible as a pink wash in the deck-1 shot). `floorFade`'s radius is in
+metres and did not scale, so it covers roughly twice the share of a half-area
+plate. Not a correctness bug and not in scope; worth its own issue.
+
+## Coordination
+
+- **#401** (remove the bubble) is untouched by this and frees a 2.1 m circle;
+  it will make the shaft band less tight, which helps everything above.
+- **#377/#380** (three floors) deliberately not attempted here.
+- **#402** (pnpm) is merged and this branch is rebased onto it.
