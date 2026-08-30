@@ -474,6 +474,20 @@ so a link from an earlier update is already stale. If a PR genuinely has
 nothing to look at (a CI or tooling change), say that in as many words
 rather than quietly omitting the link.
 
+**And every one of those links must carry a path that lands on the feature.**
+A bare preview root is the same failure as a bare `localhost` root, and Jim
+has now rejected it twice: he gets a park, on a seed he has not seen, and has
+to find the thing before he can judge it — a cost paid again on every round of
+feedback. If the PR is for a particular feature, the link goes straight to it:
+a ride deep link (`/slide`, `/rail-race`), `/spawn?at=x,z` for a place,
+`/view?camPos=…&camDir=…` for a pure look-at-this, or a route the feature
+itself defines (`/castle?deck=0&at=10,-15`). **Check the path actually lands
+where you claim before sending it** — a link to a deck that no longer exists
+after a resize is worse than no link. If the feature has no deep link, adding
+one is usually a single entry in `RIDE_DEEP_LINKS` on that PR's own branch,
+and it travels into the preview build for free. Only a fix with no "place" —
+a gesture, an input rule, a build change — is exempt, and then say so.
+
 **The same rule applies to PR preview URLs, not just local dev servers.**
 When handing Jim a Cloudflare Workers preview link (`wrangler versions
 upload --preview-alias`'s `pr-<number>-<commit-sha>-land-of-good-places.blockstack.workers.dev`
