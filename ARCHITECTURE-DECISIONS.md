@@ -1781,7 +1781,7 @@ does not have the train yet.
 > already a class). It should *not* need to touch `wanderDriver.ts` at all —
 > only `NpcSystem`'s construction of it.
 >
-> Verification landed with it: `npm run check:crowd` hashes a seeded 25-minute
+> Verification landed with it: `pnpm run check:crowd` hashes a seeded 25-minute
 > trace of the whole crowd, and the hash is byte-identical before and after.
 
 **One correction to the brief before anything else:** ~~the two additive blocks
@@ -2351,7 +2351,7 @@ layer so nothing but the manifest and the seed feed it.
   placed by data).
 - **L4 dressing** — scatter, lamps, garlands already derive from their
   surroundings and inherit the new layout free.
-- **L5 validation** — `check:park`, in `npm run build`.
+- **L5 validation** — `check:park`, in `pnpm run build`.
 
 ### The invariants (machine-checked, not claimed)
 

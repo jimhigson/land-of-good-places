@@ -22,8 +22,8 @@ and the game is live in about 40 seconds.
   that is currently exhausted, so flipping the switch stops every workflow on
   this project dead — no builds, no checks, no deploys — and the runs report
   as `startup_failure` rather than saying why.
-- **CI:** `.github/workflows/deploy.yml` — on push to `main`: `npm ci`,
-  `npm run build`, `wrangler deploy`. Re-running it is safe (idempotent).
+- **CI:** `.github/workflows/deploy.yml` — on push to `main`: `pnpm install --frozen-lockfile`,
+  `pnpm run build`, `wrangler deploy`. Re-running it is safe (idempotent).
 - **Secrets:** `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` both set.
 
 ## Log
@@ -88,7 +88,7 @@ and the game is live in about 40 seconds.
   Both were happening; only the timeout killed runs that had no successor to
   finish the job for them, so only the timeout could leave the site stale.
 
-  The cap was below the work: the `Build` step runs the whole `npm run build`
+  The cap was below the work: the `Build` step runs the whole `pnpm run build`
   chain, and its sibling job — `procgen-invariants.yml`'s "Build and checks",
   the *identical* chain — measured 14m59s, 15m49s and 15m52s the same evening
   under a 30-minute budget. Deploy did that chain **plus** publishing on 15.
@@ -98,7 +98,7 @@ and the game is live in about 40 seconds.
   1. `timeout-minutes: 15` → `30`. This is what restores deploys.
   2. `cancel-in-progress: false` — a deploy is a publish step, not a CI check,
      so the last one must always run. Real, but the secondary cause.
-  3. `npm run check:live-version` + `.github/workflows/live-version.yml` ask
+  3. `pnpm run check:live-version` + `.github/workflows/live-version.yml` ask
      the live site what commit it is serving, after every Deploy run *however
      it ended*, on a half-hourly cron, and on demand — opening a GitHub issue
      when it is behind. **This is the one that would have caught it**, because
@@ -107,15 +107,15 @@ and the game is live in about 40 seconds.
      no longer silent.
 
   **If you are ever wondering again whether live is current, that is one
-  command:** `npm run check:live-version`.
+  command:** `pnpm run check:live-version`.
 
 - 2026-08-29 — **open question: should the deploy job run the check suite at
   all?** Measured, not assumed:
 
-  - `npx vite build` alone, locally: **191 ms** (`✓ built in 191ms`, 36
+  - `pnpm exec vite build` alone, locally: **191 ms** (`✓ built in 191ms`, 36
     precache entries, `dist/sw.js` written). The artefact this job exists to
     publish takes a fifth of a second to produce.
-  - `npm run build` — the 47-step chain in front of it: **~15 minutes** in CI.
+  - `pnpm run build` — the 47-step chain in front of it: **~15 minutes** in CI.
   - `procgen-invariants.yml` triggers on `push: branches: [main]`, so that
     identical chain **already runs on every commit that deploys**, concurrently,
     in a job with its own 30-minute budget.
@@ -126,18 +126,18 @@ and the game is live in about 40 seconds.
   chain grows again.
 
   **But the naive fix is a coverage cut, so it was not made here.** Today, if
-  `npm run build` fails, `wrangler deploy` is skipped — "a broken build never
+  `pnpm run build` fails, `wrangler deploy` is skipped — "a broken build never
   ships", recorded in this file on 2026-07-26. Swapping the step for
-  `npx vite build` keeps compile errors blocking a publish but lets a failing
+  `pnpm exec vite build` keeps compile errors blocking a publish but lets a failing
   *check* (`check:park`, `check:cat-bus`, …) ship. CLAUDE.md is explicit that a
   check which stops covering something must say so audibly; doing it quietly to
   save 15 minutes is exactly the trade this repo keeps regretting.
 
   **The version that loses nothing:** trigger `deploy.yml` from
   `workflow_run` of "Procgen invariants" **completed + success** on `main`
-  instead of from `push`, and have it do `npx vite build` + `wrangler deploy`.
+  instead of from `push`, and have it do `pnpm exec vite build` + `wrangler deploy`.
   The full gate still blocks publishing — it just does it once instead of
-  twice — and a deploy becomes ~1-2 minutes, dominated by `npm ci`. The care
+  twice — and a deploy becomes ~1-2 minutes, dominated by `pnpm install --frozen-lockfile`. The care
   needed: a `workflow_run` job checks out the default branch's HEAD by default,
   so it must check out the triggering run's own sha explicitly, or it will
   publish something other than the commit that passed. Not done tonight because

@@ -14,16 +14,16 @@ TypeScript. See [GAME_DESIGN.md](./GAME_DESIGN.md) for the full design.
 ## Running it
 
 ```sh
-npm install     # once
-npm run dev     # dev server at http://127.0.0.1:5173
+pnpm install     # once
+pnpm run dev     # dev server at http://127.0.0.1:5173
 ```
 
 Other scripts:
 
 ```sh
-npm run build      # typecheck, then build to dist/
-npm run preview    # serve the built dist/ locally
-npm run typecheck  # types only, no build
+pnpm run build      # typecheck, then build to dist/
+pnpm run preview    # serve the built dist/ locally
+pnpm run typecheck  # types only, no build
 ```
 
 ## Deployment
@@ -37,8 +37,9 @@ npm run typecheck  # types only, no build
 
 Every push to `main` triggers
 [`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml), which runs
-`npm ci && npm run build` and publishes `dist/` to **Cloudflare Workers** as
-static assets (config in [`wrangler.jsonc`](./wrangler.jsonc)). No button to
+`pnpm install --frozen-lockfile && pnpm run build` and publishes `dist/` to
+**Cloudflare Workers** as static assets (config in
+[`wrangler.jsonc`](./wrangler.jsonc)). No button to
 press — merge it and it's live in about 40 seconds. A failing build or
 typecheck stops the deploy, so `main` only ever ships something that builds.
 
@@ -66,16 +67,16 @@ gh secret set CLOUDFLARE_API_TOKEN --repo jimhigson/land-of-good-places
 ### Deploying by hand
 
 ```sh
-npm run build
-npx wrangler login                       # once, opens a browser
-npx wrangler deploy                      # uses wrangler.jsonc
+pnpm run build
+pnpm exec wrangler login                       # once, opens a browser
+pnpm exec wrangler deploy                      # uses wrangler.jsonc
 ```
 
 Or with a token instead of a browser login — handy for scripts and agents:
 
 ```sh
-npm run build
-CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=… npx wrangler deploy
+pnpm run build
+CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=… pnpm exec wrangler deploy
 ```
 
 To re-run a deploy without pushing anything:
@@ -88,5 +89,5 @@ With no Cloudflare credentials at all you can still put a build online, on a
 throwaway preview account that prints a claim URL:
 
 ```sh
-npx wrangler deploy dist --temporary --name land-of-good-places
+pnpm exec wrangler deploy dist --temporary --name land-of-good-places
 ```

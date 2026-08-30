@@ -22,6 +22,27 @@ Work there. Remove the worktree when you are done. If you find the shared
 checkout on someone else's branch or carrying someone else's uncommitted
 edits, **leave it exactly as you found it** — that is somebody's live work.
 
+Then, in your new worktree:
+
+```
+pnpm install --frozen-lockfile
+```
+
+**This project is on pnpm** (pinned by `packageManager` in `package.json` —
+do not run `npm`, which would write a `package-lock.json` nobody wants). Use
+`pnpm run <script>` and `pnpm exec <tool>` where you would have typed
+`npm run` and `npx`.
+
+**Do not symlink another worktree's `node_modules`.** That trick is written
+down in several older handoffs, and it made sense when a fresh worktree meant
+a full 178 MB install: it also meant remembering to unlink before
+`git worktree remove`, or the remove followed the link and deleted the copy
+the other worktree was still using. pnpm makes it pointless — packages are
+hardlinked from one content-addressable store at
+`~/Library/pnpm/store`, so a second worktree's `node_modules` costs a few MB
+of symlinks rather than another full copy, and `pnpm install` in a fresh
+worktree takes seconds. Just run the install.
+
 ## Who does what
 
 Five roles. You are told which one you are; if you were not told, you are an
@@ -57,7 +78,7 @@ Artists can run at once.**
   `/Applications/Blender.app/Contents/MacOS/Blender --background --python <script>`
   Each run is its own process, so **any number of Artists can work in
   parallel**. This is how the bridge stone kit was actually built
-  (`art/blend/bridge_stones_*.py`, `npm run blend:bridge-stones`). Build,
+  (`art/blend/bridge_stones_*.py`, `pnpm run blend:bridge-stones`). Build,
   export and render as committed scripts: reproducible, diffable, and
   re-runnable by whoever comes next.
 - **The live MCP session — one at a time.** The `mcp__blender__*` tools drive
@@ -185,7 +206,7 @@ cause it. If a check is red when you find it, fixing it is the work now.
 
 ## Building
 
-`npm run build` must pass. **Run it and check the exit code.** Never pipe a
+`pnpm run build` must pass. **Run it and check the exit code.** Never pipe a
 build through `tail` or `head` — that masks the exit code, and we shipped a
 non-compiling branch to `main` that way once.
 
@@ -232,12 +253,12 @@ built it; and take thresholds from the game (`PLAYER_RADIUS`,
 `TRACK_CLEARANCE`) rather than from the generator's own target. Never weaken an
 assertion to make a seed pass — swap the seed and write down why.
 
-`npm run test:procgen`. CI runs it on every PR and **blocks the merge**, so this
+`pnpm run test:procgen`. CI runs it on every PR and **blocks the merge**, so this
 is not optional. It complements `check:park`, which owns whether the park
 *works*; this owns whether its furniture is *placed sanely*.
 
 **A green build is not a green repo.** `test:procgen` is **not in the `build`
-chain** — that chain is 16 steps and this is not one of them. `npm run build`
+chain** — that chain is 47 steps and this is not one of them. `pnpm run build`
 can exit 0 while all five seeds fail. **Run both before every push**; they do
 not cover each other.
 
@@ -245,7 +266,7 @@ On 29 August a branch named an interior mesh `castle-wall-plate-0`, which
 matched the pattern `parkFacts.ts` uses to find the castle's *exterior*
 stonework. A slide-clearance invariant silently began measuring the wrong
 mesh, `castleMasonryTopY` jumped 10.29 m → 14.83 m, and every seed failed —
-while `npm run build` stayed honestly green, because it never ran the suite
+while `pnpm run build` stayed honestly green, because it never ran the suite
 that could see it.
 
 ## Procgen backtracks on collision, always
@@ -531,7 +552,7 @@ If the game is behaving as though your edits do not exist — a field you just
 added looks like it has vanished from your own class — **use the
 `stale-dev-server` skill**. It covers the stale worker left on your port by an
 earlier session, the broken Vite HMR module graph after a branch switch, and
-why `npm run preview` is the only honest test of the shipped worker.
+why `pnpm run preview` is the only honest test of the shipped worker.
 
 This is about an agent's own local dev server, never a real player. A real
 person stuck on stale content on `landofgoodplaces.blockstack.ing` is the bug
@@ -563,7 +584,7 @@ button. Once she is playing, it waits to be asked, because a swap means a
 reload and a reload mid-ride loses the ride; that is also why `skipWaiting`
 stays **false** in `vite.config.ts` (it would swap the precache under a
 playing page, and the park generates through a dozen lazy imports that would
-then 404). `npm run check:update-adoption` drives two real builds and one
+then 404). `pnpm run check:update-adoption` drives two real builds and one
 persistent Chromium profile through exactly that, both directions.
 
 **If this mechanism does not get a real player onto a new deploy on its
