@@ -31,6 +31,7 @@ import {
   TOILET_DECK,
   TOILET_ROOM,
   TOP_DECK,
+  onPlate,
   shopHasForecourt,
   shopLocalToBuilding,
   type ShopUnitDefinition,
@@ -54,6 +55,22 @@ import {
  * Everything is placed by a **seeded** scatter with rejection, so the furniture
  * is identical on every reload and can never end up in a stairwell, on a shop's
  * serving spot, inside the toilets, or floating over a hole.
+ *
+ * ## What #403 changed, and what it did not
+ *
+ * The diagnosis above stands and is not being retracted: a wide plate of one
+ * flat colour is an empty car park, and giving each deck a middle is what
+ * stopped it reading as a warehouse. What changed is that decorating the plate
+ * turned out not to be *enough* on its own. Jim asked for more density three
+ * times — issue #376, the roof-garden QA, and finally #403 — and the first two
+ * answers were both "add more things". The third answer is to halve the floor
+ * **area** instead, so the same furniture reads twice as close together.
+ *
+ * So nothing here was deleted to make room. The roundel, its planters and the
+ * benches are all still the size they were: only the plate under them came in,
+ * and the counts below (eight benches a deck, ten on the roof) now cover half
+ * the floor they used to. If a later change makes the room bigger again, this
+ * file's original reasoning applies again unaltered.
  */
 
 /**
@@ -63,8 +80,15 @@ import {
  * and west of the way in — so it is the first thing you see on the ground floor
  * without being the thing you are standing on when you arrive.
  */
-const ROUNDEL_X = -6;
-const ROUNDEL_Z = 12;
+const ROUNDEL_X = onPlate(-6);
+const ROUNDEL_Z = onPlate(12);
+/**
+ * Authored size, deliberately **not** scaled with the plate (#403).
+ *
+ * A 12 m disc on a 42 m floor is a bigger share of the room than it was on a
+ * 60 m one, and that is the intended direction: the roundel is furniture, and
+ * halving the area is about the same furniture covering more of the floor.
+ */
 const ROUNDEL_RADIUS = 6;
 
 /** Nothing is placed within this of something a child needs to walk to. */
