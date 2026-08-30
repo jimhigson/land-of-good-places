@@ -96,17 +96,24 @@ jobs:
         # with `git ls-remote origin HEAD`, not from local history.
         uses: actions/checkout@v7
 
+      # Only to get the `pnpm` binary for `pnpm run` below — no install
+      # follows, and no `cache: pnpm` on setup-node, which would want a store
+      # this job never populates.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
           node-version: 26
 
-      # No `npm ci`. The check imports node builtins, `src/version-file.ts` and
-      # the repo's own extension resolver — nothing from node_modules — so the
-      # whole job is a few seconds plus whatever it spends waiting.
+      # No dependency install. The check imports node builtins,
+      # `src/version-file.ts` and the repo's own extension resolver — nothing
+      # from node_modules — so the whole job is a few seconds plus whatever it
+      # spends waiting.
       - name: Is the live site serving the head of main?
         id: check
-        run: npm run check:live-version
+        run: pnpm run check:live-version
 
       - name: Say so, loudly, where a person will see it
         if: failure() && steps.check.outcome == 'failure'
