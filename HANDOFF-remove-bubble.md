@@ -58,6 +58,32 @@ Exit codes, all **0**: `npx tsc --noEmit`, `npm run build` (unpiped),
 `check:park-boot`, `check:deck-fallthrough`, `check:park-map`,
 `check:hop-clearance`, `check:tap-spacing`, `check:nav-routes`.
 
+## Rebased onto pnpm `main` (30 Aug 2026)
+
+`main` moved to pnpm 12.1.0 (`e7d915d4`, PR #402) while this sat green. Rebased;
+**no conflicts** — this branch touches neither `package.json` nor any lockfile,
+so `pnpm-lock.yaml` comes through from `main` verbatim and `package-lock.json`
+is simply gone with the migration. Verified with
+`git diff origin/main...HEAD -- package.json package-lock.json pnpm-lock.yaml`,
+which is empty.
+
+Two things a replacement will otherwise lose an hour to:
+
+- **`pnpm` on this machine is ambiguous.** `which -a pnpm` gives two. The
+  first on `PATH` (the fnm shim) is a **broken stub** that dies with a shell
+  syntax error out of pnpm's own store. Use **`/opt/homebrew/bin/pnpm`**,
+  which is 12.1.0 and matches `packageManager`.
+- `node_modules` was stale npm; deleted and reinstalled with
+  `pnpm install --frozen-lockfile`. It left the lockfile untouched, as it must.
+
+**The build chain is 47 steps on this base, and that is correct** — #405, which
+adds the 48th (a HUD check), is still **open**, not merged. Since this branch
+never touches `package.json` there is nothing to reconcile whichever lands
+first. Do not add or remove a step here.
+
+All gates re-run under pnpm on the rebased head, all exit 0 (below), and the
+built-scene verification re-run and byte-for-byte unchanged.
+
 ## Doc mentions
 
 18 found across the docs. **12 changed** (GAME_DESIGN 4, ARCH-DECISIONS 5 +
