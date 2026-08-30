@@ -1,0 +1,20 @@
+# pnpm's settings live here, not in package.json. pnpm 12 stopped reading the
+# `pnpm` field in package.json entirely — it warns "no longer read by pnpm"
+# and carries on ignoring it, which looks like the setting simply not working.
+#
+# `allowBuilds` is pnpm 12's name for it. Most documentation still says
+# `onlyBuiltDependencies` (the pnpm 10/11 spelling); pnpm 12 reports that one
+# via `pnpm config get` while not acting on it, so it looks applied and is not.
+# `pnpm approve-builds` rewrites this file into the form below.
+#
+# Why these two: `cloudflare/wrangler-action` installs wrangler itself at
+# deploy time (as it did under npm) with `pnpm add wrangler@4`, which pulls
+# esbuild and workerd. pnpm blocks their postinstall scripts unless allowed
+# here, and wrangler does not run without them.
+#
+# This is load-bearing for the live publish. `deploy.yml` only runs on push to
+# `main`, so getting this wrong does not fail a PR — it fails after the merge,
+# on the deploy, leaving the site stale with nothing surfacing it.
+allowBuilds:
+  esbuild: true
+  workerd: true
