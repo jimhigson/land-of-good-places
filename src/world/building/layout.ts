@@ -28,6 +28,7 @@ import {
   INTERIOR_HALF_Z,
   INTERIOR_ORIGIN_X,
   INTERIOR_ORIGIN_Z,
+  INTERIOR_PLATE_SHRINK,
   INTERIOR_PLAZA_DROP,
 } from '../../core/constants';
 import { terrainHeight } from '../terrain';
@@ -57,7 +58,7 @@ import { terrainHeight } from '../terrain';
  *
  * - the **facade**, a 24 x 18 m tower standing in the garden at
  *   (`BUILDING_CENTRE_X`, `BUILDING_CENTRE_Z`). It is scenery with a door in it.
- * - the **interior**, a 60 x 44 m floor plate at
+ * - the **interior**, a 42 x 31 m floor plate at
  *   (`INTERIOR_ORIGIN_X`, `INTERIOR_ORIGIN_Z`) — six hundred metres away, which
  *   is past the terrain disc *and* past the far fog plane, so the park cannot
  *   leak into the interior nor the interior into the park.
@@ -99,6 +100,50 @@ export function worldX(localX: number): number {
 
 export function worldZ(localZ: number): number {
   return INTERIOR_ORIGIN_Z + localZ;
+}
+
+/**
+ * An **authored** interior-local coordinate, moved onto today's plate (#403).
+ *
+ * Most of the interior derives from `INTERIOR_HALF_X` / `INTERIOR_HALF_Z` and
+ * so resized for free when the plate halved its area. The numbers below did
+ * not: they were typed as absolute metres on the 60 x 44 m plate, and left
+ * alone they would have put the stairwell and the helter-skelter outside the
+ * west and east walls. `onPlate` is what those numbers go through, so the
+ * whole room still has *one* owning constant.
+ *
+ * ## Scale anchors, never parts
+ *
+ * This multiplies a **position**. It must never be applied to an extent, a
+ * radius or a half-width: the entire point of #403 is that the same furniture
+ * stands on half the floor, so furniture keeps its authored size and only its
+ * anchor comes in. A composite — the stairs' two flights, the helter's shaft
+ * and its entry pad, the toilet room and its fittings — is scaled **once, at
+ * its anchor**, with its parts laid out from that anchor as before. Scaling
+ * each part's own coordinate instead pulls the parts together and the sizes
+ * do not follow: applied naively to `stairFlights`, the two flights overlapped
+ * by 0.72 m and left 0.36 m of open slot down each side of the stairwell,
+ * which is architecture review S5's bug rebuilt from scratch.
+ *
+ * ## What had to be told rather than deriving (the #403 findings)
+ *
+ * Everything on this list hard-coded a position that could have been derived,
+ * and each one is a place where a future resize will need this same treatment:
+ *
+ * - `STAIRWELL` and `stairFlights` each typed the same four numbers, so the
+ *   well "matches the flights" only by hand. Both now come off `STAIR_AXIS_X`.
+ * - `ESCALATOR_WELL` and `escalatorRamp`, the same pairing.
+ * - `HELTER_ENTRY_X` typed 15.4 against a shaft edge at 16.5 — a 1.1 m gap
+ *   held by arithmetic nobody had written down. It is now that subtraction.
+ * - `STAIR_STAND_Z` typed 5.2 against a flight ending at 3.3, likewise.
+ * - `TOILET_STAND/PAN/BASIN` were three absolute points inside a fourth
+ *   absolute rectangle. They are now offsets from the room's own centre.
+ * - `scripts/checkShopSpacing.mjs` keeps a hand-copied duplicate of
+ *   `INTERIOR_HALF_X/Z`, every shop x, and `TOILET_ROOM` — deliberately, and
+ *   documented as such, but it does mean this resize had to be typed twice.
+ */
+export function onPlate(authored: number): number {
+  return authored * INTERIOR_PLATE_SHRINK;
 }
 
 /** Facade-local (the shell in the garden) -> world on the ground plane. */
@@ -169,15 +214,41 @@ export interface DeckHole {
  *
  * They sit in a band across the middle of the plate so the north and south
  * strips stay clear for shop units and the toilets, and there is always a
- * corridor several metres wide between two shafts. With sixty metres of floor to
- * play with they are now genuinely spread out — the old plan had the stairs, the
- * escalator and the trampoline crammed into twenty.
+ * corridor several metres wide between two shafts.
  *
  * There were five until the floating bubble was removed (issue #377): its
  * shaft was a 2.1 m circle at (-1.5, 0), and the middle of decks 1-4 is now
  * plain solid floor.
+ *
+ * Their anchors came in with the plate when it halved its area (#403), so the
+ * band is tighter than it was — the shafts are the same size and there is less
+ * nothing between them, which is the change working as intended. The bubble's
+ * removal gives some of that back in the middle. Both together are the figure
+ * to watch if anything is ever added to this band.
  */
-export const STAIRWELL = rect(-25.5, -20.6, -2.7, 2.7);
+/**
+ * The staircase's own axis: the line the switchback turns on.
+ *
+ * **One anchor for the whole staircase** (#403). `STAIRWELL` and both flights
+ * are laid out from here, so the well can no longer be a different width from
+ * the ramps that span it — the two used to be four typed numbers each, kept
+ * equal by hand, and halving the plate is exactly the change that pulls two
+ * such copies apart. See `onPlate`'s "scale anchors, never parts".
+ */
+const STAIR_AXIS_X = onPlate(-23.05);
+/** Each flight's width; the two together are the well's. Authored size. */
+const STAIR_FLIGHT_HALF_X = 2.45 / 2;
+/** The middle of the staircase's run, along Z. */
+const STAIR_AXIS_Z = onPlate(0.2);
+/** Half the flights' run. The stairs are as long as they always were. */
+const STAIR_RUN_HALF_Z = 3.1;
+
+export const STAIRWELL = rect(
+  STAIR_AXIS_X - STAIR_FLIGHT_HALF_X * 2,
+  STAIR_AXIS_X + STAIR_FLIGHT_HALF_X * 2,
+  STAIR_AXIS_Z - 2.9,
+  STAIR_AXIS_Z + 2.5,
+);
 /**
  * Matches the escalator ramp's own footprint (`escalatorRamp`, below)
  * exactly, the same way `STAIRWELL` matches `stairFlights` — so the well is
@@ -185,11 +256,36 @@ export const STAIRWELL = rect(-25.5, -20.6, -2.7, 2.7);
  * each side (architecture review S5): two 0.6 x 5.4 m open slots through the
  * slab, outside the balustrade, on every upper deck — nobody fell only
  * because player radius held them back by 0.22 m, and NPC radius by half that.
+ *
+ * Both now come off `ESCALATOR_AXIS_X`/`_Z` rather than off two copies of the
+ * same four numbers (#403).
  */
-export const ESCALATOR_WELL = rect(-13.6, -10.5, -2.9, 3.3);
-export const TRAMPOLINE_SHAFT = circle(8, 0.4, 2.5);
-/** East side: the helter-skelter winds down this one. */
-export const HELTER_SHAFT = rect(16.5, 23.5, -9.5, -2.5);
+const ESCALATOR_AXIS_X = onPlate(-12.05);
+const ESCALATOR_AXIS_Z = onPlate(0.2);
+const ESCALATOR_HALF_X = 1.55;
+const ESCALATOR_RUN_HALF_Z = 3.1;
+export const ESCALATOR_WELL = rect(
+  ESCALATOR_AXIS_X - ESCALATOR_HALF_X,
+  ESCALATOR_AXIS_X + ESCALATOR_HALF_X,
+  ESCALATOR_AXIS_Z - ESCALATOR_RUN_HALF_Z,
+  ESCALATOR_AXIS_Z + ESCALATOR_RUN_HALF_Z,
+);
+export const TRAMPOLINE_SHAFT = circle(onPlate(8), onPlate(0.4), 2.5);
+/**
+ * East side: the helter-skelter winds down this one.
+ *
+ * Anchored on the helix's own centre (`HELTER_CENTRE_*`, below) rather than on
+ * four typed numbers, so the shaft, the chute inside it and the pad you get on
+ * from all move together (#403).
+ */
+export const HELTER_CENTRE_X = onPlate(20);
+export const HELTER_CENTRE_Z = onPlate(-6.4);
+export const HELTER_SHAFT = rect(
+  HELTER_CENTRE_X - 3.5,
+  HELTER_CENTRE_X + 3.5,
+  HELTER_CENTRE_Z - 3.1,
+  HELTER_CENTRE_Z + 3.9,
+);
 
 const UPPER_DECKS = [1, 2, 3, 4] as const;
 
@@ -487,29 +583,46 @@ export function stairFlights(deck: number): readonly [RampDefinition, RampDefini
     {
       id: `stair-${deck}-a`,
       space: 'interior',
-      footprint: rect(-25.5, -23.05, -2.9, 3.3),
+      footprint: rect(
+        STAIR_AXIS_X - STAIR_FLIGHT_HALF_X * 2,
+        STAIR_AXIS_X,
+        STAIR_AXIS_Z - STAIR_RUN_HALF_Z,
+        STAIR_AXIS_Z + STAIR_RUN_HALF_Z,
+      ),
       axis: 'z',
-      from: 3.3,
-      to: -2.4,
+      from: STAIR_AXIS_Z + STAIR_RUN_HALF_Z,
+      to: STAIR_AXIS_Z - 2.6,
       yFrom: bottom,
       yTo: bottom + HALF_RISE,
     },
     {
       id: `stair-${deck}-b`,
       space: 'interior',
-      footprint: rect(-23.05, -20.6, -2.9, 2.9),
+      footprint: rect(
+        STAIR_AXIS_X,
+        STAIR_AXIS_X + STAIR_FLIGHT_HALF_X * 2,
+        STAIR_AXIS_Z - STAIR_RUN_HALF_Z,
+        STAIR_AXIS_Z + 2.7,
+      ),
       axis: 'z',
-      from: -2.4,
-      to: 2.9,
+      from: STAIR_AXIS_Z - 2.6,
+      to: STAIR_AXIS_Z + 2.7,
       yFrom: bottom + HALF_RISE,
       yTo: bottom + BUILDING_FLOOR_HEIGHT,
     },
   ];
 }
 
-/** Where a child stands to tap the stairs, on any deck. Solid floor, both ways. */
-export const STAIR_STAND_X = -23.05;
-export const STAIR_STAND_Z = 5.2;
+/**
+ * Where a child stands to tap the stairs, on any deck. Solid floor, both ways.
+ *
+ * Derived from the staircase rather than typed (#403): the authored pair were
+ * `(-23.05, 5.2)`, which is the axis and 1.9 m clear of the flight's south end
+ * — arithmetic that was true and written nowhere, so shrinking the plate would
+ * have stood a child inside the stairwell.
+ */
+export const STAIR_STAND_X = STAIR_AXIS_X;
+export const STAIR_STAND_Z = STAIR_AXIS_Z + STAIR_RUN_HALF_Z + 1.9;
 
 /**
  * The route the stair ride walks, from deck `deck` up to `deck + 1`.
@@ -540,10 +653,10 @@ export function escalatorRamp(deck: number): RampDefinition {
   return {
     id: `escalator-${deck}`,
     space: 'interior',
-    footprint: rect(-13.6, -10.5, -2.9, 3.3),
+    footprint: ESCALATOR_WELL,
     axis: 'z',
-    from: 3.3,
-    to: -2.9,
+    from: ESCALATOR_AXIS_Z + ESCALATOR_RUN_HALF_Z,
+    to: ESCALATOR_AXIS_Z - ESCALATOR_RUN_HALF_Z,
     yFrom: bottom,
     yTo: bottom + BUILDING_FLOOR_HEIGHT,
   };
@@ -591,12 +704,17 @@ export const TRAMPOLINE_RADIUS = 1.7;
  * enough that the chute never looks like a fireman's pole.
  */
 export const HELTER_DECK = 2;
-/** Where you stand to get on; the chute mouth itself is a touch further east. */
-export const HELTER_ENTRY_X = 15.4;
-export const HELTER_ENTRY_Z = -6;
-export const HELTER_MOUTH_X = 16.2;
-export const HELTER_CENTRE_X = 20;
-export const HELTER_CENTRE_Z = -6.4;
+/**
+ * Where you stand to get on; the chute mouth itself is a touch further east.
+ *
+ * Both measured **west from the shaft's own edge** rather than typed (#403).
+ * The authored 15.4 sat 1.1 m clear of a shaft that started at 16.5; halving
+ * the plate moved the shaft's edge and would have left the boarding pad
+ * hanging over the hole a child is meant to be standing beside.
+ */
+export const HELTER_ENTRY_X = HELTER_SHAFT.minX - 1.1;
+export const HELTER_ENTRY_Z = HELTER_CENTRE_Z + 0.4;
+export const HELTER_MOUTH_X = HELTER_SHAFT.minX - 0.3;
 export const HELTER_SEMI_X = 1.7;
 export const HELTER_SEMI_Z = 2.1;
 
@@ -608,8 +726,8 @@ export const HELTER_SEMI_Z = 2.1;
  * because someone typed 20 in both places.
  */
 /** The cuddly grown-up waits here, ready to be asked along. */
-export const GROWN_UP_X = 15.2;
-export const GROWN_UP_Z = 14;
+export const GROWN_UP_X = onPlate(15.2);
+export const GROWN_UP_Z = onPlate(14);
 
 // ------------------------------------------------------------- the toilets
 
@@ -620,7 +738,57 @@ export const GROWN_UP_Z = 14;
  * then runs the tap while you wash your hands.
  */
 export const TOILET_DECK = 1;
-export const TOILET_ROOM = rect(21.2, 28.6, -21.5, -14.4);
+
+/**
+ * The room's authored size. It does **not** shrink with the plate (#403): a
+ * pan, a basin and a child washing her hands are all the size they were.
+ */
+const TOILET_ROOM_WIDTH = 7.4;
+const TOILET_ROOM_DEPTH = 7.1;
+
+/**
+ * The toilets moved from the north-east corner to the south-east (#403), and
+ * this is the one placement the resize actually forced rather than scaled.
+ *
+ * **The finding:** the north strip cannot hold both the shop run and this room
+ * once the plate is 42.43 m wide instead of 60. Five shops on the north wall
+ * need 46.7 m of it at their authored spacing — they do not fit at all, at any
+ * spacing, so one had to move to the west wall (see `SHOP_UNITS`). Four fit,
+ * with 6 m to spare; but this room is 7.4 m wide, so four shops *and* the
+ * toilets need 44 m of a 42.43 m wall. Something had to leave the north strip,
+ * and a room with its own walls is a cleaner thing to move than a shop the
+ * layout rules pin to a far wall. **Nothing was made smaller and no clearance
+ * was relaxed to reach this** — see HANDOFF-castle-shrink.md.
+ *
+ * South-east rather than north-west because the west end of the north wall is
+ * now the shop run's, and because the south wall is otherwise empty above the
+ * ground floor: the interior's own door is deck 0 only.
+ *
+ * `maxX` stops at the lift lobby's west edge (`dressing.ts` keeps a 4 m disc
+ * at `INTERIOR_HALF_X - 2`), so the room never walls off the walk to the lift.
+ * That constant cannot be imported — `dressing.ts` imports this file — so the
+ * `6` is written out with this note rather than derived.
+ */
+export const TOILET_ROOM = rect(
+  INTERIOR_HALF_X - 6 - TOILET_ROOM_WIDTH,
+  INTERIOR_HALF_X - 6,
+  INTERIOR_HALF_Z - 0.5 - TOILET_ROOM_DEPTH,
+  INTERIOR_HALF_Z - 0.5,
+);
+
+/**
+ * Which way the open front of the room faces: **into the room**, always.
+ *
+ * `-1` is -Z, i.e. north, because the room now stands on the south wall. It
+ * was +1 while the room stood on the north wall, and it was not a constant at
+ * all — `Toilets.ts` simply built its front screen at `maxZ`. Making it a sign
+ * is what let the room move corners without the child having to walk through
+ * the back wall to use it.
+ */
+export const TOILET_FRONT_Z = -1;
+
+const TOILET_CENTRE_X = (TOILET_ROOM.minX + TOILET_ROOM.maxX) / 2;
+const TOILET_CENTRE_Z = (TOILET_ROOM.minZ + TOILET_ROOM.maxZ) / 2;
 /**
  * Where a child stands to use them — **inside the room**.
  *
@@ -634,20 +802,20 @@ export const TOILET_ROOM = rect(21.2, 28.6, -21.5, -14.4);
  * through a wall. `z` is between the doorway and the fittings, clear of both
  * the pan and the basin, and far enough in that the roof covers her.
  */
-export const TOILET_STAND_X = 24.9;
-export const TOILET_STAND_Z = -16.8;
+export const TOILET_STAND_X = TOILET_CENTRE_X;
+export const TOILET_STAND_Z = TOILET_CENTRE_Z + TOILET_FRONT_Z * 1.15;
 /** Where the pan itself sits, against the room's back wall. */
-export const TOILET_PAN_X = 23.2;
-export const TOILET_PAN_Z = -19.6;
+export const TOILET_PAN_X = TOILET_CENTRE_X - 1.7;
+export const TOILET_PAN_Z = TOILET_CENTRE_Z - TOILET_FRONT_Z * 1.65;
 /** And the basin, on the other side of the little room. */
-export const TOILET_BASIN_X = 27.1;
-export const TOILET_BASIN_Z = -19.4;
+export const TOILET_BASIN_X = TOILET_CENTRE_X + 2.2;
+export const TOILET_BASIN_Z = TOILET_CENTRE_Z - TOILET_FRONT_Z * 1.45;
 
 // ------------------------------------------------------------- roof terrace
 
 /** The pavilion on the roof terrace, at the west end. */
-export const ROOF_PAVILION_X = -18;
-export const ROOF_PAVILION_Z = -2;
+export const ROOF_PAVILION_X = onPlate(-18);
+export const ROOF_PAVILION_Z = onPlate(-2);
 export const ROOF_PAVILION_HALF_X = 5.4;
 export const ROOF_PAVILION_HALF_Z = 4.6;
 
@@ -714,18 +882,52 @@ const FACE_EAST = Math.PI / 2;
  * `TOILET_ROOM`'s x-range (21.2-28.6, itself inside the same z-band) by
  * 1.5 m rather than running into it.
  */
-const HAT_X = -22.44;
-const SURPRISE_EGG_X = -12.16;
-const BALLOON_X = -3.72;
-const CANDY_FLOSS_X = 4.72;
-const STICKER_PET_X = 15;
+/**
+ * ## Re-spaced for the half-area plate (#403), and one shop moved walls
+ *
+ * These positions could not simply be scaled with the plate, because the
+ * clearances above are **authored sizes** and do not scale: a counter is 2.8 m
+ * either side of centre whatever the room is, so the run's length is fixed and
+ * only the wall got shorter.
+ *
+ * The arithmetic, written out because it is the reason a shop moved:
+ *
+ * - five north-wall units need `4.64 + 10.28 + 8.44 + 8.44 + 10.28 + 4.64 =
+ *   46.72 m` of wall. Even at the bare minimum with the flat 1 m dropped —
+ *   which would be relaxing a clearance, and is not on offer — they need
+ *   42.72 m. The north wall is now **42.43 m**. Five do not fit at any spacing.
+ * - four fit in 36.44 m, with 6 m to spare.
+ * - the west wall is 31.11 m and was carrying two. Three need
+ *   `4.64 + 8.44 + 8.44 + 4.64 = 26.16 m`. They fit with 4.95 m to spare.
+ *
+ * So `hat` moved from the north wall to the west wall. It is still on a *far*
+ * wall, so rule 2 above still holds and the camera still sees into it; it is
+ * the deck-2 unit, and deck 2 had two north-wall units while the west wall had
+ * none above deck 1. **No clearance was reduced to make this fit** — every gap
+ * below is at or above the figure the paragraph above derives, and
+ * `check:shop-spacing` proves it on the built numbers.
+ *
+ * The west-wall run additionally has to clear the **stairwell**, which is a
+ * hole on decks 1-4 at `z ∈ [-2.96, 3.24]` reaching east to `x = -15.59`,
+ * and a forecourt is a hole too. `hat` and `iceCream` are placed so their
+ * forecourts stop clear of it in Z; `toy` is on deck 0, which never has holes.
+ */
+const SURPRISE_EGG_X = -15.5;
+const BALLOON_X = -7.06;
+const CANDY_FLOSS_X = 1.38;
+const STICKER_PET_X = 11.66;
+
+/** West-wall units, spaced along Z. `hat` joined them for #403; see above. */
+const HAT_Z = -8.5;
+const TOY_Z = 0.5;
+const ICE_CREAM_Z = 9;
 
 export const SHOP_UNITS: readonly ShopUnitDefinition[] = [
   {
     id: 'toy',
     deck: 0,
     x: WEST_WALL_X,
-    z: -9,
+    z: TOY_Z,
     yaw: FACE_EAST,
     title: 'Toy Shop',
     glyph: '🧸',
@@ -755,7 +957,7 @@ export const SHOP_UNITS: readonly ShopUnitDefinition[] = [
     id: 'iceCream',
     deck: 1,
     x: WEST_WALL_X,
-    z: 9,
+    z: ICE_CREAM_Z,
     yaw: FACE_EAST,
     title: 'Ice Cream',
     glyph: '🍦',
@@ -764,9 +966,9 @@ export const SHOP_UNITS: readonly ShopUnitDefinition[] = [
   {
     id: 'hat',
     deck: 2,
-    x: HAT_X,
-    z: NORTH_WALL_Z,
-    yaw: FACE_SOUTH,
+    x: WEST_WALL_X,
+    z: HAT_Z,
+    yaw: FACE_EAST,
     title: 'Hat Shop',
     glyph: '🎩',
     accent: PALETTE.markerLilac,
