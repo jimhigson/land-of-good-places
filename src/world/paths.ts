@@ -1874,6 +1874,36 @@ function segmentCutsABridgeRamp(ax: number, az: number, bx: number, bz: number):
 const RAMP_SCREEN_MARGIN = 1.5;
 
 /**
+ * What one metre of ribbon drawn across a bridge's ramp costs
+ * {@link fallbackSpurRoute}'s candidate scoring.
+ *
+ * **Large on purpose, and not a tuning dial.** Every other term in that score
+ * prices a *shape* defect — a long walk, a rail-hugging stretch, an off-axis
+ * run — things that trade off against each other honestly. A ramp cut is not
+ * in that family: the ribbon is severed by a parapet wall, so the paving past
+ * the cut is unreachable and every waypoint seeded on it is stranded. At 200 a
+ * single metre of it outweighs the whole rest of the scale, which is the
+ * intent: any candidate that does not cut a ramp beats any that does, whatever
+ * its length.
+ *
+ * ## Why this is a price and not a refusal, measured
+ *
+ * The obvious symmetric fix — give `computeStreetStubs`' `legClear` the same
+ * `segmentCutsABridgeRamp` clause `edgeOk` and `linkClear` carry — was built
+ * and **made seed 5 far worse: `poi.stranded` 8 -> 50**, and 8 -> 82 with this
+ * price as well. Refusing a stub leg is not free the way refusing a lattice
+ * edge is: a destination whose every candidate stub is refused gets *no* stub,
+ * `streetRoute` returns null, and the whole spur drops to this fallback router
+ * — so screening there pushed more routes onto exactly the path that needed
+ * fixing, and severed the gate approach along the way. Reverted; the numbers
+ * are in `HANDOFF-paths-before-bridges.md` so nobody rebuilds it.
+ *
+ * If every candidate here carries the penalty, that is a finding to report,
+ * not a number to lower.
+ */
+const RAMP_CUT_PENALTY_PER_METRE = 200;
+
+/**
  * **The ground a bridge will really stand on — deck, both ramps and the
  * parapets that flank them — known before a single path is drawn.**
  *
@@ -5356,9 +5386,33 @@ function fallbackSpurRoute(
         }
       }
     }
+    // **Metres drawn across a bridge's ramp** — this router's own form of the
+    // clause `edgeOk` and `linkClear` carry (issue #414). The lattice refuses
+    // ramp ground outright; this router prices it instead, because it is the
+    // last resort for destinations the lattice could not serve at all and a
+    // stall with no path is worse than one with a long path. See
+    // {@link RAMP_CUT_PENALTY_PER_METRE} for why refusing was tried, measured
+    // and rejected.
+    //
+    // Measured on seed 5: `spur-dodgems` ran (5.9, 45.9) -> (38.4, 36.3), 30%
+    // of it across proven site 12's ramp, and the seven waypoints seeded along
+    // the far half were stranded behind the parapet.
+    let rampMetres = 0;
+    for (let k = 1; k < points.length; k += 1) {
+      const p = points[k - 1] as readonly [number, number];
+      const q = points[k] as readonly [number, number];
+      const hop = Math.hypot(q[0] - p[0], q[1] - p[1]);
+      const steps = Math.max(1, Math.ceil(hop / 1.5));
+      for (let t = 0; t <= steps; t += 1) {
+        const x = p[0] + ((q[0] - p[0]) * t) / steps;
+        const z = p[1] + ((q[1] - p[1]) * t) / steps;
+        if (pointStandsOnABridgeRamp(x, z)) rampMetres += hop / steps;
+      }
+    }
     const score =
       polylineLength(points) +
       railHug +
+      rampMetres * RAMP_CUT_PENALTY_PER_METRE +
       (carriesAnOffLatticeStreetRun(points) ? 50 : 0) +
       (worst > MAX_OFF_AXIS_RUN ? 100 + (worst - MAX_OFF_AXIS_RUN) * 2 : 0);
     if (score < bestScore) {

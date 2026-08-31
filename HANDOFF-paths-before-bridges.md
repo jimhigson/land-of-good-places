@@ -613,3 +613,38 @@ spurs the lattice could not serve), which does not ask the ramp screen either.
 ordering, not the lattice. `CROSSING_SITES` is solved at module load in
 `crossingPlan.ts` and is fully populated before any of this runs — checked,
 because "paths planned before bridges" made it the obvious suspect.
+
+## THE FIX, AND THE HALF OF IT THAT HAD TO BE THROWN AWAY
+
+The mechanism above named two unscreened producers, so the obvious change was
+to give both the clause `edgeOk`/`linkClear` already carry. **Built both,
+measured each separately, and one of them is badly wrong.** Seed 5
+`poi.stranded`:
+
+| variant | poi.stranded |
+|---|---|
+| baseline (this branch, rebased) | 8 |
+| **stub screen only** (`legClear` gets `segmentCutsABridgeRamp`) | **50** |
+| **fallback penalty only** (`RAMP_CUT_PENALTY_PER_METRE`) | **7** |
+| both | **82** |
+
+**Screening the stub search is not the mirror image of screening a lattice
+edge, and the asymmetry is the whole point.** A refused lattice edge leaves the
+lattice with other edges. A destination whose every candidate stub leg is
+refused gets **no stub at all** — `streetStubs` returns empty, `planStreetToNetwork`
+returns null, `streetRoute` returns null, and the entire spur drops through to
+`fallbackSpurRoute`. So screening there pushed *more* routes onto the very
+router that was drawing ribbons across ramps, and severed the gate approach as
+well: at 82 the whole northern rim, gate corridor included, is stranded.
+
+Reverted, and written into `RAMP_CUT_PENALTY_PER_METRE`'s own doc comment so
+the next person does not rebuild it from the same sound-looking reasoning.
+
+**What ships is the price, not the refusal**: `fallbackSpurRoute` already
+scores its four best candidates and picks the cheapest, so metres-across-a-ramp
+is charged at 200/m — enough that any candidate which does not cut a ramp beats
+any that does. That is procgen backtracking in the idiom this router already
+uses.
+
+**8 -> 7 on seed 5.** Reported before trying anything further, per the standing
+instruction.
