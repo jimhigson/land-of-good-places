@@ -1069,12 +1069,22 @@ cache, a save, an installed service worker) is by construction invisible
 there. Those get verified by an agent's own measurement and reported as a
 result, never handed to him as something to check.
 
-**One caveat found the hard way, 26 August 2026:** this sandbox's egress
-policy returns **403 for `*.workers.dev`**, for `curl` as well as for a
-headless browser, so an agent here **cannot verify a preview URL it hands
-over**. Two links were given to Jim that failed on him before this was
-understood. So: take the URL from the PR's own preview comment (never
-assemble it), and if you have not been able to load it yourself, say that
-in the same breath rather than implying you checked it. The live domain
-`landofgoodplaces.blockstack.ing` *is* reachable by `curl` from here, so
-anything already merged can and should be verified for real.
+**~~One caveat found the hard way, 26 August 2026: this sandbox's egress
+policy returns 403 for `*.workers.dev`, for `curl` as well as for a headless
+browser, so an agent here cannot verify a preview URL it hands over.~~**
+
+**Struck 30 August 2026 — it is no longer true, and the striking matters more
+than the deletion would.** A preview URL for PR #407 returned **HTTP 200** to
+plain `curl` from this sandbox. Egress to `*.workers.dev` works. An agent here
+**can** load a preview URL, and therefore **should**: "I could not check it"
+has stopped being an available excuse.
+
+What survives from the original note, because it was never about egress: take
+the URL from the PR's own preview comment (**never assemble it** — the sha in
+it is not one you can guess), and if for any reason you have not loaded it
+yourself, say so in the same breath rather than implying you checked it. Two
+links were once given to Jim that failed on him, and that is the failure being
+guarded against.
+
+The live domain `landofgoodplaces.blockstack.ing` is reachable too, so anything
+already merged can and should be verified for real.
