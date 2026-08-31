@@ -1078,6 +1078,14 @@ function sameSideLeg(
 ): (readonly [number, number])[] {
   const direct = enforceRailSide(manhattanRoute(from, to), side);
   const directCrosses = polylineCrossesRail(direct);
+  if (DEBUG_STREETS) {
+    // eslint-disable-next-line no-console
+    console.log(
+      `[sameSideLeg] (${from[0].toFixed(1)},${from[1].toFixed(1)}) -> ` +
+        `(${to[0].toFixed(1)},${to[1].toFixed(1)}) side ${side} crosses=${directCrosses}\n` +
+        `[sameSideLeg]   ${direct.map((q) => `(${q[0].toFixed(1)},${q[1].toFixed(1)})`).join(' ')}`,
+    );
+  }
   if (!directCrosses && longestOffAxisRun(direct) <= MAX_OFF_AXIS_RUN) return direct;
   // A fence-follow can commit lattice paving through a double-crossing's
   // legs; if the direct route wins the comparison below, that paving was
@@ -3381,7 +3389,8 @@ function* gateApproachSearch(
         console.log(
           `[avenue] mouth (${mouth[0].toFixed(2)},${mouth[1].toFixed(2)}) via ${solver.name}: ` +
             `length ${polylineLength(points).toFixed(1)} retraced ${retraced.toFixed(1)} ` +
-            `score ${score.toFixed(1)}`,
+            `score ${score.toFixed(1)}` +
+            `\n[avenue]   shape ${points.map((q) => `(${q[0].toFixed(1)},${q[1].toFixed(1)})`).join(' ')}`,
         );
       }
       // **The street grid wins outright when it does not double back.** It is
