@@ -514,11 +514,23 @@ function logPileGeometry(): BufferGeometry {
   // campfire that had wandered indoors once there were 3.6 m of fireplace round
   // them, which is the same fault as a flame that is correct in the inspector
   // and invisible in the game — a dimension judged against no context at all.
+  //
+  // **The yaw spread is 0.25 rad and not the 1.1 it was, and that is a fix
+  // rather than a preference.** A 2 m log turned 1.1 rad off the opening's axis
+  // projects a metre front-to-back; measured on the built pile, it spanned
+  // z -15.84..-13.70 against a firebox of -15.33..-14.23 — half a metre through
+  // the back of the chimney and half a metre out across the hearthstone, and it
+  // was plainly visible in the first screenshot as a log growing out of the
+  // stone. It was wrong before this branch too, at 1.1 m of overhang; there was
+  // simply no fireplace for it to stick out of. `check:castle` measures the pile
+  // against the opening now, so this cannot come back quietly.
+  //
+  // Logs laid *across* the opening is also what a fire looks like.
   for (let i = 0; i < 9; i += 1) {
-    const log = new CylinderGeometry(0.15, 0.14, rng.range(1.5, 2.3), 7);
+    const log = new CylinderGeometry(0.15, 0.14, rng.range(1.4, 1.9), 7);
     log.rotateZ(Math.PI / 2);
-    log.rotateY(rng.range(-1.1, 1.1));
-    log.translate(rng.range(-0.5, 0.5), 0.16 + i * 0.09, rng.range(-0.24, 0.24));
+    log.rotateY(rng.range(-0.25, 0.25));
+    log.translate(rng.range(-0.5, 0.5), 0.16 + i * 0.05, rng.range(-0.15, 0.15));
     parts.push(log);
   }
   const first = parts[0];
@@ -606,7 +618,23 @@ function chimneypiece(): Group {
   group.name = castleHearthSurroundName(CASTLE_HEARTH.deck);
   group.position.set(CASTLE_HEARTH.x, 0, -WALL_FACE_Z);
 
-  const stone = softMaterial(PALETTE.stonePinkDark, 0.85);
+  // **Carved grey stone, not the wall's own pink** — and this came out of
+  // looking at a rendered frame, which is the only thing that was ever going to
+  // settle it. Built in `PALETTE.stonePinkDark` (0xf0a3c1) the chimneypiece was
+  // the same colour as the masonry it stands against *and* nearly the same
+  // colour as the fire in it: a large fireplace with a roaring fire read as a
+  // pale pink shape with slightly oranger pink shapes inside it. Correct in
+  // every measurement and flat on screen.
+  //
+  // `ART.statueStone` is the park's own carved grey — a rose-leaning grey
+  // chosen precisely so that carved stone can stand on pink cobble without
+  // reading as a hole in the picture (see its note in `artPalette.ts`). This is
+  // that same material doing that same job, so it is a reuse rather than
+  // ART_DIRECTION §5's forbidden second opinion about a colour the world
+  // already names. The hood takes the step below it so the chimney reads as
+  // built of parts rather than extruded.
+  const stone = softMaterial(ART.statueStone, 0.85);
+  const hoodStone = softMaterial(ART.statueStoneMid, 0.85);
   const soot = softMaterial(PALETTE.ink, 0.6);
 
   const block = (
@@ -651,7 +679,7 @@ function chimneypiece(): Group {
   // deep enough to sit over the firebox, no deeper.
   hood.scale(1, 1, (HEARTH_DEPTH + 0.14) / lintelWidth);
   hood.translate(0, hoodBottom + hoodHeight / 2, (HEARTH_DEPTH + 0.14) / 2);
-  block('castle-hearth-hood', hood, stone);
+  block('castle-hearth-hood', hood, hoodStone);
 
   // The fireback: the sooted plate the fire burns against. Flat against the
   // wall face, which is where this group's own origin is.

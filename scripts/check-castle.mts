@@ -1339,6 +1339,39 @@ for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
 
   if (deck !== CASTLE_HEARTH.deck) continue;
 
+  // **What burns is measured as well as the flames**, and that is not padding.
+  // The log pile turned each log up to 1.1 rad off the opening's axis, so a 2 m
+  // log projected a metre front-to-back: measured, the pile spanned
+  // z -15.84..-13.70 against a firebox of -15.33..-14.23 — half a metre through
+  // the back of the chimney and half a metre out over the hearthstone. It was
+  // visible in the very first screenshot of the finished fireplace, and it had
+  // been wrong for as long as the log pile had existed; there was simply no
+  // fireplace for it to stick out of before.
+  if (logs) {
+    const pile = logs as InstancedMesh;
+    pile.geometry.computeBoundingBox();
+    const pileLocal = pile.geometry.boundingBox;
+    if (pileLocal) {
+      const pileMatrix = new Matrix4();
+      const pileWorld = new Box3();
+      for (let i = 0; i < pile.count; i += 1) {
+        pile.getMatrixAt(i, pileMatrix);
+        pileWorld.copy(pileLocal).applyMatrix4(pileMatrix.premultiply(pile.matrixWorld));
+        if (openingBox.containsBox(pileWorld)) continue;
+        fail(
+          `hearth: the log pile spans x ${pileWorld.min.x.toFixed(2)}..` +
+            `${pileWorld.max.x.toFixed(2)}, y ${pileWorld.min.y.toFixed(2)}..` +
+            `${pileWorld.max.y.toFixed(2)}, z ${pileWorld.min.z.toFixed(2)}..` +
+            `${pileWorld.max.z.toFixed(2)}, which leaves the firebox ` +
+            `(${openingBox.min.x.toFixed(2)}..${openingBox.max.x.toFixed(2)} x, ` +
+            `0..${openingBox.max.y.toFixed(2)} y, ${openingBox.min.z.toFixed(2)}..` +
+            `${openingBox.max.z.toFixed(2)} z). A log through the back of the chimney or out ` +
+            `across the hearthstone is a fire that is not in its fireplace.`,
+        );
+      }
+    }
+  }
+
   const flames = floor.getObjectByName(`castle-flame-${deck}`) as InstancedMesh | undefined;
   if (!flames) continue;
   flames.geometry.computeBoundingBox();

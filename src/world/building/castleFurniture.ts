@@ -261,12 +261,22 @@ export const FEAST_TABLE_COUNT = 3;
  * How far along a bench the two diners sitting on it are placed, either side of
  * its middle.
  *
- * The bench is 2.80 m and a child is 0.80 m across the hem, so two at ±0.70
- * leaves 0.60 m of clear plank between them and 0.30 m at each end. Three would
- * fit at a pinch and would read as a queue rather than as a table people chose
- * to sit at.
+ * Two per bench. Three would fit at a pinch and would read as a queue rather
+ * than as a table people chose to sit at.
+ *
+ * **0.75 rather than 0.70, chosen off a screenshot.** At 0.70 the run's spacing
+ * alternates 1.40 m within a bench and 1.70 m between benches, and a child's
+ * *hair* is 1.53 m across even though her head is 1.36 — so the pairs sat with
+ * their hair merged and a visible gap between pairs, which reads as six clumps
+ * rather than as one full table. 0.75 makes it 1.50 and 1.60, near enough even
+ * that the eye stops seeing pairs.
+ *
+ * It does not go further. The children would stop overlapping entirely at about
+ * 0.90, and the table would then look half empty — which is the opposite of
+ * what #413 asked for. Children at a feast sitting shoulder to shoulder is the
+ * brief.
  */
-const DINER_ALONG = 0.7;
+const DINER_ALONG = 0.75;
 
 /**
  * **Where the hall is laid out**, resolved once — its axis, its end wall, and
