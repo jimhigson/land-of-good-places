@@ -734,3 +734,52 @@ choose. The three places it *can* be fixed all belong to someone else:
 (3) is the one that matches Jim's own framing — *"path finding needs to include
 bridges from the start"* — and it is the only one that gets a child to the
 dodgems on this seed. It is also a real piece of work, not a clause.
+
+---
+
+# WHERE THIS BRANCH ACTUALLY STANDS (end of this engineer's stint)
+
+Rebased a second time onto `origin/main` @ `347e9454` (#415/#420 speech
+bubbles landed mid-session). Clean — that commit touches no file this branch
+touches. `check` chain verified by **parsing the scripts object**, not
+grepping: **49 steps, `check:speech-bubbles` present**.
+
+| gate | result |
+|---|---|
+| `tsc --noEmit` | **exit 0** |
+| `pnpm run check` (49 steps) | **exit 0 — GREEN** |
+| `pnpm run test:procgen` | **exit 1 — 7 failed, 485 passed** |
+| `check:park` canonical / 2 / 11 / 18 | **0 stranded, exit 0** on all four |
+| `check:park` seed 5 | **7 stranded** (was 8 before this stint, 15 in the brief) |
+
+**`test:procgen` is the blocker and it is not close to green.** Six of the
+seven failures are inherited — they were already there before this stint's
+first code change, and `origin/main` at both rebase bases is exit 0 / 487
+passed, so they belong to this branch's earlier #414 work and nobody has
+triaged them. The seventh is this stint's, and is the honest price of
+`RAMP_CUT_PENALTY_PER_METRE`.
+
+**Note that `check` being green does not cover seed 5 at all**: `check:park`
+runs the canonical seed only, and canonical is clean. The seed-5 stranding is
+reached solely through `LGP_SEED=5`, so nothing in CI currently gates it. That
+is worth knowing before anyone reads the green `check` as cover.
+
+## What the next person should NOT redo
+
+- **The swept-curve bow.** Measured at 0.00-0.01 m on the offending routes. Dead.
+- **Screening `computeStreetStubs`' `legClear`.** Built, measured: seed 5
+  8 -> 50 stranded. Dead, and the reason is structural (a destination with no
+  clear stub gets no stub at all and falls through to the fallback router).
+- **Ordering — "sites solved after the lattice".** Checked: `crossingPlan.ts`
+  solves at module load, fully populated before any router runs.
+
+## The two live questions, both for the Overseer
+
+1. **The six inherited `test:procgen` failures have never been triaged.** They
+   gate the merge and they are older than this stint. Somebody has to own them.
+2. **Seed 5's dodgems is a design question, not a router bug** — measurement in
+   the section above: no lattice node reachable (nearest misses `STUB_TAIL_LIMIT`
+   by 1.1 m), and all four fallback candidates cross proven site 12's ramp. The
+   only fix that gets a child there is letting a foreign leg cross *on the
+   deck*, which is Jim's own "path finding needs to include bridges from the
+   start" and is its own piece of work.
