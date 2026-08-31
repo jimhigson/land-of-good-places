@@ -105,6 +105,22 @@ Headless `playwright-core` (`channel: 'chromium'`) against `/castle?deck=2`.
 fader, so a free camera parked over the roof renders empty sky. Use
 `/castle?deck=2`.
 
+## Two things found while verifying, that are not this PR's
+
+- **`check:park-boot` flaked red once** (`one advance() blocked for 23.2 ms
+  against a 8 ms budget`) — #324's known load-dependent flake, and self-inflicted:
+  a headless Chromium was driving the game on the same box. It passes clean,
+  exit 0, with nothing else running. **Re-run it before believing it.**
+- **Issue #412: the grown-up by the ginormous slide is on the wrong floor.**
+  Measured at world (610.7, **7.9**, 609.9) — the *mall's* plate, 589 m from
+  the roof, floating 7.9 m up. `Building.placeGrownUp` still says
+  `TOP_DECK * BUILDING_FLOOR_HEIGHT` and parents her to `interiorRoot` rather
+  than the roof's floor group. **Pre-existing on `main`, untouched by this
+  diff**, and it does not block #410: the only contact is that
+  `keepOutsFor(TOP_DECK)` reserves her *intended* spot, which is right either
+  way. Fixing her interacts with the slide ride's `grownUpComing` flow and
+  wants its own review.
+
 ## Not done / open
 
 - `petBlob.ts` still exists and is still used by `NpcSystem.ts:760`. Deleting it
