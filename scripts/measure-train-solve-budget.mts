@@ -50,5 +50,14 @@ console.log(
   `seed ${PARK_SEED}: poses=${report.startPoseCount} won=#${report.startPoseIndex} ` +
     `restarts=${report.restarts} backtracks=${report.backtracks} ` +
     `candidates=${report.candidatesTried} length=${report.length.toFixed(0)}m ` +
-    `${report.elapsedMs.toFixed(0)}ms`,
+    `${report.elapsedMs.toFixed(0)}ms ` +
+    // What the `satisfies` backstop costs, and whether it was met. `generate.ts`
+    // warns that a *large* `satisfyRejects` means the search keeps solving
+    // routes it must throw away, and that the fix for that is to strengthen
+    // `RouteInfluence` rather than to make the backstop work harder — so the
+    // number has to be visible to be acted on. `satisfied=false` means every
+    // start pose on every rung failed it and the first solved loop was returned
+    // regardless: the park still has a railway, but not one that kept its own
+    // bridgeable crossing.
+    `satisfyRejects=${report.satisfyRejects} satisfied=${report.satisfied}`,
 );

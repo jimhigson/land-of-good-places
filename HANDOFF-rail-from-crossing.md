@@ -580,3 +580,137 @@ now expired on this ticket:
 from reasoning.** When something here fails, log what actually happened before
 theorising — and re-measure a cause after any fix that touches the same probe,
 because clearing one gate reveals the next one behind it.
+
+---
+
+# SECOND ENGINEER — `satisfies` BUILT. 85% -> 92%, NOT 100%.
+
+Picked up at the handover point above. **Every number below is measured on this
+branch, not predicted.** Baseline re-established first, because the previous
+engineer's "12/14" counted a seed list in which seed 8 solved and it no longer
+does — on pristine `cc9d5e73` the honest baseline is **11/13 (85%)**, seeds 8
+and 9 unsolvable, seeds 2 and 15 bridgeless. Confirmed by stashing.
+
+## MEASUREMENT 4 — 11/13 (85%) -> **12/13 (92%)**. Seed 15 fixed, seed 2 not.
+
+```
+canonical 3   seed 3  2   seed 8  UNSOLVABLE   seed 13 2
+seed 2    0   seed 4  2   seed 9  UNSOLVABLE   seed 14 2
+seed 5    4   seed 6  1   seed 12 3            seed 15 1  (was 0)
+seed 11   3   seed 7  3
+seed 18   1
+```
+
+**Seed 15: 0 -> 1 bridge site. Seed 2: still 0.** Reported before trying
+anything further, per the standing instruction.
+
+## What was built
+
+`RouteBrief.satisfies`, from `briefForLength()` — `loopKeepsItsCrossing` in
+`route.ts`. Two questions of the *solved* loop, neither written out there:
+
+1. `bridgeFit.ts`'s `fitBridgeAcross` with `railCorridorBlocked`, against a 720-
+   sample polyline of the candidate route (the same sampling and the same
+   nearest-sample answer `TrainRoute.distanceNear` gives, memoised on a 1 m
+   grid). **Not** the station-structure test: there are no stations yet.
+2. `crossingKeepOut.ts`'s `crossingSurvivesStationAt`, over each station seed's
+   own `STATION_SEARCH_WINDOW` — "is there anywhere in this window the placer
+   could put the station that clears the crossing?", which is the question a
+   5000 penalty cannot answer when every candidate carries it.
+
+**Three new single-owner modules, because `satisfies` needed rules the planner
+already held.** `bridgeFit.fitBridgeAcross` + `railCorridorBlocked`;
+`crossingKeepOut.ts` (the station-vs-crossing rule, both senses);
+`stationSeeds.ts` (the bearings — `plan.ts` imports `route.ts`, so they could
+not be read back the other way). Each replaced an inline copy at its original
+caller; none is a second definition.
+
+## THE TWO CAUSES WERE BOTH REAL AND BOTH DIFFERENT FROM THE FIRST GUESS
+
+`satisfies` alone changed **nothing** — still 0/2 on seeds 2 and 15. Both
+reasons came from instrumentation (`scripts/probe427.mts`, which prints the
+solve report, each station's conflict, and which gate blocks each deck sample):
+
+### Seed 15 — my own keep-out disagreed with the planner by a half-width
+
+`crossingKeepOut` reported **both stations clear** while the planner reported
+**4 of 15 deck samples station-blocked**. The keep-out measured the station
+window against the crossing's centre *axis*; `nearStationStructure` is asked
+about every probe point, and `bridgeFit`'s `ACROSS_SAMPLES` spread those across
+the full corridor **width**. A line where the planner has a rectangle.
+
+`CrossingCorridor` now carries `halfWidth` (`SITE_HALF_WIDTH`, the widest the
+planner ever probes) and the test is point-to-rectangle. Deck samples at the
+chosen crossing: **4 blocked -> 0 blocked**, and seed 15 gets its bridge.
+
+Note this made the keep-out **stricter**, not the probe wider — the disagreement
+was resolved toward the prover, which is the direction this ticket exists to
+enforce.
+
+### Seed 2 — an unsatisfied rung was silently ending the length ladder
+
+`railRouteSearch` deliberately never throws once any pose closed a loop; if
+every pose failed `satisfies` it returns the first route anyway with
+`report.satisfied` false. Correct at its level. But `trainRouteSearch` treated
+that as success and **returned**, so the shorter, slacker rungs — which exist
+precisely for the pinched seeds — were never walked.
+
+Measured: seed 2's longest rung closes **exactly one loop in 96 poses**
+(`satisfyRejects=1, restarts=95`), and that one loop was it. The ladder now
+keeps an unsatisfied route aside and walks on, returning it only after every
+rung. `railRouteSearch`'s "a park always gets its railway" guarantee is
+untouched.
+
+**This did not fix seed 2.** All rungs walked, none satisfied. Seed 2's honest
+position: of ~1200 ranked bridgeable poses across the whole ladder, **one** loop
+closes, and that loop curves back beside its own crossing and leaves 1.5 m of
+ramp run against a 12.1 m floor. There is nothing for the backstop to reject
+*to*. This is a property of seed 2's park, not of the mechanism.
+
+## MEASUREMENTS 1, 3, 5 — the backstop is nearly free
+
+`scripts/measure-train-solve-budget.mts`, now printing `satisfyRejects` and
+`satisfied` (added per the previous engineer's note).
+
+```
+seed        won   restarts  length   time    satisfyRejects  satisfied
+canonical   #3    3         362 m    277ms   0               true
+2           #17   95        259 m    5762ms  1               FALSE
+5           #1    1         330 m    111ms   0               true
+11          #0    0         334 m    16ms    0               true
+18          #9    9         318 m    156ms   0               true
+3           #73   73        154 m    4712ms  0               true
+4           #3    3         366 m    220ms   0               true
+6           #31   31        274 m    1169ms  0               true
+7           #34   34        437 m    1787ms  0               true
+8, 9        UNSOLVABLE (also unsolvable on the pristine branch point)
+12          #73   73        169 m    3708ms  0               true
+13          #0    0         408 m    36ms    0               true
+14          #71   95        231 m    6004ms  1               FALSE
+15          #31   31        301 m    1448ms  0               true
+```
+
+- **Solve rate 13/15 — identical to the pre-change baseline.** `satisfies`
+  costs no seed its railway, as its contract promises.
+- **`satisfyRejects` is 0 on 11 of the 13 solving seeds, and 1 on the other
+  two.** So `generate.ts:356`'s warning does not apply and **`RouteInfluence`
+  is not wanted**: the search is not repeatedly solving routes it must discard.
+  On most seeds the first loop that closes already keeps its crossing.
+- Canonical is unchanged from the pre-`satisfies` entrance-pose version
+  (#3, ~275 ms) — the backstop is invisible where it does not fire.
+- **Measurement 5, lengths: 154-437 m across the 13 solving seeds.** Still a
+  varied population; no systematic shortening.
+- Seed 14 is `satisfied=false` yet has **2 bridge sites** — a loop can fail the
+  backstop (no bridge at rail distance 0 specifically) and still admit bridges
+  elsewhere. Only seed 2 is bridgeless.
+
+## STILL OPEN
+
+- **Seed 2, and it may not be fixable at this level.** See above: one closing
+  loop in the entire field. The remaining levers are the pose *ranking*
+  (`crossingPoses.ts`) or the vocabulary, not the backstop.
+- **`test:procgen`'s eight failures** — triaged in this file above, not yet
+  worked. The canonical Rail Race finish rainbow at 0.37 m against a 1.24 m
+  requirement is a real clash and must not be waved through.
+- `scripts/probe427.mts` is a scratch instrument, committed deliberately so the
+  next person can re-run it. Delete it before the PR if it is not wanted.
