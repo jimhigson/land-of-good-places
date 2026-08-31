@@ -1847,10 +1847,16 @@ function pointInSlideCorridor(x: number, z: number): boolean {
  */
 function segmentCutsABridgeRamp(ax: number, az: number, bx: number, bz: number): boolean {
   const length = Math.hypot(bx - ax, bz - az);
+  // 1.5 m is coarser than the 3 m parapet band is thick, so a transverse
+  // segment cannot step over the masonry between two samples.
   const steps = Math.max(1, Math.ceil(length / 1.5));
   for (let s = 0; s <= steps; s += 1) {
     const t = s / steps;
-    if (pointStandsOnABridgeRamp(ax + (bx - ax) * t, az + (bz - az) * t)) return true;
+    // The masonry, not the whole footprint — see
+    // {@link pointStandsOnBridgeMasonry}. A street may run along a bridge's
+    // deck (that is what the crossing leg itself does); it may not run into
+    // the parapet flanking it.
+    if (pointStandsOnBridgeMasonry(ax + (bx - ax) * t, az + (bz - az) * t)) return true;
   }
   return false;
 }
@@ -1965,6 +1971,61 @@ export function pointStandsOnABridgeRamp(x: number, z: number, margin = RAMP_SCR
   return false;
 }
 
+/**
+ * **The masonry only — the parapet band that flanks a bridge's deck and ramps,
+ * without the road surface between them.**
+ *
+ * {@link pointStandsOnABridgeRamp} answers "is this the bridge's ground at
+ * all", which is the right question for *starting* something there and the
+ * wrong one for *routing through*. A bridge's footprint is a road with two
+ * walls down it: `|across| <= halfWidth` is the surface a child walks on
+ * (the deck, and the ramps climbing to it), and only the ring outside that,
+ * out to `halfWidth + margin`, is the parapet she cannot pass.
+ *
+ * Screening streets against the whole footprint therefore refused the
+ * crossing's **own approach**. Measured on seed 24 (#414): the footprint is
+ * 13.0 m across by 39.7 m along, and it invalidated four lattice nodes
+ * including the entire row at z = -33.6 — (-12.7, -33.6), (-0.7, -33.6) and
+ * (11.3, -33.6), the east-west street running straight through the site. With
+ * no approach left, the crossing leg could not reach proven site 20 at all and
+ * took level site 74 instead, so **seed 24 lost the only bridge its loop
+ * offers** — `origin/main` builds it, this branch did not, and three
+ * invariants fired: the design assertion plus two anti-vacuity guards.
+ *
+ * ## Why a point test is enough to tell the two apart
+ *
+ * A leg running **along** the axis stays inside the deck band for its whole
+ * length, so no sample of it is ever masonry. A leg running **across** the
+ * ramp must leave the band through the parapet on both sides, so
+ * {@link segmentCutsABridgeRamp} — which samples points — refuses it. The
+ * direction is implied by the geometry; nothing has to reason about headings,
+ * and there is no second definition of "along" to fall out of step.
+ *
+ * **`nearestPointOnRoute` deliberately still asks the full footprint**, not
+ * this. Refusing to *branch* in mid-air is a different question from refusing
+ * to *pass*: a junction on the crown is the original #414 defect (the
+ * canonical seed's `spur-dodgems` branched at (-22.2, 36.4), 4.40 m up, and
+ * ran off the flank into the parapet). Passing over a bridge is what a bridge
+ * is for.
+ */
+function pointStandsOnBridgeMasonry(x: number, z: number, margin = RAMP_SCREEN_MARGIN): boolean {
+  for (const site of CROSSING_SITES) {
+    if (!site.bridge) continue;
+    const dx = x - site.x;
+    const dz = z - site.z;
+    const across = Math.abs(-dx * site.dirZ + dz * site.dirX);
+    // Inside the deck's own width is road, not wall — keep going, another
+    // site's masonry may still claim this point.
+    if (across <= site.halfWidth || across > site.halfWidth + margin) continue;
+    const along = dx * site.dirX + dz * site.dirZ;
+    if (along <= DECK_HALF_LENGTH + site.rampReachPos + margin &&
+        along >= -(DECK_HALF_LENGTH + site.rampReachNeg + margin)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** The Sky Cruiser's pylons have the same relationship to streets as the
  * slide's legs: `LampPosts.ts` lights every ribbon, and a lamp is exactly
  * what steals a pylon's spot (`skyCruiserStandsOnItsOwnSupports`, and
@@ -2050,7 +2111,10 @@ function* streetLatticeSearch(): Generator<number, StreetLattice, void> {
       // Measured: without this the canonical seed builds 2 bridges rather
       // than 3 and seed 18 one rather than two, because a crossing whose
       // approach wanders onto ramp ground stops landing on the planned site.
-      const onRamp = pointStandsOnABridgeRamp(x, z);
+      // The masonry, not the whole footprint: refusing the deck surface too
+      // refused the crossing's own approach and cost seed 24 its only bridge.
+      // See {@link pointStandsOnBridgeMasonry}.
+      const onRamp = pointStandsOnBridgeMasonry(x, z);
       nodeOk[index] = clear && !inRing && !onRamp && rail.dist >= RAIL_CLAMP_DISTANCE ? 1 : 0;
       side[index] = rail.side;
     }

@@ -795,3 +795,52 @@ to **8 stranded** and `test:procgen` back to the **6 inherited** failures.
 the function that owns the ramp rectangle and lists its three legitimate
 askers — so the next person to think "why isn't this screen asked everywhere?"
 reads the answer at the point of temptation rather than in a handoff.
+
+---
+
+# THE SIX INHERITED FAILURES — 6 down to 4
+
+## Root cause of the first two: the screen refused the bridge's own road
+
+The ramp screen tested the **whole footprint**, deck included. A bridge's
+footprint is a road with two walls down it: `|across| <= halfWidth` is the
+surface a child walks on, and only the ring out to `halfWidth + margin` is
+parapet. Screening streets against the whole thing refused the crossing's own
+approach.
+
+Measured on seed 24: the footprint is **13.0 m across by 39.7 m along**, and
+it invalidated four lattice nodes including the entire row at z = -33.6 —
+(-12.7, -33.6), (-0.7, -33.6), (11.3, -33.6) — the east-west street running
+straight through proven site 20.
+
+`pointStandsOnBridgeMasonry` now answers the routing question (parapet only)
+while `pointStandsOnABridgeRamp` keeps answering the branch-point question
+(whole footprint), because *branching* in mid-air and *passing* over a bridge
+are different questions. A leg along the axis never leaves the deck band; a leg
+across it must exit through the parapet on both sides, so the existing
+point-sampling segment test still refuses it — the direction is implied by the
+geometry, with no second definition of "along" to drift.
+
+| seed | bridges before | after |
+|---|---|---|
+| canonical | 2 of 4 crossings | 2 of 4 |
+| 2 | 0 of 3 | 0 of 3 |
+| **5** | **3 of 4** | **4 of 5** |
+| 11 | 2 of 5 | 2 of 5 |
+| 18 | 1 of 6 | 1 of 5 |
+| 24 | 0 of 2 | 0 of 2 |
+
+**`test:procgen` 6 failed -> 4.** Cleared: seed 11 `no paved path stops
+anywhere but a destination`, seed 18 `every street sits on the shared 12 m
+lattice`. Nothing lost, and seed 5 gains a bridge.
+
+## Still open (4)
+
+- seed 11 `no drawn path ends in mid-air on a bridge`
+- seed 24 trio — **`origin/main` builds seed 24's bridge and this branch does
+  not**, measured in its own worktree: on `main` the crossings are railD **20**
+  (proven site, bridge built) and 220; here they are 74 and 220. The masonry
+  split did not recover it, and the lattice node at the site is refused by
+  `RAIL_CLAMP_DISTANCE`, not by the ramp — a lattice node may never sit on the
+  rail, which is correct. The crossing leg's own site choice is the next place
+  to look, not the lattice.
