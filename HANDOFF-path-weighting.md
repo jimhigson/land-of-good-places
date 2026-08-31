@@ -182,3 +182,60 @@ routes; they cost more, they are not excluded.
   `src/world/train/*` (#414), wall placement (#417), `IsoCamera` (#420).
   This branch touches only `src/world/NavGrid.ts`, `src/world/paving.ts` (new),
   two lines of `src/world/pathGraph.ts` (the publish call), and the new check.
+
+## Re-measured on `origin/main` a6e50ede (31 Aug, after #441's 2.5 cap)
+
+Rebased clean onto a6e50ede. The branch's own diff is **byte-identical** to
+before the rebase (checked by diffing the two three-dot diffs; only context
+line numbers moved). `OFF_PATH_COST_MULTIPLIER` is untouched at 1.6. The
+`package.json` conflict was rerere-replayed, so the resolution was read back
+against `main`'s own chain and the parsed `scripts` object — it adds only
+`check:path-preference`, in the chain and as a script, and drops nothing.
+
+**Gates:** `build` exit 0. `test:procgen` **497 passed / 16 files**. Every
+step of `pnpm run check` passes **except** the one assertion below (the chain
+stops there, so the 16 steps after it were run separately — all green).
+
+### `check:path-preference`, measured
+
+| assertion | result |
+|---|---|
+| mean paved ≥ 75% | **ok — 81.4%** (unweighted the same routes get 54.3%) |
+| worst route ≥ 45% | **FAIL — 6.9%**, `dodgems → stall.railRacer` |
+| no comic detour ≤ 73% | ok — worst 21.7% |
+| kerb step ≤ 73% | ok — worst 12.5%, mean +0.10 m |
+| reachability | ok — 202 of 269 both ways, unchanged |
+| children route as the player | ok — 0.000% disagreement |
+
+The mean came in at **81.4%, not the predicted 75.7%** — 6.4 points above the
+prediction and 6.4 above the floor.
+
+### The worst-route failure is geometry, and it is wider than #443 as filed
+
+**Four** of the 100 probe pairs are under the 45% floor, not one:
+
+| pair | now | unweighted | straight-line |
+|---|---|---|---|
+| `dodgems → stall.railRacer` | 7% | 7% | **36.0 m** |
+| `dodgems → exit-railRace` | 9% | 9% | **38.8 m** |
+| `dodgems → gate` | 16% | 14% | **46.2 m** |
+| `exit-railRace → stall.facePaint` | 43% | 23% | **69.0 m** |
+
+`addInterconnects` caps connector candidates on **straight-line** distance at
+`medianNearestNeighbourSpacing × CONNECTOR_SPACING_CAP_MULTIPLE` = **30.18 m**
+(that is the 2.5 #441 moved). **All four pairs are beyond that cap**, so none
+of them can be given a connector at 2.5 — there is no paving between them to
+prefer. The first three are inert to this feature (7→7, 9→9, 14→16), which is
+the signature of "no paving exists", not of a weighting that is too weak. The
+fourth moved 23%→43%: the feature nearly rescued it and geometry capped it.
+
+**So: the remainder is entirely the #443 *class* — beyond-cap pairs the park's
+geometry cannot serve — but it is three pairs wider than #443 as written.**
+Fixing only the pair #443 names would not turn this check green: raise
+`dodgems → stall.railRacer` past 45% and `dodgems → exit-railRace` at 9%
+becomes the new worst. Note also that #443's other named pair (spooky house →
+sky cruiser) is **not** in this probe set at all — that came from a different
+instrument.
+
+Nothing here is new since #431/#441; no assertion was weakened and no probe
+dropped.
