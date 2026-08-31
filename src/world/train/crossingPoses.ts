@@ -158,10 +158,27 @@ const POSES_OFFERED = 96;
  * The heading returned is the **railway's**, perpendicular to the path that
  * crosses it. The probe is asked in terms of the *path* direction, because
  * that is the axis a bridge's deck and ramps run along.
+ *
+ * **A generator, because the whole sweep is 102 ms and it used to run in one
+ * frame.** It is called from `trainRouteSearch`'s own first line, before that
+ * generator's first `yield`, so the entire park sweep landed inside a single
+ * `ParkGeneration.advance()` — measured at 100.1 ms against an 8 ms budget and
+ * a 20 ms ceiling, twelve times over, and `check:park-boot` red because of it
+ * (see `scripts/profile-park-boot-slice.mts`). A frame that blocks that long
+ * is a visible jolt in the bus's orbit, which is the thing that check exists
+ * to catch.
+ *
+ * It yields once per **x row** — 46 of them, ~2.2 ms each — which is a unit
+ * comfortably inside the budget without making the yield itself the cost.
+ * Suspending cannot move the result: the sweep's whole state is generator
+ * locals and the only `Rng` in here is drawn after it finishes, the same
+ * argument `rail/generate.ts` makes for slicing its own search.
  */
-export function bridgeableCrossingPoses(seed: number): Pose2[] {
+export function* bridgeableCrossingPosesSearch(seed: number): Generator<number, Pose2[], void> {
   const candidates: Pose2[] = [];
+  let row = 0;
   for (let x = -SWEEP_REACH; x <= SWEEP_REACH; x += POINT_PITCH) {
+    yield (row += 1);
     for (let z = -SWEEP_REACH; z <= SWEEP_REACH; z += POINT_PITCH) {
       if (GARDEN_PLAY_BOUNDARY.distanceToEdge(x, z) < SITE_BOUNDARY_MARGIN) continue;
       for (let h = 0; h < HEADINGS; h += 1) {
@@ -212,4 +229,17 @@ export function bridgeableCrossingPoses(seed: number): Pose2[] {
   // whenever one is possible there at all.
   const gate = gateCorridorPoses();
   return [...gate, ...candidates].slice(0, POSES_OFFERED);
+}
+
+/**
+ * {@link bridgeableCrossingPosesSearch} driven straight through — for the
+ * measurement scripts and any caller with no frame to spend. The game's own
+ * path goes through `trainRouteSearch`, which slices it.
+ */
+export function bridgeableCrossingPoses(seed: number): Pose2[] {
+  const search = bridgeableCrossingPosesSearch(seed);
+  for (;;) {
+    const step = search.next();
+    if (step.done) return step.value;
+  }
 }

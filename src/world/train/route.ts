@@ -5,7 +5,7 @@ import { COASTER_PLANS } from '../coaster/plan';
 import { RAIL_OVER_RAIL_AIR } from '../coaster/route';
 import { PARK_LAYOUT } from '../parkLayout';
 import { terrainHeight } from '../terrain';
-import { bridgeableCrossingPoses } from './crossingPoses';
+import { bridgeableCrossingPosesSearch } from './crossingPoses';
 import { fitBridgeAcross, railCorridorBlocked } from './bridgeFit';
 import { chosenCrossingCorridor, crossingSurvivesStationAt } from './crossingKeepOut';
 import { STATION_SEEDS, STATION_SEED_RADIUS } from './stationSeeds';
@@ -207,8 +207,15 @@ interface TrainContext {
   readonly perimeter: number;
 }
 
-/** Builds the shared search context from the layout alone (obstacles + rim poses). */
-function buildTrainContext(): TrainContext {
+/**
+ * Builds the shared search context from the layout alone (obstacles + poses).
+ *
+ * **A generator only because the pose sweep is 102 ms.** It runs before
+ * `trainRouteSearch`'s first `yield`, so as a plain function the whole sweep
+ * landed in one `ParkGeneration.advance()` — 100.1 ms against an 8 ms budget,
+ * and `check:park-boot` red. See `bridgeableCrossingPosesSearch`'s own note.
+ */
+function* buildTrainContext(): Generator<number, TrainContext, void> {
   const obstacles = trainObstacles();
   const ox = Float64Array.from(obstacles, (o) => o.x);
   const oz = Float64Array.from(obstacles, (o) => o.z);
@@ -261,7 +268,7 @@ function buildTrainContext(): TrainContext {
   // any of them has a bridgeable crossing by construction. See
   // `crossingPoses.ts` for why it is a ranked field rather than the single
   // crossing the literal design called for.
-  const startPoses: Pose2[] = bridgeableCrossingPoses(PARK_SEED);
+  const startPoses: Pose2[] = yield* bridgeableCrossingPosesSearch(PARK_SEED);
 
   return { clear, startPoses, perimeter };
 }
@@ -418,7 +425,7 @@ function briefForLength(context: TrainContext, desiredLength: number, salt: numb
  * fail, loudly, with the last rung's diagnostic — exactly as before.
  */
 export function* trainRouteSearch(): Generator<number, SolvedRailRoute, void> {
-  const context = buildTrainContext();
+  const context = yield* buildTrainContext();
   let lastFailure: RailRouteUnsolvable | null = null;
   // **A rung that solved but did not satisfy does not end the ladder.**
   //
