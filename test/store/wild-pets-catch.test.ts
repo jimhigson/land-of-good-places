@@ -60,6 +60,10 @@ const camera = {
   focusPoint: new Vector3(0, 0, 0),
   worldUnitsPerPixel: 0.01,
   clampToFrustum: (point: Readonly<Vector3>) => new Vector3(point.x, point.y, point.z),
+  // Everything is in shot — this stub has no frustum, and none of these tests
+  // is about where the bubble lands. `check:speech-bubbles` owns that question
+  // against a real camera (#415).
+  isOnScreen: () => true,
 } as unknown as IsoCamera;
 
 function frame(elapsed: number, dt: number, playerAt: Vector3): FrameContext {

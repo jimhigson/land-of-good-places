@@ -747,7 +747,7 @@ export class NpcSystem implements GameSystem {
       this.labelOrder.push(i);
 
       const bubble = new SpeechBubble(NPC_LABEL_ACCENT);
-      bubble.sprite.position.set(
+      bubble.anchorAt(
         character.position.x,
         character.position.y + avatar.height + BUBBLE_HEIGHT_OFFSET,
         character.position.z,
@@ -1403,6 +1403,27 @@ export class NpcSystem implements GameSystem {
     return [...this.elsewhere];
   }
 
+  /**
+   * Every child paired with the bubble that is hers — read by
+   * `check:speech-bubbles`, which asks whether a drawn bubble is over the child
+   * it belongs to (issue #415: one was drawn 6.8 m away, over empty railway,
+   * with its owner off the side of the screen).
+   *
+   * The pairing is `bubbles[i]` to `characters[i]` and lives nowhere else, so
+   * a check that re-derived it by proximity — nearest child to each bubble —
+   * could not tell a bubble over the wrong child from a bubble over the right
+   * one. Allocates; not for the frame path.
+   */
+  get speechBubbles(): readonly { readonly character: NpcCharacter; readonly bubble: SpeechBubble }[] {
+    const pairs: { character: NpcCharacter; bubble: SpeechBubble }[] = [];
+    for (let i = 0; i < this.characters.length; i += 1) {
+      const character = this.characters[i];
+      const bubble = this.bubbles[i];
+      if (character && bubble) pairs.push({ character, bubble });
+    }
+    return pairs;
+  }
+
   private updateBubbles(): void {
     const camera = this.camera;
 
@@ -1413,7 +1434,7 @@ export class NpcSystem implements GameSystem {
       if (!character || !bubble) continue;
 
       bubble.setText(driver?.chatBubbleText ?? null);
-      bubble.sprite.position.set(
+      bubble.anchorAt(
         character.position.x,
         character.position.y + character.avatar.height + BUBBLE_HEIGHT_OFFSET,
         character.position.z,

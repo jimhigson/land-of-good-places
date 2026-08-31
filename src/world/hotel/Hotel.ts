@@ -2147,11 +2147,10 @@ export class Hotel implements GameSystem {
     this.updateFeast(dt, elapsed);
     this.updateSpeech(dt);
     if (this.speech) {
-      // The bubble's natural (unclamped) world anchor is the position it was
-      // parented at in `dressLobby` — she never moves, so nothing re-sets it
-      // here. `updateScreenSize` reads that anchor straight off the sprite
-      // (`sprite.getWorldPosition`) and re-clamps it to the screen fresh,
-      // every call — see `SpeechBubble`'s own doc.
+      // Her anchor was set once, in `dressLobby` — she never moves, so nothing
+      // re-sets it here. It survives because `anchorAt` owns it in a field of
+      // its own; when the anchor lived in `sprite.position`, the first clamped
+      // frame overwrote it and she never got it back (issue #415).
       this.receptionBubble.updateScreenSize(this.deps.camera);
     }
 
@@ -3955,11 +3954,7 @@ export class Hotel implements GameSystem {
     // Her speech bubble hangs over her own head and moves with nothing, because
     // she never moves. Parented to the lobby's shell so it vanishes with the
     // hotel; positioned once, here, rather than every frame.
-    this.receptionBubble.sprite.position.set(
-      RECEPTION_X,
-      reception.height + 0.42,
-      RECEPTIONIST_Z,
-    );
+    this.receptionBubble.anchorAt(RECEPTION_X, reception.height + 0.42, RECEPTIONIST_Z);
     shell.add(this.receptionBubble.sprite);
 
     // **The axis.** A runner in two lengths — doors to the medallion, then

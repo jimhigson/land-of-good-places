@@ -346,7 +346,7 @@ export class WildPets {
   private sizeAnnouncement(): void {
     const one = this.announcing;
     if (!one || this.announceLeft <= 0) return;
-    this.bubble.sprite.position.set(one.x, PET_TOP + 0.5, one.z);
+    this.bubble.anchorAt(one.x, PET_TOP + 0.5, one.z);
     this.bubble.updateScreenSize(this.camera);
   }
 
