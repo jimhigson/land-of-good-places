@@ -701,6 +701,20 @@ interface DeckPlan {
   readonly rampRunNeg: number;
 }
 
+/**
+ * Node-only reversal of the proven-bridge gate
+ * (`LGP_ALLOW_UNPROVEN_BRIDGES=1`), so the behaviour the gate exists to stop
+ * can be restored on demand and an invariant proved red against it. Absent
+ * from the browser bundle; off unless the variable is set.
+ */
+function allowUnprovenBridges(): boolean {
+  return Boolean(
+    (globalThis as { process?: { env?: Record<string, string> } }).process?.env?.[
+      'LGP_ALLOW_UNPROVEN_BRIDGES'
+    ],
+  );
+}
+
 function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): PlannedFootprint[] {
   const { collision, clearTreesNear, hasFellableTreeNear } = real;
   // `isClearCircle` only ever asks the registered circles and walls — the
@@ -1067,7 +1081,16 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
     for (let index = 0; index < crossings.length; index += 1) {
       const siblings = current.filter((d, i): d is DeckPlan => i !== index && d !== null);
       const previous = current[index] ?? null;
-      const next = searchDeck(crossings[index] as LevelCrossing, siblings, previous);
+      // **Only where a bridge was proven.** See
+      // `LevelCrossing.provenBridgeSite`: this search runs long after
+      // `crossingPlanSolve.ts` measured which ground can take a deck and
+      // both ramps, and it used to try everywhere anyway. Where it
+      // succeeded on ground the planner had already measured and rejected,
+      // the ramps it built were the ones nothing had reserved room for —
+      // and their parapets stood across the path that crossed there.
+      const next = allowUnprovenBridges() || (crossings[index] as LevelCrossing).provenBridgeSite
+        ? searchDeck(crossings[index] as LevelCrossing, siblings, previous)
+        : null;
       if (
         (next === null) !== (previous === null) ||
         (next && previous && (next.halfAcross !== previous.halfAcross || next.cx !== previous.cx || next.cz !== previous.cz))
