@@ -452,6 +452,127 @@ const wallsBorderTheGridSensibly: Invariant = (facts) => {
 };
 
 /**
+ * **Every wall run goes alongside a path, and a good few stand flush against
+ * one.** Issue #417, Jim, playing: *"outside, the walls are placed seemingly at
+ * random. They should be alongside the paths and flush with it at various
+ * places. Same number of walls, but no wall in the middle of a patch of grass
+ * for no reason."*
+ *
+ * ### Why {@link wallsBorderTheGridSensibly} above did not already catch this
+ *
+ * It is not a weaker version of this check; it answers a different question,
+ * and answers it correctly. Two gaps let Jim's walls through it:
+ *
+ * 1. **It counts a plot as a thing worth bordering.** A wall placed 6 m outside
+ *    a building's bounding circle passes it — even when that building sits out
+ *    near the park edge with lawn all round it and the nearest paving is 37 m
+ *    away. Measured on the built park before this change: seed 11 stood a run
+ *    at (-89.7, 41.5), **37.5 m** from any paving; seed 2 one at 34.8 m; seed 5
+ *    one at 27.4 m. All three were comfortably legal.
+ * 2. **Its 14 m tolerance is far too generous to see a verge.** Across the five
+ *    CI seeds, **116 of 155 runs** stood more than 4 m from any paved surface,
+ *    and the closest any wall in any park ever came to paving was **3.34 m**.
+ *    Nothing was ever flush, because nothing *could* be: the placer asked
+ *    `isPlantable(x, z, 3.2)`, so the gap it kept from a path was the same one
+ *    it kept from a plot.
+ *
+ * So this one measures the single thing that complaint is about — **distance
+ * from the wall to real paving** — and it does it on the built park:
+ * `ParkFacts.walls` is read off the runs that stand, and the paving is the
+ * *drawn* ribbon (`pathEdges[].points`) plus the plaza's own disc, not the
+ * control polygon the placer positioned against.
+ *
+ * ### The two claims, and where their numbers come from
+ *
+ * 1. **Alongside.** Every run's closest approach to paving is within
+ *    `widest path half-width x 2 + PLAYER_RADIUS`. Both terms are read rather
+ *    than typed: the half-width comes from `pathEdges` on this very park, and
+ *    the reasoning is that a strip of grass as wide as the path beside it still
+ *    reads as that path's verge, while twice the path's width reads as a field
+ *    with a wall in it. `PLAYER_RADIUS` is the slack, and it buys something
+ *    specific — the placer works against a route's control polygon, while the
+ *    paving drawn is the Catmull-Rom curve through those points, which bows
+ *    away from it in between.
+ *
+ *    That comes to 3.82 m on every CI seed (widest non-ring path is 3.2 m
+ *    wide). Measured worst case after the fix: **3.16 m** (seed 5), with
+ *    2.50 / 2.83 / 2.91 / 2.97 on the others — 0.66 m of headroom on the worst
+ *    seed. Before the fix, the same measurement was 3.34 m at *best* and ran
+ *    to 37.5 m, so this invariant would have been red on all five.
+ *
+ * 2. **Flush in places.** A run counts as flush when its own face — its centre
+ *    line less its `halfWidth` — comes within `PLAYER_RADIUS` of the paving:
+ *    the child cannot fit between the wall and the path, so there is no verge
+ *    there at all, which is what "flush" means to someone looking at it. At
+ *    least {@link FLUSH_RUNS_FLOOR} of them must be. This is the half of the
+ *    ask a proximity bound alone cannot express — walls uniformly 3 m off would
+ *    satisfy claim 1 completely and still be exactly what Jim complained about.
+ *    Measured after the fix: 9 / 9 / 8 / 9 / 11 flush runs across the five
+ *    seeds. Before it: **zero, on every seed, necessarily.**
+ */
+const FLUSH_RUNS_FLOOR = 4;
+
+const wallsRunAlongsideAPath: Invariant = (facts) => {
+  const problems: string[] = [];
+
+  // Real paving: every drawn ribbon, and the plaza, which is a paved disc
+  // rather than a ribbon (`PathNodeFact.reach`) and which the four garden beds
+  // border rather than bordering any path.
+  const pavedDiscs = facts.pathNodes.filter((node) => node.reach > 0);
+  const distanceToPaving = (point: readonly [number, number]): number => {
+    let nearest = Infinity;
+    for (const edge of facts.pathEdges) {
+      for (let i = 1; i < edge.points.length; i += 1) {
+        const d = pointToSegment(point, edge.points[i - 1]!, edge.points[i]!) - edge.halfWidth;
+        if (d < nearest) nearest = d;
+      }
+    }
+    for (const disc of pavedDiscs) {
+      const d = Math.hypot(point[0] - disc.x, point[1] - disc.z) - disc.reach;
+      if (d < nearest) nearest = d;
+    }
+    return nearest;
+  };
+
+  // The widest verge that can still read as a verge, off this park's own
+  // network. The ring is excluded for the same reason it is excluded from
+  // `wallsBorderTheGridSensibly` — it is a true circle, not a grid edge, and
+  // no wall is ever anchored to it.
+  let widestHalfWidth = 0;
+  for (const edge of facts.pathEdges) {
+    if (edge.backbone) continue;
+    widestHalfWidth = Math.max(widestHalfWidth, edge.halfWidth);
+  }
+  const alongsideMax = widestHalfWidth * 2 + PLAYER_RADIUS;
+
+  let flushRuns = 0;
+  for (const wall of facts.walls) {
+    let closest = Infinity;
+    for (const point of alongRun(wall.from, wall.to, 1)) {
+      closest = Math.min(closest, distanceToPaving(point));
+    }
+    if (closest > alongsideMax) {
+      problems.push(
+        `${wall.kind} run (${fmt(wall.from)}->${fmt(wall.to)}) never comes closer than ` +
+          `${closest.toFixed(2)} m to any paving — more than ${alongsideMax.toFixed(2)} m, so it ` +
+          `stands in open grass rather than alongside a path`,
+      );
+    }
+    if (closest - wall.halfWidth <= PLAYER_RADIUS) flushRuns += 1;
+  }
+
+  if (facts.walls.length > 0 && flushRuns < FLUSH_RUNS_FLOOR) {
+    problems.push(
+      `only ${flushRuns} of ${facts.walls.length} wall runs stand flush against paving ` +
+        `(face within ${PLAYER_RADIUS} m of it); at least ${FLUSH_RUNS_FLOOR} should. Walls all ` +
+        `holding the same polite distance off the kerb is the arrangement #417 asked to end`,
+    );
+  }
+
+  return problems;
+};
+
+/**
  * **No tree stands on the railway.** Issue #235.
  *
  * The twin of {@link wallsClearTheRailway}, and it did not exist because it
@@ -8200,6 +8321,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no two wall runs cross or crowd each other', wallsDoNotClash],
   ['no wall run stands on the railway', wallsClearTheRailway],
   ['every wall run sits on a grid axis and actually borders something', wallsBorderTheGridSensibly],
+  ['every wall run goes alongside a path, and some stand flush against one', wallsRunAlongsideAPath],
   ['no tree stands on the railway', treesClearTheRailway],
   ['no entrance prop stands on the railway', entrancePropsClearTheRailway],
   ['the train runs through no plot and no stall', trainClearsEveryPlotAndStall],
