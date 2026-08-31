@@ -17,7 +17,19 @@ with some reasonable weighting penalty"*
 - [x] Full `pnpm run check` + `build` + `test:procgen`
 - [x] Browser QA on 5419, player and NPC, before *and* after
 - [x] `origin/main` is still 6d475dab — nothing to rebase onto yet
-- [ ] PR
+- [x] PR **#421**, all four CI checks green
+
+## CI
+
+All four required checks pass on #421 — **`Checks` (the full 47) green in
+16m30s**, Procgen invariants green, PR preview deployed. `check:park-boot`
+passes on CI's quieter box, which settles the local red as #324 load flake.
+
+**Preview, checked:**
+<https://pr-421-834b9ca-land-of-good-places.blockstack.workers.dev/spawn?pos=-46,-8>
+— lands her on the western junction; tap up-and-right and she walks the street.
+Verified headless by tapping the canvas (`window.game` is DEV-only), 0 console
+errors, screenshot shows her mid-paving.
 
 ## The gate
 
