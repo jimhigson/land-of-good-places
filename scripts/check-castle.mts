@@ -1372,8 +1372,11 @@ for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
     }
   }
 
-  const flames = floor.getObjectByName(`castle-flame-${deck}`) as InstancedMesh | undefined;
-  if (!flames) continue;
+  const flames = floor.getObjectByName(`castle-hearthfire-${deck}`) as InstancedMesh | undefined;
+  if (!flames) {
+    fail(`hearth: deck ${deck} has a fireplace and no 'castle-hearthfire-${deck}' burning in it.`);
+    continue;
+  }
   flames.geometry.computeBoundingBox();
   const flameLocal = flames.geometry.boundingBox;
   if (!flameLocal) continue;

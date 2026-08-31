@@ -469,14 +469,35 @@ const HEARTH_FLUE_HALF_WIDTH = 0.85;
  * three because the opening is 3.6 m wide: the same three flames that filled a
  * bare patch of wall are a candle in a fireplace this size.
  */
-const HEARTH_FLAMES: readonly (readonly [offset: number, scale: number])[] = [
-  [-1.16, 2.6],
-  [-0.78, 3.5],
-  [-0.39, 4.4],
-  [0, 5.0],
-  [0.39, 4.4],
-  [0.78, 3.5],
-  [1.16, 2.6],
+const HEARTH_FLAMES: readonly (readonly [offset: number, scale: number, forward: number])[] = [
+  // The back rank, against the fireback: tallest in the middle, falling away.
+  [-1.16, 2.6, 0],
+  [-0.78, 3.5, 0],
+  [-0.39, 4.4, 0],
+  [0, 5.0, 0],
+  [0.39, 4.4, 0],
+  [0.78, 3.5, 0],
+  [1.16, 2.6, 0],
+  // **A second rank, half a pitch across and 0.08 m forward.** One rank alone
+  // read as a comb: seven cones with the dark fireback showing between every
+  // pair of tips, which at a glance is a row of teeth rather than a fire. The
+  // interleaved rank fills those gaps at a different depth, so the flames
+  // overlap into one mass with tongues at different heights — which is what a
+  // fire in a grate actually looks like, and the difference between a big fire
+  // and a roaring one now that the size is already right.
+  //
+  // It is 0.08 m forward and not the 0.16 first written, and `check:castle`
+  // is why: at 0.16 four of the front rank measured out to z -14.18 against a
+  // firebox front at -14.23 and the check named all four. Five centimetres of
+  // flame out through the front of a chimney is not something a screenshot
+  // would ever have shown. The offset that fills the comb's gaps is the *half
+  // pitch across*, not the depth, so nothing was lost by pulling it back.
+  [-0.97, 2.2, 0.08],
+  [-0.58, 3.0, 0.08],
+  [-0.2, 3.6, 0.08],
+  [0.2, 3.6, 0.08],
+  [0.58, 3.0, 0.08],
+  [0.97, 2.2, 0.08],
 ];
 
 /**
@@ -725,6 +746,17 @@ interface FlameSpot {
 interface DeckFire {
   readonly outer: MeshToonMaterial;
   readonly core: MeshToonMaterial;
+  /**
+   * What each material settles at. Carried per entry rather than read from a
+   * module constant, because the hearth's fire burns at a different intensity
+   * from a wall torch's and {@link CastleFire.update} must not write a torch's
+   * figure over it — which is precisely what it would have done if these had
+   * stayed global.
+   */
+  readonly outerBase: number;
+  readonly coreBase: number;
+  /** How hard it flickers. A hearth breathes deeper than a torch. */
+  readonly depth: number;
   /** Its own phase, so five storeys of fire do not pulse in lockstep. */
   readonly phase: number;
 }
@@ -742,6 +774,66 @@ interface DeckFire {
  */
 const FLAME_BASE_EMISSIVE = 1.75;
 const CORE_BASE_EMISSIVE = 2.45;
+
+/**
+ * **What a roaring fire is made of, and why it is not "a torch, but brighter".**
+ *
+ * This was the last thing on the branch to be settled, and it was settled by
+ * looking at a rendered frame, twice. The fireplace was built, the fire was
+ * five times a torch's size and seven flames wide, every measurement was right
+ * — and it read as **pale salmon**, which is not what a roaring fire looks
+ * like.
+ *
+ * The cause is arithmetic, not taste. A torch's emissive is
+ * {@link ART.castleFlameDeep} (0xd4413e) at {@link FLAME_BASE_EMISSIVE} 1.75:
+ *
+ * ```
+ * (0.83, 0.25, 0.24) x 1.75  ->  (1.45, 0.44, 0.42)  ->  clipped (1.00, 0.44, 0.42)
+ * ```
+ *
+ * **The red channel clips and the other two keep climbing.** Past the point
+ * where red saturates, every extra unit of intensity is a unit of *desaturation*
+ * — the colour walks towards white, by way of pink. 1.75 was chosen for a wall
+ * torch and is right for one: #376 raised it from 1.15 for the measured reason
+ * that a small flame at playing distance otherwise read as a brown-orange dot
+ * on a pink wall, and a torch is small enough that brightness is the only thing
+ * that can carry it.
+ *
+ * A fire 3 m across has no such problem. It is already the biggest thing in
+ * that end of the room, so it does not need to shout to be seen, and what it
+ * needs instead is to be **the right colour**. At 1.25 the red is still just
+ * under the clip and green and blue sit at 0.32/0.30, so the emissive stays a
+ * hot orange-red rather than becoming a bright pink one.
+ *
+ * So the hearth gets its own pair of materials. It costs two draw calls on one
+ * storey. The alternative — turning the whole castle's fire down to suit the
+ * hearth — would take the torches back to the dot on the wall that #376 spent a
+ * measurement fixing, which is the shape of mistake this file's header is
+ * already about: one number serving two things that want different answers.
+ */
+const HEARTH_FLAME_EMISSIVE = 1.25;
+
+/**
+ * The heart of the fire. Cream ({@link ART.jetpackFlameCore}) at a shade under
+ * the torch's own, for the same clipping reason: a core driven past its clip is
+ * a white cone, and a white cone in a fireplace reads as a hole rather than as
+ * the hottest part of a fire.
+ */
+const HEARTH_CORE_EMISSIVE = 2.05;
+
+/** See {@link HEARTH_FLAME_EMISSIVE}. Built per storey, never shared. */
+function hearthFlameMaterials(): { outer: MeshToonMaterial; core: MeshToonMaterial } {
+  return {
+    outer: toonMaterial(PALETTE.slideChuteDeep, {
+      emissive: ART.castleFlameDeep,
+      emissiveIntensity: HEARTH_FLAME_EMISSIVE,
+    }),
+    core: toonMaterial(ART.jetpackFlameCore, {
+      emissive: ART.jetpackFlameCore,
+      emissiveIntensity: HEARTH_CORE_EMISSIVE,
+    }),
+  };
+}
 
 /**
  * Every fire in the castle, and the one number per storey that makes it flicker.
@@ -764,6 +856,17 @@ export class CastleFire {
     const group = new Group();
     group.name = `castle-fire-${deck}`;
     const spots: FlameSpot[] = [];
+    /**
+     * The hearth's own fire, kept apart from the torches' and the braziers'.
+     *
+     * Two reasons, and the second is the one that matters. The small one is
+     * that a hearth fire is **named**: `castle-hearthfire-N` is a mesh a check
+     * can ask about by itself, which is #412's lesson one more time — the thing
+     * you can name is the thing you can assert about, and assertion 7 no longer
+     * has to rely on wall torches happening to be pushed onto a shared list
+     * first. The big one is colour; see {@link hearthFlameMaterials}.
+     */
+    const hearthSpots: FlameSpot[] = [];
     const rng = new Rng(0x71e + deck * 131);
 
     // --- wall torches --------------------------------------------------
@@ -869,17 +972,50 @@ export class CastleFire {
       // none needed to be: the binding constraint on a castle fire is the size
       // of its own fireplace, and this fireplace is now large enough to hold a
       // large fire.
-      for (const [offset, scale] of HEARTH_FLAMES) {
-        spots.push({
+      for (const [offset, scale, forward] of HEARTH_FLAMES) {
+        hearthSpots.push({
           x: CASTLE_HEARTH.x + offset,
           y: HEARTH_FLAME_BASE,
           // Staggered front to back as well as side to side, so the bank reads
-          // as a fire with depth rather than as a row of cones on a line.
-          z: CASTLE_HEARTH.z + Math.cos(offset * 2.3) * 0.06,
+          // as a fire with depth rather than as a row of cones on a line. Both
+          // ranks stay inside the firebox, which `check:castle` measures rather
+          // than trusts.
+          z: CASTLE_HEARTH.z + forward + Math.cos(offset * 2.3) * 0.06,
           scale,
           radial: HEARTH_FLAME_WIDTH,
         });
       }
+    }
+
+    if (hearthSpots.length > 0) {
+      const { outer: hearthOuter, core: hearthCore } = hearthFlameMaterials();
+      group.add(
+        flameMesh(
+          `castle-hearthfire-${deck}`,
+          flameGeometry(FLAME_HEIGHT, FLAME_RADIUS),
+          hearthOuter,
+          hearthSpots,
+        ),
+        flameMesh(
+          `castle-hearthfirecore-${deck}`,
+          flameGeometry(FLAME_HEIGHT * 0.5, FLAME_RADIUS * 0.4),
+          hearthCore,
+          hearthSpots,
+        ),
+      );
+      // Its own entry in the flicker list, with a phase of its own: a hearth
+      // does not breathe in time with forty wall torches.
+      this.decks.push({
+        outer: hearthOuter,
+        core: hearthCore,
+        outerBase: HEARTH_FLAME_EMISSIVE,
+        coreBase: HEARTH_CORE_EMISSIVE,
+        // Deeper and slower than a torch's. A big fire moves in bigger, lazier
+        // pulses, and this is the whole of the difference between "lit" and
+        // "roaring" once the size is right.
+        depth: 1.9,
+        phase: rng.range(0, Math.PI * 2),
+      });
     }
 
     if (spots.length === 0) return;
@@ -906,7 +1042,14 @@ export class CastleFire {
       flameMesh(`castle-flamecore-${deck}`, flameGeometry(FLAME_HEIGHT * 0.5, FLAME_RADIUS * 0.4), core, spots),
     );
 
-    this.decks.push({ outer, core, phase: rng.range(0, Math.PI * 2) });
+    this.decks.push({
+      outer,
+      core,
+      outerBase: FLAME_BASE_EMISSIVE,
+      coreBase: CORE_BASE_EMISSIVE,
+      depth: 1,
+      phase: rng.range(0, Math.PI * 2),
+    });
     floor.add(group);
   }
 
@@ -926,10 +1069,10 @@ export class CastleFire {
   update(elapsed: number): void {
     for (const fire of this.decks) {
       const t = elapsed + fire.phase;
-      const wobble = Math.sin(t * 7.3) * 0.16 + Math.sin(t * 2.9) * 0.1;
-      fire.outer.emissiveIntensity = FLAME_BASE_EMISSIVE + wobble;
+      const wobble = (Math.sin(t * 7.3) * 0.16 + Math.sin(t * 2.9) * 0.1) * fire.depth;
+      fire.outer.emissiveIntensity = fire.outerBase + wobble;
       fire.core.emissiveIntensity =
-        CORE_BASE_EMISSIVE + Math.sin(t * 5.1) * 0.24 + Math.sin(t * 11.7) * 0.12;
+        fire.coreBase + (Math.sin(t * 5.1) * 0.24 + Math.sin(t * 11.7) * 0.12) * fire.depth;
     }
   }
 }
