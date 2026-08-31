@@ -42,11 +42,47 @@ single time, so after the first clamped frame her anchor is gone for good
 (`Hotel.ts:2149`'s comment claims the anchor is re-read fresh; it is re-read
 off the clamped sprite).
 
-## Fix (in progress)
+## Fix (done, commit `e24a575e`)
 
-1. `SpeechBubble` owns its anchor in a field (`anchorAt(x, y, z)`); the sprite's
-   `position` becomes a derived, clamp-written value that no caller reads.
-2. A bubble whose anchor is off screen **hides** rather than being dragged.
-   With the anchor on screen the clamp can move it by at most half the bubble's
-   own width, so it stays over its speaker. Keeps #280 fixed.
-3. New `check:speech-bubbles` inside `pnpm run check`.
+1. `SpeechBubble.anchorAt(x, y, z)` owns the anchor in a field; the sprite's
+   `position` is a derived, clamp-written value that no caller reads. Callers
+   updated: `NpcSystem` (x2), `Hotel.dressLobby`, `WildPets`.
+2. `IsoCamera.isOnScreen` gates the clamp: an off-screen speaker's bubble
+   hides rather than being dragged. With the anchor in shot the clamp can move
+   a bubble by at most its own half-extents, so #280 stays fixed.
+3. `IsoCamera.screenOffset(from, to, out)` — screen-axis offset in metres, for
+   the check to measure "is the anchor inside the bubble's rectangle" exactly.
+
+Measured after, 48 s of the running game: worst offset 6.82 m -> 1.48 m, and
+the 1.48 m case has its owner *on screen* at the frame edge.
+
+## Check (done, commit `61543a30`)
+
+`scripts/check-speech-bubbles.mts`, wired into `pnpm run check` as
+`check:speech-bubbles` (chain is now 49 steps; verified by parsing
+`package.json`, not grep). 9.6 s. Real park, 7200 frames, 390x844 portrait,
+the crowd's own camera; player still for half the run, walking a circle for the
+other half.
+
+Proved red:
+
+- `--mutate` (isOnScreen answers yes to everything = the pre-fix path):
+  `662 occasion(s). Worst: Cleo at (-19.88, 0.40, 51.98) is not on screen, but
+  her bubble is drawn at (-9.62, 1.10, 44.39) — 12.78 m away`
+- `--mutate-anchor` (anchor read back off `sprite.position`):
+  `7349 occasion(s). Worst: the 8 m set-once bubble was anchored at
+  (-5.60, 1.90, 58.53) and is drawn at (3.48, 1.90, 49.45) — 9.22 m adrift`
+- clean: 363 sightings, exit 0. Refuses to pass under 20 sightings.
+
+## Also covers the #414 agent's sighting
+
+Same canonical seed, near (-22.1, 30): re-shot on this branch at
+`/spawn?pos=-22.1,30` on a 390x844 phone — Wren's bubble at
+`(-19.68, 5.18, 27.08)` over Wren at `(-19.68, 2.25, 27.08)`, identical x/z.
+Screenshot `bridge-spot-1.png`.
+
+## Remaining
+
+- Full `pnpm run check`, `pnpm run build`, `pnpm run test:procgen`.
+- PR referencing #415.
+- Dev server pid 36545 on 5418 — kill by PID, confirm free.
