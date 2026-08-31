@@ -31,7 +31,16 @@
  *
  * The real `World` from `park-harness.mts`, stepped through `world.update` at
  * 1/60, with the **same `IsoCamera` the crowd was handed** — driven exactly as
- * `Game` drives it, at a 390x844 portrait phone's viewport, which is the
+ * `Game` drives it, **in `Game.tick`'s own order: player, then camera, then
+ * world** (see the comment on that call below, and `Game.ts` 1597/1615). That
+ * order is not cosmetic. Every bubble is gated and sized from inside
+ * `world.update`, so stepping the world first and letting the camera follow
+ * invents a one-frame camera lag the game does not have, and the assertions
+ * below then interrogate a camera the frame was never drawn with. It is the
+ * only thing this check has ever reported on `main` — 31 August 2026, one
+ * breach in 986 sightings, quoted in full at the call site.
+ *
+ * The viewport is a 390x844 portrait phone, which is the
  * narrowest framing the game supports and therefore the one the clamp works
  * hardest on. The player stands still for the first half of the run (a
  * stationary player is what invites a child over to chat) and walks a slow
@@ -79,6 +88,26 @@
  * The two mutations isolate cleanly: `--mutate-anchor` fails assertion 3 alone,
  * which is what makes 3 a real guard on the `Hotel` set-once fault rather than
  * a restatement of the clamp fault. Both transcripts are quoted in the PR.
+ *
+ * Re-proved red on `dd5a1b09` + the frame-order fix, on the default seed at
+ * 390x844 and `SECONDS=120` — quoted with its inputs because a transcript
+ * without them goes stale silently (CLAUDE.md):
+ *
+ * ```
+ * --mutate         1437 sightings; 452 off-screen speakers (worst 37.63 m),
+ *                  9068 set-once drifts (worst 9.22 m)          exit 1
+ * --mutate-anchor   985 sightings; 7349 set-once drifts (worst 9.22 m)  exit 1
+ * (unmutated)       985 sightings; 0 breaches of any kind        exit 0
+ * ```
+ *
+ * With the frame order right, assertion 1 asks a narrower question than it
+ * looks: the gate it calls is the same `isOnScreen`, against the same anchor
+ * and the same camera, that `SpeechBubble.updateScreenSize` just called — so it
+ * is a check that the shipping code **applied** the gate, not an independent
+ * opinion about the frustum. That is by design (it is why the real method is
+ * captured on line ~126 before `--mutate` blinds the prototype), and `--mutate`
+ * failing it 452 times is what keeps it from being a check that cannot fail.
+ * The independent geometry lives in assertions 2 and 3.
  */
 import './headless-canvas.mjs';
 import { Group, Vector2, Vector3 } from 'three';
@@ -248,10 +277,25 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
     cameraForward,
     frame,
   };
-  quietly(() => world.update(context));
-  // Exactly `Game`'s order: the world is stepped, then the camera follows,
-  // then the screen-constant sprites are sized against where it ended up.
+  // Exactly `Game.tick`'s order, and it is load-bearing: the player has
+  // already moved (above), then **the camera follows, and only then is the
+  // world stepped** — see `Game.ts`'s class doc and lines 1597/1615. Every
+  // bubble in the game is sized and gated from inside `world.update`
+  // (`NpcSystem.updateBubbles`, `Hotel`, `WildPets`), so in the running game
+  // the camera a bubble is gated against **is** the camera that then renders
+  // it, on the very same frame.
+  //
+  // This file used to step the world first and let the camera follow
+  // afterwards, which is the reverse, and it fabricated a one-frame camera lag
+  // that the game does not have. On 31 August that lag produced this check's
+  // only failure on `main`: Wren's anchor sat 2 mm inside the right edge of the
+  // frustum when `updateScreenSize` gated it (screen-right −5.498 against a
+  // half-width of 5.500), the camera then panned 35 mm further, and the
+  // assertion below re-asked the question of a camera that had moved on —
+  // −5.533, off screen by 33 mm. Nothing was ever drawn wrong; the measurement
+  // was taken from somewhere the game never stands.
   camera.update(context, playerPosition, playerVelocity);
+  quietly(() => world.update(context));
 
   // --- 1 and 2: the crowd ---------------------------------------------------
   for (const { character, bubble } of world.npcs.speechBubbles) {
