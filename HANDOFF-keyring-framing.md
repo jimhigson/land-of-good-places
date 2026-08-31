@@ -230,18 +230,64 @@ screen basis: analytic and rendered agree to 1.7e-16
 comment already established that a derived framing must not run into a hand-set
 clamp unnoticed — the clamp rises or the check goes red.
 
+## Browser verification — real 390x844 device viewport, headless playwright-core
+
+Chromium with `isMobile`, `hasTouch`, `deviceScaleFactor: 3` and an iPhone UA —
+a real device viewport, not a narrowed desktop window. Deep link
+`/keychain-stall`.
+
+**A trap worth writing down:** headless swiftshader renders this scene at about
+**1.5 fps**, so the camera's damping takes tens of seconds of wall clock. A
+3.5 s wait produced a screenshot of an *unsettled* camera (zoom still 1.0,
+focus still on the player) that looked like a total failure of the fix. The
+script now polls until `zoom` and `focusPoint` have both converged rather than
+waiting a guessed duration.
+
+| | before (`origin/main`) | after |
+|---|---|---|
+| phone portrait 390x844 | zoom 4.250, **2 of 6 keyrings off-screen** (`strawberry`, `rumi`) | zoom 3.808, **6 of 6 on-screen** |
+| desktop 1440x900 | zoom 4.250, 6 of 6 on-screen | zoom 3.747, 6 of 6 on-screen |
+
+The before shot is issue #418 photographed: four keyrings visible, Eleri filling
+the left third, and a sliver of pink at the right edge where `strawberry` is cut
+off. The after shot has all six spread across the counter with the front row
+standing at the table's edge. Desktop is unchanged in character — Eleri fully in
+shot with her name label, the whole stall, all six keyrings.
+
+Screenshots: `/tmp/keyring-shots/{before,after}-{phone-portrait,desktop}.png`.
+
+## #405 HUD hiding, confirmed in the browser after the camera change
+
+`check:hud-during-rides` passes but says outright that it drives `ui/Hud.ts`
+directly and proves no CSS and no `Game.tick` wiring, so it was checked live:
+
+```
+WHILE THE RACK VIEW IS OPEN (riding): riding=true  viewOpen=true   menuButton=hidden   mapPill=hidden   X=shown
+AFTER CLOSING (back on her feet):     riding=false viewOpen=false  menuButton=visible  mapPill=hidden   X=hidden
+AFTER PRESSING MENU:                  riding=false viewOpen=false  menuButton=visible  mapPill=VISIBLE  drawer data-open="true"
+```
+
+The map pill lives inside the menu drawer, so it is correctly hidden until the
+drawer is opened. Closed with the on-screen X, the way a child does it.
+
 ## Status
 
-- [x] Worktree off `origin/main` (6d475dab); branch pushed.
-- [x] Both faults reproduced with numbers.
+- [x] Worktree off `origin/main`; branch pushed.
+- [x] Both faults reproduced with numbers, and in a real browser.
 - [x] Camera derived from content per viewport (`IsoCamera.zoomToFit`).
 - [x] Front row at the table's front edge, derived from the deepest keyring.
-- [x] `check:keyring-view` written, in `pnpm run check` (47 -> 48 steps... it
-      parses as 47 named `check:*` steps, verified by reading package.json as
-      JSON rather than grepping).
-- [x] Proved red by three mutations, all exit 1.
+- [x] `check:keyring-view` in `pnpm run check`, proved red by three mutations.
 - [x] `check:keyring-hang` still green.
-- [ ] Full `pnpm run check` + `build` + `test:procgen`.
-- [ ] 390x844 playwright screenshots, before/after, plus a wide viewport.
-- [ ] Confirm #405 HUD hiding still behaves (keychain zoom sets `Player.riding`).
+- [x] 390x844 before/after screenshots + a wide viewport.
+- [x] #405 HUD hiding confirmed live.
+- [ ] Full `pnpm run check` (running, 0 failures at check:bus-journey), `build`,
+      `test:procgen`.
 - [ ] PR referencing #418.
+
+## Cleanup owed at the end
+
+- Dev server on **5471** (mine; 5421 was already taken by another agent, so I
+  did not use it). Kill by PID, then confirm with
+  `lsof -nP -i:5471 | grep LISTEN`.
+- Scratch files `_shots.mjs`, `_hud.mjs`, `_probe2.mjs`, `_probe3.mjs` in the
+  worktree root — delete, never commit.
