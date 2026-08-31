@@ -1458,6 +1458,40 @@ function clearOfWalls(x: number, z: number, reach: number): boolean {
  */
 const MAZE_PIECE_GAP = 7;
 
+/**
+ * How much further apart than {@link MAZE_PIECE_GAP} two L-pieces' **corners**
+ * must sit. A pure density knob — the separation that keeps the maze open is
+ * `MAZE_PIECE_GAP` via `runsClash`/`fitsAmong`, and this only decides how many
+ * pieces the lawn carries.
+ *
+ * **Was 12 (a 19 m corner spacing) and had to come down to hold the count when
+ * walls moved onto the paths (#417).** Nothing about the maze got looser; the
+ * space it is packed into changed shape. Corners used to be drawn from the
+ * whole lawn *disc* — two dimensions — so a 19 m exclusion round each one still
+ * left room for the next almost anywhere. Anchored to paving, corners lie on
+ * what is effectively a one-dimensional network, where the same 19 m eats a
+ * 38 m stretch of every kerb it lands on. Measured: the wooden count across the
+ * five CI seeds fell 92 → 70 on the move alone, and 7 restores it to 88 without
+ * touching a single clearance. `wallsDoNotClash` stays green throughout — it
+ * measures faces, not corners, and `WALL_RUN_GAP` is untouched.
+ */
+const MAZE_CORNER_SPREAD = 7;
+
+/**
+ * The same thing for benches: how far apart two stone runs' centres must sit.
+ *
+ * New with #417, and needed for the mirror-image reason. A bench used to have
+ * to find a clear patch of open lawn; now it needs a clear stretch of kerb, and
+ * kerb is exactly what the park has miles of — so the same candidate budget
+ * that produced 63 benches across the five seeds produced 85, a park visibly
+ * busier with stonework than the one Jim is looking at. The budget is not the
+ * lever it looks like: dropping `BENCH_CANDIDATES` from 4200 to 1300 moved the
+ * canonical seed only 26 → 22, because acceptance is limited by how tightly
+ * runs pack rather than by how many are offered. Spacing is the honest knob,
+ * and the maze has had one all along.
+ */
+const BENCH_SPREAD = 9;
+
 /** Fixed candidate budgets. Calibrated across the five CI seeds so the parks
  * carry roughly the counts the old count-targets produced (~10 hiding walls,
  * ~8 benches); the exact number now breathes with the seed. */
@@ -1722,7 +1756,7 @@ function generateWallMaze(placed: WallRun[]): WallRun[] {
     const anchor = pickBorderAnchor(rng);
     if (!anchor) continue;
     const { x: cx, z: cz, axisYaw, outward } = anchor;
-    if (cornerPoints.some(([px, pz]) => Math.hypot(cx - px, cz - pz) < MAZE_PIECE_GAP + 12)) {
+    if (cornerPoints.some(([px, pz]) => Math.hypot(cx - px, cz - pz) < MAZE_PIECE_GAP + MAZE_CORNER_SPREAD)) {
       continue;
     }
     // One arm hugs the bordered edge (either direction along it); the other
@@ -1773,11 +1807,16 @@ function generateStoneRuns(placed: WallRun[]): WallRun[] {
   const rng = new Rng(0x57013e ^ PARK_SEED);
   const runs: WallRun[] = [];
   let piece = 1000;
-  const consider = (run: WallRun): void => {
-    if (!runIsClear(run.from[0], run.from[1], run.to[0], run.to[1])) return;
-    if (!fitsAmong(run, placed)) return;
+  // Centres of the lawn benches that stand, for {@link BENCH_SPREAD}. Only
+  // recorded on acceptance: a candidate refused for crossing a path must not
+  // reserve the space it was refused from.
+  const benchCentres: [number, number][] = [];
+  const consider = (run: WallRun): boolean => {
+    if (!runIsClear(run.from[0], run.from[1], run.to[0], run.to[1])) return false;
+    if (!fitsAmong(run, placed)) return false;
     runs.push(run);
     placed.push(run);
+    return true;
   };
 
   // Beds: short tangent walls just off the plaza kerb, on the plaza's own
@@ -1819,6 +1858,12 @@ function generateStoneRuns(placed: WallRun[]): WallRun[] {
     const anchor = pickBorderAnchor(bench);
     if (!anchor) continue;
     const { x: cx, z: cz, axisYaw } = anchor;
+    // Density, the same way the maze does it — see {@link BENCH_SPREAD}. Only
+    // the lawn benches, not the four plaza beds above, which are placed on the
+    // plaza's own cardinal bearings and are meant to be a set of four.
+    if (benchCentres.some(([px, pz]) => Math.hypot(cx - px, cz - pz) < BENCH_SPREAD)) {
+      continue;
+    }
     // Shorter than the 7-9 m these used to roll. A run that long is a garden
     // wall, and the lawn has very few 9 m stretches that clear every path,
     // plot and now the railway along their whole length — the old length only
@@ -1836,7 +1881,9 @@ function generateStoneRuns(placed: WallRun[]): WallRun[] {
       continue;
     }
     piece += 1;
-    consider({ from, to, height: bench.pick([0.8, 0.95] as const), kind: 'stone', piece });
+    if (consider({ from, to, height: bench.pick([0.8, 0.95] as const), kind: 'stone', piece })) {
+      benchCentres.push([cx, cz]);
+    }
   }
   return runs;
 }
