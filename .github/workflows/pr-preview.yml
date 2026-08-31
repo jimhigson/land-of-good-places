@@ -55,8 +55,14 @@ jobs:
 
       # Client bundle only — see the on: comment above for why the check
       # suite is deliberately not run here.
+      #
+      # This used to have to say `pnpm exec vite build` explicitly, to reach
+      # past a `build` script that would also have run 47 checks. Now that
+      # `build` means only `vite build`, the plain script is the honest way to
+      # say it — and it is the same command the deploy runs, which is the point.
+      # The checks run in `checks.yml`, which is required before merge.
       - name: Build
-        run: pnpm exec vite build
+        run: pnpm run build
 
       # `wrangler versions upload` publishes a new Worker *version* with its
       # own preview URL, without promoting it to production traffic — the

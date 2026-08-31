@@ -22,15 +22,20 @@ permissions:
   contents: read
 
 jobs:
-  # Two parallel jobs rather than one. They used to run sequentially in a single
-  # 20-minute budget — `test:procgen` first, then the full `npm run build` — and
-  # once the train started solving with the generic rail search (a ~1.5 s solve
-  # that every park-building check now pays, up from ~40 ms) the two together
-  # crept past 20 minutes on a slow runner: `test:procgen` alone ate ~5 of the
-  # 20, starving the build. Splitting them gives each its own runner and its own
-  # budget, halves the wall clock, and makes a failure read plainly as "an
-  # invariant broke" vs "a check broke". They each do their own `npm ci`; the
-  # extra install is cheap next to what it unblocks.
+  # **One job now.** This workflow used to carry a second, "Build and checks",
+  # running the whole `pnpm run build` chain — because `build` *meant* "run 47
+  # checks, then build". That chain has moved to its own workflow,
+  # `checks.yml`, now that `build` and `check` are separate scripts, so keeping
+  # a copy here would just be running the same checks twice.
+  #
+  # The reasoning that split them in the first place is unchanged and is now
+  # applied properly: each suite gets its own runner and its own budget, and a
+  # failure reads plainly as "an invariant broke" vs "a check broke" rather
+  # than being buried in a build log.
+  #
+  # **Do not rename this job.** `Procgen invariants` is a required status check
+  # on `main`; a required check is matched by name, so renaming it stops it
+  # gating merges without anything going red.
   invariants:
     name: Procgen invariants
     runs-on: ubuntu-latest
@@ -54,33 +59,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # The invariant suite on its own, so a failure reads as "an invariant
-      # broke" rather than being buried in the build log.
+      # broke" rather than being buried in the build log. `test:procgen` is not
+      # part of `pnpm run check` — the two suites do not cover each other, which
+      # is why both are required.
       - name: Procgen invariant suite
         run: pnpm run test:procgen
-
-  build:
-    name: Build and checks
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: 26
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      # The full gate: `tsc`, every `check:*` (including `check:park`'s six
-      # invariants and the canonical-seed ratchet, and `check:park-boot`), and
-      # `vite build`. Heavier since the generic train solve, so it gets the whole
-      # budget to itself with headroom.
-      - name: Build
-        run: pnpm run build

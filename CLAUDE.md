@@ -198,17 +198,60 @@ the Overseer rather than signing it off.
 - Never `git add -A` or `git add .`. Name the files you mean.
 - `.claude/` is gitignored; worktree gitlinks must never reach `main`.
 
+## `build` and `check` are different things
+
+Jim, 30 August 2026: *"why would we EVER run tests on a deploy to start
+with?"*, *"just make build not run checks"*, and *"this is very simple — build
+and check are different things."*
+
+- **`pnpm run build`** — `vite build`. Produces the artefact. **191 ms.**
+- **`pnpm run check`** — the 47-step gate: `tsc --noEmit`, `typecheck:test`,
+  and every `check:*`. **~16 minutes.**
+- **`pnpm run test:procgen`** — the invariant suite. In **neither** of the
+  above. See "Expanding the procedural generation".
+- **`pnpm run check:all`** — all three, for a local pre-push sweep.
+
+They used to be one script: `build` *was* the 47 checks followed by
+`vite build`. So everything that wanted an artefact paid for the whole gate —
+most damagingly the deploy, which re-ran 16 minutes of QA to publish a 191 ms
+bundle, on a commit that had already passed those exact checks minutes
+earlier. That duplication was not merely wasteful, **it was the 29 August
+outage**: it pushed the deploy past `timeout-minutes`, and GitHub reports a
+timeout as `cancelled`, so the site sat stale for hours with nothing red.
+
+**Where they run:**
+
+| script | workflow | required to merge? |
+|---|---|---|
+| `check` | `checks.yml` ("Checks") | **yes** |
+| `test:procgen` | `procgen-invariants.yml` ("Procgen invariants") | **yes** |
+| `build` | `deploy.yml`, `pr-preview.yml`, and `checks.yml` | — |
+
+**Both required checks are load-bearing by *name*.** A required status check is
+matched by the job's `name:`, so renaming a job or a workflow stops it gating
+merges — and nothing goes red when that happens; PRs simply start passing
+faster. If you rename either, update the branch protection in the same change
+and read it back:
+
+```
+gh api repos/jimhigson/land-of-good-places/branches/main/protection
+```
+
+**Run both `check` and `test:procgen` before every push.** `build` exiting 0
+now tells you almost nothing — it means the bundle was produced, not that
+anything is correct.
+
 ## A check that never runs is worse than a check that fails
 
-**If you touch the `build` chain in `package.json`, verify it by parsing the
+**If you touch the `check` chain in `package.json`, verify it by parsing the
 `scripts` object — never by grepping the file.**
 
 ```
 node -e "console.log(Object.keys(require('./package.json').scripts))"
 ```
 
-On 29 August a rebase conflict on the `build` line was resolved with
-`--ours`, which took `main`'s whole chain and **silently dropped a new
+On 29 August a rebase conflict on that chain (then still inside `build`) was
+resolved with `--ours`, which took `main`'s whole chain and **silently dropped a new
 `check:castle` step**. It looked resolved: the diff stat was clean, the file
 parsed, and `grep check:castle` matched — because `check:castle-window` was
 already there. The check would simply never have run, and a green build would
@@ -250,9 +293,14 @@ cause it. If a check is red when you find it, fixing it is the work now.
 
 ## Building
 
-`pnpm run build` must pass. **Run it and check the exit code.** Never pipe a
-build through `tail` or `head` — that masks the exit code, and we shipped a
+`pnpm run check` and `pnpm run build` must both pass, and `pnpm run
+test:procgen` besides. **Run them and check the exit codes.** Never pipe one
+through `tail` or `head` — that masks the exit code, and we shipped a
 non-compiling branch to `main` that way once.
+
+`build` alone is a very weak signal now: it is `vite build`, which strips types
+without consulting `tsc`, so it happily produces a bundle from code that does
+not typecheck. `check` is the one that has an opinion.
 
 TypeScript is strict with `exactOptionalPropertyTypes: true`: optional
 properties must be **omitted**, never assigned `undefined`.
@@ -301,16 +349,17 @@ assertion to make a seed pass — swap the seed and write down why.
 is not optional. It complements `check:park`, which owns whether the park
 *works*; this owns whether its furniture is *placed sanely*.
 
-**A green build is not a green repo.** `test:procgen` is **not in the `build`
-chain** — that chain is 47 steps and this is not one of them. `pnpm run build`
-can exit 0 while all five seeds fail. **Run both before every push**; they do
-not cover each other.
+**A green build is not a green repo.** `test:procgen` is in **neither**
+`pnpm run build` (which is just `vite build`) nor `pnpm run check` (the 47-step
+chain) — it is its own suite, run by its own workflow. Both of those can exit 0
+while all five seeds fail. **Run all three before every push**; they do not
+cover each other.
 
 On 29 August a branch named an interior mesh `castle-wall-plate-0`, which
 matched the pattern `parkFacts.ts` uses to find the castle's *exterior*
 stonework. A slide-clearance invariant silently began measuring the wrong
 mesh, `castleMasonryTopY` jumped 10.29 m → 14.83 m, and every seed failed —
-while `pnpm run build` stayed honestly green, because it never ran the suite
+while the check chain stayed honestly green, because it never ran the suite
 that could see it.
 
 ## Procgen backtracks on collision, always
