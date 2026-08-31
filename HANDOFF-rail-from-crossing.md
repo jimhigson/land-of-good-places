@@ -872,3 +872,55 @@ strips of ground between itself and the boundary. `main`'s rim-hugging loops
 left almost none. That is a coherent story and it fits all four remaining
 failures — but it is **a story, not a measurement**, and on this ticket four
 stories have already expired. Measure it before acting on it.
+
+## THE OPEN QUESTION IS ANSWERED: the ground is REACHABLE. 20/20.
+
+`scripts/probe427-fill.mts`, using `poiGraph.ts`'s **own** walkability test
+(`isClear` reproduced exactly: the probe stands at `bridgeHeightAt(x, z)`, and
+narrows to `PAVED_CLEARANCE` on paving) rather than a hand-rolled ground-level
+one. Standing the probe on the deck is the whole difference — it is what lets a
+fill climb a bridge, which is how a child gets outside the loop at all.
+
+```
+CONTROL: reaches 78/78 reachable nodes OUTSIDE the loop   (the old fill: 2/78)
+CONTROL: misses 0 reachable garden nodes INSIDE the loop
+CONTROL: instrument VALID
+
+20/20 stranded waypoints stand on ground a child can reach.
+```
+
+**So this is not a sealed-off district. It is the other case: the ground is
+walkable and the waypoint graph cannot chain along it.** Every short line into
+the strips crosses the railway fence or a bridge ramp parapet, and every
+unblocked line is 13.4-25.9 m — beyond `MAX_EDGE`'s 13 m. The waypoints out
+there are too sparse to hop between.
+
+**The fix is therefore more waypoints, not a bigger hop.** `MAX_EDGE` is a claim
+about how far apart waypoints may sit before the graph is lying about
+connectivity; raising it would make the check agree with the park by making the
+check weaker, which is the exact trade this ticket exists to remove. Not to be
+touched.
+
+### Two controls worth keeping, because both nearly cost a wrong answer
+
+1. **The old ground-level fill said "0/20, genuinely sealed off"** — a clean,
+   confident, investigation-ending answer. Its control killed it: it reached
+   2 of the 78 reachable nodes outside the loop, so it was only ever measuring
+   "inside the loop". Kept in this file above, verbatim, on the Overseer's
+   instruction.
+2. **The new fill's first control run said INVALID**, on 2 missed inside-nodes.
+   Examined rather than waved through: both nodes' own points are clear, both
+   their rounded 0.5 m cells are not, and 10 and 16 of the 25 cells within a
+   metre had been filled. Grid quantisation beside a clear node, not a
+   disconnection. The `hit` test now accepts any filled cell within 1 m and
+   says in its own comment why that is a measurement and not a fudge —
+   an exact-cell test would have condemned a sound instrument.
+
+### What is still not established
+
+**Why** the strips have too few waypoints. The likely mechanism is that
+`poiGraph`'s seeds are sampled densely along paved lanes and sparsely
+elsewhere, so a strip no path serves gets only scatter seeds — and these two
+strips are ground the path network does not route into. **That is a story, not
+a measurement.** Check whether any stranded node carries a `lane` identity, and
+whether a ribbon runs into either strip, before acting on it.
