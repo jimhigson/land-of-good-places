@@ -132,6 +132,26 @@ export class IsoCamera {
     return this.camera.top;
   }
 
+  /** Half the width of the orthographic box, in world metres. */
+  get viewHalfWidth(): number {
+    return this.camera.right;
+  }
+
+  /**
+   * "Right on screen" as three.js itself resolved it, straight off the camera's
+   * world matrix — the ground truth `core/screenBasis.ts`'s analytic
+   * `screenBasis3D` is checked against. Live for the current frame; do not hold
+   * a reference across one.
+   */
+  get screenRightAxis(): Readonly<Vector3> {
+    return this.screenRight;
+  }
+
+  /** "Up on screen" as three.js resolved it — see {@link screenRightAxis}. */
+  get screenUpAxis(): Readonly<Vector3> {
+    return this.screenUp;
+  }
+
   /**
    * Where the world origin currently sits on screen, in **world metres along
    * the screen's own right and up axes**.
@@ -285,17 +305,88 @@ export class IsoCamera {
   }
 
   /**
-   * Sizes the orthographic box.
+   * Half the height of the orthographic box **at zoom 1**, for the viewport
+   * this camera is currently sized to.
    *
    * Framing is height-led — the same vertical slice of park on every machine —
    * but with a **minimum width**, because a portrait phone's aspect is under
    * 0.5 and height-led framing alone hands it a letterbox barely wider than the
    * fountain. When the floor bites, the view grows *taller* to keep the aspect
-   * honest; nothing is ever stretched. The floor is applied before the zoom
-   * divide, so pinching to zoom in still zooms in on a phone.
+   * honest; nothing is ever stretched.
+   *
+   * Its own method, rather than a line inside {@link applyFrustum}, because
+   * {@link zoomToFit} has to invert it and a second copy of this `max` is
+   * exactly the "two definitions of one thing" CLAUDE.md warns about — a
+   * hand-kept copy would drift the moment either constant moved, and the
+   * symptom would be a shot that frames correctly on the machine it was
+   * checked on and clips somewhere else.
    */
+  private frustumBase(): number {
+    return Math.max(CAMERA_VIEW_HEIGHT / 2, CAMERA_MIN_VIEW_WIDTH / 2 / this.aspect);
+  }
+
+  /**
+   * **The zoom at which a content box of these half-extents fits the frame** —
+   * screen-space metres along {@link screenRightAxis}/{@link screenUpAxis}
+   * (`core/screenBasis.ts`'s `screenBasis3D` is the same pair, solved
+   * analytically for anything without a live camera to ask), measured about
+   * whatever point the shot is focused on — with `margin` as a fraction of the
+   * content left clear around it.
+   *
+   * For a shot that must *contain* something rather than sit at a distance
+   * somebody liked once. Issue #418 is what this is for: the keyring rack held
+   * a zoom constant tuned by eye against a desktop screenshot, and on a 390×844
+   * phone in portrait two of the six keyrings sat outside the frame entirely —
+   * a child being asked to choose between things she cannot see.
+   *
+   * **Why this cannot be a constant, however carefully chosen.** Width and
+   * height do not get worse on the same screen. From {@link frustumBase}, at a
+   * given zoom `halfWidth = max(H/2 · aspect, MINW/2) / zoom` and
+   * `halfHeight = max(H/2, MINW/2 / aspect) / zoom`. So the *width* floor bites
+   * on a narrow screen and the *height* floor on a wide one: any single number
+   * is slack on one and short on the other. Asking the live camera — which
+   * knows its own aspect, because {@link resize} told it — is the only answer
+   * that is right on both. It also means a child rotating her phone reframes
+   * the shot for free, with nothing to invalidate.
+   *
+   * Returns an unclamped ideal; {@link setZoomTarget} applies
+   * `CAMERA_ZOOM_MIN`/`CAMERA_ZOOM_MAX`. Callers that need to know whether the
+   * fit was actually achievable should compare against those themselves.
+   */
+  zoomToFit(halfWidth: number, halfHeight: number, margin: number): number {
+    const base = this.frustumBase();
+    const wanted = 1 + margin;
+    // `base * aspect` is the frame's own half-width at zoom 1, so each ratio is
+    // "how much closer than zoom 1 may I go and still contain this axis".
+    const byWidth = (base * this.aspect) / Math.max(halfWidth * wanted, 1e-6);
+    const byHeight = base / Math.max(halfHeight * wanted, 1e-6);
+    return Math.min(byWidth, byHeight);
+  }
+
+  /**
+   * **The zoom at which `worldMetres` covers `pixels` CSS pixels of screen.**
+   *
+   * The inverse of {@link worldUnitsPerPixel}, and the honest way to state a
+   * rule about *fingers*: a fingertip is a fixed number of CSS pixels wherever
+   * it lands (`tapSpacing.ts` derives the game's own 40 px from
+   * GAME_DESIGN.md's UI floor), so "far enough apart to tap separately" is a
+   * question about pixels, not about metres. A world distance that is a
+   * comfortable gap at one zoom is a single fat fingertip at another, and a
+   * zoomed picker changes zoom by design.
+   *
+   * Pair it with {@link zoomToFit} when a shot has to both *contain* something
+   * and stay *tappable*: those two pull in opposite directions — pulling back
+   * to fit more shrinks everything towards the finger — and this returns the
+   * floor the pulling-back has to stop at.
+   */
+  zoomForPixelSize(worldMetres: number, pixels: number): number {
+    const base = this.frustumBase();
+    return (pixels * 2 * base) / (Math.max(worldMetres, 1e-6) * this.viewportHeight);
+  }
+
+  /** Sizes the orthographic box. See {@link frustumBase} for the framing rule. */
   private applyFrustum(): void {
-    const base = Math.max(CAMERA_VIEW_HEIGHT / 2, CAMERA_MIN_VIEW_WIDTH / 2 / this.aspect);
+    const base = this.frustumBase();
     const halfHeight = base / this.zoomValue;
     const halfWidth = halfHeight * this.aspect;
     this.camera.left = -halfWidth;

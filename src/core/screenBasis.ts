@@ -94,6 +94,77 @@ export function screenBasis(yaw: number): ScreenBasis {
 }
 
 /**
+ * The **full three-dimensional** screen axes — what {@link ScreenBasis} is for
+ * the ground, but for anything with height as well.
+ *
+ * {@link screenBasis} answers "which way is up the screen *on the ground*",
+ * which is what steering needs. Framing needs a different question: *where does
+ * this point land on screen?* — and for that the vertical matters, because a
+ * pitched camera projects a metre of height and a metre of ground depth onto
+ * overlapping parts of the same screen axis. Anything asking whether a thing
+ * fits in shot, or how far apart two things look, wants these.
+ *
+ * Written out rather than read off a live camera's matrix so that a check, a
+ * headless script or a system built before the camera exists can all ask the
+ * same question and get the same answer. `check:keyring-view` asserts these
+ * agree with `IsoCamera`'s own matrix-derived axes to within a rounding error,
+ * so the analytic form here cannot quietly drift from what three.js actually
+ * renders.
+ *
+ * ## The derivation, so nobody has to redo it
+ *
+ * Every camera here sits at `focus + (sin yaw · cos p, sin p, cos yaw · cos p) · D`
+ * and looks back, with no roll. Three.js's `lookAt` builds
+ * `right = normalise(cross(worldUp, eye - target))`, which flattens to the same
+ * `(cos yaw, 0, -sin yaw)` {@link screenBasis} already gives — a pitched camera
+ * does not tilt its own horizon, so "right" has no vertical component at all.
+ * Then `up = cross(eyeDirection, right)`:
+ *
+ * ```
+ * up = (-sin p · sin yaw,  cos p,  -sin p · cos yaw)
+ * ```
+ *
+ * Note what that says: the ground part of "up the screen" is exactly
+ * {@link screenBasis}'s own `(upX, upZ)` scaled by `sin p`. So a metre of
+ * ground travel towards the viewer reads as only `sin(pitch)` metres of screen
+ * movement — 0.616 at this park's 38° — which is why two rows of keyrings a
+ * comfortable 0.75 m apart on a table looked half that far apart on screen, and
+ * overlapped (#418).
+ */
+export interface ScreenBasis3D {
+  readonly rightX: number;
+  readonly rightY: number;
+  readonly rightZ: number;
+  readonly upX: number;
+  readonly upY: number;
+  readonly upZ: number;
+}
+
+/** Solves the full screen axes for a camera at compass angle `yaw`, pitched `pitch` down (radians). */
+export function screenBasis3D(yaw: number, pitch: number): ScreenBasis3D {
+  const ground = screenBasis(yaw);
+  const sinPitch = Math.sin(pitch);
+  return {
+    rightX: ground.rightX,
+    rightY: 0,
+    rightZ: ground.rightZ,
+    upX: ground.upX * sinPitch,
+    upY: Math.cos(pitch),
+    upZ: ground.upZ * sinPitch,
+  };
+}
+
+/** How far right on screen a world point sits, in metres. */
+export function screenRightOf(basis: ScreenBasis3D, x: number, y: number, z: number): number {
+  return basis.rightX * x + basis.rightY * y + basis.rightZ * z;
+}
+
+/** How far up the screen a world point sits, in metres. */
+export function screenUpOf(basis: ScreenBasis3D, x: number, y: number, z: number): number {
+  return basis.upX * x + basis.upY * y + basis.upZ * z;
+}
+
+/**
  * World X of a screen-space direction — `x` right, `y` up the screen.
  *
  * Paired with {@link screenToWorldZ}. Two scalars rather than a vector because

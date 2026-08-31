@@ -524,16 +524,33 @@ export const CAMERA_MIN_VIEW_WIDTH = 11;
  *
  * Raised again, 2.4 → 4.6, for `world/KeychainShop.ts`'s locked view: Jim's
  * "character and stall both fit with only a small gap" framing for that shot
- * (`KEYCHAIN_VIEW_ZOOM`) needs a closer view than a person standing in the
- * open park was ever framed at, and that view drives the camera through this
- * same clamped `setZoomTarget`, not a bypass of it (see that constant's own
- * doc comment) — so the general ceiling had to rise to let it through rather
- * than silently capping the shot short. The side effect — a player can now
- * pinch/scroll a little closer everywhere, not only in this one view — is
- * the same trade the previous rise already made, in the same direction.
+ * needs a closer view than a person standing in the open park was ever framed
+ * at, and that view drives the camera through this same clamped
+ * `setZoomTarget`, not a bypass of it — so the general ceiling had to rise to
+ * let it through rather than silently capping the shot short. The side effect —
+ * a player can now pinch/scroll a little closer everywhere, not only in this
+ * one view — is the same trade the previous rise already made, in the same
+ * direction.
+ *
+ * **And again, 4.6 → 5.5 (#418), for the same reason as last time.** That
+ * keyring view no longer holds a constant: `KeychainShop.viewZoom` derives its
+ * zoom from what has to be in shot and from how far apart the keyrings must
+ * stay for a fingertip, per viewport. On a **landscape phone** — 844 × 390, so
+ * only 390 pixels of height to spread the rack across — that came out at
+ * **5.192**, and 4.6 was silently capping it: the shot still rendered, and the
+ * two closest keyrings cleared a fingertip by 0.006 m, which is not clearance,
+ * it is a coincidence. `check:keyring-view` measures that margin on every
+ * viewport, so this ceiling is now load-bearing in a way it can be *seen* to
+ * be — raise the demand past this and the check says so instead of the shot
+ * quietly getting worse.
+ *
+ * Note the shape of the argument, because it is the general one: a derived
+ * framing cannot be allowed to run into a hand-set clamp without something
+ * noticing. Either the clamp rises or the check goes red; what must not happen
+ * is the third thing, where the clamp wins and nobody hears about it.
  */
 export const CAMERA_ZOOM_MIN = 0.42;
-export const CAMERA_ZOOM_MAX = 4.6;
+export const CAMERA_ZOOM_MAX = 5.5;
 export const CAMERA_ZOOM_STEP = 0.16;
 
 /** Distance the camera sits back from its target (affects clipping only). */

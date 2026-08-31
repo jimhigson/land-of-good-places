@@ -59,8 +59,31 @@ const PHONE_VIEW_HALF_HEIGHT = Math.max(
 );
 const PHONE_METRES_PER_PX = (PHONE_VIEW_HALF_HEIGHT * 2) / PHONE_VIEWPORT.height;
 
-/** How far a finger's tap can miss what it aimed at, in world metres. */
-export const TAP_FINGER_METRES = 2 * FALLBACK_UNIT_PX * PHONE_METRES_PER_PX;
+/**
+ * **How far a finger's tap can miss what it aimed at, in CSS pixels** — the
+ * finger itself, before any camera gets involved.
+ *
+ * GAME_DESIGN.md's TEXT/UI-SCALE rule floors the UI unit at
+ * {@link FALLBACK_UNIT_PX} (20 px) and a minimum touch target is two of them:
+ * 40 px, the standard finger pad.
+ *
+ * This is the form to use anywhere the zoom is not the park's default — a
+ * zoomed picker, a cutscene, anything that reframes. A fingertip does not
+ * shrink because the camera moved closer, so the rule is a number of pixels;
+ * {@link TAP_FINGER_METRES} is this same rule already converted for the one
+ * case where the zoom is known to be 1. The keyring rack asks in pixels
+ * (`IsoCamera.zoomForPixelSize`), because deciding its zoom is the whole
+ * question there (#418).
+ */
+export const TAP_FINGER_PIXELS = 2 * FALLBACK_UNIT_PX;
+
+/**
+ * How far a finger's tap can miss what it aimed at, in world metres, **at the
+ * park's default zoom** — {@link TAP_FINGER_PIXELS} through the QA phone's own
+ * camera scale. Right for anything measured on the walked-around park; wrong,
+ * by exactly the zoom factor, for anything measured inside a zoomed view.
+ */
+export const TAP_FINGER_METRES = TAP_FINGER_PIXELS * PHONE_METRES_PER_PX;
 
 /**
  * A walk-through portal's trigger region — a rectangle in its own frame,
