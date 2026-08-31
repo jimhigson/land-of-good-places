@@ -56,13 +56,35 @@ not the search**.
 
 `ringStartPoses()` (96 rim bearings, `RIM_STANDOFF` 3.35) is what gets replaced.
 
+## MEASUREMENT 2 — the gating number, and it is emphatic
+
+`scripts/measure-crossing-poses.mts`, asking `bridgeFit.ts` (the same probe the
+real planner uses) over a 4 m grid at 8 headings:
+
+| seed | bridgeable poses | distinct points | of points in bounds | sweep |
+|---|---|---|---|---|
+| canonical | **1112** | 396 | 1269 | 95 ms |
+| 2 | **1183** | 372 | 1267 | 91 ms |
+| 5 | **1288** | 407 | 1269 | 90 ms |
+| 11 | **1268** | 413 | 1265 | 94 ms |
+| 18 | **1137** | 399 | 1267 | 96 ms |
+
+**Over a thousand bridgeable poses per seed, against the 96 rim bearings we
+have to replace.** The search budget survives outright — there is more than an
+order of magnitude of headroom, and the whole sweep costs ~95 ms.
+
+### The finding that matters most
+
+**Seed 2 offers 1183 bridgeable poses and its solved loop proves ZERO bridge
+sites.** Its park is full of ground a bridge fits on; the loop simply never
+goes through any of it. That is the entire defect, stated as a number — and it
+is exactly what growing the loop *from* such a pose fixes. The 79% is not a
+scarcity of bridgeable ground, it is a loop that never had a reason to visit
+any.
+
 ## Still to measure (in order)
 
-1. **How many bridgeable crossing poses a park actually offers.** If a typical
-   park yields ~100, the budget is preserved outright. If it yields 10, the
-   success rate has to be re-measured seed by seed. **This is the next thing to
-   do** and it needs the route-free feasibility probe below.
-2. **Variety across seeds** — do parks start rhyming? Measure, do not assert.
+1. **Variety across seeds** — do parks start rhyming? Measure, do not assert.
 3. **Does 79% become 100%?** 11 of 14 loops admit a bridge today
    (`scripts/measure-bridgeable-loops.mts`, on the #414 branch). By
    construction it should be all of them. If it is not, the construction is not
