@@ -10,48 +10,116 @@ Branch `fix/paths-planned-before-bridges`. Jim, third report:
 > "path finding needs to include bridges from the start, not as an afterthought
 > to add to an existing path layout"
 
-## Measured — `scripts/measure-bridge-path-conflicts.mts` (this branch)
+---
 
-`node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs \
-  scripts/measure-bridge-path-conflicts.mts 20260728 2 5 11 18`
+## THE DECISIVE FINDING
 
-Baseline on `origin/main` @ 6d475dab:
+**`paths.ts` knows *where* the park may cross the railway. It does not know
+*how much ground a bridge occupies*. So it routes other path legs straight
+through the ramps.**
+
+`paths.ts` imports `CROSSING_SITES` / `LEVEL_CROSSING_SITES` — a point, a
+direction, a half-width, a proven ramp *reach*. It uses them only to pick
+which site a rail-crossing leg goes through (`grep CROSSING_SITES
+src/world/paths.ts`: lines 11-16, 909, 1113, 1810, 2091). **Nothing in
+`paths.ts` reserves the ramp corridor**, so any other leg is free to be routed
+across it, along it, or to terminate in it.
+
+The one module that does know a bridge's real ground — `train/bridgeKeepout.ts`,
+`isInBridgeFootprint()` — is asked **only by the scatter passes** (trees, lamps,
+walls, benches). It cannot be asked at path-layout time by construction: it
+calls `computeCrossings()`, which reads `pathCentreline()`, which is not filled
+in until `Garden`'s `buildPaths()` has already drawn the network. Its own
+header says so.
+
+So the ordering is: **sites → paths drawn → crossings measured from the drawn
+paths → bridge footprints → bridges built.** A bridge's footprint has never
+existed at the moment the paths are laid out. That is Jim's sentence exactly.
+
+### And it is worse than the ordering story in #392
+
+#392's account is "on some seeds the planner proves zero bridge sites and
+`planReal` builds bridges anyway". That is **real and reproduced** (table
+below) — but **it is not what Jim is seeing**, because the shipping seed is not
+one of those seeds:
 
 | seed | proven bridge sites | level sites | crossings | bridges built | built on a **level** site |
 |---|---|---|---|---|---|
-| canonical (20260728) | 4 | 3 | 2 | 2 | 0 |
-| 2 | 0 | 7 | 3 | 1 | **1** |
-| 5 | 3 | 6 | 3 | 2 | **1** (d=130) |
-| 11 | 3 | 3 | 4 | 2 | **1** (d=84) |
-| 18 | 1 | 6 | 2 | 1 | **1** (d=104) |
+| **canonical (20260728)** | 4 | 3 | 2 | 2 | **0** |
+| 2 | 0 | 7 | 3 | 1 | 1 |
+| 5 | 3 | 6 | 3 | 2 | 1 (d=130) |
+| 11 | 3 | 3 | 4 | 2 | 1 (d=84) |
+| 18 | 1 | 6 | 2 | 1 | 1 (d=104) |
 
-**Four of the five seeds build at least one bridge on a crossing the planner
-offered only as a LEVEL crossing.** The site counts reproduce #392's table
-exactly. So the ordering fault is live on 4/5 seeds, not just seed 2.
+Site counts reproduce #392's table exactly. But **canonical builds both its
+bridges on properly proven sites and still shows Jim's fault.** Proving the
+site is therefore *not sufficient*: a proven site says "a bridge fits here",
+it does not say "keep the rest of the network off the ground it fits in".
 
-## The mechanism, confirmed in code
+Fixing only the opportunistic pass would have left the shipping park unchanged
+— that would have been the third adjacent fix.
+
+### Measured on canonical, entrance bridge d=172 at (-22.1, 36.2), 32.5 m from the gate
+
+Foreign drawn runs entering that bridge's own paving extent
+(`scripts/measure-bridge-path-conflicts.mts`):
+
+- **run 7** — 14 samples, lifted to **4.40 m** above ground at (-22.2, 36.4),
+  i.e. it reaches the crown. Its east end *terminates inside the footprint*.
+- **run 0** — 6 samples over the north ramp foot, lift 0.06 m.
 
 `pathGraph.ts`'s `drapePathsOverBridges` lifts **every** drawn path vertex a
-bridge's `pavingHeightAt` covers — not just the run the bridge was built for.
-So a foreign connector crossing a bridge's footprint is *drawn climbing the
-ramp flank and stopping at the parapet*. Foreign runs lifted onto a bridge
-(excluding the bridge's own run):
+bridge's `pavingHeightAt` covers, not just the run the bridge was built for.
+So a foreign leg crossing the footprint is *drawn climbing the ramp flank and
+stopping dead at the parapet* — Jim's "runs into a solid wall". Where the leg
+sits inside `covers()` but outside the paving extent it stays on the terrain
+instead — Jim's "path under the ramps". **One cause, both symptoms.**
 
-- seed 11, bridge d=84: a foreign run lifted **2.77 m** at (-45.4, 22.7)
-- seed 18, bridge d=104: a foreign run lifted **2.72 m** at (0.2, 30.4)
-- seed 5, bridge d=130: a foreign run lifted **1.10 m** at (33.4, -1.7)
+Foreign lifts on the other seeds: seed 11 bridge d=84 lifts a foreign run
+**2.77 m**; seed 18 bridge d=104 lifts one **2.72 m**; seed 5 bridge d=130
+lifts one **1.10 m**.
+
+---
+
+## Reproduction (canonical seed, dev server 5417, headless playwright)
+
+`node scripts/qa-bridge-paths-414.mjs 5417 <out> "-15.8,20.7" "-22.1,30" "-22.1,44"`
+
+- `at_-15.8_20.7.png` — **the path runs west and ends flat against the pink
+  masonry of the ramp flank.** This is Jim's second symptom, from a child's eye.
+- `at_-22.1_44.png` — a second sandy surface sits *outside* the parapet at ramp
+  height, going nowhere.
+- Plan view: `scripts/plot-bridge-neighbourhood.mts -22.1 36.2 35 out.svg` —
+  run 7 (blue) drives east into the bridge band and its endpoint dot sits
+  inside it.
+
+## Tools added on this branch
+
+- `scripts/measure-bridge-path-conflicts.mts` — per-seed site tiers, which
+  crossings got bridges, and every foreign run inside each footprint.
+- `scripts/plot-bridge-neighbourhood.mts` — plan-view SVG of one bridge and
+  every path around it.
+- `scripts/qa-bridge-paths-414.mjs` — spawns the real player and photographs.
+
+## Plan (NOT yet started — Overseer wants to see it first)
+
+1. Give `paths.ts` a bridge-aware cost at layout time: every candidate site
+   carries the ground its ramps will need (`SITE_RAMP_IDEAL` × `halfWidth`,
+   already proven by `crossingPlanSolve`), and no leg other than the crossing
+   leg may be routed into that rectangle.
+2. Make the builder honest: a bridge is built only on a site the planner
+   proved. Measure why `bridgeCandidateAt` proves nothing where `planReal`
+   succeeds before deciding whether to relax the prover or drop the bridges.
+3. Invariant in `test/procgen/invariants.ts`: no drawn path sample outside a
+   bridge's own crossing run may sit under its deck or terminate in its
+   masonry, thresholds from `PLAYER_RADIUS` / `TRACK_CLEARANCE`. Prove it red
+   by mutation.
 
 ## Status
 
-- [x] worktree, dev server on 5417
+- [x] worktree; dev server 5417 (kill by PID only)
 - [x] baseline measured, all five seeds
-- [ ] visual repro from a player's eye (Overseer's order #1)
-- [ ] confirm which foreign runs are genuine second paths vs the far half of
-      the bridge's own crossing leg (run-id split at a graph node)
-- [ ] measure WHY `bridgeCandidateAt` proves nothing where `planReal` builds
-      (a lead, not a finding)
-- [ ] report plan before deleting the opportunistic pass
-
-## Environment
-
-Dev server port **5417** (`--strictPort`). Kill by PID only.
+- [x] visual repro from a player's eye
+- [x] decisive cause identified
+- [ ] plan approved by Overseer
+- [ ] fix, invariant, mutation transcript, per-seed counts after
