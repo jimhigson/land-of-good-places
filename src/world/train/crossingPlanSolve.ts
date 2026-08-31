@@ -413,6 +413,36 @@ function selectSpaced(candidates: readonly Candidate[]): CrossingSite[] {
   return kept.map(({ obliqueness: _obliqueness, ...site }) => site);
 }
 
+
+/** **Why did the planner refuse a bridge here?** — diagnostic only (#414/#427).
+ * Reports, per width and angle, which gate closed, through the same probe the
+ * real decision uses. */
+export function explainBridgeRefusal(railDistance: number): string[] {
+  if (stationBlocked(railDistance)) return [`railD=${railDistance.toFixed(1)}: inside a station's window`];
+  const route = TRAIN_PLAN.route;
+  const point = new Vector3();
+  const tangent = new Vector3();
+  route.pointAt(railDistance, point);
+  route.tangentAt(railDistance, tangent);
+  const [perpX, perpZ] = sidePlusDirection(tangent);
+  const out: string[] = [`railD=${railDistance.toFixed(1)} at (${point.x.toFixed(1)}, ${point.z.toFixed(1)}):`];
+  for (const halfWidth of [SITE_HALF_WIDTH, NARROW_HALF_WIDTH]) {
+    for (const offset of ANGLE_OFFSETS) {
+      const cos = Math.cos(offset);
+      const sin = Math.sin(offset);
+      const { pos, neg, deckClear } = probeReach(
+        point, perpX * cos + perpZ * sin, -perpX * sin + perpZ * cos,
+        halfWidth, SITE_RAMP_IDEAL, SITE_BOUNDARY_MARGIN, SITE_PLOT_MARGIN,
+      );
+      out.push(`  halfW=${halfWidth.toFixed(1)} angle=${((offset * 180) / Math.PI).toFixed(0)}deg: ` +
+        (!deckClear ? 'DECK BLOCKED' :
+          `reach ${pos.toFixed(1)}/${neg.toFixed(1)} vs floor ${SITE_RAMP_FLOOR.toFixed(1)}` +
+          (pos < SITE_RAMP_FLOOR || neg < SITE_RAMP_FLOOR ? ' -- SHORT' : ' -- OK')));
+    }
+  }
+  return out;
+}
+
 export interface SolvedCrossingSites {
   readonly bridges: readonly CrossingSite[];
   readonly levels: readonly CrossingSite[];

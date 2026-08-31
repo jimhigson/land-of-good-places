@@ -372,3 +372,70 @@ picked, not where the loop may run.
 Prior art agrees this direction is the sound one: `HANDOFF-bridge-at-the-front-door.md`
 already made the entrance cross on a bridge by *routing the path*, not by moving
 the railway.
+
+## THE ENTRANCE-POSE VERSION — measurement 1 fixed, measurement 4 regressed
+
+Keep-out **reverted** (commit "Revert ..."). The gate corridor's own bridgeable
+crossings now go to the **head** of the ranked field instead
+(`gateCorridorPoses`), so the search tries the park's front door first and
+falls back to the general field.
+
+### Measurement 1 + 3 — solving restored, and much cheaper
+
+| seed | keep-out | entrance-pose |
+|---|---|---|
+| seeds solving | **9/15** | **14/15** |
+| canonical | #86, 4474 ms | **#3**, 274 ms |
+| 2 | #44 | #17 |
+| 5 | UNSOLVABLE | **#1**, 96 ms |
+| 11 | UNSOLVABLE | **#0**, 17 ms |
+| 18 | #49 | **#9**, 161 ms |
+
+Back to the 14/15 baseline and far cheaper than *either* previous version —
+seed 11 solves on its first pose. Seed 3 now solves for the first time
+(it failed on `main` too); seed 9 no longer does.
+
+### Measurement 4 — 100% → **86%**. Regressed.
+
+`12/14 loops admit at least one bridge`. **Seeds 2 and 15 prove zero.**
+
+### Why — measured, not reasoned
+
+On both failing seeds the winning start pose is **not** an entrance pose:
+seed 2's `d=0` is at (-34.0, -34.0), seed 15's at (-18.0, 42.0). Neither is on
+the corridor, so the entrance poses did not close a loop and the search fell
+through to the general field — which is fine and expected.
+
+The planner's own account at that chosen crossing (`explainBridgeRefusal`,
+added here, reusing the real `probeReach`):
+
+```
+seed 2,  railD=0.0 at (-34.0, -34.0): DECK BLOCKED at all ten width/angle pairs
+seed 15, railD=0.0 at (-18.0, 42.0):  DECK BLOCKED at all ten
+```
+
+**DECK BLOCKED**, not "ramp short" — the deck itself, which the pose generator
+had proven clear before the rail existed. The rail-corridor test cannot cause
+this (it only applies past the deck) and `stationBlocked` is false on both. By
+elimination the cause is **`nearStationStructure`** — the *spatial* 8 m station
+clearance, as distinct from the along-the-loop `stationBlocked` already fixed.
+
+**This is exactly the relaxation named in `bridgeFit.ts`'s header** — "dropped:
+the station-structure test… this one genuinely is a relaxation, and it is the
+one to watch". It has now bitten twice, in two different forms:
+
+1. **Along the loop** (`stationBlocked`) — fixed by `CROSSING_STATION_CLEARANCE`
+   in `plan.ts`. That fix stands and is why seed 2's *previous* loop worked.
+2. **In space** (`nearStationStructure`) — **still open**. A station 104 m away
+   along a winding loop can stand a few metres from the crossing in space, and
+   its canopy posts block the deck.
+
+### The fix, not built
+
+`plan.ts`'s station placer already keeps clear of the chosen crossing *along
+the loop*. It must also keep the station's **structures spatially** clear of it
+— the same `STATION_STRUCTURE_CLEARANCE` the planner uses, applied in the other
+direction. Same shape as the fix that worked: one constant, both directions.
+
+And per the Overseer's ruling, both directions should apply to **every planned
+crossing site**, not only the loop's own.
