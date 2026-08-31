@@ -26,11 +26,13 @@ import { castleSootTexture } from '../../core/textures';
 import { softMaterial } from './parts';
 import { BEAM_UNDERSIDE, SCONCE_HEADROOM, SCONCE_MOUNT_Y } from './castleFabric';
 import {
-  deckIsSolid,
+  HALL_DECK,
+  insideInterior,
   INTERIOR_DOOR_MAX_X,
   INTERIOR_DOOR_MIN_X,
   LIFT_DOOR_MAX_Z,
   LIFT_DOOR_MIN_Z,
+  onPlate,
   TOP_DECK,
 } from './layout';
 import { keepOutsFor } from './dressing';
@@ -225,7 +227,7 @@ export function castleTorchAnchors(deck: number): WallAnchor[] {
   const consider = (anchor: WallAnchor): void => {
     // Nothing on a wall that has no floor under it to stand and look at it
     // from. Asked of the deck that was built rather than of the hole list.
-    if (!deckIsSolid(deck, anchor.x + anchor.out.x, anchor.z + anchor.out.z)) return;
+    if (!insideInterior(anchor.x + anchor.out.x, anchor.z + anchor.out.z)) return;
     // The **same margin `check:castle` measures against**, plus the bracket's
     // own reach off the wall. It was bare `k.radius` until the check found two
     // torches a few centimetres inside a shop's queue: a builder that clears a
@@ -282,10 +284,23 @@ function spread(min: number, max: number): number[] {
  * positioned. Same rule as {@link CASTLE_TORCH_CUP}: the thing that emits owns
  * where it is, and the shell agrees with it.
  *
- * Against the north wall, west of the middle — across the hall from the front
- * door, so it is what a child walks *towards*.
+ * Against the north wall, west of the middle.
+ *
+ * **On the great hall's floor, which is `HALL_DECK` and no longer 0** (#380).
+ * This was `deck: 0` and had to move with everything else that makes the hall a
+ * hall — `castleDecor.ts`'s hearthside surround, coat of arms and portcullis,
+ * and `castleFurniture.ts`'s throne and feast. It was found *after* those had
+ * moved, by looking at the built scene: `castle-hearth-logs-0` was standing at
+ * world x=600 — in the middle of the mall's market — while its own stone
+ * surround was 300 m away at x=900 in the hall. Every check was green, because
+ * a fire without a fireplace breaks no assertion.
+ *
+ * That is the exact failure `castleFurniture.ts`'s note was written to prevent
+ * ("so the two move together rather than one being found later on the wrong
+ * floor"), and it still caught only two of the three owners. **There are three
+ * things that make the hall a hall and they live in three files.**
  */
-export const CASTLE_HEARTH = { deck: 0, x: -14, z: -WALL_FACE_Z + 0.55 } as const;
+export const CASTLE_HEARTH = { deck: HALL_DECK, x: onPlate(-14), z: -WALL_FACE_Z + 0.55 } as const;
 
 /** Where the braziers stand: the open middle of the plate, on the lower decks. */
 const BRAZIER_SPOTS: readonly { readonly x: number; readonly z: number }[] = [
@@ -293,7 +308,7 @@ const BRAZIER_SPOTS: readonly { readonly x: number; readonly z: number }[] = [
   { x: -20, z: -14 },
   { x: 4, z: -16 },
   { x: 22, z: 16 },
-];
+].map(({ x, z }) => ({ x: onPlate(x), z: onPlate(z) }));
 
 // ------------------------------------------------------------- geometry
 
@@ -485,7 +500,7 @@ export class CastleFire {
 
     // --- braziers, for the middle of the plate that no wall torch reaches --
     const standing = BRAZIER_SPOTS.filter(
-      (spot) => deck < 3 && deckIsSolid(deck, spot.x, spot.z) && clearOfKeepOuts(deck, spot),
+      (spot) => deck < 3 && insideInterior(spot.x, spot.z) && clearOfKeepOuts(deck, spot),
     );
     if (standing.length > 0) {
       const braziers = new InstancedMesh(

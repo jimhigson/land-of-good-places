@@ -1,14 +1,10 @@
 import { NavGrid, MAX_ROUTE_WAYPOINTS } from '../../world/NavGrid';
 import { ARRIVE_RADIUS, WAYPOINT_RADIUS } from '../TapNavigator';
 import { PARK_BOUNDARY, circleBoundary, type ParkBoundary } from '../../world/boundary';
-import {
-  INTERIOR_ORIGIN_X,
-  INTERIOR_ORIGIN_Z,
-  INTERIOR_PLAY_RADIUS,
-  PLAYER_RADIUS,
-} from '../../core/constants';
+import { INTERIOR_PLAY_RADIUS, PLAYER_RADIUS } from '../../core/constants';
 import { JUMP_APEX_HEIGHT } from '../Player';
-import { SPACE_CASTLE, SPACE_GARDEN, type SpaceId } from '../../world/spaces';
+import { SPACE_GARDEN, type SpaceId } from '../../world/spaces';
+import { castleFloorFor } from '../../world/building/floors';
 import type { CollisionWorld } from '../../world/Collision';
 import type { GroundSampler } from '../Player';
 import type { LevelConnector } from '../../world/building/surfaces';
@@ -168,12 +164,15 @@ const STUCK_FRACTION = 0.25;
 /** Boundaries by space — see the file comment. `null` for anywhere unplanned. */
 function boundaryFor(space: SpaceId): ParkBoundary | null {
   if (space === SPACE_GARDEN) return PARK_BOUNDARY;
-  if (space === SPACE_CASTLE) {
-    // The same circle `Building.enterInterior` hands `setPlayBounds`. Taken
-    // from the same three constants rather than captured from the collision
-    // world, so the child's lattice covers the interior whether or not the
-    // player has ever been inside.
-    return circleBoundary(INTERIOR_PLAY_RADIUS, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z);
+  const floor = castleFloorFor(space);
+  if (floor) {
+    // The same circle `Building.boundTo` hands `setPlayBounds`. Taken from the
+    // floor's own origin rather than captured from the collision world, so the
+    // child's lattice covers the floor whether or not the player has ever been
+    // on it — and **per floor** since the split, because the three plates no
+    // longer share a coordinate system and one circle can no longer stand for
+    // all of them.
+    return circleBoundary(INTERIOR_PLAY_RADIUS, floor.originX, floor.originZ);
   }
   // The hotel's rooms are their own spaces, and their guests are driven by
   // `WaypointDriver` on a pinned circuit rather than by this. Nothing to plan.
@@ -318,7 +317,7 @@ export class JourneyPlanner implements RoutePlanner {
     const full = this.insideCount >= MAX_INSIDE;
     return this.attractions.filter((a) => {
       if (!reachableFrom(space, a, this.portals)) return false;
-      if (full && a.space !== space && a.space === SPACE_CASTLE) return false;
+      if (full && a.space !== space && castleFloorFor(a.space) !== null) return false;
       return true;
     });
   }

@@ -15,22 +15,18 @@ import { Rng, TAU } from '../../core/mathUtils';
 import { SLIDE_PLAN } from '../slide/plan';
 import { interiorMaterial, softMaterial } from './parts';
 import {
-  deckIsSolid,
+  insideInterior,
   regionContains,
   GROWN_UP_X,
   GROWN_UP_Z,
-  HELTER_DECK,
-  HELTER_ENTRY_X,
-  HELTER_ENTRY_Z,
   ROOF_PAVILION_X,
   ROOF_PAVILION_Z,
   SHOP_SCALE_XZ,
   SHOP_UNITS,
-  STAIR_STAND_X,
-  STAIR_STAND_Z,
   TOILET_DECK,
   TOILET_ROOM,
   TOP_DECK,
+  onPlate,
   shopHasForecourt,
   shopLocalToBuilding,
   type ShopUnitDefinition,
@@ -54,6 +50,22 @@ import {
  * Everything is placed by a **seeded** scatter with rejection, so the furniture
  * is identical on every reload and can never end up in a stairwell, on a shop's
  * serving spot, inside the toilets, or floating over a hole.
+ *
+ * ## What #403 changed, and what it did not
+ *
+ * The diagnosis above stands and is not being retracted: a wide plate of one
+ * flat colour is an empty car park, and giving each deck a middle is what
+ * stopped it reading as a warehouse. What changed is that decorating the plate
+ * turned out not to be *enough* on its own. Jim asked for more density three
+ * times — issue #376, the roof-garden QA, and finally #403 — and the first two
+ * answers were both "add more things". The third answer is to halve the floor
+ * **area** instead, so the same furniture reads twice as close together.
+ *
+ * So nothing here was deleted to make room. The roundel, its planters and the
+ * benches are all still the size they were: only the plate under them came in,
+ * and the counts below (eight benches a deck, ten on the roof) now cover half
+ * the floor they used to. If a later change makes the room bigger again, this
+ * file's original reasoning applies again unaltered.
  */
 
 /**
@@ -63,8 +75,29 @@ import {
  * and west of the way in — so it is the first thing you see on the ground floor
  * without being the thing you are standing on when you arrive.
  */
-const ROUNDEL_X = -6;
-const ROUNDEL_Z = 12;
+const ROUNDEL_X = onPlate(-6);
+/**
+ * The roundel sits in the southern half of the floor, between the market and
+ * the door.
+ *
+ * It used to be pinned to the **south edge of the shaft band**, measured off
+ * `BUILDING_SHAFTS`, and the note here recorded how tight that was: 12.3 m of
+ * floor for a 12 m disc, because the shafts sat in a band across the middle of
+ * the plate and had not shrunk with it. The band is gone with the shafts, so
+ * the disc has room again and can simply be placed.
+ *
+ * South of the market's aisle rather than centred, so a child walks in through
+ * the front door, across the roundel, and *into* the market — the rug leads her
+ * to the stalls rather than sitting behind them.
+ */
+const ROUNDEL_Z = INTERIOR_HALF_Z - 0.8 - 6;
+/**
+ * Authored size, deliberately **not** scaled with the plate (#403).
+ *
+ * A 12 m disc on a 42 m floor is a bigger share of the room than it was on a
+ * 60 m one, and that is the intended direction: the roundel is furniture, and
+ * halving the area is about the same furniture covering more of the floor.
+ */
 const ROUNDEL_RADIUS = 6;
 
 /** Nothing is placed within this of something a child needs to walk to. */
@@ -183,9 +216,9 @@ function buildBenches(deck: number, blocked: readonly KeepOut[], isRoof: boolean
     const x = rng.range(-INTERIOR_HALF_X + 3, INTERIOR_HALF_X - 3);
     const z = rng.range(-INTERIOR_HALF_Z + 3, INTERIOR_HALF_Z - 3);
     // Never over a hole, and never within one step of the lip of one either.
-    if (!deckIsSolid(deck, x, z)) continue;
-    if (!deckIsSolid(deck, x + 1.4, z) || !deckIsSolid(deck, x - 1.4, z)) continue;
-    if (!deckIsSolid(deck, x, z + 1.4) || !deckIsSolid(deck, x, z - 1.4)) continue;
+    if (!insideInterior(x, z)) continue;
+    if (!insideInterior(x + 1.4, z) || !insideInterior(x - 1.4, z)) continue;
+    if (!insideInterior(x, z + 1.4) || !insideInterior(x, z - 1.4)) continue;
     if (blocked.some((k) => Math.hypot(x - k.x, z - k.z) < k.radius)) continue;
     if (spots.some((s) => Math.hypot(x - s.x, z - s.z) < 5)) continue;
     spots.push({ x, z, yaw: rng.pick([0, Math.PI / 2]) });
@@ -231,7 +264,6 @@ function buildBenches(deck: number, blocked: readonly KeepOut[], isRoof: boolean
 export function keepOutsFor(deck: number): KeepOut[] {
   const blocked: KeepOut[] = [
     // The stairs pad and the lane in front of it.
-    { x: STAIR_STAND_X, z: STAIR_STAND_Z, radius: 4.4 },
     // The lift lobby, on the east wall.
     { x: INTERIOR_HALF_X - 2, z: 5, radius: 4 },
     // The roundel and its planters.
@@ -250,9 +282,7 @@ export function keepOutsFor(deck: number): KeepOut[] {
     );
   }
 
-  if (deck === HELTER_DECK) {
-    blocked.push({ x: HELTER_ENTRY_X, z: HELTER_ENTRY_Z, radius: 4 });
-  }
+
 
   if (deck === TOILET_DECK) {
     blocked.push({

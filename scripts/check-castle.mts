@@ -24,6 +24,7 @@
  */
 import './headless-canvas.mjs';
 import { Box3, Group, InstancedMesh, Matrix4, Mesh, Vector3, type Object3D, type Texture } from 'three';
+import { CASTLE_FLOORS, FLOOR_SPACE_SPACING } from '../src/world/building/floors.ts';
 import {
   BUILDING_FLOOR_COUNT,
   BUILDING_FLOOR_HEIGHT,
@@ -36,8 +37,7 @@ import {
 import { castleCoursingTexture, castleFlagstoneTexture } from '../src/core/textures.ts';
 import { BuildingShell } from '../src/world/building/Shell.ts';
 import {
-  BUILDING_SHAFTS,
-  deckIsSolid,
+  insideInterior,
   regionContains,
   TOP_DECK,
 } from '../src/world/building/layout.ts';
@@ -103,12 +103,18 @@ if (CASTLE_CEILING_CLEAR <= TALLEST_CHILD) {
 // ---------------------------------------------------------------------------
 
 /**
- * A beam is fixed to the underside of the slab above it. Where that slab is
- * punched through — the stairs, the escalator, the lift, the trampoline
- * and the helter-skelter — a beam would hang from nothing, and would be
+ * A beam is fixed to the underside of this storey's ceiling. That ceiling used
+ * to be punched through — the stairs, the escalator, the lift, the trampoline
+ * and the helter-skelter — and a beam over one of those hung from nothing,
  * visible from the storey above as a plank across an open shaft.
  *
- * `buildCeilingBeams` already asks `deckIsSolid` before placing a segment.
+ * Since the floors became separate spaces (#377/#380) there are no shafts and
+ * no deck above, so the question narrows to "is this segment over the floor
+ * plate at all?" — but it is still worth asking, because the plate can be
+ * resized (#403 halved its area) and a run laid from the old half-extents
+ * would overhang into space.
+ *
+ * `buildCeilingBeams` already asks `insideInterior` before placing a segment.
  * This reads the **placed matrices back out** and asks the same question of
  * the answer, which is the only version of the assertion that can catch the
  * builder getting it wrong.
@@ -129,6 +135,20 @@ let beamsChecked = 0;
  */
 let lowestBuilt = Infinity;
 let highestBuilt = -Infinity;
+
+/**
+ * Where each storey's wall-plate ended up along X, so the loop below can prove
+ * the floors are **actually a floor apart**.
+ *
+ * This is the wrong-parenting test, moved axis. It used to compare each plate's
+ * world `y` against `deck * BUILDING_FLOOR_HEIGHT + BEAM_UNDERSIDE`, which
+ * worked while five storeys were stacked in one coordinate system and height
+ * was what told a correctly-parented plate from one hung on the wrong floor
+ * group. Since #377/#380 they step sideways and every ceiling is at the same
+ * height, so that comparison can no longer fail and a plate on the wrong floor
+ * would sail through it.
+ */
+const plateCentreX: number[] = [];
 
 /**
  * How many points across a segment's own footprint are tested for solid slab.
@@ -192,10 +212,10 @@ for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
         const tz = FOOTPRINT_SAMPLES === 1 ? 0.5 : sz / (FOOTPRINT_SAMPLES - 1);
         const x = worldBounds.min.x + (worldBounds.max.x - worldBounds.min.x) * tx;
         const z = worldBounds.min.z + (worldBounds.max.z - worldBounds.min.z) * tz;
-        if (deckIsSolid(deck + 1, x, z)) continue;
+        if (insideInterior(x, z)) continue;
         fail(
-          `beams: deck ${deck} segment ${i} covers (${x.toFixed(2)}, ${z.toFixed(2)}), ` +
-            `where deck ${deck + 1} has a hole — part of it is fixed to a ceiling that is ` +
+          `beams: floor ${deck} segment ${i} covers (${x.toFixed(2)}, ${z.toFixed(2)}), ` +
+            `which is off the floor plate — part of it is fixed to a ceiling that is ` +
             `not there.`,
         );
         sx = FOOTPRINT_SAMPLES;
@@ -878,15 +898,35 @@ let coursedWallsInScene = 0;
     // `setFromObject` walks the instance matrices *and* every parent transform,
     // so this is the box in world space — the storey offset included.
     shellBounds.setFromObject(plate);
-    const expected = deck * BUILDING_FLOOR_HEIGHT + BEAM_UNDERSIDE;
-    if (Math.abs(shellBounds.min.y - expected) > 1e-3) {
+
+    // **The wrong-parenting test moved axis with the floors.**
+    //
+    // It used to compare the plate's world `y` against `deck *
+    // BUILDING_FLOOR_HEIGHT + BEAM_UNDERSIDE`: five storeys stacked in one
+    // coordinate system, so height was what told a correctly-parented plate
+    // from one hung on the wrong floor group. Since #377/#380 the floors step
+    // sideways instead, and **every storey's ceiling is at the same height** —
+    // so the old comparison is no longer able to fail, and a plate on the wrong
+    // floor would sail through it.
+    //
+    // So it is now two clauses, and between them they are strictly stronger
+    // than the one they replace: the height must be right *and* the plate must
+    // be standing over its own floor's plate.
+    if (Math.abs(shellBounds.min.y - BEAM_UNDERSIDE) > 1e-3) {
       fail(
         `scene: storey ${deck}'s wall-plate hangs to ${shellBounds.min.y.toFixed(3)} m in the ` +
-          `assembled shell, but storey ${deck} puts its ceiling at ${expected.toFixed(3)} m — ` +
-          `it is parented to the wrong floor group.`,
+          `assembled shell, but every storey puts its ceiling at ` +
+          `${BEAM_UNDERSIDE.toFixed(3)} m.`,
       );
       continue;
     }
+    // Which floor group it is under, recorded rather than asserted here: the
+    // check builds `BuildingShell('interior')` on its own, unparented, so world
+    // x is the *shell's* frame and not the game's. Asserting an absolute origin
+    // would bake in whether the shell happens to be mounted, which is not what
+    // this is about. The spacing **between** floors is frame-independent, so
+    // that is what gets asserted, once, after the loop.
+    plateCentreX[deck] = (shellBounds.min.x + shellBounds.max.x) / 2;
 
     platedSegmentsInScene += plate.count;
     if (slab && mapOf(slab) === flagstones) storeysSeen += 1;
@@ -900,71 +940,116 @@ let coursedWallsInScene = 0;
   }
 }
 
+// --- and the floors really are a floor apart ------------------------------
+
+/**
+ * **The split itself, asserted on the built shell.**
+ *
+ * Two storeys' wall-plates `FLOOR_SPACE_SPACING` apart is the whole of
+ * "disjoint spaces without overlap" as it appears in geometry. If a floor group
+ * were ever built at the wrong offset — or at no offset, which is what the
+ * pre-split code did — the floors would be standing inside each other and every
+ * height-blind collider on one would be an invisible wall on the others. That
+ * is the exact bug this work exists to make impossible, so it gets an
+ * assertion rather than a comment.
+ */
+{
+  const built = plateCentreX.filter((x) => x !== undefined);
+  if (built.length < 2) {
+    fail(
+      `floors: only ${built.length} storey wall-plate(s) were measured, so nothing can be said ` +
+        `about whether the floors are separated at all.`,
+    );
+  }
+  for (let deck = 1; deck < plateCentreX.length; deck += 1) {
+    const here = plateCentreX[deck];
+    const below = plateCentreX[deck - 1];
+    if (here === undefined || below === undefined) continue;
+    const gap = here - below;
+    if (Math.abs(gap - FLOOR_SPACE_SPACING) > 1e-3) {
+      fail(
+        `floors: storey ${deck}'s wall-plate is ${gap.toFixed(3)} m from storey ${deck - 1}'s ` +
+          `along X, but the floors are meant to be ${FLOOR_SPACE_SPACING} m apart. Two floors ` +
+          `closer than that share coordinates, and indoor collision is height-blind — a ` +
+          `counter on one would be an invisible wall on the other.`,
+      );
+    }
+  }
+  process.stderr.write(
+    `check:castle — floors: ${plateCentreX.filter((x) => x !== undefined).length} storeys, ` +
+      `each ${FLOOR_SPACE_SPACING} m from the last. Disjoint by construction.\n`,
+  );
+}
+
 // ---------------------------------------------------------------------------
-// 9. Nothing stands where a shaft's own structure comes down.
+// 9. Every prop stands on its own floor's plate.
 // ---------------------------------------------------------------------------
 
 /**
- * **A prop may not stand inside one of the building's shafts, on any storey.**
+ * **The shaft assertion that stood here is gone, and so is the bug class it
+ * guarded.**
  *
- * `deckIsSolid` answers a different question — *is there floor here* — and on
- * deck 0 it answers "yes" everywhere, because the ground floor has no holes in
- * it. But a shaft is not only a hole: it is a **stair, an escalator, a
- * trampoline or a helter-skelter**, and those structures come all the
- * way down to the floor a child walks in on. So the ground floor has no hole
- * and is still not free plan.
+ * It asserted that no prop stood inside one of `BUILDING_SHAFTS`, on any
+ * storey. The reasoning was sound and worth keeping on the record: `deckIsSolid`
+ * answered a different question — *is there floor here* — and on deck 0 it
+ * answered "yes" everywhere, because the ground floor had no holes. But a shaft
+ * was not only a hole: it was a stair, an escalator, a trampoline or a
+ * helter-skelter, and those structures came all the way down to the floor a
+ * child walked in on. The great hall's feast benches cleared every keep-out in
+ * `keepOutsFor(0)` and this file was green three assertions deep, and the
+ * helter-skelter came down through them — found by looking at a screenshot, not
+ * by a check, because `keepOutsFor` only added the helter's disc on
+ * `HELTER_DECK`, which is where you get *on*, not where the tube is.
  *
- * This was found by looking at a screenshot, not by a check. The great hall's
- * feast benches were placed clear of every keep-out in `keepOutsFor(0)` and
- * `check:castle` was green three assertions deep — and the helter-skelter came
- * down through them, because `keepOutsFor` only adds the helter's disc on
- * `HELTER_DECK` (2), which is where you *get on*, not where the tube is. The
- * east bench was inside `HELTER_SHAFT` and the shot showed a slide growing out
- * of the dinner table.
+ * **Since #377/#380 there are no shafts.** Every floor is its own space, one
+ * unbroken slab, and nothing comes down through anything. The assertion cannot
+ * fail because the situation cannot arise, and a check that cannot fail is
+ * worse than no check — so it is replaced rather than kept as decoration.
  *
- * It is its own assertion rather than part of §6's keep-out loop because it is
- * a different fact about the building — `BUILDING_SHAFTS` is the owner, and
- * asking it costs nothing. It is deliberately *not* `DECK_HOLES`, which
- * additionally folds in every shop's **sunken forecourt**: a lowered floor a
- * prop may perfectly well stand on, and asking that list this question gives
- * 186 false failures.
- *
- * Wall furniture is exempt on the same measured basis §6 uses: a tapestry flat
- * against a wall cannot be inside a shaft in any meaningful sense, and the
- * shafts do not touch the walls.
+ * What replaces it is the live risk on a castle whose plate has just halved its
+ * area (#403): a prop **left at a coordinate from the larger plate**, standing
+ * off the edge of the floor in mid-air over the plaza disc. That is exactly the
+ * class of thing `onPlate` exists to prevent and exactly what a future resize
+ * will threaten again.
  */
-let shaftProps = 0;
-let shaftTests = 0;
-const shaftStoreys = new Set<number>();
+let plateProps = 0;
+const plateStoreys = new Set<number>();
 for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
+  const floor = CASTLE_FLOORS[deck];
+  if (!floor) continue;
   for (const { label, box } of placedOn(deck)) {
     if (box.min.y > TALLEST_CHILD_HEIGHT) continue;
-    if (reachFromWall(box) <= WALL_FURNITURE_REACH) continue;
-    shaftProps += 1;
-    shaftStoreys.add(deck);
-    for (const shaft of BUILDING_SHAFTS) {
-      shaftTests += 1;
-      // Five by five over the prop's real footprint, so a prop whose corner
-      // alone reaches into a shaft is caught — that is exactly how the bench
-      // got in, and sampling the centre would have missed it.
-      let inside = 0;
-      for (let i = 0; i <= 4; i += 1) {
-        for (let j = 0; j <= 4; j += 1) {
-          const x = box.min.x + ((box.max.x - box.min.x) * i) / 4;
-          const z = box.min.z + ((box.max.z - box.min.z) * j) / 4;
-          if (regionContains(shaft.region, x, z)) inside += 1;
-        }
+    plateProps += 1;
+    plateStoreys.add(deck);
+    // Five by five over the prop's real footprint, so a prop whose corner alone
+    // hangs off the plate is caught — sampling the centre would miss it, which
+    // is the same reason the shaft test sampled a grid.
+    for (let i = 0; i <= 4; i += 1) {
+      for (let j = 0; j <= 4; j += 1) {
+        const x = box.min.x + ((box.max.x - box.min.x) * i) / 4;
+        const z = box.min.z + ((box.max.z - box.min.z) * j) / 4;
+        // The props are built in floor-local metres inside their floor group,
+        // so the box is already floor-local: `insideInterior` is the right
+        // frame. A small margin, because a wall-hung tapestry legitimately
+        // sits flush with the plate's own edge.
+        if (insideInterior(x, z, 0.6)) continue;
+        fail(
+          `plate: floor ${deck} '${label}' reaches (${x.toFixed(2)}, ${z.toFixed(2)}), ` +
+            `which is off a plate that is ${(floor.halfX * 2).toFixed(2)} x ` +
+            `${(floor.halfZ * 2).toFixed(2)} m — it is standing in mid-air over the plaza.`,
+        );
+        i = 5;
+        j = 5;
       }
-      if (inside === 0) continue;
-      fail(
-        `shafts: deck ${deck} '${label}' stands in the '${shaft.id}' shaft ` +
-          `(${inside}/25 of its footprint). That shaft's structure comes down through this ` +
-          `storey whether or not the floor has a hole in it, so the prop is inside it.`,
-      );
-      break;
     }
   }
 }
+
+process.stderr.write(
+  `check:castle — plate: ${plateProps} props measured across ${plateStoreys.size} floors. ` +
+    `The shaft assertion this replaces is retired because there are no shafts left ` +
+    `(#377): every floor is its own space and one unbroken slab.\n`,
+);
 
 // ---------------------------------------------------------------------------
 // 10. Every figure the asset contract publishes, against the built furniture.
@@ -1193,10 +1278,11 @@ console.log(
     `exemptions are measured off the object, never taken from its name.`,
 );
 console.log(
-  `check:castle shafts OK — ${shaftProps} floor-standing props on ${shaftStoreys.size} storey(s) ` +
-    `tested against the building's shafts, ${shaftTests} prop-shaft comparisons, none inside one. ` +
-    `A shaft's structure comes down through every storey even where the floor is solid, which ` +
-    `deckIsSolid does not say. Every figure here is counted, not the size of a list.`,
+  `check:castle plate OK — ${plateProps} floor-standing props on ${plateStoreys.size} floor(s), ` +
+    `every one of them over its own floor's plate rather than hanging in mid-air over the plaza. ` +
+    `This replaces the shaft assertion, which is retired because #377 removed every shaft: the ` +
+    `structure that used to come down through a solid floor no longer exists. Every figure here ` +
+    `is counted, not the size of a list.`,
 );
 console.log(
   `check:castle contract OK — ${contractChecked} published figures measured against the ` +

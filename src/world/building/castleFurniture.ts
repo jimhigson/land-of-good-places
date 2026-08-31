@@ -1,3 +1,4 @@
+import { HALL_DECK } from './layout';
 import { BoxGeometry, Group, Mesh, type Object3D } from 'three';
 import { PALETTE } from '../../art/style/bridge';
 import { addOutline, solid } from '../../art/style/materials';
@@ -19,7 +20,7 @@ import {
   type FeastProp,
 } from '../../art/models/castleAssets';
 import { castleFloorMaterial } from './castleFabric';
-import { BUILDING_SHAFTS, regionContains } from './layout';
+
 import { CASTLE_HEARTH, castleTorchAnchors, type WallAnchor } from './castleLighting';
 
 /**
@@ -33,17 +34,19 @@ import { CASTLE_HEARTH, castleTorchAnchors, type WallAnchor } from './castleLigh
  * ## Where the hall is, and why it is one constant
  *
  * Issue #380 gives the castle three floors with jobs — ground is the mall,
- * **middle is the great hall**, roof is a garden — but that split has not landed
- * and the building still has five storeys. So the hall goes on the deck that
- * already has a hall's *fabric* on it: `castleDecor.ts` puts the hearth, the
- * coat of arms and the portcullis behind `if (deck === 0)`, and a throne on a
- * different storey from the only fireplace in the castle would read as two
- * half-rooms rather than one whole one.
+ * **middle is the great hall**, roof is a garden. **That split has now landed**
+ * (#377/#380), so the hall has moved off the ground floor and onto the middle
+ * one, which is a floor of its own with nothing else on it.
  *
- * {@link CASTLE_GREAT_HALL_DECK} is therefore a single constant, and moving the
- * hall when #380 lands is changing it. That is the same one-line promise
- * `castleDecor.ts` makes about its own `deck === 0` block, deliberately, so the
- * two move together rather than one being found later on the wrong floor.
+ * It was on deck 0 because that was the deck that already had a hall's
+ * *fabric*: `castleDecor.ts` put the hearth, the coat of arms and the
+ * portcullis behind `if (deck === 0)`, and a throne on a different storey from
+ * the only fireplace in the castle would have read as two half-rooms rather
+ * than one whole one. The note here promised that moving the hall would be
+ * changing {@link CASTLE_GREAT_HALL_DECK}, and that `castleDecor.ts`'s own
+ * block would move with it so the two could not be separated. **Both happened,
+ * and it was one line each** — which is the whole argument for having written
+ * the constant down rather than typing `0` in four places.
  *
  * ## The layout is derived from the wall, not typed against it
  *
@@ -84,7 +87,7 @@ import { CASTLE_HEARTH, castleTorchAnchors, type WallAnchor } from './castleLigh
  * line that moves. It is deliberately the same value as `castleDecor.ts`'s hall
  * block so the throne and the fireplace cannot end up on different floors.
  */
-export const CASTLE_GREAT_HALL_DECK = 0;
+export const CASTLE_GREAT_HALL_DECK = HALL_DECK;
 
 /** Everything this file adds to a storey, so the check can find it. */
 export function castleFurnitureGroupName(deck: number): string {
@@ -159,14 +162,50 @@ export function isTapestryBay(deck: number, x: number, z: number): boolean {
   );
 }
 
+/** The dais the throne stands on: broad enough to step onto from any side. */
+const DAIS_HALF_X = 1.6;
+const DAIS_HALF_Z = 1.2;
+
+/** Half the feast table's own length. Authored size; it does not scale. */
+const TABLE_HALF_LENGTH = 3;
+/**
+ * Clear floor between the dais and the table — the approach itself.
+ *
+ * A child's collision diameter is 1.24 m, so this is "two can pass abreast",
+ * which is the least a hall's approach can be and still be one.
+ */
+const FEAST_APPROACH = 1.5;
+
 /**
  * How far down the hall the feast table's centre sits from the throne.
  *
  * The table is 6 m long and the throne's dais is 2.4 m deep, so this leaves a
  * clear approach between the two — the space a child walks up to reach the
  * throne, which is the whole point of putting a throne at the end of a hall.
+ *
+ * ## Shortened from 10 m for #403, and this one is a judgement call
+ *
+ * Halving the plate's *area* left the ground floor 31.11 m deep instead of 44,
+ * and the shafts that cross its middle did not shrink: the helter-skelter's
+ * tube now reaches within 7.93 m of the north wall. At 10 m the feast's
+ * benches stood at 15.75 m from that wall — past every shaft's north edge —
+ * and `feastIsClearOfShafts` rejected **all three** bays, so `dressGreatHall`
+ * returned early and built no hall at all. `check:castle`'s contract
+ * assertion is what said so, out loud, rather than a hall quietly vanishing.
+ *
+ * Nothing here was made smaller to fix it: the throne, the dais, the table and
+ * the benches are all the sizes the Artist authored. What closed is the *gap*
+ * between the dais and the table, which is the same thing the shop run did and
+ * is the density Jim asked for. 5.7 m is the shortest that still keeps a real
+ * approach: the dais reaches 1.2 m from the throne, the table reaches 3 m back
+ * towards it, leaving **1.5 m of clear floor** to walk up — a child is 1.24 m
+ * across, so two can still pass. Any less and the table is on the dais.
+ *
+ * If #377 removes the helter-skelter, the constraint that forced this goes
+ * with it and the hall can lengthen again. Do not lower this further to fit
+ * something new in; move the something instead.
  */
-const TABLE_FROM_THRONE = 10;
+const TABLE_FROM_THRONE = DAIS_HALF_Z + TABLE_HALF_LENGTH + FEAST_APPROACH;
 
 /** How far the benches sit from the table's own axis. */
 const BENCH_OFFSET = 1.85;
@@ -178,13 +217,8 @@ const BENCH_OFFSET = 1.85;
  * the footprint {@link feast} will build, and two copies of that arithmetic is
  * the bug this whole file's header is about.
  */
-const BENCH_HALF_WIDTH = 0.3;
-const BENCH_HALF_LENGTH = 1.4;
 const BENCH_ALONG = 1.55;
 
-/** The dais the throne stands on: broad enough to step onto from any side. */
-const DAIS_HALF_X = 1.6;
-const DAIS_HALF_Z = 1.2;
 
 /**
  * Where the throne stands, measured back from the end wall.
@@ -265,59 +299,35 @@ export function dressGreatHall(deck: number, floor: Group): void {
  * Which bay the hall is laid out on — **chosen by testing, not typed.**
  *
  * The middle of the three is preferred, because a throne centred among its
- * tapestries with one either side is the composition a great hall wants. But a
- * bay is only usable if the feast that runs down its axis clears the
- * building's shafts, and the middle one **does not**: the helter-skelter's tube
- * comes down through `HELTER_SHAFT` (x 16.5–23.5) and the middle bay's eastern
- * benches stand at x 16.50–17.10, inside it.
+ * tapestries with one either side is the composition a great hall wants.
  *
- * That was not caught by `keepOutsFor` — which guards the helter's disc on the
- * deck a child gets *on* at, not the deck the tube passes through — and it was
- * not caught by `deckIsSolid`, which correctly says the ground floor has no
- * holes. It was caught by looking at a screenshot and finding a slide growing
- * out of the dinner table, and it is now `check:castle`'s shaft assertion.
+ * **And it now gets it.** The middle bay used to be rejected: the
+ * helter-skelter's tube came down through `HELTER_SHAFT` (x 16.5–23.5) and the
+ * middle bay's eastern benches stood at x 16.50–17.10, inside it — a slide
+ * growing out of the dinner table, found by looking at a screenshot because
+ * `keepOutsFor` guarded the helter's disc on the deck a child got *on* at,
+ * not the deck the tube passed through.
  *
- * So this asks rather than assumes, and it keeps asking: when #377 removes the
- * helter-skelter the middle bay becomes usable again and the hall re-centres
- * itself with no edit here. A typed axis would have had to be remembered.
+ * The version of this function that stood here ended with a prediction:
+ * *"when #377 removes the helter-skelter the middle bay becomes usable again
+ * and the hall re-centres itself with no edit here. A typed axis would have had
+ * to be remembered."* #377 has removed it — along with every other shaft — and
+ * that is exactly what happened. The `feastIsClearOfShafts` test it guarded
+ * itself with is gone with the shafts it tested against; the preference order
+ * it wrapped is all that was ever needed once there is nothing in the way.
  */
 function hallAxis(bays: readonly WallAnchor[]): WallAnchor | null {
-  // Middle first, then out to the sides — best composition that actually fits.
+  // Middle first, then out to the sides — best composition, and now nothing
+  // can refuse it.
   const order = [1, 0, 2].filter((i) => i < bays.length);
   for (const index of order) {
     const bay = bays[index];
-    if (bay && feastIsClearOfShafts(bay)) return bay;
+    if (bay) return bay;
   }
   return null;
 }
 
-/**
- * Would the feast laid on this bay's axis stand inside one of the building's
- * shafts?
- *
- * Measures the footprint the feast will actually occupy — the table's own
- * half-width plus the benches beyond it, and the benches' full run — against
- * {@link BUILDING_SHAFTS}. Deliberately the *same* arithmetic {@link feast}
- * uses, from the same constants, so a change to the bench offset moves this
- * test with it rather than leaving it describing an older layout.
- */
-function feastIsClearOfShafts(bay: WallAnchor): boolean {
-  const axisX = bay.x;
-  const tableZ = bay.z + bay.out.z * (THRONE_FROM_WALL + TABLE_FROM_THRONE);
-  // The benches reach further than the table on both axes.
-  const halfX = BENCH_OFFSET + BENCH_HALF_WIDTH;
-  const halfZ = BENCH_ALONG + BENCH_HALF_LENGTH;
-  for (const shaft of BUILDING_SHAFTS) {
-    for (let i = 0; i <= 4; i += 1) {
-      for (let j = 0; j <= 4; j += 1) {
-        const x = axisX - halfX + (halfX * 2 * i) / 4;
-        const z = tableZ - halfZ + (halfZ * 2 * j) / 4;
-        if (regionContains(shaft.region, x, z)) return false;
-      }
-    }
-  }
-  return true;
-}
+
 
 /** One tapestry: cloth and rail, both hung from {@link CASTLE_TAPESTRY_RAIL_Y}. */
 function tapestry(bay: WallAnchor): Object3D[] {

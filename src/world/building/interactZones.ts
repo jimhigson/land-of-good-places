@@ -1,17 +1,13 @@
-import { PRIMARY_ACTION, pressAction, pressZone, type InteractZone, type ZoneAction } from '../interact';
+import { PRIMARY_ACTION, pressZone, type InteractZone, type ZoneAction } from '../interact';
 import { SLIDE_PLAN } from '../slide/plan';
 import {
+  BUILDING_BASE_Y,
   GROWN_UP_X,
   GROWN_UP_Z,
-  HELTER_DECK,
-  HELTER_ENTRY_X,
-  HELTER_ENTRY_Z,
   LIFT_DOOR_Z,
   LIFT_PICK_X,
   LIFT_STAND_X,
   SHOP_UNITS,
-  STAIR_STAND_X,
-  STAIR_STAND_Z,
   TOILET_DECK,
   TOILET_STAND_X,
   TOILET_STAND_Z,
@@ -27,7 +23,8 @@ import {
   worldZ,
 } from './layout';
 import { SHOP_STAND_Z } from './shops/Shops';
-import { BUILDING_FLOOR_COUNT, BUILDING_HALF_Z } from '../../core/constants';
+import { BUILDING_HALF_Z } from '../../core/constants';
+import { CASTLE_FLOORS, CASTLE_ROOF, floorX, floorZ } from './floors';
 
 /**
  * Everything in the building a finger can point at.
@@ -49,7 +46,6 @@ export interface BuildingZoneState {
   /** "Come here, please." The lift's own summon — see `liftRide.ts`. */
   callLift(): void;
   /** Show the Climb / Descend menu for `deck`'s stairwell. */
-  openStairs(deck: number): void;
   /** Use the loo. Re-checks that she is actually in the room. */
   useToilets(): void;
   /** "Please come with me" / "never mind" — toggles the grown-up. */
@@ -61,7 +57,6 @@ export interface BuildingZoneState {
 export function buildingInteractZones(state: BuildingZoneState): InteractZone[] {
   const zones: InteractZone[] = [];
   /** One immutable action list per deck, built on first use. */
-  const stairsActions: (readonly ZoneAction[])[] = [];
 
   // Allocated once per call rather than once per deck: five decks share one
   // lift chip, and an action list is immutable. The stairs cannot be shared any
@@ -84,78 +79,53 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
     standZ: facadeZ(BUILDING_HALF_Z - 0.7),
   });
 
-  // The lift doors and the stairs, once per deck: whichever one you can see is
-  // the one you are standing next to, and the height tolerance in
-  // `pickInteractZone` keeps the other four out of the way.
-  for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
+  // The lift doors, once per floor. Each floor's alcove is at the same
+  // floor-local spot but in that floor's **own space**, hundreds of metres from
+  // the others, so there is no longer any need for the height tolerance in
+  // `pickInteractZone` to keep four other decks' worth of zones out of the way:
+  // only one of these is ever within reach at all.
+  for (const floor of CASTLE_FLOORS) {
     // The lift's one action is its call button, which is the same `call()` the
     // brushed-metal panel's own big round button fires (`ui/LiftPanel.ts`). So
     // tapping the lift from across the lobby walks her over and summons the car
     // in one gesture, and the panel — a far better affordance than any chip
     // once she is standing there — takes over from the doors onwards.
     zones.push({
-      id: `lift-${deck}`,
-      label: 'Glass lift',
-      x: worldX(LIFT_PICK_X),
-      y: deckY(deck),
-      z: worldZ(LIFT_DOOR_Z),
+      id: `lift-${floor.index}`,
+      label: 'Lift',
+      x: floorX(floor, LIFT_PICK_X),
+      y: BUILDING_BASE_Y,
+      z: floorZ(floor, LIFT_DOOR_Z),
       pickRadius: 2.8,
-      standX: worldX(LIFT_STAND_X),
-      standZ: worldZ(LIFT_DOOR_Z),
+      standX: floorX(floor, LIFT_STAND_X),
+      standZ: floorZ(floor, LIFT_DOOR_Z),
       actions: () => callAction,
     });
 
-    // Tapping the stairs walks you to the foot of the flight and then opens the
-    // Climb / Descend menu for it. The whole point is that the flights
-    // themselves are never walked by hand.
-    zones.push({
-      id: `stairs-${deck}`,
-      label: 'Stairs',
-      x: worldX(STAIR_STAND_X),
-      y: deckY(deck),
-      z: worldZ(STAIR_STAND_Z - 2.4),
-      // Wide: the target is a whole stairwell, and it is the one thing in the
-      // building a child should be able to hit without aiming.
-      pickRadius: 4.2,
-      standX: worldX(STAIR_STAND_X),
-      standZ: worldZ(STAIR_STAND_Z),
-      actions: () => stairsActions[deck] ?? (stairsActions[deck] = pressAction('Take the stairs', () => state.openStairs(deck), '🪜')),
-    });
   }
 
   zones.push({
     id: 'trampoline',
     label: 'Bouncy trampoline',
-    x: worldX(TRAMPOLINE_X),
+    x: floorX(CASTLE_ROOF, TRAMPOLINE_X),
     y: state.trampolineSurfaceY,
-    z: worldZ(TRAMPOLINE_Z),
+    z: floorZ(CASTLE_ROOF, TRAMPOLINE_Z),
     pickRadius: TRAMPOLINE_RADIUS + 0.5,
-    standX: worldX(TRAMPOLINE_X),
-    standZ: worldZ(TRAMPOLINE_Z),
+    standX: floorX(CASTLE_ROOF, TRAMPOLINE_X),
+    standZ: floorZ(CASTLE_ROOF, TRAMPOLINE_Z),
     // Landing on it is the interaction, so it offers no chip — and, by the
     // SELECTION RULE, is never outlined either.
   });
 
   zones.push({
-    id: 'helter',
-    label: 'Helter-skelter',
-    x: worldX(HELTER_ENTRY_X),
-    y: deckY(HELTER_DECK),
-    z: worldZ(HELTER_ENTRY_Z),
-    pickRadius: 1.9,
-    standX: worldX(HELTER_ENTRY_X),
-    standZ: worldZ(HELTER_ENTRY_Z),
-  });
-
-  zones.push({
     id: 'giantSlide',
     label: 'Ginormous slide',
-    x: worldX(SLIDE_PLAN.entryX),
-    y: deckY(TOP_DECK),
-    z: worldZ(SLIDE_PLAN.entryZ),
+    x: floorX(CASTLE_ROOF, SLIDE_PLAN.entryX),
+    y: BUILDING_BASE_Y,
+    z: floorZ(CASTLE_ROOF, SLIDE_PLAN.entryZ),
     pickRadius: 2.4,
-    standX: worldX(SLIDE_PLAN.entryX),
-    standZ: worldZ(SLIDE_PLAN.entryZ),
+    standX: floorX(CASTLE_ROOF, SLIDE_PLAN.entryX),
+    standZ: floorZ(CASTLE_ROOF, SLIDE_PLAN.entryZ),
   });
 
   // Tapping the loo walks her *in* and then presses — `TOILET_STAND` is now a

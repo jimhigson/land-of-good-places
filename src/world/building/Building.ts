@@ -1,36 +1,38 @@
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
 import { CylinderGeometry, Group, Mesh, Vector3, type PerspectiveCamera } from 'three';
-import { BUILDING_FLOOR_COUNT, BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, BUILDING_STEP_UP, INTERIOR_HALF_X, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, SLIDE_SPEED } from '../../core/constants';
-import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z, deckY } from './layout';
+import { BUILDING_FLOOR_COUNT, BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, SLIDE_SPEED } from '../../core/constants';
+import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
 import { bandContains, type PortalBand } from '../tapSpacing';
 import { SpaceManager } from '../SpaceManager';
+import {
+  CASTLE_FLOORS,
+  CASTLE_MALL,
+  CASTLE_ROOF,
+  castleFloorAt,
+  floorX,
+  floorZ,
+  type CastleFloor,
+} from './floors';
 import { GIANT_SLIDE_SPEED, SLIDE_PLAN } from '../slide/plan';
 import { LANDING_DROP, slideLandingSpot } from '../slide/landing';
 import { buildSlideSupports, planSlideLegs, type SlideLeg } from '../slide/supports';
 import { planSlideShots, SlideShotDirector, type SlideShot } from '../slide/cameras';
 import { RideCamera } from '../../core/RideCamera';
 import { PALETTE } from '../../core/palette';
-import { TAU } from '../../core/mathUtils';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld } from '../Collision';
 import type { AnchorPlots } from '../AnchorPlots';
 import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type Player } from '../../entities/Player';
-import type { StairDirection } from '../../ui/StairMenu';
 
 import { BallPit } from './BallPit';
-import { Escalators } from './Escalators';
 import { FloorFader } from './floorFade';
-import { GlassLift } from './GlassLift';
 import { LiftRide, type LiftPanelSource } from './liftRide';
 import { GrownUp } from './GrownUp';
-import { buildShaftGuards } from './ShaftGuards';
 import { InteriorLighting } from './InteriorLighting';
 import { BuildingShell } from './Shell';
 import { ShopUnits } from './ShopUnits';
 import { Shops } from './shops/Shops';
 import { SlideRide } from './SlideRide';
-import { StairRide } from './StairRide';
-import { Stairs } from './Stairs';
 import { Toilets } from './Toilets';
 import { Trampoline } from './Trampoline';
 import { WalkSurfaces } from './surfaces';
@@ -42,6 +44,8 @@ import type { InteractZone } from '../interact';
 import { softMaterial } from './parts';
 import {
   BALL_PIT_RADIUS,
+  LIFT_CAR_X,
+  LIFT_DOOR_Z,
   BALL_PIT_X,
   BALL_PIT_Z,
   BUILDING_BASE_Y,
@@ -49,31 +53,16 @@ import {
   ENTRANCE_MIN_X,
   GROWN_UP_X,
   GROWN_UP_Z,
-  HELTER_CENTRE_X,
-  HELTER_CENTRE_Z,
-  HELTER_DECK,
-  HELTER_ENTRY_X,
-  HELTER_ENTRY_Z,
-  HELTER_MOUTH_X,
-  HELTER_SEMI_X,
-  HELTER_SEMI_Z,
   INTERIOR_DOOR_MAX_X,
   INTERIOR_DOOR_MIN_X,
   LIFT_DOOR_MAX_Z,
   LIFT_DOOR_MIN_Z,
-  STAIR_STAND_X,
-  STAIR_STAND_Z,
   TOILET_DECK,
   TOILET_ROOM,
   TOP_DECK,
-  escalatorRamp,
   facadeX,
   facadeZ,
   regionContains,
-  stairFlights,
-  worldX,
-  worldZ,
-  type RampDefinition,
 } from './layout';
 
 const RIDER_LIFT = 0.06;
@@ -194,31 +183,16 @@ interface ActiveRide {
  * on construction and calls back through it.
  */
 export interface InteriorControls {
-  /** Walk the character somewhere under orders. Used by the stair ride. */
-  walkTo(
-    x: number,
-    y: number,
-    z: number,
-    handlers: { onArrive(): void; onAbandon(): void },
-  ): void;
   /** Stop whatever the character was told to do. */
   cancelWalk(): void;
-  /** Multiply the world clock and every animation rate by this. */
-  setTimeScale(scale: number): void;
-  /** The fast-forward speed-lines. */
-  setWhoosh(on: boolean): void;
   /** Close the iris, run `midpoint` behind it, open it again. */
   iris(midpoint: () => void): void;
   /** A soft blink. */
   flash(): void;
   /** Put the camera exactly on the player, with no travelling. */
   snapCamera(): void;
-  /** Show the Climb / Descend menu for a deck. */
-  openStairMenu(deck: number): void;
   /** Open shop unit `unitId`'s purchase panel — `Shopping` owns it, not us. */
   openShop(unitId: string): void;
-  /** Take the stairs menu down again — the player has left, or is riding. */
-  closeStairMenu(): void;
 }
 
 /**
@@ -470,30 +444,24 @@ export class Building implements GameSystem {
    */
   private parkRoot!: Group;
 
-  private readonly escalators: Escalators;
-  private readonly lift: GlassLift;
   private readonly liftRide: LiftRide;
   private readonly trampoline = new Trampoline();
-  private readonly fader = new FloorFader();
 
   /**
    * Every torch, brazier and hearth in the castle, and the one number per
    * storey that makes them flicker (issue #376).
    *
    * Owned here rather than by `dressing.ts` because it is the only piece of the
-   * decoration with a per-frame life. It is dressed in **before** the fader
-   * claims materials, which is load-bearing — see `castleLighting.ts`.
+   * decoration with a per-frame life.
    */
   private readonly castleFire = new CastleFire();
   private readonly grownUp = new GrownUp();
   private readonly toilets: Toilets;
-  private readonly helterSkelter: SlideRide;
   /** The ginormous slide itself, so `test/procgen` can measure what was built. */
   readonly ginormousSlide: SlideRide;
 
   /** Where its legs stand, so `test/procgen` can measure those too. */
   readonly slideLegs: readonly SlideLeg[];
-  private readonly stairRide: StairRide;
   /** The building's own fixed lights — on indoors, off outside and on the roof. */
   private readonly interiorLighting = new InteriorLighting();
 
@@ -505,8 +473,8 @@ export class Building implements GameSystem {
 
   /** True while the player is in the building's own space. */
   private inside = false;
-  /** The deck the player is currently standing on, or `null` off any deck. */
-  private currentDeck: number | null = null;
+  /** The floor the player is on, or `null` when she is not in the castle. */
+  private floor: CastleFloor | null = null;
   /**
    * The change-of-space dance — iris, teleport, camera snap, cooldown — which
    * this building shares with the hotel and no longer owns a copy of. See
@@ -540,32 +508,27 @@ export class Building implements GameSystem {
     // Fitted out straight away, and before the floor fader claims materials —
     // anything added to a floor group after that is not part of the cutaway.
     this.shops = new Shops(this.units);
-    // Stairs are pure geometry: what you walk on is declared in `layout.ts`.
-    new Stairs(this.shell.floorGroups);
-    this.escalators = new Escalators(this.shell.floorGroups);
     this.toilets = new Toilets(this.shell.floorGroups);
-    this.lift = new GlassLift(collision);
-    this.interiorRoot.add(this.lift.group);
     // The lift's *experience* — call panel, automatic boarding, straight to the
     // floor you pressed — lives in `liftRide.ts` behind Decision 3's
-    // `floors()` / `go(n)` seam, so the castle floor split can replace all of
-    // it without touching the car, the shaft or this file. See that file.
+    // `floors()` / `go(n)` seam. It is a **portal** now: nothing travels, so
+    // there is no car to build and no shaft to collide with. `travelTo` is the
+    // one thing it asks of this file, and it is the same method the hotel's
+    // lift asks of `Hotel`.
     this.liftRide = new LiftRide({
-      lift: this.lift,
-      surfaces: this.surfaces,
+      currentFloor: () => this.currentFloor(),
+      travelTo: (floor) => this.travelTo(floor),
       cancelWalk: () => this.controls.cancelWalk(),
-      isInside: () => this.inside,
+      player: () => this.player,
     });
     // Off until the player is actually indoors under a ceiling (see `update`);
     // starts invisible for the same reason `interiorRoot` does.
     this.interiorRoot.add(this.interiorLighting.group);
     this.interiorLighting.setActive(false);
 
-    const ground = this.shell.floorGroups[0];
-    if (ground) ground.add(this.trampoline.group);
-
-    this.helterSkelter = buildHelterSkelter();
-    this.interiorRoot.add(this.helterSkelter.group);
+    // The trampoline is a toy on the roof garden now, not a way upstairs.
+    const roof = this.shell.floorGroups[CASTLE_ROOF.index];
+    if (roof) roof.add(this.trampoline.group);
 
     addRideEntrances(this.shell.floorGroups);
     // Roundels, planters and benches, so sixty metres of floor plate reads as a
@@ -579,19 +542,25 @@ export class Building implements GameSystem {
     this.interiorRoot.add(this.grownUp.root);
     this.placeGrownUp();
 
-    // Walkable surfaces that are not part of a deck.
-    this.surfaces.addPlatform(this.lift);
+    // The trampoline pad still rises and falls under her feet, so it is still a
+    // moving platform. The lift is no longer one: there is no car.
     this.surfaces.addPlatform(this.trampoline);
 
-    registerInteriorCollision(collision);
-    // The trampoline well and the helter-skelter shaft
-    // (architecture review S14) — none of these had a rail or a collider of
-    // any kind. See `ShaftGuards.ts` for why they get two different shapes.
-    buildShaftGuards(this.shell.floorGroups, collision);
+    // **Every floor gets its own walls.** Collision is height-blind, which used
+    // to mean one registration guarded all five storeys at once; now each floor
+    // is somewhere else entirely, so each needs its own. That is the split
+    // paying for itself — a wall on the mall can no longer be a wall in the
+    // great hall.
+    for (const floor of CASTLE_FLOORS) registerInteriorCollision(collision, floor);
 
-    // The cutaway needs the floors registered bottom to top. There is no
-    // separate roof layer any more: the roof *is* the top floor.
-    for (const floor of this.shell.floorGroups) this.fader.addLayer(floor);
+    // `buildShaftGuards` was called here. There are no shafts to guard.
+    //
+    // The floor fader was fed its layers here too. Per-space visibility
+    // replaces it: only one floor is ever switched on, so there is nothing
+    // above the player to fade away. `floorFade.ts` itself survives — the
+    // hotel's `overhangFader` is a live consumer of it — but the castle is no
+    // longer one, and the material claiming and cloning it needed goes with it,
+    // which the texture budget will thank us for.
 
     // ------------------------------------------------------------ the garden
     this.gardenRoot.name = 'the-big-building-outside';
@@ -670,24 +639,11 @@ export class Building implements GameSystem {
     pitPlot.add(this.ballPit.group);
     anchorPlots.setPlaceholderVisible('ballPit', false);
 
-    // ------------------------------------------------------------ the stairs
-    this.stairRide = new StairRide(this.surfaces, {
-      walkTo: (x, y, z, handlers) => this.controls.walkTo(x, y, z, handlers),
-      setTimeScale: (scale) => this.controls.setTimeScale(scale),
-      setWhoosh: (on) => this.controls.setWhoosh(on),
-      playerY: () => this.player?.position.y ?? BUILDING_BASE_Y,
-      onArrived: () => this.controls.flash(),
-    });
-
-    // The teardown hook is a closure, so it resolves `this.stairRide` when a
-    // transition runs rather than now — this does not have to be built after
-    // the stair ride, and nothing breaks if it moves. Both of the hook's
-    // statements die in S2 with `StairRide` and `StairMenu`, and the hook goes
-    // with them.
-    this.spaces = new SpaceManager(controls, () => {
-      this.controls.closeStairMenu();
-      this.stairRide.stop(false);
-    });
+    // **No teardown hook.** `SpaceManager`'s second argument existed for the
+    // castle alone, to close the stair menu and stop the stair ride before the
+    // iris shut. Both are deleted, so the castle now asks for exactly what the
+    // hotel always did: the transition and nothing else.
+    this.spaces = new SpaceManager(controls);
   }
 
   /** True while the player is in the building's own space. */
@@ -702,28 +658,31 @@ export class Building implements GameSystem {
    *
    * `World` feeds this straight to `DayNight.setIndoors`, which is what turns
    * the sun's moving shadows off indoors and hands lighting over to
-   * {@link InteriorLighting} instead (item 18). `currentDeck` is a frame
-   * behind `inside` — set by `updateCutaway`, which runs after the doorway
-   * check — but that lag is invisible behind the same iris that already hides
-   * every other seam in a space change.
+   * {@link InteriorLighting} instead (item 18).
+   *
+   * Since the split this is a property of the **floor**, asked of the floor
+   * table rather than derived from a deck index: the roof garden is `roofed:
+   * false` and the other two are `true`. It also no longer lags a frame behind
+   * `inside` — `floor` is resolved from position on the same frame.
    */
   get playerInRoofedInterior(): boolean {
-    return this.inside && (this.currentDeck === null || this.currentDeck < TOP_DECK);
+    return this.inside && this.floor !== null && this.floor.roofed;
   }
 
   /**
    * The height above which surfaces are hidden from the player right now —
    * what the tap's pick treats as tappable (`pickWalkable.ts`).
    *
-   * Derived from the same `currentDeck` that drives `FloorFader`, so "what a
-   * tap can land on" and "what the cutaway shows" cannot disagree: inside the
-   * castle the ceiling is the top of the deck she is standing on (plus the
-   * step her foot could take anyway), and everywhere else — the park, the
-   * hotel's open-topped rooms — everything is on show.
+   * **Everything is on show now.** This existed because the cutaway drew the
+   * floors below the one she stood on, so a tap had to be stopped from landing
+   * on a deck she could see but not reach. Only one floor is ever visible since
+   * the split, and every surface on it is hers, so there is nothing to hide and
+   * nothing for a tap to land on by mistake. Kept as a member rather than
+   * deleted because `pickWalkable.ts` asks the question of the park and the
+   * hotel too, and both have always answered `Infinity`.
    */
   get visibleSurfaceCeiling(): number {
-    if (this.currentDeck === null) return Infinity;
-    return deckY(this.currentDeck) + BUILDING_STEP_UP;
+    return Infinity;
   }
 
   /**
@@ -754,7 +713,6 @@ export class Building implements GameSystem {
       // The lift's "Call" chip and the panel's big round button are the same
       // summon — see `liftRide.ts`'s `LiftPanelSource`.
       callLift: () => this.liftRide.call(),
-      openStairs: (deck) => this.openStairs(deck),
       useToilets: () => this.useToilets(),
       askGrownUp: () => this.askGrownUp(),
       // Opening the purchase panel is `Shopping`'s, not the building's — the
@@ -768,7 +726,6 @@ export class Building implements GameSystem {
   attachPlayer(player: Player): void {
     this.player = player;
     player.groundSampler = (x, z, y) => this.surfaces.sample(x, z, y);
-    this.liftRide.attachPlayer(player);
     this.ballPit.attachPlayer(player);
     // **Chase, not first person** (Jim, 5 August 2026). Same shared camera,
     // mounted behind and above the seat, looking along the chute with only a
@@ -835,12 +792,6 @@ export class Building implements GameSystem {
     return true;
   }
 
-  /** The Climb / Descend menu was answered. */
-  takeStairs(deck: number, direction: StairDirection): void {
-    if (!this.player || this.player.riding || !this.inside) return;
-    this.stairRide.start(deck, direction);
-  }
-
   update(context: FrameContext): void {
     const { dt, elapsed } = context;
     this.elapsed = elapsed;
@@ -848,7 +799,6 @@ export class Building implements GameSystem {
     this.spaces.update(dt);
 
     this.liftRide.update(dt);
-    this.escalators.update(dt);
     this.trampoline.update(dt);
     this.toilets.update(dt, elapsed, this.toiletOccupied());
     this.ballPit.update(dt, elapsed);
@@ -859,8 +809,6 @@ export class Building implements GameSystem {
     const player = this.player;
     if (!player) return;
 
-    this.stairRide.update(dt);
-
     // Unconditionally, not inside the branch below: the whole point is that it
     // runs on the frames just *after* a ride, and it must not be skipped
     // because the iris happens still to be closing.
@@ -870,23 +818,21 @@ export class Building implements GameSystem {
       this.advanceRide(dt, player);
     } else if (!this.spaces.isChanging && !player.riding) {
       this.handleTrampoline(player);
-      this.handleEscalator(player, dt);
       this.checkRideTriggers(player);
       this.checkDoorways(player);
     }
 
-    // How high she may fly. A castle floor is `BUILDING_FLOOR_HEIGHT` from the
-    // one above it and there is no ceiling collider up there, so indoors the
-    // jet pack is a hover rather than a flight: enough to lift her over the
-    // furniture, never enough to put her head through the deck above with
-    // nothing up there she chose to land on. Written every frame from one
-    // place, the way `speedMultiplier` already is — see `entities/Player.ts`.
+    // How high she may fly. There is no deck above to put her head through any
+    // more, but the storey still has a ceiling and the jet pack is still a
+    // hover rather than a flight indoors: enough to lift her over the
+    // furniture, never enough to poke through the roof of the room. Written
+    // every frame from one place, the way `speedMultiplier` already is — see
+    // `entities/Player.ts`.
     player.flyCeiling = this.inside ? INDOOR_FLY_CEILING : PARK_FLY_CEILING;
 
     this.grownUp.update(dt, elapsed, this.grownUpComing);
     this.shops.update(dt, elapsed);
-    this.updateCutaway(player);
-    this.fader.update(dt);
+    this.updateVisibleFloor(player);
   }
 
   // -------------------------------------------------------- changing space
@@ -915,22 +861,103 @@ export class Building implements GameSystem {
     }
   }
 
+  /**
+   * Walking in through the front door — onto **the mall**, which is the only
+   * floor with a door in it.
+   *
+   * Well clear of the south wall, facing north into the room. Not on the
+   * threshold, which is the obvious place and the wrong one: the camera looks
+   * in along the +X+Z diagonal, so the south wall and its parapet are between
+   * it and anybody standing within about three metres of them. Land a child
+   * there and her first sight of the market is the back of a wall.
+   */
   private enterInterior(): void {
+    this.stepThroughDoor(CASTLE_MALL, 0, CASTLE_MALL.halfZ - 6.5, Math.PI);
+  }
+
+  /**
+   * **Arriving on a floor**, from a door or from the lift — the castle's
+   * version of `Hotel.stepThroughDoor`, and deliberately the same four
+   * arguments, because Jim asked for the castle to work like the hotel and two
+   * shapes for one idea is how they would drift.
+   *
+   * `localX`/`localZ` are in the destination floor's **own** metres.
+   */
+  private stepThroughDoor(
+    floor: CastleFloor,
+    localX: number,
+    localZ: number,
+    facing: number,
+  ): void {
     const player = this.player;
     if (!player) return;
     this.inside = true;
     this.interiorRoot.visible = true;
+    this.showOnly(floor);
+    this.boundTo(floor);
+    player.teleportTo(floorX(floor, localX), BUILDING_BASE_Y, floorZ(floor, localZ), facing);
+  }
+
+  /**
+   * **The lift's portal hop** — the same shape as a door, wrapped in its own
+   * iris. `Hotel.travelTo`, for the castle.
+   *
+   * `hop` rather than `changeTo`: she is already being posed by the lift, so
+   * there is no walk to cancel, and gating four `!changingSpace` tests
+   * differently for one frame is a behaviour change nobody asked for. She keeps
+   * the ride pose across it; only the world jumps, and it jumps behind a closed
+   * iris — posing her before it closed gave a visible cross-space camera whip
+   * when the hotel first did this (reviewer finding 2 on PR #247).
+   */
+  private travelTo(floor: CastleFloor): void {
+    this.spaces.hop(() => {
+      const player = this.player;
+      if (player) {
+        // Land in the destination floor's own lift alcove. Every floor's alcove
+        // is at the same floor-local spot — a lift that wandered from floor to
+        // floor would read as broken.
+        player.setRidePose(
+          floorX(floor, LIFT_CAR_X),
+          BUILDING_BASE_Y,
+          floorZ(floor, LIFT_DOOR_Z),
+          Math.PI / 2,
+        );
+      }
+      this.showOnly(floor);
+      this.boundTo(floor);
+    });
+  }
+
+  /**
+   * Which floor the player is on, purely from where she is standing.
+   *
+   * Nothing is *told* when she changes floor: `castleFloorAt` answers from
+   * position, which is Decision 3's load-bearing choice and the reason no mode
+   * flag threads through `CollisionWorld` or `WalkSurfaces`.
+   */
+  private currentFloor(): CastleFloor | null {
+    const player = this.player;
+    if (!player) return null;
+    return castleFloorAt(player.position.x, player.position.z);
+  }
+
+  /** The soft play boundary, bound to one floor's own plate. */
+  private boundTo(floor: CastleFloor): void {
     this.collision.setPlayBounds(
-      circleBoundary(INTERIOR_PLAY_RADIUS, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z),
+      circleBoundary(INTERIOR_PLAY_RADIUS, floor.originX, floor.originZ),
     );
-    // Well clear of the south wall, facing north into the room.
-    //
-    // Not on the threshold, which is the obvious place and the wrong one: the
-    // camera looks in along the +X+Z diagonal, so the south wall and its parapet
-    // are between it and anybody standing within about three metres of them. Land
-    // a child there and their first sight of the roomiest place in the game is
-    // the back of a wall.
-    player.teleportTo(worldX(0), BUILDING_BASE_Y, worldZ(INTERIOR_HALF_Z - 6.5), Math.PI);
+  }
+
+  /**
+   * **Only one floor is ever drawn.** This is what replaces the cutaway fader:
+   * rather than fading away the storeys above her, there is simply nothing else
+   * switched on. Three hundred metres of nothing still costs a frustum test per
+   * object, which is the same reason `interiorRoot` starts hidden.
+   */
+  private showOnly(floor: CastleFloor): void {
+    this.shell.floorGroups.forEach((group, index) => {
+      group.visible = index === floor.index;
+    });
   }
 
   /**
@@ -969,30 +996,39 @@ export class Building implements GameSystem {
     // camera, a set of play bounds and a cutaway deck as much as it is a
     // position — so this takes the whole door sequence rather than the one part
     // of it that looked like the important one.
+    const floor = CASTLE_FLOORS[deck];
+    if (!floor) return false;
+    // **Through `spaces.changeTo`, not straight to the arrival.** The first cut
+    // called `enterInterior()` on its own and photographed an empty sky: the
+    // interior really was switched on and the player really was standing in it,
+    // but the *camera* was still out over the garden, because it is
+    // `SpaceManager` that irises and calls `snapCamera`. Being inside is a
+    // camera and a set of play bounds as much as it is a position — so this
+    // takes the whole door sequence rather than the one part of it that looked
+    // like the important one.
     this.spaces.changeTo(() => {
-      this.enterInterior();
-      // `enterInterior` has already put her on the ground floor's own good
-      // viewing spot; `at` overrides where, `deck` overrides how high, and
-      // anything not given carries that spot's own value straight through
-      // rather than being written down a second time here.
-      if (deck > 0 || at) {
-        // `at` is in the **interior's own metres** — the frame `layout.ts`,
-        // `dressing.ts` and every prop placer work in, and the frame anybody
-        // reading a coordinate off `castleFurniture.ts` or a keep-out list will
-        // type. `teleportTo` takes world coordinates, and the interior sits at
-        // `INTERIOR_ORIGIN_X/Z`, so it has to be converted.
-        //
-        // Getting this wrong does not fail: it teleports her to the same
-        // numbers out in the park, several hundred metres away, and the shot
-        // comes back a picture of grass with the castle nowhere in it. Caught
-        // by looking at the first screenshot rather than by trusting the link.
-        player.teleportTo(
-          at ? worldX(at.x) : player.position.x,
-          BUILDING_BASE_Y + deck * BUILDING_FLOOR_HEIGHT,
-          at ? worldZ(at.z) : player.position.z,
-          Math.PI,
-        );
-      }
+      // **`stepThroughDoor`, not a teleport by height.** This used to call
+      // `enterInterior()` and then raise her by `deck * BUILDING_FLOOR_HEIGHT`,
+      // because the storeys were stacked and height was what picked one. Since
+      // the split it is the *floor* that picks one, and `stepThroughDoor` is
+      // the same method the front door and the lift arrive through — so this
+      // link cannot drift from them, which is what the note it replaces was
+      // asking for.
+      //
+      // `at` is in the **floor's own metres** — the frame `layout.ts`,
+      // `dressing.ts` and every prop placer work in, and the frame anybody
+      // reading a coordinate off `castleFurniture.ts` will type.
+      //
+      // Getting that wrong does not fail: it stands her at the same numbers
+      // relative to a different floor, hundreds of metres away, and the shot
+      // comes back a picture of nothing. Caught by looking at the first
+      // screenshot rather than by trusting the link.
+      this.stepThroughDoor(
+        floor,
+        at ? at.x : 0,
+        at ? at.z : floor.halfZ - 6.5,
+        Math.PI,
+      );
     });
     return true;
   }
@@ -1021,59 +1057,64 @@ export class Building implements GameSystem {
     this.collision.setPlayBounds(GARDEN_PLAY_BOUNDARY);
   }
 
-  // ---------------------------------------------------------------- cutaway
+  // ----------------------------------------------------- which floor shows
 
-  private updateCutaway(player: Player): void {
+  /**
+   * Keeps `floor`, the interior lighting and the grown-up in step with where
+   * she actually is.
+   *
+   * This was `updateCutaway`, and it drove `FloorFader` and
+   * `Shops.setVisibleDeck` — "draw the floors below her, fade the ones above,
+   * and only stock the shelves on her own deck". None of that has anything to
+   * work on now: {@link showOnly} switches exactly one floor on at the moment
+   * she arrives, so there is no stack to fade and no other floor's shelves to
+   * skip. What is left is the two things that were never about the cutaway.
+   */
+  private updateVisibleFloor(player: Player): void {
     if (!this.inside && !this.ride) {
-      this.currentDeck = null;
+      this.floor = null;
       this.interiorLighting.setActive(false);
-      this.fader.setVisibleUpTo(null);
-      this.shops.setVisibleDeck(null);
       this.grownUp.root.visible = false;
       return;
     }
 
-    const floor = this.surfaces.deckAt(player.position.x, player.position.z, player.position.y);
-    this.currentDeck = floor;
+    this.floor = this.surfaces.floorAt(player.position.x, player.position.z);
     this.interiorLighting.setActive(this.playerInRoofedInterior);
-    this.fader.setVisibleUpTo(floor);
-    // Shop stock is only drawn on the deck the player is actually standing on;
-    // the floors below are visible but their shelves are not worth the budget.
-    this.shops.setVisibleDeck(floor);
 
-    // The grown-up belongs to the roof but lives outside the fader — they have
-    // to stay visible during most rides, when the player is nowhere near a
-    // floor. The ginormous slide is the exception: that's the one ride he can
-    // be *absent* from, riding only when invited (see `startGiantSlide`), and
-    // by then the player isn't in the interior any more so `floor` is a stale
-    // reading of outdoor coordinates against the interior's deck sampler —
-    // not a real "nowhere near a floor" signal worth falling back on.
+    // The grown-up belongs to the roof garden. He has to stay visible during
+    // most rides, when the player is nowhere near a floor. The ginormous slide
+    // is the exception: that's the one ride he can be *absent* from, riding
+    // only when invited (see `startGiantSlide`), and by then the player isn't
+    // in the castle at all so `floor` is a stale reading of outdoor
+    // coordinates — not a real "nowhere near a floor" signal worth falling
+    // back on.
     this.grownUp.root.visible =
       this.ride !== null && this.ride.giant
         ? this.grownUpComing
-        : this.ride !== null || floor === null || floor >= TOP_DECK;
+        : this.ride !== null || this.floor === null || !this.floor.roofed;
   }
 
   // ------------------------------------------------------------------ rides
 
+  /**
+   * The one ride you board by arriving: the ginormous slide, on the roof
+   * garden.
+   *
+   * **No height test any more.** It used to check `|localY − TOP_DECK *
+   * BUILDING_FLOOR_HEIGHT| < 1.4`, because the boarding pad's x and z were
+   * shared with four other decks and only height could tell them apart. The
+   * roof garden is its own space now, so being *near the pad* already means
+   * being on the roof — and the helter-skelter's trigger, which sat above this
+   * one, is gone with the ride.
+   */
   private checkRideTriggers(player: Player): void {
     if (!this.inside) return;
-    const localX = player.position.x - INTERIOR_ORIGIN_X;
-    const localZ = player.position.z - INTERIOR_ORIGIN_Z;
-    const localY = player.position.y - BUILDING_BASE_Y;
+    const floor = this.currentFloor();
+    if (floor?.index !== CASTLE_ROOF.index) return;
 
-    if (
-      near(localX, localZ, HELTER_ENTRY_X, HELTER_ENTRY_Z, 1.5) &&
-      Math.abs(localY - HELTER_DECK * BUILDING_FLOOR_HEIGHT) < 1.2
-    ) {
-      this.startRide(this.helterSkelter, false, player);
-      return;
-    }
-
-    if (
-      near(localX, localZ, SLIDE_PLAN.entryX, SLIDE_PLAN.entryZ, 1.9) &&
-      Math.abs(localY - TOP_DECK * BUILDING_FLOOR_HEIGHT) < 1.4
-    ) {
+    const localX = player.position.x - floor.originX;
+    const localZ = player.position.z - floor.originZ;
+    if (near(localX, localZ, SLIDE_PLAN.entryX, SLIDE_PLAN.entryZ, 1.9)) {
       this.startGiantSlide(player);
     }
   }
@@ -1138,8 +1179,6 @@ export class Building implements GameSystem {
 
   private startRide(slide: SlideRide, giant: boolean, player: Player): void {
     this.controls.cancelWalk();
-    this.controls.closeStairMenu();
-    this.stairRide.stop(false);
     this.ride = { slide, giant, distance: 0 };
     player.beginRide();
   }
@@ -1409,33 +1448,7 @@ export class Building implements GameSystem {
     this.ride = null;
   }
 
-  /**
-   * The three things inside the building a press can do, one method each.
-   *
-   * These were one `handleInteractPress(player, pressed)` that read the key,
-   * measured three patches of floor and gave the press to the first claimant.
-   * That rule was sound *within* this file and useless outside it: five other
-   * systems were measuring their own patches of floor for the same key at the
-   * same time, which is GitHub issue #122. Each is now the run body of one
-   * zone's chip (`building/interactZones.ts`), so the thing that happens is the
-   * thing the child was shown.
-   *
-   * The gates that remain are not "is this press mine?" — the selection has
-   * already settled that. They are "is this still possible?", re-checked because
-   * a chip pressed from across the room walks her there first.
-   */
-  openStairs(deck: number): void {
-    if (!this.inside || this.ride || this.spaces.isChanging) return;
-    const player = this.player;
-    if (!player || player.riding) return;
-    // The deck she is actually standing on, not the one the chip was drawn for:
-    // five decks share a stairwell shaft, so a stale chip must not open the
-    // menu for a floor she has since left.
-    const standing = this.surfaces.deckAt(player.position.x, player.position.z, player.position.y);
-    this.controls.openStairMenu(standing ?? deck);
-  }
-
-  /**
+    /**
    * Inside the room, not near it. GAME_DESIGN.md, 27 July 2026: *"you do not use
    * the toilet from the doorway"* — a radius round the stand spot reached back
    * out into the corridor, which is precisely what the family objected to. The
@@ -1449,10 +1462,11 @@ export class Building implements GameSystem {
     if (!this.inside || this.ride || this.spaces.isChanging) return;
     const player = this.player;
     if (!player || player.riding) return;
-    const localX = player.position.x - INTERIOR_ORIGIN_X;
-    const localZ = player.position.z - INTERIOR_ORIGIN_Z;
-    const deck = this.surfaces.deckAt(player.position.x, player.position.z, player.position.y);
-    if (deck !== TOILET_DECK || !regionContains(TOILET_ROOM, localX, localZ)) return;
+    const floor = this.currentFloor();
+    if (floor?.index !== TOILET_DECK) return;
+    const localX = player.position.x - floor.originX;
+    const localZ = player.position.z - floor.originZ;
+    if (!regionContains(TOILET_ROOM, localX, localZ)) return;
     this.toilets.use();
   }
 
@@ -1472,15 +1486,16 @@ export class Building implements GameSystem {
    * something a reload or an unexpected exit can leave stuck, and the one
    * thing the privacy roof must never do is shut her in. See `Toilets`.
    *
-   * `deckAt` returns `null` out in the park, so the world-space test and the
-   * interior-local one can never be confused for each other.
+   * `floorAt` returns `null` out in the park, so the world-space test and the
+   * floor-local one can never be confused for each other.
    */
   private toiletOccupied(): boolean {
     const player = this.player;
     if (!player) return false;
-    const { x, y, z } = player.position;
-    if (this.surfaces.deckAt(x, z, y) !== TOILET_DECK) return false;
-    return this.toilets.occupies(x - INTERIOR_ORIGIN_X, z - INTERIOR_ORIGIN_Z);
+    const { x, z } = player.position;
+    const floor = this.surfaces.floorAt(x, z);
+    if (floor?.index !== TOILET_DECK) return false;
+    return this.toilets.occupies(x - floor.originX, z - floor.originZ);
   }
 
   private placeGrownUp(): void {
@@ -1503,17 +1518,7 @@ export class Building implements GameSystem {
     this.wasAirborne = player.isAirborne;
   }
 
-  private handleEscalator(player: Player, dt: number): void {
-    if (player.isAirborne || !this.inside) return;
-    const carry = this.escalators.carry(
-      player.position.x - INTERIOR_ORIGIN_X,
-      player.position.z - INTERIOR_ORIGIN_Z,
-      player.position.y,
-      BUILDING_BASE_Y,
-      dt,
-    );
-    if (carry !== 0) player.nudge(0, carry);
-  }
+
 }
 
 // ---------------------------------------------------------------- geometry
@@ -1524,52 +1529,6 @@ function near(x: number, z: number, targetX: number, targetZ: number, radius: nu
   return dx * dx + dz * dz <= radius * radius;
 }
 
-/**
- * The helter-skelter: 1.75 anticlockwise oval turns from deck two down to the
- * ground floor, wound round the east shaft.
- *
- * The turns go anticlockwise so that the tangent where the helix begins already
- * points the way the lead-in was heading — start it the other way round and the
- * chute doubles back on itself at the mouth.
- */
-function buildHelterSkelter(): SlideRide {
-  const top = HELTER_DECK * BUILDING_FLOOR_HEIGHT;
-  const helixTop = top - 0.35;
-  const helixBottom = 0.75;
-
-  const points: Vector3[] = [
-    new Vector3(HELTER_MOUTH_X, top, HELTER_ENTRY_Z),
-    new Vector3(HELTER_MOUTH_X + 0.6, top - 0.15, HELTER_CENTRE_Z + 1.0),
-  ];
-
-  const sweep = TAU * 1.75;
-  const steps = 16;
-  for (let i = 0; i <= steps; i += 1) {
-    const angle = Math.PI + (sweep * i) / steps;
-    const t = i / steps;
-    points.push(
-      new Vector3(
-        HELTER_CENTRE_X + Math.cos(angle) * HELTER_SEMI_X,
-        helixTop + (helixBottom - helixTop) * t,
-        HELTER_CENTRE_Z + Math.sin(angle) * HELTER_SEMI_Z,
-      ),
-    );
-  }
-
-  points.push(
-    new Vector3(HELTER_CENTRE_X - 2.2, 0.45, HELTER_CENTRE_Z + 2.6),
-    new Vector3(HELTER_CENTRE_X - 4.4, 0.28, HELTER_CENTRE_Z + 3),
-  );
-
-  const slide = new SlideRide(points, {
-    name: 'helter-skelter',
-    colour: PALETTE.markerLilac,
-    railColour: PALETTE.markerLemon,
-  });
-  // Indoors, inside a shaft: its shadow would land on nothing anybody can see.
-  slide.setCastsShadow(false);
-  return slide;
-}
 
 /**
  * The ginormous slide, built from its solved plan.
@@ -1612,23 +1571,15 @@ function buildGinormousSlide(): SlideRide {
  * answer the SELECTION RULE already gave them.
  */
 function addRideEntrances(floorGroups: readonly Group[]): void {
-  const helterFloor = floorGroups[HELTER_DECK];
-  if (helterFloor) {
-    helterFloor.add(entrancePad(HELTER_ENTRY_X, HELTER_ENTRY_Z, PALETTE.markerLilac));
-  }
-
-  // The stairs get a pad on every deck. This is the one thing in the building
-  // you press a button at rather than walk up, so it has to be the most obvious
-  // thing on the floor.
-  for (let deck = 0; deck < floorGroups.length; deck += 1) {
-    const floor = floorGroups[deck];
-    if (!floor) continue;
-    floor.add(entrancePad(STAIR_STAND_X, STAIR_STAND_Z, PALETTE.markerMint));
-  }
-
-  const topFloor = floorGroups[TOP_DECK];
-  if (topFloor) {
-    topFloor.add(entrancePad(SLIDE_PLAN.entryX, SLIDE_PLAN.entryZ, PALETTE.slideChute));
+  // One pad left, and it is the one that matters: the ginormous slide's, on the
+  // roof garden. The stairs had a pad on every deck — *"the one thing in the
+  // building you press a button at rather than walk up, so it has to be the
+  // most obvious thing on the floor"* — and the helter-skelter had its own.
+  // Both rides are gone; the lift is a doorway in a wall, not a spot on the
+  // floor, so it is marked by its alcove rather than by a disc.
+  const roof = floorGroups[CASTLE_ROOF.index];
+  if (roof) {
+    roof.add(entrancePad(SLIDE_PLAN.entryX, SLIDE_PLAN.entryZ, PALETTE.slideChute));
   }
 }
 
@@ -1647,45 +1598,37 @@ function entrancePad(x: number, z: number, colour: number): Mesh {
  * what you want for a building, and the reason the lift shaft gets its own
  * three sides.
  */
-function registerInteriorCollision(collision: CollisionWorld): void {
-  const west = worldX(-INTERIOR_HALF_X);
-  const east = worldX(INTERIOR_HALF_X);
-  const north = worldZ(-INTERIOR_HALF_Z);
-  const south = worldZ(INTERIOR_HALF_Z);
+function registerInteriorCollision(collision: CollisionWorld, floor: CastleFloor): void {
+  const west = floorX(floor, -floor.halfX);
+  const east = floorX(floor, floor.halfX);
+  const north = floorZ(floor, -floor.halfZ);
+  const south = floorZ(floor, floor.halfZ);
 
   collision.addWall(west, north, east, north, 0.3);
   collision.addWall(west, north, west, south, 0.3);
 
-  // South face, minus the way out.
-  collision.addWall(west, south, worldX(INTERIOR_DOOR_MIN_X), south, 0.3);
-  collision.addWall(worldX(INTERIOR_DOOR_MAX_X), south, east, south, 0.3);
+  // South face. The way out is only cut on the **mall** — it is the only floor
+  // with a front door, and a gap in the great hall's or the roof garden's south
+  // wall would be a hole a child could walk out of into three hundred metres of
+  // nothing.
+  if (floor.index === CASTLE_MALL.index) {
+    collision.addWall(west, south, floorX(floor, INTERIOR_DOOR_MIN_X), south, 0.3);
+    collision.addWall(floorX(floor, INTERIOR_DOOR_MAX_X), south, east, south, 0.3);
+  } else {
+    collision.addWall(west, south, east, south, 0.3);
+  }
 
-  // East face, minus the way into the lift.
-  collision.addWall(east, north, east, worldZ(LIFT_DOOR_MIN_Z), 0.3);
-  collision.addWall(east, worldZ(LIFT_DOOR_MAX_Z), east, south, 0.3);
+  // East face, minus the way into the lift alcove. Every floor has one.
+  collision.addWall(east, north, east, floorZ(floor, LIFT_DOOR_MIN_Z), 0.3);
+  collision.addWall(east, floorZ(floor, LIFT_DOOR_MAX_Z), east, south, 0.3);
 
-  // Stairs and escalator: a wall down each side of every ramp, so a wobbly
-  // step sideways meets a rail instead of open air. Footprints do not depend
-  // on which deck you asked for, and collision is height-blind, so one
-  // registration guards every storey at once. The stairs are a switchback —
-  // two flights side by side — and the shared inner edge between them is the
-  // most dangerous one of all: at any given z the two flights are mid-climb by
-  // different amounts, so stepping across it is not a level step sideways,
-  // it is stepping off a ledge into thin air. Walling both flights' full
-  // footprints on both edges covers that shared edge twice over, which costs
-  // nothing and cannot leave a gap.
-  const [stairFlightA, stairFlightB] = stairFlights(0);
-  addRampSideWalls(collision, stairFlightA);
-  addRampSideWalls(collision, stairFlightB);
-  addRampSideWalls(collision, escalatorRamp(0));
+  // The stairs' and the escalator's side walls were registered here — a wall
+  // down each side of every ramp, so a wobbly step sideways met a rail instead
+  // of open air, and the shared inner edge of the switchback walled twice over
+  // because stepping across it was stepping off a ledge. There are no ramps
+  // left inside the castle at all.
 }
 
-/** A collision wall down each long edge of a ramp's footprint. */
-function addRampSideWalls(collision: CollisionWorld, ramp: RampDefinition): void {
-  const { minX, maxX, minZ, maxZ } = ramp.footprint;
-  collision.addWall(worldX(minX), worldZ(minZ), worldX(minX), worldZ(maxZ), 0.2);
-  collision.addWall(worldX(maxX), worldZ(minZ), worldX(maxX), worldZ(maxZ), 0.2);
-}
 
 /**
  * The facade out in the garden is a solid block with a doorway in it.

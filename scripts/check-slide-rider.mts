@@ -122,15 +122,10 @@ type InteriorControls = import('../src/world/building/Building.ts').InteriorCont
 // midpoint, because boarding the slide is a change of space and the ride does
 // not start until the midpoint fires.
 const liveControls: InteriorControls = {
-  walkTo: (_x, _y, _z, handlers) => handlers.onArrive(),
   cancelWalk: () => {},
-  setTimeScale: () => {},
-  setWhoosh: () => {},
   iris: (midpoint) => midpoint(),
   flash: () => {},
   snapCamera: () => {},
-  openStairMenu: () => {},
-  closeStairMenu: () => {},
 };
 
 const scene = new Scene();

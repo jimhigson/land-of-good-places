@@ -17,7 +17,6 @@ export {
 export { BallPit } from './BallPit';
 export {
   BUILDING_BASE_Y,
-  DECK_HOLES,
   SHOP_UNITS,
   TOP_DECK,
   deckY,

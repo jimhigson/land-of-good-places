@@ -17,6 +17,7 @@ import {
   TOILET_DECK,
   TOILET_PAN_X,
   TOILET_PAN_Z,
+  TOILET_FRONT_Z,
   TOILET_ROOM,
   TOILET_STAND_X,
   TOILET_STAND_Z,
@@ -306,11 +307,23 @@ export class Toilets {
     };
     wall(minX + 0.15, centreZ, 0.3, depth);
     wall(maxX - 0.15, centreZ, 0.3, depth);
-    wall(minX + 1.1, maxZ - 0.15, 2.2, 0.3);
-    wall(maxX - 1.1, maxZ - 0.15, 2.2, 0.3);
+    // The open front faces **into the room**, whichever wall the room stands
+    // against. It used to be built at `maxZ` outright, which was correct only
+    // while the room was in the north-east corner; halving the plate (#403)
+    // moved it to the south wall, where a front at `maxZ` would have opened
+    // onto the masonry and asked a child to walk in through the back.
+    const frontZ = centreZ + TOILET_FRONT_Z * (depth / 2 - 0.15);
+    wall(minX + 1.1, frontZ, 2.2, 0.3);
+    wall(maxX - 1.1, frontZ, 2.2, 0.3);
 
     const pan = buildPan(TOILET_PAN_X, TOILET_PAN_Z);
     const basin = buildBasin(TOILET_BASIN_X, TOILET_BASIN_Z);
+    // Both fittings are modelled with their backs to -Z (the pan's cistern, the
+    // basin's splashback), so they turn with the room rather than presenting
+    // their plumbing to whoever walks in.
+    const facing = TOILET_FRONT_Z > 0 ? 0 : Math.PI;
+    pan.group.rotation.y = facing;
+    basin.group.rotation.y = facing;
     const roof = buildPrivacyRoof(centreX, centreZ, width, depth);
     room.add(pan.group, basin.group, roof.group);
     this.routine = new ToiletRoutine(pan, basin, roof);

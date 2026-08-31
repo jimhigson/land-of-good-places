@@ -1,24 +1,13 @@
-import {
-  BUILDING_FLOOR_COUNT,
-  INTERIOR_ORIGIN_X,
-  INTERIOR_ORIGIN_Z,
-  LIFT_BOARD_SECONDS,
-} from '../../core/constants';
+import { LIFT_BOARD_SECONDS } from '../../core/constants';
 import type { Player } from '../../entities/Player';
-import type { GlassLift } from './GlassLift';
-import type { WalkSurfaces } from './surfaces';
+import { CASTLE_FLOORS, floorX, floorZ, type CastleFloor } from './floors';
 import {
   LIFT_CAR_X,
-  LIFT_CAR_Z,
   LIFT_DOOR_MAX_Z,
   LIFT_DOOR_MIN_Z,
   LIFT_DOOR_Z,
   LIFT_LOBBY_REACH,
   LIFT_STAND_X,
-  TOP_DECK,
-  deckY,
-  worldX,
-  worldZ,
 } from './layout';
 
 /**
@@ -31,27 +20,34 @@ import {
  * > character gets on automatically. The panel then shows all the floors: press
  * > one and you go straight there.
  *
- * So this file is the whole of that sequence, and `GlassLift` is now only the
- * box that moves. Nothing here asks the child to walk into a moving car, line
- * herself up, or catch anything.
+ * So this file is the whole of that sequence. Nothing here asks the child to
+ * walk into a moving car, line herself up, or catch anything.
  *
- * ## The seam
+ * ## It is a **portal** now, and the seam held
  *
- * ARCHITECTURE-DECISIONS **Decision 3** rules that castle floors become
- * separate spaces, and that the lift survives it re-conceived as the castle's
- * one any-floor portal: press floor N, the iris closes, the doors open in floor
- * N's alcove, and no car ever travels anywhere. The decision names the two
- * methods the panel must be built against so that it survives —
- * {@link LiftControl.floors} and {@link LiftControl.go} — and that is exactly
- * what `ui/LiftPanel.ts` is written to. When the split lands, `LiftRide` is
- * replaced by a portal implementation of the same two methods and the panel is
- * untouched.
+ * ARCHITECTURE-DECISIONS **Decision 3** ruled that castle floors become
+ * separate spaces and that the lift survives, re-conceived as the castle's one
+ * any-floor portal: press floor N, the iris closes, the doors open in floor N's
+ * own alcove, and **no car ever travels anywhere**. That has now happened
+ * (#377/#380). `GlassLift` — the car, the shaft, the dwell timers, its duty as
+ * a `MovingPlatform` and its shaft collision — is deleted outright. "The lift
+ * comes quickly, never make a child wait" is satisfied trivially, because there
+ * is nothing real left to wait for.
  *
- * {@link LiftPanelSource} adds two more members that are deliberately *not*
- * part of that seam: `panelState()` and `call()`. They are today's proximity
- * and summon glue — under the split "call" is meaningless (nothing has to
- * travel) and presence becomes the portal's trigger region — so they are named
- * separately and expected to go.
+ * **The prediction in the paragraph this replaces was the point of writing it.**
+ * Decision 3 named the two methods the panel had to be built against so it
+ * would survive the split — {@link LiftControl.floors} and
+ * {@link LiftControl.go} — and `ui/LiftPanel.ts` was written to exactly those.
+ * The implementation underneath has now been replaced wholesale and **the panel
+ * is untouched, not one line**. `HotelLift` proved the same seam from the other
+ * side months earlier: it is a portal lift already, and it satisfies this
+ * interface without knowing the castle exists.
+ *
+ * `panelState()` and `call()` were flagged as *expected to go* once nothing had
+ * to travel. They have not, and that is a deliberate reversal: a lift you press
+ * a button for and then watch the doors open is better theatre than one that
+ * teleports you the instant you stand near it, and the hotel's lift keeps them
+ * for the same reason. What they no longer do is fetch a car.
  */
 
 /** One floor, as the control panel needs to show it. */
@@ -119,66 +115,77 @@ export interface LiftPanelSource extends LiftControl {
   call(): void;
 }
 
-/** What `LiftRide` needs from the rest of the building. */
+/** What `LiftRide` needs from the rest of the castle. */
 export interface LiftRideDeps {
-  readonly lift: GlassLift;
-  readonly surfaces: WalkSurfaces;
-  /** Stops any tap-to-move walk that is in progress before the character boards. */
+  /** The floor the player is on, or null when she is not in the castle. */
+  currentFloor(): CastleFloor | null;
+  /**
+   * **The portal.** Teleport the player to `floor`'s lift alcove behind a
+   * closed iris, rebinding the play bounds and swapping which floor is
+   * visible. `Building` owns all of that; this file only asks.
+   */
+  travelTo(floor: CastleFloor): void;
+  /** Stops any tap-to-move walk in progress before the character boards. */
   cancelWalk(): void;
-  /** True while the player is in the building's own space. */
-  isInside(): boolean;
+  player(): Player | null;
 }
 
 type Phase =
   | 'away'
   /** At the doors, nothing asked for yet. */
   | 'waiting'
-  /** Called; the car is on its way to her. */
+  /** Called; the doors are opening. */
   | 'coming'
-  /** The car is here and she is stepping in. */
-  | 'boarding'
   /** In the car, choosing. */
   | 'aboard'
-  /** In the car, travelling. */
+  /** In the car, "travelling" — the indicator counts, the world swaps. */
   | 'going'
-  /** Arrived; stepping out onto the deck. */
+  /** Arrived; stepping out into the room. */
   | 'alighting';
+
+/** Seconds the doors take to open after a call. Never make a child wait. */
+const COMING_SECONDS = 0.7;
+
+/**
+ * Seconds the indicator spends counting between floors.
+ *
+ * Three floors rather than the hotel's fifty, so this is shorter than
+ * `HotelLift`'s 2.2 s: there is no fiction of great height to sell here, and a
+ * child pressing "the great hall" should arrive in the great hall.
+ */
+const TRAVEL_SECONDS = 1.2;
 
 export class LiftRide implements LiftPanelSource {
   private readonly deps: LiftRideDeps;
-  private player: Player | null = null;
 
   private phase: Phase = 'away';
-  /** The deck she is waiting on, or the one the car is carrying her to. */
-  private floorWanted = 0;
-  /** Progress through a board or alight step, 0..1. */
+  private phaseT = 0;
+  private to = CASTLE_FLOORS[0]!;
   private stepT = 0;
   private readonly stepFrom = { x: 0, y: 0, z: 0 };
   /** The doorway, which every step is bent through — see {@link updateStep}. */
   private readonly stepVia = { x: 0, y: 0, z: 0 };
   private readonly stepTo = { x: 0, y: 0, z: 0 };
   private stepFacing = 0;
+  private travelled = false;
 
   constructor(deps: LiftRideDeps) {
     this.deps = deps;
   }
 
-  attachPlayer(player: Player): void {
-    this.player = player;
-  }
-
   // ------------------------------------------------------------- the seam
 
   floors(): readonly FloorInfo[] {
-    const here = this.riderFloor();
+    const here = this.deps.currentFloor()?.index ?? null;
     // Top first: that is the way a lift panel reads, and the way a child looks
     // at a building — the roof is up there, so its button is up there.
     const list: FloorInfo[] = [];
-    for (let index = TOP_DECK; index >= 0; index -= 1) {
+    for (let index = CASTLE_FLOORS.length - 1; index >= 0; index -= 1) {
+      const floor = CASTLE_FLOORS[index]!;
       list.push({
         index,
-        name: floorName(index),
-        glyph: floorGlyph(index),
+        name: floor.name,
+        glyph: floor.glyph,
         here: index === here,
         reachable: this.phase === 'aboard',
       });
@@ -188,16 +195,20 @@ export class LiftRide implements LiftPanelSource {
 
   go(n: number): void {
     if (this.phase !== 'aboard') return;
-    const wanted = clampFloor(n);
-    if (wanted === this.deps.lift.floor) {
+    const here = this.deps.currentFloor();
+    if (!here) return;
+    const target = CASTLE_FLOORS[clampFloor(n)];
+    if (!target) return;
+    if (target.index === here.index) {
       // Pressing the floor you are already on means "let me out here", which is
       // the only way out of the car that does not need a second control.
-      this.beginAlight();
+      this.beginAlight(here);
       return;
     }
-    this.floorWanted = wanted;
+    this.to = target;
     this.phase = 'going';
-    this.deps.lift.callTo(wanted);
+    this.phaseT = 0;
+    this.travelled = false;
   }
 
   // ------------------------------------------------- the rest of the panel
@@ -205,15 +216,16 @@ export class LiftRide implements LiftPanelSource {
   panelState(): LiftPanelState | null {
     switch (this.phase) {
       case 'waiting':
-        return { mode: 'call', indicator: floorName(this.floorWanted) };
+        return { mode: 'call', indicator: this.hereName() };
       case 'coming':
-      case 'boarding':
         return { mode: 'coming', indicator: 'on its way…' };
       case 'aboard':
-        return { mode: 'floors', indicator: floorName(this.deps.lift.floor) };
+        return { mode: 'floors', indicator: this.hereName() };
       case 'going':
+        return { mode: 'going', indicator: `${this.to.name}…` };
       case 'alighting':
-        return { mode: 'going', indicator: `${floorName(this.floorWanted)}…` };
+        // The doors are opening on the floor she pressed — the ding.
+        return { mode: 'going', indicator: this.hereName(), arrived: true };
       default:
         return null;
     }
@@ -222,51 +234,81 @@ export class LiftRide implements LiftPanelSource {
   call(): void {
     if (this.phase !== 'waiting') return;
     this.phase = 'coming';
-    this.deps.lift.callTo(this.floorWanted);
+    this.phaseT = 0;
   }
 
   // ------------------------------------------------------------ the frame
 
   update(dt: number): void {
-    this.deps.lift.update(dt);
-
-    const player = this.player;
+    const player = this.deps.player();
     if (!player) return;
 
-    // Any other ride owns the character outright — the slides and the
-    // helter-skelter all run through `player.beginRide` too, and two things
-    // posing one character is how you get a child stuck in a wall.
+    // Any other ride owns the character outright — the ginormous slide runs
+    // through `player.beginRide` too, and two things posing one character is
+    // how you get a child stuck in a wall.
     if (player.riding && !this.ridingUs()) {
       this.phase = 'away';
       return;
     }
 
+    const floor = this.deps.currentFloor();
+    this.phaseT += dt;
+
     switch (this.phase) {
       case 'away':
-      case 'waiting':
-        this.updateWaiting(player);
+      case 'waiting': {
+        if (!floor || !this.atDoors(player)) {
+          this.phase = 'away';
+          return;
+        }
+        this.phase = 'waiting';
         return;
-      case 'coming':
-        this.updateComing(player);
+      }
+      case 'coming': {
+        // She may wander off while the doors open — in which case never mind.
+        if (!floor || !this.atDoors(player)) {
+          this.phase = 'away';
+          return;
+        }
+        if (this.phaseT < COMING_SECONDS) return;
+        this.deps.cancelWalk();
+        player.beginRide();
+        // Boarding starts from wherever she actually stopped walking — she is
+        // standing in the lobby and the glide draws her in.
+        this.beginStep(
+          player,
+          floor,
+          { x: player.position.x, z: player.position.z },
+          { x: floorX(floor, LIFT_CAR_X), z: floorZ(floor, LIFT_DOOR_Z) },
+          Math.PI / 2,
+        );
+        this.phase = 'aboard';
+        this.phaseT = 0;
         return;
-      case 'boarding':
-        this.updateStep(player, dt, () => {
-          this.phase = 'aboard';
-        });
+      }
+      case 'aboard': {
+        this.updateStep(player, dt);
         return;
-      case 'aboard':
-        this.holdInCar(player);
+      }
+      case 'going': {
+        this.updateStep(player, dt);
+        if (this.phaseT >= TRAVEL_SECONDS && !this.travelled) {
+          this.travelled = true;
+          // The portal fires: iris, teleport, new play bounds, the destination
+          // floor made visible. Alighting begins on the far side of it.
+          this.deps.travelTo(this.to);
+          this.beginAlight(this.to);
+        }
         return;
-      case 'going':
-        this.holdInCar(player);
-        if (!this.deps.lift.moving) this.beginAlight();
-        return;
-      case 'alighting':
-        this.updateStep(player, dt, () => {
+      }
+      case 'alighting': {
+        this.updateStep(player, dt);
+        if (this.stepT >= 1) {
           this.phase = 'away';
           player.endRide();
-        });
+        }
         return;
+      }
     }
   }
 
@@ -274,125 +316,95 @@ export class LiftRide implements LiftPanelSource {
 
   /** True while *we* are the ride posing the character. */
   private ridingUs(): boolean {
-    return this.phase === 'boarding' || this.phase === 'aboard' || this.phase === 'going' || this.phase === 'alighting';
+    return this.phase === 'aboard' || this.phase === 'going' || this.phase === 'alighting';
+  }
+
+  private hereName(): string {
+    return this.deps.currentFloor()?.name ?? '';
   }
 
   /**
-   * The floor the panel should light.
+   * Is she in the lift lobby?
    *
-   * While travelling that is the floor she has *asked for*, not the one the car
-   * has reached — which is what every real lift panel does, and what tells a
-   * child the press worked.
+   * The same patch of floor on every floor, in that floor's own local metres —
+   * a lift alcove that wandered from floor to floor would read as broken.
    */
-  private riderFloor(): number {
-    if (this.phase === 'going' || this.phase === 'alighting') return this.floorWanted;
-    return this.ridingUs() ? this.deps.lift.floor : this.floorWanted;
+  private atDoors(player: Player): boolean {
+    const floor = this.deps.currentFloor();
+    if (!floor) return false;
+    const localX = player.position.x - floor.originX;
+    const localZ = player.position.z - floor.originZ;
+    if (localX < LIFT_STAND_X - LIFT_LOBBY_REACH) return false;
+    if (localZ < LIFT_DOOR_MIN_Z - 1.2 || localZ > LIFT_DOOR_MAX_Z + 1.2) return false;
+    return true;
   }
 
   /**
-   * Not in the lift yet. Two ways in: standing in the lobby (which puts the
-   * call panel on screen), or having walked into the car on her own two feet,
-   * which the old lift was the only way to ride and which still has to work.
-   */
-  private updateWaiting(player: Player): void {
-    if (!this.deps.isInside()) {
-      this.phase = 'away';
-      return;
-    }
-
-    if (!this.deps.lift.moving && this.inCar(player)) {
-      this.startBoarding(player, true);
-      return;
-    }
-
-    const deck = this.lobbyDeck(player);
-    if (deck === null) {
-      this.phase = 'away';
-      return;
-    }
-    this.floorWanted = deck;
-    this.phase = 'waiting';
-  }
-
-  /** Called, and coming. She may wander off, in which case never mind. */
-  private updateComing(player: Player): void {
-    if (!this.deps.isInside()) {
-      this.phase = 'away';
-      return;
-    }
-    const deck = this.lobbyDeck(player);
-    if (deck === null) {
-      this.phase = 'away';
-      return;
-    }
-    if (deck !== this.floorWanted) {
-      // She took the stairs while it was coming. Re-fetch it to where she is.
-      this.floorWanted = deck;
-      this.deps.lift.callTo(deck);
-      return;
-    }
-    if (this.deps.lift.moving || this.deps.lift.floor !== deck) return;
-
-    this.startBoarding(player, false);
-  }
-
-  /**
-   * Getting on, automatically — the whole point of the family's note.
+   * Stepping out into the room, on the floor she pressed for.
    *
-   * A short scripted glide rather than a walk: the car is a moving platform in
-   * a shaft with a drop under it, and "walk yourself in through the doorway"
-   * is precisely the fiddly thing being deleted. `alreadyInside` covers the
-   * child who walked in herself, who needs the panel but not the step.
+   * **Every point comes from `floor`, not from `player.position`** — and that
+   * is not a style choice, it is the whole correctness of the manoeuvre.
+   * {@link travelTo} runs behind a closed iris, so the teleport has *not
+   * happened yet* when this is called on the very next line: she is still
+   * standing in the alcove of the floor she left. Reading her position here
+   * made the glide interpolate from the old floor's alcove to the new one's —
+   * **three hundred metres across open nothing**, with her visibly sliding
+   * through the void between two castles for half a second.
+   *
+   * Every check was green: the arrival is correct, the space is correct, and
+   * the validator asserts where she *ends up*, not the path she takes to get
+   * there. It was found by riding the lift and reading her x mid-glide: 826.4,
+   * which is 73.6 m short of the great hall and 200 m past the mall.
+   * `HotelLift` never had the bug because its `beginAlight` always derived both
+   * ends from the room.
    */
-  private startBoarding(player: Player, alreadyInside: boolean): void {
-    this.deps.cancelWalk();
-    player.beginRide();
-    this.floorWanted = this.deps.lift.floor;
-
-    const target = this.carPoint();
-    this.stepFrom.x = player.position.x;
-    this.stepFrom.y = player.position.y;
-    this.stepFrom.z = player.position.z;
-    this.setVia(target.y);
-    this.stepTo.x = target.x;
-    this.stepTo.y = target.y;
-    this.stepTo.z = target.z;
-    // Facing +X: out through the glass, at the park. It is a *glass* lift; the
-    // view is the reason it exists.
-    this.stepFacing = Math.PI / 2;
-    this.stepT = alreadyInside ? 1 : 0;
-    this.phase = alreadyInside ? 'aboard' : 'boarding';
-    if (alreadyInside) this.holdInCar(player);
-  }
-
-  private beginAlight(): void {
-    const player = this.player;
+  private beginAlight(floor: CastleFloor): void {
+    const player = this.deps.player();
     if (!player) return;
-    const floor = this.deps.lift.floor;
-    this.floorWanted = floor;
-
-    this.stepFrom.x = player.position.x;
-    this.stepFrom.y = player.position.y;
-    this.stepFrom.z = player.position.z;
-    this.setVia(deckY(floor));
-    this.stepTo.x = worldX(LIFT_STAND_X);
-    this.stepTo.y = deckY(floor);
-    this.stepTo.z = worldZ(LIFT_DOOR_Z);
-    // Facing −X, into the room she has just arrived on.
-    this.stepFacing = -Math.PI / 2;
-    this.stepT = 0;
+    this.beginStep(
+      player,
+      floor,
+      { x: floorX(floor, LIFT_CAR_X), z: floorZ(floor, LIFT_DOOR_Z) },
+      { x: floorX(floor, LIFT_STAND_X), z: floorZ(floor, LIFT_DOOR_Z) },
+      -Math.PI / 2,
+    );
     this.phase = 'alighting';
-  }
-
-  /** The doorway itself, at the height the step ends at. */
-  private setVia(y: number): void {
-    this.stepVia.x = worldX(LIFT_STAND_X + 1.4);
-    this.stepVia.y = y;
-    this.stepVia.z = worldZ(LIFT_DOOR_Z);
+    this.phaseT = 0;
   }
 
   /**
-   * One scripted step — in through the doors, or out of them.
+   * Sets up one scripted step across `floor`'s own lift alcove.
+   *
+   * `floor` is passed rather than asked of `currentFloor()` for the same reason
+   * the ends are: mid-transition the player's position is not yet on the floor
+   * this step belongs to.
+   */
+  private beginStep(
+    player: Player,
+    floor: CastleFloor,
+    from: { x: number; z: number },
+    to: { x: number; z: number },
+    facing: number,
+  ): void {
+    // Every floor's walking surface is at the same height since the split, so
+    // one `y` serves all three and the step never rises or falls.
+    const y = player.position.y;
+    this.stepFrom.x = from.x;
+    this.stepFrom.y = y;
+    this.stepFrom.z = from.z;
+    // The doorway itself, bent through so the curve does not clip the jamb.
+    this.stepVia.x = floorX(floor, LIFT_STAND_X + 1.4);
+    this.stepVia.y = y;
+    this.stepVia.z = floorZ(floor, LIFT_DOOR_Z);
+    this.stepTo.x = to.x;
+    this.stepTo.y = y;
+    this.stepTo.z = to.z;
+    this.stepFacing = facing;
+    this.stepT = 0;
+  }
+
+  /**
+   * One scripted step — in through the doors, or out of them, then held.
    *
    * A quadratic curve bent through the doorway rather than a straight line,
    * because a straight line from wherever she happened to stop would clip the
@@ -400,7 +412,7 @@ export class LiftRide implements LiftPanelSource {
    * Nothing here is collided against — it is half a second of choreography —
    * so the curve is the only thing keeping her out of the wall.
    */
-  private updateStep(player: Player, dt: number, onDone: () => void): void {
+  private updateStep(player: Player, dt: number): void {
     this.stepT = Math.min(1, this.stepT + dt / LIFT_BOARD_SECONDS);
     const t = smoothstep(this.stepT);
     const a = (1 - t) * (1 - t);
@@ -412,62 +424,20 @@ export class LiftRide implements LiftPanelSource {
       a * this.stepFrom.z + b * this.stepVia.z + c * this.stepTo.z,
       this.stepFacing,
     );
-    if (this.stepT >= 1) onDone();
-  }
-
-  /** Standing in the car, wherever the car happens to be this frame. */
-  private holdInCar(player: Player): void {
-    const point = this.carPoint();
-    player.setRidePose(point.x, point.y, point.z, Math.PI / 2);
-  }
-
-  private carPoint(): { x: number; y: number; z: number } {
-    return {
-      x: worldX(LIFT_CAR_X),
-      y: this.deps.lift.surfaceY,
-      z: worldZ(LIFT_CAR_Z),
-    };
-  }
-
-  private inCar(player: Player): boolean {
-    return (
-      this.deps.lift.covers(player.position.x, player.position.z) &&
-      Math.abs(player.position.y - this.deps.lift.surfaceY) < 0.7
-    );
-  }
-
-  /**
-   * The deck she is waiting on, or null if she is not at the lift doors.
-   *
-   * Same patch of floor the old `Building.callLiftIfWaiting` watched, widened
-   * to {@link LIFT_LOBBY_REACH} so the panel appears while she is still walking
-   * up rather than only once she is standing on exactly the right tile.
-   */
-  private lobbyDeck(player: Player): number | null {
-    const localX = player.position.x - INTERIOR_ORIGIN_X;
-    const localZ = player.position.z - INTERIOR_ORIGIN_Z;
-    if (localX < LIFT_STAND_X - LIFT_LOBBY_REACH) return null;
-    if (localZ < LIFT_DOOR_MIN_Z - 1.2 || localZ > LIFT_DOOR_MAX_Z + 1.2) return null;
-    return this.deps.surfaces.deckAt(player.position.x, player.position.z, player.position.y);
   }
 }
 
-/** Matches `Game.ts`'s `floorName` and `ParkMap`'s, so the game agrees with itself. */
+/**
+ * Matches `Game.ts`'s and `ParkMap`'s, so the game agrees with itself about
+ * what a floor is called — and all three now read the **one** table in
+ * `floors.ts` rather than each carrying their own `deck <= 0 ? …` ladder.
+ */
 export function floorName(deck: number): string {
-  if (deck <= 0) return 'Ground floor';
-  if (deck >= BUILDING_FLOOR_COUNT - 1) return 'The roof';
-  return `Floor ${deck}`;
+  return CASTLE_FLOORS[clampFloor(deck)]?.name ?? 'The mall';
 }
 
-/** What the round button on the panel says. */
-function floorGlyph(deck: number): string {
-  if (deck <= 0) return 'G';
-  if (deck >= BUILDING_FLOOR_COUNT - 1) return 'R';
-  return String(deck);
-}
-
-function clampFloor(deck: number): number {
-  return Math.max(0, Math.min(TOP_DECK, Math.round(deck)));
+function clampFloor(index: number): number {
+  return Math.max(0, Math.min(CASTLE_FLOORS.length - 1, Math.round(index)));
 }
 
 /** Ease in and out, so a half-second step does not start and stop with a jerk. */

@@ -70,16 +70,11 @@ async function measureWorldStages(): Promise<StageTime[]> {
       throw new Error('measure-procgen: the world drove the player while building');
     };
     const controls = {
-      walkTo: refuse,
       cancelWalk: refuse,
-      setTimeScale: refuse,
-      setWhoosh: refuse,
       iris: refuse,
       flash: refuse,
       snapCamera: refuse,
-      openStairMenu: refuse,
       openShop: refuse,
-      closeStairMenu: refuse,
     };
     let at = performance.now();
     const world = new World(

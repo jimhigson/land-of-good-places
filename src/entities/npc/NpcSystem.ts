@@ -39,7 +39,7 @@ import type { ShopStand } from '../../world/building/shops/Shops';
 import { createPetBlob, PET_BODY_NODE, PET_HEAD_NODE } from './petBlob';
 import { WanderDriver, type ClimberBudget } from './wanderDriver';
 import type { ActivityBudget } from './activities/activity';
-import { SPACE_CASTLE, SPACE_GARDEN, spaceAt } from '../../world/spaces';
+import { SPACE_CASTLE_MALL, SPACE_GARDEN, spaceAt } from '../../world/spaces';
 // Chatting (see the additive block in wanderDriver.ts): the shared budget
 // that caps how many children may be mid-chat at once, and the speed below
 // which the player counts as "stood still" for that same block.
@@ -1270,8 +1270,8 @@ export class NpcSystem implements GameSystem {
       // has chosen a shop and is on their way to the door. Counting only those
       // actually inside let six of them arrive where the cap said four —
       // everybody who chose while the room was empty was already committed.
-      const here = spaceAt(character.position.x, character.position.z) === SPACE_CASTLE;
-      if (here || driver.destinationSpace === SPACE_CASTLE) inside += 1;
+      const here = spaceAt(character.position.x, character.position.z) === SPACE_CASTLE_MALL;
+      if (here || driver.destinationSpace === SPACE_CASTLE_MALL) inside += 1;
     }
     this.planner.setInsideCount(inside);
   }
@@ -1362,7 +1362,7 @@ export class NpcSystem implements GameSystem {
    * to recover from.
    */
   private updateIndoorVisits(dt: number): void {
-    const out = this.planner.portalToward(SPACE_CASTLE, SPACE_GARDEN);
+    const out = this.planner.portalToward(SPACE_CASTLE_MALL, SPACE_GARDEN);
     for (let i = 0; i < this.characters.length; i += 1) {
       const character = this.characters[i];
       const driver = this.wanderDrivers[i];
@@ -1371,7 +1371,7 @@ export class NpcSystem implements GameSystem {
       // Not marked-and-indoors: no visit to time. Covers the case that matters
       // most — the player walking in, which un-marks everybody in there and
       // hands them straight back to ordinary simulation, timer forgotten.
-      const indoors = spaceAt(character.position.x, character.position.z) === SPACE_CASTLE;
+      const indoors = spaceAt(character.position.x, character.position.z) === SPACE_CASTLE_MALL;
       if (!indoors || !this.elsewhere.has(character)) {
         this.visitRemaining.delete(character);
         continue;

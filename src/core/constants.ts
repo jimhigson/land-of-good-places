@@ -209,7 +209,7 @@ export const BUILDING_HALF_Z = 9;
  * transitions you into the building's *own space*, which lives at
  * (INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z), six hundred metres from the park and
  * therefore utterly separate from it. Nothing about the two spaces is
- * continuous, which is the whole point: the interior floor plate is 60 x 44 m
+ * continuous, which is the whole point: the interior floor plate is 42 x 31 m
  * inside a shell that is 24 x 18 m outside.
  *
  * Six hundred is chosen to be far past TERRAIN_RADIUS *and* past FOG_FAR, so
@@ -219,9 +219,45 @@ export const BUILDING_HALF_Z = 9;
 export const INTERIOR_ORIGIN_X = 600;
 export const INTERIOR_ORIGIN_Z = 600;
 
-/** Interior half-extents in metres — a roomy 60 x 44 m floor plate. */
-export const INTERIOR_HALF_X = 30;
-export const INTERIOR_HALF_Z = 22;
+/**
+ * How much of the authored 60 x 44 m plate the castle actually uses (#403).
+ *
+ * **Half the floor *area*, which is `1/√2` off each side — not half the
+ * width.** Jim was asked which he meant and answered directly: halving each
+ * dimension quarters the area and he declined it. So 60 x 44 m becomes
+ * 42.43 x 31.11 m, and the same furniture stands in half the floor.
+ *
+ * ## Why the room is being made smaller after being made bigger on purpose
+ *
+ * `world/building/dressing.ts` records the reasoning that produced the 60 m
+ * plate, and it was right about the problem: the family asked for floors two
+ * to three times wider *and* for a world that feels closer and fuller, and
+ * *"sixty metres of one flat pink colour is not roominess, it is an empty car
+ * park"*. That diagnosis stands. What is being revised is only the **remedy**.
+ * Twice the answer has been to add decoration to the plate — the roundel and
+ * its planters, then the great hall — and twice Jim has come back and said the
+ * castle still feels sparse (issues #376, the roof-garden QA, and now #403).
+ * Three complaints is enough evidence that decoration alone does not get
+ * there, so this time the floor comes to the furniture instead.
+ *
+ * Nothing about the "bigger on the inside" trick changes: 42 m of interior
+ * still lives inside a 24 m shell, which is still the joke. The room is
+ * simply no longer *so* much bigger that its own contents get lost in it.
+ *
+ * ## What derives from this, and what has to be told
+ *
+ * The half-extents below, and — through {@link INTERIOR_HALF_X} and
+ * {@link INTERIOR_HALF_Z} — every wall, the coursing, the wall-plate, the
+ * lift shaft, the torch spread, the shop walls and the park map's drawing.
+ * Anything **authored as an absolute interior-local coordinate** cannot
+ * derive from it and is moved by `layout.ts`'s `onPlate()` instead; that
+ * function's doc lists what had to be told rather than deriving.
+ */
+export const INTERIOR_PLATE_SHRINK = Math.SQRT1_2;
+
+/** Interior half-extents in metres — a 42.43 x 31.11 m floor plate. */
+export const INTERIOR_HALF_X = 30 * INTERIOR_PLATE_SHRINK;
+export const INTERIOR_HALF_Z = 22 * INTERIOR_PLATE_SHRINK;
 
 /** How far the interior's plaza floor sits below the ground-floor deck. */
 export const INTERIOR_PLAZA_DROP = 1.2;
@@ -322,10 +358,31 @@ export const HOTEL_PLAY_RADIUS = 30;
 /** Radius of the interior's soft boundary, mirroring GARDEN_PLAY_RADIUS. */
 export const INTERIOR_PLAY_RADIUS = 46;
 
-/** Number of walkable decks. Deck 0 is the ground floor, deck 4 is the roof. */
-export const BUILDING_FLOOR_COUNT = 5;
+/**
+ * Number of walkable castle floors: **three**, and they are not stacked.
+ *
+ * Jim, 29 August 2026: *"the castle also has too many floors and the floors
+ * aren't distinct enough … Maybe just three — mall on the floor, something
+ * else in the middle, and the roof."* So floor 0 is the mall, floor 1 the
+ * great hall and floor 2 the roof garden, and each is **its own space at its
+ * own origin** — `world/building/floors.ts` is the table, and the only reason
+ * the count also lives here is that `core/constants.ts` may not import from
+ * `world/`.
+ *
+ * There were five until 30 August. Two of the three the family lost were
+ * mall-like floors of scattered shops; what they got back is three floors that
+ * each mean something, which was the whole of #380's argument.
+ */
+export const BUILDING_FLOOR_COUNT = 3;
 
-/** Deck-to-deck rise in metres. */
+/**
+ * Floor-to-floor rise in metres.
+ *
+ * Still meaningful after the split, but for a **smaller** reason than before:
+ * the floors no longer stack, so nothing is at `k * BUILDING_FLOOR_HEIGHT` any
+ * more. It survives as the storey height the walls, glass band and window rows
+ * are built to, and as the rise the lift's indicator counts through.
+ */
 export const BUILDING_FLOOR_HEIGHT = 3.6;
 
 /** How far the ground floor sits above the highest terrain under the footprint. */

@@ -226,3 +226,299 @@ claim most worth being able to re-check.
   resolution from `main`'s step list and verify by
   `node -e "console.log(Object.keys(require('./package.json').scripts))"`.
 - Diffs with three dots: `git diff --stat origin/main...HEAD`.
+
+---
+
+# S2 — THE SPLIT. Plan of record, 30 Aug 2026.
+
+**Branch changed.** S2 is being built on **`feat/castle-floors-half-area`**
+(worktree `.claude/worktrees/castle-shrink`), not on a branch of its own. Jim,
+30 Aug: *"fold this requirement into that work, make it the top priority, above
+all else"* and *"all its work is important so don't drop any, but also don't
+delay this split for one second more"*. So the halved plate, the market and the
+rewritten `check:shop-spacing` all ship; the split simply goes first, and where
+it forces the market to move, the market moves.
+
+Dev server port **5413**, `--strictPort`, killed by PID.
+
+## The shape: three spaces, one world
+
+| floor | space id | purpose |
+| --- | --- | --- |
+| 0 | `castle.mall` | **The mall.** All seven market stalls, the toilets, the front door, the lift alcove. |
+| 1 | `castle.hall` | **The great hall.** Throne, dais, feast table, benches, hearth, knights — #368/#388's furniture, which today shares deck 0 with the market and has nowhere of its own. |
+| 2 | `castle.roof` | **The roof garden.** Open sky, parapet, pavilion, planters, benches, the trampoline, the grown-up, and the **ginormous slide's launch pad** — non-negotiable. #410's wild pets and long grass land here. |
+
+Floor *k* lives at `(INTERIOR_ORIGIN_X + FLOOR_SPACE_SPACING * k, INTERIOR_ORIGIN_Z)`
+with `FLOOR_SPACE_SPACING = 300`. The mall keeps `(600, 600)`, so the front
+door's numbers barely move. Per-space radius 120 m — comfortably containing a
+21.2 x 15.6 m half-plate and its 46 m play bounds, and 300 apart so two can
+never be confused. `spaceAt` resolves the castle by x-band exactly as it
+already resolves the six hotel rooms by z-band.
+
+**Not a new architecture — the hotel's, applied to the castle**, which is
+literally what Jim asked for. `Building` grows the same four methods `Hotel`
+already has: `currentFloor()` (from `spaceAt`), `boundTo(floor)`,
+`stepThroughDoor(...)`, `travelTo(floor)`. `SpaceManager.changeTo`/`hop` get
+unified, as that file's own docblock asks S2 to do.
+
+`layout.ts` grows a `CastleFloor` record — `space`, `originX/originZ`,
+`halfX/halfZ`, `clearHeight`, `liftZ` — the direct analogue of `HotelRoom`.
+Three of them, and `BUILDING_FLOOR_COUNT` becomes 3.
+
+## Device by device — what I agree with in Decision 3 §4, and what I do not
+
+| device | Decision 3 §4 | my ruling | why |
+| --- | --- | --- | --- |
+| Tap stairs, `StairRide`, `ui/StairMenu` | delete | **agree, delete** | Pure transport plus a menu. Decision 3's replacement (walk up real steps, iris, walk off the top) is itself dead now: the lift is the only route, so there is no stair portal to build. |
+| Escalators | **keep** as a portal flavour | **disagree — delete** | Decision 3 kept them as a *route*, and a route that is not the lift is exactly what Jim removed. An escalator that returns you where you started is nonsense, and it is the mall look the family complained about. `Escalators.ts`, `ESCALATOR_WELL`, `escalatorRamp`, `handleEscalator` all go. |
+| Glass lift | keep; car/shaft deleted, `floors()`/`go(n)` seam kept | **agree** — and it is now the whole of inter-floor travel | `HotelLift.ts` is the shipped reference for exactly this: press N, iris, doors open in N's own space, no car ever travels. `ui/LiftPanel.ts` is untouched — it was written against the seam for this. Every floor's alcove at the same local spot. |
+| Trampoline | tap-and-go portal *up a floor* | **disagree — keep it, as a toy, not a route** | Strip `TRAMPOLINE_SHAFT` and leave a plain trampoline that bounces you and puts you back down on the same floor. That is what a six-year-old thinks a trampoline is, and it costs no fun. Proposed home: the **roof garden** (open sky, nothing to bang your head on). Say if you would rather it stood in the mall. |
+| Bubble | keep as the way onto the roof | **moot** | Already deleted by #401; Decision 3 correction 5 says it is not coming back. Nothing to do. |
+| Helter-skelter | ride portal, floor 2 → ground | **delete — and this is the one that loses real fun, so I am flagging it rather than doing it quietly** | With three floors the only helter that makes sense is roof→mall, which is a second inter-floor route: the thing Jim removed. Making it return you to the roof means a helix that goes down and puts you back up, which reads as broken. And the roof *already* has the ginormous slide as its down-and-out ride — one great slide off the roof beats two competing ones. **If Jim wants it kept, the honest option is a stand-alone same-floor helix in the great hall with its own steps inside it — but that reintroduces climbing geometry and is a design job, not part of the split.** My recommendation: delete now, file an issue for a same-floor slide in the hall. |
+| Ginormous slide | unchanged | **agree, and preserved** | Already a cross-space ride. Its launch simply lives in the roof-garden space. |
+| Toilets | move with a floor | **the mall** | They belong beside the shops; a child in a market needs them. |
+| Shaft guards | delete wholesale | **agree** | There are no shafts left at all. |
+| Floor fader | "deleted" | **only the castle's use of it** | Correction 2: `FloorFader` has a live hotel consumer (`overhangFader`). The file survives; the castle's layers and `Shops.setVisibleDeck` go, replaced by per-space root visibility. |
+| `DECK_HOLES`, `deckIsSolid`, `BUILDING_SHAFTS` | delete | **agree** | And this dissolves the brief's `keepOutsFor`-does-not-include-`BUILDING_SHAFTS` bug — five occurrences across four agents this week — by removing the concept of a shaft entirely. A real win, not tidying. |
+
+## Why this is worth doing beyond tidiness — the PR's strongest argument
+
+**Indoor collision is height-blind.** A shop counter on one deck is an
+invisible wall on every other deck, and `check:castle` cannot see it: it tests
+props against keep-outs, not colliders against another deck's furniture. The
+branch's previous engineer hit exactly this — a stall over the great hall's
+feast table would wall off the hall below, verifiable only by hand. **After the
+split no two floors share a plan, so that entire bug class is impossible by
+construction.** It also unblocks #376: castle props can finally have real
+colliders, which they were denied for precisely this reason.
+
+## What the split makes easier, not harder — NPCs
+
+Correction 5 stands: children *do* reach castle shops now (`npc/portals.ts`,
+`npc/attractions.ts`, `check:npc-presence`). But consolidating all seven shops
+onto the mall means **every castle attraction is in one space**, reachable
+through the existing garden↔castle portal, with no NPC lift-riding at all. The
+"child stranded on a floor she cannot leave" risk goes away rather than being
+managed.
+
+## What is at risk, stated rather than traded away
+
+- **The helter-skelter** — above. Needs a ruling.
+- **`MARKET_BEAM_INSET = 1.8` and `MARKET_SOUTH_Z`'s `+1.6`** — both were
+  *measured* to clear the hearth's fire and the stairwell's 4.2 m pick radius,
+  **on the same deck**. With the hall on its own floor and the stairwell gone,
+  both constraints vanish. So the market is re-laid as the **three rows x four
+  columns** block this branch already measured as fitting seven stalls
+  (21.72 x 15.68 m at a 3.6 m stall) — two aisles with stalls down both sides, a
+  market proper. That is the market *moving*, which was always the plan, not
+  the market being dropped.
+
+## The boot validator — `scripts/check-castle-floors.mts`
+
+Into the `build` chain (currently **47** steps, parsed from `package.json`, not
+grepped; it becomes 48), after `check:castle`. It asserts, on the **built**
+world:
+
+1. the portal graph connects the garden to all three floors **and back**, using
+   only the portals actually registered;
+2. every arrival point samples to walkable ground in its own space, within
+   `BUILDING_STEP_UP`;
+3. no arrival sits inside any trigger band, with `PLAYER_RADIUS` of margin;
+4. the three floors do not overlap — no two plates-plus-`INTERIOR_PLAY_RADIUS`
+   intersect, and `spaceAt` round-trips every plate corner to its own floor;
+5. the ginormous slide's entry is in the roof space and its stand point is
+   walkable.
+
+**Proved red by four deliberate mutations**, each recorded with the geometry it
+was proved against (CLAUDE.md: a red-run transcript goes stale): remove the lift
+portal (1 fails); push an arrival 1 m into a wall (2); move an arrival inside
+its own trigger (3); set `FLOOR_SPACE_SPACING` to 40 (4).
+
+## Commit order — so nothing is lost on the way
+
+1. three-floor table (`spaces.ts`, `layout.ts`, `CastleFloor`), no behaviour change;
+2. `Shell` + `surfaces` build three disjoint plates; door portal to the mall; lift portal the only inter-floor route;
+3. the deletions (stairs, escalator, `StairRide`, `StairMenu`, `ShaftGuards`, holes, shafts);
+4. contents move: market to the mall, hall furniture to floor 1, roof dressing to floor 2;
+5. the boot validator, proved red;
+6. `check:castle` / `check:shop-spacing` / `check:tap-spacing` / `ParkMap` / `interactZones` re-shaped for three floors; screenshots at player height of each floor and of the lift moving.
+
+---
+
+## S2 STATUS — built, green, and **not yet walked in a browser**
+
+Branch `feat/castle-floors-half-area`, worktree `.claude/worktrees/castle-shrink`.
+
+### Gates, all run unpiped, exit codes read
+
+| gate | exit | note |
+| --- | --- | --- |
+| `pnpm exec tsc --noEmit` | **0** | |
+| `pnpm exec tsc --noEmit -p tsconfig.test.json` | **0** | |
+| `pnpm run build` | **0** | 49 steps, parsed from `package.json`, never grepped |
+| `pnpm run test:procgen` | **0** | 465 passed, 15 files, **0 skipped** |
+| `pnpm run check:castle` | **0** | |
+| `pnpm run check:castle-floors` | **0** | new; see below |
+| `pnpm run check:shop-spacing` | **0** | re-shaped for one aisle on the mall |
+| `pnpm run check:tap-spacing` | **0** | |
+| `pnpm run check:park`, `check:park-boot` | **0** | in the build chain |
+
+`check:park-boot` went red once **under load** (a build running beside it) and
+passed alone and in the clean build — the #324 flake, exactly as briefed.
+
+### The boot validator, proved red four ways
+
+`scripts/check-castle-floors.mts`, inserted after `check:castle`; the chain went
+48 → **49** steps. Geometry it was proved against, from its own green line:
+
+> 3 floors 300 m apart (The mall, The great hall, The roof garden), 8 portals.
+
+1. **lift portals removed** → 4 failures: both upper floors unreachable *and*
+   unable to get back. *"That is a child stranded on a floor she cannot leave."*
+2. **lift arrival moved off the plate** → 6 failures, each naming the surface it
+   found (−0.472 m) against the floor it wanted (0.728 m).
+3. **door arrival landed on its own exit band** → the ping-pong clause fires by
+   name, plus the arrival clause.
+4. **`FLOOR_SPACE_SPACING` 300 → 40** → the overlap clause fires for all three
+   pairs, every plate corner resolves to the wrong floor, and arrivals report
+   landing in `castle.mall` while claiming `castle.hall`.
+
+**One honest note.** The first attempt at mutation 2 moved the arrival 4 m east
+and produced **no failure**. That was the mutation being wrong, not the check:
+`LIFT_STAND_X + 4 = 24.11` is still inside `LIFT_SHAFT` (21.21–24.61), which
+`LIFT_PIT` floors, so she was standing on the alcove floor and the check was
+right to pass her. Re-chosen to move off the plate. A mutation that fails to go
+red is a claim about the check that has to be run down.
+
+### The bug `test:procgen` caught that the build could not
+
+`slide/solve.ts` had `START_Y = deckY(TOP_DECK)`. That was never about the
+interior — it was a proxy for "as high as the castle is", working only because a
+five-storey interior happened to out-top the facade's battlements. `TOP_DECK`
+fell 4 → 2 and took **7.2 m** off the launch height: the chute crossed the
+castle's south wall **3.76 m inside solid battlements, on every seed**, with
+nothing cutting a hole. `pnpm run build` stayed green throughout, because
+`test:procgen` is not in the chain.
+
+Fixed at the root: `CASTLE_WALL_HEIGHT`/`CASTLE_MERLON_HEIGHT` moved from
+`Shell.ts` to `layout.ts` (the move `CASTLE_TOWERS` already made, for the same
+cycle reason), and `START_Y = BUILDING_BASE_Y + CASTLE_MASONRY_TOP +
+BATTLEMENT_AIR`. GAME_DESIGN 30c: the inside never has to agree with the
+outside's shape, so a figure about the outside must not derive from the inside's
+floor count.
+
+### WHAT IS NOT DONE — read this before merging
+
+**Nobody has watched this run.** I have not been granted the chrome-devtools
+MCP, and CLAUDE.md is explicit that an agent who has not been told it owns the
+browser must not drive it. So the three required screenshots — each floor at
+player height, and the lift moving between them — **do not exist**, and the
+three things only a rendered frame can answer are unverified:
+
+1. every floor reachable by lift, nothing stranded (asserted by the validator on
+   the portal graph; *not* observed);
+2. the great hall still reads as a hall now it has a floor to itself;
+3. **the ginormous slide still launches from the roof garden** — the validator
+   asserts the pad is in the roof space, on the plate and on walkable ground,
+   and `test:procgen` asserts the chute clears the battlements, but nobody has
+   ridden it.
+
+This is a gate, not a formality: the branch is pre-approved for merge and must
+still not be merged until somebody has looked.
+
+### CI, on the real head commit
+
+Rebased onto `main` @ `faf6d044`; head is `d10865c`, which is also the sha in
+the preview URL. All four checks **SUCCESS**: Build and checks, Procgen
+invariants, Deploy PR preview, A reload gets the new build.
+
+Preview: `https://pr-407-d10865c-land-of-good-places.blockstack.workers.dev`
+with `/castle?deck=0`, `?deck=1`, `?deck=2` and `/slide`.
+
+**Egress note, contradicting CLAUDE.md:** that host returned **HTTP 200** to
+`curl` from this sandbox. CLAUDE.md's PR section says `*.workers.dev` gives 403
+here and that an agent therefore cannot verify a preview it hands over. That was
+not true today. Worth re-checking before the next agent repeats the caveat.
+
+### The one gate still open: nobody has looked
+
+The branch is pre-approved for merge, and it must still not be merged. I was
+not granted the chrome-devtools MCP, and CLAUDE.md forbids driving it
+unasked. Outstanding, and only a rendered frame can answer them:
+
+1. every floor reachable by lift, nothing stranded;
+2. the great hall reading as a hall now it has a floor to itself;
+3. **the ginormous slide launching from the roof garden.**
+
+Screenshots required: each floor at player height, and the lift moving between
+them. `scripts/qa-castle-shrink.mjs <port> <outDir> <halfX> <halfZ>` is on this
+branch and takes standing points as fractions of the half-extent; it will need a
+small edit for three floors reached by `/castle?deck=N` rather than five by
+height.
+
+---
+
+## BROWSER QA — done, and it found two bugs every check had missed
+
+Verified in Chrome against a dev server on port 5413 (killed by PID afterwards;
+port confirmed free). All three floors walked at player height, the lift ridden
+between every pair of floors in both directions, and the ginormous slide ridden
+top to bottom.
+
+### The two bugs
+
+Both were invisible to `tsc`, to all 48 checks, to `test:procgen` and to the
+boot validator. Both were found within minutes of opening a browser.
+
+1. **The hearth was on the wrong floor.** `CASTLE_HEARTH` still said `deck: 0`.
+   The surround, coat of arms, portcullis, throne and feast had all moved to the
+   great hall; the *fire* had not. `castle-hearth-logs-0` stood at world x=600 in
+   the middle of the mall's market while its own stone surround was 300 m away at
+   x=900. Nothing broke, because **a fire without a fireplace violates no
+   assertion.** `castleFurniture.ts`'s note exists precisely to stop the hall
+   being split across files and it still only caught two of the three owners:
+   **three files make the hall a hall.**
+
+2. **The lift glided her 300 m through the void.** `beginAlight` read
+   `player.position` to start the step-out. `travelTo` runs behind a closed
+   iris, so on the next line the teleport has *not happened yet* — she was still
+   in the alcove of the floor she was leaving, and the glide interpolated from
+   there to the destination alcove, visibly sliding through open nothing between
+   two castles. Found by sampling her x mid-ride: **826.4**, which is 73.6 m
+   short of the great hall and 200 m past the mall.
+
+   **The validator could not have caught this**, and that is worth understanding
+   rather than patching: it asserts where she *ends up*, not the path she takes.
+   `HotelLift` never had the bug because its `beginAlight` always derived both
+   ends from the room. Mine now does the same. Re-verified by sampling every
+   100 ms across a ride: **0 samples outside a floor, only two floors seen.**
+
+### What was watched
+
+| | result |
+| --- | --- |
+| mall at player height | market aisle, stalls both sides, "Go shopping!" chip live |
+| great hall | throne on its dais, feast laid, armour, tapestry, braziers, fire |
+| roof garden | open sky, parapet, pavilion, benches, **trampoline as a toy** |
+| lift, all 6 ordered pairs | 8/8 rides landed on the floor asked for |
+| lift panel | three destinations by name, "you are here" on the current floor |
+| ginormous slide | boards from the roof, clears the battlements, lands **0.91 m from the ball pit's centre** on its scooped floor, not airborne |
+| console | no errors, no warnings |
+
+### `check:park-boot` — the flake, confirmed properly rather than assumed
+
+It went red twice inside the full chain and I nearly attributed it to the
+branch. The decisive tests: **standalone 3/3 green on this branch and 3/3 on
+`origin/main`**, `origin/main`'s full chain green, and finally **this branch's
+full chain green with nothing else running**. Both reds were load I was
+creating myself (a browser, a dev server and a concurrent `vite build`). #324
+is real; it is also easy to blame wrongly. Jim's own long-running `hohjs` vite
+servers were left alone throughout — they are never an agent's to kill.
+
+### A near-miss worth recording
+
+`lsof -ti:<port>` returns **clients as well as listeners**. Cleaning up, it
+returned Jim's **Google Chrome** PID alongside my vite, and a naive
+"kill everything on my port" would have killed his browser. Only the row marked
+`(LISTEN)` is the server. Use `lsof -nP -i:<port> | grep LISTEN`.

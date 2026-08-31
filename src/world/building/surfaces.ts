@@ -1,7 +1,8 @@
-import { BUILDING_FLOOR_COUNT, BUILDING_FLOOR_HEIGHT, BUILDING_STEP_UP, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z } from '../../core/constants';
+import { BUILDING_STEP_UP } from '../../core/constants';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
 import { clamp01 } from '../../core/mathUtils';
 import { terrainHeight } from '../terrain';
+import { castleFloorAt, type CastleFloor } from './floors';
 import {
   allRamps,
   BALL_PIT_FLOOR_Y,
@@ -9,11 +10,8 @@ import {
   BALL_PIT_X,
   BALL_PIT_Z,
   BUILDING_BASE_Y,
-  deckIsSolid,
-  deckY,
   insideInterior,
   INTERIOR_GROUND_Y,
-  LIFT_SHAFT,
   regionContains,
   type RampDefinition,
 } from './layout';
@@ -70,19 +68,15 @@ export interface LevelConnector {
 }
 
 /**
- * Anything within this of the interior origin is in the building's own space.
+ * **`inInteriorSpace` is gone; `floors.ts`'s `castleFloorAt` replaces it.**
  *
- * The two spaces are 848 m apart, so the exact number does not matter as long as
- * it comfortably contains the interior and comes nowhere near the park.
+ * It answered "is this position inside the castle at all?" with one radius
+ * round one origin, which was the right question while the castle was one
+ * stacked space. Since the split there are three, and the useful question is
+ * *which* — so the test lives with the floor table that knows the answer,
+ * rather than being a second copy of the arithmetic here. That is the same
+ * move `world/spaces.ts` made in the same commit.
  */
-const INTERIOR_REGION_RADIUS = 200;
-
-/** True when a world position is inside the building's own space at all. */
-export function inInteriorSpace(x: number, z: number): boolean {
-  const dx = x - INTERIOR_ORIGIN_X;
-  const dz = z - INTERIOR_ORIGIN_Z;
-  return dx * dx + dz * dz < INTERIOR_REGION_RADIUS * INTERIOR_REGION_RADIUS;
-}
 
 /**
  * Where the ground is, for anything that walks.
@@ -127,36 +121,38 @@ export class WalkSurfaces {
    * Coordinates are world space.
    */
   sample(x: number, z: number, y: number): number {
-    const interior = inInteriorSpace(x, z);
-    const localX = x - (interior ? INTERIOR_ORIGIN_X : BUILDING_CENTRE_X);
-    const localZ = z - (interior ? INTERIOR_ORIGIN_Z : BUILDING_CENTRE_Z);
+    const floor = castleFloorAt(x, z);
+    const localX = x - (floor ? floor.originX : BUILDING_CENTRE_X);
+    const localZ = z - (floor ? floor.originZ : BUILDING_CENTRE_Z);
     const ceiling = y + BUILDING_STEP_UP;
 
-    let best = interior ? INTERIOR_GROUND_Y : groundAt(x, z);
+    // Inside the castle the ground is either this floor's own plate or, off the
+    // edge of it, the plaza disc that floor floats above. Out in the park it is
+    // the terrain. **There is no stack to scan**: the five-deck top-down loop,
+    // `deckIsSolid` and `DECK_HOLES` are all gone, because a floor is now a
+    // single unbroken slab and the only way off it is the lift.
+    let best = floor
+      ? insideInterior(localX, localZ)
+        ? BUILDING_BASE_Y
+        : INTERIOR_GROUND_Y
+      : groundAt(x, z);
 
-    // Ramps and landings — stairs, escalators, the facade's entrance steps.
-    const space = interior ? 'interior' : 'garden';
+    // Ramps and landings — the porch, the lift pit, the facade's entrance
+    // steps. Every castle floor carries the same set, because each one has its
+    // own porch and its own lift alcove at the same floor-local spot; a lift
+    // that wandered from floor to floor would read as broken.
+    const space = floor ? 'interior' : 'garden';
     for (const ramp of this.ramps) {
       if (ramp.space !== space) continue;
+      if (ramp.onlyFloor !== undefined && ramp.onlyFloor !== floor?.index) continue;
       if (!regionContains(ramp.footprint, localX, localZ)) continue;
       const height = BUILDING_BASE_Y + rampHeight(ramp, localX, localZ);
       if (height <= ceiling && height > best) best = height;
     }
 
-    // Deck slabs, skipping any deck that has a hole here. Only the interior has
-    // decks — the tower in the garden is a facade with a door in it.
-    if (interior && insideInterior(localX, localZ)) {
-      for (let deck = BUILDING_FLOOR_COUNT - 1; deck >= 0; deck -= 1) {
-        const height = deckY(deck);
-        if (height > ceiling || height <= best) continue;
-        if (!deckIsSolid(deck, localX, localZ)) continue;
-        best = height;
-        break; // decks are ordered top-down, so the first hit is the highest
-      }
-    }
-
-    // Lifts — and the bridges' humps, the one platform kind
-    // whose surface height varies across its own footprint.
+    // The bridges' humps, the one platform kind whose surface height varies
+    // across its own footprint. The castle has no moving platforms any more —
+    // the lift car is gone, and with it the last reason the interior had one.
     for (const platform of this.platforms) {
       if (!platform.covers(x, z)) continue;
       const height = platform.surfaceYAt ? platform.surfaceYAt(x, z) : platform.surfaceY;
@@ -167,23 +163,23 @@ export class WalkSurfaces {
   }
 
   /**
-   * Which deck a walker at this world position counts as being on, or `null`
-   * when they are not in the building at all. Used for the cutaway view.
+   * **Which castle floor a walker is on**, or `null` out in the park.
+   *
+   * This was `deckAt(x, z, y)`, and the `y` is what has gone: it had to round
+   * the walker's height to the nearest storey, because five decks shared one
+   * coordinate system and height was the only thing telling them apart. Now
+   * **position alone answers**, which is Decision 3's load-bearing choice — the
+   * sampler stays a pure function of where you are, and a child in mid-air over
+   * the great hall is unambiguously in the great hall rather than being rounded
+   * onto the floor above.
+   *
+   * The generous margin the old version needed — to cover the porch outside the
+   * south door and the lift alcove hanging off the east wall, or stepping onto
+   * either popped the whole tower out of view — is `CASTLE_FLOOR_RADIUS`'s job
+   * now, and it is 120 m rather than 4.
    */
-  deckAt(x: number, z: number, y: number): number | null {
-    if (!inInteriorSpace(x, z)) return null;
-    const localX = x - INTERIOR_ORIGIN_X;
-    const localZ = z - INTERIOR_ORIGIN_Z;
-    // Generous margin: it also has to cover the porch outside the south door
-    // and the lift shaft hanging off the east wall, otherwise stepping onto
-    // either pops the whole tower back into view.
-    const inShell = insideInterior(localX, localZ, 4);
-    const inLift = regionContains(LIFT_SHAFT, localX, localZ);
-    if (!inShell && !inLift) return null;
-    if (y < BUILDING_BASE_Y - 2) return null;
-
-    const raw = Math.round((y - BUILDING_BASE_Y) / BUILDING_FLOOR_HEIGHT);
-    return raw < 0 ? 0 : raw > BUILDING_FLOOR_COUNT - 1 ? BUILDING_FLOOR_COUNT - 1 : raw;
+  floorAt(x: number, z: number): CastleFloor | null {
+    return castleFloorAt(x, z);
   }
 }
 
