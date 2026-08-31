@@ -919,3 +919,108 @@ That claim is now measurably not true for the *approach* to the chain.
 
 Not built, and reported rather than attempted, because it is the same class of
 change as the seed 11 one and both want the bridge-count sweep behind them.
+
+---
+
+# BOTH FIXES BUILT — `test:procgen` IS GREEN, 492/492
+
+## 1. The gateway rule, read from both directions
+
+`isInEntranceGateway` lives in `entrance/layout.ts`, the module that owns the
+gate. **Planning it alone was measurably not enough.** The planner refused a
+ramp into the arch; the builder — which searches with levers the planner has
+not (lateral shift, narrower deck, felled tree) — put one straight back
+through. It surfaced on the **canonical seed, Jim's own park**, the moment the
+paths moved: `gate-approach` ending at (0.0, 54.0), **0.70 m** up on a bridge
+against a child's 0.62 m step-up. Same shape as `CROSSING_STATION_CLEARANCE`:
+one owner, both directions.
+
+No new threshold. The deck is 10 m wide and the arch 8.6 m, so **a bridge
+cannot fit through the gate at any width** — this is not a clearance to tune.
+
+## 2. `RAMP_SCREEN_MARGIN` — the doc said 0.5 and the constant said 1.5
+
+Its own doc comment argued for half a metre and named 1.5 as the value that
+broke seed 5, while the line underneath read `1.5`. **The two-definitions bug,
+in the file that documents it**, and it had been there all branch.
+
+Restored to 0.5. Not a tuning: the skirt pads a parapet **0.3 m thick**, so
+1.5 m of it refuses ground a child can plainly stand on. The two lattice nodes
+it cost seed 24 — (11.3, -33.6) and (11.3, -45.6) — sit at |across| 5.98 and
+5.06 against a deck half-width of 5.0, i.e. **1.0 m and 0.1 m clear of the
+masonry**: inside the 1.5 m skirt, outside a 0.5 m one.
+
+## The numbers
+
+**`test:procgen`: exit 0, 492 passed, 0 failed** — from 6 failed. All six
+inherited failures clear.
+
+**Bridge counts against `origin/main`** (measured in its own worktree, real
+install), which is the honest baseline — the "seed 5 = 4" I reported earlier
+was a transient of the masonry split before the margin was corrected, not
+something to protect:
+
+| seed | `origin/main` | branch |
+|---|---|---|
+| canonical | 2 of 4 crossings | 2 of 4 |
+| 2 | 0 of 3 | 0 of 3 |
+| 5 | 3 of 4 | **3 of 4** |
+| 11 | 2 of 5 | **1 of 5** |
+| 18 | 1 of 5 | 1 of 5 |
+| 24 | 1 of 2 | **1 of 2** |
+
+**No seed loses a bridge except seed 11, by one — and that one was standing on
+the front door.** Seed 24 is restored to main's bridge.
+
+**`check:park`:**
+
+| seed | stranded | exit |
+|---|---|---|
+| canonical | 0 | **0** |
+| 2 | 0 | **0** |
+| 5 | **0** (was 8) | **0** |
+| 11 | 0 | **0** |
+| 18 | 0 | **1 — see below** |
+| 24 | 0 | **0** |
+
+**Seed 5 reaches `poi.stranded: 0`.** #436's subject resolved as a side effect
+of the margin correction — I did not work on it, and its dodgems finding still
+stands as the reason a *screen* could never have fixed it.
+
+## ONE OPEN REGRESSION, and it is the gate fix's own cost
+
+**Seed 18 `check:park`: `route.crossesRail: 4` (new).**
+
+```
+[2] the walk to stall:spaceFerrisWheel crosses the railway at (-14.1, 20.1)
+    0.56 m above the rail, short of the 4.06 m a bridge deck needs
+[2] the walk to train-station-1 crosses the railway at (-14.1, 20.1) ...
+```
+
+Isolated: **the gate fix causes it, not the margin** — it is still 4 with the
+margin back at 1.5. Seed 18's front-door crossing is at railD 306, (4.6, 53.6),
+**7.8 m from the gate**, and the gateway rule correctly refuses a bridge there,
+so it falls back to a level crossing. The family ruling is that a path crosses
+on a bridge, so this trades one defect for a smaller one.
+
+**The likely right answer, NOT attempted — reported first per the standing
+rule:** the planner should prefer a bridge site whose *footprint* clears the
+arch rather than falling back to a level crossing at the door. That is a
+ranking change in `crossingPlanSolve.ts`, not another screen, and it wants the
+whole sweep re-run behind it.
+
+Note `check:park` runs the **canonical** seed in CI, so seed 18's row is a
+diagnostic, not a gate — which is itself the point below.
+
+## THE THROUGH-LINE OF THE DAY, worth stating plainly
+
+**`check:park` saw seed 11 as `poi.stranded: 0` while a child could not get
+through the front gate.** The ground beyond the arch was reachable by another
+route, so the waypoint graph was satisfied and every check in the repo stayed
+green. Only an invariant that asked a different question — *does a drawn path
+end in mid-air on a bridge?* — could see it, and that invariant is this
+branch's own, which is exactly why `origin/main` is green and blind to it.
+
+That is #437's argument in one sentence: **reachability is not walkability, and
+a check that only asks "can this be reached at all" cannot see a wall across
+the way in.**
