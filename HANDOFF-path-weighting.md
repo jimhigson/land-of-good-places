@@ -14,10 +14,55 @@ with some reasonable weighting penalty"*
 - [x] `check:path-preference`, in the `pnpm run check` chain
 - [x] Tuning sweep, and route traces drawn and looked at
 - [x] **Both mutations proven red** (transcripts below)
-- [ ] Full `pnpm run check` + `test:procgen`
-- [ ] Browser QA on 5419, player and NPC
-- [ ] Rebase onto `origin/main` (#414 step 1 has landed — see "Moving under us")
+- [x] Full `pnpm run check` + `build` + `test:procgen`
+- [x] Browser QA on 5419, player and NPC, before *and* after
+- [x] `origin/main` is still 6d475dab — nothing to rebase onto yet
 - [ ] PR
+
+## The gate
+
+| | result |
+| --- | --- |
+| `check:waypoints` | green — 240 waypoints, every one somewhere a child could stand |
+| `check:park` | green — **19/19 attractions route from the entrance, 240/240 waypoints connected, all six invariants hold** |
+| `check:nav-routes` | green |
+| `check:path-preference` (new) | green — mean 79.8% paved, was 55.0% |
+| `pnpm run build` | exit 0 |
+| `pnpm run test:procgen` | 482/482, 16 files |
+| `check:park-boot` | **red, and red on `origin/main` too** — see below |
+
+`check:park-boot` is #324, the known load-dependent flake, and it was measured
+on both columns on this box with nine agents running:
+
+- branch: worst advance 24.2 ms, `cruiserSearch, 2 work units`
+- `origin/main` (6d475dab, its own clean worktree): worst advance **25.3 ms**,
+  `cruiserSearch, 137 work units`, 6 steps begun after their deadline
+
+`origin/main` is *worse*. Not attributable to this change. Nothing in this
+branch runs during generation — the paving stamp happens on the first route
+asked for, long after boot.
+
+## Watched running (port 5419, headless Chrome, zero console errors)
+
+The honest before/after: **the same build, the same seed, the same spawn, the
+same destination — one variable**, the multiplier flipped to 1 and back. A pair
+taken from two different builds would prove much less.
+
+Measured on the **bodies as they actually walked**, not on the routes:
+
+| | on paving, before | after |
+| --- | --- | --- |
+| player tap-to-walk, one 98 m walk | **20.0%** | **63.8%** |
+| the children, 21 kids in the garden, 60 s | **38.8%** | **60.1%** |
+
+And it is not just a number — plotted over the park's own paving
+(`qa-trails-before.png` / `qa-trails-after.png`, side by side in
+`qa-before-after.png`), *before* is one long straight diagonal for the player
+and a spider's web of diagonals for the children, cutting clean across the
+middle of the park. *After*, the player's walk runs along the top street and
+down the left, and the children's trails largely trace the beige. Nothing in
+the after picture reads as "why did she go that way?" — which is the whole
+test.
 
 ## What was built
 
