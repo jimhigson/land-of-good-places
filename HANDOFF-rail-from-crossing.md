@@ -768,3 +768,21 @@ a moved railway. Downstream, not investigated.
 loop, world (-57.51, 0.70, -20.16). The cruiser solves *before* the train so it
 has not moved; the **scatter** has, because it plants around the railway.
 Downstream, not investigated.
+
+## `pnpm run check` — one failure, and it is **inherited, not new**
+
+`check:park` on seed 3: `poi.stranded: 20 (no allowance — this is new)`, twenty
+waypoints in an unreachable pocket of the 'garden' graph, in two clusters around
+(-44, 24) and (46, -41). It is the only failing step in the whole 47-step chain;
+everything else, `tsc` included, is green.
+
+**Measured at the branch point (`cc9d5e73`, detached worktree): identical —
+same step, same count of 20.** So it is not caused by the backstop, the
+rectangle keep-out or the ladder change; it arrived with the crossing-pose
+generator earlier on this branch and was never triaged. It belongs to the same
+family as the three remaining `test:procgen` failures — the park reacting to a
+railway that now starts inside it — and it is the largest of them, because
+twenty dropped waypoints is a district a child cannot reach.
+
+**It must be fixed before this merges** (CLAUDE.md's zero-tolerance rule), and
+it is now the biggest single open item on #427, ahead of seed 2.
