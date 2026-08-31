@@ -366,12 +366,30 @@ there the control point is 3.10 m off the drawn ribbon.
 Pre-existing two-definitions fragility — CLAUDE.md's most-cited failure — that
 this change lands on rather than creates.
 
-**The real fix**: `bestBranchPoint`/`fallbackSpurRoute` must measure against
-`routeCurve`, the one owner of the drawn shape. It lives in `pathGraph.ts`,
-which imports `paths.ts`, so `paths.ts` cannot import it — `routeCurve` (and
-its `drawnPolyline` fillet pass) should **move into `paths.ts`**, which already
-owns `RouteDefinition`, with `pathGraph.ts` importing it from there. Small
-ownership refactor, four other call sites, all read-only.
+**CORRECTION — that root cause was wrong, and the fix for it did not fix
+seed 5.** `routeCurve` and its `drawnPolyline` fillet pass have been moved into
+`paths.ts` (with `pathGraph.ts` re-exporting), and `nearestPointOnRoute` now
+measures the **drawn curve** instead of the control polyline. That is a real
+one-owner improvement and it stays — but the seed 5 failure is byte-identical
+with it in: the start is still (41.1, 9.3), still 3.10 m out.
+
+**The measured cause.** (41.12, 9.26) **is a lattice node**, `ok=true`,
+**`paved=true`** — and no drawn ribbon passes within 3.10 m of it. So the spur
+did not pick a bad point on a route at all: it terminated on a lattice node the
+lattice *believes* is paved while nothing is drawn there. `pavedLatticeNodes`
+and the drawn network disagree.
+
+**Hypothesis for why, NOT yet proven** — stated as a hypothesis because the
+previous confident root cause here was wrong: `commitStreetPlan` marks a plan's
+lattice nodes paved, but `spur()` then decides `paved: !already` and may draw
+no ribbon for that edge at all. A committed lattice path whose edge is never
+paved would leave exactly this: nodes flagged paved with no ribbon under them,
+and every later route free to terminate on one.
+
+Whoever takes this next: prove or kill that by logging which plan first marked
+node (41.12, 9.26) paved on seed 5, and whether its edge was drawn. Do not
+assume it, and do not fix it before measuring it — that mistake has now been
+made once on this ticket.
 
 ### Things tried and rejected, so nobody repeats them
 

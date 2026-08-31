@@ -1,4 +1,4 @@
-import { Vector3 } from 'three';
+import { CatmullRomCurve3, Vector3 } from 'three';
 import { PLAYER_RADIUS } from '../core/constants';
 import { ANCHORS } from './anchors';
 import { PARK_LAYOUT, RING_RADIUS, edgeDistanceAlong } from './parkLayout';
@@ -4917,6 +4917,171 @@ function pushClearOfRail(
 }
 
 /** The closest point on one route to `(x, z)`, or null if it has none usable. */
+/**
+ * ## Why the drawn curve lives HERE and not in `pathGraph.ts`
+ *
+ * It used to live there, and that was the wrong module: `pathGraph.ts`
+ * *draws* routes, `paths.ts` *decides* them, and this is the definition of
+ * what a decided route looks like once drawn. Keeping them apart meant
+ * `paths.ts` could not ask what its own routes look like — `pathGraph.ts`
+ * imports `paths.ts`, so the dependency could only go one way — and so every
+ * geometric question in this file was answered against the **control
+ * polyline** instead of the swept curve.
+ *
+ * On a bend those are metres apart. Issue #414: `bestBranchPoint` picked a
+ * junction on a route's control polyline, the ribbon was drawn on the curve,
+ * and seed 5's `spur-stall.facePaint` came out branching off nothing —
+ * starting 3.10 m from the nearest paving. Same disease as #349, where
+ * `pavingHeightAt` computed on an analytic frame while the masonry was built
+ * from chords: two descriptions of one curve, drifting where it turns.
+ *
+ * `pathGraph.ts` re-exports {@link routeCurve} so its own consumers (the
+ * ribbon extruder, `LampPosts.ts`, `poiGraph.ts`, `ParkMap.ts`,
+ * `test/procgen/parkFacts.ts`) are unchanged.
+ */
+
+/** Fillet radius at a street corner — Decision 3: "rounded corners,
+ * 1.5-2 m fillets; square junctions otherwise". */
+const CORNER_FILLET = 1.75;
+
+/** Sampling pitches for {@link drawnPolyline}: dense enough that the
+ * Catmull-Rom the ribbon extruder sweeps hugs the polyline (a Catmull-Rom
+ * through collinear points *is* the straight line), coarse enough to cost
+ * nothing. */
+const STRAIGHT_SAMPLE = 2.5;
+const ARC_SAMPLE = 0.6;
+
+/**
+ * **The one owner of what an open route's drawn centreline looks like**:
+ * dead-straight runs between corners, each corner rounded by a real
+ * {@link CORNER_FILLET} arc — not the old behaviour, where the sparse
+ * control points fed a tension-0.4 Catmull-Rom whose corner rounding grew
+ * with segment length, so a 20 m street corner bowed for many metres and
+ * the whole "axis-aligned" network drew as organic sweeps (Jim, 23 August
+ * 2026: "that top-down view looks nothing like how we discussed"). The
+ * returned points are dense (every couple of metres on straights, ~0.6 m
+ * round each fillet), so the Catmull-Rom built from them cannot depart
+ * from the shape they describe.
+ */
+function drawnPolyline(
+  points: readonly (readonly [number, number])[],
+): (readonly [number, number])[] {
+  // Collapse near-duplicates first — a zero-length leg is a NaN tangent.
+  const src: [number, number][] = [];
+  for (const p of points) {
+    const last = src[src.length - 1];
+    if (last && Math.hypot(p[0] - last[0], p[1] - last[1]) < 0.05) continue;
+    src.push([p[0], p[1]]);
+  }
+  if (src.length < 2) return src;
+
+  const out: [number, number][] = [src[0] as [number, number]];
+  const emitStraightTo = (to: readonly [number, number]): void => {
+    const from = out[out.length - 1] as readonly [number, number];
+    const length = Math.hypot(to[0] - from[0], to[1] - from[1]);
+    if (length < 1e-6) return;
+    const steps = Math.max(1, Math.ceil(length / STRAIGHT_SAMPLE));
+    for (let s = 1; s <= steps; s += 1) {
+      const t = s / steps;
+      out.push([from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t]);
+    }
+  };
+
+  for (let k = 1; k < src.length - 1; k += 1) {
+    const a = src[k - 1] as readonly [number, number];
+    const c = src[k] as readonly [number, number];
+    const b = src[k + 1] as readonly [number, number];
+    const lenIn = Math.hypot(c[0] - a[0], c[1] - a[1]);
+    const lenOut = Math.hypot(b[0] - c[0], b[1] - c[1]);
+    const dirInX = (c[0] - a[0]) / lenIn;
+    const dirInZ = (c[1] - a[1]) / lenIn;
+    const dirOutX = (b[0] - c[0]) / lenOut;
+    const dirOutZ = (b[1] - c[1]) / lenOut;
+    const turn = Math.abs(Math.atan2(dirInX * dirOutZ - dirInZ * dirOutX, dirInX * dirOutX + dirInZ * dirOutZ));
+    if (turn < 0.05) {
+      emitStraightTo(c);
+      continue;
+    }
+    // Clamp the fillet so two nearby corners never eat each other's legs.
+    const fillet = Math.min(CORNER_FILLET, lenIn * 0.45, lenOut * 0.45);
+    const pIn: readonly [number, number] = [c[0] - dirInX * fillet, c[1] - dirInZ * fillet];
+    const pOut: readonly [number, number] = [c[0] + dirOutX * fillet, c[1] + dirOutZ * fillet];
+    emitStraightTo(pIn);
+    // Quadratic Bezier through the corner: a clean constant-ish-radius
+    // rounding for any turn angle, sampled finely enough to read as an arc.
+    const arcLength = fillet * turn; // close enough for choosing a sample count
+    const steps = Math.max(2, Math.ceil(arcLength / ARC_SAMPLE));
+    for (let s = 1; s <= steps; s += 1) {
+      const t = s / steps;
+      const u = 1 - t;
+      out.push([
+        u * u * pIn[0] + 2 * u * t * c[0] + t * t * pOut[0],
+        u * u * pIn[1] + 2 * u * t * c[1] + t * t * pOut[1],
+      ]);
+    }
+  }
+  emitStraightTo(src[src.length - 1] as readonly [number, number]);
+  return out;
+}
+
+/**
+ * **The one Catmull-Rom every consumer of a route's drawn shape builds** —
+ * the ribbon extruder here, the lamp walker (`LampPosts.ts`), the NPC
+ * waypoint seeder (`poiGraph.ts`), the park map (`ParkMap.ts`) and the
+ * procgen facts (`test/procgen/parkFacts.ts`) all ask this instead of each
+ * repeating the `new CatmullRomCurve3(..., 0.4)` incantation over raw
+ * control points — CLAUDE.md's "one owner; everyone else asks", after this
+ * file's fillet pass made the drawn shape more than the control points.
+ * The closed backbone ring keeps its raw points: it is a circle through 32
+ * bearings, and filleting a circle's own samples would only dent it.
+ */
+export function routeCurve(route: RouteDefinition): CatmullRomCurve3 {
+  const points = route.closed ? route.points : drawnPolyline(route.points);
+  const vectors = points.map(([x, z]) => new Vector3(x, 0, z));
+  return new CatmullRomCurve3(vectors, route.closed, 'catmullrom', 0.4);
+}
+
+/**
+ * A route's own drawn centreline, sampled — cached per route object, because
+ * every spur asks every paved route for a branch point and the fillet pass is
+ * not free. Keyed on the `RouteDefinition` itself: routes are immutable once
+ * built, so identity is a sound key.
+ */
+const drawnSamplesCache = new WeakMap<RouteDefinition, (readonly [number, number])[]>();
+
+/** Pitch the drawn curve is sampled at when looking for a branch point.
+ * Half a metre: finer than the ~1.5 m the invariant that polices junctions
+ * tolerates, so the sampling itself can never be what puts a junction off the
+ * ribbon. */
+const BRANCH_SAMPLE_PITCH = 0.5;
+
+function drawnSamplesOf(route: RouteDefinition): (readonly [number, number])[] {
+  const hit = drawnSamplesCache.get(route);
+  if (hit) return hit;
+  const curve = routeCurve(route);
+  const length = curve.getLength();
+  const steps = Math.max(8, Math.ceil(length / BRANCH_SAMPLE_PITCH));
+  const out: (readonly [number, number])[] = [];
+  for (let i = 0; i <= steps; i += 1) {
+    const point = curve.getPointAt(i / steps);
+    out.push([point.x, point.z]);
+  }
+  drawnSamplesCache.set(route, out);
+  return out;
+}
+
+/**
+ * The nearest point on a route a new spur may branch from.
+ *
+ * **Measured on the route's DRAWN curve, not on its control polyline**
+ * ({@link routeCurve}, the one owner — see its note above on why it now lives
+ * in this file). The control polyline is not where the ribbon is: the fillet
+ * pass rounds every corner and the Catmull-Rom sweeps through the result, so
+ * on a bend the two are metres apart. A junction chosen on the polyline can
+ * therefore sit in mid-lawn beside the path it claims to branch from — seed 5's
+ * `spur-stall.facePaint`, 3.10 m from the nearest paving, failing `no paved
+ * path stops anywhere but a destination` (issue #414).
+ */
 function nearestPointOnRoute(
   route: RouteDefinition,
   x: number,
@@ -4924,18 +5089,9 @@ function nearestPointOnRoute(
 ): readonly [number, number] | null {
   let best: readonly [number, number] | null = null;
   let bestDistance = Infinity;
-  const points = route.points;
-  const count = route.closed ? points.length : points.length - 1;
-  for (let i = 0; i < count; i += 1) {
-    const [ax, az] = points[i] as readonly [number, number];
-    const [bx, bz] = points[(i + 1) % points.length] as readonly [number, number];
-    const dx = bx - ax;
-    const dz = bz - az;
-    const lengthSq = dx * dx + dz * dz;
-    const t =
-      lengthSq > 0 ? Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / lengthSq)) : 0;
-    const px = ax + dx * t;
-    const pz = az + dz * t;
+  for (const sample of drawnSamplesOf(route)) {
+    const px = sample[0];
+    const pz = sample[1];
     // Never branch from inside a plot's blocker circle: every spur's last
     // couple of metres run into a plot mouth, and a junction there routes
     // the new spur straight through the booth it belongs to.
