@@ -294,3 +294,56 @@ correct behaviour; a watching adult would not ask why she went that way.
 
 This is a genuine contradiction inside the check, not a park defect and not a
 feature defect. It needs Jim's call, not a patch from here.
+
+## STOP — 22 of the 100 probes never reach their goal, and are counted anyway
+
+Found while building the servability exclusion. **This is bigger than the
+ticket and it invalidates the 81.4% headline I reported earlier.**
+
+`trace()` records `reachedGoal` on every probe run, but that field is **only
+ever asserted on the reachability lattice** (line ~645). For the 100
+junction-to-junction probes it is recorded and **never read**. So a route that
+gave up partway is measured and averaged exactly like one that arrived.
+
+Measured on the rebased branch:
+
+- **22 of 100 probes never reached the goal.** Both routers fail on all 22 —
+  the unweighted one too, so this is not caused by this feature.
+- **0 of them are at the `MAX_ROUTE_WAYPOINTS` (128) cap** — waypoint counts
+  are 1 to 13. They genuinely gave up; this is not truncation.
+- **Six are 1-waypoint stubs of ~3 m counted as 100% paved**, e.g.
+  `plaza → stall.facePaint`: separation 39.8 m, route **3.2 m**, scored
+  **100%**. A failure to route scores better than most real routes.
+
+**Every one of the 22 has `plaza` or `station-1` as an endpoint, and every
+probe involving those two nodes is among them** — 12 with `plaza`, 10 with
+`station-1`, 22 exactly. Those two junctions are unroutable from anywhere.
+They pass `isOnPath`, so they are on the paving; the router cannot work
+from them. That is a park or lattice defect, not a paving-preference one.
+
+### What it does to the numbers
+
+| | mean paved |
+|---|---|
+| over all 100 probes (what the check reports today) | **81.4%** |
+| over the 78 that actually arrived | **79.5%** |
+
+The floor is 75%, so **the mean assertion still passes honestly at 79.5%** —
+the feature is not in question. But 81.4% is inflated by counting 22 failures,
+six of them as perfect scores, and that is the exact disease CLAUDE.md names:
+*"an assertion reporting success about something it is not describing."*
+
+### Why this blocks the servability work
+
+The exclusion predicate compares the shortest all-paved walk against
+`OFF_PATH_COST_MULTIPLIER × the unweighted route length`. For a stub that
+length is ~3 m, so the budget is ~5 m and the pair is excluded as "not
+servable" — for entirely the wrong reason. The predicate is contaminated by
+the same defect. Implemented as-is it reports **85 of 100 servable** and the
+worst route becomes `exit-railRace → stall.facePaint` at 43.2%, still under
+the 45% floor — but I do not trust that 85, because 22 of its inputs are
+garbage.
+
+**Not proceeding to the red-at-cap-2.0 proof until this is settled**, because
+that proof would be run against a probe set a fifth of which does not route.
+The servability code is committed but its verdict should not be relied on yet.

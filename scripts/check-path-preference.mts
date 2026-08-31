@@ -162,6 +162,145 @@ if (probes.length < 8) {
   process.exit(1);
 }
 
+// ------------------------------- can the paving actually serve a pair at all?
+//
+// Some junction pairs have no paved route the router could take *without*
+// taking a detour this feature is designed to refuse. The worst-route floor
+// below must not gate on those, because satisfying it and satisfying
+// `OFF_PATH_COST_MULTIPLIER` are mutually exclusive there — see the header.
+//
+// So: the shortest route that stays on paving the whole way, measured on a
+// lattice whose cells are paved according to `isOnPath` — the same function
+// every other "on the paving" question in this file is asked of, so this
+// cannot invent a second idea of where the paths are.
+
+/** Cell size of the paved-only lattice. `NavGrid`'s own `CELL`. */
+const PAVED_CELL = 0.5;
+const PAVED_REACH = GARDEN_PLAY_RADIUS + 2;
+const pavedSide = Math.ceil((PAVED_REACH * 2) / PAVED_CELL);
+const pavedOrigin = -PAVED_REACH + PAVED_CELL / 2;
+const pavedCells = new Uint8Array(pavedSide * pavedSide);
+let pavedCellCount = 0;
+for (let cz = 0; cz < pavedSide; cz += 1) {
+  for (let cx = 0; cx < pavedSide; cx += 1) {
+    if (isOnPath(pavedOrigin + cx * PAVED_CELL, pavedOrigin + cz * PAVED_CELL)) {
+      pavedCells[cz * pavedSide + cx] = 1;
+      pavedCellCount += 1;
+    }
+  }
+}
+if (pavedCellCount < 100) {
+  console.error(
+    `check:path-preference — the paved-only lattice found just ${pavedCellCount} ` +
+      'paved cells. `isOnPath` has stopped agreeing with the drawn network; ' +
+      'refusing to measure servability against nothing.',
+  );
+  process.exit(1);
+}
+
+/** The paved cell nearest a world point, or -1 if none is within 3 m. */
+function pavedCellAt(x: number, z: number): number {
+  const cx = Math.round((x - pavedOrigin) / PAVED_CELL);
+  const cz = Math.round((z - pavedOrigin) / PAVED_CELL);
+  const reach = Math.ceil(3 / PAVED_CELL);
+  let best = -1;
+  let bestD = Infinity;
+  for (let dz = -reach; dz <= reach; dz += 1) {
+    for (let dx = -reach; dx <= reach; dx += 1) {
+      const nx = cx + dx;
+      const nz = cz + dz;
+      if (nx < 0 || nz < 0 || nx >= pavedSide || nz >= pavedSide) continue;
+      const c = nz * pavedSide + nx;
+      if (!pavedCells[c]) continue;
+      const d = dx * dx + dz * dz;
+      if (d < bestD) {
+        bestD = d;
+        best = c;
+      }
+    }
+  }
+  return best;
+}
+
+/** Dijkstra over paved cells only, 8-connected. One field per source, cached. */
+function pavedOnlyField(source: number): Float64Array {
+  const dist = new Float64Array(pavedSide * pavedSide).fill(Infinity);
+  const heapCell: number[] = [source];
+  const heapDist: number[] = [0];
+  dist[source] = 0;
+  const swap = (i: number, j: number): void => {
+    [heapCell[i], heapCell[j]] = [heapCell[j]!, heapCell[i]!];
+    [heapDist[i], heapDist[j]] = [heapDist[j]!, heapDist[i]!];
+  };
+  const up = (i: number): void => {
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (heapDist[p]! <= heapDist[i]!) break;
+      swap(i, p);
+      i = p;
+    }
+  };
+  const down = (i: number): void => {
+    for (;;) {
+      const l = i * 2 + 1;
+      const r = l + 1;
+      let s = i;
+      if (l < heapDist.length && heapDist[l]! < heapDist[s]!) s = l;
+      if (r < heapDist.length && heapDist[r]! < heapDist[s]!) s = r;
+      if (s === i) break;
+      swap(i, s);
+      i = s;
+    }
+  };
+  while (heapDist.length > 0) {
+    const c = heapCell[0]!;
+    const d = heapDist[0]!;
+    const lastCell = heapCell.pop()!;
+    const lastDist = heapDist.pop()!;
+    if (heapDist.length > 0) {
+      heapCell[0] = lastCell;
+      heapDist[0] = lastDist;
+      down(0);
+    }
+    if (d > dist[c]!) continue;
+    const cx = c % pavedSide;
+    const cz = (c / pavedSide) | 0;
+    for (let dz = -1; dz <= 1; dz += 1) {
+      for (let dx = -1; dx <= 1; dx += 1) {
+        if (dx === 0 && dz === 0) continue;
+        const nx = cx + dx;
+        const nz = cz + dz;
+        if (nx < 0 || nz < 0 || nx >= pavedSide || nz >= pavedSide) continue;
+        const n = nz * pavedSide + nx;
+        if (!pavedCells[n]) continue;
+        const step = (dx !== 0 && dz !== 0 ? Math.SQRT2 : 1) * PAVED_CELL;
+        const nd = d + step;
+        if (nd < dist[n]!) {
+          dist[n] = nd;
+          heapCell.push(n);
+          heapDist.push(nd);
+          up(heapDist.length - 1);
+        }
+      }
+    }
+  }
+  return dist;
+}
+
+const pavedFields = new Map<number, Float64Array>();
+/** Length of the shortest all-paved walk between two points, or Infinity. */
+function pavedOnlyDistance(ax: number, az: number, bx: number, bz: number): number {
+  const a = pavedCellAt(ax, az);
+  const b = pavedCellAt(bx, bz);
+  if (a < 0 || b < 0) return Infinity;
+  let field = pavedFields.get(a);
+  if (field === undefined) {
+    field = pavedOnlyField(a);
+    pavedFields.set(a, field);
+  }
+  return field[b] ?? Infinity;
+}
+
 // ------------------------------------------------------------- measurement
 
 const out = new Float32Array(MAX_ROUTE_WAYPOINTS * 2);
@@ -392,11 +531,54 @@ check(
     `unweighted, the same routes manage ${(mean(unweightedPaved) * 100).toFixed(1)}%)`,
 );
 
-/** Every probe individually, so one heroic route cannot carry a bad mean. */
+/**
+ * Every probe individually, so one heroic route cannot carry a bad mean —
+ * **over the pairs the paving is able to serve**. See "The pairs the paving
+ * cannot serve" in this file's header for why that qualifier is a probe
+ * re-derivation and not a lowered bar: the floor below is untouched at 45%,
+ * and the mean assertion above still runs over every probe.
+ *
+ * A pair is servable when an all-paved walk exists that costs no more than
+ * {@link OFF_PATH_COST_MULTIPLIER} times the unweighted route — i.e. when the
+ * router could have taken the paving without breaking the very bound the
+ * `no comic detour` assertion enforces. The comparison is against the
+ * unweighted route rather than the straight line because that is the walk the
+ * router actually had the option of, obstacles included, and it is the
+ * conservative choice: it excludes fewer pairs than a straight line would.
+ */
+const servable = probes.map((probe, i) => {
+  const paved = pavedOnlyDistance(probe.ax, probe.az, probe.bx, probe.bz);
+  const budget = OFF_PATH_COST_MULTIPLIER * unweightedRuns[i]!.length;
+  return { paved, budget, ok: paved <= budget };
+});
+const servableCount = servable.filter((s) => s.ok).length;
+
+for (let i = 0; i < probes.length; i += 1) {
+  const s = servable[i]!;
+  if (s.ok) continue;
+  table.push(
+    `  not servable by paving: ${probes[i]!.label} — the shortest all-paved walk is ` +
+      `${Number.isFinite(s.paved) ? `${s.paved.toFixed(1)} m` : 'nonexistent'} against a ` +
+      `${s.budget.toFixed(1)} m budget (${OFF_PATH_COST_MULTIPLIER}x the ` +
+      `${(s.budget / OFF_PATH_COST_MULTIPLIER).toFixed(1)} m unweighted route)`,
+  );
+}
+
+if (servableCount < 8) {
+  console.error(
+    `check:path-preference — only ${servableCount} of ${probes.length} probes have a ` +
+      'paved route inside the multiplier, which is too few to assert a worst case ' +
+      'over. Either the paving or the multiplier has moved a long way; re-derive ' +
+      'the probes rather than lowering the bar.',
+  );
+  process.exit(1);
+}
+
 const WORST_PAVED_FLOOR = 0.45;
 let worst = 1;
 let worstLabel = '';
 for (let i = 0; i < probes.length; i += 1) {
+  if (!servable[i]!.ok) continue;
   if (weightedPaved[i]! < worst) {
     worst = weightedPaved[i]!;
     worstLabel = probes[i]!.label;
@@ -405,7 +587,8 @@ for (let i = 0; i < probes.length; i += 1) {
 check(
   worst >= WORST_PAVED_FLOOR,
   `even the worst route uses the paving: ${(worst * 100).toFixed(1)}% on ${worstLabel} ` +
-    `(floor ${(WORST_PAVED_FLOOR * 100).toFixed(0)}%)`,
+    `(floor ${(WORST_PAVED_FLOOR * 100).toFixed(0)}%; over the ${servableCount} of ` +
+    `${probes.length} probes the paving can serve within ${OFF_PATH_COST_MULTIPLIER}x)`,
 );
 
 /**
