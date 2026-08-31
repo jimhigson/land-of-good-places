@@ -1900,9 +1900,12 @@ const RAMP_SCREEN_MARGIN = 1.5;
  *
  * **Only `CROSSING_SITES` carry this screen, not `LEVEL_CROSSING_SITES`**: a
  * level crossing stays flat, so there is no ramp to keep off and no masonry
- * to walk into. That is only true for as long as a bridge is never built on a
- * level site — which is exactly what issue #414's second half is about, so
- * this comment and that fix have to move together.
+ * to walk into. That holds because `bridgeFootprint.ts`'s
+ * `ONLY_PROVEN_BRIDGES` refuses to build a bridge on a level site at all —
+ * the two are one rule seen from its two ends, and **neither may be relaxed
+ * without the other**. Before that refusal existed, four of the five swept
+ * seeds built a bridge on a level site, and this screen had nothing to say
+ * about the ground it stood on.
  */
 function pointStandsOnABridgeRamp(x: number, z: number, margin = RAMP_SCREEN_MARGIN): boolean {
   for (const site of CROSSING_SITES) {

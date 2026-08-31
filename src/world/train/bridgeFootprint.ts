@@ -711,10 +711,53 @@ interface DeckPlan {
 }
 
 /**
- * Node-only reversal of the proven-bridge gate
- * (`LGP_ALLOW_UNPROVEN_BRIDGES=1`), so the behaviour the gate exists to stop
- * can be restored on demand and an invariant proved red against it. Absent
- * from the browser bundle; off unless the variable is set.
+ * **A bridge is only ever built where `crossingPlanSolve.ts` proved one fits**
+ * (issue #414). `LGP_ALLOW_UNPROVEN_BRIDGES=1` restores the old, opportunistic
+ * behaviour — kept as a one-flag reversal, not as a supported mode.
+ *
+ * ## Why
+ *
+ * The whole point of planning crossing sites before drawing paths is that
+ * *"the drawn network only ever meets the railway where a bridge belongs"*.
+ * That premise used to be silently untrue on four of the five swept seeds:
+ * the planner proved no bridge at a site, offered it as a level crossing,
+ * `paths.ts` laid the network out for flat ground — and this pass then built
+ * a bridge there anyway, against the finished park, using levers the planner
+ * has not got (lateral shift, a narrower deck, felling a tree). Nothing
+ * re-planned the paths afterwards, so a connector drawn for level ground
+ * ended up climbing a ramp it never knew about, and Jim reported the same
+ * bridge three times.
+ *
+ * ## The measurement that settled it
+ *
+ * Measured (`scripts/measure-prover-vs-builder.mts`), the planner and this
+ * pass do not disagree by a little: at every such site the planner finds the
+ * deck blocked outright, or a ramp reach of **0.0–5.4 m against a 12.1 m
+ * floor**. So "the planner is too strict" is not the explanation, and
+ * relaxing it was never the fix.
+ *
+ * Refusing costs four bridges across the sweep seeds and **nothing on the
+ * canonical one**, which keeps all three of its (proven) bridges. What
+ * replaces them is not a hole: all eleven crossings that lose a bridge are
+ * walkable straight through, asked of the real `NavGrid`
+ * (`scripts/measure-level-crossing-walkability.mts`). And the stranding runs
+ * the other way from the obvious guess — seeds 5 and 18 pass `check:park`
+ * outright for the first time (39 → 0 and 6 → 0 stranded waypoints), because
+ * an opportunistic bridge is exactly what was stranding them.
+ *
+ * ## Why refusing, rather than re-planning the paths
+ *
+ * The other way round would work too: build the bridge, then re-plan the
+ * network around it. It is much the bigger change, and it buys a bridge in
+ * exactly the places the planner has already said a walkable ramp does not
+ * fit — so the deck would still be reached by a ramp shorter than
+ * `WALKABLE_FLOOR`, which is the thing the floor exists to prevent. Refusing
+ * keeps one rule ("a bridge stands only where one provably fits") instead of
+ * two mechanisms that have to agree.
+ *
+ * Node-only reversal, so the behaviour the gate exists to stop can be restored
+ * on demand and an invariant proved red against it. Absent from the browser
+ * bundle; off unless the variable is set.
  */
 function allowUnprovenBridges(): boolean {
   return Boolean(
