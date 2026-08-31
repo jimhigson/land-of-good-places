@@ -783,3 +783,15 @@ is worth knowing before anyone reads the green `check` as cover.
    only fix that gets a child there is letting a foreign leg cross *on the
    deck*, which is Jim's own "path finding needs to include bridges from the
    start" and is its own piece of work.
+
+## RAMP_CUT_PENALTY_PER_METRE REVERTED — Overseer's ruling, and my own numbers agreed
+
+Removed. It recovered one waypoint (8 -> 7) and cost seed 5's `no two close
+destinations are left with a wildly disproportionate paved detour`, because at
+200/m the router buys a 228.8 m detour to walk round a parapet. Seed 5 is back
+to **8 stranded** and `test:procgen` back to the **6 inherited** failures.
+
+**Both dead ends now live in `pointStandsOnABridgeRamp`'s own doc comment**, on
+the function that owns the ramp rectangle and lists its three legitimate
+askers — so the next person to think "why isn't this screen asked everywhere?"
+reads the answer at the point of temptation rather than in a handoff.

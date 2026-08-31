@@ -1874,36 +1874,6 @@ function segmentCutsABridgeRamp(ax: number, az: number, bx: number, bz: number):
 const RAMP_SCREEN_MARGIN = 1.5;
 
 /**
- * What one metre of ribbon drawn across a bridge's ramp costs
- * {@link fallbackSpurRoute}'s candidate scoring.
- *
- * **Large on purpose, and not a tuning dial.** Every other term in that score
- * prices a *shape* defect — a long walk, a rail-hugging stretch, an off-axis
- * run — things that trade off against each other honestly. A ramp cut is not
- * in that family: the ribbon is severed by a parapet wall, so the paving past
- * the cut is unreachable and every waypoint seeded on it is stranded. At 200 a
- * single metre of it outweighs the whole rest of the scale, which is the
- * intent: any candidate that does not cut a ramp beats any that does, whatever
- * its length.
- *
- * ## Why this is a price and not a refusal, measured
- *
- * The obvious symmetric fix — give `computeStreetStubs`' `legClear` the same
- * `segmentCutsABridgeRamp` clause `edgeOk` and `linkClear` carry — was built
- * and **made seed 5 far worse: `poi.stranded` 8 -> 50**, and 8 -> 82 with this
- * price as well. Refusing a stub leg is not free the way refusing a lattice
- * edge is: a destination whose every candidate stub is refused gets *no* stub,
- * `streetRoute` returns null, and the whole spur drops to this fallback router
- * — so screening there pushed more routes onto exactly the path that needed
- * fixing, and severed the gate approach along the way. Reverted; the numbers
- * are in `HANDOFF-paths-before-bridges.md` so nobody rebuilds it.
- *
- * If every candidate here carries the penalty, that is a finding to report,
- * not a number to lower.
- */
-const RAMP_CUT_PENALTY_PER_METRE = 200;
-
-/**
  * **The ground a bridge will really stand on — deck, both ramps and the
  * parapets that flank them — known before a single path is drawn.**
  *
@@ -1945,6 +1915,39 @@ const RAMP_CUT_PENALTY_PER_METRE = 200;
  * without the other**. Before that refusal existed, four of the five swept
  * seeds built a bridge on a level site, and this screen had nothing to say
  * about the ground it stood on.
+ *
+ * ## Two measured dead ends — do not rebuild either (#414, 31 Aug 2026)
+ *
+ * `edgeOk`, `linkClear` and `nearestPointOnRoute` are the *only* askers, and
+ * that is deliberate. Extending the screen to the two routers that are not on
+ * that list looks obviously right and is not; both were built and measured on
+ * seed 5, whose `poi.stranded` baseline was **8**:
+ *
+ * 1. **Screening `computeStreetStubs`' `legClear`** — the exact clause
+ *    `edgeOk` carries, added to the stub search: **8 -> 50 stranded.**
+ *    A refused lattice edge leaves the lattice with other edges; a
+ *    destination whose every candidate stub leg is refused gets *no* stub, so
+ *    `streetStubs` comes back empty, `streetRoute` returns null, and the whole
+ *    spur drops through to `fallbackSpurRoute`. Screening there pushes *more*
+ *    routes onto the router that was drawing ribbons across ramps, and severs
+ *    the gate approach as well.
+ * 2. **Pricing ramp metres in `fallbackSpurRoute`'s candidate score** (200 per
+ *    metre): recovered **one** waypoint, 8 -> 7, and **cost an invariant** —
+ *    seed 5's `no two close destinations are left with a wildly
+ *    disproportionate paved detour`, because at that price the router will buy
+ *    a 228.8 m detour to walk round a parapet. One waypoint for one invariant
+ *    is not a trade worth making, so it was reverted too.
+ *
+ * The two together were worst of all: **82 stranded.**
+ *
+ * **Neither dead end means the remaining cuts are acceptable** — it means they
+ * cannot be fixed from inside the path routers. On seed 5 the dodgems at
+ * (38.4, 36.3) has *no* ramp-free route to reach: every lattice node is
+ * refused (the nearest misses `STUB_TAIL_LIMIT` by 1.1 m) and all four
+ * fallback candidates cross proven site 12's ramp, so a screen has nothing to
+ * pick and a price can only choose the least-bad. The real fix is letting a
+ * foreign leg cross **on the deck** — Jim's *"path finding needs to include
+ * bridges from the start"* — which is its own ticket.
  */
 export function pointStandsOnABridgeRamp(x: number, z: number, margin = RAMP_SCREEN_MARGIN): boolean {
   for (const site of CROSSING_SITES) {
@@ -5386,46 +5389,12 @@ function fallbackSpurRoute(
         }
       }
     }
-    // **Metres drawn across a bridge's ramp** — this router's own form of the
-    // clause `edgeOk` and `linkClear` carry (issue #414). The lattice refuses
-    // ramp ground outright; this router prices it instead, because it is the
-    // last resort for destinations the lattice could not serve at all and a
-    // stall with no path is worse than one with a long path. See
-    // {@link RAMP_CUT_PENALTY_PER_METRE} for why refusing was tried, measured
-    // and rejected.
-    //
-    // Measured on seed 5: `spur-dodgems` ran (5.9, 45.9) -> (38.4, 36.3), 30%
-    // of it across proven site 12's ramp, and the seven waypoints seeded along
-    // the far half were stranded behind the parapet.
-    let rampMetres = 0;
-    for (let k = 1; k < points.length; k += 1) {
-      const p = points[k - 1] as readonly [number, number];
-      const q = points[k] as readonly [number, number];
-      const hop = Math.hypot(q[0] - p[0], q[1] - p[1]);
-      // Sample each sub-segment's MIDPOINT, not its endpoints: `steps + 1`
-      // endpoints each credited `hop / steps` over-counts every segment by one
-      // step, and double-counts every junction (one segment's end is the
-      // next's start). `steps` midpoints give metres that actually sum to the
-      // length of ribbon standing on ramp ground.
-      const steps = Math.max(1, Math.ceil(hop / 1.5));
-      for (let t = 0; t < steps; t += 1) {
-        const mid = (t + 0.5) / steps;
-        const x = p[0] + (q[0] - p[0]) * mid;
-        const z = p[1] + (q[1] - p[1]) * mid;
-        if (pointStandsOnABridgeRamp(x, z)) rampMetres += hop / steps;
-      }
-    }
-    if (DEBUG_STREETS) {
-      // eslint-disable-next-line no-console
-      console.log(
-        `[ramp] candidate for ${target[0].toFixed(1)},${target[1].toFixed(1)}: ` +
-          `len ${polylineLength(points).toFixed(1)} rampMetres ${rampMetres.toFixed(1)}`,
-      );
-    }
+    // **There is deliberately no ramp term here.** Pricing metres-across-a-ramp
+    // was built and measured and is reverted — see
+    // {@link pointStandsOnABridgeRamp}'s "Two measured dead ends".
     const score =
       polylineLength(points) +
       railHug +
-      rampMetres * RAMP_CUT_PENALTY_PER_METRE +
       (carriesAnOffLatticeStreetRun(points) ? 50 : 0) +
       (worst > MAX_OFF_AXIS_RUN ? 100 + (worst - MAX_OFF_AXIS_RUN) * 2 : 0);
     if (score < bestScore) {
