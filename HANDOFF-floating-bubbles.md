@@ -105,3 +105,25 @@ pass; "Checks" still running.
 
 Dev server pid 36545 on port 5418 killed by PID; `lsof -nP -i:5418 | grep
 LISTEN` returns nothing.
+
+## Review round 1 (documentation only) — done, `b79a6e45`
+
+Reviewer approved the diagnosis, fix and check, and re-proved every claim
+independently (including that #280 survives: `clampToFrustum` still fires
+12,895 times and still displaces 11,030, max shift 3.618 m). Two doc defects:
+
+1. `screenOffset` and `isOnScreen` had been inserted *between*
+   `clampToFrustum`'s doc comment and `clampToFrustum` itself, so all three
+   blocks stacked above `screenOffset`. Each is now on its own method
+   (319 / 352 / 386), plus a line on `clampToFrustum` telling callers to bound
+   it with `isOnScreen`.
+2. The check header claimed `--mutate` fails assertions 1 and 2. It fails
+   **1 and 3** — assertion 2 is unreachable there because an off-screen speaker
+   is recorded against 1 and then `continue`s. Corrected, with the reason.
+
+Minors also taken: PR body now says step **17** of 49; `isOnScreen`'s doc
+records that it **fails open** on a camera never `update`d or `snapTo`'d
+(`screenRight`/`screenUp` are zero until the first `applyTransform`).
+
+Re-verified: `tsc` 0, `tsc -p tsconfig.test.json` 0, `check:speech-bubbles` 0
+at the same 363 sightings.
