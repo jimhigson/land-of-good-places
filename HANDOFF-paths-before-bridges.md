@@ -1024,3 +1024,56 @@ branch's own, which is exactly why `origin/main` is green and blind to it.
 That is #437's argument in one sentence: **reachability is not walkability, and
 a check that only asks "can this be reached at all" cannot see a wall across
 the way in.**
+
+---
+
+# CORRECTION — THE SEED 18 "REGRESSION" IS NOT A REGRESSION. IT IS `origin/main`'s.
+
+I reported `route.crossesRail: 4` on seed 18 as a regression caused by the gate
+fix, and the Overseer put that in PR #440's body on my word. **It is wrong, and
+the retraction is measured.**
+
+`origin/main` @ `347e9454`, its own worktree, its own real install:
+
+```
+LGP_SEED=18 pnpm run check:park  ->  route.crossesRail: 4
+```
+
+And the four complaint lines are **byte-identical** to this branch's
+(`diff` of the sorted complaints: no output). Nothing about it is mine.
+
+## How I got it wrong, because the method matters more than the result
+
+I isolated it by toggling **one** thing — margin back to 1.5, gate fix left in
+— saw the 4 persist, and concluded "the gate fix, not the margin". That is a
+one-sided test: it rules the margin out and says nothing whatever about the
+gate. The honest test is the one I ran afterwards, toggling the gate rule off:
+
+| margin | gateway rule | `route.crossesRail` |
+|---|---|---|
+| 0.5 | on | 4 |
+| 1.5 | on | 4 |
+| 0.5 | **off** | 4 |
+| 1.5 | **off** | 4 |
+| — | `origin/main` | **4** |
+
+**Every cell is 4.** Neither change touches it.
+
+My "seed 18 was exit 0 before the pair" came from a check:park sweep run at the
+`RAMP_CUT_PENALTY_PER_METRE` state — a tree that no longer existed by the time
+I compared against it. **I compared against a remembered state instead of a
+measured baseline**, which is the one thing this ticket's whole history says
+not to do, and it produced the tenth expired explanation on this chain — mine.
+
+**The lesson, and it is narrower than "instrument first" because I did
+instrument:** a toggle that changes one variable and leaves the other in place
+can only exonerate the variable it moved. It cannot convict the one it did not.
+And the baseline for "is this a regression" is always the tree, re-measured,
+never the number in my notes.
+
+## So the state of the branch is better than I reported
+
+There is **no open regression**. Seed 18's `route.crossesRail: 4` is a
+pre-existing `main` defect that this branch neither causes nor fixes, and it is
+not gated by CI (`check:park` runs the canonical seed). It deserves its own
+issue; it is not #414's and it should come out of #440's body.
