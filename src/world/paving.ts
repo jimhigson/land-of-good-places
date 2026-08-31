@@ -90,8 +90,12 @@
  */
 export const OFF_PATH_COST_MULTIPLIER = 1.6;
 
-/** Cost of a metre of paving, in the same units. Paving is the yardstick. */
-export const ON_PATH_COST_MULTIPLIER = 1;
+// There is deliberately no `ON_PATH_COST_MULTIPLIER` beside it. Paving is not
+// priced, it *is* the unit — one cost unit per cell walked — and that is load
+// bearing rather than tidy: `NavGrid`'s octile heuristic measures in cell units
+// at cost 1, so it only stays admissible (and A* only stays optimal) while
+// nothing is cheaper than paving. A constant here would invite someone to set
+// it to 0.8 and quietly break the search.
 
 /** A round patch of paving, in world metres. */
 export type PavedDiscSink = (x: number, z: number, radius: number) => void;
