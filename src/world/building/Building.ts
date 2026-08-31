@@ -548,10 +548,12 @@ export class Building implements GameSystem {
     });
     // The wild animals in the roof garden's long grass (#406). Built after
     // `dressCastle` so the burrows it asks for already exist, and parented to
-    // the roof's own floor group so the cutaway hides them with the storey —
-    // they are on deck 4 and must not be visible through the floors below.
-    this.wildPets = new WildPets(TOP_DECK, camera);
-    const roofFloor = this.shell.floorGroups[TOP_DECK];
+    // the roof's own floor group — which since #377/#380 is what puts them in
+    // the roof's *space*, 600 m along +X from the mall, rather than what hid
+    // them behind a cutaway. Their positions are floor-local and unchanged by
+    // that: the offset belongs to the group.
+    this.wildPets = new WildPets(CASTLE_ROOF.index, camera);
+    const roofFloor = this.shell.floorGroups[CASTLE_ROOF.index];
     if (roofFloor) roofFloor.add(this.wildPets.root);
 
     this.interiorRoot.add(this.grownUp.root);

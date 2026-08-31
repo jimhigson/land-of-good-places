@@ -487,8 +487,9 @@ export class WildPets {
     for (const burrow of this.burrows) {
       const distance = Math.hypot(one.x - burrow.x, one.z - burrow.z);
       // Anything it is practically standing on is "the one it came out of".
-      // Burrows are at least `BURROW_SPACING` apart, so this can only ever
-      // exclude the hole underfoot.
+      // Burrows are at least `BURROW_MIN_SPACING` (4 m) apart even where the
+      // meadow had to crowd them, so this can only ever exclude the hole
+      // underfoot and never the one it is being sent to.
       if (distance < 2) continue;
       if (distance < bestDistance) {
         bestDistance = distance;

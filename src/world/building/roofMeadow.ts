@@ -289,10 +289,39 @@ function findMeadow(deck: number): RoofMeadow {
  */
 const BURROW_COUNT = 5;
 
-/** How far apart two burrows must be. Far enough that a creature crossing
- *  between them is a *journey* a child can watch and cut off, rather than a
- *  hop. Also stops two holes reading as one wide patch of bare earth. */
+/**
+ * How far apart two burrows would *like* to be — far enough that a creature
+ * crossing between them is a *journey* a child can watch and cut off, rather
+ * than a hop, and far enough that two holes do not read as one wide patch of
+ * bare earth.
+ *
+ * **A preference, not a gate.** It was a gate, and the castle floor split
+ * (#377/#380) is what showed why that was wrong. The meadow's own placement
+ * absorbed the split exactly as it was designed to — it found new room and
+ * moved — but this number did not move with it, and six metres of compulsory
+ * spacing on the smaller plate silently returned **three** burrows where
+ * {@link BURROW_COUNT} asks for five. Nothing was red. A hole that is never dug
+ * looks precisely like a roof, and half the meadow had no burrow in it at all.
+ *
+ * That is the general trap in derived placement: deriving the *positions* is
+ * only half of it, because a hard threshold measured against the old floor is
+ * still a typed-in number, and it fails by producing *less* rather than by
+ * failing. So the count is now the requirement and the spacing is what gets
+ * relaxed to meet it, down to {@link BURROW_MIN_SPACING}.
+ */
 const BURROW_SPACING = 6;
+
+/**
+ * The spacing below which two burrows stop being two burrows.
+ *
+ * Two mounds {@link BURROW_RADIUS} across need to leave a child room to walk
+ * between them, and `WildPets.burrowAwayFrom` treats anything within 2 m of a
+ * creature as "the hole it came out of" — so holes closer together than that
+ * would make one unreachable as a destination. Four metres clears both with
+ * room over. If even this cannot seat {@link BURROW_COUNT}, fewer and
+ * better-spaced burrows is the right answer and the meadow simply has fewer.
+ */
+const BURROW_MIN_SPACING = 4;
 
 /** The mound's outer radius — what a creature aims at, and what the grass and
  *  the tap target are sized from. */
@@ -355,8 +384,8 @@ export function roofBurrows(deck: number): readonly Burrow[] {
    * westernmost patch and never reaches the others. Measured — the five landed
    * in x ∈ [-9.6, 1.2], on a plate 60 m across.
    *
-   * That matters more than tidiness. Deck 4 is the floor with no shops, no
-   * shafts and no hall, and #407's engineer still calls it *"a flat lilac
+   * That matters more than tidiness. The roof garden is the floor with no
+   * shops and no hall, and #403's engineer still calls it *"a flat lilac
    * plain"*; five holes huddled in one quarter leave three quarters of it
    * exactly as empty as before. Spreading them is most of what makes the deck
    * feel inhabited, and it is also what makes a creature's walk from one
@@ -375,24 +404,48 @@ export function roofBurrows(deck: number): readonly Burrow[] {
       first = cell;
     }
   }
-  if (first) chosen.push({ x: first.x, z: first.z });
 
-  while (chosen.length < BURROW_COUNT) {
-    let pick: { x: number; z: number } | null = null;
-    let bestDistance = -Infinity;
-    for (const cell of eligible) {
-      let nearest = Infinity;
-      for (const b of chosen) nearest = Math.min(nearest, Math.hypot(cell.x - b.x, cell.z - b.z));
-      if (nearest > bestDistance) {
-        bestDistance = nearest;
-        pick = cell;
+  const seatAt = (spacing: number): Burrow[] => {
+    if (!first) return [];
+    const seated: Burrow[] = [{ x: first.x, z: first.z }];
+    while (seated.length < BURROW_COUNT) {
+      let pick: { x: number; z: number } | null = null;
+      let bestDistance = -Infinity;
+      for (const cell of eligible) {
+        let nearest = Infinity;
+        for (const b of seated) nearest = Math.min(nearest, Math.hypot(cell.x - b.x, cell.z - b.z));
+        if (nearest > bestDistance) {
+          bestDistance = nearest;
+          pick = cell;
+        }
       }
+      // Nothing left that is far enough from what is already down.
+      if (!pick || bestDistance < spacing) break;
+      seated.push({ x: pick.x, z: pick.z });
     }
-    // Nothing left that is far enough from what is already down. Fewer, better
-    // spaced burrows beat two holes in the same patch of grass.
-    if (!pick || bestDistance < BURROW_SPACING) break;
-    chosen.push({ x: pick.x, z: pick.z });
+    return seated;
+  };
+
+  /**
+   * **Take the roomiest arrangement that seats them all**, relaxing the
+   * spacing a metre at a time rather than accepting a short count.
+   *
+   * The first pass is the one that used to be the whole function, so a roof
+   * with room for five well-spaced burrows gets exactly what it always got and
+   * this loop stops after one iteration. It is only a smaller or busier
+   * meadow that pays for the extra passes, and it pays a few thousand distance
+   * tests once at construction.
+   */
+  let seated = seatAt(BURROW_SPACING);
+  for (
+    let spacing = BURROW_SPACING - 1;
+    seated.length < BURROW_COUNT && spacing >= BURROW_MIN_SPACING;
+    spacing -= 1
+  ) {
+    const relaxed = seatAt(spacing);
+    if (relaxed.length > seated.length) seated = relaxed;
   }
+  chosen.push(...seated);
 
   burrowCache.set(deck, chosen);
   return chosen;
