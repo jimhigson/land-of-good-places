@@ -273,7 +273,15 @@ export class LiftRide implements LiftPanelSource {
         if (this.phaseT < COMING_SECONDS) return;
         this.deps.cancelWalk();
         player.beginRide();
-        this.beginStep(player, floorX(floor, LIFT_CAR_X), floorZ(floor, LIFT_DOOR_Z), Math.PI / 2);
+        // Boarding starts from wherever she actually stopped walking — she is
+        // standing in the lobby and the glide draws her in.
+        this.beginStep(
+          player,
+          floor,
+          { x: player.position.x, z: player.position.z },
+          { x: floorX(floor, LIFT_CAR_X), z: floorZ(floor, LIFT_DOOR_Z) },
+          Math.PI / 2,
+        );
         this.phase = 'aboard';
         this.phaseT = 0;
         return;
@@ -331,27 +339,66 @@ export class LiftRide implements LiftPanelSource {
     return true;
   }
 
+  /**
+   * Stepping out into the room, on the floor she pressed for.
+   *
+   * **Every point comes from `floor`, not from `player.position`** — and that
+   * is not a style choice, it is the whole correctness of the manoeuvre.
+   * {@link travelTo} runs behind a closed iris, so the teleport has *not
+   * happened yet* when this is called on the very next line: she is still
+   * standing in the alcove of the floor she left. Reading her position here
+   * made the glide interpolate from the old floor's alcove to the new one's —
+   * **three hundred metres across open nothing**, with her visibly sliding
+   * through the void between two castles for half a second.
+   *
+   * Every check was green: the arrival is correct, the space is correct, and
+   * the validator asserts where she *ends up*, not the path she takes to get
+   * there. It was found by riding the lift and reading her x mid-glide: 826.4,
+   * which is 73.6 m short of the great hall and 200 m past the mall.
+   * `HotelLift` never had the bug because its `beginAlight` always derived both
+   * ends from the room.
+   */
   private beginAlight(floor: CastleFloor): void {
     const player = this.deps.player();
     if (!player) return;
-    this.beginStep(player, floorX(floor, LIFT_STAND_X), floorZ(floor, LIFT_DOOR_Z), -Math.PI / 2);
+    this.beginStep(
+      player,
+      floor,
+      { x: floorX(floor, LIFT_CAR_X), z: floorZ(floor, LIFT_DOOR_Z) },
+      { x: floorX(floor, LIFT_STAND_X), z: floorZ(floor, LIFT_DOOR_Z) },
+      -Math.PI / 2,
+    );
     this.phase = 'alighting';
     this.phaseT = 0;
   }
 
-  /** Sets up one scripted step, from where she is to `(toX, toZ)`. */
-  private beginStep(player: Player, toX: number, toZ: number, facing: number): void {
-    const floor = this.deps.currentFloor();
-    this.stepFrom.x = player.position.x;
-    this.stepFrom.y = player.position.y;
-    this.stepFrom.z = player.position.z;
-    // The doorway itself, bent through at the height the step ends at.
-    this.stepVia.x = floor ? floorX(floor, LIFT_STAND_X + 1.4) : toX;
-    this.stepVia.y = player.position.y;
-    this.stepVia.z = floor ? floorZ(floor, LIFT_DOOR_Z) : toZ;
-    this.stepTo.x = toX;
-    this.stepTo.y = player.position.y;
-    this.stepTo.z = toZ;
+  /**
+   * Sets up one scripted step across `floor`'s own lift alcove.
+   *
+   * `floor` is passed rather than asked of `currentFloor()` for the same reason
+   * the ends are: mid-transition the player's position is not yet on the floor
+   * this step belongs to.
+   */
+  private beginStep(
+    player: Player,
+    floor: CastleFloor,
+    from: { x: number; z: number },
+    to: { x: number; z: number },
+    facing: number,
+  ): void {
+    // Every floor's walking surface is at the same height since the split, so
+    // one `y` serves all three and the step never rises or falls.
+    const y = player.position.y;
+    this.stepFrom.x = from.x;
+    this.stepFrom.y = y;
+    this.stepFrom.z = from.z;
+    // The doorway itself, bent through so the curve does not clip the jamb.
+    this.stepVia.x = floorX(floor, LIFT_STAND_X + 1.4);
+    this.stepVia.y = y;
+    this.stepVia.z = floorZ(floor, LIFT_DOOR_Z);
+    this.stepTo.x = to.x;
+    this.stepTo.y = y;
+    this.stepTo.z = to.z;
     this.stepFacing = facing;
     this.stepT = 0;
   }

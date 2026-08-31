@@ -26,6 +26,7 @@ import { castleSootTexture } from '../../core/textures';
 import { softMaterial } from './parts';
 import { BEAM_UNDERSIDE, SCONCE_HEADROOM, SCONCE_MOUNT_Y } from './castleFabric';
 import {
+  HALL_DECK,
   insideInterior,
   INTERIOR_DOOR_MAX_X,
   INTERIOR_DOOR_MIN_X,
@@ -283,10 +284,23 @@ function spread(min: number, max: number): number[] {
  * positioned. Same rule as {@link CASTLE_TORCH_CUP}: the thing that emits owns
  * where it is, and the shell agrees with it.
  *
- * Against the north wall, west of the middle — across the hall from the front
- * door, so it is what a child walks *towards*.
+ * Against the north wall, west of the middle.
+ *
+ * **On the great hall's floor, which is `HALL_DECK` and no longer 0** (#380).
+ * This was `deck: 0` and had to move with everything else that makes the hall a
+ * hall — `castleDecor.ts`'s hearthside surround, coat of arms and portcullis,
+ * and `castleFurniture.ts`'s throne and feast. It was found *after* those had
+ * moved, by looking at the built scene: `castle-hearth-logs-0` was standing at
+ * world x=600 — in the middle of the mall's market — while its own stone
+ * surround was 300 m away at x=900 in the hall. Every check was green, because
+ * a fire without a fireplace breaks no assertion.
+ *
+ * That is the exact failure `castleFurniture.ts`'s note was written to prevent
+ * ("so the two move together rather than one being found later on the wrong
+ * floor"), and it still caught only two of the three owners. **There are three
+ * things that make the hall a hall and they live in three files.**
  */
-export const CASTLE_HEARTH = { deck: 0, x: onPlate(-14), z: -WALL_FACE_Z + 0.55 } as const;
+export const CASTLE_HEARTH = { deck: HALL_DECK, x: onPlate(-14), z: -WALL_FACE_Z + 0.55 } as const;
 
 /** Where the braziers stand: the open middle of the plate, on the lower decks. */
 const BRAZIER_SPOTS: readonly { readonly x: number; readonly z: number }[] = [
