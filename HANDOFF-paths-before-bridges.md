@@ -648,3 +648,89 @@ uses.
 
 **8 -> 7 on seed 5.** Reported before trying anything further, per the standing
 instruction.
+
+## THE REMAINING 7 ON SEED 5, AND WHY THE PRICE CANNOT REACH THEM
+
+All seven are one cluster on `spur-dodgems`: (17.4, 42.2) (21.3, 41.1)
+(24.1, 39.9) (28.0, 38.7) (34.1, 35.4) (35.8, 36.6) (38.7, 38.7) — the paving
+past site 12's parapet, still cut at (10.6, 44.5) railD 10.1 and (14.3, 43.4)
+railD 13.7. The eighth, on `spur-waterFight`, is the one the price fixed.
+
+**The dodgems has no ramp-free route on this seed, and that is measured.**
+`LGP_DEBUG_STREETS=1` shows its target (38.4, 36.3) cannot reach the lattice at
+all — every candidate node is refused:
+
+```
+node 29.1,21.3: side 1 != -1        node 41.1,21.3: node invalid
+node 29.1,33.3: node invalid        node 41.1,45.3: node invalid
+node 29.1,45.3: tail 8.9 > 7.8      node 53.1,21.3: node invalid
+```
+
+so the spur drops to `fallbackSpurRoute` — and **all four of its candidates
+cross site 12's ramp**:
+
+```
+len 77.6  rampMetres 57.3
+len 92.0  rampMetres 53.1
+len 45.7  rampMetres 13.3   <- the winner
+len 91.7  rampMetres 56.3
+```
+
+The price can only pick the least-bad, and the least-bad still draws 13.3 m of
+ribbon across a parapet. This is the case `RAMP_CUT_PENALTY_PER_METRE`'s own
+doc says to report rather than lower.
+
+## `test:procgen` — MY CHANGE COSTS ONE INVARIANT. Attribution measured, not assumed.
+
+Three runs, three commits, same command:
+
+| tree | result |
+|---|---|
+| `origin/main` @ `298f39c0` (my rebase base) | **exit 0, 487 passed, 0 failed** |
+| this branch **before** my paths.ts change (`e93e2b46`) | exit 1, **6 failed**, 486 passed |
+| this branch **with** my change | exit 1, **7 failed**, 485 passed |
+
+**Six of the seven are inherited** from the branch's earlier #414 work and are
+not mine: seed 11 `no paved path stops anywhere but a destination`, seed 11
+`no drawn path ends in mid-air on a bridge`, seed 18 `every street sits on the
+shared 12 m lattice`, and seed 24's three (`nothing a bridge builds hangs into
+its own tunnel`, `every modelled coping stone sits on the wall it caps`,
+`railway crossings are planned — station-clear, and mostly real bridges`).
+
+**The seventh is mine**, and it is the honest cost of the price:
+
+```
+seed 5 > no two close destinations are left with a wildly disproportionate paved detour
+  'waterFight' and 'stall.waterFight' are 12.1 m apart in a straight line but
+  228.8 m apart by paving (18.92x, wasting 216.7 m)
+```
+
+At 200 m per ramp-metre the router will buy a 228 m detour to avoid a parapet.
+That is the trade stated plainly: **one waypoint recovered (8 -> 7 stranded) in
+exchange for one invariant**, and on those numbers it is not a good trade.
+
+**I have not tried a third variation.** Two are measured and reported: the stub
+screen (worse — 50) and the flat per-metre price (7 stranded, −1 invariant). A
+bounded or capped price is the obvious next thing and is deliberately left for
+the Overseer to rule on, per the standing instruction.
+
+## THIS IS A DESIGN QUESTION, AND HERE IS THE MEASUREMENT
+
+Seed 5 puts the **dodgems at (38.4, 36.3)**, on ground whose every approach
+crosses proven bridge site 12's ramp, and whose nearest lattice node misses the
+stub limit by **1.1 m** (tail 8.9 against `STUB_TAIL_LIMIT` 7.8). The path
+router cannot fix this by choosing better, because there is nothing better to
+choose. The three places it *can* be fixed all belong to someone else:
+
+1. **Plot placement** — do not put an attraction on ground a bridge's ramp
+   seals off.
+2. **The crossing planner** — do not prove a bridge at a site whose ramps
+   sever an attraction's only approach.
+3. **Route over the deck** — let a foreign leg join the crossing leg and cross
+   *on the bridge*, which is the one legitimate way across that ground.
+   `nearestPointOnRoute` currently refuses every branch point on ramp ground
+   (paths.ts:5169), for the good reason that a junction in mid-air is worse.
+
+(3) is the one that matches Jim's own framing — *"path finding needs to include
+bridges from the start"* — and it is the only one that gets a child to the
+dodgems on this seed. It is also a real piece of work, not a clause.
