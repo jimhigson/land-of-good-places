@@ -4,7 +4,7 @@ import {
   SITE_HALF_WIDTH,
   STATION_GAP,
 } from './clearance';
-import { DECK_HALF_LENGTH } from './bridgeFootprint';
+import { DECK_HALF_LENGTH } from './clearance';
 import { SITE_RAMP_IDEAL } from './bridgeFit';
 
 /**

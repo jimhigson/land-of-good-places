@@ -1,10 +1,9 @@
 import type { LevelCrossing } from './crossings';
 import { frameFor, type SpineFrame } from './bridgeSpine';
-import { BRIDGE_RISE, FENCE_OFFSET } from './clearance';
+import { BRIDGE_RISE, DECK_HALF_LENGTH, FENCE_OFFSET } from './clearance';
 import { ENTRANCE_RAMP } from '../building/layout';
 import { GARDEN_PLAY_BOUNDARY } from '../boundary';
 import { clearOfPlots } from '../parkLayout';
-import { distanceToRailCorridor } from './plan';
 import type { CollisionWorld } from '../Collision';
 import { PATH_KERB_OVERHANG, PLAYER_RADIUS, SPRINT_PEAK_GRADE_BUDGET } from '../../core/constants';
 
@@ -61,16 +60,10 @@ import { PATH_KERB_OVERHANG, PLAYER_RADIUS, SPRINT_PEAK_GRADE_BUDGET } from '../
  * not happen.
  */
 
-/**
- * Half-length of the deck along the crossing direction — has to clear both
- * fence lines (each {@link FENCE_OFFSET} out from the rail centre) with a
- * little margin so the deck's own edge does not sit flush on a fence post.
- *
- * **This is the part of a bridge that cannot shrink.** The tunnel has to
- * swallow the whole fenced corridor, so any future shortening of a bridge
- * takes every metre out of the ramps.
- */
-export const DECK_HALF_LENGTH = FENCE_OFFSET + 1.2;
+/** Re-exported from its leaf owner — see `clearance.ts`'s own note for why
+ * it had to move there (an import cycle this module's `plan.ts` import
+ * closed). Every reader of `bridgeFootprint.DECK_HALF_LENGTH` is unchanged. */
+export { DECK_HALF_LENGTH } from './clearance';
 
 /**
  * **How far a bridge's parapet really reaches along its own frame**, on the
@@ -461,6 +454,22 @@ export const MIN_BRIDGE_HALF_LENGTH = DECK_HALF_LENGTH + MIN_RAMP_RUN;
  */
 export interface RealWorldQuery {
   readonly collision: CollisionWorld;
+  /**
+   * How far (x, z) stands from the solved rail corridor — `plan.ts`'s
+   * `distanceToRailCorridor`, **handed in rather than imported**.
+   *
+   * This module used to import it directly, and that one import was the
+   * closing edge of a cycle: `plan -> route -> crossingKeepOut/bridgeFit ->
+   * bridgeFootprint -> plan`. Which module an entry point happened to reach
+   * first then decided whether it blew up, so the browser and most checks were
+   * fine and `check:park-boot` died with `ReferenceError: Cannot access
+   * 'TrainRoute' before initialization`. Passing it is also the more honest
+   * shape: everything else this search knows about the built world arrives
+   * through this object, and the rail corridor is part of the built world.
+   *
+   * Only `planReal` needs it; the conservative pass has no railway to ask.
+   */
+  readonly railCorridorDistance: (x: number, z: number) => number;
   readonly clearTreesNear?: (x: number, z: number, radius: number) => number;
   /**
    * Non-mutating twin of {@link clearTreesNear} — "would felling here find
@@ -716,7 +725,7 @@ function allowUnprovenBridges(): boolean {
 }
 
 function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): PlannedFootprint[] {
-  const { collision, clearTreesNear, hasFellableTreeNear } = real;
+  const { collision, clearTreesNear, hasFellableTreeNear, railCorridorDistance } = real;
   // `isClearCircle` only ever asks the registered circles and walls — the
   // park's own soft edge (`CollisionWorld.playBounds`, what `resolve()`
   // pushes a walker back across) is a *separate* mechanism, asked nowhere
@@ -973,7 +982,7 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
             blocked = true;
             break;
           }
-          if (distanceToRailCorridor(x, z) < FENCE_OFFSET + RAMP_RAIL_MARGIN) {
+          if (railCorridorDistance(x, z) < FENCE_OFFSET + RAMP_RAIL_MARGIN) {
             debugBridge?.(
               `  ramp ${sign > 0 ? '+' : '-'} blocked at along=${along.toFixed(1)} t=${t.toFixed(2)} (${x.toFixed(1)},${z.toFixed(1)}): rail corridor`,
             );
@@ -1182,7 +1191,7 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
         // felled here is a tree the built park genuinely needed cleared.
         if (!commitFell(x, z)) return false;
         if (nearOtherGuardRail(otherDecks, x, z, GUARD_RAIL_MARGIN)) return false;
-        if (distanceToRailCorridor(x, z) < FENCE_OFFSET + RAMP_RAIL_MARGIN) return false;
+        if (railCorridorDistance(x, z) < FENCE_OFFSET + RAMP_RAIL_MARGIN) return false;
       }
       return true;
     };

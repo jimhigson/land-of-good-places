@@ -8,7 +8,7 @@ import type { CollisionWorld } from '../Collision';
 import { PRIMARY_ACTION, type InteractZone, type ZoneAction } from '../interact';
 import type { MovingPlatform } from '../building/surfaces';
 import { TrainRoute } from './route';
-import { TRAIN_PLAN } from './plan';
+import { distanceToRailCorridor, TRAIN_PLAN } from './plan';
 import { buildTrack, type Track } from './track';
 import { Station } from './station';
 import { RideCamera } from '../../core/RideCamera';
@@ -259,6 +259,7 @@ export class ParkTrain implements GameSystem, TrainService {
     // `coaster/pylons.ts` already uses for its own placement search.
     const built = buildBridges(this.route, this.crossings, {
       collision,
+      railCorridorDistance: distanceToRailCorridor,
       ...(clearTreesNear ? { clearTreesNear } : {}),
       ...(hasFellableTreeNear ? { hasFellableTreeNear } : {}),
     });

@@ -190,6 +190,30 @@ export const BRIDGE_RISE = TRAIN_CLEARANCE_Y + BRIDGE_DECK_DEPTH;
 export const FENCE_OFFSET = 2.0;
 
 /**
+ * Half-length of a bridge deck along the crossing direction — has to clear
+ * both fence lines (each {@link FENCE_OFFSET} out from the rail centre) with
+ * a little margin so the deck's own edge does not sit flush on a fence post.
+ *
+ * **This is the part of a bridge that cannot shrink.** The tunnel has to
+ * swallow the whole fenced corridor, so any future shortening of a bridge
+ * takes every metre out of the ramps.
+ *
+ * It lives here, in the leaf, rather than in `bridgeFootprint.ts` which owns
+ * every other footprint number, **because of an import cycle it was the only
+ * cause of**: `crossingKeepOut.ts` needs this one constant, and taking it from
+ * `bridgeFootprint.ts` dragged in that module's `distanceToRailCorridor`
+ * import of `plan.ts`, closing the loop `plan -> route -> crossingKeepOut ->
+ * bridgeFootprint -> plan`. `check:park-boot` died on it with
+ * `ReferenceError: Cannot access 'TrainRoute' before initialization`,
+ * depending on which module the entry point happened to reach first — which is
+ * why the browser and most checks were unaffected and one check was not. Same
+ * disease, and the same fix, as {@link FENCE_OFFSET}'s own note directly
+ * above. `bridgeFootprint.ts` re-exports it, so every existing reader is
+ * unchanged and there is still exactly one definition.
+ */
+export const DECK_HALF_LENGTH = FENCE_OFFSET + 1.2;
+
+/**
  * How far below a bridge deck's own surface the fence's `topIsAbsolute` top
  * sits, where a run of fence posts falls directly under a deck — a decisive
  * margin, never a graze, and nowhere near a ground jump reaches (see
