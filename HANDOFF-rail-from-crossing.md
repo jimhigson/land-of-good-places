@@ -498,3 +498,85 @@ need.
 
 Not built — reported first, per the standing instruction not to try a third
 variation before reporting.
+
+---
+
+# NEXT ACTION, ACTIONABLE WITHOUT ME
+
+## Use `RouteBrief.satisfies` — the only hook that sees the finished loop
+
+**Where.** `src/world/rail/generate.ts:268` — `readonly satisfies?: (route:
+SolvedRailRoute) => boolean` on `RouteBriefBase`. Supplied from
+`briefForLength()` in `src/world/train/route.ts` (the object that already sets
+`seed`, `startPoses`, `budgets`).
+
+**Why it is the only mechanism that can work here.** Both remaining failures
+are properties of the *solved* loop, not of the pose:
+
+- the loop's shape near its own crossing (seed 2), and
+- whether station placement could clear the crossing (seed 15).
+
+Neither is knowable when the pose is chosen, because neither the loop nor the
+stations exist yet. `crossingPoses.ts` cannot be made smarter about them at any
+price. `satisfies` runs *after* a candidate route closes, which is exactly the
+moment both questions become answerable — and the search then simply moves to
+the next of ~1200 poses.
+
+**What the predicate should ask.** Whether the finished loop still admits a
+bridge at its own start pose — i.e. the same question
+`crossingPlanSolve.bridgeCandidateAt(0)` answers. Beware the import cycle:
+`crossingPlanSolve` imports `TRAIN_PLAN`, so `route.ts` cannot import it at
+module scope. The probe geometry is already cycle-free in `bridgeFit.ts`; what
+is *not* there is the rail-corridor and station-structure tests, which need the
+solved route — and inside `satisfies` you HAVE the solved route as the
+argument. So build those two tests against `route` locally rather than reaching
+for `crossingPlanSolve`.
+
+**The cost is already measurable.** `SolveReport.satisfyRejects` counts whole
+routes thrown away by the predicate, and `satisfied` records whether the
+returned route passed. `scripts/measure-train-solve-budget.mts` prints the
+report; add those two fields to it. `generate.ts:356` warns that a *large*
+`satisfyRejects` means the search is repeatedly solving routes it must discard
+and the influence wants strengthening rather than the backstop working harder —
+if that happens, `RouteInfluence` (`generate.ts:105`) is the paired lever.
+
+**Then re-run, in this order:** measurement 4 (must be 100%), then 1/3
+(solve rate and restarts — `satisfies` can only reduce the former), then 2 and
+5, then `test:procgen`'s eight.
+
+## THE TWO ROOT CAUSES ARE DIFFERENT PROBLEMS THAT SHARE ONE FIX
+
+1. **Seed 2 — the loop eats its own ramp room.** Deck clear, ramp reach 1.5 m
+   against a 12.1 m floor, because the loop curves back near its own crossing
+   and the rail-corridor test then refuses the ramp. Nothing about stations.
+2. **Seed 15 — station placement could not clear the crossing.** 4 of 15 deck
+   samples still station-blocked; the placer's ±60 m window had no candidate
+   that cleared it, and a 5000 penalty does not discriminate when every
+   candidate carries it.
+
+Do not fix them as one thing; verify each separately after `satisfies` lands.
+
+---
+
+# A CORRECTION ABOUT MY OWN DIAGNOSES — READ THIS FIRST
+
+I told the Overseer the rail-corridor test **could not** be the cause of seed
+2's failure. That was **true while the deck was blocked** (the corridor test
+only applies past the deck) and **stopped being true the moment the station fix
+cleared the deck**. The elimination was sound when made and stale a commit
+later — and the stale version is what I would have kept reasoning from.
+
+**A diagnosis in this area has a shelf life.** Four separate explanations have
+now expired on this ticket:
+
+- seed 5's phantom node: control-polyline-vs-swept-curve (wrong), then
+  `spur()`'s `paved: !already` (wrong), then — from instrumentation, in one
+  run — `commitStreetPlan` marking a search path rather than a drawn ribbon
+  (right);
+- seed 2's zero sites: `nearStationStructure` by elimination (right at the
+  time, superseded by the rail corridor once the deck cleared).
+
+**The ones that survived came from instrumentation; the ones that expired came
+from reasoning.** When something here fails, log what actually happened before
+theorising — and re-measure a cause after any fix that touches the same probe,
+because clearing one gate reveals the next one behind it.
