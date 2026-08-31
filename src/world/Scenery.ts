@@ -1489,18 +1489,88 @@ interface BorderAnchor {
   readonly outward: number;
 }
 
-/** Clear of a path's own `isPlantable` margin (3.2 m, `runIsClear`), with
- * enough left over that the wall still reads as hugging the kerb rather than
- * standing off in the middle of the lawn. */
-const PATH_BORDER_OFFSET_MIN = 3.6;
-const PATH_BORDER_OFFSET_MAX = 6.5;
+/**
+ * **Flush.** The gap a wall keeps from the paved surface itself.
+ *
+ * Not a tuned number: a wall's face touches the kerb exactly when its centre
+ * line stands its own half-thickness back from the paving, so the widest run
+ * the park builds ({@link WALL_HALF_WIDTH}`.stone`) *is* the clearance. The
+ * extra 4 cm is a rendering fact rather than a spacing one — the kerb and the
+ * wall's base are both drawn at ground level, and two coplanar faces z-fight.
+ *
+ * This is the number that makes "flush" possible at all. Before #417 the wall
+ * generator asked `isPlantable(x, z, 3.2)`, so the paving gap was the same
+ * 3.2 m it kept from a plot and no wall in any park could come nearer than
+ * that. See {@link isPlantable}'s own `pathClearance` parameter.
+ */
+const WALL_PAVING_CLEARANCE = WALL_HALF_WIDTH.stone + 0.04;
 
-/** Clear of a plot's own keepout (`insideAnyAnchor`: boundingRadius + 5.7 m),
- * with the same "hugs it, doesn't wander off" ceiling as the path case. */
-const PLOT_BORDER_OFFSET_MIN = 6.2;
-const PLOT_BORDER_OFFSET_MAX = 9.5;
+/**
+ * **Alongside.** How far out from the kerb a wall's anchor may be drawn,
+ * as a multiple of the half-width of the path it is bordering.
+ *
+ * Expressed against the path rather than as metres on purpose. Jim asked for
+ * walls "alongside the paths and flush with it at various places" — so the
+ * range has to start at zero (genuinely flush; see
+ * {@link WALL_PAVING_CLEARANCE}) and stop before the verge becomes a lawn. A
+ * strip of grass as wide as the path beside it still reads as that path's
+ * verge; twice the path's width reads as a field with a wall in it. The park's
+ * routes are 2.6-3.6 m wide, so this is 0-2.6 m of grass on the narrowest and
+ * 0-3.6 m on the widest, and a wall's offset varies with the path it follows
+ * instead of every wall in the park standing off by the same typed constant —
+ * which is exactly what the old fixed 3.6-6.5 m band did.
+ */
+const PATH_BORDER_OFFSET_PATH_WIDTHS = 2;
 
-const CARDINAL_BEARINGS = [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2] as const;
+/**
+ * **No wall stranded in open grass**: every run that stands must come at least
+ * this close to real paving somewhere along its length.
+ *
+ * The bound is the widest verge {@link PATH_BORDER_OFFSET_PATH_WIDTHS} can
+ * produce, plus one {@link PLAYER_RADIUS} of slack — and the slack is needed
+ * for a real reason, not for comfort. A candidate is positioned against a
+ * route's *control polygon* (`pathBorderSegments`), while the paving that gets
+ * drawn is the Catmull-Rom curve through those points, which bows away from
+ * the polygon between them. One player-radius is the smallest unit this game
+ * measures anything in that covers that bow.
+ *
+ * Checked on the runs that actually stand, **after** `clearOfAnchors` has
+ * trimmed them: trimming can cut away the very end that was hugging the path
+ * and leave the far half stranded, which is precisely the shape of the bug
+ * Jim reported. `wallsRunAlongsideAPath` (`test/procgen/invariants.ts`) then
+ * proves it again off the built park.
+ *
+ * Read off the network this park actually built rather than off the widest
+ * width `paths.ts` happens to declare today, so a new route type cannot widen
+ * the verge the placer allows while leaving this bound behind — the invariant
+ * derives its own copy the same way, from `ParkFacts.pathEdges`.
+ */
+function wallAlongsideMax(): number {
+  let widest = 0;
+  for (const seg of pathBorderSegments()) widest = Math.max(widest, seg.halfWidth);
+  return widest * PATH_BORDER_OFFSET_PATH_WIDTHS + PLAYER_RADIUS;
+}
+
+/**
+ * Does this run come near enough to real paving, anywhere along its length, to
+ * read as belonging to a path? See {@link wallAlongsideMax}.
+ *
+ * Deliberately "anywhere along its length" and not "everywhere": an L-shaped
+ * hiding piece has one arm hugging the kerb and one reaching out into the lawn
+ * behind it, and that second arm is the whole point of somewhere to hide. What
+ * the park may not have is a run with *no* part of it near a path.
+ */
+function runHugsPaving(run: WallRun): boolean {
+  const limit = wallAlongsideMax();
+  const [x1, z1] = run.from;
+  const [x2, z2] = run.to;
+  const steps = Math.max(4, Math.ceil(Math.hypot(x2 - x1, z2 - z1) / 0.5));
+  for (let i = 0; i <= steps; i += 1) {
+    const t = i / steps;
+    if (distanceToPath(x1 + (x2 - x1) * t, z1 + (z2 - z1) * t) <= limit) return true;
+  }
+  return false;
+}
 
 /**
  * Draws one candidate anchor from this attempt's own RNG stream — a point
