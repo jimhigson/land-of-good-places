@@ -555,7 +555,12 @@ function plankCanopy(accent: Material, trim: Material): Canopy {
   lip.position.set(0, eaveY + 0.02, 1.6);
   group.add(lip);
 
-  return { group, perch: new Vector3(1.1, eaveY + 0.16, 0.5), eaveY };
+  // Near enough the middle: {@link addEmblem} may only grow an emblem until it
+  // reaches the footprint, so a perch out at the corner caps the thing standing
+  // on it long before the ceiling does — and hats are the widest models in the
+  // game. Off-centre by a quarter of a metre for the sake of §4's "nothing is
+  // plumb", and no further.
+  return { group, perch: new Vector3(0.25, eaveY + 0.16, 0.5), eaveY };
 }
 
 /** Two poles and a swag of triangular flags. */
