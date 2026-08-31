@@ -714,3 +714,57 @@ canonical   #3    3         362 m    277ms   0               true
   requirement is a real clash and must not be waved through.
 - `scripts/probe427.mts` is a scratch instrument, committed deliberately so the
   next person can re-run it. Delete it before the PR if it is not wanted.
+
+## `test:procgen` — the eight are now **three**. 479 passed, 3 failed.
+
+```
+seed 18: the walk in from the gate crosses the railway where the planner
+         planned it to, on a bridge
+seed 5:  every street sits on the shared 12 m lattice
+seed 11: the Sky Cruiser flies clear of the whole park
+```
+
+**Five of the eight are gone, including the one that mattered most.** The
+canonical Rail Race finish rainbow — 0.37 m from a path against a 1.24 m
+requirement, the one the Overseer named as a real clash a child would walk
+into — **passes**, as does seed 5's 1.20 m near-miss. Both went away with the
+loops, not with a threshold: **no assertion, probe or threshold has been
+touched anywhere in this work.**
+
+Also gone: seed 11's lattice failure, seed 2's lattice failure, and seed 18's
+"crossings are planned — station-clear, and mostly real bridges" (that one is
+the direct result of the rectangle keep-out).
+
+### The three that remain
+
+**1. seed 18 — the gate corridor meets the track at an unplanned point.** This
+feature's own territory, and the same defect the previous engineer triaged as
+items 1-2; it has moved seeds (was 5 and 11, now 18) and is now **one instance
+rather than two**.
+
+```
+the walk in from the gate crosses the railway at (0.0, 57.3), railDistance
+300.1, 3.0 m in from the arch, and the crossing planner planned no crossing
+there at all — bridge sites at 4.0, level sites at 46.0 ... 274.0
+```
+
+Seed 18's winning pose is **#9, not an entrance pose**, so `gateCorridorPoses`
+did not close a loop and the search fell through to the general field — which
+may then run anywhere, including across the front door. Expected and
+documented behaviour of the shipped design, not a new fault.
+
+**Do not reach for the keep-out again.** It is written up above with numbers:
+`GATE_CORRIDOR_KEEPOUT_*` severs the rim and took solving from 14/15 to 9/15.
+The remaining honest options are (a) rank the entrance poses harder so they win
+on more seeds, or (b) route the path rather than the railway, as
+`HANDOFF-bridge-at-the-front-door.md` did. Either changes every seed's loop
+again and needs all five measurements re-run — this is its own piece of work,
+which is what the previous engineer concluded too.
+
+**2. seed 5 — `gate-approach` 1.94 m off the 12 m lattice.** Paths reacting to
+a moved railway. Downstream, not investigated.
+
+**3. seed 11 — flower heads under the Sky Cruiser's car** at 4.0 m along the
+loop, world (-57.51, 0.70, -20.16). The cruiser solves *before* the train so it
+has not moved; the **scatter** has, because it plants around the railway.
+Downstream, not investigated.
