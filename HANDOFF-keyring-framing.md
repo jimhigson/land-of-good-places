@@ -340,6 +340,49 @@ was **killed by an agent disconnect at step ~31 of 50** (`check:hotel`), with no
 failures up to that point — but a partial run nobody watched finish is not
 evidence, so it is being re-run from the top rather than trusted.
 
+## Second rebase, onto #423 — and `main` is RED, not this branch
+
+`main` moved again mid-task (`dd5a1b09`, #423 "Walls run alongside the paths").
+Rebased again; **no conflict this time**, but `main` had touched `package.json`
+so the chain was re-verified by parsing rather than trusting the clean merge:
+50 steps, nothing of `main`'s dropped, no duplicates, every step defined, and
+`main`'s relative order preserved.
+
+Gates re-run on the new base: `build` **exit 0**; `test:procgen` **497 passed /
+16 files** (up from 492 — #423 added invariants); `check:keyring-view` **exit
+0** with the framing numbers *again* identical to the approved ones.
+
+### The finding: `check:speech-bubbles` is red on `origin/main` itself
+
+CI on this PR failed at `check:speech-bubbles`. That check is not this branch's
+— it arrived with #420. Chased it properly rather than assuming, in a **detached
+`origin/main` worktree with its own real install** and zero local changes:
+
+| commit | | `check:speech-bubbles` |
+|---|---|---|
+| `819ab77c` | main before #423 | **exit 0**, 1563 sightings |
+| `dd5a1b09` | main after #423 | **exit 1**, 986 sightings |
+
+Deterministic, not flaky: two runs on `dd5a1b09` produced byte-identical output.
+
+```
+FAIL  A bubble was drawn for a child who was not on screen, on 1 occasion(s).
+Worst: Wren at (-7.77, 0.05, 50.49) is not on screen, but her bubble is drawn
+at (-5.21, 2.98, 47.93) — 4.66 m away
+```
+
+**How a green PR made a red `main`.** #423's own CI passed — but its base was
+`6d475dab`, which predates #420 (`347e9454`), the commit that *added*
+`check:speech-bubbles`. So #423 was never once run against this check. #423
+moves the walls and therefore the paths, the children walk different routes
+(sightings drop 1563 → 986), and one of them now gets a bubble drawn while she
+is off screen — exactly the fault #415 was filed about.
+
+**This is not this branch's to fix, and must not be "fixed" here.** #424 merely
+inherits it: the PR's CI tests the *merge* of this head with current `main`, so
+it will stay red until `main` is. Nothing was weakened or tuned to get around
+it. Reported to the Overseer.
+
 ## Cleanup owed at the end
 
 - Dev server on **5471** (mine; 5421 was already taken by another agent, so I
