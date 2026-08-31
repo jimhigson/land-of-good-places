@@ -562,6 +562,51 @@ export const CAMERA_FOLLOW_HALF_LIFE = 0.16;
 /** Camera looks slightly ahead of the player, in metres per unit of speed. */
 export const CAMERA_LOOK_AHEAD = 0.16;
 
+// ------------------------------------------------- drag to look around (#419)
+
+/**
+ * How long after the last drag before the camera comes back to her, in seconds.
+ *
+ * **Jim's number**, 31 August 2026: *"after about 3s of not swiping/dragging it
+ * should return to your character"*. Counted in frame `dt` inside
+ * `IsoCamera.update`, deliberately — not off `performance.now()` and not off an
+ * event clock either. There is no gesture being *measured* here (that is
+ * `tapGesture.ts`'s job, on `event.timeStamp`); this is "how much game has gone
+ * past", and the frame loop is the only honest source for that. It also means
+ * the delay cannot be skewed by a busy frame the way a wall-clock reading of a
+ * late-delivered event can.
+ */
+export const CAMERA_LOOK_RETURN_DELAY = 3;
+
+/**
+ * Smoothing half-life, in seconds, for the return journey.
+ *
+ * The same `damp()` the follow-cam itself uses, just far lazier than
+ * {@link CAMERA_FOLLOW_HALF_LIFE}'s 0.16 s — the follow is chasing a child who
+ * is *walking*, and has to keep up; this is a view drifting home with nothing
+ * to catch. At 0.45 s the offset is half gone in half a second and visually
+ * settled in about two, which reads as the park easing back rather than
+ * snapping. Exponential rather than a spring on purpose: a spring overshoots,
+ * and a camera that sails past her and rocks back is exactly the "snapped"
+ * feeling this is meant to avoid.
+ */
+export const CAMERA_LOOK_RETURN_HALF_LIFE = 0.45;
+
+/**
+ * The furthest the view may be dragged from her, in metres.
+ *
+ * The default framing is {@link CAMERA_VIEW_HEIGHT} = 15 m tall on a wide
+ * screen and ~24 m on a 390 x 844 portrait phone (where
+ * {@link CAMERA_MIN_VIEW_WIDTH}'s floor bites and grows the view instead). 18 m
+ * therefore buys about one whole screen of park in any direction — enough to
+ * genuinely look around the corner, and little enough that she is never so far
+ * from her own character that the return feels like a journey. It is a leash,
+ * not the only one: the panned focus is *also* clamped inside the play bounds
+ * of the space she is in, which is what stops the castle's floors showing each
+ * other's void (see `IsoCamera.setLookBounds`).
+ */
+export const CAMERA_LOOK_MAX_DISTANCE = 18;
+
 // -------------------------------------------------------------- day/night
 
 /**
