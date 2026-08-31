@@ -1,4 +1,5 @@
 import {
+  Box3,
   BoxGeometry,
   CylinderGeometry,
   Group,
@@ -11,8 +12,17 @@ import {
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PALETTE } from '../core/palette';
 import { STALL_PLACEMENTS, STALL_STANDS_BY_ID } from '../minigames/stallPlacement';
-import { CAMERA_YAW_DEGREES } from '../core/constants';
-import { DEG, lerp, Rng, turnTowards } from '../core/mathUtils';
+import { CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES, PLAYER_RADIUS } from '../core/constants';
+import { screenBasis3D } from '../core/screenBasis';
+import {
+  boxCorners,
+  contentFrame,
+  focusForFrame,
+  type ContentFrame,
+  type FramedSubject,
+} from '../core/contentFrame';
+import { TALLEST_CHILD_HEIGHT } from '../art/models/kid';
+import { DEG, Rng, turnTowards } from '../core/mathUtils';
 import { ART } from '../art/style/artPalette';
 import { addOutline, decal, solid, toonMaterial } from '../art/style/materials';
 import { KEYCHAIN_KINDS, createKeychain, type KeychainKind } from '../art/models/keychains';
@@ -322,24 +332,68 @@ const RACK_COLUMNS = 3;
 const RACK_ROWS = 2;
 
 /**
- * How far apart the two rows sit, in local metres along the counter's own
- * depth axis — centred on the same {@link RACK_CENTRE_LOCAL_Z} the old
- * single row used, so the grid's own centre does not drift from where the
- * counter (and the backdrop clearance built around it) already expects the
- * display to sit. Comfortably inside {@link STALL_DEPTH}'s own usable top
- * (the counter surface itself is `STALL_DEPTH - 0.06` deep) even with
- * {@link RACK_KEYRING_SCALE}'s now-much-larger keyrings, which is what "grid, not
- * two rows hanging off the edges" needs. Was `0.5`; Jim, 25 August 2026:
- * *"space them out a bit more on the table in their y dimension (forward and
- * backward on the table)"* — the counter's local depth axis is what reads as
- * forward/backward from the fixed camera. `0.75` still leaves the back row
- * (`RACK_CENTRE_LOCAL_Z - RACK_ROW_GAP / 2` ≈ `-0.40`) well clear of the
- * canopy pole at `-STALL_DEPTH / 2 + 0.15` = `-0.6`.
+ * Where the **back** row sits, in local metres along the counter's depth axis.
+ *
+ * Unchanged through #418, deliberately. Jim, 25 August 2026: *"space them out a
+ * bit more on the table in their y dimension (forward and backward on the
+ * table)"* put the two rows `0.75` apart about {@link RACK_CENTRE_LOCAL_Z},
+ * landing this row at `-0.395` — and that is as far back as it can safely go:
+ * the canopy pole stands at `-STALL_DEPTH / 2 + 0.15` = `-0.6` and rises
+ * through the keyrings' own height, so pushing this row towards the counter's
+ * back edge would put the middle keyring inside it. #418 asked for the *front*
+ * row to come forward ({@link rackFrontRowLocalZ}), which widens the gap from
+ * the other end and leaves this constraint alone.
  */
-const RACK_ROW_GAP = 0.75;
+const RACK_BACK_ROW_LOCAL_Z = -0.395;
 
-/** Where the single-row rack used to sit, and where the grid's own depth centres on. */
+/** Where the single-row rack used to sit; still the depth the composition centres on. */
 const RACK_CENTRE_LOCAL_Z = -0.02;
+
+/** The counter's own top surface depth — `buildCart`'s `top` mesh, one owner. */
+const COUNTER_DEPTH = STALL_DEPTH - 0.06;
+
+/**
+ * How much clear counter is left in front of the front row's keyrings, in
+ * metres.
+ *
+ * Not zero: the counter's top is a `RoundedBoxGeometry` whose edge curls away
+ * over its last few millimetres, and every keyring carries an outline stroke
+ * (`addOutline`) that sits proud of its own silhouette. Flush against the
+ * measured edge would put both of those over the lip, which reads as a keyring
+ * about to fall off rather than one standing at the front of the table.
+ */
+const COUNTER_EDGE_INSET = 0.04;
+
+/**
+ * **Where the front row stands: at the front edge of the table, derived from
+ * the counter and the deepest keyring rather than typed.**
+ *
+ * Jim, 31 August 2026 (#418): *"the keyrings at the front overlap those at the
+ * back, bring them forward to the front edge of the table so it is easier to
+ * click one or the other."*
+ *
+ * Local `+Z` is the camera-facing side (the stand point is at `+3.1`), so
+ * "forward" is `+Z` and the counter's front edge is at `COUNTER_DEPTH / 2`.
+ * The row sits back from it by the **deepest** keyring's own half-depth, so the
+ * straight line of the row is set by whichever charm needs the most room and
+ * none of the six overhangs — `heart` and `strawberry` are half again as deep
+ * as `rainbow`, so a single typed offset would either hang those two over the
+ * edge or waste 0.12 m for all six.
+ *
+ * Measured from the built models at {@link RACK_KEYRING_SCALE} including their
+ * lean, not from a table of sizes, for the reason `check:keyring-hang` exists
+ * one file over: a number that misses the geometry looks exactly like every
+ * other number in a diff.
+ */
+function rackFrontRowLocalZ(deepestHalfDepth: number): number {
+  return COUNTER_DEPTH / 2 - COUNTER_EDGE_INSET - deepestHalfDepth;
+}
+
+/**
+ * How far each keyring leans off square, in radians — alternating, so the grid
+ * does not read as a static shelf of identical ranks.
+ */
+const RACK_LEAN = 0.18;
 
 /**
  * How far outside the cart's short edge she stands for the locked view's own
@@ -374,44 +428,64 @@ const VIEW_STAND_CLEARANCE = 0.55;
 const VIEW_STAND_SIDE = -1;
 
 /**
- * How much of the camera's own focus point is pulled from the rack's centre
- * towards where she stands (0 = centred on the rack alone, 1 = centred on
- * her alone) — see {@link KeychainShop.buildCart}'s own solving of
- * {@link KeychainShop.rackFocus}. Not `0.5`: the two subjects are not the
- * same size on screen (she reads taller and narrower than the rack's own
- * footprint), so the point that actually balances the *frame's* left/right
- * margins sits off the geometric midpoint — found by screenshotting the
- * built view and nudging this until the gap either side of the two subjects
- * came out even, the same way every constant below it did.
+ * **How the locked view is framed, replacing two hand-tuned constants.**
+ *
+ * Jim, 24 August 2026, on this shot: *"the camera at the right distance so the
+ * character and the stall both fit into the view with only a very small gap
+ * around the edge of the screen."* That was answered with two numbers found by
+ * screenshotting the built view — `VIEW_FOCUS_PLAYER_WEIGHT = 0.43` (how far
+ * the focus was pulled from the rack towards her) and `KEYCHAIN_VIEW_ZOOM =
+ * 4.25` — and the second one said so in its own comment: *"tuned by eye against
+ * a real screenshot of the built view, not computed from the frustum maths."*
+ *
+ * The screenshot was of a desktop window, and that is issue #418. On a 390 × 844
+ * phone in portrait, `IsoCamera.applyFrustum`'s height-led framing gives a
+ * half-width of **1.294 m** where a 16:9 desktop gets 3.137 m. The six keyrings
+ * spanned screen-right `[-0.55, +1.92]` about that focus, so `strawberry` sat
+ * **0.63 m** outside the right edge and `rumi` 0.53 m outside — invisible, and
+ * therefore unchoosable, on the one screen the game is most played on.
+ *
+ * Both numbers are now derived, in {@link KeychainShop.buildCart} and
+ * {@link KeychainShop.viewContent}:
+ *
+ * - **The focus is the centre of the content**, not a weighting between two
+ *   subjects. That is what the 0.43 was reaching for — its comment describes
+ *   nudging *"until the gap either side of the two subjects came out even"* —
+ *   and centring the box achieves it exactly rather than approximately. It is
+ *   also the larger half of the fix: the content is only 2.46 m wide, so a
+ *   centred frame needs 1.23 m of half-width against the 1.92 m an off-centre
+ *   one demanded. Most of the overflow was composition, not distance.
+ * - **The zoom is asked of the camera every frame** (`IsoCamera.zoomToFit`),
+ *   because width and height do not run out on the same screen — see that
+ *   method's own comment. A phone gets the pull-back it needs, a desktop keeps
+ *   its tight shot, and a child turning her phone sideways reframes for free.
+ *
+ * `CAMERA_ZOOM_MAX` was raised specifically to make room for the old 4.25
+ * constant; it stays where it is, as the ceiling a derived zoom is clamped to.
  */
-const VIEW_FOCUS_PLAYER_WEIGHT = 0.43;
+const VIEW_MARGIN = 0.08;
 
 /**
- * How high above the ground {@link KeychainShop.rackFocus} sits, in metres —
- * roughly chest height on the standing character and just above the taller
- * keyrings' own top, so the frame does not centre low with headroom wasted
- * above, nor high with feet cut off below.
+ * The height the child in shot is framed to, in metres — **the tallest the park
+ * can build**, not the default one.
+ *
+ * `KID_HEIGHT` is 2.12 and would be the obvious choice; `TALLEST_CHILD_HEIGHT`
+ * is 2.97, because a party hat adds 0.85 m and children wear hats in shops. A
+ * frame sized to the average child crops the top off an above-average one, and
+ * it does it only for the children who chose the tall hat — the worst possible
+ * distribution for a bug. `kid.ts` keeps this honest: a procgen invariant
+ * re-measures every hair × hat combination on every seed and fails if any built
+ * child exceeds it, so this cannot go stale when a new hat lands.
  */
-const VIEW_FOCUS_HEIGHT = 1.6;
+const VIEW_CHILD_HEIGHT = TALLEST_CHILD_HEIGHT;
 
 /**
- * The zoom the park camera holds for the whole locked view. Its own constant
- * rather than reaching for the general pinch-zoom ceiling (`CAMERA_ZOOM_MAX`)
- * the way this view used to: Jim, 24 August 2026, on this exact shot: *"the
- * camera at the right distance so the character and the stall both fit into
- * the view with only a very small gap around the edge of the screen."* Tuned
- * by eye against a real screenshot of the built view, not computed from the
- * frustum maths — the subject is two separate, oddly-shaped things (her, and
- * the cart) rather than one bounding sphere the way the cat bus's own
- * derived zoom (`ArrivalSequence.ts`'s `ARRIVAL_CAMERA_ZOOM`) gets to assume,
- * so a formula here would only be a screenshot's worth of margin allowance
- * dressed up as maths. The rack plus the character beside it is a small
- * subject next to what `CAMERA_ZOOM_MAX` was previously sized for (a person
- * walking the park), so that ceiling itself had to rise to make room for
- * this constant — see `CAMERA_ZOOM_MAX`'s own comment — rather than this
- * view silently getting clamped short of the framing it asked for.
+ * The screen axes this view frames against. Solved once: the park's camera
+ * never turns (ARCHITECTURE.md, "One camera angle, forever"), so the basis is
+ * as constant as the two angles it comes from — and `screenBasis.ts`'s own
+ * header sets out when that assumption is *not* safe to cache.
  */
-export const KEYCHAIN_VIEW_ZOOM = 4.25;
+const VIEW_BASIS = screenBasis3D(CAMERA_YAW_DEGREES * DEG, CAMERA_PITCH_DEGREES * DEG);
 
 /** One keyring on the rack: its kind, its catalogue id, the model itself, and where it is in the world. */
 interface RackKeyring {
@@ -501,6 +575,21 @@ export class KeychainShop implements GameSystem {
    * do not move afterwards, so this is solved once rather than every frame).
    */
   private readonly rackFocus = new Vector3();
+
+  /**
+   * Everything that must be inside the locked view — the six keyrings' own
+   * world bounding boxes, and the box the child sweeps where she stands. Built
+   * once in {@link buildCart} from the real meshes; `check:keyring-view` reads
+   * this same list, so the check and the camera can never be framing different
+   * things.
+   */
+  private readonly framedSubjects: FramedSubject[] = [];
+
+  /**
+   * {@link framedSubjects} projected onto {@link VIEW_BASIS} — the screen-space
+   * box the shot has to hold. See {@link viewContent}.
+   */
+  private content: ContentFrame = contentFrame(VIEW_BASIS, []);
 
   private closeButton: HTMLElement | null = null;
 
@@ -614,6 +703,27 @@ export class KeychainShop implements GameSystem {
   /** {@link rackFocus}, for `Game.tick` to hand to `IsoCamera.setFocusOverride`. */
   get viewFocus(): Readonly<Vector3> {
     return this.rackFocus;
+  }
+
+  /**
+   * The screen-space box the locked view has to hold, about {@link viewFocus}.
+   *
+   * `Game.tick` hands its half-extents to `IsoCamera.zoomToFit` every frame the
+   * view is open, so the shot is framed by what is in it rather than by a
+   * constant — see {@link VIEW_MARGIN}'s own comment, and #418.
+   */
+  get viewContent(): ContentFrame {
+    return this.content;
+  }
+
+  /** The margin `Game.tick` frames with — this view's own, so one owner. */
+  get viewMargin(): number {
+    return VIEW_MARGIN;
+  }
+
+  /** What must be in shot, for `check:keyring-view` to measure against the real frame. */
+  get viewSubjects(): readonly FramedSubject[] {
+    return this.framedSubjects;
   }
 
   /**
@@ -1049,28 +1159,57 @@ export class KeychainShop implements GameSystem {
     // {@link interactZones} to build a tap target from.
     const rackWidth = STALL_WIDTH - 0.5;
     const keyringLocalY = 0.885;
-    KEYCHAIN_KINDS.forEach((kind, index) => {
+
+    // The grid has exactly two named depths ({@link RACK_BACK_ROW_LOCAL_Z} and
+    // {@link rackFrontRowLocalZ}), one held off the canopy pole and one set at
+    // the counter's front edge — neither is interpolated, because neither is
+    // free. So a seventh keyring kind would not open a third row, it would
+    // silently stack on top of the front one, invisible in a diff and visible
+    // only as two charms occupying one spot. Say so at build time instead.
+    if (KEYCHAIN_KINDS.length !== RACK_COLUMNS * RACK_ROWS) {
+      throw new Error(
+        `KeychainShop: the rack is ${RACK_COLUMNS}x${RACK_ROWS} but there are ` +
+          `${KEYCHAIN_KINDS.length} keyring kinds. Give every row its own depth in ` +
+          `KeychainShop.ts before adding one.`,
+      );
+    }
+
+    // Built and measured before any of them is placed, because where the front
+    // row stands depends on the deepest of the six — see
+    // {@link rackFrontRowLocalZ}. The wrapper carries the position/rotation
+    // this keyring sits at on the rack and stays unscaled; `handle.root` — the
+    // actual model, reset to identity local position/rotation — carries
+    // RACK_KEYRING_SCALE as the wrapper's one child. See `RackKeyring.root`'s
+    // own doc comment for why: scaling `handle.root` directly (the old code)
+    // broke the highlight shell's own "nothing is ever scaled" invariant and
+    // ballooned the rainbow outline to 3.75x size.
+    const built = KEYCHAIN_KINDS.map((kind, index) => {
       const handle = createKeychain(kind);
-      const column = index % RACK_COLUMNS;
-      const row = Math.floor(index / RACK_COLUMNS);
-      const tColumn = RACK_COLUMNS > 1 ? column / (RACK_COLUMNS - 1) : 0.5;
-      const tRow = RACK_ROWS > 1 ? row / (RACK_ROWS - 1) : 0.5;
-      const localX = -rackWidth / 2 + tColumn * rackWidth;
-      const localZ = RACK_CENTRE_LOCAL_Z - RACK_ROW_GAP / 2 + tRow * RACK_ROW_GAP;
-      // The wrapper carries the position/rotation this keyring sits at on the
-      // rack and stays unscaled; `handle.root` — the actual model, reset to
-      // identity local position/rotation — carries RACK_KEYRING_SCALE as the
-      // wrapper's one child. See `RackKeyring.root`'s own doc comment for why:
-      // scaling `handle.root` directly (the old code) broke the highlight
-      // shell's own "nothing is ever scaled" invariant and ballooned the
-      // rainbow outline to 3.75x size.
-      const wrapper = new Group();
-      wrapper.position.set(localX, keyringLocalY, localZ);
-      wrapper.rotation.y = (index % 2 === 0 ? 1 : -1) * 0.18;
       handle.root.position.set(0, 0, 0);
       handle.root.rotation.set(0, 0, 0);
       handle.root.scale.setScalar(RACK_KEYRING_SCALE);
+      const wrapper = new Group();
+      wrapper.rotation.y = (index % 2 === 0 ? 1 : -1) * RACK_LEAN;
       wrapper.add(handle.root);
+      // At the origin with only its lean applied, so the box comes out in the
+      // cart's own local frame — the frame `rackFrontRowLocalZ` insets from.
+      wrapper.updateMatrixWorld(true);
+      const box = new Box3().setFromObject(wrapper);
+      return { kind, wrapper, halfDepth: Math.max(-box.min.z, box.max.z) };
+    });
+    let deepestHalfDepth = 0;
+    for (const one of built) deepestHalfDepth = Math.max(deepestHalfDepth, one.halfDepth);
+    const frontRowLocalZ = rackFrontRowLocalZ(deepestHalfDepth);
+
+    built.forEach(({ kind, wrapper }, index) => {
+      const column = index % RACK_COLUMNS;
+      const row = Math.floor(index / RACK_COLUMNS);
+      const tColumn = RACK_COLUMNS > 1 ? column / (RACK_COLUMNS - 1) : 0.5;
+      const localX = -rackWidth / 2 + tColumn * rackWidth;
+      // Back row where it has always been (the canopy pole is right behind it);
+      // front row out at the table's front edge, per #418.
+      const localZ = row === 0 ? RACK_BACK_ROW_LOCAL_Z : frontRowLocalZ;
+      wrapper.position.set(localX, keyringLocalY, localZ);
       this.group.add(wrapper);
 
       const [x, z] = this.toWorld(localX, localZ);
@@ -1093,12 +1232,42 @@ export class KeychainShop implements GameSystem {
       });
     });
 
-    // {@link rackFocus}: pulled {@link VIEW_FOCUS_PLAYER_WEIGHT} of the way
-    // from the rack's own world centre (the six keyrings' average — solved
-    // once here rather than every frame, since they never move afterwards)
-    // towards {@link viewStandX}/{@link viewStandZ}, so the shot centres
-    // between the two subjects Jim asked to both fit in frame, rather than
-    // on the rack alone with her off to one side of it.
+    // Everything that has to be in shot, as real geometry — see
+    // {@link VIEW_MARGIN}'s own comment for why the two constants that used to
+    // do this job by eye are gone. Solved once here rather than every frame:
+    // neither the keyrings nor her composed stand point ever move afterwards.
+    this.group.updateMatrixWorld(true);
+    const measured = new Box3();
+    for (const keyring of this.rack) {
+      measured.setFromObject(keyring.root);
+      this.framedSubjects.push({
+        what: keyring.kind,
+        points: boxCorners(measured.min.clone(), measured.max.clone()),
+      });
+    }
+    // Her, as the box her worst-case height and radius sweep where she stands
+    // for the composition. A box rather than the built model: which child is in
+    // the park is not known when the cart is built, and the frame has to hold
+    // the tallest one the park can make either way.
+    this.framedSubjects.push({
+      what: 'the child',
+      points: boxCorners(
+        { x: this.viewStandX - PLAYER_RADIUS, y: this.groundY, z: this.viewStandZ - PLAYER_RADIUS },
+        {
+          x: this.viewStandX + PLAYER_RADIUS,
+          y: this.groundY + VIEW_CHILD_HEIGHT,
+          z: this.viewStandZ + PLAYER_RADIUS,
+        },
+      ),
+    });
+
+    this.content = contentFrame(VIEW_BASIS, this.framedSubjects);
+
+    // {@link rackFocus}: the world point that puts the content box's own centre
+    // in the middle of the frame, so the margins come out even by construction
+    // rather than by a weight somebody nudged against a screenshot. Corrected
+    // from the rack's own world centre, which keeps the focus at a sensible
+    // depth for anything else reading `IsoCamera.focusPoint`.
     let sumX = 0;
     let sumZ = 0;
     for (const keyring of this.rack) {
@@ -1107,9 +1276,12 @@ export class KeychainShop implements GameSystem {
     }
     const rackCentreX = sumX / this.rack.length;
     const rackCentreZ = sumZ / this.rack.length;
-    const focusX = lerp(rackCentreX, this.viewStandX, VIEW_FOCUS_PLAYER_WEIGHT);
-    const focusZ = lerp(rackCentreZ, this.viewStandZ, VIEW_FOCUS_PLAYER_WEIGHT);
-    this.rackFocus.set(focusX, this.groundY + VIEW_FOCUS_HEIGHT, focusZ);
+    focusForFrame(
+      VIEW_BASIS,
+      this.content,
+      { x: rackCentreX, y: this.groundY + keyringLocalY, z: rackCentreZ },
+      this.rackFocus,
+    );
 
     // {@link facingTable}: the bearing from her composed stand point to the
     // rack's own centre — `Player.facing`'s `atan2(x, z)` convention (see
