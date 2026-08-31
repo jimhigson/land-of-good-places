@@ -1,15 +1,21 @@
 import { Vector3 } from 'three';
 import { TRAIN_PLAN } from './plan';
-import { BRIDGE_RISE, FENCE_OFFSET } from './clearance';
-import {
-  BRIDGE_RAMP_GRADIENT,
-  DECK_HALF_LENGTH,
-  MIN_BRIDGE_HALF_LENGTH,
-  MIN_RAMP_RUN,
-} from './bridgeFootprint';
+import { FENCE_OFFSET } from './clearance';
+import { DECK_HALF_LENGTH, MIN_BRIDGE_HALF_LENGTH } from './bridgeFootprint';
 import { STATION_GAP } from './fence';
-import { GARDEN_PLAY_BOUNDARY } from '../boundary';
-import { clearOfPlots } from '../parkLayout';
+import {
+  NARROW_HALF_WIDTH,
+  SITE_BOUNDARY_MARGIN,
+  SITE_HALF_WIDTH,
+  SITE_PLOT_MARGIN,
+  SITE_RAMP_FLOOR,
+  SITE_RAMP_IDEAL,
+  probeBridgeReach,
+} from './bridgeFit';
+
+// Re-exported so every existing consumer (`paths.ts`, `crossings.ts`,
+// `crossingPlan.ts`) keeps importing these from where it always did.
+export { NARROW_HALF_WIDTH, SITE_HALF_WIDTH, SITE_RAMP_FLOOR, SITE_RAMP_IDEAL };
 
 /**
  * **Where the park may cross its own railway — planned first, not
@@ -83,43 +89,10 @@ export interface CrossingSite {
   readonly halfWidth: number;
 }
 
-/**
- * Same walkable floor the real bridge search accepts at
- * (`bridgeFootprint.ts`'s `WALKABLE_FLOOR + WALKABLE_MARGIN`), plus one
- * extra stride of planning slack — a site that only *just* clears the
- * acceptance bar leaves the late, real pass nothing to spend on the small
- * obstacles (a lamp base, a bush trunk) that legitimately arrive later.
- */
-export const SITE_RAMP_FLOOR = MIN_RAMP_RUN + 1.0;
 
-/** The most ramp a site ever needs credit for — the shallow, ideal grade,
- * the same run the real pass starts from. */
-export const SITE_RAMP_IDEAL = BRIDGE_RISE / BRIDGE_RAMP_GRADIENT;
 
-/**
- * Half-width of the corridor a bridge site's deck and ramps are probed at.
- * The real pass starts its width search at the crossing's own `halfGap`
- * (floored at 4.5 in `crossings.ts`, and a square planned crossing measures
- * at that floor), so this is the corridor the first — preferred — real
- * candidate will actually occupy, plus half a stride of slack.
- */
-export const SITE_HALF_WIDTH = 4.5 + 0.5;
 
-/**
- * The narrower corridor tried when {@link SITE_HALF_WIDTH} finds nothing —
- * a deck for a path that arrives square needs barely more than the ribbon
- * itself, and a whole district with no bridge at all is a far worse
- * outcome than a slimmer one (seed 2's east: plots, a station and the
- * boundary between them ruled out every full-width candidate).
- */
-export const NARROW_HALF_WIDTH = 4.0;
 
-/** Boundary / plot margins for a ramp — the early reservation pass's own
- * figures (`bridgeFootprint.ts`'s `RAMP_BOUNDARY_MARGIN` / `RAMP_PLOT_MARGIN`
- * are module-private; same numbers, same job, and drift here only ever makes
- * this planner *stricter* than the reservation, the safe direction). */
-const SITE_BOUNDARY_MARGIN = 1.5;
-const SITE_PLOT_MARGIN = 2.0;
 
 /** Clearance a ground-level ramp tread keeps from the rail centre line —
  * `bridgeFootprint.ts`'s own `FENCE_OFFSET + RAMP_RAIL_MARGIN`, restated
@@ -166,24 +139,6 @@ const LEVEL_REACH = 4;
 const LEVEL_HALF_WIDTH = 2.0;
 
 const scratch = new Vector3();
-
-/**
- * Memoised boundary distance on a 1 m grid — `distanceToEdge` walks the
- * whole boundary spline per query, and this module's feasibility march asks
- * it tens of thousands of times over overlapping candidate footprints
- * (`check:solve-cost` measured the un-memoised solve at ~940 ms of the
- * paths stage's ~1 s, 2026-08-23). 1 m is far finer than any margin this
- * planner decides against (1.0–2.0 m), and deterministic.
- */
-const boundaryDistanceCache = new Map<number, number>();
-function boundaryDistanceAt(x: number, z: number): number {
-  const key = (Math.round(x) + 8192) * 32768 + (Math.round(z) + 8192);
-  const hit = boundaryDistanceCache.get(key);
-  if (hit !== undefined) return hit;
-  const value = GARDEN_PLAY_BOUNDARY.distanceToEdge(x, z);
-  boundaryDistanceCache.set(key, value);
-  return value;
-}
 
 /** The same memo for "how far from the rail centre line" — `distanceNear`
  * walks the whole solved loop per query. */
@@ -260,36 +215,29 @@ function probeReach(
   boundaryMargin: number,
   plotMargin: number,
 ): { pos: number; neg: number; deckClear: boolean } {
-  const acrossX = -dirZ;
-  const acrossZ = dirX;
-  const clearAt = (along: number, sign: 1 | -1): boolean => {
-    for (const t of [-1, -0.5, 0, 0.5, 1]) {
-      const x = point.x + dirX * along * sign + acrossX * halfWidth * t;
-      const z = point.z + dirZ * along * sign + acrossZ * halfWidth * t;
-      if (boundaryDistanceAt(x, z) < boundaryMargin) return false;
-      if (!clearOfPlots(x, z, plotMargin)) return false;
-      if (nearStationStructure(x, z)) return false;
-      if (along > DECK_HALF_LENGTH) {
-        // Past the deck the ramp is ordinary near-ground paving — it may
-        // not run inside the rail's own corridor (obliques skirt it).
-        if (railDistanceAt(x, z) < SITE_RAIL_MARGIN) return false;
-      }
-    }
-    return true;
-  };
-  const deckClear = clearAt(0, 1) && clearAt(DECK_HALF_LENGTH, 1) && clearAt(DECK_HALF_LENGTH, -1);
-  if (!deckClear) return { pos: 0, neg: 0, deckClear };
-  const reach = (sign: 1 | -1): number => {
-    let run = 0;
-    const steps = Math.ceil(maxReach / 0.5);
-    for (let i = 1; i <= steps; i += 1) {
-      const along = DECK_HALF_LENGTH + (i / steps) * maxReach;
-      if (!clearAt(along, sign)) break;
-      run = along - DECK_HALF_LENGTH;
-    }
-    return run;
-  };
-  return { pos: reach(1), neg: reach(-1), deckClear };
+  // The geometry lives in `bridgeFit.ts`, shared with #427's start-pose
+  // generator so the two can never answer "does a bridge fit here"
+  // differently — see that module's header on why a second copy would
+  // recreate issue #414 one level earlier. What is added here is the pair of
+  // tests that need a *solved* route, which is exactly what this caller has
+  // and the pose generator does not.
+  return probeBridgeReach(
+    point.x,
+    point.z,
+    dirX,
+    dirZ,
+    halfWidth,
+    maxReach,
+    boundaryMargin,
+    plotMargin,
+    (x, z, along) => {
+      if (nearStationStructure(x, z)) return true;
+      // Past the deck the ramp is ordinary near-ground paving — it may
+      // not run inside the rail's own corridor (obliques skirt it).
+      if (along > DECK_HALF_LENGTH && railDistanceAt(x, z) < SITE_RAIL_MARGIN) return true;
+      return false;
+    },
+  );
 }
 
 /** The `side = +1` direction at `railDistance` — `crossings.ts`'s own sign
