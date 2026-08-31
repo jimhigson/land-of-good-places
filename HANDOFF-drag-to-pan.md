@@ -103,6 +103,37 @@ tap even with the flag cleared. Worth knowing before anyone "simplifies" that
 apparent duplication away. The mutation that does reach it is the shared
 definition itself, above.
 
+## Browser QA — the traced return, and a trap for whoever repeats it
+
+Real CDP touch input, phone portrait 390x844, `/spawn?pos=0,-18&facing=0`,
+dev server on 5422. `look` is `IsoCamera.lookDistance` in metres, `idle` is
+`lookIdle` in seconds. Wall-clock on the left:
+
+```
+t=+0s  {"look":4.135,"idle":0.25}
+t=+10s {"look":4.135,"idle":1.5}
+t=+20s {"look":4.135,"idle":2.75}
+t=+22s {"look":3.637,"idle":3}      <- the delay lands, the return starts
+t=+24s {"look":2.475,"idle":3.25}
+t=+26s {"look":1.684,"idle":3.5}
+t=+28s {"look":1.146,"idle":3.75}
+t=+32s {"look":0.603,"idle":4.17}
+t=+40s {"look":0.129,"idle":5.17}
+t=+48s {"look":0.028,"idle":6.17}
+```
+
+Dead flat for the whole delay, then a clean monotonic exponential home. No
+overshoot, no wobble, no step.
+
+**The trap:** with seven agents on this box the park runs at roughly **an
+eighth of real time** in headless Chromium — `idle` gains 0.25 s per 2 s of
+wall-clock above. The three seconds are *game* seconds, counted in frame `dt`,
+which is deliberate and matches everything else in the game (the day/night
+clock, every animation). The first QA pass waited 4 real seconds for the return
+and screenshotted a camera that had not moved, which looked exactly like the
+feature being broken. **If you re-run this, wait tens of wall-seconds, or read
+`game.camera.lookIdle` rather than a stopwatch.**
+
 ## Progress
 
 - [x] Read `CLAUDE.md`, `GAME_DESIGN.md` CONTROL rule, issue #419, `tapGesture.ts`,
