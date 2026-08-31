@@ -40,6 +40,8 @@ import { buildingInteractZones } from './interactZones';
 import { dressDeck } from './dressing';
 import { CastleFire } from './castleLighting';
 import { dressCastle } from './castleDecor';
+import { WildPets } from './WildPets';
+import type { IsoCamera } from '../../core/IsoCamera';
 import type { InteractZone } from '../interact';
 import { softMaterial } from './parts';
 import {
@@ -284,6 +286,8 @@ export class Building implements GameSystem {
   /** The fitted-out shops: stock, shopkeepers, and where you stand to buy. */
   readonly shops: Shops;
   readonly ballPit = new BallPit();
+  /** The wild pets roaming the roof garden (#406). */
+  private readonly wildPets: WildPets;
 
   /**
    * The chase camera for the ginormous slide (REQUIREMENTS §9).
@@ -493,6 +497,9 @@ export class Building implements GameSystem {
     collision: CollisionWorld,
     anchorPlots: AnchorPlots,
     controls: InteriorControls,
+    /** Sizes the wild pets' "a wild X appears!" bubble on screen — the same
+     *  reason `Hotel` takes one for its receptionist. */
+    camera: IsoCamera,
   ) {
     this.collision = collision;
     this.controls = controls;
@@ -539,6 +546,16 @@ export class Building implements GameSystem {
       this.castleFire.dress(deck, floor);
       dressCastle(deck, floor);
     });
+    // The wild animals in the roof garden's long grass (#406). Built after
+    // `dressCastle` so the burrows it asks for already exist, and parented to
+    // the roof's own floor group — which since #377/#380 is what puts them in
+    // the roof's *space*, 600 m along +X from the mall, rather than what hid
+    // them behind a cutaway. Their positions are floor-local and unchanged by
+    // that: the offset belongs to the group.
+    this.wildPets = new WildPets(CASTLE_ROOF.index, camera);
+    const roofFloor = this.shell.floorGroups[CASTLE_ROOF.index];
+    if (roofFloor) roofFloor.add(this.wildPets.root);
+
     this.interiorRoot.add(this.grownUp.root);
     this.placeGrownUp();
 
@@ -703,6 +720,10 @@ export class Building implements GameSystem {
   }
 
   interactZones(): InteractZone[] {
+    return [...this.wildPets.interactZones(), ...this.buildingZones()];
+  }
+
+  private buildingZones(): InteractZone[] {
     return buildingInteractZones({
       trampolineSurfaceY: this.trampoline.surfaceY,
       doorstepY: this.surfaces.sample(
@@ -805,6 +826,11 @@ export class Building implements GameSystem {
     // Deliberately above the `!player` return: the fire burns whether or not
     // anybody is standing in the room, which is also what makes it screenshot.
     this.castleFire.update(elapsed);
+    // Above the `!player` return for the same reason the fire is: the roof
+    // garden's animals live their lives whether or not she is up there, so she
+    // arrives to a park that was already going rather than one that starts
+    // when she looks at it.
+    this.wildPets.update(context);
 
     const player = this.player;
     if (!player) return;

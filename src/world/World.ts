@@ -114,7 +114,7 @@ export class World implements GameSystem {
     this.fireflies = new Fireflies();
     this.anchorPlots = new AnchorPlots(this.collision);
     // Built into the reserved plots, so it must come after AnchorPlots.
-    this.building = new Building(this.collision, this.anchorPlots, interiorControls);
+    this.building = new Building(this.collision, this.anchorPlots, interiorControls, camera);
     // The Land Hotel (issue #236): a crystal tower near the castle whose door
     // leads to rooms that are each their own space. Shares the building's
     // WalkSurfaces sampler — its floor plates and mattress tops are ordinary

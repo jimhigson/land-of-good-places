@@ -1,6 +1,7 @@
 import { CylinderGeometry, Group, Mesh } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { ART } from '../style/artPalette';
+import { PALETTE } from '../style/bridge';
 import { addOutline, decal, solid, toonMaterial } from '../style/materials';
 import {
   applyStaticBakedFace,
@@ -128,6 +129,32 @@ export interface RipikaPalette {
   /** The painted cheek discs. */
   readonly cheek: number;
 }
+
+/**
+ * **The wild one, in the roof garden's long grass** (issue #406).
+ *
+ * A colourway, not a creature: `createRipika({ palette: WILD_RIPIKA_PALETTE })`
+ * is the same body, the same proportions and the same face as the yellow mouse
+ * every player starts with. That is the whole point — a second *model* of a
+ * wild RiPika is exactly the drift `pets.ts` and `petBlob.ts` exist to warn
+ * about, and one option on one function cannot fall out of step with itself.
+ *
+ * She needs to be *visibly* a different animal, though, because a child who
+ * catches one ends up with two RiPikas walking behind her and two identical
+ * yellow mice read as a bug however legal they are. So she is mossy green
+ * where the tame one is electric yellow, with bark-dark ears and feet — a
+ * woodland cousin. The lightning-bolt tail keeps
+ * {@link PALETTE.flowerYellow} so the spark that makes her a RiPika at all
+ * survives the recolour.
+ */
+export const WILD_RIPIKA_PALETTE: RipikaPalette = {
+  yellow: PALETTE.leafMid,
+  yellowDeep: PALETTE.leafDeep,
+  belly: ART.cream,
+  tip: PALETTE.barkDark,
+  bolt: PALETTE.flowerYellow,
+  cheek: PALETTE.blossomPink,
+};
 
 /** RiPika as she actually is: the electric yellow mouse. */
 export const RIPIKA_PALETTE: RipikaPalette = {

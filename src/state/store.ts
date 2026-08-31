@@ -531,6 +531,31 @@ class GameStore {
   }
 
   /**
+   * She caught a wild one in the roof garden's long grass, and it is hers now
+   * (issue #406).
+   *
+   * {@link collectFlower}'s sibling, and public for the same reason: a thing
+   * *found in the world* is not a purchase, so it must not go through `buy()`
+   * and touch the purse — but `grantFree` is private, and a system reaching
+   * into it would be the second way to acquire something, which is how the
+   * two would drift.
+   *
+   * Unlike a picked flower it arrives **unstowed and paradeable**: the whole
+   * reward for a chase across the roof is the animal now walking behind her,
+   * and a pet filed silently into the backpack would look like nothing had
+   * happened. That is what the `false` means — not worn, so `grantFree` files
+   * it into the parade rather than onto her head.
+   *
+   * She keeps everything she catches, and there is no cap: Jim, 30 August
+   * 2026, *"Yes you can have multiple pets. Currently there is no limit."*
+   */
+  catchWildPet(spec: PurchaseSpec): InventoryItem {
+    const item = this.grantFree(spec, false);
+    this.notify();
+    return item;
+  }
+
+  /**
    * Picks a free flower straight out of the meadow — no shop, no price.
    *
    * Unlike `buy()` it never touches the purse and it is never carryable or
