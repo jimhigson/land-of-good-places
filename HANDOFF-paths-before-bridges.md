@@ -407,3 +407,78 @@ made once on this ticket.
 
 Not raised. `test:procgen` is red and CLAUDE.md is zero-tolerance. Needs an
 Overseer decision on the seed swap, and the `routeCurve` ownership move.
+
+---
+
+# SEED 5 — root cause MEASURED (not hypothesised), 31 Aug
+
+Instrumented `commitLatticePath` to log the first plan to mark node
+(41.12, 9.26) paved. Result:
+
+```
+[414] node (41.12, 9.26) FIRST marked paved; path=482,510,480,479,508,478
+  at commitLatticePath -> commitStreetPlan -> streetRoute
+  -> gateApproachSearch -> pathGraphSearch -> buildGraph
+```
+
+Then measured that node's distance to every **drawn** ribbon on seed 5:
+
+```
+spur-building          nearest drawn point 4.50 m
+spur-stall.facePaint   nearest drawn point 0.00 m
+```
+
+**The gate approach marked the node paved and does not go anywhere near it.**
+The only route touching it is the facePaint spur that branched onto it — which
+is why it "branches off nothing".
+
+My earlier hypothesis (`spur()`'s `paved: !already`) was **wrong**, and so was
+the one before it (control polyline vs swept curve). The actual mechanism:
+`gateApproachSearch` snapshots and restores lattice state correctly, but the
+winner's `commitStreetPlan` marks every node of the **lattice search path**
+paved, while what is finally *drawn* is `assembleGateApproach(...)` — the
+authored gate corridor plus only part of that solved route. Nodes on the
+portion that is not drawn stay flagged paved with no ribbon under them, and
+every later route is free to terminate on one.
+
+**The fix belongs in the commit, not in the branch chooser**: only the nodes
+whose ribbon is actually drawn may be marked paved. Not yet built — reported
+first, per the standing instruction not to fix this one on a hypothesis.
+
+# RAILWAY-GROWN-FROM-A-CROSSING (Jim's design) — assessment
+
+- **The rail router already grows incrementally.** `rail/generate.ts` "grows a
+  track by laying pieces from a vocabulary end to end, rejecting a piece that
+  hits something and picking another, backing up a piece when a joint runs out
+  of options" — not an all-at-once solve. Closure is analytic once the head is
+  near home. So growing outward from a fixed point is its native mode.
+- **`startPoses` is the outermost level of the search** (`generate.ts:176`) and
+  a closed loop begins *and ends* at one. **Seeding a start pose at the chosen
+  crossing point, perpendicular to the chosen path direction, makes the
+  right-angle crossing true by construction** — no new constraint machinery.
+- **A `satisfies` backstop already exists** (`generate.ts:268`,
+  `(route) => boolean`, with `satisfyRejects` in the solve report), plus
+  `RouteInfluence`, a weighted nudge that explicitly "changes which routes are
+  likely, never which are possible". So there are two existing extension
+  points and neither needs inventing.
+- **What it costs.** `budgets.restarts = startPoses.length`; today that is 96
+  rim bearings (`START_POSES`). Pinning the loop to one interior pose cuts the
+  search's outermost freedom from 96 to 1. Mitigation is to offer several
+  candidate crossing points, still pseudo-random. **This is the real risk and
+  it is a search-budget risk, not a geometry one.**
+- **Variety.** Loops currently start on the rim (`RIM_STANDOFF` 3.35) and grow
+  park-circling. Starting from an interior crossing point may change loop
+  character park-wide, not just locally. Jim has accepted the premise; it still
+  needs measuring across ~16 seeds, and I have the harness for it
+  (`scripts/measure-bridgeable-loops.mts`).
+- **Ordering today**: plots (`PARK_LAYOUT`) -> rail routes -> crossing sites ->
+  paths. The chosen crossing point must be picked before the rail, from the
+  layout alone. That is feasible — it needs only the plots and the boundary.
+
+## Rejection-rate measurement (done before the ruling changed; still useful)
+
+`scripts/measure-bridgeable-loops.mts` over 16 seeds: **11 of 14 solved loops
+admit at least one bridge site (79%)**; two seeds failed to solve a loop at all
+under the harness. So a bridgeless loop is not rare-but-catastrophic, it is a
+routine ~1-in-5 outcome — which is why constructing the crossing rather than
+hoping for one is the right call.
