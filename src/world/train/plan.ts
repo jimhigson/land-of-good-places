@@ -2,7 +2,7 @@ import { Vector3 } from 'three';
 import { TrainRoute } from './route';
 import { COASTER_PLANS } from '../coaster/plan';
 import { terrainHeight } from '../terrain';
-import { PALETTE } from '../../core/palette';
+import { STATION_SEEDS, STATION_SEED_RADIUS } from './stationSeeds';
 
 /**
  * The rail plan — the railway as *data*, solved at module load from the park
@@ -49,21 +49,6 @@ export interface PlannedStation {
   readonly leadZ: number;
 }
 
-const STATION_SEEDS = [
-  {
-    name: 'Sunny Side',
-    accent: PALETTE.markerLemon,
-    bearingX: 1,
-    bearingZ: 0,
-  },
-  {
-    name: 'Bluebell Halt',
-    accent: PALETTE.markerSky,
-    bearingX: -1,
-    bearingZ: 0,
-  },
-] as const;
-
 /** Clear of every plot's bounding circle by `radius` — the pure counterpart
  * of the old `collision.isClearCircle`. Trees no longer count: they are
  * seeded *after* this plan now, and keep off the railway rather than the
@@ -74,6 +59,13 @@ const STATION_SEEDS = [
  * layout, rather than each re-deriving it. */
 export { clearOfPlots } from '../parkLayout';
 import { clearOfPlots } from '../parkLayout';
+import {
+  STATION_SEARCH_STEP,
+  STATION_SEARCH_WINDOW,
+  chosenCrossingCorridor,
+  stationCrossingConflict,
+} from './crossingKeepOut';
+import type { Vec2 } from '../rail/segments';
 
 /** The waiting spot beside the platform at `distance` — same side math the
  * station builder uses: the park side, 2.15 m off the centre line. */
@@ -103,6 +95,20 @@ function clearStationDistance(route: TrainRoute, target: number): number {
   const tangent = new Vector3();
   const centre = new Vector3();
 
+  // **The loop's own chosen crossing** (issue #427) — the ground a station may
+  // not stand on, in either of the two senses `crossingKeepOut.ts` owns. Built
+  // once here and asked per candidate below; the module's header says why the
+  // rule lives there rather than being written out at each of its two callers.
+  const crossingWindow: Vec2 = { x: 0, z: 0 };
+  const corridor = chosenCrossingCorridor(
+    route.flatPointAt(0, { x: 0, z: 0 }),
+    route.tangentAt(0, new Vector3()),
+  );
+  const crossingConflictAt = (distance: number) =>
+    stationCrossingConflict(distance, route.length, corridor, (d) =>
+      route.flatPointAt(d, crossingWindow),
+    );
+
   // Scored, not first-fit (issue #241). With the plots unpinned and the loop
   // hugging a spline rim, the stretch nearest a seed bearing can be one
   // where the track plunges RADIALLY between a dip and the rim — and a
@@ -117,7 +123,11 @@ function clearStationDistance(route: TrainRoute, target: number): number {
   //  - and, mildly, nearness to the seed's bearing.
   let best = target;
   let bestScore = Infinity;
-  for (let offset = -60; offset <= 60; offset += 2) {
+  for (
+    let offset = -STATION_SEARCH_WINDOW;
+    offset <= STATION_SEARCH_WINDOW;
+    offset += STATION_SEARCH_STEP
+  ) {
     const distance = target + offset;
     const { standX, standZ } = stationStand(route, distance);
     route.tangentAt(distance, tangent);
@@ -149,7 +159,27 @@ function clearStationDistance(route: TrainRoute, target: number): number {
     // (seed 11 built exactly that before this term existed).
     const cruiserLow = nearCruiserLowCorridor(standX, standZ, 8);
 
+    // **Never on the loop's own chosen crossing** (issue #427), in either
+    // sense: not within `CROSSING_STATION_CLEARANCE` of it *along the loop*,
+    // and not within `CROSSING_STATION_STRUCTURE_CLEARANCE` of the corridor its
+    // deck and ramps occupy *in space*. The loop winds, so those are two rules
+    // and not one seen twice — a station a hundred metres away around the
+    // circuit can still stand a few metres from the crossing.
+    //
+    // The loop was grown from a pose where a bridge provably fits, and
+    // `crossingPlanSolve.ts` refuses to plan a crossing near a station either
+    // way, so a station placed here silently destroys the one thing the whole
+    // loop was grown to guarantee. Measured before these terms existed, seed 2:
+    // a station at d = -2.0 m, on the crossing, and a park with **no bridge at
+    // all**. Weighted above every other term put together, because a park with
+    // no bridge is invalid (Jim's ruling on #414) while a station a few metres
+    // off its ideal spot is merely not ideal — and `crossingKeepOut.ts`'s
+    // `crossingSurvivesStationAt` relies on that ordering holding.
+    const conflict = crossingConflictAt(distance);
+
     const score =
+      (conflict.alongLoop ? 5000 : 0) +
+      (conflict.inSpace ? 5000 : 0) +
       (blocked ? 1000 : 0) +
       (approachBlocked ? 120 : 0) +
       (cruiserLow ? 400 : 0) +
@@ -208,7 +238,10 @@ function nearCruiserLowCorridor(x: number, z: number, reach: number): boolean {
 
 function planStations(route: TrainRoute): readonly PlannedStation[] {
   return STATION_SEEDS.map((seed, index) => {
-    const target = route.distanceNear(seed.bearingX * 60, seed.bearingZ * 60);
+    const target = route.distanceNear(
+      seed.bearingX * STATION_SEED_RADIUS,
+      seed.bearingZ * STATION_SEED_RADIUS,
+    );
     const distance = clearStationDistance(route, target);
     const { standX, standZ } = stationStand(route, distance);
     const tangent = route.tangentAt(distance, new Vector3());

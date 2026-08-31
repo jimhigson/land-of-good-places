@@ -6073,6 +6073,74 @@ const everyProvenBridgeSiteKeepsItsBridge: Invariant = (facts) => {
 };
 
 /**
+ * **No bridge stands where the crossing planner proved none fits.** The
+ * converse of {@link everyProvenBridgeSiteKeepsItsBridge}, and the direction
+ * that was missing.
+ *
+ * `crossingPlanSolve.ts` marches the loop and sorts every candidate into two
+ * tiers: ground a deck and both ramps demonstrably fit on
+ * (`CROSSING_SITES`), and ground it looked at and rejected
+ * (`LEVEL_CROSSING_SITES`). `bridgeFootprint.ts`'s late `planReal` sweep then
+ * used to search *every* crossing for a deck regardless of which tier it came
+ * from — and where it found one on the rejected tier, it built ramps whose
+ * ground nothing had reserved. `paths.ts` keeps other legs off a *proven*
+ * site's ramps (it knows their reach from the site); it cannot keep them off
+ * ramps at a site that was never proven, because there is no reach to read.
+ *
+ * What that cost, measured on the canonical seed before the fix: bridges at
+ * railDistance 202 and 306, both level sites, their 2 m parapet panels
+ * standing across `spur-dodgems`, `spur-stall.dodgems` and
+ * `spur-stall.waterFight`, and twenty waypoints stranded on ground a child
+ * can otherwise reach — `check:park`'s `poi.stranded: 20`. The paths were
+ * routed correctly through those crossings; the bridge built on top of them
+ * is what severed them.
+ *
+ * **Proved red by mutation**, not by argument: `LGP_ALLOW_UNPROVEN_BRIDGES=1`
+ * restores the old search and this goes red on the canonical seed with those
+ * two bridges named. The geometry it was proved against is this branch's
+ * head — canonical loop 361.8 m, proven sites at railDistance 0, 234, 336,
+ * level sites at 70, 116, 166, 202, 306.
+ *
+ * Measured off the built park (`facts.world.train`), never off the planner:
+ * a bridge's deck is asked which built crossing it covers, and that
+ * crossing's `railDistance` is compared with the site distances the facts
+ * already carry.
+ */
+const noBridgeStandsWhereNoneWasProven: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const train = facts.world.train;
+  const proven = facts.plannedBridgeSiteDistances;
+
+  // Same announcement discipline as its converse: a seed with no bridges is
+  // a silent pass here, and that must not read as "every bridge checked".
+  process.stderr.write(
+    `[unproven-bridge cover] ${train.bridges.length} built bridge(s) against ` +
+      `${proven.length} proven site(s) on this seed` +
+      (train.bridges.length === 0 ? ' — this invariant asserts nothing' : '') +
+      '\n',
+  );
+
+  for (const crossing of train.crossings) {
+    const bridged = train.bridges.some((bridge) => bridge.deckCovers(crossing.x, crossing.z));
+    if (!bridged) continue;
+    const onProvenSite = proven.some(
+      (d) => Math.abs(d - crossing.railDistance) <= SITE_IDENTITY_TOLERANCE,
+    );
+    if (onProvenSite) continue;
+    complaints.push(
+      `a bridge deck stands over the crossing at (${fmt([crossing.x, crossing.z])}), ` +
+        `railDistance ${crossing.railDistance.toFixed(1)}, which is not one of the ` +
+        `${proven.length} site(s) the crossing planner proved a bridge fits on ` +
+        `(${proven.map((d) => d.toFixed(1)).join(', ') || 'none at all'}) — so its ramps ` +
+        'stand on ground nobody measured and nothing reserved, and the paths routed ' +
+        'through this crossing are free to be severed by its own parapets',
+    );
+  }
+
+  return complaints;
+};
+
+/**
  * **Is there actually a hole in the wall at the gate?**
  *
  * Issue #195. `isInEntranceGateGap` sat in `entrance/layout.ts` from the day the
@@ -8179,6 +8247,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   [
     'every crossing on a site the planner proved bridgeable still carries its bridge',
     everyProvenBridgeSiteKeepsItsBridge,
+  ],
+  [
+    'no bridge stands where the crossing planner proved none fits',
+    noBridgeStandsWhereNoneWasProven,
   ],
   [
     'the walk in from the gate crosses the railway where the planner planned it to, on a bridge',

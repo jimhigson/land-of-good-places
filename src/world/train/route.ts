@@ -5,6 +5,10 @@ import { COASTER_PLANS } from '../coaster/plan';
 import { RAIL_OVER_RAIL_AIR } from '../coaster/route';
 import { PARK_LAYOUT } from '../parkLayout';
 import { terrainHeight } from '../terrain';
+import { bridgeableCrossingPosesSearch } from './crossingPoses';
+import { fitBridgeAcross, railCorridorBlocked } from './bridgeFit';
+import { chosenCrossingCorridor, crossingSurvivesStationAt } from './crossingKeepOut';
+import { STATION_SEEDS, STATION_SEED_RADIUS } from './stationSeeds';
 import { PARK_SEED } from '../parkManifest';
 import { type Pose2, type SegmentKind, type Vec2, turnVocabulary } from '../rail/segments';
 import { railRouteSearch, RailRouteUnsolvable, type RouteBrief, type SolvedRailRoute } from '../rail/generate';
@@ -203,8 +207,15 @@ interface TrainContext {
   readonly perimeter: number;
 }
 
-/** Builds the shared search context from the layout alone (obstacles + rim poses). */
-function buildTrainContext(): TrainContext {
+/**
+ * Builds the shared search context from the layout alone (obstacles + poses).
+ *
+ * **A generator only because the pose sweep is 102 ms.** It runs before
+ * `trainRouteSearch`'s first `yield`, so as a plain function the whole sweep
+ * landed in one `ParkGeneration.advance()` — 100.1 ms against an 8 ms budget,
+ * and `check:park-boot` red. See `bridgeableCrossingPosesSearch`'s own note.
+ */
+function* buildTrainContext(): Generator<number, TrainContext, void> {
   const obstacles = trainObstacles();
   const ox = Float64Array.from(obstacles, (o) => o.x);
   const oz = Float64Array.from(obstacles, (o) => o.z);
@@ -244,15 +255,138 @@ function buildTrainContext(): TrainContext {
     const b = rim[(i + 1) % rim.length] as { x: number; z: number };
     perimeter += Math.hypot(b.x - a.x, b.z - a.z);
   }
-  const startPoses: Pose2[] = rim.map((p, i) => {
-    const next = rim[(i + 1) % rim.length] as { x: number; z: number };
-    const hx = next.x - p.x;
-    const hz = next.z - p.z;
-    const m = Math.hypot(hx, hz) || 1;
-    return { x: p.x, z: p.z, hx: hx / m, hz: hz / m };
-  });
+  // **The loop begins at a crossing a bridge fits, not at a rim bearing**
+  // (issue #427, Jim's ruling on #414: "the procgen should be able to make
+  // parks that meet constraints and this should be a constraint").
+  //
+  // The rim ring above is still built, because `perimeter` — the length ladder
+  // in `trainRouteSearch` is a fraction of it — is a property of the park's
+  // own outline and nothing to do with where the loop starts.
+  //
+  // Every pose here stands where a bridge's deck and both ramps provably fit,
+  // headed square across the path that will cross it, so a loop closed from
+  // any of them has a bridgeable crossing by construction. See
+  // `crossingPoses.ts` for why it is a ranked field rather than the single
+  // crossing the literal design called for.
+  const startPoses: Pose2[] = yield* bridgeableCrossingPosesSearch(PARK_SEED);
 
   return { clear, startPoses, perimeter };
+}
+
+/**
+ * **Does this finished loop still admit a bridge where it started?**
+ *
+ * `crossingPoses.ts` proves a bridge fits at a pose *before* the railway
+ * exists, which is the whole of issue #427 — but two things can only be known
+ * once a candidate loop has closed, and both were measured taking the guarantee
+ * away again:
+ *
+ * - **The loop can eat its own ramp room.** Seed 2 grew from a genuinely
+ *   bridgeable crossing, then curved back on itself beside it; past the deck a
+ *   ramp may not run in the rail's own corridor, and the planner measured
+ *   **1.5 m of run against a 12.1 m floor**. The pose generator cannot see
+ *   this at any price, because when it runs there is no loop to see.
+ * - **Station placement can have no move that helps.** Seed 15's placer window
+ *   held no candidate at all that cleared the crossing, so it took the
+ *   least-bad one. A penalty does not discriminate when every candidate carries
+ *   it — the loop, not the placement, is what has to give.
+ *
+ * Both are properties of the *solved* loop, so `RouteBrief.satisfies` is the
+ * only hook in the search that can ask them: it runs the moment a candidate
+ * closes, and a loop that fails simply sends the search on to the next of the
+ * ~1200 ranked crossing poses. It also cannot make a park fail — if every pose
+ * is exhausted the first solved loop is returned anyway, with
+ * `SolveReport.satisfied` false — so this can only ever improve the outcome or
+ * cost search time, never lose the railway. `SolveReport.satisfyRejects` counts
+ * what it costs; `scripts/measure-train-solve-budget.mts` prints it.
+ *
+ * Neither test is written out here. The rail-corridor rule comes from
+ * `bridgeFit.ts` and the station rule from `crossingKeepOut.ts`, both of which
+ * the real planner reads as well — a more permissive second copy of "a bridge
+ * fits here" is exactly the prover-versus-builder disagreement issue #414 was,
+ * and putting one at this level would recreate it one level earlier.
+ *
+ * The station-structure test is deliberately *not* applied to the probe: at
+ * this moment there is a route but no stations, and asking where they will
+ * stand is what {@link crossingSurvivesStationAt} does instead.
+ */
+function loopKeepsItsCrossing(route: SolvedRailRoute): boolean {
+  // The loop as a polyline, sampled once — the same 720 samples and the same
+  // nearest-sample answer `TrainRoute.distanceNear` gives, so this measures the
+  // railway the crossing planner will later measure, not a finer or coarser
+  // idea of it.
+  const samples = 720;
+  const xs = new Float64Array(samples);
+  const zs = new Float64Array(samples);
+  const probe: Vec2 = { x: 0, z: 0 };
+  for (let i = 0; i < samples; i += 1) {
+    route.pointAt((i / samples) * route.length, probe);
+    xs[i] = probe.x;
+    zs[i] = probe.z;
+  }
+  const nearestSample = (x: number, z: number): number => {
+    let best = 0;
+    let bestSquared = Infinity;
+    for (let i = 0; i < samples; i += 1) {
+      const dx = (xs[i] as number) - x;
+      const dz = (zs[i] as number) - z;
+      const squared = dx * dx + dz * dz;
+      if (squared < bestSquared) {
+        bestSquared = squared;
+        best = i;
+      }
+    }
+    return best;
+  };
+
+  // Memoised on a 1 m grid, like the planner's own — the probe asks about
+  // thousands of overlapping points per candidate footprint, and this runs once
+  // per solved route rather than once per park.
+  const railDistanceCache = new Map<number, number>();
+  const railDistanceAt = (x: number, z: number): number => {
+    const key = (Math.round(x) + 8192) * 32768 + (Math.round(z) + 8192);
+    const hit = railDistanceCache.get(key);
+    if (hit !== undefined) return hit;
+    const i = nearestSample(x, z);
+    const value = Math.hypot(x - (xs[i] as number), z - (zs[i] as number));
+    railDistanceCache.set(key, value);
+    return value;
+  };
+
+  const centre: Vec2 = { x: 0, z: 0 };
+  const tangent: Vec2 = { x: 0, z: 0 };
+  route.pointAt(0, centre);
+  route.tangentAt(0, tangent);
+
+  // 1. Does a whole bridge still fit across the track at the pose the loop was
+  //    grown from, now that the railway is really there?
+  const fit = fitBridgeAcross(
+    centre.x,
+    centre.z,
+    tangent.z,
+    -tangent.x,
+    railCorridorBlocked(railDistanceAt),
+  );
+  if (!fit) return false;
+
+  // 2. Can both stations be placed somewhere that leaves the crossing alone?
+  const corridor = chosenCrossingCorridor(centre, tangent);
+  const window: Vec2 = { x: 0, z: 0 };
+  const flatPointAt = (distance: number): Vec2 => route.pointAt(distance, window);
+  for (const seed of STATION_SEEDS) {
+    const target = route.length
+      ? (() => {
+          const i = nearestSample(
+            seed.bearingX * STATION_SEED_RADIUS,
+            seed.bearingZ * STATION_SEED_RADIUS,
+          );
+          return (i / samples) * route.length;
+        })()
+      : 0;
+    if (!crossingSurvivesStationAt(target, route.length, corridor, flatPointAt)) return false;
+  }
+
+  return true;
 }
 
 /** One ladder rung's brief: the shared context aimed at a particular length. */
@@ -269,6 +403,7 @@ function briefForLength(context: TrainContext, desiredLength: number, salt: numb
     selfClearance: SELF_CLEARANCE,
     minRadius: TRAIN_MIN_TURN_RADIUS,
     budgets: { perJoint: 16, restarts: context.startPoses.length },
+    satisfies: loopKeepsItsCrossing,
   };
 }
 
@@ -290,20 +425,47 @@ function briefForLength(context: TrainContext, desiredLength: number, salt: numb
  * fail, loudly, with the last rung's diagnostic — exactly as before.
  */
 export function* trainRouteSearch(): Generator<number, SolvedRailRoute, void> {
-  const context = buildTrainContext();
+  const context = yield* buildTrainContext();
   let lastFailure: RailRouteUnsolvable | null = null;
+  // **A rung that solved but did not satisfy does not end the ladder.**
+  //
+  // `railRouteSearch` never throws once any start pose closed a loop: if every
+  // pose failed `satisfies` it hands back the first route regardless, with
+  // `report.satisfied` false, because a park with no railway is far worse than
+  // one whose railway missed. That is right at its level and wrong at this one
+  // — here there is somewhere else to go, namely the next rung's shorter,
+  // slacker loop, and a rung's unsatisfied route was silently ending the walk
+  // before the ladder ever got there.
+  //
+  // Measured on seed 2 (#427): its longest rung closed exactly one loop out of
+  // 96 poses, that loop had curved back and eaten its own ramp room, and the
+  // search returned it as a fallback — so the shorter rungs, which are the
+  // whole reason the ladder exists for the pinched seeds, were never tried.
+  //
+  // So an unsatisfied route is kept aside and the ladder goes on. Only when
+  // every rung has been walked is it handed back, which leaves
+  // `railRouteSearch`'s own guarantee exactly as strong as it was: this can
+  // still never fail to produce a railway.
+  let unsatisfied: SolvedRailRoute | null = null;
   for (let i = 0; i < TRAIN_LENGTH_FRACTIONS.length; i += 1) {
     const fraction = TRAIN_LENGTH_FRACTIONS[i] as number;
     // A distinct seed salt per rung, so a shorter fallback explores differently
     // rather than re-walking the longer rung's dead ends at a new length.
     const brief = briefForLength(context, context.perimeter * fraction, (i + 1) * 0x1000);
     try {
-      return yield* railRouteSearch(brief);
+      const route = yield* railRouteSearch(brief);
+      if (route.report.satisfied) return route;
+      // The first, not the best: the ladder has no ordering over whole routes
+      // that could call one unsatisfied loop better than another, and inventing
+      // one here would be a second notion of quality beside `scoreOf`. Same
+      // reasoning `rail/generate.ts` gives for its own fallback.
+      unsatisfied ??= route;
     } catch (error) {
       if (!(error instanceof RailRouteUnsolvable)) throw error;
       lastFailure = error;
     }
   }
+  if (unsatisfied) return unsatisfied;
   throw lastFailure ?? new Error('train route: the length ladder was empty');
 }
 
@@ -323,6 +485,18 @@ export class TrainRoute {
   /** Smallest gap between the centre line and the boundary wall. For reporting. */
   readonly minClearance: number;
 
+  /**
+   * What the loop search actually cost — start poses offered, which one won,
+   * restarts, backtracks (`rail/generate.ts`'s {@link SolveReport}).
+   *
+   * Exposed for `scripts/measure-train-solve-budget.mts` (#427): growing the
+   * loop from a chosen crossing pose trades a ring of 96 candidate rim
+   * bearings for a handful of interior ones, and `budgets.restarts` comes
+   * straight from `startPoses.length` — so whether that starves the search is
+   * a question about these numbers, and they were not readable from outside.
+   */
+  readonly solveReport: SolvedRailRoute['report'];
+
   private readonly solved: SolvedRailRoute;
   private readonly sampleX: Float64Array;
   private readonly sampleZ: Float64Array;
@@ -336,6 +510,7 @@ export class TrainRoute {
     // `check:park`, `test:procgen` and a continued save all take, none of which
     // pre-warm. Either way it is the same ladder walk.
     this.solved = takePrewarmedTrain() ?? solveTrainLoop();
+    this.solveReport = this.solved.report;
     this.length = this.solved.length;
 
     // A lookup table for "where along the loop is this point?" — used to place

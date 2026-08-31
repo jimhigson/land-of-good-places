@@ -190,6 +190,30 @@ export const BRIDGE_RISE = TRAIN_CLEARANCE_Y + BRIDGE_DECK_DEPTH;
 export const FENCE_OFFSET = 2.0;
 
 /**
+ * Half-length of a bridge deck along the crossing direction — has to clear
+ * both fence lines (each {@link FENCE_OFFSET} out from the rail centre) with
+ * a little margin so the deck's own edge does not sit flush on a fence post.
+ *
+ * **This is the part of a bridge that cannot shrink.** The tunnel has to
+ * swallow the whole fenced corridor, so any future shortening of a bridge
+ * takes every metre out of the ramps.
+ *
+ * It lives here, in the leaf, rather than in `bridgeFootprint.ts` which owns
+ * every other footprint number, **because of an import cycle it was the only
+ * cause of**: `crossingKeepOut.ts` needs this one constant, and taking it from
+ * `bridgeFootprint.ts` dragged in that module's `distanceToRailCorridor`
+ * import of `plan.ts`, closing the loop `plan -> route -> crossingKeepOut ->
+ * bridgeFootprint -> plan`. `check:park-boot` died on it with
+ * `ReferenceError: Cannot access 'TrainRoute' before initialization`,
+ * depending on which module the entry point happened to reach first — which is
+ * why the browser and most checks were unaffected and one check was not. Same
+ * disease, and the same fix, as {@link FENCE_OFFSET}'s own note directly
+ * above. `bridgeFootprint.ts` re-exports it, so every existing reader is
+ * unchanged and there is still exactly one definition.
+ */
+export const DECK_HALF_LENGTH = FENCE_OFFSET + 1.2;
+
+/**
  * How far below a bridge deck's own surface the fence's `topIsAbsolute` top
  * sits, where a run of fence posts falls directly under a deck — a decisive
  * margin, never a graze, and nowhere near a ground jump reaches (see
@@ -206,3 +230,56 @@ export const FENCE_SEAM_MARGIN = 0.18;
  * reasoning as every other constant in this file.
  */
 export const STATION_GAP = 6.5;
+
+/**
+ * Half-width of the corridor a bridge site's deck and ramps are probed at.
+ * The real pass starts its width search at the crossing's own `halfGap`
+ * (floored at 4.5 in `crossings.ts`, and a square planned crossing measures
+ * at that floor), so this is the corridor the first — preferred — real
+ * candidate will actually occupy, plus half a stride of slack.
+ */
+export const SITE_HALF_WIDTH = 4.5 + 0.5;
+/**
+ * The narrower corridor tried when {@link SITE_HALF_WIDTH} finds nothing —
+ * a deck for a path that arrives square needs barely more than the ribbon
+ * itself, and a whole district with no bridge at all is a far worse
+ * outcome than a slimmer one (seed 2's east: plots, a station and the
+ * boundary between them ruled out every full-width candidate).
+ */
+export const NARROW_HALF_WIDTH = 4.0;
+
+/**
+ * **How far along the loop a station must stay from a planned crossing.**
+ *
+ * A crossing needs the station's own platform window ({@link STATION_GAP}
+ * either way) plus its own corridor half-width, plus a post's worth of
+ * daylight so the fence gap and the platform window never merge.
+ *
+ * **Two modules must agree on this number, which is why it lives here.**
+ * `crossingPlanSolve.ts` refuses to plan a crossing this close to a station;
+ * `plan.ts` refuses to *place* a station this close to the loop's own chosen
+ * crossing. If they ever disagreed, the generator would grow a loop from a
+ * bridgeable crossing and then put a station on top of it — which is exactly
+ * what happened on seed 2 before the second half existed (issue #427: a
+ * station landed at d = -2.0 m, on the crossing, and the park came out with no
+ * bridge at all).
+ */
+export const CROSSING_STATION_CLEARANCE = STATION_GAP + SITE_HALF_WIDTH + 2.0;
+
+/**
+ * **How far a station's own structures must stand from a planned crossing, in
+ * SPACE** — as distinct from {@link CROSSING_STATION_CLEARANCE}, which is
+ * measured *along the loop*.
+ *
+ * The loop winds, so the two are not the same rule seen twice. A station 104 m
+ * away around the circuit can stand a few metres from a crossing in plain
+ * space, and its canopy posts then block the bridge deck. Measured on #427:
+ * seeds 2 and 15 both chose a bridgeable crossing, solved a loop through it,
+ * and the planner then reported `DECK BLOCKED` at all ten width/angle pairs —
+ * with the along-the-loop clearance satisfied.
+ *
+ * Read from both directions, like its along-the-loop twin: the planner refuses
+ * to *plan* a crossing this close to station structures, and `plan.ts` refuses
+ * to *place* a station this close to the loop's chosen crossing.
+ */
+export const CROSSING_STATION_STRUCTURE_CLEARANCE = 8;

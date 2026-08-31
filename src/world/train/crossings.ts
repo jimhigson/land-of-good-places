@@ -56,6 +56,26 @@ export interface LevelCrossing {
    * falls back to the straight line the old geometry always assumed.
    */
   readonly spine: readonly SpinePoint[];
+  /**
+   * Did `crossingPlanSolve.ts` ever prove a bridge fits here?
+   *
+   * True only for a crossing snapped to a {@link CROSSING_SITES} entry —
+   * ground the planner measured a deck and both ramps onto. False for a
+   * {@link LEVEL_CROSSING_SITES} entry (the planner's deliberate level tier:
+   * it looked, and a bridge does not fit) and for an unsnapped crossing
+   * measured off the drawn paths, which nothing has ever probed.
+   *
+   * `bridgeFootprint.ts`'s late `planReal` pass used to try for a bridge at
+   * every crossing regardless, and where it found one at a level site the
+   * resulting ramp parapets stood across the very path that crossed there —
+   * measured on the canonical seed: bridges at railD 202 and 306, both level
+   * sites, severing `spur-dodgems`, `spur-stall.dodgems` and
+   * `spur-stall.waterFight` and stranding twenty waypoints on ground a child
+   * can otherwise reach. So the answer to "was a bridge proven here" has to
+   * travel with the crossing; the builder cannot re-derive it, because by
+   * then the site lists have been collapsed into this one array.
+   */
+  readonly provenBridgeSite: boolean;
 }
 
 /** One point of a crossing's {@link LevelCrossing.spine}. */
@@ -406,6 +426,7 @@ export function computeCrossings(
       );
       if (along <= SITE_SNAP_TOLERANCE) {
         crossings.push({
+          provenBridgeSite: site.bridge,
           x: site.x,
           z: site.z,
           railDistance: site.railDistance,
@@ -432,6 +453,9 @@ export function computeCrossings(
       pathDirX: midTangent.z,
       pathDirZ: -midTangent.x,
       halfGap,
+      // Nothing proved anything here: this crossing was measured off the
+      // drawn paths, at a rail distance no site list holds.
+      provenBridgeSite: false,
     });
     group = [];
   };
