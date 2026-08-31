@@ -3,17 +3,20 @@ import { TRAIN_PLAN } from './plan';
 import {
   CROSSING_STATION_CLEARANCE,
   CROSSING_STATION_STRUCTURE_CLEARANCE,
-  FENCE_OFFSET,
 } from './clearance';
 import { DECK_HALF_LENGTH, MIN_BRIDGE_HALF_LENGTH } from './bridgeFootprint';
 import { STATION_GAP } from './fence';
 import {
   NARROW_HALF_WIDTH,
+  SITE_ANGLE_OFFSETS,
   SITE_BOUNDARY_MARGIN,
   SITE_HALF_WIDTH,
+  SITE_HALF_WIDTHS,
   SITE_PLOT_MARGIN,
+  SITE_RAIL_MARGIN,
   SITE_RAMP_FLOOR,
   SITE_RAMP_IDEAL,
+  fitBridgeAcross,
   probeBridgeReach,
 } from './bridgeFit';
 
@@ -98,12 +101,6 @@ export interface CrossingSite {
 
 
 
-/** Clearance a ground-level ramp tread keeps from the rail centre line —
- * `bridgeFootprint.ts`'s own `FENCE_OFFSET + RAMP_RAIL_MARGIN`, restated
- * from the same parts because that sum is module-private too. Matters on
- * the oblique candidates, whose ramps skirt the fence at an angle. */
-const SITE_RAIL_MARGIN = FENCE_OFFSET + 0.5;
-
 /**
  * A crossing may not land where `fence.ts`'s `stationRun` seals the far
  * side of a platform: the station's own window (`STATION_GAP` either way)
@@ -111,13 +108,6 @@ const SITE_RAIL_MARGIN = FENCE_OFFSET + 0.5;
  * worth of daylight so gap and window never merge into one another.
  */
 const STATION_CLEARANCE = CROSSING_STATION_CLEARANCE;
-
-/** Candidate crossing angles, radians off square, in preference order —
- * square first (the network is predominantly grid-aligned and a crossing
- * reads best square to the track; Decision 6 keeps diagonals a genuine
- * minority), modest obliques after, for stretches where the ground past the
- * rail is too shallow for a straight ramp but has room along its length. */
-const ANGLE_OFFSETS: readonly number[] = [0, Math.PI / 6, -Math.PI / 6, Math.PI / 4, -Math.PI / 4];
 
 /** Metres between candidate points marched along the loop. */
 const MARCH_STEP = 2.0;
@@ -234,15 +224,23 @@ function probeReach(
     maxReach,
     boundaryMargin,
     plotMargin,
-    (x, z, along) => {
-      if (nearStationStructure(x, z)) return true;
-      // Past the deck the ramp is ordinary near-ground paving — it may
-      // not run inside the rail's own corridor (obliques skirt it).
-      if (along > DECK_HALF_LENGTH && railDistanceAt(x, z) < SITE_RAIL_MARGIN) return true;
-      return false;
-    },
+    plannerBlocked,
   );
 }
+
+/**
+ * The two tests that need a *solved* route — which is exactly what this caller
+ * has and the pose generator does not. Named rather than inline because
+ * {@link bridgeCandidateAt} hands it to `bridgeFit.ts`'s shared width/angle
+ * search as well as using it through {@link probeReach}.
+ */
+const plannerBlocked = (x: number, z: number, along: number): boolean => {
+  if (nearStationStructure(x, z)) return true;
+  // Past the deck the ramp is ordinary near-ground paving — it may not run
+  // inside the rail's own corridor (obliques skirt it).
+  if (along > DECK_HALF_LENGTH && railDistanceAt(x, z) < SITE_RAIL_MARGIN) return true;
+  return false;
+};
 
 /** The `side = +1` direction at `railDistance` — `crossings.ts`'s own sign
  * convention (`side = sign(tangent.z * dx - tangent.x * dz)`). */
@@ -259,37 +257,20 @@ function bridgeCandidateAt(railDistance: number): Candidate | null {
   route.tangentAt(railDistance, tangent);
   const [perpX, perpZ] = sidePlusDirection(tangent);
 
-  for (const halfWidth of [SITE_HALF_WIDTH, NARROW_HALF_WIDTH]) {
-    for (const offset of ANGLE_OFFSETS) {
-      const cos = Math.cos(offset);
-      const sin = Math.sin(offset);
-      const dirX = perpX * cos + perpZ * sin;
-      const dirZ = -perpX * sin + perpZ * cos;
-      const { pos, neg, deckClear } = probeReach(
-        point,
-        dirX,
-        dirZ,
-        halfWidth,
-        SITE_RAMP_IDEAL,
-        SITE_BOUNDARY_MARGIN,
-        SITE_PLOT_MARGIN,
-      );
-      if (!deckClear || pos < SITE_RAMP_FLOOR || neg < SITE_RAMP_FLOOR) continue;
-      return {
-        railDistance,
-        x: point.x,
-        z: point.z,
-        dirX,
-        dirZ,
-        rampReachPos: pos,
-        rampReachNeg: neg,
-        bridge: true,
-        halfWidth,
-        obliqueness: Math.abs(offset) + (halfWidth < SITE_HALF_WIDTH ? 0.01 : 0),
-      };
-    }
-  }
-  return null;
+  const fit = fitBridgeAcross(point.x, point.z, perpX, perpZ, plannerBlocked);
+  if (!fit) return null;
+  return {
+    railDistance,
+    x: point.x,
+    z: point.z,
+    dirX: fit.dirX,
+    dirZ: fit.dirZ,
+    rampReachPos: fit.rampReachPos,
+    rampReachNeg: fit.rampReachNeg,
+    bridge: true,
+    halfWidth: fit.halfWidth,
+    obliqueness: Math.abs(fit.angleOffset) + (fit.halfWidth < SITE_HALF_WIDTH ? 0.01 : 0),
+  };
 }
 
 function levelCandidateAt(railDistance: number): Candidate | null {
@@ -430,8 +411,8 @@ export function explainBridgeRefusal(railDistance: number): string[] {
   route.tangentAt(railDistance, tangent);
   const [perpX, perpZ] = sidePlusDirection(tangent);
   const out: string[] = [`railD=${railDistance.toFixed(1)} at (${point.x.toFixed(1)}, ${point.z.toFixed(1)}):`];
-  for (const halfWidth of [SITE_HALF_WIDTH, NARROW_HALF_WIDTH]) {
-    for (const offset of ANGLE_OFFSETS) {
+  for (const halfWidth of SITE_HALF_WIDTHS) {
+    for (const offset of SITE_ANGLE_OFFSETS) {
       const cos = Math.cos(offset);
       const sin = Math.sin(offset);
       const { pos, neg, deckClear } = probeReach(

@@ -3,7 +3,7 @@ import {
   DECK_HALF_LENGTH,
   MIN_RAMP_RUN,
 } from './bridgeFootprint';
-import { BRIDGE_RISE, NARROW_HALF_WIDTH, SITE_HALF_WIDTH } from './clearance';
+import { BRIDGE_RISE, FENCE_OFFSET, NARROW_HALF_WIDTH, SITE_HALF_WIDTH } from './clearance';
 
 // Re-exported so this module stays the one place a caller has to look for the
 // bridge-fit vocabulary, even though the numbers themselves live with the
@@ -170,4 +170,92 @@ export function probeBridgeReach(
     return run;
   };
   return { pos: reach(1), neg: reach(-1), deckClear };
+}
+
+/**
+ * Clearance a ground-level ramp tread keeps from the rail centre line —
+ * `bridgeFootprint.ts`'s own `FENCE_OFFSET + RAMP_RAIL_MARGIN`, restated from
+ * the same parts because that sum is module-private there. Matters on the
+ * oblique candidates, whose ramps skirt the fence at an angle.
+ *
+ * Lives here rather than in `crossingPlanSolve.ts` because **two callers now
+ * apply it**: the crossing planner, against the solved loop it is measuring,
+ * and `train/route.ts`'s `satisfies` backstop, against a candidate loop that
+ * has only just closed. One number, one owner — see this module's header.
+ */
+export const SITE_RAIL_MARGIN = FENCE_OFFSET + 0.5;
+
+/**
+ * Candidate crossing angles, radians off square, in preference order — square
+ * first (the network is predominantly grid-aligned and a crossing reads best
+ * square to the track; Decision 6 keeps diagonals a genuine minority), modest
+ * obliques after, for stretches where the ground past the rail is too shallow
+ * for a straight ramp but has room along its length.
+ */
+export const SITE_ANGLE_OFFSETS: readonly number[] = [
+  0,
+  Math.PI / 6,
+  -Math.PI / 6,
+  Math.PI / 4,
+  -Math.PI / 4,
+];
+
+/** Deck half-widths tried, widest first. */
+export const SITE_HALF_WIDTHS: readonly number[] = [SITE_HALF_WIDTH, NARROW_HALF_WIDTH];
+
+/** The first width and angle at which a whole bridge fits across the track. */
+export interface BridgeFitAcross {
+  readonly halfWidth: number;
+  readonly dirX: number;
+  readonly dirZ: number;
+  readonly rampReachPos: number;
+  readonly rampReachNeg: number;
+  /** Radians off square, signed. 0 is perpendicular to the track. */
+  readonly angleOffset: number;
+}
+
+/**
+ * **Does a whole bridge fit across the track here?** — the width/angle search
+ * both callers run, in one place.
+ *
+ * `perpX`/`perpZ` is the square-across direction (`crossings.ts`'s `side = +1`
+ * convention). Widths are tried widest-first and angles square-first, and the
+ * first pair whose deck fits and whose ramps both reach {@link SITE_RAMP_FLOOR}
+ * wins — so the returned fit is the *preferred* one, not merely a possible one.
+ *
+ * `extraBlocked` is whatever the caller knows beyond the boundary and the
+ * plots. The crossing planner passes the station-structure and rail-corridor
+ * tests; the start-pose generator passes none (there is no route yet); the
+ * `satisfies` backstop passes the rail-corridor test alone, because at that
+ * moment there is a route but not yet any stations.
+ */
+export function fitBridgeAcross(
+  centreX: number,
+  centreZ: number,
+  perpX: number,
+  perpZ: number,
+  extraBlocked?: ExtraBlocked,
+): BridgeFitAcross | null {
+  for (const halfWidth of SITE_HALF_WIDTHS) {
+    for (const angleOffset of SITE_ANGLE_OFFSETS) {
+      const cos = Math.cos(angleOffset);
+      const sin = Math.sin(angleOffset);
+      const dirX = perpX * cos + perpZ * sin;
+      const dirZ = -perpX * sin + perpZ * cos;
+      const { pos, neg, deckClear } = probeBridgeReach(
+        centreX,
+        centreZ,
+        dirX,
+        dirZ,
+        halfWidth,
+        SITE_RAMP_IDEAL,
+        SITE_BOUNDARY_MARGIN,
+        SITE_PLOT_MARGIN,
+        extraBlocked,
+      );
+      if (!deckClear || pos < SITE_RAMP_FLOOR || neg < SITE_RAMP_FLOOR) continue;
+      return { halfWidth, dirX, dirZ, rampReachPos: pos, rampReachNeg: neg, angleOffset };
+    }
+  }
+  return null;
 }
