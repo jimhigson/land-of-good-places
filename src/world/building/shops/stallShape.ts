@@ -903,9 +903,9 @@ function addEmblem(
    * So this measures the emblem it actually built and shrinks it until it fits
    * inside the stall's own footprint. Nothing has to be told in advance how wide
    * its model is, which means the next emblem somebody adds cannot silently eat
-   * the aisle, whatever shape it turns out to be. Two passes: shrinking moves
-   * the geometry towards the perch, so one correction slightly overshoots and
-   * the second recovers it.
+   * the aisle, whatever shape it turns out to be. It shrinks on all three axes
+   * together, so a hat that loses its width loses its height with it and stays
+   * the shape it was authored as.
    */
   const box = new Box3();
   asset.root.scale.set(metres / SHOP_SCALE_XZ, metres / shopScaleY(unit), metres / SHOP_SCALE_XZ);
