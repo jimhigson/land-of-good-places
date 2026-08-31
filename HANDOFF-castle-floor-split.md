@@ -426,3 +426,33 @@ three things only a rendered frame can answer are unverified:
 
 This is a gate, not a formality: the branch is pre-approved for merge and must
 still not be merged until somebody has looked.
+
+### CI, on the real head commit
+
+Rebased onto `main` @ `faf6d044`; head is `d10865c`, which is also the sha in
+the preview URL. All four checks **SUCCESS**: Build and checks, Procgen
+invariants, Deploy PR preview, A reload gets the new build.
+
+Preview: `https://pr-407-d10865c-land-of-good-places.blockstack.workers.dev`
+with `/castle?deck=0`, `?deck=1`, `?deck=2` and `/slide`.
+
+**Egress note, contradicting CLAUDE.md:** that host returned **HTTP 200** to
+`curl` from this sandbox. CLAUDE.md's PR section says `*.workers.dev` gives 403
+here and that an agent therefore cannot verify a preview it hands over. That was
+not true today. Worth re-checking before the next agent repeats the caveat.
+
+### The one gate still open: nobody has looked
+
+The branch is pre-approved for merge, and it must still not be merged. I was
+not granted the chrome-devtools MCP, and CLAUDE.md forbids driving it
+unasked. Outstanding, and only a rendered frame can answer them:
+
+1. every floor reachable by lift, nothing stranded;
+2. the great hall reading as a hall now it has a floor to itself;
+3. **the ginormous slide launching from the roof garden.**
+
+Screenshots required: each floor at player height, and the lift moving between
+them. `scripts/qa-castle-shrink.mjs <port> <outDir> <halfX> <halfZ>` is on this
+branch and takes standing points as fractions of the half-extent; it will need a
+small edit for three floors reached by `/castle?deck=N` rather than five by
+height.
