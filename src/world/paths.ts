@@ -1916,7 +1916,7 @@ const RAMP_SCREEN_MARGIN = 1.5;
  * seeds built a bridge on a level site, and this screen had nothing to say
  * about the ground it stood on.
  */
-function pointStandsOnABridgeRamp(x: number, z: number, margin = RAMP_SCREEN_MARGIN): boolean {
+export function pointStandsOnABridgeRamp(x: number, z: number, margin = RAMP_SCREEN_MARGIN): boolean {
   for (const site of CROSSING_SITES) {
     if (!site.bridge) continue;
     const dx = x - site.x;

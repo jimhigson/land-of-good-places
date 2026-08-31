@@ -482,3 +482,92 @@ admit at least one bridge site (79%)**; two seeds failed to solve a loop at all
 under the harness. So a bridgeless loop is not rare-but-catastrophic, it is a
 routine ~1-in-5 outcome — which is why constructing the crossing rather than
 hoping for one is the right call.
+
+---
+
+# AFTER THE #431 REBASE — re-measured, and BOTH defects have moved
+
+Rebased onto `origin/main` at `298f39c0` (#431, "Grow the railway from a proven
+crossing"). Six commits conflicted; **five of the six were absorbed wholesale by
+#431** and resolved to main's version — `explainBridgeRefusal`,
+`provenBridgeSite` on `LevelCrossing`, and the proven-bridge gate (which main
+ships as `allowUnprovenBridges()`, on by default, exactly as this branch
+intended). What survives as this branch's own is `paths.ts`'s ramp screen, the
+`pathGraph`→`paths` `routeCurve` move, the invariants and the probes.
+
+`tsc --noEmit` exit 0 after the rebase.
+
+## Defect (B) is GONE — do not go looking for it
+
+The fence-panel cut on `connector-stall.facePaint-station-0` at (51.1, 4.4),
+railGap 2.1 m, is **not present on seed 5 after the rebase**.
+`probe-blocked-ribbons` reports **no fence-panel block anywhere in the seed**.
+#431 moved the loop and it went with it.
+
+## Defect (A) — still real, but 8 stranded waypoints, not 15
+
+`LGP_SEED=5 pnpm run check:park`: `poi.stranded: 8`, at
+(38.7, 38.7) (17.4, 42.2) (21.3, 41.1) (24.1, 39.9) (28.0, 38.7) (34.1, 35.4)
+(35.8, 36.6) and (14.9, -44.3).
+
+`probe-blocked-ribbons`, seed 5 (loop 329.5 m, proven bridge sites 12/56/142/308):
+
+```
+spur-dodgems:    BLOCKED at (10.6, 44.5) railD 10.1 :: wall len=2.0 halfT=0.15 top=5.3
+spur-dodgems:    BLOCKED at (14.3, 43.4) railD 13.7 :: wall len=2.0 halfT=0.15 top=5.3
+spur-waterFight: BLOCKED at (14.4, -42.4) railD 144.2 :: two walls, top=4.4 and 5.1
+spur-waterFight: BLOCKED at (17.1, -44.6) railD 146.0 :: two walls, top=2.8 and 3.6
+spur-waterFight: BLOCKED at (17.1, -40.6) railD 139.6 :: wall len=2.0 halfT=0.15 top=4.4
+```
+
+`len=2.0, halfT=0.15`, tops **climbing** 2.8/3.6/4.4/5.1/5.3 — ramp parapets, at
+railD 10.1/13.7 (proven site **12**) and 139.6-146.0 (proven site **142**). The
+seven-waypoint cluster lies just beyond `spur-dodgems`' cut; (14.9, -44.3) lies
+beyond `spur-waterFight`'s.
+
+The other five blocked stretches in the sweep are **not** bridges and strand
+nothing: a `circle r=0.3 top=Infinity` at (5.1, 57.0) on three routes by the
+gate, and building walls (`len=18.0`, `len=4.2`) at (-42.8, 3.9) and
+(20.3, 21.3). Out of scope here; noted so nobody re-finds them.
+
+## THE NAMED CAUSE IS WRONG IN ITS MECHANISM — measured
+
+The handoff I inherited says a spur's **swept Catmull-Rom bows off** its control
+polyline into the parapet. `scripts/probe-ribbons-on-ramps.mts` asks the real
+screen (`pointStandsOnABridgeRamp`, imported at margin 0, never restated) about
+the drawn curve and the control polyline separately:
+
+```
+gate-approach          control too  sites=[12(crosses)]   85 drawn,  4 control, stray 0.11 m
+spur-dodgems           DRAWN ONLY   sites=[12(FOREIGN)]   20 drawn,  0 control, stray 0.01 m
+spur-waterFight        control too  sites=[142(crosses)]  83 drawn,  5 control, stray 0.43 m
+spur-stall.waterFight  control too  sites=[142(crosses)]  71 drawn,  3 control, stray 0.00 m
+spur-stall.dodgems     control too  sites=[56(crosses)]   81 drawn,  4 control, stray 0.30 m
+spur-stall.facePaint   DRAWN ONLY   sites=[56(FOREIGN)]   11 drawn,  0 control, stray 0.00 m
+spur-exit-ferrisWheel  DRAWN ONLY   sites=[142(FOREIGN)]   4 drawn,  0 control, stray 0.00 m
+```
+
+**The bow is 0.00-0.01 m on exactly the three routes that are foreign to the
+site they sit on.** A bow of a centimetre cannot carry a ribbon nine metres
+across a ramp, so the swept curve is not the mechanism — that is the seventh
+expired explanation on this chain, and it expired to an instrument like the
+other six.
+
+**What the numbers actually say:** the three foreign legs have **zero control
+points inside the ramp rectangle** and their drawn ribbon lies on the control
+polyline. So their control points *straddle* the rectangle and the straight run
+between them goes through it. `segmentCutsABridgeRamp` is precisely that test
+and it already exists — it is asked about lattice edges (`nodeOk`, `linkClear`)
+and branch points (`nearestPointOnRoute`), and **never about a spur's own
+assembled route**. Point-screening the endpoints of a segment cannot see a
+segment that spans the thing.
+
+The four routes whose control points *are* inside a ramp are the four
+legitimate crossing legs, one per proven site — those must not be screened.
+
+## Next, and not yet done
+
+Screen a spur's assembled polyline with `segmentCutsABridgeRamp`, excluding the
+site that leg legitimately crosses. Then re-measure `poi.stranded` on seed 5,
+`check`, and `test:procgen` — and re-run `probe-ribbons-on-ramps` expecting the
+three FOREIGN rows to go and the four crossing rows to stay.
