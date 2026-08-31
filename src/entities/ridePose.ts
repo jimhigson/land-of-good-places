@@ -48,8 +48,12 @@ import { KID_REST_GAZE_PITCH } from '../art/models/kid';
  * `'sleeping'` is **flat on her back in a bed**, which is not the same shape as
  * `'reclined'` and cannot be a tuning of it — see
  * {@link applySleepingRidePose}.
+ *
+ * `'dining'` is **sitting at a table, eating**, and nothing is carrying her at
+ * all: it is here rather than in the great hall's own file for the reason this
+ * file exists — see {@link applyDiningPose}.
  */
-export type RidePosture = 'seated' | 'reclined' | 'walking' | 'sleeping';
+export type RidePosture = 'seated' | 'reclined' | 'walking' | 'sleeping' | 'dining';
 
 /**
  * How far back a reclining rider lies, in radians about her own left-right axis.
@@ -259,6 +263,10 @@ export function applyRidePose(
     applySleepingRidePose(model);
     return;
   }
+  if (posture === 'dining') {
+    applyDiningPose(model, elapsed);
+    return;
+  }
   // Upright again, in case the last ride laid her down. The recline turns
   // `root`, which nothing else in the seated pose touches, so without this she
   // would board the ferris wheel still flat on her back.
@@ -416,4 +424,116 @@ function applySleepingRidePose(model: RidePoseTarget): void {
   model.head.rotation.x = 0;
   // Lolled onto one side, asleep.
   model.head.rotation.z = 0.13;
+}
+
+/**
+ * How far the eating arm swings, from resting by the plate to the mouth.
+ *
+ * **Both ends measured on the real rig**, not chosen: at −1.15 the hand sits at
+ * y = 0.59 m, just over a {@link CASTLE_TABLE_TOP} of 0.675 m and beside her own
+ * plate; at −2.50 it is at y = 0.98 m, level with her chin. The sign is the
+ * measured one — a *negative* `rotation.x` on an arm pivot swings the hand
+ * forward and up (at −1.5 the hand moves to z = +0.32), which is the opposite
+ * of what `body.rotation.x` does with the same sign. Reasoning about it was
+ * never going to settle it; this file's own reclined pose says as much.
+ */
+const DINING_ARM_DOWN = -1.15;
+const DINING_ARM_TO_MOUTH = -2.5;
+
+/**
+ * **She does not lean over her dinner, and the reason is her toes.**
+ *
+ * The obvious pose leans a diner forward at the waist. It was written, built
+ * and measured, and it does not work: the rig's legs hang off `body`, and her
+ * whole model pivots about an origin **at her feet**, so tipping `body` forward
+ * by 0.12 rad swings the front of her shoe — 0.283 m ahead of that origin —
+ * down through the floor by `0.283 × sin(0.12)` = **34 mm**. Measured on the
+ * built banquet: the lowest drawn point of a leaning diner was 37.6 mm below
+ * the floor of the storey, against 7 mm (the shoe's own sole) sitting upright.
+ *
+ * There is no lean that avoids this, only smaller amounts of it, because the
+ * pivot is under her heels rather than at her hips. She therefore sits upright,
+ * and the "looking at my dinner" read is bought entirely with
+ * `head.rotation.x`, which turns the head about a joint at y = 1.36 m and
+ * touches her feet not at all.
+ *
+ * Kept as a named constant at zero rather than deleted, because the next person
+ * to look at this pose will reach for a lean, and a zero with this note on it is
+ * the cheapest way to answer them.
+ */
+const DINING_LEAN = 0;
+
+/**
+ * **Sitting at a table, eating** — issue #413's banquet in the castle's great
+ * hall.
+ *
+ * ## Why this is a posture here and not a pose in the hall's own file
+ *
+ * Because of the cat bus. This file's header is the account: twelve children
+ * rode the whole way to the park standing bolt upright with the seat cushions
+ * through their shins, because `BusJourney` had grown its own idea of "seated"
+ * rather than naming a posture and letting one place decide what it meant. Two
+ * dozen children at a banquet is the same shape of thing at twice the count,
+ * and putting the pose in `greatHallBanquet.ts` would make it the second
+ * private definition of how a child sits down in this game. It is also what
+ * lets `check:castle` measure the pose **the game actually renders** rather
+ * than one written a second time inside the check.
+ *
+ * ## Why it is not `'seated'`
+ *
+ * `'seated'` is *holding on, delighted* — a fairground pose, arms thrown back
+ * at −2.5 — and, decisively, it puts the legs at −0.7 and −0.55. **The rig has
+ * no knee**, so a leg rotated about the hip does not bend, it swings the whole
+ * leg: at −0.7 the foot lifts to y = −0.046 from a hip pivot at 0.36 m, and
+ * more to the point it swings 0.176 m out in front of her. On a ride that is
+ * invisible, because a gondola encloses her. At a bench it is a child sitting
+ * with her legs stuck out in the air.
+ *
+ * So this posture's whole load-bearing line is `rotation.x = 0` on both legs.
+ * The Artist cut the bench to 0.360 m because that is `KID_HIP_HEIGHT` exactly
+ * and therefore the one seat height at which a **vertical** leg lands a foot on
+ * the floor; a pose that rotates the leg throws that away. `check:castle`
+ * measures every diner's feet against the floor for exactly this reason.
+ *
+ * ## The eating
+ *
+ * One arm rests by the plate; the other lifts to her mouth and comes back down,
+ * with a small chew on the head at the top of the lift. `elapsed` is expected
+ * to carry the diner's **own phase** already added in — the same trick
+ * `CastleFire` uses to stop five storeys of flame pulsing in lockstep — so
+ * twenty-four children at a table are not one child rendered twenty-four times.
+ */
+export function applyDiningPose(model: RidePoseTarget, elapsed: number): void {
+  // Upright, in case the last thing that posed this rig laid it down.
+  model.root.rotation.x = 0;
+
+  // **The line the whole posture is for.** See this function's header: a
+  // rotated leg on a knee-less rig is a foot in the air.
+  model.leftLeg.rotation.x = 0;
+  model.rightLeg.rotation.x = 0;
+
+  model.body.rotation.x = DINING_LEAN;
+  // Flushed for the reason every posture in this file flushes it: whatever
+  // wrote a walk cycle a moment ago left the gait's roll in here.
+  model.body.rotation.z = 0;
+
+  // 0 at the plate, 1 at the mouth. Two frequencies with no common period, so
+  // the mouthful is never quite the same length twice and a row of children
+  // never falls into step.
+  const bite = (Math.sin(elapsed * 1.7) * 0.62 + Math.sin(elapsed * 0.9) * 0.38 + 1) / 2;
+
+  // The left hand stays by the plate, with the smallest counter-motion so she
+  // is not a statue with one moving part.
+  model.leftArm.rotation.x = DINING_ARM_DOWN + Math.sin(elapsed * 1.3) * 0.06;
+  model.leftArm.rotation.z = 0.2;
+
+  // The right one eats.
+  model.rightArm.rotation.x = lerp(DINING_ARM_DOWN, DINING_ARM_TO_MOUTH, bite);
+  // Tucked further across her chest the higher it goes, so the hand arrives at
+  // her mouth rather than beside her ear.
+  model.rightArm.rotation.z = lerp(-0.15, -0.45, bite);
+
+  // Chin down towards the plate, with a chew on top of it while the hand is up.
+  model.head.rotation.x = 0.16 + Math.sin(elapsed * 5.3) * 0.035 * bite;
+  model.head.rotation.z = 0;
 }

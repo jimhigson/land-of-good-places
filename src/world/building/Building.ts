@@ -40,6 +40,7 @@ import { buildingInteractZones } from './interactZones';
 import { dressDeck } from './dressing';
 import { CastleFire } from './castleLighting';
 import { dressCastle } from './castleDecor';
+import { GreatHallBanquet } from './greatHallBanquet';
 import { WildPets } from './WildPets';
 import type { IsoCamera } from '../../core/IsoCamera';
 import type { InteractZone } from '../interact';
@@ -467,6 +468,16 @@ export class Building implements GameSystem {
    * decoration with a per-frame life.
    */
   private readonly castleFire = new CastleFire();
+  /**
+   * The children eating at the great hall's banquet (#413).
+   *
+   * A field beside {@link castleFire} and for the same reason: they have a
+   * per-frame life, so somebody has to hold them. Their group is added to the
+   * hall's own **floor group**, never to `interiorRoot` — see
+   * `greatHallBanquet.ts` on why that distinction is now the difference
+   * between a child at a table and a child 589 m away in the air (#412).
+   */
+  private readonly banquet = new GreatHallBanquet();
   private readonly grownUp = new GrownUp();
   private readonly toilets: Toilets;
   /** The ginormous slide itself, so `test/procgen` can measure what was built. */
@@ -581,6 +592,10 @@ export class Building implements GameSystem {
       // Fire, cloth, paint and the things that reward looking twice (#376).
       this.castleFire.dress(deck, floor);
       dressCastle(deck, floor);
+      // After `dressCastle`, because the benches the diners sit on are placed
+      // by it — `greatHallSeats` reads the same bench list, so a hall that laid
+      // out no furniture seats nobody rather than seating people in mid-air.
+      this.banquet.dress(deck, floor);
     });
     // The wild animals in the roof garden's long grass (#406). Built after
     // `dressCastle` so the burrows it asks for already exist, and parented to
@@ -863,6 +878,11 @@ export class Building implements GameSystem {
     // Deliberately above the `!player` return: the fire burns whether or not
     // anybody is standing in the room, which is also what makes it screenshot.
     this.castleFire.update(elapsed);
+    // Above the `!player` return with the fire, and for the identical reason:
+    // the feast is in progress whether or not she has walked in yet, which is
+    // the whole of #413's brief ("a feast in progress, not a set waiting for
+    // one") and is also what makes it screenshot.
+    this.banquet.update(elapsed);
     // Above the `!player` return for the same reason the fire is: the roof
     // garden's animals live their lives whether or not she is up there, so she
     // arrives to a park that was already going rather than one that starts

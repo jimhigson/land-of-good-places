@@ -78,11 +78,69 @@ wall. So a roaring fire fits with room to spare and **no threshold needs
 relaxing**. The binding constraint is the fireplace's own opening, not the
 ceiling.
 
+## Two measured failures of the first diner pose, and what they cost
+
+Both found by measuring the built banquet, neither visible in a screenshot.
+
+### 1. A forward lean sinks her toes 37 mm through the floor
+
+The obvious dining pose leans the child forward at the waist
+(`body.rotation.x = +0.12`). Measured on 24 built diners, the lowest **drawn**
+point of the crowd was then **37.6 mm below** the floor of the storey, against
+**7 mm** (the shoe's own sole) sitting upright.
+
+Cause: the rig's legs hang off `body`, and the model's origin is **at her
+feet**, not at her hips. Tipping `body` therefore swings the front of her shoe
+— 0.283 m ahead of that origin — downward by `0.283 x sin(theta)`. At 0.12 rad
+that is 34 mm, which is the whole of the discrepancy.
+
+There is no lean that avoids this, only smaller amounts of it. **The lean is
+what moved, not the bench** — the seat height is not a free parameter:
+`bench-plank` tops at 0.360 m = `KID_HIP_HEIGHT` and the rig has no knee, so it
+is the one height at which a vertical leg lands a foot on the floor. `DINING_LEAN`
+is now `0`, kept as a named constant with the measurement beside it so the next
+person to reach for a lean is answered before they write it. The "looking at my
+dinner" read is bought entirely with `head.rotation.x`, which turns a joint at
+y = 1.36 m and does not touch her feet.
+
+After the fix, measured over all 24:
+
+```
+worst |hip pivot - CASTLE_BENCH_SEAT|   0.0 mm
+worst |lowest drawn point|              4.7 mm   (the shoe sole)
+tallest diner reaches                   2.600 m  (ceiling 3.30 m)
+draw calls for the whole banquet        55
+```
+
+### 2. `'seated'` is the wrong posture and would have been the easy mistake
+
+`applyRidePose(..., 'seated')` is the fairground pose — arms thrown back at
+-2.5 and **legs at -0.7 / -0.55**. On a knee-less rig a rotated leg does not
+bend, it swings: -0.7 lifts the foot to y = -0.046 and throws it 0.176 m out in
+front of her. Invisible inside a gondola, absurd on a bench. Hence a new
+`'dining'` posture in `ridePose.ts` whose load-bearing line is
+`leftLeg.rotation.x = rightLeg.rotation.x = 0`.
+
+It lives in `ridePose.ts` rather than in the hall's own file for that file's own
+stated reason: the cat bus shipped twelve children riding bolt upright because
+`BusJourney` grew a private idea of "seated". A check can now measure the pose
+the game actually renders.
+
+## Rotation signs, measured rather than reasoned about
+
+The codebase reads both ways, so these were probed on the real rig:
+
+```
+body.rotation.x = +0.5  -> head centre moves to z +0.718   (positive = forward)
+arm .rotation.x = -1.5  -> hand moves to z +0.319, y 0.697 (negative = forward/up)
+leg .rotation.x = -0.7  -> foot bottom y -0.046, z +0.176
+```
+
 ## Status
 
 - [x] worktree, install, hall measured, rig measured
-- [ ] table run
-- [ ] diners
+- [x] table run: 3 x 6 m butted, z -9.83 .. +8.17 on the hall axis x 10.636
+- [x] diners: 24, seated, measured (above)
 - [ ] fireplace + roaring fire
-- [ ] assertions
+- [ ] assertions in `check:castle`
 - [ ] browser pass at player height
