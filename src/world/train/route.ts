@@ -420,18 +420,45 @@ function briefForLength(context: TrainContext, desiredLength: number, salt: numb
 export function* trainRouteSearch(): Generator<number, SolvedRailRoute, void> {
   const context = buildTrainContext();
   let lastFailure: RailRouteUnsolvable | null = null;
+  // **A rung that solved but did not satisfy does not end the ladder.**
+  //
+  // `railRouteSearch` never throws once any start pose closed a loop: if every
+  // pose failed `satisfies` it hands back the first route regardless, with
+  // `report.satisfied` false, because a park with no railway is far worse than
+  // one whose railway missed. That is right at its level and wrong at this one
+  // — here there is somewhere else to go, namely the next rung's shorter,
+  // slacker loop, and a rung's unsatisfied route was silently ending the walk
+  // before the ladder ever got there.
+  //
+  // Measured on seed 2 (#427): its longest rung closed exactly one loop out of
+  // 96 poses, that loop had curved back and eaten its own ramp room, and the
+  // search returned it as a fallback — so the shorter rungs, which are the
+  // whole reason the ladder exists for the pinched seeds, were never tried.
+  //
+  // So an unsatisfied route is kept aside and the ladder goes on. Only when
+  // every rung has been walked is it handed back, which leaves
+  // `railRouteSearch`'s own guarantee exactly as strong as it was: this can
+  // still never fail to produce a railway.
+  let unsatisfied: SolvedRailRoute | null = null;
   for (let i = 0; i < TRAIN_LENGTH_FRACTIONS.length; i += 1) {
     const fraction = TRAIN_LENGTH_FRACTIONS[i] as number;
     // A distinct seed salt per rung, so a shorter fallback explores differently
     // rather than re-walking the longer rung's dead ends at a new length.
     const brief = briefForLength(context, context.perimeter * fraction, (i + 1) * 0x1000);
     try {
-      return yield* railRouteSearch(brief);
+      const route = yield* railRouteSearch(brief);
+      if (route.report.satisfied) return route;
+      // The first, not the best: the ladder has no ordering over whole routes
+      // that could call one unsatisfied loop better than another, and inventing
+      // one here would be a second notion of quality beside `scoreOf`. Same
+      // reasoning `rail/generate.ts` gives for its own fallback.
+      unsatisfied ??= route;
     } catch (error) {
       if (!(error instanceof RailRouteUnsolvable)) throw error;
       lastFailure = error;
     }
   }
+  if (unsatisfied) return unsatisfied;
   throw lastFailure ?? new Error('train route: the length ladder was empty');
 }
 

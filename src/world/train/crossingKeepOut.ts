@@ -1,6 +1,7 @@
 import {
   CROSSING_STATION_CLEARANCE,
   CROSSING_STATION_STRUCTURE_CLEARANCE,
+  SITE_HALF_WIDTH,
   STATION_GAP,
 } from './clearance';
 import { DECK_HALF_LENGTH } from './bridgeFootprint';
@@ -60,6 +61,26 @@ export interface CrossingCorridor {
   readonly axisX: number;
   readonly axisZ: number;
   readonly halfLength: number;
+  /**
+   * Half the corridor's **width**, across the crossing axis — which is to say,
+   * along the track.
+   *
+   * **A rectangle, not a line, and that distinction was measured.** The first
+   * version of this module treated the crossing as its centre axis alone and
+   * asked point-to-*segment* distance. `crossingPlanSolve.ts`'s
+   * `nearStationStructure` is asked about every probe point, and the probe
+   * spreads its samples across the full corridor width (`bridgeFit.ts`'s
+   * `ACROSS_SAMPLES`, at ±`halfWidth`) — so a station standing a clear 8 m from
+   * the axis can be well inside 8 m of a sample at the corridor's edge. On seed
+   * 15 that is exactly what happened: this module reported both stations clear
+   * while the planner reported **4 of 15 deck samples station-blocked**, and
+   * the two disagreed by precisely this half-width.
+   *
+   * {@link SITE_HALF_WIDTH} because that is the widest the planner ever probes,
+   * and a keep-out that only covered the narrow deck would leave the wide one
+   * blocked.
+   */
+  readonly halfWidth: number;
 }
 
 /** The corridor about the loop's own chosen crossing, at rail distance 0. */
@@ -70,6 +91,7 @@ export function chosenCrossingCorridor(centre: FlatPoint, tangent: FlatPoint): C
     axisX: tangent.z,
     axisZ: -tangent.x,
     halfLength: DECK_HALF_LENGTH + SITE_RAMP_IDEAL,
+    halfWidth: SITE_HALF_WIDTH,
   };
 }
 
@@ -116,16 +138,13 @@ export function stationCrossingConflict(
     const window = flatPointAt(wrap(stationDistance + w));
     const dx = window.x - corridor.centreX;
     const dz = window.z - corridor.centreZ;
-    const along = Math.max(
-      -corridor.halfLength,
-      Math.min(corridor.halfLength, dx * corridor.axisX + dz * corridor.axisZ),
-    );
-    const nearestX = corridor.centreX + corridor.axisX * along;
-    const nearestZ = corridor.centreZ + corridor.axisZ * along;
-    if (
-      Math.hypot(window.x - nearestX, window.z - nearestZ) <
-      CROSSING_STATION_STRUCTURE_CLEARANCE
-    ) {
+    // Nearest point of the corridor *rectangle*: clamp in both of its own axes
+    // and measure to that, rather than to the centre line. See `halfWidth`.
+    const along = dx * corridor.axisX + dz * corridor.axisZ;
+    const across = dx * -corridor.axisZ + dz * corridor.axisX;
+    const overAlong = Math.max(0, Math.abs(along) - corridor.halfLength);
+    const overAcross = Math.max(0, Math.abs(across) - corridor.halfWidth);
+    if (Math.hypot(overAlong, overAcross) < CROSSING_STATION_STRUCTURE_CLEARANCE) {
       inSpace = true;
     }
   }
