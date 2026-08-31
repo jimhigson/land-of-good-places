@@ -287,7 +287,7 @@ function findMeadow(deck: number): RoofMeadow {
  * different one". Four burrows and four creatures could deadlock into every
  * hole being spoken for.
  */
-const BURROW_COUNT = 5;
+export const BURROW_COUNT = 5;
 
 /**
  * How far apart two burrows would *like* to be — far enough that a creature
@@ -321,7 +321,7 @@ const BURROW_SPACING = 6;
  * room over. If even this cannot seat {@link BURROW_COUNT}, fewer and
  * better-spaced burrows is the right answer and the meadow simply has fewer.
  */
-const BURROW_MIN_SPACING = 4;
+export const BURROW_MIN_SPACING = 4;
 
 /** The mound's outer radius — what a creature aims at, and what the grass and
  *  the tap target are sized from. */

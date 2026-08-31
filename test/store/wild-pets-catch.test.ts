@@ -5,7 +5,21 @@ import '../../scripts/headless-canvas.mjs';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { Vector3 } from 'three';
 import { WildPets } from '../../src/world/building/WildPets';
-import { TOP_DECK } from '../../src/world/building/layout';
+import {
+  TOP_DECK,
+  TRAMPOLINE_RADIUS,
+  TRAMPOLINE_X,
+  TRAMPOLINE_Z,
+} from '../../src/world/building/layout';
+import {
+  BURROW_COUNT,
+  BURROW_MIN_SPACING,
+  BURROW_RADIUS,
+  roofBurrows,
+  roofMeadow,
+} from '../../src/world/building/roofMeadow';
+import { SLIDE_PLAN } from '../../src/world/slide/plan';
+import { PLAYER_RADIUS } from '../../src/core/constants';
 import { gameStore } from '../../src/state';
 import { shopItem } from '../../src/world/building/shops/catalogue';
 import type { IsoCamera } from '../../src/core/IsoCamera';
@@ -233,5 +247,99 @@ describe('wild pets in the roof garden', () => {
     }
     expect(gone.size, 'creatures must cycle, or the roof is the same four forever').toBeGreaterThan(3);
     expect(seen.size).toBeGreaterThan(gone.size - 1);
+  });
+});
+
+/**
+ * **The roof has to actually get its five holes.**
+ *
+ * These exist because of a silent failure, not a hypothetical one. The castle's
+ * floor split (#377/#380) shrank the roof plate under this feature, and the
+ * meadow absorbed it exactly as its derivation promised — it scored the new
+ * clearance and moved. `BURROW_SPACING` did not move: it was a hard 6 m gate
+ * chosen against the *old* plate, so the farthest-point pass ran out of room
+ * after three burrows and returned three. Every check stayed green, `tsc`
+ * stayed green, and the roof simply had fewer holes in it.
+ *
+ * That is the whole lesson of derived placement done half way. Deriving the
+ * positions does not help if a threshold beside them is still a number typed
+ * against a floor that no longer exists — and this class of fault fails by
+ * producing *less*, which no assertion about what was produced can notice
+ * unless it is told how much to expect.
+ *
+ * So: assert the count, and assert the property the spacing was protecting,
+ * separately. Relaxing the spacing to reach the count is only sound while the
+ * second of these still holds.
+ */
+describe('the roof garden gets the burrows it asks for', () => {
+  const burrows = roofBurrows(TOP_DECK);
+
+  it('digs the full count, however tight the plate gets', () => {
+    expect(
+      burrows.length,
+      'five holes against a population of four, so there is always one to run to that is not the one it came out of',
+    ).toBe(BURROW_COUNT);
+  });
+
+  it('never puts two so close that one cannot be run to', () => {
+    let closest = Infinity;
+    for (let i = 0; i < burrows.length; i += 1) {
+      for (let j = i + 1; j < burrows.length; j += 1) {
+        const a = burrows[i]!;
+        const b = burrows[j]!;
+        closest = Math.min(closest, Math.hypot(a.x - b.x, a.z - b.z));
+      }
+    }
+    // `WildPets.burrowAwayFrom` discards any burrow within 2 m of the creature
+    // as "the one it came out of". Two holes closer than that would make the
+    // second unreachable as a destination, which is how a creature that can
+    // never go home gets built by accident for the second time.
+    expect(closest, 'two burrows must never read as one, nor shadow each other').toBeGreaterThan(2);
+    expect(closest).toBeGreaterThanOrEqual(BURROW_MIN_SPACING);
+  });
+
+  it('keeps every burrow inside the long grass and clear of the roof furniture', () => {
+    const meadow = roofMeadow(TOP_DECK);
+    for (const burrow of burrows) {
+      expect(meadow.contains(burrow.x, burrow.z), `burrow at ${burrow.x},${burrow.z} must be in the grass`).toBe(true);
+      // The same threshold `roofBurrows` selects on, re-measured off the result
+      // rather than trusted from the rule that produced it.
+      expect(meadow.clearanceAt(burrow.x, burrow.z)).toBeGreaterThanOrEqual(BURROW_RADIUS + PLAYER_RADIUS);
+    }
+  });
+
+  /**
+   * The ginormous slide launches from this floor, and its roof entry is the
+   * fragile thing up here: the split already caught its start height putting
+   * the chute 3.76 m inside solid battlements on every seed. Long grass she
+   * cannot see her feet through, or a hole to trip in, right where she boards
+   * it is the same fault in a cheaper form.
+   */
+  it('leaves the ginormous slide its boarding pad', () => {
+    const meadow = roofMeadow(TOP_DECK);
+    expect(meadow.contains(SLIDE_PLAN.entryX, SLIDE_PLAN.entryZ)).toBe(false);
+    for (const burrow of burrows) {
+      expect(
+        Math.hypot(burrow.x - SLIDE_PLAN.entryX, burrow.z - SLIDE_PLAN.entryZ),
+        'no burrow within reach of where she boards the slide',
+      ).toBeGreaterThan(BURROW_RADIUS + PLAYER_RADIUS);
+    }
+  });
+
+  /**
+   * The trampoline survived the split as a toy on the roof — a new neighbour
+   * the meadow did not have when it was written, and one that is not in
+   * `keepOutsFor`. Grass growing up through a pad a child bounces on is the
+   * kind of thing only a person looking at it would ever report.
+   */
+  it('leaves the trampoline pad clear', () => {
+    const meadow = roofMeadow(TOP_DECK);
+    expect(meadow.contains(TRAMPOLINE_X, TRAMPOLINE_Z)).toBe(false);
+    for (const cell of meadow.cells) {
+      expect(
+        Math.hypot(cell.x - TRAMPOLINE_X, cell.z - TRAMPOLINE_Z),
+        'no long grass on the trampoline',
+      ).toBeGreaterThan(TRAMPOLINE_RADIUS);
+    }
   });
 });
