@@ -5402,12 +5402,25 @@ function fallbackSpurRoute(
       const p = points[k - 1] as readonly [number, number];
       const q = points[k] as readonly [number, number];
       const hop = Math.hypot(q[0] - p[0], q[1] - p[1]);
+      // Sample each sub-segment's MIDPOINT, not its endpoints: `steps + 1`
+      // endpoints each credited `hop / steps` over-counts every segment by one
+      // step, and double-counts every junction (one segment's end is the
+      // next's start). `steps` midpoints give metres that actually sum to the
+      // length of ribbon standing on ramp ground.
       const steps = Math.max(1, Math.ceil(hop / 1.5));
-      for (let t = 0; t <= steps; t += 1) {
-        const x = p[0] + ((q[0] - p[0]) * t) / steps;
-        const z = p[1] + ((q[1] - p[1]) * t) / steps;
+      for (let t = 0; t < steps; t += 1) {
+        const mid = (t + 0.5) / steps;
+        const x = p[0] + (q[0] - p[0]) * mid;
+        const z = p[1] + (q[1] - p[1]) * mid;
         if (pointStandsOnABridgeRamp(x, z)) rampMetres += hop / steps;
       }
+    }
+    if (DEBUG_STREETS) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[ramp] candidate for ${target[0].toFixed(1)},${target[1].toFixed(1)}: ` +
+          `len ${polylineLength(points).toFixed(1)} rampMetres ${rampMetres.toFixed(1)}`,
+      );
     }
     const score =
       polylineLength(points) +
