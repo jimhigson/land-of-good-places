@@ -844,3 +844,78 @@ lattice`. Nothing lost, and seed 5 gains a bridge.
   `RAIL_CLAMP_DISTANCE`, not by the ramp — a lattice node may never sit on the
   rail, which is correct. The crossing leg's own site choice is the next place
   to look, not the lattice.
+
+## THE REMAINING 4 — both root-caused, neither fixed
+
+### Seed 11 `no drawn path ends in mid-air on a bridge` — A REAL DEFECT, and a bad one
+
+The invariant is **this branch's own** (commit `d0a4f208`), which is why
+`origin/main` is green: seed 11's geometry is **byte-identical** on both trees —
+same 3 proven sites, same 2 bridges, same crown y=4.47 at (2.0, 43.0), 17.1 m
+from the gate. Nothing regressed; the branch simply added the check that can
+see this.
+
+And it is not a false positive. `probe-blocked-ribbons` names the collider
+independently, at the exact point the invariant complains about:
+
+```
+gate-approach: BLOCKED 0.0-1.0 m of 49.8 — at (0.0, 54.0) railD 0.0
+               railGap 11.0 onPath=true :: wall len=2.0 halfT=0.15 top=1.6
+```
+
+**A child walking in through the park's entrance arch hits a bridge ramp's
+parapet in her first metre.** That is worse than a stranded waypoint — it is
+the front door. `check:park` reports seed 11 as **0 stranded**, because the
+ground beyond is reachable by another route, so nothing else in the repo can
+see this.
+
+**Why, geometrically:** the bridge site sits at railD 2.0, (2.0, 43.0). Its
+ramp runs `DECK_HALF_LENGTH + rampReach` ≈ 18.4 m from the deck centre — out to
+about z = 61, while the authored arch stands at z = 54. **The arch is mid-ramp**,
+so the parapet crosses the doorway.
+
+**The fix is not to remove the bridge.** A bridge at the gate is deliberate —
+`HANDOFF-bridge-at-the-front-door.md` made the entrance cross on one on
+purpose, #431 ranks gate-corridor poses first to keep it that way, and the
+invariant `the walk in from the gate crosses the railway ... on a bridge`
+passes. What is wrong is the arch standing *on* the ramp instead of beyond it.
+So the crossing planner should refuse a **bridge** site whose own proven ramp
+extent swallows the entrance arch — the `CROSSING_STATION_CLEARANCE` idiom, one
+constant read from both directions, and it needs no new tunable because the
+extent is the site's own `DECK_HALF_LENGTH + rampReach`. `crossingPlanSolve.ts`
+already knows the gate (`ENTRANCE_GATE_X/Z`, used by `serveTheGate`).
+
+Not built: it moves sites on every seed and needs the bridge-count sweep re-run
+behind it.
+
+### Seed 24 trio — the screen starves the crossing's approach. PROVEN BY TOGGLE.
+
+One root cause for all three (the other two are anti-vacuity guards firing
+correctly). `origin/main` builds seed 24's only bridge; this branch does not.
+
+Disabling `pointStandsOnBridgeMasonry` and changing nothing else:
+
+```
+screen ON : crossings at railD 74 (level) and 220 (level) — 0 bridges
+screen OFF: crossings at railD 20 (PROVEN, bridge built) and 220 — 1 bridge
+```
+
+So it is **this branch's ramp screen**, not the planner, the loop or the sites
+— seed 24's site list is identical on both trees (1 proven at railD 20, 4
+level). Narrowing the screen to the masonry recovered one lattice node but not
+enough: the crossing leg still cannot reach site 20 and takes level site 74.
+
+Note the lattice node nearest the site, (-0.7, -33.6) at d=1.3, is refused by
+`RAIL_CLAMP_DISTANCE` and **not** by the ramp — a lattice node may never sit on
+the rail, which is correct and not the thing to change.
+
+**This is the branch's central mechanism showing its cost**: keeping foreign
+paths off a bridge's ground can also keep the bridge's own approach off it, and
+where that happens the seed loses the bridge entirely. The screen and the
+approach need to be reconciled — most likely by the crossing leg being exempt
+from the screen along its own site's axis, the way the doc comment always said
+it was ("the crossing's own chain travels ALONG the axis via its own points").
+That claim is now measurably not true for the *approach* to the chain.
+
+Not built, and reported rather than attempted, because it is the same class of
+change as the seed 11 one and both want the bridge-count sweep behind them.
