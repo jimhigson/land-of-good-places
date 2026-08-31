@@ -114,6 +114,15 @@ function collectingWarnings<T>(body: () => T): { value: T; said: string[] } {
 export interface HeadlessPark {
   readonly scene: Scene;
   readonly world: World;
+  /**
+   * The camera the crowd was handed — the one `NpcSystem` clamps its speech
+   * bubbles against, so a check on where a bubble is drawn has to measure
+   * against *this* one and not a second camera of its own (issue #415).
+   *
+   * Un-`resize`d and un-`update`d as returned; a caller that cares about the
+   * screen must drive it exactly as `Game` does.
+   */
+  readonly camera: IsoCamera;
   /** Everything the builders said while the park was going up. */
   readonly said: readonly string[];
   /**
@@ -132,9 +141,9 @@ export interface HeadlessPark {
 export function buildHeadlessPark(): HeadlessPark {
   const started = performance.now();
   const scene = new Scene();
+  const camera = new IsoCamera();
   const { value: world, said } = collectingWarnings(() => {
     const sky = new Sky();
-    const camera = new IsoCamera();
     return new World(scene, sky, inertInteriorControls(), camera);
   });
   worldUnderConstruction = false;
@@ -143,6 +152,7 @@ export function buildHeadlessPark(): HeadlessPark {
   return {
     scene,
     world,
+    camera,
     said,
     sample: (x, z, y) => world.building.surfaces.sample(x, z, y),
     buildMs,

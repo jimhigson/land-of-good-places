@@ -343,6 +343,21 @@ export class IsoCamera {
    * Here rather than on the caller for the same reason as the clamp: the
    * screen axes are the camera's own numbers.
    */
+  /**
+   * How far `to` sits from `from` **along the screen's own right and up axes**,
+   * in world metres, written into `out` as `(right, up)`.
+   *
+   * The camera is tilted, so a sprite nudged straight up the screen also moves
+   * in world x and z: a check asking "is this bubble still over that child"
+   * cannot answer it with a horizontal distance, and one that tried would be
+   * measuring a mixture of both axes. Same reasoning as {@link clampToFrustum}
+   * — the screen axes are the camera's, and there is one copy of them.
+   */
+  screenOffset(from: Readonly<Vector3>, to: Readonly<Vector3>, out: Vector2): Vector2 {
+    const relative = SCRATCH_CLAMP_RELATIVE.copy(to).sub(from);
+    return out.set(relative.dot(this.screenRight), relative.dot(this.screenUp));
+  }
+
   isOnScreen(point: Readonly<Vector3>, margin = 0): boolean {
     const relative = SCRATCH_CLAMP_RELATIVE.copy(point).sub(this.camera.position);
     return (

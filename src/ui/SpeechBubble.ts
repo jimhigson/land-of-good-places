@@ -55,8 +55,10 @@ const LINE_HEIGHT = 54;
 const TAIL_HEIGHT = 28;
 
 /** Screen-space breathing room the clamp leaves past a bubble's own edge —
- *  a phone's bezel/safe-area inset, not just the mathematical frustum edge. */
-const EDGE_MARGIN_PX = 12;
+ *  a phone's bezel/safe-area inset, not just the mathematical frustum edge.
+ *  Exported because it is the exact slack `check:speech-bubbles` must allow a
+ *  bubble beyond its own half-width before calling it adrift. */
+export const BUBBLE_EDGE_MARGIN_PX = 12;
 
 // Scratch for `getWorldPosition` in `updateScreenSize` — read immediately,
 // never stored, so safe to share across every bubble's own call.
@@ -124,12 +126,10 @@ export class SpeechBubble {
    * used to be a flat 30px tall for the *whole* canvas, which left the words
    * themselves around 10px — the smallest text in the game.
    *
-   * `camera` is also where the bubble gets clamped onto the visible screen —
-   * see the class doc and `IsoCamera.clampToFrustum`. The caller sets
-   * `sprite.position` to the bubble's natural, unclamped world anchor (as
-   * before this fix) immediately before calling this; the clamp is worked
-   * out fresh from that anchor every call, so there is no drift from
-   * clamping an already-clamped position on the next frame.
+   * `camera` is also where the bubble is put on the screen — see the class
+   * doc, `IsoCamera.isOnScreen` and `IsoCamera.clampToFrustum`. Both are
+   * worked out fresh from {@link anchorAt}'s anchor every call, never from
+   * where the sprite ended up last frame, so nothing accumulates.
    */
   updateScreenSize(camera: IsoCamera): void {
     if (!this.currentText) return;
@@ -154,7 +154,7 @@ export class SpeechBubble {
     const width = height * this.aspect;
     this.sprite.scale.set(width, height, 1);
 
-    const clamped = camera.clampToFrustum(anchor, width / 2, height / 2, worldUnitsPerPixel * EDGE_MARGIN_PX);
+    const clamped = camera.clampToFrustum(anchor, width / 2, height / 2, worldUnitsPerPixel * BUBBLE_EDGE_MARGIN_PX);
     if (parent) parent.worldToLocal(clamped);
     this.sprite.position.copy(clamped);
   }
