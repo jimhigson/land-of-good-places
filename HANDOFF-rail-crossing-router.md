@@ -259,50 +259,142 @@ from — exactly the fix `FENCE_OFFSET`'s own header describes), and
 imported. `bridgeFootprint.ts` re-exports `DECK_HALF_LENGTH`, so every
 existing reader is unchanged.
 
-### 2. `check:park-boot` — a #427 performance regression, NOT fixed here
+### 2. `check:park-boot` — the #427 8x regression, ROOT-CAUSED AND FIXED
 
-With the cycle gone, `check:park-boot` runs and fails on generation slice
-time:
+With the cycle gone, `check:park-boot` ran and failed on generation slice
+time: `one advance() blocked for 104.0 ms against an 8 ms budget and a 20.0 ms
+ceiling`. `origin/main` passes at 13.6 ms; #427's branch point plus only the
+cycle fix fails at 105.4 ms. **One work unit had become ~8x dearer on #427**,
+and the check that exists to catch it could not run.
+
+`scripts/profile-park-boot-slice.mts` (new) drives a real `ParkGeneration` and
+times every `advance()` with the phase read off the object's own letterboxes:
 
 ```
-one advance() blocked for 104.0 ms against an 8 ms budget and a 20.0 ms
-ceiling already scaled 1.00x for this box
+worst   100.1 ms   train search          <- the whole regression, one slice
+worst    20.3 ms   path-graph search
+worst     9.9 ms   slide search
+worst     8.6 ms   cruiser search
+worst     8.1 ms   crossing-sites search
+every import phase <= 0.1 ms
 ```
 
-Measured three ways on the same machine:
+**Two offenders, both the same defect: legitimate work that was never
+yielded.**
 
-| tree | verdict |
-|---|---|
-| `origin/main` | **passes** — worst advance 13.6 ms |
-| `641573c7` (#427's branch point) + this branch's cycle fix only | **FAILS, 105.4 ms** |
-| this branch's head | FAILS, 104.0 ms |
+1. **`bridgeableCrossingPoses(PARK_SEED)` — 102.1 ms**, not memoised, called
+   from `buildTrainContext()` on `trainRouteSearch()`'s first line, *before*
+   that generator's first `yield`. #427 replaced 96 rim bearings (arithmetic)
+   with a probe of every 4 m point at 8 headings against real bridge-fit
+   geometry, and left it un-sliced. Now `bridgeableCrossingPosesSearch`, one
+   yield per x row (46 rows, ~2.2 ms each).
+2. **`streetLattice()` — 15.7 ms first build**, memoised, so it landed on
+   whoever asked first: `gateApproachSearch`'s first solver. **Pre-existing on
+   `main`** (main peaks at 14.0 ms too) and marginal there; this branch's park
+   tipped it over. Now `streetLatticeSearch`, one yield per lattice column,
+   warmed by `pathGraphSearch` before anything asks. `pathGraphSearch` goes
+   from 41 steps / worst 13.9 ms to **135 steps / worst 7.4 ms**.
 
-**So one park-generation work unit became ~8x more expensive on #427**, and
-the check that exists to catch exactly that could not run. Its own message
-says what to do (`generation.advance(0)` to price the unit) and says plainly
-not to raise the ceiling. The likely candidate is the ranked ~1200-pose
-crossing field or the `satisfies` backstop re-probing whole routes, but that
-is a guess and this ticket has buried six of those — **measure it.**
+Neither can move the result: both read static geometry only and draw no `Rng`
+— the same argument `rail/generate.ts` makes for slicing its own search. Proved
+rather than argued: `check:park` is byte-identical (229/229 waypoints), and
+`measure-train-solve-budget` returns the same winning pose, restarts and loop
+length on all five seeds.
 
-It belongs to #427. `check:arrival-completes`, the only step after it, passes.
+**`check:park-boot`, five consecutive runs each:**
+
+| | run 1 | 2 | 3 | 4 | 5 | verdict |
+|---|---|---|---|---|---|---|
+| before | 14.2 | 19.4 | 21.0 | 20.8 | 20.7 | **3 of 5 FAILED** |
+| after | 12.0 | 12.0 | 11.1 | 11.7 | 11.6 | **5 of 5 passed** |
+
+Against a 20.0 ms ceiling and an 8 ms budget, **neither touched**. Better than
+`origin/main`'s own 14.0 ms worst.
+
+**One thing for whoever owns `check:park-boot`:** its `PHASES` list counts only
+`cruiserSearch`, `cruiserFinish`, `trainSearch` and `slideSearch`, so a slice in
+the **path-graph** or **crossing-sites** phase is reported as `no generator step
+at all, 0 work units` and cannot be attributed. That is what it said about the
+15.7 ms lattice build, and it cost real time here.
+
+## Seed 2 is swapped for seed 24 (#429)
+
+Seed 2 proves **zero** bridge sites, so with the gate on it correctly builds
+none and three invariants go red — two anti-vacuity guards firing as designed,
+one design assertion. The code is right; the seed is pathological, and the
+underlying hole is **#429**, untouched here.
+
+Seed 2's coverage was its **36.7 m bridges** — PR #352 died having only ever
+measured 22 m geometry, where the same paving error is 0.371 m instead of
+0.513 m — so `scripts/probe-seed-bridges.mts`'s own header insists a
+replacement be picked for comparable geometry, not for being green. Both were
+measured per candidate:
+
+| seed | longest bridge | invariant failures |
+|---|---|---|
+| 4 | 36.5 m | 2 |
+| 29 | 36.5 m | 1 |
+| 26 | 36.5 m | 3 |
+| 22 | 36.0 m | 3 |
+| 13 | 33.5 m | 2 |
+| **24** | **32.5 m** | **0 — 78/78** |
+| 3, 7, 12, 16, 20, 21 | 28.5–36.5 m | 3–5 |
+
+**24 is the only green candidate**, 32.5 m is half as long again as the 22 m
+that let #352 through, and its shape matches seed 2's (two crossings, one
+bridged one level). It also *exercises* the rule it is here for: with
+`LGP_ALLOW_UNPROVEN_BRIDGES=1` it goes red on exactly one invariant — mine — so
+it is a park that would have built a bridge on rejected ground.
+
+`test:procgen`: **6 failed / 481 passed → 3 failed / 484 passed.** The three
+left are #427's own and unchanged (seed 11 Sky Cruiser, seed 18 gate corridor,
+seed 5 lattice).
+
+## FOR #414's OWNER — two defects measured here, precisely enough not to re-measure
+
+Both found by `scripts/probe-blocked-ribbons.mts` (on this branch), which walks
+every drawn ribbon with `poiGraph`'s own clearance test and names the collider.
+Neither is touched here: each changes the path network on every seed and needs
+all five #427 measurements re-run behind it.
+
+### A. Foreign legs cut by a PROVEN bridge's ramp parapets — #414 step 1
+
+**Seed 5, `LGP_SEED=5`.** Four blocked stretches, all against
+`wall len=2.0 halfT=0.15 top=3.5–5.3` (ramp parapets), at rail distances that
+sit inside proven bridge sites' ramps:
+
+| ribbon | blocked at | railD | proven site |
+|---|---|---|---|
+| `spur-dodgems` | (14.3, 44.1) | 13.7 | 12 |
+| `connector-dodgems-stall.dodgems` | (55.0, 21.4) | 53.5 | 56 |
+| `spur-waterFight` | (14.3, −42.4) | 144.2 | 142 |
+| `spur-waterFight` | (17.1, −40.7) | 139.6 | 142 |
+
+Seed 5's proven bridge sites are 12, 56, 142, 308; level sites 100, 172, 220,
+246. So these are **legitimate bridges on proven ground, cutting legs that are
+not their own** — exactly #414's step 1, *"paths must keep off the ground a
+bridge will stand on"*. That fix exists on this branch as
+`segmentCutsABridgeRamp`, but it screens **lattice edges and branch points
+only** — a spur's own drawn ribbon is not put through it. This is what keeps
+seed 5 at `poi.stranded: 15` (down from 25).
+
+### B. A ribbon drawn ALONG the fence, not across it
+
+**Seed 5, `connector-stall.facePaint-station-0`**, blocked 7.0–14.0 m of its
+20.5 m by a genuine railway fence panel (`len=2.6 halfT=0.18 top=Infinity`) at
+**(51.1, 4.4), railD 68.7, railGap 2.1 m**. It does not *cross* the rail there
+— `probe-unplanned-crossings` reports 0 unplanned crossings on seed 5 — it runs
+**parallel to the fence, 2.1 m off it**, and the fence's own panels catch the
+ribbon. A third, separate defect from either of the above, and the only case in
+the whole sweep where a fence panel is the collider.
 
 ## Still open, for whoever is next
 
-- **Seed 2 has no bridges.** The decision above. Nothing else on this branch
-  is blocked by it.
-- **Seed 5 keeps 15 stranded waypoints** (down from 25). Different cause, and
-  measured: `probe-blocked-ribbons` on seed 5 finds ramp parapets on
-  **proven** sites (railD 13.7, 53.5, 139.6, 144.2 against proven sites 12,
-  56, 142) cutting *foreign* legs — `spur-dodgems`, `spur-waterFight`,
-  `connector-dodgems-stall.dodgems`. That is #414's **step 1** territory
-  ("paths must keep off the ground a bridge will stand on"), which exists on
-  this branch as `segmentCutsABridgeRamp` but screens lattice edges only, not
-  a spur's own ribbon. Also on seed 5:
-  `connector-stall.facePaint-station-0` is cut by a real **fence panel**
-  (2.6 m, halfT 0.18, top=Infinity) at railD 68.7, railGap 2.1 — a ribbon
-  drawn along the fence rather than across it, a third and separate defect.
+- **#429 — seed 2 admits no bridge anywhere.** Not touched, per instruction.
+  The seed is out of the sweep (see above) and the ticket owns the hole.
 - **#396.** The measurement is here and it is 11/13; the *invariant* is not.
-  Recommendation: it is a follow-up, not this PR. Its two failures are both
-  seed 18's, both already red in `test:procgen` for #427's own reasons, and
-  writing the assertion now would land a fourth red on a branch that already
-  has a decision pending. The instrument to write it with is on this branch.
+  Overseer accepted this as a follow-up. The instrument
+  (`measure-level-crossing-walkability.mts`) is on this branch to write it
+  with. Its two failures are both seed 18's, already red for #427's reasons.
+- **#427's own three `test:procgen` reds** — seed 11 Sky Cruiser, seed 18 gate
+  corridor, seed 5 lattice. Unchanged by anything here.
