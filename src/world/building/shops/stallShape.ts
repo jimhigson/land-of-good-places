@@ -134,10 +134,10 @@ const CANOPY_HALF = (MARKET_PITCH_X - CANOPY_GAP) / 2 / SHOP_SCALE_XZ;
  * across the hall. Handing the last 60 cm of headroom to the emblem instead of
  * to the roof is the single change that makes these seven tell apart.
  */
-const CANOPY_TOP = 2.45;
+const CANOPY_TOP = 2.2;
 
 /** How much air is left between the tallest emblem and the slab above. */
-const CEILING_MARGIN = 0.2;
+const CEILING_MARGIN = 0.16;
 
 /** The counter, unchanged from the shared kiosk — see `kiosk.ts`. */
 const COUNTER_Z = 1.15;
@@ -195,7 +195,7 @@ export type SkirtKind = 'planks' | 'scallops' | 'picket' | 'plain';
 export type PostKind = 'square' | 'round' | 'none';
 
 /** The giant thing on top, and the whole reason the canopies came down. */
-export type EmblemKind = 'teddy' | 'floss' | 'cone' | 'crown' | 'star' | 'egg' | 'none';
+export type EmblemKind = 'teddy' | 'floss' | 'cone' | 'bobbleHat' | 'star' | 'egg' | 'none';
 
 export interface StallStyle {
   readonly canopy: CanopyKind;
@@ -234,8 +234,8 @@ export const STALL_STYLES: Readonly<Record<ShopId, StallStyle>> = {
   // roof, which is a shape children already know.
   iceCream: { canopy: 'barrel', skirt: 'planks', post: 'round', emblem: 'cone', trim: PALETTE.blossomWhite },
   // Tall legs and a flat plank, so the hats hang in shade under an open frame —
-  // the airiest of the seven, and a giant crown on the corner.
-  hat: { canopy: 'plank', skirt: 'plain', post: 'round', emblem: 'crown', trim: PALETTE.woodDark },
+  // the airiest of the seven, and a giant woolly hat on the corner.
+  hat: { canopy: 'plank', skirt: 'plain', post: 'round', emblem: 'bobbleHat', trim: PALETTE.woodDark },
   // A picket rail for the pen and party bunting overhead: the stall that reads
   // as animals rather than as a shop.
   stickerPet: { canopy: 'bunting', skirt: 'picket', post: 'square', emblem: 'star', trim: PALETTE.markerSky },
@@ -318,10 +318,10 @@ interface Canopy {
 /** A pitched cottage roof: two slabs meeting at a ridge, with a cream cap. */
 function gableCanopy(accent: Material, trim: Material): Canopy {
   const group = new Group();
-  const ridgeY = 2.3;
+  const ridgeY = CANOPY_TOP - 0.14;
   const ridgeZ = 0.5;
-  const eaveY = 1.98;
-  const overhang = 1.14;
+  const eaveY = 1.62;
+  const overhang = 1.05;
 
   const slabRun = Math.hypot(overhang, ridgeY - eaveY);
   const pitch = Math.atan2(ridgeY - eaveY, overhang);
@@ -332,11 +332,11 @@ function gableCanopy(accent: Material, trim: Material): Canopy {
     group.add(slab);
   }
 
-  const cap = fitting(new BoxGeometry(CANOPY_HALF * 2 + 0.1, 0.15, 0.26), trim);
+  const cap = fitting(new BoxGeometry(CANOPY_HALF * 2 + 0.1, 0.16, 0.28), trim);
   cap.position.set(0, ridgeY + 0.06, ridgeZ);
   group.add(cap);
 
-  return { group, perch: new Vector3(0.62, ridgeY + 0.135, ridgeZ), eaveY };
+  return { group, perch: new Vector3(0.62, ridgeY + 0.14, ridgeZ), eaveY };
 }
 
 /**
@@ -350,7 +350,7 @@ function bouquetCanopy(accent: Material, ceiling: number): Canopy {
   const group = new Group();
   const postX = 1.32;
   const postZ = 0.3;
-  const postTop = 2.0;
+  const postTop = CANOPY_TOP;
 
   const post = fitting(new CylinderGeometry(0.07, 0.08, postTop, 10), accent);
   post.position.set(postX, postTop / 2, postZ);
@@ -368,7 +368,7 @@ function bouquetCanopy(accent: Material, ceiling: number): Canopy {
     PALETTE.blossomPink,
     PALETTE.flowerViolet,
   ];
-  const radius = 0.28;
+  const radius = 0.32;
   const crown = ceiling - CEILING_MARGIN - radius * 1.15;
   const spot = (index: number): Vector3 => {
     // A fan rather than a ring: from the front of the stall the near balloons
@@ -414,15 +414,22 @@ function bouquetCanopy(accent: Material, ceiling: number): Canopy {
 /** A round fairground parasol on a centre pole, scalloped round its rim. */
 function parasolCanopy(accent: Material, trim: Material): Canopy {
   const group = new Group();
-  const poleZ = 0.34;
-  const rimY = 2.18;
+  const poleZ = 0.2;
+  const rimY = 1.78;
   const apexY = CANOPY_TOP;
-  // Short of `CANOPY_HALF`, and not for the neighbour's sake: a parasol is
-  // round, so its rim comes forward as far as it goes sideways, and at the full
-  // width it would hang over the very spot a child stands to be served
-  // (`SHOP_STAND_Z`). She would walk into it head-first. A gable or a plank can
-  // use the whole width because neither reaches that far forward.
-  const radius = CANOPY_HALF * 0.85;
+  const radius = 1.6;
+  /**
+   * **Squashed front-to-back, and that is the interesting number here.**
+   *
+   * A parasol is round, so it reaches as far forward as it does sideways — and
+   * a round one wide enough to shelter the counter would hang over the very
+   * spot the game walks a child to in order to be served (`SHOP_STAND_Z`, 1.92
+   * m out). She is 2.12 m tall; she would meet the rim with her head. So it is
+   * an oval: wide across the stall, cropped where she stands. From the 38°
+   * camera it still reads as round, and the crop is the difference between a
+   * canopy and a thing that clips through the customer.
+   */
+  const spread = new Vector3(1.32, 1, 0.82);
 
   const pole = fitting(new CylinderGeometry(0.075, 0.09, apexY, 10), trim);
   pole.position.set(0, apexY / 2, poleZ);
@@ -430,11 +437,12 @@ function parasolCanopy(accent: Material, trim: Material): Canopy {
 
   const shade = fitting(new ConeGeometry(radius, apexY - rimY, 18), accent);
   shade.position.set(0, (apexY + rimY) / 2, poleZ);
+  shade.scale.set(spread.x, 1, spread.z);
   group.add(shade);
 
-  // The scallops sit on the rim circle the cone actually has, so widening the
-  // parasol moves them with it.
-  const scallops = 14;
+  // The scallops sit on the rim ellipse the cone actually has — same radius,
+  // same squash — so re-proportioning the parasol carries them with it.
+  const scallops = 16;
   group.add(
     instanced(
       new SphereGeometry(0.2, 10, 8),
@@ -442,7 +450,11 @@ function parasolCanopy(accent: Material, trim: Material): Canopy {
       scallops,
       (index, position, scale) => {
         const angle = (index / scallops) * Math.PI * 2;
-        position.set(Math.cos(angle) * radius, rimY, poleZ + Math.sin(angle) * radius);
+        position.set(
+          Math.cos(angle) * radius * spread.x,
+          rimY,
+          poleZ + Math.sin(angle) * radius * spread.z,
+        );
         scale.set(1, 0.75, 1);
       },
     ),
@@ -466,8 +478,8 @@ function barrelCanopy(accent: Material, trim: Material): Canopy {
   const axisZ = 0.5;
   // Stops short of the full half-circle at both ends: a vault that reached the
   // counter top would shut the stock in a tunnel from a camera at 38°.
-  const from = 0.13 * Math.PI;
-  const to = 0.87 * Math.PI;
+  const from = 0.2 * Math.PI;
+  const to = 0.8 * Math.PI;
   const angleAt = (index: number): number => from + ((to - from) * (index + 0.5)) / slats;
   const slatDepth = ((to - from) * radius) / slats + 0.03;
 
@@ -568,34 +580,39 @@ function buntingCanopy(accent: Material, trimColour: number): Canopy {
 /** A deep header with a spiky sawtooth valance: the one jagged outline. */
 function sawtoothCanopy(accent: Material, trim: Material): Canopy {
   const group = new Group();
-  const headerY = CANOPY_TOP - 0.12;
+  const headerY = CANOPY_TOP - 0.13;
   const headerZ = 0.62;
 
-  const header = fitting(new BoxGeometry(CANOPY_HALF * 2, 0.24, 1.5), accent);
+  const header = fitting(new BoxGeometry(CANOPY_HALF * 2, 0.26, 1.5), accent);
   header.position.set(0, headerY, headerZ);
   group.add(header);
 
-  // Teeth hanging off the header's own front lip. Their number comes from its
-  // width, so a wider header grows more teeth rather than stretching nine.
-  const toothWidth = 0.42;
+  // Teeth hanging off the header's own front lip, and hanging clear **below**
+  // its underside rather than tucked against it: from a camera looking down at
+  // 38° a valance flush with the board it hangs from is hidden by that board,
+  // which is how the first attempt at this managed to look like a plain slab.
+  // Their number comes from the header's width, so a wider header grows more
+  // teeth rather than stretching a fixed nine.
+  const toothWidth = 0.55;
   const teeth = Math.round((CANOPY_HALF * 2) / toothWidth);
+  const toothSide = toothWidth * 0.74;
   group.add(
     instanced(
-      new BoxGeometry(toothWidth * 0.72, toothWidth * 0.72, 0.14),
+      new BoxGeometry(toothSide, toothSide, 0.16),
       trim,
       teeth,
       (index, position, _scale, rotation) => {
         position.set(
           -CANOPY_HALF + toothWidth * (index + 0.5),
-          headerY - 0.12,
-          headerZ + 0.75,
+          headerY - 0.13 - (toothSide * Math.SQRT2) / 2 + 0.06,
+          headerZ + 0.74,
         );
         rotation.setFromAxisAngle(new Vector3(0, 0, 1), Math.PI / 4);
       },
     ),
   );
 
-  return { group, perch: new Vector3(0, headerY + 0.12, headerZ), eaveY: headerY - 0.12 };
+  return { group, perch: new Vector3(0, headerY + 0.13, headerZ), eaveY: headerY - 0.13 };
 }
 
 function buildCanopy(style: StallStyle, accent: Material, trim: Material, ceiling: number): Canopy {
@@ -720,8 +737,8 @@ function emblemAsset(kind: EmblemKind): AssetHandle | null {
       return createCandyFloss('pink');
     case 'cone':
       return createIceCream([PALETTE.markerPink, PALETTE.flowerYellow, PALETTE.markerSky]);
-    case 'crown':
-      return createHat('crown');
+    case 'bobbleHat':
+      return createHat('bobble');
     case 'star':
       return createStarToy(PALETTE.markerLemon);
     case 'egg':
@@ -736,18 +753,39 @@ const EMBLEM_YAW: Readonly<Record<EmblemKind, number>> = {
   teddy: 0.34,
   floss: -0.2,
   cone: 0.25,
-  crown: 0.4,
+  bobbleHat: 0.4,
   star: -0.3,
   egg: 0.18,
   none: 0,
 };
 
-function addEmblem(style: StallStyle, canopy: Canopy, ceiling: number, into: Group): void {
+function addEmblem(
+  style: StallStyle,
+  canopy: Canopy,
+  unit: ShopUnitDefinition,
+  ceiling: number,
+  into: Group,
+): void {
   const asset = emblemAsset(style.emblem);
   if (!asset) return;
   const headroom = ceiling - CEILING_MARGIN - canopy.perch.y;
   if (headroom <= 0) return;
-  asset.root.scale.setScalar(headroom / asset.height);
+
+  /**
+   * **The stall's own group is not uniformly scaled, and an asset dropped into
+   * it comes out stretched.**
+   *
+   * `ShopUnits` scales a stall's stage by `SHOP_SCALE_XZ` across and
+   * `shopScaleY` up, and everything the kiosk builds was authored knowing that.
+   * These emblems were not — they are the same factories `fitouts.ts` stands on
+   * the counter, authored in honest metres — so at 0.8 across and 1.0 up a
+   * teddy comes out a fifth too thin and an egg looks like a rugby ball stood
+   * on end. Dividing each axis back out puts them in real metres inside a
+   * squashed group, which is what "1 unit = 1 metre" in ART_DIRECTION.md's
+   * contract is owed.
+   */
+  const metres = headroom / asset.height;
+  asset.root.scale.set(metres / SHOP_SCALE_XZ, metres / shopScaleY(unit), metres / SHOP_SCALE_XZ);
   asset.root.position.copy(canopy.perch);
   asset.root.rotation.y = EMBLEM_YAW[style.emblem];
   asset.root.name = `stall-emblem:${style.emblem}`;
@@ -782,7 +820,7 @@ export function buildStallDress(unit: ShopUnitDefinition): Group {
   const posts = buildPosts(style, canopy, interiorMaterial(PALETTE.woodDark, 0.74));
   if (posts) group.add(posts);
 
-  addEmblem(style, canopy, ceiling, group);
+  addEmblem(style, canopy, unit, ceiling, group);
 
   return group;
 }

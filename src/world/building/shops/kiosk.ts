@@ -103,8 +103,13 @@ export function buildKiosk(unit: ShopUnitDefinition): KioskShell {
   group.add(top);
 
   // --- shelving -----------------------------------------------------------
-  const back = fitting(new BoxGeometry(3.4, 1.8, 0.1), cream);
-  back.position.set(0, 0.9, SHELF_Z - 0.25);
+  // 1.5 m, not the 1.8 it was: the canopies now have something standing on
+  // them (see `stallShape.ts`), and the 30 cm this gives back is 30 cm of
+  // emblem. Nothing stands higher than 1.3 m on these shelves anyway — see the
+  // note on `SHELF_Y` — so the top of the old panel was holding up nothing but
+  // the roof it forced upwards.
+  const back = fitting(new BoxGeometry(COUNTER_HALF_WIDTH * 2 - 0.1, 1.5, 0.1), cream);
+  back.position.set(0, 0.75, SHELF_Z - 0.25);
   group.add(back);
 
   // Three identical boards and two identical uprights: the only repeated
@@ -129,14 +134,14 @@ export function buildKiosk(unit: ShopUnitDefinition): KioskShell {
   group.add(boards);
 
   const uprights = new InstancedMesh(
-    new BoxGeometry(0.14, 1.7, 0.5),
+    new BoxGeometry(0.14, 1.45, 0.5),
     interiorMaterial(PALETTE.woodDark, 0.74),
     2,
   );
   uprights.castShadow = false;
   uprights.receiveShadow = true;
   [-1, 1].forEach((side, index) => {
-    position.set(side * (SHELF_HALF_WIDTH + 0.07), 0.85, SHELF_Z);
+    position.set(side * (SHELF_HALF_WIDTH + 0.07), 0.725, SHELF_Z);
     matrix.compose(position, rotation, scale);
     uprights.setMatrixAt(index, matrix);
   });
