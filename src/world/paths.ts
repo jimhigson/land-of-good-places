@@ -11,7 +11,6 @@ import {
   CROSSING_SITES,
   LEVEL_CROSSING_SITES,
   LEVEL_CROSSING_PENALTY,
-  SITE_HALF_WIDTH,
   type CrossingSite,
 } from './train/crossingPlan';
 import { COASTER_PLANS } from './coaster/plan';
@@ -1849,21 +1848,73 @@ function pointInSlideCorridor(x: number, z: number): boolean {
 function segmentCutsABridgeRamp(ax: number, az: number, bx: number, bz: number): boolean {
   const length = Math.hypot(bx - ax, bz - az);
   const steps = Math.max(1, Math.ceil(length / 1.5));
+  for (let s = 0; s <= steps; s += 1) {
+    const t = s / steps;
+    if (pointStandsOnABridgeRamp(ax + (bx - ax) * t, az + (bz - az) * t)) return true;
+  }
+  return false;
+}
+
+/**
+ * Slack added to a site's own proven extent before this file screens
+ * anything against it. A path's ribbon has width of its own
+ * ({@link RIBBON_HALF_WIDTH_CEILING}), and the real bridge may end up a
+ * little longer or wider than the site was proven at — the screen has to
+ * cover where the masonry *lands*, not the centre line it was planned from.
+ */
+const RAMP_SCREEN_MARGIN = 1.5;
+
+/**
+ * **The ground a bridge will really stand on — deck, both ramps and the
+ * parapets that flank them — known before a single path is drawn.**
+ *
+ * This is the one owner of that rectangle in `paths.ts`, and it is
+ * deliberately built from the *site's own* proven numbers rather than from
+ * anything restated here:
+ *
+ * - `DECK_HALF_LENGTH` is imported from `train/bridgeFootprint.ts`, the
+ *   module that builds the deck.
+ * - `rampReachPos` / `rampReachNeg` and `halfWidth` are the reaches
+ *   `train/crossingPlanSolve.ts` *proved* a ramp into when it accepted this
+ *   site, and are the same figures `bridgeFootprint.ts`'s search starts its
+ *   own backtracking from.
+ *
+ * **Keep it that way.** If the layout's idea of a bridge's footprint and the
+ * builder's ever drift apart, issue #414 comes straight back wearing
+ * different clothes: the drift *is* the bug. Two numbers describing one piece
+ * of ground, maintained in two places, is this repo's most expensive
+ * recurring mistake.
+ *
+ * ## Why `paths.ts` needs this at all (issue #414)
+ *
+ * Before this, `paths.ts` knew only the crossing *point* — enough to route a
+ * rail-crossing leg through a proven site, and nothing at all about how much
+ * ground the bridge would occupy. So every other router was free to put a
+ * street, a lattice node or a spur's branch point inside a ramp. Measured on
+ * the canonical seed: `spur-dodgems` branched off the gate approach at
+ * (-22.2, 36.4) — a point on the bridge's own crown, 4.40 m in the air — and
+ * ran 7 m along the ramp before turning off its side into the parapet. Jim,
+ * three times: *"another path shouldn't join into a mid-ramp bridge"*, and
+ * *"there is also a path that runs into the side of the bridge — basically
+ * runs into a solid wall"*.
+ *
+ * **Only `CROSSING_SITES` carry this screen, not `LEVEL_CROSSING_SITES`**: a
+ * level crossing stays flat, so there is no ramp to keep off and no masonry
+ * to walk into. That is only true for as long as a bridge is never built on a
+ * level site — which is exactly what issue #414's second half is about, so
+ * this comment and that fix have to move together.
+ */
+function pointStandsOnABridgeRamp(x: number, z: number, margin = RAMP_SCREEN_MARGIN): boolean {
   for (const site of CROSSING_SITES) {
     if (!site.bridge) continue;
-    const reachPos = DECK_HALF_LENGTH + site.rampReachPos + 1.5;
-    const reachNeg = DECK_HALF_LENGTH + site.rampReachNeg + 1.5;
-    for (let s = 0; s <= steps; s += 1) {
-      const t = s / steps;
-      const x = ax + (bx - ax) * t;
-      const z = az + (bz - az) * t;
-      const dx = x - site.x;
-      const dz = z - site.z;
-      const along = dx * site.dirX + dz * site.dirZ;
-      const across = -dx * site.dirZ + dz * site.dirX;
-      if (Math.abs(across) <= SITE_HALF_WIDTH + 0.5 && along <= reachPos && along >= -reachNeg) {
-        return true;
-      }
+    const dx = x - site.x;
+    const dz = z - site.z;
+    const across = -dx * site.dirZ + dz * site.dirX;
+    if (Math.abs(across) > site.halfWidth + margin) continue;
+    const along = dx * site.dirX + dz * site.dirZ;
+    if (along <= DECK_HALF_LENGTH + site.rampReachPos + margin &&
+        along >= -(DECK_HALF_LENGTH + site.rampReachNeg + margin)) {
+      return true;
     }
   }
   return false;
@@ -1943,7 +1994,15 @@ function* streetLatticeSearch(): Generator<number, StreetLattice, void> {
       const clear = streetSegmentClear(x, z, x, z);
       const inRing = Math.hypot(x - PLAZA.x, z - PLAZA.z) < RING_RADIUS + 1;
       const rail = railInfoAt(x, z);
-      nodeOk[index] = clear && !inRing && rail.dist >= RAIL_CLAMP_DISTANCE ? 1 : 0;
+      // **A node standing on a bridge's ramp is not a street crossroads.**
+      // `RAIL_CLAMP_DISTANCE` keeps nodes out of the rail's own corridor,
+      // which is a few metres wide; a ramp reaches ~12 m further still, so a
+      // node could sit squarely on one and pass every test above. Its edges
+      // were already screened (`edgeOk` below), which left exactly the case
+      // #414 is about: the node itself stays valid, a route terminates *on*
+      // it, and the ribbon starts halfway up a bridge.
+      const onRamp = pointStandsOnABridgeRamp(x, z);
+      nodeOk[index] = clear && !inRing && !onRamp && rail.dist >= RAIL_CLAMP_DISTANCE ? 1 : 0;
       side[index] = rail.side;
     }
   }
@@ -4865,6 +4924,19 @@ function nearestPointOnRoute(
     // couple of metres run into a plot mouth, and a junction there routes
     // the new spur straight through the booth it belongs to.
     if (BLOCKERS.some((b) => Math.hypot(px - b.x, pz - b.z) < b.radius)) continue;
+    // **Never branch from a stretch of ribbon a bridge will carry**, for the
+    // same reason and with the same shape as the plot rule above: this route
+    // is drawn on the ground today, but the stretch crossing a planned site
+    // becomes a humpback deck between parapet walls. A junction there starts
+    // the new spur *on the bridge* and walks it off the side into masonry.
+    //
+    // This is the branch point #414 was actually built from: the canonical
+    // seed's `spur-dodgems` took its junction at (-22.2, 36.4), a point on
+    // the gate approach 0.2 m up-ramp of the crossing centre and 4.40 m in
+    // the air once the bridge existed. The scoring below prices length,
+    // off-axis runs and rail-hugging; none of them can price "this junction
+    // is in mid-air", so it has to be refused outright rather than costed.
+    if (pointStandsOnABridgeRamp(px, pz)) continue;
     const distance = Math.hypot(x - px, z - pz);
     if (distance < bestDistance) {
       bestDistance = distance;
