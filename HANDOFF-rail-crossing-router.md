@@ -235,6 +235,57 @@ fits on (0.0, 234.0, 336.0)
 
 Green without the flag.
 
+## `pnpm run check` — and TWO more inherited reds it was hiding
+
+The chain is `&&`, so `check:park` failing stopped it at step 26 of 48.
+Fixing `check:park` made the chain run on, and it found two more. **Both
+reproduce at #427's branch point `641573c7` in a detached worktree with its
+own install; neither is caused by this change.**
+
+### 1. An import cycle — FIXED HERE
+
+```
+ReferenceError: Cannot access 'TrainRoute' before initialization
+  at src/world/train/plan.ts:346
+```
+
+`plan -> route -> {crossingKeepOut, bridgeFit} -> bridgeFootprint -> plan`.
+Whichever module the entry point reaches first decides whether it blows up,
+which is why the browser and 46 other checks were unaffected and one was not.
+Two edges cut, neither by duplicating a number: `DECK_HALF_LENGTH` moves to
+`clearance.ts` (the leaf that already owns the `FENCE_OFFSET` it is derived
+from — exactly the fix `FENCE_OFFSET`'s own header describes), and
+`distanceToRailCorridor` arrives on `RealWorldQuery` instead of being
+imported. `bridgeFootprint.ts` re-exports `DECK_HALF_LENGTH`, so every
+existing reader is unchanged.
+
+### 2. `check:park-boot` — a #427 performance regression, NOT fixed here
+
+With the cycle gone, `check:park-boot` runs and fails on generation slice
+time:
+
+```
+one advance() blocked for 104.0 ms against an 8 ms budget and a 20.0 ms
+ceiling already scaled 1.00x for this box
+```
+
+Measured three ways on the same machine:
+
+| tree | verdict |
+|---|---|
+| `origin/main` | **passes** — worst advance 13.6 ms |
+| `641573c7` (#427's branch point) + this branch's cycle fix only | **FAILS, 105.4 ms** |
+| this branch's head | FAILS, 104.0 ms |
+
+**So one park-generation work unit became ~8x more expensive on #427**, and
+the check that exists to catch exactly that could not run. Its own message
+says what to do (`generation.advance(0)` to price the unit) and says plainly
+not to raise the ceiling. The likely candidate is the ranked ~1200-pose
+crossing field or the `satisfies` backstop re-probing whole routes, but that
+is a guess and this ticket has buried six of those — **measure it.**
+
+It belongs to #427. `check:arrival-completes`, the only step after it, passes.
+
 ## Still open, for whoever is next
 
 - **Seed 2 has no bridges.** The decision above. Nothing else on this branch
