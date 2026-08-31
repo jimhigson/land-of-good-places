@@ -235,8 +235,91 @@ fits on (0.0, 234.0, 336.0)
 
 Green without the flag.
 
-## STATUS: `pnpm run check` exit 0 (all 48 steps), `build` exit 0,
-## `test:procgen` 3 failed / 484 passed — all three #427's own, none mine.
+## STATUS: `test:procgen` **487/487, 16/16 files — GREEN**. `build` exit 0.
+## `pnpm run check` exit 0 across all 48 steps.
+
+## The three inherited `test:procgen` failures — all cleared, all at the cause
+
+Each was #427's own and predates this branch. None was fixed by weakening an
+assertion, widening a probe, tuning a threshold or swapping a seed.
+
+### 1. seed 5 — `every street sits on the shared 12 m lattice`
+
+`gate-approach` ran 13.0 m east-west on z = 59.20, 1.94 m off the lattice.
+
+`elbowLeg` turns a proven-clear diagonal into an L via one of two corners and
+tested both with `segmentIsWalkable`, which asks `BLOCKERS` — the plots. It
+does **not** know about the park boundary or the entrance arch's masonry. With
+both corners "walkable" it fell through to its local `dz <= dx` rule and took
+the blocked one. Measured with the generator's own screen:
+
+```
+north-then-east  (0,47.8)->(0,59.2)->(15.8,59.2)     clear=false, false  <- drawn
+east-then-north  (0,47.8)->(15.8,47.8)->(15.8,59.2)  clear=true,  true
+```
+
+The drawn run passed 0.8 m from the arch's own pier (a 0.55 m collider at
+(4.30, 60.00)), so a child could not walk it — one cause, two symptoms.
+
+**Fix:** when both corners are walkable, prefer the one `streetSegmentClear`
+also accepts — the generator's one owner of "may a street go here", and what
+the lattice itself is built from. It can never reject a leg, so every route
+that solved before still solves; where both elbows agree, `dz <= dx` decides
+exactly as before and #269's lesson is untouched.
+
+### 2. seed 11 — `the Sky Cruiser flies clear of the whole park`
+
+The car passed through `living-flower-heads` at (-57.51, **0.70**, -20.16) —
+the ride's own station approach, barely off the grass.
+
+`Scenery.ts` already exports `clearOfCruiser(x, z, reach, topY)`, documented as
+"one grid, one definition of the cruiser flies low here", asked by trees,
+bushes, hiding walls and lamp posts. **`Flowers.pickSpawnPoint` was the one
+scattered population in the park that never asked.**
+
+**Fix:** it asks. `TALLEST_FLOWER`/`WIDEST_FLOWER` are derived from the same
+two ranges `spawnAt` draws from and the same wiggle flare the update applies —
+no second description of how big a flower gets.
+
+### 3. seed 18 — `the walk in from the gate crosses the railway where the planner planned it to`
+
+**Why the walk had no choice.** Seed 18's loop runs 2.5 m from the entrance
+arch and seals the gate-side neck outright — swept about the arch there is
+**0.0 m** of gate-side ground 2 m out and **0.9 m** at 4 m, against a 3.6 m
+ribbon. A child stepping through the arch is across the track. The walk must
+cross within a few metres of the arch, and nothing was planned within 90 m of
+loop (railD 274 → 4).
+
+**Why nothing was planned** — asked of the planner, via a new
+`explainLevelRefusal` mirroring `explainBridgeRefusal`, after a
+re-implementation of the tier's own tests had told me the opposite:
+
+- railD 290–302, the arch's own stretch, is **genuinely refused by both
+  tiers** — the loop hugs the rim and there is no room. The planner is right.
+- but railD **306**, at (4.6, 53.6), **8.0 m from the arch**, *is* a level
+  candidate (reach 4.0/3.5 against a 3.5 floor), as are 308–320 and 0–12.
+
+They were selected out by **two rules in series**, and clearing the first only
+revealed the second:
+
+1. **Same-tier 24 m spacing.** Of 77 level candidates it kept 9, and near the
+   gate it kept railD 8 — 25.3 m from the arch, *across the railway* — over
+   railD 306 at 8.0 m, preferring it on ramp reach (4.0 vs 3.5). The ranking
+   has no notion of where the park *needs* to cross.
+2. **The cross-tier redundancy filter** — "a level crossing within a bridge
+   site's own spacing is pure redundancy, the bridge is right there". It struck
+   306 against the bridge at railD 4, 16.2 m along the loop. Across the ground
+   that bridge is 21.9 m from the arch and **on the far side of the very
+   railway the walk is trying to cross**.
+
+Both rules measure separation *along the loop*; a walk measures it *across the
+ground*. **Fix:** the entrance's own nearest candidate is kept first, and a
+level site nearer the arch than the bridge that shadows it is not redundant.
+
+**Two variations were tried first and reported before the next was attempted**,
+neither shipped: pulling the gate corridor out to the arch (1 failure → 4), and
+the cross-tier exemption on its own (no effect — the candidate it would have
+saved was already gone at the same-tier rule).
 
 ## `pnpm run check` — and TWO more inherited reds it was hiding
 
