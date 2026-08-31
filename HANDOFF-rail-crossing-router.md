@@ -235,6 +235,9 @@ fits on (0.0, 234.0, 336.0)
 
 Green without the flag.
 
+## STATUS: `pnpm run check` exit 0 (all 48 steps), `build` exit 0,
+## `test:procgen` 3 failed / 484 passed — all three #427's own, none mine.
+
 ## `pnpm run check` — and TWO more inherited reds it was hiding
 
 The chain is `&&`, so `check:park` failing stopped it at step 26 of 48.
