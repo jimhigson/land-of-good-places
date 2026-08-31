@@ -113,8 +113,52 @@ const PATCH_COUNT = 3;
 /** Nominal patch radius, before the edge wobble. */
 const PATCH_RADIUS = 8.4;
 
-/** Breathing room between a meadow cell and anything in {@link keepOutsFor}. */
-const KEEP_OUT_MARGIN = 1.0;
+// ------------------------------------------- how far a drawn tuft reaches
+//
+// The numbers below are the *drawn* extents of one clump, and they exist so
+// {@link KEEP_OUT_MARGIN} can be derived from them instead of guessed. Keep
+// them beside `tuftGeometry` and `buildRoofMeadow`'s instance loop, which are
+// their only other readers.
+
+/** How far a tuft's instance is jittered off its cell centre, per axis, so
+ *  three hundred clumps do not read as a grid. Worst case is both axes at
+ *  once, hence the diagonal. */
+const TUFT_JITTER = MEADOW_CELL * 0.44;
+const TUFT_JITTER_RADIAL = TUFT_JITTER * Math.SQRT2;
+
+/** The largest an instance is scaled in XZ. */
+const TUFT_MAX_SCALE = 1.18;
+
+/**
+ * How far the furthest blade tip stands from the clump's own origin, before
+ * that scale: the widest a blade springs from the middle (`spread` 0.16), plus
+ * how far the tallest blade's tip travels when it leans (`sin(0.3)` over
+ * `MEADOW_GRASS_HEIGHT × 1.16`), plus the fattest blade's own half-width
+ * (radius 0.1, scaled 1.3 across).
+ */
+const TUFT_BLADE_REACH = 0.16 + Math.sin(0.3) * (MEADOW_GRASS_HEIGHT * 1.16) + 0.1 * 1.3;
+
+/** The whole footprint of one drawn clump, measured from its cell's centre. */
+const TUFT_REACH = TUFT_JITTER_RADIAL + TUFT_BLADE_REACH * TUFT_MAX_SCALE;
+
+/**
+ * Breathing room between a meadow **cell centre** and anything in
+ * {@link keepOutsFor} — **derived from what is drawn, not chosen**.
+ *
+ * It was a typed `1.0`, and `check:castle` caught what that misses: it
+ * measures **a prop's whole footprint** against `keep-out radius +
+ * PLAYER_RADIUS`, and a cell centre is not a footprint. A tuft is jittered off
+ * its centre and then leans and splays on top of that, so the grass a child
+ * walks into stands up to {@link TUFT_REACH} further out than the point this
+ * margin was protecting. Deck 2's grass came within **8.08 m** of the
+ * pavilion's keep-out where **8.22 m** was needed — 0.14 m, and a margin
+ * nobody could have arrived at by choosing a rounder number.
+ *
+ * `PLAYER_RADIUS` is the game's, not the generator's, exactly as the procgen
+ * rules require: what matters is whether a child fits, not whether the
+ * generator hit its own target.
+ */
+const KEEP_OUT_MARGIN = PLAYER_RADIUS + TUFT_REACH;
 
 /**
  * How much room the trampoline gets, beyond its own pad.
@@ -358,21 +402,30 @@ export function roofBurrows(deck: number): readonly Burrow[] {
   const cells = meadow.cells;
   const chosen: Burrow[] = [];
   /**
-   * A burrow needs more room than the grass around it does.
+   * How much room a burrow needs **beyond what the grass around it already
+   * has** — which, now that {@link KEEP_OUT_MARGIN} is derived, is none.
    *
-   * `check:castle` measures a **prop's whole footprint** against
-   * `keep-out radius + PLAYER_RADIUS`, and a mound is
-   * {@link BURROW_RADIUS} across where a grass tuft reaches about half that.
-   * The meadow's own {@link KEEP_OUT_MARGIN} is sized for the tuft, so the
-   * first burrow run put a mound 8.18 m from the pavilion's 8 m keep-out when
-   * 8.62 m was wanted — caught by `check:castle`, which is the third time this
-   * check has caught this feature.
+   * `check:castle` measures a prop's whole footprint against
+   * `keep-out radius + PLAYER_RADIUS`. For a mound that footprint is
+   * {@link BURROW_RADIUS}, flat on the ground and centred on its cell. For a
+   * tuft it is {@link TUFT_REACH} — larger, because a tuft is jittered off its
+   * cell centre *and then* leans and splays. `clearanceAt` is measured against
+   * the tuft's requirement, so **a cell that can hold grass can already hold a
+   * mound**, and asking for `BURROW_RADIUS + PLAYER_RADIUS` on top of it was
+   * charging the burrow for the tuft's jitter a second time.
    *
-   * Asking {@link RoofMeadow.clearanceAt} rather than re-deriving the rule is
-   * the point: one measurement, two thresholds, and no second copy of the
-   * keep-out list to fall out of step.
+   * That double charge cost real burrows rather than being merely untidy: it
+   * took the roof from five holes to four the moment the margin became honest.
+   * The subtraction below is what the two footprints actually differ by, and
+   * it clamps at zero rather than going negative, so a burrow is never allowed
+   * *closer* than the grass it sits in.
+   *
+   * Still asked of {@link RoofMeadow.clearanceAt} rather than re-derived from
+   * the keep-out list, which is the part that was always right: one
+   * measurement, two thresholds, no second copy of the list to fall out of
+   * step.
    */
-  const needed = BURROW_RADIUS + PLAYER_RADIUS;
+  const needed = Math.max(0, BURROW_RADIUS - TUFT_REACH);
   const eligible = cells.filter((cell) => meadow.clearanceAt(cell.x, cell.z) >= needed);
 
   /**

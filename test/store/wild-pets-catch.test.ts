@@ -19,6 +19,7 @@ import {
   roofMeadow,
 } from '../../src/world/building/roofMeadow';
 import { SLIDE_PLAN } from '../../src/world/slide/plan';
+import { keepOutsFor } from '../../src/world/building/dressing';
 import { CASTLE_FLOOR_RADIUS, CASTLE_ROOF } from '../../src/world/building/floors';
 
 /** `WildPets`' own catch radius, re-stated here rather than exported: this is a
@@ -308,9 +309,30 @@ describe('the roof garden gets the burrows it asks for', () => {
     const meadow = roofMeadow(TOP_DECK);
     for (const burrow of burrows) {
       expect(meadow.contains(burrow.x, burrow.z), `burrow at ${burrow.x},${burrow.z} must be in the grass`).toBe(true);
-      // The same threshold `roofBurrows` selects on, re-measured off the result
-      // rather than trusted from the rule that produced it.
-      expect(meadow.clearanceAt(burrow.x, burrow.z)).toBeGreaterThanOrEqual(BURROW_RADIUS + PLAYER_RADIUS);
+    }
+  });
+
+  /**
+   * The mound measured against **the castle's own keep-out list**, at the
+   * threshold `check:castle` uses — `keep-out radius + PLAYER_RADIUS` against
+   * the prop's whole footprint — rather than against the generator's own
+   * selection rule.
+   *
+   * Deliberately not `meadow.clearanceAt >= BURROW_RADIUS + PLAYER_RADIUS`,
+   * which is what this used to say. That reads a number back out of the rule
+   * that produced the burrows, so it could only ever agree with itself; and it
+   * was also simply wrong once `KEEP_OUT_MARGIN` became derived, because the
+   * meadow's clearance is already measured against a grass tuft's reach, which
+   * is larger than a mound's. It cost a burrow before it was noticed.
+   */
+  it('leaves a child room to walk round every mound', () => {
+    for (const burrow of burrows) {
+      for (const keepOut of keepOutsFor(TOP_DECK)) {
+        expect(
+          Math.hypot(burrow.x - keepOut.x, burrow.z - keepOut.z),
+          `a mound at ${burrow.x.toFixed(1)},${burrow.z.toFixed(1)} against the keep-out at ${keepOut.x.toFixed(1)},${keepOut.z.toFixed(1)}`,
+        ).toBeGreaterThanOrEqual(keepOut.radius + PLAYER_RADIUS + BURROW_RADIUS);
+      }
     }
   });
 
