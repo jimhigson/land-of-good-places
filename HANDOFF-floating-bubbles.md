@@ -81,8 +81,27 @@ Same canonical seed, near (-22.1, 30): re-shot on this branch at
 `(-19.68, 5.18, 27.08)` over Wren at `(-19.68, 2.25, 27.08)`, identical x/z.
 Screenshot `bridge-spot-1.png`.
 
-## Remaining
+## Green, locally
 
-- Full `pnpm run check`, `pnpm run build`, `pnpm run test:procgen`.
-- PR referencing #415.
-- Dev server pid 36545 on 5418 — kill by PID, confirm free.
+- `pnpm run check` (49 steps, `check:speech-bubbles` at line 473 of the log): **exit 0**
+- `pnpm run build`: **exit 0**
+- `pnpm run test:procgen`: **exit 0**, 482 passed — after adding `isOnScreen: () => true`
+  to `test/store/wild-pets-catch.test.ts`'s camera stub, which went red on
+  `camera.isOnScreen is not a function` (10 tests).
+- The check is deterministic: 363 sightings on three consecutive runs.
+
+## PR
+
+PR #420. Preview (fresh URL every push — re-read the PR's newest preview
+comment before quoting it):
+`https://pr-420-54ee4c2-land-of-good-places.blockstack.workers.dev/spawn?pos=-22.1,30`
+— loaded at 390x844, HTTP 200, lands on the entrance bridge with three
+children right there. Screenshots `preview-1..6.png`.
+
+CI at the time of writing: preview, reload-gets-new-build and procgen all
+pass; "Checks" still running.
+
+## Housekeeping done
+
+Dev server pid 36545 on port 5418 killed by PID; `lsof -nP -i:5418 | grep
+LISTEN` returns nothing.
