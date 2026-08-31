@@ -407,3 +407,73 @@ rather than assuming: the fountain sits in the middle of the plaza, so routes
 crossing it must detour round the rim and off the paving. That may be feeding
 the worst-route number too — but it is a hypothesis, and the last two I formed
 without an instrument were both wrong.
+
+## #448 sweep — 21-22 junctions x 5 procgen seeds, source and destination apart
+
+107 junction-seed pairs. Canonical (20260728) + sweep seeds 2, 5, 11, 18, each
+in its own process (module caches make in-process re-seeding impossible).
+"Reachable" = routes to/from >= 50% of 67-86 clear sample points spread over
+the park. `margin` = distance to the nearest collider surface **minus**
+`PLAYER_RADIUS`; `hair` = half a `NavGrid` cell diagonal, **0.354 m**, which is
+how far a node can sit from its own cell centre.
+
+### The margins fall into two groups with nothing in between
+
+| margin | pairs |
+|---|---|
+| **< 0 (node inside a collider)** | **3** |
+| **0.00 – 0.15 m** | **13** |
+| 0.15 – 0.354 m (under a hair) | **0** |
+| 0.354 – 1.0 m | 35 |
+| > 1.0 m | 56 |
+
+The only values under a hair are **-0.62, 0.02, 0.06 and 0.13 m**. The next
+margin up is **0.43 m**. **Nobody has to pick a threshold — anything between
+0.15 and 0.43 separates the two groups**, and the lattice's own 0.354 m sits in
+the empty gap. That is the number to write a rule against, and it is derived
+from `NavGrid`'s `CELL`, not invented.
+
+### 14 of 107 pairs are broken, and the asymmetry holds everywhere
+
+| node | reachable as destination |
+|---|---|
+| `plaza` | **0 of 5 seeds** |
+| `building` | 2 of 5 |
+| `station-0` | 2 of 5 |
+| `station-1` | 2 of 5 |
+
+**Source-side failures: 5, every one of them `plaza`.** Destination-side: 14.
+The asymmetry survives the sweep — routing *to* a junction is what breaks, and
+`src 96% / dst 0%` is the signature across every seed.
+
+- **`plaza` fails on all five seeds, both directions.** The fountain swallows
+  it every time; this is systematic, not seed luck.
+- **`building` has margin -0.62 m on seeds 5, 11 and 18** — the junction is
+  *inside* a collider, not near one.
+- **Same margin, different outcome**: `station-0` sits at +0.13 m on all five
+  seeds and is reachable on two of them. So the margin does not decide it on
+  its own — **sub-cell alignment does**, which is exactly why this is flaky and
+  has stayed invisible. A junction at 0.13 m is a coin toss.
+
+### The canonical seed is the *mildest* of the five
+
+Broken destinations per seed: **canonical 2**, seed 2 **1**, seed 11 **3**,
+seed 5 **4**, seed 18 **4**. `check:park` runs the canonical seed only (#437),
+so `building` sitting inside a collider on three of five seeds is **invisible
+to every check we have today**.
+
+### Scoping this suggests
+
+Two rules, not one, because the two defects have different shapes:
+
+1. **No junction inside a collider ring** — catches `plaza` on 5/5. A procgen
+   invariant, shipping with the placement change per CLAUDE.md.
+2. **Every junction keeps a clear margin of at least one lattice hair
+   (0.354 m) beyond `PLAYER_RADIUS`** — catches the other three on every seed
+   they fail, and would have caught them on the seeds where they happen to
+   pass, which is the point: they pass there by alignment, not by design.
+
+Both want measuring across all five seeds, so `test/procgen/invariants.ts` is
+the natural home rather than a canonical-seed-only check.
+
+**Nothing fixed.** Sweep instrument was temporary and is deleted.
