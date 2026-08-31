@@ -171,3 +171,65 @@ because that is the claim that failed this round.
 Also worth noting for variety: seed 2's loop came out **138 m, down from
 266 m**. Shorter loops are a real effect of starting inside the park rather
 than on the rim, and measurement 3 (variety) is still outstanding.
+
+## MEASUREMENT 4, SECOND ATTEMPT — 100%, re-measured not assumed
+
+After the station keep-out: **14/14 loops admit at least one bridge (100%)**,
+up from 13/14 and from 11/14 on `main`. **Seed 2 goes from 0 bridge sites to 1.**
+
+The claim now holds by construction, and the mechanism that broke it the first
+time is closed at its source: `CROSSING_STATION_CLEARANCE` lives in
+`clearance.ts` and is read from both directions — `crossingPlanSolve.ts` will
+not *plan* a crossing that close to a station, `plan.ts` will not *place* a
+station that close to the crossing.
+
+## MEASUREMENT 5 — loop length: NOT systematically shorter
+
+Loops are not shrinking park-wide. One seed is an outlier and it is seed 2:
+
+| seed | before (rim starts) | after (crossing starts) | delta |
+|---|---|---|---|
+| canonical | 356 m | 371 m | **+15** |
+| 2 | 266 m | **138 m** | **−128** |
+| 5 | 354 m | 294 m | −60 |
+| 11 | 296 m | 285 m | −11 |
+| 18 | 297 m | 313 m | **+16** |
+
+Mean 313.8 → 280.2 m (−11%), but **almost all of that is seed 2 alone**.
+Excluding it: 325.8 → 315.8 m, **−3%** — noise at this scale, and two of the
+five seeds get *longer*.
+
+So "starting inside the park shortens loops" is **not** supported. Seed 2's
+loop halves, and seed 2 is the most constrained park we build — it is also the
+seed that previously could not bridge at all. Worth Jim seeing as a specific
+case, not as a trend.
+
+Across all 14 solvable seeds the lengths run 138–400 m, so the population is
+still varied.
+
+## Budget, restated over 14 seeds
+
+14/15 solve (seed 3 fails on `main` too — not a regression). Worst is seed 14
+at **87 of 96** restarts, which is the only seed near the edge of the field and
+is worth watching if the pose count is ever reduced.
+
+## OPEN — `test:procgen` exit 1: 474 passed, 8 failed
+
+Moving the railway moves the park, and eight invariants across five seeds
+disagree with the new one:
+
+```
+seed 11: every street sits on the shared 12 m lattice
+seed 11: the Sky Cruiser flies clear of the whole park
+seed 11: the walk in from the gate crosses the railway ... on a bridge
+seed 18: railway crossings are planned — station-clear, and mostly real bridges
+seed 2:  every street sits on the shared 12 m lattice
+seed 5:  the Rail Race finish rainbow stands on the ground
+seed 5:  the walk in from the gate crosses the railway ... on a bridge
+canonical: the Rail Race finish rainbow stands on the ground
+```
+
+None is investigated yet. They are the real remaining work on #427, and they
+are not all the same kind of thing — "the finish rainbow stands on the ground"
+and "the Sky Cruiser flies clear" are other rides reacting to a moved loop,
+while the two gate-crossing ones are this feature's own territory.
