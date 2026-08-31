@@ -4195,32 +4195,51 @@ const CONNECTOR_RATIO_THRESHOLD = 2.5;
  * clear across it, which is over-connecting, not fixing a hub-and-spoke
  * local pocket.
  *
- * 2.0, not the more generous 3.5 the "close but unlinked" reasoning above
- * would alone justify — brought down by a second, independent constraint
- * measured directly against `check:park`'s "every waypoint is reachable"
- * invariant, 18 August 2026: `Scenery.ts`'s hiding maze (`generateWallMaze`)
- * places its L-shaped pieces by walking `MAZE_CANDIDATES` = 2600 index-seeded
- * attempts, each testing clear ground against the *current* path network and
- * against every already-placed piece — so rejecting one candidate (because
- * it now overlaps a brand-new connector ribbon) can let a *later* candidate
- * fill ground the earlier one would otherwise have claimed
- * (`test/procgen/scatterDecoupling.test.ts` documents this exact mechanism
- * and tolerates up to 30 m of it for a 2 m spur bow). A whole new connector
- * is a far bigger perturbation than a 2 m bow, and on the canonical seed the
- * full 8-connector set (3.5x cap) reliably shifted a maze piece across a
- * paving-free NPC waypoint chord near the hotel spur, stranding 38 waypoints
- * — reproduced with `LGP_DISABLE_INTERCONNECTS`/cap sweeps, not a one-off.
- * Measured cap sweep on the canonical seed: 3.5x/8 connectors → 38 stranded,
- * 3.0x/7 → 37, 2.5x/6 → 3 (a different pocket, near the ferris wheel),
- * 2.0x/3-4 → 0, confirmed 0 again on seed 2. Fewer, shorter connectors is a
- * real reduction in total *new* paved ground for the maze to collide with —
- * not a proxy that happens to correlate — so 2.0 is kept as the operating
- * cap until the maze generator gets the same index-locked-against-neighbours
- * treatment its own benches already have (`BENCH_CANDIDATES`/`candidateRng`
- * in the same file), which would remove this constraint entirely rather
- * than requiring a conservative cap here.
+ * **2.5, and what it is limited by changed on 31 August 2026.**
+ *
+ * This sat at **2.0** for a fortnight, held down not by anything about
+ * connectors but by `Scenery.ts`'s hiding maze: `generateWallMaze` recorded a
+ * piece's corner — and so its 12 m+ exclusion zone — only *after* the piece had
+ * also cleared `runIsClear` and `fitsAmong`, both of which ask about the world
+ * as it stands. So a refusal caused by a brand-new connector ribbon released
+ * that zone and promoted a later candidate somewhere else, and on the canonical
+ * seed the full 3.5x set shifted a maze piece across a paving-free NPC waypoint
+ * chord near the hotel spur, stranding **38 waypoints**. The measured sweep
+ * then was: 3.5x → 38 stranded, 3.0x → 37, 2.5x → 3, 2.0x → 0.
+ *
+ * That coupling is **gone** (issue #438): the maze now claims its slot on the
+ * candidate's own index, before any screen that can refuse it for an outside
+ * reason, so a refusal only ever removes that piece. Re-measured on the same
+ * sweep, with `LGP_CONNECTOR_CAP`:
+ *
+ * | cap | canonical | seed 2 | seed 5 | seed 11 | seed 18 | `poi.stranded` |
+ * | --- | --- | --- | --- | --- | --- | --- |
+ * | 2.0 | 3 | 5 | 5 | 4 | 5 | 0 |
+ * | **2.5** | **4** | 7 | 5 | 6 | 5 | **0** |
+ * | 3.0 | 5 | 8 | 5 | 7 | 7 | 0 |
+ * | 3.5 | 5 | 8 | 6 | 7 | 7 | **0** |
+ *
+ * **Nothing strands at 3.5 any more** — the multiple that used to cost 38
+ * waypoints now costs none, which is the decoupling proving itself rather than
+ * being asserted. (`poi.stranded` is `check:park`, which covers the canonical
+ * seed only — issue #437 — so the all-seed evidence is the row below, not that
+ * column.)
+ *
+ * So the binding constraint is now a different one, and it is **not** stranding.
+ * `test:procgen` across all five seeds: **2.5 → 487 passed; 3.0 and 3.5 → seed
+ * 11 fails `every paved path runs on grid axes`**, because above 2.5 the cap
+ * admits pairs too far apart for the street lattice to serve, the connector
+ * falls back to the continuous router, and it draws a 26.2 m diagonal
+ * (`connector-stall.railRacer-stall.waterFight`) straight through Decision 3.
+ * That is a limit of the router, not a tolerance to widen, and it is filed
+ * separately.
+ *
+ * **2.5 is therefore measured, not chosen**: the largest multiple green on
+ * every seed. On the canonical park it restores exactly the connector the
+ * railway rework cost — `stall.spaceFerrisWheel` ↔ `stall.facePaint`, a pair
+ * 27.79 m apart that never moved (issue #416).
  */
-const CONNECTOR_SPACING_CAP_MULTIPLE = numberFromEnv('LGP_CONNECTOR_CAP') || 2.0;
+const CONNECTOR_SPACING_CAP_MULTIPLE = numberFromEnv('LGP_CONNECTOR_CAP') || 2.5;
 
 /**
  * How many "typical plot hops" of *wasted* paved walking (paved distance
