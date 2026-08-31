@@ -32,7 +32,13 @@ import {
 import { isInBridgeFootprint } from './train/bridgeKeepout';
 import { terrainHeight } from './terrain';
 import { PLAZA } from './paths';
-import { isOnPath, pathBorderSegments, pathCentreline, type PathBorderSegment } from './pathGraph';
+import {
+  distanceToPath,
+  isOnPath,
+  pathBorderSegments,
+  pathCentreline,
+  type PathBorderSegment,
+} from './pathGraph';
 import { ANCHORS } from './anchors';
 import { COASTER_PLANS } from './coaster/plan';
 import {
@@ -1338,7 +1344,11 @@ function runIsClear(x1: number, z1: number, x2: number, z2: number): boolean {
     const t = i / steps;
     const x = x1 + (x2 - x1) * t;
     const z = z1 + (z2 - z1) * t;
-    if (!isPlantable(x, z, 3.2)) return false;
+    // 3.2 m from every plot, the railway, a ride exit and the gate plaza — but
+    // only its own half-thickness from the paving, which is what lets a run
+    // stand at the kerb instead of 3.2 m out in the lawn. See #417 and
+    // {@link WALL_PAVING_CLEARANCE}.
+    if (!isPlantable(x, z, 3.2, WALL_PAVING_CLEARANCE)) return false;
     if (distanceToRailCorridor(x, z) < RAIL_CORRIDOR_CLEARANCE) return false;
     if (isInBridgeFootprint(x, z)) return false;
     // Seed 5 built a hiding wall across the cruiser's station approach and the
@@ -1404,8 +1414,15 @@ function wallPlan(): WallPlan {
   // plus 5.7 m, so the two structures really do compete. Measured on the
   // canonical seed — maze first gives 4 wooden and 6 stone segments; stone
   // first gives 8 stone and no hiding maze at all.
-  const wood = clearOfAnchors(generateWallMaze(placed));
-  const stone = clearOfAnchors(generateStoneRuns(placed));
+  //
+  // `runHugsPaving` is applied **after** `clearOfAnchors`, on the trimmed runs,
+  // because trimming is itself a way to strand a wall: `clearOfAnchors` cuts
+  // out whatever span of a run crosses a plot, and the span it keeps can be
+  // the far half — the half that was never near the path. Filtering the
+  // candidates before the trim would miss exactly that, and it is the built
+  // park `wallsRunAlongsideAPath` measures. See {@link wallAlongsideMax}.
+  const wood = clearOfAnchors(generateWallMaze(placed)).filter(runHugsPaving);
+  const stone = clearOfAnchors(generateStoneRuns(placed)).filter(runHugsPaving);
   cachedWallPlan = { wood, stone, all: [...wood, ...stone] };
   return cachedWallPlan;
 }
@@ -1573,32 +1590,33 @@ function runHugsPaving(run: WallRun): boolean {
 }
 
 /**
- * Draws one candidate anchor from this attempt's own RNG stream — a point
- * and grid axis taken from a real path edge or a real plot boundary, never
- * from open lawn. `null` only if the park has neither (never true in
+ * Draws one candidate anchor from this attempt's own RNG stream — a point and
+ * grid axis taken from a **real stretch of paving**, never from open lawn.
+ * `null` only if the park has no on-grid paving at all (never true in
  * practice; kept honest rather than assuming the network is non-empty).
+ *
+ * ### Why plots stopped being anchors (#417)
+ *
+ * Until now 35 % of candidates anchored to a plot's bounding circle instead,
+ * `PLOT_BORDER_OFFSET_MIN..MAX` = 6.2-9.5 m outside it, with no reference to a
+ * path anywhere in the draw. Those produced the walls Jim actually saw: on the
+ * built park, seed 11 stood one at (-89.7, 41.5), **37.5 m from the nearest
+ * paving**; seed 2 one at (74.8, 57.4) at 34.8 m; seed 5 one at (-84.6, 5.4)
+ * at 27.4 m. A plot out near the park edge has lawn all round it, so "6 m
+ * outside this building's circle" and "in the middle of a field" are the same
+ * place, and nothing in the draw could tell them apart.
+ *
+ * Dropping the branch costs nothing a player would miss, because **every plot
+ * already has its own approach spur** — a building's corner still gets its
+ * garden wall, anchored to the path that serves that building rather than to
+ * an abstract circle round it. What it does cost is *candidates*: a third of
+ * them used to come from here, so {@link MAZE_CANDIDATES} and
+ * {@link BENCH_CANDIDATES} are raised to match, because Jim asked for the same
+ * number of walls in better places, not for fewer walls.
  */
 function pickBorderAnchor(rng: Rng): BorderAnchor | null {
   const segments = pathBorderSegments();
-  const anchorPlots = ANCHORS.length > 0;
-  const anchorPath = segments.length > 0;
-  if (!anchorPlots && !anchorPath) return null;
-  // Paths run through far more of the lawn than the dozen-odd plots do, so
-  // they get the larger share — but plots are still asked often enough that
-  // a garden wall regularly reads as squaring off a building's corner too.
-  const useAPlot = anchorPlots && (!anchorPath || rng.unit() < 0.35);
-
-  if (useAPlot) {
-    const anchor = rng.pick(ANCHORS);
-    const bearing = rng.pick(CARDINAL_BEARINGS);
-    const offset = rng.range(PLOT_BORDER_OFFSET_MIN, PLOT_BORDER_OFFSET_MAX);
-    const distance = anchor.boundingRadius + offset;
-    const x = anchor.position[0] + Math.cos(bearing) * distance;
-    const z = anchor.position[1] + Math.sin(bearing) * distance;
-    // Tangent to the circle at a cardinal bearing is itself cardinal.
-    const axisYaw = bearing % Math.PI === 0 ? Math.PI / 2 : 0;
-    return { x, z, axisYaw, outward: bearing };
-  }
+  if (segments.length === 0) return null;
 
   // The segment is found by drawing a random point on the lawn and taking
   // the border segment nearest it — never `rng.pick(segments)`. Picking by
@@ -1627,8 +1645,15 @@ function pickBorderAnchor(rng: Rng): BorderAnchor | null {
   const pz = seg.a[1] + (seg.b[1] - seg.a[1]) * t;
   const side = rng.pick([1, -1] as const);
   const perp = seg.axisYaw + Math.PI / 2;
-  const offset = rng.range(PATH_BORDER_OFFSET_MIN, PATH_BORDER_OFFSET_MAX);
-  const distance = seg.halfWidth + offset;
+  // From flush against the kerb to a verge as wide as the path itself. The
+  // bottom of the range is the point of it: `rng.range` is closed at the low
+  // end, so a real share of candidates come out at or within centimetres of
+  // zero and their walls stand *on* the path edge — "flush with it at various
+  // places". The top scales with `seg.halfWidth`, so a wall beside the 3.6 m
+  // main loop may sit further out than one beside a 2.6 m spur, and no two
+  // walls in the park share one typed stand-off distance.
+  const offset = rng.range(0, seg.halfWidth * PATH_BORDER_OFFSET_PATH_WIDTHS);
+  const distance = seg.halfWidth + WALL_PAVING_CLEARANCE + offset;
   const x = px + Math.cos(perp) * side * distance;
   const z = pz + Math.sin(perp) * side * distance;
   const outward = side > 0 ? perp : perp + Math.PI;
@@ -1758,7 +1783,12 @@ function generateStoneRuns(placed: WallRun[]): WallRun[] {
   // Beds: short tangent walls just off the plaza kerb, on the plaza's own
   // cardinal bearings — exactly on grid axis, not jittered off it, for the
   // same reason the lawn benches below no longer roll a free yaw (issue #300).
-  const bedDistance = PLAZA.radius + 3.2;
+  // Against the plaza's own kerb, not 3.2 m out on the grass round it. The
+  // plaza is paving like any other, so a bed borders it the way a wall borders
+  // a path (#417): flush plus a verge drawn from the same range, which is what
+  // stops these four reading as a ring of walls marooned around the fountain.
+  const bedVerge = rng.range(0, wallAlongsideMax() - PLAYER_RADIUS);
+  const bedDistance = PLAZA.radius + WALL_PAVING_CLEARANCE + bedVerge;
   for (let i = 0; i < 4; i += 1) {
     const bearing = (i / 4) * Math.PI * 2;
     const cx = PLAZA.x + Math.cos(bearing) * bedDistance;
