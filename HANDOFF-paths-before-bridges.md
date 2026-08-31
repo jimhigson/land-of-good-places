@@ -140,3 +140,84 @@ lifts one **1.10 m**.
 - [x] decisive cause identified
 - [ ] plan approved by Overseer
 - [ ] fix, invariant, mutation transcript, per-seed counts after
+
+---
+
+# STEP 1 LANDED — the layout fix (commit "Paths must keep off the ground a bridge will stand on")
+
+`pointStandsOnABridgeRamp` in `paths.ts` is the one owner of "will a bridge
+stand here", built from the site's own proven `rampReachPos/Neg` and
+`halfWidth` plus `bridgeFootprint.ts`'s `DECK_HALF_LENGTH` — never numbers
+restated locally. Three routers ask it: lattice `nodeOk`, `nearestPointOnRoute`
+(branch points), and `segmentCutsABridgeRamp`.
+
+Result, canonical: `spur-dodgems` no longer branches at (-22.2, 36.4) on the
+crown. It crosses on the deck like the gate approach. **`at_-30_35.png` before
+and after: the path that ran into the parapet now runs up and over the bridge.**
+
+Bridge counts, `origin/main` → this branch:
+
+| seed | before | after | on proven sites | on level sites |
+|---|---|---|---|---|
+| canonical | 2 | **3** | 3 | 0 |
+| 2 | 1 | 1 | 0 | 1 |
+| 5 | 2 | **3** | 1 | 2 |
+| 11 | 2 | 2 | 1 | 1 |
+| 18 | 1 | **2** | 1 | 1 |
+
+Nothing lost; three seeds gained a bridge, all on properly proven sites.
+`check:park` 19/19 attractions, 262/262 waypoints, exit 0. `test:procgen` exit 0.
+
+Stranded path ends (an end drawn >0.5 m above the terrain on a bridge):
+
+| seed | stranded ends | under a deck |
+|---|---|---|
+| canonical | **0** | 0 |
+| 2 | **0** | 0 |
+| 5 | 3 | 0 |
+| 11 | 1 | 0 |
+| 18 | 2 | 0 |
+
+**Every remaining stranded end is on a level-site bridge** — the step-2 defect.
+
+# STEP 2 — the numbers the Overseer asked for
+
+`scripts/measure-prover-vs-builder.mts`, via a new `explainBridgeRefusal()`
+in `crossingPlanSolve.ts` that reuses the prover's own `probeReach`.
+
+**The prover is not marginally too strict. It is nowhere near.** At every
+disagreement it finds either the deck itself blocked at every width and angle,
+or a ramp reach of **0.0–5.4 m against a floor of 12.1 m**:
+
+| seed | railD | prover's verdict at the best angle |
+|---|---|---|
+| 2 | 82.0 | deck blocked at 9 of 10 width/angle combinations; reach 0.0/0.0 |
+| 5 | 130.0 | **deck blocked at all ten** |
+| 5 | 202.0 | best reach 4.9/4.9 m vs floor 12.1 |
+| 11 | 84.0 | best reach 1.5/5.4 m vs floor 12.1 |
+| 18 | 104.0 | deck blocked at 9 of 10; reach 0.0/0.0 |
+
+So **relaxing the prover is not available**: the shortfall is 7–12 m of ramp,
+not centimetres. Raising the gradient budget is explicitly ruled out (it made
+seed 2 worse and brought back a fall-through-deck failure).
+
+That leaves: **the builder must not build where the planner proved nothing.**
+Projected counts if it does not:
+
+| seed | now | after step 2 |
+|---|---|---|
+| canonical | 3 | **3** (unchanged — all proven) |
+| 2 | 1 | 0 |
+| 5 | 3 | 1 |
+| 11 | 2 | 1 |
+| 18 | 2 | 1 |
+
+**This is a real loss on the sweep seeds and it needs the Overseer's call**,
+because the family ruling is "a path crosses the railway on a bridge, never a
+level crossing", and #396 says nothing yet checks a level crossing is walkable.
+
+**The invariant cannot be added without step 2.** An honest, unconditional
+"no drawn path may end stranded above the terrain on a bridge" is red on seeds
+5, 11 and 18 today. Scoping it to proven-site bridges would be weakening an
+assertion to make a seed pass, which CLAUDE.md forbids. So step 2 belongs in
+this PR, or the PR ships without the invariant CLAUDE.md requires.
