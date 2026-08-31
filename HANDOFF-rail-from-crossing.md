@@ -322,3 +322,53 @@ a real defect rather than a tolerance.
 **No threshold has been adjusted and none should be.** If a ride cannot cope
 with the loop shapes this construction produces, that is a finding about the
 trade, for Jim.
+
+## THE FRONT-DOOR KEEP-OUT FAILS MEASUREMENT 1 — DO NOT SHIP IT AS WRITTEN
+
+Commit "Keep the railway off the walk in from the gate". Solve rate:
+
+| | before keep-out | after keep-out |
+|---|---|---|
+| seeds solving a loop | **14/15** | **9/15** |
+
+Newly unsolvable: **5, 11**, 3 (already failing), 4, 9, 13. **Two of the five CI
+seeds no longer build a park at all.**
+
+| seed | before | after |
+|---|---|---|
+| canonical | #5, 55 ms, 371 m | #86, 4474 ms, 245 m |
+| 2 | #44, 3601 ms, 138 m | #44, 1486 ms, 262 m |
+| 5 | #4, 456 ms, 294 m | **UNSOLVABLE** |
+| 11 | #22, 1460 ms, 285 m | **UNSOLVABLE** |
+| 18 | #29, 1698 ms, 313 m | #49, 2265 ms, 320 m |
+
+Canonical survives but goes from restart #5 to **#86 of 96** — one pose from
+exhausting the field.
+
+### Why, and it is structural
+
+`GATE_CORRIDOR_KEEPOUT_RADIUS` is 4.9 m over `GATE_CORRIDOR_KEEPOUT_REACH`
+30 m — a ~10 m wide, 30 m long bar driven into the park **from the rim, at the
+gate**. The loop is a closed circuit that wants to use the rim; the bar cuts
+the rim at one point and forces every candidate loop to detour inward around a
+30 m spike. That is not a tunable radius, it is the shape of the obstacle.
+
+Narrowing it only narrows the spike; the rim is still severed.
+
+### The better idea, NOT built — for the Overseer to rule on
+
+**Make the entrance crossing the chosen one.** Rather than keeping the railway
+*off* the walk in, put the chosen crossing pose *on* it: the gate corridor is
+the park's most important path and the one leg not routed through a planned
+site, so choosing the crossing there makes the entrance crossing bridgeable and
+planned **by construction** — which is exactly Jim's design applied to the path
+that matters most ("choose where a path crosses the railway first").
+
+The invariant `theWalkInFromTheGateCrossesWhereItWasPlannedTo` would then pass
+because the crossing *is* the planned site, rather than because the railway was
+pushed away. And it costs the search nothing: it constrains which pose is
+picked, not where the loop may run.
+
+Prior art agrees this direction is the sound one: `HANDOFF-bridge-at-the-front-door.md`
+already made the entrance cross on a bridge by *routing the path*, not by moving
+the railway.
