@@ -1129,12 +1129,30 @@ function onEntrancePlaza(x: number, z: number, clearance: number): boolean {
 
 /** Somewhere we are allowed to plant: not on paving, not in a reserved plot,
  * not on the railway, not where a ride sets a child down, not on the gate
- * plaza the cat bus drives through. */
-function isPlantable(x: number, z: number, clearance: number): boolean {
+ * plaza the cat bus drives through.
+ *
+ * `pathClearance` defaults to `clearance` — for a tree or a bush the two are
+ * the same question. The walls are the one caller that wants them apart, and
+ * the reason is issue #417. A wall run is *meant* to stand at the kerb, and
+ * folding its path gap in with everything else made that impossible: every
+ * wall sample had to clear the paving by the same 3.2 m it kept from a plot,
+ * so across all five CI seeds the closest any wall ever came to paving was
+ * 3.34 m — over five player-radii of grass, on every single run, for ever.
+ * Jim, 31 August 2026: *"They should be alongside the paths and flush with it
+ * at various places."* Splitting the parameter is what lets a wall be flush
+ * while it still keeps its full distance from plots, the railway, ride exits
+ * and the gate plaza — none of which it is decorating.
+ */
+function isPlantable(
+  x: number,
+  z: number,
+  clearance: number,
+  pathClearance: number = clearance,
+): boolean {
   // Five metres inside the park's own edge — the same margin the old `> 55`
   // kept from the masonry at 60, now measured from an edge that moves.
   if (PARK_BOUNDARY.distanceToEdge(x, z) < PLANTABLE_MARGIN) return false;
-  if (isOnPath(x, z, clearance)) return false;
+  if (isOnPath(x, z, pathClearance)) return false;
   // Keep the fountain plaza open — wherever the layout put it (Decision 5).
   if (Math.hypot(x - PLAZA.x, z - PLAZA.z) < PLAZA.radius + 1.6) return false;
   if (insideAnyAnchor(x, z, clearance)) return false;
