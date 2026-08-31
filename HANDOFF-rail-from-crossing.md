@@ -233,3 +233,92 @@ None is investigated yet. They are the real remaining work on #427, and they
 are not all the same kind of thing — "the finish rainbow stands on the ground"
 and "the Sky Cruiser flies clear" are other rides reacting to a moved loop,
 while the two gate-crossing ones are this feature's own territory.
+
+## TRIAGE OF THE EIGHT — all read, none dismissed
+
+### 1-2. GENUINE, and this feature's own territory: the loop crosses the front door
+
+```
+seed 11: the walk in from the gate crosses the railway at (0.0, 55.3),
+         railDistance 264.9, 5.0 m in from the arch, and the crossing planner
+         planned no crossing there at all
+seed 5:  ... at (0.0, 54.8), railDistance 51.9, 5.5 m in from the arch ...
+```
+
+The new loops **pass across the park's own entrance**, and the authored gate
+corridor (`x = 0`, from `z = 54` inward) meets the track at a rail distance the
+planner never offered. So the one leg of the network that is not routed through
+a planned site meets the rail anyway — precisely what `crossingPlanSolve.ts`
+exists to prevent.
+
+This is a **known hazard, previously measured**: see
+`HANDOFF-bridge-at-the-front-door.md`, which records seed 11 solving "a loop
+across the park's own front door: it cuts `x = 0` at `z = 54.5`, 5.5 m inside
+the arch", and records that a keep-out in `train/route.ts`'s obstacles **was
+built and measured** — and reverted because it "re-solves *every* seed's loop"
+and belonged in its own issue.
+
+It is now in scope, because growing the loop from interior crossing poses lets
+it start anywhere, including beside the gate. **This is the next thing to
+build**, and it is not small: it changes every seed's loop again, so all five
+measurements have to be re-run after it.
+
+### 3. GENUINE, and adjacent to the clearance just changed
+
+```
+seed 18: the crossing at (-24.5, 0.5) opens its fence gap 5.7 m along the loop
+         from a station platform — its 4.5 m half-gap overlaps the station's
+         sealed ±6.5 m window, so the far side of this crossing is a fenced wall
+```
+
+Note what this is **not**: the new keep-out protects the loop's *own chosen*
+crossing (rail distance 0) from stations. This is a **different** crossing —
+one *measured* from the drawn paths — landing near a station. Same family, one
+step further out. `CROSSING_STATION_CLEARANCE` is the right number; the
+question is whether the station placer should keep clear of every planned site
+rather than only the chosen one.
+
+### 4-5. Downstream: streets pushed off the 12 m lattice
+
+```
+seed 11: spur-exit-ginormousSlide runs north-south 27.8 m on x = -10.00,
+         4.76 m off the nearest lattice line
+seed 2:  spur-hotel runs east-west 10.0 m on z = -33.91, 0.95 m off
+```
+
+Paths reacting to a moved railway. Seed 2's is 0.95 m off — marginal; seed 11's
+is 4.76 m and is a genuinely private line. Not investigated further.
+
+### 6-7. Downstream: the Rail Race finish rainbow
+
+```
+canonical: finish-rainbow-leg-0-inner comes down 0.37 m from a path
+           (needs 1.24 m, two player radii)
+seed 5:    ... 1.20 m from a path (needs 1.24 m)
+```
+
+Seed 5's is 0.04 m short — a hair. **The canonical one, at 0.37 m against
+1.24 m, is a real clash a child would walk into.** Another ride reacting to
+moved paths, but this one matters and must not be waved through.
+
+### 8. Downstream: the Sky Cruiser through the scenery
+
+```
+seed 11: the Sky Cruiser's car passes through 'living-flower-heads'
+         at 4.0 m along the loop, world (-57.51, 0.70, -20.16)
+```
+
+The cruiser solves *before* the train, so the cruiser has not moved — the
+**scatter** has, because it plants around the railway. Flower heads have landed
+under the cruiser's car.
+
+### Ruling
+
+**Three of the eight are this feature's own** (1, 2, 3) and one of those — the
+front-door crossing — is the substantial one. **Five are the park reacting to a
+moved railway**, and at least one of those (the canonical rainbow at 0.37 m) is
+a real defect rather than a tolerance.
+
+**No threshold has been adjusted and none should be.** If a ride cannot cope
+with the loop shapes this construction produces, that is a finding about the
+trade, for Jim.
