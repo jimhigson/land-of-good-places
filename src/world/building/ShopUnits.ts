@@ -14,6 +14,7 @@ import {
   type ShopUnitDefinition,
 } from './layout';
 import type { CollisionWorld } from '../Collision';
+import { COUNTER_HALF_WIDTH } from './shops/stallShape';
 
 /**
  * The seven empty shop units.
@@ -133,7 +134,7 @@ function buildUnit(unit: ShopUnitDefinition): Group {
   // No back panel: the building's own wall is 15 cm behind this, and an alcove
   // liner nobody can see is not worth a draw call in the shadow pass as well.
   const counter = shopMesh(
-    new BoxGeometry(3.5, 0.95, 0.7),
+    new BoxGeometry(COUNTER_HALF_WIDTH * 2, 0.95, 0.7),
     interiorMaterial(unit.accent, 0.66),
   );
   counter.position.set(0, 0.475, 1.15);
@@ -167,8 +168,11 @@ function buildUnit(unit: ShopUnitDefinition): Group {
  * counter's real edges instead of on thin air a metre short of it.
  */
 function registerCounter(unit: ShopUnitDefinition, collision: CollisionWorld): void {
-  const [ax, az] = shopLocalToBuilding(unit, -1.75 * SHOP_SCALE_XZ, 1.15 * SHOP_SCALE_XZ);
-  const [bx, bz] = shopLocalToBuilding(unit, 1.75 * SHOP_SCALE_XZ, 1.15 * SHOP_SCALE_XZ);
+  // `COUNTER_HALF_WIDTH` rather than a copy of it: the mesh and the wall that
+  // has to land on its ends now read the same number, so a stall whose counter
+  // narrows can never leave a strip of solid air where its end used to be.
+  const [ax, az] = shopLocalToBuilding(unit, -COUNTER_HALF_WIDTH * SHOP_SCALE_XZ, 1.15 * SHOP_SCALE_XZ);
+  const [bx, bz] = shopLocalToBuilding(unit, COUNTER_HALF_WIDTH * SHOP_SCALE_XZ, 1.15 * SHOP_SCALE_XZ);
   // Half the counter's real depth (0.7 m), not more. Because collision is
   // height-blind this segment is an invisible wall on every other deck too, and
   // every extra centimetre of it is a centimetre of somebody else's floor.

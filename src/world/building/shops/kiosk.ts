@@ -5,21 +5,31 @@ import {
   Matrix4,
   Mesh,
   Quaternion,
-  SphereGeometry,
   Vector3,
   type Material,
 } from 'three';
 import { PALETTE } from '../../../core/palette';
 import { interiorMaterial } from '../parts';
 import type { ShopUnitDefinition } from '../layout';
+import { COUNTER_HALF_WIDTH, buildStallDress } from './stallShape';
 
 /**
- * The shared kiosk shell every shop is fitted out with.
+ * The part of a market stall that every stall has.
  *
- * One shape, seven skins: a counter in the shop's accent colour, a back wall of
- * shelves to stand the stock on, a stripy awning and a painted name board. Only
- * the colours and the sign change from shop to shop, which is what makes the row
- * of them read as one shopping centre rather than seven unrelated huts.
+ * A counter in the shop's accent colour with a pale top plank, and a back wall
+ * of shelves to stand the stock on. That is the family resemblance, and it is
+ * built here, once, for all seven.
+ *
+ * **What makes each stall different is in `stallShape.ts`** — its skirt, its
+ * legs, the shape of its canopy and the giant piece of its own stock standing
+ * on top of it. Until #444 there was no such file: the awning and the valance
+ * were built here too, identically, and the seven stalls differed only by an
+ * accent colour. Jim's verdict on that was *"they were better before"*, and he
+ * was right — see that file's own note for what went missing and when.
+ *
+ * The split is the point. Shared things live here so seven very different roofs
+ * still sit on one recognisable shop; different things live there so a child
+ * can pick her stall out from the end of the aisle.
  *
  * Unit-local space: the origin is the unit's front-centre on its deck, and **+Z
  * points into the room**, so the back wall is behind you at z ≈ 0 and a child
@@ -60,7 +70,7 @@ const SHELF_Y = [0.72] as const;
 export const SHELF_Z = -0.05;
 export const SHELF_HALF_WIDTH = 1.55;
 
-function fitting(geometry: BoxGeometry | SphereGeometry, material: Material): Mesh {
+function fitting(geometry: BoxGeometry, material: Material): Mesh {
   const mesh = new Mesh(geometry, material);
   mesh.castShadow = false;
   mesh.receiveShadow = true;
@@ -82,13 +92,13 @@ export function buildKiosk(unit: ShopUnitDefinition): KioskShell {
   const cream = interiorMaterial(PALETTE.buildingWall, 0.7);
 
   // --- counter ------------------------------------------------------------
-  const counter = fitting(new BoxGeometry(3.5, 0.95, 0.7), accent);
+  const counter = fitting(new BoxGeometry(COUNTER_HALF_WIDTH * 2, 0.95, 0.7), accent);
   counter.position.set(0, 0.475, COUNTER_Z);
   group.add(counter);
 
   // A pale top plank, overhanging a little. It is the one edge the player's eye
   // follows along the whole row of shops, so it is the same on every one.
-  const top = fitting(new BoxGeometry(3.74, 0.12, 0.86), cream);
+  const top = fitting(new BoxGeometry(COUNTER_HALF_WIDTH * 2 + 0.24, 0.12, 0.86), cream);
   top.position.set(0, 0.98, COUNTER_Z);
   group.add(top);
 
@@ -133,32 +143,11 @@ export function buildKiosk(unit: ShopUnitDefinition): KioskShell {
   uprights.instanceMatrix.needsUpdate = true;
   group.add(uprights);
 
-  // --- awning -------------------------------------------------------------
-  // Shallow and high: a deep awning looks lovely from the ground and hides the
-  // sign completely from a camera looking down at 38°.
-  const awning = fitting(new BoxGeometry(4.8, 0.26, 0.95), accent);
-  awning.position.set(0, 2.86, 0.42);
-  awning.rotation.x = -0.16;
-  group.add(awning);
-
-  // Scalloped valance: seven half-spheres along the awning's lip, instanced.
-  const scallops = 7;
-  const valance = new InstancedMesh(
-    new SphereGeometry(0.24, 12, 8),
-    interiorMaterial(PALETTE.blossomWhite, 0.7),
-    scallops,
-  );
-  valance.castShadow = false;
-  valance.receiveShadow = true;
-  const scallopScale = new Vector3(1, 0.8, 0.5);
-  for (let i = 0; i < scallops; i += 1) {
-    const t = scallops > 1 ? i / (scallops - 1) : 0.5;
-    position.set(-2.1 + t * 4.2, 2.74, 0.86);
-    matrix.compose(position, rotation, scallopScale);
-    valance.setMatrixAt(i, matrix);
-  }
-  valance.instanceMatrix.needsUpdate = true;
-  group.add(valance);
+  // --- what makes this stall itself ---------------------------------------
+  // Skirt, legs, canopy and the giant piece of its own stock on top. There used
+  // to be one awning and one scalloped valance built right here, the same on
+  // all seven; that is what #444 replaced.
+  group.add(buildStallDress(unit));
 
   // The hanging name board is gone (family ruling, 28 July 2026: signs in the
   // world are hard to read). The shop's name and its line of patter travel on
