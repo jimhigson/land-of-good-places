@@ -589,6 +589,39 @@ export interface ParkFacts {
    * own masonry. See {@link BridgePavingFact}.
    */
   readonly bridgePaving: readonly BridgePavingFact[];
+  /**
+   * **Drawn paths whose own END stands in the air on a bridge** — issue #414,
+   * Jim's *"there is also a path that runs into the side of the bridge —
+   * basically runs into a solid wall"*.
+   *
+   * A drawn route's centreline has two ends. One of them landing on a bridge's
+   * paving, well above the terrain under it, means a path stops dead partway
+   * up a ramp or on the deck: a child walking it arrives at masonry with
+   * nowhere to go. It is *not* the same fact as
+   * {@link BridgePavingFact} — that asks whether lifted paving has stone under
+   * it (#349, paving in mid-air); this asks whether a path **terminates**
+   * somewhere she cannot continue from, which is true even when the paving
+   * beneath her is perfectly well supported.
+   *
+   * A path end at a ramp *foot* is entirely correct and must not be reported:
+   * the hump has clamped back to the terrain there, so the lift is
+   * essentially zero and the path simply joins the ground. The threshold is
+   * therefore a real height, not a footprint test — see the invariant.
+   *
+   * Measured here rather than in the invariant for the usual reason: it needs
+   * `terrainHeight`, which reaches `parkManifest` through `boundary.ts` and so
+   * can only be imported dynamically, after the seed is fixed.
+   */
+  readonly strandedPathEnds: readonly {
+    /** Which drawn route (`paths.ts`'s own route name, e.g. `spur-dodgems`). */
+    readonly route: string;
+    /** The end that is stranded, `[x, z]`. */
+    readonly at: readonly [number, number];
+    /** How far the bridge holds the paving above the terrain there, metres. */
+    readonly aboveGround: number;
+    /** The bridge group's own name, `bridge-<railDistance>`. */
+    readonly bridge: string;
+  }[];
   /** The same, for the planner's rare deliberate level-crossing tier
    * (`LEVEL_CROSSING_SITES`) — so an invariant can tell "the planner chose a
    * level crossing here" from "nobody planned this crossing at all". */
@@ -2375,6 +2408,45 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     }
   }
 
+  // See `ParkFacts.strandedPathEnds`: a drawn route whose own end stands in
+  // the air on a bridge (issue #414). Measured off the same `drawnCentreLine`
+  // the rest of this file uses, so "where the path actually stops" is the
+  // swept curve rather than the last control point — the two differ by up to
+  // the fillet's own bow, which is metres on a turn.
+  const strandedPathEnds: {
+    route: string;
+    at: readonly [number, number];
+    aboveGround: number;
+    bridge: string;
+  }[] = [];
+  {
+    const bridgesGroup = world.train.group.getObjectByName('railway-bridges');
+    for (const edge of PATH_GRAPH.edges) {
+      if (!edge.paved) continue;
+      const { points } = drawnCentreLine(edge.route);
+      if (points.length < 2) continue;
+      for (const end of [points[0] as [number, number], points[points.length - 1] as [number, number]]) {
+        const [x, z] = end;
+        for (const bridge of world.train.bridges) {
+          const paving = bridge.pavingHeightAt(x, z);
+          if (paving === null) continue;
+          const aboveGround = paving - terrainHeight(x, z);
+          if (aboveGround <= 0) continue;
+          // Name the bridge the same way `bridgePaving` does, so a failure
+          // message points at a group that exists in the built scene.
+          let name = 'bridge';
+          if (bridgesGroup) {
+            for (const child of bridgesGroup.children) {
+              if (bridge.deckCovers(child.position.x, child.position.z)) name = child.name;
+            }
+          }
+          strandedPathEnds.push({ route: edge.route.name, at: [x, z], aboveGround, bridge: name });
+          break;
+        }
+      }
+    }
+  }
+
   // See `ParkFacts.cruiserRouteGroundClearance`'s own comment: how high the
   // built loop stands above the terrain under it, sampled every metre, so an
   // invariant can tell a genuinely-low stretch (the station boarding dip)
@@ -2412,6 +2484,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     bridgeReservations,
     plannedBridgeSiteDistances,
     bridgePaving,
+    strandedPathEnds,
     plannedLevelSiteDistances,
     crossingSiteSnapTolerance: SITE_SNAP_TOLERANCE,
     plots,

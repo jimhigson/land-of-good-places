@@ -1,4 +1,4 @@
-import { Vector3 } from 'three';
+import { CatmullRomCurve3, Vector3 } from 'three';
 import { PLAYER_RADIUS } from '../core/constants';
 import { ANCHORS } from './anchors';
 import { PARK_LAYOUT, RING_RADIUS, edgeDistanceAlong } from './parkLayout';
@@ -11,7 +11,6 @@ import {
   CROSSING_SITES,
   LEVEL_CROSSING_SITES,
   LEVEL_CROSSING_PENALTY,
-  SITE_HALF_WIDTH,
   type CrossingSite,
 } from './train/crossingPlan';
 import { COASTER_PLANS } from './coaster/plan';
@@ -1848,22 +1847,196 @@ function pointInSlideCorridor(x: number, z: number): boolean {
  */
 function segmentCutsABridgeRamp(ax: number, az: number, bx: number, bz: number): boolean {
   const length = Math.hypot(bx - ax, bz - az);
+  // 1.5 m is coarser than the 3 m parapet band is thick, so a transverse
+  // segment cannot step over the masonry between two samples.
   const steps = Math.max(1, Math.ceil(length / 1.5));
+  for (let s = 0; s <= steps; s += 1) {
+    const t = s / steps;
+    // The masonry, not the whole footprint — see
+    // {@link pointStandsOnBridgeMasonry}. A street may run along a bridge's
+    // deck (that is what the crossing leg itself does); it may not run into
+    // the parapet flanking it.
+    if (pointStandsOnBridgeMasonry(ax + (bx - ax) * t, az + (bz - az) * t)) return true;
+  }
+  return false;
+}
+
+/**
+ * Slack added to a site's own proven extent before this file screens anything
+ * against it.
+ *
+ * **Half a metre, which is what the screen this replaced always used** — and
+ * deliberately not more. A wider skirt looks free and is not: raising it to
+ * 1.5 m (the ribbon's own half-width, which was the tempting justification)
+ * pulled enough lattice edges and branch candidates out of play on seed 5 that
+ * `spur-stall.facePaint` came out starting 3.10 m from any other paving,
+ * failing `no paved path stops anywhere but a destination`. The screen's job is
+ * to keep paths off the bridge, not to clear a plaza around it.
+ *
+ * The real widening in this rewrite is that the half-width now comes from the
+ * **site's own** proven `halfWidth` rather than a module constant, so a narrow
+ * site is screened at the width it was actually proven at.
+ *
+ * ## It said 0.5 and it was 1.5, for the whole of this branch (#414)
+ *
+ * Everything above was already written here, arguing for half a metre and
+ * naming 1.5 as the value that broke seed 5 — while the constant underneath it
+ * read `1.5`. The doc and the number disagreed, which is this repo's most
+ * expensive recurring bug appearing in the file that documents it.
+ *
+ * Restored to the documented 0.5, and it is not a tuning: the skirt pads a
+ * parapet that is 0.3 m thick, so a metre and a half of it refuses ground a
+ * child can plainly stand on. Measured on seed 24 — the two lattice nodes the
+ * screen cost it, (11.3, -33.6) and (11.3, -45.6), sit at |across| 5.98 and
+ * 5.06 against a deck half-width of 5.0: **1.0 and 0.1 m clear of the
+ * masonry**, inside the 1.5 m skirt and outside a 0.5 m one. Losing them
+ * starved the crossing's approach to proven site 20 and left seed 24, alone of
+ * every seed, with no bridge at all.
+ */
+const RAMP_SCREEN_MARGIN = 0.5;
+
+/**
+ * **The ground a bridge will really stand on — deck, both ramps and the
+ * parapets that flank them — known before a single path is drawn.**
+ *
+ * This is the one owner of that rectangle in `paths.ts`, and it is
+ * deliberately built from the *site's own* proven numbers rather than from
+ * anything restated here:
+ *
+ * - `DECK_HALF_LENGTH` is imported from `train/bridgeFootprint.ts`, the
+ *   module that builds the deck.
+ * - `rampReachPos` / `rampReachNeg` and `halfWidth` are the reaches
+ *   `train/crossingPlanSolve.ts` *proved* a ramp into when it accepted this
+ *   site, and are the same figures `bridgeFootprint.ts`'s search starts its
+ *   own backtracking from.
+ *
+ * **Keep it that way.** If the layout's idea of a bridge's footprint and the
+ * builder's ever drift apart, issue #414 comes straight back wearing
+ * different clothes: the drift *is* the bug. Two numbers describing one piece
+ * of ground, maintained in two places, is this repo's most expensive
+ * recurring mistake.
+ *
+ * ## Why `paths.ts` needs this at all (issue #414)
+ *
+ * Before this, `paths.ts` knew only the crossing *point* — enough to route a
+ * rail-crossing leg through a proven site, and nothing at all about how much
+ * ground the bridge would occupy. So every other router was free to put a
+ * street, a lattice node or a spur's branch point inside a ramp. Measured on
+ * the canonical seed: `spur-dodgems` branched off the gate approach at
+ * (-22.2, 36.4) — a point on the bridge's own crown, 4.40 m in the air — and
+ * ran 7 m along the ramp before turning off its side into the parapet. Jim,
+ * three times: *"another path shouldn't join into a mid-ramp bridge"*, and
+ * *"there is also a path that runs into the side of the bridge — basically
+ * runs into a solid wall"*.
+ *
+ * **Only `CROSSING_SITES` carry this screen, not `LEVEL_CROSSING_SITES`**: a
+ * level crossing stays flat, so there is no ramp to keep off and no masonry
+ * to walk into. That holds because `bridgeFootprint.ts`'s
+ * `ONLY_PROVEN_BRIDGES` refuses to build a bridge on a level site at all —
+ * the two are one rule seen from its two ends, and **neither may be relaxed
+ * without the other**. Before that refusal existed, four of the five swept
+ * seeds built a bridge on a level site, and this screen had nothing to say
+ * about the ground it stood on.
+ *
+ * ## Two measured dead ends — do not rebuild either (#414, 31 Aug 2026)
+ *
+ * `edgeOk`, `linkClear` and `nearestPointOnRoute` are the *only* askers, and
+ * that is deliberate. Extending the screen to the two routers that are not on
+ * that list looks obviously right and is not; both were built and measured on
+ * seed 5, whose `poi.stranded` baseline was **8**:
+ *
+ * 1. **Screening `computeStreetStubs`' `legClear`** — the exact clause
+ *    `edgeOk` carries, added to the stub search: **8 -> 50 stranded.**
+ *    A refused lattice edge leaves the lattice with other edges; a
+ *    destination whose every candidate stub leg is refused gets *no* stub, so
+ *    `streetStubs` comes back empty, `streetRoute` returns null, and the whole
+ *    spur drops through to `fallbackSpurRoute`. Screening there pushes *more*
+ *    routes onto the router that was drawing ribbons across ramps, and severs
+ *    the gate approach as well.
+ * 2. **Pricing ramp metres in `fallbackSpurRoute`'s candidate score** (200 per
+ *    metre): recovered **one** waypoint, 8 -> 7, and **cost an invariant** —
+ *    seed 5's `no two close destinations are left with a wildly
+ *    disproportionate paved detour`, because at that price the router will buy
+ *    a 228.8 m detour to walk round a parapet. One waypoint for one invariant
+ *    is not a trade worth making, so it was reverted too.
+ *
+ * The two together were worst of all: **82 stranded.**
+ *
+ * **Neither dead end means the remaining cuts are acceptable** — it means they
+ * cannot be fixed from inside the path routers. On seed 5 the dodgems at
+ * (38.4, 36.3) has *no* ramp-free route to reach: every lattice node is
+ * refused (the nearest misses `STUB_TAIL_LIMIT` by 1.1 m) and all four
+ * fallback candidates cross proven site 12's ramp, so a screen has nothing to
+ * pick and a price can only choose the least-bad. The real fix is letting a
+ * foreign leg cross **on the deck** — Jim's *"path finding needs to include
+ * bridges from the start"* — which is its own ticket.
+ */
+export function pointStandsOnABridgeRamp(x: number, z: number, margin = RAMP_SCREEN_MARGIN): boolean {
   for (const site of CROSSING_SITES) {
     if (!site.bridge) continue;
-    const reachPos = DECK_HALF_LENGTH + site.rampReachPos + 1.5;
-    const reachNeg = DECK_HALF_LENGTH + site.rampReachNeg + 1.5;
-    for (let s = 0; s <= steps; s += 1) {
-      const t = s / steps;
-      const x = ax + (bx - ax) * t;
-      const z = az + (bz - az) * t;
-      const dx = x - site.x;
-      const dz = z - site.z;
-      const along = dx * site.dirX + dz * site.dirZ;
-      const across = -dx * site.dirZ + dz * site.dirX;
-      if (Math.abs(across) <= SITE_HALF_WIDTH + 0.5 && along <= reachPos && along >= -reachNeg) {
-        return true;
-      }
+    const dx = x - site.x;
+    const dz = z - site.z;
+    const across = -dx * site.dirZ + dz * site.dirX;
+    if (Math.abs(across) > site.halfWidth + margin) continue;
+    const along = dx * site.dirX + dz * site.dirZ;
+    if (along <= DECK_HALF_LENGTH + site.rampReachPos + margin &&
+        along >= -(DECK_HALF_LENGTH + site.rampReachNeg + margin)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * **The masonry only — the parapet band that flanks a bridge's deck and ramps,
+ * without the road surface between them.**
+ *
+ * {@link pointStandsOnABridgeRamp} answers "is this the bridge's ground at
+ * all", which is the right question for *starting* something there and the
+ * wrong one for *routing through*. A bridge's footprint is a road with two
+ * walls down it: `|across| <= halfWidth` is the surface a child walks on
+ * (the deck, and the ramps climbing to it), and only the ring outside that,
+ * out to `halfWidth + margin`, is the parapet she cannot pass.
+ *
+ * Screening streets against the whole footprint therefore refused the
+ * crossing's **own approach**. Measured on seed 24 (#414): the footprint is
+ * 13.0 m across by 39.7 m along, and it invalidated four lattice nodes
+ * including the entire row at z = -33.6 — (-12.7, -33.6), (-0.7, -33.6) and
+ * (11.3, -33.6), the east-west street running straight through the site. With
+ * no approach left, the crossing leg could not reach proven site 20 at all and
+ * took level site 74 instead, so **seed 24 lost the only bridge its loop
+ * offers** — `origin/main` builds it, this branch did not, and three
+ * invariants fired: the design assertion plus two anti-vacuity guards.
+ *
+ * ## Why a point test is enough to tell the two apart
+ *
+ * A leg running **along** the axis stays inside the deck band for its whole
+ * length, so no sample of it is ever masonry. A leg running **across** the
+ * ramp must leave the band through the parapet on both sides, so
+ * {@link segmentCutsABridgeRamp} — which samples points — refuses it. The
+ * direction is implied by the geometry; nothing has to reason about headings,
+ * and there is no second definition of "along" to fall out of step.
+ *
+ * **`nearestPointOnRoute` deliberately still asks the full footprint**, not
+ * this. Refusing to *branch* in mid-air is a different question from refusing
+ * to *pass*: a junction on the crown is the original #414 defect (the
+ * canonical seed's `spur-dodgems` branched at (-22.2, 36.4), 4.40 m up, and
+ * ran off the flank into the parapet). Passing over a bridge is what a bridge
+ * is for.
+ */
+function pointStandsOnBridgeMasonry(x: number, z: number, margin = RAMP_SCREEN_MARGIN): boolean {
+  for (const site of CROSSING_SITES) {
+    if (!site.bridge) continue;
+    const dx = x - site.x;
+    const dz = z - site.z;
+    const across = Math.abs(-dx * site.dirZ + dz * site.dirX);
+    // Inside the deck's own width is road, not wall — keep going, another
+    // site's masonry may still claim this point.
+    if (across <= site.halfWidth || across > site.halfWidth + margin) continue;
+    const along = dx * site.dirX + dz * site.dirZ;
+    if (along <= DECK_HALF_LENGTH + site.rampReachPos + margin &&
+        along >= -(DECK_HALF_LENGTH + site.rampReachNeg + margin)) {
+      return true;
     }
   }
   return false;
@@ -1943,7 +2116,22 @@ function* streetLatticeSearch(): Generator<number, StreetLattice, void> {
       const clear = streetSegmentClear(x, z, x, z);
       const inRing = Math.hypot(x - PLAZA.x, z - PLAZA.z) < RING_RADIUS + 1;
       const rail = railInfoAt(x, z);
-      nodeOk[index] = clear && !inRing && rail.dist >= RAIL_CLAMP_DISTANCE ? 1 : 0;
+      // **A node standing on a bridge's ramp is not a street crossroads.**
+      // `RAIL_CLAMP_DISTANCE` keeps nodes out of the rail's own corridor,
+      // which is a few metres wide; a ramp reaches ~12 m further still, so a
+      // node could sit squarely on one and pass every test above. Its edges
+      // were already screened (`edgeOk` below), which left exactly the case
+      // #414 is about: the node itself stays valid, a route terminates *on*
+      // it, and the ribbon starts halfway up a bridge.
+      //
+      // Measured: without this the canonical seed builds 2 bridges rather
+      // than 3 and seed 18 one rather than two, because a crossing whose
+      // approach wanders onto ramp ground stops landing on the planned site.
+      // The masonry, not the whole footprint: refusing the deck surface too
+      // refused the crossing's own approach and cost seed 24 its only bridge.
+      // See {@link pointStandsOnBridgeMasonry}.
+      const onRamp = pointStandsOnBridgeMasonry(x, z);
+      nodeOk[index] = clear && !inRing && !onRamp && rail.dist >= RAIL_CLAMP_DISTANCE ? 1 : 0;
       side[index] = rail.side;
     }
   }
@@ -2529,9 +2717,67 @@ interface StreetPlan {
   readonly tapNode: number | null;
 }
 
-/** Marks a plan's paving real: routes solved after this can terminate on it. */
+/**
+ * How far a lattice node may stand from the ribbon its own plan draws and
+ * still count as paved by it. A node on a committed lattice path normally
+ * *is* a vertex of that plan's polyline, so the honest distance is ~0; a
+ * metre absorbs `collapseCollinear`'s own rounding without admitting a node
+ * the ribbon never reaches.
+ */
+const PAVED_NODE_ON_RIBBON = 1.0;
+
+/**
+ * **A node is paved when a ribbon is drawn through it — not when a search
+ * walked through it** (issue #414).
+ *
+ * {@link latticeStateSnapshot} already exists to stop a *rejected* candidate's
+ * paving standing, and it works. This is the other half of the same promise,
+ * and it was missing: a candidate that **wins** commits every node of its
+ * lattice search path, while what actually gets drawn can be shorter — the
+ * gate approach stitches an authored corridor onto part of a solved tail, and
+ * `routeLeg` may plan lattice legs it does not use. Every node on the
+ * difference stayed flagged paved with nothing under it, and any later route
+ * was free to terminate on one.
+ *
+ * Measured on seed 5: the gate approach committed the node at (41.12, 9.26)
+ * while the gate approach it actually drew ends at (5.1, 12.2) — **33.5 m
+ * away**. `spur-stall.facePaint` then branched onto that node and came out
+ * starting 3.10 m from any paving, failing `no paved path stops anywhere but
+ * a destination`. Same family as the bug that invariant was written for
+ * (seed 18's station spur, 11 m from real paving on a phantom node).
+ *
+ * So the plan's own drawn `points` are the authority, and the search path is
+ * only a candidate list. This is deliberately checked against `plan.points`
+ * rather than trusted from the caller: a caller that knows it draws less than
+ * it planned is exactly the caller that forgot to say so.
+ */
 function commitStreetPlan(plan: StreetPlan): void {
-  for (const path of plan.paths) commitLatticePath(path);
+  const drawn = plan.points;
+  const onDrawnRibbon = (x: number, z: number): boolean => {
+    for (let i = 1; i < drawn.length; i += 1) {
+      const a = drawn[i - 1] as readonly [number, number];
+      const b = drawn[i] as readonly [number, number];
+      const dx = b[0] - a[0];
+      const dz = b[1] - a[1];
+      const lengthSq = dx * dx + dz * dz;
+      const t =
+        lengthSq > 1e-9
+          ? Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / lengthSq))
+          : 0;
+      if (Math.hypot(x - (a[0] + dx * t), z - (a[1] + dz * t)) <= PAVED_NODE_ON_RIBBON) {
+        return true;
+      }
+    }
+    return false;
+  };
+  const lattice = streetLattice();
+  for (const path of plan.paths) {
+    commitLatticePath(
+      path.filter((node) =>
+        onDrawnRibbon(lattice.xs[node] as number, lattice.zs[node] as number),
+      ),
+    );
+  }
   if (plan.tapNode !== null) {
     tapRimsDrawn.add(plan.tapNode);
     usedTaps.add(plan.tapNode);
@@ -4842,6 +5088,171 @@ function pushClearOfRail(
 }
 
 /** The closest point on one route to `(x, z)`, or null if it has none usable. */
+/**
+ * ## Why the drawn curve lives HERE and not in `pathGraph.ts`
+ *
+ * It used to live there, and that was the wrong module: `pathGraph.ts`
+ * *draws* routes, `paths.ts` *decides* them, and this is the definition of
+ * what a decided route looks like once drawn. Keeping them apart meant
+ * `paths.ts` could not ask what its own routes look like — `pathGraph.ts`
+ * imports `paths.ts`, so the dependency could only go one way — and so every
+ * geometric question in this file was answered against the **control
+ * polyline** instead of the swept curve.
+ *
+ * On a bend those are metres apart. Issue #414: `bestBranchPoint` picked a
+ * junction on a route's control polyline, the ribbon was drawn on the curve,
+ * and seed 5's `spur-stall.facePaint` came out branching off nothing —
+ * starting 3.10 m from the nearest paving. Same disease as #349, where
+ * `pavingHeightAt` computed on an analytic frame while the masonry was built
+ * from chords: two descriptions of one curve, drifting where it turns.
+ *
+ * `pathGraph.ts` re-exports {@link routeCurve} so its own consumers (the
+ * ribbon extruder, `LampPosts.ts`, `poiGraph.ts`, `ParkMap.ts`,
+ * `test/procgen/parkFacts.ts`) are unchanged.
+ */
+
+/** Fillet radius at a street corner — Decision 3: "rounded corners,
+ * 1.5-2 m fillets; square junctions otherwise". */
+const CORNER_FILLET = 1.75;
+
+/** Sampling pitches for {@link drawnPolyline}: dense enough that the
+ * Catmull-Rom the ribbon extruder sweeps hugs the polyline (a Catmull-Rom
+ * through collinear points *is* the straight line), coarse enough to cost
+ * nothing. */
+const STRAIGHT_SAMPLE = 2.5;
+const ARC_SAMPLE = 0.6;
+
+/**
+ * **The one owner of what an open route's drawn centreline looks like**:
+ * dead-straight runs between corners, each corner rounded by a real
+ * {@link CORNER_FILLET} arc — not the old behaviour, where the sparse
+ * control points fed a tension-0.4 Catmull-Rom whose corner rounding grew
+ * with segment length, so a 20 m street corner bowed for many metres and
+ * the whole "axis-aligned" network drew as organic sweeps (Jim, 23 August
+ * 2026: "that top-down view looks nothing like how we discussed"). The
+ * returned points are dense (every couple of metres on straights, ~0.6 m
+ * round each fillet), so the Catmull-Rom built from them cannot depart
+ * from the shape they describe.
+ */
+function drawnPolyline(
+  points: readonly (readonly [number, number])[],
+): (readonly [number, number])[] {
+  // Collapse near-duplicates first — a zero-length leg is a NaN tangent.
+  const src: [number, number][] = [];
+  for (const p of points) {
+    const last = src[src.length - 1];
+    if (last && Math.hypot(p[0] - last[0], p[1] - last[1]) < 0.05) continue;
+    src.push([p[0], p[1]]);
+  }
+  if (src.length < 2) return src;
+
+  const out: [number, number][] = [src[0] as [number, number]];
+  const emitStraightTo = (to: readonly [number, number]): void => {
+    const from = out[out.length - 1] as readonly [number, number];
+    const length = Math.hypot(to[0] - from[0], to[1] - from[1]);
+    if (length < 1e-6) return;
+    const steps = Math.max(1, Math.ceil(length / STRAIGHT_SAMPLE));
+    for (let s = 1; s <= steps; s += 1) {
+      const t = s / steps;
+      out.push([from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t]);
+    }
+  };
+
+  for (let k = 1; k < src.length - 1; k += 1) {
+    const a = src[k - 1] as readonly [number, number];
+    const c = src[k] as readonly [number, number];
+    const b = src[k + 1] as readonly [number, number];
+    const lenIn = Math.hypot(c[0] - a[0], c[1] - a[1]);
+    const lenOut = Math.hypot(b[0] - c[0], b[1] - c[1]);
+    const dirInX = (c[0] - a[0]) / lenIn;
+    const dirInZ = (c[1] - a[1]) / lenIn;
+    const dirOutX = (b[0] - c[0]) / lenOut;
+    const dirOutZ = (b[1] - c[1]) / lenOut;
+    const turn = Math.abs(Math.atan2(dirInX * dirOutZ - dirInZ * dirOutX, dirInX * dirOutX + dirInZ * dirOutZ));
+    if (turn < 0.05) {
+      emitStraightTo(c);
+      continue;
+    }
+    // Clamp the fillet so two nearby corners never eat each other's legs.
+    const fillet = Math.min(CORNER_FILLET, lenIn * 0.45, lenOut * 0.45);
+    const pIn: readonly [number, number] = [c[0] - dirInX * fillet, c[1] - dirInZ * fillet];
+    const pOut: readonly [number, number] = [c[0] + dirOutX * fillet, c[1] + dirOutZ * fillet];
+    emitStraightTo(pIn);
+    // Quadratic Bezier through the corner: a clean constant-ish-radius
+    // rounding for any turn angle, sampled finely enough to read as an arc.
+    const arcLength = fillet * turn; // close enough for choosing a sample count
+    const steps = Math.max(2, Math.ceil(arcLength / ARC_SAMPLE));
+    for (let s = 1; s <= steps; s += 1) {
+      const t = s / steps;
+      const u = 1 - t;
+      out.push([
+        u * u * pIn[0] + 2 * u * t * c[0] + t * t * pOut[0],
+        u * u * pIn[1] + 2 * u * t * c[1] + t * t * pOut[1],
+      ]);
+    }
+  }
+  emitStraightTo(src[src.length - 1] as readonly [number, number]);
+  return out;
+}
+
+/**
+ * **The one Catmull-Rom every consumer of a route's drawn shape builds** —
+ * the ribbon extruder here, the lamp walker (`LampPosts.ts`), the NPC
+ * waypoint seeder (`poiGraph.ts`), the park map (`ParkMap.ts`) and the
+ * procgen facts (`test/procgen/parkFacts.ts`) all ask this instead of each
+ * repeating the `new CatmullRomCurve3(..., 0.4)` incantation over raw
+ * control points — CLAUDE.md's "one owner; everyone else asks", after this
+ * file's fillet pass made the drawn shape more than the control points.
+ * The closed backbone ring keeps its raw points: it is a circle through 32
+ * bearings, and filleting a circle's own samples would only dent it.
+ */
+export function routeCurve(route: RouteDefinition): CatmullRomCurve3 {
+  const points = route.closed ? route.points : drawnPolyline(route.points);
+  const vectors = points.map(([x, z]) => new Vector3(x, 0, z));
+  return new CatmullRomCurve3(vectors, route.closed, 'catmullrom', 0.4);
+}
+
+/**
+ * A route's own drawn centreline, sampled — cached per route object, because
+ * every spur asks every paved route for a branch point and the fillet pass is
+ * not free. Keyed on the `RouteDefinition` itself: routes are immutable once
+ * built, so identity is a sound key.
+ */
+const drawnSamplesCache = new WeakMap<RouteDefinition, (readonly [number, number])[]>();
+
+/** Pitch the drawn curve is sampled at when looking for a branch point.
+ * Half a metre: finer than the ~1.5 m the invariant that polices junctions
+ * tolerates, so the sampling itself can never be what puts a junction off the
+ * ribbon. */
+const BRANCH_SAMPLE_PITCH = 0.5;
+
+function drawnSamplesOf(route: RouteDefinition): (readonly [number, number])[] {
+  const hit = drawnSamplesCache.get(route);
+  if (hit) return hit;
+  const curve = routeCurve(route);
+  const length = curve.getLength();
+  const steps = Math.max(8, Math.ceil(length / BRANCH_SAMPLE_PITCH));
+  const out: (readonly [number, number])[] = [];
+  for (let i = 0; i <= steps; i += 1) {
+    const point = curve.getPointAt(i / steps);
+    out.push([point.x, point.z]);
+  }
+  drawnSamplesCache.set(route, out);
+  return out;
+}
+
+/**
+ * The nearest point on a route a new spur may branch from.
+ *
+ * **Measured on the route's DRAWN curve, not on its control polyline**
+ * ({@link routeCurve}, the one owner — see its note above on why it now lives
+ * in this file). The control polyline is not where the ribbon is: the fillet
+ * pass rounds every corner and the Catmull-Rom sweeps through the result, so
+ * on a bend the two are metres apart. A junction chosen on the polyline can
+ * therefore sit in mid-lawn beside the path it claims to branch from — seed 5's
+ * `spur-stall.facePaint`, 3.10 m from the nearest paving, failing `no paved
+ * path stops anywhere but a destination` (issue #414).
+ */
 function nearestPointOnRoute(
   route: RouteDefinition,
   x: number,
@@ -4849,22 +5260,26 @@ function nearestPointOnRoute(
 ): readonly [number, number] | null {
   let best: readonly [number, number] | null = null;
   let bestDistance = Infinity;
-  const points = route.points;
-  const count = route.closed ? points.length : points.length - 1;
-  for (let i = 0; i < count; i += 1) {
-    const [ax, az] = points[i] as readonly [number, number];
-    const [bx, bz] = points[(i + 1) % points.length] as readonly [number, number];
-    const dx = bx - ax;
-    const dz = bz - az;
-    const lengthSq = dx * dx + dz * dz;
-    const t =
-      lengthSq > 0 ? Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / lengthSq)) : 0;
-    const px = ax + dx * t;
-    const pz = az + dz * t;
+  for (const sample of drawnSamplesOf(route)) {
+    const px = sample[0];
+    const pz = sample[1];
     // Never branch from inside a plot's blocker circle: every spur's last
     // couple of metres run into a plot mouth, and a junction there routes
     // the new spur straight through the booth it belongs to.
     if (BLOCKERS.some((b) => Math.hypot(px - b.x, pz - b.z) < b.radius)) continue;
+    // **Never branch from a stretch of ribbon a bridge will carry**, for the
+    // same reason and with the same shape as the plot rule above: this route
+    // is drawn on the ground today, but the stretch crossing a planned site
+    // becomes a humpback deck between parapet walls. A junction there starts
+    // the new spur *on the bridge* and walks it off the side into masonry.
+    //
+    // This is the branch point #414 was actually built from: the canonical
+    // seed's `spur-dodgems` took its junction at (-22.2, 36.4), a point on
+    // the gate approach 0.2 m up-ramp of the crossing centre and 4.40 m in
+    // the air once the bridge existed. The scoring below prices length,
+    // off-axis runs and rail-hugging; none of them can price "this junction
+    // is in mid-air", so it has to be refused outright rather than costed.
+    if (pointStandsOnABridgeRamp(px, pz)) continue;
     const distance = Math.hypot(x - px, z - pz);
     if (distance < bestDistance) {
       bestDistance = distance;
@@ -5054,6 +5469,9 @@ function fallbackSpurRoute(
         }
       }
     }
+    // **There is deliberately no ramp term here.** Pricing metres-across-a-ramp
+    // was built and measured and is reverted — see
+    // {@link pointStandsOnABridgeRamp}'s "Two measured dead ends".
     const score =
       polylineLength(points) +
       railHug +

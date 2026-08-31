@@ -14,7 +14,16 @@ import {
 import { PALETTE } from '../core/palette';
 import { pathTexture } from '../core/textures';
 import { terrainHeight, terrainNormal } from './terrain';
-import { buildGraph, PLAZA, type PathGraph, type RouteDefinition } from './paths';
+import { buildGraph, PLAZA, routeCurve, type PathGraph, type RouteDefinition } from './paths';
+
+/**
+ * **The one Catmull-Rom every consumer of a route's drawn shape builds.**
+ * Re-exported from `paths.ts`, which owns it: see that module's note on why
+ * it moved (issue #414 — this file imports `paths.ts`, so while the curve
+ * lived here `paths.ts` could not ask what its own routes look like, and
+ * answered every geometric question against the control polyline instead).
+ */
+export { routeCurve };
 import { takePrewarmedPathGraph } from './pathsPrewarm';
 
 /**
@@ -297,106 +306,6 @@ export function drapePathsOverBridges(
 
 // ---------------------------------------------------------------- internals
 
-/** Fillet radius at a street corner — Decision 3: "rounded corners,
- * 1.5-2 m fillets; square junctions otherwise". */
-const CORNER_FILLET = 1.75;
-
-/** Sampling pitches for {@link drawnPolyline}: dense enough that the
- * Catmull-Rom the ribbon extruder sweeps hugs the polyline (a Catmull-Rom
- * through collinear points *is* the straight line), coarse enough to cost
- * nothing. */
-const STRAIGHT_SAMPLE = 2.5;
-const ARC_SAMPLE = 0.6;
-
-/**
- * **The one owner of what an open route's drawn centreline looks like**:
- * dead-straight runs between corners, each corner rounded by a real
- * {@link CORNER_FILLET} arc — not the old behaviour, where the sparse
- * control points fed a tension-0.4 Catmull-Rom whose corner rounding grew
- * with segment length, so a 20 m street corner bowed for many metres and
- * the whole "axis-aligned" network drew as organic sweeps (Jim, 23 August
- * 2026: "that top-down view looks nothing like how we discussed"). The
- * returned points are dense (every couple of metres on straights, ~0.6 m
- * round each fillet), so the Catmull-Rom built from them cannot depart
- * from the shape they describe.
- */
-function drawnPolyline(
-  points: readonly (readonly [number, number])[],
-): (readonly [number, number])[] {
-  // Collapse near-duplicates first — a zero-length leg is a NaN tangent.
-  const src: [number, number][] = [];
-  for (const p of points) {
-    const last = src[src.length - 1];
-    if (last && Math.hypot(p[0] - last[0], p[1] - last[1]) < 0.05) continue;
-    src.push([p[0], p[1]]);
-  }
-  if (src.length < 2) return src;
-
-  const out: [number, number][] = [src[0] as [number, number]];
-  const emitStraightTo = (to: readonly [number, number]): void => {
-    const from = out[out.length - 1] as readonly [number, number];
-    const length = Math.hypot(to[0] - from[0], to[1] - from[1]);
-    if (length < 1e-6) return;
-    const steps = Math.max(1, Math.ceil(length / STRAIGHT_SAMPLE));
-    for (let s = 1; s <= steps; s += 1) {
-      const t = s / steps;
-      out.push([from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t]);
-    }
-  };
-
-  for (let k = 1; k < src.length - 1; k += 1) {
-    const a = src[k - 1] as readonly [number, number];
-    const c = src[k] as readonly [number, number];
-    const b = src[k + 1] as readonly [number, number];
-    const lenIn = Math.hypot(c[0] - a[0], c[1] - a[1]);
-    const lenOut = Math.hypot(b[0] - c[0], b[1] - c[1]);
-    const dirInX = (c[0] - a[0]) / lenIn;
-    const dirInZ = (c[1] - a[1]) / lenIn;
-    const dirOutX = (b[0] - c[0]) / lenOut;
-    const dirOutZ = (b[1] - c[1]) / lenOut;
-    const turn = Math.abs(Math.atan2(dirInX * dirOutZ - dirInZ * dirOutX, dirInX * dirOutX + dirInZ * dirOutZ));
-    if (turn < 0.05) {
-      emitStraightTo(c);
-      continue;
-    }
-    // Clamp the fillet so two nearby corners never eat each other's legs.
-    const fillet = Math.min(CORNER_FILLET, lenIn * 0.45, lenOut * 0.45);
-    const pIn: readonly [number, number] = [c[0] - dirInX * fillet, c[1] - dirInZ * fillet];
-    const pOut: readonly [number, number] = [c[0] + dirOutX * fillet, c[1] + dirOutZ * fillet];
-    emitStraightTo(pIn);
-    // Quadratic Bezier through the corner: a clean constant-ish-radius
-    // rounding for any turn angle, sampled finely enough to read as an arc.
-    const arcLength = fillet * turn; // close enough for choosing a sample count
-    const steps = Math.max(2, Math.ceil(arcLength / ARC_SAMPLE));
-    for (let s = 1; s <= steps; s += 1) {
-      const t = s / steps;
-      const u = 1 - t;
-      out.push([
-        u * u * pIn[0] + 2 * u * t * c[0] + t * t * pOut[0],
-        u * u * pIn[1] + 2 * u * t * c[1] + t * t * pOut[1],
-      ]);
-    }
-  }
-  emitStraightTo(src[src.length - 1] as readonly [number, number]);
-  return out;
-}
-
-/**
- * **The one Catmull-Rom every consumer of a route's drawn shape builds** —
- * the ribbon extruder here, the lamp walker (`LampPosts.ts`), the NPC
- * waypoint seeder (`poiGraph.ts`), the park map (`ParkMap.ts`) and the
- * procgen facts (`test/procgen/parkFacts.ts`) all ask this instead of each
- * repeating the `new CatmullRomCurve3(..., 0.4)` incantation over raw
- * control points — CLAUDE.md's "one owner; everyone else asks", after this
- * file's fillet pass made the drawn shape more than the control points.
- * The closed backbone ring keeps its raw points: it is a circle through 32
- * bearings, and filleting a circle's own samples would only dent it.
- */
-export function routeCurve(route: RouteDefinition): CatmullRomCurve3 {
-  const points = route.closed ? route.points : drawnPolyline(route.points);
-  const vectors = points.map(([x, z]) => new Vector3(x, 0, z));
-  return new CatmullRomCurve3(vectors, route.closed, 'catmullrom', 0.4);
-}
 
 function recordSamples(curve: CatmullRomCurve3, divisions: number, halfWidth: number): void {
   const point = new Vector3();

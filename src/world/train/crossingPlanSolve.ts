@@ -6,7 +6,7 @@ import {
 } from './clearance';
 import { MIN_BRIDGE_HALF_LENGTH } from './bridgeFootprint';
 import { STATION_GAP } from './fence';
-import { ENTRANCE_GATE_X, ENTRANCE_GATE_Z } from '../entrance/layout';
+import { ENTRANCE_GATE_X, ENTRANCE_GATE_Z, isInEntranceGateway } from '../entrance/layout';
 import {
   NARROW_HALF_WIDTH,
   SITE_ANGLE_OFFSETS,
@@ -230,6 +230,41 @@ function probeReach(
 }
 
 /**
+ * **A bridge may not stand in the park's own front doorway** (#414, #437).
+ *
+ * A deck is `2 * SITE_HALF_WIDTH` = 10 m wide and its parapets flank it; the
+ * entrance arch is `2 * ENTRANCE_GATE_HALF_WIDTH` = 8.6 m wide. **The bridge
+ * is wider than the gate**, so a ramp that reaches the arch necessarily stands
+ * its masonry inside the doorway — there is no width at which it fits.
+ *
+ * Measured on seed 11, which is what found this: a proven site at (2.0, 43.0),
+ * 17.1 m from the gate, with an 18.4 m ramp extent (`DECK_HALF_LENGTH +
+ * rampReach`) against an arch at z = 54. The arch stood **mid-ramp**, and
+ * `probe-blocked-ribbons` reported the first metre of the walk in as blocked:
+ *
+ * ```
+ * gate-approach: BLOCKED 0.0-1.0 m of 49.8 — at (0.0, 54.0)
+ *                :: wall len=2.0 halfT=0.15 top=1.6
+ * ```
+ *
+ * A child walking in through the arch hit a parapet in her first metre.
+ * `check:park` saw seed 11 as **0 stranded** throughout, because the ground
+ * beyond is reachable another way — so nothing else in the repo could see it.
+ *
+ * **This keeps bridges at the gate, and only stops them standing on it.** A
+ * crossing far enough inside the arch is untouched; the ramp march simply
+ * stops at the doorway, so a site with room to land its ramp short of the arch
+ * still proves, and one without falls back to a level crossing. That is the
+ * ordinary backtracking every generator here does, through the callback the
+ * planner already had — no new threshold, and the width comes from
+ * `entrance/layout.ts`, which owns the gate.
+ *
+ * The predicate itself lives in `entrance/layout.ts`, which owns the gate, and
+ * `bridgeFootprint.ts` asks the same one when it *builds* — planning it here
+ * alone was measurably not enough.
+ */
+
+/**
  * The two tests that need a *solved* route — which is exactly what this caller
  * has and the pose generator does not. Named rather than inline because
  * {@link bridgeCandidateAt} hands it to `bridgeFit.ts`'s shared width/angle
@@ -237,7 +272,7 @@ function probeReach(
  */
 const corridorBlocked = railCorridorBlocked(railDistanceAt);
 const plannerBlocked = (x: number, z: number, along: number): boolean =>
-  nearStationStructure(x, z) || corridorBlocked(x, z, along);
+  nearStationStructure(x, z) || isInEntranceGateway(x, z) || corridorBlocked(x, z, along);
 
 /** The `side = +1` direction at `railDistance` — `crossings.ts`'s own sign
  * convention (`side = sign(tangent.z * dx - tangent.x * dz)`). */
