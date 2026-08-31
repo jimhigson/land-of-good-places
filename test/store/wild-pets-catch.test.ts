@@ -19,6 +19,12 @@ import {
   roofMeadow,
 } from '../../src/world/building/roofMeadow';
 import { SLIDE_PLAN } from '../../src/world/slide/plan';
+import { CASTLE_FLOOR_RADIUS, CASTLE_ROOF } from '../../src/world/building/floors';
+
+/** `WildPets`' own catch radius, re-stated here rather than exported: this is a
+ *  test about where a tap target sits, and 2.2 m is the distance at which
+ *  "Catch it!" becomes pressable. */
+const CATCH_RADIUS = 2.2;
 import { PLAYER_RADIUS } from '../../src/core/constants';
 import { gameStore } from '../../src/state';
 import { shopItem } from '../../src/world/building/shops/catalogue';
@@ -340,6 +346,85 @@ describe('the roof garden gets the burrows it asks for', () => {
         Math.hypot(cell.x - TRAMPOLINE_X, cell.z - TRAMPOLINE_Z),
         'no long grass on the trampoline',
       ).toBeGreaterThan(TRAMPOLINE_RADIUS);
+    }
+  });
+});
+
+/**
+ * **A tap target has to be in the same coordinate system as the player.**
+ *
+ * This is the test for the bug that made the whole feature inoperable, and it
+ * is written against the *frame* rather than against a distance because a
+ * distance test cannot see the fault: the class compared the player's world
+ * position against floor-local creature coordinates, so both sides of every
+ * comparison were self-consistent and only the answer was wrong.
+ *
+ * Since #377/#380 the roof garden's plate stands 600 m along +X from the mall.
+ * Standing a real player exactly on top of a real bunny, the running game
+ * measured the gap between them at **1341.6 m**. `SAFE_DIVE_RANGE` was
+ * therefore never satisfied and the dive gate never engaged; nothing ever
+ * fled; and "Catch it!" could not appear at any distance, so no creature could
+ * ever be caught. Nothing was red — `tsc` sees two numbers, the check chain has
+ * no opinion, and the behavioural tests above drove the class in local metres
+ * from *both* sides, so they agreed with each other and with nothing else.
+ *
+ * The fix is one subtraction on the way in and one addition on the way out.
+ * The test is that the way out lands where `World.interactZones` will look.
+ */
+describe('the wild pets are where the player is', () => {
+  it('offers its tap targets in world metres, on the roof floor plate', () => {
+    const pets = new WildPets(TOP_DECK, camera);
+    // Far enough away in *world* metres to leave them roaming undisturbed.
+    run(pets, 10, new Vector3(CASTLE_ROOF.originX + 200, 0, CASTLE_ROOF.originZ + 200));
+    const zones = pets.interactZones();
+    expect(zones.length, 'something must be out').toBeGreaterThan(0);
+
+    for (const zone of zones) {
+      // The plate's half-extents plus generous slack. A floor-local coordinate
+      // would land near the origin and fail this by ~1200 m, which is exactly
+      // the failure that shipped.
+      expect(Math.hypot(zone.x - CASTLE_ROOF.originX, zone.z - CASTLE_ROOF.originZ)).toBeLessThan(
+        CASTLE_FLOOR_RADIUS,
+      );
+      expect(Math.hypot(zone.standX - CASTLE_ROOF.originX, zone.standZ - CASTLE_ROOF.originZ)).toBeLessThan(
+        CASTLE_FLOOR_RADIUS,
+      );
+    }
+  });
+
+  /**
+   * The same contract from the other end: **the tap target and the creature a
+   * child can see must be the same animal.**
+   *
+   * `pets.root` is parented to the roof's own floor group, so what is drawn is
+   * positioned in floor-local metres and comes out in the right place on
+   * screen *whatever* the zone says — which is precisely why the bug was
+   * invisible. The animals looked perfect. Only the thing you tap was
+   * somewhere else. So this measures the zone against the mesh rather than
+   * against another number the same code produced.
+   */
+  it('puts the tap target on the creature that is drawn', () => {
+    const pets = new WildPets(TOP_DECK, camera);
+    run(pets, 10, new Vector3(CASTLE_ROOF.originX + 200, 0, CASTLE_ROOF.originZ + 200));
+    const zones = pets.interactZones();
+    expect(zones.length, 'something must be out').toBeGreaterThan(0);
+
+    // Where the meshes actually are, in the floor-local frame they are drawn in.
+    const drawn = pets.root.children
+      .filter((child) => child.type === 'Group')
+      .map((child) => ({ x: child.position.x, z: child.position.z }));
+    expect(drawn.length, 'the creatures must be in the scene graph').toBeGreaterThan(0);
+
+    for (const zone of zones) {
+      const localX = zone.x - CASTLE_ROOF.originX;
+      const localZ = zone.z - CASTLE_ROOF.originZ;
+      const nearest = Math.min(
+        ...drawn.map((d) => Math.hypot(d.x - localX, d.z - localZ)),
+      );
+      expect(
+        nearest,
+        'every "Catch it!" must sit on an animal she can see, not on empty roof',
+      ).toBeLessThan(CATCH_RADIUS);
     }
   });
 });

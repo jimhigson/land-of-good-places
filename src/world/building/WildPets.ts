@@ -12,6 +12,7 @@ import { pressZone, type InteractZone } from '../interact';
 import { shopItem } from './shops/catalogue';
 import { gameStore } from '../../state';
 import { roofBurrows, roofMeadow, MEADOW_GRASS_HEIGHT, type Burrow } from './roofMeadow';
+import { CASTLE_FLOORS } from './floors';
 
 /**
  * **Wild pets in the roof garden's long grass** (issue #406).
@@ -198,7 +199,44 @@ export class WildPets {
   private announcing: WildOne | null = null;
   private announceLeft = 0;
   private minted = 0;
+  /**
+   * The player, **in this floor's own coordinates** — never in world ones.
+   *
+   * ## The one conversion, and why it is the only one
+   *
+   * Everything else in this class is floor-local: the meadow's cells, the
+   * burrows, a creature's `x`/`z`, and the `root` group they hang off, which
+   * the shell has already offset to wherever this floor stands. Two things
+   * arrive from outside in *world* metres and have to be met at the boundary
+   * rather than deeper in — the player's position coming in, and an
+   * {@link InteractZone} going out.
+   *
+   * **This was a genuine, total failure of the feature, not a tidy-up.** The
+   * player's world position was being compared against local creature
+   * coordinates directly. On the ground floor the two agree closely enough
+   * that nothing looked wrong; on the roof garden, which since #377/#380
+   * stands 600 m along +X from the mall, standing *exactly on top of* a bunny
+   * measured **1341.6 m** away. Every distance in the file was that number:
+   *
+   * - `SAFE_DIVE_RANGE` was never once satisfied, so the dive gate — the rule
+   *   that makes "she cannot fail" literally true rather than nominally —
+   *   never engaged at all,
+   * - nothing ever fled, because it was fleeing a point a kilometre away,
+   * - and the catch zone stood 1341.6 m from her, so the chip could not appear
+   *   and **no creature could ever be caught**, which is the entire feature.
+   *
+   * Nothing was red. `tsc` cannot see it (both are numbers), the check chain
+   * has no opinion on it, and the unit tests fed the class local coordinates
+   * from both sides, so they agreed with each other and with nothing else.
+   * It was found by standing a real player on a real creature in a real
+   * browser and printing the distance the game believed in — which is the
+   * only instrument that could have found it.
+   */
   private readonly playerXZ = new Vector3();
+  /** Where this floor's plate stands, so the two conversions above are one
+   *  subtraction and one addition against a single owner. */
+  private readonly originX: number;
+  private readonly originZ: number;
 
   constructor(deck: number, camera: IsoCamera) {
     this.camera = camera;
@@ -206,6 +244,9 @@ export class WildPets {
     this.rng = new Rng(0x1d0e + deck * 31);
     this.burrows = roofBurrows(deck);
     this.cells = roofMeadow(deck).cells;
+    const floor = CASTLE_FLOORS[deck];
+    this.originX = floor?.originX ?? 0;
+    this.originZ = floor?.originZ ?? 0;
     this.root.add(this.bubble.sprite);
   }
 
@@ -219,7 +260,12 @@ export class WildPets {
   update(context: FrameContext): void {
     if (!this.inhabited) return;
     const { dt } = context;
-    this.playerXZ.set(context.playerPosition.x, 0, context.playerPosition.z);
+    // World in, floor-local from here down. See `playerXZ`.
+    this.playerXZ.set(
+      context.playerPosition.x - this.originX,
+      0,
+      context.playerPosition.z - this.originZ,
+    );
 
     for (let i = this.live.length - 1; i >= 0; i -= 1) {
       const one = this.live[i];
@@ -260,15 +306,19 @@ export class WildPets {
           {
             id: `wildPet:${one.uid}`,
             label: one.displayName,
-            x: one.x,
+            // **World, not floor-local.** `World.interactZones` pools these
+            // with the park's own and measures them against the player's world
+            // position; a local coordinate here is a tap target on the wrong
+            // castle. See `playerXZ` for what that cost.
+            x: this.originX + one.x,
             y: 0,
-            z: one.z,
+            z: this.originZ + one.z,
             // Comfortably bigger than the creature, because it is moving and a
             // finger is not precise. Tapping *near* a bunny should select the
             // bunny.
             pickRadius: 1.5,
-            standX: one.x,
-            standZ: one.z,
+            standX: this.originX + one.x,
+            standZ: this.originZ + one.z,
             // The chip may only show where the press would actually work — the
             // same rule the flowers follow, and the reason `standRadius` exists.
             standRadius: CATCH_RADIUS,
