@@ -65,8 +65,20 @@
  * makes `IsoCamera.isOnScreen` answer `true` for everything, which is precisely
  * the code path before the gate was added. `--mutate-anchor` restores the other
  * half, reading the anchor back off `sprite.position` the way it used to.
- * Assertions 1 and 2 must fail on the first; 3 on the second. Both transcripts
- * are quoted in the PR.
+ *
+ * **Assertions 1 and 3 must fail on the first; 3 on the second.** Not 1 and 2:
+ * assertion 2 is structurally unreachable under `--mutate`, because an
+ * off-screen speaker is recorded against assertion 1 and then `continue`s
+ * before the coverage test is ever reached. That is deliberate — the two
+ * describe one bubble in one of two ways, and reporting both would double-count
+ * it — but it means `--mutate` proves assertion 1, not assertion 2. What holds
+ * assertion 2 honest instead is that it passes at **zero** breaches on the
+ * shipping code: with the anchor in shot the clamp never moved a bubble outside
+ * its own rectangle, which is the bound this fix claims.
+ *
+ * The two mutations isolate cleanly: `--mutate-anchor` fails assertion 3 alone,
+ * which is what makes 3 a real guard on the `Hotel` set-once fault rather than
+ * a restatement of the clamp fault. Both transcripts are quoted in the PR.
  */
 import './headless-canvas.mjs';
 import { Group, Vector2, Vector3 } from 'three';

@@ -306,6 +306,58 @@ export class IsoCamera {
   }
 
   /**
+   * How far `to` sits from `from` **along the screen's own right and up axes**,
+   * in world metres, written into `out` as `(right, up)`.
+   *
+   * The camera is tilted, so a sprite nudged straight up the screen also moves
+   * in world x and z: a check asking "is this bubble still over that child"
+   * cannot answer it with a horizontal distance, and one that tried would be
+   * measuring a mixture of both axes — a metre of world x carries −0.44 of
+   * screen-up at 390×844. Same reasoning as {@link clampToFrustum}: the screen
+   * axes are the camera's, and there is one copy of them.
+   */
+  screenOffset(from: Readonly<Vector3>, to: Readonly<Vector3>, out: Vector2): Vector2 {
+    const relative = SCRATCH_CLAMP_RELATIVE.copy(to).sub(from);
+    return out.set(relative.dot(this.screenRight), relative.dot(this.screenUp));
+  }
+
+  /**
+   * Whether `point` itself falls inside the visible frustum, shrunk by an
+   * optional world-unit `margin`.
+   *
+   * The companion to {@link clampToFrustum}, and the reason it is safe to use
+   * — issue #415. The clamp will happily drag a sprite anchored to somebody
+   * standing well off the side of the screen all the way back to the frustum's
+   * edge, and then draw it there over empty park: a measured 6.8 m between an
+   * "I'm going to The Castle" bubble and the child it belonged to, with the
+   * child not on screen at all. A caller that clamps must first ask this
+   * whether the thing it is anchored to is even in shot; with the anchor
+   * inside, the clamp can move a sprite by at most its own half-extents, which
+   * is the small nudge #280 asked for and nothing more.
+   *
+   * Here rather than on the caller for the same reason as the clamp: the
+   * screen axes are the camera's own numbers.
+   *
+   * **Fails open on a camera that has never been aimed.**
+   * {@link screenRight}/{@link screenUp} are zero vectors until the first
+   * {@link applyTransform}, and the constructor runs only
+   * {@link applyFrustum} — so before any `update` or `snapTo` this answers
+   * `true` for everything. Long-standing and equally true of
+   * {@link clampToFrustum}, which merely declined to move anything; it is
+   * called out here because this method decides *visibility*, so the failure
+   * mode is a sprite drawn where it should not be rather than one left alone.
+   * Both `Game` and `check:speech-bubbles` `snapTo` at boot, so nothing in the
+   * game reaches it — a new caller that aims the camera later must not.
+   */
+  isOnScreen(point: Readonly<Vector3>, margin = 0): boolean {
+    const relative = SCRATCH_CLAMP_RELATIVE.copy(point).sub(this.camera.position);
+    return (
+      Math.abs(relative.dot(this.screenRight)) <= this.camera.right - margin &&
+      Math.abs(relative.dot(this.screenUp)) <= this.camera.top - margin
+    );
+  }
+
+  /**
    * Clamps `point` so that a screen-constant sprite of the given half-extents
    * (world metres) centred on it stays fully inside the visible frustum, with
    * an optional world-unit `margin` on top.
@@ -323,49 +375,14 @@ export class IsoCamera {
    * this, not only a speech bubble: the fix is a camera capability, not a
    * patch on one caller.
    *
+   * **Bound it with {@link isOnScreen}.** On its own this will drag a sprite
+   * anchored to somebody far off the side of the screen all the way back to
+   * the frustum's edge and leave it there, which is issue #415. A caller must
+   * first ask whether what it is anchored to is even in shot.
+   *
    * Degrades gracefully — clamping to the frustum's own centre — for a
    * sprite too large to fit even centred, rather than an inverted range.
    */
-  /**
-   * Whether `point` itself falls inside the visible frustum, shrunk by an
-   * optional world-unit `margin`.
-   *
-   * The companion to {@link clampToFrustum}, and the reason it is safe to use
-   * — issue #415. The clamp will happily drag a sprite anchored to somebody
-   * standing well off the side of the screen all the way back to the frustum's
-   * edge, and then draw it there over empty park: a measured 6.8 m between an
-   * "I'm going to The Castle" bubble and the child it belonged to, with the
-   * child not on screen at all. A caller that clamps must first ask this
-   * whether the thing it is anchored to is even in shot; with the anchor
-   * inside, the clamp can move a sprite by at most its own half-extents, which
-   * is the small nudge #280 asked for and nothing more.
-   *
-   * Here rather than on the caller for the same reason as the clamp: the
-   * screen axes are the camera's own numbers.
-   */
-  /**
-   * How far `to` sits from `from` **along the screen's own right and up axes**,
-   * in world metres, written into `out` as `(right, up)`.
-   *
-   * The camera is tilted, so a sprite nudged straight up the screen also moves
-   * in world x and z: a check asking "is this bubble still over that child"
-   * cannot answer it with a horizontal distance, and one that tried would be
-   * measuring a mixture of both axes. Same reasoning as {@link clampToFrustum}
-   * — the screen axes are the camera's, and there is one copy of them.
-   */
-  screenOffset(from: Readonly<Vector3>, to: Readonly<Vector3>, out: Vector2): Vector2 {
-    const relative = SCRATCH_CLAMP_RELATIVE.copy(to).sub(from);
-    return out.set(relative.dot(this.screenRight), relative.dot(this.screenUp));
-  }
-
-  isOnScreen(point: Readonly<Vector3>, margin = 0): boolean {
-    const relative = SCRATCH_CLAMP_RELATIVE.copy(point).sub(this.camera.position);
-    return (
-      Math.abs(relative.dot(this.screenRight)) <= this.camera.right - margin &&
-      Math.abs(relative.dot(this.screenUp)) <= this.camera.top - margin
-    );
-  }
-
   clampToFrustum(point: Readonly<Vector3>, halfWidth: number, halfHeight: number, margin = 0): Vector3 {
     const relative = SCRATCH_CLAMP_RELATIVE.copy(point).sub(this.camera.position);
     const right = relative.dot(this.screenRight);
