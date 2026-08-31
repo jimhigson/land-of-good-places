@@ -5,6 +5,7 @@ import { COASTER_PLANS } from '../coaster/plan';
 import { RAIL_OVER_RAIL_AIR } from '../coaster/route';
 import { PARK_LAYOUT } from '../parkLayout';
 import { terrainHeight } from '../terrain';
+import { bridgeableCrossingPoses } from './crossingPoses';
 import { PARK_SEED } from '../parkManifest';
 import { type Pose2, type SegmentKind, type Vec2, turnVocabulary } from '../rail/segments';
 import { railRouteSearch, RailRouteUnsolvable, type RouteBrief, type SolvedRailRoute } from '../rail/generate';
@@ -244,13 +245,20 @@ function buildTrainContext(): TrainContext {
     const b = rim[(i + 1) % rim.length] as { x: number; z: number };
     perimeter += Math.hypot(b.x - a.x, b.z - a.z);
   }
-  const startPoses: Pose2[] = rim.map((p, i) => {
-    const next = rim[(i + 1) % rim.length] as { x: number; z: number };
-    const hx = next.x - p.x;
-    const hz = next.z - p.z;
-    const m = Math.hypot(hx, hz) || 1;
-    return { x: p.x, z: p.z, hx: hx / m, hz: hz / m };
-  });
+  // **The loop begins at a crossing a bridge fits, not at a rim bearing**
+  // (issue #427, Jim's ruling on #414: "the procgen should be able to make
+  // parks that meet constraints and this should be a constraint").
+  //
+  // The rim ring above is still built, because `perimeter` — the length ladder
+  // in `trainRouteSearch` is a fraction of it — is a property of the park's
+  // own outline and nothing to do with where the loop starts.
+  //
+  // Every pose here stands where a bridge's deck and both ramps provably fit,
+  // headed square across the path that will cross it, so a loop closed from
+  // any of them has a bridgeable crossing by construction. See
+  // `crossingPoses.ts` for why it is a ranked field rather than the single
+  // crossing the literal design called for.
+  const startPoses: Pose2[] = bridgeableCrossingPoses(PARK_SEED);
 
   return { clear, startPoses, perimeter };
 }

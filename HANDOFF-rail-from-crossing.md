@@ -105,3 +105,69 @@ station tests do not apply when the rail is what is being placed through it.
 - [ ] route-free feasibility probe
 - [ ] candidate crossing pose generator replacing `ringStartPoses`
 - [ ] the three measurements above
+
+## MEASUREMENT 3 — the loop still solves, and mostly faster
+
+`scripts/measure-train-solve-budget.mts`, before (rim bearings) vs after
+(bridgeable crossing poses), both offering 96:
+
+| seed | won before | won after | restarts before → after | time before → after |
+|---|---|---|---|---|
+| canonical | #0 | #5 | 0 → 5 | 11 → 53 ms |
+| 2 | #53 | #44 | 53 → 44 | 2083 → 3543 ms |
+| 5 | #61 | **#4** | 61 → **4** | 3625 → **454 ms** |
+| 11 | #18 | #22 | 18 → 22 | 822 → 1432 ms |
+| 18 | #61 | **#29** | 61 → **29** | 3196 → **1651 ms** |
+
+**5/5 solve.** The budget concern is dead: seeds 5 and 18 — the two worst —
+get *better*, and no seed comes close to exhausting the field.
+
+## MEASUREMENT 4 — 79% → 93%, NOT 100%. The construction is incomplete.
+
+I said in advance I expected 100% by construction. It is not:
+
+`13/14 loops admit at least one bridge (93%)`, up from 11/14 (79%).
+
+**And seed 2 still proves ZERO bridge sites — the very seed this was for.**
+
+### Why, measured
+
+Seed 2's loop is grown from a bridgeable crossing at rail distance 0, and then:
+
+```
+loop length 138.0 m
+STATION_CLEARANCE = 13.5 m
+  station "Sunny Side"    at d=136.3
+  station "Bluebell Halt" at d=-2.0
+station-blocked: 14/70 candidate distances (20%)
+the start pose (d=0) is STATION-BLOCKED
+```
+
+**A station landed at d = -2.0 — on the chosen crossing itself**, and
+`crossingPlanSolve`'s `stationBlocked` then refuses it. The construction did
+put a bridgeable crossing on the loop; station placement took it away
+afterwards.
+
+**This is exactly the relaxation flagged in `bridgeFit.ts`'s header** — the
+pose generator cannot see stations because stations do not exist when it runs.
+It was named as the one genuine relaxation and as the first place to look if
+loops still came out unbridgeable. It is the first place to look, and it is
+what is wrong.
+
+Checked whether it is systematic: it is **not** — on canonical, 5, 11 and 18
+the start pose is not station-blocked. Seed 2 is unlucky *and* short: at 138 m
+with two stations, 20% of its distances are station-blocked and there is no
+room for an alternative site. Longer loops absorb it.
+
+### The fix (NOT yet built)
+
+**Station placement must keep clear of the chosen crossing.** `train/plan.ts`
+slides stations along the solved route already (`clearStationDistance`); it
+needs the crossing pose as a keep-out, the same way it avoids other things.
+That closes the relaxation at its source rather than widening the probe, and
+it should take 93% to 100% — which must then be *measured*, not assumed,
+because that is the claim that failed this round.
+
+Also worth noting for variety: seed 2's loop came out **138 m, down from
+266 m**. Shorter loops are a real effect of starting inside the park rather
+than on the rim, and measurement 3 (variety) is still outstanding.
