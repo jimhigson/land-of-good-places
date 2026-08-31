@@ -239,3 +239,58 @@ instrument.
 
 Nothing here is new since #431/#441; no assertion was weakened and no probe
 dropped.
+
+## Option 2 (exclude beyond-cap pairs) is not implementable — measured, 31 Aug
+
+**Stopped before writing any code.** The exclusion would empty the probe set,
+and my own rationale for proposing it was wrong. Numbers first.
+
+### The cap is 32.67 m on this park, not 30.18 m
+
+Recomputed from the generator's own definition (20 destinations of kind
+`anchor|stall|station|exit`, median nearest-neighbour spacing **13.070 m**):
+
+| multiple | cap | probes surviving |
+|---|---|---|
+| 2.0x | 26.14 m | **0 of 100** |
+| **2.5x (today)** | **32.67 m** | **5 of 100** |
+| 3.0x | 39.21 m | 11 of 100 |
+| 3.5x | 45.75 m | 22 of 100 |
+
+The probe set spans **31.01–107.4 m** — `MIN_PROBE_SEPARATION` is 30 m and the
+cap is 32.67 m, so the two windows barely overlap. Excluding beyond-cap pairs
+leaves **5 probes, under the check's own `probes.length < 8` guard**: the check
+would not go green, it would hard-error with *"the network has changed shape;
+re-derive the probes rather than lowering the bar."* At a 2.0 cap it leaves
+**zero**. An exclusion whose survivors are a generator constant away from
+nothing is not a probe re-derivation; it makes the check's existence contingent
+on a number it does not own.
+
+### And the cap was never the reason those four pairs are unpaved
+
+**All 100 probes are beyond the cap**, yet 96 of them are 43–100% paved. They
+route via the ring backbone; a direct connector was never what paved them. So
+"beyond the cap" does not separate the four failures from the 96 passes, and my
+earlier report drew that line wrongly. The park has 27 edges, of which only 4
+are direct interconnects — this is a ring-and-spurs network, and every junction
+is connected through it.
+
+### What actually separates them: the floor contradicts the multiplier
+
+The weighted A* is optimal under its own cost function, and as the check's
+header states, *"paving costs exactly the distance walked, so an optimal
+weighted route can never exceed the multiplier times the direct one"*. For
+`dodgems → stall.railRacer` that router chose a **38.0 m route that is 7%
+paved** — barely longer than the 37.8 m unweighted line. By optimality, any
+paved alternative must therefore cost **more than 1.6 × 38 ≈ 61 m**. Same for
+the other two inert pairs.
+
+So these routes are unpaved because **the paved way round is more than 1.6x the
+direct line**, and `OFF_PATH_COST_MULTIPLIER = 1.6` is *designed* to refuse
+that detour — and the `no comic detour` assertion, at 21.7% against a 73%
+ceiling, positively *forbids* it. **The 45% worst-route floor and the 1.6
+multiplier cannot both be satisfied on these pairs.** Cutting the corner is the
+correct behaviour; a watching adult would not ask why she went that way.
+
+This is a genuine contradiction inside the check, not a park defect and not a
+feature defect. It needs Jim's call, not a patch from here.
