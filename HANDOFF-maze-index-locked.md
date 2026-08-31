@@ -1,247 +1,131 @@
-# HANDOFF — #438, index-lock the wall maze against its neighbours
+# HANDOFF — the connector cap at 2.5, and why #438 is still open
 
-Branch `fix/maze-index-locked`, off `origin/main` (`347e9454`).
+Branch `fix/maze-index-locked` (name is now a misnomer — see below), rebased
+onto `origin/main` `bbf995db`.
 
-**Why this exists:** `CONNECTOR_SPACING_CAP_MULTIPLE` in `world/paths.ts` sits
-at 2.0 instead of the 3.5 its own reasoning wants, purely because extra
-connector ribbons reshuffle the wall maze and strand NPC waypoints. That cap is
-what blocks reconnecting the ride cluster after #431 (see
-`HANDOFF-path-weighting.md` on `feat/prefer-walking-on-paths`, and #416).
-Decouple the maze and the cap can then be raised **on its merits and measured**.
+## What this branch ships
 
-## The coupling, precisely
+1. **`CONNECTOR_SPACING_CAP_MULTIPLE` 2.0 → 2.5** (`world/paths.ts`), which
+   reconnects the ride cluster #431 disconnected (issue #416).
+2. **The Sky Cruiser fills the gaps its own nudges open** (`coaster/pylons.ts`),
+   issue #301.
+3. **`LGP_CONNECTOR_CAP`** and **`LGP_DEBUG_PYLONS`** measurement hooks, in the
+   shape of the existing `LGP_SPUR_STRETCH` / `LGP_DEBUG_STREETS`.
 
-The brief was "give the maze the index-locked treatment `BENCH_CANDIDATES`
-already has". Reading it, the maze **already had** most of that treatment —
-`candidateRng(MAZE_SALT, attempts)` per index, a fixed `MAZE_CANDIDATES`
-budget with every fitting L accepted (no count target), and the
-nearest-segment anchor lookup that replaced `rng.pick(segments)`. So that part
-of the premise was already satisfied and is not where the coupling lives.
+**It no longer changes `Scenery.ts` at all** — that file is byte-identical to
+`main`. The maze change this branch was named for was reverted; the reason is
+the most useful thing here.
 
-**The coupling is the corner reservation.** `generateWallMaze` rejects a
-candidate whose corner is within `MAZE_PIECE_GAP + 12` of an already-recorded
-corner — but it recorded that corner **only at the bottom of the loop**, after
-`runIsClear` and `fitsAmong` had also passed. Those two ask about the world as
-it currently stands: the path network, the railway, bridge footprints, the
-cruiser, and every wall placed so far. So a refusal driven by any of them
-**released a 12 m+ exclusion zone**, and a later candidate that had been
-sitting outside it was promoted in — a local refusal becoming a placement
-somewhere else. That is precisely the "distant promotion" the maze's own
-comment claims it avoids, which it does for the *count target* and did not for
-the *reservation*.
+## #438's premise was stale, and the naive fix was wrong
 
-The benches have no such reservation at all, which is why they never had the
-bug — not because of anything about their RNG.
+The cap sat at 2.0 because on **18 August 2026** a 3.5x cap shifted a maze piece
+across an NPC waypoint chord and stranded **38 waypoints**. The mechanism is
+real: `generateWallMaze` records a piece's corner — its 12 m+ exclusion zone —
+only *after* `runIsClear` and `fitsAmong`, both of which ask about the world, so
+a path-driven refusal releases that zone and a later candidate takes it.
 
-**The fix** (one moved line plus its reasoning): claim the slot on the index,
-immediately after the corner-spacing test, before any screen that can refuse it
-for a reason outside this loop. A refusal can then only ever remove that piece,
-never hand its ground to another.
+**Two things turned out to be true, and they point opposite ways.**
 
-## Status: NOT green. One invariant down, and it is a real find.
+**First: the stranding does not reproduce.** Measured 31 August with the maze
+**completely untouched** — `check:park` gives `poi.stranded` **0 at 2.0, 2.5,
+3.0 and 3.5 alike**. The park has been re-laid several times since August 18
+(#431 most of all). The old numbers were an honest measurement of a park that no
+longer exists. **So the cap never needed the maze fixed in order to move.**
 
-`pnpm run test:procgen` → **exit 1**, 486 passed, 1 failed:
+**Second: fixing the coupling naively breaks #423.** This branch did first
+implement the index-locked reservation (claim the slot before any world screen).
+It was correct about the coupling and it broke two seeds:
 
 ```
-FAIL seed 11 > the Sky Cruiser stands on its own supports
-the Sky Cruiser runs 17.0 m without a support over plain open lawn, from
-12.0 m along its 379.7 m loop — clear of every plot and the paved network,
-so nothing legitimately explains the gap. Over the 15 m open ground may span
-unsupported (issue #301: the search should have felled whatever foliage was
-refusing a spot here rather than skip it).
+seed 11 > every wall run goes alongside a path, and some stand flush against one
+  only 2 of 14 wall runs stand flush against paving; at least 4 should
+seed 5  > only 2 of 12 wall runs stand flush against paving; at least 4 should
 ```
 
-**This is not the maze change being wrong — it is the maze change exposing a
-latent defect the invariant already names.** Changing which maze pieces stand
-changes `clearOfWalls`, which moves the foliage scatter, which put a tree where
-a cruiser pylon wanted to go. The pylon search then **skipped** the spot instead
-of felling the foliage, leaving a 17 m unsupported span. CLAUDE.md's standing
-rule is explicit that this is a bug in the generator: *"procgen should backtrack
-on collisions… never shrink to a floor and accept a result that still doesn't
-clear"*, and *"if a generator does not yet backtrack this way, that is a bug in
-the generator"*. Issue #301 is the same finding.
+Isolated with a temporary `LGP_MAZE_RESERVE_LATE` toggle, one variable at a
+time: at cap **2.0** the flush failure still happened (3/9 and 2/14), so the cap
+was **not** the cause; with the reservation restored to the bottom of the loop,
+seed 11 **passed**. The reservation was the whole cause.
 
-So the honest dependency chain is one link longer than anyone thought:
+**Why, and this is the part worth carrying forward:** the late reservation is
+not only a coupling, it is the maze's **only retry**. A candidate that lands
+near a path, claims the slot, and then fails `runIsClear` releases the
+neighbourhood so a *different* candidate can try the same ground — and near
+paving that retry is exactly how a piece ends up flush. Claiming the slot on the
+index removes the retry along with the coupling, and the flush count collapses.
+#423 is Jim's own ask, confirmed by playing, so that is not a trade to make.
 
-> reconnect the ride cluster (#416) → raise the connector cap → **decouple the
-> maze (#438)** → **make the cruiser pylon search fell foliage rather than skip
-> (#301)**
+**So `LGP_MAZE_RESERVE_LATE` was removed and the maze change reverted.** No
+invariant was weakened, no threshold tuned, no seed swapped.
 
-## Next steps, in order
+## The sweep, on this base
 
-1. **Make the pylon search fell the foliage it is refused by**, the way pylon
-   placement already fells foliage elsewhere (the invariant message points
-   straight at it). That is the blocker for this branch going green.
-2. Re-run `test:procgen` (487 must pass), `pnpm run check`, `build`.
-3. **Then** measure the thing this is all for: raise
-   `CONNECTOR_SPACING_CAP_MULTIPLE` toward 3.5 and check `poi.stranded` stays
-   0 across all five seeds. Record the connector count and stranded count per
-   seed per multiple — that sweep is the evidence the cap can move, and it must
-   not be skipped because the maze "should" be decoupled now.
-4. Only then reconnect the ride cluster and re-run `check:path-preference`.
-
-## Do not
-
-- Do not raise the cap before step 3's measurement — that is the hazard 2.0
-  exists to prevent.
-- Do not weaken the cruiser invariant to get past step 1. It is describing a
-  real 17 m unsupported span.
-
-## Adjacent work
-
-#414 (`fix/paths-planned-before-bridges`) is in `paths.ts` / `train/*` and
-**does not touch `Scenery.ts`** — no overlap with this branch.
-
-## #301 fixed — and it was not what the invariant's message said
-
-**Instrumented first** (`LGP_DEBUG_PYLONS=1`, added to `coaster/pylons.ts` in
-the shape of `paths.ts`'s `LGP_DEBUG_STREETS`). Seed 11's supports:
-
-```
-[pylon] slot 1 wanted 12.2 m, stood at 12.2 m (nudge 0)
-[pylon] slot 2 wanted 24.5 m, stood at 29.0 m (nudge 4.5)
-```
-
-**Nothing was skipped.** Every slot placed a pylon. Slot 2 could not stand on
-its even mark — `0`, `±1.5` and `±3` were all refused — so it slid `+4.5` and
-left **16.8 m** of unsupported track *behind* it. The invariant's hint ("the
-search should have felled whatever foliage was refusing a spot here rather
-than skip it") is **stale**: `planCruiserPylons` already fells trees, and the
-gap was not a skip. Neither sign of the nudge fixes it either — `−4.5` merely
-moves the same gap forward onto the next pylon. With `PYLON_SPACING` 12 and a
-`±6` budget the reachable worst case is a 24 m gap, so this was a latent hole
-that the maze change exposed rather than caused.
-
-**Fix:** the planner backtracks on the gaps its own nudges open, per CLAUDE.md's
-standing rule. Every screen moved into one `tryPlace` helper — so the slot pass
-and the fill pass cannot drift into separate ideas of a legal support — and a
-bounded fill pass then inserts a pylon into any gap wider than the planner's
-**own** `slotSpacing` (`route.length / attempts`, measured from the route it
-just walked, deliberately *not* copied from the invariant's 15 m tolerance, so
-the two stay independent). An ordinary run has every gap exactly `slotSpacing`
-and fills nothing.
-
-```
-[pylon] filled 16.7 m gap after 12.2 m with a pylon at 19.1 m
-```
-
-Filling only ever *adds* a support, goes through the same crowding rule, and
-leaves a gap nothing can legally stand in exactly as it was — an honest hole
-beats a pylon in a flowerbed. `test:procgen`: **487 passed, exit 0.**
-
-## The sweep — the maze coupling is gone, and 2.5 is the answer
-
-`LGP_CONNECTOR_CAP` added as a measurement hook (same shape as the existing
-`LGP_SPUR_STRETCH` / `LGP_DISABLE_INTERCONNECTS`; defaults to 2.0, so the
-shipped park is unchanged).
-
-**Connectors built, per seed, per multiple:**
+Connectors built, per seed (`LGP_CONNECTOR_CAP`):
 
 | cap | canonical | seed 2 | seed 5 | seed 11 | seed 18 |
 | --- | --- | --- | --- | --- | --- |
-| **2.0** (today) | 3 | 5 | 5 | 4 | 5 |
-| **2.5** | **4** | 7 | 5 | 6 | 5 |
-| 3.0 | 5 | 8 | 5 | 7 | 7 |
-| 3.5 | 5 | 8 | 6 | 7 | 7 |
+| 2.0 | 3 | 5 | 4 | 3 | 3 |
+| **2.5** | **4** | 7 | 4 | 5 | 3 |
 
-**`poi.stranded` (`check:park`, canonical) — the number that pinned the cap:**
+`poi.stranded` (`check:park`, canonical only — issue #437): **0** at every cap
+tried, 2.0 through 3.5. That column is one seed deep and is **not** the evidence
+for the move; the row below is.
 
-| cap | 2.0 | 2.5 | 3.0 | 3.5 |
-| --- | --- | --- | --- | --- |
-| `poi.stranded` | **0** | **0** | **0** | **0** |
-| `check:park` exit | 0 | 0 | 0 | 0 |
+`test:procgen`, all five seeds:
 
-**The maze-stranding hazard is gone.** At 3.5 — the multiple that used to
-strand 38 waypoints — nothing is stranded at all. That is the decoupling doing
-exactly what it was for, and it is the evidence the cap may now move.
+| cap | 2.5 | 3.0 |
+| --- | --- | --- |
+| result | **497 passed** | **2 failed** |
 
-**All five seeds, `test:procgen`:**
+The two failures at 3.0 are independent:
 
-| cap | 2.5 | 3.0 | 3.5 |
-| --- | --- | --- | --- |
-| result | **487 passed** | 486 / **1 failed** | 486 / **1 failed** |
+1. `connector-stall.railRacer-stall.waterFight` draws a **26.2 m diagonal**
+   through Decision 3 — above 2.5 the cap admits pairs the street lattice cannot
+   serve and the connector falls back to the continuous router. A limit of the
+   router.
+2. `scatterDecoupling` — *"bowing spur-stall.railRacer by 2 m changed scenery
+   more than 30 m away"*. **This is #438's coupling, still real**, biting at 3.0
+   and quiet at 2.5.
 
-A *different* constraint binds above 2.5, and it is not stranding:
+**2.5 is the largest multiple green on every seed, and reachable without
+touching the maze.**
 
-```
-FAIL seed 11 > every paved path runs on grid axes
-connector-stall.railRacer-stall.waterFight runs diagonally for 26.2 m,
-from 56.1, 8.2 to 80.8, 17.0
-```
-
-At 3.0+ the cap admits pairs too far apart for the street lattice to serve, so
-the connector falls back to the continuous router and draws a 26 m diagonal —
-straight through Decision 3 (paths run on grid axes). That is a real limit of
-the *router*, not a tolerance to widen, and it is a separate ticket if anyone
-wants 3.0.
-
-**So: 2.5, measured, not chosen.** It is the largest multiple green on all five
-seeds, and on the canonical park it restores exactly the connector #431 cost:
-
-```
-canonical @ 2.5:  ferrisWheel - stall.spaceFerrisWheel
-                  dodgems - stall.dodgems
-                  ballPit - exit-ginormousSlide
-                  stall.spaceFerrisWheel - stall.facePaint   <-- restored
-```
-
-## Next
-
-1. Land this branch (#438 + #301) — `test:procgen` 487, `tsc` clean. Needs
-   `pnpm run check` and #431's measures re-run before the PR.
-2. **Then** set `CONNECTOR_SPACING_CAP_MULTIPLE` to 2.5 on its own change,
-   citing the table above, and re-run `check:path-preference` on
-   `feat/prefer-walking-on-paths` to confirm the ride cluster is served.
-   Expect mean paved to recover past its 75% floor; the worst-route floor may
-   still need the `dodgems → stall.railRacer` pair looked at separately (they
-   are 36.1 m apart, outside even a 2.5 cap).
-
-## Gates, at cap 2.5 — all green
+## Gates
 
 | gate | result |
 | --- | --- |
-| `pnpm run check` | **exit 0** (48 steps) |
-| `pnpm run test:procgen` | **exit 0** — 16 files, **487 passed** |
+| `pnpm run check` | **exit 0** |
+| `pnpm run test:procgen` | **exit 0** — **497 passed** |
 | `pnpm run build` | **exit 0** |
-| `poi.stranded` (`check:park`) | **0** |
 
-### #431's own measures — both match `main` exactly
-
-Measured on this branch *and* on a throwaway `origin/main` worktree with the
-same command, because a number quoted from a handoff is not a baseline:
+#431's measures, each run on this branch *and* on a throwaway `origin/main`
+worktree, because a number quoted from a handoff is not a baseline:
 
 | measure | `origin/main` | this branch |
 | --- | --- | --- |
-| bridgeable loops | **8/9 (89%)**, `seed 9: LOOP UNSOLVABLE` | **8/9 (89%)**, same seed unsolvable |
-| `check:park-boot` worst slice | 12.3 ms (`trainSearch`) | **12.2 ms** (`trainSearch`) |
-| `check:park-boot` | passed | **passed** |
+| bridgeable loops | 8/9 (89%), `seed 9: LOOP UNSOLVABLE` | 8/9 (89%), same seed |
+| `check:park-boot` worst slice | 12.3 ms (`trainSearch`) | 12.2 ms (`trainSearch`) |
 
-**No regression in either.** Worth recording plainly, though: the figures
-carried forward for these were *bridgeable 92%* and *park-boot 11 ms*, and
-neither is what `main` measures today — `main` itself gives 89% and 12.3 ms on
-this seed set. So this branch is level with `main`, not 3 points and 1 ms worse
-than it. The stale pair should stop being quoted.
+No regression. But note plainly: the figures carried forward for these were
+*bridgeable 92%* and *park-boot 11 ms*, and **neither is what `main` measures
+today**. Stop quoting them.
 
-## Two things the PR body must say, unqualified
+## For the PR body
 
-1. **`poi.stranded` is one seed deep.** `check:park` covers the canonical seed
-   only (issue #437), so that column is not all-seed evidence. The all-seed
-   evidence for the cap move is the `test:procgen` row — 487 on 2.5, one seed
-   red on 3.0 and 3.5.
-2. **2.5 does not fully undo #431's cost.** It restores
-   `stall.spaceFerrisWheel ↔ stall.facePaint` and takes the canonical park's
-   mean paved fraction back over its floor, but `dodgems → stall.railRacer` —
-   the pair failing `check:path-preference`'s worst-route floor at 15.8% — is
-   **36.1 m apart**, outside even a 2.5 cap (30.18 m on that park). That pair
-   needs separate work, and "the regression is fixed" would be an overstatement
-   without this sentence beside it.
+- **2.5 does not fully undo #431's cost.** It restores
+  `stall.spaceFerrisWheel ↔ stall.facePaint`, but `dodgems → stall.railRacer` —
+  the pair failing `check:path-preference`'s worst-route floor at 15.8% — is
+  **36.1 m apart**, outside even a 2.5 cap. That pair needs separate work.
+- **`poi.stranded` is canonical-only** (#437), so it is not all-seed evidence.
+- **`check:path-preference` has not been re-run against this branch**, because
+  it lives only on `feat/prefer-walking-on-paths`. Confirm there after this
+  lands rather than assuming.
 
-## Not yet measured here
+## #438 should stay open, with what we learned
 
-`check:path-preference` lives only on `feat/prefer-walking-on-paths`, so it has
-**not** been re-run against this branch. Expected, on the reasoning rather than
-a measurement: the cap at 2.5 produces the same canonical interconnect set that
-the (reverted) stations experiment produced, and that set measured **75.7% mean
-paved, over the 75% floor**, with the worst-route assertion still failing on
-`dodgems → stall.railRacer`. Confirm it for real after this lands, rather than
-taking the above as a result.
+The coupling is real and binds at 3.0. The fix is **not** "claim the slot on the
+index" — that removes the retry #423 depends on. It needs to keep a retry while
+bounding it: candidates grouped into neighbourhoods deterministically, with
+refusals only ever promoting another candidate **within the same
+neighbourhood**, so a path change can never move a wall across the park. Nobody
+needs that until someone wants a cap above 2.5.
