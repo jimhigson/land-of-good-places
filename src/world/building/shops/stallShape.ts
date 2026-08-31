@@ -1,5 +1,6 @@
 import {
   BoxGeometry,
+  Box3,
   Color,
   ConeGeometry,
   CylinderGeometry,
@@ -18,7 +19,6 @@ import { toonMaterial } from '../../../art/style/materials';
 import { interiorMaterial } from '../parts';
 import { CASTLE_CEILING_CLEAR } from '../castleFabric';
 import {
-  MARKET_PITCH_X,
   MARKET_STALL,
   SHOP_RECESS_DEPTH,
   SHOP_SCALE_XZ,
@@ -112,18 +112,27 @@ import type { ShopId } from './catalogue';
 const FOOTPRINT_HALF = MARKET_STALL / 2 / SHOP_SCALE_XZ;
 
 /**
- * How far a canopy may overhang, unit-local.
+ * How wide a canopy may be: **exactly the footprint, and not a centimetre
+ * more.**
  *
- * Wider than the footprint on purpose — an awning that stops at the counter's
- * own edge does not read as an awning. The limit is the **neighbour**: stalls
- * stand `MARKET_PITCH_X` apart along a row, so this is that pitch less a gap
- * you can still see daylight through, halved, and taken back out of the stall
- * group's own scale. It comes out at the 2.4 the one shared awning used to be,
- * which is the point — nothing got smaller, it got different — and it now
- * *stays* right if the aisle ever widens.
+ * The shared awning it replaces was 3.84 m across on a 2.8 m stall, overhanging
+ * half a metre each side. That was fine at the height it sat — 2.86 m, well over
+ * everybody's head. It stops being fine here, because the whole point of this
+ * module is that the canopies came *down* to make room for what stands on them,
+ * and the gap between two stalls along a row is 2.44 m of floor a child walks
+ * through. An eave at 2.0 m overhanging into that gap is a roof she hits with
+ * her head; she is 2.12 m tall (`KID_HEIGHT`), which is a lot.
+ *
+ * There were three ways out — raise the eaves back over her head and give the
+ * emblem what was left, keep the overhang and forbid walking between stalls, or
+ * stop overhanging. This is the third, and it is the only one that costs
+ * nothing: the counter is 2.64 m wide, so a 2.8 m canopy still covers it with a
+ * lip either side and looks like a market stall rather than a table with a lid.
+ *
+ * `check:stall-shape` proves it on the built geometry, which is how the problem
+ * was found in the first place.
  */
-const CANOPY_GAP = 1.4;
-const CANOPY_HALF = (MARKET_PITCH_X - CANOPY_GAP) / 2 / SHOP_SCALE_XZ;
+const CANOPY_HALF = FOOTPRINT_HALF;
 
 /**
  * The top of every canopy, unit-local.
@@ -139,11 +148,33 @@ const CANOPY_TOP = 2.2;
 /** How much air is left between the tallest emblem and the slab above. */
 const CEILING_MARGIN = 0.16;
 
-/** The counter, unchanged from the shared kiosk — see `kiosk.ts`. */
-const COUNTER_Z = 1.15;
-const COUNTER_DEPTH = 0.7;
-const COUNTER_TOP_Y = 1.02;
+/**
+ * # The stall envelope — the numbers `kiosk.ts` and this file both build to
+ *
+ * These live here, at the bottom of the two, rather than in `kiosk.ts`, purely
+ * so there is no import cycle: `kiosk.ts` calls {@link buildStallDress}, so
+ * this file cannot call back into it. `kiosk.ts` re-exports the two that
+ * `fitouts.ts` has always taken from it, so nothing outside had to move.
+ *
+ * They are written once because a skirt has to sit flush on a counter face and
+ * a back dressing flush on a back panel, and "two numbers a comment promises
+ * agree" is the bug this repo keeps a whole CLAUDE.md section about.
+ */
+/** Middle of the counter box, and where a child stands to be served. */
+export const COUNTER_Z = 1.15;
+export const COUNTER_DEPTH = 0.7;
+/** Top of the counter: the good place to stand stock, in front of everything. */
+export const COUNTER_TOP_Y = 1.02;
 const COUNTER_FRONT_Z = COUNTER_Z + COUNTER_DEPTH / 2;
+
+/** Shelf boards sit just in front of the back panel; see `kiosk.ts`. */
+export const SHELF_Z = -0.05;
+export const SHELF_HALF_WIDTH = 1.55;
+
+/** The shelving's back panel: its middle, its thickness, and how tall it is. */
+export const BACK_PANEL_Z = SHELF_Z - 0.25;
+export const BACK_PANEL_THICKNESS = 0.1;
+export const BACK_PANEL_HEIGHT = 1.5;
 
 /**
  * Half the counter's width, unit-local — and the **one owner** of that number.
@@ -154,6 +185,12 @@ const COUNTER_FRONT_Z = COUNTER_Z + COUNTER_DEPTH / 2;
  * repo's most-repeated bug in miniature. They import this instead.
  */
 export const COUNTER_HALF_WIDTH = 1.65;
+
+/** Where a skirt's outermost surface sits: flush on the counter's front face. */
+const SKIRT_FACE_Z = COUNTER_FRONT_Z + 0.04;
+
+/** The outward face of that panel — where the back dressing lies flush. */
+const BACK_PANEL_FACE_Z = BACK_PANEL_Z - BACK_PANEL_THICKNESS / 2;
 
 /**
  * The ceiling, in this stall's own local metres.
@@ -332,7 +369,7 @@ function gableCanopy(accent: Material, trim: Material): Canopy {
     group.add(slab);
   }
 
-  const cap = fitting(new BoxGeometry(CANOPY_HALF * 2 + 0.1, 0.16, 0.28), trim);
+  const cap = fitting(new BoxGeometry(CANOPY_HALF * 2, 0.16, 0.28), trim);
   cap.position.set(0, ridgeY + 0.06, ridgeZ);
   group.add(cap);
 
@@ -348,7 +385,7 @@ function gableCanopy(accent: Material, trim: Material): Canopy {
  */
 function bouquetCanopy(accent: Material, ceiling: number): Canopy {
   const group = new Group();
-  const postX = 1.32;
+  const postX = 1.25;
   const postZ = 0.3;
   const postTop = CANOPY_TOP;
 
@@ -374,7 +411,7 @@ function bouquetCanopy(accent: Material, ceiling: number): Canopy {
     // A fan rather than a ring: from the front of the stall the near balloons
     // must not hide the far ones, so they climb as they go back.
     const angle = (index / colours.length) * Math.PI * 2 + 0.4;
-    const spread = index === 0 ? 0 : 0.62;
+    const spread = index === 0 ? 0 : 0.45;
     return new Vector3(
       postX + Math.cos(angle) * spread,
       crown - (index === 0 ? 0 : 0.34 + Math.sin(angle * 1.7) * 0.16),
@@ -417,7 +454,7 @@ function parasolCanopy(accent: Material, trim: Material): Canopy {
   const poleZ = 0.2;
   const rimY = 1.78;
   const apexY = CANOPY_TOP;
-  const radius = 1.6;
+  const radius = 1.18;
   /**
    * **Squashed front-to-back, and that is the interesting number here.**
    *
@@ -429,7 +466,7 @@ function parasolCanopy(accent: Material, trim: Material): Canopy {
    * camera it still reads as round, and the crop is the difference between a
    * canopy and a thing that clips through the customer.
    */
-  const spread = new Vector3(1.32, 1, 0.82);
+  const spread = new Vector3(1.3, 1, 0.86);
 
   const pole = fitting(new CylinderGeometry(0.075, 0.09, apexY, 10), trim);
   pole.position.set(0, apexY / 2, poleZ);
@@ -508,14 +545,14 @@ function plankCanopy(accent: Material, trim: Material): Canopy {
   const group = new Group();
   const eaveY = CANOPY_TOP - 0.16;
 
-  const board = fitting(new BoxGeometry(CANOPY_HALF * 2, 0.16, 2.5), accent);
+  const board = fitting(new BoxGeometry(CANOPY_HALF * 2, 0.16, 2.36), accent);
   board.position.set(0, eaveY + 0.08, 0.5);
   group.add(board);
 
   // A lip along the front edge only, so the flat roof has an edge to catch the
   // light instead of reading as a floating slab.
   const lip = fitting(new BoxGeometry(CANOPY_HALF * 2, 0.2, 0.14), trim);
-  lip.position.set(0, eaveY + 0.02, 1.72);
+  lip.position.set(0, eaveY + 0.02, 1.6);
   group.add(lip);
 
   return { group, perch: new Vector3(1.1, eaveY + 0.16, 0.5), eaveY };
@@ -524,13 +561,24 @@ function plankCanopy(accent: Material, trim: Material): Canopy {
 /** Two poles and a swag of triangular flags. */
 function buntingCanopy(accent: Material, trimColour: number): Canopy {
   const group = new Group();
-  const poleX = FOOTPRINT_HALF - 0.14;
+  /**
+   * **Two poles, and deliberately not a matching pair.**
+   *
+   * The right-hand one stands at the edge of the stall, where a bunting pole
+   * belongs. The left-hand one comes inboard, because the star sits on top of
+   * it and an emblem perched at the very edge of the footprint has nowhere to
+   * grow: {@link addEmblem} would shrink it to a bead. Asymmetric is also
+   * simply better here — ART_DIRECTION.md §4, "nothing is plumb".
+   */
+  const leftX = -0.86;
+  const rightX = FOOTPRINT_HALF - 0.2;
   const poleZ = 0.55;
   const poleTop = CANOPY_TOP;
 
+  const poleAt = [leftX, rightX];
   group.add(
     instanced(new BoxGeometry(0.14, poleTop, 0.14), accent, 2, (index, position) => {
-      position.set(index === 0 ? -poleX : poleX, poleTop / 2, poleZ);
+      position.set(poleAt[index] ?? 0, poleTop / 2, poleZ);
     }),
   );
 
@@ -539,7 +587,7 @@ function buntingCanopy(accent: Material, trimColour: number): Canopy {
   const sag = 0.34;
   const flags = 9;
   const at = (t: number): Vector3 =>
-    new Vector3(-poleX + t * poleX * 2, poleTop - 0.06 - sag * 4 * t * (1 - t), poleZ);
+    new Vector3(leftX + t * (rightX - leftX), poleTop - 0.06 - sag * 4 * t * (1 - t), poleZ);
 
   group.add(
     instanced(
@@ -574,7 +622,7 @@ function buntingCanopy(accent: Material, trimColour: number): Canopy {
     ),
   );
 
-  return { group, perch: new Vector3(-poleX, poleTop, poleZ), eaveY: null };
+  return { group, perch: new Vector3(leftX, poleTop, poleZ), eaveY: null };
 }
 
 /** A deep header with a spiky sawtooth valance: the one jagged outline. */
@@ -593,9 +641,16 @@ function sawtoothCanopy(accent: Material, trim: Material): Canopy {
   // which is how the first attempt at this managed to look like a plain slab.
   // Their number comes from the header's width, so a wider header grows more
   // teeth rather than stretching a fixed nine.
-  const toothWidth = 0.55;
-  const teeth = Math.round((CANOPY_HALF * 2) / toothWidth);
-  const toothSide = toothWidth * 0.74;
+  const toothSide = 0.41;
+  // A square stood on its corner is `√2` times as wide as its side, and that is
+  // what has to fit — the first version spaced the teeth on their *sides* and
+  // the outermost one hung 2 cm past the header into the gap a child walks
+  // through. `check:stall-shape` caught it; the arithmetic is written out here
+  // so it cannot come back.
+  const halfDiagonal = (toothSide * Math.SQRT2) / 2;
+  const span = CANOPY_HALF - halfDiagonal;
+  const teeth = Math.max(2, Math.round((span * 2) / (toothSide * 1.35)) + 1);
+  const step = (span * 2) / (teeth - 1);
   group.add(
     instanced(
       new BoxGeometry(toothSide, toothSide, 0.16),
@@ -603,8 +658,8 @@ function sawtoothCanopy(accent: Material, trim: Material): Canopy {
       teeth,
       (index, position, _scale, rotation) => {
         position.set(
-          -CANOPY_HALF + toothWidth * (index + 0.5),
-          headerY - 0.13 - (toothSide * Math.SQRT2) / 2 + 0.06,
+          -span + step * index,
+          headerY - 0.13 - halfDiagonal + 0.06,
           headerZ + 0.74,
         );
         rotation.setFromAxisAngle(new Vector3(0, 0, 1), Math.PI / 4);
@@ -665,7 +720,7 @@ function buildPosts(style: StallStyle, canopy: Canopy, material: Material): Mesh
  */
 function buildSkirt(style: StallStyle, accent: Material, trim: Material): Group {
   const group = new Group();
-  const faceZ = COUNTER_FRONT_Z + 0.04;
+  const faceZ = SKIRT_FACE_Z;
 
   if (style.skirt === 'planks') {
     // Alternating vertical planks: two instanced meshes, one per colour.
@@ -742,10 +797,49 @@ function emblemAsset(kind: EmblemKind): AssetHandle | null {
     case 'star':
       return createStarToy(PALETTE.markerLemon);
     case 'egg':
-      return createSurpriseEgg(PALETTE.stonePinkLight, PALETTE.markerLilac);
+      return eggCluster();
     case 'none':
       return null;
   }
+}
+
+/**
+ * Three eggs, not one — the only emblem that is a group rather than a single
+ * model, and the reason is worth keeping.
+ *
+ * Every emblem is scaled to fill the headroom above its canopy, so a *tall
+ * narrow* model comes out tall and narrow: one egg at 0.9 m read as a knob on
+ * the roof from the aisle, while a teddy or a star of the same height read
+ * instantly. Width is what carries at distance. Three eggs of different sizes
+ * and colours fill the same height with three times the silhouette, and they
+ * say "surprise eggs" rather than "an egg" besides.
+ *
+ * Wrapped as an `AssetHandle` so {@link addEmblem} needs no special case: it
+ * asks the same question — how tall are you? — and gets the same kind of
+ * answer.
+ */
+function eggCluster(): AssetHandle {
+  const root = new Group();
+  const clutch = [
+    { shell: PALETTE.markerLemon, spot: PALETTE.markerPink, x: -0.42, scale: 0.72, lean: -0.22 },
+    { shell: PALETTE.stonePinkLight, spot: PALETTE.markerLilac, x: 0, scale: 1, lean: 0.06 },
+    { shell: PALETTE.markerMint, spot: PALETTE.markerSky, x: 0.4, scale: 0.8, lean: 0.26 },
+  ];
+  // Nested behind one another as well as beside, so the group has depth from a
+  // camera looking down at 38° instead of reading as a flat row.
+  let height = 0;
+  for (const [index, egg] of clutch.entries()) {
+    const one = createSurpriseEgg(egg.shell, egg.spot);
+    one.root.position.set(egg.x, 0, (index - 1) * 0.16);
+    one.root.scale.setScalar(egg.scale);
+    one.root.rotation.z = egg.lean;
+    root.add(one.root);
+    // Each egg reports its own height; the tallest is the clutch's. Asking is
+    // the point — a hand-copied 0.35 here would be a second definition of a
+    // number `shopItems.ts` already owns.
+    height = Math.max(height, one.height * egg.scale);
+  }
+  return { root, height };
 }
 
 /** How far each emblem is turned off square. Nothing is plumb (§4). */
@@ -785,10 +879,44 @@ function addEmblem(
    * contract is owed.
    */
   const metres = headroom / asset.height;
-  asset.root.scale.set(metres / SHOP_SCALE_XZ, metres / shopScaleY(unit), metres / SHOP_SCALE_XZ);
   asset.root.position.copy(canopy.perch);
   asset.root.rotation.y = EMBLEM_YAW[style.emblem];
   asset.root.name = `stall-emblem:${style.emblem}`;
+
+  /**
+   * **Fill the headroom, then give width the veto.**
+   *
+   * Scaling by height alone is right for a teddy or an egg, whose height is
+   * their largest dimension. It is badly wrong for a hat: `hats.ts` authors them
+   * at *worn* size, where a sun hat is 2.1 m across and 0.3 m tall, so a hat
+   * grown to fill 0.94 m of headroom comes out three metres wide and hangs over
+   * the aisle on both sides. `fitouts.ts` meets the same problem on the shelf
+   * and answers it with `hatDisplayScale`, a per-kind constant — which is a
+   * second definition of "how big should this be", and it only knows about
+   * hats.
+   *
+   * So this measures the emblem it actually built and shrinks it until it fits
+   * inside the stall's own footprint. Nothing has to be told in advance how wide
+   * its model is, which means the next emblem somebody adds cannot silently eat
+   * the aisle, whatever shape it turns out to be. Two passes: shrinking moves
+   * the geometry towards the perch, so one correction slightly overshoots and
+   * the second recovers it.
+   */
+  const box = new Box3();
+  asset.root.scale.set(metres / SHOP_SCALE_XZ, metres / shopScaleY(unit), metres / SHOP_SCALE_XZ);
+  asset.root.updateWorldMatrix(false, true);
+  box.setFromObject(asset.root);
+  // Solved rather than iterated: the emblem shrinks about its own perch, so the
+  // room it has on each axis is the footprint less how far off-centre that perch
+  // already is, and the factor that just fits is the smallest of those ratios.
+  const room = (limit: number, near: number, far: number): number =>
+    Math.max(near, far) <= 0 ? 1 : limit / Math.max(near, far);
+  const fit = Math.min(
+    room(FOOTPRINT_HALF - Math.abs(canopy.perch.x), canopy.perch.x - box.min.x, box.max.x - canopy.perch.x),
+    room(FOOTPRINT_HALF - Math.abs(canopy.perch.z), canopy.perch.z - box.min.z, box.max.z - canopy.perch.z),
+  );
+  if (fit < 1) asset.root.scale.multiplyScalar(fit);
+
   into.add(asset.root);
 }
 
@@ -813,6 +941,30 @@ export function buildStallDress(unit: ShopUnitDefinition): Group {
   const ceiling = ceilingLocalY(unit);
 
   group.add(buildSkirt(style, accent, trim));
+
+  /**
+   * **And the same skirt again, on the back — because three of the seven
+   * stalls are only ever seen from behind.**
+   *
+   * The park's camera is fixed: it looks along (−0.56, −0.62, −0.56), so what
+   * it shows of any object is that object's +X and +Z faces. The market's north
+   * row faces +Z into the aisle and presents its front; the south row faces −Z
+   * into the same aisle and therefore presents its **back**, from every
+   * position a child can stand in, for ever. It is not a thing she can walk
+   * round.
+   *
+   * That did not matter while all seven stalls were one shell — the back looked
+   * exactly like the front, because both were plain. It matters a great deal
+   * now, and it is the difference between "seven stalls a child can tell apart"
+   * and "four stalls a child can tell apart and three cream panels". So the
+   * back panel wears the same dressing, mirrored onto its outer face; the
+   * offset is worked out from where `buildSkirt` puts things rather than
+   * written down, so the two cannot drift.
+   */
+  const backDress = buildSkirt(style, accent, trim);
+  backDress.rotation.y = Math.PI;
+  backDress.position.z = BACK_PANEL_FACE_Z + SKIRT_FACE_Z;
+  group.add(backDress);
 
   const canopy = buildCanopy(style, accent, trim, ceiling);
   group.add(canopy.group);

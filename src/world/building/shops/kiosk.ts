@@ -11,7 +11,24 @@ import {
 import { PALETTE } from '../../../core/palette';
 import { interiorMaterial } from '../parts';
 import type { ShopUnitDefinition } from '../layout';
-import { COUNTER_HALF_WIDTH, buildStallDress } from './stallShape';
+import {
+  BACK_PANEL_HEIGHT,
+  BACK_PANEL_THICKNESS,
+  BACK_PANEL_Z,
+  COUNTER_HALF_WIDTH,
+  COUNTER_Z,
+  SHELF_HALF_WIDTH,
+  SHELF_Z,
+  buildStallDress,
+} from './stallShape';
+
+/**
+ * Re-exported so `fitouts.ts` keeps taking the counter top and the shelf line
+ * from the module that builds them. They are *defined* in `stallShape.ts`,
+ * which this file calls into — the arrow only points one way, so the constants
+ * have to live at the far end of it.
+ */
+export { COUNTER_TOP_Y, COUNTER_Z, SHELF_HALF_WIDTH, SHELF_Z } from './stallShape';
 
 /**
  * The part of a market stall that every stall has.
@@ -41,10 +58,6 @@ import { COUNTER_HALF_WIDTH, buildStallDress } from './stallShape';
  * for it twice over.
  */
 
-/** Where the counter front sits, and where a child stands to be served. */
-export const COUNTER_Z = 1.15;
-export const COUNTER_TOP_Y = 1.02;
-
 /**
  * One shelf, not three — and this is the single most important number in the
  * kiosk.
@@ -60,15 +73,6 @@ export const COUNTER_TOP_Y = 1.02;
  * tried the other way round first, and the toys vanished.
  */
 const SHELF_Y = [0.72] as const;
-/**
- * Shelf boards sit at this z, just in front of the back panel.
- *
- * Pushed almost back to the wall (the unit origin is 0.5 m off it) on purpose:
- * the shopkeeper has to fit in the gap between the shelving and the counter, and
- * at the original depth their tummy came out through the middle shelf.
- */
-export const SHELF_Z = -0.05;
-export const SHELF_HALF_WIDTH = 1.55;
 
 function fitting(geometry: BoxGeometry, material: Material): Mesh {
   const mesh = new Mesh(geometry, material);
@@ -108,8 +112,11 @@ export function buildKiosk(unit: ShopUnitDefinition): KioskShell {
   // emblem. Nothing stands higher than 1.3 m on these shelves anyway — see the
   // note on `SHELF_Y` — so the top of the old panel was holding up nothing but
   // the roof it forced upwards.
-  const back = fitting(new BoxGeometry(COUNTER_HALF_WIDTH * 2 - 0.1, 1.5, 0.1), cream);
-  back.position.set(0, 0.75, SHELF_Z - 0.25);
+  const back = fitting(
+    new BoxGeometry(COUNTER_HALF_WIDTH * 2, BACK_PANEL_HEIGHT, BACK_PANEL_THICKNESS),
+    cream,
+  );
+  back.position.set(0, BACK_PANEL_HEIGHT / 2, BACK_PANEL_Z);
   group.add(back);
 
   // Three identical boards and two identical uprights: the only repeated
