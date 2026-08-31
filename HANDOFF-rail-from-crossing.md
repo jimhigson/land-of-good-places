@@ -786,3 +786,89 @@ twenty dropped waypoints is a district a child cannot reach.
 
 **It must be fixed before this merges** (CLAUDE.md's zero-tolerance rule), and
 it is now the biggest single open item on #427, ahead of seed 2.
+
+---
+
+# `check:park` `poi.stranded: 20` — TRIAGED, NOT FIXED. Measurements below.
+
+## It IS a regression of this branch. `origin/main` is green.
+
+Ran `scripts/check-park.mts` on a detached `origin/main` worktree with its own
+real install: **exit 0, no `poi.stranded` at all.** At this branch's handover
+point `cc9d5e73`: **20**. So it came in with the crossing-pose generator earlier
+on this branch and was never triaged — it is not inherited from `main`, and my
+earlier note in this file calling it "inherited" was right only about the branch
+point and is corrected here.
+
+**Correction to my own first reading:** the `[3]` prefix in the check output is
+the **invariant number**, not a seed. `check:park` runs the **canonical** seed.
+I reported "seed 3" to the Overseer; that was wrong and cost a probe run.
+
+## Where the pockets are
+
+`scripts/probe427-poi.mts` (committed). Canonical seed, loop 361.8 m, bridge
+sites at railD 0 / 234 / 336, level sites at 70 / 116 / 166 / 202 / 306.
+
+**All 20 stranded nodes lie OUTSIDE the loop, in exactly two strips:**
+
+| pocket | rail distances | nodes | nearest crossings |
+|---|---|---|---|
+| north-west | 309-325 | 13 | level 306, bridge 336 |
+| south-east | 191-197 | 6 | level 166, level 202 |
+
+For contrast, **78 reachable nodes also lie outside the loop** — the outside is
+not cut off in general, only these two strips.
+
+## What blocks them — named by collider geometry, not guessed
+
+For every stranded node, the nearest main-component node and what stops the line:
+
+- **North-west: the railway fence.** Every blocked line fails at railGap
+  **2.5 m** against walls of length 2.6 m, halfThickness 0.18, `top=Infinity` —
+  `train/fence.ts`'s panels. The closest case is brutal: (-44.0, 14.9) is
+  **2.7 m** from the reachable (-42.9, 12.5), with a fence panel between them.
+- **South-east: a bridge ramp's parapet.** Walls of length 2.0,
+  halfThickness 0.15, tops **2.7 / 3.7 / 5.5 m** — climbing, i.e. a ramp flank —
+  at railGap 3.6-9.1 m.
+
+Every line that is *not* blocked is longer than `poiGraph`'s `MAX_EDGE` of 13 m
+(measured 13.4-25.9 m). So each pocket is sealed by geometry on its short side
+and by the edge limit on its long side.
+
+## WHAT I COULD NOT ESTABLISH — and the probe that lied
+
+I flood-filled the walkable plane on a 0.5 m grid from the main component and
+got "0/20 reachable — genuinely sealed off". **That result is invalid and I
+have thrown it away.** The control I ran next: the same fill reaches only
+**2 of the 78 reachable nodes that are outside the loop**. A ground-level 2-D
+fill cannot climb a bridge deck, which is precisely how children get outside the
+loop, so the fill was only ever measuring "inside the loop" and could not
+distinguish a sealed strip from a normal one.
+
+**So it is still open whether these two strips are ground a child genuinely
+cannot reach, or ground she can reach over a bridge that merely has too few
+waypoints to chain along at 13 m.** That distinction decides the fix and must
+be settled first:
+
+- *genuinely sealed* -> the park needs a way in (a crossing serving the strip);
+  a real layout defect.
+- *reachable but under-seeded* -> the waypoints are right and the graph cannot
+  chain along a thin strip; the fix is in seeding or in how a strip is served.
+
+The right instrument is `PoiGraph`'s own model, which already takes
+`bridgeHeightAt` and therefore *can* climb a deck — not a hand-rolled fill.
+Ask it whether a chain exists from the main component out through the level
+crossing at railD 306 (or the bridge at 336) and along the strip, and where the
+chain breaks.
+
+**Do not fix this by relaxing `MAX_EDGE` or by adding to `RATCHET`.** 13 m is
+the edge limit the whole graph is built on, and the count must reach 0 by the
+ground becoming reachable.
+
+## Why it is plausibly the same family as the other three
+
+The loop now starts inside the park rather than on the rim, so it can leave wide
+strips of ground between itself and the boundary. `main`'s rim-hugging loops
+left almost none. That is a coherent story and it fits all four remaining
+failures — but it is **a story, not a measurement**, and on this ticket four
+stories have already expired. Measure it before acting on it.
