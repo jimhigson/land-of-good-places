@@ -6,6 +6,9 @@ import { RAIL_OVER_RAIL_AIR } from '../coaster/route';
 import { PARK_LAYOUT } from '../parkLayout';
 import { terrainHeight } from '../terrain';
 import { bridgeableCrossingPoses } from './crossingPoses';
+import { fitBridgeAcross, railCorridorBlocked } from './bridgeFit';
+import { chosenCrossingCorridor, crossingSurvivesStationAt } from './crossingKeepOut';
+import { STATION_SEEDS, STATION_SEED_RADIUS } from './stationSeeds';
 import { PARK_SEED } from '../parkManifest';
 import { type Pose2, type SegmentKind, type Vec2, turnVocabulary } from '../rail/segments';
 import { railRouteSearch, RailRouteUnsolvable, type RouteBrief, type SolvedRailRoute } from '../rail/generate';
@@ -263,6 +266,122 @@ function buildTrainContext(): TrainContext {
   return { clear, startPoses, perimeter };
 }
 
+/**
+ * **Does this finished loop still admit a bridge where it started?**
+ *
+ * `crossingPoses.ts` proves a bridge fits at a pose *before* the railway
+ * exists, which is the whole of issue #427 — but two things can only be known
+ * once a candidate loop has closed, and both were measured taking the guarantee
+ * away again:
+ *
+ * - **The loop can eat its own ramp room.** Seed 2 grew from a genuinely
+ *   bridgeable crossing, then curved back on itself beside it; past the deck a
+ *   ramp may not run in the rail's own corridor, and the planner measured
+ *   **1.5 m of run against a 12.1 m floor**. The pose generator cannot see
+ *   this at any price, because when it runs there is no loop to see.
+ * - **Station placement can have no move that helps.** Seed 15's placer window
+ *   held no candidate at all that cleared the crossing, so it took the
+ *   least-bad one. A penalty does not discriminate when every candidate carries
+ *   it — the loop, not the placement, is what has to give.
+ *
+ * Both are properties of the *solved* loop, so `RouteBrief.satisfies` is the
+ * only hook in the search that can ask them: it runs the moment a candidate
+ * closes, and a loop that fails simply sends the search on to the next of the
+ * ~1200 ranked crossing poses. It also cannot make a park fail — if every pose
+ * is exhausted the first solved loop is returned anyway, with
+ * `SolveReport.satisfied` false — so this can only ever improve the outcome or
+ * cost search time, never lose the railway. `SolveReport.satisfyRejects` counts
+ * what it costs; `scripts/measure-train-solve-budget.mts` prints it.
+ *
+ * Neither test is written out here. The rail-corridor rule comes from
+ * `bridgeFit.ts` and the station rule from `crossingKeepOut.ts`, both of which
+ * the real planner reads as well — a more permissive second copy of "a bridge
+ * fits here" is exactly the prover-versus-builder disagreement issue #414 was,
+ * and putting one at this level would recreate it one level earlier.
+ *
+ * The station-structure test is deliberately *not* applied to the probe: at
+ * this moment there is a route but no stations, and asking where they will
+ * stand is what {@link crossingSurvivesStationAt} does instead.
+ */
+function loopKeepsItsCrossing(route: SolvedRailRoute): boolean {
+  // The loop as a polyline, sampled once — the same 720 samples and the same
+  // nearest-sample answer `TrainRoute.distanceNear` gives, so this measures the
+  // railway the crossing planner will later measure, not a finer or coarser
+  // idea of it.
+  const samples = 720;
+  const xs = new Float64Array(samples);
+  const zs = new Float64Array(samples);
+  const probe: Vec2 = { x: 0, z: 0 };
+  for (let i = 0; i < samples; i += 1) {
+    route.pointAt((i / samples) * route.length, probe);
+    xs[i] = probe.x;
+    zs[i] = probe.z;
+  }
+  const nearestSample = (x: number, z: number): number => {
+    let best = 0;
+    let bestSquared = Infinity;
+    for (let i = 0; i < samples; i += 1) {
+      const dx = (xs[i] as number) - x;
+      const dz = (zs[i] as number) - z;
+      const squared = dx * dx + dz * dz;
+      if (squared < bestSquared) {
+        bestSquared = squared;
+        best = i;
+      }
+    }
+    return best;
+  };
+
+  // Memoised on a 1 m grid, like the planner's own — the probe asks about
+  // thousands of overlapping points per candidate footprint, and this runs once
+  // per solved route rather than once per park.
+  const railDistanceCache = new Map<number, number>();
+  const railDistanceAt = (x: number, z: number): number => {
+    const key = (Math.round(x) + 8192) * 32768 + (Math.round(z) + 8192);
+    const hit = railDistanceCache.get(key);
+    if (hit !== undefined) return hit;
+    const i = nearestSample(x, z);
+    const value = Math.hypot(x - (xs[i] as number), z - (zs[i] as number));
+    railDistanceCache.set(key, value);
+    return value;
+  };
+
+  const centre: Vec2 = { x: 0, z: 0 };
+  const tangent: Vec2 = { x: 0, z: 0 };
+  route.pointAt(0, centre);
+  route.tangentAt(0, tangent);
+
+  // 1. Does a whole bridge still fit across the track at the pose the loop was
+  //    grown from, now that the railway is really there?
+  const fit = fitBridgeAcross(
+    centre.x,
+    centre.z,
+    tangent.z,
+    -tangent.x,
+    railCorridorBlocked(railDistanceAt),
+  );
+  if (!fit) return false;
+
+  // 2. Can both stations be placed somewhere that leaves the crossing alone?
+  const corridor = chosenCrossingCorridor(centre, tangent);
+  const window: Vec2 = { x: 0, z: 0 };
+  const flatPointAt = (distance: number): Vec2 => route.pointAt(distance, window);
+  for (const seed of STATION_SEEDS) {
+    const target = route.length
+      ? (() => {
+          const i = nearestSample(
+            seed.bearingX * STATION_SEED_RADIUS,
+            seed.bearingZ * STATION_SEED_RADIUS,
+          );
+          return (i / samples) * route.length;
+        })()
+      : 0;
+    if (!crossingSurvivesStationAt(target, route.length, corridor, flatPointAt)) return false;
+  }
+
+  return true;
+}
+
 /** One ladder rung's brief: the shared context aimed at a particular length. */
 function briefForLength(context: TrainContext, desiredLength: number, salt: number): RouteBrief {
   return {
@@ -277,6 +396,7 @@ function briefForLength(context: TrainContext, desiredLength: number, salt: numb
     selfClearance: SELF_CLEARANCE,
     minRadius: TRAIN_MIN_TURN_RADIUS,
     budgets: { perJoint: 16, restarts: context.startPoses.length },
+    satisfies: loopKeepsItsCrossing,
   };
 }
 

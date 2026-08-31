@@ -2,7 +2,7 @@ import { Vector3 } from 'three';
 import { TrainRoute } from './route';
 import { COASTER_PLANS } from '../coaster/plan';
 import { terrainHeight } from '../terrain';
-import { PALETTE } from '../../core/palette';
+import { STATION_SEEDS, STATION_SEED_RADIUS } from './stationSeeds';
 
 /**
  * The rail plan — the railway as *data*, solved at module load from the park
@@ -48,21 +48,6 @@ export interface PlannedStation {
   readonly leadX: number;
   readonly leadZ: number;
 }
-
-const STATION_SEEDS = [
-  {
-    name: 'Sunny Side',
-    accent: PALETTE.markerLemon,
-    bearingX: 1,
-    bearingZ: 0,
-  },
-  {
-    name: 'Bluebell Halt',
-    accent: PALETTE.markerSky,
-    bearingX: -1,
-    bearingZ: 0,
-  },
-] as const;
 
 /** Clear of every plot's bounding circle by `radius` — the pure counterpart
  * of the old `collision.isClearCircle`. Trees no longer count: they are
@@ -253,7 +238,10 @@ function nearCruiserLowCorridor(x: number, z: number, reach: number): boolean {
 
 function planStations(route: TrainRoute): readonly PlannedStation[] {
   return STATION_SEEDS.map((seed, index) => {
-    const target = route.distanceNear(seed.bearingX * 60, seed.bearingZ * 60);
+    const target = route.distanceNear(
+      seed.bearingX * STATION_SEED_RADIUS,
+      seed.bearingZ * STATION_SEED_RADIUS,
+    );
     const distance = clearStationDistance(route, target);
     const { standX, standZ } = stationStand(route, distance);
     const tangent = route.tangentAt(distance, new Vector3());
