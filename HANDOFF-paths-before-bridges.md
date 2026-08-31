@@ -221,3 +221,80 @@ level crossing", and #396 says nothing yet checks a level crossing is walkable.
 5, 11 and 18 today. Scoping it to proven-site bridges would be weakening an
 assertion to make a seed pass, which CLAUDE.md forbids. So step 2 belongs in
 this PR, or the PR ships without the invariant CLAUDE.md requires.
+
+---
+
+# THE STEP-2 MEASUREMENT — it is a fix, not a cost
+
+`LGP_ONLY_PROVEN_BRIDGES=1` (off by default; a lever, not a decision).
+
+## 1. Are the resulting level crossings walkable, both sides, through the crossing?
+
+`scripts/measure-level-crossing-walkability.mts` — asks the real `NavGrid`,
+built with `PLAYER_RADIUS` and `JUMP_APEX_HEIGHT` exactly as `check-park.mts`
+builds it. Never infers from geometry.
+
+**Every single crossing that loses its bridge is WALKABLE**, and the walk goes
+*through* the crossing rather than round the loop — 16 m walked for a 16 m gap,
+passing 0.0–1.7 m from the crossing centre, on all eleven of them:
+
+| seed | crossings without a bridge | walkable through | not standable | unreachable |
+|---|---|---|---|---|
+| canonical | 0 | — | — | — |
+| 2 | 3 | **3** | 0 | 0 |
+| 5 | 3 | **3** | 0 | 0 |
+| 11 | 3 | **3** | 0 | 0 |
+| 18 | 2 | **2** | 0 | 0 |
+
+Two measurement traps, both hit and both fixed before believing any of it:
+`NavGrid` returns a *simplified* polyline (a clear straight walk comes back as
+one point), and it does not include the start. Measuring vertices only reported
+`Infinity` for exactly the crossings that work best. Sampling along the
+segments, with the start prepended, is what these numbers come from.
+
+## 2. Does anything get stranded? No — the opposite.
+
+`check:park` stranded-waypoint counts. **Baseline measured on `origin/main` in
+its own worktree first**: `check:park` is *already* red on all four sweep seeds
+on `main`, so none of this is attributable to step 1 without that column.
+
+| seed | `origin/main` | branch, gate off | branch, gate ON |
+|---|---|---|---|
+| canonical | 0 (exit 0) | 0 (exit 0) | **0 (exit 0)** |
+| 2 | 3 | 3 | 3 |
+| 5 | 18 | **39** | **0 — exit 0, fully clean** |
+| 11 | 49 (+1 nospot) | 42 (+1 nospot) | 37 (+1 nospot) |
+| 18 | 6 | 6 | **0 — exit 0, fully clean** |
+
+**Read the seed 5 row carefully. Step 1 on its own makes seed 5 worse** —
+18 stranded waypoints on `main`, 39 on this branch — because step 1 lets one
+*more* opportunistic bridge get built (seed 5 goes 2→3 bridges, the new one on
+a level site at d=202). With the gate on it goes to **zero**.
+
+**So step 1 should not ship without step 2.** That is a change to what I
+reported earlier and it is the most important line in this file.
+
+Seeds 5 and 18 become the first sweep seeds to pass `check:park` outright.
+Seed 11 improves 49 → 37 but keeps a pre-existing `poi.nospot` unrelated to
+bridges. Seed 2 is unchanged at 3.
+
+## Bridge counts, the honest full picture
+
+| seed | `origin/main` | step 1 only | step 1 + step 2 |
+|---|---|---|---|
+| canonical | 2 | **3** | **3** (all proven — unchanged by the gate) |
+| 2 | 1 | 1 | 0 |
+| 5 | 2 | 3 | 1 |
+| 11 | 2 | 2 | 1 |
+| 18 | 1 | 2 | 1 |
+
+Jim's own park gains a bridge and loses nothing. The sweeps trade four
+opportunistic bridges for eleven walkable level crossings and two seeds that
+start passing `check:park`.
+
+## What this does to the invariant
+
+With the gate ON, the honest unconditional assertion — *no drawn path may end
+stranded above the terrain on a bridge* — should be green everywhere, because
+the bridges that stranded them are not built. That is still to be confirmed and
+is the next step once Jim rules.
