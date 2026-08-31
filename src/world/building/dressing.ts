@@ -200,13 +200,7 @@ function buildPlanterRing(deck: number): Group {
 
 // ---------------------------------------------------------------- benches
 
-/**
- * Benches, scattered by a seeded rejection sample.
- *
- * Rejection rather than a hand-placed list because there are five decks and the
- * plan moves: anything hand-placed goes stale the first time a shaft shifts a
- * metre, and a bench floating in a stairwell is a bench a child falls through.
- */
+/** Where one bench stands, and which way it faces. */
 export interface BenchSpot {
   readonly x: number;
   readonly z: number;
@@ -215,6 +209,13 @@ export interface BenchSpot {
 
 /**
  * Where this deck's benches stand — **one list, asked twice**.
+ *
+ * Scattered by a seeded rejection sample rather than a hand-placed list,
+ * because the plan moves: anything hand-placed goes stale the first time a
+ * keep-out shifts a metre. (It used to say "the first time a *shaft* shifts",
+ * and that a bench floating in a stairwell is a bench a child falls through —
+ * both true until #377/#380 deleted every shaft and every hole. The reason
+ * survives the shafts; only the example needed replacing.)
  *
  * Exported for the same reason {@link keepOutsFor} is. The roof's long grass
  * (`roofMeadow.ts`) has to keep off the benches, and a bench is placed by a
