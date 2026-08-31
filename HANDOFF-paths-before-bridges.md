@@ -571,3 +571,45 @@ Screen a spur's assembled polyline with `segmentCutsABridgeRamp`, excluding the
 site that leg legitimately crosses. Then re-measure `poi.stranded` on seed 5,
 `check`, and `test:procgen` — and re-run `probe-ribbons-on-ramps` expecting the
 three FOREIGN rows to go and the four crossing rows to stay.
+
+## THE PRODUCER, NAMED — it is the STUB's long leg, not the lattice
+
+The lattice is innocent, and that is measured, not assumed. Asking
+`debugStreetLattice()` about the nodes along the offending runs:
+
+```
+node (17.1, 9.3)  ok=true   onRamp(1.5)=false
+node (29.1, 9.3)  ok=false  onRamp(1.5)=true    <- correctly refused
+node (41.1, 9.3)  ok=false  onRamp(1.5)=true    <- correctly refused
+node (17.1, 45.3) ok=false  onRamp(1.5)=true    <- correctly refused
+```
+
+`nodeOk` and `edgeOk` do their job. So the ribbon that crosses site 56's ramp
+is **not** a lattice path — it is `computeStreetStubs`' elbow leg, and the
+control polyline shows it plainly:
+
+```
+spur-stall.facePaint: (5.1,21.3) (5.1,17.3) (17.1,13.3) (17.1,9.3) (45.4,9.3) (45.4,4.4) (42.9,1.9)
+                                                         `-------- 28.3 m --------'
+```
+
+`(17.1, 9.3)` is the lattice node; `(45.4, 4.4)` is the doormat's 3.5 m arrival
+lead; `(45.4, 9.3)` is the stub's **corner**. Two things let a 28.3 m leg
+through a 7.8 m limit:
+
+1. **`STUB_TAIL_LIMIT` is checked as `min(|dx|, |dz|)`.** For this pair that is
+   `min(28.3, 4.9) = 4.9` — the *short* axis. The long leg is never measured.
+2. **`legClear` omits the ramp screen.** It asks `streetSegmentClear`,
+   `segmentClearOfRing` and `segmentHoldsRailSide` — the same three
+   `edgeOk` asks — but **not** `segmentCutsABridgeRamp`, which `edgeOk` and
+   `linkClear` both do ask.
+
+`spur-exit-ferrisWheel`'s `(-6.9,-26.7) -> (-6.9,-37.7)` (11.0 m) is the same
+stub shape. `spur-dodgems`' `(5.9,45.9) -> (38.4,36.3)` (33.9 m, diagonal) is
+the **fallback** router (`LGP_DEBUG_STREETS=1` lists `dodgems` among the eleven
+spurs the lattice could not serve), which does not ask the ramp screen either.
+
+**So it is one missing clause in two sibling predicates**, not a curve, not an
+ordering, not the lattice. `CROSSING_SITES` is solved at module load in
+`crossingPlan.ts` and is fully populated before any of this runs — checked,
+because "paths planned before bridges" made it the obvious suspect.

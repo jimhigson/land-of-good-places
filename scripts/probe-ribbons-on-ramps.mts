@@ -108,6 +108,33 @@ for (const definition of ROUTES) {
       `to (${last.x.toFixed(1)}, ${last.z.toFixed(1)}), ` +
       `worst stray from its own control polyline ${worstStray.toFixed(2)} m`,
   );
+  // Name the offending CONTROL segment: which straight run between two
+  // screened-clear control points spans the rectangle. This is what a
+  // point-screen structurally cannot see.
+  if (!crosses) {
+    console.log(
+      `      full control polyline: ${control
+        .map((p) => `(${p[0].toFixed(1)}, ${p[1].toFixed(1)})`)
+        .join(' ')}`,
+    );
+    for (let i = 1; i < control.length; i += 1) {
+      const a = control[i - 1] as readonly [number, number];
+      const b = control[i] as readonly [number, number];
+      const steps = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 0.25));
+      let inside = 0;
+      for (let s = 0; s <= steps; s += 1) {
+        const t = s / steps;
+        if (onRamp(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)) inside += 1;
+      }
+      if (inside > 0) {
+        console.log(
+          `      control segment ${i - 1}->${i}: (${a[0].toFixed(1)}, ${a[1].toFixed(1)}) -> ` +
+            `(${b[0].toFixed(1)}, ${b[1].toFixed(1)}), ${((inside / (steps + 1)) * 100).toFixed(0)}% of it on the ramp; ` +
+            `endpoints on ramp: ${onRamp(a[0], a[1])}/${onRamp(b[0], b[1])}`,
+        );
+      }
+    }
+  }
 }
 console.log(
   `\n${drawnOnly} route(s) enter a ramp ONLY when drawn; ${both} enter it as control points too.`,
