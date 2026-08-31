@@ -1,6 +1,10 @@
 import { Vector3 } from 'three';
 import { TRAIN_PLAN } from './plan';
-import { CROSSING_STATION_CLEARANCE, FENCE_OFFSET } from './clearance';
+import {
+  CROSSING_STATION_CLEARANCE,
+  CROSSING_STATION_STRUCTURE_CLEARANCE,
+  FENCE_OFFSET,
+} from './clearance';
 import { DECK_HALF_LENGTH, MIN_BRIDGE_HALF_LENGTH } from './bridgeFootprint';
 import { STATION_GAP } from './fence';
 import {
@@ -164,7 +168,7 @@ function railDistanceAt(x: number, z: number): number {
  * bridge search at the very last half-metre of required ramp. Sampled once,
  * at module load, from the same plan the stations are built from.
  */
-const STATION_STRUCTURE_CLEARANCE = 8;
+const STATION_STRUCTURE_CLEARANCE = CROSSING_STATION_STRUCTURE_CLEARANCE;
 
 const stationWindowPoints: readonly (readonly [number, number])[] = (() => {
   const route = TRAIN_PLAN.route;

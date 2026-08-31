@@ -241,3 +241,21 @@ export const NARROW_HALF_WIDTH = 4.0;
  * bridge at all).
  */
 export const CROSSING_STATION_CLEARANCE = STATION_GAP + SITE_HALF_WIDTH + 2.0;
+
+/**
+ * **How far a station's own structures must stand from a planned crossing, in
+ * SPACE** — as distinct from {@link CROSSING_STATION_CLEARANCE}, which is
+ * measured *along the loop*.
+ *
+ * The loop winds, so the two are not the same rule seen twice. A station 104 m
+ * away around the circuit can stand a few metres from a crossing in plain
+ * space, and its canopy posts then block the bridge deck. Measured on #427:
+ * seeds 2 and 15 both chose a bridgeable crossing, solved a loop through it,
+ * and the planner then reported `DECK BLOCKED` at all ten width/angle pairs —
+ * with the along-the-loop clearance satisfied.
+ *
+ * Read from both directions, like its along-the-loop twin: the planner refuses
+ * to *plan* a crossing this close to station structures, and `plan.ts` refuses
+ * to *place* a station this close to the loop's chosen crossing.
+ */
+export const CROSSING_STATION_STRUCTURE_CLEARANCE = 8;

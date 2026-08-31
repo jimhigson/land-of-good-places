@@ -74,7 +74,13 @@ const STATION_SEEDS = [
  * layout, rather than each re-deriving it. */
 export { clearOfPlots } from '../parkLayout';
 import { clearOfPlots } from '../parkLayout';
-import { CROSSING_STATION_CLEARANCE } from './clearance';
+import {
+  CROSSING_STATION_CLEARANCE,
+  CROSSING_STATION_STRUCTURE_CLEARANCE,
+  STATION_GAP,
+} from './clearance';
+import { DECK_HALF_LENGTH } from './bridgeFootprint';
+import { SITE_RAMP_IDEAL } from './bridgeFit';
 
 /** The waiting spot beside the platform at `distance` — same side math the
  * station builder uses: the park side, 2.15 m off the centre line. */
@@ -103,6 +109,9 @@ export function stationStand(
 function clearStationDistance(route: TrainRoute, target: number): number {
   const tangent = new Vector3();
   const centre = new Vector3();
+  const crossingCentre = new Vector3();
+  const crossingTangent = new Vector3();
+  const stationWindow = new Vector3();
 
   // Scored, not first-fit (issue #241). With the plots unpinned and the loop
   // hugging a spline rim, the stretch nearest a seed bearing can be one
@@ -166,8 +175,48 @@ function clearStationDistance(route: TrainRoute, target: number): number {
       Math.abs(route.wrap(distance + route.length / 2) - route.length / 2) <
       CROSSING_STATION_CLEARANCE;
 
+    // **And clear of it in SPACE, not only along the loop** (#427). The loop
+    // winds, so a station a hundred metres away around the circuit can stand a
+    // few metres from the crossing in plain space — and the crossing planner's
+    // own `nearStationStructure` then refuses the crossing, reporting the deck
+    // blocked. Measured: seeds 2 and 15 each chose a bridgeable crossing,
+    // solved a loop through it, satisfied the along-the-loop clearance, and
+    // still came out with zero bridge sites.
+    //
+    // The crossing is not a point: its deck and both ramps run
+    // `DECK_HALF_LENGTH + SITE_RAMP_IDEAL` either way along the crossing axis,
+    // and `nearStationStructure` is asked about every one of those probe
+    // points. So the whole of the station's own window has to stand clear of
+    // that corridor, which is what this measures — the station window's
+    // sampled points against the crossing's axis segment.
+    let onCrossingStructure = false;
+    {
+      const half = DECK_HALF_LENGTH + SITE_RAMP_IDEAL;
+      route.pointAt(0, crossingCentre);
+      route.tangentAt(0, crossingTangent);
+      // The crossing axis is square to the track (`crossingPoses.ts` builds
+      // the pose that way), so the ramps run along the track's normal.
+      const axisX = crossingTangent.z;
+      const axisZ = -crossingTangent.x;
+      for (let w = -STATION_GAP; w <= STATION_GAP && !onCrossingStructure; w += 2) {
+        route.pointAt(route.wrap(distance + w), stationWindow);
+        const dx = stationWindow.x - crossingCentre.x;
+        const dz = stationWindow.z - crossingCentre.z;
+        const along = Math.max(-half, Math.min(half, dx * axisX + dz * axisZ));
+        const nearestX = crossingCentre.x + axisX * along;
+        const nearestZ = crossingCentre.z + axisZ * along;
+        if (
+          Math.hypot(stationWindow.x - nearestX, stationWindow.z - nearestZ) <
+          CROSSING_STATION_STRUCTURE_CLEARANCE
+        ) {
+          onCrossingStructure = true;
+        }
+      }
+    }
+
     const score =
       (onChosenCrossing ? 5000 : 0) +
+      (onCrossingStructure ? 5000 : 0) +
       (blocked ? 1000 : 0) +
       (approachBlocked ? 120 : 0) +
       (cruiserLow ? 400 : 0) +

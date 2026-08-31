@@ -439,3 +439,62 @@ direction. Same shape as the fix that worked: one constant, both directions.
 
 And per the Overseer's ruling, both directions should apply to **every planned
 crossing site**, not only the loop's own.
+
+## SPATIAL STATION CLEARANCE BUILT — still 86%, and now the causes are DIFFERENT
+
+`CROSSING_STATION_STRUCTURE_CLEARANCE` (8 m) moved to `clearance.ts` and read
+from both directions: the planner refuses to *plan* a crossing that close to
+station structures; `plan.ts` refuses to *place* a station that close to the
+chosen crossing's whole corridor (deck **and both ramps**, since
+`nearStationStructure` is asked about every probe point).
+
+Measurement 4 is still `12/14 (86%)`. **But seeds 2 and 15 now fail for two
+different reasons, and only one of them is the station.**
+
+### Seed 2 — the station fix WORKED; the loop's own shape is the problem
+
+Deck samples at the chosen crossing: `boundary 0, plots 0, station 0, ok 15` —
+completely clear, where before it was blocked. The planner now says:
+
+```
+railD=0.0 at (-34.0, -34.0):
+  halfW=5.0 angle=0deg: reach 1.5/10.8 vs floor 12.1 -- SHORT
+  halfW=4.0 angle=0deg: reach 1.0/12.7 vs floor 12.1 -- SHORT
+```
+
+**Not the deck — the ramp.** 1.5 m of run on the plus side against a 12.1 m
+floor. The cause is the **rail-corridor test**, the *other* test `bridgeFit.ts`
+drops: past the deck a ramp may not run inside the rail's own corridor, and
+here the loop **curves back on itself** near its own chosen crossing and eats
+the ramp room.
+
+**This is the real limit of "choose the crossing first".** The pose generator
+cannot know the loop's shape, because the loop does not exist yet. No amount of
+pre-probing fixes it: the crossing was genuinely bridgeable when chosen and was
+made unusable by the railway that grew from it.
+
+### Seed 15 — still the station, and the placer could not satisfy it
+
+```
+railD=0.0 at (-18.0, 42.0): DECK BLOCKED at all ten
+```
+Deck samples: `station 4` of 15 still blocked. The placer's ±60 m window
+evidently had no candidate that cleared the crossing, so it took the least-bad
+one — a 5000 penalty does not help when every candidate carries it.
+
+### THE FIX, and it is machinery that already exists
+
+**`RouteBrief.satisfies`** — `rail/generate.ts`'s own documented backstop, *"the
+one that can actually say no"*, with `satisfyRejects` already in the solve
+report. Give the train brief a `satisfies` that re-asks the real planner
+whether the solved loop still admits a bridge at its own start pose; a loop
+that curved back and ate its own ramp room is rejected and the search moves to
+the next pose.
+
+That closes **both** seeds by construction rather than by tuning either
+clearance further, and it is what the hook is for. It is also the only
+mechanism that can see the finished loop, which is precisely what both failures
+need.
+
+Not built — reported first, per the standing instruction not to try a third
+variation before reporting.
