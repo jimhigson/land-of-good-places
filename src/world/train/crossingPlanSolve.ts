@@ -1,6 +1,6 @@
 import { Vector3 } from 'three';
 import { TRAIN_PLAN } from './plan';
-import { FENCE_OFFSET } from './clearance';
+import { CROSSING_STATION_CLEARANCE, FENCE_OFFSET } from './clearance';
 import { DECK_HALF_LENGTH, MIN_BRIDGE_HALF_LENGTH } from './bridgeFootprint';
 import { STATION_GAP } from './fence';
 import {
@@ -106,7 +106,7 @@ const SITE_RAIL_MARGIN = FENCE_OFFSET + 0.5;
  * plus the half-gap a planned crossing's fence opening needs, plus a post's
  * worth of daylight so gap and window never merge into one another.
  */
-const STATION_CLEARANCE = STATION_GAP + SITE_HALF_WIDTH + 2.0;
+const STATION_CLEARANCE = CROSSING_STATION_CLEARANCE;
 
 /** Candidate crossing angles, radians off square, in preference order —
  * square first (the network is predominantly grid-aligned and a crossing

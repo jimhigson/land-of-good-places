@@ -3,7 +3,12 @@ import {
   DECK_HALF_LENGTH,
   MIN_RAMP_RUN,
 } from './bridgeFootprint';
-import { BRIDGE_RISE } from './clearance';
+import { BRIDGE_RISE, NARROW_HALF_WIDTH, SITE_HALF_WIDTH } from './clearance';
+
+// Re-exported so this module stays the one place a caller has to look for the
+// bridge-fit vocabulary, even though the numbers themselves live with the
+// park's other clearances.
+export { NARROW_HALF_WIDTH, SITE_HALF_WIDTH };
 import { GARDEN_PLAY_BOUNDARY } from '../boundary';
 import { clearOfPlots } from '../parkLayout';
 
@@ -116,22 +121,6 @@ export const SITE_RAMP_FLOOR = MIN_RAMP_RUN + 1.0;
 /** The most ramp a site ever needs credit for — the shallow, ideal grade,
  * the same run the real pass starts from. */
 export const SITE_RAMP_IDEAL = BRIDGE_RISE / BRIDGE_RAMP_GRADIENT;
-/**
- * Half-width of the corridor a bridge site's deck and ramps are probed at.
- * The real pass starts its width search at the crossing's own `halfGap`
- * (floored at 4.5 in `crossings.ts`, and a square planned crossing measures
- * at that floor), so this is the corridor the first — preferred — real
- * candidate will actually occupy, plus half a stride of slack.
- */
-export const SITE_HALF_WIDTH = 4.5 + 0.5;
-/**
- * The narrower corridor tried when {@link SITE_HALF_WIDTH} finds nothing —
- * a deck for a path that arrives square needs barely more than the ribbon
- * itself, and a whole district with no bridge at all is a far worse
- * outcome than a slimmer one (seed 2's east: plots, a station and the
- * boundary between them ruled out every full-width candidate).
- */
-export const NARROW_HALF_WIDTH = 4.0;
 /** Boundary / plot margins for a ramp — the early reservation pass's own
  * figures (`bridgeFootprint.ts`'s `RAMP_BOUNDARY_MARGIN` / `RAMP_PLOT_MARGIN`
  * are module-private; same numbers, same job, and drift here only ever makes

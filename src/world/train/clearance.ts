@@ -206,3 +206,38 @@ export const FENCE_SEAM_MARGIN = 0.18;
  * reasoning as every other constant in this file.
  */
 export const STATION_GAP = 6.5;
+
+/**
+ * Half-width of the corridor a bridge site's deck and ramps are probed at.
+ * The real pass starts its width search at the crossing's own `halfGap`
+ * (floored at 4.5 in `crossings.ts`, and a square planned crossing measures
+ * at that floor), so this is the corridor the first — preferred — real
+ * candidate will actually occupy, plus half a stride of slack.
+ */
+export const SITE_HALF_WIDTH = 4.5 + 0.5;
+/**
+ * The narrower corridor tried when {@link SITE_HALF_WIDTH} finds nothing —
+ * a deck for a path that arrives square needs barely more than the ribbon
+ * itself, and a whole district with no bridge at all is a far worse
+ * outcome than a slimmer one (seed 2's east: plots, a station and the
+ * boundary between them ruled out every full-width candidate).
+ */
+export const NARROW_HALF_WIDTH = 4.0;
+
+/**
+ * **How far along the loop a station must stay from a planned crossing.**
+ *
+ * A crossing needs the station's own platform window ({@link STATION_GAP}
+ * either way) plus its own corridor half-width, plus a post's worth of
+ * daylight so the fence gap and the platform window never merge.
+ *
+ * **Two modules must agree on this number, which is why it lives here.**
+ * `crossingPlanSolve.ts` refuses to plan a crossing this close to a station;
+ * `plan.ts` refuses to *place* a station this close to the loop's own chosen
+ * crossing. If they ever disagreed, the generator would grow a loop from a
+ * bridgeable crossing and then put a station on top of it — which is exactly
+ * what happened on seed 2 before the second half existed (issue #427: a
+ * station landed at d = -2.0 m, on the crossing, and the park came out with no
+ * bridge at all).
+ */
+export const CROSSING_STATION_CLEARANCE = STATION_GAP + SITE_HALF_WIDTH + 2.0;

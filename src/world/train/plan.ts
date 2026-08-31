@@ -74,6 +74,7 @@ const STATION_SEEDS = [
  * layout, rather than each re-deriving it. */
 export { clearOfPlots } from '../parkLayout';
 import { clearOfPlots } from '../parkLayout';
+import { CROSSING_STATION_CLEARANCE } from './clearance';
 
 /** The waiting spot beside the platform at `distance` — same side math the
  * station builder uses: the park side, 2.15 m off the centre line. */
@@ -149,7 +150,24 @@ function clearStationDistance(route: TrainRoute, target: number): number {
     // (seed 11 built exactly that before this term existed).
     const cruiserLow = nearCruiserLowCorridor(standX, standZ, 8);
 
+    // **Never on the loop's own chosen crossing** (issue #427). The loop is
+    // grown from a pose where a bridge provably fits — rail distance 0 — and
+    // `crossingPlanSolve.ts` will refuse to plan a crossing within
+    // `CROSSING_STATION_CLEARANCE` of a station. So a station placed there
+    // silently destroys the one thing the whole loop was grown to guarantee.
+    //
+    // Measured before this term existed, seed 2: a station landed at
+    // d = -2.0 m, on the crossing, and the park came out with **no bridge at
+    // all** — the only seed of fourteen that still could not bridge. Weighted
+    // above every other term because a park with no bridge is invalid (Jim's
+    // ruling on #414), while a station a few metres off its ideal spot is
+    // merely not ideal.
+    const onChosenCrossing =
+      Math.abs(route.wrap(distance + route.length / 2) - route.length / 2) <
+      CROSSING_STATION_CLEARANCE;
+
     const score =
+      (onChosenCrossing ? 5000 : 0) +
       (blocked ? 1000 : 0) +
       (approachBlocked ? 120 : 0) +
       (cruiserLow ? 400 : 0) +
