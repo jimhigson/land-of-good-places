@@ -251,8 +251,7 @@ node -e "console.log(Object.keys(require('./package.json').scripts))"
 ```
 
 On 29 August a rebase conflict on that chain (then still inside `build`) was
-resolved with
-`--ours`, which took `main`'s whole chain and **silently dropped a new
+resolved with `--ours`, which took `main`'s whole chain and **silently dropped a new
 `check:castle` step**. It looked resolved: the diff stat was clean, the file
 parsed, and `grep check:castle` matched — because `check:castle-window` was
 already there. The check would simply never have run, and a green build would
