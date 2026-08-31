@@ -3,12 +3,22 @@
  * mouse wheel/trackpad-scroll zoom that drives the same camera call pinch does.
  *
  * The only file in the game allowed to look at `PointerEvent`. It turns the
- * mess of pointerdown/move/up bookkeeping into two clean signals — "the player
- * tapped *here*" and "the player pinched by *this much*" — and hands them to
- * whoever asked, which keeps gameplay code free of DOM events exactly as the
- * keyboard and gamepad are. `WheelEvent` is a third signal in the same spirit,
- * bolted on here rather than a file of its own because it is canvas-scoped
- * input feeding the very same zoom the pinch signal feeds.
+ * mess of pointerdown/move/up bookkeeping into three clean signals — "the
+ * player tapped *here*", "the player pinched by *this much*" and "the player
+ * dragged the view by *this far*" — and hands them to whoever asked, which
+ * keeps gameplay code free of DOM events exactly as the keyboard and gamepad
+ * are. `WheelEvent` is a fourth signal in the same spirit, bolted on here
+ * rather than a file of its own because it is canvas-scoped input feeding the
+ * very same zoom the pinch signal feeds.
+ *
+ * **A tap and a look-around drag are one decision, not two** (#419). The drag
+ * signal fires off the very flag that stops a drifted pointer becoming a tap,
+ * so there is no threshold anywhere in the game at which a gesture could both
+ * walk her and pan the view, or neither. That matters more than it sounds:
+ * GAME_DESIGN.md's CONTROL RULE is absolute, and it is this single decision —
+ * plus the fact that panning only ever *translates* the camera, never turns it
+ * (`IsoCamera.lookByPixels`) — that keeps dragging firmly a way to look and
+ * never a way to steer.
  *
  * Works with a mouse too, deliberately: click-to-walk is genuinely nicer than
  * WASD on a trackpad, and it means the whole touch path can be tested on a
@@ -56,6 +66,26 @@ export interface PointerControlsOptions {
    * the same units as `CAMERA_ZOOM_STEP`, so it can go straight to the camera.
    */
   onPinch(delta: number): void;
+  /**
+   * Fired repeatedly while **one** finger or a held mouse button drags across
+   * the park — "drag to look around" (#419). `dxPixels`/`dyPixels` are that
+   * move's own step in CSS pixels, `y` growing downward as `clientY` does, so
+   * it can go straight to `IsoCamera.lookByPixels`.
+   *
+   * **A drag is defined as a tap that stopped being one.** It fires from the
+   * moment `tapDriftedTooFar` disqualifies the pointer and not a pixel before,
+   * which means it reads the same 18 px of slop tap-to-walk and both map
+   * surfaces read, out of `tapGesture.ts` — not a copy of that number, and not
+   * a second threshold of its own. There is therefore no gap and no overlap
+   * between "this walked her" and "this looked around": a gesture is exactly
+   * one of the two, decided once, by the flag the tap path itself uses.
+   *
+   * Never fires for a pointer that did not start on the canvas (a drag off a
+   * HUD button is that button's business), and never during a pinch — two
+   * fingers are a zoom, and the pointer that recognised the pinch is already
+   * disqualified for a different reason.
+   */
+  onLookDrag?(dxPixels: number, dyPixels: number): void;
   /**
    * Fired for a mouse wheel notch or a trackpad two-finger scroll — the desktop
    * equivalent of {@link onPinch}, and meant to be wired to the exact same
@@ -162,6 +192,22 @@ interface ActivePointer extends TapCandidate {
   readonly startedOnCanvas: boolean;
   /** Set once a second finger lands, or once the drift budget is spent. */
   disqualified: boolean;
+  /**
+   * Set once this pointer has drifted past `tapGesture.ts`'s slop while alone
+   * on the canvas: it is a look-around drag from here until it lifts.
+   *
+   * Separate from {@link disqualified} because that flag has three causes and
+   * only one of them is a drag — a pointer that started on a HUD button, or one
+   * that was drafted into a pinch, is disqualified too, and neither should pan
+   * the park.
+   */
+  looking: boolean;
+  /**
+   * Set for good the moment a second finger joins, so lifting one finger of a
+   * pinch cannot leave the other one panning the park. `ParkMap`'s `hadTwo`
+   * guards its own tap against exactly this.
+   */
+  pinched: boolean;
 }
 
 export class PointerControls {
@@ -288,11 +334,18 @@ export class PointerControls {
       // — see `ActivePointer.startedOnCanvas` — but it still fully counts
       // towards recognising and measuring a pinch below.
       disqualified: !startedOnCanvas,
+      looking: false,
+      pinched: false,
     });
 
-    // Second finger down: this is a pinch, so neither finger is a tap any more.
+    // Second finger down: this is a pinch, so neither finger is a tap any more
+    // — nor a look-around drag, for as long as either of them is on the glass.
     if (this.pointers.size === 2) {
-      for (const pointer of this.pointers.values()) pointer.disqualified = true;
+      for (const pointer of this.pointers.values()) {
+        pointer.disqualified = true;
+        pointer.looking = false;
+        pointer.pinched = true;
+      }
       this.pinchDistance = this.currentPinchDistance();
     }
   };
@@ -307,13 +360,30 @@ export class PointerControls {
 
     const pointer = this.pointers.get(event.pointerId);
     if (!pointer) return;
+    const stepX = event.clientX - pointer.x;
+    const stepY = event.clientY - pointer.y;
     pointer.x = event.clientX;
     pointer.y = event.clientY;
 
     // The shared definition, not a local one — see `tapGesture.ts`.
     if (tapDriftedTooFar(pointer, event.clientX, event.clientY)) {
       pointer.disqualified = true;
+      // ...and the same instant, and off the same answer, this becomes a
+      // look-around drag (#419). One question, asked once: a gesture cannot be
+      // both, and cannot be neither.
+      if (pointer.startedOnCanvas && !pointer.pinched && this.pointers.size === 1) {
+        pointer.looking = true;
+      }
     }
+
+    // Per-step, and reported after the flag is set, so the very move that
+    // crossed the slop line already pans. The 18 px spent *reaching* that line
+    // are deliberately not replayed: they are the cost of the game having
+    // waited to find out whether this was a tap, and pouring them in at once
+    // would start every look-around with a lurch. `ParkMap` swallows the same
+    // 18 px for the same reason, which is a second sense in which this is the
+    // map's gesture and not a new one.
+    if (pointer.looking) this.options.onLookDrag?.(stepX, stepY);
 
     if (this.pointers.size === 2 && this.pinchDistance > 0) {
       const distance = this.currentPinchDistance();
