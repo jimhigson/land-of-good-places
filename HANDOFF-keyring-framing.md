@@ -284,6 +284,62 @@ drawer is opened. Closed with the on-screen X, the way a child does it.
       `test:procgen`.
 - [ ] PR referencing #418.
 
+## Rebase onto `origin/main` (31 Aug) — framing unchanged, measured
+
+Jim approved the preview, so the feature must not change. Rebased 9 commits
+from base `6d475dab` onto `819ab77c` (#420, #431, #440 had landed).
+
+**One conflict: `package.json`'s `check` chain.** Resolved *deterministically*,
+per CLAUDE.md — not with `--ours`/`--theirs`, and with `rerere.enabled` turned
+**off** for the rebase so a stale recorded resolution could not be replayed.
+Three-way split of the chain into steps:
+
+- `main` added `check:speech-bubbles` (48 → 49 steps)
+- this branch added `check:keyring-view` (48 → 49 steps)
+- neither removed anything
+
+So the resolution is `main`'s chain with `check:keyring-view` re-inserted after
+`check:keyring-hang`: **50 steps**. Verified by *parsing* `scripts`, never by
+grep (script names are prefixes of each other): both new steps present, every
+step resolves to a defined script, no duplicates.
+
+**`src/core/IsoCamera.ts` merged clean** even though both sides touched it —
+`main` added `screenOffset`/`isOnScreen` for #415's speech bubbles, this branch
+added `frustumBase`/`zoomToFit`/`zoomForPixelSize`. Both are present after the
+rebase and `frustumBase()` is still the single owner of the `max`, feeding
+`applyFrustum`, `zoomToFit` and `zoomForPixelSize` alike.
+
+**A clean rebase is the exact shape of a silent revert**, so it was audited
+rather than assumed: `git diff --stat origin/main...HEAD` (three dots) is
+byte-identical to the pre-rebase stat — same 10 files, **1387 insertions, 97
+deletions**. Nothing of `main`'s was dropped.
+
+### The framing Jim approved is numerically unchanged
+
+"It still compiles" is not evidence the shot still frames. `check:keyring-view`
+re-run after the rebase, against the rebased park, is **identical to the
+pre-rebase green numbers digit for digit**:
+
+```
+iPhone portrait  390x844 : zoom 3.808, frame ±1.444 x ±3.126, finger 0.296
+   tightest 'strawberry' 0.106 m spare; closest pair 0.341 vs 0.296 (0.044 spare)
+iPhone landscape 844x390 : zoom 5.192, frame ±3.126 x ±1.444, finger 0.296
+   tightest 'heart' 0.465 m spare;      closest pair 0.341 vs 0.296 (0.044 spare)
+desktop 16:9  1920x1080  : zoom 3.747, frame ±3.558 x ±2.001, finger 0.148
+   tightest 'heart' 0.981 m spare;      closest pair 0.341 vs 0.148 (0.193 spare)
+screen basis: analytic and rendered agree to 1.7e-16
+```
+
+Nothing on `main` moved the counter, the keyrings or the camera basis under
+this shot. No assertion was weakened and no threshold tuned to get through the
+rebase.
+
+Re-ran everything afterwards, including where nothing conflicted:
+`build` exit 0; `test:procgen` 492 passed / 16 files. The full `pnpm run check`
+was **killed by an agent disconnect at step ~31 of 50** (`check:hotel`), with no
+failures up to that point — but a partial run nobody watched finish is not
+evidence, so it is being re-run from the top rather than trusted.
+
 ## Cleanup owed at the end
 
 - Dev server on **5471** (mine; 5421 was already taken by another agent, so I
