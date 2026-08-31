@@ -141,6 +141,112 @@ leg .rotation.x = -0.7  -> foot bottom y -0.046, z +0.176
 - [x] worktree, install, hall measured, rig measured
 - [x] table run: 3 x 6 m butted, z -9.83 .. +8.17 on the hall axis x 10.636
 - [x] diners: 24, seated, measured (above)
-- [ ] fireplace + roaring fire
-- [ ] assertions in `check:castle`
+- [x] fireplace + roaring fire (3.6 x 2.2 m opening, tallest flame 1.858 m)
+- [x] assertions in `check:castle`, all four mutations proved red
 - [ ] browser pass at player height
+
+## The two new assertions, and the four mutations that proved them red
+
+Both live in `check:castle`, which is inside `pnpm run check`, which is what
+`checks.yml` runs as a required status check. `check:castle` exits **0** on the
+branch as it stands; each mutation below was applied on its own, the check run,
+and then reverted.
+
+**Assertion 9 — the fire is in a fireplace, and the fireplace has a fire.**
+This is the one #412 says nobody had: when the hall changed storeys the hearth's
+fire was left behind and burned 300 m from its own surround with every check
+green. Measured per deck off the built `castle-fire-N` group, instance by
+instance, against an opening box derived from `CASTLE_HEARTH` itself.
+
+**Assertion 10 — a child at the banquet is actually sitting down.**
+Per diner: her hip pivot is on the bench top to **3 mm**, and the lowest point
+**actually drawn** for her is on the floor to **15 mm**. The second is read off
+the crowd's `InstancedMesh` matrices, not off the skeleton the pose was written
+to — one step further downstream, which is this file's rule.
+
+### Mutation 1 — `DINING_LEAN` 0 -> 0.12. **This is the 37 mm toe-sink.**
+
+**Yes: one of the four catches it, and it is the assertion's headline case.**
+The tolerance is 15 mm precisely so that 37.6 mm fails rather than only
+something grosser. Geometry: the 24 built diners on deck 1, benches at 0.360 m.
+
+```
+check:castle — 48 failure(s):
+  ✗ banquet: the lowest point drawn for a diner is at -0.0376 m, 37.6 mm below
+    the floor of the storey. The rig has no knee, so a seated child's legs can
+    only hang vertically; anything that turns them — a lean at the waist turns
+    them too, because the model pivots about her feet — puts her toes through
+    the floor or her feet in the air.
+  ✗ banquet: a diner's hips are 0.043 m off her own seat on the plan.
+EXIT=1
+```
+
+48 = 24 diners x 2 findings. Note the plan-offset check fired as well: the lean
+also slides her 43 mm off the seat she was placed at.
+
+### Mutation 2a — the centre hearth flame 5.0 -> 9.0
+
+The "made roaring by exceeding the budget" case, caught. Geometry: opening
+3.6 x 2.2 m, firebox z -15.33..-14.23.
+
+```
+check:castle — 2 failure(s):
+  ✗ hearth: flame 29 burns from (-10.24, 0.52, -15.11) to (-9.56, 2.93, -14.33),
+    which is outside its own fireplace (-11.70..-8.10 x, 0..2.20 y,
+    -15.33..-14.23 z). A fire that has left its hearth is either too big for the
+    opening or standing somewhere the stone is not.
+  ✗ hearth: 6 of the 7 flames the hearth publishes were found burning inside the
+    fireplace. A fireplace with no fire in it is the other half of #412 and would
+    satisfy every assertion above this line.
+EXIT=1
+```
+
+### Mutation 2b — #412's own bug: fireplace on deck 0, fire on deck 1
+
+```
+check:castle — 2 failure(s):
+  ✗ hearth: deck 1 is CASTLE_HEARTH.deck and has no 'castle-hearth-surround-1'.
+    There is a fire on this storey with no fireplace round it — the exact state
+    #412 found and no assertion objected to.
+  ✗ hearth: 0 fireplaces were built across the whole castle. There is exactly
+    one hearth, and it is on deck 1.
+EXIT=1
+```
+
+### Mutation 3 — diner scale 1 -> 0.9, which is the park crowd's own variation
+
+The seat height is not a free parameter, and this is what says so.
+
+```
+  ✗ banquet: a diner's hip pivot is at 0.3240 m against a bench top of 0.3600 m
+    — she is 36 mm below the seat, so she is sunk into it.
+EXIT=1
+```
+
+## The fire fits, and nothing was relaxed
+
+`SCONCE_HEADROOM` (2.70 m) is a **wall torch's** budget — `check:castle`
+assertion 7 loops `i < anchors.length` and the hearth's spots are pushed onto
+the same instance list after the torches. What binds a hearth flame is
+assertion 6's near-wall `BEAM_UNDERSIDE` of **3.08 m**.
+
+```
+opening               3.60 m wide x 2.20 m to the lintel, firebox 1.10 m deep
+chimney reaches       3.050 m   (BEAM_UNDERSIDE 3.08, derived not chosen)
+tallest flame reaches 1.858 m   — 34 cm under its own lintel, 60% of the ceiling
+```
+
+The binding constraint on a castle fire turns out to be **the size of its own
+fireplace**, not the ceiling — and this fireplace is now large enough to hold a
+large fire. No threshold moved.
+
+Two things measurement caught building it:
+
+- A flame that scales uniformly gets **fat, not tall**: at scale 5 the middle of
+  the fire measured 1.34 m across and burst through the fireback. `FlameSpot`
+  gained a separate horizontal scale; the seven hearth flames are now one width
+  and seven heights, which is what a fire looks like.
+- A wall torch stood at x -7.85 with the new east jamb occupying -8.10..-7.55 at
+  exactly that wall face — a bracket drawn **inside** a stone pier.
+  `castleTorchAnchors` now rejects the chimney breast, derived from the
+  chimneypiece's own widths.

@@ -48,6 +48,7 @@ import {
 } from '../src/world/building/layout.ts';
 import { LiftAlcove } from '../src/world/lift/LiftAlcove.ts';
 import {
+  CASTLE_BENCH_HALF_WIDTH,
   CASTLE_BENCH_SEAT,
   CASTLE_PLINTH_TOP,
   CASTLE_SCONCE_CUP,
@@ -56,7 +57,13 @@ import {
 import {
   CASTLE_GREAT_HALL_DECK,
   castleFurnitureGroupName,
+  DINER_TABLE_GAP,
+  greatHallSeats,
 } from '../src/world/building/castleFurniture.ts';
+import {
+  banquetGroupName,
+  GreatHallBanquet,
+} from '../src/world/building/greatHallBanquet.ts';
 import {
   BEAM_UNDERSIDE,
   BEAM_WIDTH,
@@ -67,8 +74,12 @@ import {
 } from '../src/world/building/castleFabric.ts';
 import { TALLEST_CHILD_HEIGHT } from '../src/art/models/kid.ts';
 import {
+  CASTLE_HEARTH,
+  CASTLE_HEARTH_FLAME_COUNT,
+  CASTLE_HEARTH_OPENING,
   CASTLE_TORCH_CUP,
   CastleFire,
+  castleHearthSurroundName,
   castleTorchAnchors,
 } from '../src/world/building/castleLighting.ts';
 import { dressCastle } from '../src/world/building/castleDecor.ts';
@@ -1250,6 +1261,272 @@ for (const [axis, measured, owned] of [
 }
 
 // ---------------------------------------------------------------------------
+// 9. The fire is in a fireplace, and the fireplace has a fire in it.
+// ---------------------------------------------------------------------------
+
+/**
+ * **This is the assertion #412 says nobody had.**
+ *
+ * When the great hall changed storeys, the hearth's *fire* was left behind on
+ * the mall's plate: `castle-hearth-logs-0` burning at x = 600 in the middle of
+ * the market while the stone it belongs to stood 300 m away in the hall. Every
+ * check in this file was green, and the issue's own words are that **"a fire
+ * without a fireplace breaks no assertion."**
+ *
+ * It does now, and in both directions — a fireplace with nothing burning in it
+ * fails too, because an assertion that only says "no flame is outside the
+ * opening" is perfectly satisfied by a hearth that has gone out.
+ *
+ * Measured off the built group, instance by instance, like everything else
+ * here. Nothing below asks a builder what it meant to place.
+ */
+let hearthFlamesInside = 0;
+let hearthSurroundsFound = 0;
+
+/** The firebox, in the floor group's own frame — built from the fire's own constant. */
+const openingBox = new Box3(
+  new Vector3(
+    CASTLE_HEARTH.x - CASTLE_HEARTH_OPENING.halfWidth,
+    0,
+    -(INTERIOR_HALF_Z - BUILDING_WALL_THICKNESS / 2),
+  ),
+  new Vector3(
+    CASTLE_HEARTH.x + CASTLE_HEARTH_OPENING.halfWidth,
+    CASTLE_HEARTH_OPENING.height,
+    -(INTERIOR_HALF_Z - BUILDING_WALL_THICKNESS / 2) + CASTLE_HEARTH_OPENING.depth,
+  ),
+);
+
+/**
+ * How far from the hearth a flame has to be before it is somebody else's flame.
+ *
+ * A wall torch three metres along the same wall is not a hearth fire that has
+ * escaped, and must not be reported as one. Beyond this radius a flame is
+ * assumed to belong to a bracket or a brazier and is left to assertion 7.
+ */
+const HEARTH_CLAIM_RADIUS = CASTLE_HEARTH_OPENING.halfWidth + 1.5;
+
+for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
+  const floor = new Group();
+  new CastleFire().dress(deck, floor);
+  floor.updateMatrixWorld(true);
+
+  const surround = floor.getObjectByName(castleHearthSurroundName(deck));
+  if (surround) hearthSurroundsFound += 1;
+
+  // The two halves must be on the same storey. This is the 300 m bug stated as
+  // a question about the built scene rather than about anybody's intention.
+  const logs = floor.getObjectByName(`castle-hearth-logs-${deck}`);
+  if (deck === CASTLE_HEARTH.deck) {
+    if (!surround) {
+      fail(
+        `hearth: deck ${deck} is CASTLE_HEARTH.deck and has no ` +
+          `'${castleHearthSurroundName(deck)}'. There is a fire on this storey with no ` +
+          `fireplace round it — the exact state #412 found and no assertion objected to.`,
+      );
+    }
+    if (!logs) {
+      fail(`hearth: deck ${deck} built a fireplace with no log pile in it.`);
+    }
+  } else if (surround || logs) {
+    fail(
+      `hearth: deck ${deck} is not CASTLE_HEARTH.deck (${CASTLE_HEARTH.deck}) and yet built ` +
+        `${surround ? 'a fireplace' : ''}${surround && logs ? ' and ' : ''}${logs ? 'a log pile' : ''}. ` +
+        `The stone and the fire are emitted from one block so that they cannot separate; this ` +
+        `says they have.`,
+    );
+  }
+
+  if (deck !== CASTLE_HEARTH.deck) continue;
+
+  const flames = floor.getObjectByName(`castle-flame-${deck}`) as InstancedMesh | undefined;
+  if (!flames) continue;
+  flames.geometry.computeBoundingBox();
+  const flameLocal = flames.geometry.boundingBox;
+  if (!flameLocal) continue;
+
+  const matrix = new Matrix4();
+  const world = new Box3();
+  const centre = new Vector3();
+  for (let i = 0; i < flames.count; i += 1) {
+    flames.getMatrixAt(i, matrix);
+    world.copy(flameLocal).applyMatrix4(matrix.premultiply(flames.matrixWorld));
+    world.getCenter(centre);
+    if (Math.hypot(centre.x - CASTLE_HEARTH.x, centre.z - CASTLE_HEARTH.z) > HEARTH_CLAIM_RADIUS) {
+      continue;
+    }
+    if (openingBox.containsBox(world)) {
+      hearthFlamesInside += 1;
+      continue;
+    }
+    fail(
+      `hearth: flame ${i} burns from (${world.min.x.toFixed(2)}, ${world.min.y.toFixed(2)}, ` +
+        `${world.min.z.toFixed(2)}) to (${world.max.x.toFixed(2)}, ${world.max.y.toFixed(2)}, ` +
+        `${world.max.z.toFixed(2)}), which is outside its own fireplace ` +
+        `(${openingBox.min.x.toFixed(2)}..${openingBox.max.x.toFixed(2)} x, ` +
+        `0..${openingBox.max.y.toFixed(2)} y, ${openingBox.min.z.toFixed(2)}..` +
+        `${openingBox.max.z.toFixed(2)} z). A fire that has left its hearth is either too big ` +
+        `for the opening or standing somewhere the stone is not.`,
+    );
+  }
+}
+
+if (hearthSurroundsFound !== 1) {
+  fail(
+    `hearth: ${hearthSurroundsFound} fireplaces were built across the whole castle. There is ` +
+      `exactly one hearth, and it is on deck ${CASTLE_HEARTH.deck}.`,
+  );
+}
+if (hearthFlamesInside < CASTLE_HEARTH_FLAME_COUNT) {
+  fail(
+    `hearth: ${hearthFlamesInside} of the ${CASTLE_HEARTH_FLAME_COUNT} flames the hearth ` +
+      `publishes were found burning inside the fireplace. A fireplace with no fire in it is the ` +
+      `other half of #412 and would satisfy every assertion above this line.`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 10. A child at the banquet is actually sitting down.
+// ---------------------------------------------------------------------------
+
+/**
+ * **The measurement issue #413 asks for, and it exists because of a fault no
+ * screenshot would have shown.**
+ *
+ * The first dining pose leaned each child forward at the waist by 0.12 rad. The
+ * rig's legs hang off `body` and the model pivots about an origin **at her
+ * feet**, so the front of her shoe — 0.283 m ahead of that origin — went
+ * *through the floor* by `0.283 × sin(0.12)` = 34 mm. Measured on the built
+ * banquet the lowest drawn point was **37.6 mm** below the storey's floor. It
+ * looks completely normal in a rendered frame and it is wrong.
+ *
+ * So this measures two things per diner, and the tolerances are set so that
+ * **the 37.6 mm case fails**, not merely something grosser:
+ *
+ * - her hip pivot is on the bench top, `CASTLE_BENCH_SEAT`, to 3 mm;
+ * - the lowest point **actually drawn** for her is on the floor, to 15 mm.
+ *
+ * The second is deliberately taken off the crowd's own `InstancedMesh`
+ * matrices rather than off her skeleton. The skeleton is what the pose is
+ * written to; the instance buffer is what the GPU is handed. Those are one step
+ * apart, and this file's rule is to measure the further-downstream one.
+ *
+ * ## Why the seat height cannot simply be tuned to fit
+ *
+ * Because **the rig has no knee.** A leg rotated about the hip does not bend;
+ * 0.36 m is `KID_HIP_HEIGHT`, and therefore the single height at which a
+ * vertical leg lands a foot on the floor. If a pose breaks this, the pose moves.
+ */
+const SEAT_TOLERANCE = 0.003;
+const FLOOR_TOLERANCE = 0.015;
+
+let dinersChecked = 0;
+let worstSeat = 0;
+let worstFloor = 0;
+
+{
+  const seats = greatHallSeats(CASTLE_GREAT_HALL_DECK);
+  const floor = new Group();
+  const banquet = new GreatHallBanquet();
+  // Dressed and never updated, exactly as a check should: `dress` poses the
+  // diners itself precisely so that a scene nobody drove a frame of still shows
+  // children sitting down. If that ever stops being true this reads a T-pose
+  // and says so.
+  banquet.dress(CASTLE_GREAT_HALL_DECK, floor);
+  floor.updateMatrixWorld(true);
+
+  const group = floor.getObjectByName(banquetGroupName(CASTLE_GREAT_HALL_DECK));
+  if (seats.length === 0) {
+    fail(
+      `banquet: the great hall offers no seats at all, so #413's "lots of other children eating ` +
+        `at the tables" is an empty room. greatHallSeats is derived from the benches, so this ` +
+        `means the feast laid out nothing.`,
+    );
+  } else if (!group) {
+    fail(
+      `banquet: deck ${CASTLE_GREAT_HALL_DECK} has ${seats.length} seats and no ` +
+        `'${banquetGroupName(CASTLE_GREAT_HALL_DECK)}' group. Nobody is at the table.`,
+    );
+  } else {
+    if (banquet.seated.length !== seats.length) {
+      fail(
+        `banquet: ${seats.length} seats were laid and ${banquet.seated.length} children sat ` +
+          `down.`,
+      );
+    }
+
+    // Every instance the crowd will actually draw, gathered per member.
+    const drawn = new Map<number, Box3>();
+    const matrix = new Matrix4();
+    group.traverse((object: Object3D) => {
+      const mesh = object as InstancedMesh & { isInstancedMesh?: boolean };
+      if (mesh.isInstancedMesh !== true || !mesh.geometry) return;
+      mesh.geometry.computeBoundingBox();
+      const local = mesh.geometry.boundingBox;
+      if (!local) return;
+      for (let i = 0; i < mesh.count; i += 1) {
+        mesh.getMatrixAt(i, matrix);
+        // `InstancedCrowd` hides a part by giving it a zero matrix. A zero box
+        // at the origin would drag every diner's floor measurement to 0 and make
+        // this assertion incapable of failing — which is the one outcome this
+        // file exists to prevent.
+        if (matrix.elements[0] === 0 && matrix.elements[5] === 0 && matrix.elements[10] === 0) {
+          continue;
+        }
+        matrix.premultiply(mesh.matrixWorld);
+        const box = local.clone().applyMatrix4(matrix);
+        const seen = drawn.get(i);
+        if (seen) seen.union(box);
+        else drawn.set(i, box);
+      }
+    });
+
+    const hip = new Vector3();
+    for (const diner of banquet.seated) {
+      dinersChecked += 1;
+
+      // Her hip pivot: the joint the leg hangs from, which is the joint the
+      // bench height was chosen for.
+      diner.avatar.rig.leftLeg.getWorldPosition(hip);
+      const seatError = Math.abs(hip.y - CASTLE_BENCH_SEAT);
+      worstSeat = Math.max(worstSeat, seatError);
+      if (seatError > SEAT_TOLERANCE) {
+        fail(
+          `banquet: a diner's hip pivot is at ${hip.y.toFixed(4)} m against a bench top of ` +
+            `${CASTLE_BENCH_SEAT.toFixed(4)} m — she is ${(seatError * 1000).toFixed(0)} mm ` +
+            `${hip.y > CASTLE_BENCH_SEAT ? 'above' : 'below'} the seat, so she is ` +
+            `${hip.y > CASTLE_BENCH_SEAT ? 'floating over' : 'sunk into'} it.`,
+        );
+      }
+
+      const box = drawn.get(diner.avatar.member.index);
+      if (!box) {
+        fail(`banquet: a diner was seated but nothing of her is drawn.`);
+        continue;
+      }
+      const floorError = Math.abs(box.min.y);
+      worstFloor = Math.max(worstFloor, floorError);
+      if (floorError > FLOOR_TOLERANCE) {
+        fail(
+          `banquet: the lowest point drawn for a diner is at ${box.min.y.toFixed(4)} m, ` +
+            `${(floorError * 1000).toFixed(1)} mm ${box.min.y < 0 ? 'below' : 'above'} the floor ` +
+            `of the storey. The rig has no knee, so a seated child's legs can only hang ` +
+            `vertically; anything that turns them — a lean at the waist turns them too, because ` +
+            `the model pivots about her feet — puts her toes through the floor or her feet in ` +
+            `the air.`,
+        );
+      }
+
+      // And she is in the gap, rather than inside the table or beside the bench.
+      const offset = Math.abs(diner.seat.x - hip.x);
+      if (offset > 0.001) {
+        fail(`banquet: a diner's hips are ${offset.toFixed(3)} m off her own seat on the plan.`);
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // 9. The lift is a lift, and you can see the child inside it.
@@ -1382,3 +1659,61 @@ if (failures.length > 0) {
   console.error('');
   process.exit(1);
 }
+
+// **Every number in these three lines is counted, never a constant dressed up as
+// a finding.** The first line used to say "across ${TOP_DECK} enclosed storeys",
+// which was a constant printed as though something had gone and looked — so it
+// read identically on a castle with no ceiling at all. `storeysSeen`,
+// `platedSegmentsInScene`, `flagstonedDecksInScene` and `coursedWallsInScene` are
+// incremented only when a mesh was found in a built `BuildingShell('interior')`,
+// and `storeysDressed` only when a storey actually yielded placed decoration, so
+// each of them goes down when the castle does.
+console.log(
+  `check:castle OK — ${beamsChecked} ceiling-beam segments built, and in an assembled ` +
+    `BuildingShell('interior') ${storeysSeen} storeys were found with both a ceiling and a ` +
+    `flagstone floor (${platedSegmentsInScene} plate segments in the tree, ` +
+    `${flagstonedDecksInScene} flagstoned decks, ${coursedWallsInScene} coursed wall runs). ` +
+    `Every segment is fixed to real slab across its whole measured footprint and clear of a ` +
+    `${TALLEST_CHILD} m child under a ${CASTLE_CEILING_CLEAR.toFixed(2)} m ceiling, and ` +
+    `BEAM_UNDERSIDE agrees with the mesh at ${BEAM_UNDERSIDE.toFixed(3)} m.`,
+);
+console.log(
+  `check:castle props OK — ${propsChecked} placed instances measured across ` +
+    `${storeysDressed} storeys, none in a walkable route or on a shop stand and none ` +
+    `through a ceiling. Route-exempt: ${exemptOverhead} entirely above a ${TALLEST_CHILD} m ` +
+    `child, ${exemptFlat} floor treatment under ${FLOOR_TREATMENT_MAX_HEIGHT} m tall, ` +
+    `${exemptWall} wall furniture within ${WALL_FURNITURE_REACH} m of its wall. All three ` +
+    `exemptions are measured off the object, never taken from its name.`,
+);
+console.log(
+  `check:castle plate OK — ${plateProps} floor-standing props on ${plateStoreys.size} floor(s), ` +
+    `every one of them over its own floor's plate rather than hanging in mid-air over the plaza. ` +
+    `This replaces the shaft assertion, which is retired because #377 removed every shaft: the ` +
+    `structure that used to come down through a solid floor no longer exists. Every figure here ` +
+    `is counted, not the size of a list.`,
+);
+console.log(
+  `check:castle contract OK — ${contractChecked} published figures measured against the ` +
+    `furniture standing in the great hall: TABLE_TOP ${CASTLE_TABLE_TOP.toFixed(3)} m, ` +
+    `BENCH_SEAT ${CASTLE_BENCH_SEAT.toFixed(3)} m, PLINTH_TOP ${CASTLE_PLINTH_TOP.toFixed(3)} m, ` +
+    `and the sconce's cup on the flame's own placement. Every one measured off the built object, ` +
+    `outline excluded, never re-read from the file it came from.`,
+);
+console.log(
+  `check:castle hearth OK — ${hearthSurroundsFound} fireplace built, on deck ` +
+    `${CASTLE_HEARTH.deck}, with ${hearthFlamesInside} flames measured burning inside its own ` +
+    `${(CASTLE_HEARTH_OPENING.halfWidth * 2).toFixed(1)} x ` +
+    `${CASTLE_HEARTH_OPENING.height.toFixed(1)} m opening and none outside it. Both halves are ` +
+    `emitted from one block so they cannot separate; this is the assertion #412 found missing ` +
+    `when the fire burned 300 m from its own surround with every check green.`,
+);
+console.log(
+  `check:castle banquet OK — ${dinersChecked} children measured seated at the feast. Worst hip ` +
+    `off the ${CASTLE_BENCH_SEAT.toFixed(3)} m bench top: ${(worstSeat * 1000).toFixed(1)} mm ` +
+    `(tolerance ${(SEAT_TOLERANCE * 1000).toFixed(0)} mm). Worst lowest-drawn-point off the ` +
+    `floor: ${(worstFloor * 1000).toFixed(1)} mm (tolerance ` +
+    `${(FLOOR_TOLERANCE * 1000).toFixed(0)} mm) — read off the crowd's instance matrices, not ` +
+    `off the skeleton the pose was written to. Each sits on the inner face of a ` +
+    `${(CASTLE_BENCH_HALF_WIDTH * 2).toFixed(2)} m plank, in the ` +
+    `${DINER_TABLE_GAP.toFixed(2)} m of floor between that face and the table's edge.`,
+);
