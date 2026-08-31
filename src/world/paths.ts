@@ -4220,7 +4220,7 @@ const CONNECTOR_RATIO_THRESHOLD = 2.5;
  * in the same file), which would remove this constraint entirely rather
  * than requiring a conservative cap here.
  */
-const CONNECTOR_SPACING_CAP_MULTIPLE = 2.0;
+const CONNECTOR_SPACING_CAP_MULTIPLE = numberFromEnv('LGP_CONNECTOR_CAP') || 2.0;
 
 /**
  * How many "typical plot hops" of *wasted* paved walking (paved distance
