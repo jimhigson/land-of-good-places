@@ -195,3 +195,53 @@ canonical @ 2.5:  ferrisWheel - stall.spaceFerrisWheel
    Expect mean paved to recover past its 75% floor; the worst-route floor may
    still need the `dodgems → stall.railRacer` pair looked at separately (they
    are 36.1 m apart, outside even a 2.5 cap).
+
+## Gates, at cap 2.5 — all green
+
+| gate | result |
+| --- | --- |
+| `pnpm run check` | **exit 0** (48 steps) |
+| `pnpm run test:procgen` | **exit 0** — 16 files, **487 passed** |
+| `pnpm run build` | **exit 0** |
+| `poi.stranded` (`check:park`) | **0** |
+
+### #431's own measures — both match `main` exactly
+
+Measured on this branch *and* on a throwaway `origin/main` worktree with the
+same command, because a number quoted from a handoff is not a baseline:
+
+| measure | `origin/main` | this branch |
+| --- | --- | --- |
+| bridgeable loops | **8/9 (89%)**, `seed 9: LOOP UNSOLVABLE` | **8/9 (89%)**, same seed unsolvable |
+| `check:park-boot` worst slice | 12.3 ms (`trainSearch`) | **12.2 ms** (`trainSearch`) |
+| `check:park-boot` | passed | **passed** |
+
+**No regression in either.** Worth recording plainly, though: the figures
+carried forward for these were *bridgeable 92%* and *park-boot 11 ms*, and
+neither is what `main` measures today — `main` itself gives 89% and 12.3 ms on
+this seed set. So this branch is level with `main`, not 3 points and 1 ms worse
+than it. The stale pair should stop being quoted.
+
+## Two things the PR body must say, unqualified
+
+1. **`poi.stranded` is one seed deep.** `check:park` covers the canonical seed
+   only (issue #437), so that column is not all-seed evidence. The all-seed
+   evidence for the cap move is the `test:procgen` row — 487 on 2.5, one seed
+   red on 3.0 and 3.5.
+2. **2.5 does not fully undo #431's cost.** It restores
+   `stall.spaceFerrisWheel ↔ stall.facePaint` and takes the canonical park's
+   mean paved fraction back over its floor, but `dodgems → stall.railRacer` —
+   the pair failing `check:path-preference`'s worst-route floor at 15.8% — is
+   **36.1 m apart**, outside even a 2.5 cap (30.18 m on that park). That pair
+   needs separate work, and "the regression is fixed" would be an overstatement
+   without this sentence beside it.
+
+## Not yet measured here
+
+`check:path-preference` lives only on `feat/prefer-walking-on-paths`, so it has
+**not** been re-run against this branch. Expected, on the reasoning rather than
+a measurement: the cap at 2.5 produces the same canonical interconnect set that
+the (reverted) stations experiment produced, and that set measured **75.7% mean
+paved, over the 75% floor**, with the worst-route assertion still failing on
+`dodgems → stall.railRacer`. Confirm it for real after this lands, rather than
+taking the above as a result.
