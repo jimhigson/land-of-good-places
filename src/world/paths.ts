@@ -2604,9 +2604,67 @@ interface StreetPlan {
   readonly tapNode: number | null;
 }
 
-/** Marks a plan's paving real: routes solved after this can terminate on it. */
+/**
+ * How far a lattice node may stand from the ribbon its own plan draws and
+ * still count as paved by it. A node on a committed lattice path normally
+ * *is* a vertex of that plan's polyline, so the honest distance is ~0; a
+ * metre absorbs `collapseCollinear`'s own rounding without admitting a node
+ * the ribbon never reaches.
+ */
+const PAVED_NODE_ON_RIBBON = 1.0;
+
+/**
+ * **A node is paved when a ribbon is drawn through it — not when a search
+ * walked through it** (issue #414).
+ *
+ * {@link latticeStateSnapshot} already exists to stop a *rejected* candidate's
+ * paving standing, and it works. This is the other half of the same promise,
+ * and it was missing: a candidate that **wins** commits every node of its
+ * lattice search path, while what actually gets drawn can be shorter — the
+ * gate approach stitches an authored corridor onto part of a solved tail, and
+ * `routeLeg` may plan lattice legs it does not use. Every node on the
+ * difference stayed flagged paved with nothing under it, and any later route
+ * was free to terminate on one.
+ *
+ * Measured on seed 5: the gate approach committed the node at (41.12, 9.26)
+ * while the gate approach it actually drew ends at (5.1, 12.2) — **33.5 m
+ * away**. `spur-stall.facePaint` then branched onto that node and came out
+ * starting 3.10 m from any paving, failing `no paved path stops anywhere but
+ * a destination`. Same family as the bug that invariant was written for
+ * (seed 18's station spur, 11 m from real paving on a phantom node).
+ *
+ * So the plan's own drawn `points` are the authority, and the search path is
+ * only a candidate list. This is deliberately checked against `plan.points`
+ * rather than trusted from the caller: a caller that knows it draws less than
+ * it planned is exactly the caller that forgot to say so.
+ */
 function commitStreetPlan(plan: StreetPlan): void {
-  for (const path of plan.paths) commitLatticePath(path);
+  const drawn = plan.points;
+  const onDrawnRibbon = (x: number, z: number): boolean => {
+    for (let i = 1; i < drawn.length; i += 1) {
+      const a = drawn[i - 1] as readonly [number, number];
+      const b = drawn[i] as readonly [number, number];
+      const dx = b[0] - a[0];
+      const dz = b[1] - a[1];
+      const lengthSq = dx * dx + dz * dz;
+      const t =
+        lengthSq > 1e-9
+          ? Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / lengthSq))
+          : 0;
+      if (Math.hypot(x - (a[0] + dx * t), z - (a[1] + dz * t)) <= PAVED_NODE_ON_RIBBON) {
+        return true;
+      }
+    }
+    return false;
+  };
+  const lattice = streetLattice();
+  for (const path of plan.paths) {
+    commitLatticePath(
+      path.filter((node) =>
+        onDrawnRibbon(lattice.xs[node] as number, lattice.zs[node] as number),
+      ),
+    );
+  }
   if (plan.tapNode !== null) {
     tapRimsDrawn.add(plan.tapNode);
     usedTaps.add(plan.tapNode);
