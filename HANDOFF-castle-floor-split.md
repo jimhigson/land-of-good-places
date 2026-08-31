@@ -456,3 +456,69 @@ them. `scripts/qa-castle-shrink.mjs <port> <outDir> <halfX> <halfZ>` is on this
 branch and takes standing points as fractions of the half-extent; it will need a
 small edit for three floors reached by `/castle?deck=N` rather than five by
 height.
+
+---
+
+## BROWSER QA — done, and it found two bugs every check had missed
+
+Verified in Chrome against a dev server on port 5413 (killed by PID afterwards;
+port confirmed free). All three floors walked at player height, the lift ridden
+between every pair of floors in both directions, and the ginormous slide ridden
+top to bottom.
+
+### The two bugs
+
+Both were invisible to `tsc`, to all 48 checks, to `test:procgen` and to the
+boot validator. Both were found within minutes of opening a browser.
+
+1. **The hearth was on the wrong floor.** `CASTLE_HEARTH` still said `deck: 0`.
+   The surround, coat of arms, portcullis, throne and feast had all moved to the
+   great hall; the *fire* had not. `castle-hearth-logs-0` stood at world x=600 in
+   the middle of the mall's market while its own stone surround was 300 m away at
+   x=900. Nothing broke, because **a fire without a fireplace violates no
+   assertion.** `castleFurniture.ts`'s note exists precisely to stop the hall
+   being split across files and it still only caught two of the three owners:
+   **three files make the hall a hall.**
+
+2. **The lift glided her 300 m through the void.** `beginAlight` read
+   `player.position` to start the step-out. `travelTo` runs behind a closed
+   iris, so on the next line the teleport has *not happened yet* — she was still
+   in the alcove of the floor she was leaving, and the glide interpolated from
+   there to the destination alcove, visibly sliding through open nothing between
+   two castles. Found by sampling her x mid-ride: **826.4**, which is 73.6 m
+   short of the great hall and 200 m past the mall.
+
+   **The validator could not have caught this**, and that is worth understanding
+   rather than patching: it asserts where she *ends up*, not the path she takes.
+   `HotelLift` never had the bug because its `beginAlight` always derived both
+   ends from the room. Mine now does the same. Re-verified by sampling every
+   100 ms across a ride: **0 samples outside a floor, only two floors seen.**
+
+### What was watched
+
+| | result |
+| --- | --- |
+| mall at player height | market aisle, stalls both sides, "Go shopping!" chip live |
+| great hall | throne on its dais, feast laid, armour, tapestry, braziers, fire |
+| roof garden | open sky, parapet, pavilion, benches, **trampoline as a toy** |
+| lift, all 6 ordered pairs | 8/8 rides landed on the floor asked for |
+| lift panel | three destinations by name, "you are here" on the current floor |
+| ginormous slide | boards from the roof, clears the battlements, lands **0.91 m from the ball pit's centre** on its scooped floor, not airborne |
+| console | no errors, no warnings |
+
+### `check:park-boot` — the flake, confirmed properly rather than assumed
+
+It went red twice inside the full chain and I nearly attributed it to the
+branch. The decisive tests: **standalone 3/3 green on this branch and 3/3 on
+`origin/main`**, `origin/main`'s full chain green, and finally **this branch's
+full chain green with nothing else running**. Both reds were load I was
+creating myself (a browser, a dev server and a concurrent `vite build`). #324
+is real; it is also easy to blame wrongly. Jim's own long-running `hohjs` vite
+servers were left alone throughout — they are never an agent's to kill.
+
+### A near-miss worth recording
+
+`lsof -ti:<port>` returns **clients as well as listeners**. Cleaning up, it
+returned Jim's **Google Chrome** PID alongside my vite, and a naive
+"kill everything on my port" would have killed his browser. Only the row marked
+`(LISTEN)` is the server. Use `lsof -nP -i:<port> | grep LISTEN`.
