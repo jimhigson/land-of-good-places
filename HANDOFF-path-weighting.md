@@ -347,3 +347,63 @@ garbage.
 **Not proceeding to the red-at-cap-2.0 proof until this is settled**, because
 that proof would be run against a probe set a fifth of which does not route.
 The servability code is committed but its verdict should not be relied on yet.
+
+## #448 diagnosed — two *different* park defects, neither in the graph
+
+Step 1 landed first: **a probe that never arrives is now a failure**, not a
+100% score (`every probe arrives`). The check now reports 2 failures, and
+everything below was measured with that assertion in place.
+
+The Overseer's steer was to check whether the two nodes are isolated in the
+graph the router walks. **They are not, and the graph is not involved.** Both
+nodes have their spur edge (`ring->plaza`, `ring->station-1`), the same as
+healthy junctions. The router does not walk `PATH_GRAPH` at all — it walks
+`NavGrid`'s collision lattice, and that is where both fail. They fail for
+**two unrelated reasons**, so #448 is really two tickets.
+
+### 1. `plaza` sits dead centre in the fountain (12 probes)
+
+| | |
+|---|---|
+| fountain centre | **(-9.07, 7.38)**, rimRadius 4.20 |
+| `plaza` node | **(-9.07, 7.38)** |
+
+Exactly coincident. `Fountain.ts` builds its rim as **28 short wall segments**
+approximating a circle, deliberately *hollow* — its own class doc: *"a jump
+that clears one segment's `topHeight` finds nothing left to push it back out
+once it lands inside."* The rim is meant to be jumped into.
+
+So the plaza junction is on ground reachable only by jumping, and A* has no
+jump-the-rim move. Measured: from `plaza` the router reaches **1 of 201**
+sample points across the park (itself); every healthy junction reaches 192.
+Free movement out to 3 m, nothing at 6 m or beyond in any of 16 bearings.
+
+**The path network placed a junction inside the fountain.** That is the defect.
+
+### 2. `station-1` is unreachable *as a goal* only (10 probes)
+
+Asymmetric, which is why it looked healthy at first: as a **source** it reaches
+192/201, same as everything else. As a **destination** every one of its 10
+partners fails. Routing `gate → station-1`:
+
+| offset from the node | +x | -x | +z | -z |
+|---|---|---|---|---|
+| **0.00 m (the node itself)** | **FAIL** | **FAIL** | **FAIL** | **FAIL** |
+| 0.50 m | solid | ok | ok | ok |
+| 2.00 m | ok | ok | ok | ok |
+
+A knife-edge. A circle collider of r=0.22 sits **0.97 m** from the node;
+fattened by `PLAYER_RADIUS` (0.62) that reaches 0.84 m, and once quantised to
+`NavGrid`'s 0.5 m lattice it closes the last 13 cm and blocks the node's own
+cell. The walker can stand *beside* station-1 but can never arrive *at* it.
+
+### Both are park defects, and neither is this feature's
+
+The **unweighted router fails identically on all 22** — this predates #416 and
+is not caused by the paving preference. Nothing here argues against #421.
+
+**Not fixed, per instruction.** Note one hypothesis worth testing in step 3
+rather than assuming: the fountain sits in the middle of the plaza, so routes
+crossing it must detour round the rim and off the paving. That may be feeding
+the worst-route number too — but it is a hypothesis, and the last two I formed
+without an instrument were both wrong.
