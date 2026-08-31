@@ -1592,10 +1592,7 @@ export class Game {
     }
     this.keychainShopWasOpen = keychainShopOpen;
     if (keychainShopOpen) {
-      const shot = this.world.keychainShop.viewContent;
-      this.camera.setZoomTarget(
-        this.camera.zoomToFit(shot.halfWidth, shot.halfHeight, this.world.keychainShop.viewMargin),
-      );
+      this.camera.setZoomTarget(this.world.keychainShop.viewZoom(this.camera));
       this.camera.setFocusOverride(this.world.keychainShop.viewFocus);
     } else {
       this.camera.clearFocusOverride();

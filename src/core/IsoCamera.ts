@@ -363,6 +363,27 @@ export class IsoCamera {
     return Math.min(byWidth, byHeight);
   }
 
+  /**
+   * **The zoom at which `worldMetres` covers `pixels` CSS pixels of screen.**
+   *
+   * The inverse of {@link worldUnitsPerPixel}, and the honest way to state a
+   * rule about *fingers*: a fingertip is a fixed number of CSS pixels wherever
+   * it lands (`tapSpacing.ts` derives the game's own 40 px from
+   * GAME_DESIGN.md's UI floor), so "far enough apart to tap separately" is a
+   * question about pixels, not about metres. A world distance that is a
+   * comfortable gap at one zoom is a single fat fingertip at another, and a
+   * zoomed picker changes zoom by design.
+   *
+   * Pair it with {@link zoomToFit} when a shot has to both *contain* something
+   * and stay *tappable*: those two pull in opposite directions — pulling back
+   * to fit more shrinks everything towards the finger — and this returns the
+   * floor the pulling-back has to stop at.
+   */
+  zoomForPixelSize(worldMetres: number, pixels: number): number {
+    const base = this.frustumBase();
+    return (pixels * 2 * base) / (Math.max(worldMetres, 1e-6) * this.viewportHeight);
+  }
+
   /** Sizes the orthographic box. See {@link frustumBase} for the framing rule. */
   private applyFrustum(): void {
     const base = this.frustumBase();

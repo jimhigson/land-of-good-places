@@ -18,9 +18,12 @@ import {
   boxCorners,
   contentFrame,
   focusForFrame,
+  halfExtentsAbout,
+  screenDistance,
   type ContentFrame,
   type FramedSubject,
 } from '../core/contentFrame';
+import { TAP_FINGER_PIXELS } from './tapSpacing';
 import { TALLEST_CHILD_HEIGHT } from '../art/models/kid';
 import { DEG, Rng, turnTowards } from '../core/mathUtils';
 import { ART } from '../art/style/artPalette';
@@ -487,6 +490,17 @@ const VIEW_CHILD_HEIGHT = TALLEST_CHILD_HEIGHT;
  */
 const VIEW_BASIS = screenBasis3D(CAMERA_YAW_DEGREES * DEG, CAMERA_PITCH_DEGREES * DEG);
 
+/**
+ * The two things {@link KeychainShop.viewZoom} needs of a camera. `IsoCamera`
+ * satisfies this structurally; naming only the two methods keeps the shop from
+ * depending on the whole rig, and lets `check:keyring-view` drive the real
+ * decision at whatever viewport it is testing.
+ */
+export interface ViewCamera {
+  zoomToFit(halfWidth: number, halfHeight: number, margin: number): number;
+  zoomForPixelSize(worldMetres: number, pixels: number): number;
+}
+
 /** One keyring on the rack: its kind, its catalogue id, the model itself, and where it is in the world. */
 interface RackKeyring {
   readonly kind: KeychainKind;
@@ -590,6 +604,12 @@ export class KeychainShop implements GameSystem {
    * box the shot has to hold. See {@link viewContent}.
    */
   private content: ContentFrame = contentFrame(VIEW_BASIS, []);
+
+  /**
+   * {@link content}, but the six keyrings alone — the part of the shot that may
+   * not be cropped, whatever the viewport. See {@link viewZoom}.
+   */
+  private requiredContent: ContentFrame = contentFrame(VIEW_BASIS, []);
 
   private closeButton: HTMLElement | null = null;
 
@@ -706,17 +726,22 @@ export class KeychainShop implements GameSystem {
   }
 
   /**
-   * The screen-space box the locked view has to hold, about {@link viewFocus}.
-   *
-   * `Game.tick` hands its half-extents to `IsoCamera.zoomToFit` every frame the
-   * view is open, so the shot is framed by what is in it rather than by a
-   * constant — see {@link VIEW_MARGIN}'s own comment, and #418.
+   * The screen-space box holding **everything** the shot would like — the six
+   * keyrings and the child beside the table — about {@link viewFocus}.
    */
   get viewContent(): ContentFrame {
     return this.content;
   }
 
-  /** The margin `Game.tick` frames with — this view's own, so one owner. */
+  /**
+   * The screen-space box holding the six keyrings alone: what the shot must
+   * contain whatever else has to give. See {@link viewZoom}.
+   */
+  get viewRequiredContent(): ContentFrame {
+    return this.requiredContent;
+  }
+
+  /** The margin the view frames with — one owner, read by the check too. */
   get viewMargin(): number {
     return VIEW_MARGIN;
   }
@@ -724,6 +749,91 @@ export class KeychainShop implements GameSystem {
   /** What must be in shot, for `check:keyring-view` to measure against the real frame. */
   get viewSubjects(): readonly FramedSubject[] {
     return this.framedSubjects;
+  }
+
+  /** The keyring subjects alone — the ones a check may not find outside the frame. */
+  get viewRequiredSubjects(): readonly FramedSubject[] {
+    return this.framedSubjects.slice(0, this.rack.length);
+  }
+
+  /**
+   * How far apart the two closest keyrings look, in world metres on screen,
+   * once each one's own tap area is allowed for.
+   *
+   * Screen distance, not world distance, and that distinction is #418's second
+   * fault: the camera is pitched 38°, so a metre of table depth reads as only
+   * `sin(38°) = 0.616` m of screen. `check:tap-spacing` measures the world and
+   * sees the six keyrings as comfortably spread; a finger sees them at
+   * five-eighths of that across the rows and the front one covering the back.
+   *
+   * Shaped like `tapSpacing.ts`'s own `zoneSeparation` — centres apart, less
+   * the pick radius — so the two rules are read the same way, and only the
+   * space they are measured in differs.
+   */
+  get viewClosestKeyringGap(): number {
+    let closest = Infinity;
+    for (let a = 0; a < this.rack.length; a += 1) {
+      for (let b = a + 1; b < this.rack.length; b += 1) {
+        const gap = screenDistance(VIEW_BASIS, this.rack[a]!, this.rack[b]!) - KEYRING_PICK_RADIUS;
+        if (gap < closest) closest = gap;
+      }
+    }
+    return closest;
+  }
+
+  /**
+   * **The zoom this view holds, on the viewport it is actually being shown at.**
+   *
+   * Three demands, and they do not all fit on a phone. Stated here in priority
+   * order rather than settled by a constant, because #418 is what happens when
+   * a shot's framing is decided once on a desktop and never asked again:
+   *
+   * 1. **Every keyring is in frame.** Jim, 31 August: *"the keyring stand when
+   *    zoomed in doesn't show all the keyrings."* A child cannot choose what
+   *    she cannot see, so this is the ceiling — the view never zooms in past
+   *    the point where all six fit.
+   * 2. **No two keyrings are within a finger of each other on screen.** Also
+   *    #418: *"the keyrings at the front overlap those at the back."* This is
+   *    the *floor*, and it is why the other two cannot simply be traded off
+   *    against each other: pulling the camera back shrinks the whole rack
+   *    towards the size of a fingertip, and the counter is only 1.44 m deep, so
+   *    there is a distance past which no layout on that table is tappable.
+   * 3. **The child is in shot too.** Jim, 24 August: *"the character and the
+   *    stall both fit into the view."* Wanted, but the first thing to give:
+   *    she stands beside the short edge with her arms out, 1.77 m across the
+   *    widest point, and framing all of her on a 390 × 844 portrait phone costs
+   *    enough zoom to push the rack below (2). So she is included exactly as
+   *    far as the frame allows — which on any landscape viewport is completely,
+   *    leaving the composition approved in August unchanged where it was
+   *    approved, and on a phone in portrait crops her to a tighter shop
+   *    close-up of the thing being chosen.
+   *
+   * Takes the camera rather than reading one, so `check:keyring-view` drives
+   * this exact function at each viewport it tests — a check that re-implemented
+   * the decision would only prove the check agrees with itself.
+   */
+  viewZoom(camera: ViewCamera): number {
+    const wanted = camera.zoomToFit(
+      this.content.halfWidth,
+      this.content.halfHeight,
+      VIEW_MARGIN,
+    );
+    // About the focus, not about the keyrings' own middle: the focus sits at the
+    // centre of the *whole* wish-list, so the child pulls it sideways off the
+    // rack, and the rack needs room for that offset too. Measuring it about its
+    // own centre here would repeat #418's own mistake one level down.
+    const required = halfExtentsAbout(
+      this.requiredContent,
+      this.content.centreRight,
+      this.content.centreUp,
+    );
+    const ceiling = camera.zoomToFit(required.halfWidth, required.halfHeight, VIEW_MARGIN);
+    const floor = camera.zoomForPixelSize(this.viewClosestKeyringGap, TAP_FINGER_PIXELS);
+    // `min` before `max`: the ceiling is the one demand that cannot bend, so a
+    // viewport too narrow to satisfy both bounds keeps every keyring on screen
+    // and reports the tap failure through `check:keyring-view` rather than
+    // silently cropping one of the six to keep a gap.
+    return Math.min(Math.max(wanted, floor), ceiling);
   }
 
   /**
@@ -1261,6 +1371,7 @@ export class KeychainShop implements GameSystem {
       ),
     });
 
+    this.requiredContent = contentFrame(VIEW_BASIS, this.viewRequiredSubjects);
     this.content = contentFrame(VIEW_BASIS, this.framedSubjects);
 
     // {@link rackFocus}: the world point that puts the content box's own centre

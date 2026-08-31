@@ -165,6 +165,31 @@ export function focusForFrame(
 }
 
 /**
+ * How much room `frame` needs **about some other centre** — the point the
+ * camera is actually aimed at, when that is not this box's own middle.
+ *
+ * Needed whenever a shot has a *must-fit* subset inside a larger wish-list: the
+ * camera is centred on the whole wish-list, so asking "does the subset fit?"
+ * with the subset's own half-width silently assumes a frame centred somewhere
+ * the camera is not. The keyring rack is exactly that — the six keyrings may
+ * never be cropped, the child beside the table may be, and the focus sits at
+ * the centre of both together (`KeychainShop.viewZoom`). Measuring the keyrings
+ * about their own centre there would have under-stated the room they need by
+ * however far the child pulls the focus sideways, which is the same class of
+ * mistake as the off-centre focus that caused #418 in the first place.
+ */
+export function halfExtentsAbout(
+  frame: ContentFrame,
+  centreRight: number,
+  centreUp: number,
+): { halfWidth: number; halfHeight: number } {
+  return {
+    halfWidth: Math.max(frame.rightMax - centreRight, centreRight - frame.rightMin),
+    halfHeight: Math.max(frame.upMax - centreUp, centreUp - frame.upMin),
+  };
+}
+
+/**
  * Screen-space distance between two world points, in metres — how far apart
  * two things *look*, which is not how far apart they are.
  *
