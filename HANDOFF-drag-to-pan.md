@@ -201,6 +201,20 @@ measurement of the drag itself is the **0.0000 m** in table 1.
 - [x] `scripts/check-look-around.mts`, 58 checks, in `pnpm run check`
       (`check:look-around`, after `check:tap-spacing`)
 - [x] mutation transcript, above
-- [ ] browser QA at 390x844 and desktop
-- [ ] full `pnpm run check` + `build` + `test:procgen`
+- [x] browser QA at 390x844 (CDP touch) and 1440x900 (mouse)
+- [x] `pnpm run check` **exit 0** (49 steps, `check:look-around` is step 32),
+      `pnpm run build` **exit 0**, `pnpm run test:procgen` **exit 0**
+      (16 files, 482 tests)
+- [x] `ARCHITECTURE.md` note under "One camera angle, forever"
 - [ ] PR
+
+## Where to look
+
+`/spawn?pos=0,-18&facing=0` — she stands on the path beside the castle wall
+with the coaster overhead; drag and you find the keyring stall one way and a
+sweet stall the other, neither of them on screen to start with. Checked.
+
+Dev servers on 5422 (this branch) and 5423 (an `origin/main` worktree at
+`.claude/worktrees/drag-baseline`, for the A/B) are **stopped**; both ports
+confirmed free with `lsof -nP -i:<port> | grep LISTEN`. Remove that baseline
+worktree when the PR is done with.
