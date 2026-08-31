@@ -18,12 +18,27 @@ import { minTextPx } from '../core/uiScale';
  * **Screen-space clamped** (QA on #280, PR #280 round 2): a bubble pinned in
  * world space near its speaker can, on a narrow enough screen, project
  * partly or wholly off the visible frustum — the receptionist's own greeting
- * did exactly this on a 390×844 portrait phone, clipped and unreadable. Every
- * caller still hands {@link updateScreenSize} the sprite's natural,
- * unclamped world anchor (via `sprite.position`, same as before this fix);
- * the clamp is applied on top, every call, via `IsoCamera.clampToFrustum` —
- * see that method's own doc for why the camera owns the screen axes rather
- * than this class reconstructing them.
+ * did exactly this on a 390×844 portrait phone, clipped and unreadable. The
+ * clamp is applied every call via `IsoCamera.clampToFrustum` — see that
+ * method's own doc for why the camera owns the screen axes rather than this
+ * class reconstructing them.
+ *
+ * **A bubble is never drawn away from its speaker** (issue #415). Two things
+ * make that true, and both had to be fixed:
+ *
+ * 1. **{@link anchorAt} owns the anchor, not `sprite.position`.** The sprite's
+ *    position is a *derived* value that {@link updateScreenSize} overwrites
+ *    with the clamped point every frame. The anchor used to be read back off
+ *    it, which worked only for callers that rewrote it every frame; `Hotel`
+ *    sets its receptionist's bubble once, at dressing time, so the first
+ *    clamped frame ate her anchor and she never got it back. One field, one
+ *    owner, and the sprite's own position is nobody's input.
+ * 2. **An off-screen speaker's bubble hides rather than sliding.** The clamp
+ *    has no idea whether the speaker is in shot; asked to bring back a bubble
+ *    belonging to a child 6.8 m off the side of the screen, it did, and drew
+ *    "I'm going to The Castle" over empty railway. `IsoCamera.isOnScreen` is
+ *    the gate. With the anchor in shot the clamp can shift a bubble by at most
+ *    its own half-extents, so it still reads as that child's.
  */
 
 /** Beyond this many metres from the camera a bubble is not worth drawing. */
@@ -60,6 +75,11 @@ export class SpeechBubble {
   private currentText: string | null = null;
 
   private readonly accent: number;
+
+  /** Where the tail points: directly over the speaker's head, in the parent's
+   *  local space. See the class doc — this, never `sprite.position`, is the
+   *  anchor, because the sprite's position is written by the clamp. */
+  private readonly anchorLocal = new Vector3();
 
   constructor(accent: number = PALETTE.markerSky) {
     this.accent = accent;
@@ -113,9 +133,18 @@ export class SpeechBubble {
    */
   updateScreenSize(camera: IsoCamera): void {
     if (!this.currentText) return;
-    const anchor = this.sprite.getWorldPosition(SCRATCH_ANCHOR);
+    const parent = this.sprite.parent;
+    const anchor = SCRATCH_ANCHOR.copy(this.anchorLocal);
+    parent?.updateWorldMatrix(true, false);
+    if (parent) anchor.applyMatrix4(parent.matrixWorld);
     const distanceToCamera = anchor.distanceTo(camera.focusPoint);
     if (distanceToCamera > BUBBLE_MAX_DISTANCE) {
+      this.sprite.visible = false;
+      return;
+    }
+    // The speaker is not in shot: hide, rather than let the clamp below tow
+    // the bubble back onto the screen and draw it over nobody — issue #415.
+    if (!camera.isOnScreen(anchor)) {
       this.sprite.visible = false;
       return;
     }
@@ -126,9 +155,33 @@ export class SpeechBubble {
     this.sprite.scale.set(width, height, 1);
 
     const clamped = camera.clampToFrustum(anchor, width / 2, height / 2, worldUnitsPerPixel * EDGE_MARGIN_PX);
-    const parent = this.sprite.parent;
     if (parent) parent.worldToLocal(clamped);
     this.sprite.position.copy(clamped);
+  }
+
+  /**
+   * Puts the bubble over its speaker's head, in the parent's local space —
+   * the same coordinates a caller used to write into `sprite.position`.
+   *
+   * Callers must use this rather than touching the sprite: see the class doc,
+   * point 1. Cheap enough to call every frame, and safe to call once and
+   * never again.
+   */
+  anchorAt(x: number, y: number, z: number): void {
+    this.anchorLocal.set(x, y, z);
+    // Kept in step so the bubble is in the right place for the first frame,
+    // before `updateScreenSize` has run and derived one.
+    this.sprite.position.set(x, y, z);
+  }
+
+  /** Where the tail points, in world space — what a check measures against the
+   *  speaker. Allocates; not for the frame path. */
+  worldAnchor(): Vector3 {
+    const anchor = this.anchorLocal.clone();
+    const parent = this.sprite.parent;
+    if (!parent) return anchor;
+    parent.updateWorldMatrix(true, false);
+    return anchor.applyMatrix4(parent.matrixWorld);
   }
 
   dispose(): void {

@@ -747,7 +747,7 @@ export class NpcSystem implements GameSystem {
       this.labelOrder.push(i);
 
       const bubble = new SpeechBubble(NPC_LABEL_ACCENT);
-      bubble.sprite.position.set(
+      bubble.anchorAt(
         character.position.x,
         character.position.y + avatar.height + BUBBLE_HEIGHT_OFFSET,
         character.position.z,
@@ -1413,7 +1413,7 @@ export class NpcSystem implements GameSystem {
       if (!character || !bubble) continue;
 
       bubble.setText(driver?.chatBubbleText ?? null);
-      bubble.sprite.position.set(
+      bubble.anchorAt(
         character.position.x,
         character.position.y + character.avatar.height + BUBBLE_HEIGHT_OFFSET,
         character.position.z,
