@@ -1855,8 +1855,24 @@ function cruiserCorridorOverlap(ax: number, az: number, bx: number, bz: number):
 
 let latticeCache: StreetLattice | null = null;
 
-/** The lattice graph, solved once from the same inputs every router uses. */
-function streetLattice(): StreetLattice {
+/**
+ * The lattice graph, solved once from the same inputs every router uses.
+ *
+ * **A generator, because building it is 15.7 ms.** It is memoised and built on
+ * whoever asks first, which during a sliced boot is `gateApproachSearch`'s
+ * first solver — so the whole build landed inside one
+ * `ParkGeneration.advance()`: 14-21 ms against an 8 ms budget and a 20 ms
+ * ceiling, and `check:park-boot` failing three runs in five on it. Measured
+ * with `scripts/profile-park-boot-slice.mts`. Same defect the crossing-pose
+ * sweep had one layer down, and the same fix.
+ *
+ * It yields once per lattice column, which is nothing but a suspension point:
+ * the build reads only static geometry (plots, boundary, rail, ring, the
+ * crossing sites) and draws no `Rng`, so it cannot come out differently for
+ * having been sliced. {@link streetLattice} drives it straight through for
+ * every ordinary caller, and the memo means only the first one ever pays.
+ */
+function* streetLatticeSearch(): Generator<number, StreetLattice, void> {
   if (latticeCache) return latticeCache;
   const size = LATTICE_HALF_CELLS * 2 + 1;
   const count = size * size;
@@ -1871,6 +1887,7 @@ function streetLattice(): StreetLattice {
   const nodeOk = new Uint8Array(count);
   const side = new Int8Array(count);
   for (let i = -LATTICE_HALF_CELLS; i <= LATTICE_HALF_CELLS; i += 1) {
+    yield i;
     for (let j = -LATTICE_HALF_CELLS; j <= LATTICE_HALF_CELLS; j += 1) {
       const index = indexOf(i, j);
       const x = PLAZA.x + i * STREET_PITCH;
@@ -1913,6 +1930,7 @@ function streetLattice(): StreetLattice {
     );
   };
   for (let i = -LATTICE_HALF_CELLS; i <= LATTICE_HALF_CELLS; i += 1) {
+    yield i;
     for (let j = -LATTICE_HALF_CELLS; j <= LATTICE_HALF_CELLS; j += 1) {
       const index = indexOf(i, j);
       if (i < LATTICE_HALF_CELLS) edgeEast[index] = edgeOk(index, indexOf(i + 1, j)) ? 1 : 0;
@@ -1948,6 +1966,7 @@ function streetLattice(): StreetLattice {
   const PINCH_STUB = 4;
   const PINCH_COST_FACTOR = 1.3;
   for (let i = -LATTICE_HALF_CELLS; i < LATTICE_HALF_CELLS; i += 1) {
+    yield i;
     for (let j = -LATTICE_HALF_CELLS; j <= LATTICE_HALF_CELLS; j += 1) {
       for (const dj of [1, -1] as const) {
         if (Math.abs(j + dj) > LATTICE_HALF_CELLS) continue;
@@ -2089,6 +2108,7 @@ function streetLattice(): StreetLattice {
   // Registered after the cache is set because the stub search below reads
   // the finished node/edge tables through it.
   for (const site of [...CROSSING_SITES, ...LEVEL_CROSSING_SITES]) {
+    yield site.railDistance;
     const feet = crossingFeet(site);
     const stubsPlus = streetStubs(feet.plus, false);
     const stubsMinus = streetStubs(feet.minus, false);
@@ -2208,6 +2228,18 @@ function streetLattice(): StreetLattice {
   }
 
   return latticeCache;
+}
+
+/**
+ * {@link streetLatticeSearch} driven straight through — every ordinary caller,
+ * and the memo means only the first one ever builds anything.
+ */
+function streetLattice(): StreetLattice {
+  const search = streetLatticeSearch();
+  for (;;) {
+    const step = search.next();
+    if (step.done) return step.value;
+  }
 }
 
 /** One off-grid connector from a real point onto the lattice. `points` run
@@ -3475,6 +3507,14 @@ function assembleGateApproach(
 
 export function* pathGraphSearch(): Generator<number, PathGraph, void> {
   let progress = 0;
+  // **The street lattice first, sliced, before anything asks for it.** It is
+  // memoised and 15.7 ms to build, so whoever touched it first paid the lot in
+  // one frame — during a sliced boot that was `gateApproachSearch`'s first
+  // solver, and it is why `check:park-boot` failed three runs in five. Warming
+  // it here through its own generator makes it ~60 suspension points instead
+  // of one 15.7 ms unit; every `streetLattice()` call below then hits the memo.
+  // See {@link streetLatticeSearch}.
+  yield* streetLatticeSearch();
   const ringPoints = solveRing();
   const ring: RouteDefinition = { name: 'main-loop', width: 3.6, closed: true, points: ringPoints };
 
