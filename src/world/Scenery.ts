@@ -1759,6 +1759,31 @@ function generateWallMaze(placed: WallRun[]): WallRun[] {
     if (cornerPoints.some(([px, pz]) => Math.hypot(cx - px, cz - pz) < MAZE_PIECE_GAP + MAZE_CORNER_SPREAD)) {
       continue;
     }
+    // **The slot is claimed here — by the index, before anything that can
+    // refuse it for a reason outside this loop** (issue #438).
+    //
+    // This reservation used to be made at the *bottom*, only for a candidate
+    // that had also cleared `runIsClear` and `fitsAmong`. Those two ask about
+    // the world as it currently stands — the path network, the railway, bridge
+    // footprints, the cruiser, and every wall placed so far — so a refusal
+    // driven by any of them *released a 12 m+ exclusion zone*, and a later
+    // candidate that had been sitting outside it was promoted in. A single
+    // extra connector ribbon on one spur therefore moved a garden wall
+    // somewhere else entirely: measured as a maze piece shifting across a
+    // paving-free NPC waypoint chord near the hotel spur and stranding **38
+    // waypoints**, which is why `CONNECTOR_SPACING_CAP_MULTIPLE` in
+    // `world/paths.ts` sits at 2.0 rather than the 3.5 its own reasoning wants.
+    //
+    // Claiming the slot on the index instead means a refusal can only ever
+    // **remove that piece**, never hand its ground to another — the property
+    // the benches have always had (`BENCH_CANDIDATES`, `generateStoneRuns`),
+    // and the one `test/procgen/scatterDecoupling.test.ts` exists to defend.
+    // The candidate set is now fixed by the seed and the anchor geometry
+    // alone; what the world happens to look like at this moment can subtract
+    // from it, and nothing more. The piece count breathes a little per seed as
+    // a result, exactly as the benches' does, which is what "every park is
+    // unique" already asks for.
+    cornerPoints.push([cx, cz]);
     // One arm hugs the bordered edge (either direction along it); the other
     // extends outward, away from what it borders, so it only ever opens
     // further into the lawn and never doubles back across the thing it
@@ -1797,7 +1822,6 @@ function generateWallMaze(placed: WallRun[]): WallRun[] {
 
     runs.push(armOne, armTwo);
     placed.push(armOne, armTwo);
-    cornerPoints.push([cx, cz]);
   }
   return runs;
 }
