@@ -134,6 +134,42 @@ and screenshotted a camera that had not moved, which looked exactly like the
 feature being broken. **If you re-run this, wait tens of wall-seconds, or read
 `game.camera.lookIdle` rather than a stopwatch.**
 
+## Tap-to-walk: demonstrated, not asserted
+
+Two independent measurements, both in a real browser.
+
+**1. The drag itself moves her not at all.** `qa-look-around.mjs`, real CDP
+touch on the phone and a real held mouse on the desktop, reading
+`game.player.position` either side of the gesture:
+
+| viewport | input | drag | look after drag | **player moved by drag** | look at idle 6.5 s | player walked on the next tap |
+|---|---|---|---|---|---|---|
+| 390x844 | touch (CDP) | -117,-152 px | 7.06 m | **0.0000 m** | 0.000 m | 0.37 m |
+| 1440x900 | mouse | -432,-162 px | 8.43 m | **0.0000 m** | 0.107 m | 0.10 m |
+
+**2. Taps walk her exactly as far as they did before.** `qa-ab-tap.mjs` fires
+the same grid of taps at the same `/spawn?pos=0,-18&facing=0` on a second
+worktree checked out at `origin/main` (port 5423) and on this branch
+(port 5422), and compares:
+
+```
+┌─────────┬────────────────────┬─────────────────┬─────────────────┬───────┐
+│ (index) │ gesture            │ origin/main (m) │ this branch (m) │ same  │
+├─────────┼────────────────────┼─────────────────┼─────────────────┼───────┤
+│ 0       │ 'near, up-left'    │ '0.00'          │ '0.00'          │ 'yes' │
+│ 1       │ 'near, up-right'   │ '0.00'          │ '0.00'          │ 'yes' │
+│ 2       │ 'near, down-left'  │ '1.41'          │ '1.41'          │ 'yes' │
+│ 3       │ 'near, down-right' │ '1.08'          │ '1.08'          │ 'yes' │
+│ 4       │ 'DRAG (control)'   │ '1.06'          │ '1.06'          │ 'yes' │
+└─────────┴────────────────────┴─────────────────┴─────────────────┴───────┘
+```
+
+Identical to the centimetre, including the two targets across the castle wall
+that correctly walk her nowhere on both builds. **Read the DRAG row honestly:**
+1.06 m appears on `origin/main` too, where drag-to-pan does not exist, so it is
+not the drag walking her — it is NPC push-apart over the settle window. The
+clean measurement of the drag itself is the 0.0000 m in table 1.
+
 ## Progress
 
 - [x] Read `CLAUDE.md`, `GAME_DESIGN.md` CONTROL rule, issue #419, `tapGesture.ts`,
