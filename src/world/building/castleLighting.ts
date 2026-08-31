@@ -554,6 +554,24 @@ export const CASTLE_HEARTH_OPENING = {
 } as const;
 
 /**
+ * The name the chimneypiece's group takes, so a check can go and look for the
+ * fireplace rather than being told one was built. See {@link CASTLE_HEARTH_OPENING}.
+ */
+export function castleHearthSurroundName(deck: number): string {
+  return `castle-hearth-surround-${deck}`;
+}
+
+/**
+ * How many flames burn in the hearth — **exported so that a fireplace which has
+ * lost its fire fails as loudly as a fire which has lost its fireplace.**
+ *
+ * Both directions matter and #412 only ever demonstrated one of them. A check
+ * that asserted "no flame is outside the opening" would be perfectly satisfied
+ * by a hearth with nothing burning in it at all.
+ */
+export const CASTLE_HEARTH_FLAME_COUNT = HEARTH_FLAMES.length;
+
+/**
  * **The chimneypiece** — jambs, lintel, hood, fireback and hearthstone, built
  * from primitives round {@link CASTLE_HEARTH}.
  *
@@ -585,7 +603,7 @@ export const CASTLE_HEARTH_OPENING = {
  */
 function chimneypiece(): Group {
   const group = new Group();
-  group.name = `castle-hearth-surround-${CASTLE_HEARTH.deck}`;
+  group.name = castleHearthSurroundName(CASTLE_HEARTH.deck);
   group.position.set(CASTLE_HEARTH.x, 0, -WALL_FACE_Z);
 
   const stone = softMaterial(PALETTE.stonePinkDark, 0.85);
