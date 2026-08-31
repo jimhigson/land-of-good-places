@@ -164,11 +164,30 @@ worktree checked out at `origin/main` (port 5423) and on this branch
 └─────────┴────────────────────┴─────────────────┴─────────────────┴───────┘
 ```
 
-Identical to the centimetre, including the two targets across the castle wall
-that correctly walk her nowhere on both builds. **Read the DRAG row honestly:**
-1.06 m appears on `origin/main` too, where drag-to-pan does not exist, so it is
-not the drag walking her — it is NPC push-apart over the settle window. The
-clean measurement of the drag itself is the 0.0000 m in table 1.
+Identical to the centimetre, at 390x844 with CDP touch **and** at 1440x900 with
+a real mouse, including the targets that correctly walk her nowhere on both
+builds.
+
+**Two honest limits on that table, and both took a wrong turn to find.**
+
+- *The absolute distances are small.* With seven agents on this box the park
+  runs at roughly an eighth of real time, so a settle window that is 45
+  wall-seconds is about 5 game-seconds. A sweep of twelve click targets
+  (`qa-sweep.mjs`) confirms she genuinely walks — 1.04 m and 0.91 m for the two
+  that landed on reachable ground — just not far, in the time available. The
+  *equality* between the two columns is the finding; the magnitudes are a
+  property of the machine.
+- *Most single taps correctly walk her nowhere.* GAME_DESIGN.md's SELECTION
+  RULE: a tap that lands on a thing selects it and goes no further, and this
+  park is dense. The first three versions of this harness tapped once, got
+  0.00 m everywhere on both builds, and looked like a clean pass while
+  measuring nothing — the "a check can pass without checking anything" failure,
+  in a QA harness. It now taps twice, 1.5 s apart (well outside the 350 ms
+  double-tap window), which is select-then-walk and is how a child uses it.
+
+**Do not read the DRAG row as "the drag walked her 1.06 m".** That same 1.06 m
+appears on `origin/main`, where drag-to-pan does not exist. The clean
+measurement of the drag itself is the **0.0000 m** in table 1.
 
 ## Progress
 
