@@ -514,6 +514,41 @@ for (let i = 0; i < probes.length; i += 1) {
 }
 
 /**
+ * **Every probe must actually arrive.**
+ *
+ * `findRoute` reports whether it reached the goal, and until 31 August 2026
+ * this file recorded that on all 100 probes and then never read it — the field
+ * was asserted only on the reachability lattice below. A route that gave up
+ * partway was measured and averaged exactly like one that arrived, and because
+ * an abandoned route is short and starts on the spur it gave up from, **it
+ * scored better than a real one**: `plaza → stall.facePaint`, whose ends are
+ * 39.8 m apart, returned a single waypoint 3.2 m away and was counted as
+ * **100% paved**.
+ *
+ * 22 of the 100 probes were in that state, six of them scoring a perfect 100%,
+ * which lifted the headline mean from a true 79.5% to a reported 81.4%. This
+ * is CLAUDE.md's "a check can pass without checking anything" exactly: the
+ * fraction being averaged was not describing the thing the check claims to
+ * measure. Asserting arrival can only ever make this check harder to pass.
+ */
+const unreached = probes
+  .map((probe, i) => ({ probe, w: weightedRuns[i]!, u: unweightedRuns[i]! }))
+  .filter((r) => !r.w.reachedGoal || !r.u.reachedGoal);
+for (const r of unreached) {
+  const separation = Math.hypot(r.probe.ax - r.probe.bx, r.probe.az - r.probe.bz);
+  table.push(
+    `  never arrived: ${r.probe.label} — ${r.w.waypoints} waypoint(s), ` +
+      `${r.w.length.toFixed(1)} m of walking between ends ${separation.toFixed(1)} m apart` +
+      (r.u.reachedGoal ? '' : ' (the unweighted router does not arrive either)'),
+  );
+}
+check(
+  unreached.length === 0,
+  `every probe arrives: all ${probes.length} junction-to-junction routes reached ` +
+    `their goal${unreached.length > 0 ? `, but ${unreached.length} did not` : ''}`,
+);
+
+/**
  * How much of a junction-to-junction route must be on paving, on average.
  *
  * Not every metre can be: a junction is a point on a spur's *end*, and the
