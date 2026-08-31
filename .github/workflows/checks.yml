@@ -1,0 +1,100 @@
+name: Checks
+
+# **The checks. All of them, in the one place that runs them.**
+#
+# `pnpm run check` is the 47-step chain — `tsc`, `typecheck:test`, and every
+# `check:*` from `check:text` to `check:arrival-completes`. It used to live
+# inside `pnpm run build`, which meant every consumer of "build" paid for the
+# whole gate: the deploy re-ran 16 minutes of QA to produce a 191 ms artefact,
+# on a commit that had already passed those very checks minutes earlier.
+#
+# Jim, 30 August 2026: *"why would we EVER run tests on a deploy to start
+# with?"* and *"this is very simple — build and check are different things."*
+# So they are now two scripts, and this workflow owns the checking one.
+#
+# ## This workflow is a REQUIRED status check on `main`, and must stay one
+#
+# That is not decoration, it is the whole design. Moving the checks out of
+# `build` means the deploy no longer runs them and the PR preview no longer
+# runs them — **this workflow is now the only thing that makes them run at
+# all.** If it stops being required, the checks are still executing but
+# nothing is gating on them, and a red one merges. That failure is silent in
+# the worst way: every PR goes green *faster*, which looks like an
+# improvement.
+#
+# So if you rename this workflow or its job, update the branch protection in
+# the same change — a required check is matched by **name**, and a name that
+# matches nothing gates nothing. Verify by reading it back:
+#
+#     gh api repos/jimhigson/land-of-good-places/branches/main/protection
+#
+# ## Why its own file rather than a job bolted onto something else
+#
+# Same reasoning `procgen-invariants.yml` already gives for splitting its
+# invariant suite into its own job: a failure should read as *"a check broke"*
+# on its own line, not be buried in the log of something called "build".
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    # **This string is the required status check on `main`.** Changing it
+    # silently stops gating merges. See the header.
+    name: Checks
+    runs-on: ubuntu-latest
+    # The chain measured ~15m50s on a slow runner when it lived in `build`, and
+    # it grows as checks are added — which is exactly why it is no longer on the
+    # deploy's critical path. Generous headroom, deliberately: a cap that sits
+    # just above the real duration is what caused the 29 August outage, because
+    # **a job killed by `timeout-minutes` reports as `cancelled`**, which reads
+    # identically to a concurrency kill and so fails silently.
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        # Version comes from `packageManager` in package.json, so there is one
+        # place to bump it rather than one per workflow.
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - name: Install dependencies
+        # Registry hiccups are common enough to be worth retrying; the counts
+        # live in `.npmrc`, which pnpm reads.
+        run: pnpm install --frozen-lockfile
+
+      # The full gate: `tsc --noEmit`, `typecheck:test`, and every `check:*`
+      # that used to sit in front of `vite build`. Identical list, identical
+      # order — the split moved them, it did not edit them.
+      - name: Run the checks
+        run: pnpm run check
+
+      # `vite build` on its own, kept here deliberately.
+      #
+      # `pnpm run check` typechecks, but **`vite build` does not** — it strips
+      # types via esbuild and never consults `tsc`. The two therefore catch
+      # different things: `tsc` sees type errors, and the bundler sees the ones
+      # only linking can reveal (an unresolved import, a bad asset reference, a
+      # plugin that throws). "A broken build never ships" has been the rule in
+      # `DEPLOY_NOTES.md` since 2026-07-26, and this is the step that keeps it
+      # true now that the deploy no longer builds-and-checks in one go.
+      #
+      # It costs 191 ms, so it is free insurance rather than a trade.
+      - name: Build the artefact
+        run: pnpm run build
