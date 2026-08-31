@@ -511,6 +511,40 @@ function elbowLeg(a: readonly [number, number], b: readonly [number, number]): (
   if (okX && !okZ) return [cornerX, b];
   if (okZ && !okX) return [cornerZ, b];
   if (okX && okZ) {
+    // **Both walkable: prefer the one the street screen also accepts.**
+    //
+    // `segmentIsWalkable` asks {@link BLOCKERS}, which holds the plots — it
+    // does not know about the park boundary or the entrance arch's own
+    // masonry. `streetSegmentClear` is the generator's one owner of "may a
+    // street go here" (it is what the lattice itself is built with), and it
+    // knows about both. Where the two elbows disagree under it, the choice
+    // is not a tie and the heuristic below should not be deciding it.
+    //
+    // Measured on seed 5's walk in from the gate, which has to reach the
+    // railD 12 crossing's minus foot at (15.8, 59.2), 3.6 m inside the
+    // boundary. `debugStreetSegment` on the two elbows:
+    //
+    //   north-then-east  (0,47.8)->(0,59.2)->(15.8,59.2)   clear=false, false
+    //   east-then-north  (0,47.8)->(15.8,47.8)->(15.8,59.2) clear=true,  true
+    //
+    // The `dz <= dx` rule below picked north-then-east, and the resulting
+    // 15.8 m run was drawn 0.8 m from the entrance arch's own pier (a 0.55 m
+    // collider at (4.30, 60.00) that `BLOCKERS` does not carry). A child
+    // could not walk it — `scripts/probe-blocked-ribbons.mts` finds
+    // `gate-approach` blocked solid at (4.1, 59.2) — and it sat 1.94 m off
+    // the 12 m lattice, which is the invariant that caught it.
+    //
+    // This can never reject a leg: it only ever chooses between two corners
+    // that are already walkable, so a route that solved before still solves.
+    // When both elbows are street-clear, or neither is, the local rule below
+    // decides exactly as it always did — so #269's "correct the small axis"
+    // lesson is untouched wherever it was the thing doing the work.
+    const streetVia = (corner: readonly [number, number]): boolean =>
+      streetSegmentClear(a[0], a[1], corner[0], corner[1]) &&
+      streetSegmentClear(corner[0], corner[1], b[0], b[1]);
+    const streetX = streetVia(cornerX);
+    const streetZ = streetVia(cornerZ);
+    if (streetX !== streetZ) return [streetX ? cornerX : cornerZ, b];
     // Both clear: correct whichever axis moves *less* over this one leg
     // first, then run the dominant axis the rest of the way. This is a
     // purely local choice — every leg decides from its own two endpoints,
