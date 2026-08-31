@@ -54,6 +54,31 @@ export const ENTRANCE_GATE_Z = Math.sin(ENTRANCE_ANGLE) * ENTRANCE_WALL_RADIUS;
 export const ENTRANCE_GATE_HALF_WIDTH = 4.3;
 export const ENTRANCE_GATE_POST_HEIGHT = 3.3;
 
+/**
+ * **Is this point standing in the park's front doorway?**
+ *
+ * The one owner of that question, here because this module owns the gate, and
+ * asked from **both** directions of the bridge pipeline (#414, #437):
+ * `crossingPlanSolve.ts` will not *plan* a crossing whose ramp reaches the
+ * arch, and `bridgeFootprint.ts` will not *build* one — the same shape as
+ * `CROSSING_STATION_CLEARANCE`, and for the same reason. Planning it in one
+ * place only is not enough: the planner and the builder search with different
+ * levers (the builder may shift the deck sideways, narrow it, or fell a tree),
+ * so a site the planner proved with a ramp stopping short of the arch was
+ * still given a longer ramp by the builder, and the parapet went back into the
+ * doorway. Measured on the canonical seed — Jim's own park — the moment the
+ * paths moved: `gate-approach` ended at (0.0, 54.0), 0.70 m up on a bridge.
+ *
+ * **A bridge cannot fit through this gap at any width.** The deck is
+ * `2 * SITE_HALF_WIDTH` = 10 m across and its parapets flank it; the arch is
+ * `2 * ENTRANCE_GATE_HALF_WIDTH` = 8.6 m. So this is not a clearance to tune —
+ * it is a statement that the two are the wrong sizes to overlap, and the
+ * bridge is the one that has to move.
+ */
+export function isInEntranceGateway(x: number, z: number): boolean {
+  return Math.hypot(x - ENTRANCE_GATE_X, z - ENTRANCE_GATE_Z) < ENTRANCE_GATE_HALF_WIDTH;
+}
+
 /** True if the angle (radians, `atan2(z, x)` convention) falls inside the gate gap. */
 export function isInEntranceGateGap(angle: number): boolean {
   return Math.abs(angleDelta(angle, ENTRANCE_ANGLE)) < ENTRANCE_GATE_HALF_ANGLE;

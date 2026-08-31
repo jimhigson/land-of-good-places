@@ -6,11 +6,7 @@ import {
 } from './clearance';
 import { MIN_BRIDGE_HALF_LENGTH } from './bridgeFootprint';
 import { STATION_GAP } from './fence';
-import {
-  ENTRANCE_GATE_HALF_WIDTH,
-  ENTRANCE_GATE_X,
-  ENTRANCE_GATE_Z,
-} from '../entrance/layout';
+import { ENTRANCE_GATE_X, ENTRANCE_GATE_Z, isInEntranceGateway } from '../entrance/layout';
 import {
   NARROW_HALF_WIDTH,
   SITE_ANGLE_OFFSETS,
@@ -262,9 +258,11 @@ function probeReach(
  * ordinary backtracking every generator here does, through the callback the
  * planner already had — no new threshold, and the width comes from
  * `entrance/layout.ts`, which owns the gate.
+ *
+ * The predicate itself lives in `entrance/layout.ts`, which owns the gate, and
+ * `bridgeFootprint.ts` asks the same one when it *builds* — planning it here
+ * alone was measurably not enough.
  */
-const inTheGateway = (x: number, z: number): boolean =>
-  Math.hypot(x - ENTRANCE_GATE_X, z - ENTRANCE_GATE_Z) < ENTRANCE_GATE_HALF_WIDTH;
 
 /**
  * The two tests that need a *solved* route — which is exactly what this caller
@@ -274,7 +272,7 @@ const inTheGateway = (x: number, z: number): boolean =>
  */
 const corridorBlocked = railCorridorBlocked(railDistanceAt);
 const plannerBlocked = (x: number, z: number, along: number): boolean =>
-  nearStationStructure(x, z) || inTheGateway(x, z) || corridorBlocked(x, z, along);
+  nearStationStructure(x, z) || isInEntranceGateway(x, z) || corridorBlocked(x, z, along);
 
 /** The `side = +1` direction at `railDistance` — `crossings.ts`'s own sign
  * convention (`side = sign(tangent.z * dx - tangent.x * dz)`). */

@@ -1876,8 +1876,24 @@ function segmentCutsABridgeRamp(ax: number, az: number, bx: number, bz: number):
  * The real widening in this rewrite is that the half-width now comes from the
  * **site's own** proven `halfWidth` rather than a module constant, so a narrow
  * site is screened at the width it was actually proven at.
+ *
+ * ## It said 0.5 and it was 1.5, for the whole of this branch (#414)
+ *
+ * Everything above was already written here, arguing for half a metre and
+ * naming 1.5 as the value that broke seed 5 — while the constant underneath it
+ * read `1.5`. The doc and the number disagreed, which is this repo's most
+ * expensive recurring bug appearing in the file that documents it.
+ *
+ * Restored to the documented 0.5, and it is not a tuning: the skirt pads a
+ * parapet that is 0.3 m thick, so a metre and a half of it refuses ground a
+ * child can plainly stand on. Measured on seed 24 — the two lattice nodes the
+ * screen cost it, (11.3, -33.6) and (11.3, -45.6), sit at |across| 5.98 and
+ * 5.06 against a deck half-width of 5.0: **1.0 and 0.1 m clear of the
+ * masonry**, inside the 1.5 m skirt and outside a 0.5 m one. Losing them
+ * starved the crossing's approach to proven site 20 and left seed 24, alone of
+ * every seed, with no bridge at all.
  */
-const RAMP_SCREEN_MARGIN = 1.5;
+const RAMP_SCREEN_MARGIN = 0.5;
 
 /**
  * **The ground a bridge will really stand on — deck, both ramps and the

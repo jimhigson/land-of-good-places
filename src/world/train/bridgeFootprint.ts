@@ -2,6 +2,7 @@ import type { LevelCrossing } from './crossings';
 import { frameFor, type SpineFrame } from './bridgeSpine';
 import { BRIDGE_RISE, DECK_HALF_LENGTH, FENCE_OFFSET } from './clearance';
 import { ENTRANCE_RAMP } from '../building/layout';
+import { isInEntranceGateway } from '../entrance/layout';
 import { GARDEN_PLAY_BOUNDARY } from '../boundary';
 import { clearOfPlots } from '../parkLayout';
 import type { CollisionWorld } from '../Collision';
@@ -781,7 +782,16 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
   // `resolve()` call would ever be stopped by on open ground.
   const realClear = (x: number, z: number): boolean =>
     collision.isClearCircle(x, z, REAL_PROBE_RADIUS) &&
-    collision.playBounds.distanceToEdge(x, z) >= REAL_PROBE_RADIUS;
+    collision.playBounds.distanceToEdge(x, z) >= REAL_PROBE_RADIUS &&
+    // **Never into the park's own front doorway** (#414, #437). The same
+    // predicate `crossingPlanSolve.ts` plans against, asked here because this
+    // search has levers the planner has not -- a lateral shift, a narrower
+    // deck, a felled tree -- and used them to run a ramp the planner had
+    // stopped at the arch straight back through it. Measured on the canonical
+    // seed the moment the paths moved: `gate-approach` ended at (0.0, 54.0),
+    // 0.70 m up on a bridge, against a child's 0.62 m step-up. One owner
+    // (`entrance/layout.ts`), read from both directions.
+    !isInEntranceGateway(x, z);
 
   /** Node-only diagnostics (`LGP_DEBUG_BRIDGE=1 npm run check:park` etc.):
    * says, per rejected candidate, what actually stopped it — absent in the
