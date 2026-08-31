@@ -55,15 +55,66 @@ about 3s of not swiping/dragging it should return to your character"*
    cannot overshoot (a spring would rock her past centre), and it starts fast and
    lands soft — which is what "gentle rather than snapped" means.
 
+## The mutation transcript (done — both proved red)
+
+Green baseline, on the code as committed:
+
+```
+PASS: 58 checks. Dragging looks around the park, tapping still walks her, and the camera comes home.
+EXIT=0
+```
+
+**Mutation 1 — a drag walks the player.** In `src/core/input/tapGesture.ts`,
+`tapDriftedTooFar` made to return `false`, so nothing is ever a drag:
+
+```
+FAIL: a drag one pixel outside the slop must not walk her
+FAIL: a drag one pixel outside the slop must pan the camera
+FAIL: a held mouse drag must not walk her
+FAIL: dragging by (140, 0) must never walk her
+FAIL: dragging by (140, 0) must pan the camera
+FAIL: the pan must track the finger for (140, 0), got (0.0, 0.0)
+... (six directions)
+FAIL: a slow creep must pan the camera
+
+22 FAILURE(S) out of 58 checks
+EXIT=1
+```
+
+**Mutation 2 — the camera never comes back.** `if (true) return;` inserted
+above the delay test in `IsoCamera.updateLook`:
+
+```
+FAIL: one half-life in, about half the offset should remain: expected ~9.00, got 18.00
+FAIL: the return must have started
+FAIL: the camera must actually arrive back on her: expected 0.0000, got 18.0000
+FAIL: once home the view point is the follow point, right on her: expected 0.0000, got 18.0000
+
+4 FAILURE(S) out of 58 checks
+EXIT=1
+```
+
+**A first mutation attempt that did *not* go red, and why it matters.**
+Deleting `pointer.disqualified = true` from `PointerControls.onPointerMove`
+left the check green at 58/58. That is not a hole — it is a second,
+independent guard: `completesTap` in `tapGesture.ts` re-tests
+`tapDriftedTooFar` itself at lift time, so a drifted pointer cannot become a
+tap even with the flag cleared. Worth knowing before anyone "simplifies" that
+apparent duplication away. The mutation that does reach it is the shared
+definition itself, above.
+
 ## Progress
 
 - [x] Read `CLAUDE.md`, `GAME_DESIGN.md` CONTROL rule, issue #419, `tapGesture.ts`,
       `PointerControls.ts`, `IsoCamera.ts`, `Game.ts` wiring, `ParkMap.ts` pan,
       `Collision.playBounds`, `boundary.ts`.
-- [ ] `IsoCamera` look offset + return
-- [ ] `PointerControls.onLookDrag`
-- [ ] `Game` wiring + guards
-- [ ] `scripts/check-look-around.mts` into `pnpm run check`
-- [ ] mutation transcript
+- [x] `IsoCamera` look offset + return  (`lookByPixels`, `cancelLook`,
+      `setLookBounds`, `updateLook`, `viewFocus`)
+- [x] `PointerControls.onLookDrag` — fires off the tap path's own drift flag
+- [x] `Game` wiring + `lookAroundBlocked()` + per-frame `setLookBounds`
+- [x] `scripts/check-look-around.mts`, 58 checks, in `pnpm run check`
+      (`check:look-around`, after `check:tap-spacing`)
+- [x] mutation transcript, above
 - [ ] browser QA at 390x844 and desktop
+- [ ] full `pnpm run check` + `build` + `test:procgen`
 - [ ] PR
