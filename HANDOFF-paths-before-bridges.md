@@ -68,6 +68,20 @@ Foreign drawn runs entering that bridge's own paving extent
   i.e. it reaches the crown. Its east end *terminates inside the footprint*.
 - **run 0** — 6 samples over the north ramp foot, lift 0.06 m.
 
+**Two faults, one cause — measured, not eyeballed.** Per drawn run at that
+bridge (`covers()` or `pavingHeightAt() !== null`):
+
+| run | samples | inside the bridge | ends inside | verdict |
+|---|---|---|---|---|
+| 1 | 110 | 30 | 0 | the bridge's own crossing leg — passes through, correct |
+| 0 | 118 | 6 | 0 | **passes through the footprint** at the north ramp foot |
+| 7 | 47 | 14 | **1** | **dead-ends on the crown** at (-22.2, 36.4), lift 4.40 m |
+
+So run 7 is a whole separate path leg attached to the bridge's crown and
+running off *sideways* down the flank — Jim's "another path shouldn't join into
+a mid-ramp bridge" — and run 0 is a second leg driven straight through the ramp
+ground. Neither is the bridge's own path.
+
 `pathGraph.ts`'s `drapePathsOverBridges` lifts **every** drawn path vertex a
 bridge's `pavingHeightAt` covers, not just the run the bridge was built for.
 So a foreign leg crossing the footprint is *drawn climbing the ramp flank and
@@ -85,8 +99,11 @@ lifts one **1.10 m**.
 
 `node scripts/qa-bridge-paths-414.mjs 5417 <out> "-15.8,20.7" "-22.1,30" "-22.1,44"`
 
-- `at_-15.8_20.7.png` — **the path runs west and ends flat against the pink
-  masonry of the ramp flank.** This is Jim's second symptom, from a child's eye.
+- **`at_-30_35.png` — the money shot.** Eleri stands on flat ground on run 7;
+  the sandy path she is on runs straight into the **outside face** of the
+  bridge parapet and stops. No way up, no way on. Jim's "runs into a solid
+  wall", from a child's eye.
+- `at_-15.8_20.7.png` — the same fault at run 0's end of the bridge.
 - `at_-22.1_44.png` — a second sandy surface sits *outside* the parapet at ramp
   height, going nowhere.
 - Plan view: `scripts/plot-bridge-neighbourhood.mts -22.1 36.2 35 out.svg` —
