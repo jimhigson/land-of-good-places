@@ -3,9 +3,12 @@ import { BoxGeometry, Group, Mesh, type Object3D } from 'three';
 import { PALETTE } from '../../art/style/bridge';
 import { addOutline, solid } from '../../art/style/materials';
 import {
+  CASTLE_BENCH_HALF_WIDTH,
   CASTLE_BENCH_SEAT,
   CASTLE_DAIS_HEIGHT,
   CASTLE_PLINTH_TOP,
+  CASTLE_TABLE_HALF_LENGTH,
+  CASTLE_TABLE_HALF_WIDTH,
   CASTLE_TABLE_TOP,
   CASTLE_TAPESTRY_RAIL_Y,
   createCastleArmour,
@@ -166,8 +169,17 @@ export function isTapestryBay(deck: number, x: number, z: number): boolean {
 const DAIS_HALF_X = 1.6;
 const DAIS_HALF_Z = 1.2;
 
-/** Half the feast table's own length. Authored size; it does not scale. */
-const TABLE_HALF_LENGTH = 3;
+/**
+ * Half the feast table's own length — **measured off the asset**, not typed.
+ *
+ * It stood here as `const TABLE_HALF_LENGTH = 3` with the comment "authored
+ * size; it does not scale". Both halves of that were true and it was still a
+ * second copy of a figure the asset already knows, which stopped being harmless
+ * the moment #413 started *repeating* the table: the run's pitch is this
+ * number, so a table that grew by a centimetre would open a centimetre gap
+ * between every pair, and nothing would say so.
+ */
+const TABLE_HALF_LENGTH = CASTLE_TABLE_HALF_LENGTH;
 /**
  * Clear floor between the dais and the table — the approach itself.
  *
@@ -219,6 +231,169 @@ const BENCH_OFFSET = 1.85;
  */
 const BENCH_ALONG = 1.55;
 
+/**
+ * **How many feast tables stand end to end down the hall** (#413).
+ *
+ * Jim, 31 August 2026: *"ok let's do the banquet with the huge table, lots of
+ * other children eating at the tables, and a large fireplace with a roaring
+ * fire"* — and the ticket is explicit that the huge table runs **down the
+ * middle of the hall, not at the end of it**.
+ *
+ * Three, and they are three copies of the **same** asset butted together
+ * rather than one longer table. #413's own instruction ("extend or repeat the
+ * one that exists; do not author a second"), and it is also the cheaper thing:
+ * a 18 m table authored in Blender is a new node, a new style entry, a new
+ * `check:castle` contract figure and a new thing that can disagree with
+ * {@link CASTLE_TABLE_TOP}. Three of an asset whose top is already measured
+ * and already asserted is none of that.
+ *
+ * They butt exactly because the pitch is the asset's own measured length. See
+ * {@link TABLE_HALF_LENGTH}.
+ *
+ * Three is what the room has: the first table's far end is
+ * {@link FEAST_APPROACH} clear of the dais, and the third's near end lands at
+ * z ≈ +8.2 with 7 m of floor still behind it — so the run fills the hall's
+ * middle without either crowding the throne or reaching the south wall.
+ */
+export const FEAST_TABLE_COUNT = 3;
+
+/**
+ * How far along a bench the two diners sitting on it are placed, either side of
+ * its middle.
+ *
+ * The bench is 2.80 m and a child is 0.80 m across the hem, so two at ±0.70
+ * leaves 0.60 m of clear plank between them and 0.30 m at each end. Three would
+ * fit at a pinch and would read as a queue rather than as a table people chose
+ * to sit at.
+ */
+const DINER_ALONG = 0.7;
+
+/**
+ * **Where the hall is laid out**, resolved once — its axis, its end wall, and
+ * which way is into the room.
+ *
+ * Extracted from {@link dressGreatHall} because the banquet's diners
+ * (`greatHallBanquet.ts`) sit on benches this file places, and they must be
+ * placed from the **same** arithmetic rather than from a second copy of it. A
+ * diner list derived independently is precisely the "two definitions of one
+ * thing, kept in step by hand" that CLAUDE.md opens on, and it would fail in
+ * the least visible way available: two dozen children floating beside a bench
+ * that had moved a metre.
+ */
+export interface GreatHallPlan {
+  /** The hall's long axis, in interior-local metres. */
+  readonly axisX: number;
+  /** The end wall the throne stands against. */
+  readonly wallZ: number;
+  /** +1 or -1: into the room, away from that wall. */
+  readonly inward: number;
+  /** The three tapestry bays behind the throne. */
+  readonly bays: readonly WallAnchor[];
+}
+
+/** See {@link GreatHallPlan}. `null` on a storey that is not the great hall. */
+export function greatHallPlan(deck: number): GreatHallPlan | null {
+  if (deck !== CASTLE_GREAT_HALL_DECK) return null;
+  const bays = greatHallTapestries(deck);
+  if (bays.length < 3) return null;
+  const centre = hallAxis(bays);
+  if (!centre) return null;
+  return { axisX: centre.x, wallZ: centre.z, inward: centre.out.z, bays };
+}
+
+/** The middle of each table in the run, nearest the throne first. */
+function feastTableCentres(plan: GreatHallPlan): number[] {
+  const first = plan.wallZ + plan.inward * (THRONE_FROM_WALL + TABLE_FROM_THRONE);
+  return Array.from(
+    { length: FEAST_TABLE_COUNT },
+    (_, i) => first + plan.inward * i * TABLE_HALF_LENGTH * 2,
+  );
+}
+
+/** One bench in the run: where its middle is, and which side of the table. */
+interface BenchPlacement {
+  readonly x: number;
+  readonly z: number;
+  /** -1 west of the axis, +1 east. */
+  readonly side: number;
+}
+
+/** Every bench at the banquet, in placement order. */
+function feastBenches(plan: GreatHallPlan): BenchPlacement[] {
+  const benches: BenchPlacement[] = [];
+  for (const tableZ of feastTableCentres(plan)) {
+    for (const side of [-1, 1]) {
+      for (const along of [-BENCH_ALONG, BENCH_ALONG]) {
+        benches.push({ x: plan.axisX + side * BENCH_OFFSET, z: tableZ + along, side });
+      }
+    }
+  }
+  return benches;
+}
+
+/**
+ * **Where a child sits at the banquet, and which way she faces.**
+ *
+ * `greatHallBanquet.ts` is the only caller. It is here rather than there
+ * because a seat is a fact about a bench, and the benches are placed here.
+ *
+ * ## Why `x` is the plank's *inner face* and not the plank's middle
+ *
+ * The kid rig has no knee, so a seated child's legs can only hang vertically —
+ * any rotation about the hip lifts her foot by `0.36·(1 − cos θ)`. Her hip
+ * pivot is at `KID_HIP_HEIGHT`, so hips on a {@link CASTLE_BENCH_SEAT} plank
+ * and feet on the floor is not one pose among several: it is the only one, and
+ * it is the entire reason the Artist cut the bench to 0.360 m.
+ *
+ * But her torso reaches **0.18 m below her own hip pivot**. A child placed on
+ * the middle of the plank therefore has 0.18 m of herself inside it. Placing
+ * her on the plank's inner face puts that 0.18 m *behind* her instead, where
+ * her own body hides it from a camera on the table's side — and it is the only
+ * placement that does, because the gap between the table's edge and the
+ * plank's inner face is 0.45 m and her hem is 0.80 m across. She does not fit
+ * in front of the bench; she has to be half on it.
+ *
+ * The clearance that leaves in front of her is 5.2 cm against the table's edge,
+ * which is thin enough that it is asserted rather than trusted — see
+ * `check:castle`'s banquet assertion.
+ */
+export interface GreatHallSeat {
+  readonly x: number;
+  readonly z: number;
+  /** Turns a +Z-facing child to look across the table. */
+  readonly yaw: number;
+}
+
+/** Every seat at the banquet. See {@link GreatHallSeat}. */
+export function greatHallSeats(deck: number): readonly GreatHallSeat[] {
+  const plan = greatHallPlan(deck);
+  if (!plan) return [];
+
+  const seats: GreatHallSeat[] = [];
+  for (const bench of feastBenches(plan)) {
+    // The plank's inner face: its middle, pulled back towards the table by half
+    // its own measured width. Never a typed 0.30.
+    const x = bench.x - bench.side * CASTLE_BENCH_HALF_WIDTH;
+    // A child faces +Z, so a quarter turn one way or the other looks across the
+    // table. West of the axis she looks east.
+    const yaw = bench.side < 0 ? Math.PI / 2 : -Math.PI / 2;
+    for (const along of [-DINER_ALONG, DINER_ALONG]) {
+      seats.push({ x, z: bench.z + along, yaw });
+    }
+  }
+  return seats;
+}
+
+/**
+ * **The gap a diner has to fit in**: clear floor between the bench plank's
+ * inner face — where she sits — and the table's edge, in metres. 0.45 m.
+ *
+ * Derived from the two measured half-widths rather than read off the built
+ * scene, so `check:castle` can compare a *prediction* against what was built
+ * instead of restating it. A child's hem is 0.80 m across, which is what makes
+ * this a fit rather than a placement: see {@link GreatHallSeat}.
+ */
+export const DINER_TABLE_GAP = BENCH_OFFSET - CASTLE_BENCH_HALF_WIDTH - CASTLE_TABLE_HALF_WIDTH;
 
 /**
  * Where the throne stands, measured back from the end wall.
@@ -239,20 +414,13 @@ const THRONE_FROM_WALL = 2.8;
  * and ask nothing about what a prop *is*.
  */
 export function dressGreatHall(deck: number, floor: Group): void {
-  if (deck !== CASTLE_GREAT_HALL_DECK) return;
-
-  const bays = greatHallTapestries(deck);
-  if (bays.length < 3) return;
+  const plan = greatHallPlan(deck);
+  if (!plan) return;
 
   const group = new Group();
   group.name = castleFurnitureGroupName(deck);
 
-  const centre = hallAxis(bays);
-  if (!centre) return;
-  const wallZ = centre.z;
-  // Into the room, away from whichever wall the bay is on.
-  const inward = centre.out.z;
-  const axisX = centre.x;
+  const { bays, wallZ, inward, axisX } = plan;
 
   for (const bay of bays) group.add(...tapestry(bay));
 
@@ -272,8 +440,7 @@ export function dressGreatHall(deck: number, floor: Group): void {
     group.add(...armourOnPlinth(axisX + side * 5, wallZ + inward * 4.3, inward));
   }
 
-  const tableZ = wallZ + inward * (THRONE_FROM_WALL + TABLE_FROM_THRONE);
-  group.add(...feast(axisX, tableZ));
+  group.add(...feast(plan));
 
   // A bench by the fire, where `castleDecor.ts` has already put the cat and the
   // woodpile. Its Z comes from the hearth's own constant, so it cannot end up
@@ -392,36 +559,51 @@ const FEAST_SETTING: readonly FeastProp[] = [
   'loaf',
 ];
 
-/** The banqueting table, its benches, and the meal laid on it. */
-function feast(x: number, z: number): Object3D[] {
+/**
+ * **The banquet**: three tables end to end down the middle of the hall, benches
+ * both sides of every one of them, and the meal laid the whole length.
+ *
+ * This was one 6 m table parked at the throne end. #413 makes it a run — see
+ * {@link FEAST_TABLE_COUNT} for why it repeats the asset rather than growing
+ * one, and why three.
+ *
+ * The tables **butt**, because the pitch is `TABLE_HALF_LENGTH * 2` and that is
+ * the asset's own measured length: there is no gap to tune and no seam to
+ * notice, and there could not be one without the asset changing size.
+ */
+function feast(plan: GreatHallPlan): Object3D[] {
   const out: Object3D[] = [];
+  const { axisX } = plan;
 
-  const table = createCastleFeastTable();
-  table.root.position.set(x, 0, z);
-  out.push(table.root);
+  for (const z of feastTableCentres(plan)) {
+    const table = createCastleFeastTable();
+    table.root.position.set(axisX, 0, z);
+    out.push(table.root);
 
-  // Two benches a side rather than one 6 m one: the asset is 2.80 m, and four
-  // of them is what the contract asked for.
-  for (const side of [-1, 1]) {
-    for (const along of [-BENCH_ALONG, BENCH_ALONG]) {
-      const bench = createCastleBench();
-      bench.root.position.set(x + side * BENCH_OFFSET, 0, z + along);
-      out.push(bench.root);
-    }
+    // Laid down the middle of the table, on its **measured** top. A goblet
+    // standing on a typed 1.05 would have been 37 cm in the air ever since the
+    // furniture was cut to a child.
+    FEAST_SETTING.forEach((kind, index) => {
+      const prop = createCastleFeastProp(kind);
+      const along = (index - (FEAST_SETTING.length - 1) / 2) * 0.72;
+      // Alternate sides of the centre line so it reads as places laid for people
+      // sitting on both benches, not as a row of objects.
+      prop.root.position.set(axisX + (index % 2 === 0 ? -0.55 : 0.55), CASTLE_TABLE_TOP, z + along);
+      // Turned by its own place at the table rather than by its index within
+      // one table's setting, so the three tables are not three identical rows.
+      prop.root.rotation.y = (index + z) * 1.31;
+      out.push(prop.root);
+    });
   }
 
-  // Laid down the middle of the table, on its **measured** top. A goblet
-  // standing on a typed 1.05 would have been 37 cm in the air ever since the
-  // furniture was cut to a child.
-  FEAST_SETTING.forEach((kind, index) => {
-    const prop = createCastleFeastProp(kind);
-    const along = (index - (FEAST_SETTING.length - 1) / 2) * 0.72;
-    // Alternate sides of the centre line so it reads as places laid for people
-    // sitting on both benches, not as a row of objects.
-    prop.root.position.set(x + (index % 2 === 0 ? -0.55 : 0.55), CASTLE_TABLE_TOP, z + along);
-    prop.root.rotation.y = index * 1.31;
-    out.push(prop.root);
-  });
+  // Two benches a side per table rather than one long one: the asset is 2.80 m,
+  // and `feastBenches` is the same list `greatHallSeats` seats children from, so
+  // a diner cannot end up beside a bench rather than on it.
+  for (const { x, z } of feastBenches(plan)) {
+    const bench = createCastleBench();
+    bench.root.position.set(x, 0, z);
+    out.push(bench.root);
+  }
 
   return out;
 }
