@@ -4,7 +4,7 @@ import {
   CROSSING_STATION_CLEARANCE,
   CROSSING_STATION_STRUCTURE_CLEARANCE,
 } from './clearance';
-import { DECK_HALF_LENGTH, MIN_BRIDGE_HALF_LENGTH } from './bridgeFootprint';
+import { MIN_BRIDGE_HALF_LENGTH } from './bridgeFootprint';
 import { STATION_GAP } from './fence';
 import {
   NARROW_HALF_WIDTH,
@@ -13,10 +13,10 @@ import {
   SITE_HALF_WIDTH,
   SITE_HALF_WIDTHS,
   SITE_PLOT_MARGIN,
-  SITE_RAIL_MARGIN,
   SITE_RAMP_FLOOR,
   SITE_RAMP_IDEAL,
   fitBridgeAcross,
+  railCorridorBlocked,
   probeBridgeReach,
 } from './bridgeFit';
 
@@ -234,13 +234,9 @@ function probeReach(
  * {@link bridgeCandidateAt} hands it to `bridgeFit.ts`'s shared width/angle
  * search as well as using it through {@link probeReach}.
  */
-const plannerBlocked = (x: number, z: number, along: number): boolean => {
-  if (nearStationStructure(x, z)) return true;
-  // Past the deck the ramp is ordinary near-ground paving — it may not run
-  // inside the rail's own corridor (obliques skirt it).
-  if (along > DECK_HALF_LENGTH && railDistanceAt(x, z) < SITE_RAIL_MARGIN) return true;
-  return false;
-};
+const corridorBlocked = railCorridorBlocked(railDistanceAt);
+const plannerBlocked = (x: number, z: number, along: number): boolean =>
+  nearStationStructure(x, z) || corridorBlocked(x, z, along);
 
 /** The `side = +1` direction at `railDistance` — `crossings.ts`'s own sign
  * convention (`side = sign(tangent.z * dx - tangent.x * dz)`). */

@@ -186,6 +186,24 @@ export function probeBridgeReach(
 export const SITE_RAIL_MARGIN = FENCE_OFFSET + 0.5;
 
 /**
+ * **A ramp may not run inside the railway's own corridor.**
+ *
+ * Past the deck a ramp is ordinary near-ground paving, so a ramp beside the
+ * rails is a ramp in the four-foot; the obliques are the ones that skirt it.
+ * Only past {@link DECK_HALF_LENGTH}, because the deck is *over* the railway by
+ * definition and that is the whole point of it.
+ *
+ * A factory, and shared, because the two callers differ only in which route
+ * they measure against. `crossingPlanSolve.ts` asks it of the solved
+ * `TRAIN_PLAN.route`; `train/route.ts`'s `satisfies` backstop asks it of a
+ * candidate loop that has only just closed and is not yet anybody's plan. The
+ * *rule* is the same one in both, and it is this one.
+ */
+export function railCorridorBlocked(railDistanceAt: (x: number, z: number) => number): ExtraBlocked {
+  return (x, z, along) => along > DECK_HALF_LENGTH && railDistanceAt(x, z) < SITE_RAIL_MARGIN;
+}
+
+/**
  * Candidate crossing angles, radians off square, in preference order — square
  * first (the network is predominantly grid-aligned and a crossing reads best
  * square to the track; Decision 6 keeps diagonals a genuine minority), modest

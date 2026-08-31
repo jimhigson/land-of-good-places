@@ -75,12 +75,12 @@ const STATION_SEEDS = [
 export { clearOfPlots } from '../parkLayout';
 import { clearOfPlots } from '../parkLayout';
 import {
-  CROSSING_STATION_CLEARANCE,
-  CROSSING_STATION_STRUCTURE_CLEARANCE,
-  STATION_GAP,
-} from './clearance';
-import { DECK_HALF_LENGTH } from './bridgeFootprint';
-import { SITE_RAMP_IDEAL } from './bridgeFit';
+  STATION_SEARCH_STEP,
+  STATION_SEARCH_WINDOW,
+  chosenCrossingCorridor,
+  stationCrossingConflict,
+} from './crossingKeepOut';
+import type { Vec2 } from '../rail/segments';
 
 /** The waiting spot beside the platform at `distance` — same side math the
  * station builder uses: the park side, 2.15 m off the centre line. */
@@ -109,9 +109,20 @@ export function stationStand(
 function clearStationDistance(route: TrainRoute, target: number): number {
   const tangent = new Vector3();
   const centre = new Vector3();
-  const crossingCentre = new Vector3();
-  const crossingTangent = new Vector3();
-  const stationWindow = new Vector3();
+
+  // **The loop's own chosen crossing** (issue #427) — the ground a station may
+  // not stand on, in either of the two senses `crossingKeepOut.ts` owns. Built
+  // once here and asked per candidate below; the module's header says why the
+  // rule lives there rather than being written out at each of its two callers.
+  const crossingWindow: Vec2 = { x: 0, z: 0 };
+  const corridor = chosenCrossingCorridor(
+    route.flatPointAt(0, { x: 0, z: 0 }),
+    route.tangentAt(0, new Vector3()),
+  );
+  const crossingConflictAt = (distance: number) =>
+    stationCrossingConflict(distance, route.length, corridor, (d) =>
+      route.flatPointAt(d, crossingWindow),
+    );
 
   // Scored, not first-fit (issue #241). With the plots unpinned and the loop
   // hugging a spline rim, the stretch nearest a seed bearing can be one
@@ -127,7 +138,11 @@ function clearStationDistance(route: TrainRoute, target: number): number {
   //  - and, mildly, nearness to the seed's bearing.
   let best = target;
   let bestScore = Infinity;
-  for (let offset = -60; offset <= 60; offset += 2) {
+  for (
+    let offset = -STATION_SEARCH_WINDOW;
+    offset <= STATION_SEARCH_WINDOW;
+    offset += STATION_SEARCH_STEP
+  ) {
     const distance = target + offset;
     const { standX, standZ } = stationStand(route, distance);
     route.tangentAt(distance, tangent);
@@ -159,64 +174,27 @@ function clearStationDistance(route: TrainRoute, target: number): number {
     // (seed 11 built exactly that before this term existed).
     const cruiserLow = nearCruiserLowCorridor(standX, standZ, 8);
 
-    // **Never on the loop's own chosen crossing** (issue #427). The loop is
-    // grown from a pose where a bridge provably fits — rail distance 0 — and
-    // `crossingPlanSolve.ts` will refuse to plan a crossing within
-    // `CROSSING_STATION_CLEARANCE` of a station. So a station placed there
-    // silently destroys the one thing the whole loop was grown to guarantee.
+    // **Never on the loop's own chosen crossing** (issue #427), in either
+    // sense: not within `CROSSING_STATION_CLEARANCE` of it *along the loop*,
+    // and not within `CROSSING_STATION_STRUCTURE_CLEARANCE` of the corridor its
+    // deck and ramps occupy *in space*. The loop winds, so those are two rules
+    // and not one seen twice — a station a hundred metres away around the
+    // circuit can still stand a few metres from the crossing.
     //
-    // Measured before this term existed, seed 2: a station landed at
-    // d = -2.0 m, on the crossing, and the park came out with **no bridge at
-    // all** — the only seed of fourteen that still could not bridge. Weighted
-    // above every other term because a park with no bridge is invalid (Jim's
-    // ruling on #414), while a station a few metres off its ideal spot is
-    // merely not ideal.
-    const onChosenCrossing =
-      Math.abs(route.wrap(distance + route.length / 2) - route.length / 2) <
-      CROSSING_STATION_CLEARANCE;
-
-    // **And clear of it in SPACE, not only along the loop** (#427). The loop
-    // winds, so a station a hundred metres away around the circuit can stand a
-    // few metres from the crossing in plain space — and the crossing planner's
-    // own `nearStationStructure` then refuses the crossing, reporting the deck
-    // blocked. Measured: seeds 2 and 15 each chose a bridgeable crossing,
-    // solved a loop through it, satisfied the along-the-loop clearance, and
-    // still came out with zero bridge sites.
-    //
-    // The crossing is not a point: its deck and both ramps run
-    // `DECK_HALF_LENGTH + SITE_RAMP_IDEAL` either way along the crossing axis,
-    // and `nearStationStructure` is asked about every one of those probe
-    // points. So the whole of the station's own window has to stand clear of
-    // that corridor, which is what this measures — the station window's
-    // sampled points against the crossing's axis segment.
-    let onCrossingStructure = false;
-    {
-      const half = DECK_HALF_LENGTH + SITE_RAMP_IDEAL;
-      route.pointAt(0, crossingCentre);
-      route.tangentAt(0, crossingTangent);
-      // The crossing axis is square to the track (`crossingPoses.ts` builds
-      // the pose that way), so the ramps run along the track's normal.
-      const axisX = crossingTangent.z;
-      const axisZ = -crossingTangent.x;
-      for (let w = -STATION_GAP; w <= STATION_GAP && !onCrossingStructure; w += 2) {
-        route.pointAt(route.wrap(distance + w), stationWindow);
-        const dx = stationWindow.x - crossingCentre.x;
-        const dz = stationWindow.z - crossingCentre.z;
-        const along = Math.max(-half, Math.min(half, dx * axisX + dz * axisZ));
-        const nearestX = crossingCentre.x + axisX * along;
-        const nearestZ = crossingCentre.z + axisZ * along;
-        if (
-          Math.hypot(stationWindow.x - nearestX, stationWindow.z - nearestZ) <
-          CROSSING_STATION_STRUCTURE_CLEARANCE
-        ) {
-          onCrossingStructure = true;
-        }
-      }
-    }
+    // The loop was grown from a pose where a bridge provably fits, and
+    // `crossingPlanSolve.ts` refuses to plan a crossing near a station either
+    // way, so a station placed here silently destroys the one thing the whole
+    // loop was grown to guarantee. Measured before these terms existed, seed 2:
+    // a station at d = -2.0 m, on the crossing, and a park with **no bridge at
+    // all**. Weighted above every other term put together, because a park with
+    // no bridge is invalid (Jim's ruling on #414) while a station a few metres
+    // off its ideal spot is merely not ideal — and `crossingKeepOut.ts`'s
+    // `crossingSurvivesStationAt` relies on that ordering holding.
+    const conflict = crossingConflictAt(distance);
 
     const score =
-      (onChosenCrossing ? 5000 : 0) +
-      (onCrossingStructure ? 5000 : 0) +
+      (conflict.alongLoop ? 5000 : 0) +
+      (conflict.inSpace ? 5000 : 0) +
       (blocked ? 1000 : 0) +
       (approachBlocked ? 120 : 0) +
       (cruiserLow ? 400 : 0) +
