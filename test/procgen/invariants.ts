@@ -5626,6 +5626,72 @@ const bridgePavingIsCarriedByItsOwnMasonry: Invariant = (facts) => {
 };
 
 /**
+ * **No drawn path ends in mid-air on a bridge** — issue #414.
+ *
+ * Jim, three times about the same bridge, the third time exactly:
+ *
+ * > "there is also a path that runs into the side of the bridge — basically
+ * > runs into a solid wall"
+ *
+ * and
+ *
+ * > "path finding needs to include bridges from the start, not as an
+ * > afterthought to add to an existing path layout"
+ *
+ * A drawn route has two ends. One of them standing on a bridge's paving, well
+ * above the ground beneath it, is a path that **stops partway up a ramp or on
+ * the deck**: a child follows it and arrives at masonry with nowhere to go.
+ * Measured on the canonical seed before the fix, `spur-dodgems` branched off
+ * the gate approach at (-22.2, 36.4) — a point on the bridge's own crown, 4.40
+ * m in the air — and ran 7 m along the ramp before turning off its side.
+ *
+ * **This is deliberately unconditional.** It is not scoped to bridges the
+ * planner proved, even though scoping it was for a while the only way to make
+ * it pass: three of the five seeds were red on it because a bridge had been
+ * built where the planner proved none, and narrowing the assertion to hide
+ * that is exactly the "never weaken an assertion to make a seed pass" rule.
+ * What made it true everywhere was fixing both halves — `paths.ts` keeping off
+ * the ground a bridge will stand on, and `bridgeFootprint.ts` refusing to
+ * build one where no bridge was ever proven.
+ *
+ * ## The threshold is the child's own step, not a bridge number
+ *
+ * A path end at a ramp **foot** is completely correct: the hump has clamped
+ * back down to the terrain there, so the paving is lying on the ground and the
+ * path simply joins it. Measured, those sit at ~0.06 m. A genuinely stranded
+ * end measured 1.13 m to 4.40 m.
+ *
+ * So the line is {@link BUILDING_STEP_UP} — *the height the game lets a child
+ * step up*, from `core/constants.ts`, the same number the walker itself uses.
+ * Below it she walks on; above it there is a wall in front of her. Taking the
+ * threshold from the player rather than from the generator's own ramp targets
+ * is CLAUDE.md's rule, and the lesson `MAX_RAMP_GRADIENT` taught in #375 —
+ * that one came from the nav lattice instead of the player, and this whole
+ * area went wrong behind it.
+ *
+ * The two populations are three orders of slack apart, so the invariant does
+ * not balance on the constant's exact value.
+ */
+const noDrawnPathEndsStrandedOnABridge: Invariant = (facts) => {
+  const complaints: string[] = [];
+  // Not vacuous by construction: a park with no bridges has no way to strand
+  // a path end on one, and the seeds that build none are a real outcome now
+  // that unproven bridges are refused (seed 2 builds zero). The bridge-side
+  // anti-vacuity guard is `bridgePavingIsCarriedByItsOwnMasonry`'s, which
+  // already fails if no bridge carries any paving at all.
+  for (const end of facts.strandedPathEnds) {
+    if (end.aboveGround <= BUILDING_STEP_UP) continue;
+    complaints.push(
+      `the drawn route "${end.route}" ends at (${fmt(end.at)}) on ${end.bridge}, ` +
+        `${end.aboveGround.toFixed(2)} m above the ground beneath it — more than a child's own ` +
+        `step-up of ${BUILDING_STEP_UP} m, so the path stops against masonry she cannot get ` +
+        'past. A path may cross a bridge; it may not end on one',
+    );
+  }
+  return complaints;
+};
+
+/**
  * **The railway is crossed on purpose, and mostly on bridges.**
  *
  * Jim, 23 August 2026: the park is designed around the bridge constraints —
@@ -8248,6 +8314,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     'every crossing on a site the planner proved bridgeable still carries its bridge',
     everyProvenBridgeSiteKeepsItsBridge,
   ],
+  ['no drawn path ends in mid-air on a bridge', noDrawnPathEndsStrandedOnABridge],
   [
     'no bridge stands where the crossing planner proved none fits',
     noBridgeStandsWhereNoneWasProven,
