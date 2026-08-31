@@ -457,7 +457,7 @@ export class WildPets {
    * Picks somewhere to go — and this is where the 80% is spent.
    *
    * Candidates are real meadow cells, so a creature can never decide to stand
-   * on the paving, in a shaft, or through a bench: the meadow is the one
+   * on the paving, on the trampoline, or through a bench: the meadow is the one
    * definition of where the grass is and this asks it rather than re-deriving
    * it (`roofMeadow.ts`).
    *

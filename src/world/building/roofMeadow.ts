@@ -195,13 +195,16 @@ export interface RoofMeadow {
    * How much room this point has before it reaches anything the garden must
    * keep off — a keep-out, a bench, the parapet — in metres, negative inside.
    *
-   * Exposed because **the grass and the burrows need the same measurement at
-   * two different thresholds**. A tuft reaches about half a metre and the
-   * meadow's own {@link KEEP_OUT_MARGIN} covers it; a burrow mound is
-   * {@link BURROW_RADIUS} across and `check:castle` measures a prop's whole
-   * footprint against `radius + PLAYER_RADIUS`, which the meadow's margin does
-   * not cover. Handing out the number rather than a second copy of the rule is
-   * what stops those two drifting.
+   * Exposed because **the grass and the burrows measure against the same
+   * keep-outs**, and handing out the number rather than a second copy of the
+   * rule is what stops the two drifting.
+   *
+   * The threshold this is measured at is the *tuft's* — {@link KEEP_OUT_MARGIN}
+   * is `PLAYER_RADIUS + TUFT_REACH`, and a tuft reaches further than a burrow
+   * mound does, because it is jittered off its cell centre and then leans and
+   * splays. So a cell with any clearance at all can already hold a mound; see
+   * {@link roofBurrows}, which used to add `BURROW_RADIUS + PLAYER_RADIUS` on
+   * top of this and was charging the burrow for the tuft's jitter twice.
    */
   clearanceAt(x: number, z: number): number;
 }
@@ -383,16 +386,17 @@ const burrowCache = new Map<number, readonly Burrow[]>();
  *
  * Same discipline as the meadow itself: these come out of {@link roofMeadow}'s
  * own cells, so a burrow is always *in* the long grass by construction rather
- * than by a coordinate somebody checked once. When #407 shrinks the roof and
- * drops a market into it, the meadow moves and the burrows move with it.
+ * than by a coordinate somebody checked once. When the castle's floor split
+ * (#377/#380) took the roof plate down to 21.21 x 15.56 m half-extents, the
+ * meadow did move and the burrows moved with it — though see
+ * {@link BURROW_SPACING} for the half of that claim which did *not* hold.
  *
  * This used to re-test each candidate against `BUILDING_SHAFTS` on top of what
  * the meadow already excluded, because a burrow is a hole a creature walks
  * *into* and a burrow inside the helter-skelter's shaft would be a creature
  * vanishing down a slide rather than a tuft of grass clipping a wall. **There
- * are no shafts now** (#377/#380), so the second test is gone with them and the
- * meadow's own clearance is the whole answer — asked here at a stricter
- * threshold, which is the part that was always doing the work.
+ * are no shafts now** (#377/#380), so that second test is gone with them and
+ * the meadow's own clearance is the whole answer.
  */
 export function roofBurrows(deck: number): readonly Burrow[] {
   const cached = burrowCache.get(deck);
