@@ -1,6 +1,7 @@
 import { Rng } from '../../core/mathUtils';
 import type { Pose2 } from '../rail/segments';
 import { GARDEN_PLAY_BOUNDARY } from '../boundary';
+import { ENTRANCE_GATE_X, ENTRANCE_GATE_Z } from '../entrance/layout';
 import {
   NARROW_HALF_WIDTH,
   SITE_BOUNDARY_MARGIN,
@@ -55,6 +56,76 @@ import {
  * bridgeable poses while its solved loop proves zero bridge sites.** Its park
  * is full of ground a bridge fits on; the loop just never went near any of it.
  */
+
+/**
+ * **The walk in from the gate gets first refusal on the crossing.**
+ *
+ * `paths.ts` runs an authored corridor down the radial from just inside the
+ * arch — the park's main avenue, and **the one leg of the network that is not
+ * routed through a planned crossing site**. Every other path is; this one is
+ * hand-drawn because a child walks it from her first second in the park. So
+ * wherever the loop happens to cut it, the network meets the railway somewhere
+ * `crossingPlanSolve.ts` never offered, and the whole premise fails at the
+ * park's front door. Measured before this existed: seed 11 crossed at
+ * (0.0, 55.3), seed 5 at (0.0, 54.8).
+ *
+ * **Choosing the crossing here is Jim's design applied to the path that
+ * matters most** — pick where a path and the railway cross, then grow the
+ * railway from it. The entrance crossing then *is* a planned, bridgeable site
+ * by construction, rather than something checked afterwards.
+ *
+ * ## Why not keep the railway off the corridor instead
+ *
+ * That was built and measured on this branch, and it **fails**: solve rate
+ * 14/15 → **9/15**, with seeds 5 and 11 — two of the five CI seeds — unable to
+ * build a park at all, and the canonical seed surviving only at restart #86 of
+ * 96. The reason is structural rather than tunable: a keep-out down the
+ * corridor is a ~10 m × 30 m bar driven into the park **from the rim**, and it
+ * severs the rim the closed loop wants to run along. Narrowing it narrows the
+ * spike; the rim is still cut. Reverted.
+ *
+ * `HANDOFF-bridge-at-the-front-door.md` reached the same place from the other
+ * side: it made the entrance cross on a bridge by **routing the path**, never
+ * by moving the railway. That was the right lever, and this is the same lever
+ * one step earlier.
+ *
+ * These poses are simply put at the head of the ranked field, so the search
+ * tries them first and falls back to the rest if none closes a loop. Costs the
+ * search nothing: it constrains which pose is picked, not where the loop runs.
+ */
+function gateCorridorPoses(): Pose2[] {
+  const length = Math.hypot(ENTRANCE_GATE_X, ENTRANCE_GATE_Z) || 1;
+  // Inward along the radial — the direction the corridor itself runs, and so
+  // the direction the path crosses in.
+  const dirX = -ENTRANCE_GATE_X / length;
+  const dirZ = -ENTRANCE_GATE_Z / length;
+  const poses: Pose2[] = [];
+  // From just inside the arch to the far end of the authored corridor
+  // (`paths.ts` runs it from z = 54 to at most z = 30, i.e. 6-30 m in).
+  for (let step = 6; step <= 30; step += 1) {
+    const x = ENTRANCE_GATE_X + dirX * step;
+    const z = ENTRANCE_GATE_Z + dirZ * step;
+    if (GARDEN_PLAY_BOUNDARY.distanceToEdge(x, z) < SITE_BOUNDARY_MARGIN) continue;
+    for (const halfWidth of [SITE_HALF_WIDTH, NARROW_HALF_WIDTH]) {
+      const { pos, neg, deckClear } = probeBridgeReach(
+        x,
+        z,
+        dirX,
+        dirZ,
+        halfWidth,
+        SITE_RAMP_IDEAL,
+        SITE_BOUNDARY_MARGIN,
+        SITE_PLOT_MARGIN,
+      );
+      if (deckClear && pos >= SITE_RAMP_FLOOR && neg >= SITE_RAMP_FLOOR) {
+        // Square across the walk, exactly as for any other crossing.
+        poses.push({ x, z, hx: -dirZ, hz: dirX });
+        break;
+      }
+    }
+  }
+  return poses;
+}
 
 /** Grid pitch for candidate crossing points, metres. Fine enough not to step
  * over a usable strip of ground, coarse enough to sweep a park in ~95 ms. */
@@ -135,5 +206,10 @@ export function bridgeableCrossingPoses(seed: number): Pose2[] {
     candidates[i] = candidates[j] as Pose2;
     candidates[j] = a;
   }
-  return candidates.slice(0, POSES_OFFERED);
+  // The gate corridor's own crossings go first — see {@link gateCorridorPoses}.
+  // They are not shuffled into the field: their whole point is to be tried
+  // before anything else, so the park's front door gets the planned crossing
+  // whenever one is possible there at all.
+  const gate = gateCorridorPoses();
+  return [...gate, ...candidates].slice(0, POSES_OFFERED);
 }
