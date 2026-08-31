@@ -14,7 +14,13 @@ import { PALETTE } from '../../core/palette';
 import { Rng } from '../../core/mathUtils';
 import { softMaterial } from './parts';
 import { BENCH_CLEAR_RADIUS, deckBenchSpots, keepOutsFor, type KeepOut } from './dressing';
-import { BUILDING_SHAFTS, deckIsSolid, regionContains, TOP_DECK } from './layout';
+import {
+  insideInterior,
+  TOP_DECK,
+  TRAMPOLINE_RADIUS,
+  TRAMPOLINE_X,
+  TRAMPOLINE_Z,
+} from './layout';
 
 /**
  * **The long grass on the roof garden** (issue #406).
@@ -111,14 +117,25 @@ const PATCH_RADIUS = 8.4;
 const KEEP_OUT_MARGIN = 1.0;
 
 /**
- * Offsets a cell is probed at against every shaft, in metres.
+ * How much room the trampoline gets, beyond its own pad.
  *
- * The tuft is jittered up to `MEADOW_CELL * 0.3` off its cell centre and its
- * blades lean 0.13 m out, so the drawn clump reaches about 0.5 m — and
- * `check:castle` samples a prop's whole footprint, not its origin. 1.1 m
- * covers that with room to spare, which is what a shaft deserves.
+ * **The shafts this used to probe against no longer exist.** `BUILDING_SHAFTS`,
+ * `DECK_HOLES` and `deckIsSolid` were deleted when the castle's floors became
+ * three disjoint spaces (#377/#380): a shaft is a hole through a slab so that
+ * something can travel between two storeys, and there are no two storeys left
+ * to travel between. That deletion removed the whole class of fault this
+ * feature tripped over three times — the meadow grew through the
+ * helter-skelter's helix on its first run and `check:castle` said so.
+ *
+ * One neighbour survives the split, and it is a *surface* rather than a hole:
+ * the trampoline is a toy on the roof garden now. It is not in
+ * {@link keepOutsFor} — that list predates the trampoline being a roof
+ * fixture — so the meadow names it here rather than growing 0.85 m grass up
+ * through a pad a child bounces on. The pad is {@link TRAMPOLINE_RADIUS}
+ * across; the margin is a stride, so she can land off the edge of it into
+ * paving rather than into grass she cannot see her feet through.
  */
-const SHAFT_PROBE = [-1.1, 0, 1.1] as const;
+const TRAMPOLINE_MARGIN = 1.6;
 
 export interface MeadowCell {
   readonly x: number;
@@ -165,21 +182,23 @@ export function roofMeadow(deck: number): RoofMeadow {
 }
 
 function findMeadow(deck: number): RoofMeadow {
-  const blocked: KeepOut[] = keepOutsFor(deck);
-  const benches = deckBenchSpots(deck, blocked, deck === TOP_DECK);
+  const isRoof = deck === TOP_DECK;
+  const blocked: KeepOut[] = [...keepOutsFor(deck)];
+  // The benches are sampled against the *castle's* keep-out list, so this has
+  // to be added after they are asked for or the two would disagree about what
+  // the roof contains.
+  const benches = deckBenchSpots(deck, blocked, isRoof);
+  if (isRoof) {
+    blocked.push({
+      x: TRAMPOLINE_X,
+      z: TRAMPOLINE_Z,
+      radius: TRAMPOLINE_RADIUS + TRAMPOLINE_MARGIN,
+    });
+  }
 
   /** How far this point is from the nearest thing the grass must keep off —
    *  negative when it is inside one. The parapet counts as a thing. */
   const clearance = (x: number, z: number): number => {
-    // A shaft comes down through **every** storey, hole in the floor or not:
-    // the helter-skelter's helix, the bubble's tube and the trampoline's well
-    // are all structure standing in that column, and `keepOutsFor` only lists
-    // the helter's *entry* and only on the deck you board it from. The first
-    // version of this meadow grew straight through the helter shaft on the
-    // roof and `check:castle` said so, which is the check doing exactly the
-    // job it was written for. A region test rather than a distance, because a
-    // shaft is a rectangle or a circle and there is no radius to subtract.
-    if (insideAnyShaft(x, z)) return -1;
     let best = Math.min(
       INTERIOR_HALF_X - PARAPET_INSET - Math.abs(x),
       INTERIOR_HALF_Z - PARAPET_INSET - Math.abs(z),
@@ -201,7 +220,10 @@ function findMeadow(deck: number): RoofMeadow {
     for (let iz = -halfZ; iz <= halfZ; iz += 1) {
       const x = ix * MEADOW_CELL;
       const z = iz * MEADOW_CELL;
-      if (!deckIsSolid(deck, x, z)) continue;
+      // The plate has no holes in it any more, but the loop bounds are a grid
+      // and the plate is a rectangle: ask the plate rather than trusting the
+      // arithmetic that generated the indices.
+      if (!insideInterior(x, z)) continue;
       const room = clearance(x, z);
       if (room <= 0) continue;
       free.push({ x, z, room });
@@ -291,13 +313,13 @@ const burrowCache = new Map<number, readonly Burrow[]>();
  * than by a coordinate somebody checked once. When #407 shrinks the roof and
  * drops a market into it, the meadow moves and the burrows move with it.
  *
- * **Deliberately re-tested against `BUILDING_SHAFTS` here**, even though
- * `roofMeadow` already excludes them. A burrow is a hole a creature walks
- * *into*, so it is the one piece of this feature where being inside a shaft
- * would be a creature vanishing into the helter-skelter rather than a tuft of
- * grass clipping a wall — and this is the third fault of exactly that shape in
- * two days (the great-hall feast table, #401's bubble, my own first meadow).
- * The cost is a few dozen point tests at construction.
+ * This used to re-test each candidate against `BUILDING_SHAFTS` on top of what
+ * the meadow already excluded, because a burrow is a hole a creature walks
+ * *into* and a burrow inside the helter-skelter's shaft would be a creature
+ * vanishing down a slide rather than a tuft of grass clipping a wall. **There
+ * are no shafts now** (#377/#380), so the second test is gone with them and the
+ * meadow's own clearance is the whole answer — asked here at a stricter
+ * threshold, which is the part that was always doing the work.
  */
 export function roofBurrows(deck: number): readonly Burrow[] {
   const cached = burrowCache.get(deck);
@@ -322,9 +344,7 @@ export function roofBurrows(deck: number): readonly Burrow[] {
    * keep-out list to fall out of step.
    */
   const needed = BURROW_RADIUS + PLAYER_RADIUS;
-  const eligible = cells.filter(
-    (cell) => meadow.clearanceAt(cell.x, cell.z) >= needed && !insideAnyShaft(cell.x, cell.z),
-  );
+  const eligible = cells.filter((cell) => meadow.clearanceAt(cell.x, cell.z) >= needed);
 
   /**
    * **Farthest-point selection, not first-fit.**
@@ -376,19 +396,6 @@ export function roofBurrows(deck: number): readonly Burrow[] {
 
   burrowCache.set(deck, chosen);
   return chosen;
-}
-
-/** True if this point (or its immediate surroundings) is in one of the
- *  building's vertical shafts. Shared by the meadow and the burrows. */
-function insideAnyShaft(x: number, z: number): boolean {
-  for (const shaft of BUILDING_SHAFTS) {
-    for (const dx of SHAFT_PROBE) {
-      for (const dz of SHAFT_PROBE) {
-        if (regionContains(shaft.region, x + dx, z + dz)) return true;
-      }
-    }
-  }
-  return false;
 }
 
 /**
