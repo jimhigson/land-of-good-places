@@ -88,6 +88,21 @@ jobs:
         # counts live in `.npmrc`, which pnpm reads.
         run: pnpm install --frozen-lockfile
 
+      # **`build` builds. It does not check.**
+      #
+      # This step used to run a `build` script that was 47 checks followed by a
+      # 191 ms `vite build` — so publishing re-ran the entire QA suite, ~16
+      # minutes, to produce an artefact that takes a fifth of a second, on a
+      # commit whose checks had already passed. That duplication *was* the 29
+      # August outage: it pushed the job past `timeout-minutes`, and a timeout
+      # reports as `cancelled`, so the site sat stale with nothing red anywhere.
+      #
+      # The checks now live in `pnpm run check`, run by `checks.yml`, which is a
+      # **required status check on `main`** — so nothing reaches this workflow
+      # without having passed them. Publishing does not re-run them.
+      #
+      # If you ever put the checks back into `build`, this step goes back to
+      # taking 16 minutes and the cap below starts mattering again.
       - name: Build
         run: pnpm run build
 
