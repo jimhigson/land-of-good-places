@@ -483,6 +483,23 @@ const VIEW_MARGIN = 0.08;
 const VIEW_CHILD_HEIGHT = TALLEST_CHILD_HEIGHT;
 
 /**
+ * How much more than a bare fingertip the view aims to leave between two
+ * keyrings, as a multiple.
+ *
+ * `TAP_FINGER_PIXELS` is a **minimum**, and framing a shot to land exactly on a
+ * minimum leaves nothing: the smallest change to a model, the counter or the
+ * lean tips it under, and `check:keyring-view` goes red for a rounding error
+ * rather than for a regression. Aiming 15% clear means the check is measuring
+ * real headroom — the difference between "this passes" and "this passes by
+ * 0.04 m" is the difference between a check that reports and one that merely
+ * agrees.
+ *
+ * The check asserts the bare rule, never this. Raising this number cannot make
+ * a failing rack pass; it only decides how much daylight the view aims for.
+ */
+const TAP_HEADROOM = 1.15;
+
+/**
  * The screen axes this view frames against. Solved once: the park's camera
  * never turns (ARCHITECTURE.md, "One camera angle, forever"), so the basis is
  * as constant as the two angles it comes from — and `screenBasis.ts`'s own
@@ -813,26 +830,30 @@ export class KeychainShop implements GameSystem {
    * the decision would only prove the check agrees with itself.
    */
   viewZoom(camera: ViewCamera): number {
-    const wanted = camera.zoomToFit(
-      this.content.halfWidth,
-      this.content.halfHeight,
+    // The tightest shot that still holds all six keyrings. `viewFocus` is their
+    // own centre, so their half-extents are measured about it directly.
+    const ceiling = camera.zoomToFit(
+      this.requiredContent.halfWidth,
+      this.requiredContent.halfHeight,
       VIEW_MARGIN,
     );
-    // About the focus, not about the keyrings' own middle: the focus sits at the
-    // centre of the *whole* wish-list, so the child pulls it sideways off the
-    // rack, and the rack needs room for that offset too. Measuring it about its
-    // own centre here would repeat #418's own mistake one level down.
-    const required = halfExtentsAbout(
-      this.requiredContent,
-      this.content.centreRight,
-      this.content.centreUp,
+    // How far back the shot would go to get the child in as well — measured
+    // about the same focus, so her being off to one side costs what it really
+    // costs rather than being averaged away.
+    const withChild = halfExtentsAbout(
+      this.content,
+      this.requiredContent.centreRight,
+      this.requiredContent.centreUp,
     );
-    const ceiling = camera.zoomToFit(required.halfWidth, required.halfHeight, VIEW_MARGIN);
-    const floor = camera.zoomForPixelSize(this.viewClosestKeyringGap, TAP_FINGER_PIXELS);
-    // `min` before `max`: the ceiling is the one demand that cannot bend, so a
-    // viewport too narrow to satisfy both bounds keeps every keyring on screen
-    // and reports the tap failure through `check:keyring-view` rather than
-    // silently cropping one of the six to keep a gap.
+    const wanted = camera.zoomToFit(withChild.halfWidth, withChild.halfHeight, VIEW_MARGIN);
+    const floor = camera.zoomForPixelSize(
+      this.viewClosestKeyringGap,
+      TAP_FINGER_PIXELS * TAP_HEADROOM,
+    );
+    // `max` first, then `min`: pull back for the child, but never past the point
+    // where the rack stops being tappable, and never closer than every keyring
+    // fitting. The ceiling wins ties because a keyring off-screen cannot be
+    // chosen at all, where one that is merely close to its neighbour still can.
     return Math.min(Math.max(wanted, floor), ceiling);
   }
 
@@ -1374,11 +1395,21 @@ export class KeychainShop implements GameSystem {
     this.requiredContent = contentFrame(VIEW_BASIS, this.viewRequiredSubjects);
     this.content = contentFrame(VIEW_BASIS, this.framedSubjects);
 
-    // {@link rackFocus}: the world point that puts the content box's own centre
-    // in the middle of the frame, so the margins come out even by construction
-    // rather than by a weight somebody nudged against a screenshot. Corrected
-    // from the rack's own world centre, which keeps the focus at a sensible
-    // depth for anything else reading `IsoCamera.focusPoint`.
+    // {@link rackFocus}: the world point that centres **the six keyrings** in
+    // the frame.
+    //
+    // Not the centre of everything-including-the-child, which was the first cut
+    // of this fix and was wrong in an instructive way. The child is croppable
+    // and the keyrings are not ({@link viewZoom}), so a focus placed between
+    // them means that zooming in to keep the rack tappable pushes keyrings off
+    // the far edge — the shot has no room to tighten without breaking the one
+    // thing it may not break. Centred on the rack, tightening is always safe:
+    // it crops her, symmetrically, from a shot whose subject stays put. It is
+    // also simply the right composition for a picker — the things being chosen
+    // are in the middle.
+    //
+    // Corrected from the rack's own world centre, which keeps the focus at a
+    // sensible depth for anything else reading `IsoCamera.focusPoint`.
     let sumX = 0;
     let sumZ = 0;
     for (const keyring of this.rack) {
@@ -1389,7 +1420,7 @@ export class KeychainShop implements GameSystem {
     const rackCentreZ = sumZ / this.rack.length;
     focusForFrame(
       VIEW_BASIS,
-      this.content,
+      this.requiredContent,
       { x: rackCentreX, y: this.groundY + keyringLocalY, z: rackCentreZ },
       this.rackFocus,
     );
