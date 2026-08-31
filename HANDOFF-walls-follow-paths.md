@@ -103,11 +103,49 @@ wood 92 → 70, stone 63 → 92, and seed 11 fell 28 → 20 while canonical rose
 Raise the first, lower the second. **Do not fix this by loosening the
 placement rule.**
 
+## Final numbers
+
+| seed | walls before | walls after | stranded before | stranded after | nearest paving before | after | worst approach after |
+|---|---|---|---|---|---|---|---|
+| 20260728 | 27 | 35 | 15 | 0 | 3.37 | 0.43 | 2.91 |
+| 2 | 35 | 28 | 28 | 0 | 3.52 | 0.44 | 2.97 |
+| 5 | 25 | 29 | 22 | 0 | 3.45 | 0.47 | 3.16 |
+| 11 | 28 | 22 | 23 | 0 | 3.53 | 0.43 | 2.50 |
+| 18 | 40 | 41 | 28 | 0 | 3.34 | 0.39 | 2.83 |
+| **total** | **155** | **155** | **116** | **0** | | | |
+
+Wood 92 → 88, stone 63 → 67. Flush runs (face within `PLAYER_RADIUS` of
+paving): 0 → 9 / 9 / 8 / 9 / 11.
+
+**The count knob is spacing, not budget.** `BENCH_CANDIDATES` 4200 → 1300 moved
+the canonical seed only 26 → 22 stone: acceptance is packing-limited. So
+`MAZE_CORNER_SPREAD` 12 → 7 and a new `BENCH_SPREAD = 9`. No clearance was
+touched to achieve this.
+
+## Exit codes
+
+- `pnpm run test:procgen` — **0**, 487 passed, 16 files, all five seeds.
+- `pnpm run build` — **0**.
+- `pnpm run check` — `check:park-boot` red on the loaded box, **green on its own
+  re-run (exit 0)**; that is #324. Everything before it in the `&&` chain passed
+  (including `check:park`, `check:waypoints`, `check:nav-routes`);
+  `check:arrival-completes` run separately, exit 0.
+
+## #414
+
+Verified by merging `origin/fix/paths-planned-before-bridges` into a scratch
+branch: procgen 486/487, and the **one** failure (`no paved path stops anywhere
+but a destination`, seed 5) reproduces on **#414's branch alone with none of my
+code**. Not mine — reported to the Overseer. All wall invariants including the
+new one passed on the combination.
+
 ## Status
 
 - [x] Root cause measured on all five seeds
 - [x] Placement implemented — anchors are paths only, offset flush-to-one-path-width
-- [ ] Budgets tuned to hold the count
-- [ ] Invariant + mutation proof
-- [ ] `pnpm run check` / `test:procgen` / `build` exit codes
-- [ ] Screenshots, PR, rebase onto #414
+- [x] Count held: 155 → 155
+- [x] Invariant + both claims proved red by separate mutations
+- [x] Exit codes recorded
+- [x] Before/after screenshots, 30 images, `/tmp/qa417`
+- [x] Verified against #414's branch
+- [ ] PR raised; needs a real rebase once #414 merges
