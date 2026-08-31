@@ -218,3 +218,41 @@ Dev servers on 5422 (this branch) and 5423 (an `origin/main` worktree at
 `.claude/worktrees/drag-baseline`, for the A/B) are **stopped**; both ports
 confirmed free with `lsof -nP -i:<port> | grep LISTEN`. Remove that baseline
 worktree when the PR is done with.
+
+## Rebase onto `origin/main`, 31 Aug 2026
+
+Rebased `feat/drag-to-look-around` onto `dd5a1b09` (after #420, #423, #431,
+#440). **One conflict, twice: `package.json`'s `check` chain only.** `main` had
+added `check:speech-bubbles`; this branch adds `check:look-around`. Both kept —
+the chain is now 50 segments, all `&&`, with `check:look-around` still directly
+after `check:tap-spacing`. No source file conflicted.
+
+Verified afterwards that the rebase changed **nothing** in this branch's own
+diff: `git diff <old-base>..<old-head> --stat` and `git diff origin/main..HEAD
+--stat` are identical, and `Game.ts`, `constants.ts`, `PointerControls.ts` and
+`check-look-around.mts` are byte-identical to their pre-rebase blobs.
+`IsoCamera.ts` differs *only* by main's own additions (`screenOffset`,
+`isOnScreen`, #415) landing alongside ours.
+
+Those two happen to compose correctly rather than by luck: `isOnScreen` measures
+against `camera.position`, which `applyTransform` now places over `viewFocus` —
+so a bubble belonging to a child the player has panned away from correctly
+counts as off-screen.
+
+### Gate results
+
+- `pnpm run build` — **exit 0**
+- `pnpm run test:procgen` — **exit 0**, 16 files / 497 tests
+- `tsc --noEmit` — **exit 0**
+- All 49 `check:*` steps run individually: **48 green**, including
+  `check:look-around` (58 checks, still asserting 18 px / 600 ms imported from
+  `tapGesture.ts` and the 3 s return to the player's own position).
+
+`check:speech-bubbles` is **red on `main` too** — not this branch. Reproduced on
+a clean detached `origin/main` worktree with its own install, byte-identical
+message: *"Wren at (-7.77, 0.05, 50.49) is not on screen, but her bubble is
+drawn at (-5.21, 2.98, 47.93) — 4.66 m away"*. Nothing here was weakened or
+retuned to get through the rebase.
+
+Nothing on `main` competes for the pointer: `src/core/input/` is untouched
+between the old merge base and `dd5a1b09`.
