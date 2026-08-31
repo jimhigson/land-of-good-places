@@ -17,6 +17,7 @@ import { toonMaterial } from '../art/style/materials';
 import { createFlowerPickEffect, type FlowerPickEffect } from '../art/effects/flowerSparkle';
 import { terrainHeight } from './terrain';
 import { isOnPath } from './pathGraph';
+import { clearOfCruiser } from './Scenery';
 import { ANCHORS } from './anchors';
 import { pressZone, type InteractZone } from './interact';
 import { highlightInstance } from './highlight';
@@ -134,6 +135,22 @@ const SIZE_SEED = 0x1a3e07;
  */
 const LARGE_STEM_SCALE = 2.9;
 const LARGE_HEAD_SCALE = 2.0;
+
+/**
+ * The tallest and widest a flower can ever grow, derived from the same two
+ * ranges {@link spawnAt} draws its targets from and the same wiggle flare the
+ * update applies — never restated, so a retune of either moves this with it.
+ *
+ * These exist for one reason: to ask {@link clearOfCruiser} whether the Sky
+ * Cruiser's car passes low over a spot before a flower is planted there. Every
+ * other scattered thing in the park already asks it — trees, bushes, hiding
+ * walls, lamp posts — and the meadow was the one population that never did.
+ * Measured on seed 11: the car flies through `living-flower-heads` at 4.0 m
+ * along its loop, world (-57.51, 0.70, -20.16), which is the ride's own
+ * station approach where the profile is barely off the grass.
+ */
+const TALLEST_FLOWER = 0.32 * LARGE_STEM_SCALE + 0.27 * LARGE_HEAD_SCALE * 1.18;
+const WIDEST_FLOWER = 0.27 * LARGE_HEAD_SCALE * 1.18;
 /** How much wider a large flower's stalk is. A tall stem on a hair needs it. */
 const LARGE_STALK_WIDTH = 2.1;
 
@@ -547,6 +564,10 @@ export class Flowers implements GameSystem {
       if (isOnPath(x, z, 0.5)) continue;
       if (this.insideAnyAnchor(x, z, 0.5)) continue;
       if (this.insideAnyTapKeepOut(x, z)) continue;
+      // Under the Sky Cruiser's car where it flies low — see
+      // {@link TALLEST_FLOWER}. The same gate, and the same grid, every other
+      // scattered thing in the park already passes through.
+      if (!clearOfCruiser(x, z, WIDEST_FLOWER, TALLEST_FLOWER)) continue;
       return { x, z };
     }
     // Fell through every attempt (shouldn't happen with this much open lawn) —
