@@ -6,6 +6,7 @@ import {
   Group,
   InstancedMesh,
   Matrix4,
+  Mesh,
   MeshToonMaterial,
   PlaneGeometry,
   Quaternion,
@@ -241,6 +242,18 @@ export function castleTorchAnchors(deck: number): WallAnchor[] {
     ) {
       return;
     }
+    // And nothing on the chimney breast. The fireplace is 4.70 m of stone
+    // standing proud of the north wall, and a sconce anchored on that stretch
+    // of wall is a bracket buried inside a pier: measured before this guard
+    // existed, one torch stood at x = -7.85 with the east jamb occupying
+    // -8.10..-7.55 at exactly that wall face, and it was drawn *inside* it.
+    //
+    // Derived from the chimneypiece's own half-widths rather than from a
+    // hand-typed span, so widening the fireplace moves the torches rather than
+    // re-burying them. `TORCH_REACH` is added for the same reason it is added
+    // to a keep-out above: what has to clear the stone is the widest mesh the
+    // anchor places, not the anchor point.
+    if (onChimneyBreast(deck, anchor)) return;
     anchors.push(anchor);
   };
 
@@ -264,6 +277,20 @@ export function castleTorchAnchors(deck: number): WallAnchor[] {
   }
 
   return anchors;
+}
+
+/**
+ * Is this wall anchor on the fireplace's stone?
+ *
+ * See {@link castleTorchAnchors}'s call site. Note it asks about the **wall**
+ * the hearth is on, not merely about the plan distance: the chimney is against
+ * `-WALL_FACE_Z` and a torch on the opposite wall 30 m away is not on it.
+ */
+function onChimneyBreast(deck: number, anchor: WallAnchor): boolean {
+  if (deck !== CASTLE_HEARTH.deck) return false;
+  if (Math.abs(anchor.z - CASTLE_HEARTH.z) > 3) return false;
+  const stone = HEARTH_OPENING_HALF_WIDTH + HEARTH_JAMB_WIDTH + TORCH_REACH;
+  return Math.abs(anchor.x - CASTLE_HEARTH.x) < stone;
 }
 
 /** Evenly spaced points along a wall, inset from the corners at both ends. */
@@ -387,6 +414,91 @@ function brazierGeometry(): BufferGeometry {
 }
 
 /**
+ * **How big the fireplace is.** Jim asked for a *large* one (#413), and at child
+ * scale that is settled by the ruling that governs everything else in this room:
+ * *"it doesn't matter if things are a realistic size, only that they are easily
+ * recognisable as what they are."*
+ *
+ * 3.60 m across the opening and 2.20 m to the lintel — wider than the feast
+ * table is long is too much, and narrower than a child is tall stops reading as
+ * a fireplace and starts reading as an oven. A 2.12 m child can walk into it
+ * upright, which is the size a six-year-old wants a fireplace to be.
+ */
+const HEARTH_OPENING_HALF_WIDTH = 1.8;
+const HEARTH_OPENING_HEIGHT = 2.2;
+
+/**
+ * How far the firebox reaches into the room from the wall face.
+ *
+ * 1.10 m, and it is the fire that sets it rather than taste: the flames stand
+ * at {@link CASTLE_HEARTH}`.z`, which is a published constant this file does
+ * not get to move, and the widest of them measures 0.67 m across. A 0.90 m
+ * firebox left 3 cm between the fire and the stone at the back; 1.10 m leaves
+ * the flames inside their own fireplace with margin, which is the thing
+ * `check:castle` now asserts.
+ */
+const HEARTH_DEPTH = 1.1;
+
+/** How wide each stone pier beside the opening is. */
+const HEARTH_JAMB_WIDTH = 0.55;
+
+/** How deep the lintel across the opening is, top to bottom. */
+const HEARTH_LINTEL_DEPTH = 0.42;
+
+/**
+ * **Where the chimney stops — derived from the timber, not chosen.**
+ *
+ * The hearth is against a wall, so the ceiling that applies to it is
+ * {@link BEAM_UNDERSIDE} (3.08 m) rather than the room's 3.30 m: the wall-plate
+ * hangs in a {@link BEAM_WIDTH} band round the perimeter, and `check:castle`'s
+ * prop assertion measures a near-wall prop against the lower of the two. Three
+ * centimetres under it, so the stone is not exactly on the line — the same
+ * margin the soot mark takes for the same reason.
+ */
+const HEARTH_TOP = BEAM_UNDERSIDE - 0.03;
+
+/** How wide the flue is where it meets the timber. */
+const HEARTH_FLUE_HALF_WIDTH = 0.85;
+
+/**
+ * **The bank of flames in the hearth**: how far each sits from the middle, and
+ * how big it is, as a multiple of {@link FLAME_HEIGHT}.
+ *
+ * Tallest in the middle and falling away to the sides, which is the shape a
+ * fire actually is and the shape three equal cones were not. Seven rather than
+ * three because the opening is 3.6 m wide: the same three flames that filled a
+ * bare patch of wall are a candle in a fireplace this size.
+ */
+const HEARTH_FLAMES: readonly (readonly [offset: number, scale: number])[] = [
+  [-1.16, 2.6],
+  [-0.78, 3.5],
+  [-0.39, 4.4],
+  [0, 5.0],
+  [0.39, 4.4],
+  [0.78, 3.5],
+  [1.16, 2.6],
+];
+
+/**
+ * How wide every flame in the hearth is, as a multiple of {@link FLAME_RADIUS}
+ * — **one width for all seven, while their heights differ.**
+ *
+ * That is what makes the bank read as one fire rather than as seven cones of
+ * graded size: overlapping tongues of the same thickness, of different heights,
+ * is what a fire looks like. 2.5 puts each at 0.67 m across, so seven of them
+ * pitched 0.39 m apart overlap into a continuous 2.6 m mass inside a 3.6 m
+ * opening — and each stays inside the firebox's depth, which is the constraint
+ * that actually decides this number. See {@link FlameSpot.radial}.
+ */
+const HEARTH_FLAME_WIDTH = 2.5;
+
+/** How high off the hearthstone the flames start — the top of the log pile. */
+const HEARTH_FLAME_BASE = 0.52;
+
+/** How far the hearthstone is laid out into the room. */
+const HEARTH_STONE_DEPTH = 1.6;
+
+/**
  * The hearth's log pile — three crossed logs the fire sits in.
  *
  * Mine rather than the Artist's, and the split is deliberate: the chimneypiece
@@ -397,16 +509,145 @@ function brazierGeometry(): BufferGeometry {
 function logPileGeometry(): BufferGeometry {
   const parts: BufferGeometry[] = [];
   const rng = new Rng(0x106);
-  for (let i = 0; i < 5; i += 1) {
-    const log = new CylinderGeometry(0.12, 0.11, rng.range(0.9, 1.3), 7);
+  // Nine logs, not five, and half as long again. The pile is sized off the
+  // opening it sits in rather than off nothing: five 1.1 m logs looked like a
+  // campfire that had wandered indoors once there were 3.6 m of fireplace round
+  // them, which is the same fault as a flame that is correct in the inspector
+  // and invisible in the game — a dimension judged against no context at all.
+  for (let i = 0; i < 9; i += 1) {
+    const log = new CylinderGeometry(0.15, 0.14, rng.range(1.5, 2.3), 7);
     log.rotateZ(Math.PI / 2);
     log.rotateY(rng.range(-1.1, 1.1));
-    log.translate(rng.range(-0.25, 0.25), 0.13 + i * 0.1, rng.range(-0.2, 0.2));
+    log.translate(rng.range(-0.5, 0.5), 0.16 + i * 0.09, rng.range(-0.24, 0.24));
     parts.push(log);
   }
   const first = parts[0];
   if (!first) throw new Error('castleLighting: the log pile built nothing.');
   return mergeGeometries(parts, false) ?? first;
+}
+
+/**
+ * **The fireplace's opening, published** — the box a hearth flame must burn
+ * inside, in the floor group's own frame.
+ *
+ * Exported so `check:castle` can assert exactly that, which is the assertion
+ * #412 says nobody had. Its account of the bug is worth repeating, because this
+ * constant is the answer to it: when the great hall moved storeys, the hearth's
+ * *fire* was left behind on the mall's plate — `castle-hearth-logs-0` burning
+ * at world x = 600 in the middle of the market while the stone it belongs to
+ * stood 300 m away — and **every check was green, because a fire without a
+ * fireplace breaks no assertion.**
+ *
+ * There is now one, and it is not a name check: it measures every flame
+ * instance against this box. A fire that leaves its fireplace fails whether it
+ * left by moving, by growing, or by the fireplace moving out from under it.
+ *
+ * Derived from {@link CASTLE_HEARTH} and the two numbers below rather than
+ * typed, so the stone and the flames cannot be moved apart — which is the
+ * other half of the same lesson. One owner for both halves.
+ */
+export const CASTLE_HEARTH_OPENING = {
+  halfWidth: HEARTH_OPENING_HALF_WIDTH,
+  height: HEARTH_OPENING_HEIGHT,
+  /** How far the firebox reaches into the room from the wall face. */
+  depth: HEARTH_DEPTH,
+} as const;
+
+/**
+ * **The chimneypiece** — jambs, lintel, hood, fireback and hearthstone, built
+ * from primitives round {@link CASTLE_HEARTH}.
+ *
+ * Jim, 31 August 2026: *"a large fireplace with a roaring fire"*. Before this
+ * there was **no fireplace at all**: `CASTLE_HEARTH` was a log pile and three
+ * flame cones against a bare pink wall, and `castleDecor.ts`'s `hearthside()`
+ * added a sleeping cat and a woodpile beside them. The chimneypiece its own doc
+ * comment refers to — "the Artist's chimneypiece, batch 2 B1", which the hearth
+ * is placed so as to be built *round* — was never authored.
+ *
+ * ## Why it is built here, in the fire's own file
+ *
+ * Because of #412 and the 300 m fire. The rule that came out of that is *if you
+ * add anything with two halves, make one owner responsible for both* — and a
+ * fireplace and its fire are the canonical two halves. So the stone is emitted
+ * from inside the same `if (deck === CASTLE_HEARTH.deck)` block that places the
+ * logs and the flames, out of the same constant, in the same group. There is no
+ * arrangement of edits that moves one without the other, which is a stronger
+ * guarantee than any amount of care.
+ *
+ * ## What decides its size
+ *
+ * The height. This is against a wall, so the ceiling that applies is
+ * `BEAM_UNDERSIDE` (3.08 m) and not the room's 3.30 m — the timber wall-plate
+ * hangs in a {@link BEAM_WIDTH} band round the perimeter and `check:castle`'s
+ * prop assertion measures a near-wall prop against it. The hood therefore stops
+ * at {@link HEARTH_TOP}, which is derived from `BEAM_UNDERSIDE` rather than
+ * chosen, so a beam that ever moves takes the chimney with it.
+ */
+function chimneypiece(): Group {
+  const group = new Group();
+  group.name = `castle-hearth-surround-${CASTLE_HEARTH.deck}`;
+  group.position.set(CASTLE_HEARTH.x, 0, -WALL_FACE_Z);
+
+  const stone = softMaterial(PALETTE.stonePinkDark, 0.85);
+  const soot = softMaterial(PALETTE.ink, 0.6);
+
+  const block = (
+    name: string,
+    geometry: BufferGeometry,
+    material: MeshToonMaterial,
+  ): void => {
+    const mesh = new Mesh(geometry, material);
+    mesh.name = name;
+    mesh.castShadow = false;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  };
+
+  // The two piers the opening is between. Their inner faces *are* the opening's
+  // edges, which is what makes CASTLE_HEARTH_OPENING a description of the built
+  // stone rather than a second opinion about it.
+  for (const side of [-1, 1]) {
+    const jamb = new BoxGeometry(HEARTH_JAMB_WIDTH, HEARTH_OPENING_HEIGHT, HEARTH_DEPTH);
+    jamb.translate(
+      side * (HEARTH_OPENING_HALF_WIDTH + HEARTH_JAMB_WIDTH / 2),
+      HEARTH_OPENING_HEIGHT / 2,
+      HEARTH_DEPTH / 2,
+    );
+    block('castle-hearth-jamb', jamb, stone);
+  }
+
+  // The lintel across the top of the opening.
+  const lintelWidth = (HEARTH_OPENING_HALF_WIDTH + HEARTH_JAMB_WIDTH) * 2;
+  const lintel = new BoxGeometry(lintelWidth, HEARTH_LINTEL_DEPTH, HEARTH_DEPTH + 0.14);
+  lintel.translate(0, HEARTH_OPENING_HEIGHT + HEARTH_LINTEL_DEPTH / 2, (HEARTH_DEPTH + 0.14) / 2);
+  block('castle-hearth-lintel', lintel, stone);
+
+  // The hood: a tapered slab from the lintel up to the timber. Four sides, so
+  // it is a chunky painted trapezoid rather than a cone — ART_DIRECTION §1.
+  const hoodBottom = HEARTH_OPENING_HEIGHT + HEARTH_LINTEL_DEPTH;
+  const hoodHeight = HEARTH_TOP - hoodBottom;
+  const hood = new CylinderGeometry(HEARTH_FLUE_HALF_WIDTH, lintelWidth / 2, hoodHeight, 4, 1);
+  // A four-sided cylinder is a diamond in plan; an eighth turn squares it up.
+  hood.rotateY(Math.PI / 4);
+  // Scaled on Z alone so the square section becomes the chimney's own oblong —
+  // deep enough to sit over the firebox, no deeper.
+  hood.scale(1, 1, (HEARTH_DEPTH + 0.14) / lintelWidth);
+  hood.translate(0, hoodBottom + hoodHeight / 2, (HEARTH_DEPTH + 0.14) / 2);
+  block('castle-hearth-hood', hood, stone);
+
+  // The fireback: the sooted plate the fire burns against. Flat against the
+  // wall face, which is where this group's own origin is.
+  const back = new BoxGeometry(HEARTH_OPENING_HALF_WIDTH * 2, HEARTH_OPENING_HEIGHT, 0.12);
+  back.translate(0, HEARTH_OPENING_HEIGHT / 2, 0.06);
+  block('castle-hearth-back', back, soot);
+
+  // The hearthstone, laid out into the room. Under the ankle threshold
+  // `check:castle` exempts floor treatment at, because it is floor treatment.
+  const slab = new BoxGeometry(lintelWidth + 0.5, 0.06, HEARTH_STONE_DEPTH);
+  slab.translate(0, 0.03, HEARTH_STONE_DEPTH / 2);
+  block('castle-hearth-stone', slab, stone);
+
+  return group;
 }
 
 // ------------------------------------------------------------- the system
@@ -416,7 +657,23 @@ interface FlameSpot {
   readonly x: number;
   readonly y: number;
   readonly z: number;
+  /** How tall, as a multiple of {@link FLAME_HEIGHT}. */
   readonly scale: number;
+  /**
+   * How **wide**, as a multiple of {@link FLAME_RADIUS} — omitted for a flame
+   * that simply scales, which is every wall torch and every brazier.
+   *
+   * It exists because the hearth's fire cannot scale. A torch's flame is a
+   * squat cone and multiplying it by five gives a squat cone five times the
+   * size: measured, the middle of the hearth's roaring fire came out **1.34 m
+   * across**, which is wider than the firebox is deep and burst through both
+   * the fireback and the opening. A roaring fire is *tall*, not fat, and those
+   * are two numbers rather than one.
+   *
+   * `exactOptionalPropertyTypes` is on, so this is omitted rather than set to
+   * `undefined` where it does not apply.
+   */
+  readonly radial?: number;
 }
 
 interface DeckFire {
@@ -526,7 +783,14 @@ export class CastleFire {
     }
 
     // --- the hearth ----------------------------------------------------
+    //
+    // **The stone and the fire are emitted together, from one block, out of one
+    // constant.** #412: the hall changed storeys, the fire was left behind, and
+    // it burned 300 m from its own surround with every check green. The rule
+    // that came out of it is that a thing with two halves gets one owner, and
+    // this `if` is that owner. See `chimneypiece`.
     if (deck === CASTLE_HEARTH.deck) {
+      group.add(chimneypiece());
       const logs = new InstancedMesh(logPileGeometry(), softMaterial(PALETTE.barkDark, 0.8), 1);
       logs.name = `castle-hearth-logs-${deck}`;
       logs.castShadow = false;
@@ -541,12 +805,33 @@ export class CastleFire {
       );
       logs.instanceMatrix.needsUpdate = true;
       group.add(logs);
-      for (const offset of [-0.42, 0, 0.42]) {
+      // **Roaring**, which is seven flames banked across the opening rather
+      // than three in the middle of a wall — and it is roaring *within* the
+      // budget, not by spending past it.
+      //
+      // The budget is worth stating, because the obvious one is the wrong one.
+      // `SCONCE_HEADROOM` (2.70 m) is a **wall torch's** ceiling: `check:castle`
+      // assertion 7 loops `i < anchors.length`, and these spots are pushed onto
+      // the same instance list *after* the wall torches, so they are outside
+      // it. What actually constrains a hearth flame is assertion 6's prop test,
+      // which measures every instance against `BEAM_UNDERSIDE` — 3.08 m, since
+      // the hearth is within `BEAM_WIDTH` of a wall.
+      //
+      // The tallest flame here reaches 0.52 + 0.2675 x 5.0 = **1.86 m**, which
+      // is under its own 2.20 m lintel with 34 cm to spare and less than two
+      // thirds of the ceiling it is allowed. So no threshold was relaxed and
+      // none needed to be: the binding constraint on a castle fire is the size
+      // of its own fireplace, and this fireplace is now large enough to hold a
+      // large fire.
+      for (const [offset, scale] of HEARTH_FLAMES) {
         spots.push({
           x: CASTLE_HEARTH.x + offset,
-          y: 0.52,
-          z: CASTLE_HEARTH.z + (offset === 0 ? 0 : 0.1),
-          scale: offset === 0 ? 3.2 : 2.3,
+          y: HEARTH_FLAME_BASE,
+          // Staggered front to back as well as side to side, so the bank reads
+          // as a fire with depth rather than as a row of cones on a line.
+          z: CASTLE_HEARTH.z + Math.cos(offset * 2.3) * 0.06,
+          scale,
+          radial: HEARTH_FLAME_WIDTH,
         });
       }
     }
@@ -621,7 +906,8 @@ function flameMesh(
   const scale = new Vector3();
   spots.forEach((spot, index) => {
     position.set(spot.x, spot.y, spot.z);
-    scale.set(spot.scale, spot.scale, spot.scale);
+    const wide = spot.radial ?? spot.scale;
+    scale.set(wide, spot.scale, wide);
     matrix.compose(position, identity, scale);
     mesh.setMatrixAt(index, matrix);
   });
