@@ -323,6 +323,18 @@ export class TrainRoute {
   /** Smallest gap between the centre line and the boundary wall. For reporting. */
   readonly minClearance: number;
 
+  /**
+   * What the loop search actually cost — start poses offered, which one won,
+   * restarts, backtracks (`rail/generate.ts`'s {@link SolveReport}).
+   *
+   * Exposed for `scripts/measure-train-solve-budget.mts` (#427): growing the
+   * loop from a chosen crossing pose trades a ring of 96 candidate rim
+   * bearings for a handful of interior ones, and `budgets.restarts` comes
+   * straight from `startPoses.length` — so whether that starves the search is
+   * a question about these numbers, and they were not readable from outside.
+   */
+  readonly solveReport: SolvedRailRoute['report'];
+
   private readonly solved: SolvedRailRoute;
   private readonly sampleX: Float64Array;
   private readonly sampleZ: Float64Array;
@@ -336,6 +348,7 @@ export class TrainRoute {
     // `check:park`, `test:procgen` and a continued save all take, none of which
     // pre-warm. Either way it is the same ladder walk.
     this.solved = takePrewarmedTrain() ?? solveTrainLoop();
+    this.solveReport = this.solved.report;
     this.length = this.solved.length;
 
     // A lookup table for "where along the loop is this point?" — used to place
