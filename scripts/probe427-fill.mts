@@ -132,3 +132,19 @@ for (const n of reachable) {
       `filled cells within 1 m = ${nearbyFilled}/25`,
   );
 }
+
+// Are the stranded nodes on a paved lane, and if so which route? `buildSeeds`
+// has no general scatter — every seed is a plaza kerb point, an attraction
+// entrance, a stall stand, a station, or a sample along a drawn ROUTE. If these
+// carry lane identities then paths genuinely run out there and the ribbon is
+// being severed, which is a different defect from sparse seeding.
+console.log('\nlane identity of each stranded node:');
+const byLane = new Map<string, number>();
+for (const n of stranded) {
+  const lane = (n as unknown as { lane?: { name: string; at: number } }).lane;
+  const label = lane ? lane.name : '(no lane — not a path sample)';
+  byLane.set(label, (byLane.get(label) ?? 0) + 1);
+  console.log(`  (${n.x.toFixed(1)}, ${n.z.toFixed(1)}) ${lane ? `lane=${lane.name} at=${lane.at}` : 'NO LANE'}${n.interesting ? ' (interesting)' : ''}`);
+}
+console.log('\nsummary:');
+for (const [name, count] of byLane) console.log(`  ${count} on ${name}`);

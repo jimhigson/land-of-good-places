@@ -924,3 +924,60 @@ elsewhere, so a strip no path serves gets only scatter seeds — and these two
 strips are ground the path network does not route into. **That is a story, not
 a measurement.** Check whether any stranded node carries a `lane` identity, and
 whether a ribbon runs into either strip, before acting on it.
+
+## CORRECTION — "the fix is more waypoints" WAS WRONG. It is severed spurs.
+
+I wrote, one measurement ago, that the ground is reachable and the waypoints are
+"too sparse to chain". **That is the sixth expired explanation on this ticket,
+and measurement killed it too.** `buildSeeds()` has **no general scatter**:
+every seed is a plaza kerb point, an attraction entrance, a stall stand, a
+station, or a sample every `ROUTE_SPACING` along a **drawn path route**. So I
+asked which lane each stranded node belongs to:
+
+```
+7 on spur-dodgems
+7 on spur-stall.waterFight
+6 on spur-stall.dodgems
+all 20, every one, carrying a lane identity
+```
+
+**All twenty are paving.** Not sparse scatter in an unserved strip — three
+*drawn spurs*, sampled at their normal 4 m pitch, running out into those strips
+and severed. The park drew a path to the dodgems and to the water fight stall,
+and the railway fence cuts it: every blocked edge fails at railGap 2.5 m against
+`fence.ts` panels, and `laneIsClear` cannot rescue it because the ribbon it
+walks crosses the same fence.
+
+### So the real defect
+
+**Three spurs cross the railway where no crossing was planned**, and `fence.ts`
+seals them. That is **the same defect as the seed-18 `test:procgen` failure**
+("the walk in from the gate crosses the railway ... and the crossing planner
+planned no crossing there at all"), and it is exactly #414's subject: *"`paths.ts`
+knows only a crossing point, never a bridge's ground"*. Not a waypoint problem
+at any level.
+
+What it costs a child: the **dodgems** and the **water fight stall** each have a
+spur drawn to them that is cut in half by a fence. Three of the twenty nodes are
+`interesting` — they are destinations, not filler.
+
+### The fix, and why I did not make it
+
+It belongs in the path router: a leg that crosses the railway must be routed
+through a planned `CROSSING_SITES` entry, which is precisely what
+`crossingPlanSolve.ts` exists to guarantee and precisely what #414 is open
+about. It is not a waypoint change, not a `MAX_EDGE` change, and not something
+to fix inside `poiGraph.ts` — the graph is reporting the park accurately.
+
+**This is the same root cause as the remaining seed-18 procgen failure**, so the
+two should be fixed together, and that fix changes the path network on every
+seed and needs all five measurements re-run behind it. It is a real piece of
+work and it is #414's, not a loose end of this one.
+
+**Recommend to the Overseer: this is the design question, and Jim should see
+it.** #427 has done what it set out to do — 92% of loops admit a bridge, up from
+79% at the ticket's opening — but growing the loop from an interior crossing
+lets the loop run between an attraction and the path that serves it, and the
+path router has no answer for that yet. That is a genuine consequence of the
+trade, not a bug in the mechanism, and it is the thing that should decide
+whether #414 lands on top of this branch or beside it.
