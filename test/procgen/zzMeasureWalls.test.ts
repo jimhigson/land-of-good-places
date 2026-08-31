@@ -62,6 +62,34 @@ describe(`measure walls seed ${seed}`, () => {
           (closestPath > 4 ? '  <-- STRANDED' : ''),
       );
     }
+    // Closest approach to real paving (every paved edge, plus the plaza disc),
+    // which is what the new invariant will measure.
+    const plazaNodes = facts.pathNodes.filter((n) => n.reach > 0);
+    const distToPaving = (p: readonly [number, number]): number => {
+      let n = nearestPath(p, allEdges);
+      for (const node of plazaNodes) {
+        const d = Math.hypot(p[0] - node.x, p[1] - node.z) - node.reach;
+        if (d < n) n = d;
+      }
+      return n;
+    };
+    let worstApproach = 0;
+    let flush = 0;
+    let widestBorder = 0;
+    for (const edge of borderEdges) widestBorder = Math.max(widestBorder, edge.halfWidth);
+    for (const wall of facts.walls) {
+      let closest = Infinity;
+      for (const point of alongRun(wall.from, wall.to, 1)) {
+        closest = Math.min(closest, distToPaving(point));
+      }
+      worstApproach = Math.max(worstApproach, closest);
+      if (closest - wall.halfWidth <= 0.62) flush += 1;
+    }
+    process.stderr.write(
+      `WORST closest-approach-to-paving across runs = ${worstApproach.toFixed(2)} m; ` +
+        `flush runs (face within PLAYER_RADIUS of paving) = ${flush}/${facts.walls.length}; ` +
+        `widest non-ring path halfWidth = ${widestBorder.toFixed(2)}\n`,
+    );
     process.stderr.write(
       `\n=== SEED ${seed} === walls=${facts.walls.length} ` +
         `(${JSON.stringify(byKind)}) stranded(>4m from paving)=${strandedCount}\n` +
