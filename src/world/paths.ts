@@ -1856,11 +1856,20 @@ function segmentCutsABridgeRamp(ax: number, az: number, bx: number, bz: number):
 }
 
 /**
- * Slack added to a site's own proven extent before this file screens
- * anything against it. A path's ribbon has width of its own
- * ({@link RIBBON_HALF_WIDTH_CEILING}), and the real bridge may end up a
- * little longer or wider than the site was proven at — the screen has to
- * cover where the masonry *lands*, not the centre line it was planned from.
+ * Slack added to a site's own proven extent before this file screens anything
+ * against it.
+ *
+ * **Half a metre, which is what the screen this replaced always used** — and
+ * deliberately not more. A wider skirt looks free and is not: raising it to
+ * 1.5 m (the ribbon's own half-width, which was the tempting justification)
+ * pulled enough lattice edges and branch candidates out of play on seed 5 that
+ * `spur-stall.facePaint` came out starting 3.10 m from any other paving,
+ * failing `no paved path stops anywhere but a destination`. The screen's job is
+ * to keep paths off the bridge, not to clear a plaza around it.
+ *
+ * The real widening in this rewrite is that the half-width now comes from the
+ * **site's own** proven `halfWidth` rather than a module constant, so a narrow
+ * site is screened at the width it was actually proven at.
  */
 const RAMP_SCREEN_MARGIN = 1.5;
 
@@ -2004,6 +2013,10 @@ function* streetLatticeSearch(): Generator<number, StreetLattice, void> {
       // were already screened (`edgeOk` below), which left exactly the case
       // #414 is about: the node itself stays valid, a route terminates *on*
       // it, and the ribbon starts halfway up a bridge.
+      //
+      // Measured: without this the canonical seed builds 2 bridges rather
+      // than 3 and seed 18 one rather than two, because a crossing whose
+      // approach wanders onto ramp ground stops landing on the planned site.
       const onRamp = pointStandsOnABridgeRamp(x, z);
       nodeOk[index] = clear && !inRing && !onRamp && rail.dist >= RAIL_CLAMP_DISTANCE ? 1 : 0;
       side[index] = rail.side;
