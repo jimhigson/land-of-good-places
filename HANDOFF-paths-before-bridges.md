@@ -298,3 +298,94 @@ With the gate ON, the honest unconditional assertion — *no drawn path may end
 stranded above the terrain on a bridge* — should be green everywhere, because
 the bridges that stranded them are not built. That is still to be confirmed and
 is the next step once Jim rules.
+
+---
+
+# STEP 2 LANDED — and two honest reds remain. NOT ready for a PR.
+
+`ONLY_PROVEN_BRIDGES` is on by default; `LGP_ALLOW_UNPROVEN_BRIDGES=1` reverses it.
+
+## The invariant, proved red by mutation
+
+`no drawn path ends in mid-air on a bridge` — unconditional, threshold
+`BUILDING_STEP_UP` (0.62 m, the game's own step-up). **Green on all five seeds.**
+
+Mutation = the reversal flag, which restores exactly the behaviour it exists to
+catch. `LGP_ALLOW_UNPROVEN_BRIDGES=1 pnpm exec vitest run
+test/procgen/seed-5.test.ts test/procgen/seed-18.test.ts`, exit 1:
+
+```
+FAIL seed 18 > no drawn path ends in mid-air on a bridge
+  the drawn route "spur-building" ends at (3.1, 25.7) on bridge, 1.13 m above
+  the ground beneath it — more than a child's own step-up of 0.62 m ...
+  the drawn route "spur-ferrisWheel" ends at (3.1, 25.7) ... 1.13 m ...
+FAIL seed 5 > no drawn path ends in mid-air on a bridge
+  "spur-dodgems" ends at (41.1, 33.3) ... 1.14 m ...
+  "spur-stall.spookyHouse" ends at (29.1, 21.3) ... 1.97 m ...
+  "spur-stall.dodgems" ends at (41.1, 33.3) ... 1.14 m ...
+```
+
+Geometry it was proved against: this branch's head, gate off. Five stranded
+ends across two seeds; zero with the gate on.
+
+## `pnpm run test:procgen` — exit 1. 483 passed, 4 failed.
+
+**These are not weakenable and I have not weakened them.**
+
+### (a) Seed 2 builds zero bridges — 3 failures
+
+- `nothing a bridge builds hangs into its own tunnel` — *no bridge was tested*
+- `every modelled coping stone sits on the wall it caps` — *no coping was tested*
+- `railway crossings are planned — station-clear, and mostly real bridges` —
+  *the park has 3 railway crossing(s) and not one real bridge*
+
+Two are anti-vacuity guards firing correctly; the third is a **design**
+assertion. Seed 2's planner proves **0 bridge sites anywhere on its loop**, so
+with unproven bridges refused it gets none. That is #392's real defect made
+visible instead of papered over by bridges that strand waypoints.
+
+CLAUDE.md's rule is *"never weaken an assertion to make a seed pass — swap the
+seed and write down why."* **Swapping seed 2 is therefore the sanctioned move,
+and it needs a decision**, because:
+- the replacement must be picked for *comparable geometry* (seed 2 was chosen
+  for its 36.7 m bridges — `scripts/probe-seed-bridges.mts`'s own note), and
+- a bridgeless park is a real product question. The family ruling is that a
+  path crosses on a bridge. A child who rolls a seed like 2 gets none.
+
+### (b) Seed 5 — `no paved path stops anywhere but a destination`
+
+`spur-stall.facePaint's start at 41.1, 9.3 is 3.10 m from the nearest other
+paving — it branches off nothing`. **Green on `origin/main`, so this is mine.**
+
+**Root-caused, not guessed.** `bestBranchPoint` picks the nearest point on a
+route's **control polyline**; the ribbon is drawn on the swept Catmull-Rom
+(`routeCurve`, tension 0.4). On a bend the two are metres apart. The ramp
+screen moved this spur's junction from a straight stretch onto a bowed one, and
+there the control point is 3.10 m off the drawn ribbon.
+
+Pre-existing two-definitions fragility — CLAUDE.md's most-cited failure — that
+this change lands on rather than creates.
+
+**The real fix**: `bestBranchPoint`/`fallbackSpurRoute` must measure against
+`routeCurve`, the one owner of the drawn shape. It lives in `pathGraph.ts`,
+which imports `paths.ts`, so `paths.ts` cannot import it — `routeCurve` (and
+its `drawnPolyline` fillet pass) should **move into `paths.ts`**, which already
+owns `RouteDefinition`, with `pathGraph.ts` importing it from there. Small
+ownership refactor, four other call sites, all read-only.
+
+### Things tried and rejected, so nobody repeats them
+
+- **Stub-leg screening instead of `nodeOk`** — did not fix seed 5 and lost
+  bridges. Reverted.
+- **`RAMP_SCREEN_MARGIN` 0.5 instead of 1.5** — did not fix seed 5, and cost
+  the canonical seed its third bridge and seed 18 its second. Reverted to 1.5.
+- **Dropping the `nodeOk` screen** — *does* fix seed 5, and costs canonical a
+  bridge (3→2) and seed 18 both (2→0, adding 3 more failures). Net worse.
+- **Pinning the spur's junction after `snapRunsToLattice`** — built, measured,
+  changed nothing (the junction was already the reported point). Reverted
+  rather than shipped as an unexercised mechanism.
+
+## Where this leaves the PR
+
+Not raised. `test:procgen` is red and CLAUDE.md is zero-tolerance. Needs an
+Overseer decision on the seed swap, and the `routeCurve` ownership move.
