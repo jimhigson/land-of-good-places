@@ -173,21 +173,75 @@ desktop keeps its tight composition; rotating the phone reframes for free.
    moves the front row to the counter's front edge.
 4. `Game.tick` asks the camera for the zoom instead of passing the constant.
 
+## Mutation transcripts — the check proved red before trusted green
+
+**1. Restore the old by-eye zoom (`viewZoom` returns 4.25) and the old
+off-centre focus (`VIEW_FOCUS_PLAYER_WEIGHT = 0.43`)** — i.e. the shipped code:
+
+```
+iPhone portrait 390x844: zoom 4.250, frame ±1.294 x ±2.801 m, finger 0.265 m
+  tightest is 'strawberry' with -0.718 m of margin to spare
+x the 'strawberry' keyring is OUTSIDE the frame — 0.622 m past the left/right edge.
+  A child cannot choose a keyring she cannot see (#418).
+x the 'rumi' keyring is OUTSIDE the frame — 0.528 m past the left/right edge.
+check:keyring-view FAILED — 5 problem(s)          (exit 1)
+```
+
+That is issue #418 reproduced exactly, from the built game.
+
+**2. Front row back to the old `RACK_ROW_GAP` position** (`localZ 0.355`
+instead of the derived `0.418`) — the view zooms in to the ceiling trying to
+keep the rack tappable and runs out of frame:
+
+```
+iPhone portrait 390x844: zoom 4.135, frame ±1.330 x ±2.879 m, finger 0.273 m
+x the 'strawberry' keyring is inside the frame but 0.000 m into the 8% margin
+  — it touches the edge of the screen.
+check:keyring-view FAILED — 1 problem(s)          (exit 1)
+```
+
+**3. Drop the tap floor from `viewZoom`, with the front row also back** — the
+tap branch on its own, six failures across both phone orientations:
+
+```
+iPhone portrait 390x844: zoom 2.059, frame ±2.671 x ±5.780 m, finger 0.548 m
+  closest pair 'ripika' and 'rainbow': 0.302 m vs a 0.548 m finger (TOO CLOSE)
+x 'stall:keychain:ripika' and 'stall:keychain:rainbow' are 0.302 m apart on screen
+  once their pick areas are allowed for, inside the 0.548 m a fingertip covers at
+  this zoom — a tap aimed at one can select the other (#418).
+  ... and 'star'/'heart', 'strawberry'/'rumi', plus all three again in landscape
+check:keyring-view FAILED — 6 problem(s)          (exit 1)
+```
+
+## Green, after the fix
+
+```
+iPhone portrait  390x844 : zoom 3.808, frame ±1.444 x ±3.126, finger 0.296
+   tightest 'strawberry' 0.106 m of margin spare; closest pair 0.341 vs 0.296 (0.044 spare)
+iPhone landscape 844x390 : zoom 5.192, frame ±3.126 x ±1.444, finger 0.296
+   tightest 'heart' 0.465 m spare;            closest pair 0.341 vs 0.296 (0.044 spare)
+desktop 16:9  1920x1080  : zoom 3.747, frame ±3.558 x ±2.001, finger 0.148
+   tightest 'heart' 0.981 m spare;            closest pair 0.341 vs 0.148 (0.193 spare)
+screen basis: analytic and rendered agree to 1.7e-16
+```
+
+`CAMERA_ZOOM_MAX` 4.6 -> 5.5: the landscape phone's derived zoom is 5.192 and
+4.6 was silently capping it, leaving 0.006 m of tap clearance. Its own doc
+comment already established that a derived framing must not run into a hand-set
+clamp unnoticed — the clamp rises or the check goes red.
+
 ## Status
 
-- [x] Worktree created off `origin/main` (6d475dab).
-- [x] Root cause of fault 1 identified — off-centre focus **and** by-eye zoom.
-- [x] Both faults reproduced with numbers (above).
-- [x] Design decided (above).
-- [ ] Derive zoom from content bounds at narrowest aspect.
-- [ ] Move front row to the table's front edge, measure separation.
-- [ ] New check inside `pnpm run check`, proved red by mutation.
-- [ ] 390×844 playwright-core screenshots before/after + a wide viewport.
+- [x] Worktree off `origin/main` (6d475dab); branch pushed.
+- [x] Both faults reproduced with numbers.
+- [x] Camera derived from content per viewport (`IsoCamera.zoomToFit`).
+- [x] Front row at the table's front edge, derived from the deepest keyring.
+- [x] `check:keyring-view` written, in `pnpm run check` (47 -> 48 steps... it
+      parses as 47 named `check:*` steps, verified by reading package.json as
+      JSON rather than grepping).
+- [x] Proved red by three mutations, all exit 1.
+- [x] `check:keyring-hang` still green.
+- [ ] Full `pnpm run check` + `build` + `test:procgen`.
+- [ ] 390x844 playwright screenshots, before/after, plus a wide viewport.
+- [ ] Confirm #405 HUD hiding still behaves (keychain zoom sets `Player.riding`).
 - [ ] PR referencing #418.
-
-## Notes for a replacement
-
-Five disconnects so far, all early — commit early and often. `pnpm run check`
-is the 47-check suite; `build` is `vite build` alone; `test:procgen` separate.
-`check:park-boot` is a known load-dependent flake (#324) with seven agents
-running — re-run quiet and test `origin/main` before believing a red is yours.
