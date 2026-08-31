@@ -6,6 +6,7 @@ import { RAIL_OVER_RAIL_AIR } from '../coaster/route';
 import { PARK_LAYOUT } from '../parkLayout';
 import { terrainHeight } from '../terrain';
 import { bridgeableCrossingPoses } from './crossingPoses';
+import { ENTRANCE_GATE_X, ENTRANCE_GATE_Z } from '../entrance/layout';
 import { PARK_SEED } from '../parkManifest';
 import { type Pose2, type SegmentKind, type Vec2, turnVocabulary } from '../rail/segments';
 import { railRouteSearch, RailRouteUnsolvable, type RouteBrief, type SolvedRailRoute } from '../rail/generate';
@@ -149,6 +150,27 @@ const TRAIN_VOCABULARY: readonly SegmentKind[] = turnVocabulary(
   { minLength: 10, maxLength: 26 },
 );
 
+
+/**
+ * How far in from the arch the loop is kept off the walk in.
+ *
+ * `paths.ts` runs its authored gate corridor from `z = 54` to at most
+ * `z = 30`, i.e. 24 m of walk plus the 6 m from the arch at `z = 60` to the
+ * corridor's own start. 30 m covers the whole of it. Past that the walk is the
+ * *routed* network, which crosses only at planned sites and needs no help.
+ */
+const GATE_CORRIDOR_KEEPOUT_REACH = 30;
+
+/**
+ * How far the centre line stays from the walk in.
+ *
+ * The corridor's own ribbon is 3.2 m wide (`paths.ts`), so 1.6 m of that is
+ * half-width; the rest is the track's own clearance plus the fence it carries.
+ * Deliberately no more: this keep-out already re-solves every seed's loop, and
+ * a wider one walls the north of the park off from the railway entirely.
+ */
+const GATE_CORRIDOR_KEEPOUT_RADIUS = 1.6 + TRACK_CLEARANCE + 2.0;
+
 /** One thing the loop must keep clear of, as a keep-out disc on the ground. */
 interface Obstacle {
   readonly x: number;
@@ -180,6 +202,39 @@ function trainObstacles(): Obstacle[] {
         : entry.boundingRadius + TRACK_PLOT_CLEARANCE;
     out.push({ x: entry.x, z: entry.z, reach });
   }
+  // **The walk in from the gate** (issue #427). The park's front door is an
+  // authored corridor — `paths.ts` runs it down `x = 0` from just inside the
+  // arch — and it is the one leg of the network that is NOT routed through a
+  // planned crossing site. So wherever the loop happens to cut across it, the
+  // network meets the railway somewhere `crossingPlanSolve.ts` never offered,
+  // and `theWalkInFromTheGateCrossesWhereItWasPlannedTo` fails: measured on
+  // this branch, seed 11 crossed at (0.0, 55.3) — 5.0 m inside the arch — and
+  // seed 5 at (0.0, 54.8).
+  //
+  // **This keep-out was built and measured once before** and reverted as out
+  // of scope — see `HANDOFF-bridge-at-the-front-door.md`, which records that
+  // it "re-solves *every* seed's loop" and "belongs in its own issue". It is
+  // in scope now for a specific reason: the loop no longer starts on the rim.
+  // It starts at a bridgeable crossing anywhere in the park (`crossingPoses.ts`),
+  // so it is free to begin beside the gate, and the front door stopped being
+  // somewhere loops merely *sometimes* wandered.
+  //
+  // Discs down the corridor rather than one big circle: the walk is a strip,
+  // and a disc wide enough to cover its length would also wall off half the
+  // north of the park.
+  {
+    const gateLength = Math.hypot(ENTRANCE_GATE_X, ENTRANCE_GATE_Z);
+    const inX = -ENTRANCE_GATE_X / gateLength;
+    const inZ = -ENTRANCE_GATE_Z / gateLength;
+    for (let step = 0; step <= GATE_CORRIDOR_KEEPOUT_REACH; step += 2) {
+      out.push({
+        x: ENTRANCE_GATE_X + inX * step,
+        z: ENTRANCE_GATE_Z + inZ * step,
+        reach: GATE_CORRIDOR_KEEPOUT_RADIUS,
+      });
+    }
+  }
+
   // The cruiser's dismount point: a fence across the spot a ride sets a child
   // down is the seed-18 failure shape, so the avoidance lives here.
   out.push({ x: COASTER_PLANS.cruiser.exitX, z: COASTER_PLANS.cruiser.exitZ, reach: 1.6 + 4.0 });
