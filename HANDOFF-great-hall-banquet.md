@@ -143,7 +143,8 @@ leg .rotation.x = -0.7  -> foot bottom y -0.046, z +0.176
 - [x] diners: 24, seated, measured (above)
 - [x] fireplace + roaring fire (3.6 x 2.2 m opening, tallest flame 1.858 m)
 - [x] assertions in `check:castle`, all four mutations proved red
-- [ ] browser pass at player height
+- [x] browser pass at player height (`scripts/qa-great-hall-banquet.mjs 5416 <out>`)
+- [x] gates: tsc 0, build 0, check 0 (all 47), test:procgen 0 (482 tests)
 
 ## The two new assertions, and the four mutations that proved them red
 
@@ -250,3 +251,48 @@ Two things measurement caught building it:
   exactly that wall face — a bracket drawn **inside** a stone pier.
   `castleTorchAnchors` now rejects the chimney breast, derived from the
   chimneypiece's own widths.
+
+
+## The browser pass found three things no measurement had asked about
+
+`node scripts/qa-great-hall-banquet.mjs 5416 <outDir>` — walks in out of the
+lift, which since #377 is the only way onto this storey, and photographs the
+hall at player height. Console clean on every shot; the deep link lands where it
+says (`/castle?deck=1&at=10.6,-10.5` -> player at 910.6, 0.7, 589.5).
+
+1. **A log through the back of the chimney.** Fixed, and now asserted —
+   mutation 4 above.
+2. **The fireplace was the same colour as the fire in it.** `stonePinkDark`
+   against pink masonry with orange flames inside. Now `ART.statueStone`.
+3. **The diners sat in six clumps.** Hair is 1.53 m across where the head is
+   1.36, and 0.70 m spacing alternated 1.40/1.70. Now 0.75 -> 1.50/1.60.
+
+And two more the second pass found: the fire read **pale salmon** because the
+emissive clips (see below), and one rank of seven cones read as a **comb** of
+teeth rather than as a fire.
+
+## The one thing I could not fully solve, for the Overseer
+
+**The fire is large and fills its fireplace; its colour is capped by the
+castle's shared flame palette, and I did not change that.**
+
+The mechanism is worth having written down. A torch's emissive is
+`ART.castleFlameDeep` 0xd4413e at `FLAME_BASE_EMISSIVE` 1.75:
+
+```
+(0.83, 0.25, 0.24) x 1.75 -> (1.45, 0.44, 0.42) -> clipped (1.00, 0.44, 0.42)
+```
+
+**The red channel clips and the other two keep climbing**, so past that point
+every extra unit of intensity *desaturates* — the fire walks toward white by way
+of pink. That is why the first build looked salmon, and it is why "make it
+brighter" cannot make it look hotter.
+
+The hearth now has its own material pair at 1.25, where red sits just under the
+clip and the fire holds a hot orange-red. That is as far as this branch can go
+without changing `ART.castleFlameDeep` itself, which is every torch in the
+castle and is #385's territory. **My honest read is that it is now plainly a big
+fire in a big fireplace, but its colour is the park's coral-orange rather than a
+deep red, so it reads more "bright hearth" than "roaring".** If Jim wants it
+hotter, the change is one hue in `artPalette.ts` and it affects forty sconces
+per storey — a decision, not a fix.
