@@ -63,24 +63,54 @@ export const CANONICAL_PARK_SEED = 20260728;
  *
  * **To change it:**
  *
- * 1. `pnpm run vet:seeds -- <from> <to>` to find candidates. Expect to try
- *    around eight for every one you keep.
+ * 1. `pnpm run vet:seeds -- <from> <to>` to find candidates.
  * 2. Put the passers in this array.
  * 3. `pnpm run vet:seeds -- --list <the whole pool>` to confirm the pool as a
- *    whole, and paste the run's date and commit into the table below.
+ *    whole, and update the note below with the date and commit.
+ *
+ * **Budget for a low hit rate.** Vetting seeds 1-1000 at `101b5415` tried
+ * **476 candidates and kept 14 — about one in thirty-four.** That number is a
+ * measurement of the generator's health, not of the search: of the rejected,
+ * roughly two thirds fail `check:park` (stranded waypoints; a railway loop
+ * that will not solve at all) and the rest fail an invariant, most often the
+ * Rail Race's duck bar standing where it slows the ride, its camera running
+ * backwards, or the Sky Cruiser flying through the castle.
  *
  * **Re-vet the whole pool whenever the generator changes.** A seed is not
- * sound in the abstract; it is sound against the code that builds it. This
- * pool was vetted at the commit named below, and #460 (a hoppable wall's
- * routing cost) invalidated an earlier vetting run of exactly these seeds by
- * moving paths across the whole park — that is how quickly it can go stale.
+ * sound in the abstract; it is sound against the code that builds it. #460 (a
+ * hoppable wall's routing cost, 6.4 → 2.65) invalidated a whole vetting run of
+ * these seeds mid-search by moving paths across the park — that is how quickly
+ * it goes stale. **Vetted at `101b5415`, 1 September 2026.**
  *
  * `check:seed-pool` guards the cheap half of this: that the pool is a set of
  * distinct positive integers containing {@link CANONICAL_PARK_SEED}. It cannot
  * guard the expensive half — that each one still builds a sound park — which
- * is what the re-vetting run above is for.
+ * is what the re-vetting run above is for, and it says so on every run.
+ *
+ * **Seed 18 is deliberately absent**, and it is the reason a pool is not just
+ * "the seeds `test/procgen` already uses": it is one of that suite's four
+ * sweep seeds, green on all 80 invariants, and it fails `check:park` with
+ * `route.crossesRail: 4` — four walks routed across the railway at grade,
+ * 0.56 m above the rail where the deck they need is 4.06 m up. The seed goes,
+ * not the assertion. Written up on #437.
  */
-export const PARK_SEED_POOL: readonly number[] = [CANONICAL_PARK_SEED, 5, 11, 24, 208, 225];
+export const PARK_SEED_POOL: readonly number[] = [
+  CANONICAL_PARK_SEED,
+  5,
+  11,
+  24,
+  115,
+  128,
+  131,
+  208,
+  225,
+  267,
+  274,
+  288,
+  326,
+  428,
+  451,
+];
 
 /** Where the drawn seed is remembered, so a reload is the same park. */
 export const PARK_SEED_KEY = 'lgp:parkSeed';
