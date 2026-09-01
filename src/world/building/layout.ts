@@ -897,20 +897,17 @@ export const SHOP_STAND_Z = 2.4 * SHOP_SCALE_XZ;
  *
  * ## Everything here derives from the plate
  *
- * The grid is anchored at the plate's **inside north-west corner** — inside
- * the perimeter ceiling beam, so no stall stands under one — and steps by a
- * pitch built from the game's own numbers. Resize the castle and the market
- * re-lays itself; that is the whole difference between this and the ten
+ * The grid is anchored on the plate — the back rank against the north wall,
+ * inside the perimeter ceiling beam so no stall stands under one — and steps
+ * by a pitch built from the game's own numbers. Resize the castle and the
+ * market re-lays itself; that is the whole difference between this and the ten
  * hard-coded positions #403 had to chase.
  *
- * Verified against the built room by `scripts/measure-market-floor.mts`, which
- * rasterises the plan with every obstacle folded in — shafts, the roundel, the
- * toilets, the doorway, the lift lobby and all 41 boxes of the great hall's
- * own furniture — and reports which cells are clear. **Seven of the eight
- * are**, which is exactly the seven shops. The eighth is taken by the great
- * hall's fireside bench at the hearth, so the fireplace interrupts the north
- * row: a market with a fire in the middle of it, which is better than the
- * eight-square grid would have been.
+ * `scripts/measure-market-floor.mts` rasterises the plan with every obstacle
+ * folded in and reports which cells are clear; `check:shop-spacing` asserts the
+ * result. **Two paragraphs about the great hall's hearth interrupting the north
+ * row were deleted here rather than left to mislead** — the hall moved to its
+ * own space with #377/#380 and there has been no fire on the mall since.
  */
 
 /**
@@ -1007,14 +1004,16 @@ export const MARKET_PITCH_X = MARKET_STALL + MARKET_AISLE_WIDTH;
  * - `MARKET_SOUTH_Z`'s `+1.6` was measured off the **stairwell's** deliberately
  *   wide 4.2 m pick radius. There is no stairwell anywhere.
  *
- * So the market is re-laid rather than relaxed: **two rows facing each other
- * across a single aisle, four stalls and three.** That is a market a child
- * walks *down*, with something on both sides of her the whole way, and it is
- * what the two-aisle split was a workaround for.
+ * So the market is re-laid rather than relaxed: **rows facing each other
+ * across a single aisle.** That is a market a child walks *down*, with
+ * something on both sides of her the whole way, and it is what the two-aisle
+ * split was a workaround for. (It was four stalls and three; #446 made it
+ * three and two with a pair against the back wall — see {@link MARKET_ROWS}.)
  *
  * Everything still derives from the plate and from the game's own numbers —
- * along a row from `PLAYER_RADIUS`, across the aisle from `TAP_FINGER_METRES`
- * — so resizing the castle re-lays the market for free.
+ * along a row and across the aisle from `PLAYER_RADIUS` and
+ * {@link SHOP_STAND_Z}, with `TAP_FINGER_METRES` as a floor under the aisle —
+ * so resizing the castle re-lays the market for free.
  */
 
 /**
