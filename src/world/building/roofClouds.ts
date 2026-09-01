@@ -97,7 +97,7 @@ import { disposeTree, toonMaterial } from '../../art/style/materials';
  * The near tier: the clouds that **drift past her**, just outside the parapet
  * and around head height. These are the ones that do the job.
  */
-const NEAR_COUNT = 22;
+const NEAR_COUNT = 28;
 const NEAR_OUT_MIN = 3.5;
 const NEAR_OUT_MAX = 10;
 const NEAR_TOP = 2.6;
