@@ -123,10 +123,20 @@ export const CHASE_EYE_BACK = 4.35;
  * companion inside the frustum" was happy: it was inside the frustum. It was
  * *all* of the frustum.
  *
- * 1.6 m is a little over three body-lengths of the biggest companion, at which
- * one reads as a whole animal on the chute rather than as a texture.
+ * **2.35 m, because a companion is 1.46 m tall** — measured off the built
+ * models through `ParadeMember.height`, and very nearly as tall as the child
+ * herself. At 1.6 m of band, two of them rode between her and the lens, at 3.2
+ * and 2.75 m from it; the nearer one alone spans 46% of the frame's height at
+ * a 60° field of view, and with two the shot is a wall of animal with the
+ * child glimpsed between them. Seen on a paused chase frame at t = 0.33 with
+ * five companions aboard, which is what the number was raised against.
+ *
+ * At 2.35 the band runs from 2.0 m behind her, so **exactly one** companion
+ * rides in the chase shot — off to one side, on the stagger — and everybody
+ * else is behind the lens, where the three trackside cameras still show the
+ * whole line. One pet clearly following her beats four filling the lens.
  */
-export const PET_BLIND_BAND = 1.6;
+export const PET_BLIND_BAND = 2.35;
 
 /**
  * How far a companion sits to the side of the chute's centre line, in metres,
