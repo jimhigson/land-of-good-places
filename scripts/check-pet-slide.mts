@@ -77,6 +77,8 @@ const { Sky } = await import('../src/world/Sky.ts');
 const { Player } = await import('../src/entities/Player.ts');
 const { Parade } = await import('../src/entities/parade/Parade.ts');
 const { CHUTE_ENVELOPE } = await import('../src/world/building/SlideRide.ts');
+const { CHASE_EYE_BACK } = await import('../src/world/slide/petRiders.ts');
+const { Raycaster } = await import('three');
 const { PARADE_MEMBER_RADIUS } = await import('../src/core/constants.ts');
 const { IsoCamera } = await import('../src/core/IsoCamera.ts');
 const { gameStore } = await import('../src/state/index.ts');
@@ -135,6 +137,27 @@ const IN_SHOT_NDC = 0.95;
 
 /** The fraction of chase frames the first companion must be framed on. */
 const IN_SHOT_FLOOR = 0.98;
+
+/**
+ * The raster the chase shot is measured on. Landscape, and the same shape
+ * `check:slide-rider` measures the same camera with, so the two files' pixel
+ * numbers are comparable.
+ */
+const RASTER_W = 120;
+const RASTER_H = 68;
+
+/**
+ * The most of the chase frame any one companion may fill.
+ *
+ * **Read off the failure, not chosen in the abstract.** With the seats laid out
+ * plainly the third companion rode 0.45 m in front of the lens and filled
+ * essentially the whole frame with the child nowhere in it — seen on a paused
+ * mid-descent screenshot, then measured here. A pet that is genuinely following
+ * her, at 1.5–2.7 m, comes out at a few percent. 25% sits far above the honest
+ * case and far below the wall-of-fur one, so it cannot be satisfied by
+ * accident and cannot fail correct behaviour.
+ */
+const PET_FRAME_CEILING = 0.25;
 
 interface Complaint {
   readonly clause: string;
@@ -204,6 +227,16 @@ async function ride(wired: boolean): Promise<RunResult> {
     return { off, along };
   }
 
+  /** Is `node` `part`, or somewhere underneath it? */
+  function isDescendantOf(node: unknown, part: unknown): boolean {
+    let walk = node as { parent: unknown } | null;
+    while (walk) {
+      if (walk === part) return true;
+      walk = walk.parent as typeof walk;
+    }
+    return false;
+  }
+
   function drawn(object: { visible: boolean; parent: unknown } | null): boolean {
     let node = object;
     while (node) {
@@ -234,7 +267,50 @@ async function ride(wired: boolean): Promise<RunResult> {
     complaints.push({ clause, detail });
   };
 
+  /**
+   * **What the chase camera actually shows**, by shooting a grid of rays
+   * through the live camera and counting what each one lands on — the same
+   * instrument `check:slide-rider` and `check:climb-wave` measure legibility
+   * with, and for the same reason: *in frustum* and *in shot* are different
+   * questions, and only an area measurement can tell them apart.
+   */
+  function raster(
+    camera: unknown,
+    childRoot: unknown,
+    pets: readonly { readonly displayName: string; readonly root: unknown }[],
+  ): { child: number; pets: [string, number][]; total: number } {
+    const caster = new Raycaster();
+    const targets = [slide.group, building.gardenRoot, childRoot, parade.group];
+    let child = 0;
+    const counts = pets.map((pet): [string, number] => [pet.displayName, 0]);
+    for (let iy = 0; iy < RASTER_H; iy += 1) {
+      const ndcY = 1 - (2 * (iy + 0.5)) / RASTER_H;
+      for (let ix = 0; ix < RASTER_W; ix += 1) {
+        const ndcX = (2 * (ix + 0.5)) / RASTER_W - 1;
+        caster.setFromCamera({ x: ndcX, y: ndcY } as never, camera as never);
+        const hit = caster.intersectObjects(targets as never[], true)[0];
+        if (!hit) continue;
+        if (isDescendantOf(hit.object, childRoot)) {
+          child += 1;
+          continue;
+        }
+        for (let i = 0; i < pets.length; i += 1) {
+          if (isDescendantOf(hit.object, pets[i]!.root)) {
+            counts[i]![1] += 1;
+            break;
+          }
+        }
+      }
+    }
+    return { child, pets: counts, total: RASTER_W * RASTER_H };
+  }
+
   const previous = new Map<string, Vector3>();
+  let rasters = 0;
+  let childHiddenSamples = 0;
+  let worstChild = Infinity;
+  let biggestPet = 0;
+  let biggestPetName = '—';
   let worstOffChute = 0;
   let worstStep = 0;
   let closestPair = Infinity;
@@ -382,6 +458,39 @@ async function ride(wired: boolean): Promise<RunResult> {
       const framed =
         Math.abs(ndc.x) <= IN_SHOT_NDC && Math.abs(ndc.y) <= IN_SHOT_NDC && ndc.z < 1;
       if (framed) framedFrames += 1;
+
+      // **And what does the shot actually look like?** In frustum is not the
+      // same as in shot: see `RASTER` — the version of this feature that only
+      // asked the frustum question scored 100% while a bunny 0.45 m from the
+      // lens filled the frame and hid the child completely.
+      if (chaseFrames % 45 === 1) {
+        const shot = raster(liveCamera, player.model.root, bodies);
+        rasters += 1;
+        if (shot.child === 0) {
+          childHiddenSamples += 1;
+          say(
+            'the child is in her own shot',
+            `on ridden frame ${ridingFrames} the chase camera shows 0 px of the child — her ` +
+              'companions are between her and the lens and have covered her up entirely',
+          );
+        }
+        if (shot.child < worstChild) worstChild = shot.child;
+        for (const [name, pixels] of shot.pets) {
+          const share = pixels / shot.total;
+          if (share > biggestPet) {
+            biggestPet = share;
+            biggestPetName = name;
+          }
+          if (share > PET_FRAME_CEILING) {
+            say(
+              'nothing in the lens',
+              `${name} fills ${(share * 100).toFixed(0)}% of the chase frame on ridden frame ` +
+                `${ridingFrames}, against ${(PET_FRAME_CEILING * 100).toFixed(0)}% allowed — it ` +
+                'is not following her down the slide, it is pressed against the camera',
+            );
+          }
+        }
+      }
     }
   }
 

@@ -90,10 +90,61 @@ export const PET_SLIDE_LEAD = 1.5;
  *
  * Wide enough that two pets are never on the same spot — the whole line is
  * strictly ordered along one curve, so "not piled up" is true by construction
- * rather than by a separation force — and tight enough that the first three
- * are all in front of the chase camera (1.5, 2.7, 3.9 m against its 4.35 m).
+ * rather than by a separation force — and tight enough that two of them fit
+ * between her and the chase lens (1.5 and 2.7 m against its 4.35 m).
  */
 export const PET_SLIDE_GAP = 1.2;
+
+/**
+ * Where the chase camera's eye sits behind her, in metres of chute — the `z`
+ * of `Building.ts`'s `CHASE_EYE`, which is what {@link PET_BLIND_BAND} is
+ * measured around.
+ *
+ * **A second copy of a number, and the only one in this feature**, so it is
+ * worth saying why rather than importing it: `Building.ts` imports this module,
+ * so this module cannot import `Building.ts` back without a cycle whose
+ * initialiser order would be decided by whoever happened to be imported first.
+ * It is asserted instead — `check:pet-slide` reads the ride's **live** camera
+ * offset and fails if it has moved away from this, so the two cannot drift
+ * silently the way the repo's most-filed bug does.
+ */
+export const CHASE_EYE_BACK = 4.35;
+
+/**
+ * How much room the chase lens is given, fore and aft, in metres.
+ *
+ * **This is not a tuning constant, it is the whole reason the line has a hole
+ * in it.** With the seats laid out plainly — 1.5, 2.7, 3.9, 5.1 m — the third
+ * companion rides 0.45 m in front of a lens 4.35 m behind her, and a bunny
+ * 45 cm from the camera is not a pet following her: it is a wall of fur with
+ * two ears, filling the frame, with the child completely hidden behind it.
+ * Seen, not reasoned about, on a paused mid-descent frame at t = 0.43 — the
+ * measurement that decided it, and the reason a check that asked only "is a
+ * companion inside the frustum" was happy: it was inside the frustum. It was
+ * *all* of the frustum.
+ *
+ * 1.6 m is a little over three body-lengths of the biggest companion, at which
+ * one reads as a whole animal on the chute rather than as a texture.
+ */
+export const PET_BLIND_BAND = 1.6;
+
+/**
+ * How far a companion sits to the side of the chute's centre line, in metres,
+ * alternating left and right down the line.
+ *
+ * Two things at once, and the second is the important one:
+ *
+ * - the child is at the **far** end of the chase shot and everybody else is
+ *   between her and the lens, so a line straight down the middle of the trough
+ *   puts a pet in front of her face for the whole descent. Staggered, the
+ *   middle of the shot stays hers.
+ * - a queue of identical animals in single file reads as one long creature.
+ *   Zigzagged, it reads as several pets, which is what it is.
+ *
+ * Inside the trough with room to spare: `CHUTE_ENVELOPE.halfWidth` is 0.95 m
+ * and `PARADE_MEMBER_RADIUS` is 0.3, so 0.45 leaves 0.2 m of wall clearance.
+ */
+export const PET_SIDE_STEP = 0.45;
 
 /**
  * How far a companion's feet sit above the chute's centre line.
@@ -129,6 +180,26 @@ export function slopeOf(tangent: Vector3): number {
 
 const point = new Vector3();
 const tangent = new Vector3();
+const across = new Vector3();
+const UP = new Vector3(0, 1, 0);
+
+/**
+ * How far back along the chute the `slot`-th companion rides, in metres.
+ *
+ * The plain answer is `lead + slot * gap`. The only thing on top of it is the
+ * **blind band**: no companion may ride within {@link PET_BLIND_BAND} of the
+ * chase lens, so any seat that would land in that band — and everybody behind
+ * it, or they would close up and pile — is pushed out past the far side of it.
+ *
+ * Everything therefore stays in line order and strictly spaced, which is what
+ * makes "no two on the same spot" true by construction rather than by a
+ * separation force that could fail to converge.
+ */
+export function petSlideOffset(slot: number): number {
+  const raw = PET_SLIDE_LEAD + slot * PET_SLIDE_GAP;
+  const bandStart = CHASE_EYE_BACK - PET_BLIND_BAND;
+  return raw < bandStart ? raw : raw + PET_BLIND_BAND * 2;
+}
 
 /**
  * Fills `seat` with where the `slot`-th companion rides when the child has
@@ -150,13 +221,23 @@ export function petSeatOnSlide(
   slot: number,
   seat: SlideSeat,
 ): void {
-  const distance = riderDistance - PET_SLIDE_LEAD - slot * PET_SLIDE_GAP;
+  const distance = riderDistance - petSlideOffset(slot);
   const t = Math.min(1, Math.max(0, distance) / slide.length);
   slide.pointAt(t, point);
   slide.tangentAt(t, tangent);
   // Behind the lip: carry on along the entry tangent, backwards. `distance` is
   // negative here, so this subtracts.
   if (distance < 0) point.addScaledVector(tangent, distance);
+
+  // Left, right, left — see PET_SIDE_STEP. Across the chute is the tangent
+  // crossed with world up, which is the same "up is always world up" the chute
+  // itself is swept with (`SlideRide`), so a companion stays in the trough
+  // through a corkscrew instead of being rolled up its wall by a Frenet frame.
+  across.crossVectors(tangent, UP);
+  if (across.lengthSq() > 1e-6) {
+    across.normalize();
+    point.addScaledVector(across, slot % 2 === 0 ? PET_SIDE_STEP : -PET_SIDE_STEP);
+  }
 
   seat.x = point.x;
   seat.y = point.y + PET_RIDE_LIFT;
