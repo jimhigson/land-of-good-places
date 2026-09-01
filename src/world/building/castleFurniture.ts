@@ -607,6 +607,15 @@ export function greatHallFreePlaces(deck: number): readonly GreatHallSeat[] {
  */
 export const DINER_TABLE_GAP = BENCH_OFFSET - CASTLE_BENCH_HALF_WIDTH - CASTLE_TABLE_HALF_WIDTH;
 
+/**
+ * How far in front of a blank place its lone goblet stands, in metres.
+ *
+ * Past {@link DINER_TABLE_GAP} — so it is on the table rather than balanced on
+ * its edge — and past `Building`'s own `FEAST_DISH_REACH` of 0.5 m, so the dish
+ * she chooses when she sits down lands beside it and never inside it.
+ */
+const FREE_PLACE_GOBLET_REACH = 0.62;
+
 // ------------------------------------------------------- the pets' table
 
 /**
@@ -876,7 +885,7 @@ export function dressGreatHall(deck: number, floor: Group): void {
     group.add(...armourOnPlinth(axisX + side * ARMOUR_FROM_AXIS, wallZ + inward * 4.3, inward));
   }
 
-  group.add(...feast(plan));
+  group.add(...feast(plan, deck));
 
   // The pets' table, at the mouth of the aisle (#449). Placed from the same
   // plan as the feast, so it cannot end up in a hall that laid out somewhere
@@ -1014,7 +1023,7 @@ const FEAST_SETTING: readonly FeastProp[] = [
  * the asset's own measured length: there is no gap to tune and no seam to
  * notice, and there could not be one without the asset changing size.
  */
-function feast(plan: GreatHallPlan): Object3D[] {
+function feast(plan: GreatHallPlan, deck: number): Object3D[] {
   const out: Object3D[] = [];
 
   for (const rowX of feastRowAxes(plan)) {
@@ -1038,6 +1047,26 @@ function feast(plan: GreatHallPlan): Object3D[] {
         out.push(prop.root);
       });
     }
+  }
+
+  // **A goblet standing alone in front of every blank place** (#449).
+  //
+  // The gaps read as gaps from a metre away and as very little from across the
+  // hall, where a child first sees the room — the rainbow outline and the Sit
+  // chip only arrive once she is near. A place laid with nobody at it is what a
+  // laid table says instead: this one is for somebody who has not sat down yet.
+  //
+  // The castle's own goblet, in the castle's own place setting, pushed out past
+  // where her chosen dish lands so the two never share a spot.
+  for (const seat of greatHallSeats(deck)) {
+    if (!seat.free) continue;
+    const goblet = createCastleFeastProp('goblet');
+    goblet.root.position.set(
+      seat.x + Math.sin(seat.yaw) * FREE_PLACE_GOBLET_REACH,
+      CASTLE_TABLE_TOP,
+      seat.z + Math.cos(seat.yaw) * FREE_PLACE_GOBLET_REACH,
+    );
+    out.push(goblet.root);
   }
 
   // Two benches a side per table rather than one long one: the asset is 2.80 m,
