@@ -3,6 +3,7 @@ import { BUILDING_STEP_UP } from '../core/constants';
 import type { GroundSampler } from '../entities/Player';
 import type { LevelConnector } from './building/surfaces';
 import { MAX_AUTO_HOP_HEIGHT, autoHopClears, type CollisionWorld } from './Collision';
+import { forEachPavedDisc, OFF_PATH_COST_MULTIPLIER } from './paving';
 
 /**
  * The park, as something you can find a way across — **on every level of it**.
@@ -135,6 +136,41 @@ import { MAX_AUTO_HOP_HEIGHT, autoHopClears, type CollisionWorld } from './Colli
  * than as a nudge to `BUILDING_STEP_UP`: a child hopping a wall is not taking
  * a step, and holding her to one was never right — it merely happened to be
  * survivable while nothing hoppable had a drop behind it.
+ *
+ * ## Paving costs less to walk on (issue #416)
+ *
+ * Jim, 31 August 2026: *"the pathfinding seemingly gives no weighting to paths
+ * (for player and NPC) - make it prefer walking on paths, but off them is
+ * possible too if you with some reasonable weighting penalty"*. Every step used
+ * to cost the same whatever it was standing on, so a route crossed a lawn as
+ * readily as it followed the street, and the park's whole path network was
+ * decoration.
+ *
+ * So a cell now also carries **whether it is paved**, stamped from the drawn
+ * network exactly as the colliders are stamped (`world/paving.ts`, published by
+ * `pathGraph.ts`'s `buildPaths`), and a step onto an unpaved cell is charged
+ * {@link OFF_PATH_COST_MULTIPLIER}. The multiplier is *one* number in *one*
+ * module, and because both movers plan on this class — the player's tap-to-walk
+ * grid in `Game.ts` and `JourneyPlanner`'s per-space grids for the children —
+ * there is no second copy of it anywhere to drift.
+ *
+ * Three consequences worth knowing:
+ *
+ * - **The heuristic stays admissible.** Octile distance is in cell units at
+ *   cost 1, and paving is the cheapest thing there is, so it still never
+ *   overestimates: A* remains optimal, and the search is not slower for it.
+ * - **Nothing becomes unreachable.** A multiplier is a preference, not a wall.
+ *   Every node that had an edge still has it, at a higher price; grass, the
+ *   roof garden's meadow and the gaps between attractions are all exactly as
+ *   reachable as before.
+ * - **Smoothing had to learn about it too**, or the whole thing would be
+ *   silently undone — see {@link smooth}. A string-pull that only asked
+ *   "is the chord walkable?" would straighten a route that carefully followed
+ *   the paving right back across the grass it was avoiding.
+ *
+ * Where no paving has been published — every interior, and any harness that
+ * never builds a garden — the stamp finds nothing and every cell costs 1, which
+ * is bit-for-bit the behaviour this router had before.
  *
  * ## Nothing here happens per frame
  *
@@ -299,6 +335,31 @@ const BEST_HEIGHT_WEIGHT = 0.25 / CELL;
  */
 export const MAX_ROUTE_WAYPOINTS = 128;
 
+/**
+ * How much dearer than the lattice legs it replaces a smoothed chord may be
+ * (issue #416).
+ *
+ * String-pulling used to ask only "is the chord walkable?", which was the whole
+ * question when every step cost the same. With paving weighted it is the wrong
+ * question: a route that dutifully went round the lawn would be straightened
+ * right back across it, and the feature would be inert while looking
+ * implemented.
+ *
+ * So a chord is taken only when it is no dearer, in the router's own currency,
+ * than the legs it replaces — plus this. The allowance exists because a curve
+ * is a polygon on a lattice: a chord across the inside of the ring road is
+ * *geometrically* the walk a person takes, and refusing it for a few
+ * centimetres of grass at the apex would emit a waypoint every half metre round
+ * the whole ring, which walks jerkily and eats {@link MAX_ROUTE_WAYPOINTS}.
+ *
+ * Because each emitted segment is bounded against the legs beneath it, the
+ * bound composes: **the smoothed walk is never more than 8% dearer than the
+ * weighted route it smooths.** Measured on the built park, the ring's paving is
+ * wide enough that chords of up to ~17 m stay on it outright, so this allowance
+ * is headroom rather than something the smoother leans on.
+ */
+const SMOOTH_CORNER_TOLERANCE = 0.08;
+
 const NEW = 0;
 const OPEN = 1;
 const CLOSED = 2;
@@ -336,6 +397,13 @@ export class NavGrid {
    * wins wherever both apply, since the search reads it first.
    */
   private hopBand = new Uint8Array(0);
+  /**
+   * 1 where the drawn path network paved this cell. Two-dimensional like
+   * {@link blocked}, and for the same reason: paving is a property of the
+   * ground plan, and a bridge deck carrying the path (`drapePathsOverBridges`)
+   * is paved at the same `x, z` as the ribbon that climbs onto it.
+   */
+  private paved = new Uint8Array(0);
   /** Level count prefix: cell `c`'s nodes are `levelStart[c] .. levelStart[c+1]`. */
   private levelStart = new Int32Array(0);
   /** Height of each node's surface, descending within a cell. */
@@ -533,7 +601,7 @@ export class NavGrid {
     // A goal off the edge of the lattice is not "unreachable", it is
     // unknowable. Say so, and let the caller fall back.
     if (goalCell < 0) return 0;
-    const goalNode = this.blocked[goalCell] === 0 ? this.nodeNearest(goalCell, goalY) : -1;
+    const goalNode = this.standableNodeIn(goalCell, goalY);
 
     const endNode = this.search(startNode, goalNode, goalCell, goalY);
     // Reaching the goal *node* is reaching the goal: the node was chosen as
@@ -545,6 +613,44 @@ export class NavGrid {
 
     const pathLength = this.reconstruct(startNode, endNode);
     return this.smooth(startX, startZ, startY, goalX, goalZ, pathLength, out);
+  }
+
+  /**
+   * **Is this somewhere a walker could stand — and therefore somewhere a route
+   * could end?**
+   *
+   * This is exactly the test {@link findRoute} applies to its own goal, asked
+   * of the same lattice, through the same {@link standableNodeIn}: there is
+   * deliberately no second definition of "standable" for a caller to fall out
+   * of step with. A point this returns false for can never be arrived at, so
+   * asking for a route to it is asking for a route that cannot exist.
+   *
+   * `y` says which **level** is meant, the same way `findRoute`'s `goalY` does;
+   * `sample` is needed for the same reason it is there, because the lattice is
+   * built lazily on the first question anyone asks of it.
+   *
+   * Note the asymmetry, and that it is the router's and not an oversight:
+   * `findRoute` will happily *start* from a blocked cell, routing from the
+   * nearest free one instead, because a walker really can be squeezed inside
+   * something and still need to walk out. It will not *finish* on one.
+   */
+  canStandAt(x: number, z: number, y: number, sample: GroundSampler): boolean {
+    if (!this.ensureLattice(sample)) return false;
+    const cell = this.cellAt(x, z);
+    if (cell < 0) return false;
+    return this.standableNodeIn(cell, y) >= 0;
+  }
+
+  /**
+   * The node of `cell` a walker would stand on at height `y`, or **-1** when
+   * the cell is blocked or carries no level at all.
+   *
+   * The one owner of "a route may end here", read by {@link findRoute} for its
+   * goal and by {@link canStandAt} for everyone else.
+   */
+  private standableNodeIn(cell: number, y: number): number {
+    if (this.blocked[cell] === 1) return -1;
+    return this.nodeNearest(cell, y);
   }
 
   // ------------------------------------------------------------- the lattice
@@ -593,10 +699,12 @@ export class NavGrid {
     if (this.blocked.length !== total) {
       this.blocked = new Uint8Array(total);
       this.hopBand = new Uint8Array(total);
+      this.paved = new Uint8Array(total);
       this.levelStart = new Int32Array(total + 1);
     } else {
       this.blocked.fill(0);
       this.hopBand.fill(0);
+      this.paved.fill(0);
     }
 
     // The soft boundary first: everything the resolver would push her back
@@ -668,6 +776,15 @@ export class NavGrid {
         this.hopBand[row + cx] = 0;
       }
     }
+
+    // The paving (issue #416), stamped from the drawn network's own record of
+    // where it put the ribbons. Not fattened by the walker's radius, unlike a
+    // collider: a collider is fattened because her *body* must clear it, while
+    // paving is about where her *feet* are, and shrinking every path by 1.24 m
+    // would leave a 2 m garden spur with no cheap band down the middle at all.
+    // Blocked cells are stamped too and simply never read — cheaper than a
+    // branch, and it keeps this pass independent of the one above it.
+    forEachPavedDisc((x, z, radius) => this.stampCircle(x, z, radius, this.paved));
 
     // Levels, for the free cells only — a blocked cell is never stepped on, so
     // its heights are never asked for, and this is much the most expensive
@@ -960,6 +1077,20 @@ export class NavGrid {
         if (intoBand) step *= HOP_COST_MULTIPLIER;
         const rise = onBand || intoBand ? MAX_AUTO_HOP_HEIGHT : MAX_STEP;
 
+        // What the ground is worth (issue #416). Charged on the cell being
+        // stepped *into*, which is the standard weighted-lattice reading and
+        // the one that makes the first step off a kerb cost what the grass
+        // costs. Paving is 1, so the octile heuristic — which is in cell units
+        // at cost 1 — still never overestimates and A* stays optimal.
+        //
+        // **The two multipliers compose safely, structurally rather than by
+        // luck.** Both are written on this same `step`, neither touches
+        // {@link heuristic} (octile, in cell units, at cost 1), and both are
+        // >= 1 on the geometric step — so the heuristic remains a lower bound
+        // with both applied exactly as it is with either alone. Any further
+        // weighting of this shape is admissible for the same reason.
+        step *= this.costOf(neighbourCell);
+
         // Every level of the neighbouring cell a walking foot could reach.
         // Levels of one cell are more than a step apart by construction, so
         // at most one matches; the loop is over the cell's own short range.
@@ -1011,6 +1142,14 @@ export class NavGrid {
     }
   }
 
+  /**
+   * What a metre of this cell costs, relative to a metre of paving
+   * (issue #416). One number, from `world/paving.ts`, for both movers.
+   */
+  private costOf(cell: number): number {
+    return this.paved[cell] === 1 ? 1 : OFF_PATH_COST_MULTIPLIER;
+  }
+
   /** Octile distance, in cells: exact for an eight-connected lattice. */
   private heuristic(cell: number, goalX: number, goalZ: number): number {
     const cx = cell % this.cells;
@@ -1049,9 +1188,11 @@ export class NavGrid {
    * actually walk.
    *
    * Straight string-pulling: keep the last waypoint, run forward as long as the
-   * straight line back to it is walkable, and emit the last point that was. On
-   * open ground the whole route collapses to a single waypoint — the goal — and
-   * the walk is bit-for-bit the straight line tap-to-move always did.
+   * straight line back to it is walkable **and no dearer than the legs it
+   * replaces** ({@link SMOOTH_CORNER_TOLERANCE}), and emit the last point that
+   * was. On open unpaved ground every cell costs the same, the chord is shorter
+   * than the polyline by the triangle inequality, and so the whole route
+   * collapses to a single waypoint — the goal — exactly as it always did.
    *
    * A connector's spliced-in walk path is exempt: its points are somebody's
    * real stair, emitted verbatim and never string-pulled across — a straight
@@ -1131,17 +1272,43 @@ export class NavGrid {
       // A rigid point is emitted as it stands: never pulled, never pulled
       // across. Only a run of ordinary lattice points may be straightened.
       if (this.pointRigid[furthest] !== 1) {
+        // The weighted cost of the lattice legs a chord would replace, grown
+        // one leg at a time as the chord reaches further. A chord is taken
+        // only when it is no dearer than them — see this method's header.
+        // A negative first leg means the anchor is not somewhere this can
+        // measure from (she is standing inside something, and `findRoute`
+        // routed from a neighbouring cell): no pull, exactly as before, since
+        // the old walkability test failed from such an anchor too.
+        let polyCost = this.lineCost(
+          this.pointX[anchor] ?? 0,
+          this.pointZ[anchor] ?? 0,
+          this.pointY[anchor] ?? 0,
+          this.pointX[furthest] ?? 0,
+          this.pointZ[furthest] ?? 0,
+        );
         while (
+          polyCost >= 0 &&
           furthest + 1 < points &&
-          this.pointRigid[furthest + 1] !== 1 &&
-          this.lineIsWalkable(
+          this.pointRigid[furthest + 1] !== 1
+        ) {
+          const legCost = this.lineCost(
+            this.pointX[furthest] ?? 0,
+            this.pointZ[furthest] ?? 0,
+            this.pointY[furthest] ?? 0,
+            this.pointX[furthest + 1] ?? 0,
+            this.pointZ[furthest + 1] ?? 0,
+          );
+          if (legCost < 0) break;
+          const chordCost = this.lineCost(
             this.pointX[anchor] ?? 0,
             this.pointZ[anchor] ?? 0,
             this.pointY[anchor] ?? 0,
             this.pointX[furthest + 1] ?? 0,
             this.pointZ[furthest + 1] ?? 0,
-          )
-        ) {
+          );
+          if (chordCost < 0) break;
+          if (chordCost > (polyCost + legCost) * (1 + SMOOTH_CORNER_TOLERANCE)) break;
+          polyCost += legCost;
           furthest += 1;
         }
       }
@@ -1161,8 +1328,9 @@ export class NavGrid {
   }
 
   /**
-   * Is the straight line between two world points walkable end to end, on the
-   * levels a walking foot would take?
+   * What the straight line between two world points costs to walk, in cell
+   * units — or **-1** when it is not walkable end to end on the levels a
+   * walking foot would take.
    *
    * Samples at half a cell, which cannot step over a blocked cell, and follows
    * the nearest level along, so a line that crosses a deck edge or a drop
@@ -1174,7 +1342,17 @@ export class NavGrid {
    * never chose to pay for — free again by the back door, which is exactly what
    * this change exists to stop. Where the route genuinely does cross a band,
    * those points are rigid (see {@link pointRigid}) and are emitted as planned
-   * rather than pulled, so nothing is lost by refusing here.
+   * rather than pulled, so nothing is lost by refusing here. That refusal is
+   * expressed as this function's `-1`, the same answer it gives for a blocked
+   * cell, so it survives the change from a boolean to a cost unaltered.
+   *
+   * The cost is the same weighting the search charges — paving at 1, everything
+   * else at {@link OFF_PATH_COST_MULTIPLIER} — so {@link smooth} can compare a
+   * chord with the legs it would replace in the router's own currency rather
+   * than in bare metres. Before issue #416 this only answered yes or no, and a
+   * yes was enough to straighten the route; with paving in the picture that
+   * would have quietly undone the entire feature, pulling every carefully
+   * kerb-following route back across the lawn it had just gone round.
    *
    * It reads the floor, and only the floor. That is deliberate, and it is why
    * a ramp's flank must be stamped into the lattice (`navStamped`, see
@@ -1188,33 +1366,38 @@ export class NavGrid {
    * and 13,053 park-wide routes), so it bought nothing but an untestable
    * branch on the router's hot path.
    */
-  private lineIsWalkable(
+  private lineCost(
     ax: number,
     az: number,
     aHeight: number,
     bx: number,
     bz: number,
-  ): boolean {
+  ): number {
     const startCell = this.cellAt(ax, az);
     if (startCell < 0 || this.blocked[startCell] === 1 || this.hopBand[startCell] === 1) {
-      return false;
+      return -1;
     }
 
     const distance = Math.hypot(bx - ax, bz - az);
     const steps = Math.max(1, Math.ceil(distance / (CELL * 0.5)));
+    // Every sample stands for one equal slice of the line. In cell units, so
+    // the answer is directly comparable with the search's own g-scores.
+    const slice = distance / steps / CELL;
     let previousHeight = aHeight;
+    let cost = 0;
 
     for (let i = 1; i <= steps; i += 1) {
       const t = i / steps;
       const cell = this.cellAt(ax + (bx - ax) * t, az + (bz - az) * t);
-      if (cell < 0 || this.blocked[cell] === 1 || this.hopBand[cell] === 1) return false;
+      if (cell < 0 || this.blocked[cell] === 1 || this.hopBand[cell] === 1) return -1;
       const node = this.nodeNearest(cell, previousHeight);
-      if (node < 0) return false;
+      if (node < 0) return -1;
       const height = this.nodeHeight[node] ?? 0;
-      if (Math.abs(height - previousHeight) > MAX_STEP) return false;
+      if (Math.abs(height - previousHeight) > MAX_STEP) return -1;
       previousHeight = height;
+      cost += slice * this.costOf(cell);
     }
-    return true;
+    return cost;
   }
 
   // ---------------------------------------------------------------- plumbing

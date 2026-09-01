@@ -25,6 +25,7 @@ import { buildGraph, PLAZA, routeCurve, type PathGraph, type RouteDefinition } f
  */
 export { routeCurve };
 import { takePrewarmedPathGraph } from './pathsPrewarm';
+import { publishPaving } from './paving';
 
 /**
  * **The solved walk network and everything drawn from it.**
@@ -238,6 +239,17 @@ export function buildPaths(): Mesh[] {
     { mesh: kerbMesh, lift: PATH_KERB_LIFT },
     { mesh: surfaceMesh, lift: PATH_SURFACE_LIFT },
   ];
+
+  // Tell the router where the paving went (issue #416, `world/paving.ts`).
+  // The same `samples` and the same `PLAZA` disc `distanceToPath` answers
+  // from — read live rather than copied, so a re-drape over a bridge, or a
+  // rebuild of the network, cannot leave the router describing paving that
+  // has moved. The kerb is deliberately not included: a child walks the
+  // surface, and the kerb is the surface's frame.
+  publishPaving((sink) => {
+    for (const sample of samples) sink(sample.x, sample.z, sample.halfWidth);
+    sink(PLAZA.x, PLAZA.z, PLAZA.radius);
+  });
 
   return [kerbMesh, surfaceMesh];
 }
