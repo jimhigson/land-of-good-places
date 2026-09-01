@@ -2,7 +2,7 @@ import type { ParkBoundary } from './boundary';
 import { BUILDING_STEP_UP } from '../core/constants';
 import type { GroundSampler } from '../entities/Player';
 import type { LevelConnector } from './building/surfaces';
-import { autoHopClears, type CollisionWorld } from './Collision';
+import { MAX_AUTO_HOP_HEIGHT, autoHopClears, type CollisionWorld } from './Collision';
 
 /**
  * The park, as something you can find a way across — **on every level of it**.
@@ -91,16 +91,42 @@ import { autoHopClears, type CollisionWorld } from './Collision';
  * route so the walk descends the actual arc. Multi-flight compositions chain
  * for free, because a route through two edges is just a route.
  *
- * ## Walls she can hop are not obstacles
+ * ## Walls she can hop cost something to cross
  *
  * The low garden walls are `autoHoppable` (design feedback #30e): walk into one
- * and the character hops it without being asked. A route that detoured around
- * one would be strictly worse than the straight line, so hoppable colliders the
- * hop actually clears are **not stamped at all** — the route goes over them,
- * and `Player`'s existing lookahead fires the hop when she gets there. The test
- * is the same `reach >= topHeight` comparison `CollisionWorld.wouldAutoHopClear`
- * makes, from the same numbers, so the two can never disagree about which walls
- * those are.
+ * and the character hops it without being asked. They used to be **not stamped
+ * at all** — free, so a route preferred the straight line over one every time.
+ *
+ * That was wrong twice over, and Jim ruled on it directly: *"give hoppable
+ * walls a high penalty so the route finding goes around them unless they are a
+ * much better path — for example the destination is the water in the fountain
+ * itself."* A wall a child *can* vault is not a wall she *should* be sent over
+ * on the way to the ice cream, and once the fountain rim became hoppable, free
+ * meant routing children straight through the water for a two-metre saving.
+ *
+ * So a hoppable collider is stamped into {@link hopBand} instead of into
+ * `blocked`, and the cells it covers cost {@link HOP_COST_MULTIPLIER} times the
+ * distance walked through them. Which colliders those are is still decided by
+ * the same `autoHopClears` call `CollisionWorld.wouldAutoHopClear` makes, from
+ * the same numbers, so the two can never disagree about which walls she hops.
+ *
+ * **A multiplier on distance, never a flat toll, and that is what keeps A\*
+ * honest.** Every edge then costs *at least* its own geometric length, so the
+ * octile heuristic — which prices every cell at 1 — stays a lower bound on the
+ * true remaining cost, and the search stays admissible: the first time the goal
+ * comes off the heap it really is the cheapest way there. A flat toll charged
+ * at the band edge could not make that promise, and an inadmissible heuristic
+ * fails silently, by quietly returning a route that is not the best one.
+ *
+ * **Inside a band the level rule is the hop's, not the walk's.** Getting across
+ * a hoppable wall is a jump, so an edge touching a band may change height by
+ * {@link MAX_AUTO_HOP_HEIGHT} — `Collision.ts`'s own measured ceiling, asked of
+ * it rather than restated — where an ordinary walking edge is held to
+ * `BUILDING_STEP_UP`. Without this the fountain's own water is unreachable: the
+ * wading surface stands **0.631 m** above the plaza paving it is ringed by
+ * (measured, canonical seed, `scripts/probe-fountain-levels.mts`) against a
+ * 0.62 m walking step, so the lattice refused the last 11 mm of a step a child
+ * plainly makes by hopping the rim.
  *
  * ## Nothing here happens per frame
  *
@@ -152,6 +178,42 @@ const MARGIN = 2;
  * sits comfortably under it and stays walkable, as it must.
  */
 const MAX_STEP = BUILDING_STEP_UP;
+
+/**
+ * How much dearer a metre walked through a hoppable wall's band is than a
+ * metre of open park. **6.4, and it is a measurement, not a round number.**
+ *
+ * `scripts/measure-hop-detours.mts` routes across every hoppable collider in
+ * the built park twice — once on this lattice, where the hop is available, and
+ * once on a lattice built for a walker with no jump at all (`hopApex = 0`,
+ * which makes `autoHopClears` false for everything and stamps every hoppable
+ * collider solid; no second code path, the same `NavGrid` told she cannot
+ * jump). The difference is the real price of going round *that* wall.
+ *
+ * Pooled over the five CI seeds, 73 crossings:
+ *
+ * ```
+ * p0 0.38   p25 4.55   p50 5.34   p75 6.69   p90 10.32   p95 14.02   p100 21.76
+ * ```
+ *
+ * A multiplier `M` prices a crossing of a band `w` wide at `(M - 1) * w` metres
+ * over walking through it, and the median fattened band is 1.92 m
+ * (`2 * (halfThickness + PLAYER_RADIUS)` for the park's garden walls). Setting
+ * that price at the **p90 detour** gives `1 + 10.32 / 1.92 = 6.38`, so 6.4.
+ *
+ * That is what Jim's "high penalty… unless they are a much better path" means
+ * in numbers: **90% of the park's hoppable walls are now walked round**, and
+ * the tenth that are still crossed are the ones where going round costs more
+ * than any ordinary garden wall ever asks — up to 21.8 m. The two ends were
+ * both checked rather than assumed: at `M = 2` only 3% go round (barely a
+ * change), and by `M = 16` all 73 do, which is a wall that is blocked in all
+ * but name. 6.4 sits where the ruling puts it.
+ *
+ * Set from the *detours the park actually has*, so it is not a knob to be
+ * nudged when a route looks wrong. If the park's walls change shape, re-run the
+ * script and re-derive it.
+ */
+const HOP_COST_MULTIPLIER = 6.4;
 
 /**
  * How far apart two levels of one cell may match a height being looked up —
@@ -243,6 +305,14 @@ export class NavGrid {
   private originZ = 0;
 
   private blocked = new Uint8Array(0);
+  /**
+   * 1 where a hoppable collider's fattened footprint falls — a cell she may
+   * cross, at {@link HOP_COST_MULTIPLIER} times the price. A flag rather than a
+   * per-cell cost because every hoppable wall in the game is priced the same:
+   * one number, one owner, and no per-collider tuning to drift. `blocked` still
+   * wins wherever both apply, since the search reads it first.
+   */
+  private hopBand = new Uint8Array(0);
   /** Level count prefix: cell `c`'s nodes are `levelStart[c] .. levelStart[c+1]`. */
   private levelStart = new Int32Array(0);
   /** Height of each node's surface, descending within a cell. */
@@ -262,11 +332,18 @@ export class NavGrid {
   /** The node path A* found, start-first, and how each step was taken. */
   private path = new Int32Array(0);
   private pathVia = new Int32Array(0);
-  /** The path as world points plus heights, with connector splices marked. */
+  /** The path as world points plus heights. */
   private pointX = new Float32Array(0);
   private pointZ = new Float32Array(0);
   private pointY = new Float32Array(0);
-  private pointSpliced = new Uint8Array(0);
+  /**
+   * Points the string-pull must emit exactly as they stand, and never
+   * straighten across: a connector's own stair treads, and any point standing
+   * in a hoppable wall's band. Both for the same reason — the route was planned
+   * to pass through *that* spot, and a chord that cuts the corner off it is a
+   * chord across somebody's stair or over a wall the route decided to pay for.
+   */
+  private pointRigid = new Uint8Array(0);
 
   /** Connector edges by node, rebuilt with the lattice. */
   private readonly connectorEdges = new Map<number, ConnectorEdge[]>();
@@ -492,9 +569,11 @@ export class NavGrid {
     const total = side * side;
     if (this.blocked.length !== total) {
       this.blocked = new Uint8Array(total);
+      this.hopBand = new Uint8Array(total);
       this.levelStart = new Int32Array(total + 1);
     } else {
       this.blocked.fill(0);
+      this.hopBand.fill(0);
     }
 
     // The soft boundary first: everything the resolver would push her back
@@ -511,9 +590,10 @@ export class NavGrid {
       }
     }
 
-    // Then everything solid, fattened by the walker's own width — skipping the
-    // walls she hops without being asked, which are not obstacles to her, and
-    // skipping **banded** colliders (a finite `baseHeight` — the balustrade on
+    // Then everything solid, fattened by the walker's own width — the walls
+    // she hops without being asked going into `hopBand` rather than into
+    // `blocked`, so a route may cross one at a price instead of pretending it
+    // is not there (see the header), and skipping **banded** colliders (a finite `baseHeight` — the balustrade on
     // an overhanging deck's edge). A banded collider guards an edge rather
     // than occupying the column of space: the lattice's own level rule (no
     // edge between nodes more than a step apart) already refuses every route
@@ -522,16 +602,28 @@ export class NavGrid {
     // level. See `Collision.ts`'s `baseHeight` header.
     this.collision.forEachCircle(
       (x, z, colliderRadius, topHeight, autoHoppable, baseHeight, navStamped) => {
-        if (autoHoppable && autoHopClears(topHeight, this.hopApex)) return;
-        if (Number.isFinite(baseHeight) && !navStamped) return;
-        this.stampCircle(x, z, colliderRadius + this.walkerRadius);
+        const hoppable = autoHoppable && autoHopClears(topHeight, this.hopApex);
+        if (!hoppable && Number.isFinite(baseHeight) && !navStamped) return;
+        this.stampCircle(
+          x,
+          z,
+          colliderRadius + this.walkerRadius,
+          hoppable ? this.hopBand : this.blocked,
+        );
       },
     );
     this.collision.forEachWall(
       (x1, z1, x2, z2, halfThickness, topHeight, autoHoppable, baseHeight, navStamped) => {
-        if (autoHoppable && autoHopClears(topHeight, this.hopApex)) return;
-        if (Number.isFinite(baseHeight) && !navStamped) return;
-        this.stampSegment(x1, z1, x2, z2, halfThickness + this.walkerRadius);
+        const hoppable = autoHoppable && autoHopClears(topHeight, this.hopApex);
+        if (!hoppable && Number.isFinite(baseHeight) && !navStamped) return;
+        this.stampSegment(
+          x1,
+          z1,
+          x2,
+          z2,
+          halfThickness + this.walkerRadius,
+          hoppable ? this.hopBand : this.blocked,
+        );
       },
     );
 
@@ -548,7 +640,9 @@ export class NavGrid {
       const row = cz * side;
       for (let cx = 0; cx < side; cx += 1) {
         const x = this.originX + cx * CELL;
-        if (this.bridgeCovers(x, z)) this.blocked[row + cx] = 0;
+        if (!this.bridgeCovers(x, z)) continue;
+        this.blocked[row + cx] = 0;
+        this.hopBand[row + cx] = 0;
       }
     }
 
@@ -701,10 +795,11 @@ export class NavGrid {
     this.pointX = new Float32Array(size);
     this.pointZ = new Float32Array(size);
     this.pointY = new Float32Array(size);
-    this.pointSpliced = new Uint8Array(size);
+    this.pointRigid = new Uint8Array(size);
   }
 
-  private stampCircle(x: number, z: number, radius: number): void {
+  /** Marks every cell whose centre is within `radius` of a point in `into`. */
+  private stampCircle(x: number, z: number, radius: number, into: Uint8Array): void {
     const minX = this.columnOf(x - radius);
     const maxX = this.columnOf(x + radius);
     const minZ = this.rowOf(z - radius);
@@ -722,17 +817,19 @@ export class NavGrid {
       const row = cz * this.cells;
       for (let cx = fromX; cx <= toX; cx += 1) {
         const dx = this.originX + cx * CELL - x;
-        if (dx * dx + dz * dz <= radiusSquared) this.blocked[row + cx] = 1;
+        if (dx * dx + dz * dz <= radiusSquared) into[row + cx] = 1;
       }
     }
   }
 
+  /** The same, for the fattened footprint of a wall segment. */
   private stampSegment(
     x1: number,
     z1: number,
     x2: number,
     z2: number,
     radius: number,
+    into: Uint8Array,
   ): void {
     const minX = this.columnOf(Math.min(x1, x2) - radius);
     const maxX = this.columnOf(Math.max(x1, x2) + radius);
@@ -760,7 +857,7 @@ export class NavGrid {
         t = t < 0 ? 0 : t > 1 ? 1 : t;
         const dx = x - (x1 + ax * t);
         const dz = z - (z1 + az * t);
-        if (dx * dx + dz * dz <= radiusSquared) this.blocked[row + cx] = 1;
+        if (dx * dx + dz * dz <= radiusSquared) into[row + cx] = 1;
       }
     }
   }
@@ -811,6 +908,7 @@ export class NavGrid {
       const cz = (cell - cx) / this.cells;
       const nodeHeight = this.nodeHeight[node] ?? 0;
       const nodeCost = this.gScore[node] ?? 0;
+      const onBand = this.hopBand[cell] === 1;
 
       for (let i = 0; i < 8; i += 1) {
         const nx = cx + (NEIGHBOUR_X[i] ?? 0);
@@ -831,13 +929,21 @@ export class NavGrid {
           step = Math.SQRT2;
         }
 
+        // An edge touching a hoppable wall's band is a *hop*, so it is priced
+        // at the multiplier and held to the hop's own reach rather than to a
+        // walking step. Both facts come from the same place — see the header —
+        // and neither applies anywhere a hoppable collider is not stamped.
+        const intoBand = this.hopBand[neighbourCell] === 1;
+        if (intoBand) step *= HOP_COST_MULTIPLIER;
+        const rise = onBand || intoBand ? MAX_AUTO_HOP_HEIGHT : MAX_STEP;
+
         // Every level of the neighbouring cell a walking foot could reach.
         // Levels of one cell are more than a step apart by construction, so
         // at most one matches; the loop is over the cell's own short range.
         const from = this.levelStart[neighbourCell] ?? 0;
         const to = this.levelStart[neighbourCell + 1] ?? 0;
         for (let neighbour = from; neighbour < to; neighbour += 1) {
-          if (Math.abs((this.nodeHeight[neighbour] ?? 0) - nodeHeight) > MAX_STEP) continue;
+          if (Math.abs((this.nodeHeight[neighbour] ?? 0) - nodeHeight) > rise) continue;
           this.relax(node, neighbour, nodeCost + step, 0, goalX, goalZ, goalY);
         }
       }
@@ -946,7 +1052,7 @@ export class NavGrid {
     this.pointX[points] = startX;
     this.pointZ[points] = startZ;
     this.pointY[points] = startY;
-    this.pointSpliced[points] = 0;
+    this.pointRigid[points] = 0;
     points += 1;
     for (let i = 1; i < pathLength; i += 1) {
       const via = this.pathVia[i] ?? 0;
@@ -963,7 +1069,7 @@ export class NavGrid {
             this.pointX[points] = point.x;
             this.pointZ[points] = point.z;
             this.pointY[points] = point.y;
-            this.pointSpliced[points] = 1;
+            this.pointRigid[points] = 1;
             points += 1;
           }
           continue;
@@ -976,14 +1082,14 @@ export class NavGrid {
       this.pointX[points] = this.originX + cx * CELL;
       this.pointZ[points] = this.originZ + cz * CELL;
       this.pointY[points] = this.nodeHeight[node] ?? 0;
-      this.pointSpliced[points] = 0;
+      this.pointRigid[points] = this.hopBand[cell] ?? 0;
       points += 1;
     }
     if (this.reachedGoal) {
       this.pointX[points] = goalX;
       this.pointZ[points] = goalZ;
       this.pointY[points] = this.routeEndY;
-      this.pointSpliced[points] = 0;
+      this.pointRigid[points] = 0;
       points += 1;
     }
     if (points < 2) {
@@ -999,12 +1105,12 @@ export class NavGrid {
     let anchor = 0;
     while (anchor < points - 1 && written < MAX_ROUTE_WAYPOINTS) {
       let furthest = anchor + 1;
-      // A spliced point is emitted as it stands: never pulled, never pulled
+      // A rigid point is emitted as it stands: never pulled, never pulled
       // across. Only a run of ordinary lattice points may be straightened.
-      if (this.pointSpliced[furthest] !== 1) {
+      if (this.pointRigid[furthest] !== 1) {
         while (
           furthest + 1 < points &&
-          this.pointSpliced[furthest + 1] !== 1 &&
+          this.pointRigid[furthest + 1] !== 1 &&
           this.lineIsWalkable(
             this.pointX[anchor] ?? 0,
             this.pointZ[anchor] ?? 0,
@@ -1039,6 +1145,14 @@ export class NavGrid {
    * the nearest level along, so a line that crosses a deck edge or a drop
    * fails for the same reason a step across one does.
    *
+   * **A hoppable wall's band is not walkable for this purpose, whatever the
+   * search decided.** The pull's whole job is to replace a staircase of cells
+   * with the chord across it, and a chord that clips a band is a wall the route
+   * never chose to pay for — free again by the back door, which is exactly what
+   * this change exists to stop. Where the route genuinely does cross a band,
+   * those points are rigid (see {@link pointRigid}) and are emitted as planned
+   * rather than pulled, so nothing is lost by refusing here.
+   *
    * It reads the floor, and only the floor. That is deliberate, and it is why
    * a ramp's flank must be stamped into the lattice (`navStamped`, see
    * `Collision.ts`): given an unstamped flank, a chord between two of a
@@ -1059,7 +1173,9 @@ export class NavGrid {
     bz: number,
   ): boolean {
     const startCell = this.cellAt(ax, az);
-    if (startCell < 0 || this.blocked[startCell] === 1) return false;
+    if (startCell < 0 || this.blocked[startCell] === 1 || this.hopBand[startCell] === 1) {
+      return false;
+    }
 
     const distance = Math.hypot(bx - ax, bz - az);
     const steps = Math.max(1, Math.ceil(distance / (CELL * 0.5)));
@@ -1068,7 +1184,7 @@ export class NavGrid {
     for (let i = 1; i <= steps; i += 1) {
       const t = i / steps;
       const cell = this.cellAt(ax + (bx - ax) * t, az + (bz - az) * t);
-      if (cell < 0 || this.blocked[cell] === 1) return false;
+      if (cell < 0 || this.blocked[cell] === 1 || this.hopBand[cell] === 1) return false;
       const node = this.nodeNearest(cell, previousHeight);
       if (node < 0) return false;
       const height = this.nodeHeight[node] ?? 0;
