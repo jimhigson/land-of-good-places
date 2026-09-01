@@ -84,6 +84,53 @@ const BED_CLIMB_SECONDS = 0.8;
 export type BedPhase = 'walking' | 'climbing' | 'asleep';
 
 /**
+ * **A pet's own place at the pets' table** — issue #449.
+ *
+ * Jim: *"There should also be a small pets table for the pets to eat at, and
+ * they go there when the player sits."* This is one setting at it: where the
+ * animal stands, and which way it turns to face its bowl.
+ *
+ * Deliberately thinner than {@link PetBedSpot}, because getting to it needs
+ * less. A bed is climbed *into* and lain *in*, so the run-up spot and the
+ * cushion are two different places and the member has to hand itself from the
+ * follow spring to a scripted climb. A pet at a table simply **walks up and
+ * stands there**, which the follow spring already does perfectly: aim it here
+ * and it arrives, slows, settles, and stops — with the same easing, the same
+ * turn and the same walk cycle it crosses the park with. So there is one
+ * mover, not two, and no arrival hand-off to get wrong.
+ */
+export interface PetTablePlace {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  /** Which way it turns once it is there, so it faces its own bowl. */
+  readonly facing: number;
+}
+
+/**
+ * How close a pet has to be to its place before it turns to its bowl and
+ * starts eating, in metres.
+ *
+ * Wider than {@link BED_ARRIVE_RADIUS} because nothing snaps here: this only
+ * decides when the pet stops taking its heading from the direction it is
+ * travelling and starts taking it from the table. Too tight and a pet that
+ * settles 4 cm out never turns to its bowl at all; too loose and it turns
+ * while still visibly walking. Half a stride is right.
+ */
+const TABLE_ARRIVE_RADIUS = 0.55;
+
+/**
+ * How far a pet's head dips into its bowl, in radians, and how much it chews.
+ *
+ * Positive is down — the parade's idle look-up is negative (see {@link pose}).
+ * The head is the only joint that moves: a pet standing at a bowl with its
+ * nose in it reads instantly at this camera, and the legs staying still is
+ * what makes it read as *stopped to eat* rather than as walking on the spot.
+ */
+const TABLE_HEAD_DIP = 0.45;
+const TABLE_CHEW = 0.09;
+
+/**
  * The smallest a follower's jet pack may be shrunk, as a fraction of the one on
  * the player's back.
  *
@@ -168,6 +215,16 @@ export class ParadeMember {
    * moves, hides or poses a parade pet.
    */
   private bed: PetBedSpot | null = null;
+  /**
+   * This one's own place at the great hall's pets' table while the player is
+   * sitting at the feast, or `null` the rest of the time — see
+   * {@link goToTable}. Held here, on the member, for the same reason
+   * {@link bed} is: this class is the single owner of where this body is and
+   * what it is doing, and nothing else in the game moves or poses a parade pet.
+   */
+  private table: PetTablePlace | null = null;
+  /** True once it has arrived at {@link table} and has its nose in the bowl. */
+  private eating = false;
   private phase_: BedPhase = 'walking';
   private climbTimer = 0;
   /** Where the climb starts from, captured on arrival at the run-up spot. */
@@ -259,6 +316,57 @@ export class ParadeMember {
     this.bed = bed;
     this.phase_ = 'walking';
     this.climbTimer = 0;
+  }
+
+  /**
+   * This one's own place at the pets' table, or `null` — the parade reads it
+   * to know whether to aim this member at a trail sample or at the table.
+   */
+  get tablePlace(): PetTablePlace | null {
+    return this.table;
+  }
+
+  /** True once it has actually got there and is eating, rather than on its way. */
+  get eatingAtTable(): boolean {
+    return this.table !== null && this.eating;
+  }
+
+  /**
+   * **Go and eat at the pets' table** (#449). The great hall's banquet is the
+   * one caller, by way of `Parade.sendPetsToTable`, when the player sits down.
+   *
+   * It walks there on the **ordinary follow spring** — the parade points
+   * {@link target} at the place instead of at a trail sample, exactly as it
+   * does for a bed — and then simply stays there, because that is what the
+   * spring does when its target stops moving. The only thing this class adds
+   * on arrival is the turn to face the bowl and the head in it; the body is
+   * never taken off the spring, so unlike the bedtime routine there is not
+   * even a hand-off here for a future edit to get wrong.
+   *
+   * Idempotent for a pet already going to the same place, so a caller may
+   * re-assert it every frame if it likes.
+   *
+   * A pet already on its way to bed keeps going to bed: a nap and a banquet
+   * cannot both be happening, and if they somehow were, the bed is the one
+   * with a scripted climb that must not be interrupted halfway up.
+   */
+  goToTable(place: PetTablePlace): void {
+    if (this.bed || this.table === place) return;
+    this.table = place;
+    this.eating = false;
+  }
+
+  /**
+   * Dinner is over: back into the line, from wherever it had got to. A no-op
+   * for a member that was never sent to the table, so the hall may call it for
+   * every companion without tracking which ones actually went.
+   */
+  leaveTable(): void {
+    if (!this.table) return;
+    this.table = null;
+    this.eating = false;
+    // Nothing to un-pose but the head, which `pose` writes every frame anyway.
+    this.rejoice();
   }
 
   /**
@@ -389,7 +497,24 @@ export class ParadeMember {
     const speed = dt > 0 ? moved / dt : 0;
     this.gait += (clamp01(speed / TOP_SPEED) - this.gait) * clamp01(dt * 9);
 
-    if (moved > 1e-4) {
+    // **Arrived at its own place at the pets' table?** Asked of the body that
+    // is about to be drawn, never of {@link target}, which has been the place
+    // since the first frame and would call every pet arrived before it moved.
+    //
+    // Nothing snaps and nothing is taken off the spring: all that changes is
+    // where the heading comes from. A pet still crossing the hall takes it
+    // from the direction it is travelling, like every follower always has; a
+    // pet standing at its bowl takes it from the table, because by then it has
+    // stopped moving and there is no travel direction left to read.
+    const place = this.table;
+    const arrived =
+      place !== null &&
+      Math.hypot(this.position.x - place.x, this.position.z - place.z) <= TABLE_ARRIVE_RADIUS;
+    this.eating = arrived;
+
+    if (arrived && place) {
+      this.facing = turnTowards(this.facing, place.facing, TURN_SPEED * dt);
+    } else if (moved > 1e-4) {
       const wanted = Math.atan2(this.position.x - previousX, this.position.z - previousZ);
       this.facing = turnTowards(this.facing, wanted, TURN_SPEED * dt);
     }
@@ -584,8 +709,14 @@ export class ParadeMember {
           creature.limbs.leftLeg.rotation.x = 0.5;
           creature.limbs.rightLeg.rotation.x = 0.35;
         }
-        // A little look up at the player when idling right behind her.
-        creature.head.rotation.x = -0.1 * (1 - this.gait) + Math.sin(elapsed * 2.1) * 0.03;
+        // A little look up at the player when idling right behind her — unless
+        // it has its nose in a bowl at the pets' table (#449), where the head
+        // is the whole of the read. `this.eating` is only ever true after it
+        // has actually arrived, so a pet still trotting across the hall looks
+        // where it is going and dips its head on the last stride.
+        creature.head.rotation.x = this.eating
+          ? TABLE_HEAD_DIP + Math.sin(elapsed * 6.1) * TABLE_CHEW
+          : -0.1 * (1 - this.gait) + Math.sin(elapsed * 2.1) * 0.03;
         break;
       }
       case 'hopper': {

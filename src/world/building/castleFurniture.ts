@@ -1,8 +1,11 @@
 import { HALL_DECK } from './layout';
 import { BoxGeometry, Group, Mesh, type Object3D } from 'three';
 import { PALETTE } from '../../art/style/bridge';
-import { addOutline, solid } from '../../art/style/materials';
+import { addOutline, softMaterial, solid } from '../../art/style/materials';
+import { INTERIOR_HALF_X, INTERIOR_HALF_Z, PARADE_MEMBER_RADIUS } from '../../core/constants';
+import { createPetBowl } from '../../art/models/hotelAssets';
 import {
+  CASTLE_BENCH_HALF_LENGTH,
   CASTLE_BENCH_HALF_WIDTH,
   CASTLE_BENCH_SEAT,
   CASTLE_DAIS_HEIGHT,
@@ -23,6 +26,7 @@ import {
   type FeastProp,
 } from '../../art/models/castleAssets';
 import { castleFloorMaterial } from './castleFabric';
+import type { KeepOut } from './dressing';
 
 import { CASTLE_HEARTH, castleTorchAnchors, type WallAnchor } from './castleLighting';
 
@@ -66,21 +70,27 @@ import { CASTLE_HEARTH, castleTorchAnchors, type WallAnchor } from './castleLigh
  * of wall positions is exactly how that happens, and it cannot happen to
  * coordinates that are computed from the other list.
  *
- * ## No colliders, and that is not an oversight
+ * ## The banquet is solid; the rest of the hall is placement
  *
- * Indoor collision is height-blind — `registerInteriorCollision` walls the shell
- * once and it holds on every storey — so a collider under the throne on deck 0
- * would be an invisible pillar in the middle of floor 3. Nothing here registers
- * one. **Placement is the whole of the protection**, and `check:castle`'s prop
- * assertions are what enforce it.
+ * This file used to say castle props get **no** colliders, because indoor
+ * collision is height-blind and one under the throne would be an invisible
+ * pillar on the floor above. That was true of a stacked castle and **it is not
+ * true now**: since #377/#380 the hall's plate stands 279 m from the nearest
+ * point of any other storey, so a collider here reaches nothing else at all.
+ * The measurement, rather than the argument, is `scripts/probe-height-blind.mts`
+ * and {@link greatHallSolids}, which is where the banquet's own solids are
+ * derived. Jim, on #453: *"you can walk straight through the tables — they
+ * should be solid."*
  *
- * Issue #377's floor split removes that constraint by construction. What wants a
- * collider afterwards is written down in `HANDOFF-castle-great-hall.md` rather
- * than left to be rediscovered, and the interesting part is that **the bench,
- * the throne seat, the dais and the table top must not get a blocking one**: a
- * child is *meant* to climb onto all four, and a blocking body on a bench turns
- * the one object in the room built to be sat on into a wall. They take a
- * jump-on plate, the way `hotel/place.ts` already places props.
+ * Everything else on this storey — the throne, the dais, the armour, the
+ * tapestries — still carries **no collider**, and now for an ordinary reason
+ * rather than an architectural one: nobody has asked for it, and the approach
+ * past the dais is only {@link FEAST_APPROACH} wide. **Placement is still the
+ * whole of the protection there**, and `check:castle`'s prop assertions are
+ * what enforce it. Anything that does gain one takes an **absolute** top
+ * (`Collision.ts`'s `topIsAbsolute`), never `Infinity`: a bench a child cannot
+ * climb onto is the one object in the room built to be sat on turned into a
+ * wall. `hotel/place.ts` is the shipped precedent for all of it.
  */
 
 /**
@@ -232,30 +242,130 @@ const BENCH_OFFSET = 1.85;
 const BENCH_ALONG = 1.55;
 
 /**
- * **How many feast tables stand end to end down the hall** (#413).
+ * **How many feast tables stand end to end in one run — counted off the room,
+ * not typed** (#413, #449).
  *
- * Jim, 31 August 2026: *"ok let's do the banquet with the huge table, lots of
- * other children eating at the tables, and a large fireplace with a roaring
- * fire"* — and the ticket is explicit that the huge table runs **down the
- * middle of the hall, not at the end of it**.
+ * They are copies of the **same** asset butted together rather than one longer
+ * table: #413's own instruction ("extend or repeat the one that exists; do not
+ * author a second"), and the cheaper thing besides — an 18 m table authored in
+ * Blender is a new node, a new style entry, a new `check:castle` contract
+ * figure and a new thing that can disagree with {@link CASTLE_TABLE_TOP}. They
+ * butt exactly, because the pitch is the asset's own measured length.
  *
- * Three, and they are three copies of the **same** asset butted together
- * rather than one longer table. #413's own instruction ("extend or repeat the
- * one that exists; do not author a second"), and it is also the cheaper thing:
- * a 18 m table authored in Blender is a new node, a new style entry, a new
- * `check:castle` contract figure and a new thing that can disagree with
- * {@link CASTLE_TABLE_TOP}. Three of an asset whose top is already measured
- * and already asserted is none of that.
- *
- * They butt exactly because the pitch is the asset's own measured length. See
- * {@link TABLE_HALF_LENGTH}.
- *
- * Three is what the room has: the first table's far end is
- * {@link FEAST_APPROACH} clear of the dais, and the third's near end lands at
- * z ≈ +8.2 with 7 m of floor still behind it — so the run fills the hall's
- * middle without either crowding the throne or reaching the south wall.
+ * Jim, on #453: *"have as many tables as is needed to fill the space."* So the
+ * count is no longer a number somebody chose — the run grows south, table by
+ * table, until the last bench's own end would come within
+ * {@link FEAST_SOUTH_MARGIN} of the south wall. Change the plate's depth and
+ * the run lengthens or shortens on its own; that is precisely what a hard 2 or
+ * 3 could not do, and what went stale the moment the hall changed size.
  */
-export const FEAST_TABLE_COUNT = 3;
+export function feastTableCount(plan: GreatHallPlan): number {
+  // The first table is fixed: {@link FEAST_APPROACH} clear of the dais.
+  const first = plan.wallZ + plan.inward * (THRONE_FROM_WALL + TABLE_FROM_THRONE);
+  let count = 0;
+  for (;;) {
+    const centre = first + plan.inward * count * TABLE_HALF_LENGTH * 2;
+    // The southernmost thing a table brings with it is the far end of its
+    // outer bench, not the table top — so that is what is measured against the
+    // wall, and it is measured off the bench asset rather than guessed.
+    const reach = Math.abs(centre + plan.inward * (BENCH_ALONG + BENCH_HALF_LENGTH));
+    if (reach > INTERIOR_HALF_Z - FEAST_SOUTH_MARGIN) return count;
+    count += 1;
+  }
+}
+
+/**
+ * Clear floor left between the last bench and the south wall, in metres.
+ *
+ * A child is 1.24 m across, so this is "she can walk round the end of the
+ * banquet without brushing the wall", twice over. Any less and the run reaches
+ * a wall it has to be squeezed past; any more and the room starts looking
+ * half-used again, which is the thing #453 is about.
+ */
+const FEAST_SOUTH_MARGIN = 3;
+
+/** Half a bench's own length, measured off the asset. */
+const BENCH_HALF_LENGTH = CASTLE_BENCH_HALF_LENGTH;
+
+/**
+ * **The hall fills with tables, and the count comes off the room** — Jim, on
+ * #453.
+ *
+ * > *"the tables don't compose nicely into the space, they're kind of shoved
+ * > into one end of a mostly empty room … have as many tables as is needed to
+ * > fill the space."*
+ *
+ * He was right twice over, and the second half was not really about tables.
+ * Two invisible discs in `keepOutsFor` — the roundel's and the front door's —
+ * claimed the middle and the south of a storey that has neither a roundel nor
+ * a door, and the banquet had been squeezed into what was left. Those are gone
+ * (see `dressing.ts`), and with the floor back the runs simply march across it.
+ *
+ * ## The throne stands at the head of the first run, not at the end of an aisle
+ *
+ * The east-most run is **on the hall's own axis**, so the throne looks straight
+ * down a table: the high table of a great hall, which is what a throne at the
+ * head of a room has always meant. The version this replaces put an aisle on
+ * that axis with a run either side, which was a good composition for exactly
+ * two tables and cannot survive more of them — a grid of runs either side of a
+ * centred aisle has to grow east as fast as it grows west, and east is the lift
+ * lobby, the one disc on this storey that is really there.
+ *
+ * Putting a run on the axis instead means the grid only ever grows **west**,
+ * into the open half of the hall, and the east-most run's benches sit 6.4 m
+ * clear of the lift lobby whatever else changes.
+ */
+
+/**
+ * Clear floor between one run's benches and the next run's, in metres.
+ *
+ * A child is 1.24 m across, so 2.6 m is two of her abreast: this is the aisle
+ * she walks up between two tables of children, and it is what stops a hall of
+ * five runs reading as one enormous slab of furniture.
+ */
+const FEAST_AISLE = 2.6;
+
+/**
+ * Middle to middle of two neighbouring runs — the aisle plus what a run itself
+ * claims either side of its own axis.
+ *
+ * Derived rather than typed, so widening a bench or moving it out from the
+ * table moves every run in the hall together and cannot leave two of them
+ * overlapping.
+ */
+const FEAST_ROW_PITCH = 2 * (BENCH_OFFSET + CASTLE_BENCH_HALF_WIDTH) + FEAST_AISLE;
+
+/**
+ * Clear floor left between the west-most run's benches and the west wall.
+ *
+ * Two metres: enough to walk down the outside of the banquet, which is how a
+ * child reaches the far tables at all, and not so much that the hall goes back
+ * to having an empty half. It is what decides the number of runs, so it is the
+ * one number to move if the hall ever wants one fewer.
+ */
+const FEAST_WALL_MARGIN = 2;
+
+/**
+ * **Every run's axis, east to west** — the east-most on the hall's own axis
+ * with the throne at its head, then one every {@link FEAST_ROW_PITCH} until the
+ * next would come within {@link FEAST_WALL_MARGIN} of the west wall.
+ *
+ * East to west and not the other way round, because index 0 is the run the
+ * blank places and the pets' table belong to (see {@link FREE_PLACE_ROW}), and
+ * that wants to be the run nearest the lift she arrives by rather than the one
+ * furthest from it.
+ */
+function feastRowAxes(plan: GreatHallPlan): number[] {
+  const axes: number[] = [];
+  for (;;) {
+    const axis = plan.axisX - axes.length * FEAST_ROW_PITCH;
+    // A run reaches this far west of its own axis: the outer bench, plus the
+    // plank's half-width. Measured off the assets, never typed.
+    const reach = axis - BENCH_OFFSET - CASTLE_BENCH_HALF_WIDTH;
+    if (reach < -INTERIOR_HALF_X + FEAST_WALL_MARGIN) return axes;
+    axes.push(axis);
+  }
+}
 
 /**
  * How far along a bench the two diners sitting on it are placed, either side of
@@ -315,29 +425,49 @@ export function greatHallPlan(deck: number): GreatHallPlan | null {
 function feastTableCentres(plan: GreatHallPlan): number[] {
   const first = plan.wallZ + plan.inward * (THRONE_FROM_WALL + TABLE_FROM_THRONE);
   return Array.from(
-    { length: FEAST_TABLE_COUNT },
+    { length: feastTableCount(plan) },
     (_, i) => first + plan.inward * i * TABLE_HALF_LENGTH * 2,
   );
 }
 
-/** One bench in the run: where its middle is, and which side of the table. */
+/** One bench in the run: where its middle is, and which side of its table. */
 interface BenchPlacement {
   readonly x: number;
   readonly z: number;
-  /** -1 west of the axis, +1 east. */
+  /** -1 west of its own run's axis, +1 east. */
   readonly side: number;
+  /**
+   * Which run this bench belongs to, 0 west and 1 east.
+   *
+   * Carried rather than recovered from `x`. {@link greatHallSeats} counts the
+   * free places along each run's own bench line, and recovering the run by
+   * undoing `x ± BENCH_OFFSET` in floating point does not give back the same
+   * number on both sides of a table — which silently put the count out of step
+   * halfway down a run and left five free places where six were intended.
+   */
+  readonly row: number;
 }
 
-/** Every bench at the banquet, in placement order. */
+/**
+ * Every bench at the banquet, in placement order: west run first, and within a
+ * run, table by table down the hall.
+ *
+ * The order is load-bearing rather than incidental — {@link greatHallSeats}
+ * counts along it to decide which places are left free, and
+ * `greatHallBanquet.ts` seats children off the list it returns. One list, one
+ * order, one owner.
+ */
 function feastBenches(plan: GreatHallPlan): BenchPlacement[] {
   const benches: BenchPlacement[] = [];
-  for (const tableZ of feastTableCentres(plan)) {
-    for (const side of [-1, 1]) {
-      for (const along of [-BENCH_ALONG, BENCH_ALONG]) {
-        benches.push({ x: plan.axisX + side * BENCH_OFFSET, z: tableZ + along, side });
+  feastRowAxes(plan).forEach((rowX, row) => {
+    for (const tableZ of feastTableCentres(plan)) {
+      for (const side of [-1, 1]) {
+        for (const along of [-BENCH_ALONG, BENCH_ALONG]) {
+          benches.push({ x: rowX + side * BENCH_OFFSET, z: tableZ + along, side, row });
+        }
       }
     }
-  }
+  });
   return benches;
 }
 
@@ -372,14 +502,111 @@ export interface GreatHallSeat {
   readonly z: number;
   /** Turns a +Z-facing child to look across the table. */
   readonly yaw: number;
+  /**
+   * **Nobody is sitting here** — one of #449's blank spaces, kept clear for
+   * the player. See {@link FREE_PLACE_STRIDE}.
+   *
+   * A property of the seat rather than a second list of coordinates, because
+   * the two questions a free place is asked — "seat no child here" and "offer
+   * a Sit chip here" — must never be able to disagree about which seat they
+   * mean. `greatHallBanquet.ts` skips these; {@link greatHallFreePlaces}
+   * hands the same ones to `Building`'s interact zones.
+   */
+  readonly free: boolean;
+  /** Where a child stands to sit down here. See {@link greatHallFreePlaces}. */
+  readonly standX: number;
+  readonly standZ: number;
 }
 
-/** Every seat at the banquet. See {@link GreatHallSeat}. */
+/**
+ * **How many places are left blank, and where along the run they are** — #449's
+ * "a few spaces".
+ *
+ * Jim: *"no free spaces for the player to sit."* The fix is not one gap at the
+ * end of a table, which reads as the table having run out of children; it is
+ * gaps **among** the diners, which read as places laid for somebody who has not
+ * sat down yet.
+ *
+ * Three of them, every other place, at the **south end** of the run — which is
+ * where the pets' table stands and where she walks in from the lift. That
+ * clustering is not tidiness: a run is 18 m long, there is one pets' table, and
+ * #449's fourth ask is that she *watches* her cat go and eat. Free places
+ * spread evenly down the whole run measured 12 m from the nearest bowl, and on
+ * screen that is the animal walking out of the bottom of the frame — the first
+ * version of this, built and thrown away. `check:castle`'s places assertion
+ * fails on it now.
+ *
+ * It has a second virtue: three gaps together are something a six-year-old
+ * finds while scanning a hall of a hundred children, where one here and one
+ * fifteen metres away are not.
+ */
+const FREE_PLACE_COUNT = 3;
+
+/** Every other place, so no two blanks are adjacent and read as a missing pair. */
+const FREE_PLACE_STRIDE = 2;
+
+/**
+ * Which side of a run's table the free places are on: the **camera-facing**
+ * one.
+ *
+ * The camera is fixed isometric and always shows an object's +X/+Z faces, so a
+ * child sitting west of a table (`side < 0`) looks east, into the camera, and
+ * one sitting east of it shows her back. Both are true of the diners either
+ * way — a banquet has two sides and children sit on both of them — but **the
+ * player only ever sits in a free place**, and a six-year-old watching herself
+ * from behind for the length of a meal is the fault #447 files against the
+ * market's south row. So every free place is on the side she will be seen from
+ * the front at.
+ */
+const FREE_PLACE_SIDE = -1;
+
+/**
+ * **Which run the blank places are on: the first, the one on the hall's own
+ * axis with the throne at its head.**
+ *
+ * The run nearest the lift she arrives by, so the blank places and the pets'
+ * table are the first things she reaches rather than something across the
+ * width of a hall of five tables. {@link greatHallPetTable} reads the same
+ * index, so the two cannot come to mean different runs.
+ */
+const FREE_PLACE_ROW = 0;
+
+/**
+ * How far back from her seat a child stands to sit down in it, in metres.
+ *
+ * She has to arrive somewhere the bench is not: her seat is on the plank's
+ * inner face, so a stand spot a chair's depth behind it would be inside the
+ * plank. This is measured from the seat out past the plank's far edge —
+ * `CASTLE_BENCH_HALF_WIDTH × 2` of bench plus room to stand — rather than
+ * typed, so a wider bench moves the spot with it.
+ *
+ * Castle props carry no colliders, so nothing would *stop* her standing in the
+ * bench; it would simply look like she was standing in the bench.
+ */
+const SIT_STAND_BACK = CASTLE_BENCH_HALF_WIDTH * 2 + 0.85;
+
+/**
+ * How close a tap has to land to a blank place to mean *that* place, in metres.
+ *
+ * The hotel breakfast chair's own figure. It lives here rather than in
+ * `interactZones.ts` because {@link SIT_STAND_BACK} has to stay inside it —
+ * a stand spot further from its seat than the pick radius is a chip that comes
+ * into view and can never be pressed, which is what the hotel's window zones
+ * were found doing — and a check can only assert that if both numbers have one
+ * home.
+ */
+export const SIT_PICK_RADIUS = 1.6;
+
+/** Every seat at the banquet, taken and free alike. See {@link GreatHallSeat}. */
 export function greatHallSeats(deck: number): readonly GreatHallSeat[] {
   const plan = greatHallPlan(deck);
   if (!plan) return [];
 
-  const seats: GreatHallSeat[] = [];
+  /** Every seat, and where along {@link FREE_PLACE_ROW}'s blank-side bench line
+   *  it falls — `-1` for a seat that is not on that line at all. */
+  const seats: { seat: GreatHallSeat; along: number }[] = [];
+  let alongLine = 0;
+
   for (const bench of feastBenches(plan)) {
     // The plank's inner face: its middle, pulled back towards the table by half
     // its own measured width. Never a typed 0.30.
@@ -387,11 +614,49 @@ export function greatHallSeats(deck: number): readonly GreatHallSeat[] {
     // A child faces +Z, so a quarter turn one way or the other looks across the
     // table. West of the axis she looks east.
     const yaw = bench.side < 0 ? Math.PI / 2 : -Math.PI / 2;
+    const onFreeLine = bench.side === FREE_PLACE_SIDE && bench.row === FREE_PLACE_ROW;
     for (const along of [-DINER_ALONG, DINER_ALONG]) {
-      seats.push({ x, z: bench.z + along, yaw });
+      seats.push({
+        seat: {
+          x,
+          z: bench.z + along,
+          yaw,
+          free: false,
+          // Straight back out from the table, which is the way she walked in.
+          standX: x + bench.side * SIT_STAND_BACK,
+          standZ: bench.z + along,
+        },
+        along: onFreeLine ? alongLine : -1,
+      });
+      if (onFreeLine) alongLine += 1;
     }
   }
-  return seats;
+
+  // **The blank places, counted back from the south end of that line.**
+  // Counted from the end rather than from the start because the end is the
+  // fixed one: the run grows southwards as the hall gets deeper
+  // ({@link feastTableCount}), so a count from the north would slide the gaps
+  // — and the pets' table — a table's length every time the room changed size.
+  const last = alongLine - 1;
+  const free = new Set<number>();
+  for (let i = 0; i < FREE_PLACE_COUNT; i += 1) {
+    const at = last - i * FREE_PLACE_STRIDE;
+    if (at >= 0) free.add(at);
+  }
+
+  return seats.map(({ seat, along }) =>
+    free.has(along) ? { ...seat, free: true } : seat,
+  );
+}
+
+/**
+ * The blank places, for whoever offers the Sit chip.
+ *
+ * A filter over {@link greatHallSeats} rather than a second derivation, so
+ * "which seats are free" has exactly one answer in this game.
+ */
+export function greatHallFreePlaces(deck: number): readonly GreatHallSeat[] {
+  return greatHallSeats(deck).filter((seat) => seat.free);
 }
 
 /**
@@ -406,6 +671,425 @@ export function greatHallSeats(deck: number): readonly GreatHallSeat[] {
 export const DINER_TABLE_GAP = BENCH_OFFSET - CASTLE_BENCH_HALF_WIDTH - CASTLE_TABLE_HALF_WIDTH;
 
 /**
+ * How far in front of a blank place its lone goblet stands, in metres.
+ *
+ * Past {@link DINER_TABLE_GAP} — so it is on the table rather than balanced on
+ * its edge — and past `Building`'s own `FEAST_DISH_REACH` of 0.5 m, so the dish
+ * she chooses when she sits down lands beside it and never inside it.
+ */
+const FREE_PLACE_GOBLET_REACH = 0.62;
+
+// ------------------------------------------------------- the pets' table
+
+/**
+ * **A small table for the pets, alongside the banquet** — #449's fourth ask,
+ * and the one that makes the hall a scene rather than furniture.
+ *
+ * Jim: *"There should also be a small pets table for the pets to eat at, and
+ * they go there when the player sits."* A child who brings her cat to dinner
+ * sees it leave her side and settle at its own little table.
+ *
+ * ## The numbers, and what each is for
+ *
+ * The top is at {@link GREAT_HALL_PET_TABLE_TOP}, roughly a third of the feast
+ * tables' 0.675 m. That is not "small" for its own sake: the pets are between
+ * 0.3 and 0.6 m tall, and a bowl on a 0.675 m table would be over every one of
+ * their heads. At 0.30 m a bunny's nose reaches its own bowl, which is the
+ * whole read.
+ *
+ * It is 2.4 m long, which is *large* for four small animals and deliberately
+ * so — a table the size of the bowls on it disappears at this camera, and this
+ * one has to be recognisable as a table from across the hall or the moment it
+ * exists for does not land.
+ *
+ * **Its long axis runs down the hall, like the feast tables' own**, so it reads
+ * as a little one alongside the big ones rather than as a bench pushed across
+ * the end of them — and so its animals can line up facing the same way as the
+ * children.
+ */
+const PET_TABLE_HALF_X = 0.45;
+const PET_TABLE_HALF_Z = 1.2;
+/** The plank's thickness, and therefore where the legs stop. */
+const PET_TABLE_PLANK = 0.09;
+
+/** The pets' table's own top surface, in metres. See {@link petTable}. */
+export const GREAT_HALL_PET_TABLE_TOP = 0.3;
+
+/**
+ * Where the pets' table stands relative to {@link FREE_PLACE_ROW}'s run: a
+ * little west of its axis, and south of the last bench on it.
+ *
+ * **In the clear band at the south end of the hall**, which is floor the
+ * banquet deliberately leaves ({@link FEAST_SOUTH_MARGIN}) rather than floor
+ * borrowed from it — so the animals eat beside the feast rather than among the
+ * children's legs, and nothing has to be moved to make room for them.
+ *
+ * ## It has to be in shot from her seat, and that is the requirement that is
+ * easy to miss
+ *
+ * The point of #449 is that she *watches* her cat leave her side and go and
+ * eat, so a pets' table she cannot see while sitting down would satisfy the
+ * ticket's words and none of its purpose. Two placements were built and thrown
+ * away for this — at the mouth of an aisle it was 12 m from the nearest blank
+ * place, and beside a run it was 12 m from the blank places on the *other* run.
+ * Both were measured in the running game, not reasoned about: the animal was
+ * where it should be and the moment was not there. The blank places now cluster
+ * at the south end of one run ({@link FREE_PLACE_COUNT}) and this stands beside
+ * them, which puts the farthest of them a few strides apart.
+ *
+ * The westward nudge keeps the table out of the walking lane straight off the
+ * end of the run, and puts the animals between her seat and the camera rather
+ * than directly behind her.
+ */
+const PET_TABLE_WEST_OF_ROW = 2.0;
+
+/**
+ * How far south of the last bench's own end the pets' table's middle sits.
+ *
+ * Its own half-length plus room for the animals standing at its north end, so
+ * nothing at the pets' table is ever inside the last bench of the banquet —
+ * and no more than that, because every centimetre further south is a
+ * centimetre further from the blank place at the *far* end of the run. At 2.2
+ * the worst of the three measured 8.4 m and `check:castle` failed it; the
+ * clearance is what it has to be and not a round number.
+ */
+const PET_TABLE_SOUTH_OF_FEAST = 1.2;
+
+/**
+ * How far out from the table's edge a pet stands, and how far in its bowl sits.
+ *
+ * The stand-off is a pet's own body plus a little: {@link PARADE_MEMBER_RADIUS}
+ * is what the parade spaces the line with, so a pet standing this far out has
+ * its nose at the table rather than its shoulders through it.
+ *
+ * **0.25 rather than 0.45, off a screenshot.** These are small animals —
+ * `PARADE_MEMBER_RADIUS` is 0.22 m — and at 0.45 the extra hand's width read
+ * as a pet standing *near* its table rather than *at* it. There is no lower
+ * useful figure either: at 0 the body is against the plank and the head goes
+ * through it.
+ */
+const PET_STAND_OFF = PARADE_MEMBER_RADIUS + 0.25;
+const PET_BOWL_INSET = 0.17;
+
+/**
+ * **Where each pet stands, and which way it turns**, in the hall's own local
+ * metres — the one owner of the pets' seating plan.
+ *
+ * `Building` maps these into world coordinates and hands them to the parade;
+ * {@link petTable} lays a bowl at each of them. One list, so a bowl cannot end
+ * up in front of nobody or a pet in front of no bowl.
+ *
+ * ## All of them on the far side, and that is the camera talking
+ *
+ * The camera is fixed isometric and always shows an object's +X/+Z faces. A
+ * pet on the near (east or south) side of the table would face away into it
+ * and show the camera its tail; on the west edge it faces +X, and at the north
+ * end +Z, so every animal at this table is looked at from the front. It is the
+ * same rule the free places at the feast are chosen by — and, pleasingly, it
+ * turns them the same way as the children, so a row of pets reads as a smaller
+ * echo of the row of diners rather than as a separate arrangement.
+ *
+ * Four places: three down the long west edge at 0.8 m — comfortably more than
+ * a companion's own {@link PARADE_MEMBER_RADIUS} — and one at the north end,
+ * which stops three-in-a-row reading as a queue. A child with more than four
+ * companions keeps the rest in the line beside her, which is a perfectly good
+ * thing for them to be doing.
+ */
+export interface PetPlace {
+  readonly x: number;
+  readonly z: number;
+  /** Which way it turns to face its bowl. A pet's model faces +Z at yaw 0. */
+  readonly facing: number;
+}
+
+/** Where the pets' table stands on `deck`, or `null` on any other storey. */
+export function greatHallPetTable(deck: number): { readonly x: number; readonly z: number } | null {
+  const plan = greatHallPlan(deck);
+  if (!plan) return null;
+  const centres = feastTableCentres(plan);
+  const last = centres[centres.length - 1];
+  const row = feastRowAxes(plan)[FREE_PLACE_ROW];
+  if (last === undefined || row === undefined) return null;
+  return {
+    x: row - PET_TABLE_WEST_OF_ROW,
+    // Clear of the last bench's own far end, which is the southernmost thing
+    // the banquet puts on the floor — measured off the assets, never guessed.
+    z:
+      last +
+      plan.inward *
+        (BENCH_ALONG + CASTLE_BENCH_HALF_LENGTH + PET_TABLE_HALF_Z + PET_TABLE_SOUTH_OF_FEAST),
+  };
+}
+
+/**
+ * **Every piece of floor the banquet is standing on**, as discs — for the
+ * things that *scatter* rather than being placed.
+ *
+ * Braziers (`castleLighting.ts`) and the corner clutter (`castleDecor.ts`) pick
+ * their spots by seeded rejection against {@link keepOutsFor}, which is the
+ * list of places a **child has to be able to stand**. The banquet is not one of
+ * those — it is furniture — so it is deliberately not in that list, and the
+ * moment the hall filled with tables the braziers started landing inside them:
+ * measured in the running game, one standing in the top table's bench at
+ * (8.5, 5.7) and another inside a table top at (2.8, −11.3).
+ *
+ * **It must not simply be added to `keepOutsFor`.** `check:castle`'s prop
+ * assertion fails any prop that lands inside a keep-out, and every table, bench
+ * and goblet at this feast is inside the banquet — so that list would fail on
+ * the banquet's own furniture. Two different questions, two lists, one owner
+ * each: *where must a child be able to stand* stays in `dressing.ts`, and
+ * *where is the banquet already* is here, next to the thing that puts it there.
+ *
+ * One disc per table, its radius the corner of that table's own footprint —
+ * measured off the assets, so a longer bench or a wider table grows the disc
+ * with it — plus one for the pets' table.
+ */
+export function greatHallFootprint(deck: number): readonly KeepOut[] {
+  const plan = greatHallPlan(deck);
+  if (!plan) return [];
+
+  // The corner of one table's own claim on the floor: half a run's width by
+  // the far end of its outermost bench.
+  const radius = Math.hypot(
+    BENCH_OFFSET + CASTLE_BENCH_HALF_WIDTH,
+    BENCH_ALONG + CASTLE_BENCH_HALF_LENGTH,
+  );
+  const discs: KeepOut[] = [];
+  for (const rowX of feastRowAxes(plan)) {
+    for (const z of feastTableCentres(plan)) discs.push({ x: rowX, z, radius });
+  }
+
+  const pets = greatHallPetTable(deck);
+  if (pets) {
+    discs.push({
+      x: pets.x,
+      z: pets.z,
+      // Its own half-diagonal, plus the animals standing round it.
+      radius: Math.hypot(PET_TABLE_HALF_X, PET_TABLE_HALF_Z) + PET_STAND_OFF,
+    });
+  }
+  return discs;
+}
+
+/**
+ * A solid piece of the banquet: an axis-aligned box standing on the storey's
+ * floor, in that floor's own local metres.
+ *
+ * `halfX`/`halfZ` are the **effective** footprint — the face a child's body
+ * meets — so whoever registers it insets the walls it builds them from by
+ * their own half-thickness, exactly as `hotel/place.ts` does.
+ */
+export interface HallSolid {
+  readonly x: number;
+  readonly z: number;
+  readonly halfX: number;
+  readonly halfZ: number;
+  /** Its flat top, above the storey's floor. Never `Infinity`: see below. */
+  readonly top: number;
+}
+
+/**
+ * **Everything at the banquet a child cannot walk through** — Jim, on #453:
+ * *"Banquet hall looks good but you can walk straight through the tables —
+ * they should be solid."*
+ *
+ * ## Why this can exist now, when the file header says it cannot
+ *
+ * That header (and `dressing.ts`, `castleDecor.ts`, `Toilets.ts` and
+ * `layout.ts` with it) says castle props get no colliders because indoor
+ * collision is height-blind. **One sentence, two facts** — and the rule only
+ * follows if both hold:
+ *
+ *   A. the collision world is 2-D, so a collider blocks at every height;
+ *   B. two storeys share an (x, z), so A reaches across them.
+ *
+ * `scripts/probe-height-blind.mts` measures each on its own, and the answer is
+ * that **A still holds and B is dead**. An `Infinity`-top collider in the
+ * middle of this hall still blocks at y = 100 — nothing about `CollisionWorld`
+ * changed — but since #377/#380 the hall's plate stands **279 m** from the
+ * nearest point of any other storey, so height-blindness has nothing left to
+ * reach: 0 of 21250 swept points on the mall and 0 of 21250 on the roof are
+ * touched by it, and the park is untouched too. `floors.ts` predicted exactly
+ * this ("what finally lets castle props have real colliders at all"); the probe
+ * is what turns the prediction into a measurement.
+ *
+ * ## Absolute tops, so a solid table is not an invisible pillar
+ *
+ * Every solid here states its **real** top, and `Building` registers it with
+ * `Collision.ts`'s `topIsAbsolute`. Jim, 7 Aug 2026: *"I should be able to jump
+ * onto any solid item that's not too high, here and elsewhere in the game."* A
+ * 0.675 m table against a 1.28 m jump apex is squarely inside that rule, and
+ * the same probe's second row is the measurement: at feet 0.5 m the table
+ * blocks, at 1.0 m and above it does not. An `Infinity` top would have been the
+ * "every prop is a pillar" bug the hotel already paid for.
+ *
+ * ## One rectangle per **run**, not per table and not per bench
+ *
+ * A run's benches stand 1.85 m either side of its table's axis and reach 0.30 m
+ * further out again, and the clear floor between a bench's inner face and the
+ * table is {@link DINER_TABLE_GAP} — **0.45 m**, against a child's 1.24 m
+ * collision diameter. So that gap is not floor she has ever been able to stand
+ * in, and filling it invents no pocket; it only stops her walking through the
+ * run. Along the run the benches are already within 0.1–0.3 m of each other, so
+ * a run is a continuous line of furniture whether or not this says so.
+ *
+ * Registering the run whole rather than piece by piece is therefore both the
+ * honest shape *and* the cheap one: five rectangles instead of ninety, no
+ * interior walls buried inside a solid slab for a depenetration to catch on,
+ * and no butt-joint between neighbouring tables to fall out of step.
+ *
+ * The **dais, throne and armour deliberately get nothing.** The approach
+ * between the dais and the first table is {@link FEAST_APPROACH}, 1.5 m, and a
+ * child is 1.24 m across — solid on both sides it would be a 13 cm squeeze.
+ * Jim asked for the tables, the benches and the pets' table; those are what
+ * this returns.
+ */
+export function greatHallSolids(deck: number): readonly HallSolid[] {
+  const plan = greatHallPlan(deck);
+  if (!plan) return [];
+
+  const solids: HallSolid[] = [];
+  const centres = feastTableCentres(plan);
+  const first = centres[0];
+  const last = centres[centres.length - 1];
+  if (first !== undefined && last !== undefined) {
+    for (const rowX of feastRowAxes(plan)) {
+      solids.push({
+        x: rowX,
+        z: (first + last) / 2,
+        // Out to the outer face of the outer bench, measured off the asset.
+        halfX: BENCH_OFFSET + CASTLE_BENCH_HALF_WIDTH,
+        // The whole run, end to end: the tables butt exactly, so this is their
+        // count times the asset's own half-length. It also covers the benches,
+        // which reach 2.95 m from a table's middle against the table's 3.00.
+        halfZ: (Math.abs(last - first) + TABLE_HALF_LENGTH * 2) / 2,
+        top: CASTLE_TABLE_TOP,
+      });
+    }
+  }
+
+  const pets = greatHallPetTable(deck);
+  if (pets) {
+    solids.push({
+      x: pets.x,
+      z: pets.z,
+      halfX: PET_TABLE_HALF_X,
+      halfZ: PET_TABLE_HALF_Z,
+      top: GREAT_HALL_PET_TABLE_TOP,
+    });
+  }
+
+  return solids;
+}
+
+/**
+ * The part of the banquet a jump can **land on**: each run, whole, at
+ * {@link GREAT_HALL_TABLE_HEIGHT}.
+ *
+ * **The same footprint as {@link greatHallSolids}, deliberately.** The obvious
+ * version of this returned the table's own measured half-width, so the floor
+ * she stands on would be the wood she can see — and it opens a soft-lock: a
+ * `CollisionWorld` rectangle is hollow, a body inside one is never pushed out
+ * (measured: eleven seconds without moving), and walking off a narrow plate
+ * drops her onto the flagstones *inside* the run. Covering the run edge to edge
+ * is what makes the inside unreachable rather than merely unpleasant. See
+ * `Building.ts`'s `banquetTables` for the full argument and the two fixes that
+ * did not work.
+ *
+ * The pets' table is excluded because it does not need this: at 0.45 m
+ * half-width it is narrower than a child's own 0.62 m radius, so a body inside
+ * it is pushed clear by its own walls. `check:hall-solid` measures that rather
+ * than taking it on trust.
+ */
+export function greatHallTableTops(deck: number): readonly HallSolid[] {
+  return greatHallSolids(deck).filter((solid) => solid.top === CASTLE_TABLE_TOP);
+}
+
+/** Every place at the pets' table. See {@link PetPlace}. */
+export function greatHallPetPlaces(deck: number): readonly PetPlace[] {
+  const table = greatHallPetTable(deck);
+  if (!table) return [];
+  const places: PetPlace[] = [];
+  // Down the west edge, facing east across the table: +X, into the camera, and
+  // the same way the children at the feast are facing.
+  for (const along of [-0.8, 0, 0.8]) {
+    places.push({
+      x: table.x - PET_TABLE_HALF_X - PET_STAND_OFF,
+      z: table.z + along,
+      facing: Math.PI / 2,
+    });
+  }
+  // And one at the north end, facing down the table: +Z, into the camera too.
+  places.push({ x: table.x, z: table.z - PET_TABLE_HALF_Z - PET_STAND_OFF, facing: 0 });
+  return places;
+}
+
+/**
+ * The pets' table itself: a plank on four legs, and a bowl at every place.
+ *
+ * Built here from boxes rather than authored, for the reason `dais` is: it is
+ * a rectangle, and a rectangle is not worth a node in `castle.glb`, a style
+ * entry and a contract figure. Its colours are the **feast tables' own** —
+ * `woodLight` over `woodDark` — so it reads as a small piece of the same
+ * furniture rather than as something from another room.
+ *
+ * The bowls are `createPetBowl()`, the hotel's. That is one definition of
+ * "a bowl a pet eats out of" being used twice, which is the rule this codebase
+ * is built on; a second castle-flavoured pet bowl would be a second thing to
+ * keep in step and would look, at this camera, exactly the same.
+ */
+function petTable(x: number, z: number, places: readonly PetPlace[]): Object3D[] {
+  const out: Object3D[] = [];
+
+  const top = new BoxGeometry(PET_TABLE_HALF_X * 2, PET_TABLE_PLANK, PET_TABLE_HALF_Z * 2);
+  top.translate(0, GREAT_HALL_PET_TABLE_TOP - PET_TABLE_PLANK / 2, 0);
+  const plank = solid(new Mesh(top, softMaterial(PALETTE.woodLight, 0.78)));
+  plank.name = 'castle-pet-table-top';
+  plank.position.set(x, 0, z);
+  plank.receiveShadow = true;
+  addOutline(plank, 0.018);
+  out.push(plank);
+
+  const legHeight = GREAT_HALL_PET_TABLE_TOP - PET_TABLE_PLANK;
+  for (const dx of [-1, 1]) {
+    for (const dz of [-1, 1]) {
+      const geometry = new BoxGeometry(0.12, legHeight, 0.12);
+      geometry.translate(0, legHeight / 2, 0);
+      const leg = solid(new Mesh(geometry, softMaterial(PALETTE.woodDark, 0.78)));
+      leg.name = 'castle-pet-table-leg';
+      leg.position.set(x + dx * (PET_TABLE_HALF_X - 0.18), 0, z + dz * (PET_TABLE_HALF_Z - 0.18));
+      addOutline(leg, 0.016);
+      out.push(leg);
+    }
+  }
+
+  // One bowl per place, laid on the table's measured top in front of whoever
+  // is standing there — never a second list of bowl positions.
+  for (const place of places) {
+    const bowl = createPetBowl();
+    bowl.root.position.set(
+      towards(place.x, x, PET_TABLE_HALF_X - PET_BOWL_INSET),
+      GREAT_HALL_PET_TABLE_TOP,
+      towards(place.z, z, PET_TABLE_HALF_Z - PET_BOWL_INSET),
+    );
+    out.push(bowl.root);
+  }
+
+  return out;
+}
+
+/**
+ * The point on the table's own edge nearest a place: the place's coordinate,
+ * pulled back to at most `limit` from the table's centre.
+ *
+ * So a bowl lands in front of the animal that has to reach it, whichever side
+ * of the table it is standing on, without a per-side table of offsets.
+ */
+function towards(place: number, centre: number, limit: number): number {
+  return centre + Math.max(-limit, Math.min(limit, place - centre));
+}
+
+/**
  * Where the throne stands, measured back from the end wall.
  *
  * Far enough off the wall that the **room's** 3.30 m ceiling applies rather
@@ -415,6 +1099,23 @@ export const DINER_TABLE_GAP = BENCH_OFFSET - CASTLE_BENCH_HALF_WIDTH - CASTLE_T
  * placement rule nobody will remember.
  */
 const THRONE_FROM_WALL = 2.8;
+
+/**
+ * How far either side of the hall's axis the two suits of armour stand.
+ *
+ * **East of the whole banquet**, because the banquet now grows west from the
+ * hall's axis and there is no floor left on that side to stand a knight in.
+ * The east-most run's benches reach 2.15 m from the axis, so a plinth 4.2 m
+ * out clears it by 2 m — a stride and a half of walking room between the
+ * armour and the end of the top table — and stays well clear of the lift
+ * lobby's disc, which `check:castle` measures it against.
+ *
+ * One either side used to flank the approach. With the throne now at the head
+ * of a table rather than at the end of an aisle, the pair stands **both to the
+ * east**, one forward of the other, so they still flank the walk up to the
+ * dais without one of them standing in the middle of a run.
+ */
+const ARMOUR_FROM_AXIS = 4.2;
 
 /**
  * Stands the great hall's furniture on `deck`.
@@ -446,11 +1147,24 @@ export function dressGreatHall(deck: number, floor: Group): void {
 
   // A guard of honour flanking the approach, rather than two suits of armour
   // pushed into the corners where nobody walks past them.
-  for (const side of [-1, 1]) {
-    group.add(...armourOnPlinth(axisX + side * 5, wallZ + inward * 4.3, inward));
+  //
+  // **Outboard of both runs since #449.** They stood at ±5 m, which was clear
+  // floor when one table ran down the axis and is inside the west run's bench
+  // band now that there are two — 0.25 m apart on the plan, saved only by 1.25 m
+  // of Z. `ARMOUR_FROM_AXIS` puts them outside the whole banquet, where they
+  // flank the feast rather than growing out of the end of a bench.
+  for (const along of [4.3, 8.1]) {
+    group.add(...armourOnPlinth(axisX + ARMOUR_FROM_AXIS, wallZ + inward * along, inward));
   }
 
-  group.add(...feast(plan));
+  group.add(...feast(plan, deck));
+
+  // The pets' table, at the mouth of the aisle (#449). Placed from the same
+  // plan as the feast, so it cannot end up in a hall that laid out somewhere
+  // else — and from the same `greatHallPetPlaces` the parade is handed, so
+  // every bowl has an animal in front of it.
+  const pets = greatHallPetTable(deck);
+  if (pets) group.add(...petTable(pets.x, pets.z, greatHallPetPlaces(deck)));
 
   // A bench by the fire, where `castleDecor.ts` has already put the cat and the
   // woodpile. Its Z comes from the hearth's own constant, so it cannot end up
@@ -581,29 +1295,50 @@ const FEAST_SETTING: readonly FeastProp[] = [
  * the asset's own measured length: there is no gap to tune and no seam to
  * notice, and there could not be one without the asset changing size.
  */
-function feast(plan: GreatHallPlan): Object3D[] {
+function feast(plan: GreatHallPlan, deck: number): Object3D[] {
   const out: Object3D[] = [];
-  const { axisX } = plan;
 
-  for (const z of feastTableCentres(plan)) {
-    const table = createCastleFeastTable();
-    table.root.position.set(axisX, 0, z);
-    out.push(table.root);
+  for (const rowX of feastRowAxes(plan)) {
+    for (const z of feastTableCentres(plan)) {
+      const table = createCastleFeastTable();
+      table.root.position.set(rowX, 0, z);
+      out.push(table.root);
 
-    // Laid down the middle of the table, on its **measured** top. A goblet
-    // standing on a typed 1.05 would have been 37 cm in the air ever since the
-    // furniture was cut to a child.
-    FEAST_SETTING.forEach((kind, index) => {
-      const prop = createCastleFeastProp(kind);
-      const along = (index - (FEAST_SETTING.length - 1) / 2) * 0.72;
-      // Alternate sides of the centre line so it reads as places laid for people
-      // sitting on both benches, not as a row of objects.
-      prop.root.position.set(axisX + (index % 2 === 0 ? -0.55 : 0.55), CASTLE_TABLE_TOP, z + along);
-      // Turned by its own place at the table rather than by its index within
-      // one table's setting, so the three tables are not three identical rows.
-      prop.root.rotation.y = (index + z) * 1.31;
-      out.push(prop.root);
-    });
+      // Laid down the middle of the table, on its **measured** top. A goblet
+      // standing on a typed 1.05 would have been 37 cm in the air ever since the
+      // furniture was cut to a child.
+      FEAST_SETTING.forEach((kind, index) => {
+        const prop = createCastleFeastProp(kind);
+        const along = (index - (FEAST_SETTING.length - 1) / 2) * 0.72;
+        // Alternate sides of the centre line so it reads as places laid for people
+        // sitting on both benches, not as a row of objects.
+        prop.root.position.set(rowX + (index % 2 === 0 ? -0.55 : 0.55), CASTLE_TABLE_TOP, z + along);
+        // Turned by its own place at the table rather than by its index within
+        // one table's setting, so no two tables are identical rows.
+        prop.root.rotation.y = (index + z + rowX) * 1.31;
+        out.push(prop.root);
+      });
+    }
+  }
+
+  // **A goblet standing alone in front of every blank place** (#449).
+  //
+  // The gaps read as gaps from a metre away and as very little from across the
+  // hall, where a child first sees the room — the rainbow outline and the Sit
+  // chip only arrive once she is near. A place laid with nobody at it is what a
+  // laid table says instead: this one is for somebody who has not sat down yet.
+  //
+  // The castle's own goblet, in the castle's own place setting, pushed out past
+  // where her chosen dish lands so the two never share a spot.
+  for (const seat of greatHallSeats(deck)) {
+    if (!seat.free) continue;
+    const goblet = createCastleFeastProp('goblet');
+    goblet.root.position.set(
+      seat.x + Math.sin(seat.yaw) * FREE_PLACE_GOBLET_REACH,
+      CASTLE_TABLE_TOP,
+      seat.z + Math.cos(seat.yaw) * FREE_PLACE_GOBLET_REACH,
+    );
+    out.push(goblet.root);
   }
 
   // Two benches a side per table rather than one long one: the asset is 2.80 m,

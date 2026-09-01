@@ -1,11 +1,12 @@
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
-import { CylinderGeometry, Group, Mesh, Vector3, type PerspectiveCamera } from 'three';
+import { CylinderGeometry, Group, Mesh, Object3D, Vector3, type PerspectiveCamera } from 'three';
 import { BUILDING_FLOOR_COUNT, BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, SLIDE_SPEED } from '../../core/constants';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
 import { bandContains, type PortalBand } from '../tapSpacing';
 import { SpaceManager } from '../SpaceManager';
 import {
   CASTLE_FLOORS,
+  CASTLE_HALL,
   CASTLE_MALL,
   CASTLE_ROOF,
   castleFloorAt,
@@ -35,14 +36,33 @@ import { Shops } from './shops/Shops';
 import { SlideRide } from './SlideRide';
 import { Toilets } from './Toilets';
 import { Trampoline } from './Trampoline';
-import { WalkSurfaces } from './surfaces';
+import { WalkSurfaces, type MovingPlatform } from './surfaces';
 import { buildingInteractZones } from './interactZones';
 import { dressDeck } from './dressing';
 import { CastleFire } from './castleLighting';
 import { dressCastle } from './castleDecor';
-import { GreatHallBanquet } from './greatHallBanquet';
+import { GreatHallBanquet, type PetTableLink } from './greatHallBanquet';
+import {
+  CASTLE_GREAT_HALL_DECK,
+  GREAT_HALL_TABLE_HEIGHT,
+  greatHallPetPlaces,
+  greatHallSeats,
+  greatHallSolids,
+  greatHallTableTops,
+} from './castleFurniture';
+import { CASTLE_TABLE_TOP, createCastleFeastProp, type FeastProp } from '../../art/models/castleAssets';
 import { WildPets } from './WildPets';
 import { createRoofClouds, type RoofClouds } from './roofClouds';
+
+/**
+ * How far towards the table her chosen dish is set down, in metres.
+ *
+ * Half the 0.45 m of clear floor between the bench plank's inner face and the
+ * table's edge, plus a little, so the dish lands **on** the table in front of
+ * her rather than balanced on its edge. The hotel's breakfast bowl uses 0.42 m
+ * for the same job at a round table she sits further back from.
+ */
+const FEAST_DISH_REACH = 0.5;
 import type { IsoCamera } from '../../core/IsoCamera';
 import type { InteractZone } from '../interact';
 import { softMaterial } from './parts';
@@ -491,8 +511,39 @@ export class Building implements GameSystem {
   /** The building's own fixed lights — on indoors, off outside and on the roof. */
   private readonly interiorLighting = new InteriorLighting();
 
+  /**
+   * The seam the banquet sends her companions to their own table down (#449).
+   *
+   * The same one-way shape as `Hotel.petParade`, and assigned in the same
+   * place, `Game`: the hall says *there is a place laid here, and it is your
+   * cat's*; the parade walks the animal there and holds it. Nothing comes back
+   * the other way, and this file never touches a pet's body — which is what
+   * makes the flickering, species-swapping stand-in of Jim's 23 Aug report
+   * impossible here rather than merely absent.
+   */
+  petParade: PetTableLink | null = null;
+
   private player: Player | null = null;
   private ride: ActiveRide | null = null;
+  /**
+   * Which of the banquet's blank places she is sitting in, or `null`. Read by
+   * `interactZones.ts` to decide whether a free place offers the invitation or
+   * the food. The hotel's `seatedAt` is the same field.
+   */
+  private banquetSeat: number | null = null;
+  /** What she chose to eat, on the table in front of her. See `eatAtFeast`. */
+  private feastDish: Object3D | null = null;
+  /**
+   * Where the pets eat, in world metres — the hall's own floor-local plan
+   * mapped once rather than every frame, because {@link sendPetsToTheirTable}
+   * re-asserts it while she is at the table.
+   */
+  private readonly petTablePlaces = greatHallPetPlaces(CASTLE_GREAT_HALL_DECK).map((place) => ({
+    x: floorX(CASTLE_HALL, place.x),
+    y: BUILDING_BASE_Y,
+    z: floorZ(CASTLE_HALL, place.z),
+    facing: place.facing,
+  }));
   private grownUpComing = false;
   private wasOnPad = false;
   private wasAirborne = false;
@@ -631,6 +682,20 @@ export class Building implements GameSystem {
     // paying for itself — a wall on the mall can no longer be a wall in the
     // great hall.
     for (const floor of CASTLE_FLOORS) registerInteriorCollision(collision, floor);
+
+    // **And the banquet is solid** (#453). Jim, having walked the hall: *"you
+    // can walk straight through the tables — they should be solid."*
+    //
+    // Registered per floor through the same loop as the shell, off
+    // `greatHallSolids`, which returns nothing on a storey that is not the
+    // great hall — so this is one call rather than a special case, and a hall
+    // that ever moves storey brings its own collision with it.
+    for (const floor of CASTLE_FLOORS) registerHallCollision(collision, floor);
+
+    // Her feet land on the wood: the table tops are one walkable plate, so a
+    // jump onto the banquet ends up standing on it. See `banquetTables`.
+    this.surfaces.addPlatform(banquetTables());
+
 
     // `buildShaftGuards` was called here. There are no shafts to guard.
     //
@@ -802,7 +867,147 @@ export class Building implements GameSystem {
       // building owns the geometry and `Game` owns the join. See
       // `InteriorControls.openShop`.
       openShop: (unitId) => this.controls.openShop(unitId),
+      banquetSeat: this.banquetSeat,
+      sitAtFeast: (index) => this.sitAtFeast(index),
+      eatAtFeast: (kind) => this.eatAtFeast(kind),
+      leaveFeast: () => this.leaveFeast(),
     });
+  }
+
+  /**
+   * **Sit down in one of the banquet's blank places** — #449's third ask, and
+   * the door to its fourth.
+   *
+   * The hotel breakfast room's `sitAt` is the model, line for line: hand the
+   * player to a ride, put her on the seat, and remember which one so the zone
+   * offers the food instead of the invitation. What is different is the two
+   * lines after it, and both are the great hall's rather than the hotel's.
+   *
+   * **The posture is `'dining'`, not `'seated'`.** `beginRide` sets `'seated'`
+   * on every ride, deliberately, so a ride that has never heard of postures
+   * cannot inherit one. `'seated'` is the fairground pose: arms thrown back,
+   * legs at −0.7. The kid rig has no knee, so a rotated leg does not bend, it
+   * swings — at −0.7 her foot ends up 0.176 m out in front of her and in the
+   * air. Invisible in a gondola; absurd on a bench. `'dining'` is the posture
+   * the two dozen children beside her are already wearing, so she sits down
+   * *the same way they are sitting*, which is the whole point of sitting with
+   * them. See `ridePose.ts`.
+   *
+   * **Her feet land on the floor, and `y` is the storey's floor for that
+   * reason.** The bench is cut to `KID_HIP_HEIGHT` exactly — the one height at
+   * which a vertical leg reaches the ground — so a diner's root is on the
+   * flagstones, not on the plank. Passing the bench top here would sit her
+   * 0.36 m in the air.
+   */
+  private sitAtFeast(index: number): void {
+    const player = this.player;
+    const seat = greatHallSeats(CASTLE_GREAT_HALL_DECK)[index];
+    if (!player || !seat || player.riding) return;
+
+    player.beginRide();
+    player.setRidePose(
+      floorX(CASTLE_HALL, seat.x),
+      BUILDING_BASE_Y,
+      floorZ(CASTLE_HALL, seat.z),
+      seat.yaw,
+    );
+    player.ridePosture = 'dining';
+    this.banquetSeat = index;
+
+    // **And the pets go to their own table** (#449). This is the moment the
+    // ticket is for: her cat leaves her side, trots across the hall and puts
+    // its nose in a bowl at a little table of its own.
+    //
+    // One call, and everything about it belongs to somebody else already: the
+    // places are `castleFurniture.ts`'s (which also laid the bowls at them),
+    // and the animals are the parade's, which is the one owner of every
+    // companion's body. This file builds no animal and moves none.
+    this.sendPetsToTheirTable();
+  }
+
+  /**
+   * Points every companion at its own place at the pets' table.
+   *
+   * **Called every frame she is sitting, not once when she sits down.** The
+   * parade's visible line is not fixed: it rotates one place every 22 seconds
+   * for a child who owns more than eight things (`Parade`'s `ROTATE_SECONDS`),
+   * and a toy taken out of the backpack joins it immediately. A one-shot
+   * dispatch leaves those newcomers standing at her elbow while the animals
+   * that happened to be out when she sat are eating — which is precisely what
+   * a six-year-old would notice and nobody testing with one pet would.
+   * `goToTable` is idempotent for a pet already going to the same place, so
+   * re-asserting costs a comparison per companion.
+   */
+  private sendPetsToTheirTable(): void {
+    this.petParade?.sendPetsToTable(this.petTablePlaces);
+  }
+
+  /**
+   * She has chosen something to eat. A happy face, and the dish itself on the
+   * table in front of her.
+   *
+   * The hotel's `eat` puts a bowl of the cereal she picked in front of her for
+   * the same reason: choosing is the one thing she came to the table to *do*,
+   * and a choice with no result on screen is not a choice. The dish is one of
+   * the castle's own `FEAST_PROPS` — the same roast, pie and loaf already laid
+   * down the middle of every table in the room — built once per choice and
+   * swapped, never accumulated.
+   */
+  private eatAtFeast(kind: FeastProp): void {
+    const player = this.player;
+    const index = this.banquetSeat;
+    const seat = index === null ? undefined : greatHallSeats(CASTLE_GREAT_HALL_DECK)[index];
+    if (!player || !seat) return;
+    player.model.setExpression('happy');
+
+    const floor = this.shell.floorGroups[CASTLE_HALL.index];
+    if (!floor) return;
+    this.feastDish?.removeFromParent();
+    const dish = createCastleFeastProp(kind);
+    // On the table's measured top, half a stride towards it from her seat —
+    // which is where she is looking, because `seat.yaw` is the way she turned
+    // to sit down.
+    dish.root.position.set(
+      seat.x + Math.sin(seat.yaw) * FEAST_DISH_REACH,
+      CASTLE_TABLE_TOP,
+      seat.z + Math.cos(seat.yaw) * FEAST_DISH_REACH,
+    );
+    floor.add(dish.root);
+    this.feastDish = dish.root;
+  }
+
+  /**
+   * Up from the table: she stands, and the pets come back to the line from
+   * wherever they had got to.
+   *
+   * `callPetsBackFromTable` is a no-op for a companion that never went, so
+   * there is no list of "which ones did I actually send" to keep in step —
+   * the same shape as the hotel's `standPetsDown`.
+   */
+  private leaveFeast(): void {
+    const player = this.player;
+    const index = this.banquetSeat;
+    const seat = index === null ? undefined : greatHallSeats(CASTLE_GREAT_HALL_DECK)[index];
+    this.banquetSeat = null;
+    this.feastDish?.removeFromParent();
+    this.feastDish = null;
+    this.petParade?.callPetsBackFromTable();
+    if (!player) return;
+    // **She steps back from the table as she gets up**, onto the same spot the
+    // Sit chip walked her to. Without it she stands up exactly where she was
+    // sitting, which is half inside the bench — and castle props carry no
+    // colliders, so nothing would push her out of it either. The hotel's
+    // `standUp` leaves her in the chair for the same reason and gets away with
+    // it because a hotel chair is pulled out from its table; a bench is not.
+    if (seat) {
+      player.setRidePose(
+        floorX(CASTLE_HALL, seat.standX),
+        BUILDING_BASE_Y,
+        floorZ(CASTLE_HALL, seat.standZ),
+        seat.yaw,
+      );
+    }
+    player.endRide();
   }
 
   /** Hands the building the player, so it can carry, bounce and ride them. */
@@ -905,6 +1110,9 @@ export class Building implements GameSystem {
     // job is to be moving while she watches, so re-posing them from inside the
     // mall is pure cost. See `roofClouds.ts`'s `update`.
     if (this.floor?.index === CASTLE_ROOF.index) this.roofClouds.update(dt, elapsed);
+    // Companions that joined the line since she sat down go and eat too. See
+    // `sendPetsToTheirTable`.
+    if (this.banquetSeat !== null) this.sendPetsToTheirTable();
 
     const player = this.player;
     if (!player) return;
@@ -1716,10 +1924,12 @@ function entrancePad(x: number, z: number, colour: number): Mesh {
 // --------------------------------------------------------------- collision
 
 /**
- * The interior shell is solid apart from its two doorways. Collision is
- * height-blind, so these walls hold on every deck at once — which is exactly
- * what you want for a building, and the reason the lift shaft gets its own
- * three sides.
+ * The interior shell is solid apart from its two doorways.
+ *
+ * **Once per floor.** This used to say the walls "hold on every deck at once",
+ * which was true of a stacked castle and is exactly what #377/#380 undid: three
+ * floors, 300 m apart, each needing its own shell — see the loop that calls
+ * this. That is the split paying for itself rather than costing.
  */
 function registerInteriorCollision(collision: CollisionWorld, floor: CastleFloor): void {
   const west = floorX(floor, -floor.halfX);
@@ -1754,6 +1964,110 @@ function registerInteriorCollision(collision: CollisionWorld, floor: CastleFloor
   // left inside the castle at all.
 }
 
+
+/**
+ * Half-thickness of the walls a solid banquet footprint is built from.
+ *
+ * The same 0.2 m `hotel/place.ts` uses, and for its reason rather than for
+ * symmetry: `CollisionWorld.maxSafeStep` divides the **thinnest** collider in
+ * the whole world into sub-steps for every mover in it, so a hair-thin table
+ * edge would make the park's collision loop run more sub-steps per frame for
+ * ever. 0.2 m is already the park's own thinnest (the entrance's rope posts),
+ * so nothing here lowers it.
+ */
+const HALL_SOLID_HALF_THICKNESS = 0.2;
+
+/**
+ * **The banquet's furniture is solid** (#453) — the tables, the benches either
+ * side of them, and the pets' table.
+ *
+ * `castleFurniture.ts`'s {@link greatHallSolids} owns the footprints (and says
+ * at length why they may exist at all now, and why one rectangle per *run*);
+ * this owns only the registration. Two details are load-bearing:
+ *
+ * - **The half-extents are inset by the wall's own half-thickness**, so the
+ *   face a child's body meets is the footprint she can see rather than 0.2 m
+ *   outside it. `hotel/place.ts`'s rule: generous-light, never generous-heavy.
+ * - **`topIsAbsolute`, with the prop's real top.** Solid to feet on the
+ *   flagstones, air to feet in a jump, and still there beneath the feet
+ *   standing on it. The default `Infinity` would make a 0.675 m table an
+ *   invisible pillar to the ceiling — the bug the hotel's furniture already
+ *   paid for once.
+ */
+export function registerHallCollision(collision: CollisionWorld, floor: CastleFloor): void {
+  for (const solid of greatHallSolids(floor.index)) {
+    const cx = floorX(floor, solid.x);
+    const cz = floorZ(floor, solid.z);
+    const top = BUILDING_BASE_Y + solid.top;
+
+    // The edges, crisp: four thin walls on the footprint the eye can see.
+    collision.addRectangle(
+      cx,
+      cz,
+      solid.halfX - HALL_SOLID_HALF_THICKNESS,
+      solid.halfZ - HALL_SOLID_HALF_THICKNESS,
+      HALL_SOLID_HALF_THICKNESS,
+      top,
+      false,
+      true,
+    );
+  }
+}
+
+/**
+ * The banquet's runs, as **one** walkable surface at the tables' own height.
+ *
+ * ## Why the plate covers the whole run and not just the wood
+ *
+ * `addRectangle` is four walls round a **hollow** middle, and a mover inside
+ * one is never pushed out of it: measured in the running game, a body dropped
+ * on a run's own axis had not moved after eleven seconds, because the two side
+ * walls push it exactly opposite amounts. That is not a curiosity — it is a
+ * soft-lock, and it is reachable: jump onto the banquet, walk off the side, and
+ * land on the flagstones between the benches.
+ *
+ * Filling the footprint was tried first and is a dead end. A wall collider is a
+ * filled stadium, so one fat segment down the run's axis does fill it — but the
+ * four crisp edge walls then push a body **inwards** while the fat one pushes
+ * it out, and it settles 1.13 m off the axis and stays there. Two overlapping
+ * colliders always have a standoff wherever their pushes cancel; a single
+ * stadium wide enough to span the run rounds 2.15 m off each corner, which is
+ * most of the outermost bench's own length left walk-through.
+ *
+ * So the inside is made **unreachable** instead of escapable: the plate covers
+ * the whole footprint, so a jump onto the banquet lands *on* it wherever it
+ * comes down, and stepping off its edge — which is the footprint's edge — drops
+ * her onto the floor **outside**. There is then no way to be inside at floor
+ * level at all, and `check:hall-solid` holds that rule rather than this comment.
+ * The price is that the outer metre either side is table height rather than
+ * bench height, so standing right at the edge floats her 0.315 m over the
+ * plank; the alternative was a six-year-old stuck in the furniture.
+ *
+ * ## And one platform, not five
+ *
+ * `WalkSurfaces.sample` consults every registered platform on every sample —
+ * for the player and for each NPC, every frame, everywhere in the park. Five
+ * rectangle tests inside one `covers` is a loop entry; five platforms is five.
+ * Nothing here moves, of course; `MovingPlatform` is simply the seam
+ * `surfaces.ts` offers for "there is floor up here", and a second seam that
+ * did the same job would be a second thing to keep in step.
+ */
+function banquetTables(): MovingPlatform {
+  const tops = greatHallTableTops(CASTLE_GREAT_HALL_DECK).map((top) => ({
+    x: floorX(CASTLE_HALL, top.x),
+    z: floorZ(CASTLE_HALL, top.z),
+    halfX: top.halfX,
+    halfZ: top.halfZ,
+  }));
+  return {
+    surfaceY: BUILDING_BASE_Y + GREAT_HALL_TABLE_HEIGHT,
+    covers(x: number, z: number): boolean {
+      return tops.some(
+        (top) => Math.abs(x - top.x) <= top.halfX && Math.abs(z - top.z) <= top.halfZ,
+      );
+    },
+  };
+}
 
 /**
  * The facade out in the garden is a solid block with a doorway in it.

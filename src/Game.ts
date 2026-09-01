@@ -352,6 +352,12 @@ export class Game {
     // owns a pet's body from the line all the way onto the cushion and back;
     // nothing here hides a pet, moves one, or holds a second copy of one.
     this.world.hotel.petParade = this.parade;
+    // And the same seam again for the great hall's banquet (#449): she sits
+    // down at the feast, and her companions go and eat at their own little
+    // table. Identical shape, identical reasoning — the building says where
+    // the places are, the parade walks the animals to them and owns their
+    // bodies the whole way, and nothing comes back the other direction.
+    this.world.building.petParade = this.parade;
 
     // Every balloon the player owns and has not stowed, held above them on a
     // bending string — see `entities/HeldBalloon.ts`'s doc comment for why

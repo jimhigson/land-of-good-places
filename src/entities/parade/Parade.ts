@@ -10,7 +10,7 @@ import { shopItem } from '../../world/building/shops/catalogue';
 import { gameStore, walksInParade, type GameState, type InventoryItem } from '../../state';
 import type { Player } from '../Player';
 import { PlayerTrail } from './trail';
-import { ParadeMember, type BedPhase } from './ParadeMember';
+import { ParadeMember, type BedPhase, type PetTablePlace } from './ParadeMember';
 import { BackpackPeek } from './BackpackPeek';
 
 /**
@@ -170,6 +170,59 @@ export class Parade implements GameSystem, PetParadeLink {
   }
 
   /**
+   * **Send the companions off to the pets' table** — issue #449, and the great
+   * hall's banquet is the one caller.
+   *
+   * Jim: *"There should also be a small pets table for the pets to eat at, and
+   * they go there when the player sits."* She sits down; her cat leaves her
+   * side, trots over to a little table of its own and puts its nose in a bowl.
+   *
+   * **The hall offers places; this hands them out.** It does not ask the hall
+   * who her companions are, and the hall does not ask it — the line *is* the
+   * answer to "what walks behind her", and it is already here. That is the
+   * difference between this and the hotel's breakfast pet, which builds a
+   * `createPet` of its own beside her chair: a second body for an animal she
+   * already owns, of a species picked separately from the one in the line.
+   * Here the pet a child has been watching walk behind her is the pet that
+   * walks to the table and eats at it.
+   *
+   * Places are handed out in line order, nearest her first, and a companion
+   * past the last place simply stays in the line — it will be standing beside
+   * her at the bench, which is a perfectly good thing for it to be doing and
+   * is better than two animals in one chair.
+   *
+   * Returns how many actually went, which is what a check measures.
+   */
+  sendPetsToTable(places: readonly PetTablePlace[]): number {
+    let sent = 0;
+    for (const member of this.members) {
+      const place = places[sent];
+      if (!place) break;
+      member.goToTable(place);
+      sent += 1;
+    }
+    return sent;
+  }
+
+  /**
+   * She has got up from the table: everybody back into the line, from wherever
+   * they had got to. A no-op for a member that never went, so the hall may
+   * call it whenever she stands up without tracking who it sent.
+   */
+  callPetsBackFromTable(): void {
+    for (const member of this.members) member.leaveTable();
+  }
+
+  /**
+   * How many companions are actually standing at the pets' table with their
+   * noses in a bowl — the question `check:castle` asks, answered by the one
+   * system that owns those bodies rather than by a second clock in the hall.
+   */
+  petsEatingAtTable(): number {
+    return this.members.filter((member) => member.eatingAtTable).length;
+  }
+
+  /**
    * The nap is over, or ended early: this pet stands back up wherever its
    * routine had got to and rejoins the line. A no-op for a uid that was never
    * sent to bed, so `Hotel.standPetsDown` can call it for every bed it owns
@@ -242,8 +295,16 @@ export class Parade implements GameSystem, PetParadeLink {
       // at a trail sample. That is the *only* difference: the same spring,
       // the same easing, the same turn-to-face and the same walk cycle carry
       // it there, so there is no second way of moving a pet in this game.
+      // A pet on its way to bed aims at its bed's own run-up spot, and one on
+      // its way to the pets' table (#449) at its own place there, instead of
+      // at a trail sample. That is the *only* difference in either case: the
+      // same spring, the same easing, the same turn-to-face and the same walk
+      // cycle carry it there, so there is no second way of moving a pet in
+      // this game.
       const bed = member.bedSpot;
+      const place = member.tablePlace;
       if (bed) member.target.set(bed.runUpX, bed.runUpY, bed.runUpZ);
+      else if (place) member.target.set(place.x, place.y, place.z);
       else this.aimAt(member);
       member.update(dt, elapsed);
     }

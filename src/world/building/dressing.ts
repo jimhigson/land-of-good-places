@@ -23,6 +23,7 @@ import {
   ROOF_PAVILION_Z,
   SHOP_SCALE_XZ,
   SHOP_UNITS,
+  MALL_DECK,
   TOILET_DECK,
   TOILET_ROOM,
   TOP_DECK,
@@ -31,6 +32,7 @@ import {
   shopLocalToBuilding,
   type ShopUnitDefinition,
 } from './layout';
+import { CASTLE_GREAT_HALL_DECK, greatHallFootprint } from './castleFurniture';
 
 /**
  * What makes a roomy floor read as a *place* rather than as a plain.
@@ -109,7 +111,45 @@ export interface KeepOut {
   readonly radius: number;
 }
 
+/**
+ * **The great hall is furnished, so it gets none of this** (issue #449).
+ *
+ * Jim, looking at #453: *"Banquet tables have green bench things clipping into
+ * them, and also the tables don't compose nicely into the space, they're kind
+ * of shoved into one end of a mostly empty room. Clear out other 'stuff' from
+ * the middle of the room so it focusses on the banquet only."*
+ *
+ * Both halves of that are this one line. The green benches were {@link
+ * buildBenches}' seeded scatter, which rejects against {@link keepOutsFor} and
+ * therefore knew nothing about a feast table — so benches landed in the middle
+ * of the banquet, and would have gone on landing there however the tables were
+ * arranged. And the roundel and its ring of planters are the *other* half of
+ * what made the room read as a banquet in the corner of a lobby: a 12 m inlaid
+ * disc with a ring of pots round it is a second, competing middle for a room
+ * that has one already.
+ *
+ * The argument for not simply nudging them out of the way: this file's own
+ * header says what this furniture is *for* — it is what stops a wide, bare
+ * plate reading as a car park. **The great hall is not a bare plate.** It has a
+ * throne, tapestries, a fireplace and a banquet down the middle of it, which is
+ * a far better answer to the same problem, so the generic answer is not needed
+ * and is only ever in the way.
+ *
+ * Everything the hall does have is `castleFurniture.ts`'s, placed rather than
+ * scattered, and measured by `check:castle`.
+ *
+ * Exported because `castleDecor.ts` lays a **rug** on {@link DECK_ROUNDEL} —
+ * dressing the disc this file draws. With no disc there is nothing for it to
+ * dress, and it was found lying on bare flagstones under the banquet with a
+ * dozen children standing on it. One question, one answer, asked by both.
+ */
+export function deckIsFurnished(deck: number): boolean {
+  return deck === CASTLE_GREAT_HALL_DECK;
+}
+
 export function dressDeck(deck: number, floor: Group): void {
+  if (deckIsFurnished(deck)) return;
+
   const isRoof = deck === TOP_DECK;
   const blocked = keepOutsFor(deck);
 
@@ -284,22 +324,79 @@ function buildBenches(deck: number, blocked: readonly KeepOut[], isRoof: boolean
  * Everywhere a child has to be able to stand, walk to, or ride from.
  *
  * **Exported (issue #376) so the castle's decoration and `check:castle` both
- * ask this one list rather than growing their own.** Castle props get no
- * colliders at all — indoor collision is height-blind, so a collider on deck 0
- * would block that square metre on all five storeys — which means placement is
- * the only protection a prop gets and a second copy of these discs is the whole
- * ballgame. See `HANDOFF-castle-interior-363.md` §5.
+ * ask this one list rather than growing their own.** See
+ * `HANDOFF-castle-interior-363.md` §5.
+ *
+ * ## The rule that used to be written here, and why it is gone
+ *
+ * This said: *"Castle props get no colliders at all — indoor collision is
+ * height-blind, so a collider on deck 0 would block that square metre on all
+ * five storeys — which means placement is the only protection a prop gets."*
+ *
+ * **That is no longer true, and leaving it here is how the next person gets
+ * talked out of the right fix.** It was one sentence carrying two facts, and
+ * the prohibition only followed if both held: (A) the collision world is 2-D,
+ * so a collider blocks at every height, and (B) two storeys share an (x, z),
+ * so A reaches across them. `scripts/probe-height-blind.mts` measures each on
+ * its own. **A still holds. B died with #377/#380.** There are three floors,
+ * not five, they stand 300 m apart, and the great hall's plate is 279 m from
+ * the nearest point of any other storey: of 21250 points swept on the mall and
+ * 21250 on the roof, a collider in the middle of the hall blocks **none**.
+ *
+ * So the banquet's tables, benches and pets' table **are** solid — Jim, on
+ * #453: *"you can walk straight through the tables — they should be solid"* —
+ * and `castleFurniture.ts`'s `greatHallSolids` is where that lives.
+ *
+ * ## What this list is still for, which is not that
+ *
+ * Two different questions, and conflating them is a bug in each direction:
+ *
+ * - **"Where must a child be able to stand?"** — *this list*. It is what the
+ *   seeded scatters (benches, braziers, corner clutter) reject against, so a
+ *   walking route, a doorway or a ride's boarding spot never has furniture
+ *   dropped into it. It is a **placement** rule and it stays one; adding a
+ *   collider to a prop does not remove the need to keep the room walkable.
+ * - **"Where is furniture already standing?"** — `greatHallFootprint`, next to
+ *   the thing that puts it there. Do not merge it into this list: every table,
+ *   bench and goblet at the feast is inside the banquet, so `check:castle`'s
+ *   prop assertion would then fail on the banquet's own furniture.
+ *
+ * Most castle props still carry no collider, and now for an ordinary reason
+ * rather than an architectural one — nobody has asked for it. Anything that
+ * gains one takes an **absolute** top (`Collision.ts`'s `topIsAbsolute`), never
+ * the default `Infinity`, or a 0.675 m table becomes an invisible pillar to the
+ * ceiling. `world/hotel/place.ts` is the shipped precedent.
  */
 export function keepOutsFor(deck: number): KeepOut[] {
   const blocked: KeepOut[] = [
     // The stairs pad and the lane in front of it.
-    // The lift lobby, on the east wall.
+    // The lift lobby, on the east wall. Every floor has one, because the lift
+    // is the only way between them.
     { x: INTERIOR_HALF_X - 2, z: 5, radius: 4 },
-    // The roundel and its planters.
-    { x: ROUNDEL_X, z: ROUNDEL_Z, radius: ROUNDEL_RADIUS + 1.6 },
-    // The way in and out, on the ground floor's south wall.
-    { x: 0, z: INTERIOR_HALF_Z - 4, radius: 7 },
   ];
+
+  // **A disc for the roundel only on a floor that has a roundel, and one for
+  // the front door only on the floor the front door is on** (issue #449).
+  //
+  // These two claimed 14 m and 15.2 m of floor on *every* storey, and on the
+  // great hall both of them claimed floor that nothing whatsoever stands on:
+  // {@link dressDeck} does not dress a furnished deck, and the way in and out
+  // is on the mall — the floors are disjoint spaces reached only by the lift,
+  // so there is no front door anywhere else to walk to.
+  //
+  // Between them they were most of Jim's *"shoved into one end of a mostly
+  // empty room"*: the banquet had the north-east corner because two invisible
+  // discs held the south and the middle of the hall against furniture that
+  // was never built there. This is not a widened assertion — it is the list
+  // catching up with what is actually on the floor. A keep-out exists to stop
+  // a prop landing where a child must be able to stand; one guarding a
+  // roundel that was never laid guards nothing.
+  if (!deckIsFurnished(deck)) {
+    blocked.push({ x: ROUNDEL_X, z: ROUNDEL_Z, radius: ROUNDEL_RADIUS + 1.6 });
+  }
+  if (deck === MALL_DECK) {
+    blocked.push({ x: 0, z: INTERIOR_HALF_Z - 4, radius: 7 });
+  }
 
   if (deck === TOP_DECK) {
     // The roof's own furniture: the pavilion, the slide you leave from, and the
@@ -327,6 +424,26 @@ export function keepOutsFor(deck: number): KeepOut[] {
   }
 
   return blocked;
+}
+
+/**
+ * **Where a scattered prop may not land** — {@link keepOutsFor} plus whatever
+ * furniture is already standing on this floor.
+ *
+ * The two are different questions and the difference matters. `keepOutsFor` is
+ * *where a child has to be able to stand*, and `check:castle` fails any prop
+ * that lands in one — so the great hall's banquet cannot go in it, because the
+ * banquet's own tables and benches are inside the banquet. But a brazier
+ * choosing a spot at random very much does need to know the tables are there:
+ * with the hall filled (#449) two of the four landed inside benches, measured
+ * in the running game.
+ *
+ * So: things that are *placed* ask `keepOutsFor`, and things that **scatter**
+ * ask this. One extra call at each of the two scatter sites, and no list is
+ * kept in step with another by hand.
+ */
+export function scatterKeepOutsFor(deck: number): KeepOut[] {
+  return [...keepOutsFor(deck), ...greatHallFootprint(deck)];
 }
 
 /**

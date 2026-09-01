@@ -14,6 +14,7 @@ import {
 } from '../../art/models/kidLooks';
 import { KID_SKIN_TONES } from '../../art/models/kid';
 import { greatHallSeats, type GreatHallSeat } from './castleFurniture';
+import type { PetTablePlace } from '../../entities/parade/ParadeMember';
 
 /**
  * **Two dozen children eating at the banquet** — issue #413.
@@ -75,6 +76,38 @@ import { greatHallSeats, type GreatHallSeat } from './castleFurniture';
  */
 
 /**
+ * **What the banquet needs from the parade, and the whole of it** — issue #449.
+ *
+ * The direct analogue of `Hotel`'s `PetParadeLink`, and deliberately the same
+ * shape: the hall says *there are places laid here*, the parade walks the
+ * animals to them and holds them there, and **nothing crosses back**. No
+ * callback, no hand-off, no second model to keep in step — which is what makes
+ * a flicker or a swapped species impossible rather than merely fixed.
+ *
+ * It is stated here, next to the feast, rather than inside the parade, for the
+ * same reason the hotel states its own: the consumer names what it needs, and
+ * `Parade` satisfies it structurally without ever importing the castle.
+ */
+export interface PetTableLink {
+  /**
+   * Sends companions to `places`, in the order they walk behind her — nearest
+   * first. Returns how many actually went; a child with more companions than
+   * there are places keeps the rest in the line beside her.
+   */
+  sendPetsToTable(places: readonly PetTablePlace[]): number;
+  /**
+   * She has got up: everybody back into the line from wherever they had got
+   * to. Safe to call when nothing was ever sent.
+   */
+  callPetsBackFromTable(): void;
+  /**
+   * How many are actually standing at the table with their noses in a bowl —
+   * what `check:castle` measures, asked of the system that owns those bodies.
+   */
+  petsEatingAtTable(): number;
+}
+
+/**
  * The name the diners' group takes on the storey, so `check:castle` can find
  * what was built rather than being told what was intended.
  */
@@ -114,7 +147,12 @@ export class GreatHallBanquet {
    * benches that were never built.
    */
   dress(deck: number, floor: Group): void {
-    const seats = greatHallSeats(deck);
+    // **Only the places that are not being kept free** (#449). Jim, on #422's
+    // preview: *"no free spaces for the player to sit"*. Which seats those are
+    // is `castleFurniture.ts`'s answer, not a second one taken here — a gap the
+    // Sit chip offers and a gap nobody is sitting in have to be the same gap,
+    // and the only way to guarantee that is for one list to carry both facts.
+    const seats = greatHallSeats(deck).filter((seat) => !seat.free);
     if (seats.length === 0) return;
 
     const crowd = new KidCrowd(seats.length);

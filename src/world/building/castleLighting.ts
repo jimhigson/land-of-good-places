@@ -36,7 +36,7 @@ import {
   onPlate,
   TOP_DECK,
 } from './layout';
-import { keepOutsFor } from './dressing';
+import { keepOutsFor, scatterKeepOutsFor } from './dressing';
 
 /**
  * **Fire in the castle** (issues #363 and #376).
@@ -222,6 +222,12 @@ export interface WallAnchor {
  */
 export function castleTorchAnchors(deck: number): WallAnchor[] {
   if (deck >= TOP_DECK) return [];
+  // **`keepOutsFor`, never `scatterKeepOutsFor`.** This is a *wall* question,
+  // and the banquet is on the floor — but far more importantly, the banquet is
+  // derived from these anchors: a tapestry bay is a midpoint between two of
+  // them, the hall's axis is a bay, and the runs are placed from the axis.
+  // Asking where the banquet is from inside the thing the banquet is built out
+  // of is a cycle.
   const blocked = keepOutsFor(deck);
   const anchors: WallAnchor[] = [];
 
@@ -1171,5 +1177,10 @@ const SOOT_HEIGHT = 0.8;
 const SOOT_RISE = BEAM_UNDERSIDE - 0.01 - SOOT_HEIGHT / 2 - SCONCE_MOUNT_Y;
 
 function clearOfKeepOuts(deck: number, spot: { x: number; z: number }): boolean {
-  return keepOutsFor(deck).every((k) => Math.hypot(spot.x - k.x, spot.z - k.z) >= k.radius + 0.9);
+  // A brazier scatters, so it has to clear the furniture already on the floor
+  // as well as the places a child must be able to stand — with the great hall
+  // full of tables (#449), two of the four landed inside a bench without this.
+  return scatterKeepOutsFor(deck).every(
+    (k) => Math.hypot(spot.x - k.x, spot.z - k.z) >= k.radius + 0.9,
+  );
 }
