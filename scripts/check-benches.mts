@@ -830,28 +830,34 @@ for (const floor of CASTLE_FLOORS) {
   // **The corner turrets: solid stone she walks round, not through, and not a
   // trap** (#462).
   //
-  // Each one stands on the plate's own corner, so roughly a quarter of its
-  // footprint is over floor a child can otherwise walk on — she can get right
-  // up beside it, which is exactly when CLAUDE.md's first rule bites. Measured
-  // with the collider taken out: a body marched at a turret ends **1.62 m** from
-  // its middle, inside 2.45 m of drawn stone, from twelve of sixteen bearings.
-  // That is what this clause exists to keep from coming back.
+  // Each one is tangent to the parapet's inner face, so no *straight* approach
+  // can reach one — but the two perimeter runs meet at a right angle, and a
+  // body pushed into that corner slides along both and ends up under the
+  // turret. **Proved red** by dropping `registerRoofTurretCollision` from
+  // `worldFor`, against the geometry as committed here: 4 failures, one per
+  // turret, on the inboard diagonal bearing, each ending **1.11 m** from a
+  // turret's middle inside 2.45 m of drawn stone.
+  //
+  // That is worth stating plainly because it is the whole reason the collider
+  // still earns its place after the turrets moved outboard: the plate's own
+  // perimeter wall does *not* cover them, and a clause that had gone vacuous
+  // when the geometry moved would look exactly like this one does.
   //
   // Three clauses on **the one fill above**, pointing in opposite directions on
   // purpose, which is what stops any of them being true by accident:
   //
   //  1. the middle of a turret is **not** reachable — it is 2 m of masonry.
-  //     This one is belt-and-braces and says so: the plate's perimeter wall
-  //     already excludes the corner, so it stays green with the turret collider
-  //     removed. It is clause 3 that has the teeth;
+  //     This one is belt-and-braces and says so: the flood fill only ever asks
+  //     about lattice points on the plate, and a turret's middle is off it, so
+  //     this stays green with the turret collider removed. It is clause 3 that
+  //     has the teeth;
   //  2. the paving on its **inboard** side still is — a turret that had walled
   //     off the corner of the roof would pass clause 1 and fail this;
   //  3. a body marched at it from sixteen bearings at a sprinting stride stops
   //     **outside** the drawn cone. Unreachable is not the same as solid: the
   //     fill only ever asks about lattice points, and the hotel's six
   //     evenly-spaced gaps (CLAUDE.md) were found by marching and by nothing
-  //     else. **Proved red** by dropping `registerRoofTurretCollision` from
-  //     `worldFor`: 16 failures, against the geometry as committed here.
+  //     else.
   //
   // Clause 1 needs no soft-lock clause of its own the way the pavilion does,
   // and it is worth saying why: a circular collider has no hollow middle.
