@@ -60,6 +60,39 @@ There is no other reachable walk-through bench. Measured live, off
   2.29 m, and the walkable ground under them is the terrain (0.33 m), not the
   platform, so nobody ever stands on the platform to walk through the bench.
 
+## What is solid on this branch, and what is deliberately not
+
+| made solid | how |
+|---|---|
+| **26 deck benches** (8 mall, 8 hall, 10 roof) | rectangle, `topIsAbsolute` at 0.44 m, plus a `WalkSurfaces` plate so she can stand on one |
+| **20 planters** (10 each on mall and hall) | circle at the pot's rim, `topIsAbsolute` at 0.70 m |
+| **the roof pavilion** | rectangle, no top — a building is solid at every height |
+
+Deliberately soft, with reasons:
+
+- **The long grass.** Jim's own stated exception.
+- **The bush on top of each planter.** The pot is masonry and stops her; the
+  shrub is foliage, and brushing through leaves is what foliage is for. Making
+  it solid would put a 1.5 m unjumpable hedge round the roundel. `topIsAbsolute`
+  at the pot's rim is what expresses that as one collider rather than an
+  argument, and `check:benches` asserts a body 0.3 m above the rim passes.
+- **The pavilion's interior.** Not "soft" — *unreachable*, which is the other
+  half of CLAUDE.md's rule. There is no doorway and the walls are 2.9 m against
+  a 1.28 m jump apex.
+
+## Still walk-through, and NOT in this PR
+
+The general sweep Jim asked for ("everything else that isn't long grass") is a
+second body of work. A crude probe of the mall's scene graph against the
+collision world already names: **market-stall counters and awnings, the wooden
+crates, the great hall's armour, plinths and goblets, the lift car and its
+doors, the corner pillars.** Each needs a footprint decision and the same
+in-and-out reachability proof, and doing them blind from a probe that measures
+mesh *origins* rather than geometry would be guesswork. **The right deliverable
+for that is an instrument first** — a geometry-aware audit that enumerates every
+drawn mesh in the castle and the park and reports it as solid, unreachable, or
+walk-through — and then fixes what it finds. That is PR 2.
+
 ## Watched running (roof garden, port 5545)
 
 - Walked head-on into the bench at local (5.14, 1.80): stopped dead at
@@ -70,6 +103,23 @@ There is no other reachable walk-through bench. Measured live, off
   there — `topIsAbsolute` holds still under her rather than ejecting her.
 - Walked off it: drops to the floor and keeps going.
 - Jumped at it while running: sailed over, so it is not a pillar.
+
+## Watched running — the pavilion and the planters
+
+- **Pavilion**, walked west at its east face (local x −7.35): stopped dead at
+  x = **−6.71**, which is that face plus `PLAYER_RADIUS` less the 0.2 m inset.
+- **Pavilion, the version that was reverted**: with a doorway she walked in
+  (stopped by the far wall at x = −17.01, its inner face plus her radius,
+  exactly), was stopped from inside by the north wall at z = 2.07, and walked
+  back out through the door to x = +2.13. It worked, and she was **invisible**
+  under the pyramid roof the whole time. That is why it is a sealed block.
+- **Planter**, walked west at the pot at local (0.86, 8.76): stopped at
+  x = **1.92** = rim + radius. Then slid round it and carried on **between two
+  pots** to x = −2.22, inside the ring.
+- **Planter, jumped**: at x = 0.80, directly over the pot, she was at
+  y = **1.83** and sailed through to x = −11.41. Pot solid to feet, open to a
+  jump, bush and all.
+- Stood in the **middle of the roundel** at local (−4.24, 8.76): reachable.
 
 ## Gates
 
