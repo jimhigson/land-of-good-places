@@ -53,18 +53,28 @@ measuredHopCeiling(2*(0.32+0.62)) = measuredHopCeiling(1.88) = 1.010 m
 So 1.0. Invisible: the visible stone crest is the torus at `y = 1.05 ± 0.22`,
 i.e. 1.27 m, so the collider already sat 0.17 m below it and now sits 0.27 m.
 
-### F3 — the water is 0.631 m up, against a 0.62 m walking step
+### F3 — the water is 0.63–0.66 m up, against a 0.62 m walking step
+
+**Corrected 1 Sep** — the first version of this finding generalised the
+canonical seed into a claim about the park, and the revert test caught it.
 
 `Fountain.groundLevel` lifts the ground inside the rim to
 `waterLevel - WADE_SINK`, and `World.attachPlayer` composes that onto the
 player's sampler — the sampler `NavGrid` builds its lattice from. Measured
-(`measure-fountain-rim-step.mts`, canonical seed): the step into the water is
-**0.631 m** against `BUILDING_STEP_UP` 0.62. The lattice refused the water by
-11 mm, so the rim being hoppable would have changed nothing.
+(`measure-fountain-rim-step.mts`): the step into the water is **0.631 m** on
+the canonical seed and **0.658 m** on seed 11, against `BUILDING_STEP_UP` 0.62.
 
 Fixed by the level rule inside a band being the hop's own reach
 (`MAX_AUTO_HOP_HEIGHT`, asked of `Collision.ts`, not restated) — because
 getting over a hoppable wall *is* a jump. **Not** by moving `BUILDING_STEP_UP`.
+
+**How load-bearing that is, measured rather than assumed.** With the rule
+removed: the canonical seed and seeds 2, 5 and 18 still get into the water, on
+whichever bearing the terrain round the rim runs highest; **seed 11 does not
+get in at all** — 0.658 m of step over ground that varies by 5 mm all the way
+round. So the fountain would have worked in front of Jim and been broken on a
+fifth of the parks CI builds. `check:fountain-hop` therefore sweeps all five
+seeds; on the canonical seed alone it sat green over this exact revert.
 
 ### F4 — the multiplier, 6.4, derived
 
@@ -112,9 +122,29 @@ to **reached**, and two of the canonical seed's are the fountain itself:
 Waypoints are up 5–8%: a crossing is emitted as planned rather than
 string-pulled, which is the point.
 
+### F6 — watched running, port 5497, canonical seed
+
+Deep link `/spawn?pos=-9.07,16&facing=180`, then `tapNavigator.navigateTo`,
+watching `player.position` every frame:
+
+| leg | ended | closest to fountain centre | entered water | highest feet |
+|---|---|---|---|---|
+| walk past to the far side | 0.33 m from target | **5.24 m** | **no** | 0.168 m |
+| walk into the water | 0.48 m from centre, y 0.744 | 0.48 m | yes | **1.244 m** |
+| and back out again | 0.34 m from target, y 0.149 | 0.25 m | yes | **1.998 m** |
+
+She goes round when passing, hops in when sent in (feet 1.24 m, over the 1.0 m
+rim), and hops back out (1.998 m = the same 1.25 m hop off the 0.744 m water).
+No console errors. Also measured: over 20 s the closest any of the park's 31
+children ever got to the fountain centre was **4.99 m** — nobody paddles.
+
+## Gates
+
+- `pnpm run check` exit 0 (twice, before the new gate); re-running with it.
+- `pnpm run build` exit 0.
+- `pnpm run test:procgen` exit 0, **497 passed**.
+
 ## Left to do
 
-- `pnpm run check` (running), `build`, `test:procgen` re-run from the top
-  (497 passed at 09:48 on the finished code).
-- Browser QA on 5497: walk past the fountain, then into it, then out.
-- PR. **Do not merge.** Remove both worktrees when done.
+- Confirm the final `check` run, raise the PR. **Do not merge.**
+- Remove both worktrees and kill the 5497 dev server by PID.
