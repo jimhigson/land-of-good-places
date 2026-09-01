@@ -65,6 +65,7 @@ import {
   registerHallCollision,
   registerPavilionCollision,
   registerPlanterCollision,
+  registerRoofTurretCollision,
 } from '../src/world/building/Building.ts';
 import {
   BENCH_DEPTH,
@@ -85,8 +86,10 @@ import {
   ROOF_PAVILION_HALF_Z,
   ROOF_PAVILION_X,
   ROOF_PAVILION_Z,
+  roofTurretSpots,
   TOP_DECK,
 } from '../src/world/building/layout.ts';
+import { CASTLE_TURRET_FOOTPRINT_RADIUS } from '../src/world/building/castleMasonry.ts';
 import { PET_RENDER_HEIGHT } from '../src/art/models/pets.ts';
 import {
   INTERIOR_HALF_X,
@@ -116,6 +119,7 @@ function worldFor(floor: CastleFloor): CollisionWorld {
   registerBenchCollision(world, floor);
   registerPlanterCollision(world, floor);
   registerPavilionCollision(world, floor);
+  registerRoofTurretCollision(world, floor);
   return world;
 }
 
@@ -727,6 +731,107 @@ for (const floor of CASTLE_FLOORS) {
     }
   }
 
+  // **The corner turrets: solid stone she walks round, not through, and not a
+  // trap** (#462).
+  //
+  // Each one stands on the plate's own corner, so roughly a quarter of its
+  // footprint is over floor a child can otherwise walk on — she can get right
+  // up beside it, which is exactly when CLAUDE.md's first rule bites. Measured
+  // with the collider taken out: a body marched at a turret ends **1.62 m** from
+  // its middle, inside 2.45 m of drawn stone, from twelve of sixteen bearings.
+  // That is what this clause exists to keep from coming back.
+  //
+  // Three clauses on **the one fill above**, pointing in opposite directions on
+  // purpose, which is what stops any of them being true by accident:
+  //
+  //  1. the middle of a turret is **not** reachable — it is 2 m of masonry.
+  //     This one is belt-and-braces and says so: the plate's perimeter wall
+  //     already excludes the corner, so it stays green with the turret collider
+  //     removed. It is clause 3 that has the teeth;
+  //  2. the paving on its **inboard** side still is — a turret that had walled
+  //     off the corner of the roof would pass clause 1 and fail this;
+  //  3. a body marched at it from sixteen bearings at a sprinting stride stops
+  //     **outside** the drawn cone. Unreachable is not the same as solid: the
+  //     fill only ever asks about lattice points, and the hotel's six
+  //     evenly-spaced gaps (CLAUDE.md) were found by marching and by nothing
+  //     else. **Proved red** by dropping `registerRoofTurretCollision` from
+  //     `worldFor`: 16 failures, against the geometry as committed here.
+  //
+  // Clause 1 needs no soft-lock clause of its own the way the pavilion does,
+  // and it is worth saying why: a circular collider has no hollow middle.
+  // `CollisionWorld` pushes a mover out along the radius from wherever it
+  // stands, so a body that somehow began at a turret's centre leaves on the
+  // first frame. That is the reason `Building.ts` registers a disc rather than
+  // a rectangle for a round solid.
+  if (floor.index === TOP_DECK) {
+    const spots = roofTurretSpots();
+    if (spots.length === 0) {
+      fail('the roof garden has no corner turrets at all, so this clause asserts nothing');
+    }
+    for (const spot of spots) {
+      if (canReach(seen, spot.x, spot.z, FILL_PITCH)) {
+        fail(
+          `the middle of the corner turret at [${spot.x.toFixed(1)}, ${spot.z.toFixed(1)}] IS ` +
+            `reachable — a child is standing inside 2 m of castle masonry`,
+        );
+      }
+
+      // Inboard along the diagonal, just clear of the drawn stone: the nearest
+      // paving a child could stand on beside this turret. Derived from the
+      // turret's own footprint, so a wider turret moves the probe rather than
+      // silently sitting inside it.
+      const inward = CASTLE_TURRET_FOOTPRINT_RADIUS + PLAYER_RADIUS + 0.2;
+      const besideX = spot.x - Math.sign(spot.x) * inward * Math.SQRT1_2;
+      const besideZ = spot.z - Math.sign(spot.z) * inward * Math.SQRT1_2;
+      if (!canReach(seen, besideX, besideZ, FILL_PITCH * 2)) {
+        fail(
+          `the paving beside the corner turret at [${spot.x.toFixed(1)}, ` +
+            `${spot.z.toFixed(1)}] is not reachable from the lift lobby — the turret has walled ` +
+            `off the corner of the roof garden rather than standing in it`,
+        );
+      }
+
+      // The same sixteen bearings the benches are marched from, asked of the
+      // one constant rather than a second 16 written here.
+      for (let b = 0; b < BEARINGS; b += 1) {
+        const angle = (b / BEARINGS) * Math.PI * 2;
+        const dirX = Math.cos(angle);
+        const dirZ = Math.sin(angle);
+        const start = CASTLE_TURRET_FOOTPRINT_RADIUS + 4;
+        const position = new Vector3(
+          floorX(floor, spot.x + dirX * start),
+          BUILDING_BASE_Y,
+          floorZ(floor, spot.z + dirZ * start),
+        );
+        for (let step = 0; step < 20; step += 1) {
+          world.resolveMovement(
+            position,
+            -dirX * PLAYER_LONGEST_STEP,
+            -dirZ * PLAYER_LONGEST_STEP,
+            PLAYER_RADIUS,
+            0,
+            1 / 30,
+          );
+        }
+        const stoppedAt = Math.hypot(
+          position.x - floorX(floor, spot.x),
+          position.z - floorZ(floor, spot.z),
+        );
+        // Allowed a whisker inside the drawn footprint: `resolveMovement`
+        // settles a body on the surface rather than a hair off it.
+        if (stoppedAt < CASTLE_TURRET_FOOTPRINT_RADIUS - 0.05) {
+          fail(
+            `a body marched at the corner turret at [${spot.x.toFixed(1)}, ` +
+              `${spot.z.toFixed(1)}] on bearing ${((angle * 180) / Math.PI).toFixed(0)}° ended ` +
+              `${stoppedAt.toFixed(2)} m from its middle, inside its ` +
+              `${CASTLE_TURRET_FOOTPRINT_RADIUS.toFixed(2)} m of stone — it is not solid from ` +
+              `that approach`,
+          );
+        }
+      }
+    }
+  }
+
   // What the furniture actually cost, reported whether or not anything failed —
   // a number nobody has to take on trust, and the tell if a future bench count
   // starts eating the floor.
@@ -742,7 +847,7 @@ for (const floor of CASTLE_FLOORS) {
   process.stderr.write(
     `check:benches — ${floor.name}: ${benchFootprints(floor.index).length} benches, ` +
       `${planterRing(floor.index).length} planters` +
-      `${floor.index === TOP_DECK ? ' and the pavilion' : ''} cost ` +
+      `${floor.index === TOP_DECK ? ', the pavilion and 4 corner turrets' : ''} cost ` +
       `${lost} of ${bare.size} walkable cells (${((lost / bare.size) * 100).toFixed(2)}%), and ` +
       `${clean ? 'nothing became unreachable' : 'SOMETHING BECAME UNREACHABLE — see below'}.\n`,
   );
