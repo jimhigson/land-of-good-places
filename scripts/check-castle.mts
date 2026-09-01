@@ -59,7 +59,6 @@ import {
   CASTLE_GREAT_HALL_DECK,
   castleFurnitureGroupName,
   DINER_TABLE_GAP,
-  greatHallPetPlaces,
   greatHallFootprint,
   greatHallPetPlaces,
   greatHallPetTable,

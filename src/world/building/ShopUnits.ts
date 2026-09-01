@@ -180,11 +180,6 @@ function registerCounter(unit: ShopUnitDefinition, collision: CollisionWorld): v
   // narrows can never leave a strip of solid air where its end used to be.
   const [ax, az] = shopLocalToBuilding(unit, -COUNTER_HALF_WIDTH * SHOP_SCALE_XZ, 1.15 * SHOP_SCALE_XZ);
   const [bx, bz] = shopLocalToBuilding(unit, COUNTER_HALF_WIDTH * SHOP_SCALE_XZ, 1.15 * SHOP_SCALE_XZ);
-  // Half the counter's real depth (0.7 m), not more. Because collision is
-  // height-blind this segment is an invisible wall on every other deck too, and
-  // every extra centimetre of it is a centimetre of somebody else's floor.
-  const [ax, az] = shopLocalToBuilding(unit, -1.75 * SHOP_SCALE_XZ, 1.15 * SHOP_SCALE_XZ);
-  const [bx, bz] = shopLocalToBuilding(unit, 1.75 * SHOP_SCALE_XZ, 1.15 * SHOP_SCALE_XZ);
   // Half the counter's real depth (0.7 m), not more — `hotel/place.ts`'s
   // generous-light rule. It no longer costs another storey its floor (the
   // floors are disjoint since #377/#380), but a counter fatter than the wood a
