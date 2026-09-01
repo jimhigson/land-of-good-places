@@ -254,6 +254,27 @@ async function ride(wired: boolean): Promise<RunResult> {
     throw new Error('check:pet-slide — could not board the ginormous slide at all');
   }
 
+  // **The follow distances are measured against the chase lens, so the lens is
+  // read from the ride rather than written down twice.** `PET_BLIND_BAND` is a
+  // band around `CHASE_EYE_BACK`, and `CHASE_EYE_BACK` is a copy of
+  // `Building.ts`'s `CHASE_EYE.z` that a module cycle forbids importing. A copy
+  // nobody checks is the disease this repo files most often — the hood face,
+  // the coplanar offsets, the rider 26.65 m off its own chute — so this asks
+  // the **live camera the game has just mounted** what its offset really is.
+  // Move the chase camera and this goes red, in the file that would otherwise
+  // quietly start seating pets in the lens again.
+  const liveEyeBack = (
+    building.rideView as { camera: { position: { z: number } } } | null
+  )?.camera.position.z;
+  if (liveEyeBack === undefined || Math.abs(liveEyeBack - CHASE_EYE_BACK) > 1e-6) {
+    throw new Error(
+      `check:pet-slide — the ride's chase camera sits ${liveEyeBack ?? 'nowhere'} m behind her, ` +
+        `but slide/petRiders.ts lays the companions out around ${CHASE_EYE_BACK} m. Update ` +
+        'CHASE_EYE_BACK to match Building.ts\'s CHASE_EYE.z, and re-check the framing: the ' +
+        'blind band that keeps a pet out of the lens is measured from it.',
+    );
+  }
+
   const dt = 1 / 60;
   let elapsed = 0;
   let frames = 0;
@@ -538,6 +559,8 @@ async function ride(wired: boolean): Promise<RunResult> {
       `closest pair ${closestPair === Infinity ? 'n/a' : `${closestPair.toFixed(2)} m`}, ` +
       `biggest single-frame step ${worstStep.toFixed(3)} m, ` +
       `framed on ${(framedFraction * 100).toFixed(0)}% of ${chaseFrames} chase frames, ` +
+      `${rasters} chase rasters (child at worst ${worstChild === Infinity ? 'n/a' : `${worstChild} px`}, ` +
+      `biggest pet ${(biggestPet * 100).toFixed(0)}% of frame — ${biggestPetName}), ` +
       `furthest from her afterwards ${worstRegroup.toFixed(1)} m ` +
       `(${missingFrames} undrawn, ${offChuteFrames} off-chute, ${aheadFrames} overtaking ` +
       'pet-frames)',
