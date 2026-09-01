@@ -32,44 +32,35 @@ Branch `feat/sixteen-seeds`, worktree `.claude/worktrees/seed-pool`.
   stone sits on the wall it caps*, *railway crossings are planned — station-
   clear, and mostly real bridges*. 77 passed, 3 failed.
 
-## The state of the search
+## The state of the search — DONE
 
-**Everything vetted before the rebase was thrown away**: `fix/hop-penalty-detour`
-(#460, hoppable-wall routing cost 6.4 → 2.65) merged mid-search and moves paths
-across the whole park. The branch is rebased on that (101b5415) and the search
-was restarted from scratch. Nothing in the numbers below predates it.
+Pool is **sixteen**: `20260728, 5, 11, 24, 115, 128, 131, 208, 225, 267, 274,
+288, 326, 346, 428, 451`. Confirmed 16/16 in one run at `8409724f`.
 
-Live results: `seed-vetting.jsonl` (gitignored), logs `seed-vetting*.log`.
-Ranges in flight: 1-200, 201-420, 421-700 (`--fast`).
+**515 candidates tried, 17 passed — one in thirty.** 1102 and 1104 are spares.
+Raw verdicts in `seed-vetting.jsonl` (gitignored).
 
-**At 252 candidates: 10 passers — a 4.1% hit rate.** Passers so far:
-5, 11, 24, 115, 128, 131, 208, 225, 428, 451. Plus the canonical 20260728 that
-is 11 of 16; the pool in the code currently holds the first six.
-
-Failure taxonomy (of the rejected): the railway loop failing to solve at all
-(42), stranded waypoints (`poi.stranded`, 22), and on the invariant side the
-Rail Race duck bar (69), the Rail Race camera running backwards (65) and the
-Sky Cruiser flying through the castle (53).
+**Re-vetted twice against merges that landed mid-flight**: #460 (hop penalty —
+first whole search discarded and redone) and #461 (long grass and solid
+benches — pool re-vetted on top, 16/16 still pass).
 
 **Finding worth keeping whatever happens to this branch:** sweep seed **18**,
-which `test:procgen` runs on every PR, **fails `check:park` on current `main`**
-— `route.crossesRail: 4`, four walks routed across the railway at grade 0.56 m
+which `test:procgen` runs on every PR, **fails `check:park` on `main`** —
+`route.crossesRail: 4`, four walks routed across the railway at grade 0.56 m
 above the rail where the deck needs 4.06 m. Green in `test:procgen` (80/80).
-Written up on **#437**.
+Written up on **#437**, along with the correction that 18 of the 19
+park-building check steps are canonical-only — `check:fountain-hop` already
+sweeps five seeds and is the pattern to copy.
 
-## Browser QA is already done (port 5551, server killed)
+## Browser QA is done (port 5551, server killed, pages closed)
 
-- Fresh profiles drew 24, 208, 24, 24, 20260728 and remembered each.
+- Fresh profiles drew 24, 208, 24, 24, 20260728, then 20260728, 131, 115.
 - "Yes, start a new game" took a device 20260728 → 5, reloading exactly once
   (one console line on the new document, reading `(drawn)`).
-- `?seed=208` pinned without persisting; 24 and 208 are visibly different,
-  walkable parks.
+- `?seed=208` pinned without persisting; 24, 208 and 115 are visibly
+  different, walkable parks.
 
-## What is left
+## Gates
 
-1. Top the pool up to 16 as the search finds more, then re-run
-   `pnpm run vet:seeds -- --list <the whole pool>` as a final confirmation.
-2. `pnpm run check` (exit 0), `pnpm run test:procgen` (**497**), `pnpm run build`.
-   Run these when the vetting processes are finished — `check:park-boot` and
-   `check:solve-cost` are load-sensitive.
-3. PR body: pool, hit rate, failures, how to change 16, and #437's blind spot.
+`pnpm run check` exit 0, `test:procgen` 497 passed, `build` exit 0,
+`vet:seeds --list <pool>` 16/16.
