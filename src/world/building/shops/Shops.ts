@@ -6,6 +6,7 @@ import { gameStore } from '../../../state';
 import {
   SHOP_RECESS_DEPTH,
   SHOP_SCALE_XZ,
+  SHOP_STAND_Z,
   SHOP_UNITS,
   deckY,
   shopHasForecourt,
@@ -39,11 +40,11 @@ import { rainbowFlossAvailable, type ShopId } from './catalogue';
 /**
  * Where a child stands to be served, in unit-local metres.
  *
- * Scaled by `SHOP_SCALE_XZ` along with the rest of the shop: a bigger counter
- * needs the standing spot to recede with it, or a child would be asked to
- * stand inside the (now bigger) counter itself.
+ * **Defined in `layout.ts` now, and re-exported from here** so every existing
+ * importer is unaffected. It moved because the market's aisle width is derived
+ * from it — see its declaration for why that could not be done from a copy.
  */
-export const SHOP_STAND_Z = 2.4 * SHOP_SCALE_XZ;
+export { SHOP_STAND_Z };
 /** How close to that spot counts as "at the counter". Scaled the same way. */
 export const SHOP_REACH = 2.2 * SHOP_SCALE_XZ;
 
