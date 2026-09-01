@@ -80,13 +80,10 @@ import { CASTLE_FLOORS, floorX, floorZ, type CastleFloor } from '../src/world/bu
 import {
   BUILDING_BASE_Y,
   insideInterior,
-  ROOF_PAVILION_DOOR_SPAN,
   ROOF_PAVILION_HALF_X,
   ROOF_PAVILION_HALF_Z,
-  ROOF_PAVILION_WALL,
   ROOF_PAVILION_X,
   ROOF_PAVILION_Z,
-  roofPavilionWalls,
   TOP_DECK,
 } from '../src/world/building/layout.ts';
 import { PET_RENDER_HEIGHT } from '../src/art/models/pets.ts';
@@ -617,88 +614,71 @@ for (const floor of CASTLE_FLOORS) {
     });
   }
 
-  // **The pavilion: in through the doorway, and out again.**
+  // **The pavilion: solid, and its inside genuinely out of reach.**
   //
   // Jim, 1 September 2026: *"Why does the roof garden have a big shed-like
-  // building on it that you can run through?"* It is walls now, and the whole
-  // hazard of walls round a room is that a child gets in and cannot get out —
-  // CLAUDE.md's hollow-rectangle soft-lock, at the one size where it is a room
-  // rather than a curiosity.
-  //
-  // A flood fill answers both halves at once and that is why it is the right
-  // instrument: reachability is symmetric, so if the middle of the pavilion is
-  // in the same connected component as the lift lobby she walked out of, then
-  // she can walk in *and* she can walk back out. There is no arrangement of
-  // colliders that lets one hold and not the other.
+  // building on it that you can run through?"* It is solid now, and an 11 × 9 m
+  // rectangle's hollow middle is exactly the size of soft-lock CLAUDE.md warns
+  // about. The rule is that such an inside is either enterable *and* leavable
+  // or unreachable, and this one is unreachable — so that is asserted, on the
+  // **same fill** that requires every keep-out to be reachable. One instrument,
+  // two opposite answers, neither of which can come out right by accident: a
+  // fill that had quietly stopped consulting its colliders would fail this
+  // clause, and a fill that could not leave its seed would fail the other.
   if (floor.index === TOP_DECK) {
-    if (!canReach(seen, ROOF_PAVILION_X, ROOF_PAVILION_Z, FILL_PITCH * 2)) {
+    if (canReach(seen, ROOF_PAVILION_X, ROOF_PAVILION_Z, FILL_PITCH)) {
       fail(
-        `the middle of the roof pavilion is not reachable from the lift lobby — it is a sealed ` +
-          `shed on her own roof garden, which is a worse thing to own than one she could run ` +
-          `through`,
+        `the middle of the roof pavilion IS reachable — a child can get inside an 11 × 9 m ` +
+          `sealed box, and a CollisionWorld rectangle never pushes a mover out of its middle, so ` +
+          `that is a soft-lock she cannot walk out of`,
       );
     }
-    // …and the walls really do stop her, or "enterable" is just "still a
-    // ghost".
-    //
-    // **Marched along each wall's own normal, and asked whether that wall's
-    // plane was crossed** — not "did she end up inside the room". The first
-    // draft walked outwards from the pavilion's *centre*, which for the two
-    // east pieces is a diagonal, so the body sidled round to the doorway,
-    // walked in through it, and was duly reported as having come through the
-    // wall. It had not; it had used the door. A wall's question is about that
-    // wall, and the only honest bearing to ask it from is square on.
-    for (const wall of roofPavilionWalls()) {
-      const thinInX = wall.maxX - wall.minX < wall.maxZ - wall.minZ;
-      const midX = (wall.minX + wall.maxX) / 2;
-      const midZ = (wall.minZ + wall.maxZ) / 2;
-      const outward = thinInX
-        ? Math.sign(midX - ROOF_PAVILION_X)
-        : Math.sign(midZ - ROOF_PAVILION_Z);
-      const dirX = thinInX ? outward : 0;
-      const dirZ = thinInX ? 0 : outward;
-      // Sample along the run, not only its midpoint: a hole could be anywhere.
-      const samples = 5;
+    // …and unreachable is not the same as solid, so each of the four faces is
+    // also **marched at square on**, and sampled along its length rather than
+    // only at its middle: a hole in a wall could be anywhere along it, and the
+    // hotel's six evenly-spaced gaps (CLAUDE.md) were all found by exactly this
+    // and by nothing else. Square on, because a body approaching a corner
+    // diagonally slides round it, which says nothing about the face.
+    const faces = [
+      { dirX: 1, dirZ: 0 },
+      { dirX: -1, dirZ: 0 },
+      { dirX: 0, dirZ: 1 },
+      { dirX: 0, dirZ: -1 },
+    ] as const;
+    const samples = 9;
+    for (const face of faces) {
+      const alongHalf = face.dirX !== 0 ? ROOF_PAVILION_HALF_Z : ROOF_PAVILION_HALF_X;
       for (let s = 0; s < samples; s += 1) {
-        const t = (s + 0.5) / samples;
-        const alongX = thinInX ? midX : wall.minX + (wall.maxX - wall.minX) * t;
-        const alongZ = thinInX ? wall.minZ + (wall.maxZ - wall.minZ) * t : midZ;
+        const offset = ((s + 0.5) / samples - 0.5) * 2 * (alongHalf - PLAYER_RADIUS);
+        const startX =
+          ROOF_PAVILION_X + face.dirX * (ROOF_PAVILION_HALF_X + 4) + (face.dirX === 0 ? offset : 0);
+        const startZ =
+          ROOF_PAVILION_Z + face.dirZ * (ROOF_PAVILION_HALF_Z + 4) + (face.dirZ === 0 ? offset : 0);
         const position = new Vector3(
-          floorX(floor, alongX + dirX * 4),
+          floorX(floor, startX),
           BUILDING_BASE_Y,
-          floorZ(floor, alongZ + dirZ * 4),
+          floorZ(floor, startZ),
         );
         for (let step = 0; step < 20; step += 1) {
           world.resolveMovement(
             position,
-            -dirX * PLAYER_LONGEST_STEP,
-            -dirZ * PLAYER_LONGEST_STEP,
+            -face.dirX * PLAYER_LONGEST_STEP,
+            -face.dirZ * PLAYER_LONGEST_STEP,
             PLAYER_RADIUS,
             0,
             1 / 30,
           );
         }
-        // The inner face of this run, in world metres, and which side of it
-        // "outside" is.
-        const innerFace = thinInX
-          ? floorX(floor, outward > 0 ? wall.minX : wall.maxX)
-          : floorZ(floor, outward > 0 ? wall.minZ : wall.maxZ);
-        const reached = thinInX ? position.x : position.z;
-        const crossed = outward > 0 ? reached < innerFace : reached > innerFace;
-        if (crossed) {
+        const insideX = Math.abs(position.x - floorX(floor, ROOF_PAVILION_X));
+        const insideZ = Math.abs(position.z - floorZ(floor, ROOF_PAVILION_Z));
+        if (insideX < ROOF_PAVILION_HALF_X && insideZ < ROOF_PAVILION_HALF_Z) {
           fail(
-            `a body walked straight through the pavilion wall at [${alongX.toFixed(1)}, ` +
-              `${alongZ.toFixed(1)}], crossing its inner face — that wall is not solid`,
+            `a body marched at the pavilion's [${face.dirX}, ${face.dirZ}] face, ` +
+              `${offset.toFixed(2)} m along it, ended up inside the building — that face is not ` +
+              `solid`,
           );
         }
       }
-    }
-    // The doorway is a doorway: wide enough for her, and clear.
-    if (ROOF_PAVILION_DOOR_SPAN < PLAYER_RADIUS * 2 + 0.4) {
-      fail(
-        `the pavilion doorway is ${ROOF_PAVILION_DOOR_SPAN} m clear, which is not a comfortable ` +
-          `way in for a ${(PLAYER_RADIUS * 2).toFixed(2)} m child`,
-      );
     }
   }
 
@@ -873,7 +853,6 @@ process.stdout.write(
   `check:benches OK — ${CASTLE_FLOORS.length} floors, ` +
     `${CASTLE_FLOORS.reduce((n, f) => n + benchFootprints(f.index).length, 0)} benches ` +
     `(${BENCH_LENGTH} × ${BENCH_DEPTH} × ${BENCH_HEIGHT} m) solid from ${BEARINGS} bearings and ` +
-    `none of them a trap, 20 planters solid to feet and open to a jump, a pavilion that stops ` +
-    `her at every wall and lets her in and out through its doorway, nothing walled off, and the ` +
-    `long grass measured.\n`,
+    `none of them a trap, 20 planters solid to feet and open to a jump, a pavilion solid on all ` +
+    `four faces with its inside out of reach, nothing walled off, and the long grass measured.\n`,
 );

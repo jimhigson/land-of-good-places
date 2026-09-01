@@ -91,7 +91,10 @@ import {
   LIFT_DOOR_MIN_Z,
   LIFT_OUT_YAW,
   LIFT_WALL_X,
-  roofPavilionWalls,
+  ROOF_PAVILION_HALF_X,
+  ROOF_PAVILION_HALF_Z,
+  ROOF_PAVILION_X,
+  ROOF_PAVILION_Z,
   TOILET_DECK,
   TOILET_ROOM,
   TOP_DECK,
@@ -2211,44 +2214,58 @@ function banquetTables(): MovingPlatform {
 }
 
 /**
- * **The roof pavilion is solid, and you can still walk into it** (#459).
+
+/**
+ * **The roof pavilion is solid** (#459).
  *
  * Jim: *"Why does the roof garden have a big shed-like building on it that you
- * can run through?"* `layout.ts`'s {@link roofPavilionWalls} owns the plan —
- * including why the building is now hollow with a doorway rather than the
- * filled box it used to be — and `Shell.ts` extrudes those same rectangles.
+ * can run through?"* Sized straight off the half-extents `Shell.ts` builds the
+ * block from, so the shed she can see and the shed she is stopped by are the
+ * same 10.8 × 9.2 m.
  *
  * **Not `topIsAbsolute`, and that is the one deliberate difference from every
  * other prop on this branch.** An absolute top is for something a jump should
- * clear; a 2.9 m wall is not, and stating a finite top at all invites a future
- * reader to wonder whether she can get over it. The default `Infinity` is the
- * honest description of a building: solid at every height, exactly like the
- * castle's own shell registered a few lines above.
+ * clear; a 2.9 m building is not, and stating a finite top at all invites a
+ * future reader to wonder whether she can get over it. The default `Infinity`
+ * is the honest description of a building — exactly like the castle's own
+ * shell, registered a few functions above.
  *
- * The room inside is a hollow a child can get into, so the soft-lock question
- * is live here in a way it is not for a bench — and the answer is that it is
- * not a trap but a room: she goes in through the doorway and out through the
- * same doorway. `check:benches` walks her in and back out rather than reasoning
- * about it.
+ * ## The hollow middle, at the one size where it matters
+ *
+ * CLAUDE.md's rule is that a rectangle's hollow interior is either genuinely
+ * enterable **and leavable**, or unreachable. Eleven metres by nine is
+ * emphatically a size a child could be stuck in, so which of the two this is
+ * has to be a fact rather than an intention.
+ *
+ * It is **unreachable**, and by two independent margins: there is no doorway
+ * in the drawn block at all, and the walls are 2.9 m against a jump apex of
+ * 1.28 m, so nothing can carry her over them. `check:benches` asserts it,
+ * flooding the roof from the lift lobby and requiring the middle of the
+ * pavilion **not** to be in the reachable set — the same instrument that
+ * requires every keep-out to *be* in it, so a single fill answers both and
+ * neither answer can be true by accident.
+ *
+ * A version with a doorway was built and reverted. It worked — she walked in,
+ * was stopped by the far wall, and walked out — and then she **vanished**,
+ * because the pyramid roof is opaque from beneath and nothing fades it. See
+ * `Shell.ts`.
  */
 export function registerPavilionCollision(collision: CollisionWorld, floor: CastleFloor): void {
   if (floor.index !== TOP_DECK) return;
-  for (const wall of roofPavilionWalls()) {
-    // Each run as a single thick wall down its own long axis, so a face is one
-    // collider rather than a rectangle-of-four with its own hollow middle.
-    const alongX = wall.maxX - wall.minX > wall.maxZ - wall.minZ;
-    const halfThickness = (alongX ? wall.maxZ - wall.minZ : wall.maxX - wall.minX) / 2;
-    const midX = (wall.minX + wall.maxX) / 2;
-    const midZ = (wall.minZ + wall.maxZ) / 2;
-    collision.addWall(
-      floorX(floor, alongX ? wall.minX + halfThickness : midX),
-      floorZ(floor, alongX ? midZ : wall.minZ + halfThickness),
-      floorX(floor, alongX ? wall.maxX - halfThickness : midX),
-      floorZ(floor, alongX ? midZ : wall.maxZ - halfThickness),
-      halfThickness,
-    );
-  }
+  collision.addRectangle(
+    floorX(floor, ROOF_PAVILION_X),
+    floorZ(floor, ROOF_PAVILION_Z),
+    ROOF_PAVILION_HALF_X - PAVILION_HALF_THICKNESS,
+    ROOF_PAVILION_HALF_Z - PAVILION_HALF_THICKNESS,
+    PAVILION_HALF_THICKNESS,
+  );
 }
+
+/** Half-thickness of the four walls the pavilion's footprint is built from —
+ *  the same 0.2 m the benches and `hotel/place.ts` use, and for the same
+ *  `maxSafeStep` reason. The half-extents are inset by it, so the face she
+ *  meets is the face she sees. */
+const PAVILION_HALF_THICKNESS = 0.2;
 
 /**
  * The facade out in the garden is a solid block with a doorway in it.

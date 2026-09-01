@@ -802,75 +802,10 @@ export const ROOF_PAVILION_Z = onPlate(-2);
 export const ROOF_PAVILION_HALF_X = 5.4;
 export const ROOF_PAVILION_HALF_Z = 4.6;
 
-/** How tall the pavilion's walls stand, before its pyramid roof. */
+/** How tall the pavilion stands, before its pyramid roof. Read by the block
+ *  `Shell.ts` draws and by the collider `Building.ts` registers, so the thing
+ *  she sees and the thing she is stopped by are one height. */
 export const ROOF_PAVILION_HEIGHT = 2.9;
-
-/** How thick those walls are. */
-export const ROOF_PAVILION_WALL = 0.5;
-
-/**
- * The clear span of the pavilion's doorway, in metres.
- *
- * **A doorway a child can see has to be a doorway she can use.** She is
- * `PLAYER_RADIUS * 2` = 1.24 m across, so 2.4 m is nearly a whole child of
- * slack either side — deliberately generous, because a pavilion is somewhere
- * she wanders into rather than a gap she is expected to aim at, and because
- * the doorway is the one part of a solid building where being wrong turns a
- * shelter into a box. `TOILET_STAND_X` states its own clear span for the same
- * reason and this follows it.
- */
-export const ROOF_PAVILION_DOOR_SPAN = 2.4;
-
-/** One run of pavilion wall, in roof-local metres. */
-export interface PavilionWall {
-  readonly minX: number;
-  readonly maxX: number;
-  readonly minZ: number;
-  readonly maxZ: number;
-}
-
-/**
- * **The pavilion's walls — one list, drawn by `Shell.ts` and made solid by
- * `Building.ts`.**
- *
- * Jim, 1 September 2026: *"Why does the roof garden have a big shed-like
- * building on it that you can run through?"* It was a **filled box** — a
- * `BoxGeometry` the size of a shed with no doorway, no interior and no
- * collider — so it was not a building a child could walk through so much as a
- * building-shaped lump she could walk through. Making the lump solid would
- * have answered the complaint and left the roof garden with a shed she can see
- * the door of and never enter, which is a worse thing to own.
- *
- * So it becomes what it always looked like: four walls with a way in, at the
- * east end, facing back across the terrace she arrives on. The `keepOutsFor`
- * disc round the pavilion is 8 m — larger than the 7.1 m half-diagonal — so
- * the approach to that doorway is already clear of grass and benches by
- * construction, and stays so if the pavilion ever moves.
- *
- * **The east wall is one run split in two, not two walls that happen to leave
- * a gap.** A gap arrived at by writing down two spans is a gap that can be
- * mistyped into a wall or into a hole the whole side wide; a span subtracted
- * from a face cannot be either. `Shell.ts` extrudes exactly these rectangles
- * and `registerPavilionCollision` makes exactly these rectangles solid, so the
- * doorway you can see and the doorway you can walk through are the same
- * subtraction.
- */
-export function roofPavilionWalls(): PavilionWall[] {
-  const minX = ROOF_PAVILION_X - ROOF_PAVILION_HALF_X;
-  const maxX = ROOF_PAVILION_X + ROOF_PAVILION_HALF_X;
-  const minZ = ROOF_PAVILION_Z - ROOF_PAVILION_HALF_Z;
-  const maxZ = ROOF_PAVILION_Z + ROOF_PAVILION_HALF_Z;
-  const half = ROOF_PAVILION_DOOR_SPAN / 2;
-  return [
-    // West, north and south: whole faces, corner to corner.
-    { minX, maxX: minX + ROOF_PAVILION_WALL, minZ, maxZ },
-    { minX, maxX, minZ: maxZ - ROOF_PAVILION_WALL, maxZ },
-    { minX, maxX, minZ, maxZ: minZ + ROOF_PAVILION_WALL },
-    // East: the same face, minus the doorway in the middle of it.
-    { minX: maxX - ROOF_PAVILION_WALL, maxX, minZ, maxZ: ROOF_PAVILION_Z - half },
-    { minX: maxX - ROOF_PAVILION_WALL, maxX, minZ: ROOF_PAVILION_Z + half, maxZ },
-  ];
-}
 
 // ------------------------------------------------------------- shop units
 
