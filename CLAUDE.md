@@ -2,6 +2,41 @@
 
 Read this before you touch anything. It is short on purpose.
 
+## The player is not a ghost
+
+**Anything a child can see, she must not be able to walk through.** Tables,
+benches, planters, sheds, pavilions, walls, crates — if it is drawn, it is
+solid, unless there is a stated reason it is not.
+
+This has been reported four separate times in one day: the banquet tables, the
+roof pavilion, the planters, the benches. Every time the cause was the same —
+scenery built with no collider at all — and every time it was a father walking
+his six-year-old's park and finding her strolling through the furniture.
+
+**When you add something to the world, give it a collider in the same commit.**
+Two things to get right, both learned the hard way:
+
+- **`topIsAbsolute`** is what makes a knee-high prop solid to feet on the floor
+  and air to feet mid-jump. `hotel/place.ts` is the precedent.
+- **A `CollisionWorld` rectangle is four walls round a hollow middle, and a
+  mover inside one is never pushed out.** A child who gets inside a solid box
+  is stuck for good — this nearly shipped on the banquet. Either the inside is
+  genuinely enterable *and leavable*, or it must be unreachable.
+
+And the thing solidity must never cost: `keepOutsFor` is the single owner of
+where a child has to be able to stand. A new collider must not block a doorway,
+a ride's stand spot, or a seat she is invited to sit in. **Prove that with a
+reachability instrument, and run a control on the instrument first** — two
+agents got clean, decisive, entirely wrong answers from flood fills that were
+measuring the wrong thing, and only the control caught it.
+
+**Castle props were once exempt from all of this**, because indoor collision is
+height-blind and a collider on one deck blocked that square metre on every
+deck. That exemption is dead: since #377/#380 the floors are disjoint spaces
+**279 m apart**, and a collider in one blocks *nothing* in the others —
+measured, 0 of 21250 swept points. If you meet a comment still claiming
+otherwise, it is stale; correct it where you find it.
+
 ## The one rule that keeps costing us work
 
 **Never work in the shared checkout at `/Users/jim/dev/landOfGoodPlaces`.**
