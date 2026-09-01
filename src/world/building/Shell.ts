@@ -56,6 +56,7 @@ import {
   INTERIOR_DOOR_MIN_X,
   LIFT_DOOR_MAX_Z,
   LIFT_DOOR_MIN_Z,
+  LIFT_SHAFT,
   ROOF_PAVILION_HALF_X,
   ROOF_PAVILION_HALF_Z,
   ROOF_PAVILION_X,
@@ -233,6 +234,20 @@ function buildDeck(plan: ShellPlan, deck: number): Mesh {
   // them, and the lift does not travel through anything. `parts.ts`'s
   // `planHole` lost its last caller with them.
   const slab = planRect(-ox, ox, -oz, oz);
+  // **The lift alcove's own floor, part of the same slab.** The alcove hangs
+  // off the east wall, past the plate — so before #450 there was simply nothing
+  // under it, and the lift's car (whose own floor plate is only 2.2 m deep and
+  // starts 0.62 m out from the wall) would have stood over a 0.40 m slot of
+  // open sky at its threshold. One more rectangle in the same extrusion rather
+  // than a separate mesh: same material, same draw call, and no seam where two
+  // plates meet. `LIFT_SHAFT` is the footprint `LIFT_PIT` already registers as
+  // walkable, so the floor you can see and the floor you can stand on are the
+  // same rectangle by construction. It starts at the wall's *outer* face
+  // rather than at `LIFT_SHAFT.minX`, so the two rectangles abut instead of
+  // overlapping — two coplanar top faces in one extrusion z-fight.
+  const shapes = plan.holes
+    ? [slab, planRect(ox, LIFT_SHAFT.maxX, LIFT_SHAFT.minZ, LIFT_SHAFT.maxZ)]
+    : [slab];
 
   // `plan.holes` is true only for the interior — the facade out in the garden
   // is a solid block and takes none of this. The roof terrace is genuinely
@@ -241,7 +256,7 @@ function buildDeck(plan: ShellPlan, deck: number): Mesh {
   const colour =
     deck === TOP_DECK && plan.holes ? PALETTE.stonePinkLight : storeyColours(deck).floor;
   const mesh = new Mesh(
-    extrudePlan([slab], BUILDING_SLAB),
+    extrudePlan(shapes, BUILDING_SLAB),
     isCastleFloor ? castleFloorMaterial(colour) : interiorMaterial(colour, 0.82),
   );
   mesh.receiveShadow = true;
