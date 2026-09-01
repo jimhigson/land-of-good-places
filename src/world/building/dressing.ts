@@ -324,11 +324,48 @@ function buildBenches(deck: number, blocked: readonly KeepOut[], isRoof: boolean
  * Everywhere a child has to be able to stand, walk to, or ride from.
  *
  * **Exported (issue #376) so the castle's decoration and `check:castle` both
- * ask this one list rather than growing their own.** Castle props get no
- * colliders at all — indoor collision is height-blind, so a collider on deck 0
- * would block that square metre on all five storeys — which means placement is
- * the only protection a prop gets and a second copy of these discs is the whole
- * ballgame. See `HANDOFF-castle-interior-363.md` §5.
+ * ask this one list rather than growing their own.** See
+ * `HANDOFF-castle-interior-363.md` §5.
+ *
+ * ## The rule that used to be written here, and why it is gone
+ *
+ * This said: *"Castle props get no colliders at all — indoor collision is
+ * height-blind, so a collider on deck 0 would block that square metre on all
+ * five storeys — which means placement is the only protection a prop gets."*
+ *
+ * **That is no longer true, and leaving it here is how the next person gets
+ * talked out of the right fix.** It was one sentence carrying two facts, and
+ * the prohibition only followed if both held: (A) the collision world is 2-D,
+ * so a collider blocks at every height, and (B) two storeys share an (x, z),
+ * so A reaches across them. `scripts/probe-height-blind.mts` measures each on
+ * its own. **A still holds. B died with #377/#380.** There are three floors,
+ * not five, they stand 300 m apart, and the great hall's plate is 279 m from
+ * the nearest point of any other storey: of 21250 points swept on the mall and
+ * 21250 on the roof, a collider in the middle of the hall blocks **none**.
+ *
+ * So the banquet's tables, benches and pets' table **are** solid — Jim, on
+ * #453: *"you can walk straight through the tables — they should be solid"* —
+ * and `castleFurniture.ts`'s `greatHallSolids` is where that lives.
+ *
+ * ## What this list is still for, which is not that
+ *
+ * Two different questions, and conflating them is a bug in each direction:
+ *
+ * - **"Where must a child be able to stand?"** — *this list*. It is what the
+ *   seeded scatters (benches, braziers, corner clutter) reject against, so a
+ *   walking route, a doorway or a ride's boarding spot never has furniture
+ *   dropped into it. It is a **placement** rule and it stays one; adding a
+ *   collider to a prop does not remove the need to keep the room walkable.
+ * - **"Where is furniture already standing?"** — `greatHallFootprint`, next to
+ *   the thing that puts it there. Do not merge it into this list: every table,
+ *   bench and goblet at the feast is inside the banquet, so `check:castle`'s
+ *   prop assertion would then fail on the banquet's own furniture.
+ *
+ * Most castle props still carry no collider, and now for an ordinary reason
+ * rather than an architectural one — nobody has asked for it. Anything that
+ * gains one takes an **absolute** top (`Collision.ts`'s `topIsAbsolute`), never
+ * the default `Infinity`, or a 0.675 m table becomes an invisible pillar to the
+ * ceiling. `world/hotel/place.ts` is the shipped precedent.
  */
 export function keepOutsFor(deck: number): KeepOut[] {
   const blocked: KeepOut[] = [

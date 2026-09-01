@@ -1924,10 +1924,12 @@ function entrancePad(x: number, z: number, colour: number): Mesh {
 // --------------------------------------------------------------- collision
 
 /**
- * The interior shell is solid apart from its two doorways. Collision is
- * height-blind, so these walls hold on every deck at once — which is exactly
- * what you want for a building, and the reason the lift shaft gets its own
- * three sides.
+ * The interior shell is solid apart from its two doorways.
+ *
+ * **Once per floor.** This used to say the walls "hold on every deck at once",
+ * which was true of a stacked castle and is exactly what #377/#380 undid: three
+ * floors, 300 m apart, each needing its own shell — see the loop that calls
+ * this. That is the split paying for itself rather than costing.
  */
 function registerInteriorCollision(collision: CollisionWorld, floor: CastleFloor): void {
   const west = floorX(floor, -floor.halfX);

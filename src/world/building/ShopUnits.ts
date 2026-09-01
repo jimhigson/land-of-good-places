@@ -158,8 +158,15 @@ function buildUnit(unit: ShopUnitDefinition): Group {
 
 /**
  * The counter is solid; the alcove behind it is not, so you can lean over and
- * peer in. Collision is height-blind, so this holds on every deck at once —
- * which is exactly why no two units are stacked on top of each other.
+ * peer in.
+ *
+ * This used to add *"collision is height-blind, so this holds on every deck at
+ * once — which is exactly why no two units are stacked on top of each other."*
+ * Half of that is dead: since #377/#380 the floors are disjoint spaces 300 m
+ * apart, so a counter reaches no other storey at all
+ * (`scripts/probe-height-blind.mts`). The stacking rule outlived its reason
+ * anyway — all seven stalls are on the mall now, in one frame, by Jim's own
+ * choice (see `layout.ts`).
  *
  * Scaled by `SHOP_SCALE_XZ` to match the now-bigger counter built into the
  * stage — the counter mesh itself lives inside the scaled stage, but this wall
@@ -176,6 +183,12 @@ function registerCounter(unit: ShopUnitDefinition, collision: CollisionWorld): v
   // Half the counter's real depth (0.7 m), not more. Because collision is
   // height-blind this segment is an invisible wall on every other deck too, and
   // every extra centimetre of it is a centimetre of somebody else's floor.
+  const [ax, az] = shopLocalToBuilding(unit, -1.75 * SHOP_SCALE_XZ, 1.15 * SHOP_SCALE_XZ);
+  const [bx, bz] = shopLocalToBuilding(unit, 1.75 * SHOP_SCALE_XZ, 1.15 * SHOP_SCALE_XZ);
+  // Half the counter's real depth (0.7 m), not more — `hotel/place.ts`'s
+  // generous-light rule. It no longer costs another storey its floor (the
+  // floors are disjoint since #377/#380), but a counter fatter than the wood a
+  // child can see is still a child brushing an invisible wall.
   collision.addWall(worldX(ax), worldZ(az), worldX(bx), worldZ(bz), 0.35 * SHOP_SCALE_XZ);
 }
 

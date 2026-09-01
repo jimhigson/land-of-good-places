@@ -36,9 +36,13 @@ import {
  * chime is: no assets, no audio system, and nothing for the real sound designer
  * to unpick at build step 9.
  *
- * Nothing here registers collision. Collision in this game is height-blind, so a
- * cubicle wall on deck one would be an invisible cubicle wall on all five decks;
- * the little room is open-fronted geometry you walk into and out of freely.
+ * Nothing here registers collision, and the reason has changed: it used to be
+ * that *"a cubicle wall on deck one would be an invisible cubicle wall on all
+ * five decks"*, which #377/#380 made untrue — there are three floors, 300 m
+ * apart, and a collider in one reaches none of the others
+ * (`scripts/probe-height-blind.mts`). It is now simply a design choice: the
+ * little room is open-fronted geometry you walk into and out of freely, and a
+ * six-year-old should never be able to wedge herself in a lavatory.
  *
  * ## The privacy roof
  *

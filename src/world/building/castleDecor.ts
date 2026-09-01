@@ -62,12 +62,15 @@ import {
  *
  * ## Three rules everything in this file obeys
  *
- * 1. **No colliders.** Indoor collision is height-blind: a collider on deck 0
- *    walls off that square metre on all five storeys. Placement is the whole of
- *    the protection, and it is enforced by `check:castle`. *(Issue #377's
- *    space-per-floor split removes this constraint by construction — see
- *    `HANDOFF-castle-interior-376.md` for which of these will want a collider
- *    pass once it lands.)*
+ * 1. **No colliders — but by choice now, not by law.** This used to read *"a
+ *    collider on deck 0 walls off that square metre on all five storeys"*, and
+ *    that stopped being true when #377/#380 landed: the floors are three
+ *    disjoint spaces 300 m apart, and a collider in one is measured at 279 m
+ *    from the nearest point of any other (`scripts/probe-height-blind.mts`;
+ *    the banquet took real colliders on #453). Nothing here has been asked for
+ *    one, so placement is still the whole of the protection and `check:castle`
+ *    still enforces it — but anything that does gain one takes an **absolute**
+ *    top (`Collision.ts`'s `topIsAbsolute`), never `Infinity`.
  * 2. **Nothing looms.** The ceiling is {@link CASTLE_CEILING_CLEAR} (3.30 m),
  *    {@link BEAM_UNDERSIDE} (3.08 m) within 0.40 m of a wall, and the tallest
  *    child in the game is 2.97 m. There is no headroom to spend.
