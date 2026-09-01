@@ -1,6 +1,5 @@
 import {
   BoxGeometry,
-  CanvasTexture,
   type PerspectiveCamera,
   CylinderGeometry,
   Group,
@@ -10,9 +9,9 @@ import {
   type Object3D,
   PlaneGeometry,
   SpotLight,
-  SRGBColorSpace,
   Vector3,
 } from 'three';
+import { glbCanvasTexture } from '../../art/style/glb';
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
 import { HOTEL_PLAY_RADIUS, PLAYER_RADIUS } from '../../core/constants';
 import { hexToCss, PALETTE } from '../../core/palette';
@@ -6607,31 +6606,6 @@ function paintSign(signboard: Mesh): void {
   signboard.material = new MeshToonMaterial({ map: glbCanvasTexture(canvas) });
 }
 
-/**
- * A canvas texture for a mesh whose UVs came out of a **glTF file**.
- *
- * three.js defaults `Texture.flipY` to `true`, which is right for the whole
- * rest of this game: a `CanvasTexture` is painted with y running *down* the
- * page, and geometry built here has v running *up*, so the flip is what makes
- * the two agree. glTF stores its UVs the other way up — v runs down, top-left
- * origin — and the loader does not rewrite them, so the same default flip
- * applied to an authored mesh cancels out the wrong way and the writing comes
- * out **upside-down**. QA found exactly that on the tower's signboard
- * (6 August 2026), and the "yours" plaque had it too — it was simply harder to
- * spot on a five-letter word in a rounded panel.
- *
- * Both painted panels in this hotel are authored nodes (`hotel_build.py` UV-maps
- * them), so both go through here. **Anything else that paints words onto an
- * asset from a `.glb` must do the same** — the failure is silent, symmetrical
- * and looks like a modelling mistake rather than a texture setting.
- */
-function glbCanvasTexture(canvas: HTMLCanvasElement): CanvasTexture {
-  const texture = new CanvasTexture(canvas);
-  texture.colorSpace = SRGBColorSpace;
-  texture.flipY = false;
-  texture.needsUpdate = true;
-  return texture;
-}
 
 /**
  * Recolours one named part of an authored asset, outline included.

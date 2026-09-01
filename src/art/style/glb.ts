@@ -1,4 +1,4 @@
-import { BufferAttribute, BufferGeometry, Matrix4, Quaternion, Vector3 } from 'three';
+import { BufferAttribute, BufferGeometry, CanvasTexture, Matrix4, Quaternion, SRGBColorSpace, Vector3 } from 'three';
 
 /**
  * A **synchronous** reader for the `.glb` files this repo authors.
@@ -274,4 +274,32 @@ export function base64ToArrayBuffer(base64: string): ArrayBuffer {
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
   return bytes.buffer;
+}
+
+/**
+ * A canvas texture for a mesh whose UVs came out of a **glTF file**.
+ *
+ * three.js defaults `Texture.flipY` to `true`, which is right for the whole
+ * rest of this game: a `CanvasTexture` is painted with y running *down* the
+ * page, and geometry built here has v running *up*, so the flip is what makes
+ * the two agree. glTF stores its UVs the other way up — v runs down, top-left
+ * origin — and the loader does not rewrite them, so the same default flip
+ * applied to an authored mesh cancels out the wrong way and the writing comes
+ * out **upside-down**. QA found exactly that on the tower's signboard
+ * (6 August 2026), and the "yours" plaque had it too — it was simply harder to
+ * spot on a five-letter word in a rounded panel.
+ *
+ * **Anything that paints words onto an asset read by {@link readGlbParts} must
+ * go through here** — the failure is silent, symmetrical and looks like a
+ * modelling mistake rather than a texture setting. It lives beside the reader
+ * rather than in `world/hotel/` (where it was written) because the lift dial
+ * the castle now shares needs it too, and a second copy of a one-line texture
+ * setting is exactly the kind of duplication that comes apart quietly.
+ */
+export function glbCanvasTexture(canvas: HTMLCanvasElement): CanvasTexture {
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.flipY = false;
+  texture.needsUpdate = true;
+  return texture;
 }
