@@ -176,3 +176,80 @@ registering table + benches as one rectangle per *run* invents no pocket a child
 could ever have stood in — it only stops being able to walk through the run.
 Benches along a run are 0.1–0.3 m apart, so a run is already a continuous line.
 
+## What round three built
+
+| ask | where |
+|---|---|
+| tables, benches, pets' table solid | `castleFurniture.ts`'s `greatHallSolids`; registered by `Building.ts`'s `registerHallCollision` |
+| a jump can still land on the banquet | `greatHallTableTops` + `Building.ts`'s `banquetTables` (one `MovingPlatform`) |
+| the stale rule corrected | `dressing.ts`, `castleDecor.ts`, `Toilets.ts`, `ShopUnits.ts` (x2), `Building.ts`, `CLAUDE.md` |
+| a check that holds all of it | `scripts/check-hall-solid.mts`, wired into `check` after `check:castle-floors` |
+
+**One rectangle per run**, not per table and not per bench: the run's benches
+stand 0.45 m from its table against a 1.24 m body, so filling that gap invents
+no pocket she could ever have stood in. `topIsAbsolute` at the prop's real top,
+walls inset by their own 0.2 m half-thickness, per `hotel/place.ts`.
+
+The dais, throne and armour deliberately get **nothing** — the approach past the
+dais is 1.5 m against a 1.24 m child, so solid on both sides it would be a 13 cm
+squeeze. Jim asked for the tables, the benches and the pets' table.
+
+## The thing that nearly shipped, and how it was found
+
+**A `CollisionWorld` rectangle is four walls round a hollow middle, and a mover
+inside one is never pushed out.** Dropped on a run's own axis in the running
+game she had not moved after eleven seconds — the two side walls push exactly
+opposite amounts. Reachable (jump onto the banquet, walk off the side, land on
+the flagstones between the benches) and a **soft-lock**.
+
+Two fixes were tried and measured and both fail; do not re-try them:
+
+1. **Fill it with a fat wall down the axis.** A wall collider *is* a filled
+   stadium, so this does fill it — and then the four crisp edge walls push a
+   body **inwards** while the fat one pushes it out. It settles 1.13 m off the
+   axis and stays there. Any two overlapping colliders have a standoff wherever
+   their pushes cancel.
+2. **One stadium wide enough to span the run.** Rounds `halfX` = 2.15 m off each
+   corner — most of the outermost bench's own length left walk-through.
+
+**The fix is to make the inside unreachable rather than escapable**: the walk
+plate covers the run edge to edge, so a fall lands *on* it wherever it comes
+down, and its edge is the footprint's edge. The price is that the outer metre
+either side is table height rather than bench height. `check:hall-solid` holds
+the general rule — *a solid a jump can clear is either narrow enough to escort a
+body out, or plated edge to edge* — so the pets' table passes on the first
+clause (0.45 m half-width, narrower than a 0.62 m child) without needing a plate.
+
+## Two traps in the instruments themselves
+
+1. **The fill escaped through the lift doorway.** Asking only `isClearCircle`,
+   the flood fill flooded 354516 cells of empty world outside the shell, and
+   "reachable" would have meant "reachable, possibly through the castle wall".
+   Only the control clause — *a point outside the south wall is NOT reachable* —
+   caught it. Bounded to `insideInterior` it reaches 29880 cells empty, 16522
+   with the banquet in.
+2. **The browser runs this game at 0.2–0.5 fps** on swiftshader — one frame
+   every two to five seconds. Blocking tests survive that (a body stopped at
+   exactly the right face is stopped at exactly the right face however few
+   frames it took); anything needing a *sequence* of frames does not, and a
+   jump-and-walk-off reads as a character frozen in mid-air. `qa-hall-solid.mjs`
+   measures and prints the frame rate so nobody trusts a multi-frame result from
+   it again.
+
+Also: the hall's floor origin is **x = 900**. Comparing a world x against a
+floor-local face reported a perfect block as a FAIL first time round.
+
+## Gates, round three
+
+- `pnpm run check` **exit 0** (49 steps, including the new `check:hall-solid`;
+  `check:castle` and `check:castle-floors` unweakened and green).
+- `pnpm run build` **exit 0**. `pnpm run test:procgen` **482 passed**.
+- Watched running on port 5533, `/castle?deck=1&at=7.64,4.37`, zero console
+  errors: walked at the table from the aisle and stopped at x = 7.866 against a
+  predicted 7.87; walked at it from the east and stopped at 13.406 against a
+  predicted 13.41; the "Sit down and eat" chip is offered at the stand spot and
+  pressing it seats her at (9.09, 4.37) with posture `dining`.
+- Screenshots in `/tmp/qa-453/` on this machine.
+
+**The chip row still shows `R` twice** while seated ("Warm bread R" and "Leave
+the feast R") — see "Known, and not mine" above. Still not this branch's.
