@@ -34,22 +34,42 @@ Branch `feat/sixteen-seeds`, worktree `.claude/worktrees/seed-pool`.
 
 ## The state of the search
 
-**Everything vetted before ~17:20 was thrown away**: `fix/hop-penalty-detour`
+**Everything vetted before the rebase was thrown away**: `fix/hop-penalty-detour`
 (#460, hoppable-wall routing cost 6.4 → 2.65) merged mid-search and moves paths
-across the whole park. The branch is rebased on that and the search restarted
-from scratch.
+across the whole park. The branch is rebased on that (101b5415) and the search
+was restarted from scratch. Nothing in the numbers below predates it.
 
-Live results are in `seed-vetting.jsonl` (gitignored) and `seed-vetting.log`.
-At 40/200 candidates: **3 passers (5, 11, 24) — a ~7.5% hit rate.** All three
-are seeds the repo had already vetted as sweep seeds, which is itself a
-finding. If 1–200 does not yield 16, extend the range (`vet:seeds -- 201 500`)
-rather than lowering the bar.
+Live results: `seed-vetting.jsonl` (gitignored), logs `seed-vetting*.log`.
+Ranges in flight: 1-200, 201-420, 421-700 (`--fast`).
+
+**At 252 candidates: 10 passers — a 4.1% hit rate.** Passers so far:
+5, 11, 24, 115, 128, 131, 208, 225, 428, 451. Plus the canonical 20260728 that
+is 11 of 16; the pool in the code currently holds the first six.
+
+Failure taxonomy (of the rejected): the railway loop failing to solve at all
+(42), stranded waypoints (`poi.stranded`, 22), and on the invariant side the
+Rail Race duck bar (69), the Rail Race camera running backwards (65) and the
+Sky Cruiser flying through the castle (53).
+
+**Finding worth keeping whatever happens to this branch:** sweep seed **18**,
+which `test:procgen` runs on every PR, **fails `check:park` on current `main`**
+— `route.crossesRail: 4`, four walks routed across the railway at grade 0.56 m
+above the rail where the deck needs 4.06 m. Green in `test:procgen` (80/80).
+Written up on **#437**.
+
+## Browser QA is already done (port 5551, server killed)
+
+- Fresh profiles drew 24, 208, 24, 24, 20260728 and remembered each.
+- "Yes, start a new game" took a device 20260728 → 5, reloading exactly once
+  (one console line on the new document, reading `(drawn)`).
+- `?seed=208` pinned without persisting; 24 and 208 are visibly different,
+  walkable parks.
 
 ## What is left
 
-1. Put the passers into `PARK_SEED_POOL` (keep `CANONICAL_PARK_SEED` first).
+1. Top the pool up to 16 as the search finds more, then re-run
+   `pnpm run vet:seeds -- --list <the whole pool>` as a final confirmation.
 2. `pnpm run check` (exit 0), `pnpm run test:procgen` (**497**), `pnpm run build`.
-3. Play it on port **5551** `--strictPort`: new game twice, confirm different
-   parks, each walkable. Close the page immediately; kill the server by PID.
-4. PR body: the pool, the hit rate, the failure reasons, how to change 16, and
-   the canonical-only checks (#437) that stop describing the real park.
+   Run these when the vetting processes are finished — `check:park-boot` and
+   `check:solve-cost` are load-sensitive.
+3. PR body: pool, hit rate, failures, how to change 16, and #437's blind spot.
