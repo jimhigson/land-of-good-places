@@ -263,6 +263,36 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
   }
 
   /**
+   * The `slot`-th companion's own live body, nearest her first — what
+   * `check:pet-slide` measures a descent with.
+   *
+   * By place in the line rather than by uid, unlike {@link petState}, because
+   * the question that check asks is about **order**: is each one behind the one
+   * in front of it, and is any pair on the same spot. `root` is the real node,
+   * so the check takes its own world position off the scene graph after the
+   * frame that moved it rather than being told where the pet ought to be — the
+   * distinction that separates observing from recomputing, and the reason this
+   * returns the body and not a copy of its coordinates.
+   */
+  companionAt(slot: number): {
+    readonly uid: string;
+    readonly displayName: string;
+    readonly height: number;
+    readonly onSlide: boolean;
+    readonly root: Object3D;
+  } | null {
+    const member = this.members[slot];
+    if (!member) return null;
+    return {
+      uid: member.uid,
+      displayName: member.displayName,
+      height: member.height,
+      onSlide: member.onSlide,
+      root: member.root,
+    };
+  }
+
+  /**
    * How many companions are actually standing at the pets' table with their
    * noses in a bowl — the question `check:castle` asks, answered by the one
    * system that owns those bodies rather than by a second clock in the hall.
