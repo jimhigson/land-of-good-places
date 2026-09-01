@@ -134,12 +134,17 @@ const PUFFS_MAX = 5;
  * X runs along the direction it is travelling and local Z points outwards, away
  * from the building. That is worth the few lines it costs for two reasons.
  * A cloud then streaks along the way it is going, which is what a cloud does;
- * and — the load-bearing one — its inward reach is `PUFF_SPREAD_Z × radius`,
- * which is **less than {@link NEAR_OUT_MIN} and {@link DEEP_OUT_MIN}**, so no
- * puff can ever poke back over the parapet and hang above the garden. With a
- * random yaw the long X spread pointed inwards about a quarter of the time and
- * dropped grey blobs on the meadow; that is what this arrangement rules out
- * rather than merely making unlikely.
+ * and — the load-bearing one — the whole of its inward reach lies on **one
+ * axis**, so `addTier` can measure that reach off the puffs it just made and
+ * push the cloud out until the reach clears the plate ({@link
+ * PARAPET_CLEARANCE}). With a random yaw the long X spread pointed inwards
+ * about a quarter of the time and dropped grey blobs on the meadow.
+ *
+ * Note what this is *not*: an inequality between the constants below, checked
+ * by hand. That was the first version, and it was wrong — it compared the plate
+ * against a puff's centre and forgot the puff's own radius, so clouds hung 0.87
+ * m over the garden while the comment asserted they could not. `check:castle`
+ * measures the drawn extent of every puff round a whole lap.
  */
 const PUFF_SPREAD_X = 1.9;
 const PUFF_SPREAD_Y = 0.42;
@@ -147,6 +152,17 @@ const PUFF_SPREAD_Z = 0.85;
 
 /** How far off the outline's bearing a cloud may be twisted, in radians. */
 const YAW_JITTER = 0.3;
+
+/**
+ * How much daylight is left between a cloud's innermost drawn edge and the
+ * plate, in metres.
+ *
+ * The parapet's outer face stands half a wall past the plate — comfortably
+ * under this — so a cloud clears the stonework as well as the floor. The
+ * stand-off it enforces is worked out per cloud from the puffs that cloud
+ * actually got, never from an inequality between the tier constants above.
+ */
+const PARAPET_CLEARANCE = 0.6;
 
 /** How fast a cloud travels around the building, in metres per second. */
 const DRIFT_MIN = 0.55;
@@ -329,9 +345,31 @@ export function createRoofClouds(halfX: number, halfZ: number): RoofClouds {
     puffMax: number,
   ): void {
     for (let i = 0; i < count; i += 1) {
-      const out = rng.range(outMin, outMax);
-      const lap = lapLength(halfX, halfZ, out);
       const index = clouds.length;
+      // **Shape the cloud first, then decide how far out it flies.** The
+      // stand-off is *derived* from the puffs it actually got — see
+      // {@link PUFF_SPREAD_Z}. Sampling `out` first and trusting an inequality
+      // between the constants is what the first version did, and it was wrong
+      // by 0.87 m because it compared against the puff's *centre* and forgot
+      // the puff's own radius. `check:castle` found that in one run; this loop
+      // is what makes it unable to happen again, rather than a corrected sum in
+      // a comment that the next tweak to `NEAR_PUFF_MAX` would silently break.
+      const lobes = PUFFS_MIN + Math.floor(rng.range(0, PUFFS_MAX - PUFFS_MIN + 1));
+      let reach = 0;
+      for (let p = 0; p < lobes; p += 1) {
+        const radius = rng.range(puffMin, puffMax);
+        const offset = new Vector3(
+          rng.range(-PUFF_SPREAD_X, PUFF_SPREAD_X) * radius,
+          rng.range(-PUFF_SPREAD_Y * 0.7, PUFF_SPREAD_Y) * radius,
+          rng.range(-PUFF_SPREAD_Z, PUFF_SPREAD_Z) * radius,
+        );
+        // Local −Z is inwards, and it is the *drawn* edge that must clear the
+        // parapet, so the puff's own radius counts.
+        reach = Math.max(reach, radius - offset.z);
+        puffs.push({ cloud: index, offset, radius, flatten: rng.range(0.46, 0.72) });
+      }
+      const out = Math.max(rng.range(outMin, outMax), reach + PARAPET_CLEARANCE);
+      const lap = lapLength(halfX, halfZ, out);
       clouds.push({
         out,
         lap,
@@ -341,20 +379,6 @@ export function createRoofClouds(halfX: number, halfZ: number): RoofClouds {
         phase: rng.range(0, TAU),
         travelled: rng.range(0, lap),
       });
-      const lobes = PUFFS_MIN + Math.floor(rng.range(0, PUFFS_MAX - PUFFS_MIN + 1));
-      for (let p = 0; p < lobes; p += 1) {
-        const radius = rng.range(puffMin, puffMax);
-        puffs.push({
-          cloud: index,
-          offset: new Vector3(
-            rng.range(-PUFF_SPREAD_X, PUFF_SPREAD_X) * radius,
-            rng.range(-PUFF_SPREAD_Y * 0.7, PUFF_SPREAD_Y) * radius,
-            rng.range(-PUFF_SPREAD_Z, PUFF_SPREAD_Z) * radius,
-          ),
-          radius,
-          flatten: rng.range(0.46, 0.72),
-        });
-      }
     }
   }
 
