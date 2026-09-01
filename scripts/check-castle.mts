@@ -1463,6 +1463,8 @@ let worstFloor = 0;
 
 {
   const seats = greatHallSeats(CASTLE_GREAT_HALL_DECK);
+  /** #449's blank spaces — the places the Sit chip is offered on. */
+  const freePlaces = seats.filter((seat) => seat.free);
   const floor = new Group();
   const banquet = new GreatHallBanquet();
   // Dressed and never updated, exactly as a check should: `dress` poses the
@@ -1485,10 +1487,30 @@ let worstFloor = 0;
         `'${banquetGroupName(CASTLE_GREAT_HALL_DECK)}' group. Nobody is at the table.`,
     );
   } else {
-    if (banquet.seated.length !== seats.length) {
+    // **Every taken place has a child in it, and every free one is empty.**
+    // Not `seated.length === seats.length` any more: since #449 a few places
+    // are deliberately blank, so the accounting is against the seats that are
+    // *not* free rather than against all of them. That is the same total stated
+    // exactly once — `greatHallSeats` owns which places are free, and both the
+    // crowd and the Sit chips read it — rather than a tolerance that would let
+    // a child vanish quietly.
+    const taken = seats.filter((seat) => !seat.free);
+    if (banquet.seated.length !== taken.length) {
       fail(
-        `banquet: ${seats.length} seats were laid and ${banquet.seated.length} children sat ` +
-          `down.`,
+        `banquet: ${taken.length} of ${seats.length} places were laid for a child and ` +
+          `${banquet.seated.length} children sat down.`,
+      );
+    }
+    if (banquet.seated.some((diner) => diner.seat.free)) {
+      fail(
+        `banquet: a child is sitting in one of #449's free places. Nothing may seat a diner on ` +
+          `a seat whose 'free' is true — that place is the one the player is offered.`,
+      );
+    }
+    if (freePlaces.length === 0) {
+      fail(
+        `banquet: the banquet lays ${seats.length} places and leaves none of them free, so ` +
+          `#449's "no free spaces for the player to sit" is still true.`,
       );
     }
 

@@ -114,7 +114,12 @@ export class GreatHallBanquet {
    * benches that were never built.
    */
   dress(deck: number, floor: Group): void {
-    const seats = greatHallSeats(deck);
+    // **Only the places that are not being kept free** (#449). Jim, on #422's
+    // preview: *"no free spaces for the player to sit"*. Which seats those are
+    // is `castleFurniture.ts`'s answer, not a second one taken here — a gap the
+    // Sit chip offers and a gap nobody is sitting in have to be the same gap,
+    // and the only way to guarantee that is for one list to carry both facts.
+    const seats = greatHallSeats(deck).filter((seat) => !seat.free);
     if (seats.length === 0) return;
 
     const crowd = new KidCrowd(seats.length);
