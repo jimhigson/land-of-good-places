@@ -29,8 +29,8 @@ const NAV_GRID = new URL('../src/world/NavGrid.ts', import.meta.url);
 const KERB = 'scripts/measure-kerb-detour.mts';
 const FOUNTAIN = 'scripts/check-fountain-hop.mts';
 
-/** The five seeds CI builds a park on — `check:fountain-hop`'s own list. */
-const CI_SEEDS = [20260728, 2, 5, 11, 18] as const;
+/** The five seeds CI builds a park on — `test/procgen/`'s list, seed 24 included. */
+const CI_SEEDS = [20260728, 5, 11, 18, 24] as const;
 
 const CANDIDATES =
   process.argv.length > 2
