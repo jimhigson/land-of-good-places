@@ -151,13 +151,12 @@ export function dressDeck(deck: number, floor: Group): void {
   if (deckIsFurnished(deck)) return;
 
   const isRoof = deck === TOP_DECK;
-  const blocked = keepOutsFor(deck);
 
   if (!isRoof) {
     floor.add(buildRoundel(deck));
     floor.add(buildPlanterRing(deck));
   }
-  floor.add(buildBenches(deck, blocked, isRoof));
+  floor.add(buildBenches(deck, benchesOn(deck)));
 }
 
 // ------------------------------------------------------------- the middle
@@ -194,22 +193,89 @@ function buildRoundel(deck: number): Group {
   return group;
 }
 
+/** How many planters ring the roundel. */
+const PLANTER_COUNT = 10;
+/** How far out from the roundel's middle they stand. */
+const PLANTER_RING_RADIUS = ROUNDEL_RADIUS - 0.9;
+/** The pot's widest radius — its rim. It tapers to 0.36 at the foot, and the
+ *  rim is what a child's shins actually meet. */
+export const PLANTER_RADIUS = 0.44;
+/** How tall the pot stands. The bush above it is another 0.8 m and is
+ *  deliberately **not** part of the collider — see {@link planterRing}. */
+export const PLANTER_TOP = 0.7;
+
+/** Where one planter stands, in its deck's own local metres. */
+export interface Planter {
+  readonly x: number;
+  readonly z: number;
+}
+
+/**
+ * **Where the ten planters are** — the ring arithmetic, once (#459).
+ *
+ * Jim, straight after the pavilion: *"and also planters that you can run
+ * through."* They are two `InstancedMesh`es, so unlike a bench there is no
+ * list of transforms to walk; the honest way to give them colliders is to ask
+ * the same function that places the instances, which is this. `buildPlanterRing`
+ * draws these positions and `registerPlanterCollision` makes these positions
+ * solid — there is no second copy of `cos(angle) * (ROUNDEL_RADIUS - 0.9)` to
+ * drift.
+ *
+ * ## The pot is solid; the bush is not
+ *
+ * A planter is a stone pot with a shrub in it, and those are two different
+ * things to a child running past. The pot is knee-high masonry and stops her.
+ * The bush is foliage: brushing through leaves is what foliage is *for*, and a
+ * 1.5 m invisible wall of hedge round the roundel would be both wrong and
+ * unjumpable.
+ *
+ * `topIsAbsolute` is what lets that be one collider rather than an argument:
+ * the pot is solid to feet on the floor and open to feet in a jump, so she can
+ * hop the planter — bush and all — exactly as Jim's 7 August rule asks, and
+ * the leaves she passes through on the way are leaves.
+ *
+ * ## Ten pots in a ring is not a fence
+ *
+ * The roundel is *the* meeting spot on a floor, and it is in
+ * {@link keepOutsFor} for that reason — so enclosing it would be the precise
+ * thing solidity must never cost. It does not: the ring's circumference is
+ * `2π × 5.1` = 32.0 m over ten pots, so their centres are 3.20 m apart and
+ * their rims 2.32 m apart, against a child 1.24 m across. She walks between
+ * any two of them with half a metre either side. That is arithmetic, and
+ * `check:benches` floods the floor and holds it to the result rather than to
+ * this paragraph.
+ */
+export function planterRing(deck: number): Planter[] {
+  // Only the decks that have a roundel to ring — `dressDeck`'s own two tests,
+  // asked rather than copied. The roof garden has no roundel and the great
+  // hall has a banquet where one would go.
+  if (deck === TOP_DECK || deckIsFurnished(deck)) return [];
+  const ring: Planter[] = [];
+  for (let i = 0; i < PLANTER_COUNT; i += 1) {
+    const angle = (i / PLANTER_COUNT) * TAU;
+    ring.push({
+      x: ROUNDEL_X + Math.cos(angle) * PLANTER_RING_RADIUS,
+      z: ROUNDEL_Z + Math.sin(angle) * PLANTER_RING_RADIUS,
+    });
+  }
+  return ring;
+}
+
 /** A ring of chunky planters round the roundel. One instanced mesh. */
 function buildPlanterRing(deck: number): Group {
   const group = new Group();
   group.name = `deck-planters-${deck}`;
-  group.position.set(ROUNDEL_X, 0, ROUNDEL_Z);
 
-  const count = 10;
+  const ring = planterRing(deck);
   const pots = new InstancedMesh(
-    new CylinderGeometry(0.44, 0.36, 0.7, 12),
+    new CylinderGeometry(PLANTER_RADIUS, 0.36, PLANTER_TOP, 12),
     softMaterial(PALETTE.stonePinkLight, 0.8),
-    count,
+    ring.length,
   );
   const bushes = new InstancedMesh(
     new SphereGeometry(0.55, 12, 9),
     softMaterial(PALETTE.leafMid, 0.7),
-    count,
+    ring.length,
   );
   for (const mesh of [pots, bushes]) {
     mesh.castShadow = false;
@@ -220,17 +286,18 @@ function buildPlanterRing(deck: number): Group {
   const rotation = new Quaternion();
   const scale = new Vector3(1, 1, 1);
   const position = new Vector3();
-  for (let i = 0; i < count; i += 1) {
-    const angle = (i / count) * TAU;
-    const x = Math.cos(angle) * (ROUNDEL_RADIUS - 0.9);
-    const z = Math.sin(angle) * (ROUNDEL_RADIUS - 0.9);
-    position.set(x, 0.35, z);
+  ring.forEach((planter, i) => {
+    // The group used to sit at the roundel and the instances used to be placed
+    // relative to it. They are absolute now, because `planterRing` has to hand
+    // the same coordinates to the collision world, which knows nothing about
+    // this group's transform.
+    position.set(planter.x, PLANTER_TOP / 2, planter.z);
     matrix.compose(position, rotation, scale);
     pots.setMatrixAt(i, matrix);
-    position.set(x, 0.95, z);
+    position.set(planter.x, PLANTER_TOP + 0.25, planter.z);
     matrix.compose(position, rotation, scale);
     bushes.setMatrixAt(i, matrix);
-  }
+  });
   pots.instanceMatrix.needsUpdate = true;
   bushes.instanceMatrix.needsUpdate = true;
 
@@ -286,16 +353,89 @@ export function deckBenchSpots(deck: number, blocked: readonly KeepOut[], isRoof
   return spots;
 }
 
+/**
+ * **This deck's benches, asked with the deck's own keep-outs** — the single
+ * call every consumer makes.
+ *
+ * {@link deckBenchSpots} takes its keep-out list as a parameter, which is what
+ * lets the roof's meadow add the trampoline to the list it measures *grass*
+ * against without also moving the benches. That flexibility is exactly what
+ * makes it the wrong thing for a third and fourth caller to reach for: the
+ * benches a child sees, the benches she bumps into and the benches she can
+ * stand on must be the *same* benches, and three call sites each assembling
+ * their own `blocked` array is three chances to differ. So the scatter takes
+ * a list, and this — the one that says which list a bench is actually placed
+ * against — takes only a deck.
+ */
+export function benchesOn(deck: number): BenchSpot[] {
+  // **A furnished deck has none**, and this asks {@link deckIsFurnished}
+  // rather than re-testing the great hall's number, because `dressDeck`
+  // already returns early on exactly that test. A collider for a bench nobody
+  // drew is an invisible wall in the middle of the banquet — and it is the
+  // *cheapest* possible bug to introduce, since the scatter is perfectly happy
+  // to hand out ten spots for a room it is not decorating.
+  if (deckIsFurnished(deck)) return [];
+  return deckBenchSpots(deck, keepOutsFor(deck), deck === TOP_DECK);
+}
+
 /** How far from a bench's centre nothing else may grow. Half its 2.2 m length,
  *  plus room to sit down without a face full of grass. */
 export const BENCH_CLEAR_RADIUS = 2.2;
 
-function buildBenches(deck: number, blocked: readonly KeepOut[], isRoof: boolean): InstancedMesh {
-  const spots = deckBenchSpots(deck, blocked, isRoof);
+/**
+ * How big a bench is, in metres — **the one description**, read by the box
+ * that is drawn, by the collider that stops her, and by the plate she lands on
+ * when she jumps up onto it.
+ *
+ * These were three literals inside `new BoxGeometry(2.2, 0.44, 0.72)` and
+ * nothing else knew them, which was fine while a bench was scenery. It is not
+ * fine now that a bench is solid: a collider sized from a second copy of these
+ * numbers is CLAUDE.md's most common bug with a 2.2 m lever on it, and the
+ * failure mode — a bench whose invisible edge is 20 cm off the wood — is
+ * precisely the kind a child finds and a build cannot.
+ */
+export const BENCH_LENGTH = 2.2;
+export const BENCH_HEIGHT = 0.44;
+export const BENCH_DEPTH = 0.72;
 
+/**
+ * One bench's footprint, axis-aligned, as the collision world and the walk
+ * surfaces want it.
+ *
+ * A bench's yaw is only ever `0` or `π / 2` ({@link deckBenchSpots} picks from
+ * those two), so a quarter turn is a swap of half-extents rather than a
+ * rotated box — which matters because `CollisionWorld.addRectangle` is
+ * axis-aligned and has no way to express anything else. The `yaw > 0.1` test
+ * is deliberately a test of the *spot*, not an assumption about it: if the
+ * scatter ever rolls a free yaw, this rounds it to the nearer axis and
+ * `check:benches`' footprint clause is what will say so.
+ */
+export interface BenchFootprint {
+  readonly x: number;
+  readonly z: number;
+  readonly halfX: number;
+  readonly halfZ: number;
+  /** The bench's own top, above the floor it stands on. */
+  readonly top: number;
+}
+
+export function benchFootprints(deck: number): BenchFootprint[] {
+  return benchesOn(deck).map((spot) => {
+    const turned = Math.abs(Math.sin(spot.yaw)) > Math.SQRT1_2;
+    return {
+      x: spot.x,
+      z: spot.z,
+      halfX: (turned ? BENCH_DEPTH : BENCH_LENGTH) / 2,
+      halfZ: (turned ? BENCH_LENGTH : BENCH_DEPTH) / 2,
+      top: BENCH_HEIGHT,
+    };
+  });
+}
+
+function buildBenches(deck: number, spots: readonly BenchSpot[]): InstancedMesh {
   const benches = new InstancedMesh(
-    new BoxGeometry(2.2, 0.44, 0.72),
-    softMaterial(isRoof ? PALETTE.woodLight : PALETTE.buildingTrimDeep, 0.78),
+    new BoxGeometry(BENCH_LENGTH, BENCH_HEIGHT, BENCH_DEPTH),
+    softMaterial(deck === TOP_DECK ? PALETTE.woodLight : PALETTE.buildingTrimDeep, 0.78),
     Math.max(1, spots.length),
   );
   benches.name = `deck-benches-${deck}`;
@@ -310,7 +450,7 @@ function buildBenches(deck: number, blocked: readonly KeepOut[], isRoof: boolean
   const position = new Vector3();
   spots.forEach((spot, index) => {
     rotation.setFromAxisAngle(axis, spot.yaw);
-    position.set(spot.x, 0.22, spot.z);
+    position.set(spot.x, BENCH_HEIGHT / 2, spot.z);
     matrix.compose(position, rotation, scale);
     benches.setMatrixAt(index, matrix);
   });
@@ -361,11 +501,19 @@ function buildBenches(deck: number, blocked: readonly KeepOut[], isRoof: boolean
  *   bench and goblet at the feast is inside the banquet, so `check:castle`'s
  *   prop assertion would then fail on the banquet's own furniture.
  *
- * Most castle props still carry no collider, and now for an ordinary reason
- * rather than an architectural one — nobody has asked for it. Anything that
- * gains one takes an **absolute** top (`Collision.ts`'s `topIsAbsolute`), never
- * the default `Infinity`, or a 0.675 m table becomes an invisible pillar to the
- * ceiling. `world/hotel/place.ts` is the shipped precedent.
+ * Since #459 the **deck benches, the roundel's planters and the roof
+ * pavilion** carry colliders too — Jim, the same afternoon: *"the general rule
+ * should be that nothing can be run through — the player is not a ghost."*
+ * Anything that gains one takes an **absolute** top (`Collision.ts`'s
+ * `topIsAbsolute`), never the default `Infinity`, or a 0.675 m table becomes an
+ * invisible pillar to the ceiling. `world/hotel/place.ts` is the shipped
+ * precedent, and `check:benches` is what holds this list to the result: it
+ * floods the walkable floor from where the lift puts her down and requires
+ * every disc here to still have somewhere to stand in it.
+ *
+ * Props that still carry none — the market stalls, the crates, the armour, the
+ * lift car — do so for an ordinary reason rather than an architectural one:
+ * nobody has got to them yet. That is a backlog, not a rule.
  */
 export function keepOutsFor(deck: number): KeepOut[] {
   const blocked: KeepOut[] = [

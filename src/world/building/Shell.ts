@@ -59,6 +59,7 @@ import {
   LIFT_SHAFT,
   ROOF_PAVILION_HALF_X,
   ROOF_PAVILION_HALF_Z,
+  ROOF_PAVILION_HEIGHT,
   ROOF_PAVILION_X,
   ROOF_PAVILION_Z,
   TOP_DECK,
@@ -537,13 +538,25 @@ function buildRoofTerrace(plan: ShellPlan, roof: Group): void {
   // A pavilion at the west end, to break up the terrace and give the roof a
   // shady corner. Same silhouette it always had, only bigger and standing on a
   // floor you can now walk about on.
+  //
+  // **A filled block, and it stays one** (#459). Jim: *"Why does the roof
+  // garden have a big shed-like building on it that you can run through?"* —
+  // so it is solid now, `registerPavilionCollision` off these same numbers.
+  // It was tried as four walls with a doorway, so the shady corner would be
+  // somewhere she could stand *in*, and that is a bigger job than it looks:
+  // the pyramid roof is opaque from beneath and a child who walks inside
+  // simply **disappears** under it. Making her visible in there means the
+  // hotel's `overhangFader`, which is a feature rather than a collider, and
+  // Jim's own words were *"the pavilion is fine but should be solid"*. So it
+  // is solid, and an enterable pavilion is its own ticket.
   const pavilion = castAndReceive(
     new Mesh(
-      new BoxGeometry(ROOF_PAVILION_HALF_X * 2, 2.9, ROOF_PAVILION_HALF_Z * 2),
+      new BoxGeometry(ROOF_PAVILION_HALF_X * 2, ROOF_PAVILION_HEIGHT, ROOF_PAVILION_HALF_Z * 2),
       softMaterial(PALETTE.buildingWall, 0.78),
     ),
   );
-  pavilion.position.set(ROOF_PAVILION_X, 1.45, ROOF_PAVILION_Z);
+  pavilion.name = 'roof-pavilion';
+  pavilion.position.set(ROOF_PAVILION_X, ROOF_PAVILION_HEIGHT / 2, ROOF_PAVILION_Z);
   roof.add(pavilion);
 
   // ConeGeometry with four segments is a pyramid, and its radius is the

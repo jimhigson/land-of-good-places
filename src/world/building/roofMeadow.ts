@@ -13,7 +13,7 @@ import { INTERIOR_HALF_X, INTERIOR_HALF_Z, PLAYER_RADIUS } from '../../core/cons
 import { PALETTE } from '../../core/palette';
 import { Rng } from '../../core/mathUtils';
 import { softMaterial } from './parts';
-import { BENCH_CLEAR_RADIUS, deckBenchSpots, keepOutsFor, type KeepOut } from './dressing';
+import { BENCH_CLEAR_RADIUS, benchesOn, keepOutsFor, type KeepOut } from './dressing';
 import {
   insideInterior,
   TOP_DECK,
@@ -77,23 +77,57 @@ import {
  *  (planted at 2.3 m in, 0.8 m deep, with a crown that spills over the rim). */
 const PARAPET_INSET = 3.9;
 
-/** Grid pitch of the meadow, in metres. Every cell is one turf quad and one
- *  tuft, so this is simultaneously the density of both. */
+/** Grid pitch of the meadow, in metres. One turf quad per cell, and the region
+ *  the wild animals may stand in is resolved at this pitch — see
+ *  {@link TUFTS_PER_CELL} for why the *grass* is no longer counted in cells. */
 export const MEADOW_CELL = 1.05;
+
+/**
+ * **How many clumps of grass stand in each cell** (issue #459).
+ *
+ * Jim, on the roof garden: *"Long grass needs to be longer and more dense."*
+ *
+ * One clump per cell was the same number as one turf quad per cell, and that
+ * was a coincidence rather than a decision — {@link MEADOW_CELL} is the pitch
+ * at which the *region* is resolved (which cells are meadow, where a creature
+ * may stand, how coarse the patch outline is), and it had quietly become the
+ * grass's density as well.
+ *
+ * The obvious way to get denser grass is to shrink the cell, and it is the
+ * wrong one: it drags the region grid, the turf disc count, the jitter, the
+ * reach and therefore {@link KEEP_OUT_MARGIN} along with it, so a request to
+ * make the grass look thicker silently re-derives where the grass is *allowed
+ * to be*. Splitting the two apart means density is one number that changes one
+ * thing. It costs no draw call — every clump is another instance in the same
+ * {@link InstancedMesh} — and the jitter each already had is what spreads them
+ * inside their cell, so three clumps in a cell do not stack up in its middle.
+ */
+const TUFTS_PER_CELL = 3;
 
 /**
  * How tall a blade stands.
  *
  * The creatures are {@link PET_RENDER_HEIGHT} (1.46 m) and the brief asks for
- * them to be *half-hidden*. At 0.85 m a pet's head and ears clear the grass
- * while its body is in it — which is the thing worth seeing, because a
- * creature you can only half see is a creature worth walking over to. Any
- * taller and the animals vanish, which fails the whole point of putting them
- * there; any shorter and it is a lawn rather than long grass.
+ * them to be *half-hidden*: a pet's head and ears clear the grass while its
+ * body is in it, which is the thing worth seeing, because a creature you can
+ * only half see is a creature worth walking over to.
  *
- * On a 2.12 m child it comes to just above the knee.
+ * **Raised from 0.85 m on #459** — *"long grass needs to be longer"*. 0.85 m
+ * was set from the top of that window and read, on screen, as a lawn somebody
+ * had been slightly late mowing. 1.08 m is 74% of a pet: its body is properly
+ * buried, its head and ears are properly out, and the two halves of "half
+ * hidden" are both true instead of the grass merely brushing its belly. Any
+ * taller and the animals vanish, which fails the whole point of putting them
+ * there.
+ *
+ * Nothing else needs telling. `WildPets`' `PET_TOP` is already
+ * `MEADOW_GRASS_HEIGHT + 0.8`, so how far a diving creature sinks moves with
+ * this; {@link TUFT_BLADE_REACH} and so {@link KEEP_OUT_MARGIN} are derived
+ * from it, so taller grass keeps further off the things a child must reach.
+ *
+ * On a 2.12 m child it comes a little above the knee.
  */
-export const MEADOW_GRASS_HEIGHT = 0.85;
+export const MEADOW_GRASS_HEIGHT = 1.08;
 
 /**
  * Sides on a turf disc, and the radius that follows from it.
@@ -232,9 +266,11 @@ function findMeadow(deck: number): RoofMeadow {
   const isRoof = deck === TOP_DECK;
   const blocked: KeepOut[] = [...keepOutsFor(deck)];
   // The benches are sampled against the *castle's* keep-out list, so this has
-  // to be added after they are asked for or the two would disagree about what
-  // the roof contains.
-  const benches = deckBenchSpots(deck, blocked, isRoof);
+  // to be asked for before the trampoline is added below, or the meadow and
+  // the benches would disagree about what the roof contains. `benchesOn` is
+  // what makes that a fact about the deck rather than about the order of the
+  // two lines — it assembles the same list every consumer gets.
+  const benches = benchesOn(deck);
   if (isRoof) {
     blocked.push({
       x: TRAMPOLINE_X,
@@ -663,7 +699,7 @@ export function buildRoofMeadow(deck: number): Group | null {
   const tufts = new InstancedMesh(
     tuftGeometry(),
     softMaterial(PALETTE.grassLight, 0.75),
-    meadow.cells.length,
+    meadow.cells.length * TUFTS_PER_CELL,
   );
   tufts.name = `castle-roof-grass-${deck}`;
   tufts.castShadow = false;
@@ -686,17 +722,22 @@ export function buildRoofMeadow(deck: number): Group | null {
     turf.setMatrixAt(index, matrix);
 
     // The clumps do turn, and vary in size, or three hundred identical tufts
-    // read as wallpaper.
-    rotation.setFromAxisAngle(axis, rng.range(0, Math.PI * 2));
-    position.set(
-      cell.x + rng.range(-MEADOW_CELL * 0.44, MEADOW_CELL * 0.44),
-      0.03,
-      cell.z + rng.range(-MEADOW_CELL * 0.44, MEADOW_CELL * 0.44),
-    );
-    const size = rng.range(0.82, 1.18);
-    scale.set(size, rng.range(0.86, 1.14), size);
-    matrix.compose(position, rotation, scale);
-    tufts.setMatrixAt(index, matrix);
+    // read as wallpaper. {@link TUFTS_PER_CELL} of them per cell, each rolled
+    // separately — the jitter is what stops the extra ones stacking up in the
+    // middle of their cell, and it is the same jitter {@link TUFT_REACH}, and
+    // so {@link KEEP_OUT_MARGIN}, is already derived from.
+    for (let n = 0; n < TUFTS_PER_CELL; n += 1) {
+      rotation.setFromAxisAngle(axis, rng.range(0, Math.PI * 2));
+      position.set(
+        cell.x + rng.range(-TUFT_JITTER, TUFT_JITTER),
+        0.03,
+        cell.z + rng.range(-TUFT_JITTER, TUFT_JITTER),
+      );
+      const size = rng.range(0.82, TUFT_MAX_SCALE);
+      scale.set(size, rng.range(0.86, 1.14), size);
+      matrix.compose(position, rotation, scale);
+      tufts.setMatrixAt(index * TUFTS_PER_CELL + n, matrix);
+    }
   });
   turf.instanceMatrix.needsUpdate = true;
   tufts.instanceMatrix.needsUpdate = true;

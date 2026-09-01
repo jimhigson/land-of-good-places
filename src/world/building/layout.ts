@@ -802,6 +802,11 @@ export const ROOF_PAVILION_Z = onPlate(-2);
 export const ROOF_PAVILION_HALF_X = 5.4;
 export const ROOF_PAVILION_HALF_Z = 4.6;
 
+/** How tall the pavilion stands, before its pyramid roof. Read by the block
+ *  `Shell.ts` draws and by the collider `Building.ts` registers, so the thing
+ *  she sees and the thing she is stopped by are one height. */
+export const ROOF_PAVILION_HEIGHT = 2.9;
+
 // ------------------------------------------------------------- shop units
 
 export interface ShopUnitDefinition {
