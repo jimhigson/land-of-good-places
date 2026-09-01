@@ -8,6 +8,7 @@ import {
   type SlidingDoorsHandle,
 } from '../../art/models/hotelAssets';
 import { disposeTree } from '../../art/style/materials';
+import { FloorFader } from '../building/floorFade';
 import { glbCanvasTexture } from '../../art/style/glb';
 
 /**
@@ -55,6 +56,17 @@ import { glbCanvasTexture } from '../../art/style/glb';
  */
 export const CAR_DEPTH = 1.72;
 
+/**
+ * How solid the car is while it is **standing between the camera and the child
+ * inside it** — see {@link LiftAlcove.ghostCar}.
+ *
+ * The hotel's `OVERHANG_GHOST_ALPHA` exactly, which is itself close to
+ * `FoliageFade`'s `MIN_ALPHA` (0.26): the value this game has already decided a
+ * faded-but-still-there thing looks like. Never 0 — a lift that vanishes so you
+ * can see the child is the same bug as no lift at all.
+ */
+export const CAR_GHOST_ALPHA = 0.24;
+
 /** How far the dial stands proud of the architrave. */
 export const DIAL_STANDOFF = 0.3;
 
@@ -99,6 +111,8 @@ export class LiftAlcove {
   readonly root = new Group();
 
   private readonly doors: SlidingDoorsHandle;
+  /** Ghosts the car body only, never the doors or the dial. See {@link ghostCar}. */
+  private readonly carGhost = new FloorFader(CAR_GHOST_ALPHA);
   private readonly dial: LiftDialHandle;
   private readonly topOfScale: number;
 
@@ -117,6 +131,7 @@ export class LiftAlcove {
     car.root.position.set(wallX - outX * CAR_DEPTH, 0, wallZ - outZ * CAR_DEPTH);
     car.root.rotation.y = yaw;
     this.root.add(car.root);
+    this.carGhost.addLayer(car.root);
 
     // The architrave, plugging the wall gap.
     const frame = createLiftFrame();
@@ -149,6 +164,36 @@ export class LiftAlcove {
   /** 0 shut, 1 wide open. Feed it `liftDoorOpenness` from `lift/phases.ts`. */
   setOpen(open01: number): void {
     this.doors.setOpen(open01);
+  }
+
+  /**
+   * **Ghost the car body**, so the child riding inside it can be seen.
+   *
+   * The camera is fixed at 45° and looks along −X−Z, so a lift alcove is only
+   * ever watchable from one side. The hotel's is in a **west** wall: the car
+   * stands beyond it, opens towards the camera, and you look straight into it.
+   * The castle's is in an **east** wall, which puts the car's closed back panel
+   * squarely between the camera and the rider — and no amount of getting the
+   * geometry right changes that, because it is a fact about which way the wall
+   * faces, not about the lift.
+   *
+   * Found by riding it: with the car built and every check green, she boarded
+   * and **disappeared**, name tag hovering over a solid tan box. So the car
+   * ghosts while it has her in it, the same way the hotel's lobby overhang
+   * ghosts when it hides her (`Hotel`'s `overhangFader`) and a tree ghosts when
+   * it stands in front of her (`FoliageFade`). Same class, same alpha, same
+   * reasoning; the castle is simply the third thing to need it.
+   *
+   * The doors, the architrave, the dial and the alcove's floor are untouched —
+   * they are never in the way, and they are what makes it read as a lift.
+   */
+  ghostCar(on: boolean): void {
+    this.carGhost.setVisibleUpTo(on ? -1 : null);
+  }
+
+  /** Eases {@link ghostCar} rather than snapping it. */
+  update(dt: number): void {
+    this.carGhost.update(dt);
   }
 
   /**

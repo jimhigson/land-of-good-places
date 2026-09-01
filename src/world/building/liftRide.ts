@@ -249,6 +249,18 @@ export class LiftRide implements LiftPanelSource {
   }
 
   /**
+   * **Is the lift holding her?** True from the moment the doors start opening
+   * to draw her in until she has stepped back out — every phase in which she is
+   * inside the car, or about to be.
+   *
+   * `coming` counts: the car has to be see-through *before* she is behind it,
+   * or she blinks out for the half-second of the boarding glide.
+   */
+  hasRider(): boolean {
+    return this.phase === 'coming' || this.ridingUs();
+  }
+
+  /**
    * Whose doors and dial are the live ones right now.
    *
    * While travelling this is the floor she is **going to**, because that is the
