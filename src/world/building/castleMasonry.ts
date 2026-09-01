@@ -23,6 +23,8 @@ import {
   TOWER_ROOF_OVERHANG,
 } from './layout';
 
+export { CASTLE_TURRET_FOOTPRINT_RADIUS } from './layout';
+
 /**
  * **The castle's masonry kit — the one owner of what a battlement and a corner
  * turret are made of** (issue #462).
@@ -309,21 +311,6 @@ export function buildCastleTurrets(options: TurretOptions): Group {
 
   return group;
 }
-
-/**
- * How wide a turret is, for anything that has to keep out of one — a collider,
- * a keep-out disc, a bench scatter.
- *
- * The cone overhangs the shaft, and it is the cone a child's head meets when
- * she walks up to a turret whose eaves are near her own height, so the wider of
- * the two is the honest answer. Derived rather than typed for the reason
- * everything in this file is: a turret that grows must take its keep-out with
- * it.
- */
-export const CASTLE_TURRET_FOOTPRINT_RADIUS = Math.max(
-  TOWER_RADIUS * TOWER_BASE_FLARE,
-  TOWER_RADIUS + TOWER_ROOF_OVERHANG,
-);
 
 /** A little three-cornered pennant, big enough to read from across the garden. */
 function pennantGeometry(width: number, height: number): BufferGeometry {

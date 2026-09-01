@@ -52,9 +52,8 @@ import {
   spread,
   type MerlonSlot,
 } from './castleMasonry';
-import { TALLEST_CHILD_HEIGHT } from '../../art/models/kid';
 import { FLOOR_SPACE_SPACING } from './floors';
-import { CASTLE_WALL_HEIGHT } from './layout';
+import { CASTLE_MERLON_HEIGHT, CASTLE_WALL_HEIGHT } from './layout';
 import {
   ENTRANCE_MAX_X,
   ENTRANCE_MIN_X,
@@ -69,6 +68,7 @@ import {
   ROOF_PAVILION_HEIGHT,
   ROOF_PAVILION_X,
   ROOF_PAVILION_Z,
+  ROOF_PARAPET_THICKNESS,
   roofTurretSpots,
   TOP_DECK,
   TOWER_HEIGHT,
@@ -510,16 +510,17 @@ function buildRoofTerrace(plan: ShellPlan, roof: Group): void {
   // A parapet all the way round, with a gap where the slide leaves and another
   // where you step out of the lift.
   const shapes: Shape[] = [];
-  shapes.push(planRect(-ox, ox, -oz, -oz + 0.6));
+  const band = ROOF_PARAPET_THICKNESS;
+  shapes.push(planRect(-ox, ox, -oz, -oz + band));
   for (const [start, end] of segmentsMinusGaps(-ox, ox, [[SLIDE_PLAN.roofDoorMinX, SLIDE_PLAN.roofDoorMaxX]])) {
-    shapes.push(planRect(start, end, oz - 0.6, oz));
+    shapes.push(planRect(start, end, oz - band, oz));
   }
-  for (const [start, end] of segmentsMinusGaps(-oz + 0.6, oz - 0.6, [
+  for (const [start, end] of segmentsMinusGaps(-oz + band, oz - band, [
     [LIFT_DOOR_MIN_Z, LIFT_DOOR_MAX_Z],
   ])) {
-    shapes.push(planRect(-ox, -ox + 0.6, start, end));
+    shapes.push(planRect(-ox, -ox + band, start, end));
   }
-  shapes.push(planRect(ox - 0.6, ox, -oz + 0.6, oz - 0.6));
+  shapes.push(planRect(ox - band, ox, -oz + band, oz - band));
 
   // **The parapet is a battlement now** (#462). Jim, standing on the roof
   // garden: *"it needs the rooftop's near side to look like the external of the
@@ -620,23 +621,22 @@ function roofMerlonSlots(plan: ShellPlan): MerlonSlot[] {
 }
 
 /**
- * **How far a roof-garden turret's shaft rises before its cone starts.**
+ * **Where a roof-garden turret's cone starts** — at the top of the battlement.
  *
- * Derived, not chosen. Two things want a say and the taller wins:
+ * The first cut stood the shaft on the paving and carried it up past the
+ * tallest child in the game, because she could walk under the cone. She cannot
+ * any more — {@link roofTurretSpots} pushes the turret out past the parapet's
+ * inner face — and the number that binds is now what *reads* rather than what
+ * clears her hat.
  *
- * - the facade's own proportion — its towers carry
- *   `TOWER_HEIGHT − CASTLE_WALL_HEIGHT` (1.8 m) of shaft above the battlement
- *   line before the witch's hat begins, and this is the same castle;
- * - **a child has to be able to walk past one.** The cone overhangs the shaft
- *   and its eaves are the lowest thing on it, so at 1.8 m the tallest child in
- *   the game (2.97 m in the tallest hair and hat) walks face-first into a roof.
- *   That is the number that actually binds, and it is `TALLEST_CHILD_HEIGHT`
- *   plus a hand's breadth rather than a round figure somebody liked.
+ * The eaves sit exactly on the merlons' tops, so the turret grows out of the
+ * rampart the way a corner tower does rather than standing behind it on the
+ * floor. It is also 1.8 m less cone hanging over the garden, and that is the
+ * point: at the fixed isometric a solid this size hides `height × 1.28` metres
+ * of floor up-frame of itself, and the taller version swallowed a child five
+ * metres inboard of the corner. Measured on screen, not reasoned about.
  */
-const ROOF_TURRET_BODY = Math.max(
-  TOWER_HEIGHT - CASTLE_WALL_HEIGHT,
-  TALLEST_CHILD_HEIGHT + 0.4,
-);
+const ROOF_TURRET_EAVES = ROOF_CRENEL_BASE + CASTLE_MERLON_HEIGHT;
 
 /**
  * How far the roof garden's curtain wall — and the turret shafts standing in
@@ -664,7 +664,7 @@ function buildRoofTurrets(): Group {
     prefix: 'roof-turret',
     spots: roofTurretSpots(),
     baseY: 0,
-    bodyHeight: ROOF_TURRET_BODY,
+    bodyHeight: ROOF_TURRET_EAVES,
     bodyBelow: ROOF_CURTAIN_DROP,
   });
   group.name = 'roof-turrets';
@@ -692,12 +692,12 @@ function buildRoofCurtainWalls(plan: ShellPlan): Mesh {
   const oz = outerZ(plan);
   const shapes: Shape[] = [
     // The east face, full depth.
-    planRect(ox - 0.6, ox, -oz, oz),
+    planRect(ox - ROOF_PARAPET_THICKNESS, ox, -oz, oz),
     // The south face, stepping round the gap the ginormous slide leaves
     // through — the same numbers the parapet above it steps round.
-    ...segmentsMinusGaps(-ox, ox - 0.6, [
+    ...segmentsMinusGaps(-ox, ox - ROOF_PARAPET_THICKNESS, [
       [SLIDE_PLAN.roofDoorMinX, SLIDE_PLAN.roofDoorMaxX],
-    ]).map(([start, end]) => planRect(start, end, oz - 0.6, oz)),
+    ]).map(([start, end]) => planRect(start, end, oz - ROOF_PARAPET_THICKNESS, oz)),
   ];
 
   const wall = new Mesh(
