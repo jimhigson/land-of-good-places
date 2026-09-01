@@ -8,6 +8,7 @@ import { KID_HEIGHT } from '../../art/models/kid';
 import type { ShopItem } from '../../world/building/shops/catalogue';
 import type { PetBedSpot } from '../../world/hotel/Hotel';
 import { BED_POSE_X, BED_POSE_Y, sleepingBox } from '../../world/hotel/petBedFit';
+import type { SlideSeat } from '../../world/slide/petRiders';
 
 /**
  * One cute thing walking behind you.
@@ -225,6 +226,17 @@ export class ParadeMember {
   private table: PetTablePlace | null = null;
   /** True once it has arrived at {@link table} and has its nose in the bowl. */
   private eating = false;
+  /**
+   * True while this one is coming down the ginormous slide behind her (#468),
+   * and its seat on the chute for this frame.
+   *
+   * Held here, on the member, for the same reason {@link bed} and {@link table}
+   * are: this class is the single owner of where this body is and what it is
+   * doing, and nothing else in the game moves or poses a parade pet. The ride
+   * says where the seat is; it never touches the animal.
+   */
+  private sliding = false;
+  private readonly seat: SlideSeat = { x: 0, y: 0, z: 0, facing: 0, pitch: 0 };
   private phase_: BedPhase = 'walking';
   private climbTimer = 0;
   /** Where the climb starts from, captured on arrival at the run-up spot. */
@@ -369,6 +381,68 @@ export class ParadeMember {
     this.rejoice();
   }
 
+  /** True while this one is riding the ginormous slide behind her (#468). */
+  get onSlide(): boolean {
+    return this.sliding;
+  }
+
+  /**
+   * **Ride the ginormous slide, in this seat** (#468). `Building.advanceRide`
+   * is the one caller, by way of `Parade.ridePetsDownSlide`, every frame of the
+   * descent.
+   *
+   * Unlike the bed and the pets' table, this is **not** the follow spring with
+   * a different target. The chute is a solved curve travelled at 6.5 m/s and a
+   * spring lags behind and cuts corners, which on a corkscrew means a pet
+   * outside the trough — so the seat is written straight onto the body, exactly
+   * as `Player.setRidePose` writes the child's and as the grown-up's is
+   * written. Still one body and one mover: the ride never touches the animal,
+   * and there is no second copy of it anywhere.
+   *
+   * Idempotent, and boarding is simply the first frame a seat arrives.
+   */
+  rideSlide(seat: SlideSeat): void {
+    if (!this.sliding) {
+      this.sliding = true;
+      // Off the spring: whatever momentum it had walking is not what carries
+      // it down the chute, and it must not be waiting to be spent when the
+      // ride hands the body back at the bottom.
+      this.velocity.set(0, 0, 0);
+      // Yaw first, then the chute's slope in the yawed frame — the same `YXZ`
+      // composition the child and the grown-up ride in. In the default `XYZ`
+      // the two compose the other way round and a pet lying down on a turn
+      // corkscrews. Put back in {@link leaveSlide}.
+      this.root.rotation.order = 'YXZ';
+    }
+    this.seat.x = seat.x;
+    this.seat.y = seat.y;
+    this.seat.z = seat.z;
+    this.seat.facing = seat.facing;
+    this.seat.pitch = seat.pitch;
+    // Delighted for the whole descent. Re-asserted rather than set once so it
+    // cannot time out halfway down; `updateFace` only re-uploads a texture on a
+    // change of expression, so holding it costs nothing.
+    this.joyRemaining = JOY_SECONDS;
+  }
+
+  /**
+   * The bottom of the slide: back into the line from wherever on the chute it
+   * had got to. A no-op for a member that never boarded, so the ride may call
+   * it without tracking who went.
+   *
+   * No teleport, and nothing to catch up: {@link position} tracked the body all
+   * the way down (see {@link updateOnSlide}), so the ordinary follow spring
+   * picks it up from the chute and carries it to her in the ball pit.
+   */
+  leaveSlide(): void {
+    if (!this.sliding) return;
+    this.sliding = false;
+    this.root.rotation.order = 'XYZ';
+    this.root.rotation.set(0, this.facing, 0);
+    this.velocity.set(0, 0, 0);
+    this.rejoice();
+  }
+
   /**
    * The nap is over: stand back up, wherever the routine had got to, and
    * rejoin the line. A no-op for a member that was never sent to bed.
@@ -471,6 +545,15 @@ export class ParadeMember {
 
   /** Follows {@link target}, animates, and writes the result onto `root`. */
   update(dt: number, elapsed: number): void {
+    // On the chute the ride owns this body outright, the same way the bedtime
+    // climb below does: the seat is written straight on, and letting the spring
+    // write `root` in the same frame is the two-owners bug this class is the
+    // single owner against.
+    if (this.sliding) {
+      this.updateOnSlide(dt, elapsed);
+      return;
+    }
+
     const bed = this.bed;
     // Past the run-up spot the bedtime routine owns this body outright — the
     // climb and the sleeping pose are not a spring following a target, and
@@ -559,6 +642,32 @@ export class ParadeMember {
   }
 
   // -------------------------------------------------------------- internals
+
+  /**
+   * One frame of a companion coming down the ginormous slide behind her (#468).
+   *
+   * **The one owner of this body's transform while it is on the chute**, and it
+   * keeps {@link position} level with what is drawn throughout — so the bottom
+   * of the ride is simply handing this body back to the follow spring from
+   * where it actually is, rather than a teleport she would see as a jump.
+   *
+   * The legs are still. `setWalkPhase(_, 0)` is every stopped pet's own idle,
+   * the same one a pet at its bowl uses: legs trotting on a slide would read as
+   * running down it rather than sliding.
+   */
+  private updateOnSlide(dt: number, elapsed: number): void {
+    this.updatePop(dt);
+
+    this.position.set(this.seat.x, this.seat.y, this.seat.z);
+    this.facing = this.seat.facing;
+    this.root.position.copy(this.position);
+    this.root.rotation.set(this.seat.pitch, this.seat.facing, 0);
+
+    this.gait = 0;
+    this.creature?.setWalkPhase(elapsed * 0.9, 0);
+    this.updateFace(dt);
+    this.handle.update?.(dt, elapsed);
+  }
 
   /**
    * One frame of a pet climbing into, and then sleeping in, its own bed.

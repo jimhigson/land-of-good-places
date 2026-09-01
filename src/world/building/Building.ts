@@ -18,6 +18,12 @@ import { GIANT_SLIDE_SPEED, SLIDE_PLAN } from '../slide/plan';
 import { LANDING_DROP, slideLandingSpot } from '../slide/landing';
 import { buildSlideSupports, planSlideLegs, type SlideLeg } from '../slide/supports';
 import { planSlideShots, SlideShotDirector, type SlideShot } from '../slide/cameras';
+import {
+  petSeatOnSlide,
+  slopeOf,
+  type PetSlideLink,
+  type SlideSeatFor,
+} from '../slide/petRiders';
 import { RideCamera } from '../../core/RideCamera';
 import { PALETTE } from '../../core/palette';
 import type { FrameContext, GameSystem } from '../../core/types';
@@ -168,23 +174,15 @@ const GROWN_UP_RECLINE = -Math.PI / 2;
 const CHASE_EYE = { x: 0, y: 1.62, z: 4.35 } as const;
 
 /**
- * How steeply the chute is falling here, as a rotation about the rider's own
- * left-right axis.
+ * How steeply the chute is falling here — **`slide/petRiders.ts` owns it now.**
  *
- * Derived from the unit tangent the ride is *already* using to face her, so
- * there is no second description of the chute's slope that could drift from the
- * first. Under a `YXZ` composition the model's forward (+Z) maps to
- * `(0, -sin θ, cos θ)` once yaw has been applied, so matching the tangent's
- * rise against its horizontal run is exactly `atan2(-y, |xz|)` — positive is
- * nose-down, which is the way a slide goes.
- *
- * Taking `atan2` of the run rather than `asin` of the rise keeps it honest if a
- * tangent ever arrives un-normalised; `SlideRide.tangentAt` normalises today,
- * and this does not have to care whether it still does tomorrow.
+ * It moved there when the companions started riding down behind her (#468),
+ * because the child, the grown-up in front of her and every pet behind her all
+ * need the same answer from the same tangent, and a second copy of it here
+ * would be exactly the two-definitions-kept-in-step-by-hand bug CLAUDE.md files
+ * most often. Its reasoning — why `atan2` of the run rather than `asin` of the
+ * rise, and why the composition order matters — is written up there.
  */
-function slopeOf(tangent: Vector3): number {
-  return Math.atan2(-tangent.y, Math.hypot(tangent.x, tangent.z));
-}
 
 /**
  * How hard the balls are thrown when a rider lands in them.
@@ -532,7 +530,22 @@ export class Building implements GameSystem {
    * makes the flickering, species-swapping stand-in of Jim's 23 Aug report
    * impossible here rather than merely absent.
    */
-  petParade: PetTableLink | null = null;
+  petParade: (PetTableLink & PetSlideLink) | null = null;
+
+  /**
+   * Where the slot-th companion rides, this frame — handed to
+   * {@link PetSlideLink.ridePetsDownSlide} (#468).
+   *
+   * A field rather than an arrow written at the call site, because that call
+   * site runs sixty times a second for the length of every descent and a fresh
+   * closure each time would be a garbage-collection pause in the middle of the
+   * ride the whole feature is for.
+   */
+  private readonly petSeat: SlideSeatFor = (slot, seat) => {
+    const ride = this.ride;
+    if (!ride) return;
+    petSeatOnSlide(ride.slide, ride.distance, slot, seat);
+  };
 
   private player: Player | null = null;
   private ride: ActiveRide | null = null;
@@ -1608,6 +1621,14 @@ export class Building implements GameSystem {
       this.cutTheSlideShot(t, player);
     }
 
+    // **And the pets come down behind her** (#468). Every frame, in line order,
+    // from the same curve at the same instant — so a companion cannot be left
+    // standing at the top, cannot lag on the ground under the chute, and cannot
+    // arrive somewhere the ride is not. The seats come from
+    // `slide/petRiders.ts`; the parade owns the animals, and this file never
+    // touches one.
+    if (ride.giant) this.petParade?.ridePetsDownSlide(this.petSeat);
+
     if (ride.giant && this.grownUpComing) {
       // In front, and lying down. Clamped to the end of the chute so the
       // grown-up never runs off the far end while the child is still aboard.
@@ -1790,6 +1811,12 @@ export class Building implements GameSystem {
       // The balls scatter when she *hits* them, not now — `update` watches for
       // the touchdown. See {@link pendingSplash}.
       this.pendingSplash = { x: spot.x, z: spot.z, waited: 0 };
+      // **The companions get off too** (#468) — from wherever on the chute each
+      // had got to, back onto the ordinary follow spring, which carries them
+      // down to her in the balls with no jump and nothing to catch up. Called
+      // unconditionally: `callPetsOffSlide` is a no-op for anybody who never
+      // boarded, so a ride taken with an empty backpack costs one call.
+      this.petParade?.callPetsOffSlide();
       this.grownUpComing = false;
       // Back up onto the roof, to wait for the next one.
       this.interiorRoot.add(this.grownUp.root);
