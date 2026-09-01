@@ -491,8 +491,23 @@ export const LIFT_SHAFT = rect(
   3.3,
   6.7,
 );
-/** Where the rider stands inside the car — 1.7 m back from the doorway. */
-export const LIFT_CAR_X = LIFT_WALL_X - LIFT_OUT_X * 1.7;
+/**
+ * How far back from the doorway the rider stands, in metres — **just inside the
+ * car's mouth, not in the middle of it.**
+ *
+ * The car is 2.43 m deep with its ceiling at 2.62 m, and the camera looks down
+ * at 38°: a child standing in the middle of it has her head behind that ceiling
+ * from every point the camera can be. At 1.7 m back (the depth this was first
+ * given, copied from the hotel) `check:castle`'s sightline probe finds the roof
+ * of the car in front of her head and her chest, and only her waist is visible —
+ * which is the shape of #450 all over again, in miniature.
+ *
+ * 0.9 m puts her 0.87 m inside the mouth: the car is still round and over her,
+ * the doors still shut in front of her, and her whole body is in the frame.
+ * The number is held honest by that probe rather than by this comment.
+ */
+export const LIFT_RIDER_DEPTH = 0.9;
+export const LIFT_CAR_X = LIFT_WALL_X - LIFT_OUT_X * LIFT_RIDER_DEPTH;
 export const LIFT_CAR_Z = 5;
 export const LIFT_CAR_HALF = 1.3;
 
