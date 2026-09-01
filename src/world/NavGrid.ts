@@ -601,7 +601,7 @@ export class NavGrid {
     // A goal off the edge of the lattice is not "unreachable", it is
     // unknowable. Say so, and let the caller fall back.
     if (goalCell < 0) return 0;
-    const goalNode = this.blocked[goalCell] === 0 ? this.nodeNearest(goalCell, goalY) : -1;
+    const goalNode = this.standableNodeIn(goalCell, goalY);
 
     const endNode = this.search(startNode, goalNode, goalCell, goalY);
     // Reaching the goal *node* is reaching the goal: the node was chosen as
@@ -613,6 +613,44 @@ export class NavGrid {
 
     const pathLength = this.reconstruct(startNode, endNode);
     return this.smooth(startX, startZ, startY, goalX, goalZ, pathLength, out);
+  }
+
+  /**
+   * **Is this somewhere a walker could stand — and therefore somewhere a route
+   * could end?**
+   *
+   * This is exactly the test {@link findRoute} applies to its own goal, asked
+   * of the same lattice, through the same {@link standableNodeIn}: there is
+   * deliberately no second definition of "standable" for a caller to fall out
+   * of step with. A point this returns false for can never be arrived at, so
+   * asking for a route to it is asking for a route that cannot exist.
+   *
+   * `y` says which **level** is meant, the same way `findRoute`'s `goalY` does;
+   * `sample` is needed for the same reason it is there, because the lattice is
+   * built lazily on the first question anyone asks of it.
+   *
+   * Note the asymmetry, and that it is the router's and not an oversight:
+   * `findRoute` will happily *start* from a blocked cell, routing from the
+   * nearest free one instead, because a walker really can be squeezed inside
+   * something and still need to walk out. It will not *finish* on one.
+   */
+  canStandAt(x: number, z: number, y: number, sample: GroundSampler): boolean {
+    if (!this.ensureLattice(sample)) return false;
+    const cell = this.cellAt(x, z);
+    if (cell < 0) return false;
+    return this.standableNodeIn(cell, y) >= 0;
+  }
+
+  /**
+   * The node of `cell` a walker would stand on at height `y`, or **-1** when
+   * the cell is blocked or carries no level at all.
+   *
+   * The one owner of "a route may end here", read by {@link findRoute} for its
+   * goal and by {@link canStandAt} for everyone else.
+   */
+  private standableNodeIn(cell: number, y: number): number {
+    if (this.blocked[cell] === 1) return -1;
+    return this.nodeNearest(cell, y);
   }
 
   // ------------------------------------------------------------- the lattice
