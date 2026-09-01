@@ -30,6 +30,8 @@ import { CharacterCreation, ContinueOrRestart, DevBadge, defaultCharacterChoice 
 import { gameStore } from './state';
 import { saveFlags } from './state/flags';
 import { clearSave, loadSave, type SaveFile } from './state/save';
+import { PARK_SEED } from './world/parkManifest';
+import { forgetParkSeed, parkSeedSource } from './world/parkSeedPool';
 import { canAdoptWithoutAsking, noteAdopting, watchForFirstTouch } from './update-adoption';
 import { startVersionCheck } from './version-check';
 import { askForOrientationOnFirstGesture } from './core/deviceOrientationLook';
@@ -81,6 +83,16 @@ function boot(): void {
   if (!(canvas instanceof HTMLCanvasElement) || !uiRoot) {
     throw new Error('Land of Good Places: expected #game-canvas and #ui-root in the document.');
   }
+
+  // **Which park this is, said out loud.** A pool of seeds makes every child's
+  // park different, which would make "the fence is broken near the ferris
+  // wheel" an unreproducible bug report — so the boot names its seed, and
+  // `?seed=` on any URL builds exactly that park again. Issue #426 asks for
+  // this in as many words, and it is one line at boot.
+  console.info(
+    `Land of Good Places: park seed ${PARK_SEED} (${parkSeedSource()}). ` +
+      `Reproduce this park with ?seed=${PARK_SEED}`,
+  );
 
   const save = loadSave();
   const deepLink = parseDeepLink(location.pathname, location.search) ?? undefined;
@@ -540,6 +552,24 @@ function startFresh(
   deepLink?: DeepLink,
 ): void {
   clearSave();
+
+  // **A new game is a new park** (issue #426). The seed is read once, at
+  // module load, by every generator — `parkManifest.ts` is already on
+  // `main.ts`'s static import graph, so by the time she presses "start again"
+  // this page has long since fixed which park it is building. Forgetting the
+  // remembered seed and reloading is what actually gives her a different one;
+  // anything short of that would hand her the same park she just said goodbye
+  // to.
+  //
+  // Only a *remembered* seed is thrown away, and that is what stops this
+  // looping: after the reload the seed is `drawn` (or, under `?seed=`,
+  // `pinned`), and neither is redrawn. The reload keeps the URL, so a deep
+  // link survives it.
+  if (parkSeedSource() === 'remembered') {
+    forgetParkSeed();
+    location.reload();
+    return;
+  }
   if (deepLink) {
     // `defaultCharacterChoice` includes the default pet and
     // `completeCharacterCreation` grants it unstowed, so a brand-new profile
