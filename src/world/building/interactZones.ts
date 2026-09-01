@@ -6,7 +6,7 @@ import {
   type ZoneAction,
 } from '../interact';
 import type { FeastProp } from '../../art/models/castleAssets';
-import { CASTLE_GREAT_HALL_DECK, greatHallSeats } from './castleFurniture';
+import { CASTLE_GREAT_HALL_DECK, greatHallSeats, SIT_PICK_RADIUS } from './castleFurniture';
 import { SLIDE_PLAN } from '../slide/plan';
 import {
   BUILDING_BASE_Y,
@@ -254,7 +254,7 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
       // table rather than the flagstones under the bench.
       y: BUILDING_BASE_Y + 1,
       z: floorZ(CASTLE_HALL, seat.z),
-      pickRadius: 1.6,
+      pickRadius: SIT_PICK_RADIUS,
       // The seating plan's own stand spot — measured out past the bench plank
       // it belongs to, rather than a fixed distance guessed here. See
       // `castleFurniture.ts`'s `SIT_STAND_BACK`.

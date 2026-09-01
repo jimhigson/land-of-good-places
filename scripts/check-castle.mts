@@ -59,7 +59,9 @@ import {
   CASTLE_GREAT_HALL_DECK,
   castleFurnitureGroupName,
   DINER_TABLE_GAP,
+  greatHallPetPlaces,
   greatHallSeats,
+  SIT_PICK_RADIUS,
 } from '../src/world/building/castleFurniture.ts';
 import {
   banquetGroupName,
@@ -1862,6 +1864,220 @@ let worstFloor = 0;
       `round ${steps} positions of a full lap stayed clear of the terrace by ` +
       `${Number.isFinite(closest) ? closest.toFixed(2) : '—'} m at their worst.`,
   );
+}
+
+// 11. The blank places are reachable, and the pets' table is one a pet can
+//     reach and the camera can see.
+// ---------------------------------------------------------------------------
+
+/**
+ * **Issue #449, both halves, measured off what was built.**
+ *
+ * Jim, on #422's preview: *"Great hall only has one table and no free spaces
+ * for the player to sit … There should also be a small pets table for the pets
+ * to eat at, and they go there when the player sits."*
+ *
+ * Assertion 10 already proves that every place laid for a child has a child in
+ * it and that she is genuinely sitting down. What it cannot see is the four
+ * things this ticket added, each of which fails silently and none of which a
+ * screenshot of the empty hall would catch:
+ *
+ * 1. **There are two runs**, not one. Counted off the built tables' own X
+ *    positions, so a change that quietly collapses them back onto one axis —
+ *    the exact regression #449 is a fix for — is loud.
+ * 2. **A free place can be stood at.** Its stand spot has to be far enough
+ *    from the seat to be outside the bench and near enough to be inside the
+ *    zone's own pick radius. Too far and the chip exists and never comes in
+ *    range, which is the fault the hotel's window zones were found to have
+ *    (`Hotel.standSpotFor`'s own note).
+ * 3. **A pet can reach its bowl.** The pets' table is short *for a reason* —
+ *    the animals are 0.3–0.6 m tall — so its top is asserted against the feast
+ *    tables' rather than against a number typed here.
+ * 4. **Every bowl has somebody at it, and every pet has a bowl.** One list
+ *    owns both, so this is really asking whether that is still true.
+ */
+/**
+ * How far a pet standing at its place may be from the nearest bowl, in metres.
+ *
+ * A pet's own body plus its nose: `PARADE_MEMBER_RADIUS` is what the parade
+ * spaces the line with, and the stand-off is built from it, so this is that
+ * plus the half-table it has to lean over. Generous, because the failure it
+ * exists to catch is not "a centimetre out" — it is a bowl laid from one list
+ * and a place taken from another, which is metres out or nothing.
+ */
+const PET_REACH = 1.5;
+
+/**
+ * How far from her seat the nearest pet may be and still be on screen, in
+ * metres.
+ *
+ * **Read off the running game, not chosen.** At the mouth of the aisle the
+ * nearest pet was 12.2 m from the nearest free place and sat exactly on the
+ * bottom edge of the frame — the cat walked out of the picture. The roundel's
+ * near edge, about 13 m away, was the last thing visible at the screen's
+ * corner in the same shot. So 8 m is comfortably inside frame with the walk
+ * itself visible, and 12 m is known to be too far.
+ */
+const PET_TABLE_IN_SHOT = 8;
+
+/**
+ * **How many big tables #449 asks for.** Two.
+ *
+ * Written here rather than read from `castleFurniture.ts`, and that is the
+ * whole point of it: an earlier draft compared the tables in the scene against
+ * the list the furniture was placed from, so collapsing the two runs onto one
+ * axis moved both sides of the comparison together and the assertion sailed
+ * through green. Proved by mutation, not by reading. The number a check
+ * asserts has to come from the requirement, never from the code under test.
+ */
+const FEAST_RUNS_ASKED_FOR = 2;
+
+{
+  // So the summary below cannot announce a hall it has just failed. Every
+  // earlier assertion here prints its OK line unconditionally, which reads
+  // oddly enough on a red run to be worth not repeating.
+  const failuresBefore = failures.length;
+  const seats = greatHallSeats(CASTLE_GREAT_HALL_DECK);
+  const free = seats.filter((seat) => seat.free);
+  const places = greatHallPetPlaces(CASTLE_GREAT_HALL_DECK);
+  const petTable = greatHallPetTable(CASTLE_GREAT_HALL_DECK);
+
+  // --- 1. two runs ---------------------------------------------------------
+  const tableXs = new Set<string>();
+  hall?.traverse((object: Object3D) => {
+    if (!object.name.startsWith('castle.feastTable')) return;
+    tableXs.add(object.position.x.toFixed(2));
+  });
+  if (tableXs.size !== FEAST_RUNS_ASKED_FOR) {
+    fail(
+      `banquet places: the hall built feast tables on ${tableXs.size} axis/axes ` +
+        `(${[...tableXs].join(', ')}), not ${FEAST_RUNS_ASKED_FOR}. #449 is "make it two big ` +
+        `tables"; a run of assets end to end reads as one table, which is what Jim saw.`,
+    );
+  }
+
+  // --- 2. a free place can be stood at -------------------------------------
+  for (const seat of free) {
+    const reach = Math.hypot(seat.standX - seat.x, seat.standZ - seat.z);
+    if (reach <= CASTLE_BENCH_HALF_WIDTH * 2) {
+      fail(
+        `banquet places: a free place's stand spot is ${reach.toFixed(2)} m from the seat, ` +
+          `which is inside its own ${(CASTLE_BENCH_HALF_WIDTH * 2).toFixed(2)} m bench plank. ` +
+          `She would be walked into the furniture to sit down on it.`,
+      );
+    }
+    if (reach >= SIT_PICK_RADIUS) {
+      fail(
+        `banquet places: a free place's stand spot is ${reach.toFixed(2)} m from the seat, ` +
+          `outside the zone's own ${SIT_PICK_RADIUS.toFixed(2)} m pick radius. The chip would ` +
+          `exist and never come into range — the fault the hotel's window zones had.`,
+      );
+    }
+  }
+
+  // --- 3 and 4. the pets' table --------------------------------------------
+  if (!petTable || places.length === 0) {
+    fail(
+      `banquet places: the great hall laid no pets' table, so #449's "a small pets table for ` +
+        `the pets to eat at" is not there and nothing has anywhere to go when she sits.`,
+    );
+  } else {
+    const tops: number[] = [];
+    const bowls: Vector3[] = [];
+    const box = new Box3();
+    hall?.traverse((object: Object3D) => {
+      if (object.name === 'castle-pet-table-top') tops.push(box.setFromObject(object).max.y);
+      if (object.name.startsWith('hotel.petBowl')) {
+        bowls.push(object.getWorldPosition(new Vector3()));
+      }
+    });
+    if (tops.length !== 1) {
+      fail(`banquet places: ${tops.length} pets' table tops were built, not 1.`);
+    }
+    const top = tops[0] ?? 0;
+    if (top >= CASTLE_TABLE_TOP) {
+      fail(
+        `banquet places: the pets' table top is at ${top.toFixed(3)} m, no lower than the ` +
+          `feast tables' own ${CASTLE_TABLE_TOP.toFixed(3)} m. The pets are 0.3–0.6 m tall; a ` +
+          `bowl up there is over every one of their heads.`,
+      );
+    }
+    if (bowls.length === 0) {
+      fail(
+        `banquet places: the pets' table has ${places.length} places laid at it and no bowls ` +
+          `on it at all, so every animal sent there stands at bare wood.`,
+      );
+    }
+    for (const place of places) {
+      const nearest = bowls.reduce(
+        (best, bowl) => Math.min(best, Math.hypot(bowl.x - place.x, bowl.z - place.z)),
+        Infinity,
+      );
+      if (nearest > PET_REACH) {
+        fail(
+          `banquet places: a pet's place is ${nearest.toFixed(2)} m from the nearest bowl, ` +
+            `beyond the ${PET_REACH.toFixed(2)} m it can reach. It would stand there eating air.`,
+        );
+      }
+    }
+    // Its whole point is that she watches it happen from where she is sitting.
+    const farthest = free.reduce(
+      (worst, seat) =>
+        Math.max(
+          worst,
+          places.reduce(
+            (best, place) => Math.min(best, Math.hypot(place.x - seat.x, place.z - seat.z)),
+            Infinity,
+          ),
+        ),
+      0,
+    );
+    if (farthest > PET_TABLE_IN_SHOT) {
+      fail(
+        `banquet places: from the worst free place the nearest pet is ${farthest.toFixed(1)} m ` +
+          `away, past the ${PET_TABLE_IN_SHOT.toFixed(1)} m that stays in frame at this camera. ` +
+          `#449's whole point is that she *watches* her cat go and eat; at the mouth of the ` +
+          `aisle it was 12 m off and the animal walked off the bottom of the picture.`,
+      );
+    }
+  }
+
+  if (failures.length > failuresBefore) {
+    console.error(
+      `check:castle places — ${failures.length - failuresBefore} of #449's own assertions ` +
+        `failed, so nothing about the blank places or the pets' table is being claimed here.`,
+    );
+  } else console.log(
+    `check:castle places OK — ${tableXs.size} feast runs built, ${free.length} of ` +
+      `${seats.length} places left free for the player, each with a stand spot ` +
+      `${Math.min(...free.map((s) => Math.hypot(s.standX - s.x, s.standZ - s.z))).toFixed(2)} m ` +
+      `back — outside its own ${(CASTLE_BENCH_HALF_WIDTH * 2).toFixed(2)} m bench and inside ` +
+      `the chip's ${SIT_PICK_RADIUS.toFixed(2)} m reach. The pets' table stands at ` +
+      `${top_(petTable)} with ${places.length} places and a bowl at every one, its top below ` +
+      `the feast's own, and the farthest of them ${farthest_(free, places).toFixed(1)} m from ` +
+      `the worst free place — so she watches it happen from her seat.`,
+  );
+}
+
+/** Where the pets' table ended up, for the line above. */
+function top_(table: { readonly x: number; readonly z: number } | null): string {
+  return table ? `(${table.x.toFixed(1)}, ${table.z.toFixed(1)})` : 'nowhere';
+}
+
+/** The worst free-place-to-nearest-pet distance, for the line above. */
+function farthest_(
+  free: readonly { readonly x: number; readonly z: number }[],
+  places: readonly { readonly x: number; readonly z: number }[],
+): number {
+  let worst = 0;
+  for (const seat of free) {
+    let best = Infinity;
+    for (const place of places) {
+      best = Math.min(best, Math.hypot(place.x - seat.x, place.z - seat.z));
+    }
+    worst = Math.max(worst, best);
+  }
+  return worst;
 }
 
 // ---------------------------------------------------------------------------

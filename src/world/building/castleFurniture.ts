@@ -503,6 +503,29 @@ const FREE_PLACE_STRIDE = 3;
 const FREE_PLACE_SIDE = -1;
 
 /**
+ * **Which run the blank places are on: the west one, the one the pets' table
+ * stands beside.**
+ *
+ * Not tidiness — this is the second half of #449's fourth ask. She has to
+ * *watch* her cat go and eat, and the runs are 12 m long, so a single pets'
+ * table is close to the free places on one run and a long way from the other's.
+ * Free places on the east run measured **12.0 m** from the nearest bowl, which
+ * `check:castle`'s own places assertion now fails on: on screen that is the
+ * animal walking out of the bottom of the frame, which is the first version of
+ * this that was built and thrown away.
+ *
+ * The alternatives were a second pets' table (the ticket says *a* small pets
+ * table, and two would halve the moment) or a table in the aisle between the
+ * runs (2.3 m wide, so an animal standing at it stands inside a bench and in
+ * the way of anyone walking up to the throne). Putting every blank place
+ * within a few strides of the one table is the cheap answer, and it has a
+ * second virtue: the gaps are **together**, so a six-year-old scanning a hall
+ * of thirty-two children finds three in one place rather than one here and one
+ * ten metres away.
+ */
+const FREE_PLACE_ROW = 0;
+
+/**
  * How far back from her seat a child stands to sit down in it, in metres.
  *
  * She has to arrive somewhere the bench is not: her seat is on the plank's
@@ -515,6 +538,18 @@ const FREE_PLACE_SIDE = -1;
  * bench; it would simply look like she was standing in the bench.
  */
 const SIT_STAND_BACK = CASTLE_BENCH_HALF_WIDTH * 2 + 0.85;
+
+/**
+ * How close a tap has to land to a blank place to mean *that* place, in metres.
+ *
+ * The hotel breakfast chair's own figure. It lives here rather than in
+ * `interactZones.ts` because {@link SIT_STAND_BACK} has to stay inside it —
+ * a stand spot further from its seat than the pick radius is a chip that comes
+ * into view and can never be pressed, which is what the hotel's window zones
+ * were found doing — and a check can only assert that if both numbers have one
+ * home.
+ */
+export const SIT_PICK_RADIUS = 1.6;
 
 /** Every seat at the banquet, taken and free alike. See {@link GreatHallSeat}. */
 export function greatHallSeats(deck: number): readonly GreatHallSeat[] {
@@ -534,7 +569,7 @@ export function greatHallSeats(deck: number): readonly GreatHallSeat[] {
     // table. West of the axis she looks east.
     const yaw = bench.side < 0 ? Math.PI / 2 : -Math.PI / 2;
     for (const along of [-DINER_ALONG, DINER_ALONG]) {
-      const onFreeSide = bench.side === FREE_PLACE_SIDE;
+      const onFreeSide = bench.side === FREE_PLACE_SIDE && bench.row === FREE_PLACE_ROW;
       const place = onFreeSide ? (alongRow[bench.row] ?? 0) : -1;
       if (onFreeSide) alongRow[bench.row] = place + 1;
       seats.push({
