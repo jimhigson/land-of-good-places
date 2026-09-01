@@ -22,17 +22,45 @@ reconciliation, the same **probe geometry** is rebuilt on main:
 Both constraints are measured, never argued: kerb detour on all five CI seeds,
 and `check:fountain-hop` on all five CI seeds.
 
-## Sweep (see PR body for the full table)
+## Two environments, and they do not agree
 
-`M = 1` is the baseline (0.0% by construction) and **fails the fountain on every
-seed**, so the instrument can go red. `M = 2` still fails the fountain.
-`M = 2.5` is the first candidate that passes the fountain on all five seeds,
-at a worst kerb detour of **68.2%** against the 73% ceiling.
+**Main-only instrument** (`sweep-hop-multiplier.mts`, worst of 344 probes over
+the five CI seeds, ratio against `M = 1`): fountain fails at every `M <= 2.1`
+and passes from `2.2` up. Kerb detour steps up in plateaus —
+`43.7%` at 2.1–2.4, `68.2%` at 2.5–3, `114.3%` at 3.5–4, `118.7%` at 6.4.
+
+**The environment the 73% ceiling actually lives in** — a throwaway worktree
+`.claude/worktrees/hop-measure` (branch `tmp/hop-measure`), which is
+`feat/prefer-walking-on-paths` with #452 cherry-picked and the previous agent's
+`lineCost` reconciliation reproduced. **It reproduces their numbers exactly**:
+canonical `183.9%` worst, `+0.21 m` mean, probe `(14, 14) 4.1 m off`, mean paved
+`83.3%`; seed 24 `202.4%`. So it is the same measurement, not a lookalike.
+
+And in that environment the worst case is **not monotone in M**:
+
+| M | canonical worst kerb |
+|---|---|
+| 2 | 47.8% ok |
+| 2.5 | 52.4% ok |
+| 3 | **120.5% FAIL** |
+| 3.5 | 12.5% ok |
+| 4 | 12.5% ok |
+| 6.4 | **183.9% FAIL** |
+
+That is the crux. The assertion is a **worst-of-105** over routes that change
+topology discontinuously as the price of a crossing moves, so a value chosen by
+"sweep until it passes" is green by the luck of one probe, not by a property of
+the number. Denser sweep running; verify determinism by re-running 3 and 3.5
+before believing the shape.
+
+**Throwaway worktree housekeeping:** `rerere.enabled` was set to `false`
+repo-wide so the cherry-pick's resolution could not be replayed into the real
+merge (CLAUDE.md's rerere hazard). **It must be set back to `true`.**
 
 ## Status
 
 - [x] Worktree, deps, instrument written and committed
-- [ ] Full sweep finished
+- [x] Full sweep finished on main; branch-env sweep running
 - [ ] Constant chosen and its derivation written onto it
 - [ ] `pnpm run check` / `build` / `test:procgen` 497
 - [ ] Browser QA on 5539
