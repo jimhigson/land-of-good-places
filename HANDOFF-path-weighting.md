@@ -477,3 +477,74 @@ Both want measuring across all five seeds, so `test/procgen/invariants.ts` is
 the natural home rather than a canonical-seed-only check.
 
 **Nothing fixed.** Sweep instrument was temporary and is deleted.
+
+## 1 Sep — both paving thresholds re-derived from all five seeds, and landed
+
+Jim's ruling, relayed by the Overseer: replace the worst-route assertion with
+**"at least 85% of routes are at least 60% paved"** (his first form was 90/60;
+he took the safer variant when the seed-11 margin came back at +1.8). Done, and
+`MEAN_PAVED_FLOOR` re-derived alongside it because it had the same disease.
+
+### The distribution, measured (reached **and** servable, all five seeds)
+
+| seed | n | mean W | mean U | ≥60% paved, W | ≥60% paved, U |
+|---|---|---|---|---|---|
+| canonical | 71 | 83.0% | 52.5% | 68/71 = 95.8% | 27/71 = 38.0% |
+| 5 | 52 | 82.3% | 51.1% | 50/52 = 96.2% | 14/52 = 26.9% |
+| **11 (binds)** | 49 | **74.3%** | 45.2% | **45/49 = 91.8%** | 10/49 = 20.4% |
+| 18 | 43 | 79.1% | 41.8% | 41/43 = 95.3% | 5/43 = 11.6% |
+| 24 | 47 | 80.1% | 51.8% | 45/47 = 95.7% | 17/47 = 36.2% |
+
+`MEAN_PAVED_FLOOR` **0.75 → 0.70**: 0.75 was canonical-only and failed on seeds
+11 (71.0%) and 18 (73.1%). 0.70 is the highest round figure all five clear
+(binding margin +4.3) and clears the best unweighted mean (52.5%) by 17.5.
+
+`WORST_PAVED_FLOOR = 0.45` **deleted**. It was red on three of five seeds, and
+two of those three failures were fake: the worst-route loop skipped
+non-servable probes but not *abandoned* ones, so seed 11's 29.9% and seed 18's
+27.1% were routes that never arrived being scored.
+
+**One population for both statements** — arrived, and servable. Seed 18's 43
+probes move in 2.3-point steps, so 85 and 86 are the same rule there; noted in
+the code so nobody reads a one-point edit as a one-point change of strictness.
+
+### Anti-vacuity: the mutation now runs on every invocation
+
+New assertion `the bar is a real bar` puts the same bar to the **unweighted**
+lattice (the same park with the paving forgotten) and requires it to fail.
+Fails by **47.0** points canonical, 47–73 across the seeds.
+
+**Mutation re-run, 1 Sep, and one correction worth having:**
+
+- **Smoother mutation** (drop the weighted-chord test) is the honest proof —
+  it leaves `OFF_PATH_COST_MULTIPLIER` alone, so the population stays at 71 and
+  only the routes move: mean **83.0 → 67.8%** (floor 70), share **95.8 →
+  73.2%** (bar 85). Both new assertions red. exit=1.
+- **`OFF_PATH_COST_MULTIPLIER = 1`** exits 1 too, **but not by failing the
+  paving assertions** — the servable predicate is defined in terms of that same
+  multiplier, so setting it to 1 collapses the population to 2 probes and the
+  run stops at the `< 8` guard. Recorded as the guard talking, not as a paving
+  measurement, because quoting it as the latter would be the stale-transcript
+  trap CLAUDE.md names.
+
+### Gates
+
+| gate | result |
+|---|---|
+| `pnpm run build` | **exit 0** |
+| `pnpm run test:procgen` | **497 passed / 16 files** |
+| `tsc --noEmit` | exit 0 |
+| every paving assertion, all five seeds | **green** |
+| `pnpm run check` | **red — `every probe arrives`, and only that** |
+
+### Still blocking, and it is not this work
+
+`check:path-preference` remains red on **every** seed on `every probe arrives`
+— 22/20/24/27/11 probes of 100/77/98/78/77. That is **#448**, the two park
+defects diagnosed above (`plaza` inside the fountain; junctions unreachable as
+goals on a knife-edge margin). The **unweighted router fails identically on all
+of them**, so it predates #416 and is not caused by this feature. Nothing in
+this section changes it, and per instruction it was not touched.
+
+**`pnpm run check` cannot exit 0, and therefore #421 cannot go green, until
+#448 is fixed.** The paving work itself is done and green.
