@@ -45,7 +45,38 @@ have it yet, so the wording is re-derived here rather than merged.
   outline is resolved), and `MEADOW_GRASS_HEIGHT` goes up. `WildPets`' `PET_TOP`
   is already derived from the grass height, so the animals stay half-hidden.
 
+## "Everywhere else" — measured, in the running park
+
+There is no other reachable walk-through bench. Measured live, off
+`world.collision`, not read off source:
+
+- The park's stone benches (`Scenery.ts`'s `buildStoneWalls`) are already
+  solid: a player-sized disc at the middle of each of the first six stone runs
+  is blocked.
+- The **bus-shelter bench** at (-9, 64.5) is **4.71 m outside the play
+  boundary** (`playBounds.distanceToEdge` = −4.71). She can never stand there.
+- The **station platform benches** at (39.96, −20.53) and (−33.74, −4.9) cannot
+  be approached: a body marched at one from eight bearings never gets within
+  2.29 m, and the walkable ground under them is the terrain (0.33 m), not the
+  platform, so nobody ever stands on the platform to walk through the bench.
+
+## Watched running (roof garden, port 5545)
+
+- Walked head-on into the bench at local (5.14, 1.80): stopped dead at
+  z = 602.78, which is `601.80 + 0.36 + PLAYER_RADIUS` exactly.
+- Dropped a body at the bench's own centre: pushed out to 602.78 in one frame
+  and stayed. No soft-lock.
+- Dropped from 2.2 m onto it: lands at y = 1.168 = floor 0.728 + 0.44 and stays
+  there — `topIsAbsolute` holds still under her rather than ejecting her.
+- Walked off it: drops to the floor and keeps going.
+- Jumped at it while running: sailed over, so it is not a pillar.
+
 ## Gates
 
-`pnpm run check`, `pnpm run test:procgen`, `pnpm run build` — see the PR body
-for the numbers actually off the screen.
+- `pnpm run build` — exit 0.
+- `pnpm run test:procgen` — **497 passed, 16 files**, exit 0.
+- `pnpm run check` — see the PR body.
+- `check:benches` proved red by thirteen mutations; the two that matter most
+  are the pre-#459 meadow (median clump 0.75 m apart against a 0.39 m clump)
+  and `FLOOR_SPACE_SPACING = 0` (a mall bench blocks 47 of 1333 points swept on
+  the hall), which is the measurement that licenses the whole change.
