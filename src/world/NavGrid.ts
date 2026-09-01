@@ -189,41 +189,54 @@ const MAX_STEP = BUILDING_STEP_UP;
 
 /**
  * How much dearer a metre walked through a hoppable wall's band is than a
- * metre of open park. **6.4, and it is a measurement, not a round number.**
- *
- * `scripts/measure-hop-detours.mts` stands two points either side of every
- * hoppable collider in the built park and asks what a walker with **no jump at
- * all** must do to get between them (`hopApex = 0`, which makes `autoHopClears`
- * false for everything and stamps every hoppable collider solid; no second code
- * path, the same `NavGrid` told she cannot jump). How much longer that is than
- * the straight line through the wall is the real price of going round *that*
- * wall — measured against the straight line, never against a routed crossing,
- * or this number would be deriving itself.
- *
- * Pooled over the five CI seeds, 73 crossings:
- *
- * ```
- * p0 3.34   p25 4.77   p50 5.67   p75 7.59   p90 10.32   p95 14.02   p100 21.76
- * ```
+ * metre of open park. **2.65, and it is a measurement, not a round number.**
  *
  * A multiplier `M` prices a crossing of a band `w` wide at `(M - 1) * w` metres
- * over walking through it, and the median fattened band is 1.92 m
- * (`2 * (halfThickness + PLAYER_RADIUS)` for the park's garden walls). Setting
- * that price at the **p90 detour** gives `1 + 10.32 / 1.92 = 6.38`, so 6.4.
+ * over walking through it. Why it is a multiplier on distance rather than a
+ * flat toll, and why an edge touching a band gets the hop's level rule instead
+ * of the walk's, are both in this file's header; neither is restated here.
  *
- * That is what Jim's "high penalty… unless they are a much better path" means
- * in numbers: **86% of the park's hoppable walls are now walked round**, and
- * the rest are the ones where going round costs more than any ordinary garden
- * wall ever asks — up to 21.8 m. Both ends were checked rather than assumed: at
- * `M = 2` not one of the 73 goes round, so it would barely be a change, and by
- * `M = 16` every one does, which is a wall that is blocked in all but name.
- * 6.4 sits where the ruling puts it.
+ * ## Where 2.65 comes from
  *
- * Set from the *detours the park actually has*, so it is not a knob to be
- * nudged when a route looks wrong. If the park's walls change shape, re-run the
- * script and re-derive it.
+ * It is pinched between two measured cliffs, and it is the middle of the only
+ * interval that clears both. `scripts/sweep-hop-multiplier.mts` walks the
+ * constant across the real router and runs the real checks at each value.
+ *
+ * **The floor is the fountain**, `check:fountain-hop`, on all five CI seeds:
+ * walking past the basin must not paddle through it. Red at `M = 2.3`, green
+ * from `M = 2.4`. The binding seed is **24**, and no other seed can see this —
+ * seeds 5, 11, 18 and the canonical park are all still green at 2.2.
+ *
+ * **The ceiling is the kerb**: a destination 2–6 m out on the grass must not
+ * send a child round the houses to reach it — Jim's own named failure mode, and
+ * `stepping off the kerb stays a step`'s 73% bar. Measured on all five seeds,
+ * green at 2.6 and 2.7, **red at 2.55** (seed 18, 85.7%) and **red at 2.75**
+ * (canonical, 120.5%). So the all-green run is `[2.6, 2.7]` and 2.65 is its
+ * middle.
+ *
+ * The old **6.4** came from a real measurement — the p90 of the pooled
+ * garden-wall detours, `scripts/measure-hop-detours.mts` — but that derivation
+ * only ever asked the *floor* question, "is a wall walked round?", and never
+ * the ceiling one. At 6.4 the kerb worst case is **183.9%** on the canonical
+ * park and **202.4%** on seed 24, against the 73% bar: a child stepping four
+ * metres onto the grass looped round a low wall to get there.
+ *
+ * ## Read the worst case, not the mean, and know that it jumps
+ *
+ * The cost of the change is small in the middle and large in the tail — mean
+ * extra walking is **+0.05 m** over 342 probes — because this is a worst case on
+ * a handful of spots, not a park-wide slowdown. And the worst case is **not
+ * monotone in M**: it is a worst-of-105 over routes whose topology flips as the
+ * price of a crossing moves, so the canonical park reads 12.5% at 2.7 and
+ * 120.5% at 2.75. That is real, reproducible router behaviour, not noise
+ * (2.8 re-measured to 120.5% to the decimal).
+ *
+ * **So do not nudge this number.** Re-run the sweep and take the middle of the
+ * green run, because the value either side of a green one can be four times
+ * worse. If the park's walls or the fountain change shape, the cliffs move and
+ * this is re-derived, not adjusted.
  */
-const HOP_COST_MULTIPLIER = 6.4;
+const HOP_COST_MULTIPLIER = 2.65;
 
 /**
  * How far apart two levels of one cell may match a height being looked up —

@@ -1,8 +1,15 @@
 /**
  * **What does it actually cost to walk round a hoppable wall?**
  *
- * This is where `NavGrid`'s `HOP_COST_MULTIPLIER` comes from. It is a
- * measurement of the built park, not a round number: for every hoppable
+ * **This answers half of `NavGrid`'s `HOP_COST_MULTIPLIER`, and it is the half
+ * that does not bind.** It asks only "how dear must a crossing be before a wall
+ * is walked round?", which sets a *floor*; it cannot see the opposite failure —
+ * a child sent round the houses to reach a spot four metres off the kerb — and
+ * the multiplier derived from it alone (6.4, the p90 of the detours below) was
+ * 183.9% over that ceiling. `scripts/sweep-hop-multiplier.mts` is what puts
+ * both questions to the constant at once, and it is what 2.65 came from.
+ *
+ * It is a measurement of the built park, not a round number: for every hoppable
  * collider the auto-hop really clears, it stands two points either side of the
  * wall and asks what a walker **who cannot jump at all** must do to get from
  * one to the other. That walker is a lattice built with `hopApex = 0`, which
@@ -42,8 +49,18 @@ import { PLAYER_RADIUS } from '../src/core/constants.ts';
 import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
 import { PARK_SEED } from '../src/world/parkManifest.ts';
 
-/** The five seeds CI builds a park on — the canonical one and four sweeps. */
-const CI_SEEDS = [PARK_SEED, 2, 5, 11, 18] as const;
+/**
+ * The five seeds CI builds a park on — the canonical one and four sweeps.
+ *
+ * **Seed 24, not seed 2.** `test/procgen/` is the owner of this list, and #429
+ * retired seed 2 from it: seed 2 proves zero bridge sites, so it is
+ * pathological rather than merely different, and `test/procgen/seed-24.test.ts`
+ * records why 24 replaced it. This file was still sweeping the retired seed,
+ * which is not a cosmetic drift — seed 24 is the seed that binds the fountain
+ * hardest, so the check that exists to defend the fountain was the one seed
+ * short of being able to see it.
+ */
+const CI_SEEDS = [PARK_SEED, 5, 11, 18, 24] as const;
 
 /** The percentile of the pooled detours the price of a crossing is set to. */
 const TARGET_PERCENTILE = 0.9;
