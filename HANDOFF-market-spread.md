@@ -72,7 +72,33 @@ clause 2 requirement is that some pair of ranks still faces each other (the
 Proved red before green — see the commit message for the three mutations and
 their real numbers.
 
+## Looked at, on port 5503
+
+`/castle?deck=0&at=-9,-2.9` (west end of the aisle), `&at=9,-2.9` (east end),
+`&at=0,-4` (the middle), `&at=0,13` (the doorway), `&at=-8,-9.5` (the back
+lane). **Verdict: a market hall using its room, not a huddle.** Five or six of
+the seven stalls are in frame from anywhere in the market, with real floor
+between them, and from the back lane you see two ranks one behind the other —
+the room has a far side now. The `|x| > 13` strips at either end are still bare
+but for benches; seven 2.8 m stalls cannot fill a 42 m room and chasing that
+would break the aisle.
+
+**The back-wall pair shows its fronts.** Confirmed on screen from the back lane:
+stickerPet's counter, bunting and star face the camera. Rank 2 is the only rank
+showing backs and it is down from three stalls to two.
+
+## Two traps for whoever comes next
+
+1. **A save beats the deep link.** `/castle?deck=0&at=…` is ignored if
+   `localStorage` holds a session — you land wherever you last were, which for
+   me was inside the lift on the great hall, twice, and looked like the deep
+   link being broken. `localStorage.clear()` in the console, then navigate.
+2. `/view?camPos=…` will **not** show the castle interior — it renders empty
+   sky. Interior decks are only built around the player, so the in-game camera
+   is the only way to look at this.
+
 ## State
 
 - `check:shop-spacing`, `check:stall-shape`, `tsc --noEmit` — green.
-- Full `pnpm run check`, `test:procgen`, `build`, browser pass — see the PR.
+- `test:procgen` — 497 passed.
+- Full `pnpm run check`, `build`, and the browser pass — see the PR.
