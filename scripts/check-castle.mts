@@ -60,6 +60,9 @@ import {
   castleFurnitureGroupName,
   DINER_TABLE_GAP,
   greatHallPetPlaces,
+  greatHallFootprint,
+  greatHallPetPlaces,
+  greatHallPetTable,
   greatHallSeats,
   SIT_PICK_RADIUS,
 } from '../src/world/building/castleFurniture.ts';
@@ -2044,6 +2047,95 @@ const FEAST_RUNS_ASKED_FOR = 2;
           `away, past the ${PET_TABLE_IN_SHOT.toFixed(1)} m that stays in frame at this camera. ` +
           `#449's whole point is that she *watches* her cat go and eat; at the mouth of the ` +
           `aisle it was 12 m off and the animal walked off the bottom of the picture.`,
+      );
+    }
+  }
+
+  // --- 5. nothing scattered stands in the banquet ---------------------------
+  //
+  // **Jim's own report on #453**: *"Banquet tables have green bench things
+  // clipping into them."* Those were `dressDeck`'s seeded benches, and the
+  // braziers were doing it too once the hall filled — a scatter rejects
+  // against `keepOutsFor`, which deliberately does not contain the banquet
+  // (the banquet's own props are inside the banquet). `scatterKeepOutsFor`
+  // is the fix; this is what says so out loud if it is ever unpicked.
+  //
+  // Measured off the built storey, not off the placement rules: everything
+  // dressed onto the hall that is **not** the banquet's own furniture or its
+  // diners has to be clear of the banquet's footprint.
+  {
+    const footprint = greatHallFootprint(CASTLE_GREAT_HALL_DECK);
+
+    // **A storey with its fire on it, not just its decoration.** The first
+    // draft measured `hallFloor`, which is `dressCastle` alone — and the
+    // braziers, which were the things actually standing in the benches, are
+    // `CastleFire.dress`'s. So the clause was asking a scene that did not
+    // contain the thing it is about, and a mutation putting the braziers back
+    // on the wrong list sailed through green. Both dressers run here.
+    const lit = new Group();
+    dressCastle(CASTLE_GREAT_HALL_DECK, lit);
+    new CastleFire().dress(CASTLE_GREAT_HALL_DECK, lit);
+    lit.updateMatrixWorld(true);
+
+    // The banquet's own furniture and its diners are *supposed* to be inside
+    // the banquet, so they are gathered first and excluded by identity. By
+    // identity and not by name: `dressGreatHall` puts the furniture group
+    // inside the decor group, so a name test on the storey's direct children
+    // sees `castle-decor-1` and lets the entire feast through as an intruder —
+    // which is what the first draft of this did, reporting 437 of them.
+    const own = new Set<Object3D>();
+    for (const name of [
+      castleFurnitureGroupName(CASTLE_GREAT_HALL_DECK),
+      banquetGroupName(CASTLE_GREAT_HALL_DECK),
+    ]) {
+      lit.getObjectByName(name)?.traverse((object: Object3D) => own.add(object));
+    }
+
+    const intruders: string[] = [];
+    const matrix = new Matrix4();
+    lit.traverse((object: Object3D) => {
+      if (own.has(object)) return;
+      const mesh = object as Mesh &
+        InstancedMesh & { isMesh?: boolean; isInstancedMesh?: boolean };
+      if (mesh.isMesh !== true && mesh.isInstancedMesh !== true) return;
+      // A decal or an inlay on the floor is not furniture and cannot be walked
+      // into — measured off the object, never taken from its name, the same
+      // exemption the props assertion already makes.
+      const box = new Box3().setFromObject(object);
+      if (box.max.y - box.min.y < FLOOR_TREATMENT_MAX_HEIGHT) return;
+
+      const spots: Vector3[] = [];
+      if (mesh.isInstancedMesh === true) {
+        for (let i = 0; i < mesh.count; i += 1) {
+          mesh.getMatrixAt(i, matrix);
+          spots.push(
+            new Vector3(matrix.elements[12], 0, matrix.elements[14]).applyMatrix4(
+              object.parent?.matrixWorld ?? object.matrixWorld,
+            ),
+          );
+        }
+      } else {
+        spots.push(object.getWorldPosition(new Vector3()));
+      }
+
+      for (const spot of spots) {
+        for (const disc of footprint) {
+          if (Math.hypot(spot.x - disc.x, spot.z - disc.z) >= disc.radius) continue;
+          intruders.push(
+            `${object.name || 'unnamed'} at (${spot.x.toFixed(1)}, ${spot.z.toFixed(1)})`,
+          );
+          return;
+        }
+      }
+    });
+
+    if (intruders.length > 0) {
+      fail(
+        `banquet places: ${intruders.length} thing(s) the hall scattered are standing inside ` +
+          `the banquet — ${intruders.slice(0, 4).join('; ')}. That is Jim's "green bench things ` +
+          `clipping into them" on #453. A scatter must reject against ` +
+          `\`scatterKeepOutsFor\`, which knows where the furniture is, not \`keepOutsFor\`, ` +
+          `which is only where a child must be able to stand.`,
       );
     }
   }

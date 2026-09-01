@@ -30,7 +30,7 @@ import {
 import { softMaterial } from './parts';
 import { BEAM_UNDERSIDE, BEAM_WIDTH, CASTLE_CEILING_CLEAR } from './castleFabric';
 import { CASTLE_HEARTH, castleTorchAnchors, type WallAnchor } from './castleLighting';
-import { DECK_ROUNDEL, keepOutsFor } from './dressing';
+import { DECK_ROUNDEL, deckIsFurnished, keepOutsFor, scatterKeepOutsFor } from './dressing';
 import { buildBurrows, buildRoofMeadow } from './roofMeadow';
 import { dressGreatHall, isTapestryBay } from './castleFurniture';
 import {
@@ -96,7 +96,14 @@ export function dressCastle(deck: number, floor: Group): void {
   const banner = bannerRun(deck, anchors);
   if (banner) group.add(banner);
 
-  group.add(roundelRug(deck));
+  // **A rug only where there is a roundel to dress** (issue #449). This lies
+  // on `DECK_ROUNDEL`, which is `dressing.ts`'s inlaid disc — and a furnished
+  // deck has no such disc, because `dressDeck` does not dress one. Left in, it
+  // was a 11 m rug lying on bare flagstones with the banquet's tables and a
+  // dozen children standing on top of it: Jim's *"other 'stuff' from the
+  // middle of the room"*, exactly. The rug follows the thing it dresses.
+  const rug = roundelRug(deck);
+  if (rug) group.add(rug);
   group.add(paintings(deck, anchors, rng));
 
   const clutter = cornerClutter(deck, rng);
@@ -389,7 +396,8 @@ function portcullis(): InstancedMesh {
  * and `check:castle` exempts it from the walkable-route assertion **by
  * measuring how tall it is** rather than by knowing what it is called.
  */
-function roundelRug(deck: number): Mesh {
+function roundelRug(deck: number): Mesh | null {
+  if (deckIsFurnished(deck)) return null;
   const rug = new Mesh(
     new CircleGeometry(DECK_ROUNDEL.radius * 0.92, 44),
     toonMaterial(PALETTE.blossomWhite, { map: castleRugTexture() }),
@@ -656,7 +664,9 @@ function hearthside(): Group {
  * an obstacle course.
  */
 function cornerClutter(deck: number, rng: Rng): InstancedMesh | null {
-  const blocked = keepOutsFor(deck);
+  // A scatter, so it asks what is already standing on the floor as well as
+  // where a child has to be able to stand. See `scatterKeepOutsFor`.
+  const blocked = scatterKeepOutsFor(deck);
   const spots: { x: number; z: number; yaw: number; size: number }[] = [];
   const wanted = 9;
 

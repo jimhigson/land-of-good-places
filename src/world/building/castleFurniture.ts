@@ -26,6 +26,7 @@ import {
   type FeastProp,
 } from '../../art/models/castleAssets';
 import { castleFloorMaterial } from './castleFabric';
+import type { KeepOut } from './dressing';
 
 import { CASTLE_HEARTH, castleTorchAnchors, type WallAnchor } from './castleLighting';
 
@@ -812,6 +813,56 @@ export function greatHallPetTable(deck: number): { readonly x: number; readonly 
       plan.inward *
         (BENCH_ALONG + CASTLE_BENCH_HALF_LENGTH + PET_TABLE_HALF_Z + PET_TABLE_SOUTH_OF_FEAST),
   };
+}
+
+/**
+ * **Every piece of floor the banquet is standing on**, as discs — for the
+ * things that *scatter* rather than being placed.
+ *
+ * Braziers (`castleLighting.ts`) and the corner clutter (`castleDecor.ts`) pick
+ * their spots by seeded rejection against {@link keepOutsFor}, which is the
+ * list of places a **child has to be able to stand**. The banquet is not one of
+ * those — it is furniture — so it is deliberately not in that list, and the
+ * moment the hall filled with tables the braziers started landing inside them:
+ * measured in the running game, one standing in the top table's bench at
+ * (8.5, 5.7) and another inside a table top at (2.8, −11.3).
+ *
+ * **It must not simply be added to `keepOutsFor`.** `check:castle`'s prop
+ * assertion fails any prop that lands inside a keep-out, and every table, bench
+ * and goblet at this feast is inside the banquet — so that list would fail on
+ * the banquet's own furniture. Two different questions, two lists, one owner
+ * each: *where must a child be able to stand* stays in `dressing.ts`, and
+ * *where is the banquet already* is here, next to the thing that puts it there.
+ *
+ * One disc per table, its radius the corner of that table's own footprint —
+ * measured off the assets, so a longer bench or a wider table grows the disc
+ * with it — plus one for the pets' table.
+ */
+export function greatHallFootprint(deck: number): readonly KeepOut[] {
+  const plan = greatHallPlan(deck);
+  if (!plan) return [];
+
+  // The corner of one table's own claim on the floor: half a run's width by
+  // the far end of its outermost bench.
+  const radius = Math.hypot(
+    BENCH_OFFSET + CASTLE_BENCH_HALF_WIDTH,
+    BENCH_ALONG + CASTLE_BENCH_HALF_LENGTH,
+  );
+  const discs: KeepOut[] = [];
+  for (const rowX of feastRowAxes(plan)) {
+    for (const z of feastTableCentres(plan)) discs.push({ x: rowX, z, radius });
+  }
+
+  const pets = greatHallPetTable(deck);
+  if (pets) {
+    discs.push({
+      x: pets.x,
+      z: pets.z,
+      // Its own half-diagonal, plus the animals standing round it.
+      radius: Math.hypot(PET_TABLE_HALF_X, PET_TABLE_HALF_Z) + PET_STAND_OFF,
+    });
+  }
+  return discs;
 }
 
 /** Every place at the pets' table. See {@link PetPlace}. */

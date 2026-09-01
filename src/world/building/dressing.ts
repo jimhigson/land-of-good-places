@@ -32,7 +32,7 @@ import {
   shopLocalToBuilding,
   type ShopUnitDefinition,
 } from './layout';
-import { CASTLE_GREAT_HALL_DECK } from './castleFurniture';
+import { CASTLE_GREAT_HALL_DECK, greatHallFootprint } from './castleFurniture';
 
 /**
  * What makes a roomy floor read as a *place* rather than as a plain.
@@ -137,8 +137,13 @@ export interface KeepOut {
  *
  * Everything the hall does have is `castleFurniture.ts`'s, placed rather than
  * scattered, and measured by `check:castle`.
+ *
+ * Exported because `castleDecor.ts` lays a **rug** on {@link DECK_ROUNDEL} —
+ * dressing the disc this file draws. With no disc there is nothing for it to
+ * dress, and it was found lying on bare flagstones under the banquet with a
+ * dozen children standing on it. One question, one answer, asked by both.
  */
-function deckIsFurnished(deck: number): boolean {
+export function deckIsFurnished(deck: number): boolean {
   return deck === CASTLE_GREAT_HALL_DECK;
 }
 
@@ -382,6 +387,26 @@ export function keepOutsFor(deck: number): KeepOut[] {
   }
 
   return blocked;
+}
+
+/**
+ * **Where a scattered prop may not land** — {@link keepOutsFor} plus whatever
+ * furniture is already standing on this floor.
+ *
+ * The two are different questions and the difference matters. `keepOutsFor` is
+ * *where a child has to be able to stand*, and `check:castle` fails any prop
+ * that lands in one — so the great hall's banquet cannot go in it, because the
+ * banquet's own tables and benches are inside the banquet. But a brazier
+ * choosing a spot at random very much does need to know the tables are there:
+ * with the hall filled (#449) two of the four landed inside benches, measured
+ * in the running game.
+ *
+ * So: things that are *placed* ask `keepOutsFor`, and things that **scatter**
+ * ask this. One extra call at each of the two scatter sites, and no list is
+ * kept in step with another by hand.
+ */
+export function scatterKeepOutsFor(deck: number): KeepOut[] {
+  return [...keepOutsFor(deck), ...greatHallFootprint(deck)];
 }
 
 /**
