@@ -114,9 +114,12 @@ Unless the grown-ups turn on **Mayhem mode**…
   action"*: two boxes, a heading and a button, saying much the same thing over a
   child's head. So the sign card is gone, and the chip's own label grew from a
   one-word verb into a short **call to action that implies the thing by naming
-  what you do to it** — "Race the carts!", "See the view", "Go shopping!", "Pick
-  the flower!" — still one very short phrase, never a heading and never a
-  sentence. **And the hotel floor read-out (the little top-middle pill from issue
+  what you do to it** — "Race the carts!", "See the view", "Pick the flower!" —
+  still one very short phrase, never a heading and never a sentence. **The market
+  stalls are the one exception, and by request:** they used to say "Go shopping!"
+  every one, and Jim (29 August 2026) asked for *"just what they sell, such as
+  'Pets' or 'Toys'"* — with seven stalls side by side the useful word is which
+  stall this is, not what pressing it does. **And the hotel floor read-out (the little top-middle pill from issue
   #236) is removed entirely:** it is one more thing to read for something a child
   can already see out of the window, and the family asked for it gone.
   *As built:* `ui/SignCard.ts` and `ui/FloorPill.ts` are deleted, `InteractZone`

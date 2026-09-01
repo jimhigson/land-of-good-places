@@ -813,6 +813,23 @@ export interface ShopUnitDefinition {
   /** Yaw in radians; 0 faces +Z. */
   readonly yaw: number;
   readonly title: string;
+  /**
+   * What this stall sells, for the interact prompt a child reads walking up to
+   * it — "Toys", "Pets", "Ice Cream".
+   *
+   * Jim, 29 August 2026: *"just change so they don't all say 'Go shopping!' —
+   * instead say just what they sell, such as 'Pets' or 'Toys'."* Seven stalls
+   * standing in a row all offering the same words told her nothing about which
+   * one she was in front of, which is the whole point of a market.
+   *
+   * It lives **here**, beside {@link title}, rather than in a table of prompt
+   * strings somewhere near the zones. `title` is the shop's name over its
+   * awning ("Stickers & Pets", "Toy Shop"); this is the goods, shorter and
+   * plural. They are close enough that a second list keyed by shop id would be
+   * two definitions of one shop kept in step by hand — the bug CLAUDE.md opens
+   * with — and far enough apart that one string cannot serve both.
+   */
+  readonly sells: string;
   readonly glyph: string;
   readonly accent: number;
 }
@@ -1167,13 +1184,16 @@ function stall(index: number): { x: number; z: number; yaw: number } {
  * market moves floor in one edit if it ever should.
  */
 export const SHOP_UNITS: readonly ShopUnitDefinition[] = [
-  { id: 'toy', deck: MALL_DECK, ...stall(0), title: 'Toy Shop', glyph: '🧸', accent: PALETTE.markerPink },
-  { id: 'balloon', deck: MALL_DECK, ...stall(1), title: 'Balloon Shop', glyph: '🎈', accent: PALETTE.markerSky },
-  { id: 'candyFloss', deck: MALL_DECK, ...stall(2), title: 'Candy Floss', glyph: '🍬', accent: PALETTE.blossomPink },
-  { id: 'iceCream', deck: MALL_DECK, ...stall(3), title: 'Ice Cream', glyph: '🍦', accent: PALETTE.markerMint },
-  { id: 'hat', deck: MALL_DECK, ...stall(4), title: 'Hat Shop', glyph: '🎩', accent: PALETTE.markerLilac },
-  { id: 'stickerPet', deck: MALL_DECK, ...stall(5), title: 'Stickers & Pets', glyph: '🐹', accent: PALETTE.markerLemon },
-  { id: 'surpriseEgg', deck: MALL_DECK, ...stall(6), title: 'Surprise Eggs', glyph: '🥚', accent: PALETTE.flowerViolet },
+  { id: 'toy', deck: MALL_DECK, ...stall(0), title: 'Toy Shop', sells: 'Toys', glyph: '🧸', accent: PALETTE.markerPink },
+  { id: 'balloon', deck: MALL_DECK, ...stall(1), title: 'Balloon Shop', sells: 'Balloons', glyph: '🎈', accent: PALETTE.markerSky },
+  { id: 'candyFloss', deck: MALL_DECK, ...stall(2), title: 'Candy Floss', sells: 'Candy Floss', glyph: '🍬', accent: PALETTE.blossomPink },
+  { id: 'iceCream', deck: MALL_DECK, ...stall(3), title: 'Ice Cream', sells: 'Ice Cream', glyph: '🍦', accent: PALETTE.markerMint },
+  { id: 'hat', deck: MALL_DECK, ...stall(4), title: 'Hat Shop', sells: 'Hats', glyph: '🎩', accent: PALETTE.markerLilac },
+  // Pets first, not "Stickers & Pets" as the awning has it: Jim's own example
+  // of the new prompt was "Pets", and it is the half of the stall a six-year-old
+  // is walking towards.
+  { id: 'stickerPet', deck: MALL_DECK, ...stall(5), title: 'Stickers & Pets', sells: 'Pets & Stickers', glyph: '🐹', accent: PALETTE.markerLemon },
+  { id: 'surpriseEgg', deck: MALL_DECK, ...stall(6), title: 'Surprise Eggs', sells: 'Surprise Eggs', glyph: '🥚', accent: PALETTE.flowerViolet },
 ];
 
 /** Scene-graph name for a shop unit's anchor group. */

@@ -153,6 +153,12 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
   // The seven shops. Tapping a counter walks you to the serving spot and opens
   // *that* counter on arrival — the chip names the unit, so the walk and the
   // key press cannot end up at different tills (issue #122).
+  //
+  // The chip says what the stall *sells* ("Toys", "Pets") rather than "Go
+  // shopping!": seven stalls in a row all offering the same three words told a
+  // child nothing about which one she was standing at. The words come from the
+  // shop's own definition (`unit.sells`), so a new stall arrives with its own
+  // prompt and there is no list here to forget to update.
   for (const unit of SHOP_UNITS) {
     const [counterX, counterZ] = shopLocalToBuilding(unit, 0, 1.15);
     const [standX, standZ] = shopLocalToBuilding(unit, 0, SHOP_STAND_Z);
@@ -172,7 +178,7 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
         },
         () => state.openShop(unit.id),
         '🛍️',
-        'Go shopping!',
+        unit.sells,
       ),
     );
   }

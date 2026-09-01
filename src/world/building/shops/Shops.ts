@@ -27,7 +27,8 @@ import { rainbowFlossAvailable, type ShopId } from './catalogue';
  * gets the shared kiosk shell (counter, shelves, awning), its own stock on the
  * shelves, and a shopkeeper behind the counter. The name board that used to
  * hang off the awning is gone — the shop's own goods say what it is, and its
- * "Go shopping!" chip does the rest (see `building/interactZones.ts`).
+ * chip, which names those goods ("Toys", "Pets"), does the rest (see
+ * `building/interactZones.ts` and `sells` in `layout.ts`).
  *
  * **Two visibility tiers, and the reason is the draw-call budget.** The shell
  * lives with the floor and is hidden by the cutaway along with it. The *detail*
