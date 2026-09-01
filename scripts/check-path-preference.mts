@@ -17,7 +17,8 @@
  * satisfy and useless:
  *
  * 1. **Routes use the paving.** Between two junctions of the solved path
- *    network — the network's own nodes, never coordinates typed in here — a
+ *    network — the network's own nodes, never coordinates typed in here, and
+ *    only the ones a child could actually stand at (see `standable`) — a
  *    route must spend most of its length on paving. Two statements, both about
  *    **one** population (routes that arrived, over pairs the paving can serve
  *    within {@link OFF_PATH_COST_MULTIPLIER}): a **mean** floor of 70%, and a
@@ -175,10 +176,83 @@ interface Probe {
   readonly bz: number;
 }
 
-const junctions = PATH_GRAPH.nodes
+// The weighted router — the one the game runs. Built here rather than further
+// down because the probe set is derived *from it*: see `standable` below.
+const weighted = playerGrid();
+
+/**
+ * **Is this junction somewhere a child could actually stand?**
+ *
+ * Asked of `NavGrid.canStandAt`, which is the very test `findRoute` applies to
+ * its own goal — so this cannot invent a second idea of where a walk may end,
+ * any more than `isOnPath` lets this file invent a second idea of where the
+ * paving is. Nothing here is a list of node names: a junction is excluded
+ * because the lattice the router walks says a body cannot occupy its cell,
+ * which stays true when the park moves and a hand-maintained exclusion list
+ * would not.
+ *
+ * **Why the probe set has to be built this way.** `PATH_GRAPH`'s nodes are
+ * points on a *drawn plan*, and the plan does not know about the bollard the
+ * scenery placer later put 0.97 m away. Fattened by `PLAYER_RADIUS` and
+ * quantised to `NavGrid`'s 0.5 m lattice, a collider that close closes the
+ * node's own cell, and the junction becomes a place a route can pass but never
+ * finish. Asking for a route to it is asking for a route that cannot exist, so
+ * `every probe arrives` — rightly — fails. The sample set was the defect, not
+ * the assertion: before that assertion existed these probes were scored as
+ * **100% paved** 3 m stubs, which is the check flattering itself with its own
+ * failures.
+ */
+const standable = (x: number, z: number): boolean =>
+  weighted.canStandAt(x, z, park.sample(x, z, 0), park.sample);
+
+/**
+ * How far from a point the nearest standable ground is, so an exclusion can
+ * report *how badly* the junction misses rather than only that it did. A
+ * knife-edge miss (one lattice cell) is a different park defect from a
+ * junction several metres inside something, and the two want different fixes.
+ * `Infinity` if nothing within {@link EXCLUSION_PROBE_REACH}.
+ */
+const EXCLUSION_PROBE_REACH = 6;
+function distanceToStandable(x: number, z: number): number {
+  for (let radius = 0.25; radius <= EXCLUSION_PROBE_REACH; radius += 0.25) {
+    for (let bearing = 0; bearing < 16; bearing += 1) {
+      const angle = (bearing / 16) * Math.PI * 2;
+      if (standable(x + Math.cos(angle) * radius, z + Math.sin(angle) * radius)) return radius;
+    }
+  }
+  return Infinity;
+}
+
+const onPathNodes = PATH_GRAPH.nodes
   .filter((node) => isOnPath(node.x, node.z))
   .slice()
   .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
+const junctions = onPathNodes.filter((node) => standable(node.x, node.z));
+const excluded = onPathNodes.filter((node) => !standable(node.x, node.z));
+
+// **Say what was dropped, every run.** A probe set that silently shrinks is how
+// the next regression hides: excluding endpoints can only make this check
+// easier, so the count and the reason belong on the screen next to the numbers
+// they shaped. On stderr, per CLAUDE.md — vitest aside, a note that only
+// appears when something else fails is a note nobody reads on the run it
+// matters for.
+process.stderr.write(
+  `check:path-preference — ${junctions.length} of ${onPathNodes.length} path-network ` +
+    `junctions are somewhere a child can stand; ${excluded.length} excluded from the ` +
+    'probe set because `NavGrid` (the lattice the router itself walks) will not let a ' +
+    "body occupy the junction's own cell, so no route could ever end there:\n",
+);
+for (const node of excluded) {
+  const clear = distanceToStandable(node.x, node.z);
+  process.stderr.write(
+    `  · ${node.id} at (${node.x.toFixed(2)}, ${node.z.toFixed(2)}) — nearest standable ` +
+      `ground ${Number.isFinite(clear) ? `${clear.toFixed(2)} m away` : `over ${EXCLUSION_PROBE_REACH} m away`}\n`,
+  );
+}
+if (excluded.length === 0) {
+  process.stderr.write('  · none — every junction of the network is standable\n');
+}
 
 const probes: Probe[] = [];
 for (let i = 0; i < junctions.length; i += 1) {
@@ -195,10 +269,18 @@ for (let i = 0; i < junctions.length; i += 1) {
   }
 }
 
+// **The guard that makes the exclusion above safe.** Dropping unstandable
+// endpoints can only shrink the probe set, and a check measuring three routes
+// would sail green while proving nothing. So if exclusion ever eats the set,
+// this is loud rather than quiet — and it names the exclusion as a suspect,
+// because "the park grew a lot of blocked junctions" and "the network changed
+// shape" are different diagnoses with the same symptom.
 if (probes.length < 8) {
   console.error(
     `check:path-preference — only ${probes.length} junction pairs in the solved ` +
-      'network are far enough apart to route between. The network has changed ' +
+      `network are both far enough apart to route between and standable at each end ` +
+      `(${junctions.length} of ${onPathNodes.length} junctions are standable, ` +
+      `${excluded.length} excluded — listed above). The network has changed ` +
       'shape; re-derive the probes rather than lowering the bar.',
   );
   process.exit(1);
@@ -403,8 +485,6 @@ function trace(
   return measure(count, ax, az, grid.lastRouteReachedGoal);
 }
 
-// The weighted router — the one the game runs.
-const weighted = playerGrid();
 const weightedRuns = probes.map((probe) => trace(weighted, probe.ax, probe.az, probe.bx, probe.bz));
 
 // The children's own planner, on the same probes. A real `JourneyPlanner`,
@@ -572,6 +652,14 @@ for (let i = 0; i < probes.length; i += 1) {
  * is CLAUDE.md's "a check can pass without checking anything" exactly: the
  * fraction being averaged was not describing the thing the check claims to
  * measure. Asserting arrival can only ever make this check harder to pass.
+ *
+ * **What it then caught was a faulty sample, not a faulty router** (1 Sep
+ * 2026). Every remaining failure was a probe *ending* at a junction whose own
+ * lattice cell is blocked — a body cannot occupy it, so no route can finish
+ * there and the unweighted router failed identically. The probe set is now
+ * built from junctions the router itself calls standable (`standable`, above),
+ * which is a fix to the sample and leaves this assertion at full strength:
+ * every pair it is asked about is a pair that *can* be walked.
  */
 const unreached = probes
   .map((probe, i) => ({ probe, w: weightedRuns[i]!, u: unweightedRuns[i]! }))
