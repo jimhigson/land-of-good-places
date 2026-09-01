@@ -904,7 +904,7 @@ export function buildFenderPaw(
    * depth can move the paw towards the tyre, and that is the one the caller
    * places the paw by.
    */
-  const PALM_SQUASH = [1, 0.62, 1.45] as const;
+  const PALM_SQUASH = [1, 0.85, 1.3] as const;
   const palm = blob(palmRadius, furMaterial, [...PALM_SQUASH]);
   palm.name = 'cat-bus-paw-palm';
   group.add(palm);
@@ -941,7 +941,7 @@ export function buildFenderPaw(
     // and fanned past its leading edge in z, the middle toe leading, so the
     // toes are what the silhouette ends in.
     bean.position.set(
-      Math.sin(a) * palmRadius * 0.72,
+      Math.sin(a) * palmRadius * 0.8,
       palmRadius * PALM_SQUASH[1] * 0.7,
       palmRadius * PALM_SQUASH[2] * (0.95 + Math.cos(a) * 0.17),
     );
