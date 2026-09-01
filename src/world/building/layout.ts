@@ -432,29 +432,104 @@ export function distanceOutsideTower(tower: TowerSolid, x: number, z: number, y:
  * `deckY`), so it must never import back from it.
  */
 
-// -------------------------------------------------------- glass lift shaft
+// -------------------------------------------------------------- lift alcove
 
-export const LIFT_SHAFT = rect(INTERIOR_HALF_X, INTERIOR_HALF_X + 3.4, 3.3, 6.7);
-export const LIFT_CAR_X = INTERIOR_HALF_X + 1.7;
+/**
+ * **Which wall the lift is in** — the middle of its doorway, in floor-local
+ * metres, and the way *out* of it.
+ *
+ * The **west** wall, and that is not arbitrary: it is the hotel's wall, and the
+ * reason is the camera. The park's camera is fixed at 45° looking along −X−Z
+ * (design feedback #16, no more rotating), so an alcove is only ever watchable
+ * from one side — the side its doors face. `Hotel.fitLiftAlcove` puts its lift
+ * in a west wall and you look straight into the car; the castle's was in the
+ * **east** wall, which is the near side, so the car's closed back panel stood
+ * squarely between the camera and whoever was inside it and the dial faced away
+ * into the room.
+ *
+ * That was invisible in code and obvious the moment it was ridden (#450): with
+ * a car finally built, the child boarded and **disappeared** behind a solid
+ * box. Ghosting the shell was tried and does not work — it is panelled, so a
+ * sightline crosses four or five of its own surfaces and translucency
+ * compounds; at the hotel overhang's 0.24 the box still reads as solid, and at
+ * the ~0.06 that lets her through the lift has effectively vanished. Hiding the
+ * shell outright leaves a doorway and a wire handrail, which is not a lift.
+ *
+ * **None of those are fixes; they are apologies for the wrong wall.** The east
+ * wall was only ever right for the `GlassLift` that used to hang there, which
+ * you could see through. So the alcove moved to the wall the hotel already
+ * proved, and every one of those workarounds went with it.
+ */
+export const LIFT_WALL_X = -INTERIOR_HALF_X;
+
+/**
+ * The yaw of "out of the lift", in `Player.facing`'s units (0 along +Z, +π/2
+ * along +X) — the doors' facing, the rider's facing, and the only orientation
+ * `world/lift/LiftAlcove.ts` takes.
+ *
+ * One owner, because three places have to agree: `Building` builds the alcove
+ * and lands her in it, and `liftRide.ts` poses her while she rides. Both used a
+ * hand-written `Math.PI / 2` copied from the hotel, which was right for the
+ * hotel's wall and, while the castle's alcove was in the east wall, had her
+ * riding **facing the back of the car**. Deriving both from this makes that
+ * disagreement impossible rather than unlikely.
+ */
+export const LIFT_OUT_YAW = Math.PI / 2;
+
+/** Out of the alcove as a unit vector, from {@link LIFT_OUT_YAW}. */
+const LIFT_OUT_X = Math.sin(LIFT_OUT_YAW);
+
+/**
+ * How deep the alcove is cut past the wall, and where the car and the rider
+ * stand in it. All measured **out from the doorway**, so moving the lift to
+ * another wall is one line above rather than four sign flips down here.
+ */
+export const LIFT_ALCOVE_DEPTH = 3.4;
+export const LIFT_SHAFT = rect(
+  Math.min(LIFT_WALL_X, LIFT_WALL_X - LIFT_OUT_X * LIFT_ALCOVE_DEPTH),
+  Math.max(LIFT_WALL_X, LIFT_WALL_X - LIFT_OUT_X * LIFT_ALCOVE_DEPTH),
+  3.3,
+  6.7,
+);
+/**
+ * How far back from the doorway the rider stands, in metres — **just inside the
+ * car's mouth, not in the middle of it.**
+ *
+ * The car is 2.43 m deep with its ceiling at 2.62 m, and the camera looks down
+ * at 38°: a child standing in the middle of it has her head behind that ceiling
+ * from every point the camera can be. At 1.7 m back (the depth this was first
+ * given, copied from the hotel) `check:castle`'s sightline probe finds the roof
+ * of the car in front of her head and her chest, and only her waist is visible —
+ * which is the shape of #450 all over again, in miniature.
+ *
+ * 0.9 m puts her 0.87 m inside the mouth: the car is still round and over her,
+ * the doors still shut in front of her, and her whole body is in the frame.
+ * The number is held honest by that probe rather than by this comment.
+ */
+export const LIFT_RIDER_DEPTH = 0.9;
+export const LIFT_CAR_X = LIFT_WALL_X - LIFT_OUT_X * LIFT_RIDER_DEPTH;
 export const LIFT_CAR_Z = 5;
 export const LIFT_CAR_HALF = 1.3;
+
 
 /**
  * The lift lobby: where a child stands to wait, and what a tap aims at.
  *
- * `LIFT_STAND_X` is deliberately *inside* the east doorway rather than in the
- * car. The car is only ever at one deck, and the shaft below it is a
- * five-storey drop — walking a six-year-old into an open shaft because she
- * tapped the pretty glass box is not the game we are making. Standing here is
- * what puts the lift's call panel on screen (`liftRide.ts`), and stepping into
- * the car is something the lift does *for* her, once it has actually arrived.
+ * `LIFT_STAND_X` is deliberately *inside* the doorway rather than in the car:
+ * standing here is what puts the lift's call panel on screen (`liftRide.ts`),
+ * and stepping into the car is something the lift does *for* her, once it has
+ * actually arrived. The original reason was an open five-storey shaft below the
+ * car; there is no shaft any more (#377/#380), and the rule survives because
+ * the family's own spec is that she never has to walk into a lift herself.
  *
  * Shared by `interactZones.ts` (the tap target) and `liftRide.ts` (the waiting
  * area and the spot she is set down on when she gets out), so the two can
  * never drift apart.
  */
-export const LIFT_STAND_X = INTERIOR_HALF_X - 1.1;
-export const LIFT_PICK_X = INTERIOR_HALF_X + 0.6;
+export const LIFT_STAND_X = LIFT_WALL_X + LIFT_OUT_X * 1.1;
+export const LIFT_PICK_X = LIFT_WALL_X - LIFT_OUT_X * 0.6;
+/** The point every boarding and alighting glide is bent through — the doorway. */
+export const LIFT_VIA_X = LIFT_WALL_X - LIFT_OUT_X * 0.3;
 export const LIFT_DOOR_Z = 5;
 /** How far back from the doors the call panel still appears. */
 export const LIFT_LOBBY_REACH = 4;

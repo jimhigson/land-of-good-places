@@ -1,5 +1,11 @@
-import { LIFT_BOARD_SECONDS } from '../../core/constants';
 import type { Player } from '../../entities/Player';
+import {
+  liftDoorOpenness,
+  LIFT_COMING_SECONDS,
+  LIFT_STEP_SECONDS,
+  smoothstep01,
+  type LiftPhase,
+} from '../lift/phases';
 import { CASTLE_FLOORS, floorX, floorZ, type CastleFloor } from './floors';
 import {
   LIFT_CAR_X,
@@ -7,7 +13,9 @@ import {
   LIFT_DOOR_MIN_Z,
   LIFT_DOOR_Z,
   LIFT_LOBBY_REACH,
+  LIFT_OUT_YAW,
   LIFT_STAND_X,
+  LIFT_VIA_X,
 } from './layout';
 
 /**
@@ -130,22 +138,6 @@ export interface LiftRideDeps {
   player(): Player | null;
 }
 
-type Phase =
-  | 'away'
-  /** At the doors, nothing asked for yet. */
-  | 'waiting'
-  /** Called; the doors are opening. */
-  | 'coming'
-  /** In the car, choosing. */
-  | 'aboard'
-  /** In the car, "travelling" — the indicator counts, the world swaps. */
-  | 'going'
-  /** Arrived; stepping out into the room. */
-  | 'alighting';
-
-/** Seconds the doors take to open after a call. Never make a child wait. */
-const COMING_SECONDS = 0.7;
-
 /**
  * Seconds the indicator spends counting between floors.
  *
@@ -158,8 +150,10 @@ const TRAVEL_SECONDS = 1.2;
 export class LiftRide implements LiftPanelSource {
   private readonly deps: LiftRideDeps;
 
-  private phase: Phase = 'away';
+  private phase: LiftPhase = 'away';
   private phaseT = 0;
+  /** Where she got on, and where she pressed for — the dial sweeps between. */
+  private from = CASTLE_FLOORS[0]!;
   private to = CASTLE_FLOORS[0]!;
   private stepT = 0;
   private readonly stepFrom = { x: 0, y: 0, z: 0 };
@@ -205,6 +199,7 @@ export class LiftRide implements LiftPanelSource {
       this.beginAlight(here);
       return;
     }
+    this.from = here;
     this.to = target;
     this.phase = 'going';
     this.phaseT = 0;
@@ -235,6 +230,51 @@ export class LiftRide implements LiftPanelSource {
     if (this.phase !== 'waiting') return;
     this.phase = 'coming';
     this.phaseT = 0;
+  }
+
+  // ------------------------------------------------ what the alcove shows
+
+  /**
+   * **How far apart the door leaves are** — 0 shut, 1 wide open.
+   *
+   * The castle had no such method, and that is the whole of issue #450: the
+   * hotel grew one, drew a lift with it, and the castle — which had the same
+   * six phases and the same portal — drew nothing at all, so a child stepped
+   * into the great hall's lift and floated in open air. The rule the two now
+   * share lives in `world/lift/phases.ts`; this only forwards the phase to it,
+   * because a copy of that switch over here is exactly the drift that produced
+   * the bug.
+   */
+  doorOpenness(): number {
+    return liftDoorOpenness(this.phase, this.phaseT);
+  }
+
+  /**
+   * Whose doors and dial are the live ones right now.
+   *
+   * While travelling this is the floor she is **going to**, because that is the
+   * alcove she is about to be standing in: the portal has not fired yet, but
+   * the doors that matter are the ones that will open.
+   */
+  activeFloor(): CastleFloor | null {
+    if (this.phase === 'going') return this.to;
+    return this.deps.currentFloor();
+  }
+
+  /**
+   * Where the needle should point, as a floor index — a *fraction* of one
+   * mid-ride, so the dial sweeps between floors rather than snapping, which is
+   * the thing that makes a pointer better than a number.
+   *
+   * Three floors rather than the hotel's fifty, so this is the deck index
+   * itself and not a storey count: there is no fiction of great height to sell.
+   */
+  indicatedFloor(): number {
+    if (this.phase === 'going') {
+      const t = smoothstep01(this.phaseT / TRAVEL_SECONDS);
+      return this.from.index + (this.to.index - this.from.index) * t;
+    }
+    return this.deps.currentFloor()?.index ?? 0;
   }
 
   // ------------------------------------------------------------ the frame
@@ -270,7 +310,7 @@ export class LiftRide implements LiftPanelSource {
           this.phase = 'away';
           return;
         }
-        if (this.phaseT < COMING_SECONDS) return;
+        if (this.phaseT < LIFT_COMING_SECONDS) return;
         this.deps.cancelWalk();
         player.beginRide();
         // Boarding starts from wherever she actually stopped walking — she is
@@ -280,7 +320,7 @@ export class LiftRide implements LiftPanelSource {
           floor,
           { x: player.position.x, z: player.position.z },
           { x: floorX(floor, LIFT_CAR_X), z: floorZ(floor, LIFT_DOOR_Z) },
-          Math.PI / 2,
+          LIFT_OUT_YAW,
         );
         this.phase = 'aboard';
         this.phaseT = 0;
@@ -334,7 +374,7 @@ export class LiftRide implements LiftPanelSource {
     if (!floor) return false;
     const localX = player.position.x - floor.originX;
     const localZ = player.position.z - floor.originZ;
-    if (localX < LIFT_STAND_X - LIFT_LOBBY_REACH) return false;
+    if (localX > LIFT_STAND_X + LIFT_LOBBY_REACH) return false;
     if (localZ < LIFT_DOOR_MIN_Z - 1.2 || localZ > LIFT_DOOR_MAX_Z + 1.2) return false;
     return true;
   }
@@ -366,7 +406,7 @@ export class LiftRide implements LiftPanelSource {
       floor,
       { x: floorX(floor, LIFT_CAR_X), z: floorZ(floor, LIFT_DOOR_Z) },
       { x: floorX(floor, LIFT_STAND_X), z: floorZ(floor, LIFT_DOOR_Z) },
-      -Math.PI / 2,
+      LIFT_OUT_YAW,
     );
     this.phase = 'alighting';
     this.phaseT = 0;
@@ -393,7 +433,7 @@ export class LiftRide implements LiftPanelSource {
     this.stepFrom.y = y;
     this.stepFrom.z = from.z;
     // The doorway itself, bent through so the curve does not clip the jamb.
-    this.stepVia.x = floorX(floor, LIFT_STAND_X + 1.4);
+    this.stepVia.x = floorX(floor, LIFT_VIA_X);
     this.stepVia.y = y;
     this.stepVia.z = floorZ(floor, LIFT_DOOR_Z);
     this.stepTo.x = to.x;
@@ -413,8 +453,8 @@ export class LiftRide implements LiftPanelSource {
    * so the curve is the only thing keeping her out of the wall.
    */
   private updateStep(player: Player, dt: number): void {
-    this.stepT = Math.min(1, this.stepT + dt / LIFT_BOARD_SECONDS);
-    const t = smoothstep(this.stepT);
+    this.stepT = Math.min(1, this.stepT + dt / LIFT_STEP_SECONDS);
+    const t = smoothstep01(this.stepT);
     const a = (1 - t) * (1 - t);
     const b = 2 * (1 - t) * t;
     const c = t * t;
@@ -438,9 +478,4 @@ export function floorName(deck: number): string {
 
 function clampFloor(index: number): number {
   return Math.max(0, Math.min(CASTLE_FLOORS.length - 1, Math.round(index)));
-}
-
-/** Ease in and out, so a half-second step does not start and stop with a jerk. */
-function smoothstep(t: number): number {
-  return t * t * (3 - 2 * t);
 }

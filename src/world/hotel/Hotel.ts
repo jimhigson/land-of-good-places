@@ -1,6 +1,5 @@
 import {
   BoxGeometry,
-  CanvasTexture,
   type PerspectiveCamera,
   CylinderGeometry,
   Group,
@@ -10,9 +9,10 @@ import {
   type Object3D,
   PlaneGeometry,
   SpotLight,
-  SRGBColorSpace,
   Vector3,
 } from 'three';
+import { glbCanvasTexture } from '../../art/style/glb';
+import { LiftAlcove } from '../lift/LiftAlcove';
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
 import { HOTEL_PLAY_RADIUS, PLAYER_RADIUS } from '../../core/constants';
 import { hexToCss, PALETTE } from '../../core/palette';
@@ -54,10 +54,6 @@ import {
   createHotelBed,
   createHotelTower,
   createLandingNosing,
-  createLiftCar,
-  createLiftDial,
-  createLiftDoors,
-  createLiftFrame,
   createPetBed,
   createPetBowl,
   createReceptionDesk,
@@ -78,7 +74,6 @@ import {
   STRAIGHT_TREADS,
   STRAIGHT_WALK_WIDTH,
   type BreakfastKind,
-  type LiftDialHandle,
   type SlidingDoorsHandle,
 } from '../../art/models/hotelAssets';
 import { petBedFit } from './petBedFit';
@@ -363,16 +358,6 @@ const FOOD_EASE_SECONDS = 2.5;
 const FOOD_HOLD_SECONDS = 1.9;
 /** How long the pet takes to trot over. Inside the ease, so it arrives on camera. */
 const FOOD_TROT_SECONDS = 2.1;
-
-/**
- * The pointer dial's pivot height above the alcove floor.
- *
- * Over the doors and just under the top of the architrave (2.96 m), which is
- * the only place a dial fits: three of these rooms have 3.0 m walls, so the
- * strip *above* the frame that a real lift would use does not exist here. The
- * arc is 0.45 m tall, so this puts its top at 2.91 m.
- */
-const DIAL_PIVOT_Y = 2.46;
 
 /** The top of the hotel, in storeys — what the dial's right-hand end means. */
 const TOP_STOREY = 50;
@@ -1141,11 +1126,10 @@ export class Hotel implements GameSystem {
    * exists.
    */
   private suiteLock: WallCollider | null = null;
-  /** Every lift alcove's sliding leaves and pointer dial. See {@link fitLiftAlcove}. */
+  /** Every lift alcove, one per room the lift serves. See {@link fitLiftAlcove}. */
   private readonly alcoves: {
     readonly room: HotelRoom;
-    readonly doors: SlidingDoorsHandle;
-    readonly dial: LiftDialHandle;
+    readonly alcove: LiftAlcove;
   }[] = [];
   /** The tower's front doors, and the lobby's — see {@link fitAutoDoors}. */
   private outerDoors: SlidingDoorsHandle | null = null;
@@ -3277,52 +3261,36 @@ export class Hotel implements GameSystem {
    * over the top.
    *
    * Jim, 7 August 2026: *"no doors, no floor and also no lift to speak of"* —
-   * the alcove was three collision walls and a teleport. All four pieces are
-   * the artist's (`art/models/hotelAssets.ts`), and every one of them is
-   * measured to the hole this file already cuts: the frame is 3.28 m against
-   * `gaps.west`'s 3.2 m so it overlaps the wall by 4 cm a side, and the car's
-   * floor has its top at exactly y = 0 so it lies flush *under* the walk
-   * surface the alcove already registers rather than standing on it as a step.
+   * the alcove was three collision walls and a teleport.
    *
-   * **The doors face +Z as authored and are yawed a quarter turn to face +X**,
-   * out of the alcove into the room. That also turns their sliding axis — the
-   * leaves move along local X, which after the yaw runs along world Z, which is
-   * the way the doorway runs. Nothing here has to know that; it falls out of
-   * `setOpen` being written in the asset's own frame.
+   * **The assembly itself now lives in `world/lift/LiftAlcove.ts`**, because
+   * the castle's lift had the same complaint two ticket-months later (#450) and
+   * a second copy of it would have been this codebase's most-cited defect all
+   * over again. The hole this file cuts (`gaps.west`, 3.2 m) is what the 3.28 m
+   * architrave was measured against, and that has not changed; what moved out is
+   * the arithmetic that puts four authored parts on a wall, which is the same
+   * arithmetic in every building.
+   *
+   * `yaw = +π/2` because these alcoves are in a **west** wall and open towards
+   * +X. That single number is the whole of what differs from the castle's.
    */
   private fitLiftAlcove(shell: Group, room: HotelRoom, liftZ: number): void {
-    const wallX = -room.halfX;
-
-    // The car, at the back of the alcove, open side facing the room.
-    const car = createLiftCar();
-    car.root.position.set(wallX - 1.72, 0, liftZ);
-    car.root.rotation.y = Math.PI / 2;
-    shell.add(car.root);
-
-    // The architrave, plugging the wall gap.
-    const frame = createLiftFrame();
-    frame.root.position.set(wallX, 0, liftZ);
-    frame.root.rotation.y = Math.PI / 2;
-    shell.add(frame.root);
-
-    const doors = createLiftDoors();
-    doors.root.position.set(wallX, 0, liftZ);
-    doors.root.rotation.y = Math.PI / 2;
-    doors.setOpen(0);
-    shell.add(doors.root);
-
-    // The dial, over the doors and standing proud of the architrave, which is
-    // where a lift dial goes and the only place there is room for one: the
-    // frame is 2.96 m tall and three of these rooms have 3.0 m walls, so the
-    // strip *above* the frame does not exist except in the lobby.
-    const dial = createLiftDial();
-    dial.root.position.set(wallX + 0.3, DIAL_PIVOT_Y, liftZ);
-    dial.root.rotation.y = Math.PI / 2;
-    paintDialFace(dial.face);
-    dial.setSweep(0);
-    shell.add(dial.root);
-
-    this.alcoves.push({ room, doors, dial });
+    const alcove = new LiftAlcove({
+      wallX: -room.halfX,
+      wallZ: liftZ,
+      yaw: Math.PI / 2,
+      topOfScale: TOP_STOREY,
+      // Only the floors that exist, and not Floor 1: at fifty storeys of scale
+      // its label lands on top of the ground floor's.
+      labels: [
+        { at: 0, text: 'G' },
+        { at: 12, text: '12' },
+        { at: 33, text: '33' },
+        { at: 50, text: '50' },
+      ],
+    });
+    shell.add(alcove.root);
+    this.alcoves.push({ room, alcove });
   }
 
   /**
@@ -3379,11 +3347,11 @@ export class Hotel implements GameSystem {
     const active = this.lift.activeRoom();
     const openness = this.lift.doorOpenness();
     for (const alcove of this.alcoves) {
-      alcove.doors.setOpen(alcove.room === active ? openness : 0);
+      alcove.alcove.setOpen(alcove.room === active ? openness : 0);
       // Every dial in the hotel reads the same storey, because every alcove is
       // the same lift. The needle sweeps rather than snaps — `indicatedStorey`
       // is already eased for the indicator's own count.
-      alcove.dial.setSweep(this.lift.indicatedStorey() / TOP_STOREY);
+      alcove.alcove.setStorey(this.lift.indicatedStorey());
     }
 
     const player = this.player;
@@ -6370,66 +6338,6 @@ function ease(current: number, target: number, dt: number): number {
   return Math.max(target, current - step);
 }
 
-/**
- * The floor numbers, painted onto the dial's own UV map.
- *
- * **`flipY = false`, via `glbCanvasTexture`** — this face's UVs came out of a
- * `.glb`, where v runs *down* from the top left, and three.js's default flip
- * would cancel out the wrong way and paint the numbers upside down. That is
- * the bug that ate a day on the tower's signboard; see that helper's header.
- *
- * The face's UVs are `u = x / 0.9 + 0.5`, `v = z / 0.9 + 0.5` off the disc's
- * own vertices (`hotel_build.py`'s `uv_from_xz`), so a point at dial angle φ
- * lands at `u = cos φ / 2 + 0.5`, `v = sin φ / 2 + 0.5`. With the flip off,
- * v = 1 is the *bottom* of the canvas while it is the *top* of the dial — so
- * the canvas is mirrored vertically once, here, and everything below can then
- * be written in ordinary dial coordinates.
- *
- * Only the floors that exist are labelled. Eleven evenly-spaced numbers is
- * what a real lift dial has and what a six-year-old cannot read; four is the
- * hotel she is actually in.
- */
-function paintDialFace(face: Mesh): void {
-  const SIZE = 512;
-  const canvas = document.createElement('canvas');
-  canvas.width = SIZE;
-  canvas.height = SIZE;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
-
-  ctx.fillStyle = '#fff3c9';
-  ctx.fillRect(0, 0, SIZE, SIZE);
-
-  // The one mirror, so the arithmetic below is in dial space: +y is up the
-  // dial, and a glyph drawn upright here reads upright on the plaque.
-  ctx.translate(0, SIZE);
-  ctx.scale(1, -1);
-
-  ctx.fillStyle = '#4a3a52';
-  ctx.font = 'bold 46px "Trebuchet MS", sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-
-  // Radius the labels sit at, as a fraction of the face — inside the ticks,
-  // which are geometry and stand at about 0.85 of it.
-  const LABEL_RADIUS = 0.64;
-  for (const [storey, label] of [
-    [0, 'G'],
-    [12, '12'],
-    [33, '33'],
-    [50, '50'],
-  ] as const) {
-    // Left-hand end of the arc is the ground floor, right-hand end the top.
-    const phi = Math.PI * (1 - storey / TOP_STOREY);
-    ctx.fillText(
-      label,
-      SIZE / 2 + Math.cos(phi) * LABEL_RADIUS * (SIZE / 2),
-      SIZE / 2 - Math.sin(phi) * LABEL_RADIUS * (SIZE / 2),
-    );
-  }
-
-  face.material = new MeshToonMaterial({ map: glbCanvasTexture(canvas) });
-}
 
 /**
  * What is on the telly: the park, from the hotel, in four bands.
@@ -6607,31 +6515,6 @@ function paintSign(signboard: Mesh): void {
   signboard.material = new MeshToonMaterial({ map: glbCanvasTexture(canvas) });
 }
 
-/**
- * A canvas texture for a mesh whose UVs came out of a **glTF file**.
- *
- * three.js defaults `Texture.flipY` to `true`, which is right for the whole
- * rest of this game: a `CanvasTexture` is painted with y running *down* the
- * page, and geometry built here has v running *up*, so the flip is what makes
- * the two agree. glTF stores its UVs the other way up — v runs down, top-left
- * origin — and the loader does not rewrite them, so the same default flip
- * applied to an authored mesh cancels out the wrong way and the writing comes
- * out **upside-down**. QA found exactly that on the tower's signboard
- * (6 August 2026), and the "yours" plaque had it too — it was simply harder to
- * spot on a five-letter word in a rounded panel.
- *
- * Both painted panels in this hotel are authored nodes (`hotel_build.py` UV-maps
- * them), so both go through here. **Anything else that paints words onto an
- * asset from a `.glb` must do the same** — the failure is silent, symmetrical
- * and looks like a modelling mistake rather than a texture setting.
- */
-function glbCanvasTexture(canvas: HTMLCanvasElement): CanvasTexture {
-  const texture = new CanvasTexture(canvas);
-  texture.colorSpace = SRGBColorSpace;
-  texture.flipY = false;
-  texture.needsUpdate = true;
-  return texture;
-}
 
 /**
  * Recolours one named part of an authored asset, outline included.

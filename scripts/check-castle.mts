@@ -23,13 +23,14 @@
  * Run: `npm run check:castle`
  */
 import './headless-canvas.mjs';
-import { Box3, Group, InstancedMesh, Matrix4, Mesh, Vector3, type Object3D, type Texture } from 'three';
+import { Box3, Group, InstancedMesh, Matrix4, Mesh, Raycaster, Vector3, type Object3D, type Texture } from 'three';
 import { CASTLE_FLOORS, FLOOR_SPACE_SPACING } from '../src/world/building/floors.ts';
 import {
   BUILDING_FLOOR_COUNT,
   BUILDING_FLOOR_HEIGHT,
   BUILDING_WALL_THICKNESS,
   CAMERA_PITCH_DEGREES,
+  CAMERA_YAW_DEGREES,
   INTERIOR_HALF_X,
   INTERIOR_HALF_Z,
   PLAYER_RADIUS,
@@ -39,8 +40,13 @@ import { BuildingShell } from '../src/world/building/Shell.ts';
 import {
   insideInterior,
   regionContains,
+  LIFT_CAR_X,
+  LIFT_DOOR_Z,
+  LIFT_OUT_YAW,
+  LIFT_WALL_X,
   TOP_DECK,
 } from '../src/world/building/layout.ts';
+import { LiftAlcove } from '../src/world/lift/LiftAlcove.ts';
 import {
   CASTLE_BENCH_SEAT,
   CASTLE_PLINTH_TOP,
@@ -1245,49 +1251,134 @@ for (const [axis, measured, owned] of [
 
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// 9. The lift is a lift, and you can see the child inside it.
+// ---------------------------------------------------------------------------
+
+/**
+ * **Issue #450, and the two ways it went wrong.**
+ *
+ * First there was no car at all: `GlassLift` was deleted with the floor split
+ * (#377/#380) and nothing replaced it, so the lift glided a six-year-old out
+ * through a hole in a wall and held her in open air for the whole ride. Every
+ * check was green — because every check measured *props*, and the one place she
+ * actually stands had nothing standing in it to measure.
+ *
+ * Then, with the hotel's car finally hung in the castle's **east** wall, she
+ * boarded and **disappeared**: the park's camera is fixed at 45° looking along
+ * −X−Z, so an east-wall alcove points away from it and the car's own back panel
+ * stood between the camera and the rider. Also green, and also only findable by
+ * riding it, which is how Jim found the first one.
+ *
+ * So this measures both, off the built objects:
+ *
+ *  1. the rider's spot is **inside** a lift car, and
+ *  2. the line from her out to the camera **leaves that car**, at head, chest
+ *     and waist height.
+ *
+ * (2) is the one that cannot be satisfied by an alcove in the wrong wall — at
+ * any opacity, with any amount of hiding — which is why the wall moved rather
+ * than the car being faded. Only the **car** is tested: the doors are meant to
+ * shut in front of her, and the architrave is the hole she is seen through.
+ */
+{
+  const alcove = new LiftAlcove({
+    wallX: LIFT_WALL_X,
+    wallZ: LIFT_DOOR_Z,
+    yaw: LIFT_OUT_YAW,
+    topOfScale: CASTLE_FLOORS.length - 1,
+    labels: CASTLE_FLOORS.map((floor) => ({ at: floor.index, text: floor.glyph })),
+  });
+  alcove.root.updateMatrixWorld(true);
+
+  const carParts: Mesh[] = [];
+  const carBoxes: Box3[] = [];
+  alcove.root.traverse((object: Object3D) => {
+    const mesh = object as Mesh;
+    if (mesh.isMesh !== true || !mesh.geometry) return;
+    const named = mesh.name || (mesh.parent?.name ?? '');
+    if (!named.startsWith('lift-car')) return;
+    carParts.push(mesh);
+    mesh.geometry.computeBoundingBox();
+    const box = mesh.geometry.boundingBox;
+    if (box) carBoxes.push(box.clone().applyMatrix4(mesh.matrixWorld));
+  });
+
+  if (carBoxes.length === 0) {
+    fail(
+      'check:castle lift: the alcove built no lift car at all — nothing for a rider to stand in.',
+    );
+  }
+
+  // Where the ride actually poses her (`liftRide.ts`), in the alcove's frame.
+  const rider = new Vector3(LIFT_CAR_X, 0, LIFT_DOOR_Z);
+  const inCar = carBoxes.some(
+    (box) =>
+      rider.x >= box.min.x && rider.x <= box.max.x && rider.z >= box.min.z && rider.z <= box.max.z,
+  );
+  if (!inCar) {
+    fail(
+      `check:castle lift: the rider stands at local (${LIFT_CAR_X.toFixed(2)}, ` +
+        `${LIFT_DOOR_Z.toFixed(2)}) and no part of the car covers it — she would ride in mid-air.`,
+    );
+  }
+
+  // Out towards the camera: the game's own fixed yaw and pitch, never a
+  // direction written down here.
+  const pitch = (CAMERA_PITCH_DEGREES * Math.PI) / 180;
+  const yaw = (CAMERA_YAW_DEGREES * Math.PI) / 180;
+  const toCamera = new Vector3(
+    Math.cos(pitch) * Math.sin(yaw),
+    Math.sin(pitch),
+    Math.cos(pitch) * Math.cos(yaw),
+  ).normalize();
+
+  // Head, chest and waist — the same three heights `check:hotel` and
+  // `check:statue-occlusion` use, because her head clearing an obstruction
+  // while her body does not is still "she cannot be seen".
+  //
+  // **A real ray against real triangles**, not a bounding-box march: the shell
+  // is a hollow box, so its bounding box contains the whole inside of the car
+  // and every sightline out of it would "hit" immediately. The first draft did
+  // exactly that and reported two obstructions in a lift you can plainly see
+  // into — a check that cannot pass, which is the same disease as one that
+  // cannot fail.
+  const heights = [TALLEST_CHILD * 0.95, TALLEST_CHILD * 0.7, TALLEST_CHILD * 0.45];
+  let blocked = 0;
+  for (const height of heights) {
+    const from = new Vector3(rider.x, height, rider.z);
+    const ray = new Raycaster(from, toCamera, 0.02, 12);
+    const hit = ray.intersectObjects(carParts, false)[0];
+    if (hit) {
+      blocked += 1;
+      fail(
+        `check:castle lift: at ${height.toFixed(2)} m up her body the line to the camera meets ` +
+          `'${hit.object.name}' ${hit.distance.toFixed(2)} m out — the car is between the ` +
+          `camera and the child riding in it, which is #450.`,
+      );
+    }
+  }
+
+  alcove.dispose();
+  console.log(
+    // Never the word OK on a run that just failed: the summary is a
+    // measurement, and one that congratulates itself while the failure list
+    // fills up is the "check that cannot fail" wearing a rosette.
+    `check:castle lift ${blocked === 0 && inCar ? 'OK' : 'FAILED'} — ${carBoxes.length} ` +
+      `car part(s) built at the ` +
+      `${LIFT_WALL_X < 0 ? 'west' : 'east'} wall; the rider's spot is ` +
+      `${inCar ? 'inside' : 'NOT inside'} them, and ` +
+      `${heights.length} sightlines cast out to the camera from head, chest and waist found ` +
+      `${blocked} obstruction(s). Both facts are read off a built LiftAlcove, not off the ` +
+      `constants that placed it.`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+
 if (failures.length > 0) {
   console.error(`\ncheck:castle — ${failures.length} failure(s):\n`);
   for (const message of failures) console.error(`  ✗ ${message}`);
   console.error('');
   process.exit(1);
 }
-
-// **Every number in these three lines is counted, never a constant dressed up as
-// a finding.** The first line used to say "across ${TOP_DECK} enclosed storeys",
-// which was a constant printed as though something had gone and looked — so it
-// read identically on a castle with no ceiling at all. `storeysSeen`,
-// `platedSegmentsInScene`, `flagstonedDecksInScene` and `coursedWallsInScene` are
-// incremented only when a mesh was found in a built `BuildingShell('interior')`,
-// and `storeysDressed` only when a storey actually yielded placed decoration, so
-// each of them goes down when the castle does.
-console.log(
-  `check:castle OK — ${beamsChecked} ceiling-beam segments built, and in an assembled ` +
-    `BuildingShell('interior') ${storeysSeen} storeys were found with both a ceiling and a ` +
-    `flagstone floor (${platedSegmentsInScene} plate segments in the tree, ` +
-    `${flagstonedDecksInScene} flagstoned decks, ${coursedWallsInScene} coursed wall runs). ` +
-    `Every segment is fixed to real slab across its whole measured footprint and clear of a ` +
-    `${TALLEST_CHILD} m child under a ${CASTLE_CEILING_CLEAR.toFixed(2)} m ceiling, and ` +
-    `BEAM_UNDERSIDE agrees with the mesh at ${BEAM_UNDERSIDE.toFixed(3)} m.`,
-);
-console.log(
-  `check:castle props OK — ${propsChecked} placed instances measured across ` +
-    `${storeysDressed} storeys, none in a walkable route or on a shop stand and none ` +
-    `through a ceiling. Route-exempt: ${exemptOverhead} entirely above a ${TALLEST_CHILD} m ` +
-    `child, ${exemptFlat} floor treatment under ${FLOOR_TREATMENT_MAX_HEIGHT} m tall, ` +
-    `${exemptWall} wall furniture within ${WALL_FURNITURE_REACH} m of its wall. All three ` +
-    `exemptions are measured off the object, never taken from its name.`,
-);
-console.log(
-  `check:castle plate OK — ${plateProps} floor-standing props on ${plateStoreys.size} floor(s), ` +
-    `every one of them over its own floor's plate rather than hanging in mid-air over the plaza. ` +
-    `This replaces the shaft assertion, which is retired because #377 removed every shaft: the ` +
-    `structure that used to come down through a solid floor no longer exists. Every figure here ` +
-    `is counted, not the size of a list.`,
-);
-console.log(
-  `check:castle contract OK — ${contractChecked} published figures measured against the ` +
-    `furniture standing in the great hall: TABLE_TOP ${CASTLE_TABLE_TOP.toFixed(3)} m, ` +
-    `BENCH_SEAT ${CASTLE_BENCH_SEAT.toFixed(3)} m, PLINTH_TOP ${CASTLE_PLINTH_TOP.toFixed(3)} m, ` +
-    `and the sconce's cup on the flame's own placement. Every one measured off the built object, ` +
-    `outline excluded, never re-read from the file it came from.`,
-);

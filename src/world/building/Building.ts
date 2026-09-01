@@ -44,6 +44,7 @@ import { WildPets } from './WildPets';
 import type { IsoCamera } from '../../core/IsoCamera';
 import type { InteractZone } from '../interact';
 import { softMaterial } from './parts';
+import { LiftAlcove } from '../lift/LiftAlcove';
 import {
   BALL_PIT_RADIUS,
   LIFT_CAR_X,
@@ -59,6 +60,8 @@ import {
   INTERIOR_DOOR_MIN_X,
   LIFT_DOOR_MAX_Z,
   LIFT_DOOR_MIN_Z,
+  LIFT_OUT_YAW,
+  LIFT_WALL_X,
   TOILET_DECK,
   TOILET_ROOM,
   TOP_DECK,
@@ -449,6 +452,11 @@ export class Building implements GameSystem {
   private parkRoot!: Group;
 
   private readonly liftRide: LiftRide;
+  /**
+   * The lift you can see, one per floor — see the constructor. Indexed by deck,
+   * so `activeFloor().index` picks the one whose doors are the live ones.
+   */
+  private readonly liftAlcoves: LiftAlcove[] = [];
   private readonly trampoline = new Trampoline();
 
   /**
@@ -528,6 +536,34 @@ export class Building implements GameSystem {
       cancelWalk: () => this.controls.cancelWalk(),
       player: () => this.player,
     });
+    // **And the lift you can see and stand in**, one per floor, in that floor's
+    // own group. This is the same `LiftAlcove` the hotel hangs in its west wall
+    // — car, architrave, sliding doors, pointer dial — reused rather than
+    // rebuilt, which is Jim's instruction on #450 (*"it should be like in the
+    // hotel"*) and CLAUDE.md's rule besides. Before it there was nothing here
+    // at all: `GlassLift` went with the floor split and `liftRide.ts` glided
+    // her out through the hole in the east wall to hang in open air for the
+    // whole ride.
+    //
+    // Built here, before `dressDeck` and the fader, for the same reason the
+    // dressing is: anything added to a floor group afterwards is not part of
+    // the cutaway.
+    this.shell.floorGroups.forEach((group, index) => {
+      const alcove = new LiftAlcove({
+        wallX: LIFT_WALL_X,
+        wallZ: LIFT_DOOR_Z,
+        // Out of the west wall — the same quarter turn the hotel's takes.
+        yaw: LIFT_OUT_YAW,
+        topOfScale: CASTLE_FLOORS.length - 1,
+        // Three floors, so every one of them is labelled — and with the glyph
+        // off its own button, so the dial and the button she just pressed
+        // cannot say different things about the same floor.
+        labels: CASTLE_FLOORS.map((floor) => ({ at: floor.index, text: floor.glyph })),
+      });
+      group.add(alcove.root);
+      this.liftAlcoves[index] = alcove;
+    });
+
     // Off until the player is actually indoors under a ceiling (see `update`);
     // starts invisible for the same reason `interiorRoot` does.
     this.interiorRoot.add(this.interiorLighting.group);
@@ -820,6 +856,7 @@ export class Building implements GameSystem {
     this.spaces.update(dt);
 
     this.liftRide.update(dt);
+    this.updateLiftAlcoves();
     this.trampoline.update(dt);
     this.toilets.update(dt, elapsed, this.toiletOccupied());
     this.ballPit.update(dt, elapsed);
@@ -946,7 +983,7 @@ export class Building implements GameSystem {
           floorX(floor, LIFT_CAR_X),
           BUILDING_BASE_Y,
           floorZ(floor, LIFT_DOOR_Z),
-          Math.PI / 2,
+          LIFT_OUT_YAW,
         );
       }
       this.showOnly(floor);
@@ -972,6 +1009,29 @@ export class Building implements GameSystem {
     this.collision.setPlayBounds(
       circleBoundary(INTERIOR_PLAY_RADIUS, floor.originX, floor.originZ),
     );
+  }
+
+  /**
+   * One frame of every lift alcove — the doors, and the needle.
+   *
+   * Driven from `LiftRide.doorOpenness()` rather than from its phase: the lift
+   * owns *when*, the alcove owns what that looks like, and a copy of that
+   * switch statement over here would go stale the next time a phase is added.
+   * Same reason `activeFloor()` exists — while she is "travelling" the doors
+   * that matter are the ones on the floor she is about to be standing in, and
+   * only the lift knows which that is.
+   *
+   * Line for line the hotel's `updateDoors`, because it is the same lift.
+   */
+  private updateLiftAlcoves(): void {
+    const active = this.liftRide.activeFloor();
+    const openness = this.liftRide.doorOpenness();
+    const storey = this.liftRide.indicatedFloor();
+    this.liftAlcoves.forEach((alcove, index) => {
+      const live = index === active?.index;
+      alcove.setOpen(live ? openness : 0);
+      alcove.setStorey(storey);
+    });
   }
 
   /**
@@ -1631,7 +1691,6 @@ function registerInteriorCollision(collision: CollisionWorld, floor: CastleFloor
   const south = floorZ(floor, floor.halfZ);
 
   collision.addWall(west, north, east, north, 0.3);
-  collision.addWall(west, north, west, south, 0.3);
 
   // South face. The way out is only cut on the **mall** — it is the only floor
   // with a front door, and a gap in the great hall's or the roof garden's south
@@ -1644,9 +1703,12 @@ function registerInteriorCollision(collision: CollisionWorld, floor: CastleFloor
     collision.addWall(west, south, east, south, 0.3);
   }
 
-  // East face, minus the way into the lift alcove. Every floor has one.
-  collision.addWall(east, north, east, floorZ(floor, LIFT_DOOR_MIN_Z), 0.3);
-  collision.addWall(east, floorZ(floor, LIFT_DOOR_MAX_Z), east, south, 0.3);
+  // East face: solid all the way since the lift moved off it (#450).
+  collision.addWall(east, north, east, south, 0.3);
+
+  // West face, minus the way into the lift alcove. Every floor has one.
+  collision.addWall(west, north, west, floorZ(floor, LIFT_DOOR_MIN_Z), 0.3);
+  collision.addWall(west, floorZ(floor, LIFT_DOOR_MAX_Z), west, south, 0.3);
 
   // The stairs' and the escalator's side walls were registered here — a wall
   // down each side of every ramp, so a wobbly step sideways met a rail instead
