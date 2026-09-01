@@ -22,40 +22,57 @@ reconciliation, the same **probe geometry** is rebuilt on main:
 Both constraints are measured, never argued: kerb detour on all five CI seeds,
 and `check:fountain-hop` on all five CI seeds.
 
-## Two environments, and they do not agree
+## The seed list was wrong, and it was hiding the floor
 
-**Main-only instrument** (`sweep-hop-multiplier.mts`, worst of 344 probes over
-the five CI seeds, ratio against `M = 1`): fountain fails at every `M <= 2.1`
-and passes from `2.2` up. Kerb detour steps up in plateaus —
-`43.7%` at 2.1–2.4, `68.2%` at 2.5–3, `114.3%` at 3.5–4, `118.7%` at 6.4.
+`check-fountain-hop.mts` and `measure-hop-detours.mts` both swept
+`[PARK_SEED, 2, 5, 11, 18]` and called it "the five seeds CI builds a park on".
+It is not: **#429 retired seed 2** (it proves zero bridge sites) and put **24**
+in its place — `test/procgen/` is the owner. Corrected in both files.
 
-**The environment the 73% ceiling actually lives in** — a throwaway worktree
-`.claude/worktrees/hop-measure` (branch `tmp/hop-measure`), which is
-`feat/prefer-walking-on-paths` with #452 cherry-picked and the previous agent's
-`lineCost` reconciliation reproduced. **It reproduces their numbers exactly**:
-canonical `183.9%` worst, `+0.21 m` mean, probe `(14, 14) 4.1 m off`, mean paved
-`83.3%`; seed 24 `202.4%`. So it is the same measurement, not a lookalike.
+This is load-bearing, not tidying: **seed 24 is the seed that binds the fountain
+hardest.** Its fountain goes red at `M = 2.3` while all four of the old list's
+seeds are still green there, so the check that exists to defend the fountain
+could not see its own floor. It passes on 24 at today's `6.4`, so the
+correction changes no verdict on main today.
 
-And in that environment the worst case is **not monotone in M**:
+## Two environments, both measured
 
-| M | canonical worst kerb |
-|---|---|
-| 2 | 47.8% ok |
-| 2.5 | 52.4% ok |
-| 3 | **120.5% FAIL** |
-| 3.5 | 12.5% ok |
-| 4 | 12.5% ok |
-| 6.4 | **183.9% FAIL** |
+**Main** (`sweep-hop-multiplier.mts`; worst of 342 kerb probes over the
+corrected five seeds, ratio against `M = 1`; fountain via `check:fountain-hop`).
+Monotone and well behaved: fountain red at `<= 2.3`, green from `2.4`; kerb
+`43.7%` at 2.2–2.5, `68.2%` at 2.6–3.1, `94.7%` at 3.2, `114.3%` at 3.3+.
 
-That is the crux. The assertion is a **worst-of-105** over routes that change
-topology discontinuously as the price of a crossing moves, so a value chosen by
-"sweep until it passes" is green by the luck of one probe, not by a property of
-the number. Denser sweep running; verify determinism by re-running 3 and 3.5
-before believing the shape.
+**The environment the 73% ceiling actually lives in** — throwaway worktree
+`.claude/worktrees/hop-measure` (branch `tmp/hop-measure`):
+`feat/prefer-walking-on-paths` + #452 cherry-picked, with the previous agent's
+`lineCost` reconciliation reproduced. **It reproduces their numbers exactly** —
+canonical `183.9%`, `+0.21 m`, probe `(14, 14) 4.1 m off`, mean paved `83.3%`;
+seed 24 `202.4%` — so it is the same measurement, not a lookalike.
 
-**Throwaway worktree housekeeping:** `rerere.enabled` was set to `false`
-repo-wide so the cherry-pick's resolution could not be replayed into the real
-merge (CLAUDE.md's rerere hazard). **It must be set back to `true`.**
+Worst kerb detour per seed, ceiling 73%:
+
+| M | canon | 5 | 11 | 18 | 24 | fountain |
+|---|---|---|---|---|---|---|
+| 2.2 | 12.5 | 21.3 | 6.1 | 37.9 | 7.6 | **red (24)** |
+| 2.3 | 12.5 | 21.3 | 6.1 | 34.2 | 7.6 | **red (24)** |
+| **2.4** | 12.5 | 21.3 | 6.1 | 34.2 | 7.6 | **ok** |
+| 2.5 | 52.4 | 21.3 | 6.1 | **85.7** | 7.6 | ok |
+| **2.6** | 12.5 | 21.3 | 6.1 | 19.6 | 7.6 | **ok** |
+| 2.8 | **120.5** | 21.3 | 6.1 | 32.1 | 7.6 | ok |
+| 3 | **120.5** | 21.3 | 6.1 | 19.6 | 43.8 | ok |
+| 3.2 | **120.5** | 21.3 | **104.2** | 37.4 | 43.8 | ok |
+| 3.5 | 12.5 | 21.3 | **104.2** | 37.4 | 43.8 | ok |
+| 4 | 12.5 | **98.7** | **97.3** | 69.4 | 7.6 | ok |
+| 5 | 12.5 | 21.3 | **118.7** | 37.3 | 7.6 | ok |
+| 6.4 | **183.9** | 21.3 | 6.1 | 37.3 | **202.4** | ok |
+
+**It is deterministic** — 2.8 re-run gave 120.5% to the decimal — so the
+non-monotonicity is real router behaviour, not noise: the assertion is a
+worst-of-105 over routes whose topology flips as the price of a crossing moves.
+
+**A value does exist: 2.4 and 2.6 are green everywhere in both environments**,
+and 2.5 between them is not (seed 18, 85.7%). Mapping the width of the 2.6
+plateau now; a value picked off a knife edge is not a fix, whatever it scores.
 
 ## Status
 
