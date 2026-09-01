@@ -58,19 +58,37 @@
  *
  * ## Proven red by mutation
  *
- * With `OFF_PATH_COST_MULTIPLIER` set to 1 in `src/world/paving.ts` — i.e. the
- * behaviour before this issue — this check fails; the transcript is in the PR
- * for #416. It also fails with the multiplier left alone but the smoother's
- * weighted-chord test reverted to a bare walkability test, which is the subtler
- * of the two ways to ship this feature inert.
+ * Re-run 1 September 2026 against the thresholds below, on the canonical park.
  *
- * **A transcript is a measurement, and measurements go stale** (CLAUDE.md).
- * So the first of those two mutations is also asserted *live*, by
- * `the bar is a real bar` below: the unweighted lattice is the mutated router,
- * built in this same process, and the check requires it to fail the very bar
- * the weighted one passes. Reverting the multiplier makes the two columns
- * coincide and takes that assertion red without anyone having to re-run a
- * transcript by hand.
+ * **Mutation 2 — the smoother stops respecting the weighting** (delete the
+ * `chordCost > (polyCost + legCost) * (1 + SMOOTH_CORNER_TOLERANCE)` line in
+ * `NavGrid.smooth`; the feature shipped with only half of it, which is the
+ * subtle way to get this wrong). This is the honest proof of the two
+ * assertions below, because it does not touch `OFF_PATH_COST_MULTIPLIER`, so
+ * the population is the same 71 probes and only the routes change:
+ *
+ * ```
+ * FAIL  routes stay on the paving: mean 67.8% ... (floor 70%)     [was 83.0%]
+ * FAIL  most routes are mostly paved: 52 of 71 (73.2%), bar 85%   [was 68 of 71, 95.8%]
+ * exit=1
+ * ```
+ *
+ * **Mutation 1 — `OFF_PATH_COST_MULTIPLIER = 1`**, the behaviour before this
+ * issue. This also exits 1, but **be precise about why, because it is not the
+ * paving assertions that fail**: the servable predicate is defined in terms of
+ * that very multiplier, so setting it to 1 collapses the population to 2 probes
+ * and the run stops at the `< 8` guard with *"only 2 of 100 probes both arrive
+ * and have a paved route inside 1x"*. Red, and loudly, but it is the guard
+ * talking, not a measurement of paving.
+ *
+ * **A transcript is a measurement, and measurements go stale** (CLAUDE.md), so
+ * what mutation 1 was *for* is asserted live instead, on every invocation, by
+ * `the bar is a real bar` below. The unweighted lattice is that mutation —
+ * built in this same process, at the true multiplier, over the true
+ * population — and the check requires it to fail the very bar the weighted one
+ * passes. It fails it by 47.0 points on the canonical park and by 47–73 across
+ * the five seeds. That is the strongest form of the claim available here: not
+ * "someone once saw this go red", but "it is red right now, in this run".
  *
  * ## Every seed, not just the canonical one
  *
