@@ -46,3 +46,31 @@ within 4.2 m of her 3 s later.
 - Added `check:pet-slide` to the `check` chain: step sets compared against
   `origin/main` — 55 -> 56, nothing dropped.
 - TODO: browser QA on port 5581 (`/slide`), mid-descent screenshots, PR.
+
+## Round 2 — the framing fix (1 Sept)
+
+The first version put the pets at 1.5/2.7/3.9 m behind her. The chase lens is
+4.35 m behind her, so the third pet rode **0.45 m in front of the camera and
+filled the frame**. Found by pausing the game mid-descent in a real browser and
+looking; the check's "is a companion in the frustum" clause scored 100% while it
+was true. **In frustum is not in shot.**
+
+Fixes:
+- `PET_BLIND_BAND` (2.35 m) — no companion may ride within that of the lens, so
+  exactly one is in the chase shot and the rest sit behind it. A companion is
+  1.46 m tall (`ParadeMember.height`), nearly as tall as the child, which is why
+  only one fits.
+- `PET_SIDE_STEP` (0.45 m) — the line zigzags either side of the centre line so
+  the middle of the shot stays hers.
+- `check:pet-slide` now rasters the live chase camera: fails if she is ever 0 px
+  or one pet exceeds 25% of the frame. `CHASE_EYE_BACK` is compared against the
+  ride's **live** mounted camera, so the one copied number cannot drift.
+
+## State (PR #469 open)
+
+- build 0; test:procgen 0 (**497 tests, 16 files**); check:pet-slide 0.
+- Full `check` was still running locally at hand-off; CI has it.
+- Open question for Jim: one 1.46 m pet 3.2 m from the lens is big in the chase
+  shot (3% of frame, she keeps 526 of 612 px). Levers: `PET_BLIND_BAND`,
+  `CHASE_EYE`.
+- Browser page closed, dev server on 5581 killed (PIDs 18744/18752).
