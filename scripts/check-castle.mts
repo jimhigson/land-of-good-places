@@ -24,7 +24,8 @@
  */
 import './headless-canvas.mjs';
 import { Box3, Group, InstancedMesh, Matrix4, Mesh, Raycaster, Vector3, type Object3D, type Texture } from 'three';
-import { CASTLE_FLOORS, FLOOR_SPACE_SPACING } from '../src/world/building/floors.ts';
+import { CASTLE_FLOORS, CASTLE_ROOF, FLOOR_SPACE_SPACING } from '../src/world/building/floors.ts';
+import { createRoofClouds } from '../src/world/building/roofClouds.ts';
 import {
   BUILDING_FLOOR_COUNT,
   BUILDING_FLOOR_HEIGHT,
@@ -1371,6 +1372,160 @@ for (const [axis, measured, owned] of [
       `${heights.length} sightlines cast out to the camera from head, chest and waist found ` +
       `${blocked} obstruction(s). Both facts are read off a built LiftAlcove, not off the ` +
       `constants that placed it.`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 10. The roof garden stands in open sky, with weather going past it.
+// ---------------------------------------------------------------------------
+
+/**
+ * **Issue #455 — the green floor, and the clouds that replaced it.**
+ *
+ * Jim, riding the lift up: *"There is a green floor for some reason below the
+ * roof garden — it is supposed to be high in the air."* It was `Shell.ts`'s
+ * `interior-plaza`, correct for the stacked building it was written for and
+ * wrong the day the floors became separate spaces at one `y` (#377/#380).
+ *
+ * Three things are asserted here, and the third is the one worth having:
+ *
+ * 1. **Straight down, beyond the parapet, on the roof: nothing.** Cast off the
+ *    built shell, not off a constant — a `buildInteriorPlaza()` call creeping
+ *    back into the roof's branch would be caught by geometry.
+ * 2. **The same rays on the mall: something.** Without this pair the first
+ *    assertion is one deleted `if` away from being a check that cannot fail —
+ *    delete the plaza everywhere and the roof still "passes", while the mall's
+ *    windows look out on a void. It is also what stops the fix over-reaching.
+ * 3. **No cloud ever hangs over the garden — at any point in its drift.** The
+ *    clouds live in the roof's own space and the only thing keeping them
+ *    outside the terrace is `roofClouds.ts`'s claim that a puff's inward reach
+ *    is smaller than its cloud's stand-off. That is arithmetic in a comment
+ *    until something measures it, so every puff is stepped a whole lap round
+ *    the building and its **drawn extent** — centre minus radius — is checked
+ *    against the plate on every step. A grey blob over the meadow is exactly
+ *    what the first build did.
+ */
+{
+  const shell = new BuildingShell('interior');
+  shell.group.updateMatrixWorld(true);
+
+  /** Straight down from well above the deck, at a ring of points off the plate. */
+  function groundUnder(floor: Object3D, radius: number, bearing: number): boolean {
+    const origin = new Vector3(
+      floor.position.x + Math.cos(bearing) * radius,
+      20,
+      Math.sin(bearing) * radius,
+    );
+    const ray = new Raycaster(origin, new Vector3(0, -1, 0), 0.02, 200);
+    return ray.intersectObject(floor, true).length > 0;
+  }
+
+  // Beyond the plate's own corner (26.6 m) and inside where the disc used to
+  // stop (52 m): the band a child sees when she looks over the rim.
+  const RADII = [30, 38, 46, 50];
+  const BEARINGS = 16;
+  const roof = shell.floorGroups[CASTLE_ROOF.index];
+  const mall = shell.floorGroups[0];
+  let roofHits = 0;
+  let mallHits = 0;
+  let cast = 0;
+  for (let i = 0; i < BEARINGS; i += 1) {
+    const bearing = (i / BEARINGS) * Math.PI * 2;
+    for (const radius of RADII) {
+      cast += 1;
+      if (roof && groundUnder(roof, radius, bearing)) roofHits += 1;
+      if (mall && groundUnder(mall, radius, bearing)) mallHits += 1;
+    }
+  }
+  if (roofHits > 0) {
+    fail(
+      `roof: ${roofHits} of ${cast} rays dropped straight down past the roof garden's parapet ` +
+        `landed on something. The roof garden is supposed to be fifty metres up in open sky ` +
+        `(#455) — this is the green floor coming back.`,
+    );
+  }
+  if (mallHits < cast) {
+    fail(
+      `roof: only ${mallHits} of ${cast} rays dropped past the *mall's* edge found ground. ` +
+        `The enclosed floors keep their plaza disc — their windows have to look out on ` +
+        `something — so removing the roof's must not have removed theirs.`,
+    );
+  }
+
+  // --- and no cloud ever drifts over the terrace -------------------------
+  // The rail's height is read off the built parapet, never typed here: the
+  // number this compares against has to be the one the child actually looks
+  // over.
+  const parapetMesh = roof ? findInFloor(roof, 'roof-parapet') : null;
+  const parapetTop = parapetMesh ? new Box3().setFromObject(parapetMesh).max.y : 0;
+  if (!parapetMesh) fail('roof: no roof-parapet in the built roof garden to measure against.');
+  const clouds = createRoofClouds(CASTLE_ROOF.halfX, CASTLE_ROOF.halfZ);
+  const puffs = clouds.root.children[0] as InstancedMesh | undefined;
+  let overGarden = 0;
+  let closest = Infinity;
+  let aboveTheRail = 0;
+  let belowTheDeck = 0;
+  let steps = 0;
+  if (!puffs?.isInstancedMesh) {
+    fail('roof: createRoofClouds built no InstancedMesh, so nothing drifts past the parapet.');
+  } else {
+    const matrix = new Matrix4();
+    // Long enough that even the slowest cloud on the shortest lap goes all the
+    // way round and then some: 400 steps of 1.2 s at the slowest 0.55 m/s is
+    // 264 m against a shortest lap of about 170 m. The seeded starting
+    // arrangement is one out of thousands and proves nothing on its own — the
+    // claim is about all of them.
+    const STEP_SECONDS = 1.2;
+    for (let step = 0; step < 400; step += 1) {
+      steps += 1;
+      for (let i = 0; i < puffs.count; i += 1) {
+        puffs.getMatrixAt(i, matrix);
+        const e = matrix.elements;
+        const x = e[12] as number;
+        const y = e[13] as number;
+        const z = e[14] as number;
+        // The geometry is a unit sphere, so the length of the matrix's first
+        // column *is* the drawn radius in metres — and x and z share a scale.
+        const radius = Math.hypot(e[0] as number, e[1] as number, e[2] as number);
+        // How far the *drawn* puff stays outside the plate: the true distance
+        // from the rectangle, not the worse of the two axes. Per-axis was tried
+        // first and is wrong at the corners — it under-reports a diagonal
+        // stand-off by up to 30%, so it condemned puffs that clear the plate
+        // perfectly well. `dx`/`dz` are zero on an axis the puff overlaps, so
+        // outside gives a real distance and inside gives zero.
+        const dx = Math.max(Math.abs(x) - CASTLE_ROOF.halfX, 0);
+        const dz = Math.max(Math.abs(z) - CASTLE_ROOF.halfZ, 0);
+        const clear = Math.hypot(dx, dz) - radius;
+        if (clear < closest) closest = clear;
+        if (clear < 0) overGarden += 1;
+        if (y > parapetTop) aboveTheRail += 1;
+        if (y < -2) belowTheDeck += 1;
+      }
+      clouds.update(STEP_SECONDS, step * STEP_SECONDS);
+    }
+  }
+  if (overGarden > 0) {
+    fail(
+      `roof: ${overGarden} cloud puff(s) reached back over the roof garden as the field ` +
+        `drifted — worst by ${(-closest).toFixed(2)} m. A cloud belongs outside the parapet; ` +
+        `inside it is a grey blob on the meadow (#455).`,
+    );
+  }
+  if (aboveTheRail === 0 || belowTheDeck === 0) {
+    fail(
+      `roof: the cloud field has ${aboveTheRail} puff-frames above the parapet and ` +
+        `${belowTheDeck} below the deck. It needs both — the ones at head height are what ` +
+        `she sees drift past, the ones below are what say she is high up.`,
+    );
+  }
+  clouds.dispose();
+
+  console.log(
+    `check:castle roof ${roofHits === 0 && mallHits === cast && overGarden === 0 ? 'OK' : 'FAILED'}` +
+      ` — ${cast} rays down past the roof's rim hit ground ${roofHits} time(s) and the same ` +
+      `rays past the mall's hit it ${mallHits} time(s); ${puffs?.count ?? 0} cloud puffs stepped ` +
+      `round ${steps} positions of a full lap stayed clear of the terrace by ` +
+      `${Number.isFinite(closest) ? closest.toFixed(2) : '—'} m at their worst.`,
   );
 }
 

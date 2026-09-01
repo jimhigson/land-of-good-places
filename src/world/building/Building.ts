@@ -41,6 +41,7 @@ import { dressDeck } from './dressing';
 import { CastleFire } from './castleLighting';
 import { dressCastle } from './castleDecor';
 import { WildPets } from './WildPets';
+import { createRoofClouds, type RoofClouds } from './roofClouds';
 import type { IsoCamera } from '../../core/IsoCamera';
 import type { InteractZone } from '../interact';
 import { softMaterial } from './parts';
@@ -291,6 +292,8 @@ export class Building implements GameSystem {
   readonly ballPit = new BallPit();
   /** The wild pets roaming the roof garden (#406). */
   private readonly wildPets: WildPets;
+  /** The clouds drifting past the roof garden's parapet (#455). */
+  private readonly roofClouds: RoofClouds;
 
   /**
    * The chase camera for the ginormous slide (REQUIREMENTS §9).
@@ -589,8 +592,16 @@ export class Building implements GameSystem {
     // them behind a cutaway. Their positions are floor-local and unchanged by
     // that: the offset belongs to the group.
     this.wildPets = new WildPets(CASTLE_ROOF.index, camera);
+    // The clouds that say how high up the roof garden is (#455). Parented to
+    // the same floor group for the same reason, and given the roof's own
+    // half-extents from `floors.ts` rather than a second copy of them, so a
+    // resized castle takes its weather with it.
+    this.roofClouds = createRoofClouds(CASTLE_ROOF.halfX, CASTLE_ROOF.halfZ);
     const roofFloor = this.shell.floorGroups[CASTLE_ROOF.index];
-    if (roofFloor) roofFloor.add(this.wildPets.root);
+    if (roofFloor) {
+      roofFloor.add(this.wildPets.root);
+      roofFloor.add(this.roofClouds.root);
+    }
 
     this.interiorRoot.add(this.grownUp.root);
     this.placeGrownUp();
@@ -868,6 +879,12 @@ export class Building implements GameSystem {
     // arrives to a park that was already going rather than one that starts
     // when she looks at it.
     this.wildPets.update(context);
+    // Only while the roof garden is the space being drawn. Unlike the animals
+    // above, nothing about the clouds is a simulation anybody can arrive in the
+    // middle of — they are a hundred and thirty instance matrices whose only
+    // job is to be moving while she watches, so re-posing them from inside the
+    // mall is pure cost. See `roofClouds.ts`'s `update`.
+    if (this.floor?.index === CASTLE_ROOF.index) this.roofClouds.update(dt, elapsed);
 
     const player = this.player;
     if (!player) return;

@@ -194,11 +194,14 @@ export class BuildingShell {
       this.group.add(floor);
 
       floor.add(buildDeck(plan, deck));
-      // A plaza disc per floor, because each floor now floats over its own
-      // patch of nothing. There used to be one for the whole stack.
-      floor.add(buildInteriorPlaza());
 
       if (deck < plan.enclosedDecks) {
+        // A plaza disc per *enclosed* floor, because each one now floats over
+        // its own patch of nothing and its windows have to look out on
+        // something. There used to be one for the whole stack, and — until
+        // #455 — one for the roof garden too. See {@link buildInteriorPlaza}
+        // for why the roof is now the exception.
+        floor.add(buildInteriorPlaza());
         floor.add(buildWalls(plan, deck, BUILDING_PARAPET));
         floor.add(buildGlass(plan, deck));
         floor.add(buildTrimBand(plan, deck));
@@ -681,17 +684,33 @@ function buildRoofPlanters(plan: ShellPlan): InstancedMesh {
  * skirt round its rim so you can never see under it.
  *
  * The building's space has no terrain — it is not on the hilltop, it is not
- * anywhere. Without this the windows look out on a void and the roof terrace
- * floats over nothing.
+ * anywhere. Without this the enclosed floors' windows look out on a void.
  *
  * It is a **disc**, and the radius matters, for exactly the reason the garden is
  * a diorama on a hilltop (see `constants.ts`): the camera is orthographic, so an
- * endless ground plane fills the frame forever and the sky is never seen. The
- * top floor of this building is the roof and it is supposed to be *outdoors* —
- * so the ground has to stop somewhere inside the view, and it stops at roughly
- * the soft play boundary, by which distance the fog has already dissolved its
- * edge into the horizon colour. Stand at the north-west parapet and there is
- * open sky above the rim, whatever time of day it is.
+ * endless ground plane fills the frame forever and the sky is never seen. So the
+ * ground stops at roughly the soft play boundary, by which distance the fog has
+ * already dissolved its edge into the horizon colour.
+ *
+ * ## The roof garden does not get one — issue #455
+ *
+ * It used to. Jim, riding the lift up: *"There is a green floor for some reason
+ * below the roof garden — it is supposed to be high in the air."* He was looking
+ * at this disc: a metre and a bit under a terrace that is meant to be fifty
+ * metres up, filling the whole lower half of the frame the moment the camera
+ * cleared the parapet, and leaving no sky in shot for the day/night cycle to
+ * show itself in.
+ *
+ * The paragraph that used to stand here claimed the opposite — *"stand at the
+ * north-west parapet and there is open sky above the rim"* — and it was true of
+ * the stacked building it was written for, where the roof was five storeys over
+ * this disc and the drop did the work. Since #377/#380 every floor stands at the
+ * same `y` in its own space, so the roof sat one metre over its own lawn.
+ *
+ * What replaces it is **nothing plus weather**: sky under the parapet, and
+ * `building/roofClouds.ts` drifting past below and beside it. Nothing walkable
+ * changes — `registerInteriorCollision` walls the roof's whole perimeter, so the
+ * disc was scenery and only ever scenery there.
  */
 function buildInteriorPlaza(): Group {
   const group = new Group();
