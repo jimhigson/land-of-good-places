@@ -797,9 +797,38 @@ export function createLiftFrame(): LiftFrameHandle {
  * −0.06 (the plate plus its outline), which is deliberate — the same kind of
  * documented exception as the tower's leaning feet.
  */
-export function createLiftCar(): AssetHandle {
-  const { root } = assemble('hotel.liftCar', ['lift-car-floor', 'lift-car', 'lift-car-rail']);
-  return { root, height: measuredHeight(root), dispose: () => disposeTree(root) };
+export interface LiftCarHandle extends AssetHandle {
+  /**
+   * The panelled walls and ceiling — **the only part of a lift that can ever
+   * stand between the camera and the child inside it.**
+   *
+   * Published as its own handle so a building whose alcove faces away from the
+   * fixed camera can take the shell out of the way while she rides and leave
+   * everything that makes it read as a lift — the floor she stands on, the rail
+   * round her — where it is. See `world/lift/LiftAlcove.ts`, which is the only
+   * caller and carries the reasoning. Looking it up by name from outside would
+   * work today and break silently the day the part is renamed; this is the
+   * asset saying which part is which.
+   */
+  readonly shell: Mesh;
+  readonly floor: Mesh;
+  readonly rail: Mesh;
+}
+
+export function createLiftCar(): LiftCarHandle {
+  const { root, meshes } = assemble('hotel.liftCar', [
+    'lift-car-floor',
+    'lift-car',
+    'lift-car-rail',
+  ]);
+  return {
+    root,
+    height: measuredHeight(root),
+    shell: required(meshes, 'lift-car'),
+    floor: required(meshes, 'lift-car-floor'),
+    rail: required(meshes, 'lift-car-rail'),
+    dispose: () => disposeTree(root),
+  };
 }
 
 export interface LiftDialHandle extends AssetHandle {

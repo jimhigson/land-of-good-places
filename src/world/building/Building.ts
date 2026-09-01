@@ -1026,18 +1026,18 @@ export class Building implements GameSystem {
     const active = this.liftRide.activeFloor();
     const openness = this.liftRide.doorOpenness();
     const storey = this.liftRide.indicatedFloor();
-    // **The car ghosts while it has her.** The castle's alcove is in the east
+    // **The car opens up while it has her.** The castle's alcove is in the east
     // wall, so the car's closed back stands between the fixed camera and
-    // whoever is inside it — see `LiftAlcove.ghostCar`, which is where the
-    // whole of that reasoning lives. Any phase that is posing her counts,
-    // including the doors opening to draw her in, so the box is already
-    // see-through by the time she is behind it.
+    // whoever is inside it — see `LiftAlcove.openUp`, which is where the whole
+    // of that reasoning lives. Any phase that is posing her counts, including
+    // the doors opening to draw her in, so the shell is already out of the way
+    // by the time she is behind it.
     const holdingHer = this.liftRide.hasRider();
     this.liftAlcoves.forEach((alcove, index) => {
       const live = index === active?.index;
       alcove.setOpen(live ? openness : 0);
       alcove.setStorey(storey);
-      alcove.ghostCar(live && holdingHer);
+      alcove.openUp(live && holdingHer);
       alcove.update(dt);
     });
   }
