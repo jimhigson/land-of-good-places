@@ -74,11 +74,36 @@ worst-of-105 over routes whose topology flips as the price of a crossing moves.
 and 2.5 between them is not (seed 18, 85.7%). Mapping the width of the 2.6
 plateau now; a value picked off a knife edge is not a fix, whatever it scores.
 
+## Landed
+
+`HOP_COST_MULTIPLIER = 2.65` (`src/world/NavGrid.ts`), the middle of the only
+all-green run, with the derivation and the non-monotonicity written onto the
+constant. Gate: `check` exit 0, `build` exit 0, `test:procgen` **497**.
+
+Watched running on 5539 (server killed by PID, page closed):
+
+- kerb: spawned on the path at `(-45.07, -21.5)`, walked to `(-40, -22)` —
+  **4.7 m walked for a 5.09 m straight line**, dead straight over the grass past
+  a low pink wall. At 6.4 that same walk was **9.63 m**.
+- fountain: walking past keeps **5.19 m** from the centre against a 3.90 m water
+  edge; tapping the water gets in (ends at `y = 0.744`, the wading surface
+  exactly); and she walks back out again. No console errors.
+
+## Still open — read this before touching the constant again
+
+The kerb worst case is a **worst-of-105 and it is not monotone in M**. 2.65 is
+green with wide margins, but 2.55 and 2.75 either side of the run are red. A
+park regeneration could land the same way. The structural fix is probably a
+different *shape* of cost rather than a better flat number — the failures are
+always short trips (2–4 m off the kerb) where a fixed ~+3 m band price dwarfs
+the journey, while the mean cost is +0.05 m. **Proposed, not built**, and it
+wants Jim's ruling before anyone starts.
+
 ## Status
 
 - [x] Worktree, deps, instrument written and committed
 - [x] Full sweep finished on main; branch-env sweep running
-- [ ] Constant chosen and its derivation written onto it
-- [ ] `pnpm run check` / `build` / `test:procgen` 497
-- [ ] Browser QA on 5539
+- [x] Constant chosen and its derivation written onto it
+- [x] `pnpm run check` / `build` / `test:procgen` 497
+- [x] Browser QA on 5539
 - [ ] PR
