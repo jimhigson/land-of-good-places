@@ -628,6 +628,10 @@ let wheelDrift = 0;
 const recentHeave: number[] = [];
 let stoppedPeakToPeak = Number.NaN;
 let drivingPeakToPeak = 0;
+/** The same, for pitch — see 6e. */
+const recentPitch: number[] = [];
+let drivingPitchPeakToPeak = 0;
+let stoppedPitchPeakToPeak = Number.NaN;
 
 for (let frame = 0; frame < SECONDS / DT; frame += 1) {
   elapsed += DT;
@@ -662,6 +666,14 @@ for (let frame = 0; frame < SECONDS / DT; frame += 1) {
   // Sampled at the very end of the stopped stretch, by which time an
   // under-damped spring has had eight seconds to settle.
   if (elapsed > 37.9 && elapsed < 38) stoppedPeakToPeak = spread;
+
+  recentPitch.push(chassis.rotation.x);
+  if (recentPitch.length > 60) recentPitch.shift();
+  const pitchSpread = Math.max(...recentPitch) - Math.min(...recentPitch);
+  if (elapsed > 20 && elapsed < 24) {
+    drivingPitchPeakToPeak = Math.max(drivingPitchPeakToPeak, pitchSpread);
+  }
+  if (elapsed > 37.9 && elapsed < 38) stoppedPitchPeakToPeak = pitchSpread;
 }
 
 // 6a. The clamps that `CAT_BUS_ARCH_GAP` is derived from are actually enforced.
@@ -710,6 +722,65 @@ check(
   `the body was still moving ${stoppedPeakToPeak.toFixed(5)} m peak-to-peak after eight seconds parked — the bob is running off the clock rather than off the road`,
 );
 note(`parked and settled: ${stoppedPeakToPeak.toFixed(6)} m peak-to-peak`);
+
+/**
+ * 6e. **And it rocks as well as bobbing.**
+ *
+ * Jim, 29 August 2026: *"the bus's bob should also be a rocking back and forth,
+ * since it has suspension at the front and back."* 6c above owns the bob and
+ * cannot see this: heave is the *average* of the two corner springs, so a bus
+ * whose axles moved in perfect lockstep — one spring, effectively — would pass
+ * every assertion in this file with room to spare while being exactly the
+ * vehicle Jim said it should not be. The rock is the *difference* between the
+ * corners, and nothing was measuring the difference.
+ *
+ * This lives here rather than in a new check because it is the same motion, the
+ * same drive and the same road; a second file describing the bus's bob would be
+ * a second definition of it, kept in step by hand.
+ *
+ * Two floors, deliberately:
+ *
+ * - **it rocks at all**, at least a third of the published pitch limit
+ *   peak-to-peak, the same fraction 6c asks of the heave;
+ * - **and the rock is not merely the bob wearing a different name**. The road's
+ *   pitch input is a wave two wheelbases long and its heave input one wheelbase
+ *   long, so the nose's own travel — pitch about the middle, at the chin, plus
+ *   heave — has to be a good deal larger than the heave alone. A "rock" that
+ *   simply rose and fell with the body would satisfy the first floor and fail
+ *   this one.
+ *
+ * Not a ceiling: 6a already caps pitch at `CAT_BUS_MAX_PITCH`, and the pose
+ * sweep above proves the whole envelope clears.
+ */
+const PITCH_FLOOR = CAT_BUS_MAX_PITCH / 3;
+check(
+  drivingPitchPeakToPeak > PITCH_FLOOR,
+  `the body only pitched ${drivingPitchPeakToPeak.toFixed(5)} rad peak-to-peak while cruising at 6 m/s — ` +
+    `it is bobbing but not rocking, which is a bus with one spring rather than an axle at each end ` +
+    `(expected more than ${PITCH_FLOOR.toFixed(5)} rad)`,
+);
+/**
+ * The chin, {@link NOSE_AHEAD} m in front of the middle, is where a rock is
+ * actually seen — pitch is an angle, and an angle is only visible through the
+ * lever it acts on. Read off the built model rather than restated: the same
+ * bodywork box the ride-height derivation in `catBus.ts` is written against.
+ */
+const NOSE_AHEAD = new Box3().setFromObject(chassis).max.z;
+const noseTravel = drivingPitchPeakToPeak * NOSE_AHEAD;
+check(
+  noseTravel > drivingPeakToPeak * 1.2,
+  `the nose travels ${noseTravel.toFixed(3)} m peak-to-peak from pitch against ${drivingPeakToPeak.toFixed(3)} m of heave — ` +
+    `the rock is not distinguishable from the bob, so the bus reads as rising and falling flat`,
+);
+note(
+  `cruising: ${drivingPitchPeakToPeak.toFixed(5)} rad peak-to-peak pitch, which swings the nose at ` +
+    `z=${NOSE_AHEAD.toFixed(2)} m through ${noseTravel.toFixed(3)} m against ${drivingPeakToPeak.toFixed(3)} m of heave`,
+);
+check(
+  stoppedPitchPeakToPeak < PITCH_FLOOR / 10,
+  `the body was still rocking ${stoppedPitchPeakToPeak.toFixed(6)} rad peak-to-peak after eight seconds parked — ` +
+    `the rock is running off the clock rather than off the road`,
+);
 
 // --------------------------------- 7. the stripes are one pattern, one scale
 

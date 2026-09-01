@@ -778,8 +778,8 @@ const SPRING_DAMPING = 7.4;
 const HEAVE_WAVE = (Math.PI * 2) / WHEELBASE;
 function roadHeightAt(distance: number): number {
   return (
-    Math.sin(distance * HEAVE_WAVE) * 0.12 +
-    Math.sin(distance * HEAVE_WAVE * 0.5 + 1.7) * 0.105 +
+    Math.sin(distance * HEAVE_WAVE) * 0.105 +
+    Math.sin(distance * HEAVE_WAVE * 0.5 + 1.7) * 0.135 +
     Math.sin(distance * HEAVE_WAVE * 3 + 3.9) * 0.035
   );
 }
@@ -917,19 +917,33 @@ export function buildFenderPaw(
 
   // Three beans, fanned round the leading edge — the same count and the same
   // fan as the painted print, so the two read as one animal.
-  const BEAN_RADIUS = palmRadius * 0.44;
+  /**
+   * Big enough to be three toes rather than three dots.
+   *
+   * Sized by looking rather than by ratio: at 0.44 the beans sat inside the
+   * palm's own outline from the game's camera and the paw read as a smooth
+   * boot with a pink spot on the toe. **A paw's silhouette is lumpy** — that
+   * is most of what distinguishes it from a leg — so the beans have to break
+   * the palm's outline rather than decorate its surface. §4's "break the
+   * silhouette", applied to a foot instead of a head.
+   *
+   * The width they can spread to is bounded, as everything on this axle is, by
+   * the mudguard: `sin(0.62) * 0.72 + 0.5` of the palm radius is 0.92 of it,
+   * so the widest bean still sits inside the palm, which sits inside the arch.
+   */
+  const BEAN_RADIUS = palmRadius * 0.5;
   for (let i = 0; i < 3; i += 1) {
     const a = (i - 1) * 0.62;
     const bean = blob(BEAN_RADIUS, beanMaterial, [1, 0.8, 1]);
     bean.name = 'cat-bus-paw-bean';
     // Proud of the palm's own surface in y — §5's markings rule, a patch whose
     // front sits inside the body shows only as a jagged intersection curve —
-    // and fanned forward past its leading edge in z, so the toes are what the
-    // silhouette leads with.
+    // and fanned past its leading edge in z, the middle toe leading, so the
+    // toes are what the silhouette ends in.
     bean.position.set(
-      Math.sin(a) * palmRadius * 0.62,
-      palmRadius * PALM_SQUASH[1] * 0.72,
-      palmRadius * PALM_SQUASH[2] * (0.9 + Math.cos(a) * 0.16),
+      Math.sin(a) * palmRadius * 0.72,
+      palmRadius * PALM_SQUASH[1] * 0.7,
+      palmRadius * PALM_SQUASH[2] * (0.95 + Math.cos(a) * 0.17),
     );
     group.add(bean);
   }
