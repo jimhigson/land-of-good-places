@@ -565,3 +565,66 @@ present.
 landed PR moves the park, so the derivation tables in the source are still
 accurate. `tsc` 0, `build` 0, `test:procgen` **497**, and main's own two new
 steps (`look-around`, `keyring-view`) green on this branch.
+
+## Measured against #452 (`feat/hoppable-walls-cost`), 1 Sep — measurement only
+
+Done in a **throwaway worktree, never pushed, since deleted**. Neither branch
+was rebased or merged; sequencing is the Overseer's.
+
+### 1. Admissibility holds — structurally, not by luck
+
+Both changes write `step *= <multiplier>` on the **same** `let step` in the
+same neighbour loop (`costOf` → 1 or 1.6; `HOP_COST_MULTIPLIER` → 6.4), and
+**neither touches `heuristic()`**, which stays octile in cell units at cost 1.
+Every multiplier is >= 1 on the geometric step, so the heuristic remains a
+lower bound with **both** applied (worst case 1.6 x 6.4 = 10.24x) exactly as
+with either alone. This is a property of the composition, not of the two
+particular numbers: any further weighting of the same shape is also safe.
+
+### 2. The thresholds survive unchanged — no re-derivation needed
+
+| seed | n (alone → with #452) | mean (floor 70) | share >=60% (bar 85) |
+|---|---|---|---|
+| canonical | 71 → 83 | 83.0 → **83.3** | 95.8 → **96.4** |
+| 5 | 52 → 60 | 82.3 → **82.5** | 96.2 → **95.0** |
+| 11 | 49 → 57 | 74.3 → **74.6** | 91.8 → **93.0** |
+| 18 | 43 → 49 | 79.1 → **79.0** | 95.3 → **91.8** |
+| 24 | 47 → 52 | 80.1 → **81.3** | 95.7 → **96.2** |
+
+Binding margins are unchanged: mean +4.3 → **+4.6** (seed 11 still), share
++6.8 → **+6.8** (binding seed moves 11 → 18). `the bar is a real bar` still
+fails unweighted by **38.8–72.8** points. **85/60 and the 70% mean floor stand
+as derived.**
+
+### 3. #452 largely fixes #448's arrival failures
+
+Probes that never arrive: **22 → 10** canonical, 20 → 9, 24 → 12, 27 → 17,
+and **11 → 0 on seed 24**, which goes fully green on `every probe arrives`.
+Its `Fountain.ts` change reaches the same defect this branch documented.
+
+### 4. But #452 breaks `stepping off the kerb stays a step`
+
+| seed | worst kerb detour | ceiling |
+|---|---|---|
+| canonical | **183.9%** (a spot 4.1 m off the path) | 73% |
+| 24 | **202.4%** (4.1 m off) | 73% |
+
+This is **Jim's own named failure mode** — the comic detour to reach something
+a few metres across the grass — and it is what this assertion exists to catch.
+Mean cost stays small (+0.21 m), so it is a worst case on one or two spots,
+not a park-wide regression.
+
+**Isolated, not guessed**: removing the hop-band rejection I put into
+`lineCost` (my reconciliation choice) leaves it failing at **157.1%**, so that
+choice accounts for ~27 points and the remaining regression is **the 6.4x
+multiplier itself**, not the way the two were reconciled.
+
+### The reconciliation is real, and it is ~12 hunks
+
+Two parallel `Uint8Array`s (`paved` / `hopBand`), a `stampCircle` parameter
+rename, superseded collider-stamping logic, a `pointSpliced` → `pointRigid`
+rename, and — the only genuinely hard one — **this branch turned
+`lineIsWalkable` into `lineCost` while #452 kept the boolean and added band
+rejection to it**. Whoever merges second must fold band rejection into
+`lineCost`'s `-1` shape. My resolution was for measurement only and is one
+reading, not a ruling.
