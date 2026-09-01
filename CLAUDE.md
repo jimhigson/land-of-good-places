@@ -296,6 +296,18 @@ have said so proudly.
 answer this: `test:procgen` matches `test:procgen:watch` on `main` today.
 Parse the object and look for the name you expect.
 
+**Compare the step *sets*, not their size.** On 1 September a banquet rebase
+swapped `check:stall-shape` out for `check:hall-solid` one for one — 53 steps
+before, 53 after — and nobody noticed for a day. The count is what several of
+us had been told to report, and a count cannot see a swap. Every step present
+before must still be present, plus whatever your branch adds.
+
+That one had a second sting worth knowing when you go looking: `git log -S` on
+the step's name does **not** find the commit that removed it, because the
+script *definition* keeps the string alive in the file. You have to walk
+first-parent history and parse the chain at each commit. A check can be defined
+and unrun, which is the quietest way for one to die.
+
 **`rerere.enabled` is `true` in this repo, and it will replay a stale
 resolution without telling you.** On 29 August an engineer rebasing a second
 time had its *earlier* `build`-chain resolution replayed automatically — a
@@ -820,57 +832,6 @@ So, for anything a child can walk up to:
   sampled once a frame has exactly the same hole pointed the other way. Ask
   what she *crossed*, not where she *landed* — `tapSpacing.ts`'s `bandCrossed`,
   against `Player.previousPosition`, is the one owner of that question.
-
-### Indoors, "collision is height-blind" is no longer a reason for anything
-
-Six files in `world/building/` used to carry the same prohibition: **castle
-props get no colliders at all**, because indoor collision is height-blind and a
-collider on deck 0 would wall off that square metre on all five storeys. It was
-load-bearing, it was correct, and on 1 September 2026 it cost a round of
-feedback — Jim, walking the great hall: *"you can walk straight through the
-tables — they should be solid."*
-
-**It was one sentence carrying two facts, and the prohibition only followed if
-both held:**
-
-- **A.** the collision world is 2-D, so a collider blocks at every height;
-- **B.** two storeys share an (x, z), so A reaches across them.
-
-`scripts/probe-height-blind.mts` measures each on its own. **A still holds** —
-an `Infinity`-top collider blocks at y = 100, nothing about `CollisionWorld`
-changed. **B died with the floor split** (#377/#380): three floors, not five,
-300 m apart, and the great hall's plate is 279 m from the nearest point of any
-other storey. Of 21250 points swept on the mall and 21250 on the roof, a
-collider in the middle of the hall blocks **none**.
-
-Two general lessons, and the second is the one worth carrying out of the castle:
-
-- **A prohibition inherits the lifetime of its shortest-lived premise.** When
-  you write one down, write down *why*, in separable pieces — a rule stated as
-  a conclusion cannot be re-checked when the world moves under it, and the
-  next person just obeys it. Six copies of this one had all been faithfully
-  maintained through the very refactor that invalidated them.
-- **`topIsAbsolute` is the answer to "solid but climbable", and always was.**
-  Jim, 7 August: *"I should be able to jump onto any solid item that's not too
-  high, here and elsewhere in the game."* A collider's default `topHeight` is
-  `Infinity`, which makes a 0.675 m table an invisible pillar to the ceiling;
-  an absolute top makes it solid to feet on the floor, air to feet in a jump,
-  and still there beneath the feet standing on it. `world/hotel/place.ts` is
-  the shipped precedent — one footprint, three consumers (collision, keep-outs,
-  walk surface) — and new solid furniture anywhere should go through that shape
-  rather than inventing a fourth.
-
-**Solidity and reachability are one question, so check them together.** The
-hall's whole point is that she can sit and eat; a collider that walls off a free
-place turns the action into a tease. `check:hall-solid` is the pattern: flood
-the walkable floor from where the lift puts her down, then assert both that
-every place she is *invited* to sit in is still reachable and that the middle of
-every table is not. **Run a control first** — a fill that cannot leave the room
-reports everything unreachable and looks exactly like a correct catastrophic
-finding. The first draft of that check asked only `isClearCircle`, walked
-straight out through the lift doorway, and flooded 354516 cells of empty world
-outside the shell; only the control ("a point outside the south wall is NOT
-reachable") caught it.
 
 ## A face on a worn thing goes in its own UV texture, not a floating patch
 
