@@ -56,7 +56,8 @@ interface Verdict {
   readonly park: 'pass' | 'fail';
   /** Non-null only when `park` failed: did it also fail with the ratchet off? */
   readonly parkWithoutRatchet?: 'pass' | 'fail';
-  readonly invariants: 'pass' | 'fail';
+  /** `not run` under `--fast`, when `check:park` had already rejected the seed. */
+  readonly invariants: 'pass' | 'fail' | 'not run';
   /** How many invariants ran, and how many of them failed. */
   readonly invariantsPassed?: number;
   readonly invariantsFailed?: number;
@@ -70,6 +71,7 @@ interface Verdict {
 // of a flag and the range comes out empty.
 const args = process.argv.slice(2).filter((a) => a !== '--');
 const FLAGS = ['--list', '--jobs', '--out'] as const;
+const BOOLEAN_FLAGS = ['--fast'];
 
 function flag(name: (typeof FLAGS)[number]): string | undefined {
   const at = args.indexOf(name);
@@ -77,13 +79,17 @@ function flag(name: (typeof FLAGS)[number]): string | undefined {
 }
 
 const isFlag = (a: string | undefined): boolean => FLAGS.includes(a as (typeof FLAGS)[number]);
-const positional = args.filter((a, i) => !a.startsWith('--') && !isFlag(args[i - 1]));
+const positional = args.filter(
+  (a, i) => !a.startsWith('--') && !isFlag(args[i - 1]) && !BOOLEAN_FLAGS.includes(a),
+);
 const listed = flag('--list');
 const seeds = listed
   ? listed.split(',').map((s) => Number(s.trim()))
   : rangeInclusive(Number(positional[0] ?? 1), Number(positional[1] ?? 30));
 const jobs = Math.max(1, Number(flag('--jobs') ?? 3));
 const out = flag('--out') ?? 'seed-vetting.jsonl';
+/** Stop at the first gate a candidate fails. See {@link vet}. */
+const fast = args.includes('--fast');
 
 function rangeInclusive(from: number, to: number): number[] {
   const list: number[] = [];
@@ -209,9 +215,27 @@ async function vet(seed: number): Promise<Verdict> {
   if (!park.ok) {
     parkWithoutRatchet = (await checkPark(seed, false)).ok ? 'pass' : 'fail';
   }
-  // Both gates are always run, even when the first has already rejected the
+  // By default both gates run even when the first has already rejected the
   // seed: a rejected candidate's *other* failures are the interesting part of
-  // the report — that is how #429's pathological seed was understood.
+  // the report, and that is how #429's pathological seed was understood.
+  //
+  // `--fast` gives that up to search a wider range. The hit rate is around
+  // one in twenty-five, `check:park` costs 8 s where the invariant suite costs
+  // 21 s, and roughly half of all candidates are rejected by `check:park`
+  // alone — so stopping there roughly halves the cost of a sweep whose only
+  // purpose is to *find* passers. A seed still has to clear both gates to
+  // pass; `--fast` only declines to describe how a failure failed.
+  if (fast && !park.ok) {
+    return {
+      seed,
+      verdict: 'fail',
+      park: 'fail',
+      ...(parkWithoutRatchet ? { parkWithoutRatchet } : {}),
+      invariants: 'not run',
+      note: `check:park: ${park.note}`,
+      seconds: Math.round((Date.now() - started) / 100) / 10,
+    };
+  }
   const inv = await checkInvariants(seed);
   return {
     seed,
