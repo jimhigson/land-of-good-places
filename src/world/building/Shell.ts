@@ -662,6 +662,12 @@ const ROOF_TURRET_EAVES = ROOF_CRENEL_BASE + CASTLE_MERLON_HEIGHT;
  * It comes out a little under three metres — a stubby witch's hat rather than
  * the facade's tall one, which is right for something seen from ten metres
  * instead of a hundred.
+ *
+ * **The cone's apex has to *be* the tip for this to hold**, which is why these
+ * turrets carry no mast (`withMast: false`). The first version kept the
+ * facade's mast and finial, 1.9 m of them above the apex, and the finial was
+ * measured drawn across a child's chest at 8.12 m — the cap was correct and it
+ * was capping the wrong thing.
  */
 const ROOF_TURRET_ROOF = (() => {
   const nearestFloor = CASTLE_TURRET_FOOTPRINT_RADIUS + PLAYER_RADIUS;
@@ -698,6 +704,7 @@ function buildRoofTurrets(): Group {
     bodyHeight: ROOF_TURRET_EAVES,
     bodyBelow: ROOF_CURTAIN_DROP,
     roofHeight: ROOF_TURRET_ROOF,
+    withMast: false,
   });
   group.name = 'roof-turrets';
   return group;

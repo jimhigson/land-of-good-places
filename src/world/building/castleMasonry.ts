@@ -217,6 +217,20 @@ export interface TurretOptions {
    * floor it hides up-frame of itself.
    */
   readonly roofHeight?: number;
+  /**
+   * Whether the turret carries a mast, a finial and a pennant above its cone.
+   * Defaults to true — the facade's towers do, and they are most of what makes
+   * the castle read as a castle from across the garden.
+   *
+   * **The roof garden's do not, and it is the camera's fault again.** The mast
+   * and finial stand 1.9 m above the cone's apex, so they are the *tallest*
+   * part of a turret and the part that decides how much floor it hides
+   * up-frame. Measured in the running game: with the cone already cut to clear
+   * a child at the nearest reachable floor, the finial was still drawn across
+   * her chest from **8.12 m** away. A flag you can see from a hundred metres is
+   * worth having; one that hides the child from ten is not.
+   */
+  readonly withMast?: boolean;
 }
 
 /**
@@ -230,6 +244,7 @@ export function buildCastleTurrets(options: TurretOptions): Group {
   const { prefix, spots, baseY, bodyHeight } = options;
   const bodyBelow = options.bodyBelow ?? 0;
   const roofHeight = options.roofHeight ?? TOWER_ROOF_HEIGHT;
+  const withMast = options.withMast ?? true;
   const group = new Group();
   group.name = `${prefix}s`;
 
@@ -274,7 +289,7 @@ export function buildCastleTurrets(options: TurretOptions): Group {
   masts.name = `${prefix}-masts`;
   masts.castShadow = false;
   masts.receiveShadow = false;
-  masts.count = spots.length;
+  masts.count = withMast ? spots.length : 0;
 
   const finials = new InstancedMesh(
     new SphereGeometry(0.26, 14, 10),
@@ -284,7 +299,7 @@ export function buildCastleTurrets(options: TurretOptions): Group {
   finials.name = `${prefix}-finials`;
   finials.castShadow = false;
   finials.receiveShadow = false;
-  finials.count = spots.length;
+  finials.count = withMast ? spots.length : 0;
 
   const matrix = new Matrix4();
   const rotation = new Quaternion();
@@ -301,6 +316,8 @@ export function buildCastleTurrets(options: TurretOptions): Group {
     position.set(spot.x, eaves + roofHeight / 2, spot.z);
     matrix.compose(position, rotation, scale);
     roofs.setMatrixAt(index, matrix);
+
+    if (!withMast) return;
 
     position.set(spot.x, roofTopY + 0.8, spot.z);
     matrix.compose(position, rotation, scale);
