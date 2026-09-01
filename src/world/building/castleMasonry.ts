@@ -207,6 +207,16 @@ export interface TurretOptions {
    * than being a flat cliff.
    */
   readonly bodyBelow?: number;
+  /**
+   * How tall the conical roof is. Defaults to the facade's own
+   * {@link TOWER_ROOF_HEIGHT}.
+   *
+   * The roof garden's turrets take a shorter one, and the reason is the fixed
+   * camera rather than taste — see `Shell.ts`'s `ROOF_TURRET_ROOF`. A cone is
+   * the tallest part of a turret and therefore the part that decides how much
+   * floor it hides up-frame of itself.
+   */
+  readonly roofHeight?: number;
 }
 
 /**
@@ -219,6 +229,7 @@ export interface TurretOptions {
 export function buildCastleTurrets(options: TurretOptions): Group {
   const { prefix, spots, baseY, bodyHeight } = options;
   const bodyBelow = options.bodyBelow ?? 0;
+  const roofHeight = options.roofHeight ?? TOWER_ROOF_HEIGHT;
   const group = new Group();
   group.name = `${prefix}s`;
 
@@ -246,7 +257,7 @@ export function buildCastleTurrets(options: TurretOptions): Group {
   // A true cone (16 segments), unlike the roof pavilion's four-sided pyramid —
   // this one is meant to read as a proper witch's-hat tower roof up close.
   const roofs = new InstancedMesh(
-    new ConeGeometry(TOWER_RADIUS + TOWER_ROOF_OVERHANG, TOWER_ROOF_HEIGHT, 16),
+    new ConeGeometry(TOWER_RADIUS + TOWER_ROOF_OVERHANG, roofHeight, 16),
     softMaterial(CASTLE_TURRET_ROOF, 0.72),
     Math.max(1, spots.length),
   );
@@ -280,14 +291,14 @@ export function buildCastleTurrets(options: TurretOptions): Group {
   const scale = new Vector3(1, 1, 1);
   const position = new Vector3();
   const eaves = baseY + bodyHeight;
-  const roofTopY = eaves + TOWER_ROOF_HEIGHT;
+  const roofTopY = eaves + roofHeight;
 
   spots.forEach((spot, index) => {
     position.set(spot.x, eaves - shaft / 2, spot.z);
     matrix.compose(position, rotation, scale);
     bodies.setMatrixAt(index, matrix);
 
-    position.set(spot.x, eaves + TOWER_ROOF_HEIGHT / 2, spot.z);
+    position.set(spot.x, eaves + roofHeight / 2, spot.z);
     matrix.compose(position, rotation, scale);
     roofs.setMatrixAt(index, matrix);
 

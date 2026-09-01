@@ -21,12 +21,15 @@ import {
   BUILDING_HALF_Z,
   BUILDING_PARAPET,
   BUILDING_SLAB,
+  CAMERA_PITCH_DEGREES,
   BUILDING_WALL_THICKNESS,
   INTERIOR_HALF_X,
   INTERIOR_HALF_Z,
   INTERIOR_PLAZA_DROP,
   INTERIOR_PLAZA_RADIUS,
+  PLAYER_RADIUS,
 } from '../../core/constants';
+import { KID_HEIGHT } from '../../art/models/kid';
 import { PALETTE } from '../../core/palette';
 import {
   CASTLE_WINDOWS,
@@ -68,6 +71,7 @@ import {
   ROOF_PAVILION_HEIGHT,
   ROOF_PAVILION_X,
   ROOF_PAVILION_Z,
+  CASTLE_TURRET_FOOTPRINT_RADIUS,
   ROOF_PARAPET_THICKNESS,
   roofTurretSpots,
   TOP_DECK,
@@ -639,6 +643,33 @@ function roofMerlonSlots(plan: ShellPlan): MerlonSlot[] {
 const ROOF_TURRET_EAVES = ROOF_CRENEL_BASE + CASTLE_MERLON_HEIGHT;
 
 /**
+ * **How tall a roof-garden turret's cone is — decided by the camera, not by
+ * taste.**
+ *
+ * At the fixed isometric a solid hides everything within `height ÷ tan(38°)`
+ * up-frame of itself, and up-frame from a corner turret is the corner of the
+ * garden a child walks to in order to lean on the rampart. The facade's own
+ * 4.2 m cone put her whole body behind it from eight metres away; that was
+ * measured on screen, twice, and it is the second time this exact defect has
+ * been found here (the enterable pavilion was reverted for it).
+ *
+ * So the height is derived from the thing that must stay visible. The nearest
+ * floor to a turret is {@link CASTLE_TURRET_FOOTPRINT_RADIUS} plus her own
+ * radius from its middle; a camera ray grazing the turret's tip passes over
+ * that spot at `tip − distance × tan(38°)`; and her head has to be above it.
+ * Rearranged, that caps the tip, and the cone is what is left after the eaves.
+ *
+ * It comes out a little under three metres — a stubby witch's hat rather than
+ * the facade's tall one, which is right for something seen from ten metres
+ * instead of a hundred.
+ */
+const ROOF_TURRET_ROOF = (() => {
+  const nearestFloor = CASTLE_TURRET_FOOTPRINT_RADIUS + PLAYER_RADIUS;
+  const tipCap = nearestFloor * Math.tan((CAMERA_PITCH_DEGREES * Math.PI) / 180) + KID_HEIGHT;
+  return Math.max(1.2, tipCap - ROOF_TURRET_EAVES);
+})();
+
+/**
  * How far the roof garden's curtain wall — and the turret shafts standing in
  * it — carry on down past the deck.
  *
@@ -666,6 +697,7 @@ function buildRoofTurrets(): Group {
     baseY: 0,
     bodyHeight: ROOF_TURRET_EAVES,
     bodyBelow: ROOF_CURTAIN_DROP,
+    roofHeight: ROOF_TURRET_ROOF,
   });
   group.name = 'roof-turrets';
   return group;
