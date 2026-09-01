@@ -112,7 +112,15 @@ async function checkPark(seed: number, ratchet: boolean): Promise<{ ok: boolean;
     // solve" for a park that solved fine but stranded two waypoints would be a
     // report that says nothing, which is the whole failure this repo keeps
     // catching in its own checks.
-    const keys = lines.filter((l) => /^[a-z][\w.:-]*: -?\d/.test(l) && !l.startsWith('check:park:'));
+    // Only the lines *after* the regression header are findings. `check:park`
+    // prints a summary table above it whose lines look identical to a finding
+    // (`destinations: 19 checked …`), and quoting one of those as the reason a
+    // seed was rejected would be a report about the wrong thing entirely.
+    const at = lines.findIndex((l) => /^check:park: \d+ invariant regression/.test(l));
+    const keys =
+      at === -1
+        ? []
+        : lines.slice(at + 1).filter((l) => /^[a-z][\w.:-]*: -?\d/.test(l));
     if (keys.length > 0) return { ok: false, note: keys.join('; ').slice(0, 200) };
     const line =
       lines.find(
