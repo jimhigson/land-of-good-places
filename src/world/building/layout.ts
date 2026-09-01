@@ -807,6 +807,33 @@ export const ROOF_PAVILION_HALF_Z = 4.6;
  *  she sees and the thing she is stopped by are one height. */
 export const ROOF_PAVILION_HEIGHT = 2.9;
 
+/**
+ * **Where the roof garden's four corner turrets stand** (issue #462).
+ *
+ * Jim: *"turrets in the corner, ramparts, walls reaching down."* One list,
+ * three consumers — `Shell.ts` draws them, `Building.ts` registers a circular
+ * collider on each, and `dressing.ts`'s `keepOutsFor` keeps the grass, the
+ * planting troughs and the bench scatter off them. That is `hotel/place.ts`'s
+ * shape, and it is here rather than in `Shell.ts` so that the two consumers
+ * that are not `Shell.ts` do not have to import it and risk a cycle.
+ *
+ * On the plate's own corners — the outer face of the parapet, which is half a
+ * wall past the plate's half-extents — so each turret half overhangs the edge
+ * the way a real corner tower does and half stands on floor a child can walk
+ * on. That second half is precisely why it needs a collider rather than being
+ * scenery beyond the rail.
+ */
+export function roofTurretSpots(): readonly { readonly x: number; readonly z: number }[] {
+  const ox = INTERIOR_HALF_X + BUILDING_WALL_THICKNESS / 2;
+  const oz = INTERIOR_HALF_Z + BUILDING_WALL_THICKNESS / 2;
+  return [
+    { x: -ox, z: -oz },
+    { x: ox, z: -oz },
+    { x: -ox, z: oz },
+    { x: ox, z: oz },
+  ];
+}
+
 // ------------------------------------------------------------- shop units
 
 export interface ShopUnitDefinition {

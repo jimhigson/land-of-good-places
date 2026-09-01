@@ -31,6 +31,8 @@ import { LiftRide, type LiftPanelSource } from './liftRide';
 import { GrownUp } from './GrownUp';
 import { InteriorLighting } from './InteriorLighting';
 import { BuildingShell } from './Shell';
+import { CASTLE_TURRET_FOOTPRINT_RADIUS } from './castleMasonry';
+import { roofTurretSpots } from './layout';
 import { ShopUnits } from './ShopUnits';
 import { Shops } from './shops/Shops';
 import { SlideRide } from './SlideRide';
@@ -728,6 +730,7 @@ export class Building implements GameSystem {
     // rather than needing a line added here.
     for (const floor of CASTLE_FLOORS) registerPlanterCollision(collision, floor);
     for (const floor of CASTLE_FLOORS) registerPavilionCollision(collision, floor);
+    for (const floor of CASTLE_FLOORS) registerRoofTurretCollision(collision, floor);
 
     // `buildShaftGuards` was called here. There are no shafts to guard.
     //
@@ -2261,6 +2264,45 @@ export function registerPavilionCollision(collision: CollisionWorld, floor: Cast
     ROOF_PAVILION_HALF_Z - PAVILION_HALF_THICKNESS,
     PAVILION_HALF_THICKNESS,
   );
+}
+
+/**
+ * **The roof garden's corner turrets are solid** (#462).
+ *
+ * They stand on the plate's own corners, so half of each one overhangs the edge
+ * and half stands on floor a child can walk on — she can get right up beside a
+ * turret, and CLAUDE.md's first rule is that anything she can see stops her.
+ *
+ * **A disc, not a rectangle, and that is what makes it safe.** The pavilion
+ * above is four walls round a hollow middle and needs a whole clause of
+ * `check:benches` to prove she can never get inside one. A circular collider
+ * has no inside to be trapped in: `CollisionWorld` pushes a mover out along the
+ * radius from wherever it is, so even a body that somehow started at the centre
+ * leaves. That is the reason to prefer one for a round solid, not merely that
+ * the turret happens to be round.
+ *
+ * The radius is the turret's own — `CASTLE_TURRET_FOOTPRINT_RADIUS`, the wider
+ * of the flared foot and the overhanging cone, since the cone is what a tall
+ * child's hat meets. The spots come from `roofTurretSpots()`, the same list
+ * `Shell.ts` draws from and `keepOutsFor` keeps benches off: one footprint,
+ * three consumers, `hotel/place.ts`'s shape.
+ *
+ * Infinity-topped like the pavilion and like the castle's own shell. A 7.6 m
+ * tower is not something a 1.28 m jump apex has any business clearing, and
+ * stating a finite top would invite the question.
+ */
+export function registerRoofTurretCollision(
+  collision: CollisionWorld,
+  floor: CastleFloor,
+): void {
+  if (floor.index !== TOP_DECK) return;
+  for (const spot of roofTurretSpots()) {
+    collision.addCircle(
+      floorX(floor, spot.x),
+      floorZ(floor, spot.z),
+      CASTLE_TURRET_FOOTPRINT_RADIUS,
+    );
+  }
 }
 
 /** Half-thickness of the four walls the pavilion's footprint is built from —

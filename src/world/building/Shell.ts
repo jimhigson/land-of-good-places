@@ -51,7 +51,6 @@ import {
   rectangleMerlonSlots,
   spread,
   type MerlonSlot,
-  type TurretSpot,
 } from './castleMasonry';
 import { TALLEST_CHILD_HEIGHT } from '../../art/models/kid';
 import { FLOOR_SPACE_SPACING } from './floors';
@@ -70,6 +69,7 @@ import {
   ROOF_PAVILION_HEIGHT,
   ROOF_PAVILION_X,
   ROOF_PAVILION_Z,
+  roofTurretSpots,
   TOP_DECK,
   TOWER_HEIGHT,
 } from './layout';
@@ -650,32 +650,6 @@ const ROOF_TURRET_BODY = Math.max(
  * wall is weather.
  */
 const ROOF_CURTAIN_DROP = 18;
-
-/**
- * Where the roof garden's corner turrets stand, and how wide a berth they
- * need.
- *
- * **One footprint, three consumers** — the drawn mesh, the collider in
- * `Building.registerInteriorCollision` and the keep-out disc in
- * `dressing.ts`'s `keepOutsFor` — which is `hotel/place.ts`'s shape and the one
- * CLAUDE.md points at for new solid furniture. A turret drawn in one place and
- * kept out of in another is the two-definitions bug wearing a hat.
- *
- * They sit on the plate's own corners, so half of each turret overhangs the
- * edge the way a real corner tower does and half stands on ground a child can
- * walk on — which is exactly why it needs a collider rather than being
- * scenery beyond the rail.
- */
-export function roofTurretSpots(): readonly TurretSpot[] {
-  const ox = INTERIOR_HALF_X + HALF_WALL;
-  const oz = INTERIOR_HALF_Z + HALF_WALL;
-  return [
-    { x: -ox, z: -oz },
-    { x: ox, z: -oz },
-    { x: -ox, z: oz },
-    { x: ox, z: oz },
-  ];
-}
 
 /**
  * Corner turrets on the roof garden — the same turret the facade wears, on the

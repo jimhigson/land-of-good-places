@@ -21,6 +21,7 @@ import {
   GROWN_UP_Z,
   ROOF_PAVILION_X,
   ROOF_PAVILION_Z,
+  roofTurretSpots,
   SHOP_SCALE_XZ,
   SHOP_UNITS,
   MALL_DECK,
@@ -33,6 +34,7 @@ import {
   type ShopUnitDefinition,
 } from './layout';
 import { CASTLE_GREAT_HALL_DECK, greatHallFootprint } from './castleFurniture';
+import { CASTLE_TURRET_FOOTPRINT_RADIUS } from './castleMasonry';
 
 /**
  * What makes a roomy floor read as a *place* rather than as a plain.
@@ -554,6 +556,26 @@ export function keepOutsFor(deck: number): KeepOut[] {
       { x: SLIDE_PLAN.entryX, z: SLIDE_PLAN.entryZ, radius: 5 },
       { x: GROWN_UP_X, z: GROWN_UP_Z, radius: 4 },
     );
+    // **The four corner turrets** (#462). Solid stone standing on the plate's
+    // own corners, so the grass, the planting troughs and the bench scatter all
+    // have to know where they are — three consumers, one list, asked of
+    // `Shell.ts` rather than restated here.
+    //
+    // In *this* list rather than `greatHallFootprint`'s, for the same reason
+    // the pavilion is: it is a solid a child walks round, and the ground beside
+    // it is somewhere she must still be able to get to. `check:benches` holds
+    // that to account — it floods the roof and requires a reachable cell inside
+    // every disc here, which for a turret means the paving on its inboard side.
+    //
+    // The radius is the turret's drawn footprint plus a stride, so nothing is
+    // planted hard against a wall she has to squeeze past.
+    for (const spot of roofTurretSpots()) {
+      blocked.push({
+        x: spot.x,
+        z: spot.z,
+        radius: CASTLE_TURRET_FOOTPRINT_RADIUS + 1.4,
+      });
+    }
   }
 
 
