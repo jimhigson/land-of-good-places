@@ -4,6 +4,13 @@ import type {
   LiftPanelSource,
   LiftPanelState,
 } from '../building/liftRide';
+import {
+  liftDoorOpenness,
+  LIFT_COMING_SECONDS,
+  LIFT_STEP_SECONDS,
+  smoothstep01,
+  type LiftPhase,
+} from '../lift/phases';
 import { HOTEL_FLOORS, LIFT_CAR_X, type HotelRoom } from './layout';
 
 /**
@@ -34,19 +41,11 @@ export interface HotelLiftDeps {
   player(): Player | null;
 }
 
-type Phase = 'away' | 'waiting' | 'coming' | 'aboard' | 'going' | 'alighting';
-
-/** Seconds the doors take to "arrive" after a call. Never make a child wait. */
-const COMING_SECONDS = 0.7;
-
 /** Seconds the storey counter spends ticking between floors. */
 const TRAVEL_SECONDS = 2.2;
 
-/** Seconds to glide in or out of the alcove. */
-const STEP_SECONDS = 0.5;
-
 export class HotelLift implements LiftPanelSource {
-  private phase: Phase = 'away';
+  private phase: LiftPhase = 'away';
   private phaseT = 0;
   private from = HOTEL_FLOORS[0]!;
   private to = HOTEL_FLOORS[0]!;
@@ -145,18 +144,9 @@ export class HotelLift implements LiftPanelSource {
    * the glide looking like she walks through them.
    */
   doorOpenness(): number {
-    switch (this.phase) {
-      case 'aboard':
-        return 1;
-      case 'alighting':
-        // Closing again behind her as she steps out.
-        return 1 - smooth(Math.min(1, this.phaseT / STEP_SECONDS));
-      case 'coming':
-        return smooth(Math.min(1, Math.max(0, (this.phaseT - COMING_SECONDS * 0.45) / (COMING_SECONDS * 0.55))));
-      default:
-        return 0;
-    }
+    return liftDoorOpenness(this.phase, this.phaseT);
   }
+
 
   /**
    * Which room's alcove the doors and dial belong to right now.
@@ -215,7 +205,7 @@ export class HotelLift implements LiftPanelSource {
           this.phase = 'away';
           return;
         }
-        if (this.phaseT < COMING_SECONDS) return;
+        if (this.phaseT < LIFT_COMING_SECONDS) return;
         // Doors open; glide her in. The alcove mouth is the via point by
         // construction — the alcove faces the room, so a straight glide from
         // anywhere in reach passes through it.
@@ -246,7 +236,7 @@ export class HotelLift implements LiftPanelSource {
         return;
       }
       case 'alighting': {
-        const t = Math.min(1, this.phaseT / STEP_SECONDS);
+        const t = Math.min(1, this.phaseT / LIFT_STEP_SECONDS);
         const eased = t * t * (3 - 2 * t);
         player.setRidePose(
           this.step.fromX + (this.step.toX - this.step.fromX) * eased,
@@ -283,7 +273,7 @@ export class HotelLift implements LiftPanelSource {
 
   private holdInCar(player: Player): void {
     // A short glide in, then held at the car spot, facing back into the room.
-    const t = Math.min(1, this.phaseT / STEP_SECONDS);
+    const t = Math.min(1, this.phaseT / LIFT_STEP_SECONDS);
     const eased = t * t * (3 - 2 * t);
     player.setRidePose(
       this.step.fromX + (this.step.toX - this.step.fromX) * eased,
@@ -303,7 +293,7 @@ export class HotelLift implements LiftPanelSource {
     const t = Math.min(1, this.phaseT / TRAVEL_SECONDS);
     const from = this.from.storey;
     const to = this.to.storey;
-    return Math.round(from + (to - from) * smooth(t));
+    return Math.round(from + (to - from) * smoothstep01(t));
   }
 
   /**
@@ -316,9 +306,4 @@ export class HotelLift implements LiftPanelSource {
     const storey = this.tickingStorey();
     return storey === 0 ? 'Ground floor' : `Floor ${storey}`;
   }
-}
-
-/** Ease in and out. Named once here rather than inlined at four call sites. */
-function smooth(t: number): number {
-  return t * t * (3 - 2 * t);
 }
