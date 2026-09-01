@@ -530,6 +530,17 @@ export class Building implements GameSystem {
   private banquetSeat: number | null = null;
   /** What she chose to eat, on the table in front of her. See `eatAtFeast`. */
   private feastDish: Object3D | null = null;
+  /**
+   * Where the pets eat, in world metres — the hall's own floor-local plan
+   * mapped once rather than every frame, because {@link sendPetsToTheirTable}
+   * re-asserts it while she is at the table.
+   */
+  private readonly petTablePlaces = greatHallPetPlaces(CASTLE_GREAT_HALL_DECK).map((place) => ({
+    x: floorX(CASTLE_HALL, place.x),
+    y: BUILDING_BASE_Y,
+    z: floorZ(CASTLE_HALL, place.z),
+    facing: place.facing,
+  }));
   private grownUpComing = false;
   private wasOnPad = false;
   private wasAirborne = false;
@@ -894,14 +905,24 @@ export class Building implements GameSystem {
     // places are `castleFurniture.ts`'s (which also laid the bowls at them),
     // and the animals are the parade's, which is the one owner of every
     // companion's body. This file builds no animal and moves none.
-    this.petParade?.sendPetsToTable(
-      greatHallPetPlaces(CASTLE_GREAT_HALL_DECK).map((place) => ({
-        x: floorX(CASTLE_HALL, place.x),
-        y: BUILDING_BASE_Y,
-        z: floorZ(CASTLE_HALL, place.z),
-        facing: place.facing,
-      })),
-    );
+    this.sendPetsToTheirTable();
+  }
+
+  /**
+   * Points every companion at its own place at the pets' table.
+   *
+   * **Called every frame she is sitting, not once when she sits down.** The
+   * parade's visible line is not fixed: it rotates one place every 22 seconds
+   * for a child who owns more than eight things (`Parade`'s `ROTATE_SECONDS`),
+   * and a toy taken out of the backpack joins it immediately. A one-shot
+   * dispatch leaves those newcomers standing at her elbow while the animals
+   * that happened to be out when she sat are eating — which is precisely what
+   * a six-year-old would notice and nobody testing with one pet would.
+   * `goToTable` is idempotent for a pet already going to the same place, so
+   * re-asserting costs a comparison per companion.
+   */
+  private sendPetsToTheirTable(): void {
+    this.petParade?.sendPetsToTable(this.petTablePlaces);
   }
 
   /**
@@ -1072,6 +1093,9 @@ export class Building implements GameSystem {
     // job is to be moving while she watches, so re-posing them from inside the
     // mall is pure cost. See `roofClouds.ts`'s `update`.
     if (this.floor?.index === CASTLE_ROOF.index) this.roofClouds.update(dt, elapsed);
+    // Companions that joined the line since she sat down go and eat too. See
+    // `sendPetsToTheirTable`.
+    if (this.banquetSeat !== null) this.sendPetsToTheirTable();
 
     const player = this.player;
     if (!player) return;
