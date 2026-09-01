@@ -70,5 +70,8 @@ stand-off bug, against the geometry as committed in 8e8b6d6).
 not read from the middle of the plate — the frame is too tight — only from the
 rim, which is where the height is.
 
-`scripts/shoot-roof.mts` is the throwaway harness (`SHOOT_PATH='a|b'`); delete
-it before merge if a reviewer would rather not carry it.
+The harness used to take them was a throwaway playwright script (clear
+`lgp:save`, navigate to the deep link, call
+`game.world.dayNight.setTimeOfDay(t)`, screenshot); it is deleted rather than
+shipped. The reusable part of it is now in `check:castle`, which measures the
+same facts without a browser.
