@@ -80,7 +80,7 @@ export const CANONICAL_PARK_SEED = 20260728;
  * guard the expensive half — that each one still builds a sound park — which
  * is what the re-vetting run above is for.
  */
-export const PARK_SEED_POOL: readonly number[] = [CANONICAL_PARK_SEED];
+export const PARK_SEED_POOL: readonly number[] = [CANONICAL_PARK_SEED, 5, 11, 24, 208, 225];
 
 /** Where the drawn seed is remembered, so a reload is the same park. */
 export const PARK_SEED_KEY = 'lgp:parkSeed';
