@@ -59,36 +59,51 @@
  *
  * ## Proven red by mutation
  *
- * Re-run 1 September 2026 against the thresholds below, on the canonical park.
+ * Re-run 1 September 2026 **after rebasing onto `origin/main`'s hoppable-wall
+ * cost and after the standable-endpoint fix below**, because a transcript is a
+ * measurement and measurements go stale (CLAUDE.md): the park these were
+ * proved against is the park in the working tree today.
  *
  * **Mutation 2 — the smoother stops respecting the weighting** (delete the
  * `chordCost > (polyCost + legCost) * (1 + SMOOTH_CORNER_TOLERANCE)` line in
  * `NavGrid.smooth`; the feature shipped with only half of it, which is the
  * subtle way to get this wrong). This is the honest proof of the two
  * assertions below, because it does not touch `OFF_PATH_COST_MULTIPLIER`, so
- * the population is the same 71 probes and only the routes change:
+ * the population is unchanged and only the routes move:
  *
  * ```
- * FAIL  routes stay on the paving: mean 67.8% ... (floor 70%)     [was 83.0%]
- * FAIL  most routes are mostly paved: 52 of 71 (73.2%), bar 85%   [was 68 of 71, 95.8%]
+ * canonical (82 probes):
+ *   ok    routes stay on the paving: mean 71.5%  (floor 70%)      [was 83.4%]
+ *   FAIL  most routes are mostly paved: 65 of 82 (79.3%), bar 85% [was 79 of 82, 96.3%]
+ * seed 11, the binding seed (50 probes):
+ *   FAIL  routes stay on the paving: mean 57.3%  (floor 70%)      [was 74.4%]
+ *   FAIL  most routes are mostly paved: 21 of 50 (42.0%), bar 85% [was 47 of 50, 94.0%]
  * exit=1
  * ```
+ *
+ * Note which one bites where. On the canonical park the **distribution** rule
+ * is what goes red while the mean survives at +1.5 — which is exactly why the
+ * distribution rule exists, and why a mean alone would have let this mutation
+ * through on the one seed most people run.
  *
  * **Mutation 1 — `OFF_PATH_COST_MULTIPLIER = 1`**, the behaviour before this
  * issue. This also exits 1, but **be precise about why, because it is not the
  * paving assertions that fail**: the servable predicate is defined in terms of
  * that very multiplier, so setting it to 1 collapses the population to 2 probes
- * and the run stops at the `< 8` guard with *"only 2 of 100 probes both arrive
- * and have a paved route inside 1x"*. Red, and loudly, but it is the guard
- * talking, not a measurement of paving.
+ * and the run stops at the `< 8` guard with *"only 2 of 89 probes both arrive
+ * and have a paved route inside 1x (2 servable, 89 arriving)"*. Red, and
+ * loudly, but it is the guard talking, not a measurement of paving. Note the
+ * *89 arriving*: all of them do, which is the standable-endpoint fix showing
+ * its work — before it, this line read 78 of 100.
  *
  * **A transcript is a measurement, and measurements go stale** (CLAUDE.md), so
  * what mutation 1 was *for* is asserted live instead, on every invocation, by
  * `the bar is a real bar` below. The unweighted lattice is that mutation —
  * built in this same process, at the true multiplier, over the true
  * population — and the check requires it to fail the very bar the weighted one
- * passes. It fails it by 47.0 points on the canonical park and by 47–73 across
- * the five seeds. That is the strongest form of the claim available here: not
+ * passes. It fails it by 43.5 points on the canonical park and by 38.3–71.8
+ * across the five seeds. That is the strongest form of the claim available
+ * here: not
  * "someone once saw this go red", but "it is red right now, in this run".
  *
  * ## Every seed, not just the canonical one
@@ -773,18 +788,27 @@ const populationUnweighted = population.map((r) => r.u);
  * 11 came in at 71.0% and seed 18 at 73.1%, so the old floor was green only
  * because nothing but the canonical seed was ever run through it.
  *
+ * **Re-measured 1 September 2026** on `origin/main` with the hoppable-wall
+ * cost in it, and over the standable-endpoint probe set (see `standable`):
+ *
  * | seed | n | weighted mean | unweighted mean | margin over floor |
  * |---|---|---|---|---|
- * | canonical (20260728) | 71 | 83.0% | 52.5% | +13.0 |
- * | 5 | 52 | 82.3% | 51.1% | +12.3 |
- * | **11 (binding)** | 49 | **74.3%** | 45.2% | **+4.3** |
- * | 18 | 43 | 79.1% | 41.8% | +9.1 |
- * | 24 | 47 | 80.1% | 51.8% | +10.1 |
+ * | canonical (20260728) | 82 | 83.4% | 55.4% | +13.4 |
+ * | 5 | 50 | 81.5% | 52.9% | +11.5 |
+ * | **11 (binding)** | 50 | **74.4%** | 47.6% | **+4.4** |
+ * | 18 | 38 | 78.9% | 42.1% | +8.9 |
+ * | 24 | 45 | 81.2% | 56.8% | +11.2 |
+ *
+ * Every seed moved by under a point and a half, and the binding seed and its
+ * margin are unchanged (11, +4.3 → +4.4): **dropping the unstandable
+ * endpoints did not buy this floor any headroom**, which is what you would
+ * expect, since the probes it removed were ones that never arrived and were
+ * therefore already outside this population.
  *
  * 70% is the highest round figure every seed clears, and it clears the best
- * **unweighted** mean (52.5%, canonical) by **17.5 points** — that gap is what
- * makes this assertion able to fail, and `unweighted routes fail the same bar`
- * below asserts it rather than trusting this table.
+ * **unweighted** mean (56.8%, seed 24) by **13.2 points** — that gap is what
+ * makes this assertion able to fail, and `the bar is a real bar` below asserts
+ * it rather than trusting this table.
  *
  * Seed 11 is the binding seed on every statement in this file; if a future
  * change moves the paving, that is the seed to measure first.
@@ -819,27 +843,28 @@ check(
  * **Derived, 1 September 2026** — measured on all five seeds, over the
  * population above:
  *
+ * **Re-measured 1 September 2026** on `origin/main` with the hoppable-wall
+ * cost in it, and over the standable-endpoint probe set (see `standable`):
+ *
  * | seed | n | weighted ≥60% | unweighted ≥60% | margin over 85% |
  * |---|---|---|---|---|
- * | canonical (20260728) | 71 | 68/71 = **95.8%** | 27/71 = 38.0% | +10.8 |
- * | 5 | 52 | 50/52 = **96.2%** | 14/52 = 26.9% | +11.2 |
- * | **11 (binding)** | 49 | 45/49 = **91.8%** | 10/49 = 20.4% | **+6.8** |
- * | 18 | 43 | 41/43 = **95.3%** | 5/43 = 11.6% | +10.3 |
- * | 24 | 47 | 45/47 = **95.7%** | 17/47 = 36.2% | +10.8 |
+ * | canonical (20260728) | 82 | 79/82 = **96.3%** | 34/82 = 41.5% | +11.3 |
+ * | **5 (binding)** | 50 | 47/50 = **94.0%** | 14/50 = 28.0% | **+9.0** |
+ * | **11 (binding)** | 50 | 47/50 = **94.0%** | 11/50 = 22.0% | **+9.0** |
+ * | 18 | 38 | 36/38 = **94.7%** | 5/38 = 13.2% | +9.7 |
+ * | 24 | 45 | 43/45 = **95.6%** | 21/45 = 46.7% | +10.6 |
  *
- * At Jim's original 90% the binding seed's margin is **+1.8**, under one
- * probe's worth: seed 11's population of 49 moves in 2.0-point steps, so two
- * more failures there would take it under. 85% costs three probes of headroom
- * on the binding seed and keeps the same 50-point separation from the
- * unweighted router.
+ * At Jim's original 90% the binding margin was **+1.8**, under one probe's
+ * worth. 85% keeps three or four probes of headroom on the binding seed and
+ * keeps a 48-point separation from the unweighted router at its best.
  *
  * **The percentages are coarse, and deliberately quoted as counts too.** The
- * populations are 43–71 probes, so seed 18's share moves in **2.3-point steps**
+ * populations are 38–82 probes, so seed 18's share moves in **2.6-point steps**
  * — 85 and 86 are the same rule there, and so are 87 and 88. Do not read a
  * one-point change of this constant as a one-point change of strictness.
  *
  * The `60%` half of the rule is Jim's, and it is also where the two routers
- * separate most cleanly: the unweighted router puts only 11.6–38.0% of its
+ * separate most cleanly: the unweighted router puts only 13.2–46.7% of its
  * routes over that line on any seed.
  */
 const PAVED_FLOOR = 0.6;
@@ -877,9 +902,11 @@ check(
  * about the feature — which is precisely how the old `MEAN_PAVED_FLOOR = 0.75`
  * was justified, and it is worth asserting rather than asserting in prose.
  *
- * Measured margin on the five seeds: the unweighted router clears the 60% floor
- * on 11.6–38.0% of routes against an 85% bar, so it fails by **47 to 73
- * points**. There is no seed on which this is close.
+ * Measured margin on the five seeds (1 September 2026, on `origin/main` with
+ * the hoppable-wall cost, over the standable-endpoint probe set): the
+ * unweighted router clears the 60% floor on 13.2–46.7% of routes against an
+ * 85% bar, so it fails by **38.3 to 71.8 points**. There is no seed on which
+ * this is close.
  */
 const unweightedOverFloor = populationUnweighted.filter((v) => v >= PAVED_FLOOR).length;
 const unweightedShare = unweightedOverFloor / population.length;
