@@ -193,22 +193,85 @@ function buildRoundel(deck: number): Group {
   return group;
 }
 
+/** How many planters ring the roundel. */
+const PLANTER_COUNT = 10;
+/** How far out from the roundel's middle they stand. */
+const PLANTER_RING_RADIUS = ROUNDEL_RADIUS - 0.9;
+/** The pot's widest radius — its rim. It tapers to 0.36 at the foot, and the
+ *  rim is what a child's shins actually meet. */
+export const PLANTER_RADIUS = 0.44;
+/** How tall the pot stands. The bush above it is another 0.8 m and is
+ *  deliberately **not** part of the collider — see {@link planterRing}. */
+export const PLANTER_TOP = 0.7;
+
+/** Where one planter stands, in its deck's own local metres. */
+export interface Planter {
+  readonly x: number;
+  readonly z: number;
+}
+
+/**
+ * **Where the ten planters are** — the ring arithmetic, once (#459).
+ *
+ * Jim, straight after the pavilion: *"and also planters that you can run
+ * through."* They are two `InstancedMesh`es, so unlike a bench there is no
+ * list of transforms to walk; the honest way to give them colliders is to ask
+ * the same function that places the instances, which is this. `buildPlanterRing`
+ * draws these positions and `registerPlanterCollision` makes these positions
+ * solid — there is no second copy of `cos(angle) * (ROUNDEL_RADIUS - 0.9)` to
+ * drift.
+ *
+ * ## The pot is solid; the bush is not
+ *
+ * A planter is a stone pot with a shrub in it, and those are two different
+ * things to a child running past. The pot is knee-high masonry and stops her.
+ * The bush is foliage: brushing through leaves is what foliage is *for*, and a
+ * 1.5 m invisible wall of hedge round the roundel would be both wrong and
+ * unjumpable.
+ *
+ * `topIsAbsolute` is what lets that be one collider rather than an argument:
+ * the pot is solid to feet on the floor and open to feet in a jump, so she can
+ * hop the planter — bush and all — exactly as Jim's 7 August rule asks, and
+ * the leaves she passes through on the way are leaves.
+ *
+ * ## Ten pots in a ring is not a fence
+ *
+ * The roundel is *the* meeting spot on a floor, and it is in
+ * {@link keepOutsFor} for that reason — so enclosing it would be the precise
+ * thing solidity must never cost. It does not: the ring's circumference is
+ * `2π × 5.1` = 32.0 m over ten pots, so their centres are 3.20 m apart and
+ * their rims 2.32 m apart, against a child 1.24 m across. She walks between
+ * any two of them with half a metre either side. That is arithmetic, and
+ * `check:benches` floods the floor and holds it to the result rather than to
+ * this paragraph.
+ */
+export function planterRing(): Planter[] {
+  const ring: Planter[] = [];
+  for (let i = 0; i < PLANTER_COUNT; i += 1) {
+    const angle = (i / PLANTER_COUNT) * TAU;
+    ring.push({
+      x: ROUNDEL_X + Math.cos(angle) * PLANTER_RING_RADIUS,
+      z: ROUNDEL_Z + Math.sin(angle) * PLANTER_RING_RADIUS,
+    });
+  }
+  return ring;
+}
+
 /** A ring of chunky planters round the roundel. One instanced mesh. */
 function buildPlanterRing(deck: number): Group {
   const group = new Group();
   group.name = `deck-planters-${deck}`;
-  group.position.set(ROUNDEL_X, 0, ROUNDEL_Z);
 
-  const count = 10;
+  const ring = planterRing();
   const pots = new InstancedMesh(
-    new CylinderGeometry(0.44, 0.36, 0.7, 12),
+    new CylinderGeometry(PLANTER_RADIUS, 0.36, PLANTER_TOP, 12),
     softMaterial(PALETTE.stonePinkLight, 0.8),
-    count,
+    ring.length,
   );
   const bushes = new InstancedMesh(
     new SphereGeometry(0.55, 12, 9),
     softMaterial(PALETTE.leafMid, 0.7),
-    count,
+    ring.length,
   );
   for (const mesh of [pots, bushes]) {
     mesh.castShadow = false;
@@ -219,17 +282,18 @@ function buildPlanterRing(deck: number): Group {
   const rotation = new Quaternion();
   const scale = new Vector3(1, 1, 1);
   const position = new Vector3();
-  for (let i = 0; i < count; i += 1) {
-    const angle = (i / count) * TAU;
-    const x = Math.cos(angle) * (ROUNDEL_RADIUS - 0.9);
-    const z = Math.sin(angle) * (ROUNDEL_RADIUS - 0.9);
-    position.set(x, 0.35, z);
+  ring.forEach((planter, i) => {
+    // The group used to sit at the roundel and the instances used to be placed
+    // relative to it. They are absolute now, because `planterRing` has to hand
+    // the same coordinates to the collision world, which knows nothing about
+    // this group's transform.
+    position.set(planter.x, PLANTER_TOP / 2, planter.z);
     matrix.compose(position, rotation, scale);
     pots.setMatrixAt(i, matrix);
-    position.set(x, 0.95, z);
+    position.set(planter.x, PLANTER_TOP + 0.25, planter.z);
     matrix.compose(position, rotation, scale);
     bushes.setMatrixAt(i, matrix);
-  }
+  });
   pots.instanceMatrix.needsUpdate = true;
   bushes.instanceMatrix.needsUpdate = true;
 

@@ -59,8 +59,10 @@ import {
   LIFT_SHAFT,
   ROOF_PAVILION_HALF_X,
   ROOF_PAVILION_HALF_Z,
+  ROOF_PAVILION_HEIGHT,
   ROOF_PAVILION_X,
   ROOF_PAVILION_Z,
+  roofPavilionWalls,
   TOP_DECK,
   TOWER_BASE_FLARE,
   TOWER_HEIGHT,
@@ -535,16 +537,36 @@ function buildRoofTerrace(plan: ShellPlan, roof: Group): void {
   roof.add(lip);
 
   // A pavilion at the west end, to break up the terrace and give the roof a
-  // shady corner. Same silhouette it always had, only bigger and standing on a
-  // floor you can now walk about on.
+  // shady corner. Same silhouette it always had — and, since #459, actually
+  // hollow: four walls with a doorway at the east end, so the "shady corner"
+  // is somewhere she can stand in the shade rather than a shed-shaped lump.
+  // `roofPavilionWalls` owns the plan; `registerPavilionCollision` makes these
+  // very rectangles solid.
   const pavilion = castAndReceive(
     new Mesh(
-      new BoxGeometry(ROOF_PAVILION_HALF_X * 2, 2.9, ROOF_PAVILION_HALF_Z * 2),
+      extrudePlan(
+        roofPavilionWalls().map((wall) => planRect(wall.minX, wall.maxX, wall.minZ, wall.maxZ)),
+        ROOF_PAVILION_HEIGHT,
+      ),
       softMaterial(PALETTE.buildingWall, 0.78),
     ),
   );
-  pavilion.position.set(ROOF_PAVILION_X, 1.45, ROOF_PAVILION_Z);
+  pavilion.name = 'roof-pavilion-walls';
   roof.add(pavilion);
+
+  // A ceiling on the walls. The pyramid above is a `ConeGeometry`, which is
+  // wound outwards and culled from beneath — without this the sky is visible
+  // straight up through the roof from inside, which is the one thing a shelter
+  // must not do.
+  const pavilionCeiling = castAndReceive(
+    new Mesh(
+      new BoxGeometry(ROOF_PAVILION_HALF_X * 2, 0.2, ROOF_PAVILION_HALF_Z * 2),
+      softMaterial(PALETTE.buildingRoofDeep, 0.72),
+    ),
+  );
+  pavilionCeiling.name = 'roof-pavilion-ceiling';
+  pavilionCeiling.position.set(ROOF_PAVILION_X, ROOF_PAVILION_HEIGHT - 0.1, ROOF_PAVILION_Z);
+  roof.add(pavilionCeiling);
 
   // ConeGeometry with four segments is a pyramid, and its radius is the
   // *circum*radius — size it off the box's diagonal or it swamps the roof.

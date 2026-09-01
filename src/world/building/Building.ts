@@ -38,7 +38,14 @@ import { Toilets } from './Toilets';
 import { Trampoline } from './Trampoline';
 import { WalkSurfaces, type MovingPlatform } from './surfaces';
 import { buildingInteractZones } from './interactZones';
-import { BENCH_HEIGHT, benchFootprints, dressDeck } from './dressing';
+import {
+  BENCH_HEIGHT,
+  benchFootprints,
+  dressDeck,
+  PLANTER_RADIUS,
+  PLANTER_TOP,
+  planterRing,
+} from './dressing';
 import { CastleFire } from './castleLighting';
 import { dressCastle } from './castleDecor';
 import { GreatHallBanquet, type PetTableLink } from './greatHallBanquet';
@@ -84,6 +91,7 @@ import {
   LIFT_DOOR_MIN_Z,
   LIFT_OUT_YAW,
   LIFT_WALL_X,
+  roofPavilionWalls,
   TOILET_DECK,
   TOILET_ROOM,
   TOP_DECK,
@@ -708,6 +716,15 @@ export class Building implements GameSystem {
     // Jim's 7 August rule is that anything solid and not too high is something
     // she can get on top of.
     this.surfaces.addPlatform(benchTops());
+
+    // **And the planters, and the pavilion** (#459). Jim: *"the general rule
+    // should be that nothing can be run through — the player is not a ghost."*
+    // Same per-floor loop for the same reason, and each registration returns
+    // nothing on a storey that does not have the thing — so a floor that ever
+    // gains a roundel or loses a pavilion brings its own collision with it
+    // rather than needing a line added here.
+    for (const floor of CASTLE_FLOORS) registerPlanterCollision(collision, floor);
+    for (const floor of CASTLE_FLOORS) registerPavilionCollision(collision, floor);
 
     // `buildShaftGuards` was called here. There are no shafts to guard.
     //
@@ -2112,6 +2129,33 @@ export function registerHallCollision(collision: CollisionWorld, floor: CastleFl
 }
 
 /**
+ * **The planters are solid** (#459) — the pots, not the bushes.
+ *
+ * A circle each, at the pot's own rim radius, with an **absolute** top at the
+ * pot's own height. `dressing.ts`'s {@link planterRing} says at length why the
+ * shrub above it is deliberately left soft, and why ten pots in a ring do not
+ * enclose the roundel; this owns only the registration.
+ *
+ * A circle rather than a rectangle, and not only because a pot is round: a
+ * circle collider has no interior at all, so the hollow-middle soft-lock the
+ * rectangles have to be argued out of cannot arise here in the first place.
+ */
+export function registerPlanterCollision(collision: CollisionWorld, floor: CastleFloor): void {
+  // Only the storeys that have a roundel to ring — `dressDeck`'s own test.
+  if (floor.index === TOP_DECK) return;
+  for (const planter of planterRing()) {
+    collision.addCircle(
+      floorX(floor, planter.x),
+      floorZ(floor, planter.z),
+      PLANTER_RADIUS,
+      BUILDING_BASE_Y + PLANTER_TOP,
+      false,
+      true,
+    );
+  }
+}
+
+/**
  * The banquet's runs, as **one** walkable surface at the tables' own height.
  *
  * ## Why the plate covers the whole run and not just the wood
@@ -2164,6 +2208,46 @@ function banquetTables(): MovingPlatform {
       );
     },
   };
+}
+
+/**
+ * **The roof pavilion is solid, and you can still walk into it** (#459).
+ *
+ * Jim: *"Why does the roof garden have a big shed-like building on it that you
+ * can run through?"* `layout.ts`'s {@link roofPavilionWalls} owns the plan —
+ * including why the building is now hollow with a doorway rather than the
+ * filled box it used to be — and `Shell.ts` extrudes those same rectangles.
+ *
+ * **Not `topIsAbsolute`, and that is the one deliberate difference from every
+ * other prop on this branch.** An absolute top is for something a jump should
+ * clear; a 2.9 m wall is not, and stating a finite top at all invites a future
+ * reader to wonder whether she can get over it. The default `Infinity` is the
+ * honest description of a building: solid at every height, exactly like the
+ * castle's own shell registered a few lines above.
+ *
+ * The room inside is a hollow a child can get into, so the soft-lock question
+ * is live here in a way it is not for a bench — and the answer is that it is
+ * not a trap but a room: she goes in through the doorway and out through the
+ * same doorway. `check:benches` walks her in and back out rather than reasoning
+ * about it.
+ */
+export function registerPavilionCollision(collision: CollisionWorld, floor: CastleFloor): void {
+  if (floor.index !== TOP_DECK) return;
+  for (const wall of roofPavilionWalls()) {
+    // Each run as a single thick wall down its own long axis, so a face is one
+    // collider rather than a rectangle-of-four with its own hollow middle.
+    const alongX = wall.maxX - wall.minX > wall.maxZ - wall.minZ;
+    const halfThickness = (alongX ? wall.maxZ - wall.minZ : wall.maxX - wall.minX) / 2;
+    const midX = (wall.minX + wall.maxX) / 2;
+    const midZ = (wall.minZ + wall.maxZ) / 2;
+    collision.addWall(
+      floorX(floor, alongX ? wall.minX + halfThickness : midX),
+      floorZ(floor, alongX ? midZ : wall.minZ + halfThickness),
+      floorX(floor, alongX ? wall.maxX - halfThickness : midX),
+      floorZ(floor, alongX ? midZ : wall.maxZ - halfThickness),
+      halfThickness,
+    );
+  }
 }
 
 /**

@@ -62,17 +62,33 @@ import { CollisionWorld } from '../src/world/Collision.ts';
 import {
   registerBenchCollision,
   registerInteriorCollision,
+  registerPavilionCollision,
+  registerPlanterCollision,
 } from '../src/world/building/Building.ts';
 import {
   BENCH_DEPTH,
   BENCH_HEIGHT,
   BENCH_LENGTH,
   benchFootprints,
+  DECK_ROUNDEL,
   keepOutsFor,
+  PLANTER_TOP,
+  planterRing,
 } from '../src/world/building/dressing.ts';
 import { buildRoofMeadow, roofMeadow, MEADOW_GRASS_HEIGHT } from '../src/world/building/roofMeadow.ts';
 import { CASTLE_FLOORS, floorX, floorZ, type CastleFloor } from '../src/world/building/floors.ts';
-import { BUILDING_BASE_Y, insideInterior, TOP_DECK } from '../src/world/building/layout.ts';
+import {
+  BUILDING_BASE_Y,
+  insideInterior,
+  ROOF_PAVILION_DOOR_SPAN,
+  ROOF_PAVILION_HALF_X,
+  ROOF_PAVILION_HALF_Z,
+  ROOF_PAVILION_WALL,
+  ROOF_PAVILION_X,
+  ROOF_PAVILION_Z,
+  roofPavilionWalls,
+  TOP_DECK,
+} from '../src/world/building/layout.ts';
 import { PET_RENDER_HEIGHT } from '../src/art/models/pets.ts';
 import {
   INTERIOR_HALF_X,
@@ -91,11 +107,13 @@ function worldFor(floor: CastleFloor): CollisionWorld {
   const world = new CollisionWorld();
   registerInteriorCollision(world, floor);
   registerBenchCollision(world, floor);
+  registerPlanterCollision(world, floor);
+  registerPavilionCollision(world, floor);
   return world;
 }
 
-/** The same shell with **no** benches — what "before" looked like, so the
- *  reachability clause can report what the benches actually cost. */
+/** The same shell with **no** furniture — what "before" looked like, so the
+ *  reachability clause can report what solidity actually cost. */
 function bareWorldFor(floor: CastleFloor): CollisionWorld {
   const world = new CollisionWorld();
   registerInteriorCollision(world, floor);
@@ -367,6 +385,47 @@ if (BENCH_DEPTH >= 4 * 0.2) {
 }
 
 // ---------------------------------------------------------------------------
+// 3b. The planters: the pot stops her, the bush does not
+// ---------------------------------------------------------------------------
+
+/**
+ * The same three behaviours asked of the benches, asked of a pot — plus the
+ * one that is only true here.
+ *
+ * A planter is a stone pot with a shrub in it, and `dressing.ts`'s
+ * `planterRing` explains why only the pot is solid. That judgement is worth an
+ * assertion rather than a paragraph, because it is exactly the kind of thing a
+ * later "make everything solid" sweep would undo without noticing: **a body
+ * whose feet are above the pot's rim must pass**, so a jump carries her over
+ * the planter, leaves and all, and the bush is never an invisible hedge.
+ */
+for (const floor of CASTLE_FLOORS) {
+  if (floor.index === TOP_DECK) continue;
+  const world = worldFor(floor);
+  const potTop = BUILDING_BASE_Y + PLANTER_TOP;
+  for (const planter of planterRing()) {
+    const cx = floorX(floor, planter.x);
+    const cz = floorZ(floor, planter.z);
+    const held = (y: number): boolean => {
+      const position = new Vector3(cx, y, cz);
+      const before = position.clone();
+      world.resolve(position, PLAYER_RADIUS, 0, 1 / 60);
+      return position.distanceTo(before) > 1e-6;
+    };
+    const where = `${floor.name}'s planter at [${planter.x.toFixed(1)}, ${planter.z.toFixed(1)}]`;
+    if (!held(BUILDING_BASE_Y)) {
+      fail(`${where} does not stop a body walking into it — the pot is not solid`);
+    }
+    if (held(potTop + 0.3)) {
+      fail(
+        `${where} still blocks a body 0.3 m above its rim: the shrub has become an invisible ` +
+          `hedge she cannot jump, which is not what a planter is`,
+      );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 4. Nothing a child needs got walled off — with its two controls
 // ---------------------------------------------------------------------------
 
@@ -525,7 +584,125 @@ for (const floor of CASTLE_FLOORS) {
     }
   }
 
-  // What the benches actually cost, reported whether or not anything failed —
+  // **The middle of the roundel, specifically.** The keep-out clause above
+  // cannot see this: the roundel's disc is 7.6 m and the planters ring it at
+  // 5.1 m, so a fill that reached only the outer annulus would satisfy it
+  // while the meeting spot in the middle was fenced off. This asks for the
+  // exact centre.
+  if (floor.index !== TOP_DECK) {
+    if (!canReach(seen, DECK_ROUNDEL.x, DECK_ROUNDEL.z, FILL_PITCH * 2)) {
+      fail(
+        `${floor.name}: the middle of the roundel is not reachable — the ring of ten solid ` +
+          `planters has become a fence round the one place on the floor that is meant to be a ` +
+          `meeting spot`,
+      );
+    }
+    // And every gap between two neighbouring pots is walkable, not merely one
+    // of them. A single wide way in would satisfy the clause above while nine
+    // gaps were closed.
+    const ring = planterRing();
+    ring.forEach((planter, i) => {
+      const next = ring[(i + 1) % ring.length];
+      if (!next) return;
+      const midX = (planter.x + next.x) / 2;
+      const midZ = (planter.z + next.z) / 2;
+      if (!canReach(seen, midX, midZ, FILL_PITCH)) {
+        fail(
+          `${floor.name}: the gap between the planters at [${planter.x.toFixed(1)}, ` +
+            `${planter.z.toFixed(1)}] and [${next.x.toFixed(1)}, ${next.z.toFixed(1)}] is not ` +
+            `walkable — two pots ${Math.hypot(next.x - planter.x, next.z - planter.z).toFixed(2)} m ` +
+            `apart have closed on a ${(PLAYER_RADIUS * 2).toFixed(2)} m child`,
+        );
+      }
+    });
+  }
+
+  // **The pavilion: in through the doorway, and out again.**
+  //
+  // Jim, 1 September 2026: *"Why does the roof garden have a big shed-like
+  // building on it that you can run through?"* It is walls now, and the whole
+  // hazard of walls round a room is that a child gets in and cannot get out —
+  // CLAUDE.md's hollow-rectangle soft-lock, at the one size where it is a room
+  // rather than a curiosity.
+  //
+  // A flood fill answers both halves at once and that is why it is the right
+  // instrument: reachability is symmetric, so if the middle of the pavilion is
+  // in the same connected component as the lift lobby she walked out of, then
+  // she can walk in *and* she can walk back out. There is no arrangement of
+  // colliders that lets one hold and not the other.
+  if (floor.index === TOP_DECK) {
+    if (!canReach(seen, ROOF_PAVILION_X, ROOF_PAVILION_Z, FILL_PITCH * 2)) {
+      fail(
+        `the middle of the roof pavilion is not reachable from the lift lobby — it is a sealed ` +
+          `shed on her own roof garden, which is a worse thing to own than one she could run ` +
+          `through`,
+      );
+    }
+    // …and the walls really do stop her, or "enterable" is just "still a
+    // ghost".
+    //
+    // **Marched along each wall's own normal, and asked whether that wall's
+    // plane was crossed** — not "did she end up inside the room". The first
+    // draft walked outwards from the pavilion's *centre*, which for the two
+    // east pieces is a diagonal, so the body sidled round to the doorway,
+    // walked in through it, and was duly reported as having come through the
+    // wall. It had not; it had used the door. A wall's question is about that
+    // wall, and the only honest bearing to ask it from is square on.
+    for (const wall of roofPavilionWalls()) {
+      const thinInX = wall.maxX - wall.minX < wall.maxZ - wall.minZ;
+      const midX = (wall.minX + wall.maxX) / 2;
+      const midZ = (wall.minZ + wall.maxZ) / 2;
+      const outward = thinInX
+        ? Math.sign(midX - ROOF_PAVILION_X)
+        : Math.sign(midZ - ROOF_PAVILION_Z);
+      const dirX = thinInX ? outward : 0;
+      const dirZ = thinInX ? 0 : outward;
+      // Sample along the run, not only its midpoint: a hole could be anywhere.
+      const samples = 5;
+      for (let s = 0; s < samples; s += 1) {
+        const t = (s + 0.5) / samples;
+        const alongX = thinInX ? midX : wall.minX + (wall.maxX - wall.minX) * t;
+        const alongZ = thinInX ? wall.minZ + (wall.maxZ - wall.minZ) * t : midZ;
+        const position = new Vector3(
+          floorX(floor, alongX + dirX * 4),
+          BUILDING_BASE_Y,
+          floorZ(floor, alongZ + dirZ * 4),
+        );
+        for (let step = 0; step < 20; step += 1) {
+          world.resolveMovement(
+            position,
+            -dirX * PLAYER_LONGEST_STEP,
+            -dirZ * PLAYER_LONGEST_STEP,
+            PLAYER_RADIUS,
+            0,
+            1 / 30,
+          );
+        }
+        // The inner face of this run, in world metres, and which side of it
+        // "outside" is.
+        const innerFace = thinInX
+          ? floorX(floor, outward > 0 ? wall.minX : wall.maxX)
+          : floorZ(floor, outward > 0 ? wall.minZ : wall.maxZ);
+        const reached = thinInX ? position.x : position.z;
+        const crossed = outward > 0 ? reached < innerFace : reached > innerFace;
+        if (crossed) {
+          fail(
+            `a body walked straight through the pavilion wall at [${alongX.toFixed(1)}, ` +
+              `${alongZ.toFixed(1)}], crossing its inner face — that wall is not solid`,
+          );
+        }
+      }
+    }
+    // The doorway is a doorway: wide enough for her, and clear.
+    if (ROOF_PAVILION_DOOR_SPAN < PLAYER_RADIUS * 2 + 0.4) {
+      fail(
+        `the pavilion doorway is ${ROOF_PAVILION_DOOR_SPAN} m clear, which is not a comfortable ` +
+          `way in for a ${(PLAYER_RADIUS * 2).toFixed(2)} m child`,
+      );
+    }
+  }
+
+  // What the furniture actually cost, reported whether or not anything failed —
   // a number nobody has to take on trust, and the tell if a future bench count
   // starts eating the floor.
   //
@@ -538,7 +715,8 @@ for (const floor of CASTLE_FLOORS) {
   const lost = bare.size - seen.size;
   const clean = failures.length === failuresBefore;
   process.stderr.write(
-    `check:benches — ${floor.name}: ${benchFootprints(floor.index).length} solid benches cost ` +
+    `check:benches — ${floor.name}: ${benchFootprints(floor.index).length} benches` +
+      `${floor.index === TOP_DECK ? ' + the pavilion' : ' + 10 planters'} cost ` +
       `${lost} of ${bare.size} walkable cells (${((lost / bare.size) * 100).toFixed(2)}%), and ` +
       `${clean ? 'nothing became unreachable' : 'SOMETHING BECAME UNREACHABLE — see below'}.\n`,
   );
@@ -694,6 +872,8 @@ if (failures.length > 0) {
 process.stdout.write(
   `check:benches OK — ${CASTLE_FLOORS.length} floors, ` +
     `${CASTLE_FLOORS.reduce((n, f) => n + benchFootprints(f.index).length, 0)} benches ` +
-    `(${BENCH_LENGTH} × ${BENCH_DEPTH} × ${BENCH_HEIGHT} m) solid from ${BEARINGS} bearings, ` +
-    `none of them a trap, nothing walled off, and the long grass measured.\n`,
+    `(${BENCH_LENGTH} × ${BENCH_DEPTH} × ${BENCH_HEIGHT} m) solid from ${BEARINGS} bearings and ` +
+    `none of them a trap, 20 planters solid to feet and open to a jump, a pavilion that stops ` +
+    `her at every wall and lets her in and out through its doorway, nothing walled off, and the ` +
+    `long grass measured.\n`,
 );
