@@ -126,6 +126,14 @@ check(
   fresh.getItem(PARK_SEED_KEY) === null && PARK_SEED_POOL.includes(resolveParkSeed()),
   `key still reads ${String(fresh.getItem(PARK_SEED_KEY))}`,
 );
+// `main.ts`'s "start again" forgets the seed and reloads, and reloads again
+// for as long as the seed is `remembered`. This is the assertion that says it
+// cannot loop: after the forget, the next load's seed is `drawn`.
+check(
+  'and the park after a forget is drawn, not remembered — so "start again" reloads once',
+  parkSeedSource() === 'drawn',
+  `source is ${parkSeedSource()}: startFresh would forget and reload for ever`,
+);
 
 // A seed is usually retired because it was found to build a bad park, so a
 // profile still holding one must be moved rather than kept on it.
