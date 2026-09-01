@@ -432,12 +432,31 @@ export function distanceOutsideTower(tower: TowerSolid, x: number, z: number, y:
  * `deckY`), so it must never import back from it.
  */
 
-// -------------------------------------------------------- glass lift shaft
+// -------------------------------------------------------------- lift alcove
 
 export const LIFT_SHAFT = rect(INTERIOR_HALF_X, INTERIOR_HALF_X + 3.4, 3.3, 6.7);
 export const LIFT_CAR_X = INTERIOR_HALF_X + 1.7;
 export const LIFT_CAR_Z = 5;
 export const LIFT_CAR_HALF = 1.3;
+
+/**
+ * **Which way is *out* of the lift** — the yaw of the direction the doors face
+ * and the rider looks while she is riding, in `Player.facing`'s own units
+ * (0 along +Z, +π/2 along +X).
+ *
+ * The castle's alcove hangs off the **east** wall, so out of it is −X. The
+ * hotel's is in a west wall and its equivalent is +π/2; that one number is the
+ * whole of the difference between the two buildings' lifts, which is why
+ * `world/lift/LiftAlcove.ts` takes it as its only orientation input.
+ *
+ * It is here because three places need to agree about it and none of them may
+ * own it: `Building` builds the alcove and lands her in it, `liftRide.ts` poses
+ * her while she rides, and both used a hand-written `Math.PI / 2` — copied from
+ * the hotel and never mirrored, so **she rode the castle's lift facing the back
+ * wall of the car** (#450, found on screen once there was a car to face away
+ * from).
+ */
+export const LIFT_OUT_YAW = -Math.PI / 2;
 
 /**
  * The lift lobby: where a child stands to wait, and what a tap aims at.
