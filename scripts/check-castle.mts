@@ -1921,14 +1921,20 @@ const PET_REACH = 1.5;
 const PET_TABLE_IN_SHOT = 8;
 
 /**
- * **How many big tables #449 asks for.** Two.
+ * **The fewest runs of tables #449 will accept.** Two.
+ *
+ * Jim asked first for *"two big tables"* and then, having seen them, for *"as
+ * many tables as is needed to fill the space"* — so the hall now derives its
+ * own count from the plate and this is a floor rather than a target. What it
+ * still catches is the thing he actually reported: a single run of assets end
+ * to end, which reads from the sofa as one long table.
  *
  * Written here rather than read from `castleFurniture.ts`, and that is the
  * whole point of it: an earlier draft compared the tables in the scene against
- * the list the furniture was placed from, so collapsing the two runs onto one
- * axis moved both sides of the comparison together and the assertion sailed
- * through green. Proved by mutation, not by reading. The number a check
- * asserts has to come from the requirement, never from the code under test.
+ * the list the furniture was placed from, so collapsing the runs onto one axis
+ * moved both sides of the comparison together and the assertion sailed through
+ * green. Proved by mutation, not by reading. The number a check asserts has to
+ * come from the requirement, never from the code under test.
  */
 const FEAST_RUNS_ASKED_FOR = 2;
 
@@ -1948,11 +1954,11 @@ const FEAST_RUNS_ASKED_FOR = 2;
     if (!object.name.startsWith('castle.feastTable')) return;
     tableXs.add(object.position.x.toFixed(2));
   });
-  if (tableXs.size !== FEAST_RUNS_ASKED_FOR) {
+  if (tableXs.size < FEAST_RUNS_ASKED_FOR) {
     fail(
       `banquet places: the hall built feast tables on ${tableXs.size} axis/axes ` +
-        `(${[...tableXs].join(', ')}), not ${FEAST_RUNS_ASKED_FOR}. #449 is "make it two big ` +
-        `tables"; a run of assets end to end reads as one table, which is what Jim saw.`,
+        `(${[...tableXs].join(', ')}), fewer than the ${FEAST_RUNS_ASKED_FOR} #449 asks for. ` +
+        `A run of assets end to end reads as one long table, which is what Jim saw.`,
     );
   }
 

@@ -359,6 +359,17 @@ export const CASTLE_TABLE_HALF_WIDTH = surfaceHalf(['table-top'], 'x');
 export const CASTLE_TABLE_HALF_LENGTH = surfaceHalf(['table-legs', 'table-top'], 'z');
 
 /**
+ * **Half the bench's own length, in metres — measured, never typed.**
+ *
+ * The southernmost thing a feast table brings with it is the far end of its
+ * bench, not the table top, so this is what decides how many tables a hall of a
+ * given depth holds (`castleFurniture.ts`'s `feastTableCount`). It stood in
+ * that file as a `1.4` inside an arithmetic expression, which is the same
+ * second-copy-of-an-asset's-size the note above is about.
+ */
+export const CASTLE_BENCH_HALF_LENGTH = surfaceHalf(['bench-plank'], 'z');
+
+/**
  * **The top of the armour's plinth, in metres — the surface a knight stands
  * on.** Measured off the emitted geometry, so it is 0.250 and not the 0.270 the
  * dressed group reports; see {@link surfaceTop} for why those differ and which

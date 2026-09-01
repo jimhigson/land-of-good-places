@@ -2,9 +2,10 @@ import { HALL_DECK } from './layout';
 import { BoxGeometry, Group, Mesh, type Object3D } from 'three';
 import { PALETTE } from '../../art/style/bridge';
 import { addOutline, softMaterial, solid } from '../../art/style/materials';
-import { PARADE_MEMBER_RADIUS } from '../../core/constants';
+import { INTERIOR_HALF_X, INTERIOR_HALF_Z, PARADE_MEMBER_RADIUS } from '../../core/constants';
 import { createPetBowl } from '../../art/models/hotelAssets';
 import {
+  CASTLE_BENCH_HALF_LENGTH,
   CASTLE_BENCH_HALF_WIDTH,
   CASTLE_BENCH_SEAT,
   CASTLE_DAIS_HEIGHT,
@@ -234,92 +235,129 @@ const BENCH_OFFSET = 1.85;
 const BENCH_ALONG = 1.55;
 
 /**
- * **How many feast tables stand end to end in one run** (#413, #449).
- *
- * Jim, 31 August 2026: *"ok let's do the banquet with the huge table, lots of
- * other children eating at the tables, and a large fireplace with a roaring
- * fire"* — and the ticket is explicit that the huge table runs **down the
- * middle of the hall, not at the end of it**.
+ * **How many feast tables stand end to end in one run — counted off the room,
+ * not typed** (#413, #449).
  *
  * They are copies of the **same** asset butted together rather than one longer
- * table. #413's own instruction ("extend or repeat the one that exists; do not
- * author a second"), and it is also the cheaper thing: an 18 m table authored
- * in Blender is a new node, a new style entry, a new `check:castle` contract
- * figure and a new thing that can disagree with {@link CASTLE_TABLE_TOP}.
- * Copies of an asset whose top is already measured and already asserted is
- * none of that.
+ * table: #413's own instruction ("extend or repeat the one that exists; do not
+ * author a second"), and the cheaper thing besides — an 18 m table authored in
+ * Blender is a new node, a new style entry, a new `check:castle` contract
+ * figure and a new thing that can disagree with {@link CASTLE_TABLE_TOP}. They
+ * butt exactly, because the pitch is the asset's own measured length.
  *
- * They butt exactly because the pitch is the asset's own measured length. See
- * {@link TABLE_HALF_LENGTH}.
- *
- * **Two rather than three since #449**, because the hall now holds two runs
- * side by side rather than one down the middle, and the second run has to
- * clear the lift lobby's keep-out disc. See {@link FEAST_ROW_OFFSET} for the
- * arithmetic that fixes both numbers together. Twelve metres a run, two runs:
- * more table and more children than the single 18 m run it replaces (32 places
- * against 24), which is the direction #413 was already pulling in.
+ * Jim, on #453: *"have as many tables as is needed to fill the space."* So the
+ * count is no longer a number somebody chose — the run grows south, table by
+ * table, until the last bench's own end would come within
+ * {@link FEAST_SOUTH_MARGIN} of the south wall. Change the plate's depth and
+ * the run lengthens or shortens on its own; that is precisely what a hard 2 or
+ * 3 could not do, and what went stale the moment the hall changed size.
  */
-export const FEAST_TABLE_COUNT = 2;
+export function feastTableCount(plan: GreatHallPlan): number {
+  // The first table is fixed: {@link FEAST_APPROACH} clear of the dais.
+  const first = plan.wallZ + plan.inward * (THRONE_FROM_WALL + TABLE_FROM_THRONE);
+  let count = 0;
+  for (;;) {
+    const centre = first + plan.inward * count * TABLE_HALF_LENGTH * 2;
+    // The southernmost thing a table brings with it is the far end of its
+    // outer bench, not the table top — so that is what is measured against the
+    // wall, and it is measured off the bench asset rather than guessed.
+    const reach = Math.abs(centre + plan.inward * (BENCH_ALONG + BENCH_HALF_LENGTH));
+    if (reach > INTERIOR_HALF_Z - FEAST_SOUTH_MARGIN) return count;
+    count += 1;
+  }
+}
 
 /**
- * **Two big tables, not one** — the first of #449's four asks.
+ * Clear floor left between the last bench and the south wall, in metres.
  *
- * Jim, looking at #422's preview: *"Great hall only has one table and no free
- * spaces for the player to sit. Make it two big tables…"*. What shipped was a
- * single 18 m run straight down the hall's axis, and from the sofa an
- * end-to-end run of three assets reads — correctly — as **one long table**.
- *
- * So this is how far each run stands from the hall's axis. The axis itself is
- * now a **central aisle** with the throne at the head of it, which is what a
- * great hall has always looked like: you walk up the middle between the two
- * tables to reach the throne, instead of squeezing round the end of one.
- *
- * ## The number is pinned at both ends, and there is very little room in it
- *
- * A run claims about 2.15 m either side of its own axis — `BENCH_OFFSET` plus
- * the plank's half-width, plus the outline hull the check measures. So:
- *
- * - **Inwards**, the aisle between the two inner benches is
- *   `2 × (offset − 2.15)`. At 3.3 that is 2.3 m of clear floor — a child is
- *   1.24 m across, so she walks up it comfortably, and it is wide enough that
- *   the two runs read as two tables with a gap rather than as one wide one.
- * - **Outwards**, the east run's benches have to stay clear of the lift
- *   lobby's keep-out — `keepOutsFor`'s `(19.21, 5) r 4`, the disc a child
- *   arrives on this storey standing in, and the one piece of floor on this
- *   storey she cannot do without. `check:castle`'s prop assertion wants the
- *   nearest drawn point of any prop 4.62 m from its centre (the radius plus a
- *   player's own), and the east run's southernmost bench is what reaches it.
- *
- * **Do not widen this to make the aisle grander**, and do not answer a
- * `check:castle` prop failure by moving {@link FEAST_ROWS_SHIFT} further west
- * than it already is — the west run walks into the roundel's disc from the
- * other side. If the banquet wants more room, shorten
- * {@link FEAST_TABLE_COUNT}: that costs places at the table, which is at least
- * a decision somebody can see.
+ * A child is 1.24 m across, so this is "she can walk round the end of the
+ * banquet without brushing the wall", twice over. Any less and the run reaches
+ * a wall it has to be squeezed past; any more and the room starts looking
+ * half-used again, which is the thing #453 is about.
  */
-const FEAST_ROW_OFFSET = 3.3;
+const FEAST_SOUTH_MARGIN = 3;
+
+/** Half a bench's own length, measured off the asset. */
+const BENCH_HALF_LENGTH = CASTLE_BENCH_HALF_LENGTH;
 
 /**
- * How far west of the throne's own axis the pair of runs is nudged, in metres.
+ * **The hall fills with tables, and the count comes off the room** — Jim, on
+ * #453.
  *
- * **The lift lobby is what moved it, and 0.40 m is all it needed.** Centred on
- * the throne's axis, the east run's southernmost bench sits 4.3 m from the
- * lift lobby's keep-out against the 4.62 m a prop needs — the disc a child
- * arrives on this storey standing in, so the furniture is what moves.
+ * > *"the tables don't compose nicely into the space, they're kind of shoved
+ * > into one end of a mostly empty room … have as many tables as is needed to
+ * > fill the space."*
  *
- * The cost is that the aisle's centre line is 0.40 m west of the throne's, on
- * an aisle 2.30 m wide: the throne still stands within it, a sixth of a
- * half-width off the middle, which at this camera's distance nobody will see.
- * The alternative — a 1.5 m aisle, symmetric — is one a child can only just
- * walk down, and it would have been symmetric about a throne she could not
- * comfortably reach.
+ * He was right twice over, and the second half was not really about tables.
+ * Two invisible discs in `keepOutsFor` — the roundel's and the front door's —
+ * claimed the middle and the south of a storey that has neither a roundel nor
+ * a door, and the banquet had been squeezed into what was left. Those are gone
+ * (see `dressing.ts`), and with the floor back the runs simply march across it.
+ *
+ * ## The throne stands at the head of the first run, not at the end of an aisle
+ *
+ * The east-most run is **on the hall's own axis**, so the throne looks straight
+ * down a table: the high table of a great hall, which is what a throne at the
+ * head of a room has always meant. The version this replaces put an aisle on
+ * that axis with a run either side, which was a good composition for exactly
+ * two tables and cannot survive more of them — a grid of runs either side of a
+ * centred aisle has to grow east as fast as it grows west, and east is the lift
+ * lobby, the one disc on this storey that is really there.
+ *
+ * Putting a run on the axis instead means the grid only ever grows **west**,
+ * into the open half of the hall, and the east-most run's benches sit 6.4 m
+ * clear of the lift lobby whatever else changes.
  */
-const FEAST_ROWS_SHIFT = -0.55;
 
-/** The two runs' own axes, west first. See {@link FEAST_ROW_OFFSET}. */
+/**
+ * Clear floor between one run's benches and the next run's, in metres.
+ *
+ * A child is 1.24 m across, so 2.6 m is two of her abreast: this is the aisle
+ * she walks up between two tables of children, and it is what stops a hall of
+ * five runs reading as one enormous slab of furniture.
+ */
+const FEAST_AISLE = 2.6;
+
+/**
+ * Middle to middle of two neighbouring runs — the aisle plus what a run itself
+ * claims either side of its own axis.
+ *
+ * Derived rather than typed, so widening a bench or moving it out from the
+ * table moves every run in the hall together and cannot leave two of them
+ * overlapping.
+ */
+const FEAST_ROW_PITCH = 2 * (BENCH_OFFSET + CASTLE_BENCH_HALF_WIDTH) + FEAST_AISLE;
+
+/**
+ * Clear floor left between the west-most run's benches and the west wall.
+ *
+ * Two metres: enough to walk down the outside of the banquet, which is how a
+ * child reaches the far tables at all, and not so much that the hall goes back
+ * to having an empty half. It is what decides the number of runs, so it is the
+ * one number to move if the hall ever wants one fewer.
+ */
+const FEAST_WALL_MARGIN = 2;
+
+/**
+ * **Every run's axis, east to west** — the east-most on the hall's own axis
+ * with the throne at its head, then one every {@link FEAST_ROW_PITCH} until the
+ * next would come within {@link FEAST_WALL_MARGIN} of the west wall.
+ *
+ * East to west and not the other way round, because index 0 is the run the
+ * blank places and the pets' table belong to (see {@link FREE_PLACE_ROW}), and
+ * that wants to be the run nearest the lift she arrives by rather than the one
+ * furthest from it.
+ */
 function feastRowAxes(plan: GreatHallPlan): number[] {
-  const centre = plan.axisX + FEAST_ROWS_SHIFT;
-  return [centre - FEAST_ROW_OFFSET, centre + FEAST_ROW_OFFSET];
+  const axes: number[] = [];
+  for (;;) {
+    const axis = plan.axisX - axes.length * FEAST_ROW_PITCH;
+    // A run reaches this far west of its own axis: the outer bench, plus the
+    // plank's half-width. Measured off the assets, never typed.
+    const reach = axis - BENCH_OFFSET - CASTLE_BENCH_HALF_WIDTH;
+    if (reach < -INTERIOR_HALF_X + FEAST_WALL_MARGIN) return axes;
+    axes.push(axis);
+  }
 }
 
 /**
@@ -380,7 +418,7 @@ export function greatHallPlan(deck: number): GreatHallPlan | null {
 function feastTableCentres(plan: GreatHallPlan): number[] {
   const first = plan.wallZ + plan.inward * (THRONE_FROM_WALL + TABLE_FROM_THRONE);
   return Array.from(
-    { length: FEAST_TABLE_COUNT },
+    { length: feastTableCount(plan) },
     (_, i) => first + plan.inward * i * TABLE_HALF_LENGTH * 2,
   );
 }
@@ -474,18 +512,31 @@ export interface GreatHallSeat {
 }
 
 /**
- * **Every third place along a bench run is left empty, starting at the
- * second** — #449's "a few spaces … on the blank spaces".
+ * **How many places are left blank, and where along the run they are** — #449's
+ * "a few spaces".
  *
- * Jim: *"no free spaces for the player to sit"*. The fix is not one gap at the
+ * Jim: *"no free spaces for the player to sit."* The fix is not one gap at the
  * end of a table, which reads as the table having run out of children; it is
- * gaps **among** the diners, which read as places laid for somebody who has
- * not sat down yet — and there is one wherever she happens to walk in.
+ * gaps **among** the diners, which read as places laid for somebody who has not
+ * sat down yet.
  *
- * Three per run of eight, never two adjacent, so no gap is wide enough to look
- * like a missing pair.
+ * Three of them, every other place, at the **south end** of the run — which is
+ * where the pets' table stands and where she walks in from the lift. That
+ * clustering is not tidiness: a run is 18 m long, there is one pets' table, and
+ * #449's fourth ask is that she *watches* her cat go and eat. Free places
+ * spread evenly down the whole run measured 12 m from the nearest bowl, and on
+ * screen that is the animal walking out of the bottom of the frame — the first
+ * version of this, built and thrown away. `check:castle`'s places assertion
+ * fails on it now.
+ *
+ * It has a second virtue: three gaps together are something a six-year-old
+ * finds while scanning a hall of a hundred children, where one here and one
+ * fifteen metres away are not.
  */
-const FREE_PLACE_STRIDE = 3;
+const FREE_PLACE_COUNT = 3;
+
+/** Every other place, so no two blanks are adjacent and read as a missing pair. */
+const FREE_PLACE_STRIDE = 2;
 
 /**
  * Which side of a run's table the free places are on: the **camera-facing**
@@ -503,25 +554,13 @@ const FREE_PLACE_STRIDE = 3;
 const FREE_PLACE_SIDE = -1;
 
 /**
- * **Which run the blank places are on: the west one, the one the pets' table
- * stands beside.**
+ * **Which run the blank places are on: the first, the one on the hall's own
+ * axis with the throne at its head.**
  *
- * Not tidiness — this is the second half of #449's fourth ask. She has to
- * *watch* her cat go and eat, and the runs are 12 m long, so a single pets'
- * table is close to the free places on one run and a long way from the other's.
- * Free places on the east run measured **12.0 m** from the nearest bowl, which
- * `check:castle`'s own places assertion now fails on: on screen that is the
- * animal walking out of the bottom of the frame, which is the first version of
- * this that was built and thrown away.
- *
- * The alternatives were a second pets' table (the ticket says *a* small pets
- * table, and two would halve the moment) or a table in the aisle between the
- * runs (2.3 m wide, so an animal standing at it stands inside a bench and in
- * the way of anyone walking up to the throne). Putting every blank place
- * within a few strides of the one table is the cheap answer, and it has a
- * second virtue: the gaps are **together**, so a six-year-old scanning a hall
- * of thirty-two children finds three in one place rather than one here and one
- * ten metres away.
+ * The run nearest the lift she arrives by, so the blank places and the pets'
+ * table are the first things she reaches rather than something across the
+ * width of a hall of five tables. {@link greatHallPetTable} reads the same
+ * index, so the two cannot come to mean different runs.
  */
 const FREE_PLACE_ROW = 0;
 
@@ -556,11 +595,11 @@ export function greatHallSeats(deck: number): readonly GreatHallSeat[] {
   const plan = greatHallPlan(deck);
   if (!plan) return [];
 
-  const seats: GreatHallSeat[] = [];
-  // Counted per run, so the free places march evenly down each run's own bench
-  // line — the west run's line and the east run's line each get their own
-  // count, and the seats on the far side of a table never advance it.
-  const alongRow = [0, 0];
+  /** Every seat, and where along {@link FREE_PLACE_ROW}'s blank-side bench line
+   *  it falls — `-1` for a seat that is not on that line at all. */
+  const seats: { seat: GreatHallSeat; along: number }[] = [];
+  let alongLine = 0;
+
   for (const bench of feastBenches(plan)) {
     // The plank's inner face: its middle, pulled back towards the table by half
     // its own measured width. Never a typed 0.30.
@@ -568,22 +607,39 @@ export function greatHallSeats(deck: number): readonly GreatHallSeat[] {
     // A child faces +Z, so a quarter turn one way or the other looks across the
     // table. West of the axis she looks east.
     const yaw = bench.side < 0 ? Math.PI / 2 : -Math.PI / 2;
+    const onFreeLine = bench.side === FREE_PLACE_SIDE && bench.row === FREE_PLACE_ROW;
     for (const along of [-DINER_ALONG, DINER_ALONG]) {
-      const onFreeSide = bench.side === FREE_PLACE_SIDE && bench.row === FREE_PLACE_ROW;
-      const place = onFreeSide ? (alongRow[bench.row] ?? 0) : -1;
-      if (onFreeSide) alongRow[bench.row] = place + 1;
       seats.push({
-        x,
-        z: bench.z + along,
-        yaw,
-        free: place >= 0 && place % FREE_PLACE_STRIDE === 1,
-        // Straight back out from the table, which is the way she walked in.
-        standX: x + bench.side * SIT_STAND_BACK,
-        standZ: bench.z + along,
+        seat: {
+          x,
+          z: bench.z + along,
+          yaw,
+          free: false,
+          // Straight back out from the table, which is the way she walked in.
+          standX: x + bench.side * SIT_STAND_BACK,
+          standZ: bench.z + along,
+        },
+        along: onFreeLine ? alongLine : -1,
       });
+      if (onFreeLine) alongLine += 1;
     }
   }
-  return seats;
+
+  // **The blank places, counted back from the south end of that line.**
+  // Counted from the end rather than from the start because the end is the
+  // fixed one: the run grows southwards as the hall gets deeper
+  // ({@link feastTableCount}), so a count from the north would slide the gaps
+  // — and the pets' table — a table's length every time the room changed size.
+  const last = alongLine - 1;
+  const free = new Set<number>();
+  for (let i = 0; i < FREE_PLACE_COUNT; i += 1) {
+    const at = last - i * FREE_PLACE_STRIDE;
+    if (at >= 0) free.add(at);
+  }
+
+  return seats.map(({ seat, along }) =>
+    free.has(along) ? { ...seat, free: true } : seat,
+  );
 }
 
 /**
@@ -653,29 +709,44 @@ const PET_TABLE_PLANK = 0.09;
 export const GREAT_HALL_PET_TABLE_TOP = 0.3;
 
 /**
- * How far west of the west run's axis the pets' table stands, in metres.
+ * Where the pets' table stands relative to {@link FREE_PLACE_ROW}'s run: a
+ * little west of its axis, and south of the last bench on it.
  *
- * **It has to be in shot from her seat, and that is the requirement that is
- * easy to miss.** The point of #449 is that she *watches* her cat leave her
- * side and go and eat, so a pets' table she cannot see while she is sitting
- * down would satisfy the ticket's words and none of its purpose. It stood at
- * the mouth of the aisle first — clear floor, tidy, and **12 m south of the
- * nearest free place**, which put it on the very bottom edge of the frame. On
- * screen the cat simply walked off the picture. Measured in the running game,
- * not reasoned about: the animal was where it should be and the moment was
- * not there.
+ * **In the clear band at the south end of the hall**, which is floor the
+ * banquet deliberately leaves ({@link FEAST_SOUTH_MARGIN}) rather than floor
+ * borrowed from it — so the animals eat beside the feast rather than among the
+ * children's legs, and nothing has to be moved to make room for them.
  *
- * Alongside the banquet instead, level with the middle of it, the farthest
- * pet is **about 5 m** from the nearest free place — a few strides, in frame
- * the whole way, with the walk itself visible.
+ * ## It has to be in shot from her seat, and that is the requirement that is
+ * easy to miss
  *
- * 5.0 m is what it takes to be *out of the way* as well as in shot: a free
- * place's own stand spot is 3.0 m west of its run's axis
- * ({@link SIT_STAND_BACK}), so the table's near edge clears the spot a child
- * stands on to sit down by a comfortable 1.35 m — she never has to walk
- * through the pets' dinner to reach her own.
+ * The point of #449 is that she *watches* her cat leave her side and go and
+ * eat, so a pets' table she cannot see while sitting down would satisfy the
+ * ticket's words and none of its purpose. Two placements were built and thrown
+ * away for this — at the mouth of an aisle it was 12 m from the nearest blank
+ * place, and beside a run it was 12 m from the blank places on the *other* run.
+ * Both were measured in the running game, not reasoned about: the animal was
+ * where it should be and the moment was not there. The blank places now cluster
+ * at the south end of one run ({@link FREE_PLACE_COUNT}) and this stands beside
+ * them, which puts the farthest of them a few strides apart.
+ *
+ * The westward nudge keeps the table out of the walking lane straight off the
+ * end of the run, and puts the animals between her seat and the camera rather
+ * than directly behind her.
  */
-const PET_TABLE_FROM_ROW = 5.0;
+const PET_TABLE_WEST_OF_ROW = 2.0;
+
+/**
+ * How far south of the last bench's own end the pets' table's middle sits.
+ *
+ * Its own half-length plus room for the animals standing at its north end, so
+ * nothing at the pets' table is ever inside the last bench of the banquet —
+ * and no more than that, because every centimetre further south is a
+ * centimetre further from the blank place at the *far* end of the run. At 2.2
+ * the worst of the three measured 8.4 m and `check:castle` failed it; the
+ * clearance is what it has to be and not a round number.
+ */
+const PET_TABLE_SOUTH_OF_FEAST = 1.2;
 
 /**
  * How far out from the table's edge a pet stands, and how far in its bowl sits.
@@ -729,15 +800,17 @@ export function greatHallPetTable(deck: number): { readonly x: number; readonly 
   const plan = greatHallPlan(deck);
   if (!plan) return null;
   const centres = feastTableCentres(plan);
-  const first = centres[0];
   const last = centres[centres.length - 1];
-  const west = feastRowAxes(plan)[0];
-  if (first === undefined || last === undefined || west === undefined) return null;
+  const row = feastRowAxes(plan)[FREE_PLACE_ROW];
+  if (last === undefined || row === undefined) return null;
   return {
-    x: west - PET_TABLE_FROM_ROW,
-    // Level with the middle of the run, so it is the same short walk from the
-    // free place at either end of it.
-    z: (first + last) / 2,
+    x: row - PET_TABLE_WEST_OF_ROW,
+    // Clear of the last bench's own far end, which is the southernmost thing
+    // the banquet puts on the floor — measured off the assets, never guessed.
+    z:
+      last +
+      plan.inward *
+        (BENCH_ALONG + CASTLE_BENCH_HALF_LENGTH + PET_TABLE_HALF_Z + PET_TABLE_SOUTH_OF_FEAST),
   };
 }
 
@@ -839,11 +912,19 @@ const THRONE_FROM_WALL = 2.8;
 /**
  * How far either side of the hall's axis the two suits of armour stand.
  *
- * Outside both runs: a run's benches reach `FEAST_ROW_OFFSET + 2.15` = 5.35 m
- * from the axis, so this clears the outermost bench by 2.15 m — a stride and a
- * half of walking room between the armour and the end of the table.
+ * **East of the whole banquet**, because the banquet now grows west from the
+ * hall's axis and there is no floor left on that side to stand a knight in.
+ * The east-most run's benches reach 2.15 m from the axis, so a plinth 4.2 m
+ * out clears it by 2 m — a stride and a half of walking room between the
+ * armour and the end of the top table — and stays well clear of the lift
+ * lobby's disc, which `check:castle` measures it against.
+ *
+ * One either side used to flank the approach. With the throne now at the head
+ * of a table rather than at the end of an aisle, the pair stands **both to the
+ * east**, one forward of the other, so they still flank the walk up to the
+ * dais without one of them standing in the middle of a run.
  */
-const ARMOUR_FROM_AXIS = 7.5;
+const ARMOUR_FROM_AXIS = 4.2;
 
 /**
  * Stands the great hall's furniture on `deck`.
@@ -881,8 +962,8 @@ export function dressGreatHall(deck: number, floor: Group): void {
   // band now that there are two — 0.25 m apart on the plan, saved only by 1.25 m
   // of Z. `ARMOUR_FROM_AXIS` puts them outside the whole banquet, where they
   // flank the feast rather than growing out of the end of a bench.
-  for (const side of [-1, 1]) {
-    group.add(...armourOnPlinth(axisX + side * ARMOUR_FROM_AXIS, wallZ + inward * 4.3, inward));
+  for (const along of [4.3, 8.1]) {
+    group.add(...armourOnPlinth(axisX + ARMOUR_FROM_AXIS, wallZ + inward * along, inward));
   }
 
   group.add(...feast(plan, deck));

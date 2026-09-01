@@ -23,6 +23,7 @@ import {
   ROOF_PAVILION_Z,
   SHOP_SCALE_XZ,
   SHOP_UNITS,
+  MALL_DECK,
   TOILET_DECK,
   TOILET_ROOM,
   TOP_DECK,
@@ -31,6 +32,7 @@ import {
   shopLocalToBuilding,
   type ShopUnitDefinition,
 } from './layout';
+import { CASTLE_GREAT_HALL_DECK } from './castleFurniture';
 
 /**
  * What makes a roomy floor read as a *place* rather than as a plain.
@@ -109,7 +111,40 @@ export interface KeepOut {
   readonly radius: number;
 }
 
+/**
+ * **The great hall is furnished, so it gets none of this** (issue #449).
+ *
+ * Jim, looking at #453: *"Banquet tables have green bench things clipping into
+ * them, and also the tables don't compose nicely into the space, they're kind
+ * of shoved into one end of a mostly empty room. Clear out other 'stuff' from
+ * the middle of the room so it focusses on the banquet only."*
+ *
+ * Both halves of that are this one line. The green benches were {@link
+ * buildBenches}' seeded scatter, which rejects against {@link keepOutsFor} and
+ * therefore knew nothing about a feast table — so benches landed in the middle
+ * of the banquet, and would have gone on landing there however the tables were
+ * arranged. And the roundel and its ring of planters are the *other* half of
+ * what made the room read as a banquet in the corner of a lobby: a 12 m inlaid
+ * disc with a ring of pots round it is a second, competing middle for a room
+ * that has one already.
+ *
+ * The argument for not simply nudging them out of the way: this file's own
+ * header says what this furniture is *for* — it is what stops a wide, bare
+ * plate reading as a car park. **The great hall is not a bare plate.** It has a
+ * throne, tapestries, a fireplace and a banquet down the middle of it, which is
+ * a far better answer to the same problem, so the generic answer is not needed
+ * and is only ever in the way.
+ *
+ * Everything the hall does have is `castleFurniture.ts`'s, placed rather than
+ * scattered, and measured by `check:castle`.
+ */
+function deckIsFurnished(deck: number): boolean {
+  return deck === CASTLE_GREAT_HALL_DECK;
+}
+
 export function dressDeck(deck: number, floor: Group): void {
+  if (deckIsFurnished(deck)) return;
+
   const isRoof = deck === TOP_DECK;
   const blocked = keepOutsFor(deck);
 
@@ -293,13 +328,33 @@ function buildBenches(deck: number, blocked: readonly KeepOut[], isRoof: boolean
 export function keepOutsFor(deck: number): KeepOut[] {
   const blocked: KeepOut[] = [
     // The stairs pad and the lane in front of it.
-    // The lift lobby, on the east wall.
+    // The lift lobby, on the east wall. Every floor has one, because the lift
+    // is the only way between them.
     { x: INTERIOR_HALF_X - 2, z: 5, radius: 4 },
-    // The roundel and its planters.
-    { x: ROUNDEL_X, z: ROUNDEL_Z, radius: ROUNDEL_RADIUS + 1.6 },
-    // The way in and out, on the ground floor's south wall.
-    { x: 0, z: INTERIOR_HALF_Z - 4, radius: 7 },
   ];
+
+  // **A disc for the roundel only on a floor that has a roundel, and one for
+  // the front door only on the floor the front door is on** (issue #449).
+  //
+  // These two claimed 14 m and 15.2 m of floor on *every* storey, and on the
+  // great hall both of them claimed floor that nothing whatsoever stands on:
+  // {@link dressDeck} does not dress a furnished deck, and the way in and out
+  // is on the mall — the floors are disjoint spaces reached only by the lift,
+  // so there is no front door anywhere else to walk to.
+  //
+  // Between them they were most of Jim's *"shoved into one end of a mostly
+  // empty room"*: the banquet had the north-east corner because two invisible
+  // discs held the south and the middle of the hall against furniture that
+  // was never built there. This is not a widened assertion — it is the list
+  // catching up with what is actually on the floor. A keep-out exists to stop
+  // a prop landing where a child must be able to stand; one guarding a
+  // roundel that was never laid guards nothing.
+  if (!deckIsFurnished(deck)) {
+    blocked.push({ x: ROUNDEL_X, z: ROUNDEL_Z, radius: ROUNDEL_RADIUS + 1.6 });
+  }
+  if (deck === MALL_DECK) {
+    blocked.push({ x: 0, z: INTERIOR_HALF_Z - 4, radius: 7 });
+  }
 
   if (deck === TOP_DECK) {
     // The roof's own furniture: the pavilion, the slide you leave from, and the
