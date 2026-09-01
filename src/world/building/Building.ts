@@ -36,7 +36,7 @@ import { Shops } from './shops/Shops';
 import { SlideRide } from './SlideRide';
 import { Toilets } from './Toilets';
 import { Trampoline } from './Trampoline';
-import { WalkSurfaces } from './surfaces';
+import { WalkSurfaces, type MovingPlatform } from './surfaces';
 import { buildingInteractZones } from './interactZones';
 import { dressDeck } from './dressing';
 import { CastleFire } from './castleLighting';
@@ -44,8 +44,11 @@ import { dressCastle } from './castleDecor';
 import { GreatHallBanquet, type PetTableLink } from './greatHallBanquet';
 import {
   CASTLE_GREAT_HALL_DECK,
+  GREAT_HALL_TABLE_HEIGHT,
   greatHallPetPlaces,
   greatHallSeats,
+  greatHallSolids,
+  greatHallTableTops,
 } from './castleFurniture';
 import { CASTLE_TABLE_TOP, createCastleFeastProp, type FeastProp } from '../../art/models/castleAssets';
 import { WildPets } from './WildPets';
@@ -679,6 +682,20 @@ export class Building implements GameSystem {
     // paying for itself — a wall on the mall can no longer be a wall in the
     // great hall.
     for (const floor of CASTLE_FLOORS) registerInteriorCollision(collision, floor);
+
+    // **And the banquet is solid** (#453). Jim, having walked the hall: *"you
+    // can walk straight through the tables — they should be solid."*
+    //
+    // Registered per floor through the same loop as the shell, off
+    // `greatHallSolids`, which returns nothing on a storey that is not the
+    // great hall — so this is one call rather than a special case, and a hall
+    // that ever moves storey brings its own collision with it.
+    for (const floor of CASTLE_FLOORS) registerHallCollision(collision, floor);
+
+    // Her feet land on the wood: the table tops are one walkable plate, so a
+    // jump onto the banquet ends up standing on it. See `banquetTables`.
+    this.surfaces.addPlatform(banquetTables());
+
 
     // `buildShaftGuards` was called here. There are no shafts to guard.
     //
@@ -1945,6 +1962,78 @@ function registerInteriorCollision(collision: CollisionWorld, floor: CastleFloor
   // left inside the castle at all.
 }
 
+
+/**
+ * Half-thickness of the walls a solid banquet footprint is built from.
+ *
+ * The same 0.2 m `hotel/place.ts` uses, and for its reason rather than for
+ * symmetry: `CollisionWorld.maxSafeStep` divides the **thinnest** collider in
+ * the whole world into sub-steps for every mover in it, so a hair-thin table
+ * edge would make the park's collision loop run more sub-steps per frame for
+ * ever. 0.2 m is already the park's own thinnest (the entrance's rope posts),
+ * so nothing here lowers it.
+ */
+const HALL_SOLID_HALF_THICKNESS = 0.2;
+
+/**
+ * **The banquet's furniture is solid** (#453) — the tables, the benches either
+ * side of them, and the pets' table.
+ *
+ * `castleFurniture.ts`'s {@link greatHallSolids} owns the footprints (and says
+ * at length why they may exist at all now, and why one rectangle per *run*);
+ * this owns only the registration. Two details are load-bearing:
+ *
+ * - **The half-extents are inset by the wall's own half-thickness**, so the
+ *   face a child's body meets is the footprint she can see rather than 0.2 m
+ *   outside it. `hotel/place.ts`'s rule: generous-light, never generous-heavy.
+ * - **`topIsAbsolute`, with the prop's real top.** Solid to feet on the
+ *   flagstones, air to feet in a jump, and still there beneath the feet
+ *   standing on it. The default `Infinity` would make a 0.675 m table an
+ *   invisible pillar to the ceiling — the bug the hotel's furniture already
+ *   paid for once.
+ */
+function registerHallCollision(collision: CollisionWorld, floor: CastleFloor): void {
+  for (const solid of greatHallSolids(floor.index)) {
+    collision.addRectangle(
+      floorX(floor, solid.x),
+      floorZ(floor, solid.z),
+      solid.halfX - HALL_SOLID_HALF_THICKNESS,
+      solid.halfZ - HALL_SOLID_HALF_THICKNESS,
+      HALL_SOLID_HALF_THICKNESS,
+      BUILDING_BASE_Y + solid.top,
+      false,
+      true,
+    );
+  }
+}
+
+/**
+ * The feast tables' tops, as **one** walkable surface.
+ *
+ * One `MovingPlatform` covering every run rather than one each, because
+ * `WalkSurfaces.sample` consults every registered platform on every sample —
+ * for the player and for each NPC, every frame, everywhere in the park. Five
+ * rectangle tests inside one `covers` is a loop entry; five platforms is five.
+ * Nothing here moves, of course; `MovingPlatform` is simply the seam
+ * `surfaces.ts` offers for "there is floor up here", and a second seam that
+ * did the same job would be a second thing to keep in step.
+ */
+function banquetTables(): MovingPlatform {
+  const tops = greatHallTableTops(CASTLE_GREAT_HALL_DECK).map((top) => ({
+    x: floorX(CASTLE_HALL, top.x),
+    z: floorZ(CASTLE_HALL, top.z),
+    halfX: top.halfX,
+    halfZ: top.halfZ,
+  }));
+  return {
+    surfaceY: BUILDING_BASE_Y + GREAT_HALL_TABLE_HEIGHT,
+    covers(x: number, z: number): boolean {
+      return tops.some(
+        (top) => Math.abs(x - top.x) <= top.halfX && Math.abs(z - top.z) <= top.halfZ,
+      );
+    },
+  };
+}
 
 /**
  * The facade out in the garden is a solid block with a doorway in it.

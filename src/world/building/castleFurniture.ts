@@ -70,21 +70,27 @@ import { CASTLE_HEARTH, castleTorchAnchors, type WallAnchor } from './castleLigh
  * of wall positions is exactly how that happens, and it cannot happen to
  * coordinates that are computed from the other list.
  *
- * ## No colliders, and that is not an oversight
+ * ## The banquet is solid; the rest of the hall is placement
  *
- * Indoor collision is height-blind — `registerInteriorCollision` walls the shell
- * once and it holds on every storey — so a collider under the throne on deck 0
- * would be an invisible pillar in the middle of floor 3. Nothing here registers
- * one. **Placement is the whole of the protection**, and `check:castle`'s prop
- * assertions are what enforce it.
+ * This file used to say castle props get **no** colliders, because indoor
+ * collision is height-blind and one under the throne would be an invisible
+ * pillar on the floor above. That was true of a stacked castle and **it is not
+ * true now**: since #377/#380 the hall's plate stands 279 m from the nearest
+ * point of any other storey, so a collider here reaches nothing else at all.
+ * The measurement, rather than the argument, is `scripts/probe-height-blind.mts`
+ * and {@link greatHallSolids}, which is where the banquet's own solids are
+ * derived. Jim, on #453: *"you can walk straight through the tables — they
+ * should be solid."*
  *
- * Issue #377's floor split removes that constraint by construction. What wants a
- * collider afterwards is written down in `HANDOFF-castle-great-hall.md` rather
- * than left to be rediscovered, and the interesting part is that **the bench,
- * the throne seat, the dais and the table top must not get a blocking one**: a
- * child is *meant* to climb onto all four, and a blocking body on a bench turns
- * the one object in the room built to be sat on into a wall. They take a
- * jump-on plate, the way `hotel/place.ts` already places props.
+ * Everything else on this storey — the throne, the dais, the armour, the
+ * tapestries — still carries **no collider**, and now for an ordinary reason
+ * rather than an architectural one: nobody has asked for it, and the approach
+ * past the dais is only {@link FEAST_APPROACH} wide. **Placement is still the
+ * whole of the protection there**, and `check:castle`'s prop assertions are
+ * what enforce it. Anything that does gain one takes an **absolute** top
+ * (`Collision.ts`'s `topIsAbsolute`), never `Infinity`: a bench a child cannot
+ * climb onto is the one object in the room built to be sat on turned into a
+ * wall. `hotel/place.ts` is the shipped precedent for all of it.
  */
 
 /**
@@ -863,6 +869,132 @@ export function greatHallFootprint(deck: number): readonly KeepOut[] {
     });
   }
   return discs;
+}
+
+/**
+ * A solid piece of the banquet: an axis-aligned box standing on the storey's
+ * floor, in that floor's own local metres.
+ *
+ * `halfX`/`halfZ` are the **effective** footprint — the face a child's body
+ * meets — so whoever registers it insets the walls it builds them from by
+ * their own half-thickness, exactly as `hotel/place.ts` does.
+ */
+export interface HallSolid {
+  readonly x: number;
+  readonly z: number;
+  readonly halfX: number;
+  readonly halfZ: number;
+  /** Its flat top, above the storey's floor. Never `Infinity`: see below. */
+  readonly top: number;
+}
+
+/**
+ * **Everything at the banquet a child cannot walk through** — Jim, on #453:
+ * *"Banquet hall looks good but you can walk straight through the tables —
+ * they should be solid."*
+ *
+ * ## Why this can exist now, when the file header says it cannot
+ *
+ * That header (and `dressing.ts`, `castleDecor.ts`, `Toilets.ts` and
+ * `layout.ts` with it) says castle props get no colliders because indoor
+ * collision is height-blind. **One sentence, two facts** — and the rule only
+ * follows if both hold:
+ *
+ *   A. the collision world is 2-D, so a collider blocks at every height;
+ *   B. two storeys share an (x, z), so A reaches across them.
+ *
+ * `scripts/probe-height-blind.mts` measures each on its own, and the answer is
+ * that **A still holds and B is dead**. An `Infinity`-top collider in the
+ * middle of this hall still blocks at y = 100 — nothing about `CollisionWorld`
+ * changed — but since #377/#380 the hall's plate stands **279 m** from the
+ * nearest point of any other storey, so height-blindness has nothing left to
+ * reach: 0 of 21250 swept points on the mall and 0 of 21250 on the roof are
+ * touched by it, and the park is untouched too. `floors.ts` predicted exactly
+ * this ("what finally lets castle props have real colliders at all"); the probe
+ * is what turns the prediction into a measurement.
+ *
+ * ## Absolute tops, so a solid table is not an invisible pillar
+ *
+ * Every solid here states its **real** top, and `Building` registers it with
+ * `Collision.ts`'s `topIsAbsolute`. Jim, 7 Aug 2026: *"I should be able to jump
+ * onto any solid item that's not too high, here and elsewhere in the game."* A
+ * 0.675 m table against a 1.28 m jump apex is squarely inside that rule, and
+ * the same probe's second row is the measurement: at feet 0.5 m the table
+ * blocks, at 1.0 m and above it does not. An `Infinity` top would have been the
+ * "every prop is a pillar" bug the hotel already paid for.
+ *
+ * ## One rectangle per **run**, not per table and not per bench
+ *
+ * A run's benches stand 1.85 m either side of its table's axis and reach 0.30 m
+ * further out again, and the clear floor between a bench's inner face and the
+ * table is {@link DINER_TABLE_GAP} — **0.45 m**, against a child's 1.24 m
+ * collision diameter. So that gap is not floor she has ever been able to stand
+ * in, and filling it invents no pocket; it only stops her walking through the
+ * run. Along the run the benches are already within 0.1–0.3 m of each other, so
+ * a run is a continuous line of furniture whether or not this says so.
+ *
+ * Registering the run whole rather than piece by piece is therefore both the
+ * honest shape *and* the cheap one: five rectangles instead of ninety, no
+ * interior walls buried inside a solid slab for a depenetration to catch on,
+ * and no butt-joint between neighbouring tables to fall out of step.
+ *
+ * The **dais, throne and armour deliberately get nothing.** The approach
+ * between the dais and the first table is {@link FEAST_APPROACH}, 1.5 m, and a
+ * child is 1.24 m across — solid on both sides it would be a 13 cm squeeze.
+ * Jim asked for the tables, the benches and the pets' table; those are what
+ * this returns.
+ */
+export function greatHallSolids(deck: number): readonly HallSolid[] {
+  const plan = greatHallPlan(deck);
+  if (!plan) return [];
+
+  const solids: HallSolid[] = [];
+  const centres = feastTableCentres(plan);
+  const first = centres[0];
+  const last = centres[centres.length - 1];
+  if (first !== undefined && last !== undefined) {
+    for (const rowX of feastRowAxes(plan)) {
+      solids.push({
+        x: rowX,
+        z: (first + last) / 2,
+        // Out to the outer face of the outer bench, measured off the asset.
+        halfX: BENCH_OFFSET + CASTLE_BENCH_HALF_WIDTH,
+        // The whole run, end to end: the tables butt exactly, so this is their
+        // count times the asset's own half-length. It also covers the benches,
+        // which reach 2.95 m from a table's middle against the table's 3.00.
+        halfZ: (Math.abs(last - first) + TABLE_HALF_LENGTH * 2) / 2,
+        top: CASTLE_TABLE_TOP,
+      });
+    }
+  }
+
+  const pets = greatHallPetTable(deck);
+  if (pets) {
+    solids.push({
+      x: pets.x,
+      z: pets.z,
+      halfX: PET_TABLE_HALF_X,
+      halfZ: PET_TABLE_HALF_Z,
+      top: GREAT_HALL_PET_TABLE_TOP,
+    });
+  }
+
+  return solids;
+}
+
+/**
+ * The part of each run a jump can actually **land on**: the table tops, at
+ * {@link GREAT_HALL_TABLE_HEIGHT}.
+ *
+ * Deliberately narrower than {@link greatHallSolids}' own rectangles — the
+ * table's own measured half-width rather than the run's — so the floor she
+ * stands on is the wood she can see, and never the 0.45 m of air over the gap
+ * or the bench with children sitting on it.
+ */
+export function greatHallTableTops(deck: number): readonly HallSolid[] {
+  return greatHallSolids(deck)
+    .filter((solid) => solid.top === CASTLE_TABLE_TOP)
+    .map((solid) => ({ ...solid, halfX: CASTLE_TABLE_HALF_WIDTH }));
 }
 
 /** Every place at the pets' table. See {@link PetPlace}. */
