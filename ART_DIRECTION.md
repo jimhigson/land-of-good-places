@@ -396,6 +396,28 @@ flat appliqué that could have been geometry, not a texture doing shading's
 job — §3's rule on that is not relaxed just because the base mesh is
 authored.
 
+### Two surfaces in the same plane will flicker
+
+**Never leave two faces occupying the same plane.** The depth buffer cannot
+choose between them, so which one wins changes as the camera moves and the
+seam strobes. It looks like a rendering bug in the engine; it is a modelling
+mistake, and it has bitten this game repeatedly — the castle roof's floor
+edges against its walls (#467) is only the most recent.
+
+It shows up wherever two builders meet: a floor plate and the wall rising from
+its edge, a decal on a slab, a patch laid over paving, two quads from
+different factories that happen to agree.
+
+**Fix it by removing the hidden face, not by nudging one surface.** Where a
+floor meets a wall, the floor's edge is never seen — so do not draw it. A
+stand-off offset is a number somebody has to maintain, and it goes stale the
+moment either surface moves; geometry that is never visible is free to delete
+and stays deleted.
+
+This is the same disease as the hood-face defect in `CLAUDE.md`: a second
+surface whose position has to track a first one. The cure is the same — have
+one surface.
+
 ---
 
 ## 8. Quick checklist before you commit an asset
@@ -408,5 +430,6 @@ authored.
 - [ ] Outlines on silhouette parts only, ink-tinted, never black
 - [ ] Every sphere squashed; one asymmetric feature on the head
 - [ ] Markings protrude past the surface
+- [ ] No two faces share a plane — the hidden one is deleted, not offset
 - [ ] No `Math.random()`, no inline hex, no `MeshBasicMaterial` on a solid
 - [ ] Looked at it in `/art-samples.html` at gameplay distance, not just close up
