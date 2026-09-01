@@ -482,8 +482,20 @@ exactly what needs visual QA.
 
 If you do own it: **always pass `background: true` to `new_page`.** A
 foreground page steals the user's focus and switches macOS Spaces, which is
-horrible when they are doing something else. Close every page you open and
-kill your dev server when you finish. See QA-PLAYBOOK.md.
+horrible when they are doing something else. See QA-PLAYBOOK.md.
+
+**Close the page the moment you have finished looking at it — not at the end
+of your task.** Jim watches this machine. On 1 September he found a pile of
+open tabs each showing his daughter's game with the player standing still,
+left there by agents that had moved on to something else half an hour
+earlier. A tab you are not actively reading is litter on somebody's desktop.
+
+The pattern: open, look, screenshot, **close**. If you need to look again
+later, open it again — it costs a second. Do not hold a page "in case", and
+do not batch all your closing up until the end, because you will be
+disconnected before you get there. The same goes for your dev server: it
+exists while you are using it, and you kill it **by PID** as soon as you are
+not.
 
 **Kill only the dev server you started, by its PID.** Never `pkill -f vite`
 or any other blanket process match — an agent did this on 28 July and took
