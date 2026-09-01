@@ -84,9 +84,12 @@ export const CANONICAL_PARK_SEED = 20260728;
  * sound in the abstract; it is sound against the code that builds it. #460 (a
  * hoppable wall's routing cost, 6.4 → 2.65) invalidated a whole vetting run of
  * these seeds mid-search by moving paths across the park — that is how quickly
- * it goes stale, and #461 (long grass, and solid benches, planters and
- * pavilion) landed the same evening and was re-vetted against: all sixteen
- * still pass. **Vetted at `8409724f`, 1 September 2026.**
+ * it goes stale. **Three routing changes landed while this pool was being
+ * found, and it was re-vetted against every one of them**: #460 (the hop
+ * multiplier), #461 (long grass, and solid benches, planters and pavilion) and
+ * #421 (paving preference in the router). All sixteen still pass after all
+ * three, and not one seed that passed earlier fails now.
+ * **Vetted at `fb8496a0`, 1 September 2026.**
  *
  * `check:seed-pool` guards the cheap half of this: that the pool is a set of
  * distinct positive integers containing {@link CANONICAL_PARK_SEED}. It cannot
