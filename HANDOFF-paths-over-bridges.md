@@ -64,3 +64,66 @@ offset 2.93 m sideways, so **every corner in it is a right angle and
 Bridge **feet become first-class lattice nodes**, so any stub may land on one
 and cross the deck. Entry stays at the feet only — a junction *mid*-ramp is
 the original #414 defect and must not come back.
+
+## The clump, measured (2 Sep) — paved area inside each built bridge's footprint
+
+Rasterised at 0.25 m from the **drawn** ribbons (`routeCurve` + each route's own
+width), over the site's own proven footprint rectangle. "One ribbon" = the
+3.2 m avenue running the footprint's length, i.e. the least a crossing can cost.
+
+| seed | site | footprint | paved | % of footprint | vs one ribbon |
+|---|---|---|---|---|---|
+| **20260728** | **railD 0 (0, 40) — the entrance bridge** | 281 m2 | **180 m2** | **64%** | **1.67x (+72 m2)** |
+| 20260728 | railD 234 | 377 | 151 | 40% | 1.28x |
+| 5 | railD 12 | 372 | 131 | 35% | 1.13x |
+| 5 | railD 56 | 377 | 172 | 46% | 1.46x |
+| 5 | railD 142 | 366 | 140 | 38% | 1.23x |
+| 11 | railD 30 | 377 | 107 | 28% | 0.91x |
+| 18 | railD 4 | 366 | 146 | 40% | 1.28x |
+| 24 | railD 20 | 377 | 110 | 29% | 0.93x |
+
+**It is not every bridge and not every seed.** Two of the eight built bridges
+carry less paving than a single ribbon. The canonical seed's entrance bridge is
+the worst by a clear margin, and it is the one Jim looked at.
+
+Deepest single backwards run along a bridge's own axis, per seed (fixed
+instrument; controlled against the hand-computed 10.6 m on the canonical
+control polyline, instrument says 11.6 m on the bowed drawn ribbon):
+
+- 20260728 **11.6 m** (`gate-approach`, railD 0)
+- 5 **15.4 m** (`spur-stall.waterFight`, railD 142); `gate-approach` 13.5 m
+- 11 6.7 m; 18 9.4 m; 24 2.1 m
+
+Caveat on that metric: where the arch is off the bridge's axis (seed 18) a
+legitimate walk *to* the toe reads as a backtrack. The canonical seed and seed
+5's gate approach are unambiguous — arch, mouth and bridge share one line.
+
+## Verdict: paths ALREADY cross decks. #436's premise is stale.
+
+`gate-approach` lays 69.9 m inside the entrance bridge's footprint and crosses
+it on the deck. `streetLatticeSearch` has registered every crossing as a
+lattice edge (`dir: 8`) whose `via` runs foot, deck, centre, deck, foot since
+before this branch. A bridge is already part of the path network.
+
+The clump is **not** paths going round a ramp they cannot climb. It is the walk
+climbing the ramp, going back down and sideways to a grid node in order to be
+*allowed* to start the crossing, and climbing it again — because **the
+crossing's feet are not lattice nodes**, so the only way onto a bridge is via
+the two grid nodes its own `streetStubs` happened to find.
+
+## Three cheap fixes considered, all measured into an existing constraint
+
+1. **Feet as lattice nodes** (the obvious one). On the canonical seed the mouth
+   is (0, 45.8) and the north foot (0, 56.42): `direct` = **10.62 m**, against
+   `computeStreetStubs`' straight-stub gate of `STUB_TAIL_LIMIT + 2` = **9.8 m**.
+   The stub is refused, and both elbow corners are degenerate (mouth and foot
+   share x = 0). So this does not fix the canonical case without moving
+   `STUB_TAIL_LIMIT`, which is a threshold and is not available.
+2. **Collapse the hairpin in a post-pass.** The limb it would delete ends at
+   lattice node (2.93, 55.38) — which is **exactly the first control point of
+   `spur-stall.railRacer`**. Deleting it strands that spur off any paving:
+   `no paved path stops anywhere but a destination`.
+3. **Teach `retracedLength` about offset hairpins** so `gateApproachSearch`
+   scores this candidate honestly. Real bug — every corner in the hairpin is a
+   right angle, so the scorer returns 0 — but it only helps the gate approach,
+   and only if a better candidate exists on that seed. Unverified.
