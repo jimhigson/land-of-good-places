@@ -1996,13 +1996,18 @@ const HALL_SOLID_HALF_THICKNESS = 0.2;
  */
 export function registerHallCollision(collision: CollisionWorld, floor: CastleFloor): void {
   for (const solid of greatHallSolids(floor.index)) {
+    const cx = floorX(floor, solid.x);
+    const cz = floorZ(floor, solid.z);
+    const top = BUILDING_BASE_Y + solid.top;
+
+    // The edges, crisp: four thin walls on the footprint the eye can see.
     collision.addRectangle(
-      floorX(floor, solid.x),
-      floorZ(floor, solid.z),
+      cx,
+      cz,
       solid.halfX - HALL_SOLID_HALF_THICKNESS,
       solid.halfZ - HALL_SOLID_HALF_THICKNESS,
       HALL_SOLID_HALF_THICKNESS,
-      BUILDING_BASE_Y + solid.top,
+      top,
       false,
       true,
     );
@@ -2010,9 +2015,36 @@ export function registerHallCollision(collision: CollisionWorld, floor: CastleFl
 }
 
 /**
- * The feast tables' tops, as **one** walkable surface.
+ * The banquet's runs, as **one** walkable surface at the tables' own height.
  *
- * One `MovingPlatform` covering every run rather than one each, because
+ * ## Why the plate covers the whole run and not just the wood
+ *
+ * `addRectangle` is four walls round a **hollow** middle, and a mover inside
+ * one is never pushed out of it: measured in the running game, a body dropped
+ * on a run's own axis had not moved after eleven seconds, because the two side
+ * walls push it exactly opposite amounts. That is not a curiosity — it is a
+ * soft-lock, and it is reachable: jump onto the banquet, walk off the side, and
+ * land on the flagstones between the benches.
+ *
+ * Filling the footprint was tried first and is a dead end. A wall collider is a
+ * filled stadium, so one fat segment down the run's axis does fill it — but the
+ * four crisp edge walls then push a body **inwards** while the fat one pushes
+ * it out, and it settles 1.13 m off the axis and stays there. Two overlapping
+ * colliders always have a standoff wherever their pushes cancel; a single
+ * stadium wide enough to span the run rounds 2.15 m off each corner, which is
+ * most of the outermost bench's own length left walk-through.
+ *
+ * So the inside is made **unreachable** instead of escapable: the plate covers
+ * the whole footprint, so a jump onto the banquet lands *on* it wherever it
+ * comes down, and stepping off its edge — which is the footprint's edge — drops
+ * her onto the floor **outside**. There is then no way to be inside at floor
+ * level at all, and `check:hall-solid` holds that rule rather than this comment.
+ * The price is that the outer metre either side is table height rather than
+ * bench height, so standing right at the edge floats her 0.315 m over the
+ * plank; the alternative was a six-year-old stuck in the furniture.
+ *
+ * ## And one platform, not five
+ *
  * `WalkSurfaces.sample` consults every registered platform on every sample —
  * for the player and for each NPC, every frame, everywhere in the park. Five
  * rectangle tests inside one `covers` is a loop entry; five platforms is five.

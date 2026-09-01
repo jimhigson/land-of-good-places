@@ -15,7 +15,9 @@ import {
   greatHallFreePlaces,
   greatHallPetPlaces,
   greatHallSolids,
+  greatHallTableTops,
 } from '../src/world/building/castleFurniture.ts';
+import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
 import { registerHallCollision } from '../src/world/building/Building.ts';
 
 /**
@@ -232,6 +234,70 @@ if (solids.length === 0) {
       }
     }
     say(inside === 0, `solid ${i} — ${inside} of 48 bearings got inside it`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// **And nothing solid is a trap.**
+//
+// `addRectangle` is four walls round a hollow middle, and a mover inside one is
+// never pushed out of it — measured in the running game on 1 September, where a
+// body dropped on a run's own axis had not moved after eleven seconds because
+// the two side walls push it exactly opposite amounts. It is reachable (jump
+// onto the banquet, walk off the side, land on the flagstones between the
+// benches) and it is a soft-lock, which for a six-year-old is the worst bug
+// this hall could have.
+//
+// The rule that fixes it, and the rule this clause holds:
+//
+//   **A solid whose top a jump can clear is either narrow enough that a body
+//   inside is escorted out, or covered edge to edge by a walk plate so a body
+//   can never be inside at floor level.**
+//
+// Both halves are measured. Neither is taken on trust, and a solid that is
+// neither fails — including a future one nobody has thought about yet.
+// ---------------------------------------------------------------------------
+console.log('\nNO SOLID IS A TRAP — escapable, or unreachable:');
+{
+  const collision = hallWorld(true);
+  const plates = greatHallTableTops(CASTLE_GREAT_HALL_DECK);
+  for (const [i, solid] of solids.entries()) {
+    const cx = floorX(CASTLE_HALL, solid.x);
+    const cz = floorZ(CASTLE_HALL, solid.z);
+
+    // Its own axis is the worst case: the side walls are equidistant, so
+    // anything that pushes towards the nearest face has nothing to choose.
+    const p = new Vector3(cx, BUILDING_BASE_Y, cz);
+    for (let step = 0; step < 180; step += 1) {
+      collision.resolveMovement(p, 0, 0, PLAYER_RADIUS, 0, 1 / 60);
+    }
+    const escaped =
+      Math.abs(p.x - cx) >= solid.halfX - 0.01 || Math.abs(p.z - cz) >= solid.halfZ - 0.01;
+
+    // Covered edge to edge — so she lands on top wherever she comes down, and
+    // steps off its edge onto the floor outside it.
+    const covered = plates.some(
+      (plate) =>
+        Math.abs(plate.x - solid.x) < 1e-6 &&
+        Math.abs(plate.z - solid.z) < 1e-6 &&
+        plate.halfX >= solid.halfX - 1e-6 &&
+        plate.halfZ >= solid.halfZ - 1e-6,
+    );
+
+    // Only a solid a jump can get on top of can strand her in the first place.
+    const jumpable = solid.top < JUMP_APEX_HEIGHT;
+
+    say(
+      !jumpable || escaped || covered,
+      `solid ${i} (top ${solid.top.toFixed(3)} m, half-width ${solid.halfX.toFixed(2)} m) — ` +
+        (covered
+          ? 'plated edge to edge, so its inside is unreachable'
+          : escaped
+            ? `escorts a body out (ended ${Math.abs(p.x - cx).toFixed(2)} m off its axis)`
+            : !jumpable
+              ? 'too tall to jump onto'
+              : 'NEITHER escapable NOR plated — a child who lands inside is stuck'),
+    );
   }
 }
 
