@@ -1943,7 +1943,7 @@ function entrancePad(x: number, z: number, colour: number): Mesh {
  * floors, 300 m apart, each needing its own shell — see the loop that calls
  * this. That is the split paying for itself rather than costing.
  */
-function registerInteriorCollision(collision: CollisionWorld, floor: CastleFloor): void {
+export function registerInteriorCollision(collision: CollisionWorld, floor: CastleFloor): void {
   const west = floorX(floor, -floor.halfX);
   const east = floorX(floor, floor.halfX);
   const north = floorZ(floor, -floor.halfZ);
