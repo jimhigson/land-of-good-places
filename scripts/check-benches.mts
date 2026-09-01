@@ -62,6 +62,7 @@ import { CollisionWorld } from '../src/world/Collision.ts';
 import {
   registerBenchCollision,
   registerInteriorCollision,
+  registerHallCollision,
   registerPavilionCollision,
   registerPlanterCollision,
 } from '../src/world/building/Building.ts';
@@ -99,21 +100,32 @@ function fail(message: string): void {
   failures.push(message);
 }
 
-/** Every floor's collision, exactly as `Building` registers it. */
+/**
+ * Every floor's collision, exactly as `Building` registers it.
+ *
+ * **The banquet is in here too**, though this file adds nothing to it. The
+ * flood fill's whole job is to prove that nothing a child needs got walled
+ * off, and a fill run against a great hall with no tables in it would happily
+ * report a route that the real hall does not have. `check:hall-solid` owns
+ * whether the banquet's own places are reachable; this owns whether *these*
+ * colliders took anything away — and it can only answer that in the room as it
+ * really is.
+ */
 function worldFor(floor: CastleFloor): CollisionWorld {
-  const world = new CollisionWorld();
-  registerInteriorCollision(world, floor);
+  const world = bareWorldFor(floor);
   registerBenchCollision(world, floor);
   registerPlanterCollision(world, floor);
   registerPavilionCollision(world, floor);
   return world;
 }
 
-/** The same shell with **no** furniture — what "before" looked like, so the
- *  reachability clause can report what solidity actually cost. */
+/** The same castle **without this branch's colliders** — the "before" the
+ *  reachability clause reports its cost against. Not an empty shell: the
+ *  banquet was already solid when this landed. */
 function bareWorldFor(floor: CastleFloor): CollisionWorld {
   const world = new CollisionWorld();
   registerInteriorCollision(world, floor);
+  registerHallCollision(world, floor);
   return world;
 }
 
@@ -165,7 +177,16 @@ for (const floor of CASTLE_FLOORS) {
   const benches = benchFootprints(floor.index);
 
   if (benches.length === 0) {
-    fail(`floor ${floor.index} (${floor.name}) has no benches to check at all`);
+    // A **furnished** floor draws no scattered benches at all — the great hall
+    // has a banquet where they would go, and `dressDeck` returns early on it.
+    // That is a legitimate zero, so it is announced rather than failed, and
+    // announced on every run: a floor that silently stopped being covered is
+    // how the next person inherits a false belief about what this file proves.
+    process.stderr.write(
+      `check:benches — ${floor.name}: no scattered benches or planters here; this floor is ` +
+        `furnished by hand (see dressing.ts's deckIsFurnished), so this file asserts nothing ` +
+        `about its furniture. check:hall-solid owns it.\n`,
+    );
     continue;
   }
 
@@ -397,10 +418,10 @@ if (BENCH_DEPTH >= 4 * 0.2) {
  * the planter, leaves and all, and the bush is never an invisible hedge.
  */
 for (const floor of CASTLE_FLOORS) {
-  if (floor.index === TOP_DECK) continue;
+  if (planterRing(floor.index).length === 0) continue;
   const world = worldFor(floor);
   const potTop = BUILDING_BASE_Y + PLANTER_TOP;
-  for (const planter of planterRing()) {
+  for (const planter of planterRing(floor.index)) {
     const cx = floorX(floor, planter.x);
     const cz = floorZ(floor, planter.z);
     const held = (y: number): boolean => {
@@ -511,11 +532,35 @@ for (const floor of CASTLE_FLOORS) {
   }
 
   // --- control two: it can say no because of a collider ------------------
-  // A ring of walls round the roundel's middle. If the fill is genuinely
-  // consulting the collision world, that point goes from reachable to not.
-  const roundel = keepOutsFor(floor.index)[1];
+  //
+  // A ring of walls dropped round a spot the fill has just reached. If it is
+  // genuinely consulting the collision world, that spot goes from reachable to
+  // not; if it is only ever bounded by the plate, it stays reachable and every
+  // green answer this file gives is worthless.
+  //
+  // **The spot is derived from the fill, not named.** It was
+  // `keepOutsFor(deck)[1]` — the roundel, by its position in the list — and the
+  // banquet (#453) added the great hall's own keep-outs, so index 1 stopped
+  // being the roundel and the control failed on that floor alone. Indexing a
+  // list by position is a second copy of that list's order, kept in step by
+  // hand, which is the bug this repo opens its own instructions with. The
+  // farthest reachable cell from the arrival is a spot the fill itself has
+  // just proved it can get to, on any floor, whatever furniture arrives later.
+  let control: { x: number; z: number } | null = null;
+  let farthest = -Infinity;
+  for (const cell of seen) {
+    const parts = cell.split(',');
+    const x = Number(parts[0]) * FILL_PITCH;
+    const z = Number(parts[1]) * FILL_PITCH;
+    const d = Math.hypot(x - ARRIVAL[0], z - ARRIVAL[1]);
+    if (d > farthest) {
+      farthest = d;
+      control = { x, z };
+    }
+  }
+  const roundel = control;
   if (!roundel) {
-    fail(`${floor.name}: keepOutsFor no longer has a roundel to run the collider control on`);
+    fail(`${floor.name}: the fill reached nowhere to run the collider control on`);
     continue;
   }
   const walled = worldFor(floor);
@@ -586,7 +631,7 @@ for (const floor of CASTLE_FLOORS) {
   // 5.1 m, so a fill that reached only the outer annulus would satisfy it
   // while the meeting spot in the middle was fenced off. This asks for the
   // exact centre.
-  if (floor.index !== TOP_DECK) {
+  if (planterRing(floor.index).length > 0) {
     if (!canReach(seen, DECK_ROUNDEL.x, DECK_ROUNDEL.z, FILL_PITCH * 2)) {
       fail(
         `${floor.name}: the middle of the roundel is not reachable — the ring of ten solid ` +
@@ -597,7 +642,7 @@ for (const floor of CASTLE_FLOORS) {
     // And every gap between two neighbouring pots is walkable, not merely one
     // of them. A single wide way in would satisfy the clause above while nine
     // gaps were closed.
-    const ring = planterRing();
+    const ring = planterRing(floor.index);
     ring.forEach((planter, i) => {
       const next = ring[(i + 1) % ring.length];
       if (!next) return;
@@ -695,8 +740,9 @@ for (const floor of CASTLE_FLOORS) {
   const lost = bare.size - seen.size;
   const clean = failures.length === failuresBefore;
   process.stderr.write(
-    `check:benches — ${floor.name}: ${benchFootprints(floor.index).length} benches` +
-      `${floor.index === TOP_DECK ? ' + the pavilion' : ' + 10 planters'} cost ` +
+    `check:benches — ${floor.name}: ${benchFootprints(floor.index).length} benches, ` +
+      `${planterRing(floor.index).length} planters` +
+      `${floor.index === TOP_DECK ? ' and the pavilion' : ''} cost ` +
       `${lost} of ${bare.size} walkable cells (${((lost / bare.size) * 100).toFixed(2)}%), and ` +
       `${clean ? 'nothing became unreachable' : 'SOMETHING BECAME UNREACHABLE — see below'}.\n`,
   );
@@ -853,6 +899,8 @@ process.stdout.write(
   `check:benches OK — ${CASTLE_FLOORS.length} floors, ` +
     `${CASTLE_FLOORS.reduce((n, f) => n + benchFootprints(f.index).length, 0)} benches ` +
     `(${BENCH_LENGTH} × ${BENCH_DEPTH} × ${BENCH_HEIGHT} m) solid from ${BEARINGS} bearings and ` +
-    `none of them a trap, 20 planters solid to feet and open to a jump, a pavilion solid on all ` +
-    `four faces with its inside out of reach, nothing walled off, and the long grass measured.\n`,
+    `none of them a trap, ` +
+    `${CASTLE_FLOORS.reduce((n, f) => n + planterRing(f.index).length, 0)} planters solid to ` +
+    `feet and open to a jump, a pavilion solid on all four faces with its inside out of reach, ` +
+    `nothing walled off, and the long grass measured.\n`,
 );

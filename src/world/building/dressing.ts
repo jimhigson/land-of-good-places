@@ -245,7 +245,11 @@ export interface Planter {
  * `check:benches` floods the floor and holds it to the result rather than to
  * this paragraph.
  */
-export function planterRing(): Planter[] {
+export function planterRing(deck: number): Planter[] {
+  // Only the decks that have a roundel to ring — `dressDeck`'s own two tests,
+  // asked rather than copied. The roof garden has no roundel and the great
+  // hall has a banquet where one would go.
+  if (deck === TOP_DECK || deckIsFurnished(deck)) return [];
   const ring: Planter[] = [];
   for (let i = 0; i < PLANTER_COUNT; i += 1) {
     const angle = (i / PLANTER_COUNT) * TAU;
@@ -262,7 +266,7 @@ function buildPlanterRing(deck: number): Group {
   const group = new Group();
   group.name = `deck-planters-${deck}`;
 
-  const ring = planterRing();
+  const ring = planterRing(deck);
   const pots = new InstancedMesh(
     new CylinderGeometry(PLANTER_RADIUS, 0.36, PLANTER_TOP, 12),
     softMaterial(PALETTE.stonePinkLight, 0.8),
@@ -364,6 +368,13 @@ export function deckBenchSpots(deck: number, blocked: readonly KeepOut[], isRoof
  * against — takes only a deck.
  */
 export function benchesOn(deck: number): BenchSpot[] {
+  // **A furnished deck has none**, and this asks {@link deckIsFurnished}
+  // rather than re-testing the great hall's number, because `dressDeck`
+  // already returns early on exactly that test. A collider for a bench nobody
+  // drew is an invisible wall in the middle of the banquet — and it is the
+  // *cheapest* possible bug to introduce, since the scatter is perfectly happy
+  // to hand out ten spots for a room it is not decorating.
+  if (deckIsFurnished(deck)) return [];
   return deckBenchSpots(deck, keepOutsFor(deck), deck === TOP_DECK);
 }
 

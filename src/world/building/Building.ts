@@ -2144,9 +2144,11 @@ export function registerHallCollision(collision: CollisionWorld, floor: CastleFl
  * rectangles have to be argued out of cannot arise here in the first place.
  */
 export function registerPlanterCollision(collision: CollisionWorld, floor: CastleFloor): void {
-  // Only the storeys that have a roundel to ring — `dressDeck`'s own test.
-  if (floor.index === TOP_DECK) return;
-  for (const planter of planterRing()) {
+  // Which storeys have planters at all is `planterRing`'s own question, and it
+  // answers with an empty list rather than a flag — so a floor that gains or
+  // loses its roundel brings its colliders with it and there is nothing here
+  // to remember to update.
+  for (const planter of planterRing(floor.index)) {
     collision.addCircle(
       floorX(floor, planter.x),
       floorZ(floor, planter.z),
