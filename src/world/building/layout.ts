@@ -1189,10 +1189,11 @@ export const SHOP_UNITS: readonly ShopUnitDefinition[] = [
   { id: 'candyFloss', deck: MALL_DECK, ...stall(2), title: 'Candy Floss', sells: 'Candy Floss', glyph: '🍬', accent: PALETTE.blossomPink },
   { id: 'iceCream', deck: MALL_DECK, ...stall(3), title: 'Ice Cream', sells: 'Ice Cream', glyph: '🍦', accent: PALETTE.markerMint },
   { id: 'hat', deck: MALL_DECK, ...stall(4), title: 'Hat Shop', sells: 'Hats', glyph: '🎩', accent: PALETTE.markerLilac },
-  // Pets first, not "Stickers & Pets" as the awning has it: Jim's own example
-  // of the new prompt was "Pets", and it is the half of the stall a six-year-old
-  // is walking towards.
-  { id: 'stickerPet', deck: MALL_DECK, ...stall(5), title: 'Stickers & Pets', sells: 'Pets & Stickers', glyph: '🐹', accent: PALETTE.markerLemon },
+  // "Pets", not the awning's full "Stickers & Pets": Jim named this one himself
+  // — *"such as 'Pets' or 'Toys'"* — and it is the half of the stall a
+  // six-year-old is walking towards. The stickers are still on the shelves and
+  // still in the panel `title` heads; the chip is the short word.
+  { id: 'stickerPet', deck: MALL_DECK, ...stall(5), title: 'Stickers & Pets', sells: 'Pets', glyph: '🐹', accent: PALETTE.markerLemon },
   { id: 'surpriseEgg', deck: MALL_DECK, ...stall(6), title: 'Surprise Eggs', sells: 'Surprise Eggs', glyph: '🥚', accent: PALETTE.flowerViolet },
 ];
 
