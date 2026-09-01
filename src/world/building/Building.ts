@@ -1,6 +1,6 @@
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
 import { CylinderGeometry, Group, Mesh, Vector3, type PerspectiveCamera } from 'three';
-import { BUILDING_FLOOR_COUNT, BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, INTERIOR_HALF_X, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, SLIDE_SPEED } from '../../core/constants';
+import { BUILDING_FLOOR_COUNT, BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, SLIDE_SPEED } from '../../core/constants';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
 import { bandContains, type PortalBand } from '../tapSpacing';
 import { SpaceManager } from '../SpaceManager';
@@ -61,6 +61,7 @@ import {
   LIFT_DOOR_MAX_Z,
   LIFT_DOOR_MIN_Z,
   LIFT_OUT_YAW,
+  LIFT_WALL_X,
   TOILET_DECK,
   TOILET_ROOM,
   TOP_DECK,
@@ -549,9 +550,9 @@ export class Building implements GameSystem {
     // the cutaway.
     this.shell.floorGroups.forEach((group, index) => {
       const alcove = new LiftAlcove({
-        wallX: INTERIOR_HALF_X,
+        wallX: LIFT_WALL_X,
         wallZ: LIFT_DOOR_Z,
-        // Out of the *east* wall. The hotel's is +π/2 out of a west one.
+        // Out of the west wall — the same quarter turn the hotel's takes.
         yaw: LIFT_OUT_YAW,
         topOfScale: CASTLE_FLOORS.length - 1,
         // Three floors, so every one of them is labelled — and with the glyph
@@ -855,7 +856,7 @@ export class Building implements GameSystem {
     this.spaces.update(dt);
 
     this.liftRide.update(dt);
-    this.updateLiftAlcoves(dt);
+    this.updateLiftAlcoves();
     this.trampoline.update(dt);
     this.toilets.update(dt, elapsed, this.toiletOccupied());
     this.ballPit.update(dt, elapsed);
@@ -1022,23 +1023,14 @@ export class Building implements GameSystem {
    *
    * Line for line the hotel's `updateDoors`, because it is the same lift.
    */
-  private updateLiftAlcoves(dt: number): void {
+  private updateLiftAlcoves(): void {
     const active = this.liftRide.activeFloor();
     const openness = this.liftRide.doorOpenness();
     const storey = this.liftRide.indicatedFloor();
-    // **The car opens up while it has her.** The castle's alcove is in the east
-    // wall, so the car's closed back stands between the fixed camera and
-    // whoever is inside it — see `LiftAlcove.openUp`, which is where the whole
-    // of that reasoning lives. Any phase that is posing her counts, including
-    // the doors opening to draw her in, so the shell is already out of the way
-    // by the time she is behind it.
-    const holdingHer = this.liftRide.hasRider();
     this.liftAlcoves.forEach((alcove, index) => {
       const live = index === active?.index;
       alcove.setOpen(live ? openness : 0);
       alcove.setStorey(storey);
-      alcove.openUp(live && holdingHer);
-      alcove.update(dt);
     });
   }
 
@@ -1699,7 +1691,6 @@ function registerInteriorCollision(collision: CollisionWorld, floor: CastleFloor
   const south = floorZ(floor, floor.halfZ);
 
   collision.addWall(west, north, east, north, 0.3);
-  collision.addWall(west, north, west, south, 0.3);
 
   // South face. The way out is only cut on the **mall** — it is the only floor
   // with a front door, and a gap in the great hall's or the roof garden's south
@@ -1712,9 +1703,12 @@ function registerInteriorCollision(collision: CollisionWorld, floor: CastleFloor
     collision.addWall(west, south, east, south, 0.3);
   }
 
-  // East face, minus the way into the lift alcove. Every floor has one.
-  collision.addWall(east, north, east, floorZ(floor, LIFT_DOOR_MIN_Z), 0.3);
-  collision.addWall(east, floorZ(floor, LIFT_DOOR_MAX_Z), east, south, 0.3);
+  // East face: solid all the way since the lift moved off it (#450).
+  collision.addWall(east, north, east, south, 0.3);
+
+  // West face, minus the way into the lift alcove. Every floor has one.
+  collision.addWall(west, north, west, floorZ(floor, LIFT_DOOR_MIN_Z), 0.3);
+  collision.addWall(west, floorZ(floor, LIFT_DOOR_MAX_Z), west, south, 0.3);
 
   // The stairs' and the escalator's side walls were registered here — a wall
   // down each side of every ramp, so a wobbly step sideways met a rail instead

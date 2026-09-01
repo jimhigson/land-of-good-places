@@ -1,4 +1,4 @@
-import type { Material, Mesh, Object3D } from 'three';
+import type { Group, Material, Mesh, Object3D } from 'three';
 import { BUILDING_FADE_SECONDS } from '../../core/constants';
 
 interface FadeMaterial extends Material {
@@ -8,14 +8,7 @@ interface FadeMaterial extends Material {
 }
 
 interface FloorLayer {
-  /**
-   * What fades. A whole floor of the castle, the hotel's gallery overhang, or —
-   * since #450 — a single mesh: the lift car's shell, which is the one part of
-   * an alcove that can stand between the camera and the child inside it. Typed
-   * `Object3D` rather than `Group` for that last case; nothing here ever needed
-   * more than `traverse` and `visible`.
-   */
-  readonly group: Object3D;
+  readonly group: Group;
   readonly materials: FadeMaterial[];
   readonly baseOpacity: number[];
   readonly baseTransparent: boolean[];
@@ -55,7 +48,7 @@ export class FloorFader {
   }
 
   /** Registers a floor group. Call once per floor, bottom to top, once built. */
-  addLayer(group: Object3D): void {
+  addLayer(group: Group): void {
     const materials: FadeMaterial[] = [];
     const substitutes = new Map<Material, Material>();
 

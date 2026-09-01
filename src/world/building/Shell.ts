@@ -235,7 +235,7 @@ function buildDeck(plan: ShellPlan, deck: number): Mesh {
   // `planHole` lost its last caller with them.
   const slab = planRect(-ox, ox, -oz, oz);
   // **The lift alcove's own floor, part of the same slab.** The alcove hangs
-  // off the east wall, past the plate — so before #450 there was simply nothing
+  // off the west wall, past the plate — so before #450 there was simply nothing
   // under it, and the lift's car (whose own floor plate is only 2.2 m deep and
   // starts 0.62 m out from the wall) would have stood over a 0.40 m slot of
   // open sky at its threshold. One more rectangle in the same extrusion rather
@@ -243,10 +243,10 @@ function buildDeck(plan: ShellPlan, deck: number): Mesh {
   // plates meet. `LIFT_SHAFT` is the footprint `LIFT_PIT` already registers as
   // walkable, so the floor you can see and the floor you can stand on are the
   // same rectangle by construction. It starts at the wall's *outer* face
-  // rather than at `LIFT_SHAFT.minX`, so the two rectangles abut instead of
+  // rather than at `LIFT_SHAFT.maxX`, so the two rectangles abut instead of
   // overlapping — two coplanar top faces in one extrusion z-fight.
   const shapes = plan.holes
-    ? [slab, planRect(ox, LIFT_SHAFT.maxX, LIFT_SHAFT.minZ, LIFT_SHAFT.maxZ)]
+    ? [slab, planRect(LIFT_SHAFT.minX, -ox, LIFT_SHAFT.minZ, LIFT_SHAFT.maxZ)]
     : [slab];
 
   // `plan.holes` is true only for the interior — the facade out in the garden
@@ -287,17 +287,19 @@ function wallShapes(plan: ShellPlan, deck: number): Shape[] {
     shapes.push(planRect(start, end, plan.halfZ - HALF_WALL, oz));
   }
 
-  // East face: the way into the glass lift, on every deck.
+  // East face: never interrupted since the lift moved off it (#450).
+  shapes.push(
+    planRect(plan.halfX - HALF_WALL, ox, -plan.halfZ + HALF_WALL, plan.halfZ - HALF_WALL),
+  );
+
+  // West face: the way into the lift, on every floor. It is the **far** wall
+  // from the fixed camera, which is the whole reason the lift is in it — see
+  // `layout.ts`'s `LIFT_WALL_X`.
   for (const [start, end] of segmentsMinusGaps(-plan.halfZ + HALF_WALL, plan.halfZ - HALF_WALL, [
     [LIFT_DOOR_MIN_Z, LIFT_DOOR_MAX_Z],
   ])) {
-    shapes.push(planRect(plan.halfX - HALF_WALL, ox, start, end));
+    shapes.push(planRect(-ox, -plan.halfX + HALF_WALL, start, end));
   }
-
-  // West face.
-  shapes.push(
-    planRect(-ox, -plan.halfX + HALF_WALL, -plan.halfZ + HALF_WALL, plan.halfZ - HALF_WALL),
-  );
 
   return shapes;
 }
@@ -404,10 +406,10 @@ function buildWindows(plan: ShellPlan, deck: number): InstancedMesh[] {
     if (!blocked(x, southGaps)) slots.push({ x, z: oz + outward, yaw: Math.PI });
   }
   for (const z of spread(plan.halfZ, 3.2)) {
-    slots.push({ x: -ox - outward, z, yaw: Math.PI / 2 });
     if (!blocked(z, [[LIFT_DOOR_MIN_Z, LIFT_DOOR_MAX_Z]])) {
-      slots.push({ x: ox + outward, z, yaw: -Math.PI / 2 });
+      slots.push({ x: -ox - outward, z, yaw: Math.PI / 2 });
     }
+    slots.push({ x: ox + outward, z, yaw: -Math.PI / 2 });
   }
 
   const storey = storeyColours(deck);
@@ -516,12 +518,12 @@ function buildRoofTerrace(plan: ShellPlan, roof: Group): void {
   for (const [start, end] of segmentsMinusGaps(-ox, ox, [[SLIDE_PLAN.roofDoorMinX, SLIDE_PLAN.roofDoorMaxX]])) {
     shapes.push(planRect(start, end, oz - 0.6, oz));
   }
-  shapes.push(planRect(-ox, -ox + 0.6, -oz + 0.6, oz - 0.6));
   for (const [start, end] of segmentsMinusGaps(-oz + 0.6, oz - 0.6, [
     [LIFT_DOOR_MIN_Z, LIFT_DOOR_MAX_Z],
   ])) {
-    shapes.push(planRect(ox - 0.6, ox, start, end));
+    shapes.push(planRect(-ox, -ox + 0.6, start, end));
   }
+  shapes.push(planRect(ox - 0.6, ox, -oz + 0.6, oz - 0.6));
 
   const lip = castAndReceive(
     new Mesh(extrudePlan(shapes, ROOF_PARAPET), softMaterial(PALETTE.buildingRoofDeep, 0.72)),

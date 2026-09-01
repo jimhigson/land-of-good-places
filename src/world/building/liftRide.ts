@@ -15,6 +15,7 @@ import {
   LIFT_LOBBY_REACH,
   LIFT_OUT_YAW,
   LIFT_STAND_X,
+  LIFT_VIA_X,
 } from './layout';
 
 /**
@@ -249,18 +250,6 @@ export class LiftRide implements LiftPanelSource {
   }
 
   /**
-   * **Is the lift holding her?** True from the moment the doors start opening
-   * to draw her in until she has stepped back out — every phase in which she is
-   * inside the car, or about to be.
-   *
-   * `coming` counts: the car has to be see-through *before* she is behind it,
-   * or she blinks out for the half-second of the boarding glide.
-   */
-  hasRider(): boolean {
-    return this.phase === 'coming' || this.ridingUs();
-  }
-
-  /**
    * Whose doors and dial are the live ones right now.
    *
    * While travelling this is the floor she is **going to**, because that is the
@@ -385,7 +374,7 @@ export class LiftRide implements LiftPanelSource {
     if (!floor) return false;
     const localX = player.position.x - floor.originX;
     const localZ = player.position.z - floor.originZ;
-    if (localX < LIFT_STAND_X - LIFT_LOBBY_REACH) return false;
+    if (localX > LIFT_STAND_X + LIFT_LOBBY_REACH) return false;
     if (localZ < LIFT_DOOR_MIN_Z - 1.2 || localZ > LIFT_DOOR_MAX_Z + 1.2) return false;
     return true;
   }
@@ -444,7 +433,7 @@ export class LiftRide implements LiftPanelSource {
     this.stepFrom.y = y;
     this.stepFrom.z = from.z;
     // The doorway itself, bent through so the curve does not clip the jamb.
-    this.stepVia.x = floorX(floor, LIFT_STAND_X + 1.4);
+    this.stepVia.x = floorX(floor, LIFT_VIA_X);
     this.stepVia.y = y;
     this.stepVia.z = floorZ(floor, LIFT_DOOR_Z);
     this.stepTo.x = to.x;
