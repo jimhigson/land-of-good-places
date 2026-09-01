@@ -488,6 +488,8 @@ for (const floor of CASTLE_FLOORS) {
 
   // --- the assertion itself ---------------------------------------------
   //
+  const failuresBefore = failures.length;
+  //
   // Every disc in the castle's register of "somewhere a child must be able to
   // stand" must still have somewhere to stand in it.
   for (const spot of keepOutsFor(floor.index)) {
@@ -524,14 +526,21 @@ for (const floor of CASTLE_FLOORS) {
   }
 
   // What the benches actually cost, reported whether or not anything failed —
-  // a number nobody has to take on trust, and the tell if a future bench
-  // count starts eating the floor.
+  // a number nobody has to take on trust, and the tell if a future bench count
+  // starts eating the floor.
+  //
+  // **Its second clause is conditional on this floor's own result.** It read
+  // "…and nothing became unreachable" unconditionally, and a mutation run
+  // printed exactly that on a floor whose next line was a keep-out it had just
+  // walled off. A note that asserts more than the run behind it is the same
+  // disease as a check that cannot fail, one layer out.
   const bare = reachable(bareWorldFor(floor), floor, ARRIVAL);
   const lost = bare.size - seen.size;
+  const clean = failures.length === failuresBefore;
   process.stderr.write(
     `check:benches — ${floor.name}: ${benchFootprints(floor.index).length} solid benches cost ` +
       `${lost} of ${bare.size} walkable cells (${((lost / bare.size) * 100).toFixed(2)}%), and ` +
-      `nothing became unreachable.\n`,
+      `${clean ? 'nothing became unreachable' : 'SOMETHING BECAME UNREACHABLE — see below'}.\n`,
   );
 }
 
