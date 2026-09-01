@@ -122,11 +122,19 @@ import { MAX_AUTO_HOP_HEIGHT, autoHopClears, type CollisionWorld } from './Colli
  * a hoppable wall is a jump, so an edge touching a band may change height by
  * {@link MAX_AUTO_HOP_HEIGHT} — `Collision.ts`'s own measured ceiling, asked of
  * it rather than restated — where an ordinary walking edge is held to
- * `BUILDING_STEP_UP`. Without this the fountain's own water is unreachable: the
- * wading surface stands **0.631 m** above the plaza paving it is ringed by
- * (measured, canonical seed, `scripts/probe-fountain-levels.mts`) against a
- * 0.62 m walking step, so the lattice refused the last 11 mm of a step a child
- * plainly makes by hopping the rim.
+ * `BUILDING_STEP_UP`.
+ *
+ * Without it the fountain's water can be out of reach altogether. The wading
+ * surface stands **0.63–0.66 m** above the paving that rings it
+ * (`scripts/measure-fountain-rim-step.mts`) against a 0.62 m walking step — so
+ * whether a route can get in at all comes down to whether the terrain happens
+ * to run high enough on *some* bearing round the rim. Measured with this rule
+ * removed: four of the five CI seeds still get in, by luck; **seed 11 does not
+ * get in anywhere** (0.658 m of step over ground that varies by 5 mm all the
+ * way round). Which is a fair description of why the rule belongs here rather
+ * than as a nudge to `BUILDING_STEP_UP`: a child hopping a wall is not taking
+ * a step, and holding her to one was never right — it merely happened to be
+ * survivable while nothing hoppable had a drop behind it.
  *
  * ## Nothing here happens per frame
  *
