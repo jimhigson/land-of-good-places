@@ -45,17 +45,34 @@ on the whole park.
 
 ## Proved on screen
 
-`/castle?deck=2&at=17,11`, walking her along the south parapet so the camera
-moves with her. Screenshots in the session scratchpad:
+**In its own headless Chromium, not the shared MCP profile** — another agent's
+tab switching reached into the shared page twice and moved a camera, and a
+flicker judgement is exactly the thing that ruins. `scripts/_qa-roof-seam.mjs`
+(scratch, not committed; copy in the session scratchpad) stands her at four
+spots along the south rampart — `/castle?deck=2&at=17,11`, `13,11`, `9,11`,
+`5,11` — and photographs each, so the camera is in four places rather than one.
 
-- `before-f-crop.png` — fix reverted: heavy diagonal hatching all along the
-  seam and down the wall face. That is the two surfaces interleaving.
-- `after-f-crop.png`, `after-g-crop.png` — fix in place, **two different
-  camera positions**: one continuous kerb band, no hatching anywhere.
+- **Broken build**: a dashed lighter line runs through the wall just under the
+  kerb — the deck's edge winning the depth test in patches.
+- **Fixed build**: that boundary is one clean unbroken edge.
+- **The frames differ in one place only.** Diffing the matched pair at `17,11`
+  gives 7001 differing pixels, and their busiest columns are at 207, 279, 351,
+  424 … — **72 px apart, the merlon pitch**. The change between the two builds
+  is a dashed line along the parapet run and nothing else.
+
+Frames and the overlay in the scratchpad: `roof-out/broken-zoom.png`,
+`roof-out/fixed-zoom.png`, `roof-out/diff-overlay-17_11.png`.
+
+Be warned that it is **subtle at swiftshader's 1400x900** — a 0.3 m strip about
+20 px tall, dashed rather than strobing, and two naive pixel metrics (bright
+specks in the wall, warm-cream fraction under the kerb) failed to separate the
+builds before the frame diff did. The measurement below is the primary proof;
+the frames confirm it is the thing a child would see.
 
 Trap hit on the way: a saved game overrode the deep link mid-session twice
 (she resumed in the ball pit, then on the rail race). `localStorage.clear()`
-then navigate.
+then navigate — or, as the headless script does, write the save yourself in an
+init script.
 
 ## Gates
 
