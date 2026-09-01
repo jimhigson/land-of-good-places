@@ -271,6 +271,35 @@ function surfaceTop(names: readonly string[]): number {
   return top;
 }
 
+/**
+ * Half a part's **bare geometry** across one horizontal axis — {@link
+ * surfaceTop}'s sideways twin, and it exists for the same reason.
+ *
+ * The banquet (#413) has to know how wide a bench and a table are, because a
+ * child sits on the bench's inner face and her front must clear the table's
+ * edge — 5 cm of it, at child scale. Those two half-widths were about to be
+ * typed as `0.30` and `1.10` in `castleFurniture.ts`, read off a debug dump of
+ * the built hall. That is a measurement of the right quantity **copied into a
+ * second place**, which is this repo's most-cited bug with an extra step: the
+ * day the Artist widens a plank, the diner sits inside the table and nothing
+ * says so.
+ *
+ * Outline-free, like {@link surfaceTop} — the inverted hull is drawn behind the
+ * plank and a child is not kept out by it.
+ */
+function surfaceHalf(names: readonly string[], axis: 'x' | 'z'): number {
+  let half = 0;
+  for (const name of names) {
+    const part = castlePart(name);
+    part.geometry.computeBoundingBox();
+    const box = part.geometry.boundingBox;
+    if (!box) throw new Error(`castleAssets: '${name}' has no geometry to measure.`);
+    const offset = axis === 'x' ? part.position.x : part.position.z;
+    half = Math.max(half, Math.abs(box.max[axis] + offset), Math.abs(box.min[axis] + offset));
+  }
+  return half;
+}
+
 // ---------------------------------------------------------------------------
 // The figures this side of the contract publishes, measured at load.
 // ---------------------------------------------------------------------------
@@ -297,6 +326,37 @@ export const CASTLE_TABLE_TOP = surfaceTop(['table-top']);
  * inherits it rather than picking its own.
  */
 export const CASTLE_BENCH_SEAT = surfaceTop(['bench-plank']);
+
+/**
+ * **Half the bench plank's width, in metres — measured, never typed.** 0.300 m.
+ *
+ * A diner at the banquet (#413) sits on the plank's **inner face**, not on its
+ * middle, and this is the number that says where that face is. She cannot sit
+ * centred: her torso reaches 0.18 m below her own hip pivot, so a child whose
+ * hips are at {@link CASTLE_BENCH_SEAT} — the only height at which her feet
+ * reach the floor — has 0.18 m of herself below the plank's top surface. On the
+ * inner face that 0.18 m is behind her, under the table's shadow and out of
+ * sight; in the middle of the plank it is inside the plank.
+ */
+export const CASTLE_BENCH_HALF_WIDTH = surfaceHalf(['bench-plank'], 'x');
+
+/**
+ * **Half the feast table's width, in metres — measured, never typed.** 1.100 m.
+ *
+ * What a seated child's front has to clear. See {@link CASTLE_BENCH_HALF_WIDTH}.
+ */
+export const CASTLE_TABLE_HALF_WIDTH = surfaceHalf(['table-top'], 'x');
+
+/**
+ * **Half the feast table's length, in metres — measured, never typed.** 3.000 m.
+ *
+ * The banquet repeats the table down the hall rather than authoring a longer
+ * one, so this is the pitch consecutive tables are placed at: butt one against
+ * the next and the run is continuous by construction, with no gap to tune.
+ * `castleFurniture.ts` typed this as a `3` with the comment "authored size; it
+ * does not scale", which was true and still a second copy.
+ */
+export const CASTLE_TABLE_HALF_LENGTH = surfaceHalf(['table-legs', 'table-top'], 'z');
 
 /**
  * **The top of the armour's plinth, in metres — the surface a knight stands
