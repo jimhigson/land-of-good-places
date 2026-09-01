@@ -255,9 +255,14 @@ function buildDeck(plan: ShellPlan, deck: number): Mesh {
   // same rectangle by construction. It starts at the wall's *outer* face
   // rather than at `LIFT_SHAFT.maxX`, so the two rectangles abut instead of
   // overlapping — two coplanar top faces in one extrusion z-fight.
+  //
+  // **The roof deck is cut back to where its curtain wall begins** (#467) —
+  // see {@link roofDeckShapes}. Everything else is the plain slab.
+  const isRoof = plan.holes && deck === TOP_DECK;
+  const plate = isRoof ? roofDeckShapes(plan) : [slab];
   const shapes = plan.holes
-    ? [slab, planRect(LIFT_SHAFT.minX, -ox, LIFT_SHAFT.minZ, LIFT_SHAFT.maxZ)]
-    : [slab];
+    ? [...plate, planRect(LIFT_SHAFT.minX, -ox, LIFT_SHAFT.minZ, LIFT_SHAFT.maxZ)]
+    : plate;
 
   // `plan.holes` is true only for the interior — the facade out in the garden
   // is a solid block and takes none of this. The roof terrace is genuinely
@@ -499,6 +504,60 @@ function buildCornerPillars(plan: ShellPlan): InstancedMesh {
 // ----------------------------------------------------------- roof terrace
 
 /**
+ * **The one opening in the roof garden's south (+Z) edge** — where the
+ * ginormous slide leaves.
+ *
+ * Four things step round it: the parapet kerb, the merlons standing on the
+ * kerb, the curtain wall falling away below it, and the deck plate itself
+ * ({@link roofDeckShapes}), which has to *fill* the gap the other three leave.
+ * They used to say it four times over in their own inline literals; a moved
+ * doorway now moves all four, which is what CLAUDE.md's "one owner; everyone
+ * else asks" is for.
+ */
+const ROOF_SLIDE_GAPS: readonly (readonly [number, number])[] = [
+  [SLIDE_PLAN.roofDoorMinX, SLIDE_PLAN.roofDoorMaxX],
+];
+
+/**
+ * **The roof deck's plate, stopping where the curtain wall starts** (#467).
+ *
+ * Jim, on the roof garden: *"the roof has an issue we've seen before of
+ * coplanar faces upsetting z-index — in this case the edges of the floor and
+ * the walls. But really the floor doesn't need edges rendered."*
+ *
+ * The deck is a 0.3 m slab hanging under the walking surface, and
+ * {@link buildRoofCurtainWalls} hangs 18 m of wall off the same two edges,
+ * its top at the same `y = 0`. So along the east and south runs the slab's
+ * outer 0.6 m sat **inside** the wall: their outer faces were the same plane
+ * facing the same way, and the depth buffer picked a different winner as the
+ * camera moved. That strobing 0.3 m strip under the battlement is what a child
+ * sees.
+ *
+ * So the plate stops at the wall's inner face and the wall itself fills the
+ * band — no offset to maintain, and the deleted faces were never visible
+ * (ART_DIRECTION §7). Measured after the cut: the roof's four
+ * `deck-2`/`roof-curtain-wall` coplanar pairs are gone.
+ *
+ * The two runs the wall does *not* cover keep their full plate: the north and
+ * west edges have only the parapet standing on them, and nothing below to
+ * argue with.
+ */
+function roofDeckShapes(plan: ShellPlan): Shape[] {
+  const ox = outerX(plan);
+  const oz = outerZ(plan);
+  const band = ROOF_PARAPET_THICKNESS;
+  const shapes = [planRect(-ox, ox - band, -oz, oz - band)];
+  // Where the wall steps aside for the slide there is nothing to hide the
+  // plate — and nothing to stand on either, so the plate carries on to the
+  // edge rather than leaving a notch in the floor at the slide's mouth. Read
+  // from the list the wall steps round, so the two cannot disagree.
+  for (const [start, end] of ROOF_SLIDE_GAPS) {
+    shapes.push(planRect(Math.max(start, -ox), Math.min(end, ox - band), oz - band, oz));
+  }
+  return shapes;
+}
+
+/**
  * The roof: an actual outdoor terrace, and the top floor of the building.
  *
  * "The top floor is the roof" was the family's fifth note, and it changes what
@@ -516,7 +575,7 @@ function buildRoofTerrace(plan: ShellPlan, roof: Group): void {
   const shapes: Shape[] = [];
   const band = ROOF_PARAPET_THICKNESS;
   shapes.push(planRect(-ox, ox, -oz, -oz + band));
-  for (const [start, end] of segmentsMinusGaps(-ox, ox, [[SLIDE_PLAN.roofDoorMinX, SLIDE_PLAN.roofDoorMaxX]])) {
+  for (const [start, end] of segmentsMinusGaps(-ox, ox, ROOF_SLIDE_GAPS)) {
     shapes.push(planRect(start, end, oz - band, oz));
   }
   for (const [start, end] of segmentsMinusGaps(-oz + band, oz - band, [
@@ -616,9 +675,7 @@ function roofMerlonSlots(plan: ShellPlan): MerlonSlot[] {
   return slots.filter((slot) => {
     // The slide leaves through the south (+Z) run; the lift door is in the
     // west (−X) one.
-    if (slot.z === oz) {
-      return clearOf(slot.x, [[SLIDE_PLAN.roofDoorMinX, SLIDE_PLAN.roofDoorMaxX]]);
-    }
+    if (slot.z === oz) return clearOf(slot.x, ROOF_SLIDE_GAPS);
     if (slot.x === -ox) return clearOf(slot.z, [[LIFT_DOOR_MIN_Z, LIFT_DOOR_MAX_Z]]);
     return true;
   });
@@ -734,9 +791,9 @@ function buildRoofCurtainWalls(plan: ShellPlan): Mesh {
     planRect(ox - ROOF_PARAPET_THICKNESS, ox, -oz, oz),
     // The south face, stepping round the gap the ginormous slide leaves
     // through — the same numbers the parapet above it steps round.
-    ...segmentsMinusGaps(-ox, ox - ROOF_PARAPET_THICKNESS, [
-      [SLIDE_PLAN.roofDoorMinX, SLIDE_PLAN.roofDoorMaxX],
-    ]).map(([start, end]) => planRect(start, end, oz - ROOF_PARAPET_THICKNESS, oz)),
+    ...segmentsMinusGaps(-ox, ox - ROOF_PARAPET_THICKNESS, ROOF_SLIDE_GAPS).map(([start, end]) =>
+      planRect(start, end, oz - ROOF_PARAPET_THICKNESS, oz),
+    ),
   ];
 
   const wall = new Mesh(
