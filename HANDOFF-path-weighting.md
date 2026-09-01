@@ -548,3 +548,20 @@ this section changes it, and per instruction it was not touched.
 
 **`pnpm run check` cannot exit 0, and therefore #421 cannot go green, until
 #448 is fixed.** The paving work itself is done and green.
+
+## Rebased onto `origin/main` a7fb6e71, 1 Sep
+
+Two commits had landed (#424 keyring framing, #425 drag-to-look). **The
+`package.json` conflict is the one CLAUDE.md names**: `main` had gained
+`check:look-around` and `check:keyring-view` while this branch adds
+`check:path-preference`, so accepting either side would silently drop steps.
+Resolved by rebuilding the chain from **main's** list and inserting
+`check:path-preference` after `check:nav-routes`, then verifying by parsing
+the `scripts` object rather than grepping: **52 steps**, all three names
+present.
+
+**Every paving number is byte-identical after the rebase** — 83.0 / 82.3 /
+74.3 / 79.1 / 80.1% mean, 95.8 / 96.2 / 91.8 / 95.3 / 95.7% share. Neither
+landed PR moves the park, so the derivation tables in the source are still
+accurate. `tsc` 0, `build` 0, `test:procgen` **497**, and main's own two new
+steps (`look-around`, `keyring-view`) green on this branch.
