@@ -712,6 +712,23 @@ green everywhere"*), reverted immediately after:
 So `pnpm run check` cannot exit 0 here until the hop multiplier lands, and
 nothing on this branch should be adjusted for it.
 
+### Gates, 1 Sep
+
+| gate | result |
+|---|---|
+| `pnpm run build` | **exit 0** |
+| `pnpm run test:procgen` | **497 passed / 16 files** |
+| `pnpm exec tsc --noEmit` | **exit 0** |
+| `pnpm run check` | **exit 1 — `check:path-preference` only** |
+| every other step of the chain | **green**, all 53 run individually |
+| `check:path-preference`, seeds 5 / 11 / 18 | **all green** |
+| `check:path-preference`, canonical / 24 | green **except** the kerb assertion |
+
+The chain's 53 other steps were each run on their own and all exit 0 —
+including the router-adjacent `check:waypoints`, `check:park`,
+`check:nav-routes`, `check:tap-spacing` and `check:look-around`, which is what
+covers the `standableNodeIn` refactor of `findRoute`'s goal test.
+
 ### The reconciliation is real, and it is ~12 hunks
 
 Two parallel `Uint8Array`s (`paved` / `hopBand`), a `stampCircle` parameter
