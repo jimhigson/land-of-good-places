@@ -365,6 +365,32 @@ if (busRoot) {
   }
 
   const insideBus = inside.scene.getObjectByName('cat-bus');
+  /**
+   * **The frame the aisle is actually in** — the sprung body, not the vehicle.
+   *
+   * The pan measurements below all ask where the lens is *along the bus*, and
+   * the bus they mean is the cabin: the seats, the aisle and the children are
+   * all children of `chassis`, and so is the lens. `cat-bus` the root is the
+   * cabin **plus the suspension**, and measuring in it therefore mixes the
+   * lens's travel with the body's heave and pitch.
+   *
+   * That is invisible frame to frame — the springs move slowly — and it shows
+   * up in exactly one place: **across the cut** between the two interior beats,
+   * where several seconds of ride time pass with the lens not being sampled, so
+   * the whole of the body's attitude change since arrives at once and reads as
+   * a jump. It duly did, at 0.085 m, the moment the bus was given the deeper
+   * rock Jim asked for in #435; the pan itself was perfectly continuous.
+   *
+   * Measuring in the chassis is a **sharpening, not a relaxation**: it removes
+   * a noise term that has nothing to do with the question. The failure the jump
+   * clause exists to catch — a pan running on the ride's own clock, which
+   * "would leap a third of the bus across the gap" — is 2.8 m on this bus and
+   * is not remotely disguised by dropping 0.085 m of springs.
+   *
+   * The camera-inside-the-bus test below deliberately keeps the **root**: "is
+   * the lens inside the vehicle" is a question about the whole vehicle.
+   */
+  const insideCabin = insideBus?.getObjectByName('chassis') ?? insideBus;
   const seats: Object3D[] = [];
   inside.scene.traverse((object) => {
     if (object.name.startsWith('cat-bus-seat-')) seats.push(object);
@@ -524,7 +550,8 @@ if (busRoot) {
       box.setFromObject(insideBus);
       if (!box.containsPoint(inside.camera.position)) framesCameraOutsideTheBus += 1;
 
-      intoTheBus.copy(insideBus.matrixWorld).invert();
+      // The **cabin's** frame, not the vehicle's — see `insideCabin`.
+      intoTheBus.copy((insideCabin ?? insideBus).matrixWorld).invert();
       lensInTheBus.copy(inside.camera.position).applyMatrix4(intoTheBus);
       // Where it is looking, as a bearing off the aisle: 0 is straight down the
       // bus, 90 is square at the seats beside it.
