@@ -786,7 +786,7 @@ function buildRoofCurtainWalls(plan: ShellPlan): Mesh {
  * `position` and nothing else — ART_DIRECTION §7's rule for an asset, applied
  * to a piece of world geometry for the same reason.
  */
-export function buildRoofPavilion(scale: number): Group {
+export function buildRoofPavilion(scale: number, withMast = true): Group {
   const group = new Group();
   group.name = 'roof-pavilion-group';
 
@@ -821,7 +821,18 @@ export function buildRoofPavilion(scale: number): Group {
   pavilionRoof.rotation.y = Math.PI / 4;
   group.add(pavilionRoof);
 
-  // Every building in this park has a bobble on top.
+  // Every building in this park has a bobble on top — except the copy on the
+  // castle's own roof out in the garden, which is why this is optional.
+  //
+  // That castle is 24 m across and its battlements top out at
+  // `CASTLE_MASONRY_TOP`; the ginormous slide's air begins 3.44 m above them,
+  // and `theGinormousSlideLeavesOverTheBattlements` holds it open on every
+  // seed. A mast and a bobble scaled for a 42 m roof garden would stand 5 m
+  // over the parapet — the tallest thing on the castle, poking into a ride's
+  // envelope, to say something the pyramid roof already says. The roof garden's
+  // own pavilion keeps both.
+  if (!withMast) return group;
+
   const mast = receiveOnly(
     new Mesh(
       new CylinderGeometry(0.12 * scale, 0.16 * scale, 3.4 * scale, 8),
@@ -1401,7 +1412,7 @@ function buildCastleRoofGarden(plan: ShellPlan): Group {
   // are different sizes and 300 m apart.
   const pavilionX = (ROOF_PAVILION_X / INTERIOR_HALF_X) * innerX;
   const pavilionZ = (ROOF_PAVILION_Z / INTERIOR_HALF_Z) * innerZ;
-  const pavilion = buildRoofPavilion(FACADE_SCALE);
+  const pavilion = buildRoofPavilion(FACADE_SCALE, false);
   pavilion.position.set(pavilionX, CASTLE_WALL_HEIGHT, pavilionZ);
   group.add(pavilion);
 

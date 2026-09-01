@@ -3739,6 +3739,101 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
 };
 
 /**
+ * **The ginormous slide clears the garden on the castle's roof.** (Issue #462.)
+ *
+ * Jim, having stood on the roof garden: *"when out in the park there should be
+ * a roof on the castle with a few of the features from the actual roof garden
+ * on top of it."* So the castle grew a roof, and on it the garden's paving, its
+ * pavilion and its ring of planters.
+ *
+ * ## Why that needs an invariant of its own
+ *
+ * Everything else on the castle is matched by
+ * {@link ParkFacts.castleMasonryTopY}'s name pattern, and
+ * {@link theGinormousSlideLeavesOverTheBattlements} measures the chute against
+ * it. The roof garden deliberately is **not** matched — an interior-ish name
+ * falling into that pattern is the fault `castleFabric.ts`'s `castle-timber-`
+ * note exists for. So the roof garden is a class of solid standing on the
+ * castle that the slide's own invariant cannot see, and the guard has to be
+ * explicit.
+ *
+ * It is not hypothetical. The pavilion is a **scaled copy** of a building sized
+ * for the 42 m interior plate, and even cut to facade scale its pyramid stands
+ * **1.95 m above the battlements** — measured, on the canonical seed. Its mast
+ * and bobble stood 4 m higher again until they were dropped from the facade
+ * copy for exactly this reason.
+ *
+ * ## What it asserts, and the proxy it deliberately does not
+ *
+ * The first draft asserted *"nothing on the roof rises above the
+ * battlements"*, which is tidy, easy to measure, and **the wrong question**. It
+ * fails on a pavilion that clears the ride by metres, and worse, a pavilion
+ * standing proud of the parapet is the whole point: it is what a child in the
+ * park can actually see. Passing that draft would have meant shrinking the
+ * pavilion to a fifth of its size to satisfy a number nothing in the game
+ * cares about.
+ *
+ * So this measures the real requirement instead: **no sampled point of the
+ * chute passes over the roof garden lower than the roof garden's own top**,
+ * with the chute's full built envelope (`CHUTE_ENVELOPE`, the trough as
+ * measured, not the generator's wider steering corridor) counted underneath its
+ * centre line. That is stated against the ride a child sits in rather than
+ * against a decorative line, and it is the assertion that would actually catch
+ * a pavilion growing into the slide.
+ *
+ * **Two ways this could assert nothing, both announced rather than passed.** A
+ * missing roof garden is a failure, in the tradition of `castleMasonryTopY`'s
+ * own guard. And a chute that never crosses the roof's plan box on a given seed
+ * is a legitimate pass — but it is a pass over *zero* samples, so the count is
+ * reported on every run the way `everyProvenBridgeSiteKeepsItsBridge` reports
+ * its coverage, and a suite where every seed covers nothing is visible instead
+ * of silent.
+ */
+const theSlideClearsTheCastleRoofGarden: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const roof = facts.castleRoofGarden;
+
+  if (roof === null) {
+    complaints.push(
+      'the castle in the garden has no roof garden on it at all (nothing named ' +
+        '`castle-roof-garden` is in the built park), so this invariant is switched off. ' +
+        "Issue #462 put the roof garden's paving, pavilion and planters up there so a " +
+        'child out in the park can see where she was standing',
+    );
+    return complaints;
+  }
+
+  // The chute is a tube, so a centre line passing beside the roof still puts
+  // trough over it. Widen the box by the built half-width before asking.
+  const reach = facts.chuteEnvelope.halfWidth;
+  let over = 0;
+  let worst = Infinity;
+  for (const [x, y, z] of facts.slideChute) {
+    if (x < roof.minX - reach || x > roof.maxX + reach) continue;
+    if (z < roof.minZ - reach || z > roof.maxZ + reach) continue;
+    over += 1;
+    const gap = y - facts.chuteEnvelope.below - roof.topY;
+    if (gap < worst) worst = gap;
+  }
+
+  process.stderr.write(
+    `  the slide over the castle's roof garden: ${over} chute sample(s) pass over it` +
+      `${over === 0 ? ' — this clause asserts nothing on this seed' : `, clearing its ${roof.topY.toFixed(2)} m top by ${worst.toFixed(2)} m at worst`}\n`,
+  );
+
+  if (over > 0 && worst < 0) {
+    complaints.push(
+      `the ginormous slide passes over the castle's roof garden with its trough floor ` +
+        `${(-worst).toFixed(2)} m *inside* it — the roof tops out at ${roof.topY.toFixed(2)} m ` +
+        `and the chute's underside gets to ${(roof.topY + worst).toFixed(2)} m. Lower what is ` +
+        'on that roof, or the ride goes through the pavilion',
+    );
+  }
+
+  return complaints;
+};
+
+/**
  * **The ginormous slide does not go through the castle's corner towers.**
  *
  * Jim rode it and found it clipping through them; this is that, stated as
@@ -8311,6 +8406,7 @@ const nothingGrowsInTheLaneButTheParksOwnTrees: Invariant = (facts) => {
 
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the arrival reaches its end and hands over', theArrivalReachesItsEnd],
+  ['the ginormous slide clears the garden on the castle roof', theSlideClearsTheCastleRoofGarden],
   ['nothing stands in the journey lane carriageway', nothingStandsInTheLanesCarriageway],
   ["nothing grows in the lane but the park's own trees", nothingGrowsInTheLaneButTheParksOwnTrees],
   ['no two tap targets crowd each other or a doorway', tapTargetsKeepTheirDistance],
