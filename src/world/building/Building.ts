@@ -1992,7 +1992,7 @@ const HALL_SOLID_HALF_THICKNESS = 0.2;
  *   invisible pillar to the ceiling — the bug the hotel's furniture already
  *   paid for once.
  */
-function registerHallCollision(collision: CollisionWorld, floor: CastleFloor): void {
+export function registerHallCollision(collision: CollisionWorld, floor: CastleFloor): void {
   for (const solid of greatHallSolids(floor.index)) {
     collision.addRectangle(
       floorX(floor, solid.x),
