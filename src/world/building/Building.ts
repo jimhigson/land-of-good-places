@@ -32,7 +32,7 @@ import { GrownUp } from './GrownUp';
 import { InteriorLighting } from './InteriorLighting';
 import { BuildingShell } from './Shell';
 import { CASTLE_TURRET_FOOTPRINT_RADIUS } from './castleMasonry';
-import { roofTurretSpots } from './layout';
+import { ROOF_EDGE_Z, ROOF_PARAPET_THICKNESS, roofTurretSpots } from './layout';
 import { ShopUnits } from './ShopUnits';
 import { Shops } from './shops/Shops';
 import { SlideRide } from './SlideRide';
@@ -1967,30 +1967,45 @@ function entrancePad(x: number, z: number, colour: number): Mesh {
  * this. That is the split paying for itself rather than costing.
  */
 export function registerInteriorCollision(collision: CollisionWorld, floor: CastleFloor): void {
-  const west = floorX(floor, -floor.halfX);
-  const east = floorX(floor, floor.halfX);
-  const north = floorZ(floor, -floor.halfZ);
-  const south = floorZ(floor, floor.halfZ);
+  // **The roof garden's edge is its parapet's, not its plate's** (#462).
+  //
+  // Every enclosed storey's wall is drawn from `halfX - HALF_WALL` outwards, so
+  // a wall centred on `halfX` stops a child's body 0.075 m *short* of the stone
+  // — generous-light, which is the right direction (`hotel/place.ts`).
+  //
+  // The roof has no wall; it has a parapet, and that parapet is a **0.6 m**
+  // band rather than a 0.45 m one, so it reaches 0.075 m further inboard than
+  // the storeys below. The same line therefore let a child's body 0.075 m
+  // *inside* the drawn rampart — generous-heavy, and on the one edge #462
+  // invites her to walk up and lean on. Measured by `check:benches`, which
+  // holds the two together from here on.
+  //
+  // So the roof's line is derived from the stone rather than from the plate.
+  const inset = floor.index === TOP_DECK ? ROOF_PARAPET_EDGE_INSET : 0;
+  const west = floorX(floor, -floor.halfX + inset);
+  const east = floorX(floor, floor.halfX - inset);
+  const north = floorZ(floor, -floor.halfZ + inset);
+  const south = floorZ(floor, floor.halfZ - inset);
 
-  collision.addWall(west, north, east, north, 0.3);
+  collision.addWall(west, north, east, north, INTERIOR_WALL_HALF_THICKNESS);
 
   // South face. The way out is only cut on the **mall** — it is the only floor
   // with a front door, and a gap in the great hall's or the roof garden's south
   // wall would be a hole a child could walk out of into three hundred metres of
   // nothing.
   if (floor.index === CASTLE_MALL.index) {
-    collision.addWall(west, south, floorX(floor, INTERIOR_DOOR_MIN_X), south, 0.3);
-    collision.addWall(floorX(floor, INTERIOR_DOOR_MAX_X), south, east, south, 0.3);
+    collision.addWall(west, south, floorX(floor, INTERIOR_DOOR_MIN_X), south, INTERIOR_WALL_HALF_THICKNESS);
+    collision.addWall(floorX(floor, INTERIOR_DOOR_MAX_X), south, east, south, INTERIOR_WALL_HALF_THICKNESS);
   } else {
-    collision.addWall(west, south, east, south, 0.3);
+    collision.addWall(west, south, east, south, INTERIOR_WALL_HALF_THICKNESS);
   }
 
   // East face: solid all the way since the lift moved off it (#450).
-  collision.addWall(east, north, east, south, 0.3);
+  collision.addWall(east, north, east, south, INTERIOR_WALL_HALF_THICKNESS);
 
   // West face, minus the way into the lift alcove. Every floor has one.
-  collision.addWall(west, north, west, floorZ(floor, LIFT_DOOR_MIN_Z), 0.3);
-  collision.addWall(west, floorZ(floor, LIFT_DOOR_MAX_Z), west, south, 0.3);
+  collision.addWall(west, north, west, floorZ(floor, LIFT_DOOR_MIN_Z), INTERIOR_WALL_HALF_THICKNESS);
+  collision.addWall(west, floorZ(floor, LIFT_DOOR_MAX_Z), west, south, INTERIOR_WALL_HALF_THICKNESS);
 
   // The stairs' and the escalator's side walls were registered here — a wall
   // down each side of every ramp, so a wobbly step sideways met a rail instead
@@ -1998,6 +2013,23 @@ export function registerInteriorCollision(collision: CollisionWorld, floor: Cast
   // because stepping across it was stepping off a ledge. There are no ramps
   // left inside the castle at all.
 }
+
+/**
+ * How far the roof garden's perimeter collision sits inboard of the plate's own
+ * half-extents, so that the surface a child's body meets is the inner face of
+ * the drawn parapet.
+ *
+ * Derived from the two things that decide it and typed from neither: the
+ * parapet's outer face is half a wall past the plate, its band is
+ * {@link ROOF_PARAPET_THICKNESS} thick, and `addWall`'s own 0.3 m half-thickness
+ * is what her body is held off the line by. Comes out at 0.075 m.
+ */
+/** The half-thickness every run of `registerInteriorCollision`'s shell uses. */
+const INTERIOR_WALL_HALF_THICKNESS = 0.3;
+
+const ROOF_PARAPET_EDGE_INSET =
+  INTERIOR_HALF_Z -
+  (ROOF_EDGE_Z - ROOF_PARAPET_THICKNESS + INTERIOR_WALL_HALF_THICKNESS);
 
 /**
  * Half-thickness of the walls a solid bench footprint is built from.

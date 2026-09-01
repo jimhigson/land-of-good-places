@@ -57,7 +57,9 @@
  *   is only ever bounded by the plate, which is what an `isClearCircle` that
  *   was never actually consulted would look like.
  */
-import { Matrix4, Vector3 } from 'three';
+import { Box3, Matrix4, Vector3, type Object3D } from 'three';
+import './headless-canvas.mjs';
+import { BuildingShell } from '../src/world/building/Shell.ts';
 import { CollisionWorld } from '../src/world/Collision.ts';
 import {
   registerBenchCollision,
@@ -86,6 +88,7 @@ import {
   ROOF_PAVILION_HALF_Z,
   ROOF_PAVILION_X,
   ROOF_PAVILION_Z,
+  ROOF_PARAPET_THICKNESS,
   roofTurretSpots,
   TOP_DECK,
 } from '../src/world/building/layout.ts';
@@ -97,6 +100,16 @@ import {
   PLAYER_LONGEST_STEP,
   PLAYER_RADIUS,
 } from '../src/core/constants.ts';
+
+/**
+ * How far short of the drawn parapet a child may be stopped before it reads as
+ * an invisible wall rather than as the stone she can see.
+ *
+ * Ten centimetres — under a fifth of her own radius, and well under the width
+ * of one merlon, so nothing a player could notice. The measured figure as
+ * committed is 0.075 m.
+ */
+const PARAPET_STANDOFF_LIMIT = 0.1;
 
 const failures: string[] = [];
 function fail(message: string): void {
@@ -725,6 +738,89 @@ for (const floor of CASTLE_FLOORS) {
             `a body marched at the pavilion's [${face.dirX}, ${face.dirZ}] face, ` +
               `${offset.toFixed(2)} m along it, ended up inside the building — that face is not ` +
               `solid`,
+          );
+        }
+      }
+    }
+  }
+
+  // **The rampart she can see is the thing that stops her** (#462).
+  //
+  // Nothing derives a collider from a mesh in this codebase, so the drawn
+  // parapet and the perimeter wall that actually stops her are two definitions
+  // of one edge, kept in step by hand — which is the defect this repo cites
+  // more than any other. Since #462 puts merlons and turrets along that edge
+  // and invites a child to walk up and lean on them, the two are checked
+  // against each other here rather than left to agree by luck.
+  //
+  // **Both sides are measured, neither is typed.** The stone comes off the
+  // built `roof-parapet` group's own bounding box; the stopping surface comes
+  // out of a body marched at it through the real `CollisionWorld`. Comparing a
+  // constant against a constant is how a clause like this passes for ever
+  // while the wall drifts.
+  //
+  // Measured as committed: her body stops **0.075 m** short of the drawn inner
+  // face, on both axes. That gap is the honest one to allow — `hotel/place.ts`'s
+  // rule is generous-*light*, never generous-heavy, so being kept a whisker off
+  // the stone is right and being let inside it is not.
+  if (floor.index === TOP_DECK) {
+    const shell = new BuildingShell('interior');
+    shell.group.updateMatrixWorld(true);
+    const roofGroup = shell.floorGroups[TOP_DECK];
+    let parapet: Object3D | null = null;
+    roofGroup?.traverse((object) => {
+      if (object.name === 'roof-parapet-lip') parapet = object;
+    });
+    if (!parapet) {
+      fail(
+        'the roof garden has no `roof-parapet-lip` to measure, so the clause that keeps the ' +
+          'drawn rampart and the collider that stops her in step is switched off',
+      );
+    } else {
+      const box = new Box3().setFromObject(parapet);
+      const groupX = roofGroup?.position.x ?? 0;
+      // The kerb is a ring, so its box is the *outer* face on every side. The
+      // inner face is one band in from it, and the band is the one number
+      // `Shell.ts` extrudes the ring from.
+      //
+      // **The +X and +Z runs only**, which is not laziness. The fixed
+      // isometric shows an object's +X/+Z faces, so those two are the ramparts
+      // a child ever stands at and looks over — Jim's own scoping on #462 — and
+      // they are the two with an unbroken run of parapet to march at. The −X
+      // run has the lift alcove cut through it: a body marched at that face
+      // from the middle of the plate goes **13.5 m** straight out of the
+      // doorway, which is the alcove working correctly and says nothing about
+      // the stone either side of it.
+      const faces = [
+        { axis: 'x' as const, inner: box.max.x - groupX - ROOF_PARAPET_THICKNESS, dir: 1 },
+        { axis: 'z' as const, inner: box.max.z - ROOF_PARAPET_THICKNESS, dir: 1 },
+      ];
+      for (const face of faces) {
+        const position = new Vector3(floorX(floor, 0), BUILDING_BASE_Y, floorZ(floor, 0));
+        const stepX = face.axis === 'x' ? face.dir * PLAYER_LONGEST_STEP : 0;
+        const stepZ = face.axis === 'z' ? face.dir * PLAYER_LONGEST_STEP : 0;
+        for (let i = 0; i < 80; i += 1) {
+          world.resolveMovement(position, stepX, stepZ, PLAYER_RADIUS, 0, 1 / 30);
+        }
+        const local =
+          face.axis === 'x' ? position.x - floorX(floor, 0) : position.z - floorZ(floor, 0);
+        // Where her *body* stopped, not her centre: that is the surface which
+        // either meets the stone or does not.
+        const surface = local + face.dir * PLAYER_RADIUS;
+        const shortBy = (face.inner - surface) * face.dir;
+        if (shortBy < -0.001) {
+          fail(
+            `on the roof garden's ${face.dir > 0 ? '+' : '-'}${face.axis} side a child's body ` +
+              `reaches ${(-shortBy).toFixed(3)} m *inside* the drawn parapet — the stone she ` +
+              `can see is not what stops her`,
+          );
+        }
+        if (shortBy > PARAPET_STANDOFF_LIMIT) {
+          fail(
+            `on the roof garden's ${face.dir > 0 ? '+' : '-'}${face.axis} side a child is ` +
+              `stopped ${shortBy.toFixed(3)} m short of the drawn parapet — that is an ` +
+              `invisible wall standing off the rampart she is meant to lean on, and the two ` +
+              `have drifted apart`,
           );
         }
       }
