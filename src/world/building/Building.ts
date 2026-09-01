@@ -38,7 +38,7 @@ import { Toilets } from './Toilets';
 import { Trampoline } from './Trampoline';
 import { WalkSurfaces, type MovingPlatform } from './surfaces';
 import { buildingInteractZones } from './interactZones';
-import { dressDeck } from './dressing';
+import { BENCH_HEIGHT, benchFootprints, dressDeck } from './dressing';
 import { CastleFire } from './castleLighting';
 import { dressCastle } from './castleDecor';
 import { GreatHallBanquet, type PetTableLink } from './greatHallBanquet';
@@ -696,6 +696,18 @@ export class Building implements GameSystem {
     // jump onto the banquet ends up standing on it. See `banquetTables`.
     this.surfaces.addPlatform(banquetTables());
 
+    // **And the benches are solid** (#459). Jim, on the roof garden: *"benches
+    // need to be solid (can't walk through them) on the roof garden and
+    // everywhere else."* Registered through the same per-floor loop as the
+    // shell, which is what carries them wherever a floor moves to. See
+    // `dressing.ts`'s `keepOutsFor` for why a castle prop may have a collider
+    // at all now, and `registerBenchCollision` for the two details that decide
+    // whether she stops at one or gets stuck inside it.
+    for (const floor of CASTLE_FLOORS) registerBenchCollision(collision, floor);
+    // Her feet land on the seat: a bench is 0.44 m, well inside a jump, and
+    // Jim's 7 August rule is that anything solid and not too high is something
+    // she can get on top of.
+    this.surfaces.addPlatform(benchTops());
 
     // `buildShaftGuards` was called here. There are no shafts to guard.
     //
@@ -1964,6 +1976,91 @@ function registerInteriorCollision(collision: CollisionWorld, floor: CastleFloor
   // left inside the castle at all.
 }
 
+/**
+ * Half-thickness of the walls a solid bench footprint is built from.
+ *
+ * The same 0.2 m `hotel/place.ts` uses, and for its reason rather than for
+ * symmetry: `CollisionWorld.maxSafeStep` divides the **thinnest** collider in
+ * the whole world into sub-steps for every mover in it, so a hair-thin bench
+ * edge would make the park's collision loop run more sub-steps per frame for
+ * ever. 0.2 m is already the park's own thinnest (the entrance's rope posts),
+ * so nothing here lowers it.
+ */
+const BENCH_HALF_THICKNESS = 0.2;
+
+/**
+ * **The deck benches are solid** (#459).
+ *
+ * `dressing.ts` owns where they are and how big they are; this owns only the
+ * registration. Three details are load-bearing, and the third is the one that
+ * nearly shipped a soft-lock on the banquet tables (#453):
+ *
+ * - **The half-extents are inset by the wall's own half-thickness**, so the
+ *   face her body meets is the wood she can see rather than 0.2 m outside it.
+ *   `hotel/place.ts`'s rule: generous-light, never generous-heavy.
+ * - **`topIsAbsolute`, with the bench's real top.** Solid to feet on the
+ *   floor, air to feet in a jump, and still there beneath the feet standing on
+ *   it. The default `Infinity` would make a 0.44 m bench an invisible pillar to
+ *   the ceiling — the bug the hotel's furniture already paid for once.
+ * - **There is no hollow middle to get stuck in, and that is arithmetic rather
+ *   than luck.** `addRectangle` is four walls round an empty centre, and a
+ *   mover inside one is pushed by opposite walls that can cancel. A bench is
+ *   0.72 m deep, so inset by 0.2 the two long walls stand only 0.16 m either
+ *   side of the axis while each is 0.2 m thick — their stadiums overlap
+ *   through the middle, there is no interior, and a body anywhere inside is
+ *   pushed the *same* way by both. That holds because `dressing.ts`'s
+ *   `BENCH_DEPTH` is under `4 × BENCH_HALF_THICKNESS`; `check:benches` drops a body at the
+ *   centre of every bench on every deck and watches it come out, so the day
+ *   somebody widens a bench past 0.8 m the check says so rather than a child
+ *   finding it.
+ */
+export function registerBenchCollision(collision: CollisionWorld, floor: CastleFloor): void {
+  for (const bench of benchFootprints(floor.index)) {
+    collision.addRectangle(
+      floorX(floor, bench.x),
+      floorZ(floor, bench.z),
+      bench.halfX - BENCH_HALF_THICKNESS,
+      bench.halfZ - BENCH_HALF_THICKNESS,
+      BENCH_HALF_THICKNESS,
+      BUILDING_BASE_Y + bench.top,
+      false,
+      true,
+    );
+  }
+}
+
+/**
+ * Every bench in the castle, as one walkable plate at seat height.
+ *
+ * One platform rather than one per bench because `WalkSurfaces` asks each
+ * platform `covers(x, z)` on every sample: twenty-six benches would be
+ * twenty-six calls a frame to answer a question a single loop answers once.
+ * Every floor's plate is at the same world Y — the floors are separated in X
+ * and Z, never in height (`floors.ts`) — so `surfaceY` is a constant and
+ * `covers` is the whole of the geometry.
+ *
+ * Built once, at construction, from the same {@link benchFootprints} the
+ * colliders come from. That is the point: the edge she is stopped by and the
+ * edge she can stand on are the same rectangle, so a bench cannot become a
+ * plate hanging over air or a collider with no top.
+ */
+function benchTops(): MovingPlatform {
+  const plates = CASTLE_FLOORS.flatMap((floor) =>
+    benchFootprints(floor.index).map((bench) => ({
+      minX: floorX(floor, bench.x) - bench.halfX,
+      maxX: floorX(floor, bench.x) + bench.halfX,
+      minZ: floorZ(floor, bench.z) - bench.halfZ,
+      maxZ: floorZ(floor, bench.z) + bench.halfZ,
+    })),
+  );
+  return {
+    surfaceY: BUILDING_BASE_Y + BENCH_HEIGHT,
+    covers: (x, z) =>
+      plates.some(
+        (plate) => x >= plate.minX && x <= plate.maxX && z >= plate.minZ && z <= plate.maxZ,
+      ),
+  };
+}
 
 /**
  * Half-thickness of the walls a solid banquet footprint is built from.

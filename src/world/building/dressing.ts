@@ -151,13 +151,12 @@ export function dressDeck(deck: number, floor: Group): void {
   if (deckIsFurnished(deck)) return;
 
   const isRoof = deck === TOP_DECK;
-  const blocked = keepOutsFor(deck);
 
   if (!isRoof) {
     floor.add(buildRoundel(deck));
     floor.add(buildPlanterRing(deck));
   }
-  floor.add(buildBenches(deck, blocked, isRoof));
+  floor.add(buildBenches(deck, benchesOn(deck)));
 }
 
 // ------------------------------------------------------------- the middle
@@ -286,16 +285,82 @@ export function deckBenchSpots(deck: number, blocked: readonly KeepOut[], isRoof
   return spots;
 }
 
+/**
+ * **This deck's benches, asked with the deck's own keep-outs** — the single
+ * call every consumer makes.
+ *
+ * {@link deckBenchSpots} takes its keep-out list as a parameter, which is what
+ * lets the roof's meadow add the trampoline to the list it measures *grass*
+ * against without also moving the benches. That flexibility is exactly what
+ * makes it the wrong thing for a third and fourth caller to reach for: the
+ * benches a child sees, the benches she bumps into and the benches she can
+ * stand on must be the *same* benches, and three call sites each assembling
+ * their own `blocked` array is three chances to differ. So the scatter takes
+ * a list, and this — the one that says which list a bench is actually placed
+ * against — takes only a deck.
+ */
+export function benchesOn(deck: number): BenchSpot[] {
+  return deckBenchSpots(deck, keepOutsFor(deck), deck === TOP_DECK);
+}
+
 /** How far from a bench's centre nothing else may grow. Half its 2.2 m length,
  *  plus room to sit down without a face full of grass. */
 export const BENCH_CLEAR_RADIUS = 2.2;
 
-function buildBenches(deck: number, blocked: readonly KeepOut[], isRoof: boolean): InstancedMesh {
-  const spots = deckBenchSpots(deck, blocked, isRoof);
+/**
+ * How big a bench is, in metres — **the one description**, read by the box
+ * that is drawn, by the collider that stops her, and by the plate she lands on
+ * when she jumps up onto it.
+ *
+ * These were three literals inside `new BoxGeometry(2.2, 0.44, 0.72)` and
+ * nothing else knew them, which was fine while a bench was scenery. It is not
+ * fine now that a bench is solid: a collider sized from a second copy of these
+ * numbers is CLAUDE.md's most common bug with a 2.2 m lever on it, and the
+ * failure mode — a bench whose invisible edge is 20 cm off the wood — is
+ * precisely the kind a child finds and a build cannot.
+ */
+export const BENCH_LENGTH = 2.2;
+export const BENCH_HEIGHT = 0.44;
+export const BENCH_DEPTH = 0.72;
 
+/**
+ * One bench's footprint, axis-aligned, as the collision world and the walk
+ * surfaces want it.
+ *
+ * A bench's yaw is only ever `0` or `π / 2` ({@link deckBenchSpots} picks from
+ * those two), so a quarter turn is a swap of half-extents rather than a
+ * rotated box — which matters because `CollisionWorld.addRectangle` is
+ * axis-aligned and has no way to express anything else. The `yaw > 0.1` test
+ * is deliberately a test of the *spot*, not an assumption about it: if the
+ * scatter ever rolls a free yaw, this rounds it to the nearer axis and
+ * `check:benches`' footprint clause is what will say so.
+ */
+export interface BenchFootprint {
+  readonly x: number;
+  readonly z: number;
+  readonly halfX: number;
+  readonly halfZ: number;
+  /** The bench's own top, above the floor it stands on. */
+  readonly top: number;
+}
+
+export function benchFootprints(deck: number): BenchFootprint[] {
+  return benchesOn(deck).map((spot) => {
+    const turned = Math.abs(Math.sin(spot.yaw)) > Math.SQRT1_2;
+    return {
+      x: spot.x,
+      z: spot.z,
+      halfX: (turned ? BENCH_DEPTH : BENCH_LENGTH) / 2,
+      halfZ: (turned ? BENCH_LENGTH : BENCH_DEPTH) / 2,
+      top: BENCH_HEIGHT,
+    };
+  });
+}
+
+function buildBenches(deck: number, spots: readonly BenchSpot[]): InstancedMesh {
   const benches = new InstancedMesh(
-    new BoxGeometry(2.2, 0.44, 0.72),
-    softMaterial(isRoof ? PALETTE.woodLight : PALETTE.buildingTrimDeep, 0.78),
+    new BoxGeometry(BENCH_LENGTH, BENCH_HEIGHT, BENCH_DEPTH),
+    softMaterial(deck === TOP_DECK ? PALETTE.woodLight : PALETTE.buildingTrimDeep, 0.78),
     Math.max(1, spots.length),
   );
   benches.name = `deck-benches-${deck}`;
@@ -310,7 +375,7 @@ function buildBenches(deck: number, blocked: readonly KeepOut[], isRoof: boolean
   const position = new Vector3();
   spots.forEach((spot, index) => {
     rotation.setFromAxisAngle(axis, spot.yaw);
-    position.set(spot.x, 0.22, spot.z);
+    position.set(spot.x, BENCH_HEIGHT / 2, spot.z);
     matrix.compose(position, rotation, scale);
     benches.setMatrixAt(index, matrix);
   });
@@ -361,11 +426,19 @@ function buildBenches(deck: number, blocked: readonly KeepOut[], isRoof: boolean
  *   bench and goblet at the feast is inside the banquet, so `check:castle`'s
  *   prop assertion would then fail on the banquet's own furniture.
  *
- * Most castle props still carry no collider, and now for an ordinary reason
- * rather than an architectural one — nobody has asked for it. Anything that
- * gains one takes an **absolute** top (`Collision.ts`'s `topIsAbsolute`), never
- * the default `Infinity`, or a 0.675 m table becomes an invisible pillar to the
- * ceiling. `world/hotel/place.ts` is the shipped precedent.
+ * Since #459 the **deck benches, the roundel's planters and the roof
+ * pavilion** carry colliders too — Jim, the same afternoon: *"the general rule
+ * should be that nothing can be run through — the player is not a ghost."*
+ * Anything that gains one takes an **absolute** top (`Collision.ts`'s
+ * `topIsAbsolute`), never the default `Infinity`, or a 0.675 m table becomes an
+ * invisible pillar to the ceiling. `world/hotel/place.ts` is the shipped
+ * precedent, and `check:benches` is what holds this list to the result: it
+ * floods the walkable floor from where the lift puts her down and requires
+ * every disc here to still have somewhere to stand in it.
+ *
+ * Props that still carry none — the market stalls, the crates, the armour, the
+ * lift car — do so for an ordinary reason rather than an architectural one:
+ * nobody has got to them yet. That is a backlog, not a rule.
  */
 export function keepOutsFor(deck: number): KeepOut[] {
   const blocked: KeepOut[] = [

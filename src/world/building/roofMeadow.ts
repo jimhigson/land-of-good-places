@@ -13,7 +13,7 @@ import { INTERIOR_HALF_X, INTERIOR_HALF_Z, PLAYER_RADIUS } from '../../core/cons
 import { PALETTE } from '../../core/palette';
 import { Rng } from '../../core/mathUtils';
 import { softMaterial } from './parts';
-import { BENCH_CLEAR_RADIUS, deckBenchSpots, keepOutsFor, type KeepOut } from './dressing';
+import { BENCH_CLEAR_RADIUS, benchesOn, keepOutsFor, type KeepOut } from './dressing';
 import {
   insideInterior,
   TOP_DECK,
@@ -232,9 +232,11 @@ function findMeadow(deck: number): RoofMeadow {
   const isRoof = deck === TOP_DECK;
   const blocked: KeepOut[] = [...keepOutsFor(deck)];
   // The benches are sampled against the *castle's* keep-out list, so this has
-  // to be added after they are asked for or the two would disagree about what
-  // the roof contains.
-  const benches = deckBenchSpots(deck, blocked, isRoof);
+  // to be asked for before the trampoline is added below, or the meadow and
+  // the benches would disagree about what the roof contains. `benchesOn` is
+  // what makes that a fact about the deck rather than about the order of the
+  // two lines — it assembles the same list every consumer gets.
+  const benches = benchesOn(deck);
   if (isRoof) {
     blocked.push({
       x: TRAMPOLINE_X,
