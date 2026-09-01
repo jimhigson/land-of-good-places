@@ -3,6 +3,9 @@ import {
   CAMERA_DISTANCE,
   CAMERA_FOLLOW_HALF_LIFE,
   CAMERA_LOOK_AHEAD,
+  CAMERA_LOOK_MAX_DISTANCE,
+  CAMERA_LOOK_RETURN_DELAY,
+  CAMERA_LOOK_RETURN_HALF_LIFE,
   CAMERA_MIN_VIEW_WIDTH,
   CAMERA_PITCH_DEGREES,
   CAMERA_VIEW_HEIGHT,
@@ -15,6 +18,7 @@ import { clamp, damp, DEG } from './mathUtils';
 import { cameraOffset } from './cameraRig';
 import { screenBasis } from './screenBasis';
 import type { FrameContext } from './types';
+import type { ParkBoundary } from '../world/boundary';
 
 /**
  * The Theme Park camera.
@@ -38,6 +42,20 @@ export class IsoCamera {
   /** Point the camera orbits. Damped towards the follow target every frame. */
   private readonly focus = new Vector3();
   private readonly desiredFocus = new Vector3();
+  /**
+   * {@link focus} plus {@link lookOffset} — the point actually on screen, and
+   * what {@link applyTransform} places the camera over.
+   *
+   * Two points rather than one because the follow and the look-around must not
+   * eat each other. `focus` stays the pure damped follow: if the drag were
+   * folded into it, the very next frame's damp towards `desiredFocus` would
+   * start hauling the pan back immediately, and dragging would feel like
+   * fighting a rubber band that only lets go when you stop. Kept apart, the
+   * drag is exactly 1:1 with the finger and the follow keeps working
+   * underneath it, so a child dragged out to look at the coaster still sees the
+   * view slide as she walks.
+   */
+  private readonly viewFocus = new Vector3();
 
   /**
    * Ground-plane basis vectors and the camera's fixed offset from its focus.
@@ -60,6 +78,32 @@ export class IsoCamera {
   private readonly focusOverrideValue = new Vector3();
 
   /**
+   * How far the view has been dragged from her, in world metres on the ground
+   * plane — "drag to look around the park" (#419).
+   *
+   * **A bounded offset from her own camera, never a free camera.** The rig's
+   * pitch and yaw are untouched by all of this: panning *translates* the point
+   * the camera orbits and nothing else, so ARCHITECTURE.md's "one camera angle,
+   * forever" still holds, `screenBasis` is untouched, and "up the screen" means
+   * the same thing whether or not the view has been dragged. That is also what
+   * makes this safe against GAME_DESIGN.md's CONTROL RULE: there is no rotation
+   * anywhere in it, so a drag cannot become a way to steer even in principle —
+   * pressing left still goes left, and a tap still walks.
+   */
+  private readonly lookOffset = new Vector3();
+  /**
+   * Seconds since the last drag delta arrived, counted in frame `dt`. Once it
+   * passes {@link CAMERA_LOOK_RETURN_DELAY} the offset damps home.
+   */
+  private lookIdleSeconds = 0;
+  /**
+   * The leash for where the view may be dragged to: the play bounds of the
+   * space she is standing in. `null` means "unbounded", for a caller that has
+   * none — see {@link setLookBounds}.
+   */
+  private lookBounds: ParkBoundary | null = null;
+
+  /**
    * Where the **world origin** sits on screen, in world units along the
    * screen's own two axes. See {@link skyAnchor}.
    */
@@ -72,9 +116,23 @@ export class IsoCamera {
   /** CSS pixels — kept for {@link worldUnitsPerPixel}, screen-constant UI sizing. */
   private viewportHeight = 1;
 
+  /**
+   * `sin(pitch)` — how much of a ground-plane metre along {@link forward}
+   * survives as vertical screen distance once the camera is tilted down.
+   *
+   * At the rig's 38° that is 0.62, so a metre walked "up the screen" only
+   * climbs 0.62 m worth of frame. A drag has to divide by it to keep the park
+   * exactly under the finger: without it, dragging vertically moves the world
+   * 38% *less* than the finger and the park visibly slips, which is the one
+   * thing that makes a direct-manipulation gesture feel broken. Solved once,
+   * with the rest of the rig, because the pitch never changes again.
+   */
+  private readonly pitchSine: number;
+
   constructor() {
     const yaw = CAMERA_YAW_DEGREES * DEG;
     const pitch = CAMERA_PITCH_DEGREES * DEG;
+    this.pitchSine = Math.sin(pitch);
 
     const offset = cameraOffset(yaw, pitch, CAMERA_DISTANCE);
     this.offset = new Vector3(offset.x, offset.y, offset.z);
@@ -119,7 +177,12 @@ export class IsoCamera {
    * say — wants distance to this point instead.
    */
   get focusPoint(): Readonly<Vector3> {
-    return this.focus;
+    // `viewFocus`, not `focus`: this answers "what is the camera looking at",
+    // and while the view is dragged out to look around the park (#419) that is
+    // the follow point *plus* the drag. A name label deciding whether it is
+    // near enough to show should hide when it leaves the screen, wherever the
+    // screen currently is.
+    return this.viewFocus;
   }
 
   /**
@@ -182,6 +245,12 @@ export class IsoCamera {
   snapTo(position: Vector3): void {
     this.focus.copy(position);
     this.desiredFocus.copy(position);
+    // A snap is a change of *place* — through a door, out of a ride, in from
+    // the title screen — and every one of them happens behind a closed iris.
+    // Carrying a look-around offset across it would open that iris on a view
+    // shoved sideways from wherever she has just arrived, which in the castle
+    // is precisely the empty sky this feature must never show.
+    this.cancelLook();
     this.applyTransform();
   }
 
@@ -247,6 +316,130 @@ export class IsoCamera {
     this.focusOverrideActive = false;
   }
 
+  // -------------------------------------------------- drag to look around
+
+  /**
+   * How far the view is currently dragged from her, in metres. Read by the
+   * check in `scripts/check-look-around.mts`; nothing in the game needs it.
+   */
+  get lookDistance(): number {
+    return this.lookOffset.length();
+  }
+
+  /** Seconds since the last drag — how close the return is. */
+  get lookIdle(): number {
+    return this.lookIdleSeconds;
+  }
+
+  /**
+   * The leash for the look-around: she may look anywhere she could *walk*, and
+   * no further. Pass `Collision.playBounds`, re-asserted every frame.
+   *
+   * **This is the whole answer to the castle's void.** The floors are disjoint
+   * spaces hundreds of metres apart and per-space visibility means a camera
+   * that wanders off the floor she is on renders empty sky — so panning indoors
+   * had to be bounded by *something*. Rather than invent a second idea of
+   * "where the inside is" (a hand-typed rectangle around the floor plate, which
+   * would then be a copied number silently left behind the day the plate
+   * changes size — this repo's most common bug), it borrows the boundary the
+   * player is *already* leashed to. `Collision.setPlayBounds` is called on
+   * every change of space — the garden, the castle interior, each hotel room
+   * take it in turn — so this is per-space for free and correct in rooms nobody
+   * had this feature in mind for.
+   *
+   * Panning is deliberately **not** switched off indoors. A gesture that works
+   * in the park and silently does nothing in the great hall is a gesture a
+   * six-year-old decides is broken; one that pans until it reaches the wall and
+   * stops is one she understands immediately.
+   */
+  setLookBounds(bounds: ParkBoundary | null): void {
+    this.lookBounds = bounds;
+  }
+
+  /**
+   * Drags the view by a finger/mouse movement measured in **CSS pixels**, with
+   * `y` growing downward exactly as `PointerEvent.clientY` does.
+   *
+   * Pixels rather than metres because the px-to-metres mapping needs the zoom
+   * and the rig's pitch, both of which live here — the input layer must not
+   * grow its own copy of either. Resets the idle timer, so the three-second
+   * return only starts counting once the finger stops.
+   *
+   * The sign is direct manipulation, the same as the park map's `pannedBy`:
+   * the park goes where the finger goes, so the *camera* moves the opposite
+   * way. Drag downward and the view travels up the screen, revealing what was
+   * above.
+   */
+  lookByPixels(dxPixels: number, dyPixels: number): void {
+    this.lookIdleSeconds = 0;
+    const metresPerPixel = this.worldUnitsPerPixel;
+    this.lookOffset
+      .addScaledVector(this.rightVector, -dxPixels * metresPerPixel)
+      // Divided by the pitch's sine so the ground keeps up with the finger —
+      // see `pitchSine`.
+      .addScaledVector(this.forwardVector, (dyPixels * metresPerPixel) / this.pitchSine);
+    this.clampLookOffset();
+  }
+
+  /**
+   * Puts the view back on her **at once**, with no easing at all.
+   *
+   * For the moment a ride takes the camera. The gentle return is for a child
+   * who has stopped dragging and is still standing in the park; a ride is a
+   * different thing entirely — its camera owns the frame from that frame on, so
+   * an eased return would be a second camera motion running *underneath* a
+   * camera nobody can see, and still mid-flight whenever the ride handed back.
+   * Zeroed outright behind the ride's own view, the park rig is already
+   * pointing squarely at her the first frame it is drawn again: nothing to
+   * fight, and nothing to see.
+   */
+  cancelLook(): void {
+    this.lookOffset.set(0, 0, 0);
+    this.lookIdleSeconds = 0;
+  }
+
+  /**
+   * Holds the offset inside both leashes: {@link CAMERA_LOOK_MAX_DISTANCE} from
+   * her, and inside {@link setLookBounds}'s boundary.
+   *
+   * The boundary clamp is a bisection rather than a projection because a
+   * `ParkBoundary` answers *how far* to its edge, not *which way* — the park's
+   * is a spline, not a circle, and asking it for a normal would mean either
+   * differencing the SDF (noisy near the spline's own knots) or teaching every
+   * boundary shape a second method for one caller. Shortening the offset along
+   * the ray she is already looking down is exact for the only question asked,
+   * needs nothing new from `boundary.ts`, and terminates in a fixed twelve
+   * steps — about 4 mm of precision on an 18 m leash, well under a pixel.
+   *
+   * The player herself is always inside her own play bounds, so zero length is
+   * always a valid answer and the bisection can never fail to find one.
+   */
+  private clampLookOffset(): void {
+    const requested = this.lookOffset.length();
+    if (requested <= 0) return;
+    if (requested > CAMERA_LOOK_MAX_DISTANCE) {
+      this.lookOffset.multiplyScalar(CAMERA_LOOK_MAX_DISTANCE / requested);
+    }
+    const bounds = this.lookBounds;
+    if (!bounds) return;
+
+    const length = this.lookOffset.length();
+    const x = this.desiredFocus.x;
+    const z = this.desiredFocus.z;
+    const dirX = this.lookOffset.x / length;
+    const dirZ = this.lookOffset.z / length;
+    if (bounds.contains(x + dirX * length, z + dirZ * length)) return;
+
+    let good = 0;
+    let bad = length;
+    for (let step = 0; step < 12; step += 1) {
+      const middle = (good + bad) / 2;
+      if (bounds.contains(x + dirX * middle, z + dirZ * middle)) good = middle;
+      else bad = middle;
+    }
+    this.lookOffset.multiplyScalar(good / length);
+  }
+
   /**
    * Follows `target`, leaning slightly in the direction of travel so the player
    * can see a touch further ahead when they run.
@@ -285,12 +478,50 @@ export class IsoCamera {
     this.focus.y = damp(this.focus.y, this.desiredFocus.y, CAMERA_FOLLOW_HALF_LIFE * 2, dt);
     this.focus.z = damp(this.focus.z, this.desiredFocus.z, CAMERA_FOLLOW_HALF_LIFE, dt);
 
+    this.updateLook(dt);
     this.applyTransform();
   }
 
+  /**
+   * Ages the look-around offset by one frame: counts the idle time, and once
+   * {@link CAMERA_LOOK_RETURN_DELAY} has passed, eases the view back to her.
+   *
+   * Also re-clamps every frame, not only on a drag — she can keep walking while
+   * the view is out, and the leash has to follow her rather than being decided
+   * once when the finger lifted. Walking towards a wall with the view already
+   * out over it therefore pulls the view gently back in, instead of leaving it
+   * parked in the void.
+   *
+   * A focus override (the keychain rack's zoomed picker, the cat bus's arrival)
+   * is a composed shot with its own subject, so the offset goes to zero with
+   * it rather than sliding the shot off its mark.
+   */
+  private updateLook(dt: number): void {
+    if (this.focusOverrideActive) {
+      this.lookOffset.set(0, 0, 0);
+      this.lookIdleSeconds = 0;
+      return;
+    }
+    this.lookIdleSeconds += dt;
+    this.clampLookOffset();
+    if (this.lookIdleSeconds < CAMERA_LOOK_RETURN_DELAY) return;
+    // Damping towards zero, on the same curve the follow uses — see
+    // `CAMERA_LOOK_RETURN_HALF_LIFE`. The last millimetre is snapped off so
+    // "is the view home?" has an answer that arrives, rather than an
+    // exponential that approaches zero forever.
+    const remaining = Math.pow(2, -dt / CAMERA_LOOK_RETURN_HALF_LIFE);
+    this.lookOffset.multiplyScalar(remaining);
+    if (this.lookOffset.lengthSq() < LOOK_HOME_EPSILON * LOOK_HOME_EPSILON) {
+      this.lookOffset.set(0, 0, 0);
+    }
+  }
+
   private applyTransform(): void {
-    this.camera.position.copy(this.focus).add(this.offset);
-    this.camera.lookAt(this.focus);
+    // The look-around offset is applied *here*, on top of the settled follow,
+    // rather than folded into `focus` — see `viewFocus`.
+    this.viewFocus.copy(this.focus).add(this.lookOffset);
+    this.camera.position.copy(this.viewFocus).add(this.offset);
+    this.camera.lookAt(this.viewFocus);
     this.camera.updateMatrixWorld();
 
     // The world origin in view space is `-cameraPosition` resolved against the
@@ -498,6 +729,15 @@ export class IsoCamera {
 // Raised with the closer framing: the aim point wants to sit around chest height
 // on the character, and the character's chest went up when her head did.
 const TEMP_LIFT = new Vector3(0, 1.25, 0);
+
+/**
+ * Below this many metres from her, the look-around offset is simply zero.
+ *
+ * A millimetre — far under one pixel at any zoom the camera allows — so this
+ * only ever ends an exponential tail nobody can see, and never truncates a
+ * movement anyone could.
+ */
+const LOOK_HOME_EPSILON = 0.001;
 
 // Scratch vector for clampToFrustum's own intermediate maths — discarded
 // before the method returns, so safe to share across calls.

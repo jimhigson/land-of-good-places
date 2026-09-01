@@ -153,6 +153,17 @@ mini-game's play view (dodgems, rail racer, the space ferris wheel), and any
 future ride camera. Those are separate rigs solving a separate problem and are
 untouched by any of the above.
 
+**Drag-to-look-around does not break this rule, and could not** (#419). Dragging
+the screen during ordinary play slides the point the camera orbits — a bounded
+offset from the character, `IsoCamera`'s `lookOffset` — and leaves the pitch and
+the yaw exactly where they have always been. So a sign that faces 45° still
+faces the camera when the view has been dragged twelve metres sideways, and
+`screenBasis` is untouched: "up the screen" means the same ground direction
+whether or not a finger is on the glass. That last part is not a nicety, it is
+what keeps the feature on the right side of GAME_DESIGN.md's CONTROL RULE —
+a translation cannot become a way to steer, whereas a rotation immediately
+could.
+
 ### Colours and numbers
 
 Every tunable number lives in `core/constants.ts`; every colour lives in

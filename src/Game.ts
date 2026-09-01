@@ -500,6 +500,19 @@ export class Game {
         if (this.cameraOverride) return;
         this.camera.nudgeZoom(notches * CAMERA_ZOOM_STEP);
       },
+      // Drag to look around the park (#419). Jim, 31 Aug 2026: *"while in
+      // normal gameplay (walking around) dragging the screen with the mouse or
+      // a finger should pan the camera to look around the park. Then, after
+      // about 3s of not swiping/dragging it should return to your character"*.
+      //
+      // Nothing here decides *what a drag is* — `PointerControls` fires this
+      // off the very flag that stopped the same gesture becoming a tap, which
+      // is `tapGesture.ts`'s one definition. All this closure owns is when a
+      // drag is *allowed*, and the camera owns how far it may go.
+      onLookDrag: (dx, dy) => {
+        if (this.lookAroundBlocked()) return;
+        this.camera.lookByPixels(dx, dy);
+      },
       // The mouse half of the HIGHLIGHT RULE. Mouse-only, and `Selection` does
       // the picking on the next frame rather than here, so a mouse waggled
       // about cannot cost more than one ray a frame. `selection` is built
@@ -1104,6 +1117,47 @@ export class Game {
   }
 
   /**
+   * True while dragging must **not** pan the park (#419) — and, because
+   * `tick()` acts on it too, while any offset already out must be put away.
+   *
+   * "Normal gameplay (walking around)" was Jim's own framing of when this is
+   * on, so this is that phrase written as a predicate, and everything in it is
+   * a thing that has taken the camera or the screen away from ordinary play:
+   *
+   * - **`cameraOverride`** — a ride is drawing the frame through its own
+   *   camera. That covers the slides, the train, the coaster, the rail race,
+   *   the ferris wheel, the cat bus and the lift. The camera belongs to the
+   *   ride; a pan under it would be a second camera nobody can see.
+   * - **`player.riding` and `treeClimbing.playerClimbing`** as well as, not
+   *   instead of, the above: `riding` is the broader truth (it is what #405
+   *   hides the HUD on) and not every ride installs a `cameraOverride` — up a
+   *   tree the park's own rig is still drawing, and dragging the view off her
+   *   while she is stuck in a branch is not a thing to offer.
+   * - **`miniGames.hidesPark`** and **`parkMap.isOpen`** — the same two guards
+   *   `onPinch` above already carries, for the same reason it carries them: a
+   *   window-level capture listener still sees fingers dragging on an overlay,
+   *   and without this a swipe across the open map would silently drag the park
+   *   underneath it, to be discovered the moment the map closed.
+   * - **`screenIsBusy()`** — a panel, a sign, a pause. The park is not being
+   *   walked around.
+   *
+   * The keychain rack's zoomed picker is deliberately *not* listed: it holds
+   * the camera through `setFocusOverride`, and `IsoCamera.updateLook` already
+   * zeroes the offset for the whole time any focus override is asserted, which
+   * is the one place that can be true of a shot this file has never heard of.
+   */
+  private lookAroundBlocked(): boolean {
+    return (
+      this.cameraOverride !== null ||
+      this.player.riding ||
+      this.treeClimbing.playerClimbing ||
+      this.miniGames.hidesPark ||
+      this.parkMap.isOpen ||
+      this.screenIsBusy()
+    );
+  }
+
+  /**
    * {@link screenIsBusy}, minus riding.
    *
    * The one predicate the SELECTION RULE runs on. Riding is the exception it has
@@ -1597,6 +1651,24 @@ export class Game {
     } else {
       this.camera.clearFocusOverride();
     }
+
+    // Drag-to-look-around's two per-frame duties (#419).
+    //
+    // The leash first: she may look anywhere she could *walk*, and no further.
+    // `playBounds` is a single mutable that `Collision.setPlayBounds` swaps on
+    // every change of space, so re-asserting it here — rather than handing the
+    // camera a boundary once at construction — is what makes this correct in
+    // the castle. Its floors are disjoint spaces hundreds of metres apart and
+    // per-space visibility means a camera that leaves the floor she is on
+    // renders empty sky; the boundary that is fitted while she is on that floor
+    // is exactly the floor, so the void is unreachable without the camera
+    // knowing anything about castles.
+    this.camera.setLookBounds(this.world.collision.playBounds);
+    // And then: a ride, a mini-game or a panel takes the view back at once,
+    // rather than easing. `cancelLook` says why an ease would be wrong here.
+    // Unconditional while blocked, deliberately, so a ride that starts
+    // mid-drag cannot inherit an offset.
+    if (this.lookAroundBlocked()) this.camera.cancelLook();
 
     this.camera.update(this.frameContext, this.player.position, this.player.velocity);
     // Straight after the camera moves and before the sky is drawn: the stars,
