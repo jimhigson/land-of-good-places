@@ -183,17 +183,19 @@ const MAX_STEP = BUILDING_STEP_UP;
  * How much dearer a metre walked through a hoppable wall's band is than a
  * metre of open park. **6.4, and it is a measurement, not a round number.**
  *
- * `scripts/measure-hop-detours.mts` routes across every hoppable collider in
- * the built park twice — once on this lattice, where the hop is available, and
- * once on a lattice built for a walker with no jump at all (`hopApex = 0`,
- * which makes `autoHopClears` false for everything and stamps every hoppable
- * collider solid; no second code path, the same `NavGrid` told she cannot
- * jump). The difference is the real price of going round *that* wall.
+ * `scripts/measure-hop-detours.mts` stands two points either side of every
+ * hoppable collider in the built park and asks what a walker with **no jump at
+ * all** must do to get between them (`hopApex = 0`, which makes `autoHopClears`
+ * false for everything and stamps every hoppable collider solid; no second code
+ * path, the same `NavGrid` told she cannot jump). How much longer that is than
+ * the straight line through the wall is the real price of going round *that*
+ * wall — measured against the straight line, never against a routed crossing,
+ * or this number would be deriving itself.
  *
  * Pooled over the five CI seeds, 73 crossings:
  *
  * ```
- * p0 0.38   p25 4.55   p50 5.34   p75 6.69   p90 10.32   p95 14.02   p100 21.76
+ * p0 3.34   p25 4.77   p50 5.67   p75 7.59   p90 10.32   p95 14.02   p100 21.76
  * ```
  *
  * A multiplier `M` prices a crossing of a band `w` wide at `(M - 1) * w` metres
@@ -202,12 +204,12 @@ const MAX_STEP = BUILDING_STEP_UP;
  * that price at the **p90 detour** gives `1 + 10.32 / 1.92 = 6.38`, so 6.4.
  *
  * That is what Jim's "high penalty… unless they are a much better path" means
- * in numbers: **90% of the park's hoppable walls are now walked round**, and
- * the tenth that are still crossed are the ones where going round costs more
- * than any ordinary garden wall ever asks — up to 21.8 m. The two ends were
- * both checked rather than assumed: at `M = 2` only 3% go round (barely a
- * change), and by `M = 16` all 73 do, which is a wall that is blocked in all
- * but name. 6.4 sits where the ruling puts it.
+ * in numbers: **86% of the park's hoppable walls are now walked round**, and
+ * the rest are the ones where going round costs more than any ordinary garden
+ * wall ever asks — up to 21.8 m. Both ends were checked rather than assumed: at
+ * `M = 2` not one of the 73 goes round, so it would barely be a change, and by
+ * `M = 16` every one does, which is a wall that is blocked in all but name.
+ * 6.4 sits where the ruling puts it.
  *
  * Set from the *detours the park actually has*, so it is not a knob to be
  * nudged when a route looks wrong. If the park's walls change shape, re-run the

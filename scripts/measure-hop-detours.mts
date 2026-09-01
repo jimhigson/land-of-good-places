@@ -3,17 +3,24 @@
  *
  * This is where `NavGrid`'s `HOP_COST_MULTIPLIER` comes from. It is a
  * measurement of the built park, not a round number: for every hoppable
- * collider the auto-hop really clears, it routes from one side of the wall to
- * the other twice —
+ * collider the auto-hop really clears, it stands two points either side of the
+ * wall and asks what a walker **who cannot jump at all** must do to get from
+ * one to the other. That walker is a lattice built with `hopApex = 0`, which
+ * makes `autoHopClears` false for everything and so stamps every hoppable
+ * collider solid — no second code path and no flag, the same `NavGrid` told
+ * she has no jump.
  *
- * - once on the ordinary lattice, where a hoppable wall is not stamped at all,
- *   so the route goes **over** it; and
- * - once on a lattice built with `hopApex = 0`, which makes `autoHopClears`
- *   false for everything and so stamps every hoppable collider **solid**. No
- *   second code path, no flag: the same `NavGrid`, told the walker cannot jump.
+ * How much longer that is than the straight line through the wall is the real
+ * detour: the price a child pays for going round *that* wall.
  *
- * The difference between the two route lengths is the real detour — the price
- * a child pays for going round rather than over that particular wall.
+ * **Measured against the straight line, not against a second routed crossing.**
+ * The multiplier this feeds is precisely what makes a crossing dearer, so
+ * measuring the crossing with the router would make the derivation circular and
+ * the number would drift every time it was re-run. The straight line between
+ * two points either side of one wall *is* the crossing.
+ *
+ * The `now` column is the separate question of what the router plans **today**,
+ * penalty and all — the before/after, not the input to the derivation.
  *
  * ```
  * node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs \
@@ -97,7 +104,16 @@ if (process.argv.includes('--sweep')) {
 const park = buildHeadlessPark();
 const { collision } = park.world;
 
-/** The lattice the game plans on: hoppable walls simply are not there. */
+/**
+ * The sampler the *game* routes on — `World.attachPlayer` wraps the building's
+ * surfaces with the fountain's wading dip, and the fountain rim is one of the
+ * hoppable walls measured here, so the harness's bare sampler would be
+ * measuring a park the player never walks in.
+ */
+const sample = (x: number, z: number, y: number): number =>
+  park.world.fountain.groundLevel(x, z, park.sample(x, z, y));
+
+/** The lattice the game plans on. */
 const hopping = new NavGrid(collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT);
 /** The same lattice for a walker who cannot jump at all — every hop is solid. */
 const grounded = new NavGrid(collision, PLAYER_RADIUS, 0);
@@ -112,9 +128,9 @@ function routeLength(
   bx: number,
   bz: number,
 ): number | null {
-  const ay = park.sample(ax, az, 0);
-  const by = park.sample(bx, bz, 0);
-  const count = grid.findRoute(ax, az, ay, bx, bz, by, park.sample, out);
+  const ay = sample(ax, az, 0);
+  const by = sample(bx, bz, 0);
+  const count = grid.findRoute(ax, az, ay, bx, bz, by, sample, out);
   if (count === 0 || !grid.lastRouteReachedGoal) return null;
   let length = 0;
   let px = ax;
@@ -132,12 +148,20 @@ function routeLength(
 interface Sample {
   what: string;
   band: number;
-  over: number;
+  /** Straight through: the distance between the two probe points. */
+  straight: number;
+  /** The best a walker with no jump can do — round the end of the wall. */
   round: number;
+  /** What going round costs over walking straight through. */
   detour: number;
+  /** What the router plans **today**, hop penalty and all. */
+  now: number;
 }
 
 const samples: Sample[] = [];
+/** Crossings with no way round at all — the fountain rim is 28 of them. */
+let onlyWayOver = 0;
+/** Probes neither lattice could route, so they say nothing either way. */
 let unroutable = 0;
 
 /** Probes one crossing: two points either side of `(x, z)` along `(nx, nz)`. */
@@ -157,13 +181,26 @@ function probe(
   const bx = x - nx * reach;
   const bz = z - nz * reach;
 
-  const over = routeLength(hopping, ax, az, bx, bz);
+  const now = routeLength(hopping, ax, az, bx, bz);
   const round = routeLength(grounded, ax, az, bx, bz);
-  if (over === null || round === null) {
+  if (now === null) {
     unroutable += 1;
     return;
   }
-  samples.push({ what, band, over, round, detour: round - over });
+  if (round === null) {
+    // Nothing to compare: over the wall is the only way there is. That is not
+    // a failed probe, it is the fountain — and it is the case Jim's ruling
+    // named, so it is counted rather than swallowed.
+    onlyWayOver += 1;
+    return;
+  }
+  // Measured against the straight line rather than against a second routed
+  // crossing, deliberately: the multiplier this feeds is what makes the
+  // crossing dearer, so a crossing route would make the derivation circular
+  // and the number would move every time it was re-run. The straight line
+  // between two points either side of one wall is the crossing, exactly.
+  const straight = 2 * reach;
+  samples.push({ what, band, straight, round, detour: round - straight, now });
 }
 
 collision.forEachWall((x1, z1, x2, z2, halfThickness, topHeight, autoHoppable) => {
@@ -199,14 +236,27 @@ collision.forEachCircle((x, z, radius, topHeight, autoHoppable) => {
 });
 
 console.log(`seed ${PARK_SEED}`);
-console.log(`${samples.length} hoppable crossings measured, ${unroutable} unroutable\n`);
-console.log('band   over   round   detour  what');
+console.log(
+  `${samples.length} hoppable crossings measured, ${onlyWayOver} with no way round at all, ` +
+    `${unroutable} unroutable\n`,
+);
+console.log('band  straight   round  detour     now  goes  what');
+let goesRound = 0;
 for (const s of samples.sort((a, b) => a.detour - b.detour)) {
+  // The router "went round" if what it plans today is nearer the way round
+  // than to the straight line through the wall.
+  const round = s.now - s.straight > s.round - s.now;
+  if (round) goesRound += 1;
   console.log(
-    `${s.band.toFixed(2)}  ${s.over.toFixed(2).padStart(6)}  ${s.round.toFixed(2).padStart(6)}  ` +
-      `${s.detour.toFixed(2).padStart(6)}  ${s.what}`,
+    `${s.band.toFixed(2)}  ${s.straight.toFixed(2).padStart(8)}  ${s.round.toFixed(2).padStart(6)}  ` +
+      `${s.detour.toFixed(2).padStart(6)}  ${s.now.toFixed(2).padStart(6)}  ` +
+      `${round ? 'round' : 'over '}  ${s.what}`,
   );
 }
+console.log(
+  `\nthe router walks round ${goesRound} of these ${samples.length} and crosses ` +
+    `${samples.length - goesRound}`,
+);
 // Machine-readable, for `--sweep` to pool across seeds.
 for (const s of samples) console.log(`DETOUR ${s.detour.toFixed(4)} ${s.band.toFixed(4)}`);
 

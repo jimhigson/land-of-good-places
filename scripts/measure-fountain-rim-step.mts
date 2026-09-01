@@ -1,4 +1,25 @@
-/** Scratch probe: what does the router's sampler see across the fountain rim? */
+/**
+ * **How big a step is it into the fountain's water?**
+ *
+ * The fountain's wading surface is not the terrain: `Fountain.groundLevel`
+ * lifts the ground inside the rim to `waterLevel - WADE_SINK`, and
+ * `World.attachPlayer` composes that onto the player's own sampler — which is
+ * the sampler `NavGrid` builds its lattice from. So the water is a *level*, and
+ * whether a route can enter it is decided by the lattice's level rule.
+ *
+ * This measures the step, on the real park, through the real composed sampler.
+ * It is where `NavGrid`'s "inside a band the level rule is the hop's own reach"
+ * comes from: the step is **0.631 m** on the canonical seed against a 0.62 m
+ * `BUILDING_STEP_UP`, so a walking rule refuses the water by 11 mm — while a
+ * child plainly gets in by hopping the rim, which is what she is doing.
+ *
+ * ```
+ * node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs \
+ *      scripts/measure-fountain-rim-step.mts
+ * ```
+ *
+ * `LGP_SEED=n` measures another park.
+ */
 import './headless-canvas.mjs';
 import { buildHeadlessPark } from './park-harness.mts';
 import { BUILDING_STEP_UP } from '../src/core/constants.ts';

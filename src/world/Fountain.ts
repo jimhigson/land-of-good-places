@@ -46,6 +46,22 @@ import type { Player } from '../entities/Player';
  * exactly as a single circle would, but a jump that clears one segment's
  * `topHeight` finds nothing left to push it back out once it lands inside.
  * See `attachPlayer` and `groundLevel` for what happens once you're in.
+ *
+ * **And the route planner knows it** — Jim, 29 August 2026: *"make the fountain
+ * wall hoppable, but give hoppable walls a high penalty so the route finding
+ * goes around them unless they are a much better path — for example the
+ * destination is the water in the fountain itself."* The segments are
+ * `autoHoppable`, so `NavGrid` prices a crossing rather than treating the rim
+ * as solid: a tap on the water now walks a child up to the rim and hops her in,
+ * where before the router called the whole fountain a wall and gave up at the
+ * edge of it. Walking *past* the fountain is unaffected — going round costs
+ * far less than the crossing does. See `NavGrid`'s `HOP_COST_MULTIPLIER`.
+ *
+ * She can always get out again. `resolve` measures a jump's clearance above the
+ * mover's **own ground**, and inside the rim that ground is the wading surface
+ * (see {@link groundLevel}) — so the rim is exactly {@link RIM_TOP_HEIGHT} above
+ * her feet whichever side of it she is standing on, and the hop that got her in
+ * is the same hop that gets her out. The basin is not a trap.
  */
 /**
  * The fountain's share of "make the lit area three times bigger in radius".
@@ -80,8 +96,29 @@ export class Fountain implements GameSystem {
   /** 0 in daylight, 1 at night. Set by the DayNight system each frame. */
   nightFactor = 0;
 
-  /** How high a jump must clear to sail over the rim — see the class doc. */
-  private static readonly RIM_TOP_HEIGHT = 1.1;
+  /**
+   * How high a jump must clear to sail over the rim — see the class doc.
+   *
+   * **1.0, and it has to be**, because the rim is `autoHoppable` now and
+   * `Collision.ts` owns what that can mean: `MAX_AUTO_HOP_HEIGHT` is 1.0 m, so
+   * at the old 1.1 m `autoHopClears` was false, `NavGrid` went on stamping the
+   * rim solid and `Player`'s lookahead never fired at it — the flag would have
+   * been completely inert.
+   *
+   * It is not a number bent to fit the flag, either. Measured on the rim's own
+   * 0.32 m half-thickness with `measure-hop-clearance.mts`'s rig, 210 attempts
+   * over 20–120 fps × walk/sprint × 0–40° approach × seven frame phases: at
+   * 1.10 m, 182 were clean and **28 were "popped"** — the wall going solid
+   * under her mid-footprint and ejecting her out the far side, which a route
+   * must never plan on. The worst-case clean ceiling at that thickness is
+   * 1.045 m, and `measuredHopCeiling(2 * (0.32 + PLAYER_RADIUS))` reads
+   * 1.010 m. 1.0 is under both, so `checkHoppableColliders` passes it at boot.
+   *
+   * Nothing moves on screen. The visible stone crest is the torus at
+   * `y = 1.05 ± 0.22`, so it tops out at 1.27 m: the collider already sat
+   * 0.17 m below what you can see, and now sits 0.27 m below it.
+   */
+  private static readonly RIM_TOP_HEIGHT = 1.0;
 
   /** Anything closer to the centre than this counts as "in the water". */
   private readonly waterRadius = this.rimRadius - 0.3;
@@ -311,11 +348,11 @@ export class Fountain implements GameSystem {
     }
 
     // --- rim collider: a ring of short walls, not one filled circle --------
-    // See the class doc for why. `Fountain.RIM_TOP_HEIGHT` is comfortably
-    // under the 1.4 m jump ceiling `Player.ts` documents, and the segment
-    // count is high enough that the polygon reads as a circle: at 28
-    // segments the midpoint of an edge sags under the true radius by about
-    // 2.5 cm, well inside the walls' own thickness.
+    // See the class doc for why, including why every segment is `autoHoppable`
+    // and why `RIM_TOP_HEIGHT` is what it is. The segment count is high enough
+    // that the polygon reads as a circle: at 28 segments the midpoint of an
+    // edge sags under the true radius by about 2.5 cm, well inside the walls'
+    // own thickness.
     const RIM_SEGMENTS = 28;
     for (let i = 0; i < RIM_SEGMENTS; i += 1) {
       const a1 = (i / RIM_SEGMENTS) * Math.PI * 2;
@@ -327,6 +364,7 @@ export class Fountain implements GameSystem {
         z + Math.sin(a2) * this.rimRadius,
         0.32,
         Fountain.RIM_TOP_HEIGHT,
+        true,
       );
     }
 
