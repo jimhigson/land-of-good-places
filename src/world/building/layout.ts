@@ -813,9 +813,86 @@ export interface ShopUnitDefinition {
   /** Yaw in radians; 0 faces +Z. */
   readonly yaw: number;
   readonly title: string;
+  /**
+   * What this stall sells, for the interact prompt a child reads walking up to
+   * it — "Toys", "Pets", "Ice Cream".
+   *
+   * Jim, 29 August 2026: *"just change so they don't all say 'Go shopping!' —
+   * instead say just what they sell, such as 'Pets' or 'Toys'."* Seven stalls
+   * standing in a row all offering the same words told her nothing about which
+   * one she was in front of, which is the whole point of a market.
+   *
+   * It lives **here**, beside {@link title}, rather than in a table of prompt
+   * strings somewhere near the zones. `title` is the shop's name over its
+   * awning ("Stickers & Pets", "Toy Shop"); this is the goods, shorter and
+   * plural. They are close enough that a second list keyed by shop id would be
+   * two definitions of one shop kept in step by hand — the bug CLAUDE.md opens
+   * with — and far enough apart that one string cannot serve both.
+   */
+  readonly sells: string;
   readonly glyph: string;
   readonly accent: number;
 }
+
+/**
+ * "Shops must dominate their rooms" (design feedback, 26 July 2026): every shop
+ * gets a bigger footprint, and — everywhere the ground floor's "never has a
+ * hole" rule (see `deckIsSolid`) does not forbid it — a shallow sunken
+ * forecourt, so the counter and awning loom over a child standing in front of
+ * them instead of reading as a hut in a warehouse.
+ *
+ * `SHOP_SCALE_XZ` alone is what makes every shop bigger; it is applied to the
+ * whole kiosk+stock+shopkeeper group in `ShopUnits`, so nothing that builds a
+ * shop's contents (`shops/kiosk.ts`, `shops/fitouts.ts`) has to know it
+ * happened. Anything computed independently in *world* space — the counter's
+ * collision segment, the till spot, the keep-out zone other floor dressing
+ * respects — has to be scaled by hand alongside it; see `ShopUnits.ts`,
+ * `shops/Shops.ts` and `dressing.ts`.
+ */
+/**
+ * ## Amended for the market (#403) — 1.6 became 0.8
+ *
+ * The paragraph above is **not retracted**. "Shops must dominate their rooms"
+ * was right about the thing it was looking at: a wall-mounted kiosk marooned
+ * on a sixty-metre plate did read as a hut in a warehouse, and scaling it up
+ * was the correct fix for that object in that room.
+ *
+ * A market stall is a different object. It is not trying to dominate a room
+ * from across it — it is one of seven, an arm's length from the child walking
+ * between them, and the thing that makes it read as a market is that there are
+ * *lots* of them close together. At 1.6 only three stalls fit anywhere on the
+ * plate at all (measured, `scripts/measure-market-floor.mts`); at 0.8 all
+ * seven fit with room for the aisle.
+ *
+ * So: if the shops ever go back on the walls, put this back to 1.6 with them.
+ * Do not raise it while they are stalls, and do not read this as licence to
+ * shrink furniture generally — it is the one object whose *kind* changed.
+ *
+ * ## Declared here, above the market, and not by accident
+ *
+ * It used to sit two hundred lines further down, next to the other shop
+ * geometry. The market's own spacing derives from {@link SHOP_STAND_Z}, which
+ * derives from this — and a `const` referenced before its declaration is
+ * evaluated is a `ReferenceError`, not a warning. So it moved up rather than
+ * the market growing a second copy of 0.8. Nothing else changed.
+ */
+export const SHOP_SCALE_XZ = 0.8;
+
+/**
+ * Where a child stands to be served, in unit-local metres.
+ *
+ * Scaled by {@link SHOP_SCALE_XZ} along with the rest of the shop: a bigger
+ * counter needs the standing spot to recede with it, or a child would be asked
+ * to stand inside the (now bigger) counter itself.
+ *
+ * **Owned here, re-exported by `shops/Shops.ts`** (which is where it used to
+ * live, and where every consumer still imports it from). It had to move
+ * because the market's aisle is now *defined* as "wide enough that two
+ * children can walk past two more being served", and that sentence is
+ * arithmetic on this number. A layout that guesses how far a served child
+ * stands from a counter is the two-definitions bug CLAUDE.md opens with.
+ */
+export const SHOP_STAND_Z = 2.4 * SHOP_SCALE_XZ;
 
 /**
  * # The market (#403)
@@ -837,20 +914,17 @@ export interface ShopUnitDefinition {
  *
  * ## Everything here derives from the plate
  *
- * The grid is anchored at the plate's **inside north-west corner** — inside
- * the perimeter ceiling beam, so no stall stands under one — and steps by a
- * pitch built from the game's own numbers. Resize the castle and the market
- * re-lays itself; that is the whole difference between this and the ten
+ * The grid is anchored on the plate — the back rank against the north wall,
+ * inside the perimeter ceiling beam so no stall stands under one — and steps
+ * by a pitch built from the game's own numbers. Resize the castle and the
+ * market re-lays itself; that is the whole difference between this and the ten
  * hard-coded positions #403 had to chase.
  *
- * Verified against the built room by `scripts/measure-market-floor.mts`, which
- * rasterises the plan with every obstacle folded in — shafts, the roundel, the
- * toilets, the doorway, the lift lobby and all 41 boxes of the great hall's
- * own furniture — and reports which cells are clear. **Seven of the eight
- * are**, which is exactly the seven shops. The eighth is taken by the great
- * hall's fireside bench at the hearth, so the fireplace interrupts the north
- * row: a market with a fire in the middle of it, which is better than the
- * eight-square grid would have been.
+ * `scripts/measure-market-floor.mts` rasterises the plan with every obstacle
+ * folded in and reports which cells are clear; `check:shop-spacing` asserts the
+ * result. **Two paragraphs about the great hall's hearth interrupting the north
+ * row were deleted here rather than left to mislead** — the hall moved to its
+ * own space with #377/#380 and there has been no fire on the mall since.
  */
 
 /**
@@ -869,26 +943,56 @@ export const MARKET_STALL = 2.8;
  */
 const MARKET_WALK_AISLE = 2 * PLAYER_RADIUS + 1.2;
 
-/** Along a row, stall to stall. */
-export const MARKET_PITCH_X = MARKET_STALL + MARKET_WALK_AISLE;
+/**
+ * How far a child being served sticks out into the lane behind her.
+ *
+ * She stands at `SHOP_STAND_Z`, which is 0.52 m clear of a 2.8 m stall, and
+ * she is `PLAYER_RADIUS` across. Derived rather than guessed because it is the
+ * unit both lane widths below are built out of.
+ */
+const MARKET_QUEUE_DEPTH = SHOP_STAND_Z - MARKET_STALL / 2 + PLAYER_RADIUS;
 
 /**
- * Between the two rows — **wider than the walking aisle, and not by taste.**
- *
- * Two stalls facing each other put their tap targets nose to nose: each sits
- * 1.15 m in front of its own stall with a 2.3 m pick radius, so the rows have
- * to be far enough apart that `tapSpacing`'s `TAP_FINGER_METRES` still fits
- * between them or a tap aimed at the fruit stall opens the hat stall behind
- * it. `check:tap-spacing` is what proves it, and it is the binding constraint
- * here rather than the walking width — 2.93 m of aisle rather than 2.44.
+ * A lane with stalls down **one** side: the strip in front of the back-wall
+ * pair. One child being served, two more walking past behind her.
  */
-const MARKET_ROW_SEPARATION = Math.max(
-  MARKET_STALL + MARKET_WALK_AISLE,
-  2.3 + 2.3 + TAP_FINGER_METRES,
+const MARKET_SIDE_LANE = MARKET_QUEUE_DEPTH + MARKET_WALK_AISLE;
+
+/**
+ * The main aisle: **two children being served, and two more walking between
+ * them** (#446 — "spread them out more").
+ *
+ * The old aisle was 2.93 m, which is what the *tap targets* need and nothing
+ * more: one child at a counter filled it, and the market read as a huddle
+ * because every gap in it was the narrowest gap that could legally exist. This
+ * is the width the thing is actually *for* — a child can walk the whole length
+ * of the market without asking anyone to move — and it comes out at 4.72 m.
+ *
+ * The tap-target floor is kept as a floor, not deleted: it is still true that
+ * two stalls facing each other must not put their 2.3 m pick radii within
+ * `TAP_FINGER_METRES` of each other, and if the queue term ever shrank below
+ * it this would still be honest. `check:tap-spacing` proves it either way.
+ */
+export const MARKET_AISLE_WIDTH = Math.max(
+  2 * MARKET_QUEUE_DEPTH + MARKET_WALK_AISLE,
+  2.3 + 2.3 + TAP_FINGER_METRES - MARKET_STALL,
 );
 
-/** Clear floor down the middle of the market. */
-export const MARKET_AISLE_WIDTH = MARKET_ROW_SEPARATION - MARKET_STALL;
+/** Between two facing rows, centre to centre. */
+const MARKET_ROW_SEPARATION = MARKET_STALL + MARKET_AISLE_WIDTH;
+
+/**
+ * Along a row, stall to stall — **the same as across the aisle, so the grid is
+ * square.**
+ *
+ * It used to be the walking aisle alone (5.24 m, a 2.44 m slot between
+ * neighbours), which made the market a tight double row inside a very large
+ * room. Setting the cross-lanes to the aisle's own width is what turns it into
+ * a hall you move about in rather than a corridor you file down, and it keeps
+ * one number rather than two: widen the aisle and the cross-lanes widen with
+ * it.
+ */
+export const MARKET_PITCH_X = MARKET_STALL + MARKET_AISLE_WIDTH;
 
 /**
  * # One aisle, seven stalls, all on the mall (#380)
@@ -917,14 +1021,16 @@ export const MARKET_AISLE_WIDTH = MARKET_ROW_SEPARATION - MARKET_STALL;
  * - `MARKET_SOUTH_Z`'s `+1.6` was measured off the **stairwell's** deliberately
  *   wide 4.2 m pick radius. There is no stairwell anywhere.
  *
- * So the market is re-laid rather than relaxed: **two rows facing each other
- * across a single aisle, four stalls and three.** That is a market a child
- * walks *down*, with something on both sides of her the whole way, and it is
- * what the two-aisle split was a workaround for.
+ * So the market is re-laid rather than relaxed: **rows facing each other
+ * across a single aisle.** That is a market a child walks *down*, with
+ * something on both sides of her the whole way, and it is what the two-aisle
+ * split was a workaround for. (It was four stalls and three; #446 made it
+ * three and two with a pair against the back wall — see {@link MARKET_ROWS}.)
  *
  * Everything still derives from the plate and from the game's own numbers —
- * along a row from `PLAYER_RADIUS`, across the aisle from `TAP_FINGER_METRES`
- * — so resizing the castle re-lays the market for free.
+ * along a row and across the aisle from `PLAYER_RADIUS` and
+ * {@link SHOP_STAND_Z}, with `TAP_FINGER_METRES` as a floor under the aisle —
+ * so resizing the castle re-lays the market for free.
  */
 
 /**
@@ -939,62 +1045,135 @@ const FACE_SOUTH = 0;
 const FACE_NORTH = Math.PI;
 
 /**
- * Where the market's aisle runs, in floor-local Z.
+ * How far a stall's centre stands off the wall it backs onto.
  *
- * A little north of the middle: the front door is in the south wall, so a
- * child walks *into* the aisle rather than arriving beside it, and the south
- * strip stays clear as the room she enters before the market starts.
+ * `check:shop-spacing` refuses any stall footprint within 0.8 m of the plate
+ * edge — the perimeter wall-plate hangs there — so this is that clearance,
+ * plus the stall's own half footprint, plus 0.3 m so the assertion is met with
+ * room rather than to the centimetre. Backing right onto the plaster would
+ * also hide the skirt on the stall's back panel, which is the thing that makes
+ * a back-wall stall look like a stall from the aisle.
  */
-const MARKET_CENTRE_Z = -2;
-
-/** The two rows, either side of the aisle. */
-const MARKET_ROW_Z = [
-  MARKET_CENTRE_Z - MARKET_ROW_SEPARATION / 2,
-  MARKET_CENTRE_Z + MARKET_ROW_SEPARATION / 2,
-] as const;
-
-/** How many stalls stand in each row. Four and three, north row first. */
-const MARKET_ROW_LENGTHS = [4, 3] as const;
+const MARKET_WALL_STANDOFF = 0.8 + MARKET_STALL / 2 + 0.3;
 
 /**
- * Centre of the stall in column `col` of row `row`, floor-local.
+ * The back wall: the north side of the mall, opposite the front door.
  *
- * Each row is centred on the plate independently, so the shorter row sits
- * symmetrically against the longer one instead of trailing off one end.
+ * A stall here faces **+Z**, into the room, which is also the face the fixed
+ * isometric camera shows (see #447). Moving stalls here therefore shows a
+ * child more shop fronts, not fewer.
  */
-export function marketCell(row: number, col: number): [number, number] {
-  const count = MARKET_ROW_LENGTHS[row] ?? 1;
-  const span = (count - 1) * MARKET_PITCH_X;
-  return [-span / 2 + col * MARKET_PITCH_X, MARKET_ROW_Z[row] ?? MARKET_CENTRE_Z];
-}
+const MARKET_BACK_Z = -(INTERIOR_HALF_Z - MARKET_WALL_STANDOFF);
+
+/** The aisle's north row, one side lane clear of the back-wall pair. */
+const MARKET_NORTH_Z = MARKET_BACK_Z + MARKET_STALL + MARKET_SIDE_LANE;
+
+/** The aisle's south row, across the aisle from it. */
+const MARKET_SOUTH_Z = MARKET_NORTH_Z + MARKET_ROW_SEPARATION;
 
 /** The middle of the aisle, for anything that wants to run down it. */
-export const MARKET_AISLE_Z = MARKET_CENTRE_Z;
+export const MARKET_AISLE_Z = MARKET_NORTH_Z + MARKET_ROW_SEPARATION / 2;
+
+/** One rank of stalls: where it stands, which way it looks, and its columns. */
+interface MarketRow {
+  /** Floor-local Z of every stall in the rank. */
+  readonly z: number;
+  /** Which way they all look. */
+  readonly yaw: number;
+  /**
+   * Column centres, in **pitches** either side of the market's mid-line. Half
+   * pitches are deliberate: a rank offset by half a pitch sits opposite its
+   * neighbours' cross-lanes rather than behind their canopies, so from the
+   * aisle you look through a gap and see another stall behind it.
+   */
+  readonly cols: readonly number[];
+}
+
+/**
+ * # Three ranks, not two (#446)
+ *
+ * Jim, looking at the market: *"Market stalls are all clumped together in the
+ * middle of a large room — spread them out more. Move a couple to the back
+ * wall, while keeping the rest in a bigger grid."*
+ *
+ * He was describing a real thing and not a matter of taste. Seven stalls at
+ * the old 5.24 m pitch occupied a 15.7 m × 5.7 m patch of a 42.4 m × 31.1 m
+ * room, all of it within a few metres of the middle, with every gap in it set
+ * to the narrowest width that would pass a check. The room was doing nothing.
+ *
+ * So the market now has three ranks:
+ *
+ * - **The back wall** — two stalls against the north wall, facing into the
+ *   room, half a pitch outboard of the grid so they read from the aisle
+ *   through the cross-lanes rather than hiding behind the north row.
+ * - **The aisle** — three facing two across {@link MARKET_AISLE_WIDTH}, which
+ *   is the #403 ruling kept intact and widened from 2.93 m to 4.72 m.
+ *
+ * Everything still derives from the plate and the game's own numbers, so
+ * resizing the castle re-lays the market for free — and `keepOutsFor` reads
+ * `SHOP_UNITS`, so the benches and props move with the stalls without a second
+ * list being edited.
+ *
+ * **The south strip is left alone on purpose.** The front door, the roundel
+ * and its planters own the floor from about z = 2.8 southwards; the market
+ * fills the room from the back wall down to the edge of that, which is the
+ * whole of the floor it is allowed to have.
+ */
+const MARKET_ROWS: readonly MarketRow[] = [
+  { z: MARKET_BACK_Z, yaw: FACE_SOUTH, cols: [-1.5, 1.5] },
+  { z: MARKET_NORTH_Z, yaw: FACE_SOUTH, cols: [-1, 0, 1] },
+  { z: MARKET_SOUTH_Z, yaw: FACE_NORTH, cols: [-0.5, 0.5] },
+];
+
+/**
+ * Centre of the stall in column `col` of rank `row`, floor-local.
+ *
+ * Every rank is centred on the market's own mid-line, so a short rank sits
+ * symmetrically against a long one instead of trailing off one end.
+ */
+export function marketCell(row: number, col: number): [number, number] {
+  const rank = MARKET_ROWS[row];
+  if (!rank) return [0, MARKET_AISLE_Z];
+  return [(rank.cols[col] ?? 0) * MARKET_PITCH_X, rank.z];
+}
 
 /**
  * Which pitch each shop has. A **seating plan**, not a formula: which shop
  * gets which stall is a thing a six-year-old should be allowed an opinion
  * about, and it should be editable without touching any arithmetic.
+ *
+ * Two judgements are baked into the order below, both worth arguing with:
+ *
+ * - **The back wall gets the two you go looking for** — stickers-and-pets and
+ *   surprise eggs — rather than the two a child beelines for. Ice cream,
+ *   candy floss, balloons, toys and hats stay on the aisle she walks into;
+ *   the far rank rewards going further in.
+ * - **The south row, which shows the camera its back, gets the two canopies
+ *   that have no back** — the balloon stall's bouquet on a post and the candy
+ *   floss stall's parasol read the same from every side. That is #447 made
+ *   smaller: three stalls used to present their back panel, now two do, and
+ *   those two are the ones it costs least.
  */
 const MARKET_PLAN: readonly (readonly [number, number])[] = [
-  [0, 0],
-  [0, 1],
-  [0, 2],
-  [0, 3],
-  [1, 0],
-  [1, 1],
-  [1, 2],
+  [1, 0], // toy
+  [2, 0], // balloon
+  [2, 1], // candyFloss
+  [1, 1], // iceCream
+  [1, 2], // hat
+  [0, 0], // stickerPet
+  [0, 1], // surpriseEgg
 ];
 
 function stall(index: number): { x: number; z: number; yaw: number } {
   const seat = MARKET_PLAN[index];
   if (!seat) throw new Error(`market: shop ${index} has no pitch — MARKET_PLAN is short`);
   const [row, col] = seat;
+  const rank = MARKET_ROWS[row];
+  if (!rank) throw new Error(`market: shop ${index} is seated in rank ${row}, which does not exist`);
   const [x, z] = marketCell(row, col);
-  // Row 0 stands north of the aisle and looks south into it; row 1 stands
-  // south of it and looks north. Both therefore face the child walking
-  // between them, which is the whole point of an aisle.
-  return { x, z, yaw: row === 0 ? FACE_SOUTH : FACE_NORTH };
+  // Every stall looks at a lane a child walks down: the back-wall pair and the
+  // north row south into theirs, the south row north into the same aisle.
+  return { x, z, yaw: rank.yaw };
 }
 
 
@@ -1005,13 +1184,17 @@ function stall(index: number): { x: number; z: number; yaw: number } {
  * market moves floor in one edit if it ever should.
  */
 export const SHOP_UNITS: readonly ShopUnitDefinition[] = [
-  { id: 'toy', deck: MALL_DECK, ...stall(0), title: 'Toy Shop', glyph: '🧸', accent: PALETTE.markerPink },
-  { id: 'balloon', deck: MALL_DECK, ...stall(1), title: 'Balloon Shop', glyph: '🎈', accent: PALETTE.markerSky },
-  { id: 'candyFloss', deck: MALL_DECK, ...stall(2), title: 'Candy Floss', glyph: '🍬', accent: PALETTE.blossomPink },
-  { id: 'iceCream', deck: MALL_DECK, ...stall(3), title: 'Ice Cream', glyph: '🍦', accent: PALETTE.markerMint },
-  { id: 'hat', deck: MALL_DECK, ...stall(4), title: 'Hat Shop', glyph: '🎩', accent: PALETTE.markerLilac },
-  { id: 'stickerPet', deck: MALL_DECK, ...stall(5), title: 'Stickers & Pets', glyph: '🐹', accent: PALETTE.markerLemon },
-  { id: 'surpriseEgg', deck: MALL_DECK, ...stall(6), title: 'Surprise Eggs', glyph: '🥚', accent: PALETTE.flowerViolet },
+  { id: 'toy', deck: MALL_DECK, ...stall(0), title: 'Toy Shop', sells: 'Toys', glyph: '🧸', accent: PALETTE.markerPink },
+  { id: 'balloon', deck: MALL_DECK, ...stall(1), title: 'Balloon Shop', sells: 'Balloons', glyph: '🎈', accent: PALETTE.markerSky },
+  { id: 'candyFloss', deck: MALL_DECK, ...stall(2), title: 'Candy Floss', sells: 'Candy Floss', glyph: '🍬', accent: PALETTE.blossomPink },
+  { id: 'iceCream', deck: MALL_DECK, ...stall(3), title: 'Ice Cream', sells: 'Ice Cream', glyph: '🍦', accent: PALETTE.markerMint },
+  { id: 'hat', deck: MALL_DECK, ...stall(4), title: 'Hat Shop', sells: 'Hats', glyph: '🎩', accent: PALETTE.markerLilac },
+  // "Pets", not the awning's full "Stickers & Pets": Jim named this one himself
+  // — *"such as 'Pets' or 'Toys'"* — and it is the half of the stall a
+  // six-year-old is walking towards. The stickers are still on the shelves and
+  // still in the panel `title` heads; the chip is the short word.
+  { id: 'stickerPet', deck: MALL_DECK, ...stall(5), title: 'Stickers & Pets', sells: 'Pets', glyph: '🐹', accent: PALETTE.markerLemon },
+  { id: 'surpriseEgg', deck: MALL_DECK, ...stall(6), title: 'Surprise Eggs', sells: 'Surprise Eggs', glyph: '🥚', accent: PALETTE.flowerViolet },
 ];
 
 /** Scene-graph name for a shop unit's anchor group. */
@@ -1064,42 +1247,6 @@ function shopFootprintRect(
   const zs = corners.map((c) => c[1]);
   return rect(Math.min(...xs), Math.max(...xs), Math.min(...zs), Math.max(...zs));
 }
-
-/**
- * "Shops must dominate their rooms" (design feedback, 26 July 2026): every shop
- * gets a bigger footprint, and — everywhere the ground floor's "never has a
- * hole" rule (see `deckIsSolid`) does not forbid it — a shallow sunken
- * forecourt, so the counter and awning loom over a child standing in front of
- * them instead of reading as a hut in a warehouse.
- *
- * `SHOP_SCALE_XZ` alone is what makes every shop bigger; it is applied to the
- * whole kiosk+stock+shopkeeper group in `ShopUnits`, so nothing that builds a
- * shop's contents (`shops/kiosk.ts`, `shops/fitouts.ts`) has to know it
- * happened. Anything computed independently in *world* space — the counter's
- * collision segment, the till spot, the keep-out zone other floor dressing
- * respects — has to be scaled by hand alongside it; see `ShopUnits.ts`,
- * `shops/Shops.ts` and `dressing.ts`.
- */
-/**
- * ## Amended for the market (#403) — 1.6 became 0.8
- *
- * The paragraph above is **not retracted**. "Shops must dominate their rooms"
- * was right about the thing it was looking at: a wall-mounted kiosk marooned
- * on a sixty-metre plate did read as a hut in a warehouse, and scaling it up
- * was the correct fix for that object in that room.
- *
- * A market stall is a different object. It is not trying to dominate a room
- * from across it — it is one of seven, an arm's length from the child walking
- * between them, and the thing that makes it read as a market is that there are
- * *lots* of them close together. At 1.6 only three stalls fit anywhere on the
- * plate at all (measured, `scripts/measure-market-floor.mts`); at 0.8 all
- * seven fit with room for the aisle.
- *
- * So: if the shops ever go back on the walls, put this back to 1.6 with them.
- * Do not raise it while they are stalls, and do not read this as licence to
- * shrink furniture generally — it is the one object whose *kind* changed.
- */
-export const SHOP_SCALE_XZ = 0.8;
 
 /**
  * How much taller a shop with a sunken forecourt gets to be, on top of

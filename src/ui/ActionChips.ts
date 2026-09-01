@@ -9,7 +9,7 @@ import { PRIMARY_ACTION, type InteractZone, type ZoneAction } from '../world/int
  * the possible actions show over the item itself"*.
  *
  * Little buttons floating over the selected thing: "Race the carts!", "Pick the
- * flower!", "Go shopping!". They are plain `<button>`s, mounted in the ordinary
+ * flower!", "Toys". They are plain `<button>`s, mounted in the ordinary
  * UI root, so the HIGHLIGHT RULE's rainbow hover/focus outline, the pointer
  * cursor and the activation flash all arrive for free from `style.css`'s global
  * rule and `ui/TapBurst.ts` — nothing here draws feedback of its own.

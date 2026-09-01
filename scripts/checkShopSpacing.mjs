@@ -58,42 +58,65 @@ const SHOP_PICK = 2.3;
 
 const STALL = 2.8;
 const WALK_AISLE = 2 * PLAYER_RADIUS + 1.2;
-const PITCH_X = STALL + WALK_AISLE;
-const ROW_SEP = Math.max(PITCH_X, SHOP_PICK + SHOP_PICK + TAP_FINGER);
-const AISLE = ROW_SEP - STALL;
 const BEAM = 0.8;
+
+/**
+ * The **serving spot** is where the child actually stands: `SHOP_STAND_Z`,
+ * which is `2.4 * SHOP_SCALE_XZ` = 1.92 m, so it is 0.52 m clear of the stall
+ * and in the aisle. That distinction is the one this check exists to hold: a
+ * stall whose stand spot fell inside its own body would ask a child to walk
+ * into the counter to be served.
+ */
+const SHOP_STAND_Z = 2.4 * 0.8;
+/** `MARKET_QUEUE_DEPTH` — how far a served child sticks out into the lane. */
+const QUEUE_DEPTH = SHOP_STAND_Z - STALL / 2 + PLAYER_RADIUS;
+/** `MARKET_SIDE_LANE` — stalls down one side: one served, two walking past. */
+const SIDE_LANE = QUEUE_DEPTH + WALK_AISLE;
+/** `MARKET_AISLE_WIDTH` — two served facing each other, two walking between. */
+const AISLE = Math.max(2 * QUEUE_DEPTH + WALK_AISLE, SHOP_PICK + SHOP_PICK + TAP_FINGER - STALL);
+const ROW_SEP = STALL + AISLE;
+/** `MARKET_PITCH_X` — the same, so the grid is square. */
+const PITCH_X = STALL + AISLE;
 
 /** `MALL_DECK` — every stall is on it. */
 const MALL_DECK = 0;
-/** `MARKET_CENTRE_Z`: the aisle runs a little north of the middle. */
-const CENTRE_Z = -2;
-const ROW_Z = [CENTRE_Z - ROW_SEP / 2, CENTRE_Z + ROW_SEP / 2];
-/** `MARKET_ROW_LENGTHS` — four stalls facing three. */
-const ROW_LENGTHS = [4, 3];
 
-/** Each row centred on the plate independently, mirroring `marketCell`. */
-const cell = (row, col) => {
-  const span = (ROW_LENGTHS[row] - 1) * PITCH_X;
-  return [-span / 2 + col * PITCH_X, ROW_Z[row]];
-};
+/** `MARKET_WALL_STANDOFF`, and the back wall it puts a rank against. */
+const WALL_STANDOFF = BEAM + STALL / 2 + 0.3;
+const BACK_Z = -(INTERIOR_HALF_Z - WALL_STANDOFF);
+const NORTH_Z = BACK_Z + STALL + SIDE_LANE;
+const SOUTH_Z = NORTH_Z + ROW_SEP;
+const AISLE_Z = NORTH_Z + ROW_SEP / 2;
+
+/**
+ * `MARKET_ROWS` — three ranks, each with its own z, facing and columns
+ * (in pitches either side of the market's mid-line). `face` is +1 for a rank
+ * that looks along +Z.
+ */
+const rows = [
+  { z: BACK_Z, face: 1, cols: [-1.5, 1.5] },
+  { z: NORTH_Z, face: 1, cols: [-1, 0, 1] },
+  { z: SOUTH_Z, face: -1, cols: [-0.5, 0.5] },
+];
+
+/** Mirroring `marketCell`. */
+const cell = (row, col) => [rows[row].cols[col] * PITCH_X, rows[row].z];
 
 /** The seating plan, mirroring `MARKET_PLAN`. */
 const plan = [
-  { id: 'toy', deck: MALL_DECK, seat: [0, 0] },
-  { id: 'balloon', deck: MALL_DECK, seat: [0, 1] },
-  { id: 'candyFloss', deck: MALL_DECK, seat: [0, 2] },
-  { id: 'iceCream', deck: MALL_DECK, seat: [0, 3] },
-  { id: 'hat', deck: MALL_DECK, seat: [1, 0] },
-  { id: 'stickerPet', deck: MALL_DECK, seat: [1, 1] },
-  { id: 'surpriseEgg', deck: MALL_DECK, seat: [1, 2] },
+  { id: 'toy', deck: MALL_DECK, seat: [1, 0] },
+  { id: 'balloon', deck: MALL_DECK, seat: [2, 0] },
+  { id: 'candyFloss', deck: MALL_DECK, seat: [2, 1] },
+  { id: 'iceCream', deck: MALL_DECK, seat: [1, 1] },
+  { id: 'hat', deck: MALL_DECK, seat: [1, 2] },
+  { id: 'stickerPet', deck: MALL_DECK, seat: [0, 0] },
+  { id: 'surpriseEgg', deck: MALL_DECK, seat: [0, 1] },
 ];
 
 const units = plan.map((u) => {
   const [row, col] = u.seat;
   const [x, z] = cell(row, col);
-  // Row 0 stands north of the aisle and faces +Z into it; row 1 faces -Z.
-  const face = row === 0 ? 1 : -1;
-  return { ...u, row, col, x, z, face };
+  return { ...u, row, col, x, z, face: rows[row].face };
 });
 
 const stallRect = (u) => ({
@@ -108,14 +131,6 @@ const stallRect = (u) => ({
  * rightly so: you tap the counter.
  */
 const tapPoint = (u) => ({ x: u.x, z: u.z + u.face * 1.15 });
-/**
- * The **serving spot** is where the child actually stands: `SHOP_STAND_Z`,
- * which is `2.4 * SHOP_SCALE_XZ` = 1.92 m, so it is 0.52 m clear of the stall
- * and in the aisle. That distinction is the one this check exists to hold: a
- * stall whose stand spot fell inside its own body would ask a child to walk
- * into the counter to be served.
- */
-const SHOP_STAND_Z = 2.4 * 0.8;
 const standPoint = (u) => ({ x: u.x, z: u.z + u.face * SHOP_STAND_Z });
 
 const overlaps = (a, b) => a.minX < b.maxX && b.minX < a.maxX && a.minZ < b.maxZ && b.minZ < a.maxZ;
@@ -150,20 +165,62 @@ for (let i = 0; i < units.length; i += 1) {
   }
 }
 
-// 2. The aisle is walkable: two children abreast between facing rows.
+// 2. **Every rank has a lane in front of it, and at least one pair of ranks
+//    faces across a shared one.**
+//
+//    The market is three ranks now, not two (#446), so "the gap between row 0
+//    and row 1" stopped being the question. Two things are asked instead, and
+//    both are the arrangement rather than the arithmetic:
+//
+//    - Each rank's lane is measured to whatever is actually in front of it —
+//      the next rank's near face, or the plate wall if there is none — and has
+//      to hold everyone who has to be in it: this rank's served child, two more
+//      walking past, and the facing rank's served child if there is one. That
+//      is `MARKET_SIDE_LANE` for a one-sided lane and `MARKET_AISLE_WIDTH` for
+//      a shared one, both from `PLAYER_RADIUS` and `SHOP_STAND_Z`.
+//    - At least one pair of ranks must face each other. #403 is Jim's own
+//      ruling and "spread them out" is exactly the change that could delete it
+//      by accident, leaving seven stalls scattered round a room.
 {
-  const r0 = units.filter((u) => u.row === 0);
-  const r1 = units.filter((u) => u.row === 1);
-  if (!r0.length || !r1.length) {
-    fail('the market has stalls on only one side — that is a parade, not an aisle');
-  } else {
-    const gap =
-      Math.min(...r1.map((u) => u.z - STALL / 2)) - Math.max(...r0.map((u) => u.z + STALL / 2));
-    if (gap < 2 * PLAYER_RADIUS) {
-      fail(`the aisle is ${gap.toFixed(2)} m — a child is ${(2 * PLAYER_RADIUS).toFixed(2)} m across`);
+  const ranks = rows
+    .map((row, index) => ({ ...row, index, members: units.filter((u) => u.row === index) }))
+    .filter((r) => r.members.length);
+
+  let facingPairs = 0;
+  for (const rank of ranks) {
+    // What this rank looks at: the nearest rank in front of it, or the wall.
+    const ahead = ranks
+      .filter((o) => o !== rank && (o.z - rank.z) * rank.face > 0)
+      .sort((a, b) => Math.abs(a.z - rank.z) - Math.abs(b.z - rank.z))[0];
+    const facesBack = ahead ? ahead.face === -rank.face : false;
+    if (facesBack && rank.face > 0) facingPairs += 1;
+
+    const wallZ = rank.face > 0 ? INTERIOR_HALF_Z - BEAM : -(INTERIOR_HALF_Z - BEAM);
+    const front = rank.z + rank.face * (STALL / 2);
+    const blocker = ahead ? ahead.z - rank.face * (STALL / 2) : wallZ;
+    const gap = (blocker - front) * rank.face;
+    // A millimetre of tolerance, and only that: the layout derives these gaps
+    // from the same terms this recomputes, so the difference is float
+    // association, never design margin.
+    const wanted = QUEUE_DEPTH + WALK_AISLE + (facesBack ? QUEUE_DEPTH : 0) - 0.001;
+    const what = ahead ? `the ${facesBack ? 'aisle' : 'lane'} in front of` : 'the lane between';
+    const against = ahead ? `rank ${ahead.index}` : 'the wall';
+    if (gap < wanted) {
+      fail(
+        `${what} rank ${rank.index} and ${against} is ${gap.toFixed(2)} m — it has to hold a child ` +
+          `being served (${QUEUE_DEPTH.toFixed(2)} m)${facesBack ? ' on each side' : ''} plus two ` +
+          `walking past (${WALK_AISLE.toFixed(2)} m), so ${wanted.toFixed(2)} m`,
+      );
     } else {
-      console.log(`\n  aisle walkable: ${gap.toFixed(2)} m clear`);
+      console.log(
+        `\n  rank ${rank.index} (${rank.members.length} stalls, faces ${rank.face > 0 ? '+Z' : '-Z'}): ` +
+          `${gap.toFixed(2)} m to ${against}, needs ${wanted.toFixed(2)} m`,
+      );
     }
+  }
+
+  if (facingPairs === 0) {
+    fail('no two ranks face each other across a lane — that is a scatter of kiosks, not an aisle');
   }
 }
 
@@ -248,9 +305,41 @@ for (const u of units) {
   }
 }
 
+// 7. **No stall stands on the roundel, or on its ring of planters.**
+//
+//    New with #446, and it is the constraint the spread actually ran into: the
+//    market grew southwards until the only thing left in its way was the floor
+//    medallion by the front door, which is a disc rather than a rectangle and
+//    so could not be expressed as a fixture above. The planters are props, and
+//    a castle prop gets no collider (indoor collision is height-blind), so
+//    placement is the only thing keeping a stall from growing through one.
+{
+  /**
+   * `dressing.ts`: `ROUNDEL_X/Z/RADIUS`. The planter ring is measured, not
+   * assumed: its pots sit at `ROUNDEL_RADIUS - 0.9` = 5.1 m carrying a 0.55 m
+   * bush, reaching 5.65 m — **inside** the disc, so the disc is the whole
+   * obstacle and there is no second radius to keep in step.
+   */
+  const ROUNDEL = { x: -6 * PLATE_SHRINK, z: INTERIOR_HALF_Z - 0.8 - 6, radius: 6 };
+  const reach = ROUNDEL.radius;
+  for (const u of units) {
+    const r = stallRect(u);
+    const dx = Math.max(r.minX - ROUNDEL.x, 0, ROUNDEL.x - r.maxX);
+    const dz = Math.max(r.minZ - ROUNDEL.z, 0, ROUNDEL.z - r.maxZ);
+    const clear = Math.hypot(dx, dz) - reach;
+    if (clear < 0) {
+      fail(
+        `${u.id} ${fmt(r)} overlaps the roundel (centre ${ROUNDEL.x.toFixed(2)}, ` +
+          `${ROUNDEL.z.toFixed(2)}, reach ${reach.toFixed(2)} m) by ${(-clear).toFixed(2)} m`,
+      );
+    }
+  }
+}
+
 console.log(
   failures === 0
-    ? `\nPASS: ${units.length} stalls on one floor, one walkable aisle, every serving spot in it.`
+    ? `\nPASS: ${units.length} stalls on one floor, every rank with a lane in front of it, ` +
+        `at least one facing pair, every serving spot in a lane.`
     : `\n${failures} FAILURE(S)`,
 );
 process.exit(failures === 0 ? 0 : 1);
