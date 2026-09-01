@@ -1,11 +1,12 @@
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
-import { CylinderGeometry, Group, Mesh, Vector3, type PerspectiveCamera } from 'three';
+import { CylinderGeometry, Group, Mesh, Object3D, Vector3, type PerspectiveCamera } from 'three';
 import { BUILDING_FLOOR_COUNT, BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, SLIDE_SPEED } from '../../core/constants';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
 import { bandContains, type PortalBand } from '../tapSpacing';
 import { SpaceManager } from '../SpaceManager';
 import {
   CASTLE_FLOORS,
+  CASTLE_HALL,
   CASTLE_MALL,
   CASTLE_ROOF,
   castleFloorAt,
@@ -40,9 +41,25 @@ import { buildingInteractZones } from './interactZones';
 import { dressDeck } from './dressing';
 import { CastleFire } from './castleLighting';
 import { dressCastle } from './castleDecor';
-import { GreatHallBanquet } from './greatHallBanquet';
+import { GreatHallBanquet, type PetTableLink } from './greatHallBanquet';
+import {
+  CASTLE_GREAT_HALL_DECK,
+  greatHallPetPlaces,
+  greatHallSeats,
+} from './castleFurniture';
+import { CASTLE_TABLE_TOP, createCastleFeastProp, type FeastProp } from '../../art/models/castleAssets';
 import { WildPets } from './WildPets';
 import { createRoofClouds, type RoofClouds } from './roofClouds';
+
+/**
+ * How far towards the table her chosen dish is set down, in metres.
+ *
+ * Half the 0.45 m of clear floor between the bench plank's inner face and the
+ * table's edge, plus a little, so the dish lands **on** the table in front of
+ * her rather than balanced on its edge. The hotel's breakfast bowl uses 0.42 m
+ * for the same job at a round table she sits further back from.
+ */
+const FEAST_DISH_REACH = 0.5;
 import type { IsoCamera } from '../../core/IsoCamera';
 import type { InteractZone } from '../interact';
 import { softMaterial } from './parts';
@@ -491,8 +508,28 @@ export class Building implements GameSystem {
   /** The building's own fixed lights — on indoors, off outside and on the roof. */
   private readonly interiorLighting = new InteriorLighting();
 
+  /**
+   * The seam the banquet sends her companions to their own table down (#449).
+   *
+   * The same one-way shape as `Hotel.petParade`, and assigned in the same
+   * place, `Game`: the hall says *there is a place laid here, and it is your
+   * cat's*; the parade walks the animal there and holds it. Nothing comes back
+   * the other way, and this file never touches a pet's body — which is what
+   * makes the flickering, species-swapping stand-in of Jim's 23 Aug report
+   * impossible here rather than merely absent.
+   */
+  petParade: PetTableLink | null = null;
+
   private player: Player | null = null;
   private ride: ActiveRide | null = null;
+  /**
+   * Which of the banquet's blank places she is sitting in, or `null`. Read by
+   * `interactZones.ts` to decide whether a free place offers the invitation or
+   * the food. The hotel's `seatedAt` is the same field.
+   */
+  private banquetSeat: number | null = null;
+  /** What she chose to eat, on the table in front of her. See `eatAtFeast`. */
+  private feastDish: Object3D | null = null;
   private grownUpComing = false;
   private wasOnPad = false;
   private wasAirborne = false;
@@ -802,7 +839,120 @@ export class Building implements GameSystem {
       // building owns the geometry and `Game` owns the join. See
       // `InteriorControls.openShop`.
       openShop: (unitId) => this.controls.openShop(unitId),
+      banquetSeat: this.banquetSeat,
+      sitAtFeast: (index) => this.sitAtFeast(index),
+      eatAtFeast: (kind) => this.eatAtFeast(kind),
+      leaveFeast: () => this.leaveFeast(),
     });
+  }
+
+  /**
+   * **Sit down in one of the banquet's blank places** — #449's third ask, and
+   * the door to its fourth.
+   *
+   * The hotel breakfast room's `sitAt` is the model, line for line: hand the
+   * player to a ride, put her on the seat, and remember which one so the zone
+   * offers the food instead of the invitation. What is different is the two
+   * lines after it, and both are the great hall's rather than the hotel's.
+   *
+   * **The posture is `'dining'`, not `'seated'`.** `beginRide` sets `'seated'`
+   * on every ride, deliberately, so a ride that has never heard of postures
+   * cannot inherit one. `'seated'` is the fairground pose: arms thrown back,
+   * legs at −0.7. The kid rig has no knee, so a rotated leg does not bend, it
+   * swings — at −0.7 her foot ends up 0.176 m out in front of her and in the
+   * air. Invisible in a gondola; absurd on a bench. `'dining'` is the posture
+   * the two dozen children beside her are already wearing, so she sits down
+   * *the same way they are sitting*, which is the whole point of sitting with
+   * them. See `ridePose.ts`.
+   *
+   * **Her feet land on the floor, and `y` is the storey's floor for that
+   * reason.** The bench is cut to `KID_HIP_HEIGHT` exactly — the one height at
+   * which a vertical leg reaches the ground — so a diner's root is on the
+   * flagstones, not on the plank. Passing the bench top here would sit her
+   * 0.36 m in the air.
+   */
+  private sitAtFeast(index: number): void {
+    const player = this.player;
+    const seat = greatHallSeats(CASTLE_GREAT_HALL_DECK)[index];
+    if (!player || !seat || player.riding) return;
+
+    player.beginRide();
+    player.setRidePose(
+      floorX(CASTLE_HALL, seat.x),
+      BUILDING_BASE_Y,
+      floorZ(CASTLE_HALL, seat.z),
+      seat.yaw,
+    );
+    player.ridePosture = 'dining';
+    this.banquetSeat = index;
+
+    // **And the pets go to their own table** (#449). This is the moment the
+    // ticket is for: her cat leaves her side, trots across the hall and puts
+    // its nose in a bowl at a little table of its own.
+    //
+    // One call, and everything about it belongs to somebody else already: the
+    // places are `castleFurniture.ts`'s (which also laid the bowls at them),
+    // and the animals are the parade's, which is the one owner of every
+    // companion's body. This file builds no animal and moves none.
+    this.petParade?.sendPetsToTable(
+      greatHallPetPlaces(CASTLE_GREAT_HALL_DECK).map((place) => ({
+        x: floorX(CASTLE_HALL, place.x),
+        y: BUILDING_BASE_Y,
+        z: floorZ(CASTLE_HALL, place.z),
+        facing: place.facing,
+      })),
+    );
+  }
+
+  /**
+   * She has chosen something to eat. A happy face, and the dish itself on the
+   * table in front of her.
+   *
+   * The hotel's `eat` puts a bowl of the cereal she picked in front of her for
+   * the same reason: choosing is the one thing she came to the table to *do*,
+   * and a choice with no result on screen is not a choice. The dish is one of
+   * the castle's own `FEAST_PROPS` — the same roast, pie and loaf already laid
+   * down the middle of every table in the room — built once per choice and
+   * swapped, never accumulated.
+   */
+  private eatAtFeast(kind: FeastProp): void {
+    const player = this.player;
+    const index = this.banquetSeat;
+    const seat = index === null ? undefined : greatHallSeats(CASTLE_GREAT_HALL_DECK)[index];
+    if (!player || !seat) return;
+    player.model.setExpression('happy');
+
+    const floor = this.shell.floorGroups[CASTLE_HALL.index];
+    if (!floor) return;
+    this.feastDish?.removeFromParent();
+    const dish = createCastleFeastProp(kind);
+    // On the table's measured top, half a stride towards it from her seat —
+    // which is where she is looking, because `seat.yaw` is the way she turned
+    // to sit down.
+    dish.root.position.set(
+      seat.x + Math.sin(seat.yaw) * FEAST_DISH_REACH,
+      CASTLE_TABLE_TOP,
+      seat.z + Math.cos(seat.yaw) * FEAST_DISH_REACH,
+    );
+    floor.add(dish.root);
+    this.feastDish = dish.root;
+  }
+
+  /**
+   * Up from the table: she stands, and the pets come back to the line from
+   * wherever they had got to.
+   *
+   * `callPetsBackFromTable` is a no-op for a companion that never went, so
+   * there is no list of "which ones did I actually send" to keep in step —
+   * the same shape as the hotel's `standPetsDown`.
+   */
+  private leaveFeast(): void {
+    const player = this.player;
+    this.banquetSeat = null;
+    this.feastDish?.removeFromParent();
+    this.feastDish = null;
+    this.petParade?.callPetsBackFromTable();
+    if (player) player.endRide();
   }
 
   /** Hands the building the player, so it can carry, bounce and ride them. */

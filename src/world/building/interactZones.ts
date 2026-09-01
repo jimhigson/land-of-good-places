@@ -1,4 +1,12 @@
-import { PRIMARY_ACTION, pressZone, type InteractZone, type ZoneAction } from '../interact';
+import {
+  PRIMARY_ACTION,
+  pressAction,
+  pressZone,
+  type InteractZone,
+  type ZoneAction,
+} from '../interact';
+import type { FeastProp } from '../../art/models/castleAssets';
+import { CASTLE_GREAT_HALL_DECK, greatHallSeats } from './castleFurniture';
 import { SLIDE_PLAN } from '../slide/plan';
 import {
   BUILDING_BASE_Y,
@@ -24,7 +32,7 @@ import {
 } from './layout';
 import { SHOP_STAND_Z } from './shops/Shops';
 import { BUILDING_HALF_Z } from '../../core/constants';
-import { CASTLE_FLOORS, CASTLE_ROOF, floorX, floorZ } from './floors';
+import { CASTLE_FLOORS, CASTLE_HALL, CASTLE_ROOF, floorX, floorZ } from './floors';
 
 /**
  * Everything in the building a finger can point at.
@@ -37,6 +45,25 @@ import { CASTLE_FLOORS, CASTLE_ROOF, floorX, floorZ } from './floors';
  * which is how you get in. Zones are picked by world position, so the two sets
  * can never be mistaken for one another.
  */
+
+/**
+ * **What is on the menu at the banquet** — #449's "the action to sit and eat".
+ *
+ * The castle's own laid meal, `FEAST_PROPS`, rather than a new list of foods:
+ * a roast, a pie and a loaf are already on that table in front of her, so
+ * these chips name things she can see. `'goblet'` is left off — a goblet is a
+ * drink, and "Have a goblet" as an *eat* chip is the kind of near-miss a
+ * six-year-old notices.
+ *
+ * The hotel breakfast room's `BREAKFASTS` is the shape this copies: a small
+ * closed list of nameable things, each with its own glyph, offered as a row of
+ * chips once she is sitting down.
+ */
+const FEAST_FOODS: readonly { kind: FeastProp; label: string; glyph: string }[] = [
+  { kind: 'roast', label: 'Big roast dinner', glyph: '🍗' },
+  { kind: 'pie', label: 'A whole pie', glyph: '🥧' },
+  { kind: 'loaf', label: 'Warm bread', glyph: '🍞' },
+];
 
 export interface BuildingZoneState {
   /** Current top surface of the trampoline pad, in world units. */
@@ -52,6 +79,20 @@ export interface BuildingZoneState {
   askGrownUp(): void;
   /** Open shop unit `unitId`'s purchase panel. */
   openShop(unitId: string): void;
+
+  /**
+   * Which blank place at the banquet she is sitting in, or `null` — the same
+   * mechanism the hotel's `seatedAt` is, and for the same reason: it is what
+   * turns one chip ("Sit down to eat") into the row she gets once she is
+   * down (the food, and the way back up).
+   */
+  readonly banquetSeat: number | null;
+  /** Sit down in free place `index` of `greatHallSeats`. */
+  sitAtFeast(index: number): void;
+  /** Have some of `kind`, wherever she is sitting. */
+  eatAtFeast(kind: FeastProp): void;
+  /** Get up, and call the pets back off their table. */
+  leaveFeast(): void;
 }
 
 export function buildingInteractZones(state: BuildingZoneState): InteractZone[] {
@@ -182,6 +223,60 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
       ),
     );
   }
+
+  // **The blank places at the banquet** (#449). Jim: *"no free spaces for the
+  // player to sit … the action to sit and eat on the blank spaces."*
+  //
+  // Shaped on the hotel breakfast room's chair zone, which has solved
+  // walk-to-a-free-chair-and-sit since #276 — down to the two details that
+  // are easy to leave out and expensive to leave out:
+  //
+  //  - **`selectableWhileRiding`.** Sitting is a ride as far as the engine
+  //    cares, and a zone is not offered while riding unless it says so. Without
+  //    it, sitting down eats every chip *including the way back up*, and a
+  //    child is stuck at the table for ever.
+  //  - **The chip says what leaving *this* is.** "Leave the feast", not "Hop
+  //    down" — Jim's own correction on the breakfast room (7 Aug 2026): a child
+  //    sitting at a table reads "Hop down" as another thing to do at the table
+  //    rather than as the way out of it.
+  //
+  // Only the free places get a zone at all. A place with a child already in it
+  // offers nothing, which is the same mechanism the hotel's `chair.taken` is:
+  // a chip that appears and then refuses teaches a six-year-old that chips
+  // sometimes lie.
+  greatHallSeats(CASTLE_GREAT_HALL_DECK).forEach((seat, index) => {
+    if (!seat.free) return;
+    zones.push({
+      id: `banquet-seat-${index}`,
+      label: 'A place at the feast',
+      x: floorX(CASTLE_HALL, seat.x),
+      // Chest height on a seated child, so the tap target is her place at the
+      // table rather than the flagstones under the bench.
+      y: BUILDING_BASE_Y + 1,
+      z: floorZ(CASTLE_HALL, seat.z),
+      pickRadius: 1.6,
+      // The seating plan's own stand spot — measured out past the bench plank
+      // it belongs to, rather than a fixed distance guessed here. See
+      // `castleFurniture.ts`'s `SIT_STAND_BACK`.
+      standX: floorX(CASTLE_HALL, seat.standX),
+      standZ: floorZ(CASTLE_HALL, seat.standZ),
+      standRadius: 2.2,
+      selectableWhileRiding: true,
+      verb: 'Sit',
+      actions: () =>
+        state.banquetSeat === index
+          ? [
+              ...FEAST_FOODS.map((food) => ({
+                id: `feast-${food.kind}`,
+                label: food.label,
+                glyph: food.glyph,
+                run: () => state.eatAtFeast(food.kind),
+              })),
+              { id: 'leave-feast', label: 'Leave the feast', run: () => state.leaveFeast() },
+            ]
+          : pressAction('Sit down and eat', () => state.sitAtFeast(index), '🍽️'),
+    });
+  });
 
   zones.push(
     pressZone(

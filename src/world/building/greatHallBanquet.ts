@@ -14,6 +14,7 @@ import {
 } from '../../art/models/kidLooks';
 import { KID_SKIN_TONES } from '../../art/models/kid';
 import { greatHallSeats, type GreatHallSeat } from './castleFurniture';
+import type { PetTablePlace } from '../../entities/parade/ParadeMember';
 
 /**
  * **Two dozen children eating at the banquet** — issue #413.
@@ -73,6 +74,38 @@ import { greatHallSeats, type GreatHallSeat } from './castleFurniture';
  * The variety comes from the nine hair styles, the colour rolls and each
  * diner's own eating phase instead, which is plenty at twenty-four.
  */
+
+/**
+ * **What the banquet needs from the parade, and the whole of it** — issue #449.
+ *
+ * The direct analogue of `Hotel`'s `PetParadeLink`, and deliberately the same
+ * shape: the hall says *there are places laid here*, the parade walks the
+ * animals to them and holds them there, and **nothing crosses back**. No
+ * callback, no hand-off, no second model to keep in step — which is what makes
+ * a flicker or a swapped species impossible rather than merely fixed.
+ *
+ * It is stated here, next to the feast, rather than inside the parade, for the
+ * same reason the hotel states its own: the consumer names what it needs, and
+ * `Parade` satisfies it structurally without ever importing the castle.
+ */
+export interface PetTableLink {
+  /**
+   * Sends companions to `places`, in the order they walk behind her — nearest
+   * first. Returns how many actually went; a child with more companions than
+   * there are places keeps the rest in the line beside her.
+   */
+  sendPetsToTable(places: readonly PetTablePlace[]): number;
+  /**
+   * She has got up: everybody back into the line from wherever they had got
+   * to. Safe to call when nothing was ever sent.
+   */
+  callPetsBackFromTable(): void;
+  /**
+   * How many are actually standing at the table with their noses in a bowl —
+   * what `check:castle` measures, asked of the system that owns those bodies.
+   */
+  petsEatingAtTable(): number;
+}
 
 /**
  * The name the diners' group takes on the storey, so `check:castle` can find
