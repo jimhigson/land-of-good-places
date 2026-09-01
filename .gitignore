@@ -59,3 +59,8 @@ coverage/
 # ...and so are project skills — lazily-loaded guidance, versioned with the code
 !.claude/skills/
 
+
+# Throwaway per-seed test files written by `pnpm run vet:seeds` (scripts/vet-seed-pool.mts),
+# and the results file it appends to. Both are scratch for a seed search.
+test/procgen/vet-seed-*.test.ts
+seed-vetting*.jsonl
