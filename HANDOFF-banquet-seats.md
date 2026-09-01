@@ -63,10 +63,36 @@ and sailed through green. The run count now comes from the ticket (two), and
 the bowl clause asks whether a pet can *reach* a bowl rather than counting a
 list against itself. **All five clauses proved red by mutation and reverted.**
 
+## Round two — Jim's #453 feedback (done)
+
+> *"Banquet tables have green bench things clipping into them … Clear out other
+> 'stuff' from the middle of the room … have as many tables as is needed to fill
+> the space."*
+
+- **The hall gets no `dressDeck` furniture** (`deckIsFurnished`) — no benches,
+  no roundel, no planters — and no roundel **rug** (`castleDecor`).
+- **Two dead keep-outs removed on the hall**: the roundel's and the front
+  door's. Neither thing exists on that storey. They were most of "shoved into
+  one end".
+- **Everything derived**: 5 runs (east-most on the throne axis as the high
+  table, then west at `FEAST_ROW_PITCH` until 2 m from the wall), 3 tables per
+  run (south until 3 m from the wall). **120 places, 117 children.**
+- **`scatterKeepOutsFor`** = `keepOutsFor` + `greatHallFootprint`. Braziers and
+  corner clutter ask it; **wall anchors must not** (the banquet is derived from
+  them — cycle).
+- Blank places count back from the **south end** of run 0; the pets' table is in
+  the clear band at the south wall beside them.
+- Companions joining the line mid-meal now go to the table too (re-asserted
+  each frame while seated).
+
 ## Gates
 
 - `check:castle` green, including the new `places` assertion.
-- `pnpm run check`, `test:procgen`, `build`: see the PR.
+- `pnpm run check` exit 0, `build` exit 0, `test:procgen` 482 passed.
+- **Run `check` on a quiet machine.** `check:park-boot` failed once at 36.8 ms
+  against a 24 ms ceiling with **zero work units in the slice** — the box was
+  running a dev server and a rendering browser page. Three consecutive passes at
+  15.6–16.9 ms with those killed. Kill your dev server before the final gate.
 
 ## Known, and not mine
 
