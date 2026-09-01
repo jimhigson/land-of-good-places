@@ -1,7 +1,9 @@
 import { HALL_DECK } from './layout';
 import { BoxGeometry, Group, Mesh, type Object3D } from 'three';
 import { PALETTE } from '../../art/style/bridge';
-import { addOutline, solid } from '../../art/style/materials';
+import { addOutline, softMaterial, solid } from '../../art/style/materials';
+import { PARADE_MEMBER_RADIUS } from '../../core/constants';
+import { createPetBowl } from '../../art/models/hotelAssets';
 import {
   CASTLE_BENCH_HALF_WIDTH,
   CASTLE_BENCH_SEAT,
@@ -570,6 +572,187 @@ export function greatHallFreePlaces(deck: number): readonly GreatHallSeat[] {
  */
 export const DINER_TABLE_GAP = BENCH_OFFSET - CASTLE_BENCH_HALF_WIDTH - CASTLE_TABLE_HALF_WIDTH;
 
+// ------------------------------------------------------- the pets' table
+
+/**
+ * **A small table for the pets, at the mouth of the aisle** — #449's fourth
+ * ask, and the one that makes the hall a scene rather than furniture.
+ *
+ * Jim: *"There should also be a small pets table for the pets to eat at, and
+ * they go there when the player sits."* A child who brings her cat to dinner
+ * sees it leave her side and settle at its own little table.
+ *
+ * ## The numbers, and what each is for
+ *
+ * The top is at {@link GREAT_HALL_PET_TABLE_TOP}, roughly a third of the feast
+ * tables' 0.675 m. That is not "small" for its own sake: the pets are between
+ * 0.3 and 0.6 m tall, and a bowl on a 0.675 m table would be over every one of
+ * their heads. At 0.30 m a bunny's nose reaches its own bowl, which is the
+ * whole read.
+ *
+ * It is 2.4 m long, which is *large* for four small animals and deliberately
+ * so — a table the size of the bowls on it disappears at this camera, and this
+ * one has to be recognisable as a table from across the hall or the moment it
+ * exists for does not land.
+ */
+const PET_TABLE_HALF_X = 1.2;
+const PET_TABLE_HALF_Z = 0.45;
+/** The plank's thickness, and therefore where the legs stop. */
+const PET_TABLE_PLANK = 0.09;
+
+/** The pets' table's own top surface, in metres. See {@link petTable}. */
+export const GREAT_HALL_PET_TABLE_TOP = 0.3;
+
+/**
+ * How far south of the last feast table's centre the pets' table stands.
+ *
+ * At the **mouth of the aisle**, which is the one spot in the hall that is
+ * both clear floor and in shot from every free place at the feast. That
+ * second half is the requirement people forget: the point of #449 is that she
+ * *watches* her cat go and eat, so a pets' table she cannot see from her seat
+ * would satisfy the ticket's words and none of its purpose. The farthest free
+ * place is 12 m from it, well inside frame at this camera.
+ *
+ * 5.4 m clears the last bench's own south end (2.95 m from that table's
+ * centre) by 1.65 m, so the animals eating at it are never standing among the
+ * children's legs.
+ */
+const PET_TABLE_FROM_FEAST = 5.4;
+
+/**
+ * How far out from the table's edge a pet stands, and how far in its bowl sits.
+ *
+ * The stand-off is a pet's own body plus a little: {@link PARADE_MEMBER_RADIUS}
+ * is what the parade spaces the line with, so a pet standing this far out has
+ * its nose at the table rather than its shoulders through it.
+ */
+const PET_STAND_OFF = PARADE_MEMBER_RADIUS + 0.45;
+const PET_BOWL_INSET = 0.17;
+
+/**
+ * **Where each pet stands, and which way it turns**, in the hall's own local
+ * metres — the one owner of the pets' seating plan.
+ *
+ * `Building` maps these into world coordinates and hands them to the parade;
+ * {@link petTable} lays a bowl at each of them. One list, so a bowl cannot end
+ * up in front of nobody or a pet in front of no bowl.
+ *
+ * ## All of them on the far side, and that is the camera talking
+ *
+ * The camera is fixed isometric and always shows an object's +X/+Z faces. A
+ * pet on the near (south or east) side of the table would face away into it
+ * and show the camera its tail; on the north edge it faces +Z, and on the west
+ * end +X, so every animal at this table is looked at from the front. It is the
+ * same rule the free places at the feast are chosen by, and the same fault
+ * #447 files against the market's south row.
+ *
+ * Four places: three along the long north edge at 0.8 m — comfortably more
+ * than a companion's own {@link PARADE_MEMBER_RADIUS} — and one at the west
+ * end, which stops three-in-a-row reading as a queue. A child with more than
+ * four companions keeps the rest in the line beside her, which is a perfectly
+ * good thing for them to be doing.
+ */
+export interface PetPlace {
+  readonly x: number;
+  readonly z: number;
+  /** Which way it turns to face its bowl. A pet's model faces +Z at yaw 0. */
+  readonly facing: number;
+}
+
+/** Where the pets' table stands on `deck`, or `null` on any other storey. */
+export function greatHallPetTable(deck: number): { readonly x: number; readonly z: number } | null {
+  const plan = greatHallPlan(deck);
+  if (!plan) return null;
+  const centres = feastTableCentres(plan);
+  const last = centres[centres.length - 1];
+  if (last === undefined) return null;
+  return {
+    // The aisle's own centre line, which is where the two runs are centred —
+    // never the throne's axis, or the table would sit against the east run.
+    x: plan.axisX + FEAST_ROWS_SHIFT,
+    z: last + plan.inward * PET_TABLE_FROM_FEAST,
+  };
+}
+
+/** Every place at the pets' table. See {@link PetPlace}. */
+export function greatHallPetPlaces(deck: number): readonly PetPlace[] {
+  const table = greatHallPetTable(deck);
+  if (!table) return [];
+  const places: PetPlace[] = [];
+  // Along the north edge, facing south across the table: +Z, into the camera.
+  for (const along of [-0.8, 0, 0.8]) {
+    places.push({ x: table.x + along, z: table.z - PET_TABLE_HALF_Z - PET_STAND_OFF, facing: 0 });
+  }
+  // And one at the west end, facing east: +X, into the camera as well.
+  places.push({ x: table.x - PET_TABLE_HALF_X - PET_STAND_OFF, z: table.z, facing: Math.PI / 2 });
+  return places;
+}
+
+/**
+ * The pets' table itself: a plank on four legs, and a bowl at every place.
+ *
+ * Built here from boxes rather than authored, for the reason `dais` is: it is
+ * a rectangle, and a rectangle is not worth a node in `castle.glb`, a style
+ * entry and a contract figure. Its colours are the **feast tables' own** —
+ * `woodLight` over `woodDark` — so it reads as a small piece of the same
+ * furniture rather than as something from another room.
+ *
+ * The bowls are `createPetBowl()`, the hotel's. That is one definition of
+ * "a bowl a pet eats out of" being used twice, which is the rule this codebase
+ * is built on; a second castle-flavoured pet bowl would be a second thing to
+ * keep in step and would look, at this camera, exactly the same.
+ */
+function petTable(x: number, z: number, places: readonly PetPlace[]): Object3D[] {
+  const out: Object3D[] = [];
+
+  const top = new BoxGeometry(PET_TABLE_HALF_X * 2, PET_TABLE_PLANK, PET_TABLE_HALF_Z * 2);
+  top.translate(0, GREAT_HALL_PET_TABLE_TOP - PET_TABLE_PLANK / 2, 0);
+  const plank = solid(new Mesh(top, softMaterial(PALETTE.woodLight, 0.78)));
+  plank.name = 'castle-pet-table-top';
+  plank.position.set(x, 0, z);
+  plank.receiveShadow = true;
+  addOutline(plank, 0.018);
+  out.push(plank);
+
+  const legHeight = GREAT_HALL_PET_TABLE_TOP - PET_TABLE_PLANK;
+  for (const dx of [-1, 1]) {
+    for (const dz of [-1, 1]) {
+      const geometry = new BoxGeometry(0.12, legHeight, 0.12);
+      geometry.translate(0, legHeight / 2, 0);
+      const leg = solid(new Mesh(geometry, softMaterial(PALETTE.woodDark, 0.78)));
+      leg.name = 'castle-pet-table-leg';
+      leg.position.set(x + dx * (PET_TABLE_HALF_X - 0.18), 0, z + dz * (PET_TABLE_HALF_Z - 0.18));
+      addOutline(leg, 0.016);
+      out.push(leg);
+    }
+  }
+
+  // One bowl per place, laid on the table's measured top in front of whoever
+  // is standing there — never a second list of bowl positions.
+  for (const place of places) {
+    const bowl = createPetBowl();
+    bowl.root.position.set(
+      towards(place.x, x, PET_TABLE_HALF_X - PET_BOWL_INSET),
+      GREAT_HALL_PET_TABLE_TOP,
+      towards(place.z, z, PET_TABLE_HALF_Z - PET_BOWL_INSET),
+    );
+    out.push(bowl.root);
+  }
+
+  return out;
+}
+
+/**
+ * The point on the table's own edge nearest a place: the place's coordinate,
+ * pulled back to at most `limit` from the table's centre.
+ *
+ * So a bowl lands in front of the animal that has to reach it, whichever side
+ * of the table it is standing on, without a per-side table of offsets.
+ */
+function towards(place: number, centre: number, limit: number): number {
+  return centre + Math.max(-limit, Math.min(limit, place - centre));
+}
+
 /**
  * Where the throne stands, measured back from the end wall.
  *
@@ -631,6 +814,13 @@ export function dressGreatHall(deck: number, floor: Group): void {
   }
 
   group.add(...feast(plan));
+
+  // The pets' table, at the mouth of the aisle (#449). Placed from the same
+  // plan as the feast, so it cannot end up in a hall that laid out somewhere
+  // else — and from the same `greatHallPetPlaces` the parade is handed, so
+  // every bowl has an animal in front of it.
+  const pets = greatHallPetTable(deck);
+  if (pets) group.add(...petTable(pets.x, pets.z, greatHallPetPlaces(deck)));
 
   // A bench by the fire, where `castleDecor.ts` has already put the cat and the
   // woodpile. Its Z comes from the hearth's own constant, so it cannot end up
