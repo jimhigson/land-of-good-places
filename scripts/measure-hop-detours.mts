@@ -1,8 +1,15 @@
 /**
  * **What does it actually cost to walk round a hoppable wall?**
  *
- * This is where `NavGrid`'s `HOP_COST_MULTIPLIER` comes from. It is a
- * measurement of the built park, not a round number: for every hoppable
+ * **This answers half of `NavGrid`'s `HOP_COST_MULTIPLIER`, and it is the half
+ * that does not bind.** It asks only "how dear must a crossing be before a wall
+ * is walked round?", which sets a *floor*; it cannot see the opposite failure —
+ * a child sent round the houses to reach a spot four metres off the kerb — and
+ * the multiplier derived from it alone (6.4, the p90 of the detours below) was
+ * 183.9% over that ceiling. `scripts/sweep-hop-multiplier.mts` is what puts
+ * both questions to the constant at once, and it is what 2.65 came from.
+ *
+ * It is a measurement of the built park, not a round number: for every hoppable
  * collider the auto-hop really clears, it stands two points either side of the
  * wall and asks what a walker **who cannot jump at all** must do to get from
  * one to the other. That walker is a lattice built with `hopApex = 0`, which
