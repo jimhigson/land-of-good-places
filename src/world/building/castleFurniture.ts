@@ -674,8 +674,14 @@ const PET_TABLE_FROM_ROW = 5.0;
  * The stand-off is a pet's own body plus a little: {@link PARADE_MEMBER_RADIUS}
  * is what the parade spaces the line with, so a pet standing this far out has
  * its nose at the table rather than its shoulders through it.
+ *
+ * **0.25 rather than 0.45, off a screenshot.** These are small animals —
+ * `PARADE_MEMBER_RADIUS` is 0.22 m — and at 0.45 the extra hand's width read
+ * as a pet standing *near* its table rather than *at* it. There is no lower
+ * useful figure either: at 0 the body is against the plank and the head goes
+ * through it.
  */
-const PET_STAND_OFF = PARADE_MEMBER_RADIUS + 0.45;
+const PET_STAND_OFF = PARADE_MEMBER_RADIUS + 0.25;
 const PET_BOWL_INSET = 0.17;
 
 /**

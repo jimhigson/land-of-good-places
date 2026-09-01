@@ -1,74 +1,76 @@
 # HANDOFF — two tables, free places, and a table for the pets (#449)
 
 Branch `feat/banquet-seats`, cut from **`origin/feat/great-hall-banquet`** (PR #422),
-**not** `main`. Worktree `.claude/worktrees/banquet-seats`. Dev port **5509**
-(`pnpm exec vite --port 5509 --strictPort`). PR goes against
-`feat/great-hall-banquet`.
+**not** `main`. Worktree `.claude/worktrees/banquet-seats`. Dev port **5509**.
+PR goes against `feat/great-hall-banquet`.
 
-Jim, on #422's preview:
+> Jim, on #422's preview: *"Great hall only has one table and no free spaces for
+> the player to sit. Make it two big tables, with a few spaces and the action to
+> sit and eat on the blank spaces. There should also be a small pets table for
+> the pets to eat at, and they go there when the player sits."*
 
-> *"Great hall only has one table and no free spaces for the player to sit. Make it
-> two big tables, with a few spaces and the action to sit and eat on the blank
-> spaces. There should also be a small pets table for the pets to eat at, and they
-> go there when the player sits."*
+**All four asks are built, played and screenshotted.** What is left is the PR
+body, and whatever review asks for.
 
 ## The deep link is `/castle?deck=1`, not `?deck=0`
 
 The brief says 0. The hall is `HALL_DECK = CASTLE_HALL.index` = **1** since the
-floor split (#377/#380); deck 0 is the mall. `main.ts`'s own doc comment for the
-link ("defaults to the ground floor, which is the great hall") is stale for the
-same reason.
+floor split; deck 0 is the mall. `main.ts`'s own doc comment for the link is
+stale for the same reason. `/castle?deck=1&at=3.8,-7.6` lands her standing at a
+blank place with the Sit chip up — that is the URL to hand anyone.
 
-## What is there before this branch (#422, measured off its handoff)
+## What was built
 
-- **One run of three 6 m feast tables** butted end to end down the hall's axis,
-  x = 10.636, z −9.83 … +8.17. `FEAST_TABLE_COUNT = 3` in `castleFurniture.ts`.
-- **24 diners**, two per bench end, four benches per table, both sides.
-  `greatHallSeats(deck)` is the one owner of where a diner sits;
-  `greatHallBanquet.ts` seats an instanced `KidCrowd` on every seat it returns.
-- Bench top `CASTLE_BENCH_SEAT` = 0.360 m = `KID_HIP_HEIGHT` exactly, because the
-  kid rig **has no knee**: that is the one seat height at which a vertical leg
-  lands a foot on the floor. Diners are scale 1 for the same reason. Do not
-  reach for a lean — #422 measured a 37.6 mm toe-sink at 0.12 rad.
+| ask | where |
+|---|---|
+| two big tables | `castleFurniture.ts` — `FEAST_ROW_OFFSET`, `FEAST_ROWS_SHIFT`, `feastRowAxes` |
+| free places | `GreatHallSeat.free`, `FREE_PLACE_STRIDE/SIDE/ROW`; `greatHallBanquet.ts` skips them |
+| sit and eat | `interactZones.ts` banquet zones; `Building.sitAtFeast/eatAtFeast/leaveFeast` |
+| pets go to their table | `ParadeMember.goToTable/leaveTable`, `Parade.sendPetsToTable`, `Building.petParade` |
 
-## The four pieces, and where each one goes
+32 places, **3 free**, **29 children** seated. Pets' table at floor-local
+(1.8, −3.8) with 4 places and a bowl at each.
 
-1. **Two runs, not one.** `castleFurniture.ts`. `greatHallPlan` already resolves
-   the hall's axis; the run offsets either side of it. Everything (tables,
-   benches, seats, the laid meal) already derives from `feastTableCentres` /
-   `feastBenches`, so a second run is a loop, not a copy.
-2. **Free places.** `greatHallSeats` grows a `free` flag. `greatHallBanquet`
-   seats children only on the taken ones — it already reads that one list, so
-   there is no second definition of "is anybody sitting here".
-3. **The sit-and-eat action.** Modelled on the hotel breakfast room's chair zone
-   (`Hotel.interactZones`, `sitAt`/`standUp`/`eat`): a zone per free place,
-   `selectableWhileRiding: true` (without it, sitting eats every chip including
-   the way back up — the hotel's own note), verb `Sit`, and once seated the chip
-   row becomes the food list plus "Leave the table".
-4. **The pets' table.** The pet-follow owner is **`entities/parade/Parade.ts`**,
-   not `WildPets.ts` — `WildPets` is the roof garden's catchable animals (#406).
-   `Parade.sendPetToBed(uid, bed)` → `ParadeMember.goToBed(bed)` is the exact
-   precedent: the parade points `member.target` at the spot instead of at a trail
-   sample and the member walks there on the ordinary follow spring, then runs its
-   own settle. **One body, no stand-in** — that rule is the fix for Jim's 23 Aug
-   *"morphs into a totally different pet"* and must not be broken here.
+## The numbers that are pinned, and by what
 
-   Note the hotel breakfast room's pet **is** a stand-in (`Hotel.eat` builds its
-   own `createPet`). Do not copy that half; copy the parade's.
+Do not move these without re-reading why:
 
-## Constraints that bite (from the brief and the files)
+- `FEAST_ROW_OFFSET = 3.3`, `FEAST_ROWS_SHIFT = −0.55`. The **east run's
+  southernmost bench** reaches the lift lobby's keep-out `(19.21, 5) r4`, and
+  `check:castle` wants any prop 4.62 m from its centre. Wider or less-shifted
+  fails; further west and the west run walks into the roundel's disc.
+- `FEAST_TABLE_COUNT = 2` per run. Three per run puts the **west** run's south
+  bench inside `(0, 11.556) r7`.
+- Free places are on the **west run only** (`FREE_PLACE_ROW = 0`) because a run
+  is 12 m long and there is one pets' table. From the east run the nearest pet
+  measured 12.0 m and walked off the bottom of the frame.
+- `PET_TABLE_FROM_ROW = 5.0` — in shot from the seat *and* clear of the free
+  places' own stand spots.
 
-- Castle props get **no colliders at all** — indoor collision is height-blind.
-  Placement is the only protection a prop gets.
-- Fixed isometric camera shows +X/+Z faces. The hall runs along Z, so a child
-  west of a table faces the camera and a child east of it shows her back. Two
-  runs doubles that count. #447 is the market's version of this fault; the free
-  places at least must be on the camera-facing side so **she** is seen from the
-  front when she sits.
-- `check:castle`, `check:castle-floors` keep passing. Move the furniture, never
-  widen an assertion.
+## Two things found by looking, not by reasoning
 
-## State
+1. **The pets' table at the mouth of the aisle was 12 m from the nearest free
+   place.** Clear floor, tidy, and on screen the cat simply walked out of the
+   picture. Moved alongside the banquet; now 6.4 m at worst.
+2. **`check:castle`'s new assertion 11 was appended after the block that
+   reports failures and exits**, so its four fails were computed and thrown
+   away while it printed a green line about a hall it had just rejected. Moved
+   above the report; its OK line is now conditional on its own clauses.
 
-- Worktree cut, deps installed, dev server up on 5509 (killed by PID).
-- Nothing implemented yet at the time of writing.
+Two of its clauses also had to be rewritten because they compared the scene
+against the very function that built it — a mutation moved both sides together
+and sailed through green. The run count now comes from the ticket (two), and
+the bowl clause asks whether a pet can *reach* a bowl rather than counting a
+list against itself. **All five clauses proved red by mutation and reverted.**
+
+## Gates
+
+- `check:castle` green, including the new `places` assertion.
+- `pnpm run check`, `test:procgen`, `build`: see the PR.
+
+## Known, and not mine
+
+The seated chip row shows **`R` twice** — "Warm bread R" and "Leave the feast
+R". The hotel breakfast room offers the same four chips (three foods plus a
+leave) and does the same thing, so this is the chip row's key assignment, not
+the banquet's. Worth its own issue.
