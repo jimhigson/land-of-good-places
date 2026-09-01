@@ -16,12 +16,12 @@ import { SAVE_KEY } from '../state/save';
  *
  * ## A pool, not a free random number
  *
- * A seed off the top of `Math.random()` is a park nobody has ever built. Most
- * of them are not fine: measured on this branch, **roughly one candidate seed
- * in eight** passes both gates a park has to pass — the rest strand waypoints,
- * put a duck bar where it slows the Rail Race down, run a street off the
- * lattice, or (seed 2, issue #429) admit no railway bridge anywhere at all.
- * Those are the parks a free seed would have handed a six-year-old.
+ * A seed off the top of `Math.random()` is a park nobody has ever built, and
+ * measured on this branch **only about one candidate in thirty** passes both
+ * gates a park has to pass. The other twenty-nine strand waypoints, put a duck
+ * bar where it slows the Rail Race down, run a street off the lattice, fail to
+ * grow a railway loop at all, or (seed 2, issue #429) admit no railway bridge
+ * anywhere. Those are the parks a free seed would have handed a six-year-old.
  *
  * So the pool is a list of seeds that have each been through `check:park` and
  * the full procgen invariant suite, with the ratchet enforced, by
@@ -68,13 +68,17 @@ export const CANONICAL_PARK_SEED = 20260728;
  * 3. `pnpm run vet:seeds -- --list <the whole pool>` to confirm the pool as a
  *    whole, and update the note below with the date and commit.
  *
- * **Budget for a low hit rate.** Vetting seeds 1-1000 at `101b5415` tried
- * **476 candidates and kept 14 — about one in thirty-four.** That number is a
- * measurement of the generator's health, not of the search: of the rejected,
- * roughly two thirds fail `check:park` (stranded waypoints; a railway loop
- * that will not solve at all) and the rest fail an invariant, most often the
- * Rail Race's duck bar standing where it slows the ride, its camera running
- * backwards, or the Sky Cruiser flying through the castle.
+ * **Budget for a low hit rate.** Vetting candidates from 1-1400 at `101b5415`
+ * tried **515 and kept 17 — about one in thirty.** Sixteen are here; 1102 and
+ * 1104 are spares, recorded on the PR rather than used.
+ *
+ * That rate is a measurement of the generator's health rather than of the
+ * search. Of the 498 rejected, about three quarters fail `check:park` — most
+ * often waypoints with nowhere a child fits (`poi.stranded`, 100 seeds) or a
+ * railway loop that will not solve at all (~96) — and the rest fail an
+ * invariant, most often the Rail Race's duck bar standing where it slows the
+ * ride (95), its camera running backwards (94), or the Sky Cruiser flying
+ * through the castle (73).
  *
  * **Re-vet the whole pool whenever the generator changes.** A seed is not
  * sound in the abstract; it is sound against the code that builds it. #460 (a
@@ -108,6 +112,7 @@ export const PARK_SEED_POOL: readonly number[] = [
   274,
   288,
   326,
+  346,
   428,
   451,
 ];
