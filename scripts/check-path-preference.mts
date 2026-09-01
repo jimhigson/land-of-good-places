@@ -18,8 +18,15 @@
  *
  * 1. **Routes use the paving.** Between two junctions of the solved path
  *    network — the network's own nodes, never coordinates typed in here — a
- *    route must spend most of its length on paving. Proven red by mutation; see
- *    the transcript at the foot of this comment.
+ *    route must spend most of its length on paving. Two statements, both about
+ *    **one** population (routes that arrived, over pairs the paving can serve
+ *    within {@link OFF_PATH_COST_MULTIPLIER}): a **mean** floor of 70%, and a
+ *    **distribution** rule — *at least 85% of routes are at least 60% paved* —
+ *    so one heroic route cannot carry a bad mean. Both numbers were derived by
+ *    measuring all five procgen seeds, and the tables that derive them sit on
+ *    the constants themselves. The same bar is then put to the **unweighted**
+ *    router and asserted to fail, so the mutation test runs on every
+ *    invocation rather than living in a transcript that goes stale.
  * 2. **It is a preference, not a wall.** The same probes are run a second time
  *    against a second lattice built with the paving forgotten, and:
  *    - **nothing may become unreachable**: every destination the unweighted
@@ -56,6 +63,23 @@
  * for #416. It also fails with the multiplier left alone but the smoother's
  * weighted-chord test reverted to a bare walkability test, which is the subtler
  * of the two ways to ship this feature inert.
+ *
+ * **A transcript is a measurement, and measurements go stale** (CLAUDE.md).
+ * So the first of those two mutations is also asserted *live*, by
+ * `the bar is a real bar` below: the unweighted lattice is the mutated router,
+ * built in this same process, and the check requires it to fail the very bar
+ * the weighted one passes. Reverting the multiplier makes the two columns
+ * coincide and takes that assertion red without anyone having to re-run a
+ * transcript by hand.
+ *
+ * ## Every seed, not just the canonical one
+ *
+ * The thresholds here were derived on **all five procgen seeds** (canonical
+ * `20260728` plus 5, 11, 18, 24 — `LGP_SEED=n pnpm run check:path-preference`),
+ * because a threshold read off one park is a threshold that breaks on the next
+ * one: that is exactly what happened to the two constants this file used to
+ * carry. Seed **11** is the binding seed on every statement below and is the
+ * one to measure first if the paving moves.
  */
 
 import './headless-canvas.mjs';
@@ -549,29 +573,7 @@ check(
 );
 
 /**
- * How much of a junction-to-junction route must be on paving, on average.
- *
- * Not every metre can be: a junction is a point on a spur's *end*, and the
- * network does not join every pair of them directly, so a legitimate route
- * crosses grass between two spurs. Measured on the canonical park the weighted
- * router manages far more than this; the bar is set where an unweighted router
- * cannot reach it, which is what makes the check able to fail.
- */
-const MEAN_PAVED_FLOOR = 0.75;
-
-check(
-  mean(weightedPaved) >= MEAN_PAVED_FLOOR,
-  `routes stay on the paving: mean ${(mean(weightedPaved) * 100).toFixed(1)}% of route ` +
-    `length is paved (floor ${(MEAN_PAVED_FLOOR * 100).toFixed(0)}%; ` +
-    `unweighted, the same routes manage ${(mean(unweightedPaved) * 100).toFixed(1)}%)`,
-);
-
-/**
- * Every probe individually, so one heroic route cannot carry a bad mean —
- * **over the pairs the paving is able to serve**. See "The pairs the paving
- * cannot serve" in this file's header for why that qualifier is a probe
- * re-derivation and not a lowered bar: the floor below is untouched at 45%,
- * and the mean assertion above still runs over every probe.
+ * **The pairs the paving is able to serve at all.**
  *
  * A pair is servable when an all-paved walk exists that costs no more than
  * {@link OFF_PATH_COST_MULTIPLIER} times the unweighted route — i.e. when the
@@ -580,6 +582,14 @@ check(
  * unweighted route rather than the straight line because that is the walk the
  * router actually had the option of, obstacles included, and it is the
  * conservative choice: it excludes fewer pairs than a straight line would.
+ *
+ * On a non-servable pair, satisfying a paving floor and satisfying
+ * {@link OFF_PATH_COST_MULTIPLIER} are **mutually exclusive**: the weighted A*
+ * is optimal under its own cost function, so if it chose an unpaved route then
+ * every paved alternative costs more than the multiplier times the direct one,
+ * and the `no comic detour` assertion below positively *forbids* taking it.
+ * Cutting the corner is the correct behaviour there, and a watching adult would
+ * not ask why she went that way.
  */
 const servable = probes.map((probe, i) => {
   const paved = pavedOnlyDistance(probe.ax, probe.az, probe.bx, probe.bz);
@@ -599,31 +609,182 @@ for (let i = 0; i < probes.length; i += 1) {
   );
 }
 
-if (servableCount < 8) {
+// ------------------------------------- the population every claim is made about
+//
+// **Arrived, and servable.** One population, so the two paving statements below
+// cannot quietly be about two different sets of routes.
+//
+// - **Arrived**, because a route that gave up is not a route. Until 31 August
+//   2026 the fraction was averaged over probes that never got there, and since
+//   an abandoned route is short and starts on the spur it gave up from, it
+//   *scored better than a real one* — six 1-waypoint stubs counted as 100%
+//   paved, lifting the canonical mean from a true 79.5% to a reported 81.4%.
+// - **Servable**, because on the other pairs a paving floor and
+//   `OFF_PATH_COST_MULTIPLIER` cannot both be satisfied — see the comment on
+//   `servable` above. Asserting a paving floor there would be asserting that
+//   the router should do the thing `no comic detour` forbids.
+
+interface Measured {
+  readonly label: string;
+  readonly w: number;
+  readonly u: number;
+}
+
+const population: Measured[] = probes
+  .map((probe, i) => ({
+    label: probe.label,
+    w: weightedPaved[i]!,
+    u: unweightedPaved[i]!,
+    arrived: weightedRuns[i]!.reachedGoal && unweightedRuns[i]!.reachedGoal,
+    servable: servable[i]!.ok,
+  }))
+  .filter((r) => r.arrived && r.servable);
+
+if (population.length < 8) {
   console.error(
-    `check:path-preference — only ${servableCount} of ${probes.length} probes have a ` +
-      'paved route inside the multiplier, which is too few to assert a worst case ' +
-      'over. Either the paving or the multiplier has moved a long way; re-derive ' +
-      'the probes rather than lowering the bar.',
+    `check:path-preference — only ${population.length} of ${probes.length} probes both ` +
+      `arrive and have a paved route inside ${OFF_PATH_COST_MULTIPLIER}x ` +
+      `(${servableCount} servable, ${probes.length - unreached.length} arriving), which is ` +
+      'too few to assert a distribution over. Either the paving or the multiplier ' +
+      'has moved a long way; re-derive the probes rather than lowering the bar.',
   );
   process.exit(1);
 }
 
-const WORST_PAVED_FLOOR = 0.45;
-let worst = 1;
-let worstLabel = '';
-for (let i = 0; i < probes.length; i += 1) {
-  if (!servable[i]!.ok) continue;
-  if (weightedPaved[i]! < worst) {
-    worst = weightedPaved[i]!;
-    worstLabel = probes[i]!.label;
-  }
-}
+const populationWeighted = population.map((r) => r.w);
+const populationUnweighted = population.map((r) => r.u);
+
+/**
+ * **How much of a route is on paving, on average.**
+ *
+ * Not every metre can be: a junction is a point on a spur's *end*, and the
+ * network does not join every pair of them directly, so a legitimate route
+ * crosses grass between two spurs.
+ *
+ * **Derived, 1 September 2026** — measured on all five procgen seeds, over the
+ * population above (arrived and servable). This replaces an earlier `0.75`
+ * which had been read off the canonical park alone and **did not hold**: seed
+ * 11 came in at 71.0% and seed 18 at 73.1%, so the old floor was green only
+ * because nothing but the canonical seed was ever run through it.
+ *
+ * | seed | n | weighted mean | unweighted mean | margin over floor |
+ * |---|---|---|---|---|
+ * | canonical (20260728) | 71 | 83.0% | 52.5% | +13.0 |
+ * | 5 | 52 | 82.3% | 51.1% | +12.3 |
+ * | **11 (binding)** | 49 | **74.3%** | 45.2% | **+4.3** |
+ * | 18 | 43 | 79.1% | 41.8% | +9.1 |
+ * | 24 | 47 | 80.1% | 51.8% | +10.1 |
+ *
+ * 70% is the highest round figure every seed clears, and it clears the best
+ * **unweighted** mean (52.5%, canonical) by **17.5 points** — that gap is what
+ * makes this assertion able to fail, and `unweighted routes fail the same bar`
+ * below asserts it rather than trusting this table.
+ *
+ * Seed 11 is the binding seed on every statement in this file; if a future
+ * change moves the paving, that is the seed to measure first.
+ */
+const MEAN_PAVED_FLOOR = 0.7;
+
 check(
-  worst >= WORST_PAVED_FLOOR,
-  `even the worst route uses the paving: ${(worst * 100).toFixed(1)}% on ${worstLabel} ` +
-    `(floor ${(WORST_PAVED_FLOOR * 100).toFixed(0)}%; over the ${servableCount} of ` +
-    `${probes.length} probes the paving can serve within ${OFF_PATH_COST_MULTIPLIER}x)`,
+  mean(populationWeighted) >= MEAN_PAVED_FLOOR,
+  `routes stay on the paving: mean ${(mean(populationWeighted) * 100).toFixed(1)}% of route ` +
+    `length is paved over the ${population.length} of ${probes.length} probes that arrive and ` +
+    `the paving can serve within ${OFF_PATH_COST_MULTIPLIER}x ` +
+    `(floor ${(MEAN_PAVED_FLOOR * 100).toFixed(0)}%; ` +
+    `unweighted, the same routes manage ${(mean(populationUnweighted) * 100).toFixed(1)}%)`,
+);
+
+/**
+ * **And the bad end of the distribution, so one heroic route cannot carry a
+ * bad mean: at least 85% of routes are at least 60% paved.**
+ *
+ * Jim's own form of the rule, 1 September 2026: *"at least 90% should be at
+ * least 60% on paths"*. He took 85 over his first 90 once the sweep came back —
+ * see the margins below.
+ *
+ * **This replaces a `WORST_PAVED_FLOOR = 0.45`**, a bare constant with no
+ * derivation recorded anywhere, which was red on three of the five seeds. Two
+ * of those three failures were not even real: the worst-route loop skipped
+ * non-servable probes but not *abandoned* ones, so seed 11's reported 29.9% and
+ * seed 18's 27.1% were routes that never arrived being scored. A single worst
+ * case is also the wrong instrument for this — it hands the whole assertion to
+ * one pair of junctions, and the park regenerates on every seed.
+ *
+ * **Derived, 1 September 2026** — measured on all five seeds, over the
+ * population above:
+ *
+ * | seed | n | weighted ≥60% | unweighted ≥60% | margin over 85% |
+ * |---|---|---|---|---|
+ * | canonical (20260728) | 71 | 68/71 = **95.8%** | 27/71 = 38.0% | +10.8 |
+ * | 5 | 52 | 50/52 = **96.2%** | 14/52 = 26.9% | +11.2 |
+ * | **11 (binding)** | 49 | 45/49 = **91.8%** | 10/49 = 20.4% | **+6.8** |
+ * | 18 | 43 | 41/43 = **95.3%** | 5/43 = 11.6% | +10.3 |
+ * | 24 | 47 | 45/47 = **95.7%** | 17/47 = 36.2% | +10.8 |
+ *
+ * At Jim's original 90% the binding seed's margin is **+1.8**, under one
+ * probe's worth: seed 11's population of 49 moves in 2.0-point steps, so two
+ * more failures there would take it under. 85% costs three probes of headroom
+ * on the binding seed and keeps the same 50-point separation from the
+ * unweighted router.
+ *
+ * **The percentages are coarse, and deliberately quoted as counts too.** The
+ * populations are 43–71 probes, so seed 18's share moves in **2.3-point steps**
+ * — 85 and 86 are the same rule there, and so are 87 and 88. Do not read a
+ * one-point change of this constant as a one-point change of strictness.
+ *
+ * The `60%` half of the rule is Jim's, and it is also where the two routers
+ * separate most cleanly: the unweighted router puts only 11.6–38.0% of its
+ * routes over that line on any seed.
+ */
+const PAVED_FLOOR = 0.6;
+/** …and the share of routes that must clear {@link PAVED_FLOOR}. */
+const PAVED_SHARE = 0.85;
+
+const overFloor = populationWeighted.filter((v) => v >= PAVED_FLOOR).length;
+const share = overFloor / population.length;
+
+for (const r of population) {
+  if (r.w >= PAVED_FLOOR) continue;
+  table.push(
+    `  under the floor: ${r.label.padEnd(34)} paved ${(r.w * 100).toFixed(1)}% ` +
+      `(unweighted ${(r.u * 100).toFixed(1)}%)`,
+  );
+}
+
+check(
+  share >= PAVED_SHARE,
+  `most routes are mostly paved: ${overFloor} of ${population.length} routes ` +
+    `(${(share * 100).toFixed(1)}%) are at least ${(PAVED_FLOOR * 100).toFixed(0)}% paved, ` +
+    `bar ${(PAVED_SHARE * 100).toFixed(0)}% (over the probes that arrive and the paving can ` +
+    `serve within ${OFF_PATH_COST_MULTIPLIER}x, of ${probes.length} probes in all)`,
+);
+
+/**
+ * **The same bar, put to the router this feature replaced — it must fail.**
+ *
+ * This is the mutation test, run on every invocation rather than written down
+ * in a comment that goes stale. `unweightedRuns` came from a second lattice
+ * built with the paving forgotten, i.e. `NavGrid` exactly as it behaved before
+ * issue #416, so if `OFF_PATH_COST_MULTIPLIER` were reverted to 1 the two
+ * columns would coincide and **this assertion would fail before the one above
+ * did**. A bar the unweighted router also clears is a bar that proves nothing
+ * about the feature — which is precisely how the old `MEAN_PAVED_FLOOR = 0.75`
+ * was justified, and it is worth asserting rather than asserting in prose.
+ *
+ * Measured margin on the five seeds: the unweighted router clears the 60% floor
+ * on 11.6–38.0% of routes against an 85% bar, so it fails by **47 to 73
+ * points**. There is no seed on which this is close.
+ */
+const unweightedOverFloor = populationUnweighted.filter((v) => v >= PAVED_FLOOR).length;
+const unweightedShare = unweightedOverFloor / population.length;
+
+check(
+  unweightedShare < PAVED_SHARE,
+  `the bar is a real bar: the unweighted router — the same park with the paving ` +
+    `forgotten — gets only ${unweightedOverFloor} of ${population.length} routes ` +
+    `(${(unweightedShare * 100).toFixed(1)}%) over the ${(PAVED_FLOOR * 100).toFixed(0)}% ` +
+    `floor, failing the ${(PAVED_SHARE * 100).toFixed(0)}% bar by ` +
+    `${((PAVED_SHARE - unweightedShare) * 100).toFixed(1)} points`,
 );
 
 /**
@@ -719,6 +880,8 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log(
-  `\ncheck:path-preference — all green (mean ${(mean(weightedPaved) * 100).toFixed(1)}% paved, ` +
-    `was ${(mean(unweightedPaved) * 100).toFixed(1)}%)`,
+  `\ncheck:path-preference — all green (mean ${(mean(populationWeighted) * 100).toFixed(1)}% paved ` +
+    `over ${population.length} routes, was ${(mean(populationUnweighted) * 100).toFixed(1)}%; ` +
+    `${overFloor} of them — ${(share * 100).toFixed(1)}% — at least ` +
+    `${(PAVED_FLOOR * 100).toFixed(0)}% paved)`,
 );
