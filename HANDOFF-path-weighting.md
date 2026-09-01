@@ -619,6 +619,99 @@ not a park-wide regression.
 choice accounts for ~27 points and the remaining regression is **the 6.4x
 multiplier itself**, not the way the two were reconciled.
 
+## 1 Sep — rebased onto `origin/main` 32f3bd3c, and the faulty probe set fixed
+
+Jim's ruling, relayed: `every probe arrives` is right and **the sample feeding
+it is what to fix**. Done. No threshold touched.
+
+### The rebase
+
+20 commits onto 32f3bd3c. Two conflicts, both the ones CLAUDE.md names:
+
+- **`package.json`** — rebuilt from **main's** own chain (53 steps) with
+  `check:path-preference` inserted after `check:nav-routes`, then verified by
+  **parsing the `scripts` object**, not grepping: **54 steps**, exactly one key
+  added, **nothing dropped**, every other script byte-identical to main's.
+- **`src/world/NavGrid.ts`, 12 hunks** — the #452 reconciliation this file
+  predicted. `hopBand` and `paved` both kept; both multipliers written on the
+  same `let step` (the composition is admissible structurally — neither touches
+  `heuristic()`, both are >= 1); `pointSpliced` → main's `pointRigid`; and the
+  hard one, **`lineIsWalkable`'s hop-band rejection folded into `lineCost`'s
+  `-1` shape**, which preserves main's behaviour exactly.
+
+### The fix: probe only from junctions a child can stand at
+
+`PATH_GRAPH`'s junctions are points on a **drawn plan**. The plan does not know
+about the bollard the scenery placer later put 0.97 m away — fattened by
+`PLAYER_RADIUS` and quantised to `NavGrid`'s 0.5 m lattice, that closes the
+junction's **own cell**. A route can pass such a node but never *finish* on it,
+so the check was asking for routes that cannot exist and then failing because
+they did not.
+
+- **`NavGrid.canStandAt(x, z, y, sample)`** — new, public. `findRoute`'s goal
+  test (`standableNodeIn`) is now the one owner of "a route may end here", read
+  by the router for its goal and by this check for its endpoints. **No second
+  definition of standable, and no exclusion list to go stale.**
+- The check filters endpoints through it, **writes the count and every excluded
+  junction to stderr on every run** — with how far the nearest standable ground
+  is, which separates a knife-edge miss from a node deep inside something — and
+  the `probes.length < 8` guard now names the exclusion as a suspect.
+
+| seed | standable / junctions | excluded (nearest standable) | probes |
+|---|---|---|---|
+| canonical | 20/21 | `station-1` (0.25 m) | 100 → 89 |
+| 5 | 19/22 | `building`, `station-0`, `station-1` (0.25 m each) | 57 |
+| 11 | 20/22 | `building` (0.50 m), `station-0` (0.25 m) | 74 |
+| 18 | 18/21 | `building` (0.50 m), `station-0`, `station-1` (0.25 m) | 50 |
+| 24 | 19/20 | `building` (0.25 m) | 69 |
+
+Every exclusion is 0.25–0.50 m — **one lattice cell**, exactly the knife-edge
+#448 diagnosed. `plaza` no longer appears: main's fountain-hop work fixed it.
+
+### `every probe arrives` is green on all five seeds
+
+And the thresholds stand as derived — nothing weakened, nothing widened:
+
+| seed | n | mean (floor 70) | share >=60% (bar 85) | anti-vacuity margin |
+|---|---|---|---|---|
+| canonical | 82 | **83.4%** | **96.3%** | 43.5 |
+| 5 | 50 | **81.5%** | **94.0%** | 57.0 |
+| **11 (binds mean)** | 50 | **74.4%** (+4.4) | **94.0%** | 63.0 |
+| 18 | 38 | **78.9%** | **94.7%** | 71.8 |
+| 24 | 45 | **81.2%** | **95.6%** | 38.3 |
+
+Binding margins essentially unchanged (mean +4.3 → **+4.4**, still seed 11):
+**the exclusion bought this floor no headroom**, as it should not — the probes
+it removed never arrived, so they were already outside this population.
+
+**Mutation re-proved on today's park** (a transcript is a measurement):
+smoother mutation takes canonical share 96.3 → **79.3%** (red) and seed 11 red
+on **both** (mean 74.4 → 57.3%, share 94.0 → 42.0%). On canonical the mean
+survives at +1.5 — the distribution rule is what catches it, which is why a
+mean alone is not enough. `OFF_PATH_COST_MULTIPLIER = 1` still exits 1 at the
+`< 8` guard ("2 of 89 … 89 arriving").
+
+### Still red, and it is `fix/hop-penalty-detour`'s, not this branch's
+
+`stepping off the kerb stays a step`: **183.9%** canonical and **202.4%** on
+seed 24, ceiling 73%. Seeds 5, 11 and 18 pass. This is `HOP_COST_MULTIPLIER =
+6.4` on `origin/main`, it was red on this branch **before** the probe fix (the
+hop probes come from the path centreline, not from junctions, so the filter
+cannot touch them), and it is Jim's own named failure mode.
+
+**Measured against that branch's intended value.** With `HOP_COST_MULTIPLIER`
+set to **2.6** locally (its handoff: *"the fountain floor is 2.4 and 2.6 is
+green everywhere"*), reverted immediately after:
+
+- **All five seeds go fully green**, kerb included: worst detour 12.5 / 21.3 /
+  6.1 / 19.6 / 7.6% against the 73% ceiling.
+- **Every paving number moves by at most 0.2 points** (mean 83.4 → 83.5, 81.5 →
+  81.4, 74.4 → 74.5, 78.9 → 78.7, 81.2 → 81.3; shares identical). **The
+  thresholds survive that branch unchanged.**
+
+So `pnpm run check` cannot exit 0 here until the hop multiplier lands, and
+nothing on this branch should be adjusted for it.
+
 ### The reconciliation is real, and it is ~12 hunks
 
 Two parallel `Uint8Array`s (`paved` / `hopBand`), a `stampCircle` parameter
