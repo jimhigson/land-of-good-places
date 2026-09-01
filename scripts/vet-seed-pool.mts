@@ -65,14 +65,19 @@ interface Verdict {
   readonly seconds: number;
 }
 
-const args = process.argv.slice(2);
+// `pnpm run vet:seeds -- 1 80` hands the bare `--` through as an argument of
+// its own, so drop it before parsing — otherwise the `1` looks like the value
+// of a flag and the range comes out empty.
+const args = process.argv.slice(2).filter((a) => a !== '--');
+const FLAGS = ['--list', '--jobs', '--out'] as const;
 
-function flag(name: string): string | undefined {
+function flag(name: (typeof FLAGS)[number]): string | undefined {
   const at = args.indexOf(name);
   return at === -1 ? undefined : args[at + 1];
 }
 
-const positional = args.filter((a, i) => !a.startsWith('--') && !args[i - 1]?.startsWith('--'));
+const isFlag = (a: string | undefined): boolean => FLAGS.includes(a as (typeof FLAGS)[number]);
+const positional = args.filter((a, i) => !a.startsWith('--') && !isFlag(args[i - 1]));
 const listed = flag('--list');
 const seeds = listed
   ? listed.split(',').map((s) => Number(s.trim()))
@@ -100,18 +105,24 @@ async function checkPark(seed: number, ratchet: boolean): Promise<{ ok: boolean;
   } catch (error) {
     const stdout = (error as { stdout?: string }).stdout ?? '';
     const stderr = (error as { stderr?: string }).stderr ?? '';
-    const both = `${stdout}\n${stderr}`;
+    const lines = `${stdout}\n${stderr}`.split('\n').map((l) => l.trim());
+    // `check:park` reports a rejection as a "N invariant regression(s):"
+    // header followed by one `key: measured` line per finding, and a park that
+    // would not build at all as a thrown error. Name the actual keys: "did not
+    // solve" for a park that solved fine but stranded two waypoints would be a
+    // report that says nothing, which is the whole failure this repo keeps
+    // catching in its own checks.
+    const keys = lines.filter((l) => /^[a-z][\w.:-]*: -?\d/.test(l) && !l.startsWith('check:park:'));
+    if (keys.length > 0) return { ok: false, note: keys.join('; ').slice(0, 200) };
     const line =
-      both
-        .split('\n')
-        .find(
-          (l) =>
-            l.includes('no valid position') ||
-            l.includes('unsolvable') ||
-            l.includes('FAIL') ||
-            l.includes('Error'),
-        ) ?? 'did not solve';
-    return { ok: false, note: line.trim().slice(0, 200) };
+      lines.find(
+        (l) =>
+          l.includes('no valid position') ||
+          l.includes('unsolvable') ||
+          l.includes('Error') ||
+          l.includes('regression'),
+      ) ?? 'did not solve, and printed no finding key';
+    return { ok: false, note: line.slice(0, 200) };
   }
 }
 
@@ -150,10 +161,22 @@ async function checkInvariants(
     const stderr = (error as { stderr?: string }).stderr ?? '';
     const counts = parseCounts(stdout);
     const failures = [...stdout.matchAll(/(?:FAIL|×|✕)\s+(.+)/g)].map((m) => m[1]!.trim());
-    const note =
-      failures.length > 0
-        ? failures.slice(0, 4).join(' | ')
-        : (stderr.split('\n').find((l) => l.trim()) ?? 'suite did not run').trim();
+    // A seed whose park will not build at all fails *before* any test runs, so
+    // there is no failure line to quote and the reason is in the thrown error.
+    // Skip Node's own noise on the way to it: reporting `--localstorage-file`
+    // as the reason a park is unbuildable would be a report that says nothing.
+    const noise = /localstorage-file|trace-warnings|ExperimentalWarning|^\(node:\d+\)/;
+    const thrown =
+      `${stdout}\n${stderr}`
+        .split('\n')
+        .map((l) => l.trim())
+        .find((l) => l && !noise.test(l) && /Error|Unsolvable|unsolvable|no valid position/.test(l)) ??
+      stderr
+        .split('\n')
+        .map((l) => l.trim())
+        .find((l) => l && !noise.test(l)) ??
+      'suite did not run, and printed no reason';
+    const note = failures.length > 0 ? failures.slice(0, 4).join(' | ') : thrown;
     return { ok: false, note: note.slice(0, 400), ...counts };
   } finally {
     rmSync(file, { force: true });
