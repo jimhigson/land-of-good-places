@@ -585,9 +585,36 @@ export const CAT_BUS_TRACK_WIDTH = 2 * (WHEEL_X + FENDER_HALF_WIDTH);
  *   the most ride height per radian, and it is deliberately the one held back;
  * - **roll** costs `FACE_RADIUS` and only ever shows on a corner, which is
  *   `BusJourney` and not the arrival.
+ *
+ * ## The rock, and why this limit went up (29 August 2026)
+ *
+ * Jim, having watched the bob he asked for: *"the bus's bob should also be a
+ * rocking back and forth, since it has suspension at the front and back."*
+ *
+ * He is describing a limit, not a missing mechanism. The two-axle spring below
+ * has always produced pitch — the road carries a wave two wheelbases long
+ * precisely so that it does — and **the clamp was eating it**. Sampled off the
+ * running game during an outside shot of the intro ride, the body sat at
+ * exactly `-0.028` rad on the first frame captured and again later in the
+ * strip: the rock was saturating its own limit, which is why it read as a bus
+ * that went up and down rather than one that nodded.
+ *
+ * So the pitch limit is **0.042 rad (2.4 degrees)**, half again what it was,
+ * and the road's pitch term is raised to match so the nod is continuous rather
+ * than a clipped square wave at the peaks. That is 0.33 m of nose travel either
+ * way against the heave's 0.20 m, and the two run at **different rates** — one
+ * wheelbase of road is a pure heave input at 0.65 Hz, two wheelbases a pure
+ * pitch input at 0.33 Hz — so the nose dips out of step with the body rising,
+ * which is the thing being asked for. Nothing was added to make that happen;
+ * it is what a two-axle spring on a road does, once it is allowed to.
+ *
+ * **Still gentle, and deliberately still the limit held back hardest.** 2.4
+ * degrees is a nod, not a lowrider: the exchange rate above is unchanged, and
+ * pitch is still the most expensive of the three, costing `NOSE_Z` = 7.9 m of
+ * ride height per radian.
  */
 export const CAT_BUS_MAX_HEAVE = 0.2;
-export const CAT_BUS_MAX_PITCH = 0.028;
+export const CAT_BUS_MAX_PITCH = 0.042;
 export const CAT_BUS_MAX_ROLL = 0.05;
 
 /**
@@ -729,14 +756,30 @@ const SPRING_DAMPING = 7.4;
  *   6.8 rad/s so it reads as the road rather than as the body.
  *
  * They are still mutually irrational once the phases are in, so there is no
- * pattern to learn; they are simply aimed now. Total amplitude 0.245 m: the
+ * pattern to learn; they are simply aimed now. Total amplitude 0.26 m: the
  * road through the park is still tarmac, but this is a cartoon.
+ *
+ * ## The pitch term carries more of it now
+ *
+ * Jim's *"should also be a rocking back and forth"* is answered here as well as
+ * at `CAT_BUS_MAX_PITCH`, and the two halves are not interchangeable. Raising
+ * the clamp alone lets through more of the pitch the road already had, but the
+ * road only had 0.075 m of it against 0.135 m of heave, so the nod stayed the
+ * junior partner and spent its time clipped flat at the peaks — a bus that
+ * lurches to a stop against a limit and holds there is not a bus on springs.
+ *
+ * So the **two-wheelbase (pure pitch) term is raised to 0.105 and the
+ * one-wheelbase (pure heave) term trimmed to 0.12**: a rock roughly the size of
+ * the bob rather than half of it, and comfortably inside the new clamp rather
+ * than sitting on it. The total amplitude barely moves, so this is a
+ * redistribution of the same road rather than a rougher one — the bus is not
+ * being shaken harder, it is being shaken in a way that shows its two axles.
  */
 const HEAVE_WAVE = (Math.PI * 2) / WHEELBASE;
 function roadHeightAt(distance: number): number {
   return (
-    Math.sin(distance * HEAVE_WAVE) * 0.135 +
-    Math.sin(distance * HEAVE_WAVE * 0.5 + 1.7) * 0.075 +
+    Math.sin(distance * HEAVE_WAVE) * 0.12 +
+    Math.sin(distance * HEAVE_WAVE * 0.5 + 1.7) * 0.105 +
     Math.sin(distance * HEAVE_WAVE * 3 + 3.9) * 0.035
   );
 }
@@ -843,10 +886,25 @@ export function buildFenderPaw(
   group.name = 'cat-bus-fender-paw';
 
   /**
-   * Flattened against the mudguard it sits on, and wider than it is long —
-   * §4's "squash every sphere", and a paw pad is a flattened thing anyway.
+   * Squashed radially and **stretched along the toes' axis**, so the paw hangs
+   * down the front of the arch rather than sitting on its tip as a lump.
+   *
+   * The first cut was near-spherical (`[1, 0.7, 0.88]`) and it was measured
+   * against the wrong thing — the mudguard, which it matched nicely. What it
+   * has to read against is a **2.13 m wheel** and a 14 m bus, and in the
+   * captured frames it came out as a small bump on the end of the fender: the
+   * beans were legible, the paw was not. It cannot get wider without
+   * `CAT_BUS_TRACK_WIDTH` ceasing to be the widest thing on the axle, so it
+   * gets **longer** instead, which is both free and the right shape — a paw
+   * reaching down towards the road is longer than it is wide.
+   *
+   * Stretching along z is free in the clearance sense too, and that is not
+   * luck: z here is the arc's *tangent*, so every point it adds is further from
+   * the axle than the palm's centre, never nearer. Only the radial (y) half
+   * depth can move the paw towards the tyre, and that is the one the caller
+   * places the paw by.
    */
-  const PALM_SQUASH = [1, 0.7, 0.88] as const;
+  const PALM_SQUASH = [1, 0.62, 1.45] as const;
   const palm = blob(palmRadius, furMaterial, [...PALM_SQUASH]);
   palm.name = 'cat-bus-paw-palm';
   group.add(palm);
@@ -859,7 +917,7 @@ export function buildFenderPaw(
 
   // Three beans, fanned round the leading edge — the same count and the same
   // fan as the painted print, so the two read as one animal.
-  const BEAN_RADIUS = palmRadius * 0.42;
+  const BEAN_RADIUS = palmRadius * 0.44;
   for (let i = 0; i < 3; i += 1) {
     const a = (i - 1) * 0.62;
     const bean = blob(BEAN_RADIUS, beanMaterial, [1, 0.8, 1]);
@@ -1700,10 +1758,20 @@ export function createCatBus(): CatBusHandle {
       // Turns the paw's own frame onto the arc: its +y (the face of the paw)
       // onto the radial direction at `FENDER_ARC_FROM`, which leaves its +z
       // (the toes) pointing along the arc — down towards the road, since the
-      // arc's leading end is below the crown. `pawA - PI/2` is the rotation
-      // about x that does that, and it is the same expression whatever
+      // arc's leading end is below the crown. The same expression whatever
       // `FENDER_ARC` becomes.
-      paw.group.rotation.x = FENDER_ARC_FROM - Math.PI / 2;
+      //
+      // **`PI/2 - arc`, not `arc - PI/2`**, and the sign was wrong first time
+      // round. A rotation about x sends `+y` to `(0, cos, sin)`; the radial
+      // direction at angle `a` is `(0, sin a, cos a)`; so the angle wanted is
+      // the *complement*, not the negated complement. Flipped, the paw's long
+      // axis lay radially instead of along the arc and reached **0.09 m inside
+      // the arch's own inner surface** — into the gap the tyre travels through.
+      // `check:cat-bus-suspension` is what noticed, by reporting a gap swing
+      // too small rather than by anyone seeing it: from outside, a paw pointing
+      // backwards up the arch and a paw pointing down the road are both just a
+      // blob on the end of a mudguard.
+      paw.group.rotation.x = Math.PI / 2 - FENDER_ARC_FROM;
       fender.add(paw.group);
     }
   }
