@@ -575,8 +575,8 @@ export const DINER_TABLE_GAP = BENCH_OFFSET - CASTLE_BENCH_HALF_WIDTH - CASTLE_T
 // ------------------------------------------------------- the pets' table
 
 /**
- * **A small table for the pets, at the mouth of the aisle** — #449's fourth
- * ask, and the one that makes the hall a scene rather than furniture.
+ * **A small table for the pets, alongside the banquet** — #449's fourth ask,
+ * and the one that makes the hall a scene rather than furniture.
  *
  * Jim: *"There should also be a small pets table for the pets to eat at, and
  * they go there when the player sits."* A child who brings her cat to dinner
@@ -594,9 +594,14 @@ export const DINER_TABLE_GAP = BENCH_OFFSET - CASTLE_BENCH_HALF_WIDTH - CASTLE_T
  * so — a table the size of the bowls on it disappears at this camera, and this
  * one has to be recognisable as a table from across the hall or the moment it
  * exists for does not land.
+ *
+ * **Its long axis runs down the hall, like the feast tables' own**, so it reads
+ * as a little one alongside the big ones rather than as a bench pushed across
+ * the end of them — and so its animals can line up facing the same way as the
+ * children.
  */
-const PET_TABLE_HALF_X = 1.2;
-const PET_TABLE_HALF_Z = 0.45;
+const PET_TABLE_HALF_X = 0.45;
+const PET_TABLE_HALF_Z = 1.2;
 /** The plank's thickness, and therefore where the legs stop. */
 const PET_TABLE_PLANK = 0.09;
 
@@ -604,20 +609,29 @@ const PET_TABLE_PLANK = 0.09;
 export const GREAT_HALL_PET_TABLE_TOP = 0.3;
 
 /**
- * How far south of the last feast table's centre the pets' table stands.
+ * How far west of the west run's axis the pets' table stands, in metres.
  *
- * At the **mouth of the aisle**, which is the one spot in the hall that is
- * both clear floor and in shot from every free place at the feast. That
- * second half is the requirement people forget: the point of #449 is that she
- * *watches* her cat go and eat, so a pets' table she cannot see from her seat
- * would satisfy the ticket's words and none of its purpose. The farthest free
- * place is 12 m from it, well inside frame at this camera.
+ * **It has to be in shot from her seat, and that is the requirement that is
+ * easy to miss.** The point of #449 is that she *watches* her cat leave her
+ * side and go and eat, so a pets' table she cannot see while she is sitting
+ * down would satisfy the ticket's words and none of its purpose. It stood at
+ * the mouth of the aisle first — clear floor, tidy, and **12 m south of the
+ * nearest free place**, which put it on the very bottom edge of the frame. On
+ * screen the cat simply walked off the picture. Measured in the running game,
+ * not reasoned about: the animal was where it should be and the moment was
+ * not there.
  *
- * 5.4 m clears the last bench's own south end (2.95 m from that table's
- * centre) by 1.65 m, so the animals eating at it are never standing among the
- * children's legs.
+ * Alongside the banquet instead, level with the middle of it, the farthest
+ * pet is **about 5 m** from the nearest free place — a few strides, in frame
+ * the whole way, with the walk itself visible.
+ *
+ * 5.0 m is what it takes to be *out of the way* as well as in shot: a free
+ * place's own stand spot is 3.0 m west of its run's axis
+ * ({@link SIT_STAND_BACK}), so the table's near edge clears the spot a child
+ * stands on to sit down by a comfortable 1.35 m — she never has to walk
+ * through the pets' dinner to reach her own.
  */
-const PET_TABLE_FROM_FEAST = 5.4;
+const PET_TABLE_FROM_ROW = 5.0;
 
 /**
  * How far out from the table's edge a pet stands, and how far in its bowl sits.
@@ -640,17 +654,18 @@ const PET_BOWL_INSET = 0.17;
  * ## All of them on the far side, and that is the camera talking
  *
  * The camera is fixed isometric and always shows an object's +X/+Z faces. A
- * pet on the near (south or east) side of the table would face away into it
- * and show the camera its tail; on the north edge it faces +Z, and on the west
- * end +X, so every animal at this table is looked at from the front. It is the
- * same rule the free places at the feast are chosen by, and the same fault
- * #447 files against the market's south row.
+ * pet on the near (east or south) side of the table would face away into it
+ * and show the camera its tail; on the west edge it faces +X, and at the north
+ * end +Z, so every animal at this table is looked at from the front. It is the
+ * same rule the free places at the feast are chosen by — and, pleasingly, it
+ * turns them the same way as the children, so a row of pets reads as a smaller
+ * echo of the row of diners rather than as a separate arrangement.
  *
- * Four places: three along the long north edge at 0.8 m — comfortably more
- * than a companion's own {@link PARADE_MEMBER_RADIUS} — and one at the west
- * end, which stops three-in-a-row reading as a queue. A child with more than
- * four companions keeps the rest in the line beside her, which is a perfectly
- * good thing for them to be doing.
+ * Four places: three down the long west edge at 0.8 m — comfortably more than
+ * a companion's own {@link PARADE_MEMBER_RADIUS} — and one at the north end,
+ * which stops three-in-a-row reading as a queue. A child with more than four
+ * companions keeps the rest in the line beside her, which is a perfectly good
+ * thing for them to be doing.
  */
 export interface PetPlace {
   readonly x: number;
@@ -664,13 +679,15 @@ export function greatHallPetTable(deck: number): { readonly x: number; readonly 
   const plan = greatHallPlan(deck);
   if (!plan) return null;
   const centres = feastTableCentres(plan);
+  const first = centres[0];
   const last = centres[centres.length - 1];
-  if (last === undefined) return null;
+  const west = feastRowAxes(plan)[0];
+  if (first === undefined || last === undefined || west === undefined) return null;
   return {
-    // The aisle's own centre line, which is where the two runs are centred —
-    // never the throne's axis, or the table would sit against the east run.
-    x: plan.axisX + FEAST_ROWS_SHIFT,
-    z: last + plan.inward * PET_TABLE_FROM_FEAST,
+    x: west - PET_TABLE_FROM_ROW,
+    // Level with the middle of the run, so it is the same short walk from the
+    // free place at either end of it.
+    z: (first + last) / 2,
   };
 }
 
@@ -679,12 +696,17 @@ export function greatHallPetPlaces(deck: number): readonly PetPlace[] {
   const table = greatHallPetTable(deck);
   if (!table) return [];
   const places: PetPlace[] = [];
-  // Along the north edge, facing south across the table: +Z, into the camera.
+  // Down the west edge, facing east across the table: +X, into the camera, and
+  // the same way the children at the feast are facing.
   for (const along of [-0.8, 0, 0.8]) {
-    places.push({ x: table.x + along, z: table.z - PET_TABLE_HALF_Z - PET_STAND_OFF, facing: 0 });
+    places.push({
+      x: table.x - PET_TABLE_HALF_X - PET_STAND_OFF,
+      z: table.z + along,
+      facing: Math.PI / 2,
+    });
   }
-  // And one at the west end, facing east: +X, into the camera as well.
-  places.push({ x: table.x - PET_TABLE_HALF_X - PET_STAND_OFF, z: table.z, facing: Math.PI / 2 });
+  // And one at the north end, facing down the table: +Z, into the camera too.
+  places.push({ x: table.x, z: table.z - PET_TABLE_HALF_Z - PET_STAND_OFF, facing: 0 });
   return places;
 }
 

@@ -948,11 +948,28 @@ export class Building implements GameSystem {
    */
   private leaveFeast(): void {
     const player = this.player;
+    const index = this.banquetSeat;
+    const seat = index === null ? undefined : greatHallSeats(CASTLE_GREAT_HALL_DECK)[index];
     this.banquetSeat = null;
     this.feastDish?.removeFromParent();
     this.feastDish = null;
     this.petParade?.callPetsBackFromTable();
-    if (player) player.endRide();
+    if (!player) return;
+    // **She steps back from the table as she gets up**, onto the same spot the
+    // Sit chip walked her to. Without it she stands up exactly where she was
+    // sitting, which is half inside the bench — and castle props carry no
+    // colliders, so nothing would push her out of it either. The hotel's
+    // `standUp` leaves her in the chair for the same reason and gets away with
+    // it because a hotel chair is pulled out from its table; a bench is not.
+    if (seat) {
+      player.setRidePose(
+        floorX(CASTLE_HALL, seat.standX),
+        BUILDING_BASE_Y,
+        floorZ(CASTLE_HALL, seat.standZ),
+        seat.yaw,
+      );
+    }
+    player.endRide();
   }
 
   /** Hands the building the player, so it can carry, bounce and ride them. */
