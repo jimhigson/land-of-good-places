@@ -337,6 +337,28 @@ All measurement logs are committed under measurements/. CI last verdict:
 red on check:path-preference (pre-{hotel:2}); a fresh CI run on the pushed
 head is owed once the chain is green locally.
 
+## STOPPED — canonical search exhausted; Jim's ruling needed (2 Sep, night)
+
+Round three (path-preference AND pet-slide in the acceptance gate):
+**UNSOLVED — all 35 candidates tried, 6 rejected by oracle/gates, 771 s**
+(measurements/warp-search-canonical-v3.jsonl). Every candidate passes
+ratchet-on check:park with 0 stranded; none survives the full canonical
+gate stack. The neighbourhood searched: one-entry layout bumps x2 rounds
+x14 entries, plus whole-layout restarts 1-6.
+
+The choice is Jim's (Overseer instruction: do not pick):
+ A. WIDEN the search for canonical — deeper bumps (3-4), pairs of bumps,
+    crossing-site bans, paths knobs — more candidates at ~4 s + up to
+    ~5 min gate per check:park winner; no convergence guarantee.
+ B. CANONICAL LEAVES THE POOL — the bar is sixteen good seeds; canonical
+    is in only by history. Pool gains a vetted spare (1102/1104 recorded);
+    canonical-only checks (#437's five instances this branch) then need
+    re-pointing at a pool seed, which is its own small PR.
+
+Everything else is DONE and green: 15 pool seeds (all but canonical) pass
+both gates with their bakes; seed 18 retired; docs in; npc-separation dead
+band fixed with --mutate still red.
+
 ## Superseded checklist (history)
 
 1. Bake 326's oracle-passing vector when the search lands one (or report
