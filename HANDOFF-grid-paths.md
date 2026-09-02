@@ -96,8 +96,11 @@ straight-line last resort.
       two feet", plus the turn-sharpness clause if not implied by
       `pathsRunOnGridAxes`. Each proved red by mutation, red output in the
       commit message, mutation reverted. CLAUDE.md requires this in the same PR.
-- [ ] **Stage 3: park-wide measurement.** `pnpm run test:procgen` has NOT been
-      run yet. Per-seed `check:park` results: see the table below.
+- [ ] **Stage 3: park-wide measurement.** GREEN: `pnpm exec tsc --noEmit`
+      (exit 0), `pnpm exec tsc --noEmit -p tsconfig.test.json` (exit 0),
+      `pnpm run build` (exit 0). RED: `pnpm run test:procgen` and the per-seed
+      `check:park` sweep — results below. `pnpm run check` (the 47-step chain)
+      has NOT been run.
 - [ ] Warp re-search (`scripts/warp-search.mts`) for any seed that goes red
       under the new plotter; prefer emptying a vector where the seed passes
       unwarped.
@@ -129,9 +132,35 @@ straight-line last resort.
 | 428 | 0 | 19/19, 191/191 | — |
 | 451 | 1 | poi.stranded 3 | — |
 
-**8 pass, 7 fail. Every failure is `poi.stranded`** — no seed fails on
-reachability, on an illegal rail crossing, or on any other invariant. That is
-one defect class, not seven.
+Plus the canonical seed (no `LGP_SEED`): exit 1, `poi.stranded: 41`, no doors
+stranded. It was a hard build failure until `the gate approach's own fallback
+may not hop the railway either`.
+
+**8 pass, 8 fail (incl. canonical). Every failure is `poi.stranded`** — no seed
+fails on reachability, on an illegal rail crossing, or on any other check:park
+invariant. That is one defect class, not eight.
+
+### test:procgen (at `the last resort may not hop the railway`)
+
+`Test Files 3 failed | 14 passed (17)`, `Tests 1 failed | 497 passed | 81
+skipped (579)`, exit 1. The three failed *files* are two whole-file failures
+(`scatterDecoupling.test.ts`, `seed-canonical.test.ts` — both from the
+canonical build throwing at the time, since fixed) plus the one failed *test*:
+
+```
+FAIL test/procgen/seed-11.test.ts > seed 11 > every street sits on the shared 12 m lattice
+  spur-waterFight runs north-south for 10.0 m on x = 39.23, 6.00 m off the nearest 12 m lattice line
+  spur-stall.skyCruiser runs north-south for 15.4 m on x = -32.77, 6.00 m off
+  spur-exit-skyCruiser runs north-south for 30.0 m on x = -60.90, 1.87 m off
+```
+
+This is exactly the invariant Stage 2 must rewrite, and the numbers say how:
+the two **6.00 m** offenders are half-pitch runs from the jog/relay routers —
+the same grid one level finer, which the successor invariant should admit by
+name. The **1.87 m** one is a genuine violation (a run on a door's own private
+line) and the successor must still catch it. Rewriting it to allow half-pitch
+and nothing else is therefore *stronger* than the current test on that third
+run and honest about the first two — do not simply widen the tolerance.
 
 ### The two open shapes of failure
 
