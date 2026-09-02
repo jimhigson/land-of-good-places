@@ -311,6 +311,32 @@ check:seed-pool PASS. Open for Jim: pool membership of 24/115 on quality
 grounds (spares 1102/1104); #437 standing coverage; LAYOUT_VERSION bump on
 merge. Do not merge — Overseer's call.
 
+## LIVE — canonical warp vs canonical-only checks (2 Sep, evening)
+
+The canonical seed answers to canonical-only CI checks that no other gate
+runs, so its warp keeps being re-rolled as each one bites (this is #437's
+shape, instances five and six):
+
+- {ferrisWheel:2}: failed check:path-preference in CI (kerb-step 84.1% vs
+  73% ceiling). Gate added to warp-search acceptance; re-searched.
+- {hotel:2} (candidate 22): passes path-preference; full local chain then
+  failed check:npc-separation — a DEAD BAND in the check itself (pairs
+  starting 2.1-2.8 m apart cannot satisfy walked>0.5 even in a perfect
+  run); fixed by deriving MIN_START_GAP from the walk clause, --mutate
+  still red, committed. Chain round two then failed **check:pet-slide**
+  (#469, merged this morning): 7/8 chase rasters with the pet in shot vs
+  95% required — deterministic, re-run confirmed.
+- NEXT: add check:pet-slide to the canonical acceptance gate in
+  warp-search.mts (beside path-preference), resume search from candidate
+  23, bake winner, run FULL chain locally (measurements/full-chain-local-N),
+  push, watch CI. Iterate if yet another canonical-only check bites; the
+  full-chain-once-per-winner loop converges because each added gate is in
+  the acceptance thereafter.
+
+All measurement logs are committed under measurements/. CI last verdict:
+red on check:path-preference (pre-{hotel:2}); a fresh CI run on the pushed
+head is owed once the chain is green locally.
+
 ## Superseded checklist (history)
 
 1. Bake 326's oracle-passing vector when the search lands one (or report
