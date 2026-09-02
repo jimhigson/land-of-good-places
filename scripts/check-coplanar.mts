@@ -5,6 +5,7 @@
  * pnpm run check:coplanar              # every space, every seed in the pool
  * pnpm run check:coplanar -- --verbose # and print the whole ranked backlog
  * pnpm run check:coplanar -- --print-baseline > scripts/coplanar-baseline.mts
+ * LGP_RATCHET=off pnpm run check:coplanar   # report the drift, do not fail
  * ```
  *
  * Two faces in one plane make the depth buffer strobe as the camera moves.
@@ -325,6 +326,22 @@ if (printBaseline) {
   process.exit(0);
 }
 
+/**
+ * `LGP_RATCHET=off` — report the drift, do not fail on it.
+ *
+ * The same switch `check-park.mts` honours, spelled the same way, because a
+ * second shape for "the recorded allowances are not the point of this run"
+ * would be one more thing to remember. It exists for the same job: somebody
+ * vetting a *candidate* seed (`vet-seed-pool.mts`) wants to know what a park
+ * built from it looks like, and failing them for seams the pool inherited from
+ * the modelling would tell them nothing about the seed.
+ *
+ * The canonical run never sets it, CI never sets it, and it can only ever make
+ * this print more and exit 0 — it cannot hide a finding, because every
+ * regression is still listed, just not fatal.
+ */
+const ratchetEnforced = process.env['LGP_RATCHET'] !== 'off';
+
 const regressions: string[] = [];
 for (const [key, entry] of worst) {
   const recorded: BaselineEntry | undefined = COPLANAR_BASELINE[key];
@@ -394,14 +411,20 @@ for (const key of loose) {
 }
 
 if (regressions.length > 0) {
-  console.error(`check:coplanar — ${regressions.length} new or worse coplanar seam(s):\n`);
-  for (const line of regressions) console.error(`  ${line}`);
-  console.error(
-    '\nART_DIRECTION.md §7: delete the hidden face, do not offset a surface. An' +
-      '\noffset is a number somebody has to maintain and it goes stale the moment' +
-      '\neither surface moves. Do not silence this by editing coplanar-baseline.mts.',
+  const say = ratchetEnforced ? console.error : console.log;
+  say(
+    `check:coplanar — ${regressions.length} new or worse coplanar seam(s)` +
+      `${ratchetEnforced ? '' : ' (LGP_RATCHET=off, so reported and not enforced)'}:\n`,
   );
-  process.exit(1);
+  for (const line of regressions) say(`  ${line}`);
+  if (ratchetEnforced) {
+    console.error(
+      '\nART_DIRECTION.md §7: delete the hidden face, do not offset a surface. An' +
+        '\noffset is a number somebody has to maintain and it goes stale the moment' +
+        '\neither surface moves. Do not silence this by editing coplanar-baseline.mts.',
+    );
+    process.exit(1);
+  }
 }
 
 console.log(
@@ -410,6 +433,13 @@ console.log(
     `${fightingCount} fighting at ${DEFAULT_TOLERANCES.fighting * 1000} mm, ` +
     `${worst.size - fightingCount} more held apart by a stand-off under ` +
     `${DEFAULT_TOLERANCES.near * 100} cm, of which ${occluded} are buried where no camera can ` +
-    `reach them. All of them are in the baseline; none is new. ` +
-    `${((performance.now() - started) / 1000).toFixed(1)} s.`,
+    // The one line anybody reads has to be true on the run where the gate was
+    // switched off, or `LGP_RATCHET=off` becomes a way to get a green summary
+    // over a red result — which is this repo's own commonest instrument bug,
+    // built in on purpose.
+    `reach them. ${
+      regressions.length === 0
+        ? 'All of them are in the baseline; none is new.'
+        : `${regressions.length} new or worse, listed above and NOT enforced because LGP_RATCHET=off.`
+    } ${((performance.now() - started) / 1000).toFixed(1)} s.`,
 );
