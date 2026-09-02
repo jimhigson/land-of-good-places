@@ -3534,21 +3534,53 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
         if (routed) break;
       }
     }
+    let paved = true;
     if (!routed) {
-      // Nothing legal reaches it. Draw the shortest straight run to paving so
-      // the door is still a paving terminal, and let the invariants say
-      // plainly which seed lost its grid route rather than hide it.
+      // **Nothing legal reaches it.** The straight run to the nearest paving is
+      // the last resort — but only when it stays on the door's own side of the
+      // railway. A straight line that hops the rail is not a worse path, it is
+      // an illegal one: `train/crossings.ts` fails the whole build on it (Jim,
+      // 2 Sep: every crossing is a bridge), so it would hide a stranded door
+      // behind a crash in a different file. Where even that is not available,
+      // the edge stays a connectivity fact with no ribbon, and
+      // {@link strandedDoorsOfLastSolve} says so.
       path = null;
-      routed = [nearestGridPaving(destination.gridPoint), destination.gridPoint];
+      const near = nearestGridPaving(destination.gridPoint);
+      const doorSide = railInfoAt(destination.gridPoint[0], destination.gridPoint[1]).side;
+      if (
+        segmentHoldsRailSide(
+          near[0],
+          near[1],
+          destination.gridPoint[0],
+          destination.gridPoint[1],
+          doorSide,
+          0,
+        )
+      ) {
+        routed = [near, destination.gridPoint];
+      } else {
+        routed = [destination.gridPoint];
+        paved = false;
+      }
       strandedDoors.push(destination.id);
     }
     const points: (readonly [number, number])[] = [...routed, ...destination.tail];
     if (SPUR_STRETCH > 0 && destination.id === SPUR_STRETCH_ID) bowMidSegment(points);
     if (path) commitGridPathDrawn(path, points);
+    if (points.length < 2) {
+      // Every route must be a curve, and a curve needs two points. A stranded
+      // door with nothing past it gets a one-metre stub along its own outward
+      // ray so the edge is still a real, drawable arrival.
+      const outward = destination.lead ?? [destination.x, destination.z + 1];
+      const dx = outward[0] - destination.gridPoint[0];
+      const dz = outward[1] - destination.gridPoint[1];
+      const l = Math.hypot(dx, dz) || 1;
+      points.push([destination.gridPoint[0] + dx / l, destination.gridPoint[1] + dz / l]);
+    }
     edges.push({
       from: 'ring',
       to: destination.id,
-      paved: true,
+      paved,
       route: {
         name: `spur-${destination.id}`,
         width: destination.width,
