@@ -43,7 +43,7 @@
  * rather than its own expectations, before any measuring is believed.
  */
 import { execFile } from 'node:child_process';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, rmSync, writeFileSync } from 'node:fs';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
@@ -136,11 +136,23 @@ const INVARIANT_FILES: Record<number, string> = {
   326: 'test/procgen/seed-326.test.ts',
 };
 
-async function proveWithOracle(seed: number, warp: WarpVector | null): Promise<'pass' | 'fail' | 'not covered'> {
-  const file = INVARIANT_FILES[seed];
-  if (!file) return 'not covered';
+async function proveWithOracle(seed: number, warp: WarpVector | null): Promise<'pass' | 'fail'> {
+  // A seed without a checked-in invariant file gets a throwaway vet-style
+  // one (exactly `vet-seed-pool.mts`'s mechanism, and its naming, so the
+  // same gitignore covers it and a killed run's stray is swept by the next
+  // vet): the vet found seeds 115 and 225 green under check:park and red
+  // under the full suite, so "not covered" can no longer count as proof.
+  const staticFile = INVARIANT_FILES[seed];
+  const file = staticFile ?? `test/procgen/vet-seed-${seed}.test.ts`;
+  if (!staticFile) {
+    writeFileSync(
+      file,
+      `import { registerParkInvariants } from './invariants.ts';\nregisterParkInvariants(${seed});\n`,
+    );
+  }
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
+    LGP_SEED: String(seed),
   };
   if (warp) env['LGP_WARP'] = JSON.stringify(warp);
   try {
@@ -148,6 +160,8 @@ async function proveWithOracle(seed: number, warp: WarpVector | null): Promise<'
     return 'pass';
   } catch {
     return 'fail';
+  } finally {
+    if (!staticFile) rmSync(file, { force: true });
   }
 }
 
@@ -183,7 +197,7 @@ for (const seed of seeds) {
   let best: { warp: WarpVector | null; score: Score } | null = null;
   let tried = 0;
   let oracleRejections = 0;
-  let winnerOracle: 'pass' | 'not covered' | 'not run' = 'not run';
+  let winnerOracle: 'pass' | 'not run' = 'not run';
   for (const warp of candidates(ids)) {
     const s = await score(seed, warp);
     tried += 1;
