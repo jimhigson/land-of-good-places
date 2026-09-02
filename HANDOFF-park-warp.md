@@ -301,7 +301,17 @@ New coverage immediately earned its keep:
 - `warp-search` rerun for 326/288 WITH their new oracles wired into
   INVARIANT_FILES (results → measurements/warp-search-2sep-with-oracles.jsonl).
 
-## Remaining before PR
+## DONE — PR #474 raised, 2 Sep
+
+All warps baked (7 seeds: canonical, 5, 24, 115, 225, 288, 326 — all
+one-entry layout bumps). Final state on rebased base (edb508e7):
+check:park 16/16 ratchet-on; test:procgen 583/583 (main is 502 — the two
+added per-seed files); vet:seeds 7/7 warped seeds both gates; build 0;
+check:seed-pool PASS. Open for Jim: pool membership of 24/115 on quality
+grounds (spares 1102/1104); #437 standing coverage; LAYOUT_VERSION bump on
+merge. Do not merge — Overseer's call.
+
+## Superseded checklist (history)
 
 1. Bake 326's oracle-passing vector when the search lands one (or report
    non-convergence to Jim as a decision).
