@@ -205,7 +205,11 @@ export class Shops {
 
       leaveTheShadowPass(detail);
       anchor.add(detail);
-      units.setPlaceholderVisible(unit.id, false);
+      // Gone, not hidden: this unit has a real shop in it now and the empty-unit
+      // counter and awning behind the kiosk are never seen again. See
+      // ShopUnits.discardPlaceholder — seven coplanar seams (#472) and seven
+      // units of dead geometry.
+      units.discardPlaceholder(unit.id);
 
       this.shops.push({ unit, detail, fitout, keeper, seed: stands.length * 1.7 });
 
