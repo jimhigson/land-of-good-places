@@ -66,7 +66,10 @@ which found 47 more garden seams (234 → 281).
 - **CI is two cores, and the first version collapsed to one lane there.**
   `lanes` was `floor(cores / 2)` — fine on this laptop, one lane on a GitHub
   runner, so sixteen parks ran in a row inside a workflow capped at 30 minutes,
-  and the first CI run sat at 28 and climbing. Fixed twice over: never fewer
+  and the first CI run reached **28m38s** still running. Be precise about that
+  number if you cite it: the run ended `cancelled`, but by my own next push
+  (`checks.yml` sets `cancel-in-progress`), **not** by the cap — so it is a
+  measured near-miss, not a proven timeout. It did not need to be one. Fixed twice over: never fewer
   than two lanes, and the garden-only children now drop their indoor seams
   **before** ranking rather than after, which is where the cost is (a sight-line
   ray against every mesh in the game, plus a ring search, per seam). Same 281
