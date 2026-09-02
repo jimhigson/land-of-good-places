@@ -1091,8 +1091,17 @@ function streetSegmentClear(
   const active = exemptAt
     ? plots.filter((plot) => distanceToPlotEdge(plot, exemptAt[0], exemptAt[1]) > exemptNear)
     : plots;
+  // A destination standing **inside** a plot's own footprint exempts that plot
+  // outright, not merely to the walk-along margin below. The ginormous slide's
+  // exit is the case: the chute lands inside the castle's own plot, so every
+  // sample of every candidate connector was inside it and the door had no
+  // route onto the grid at all on five of the sixteen pool seeds. Its own
+  // building is not an obstacle to arriving at it.
   const relaxed = exemptAt
-    ? plots.filter((plot) => distanceToPlotEdge(plot, exemptAt[0], exemptAt[1]) <= exemptNear)
+    ? plots.filter((plot) => {
+        const edge = distanceToPlotEdge(plot, exemptAt[0], exemptAt[1]);
+        return edge <= exemptNear && edge >= 0;
+      })
     : [];
   const length = Math.hypot(bx - ax, bz - az);
   const steps = Math.max(1, Math.ceil(length / 1.5));
@@ -1375,21 +1384,20 @@ const RAMP_SCREEN_MARGIN = 0.5;
  * seeds built a bridge on a level site, and this screen had nothing to say
  * about the ground it stood on.
  *
- * ## Two measured dead ends — do not rebuild either (#414, 31 Aug 2026)
+ * ## Two measured dead ends, and the ticket that resolved them (#414, 31 Aug
+ * 2026; grid rework, 2 Sep 2026)
  *
- * `edgeOk`, `linkClear` and `nearestPointOnRoute` are the *only* askers, and
- * that is deliberate. Extending the screen to the two routers that are not on
- * that list looks obviously right and is not; both were built and measured on
- * seed 5, whose `poi.stranded` baseline was **8**:
+ * When this screen had only `edgeOk`, `linkClear` and `nearestPointOnRoute` as
+ * askers, extending it to the two routers that were *not* on that list looked
+ * obviously right and was not. Both were built and measured on seed 5, whose
+ * `poi.stranded` baseline was **8**:
  *
- * 1. **Screening `computeStreetStubs`' `legClear`** — the exact clause
- *    `edgeOk` carries, added to the stub search: **8 -> 50 stranded.**
- *    A refused lattice edge leaves the lattice with other edges; a
- *    destination whose every candidate stub leg is refused gets *no* stub, so
- *    `streetStubs` comes back empty, `streetRoute` returns null, and the whole
- *    spur drops through to `fallbackSpurRoute`. Screening there pushes *more*
- *    routes onto the router that was drawing ribbons across ramps, and severs
- *    the gate approach as well.
+ * 1. **Screening the stub search's `legClear`** — the exact clause `edgeOk`
+ *    carries: **8 -> 50 stranded.** A refused lattice edge leaves the lattice
+ *    with other edges; a destination whose every candidate stub leg was
+ *    refused got *no* stub, `streetRoute` returned null, and the whole spur
+ *    dropped through to `fallbackSpurRoute` — pushing *more* routes onto the
+ *    very router that was drawing ribbons across ramps.
  * 2. **Pricing ramp metres in `fallbackSpurRoute`'s candidate score** (200 per
  *    metre): recovered **one** waypoint, 8 -> 7, and **cost an invariant** —
  *    seed 5's `no two close destinations are left with a wildly
@@ -1399,14 +1407,18 @@ const RAMP_SCREEN_MARGIN = 0.5;
  *
  * The two together were worst of all: **82 stranded.**
  *
- * **Neither dead end means the remaining cuts are acceptable** — it means they
- * cannot be fixed from inside the path routers. On seed 5 the dodgems at
- * (38.4, 36.3) has *no* ramp-free route to reach: every lattice node is
- * refused (the nearest misses `STUB_TAIL_LIMIT` by 1.1 m) and all four
- * fallback candidates cross proven site 12's ramp, so a screen has nothing to
- * pick and a price can only choose the least-bad. The real fix is letting a
- * foreign leg cross **on the deck** — Jim's *"path finding needs to include
- * bridges from the start"* — which is its own ticket.
+ * **Neither dead end meant the cuts were acceptable** — it meant they could
+ * not be fixed from inside routers that treated a bridge as an afterthought.
+ * On seed 5 the dodgems at (38.4, 36.3) had *no* ramp-free route to reach:
+ * every lattice node was refused (the nearest missed `STUB_TAIL_LIMIT` by
+ * 1.1 m) and all four fallback candidates crossed proven site 12's ramp, so a
+ * screen had nothing to pick and a price could only choose the least-bad. The
+ * fix that comment named — letting a foreign leg cross **on the deck**, Jim's
+ * *"path finding needs to include bridges from the start"* — is the grid
+ * rework this file now carries: a bridge is a mandatory edge of the one graph
+ * every route is solved on, so the second router that made dead end 1 a dead
+ * end no longer exists, and {@link computeGridConnectors} carries the screen.
+ * `fallbackSpurRoute` is gone, so dead end 2 has nothing left to price.
  */
 export function pointStandsOnABridgeRamp(x: number, z: number, margin = RAMP_SCREEN_MARGIN): boolean {
   for (const site of CROSSING_SITES) {
@@ -1808,11 +1820,12 @@ function gridConnectors(
   p: readonly [number, number],
   arrival: boolean,
   relax = 0,
+  lead: readonly [number, number] | null = null,
 ): GridConnector[] {
-  const key = `${p[0]},${p[1]},${arrival ? 1 : 0},${relax}`;
+  const key = `${p[0]},${p[1]},${arrival ? 1 : 0},${relax},${lead ? `${lead[0]},${lead[1]}` : ''}`;
   const hit = gridConnectorCache.get(key);
   if (hit) return hit;
-  const connectors = computeGridConnectors(p, arrival, relax);
+  const connectors = computeGridConnectors(p, arrival, relax, lead);
   gridConnectorCache.set(key, connectors);
   return connectors;
 }
@@ -1821,6 +1834,7 @@ function computeGridConnectors(
   p: readonly [number, number],
   arrival: boolean,
   relax: number,
+  lead: readonly [number, number] | null,
 ): GridConnector[] {
   const lattice = streetLattice();
   const pSide = railInfoAt(p[0], p[1]).side;
@@ -1872,9 +1886,53 @@ function computeGridConnectors(
         const tail = Math.min(Math.abs(p[0] - nx), Math.abs(p[1] - nz));
         if (tail > tailLimit) continue;
         const direct = Math.hypot(p[0] - nx, p[1] - nz);
+        // **Arrive HEAD-ON where the door has a facing.** The doormat faces the
+        // park middle (the layout solver put it there), and a booth's own
+        // counter walls flank it — a connector arriving far off that axis draws
+        // a leg that grazes the counter's side at centimetres (seed 2's rim
+        // stall stranded its whole doormat that way). So a connector via the
+        // outward lead is tried first, and only its failure falls back to the
+        // plain shapes below. The lead is *not* the grid node: making it one
+        // (the first cut of this rework did) loses the door outright whenever
+        // the ground 3.5 m out is worse than the doormat's own — seed 131's
+        // hotel had a clean 7.1 m straight run to its door and no route at all
+        // to the point in front of it.
+        if (lead) {
+          const shapes: readonly (readonly (readonly [number, number])[])[] = [
+            [[nx, nz], lead, p],
+            [[nx, nz], [nx, lead[1]], lead, p],
+            [[nx, nz], [lead[0], nz], lead, p],
+          ];
+          let headOn = false;
+          for (const shape of shapes) {
+            let ok = true;
+            let length = 0;
+            for (let s = 1; s < shape.length && ok; s += 1) {
+              const a = shape[s - 1] as readonly [number, number];
+              const b = shape[s] as readonly [number, number];
+              if (!legClear(a[0], a[1], b[0], b[1])) ok = false;
+              length += Math.hypot(b[0] - a[0], b[1] - a[1]);
+            }
+            if (!ok || length > (tailLimit + 2) * 2) continue;
+            found.push({
+              node: index,
+              points: collapseCollinear(shape),
+              cost: length * STUB_COST_FACTOR,
+            });
+            headOn = true;
+            break;
+          }
+          // A head-on arrival is strictly better than an oblique one at the
+          // same node, so do not also offer the oblique shapes there.
+          if (headOn) continue;
+        }
         // Straight connector: shortest, slightly diagonal — fine when short.
         if (direct <= tailLimit + 2 && legClear(nx, nz, p[0], p[1])) {
-          found.push({ node: index, points: [[nx, nz], p], cost: direct * STUB_COST_FACTOR });
+          found.push({
+            node: index,
+            points: [[nx, nz], p],
+            cost: direct * STUB_COST_FACTOR + (lead ? 0.5 : 0),
+          });
           continue;
         }
         // Elbow via the node's own street line: corner shares the node's x
@@ -1907,8 +1965,165 @@ function computeGridConnectors(
       }
     }
   }
+  if (found.length === 0 && relax > 1) return relayConnectors(p, exemptNear, pSide, legClear);
   found.sort((a, b) => a.cost - b.cost);
   return found;
+}
+
+/**
+ * **The last way onto the grid: walk out along the grid's own lines.**
+ *
+ * A destination beside a big plot can have no valid grid node near it at all —
+ * its own building invalidates the whole cell it stands in, and the ring of
+ * cells beyond is invalidated by its neighbours. Seed 24's ferris wheel is the
+ * case: of the 49 nodes within three shells, exactly one is valid, and every
+ * single-elbow leg to that one clips a plot.
+ *
+ * So: a small Dijkstra over the grid *cells* around the door, screened with the
+ * **door's own arrival exemption** rather than the public street clearance, run
+ * until it reaches a node that is genuinely valid in the shared lattice. Every
+ * leg is a run along a grid line, so what comes out is axis-aligned and reads
+ * as a street — it is simply allowed to start on ground the public grid has
+ * written off, which is exactly the ground the door stands on.
+ *
+ * This is what replaced the old continuous fallback router. It cannot draw a
+ * diagonal, cannot cross the railway (`legClear` carries the side and masonry
+ * screens), and terminates on a real node, so the route it hands back joins the
+ * network properly instead of ending in the grass near it.
+ */
+const RELAY_CELLS = 4;
+function relayConnectors(
+  p: readonly [number, number],
+  exemptNear: number,
+  pSide: 1 | -1,
+  legClear: (ax: number, az: number, bx: number, bz: number) => boolean,
+): GridConnector[] {
+  void exemptNear;
+  const lattice = streetLattice();
+  const ci = Math.round((p[0] - PLAZA.x) / STREET_PITCH);
+  const cj = Math.round((p[1] - PLAZA.z) / STREET_PITCH);
+  const size = RELAY_CELLS * 2 + 1;
+  const cellX = (i: number): number => PLAZA.x + i * STREET_PITCH;
+  const cellZ = (j: number): number => PLAZA.z + j * STREET_PITCH;
+  const key = (i: number, j: number): number => (i - ci + RELAY_CELLS) * size + (j - cj + RELAY_CELLS);
+  const inRange = (i: number, j: number): boolean =>
+    Math.abs(i - ci) <= RELAY_CELLS &&
+    Math.abs(j - cj) <= RELAY_CELLS &&
+    Math.abs(i) <= LATTICE_HALF_CELLS &&
+    Math.abs(j) <= LATTICE_HALF_CELLS;
+  const usable = new Map<number, boolean>();
+  const relayOk = (i: number, j: number): boolean => {
+    const k = key(i, j);
+    const hit = usable.get(k);
+    if (hit !== undefined) return hit;
+    const x = cellX(i);
+    const z = cellZ(j);
+    const ok =
+      railInfoAt(x, z).side === pSide &&
+      railInfoAt(x, z).dist >= RAIL_CLAMP_DISTANCE &&
+      !pointStandsOnBridgeMasonry(x, z) &&
+      Math.hypot(x - PLAZA.x, z - PLAZA.z) >= RING_RADIUS + 1 &&
+      legClear(x, z, x, z);
+    usable.set(k, ok);
+    return ok;
+  };
+  // Seed: every relay cell the door itself can reach by one straight or
+  // elbowed hop, at the ordinary tail limit.
+  const cost = new Map<number, number>();
+  const from = new Map<number, number>();
+  const entry = new Map<number, readonly (readonly [number, number])[]>();
+  const queue: { i: number; j: number; c: number }[] = [];
+  for (let di = -1; di <= 1; di += 1) {
+    for (let dj = -1; dj <= 1; dj += 1) {
+      const i = ci + di;
+      const j = cj + dj;
+      if (!inRange(i, j) || !relayOk(i, j)) continue;
+      const nx = cellX(i);
+      const nz = cellZ(j);
+      const shapes: readonly (readonly (readonly [number, number])[])[] = [
+        [[nx, nz], p],
+        [[nx, nz], [nx, p[1]], p],
+        [[nx, nz], [p[0], nz], p],
+      ];
+      for (const shape of shapes) {
+        let ok = true;
+        let length = 0;
+        for (let s = 1; s < shape.length && ok; s += 1) {
+          const a = shape[s - 1] as readonly [number, number];
+          const b = shape[s] as readonly [number, number];
+          if (!legClear(a[0], a[1], b[0], b[1])) ok = false;
+          length += Math.hypot(b[0] - a[0], b[1] - a[1]);
+        }
+        if (!ok) continue;
+        const k = key(i, j);
+        const c = length * STUB_COST_FACTOR;
+        if ((cost.get(k) ?? Infinity) <= c) break;
+        cost.set(k, c);
+        entry.set(k, shape);
+        queue.push({ i, j, c });
+        break;
+      }
+    }
+  }
+  // Dijkstra along grid lines.
+  const closed = new Set<number>();
+  const reached: { i: number; j: number; c: number }[] = [];
+  while (queue.length > 0) {
+    queue.sort((a, b) => a.c - b.c);
+    const here = queue.shift() as { i: number; j: number; c: number };
+    const k = key(here.i, here.j);
+    if (closed.has(k)) continue;
+    closed.add(k);
+    if (lattice.nodeOk[lattice.indexOf(here.i, here.j)]) {
+      reached.push(here);
+      if (reached.length >= 3) break;
+      continue;
+    }
+    for (const [di, dj] of [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ] as readonly (readonly [number, number])[]) {
+      const i = here.i + di;
+      const j = here.j + dj;
+      if (!inRange(i, j) || !relayOk(i, j)) continue;
+      if (!legClear(cellX(here.i), cellZ(here.j), cellX(i), cellZ(j))) continue;
+      const next = here.c + STREET_PITCH;
+      const nk = key(i, j);
+      if ((cost.get(nk) ?? Infinity) <= next) continue;
+      cost.set(nk, next);
+      from.set(nk, k);
+      queue.push({ i, j, c: next });
+    }
+  }
+  const connectors: GridConnector[] = [];
+  for (const goal of reached) {
+    const chain: (readonly [number, number])[] = [];
+    let k: number | undefined = key(goal.i, goal.j);
+    let cell: readonly [number, number] = [goal.i, goal.j];
+    while (k !== undefined) {
+      chain.push([cellX(cell[0]), cellZ(cell[1])]);
+      const parent: number | undefined = from.get(k);
+      if (parent === undefined) break;
+      const pi = ci + (Math.floor(parent / size) - RELAY_CELLS);
+      const pj = cj + ((parent % size) - RELAY_CELLS);
+      cell = [pi, pj];
+      k = parent;
+    }
+    const seedShape = entry.get(k as number);
+    if (!seedShape) continue;
+    // `chain` runs goal-first back to the seed cell, whose own shape already
+    // starts at that cell and ends at the door.
+    const points = collapseCollinear([...chain.slice(0, -1), ...seedShape]);
+    connectors.push({
+      node: lattice.indexOf(goal.i, goal.j),
+      points,
+      cost: (cost.get(key(goal.i, goal.j)) as number) + 2,
+    });
+  }
+  connectors.sort((a, b) => a.cost - b.cost);
+  return connectors;
 }
 
 // ------------------------------------------------------------- the grid
@@ -1964,9 +2179,14 @@ interface GridDestination {
    * (poiGraph, check:park, the invariants) calls "the destination". */
   readonly x: number;
   readonly z: number;
-  /** Where the grid's terminal connector lands: the head-on arrival lead
-   * when the place has one, the door itself otherwise. */
+  /** Where the grid's terminal connector lands — the door itself for
+   * everything with a doormat, and a station's own platform lead for a
+   * station, whose walkable end `train/plan.ts` already solved. */
   readonly gridPoint: readonly [number, number];
+  /** The outward point the connector prefers to arrive through, so the last
+   * few metres run the way a visitor actually walks in. Null for a place with
+   * no facing (a station, a ride exit). */
+  readonly lead: readonly [number, number] | null;
   /** Points from `gridPoint` onward, ending at the door (and then any
    * past-the-doormat extension). Empty when `gridPoint` IS the door and
    * nothing extends past it. */
@@ -2081,12 +2301,18 @@ function gridDestinations(): readonly GridDestination[] {
     extraTail: readonly (readonly [number, number])[] = [],
   ): void => {
     const lead = arrivalLead(x, z, id);
-    const gridPoint = (lead[0] ?? ([x, z] as const)) as readonly [number, number];
-    const tail: (readonly [number, number])[] = [];
-    if (lead.length) tail.push([x, z]);
-    tail.push(...extraTail);
+    const tail: (readonly [number, number])[] = [...extraTail];
     tail.push(...pastTheDoormat(id, x, z, towardX, towardZ));
-    out.push({ id, kind, x, z, gridPoint, tail, width });
+    out.push({
+      id,
+      kind,
+      x,
+      z,
+      gridPoint: [x, z] as const,
+      lead: (lead[0] ?? null) as readonly [number, number] | null,
+      tail,
+      width,
+    });
   };
   for (const anchor of ANCHORS) {
     const [ex, ez] = anchor.entrance;
@@ -2113,6 +2339,7 @@ function gridDestinations(): readonly GridDestination[] {
       x: station.standX,
       z: station.standZ,
       gridPoint: [station.leadX, station.leadZ] as const,
+      lead: null,
       tail: [
         [station.approachX, station.approachZ] as const,
         [station.standX, station.standZ] as const,
@@ -2178,9 +2405,10 @@ function* pathGridSearch(): Generator<number, PathGrid, void> {
     p: readonly [number, number],
     arrival: boolean,
     relax = 0,
+    lead: readonly [number, number] | null = null,
   ): number => {
     let made = 0;
-    for (const connector of gridConnectors(p, arrival, relax)) {
+    for (const connector of gridConnectors(p, arrival, relax, lead)) {
       link(
         node,
         connector.node,
@@ -2269,10 +2497,19 @@ function* pathGridSearch(): Generator<number, PathGrid, void> {
     yield destinations.length;
     const node = addNode(destination.gridPoint[0], destination.gridPoint[1]);
     destinationNode.set(destination.id, node);
-    if (joinToGrid(node, destination.gridPoint, true) > 0) continue;
-    // Backtrack rather than give the door away to another router.
+    if (joinToGrid(node, destination.gridPoint, true, 0, destination.lead) > 0) continue;
+    // Backtrack rather than give the door away to another router: first drop
+    // the head-on preference, then widen the shells and the tail limit.
+    if (joinToGrid(node, destination.gridPoint, true) > 0) {
+      relaxedDoors.push(`${destination.id}:oblique`);
+      continue;
+    }
     if (joinToGrid(node, destination.gridPoint, true, 1) > 0) {
-      relaxedDoors.push(destination.id);
+      relaxedDoors.push(`${destination.id}:wide`);
+      continue;
+    }
+    if (joinToGrid(node, destination.gridPoint, true, 2) > 0) {
+      relaxedDoors.push(`${destination.id}:relay`);
       continue;
     }
     relaxedDoors.push(`${destination.id}!`);
@@ -4141,3 +4378,63 @@ function polylineLength(points: readonly (readonly [number, number])[]): number 
 }
 
 
+
+/** TEMP diagnostic. */
+export function debugRelaxedDoors(): readonly string[] {
+  return pathGrid().relaxedDoors;
+}
+
+/** TEMP diagnostic: why can this point not reach the grid? */
+export function debugDoorReach(p: readonly [number, number]): unknown {
+  const lattice = streetLattice();
+  const pSide = railInfoAt(p[0], p[1]).side;
+  const out: unknown[] = [];
+  const ci = Math.round((p[0] - PLAZA.x) / STREET_PITCH);
+  const cj = Math.round((p[1] - PLAZA.z) / STREET_PITCH);
+  for (let shell = 0; shell <= 3; shell += 1) {
+    for (let di = -shell; di <= shell; di += 1) {
+      for (let dj = -shell; dj <= shell; dj += 1) {
+        if (Math.max(Math.abs(di), Math.abs(dj)) !== shell) continue;
+        const i = ci + di;
+        const j = cj + dj;
+        if (Math.abs(i) > LATTICE_HALF_CELLS || Math.abs(j) > LATTICE_HALF_CELLS) continue;
+        const index = lattice.indexOf(i, j);
+        const nx = lattice.xs[index] as number;
+        const nz = lattice.zs[index] as number;
+        out.push({
+          n: `${nx.toFixed(1)},${nz.toFixed(1)}`,
+          ok: lattice.nodeOk[index] === 1,
+          side: lattice.side[index],
+          pSide,
+          tail: Math.min(Math.abs(p[0] - nx), Math.abs(p[1] - nz)).toFixed(1),
+          direct: Math.hypot(p[0] - nx, p[1] - nz).toFixed(1),
+          clear: streetSegmentClear(nx, nz, p[0], p[1], p, 7),
+          ring: segmentClearOfRing(nx, nz, p[0], p[1]),
+          railSide: segmentHoldsRailSide(nx, nz, p[0], p[1], pSide, 0),
+          ramp: !segmentCutsABridgeRamp(nx, nz, p[0], p[1]),
+          elbowA: [
+            streetSegmentClear(nx, nz, nx, p[1], p, 7),
+            segmentClearOfRing(nx, nz, nx, p[1]),
+            segmentHoldsRailSide(nx, nz, nx, p[1], pSide, 0),
+            !segmentCutsABridgeRamp(nx, nz, nx, p[1]),
+            streetSegmentClear(nx, p[1], p[0], p[1], p, 7),
+            segmentClearOfRing(nx, p[1], p[0], p[1]),
+            segmentHoldsRailSide(nx, p[1], p[0], p[1], pSide, 0),
+            !segmentCutsABridgeRamp(nx, p[1], p[0], p[1]),
+          ].join(''),
+          elbowB: [
+            streetSegmentClear(nx, nz, p[0], nz, p, 7),
+            segmentClearOfRing(nx, nz, p[0], nz),
+            segmentHoldsRailSide(nx, nz, p[0], nz, pSide, 0),
+            !segmentCutsABridgeRamp(nx, nz, p[0], nz),
+            streetSegmentClear(p[0], nz, p[0], p[1], p, 7),
+            segmentClearOfRing(p[0], nz, p[0], p[1]),
+            segmentHoldsRailSide(p[0], nz, p[0], p[1], pSide, 0),
+            !segmentCutsABridgeRamp(p[0], nz, p[0], p[1]),
+          ].join(''),
+        });
+      }
+    }
+  }
+  return { p, pSide, ringDist: Math.hypot(p[0] - PLAZA.x, p[1] - PLAZA.z).toFixed(1), RING_RADIUS, out };
+}
