@@ -130,7 +130,7 @@ straight-line last resort.
 | 326 | 1 | poi.stranded 1 | — |
 | 346 | 0 | 19/19, 240/240 | — |
 | 428 | 0 | 19/19, 191/191 | — |
-| 451 | 1 | poi.stranded 3 | — |
+| 451 | 0 | passes since `walkEveryBridge` (263/263 waypoints) | — |
 
 Plus the canonical seed (no `LGP_SEED`): exit 1, `poi.stranded: 41`, no doors
 stranded. It was a hard build failure until `the gate approach's own fallback
@@ -162,26 +162,61 @@ line) and the successor must still catch it. Rewriting it to allow half-pitch
 and nothing else is therefore *stronger* than the current test on that third
 run and honest about the first two — do not simply widen the tolerance.
 
-### The two open shapes of failure
+### `poi.stranded` — what is measured, and what is ruled out
 
-1. **`poi.stranded`, the whole remaining failure set.** Seed 225 is the loud
-   one: 114 of 219 waypoint seeds in the main component, i.e. the poiGraph is
-   cut roughly in half. Seed 131's six are all on the gate corridor at `x = 0`,
-   `z = 32..52`, which *is* drawn and *does* reach the ring rim — so it is not
-   a missing route. **Measured and ruled out**: the rescue router's relaxed
-   plot clearance. Forcing its ladder back to `STREET_PLOT_CLEARANCE` alone
-   leaves seeds 326/451/225 at exactly 1 / 3 / 105 stranded — identical. The
-   next hypothesis to test is the *waypoint graph across a bridge*: on this
-   branch only the routes that need to cross do so, where the old plotter sent
-   several, and `poiGraph`'s own walkability link may not survive a ramp.
-   Compare `poiGraph: N/M seeds placed, K in the main component` on the parent
-   branch for the same seed before assuming this branch caused it.
-2. **Stranded doors** (seeds 11, 24, 115): the district is cut off on its own
-   rail side and `relayPolyline` cannot thread it either. The old code reached
-   these with `fenceFollowRoute` — hugging the rail fence round the loop, which
-   is exactly the "twists and mini-turns" Jim rejected. If a grid answer cannot
-   be found, the honest options are a seed swap (Jim's 2 Sep sixteen-good-seeds
-   ruling) or a warp vector, not a diagonal.
+The parent-branch probe was run (ordered, and it answers the "did this branch
+cause it" question): **parent seed 225 gives 19/19 attractions, 284/284
+waypoints connected, all six invariants.** This branch gives 254 seeds placed,
+183 in the main component, 70 stranded. So yes, this branch causes it.
+
+**Both branches build the same three bridges**, at the same three proven sites
+(railD 0 / 102 / 194) with the same halfGaps — measured with the park harness on
+each branch. The rail is **not** the split: waypoint seeds by rail side are
+90 inside / 164 outside on this branch (97 / 187 on the parent), and 94 of the
+164 outside seeds ARE in the main component. The bridge-ramp-span hypothesis is
+therefore dead — write it off, do not re-run it.
+
+**What the 70 actually are.** Every one of them belongs to a route of the *east
+district*, and that district's routes are the whole list:
+
+```
+spur-building 14  spur-stall.waterFight 12  spur-waterFight 11  spur-hotel 9
+spur-exit-ginormousSlide 6  spur-ballPit 6  connector-building-exit-ginormousSlide 4
+spur-stall.skyCruiser 4  spur-exit-skyCruiser 4
+```
+
+One contiguous district, every route in it, nothing else. So the district's own
+path network is internally connected and joins the rest of the poiGraph
+nowhere.
+
+**Ruled out by measurement, each mutation reverted** (do not re-litigate any of
+these):
+
+| suspect | seed 225 before → after |
+|---|---|
+| `collapseCollinear` dropping a bridge's pinned deck points | 105 → 105 |
+| rescue router's 2.2 m plot clearance + 2.0 m arrival boundary | 70 → 70 (seed 115 16 → 16) |
+| a second drawn route over every bridge | 70 → 70 |
+| connectors/relay hugging the rail (margin 0 vs `RAIL_CLAMP_DISTANCE - 0.1`) | 70 → 71 |
+| trimming route backtracks | 70 → 70 |
+
+(The first three fixes were kept anyway — each is a correctness fix in its own
+right, and `walkEveryBridge` took seed 451 from 3 stranded to a full pass.)
+
+**The live hypothesis, and the next experiment.** The east district appears to
+hang off the rest of the network at a *single* junction: `spur-building` starts
+at the gate handover node `(0, 46.9)` on the gate approach, and every other east
+route hangs off `spur-building`. On the parent, four routes pass within 20 m of
+railD 0 and the district has several junctions. A grid solve that grows one
+shortest path per destination produces a **tree with one articulation point per
+district**, where the old per-destination plotter produced several — so a single
+failed `lineIsClear` chord drops a whole district.
+
+So: count the junctions between the east district's routes and the rest, and
+probe that one chord (`poiGraph.ts`'s `lineIsClear` / `laneIsClear`, around line
+418). If it is the articulation-point shape, the fix belongs in the selection
+pass — guarantee each district at least two joins to the network — not in
+`poiGraph`.
 
 ## Open elsewhere
 
