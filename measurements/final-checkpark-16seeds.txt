@@ -1,0 +1,16 @@
+20260728 exit=0 | check:park: 19/19 attractions route from the entrance, 0 rail crossing(s), 245/245 waypoints connect
+5 exit=0 | check:park: 19/19 attractions route from the entrance, 0 rail crossing(s), 322/322 waypoints connect
+11 exit=0 | check:park: 19/19 attractions route from the entrance, 0 rail crossing(s), 254/254 waypoints connect
+24 exit=1 | 
+115 exit=0 | check:park: 19/19 attractions route from the entrance, 0 rail crossing(s), 215/215 waypoints connect
+128 exit=0 | check:park: 19/19 attractions route from the entrance, 0 rail crossing(s), 220/220 waypoints connect
+131 exit=0 | check:park: 19/19 attractions route from the entrance, 0 rail crossing(s), 228/228 waypoints connect
+208 exit=0 | check:park: 19/19 attractions route from the entrance, 0 rail crossing(s), 201/201 waypoints connect
+225 exit=0 | check:park: 19/19 attractions route from the entrance, 0 rail crossing(s), 245/245 waypoints connect
+267 exit=0 | check:park: 19/19 attractions route from the entrance, 0 rail crossing(s), 249/249 waypoints connect
+274 exit=0 | check:park: 19/19 attractions route from the entrance, 0 rail crossing(s), 227/227 waypoints connect
+288 exit=0 | check:park: 19/19 attractions route from the entrance, 0 rail crossing(s), 229/229 waypoints connect
+326 exit=0 | check:park: 19/19 attractions route from the entrance, 0 rail crossing(s), 216/216 waypoints connect
+346 exit=0 | check:park: 19/19 attractions route from the entrance, 0 rail crossing(s), 258/258 waypoints connect
+428 exit=0 | check:park: 19/19 attractions route from the entrance, 0 rail crossing(s), 180/180 waypoints connect
+451 exit=0 | check:park: 19/19 attractions route from the entrance, 0 rail crossing(s), 226/226 waypoints connect

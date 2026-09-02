@@ -70,6 +70,12 @@ const WARPS_BY_SEED: Readonly<Record<number, WarpVector>> = {
   // carry.
   20260728: { layout: { ferrisWheel: 2 } },
   5: { layout: { ferrisWheel: 2 } },
+  // Not a stranded seed: 24's unwarped network crossed the rail at railD
+  // 47.8, off every proven site — absorbed silently as a fence gap while
+  // the level tier existed, invisible to check:park (which samples only
+  // the entrance route), surfaced the moment crossings.ts learned to
+  // throw. Its own invariant file proved the fix (81/81).
+  24: { layout: { waterFight: 1 } },
   288: { layout: { waterFight: 1 } },
   // First baked as {fountain:1} on check:park evidence alone; the moment
   // seed-326.test.ts existed, that vector went red on ONE invariant the
