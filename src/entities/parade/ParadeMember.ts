@@ -456,6 +456,14 @@ export class ParadeMember {
     this.seat.z = seat.z;
     this.seat.facing = seat.facing;
     this.seat.pitch = seat.pitch;
+    // **Every field, or the body wears a stale one.** The seat is a scratch
+    // object the ride refills for each companion in turn, so a field copied out
+    // here is the only way its value reaches this member — and one left out
+    // does not fail loudly, it silently keeps whatever this member's own seat
+    // had before. Leaving `recline` out is exactly that: the pets rode the
+    // whole descent bolt upright while `petSeatOnSlide` filled in a recline
+    // nobody read.
+    this.seat.recline = seat.recline;
     // Delighted for the whole descent. Re-asserted rather than set once so it
     // cannot time out halfway down; `updateFace` only re-uploads a texture on a
     // change of expression, so holding it costs nothing.
