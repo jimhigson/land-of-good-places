@@ -239,8 +239,17 @@ for (const seed of seeds) {
       // winner until the canonical-only gates it will actually face have
       // passed too.
       if (seed === 20260728) {
-        const ok = await passesExtraGate(seed, warp, 'check:path-preference');
-        if (!ok) {
+        // Grown one check at a time as each has bitten a winner (#437's
+        // shape): path-preference caught {ferrisWheel:2} in CI, pet-slide
+        // caught {hotel:2} in the full local chain. Cheapest first.
+        let gated = true;
+        for (const gate of ['check:path-preference', 'check:pet-slide']) {
+          if (!(await passesExtraGate(seed, warp, gate))) {
+            gated = false;
+            break;
+          }
+        }
+        if (!gated) {
           oracleRejections += 1;
           continue;
         }
