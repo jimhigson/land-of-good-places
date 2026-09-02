@@ -384,6 +384,43 @@ swap CANONICAL_PARK_SEED + pool membership + warps table + the
 seed-canonical test registration, run full chain + test:procgen + re-vet,
 push, CI.
 
+## RULED, SUPERSEDING THE SWAP — no default seed at all (Jim, direct, 2 Sep night)
+
+Jim: "I have no idea what this default seed is" → explained → "yeah I
+don't want any default anymore - all 16 are defaults - delete all concept
+of this."
+
+So the default-seed REPLACEMENT hunt (spares 1102/1104, --full-gates) is
+DEAD — do not resume it. The work is now:
+1. Node with no LGP_SEED must fail LOUDLY, not silently build 20260728
+   (delete `?? CANONICAL_PARK_SEED` in the resolver's Node leg; browser
+   pool draw unchanged). Every script that legitimately builds one park
+   passes LGP_SEED explicitly.
+2. Every park-shaped check that today builds only the old canonical
+   (path-preference, pet-slide, park-map, waypoints, nav-routes,
+   tap-spacing, benches, hotel, castle, solve-cost... — grep the chain)
+   sweeps seeds instead: CI_SWEEP_SEEDS (pool-derived, one owner, already
+   exists) in-chain, full pool via vet:seeds.
+3. The RATCHET's recorded deviations are tuned to 20260728 — they die
+   with the concept (a recorded deviation for a park nobody measures is
+   noise). Per-seed ratchets only if a real need appears; start empty.
+4. CI cost: chain is 24-25 min against a 30 cap already. Sweeping every
+   park check 16x in-chain will blow it; the plan of record is the 6-seed
+   CI_SWEEP_SEEDS subset in-chain + full-16 vet:seeds as its own parallel
+   CI job. If that compromise is unacceptable ("all 16 are defaults"
+   read strictly), a matrix job per seed is the alternative — Overseer
+   to sequence with the 30-min cap work already flagged.
+5. Canonical's pool exit already ruled; with no default concept, its
+   remaining special status (test file name seed-canonical.test.ts,
+   scatterDecoupling baseline, measure scripts) is renamed/re-pointed at
+   pool seeds.
+
+Sequencing per Jim's standing instruction: the grid path rework stays the
+priority (builder running on feat/grid-paths); this conversion is its own
+branch/PR after or alongside, and #474's canonical-only CI failures
+dissolve into it (they stop being gates when 20260728 stops being
+special).
+
 ## Superseded checklist (history)
 
 1. Bake 326's oracle-passing vector when the search lands one (or report
