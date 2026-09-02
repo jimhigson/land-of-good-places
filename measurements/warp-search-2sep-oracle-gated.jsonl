@@ -1,0 +1,1 @@
+{"seed":20260728,"solved":true,"gate":"ratchet-on pass","oracleRejections":3,"warp":{"layout":{"ferrisWheel":2}},"stranded":0,"oracle":"pass","tried":20,"seconds":307,"summary":"check:park: 19/19 attractions route from the entrance, 0 rail crossing(s), 245/245 waypoints connected. All six invariants hold. 3401 ms."}
