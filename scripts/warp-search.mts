@@ -180,6 +180,17 @@ async function passesExtraGate(seed: number, warp: WarpVector | null, script: st
 }
 
 const args = process.argv.slice(2).filter((a) => a !== '--');
+// `--full-gates`: candidate seeds for the DEFAULT slot (the seed every
+// canonical-only check builds) must pass those checks too, whatever their
+// number is — the gates go with the role, not with 20260728.
+const fullGates = (() => {
+  const i = args.indexOf('--full-gates');
+  if (i >= 0) {
+    args.splice(i, 1);
+    return true;
+  }
+  return false;
+})();
 const outFile = (() => {
   const i = args.indexOf('--out');
   return i >= 0 ? (args.splice(i, 2)[1] as string) : 'warp-search.jsonl';
@@ -238,7 +249,7 @@ for (const seed of seeds) {
       // 73% ceiling at kerb -> (-37, 2)). A canonical candidate is not a
       // winner until the canonical-only gates it will actually face have
       // passed too.
-      if (seed === 20260728) {
+      if (seed === 20260728 || fullGates) {
         // Grown one check at a time as each has bitten a winner (#437's
         // shape): path-preference caught {ferrisWheel:2} in CI, pet-slide
         // caught {hotel:2} in the full local chain. Cheapest first.
