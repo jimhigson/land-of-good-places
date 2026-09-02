@@ -38,6 +38,15 @@ import type { CollisionWorld } from '../../world/Collision';
 /** How far the props keep from the path spur and the stall's counter, in metres. */
 const STALL_CLEARANCE = 4.2;
 
+/** How thick the mown-lawn slab is, and how far its middle sits off the plot's
+ * own origin — so its top surface is at {@link LAWN_TOP}. One definition, read
+ * by the slab that is built and by the ground query every prop stands on. */
+const LAWN_THICKNESS = 0.08;
+const LAWN_MID = 0.05;
+
+/** Top of the mown lawn, in plot-local metres. */
+const LAWN_TOP = LAWN_MID + LAWN_THICKNESS / 2;
+
 export function dressWaterFightPlot(plots: AnchorPlots, collision: CollisionWorld): void {
   const anchor = ANCHORS_BY_ID.waterFight;
   const [centreX, centreZ] = anchor.position;
@@ -69,6 +78,32 @@ export function dressWaterFightPlot(plots: AnchorPlots, collision: CollisionWorl
   const localGround = (x: number, z: number): number =>
     terrainHeight(centreX + x, centreZ + z) - ground;
 
+  /**
+   * The height a **paddling pool** stands at: whichever of the ground and the
+   * mown lawn is actually on top under it.
+   *
+   * The pools used to stand on the terrain alone, and the lawn is a *flat* slab
+   * laid over terrain that rolls ±0.32 m across this plot (measured, on every
+   * seed). On the low ground the lawn floats above the terrain, so a pool
+   * placed on the terrain was placed *under the lawn* — and on the canonical
+   * seed that put a pool's water disc exactly in the lawn's own top plane:
+   * 16.48 m² of coplanar face, the fifth-worst seam in the game (#472),
+   * strobing inside a pool a child stands half a metre from.
+   *
+   * `Math.max` rather than a stand-off: not a gap being maintained, but the
+   * honest answer to "how high is the ground here?" where two surfaces are
+   * drawn and only the higher one is seen. Nothing has to be kept in step,
+   * because nothing is being tracked — the question is asked afresh under each
+   * pool.
+   *
+   * Only the pools, deliberately. A pool is the one prop here with a wide flat
+   * **horizontal** face — the water — and a horizontal face is the only kind
+   * that can land in the lawn's own horizontal plane. Lifting the hedges and
+   * the gun rack to the same line instead put *their* undersides in the plane
+   * of the park terrain on seed 115, which is trading one seam for another.
+   */
+  const poolGround = (x: number, z: number): number => Math.max(localGround(x, z), LAWN_TOP);
+
   const [entranceX, entranceZ] = anchor.entrance;
   const doorX = entranceX - centreX;
   const doorZ = entranceZ - centreZ;
@@ -79,8 +114,11 @@ export function dressWaterFightPlot(plots: AnchorPlots, collision: CollisionWorl
   // --- a mown lawn where the plot markings used to be --------------------------
   const halfX = anchor.footprint.kind === 'rect' ? anchor.footprint.halfX : 10;
   const halfZ = anchor.footprint.kind === 'rect' ? anchor.footprint.halfZ : 10;
-  const lawn = new Mesh(new RoundedBoxGeometry(halfX * 2, 0.08, halfZ * 2, 3, 0.8), materials.grass);
-  lawn.position.y = 0.05;
+  const lawn = new Mesh(
+    new RoundedBoxGeometry(halfX * 2, LAWN_THICKNESS, halfZ * 2, 3, 0.8),
+    materials.grass,
+  );
+  lawn.position.y = LAWN_MID;
   lawn.receiveShadow = true;
   root.add(lawn);
 
@@ -96,7 +134,7 @@ export function dressWaterFightPlot(plots: AnchorPlots, collision: CollisionWorl
 
   for (const [x, z, radius, rimColour] of pools) {
     if (!clearOfDoor(x, z, radius)) continue;
-    const y = localGround(x, z);
+    const y = poolGround(x, z);
 
     const rim = solid(new Mesh(new TorusGeometry(radius, 0.2, 9, 30), toonMaterial(rimColour)));
     rim.rotation.x = Math.PI / 2;

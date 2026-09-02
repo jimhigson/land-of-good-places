@@ -1912,6 +1912,34 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[]): Gr
   const postGeometry = new CylinderGeometry(0.19, 0.21, 1, 8);
   const capGeometry = new SphereGeometry(0.24, 10, 8);
 
+  /**
+   * **One post per corner, however many runs end there.**
+   *
+   * The maze is L-shaped pieces, so an L's two arms share an endpoint — and
+   * each arm used to stand its own post and its own ball cap at it. Two
+   * eight-sided posts on the same spot put every one of their facets in one
+   * plane: nine coplanar seams and 3.13 m² of it, at 1.3 m from a child who is
+   * hiding behind that exact corner (#472). The shorter post is entirely
+   * inside the taller one, so per `ART_DIRECTION.md` §7 it should not be drawn
+   * at all rather than held off by anything.
+   *
+   * Collected across every run first, then built once each below. A corner
+   * takes the **lowest** base and the **highest** top of the runs meeting
+   * there, so the surviving post still reaches from the ground each arm stands
+   * on to the top of the taller arm — exactly what the pair of them covered
+   * between them, in one mesh.
+   */
+  interface Corner {
+    x: number;
+    z: number;
+    base: number;
+    top: number;
+  }
+  const corners: Corner[] = [];
+  /** Same corner, allowing for the endpoints being written twice over. */
+  const cornerAt = (x: number, z: number): Corner | undefined =>
+    corners.find((corner) => Math.hypot(corner.x - x, corner.z - z) < 0.05);
+
   for (const run of runs) {
     const [x1, z1] = run.from;
     const [x2, z2] = run.to;
@@ -1932,19 +1960,14 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[]): Gr
     group.add(boards);
 
     for (const [px, pz] of [run.from, run.to]) {
-      const postHeight = run.height + 0.32;
-      const post = new Mesh(postGeometry, postMaterial);
-      post.position.set(px, base + postHeight / 2, pz);
-      post.scale.y = postHeight;
-      post.castShadow = true;
-      post.receiveShadow = true;
-      group.add(post);
-
-      const cap = new Mesh(capGeometry, capMaterial);
-      cap.position.set(px, base + postHeight, pz);
-      cap.scale.set(1, 0.8, 1);
-      cap.castShadow = true;
-      group.add(cap);
+      const top = base + run.height + 0.32;
+      const existing = cornerAt(px, pz);
+      if (existing) {
+        existing.base = Math.min(existing.base, base);
+        existing.top = Math.max(existing.top, top);
+      } else {
+        corners.push({ x: px, z: pz, base, top });
+      }
     }
 
     // Real wall height, not the `Infinity` default — this is what lets a jump
@@ -1954,6 +1977,22 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[]): Gr
     // could jump anyway (design feedback #30e).
     collision.addWall(x1, z1, x2, z2, 0.22, run.height, true);
     built.push({ ...run, halfWidth: WALL_HALF_WIDTH[run.kind] });
+  }
+
+  for (const corner of corners) {
+    const postHeight = corner.top - corner.base;
+    const post = new Mesh(postGeometry, postMaterial);
+    post.position.set(corner.x, corner.base + postHeight / 2, corner.z);
+    post.scale.y = postHeight;
+    post.castShadow = true;
+    post.receiveShadow = true;
+    group.add(post);
+
+    const cap = new Mesh(capGeometry, capMaterial);
+    cap.position.set(corner.x, corner.top, corner.z);
+    cap.scale.set(1, 0.8, 1);
+    cap.castShadow = true;
+    group.add(cap);
   }
 
   return group;

@@ -16,6 +16,7 @@ import type { CollisionWorld } from '../Collision';
 import type { InteractZone } from '../interact';
 import type { MovingPlatform } from '../building/surfaces';
 import type { TrainRoute } from './route';
+import { PLATFORM_LENGTH } from './clearance';
 
 /**
  * A little station: a platform, a stripy canopy, lamps and a bench.
@@ -40,8 +41,17 @@ import type { TrainRoute } from './route';
  */
 const PLATFORM_HEIGHT = 0.34;
 
-const PLATFORM_LENGTH = 7.2;
 const PLATFORM_WIDTH = 2.6;
+
+/**
+ * How much of {@link PLATFORM_WIDTH} the painted edge stripe takes.
+ *
+ * One constant rather than a `0.3` in the stripe's size and a `0.15` in its
+ * position: the deck now has to stop exactly where the stripe starts, so three
+ * places have to agree, and CLAUDE.md's most common bug in this repo is two
+ * definitions of one thing kept in step by hand.
+ */
+const STRIPE_WIDTH = 0.3;
 
 /** Centre of the platform, out from the track centre line. */
 const PLATFORM_OFFSET = 2.15;
@@ -181,21 +191,37 @@ export class Station {
     const boardMaterial = toonMaterial(0xffffff, { map: woodTexture(1, 1) });
 
     // --- the deck ------------------------------------------------------------
+    // The deck stops where the edge stripe starts, rather than running the
+    // platform's full width with the stripe laid on top of it.
+    //
+    // Flush is what the stripe used to be: a 0.3 m box whose outer face landed
+    // *exactly* on the deck's own outer face, so 2.45 m² — the deck's whole
+    // trackside face, 7.2 m × 0.34 m — was two surfaces in one plane at 1e-16 m,
+    // on both stations. `ART_DIRECTION.md` §7's answer is to delete the face
+    // that is never seen, and the deck's trackside face is never seen: the
+    // stripe is in front of every square centimetre of it.
+    //
+    // So the two boxes abut instead of overlapping. They meet along one plane,
+    // but their touching faces point *opposite* ways (culling draws one) and
+    // their top faces share only an edge — which is how every tiled floor in
+    // this game is built, and is not a finding. Nothing is nudged and nothing
+    // moved: `covers()` still spans the full `PLATFORM_WIDTH`, because deck plus
+    // stripe still add up to it.
     const deck = new Mesh(
-      new BoxGeometry(PLATFORM_WIDTH, PLATFORM_HEIGHT, PLATFORM_LENGTH),
+      new BoxGeometry(PLATFORM_WIDTH - STRIPE_WIDTH, PLATFORM_HEIGHT, PLATFORM_LENGTH),
       deckMaterial,
     );
-    deck.position.y = PLATFORM_HEIGHT / 2;
+    deck.position.set(-trackSide * (STRIPE_WIDTH / 2), PLATFORM_HEIGHT / 2, 0);
     deck.castShadow = true;
     deck.receiveShadow = true;
     this.group.add(deck);
 
     // A painted stripe along the platform edge, the side the train comes to.
     const stripe = new Mesh(
-      new BoxGeometry(0.3, PLATFORM_HEIGHT + 0.02, PLATFORM_LENGTH),
+      new BoxGeometry(STRIPE_WIDTH, PLATFORM_HEIGHT + 0.02, PLATFORM_LENGTH),
       edgeMaterial,
     );
-    stripe.position.set(trackSide * (PLATFORM_WIDTH / 2 - 0.15), PLATFORM_HEIGHT / 2, 0);
+    stripe.position.set(trackSide * (PLATFORM_WIDTH / 2 - STRIPE_WIDTH / 2), PLATFORM_HEIGHT / 2, 0);
     stripe.castShadow = false;
     stripe.receiveShadow = true;
     this.group.add(stripe);

@@ -957,6 +957,11 @@ function buildShellGeometry(
     /** The coursed outer face: per side, two vertex indices per course (its
      * own top and bottom, at its own recess). See {@link COURSE_HEIGHT}. */
     readonly courses: [number[], number[]];
+    /** The same columns' clamped world `y`, two per course, so the horizontal
+     * reveal between two courses can ask what height it would be drawn at. */
+    readonly courseYs: [number[], number[]];
+    /** This ring's parapet top, per side — the plane the coping strip caps. */
+    readonly top: [number, number];
     readonly innerBottom: [number, number]; // parapet inner face, at road
     readonly innerTop: [number, number];
     readonly roadA: number; // road edge, side +1
@@ -1079,8 +1084,13 @@ function buildShellGeometry(
     // The coursed outer face for this ring — two vertices per course, at that
     // course's own recess, clamped into this ring's own wall. See the course
     // levels above.
-    const buildCourses = (topY: number, bottomY: number, side: 1 | -1): number[] => {
+    const buildCourses = (
+      topY: number,
+      bottomY: number,
+      side: 1 | -1,
+    ): { column: number[]; ys: number[] } => {
       const column: number[] = [];
+      const ys: number[] = [];
       for (let course = 0; course < courseCount; course += 1) {
         const recess = course % 2 === 0 ? 0 : COURSE_RECESS;
         const face = frame.worldAt(along, (halfAcross - recess) * side, shift);
@@ -1092,9 +1102,17 @@ function buildShellGeometry(
           vertex(face.x, yTop, face.z, u, yTop / TEXTURE_METRES),
           vertex(face.x, yBottom, face.z, u, yBottom / TEXTURE_METRES),
         );
+        // Kept beside the indices so the reveal below can ask how high it is
+        // about to be drawn without reading vertices back out of the buffer.
+        ys.push(yTop, yBottom);
       }
-      return column;
+      return { column, ys };
     };
+    /** This ring's own wall top, per side — what a course clamps up against. */
+    const ringTop: [number, number] = [parapetTopPlus, parapetTopMinus];
+
+    const coursesPlus = buildCourses(parapetTopPlus, bottomPlus, 1);
+    const coursesMinus = buildCourses(parapetTopMinus, bottomMinus, -1);
 
     const ring: Ring = {
       outerBottom: [
@@ -1105,10 +1123,9 @@ function buildShellGeometry(
         vertex(outerPlus.x, parapetTopPlus, outerPlus.z, u, parapetTopPlus / TEXTURE_METRES),
         vertex(outerMinus.x, parapetTopMinus, outerMinus.z, u, parapetTopMinus / TEXTURE_METRES),
       ],
-      courses: [
-        buildCourses(parapetTopPlus, bottomPlus, 1),
-        buildCourses(parapetTopMinus, bottomMinus, -1),
-      ],
+      courses: [coursesPlus.column, coursesMinus.column],
+      courseYs: [coursesPlus.ys, coursesMinus.ys],
+      top: ringTop,
       innerBottom: [
         vertex(roadPlus.x, roadBed, roadPlus.z, u, roadBed / TEXTURE_METRES),
         vertex(roadMinus.x, roadBed, roadMinus.z, u, roadBed / TEXTURE_METRES),
@@ -1182,10 +1199,39 @@ function buildShellGeometry(
           if (side === 0) quad(indices, bb, nb, nt, bt);
           else quad(indices, bb, bt, nt, nb);
           if (course + 1 < courseCount) {
-            const bnt = before[(course + 1) * 2] as number;
-            const nnt = now[(course + 1) * 2] as number;
-            if (side === 0) quad(indices, bb, bnt, nnt, nb);
-            else quad(indices, bb, nb, nnt, bnt);
+            // **Not where the reveal would be drawn in the coping's own
+            // plane** (#472).
+            //
+            // Every ring carries the same number of course vertices, clamped
+            // into that ring's own wall, so a short wall leaves the upper
+            // courses collapsed to zero height at the parapet top — which is
+            // deliberate and stated above, because a per-ring course count
+            // makes the strip between two rings unjoinable. What was not
+            // intended is that the *reveal* under a collapsed course is a
+            // horizontal quad sitting exactly at that parapet top, 6 cm wide,
+            // running the whole length of the flank — and the `wallTop` coping
+            // strip is a horizontal quad at the same height covering the same
+            // 6 cm. That is 18 of the game's coplanar seams, one per bridge,
+            // 4 m² of strobing along a wall a child walks beside; and where
+            // `parapetHeightFor` has tapered the parapet away to nothing at
+            // the ramp feet, the same face lands in the park terrain's plane
+            // as well, which is 8 seams more.
+            //
+            // Deleting it loses nothing, which is why this is the fix
+            // `ART_DIRECTION.md` §7 asks for rather than an offset: the coping
+            // spans from `halfAcross` inward past every course's recess, so it
+            // already closes the wall at exactly this height. The reveal is
+            // surplus geometry that only exists because the collapsed course
+            // above it has no face for it to step to.
+            const revealAtTop =
+              (previous.courseYs[side][course * 2 + 1] as number) >= (previous.top[side] as number) &&
+              (ring.courseYs[side][course * 2 + 1] as number) >= (ring.top[side] as number);
+            if (!revealAtTop) {
+              const bnt = before[(course + 1) * 2] as number;
+              const nnt = now[(course + 1) * 2] as number;
+              if (side === 0) quad(indices, bb, bnt, nnt, nb);
+              else quad(indices, bb, nb, nnt, bnt);
+            }
           }
         }
 

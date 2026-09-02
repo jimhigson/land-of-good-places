@@ -166,10 +166,24 @@ export function dressDeck(deck: number, floor: Group): void {
 /**
  * A big inlaid roundel, in the storey's own accent.
  *
- * Two flat discs a couple of centimetres proud of the slab. It costs two draw
- * calls and it is the single biggest reason a sixty-metre floor stops looking
+ * One flat disc a couple of centimetres proud of the slab. It costs one draw
+ * call and it is the single biggest reason a sixty-metre floor stops looking
  * like a warehouse: it gives the eye a middle, and it gives a child somewhere
  * that is obviously *the* place to meet.
+ *
+ * **It used to be two discs, and the inner one was 30 m² of coplanar seam** —
+ * the second-worst in the game (#472). `castleDecor.ts`'s `roundelRug` lays a
+ * textured rug at y = 0.055 over `DECK_ROUNDEL` at 0.92 of this radius; the
+ * inner disc was 0.52 of it with its top face at y = 0.06, so it was entirely
+ * inside the rug's footprint and 5 mm from its plane. Two surfaces fighting
+ * over the same 30 m², and the one that won was the plain white disc rather
+ * than the painted rug the roundel got a rug *for*.
+ *
+ * The rug is guaranteed to be there: `dressDeck` only builds a roundel when
+ * the deck is neither furnished nor the roof, and `roundelRug` returns one for
+ * every deck that is not furnished. So the inner disc is never the thing being
+ * looked at, and per `ART_DIRECTION.md` §7 the answer to a face that is never
+ * seen is to not draw it — not to hold it 5 mm off something.
  */
 function buildRoundel(deck: number): Group {
   const group = new Group();
@@ -183,14 +197,6 @@ function buildRoundel(deck: number): Group {
   outer.position.y = 0.02;
   outer.receiveShadow = true;
   group.add(outer);
-
-  const inner = new Mesh(
-    new CylinderGeometry(ROUNDEL_RADIUS * 0.52, ROUNDEL_RADIUS * 0.52, 0.05, 32),
-    interiorMaterial(PALETTE.blossomWhite, 0.55),
-  );
-  inner.position.y = 0.035;
-  inner.receiveShadow = true;
-  group.add(inner);
 
   return group;
 }

@@ -112,6 +112,39 @@ export class ShopUnits {
     const placeholder = this.placeholders.get(id);
     if (placeholder) placeholder.visible = visible;
   }
+
+  /**
+   * **Take the empty-unit dressing away for good**, once a real shop has moved
+   * into this unit.
+   *
+   * `Shops` used to call `setPlaceholderVisible(id, false)` here, and every one
+   * of the seven units has a real shop in it — so all seven placeholders were
+   * built, hidden on the same frame, and then carried for the rest of the game
+   * as counters and awnings sitting inside the kiosks that replaced them. That
+   * is seven pairs of coplanar faces (#472), 17.5 m² of them, and seven units'
+   * worth of geometry nobody will ever see.
+   *
+   * `check:coplanar` reports them because it deliberately ignores `visible`:
+   * two-thirds of the meshes in this game are `visible = false` at build time,
+   * since the castle's interior and the hotel's rooms are hidden until you walk
+   * in, and honouring the flag would sweep the park and skip every interior.
+   * So a permanently-hidden mesh is indistinguishable from a temporarily-hidden
+   * one, and the honest fix is the one `ART_DIRECTION.md` §7 asks for anyway:
+   * if it is never seen, do not keep it.
+   *
+   * `setPlaceholderVisible` stays for a unit that has no shop yet, which is
+   * still a real state — `Shops` skips any unit with no skin defined.
+   */
+  discardPlaceholder(id: string): void {
+    const placeholder = this.placeholders.get(id);
+    if (!placeholder) return;
+    placeholder.removeFromParent();
+    placeholder.traverse((object) => {
+      const mesh = object as { isMesh?: boolean; geometry?: { dispose(): void } };
+      if (mesh.isMesh) mesh.geometry?.dispose();
+    });
+    this.placeholders.delete(id);
+  }
 }
 
 /**
