@@ -68,7 +68,12 @@ const WARPS_BY_SEED: Readonly<Record<number, WarpVector>> = {
   // (#437). These vectors are meaningless until the level tier is gone:
   // they exist to reconnect the garden pockets the level crossings used to
   // carry.
-  20260728: { layout: { ferrisWheel: 2 } },
+  // First baked as {ferrisWheel:2}, which passed check:park and all 81
+  // invariants yet failed check:path-preference's kerb-step clause in CI
+  // (84.1% vs 73% ceiling) — the canonical seed answers to canonical-only
+  // gates the pool seeds do not (#437). Re-searched with that gate in the
+  // acceptance loop: {hotel:2}, candidate 22.
+  20260728: { layout: { hotel: 2 } },
   5: { layout: { ferrisWheel: 2 } },
   // Not a stranded seed: 24's unwarped network crossed the rail at railD
   // 47.8, off every proven site — absorbed silently as a fence gap while
