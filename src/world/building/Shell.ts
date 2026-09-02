@@ -1,11 +1,8 @@
 import {
   BoxGeometry,
-  BufferGeometry,
   CircleGeometry,
   ConeGeometry,
   CylinderGeometry,
-  DoubleSide,
-  Float32BufferAttribute,
   Group,
   InstancedMesh,
   Matrix4,
@@ -24,12 +21,15 @@ import {
   BUILDING_HALF_Z,
   BUILDING_PARAPET,
   BUILDING_SLAB,
+  CAMERA_PITCH_DEGREES,
   BUILDING_WALL_THICKNESS,
   INTERIOR_HALF_X,
   INTERIOR_HALF_Z,
   INTERIOR_PLAZA_DROP,
   INTERIOR_PLAZA_RADIUS,
+  PLAYER_RADIUS,
 } from '../../core/constants';
+import { KID_HEIGHT } from '../../art/models/kid';
 import { PALETTE } from '../../core/palette';
 import {
   CASTLE_WINDOWS,
@@ -46,6 +46,15 @@ import {
 } from './parts';
 import { segmentsMinusGaps } from '../wallRuns';
 import { buildCeilingBeams, castleFloorMaterial, castleWallMaterial } from './castleFabric';
+import {
+  buildCastleTurrets,
+  buildMerlons,
+  CASTLE_MERLON_WIDTH,
+  CASTLE_STONE,
+  rectangleMerlonSlots,
+  spread,
+  type MerlonSlot,
+} from './castleMasonry';
 import { FLOOR_SPACE_SPACING } from './floors';
 import { CASTLE_MERLON_HEIGHT, CASTLE_WALL_HEIGHT } from './layout';
 import {
@@ -62,12 +71,11 @@ import {
   ROOF_PAVILION_HEIGHT,
   ROOF_PAVILION_X,
   ROOF_PAVILION_Z,
+  CASTLE_TURRET_FOOTPRINT_RADIUS,
+  ROOF_PARAPET_THICKNESS,
+  roofTurretSpots,
   TOP_DECK,
-  TOWER_BASE_FLARE,
   TOWER_HEIGHT,
-  TOWER_RADIUS,
-  TOWER_ROOF_HEIGHT,
-  TOWER_ROOF_OVERHANG,
 } from './layout';
 import { SLIDE_PLAN } from '../slide/plan';
 import { CHUTE_ENVELOPE, SlideRide } from './SlideRide';
@@ -83,8 +91,6 @@ const HALF_WALL = BUILDING_WALL_THICKNESS / 2;
 /** Header band under each deck, so the glass stops short of the ceiling. */
 const GLASS_TOP = BUILDING_FLOOR_HEIGHT - 0.34;
 
-/** How high the roof terrace's parapet stands. Low enough to see over at 38°. */
-const ROOF_PARAPET = 1.05;
 
 /**
  * The two shells this game builds.
@@ -249,9 +255,14 @@ function buildDeck(plan: ShellPlan, deck: number): Mesh {
   // same rectangle by construction. It starts at the wall's *outer* face
   // rather than at `LIFT_SHAFT.maxX`, so the two rectangles abut instead of
   // overlapping — two coplanar top faces in one extrusion z-fight.
+  //
+  // **The roof deck is cut back to where its curtain wall begins** (#467) —
+  // see {@link roofDeckShapes}. Everything else is the plain slab.
+  const isRoof = plan.holes && deck === TOP_DECK;
+  const plate = isRoof ? roofDeckShapes(plan) : [slab];
   const shapes = plan.holes
-    ? [slab, planRect(LIFT_SHAFT.minX, -ox, LIFT_SHAFT.minZ, LIFT_SHAFT.maxZ)]
-    : [slab];
+    ? [...plate, planRect(LIFT_SHAFT.minX, -ox, LIFT_SHAFT.minZ, LIFT_SHAFT.maxZ)]
+    : plate;
 
   // `plan.holes` is true only for the interior — the facade out in the garden
   // is a solid block and takes none of this. The roof terrace is genuinely
@@ -457,16 +468,6 @@ function buildWindows(plan: ShellPlan, deck: number): InstancedMesh[] {
   return [frames, panes];
 }
 
-/** Evenly spaced positions across a wall, leaving room at the corners. */
-function spread(halfExtent: number, spacing: number): number[] {
-  const usable = halfExtent - 1.6;
-  const count = Math.max(1, Math.floor((usable * 2) / spacing) + 1);
-  const step = count > 1 ? (usable * 2) / (count - 1) : 0;
-  const values: number[] = [];
-  for (let i = 0; i < count; i += 1) values.push(-usable + step * i);
-  return values;
-}
-
 function blocked(along: number, gaps: readonly (readonly [number, number])[]): boolean {
   const half = WINDOW_WIDTH / 2 + 0.3;
   return gaps.some(([start, end]) => along + half > start && along - half < end);
@@ -503,6 +504,60 @@ function buildCornerPillars(plan: ShellPlan): InstancedMesh {
 // ----------------------------------------------------------- roof terrace
 
 /**
+ * **The one opening in the roof garden's south (+Z) edge** — where the
+ * ginormous slide leaves.
+ *
+ * Four things step round it: the parapet kerb, the merlons standing on the
+ * kerb, the curtain wall falling away below it, and the deck plate itself
+ * ({@link roofDeckShapes}), which has to *fill* the gap the other three leave.
+ * They used to say it four times over in their own inline literals; a moved
+ * doorway now moves all four, which is what CLAUDE.md's "one owner; everyone
+ * else asks" is for.
+ */
+const ROOF_SLIDE_GAPS: readonly (readonly [number, number])[] = [
+  [SLIDE_PLAN.roofDoorMinX, SLIDE_PLAN.roofDoorMaxX],
+];
+
+/**
+ * **The roof deck's plate, stopping where the curtain wall starts** (#467).
+ *
+ * Jim, on the roof garden: *"the roof has an issue we've seen before of
+ * coplanar faces upsetting z-index — in this case the edges of the floor and
+ * the walls. But really the floor doesn't need edges rendered."*
+ *
+ * The deck is a 0.3 m slab hanging under the walking surface, and
+ * {@link buildRoofCurtainWalls} hangs 18 m of wall off the same two edges,
+ * its top at the same `y = 0`. So along the east and south runs the slab's
+ * outer 0.6 m sat **inside** the wall: their outer faces were the same plane
+ * facing the same way, and the depth buffer picked a different winner as the
+ * camera moved. That strobing 0.3 m strip under the battlement is what a child
+ * sees.
+ *
+ * So the plate stops at the wall's inner face and the wall itself fills the
+ * band — no offset to maintain, and the deleted faces were never visible
+ * (ART_DIRECTION §7). Measured after the cut: the roof's four
+ * `deck-2`/`roof-curtain-wall` coplanar pairs are gone.
+ *
+ * The two runs the wall does *not* cover keep their full plate: the north and
+ * west edges have only the parapet standing on them, and nothing below to
+ * argue with.
+ */
+function roofDeckShapes(plan: ShellPlan): Shape[] {
+  const ox = outerX(plan);
+  const oz = outerZ(plan);
+  const band = ROOF_PARAPET_THICKNESS;
+  const shapes = [planRect(-ox, ox - band, -oz, oz - band)];
+  // Where the wall steps aside for the slide there is nothing to hide the
+  // plate — and nothing to stand on either, so the plate carries on to the
+  // edge rather than leaving a notch in the floor at the slide's mouth. Read
+  // from the list the wall steps round, so the two cannot disagree.
+  for (const [start, end] of ROOF_SLIDE_GAPS) {
+    shapes.push(planRect(Math.max(start, -ox), Math.min(end, ox - band), oz - band, oz));
+  }
+  return shapes;
+}
+
+/**
  * The roof: an actual outdoor terrace, and the top floor of the building.
  *
  * "The top floor is the roof" was the family's fifth note, and it changes what
@@ -518,75 +573,341 @@ function buildRoofTerrace(plan: ShellPlan, roof: Group): void {
   // A parapet all the way round, with a gap where the slide leaves and another
   // where you step out of the lift.
   const shapes: Shape[] = [];
-  shapes.push(planRect(-ox, ox, -oz, -oz + 0.6));
-  for (const [start, end] of segmentsMinusGaps(-ox, ox, [[SLIDE_PLAN.roofDoorMinX, SLIDE_PLAN.roofDoorMaxX]])) {
-    shapes.push(planRect(start, end, oz - 0.6, oz));
+  const band = ROOF_PARAPET_THICKNESS;
+  shapes.push(planRect(-ox, ox, -oz, -oz + band));
+  for (const [start, end] of segmentsMinusGaps(-ox, ox, ROOF_SLIDE_GAPS)) {
+    shapes.push(planRect(start, end, oz - band, oz));
   }
-  for (const [start, end] of segmentsMinusGaps(-oz + 0.6, oz - 0.6, [
+  for (const [start, end] of segmentsMinusGaps(-oz + band, oz - band, [
     [LIFT_DOOR_MIN_Z, LIFT_DOOR_MAX_Z],
   ])) {
-    shapes.push(planRect(-ox, -ox + 0.6, start, end));
+    shapes.push(planRect(-ox, -ox + band, start, end));
   }
-  shapes.push(planRect(ox - 0.6, ox, -oz + 0.6, oz - 0.6));
+  shapes.push(planRect(ox - band, ox, -oz + band, oz - band));
 
+  // **The parapet is a battlement now** (#462). Jim, standing on the roof
+  // garden: *"it needs the rooftop's near side to look like the external of the
+  // castle … ramparts, same colour as the castle viewed from the outside."*
+  //
+  // The lip is the same ring it always was, in the facade's own wall cream
+  // rather than its roof colour, but it is cut down to {@link ROOF_CRENEL_BASE}
+  // and merlons stand on it — the *same* merlons the curtain wall out in the
+  // garden wears, from `castleMasonry.ts`, so the two cannot drift.
+  //
+  // **The battlement's top ends up 0.7 m higher than the plain lip did and she
+  // can see out better, not worse.** The crenels between the merlons run right
+  // down to 0.55 m, where the old parapet was solid to 1.05 m — so there is
+  // more sky and more cloud (#455) through the gaps than there was over the
+  // top, and the silhouette gains the thing that says "castle" at a glance.
   const lip = castAndReceive(
-    new Mesh(extrudePlan(shapes, ROOF_PARAPET), softMaterial(PALETTE.buildingRoofDeep, 0.72)),
+    new Mesh(extrudePlan(shapes, ROOF_CRENEL_BASE), softMaterial(CASTLE_STONE, 0.78)),
   );
-  lip.name = 'roof-parapet';
-  roof.add(lip);
+  lip.name = 'roof-parapet-lip';
+
+  // Grouped under the name `check:castle` measures, because the question it
+  // asks — *how high is the rail she looks over* — is answered by the merlons
+  // now, not by the kerb they stand on. `Box3.setFromObject` walks children, so
+  // one group is one honest answer rather than two half ones.
+  const parapet = new Group();
+  parapet.name = 'roof-parapet';
+  parapet.add(lip);
+  parapet.add(
+    buildMerlons(
+      'roof-battlement',
+      // The merlon run keeps off the slide's gap and the lift's, the same two
+      // openings the kerb below it steps round — asked of `segmentsMinusGaps`
+      // rather than restated, so a moved doorway takes its merlons with it.
+      roofMerlonSlots(plan),
+      ROOF_CRENEL_BASE,
+    ),
+  );
+  roof.add(parapet);
+
+  // Turrets at the corners, and the castle's own wall dropping away below them.
+  roof.add(buildRoofTurrets());
+  roof.add(buildRoofCurtainWalls(plan));
 
   // A pavilion at the west end, to break up the terrace and give the roof a
   // shady corner. Same silhouette it always had, only bigger and standing on a
   // floor you can now walk about on.
-  //
-  // **A filled block, and it stays one** (#459). Jim: *"Why does the roof
-  // garden have a big shed-like building on it that you can run through?"* —
-  // so it is solid now, `registerPavilionCollision` off these same numbers.
-  // It was tried as four walls with a doorway, so the shady corner would be
-  // somewhere she could stand *in*, and that is a bigger job than it looks:
-  // the pyramid roof is opaque from beneath and a child who walks inside
-  // simply **disappears** under it. Making her visible in there means the
-  // hotel's `overhangFader`, which is a feature rather than a collider, and
-  // Jim's own words were *"the pavilion is fine but should be solid"*. So it
-  // is solid, and an enterable pavilion is its own ticket.
+  const pavilion = buildRoofPavilion(1);
+  pavilion.position.set(ROOF_PAVILION_X, 0, ROOF_PAVILION_Z);
+  roof.add(pavilion);
+
+  roof.add(buildSlideMouth(plan));
+
+  roof.add(
+    buildRoofPlanters(plan, 1, {
+      x: ROOF_PAVILION_X,
+      z: ROOF_PAVILION_Z,
+      halfX: ROOF_PAVILION_HALF_X,
+      halfZ: ROOF_PAVILION_HALF_Z,
+    }),
+  );
+}
+
+/**
+ * How high the solid kerb under the merlons stands.
+ *
+ * Low enough that a crenel is a real hole a six-year-old sees sky through —
+ * which is the whole point of #455's clouds — and high enough that the edge of
+ * the deck still reads as stone rather than as a row of loose teeth. Just over
+ * half a merlon.
+ */
+const ROOF_CRENEL_BASE = 0.55;
+
+/**
+ * The merlon slots round the roof garden's parapet, stepping round the two
+ * openings in it.
+ *
+ * The openings are asked of the same numbers the kerb steps round, so a merlon
+ * can never end up standing in the slide's doorway.
+ */
+function roofMerlonSlots(plan: ShellPlan): MerlonSlot[] {
+  const ox = outerX(plan);
+  const oz = outerZ(plan);
+  const slots = rectangleMerlonSlots(ox, oz, plan.halfX, plan.halfZ);
+  const half = CASTLE_MERLON_WIDTH / 2;
+  const clearOf = (
+    along: number,
+    gaps: readonly (readonly [number, number])[],
+  ): boolean => !gaps.some(([start, end]) => along + half > start && along - half < end);
+  return slots.filter((slot) => {
+    // The slide leaves through the south (+Z) run; the lift door is in the
+    // west (−X) one.
+    if (slot.z === oz) return clearOf(slot.x, ROOF_SLIDE_GAPS);
+    if (slot.x === -ox) return clearOf(slot.z, [[LIFT_DOOR_MIN_Z, LIFT_DOOR_MAX_Z]]);
+    return true;
+  });
+}
+
+/**
+ * **Where a roof-garden turret's cone starts** — at the top of the battlement.
+ *
+ * The first cut stood the shaft on the paving and carried it up past the
+ * tallest child in the game, because she could walk under the cone. She cannot
+ * any more — {@link roofTurretSpots} pushes the turret out past the parapet's
+ * inner face — and the number that binds is now what *reads* rather than what
+ * clears her hat.
+ *
+ * The eaves sit exactly on the merlons' tops, so the turret grows out of the
+ * rampart the way a corner tower does rather than standing behind it on the
+ * floor. It is also 1.8 m less cone hanging over the garden, and that is the
+ * point: at the fixed isometric a solid this size hides `height × 1.28` metres
+ * of floor up-frame of itself, and the taller version swallowed a child five
+ * metres inboard of the corner. Measured on screen, not reasoned about.
+ */
+const ROOF_TURRET_EAVES = ROOF_CRENEL_BASE + CASTLE_MERLON_HEIGHT;
+
+/**
+ * **How tall a roof-garden turret's cone is — decided by the camera, not by
+ * taste.**
+ *
+ * At the fixed isometric a solid hides everything within `height ÷ tan(38°)`
+ * up-frame of itself, and up-frame from a corner turret is the corner of the
+ * garden a child walks to in order to lean on the rampart. The facade's own
+ * 4.2 m cone put her whole body behind it from eight metres away; that was
+ * measured on screen, twice, and it is the second time this exact defect has
+ * been found here (the enterable pavilion was reverted for it).
+ *
+ * So the height is derived from the thing that must stay visible. The nearest
+ * floor to a turret is {@link CASTLE_TURRET_FOOTPRINT_RADIUS} plus her own
+ * radius from its middle; a camera ray grazing the turret's tip passes over
+ * that spot at `tip − distance × tan(38°)`; and her head has to be above it.
+ * Rearranged, that caps the tip, and the cone is what is left after the eaves.
+ *
+ * It comes out a little under three metres — a stubby witch's hat rather than
+ * the facade's tall one, which is right for something seen from ten metres
+ * instead of a hundred.
+ *
+ * **The cone's apex has to *be* the tip for this to hold**, which is why these
+ * turrets carry no mast (`withMast: false`). The first version kept the
+ * facade's mast and finial, 1.9 m of them above the apex, and the finial was
+ * measured drawn across a child's chest at 8.12 m — the cap was correct and it
+ * was capping the wrong thing.
+ */
+const ROOF_TURRET_ROOF = (() => {
+  const nearestFloor = CASTLE_TURRET_FOOTPRINT_RADIUS + PLAYER_RADIUS;
+  const tipCap = nearestFloor * Math.tan((CAMERA_PITCH_DEGREES * Math.PI) / 180) + KID_HEIGHT;
+  return Math.max(1.2, tipCap - ROOF_TURRET_EAVES);
+})();
+
+/**
+ * How far the roof garden's curtain wall — and the turret shafts standing in
+ * it — carry on down past the deck.
+ *
+ * Far enough that its foot is never in frame: from a child's eye at the
+ * parapet the camera's 38° sight line reaches the bottom of an 18 m drop some
+ * 23 m out, and the orthographic frame is only about 12 m of half-width
+ * (measured in #455). `roofClouds.ts`'s deep tier drifts from −9 m to −26 m
+ * across the same band, so what a child actually sees at the bottom of the
+ * wall is weather.
+ */
+const ROOF_CURTAIN_DROP = 18;
+
+/**
+ * Corner turrets on the roof garden — the same turret the facade wears, on the
+ * plate a child is standing on.
+ *
+ * Their shafts carry on {@link ROOF_CURTAIN_DROP} below the deck, so the wall
+ * falling away outside has something at its corners rather than being a flat
+ * cliff of cream.
+ */
+function buildRoofTurrets(): Group {
+  const group = buildCastleTurrets({
+    prefix: 'roof-turret',
+    spots: roofTurretSpots(),
+    baseY: 0,
+    bodyHeight: ROOF_TURRET_EAVES,
+    bodyBelow: ROOF_CURTAIN_DROP,
+    roofHeight: ROOF_TURRET_ROOF,
+    withMast: false,
+  });
+  group.name = 'roof-turrets';
+  return group;
+}
+
+/**
+ * **The castle wall, falling away below the roof garden's near edges** (#462).
+ *
+ * Jim asked for *"walls reaching down"*, and only for the side he can see:
+ * *"the far side being hidden can be ignored"*. The camera is a fixed
+ * isometric looking from +X +Z, so those two runs — the east (+X) and south
+ * (+Z) faces — are the ones a child looks down over. The −X and −Z faces are at
+ * the *top* of the frame with their own parapet in front of them, so a wall
+ * there could never be drawn into a single frame; building it would be two more
+ * extrusions of nothing.
+ *
+ * Flat paint in the facade's own `buildingWall` cream rather than the interior's
+ * coursed ashlar, because this is the castle *seen from outside* — the same
+ * decision `buildWalls` makes for the facade, and the reason the castle reads as
+ * one storybook mass from across the park.
+ */
+function buildRoofCurtainWalls(plan: ShellPlan): Mesh {
+  const ox = outerX(plan);
+  const oz = outerZ(plan);
+  const shapes: Shape[] = [
+    // The east face, full depth.
+    planRect(ox - ROOF_PARAPET_THICKNESS, ox, -oz, oz),
+    // The south face, stepping round the gap the ginormous slide leaves
+    // through — the same numbers the parapet above it steps round.
+    ...segmentsMinusGaps(-ox, ox - ROOF_PARAPET_THICKNESS, ROOF_SLIDE_GAPS).map(([start, end]) =>
+      planRect(start, end, oz - ROOF_PARAPET_THICKNESS, oz),
+    ),
+  ];
+
+  const wall = new Mesh(
+    extrudePlan(shapes, ROOF_CURTAIN_DROP),
+    softMaterial(CASTLE_STONE, 0.78),
+  );
+  wall.name = 'roof-curtain-wall';
+  // Below everything, lit but never a caster: a shadow from an 18 m cliff falls
+  // on nothing at all, and the shadow pass is already 57% of draw calls (#251).
+  wall.castShadow = false;
+  wall.receiveShadow = true;
+  wall.position.y = -ROOF_CURTAIN_DROP;
+  return wall;
+}
+
+/**
+ * **The roof garden's pavilion — one builder, two castles** (#462).
+ *
+ * Jim: *"when out in the park there should be a roof on the castle with a few
+ * of the features from the actual roof garden on top of it … maybe just the
+ * floor of the roof garden and the pavilion."*
+ *
+ * So the same shape stands in two places, and the two are **disjoint spaces**
+ * (#377/#380) — the roof garden's plate is 300 m from the facade's. Nothing
+ * about a position can be shared between them; the *shape* can, and this is it.
+ * A second pavilion modelled on the facade is precisely the defect CLAUDE.md
+ * names most often.
+ *
+ * `scale` is the only thing that differs. The facade's plate is 24 × 18 m
+ * against the interior's 42.4 × 31.1 (GAME_DESIGN item 30c: they are different
+ * worlds at different sizes), so the facade's copy is cut down by that same
+ * ratio and reads as the same building rather than as a shed that has swallowed
+ * a castle. See {@link FACADE_SCALE}.
+ *
+ * **A filled block, and it stays one** (#459). Jim: *"Why does the roof
+ * garden have a big shed-like building on it that you can run through?"* —
+ * so it is solid, `registerPavilionCollision` off these same numbers. It was
+ * tried as four walls with a doorway, so the shady corner would be somewhere
+ * she could stand *in*, and that is a bigger job than it looks: the pyramid
+ * roof is opaque from beneath and a child who walks inside simply
+ * **disappears** under it. Making her visible in there means the hotel's
+ * `overhangFader`, which is a feature rather than a collider, and Jim's own
+ * words were *"the pavilion is fine but should be solid"*. So it is solid, and
+ * an enterable pavilion is its own ticket.
+ *
+ * Origin at the pavilion's own base, centred in plan, so a caller sets
+ * `position` and nothing else — ART_DIRECTION §7's rule for an asset, applied
+ * to a piece of world geometry for the same reason.
+ */
+export function buildRoofPavilion(scale: number, withMast = true): Group {
+  const group = new Group();
+  group.name = 'roof-pavilion-group';
+
   const pavilion = castAndReceive(
     new Mesh(
-      new BoxGeometry(ROOF_PAVILION_HALF_X * 2, ROOF_PAVILION_HEIGHT, ROOF_PAVILION_HALF_Z * 2),
+      new BoxGeometry(
+        ROOF_PAVILION_HALF_X * 2 * scale,
+        ROOF_PAVILION_HEIGHT * scale,
+        ROOF_PAVILION_HALF_Z * 2 * scale,
+      ),
       softMaterial(PALETTE.buildingWall, 0.78),
     ),
   );
   pavilion.name = 'roof-pavilion';
-  pavilion.position.set(ROOF_PAVILION_X, ROOF_PAVILION_HEIGHT / 2, ROOF_PAVILION_Z);
-  roof.add(pavilion);
+  pavilion.position.y = (ROOF_PAVILION_HEIGHT / 2) * scale;
+  group.add(pavilion);
 
   // ConeGeometry with four segments is a pyramid, and its radius is the
   // *circum*radius — size it off the box's diagonal or it swamps the roof.
   const pavilionRoof = castAndReceive(
     new Mesh(
-      new ConeGeometry(Math.hypot(ROOF_PAVILION_HALF_X, ROOF_PAVILION_HALF_Z) + 0.5, 2.4, 4),
+      new ConeGeometry(
+        (Math.hypot(ROOF_PAVILION_HALF_X, ROOF_PAVILION_HALF_Z) + 0.5) * scale,
+        2.4 * scale,
+        4,
+      ),
       softMaterial(PALETTE.buildingRoofDeep, 0.72),
     ),
   );
-  pavilionRoof.position.set(ROOF_PAVILION_X, 4.1, ROOF_PAVILION_Z);
+  pavilionRoof.name = 'roof-pavilion-roof';
+  pavilionRoof.position.y = 4.1 * scale;
   pavilionRoof.rotation.y = Math.PI / 4;
-  roof.add(pavilionRoof);
+  group.add(pavilionRoof);
 
-  // Every building in this park has a bobble on top.
+  // Every building in this park has a bobble on top — except the copy on the
+  // castle's own roof out in the garden, which is why this is optional.
+  //
+  // That castle is 24 m across and its battlements top out at
+  // `CASTLE_MASONRY_TOP`; the ginormous slide's air begins 3.44 m above them,
+  // and `theGinormousSlideLeavesOverTheBattlements` holds it open on every
+  // seed. A mast and a bobble scaled for a 42 m roof garden would stand 5 m
+  // over the parapet — the tallest thing on the castle, poking into a ride's
+  // envelope, to say something the pyramid roof already says. The roof garden's
+  // own pavilion keeps both.
+  if (!withMast) return group;
+
   const mast = receiveOnly(
-    new Mesh(new CylinderGeometry(0.12, 0.16, 3.4, 8), softMaterial(PALETTE.woodLight, 0.85)),
+    new Mesh(
+      new CylinderGeometry(0.12 * scale, 0.16 * scale, 3.4 * scale, 8),
+      softMaterial(PALETTE.woodLight, 0.85),
+    ),
   );
-  mast.position.set(ROOF_PAVILION_X, 6.6, ROOF_PAVILION_Z);
-  roof.add(mast);
+  mast.name = 'roof-pavilion-mast';
+  mast.position.y = 6.6 * scale;
+  group.add(mast);
 
   const bobble = receiveOnly(
-    new Mesh(new SphereGeometry(0.62, 18, 14), softMaterial(PALETTE.markerPink, 0.5)),
+    new Mesh(new SphereGeometry(0.62 * scale, 18, 14), softMaterial(PALETTE.markerPink, 0.5)),
   );
-  bobble.position.set(ROOF_PAVILION_X, 8.5, ROOF_PAVILION_Z);
-  roof.add(bobble);
+  bobble.name = 'roof-pavilion-bobble';
+  bobble.position.y = 8.5 * scale;
+  group.add(bobble);
 
-  roof.add(buildSlideMouth(plan));
-
-  roof.add(buildRoofPlanters(plan));
+  return group;
 }
 
 /**
@@ -662,32 +983,53 @@ function buildSlideMouth(plan: ShellPlan): Group {
   return mouth.group;
 }
 
-/** A ring of pastel planters so the terrace is not a blank field from above. */
-function buildRoofPlanters(plan: ShellPlan): InstancedMesh {
+/**
+ * A ring of pastel planters so the terrace is not a blank field from above.
+ *
+ * Sized entirely off the plan it is handed, which is what lets the castle's own
+ * roof (#462) take the same ring at facade scale without a second set of
+ * numbers — the ellipse simply comes out 24 × 18 m instead of 42 × 31.
+ *
+ * `pavilion` is the footprint to step round, in the same local metres. On the
+ * roof garden the ring misses the pavilion by 0.7 m and this filter drops
+ * nothing; on the facade's much tighter plate it would otherwise stand two mint
+ * spheres inside the shed. Asked rather than assumed, because "it happens to
+ * miss" is not a mechanism.
+ */
+function buildRoofPlanters(
+  plan: ShellPlan,
+  scale: number,
+  pavilion: { x: number; z: number; halfX: number; halfZ: number },
+): InstancedMesh {
   const count = 18;
+  const spots: Vector3[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const t = (i / count) * Math.PI * 2;
+    const x = Math.cos(t) * (outerX(plan) - 2.2 * scale);
+    const z = Math.sin(t) * (outerZ(plan) - 2.2 * scale);
+    const clear =
+      Math.abs(x - pavilion.x) > pavilion.halfX + 0.62 * scale ||
+      Math.abs(z - pavilion.z) > pavilion.halfZ + 0.62 * scale;
+    if (clear) spots.push(new Vector3(x, 0.35 * scale, z));
+  }
+
   const planters = new InstancedMesh(
-    new SphereGeometry(0.62, 12, 9),
+    new SphereGeometry(0.62 * scale, 12, 9),
     softMaterial(PALETTE.markerMint, 0.55),
-    count,
+    Math.max(1, spots.length),
   );
   planters.name = 'roof-planters';
   planters.castShadow = false;
   planters.receiveShadow = true;
+  planters.count = spots.length;
 
   const matrix = new Matrix4();
   const rotation = new Quaternion();
-  const scale = new Vector3(1, 0.8, 1);
-  const position = new Vector3();
-  for (let i = 0; i < count; i += 1) {
-    const t = (i / count) * Math.PI * 2;
-    position.set(
-      Math.cos(t) * (outerX(plan) - 2.2),
-      0.35,
-      Math.sin(t) * (outerZ(plan) - 2.2),
-    );
-    matrix.compose(position, rotation, scale);
-    planters.setMatrixAt(i, matrix);
-  }
+  const scaling = new Vector3(1, 0.8, 1);
+  spots.forEach((position, index) => {
+    matrix.compose(position, rotation, scaling);
+    planters.setMatrixAt(index, matrix);
+  });
   planters.instanceMatrix.needsUpdate = true;
   return planters;
 }
@@ -759,11 +1101,8 @@ const CASTLE_DOOR_HEIGHT = 3.6;
 /** Total height of the curtain wall, battlement included. One number, one
  * colour, the whole way round — which is what stops it reading as storeys. */
 
-
-const CASTLE_MERLON_WIDTH = 0.85;
-const CASTLE_MERLON_DEPTH = 0.5;
-
-const CASTLE_MERLON_PITCH = 1.7;
+// A merlon's width, depth and pitch now live in `castleMasonry.ts` with the
+// battlement builder itself, because the roof garden wears the same one (#462).
 
 // TOWER_RADIUS, TOWER_HEIGHT, TOWER_ROOF_HEIGHT, TOWER_ROOF_OVERHANG and
 // TOWER_BASE_FLARE now live in `layout.ts`. `slide/plan.ts` has to route the
@@ -803,6 +1142,7 @@ function buildCastle(plan: ShellPlan, group: Group): void {
   group.add(buildPlinth(plan));
   group.add(buildEntranceSteps());
   group.add(buildCourtyard(plan));
+  group.add(buildCastleRoofGarden(plan));
   group.add(buildCastleWalls(plan));
   group.add(buildCruiserWindows(plan));
   group.add(buildCrenellations(plan));
@@ -1045,167 +1385,153 @@ function buildCourtyard(plan: ShellPlan): Group {
   return group;
 }
 
-/** Slots for {@link buildCrenellations}: one instance per merlon, right round the wall. */
-function crenellationSlots(plan: ShellPlan): WindowSlot[] {
-  const slots: WindowSlot[] = [];
-  const ox = outerX(plan);
-  const oz = outerZ(plan);
-  // Kept well clear of the corner towers, which stand outside this ring.
-  for (const x of spread(plan.halfX - 0.9, CASTLE_MERLON_PITCH)) {
-    slots.push({ x, z: -oz, yaw: 0 });
-    slots.push({ x, z: oz, yaw: 0 });
-  }
-  for (const z of spread(plan.halfZ - 0.9, CASTLE_MERLON_PITCH)) {
-    slots.push({ x: -ox, z, yaw: Math.PI / 2 });
-    slots.push({ x: ox, z, yaw: Math.PI / 2 });
-  }
-  return slots;
+/**
+ * **How much smaller the castle in the garden is than the space inside it.**
+ *
+ * The facade's plate is 24 m across; the interior's is 42.43 (GAME_DESIGN item
+ * 30c — they are disconnected worlds, and the inside is deliberately far bigger
+ * than the outside). Anything copied from the roof garden onto the castle's own
+ * roof is cut by this, so it reads as the same object seen from further away
+ * rather than as furniture that has outgrown the building.
+ *
+ * Derived from the two plates rather than eyeballed: shrink either and the
+ * pavilion on the roof moves with it.
+ */
+const FACADE_SCALE = BUILDING_HALF_X / INTERIOR_HALF_X;
+
+/**
+ * **The castle wears its roof garden** (issue #462).
+ *
+ * Jim, having stood on the roof garden: *"when out in the park there should be
+ * a roof on the castle with a few of the features from the actual roof garden
+ * on top of it, if not a perfect reproduction. Maybe just the floor of the roof
+ * garden and the pavilion."*
+ *
+ * So: the garden's pink paving, its pavilion and its ring of mint planters,
+ * standing on a deck level with the top of the curtain wall. Three things, all
+ * of them **the roof garden's own builders** rather than new models — which is
+ * the point of the ticket as much as the look is.
+ *
+ * ## Where the deck sits, and why that is the wall top exactly
+ *
+ * Level with {@link CASTLE_WALL_HEIGHT}, so the merlons that were already there
+ * become this roof's parapet and nothing new has to be invented to edge it.
+ * That is also the same relationship the roof garden has with its own
+ * battlement, which is what makes the two read as the same place.
+ *
+ * Two things it has to stay clear of, both measured rather than asserted:
+ *
+ * - **the battlements stand proud of it**, so `parkFacts.castleMasonryTopY`
+ *   still measures the crenellations and the ginormous slide's clearance
+ *   invariant is unmoved. The deck's top is `CASTLE_MERLON_HEIGHT` below the
+ *   merlons' tops;
+ * - **the Sky Cruiser flies underneath.** Its openings' head is at 7.65 m
+ *   (`castleWindows.ts`, which asserts there that it is below the wall), and
+ *   this slab's underside is `BUILDING_SLAB` below the wall top — 8.50 m. The
+ *   coaster passes through the courtyard with the roof over it, exactly as it
+ *   passed through the open courtyard before.
+ *
+ * ## It is not the "lid" this castle was rebuilt to get rid of
+ *
+ * {@link buildCourtyard}'s note says a flat cap across the whole footprint is
+ * "the top of a building look this rebuild removes", and it was right about a
+ * *flat cap*. What stands here is a garden — paving, a pavilion with a mast and
+ * a bobble on it, and a ring of planters — seen over a crenellated wall. The
+ * courtyard floor stays where it is underneath, because the coaster still flies
+ * through that space and wants a floor beneath it.
+ */
+function buildCastleRoofGarden(plan: ShellPlan): Group {
+  const group = new Group();
+  group.name = 'castle-roof-garden';
+
+  // Inside the wall faces, so the slab meets the masonry rather than poking
+  // out through it.
+  const innerX = plan.halfX - HALF_WALL;
+  const innerZ = plan.halfZ - HALF_WALL;
+
+  // The roof garden's own paving, in the roof garden's own colour — `buildDeck`
+  // gives the top deck `stonePinkLight`, and this is that same floor.
+  const deck = new Mesh(
+    extrudePlan([planRect(-innerX, innerX, -innerZ, innerZ)], BUILDING_SLAB),
+    interiorMaterial(PALETTE.stonePinkLight, 0.82),
+  );
+  // **Never `castle-wall-`.** `parkFacts.ts` matches that prefix to find the
+  // top of the castle's stonework; a deck that fell into it would be measured
+  // as the battlements. See `castleFabric.ts` for the afternoon that cost.
+  deck.name = 'castle-roof-deck';
+  deck.receiveShadow = true;
+  deck.castShadow = false;
+  deck.position.y = CASTLE_WALL_HEIGHT - BUILDING_SLAB;
+  group.add(deck);
+
+  // The pavilion, at the same *relative* spot on the plate it occupies
+  // upstairs — the position is mapped, never copied, because these two plates
+  // are different sizes and 300 m apart.
+  const pavilionX = (ROOF_PAVILION_X / INTERIOR_HALF_X) * innerX;
+  const pavilionZ = (ROOF_PAVILION_Z / INTERIOR_HALF_Z) * innerZ;
+  const pavilion = buildRoofPavilion(FACADE_SCALE, false);
+  pavilion.position.set(pavilionX, CASTLE_WALL_HEIGHT, pavilionZ);
+  group.add(pavilion);
+
+  const planters = buildRoofPlanters(plan, FACADE_SCALE, {
+    x: pavilionX,
+    z: pavilionZ,
+    halfX: ROOF_PAVILION_HALF_X * FACADE_SCALE,
+    halfZ: ROOF_PAVILION_HALF_Z * FACADE_SCALE,
+  });
+  planters.name = 'castle-roof-planters';
+  planters.position.y = CASTLE_WALL_HEIGHT;
+  group.add(planters);
+
+  return group;
 }
 
-/** The battlement: a merlon standing on top of the wall at every slot, one draw call. */
+/**
+ * The battlement: a merlon standing on top of the wall at every slot, one draw
+ * call.
+ *
+ * The merlon itself, its pitch and the 1.6 m each run is held back from the
+ * corner towers all live in `castleMasonry.ts` now, because the roof garden
+ * wears the same battlement (#462) and a second set of those numbers is this
+ * repo's most-cited defect. **The name stays `crenellations`** — that exact
+ * string is what `test/procgen/parkFacts.ts` matches to find the top of the
+ * castle's stonework, which the ginormous slide's clearance invariant is built
+ * on.
+ */
 function buildCrenellations(plan: ShellPlan): InstancedMesh {
-  const slots = crenellationSlots(plan);
-  const merlons = new InstancedMesh(
-    new BoxGeometry(CASTLE_MERLON_WIDTH, CASTLE_MERLON_HEIGHT, CASTLE_MERLON_DEPTH),
-    softMaterial(PALETTE.buildingTrim, 0.72),
-    slots.length,
+  return buildMerlons(
+    'crenellations',
+    rectangleMerlonSlots(outerX(plan), outerZ(plan), plan.halfX, plan.halfZ),
+    CASTLE_WALL_HEIGHT,
   );
-  merlons.name = 'crenellations';
-  merlons.castShadow = true;
-  merlons.receiveShadow = true;
-
-  const matrix = new Matrix4();
-  const rotation = new Quaternion();
-  const axis = new Vector3(0, 1, 0);
-  const scale = new Vector3(1, 1, 1);
-  const position = new Vector3();
-
-  slots.forEach((slot, index) => {
-    rotation.setFromAxisAngle(axis, slot.yaw);
-    position.set(slot.x, CASTLE_WALL_HEIGHT + CASTLE_MERLON_HEIGHT / 2, slot.z);
-    matrix.compose(position, rotation, scale);
-    merlons.setMatrixAt(index, matrix);
-  });
-  merlons.instanceMatrix.needsUpdate = true;
-  return merlons;
 }
 
 /**
  * Four corner towers, each a cylinder, a conical roof, a little mast and a
  * flag — the part of the silhouette that reads as "castle" from clear across
  * the garden, well above the battlement line.
+ *
+ * Built from `castleMasonry.ts`'s shared turret so that the ones standing at
+ * the corners of the roof garden are the same object (#462). **The mesh names
+ * stay `tower-bodies` / `tower-roofs`**: `parkFacts.ts` matches those to find
+ * the solids the ginormous slide has to miss.
  */
 function buildCornerTowers(plan: ShellPlan): Group {
-  const group = new Group();
-  group.name = 'castle-towers';
-
-  const corners: readonly (readonly [number, number])[] = [
-    [-outerX(plan), -outerZ(plan)],
-    [outerX(plan), -outerZ(plan)],
-    [-outerX(plan), outerZ(plan)],
-    [outerX(plan), outerZ(plan)],
-  ];
-  const flagColours = [
-    PALETTE.markerPink,
-    PALETTE.markerSky,
-    PALETTE.markerLemon,
-    PALETTE.markerLilac,
-  ];
-
-  const bodies = new InstancedMesh(
-    new CylinderGeometry(TOWER_RADIUS, TOWER_RADIUS * TOWER_BASE_FLARE, TOWER_HEIGHT, 16),
-    softMaterial(PALETTE.buildingWall, 0.78),
-    corners.length,
-  );
-  bodies.name = 'tower-bodies';
-  bodies.castShadow = true;
-  bodies.receiveShadow = true;
-
-  // A true cone (16 segments), unlike the roof pavilion's four-sided pyramid —
-  // this one is meant to read as a proper witch's-hat tower roof up close.
-  const roofs = new InstancedMesh(
-    new ConeGeometry(TOWER_RADIUS + TOWER_ROOF_OVERHANG, TOWER_ROOF_HEIGHT, 16),
-    softMaterial(PALETTE.buildingRoofDeep, 0.72),
-    corners.length,
-  );
-  roofs.name = 'tower-roofs';
-  roofs.castShadow = true;
-  roofs.receiveShadow = true;
-
-  const masts = new InstancedMesh(
-    new CylinderGeometry(0.07, 0.09, 1.6, 8),
-    softMaterial(PALETTE.woodLight, 0.85),
-    corners.length,
-  );
-  masts.name = 'tower-masts';
-  masts.castShadow = false;
-  masts.receiveShadow = false;
-
-  const finials = new InstancedMesh(
-    new SphereGeometry(0.26, 14, 10),
-    softMaterial(PALETTE.markerLemon, 0.55),
-    corners.length,
-  );
-  finials.name = 'tower-finials';
-  finials.castShadow = false;
-  finials.receiveShadow = false;
-
-  const matrix = new Matrix4();
-  const rotation = new Quaternion();
-  const scale = new Vector3(1, 1, 1);
-  const position = new Vector3();
-  const roofTopY = TOWER_HEIGHT + TOWER_ROOF_HEIGHT;
-
-  corners.forEach(([x, z], index) => {
-    position.set(x, TOWER_HEIGHT / 2, z);
-    matrix.compose(position, rotation, scale);
-    bodies.setMatrixAt(index, matrix);
-
-    position.set(x, TOWER_HEIGHT + TOWER_ROOF_HEIGHT / 2, z);
-    matrix.compose(position, rotation, scale);
-    roofs.setMatrixAt(index, matrix);
-
-    position.set(x, roofTopY + 0.8, z);
-    matrix.compose(position, rotation, scale);
-    masts.setMatrixAt(index, matrix);
-
-    position.set(x, roofTopY + 1.65, z);
-    matrix.compose(position, rotation, scale);
-    finials.setMatrixAt(index, matrix);
-
-    const flag = buildPennant(flagColours[index % flagColours.length] ?? PALETTE.markerPink);
-    flag.position.set(x, roofTopY + 1.15, z);
-    group.add(flag);
+  const ox = outerX(plan);
+  const oz = outerZ(plan);
+  const group = buildCastleTurrets({
+    prefix: 'tower',
+    spots: [
+      { x: -ox, z: -oz },
+      { x: ox, z: -oz },
+      { x: -ox, z: oz },
+      { x: ox, z: oz },
+    ],
+    baseY: 0,
+    bodyHeight: TOWER_HEIGHT,
   });
-
-  bodies.instanceMatrix.needsUpdate = true;
-  roofs.instanceMatrix.needsUpdate = true;
-  masts.instanceMatrix.needsUpdate = true;
-  finials.instanceMatrix.needsUpdate = true;
-
-  group.add(bodies, roofs, masts, finials);
+  group.name = 'castle-towers';
   return group;
-}
-
-/** A little three-cornered pennant, big enough to read from across the garden. */
-function pennantGeometry(width: number, height: number): BufferGeometry {
-  const geometry = new BufferGeometry();
-  const positions = new Float32Array([0, 0, 0, 0, height, 0, width, height * 0.5, 0]);
-  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
-  geometry.setIndex([0, 1, 2]);
-  geometry.computeVertexNormals();
-  return geometry;
-}
-
-/** One flag flying from a mast. Double-sided: a flag has no "back" worth hiding. */
-function buildPennant(colour: number): Mesh {
-  const material = softMaterial(colour, 0.6);
-  material.side = DoubleSide;
-  const mesh = new Mesh(pennantGeometry(0.85, 0.55), material);
-  mesh.castShadow = false;
-  mesh.receiveShadow = false;
-  mesh.position.y -= 0.3;
-  return mesh;
 }
 
 /**

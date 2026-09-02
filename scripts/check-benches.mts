@@ -57,7 +57,9 @@
  *   is only ever bounded by the plate, which is what an `isClearCircle` that
  *   was never actually consulted would look like.
  */
-import { Matrix4, Vector3 } from 'three';
+import { Box3, Matrix4, Vector3, type Object3D } from 'three';
+import './headless-canvas.mjs';
+import { BuildingShell } from '../src/world/building/Shell.ts';
 import { CollisionWorld } from '../src/world/Collision.ts';
 import {
   registerBenchCollision,
@@ -65,6 +67,7 @@ import {
   registerHallCollision,
   registerPavilionCollision,
   registerPlanterCollision,
+  registerRoofTurretCollision,
 } from '../src/world/building/Building.ts';
 import {
   BENCH_DEPTH,
@@ -85,8 +88,11 @@ import {
   ROOF_PAVILION_HALF_Z,
   ROOF_PAVILION_X,
   ROOF_PAVILION_Z,
+  ROOF_PARAPET_THICKNESS,
+  roofTurretSpots,
   TOP_DECK,
 } from '../src/world/building/layout.ts';
+import { CASTLE_TURRET_FOOTPRINT_RADIUS } from '../src/world/building/castleMasonry.ts';
 import { PET_RENDER_HEIGHT } from '../src/art/models/pets.ts';
 import {
   INTERIOR_HALF_X,
@@ -94,6 +100,16 @@ import {
   PLAYER_LONGEST_STEP,
   PLAYER_RADIUS,
 } from '../src/core/constants.ts';
+
+/**
+ * How far short of the drawn parapet a child may be stopped before it reads as
+ * an invisible wall rather than as the stone she can see.
+ *
+ * Ten centimetres — under a fifth of her own radius, and well under the width
+ * of one merlon, so nothing a player could notice. The measured figure as
+ * committed is 0.075 m.
+ */
+const PARAPET_STANDOFF_LIMIT = 0.1;
 
 const failures: string[] = [];
 function fail(message: string): void {
@@ -116,6 +132,7 @@ function worldFor(floor: CastleFloor): CollisionWorld {
   registerBenchCollision(world, floor);
   registerPlanterCollision(world, floor);
   registerPavilionCollision(world, floor);
+  registerRoofTurretCollision(world, floor);
   return world;
 }
 
@@ -727,6 +744,196 @@ for (const floor of CASTLE_FLOORS) {
     }
   }
 
+  // **The rampart she can see is the thing that stops her** (#462).
+  //
+  // Nothing derives a collider from a mesh in this codebase, so the drawn
+  // parapet and the perimeter wall that actually stops her are two definitions
+  // of one edge, kept in step by hand — which is the defect this repo cites
+  // more than any other. Since #462 puts merlons and turrets along that edge
+  // and invites a child to walk up and lean on them, the two are checked
+  // against each other here rather than left to agree by luck.
+  //
+  // **Both sides are measured, neither is typed.** The stone comes off the
+  // built `roof-parapet` group's own bounding box; the stopping surface comes
+  // out of a body marched at it through the real `CollisionWorld`. Comparing a
+  // constant against a constant is how a clause like this passes for ever
+  // while the wall drifts.
+  //
+  // Measured as committed: her body stops **0.075 m** short of the drawn inner
+  // face, on both axes. That gap is the honest one to allow — `hotel/place.ts`'s
+  // rule is generous-*light*, never generous-heavy, so being kept a whisker off
+  // the stone is right and being let inside it is not.
+  if (floor.index === TOP_DECK) {
+    const shell = new BuildingShell('interior');
+    shell.group.updateMatrixWorld(true);
+    const roofGroup = shell.floorGroups[TOP_DECK];
+    let parapet: Object3D | null = null;
+    roofGroup?.traverse((object) => {
+      if (object.name === 'roof-parapet-lip') parapet = object;
+    });
+    if (!parapet) {
+      fail(
+        'the roof garden has no `roof-parapet-lip` to measure, so the clause that keeps the ' +
+          'drawn rampart and the collider that stops her in step is switched off',
+      );
+    } else {
+      const box = new Box3().setFromObject(parapet);
+      const groupX = roofGroup?.position.x ?? 0;
+      // The kerb is a ring, so its box is the *outer* face on every side. The
+      // inner face is one band in from it, and the band is the one number
+      // `Shell.ts` extrudes the ring from.
+      //
+      // **The +X and +Z runs only**, which is not laziness. The fixed
+      // isometric shows an object's +X/+Z faces, so those two are the ramparts
+      // a child ever stands at and looks over — Jim's own scoping on #462 — and
+      // they are the two with an unbroken run of parapet to march at. The −X
+      // run has the lift alcove cut through it: a body marched at that face
+      // from the middle of the plate goes **13.5 m** straight out of the
+      // doorway, which is the alcove working correctly and says nothing about
+      // the stone either side of it.
+      const faces = [
+        { axis: 'x' as const, inner: box.max.x - groupX - ROOF_PARAPET_THICKNESS, dir: 1 },
+        { axis: 'z' as const, inner: box.max.z - ROOF_PARAPET_THICKNESS, dir: 1 },
+      ];
+      for (const face of faces) {
+        const position = new Vector3(floorX(floor, 0), BUILDING_BASE_Y, floorZ(floor, 0));
+        const stepX = face.axis === 'x' ? face.dir * PLAYER_LONGEST_STEP : 0;
+        const stepZ = face.axis === 'z' ? face.dir * PLAYER_LONGEST_STEP : 0;
+        for (let i = 0; i < 80; i += 1) {
+          world.resolveMovement(position, stepX, stepZ, PLAYER_RADIUS, 0, 1 / 30);
+        }
+        const local =
+          face.axis === 'x' ? position.x - floorX(floor, 0) : position.z - floorZ(floor, 0);
+        // Where her *body* stopped, not her centre: that is the surface which
+        // either meets the stone or does not.
+        const surface = local + face.dir * PLAYER_RADIUS;
+        const shortBy = (face.inner - surface) * face.dir;
+        if (shortBy < -0.001) {
+          fail(
+            `on the roof garden's ${face.dir > 0 ? '+' : '-'}${face.axis} side a child's body ` +
+              `reaches ${(-shortBy).toFixed(3)} m *inside* the drawn parapet — the stone she ` +
+              `can see is not what stops her`,
+          );
+        }
+        if (shortBy > PARAPET_STANDOFF_LIMIT) {
+          fail(
+            `on the roof garden's ${face.dir > 0 ? '+' : '-'}${face.axis} side a child is ` +
+              `stopped ${shortBy.toFixed(3)} m short of the drawn parapet — that is an ` +
+              `invisible wall standing off the rampart she is meant to lean on, and the two ` +
+              `have drifted apart`,
+          );
+        }
+      }
+    }
+  }
+
+  // **The corner turrets: solid stone she walks round, not through, and not a
+  // trap** (#462).
+  //
+  // Each one is tangent to the parapet's inner face, so no *straight* approach
+  // can reach one — but the two perimeter runs meet at a right angle, and a
+  // body pushed into that corner slides along both and ends up under the
+  // turret. **Proved red** by dropping `registerRoofTurretCollision` from
+  // `worldFor`, against the geometry as committed here: 4 failures, one per
+  // turret, on the inboard diagonal bearing, each ending **1.11 m** from a
+  // turret's middle inside 2.45 m of drawn stone.
+  //
+  // That is worth stating plainly because it is the whole reason the collider
+  // still earns its place after the turrets moved outboard: the plate's own
+  // perimeter wall does *not* cover them, and a clause that had gone vacuous
+  // when the geometry moved would look exactly like this one does.
+  //
+  // Three clauses on **the one fill above**, pointing in opposite directions on
+  // purpose, which is what stops any of them being true by accident:
+  //
+  //  1. the middle of a turret is **not** reachable — it is 2 m of masonry.
+  //     This one is belt-and-braces and says so: the flood fill only ever asks
+  //     about lattice points on the plate, and a turret's middle is off it, so
+  //     this stays green with the turret collider removed. It is clause 3 that
+  //     has the teeth;
+  //  2. the paving on its **inboard** side still is — a turret that had walled
+  //     off the corner of the roof would pass clause 1 and fail this;
+  //  3. a body marched at it from sixteen bearings at a sprinting stride stops
+  //     **outside** the drawn cone. Unreachable is not the same as solid: the
+  //     fill only ever asks about lattice points, and the hotel's six
+  //     evenly-spaced gaps (CLAUDE.md) were found by marching and by nothing
+  //     else.
+  //
+  // Clause 1 needs no soft-lock clause of its own the way the pavilion does,
+  // and it is worth saying why: a circular collider has no hollow middle.
+  // `CollisionWorld` pushes a mover out along the radius from wherever it
+  // stands, so a body that somehow began at a turret's centre leaves on the
+  // first frame. That is the reason `Building.ts` registers a disc rather than
+  // a rectangle for a round solid.
+  if (floor.index === TOP_DECK) {
+    const spots = roofTurretSpots();
+    if (spots.length === 0) {
+      fail('the roof garden has no corner turrets at all, so this clause asserts nothing');
+    }
+    for (const spot of spots) {
+      if (canReach(seen, spot.x, spot.z, FILL_PITCH)) {
+        fail(
+          `the middle of the corner turret at [${spot.x.toFixed(1)}, ${spot.z.toFixed(1)}] IS ` +
+            `reachable — a child is standing inside 2 m of castle masonry`,
+        );
+      }
+
+      // Inboard along the diagonal, just clear of the drawn stone: the nearest
+      // paving a child could stand on beside this turret. Derived from the
+      // turret's own footprint, so a wider turret moves the probe rather than
+      // silently sitting inside it.
+      const inward = CASTLE_TURRET_FOOTPRINT_RADIUS + PLAYER_RADIUS + 0.2;
+      const besideX = spot.x - Math.sign(spot.x) * inward * Math.SQRT1_2;
+      const besideZ = spot.z - Math.sign(spot.z) * inward * Math.SQRT1_2;
+      if (!canReach(seen, besideX, besideZ, FILL_PITCH * 2)) {
+        fail(
+          `the paving beside the corner turret at [${spot.x.toFixed(1)}, ` +
+            `${spot.z.toFixed(1)}] is not reachable from the lift lobby — the turret has walled ` +
+            `off the corner of the roof garden rather than standing in it`,
+        );
+      }
+
+      // The same sixteen bearings the benches are marched from, asked of the
+      // one constant rather than a second 16 written here.
+      for (let b = 0; b < BEARINGS; b += 1) {
+        const angle = (b / BEARINGS) * Math.PI * 2;
+        const dirX = Math.cos(angle);
+        const dirZ = Math.sin(angle);
+        const start = CASTLE_TURRET_FOOTPRINT_RADIUS + 4;
+        const position = new Vector3(
+          floorX(floor, spot.x + dirX * start),
+          BUILDING_BASE_Y,
+          floorZ(floor, spot.z + dirZ * start),
+        );
+        for (let step = 0; step < 20; step += 1) {
+          world.resolveMovement(
+            position,
+            -dirX * PLAYER_LONGEST_STEP,
+            -dirZ * PLAYER_LONGEST_STEP,
+            PLAYER_RADIUS,
+            0,
+            1 / 30,
+          );
+        }
+        const stoppedAt = Math.hypot(
+          position.x - floorX(floor, spot.x),
+          position.z - floorZ(floor, spot.z),
+        );
+        // Allowed a whisker inside the drawn footprint: `resolveMovement`
+        // settles a body on the surface rather than a hair off it.
+        if (stoppedAt < CASTLE_TURRET_FOOTPRINT_RADIUS - 0.05) {
+          fail(
+            `a body marched at the corner turret at [${spot.x.toFixed(1)}, ` +
+              `${spot.z.toFixed(1)}] on bearing ${((angle * 180) / Math.PI).toFixed(0)}° ended ` +
+              `${stoppedAt.toFixed(2)} m from its middle, inside its ` +
+              `${CASTLE_TURRET_FOOTPRINT_RADIUS.toFixed(2)} m of stone — it is not solid from ` +
+              `that approach`,
+          );
+        }
+      }
+    }
+  }
+
   // What the furniture actually cost, reported whether or not anything failed —
   // a number nobody has to take on trust, and the tell if a future bench count
   // starts eating the floor.
@@ -742,7 +949,7 @@ for (const floor of CASTLE_FLOORS) {
   process.stderr.write(
     `check:benches — ${floor.name}: ${benchFootprints(floor.index).length} benches, ` +
       `${planterRing(floor.index).length} planters` +
-      `${floor.index === TOP_DECK ? ' and the pavilion' : ''} cost ` +
+      `${floor.index === TOP_DECK ? ', the pavilion and 4 corner turrets' : ''} cost ` +
       `${lost} of ${bare.size} walkable cells (${((lost / bare.size) * 100).toFixed(2)}%), and ` +
       `${clean ? 'nothing became unreachable' : 'SOMETHING BECAME UNREACHABLE — see below'}.\n`,
   );

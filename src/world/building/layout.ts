@@ -340,6 +340,21 @@ export const TOWER_ROOF_OVERHANG = 0.4;
 export const TOWER_BASE_FLARE = 1.08;
 
 /**
+ * **How wide a turret is**, for anything that has to keep out of one — a
+ * collider, a keep-out disc, a bench scatter, the offset that pushes the roof
+ * garden's turrets clear of its paving.
+ *
+ * The cone oversails the shaft, and the cone is what a child's hat meets when
+ * she walks up to a turret, so the wider of the two is the honest answer.
+ * Derived rather than typed for the reason everything round here is: a turret
+ * that grows must take its keep-out with it.
+ */
+export const CASTLE_TURRET_FOOTPRINT_RADIUS = Math.max(
+  TOWER_RADIUS * TOWER_BASE_FLARE,
+  TOWER_RADIUS + TOWER_ROOF_OVERHANG,
+);
+
+/**
  * A tower part as a solid of revolution: a vertical span with a radius that
  * varies linearly from bottom to top. A cylinder and a cone are both this.
  */
@@ -806,6 +821,67 @@ export const ROOF_PAVILION_HALF_Z = 4.6;
  *  `Shell.ts` draws and by the collider `Building.ts` registers, so the thing
  *  she sees and the thing she is stopped by are one height. */
 export const ROOF_PAVILION_HEIGHT = 2.9;
+
+/**
+ * How thick the roof garden's parapet is, in plan.
+ *
+ * `Shell.ts` extrudes the kerb from this and {@link roofTurretSpots} pushes the
+ * turrets out past it, so the two cannot disagree about where the edge of the
+ * walkable floor is. It was a `0.6` written four times in one function.
+ */
+export const ROOF_PARAPET_THICKNESS = 0.6;
+
+/** The outer face of the roof garden's parapet — half a wall past the plate. */
+export const ROOF_EDGE_X = INTERIOR_HALF_X + BUILDING_WALL_THICKNESS / 2;
+export const ROOF_EDGE_Z = INTERIOR_HALF_Z + BUILDING_WALL_THICKNESS / 2;
+
+/**
+ * **Where the roof garden's four corner turrets stand** (issue #462).
+ *
+ * Jim: *"turrets in the corner, ramparts, walls reaching down."* One list,
+ * three consumers — `Shell.ts` draws them, `Building.ts` registers a circular
+ * collider on each, and `dressing.ts`'s `keepOutsFor` keeps the grass, the
+ * planting troughs and the bench scatter off them. That is `hotel/place.ts`'s
+ * shape, and it is here rather than in `Shell.ts` so that the two consumers
+ * that are not `Shell.ts` do not have to import it and risk a cycle.
+ *
+ * ## They stand *outside* the walkable floor, and that was found on screen
+ *
+ * The first cut centred them on the plate's own corners, so each turret half
+ * overhung the edge and half stood on paving. It looked right in the geometry
+ * and was wrong in the frame: the camera is a fixed isometric looking from
+ * +X +Z, a turret is 2.45 m across and rises 4.2 m of cone above its eaves, and
+ * **a child five metres inboard of a corner was drawn completely behind it** —
+ * name label and hat bobble showing, and nothing else. That is the same defect
+ * that reverted the enterable pavilion (`Shell.ts`'s `buildRoofPavilion`): a
+ * roof she disappears under.
+ *
+ * So each turret is pushed out along the diagonal until its disc is **tangent
+ * to the parapet's inner face** — the line the plate's own perimeter collision
+ * already stops her at. She can no longer stand behind one at close range
+ * because she can no longer stand *near* one: the nearest floor to a turret is
+ * the far side of the rampart. It is also what a corbelled corner tower does on
+ * a real castle, so the fix and the reference agree.
+ *
+ * The offset is derived from the turret's own footprint, so a wider turret
+ * moves further out rather than quietly reclaiming paving.
+ */
+export function roofTurretSpots(): readonly { readonly x: number; readonly z: number }[] {
+  // The corner of the floor she can actually reach: the parapet's inner face.
+  const innerX = ROOF_EDGE_X - ROOF_PARAPET_THICKNESS;
+  const innerZ = ROOF_EDGE_Z - ROOF_PARAPET_THICKNESS;
+  // Out along the 45° diagonal by the turret's own radius, which is exactly
+  // where a disc of that radius stops touching that corner.
+  const out = CASTLE_TURRET_FOOTPRINT_RADIUS * Math.SQRT1_2;
+  const cx = innerX + out;
+  const cz = innerZ + out;
+  return [
+    { x: -cx, z: -cz },
+    { x: cx, z: -cz },
+    { x: -cx, z: cz },
+    { x: cx, z: cz },
+  ];
+}
 
 // ------------------------------------------------------------- shop units
 

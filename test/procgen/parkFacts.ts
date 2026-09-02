@@ -773,6 +773,33 @@ export interface ParkFacts {
    */
   readonly castleMasonryTopY: number;
   /**
+   * **The top of everything standing on the castle's own roof** — the paving,
+   * the pavilion and the ring of planters `Shell.ts`'s `buildCastleRoofGarden`
+   * puts there (#462), measured in world space off the built group.
+   *
+   * `null` if the castle has no roof garden at all, which is a failure rather
+   * than a pass: see `theCastleRoofStaysInsideItsBattlements`.
+   *
+   * It exists because the roof garden is the one thing on the castle that is
+   * **not** matched by {@link castleMasonryTopY}'s name pattern and could still
+   * reach into the ginormous slide's air. The pavilion is a scaled copy of a
+   * building sized for a 42 m plate; put it on a 24 m castle with its mast and
+   * bobble and it stands 4 m over the parapet.
+   *
+   * The **plan box** comes with the height deliberately: a clearance test needs
+   * to know *where* the roof is as well as how high, and a lone scalar makes
+   * the only available assertion "nothing on the roof is above the
+   * battlements" — which is a proxy rather than the requirement, and one the
+   * pavilion's own pyramid fails by 1.95 m while clearing the ride by metres.
+   */
+  readonly castleRoofGarden: {
+    readonly minX: number;
+    readonly maxX: number;
+    readonly minZ: number;
+    readonly maxZ: number;
+    readonly topY: number;
+  } | null;
+  /**
    * The castle's four corner towers, as the solids of revolution they were
    * actually built as, in **world space**.
    *
@@ -1176,6 +1203,28 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
       box.setFromObject(object);
       if (box.max.y > castleMasonryTopY) castleMasonryTopY = box.max.y;
     });
+  }
+
+  // Everything standing on the castle's own roof (#462), as one box in world
+  // space. Found by walking the scene for the group `Shell.ts` builds rather
+  // than by asking the builder whether it built one — the same discipline the
+  // cat bus below is found with, and for the same reason.
+  let castleRoofGarden: ParkFacts['castleRoofGarden'] = null;
+  {
+    let roofRoot: import('three').Object3D | null = null;
+    scene.traverse((object) => {
+      if (object.name === 'castle-roof-garden') roofRoot = object;
+    });
+    if (roofRoot) {
+      const box = new Box3().setFromObject(roofRoot as import('three').Object3D);
+      castleRoofGarden = {
+        minX: box.min.x,
+        maxX: box.max.x,
+        minZ: box.min.z,
+        maxZ: box.max.z,
+        topY: box.max.y,
+      };
+    }
   }
 
   // --- the cat bus -----------------------------------------------------------
@@ -2504,6 +2553,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     slideShotSpans,
     slideLanding,
     castleMasonryTopY,
+    castleRoofGarden,
     castleTowers,
     chuteEnvelope: CHUTE_ENVELOPE,
     slideLegs: world.building.slideLegs,

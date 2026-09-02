@@ -390,16 +390,51 @@ const EXTERIOR_MASONRY_PATTERN = /^(castle-wall-|crenellations$)/;
  * two of them after it was written), so the interior is what must stay clear of
  * it. This makes that a rule with teeth rather than a comment.
  */
-for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
-  const built = buildCeilingBeams(deck);
-  if (!built) continue;
-  if (!EXTERIOR_MASONRY_PATTERN.test(built.name)) continue;
-  fail(
-    `naming: '${built.name}' is an interior mesh whose name matches the pattern ` +
-      `parkFacts.ts uses to find the castle's exterior stonework ` +
-      `(${String(EXTERIOR_MASONRY_PATTERN)}). It will be measured as the battlements and ` +
-      `will break the ginormous-slide clearance invariant in test:procgen, which ` +
-      `npm run build does not run. Name interior parts 'castle-timber-', not 'castle-wall-'.`,
+/**
+ * The two patterns `parkFacts.ts` matches on, copied here for
+ * {@link EXTERIOR_MASONRY_PATTERN}'s stated reason. The second one finds the
+ * solids the ginormous slide has to miss.
+ */
+const EXTERIOR_TOWER_PATTERN = /^tower-(bodies|roofs)$/;
+
+/**
+ * **Walked over the whole built interior, not over one function.**
+ *
+ * This clause used to build `buildCeilingBeams` and check that one mesh, which
+ * was right for the day the wall-plate caused the bug and wrong from then on:
+ * it could only ever catch a bad name in the function it already knew about.
+ * #462 put a **battlement, four corner turrets and a curtain wall** on the roof
+ * garden — interior geometry whose natural names are exactly the exterior's —
+ * so the guard now traverses the assembled shell and asks the question of every
+ * node in it.
+ */
+{
+  const shell = new BuildingShell('interior');
+  const offenders: string[] = [];
+  shell.group.traverse((object) => {
+    if (!object.name) return;
+    if (EXTERIOR_MASONRY_PATTERN.test(object.name) || EXTERIOR_TOWER_PATTERN.test(object.name)) {
+      offenders.push(object.name);
+    }
+  });
+  if (offenders.length > 0) {
+    fail(
+      `naming: ${offenders.length} interior mesh/meshes (${[...new Set(offenders)].sort().join(', ')}) ` +
+        `match a pattern parkFacts.ts uses to find the castle's *exterior* stonework or towers ` +
+        `(${String(EXTERIOR_MASONRY_PATTERN)}, ${String(EXTERIOR_TOWER_PATTERN)}). They will be ` +
+        `measured as the battlements or as the towers the ginormous slide has to miss, and will ` +
+        `break its clearance invariants in test:procgen — which npm run build does not run. ` +
+        `Name interior parts 'castle-timber-' or 'roof-', never 'castle-wall-' or 'tower-'.`,
+    );
+  }
+  // **"OK" only when it is.** The first draft printed `naming OK` and the match
+  // count on the same line whatever the count was, so a failing run announced
+  // itself as OK and then failed underneath — the same disease as a check that
+  // cannot fail, one layer out.
+  console.log(
+    `check:castle naming ${offenders.length === 0 ? 'OK' : 'FAILED'} — every node in a built ` +
+      `BuildingShell('interior') checked against both of parkFacts.ts's exterior patterns; ` +
+      `${offenders.length} matched.`,
   );
 }
 
