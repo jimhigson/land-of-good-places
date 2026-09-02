@@ -2860,6 +2860,17 @@ function routeFromNetwork(goal: number): number[] | null {
 function gridPathPoints(nodes: readonly number[]): (readonly [number, number])[] {
   const grid = pathGrid();
   const points: (readonly [number, number])[] = [];
+  // **A bridge's own control points survive the collapse.** A deck is pinned at
+  // its two edges and its centre so the drawn Catmull-Rom runs dead straight
+  // over the rail rather than bowing off the deck between two distant feet —
+  // and when a site's feet and deck are collinear (seed 225's front-door
+  // bridge is exactly on `x = 0`), `collapseCollinear` deletes all three. What
+  // is left is one 39 m straight segment with the deck somewhere in the middle
+  // of it and nothing telling `drapePathsOverBridges` where the deck starts:
+  // the ribbon stays at ground level under a raised bridge, the NavGrid's
+  // keepout cuts the walk there, and **every waypoint on the far side of the
+  // railway is stranded** — 105 of them on seed 225, all on one rail side.
+  const pinned = new Set<number>();
   for (let i = 0; i < nodes.length; i += 1) {
     const node = nodes[i] as number;
     if (i > 0) {
@@ -2867,11 +2878,47 @@ function gridPathPoints(nodes: readonly number[]): (readonly [number, number])[]
       const link = (grid.neighbours[previous] as readonly LatticeNeighbour[]).find(
         (step) => step.to === node && step.via.length > 0,
       );
-      if (link) points.push(...link.via);
+      if (link) {
+        for (const point of link.via) {
+          if (link.dir === DECK_DIR) pinned.add(points.length);
+          points.push(point);
+        }
+      }
     }
     points.push([grid.xs[node] as number, grid.zs[node] as number]);
   }
-  return collapseCollinear(points);
+  return collapseCollinearKeeping(points, pinned);
+}
+
+/** {@link collapseCollinear}, except that the listed indices are never
+ * dropped however collinear they look — see {@link gridPathPoints}. */
+function collapseCollinearKeeping(
+  points: readonly (readonly [number, number])[],
+  keep: ReadonlySet<number>,
+): (readonly [number, number])[] {
+  if (keep.size === 0) return collapseCollinear(points);
+  const out: (readonly [number, number])[] = [];
+  let run: (readonly [number, number])[] = [];
+  const flush = (): void => {
+    if (run.length === 0) return;
+    const collapsed = collapseCollinear(run);
+    for (const point of collapsed) {
+      const last = out[out.length - 1];
+      if (last && Math.hypot(last[0] - point[0], last[1] - point[1]) < 1e-9) continue;
+      out.push(point);
+    }
+    run = [];
+  };
+  for (let i = 0; i < points.length; i += 1) {
+    const point = points[i] as readonly [number, number];
+    run.push(point);
+    if (keep.has(i)) {
+      flush();
+      run.push(point); // the pinned point starts the next run too
+    }
+  }
+  flush();
+  return out;
 }
 
 
@@ -3609,6 +3656,29 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
     yield (progress += 1);
   }
 
+  // **Every proven bridge gets walked on.**
+  //
+  // A bridge exists in the built park only where a drawn path crosses the
+  // railway (`train/crossings.ts` measures the ribbons, `bridgeFootprint.ts`
+  // builds from that list), and the fence seals the rail corridor everywhere
+  // else. So an unwalked crossing site is not merely an unused shortcut: it is
+  // a **gap in the fence that never opens**, and any pocket of park that the
+  // rail loop and the boundary between them cut off has no way in or out at
+  // all.
+  //
+  // Measured on seed 225: the parent branch's per-destination router happened
+  // to use all three of that seed's proven sites, this one's shortest-path
+  // solve used two, and the 105 waypoints in the pocket behind the third —
+  // every one of them on the same side of the railway — were in "a pocket of
+  // the garden graph nobody can walk to". Not one of them was near a door, so
+  // no reachability check saw it; `poi.stranded` did.
+  //
+  // Paving all of them is also the shape Jim asked for — bridges as first-class
+  // citizens of the layout rather than an afterthought — and a park with three
+  // bridges in it is a better park for a six-year-old than one with two.
+  yield (progress += 1);
+  yield* walkEveryBridge(edges, progress);
+
   // Every ring gateway that no route happened to use still gets its street —
   // Decision 5's "exactly 4 connections at compass points" is a property of the
   // built ring, not a hope about routing order.
@@ -3636,6 +3706,76 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
 let lastStrandedDoors: readonly string[] = [];
 export function strandedDoorsOfLastSolve(): readonly string[] {
   return lastStrandedDoors;
+}
+
+
+/**
+ * One route over every proven crossing site whose deck no other route already
+ * walks — see the call site for why an unwalked site is a sealed pocket rather
+ * than an unused shortcut.
+ *
+ * The route runs from the paved network to whichever foot is cheaper to reach,
+ * straight over the deck, and then on to the far side's own paving where there
+ * is any, so it does not end in mid-air. Where the far side has nothing paved
+ * yet, the foot is the end: a bridge foot is a real place to arrive, and the
+ * next destination on that side will branch from it.
+ */
+function* walkEveryBridge(edges: PathEdge[], progress: number): Generator<number, number, void> {
+  const grid = pathGrid();
+  for (let site = 0; site * 2 + 1 < grid.footNodes.length; site += 1) {
+    yield (progress += 1);
+    const plus = grid.footNodes[site * 2] as number;
+    const minus = grid.footNodes[site * 2 + 1] as number;
+    if (pavedGridEdges.has(gridEdgeKey(plus, minus))) continue;
+    const deck = (grid.neighbours[plus] as readonly LatticeNeighbour[]).find(
+      (step) => step.to === minus && step.dir === DECK_DIR,
+    );
+    if (!deck) continue;
+    let best: { near: number; far: number; path: number[] } | null = null;
+    for (const [near, far] of [
+      [plus, minus],
+      [minus, plus],
+    ] as readonly (readonly [number, number])[]) {
+      const path = routeFromNetwork(near);
+      if (!path) continue;
+      if (best && path.length >= best.path.length) continue;
+      best = { near, far, path };
+    }
+    if (!best) continue;
+    const onward = (() => {
+      const sources = [...pavedGridNodes];
+      if (sources.length === 0) return null;
+      // The far side's own paving, if it has any — never back over this deck.
+      const settled = gridSearch([{ node: best.far, cost: 0 }], (node) =>
+        node !== best.far &&
+        pavedGridNodes.has(node) &&
+        railInfoAt(grid.xs[node] as number, grid.zs[node] as number).side ===
+          railInfoAt(grid.xs[best.far] as number, grid.zs[best.far] as number).side
+          ? 0
+          : Infinity,
+      );
+      return settled && settled.length > 1 ? settled : null;
+    })();
+    const via = best.near === plus ? deck.via : [...deck.via].reverse();
+    const points: (readonly [number, number])[] = [
+      ...gridPathPoints(best.path),
+      ...via,
+      [grid.xs[best.far] as number, grid.zs[best.far] as number],
+      ...(onward ? gridPathPoints(onward).slice(1) : []),
+    ];
+    commitGridPathDrawn(best.path, points);
+    pavedGridNodes.add(best.near);
+    pavedGridNodes.add(best.far);
+    pavedGridEdges.add(gridEdgeKey(plus, minus));
+    if (onward) commitGridPathDrawn(onward, points);
+    edges.push({
+      from: 'ring',
+      to: 'ring',
+      paved: true,
+      route: { name: `bridge-walk-${site}`, width: 3.0, closed: false, points },
+    });
+  }
+  return progress;
 }
 
 /** The nearest point on anything already paved — the last-resort terminal for
