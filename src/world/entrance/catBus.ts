@@ -585,9 +585,36 @@ export const CAT_BUS_TRACK_WIDTH = 2 * (WHEEL_X + FENDER_HALF_WIDTH);
  *   the most ride height per radian, and it is deliberately the one held back;
  * - **roll** costs `FACE_RADIUS` and only ever shows on a corner, which is
  *   `BusJourney` and not the arrival.
+ *
+ * ## The rock, and why this limit went up (29 August 2026)
+ *
+ * Jim, having watched the bob he asked for: *"the bus's bob should also be a
+ * rocking back and forth, since it has suspension at the front and back."*
+ *
+ * He is describing a limit, not a missing mechanism. The two-axle spring below
+ * has always produced pitch — the road carries a wave two wheelbases long
+ * precisely so that it does — and **the clamp was eating it**. Sampled off the
+ * running game during an outside shot of the intro ride, the body sat at
+ * exactly `-0.028` rad on the first frame captured and again later in the
+ * strip: the rock was saturating its own limit, which is why it read as a bus
+ * that went up and down rather than one that nodded.
+ *
+ * So the pitch limit is **0.042 rad (2.4 degrees)**, half again what it was,
+ * and the road's pitch term is raised to match so the nod is continuous rather
+ * than a clipped square wave at the peaks. That is 0.33 m of nose travel either
+ * way against the heave's 0.20 m, and the two run at **different rates** — one
+ * wheelbase of road is a pure heave input at 0.65 Hz, two wheelbases a pure
+ * pitch input at 0.33 Hz — so the nose dips out of step with the body rising,
+ * which is the thing being asked for. Nothing was added to make that happen;
+ * it is what a two-axle spring on a road does, once it is allowed to.
+ *
+ * **Still gentle, and deliberately still the limit held back hardest.** 2.4
+ * degrees is a nod, not a lowrider: the exchange rate above is unchanged, and
+ * pitch is still the most expensive of the three, costing `NOSE_Z` = 7.9 m of
+ * ride height per radian.
  */
 export const CAT_BUS_MAX_HEAVE = 0.2;
-export const CAT_BUS_MAX_PITCH = 0.028;
+export const CAT_BUS_MAX_PITCH = 0.042;
 export const CAT_BUS_MAX_ROLL = 0.05;
 
 /**
@@ -645,6 +672,29 @@ const WORST_BODY_DROP_AT_A_WHEEL =
   CAT_BUS_MAX_ROLL * WHEEL_X;
 export const CAT_BUS_ARCH_GAP =
   WORST_BODY_DROP_AT_A_WHEEL * 1.35 + FENDER_OUTLINE_THICKNESS;
+
+/**
+ * **The mudguard's swept arc, as four numbers rather than as four expressions
+ * written twice.**
+ *
+ * The arch used to derive these inline where it was extruded, which was fine
+ * while it was the only thing that knew the shape. The modelled paws
+ * ({@link buildFenderPaw}) sit on the front end of that arc, so there are now
+ * two readers — and a paw placed from its own copy of `WHEEL_RADIUS +
+ * CAT_BUS_ARCH_GAP` would be exactly the second-surface-tracking-a-first bug
+ * CLAUDE.md is emphatic about: retune the arch gap and the paw floats off the
+ * mudguard, in the running game only, with nothing in the source looking wrong.
+ *
+ * `FENDER_ARC_FROM` is the **front** end of the arc, and that falls out of the
+ * geometry rather than being asserted: the section is drawn in the shape's own
+ * xy plane and the mesh is then turned a quarter turn about y, which maps the
+ * shape's +x onto the bus's +z — forward. So the smaller of the two arc angles
+ * is the leading edge, whichever way `FENDER_ARC` is later widened.
+ */
+const FENDER_INNER_RADIUS = WHEEL_RADIUS + CAT_BUS_ARCH_GAP;
+const FENDER_OUTER_RADIUS = FENDER_INNER_RADIUS + FENDER_THICKNESS;
+const FENDER_ARC_FROM = Math.PI / 2 - FENDER_ARC / 2;
+const FENDER_ARC_TO = Math.PI / 2 + FENDER_ARC / 2;
 
 /**
  * The spring itself: stiffness and damping, as a plain second-order system.
@@ -706,14 +756,30 @@ const SPRING_DAMPING = 7.4;
  *   6.8 rad/s so it reads as the road rather than as the body.
  *
  * They are still mutually irrational once the phases are in, so there is no
- * pattern to learn; they are simply aimed now. Total amplitude 0.245 m: the
+ * pattern to learn; they are simply aimed now. Total amplitude 0.26 m: the
  * road through the park is still tarmac, but this is a cartoon.
+ *
+ * ## The pitch term carries more of it now
+ *
+ * Jim's *"should also be a rocking back and forth"* is answered here as well as
+ * at `CAT_BUS_MAX_PITCH`, and the two halves are not interchangeable. Raising
+ * the clamp alone lets through more of the pitch the road already had, but the
+ * road only had 0.075 m of it against 0.135 m of heave, so the nod stayed the
+ * junior partner and spent its time clipped flat at the peaks — a bus that
+ * lurches to a stop against a limit and holds there is not a bus on springs.
+ *
+ * So the **two-wheelbase (pure pitch) term is raised to 0.105 and the
+ * one-wheelbase (pure heave) term trimmed to 0.12**: a rock roughly the size of
+ * the bob rather than half of it, and comfortably inside the new clamp rather
+ * than sitting on it. The total amplitude barely moves, so this is a
+ * redistribution of the same road rather than a rougher one — the bus is not
+ * being shaken harder, it is being shaken in a way that shows its two axles.
  */
 const HEAVE_WAVE = (Math.PI * 2) / WHEELBASE;
 function roadHeightAt(distance: number): number {
   return (
-    Math.sin(distance * HEAVE_WAVE) * 0.135 +
-    Math.sin(distance * HEAVE_WAVE * 0.5 + 1.7) * 0.075 +
+    Math.sin(distance * HEAVE_WAVE) * 0.105 +
+    Math.sin(distance * HEAVE_WAVE * 0.5 + 1.7) * 0.135 +
     Math.sin(distance * HEAVE_WAVE * 3 + 3.9) * 0.035
   );
 }
@@ -755,6 +821,134 @@ export function buildPawPrint(material: ReturnType<typeof toonMaterial>): Group 
     group.add(toe);
   }
   return group;
+}
+
+/**
+ * **A modelled paw for the front of a mudguard** — the livery paw print above,
+ * built out of geometry instead of painted on.
+ *
+ * Jim, 29 August 2026: *"add modelled paws to the front of the
+ * mudguards/fenders on the bus"*. The flat prints down the flanks stay; this is
+ * the other thing, and the point of it is that the bus reads as a **creature
+ * with its paws over its wheels** rather than a van with cat decals on it. A
+ * decal cannot do that, because a decal has no silhouette: from the park's
+ * isometric camera the flank prints are seen at a glancing angle and all but
+ * disappear, while a paw that stands proud of the arch breaks the mudguard's
+ * outline and is legible from any bearing.
+ *
+ * **Modelling it is right here and does not contradict ART_DIRECTION §3.** That
+ * rule is about *faces and flat appliqué* — an eye painted on a curved patch
+ * beats an eye built as a sphere. A paw is a limb, and limbs in this park are
+ * chunky primitives (§4, "limbs short and fat"; §7's "primitive composition is
+ * the preferred way to build a model"). So: one squashed sphere for the paw
+ * and three for the toe beans, which is the same palm-plus-three-toes reading
+ * as {@link buildPawPrint} so the modelled paw and the painted print are
+ * recognisably the same cat's foot.
+ *
+ * ## The frame this is built in, because the caller rotates it
+ *
+ * Built about its own palm centre, with
+ *
+ * - **+x** across the bus (the axle),
+ * - **+y** the direction the paw faces — radially *out* from the wheel, which
+ *   at the front of the arch is forwards and a little up,
+ * - **+z** the way the toes point — along the arc, and at the front of the arch
+ *   that is downwards, towards the road.
+ *
+ * The caller turns that frame onto the arc's leading end with a single rotation
+ * about x, derived from the arc's own start angle. Nothing here knows where on
+ * the bus it ends up.
+ *
+ * ## Nothing is coplanar with anything
+ *
+ * ART_DIRECTION §7's new rule — *two surfaces in the same plane will flicker* —
+ * is why the paw is spheres rather than, say, a rounded box capping the arch's
+ * flat end face. A sphere pushed into a plate shares no face with it, so there
+ * is no pair of surfaces for the depth buffer to strobe between, and there is
+ * no hidden face to delete either: there is simply never a second face in the
+ * same plane.
+ *
+ * The beans are siblings of the palm, not children of it, and that is not an
+ * oversight: `blob` squashes a sphere with `Object3D.scale`, which a child
+ * inherits — parented to the palm, each bean would be squashed twice and its
+ * offset stretched by the palm's own proportions, so retuning the palm's squash
+ * would silently move and deform the toes. They are placed instead from
+ * `palmRadius` and `PALM_SQUASH`, the same two values the palm itself is built
+ * from, so there is still exactly one owner of the paw's proportions.
+ */
+export function buildFenderPaw(
+  furMaterial: ReturnType<typeof toonMaterial>,
+  beanMaterial: ReturnType<typeof toonMaterial>,
+  palmRadius: number,
+  outlineThickness: number,
+): { readonly group: Group; readonly palmHalfDepth: number } {
+  const group = new Group();
+  group.name = 'cat-bus-fender-paw';
+
+  /**
+   * Squashed radially and **stretched along the toes' axis**, so the paw hangs
+   * down the front of the arch rather than sitting on its tip as a lump.
+   *
+   * The first cut was near-spherical (`[1, 0.7, 0.88]`) and it was measured
+   * against the wrong thing — the mudguard, which it matched nicely. What it
+   * has to read against is a **2.13 m wheel** and a 14 m bus, and in the
+   * captured frames it came out as a small bump on the end of the fender: the
+   * beans were legible, the paw was not. It cannot get wider without
+   * `CAT_BUS_TRACK_WIDTH` ceasing to be the widest thing on the axle, so it
+   * gets **longer** instead, which is both free and the right shape — a paw
+   * reaching down towards the road is longer than it is wide.
+   *
+   * Stretching along z is free in the clearance sense too, and that is not
+   * luck: z here is the arc's *tangent*, so every point it adds is further from
+   * the axle than the palm's centre, never nearer. Only the radial (y) half
+   * depth can move the paw towards the tyre, and that is the one the caller
+   * places the paw by.
+   */
+  const PALM_SQUASH = [1, 0.85, 1.3] as const;
+  const palm = blob(palmRadius, furMaterial, [...PALM_SQUASH]);
+  palm.name = 'cat-bus-paw-palm';
+  group.add(palm);
+  // One outline, on the palm only. The beans are a strongly contrasting colour
+  // and sit inside the palm's own silhouette for most of their circumference;
+  // outlining each of them would rule three lines across the middle of a paw
+  // 0.8 m across, which is §2's "outlining every little sphere fills the
+  // character with internal lines".
+  addOutline(palm, outlineThickness);
+
+  // Three beans, fanned round the leading edge — the same count and the same
+  // fan as the painted print, so the two read as one animal.
+  /**
+   * Big enough to be three toes rather than three dots.
+   *
+   * Sized by looking rather than by ratio: at 0.44 the beans sat inside the
+   * palm's own outline from the game's camera and the paw read as a smooth
+   * boot with a pink spot on the toe. **A paw's silhouette is lumpy** — that
+   * is most of what distinguishes it from a leg — so the beans have to break
+   * the palm's outline rather than decorate its surface. §4's "break the
+   * silhouette", applied to a foot instead of a head.
+   *
+   * The width they can spread to is bounded, as everything on this axle is, by
+   * the mudguard: `sin(0.62) * 0.72 + 0.5` of the palm radius is 0.92 of it,
+   * so the widest bean still sits inside the palm, which sits inside the arch.
+   */
+  const BEAN_RADIUS = palmRadius * 0.5;
+  for (let i = 0; i < 3; i += 1) {
+    const a = (i - 1) * 0.62;
+    const bean = blob(BEAN_RADIUS, beanMaterial, [1, 0.8, 1]);
+    bean.name = 'cat-bus-paw-bean';
+    // Proud of the palm's own surface in y — §5's markings rule, a patch whose
+    // front sits inside the body shows only as a jagged intersection curve —
+    // and fanned past its leading edge in z, the middle toe leading, so the
+    // toes are what the silhouette ends in.
+    bean.position.set(
+      Math.sin(a) * palmRadius * 0.8,
+      palmRadius * PALM_SQUASH[1] * 0.7,
+      palmRadius * PALM_SQUASH[2] * (0.95 + Math.cos(a) * 0.17),
+    );
+    group.add(bean);
+  }
+
+  return { group, palmHalfDepth: palmRadius * PALM_SQUASH[1] };
 }
 
 export interface CatBusHandle {
@@ -1473,17 +1667,13 @@ export function createCatBus(): CatBusHandle {
   // Drawn as a flat annular sector in the shape's own xy plane and extruded
   // along its z, then turned a quarter turn about y so that the extrusion runs
   // along the wheel's axle and the sector stands up in the bus's yz plane.
-  const fenderInnerRadius = WHEEL_RADIUS + CAT_BUS_ARCH_GAP;
-  const fenderOuterRadius = fenderInnerRadius + FENDER_THICKNESS;
-  const fenderArcFrom = Math.PI / 2 - FENDER_ARC / 2;
-  const fenderArcTo = Math.PI / 2 + FENDER_ARC / 2;
   const fenderSection = new Shape();
   fenderSection.moveTo(
-    Math.cos(fenderArcFrom) * fenderInnerRadius,
-    Math.sin(fenderArcFrom) * fenderInnerRadius,
+    Math.cos(FENDER_ARC_FROM) * FENDER_INNER_RADIUS,
+    Math.sin(FENDER_ARC_FROM) * FENDER_INNER_RADIUS,
   );
-  fenderSection.absarc(0, 0, fenderInnerRadius, fenderArcFrom, fenderArcTo, false);
-  fenderSection.absarc(0, 0, fenderOuterRadius, fenderArcTo, fenderArcFrom, true);
+  fenderSection.absarc(0, 0, FENDER_INNER_RADIUS, FENDER_ARC_FROM, FENDER_ARC_TO, false);
+  fenderSection.absarc(0, 0, FENDER_OUTER_RADIUS, FENDER_ARC_TO, FENDER_ARC_FROM, true);
   fenderSection.closePath();
   const fenderGeometry = new ExtrudeGeometry(fenderSection, {
     depth: FENDER_HALF_WIDTH * 2,
@@ -1542,6 +1732,61 @@ export function createCatBus(): CatBusHandle {
       // One outline for the whole arch. Eight plates meant eight outlines, and
       // from above they read as eight lines ruled across a plank stack.
       addOutline(arch, FENDER_OUTLINE_THICKNESS);
+
+      // --- and a paw on the front of it ------------------------------------
+      //
+      // **Placed entirely from the arch's own numbers.** Nothing below is a
+      // coordinate somebody liked the look of:
+      //
+      //  - the *angle* is `FENDER_ARC_FROM`, the arc's leading end, so widening
+      //    `FENDER_ARC` slides the paw round with the mudguard it caps;
+      //  - the *radius* is `FENDER_INNER_RADIUS` plus the paw's own half-depth,
+      //    which puts the paw's innermost surface exactly on the arch's
+      //    innermost surface. That is the load-bearing part: `CAT_BUS_ARCH_GAP`
+      //    is derived for *that* radius, so a paw sitting on it can never be
+      //    the part of the mudguard assembly that reaches the tyre — whatever
+      //    the suspension does. `check:cat-bus-suspension` measures the whole
+      //    fender group, paw included, so this is asserted rather than hoped;
+      //  - the *size* is `FENDER_HALF_WIDTH`, so the paw is as wide as the
+      //    mudguard and no wider, and `CAT_BUS_TRACK_WIDTH` stays the truth
+      //    about how much road the bus needs.
+      //
+      // Which leaves nothing for a hand-tuned constant to be wrong about, and
+      // no second surface being tracked by a formula — CLAUDE.md's most
+      // expensive bug shape, and the one the hood faces were lost to.
+      const paw = buildFenderPaw(
+        bodyMaterial,
+        pawMaterial,
+        // Just inside the mudguard's own half width, so that the paw plus its
+        // outline shell still sits within the arch plus *its* outline shell and
+        // `CAT_BUS_TRACK_WIDTH` keeps being the widest thing on the axle.
+        FENDER_HALF_WIDTH * 0.9,
+        FENDER_OUTLINE_THICKNESS,
+      );
+      const pawRadius = FENDER_INNER_RADIUS + paw.palmHalfDepth;
+      paw.group.position.set(
+        0,
+        Math.sin(FENDER_ARC_FROM) * pawRadius,
+        Math.cos(FENDER_ARC_FROM) * pawRadius,
+      );
+      // Turns the paw's own frame onto the arc: its +y (the face of the paw)
+      // onto the radial direction at `FENDER_ARC_FROM`, which leaves its +z
+      // (the toes) pointing along the arc — down towards the road, since the
+      // arc's leading end is below the crown. The same expression whatever
+      // `FENDER_ARC` becomes.
+      //
+      // **`PI/2 - arc`, not `arc - PI/2`**, and the sign was wrong first time
+      // round. A rotation about x sends `+y` to `(0, cos, sin)`; the radial
+      // direction at angle `a` is `(0, sin a, cos a)`; so the angle wanted is
+      // the *complement*, not the negated complement. Flipped, the paw's long
+      // axis lay radially instead of along the arc and reached **0.09 m inside
+      // the arch's own inner surface** — into the gap the tyre travels through.
+      // `check:cat-bus-suspension` is what noticed, by reporting a gap swing
+      // too small rather than by anyone seeing it: from outside, a paw pointing
+      // backwards up the arch and a paw pointing down the road are both just a
+      // blob on the end of a mudguard.
+      paw.group.rotation.x = Math.PI / 2 - FENDER_ARC_FROM;
+      fender.add(paw.group);
     }
   }
 
