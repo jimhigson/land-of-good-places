@@ -232,6 +232,17 @@ export const FENCE_SEAM_MARGIN = 0.18;
 export const STATION_GAP = 6.5;
 
 /**
+ * How long a station platform is along the track, metres.
+ *
+ * Here rather than in `station.ts` for the same reason as everything else in
+ * this file: `plan.ts` has to know it — it is half of how far apart two
+ * stations must stand (#472) — and `station.ts` builds meshes, so a plan that
+ * imported it would drag the whole scene layer into the pure planning pass.
+ * `station.ts` reads it from here, so there is still one definition.
+ */
+export const PLATFORM_LENGTH = 7.2;
+
+/**
  * Half-width of the corridor a bridge site's deck and ramps are probed at.
  * The real pass starts its width search at the crossing's own `halfGap`
  * (floored at 4.5 in `crossings.ts`, and a square planned crossing measures

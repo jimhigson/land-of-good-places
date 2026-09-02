@@ -108,7 +108,12 @@ import {
   CARRIAGE_BODY_HALF_WIDTH,
   LOCO_BODY_TOP_Y,
 } from '../../src/world/train/trainDimensions.ts';
-import { RIDER_HEADROOM, STATION_GAP, TRAIN_CLEARANCE_Y } from '../../src/world/train/clearance.ts';
+import {
+  PLATFORM_LENGTH,
+  RIDER_HEADROOM,
+  STATION_GAP,
+  TRAIN_CLEARANCE_Y,
+} from '../../src/world/train/clearance.ts';
 // A leaf module (imports nothing), so it cannot pin the park's seed the way a
 // static import of `train/route.ts` would — see that constant's own note.
 import { TRAIN_MIN_TURN_RADIUS } from '../../src/world/train/turning.ts';
@@ -5976,6 +5981,62 @@ const noDrawnPathEndsStrandedOnABridge: Invariant = (facts) => {
  * (it solves against `PARK_LAYOUT` at module load) and re-measure the
  * rules instead of the park.
  */
+/**
+ * **No two stations stand in each other.**
+ *
+ * The stations used to be planned independently — one scored search per seed
+ * bearing, neither aware of the other — and on seeds 3 and 23 both searches
+ * converged on the same stretch of loop. The park was built with Sunny Side and
+ * Bluebell Halt interpenetrating: two decks in one plane over 18 m², two
+ * canopy roofs over another 9 m², one smeared station where a child expected
+ * two. Nothing caught it. `check:coplanar` found it, which is a rendering check
+ * finding a placement bug — so the placement gets its own assertion here, where
+ * it belongs.
+ *
+ * Measured on the park that was built (`facts.world.train.stations`), never on
+ * the rule that built it, and the threshold is the game's own: `fence.ts`
+ * leaves the lineside fence open for `STATION_GAP` either side of a platform,
+ * so two stands closer than a platform's length plus two of those windows are
+ * sharing one opening. That is `plan.ts`'s `STATION_SEPARATION`, and it is read
+ * from `clearance.ts` rather than restated.
+ *
+ * Deliberately generous-side-of-honest: the assertion is that they do not
+ * *crowd*, at the same distance the planner is scored against, not merely that
+ * they do not touch. Two stations 8 m apart would pass a bare overlap test and
+ * still be one station as far as a six-year-old is concerned.
+ */
+const stationsDoNotCrowdEachOther: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const stations = facts.world.train.stations;
+  const needed = PLATFORM_LENGTH + STATION_GAP * 2;
+
+  for (let i = 0; i < stations.length; i += 1) {
+    for (let j = i + 1; j < stations.length; j += 1) {
+      const a = stations[i];
+      const b = stations[j];
+      if (!a || !b) continue;
+      const gap = Math.hypot(a.standX - b.standX, a.standZ - b.standZ);
+      if (gap < needed) {
+        complaints.push(
+          `${a.name} at (${fmt([a.standX, a.standZ])}) and ${b.name} at ` +
+            `(${fmt([b.standX, b.standZ])}) stand ${gap.toFixed(1)} m apart — ` +
+            `closer than the ${needed.toFixed(1)} m two platforms need before their ` +
+            'fence openings stop being one opening',
+        );
+      }
+    }
+  }
+
+  if (stations.length < 2) {
+    process.stderr.write(
+      `stationsDoNotCrowdEachOther: only ${stations.length} station(s) in this park — ` +
+        'asserts nothing\n',
+    );
+  }
+
+  return complaints;
+};
+
 const crossingsArePlannedAndWalkable: Invariant = (facts) => {
   const complaints: string[] = [];
   const train = facts.world.train;
@@ -8423,6 +8484,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the train runs through no plot and no stall', trainClearsEveryPlotAndStall],
   ['the park train keeps its turning circle', trainKeepsItsTurningCircle],
   ['no two plots overlap', plotsDoNotOverlap],
+  ['no two stations stand in each other', stationsDoNotCrowdEachOther],
   ['every entrance has standable ground', entrancesAreUsable],
   ['no two trees interpenetrate', treesDoNotInterpenetrate],
   ['no bush stands on the paving or inside a plot', bushesStandOnOpenGround],

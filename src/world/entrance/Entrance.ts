@@ -26,6 +26,7 @@ import type { Player } from '../../entities/Player';
 import { buildPawPrint, CAT_BUS_LENGTH } from './catBus';
 import { ROAD_HALF_WIDTH, applyRoadUvs, roadMaterial } from './road';
 import { PARK_BOUNDARY, edgeRadiusAt } from '../boundary';
+import { forEachPavedDisc } from '../paving';
 import { ArrivalSequence, arrivalIsDue } from './ArrivalSequence';
 import type { NpcCharacter } from '../../entities/npc/NpcCharacter';
 import { highlightObject } from '../highlight';
@@ -659,6 +660,49 @@ function buildEntranceRoad(): Mesh[] {
     return reach;
   };
 
+  /**
+   * How far in through the gate the spur can run before the park's own paving
+   * is already under it.
+   *
+   * The spur used to run all the way to `ENTRANCE_STOP_Z`, which is inside the
+   * plaza's paving — so its last five and a half metres were a road slab drawn
+   * 5 mm under a path slab, 24 m² of shared plane and the fourth-worst seam in
+   * the game (#472). The paving wins that argument anyway (`path-surface`
+   * carries `polygonOffset: -2`), so the road under it is a hidden face, and
+   * `ART_DIRECTION.md` §7's answer to a hidden face is to not draw it.
+   *
+   * The stopping line is *asked for*, not written down. `paving.ts` is where
+   * `buildPaths()` publishes the discs it actually drew, and `Garden` builds
+   * the path network long before `Entrance` is constructed, so it is live by
+   * the time this runs. A hard-coded z here would be exactly CLAUDE.md's "two
+   * definitions of one thing, kept in step by hand" — the paths are generated
+   * per seed and this line moves with them. It reads `forEachPavedDisc` rather
+   * than `pathGraph`'s own `distanceToPath` for the reason that module exists:
+   * importing `pathGraph` *runs the whole path solve*, and this file must not
+   * be the thing that triggers it.
+   *
+   * The road's centre is the part that reaches the paving first, because the
+   * path arrives head-on; stopping the whole ribbon there therefore keeps its
+   * wings off the paving too. Nothing walkable is lost — the paving carries on
+   * from the exact line the road stops at, which is the castle roof deck's fix
+   * in a different material.
+   */
+  const spurReach = (): number => {
+    const from = ENTRANCE_BUS_STOP_Z - ROAD_HALF_WIDTH;
+    for (let z = from; z >= ENTRANCE_STOP_Z; z -= 0.1) {
+      let paved = false;
+      const known = forEachPavedDisc((x, discZ, radius) => {
+        if (Math.hypot(ENTRANCE_GATE_X - x, z - discZ) < radius) paved = true;
+      });
+      // Nothing published — an interior harness with no garden. Behave as
+      // before rather than guessing.
+      if (!known) return ENTRANCE_STOP_Z;
+      if (paved) return z;
+    }
+    // No paving reaches the gate on this seed: run the whole way in, as before.
+    return ENTRANCE_STOP_Z;
+  };
+
   const meshes: Mesh[] = [];
 
   // --- the kerb, along the bus's stopping line -------------------------------
@@ -681,15 +725,28 @@ function buildEntranceRoad(): Mesh[] {
   );
 
   // --- the spur, in through the gate ----------------------------------------
-  // From the outer edge of the kerb road to the bus stop inside the park, so it
+  // From the kerb road's **inner** edge to the bus stop inside the park, so it
   // crosses the wall through the gate's own opening and meets ground the
   // plaza's paths already reach.
+  //
+  // It used to start at the kerb's *outer* edge, which meant the spur ran
+  // straight across the full 7.78 m width of the kerb — a 48 m² slab of road
+  // laid on top of another slab of road, in the same plane, 0.08 mm apart, and
+  // the single worst coplanar seam in the game (#472). It is also the first
+  // thing a child sees: she arrives on the bus and walks in through here.
+  //
+  // Starting at the inner edge deletes that buried face rather than nudging
+  // either ribbon. The road stays continuous — the kerb already paves the whole
+  // gate opening's width across its own band, so the two abut exactly at
+  // `ENTRANCE_BUS_STOP_Z - ROAD_HALF_WIDTH` and you can still trace the surface
+  // from outside the wall to inside it without leaving it, which is the thing
+  // this road exists to do.
   meshes.push(
     roadRibbon({
       name: 'entrance-road-gateway',
       material,
-      from: { x: ENTRANCE_GATE_X, z: ENTRANCE_BUS_STOP_Z + ROAD_HALF_WIDTH },
-      to: { x: ENTRANCE_GATE_X, z: ENTRANCE_STOP_Z },
+      from: { x: ENTRANCE_GATE_X, z: ENTRANCE_BUS_STOP_Z - ROAD_HALF_WIDTH },
+      to: { x: ENTRANCE_GATE_X, z: spurReach() },
       across: 'x',
       along: 'z',
       centre: ENTRANCE_GATE_X,

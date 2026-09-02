@@ -1,0 +1,76 @@
+name: Coplanar faces
+
+# Proves no new pair of same-facing faces has come to share a plane — the
+# depth-buffer flicker Jim reported three times in one week (#467, #472), and
+# the rule `ART_DIRECTION.md` §7 has carried all along without a command beside
+# it. Sixteen parks and every interior space, ratcheted against
+# `scripts/coplanar-baseline.mts` so only a new or worse seam fails.
+#
+# ## Why this is its own workflow rather than a step in `checks.yml`
+#
+# **`checks.yml` is already at 25 minutes against its own 30-minute cap** —
+# 25m04s, 24m11s, 22m52s on `main`'s last few runs, and trending up as checks
+# are added. Adding a minute-and-a-bit to a chain that close to its limit is how
+# this project lost a deploy on 29 August: a job killed by `timeout-minutes`
+# reports as **`cancelled`**, so nothing goes red and the failure looks like
+# somebody pressed a button. That is a hazard that already existed; it is not
+# one to walk into knowingly.
+#
+# So this takes `procgen-invariants.yml`'s shape, for the reason that file
+# gives: each suite gets its own runner and its own budget, and a failure reads
+# plainly as "somebody put two faces in a plane" rather than being buried in a
+# 25-minute log. It also runs *beside* the checks rather than after them, so it
+# costs nothing on the critical path.
+#
+# ## This must be made a required status check on `main`
+#
+# It is not one automatically, and adding it needs a repository setting that
+# only Jim can make — CLAUDE.md's "report, do not act" rule covers exactly
+# this. Until it is added, this workflow runs and goes red but **does not block
+# a merge**. See the PR that introduced it.
+#
+# **Do not rename this job.** A required status check is matched by name, so a
+# rename stops it gating merges with nothing going red — the failure mode
+# CLAUDE.md describes under "A check that never runs is worse than a check that
+# fails".
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: coplanar-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  coplanar:
+    name: Coplanar faces
+    runs-on: ubuntu-latest
+    # Generous against a measured 3-4 minutes: the sweep builds sixteen parks,
+    # and a runner that is having a slow day should say so by being slow, not by
+    # being cancelled.
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - name: Install dependencies
+        # Registry hiccups are common enough to be worth retrying — same
+        # reasoning as deploy.yml; the counts live in `.npmrc`.
+        run: pnpm install --frozen-lockfile
+
+      - name: Coplanar sweep
+        run: pnpm run check:coplanar
