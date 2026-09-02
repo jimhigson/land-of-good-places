@@ -265,10 +265,18 @@ findings.sort((a, b) => a.seed - b.seed || (a.key < b.key ? -1 : a.key > b.key ?
  * existing key and pass in silence. It counts distinct facings; two objects
  * meeting in two parallel planes fold into one seam whose `area` is their sum,
  * and that case is caught by `area` instead.
+ *
+ * **`best` is the seed that shows this seam off worst**, not the seed with the
+ * largest overlap, and the two are not the same question. The entrance road's
+ * kerb is 45 m² of shared plane on one seed and buried under a bridge ramp on
+ * another; ranking off the biggest one dropped the single most prominent seam
+ * in the game — 45 m² at the front gate — to the bottom of the list, because
+ * that particular seed happened to hide it. What a person wants to know is
+ * whether *any* park a child can be given puts it in front of her.
  */
 const worst = new Map<
   string,
-  { area: number; separation: number; seams: number; sample: Finding }
+  { area: number; separation: number; seams: number; best: Finding }
 >();
 {
   /** How many seams each key had **on one seed**, so the max is comparable. */
@@ -285,16 +293,16 @@ const worst = new Map<
         area: finding.area,
         separation: finding.separation,
         seams,
-        sample: finding,
+        best: finding,
       });
       continue;
     }
     if (seams > previous.seams) previous.seams = seams;
-    if (finding.area > previous.area) {
-      previous.area = finding.area;
-      previous.sample = finding;
-    }
+    if (finding.area > previous.area) previous.area = finding.area;
     if (finding.separation < previous.separation) previous.separation = finding.separation;
+    // `findings` is in seed order, so `>` rather than `>=` keeps the lowest
+    // seed of any tie and the report cannot wobble.
+    if (finding.score > previous.best.score) previous.best = finding;
   }
 }
 
@@ -325,7 +333,7 @@ for (const [key, entry] of worst) {
     regressions.push(
       `NEW: ${key}\n      ${entry.area.toFixed(3)} m² of shared plane, ` +
         `${entry.separation <= DEFAULT_TOLERANCES.fighting ? 'fighting now' : 'a maintained stand-off'} ` +
-        `at ${entry.separation.toExponential(1)} m, seen on seed ${entry.sample.seed}`,
+        `at ${entry.separation.toExponential(1)} m, seen on seed ${entry.best.seed}`,
     );
     continue;
   }
@@ -360,19 +368,19 @@ for (const key of Object.keys(COPLANAR_BASELINE)) {
 // ------------------------------------------------------------------- report
 
 const ranked = [...worst.entries()]
-  .filter(([, entry]) => !entry.sample.occluded)
-  .sort((a, b) => b[1].sample.score - a[1].sample.score);
+  .filter(([, entry]) => !entry.best.occluded)
+  .sort((a, b) => b[1].best.score - a[1].best.score);
 const fightingCount = [...worst.values()].filter(
   (entry) => entry.separation <= DEFAULT_TOLERANCES.fighting,
 ).length;
-const occluded = [...worst.values()].filter((entry) => entry.sample.occluded).length;
+const occluded = [...worst.values()].filter((entry) => entry.best.occluded).length;
 
 if (verbose || regressions.length > 0) {
   console.log('\nranked backlog — visible area ÷ how close a child gets:\n');
   for (const [key, entry] of ranked.slice(0, verbose ? ranked.length : 12)) {
     console.log(
-      `  ${entry.sample.score.toFixed(2).padStart(8)}  ${entry.area.toFixed(2)} m²  ` +
-        `${entry.sample.reach.toFixed(1)} m away  ${entry.separation.toExponential(1)} m apart\n` +
+      `  ${entry.best.score.toFixed(2).padStart(8)}  ${entry.area.toFixed(2)} m²  ` +
+        `${entry.best.reach.toFixed(1)} m away  ${entry.separation.toExponential(1)} m apart\n` +
         `            ${key.split('|').slice(1).join('\n            ')}`,
     );
   }
@@ -398,7 +406,7 @@ if (regressions.length > 0) {
 
 console.log(
   `check:coplanar OK — ${worst.size} same-facing coplanar seam(s) across ${seeds.length} seed(s) ` +
-    `and ${new Set([...worst.values()].map((e) => e.sample.space)).size} space(s): ` +
+    `and ${new Set([...worst.values()].map((e) => e.best.space)).size} space(s): ` +
     `${fightingCount} fighting at ${DEFAULT_TOLERANCES.fighting * 1000} mm, ` +
     `${worst.size - fightingCount} more held apart by a stand-off under ` +
     `${DEFAULT_TOLERANCES.near * 100} cm, of which ${occluded} are buried where no camera can ` +
