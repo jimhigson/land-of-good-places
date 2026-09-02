@@ -207,6 +207,31 @@ UNWARPED layout for that seed will keep serving it. Baking warps must
 either bump `LAYOUT_VERSION` or fold the warp vector into the cache key.
 Do this in the same commit as the first bake, and prove it in a check.
 
+## MEASUREMENT 4 — the warp search converges, and the scorer had to be honest (2 Sep)
+
+`scripts/warp-search.mts`: candidates cheapest-and-most-local first (empty
+vector; one-entry layout bumps x14 entries x2; layoutRestart 1-6 = 35
+vectors), each a complete out-of-process replay (~2.4-3.2 s), scored on
+`check:park` with `LGP_NO_LEVEL_CROSSINGS=1`.
+
+**First scorer ran ratchet-off and its winners were false:**
+- canonical: `{layout:{fountain:1}}` after 2 candidates, 0 stranded, vitest
+  oracle PASS — but ratchet-ON check:park FAILS it (anchor.reach:waterFight
+  regression: overbuilds declared 18.5 m radius to 20.5 m).
+- seed 5: `{layout:{waterFight:1}}` after 5 candidates, 0 stranded — vitest
+  oracle FAIL.
+(Raw: `measurements/warp-search-2sep-lenient-scorer.jsonl`.)
+
+**Scorer corrected to the pool's real gate** (ratchet ON, winner must exit
+0 — vet-seed-pool's own standard; instrument control re-run OK). Corrected
+results → `measurements/warp-search-2sep-ratchet.jsonl`, run in progress.
+
+Budget answer for the Overseer: one candidate = one full replay = ~2.4-3.2 s
+(check:park child) + ~50 s vitest oracle for the winner only. All three
+levers are cheap in-process knobs (layout ~9 ms end of the surveyor's
+ranking) but any candidate pays the full replay today; convergence so far
+is single-digit candidates per seed, so minutes per seed offline.
+
 ## Status
 
 - [x] Worktree created, brief captured.
