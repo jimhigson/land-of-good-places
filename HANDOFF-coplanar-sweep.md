@@ -86,7 +86,12 @@ which found 47 more garden seams (234 → 281).
   and the first CI run reached **28m38s** still running. Be precise about that
   number if you cite it: the run ended `cancelled`, but by my own next push
   (`checks.yml` sets `cancel-in-progress`), **not** by the cap — so it is a
-  measured near-miss, not a proven timeout. It did not need to be one. Fixed twice over: never fewer
+  measured near-miss, not a proven timeout. The optimised in-chain version then
+  reached **23m39s** and was superseded the same way. **Neither in-chain run was
+  ever observed completing**, which is exactly why the check moved out of the
+  chain rather than being tuned until the number looked comfortable: `main`'s
+  own 25m04s against a 30-minute cap is the fact that decides it, and that fact
+  is not mine to make better by shaving my step. Fixed twice over: never fewer
   than two lanes, and the garden-only children now drop their indoor seams
   **before** ranking rather than after, which is where the cost is (a sight-line
   ray against every mesh in the game, plus a ring search, per seam). Same 281
