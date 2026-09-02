@@ -233,6 +233,39 @@ levers are cheap in-process knobs (layout ~9 ms end of the surveyor's
 ranking) but any candidate pays the full replay today; convergence so far
 is single-digit candidates per seed, so minutes per seed offline.
 
+## MEASUREMENT 5 — THE CAPSTONE: B works on the whole pool (2 Sep)
+
+With the four vectors baked (`parkWarp.ts WARPS_BY_SEED`) and the level
+tier empty (`LGP_NO_LEVEL_CROSSINGS=1`):
+
+- **check:park, ratchet ON: exit 0 on ALL SIXTEEN pool seeds.** 19/19
+  attractions everywhere, 0 illegal crossings, 0 stranded
+  (`measurements/baked-warps-16seeds.txt`).
+- **Full vitest oracle: 500/502; the only failures are seed 18's two
+  crossing tests** — not a pool seed, and its park structurally needs a
+  level crossing (`measurements/baked-warps-vitest.txt`).
+
+Search convergence, fully gated (ratchet-on + zero stranded + oracle where
+covered): canonical 20 candidates/3 oracle rejections/307 s; seed 5 20/487 s
+(same winning vector {ferrisWheel:2}; genuinely different parks — 245 vs
+322 waypoints); 288 5 candidates; 326 2 candidates. **All four winners are
+one-entry local warps; the layoutRestart (backtrack) candidates were never
+reached** — warping preferentially to backtracking, exactly as ruled.
+
+## DECISION POINTS — for Jim/Overseer before the deletion PR
+
+1. **Seed 18's test files** (`seed-18.test.ts`, sweep-seed set): under
+   zero-LC it fails permanently — its park cannot exist under the new rule.
+   Replacing it looks like "swapping a seed to make a test pass", which is
+   banned without a ruling; but the rule it needs is being deleted by
+   design. Needs an explicit ruling + written rationale.
+2. **288/326 have no per-seed invariant coverage** (#437): their baked
+   vectors are proven only at ratchet-on check:park. Accept, or generate
+   invariant coverage per pool seed first?
+3. Then: delete the level tier for real (deletion map in MAP 1), remove the
+   probe switch, add the every-crossing-is-a-bridge invariant in the same
+   PR, re-vet the pool via vet-seed-pool (feat/sixteen-seeds branch).
+
 ## Status
 
 - [x] Worktree created, brief captured.
