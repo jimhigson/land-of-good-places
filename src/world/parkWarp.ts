@@ -59,7 +59,20 @@ export interface WarpVector {
  * the warp-search script, never edited by hand; absence means "this seed
  * solves unwarped".
  */
-const WARPS_BY_SEED: Readonly<Record<number, WarpVector>> = {};
+const WARPS_BY_SEED: Readonly<Record<number, WarpVector>> = {
+  // Found by scripts/warp-search.mts, 2 Sep 2026, against the level-tier-empty
+  // park (measurements/warp-search-2sep-*.jsonl). Gates at time of baking:
+  // ratchet-on check:park exit 0 + zero stranded on all four; the
+  // unallowanced vitest oracle additionally passed on the two seeds it
+  // covers (canonical, 5) — 288 and 326 have no per-seed invariant file
+  // (#437). These vectors are meaningless until the level tier is gone:
+  // they exist to reconnect the garden pockets the level crossings used to
+  // carry.
+  20260728: { layout: { ferrisWheel: 2 } },
+  5: { layout: { ferrisWheel: 2 } },
+  288: { layout: { waterFight: 1 } },
+  326: { layout: { fountain: 1 } },
+};
 
 function envWarp(): WarpVector | null {
   try {
