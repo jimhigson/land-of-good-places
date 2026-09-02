@@ -143,10 +143,31 @@ export interface PetBedFit {
  * size and not wherever it happened to be standing.
  */
 export function sleepingBox(root: Object3D): Box3 {
+  return posedBox(root, BED_POSE_X, BED_POSE_Y);
+}
+
+/**
+ * **How big this model is when it is turned like that**, about its own origin,
+ * at scale 1 — and the model put back exactly as it was found.
+ *
+ * The general form of {@link sleepingBox}, extracted when the ginormous slide
+ * needed the same answer for a *different* pose: a companion lying back on the
+ * chute at `RIDE_RECLINE` sinks its own tail 0.58 m below its feet, so
+ * `ParadeMember` has to measure that pose to know how far to lift the body
+ * before it draws it, exactly as it measures the sleeping one to land a pet on
+ * a cushion. Two poses, one measurement — a second copy of the
+ * rotate-measure-restore dance is a second place for the restore to be
+ * forgotten, and forgetting it leaves a live pet in the park frozen in a
+ * measuring pose.
+ *
+ * Taken about the origin at scale 1, so the answer is the model's own size and
+ * not wherever it happened to be standing.
+ */
+export function posedBox(root: Object3D, rotationX: number, rotationY: number): Box3 {
   const rotation = root.rotation.clone();
   const scale = root.scale.clone();
   const position = root.position.clone();
-  root.rotation.set(BED_POSE_X, BED_POSE_Y, 0);
+  root.rotation.set(rotationX, rotationY, 0);
   root.scale.setScalar(1);
   root.position.set(0, 0, 0);
   root.updateMatrixWorld(true);

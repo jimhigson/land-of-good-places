@@ -1,4 +1,5 @@
 import { Vector3 } from 'three';
+import { RIDE_RECLINE } from '../../entities/ridePose';
 import type { SlideRide } from '../building/SlideRide';
 
 /**
@@ -41,6 +42,18 @@ export interface SlideSeat {
   facing: number;
   /** Nose-down pitch, radians. See {@link slopeOf}. */
   pitch: number;
+  /**
+   * How far back the body lies, radians, **on top of** {@link pitch} and in the
+   * same yawed frame — so a companion is turned by `pitch + recline` about its
+   * own left-right axis and ends up lying along the chute rather than standing
+   * on it.
+   *
+   * Always `RIDE_RECLINE`, the child's own. It is carried in the seat rather
+   * than read by `ParadeMember` directly because the seat is already the one
+   * message the ride sends the parade: everything about *how a companion rides*
+   * arrives in one object, and there is no second channel to keep in step.
+   */
+  recline: number;
 }
 
 /** Fills `seat` with where the `slot`-th companion rides this frame. */
@@ -74,69 +87,85 @@ export interface PetSlideLink {
 }
 
 /**
+ * The length of a **reclining child**, in metres: how far back along the chute
+ * her body reaches from the point her feet are placed at.
+ *
+ * Measured on a really-built `CharacterModel` posed by `applyRidePose` at
+ * `'reclined'` and turned by {@link RIDE_RECLINE} — the pose the game actually
+ * draws her in — not reasoned about. Her *head* is 1.33 m behind her feet, and
+ * the doc on `RIDE_RECLINE` says so; her **arms**, thrown back over her head at
+ * −1.95, reach **2.28 m**, and it is the arms a pet clips into. That gap
+ * between the number everybody quotes and the number that matters is exactly
+ * why this is measured off the built rig.
+ *
+ * Written down rather than measured at run time on purpose: building a kid to
+ * place a pet would drag `CharacterModel` into the ride's module graph for one
+ * scalar. The guard against it drifting is not this comment — it is
+ * `check:pet-slide`'s **no companion touches her** clause, which compares the
+ * drawn meshes of the real child against the drawn meshes of the real pets on
+ * every frame of a real descent and fails on the first millimetre of overlap.
+ * A number that a check re-measures every build is not a copy.
+ */
+const CHILD_RECLINED_LENGTH = 2.28;
+
+/**
+ * The same, for the **longest companion**: how far back a reclining animal
+ * reaches from its own seat.
+ *
+ * Measured across every catalogue entry `walksInParade` accepts, in the same
+ * pose, the same way `petBedFit` measures the biggest sleeper — so the spacing
+ * fits the roundest pet in the game rather than the one that happened to be
+ * tried. The puff is the long one at 1.52 m; the bunny is 1.53 m nose to tail
+ * but narrower. Standing, every one of them is 1.46 m *tall*; lying down that
+ * height becomes length, which is the whole reason this number is not the one
+ * the first version of this feature was spaced by.
+ */
+const PET_RECLINED_LENGTH = 1.53;
+
+/**
+ * The daylight left between one body and the next, in metres.
+ *
+ * **The one number here that is a choice rather than a measurement.** Jim, 1
+ * September 2026, having ridden it: *"Pet on the slide shouldn't mean they clip
+ * inside the player's head."* They did: the first companion rode 1.5 m behind
+ * her, which is 0.78 m *inside* a child whose arms reach 2.28 m back, and it
+ * stood upright through her while it did it.
+ *
+ * 0.30 m is a third of a pet's width and it has to absorb three things a
+ * measurement of two straight bodies cannot: the chute bends, so two bodies
+ * 1.8 m apart along the curve are slightly closer than that through the air;
+ * her hair and her backpack are hers, chosen in the character creator, and are
+ * not in the 2.28 m above; and a pet breathes and bobs. Anything smaller has
+ * been seen to touch.
+ */
+const BODY_CLEARANCE = 0.3;
+
+/**
  * How far behind her the first companion rides, in metres of chute.
  *
- * **Read off the framed shot, not chosen as a gap in metres.** The chase camera
- * sits `CHASE_EYE.z` = 4.35 m behind her (`Building.ts`), so anything further
- * back than that is behind the lens and simply not in the ride at all from a
- * child's seat. 1.5 m puts the first companion clearly separate from her — a
- * pet at half a metre reads as part of her — and leaves room for a second and a
- * third at {@link PET_SLIDE_GAP} before the camera is reached.
+ * **Measured against her body, not against the lens.** The version Jim saw put
+ * this at 1.5 m because that was a good-looking gap in the chase shot, and a
+ * gap that is safe in a plan view is not safe against a child lying down: she
+ * occupies the 2.28 m of chute behind her own feet, so 1.5 m was inside her.
+ * Keeping a companion out of the *camera* and keeping it out of *her* are
+ * different questions, and only the second one is about her.
  */
-export const PET_SLIDE_LEAD = 1.5;
+export const PET_SLIDE_LEAD = CHILD_RECLINED_LENGTH + BODY_CLEARANCE;
 
 /**
  * Gap between one companion and the next, in metres of chute.
  *
- * Wide enough that two pets are never on the same spot — the whole line is
- * strictly ordered along one curve, so "not piled up" is true by construction
- * rather than by a separation force — and tight enough that two of them fit
- * between her and the chase lens (1.5 and 2.7 m against its 4.35 m).
+ * The same rule one place further down the line: a body's own length plus the
+ * daylight after it. This is what makes "no two on the same spot" hold at three
+ * pets and at eight — the line is strictly ordered along one curve and every
+ * neighbouring pair is spaced by more than either of them is long, so it is
+ * true by construction rather than by a separation force that has to converge.
+ *
+ * It is deliberately *not* {@link PET_SLIDE_LEAD}: a pet is a metre shorter
+ * than a reclining child, and spacing the whole line at her length would string
+ * eight animals out over twenty metres of chute for no reason.
  */
-export const PET_SLIDE_GAP = 1.2;
-
-/**
- * Where the chase camera's eye sits behind her, in metres of chute — the `z`
- * of `Building.ts`'s `CHASE_EYE`, which is what {@link PET_BLIND_BAND} is
- * measured around.
- *
- * **A second copy of a number, and the only one in this feature**, so it is
- * worth saying why rather than importing it: `Building.ts` imports this module,
- * so this module cannot import `Building.ts` back without a cycle whose
- * initialiser order would be decided by whoever happened to be imported first.
- * It is asserted instead — `check:pet-slide` reads the ride's **live** camera
- * offset and fails if it has moved away from this, so the two cannot drift
- * silently the way the repo's most-filed bug does.
- */
-export const CHASE_EYE_BACK = 4.35;
-
-/**
- * How much room the chase lens is given, fore and aft, in metres.
- *
- * **This is not a tuning constant, it is the whole reason the line has a hole
- * in it.** With the seats laid out plainly — 1.5, 2.7, 3.9, 5.1 m — the third
- * companion rides 0.45 m in front of a lens 4.35 m behind her, and a bunny
- * 45 cm from the camera is not a pet following her: it is a wall of fur with
- * two ears, filling the frame, with the child completely hidden behind it.
- * Seen, not reasoned about, on a paused mid-descent frame at t = 0.43 — the
- * measurement that decided it, and the reason a check that asked only "is a
- * companion inside the frustum" was happy: it was inside the frustum. It was
- * *all* of the frustum.
- *
- * **2.35 m, because a companion is 1.46 m tall** — measured off the built
- * models through `ParadeMember.height`, and very nearly as tall as the child
- * herself. At 1.6 m of band, two of them rode between her and the lens, at 3.2
- * and 2.75 m from it; the nearer one alone spans 46% of the frame's height at
- * a 60° field of view, and with two the shot is a wall of animal with the
- * child glimpsed between them. Seen on a paused chase frame at t = 0.33 with
- * five companions aboard, which is what the number was raised against.
- *
- * At 2.35 the band runs from 2.0 m behind her, so **exactly one** companion
- * rides in the chase shot — off to one side, on the stagger — and everybody
- * else is behind the lens, where the three trackside cameras still show the
- * whole line. One pet clearly following her beats four filling the lens.
- */
-export const PET_BLIND_BAND = 2.35;
+export const PET_SLIDE_GAP = PET_RECLINED_LENGTH + BODY_CLEARANCE;
 
 /**
  * How far a companion sits to the side of the chute's centre line, in metres,
@@ -196,19 +225,31 @@ const UP = new Vector3(0, 1, 0);
 /**
  * How far back along the chute the `slot`-th companion rides, in metres.
  *
- * The plain answer is `lead + slot * gap`. The only thing on top of it is the
- * **blind band**: no companion may ride within {@link PET_BLIND_BAND} of the
- * chase lens, so any seat that would land in that band — and everybody behind
- * it, or they would close up and pile — is pushed out past the far side of it.
+ * **A plain line, and it is plain again on purpose.** The version before this
+ * one had a hole punched in it — a "blind band" that shunted any companion
+ * landing near the chase lens out past the far side of it, because a 1.46 m
+ * animal standing bolt upright 45 cm from the camera filled the entire frame.
+ * Lying down retires the problem the band was invented for rather than
+ * mitigating it: a reclining pet stands 0.6–0.9 m off the trough floor against
+ * a lens 1.62 m above it, so the one that passes under the camera passes
+ * *under* it — some 70° below the axis of a shot whose lower edge is 38° down —
+ * and is simply not in the picture, instead of being all of it.
  *
- * Everything therefore stays in line order and strictly spaced, which is what
- * makes "no two on the same spot" true by construction rather than by a
- * separation force that could fail to converge.
+ * So the line goes `lead + slot * gap` and nothing else, which is what Jim
+ * asked for: *"several strung out behind her, lying down, as a line."* A hole
+ * in it was visible from the three trackside cameras, which see the whole line
+ * in profile and were never the shot the band was protecting.
+ *
+ * Nothing here asserts where the camera is, and that is deliberate — the copy
+ * of `CHASE_EYE.z` this module used to keep, purely so the band could be
+ * measured around it, is gone with the band. What replaces it is not another
+ * constant but a measurement: `check:pet-slide` rasters the **live** chase
+ * camera and fails if the child is ever hidden or a pet ever fills more than a
+ * quarter of the frame, so moving the lens is answered by the shot rather than
+ * by two numbers promising each other they still agree.
  */
 export function petSlideOffset(slot: number): number {
-  const raw = PET_SLIDE_LEAD + slot * PET_SLIDE_GAP;
-  const bandStart = CHASE_EYE_BACK - PET_BLIND_BAND;
-  return raw < bandStart ? raw : raw + PET_BLIND_BAND * 2;
+  return PET_SLIDE_LEAD + slot * PET_SLIDE_GAP;
 }
 
 /**
@@ -254,4 +295,8 @@ export function petSeatOnSlide(
   seat.z = point.z;
   seat.facing = Math.atan2(tangent.x, tangent.z);
   seat.pitch = slopeOf(tangent);
+  // **On its back, feet first, exactly as she is.** The child's own recline,
+  // taken from the one place that defines it, so there is no second answer to
+  // "how does a body lie on this chute" for the two kinds of body on it.
+  seat.recline = RIDE_RECLINE;
 }

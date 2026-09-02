@@ -113,7 +113,14 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
    * eight companions in it allocates nothing per frame. Never held by anybody:
    * {@link ParadeMember.rideSlide} copies the numbers out of it.
    */
-  private readonly slideSeat: SlideSeat = { x: 0, y: 0, z: 0, facing: 0, pitch: 0 };
+  private readonly slideSeat: SlideSeat = {
+    x: 0,
+    y: 0,
+    z: 0,
+    facing: 0,
+    pitch: 0,
+    recline: 0,
+  };
 
   constructor(player: Player, collision: CollisionWorld, camera: IsoCamera) {
     this.player = player;
