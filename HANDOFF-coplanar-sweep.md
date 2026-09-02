@@ -5,8 +5,8 @@ No browser, no dev server: this is a headless geometry tool.
 
 ## State
 
-Done. PR #473. `check` / `test:procgen` / `build` all exit 0 locally; CI is the
-authority. No geometry changed, so there is nothing to look at — no preview
+Done. PR #473, rebased onto `main` after #463. `check` (58 steps), `test:procgen` (17 files, **510** tests — `main`'s 502 plus
+the 8 controls here) and `build` all exit 0 locally; CI is the authority. No geometry changed, so there is nothing to look at — no preview
 link was given, deliberately.
 
 ## What was built
@@ -106,6 +106,20 @@ Both against `src/world/entrance/Entrance.ts` at `72d526f4`:
    `hotel.wall|hotel.wall` is one key covering two different meshes.
 
 All three reverted; the check is green at exit 0 on the unmodified tree.
+
+4. `LGP_RATCHET=off`, proved both ways without touching `src/` at all — delete
+   the entrance road's line from `coplanar-baseline.mts` and the same run is
+   exit 1 enforced and exit 0 with the switch, listing the finding either way:
+
+   ```
+   NEW: garden|entrance/entrance-road-gateway|entrance/entrance-road-kerb
+         48.429 m² of shared plane, fighting now at 8.1e-5 m, seen on seed 24
+   check:coplanar OK — … 1 new or worse, listed above and NOT enforced because LGP_RATCHET=off.
+   ```
+
+   The summary names the suppressed count rather than saying "none is new",
+   which was the first version and would have made the switch a way to get a
+   green line over a red result.
 
 ## If you pick this up
 
