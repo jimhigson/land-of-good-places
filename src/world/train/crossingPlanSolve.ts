@@ -7,6 +7,7 @@ import {
 import { MIN_BRIDGE_HALF_LENGTH } from './bridgeFootprint';
 import { STATION_GAP } from './fence';
 import { ENTRANCE_GATE_X, ENTRANCE_GATE_Z, isInEntranceGateway } from '../entrance/layout';
+import { crossingSiteBanned } from '../parkWarp';
 import {
   NARROW_HALF_WIDTH,
   SITE_ANGLE_OFFSETS,
@@ -554,6 +555,10 @@ export function* crossingSitesSearch(): Generator<number, SolvedCrossingSites, v
   const levelCandidates: Candidate[] = [];
   for (let d = 0; d < route.length; d += MARCH_STEP) {
     yield d;
+    // The warp vector may ban a site the paths could not use well; the
+    // march then simply never sees a candidate there and `selectSpaced`
+    // picks the next-best spacing. Unwarped, nothing is ever banned.
+    if (crossingSiteBanned(d)) continue;
     const bridge = bridgeCandidateAt(d);
     if (bridge) {
       bridgeCandidates.push(bridge);

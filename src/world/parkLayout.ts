@@ -9,6 +9,7 @@ import {
   type ManifestEntry,
 } from './parkManifest';
 import { cachedSolve } from '../core/solveCache';
+import { layoutRestartBase, layoutStreamBump } from './parkWarp';
 import { PARK_BOUNDARY } from './boundary';
 import type { AnchorFootprint } from './anchors';
 
@@ -171,7 +172,10 @@ export function edgeDistanceAlong(footprint: AnchorFootprint, dirX: number, dirZ
 }
 
 function solve(): ParkLayout {
-  for (let restart = 0; restart < PARK_RESTARTS; restart += 1) {
+  // The warp vector may start the loop above zero (a whole-park re-roll the
+  // offline search chose); with no warp this is the same `0` as ever.
+  const base = layoutRestartBase();
+  for (let restart = base; restart < base + PARK_RESTARTS; restart += 1) {
     const built = buildOnce(restart);
     if (built) return built;
   }
@@ -228,7 +232,11 @@ function buildOnce(restart: number): ParkLayout | null {
 
     // This entry's own stream — a pure function of (seed, id, restart), so
     // no other entry's fortunes can move this one's candidates.
-    const rng = candidateRng(hashString(entry.id) ^ PARK_SEED, restart);
+    // `layoutStreamBump` is the warp vector's per-entry move: bumping ONE
+    // entry's stream index re-draws that entry's candidates while every
+    // other entry keeps the stream it had — the per-entry-stream property
+    // above is exactly what makes this a local, deterministic mutation.
+    const rng = candidateRng(hashString(entry.id) ^ PARK_SEED, restart + layoutStreamBump(entry.id));
 
     const candidates: Candidate[] = [];
     for (let attempt = 0; attempt < MAX_TRIES && candidates.length < SPREAD_CHOICES; attempt += 1) {
