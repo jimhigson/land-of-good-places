@@ -76,6 +76,12 @@ const WARPS_BY_SEED: Readonly<Record<number, WarpVector>> = {
   // the entrance route), surfaced the moment crossings.ts learned to
   // throw. Its own invariant file proved the fix (81/81).
   24: { layout: { waterFight: 1 } },
+  // 115 and 225 were the full pool re-vet's catches (2 Sep): green under
+  // check:park, red under the invariant suite (paths off grid axes;
+  // Sky Cruiser clearance) — the same #437 shape as 326. Proved with
+  // throwaway vet-style oracles, since neither has a checked-in test file.
+  115: { layout: { dodgems: 1 } },
+  225: { layout: { 'stall.railRacer': 1 } },
   288: { layout: { waterFight: 1 } },
   // First baked as {fountain:1} on check:park evidence alone; the moment
   // seed-326.test.ts existed, that vector went red on ONE invariant the

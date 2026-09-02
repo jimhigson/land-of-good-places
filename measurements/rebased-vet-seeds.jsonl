@@ -1,0 +1,16 @@
+{"seed":5,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":81,"note":"81 invariants passed","seconds":37.1}
+{"seed":11,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":81,"note":"81 invariants passed","seconds":43.9}
+{"seed":20260728,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":81,"note":"81 invariants passed","seconds":44.2}
+{"seed":24,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":81,"note":"81 invariants passed","seconds":62.2}
+{"seed":128,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":81,"note":"81 invariants passed","seconds":26.6}
+{"seed":115,"verdict":"fail","park":"pass","invariants":"fail","invariantsPassed":77,"invariantsFailed":4,"note":"every paved path runs on grid axes 8ms | nothing a bridge builds hangs into its own tunnel, measured by ray from the rail 1ms | every modelled coping stone sits on the wall it caps 0ms | every crossing on a site the planner proved bridgeable still carries its bridge 0ms","seconds":47.5}
+{"seed":131,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":81,"note":"81 invariants passed","seconds":47.2}
+{"seed":208,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":81,"note":"81 invariants passed","seconds":42.6}
+{"seed":225,"verdict":"fail","park":"pass","invariants":"fail","invariantsPassed":80,"invariantsFailed":1,"note":"the Sky Cruiser flies clear of the whole park 7ms","seconds":50.4}
+{"seed":267,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":81,"note":"81 invariants passed","seconds":44.2}
+{"seed":274,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":81,"note":"81 invariants passed","seconds":43.9}
+{"seed":326,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":81,"note":"81 invariants passed","seconds":52.5}
+{"seed":346,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":81,"note":"81 invariants passed","seconds":48.5}
+{"seed":428,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":81,"note":"81 invariants passed","seconds":58}
+{"seed":451,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":81,"note":"81 invariants passed","seconds":55.8}
+{"seed":288,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":81,"note":"81 invariants passed","seconds":124.6}
