@@ -1856,8 +1856,16 @@ function computeGridConnectors(
   // refused connector is answered by another connector, a relaxed pass, or a
   // route over the deck — never by a leg that walks into a parapet. This is
   // the fix that comment names as "its own ticket".
+  // **The boundary margin an arrival keeps is the ribbon's own, not a
+  // crossroads'.** A grid node needs `STREET_PLOT_CLEARANCE` from the park's
+  // edge because it is a public junction; a door standing 2.31 m in from the
+  // spline (seed 225's and seed 267's rail-race exit, measured) is where the
+  // ride actually lets a child off, and refusing to pave the last two metres to
+  // it does not move the exit — it only leaves her in the grass. 2.0 m still
+  // fits a 2.2 m ribbon's half-width plus its kerb (1.95 m) inside the edge.
+  const boundaryMargin = arrival ? 2.0 : STREET_PLOT_CLEARANCE;
   const legClear = (ax: number, az: number, bx: number, bz: number): boolean =>
-    streetSegmentClear(ax, az, bx, bz, p, exemptNear) &&
+    streetSegmentClear(ax, az, bx, bz, p, exemptNear, boundaryMargin) &&
     segmentClearOfRing(ax, az, bx, bz) &&
     segmentHoldsRailSide(ax, az, bx, bz, pSide, 0) &&
     !segmentCutsABridgeRamp(ax, az, bx, bz);
@@ -1965,7 +1973,7 @@ function computeGridConnectors(
       }
     }
   }
-  if (found.length === 0 && relax > 1) return relayConnectors(p, exemptNear, pSide, legClear);
+  if (found.length === 0 && relax > 1) return relayConnectors(p, pSide, legClear);
   found.sort((a, b) => a.cost - b.cost);
   return found;
 }
@@ -1994,90 +2002,84 @@ function computeGridConnectors(
 const RELAY_CELLS = 4;
 function relayConnectors(
   p: readonly [number, number],
-  exemptNear: number,
   pSide: 1 | -1,
   legClear: (ax: number, az: number, bx: number, bz: number) => boolean,
 ): GridConnector[] {
-  void exemptNear;
   const lattice = streetLattice();
   const ci = Math.round((p[0] - PLAZA.x) / STREET_PITCH);
   const cj = Math.round((p[1] - PLAZA.z) / STREET_PITCH);
-  const size = RELAY_CELLS * 2 + 1;
-  const cellX = (i: number): number => PLAZA.x + i * STREET_PITCH;
-  const cellZ = (j: number): number => PLAZA.z + j * STREET_PITCH;
-  const key = (i: number, j: number): number => (i - ci + RELAY_CELLS) * size + (j - cj + RELAY_CELLS);
-  const inRange = (i: number, j: number): boolean =>
-    Math.abs(i - ci) <= RELAY_CELLS &&
-    Math.abs(j - cj) <= RELAY_CELLS &&
-    Math.abs(i) <= LATTICE_HALF_CELLS &&
-    Math.abs(j) <= LATTICE_HALF_CELLS;
-  const usable = new Map<number, boolean>();
-  const relayOk = (i: number, j: number): boolean => {
-    const k = key(i, j);
-    const hit = usable.get(k);
-    if (hit !== undefined) return hit;
-    const x = cellX(i);
-    const z = cellZ(j);
-    const ok =
-      railInfoAt(x, z).side === pSide &&
-      railInfoAt(x, z).dist >= RAIL_CLAMP_DISTANCE &&
-      !pointStandsOnBridgeMasonry(x, z) &&
-      Math.hypot(x - PLAZA.x, z - PLAZA.z) >= RING_RADIUS + 1 &&
-      legClear(x, z, x, z);
-    usable.set(k, ok);
-    return ok;
-  };
-  // Seed: every relay cell the door itself can reach by one straight or
-  // elbowed hop, at the ordinary tail limit.
-  const cost = new Map<number, number>();
-  const from = new Map<number, number>();
-  const entry = new Map<number, readonly (readonly [number, number])[]>();
-  const queue: { i: number; j: number; c: number }[] = [];
-  for (let di = -1; di <= 1; di += 1) {
-    for (let dj = -1; dj <= 1; dj += 1) {
-      const i = ci + di;
-      const j = cj + dj;
-      if (!inRange(i, j) || !relayOk(i, j)) continue;
-      const nx = cellX(i);
-      const nz = cellZ(j);
-      const shapes: readonly (readonly (readonly [number, number])[])[] = [
-        [[nx, nz], p],
-        [[nx, nz], [nx, p[1]], p],
-        [[nx, nz], [p[0], nz], p],
-      ];
-      for (const shape of shapes) {
-        let ok = true;
-        let length = 0;
-        for (let s = 1; s < shape.length && ok; s += 1) {
-          const a = shape[s - 1] as readonly [number, number];
-          const b = shape[s] as readonly [number, number];
-          if (!legClear(a[0], a[1], b[0], b[1])) ok = false;
-          length += Math.hypot(b[0] - a[0], b[1] - a[1]);
-        }
-        if (!ok) continue;
-        const k = key(i, j);
-        const c = length * STUB_COST_FACTOR;
-        if ((cost.get(k) ?? Infinity) <= c) break;
-        cost.set(k, c);
-        entry.set(k, shape);
-        queue.push({ i, j, c });
-        break;
-      }
+  // The grid lines in range, **plus the door's own two lines**. Adding those
+  // two is what makes this work at all: a door boxed in by its own building
+  // can always step straight out along its own row or column to the first grid
+  // line that is clear, and from there the walk is on the grid proper.
+  const cells: number[] = [];
+  const xs: number[] = [];
+  const zs: number[] = [];
+  for (let k = -RELAY_CELLS; k <= RELAY_CELLS; k += 1) {
+    if (Math.abs(ci + k) <= LATTICE_HALF_CELLS) {
+      xs.push(PLAZA.x + (ci + k) * STREET_PITCH);
+      cells.push(ci + k);
+    }
+    if (Math.abs(cj + k) <= LATTICE_HALF_CELLS) zs.push(PLAZA.z + (cj + k) * STREET_PITCH);
+  }
+  xs.push(p[0]);
+  zs.push(p[1]);
+  xs.sort((a, b) => a - b);
+  zs.sort((a, b) => a - b);
+  const w = xs.length;
+  const h = zs.length;
+  const at = (i: number, j: number): number => i * h + j;
+  const px = xs.indexOf(p[0]);
+  const pz = zs.indexOf(p[1]);
+  const usable = new Uint8Array(w * h);
+  for (let i = 0; i < w; i += 1) {
+    for (let j = 0; j < h; j += 1) {
+      const x = xs[i] as number;
+      const z = zs[j] as number;
+      // Deliberately only the screens `legClear` cannot express as a segment:
+      // the rail SIDE (a corner may legitimately stand closer to the track
+      // than a crossroads may — `segmentHoldsRailSide` on each leg is what
+      // keeps the run itself off the corridor) and the bridge masonry.
+      usable[at(i, j)] =
+        railInfoAt(x, z).side === pSide && !pointStandsOnBridgeMasonry(x, z) && legClear(x, z, x, z)
+          ? 1
+          : 0;
     }
   }
-  // Dijkstra along grid lines.
-  const closed = new Set<number>();
-  const reached: { i: number; j: number; c: number }[] = [];
-  while (queue.length > 0) {
-    queue.sort((a, b) => a.c - b.c);
-    const here = queue.shift() as { i: number; j: number; c: number };
-    const k = key(here.i, here.j);
-    if (closed.has(k)) continue;
-    closed.add(k);
-    if (lattice.nodeOk[lattice.indexOf(here.i, here.j)]) {
-      reached.push(here);
+  usable[at(px, pz)] = 1; // the door itself is where the walk starts
+  /** Index of the lattice node standing exactly here, or -1. */
+  const latticeNodeAt = (i: number, j: number): number => {
+    const ii = Math.round(((xs[i] as number) - PLAZA.x) / STREET_PITCH);
+    const jj = Math.round(((zs[j] as number) - PLAZA.z) / STREET_PITCH);
+    if (Math.abs((xs[i] as number) - (PLAZA.x + ii * STREET_PITCH)) > 1e-6) return -1;
+    if (Math.abs((zs[j] as number) - (PLAZA.z + jj * STREET_PITCH)) > 1e-6) return -1;
+    if (Math.abs(ii) > LATTICE_HALF_CELLS || Math.abs(jj) > LATTICE_HALF_CELLS) return -1;
+    const index = lattice.indexOf(ii, jj);
+    return lattice.nodeOk[index] ? index : -1;
+  };
+  const cost = new Float64Array(w * h).fill(Infinity);
+  const from = new Int32Array(w * h).fill(-1);
+  const done = new Uint8Array(w * h);
+  cost[at(px, pz)] = 0;
+  const reached: { cell: number; node: number; cost: number }[] = [];
+  for (;;) {
+    let bestCell = -1;
+    let bestCost = Infinity;
+    for (let c = 0; c < w * h; c += 1) {
+      if (!done[c] && (cost[c] as number) < bestCost) {
+        bestCost = cost[c] as number;
+        bestCell = c;
+      }
+    }
+    if (bestCell < 0) break;
+    done[bestCell] = 1;
+    const i = Math.floor(bestCell / h);
+    const j = bestCell % h;
+    const node = latticeNodeAt(i, j);
+    if (node >= 0 && bestCell !== at(px, pz)) {
+      reached.push({ cell: bestCell, node, cost: bestCost });
       if (reached.length >= 3) break;
-      continue;
+      continue; // a valid node is a terminus, not a through-route for this search
     }
     for (const [di, dj] of [
       [1, 0],
@@ -2085,42 +2087,32 @@ function relayConnectors(
       [0, 1],
       [0, -1],
     ] as readonly (readonly [number, number])[]) {
-      const i = here.i + di;
-      const j = here.j + dj;
-      if (!inRange(i, j) || !relayOk(i, j)) continue;
-      if (!legClear(cellX(here.i), cellZ(here.j), cellX(i), cellZ(j))) continue;
-      const next = here.c + STREET_PITCH;
-      const nk = key(i, j);
-      if ((cost.get(nk) ?? Infinity) <= next) continue;
-      cost.set(nk, next);
-      from.set(nk, k);
-      queue.push({ i, j, c: next });
+      const ni = i + di;
+      const nj = j + dj;
+      if (ni < 0 || nj < 0 || ni >= w || nj >= h) continue;
+      const next = at(ni, nj);
+      if (!usable[next] || done[next]) continue;
+      const ax = xs[i] as number;
+      const az = zs[j] as number;
+      const bx = xs[ni] as number;
+      const bz = zs[nj] as number;
+      if (!legClear(ax, az, bx, bz)) continue;
+      const step = bestCost + Math.hypot(bx - ax, bz - az) * STUB_COST_FACTOR + 1;
+      if (step < (cost[next] as number)) {
+        cost[next] = step;
+        from[next] = bestCell;
+        }
     }
   }
   const connectors: GridConnector[] = [];
   for (const goal of reached) {
     const chain: (readonly [number, number])[] = [];
-    let k: number | undefined = key(goal.i, goal.j);
-    let cell: readonly [number, number] = [goal.i, goal.j];
-    while (k !== undefined) {
-      chain.push([cellX(cell[0]), cellZ(cell[1])]);
-      const parent: number | undefined = from.get(k);
-      if (parent === undefined) break;
-      const pi = ci + (Math.floor(parent / size) - RELAY_CELLS);
-      const pj = cj + ((parent % size) - RELAY_CELLS);
-      cell = [pi, pj];
-      k = parent;
+    for (let c = goal.cell; c !== -1; c = from[c] as number) {
+      chain.push([xs[Math.floor(c / h)] as number, zs[c % h] as number]);
     }
-    const seedShape = entry.get(k as number);
-    if (!seedShape) continue;
-    // `chain` runs goal-first back to the seed cell, whose own shape already
-    // starts at that cell and ends at the door.
-    const points = collapseCollinear([...chain.slice(0, -1), ...seedShape]);
-    connectors.push({
-      node: lattice.indexOf(goal.i, goal.j),
-      points,
-      cost: (cost.get(key(goal.i, goal.j)) as number) + 2,
-    });
+    // `chain` runs node-first back to the door, which is exactly the order a
+    // connector's points are published in.
+    connectors.push({ node: goal.node, points: collapseCollinear(chain), cost: goal.cost + 2 });
   }
   connectors.sort((a, b) => a.cost - b.cost);
   return connectors;
