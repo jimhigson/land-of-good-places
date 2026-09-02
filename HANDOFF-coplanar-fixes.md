@@ -10,7 +10,7 @@ when done** — it is not part of the branch.
 
 ## Where it stands
 
-**281 seams → 270.** Six causes fixed, and one of them turned out to be a
+**281 seams → 250.** Eight causes fixed, and one of them turned out to be a
 placement bug rather than a rendering one.
 
 | # | cause | seams | m² killed | commit |
@@ -21,6 +21,8 @@ placement bug rather than a rendering one.
 | 4 | **two stations built in the same place on seeds 3 and 23** | 1 | 23.71 | same |
 | 5 | seven shop unit placeholders hidden but never removed | 7 | 17.56 | "Seven dead shop placeholders…" |
 | 6 | paddling pool water in the flat lawn slab's plane | 1 | 16.48 | same |
+| 7 | bridge course reveal drawn in the coping's own plane | 17 | 4.69 | "Bridges: the reveal that was drawn in the coping's own plane" |
+| 8 | both arms of an L standing their own post at the shared corner | 3 | 3.22 | "One post per wall corner, not one per arm that ends there" |
 
 `check:coplanar` is green against a regenerated baseline at every commit. The
 baseline was regenerated **per commit**, so the ratchet tightened as the count
@@ -89,11 +91,10 @@ clearance invariants; moving it would make them measure the wrong thing. These
 are false positives and should stay in the baseline with this note against
 them. All 18 rank ≤ 0.01 on the sweep's own visibility score.
 
-## The next thing to do, and what I found out about it
+## Done since: the bridges
 
-**The 18 `shell`/`wallTop` pairs (4.00 m², visible, 0.5–1.3 m reach) are the
-biggest remaining group and the one worth doing next.** Diagnosis, not yet
-fixed:
+**The 18 `shell`/`wallTop` pairs plus 8 `terrain` pairs are fixed** — see the
+commit. Diagnosis kept here because it is the shape of the whole file:
 
 `buildShellGeometry` (bridges.ts ~1055–1195) builds the outer flank as coursed
 stone, alternating `COURSE_RECESS` by course index, and emits a **horizontal
@@ -106,12 +107,30 @@ their reveal becomes a horizontal quad lying exactly in the plane of the
 root cause for the 4 `terrain`↔`wallTop` and 4 `terrain`↔`shell` pairs, where
 the parapet has tapered to nothing and the strip lands in the terrain's plane.
 
-The obvious fix — skipping the reveal for a collapsed course — **opens a real
-slot**, because the coping runs from `halfAcross` inward while a recessed
-course's top edge is inboard of that; the reveal is what closes it. So the fix
-wants to be either "the course that meets the coping is never recessed" or "the
-coping's outer edge follows the top course's own recess". Neither is a
-five-minute change and both want measuring before and after.
+Fixed by skipping the reveal **only where its own height has reached the ring's
+parapet top on both rings it spans**. That is safe where a blanket skip is not:
+the coping spans from `halfAcross` inward past every course's recess, so at
+exactly that height it already closes the wall. A reveal anywhere lower is a
+real shadow line and is still drawn. Confirmed on screen — `after-bridge-flank`
+and `after-bridge-coping` show solid coursed masonry with the coping unbroken
+down the ramp and every lower reveal still there.
+
+## The next thing to do
+
+**The picture-on-a-board family — ~8 seams, ~13 m², and one pattern.** The
+welcome sign (5.64 m², board box + text plane 5 mm proud), `hotel.artwork` in
+five rooms (mount box + canvas plane 5 mm proud), and the two castle dragon
+paintings (10 mm). `ART_DIRECTION.md` §3 already rules on this shape: bake the
+picture into the board's **own** UV map rather than floating a second surface
+in front of it — the hood-face lesson, in a picture frame.
+
+Concretely for `paintedPicture` (`world/hotel/dressing.ts:599`): the mount is a
+`BoxGeometry`, which already carries six material groups, so give group 4 (+Z)
+a texture that is the mount colour with the artwork composited into it, leave
+the other five plain, and delete `canvasPlane` entirely. `artworkTexture` draws
+into its own canvas, so the composite is a `drawImage` into an inset rect — the
+big `switch` need not be touched. Check what `decal()` does to a mesh whose
+`material` is an array before wiring it up.
 
 ## Gates, all confirmed on this branch
 
