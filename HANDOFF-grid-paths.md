@@ -107,27 +107,52 @@ straight-line last resort.
       to stay (the invariants should read it).
 - [ ] No PR yet, by instruction.
 
-### check:park, pool seeds (see /tmp/gp/results.txt for the live run)
+### check:park, all 15 measured pool seeds (2 Sep, at `the last resort may not hop the railway`)
 
-Last measured by hand: seed 5 PASS (19/19, 0 crossings, 1 recorded deviation),
-seed 128 PASS, seed 11 FAIL (a ribbon still crosses the rail off-site — 3 doors
-stranded: building, ballPit, exit-ginormousSlide), seed 131 FAIL
-(`poi.stranded: 6`, all six on the gate corridor at x=0, z 32..52 — the
-corridor is drawn and reaches the ring rim, so this is the poiGraph pocket, not
-a missing route; not yet diagnosed).
+`LGP_SEED=<s> node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-park.mts`
+
+| seed | exit | note | doors stranded |
+|---|---|---|---|
+| 5 | 0 | 19/19, 0 crossings, 293/293 waypoints, 1 recorded deviation | — |
+| 11 | 1 | 2 invariant regressions | building, ballPit, exit-ginormousSlide |
+| 24 | 1 | poi.stranded | station-0 |
+| 115 | 1 | poi.stranded 16 | stall.spaceFerrisWheel |
+| 128 | 0 | 19/19, 220/220 | — |
+| 131 | 1 | poi.stranded 6 | — |
+| 208 | 0 | 19/19, 216/216 | — |
+| 225 | 1 | poi.stranded 105 (114/219 seeds in the main component) | — |
+| 267 | 0 | 19/19, 256/256 | — |
+| 274 | 0 | 19/19, 222/222 | — |
+| 288 | 0 | 19/19, 215/215 | — |
+| 326 | 1 | poi.stranded 1 | — |
+| 346 | 0 | 19/19, 240/240 | — |
+| 428 | 0 | 19/19, 191/191 | — |
+| 451 | 1 | poi.stranded 3 | — |
+
+**8 pass, 7 fail. Every failure is `poi.stranded`** — no seed fails on
+reachability, on an illegal rail crossing, or on any other invariant. That is
+one defect class, not seven.
 
 ### The two open shapes of failure
 
-1. **Stranded doors** (seed 11): the district is cut off on its own rail side
-   and `relayPolyline` cannot thread it either. The old code reached these with
-   `fenceFollowRoute` — hugging the rail fence round the loop, which is exactly
-   the "twists and mini-turns" Jim rejected. If a grid answer cannot be found,
-   the honest options are a seed swap (Jim's 2 Sep sixteen-good-seeds ruling) or
-   a warp vector, not a diagonal.
-2. **poi.stranded on the gate corridor** (seed 131): diagnose from
-   `check:park`'s own output; the corridor's ribbon is drawn and connected, so
-   suspect the wall runs (`Scenery.ts` owns wall-vs-path) or paving coverage
-   round the corridor's seam.
+1. **`poi.stranded`, the whole remaining failure set.** Seed 225 is the loud
+   one: 114 of 219 waypoint seeds in the main component, i.e. the poiGraph is
+   cut roughly in half. Seed 131's six are all on the gate corridor at `x = 0`,
+   `z = 32..52`, which *is* drawn and *does* reach the ring rim — so it is not
+   a missing route. **Measured and ruled out**: the rescue router's relaxed
+   plot clearance. Forcing its ladder back to `STREET_PLOT_CLEARANCE` alone
+   leaves seeds 326/451/225 at exactly 1 / 3 / 105 stranded — identical. The
+   next hypothesis to test is the *waypoint graph across a bridge*: on this
+   branch only the routes that need to cross do so, where the old plotter sent
+   several, and `poiGraph`'s own walkability link may not survive a ramp.
+   Compare `poiGraph: N/M seeds placed, K in the main component` on the parent
+   branch for the same seed before assuming this branch caused it.
+2. **Stranded doors** (seeds 11, 24, 115): the district is cut off on its own
+   rail side and `relayPolyline` cannot thread it either. The old code reached
+   these with `fenceFollowRoute` — hugging the rail fence round the loop, which
+   is exactly the "twists and mini-turns" Jim rejected. If a grid answer cannot
+   be found, the honest options are a seed swap (Jim's 2 Sep sixteen-good-seeds
+   ruling) or a warp vector, not a diagonal.
 
 ## Open elsewhere
 
