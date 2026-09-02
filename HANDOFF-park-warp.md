@@ -199,6 +199,14 @@ restart, crossing-site ban) all sit at the cheap end IN-PROCESS, but any
 candidate still pays the full ~6 s replay out-of-process today. Convergence
 math: 4 seeds x dozens of candidates x 6 s = minutes, offline — fine.
 
+## LANDMINE — cache key vs baked warps (recorded 2 Sep, not yet handled)
+
+`PARK_LAYOUT` ships through `cachedSolve` keyed on `LAYOUT_VERSION` (+seed).
+When `WARPS_BY_SEED` gains its first baked entry, a browser that cached the
+UNWARPED layout for that seed will keep serving it. Baking warps must
+either bump `LAYOUT_VERSION` or fold the warp vector into the cache key.
+Do this in the same commit as the first bake, and prove it in a check.
+
 ## Status
 
 - [x] Worktree created, brief captured.
