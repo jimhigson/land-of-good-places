@@ -36,9 +36,7 @@ export interface BaselineEntry {
 }
 
 export const COPLANAR_BASELINE: Readonly<Record<string, BaselineEntry>> = {
-  "garden|entrance/entrance-road-gateway|entrance/entrance-road-kerb": { area: 48.4294, seams: 2, fighting: true },
   "castle.mall|the-big-building-inside/building-shell/building-shell-floor-0/castle-decor-0/castle-rug-0|the-big-building-inside/building-shell/building-shell-floor-0/deck-roundel-0/<Mesh:CylinderGeometry>": { area: 30.3854, seams: 1, fighting: false },
-  "garden|entrance/entrance-road-gateway|garden/path-surface": { area: 24.5381, seams: 5, fighting: false },
   "garden|park-train/train-station-0/<Mesh:BoxGeometry>|park-train/train-station-1/<Mesh:BoxGeometry>": { area: 23.7112, seams: 2, fighting: false },
   "garden|anchor-plots/anchor:waterFight/waterfight:plot/<Mesh:CircleGeometry>|anchor-plots/anchor:waterFight/waterfight:plot/<Mesh:RoundedBoxGeometry>": { area: 16.4799, seams: 1, fighting: false },
   "castle.mall|the-big-building-inside/building-shell/building-shell-floor-0/deck-0|the-big-building-inside/building-shell/building-shell-floor-0/interior-porch/<Mesh:BoxGeometry>": { area: 8.3250, seams: 1, fighting: true },
@@ -63,6 +61,7 @@ export const COPLANAR_BASELINE: Readonly<Record<string, BaselineEntry>> = {
   "castle.mall|the-big-building-inside/building-shell/building-shell-floor-0/shop:stickerPet/shop-stage:stickerPet/kiosk:stickerPet/<Mesh:BoxGeometry>|the-big-building-inside/building-shell/building-shell-floor-0/shop:stickerPet/shop-stage:stickerPet/unit-placeholder/<Mesh:BoxGeometry>": { area: 2.5080, seams: 3, fighting: true },
   "castle.mall|the-big-building-inside/building-shell/building-shell-floor-0/shop:surpriseEgg/shop-stage:surpriseEgg/kiosk:surpriseEgg/<Mesh:BoxGeometry>|the-big-building-inside/building-shell/building-shell-floor-0/shop:surpriseEgg/shop-stage:surpriseEgg/unit-placeholder/<Mesh:BoxGeometry>": { area: 2.5080, seams: 3, fighting: true },
   "castle.mall|the-big-building-inside/building-shell/building-shell-floor-0/shop:toy/shop-stage:toy/kiosk:toy/<Mesh:BoxGeometry>|the-big-building-inside/building-shell/building-shell-floor-0/shop:toy/shop-stage:toy/unit-placeholder/<Mesh:BoxGeometry>": { area: 2.5080, seams: 3, fighting: true },
+  "garden|entrance/entrance-road-gateway|garden/path-surface": { area: 2.4910, seams: 3, fighting: false },
   "garden|anchor-plots/anchor:waterFight/waterfight:plot/<Mesh:RoundedBoxGeometry>|anchor-plots/anchor:waterFight/waterfight:plot/<Mesh:RoundedBoxGeometry>/<Mesh:RoundedBoxGeometry>": { area: 2.4824, seams: 1, fighting: false },
   "garden|park-train/train-station-0/<Mesh:BoxGeometry>|park-train/train-station-0/<Mesh:BoxGeometry>": { area: 2.4480, seams: 2, fighting: true },
   "garden|park-train/train-station-1/<Mesh:BoxGeometry>|park-train/train-station-1/<Mesh:BoxGeometry>": { area: 2.4480, seams: 2, fighting: true },
