@@ -5,6 +5,7 @@ import type { IsoCamera } from '../../core/IsoCamera';
 import type { TapPoint } from '../../core/input/PointerControls';
 import type { CollisionWorld } from '../../world/Collision';
 import type { PetBedSpot, PetParadeLink } from '../../world/hotel/Hotel';
+import type { PetSlideLink, SlideSeat, SlideSeatFor } from '../../world/slide/petRiders';
 import { terrainHeight } from '../../world/terrain';
 import { shopItem } from '../../world/building/shops/catalogue';
 import { gameStore, walksInParade, type GameState, type InventoryItem } from '../../state';
@@ -80,7 +81,7 @@ const MEMBER_RADIUS = PARADE_MEMBER_RADIUS;
 /** Seconds of stagger per place in the line when the hop ripples down it. */
 const HOP_RIPPLE = 0.075;
 
-export class Parade implements GameSystem, PetParadeLink {
+export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
   readonly name = 'parade';
 
   /** Add this to the scene once. Members live in world space inside it. */
@@ -107,6 +108,19 @@ export class Parade implements GameSystem, PetParadeLink {
   private overflow = 0;
   /** Signature of the last sync, so a store notification is usually free. */
   private signature = '';
+  /**
+   * Scratch handed to the ride and straight on to one member, so a descent with
+   * eight companions in it allocates nothing per frame. Never held by anybody:
+   * {@link ParadeMember.rideSlide} copies the numbers out of it.
+   */
+  private readonly slideSeat: SlideSeat = {
+    x: 0,
+    y: 0,
+    z: 0,
+    facing: 0,
+    pitch: 0,
+    recline: 0,
+  };
 
   constructor(player: Player, collision: CollisionWorld, camera: IsoCamera) {
     this.player = player;
@@ -214,6 +228,78 @@ export class Parade implements GameSystem, PetParadeLink {
   }
 
   /**
+   * **Everybody down the slide behind her** — issue #468, and the ginormous
+   * slide is the one caller, every frame of the descent.
+   *
+   * Jim: *"When going down the slide, the pet should slide down behind the
+   * player."*
+   *
+   * The same one-way seam as the banquet's `sendPetsToTable` and, like it,
+   * built on the line itself: the order companions walk in *is* the order they
+   * come down the chute in, so nothing here decides who goes where, and there
+   * is no second list of who her companions are to disagree with the one behind
+   * her. The ride answers where each seat is (`slide/petRiders.ts`); this puts
+   * the animals in them and never gives the ride a body to hold.
+   *
+   * Returns how many are aboard, which is what a check measures.
+   */
+  ridePetsDownSlide(seatFor: SlideSeatFor): number {
+    for (let slot = 0; slot < this.members.length; slot += 1) {
+      seatFor(slot, this.slideSeat);
+      this.members[slot]?.rideSlide(this.slideSeat);
+    }
+    return this.members.length;
+  }
+
+  /**
+   * The bottom of the slide: everybody back into the line, from wherever on the
+   * chute they had got to. A no-op for a member that never boarded, so the ride
+   * may call it whenever a descent ends without tracking who went.
+   */
+  callPetsOffSlide(): void {
+    for (const member of this.members) member.leaveSlide();
+  }
+
+  /**
+   * How many companions are actually on the chute — the question a check asks,
+   * answered by the system that owns those bodies rather than by a second
+   * count kept by the ride.
+   */
+  petsOnSlide(): number {
+    return this.members.filter((member) => member.onSlide).length;
+  }
+
+  /**
+   * The `slot`-th companion's own live body, nearest her first — what
+   * `check:pet-slide` measures a descent with.
+   *
+   * By place in the line rather than by uid, unlike {@link petState}, because
+   * the question that check asks is about **order**: is each one behind the one
+   * in front of it, and is any pair on the same spot. `root` is the real node,
+   * so the check takes its own world position off the scene graph after the
+   * frame that moved it rather than being told where the pet ought to be — the
+   * distinction that separates observing from recomputing, and the reason this
+   * returns the body and not a copy of its coordinates.
+   */
+  companionAt(slot: number): {
+    readonly uid: string;
+    readonly displayName: string;
+    readonly height: number;
+    readonly onSlide: boolean;
+    readonly root: Object3D;
+  } | null {
+    const member = this.members[slot];
+    if (!member) return null;
+    return {
+      uid: member.uid,
+      displayName: member.displayName,
+      height: member.height,
+      onSlide: member.onSlide,
+      root: member.root,
+    };
+  }
+
+  /**
    * How many companions are actually standing at the pets' table with their
    * noses in a bowl — the question `check:castle` asks, answered by the one
    * system that owns those bodies rather than by a second clock in the hall.
@@ -303,7 +389,14 @@ export class Parade implements GameSystem, PetParadeLink {
       // this game.
       const bed = member.bedSpot;
       const place = member.tablePlace;
-      if (bed) member.target.set(bed.runUpX, bed.runUpY, bed.runUpZ);
+      // **A companion on the ginormous slide (#468) is aimed at nothing at
+      // all.** The ride has already written its seat on the chute and the
+      // member ignores {@link ParadeMember.target} while it is riding, so
+      // aiming would only resolve a trail sample against the collision world
+      // for a body that is thirty metres up in the air.
+      if (member.onSlide) {
+        // nothing to aim
+      } else if (bed) member.target.set(bed.runUpX, bed.runUpY, bed.runUpZ);
       else if (place) member.target.set(place.x, place.y, place.z);
       else this.aimAt(member);
       member.update(dt, elapsed);

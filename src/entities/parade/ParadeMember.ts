@@ -1,4 +1,4 @@
-import { Group, Vector3 } from 'three';
+import { Euler, Group, Vector3 } from 'three';
 import { clamp, clamp01, TAU, turnTowards } from '../../core/mathUtils';
 import { disposeTree } from '../../art/style/materials';
 import type { AssetHandle, CreatureHandle } from '../../art/style/asset';
@@ -7,7 +7,9 @@ import { createJetpack, type JetpackHandle } from '../../art/models/jetpack';
 import { KID_HEIGHT } from '../../art/models/kid';
 import type { ShopItem } from '../../world/building/shops/catalogue';
 import type { PetBedSpot } from '../../world/hotel/Hotel';
-import { BED_POSE_X, BED_POSE_Y, sleepingBox } from '../../world/hotel/petBedFit';
+import { BED_POSE_X, BED_POSE_Y, posedBox, sleepingBox } from '../../world/hotel/petBedFit';
+import type { SlideSeat } from '../../world/slide/petRiders';
+import { RIDE_RECLINE } from '../ridePose';
 
 /**
  * One cute thing walking behind you.
@@ -225,6 +227,24 @@ export class ParadeMember {
   private table: PetTablePlace | null = null;
   /** True once it has arrived at {@link table} and has its nose in the bowl. */
   private eating = false;
+  /**
+   * True while this one is coming down the ginormous slide behind her (#468),
+   * and its seat on the chute for this frame.
+   *
+   * Held here, on the member, for the same reason {@link bed} and {@link table}
+   * are: this class is the single owner of where this body is and what it is
+   * doing, and nothing else in the game moves or poses a parade pet. The ride
+   * says where the seat is; it never touches the animal.
+   */
+  private sliding = false;
+  private readonly seat: SlideSeat = {
+    x: 0,
+    y: 0,
+    z: 0,
+    facing: 0,
+    pitch: 0,
+    recline: 0,
+  };
   private phase_: BedPhase = 'walking';
   private climbTimer = 0;
   /** Where the climb starts from, captured on arrival at the run-up spot. */
@@ -240,6 +260,34 @@ export class ParadeMember {
    * CLAUDE.md warns about.
    */
   private readonly sleepOffset = new Vector3();
+
+  /**
+   * The same idea for the ginormous slide: the offset, **in the chute's own
+   * frame**, that lands this model's lowest point on the seat the ride gave it
+   * and its width centred on the trough, once it has been laid on its back at
+   * `RIDE_RECLINE`.
+   *
+   * It is not optional dressing. A companion's origin is between its feet and
+   * its bulk is above; tipped 1.35 rad onto its back about that origin, the
+   * back half of it swings *below* the floor — 0.58 m below, for a kitten, and
+   * 0.60 m for a puff. Drawn without this the pets would ride the whole way
+   * buried to the shoulder in the chute, which is the mirror image of the
+   * complaint that made `measureSleepOffset` exist (*"clips out of the bed and
+   * floats half hanging off the edge"*, 23 Aug 2026). Measured off the built
+   * model, per species, for the same reason that one is: the four pets' y terms
+   * differ by more than the clearance any shared literal could carry.
+   *
+   * The z term is deliberately **not** centred, unlike the bed's. On a chute a
+   * body is placed by its feet and lies back up-slope from them — that is what
+   * the child does, and matching her is what makes one line of bodies read as
+   * one line rather than as a child followed by animals lying at a different
+   * offset to their own seats.
+   */
+  private readonly slideOffset = new Vector3();
+
+  /** Scratch for turning {@link slideOffset} into the world frame each frame. */
+  private readonly slideLift = new Vector3();
+  private readonly seatFrame = new Euler(0, 0, 0, 'YXZ');
 
   constructor(uid: string, item: ShopItem) {
     this.uid = uid;
@@ -265,6 +313,7 @@ export class ParadeMember {
     // when the model is built, unposed and not yet scaled or carrying a jet
     // pack (which is lazy, and would otherwise land inside the box).
     this.measureSleepOffset();
+    this.measureSlideOffset();
 
     // Stagger the first joyful face so eight toys do not all beam at once.
     this.joyCountdown = 2 + Math.random() * 7;
@@ -366,6 +415,76 @@ export class ParadeMember {
     this.table = null;
     this.eating = false;
     // Nothing to un-pose but the head, which `pose` writes every frame anyway.
+    this.rejoice();
+  }
+
+  /** True while this one is riding the ginormous slide behind her (#468). */
+  get onSlide(): boolean {
+    return this.sliding;
+  }
+
+  /**
+   * **Ride the ginormous slide, in this seat** (#468). `Building.advanceRide`
+   * is the one caller, by way of `Parade.ridePetsDownSlide`, every frame of the
+   * descent.
+   *
+   * Unlike the bed and the pets' table, this is **not** the follow spring with
+   * a different target. The chute is a solved curve travelled at 6.5 m/s and a
+   * spring lags behind and cuts corners, which on a corkscrew means a pet
+   * outside the trough — so the seat is written straight onto the body, exactly
+   * as `Player.setRidePose` writes the child's and as the grown-up's is
+   * written. Still one body and one mover: the ride never touches the animal,
+   * and there is no second copy of it anywhere.
+   *
+   * Idempotent, and boarding is simply the first frame a seat arrives.
+   */
+  rideSlide(seat: SlideSeat): void {
+    if (!this.sliding) {
+      this.sliding = true;
+      // Off the spring: whatever momentum it had walking is not what carries
+      // it down the chute, and it must not be waiting to be spent when the
+      // ride hands the body back at the bottom.
+      this.velocity.set(0, 0, 0);
+      // Yaw first, then the chute's slope in the yawed frame — the same `YXZ`
+      // composition the child and the grown-up ride in. In the default `XYZ`
+      // the two compose the other way round and a pet lying down on a turn
+      // corkscrews. Put back in {@link leaveSlide}.
+      this.root.rotation.order = 'YXZ';
+    }
+    this.seat.x = seat.x;
+    this.seat.y = seat.y;
+    this.seat.z = seat.z;
+    this.seat.facing = seat.facing;
+    this.seat.pitch = seat.pitch;
+    // **Every field, or the body wears a stale one.** The seat is a scratch
+    // object the ride refills for each companion in turn, so a field copied out
+    // here is the only way its value reaches this member — and one left out
+    // does not fail loudly, it silently keeps whatever this member's own seat
+    // had before. Leaving `recline` out is exactly that: the pets rode the
+    // whole descent bolt upright while `petSeatOnSlide` filled in a recline
+    // nobody read.
+    this.seat.recline = seat.recline;
+    // Delighted for the whole descent. Re-asserted rather than set once so it
+    // cannot time out halfway down; `updateFace` only re-uploads a texture on a
+    // change of expression, so holding it costs nothing.
+    this.joyRemaining = JOY_SECONDS;
+  }
+
+  /**
+   * The bottom of the slide: back into the line from wherever on the chute it
+   * had got to. A no-op for a member that never boarded, so the ride may call
+   * it without tracking who went.
+   *
+   * No teleport, and nothing to catch up: {@link position} tracked the body all
+   * the way down (see {@link updateOnSlide}), so the ordinary follow spring
+   * picks it up from the chute and carries it to her in the ball pit.
+   */
+  leaveSlide(): void {
+    if (!this.sliding) return;
+    this.sliding = false;
+    this.root.rotation.order = 'XYZ';
+    this.root.rotation.set(0, this.facing, 0);
+    this.velocity.set(0, 0, 0);
     this.rejoice();
   }
 
@@ -471,6 +590,15 @@ export class ParadeMember {
 
   /** Follows {@link target}, animates, and writes the result onto `root`. */
   update(dt: number, elapsed: number): void {
+    // On the chute the ride owns this body outright, the same way the bedtime
+    // climb below does: the seat is written straight on, and letting the spring
+    // write `root` in the same frame is the two-owners bug this class is the
+    // single owner against.
+    if (this.sliding) {
+      this.updateOnSlide(dt, elapsed);
+      return;
+    }
+
     const bed = this.bed;
     // Past the run-up spot the bedtime routine owns this body outright — the
     // climb and the sleeping pose are not a spring following a target, and
@@ -561,6 +689,54 @@ export class ParadeMember {
   // -------------------------------------------------------------- internals
 
   /**
+   * One frame of a companion coming down the ginormous slide behind her (#468).
+   *
+   * **The one owner of this body's transform while it is on the chute**, and it
+   * keeps {@link position} level with what is drawn throughout — so the bottom
+   * of the ride is simply handing this body back to the follow spring from
+   * where it actually is, rather than a teleport she would see as a jump.
+   *
+   * The legs are still. `setWalkPhase(_, 0)` is every stopped pet's own idle,
+   * the same one a pet at its bowl uses: legs trotting on a slide would read as
+   * running down it rather than sliding.
+   *
+   * **And it is lying down, because she is.** Jim, 1 September 2026: *"they
+   * should ride behind them, lying down like the player"*. The angle is the
+   * child's own `RIDE_RECLINE`, handed over in {@link SlideSeat.recline}, added
+   * to the chute's pitch in the yawed `YXZ` frame — so `pitch` keeps the body
+   * parallel with the falling floor and `recline` lays it back on that floor,
+   * which is precisely how `Building.advanceRide` and `Player.setRidePose`
+   * compose the same two turns for her (her ride group takes the pitch, her
+   * model root takes the recline). One angle, one composition, two kinds of
+   * body.
+   */
+  private updateOnSlide(dt: number, elapsed: number): void {
+    this.updatePop(dt);
+
+    this.facing = this.seat.facing;
+    this.root.rotation.set(this.seat.pitch + this.seat.recline, this.seat.facing, 0);
+
+    // Lifted so its lowest point rests on the seat instead of sinking through
+    // the trough — see {@link slideOffset}. The lift is measured in the
+    // reclined body's own frame, so it is turned into the world by the seat's
+    // yaw and pitch (and *not* by the recline, which the measurement already
+    // carries) before it is added.
+    this.seatFrame.set(this.seat.pitch, this.seat.facing, 0);
+    this.slideLift.copy(this.slideOffset).applyEuler(this.seatFrame);
+    this.position.set(
+      this.seat.x + this.slideLift.x,
+      this.seat.y + this.slideLift.y,
+      this.seat.z + this.slideLift.z,
+    );
+    this.root.position.copy(this.position);
+
+    this.gait = 0;
+    this.creature?.setWalkPhase(elapsed * 0.9, 0);
+    this.updateFace(dt);
+    this.handle.update?.(dt, elapsed);
+  }
+
+  /**
    * One frame of a pet climbing into, and then sleeping in, its own bed.
    *
    * **The one owner of this body's transform while it is in bed.** No spring,
@@ -640,6 +816,27 @@ export class ParadeMember {
       -box.min.y,
       -(box.min.z + box.max.z) / 2,
     );
+  }
+
+  /**
+   * The same measurement for the ginormous slide's reclining pose — see
+   * {@link slideOffset} for why a companion needs lifting at all, and
+   * `petBedFit.ts`'s {@link posedBox} for the one shared way of asking how big
+   * a model is when it is turned like that.
+   *
+   * Taken here, beside {@link measureSleepOffset}, and for its reasons: this is
+   * the one moment the model is built, at full scale, unposed, and without the
+   * lazily-built jet pack that would otherwise inflate the box.
+   *
+   * `RIDE_RECLINE` and nothing else — no yaw, no pitch. The chute supplies
+   * those every frame and {@link updateOnSlide} turns this offset by them; a
+   * measurement that baked in one particular bend of the slide would be right
+   * at one point on the ride and wrong everywhere else.
+   */
+  private measureSlideOffset(): void {
+    const box = posedBox(this.root, RIDE_RECLINE, 0);
+    if (box.isEmpty()) return;
+    this.slideOffset.set(-(box.min.x + box.max.x) / 2, -box.min.y, 0);
   }
 
   /**

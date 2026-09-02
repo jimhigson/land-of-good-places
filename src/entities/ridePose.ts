@@ -67,8 +67,19 @@ export type RidePosture = 'seated' | 'reclined' | 'walking' | 'sleeping' | 'dini
  * Not the grown-up's flat `-PI/2`. That puts the head at floor level, which for
  * a child on a slide means riding the whole way looking at the sky with her face
  * in the trough. This leaves her propped just enough to see where she is going.
+ *
+ * **Exported, because it is the one description of how a body lies on the
+ * chute.** Jim, 1 September 2026, having watched the pets follow her down:
+ * *"they should ride behind them, lying down like the player"*. A companion is
+ * not a `RidePoseTarget` — it has no arms to throw back and no waist to curl —
+ * so it cannot wear {@link applyReclinedRidePose}; what it shares with her is
+ * the **angle**, and that is what travels. `slide/petRiders.ts` puts it into
+ * every companion's seat and `ParadeMember.updateOnSlide` turns the body by it,
+ * so "lying down on the slide" means exactly one thing for everybody on the
+ * slide. Retune this and the whole line retunes with her, which is the only way
+ * a second description of a reclining body can never appear.
  */
-const RIDE_RECLINE = -1.35;
+export const RIDE_RECLINE = -1.35;
 
 /**
  * How far back a **sleeping** rider lies: all the way, flat on her back.
