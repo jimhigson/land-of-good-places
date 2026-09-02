@@ -16,20 +16,25 @@ link was given, deliberately.
 | `scripts/coplanar-sweep.mts` | the measurement — world-space triangles bucketed by plane, area overlap between different meshes, same-facing only |
 | `scripts/coplanar-rank.mts` | the sight line (can a camera see it) and the reach (how close can a child stand), and the ordering |
 | `scripts/check-coplanar.mts` | the gate: five seeds, every space, ratcheted |
-| `scripts/coplanar-baseline.mts` | generated; 234 entries |
+| `scripts/coplanar-baseline.mts` | generated; 281 entries |
 | `test/coplanar/sweepControls.test.ts` | eight controls on the instrument |
 
 `pnpm run check:coplanar` — also wired into the `check` chain after
 `check:assets`. Step-set diff before/after was exactly one addition, nothing
 dropped (CLAUDE.md's rule).
 
-## Numbers, as of 2 September 2026, seed 20260728 + 5, 11, 18, 24
+## Numbers, as of 2 September 2026, all sixteen pool seeds
 
-**234 seams, 10 spaces, 70 s.** 92 fighting at 0.1 mm; 142 more held apart by a
-stand-off under 1 cm; 168 of the 234 buried where no camera can reach them.
+**281 seams, 10 spaces, 60 s** (sixteen parks, six at a time). 112 fighting at
+0.1 mm; 169 more held apart by a stand-off under 1 cm; 182 of the 281 buried
+where no camera can reach them on any seed.
 
 Raw before aggregation: 11.8 M triangles → 1.81 M front-facing and over 1 cm²
-→ 543 seams on the canonical seed alone (397 of those occluded).
+→ 543 seams on the canonical seed alone.
+
+Rebased onto `main` mid-flight when #463's sixteen-seed pool landed; the seed
+source moved from `test/procgen`'s four files to `parkSeedPool.ts`'s sixteen,
+which found 47 more garden seams (234 → 281).
 
 ## Decisions worth not re-deriving
 
@@ -37,6 +42,16 @@ Raw before aggregation: 11.8 M triangles → 1.81 M front-facing and over 1 cm²
   time, because the castle interior root and the hotel rooms are hidden until
   you walk in. Honouring it would sweep the park and skip every interior —
   which is where the last two of these bugs were.
+- **The seeds come from `parkSeedPool.ts`, not `test/procgen`.** The pool is
+  the one owner of which parks a child can be given; the test directory only
+  keeps files for four of them.
+- **Two orderings are pinned deliberately** — `findings` by seed, and the
+  printed baseline by area then key — because the children finish in whatever
+  order the machine gets to them. Without them the summary's occluded count and
+  the baseline's line order both wobbled, and the baseline's diff is the review.
+- **A key's rank comes from the seed that shows it worst**, not the seed with
+  the largest overlap: the entrance road is 48 m² at the front gate on one seed
+  and buried under a bridge ramp on another.
 - **`Float64Array`, not `Float32Array`.** The hotel is 600 m out; a 32-bit
   float resolves ~6/100 mm there, coarser than the 0.1 mm tolerance. The
   control test's "600 m from the origin" case is what fails if anyone narrows

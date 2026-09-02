@@ -846,7 +846,7 @@ you work in that directory.
 
 **`pnpm run check:coplanar` before you call model work done.** It is in
 `pnpm run check`, so a full gate already runs it; run it on its own while you
-are working, because it takes 70 seconds rather than sixteen minutes.
+are working, because it takes a minute rather than sixteen.
 
 Two faces occupying one plane make the depth buffer strobe as the camera
 moves. It reads as an engine bug and it is a modelling mistake, and Jim
@@ -865,7 +865,8 @@ back to back never fight, because culling draws one) and only ones the fixed
 iso camera could ever see. It sweeps **every space** — the castle's floors and
 the hotel's rooms are hundreds of metres out at their own origins and are not
 in the park's own groups — by asking `world/spaces.ts`'s `spaceAt` where each
-finding stands, so a room added tomorrow is swept the day it exists. And it
+finding stands, so a room added tomorrow is swept the day it exists, and it
+sweeps the garden across all sixteen seeds in `parkSeedPool.ts`. And it
 **ratchets** against `scripts/coplanar-baseline.mts`: hundreds of these
 already exist, so only a new or worse one fails.
 
@@ -874,7 +875,7 @@ an entry means "already wrong before the gate existed", and a new finding means
 you have just made one. **And fix a finding by deleting the hidden face, never
 by nudging a surface apart**: a stand-off is a number somebody has to maintain,
 it goes stale the moment either surface moves, and the check reports those
-separately for exactly that reason (92 fighting under 0.1 mm today, 142 more
+separately for exactly that reason (112 fighting under 0.1 mm today, 169 more
 held apart by a stand-off under 1 cm).
 
 ## Handoff files

@@ -429,10 +429,12 @@ pnpm run check:coplanar -- --verbose # the whole backlog, worst first
 and reports where two different meshes cover the same area of one. Three things
 about it are worth knowing before you read its output:
 
-- **It looks at every space, not just the park.** The castle's floors and the
-  hotel's rooms are hundreds of metres away at their own origins; the sweep
-  files each finding under whatever `world/spaces.ts` says it is standing in,
-  so a room added tomorrow is swept the day it exists.
+- **It looks at every space, not just the park, on every seed a child can be
+  given.** The castle's floors and the hotel's rooms are hundreds of metres
+  away at their own origins; the sweep files each finding under whatever
+  `world/spaces.ts` says it is standing in, and sweeps the garden across all
+  sixteen of `parkSeedPool.ts`'s parks. A room added tomorrow is swept the day
+  it exists.
 - **It only reports faces that point the same way, and the way the camera
   looks.** Two coplanar faces back to back never fight — culling draws one —
   and the rig has one angle forever, so this is decided rather than guessed.
@@ -441,9 +443,9 @@ about it are worth knowing before you read its output:
 - **It reports two tolerances and you must say which you mean.** *Fighting
   now* is under 0.1 mm; *one edit away* is a maintained stand-off under 1 cm,
   which is a smell in itself for the reason two paragraphs up. On the park
-  today that is 92 and 142.
+  today that is 112 and 169.
 
-It **ratchets**: `scripts/coplanar-baseline.mts` records the 234 seams that
+It **ratchets**: `scripts/coplanar-baseline.mts` records the 281 seams that
 already existed when it was written, and only a new or worse one fails. Do not
 add an entry to make it pass — an entry means "this was already wrong", and a
 new finding means you have just made another one.
