@@ -94,6 +94,61 @@ with the baked decisions — zero search cost at boot. 16 vetted seeds become
 Note: canonical seed reports **"0 rail crossing(s)"** in check:park — worth
 understanding what that counts before trusting it as a fitness term.
 
+## MAP 1 — level-crossing deletion scope (Explore agent, 2 Sep)
+
+Two independent concepts must both die:
+
+- **A. Planned level tier** — `crossingPlanSolve.ts` `levelCandidateAt`
+  (:308-338) returns `CrossingSite.bridge: false`; published as
+  `LEVEL_CROSSING_SITES` + `LEVEL_CROSSING_PENALTY=45` in `crossingPlan.ts`.
+- **B. Build-time fallback** — `bridgeFootprint.planReal` returns null deck
+  → `bridges.ts:519-522` pushes onto `BuiltBridges.fallbackCrossings` →
+  `fence.ts:193` opens a flat fence gap. (`LevelCrossing` in `crossings.ts`
+  is a legacy name for EVERY crossing — rename to `RailCrossing`, not
+  delete.)
+
+Key facts:
+- `ONLY_PROVEN_BRIDGES` is a docs name; code is `allowUnprovenBridges()`
+  (`bridgeFootprint.ts:763-769`, env `LGP_ALLOW_UNPROVEN_BRIDGES`).
+- `bridgeFit.ts` is THE one marching probe (SITE_RAMP_FLOOR = MIN_RAMP_RUN+1;
+  widths widest-first, angles square-first; `extraBlocked` is the per-caller
+  variation: planner passes station+gateway+railCorridor, #427 pose gen
+  passes nothing — the known relaxation — `route.ts` satisfies passes
+  railCorridor only).
+- `paths.ts:955-958`: when no site exists anywhere, `routeLeg` falls back to
+  `manhattanRoute` — "the level tier exists for exactly this". **That safety
+  net is where restart/backtracking must take over.**
+- `crossingPlanSolve.ts:557-563` is the decision point: try
+  `bridgeCandidateAt`, else `levelCandidateAt`. Empty `bridges` must become
+  a restart signal.
+- Seed counts: canonical 3-4 proven + 5 level sites; seed 2: 0 proven of 7
+  (retired for it); seed 11's entrance lands ON a level site (railD 30);
+  seed 18: 1 proven. Pre-#427 measurement: 11/14 solved loops admit >=1
+  bridge site (79%). #427's crossing-first work measured 100% — but only
+  over 5 seeds, not 16.
+- Deletion order (dependency-first): crossingPlanSolve → crossingPlan →
+  paths.ts (8 `site.bridge` sites: :900, :951, :1162, :1976, :2029, :2394,
+  :2445; two-list spreads at :942, :1154, :2340) → crossings.ts →
+  bridgeFootprint (gate at :1153, null-deck at :1214 becomes hard fail) →
+  bridges/ParkTrain/fence `fallbackCrossings` end-to-end → check-park.mts
+  (`LEVEL_CROSSING_REACH` :376, `atFallbackCrossing` :495-498, declaredOpen
+  :653-655) → invariants/parkFacts → seed-24.test.ts needs re-justifying
+  (its registration rationale is level-site behaviour).
+- check:park's "0 rail crossing(s)" counts only ILLEGAL crossings (neither
+  over a deck nor at a declared fallback) — mystery resolved.
+- `crossingPoses.ts` (#427) is already bridge-only and is the model.
+
+## MAP 2 — seed pool reality (2 Sep)
+
+The sixteen-seed pool is NOT on main: it lives on unmerged
+`origin/feat/sixteen-seeds` (`parkSeedPool.ts`, `vet-seed-pool.mts`,
+`check-seed-pool.mts`; `PARK_SEED = resolveParkSeed()`: pins, then profile's
+drawn seed, then fresh draw; Node default stays canonical). `vet-seed-pool`
+runs both gates (check:park + invariants) per seed in parallel child
+processes, JSONL results. **The warp search slots exactly here: a seed
+enters the pool only with a decision vector that makes it valid; seeds that
+cannot converge simply do not enter.** Plan compatibility with that branch.
+
 ## Status
 
 - [x] Worktree created, brief captured.
