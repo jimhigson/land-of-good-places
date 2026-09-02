@@ -3072,7 +3072,7 @@ function ensureCompassTaps(edges: PathEdge[]): void {
       node < grid.lattice.count && pavedGridNodes.has(node) ? 0 : Infinity,
     );
     if (!path || path.length < 2) continue;
-    const points = gridPathPoints(path);
+    const points = trimBacktracks(gridPathPoints(path));
     if (points.length < 2) continue;
     commitGridPathDrawn(path, points);
     const di = Math.sign((grid.xs[ringNode] as number) - PLAZA.x);
@@ -3342,7 +3342,7 @@ function* gateApproachSearch(
     const path = routeFromNetwork(gate.node);
     if (!path) continue;
     // The search runs network-first; the avenue is drawn gate-first.
-    const points = assembleGateApproach(gate.mouth, [...gridPathPoints(path)].reverse());
+    const points = trimBacktracks(assembleGateApproach(gate.mouth, [...gridPathPoints(path)].reverse()));
     if (points.length < 2) continue;
     const retraced = retracedLength(points);
     const score = retraced * RETRACE_PENALTY + polylineLength(points);
@@ -3629,7 +3629,7 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
       }
       strandedDoors.push(destination.id);
     }
-    const points: (readonly [number, number])[] = [...routed, ...destination.tail];
+    const points: (readonly [number, number])[] = trimBacktracks([...routed, ...destination.tail]);
     if (SPUR_STRETCH > 0 && destination.id === SPUR_STRETCH_ID) bowMidSegment(points);
     if (path) commitGridPathDrawn(path, points);
     if (points.length < 2) {
@@ -3757,12 +3757,12 @@ function* walkEveryBridge(edges: PathEdge[], progress: number): Generator<number
       return settled && settled.length > 1 ? settled : null;
     })();
     const via = best.near === plus ? deck.via : [...deck.via].reverse();
-    const points: (readonly [number, number])[] = [
+    const points: (readonly [number, number])[] = trimBacktracks([
       ...gridPathPoints(best.path),
       ...via,
       [grid.xs[best.far] as number, grid.zs[best.far] as number],
       ...(onward ? gridPathPoints(onward).slice(1) : []),
-    ];
+    ]);
     commitGridPathDrawn(best.path, points);
     pavedGridNodes.add(best.near);
     pavedGridNodes.add(best.far);
@@ -3776,6 +3776,56 @@ function* walkEveryBridge(edges: PathEdge[], progress: number): Generator<number
     });
   }
   return progress;
+}
+
+
+/**
+ * **Nothing this file draws may double back on itself.**
+ *
+ * A control polyline that walks out and comes back along the same line — seed
+ * 225's `spur-building` ran `(0, 43.1) -> (36.5, 43.1) -> (25.4, 43.1)`, 11 m
+ * of pure overshoot — is not merely untidy. `routeCurve`'s fillet pass and the
+ * Catmull-Rom through it have no sensible answer at a 180 degree vertex, so the
+ * ribbon folds over itself; that is Jim's "path mess", and the waypoints
+ * `poiGraph` samples at the fold land off the paving.
+ *
+ * The seams are where it comes from: a solved grid path joined to a relay walk,
+ * or a bridge route joined to its onward leg, can meet head to head. Rather
+ * than teach four callers to trim their own seams, every route is trimmed here,
+ * once, on the way out.
+ *
+ * Deleting the middle vertex of an about-turn leaves exactly the net movement
+ * the walk actually makes, and always shortens the polyline, so the pass
+ * terminates.
+ */
+const ABOUT_TURN_COSINE_DRAWN = Math.cos((150 * Math.PI) / 180);
+
+function trimBacktracks(
+  points: readonly (readonly [number, number])[],
+): (readonly [number, number])[] {
+  const out = points.map((point) => [point[0], point[1]] as readonly [number, number]);
+  for (let pass = 0; pass < out.length; pass += 1) {
+    let cut = -1;
+    for (let i = 1; i < out.length - 1; i += 1) {
+      const a = out[i - 1] as readonly [number, number];
+      const b = out[i] as readonly [number, number];
+      const c = out[i + 1] as readonly [number, number];
+      const inX = b[0] - a[0];
+      const inZ = b[1] - a[1];
+      const outX = c[0] - b[0];
+      const outZ = c[1] - b[1];
+      const inLength = Math.hypot(inX, inZ);
+      const outLength = Math.hypot(outX, outZ);
+      if (inLength < 1e-6 || outLength < 1e-6) continue;
+      const cosine = (inX * outX + inZ * outZ) / (inLength * outLength);
+      if (cosine > ABOUT_TURN_COSINE_DRAWN) continue;
+      cut = i;
+      break;
+    }
+    if (cut < 0) break;
+    out.splice(cut, 1);
+  }
+  return out;
 }
 
 /** The nearest point on anything already paved — the last-resort terminal for
