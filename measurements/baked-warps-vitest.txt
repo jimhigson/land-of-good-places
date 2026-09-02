@@ -1,0 +1,81 @@
+
+ RUN  v4.1.11 /Users/jim/dev/landOfGoodPlaces/.claude/worktrees/park-warp
+
+(node:58694) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:58688) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:58691) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:58692) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:58690) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:58687) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+  the slide over the castle's roof garden: 4 chute sample(s) pass over it, clearing its 12.10 m top by 2.54 m at worst
+[proven-site cover] 1 of 4 built crossing(s) stand on one of 1 proven bridge site(s)
+[unproven-bridge cover] 1 built bridge(s) against 1 proven site(s) on this seed
+ ❯ test/procgen/seed-18.test.ts (81 tests | 2 failed) 21402ms
+     × railway crossings are planned — station-clear, and mostly real bridges 8ms
+     × the walk in from the gate crosses the railway where the planner planned it to, on a bridge 2ms
+  the slide over the castle's roof garden: 11 chute sample(s) pass over it, clearing its 12.30 m top by 2.54 m at worst
+[proven-site cover] 3 of 3 built crossing(s) stand on one of 4 proven bridge site(s)
+[unproven-bridge cover] 3 built bridge(s) against 4 proven site(s) on this seed
+  the slide over the castle's roof garden: 4 chute sample(s) pass over it, clearing its 12.15 m top by 2.54 m at worst
+[proven-site cover] 2 of 2 built crossing(s) stand on one of 2 proven bridge site(s)
+[unproven-bridge cover] 2 built bridge(s) against 2 proven site(s) on this seed
+  the slide over the castle's roof garden: 4 chute sample(s) pass over it, clearing its 12.53 m top by 2.54 m at worst
+[proven-site cover] 3 of 3 built crossing(s) stand on one of 3 proven bridge site(s)
+[unproven-bridge cover] 3 built bridge(s) against 3 proven site(s) on this seed
+  the slide over the castle's roof garden: 4 chute sample(s) pass over it, clearing its 12.36 m top by 2.54 m at worst
+[proven-site cover] 1 of 4 built crossing(s) stand on one of 1 proven bridge site(s)
+[unproven-bridge cover] 1 built bridge(s) against 1 proven site(s) on this seed
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/procgen/seed-18.test.ts > seed 18 > railway crossings are planned — station-clear, and mostly real bridges
+AssertionError: the crossing at (-39.4, 5.0) opens its fence gap 1.5 m along the loop from a station platform — its 7.8 m half-gap overlaps the station's sealed ±6.5 m window, so the far side of this crossing is a fenced wall: expected [ Array(1) ] to have a length of +0 but got 1
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ test/procgen/invariants.ts:8651:60
+    8649|       it(name, () => {
+    8650|         const complaints = check(facts);
+    8651|         expect(complaints, describeComplaints(complaints)).toHaveLengt…
+       |                                                            ^
+    8652|       });
+    8653|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  test/procgen/seed-18.test.ts > seed 18 > the walk in from the gate crosses the railway where the planner planned it to, on a bridge
+AssertionError: the walk in from the gate crosses the railway at (0.0, 57.3), railDistance 300.1, 3.0 m in from the arch, and the crossing planner planned no crossing there at all — its bridge sites are at 4.0 and its level sites at none, so this is the one leg of the network that meets the track somewhere `crossingPlanSolve.ts` had already measured and rejected, which is exactly what it exists to prevent: expected [ Array(1) ] to have a length of +0 but got 1
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ test/procgen/invariants.ts:8651:60
+    8649|       it(name, () => {
+    8650|         const complaints = check(facts);
+    8651|         expect(complaints, describeComplaints(complaints)).toHaveLengt…
+       |                                                            ^
+    8652|       });
+    8653|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 15 passed (16)
+      Tests  2 failed | 500 passed (502)
+   Start at  08:54:53
+   Duration  53.91s (transform 5.07s, setup 0ms, import 19.21s, tests 207.30s, environment 1ms)
+
+vitest exit: 1
