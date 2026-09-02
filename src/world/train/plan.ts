@@ -3,6 +3,7 @@ import { TrainRoute } from './route';
 import { COASTER_PLANS } from '../coaster/plan';
 import { terrainHeight } from '../terrain';
 import { STATION_SEEDS, STATION_SEED_RADIUS } from './stationSeeds';
+import { PLATFORM_LENGTH, STATION_GAP } from './clearance';
 
 /**
  * The rail plan — the railway as *data*, solved at module load from the park
@@ -91,7 +92,11 @@ export function stationStand(
  * Gives up at ±24 m and returns the target; the boot assert and check:park
  * then say so loudly rather than a child finding a platform inside a booth.
  */
-function clearStationDistance(route: TrainRoute, target: number): number {
+function clearStationDistance(
+  route: TrainRoute,
+  target: number,
+  placed: readonly Vec2[],
+): number {
   const tangent = new Vector3();
   const centre = new Vector3();
 
@@ -177,9 +182,40 @@ function clearStationDistance(route: TrainRoute, target: number): number {
     // `crossingSurvivesStationAt` relies on that ordering holding.
     const conflict = crossingConflictAt(distance);
 
+    // **Not on top of a station that is already there** (#472).
+    //
+    // Every station used to be planned in ignorance of the others — two
+    // independent searches, each sliding up to `STATION_SEARCH_WINDOW` along
+    // the loop from its own bearing. The two bearings are opposite, so that
+    // looks safe and mostly is; on seeds 3 and 23 it was not. Both searches
+    // converged on the same stretch and the park was built with **Sunny Side
+    // and Bluebell Halt inside each other** — two platforms, two canopies and
+    // two benches interpenetrating, 18 m² of deck and 9 m² of roof in one
+    // plane. The coplanar sweep is what found it; a child would have seen a
+    // single smeared station.
+    //
+    // CLAUDE.md's standing rule for every generator here: backtrack against
+    // the world as it stands, not against the two or three things this
+    // generator happens to know by name. So the stations are planned in turn
+    // and each one is scored against the stands already chosen.
+    //
+    // Proportional rather than a step, so a loop that genuinely cannot spread
+    // them still returns its least-bad answer instead of a coin toss between
+    // two equally-forbidden candidates.
+    let crowding = 0;
+    for (const other of placed) {
+      const gap = Math.hypot(standX - other.x, standZ - other.z);
+      crowding = Math.max(crowding, Math.max(0, STATION_SEPARATION - gap) / STATION_SEPARATION);
+    }
+
     const score =
       (conflict.alongLoop ? 5000 : 0) +
       (conflict.inSpace ? 5000 : 0) +
+      // Below the crossing terms, and deliberately: a park with no bridge is
+      // invalid (Jim's ruling on #414) while two stations closer together than
+      // we would like is merely bad. Above `blocked`, because a platform inside
+      // another platform is worse than a platform near a booth.
+      crowding * 3000 +
       (blocked ? 1000 : 0) +
       (approachBlocked ? 120 : 0) +
       (cruiserLow ? 400 : 0) +
@@ -236,14 +272,30 @@ function nearCruiserLowCorridor(x: number, z: number, reach: number): boolean {
   return false;
 }
 
+/**
+ * **How far apart two station stands must be before neither is crowding the
+ * other**, in metres.
+ *
+ * Taken from the game rather than chosen: `fence.ts` opens the lineside fence
+ * for `STATION_GAP` either side of a station, so two stations closer together
+ * than two of those windows plus a platform's own length are sharing one
+ * opening — which is the point past which they have stopped being two stations.
+ */
+const STATION_SEPARATION = PLATFORM_LENGTH + STATION_GAP * 2;
+
 function planStations(route: TrainRoute): readonly PlannedStation[] {
+  // Sequential, not `map`: each station is scored against the stands already
+  // chosen, which is what stops two of them landing in the same place. See the
+  // `crowding` term in `clearStationDistance`.
+  const placed: Vec2[] = [];
   return STATION_SEEDS.map((seed, index) => {
     const target = route.distanceNear(
       seed.bearingX * STATION_SEED_RADIUS,
       seed.bearingZ * STATION_SEED_RADIUS,
     );
-    const distance = clearStationDistance(route, target);
+    const distance = clearStationDistance(route, target, placed);
     const { standX, standZ } = stationStand(route, distance);
+    placed.push({ x: standX, z: standZ });
     const tangent = route.tangentAt(distance, new Vector3());
     // Away from the track, through the stand — the platform's park side.
     const centre = route.pointAt(distance, new Vector3());
