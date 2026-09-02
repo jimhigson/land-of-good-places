@@ -181,11 +181,21 @@ const BASELINE_HEADER = `/**
  * to make a check pass: an entry here means "this was already wrong", and a
  * finding that is not here means somebody has just made a new one.
  *
- * \`area\` is the worst (largest) shared plane seen across the seed pool, in
- * square metres. \`fighting\` is true where the two faces are within 0.1 mm —
- * the depth buffer has nothing to resolve and the seam strobes now; false means
- * they are held apart by a maintained stand-off under 1 cm, which
- * \`ART_DIRECTION.md\` calls a smell in its own right.
+ * \`area\` is the worst shared plane seen across the seed pool, in square
+ * metres. Where two objects meet in two *parallel* planes those fold into one
+ * entry and this is their sum, so a second seam between the same two things
+ * shows up here as growth.
+ *
+ * \`seams\` is how many distinct **facings** the two share on the worst single
+ * seed. Two objects can meet pointing more than one way, and two different
+ * objects can share a path — \`hotel.wall\` appears twice below, because both
+ * meshes are called that — so without a count a third wall joining an existing
+ * key would pass in silence.
+ *
+ * \`fighting\` is true where the two faces are within 0.1 mm — the depth buffer
+ * has nothing to resolve and the seam strobes now; false means they are held
+ * apart by a maintained stand-off under 1 cm, which \`ART_DIRECTION.md\` calls a
+ * smell in its own right.
  *
  * The way an entry leaves this table is by the seam being fixed, at which point
  * \`check:coplanar\` prints BASELINE LOOSE and asks for the line to be deleted.
@@ -195,6 +205,8 @@ const BASELINE_HEADER = `/**
 export interface BaselineEntry {
   /** Square metres of shared plane, worst across the pool. */
   readonly area: number;
+  /** Distinct facings these two shared, on the worst single seed. */
+  readonly seams: number;
   /** True where the faces are within 0.1 mm of each other. */
   readonly fighting: boolean;
 }
@@ -208,33 +220,55 @@ const BASELINE_FOOTER = `
 
 // ------------------------------------------------------------------ the gate
 
-/** Worst seen per key across the whole pool — the number the baseline records. */
-const worst = new Map<string, { area: number; separation: number; seams: number; sample: Finding }>();
-for (const finding of findings) {
-  const previous = worst.get(finding.key);
-  if (!previous) {
-    worst.set(finding.key, {
-      area: finding.area,
-      separation: finding.separation,
-      seams: 1,
-      sample: finding,
-    });
-    continue;
+/**
+ * Worst seen per key across the whole pool — the numbers the baseline records.
+ *
+ * **`seams` is per seed, not a total**, and it is what closes the hole the key
+ * would otherwise leave: two *different* objects can share one path —
+ * `hotel.wall|hotel.wall` is a real key today, because both meshes are called
+ * `hotel.wall` — so without it a third wall joining them would land on an
+ * existing key and pass in silence. It counts distinct facings; two objects
+ * meeting in two parallel planes fold into one seam whose `area` is their sum,
+ * and that case is caught by `area` instead.
+ */
+const worst = new Map<
+  string,
+  { area: number; separation: number; seams: number; sample: Finding }
+>();
+{
+  /** How many seams each key had **on one seed**, so the max is comparable. */
+  const perSeed = new Map<string, number>();
+  for (const finding of findings) {
+    const seedKey = `${finding.seed} ${finding.key}`;
+    perSeed.set(seedKey, (perSeed.get(seedKey) ?? 0) + 1);
   }
-  previous.seams += 1;
-  if (finding.area > previous.area) {
-    previous.area = finding.area;
-    previous.sample = finding;
+  for (const finding of findings) {
+    const seams = perSeed.get(`${finding.seed} ${finding.key}`) ?? 1;
+    const previous = worst.get(finding.key);
+    if (!previous) {
+      worst.set(finding.key, {
+        area: finding.area,
+        separation: finding.separation,
+        seams,
+        sample: finding,
+      });
+      continue;
+    }
+    if (seams > previous.seams) previous.seams = seams;
+    if (finding.area > previous.area) {
+      previous.area = finding.area;
+      previous.sample = finding;
+    }
+    if (finding.separation < previous.separation) previous.separation = finding.separation;
   }
-  if (finding.separation < previous.separation) previous.separation = finding.separation;
 }
 
 if (printBaseline) {
   const lines: string[] = [];
   for (const [key, entry] of [...worst.entries()].sort((a, b) => b[1].area - a[1].area)) {
     lines.push(
-      `  ${JSON.stringify(key)}: { area: ${entry.area.toFixed(4)}, fighting: ` +
-        `${entry.separation <= DEFAULT_TOLERANCES.fighting} },`,
+      `  ${JSON.stringify(key)}: { area: ${entry.area.toFixed(4)}, seams: ${entry.seams}, ` +
+        `fighting: ${entry.separation <= DEFAULT_TOLERANCES.fighting} },`,
     );
   }
   process.stdout.write(BASELINE_HEADER + lines.join('\n') + BASELINE_FOOTER);
@@ -260,6 +294,12 @@ for (const [key, entry] of worst) {
   if (entry.area > recorded.area + 0.1) {
     regressions.push(
       `WORSE: ${key}\n      ${entry.area.toFixed(3)} m², recorded at ${recorded.area.toFixed(3)} m²`,
+    );
+  }
+  if (entry.seams > recorded.seams) {
+    regressions.push(
+      `MORE: ${key}\n      ${entry.seams} separate seam(s) between these two on one seed, ` +
+        `recorded at ${recorded.seams}`,
     );
   }
   if (fighting && !recorded.fighting) {
