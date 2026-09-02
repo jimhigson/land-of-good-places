@@ -116,6 +116,7 @@ export {
   CLIMB_WAVE_HEAD_PITCH,
   CLIMB_WAVE_LEAN,
   CLIMB_WAVE_LEAN_RATE,
+  RIDE_RECLINE,
   WAVE_WAGGLE,
   type RidePoseTarget,
   type RidePosture,
