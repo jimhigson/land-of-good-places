@@ -1009,6 +1009,25 @@ why, no reassurance, no restating what he already knows, no defending a
 past message. If a message has neither a ready-to-review deliverable nor a
 live question in it, do not send it.
 
+**Restated 2 September 2026, because it had drifted back:** *"The Overseer
+should only say messages which are necessary. Zero fluff or random
+information."* And, specifically: **stop listing what merged today.** He
+knows; he approved every one. A tally of the day's merges is the purest
+form of this fault — it is a thing the Overseer finds satisfying to write
+and he has no use for.
+
+Two other habits that count as fluff, from the same drift:
+
+- **Do not narrate the fleet.** "Two agents working, one mid-check" is not
+  news. Answer the standing loops in as few words as they need — "none
+  stuck", "nothing to kill" — and say nothing more unless something is
+  actually wrong.
+- **Do not colour a finding.** Report the number and what it means for the
+  game. An agent catching its own bug is how the work is supposed to go,
+  not an anecdote.
+
+When in doubt, delete the sentence. He asks when he wants more.
+
 ## PRs
 
 **Never create a GitHub repository. Not ever, not for anything.** No test
