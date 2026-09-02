@@ -43,11 +43,11 @@
  *    defect. The overlap polygon is clipped for real (Sutherland–Hodgman in
  *    the shared plane) and its area is the finding's size.
  *
- * 5. **Different objects only.** A single geometry's own triangles tile their
+ * 5. **Different meshes only.** A single geometry's own triangles tile their
  *    plane; that is what a subdivided floor *is*. The defect is two builders
- *    meeting, so a pair must come from two different `Object3D`s — or two
- *    different instances of one `InstancedMesh`, which are two different
- *    things standing in the world.
+ *    meeting, so a pair must come from two different `Object3D`s — and an
+ *    `InstancedMesh` counts as one, however many instances it has, for the
+ *    reason written where the ids are handed out.
  *
  * ## Two tolerances, because the tolerance decides the count
  *
@@ -72,7 +72,6 @@ import {
   BackSide,
   DoubleSide,
   InstancedMesh,
-  Matrix3,
   Matrix4,
   Mesh,
   Vector3,
@@ -260,7 +259,6 @@ function collect(root: Object3D): Collected {
   const normal = new Vector3();
   const world = new Matrix4();
   const instance = new Matrix4();
-  const normalMatrix = new Matrix3();
 
   root.traverse((node) => {
     if (!(node instanceof Mesh)) return;
@@ -272,11 +270,17 @@ function collect(root: Object3D): Collected {
     if (triangles < 1) return;
 
     const materials: Material[] = Array.isArray(node.material) ? node.material : [node.material];
-    // A face on a material that never writes depth cannot win or lose a depth
-    // fight — it is drawn over whatever is already there. Skipping those is
-    // not slack: it is the one case where two faces in a plane is the
-    // intended way to draw something.
     const groups = geometry.groups.length > 0 ? geometry.groups : null;
+    /**
+     * Which side of this triangle is drawn — or `NaN` for one that cannot take
+     * part in a depth fight at all.
+     *
+     * `NaN` means the material never writes depth, so the face is laid over
+     * whatever is already in the buffer and can neither win nor lose. Skipping
+     * those is not slack: it is the one case where two faces in a plane is the
+     * intended way to draw something. Asked per triangle rather than per mesh
+     * because a multi-material geometry answers differently per group.
+     */
     const sideOf = (triangle: number): number => {
       let material = materials[0];
       if (groups) {
@@ -311,8 +315,6 @@ function collect(root: Object3D): Collected {
       } else {
         world.copy(node.matrixWorld);
       }
-      normalMatrix.getNormalMatrix(world);
-
       for (let triangle = 0; triangle < triangles; triangle += 1) {
         total += 1;
         const side = sideOf(triangle);
