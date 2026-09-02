@@ -161,6 +161,44 @@ USES the level tier — plan is an `LGP_NO_LEVEL_CROSSINGS=1` switch that
 empties the level list, then both gates over 16 seeds. Control: with the
 switch absent, output must be byte-identical to baseline.
 
+## MEASUREMENT 3 — what the park loses when the level tier is emptied (2 Sep)
+
+Probe `LGP_NO_LEVEL_CROSSINGS=1` (commit on this branch). **Control passed:**
+switch unset, `check:park` canonical summary byte-identical to baseline
+(19/19, 0 rail crossings, 248/248, all six invariants).
+
+**Gate A — `check:park` per-seed child processes, `LGP_RATCHET=off`
+(stricter: deviations reported, none excused), all SIXTEEN POOL seeds**
+(pool from feat/sixteen-seeds; raw in
+`measurements/no-level-tier-checkpark-16seeds.txt`):
+- **19/19 attractions route from the entrance on every seed; 0 illegal
+  crossings on every seed.**
+- 12/16 seeds fully connected, all six invariants hold.
+- 4 seeds strand garden waypoints: canonical **19**, seed 5 **10**,
+  seed 288 **5**, seed 326 **3** — all "pocket of the 'garden' graph
+  nobody can walk to". (Baseline with levels: poi.stranded 0.)
+
+**Gate B — `test:procgen` (the unallowanced multi-seed oracle; builds
+canonical, 5, 11, 18, 24): 500/502 pass; both failures are SEED 18**, which
+is NOT in the pool (deliberately excluded, b2617949): "railway crossings are
+planned — station-clear, and mostly real bridges" and "the walk in from the
+gate crosses the railway where the planner planned it to, on a bridge".
+Seed 18 is the documented nearer-the-gate level-site exception in
+`crossingSitesSearch` — its front door NEEDS the level tier today. #442 open.
+
+**Reading: deleting level crossings costs no attraction, on any pool seed.
+The warp search's whole job on today's pool is to reconnect four seeds'
+stranded garden pockets (3-19 waypoints each), plus a policy for
+seed-18-class parks (refuse/never pool them).** Much smaller than feared.
+
+**Candidate evaluation cost** (for the budget-minded): full out-of-process
+gate ~6.1 s; `check:park` alone ~3 s. Surveyor's knob-cost ranking: layout
+restart ~9 ms < paths knobs (~343 ms) < crossing march < cruiser ~788 ms <
+slide ~4 s < full seed. My three levers (per-entry layout bump, whole-layout
+restart, crossing-site ban) all sit at the cheap end IN-PROCESS, but any
+candidate still pays the full ~6 s replay out-of-process today. Convergence
+math: 4 seeds x dozens of candidates x 6 s = minutes, offline — fine.
+
 ## Status
 
 - [x] Worktree created, brief captured.
