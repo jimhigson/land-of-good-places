@@ -165,6 +165,20 @@ async function proveWithOracle(seed: number, warp: WarpVector | null): Promise<'
   }
 }
 
+async function passesExtraGate(seed: number, warp: WarpVector | null, script: string): Promise<boolean> {
+  const env: Record<string, string> = {
+    ...(process.env as Record<string, string>),
+    LGP_SEED: String(seed),
+  };
+  if (warp) env['LGP_WARP'] = JSON.stringify(warp);
+  try {
+    await run('pnpm', ['run', script], { env, maxBuffer: 64 * 1024 * 1024 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const args = process.argv.slice(2).filter((a) => a !== '--');
 const outFile = (() => {
   const i = args.indexOf('--out');
@@ -215,6 +229,21 @@ for (const seed of seeds) {
       if (verdict === 'fail') {
         oracleRejections += 1;
         continue;
+      }
+      // The canonical seed answers to more gates than the pool ones do:
+      // CI runs a set of canonical-only checks (#437's shape), and the
+      // first canonical winner ({ferrisWheel:2}, candidate 20) passed
+      // check:park AND the full invariant suite yet failed
+      // check:path-preference's kerb-step clause in CI (worst 84.1% vs the
+      // 73% ceiling at kerb -> (-37, 2)). A canonical candidate is not a
+      // winner until the canonical-only gates it will actually face have
+      // passed too.
+      if (seed === 20260728) {
+        const ok = await passesExtraGate(seed, warp, 'check:path-preference');
+        if (!ok) {
+          oracleRejections += 1;
+          continue;
+        }
       }
       winnerOracle = verdict;
       winner = { warp, score: s };
