@@ -22,8 +22,9 @@
  *     structured backtrack, only reached when no local move worked.
  *
  * Each candidate is a **complete fresh out-of-process solve** (module state
- * makes in-process re-solving impossible), scored by `check:park` run with
- * `LGP_NO_LEVEL_CROSSINGS=1` and `LGP_RATCHET=off`: a park scores
+ * makes in-process re-solving impossible), scored by `check:park` (the
+ * level tier no longer exists to switch off — every crossing is a bridge
+ * on this branch): a park scores
  * `Infinity` unless every attraction routes and there are zero illegal rail
  * crossings, otherwise its score is its stranded-waypoint count. The first
  * zero wins; the search stops there for that seed.
@@ -36,8 +37,8 @@
  *
  * ## Control on the instrument
  *
- * `--control` runs the scorer twice on the unwarped canonical seed WITHOUT
- * `LGP_NO_LEVEL_CROSSINGS` and asserts both runs parse to the same score
+ * `--control` runs the scorer twice on the unwarped canonical seed
+ * and asserts both runs parse to the same score
  * and that the score is 0 — proving the parser reads the real summary
  * rather than its own expectations, before any measuring is believed.
  */
@@ -83,7 +84,7 @@ async function entryIds(): Promise<string[]> {
   return stdout.trim().split('\n').filter(Boolean);
 }
 
-async function score(seed: number, warp: WarpVector | null, noLevels: boolean): Promise<Score> {
+async function score(seed: number, warp: WarpVector | null): Promise<Score> {
   // Ratchet ON (the default): the pool's own standard — `vet-seed-pool.mts`
   // rejects any seed that trips a recorded deviation, so the search must
   // score against exactly that gate or its winners are not admissible.
@@ -91,7 +92,6 @@ async function score(seed: number, warp: WarpVector | null, noLevels: boolean): 
     ...(process.env as Record<string, string>),
     LGP_SEED: String(seed),
   };
-  if (noLevels) env['LGP_NO_LEVEL_CROSSINGS'] = '1';
   if (warp) env['LGP_WARP'] = JSON.stringify(warp);
   let out: string;
   let ok = false;
@@ -139,7 +139,6 @@ async function proveWithOracle(seed: number, warp: WarpVector | null): Promise<'
   if (!file) return 'not covered';
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
-    LGP_NO_LEVEL_CROSSINGS: '1',
   };
   if (warp) env['LGP_WARP'] = JSON.stringify(warp);
   try {
@@ -157,8 +156,8 @@ const outFile = (() => {
 })();
 
 if (args.includes('--control')) {
-  const a = await score(20260728, null, false);
-  const b = await score(20260728, null, false);
+  const a = await score(20260728, null);
+  const b = await score(20260728, null);
   // The summary ends in wall-clock ms, which honestly differs run to run;
   // the park facts before it must not.
   const facts = (s: Score) => s.summary.replace(/ \d+ ms\.$/, '');
@@ -184,7 +183,7 @@ for (const seed of seeds) {
   let oracleRejections = 0;
   let winnerOracle: 'pass' | 'not covered' | 'not run' = 'not run';
   for (const warp of candidates(ids)) {
-    const s = await score(seed, warp, true);
+    const s = await score(seed, warp);
     tried += 1;
     const better =
       best === null ||

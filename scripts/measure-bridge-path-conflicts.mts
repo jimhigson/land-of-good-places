@@ -48,7 +48,7 @@ async function inspect(seed: number): Promise<void> {
   const { PARK_SEED } = await import('../src/world/parkManifest.ts');
   if (PARK_SEED !== seed) throw new Error(`harness built ${PARK_SEED} instead of ${seed}`);
   const { world } = buildHeadlessPark();
-  const { CROSSING_SITES, LEVEL_CROSSING_SITES } = await import('../src/world/train/crossingPlan.ts');
+  const { CROSSING_SITES } = await import('../src/world/train/crossingPlan.ts');
   const { pathCentreline } = await import('../src/world/pathGraph.ts');
   const { terrainHeight } = await import('../src/world/terrain.ts');
   const { ENTRANCE_GATE_X, ENTRANCE_GATE_Z } = await import('../src/world/entrance/layout.ts');
@@ -60,8 +60,7 @@ async function inspect(seed: number): Promise<void> {
   const lines: string[] = [];
   lines.push(`\n=== seed ${seed} ===`);
   lines.push(
-    `planner: ${CROSSING_SITES.length} PROVEN bridge sites, ` +
-      `${LEVEL_CROSSING_SITES.length} level sites; ` +
+    `planner: ${CROSSING_SITES.length} PROVEN bridge sites (every site is a bridge); ` +
       `built: ${bridges.length} bridges over ${crossings.length} measured crossings`,
   );
 
@@ -69,7 +68,6 @@ async function inspect(seed: number): Promise<void> {
     const near = (list: readonly { railDistance: number }[]): boolean =>
       list.some((s) => Math.abs(s.railDistance - railDistance) < 0.001);
     if (near(CROSSING_SITES)) return 'BRIDGE-site';
-    if (near(LEVEL_CROSSING_SITES)) return 'level-site';
     return 'unplanned';
   };
 
