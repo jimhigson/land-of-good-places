@@ -5,8 +5,14 @@ No browser, no dev server: this is a headless geometry tool.
 
 ## State
 
-Done. PR #473, rebased onto `main` after #463. `check` (58 steps), `test:procgen` (17 files, **510** tests — `main`'s 502 plus
-the 8 controls here) and `build` all exit 0 locally; CI is the authority. No geometry changed, so there is nothing to look at — no preview
+Done. PR #473, rebased onto `main` after #463. **CI green on all five checks** at `1b3b0a5`-and-later:
+Checks 24m19s pass, Coplanar faces **5m04s** pass, Procgen invariants 2m47s
+pass, plus both deploy checks. Locally: `check` (`main`'s chain, unchanged),
+`test:procgen` (17 files, **510** tests — `main`'s 502 plus the 8 controls
+here), `check:coplanar` and `build` all exit 0.
+
+That 5m04s is the number that vindicates moving it out of the chain: it is
+exactly what would have taken `checks.yml`'s 24m19s past its 30-minute cap. No geometry changed, so there is nothing to look at — no preview
 link was given, deliberately.
 
 ## What was built
