@@ -149,6 +149,18 @@ processes, JSONL results. **The warp search slots exactly here: a seed
 enters the pool only with a decision vector that makes it valid; seeds that
 cannot converge simply do not enter.** Plan compatibility with that branch.
 
+## MEASUREMENT 2 — bridge vs level sites, all 16 pool seeds (2 Sep)
+
+`measure-bridgeable-loops.mts` over the pool from feat/sixteen-seeds:
+canonical 3/6 (bridge/level), 5: 4/7, 11: 2/7, 24: 1/4, 115: 1/4, 128: 2/3,
+131: 1/4, 208: 1/4, 225: 4/4, 267: 1/4, 274: 2/8, 288: 1/5, 326: 2/6,
+346: 1/3, 428: 1/4, 451: 2/2. **16/16 prove >=1 bridge site** (they were
+vetted, so no surprise), but **9/16 prove exactly one**, and every seed
+plans 3-8 level sites. Next: measure how much the path network actually
+USES the level tier — plan is an `LGP_NO_LEVEL_CROSSINGS=1` switch that
+empties the level list, then both gates over 16 seeds. Control: with the
+switch absent, output must be byte-identical to baseline.
+
 ## Status
 
 - [x] Worktree created, brief captured.
