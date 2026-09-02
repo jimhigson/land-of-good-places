@@ -199,9 +199,22 @@ these):
 | a second drawn route over every bridge | 70 → 70 |
 | connectors/relay hugging the rail (margin 0 vs `RAIL_CLAMP_DISTANCE - 0.1`) | 70 → 71 |
 | trimming route backtracks | 70 → 70 |
+| refusing a gate-corridor mouth that stands on a bridge ramp | 70 → **74** (reverted) |
 
 (The first three fixes were kept anyway — each is a correctness fix in its own
 right, and `walkEveryBridge` took seed 451 from 3 stranded to a full pass.)
+
+**A real defect found on the way, which is NOT the cause.** The gate corridor's
+mouth on seed 225 came to rest at `(0, 39.8)` — exactly the 5.8 m
+`GATE_CORRIDOR_RAIL_STANDOFF` from the track and **four metres up the front-door
+bridge's ramp**, because that standoff is measured from the rail centre line and
+a ramp reaches three times further. The mouth is the node every later route
+branches from, and `spur-building` — the east district's only join to the rest —
+branched exactly there. This is #414's "another path shouldn't join into a
+mid-ramp bridge" and Jim's own complaint 1, so it wants fixing on its own
+merits. It is **not** the stranding cause: screening it took seed 225 from 70 to
+74, so the change was reverted rather than kept on a story. Whoever fixes it
+should do so where the junction is chosen, and measure.
 
 **The live hypothesis, and the next experiment.** The east district appears to
 hang off the rest of the network at a *single* junction: `spur-building` starts
