@@ -118,16 +118,26 @@ function keyOf(seam: RankedSeam): string {
 function sweepThisSeed(): Finding[] {
   const park = buildHeadlessPark();
   const result = sweepCoplanar(park.scene, DEFAULT_TOLERANCES);
-  const ranked = rankSeams(result.pairs, {
+  // Interiors are authored and identical on every seed, so only the canonical
+  // run reports them; the rest of the pool is here for the park, which moves.
+  //
+  // Dropped **before** ranking, not after. Ranking is the expensive half — a
+  // sight-line ray against every mesh in the game, then a ring search for
+  // somewhere to stand, per seam — and three quarters of the seams on a garden
+  // run are indoors and about to be thrown away. Doing it the tidy way round
+  // cost fifteen seeds' worth of raycasting for nothing, which on a two-core CI
+  // runner is minutes, against a workflow whose 30-minute cap has taken this
+  // project's deploy down once already.
+  const gardenOnly = process.env['LGP_COPLANAR_GARDEN_ONLY'] === '1';
+  const mine = gardenOnly
+    ? result.pairs.filter((pair) => pair.space === SPACE_GARDEN)
+    : result.pairs;
+  const ranked = rankSeams(mine, {
     scene: park.scene,
     collision: park.world.collision,
     sample: park.sample,
   });
-  // Interiors are authored and identical on every seed, so only the canonical
-  // run reports them; the rest of the pool is here for the park, which moves.
-  const gardenOnly = process.env['LGP_COPLANAR_GARDEN_ONLY'] === '1';
   return ranked
-    .filter((seam) => !gardenOnly || seam.space === SPACE_GARDEN)
     .map((seam) => ({
       key: keyOf(seam),
       space: seam.space,
@@ -160,11 +170,17 @@ findings.push(...sweepThisSeed());
  * Sixteen seeds one after another is four minutes on this laptop and each one
  * is a whole park built and swept in a process of its own, so they are
  * independent by construction — nothing is shared but the baseline they are all
- * compared against afterwards. Capped at half the cores because each child
- * peaks around a quarter of a gigabyte holding the park's triangles, and a
- * machine that starts swapping would be slower than doing them in a row.
+ * compared against afterwards.
+ *
+ * **Never fewer than two**, whatever the machine says. This was
+ * `floor(cores / 2)`, which is fine on a laptop and collapses to a single lane
+ * on a two-core CI runner — sixteen parks in a row, inside a workflow whose
+ * 30-minute cap has taken this project's deploy down once already. Capped at
+ * six because each child peaks around a quarter of a gigabyte holding the
+ * park's triangles, and a machine that starts swapping would be slower than
+ * doing them in a row.
  */
-const lanes = Math.max(1, Math.min(6, Math.floor(cpus().length / 2)));
+const lanes = Math.max(2, Math.min(6, cpus().length));
 const queue = seeds.filter((seed) => seed !== PARK_SEED);
 const run = promisify(execFile);
 await Promise.all(

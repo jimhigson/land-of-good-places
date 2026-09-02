@@ -63,6 +63,14 @@ which found 47 more garden seams (234 → 281).
   a frame run on it, so the ferris gondolas and the hotel's disco motes are all
   still stacked at t = 0. Treating those as findings buried the real ones under
   two hundred of them.
+- **CI is two cores, and the first version collapsed to one lane there.**
+  `lanes` was `floor(cores / 2)` — fine on this laptop, one lane on a GitHub
+  runner, so sixteen parks ran in a row inside a workflow capped at 30 minutes,
+  and the first CI run sat at 28 and climbing. Fixed twice over: never fewer
+  than two lanes, and the garden-only children now drop their indoor seams
+  **before** ranking rather than after, which is where the cost is (a sight-line
+  ray against every mesh in the game, plus a ring search, per seam). Same 281
+  seams out. Do not re-tidy that filter back to where it reads more naturally.
 - **The hash key is (world 4 m cell) × (normal cell, 27-neighbour probe).**
   A triangle is inserted into every world cell its box covers, so the grid
   cannot lose a pair; only the normal needs neighbour probing.
