@@ -19,9 +19,26 @@ link was given, deliberately.
 | `scripts/coplanar-baseline.mts` | generated; 281 entries |
 | `test/coplanar/sweepControls.test.ts` | eight controls on the instrument |
 
-`pnpm run check:coplanar` — also wired into the `check` chain after
-`check:assets`. Step-set diff before/after was exactly one addition, nothing
-dropped (CLAUDE.md's rule).
+`pnpm run check:coplanar`, run by **its own workflow** `.github/workflows/coplanar.yml`,
+*not* by the `check` chain — `package.json`'s `check` is now byte-identical to
+`main`'s (step sets diffed: nothing added, nothing dropped).
+
+**It was in the chain, and taking it out is the important decision here.**
+`checks.yml`'s job is already **25m04s / 24m11s / 22m52s** on `main`'s recent
+runs against its own `timeout-minutes: 30`. A minute more is not free at that
+margin, and a job killed by the cap reports as `cancelled`, which is precisely
+the shape of the 29 August deploy outage this repo documents. So it takes
+`procgen-invariants.yml`'s shape and runs beside the checks instead of inside
+them — no critical-path cost, its own budget, and a failure that reads as
+"somebody put two faces in a plane" rather than being buried in a 25-minute log.
+
+**Needs a repository setting nobody but Jim can make:** `Coplanar faces` is not
+a required status check on `main` until it is added to branch protection. Until
+then it runs and goes red without blocking a merge. Reported on the PR, not
+acted on — CLAUDE.md's rule for anything reaching outward from the project.
+
+**And `checks.yml` at 25 of 30 minutes is a live hazard that predates this
+work and outlives it.** Worth its own ticket.
 
 ## Numbers, as of 2 September 2026, all sixteen pool seeds
 

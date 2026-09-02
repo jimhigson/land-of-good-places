@@ -421,7 +421,7 @@ one surface.
 **And it is now a check you can run, not a rule you have to remember:**
 
 ```
-pnpm run check:coplanar              # and it is in `pnpm run check`
+pnpm run check:coplanar              # its own workflow, NOT in `pnpm run check`
 pnpm run check:coplanar -- --verbose # the whole backlog, worst first
 ```
 

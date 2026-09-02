@@ -260,6 +260,7 @@ timeout as `cancelled`, so the site sat stale for hours with nothing red.
 |---|---|---|
 | `check` | `checks.yml` ("Checks") | **yes** |
 | `test:procgen` | `procgen-invariants.yml` ("Procgen invariants") | **yes** |
+| `check:coplanar` | `coplanar.yml` ("Coplanar faces") | not yet — needs adding |
 | `build` | `deploy.yml`, `pr-preview.yml`, and `checks.yml` | — |
 
 **Both required checks are load-bearing by *name*.** A required status check is
@@ -272,7 +273,7 @@ and read it back:
 gh api repos/jimhigson/land-of-good-places/branches/main/protection
 ```
 
-**Run both `check` and `test:procgen` before every push.** `build` exiting 0
+**Run `check`, `test:procgen` and `check:coplanar` before every push.** `build` exiting 0
 now tells you almost nothing — it means the bundle was produced, not that
 anything is correct.
 
@@ -844,9 +845,10 @@ you work in that directory.
 
 ## Two faces in one plane: run the check, don't eyeball it
 
-**`pnpm run check:coplanar` before you call model work done.** It is in
-`pnpm run check`, so a full gate already runs it; run it on its own while you
-are working, because it takes a minute rather than sixteen.
+**`pnpm run check:coplanar` before you call model work done.** It is **not**
+in `pnpm run check` — it has its own workflow, `coplanar.yml`, for the same
+reason `test:procgen` does, so `pnpm run check` passing tells you nothing about
+it. It takes about a minute; run it yourself.
 
 Two faces occupying one plane make the depth buffer strobe as the camera
 moves. It reads as an engine bug and it is a modelling mistake, and Jim
@@ -869,6 +871,14 @@ finding stands, so a room added tomorrow is swept the day it exists, and it
 sweeps the garden across all sixteen seeds in `parkSeedPool.ts`. And it
 **ratchets** against `scripts/coplanar-baseline.mts`: hundreds of these
 already exist, so only a new or worse one fails.
+
+It is its own workflow because **`checks.yml` is already at 25 minutes against
+a 30-minute cap** (25m04s, 24m11s, 22m52s on `main`'s recent runs, trending
+up). A job killed by `timeout-minutes` reports as `cancelled`, which is how
+this project lost a deploy on 29 August — so that chain is not somewhere to add
+minutes, and anything new that takes real time belongs beside it rather than in
+it. **That 25-of-30 is a live hazard whoever reads this next inherits**,
+independent of this check.
 
 Two things not to do with it. **Do not add a baseline entry to make it pass** —
 an entry means "already wrong before the gate existed", and a new finding means
