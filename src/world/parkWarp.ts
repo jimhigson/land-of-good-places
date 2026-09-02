@@ -71,7 +71,12 @@ const WARPS_BY_SEED: Readonly<Record<number, WarpVector>> = {
   20260728: { layout: { ferrisWheel: 2 } },
   5: { layout: { ferrisWheel: 2 } },
   288: { layout: { waterFight: 1 } },
-  326: { layout: { fountain: 1 } },
+  // First baked as {fountain:1} on check:park evidence alone; the moment
+  // seed-326.test.ts existed, that vector went red on ONE invariant the
+  // check cannot see (the slide climbing 0.001 m) — the #437 blind spot,
+  // measured. Re-searched with the oracle in the loop, 2 Sep 2026:
+  // {waterFight:1} passes all 81.
+  326: { layout: { waterFight: 1 } },
 };
 
 function envWarp(): WarpVector | null {
