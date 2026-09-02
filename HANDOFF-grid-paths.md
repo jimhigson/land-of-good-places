@@ -1,7 +1,8 @@
 # HANDOFF — grid-first path network (the path rework Jim actually asked for)
 
 Branch `feat/grid-paths`, stacked on `feat/park-warp-solver` (#474).
-Worktree `.claude/worktrees/park-warp`. Dev port 5611 if needed.
+Worktree `.claude/worktrees/park-warp/.claude/worktrees/grid-paths`.
+**pnpm**, not npm. Dev port 5611 if needed.
 
 ## Jim's brief, verbatim (2 Sep, direct — THE authority; re-read, do not paraphrase)
 
@@ -24,60 +25,109 @@ Worktree `.claude/worktrees/park-warp`. Dev port 5611 if needed.
    → the path rework must include EVERYTHING above; do not stop until
    everything he asked for is ready.
 
-Zero-LC is done (parent branch). THIS branch owes 1, 3, 4 (and the rest of
-2 — bridges as first-class citizens of path layout).
+Zero-LC is done (parent branch). THIS branch owes 1, 3, 4 and the rest of 2.
 
-## The design
+## What is built (Stage 1 — done, pushed)
 
-Replace the lattice/street/stub/spur/fallbackSpurRoute plotting stack in
-`paths.ts` with a grid-first network:
+`src/world/paths.ts` no longer plots anything in continuous space. The
+street-lattice/stubs/spurs/`fallbackSpurRoute`/`routeLeg` stack is **deleted**
+(with it: `sameSideLeg`, `doubleCrossingLeg`, `fenceFollowRoute`,
+`enforceRailSide`, `manhattanRoute`, `clampPoint`, `polylineCrossesRail`,
+`longestOffAxisRun`, `bestBranchPoint`, `nearestPointOnRoute`,
+`distanceToRouteNetwork`, `planStreet*`, `snapRunsToLattice`,
+`carriesAnOffLatticeStreetRun`, `streetRoute`, `debugStreetSegment`). All 11
+required exports are intact; `debugStreetLattice` and `pointStandsOnABridgeRamp`
+are kept (the latter's "two measured dead ends" comment is updated in place, not
+lost — this ticket IS the "own ticket" it names).
 
-1. **Grid graph**: an approximate (lightly jittered) axis-aligned grid over
-   the park, clipped to the boundary, cell size chosen from the game
-   (existing street spacing constant if one exists; measure, don't invent).
-   Cells blocked by plots/rail/water removed.
-2. **Mandatory nodes, snapped into the grid**: the entrance gate, EVERY
-   attraction's door (PlacedEntry.entranceX/Z doormats), and EVERY bridge
-   foot (from CROSSING_SITES ramp reaches — the same crossingFeet formula
-   paths.ts already owns). **Mandatory edges**: each bridge's
-   foot→deck→foot polyline. The rail is crossable ONLY via those edges —
-   already true by construction on the parent branch.
-3. **Network selection**: connected subgraph of grid edges spanning gate +
-   all doors (+ plaza ring attachment), lightly redundant (loops are good
-   in a park), detour-bounded. Everything drawn IS a grid edge → no
-   mini-turns; doors are terminal nodes → paths go UP TO the door; bridge
-   feet are nodes → the apron knot cannot exist.
-4. Keep: plaza/promenade ring, paving/ribbon rendering, waypoints, lamps,
-   NavGrid interfaces — the rewrite replaces route PLOTTING, not drawing.
-   Surveyor mapping paths.ts's public surface + consumers is running
-   (report may arrive to a replacement: re-dispatch if lost — task was
-   "map the complete public surface of src/world/paths.ts").
+**One graph** (`pathGridSearch`, a generator drained by `pathGrid()`):
 
-## Acceptance (his words → measurable)
+- the existing 12 m lattice (`STREET_PITCH`, unchanged), nodes at intersections
+  inside the boundary, minus plots, rail corridor, ring interior, bridge masonry;
+- **jog links**: where a straight run between adjacent nodes is blocked, a
+  three-segment step round it through half-pitch offsets;
+- **mandatory nodes**: the four ring gateways, EVERY bridge foot (`crossingFeet`
+  over `CROSSING_SITES`), EVERY destination's door;
+- **mandatory edges**: each bridge's foot→deck→foot polyline — the only edge in
+  the graph that crosses the railway;
+- **terminal connectors** per door (`gridConnectors`), straight or elbowed via
+  the node's own street line, preferring a head-on arrival along the doormat's
+  outward ray.
 
-- Every attraction door is a path terminal: walk from gate reaches the
-  door node ON PAVING for all entries, all 16 pool seeds (extend
-  invariants: "every door is a paving endpoint", prove red by mutation).
-- No hairpin/apron: inside any bridge footprint the network contains only
-  the deck edge and its two feet (invariant; the 59.6m-for-33.4m canonical
-  measurement is the historical red).
-- Grid-ness: every drawn segment is axis-aligned or a deliberate diagonal
-  of the grid (invariant on segment bearings), no turn sharper than the
-  grid admits outside the plaza ring.
-- All existing gates stay green: test:procgen (583), check:park 16 seeds,
-  vet:seeds, full chain. The warp vectors may need re-searching after the
-  plotting change (parks change!) — expect to re-run warp-search and
-  possibly re-bake; canonical's exhaustion may well DISSOLVE here, since
-  the canonical-only failures were all path-shaped.
+Selection: `routeFromNetwork(goal)` = Dijkstra from everything already paved to
+the door node; the ring is paved from the outset. `ensureCompassTaps` and
+`addInterconnects` are grid-routed. `gateApproachSearch` keeps the authored
+corridor + retrace scoring but its only solver is the grid.
 
-## State
+Rescue path for a district the shared grid cannot reach: get onto the door's own
+rail side on the shared grid (over a bridge), then `relayPolyline` — an
+axis-aligned walk over the grid's lines and the endpoints' own rows/columns, at
+**half pitch**, screened with the door's arrival exemption. It carries the rail
+side screen, so it cannot cross the railway anywhere but a bridge. Backtracks
+over 6 bridgeheads × 2 plot clearances (2.6, 2.2).
 
-- [x] Branch created off park-warp head (d9faa0b6 + npc/pet gates).
-- [ ] Surveyor report on paths.ts surface.
-- [ ] Grid module built (pathGrid solve; grid+mandatory nodes+selection).
-- [ ] paths.ts plotting stack replaced, drawing kept.
-- [ ] Invariants added (doors, no-apron, grid bearings) + red proofs.
-- [ ] 16-seed measurement; warp re-search if needed; full chain; PR.
+`strandedDoorsOfLastSolve()` publishes any door that still fell to the
+straight-line last resort.
+
+### Findings worth keeping
+
+- Making the **arrival lead** the grid node loses doors outright (seed 131's
+  hotel: clean 7.1 m run to the door, no route at all to the point 3.5 m in
+  front of it). The door is the node; head-on is a preference in the connector.
+- A plot the door stands **inside** must be exempt outright — the slide's chute
+  lands inside the castle's plot; `exit-ginormousSlide` had no grid route on 5
+  of 16 seeds because of it.
+- **Forbidding** a route to pass through a door node cuts the park up: a door's
+  own 2-3 connectors can be the only join between lattice islands (seed 5's ring
+  could reach 28 nodes). Priced at `DOOR_THROUGH_PENALTY` instead.
+- The goal must be excluded from its own search's sources, or a door another
+  route already paved through gets a one-point route and `CatmullRomCurve3`
+  throws (seeds 5, 11 crashed the park build).
+- An arriving leg keeps 2.0 m from the boundary, not a crossroads' 2.6 —
+  seeds 225/267 put the rail-race exit 2.38/2.31 m in from the spline.
+
+## State — what remains
+
+- [x] Stage 1 grid solve (pushed).
+- [ ] **Stage 2: invariants. NOT STARTED.** `streetsShareLatticeLines` must be
+      rewritten for the new grid (it must admit half-pitch runs from jogs and
+      the rescue router, and must be at least as strong); add "every doormat is
+      a paving terminal", "inside a bridge footprint only the deck edge and its
+      two feet", plus the turn-sharpness clause if not implied by
+      `pathsRunOnGridAxes`. Each proved red by mutation, red output in the
+      commit message, mutation reverted. CLAUDE.md requires this in the same PR.
+- [ ] **Stage 3: park-wide measurement.** `pnpm run test:procgen` has NOT been
+      run yet. Per-seed `check:park` results: see the table below.
+- [ ] Warp re-search (`scripts/warp-search.mts`) for any seed that goes red
+      under the new plotter; prefer emptying a vector where the seed passes
+      unwarped.
+- [ ] Delete the temporary debug exports and scripts before the PR:
+      `debugRelaxedDoors`, `debugDoorReach`, `debugGridReach` at the end of
+      `paths.ts`, and `scripts/tmp-*.mts`. `strandedDoorsOfLastSolve` is meant
+      to stay (the invariants should read it).
+- [ ] No PR yet, by instruction.
+
+### check:park, pool seeds (see /tmp/gp/results.txt for the live run)
+
+Last measured by hand: seed 5 PASS (19/19, 0 crossings, 1 recorded deviation),
+seed 128 PASS, seed 11 FAIL (a ribbon still crosses the rail off-site — 3 doors
+stranded: building, ballPit, exit-ginormousSlide), seed 131 FAIL
+(`poi.stranded: 6`, all six on the gate corridor at x=0, z 32..52 — the
+corridor is drawn and reaches the ring rim, so this is the poiGraph pocket, not
+a missing route; not yet diagnosed).
+
+### The two open shapes of failure
+
+1. **Stranded doors** (seed 11): the district is cut off on its own rail side
+   and `relayPolyline` cannot thread it either. The old code reached these with
+   `fenceFollowRoute` — hugging the rail fence round the loop, which is exactly
+   the "twists and mini-turns" Jim rejected. If a grid answer cannot be found,
+   the honest options are a seed swap (Jim's 2 Sep sixteen-good-seeds ruling) or
+   a warp vector, not a diagonal.
+2. **poi.stranded on the gate corridor** (seed 131): diagnose from
+   `check:park`'s own output; the corridor's ribbon is drawn and connected, so
+   suspect the wall runs (`Scenery.ts` owns wall-vs-path) or paving coverage
+   round the corridor's seam.
 
 ## Open elsewhere
 
