@@ -842,6 +842,41 @@ could not have worked, is in `src/art/models/CLAUDE.md`, which loads whenever
 you work in that directory.
 
 
+## Two faces in one plane: run the check, don't eyeball it
+
+**`pnpm run check:coplanar` before you call model work done.** It is in
+`pnpm run check`, so a full gate already runs it; run it on its own while you
+are working, because it takes 70 seconds rather than sixteen minutes.
+
+Two faces occupying one plane make the depth buffer strobe as the camera
+moves. It reads as an engine bug and it is a modelling mistake, and Jim
+reported it three times in one week — the castle roof's floor slab through its
+own curtain wall, twice. `ART_DIRECTION.md` §7 has forbidden it for weeks and
+its checklist has carried the line "no two faces share a plane" all along;
+nobody could *run* that line, so it rotted. That is the lesson worth
+generalising: **a rule in a checklist that has no command beside it is a rule
+that is already decaying**, whatever it says.
+
+What the check is, in one paragraph: it buckets every world-space triangle in
+the game by its plane and reports where two different meshes cover the same
+*area* of one — edge contact, which is how every tiled floor here is built, is
+not a finding. It only counts faces pointing the same way (two coplanar faces
+back to back never fight, because culling draws one) and only ones the fixed
+iso camera could ever see. It sweeps **every space** — the castle's floors and
+the hotel's rooms are hundreds of metres out at their own origins and are not
+in the park's own groups — by asking `world/spaces.ts`'s `spaceAt` where each
+finding stands, so a room added tomorrow is swept the day it exists. And it
+**ratchets** against `scripts/coplanar-baseline.mts`: hundreds of these
+already exist, so only a new or worse one fails.
+
+Two things not to do with it. **Do not add a baseline entry to make it pass** —
+an entry means "already wrong before the gate existed", and a new finding means
+you have just made one. **And fix a finding by deleting the hidden face, never
+by nudging a surface apart**: a stand-off is a number somebody has to maintain,
+it goes stale the moment either surface moves, and the check reports those
+separately for exactly that reason (92 fighting under 0.1 mm today, 142 more
+held apart by a stand-off under 1 cm).
+
 ## Handoff files
 
 You can be pulled at zero warning. Keep a short `HANDOFF-<your-task>.md` on
