@@ -756,18 +756,12 @@ interface DeckPlan {
  * keeps one rule ("a bridge stands only where one provably fits") instead of
  * two mechanisms that have to agree.
  *
- * Node-only reversal, so the behaviour the gate exists to stop can be restored
- * on demand and an invariant proved red against it. Absent from the browser
- * bundle; off unless the variable is set.
+ * Since 2 Sep 2026 there is nothing to reverse INTO: every crossing that
+ * reaches this pass snapped to a proven site (`crossings.ts` fails the build
+ * on one that did not), so the gate below is vacuous by construction and
+ * the old `LGP_ALLOW_UNPROVEN_BRIDGES` reversal is gone with the level tier
+ * it re-enabled.
  */
-function allowUnprovenBridges(): boolean {
-  return Boolean(
-    (globalThis as { process?: { env?: Record<string, string> } }).process?.env?.[
-      'LGP_ALLOW_UNPROVEN_BRIDGES'
-    ],
-  );
-}
-
 function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): PlannedFootprint[] {
   const { collision, clearTreesNear, hasFellableTreeNear, railCorridorDistance } = real;
   // `isClearCircle` only ever asks the registered circles and walls — the
@@ -1143,16 +1137,10 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
     for (let index = 0; index < crossings.length; index += 1) {
       const siblings = current.filter((d, i): d is DeckPlan => i !== index && d !== null);
       const previous = current[index] ?? null;
-      // **Only where a bridge was proven.** See
-      // `LevelCrossing.provenBridgeSite`: this search runs long after
-      // `crossingPlanSolve.ts` measured which ground can take a deck and
-      // both ramps, and it used to try everywhere anyway. Where it
-      // succeeded on ground the planner had already measured and rejected,
-      // the ramps it built were the ones nothing had reserved room for —
-      // and their parapets stood across the path that crossed there.
-      const next = allowUnprovenBridges() || (crossings[index] as LevelCrossing).provenBridgeSite
-        ? searchDeck(crossings[index] as LevelCrossing, siblings, previous)
-        : null;
+      // Every crossing here snapped to a site the planner proved a deck and
+      // both ramps onto (`crossings.ts` fails the build on one that did
+      // not), so this search runs for all of them.
+      const next = searchDeck(crossings[index] as LevelCrossing, siblings, previous);
       if (
         (next === null) !== (previous === null) ||
         (next && previous && (next.halfAcross !== previous.halfAcross || next.cx !== previous.cx || next.cz !== previous.cz))
@@ -1211,7 +1199,7 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
 
   return crossings.map((crossing, crossingIndex) => {
     const deck = decks.find((d) => d.crossingIndex === crossingIndex);
-    if (!deck) return null; // see this file's own header: fall back to a level crossing
+    if (!deck) return null; // buildBridges fails the build on this — there is no level fallback
 
     const { cx, cz, dirX, dirZ, acrossX, acrossZ, halfAcross, shift } = deck;
     const frame = frameFor(crossing);
