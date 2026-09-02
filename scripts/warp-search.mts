@@ -181,6 +181,8 @@ for (const seed of seeds) {
   let winner: { warp: WarpVector | null; score: Score } | null = null;
   let best: { warp: WarpVector | null; score: Score } | null = null;
   let tried = 0;
+  let oracleRejections = 0;
+  let winnerOracle: 'pass' | 'not covered' | 'not run' = 'not run';
   for (const warp of candidates(ids)) {
     const s = await score(seed, warp, true);
     tried += 1;
@@ -190,16 +192,27 @@ for (const seed of seeds) {
       (s.ok === best.score.ok && s.stranded < best.score.stranded);
     if (better) best = { warp, score: s };
     if (s.ok && s.stranded === 0) {
+      // The oracle sits INSIDE the acceptance loop: canonical's first two
+      // check:park winners built parks the invariants reject (walls off the
+      // kerb, spurs branching off nothing) — a candidate is not a winner
+      // until the unallowanced oracle has nothing to say either.
+      const verdict = await proveWithOracle(seed, warp);
+      if (verdict === 'fail') {
+        oracleRejections += 1;
+        continue;
+      }
+      winnerOracle = verdict;
       winner = { warp, score: s };
       break;
     }
   }
   const chosen = winner ?? best;
-  const oracle = winner ? await proveWithOracle(seed, winner.warp) : 'not run';
+  const oracle = winnerOracle;
   const record = {
     seed,
     solved: winner !== null,
     gate: chosen?.score.ok ? 'ratchet-on pass' : 'fails gate',
+    oracleRejections,
     warp: chosen?.warp ?? null,
     stranded: chosen?.score.stranded ?? Infinity,
     oracle,
