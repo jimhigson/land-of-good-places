@@ -122,6 +122,36 @@ export const PARK_SEED_POOL: readonly number[] = [
   451,
 ];
 
+/**
+ * **The seeds a multi-seed check script sweeps — THE one owner.**
+ *
+ * Before 2 Sep 2026 each sweeping script kept its own hand-typed list
+ * (`CI_SEEDS = [PARK_SEED, 5, 11, 18, 24]` and variations), and when seed
+ * 18 was retired (it structurally needs a level crossing, which no longer
+ * exists — see `test/procgen/invariants.ts`'s header for the ruling) the
+ * lists kept building it and CI went red on a seed the rules say does not
+ * have to pass. A second hand-maintained list that can drift from the pool
+ * is the two-definitions shape this repo keeps paying for, so the sweep
+ * list now derives from the pool itself.
+ *
+ * **Seed 18 (and old seed 2) are not "missing" from this list — they are
+ * out by ruling.** Do not add a non-pool seed back here: a seed that is
+ * not in {@link PARK_SEED_POOL} is not a park a child can be given, and
+ * the filter below throws rather than sweep one.
+ *
+ * The subset is the pool seeds with checked-in invariant files (the deep
+ * sweep), not all sixteen — `vet:seeds` owns whole-pool coverage; this
+ * keeps the blocking chain's cost where it was.
+ */
+export const CI_SWEEP_SEEDS: readonly number[] = [CANONICAL_PARK_SEED, 5, 11, 24, 288, 326].map(
+  (seed) => {
+    if (!PARK_SEED_POOL.includes(seed)) {
+      throw new Error(`CI_SWEEP_SEEDS: ${seed} is not in PARK_SEED_POOL — sweep only real parks`);
+    }
+    return seed;
+  },
+);
+
 /** Where the drawn seed is remembered, so a reload is the same park. */
 export const PARK_SEED_KEY = 'lgp:parkSeed';
 
