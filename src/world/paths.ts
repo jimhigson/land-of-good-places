@@ -2196,6 +2196,13 @@ interface PathGrid {
   readonly ringNodes: readonly number[];
   readonly destinations: readonly GridDestination[];
   readonly destinationNode: ReadonlyMap<string, number>;
+  /** Every door node, for the rule that a door is a **terminal**: a route to
+   * somewhere else never walks through somebody's doormat. Without it a later
+   * route can pave straight over an earlier door, and that door's own edge
+   * then has a single point in it — one that `CatmullRomCurve3` cannot make a
+   * curve from at all (seeds 5 and 11 crashed the park build on exactly that
+   * before doors were made terminal). */
+  readonly doorNodes: ReadonlySet<number>;
   /** Node per bridge foot, in `CROSSING_SITES` order, plus then minus. */
   readonly footNodes: readonly number[];
   /** Handover node per gate-corridor mouth candidate, mouth-order. */
@@ -2526,6 +2533,7 @@ function* pathGridSearch(): Generator<number, PathGrid, void> {
     ringNodes,
     destinations,
     destinationNode,
+    doorNodes: new Set(destinationNode.values()),
     footNodes,
     gateNodes,
     relaxedDoors,
@@ -2590,12 +2598,20 @@ function gridSearch(
       best = stateCost + terminal;
       bestState = state;
     }
+    // **Walking through somebody's doormat costs.** A door is where a route
+    // ends, not a corridor to somewhere else. Refusing it outright was tried
+    // and is wrong: a door's own two or three terminal connectors can be the
+    // only thing joining two islands of a lattice that plots have cut up, and
+    // forbidding the hop left seed 5's ring able to reach 28 nodes of its own
+    // park. So it is priced instead — high enough that any ordinary street
+    // route is preferred, low enough that a district is never cut off.
+    const doorHop = dirIn >= 0 && grid.doorNodes.has(node) ? DOOR_THROUGH_PENALTY : 0;
     for (const step of grid.neighbours[node] as readonly LatticeNeighbour[]) {
       const turn = dirIn >= 0 && dirIn !== step.dir ? STREET_TURN_PENALTY : 0;
       // A hair's preference for edges already paved, so equal-length routes
       // ride the existing street rather than pave a parallel one.
       const reuse = pavedGridEdges.has(gridEdgeKey(node, step.to)) ? -0.01 : 0;
-      const next = stateCost + step.cost + turn + reuse;
+      const next = stateCost + step.cost + turn + reuse + doorHop;
       const nextState = stateOf(step.to, step.dir);
       if (next < (cost[nextState] as number)) {
         cost[nextState] = next;
@@ -2604,7 +2620,18 @@ function gridSearch(
       }
     }
   }
-  if (bestState === -1) return null;
+  if (bestState === -1) {
+    if (DEBUG_STREETS) {
+      const settledNodes = new Set<number>();
+      for (let i = 0; i < states; i += 1) if (closed[i]) settledNodes.add(Math.floor(i / GRID_DIRS));
+      // eslint-disable-next-line no-console
+      console.log(
+        `[gridSearch] no goal: ${sources.length} sources, ${settledNodes.size} nodes: ` +
+          [...settledNodes].map((n) => `${(grid.xs[n] as number).toFixed(0)},${(grid.zs[n] as number).toFixed(0)}`).join(' '),
+      );
+    }
+    return null;
+  }
   const nodes: number[] = [];
   for (let state = bestState; state !== -1; state = from[state] as number) {
     const node = Math.floor(state / GRID_DIRS);
@@ -2613,10 +2640,24 @@ function gridSearch(
   return nodes.reverse();
 }
 
+/** Metres a route is charged for passing through a door node — see
+ * {@link gridSearch}. Four street cells: far more than any real detour round a
+ * block, far less than losing a district. */
+const DOOR_THROUGH_PENALTY = STREET_PITCH * 4;
+
 /** The route from whatever is paved already to `goal`, as grid nodes —
- * network-first, goal-last. Null when the goal cannot be reached. */
+ * network-first, goal-last. Null when the goal cannot be reached.
+ *
+ * **The goal is never its own source.** A door another route has already paved
+ * through is still owed its own edge, and a zero-length one is not an edge:
+ * `CatmullRomCurve3` cannot make a curve from a single point, and seeds 5 and
+ * 11 crashed the park build on exactly that. Starting one node back gives the
+ * edge a real, drawn arrival.
+ */
 function routeFromNetwork(goal: number): number[] | null {
-  const sources = [...pavedGridNodes].map((node) => ({ node, cost: 0 }));
+  const sources = [...pavedGridNodes]
+    .filter((node) => node !== goal)
+    .map((node) => ({ node, cost: 0 }));
   if (sources.length === 0) return null;
   return gridSearch(sources, (node) => (node === goal ? 0 : Infinity));
 }
@@ -4429,4 +4470,37 @@ export function debugDoorReach(p: readonly [number, number]): unknown {
     }
   }
   return { p, pSide, ringDist: Math.hypot(p[0] - PLAZA.x, p[1] - PLAZA.z).toFixed(1), RING_RADIUS, out };
+}
+
+/** TEMP diagnostic: which destinations are reachable in the grid at all, and
+ * how many connectors each bridge foot got. */
+export function debugGridReach(): unknown {
+  const grid = pathGrid();
+  const seen = new Set<number>(grid.ringNodes);
+  const queue = [...grid.ringNodes];
+  while (queue.length) {
+    const n = queue.pop() as number;
+    for (const step of grid.neighbours[n] as readonly LatticeNeighbour[]) {
+      if (seen.has(step.to)) continue;
+      seen.add(step.to);
+      queue.push(step.to);
+    }
+  }
+  const noSearch = grid.destinations
+    .filter((d) => {
+      pavedGridNodes.clear();
+      for (const n of grid.ringNodes) pavedGridNodes.add(n);
+      return routeFromNetwork(grid.destinationNode.get(d.id) as number) === null;
+    })
+    .map((d) => d.id);
+  const unreachable = grid.destinations
+    .filter((d) => !seen.has(grid.destinationNode.get(d.id) as number))
+    .map((d) => d.id);
+  const feet = grid.footNodes.map((n, i) => ({
+    i,
+    at: `${(grid.xs[n] as number).toFixed(1)},${(grid.zs[n] as number).toFixed(1)}`,
+    links: (grid.neighbours[n] as readonly LatticeNeighbour[]).length,
+    reachable: seen.has(n),
+  }));
+  return { unreachable, noSearch, feet };
 }
