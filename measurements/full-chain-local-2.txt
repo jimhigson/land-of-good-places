@@ -1,0 +1,959 @@
+$ pnpm run check:text && pnpm run check:shop-spacing && pnpm run check:stall-shape && pnpm run check:gondola-sightline && pnpm run check:hop-clearance && pnpm run check:deck-fallthrough && tsc --noEmit && pnpm run typecheck:test && pnpm run check:brevity && pnpm run check:assets && pnpm run check:hat-fit && pnpm run check:glasses-fit && pnpm run check:hood-face && pnpm run check:baked-face && pnpm run check:character-parity && pnpm run check:hair && pnpm run check:crowd && pnpm run check:speech-bubbles && pnpm run check:ride-camera && pnpm run check:slide-rider && pnpm run check:pet-slide && pnpm run check:orientation && pnpm run check:sky-view && pnpm run check:space-night && pnpm run check:waypoints && pnpm run check:seed-pool && pnpm run check:park && pnpm run check:fountain-hop && pnpm run check:park-map && pnpm run check:hud-during-rides && pnpm run check:solve-cost && pnpm run check:jitter && pnpm run check:castle && pnpm run check:benches && pnpm run check:castle-floors && pnpm run check:hall-solid && pnpm run check:hotel && pnpm run check:tap-spacing && pnpm run check:look-around && pnpm run check:nav-routes && pnpm run check:path-preference && pnpm run check:rail-race && pnpm run check:cart-shape && pnpm run check:tie-frame && pnpm run check:cruiser-solves && pnpm run check:cruiser-turn-radius && pnpm run check:cruiser-clearance && pnpm run check:castle-window && pnpm run check:backpack-peek && pnpm run check:statue-occlusion && pnpm run check:keyring-hang && pnpm run check:keyring-view && pnpm run check:climb-wave && pnpm run check:cat-bus && pnpm run check:cat-bus-suspension && pnpm run check:bus-journey && pnpm run check:park-boot && pnpm run check:arrival-completes
+$ node scripts/check-text-sizes.mjs
+TEXT RULE: no text below the minimum size. ✓
+$ node scripts/checkShopSpacing.mjs
+Plate 42.43 x 31.11 m
+Market: stall 2.8 m, along-row pitch 7.52 m, row separation 7.52 m, aisle 4.72 m
+
+  toy          floor 0  r1c0  x[-8.92, -6.12] z[-8.08, -5.28]  faces +Z
+  balloon      floor 0  r2c0  x[-5.16, -2.36] z[-0.56, 2.24]  faces -Z
+  candyFloss   floor 0  r2c1  x[2.36, 5.16] z[-0.56, 2.24]  faces -Z
+  iceCream     floor 0  r1c1  x[-1.40, 1.40] z[-8.08, -5.28]  faces +Z
+  hat          floor 0  r1c2  x[6.12, 8.92] z[-8.08, -5.28]  faces +Z
+  stickerPet   floor 0  r0c0  x[-12.68, -9.88] z[-14.46, -11.66]  faces +Z
+  surpriseEgg  floor 0  r0c1  x[9.88, 12.68] z[-14.46, -11.66]  faces +Z
+
+  rank 0 (2 stalls, faces +Z): 3.58 m to rank 1, needs 3.58 m
+
+  rank 1 (3 stalls, faces +Z): 4.72 m to rank 2, needs 4.72 m
+
+  rank 2 (2 stalls, faces -Z): 4.72 m to rank 1, needs 4.72 m
+  all 7 stalls on floor 0: one room, one market
+
+PASS: 7 stalls on one floor, every rank with a lane in front of it, at least one facing pair, every serving spot in a lane.
+$ node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-stall-shape.mts
+Ceiling 3.30 m, stall footprint 2.80 m square, pitch along a row 7.52 m
+
+  toy          gable     top 3.15 m  x ±1.40  z [-0.46, 1.26]
+  balloon      bouquet   top 3.14 m  x ±1.57  z [-0.32, 1.27]
+  candyFloss   parasol   top 3.12 m  x ±1.39  z [-0.80, 1.27]
+  iceCream     barrel    top 3.12 m  x ±1.40  z [-0.36, 1.26]
+  hat          plank     top 3.09 m  x ±1.40  z [-0.60, 1.40]
+  stickerPet   bunting   top 3.17 m  x ±1.32  z [-0.30, 1.26]
+  surpriseEgg  sawtooth  top 3.11 m  x ±1.40  z [-0.35, 1.26]
+
+  widest canopy 3.14 m; 4.38 m to the next stall
+  7 distinct canopies for 7 stalls
+  toy=gable+teddy, balloon=bouquet, candyFloss=parasol+floss, iceCream=barrel+cone, hat=plank+bobbleHat, stickerPet=bunting+star, surpriseEgg=sawtooth+egg
+
+PASS: 7 stalls, all different, all under the ceiling and inside the aisle.
+$ node scripts/checkGondolaSightline.mjs
+Car 3.6 x 2.8 x 2.6 m. Player's cushion 0.8, eye 1.8. Pets' cushion 0.16.
+
+Head clearance under the player's eye:
+  pet.bunny      head 1.620 m  clearance 0.180 m  (view clear above 7.2° below the horizon)
+  pet.kitten     head 1.620 m  clearance 0.180 m  (view clear above 7.2° below the horizon)
+  pet.mouse      head 1.620 m  clearance 0.180 m  (view clear above 7.2° below the horizon)
+  pet.puff       head 1.620 m  clearance 0.180 m  (view clear above 7.2° below the horizon)
+  pet.ripika     head 1.640 m  clearance 0.160 m  (view clear above 6.4° below the horizon)
+  toy.biscuit    head 1.320 m  clearance 0.480 m  (view clear above 18.7° below the horizon)
+  toy.star       head 0.530 m  clearance 1.270 m  (view clear above 41.8° below the horizon)
+  balloon.corgi  head 1.735 m  clearance 0.065 m  (view clear above 2.6° below the horizon)
+
+Pets' cushion sits 0.64 m below the player's.
+
+Fit inside the glass:
+  pet.bunny      side reach 1.379 / 1.8   front reach 1.035 / 1.4
+  pet.kitten     side reach 1.457 / 1.8   front reach 1.171 / 1.4
+  pet.mouse      side reach 1.483 / 1.8   front reach 1.145 / 1.4
+  pet.puff       side reach 1.651 / 1.8   front reach 1.272 / 1.4
+  pet.ripika     side reach 1.653 / 1.8   front reach 1.070 / 1.4
+  toy.biscuit    side reach 1.542 / 1.8   front reach 1.086 / 1.4
+  toy.star       side reach 1.239 / 1.8   front reach 0.796 / 1.4
+  balloon.corgi  side reach 1.496 / 1.8   front reach 0.970 / 1.4
+
+Looking up through the front glass: clear to 13.7° above the horizon.
+Headroom above the player's eye: 0.80 m.
+
+PASS: every rider sits below the eye line and inside the glass.
+$ node --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-hop-clearance.mts
+JUMP_APEX_HEIGHT (algebraic) = 1.2812 m
+Collision.ts believes it was measured at 1.2812 m
+Collision.ts currently permits topHeight <= 1.00 m
+The "clean" column below is what that number must stay under.
+  discrete apex at 30 fps: 1.1733 m
+  discrete apex at 60 fps: 1.2267 m
+  discrete apex at 90 fps: 1.2446 m
+  discrete apex at 120 fps: 1.2538 m
+  discrete apex at 144 fps: 1.2583 m
+
+half   fps  gait    angle   clean   clean-or-pop
+0.15   20  walk      0     1.162   1.259
+0.15   20  walk     20     1.162   1.259
+0.15   20  walk     40     1.112   1.259
+0.15   20  sprint    0     1.162   1.259
+0.15   20  sprint   20     1.162   1.259
+0.15   20  sprint   40     1.162   1.259
+0.15   30  walk      0     1.183   1.311
+0.15   30  walk     20     1.183   1.311
+0.15   30  walk     40     1.160   1.291
+0.15   30  sprint    0     1.230   1.311
+0.15   30  sprint   20     1.230   1.311
+0.15   30  sprint   40     1.230   1.311
+0.15   60  walk      0     1.233   1.342
+0.15   60  walk     20     1.217   1.342
+0.15   60  walk     40     1.176   1.342
+0.15   60  sprint    0     1.254   1.342
+0.15   60  sprint   20     1.254   1.342
+0.15   60  sprint   40     1.254   1.342
+0.15   90  walk      0     1.232   1.362
+0.15   90  walk     20     1.229   1.362
+0.15   90  walk     40     1.175   1.362
+0.15   90  sprint    0     1.277   1.362
+0.15   90  sprint   20     1.277   1.362
+0.15   90  sprint   40     1.254   1.362
+0.15  120  walk      0     1.234   1.365
+0.15  120  walk     20     1.231   1.365
+0.15  120  walk     40     1.188   1.365
+0.15  120  sprint    0     1.273   1.365
+0.15  120  sprint   20     1.273   1.365
+0.15  120  sprint   40     1.254   1.365
+0.22   20  walk      0     1.162   1.259
+0.22   20  walk     20     1.162   1.259
+0.22   20  walk     40     1.112   1.259
+0.22   20  sprint    0     1.162   1.259
+0.22   20  sprint   20     1.162   1.259
+0.22   20  sprint   40     1.162   1.259
+0.22   30  walk      0     1.183   1.311
+0.22   30  walk     20     1.160   1.311
+0.22   30  walk     40     1.100   1.291
+0.22   30  sprint    0     1.230   1.311
+0.22   30  sprint   20     1.230   1.311
+0.22   30  sprint   40     1.183   1.311
+0.22   60  walk      0     1.217   1.342
+0.22   60  walk     20     1.194   1.342
+0.22   60  walk     40     1.150   1.342
+0.22   60  sprint    0     1.254   1.342
+0.22   60  sprint   20     1.254   1.342
+0.22   60  sprint   40     1.233   1.342
+0.22   90  walk      0     1.205   1.362
+0.22   90  walk     20     1.201   1.362
+0.22   90  walk     40     1.144   1.362
+0.22   90  sprint    0     1.257   1.362
+0.22   90  sprint   20     1.254   1.362
+0.22   90  sprint   40     1.232   1.362
+0.22  120  walk      0     1.214   1.365
+0.22  120  walk     20     1.211   1.365
+0.22  120  walk     40     1.145   1.365
+0.22  120  sprint    0     1.254   1.365
+0.22  120  sprint   20     1.254   1.365
+0.22  120  sprint   40     1.234   1.365
+0.28   20  walk      0     1.162   1.259
+0.28   20  walk     20     1.112   1.259
+0.28   20  walk     40     1.045   1.259
+0.28   20  sprint    0     1.162   1.259
+0.28   20  sprint   20     1.162   1.259
+0.28   20  sprint   40     1.112   1.259
+0.28   30  walk      0     1.160   1.311
+0.28   30  walk     20     1.160   1.311
+0.28   30  walk     40     1.100   1.291
+0.28   30  sprint    0     1.230   1.311
+0.28   30  sprint   20     1.183   1.311
+0.28   30  sprint   40     1.183   1.311
+0.28   60  walk      0     1.194   1.342
+0.28   60  walk     20     1.176   1.342
+0.28   60  walk     40     1.101   1.342
+0.28   60  sprint    0     1.233   1.342
+0.28   60  sprint   20     1.233   1.342
+0.28   60  sprint   40     1.217   1.342
+0.28   90  walk      0     1.201   1.362
+0.28   90  walk     20     1.175   1.362
+0.28   90  walk     40     1.111   1.362
+0.28   90  sprint    0     1.254   1.362
+0.28   90  sprint   20     1.232   1.362
+0.28   90  sprint   40     1.229   1.362
+0.28  120  walk      0     1.193   1.365
+0.28  120  walk     20     1.188   1.365
+0.28  120  walk     40     1.115   1.365
+0.28  120  sprint    0     1.251   1.365
+0.28  120  sprint   20     1.251   1.365
+0.28  120  sprint   40     1.231   1.365
+0.34   20  walk      0     1.112   1.259
+0.34   20  walk     20     1.112   1.259
+0.34   20  walk     40     1.045   1.259
+0.34   20  sprint    0     1.162   1.259
+0.34   20  sprint   20     1.162   1.259
+0.34   20  sprint   40     1.112   1.259
+0.34   30  walk      0     1.160   1.311
+0.34   30  walk     20     1.100   1.311
+0.34   30  walk     40     1.073   1.291
+0.34   30  sprint    0     1.183   1.311
+0.34   30  sprint   20     1.183   1.311
+0.34   30  sprint   40     1.160   1.311
+0.34   60  walk      0     1.176   1.342
+0.34   60  walk     20     1.150   1.342
+0.34   60  walk     40     1.080   1.342
+0.34   60  sprint    0     1.217   1.342
+0.34   60  sprint   20     1.217   1.342
+0.34   60  sprint   40     1.194   1.342
+0.34   90  walk      0     1.172   1.362
+0.34   90  walk     20     1.144   1.362
+0.34   90  walk     40     1.075   1.362
+0.34   90  sprint    0     1.232   1.362
+0.34   90  sprint   20     1.229   1.362
+0.34   90  sprint   40     1.201   1.362
+0.34  120  walk      0     1.170   1.365
+0.34  120  walk     20     1.165   1.365
+0.34  120  walk     40     1.089   1.365
+0.34  120  sprint    0     1.234   1.365
+0.34  120  sprint   20     1.231   1.365
+0.34  120  sprint   40     1.211   1.365
+0.45   20  walk      0     1.112   1.259
+0.45   20  walk     20     1.045   1.259
+0.45   20  walk     40     0.975   1.259
+0.45   20  sprint    0     1.112   1.259
+0.45   20  sprint   20     1.112   1.259
+0.45   20  sprint   40     1.112   1.259
+0.45   30  walk      0     1.100   1.311
+0.45   30  walk     20     1.073   1.311
+0.45   30  walk     40     0.999   1.291
+0.45   30  sprint    0     1.183   1.311
+0.45   30  sprint   20     1.160   1.311
+0.45   30  sprint   40     1.160   1.311
+0.45   60  walk      0     1.131   1.342
+0.45   60  walk     20     1.101   1.342
+0.45   60  walk     40     1.025   1.342
+0.45   60  sprint    0     1.194   1.342
+0.45   60  sprint   20     1.194   1.342
+0.45   60  sprint   40     1.150   1.342
+0.45   90  walk      0     1.140   1.362
+0.45   90  walk     20     1.107   1.362
+0.45   90  walk     40     0.997   1.362
+0.45   90  sprint    0     1.205   1.362
+0.45   90  sprint   20     1.201   1.362
+0.45   90  sprint   40     1.172   1.362
+0.45  120  walk      0     1.141   1.365
+0.45  120  walk     20     1.115   1.365
+0.45  120  walk     40     1.007   1.365
+0.45  120  sprint    0     1.211   1.365
+0.45  120  sprint   20     1.211   1.365
+0.45  120  sprint   40     1.170   1.365
+0.60   20  walk      0     1.045   1.259
+0.60   20  walk     20     0.975   1.259
+0.60   20  walk     40     0.884   1.259
+0.60   20  sprint    0     1.112   1.259
+0.60   20  sprint   20     1.112   1.259
+0.60   20  sprint   40     1.045   1.259
+0.60   30  walk      0     1.073   1.311
+0.60   30  walk     20     0.999   1.311
+0.60   30  walk     40     0.879   1.291
+0.60   30  sprint    0     1.160   1.311
+0.60   30  sprint   20     1.160   1.311
+0.60   30  sprint   40     1.100   1.311
+0.60   60  walk      0     1.048   1.342
+0.60   60  walk     20     1.025   1.342
+0.60   60  walk     40     0.900   1.342
+0.60   60  sprint    0     1.176   1.342
+0.60   60  sprint   20     1.150   1.342
+0.60   60  sprint   40     1.101   1.342
+0.60   90  walk      0     1.071   1.362
+0.60   90  walk     20     1.037   1.362
+0.60   90  walk     40     0.912   1.362
+0.60   90  sprint    0     1.172   1.362
+0.60   90  sprint   20     1.172   1.362
+0.60   90  sprint   40     1.111   1.362
+0.60  120  walk      0     1.066   1.365
+0.60  120  walk     20     1.037   1.365
+0.60  120  walk     40     0.910   1.365
+0.60  120  sprint    0     1.170   1.365
+0.60  120  sprint   20     1.165   1.365
+0.60  120  sprint   40     1.115   1.365
+
+Worst clean crossing over the park's own wall thicknesses: 1.045 m
+(node:99991) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+$ node --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-deck-fallthrough.mts
+
+Can a long frame carry the player through the deck she is walking up? (#358)
+
+  worst sub-step over the frame rates swept: 0.370 m (at 15 fps), against the park's thinnest 0.18 m collider
+  so the predicted ceiling is BUILDING_STEP_UP / that = 1.676
+
+  gradient   before: lost/runs  worst gap    after: lost/runs  worst gap
+     0.100        0/1280      0.000         0/1280      0.000
+     0.200        0/1280      0.000         0/1280      0.000
+     0.300        0/1280      0.000         0/1280      0.000
+     0.400        0/1280      0.000         0/1280      0.000
+     0.450        0/1280      0.000         0/1280      0.000
+     0.500        0/1280      0.000         0/1280      0.000
+     0.512        0/1280      0.000         0/1280      0.000
+     0.550       64/1280      8.033         0/1280      0.000
+     0.600      128/1280      8.158         0/1280      0.000
+     0.620      128/1280      8.230         0/1280      0.000
+     0.650      192/1280      9.485         0/1280      0.000
+     0.670      192/1280      8.483         0/1280      0.000
+     0.700      192/1280      8.209         0/1280      0.000
+     0.800      320/1280      8.455         0/1280      0.000
+     0.900      448/1280      8.849         0/1280      0.000
+     1.000      512/1280      8.701         0/1280      0.000
+     1.200      576/1280      8.695         0/1280      0.000
+     1.400      640/1280      8.936         0/1280      0.000
+     1.600      640/1280      8.984         0/1280      0.000
+     1.650      640/1280      9.077         0/1280      0.000
+     1.670      640/1280      9.115         0/1280      0.000
+     1.700      640/1280      9.171       192/1280     10.881
+     1.800      640/1280      9.358       256/1280     11.169
+     2.000      640/1280      9.196       384/1280     11.745
+     2.100      640/1280      9.356       384/1280     10.481
+     2.200      640/1280      9.516       384/1280     10.695
+     2.400      640/1280      9.652       384/1280     11.122
+
+  steepest deck with no fall-through anywhere in the sweep:
+
+    neither (as shipped before #358)   0.512
+    sub-stepping only                  0.512
+    true-surface reference only        0.670
+    both (what ships now)              1.670
+
+  a hole in the deck, at gradient 0.3 (see HOLE_WIDTHS):
+
+    hole width    before: lost/runs      after: lost/runs
+          0.00         0/640            0/640   
+          0.10        14/640           83/640   
+          0.30        43/640          185/640   
+          0.50        83/640          141/640   
+
+  the control's first failure:
+    a sprinting child up a gradient-0.550 deck at 12 fps (phase 0.0000) lost the surface at x=-37.19: the deck is at y=7.376 but the sampler returned -0.159, 7.535 m below her own feet — she falls through it.
+
+  the first failure that survives the fix:
+    a sprinting child up a gradient-1.700 deck at 15 fps (phase 0.0000) lost the surface at x=-38.03: the deck is at y=9.175 but the sampler returned -0.162, 9.337 m below her own feet — she falls through it.
+
+  guaranteed floor, independent of what the park contains: 0.670
+  (BUILDING_STEP_UP 0.62 / PLAYER_LONGEST_STEP 0.925)
+
+  ceiling 0.512 -> 1.670, bracketing the predicted 1.676. OK
+
+$ tsc --noEmit -p tsconfig.test.json
+$ node --import ./scripts/ts-extension-resolver-register.mjs scripts/check-copy-brevity.mts
+BREVITY RULE: 142 pieces of copy are short enough; 6 still carry a recorded exception. See KNOWN_LONG in scripts/check-copy-brevity.mts. ✓
+(node:237) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+$ node --import ./scripts/ts-extension-resolver-register.mjs scripts/check-asset-contract.mts
+asset contract: 102 assets check out, 36 of them creatures that stand still as built (21 also posed through update()); 28 still carry recorded drift (worst: balloon.corgi +0.077 m). See KNOWN_DRIFT in scripts/check-asset-contract.mts.
+$ node --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-hat-fit.mts
+kid: 2.087 m tall, bare head 1.399 m wide
+hat anchor (crown): 1.981 m above the feet
+worn size, per hat: party ×1.500, crown ×1.950, bobble ×1.500, sun ×1.650, cap ×1.125, flower ×1.125, ripikaHat ×1.125, puff ×1.125
+
+hat            width    head   grip   span    rise     tip  of kid     eye
+--------------------------------------------------------------------------
+party          1.212   0.935   1.30   0.87   1.000   2.981    1.43   0.329
+crown          1.644   1.202   1.37   1.28   0.710   2.691    1.29   0.195
+bobble         1.273   1.126   1.13   1.03   0.844   2.825    1.35   0.263
+sun            2.312   1.263   1.83   1.66   0.384   2.365    1.13   0.267
+cap            1.425   1.202   1.19   1.22   0.525   2.506    1.20   0.208
+flower         1.054   1.037   1.02   0.83   0.063   2.043    0.98   0.302
+ripikaHat      1.343   1.202   1.12   1.21   0.817   2.798    1.34   0.215
+puff           1.615   1.383   1.17   1.22   0.801   2.782    1.33   0.232
+
+width/head = the hat at its lowest ring against the skull there;
+grip = that ratio (oversized hats perch, so ≳ 1); span = widest ÷ bare head;
+eye = clear air between the hat and the top of an eye, in metres.
+loosest rim: sun at 1.83×; narrowest hat: flower at 0.83× the head;
+closest to an eye: crown, 195 mm clear.
+
+shop stands 0.85 m apart: widest two are puff at 0.782 m and cap at 0.780 m, leaving 69 mm between them.
+hat fit: all 8 hats fit the head they sit on.
+$ node --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-glasses-fit.mts
+kid: bare head 1.398 m across, left ear to right ear
+
+glasses        span  centreX eyeY off halfSpan
+----------------------------------------------
+sunglasses     0.79   0.0000   -0.0mm    0.555
+star           0.67   0.0000   -0.3mm    0.467
+heart          0.73   0.0000   +3.3mm    0.509
+
+glasses fit: all 3 pairs sit correctly on the face.
+$ node --import ./scripts/ts-extension-resolver-register.mjs scripts/check-hood-face.mts
+Hood faces — is the painted face on the surface the camera sees?
+
+  RiPika cap — left eye: shell first, uv off by 0.0001
+  RiPika cap — right eye: shell first, uv off by 0.0003
+  RiPika cap — mouth: shell first, uv off by 0.0000
+  RiPika cap — brow centre: shell first, uv off by 0.0000
+  RiPika cap — back of hood: uv u=2.63 (clamps to the plain border)
+  Trilla bonnet — left eye: shell first, uv off by 0.0000
+  Trilla bonnet — right eye: shell first, uv off by 0.0001
+  Trilla bonnet — mouth: shell first, uv off by 0.0000
+  Trilla bonnet — brow centre: shell first, uv off by 0.0000
+  Trilla bonnet — back of hood: uv u=2.77 (clamps to the plain border)
+  Cheery Cap: flat colour, no map, no shell UVs, 2306 vertices — untouched
+
+Both critter hoods: face baked into the shell's own UVs, visible from outside.
+$ node --import ./scripts/ts-extension-resolver-register.mjs scripts/check-baked-face.mts
+Baked faces — is each face on the surface the camera sees?
+
+  three.js sphere: +Z at u=0.237, seam 90° round the side, v 1→0 top→bottom
+  face paint: all 6 designs land within 0.0000 mm of where they were authored
+  player kid — left eye: skull first, uv off by 0.0001
+  player kid — right eye: skull first, uv off by 0.0002
+  player kid — mouth: skull first, uv off by 0.0004
+  RiPika — left eye: skull first, uv off by 0.0001
+  RiPika — right eye: skull first, uv off by 0.0001
+  RiPika — mouth: skull first, uv off by 0.0000
+  RiPika — back of head: uv u=1.93 (the plain border)
+  Mini — left eye: skull first, uv off by 0.0001
+  Mini — right eye: skull first, uv off by 0.0001
+  Mini — mouth: skull first, uv off by 0.0000
+  Mini — back of head: uv u=1.89 (the plain border)
+  Biscuit — left eye: skull first, uv off by 0.0001
+  Biscuit — right eye: skull first, uv off by 0.0000
+  Biscuit — back of head: uv u=1.97 (the plain border)
+  RiPika statue — left eye: skull first, uv off by 0.0001
+  RiPika statue — right eye: skull first, uv off by 0.0001
+  RiPika statue — mouth: skull first, uv off by 0.0000
+  RiPika statue — back of head: uv u=1.93 (the plain border)
+  crowd prototype: separate facePatch kept, skull untextured — instancing intact
+
+Every baked face is on its own head, where it was painted.
+$ node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-character-parity.mts
+
+check:character-parity — authored kid against the procedural one
+
+  14 parts: every triangle between the same points; worst vertex 0.000127 mm, worst uv 4.47e-8
+  normals: ordinary vertices turned at most 0.0296°, fan apexes 1.1635° (bounds 0.05° and 1.20°)
+  winding: every part outward-facing, normals agree by at least 0.9899; 14 undrawn vertices dropped by the round trip
+  height 2.0874 m, hat anchor 1.9809 m
+  hip 0.3600 m, hands rest at 0.4000 m, reach 1.0400 m
+  silhouette: 192 rays, worst 0.0003 mm, 192 hits
+  walk cycle: 24 frames × 4 limb tips, worst 0.0000 mm
+  .glb read twice — ours and three.js's GLTFLoader agree exactly
+
+The authored kid is the same kid, to 0.000001 m.
+
+$ node --import ./scripts/ts-extension-resolver-register.mjs scripts/check-hair.mts
+check:hair — 4 shells, 8 styles, skull 0.660 m (HEAD 1.5)
+  long   1122 verts   2240 tris  probe drift 3.0e-8
+  bob    1122 verts   2240 tris  probe drift 2.8e-8
+  bowl   1122 verts   2240 tris  probe drift 2.4e-8
+  crop   1122 verts   2240 tris  probe drift 2.9e-8
+  long  fringe clears the eyes by 16 mm
+  bob   fringe clears the eyes by 16 mm
+  bowl  fringe clears the eyes by 28 mm
+  crop  fringe clears the eyes by 17 mm
+  bunches  hand clearance 568 mm
+  bob      hand clearance 254 mm
+  short    hand clearance 568 mm
+  long     hand clearance 38 mm
+  bowl     hand clearance 527 mm
+  spiky    hand clearance 568 mm
+  messy    hand clearance 568 mm
+  mohican  hand clearance 568 mm
+  spiky    stands 255 mm proud of the crown, kid 2.342 m
+  spiky    274/1120 spike vertices buried, widest unrooted gap 14°
+hair: one piece, off her face, clear of her hands.
+$ node --import ./scripts/ts-extension-resolver-register.mjs scripts/trace-npc-driver.mts && pnpm run check:npc-perch && pnpm run check:npc-separation && pnpm run check:npc-dispersal && pnpm run check:npc-presence
+frames=90000 children=12
+covered climbs=12 trips=85 chats=292 paints=4 waves=63845 hops=362
+trace=2cdba2c3
+wedged-visitor painted=4/4 fourth-painted t=100.7s
+(node:296) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:294) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+$ node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-npc-perch.mts
+check:npc-perch: 24 wandering children, 42 climbable trees x 4 approaches.
+  NPC heads sit -0.048 to 0.016 of a canopy height above the topmost leaf (allowed -0.25 to 0.08).
+  In metres: -0.17 m to 0.06 m, against canopies 3.21-4.79 m tall.
+  For contrast, the PLAYER sits 0.118 to 0.176 up there (0.56-0.56 m), on CLIMB_PEEK_LIFT 0.564 m. Not asserted here — she is allowed to, and that is the whole point.
+  drawn: a climbing NPC is drawn 1.07 m below the head at the worst of 168 climbs (needs 0.9 m).
+check:npc-perch OK
+$ node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-npc-separation.mts
+  chosen pair: Zara and Bodhi, starting 8.43 m apart (minimum required: 3.10 m)
+  ran 15 s (900 frames) at 0.0167 s/frame
+  Zara walked 3.31 m, Bodhi walked 3.31 m
+  closest approach: 1.800 m at 1.35 s (true-overlap floor NPC_RADIUS*2 = 1.00 m, SEPARATION trigger = 1.80 m)
+  farthest apart during the run: 8.42 m
+  separateFrom applied a real correction to this pair on 819 of 900 frames, worst single-frame correction 0.042 m
+
+npc separation OK
+$ node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-npc-dispersal.mts
+park seed 20260728
+  24 park children (of 31 NPCs; the rest are the hotel's)
+  park area 21136 m² -> equivalent radius 82.0 m, uniform-scatter RMS 58.00 m, clump radius 8.2 m
+  ran 240s, sampled every 10s from 60s (19 samples)
+  mean spread: RMS 39.84 m = 69% of uniform (needs >= 29.00 m). Worst single sample 31.47 m (54%) at t=240s
+  worst clump: 5 children at t=60s (allows <= 8)
+  destination variety: mean 8.6 of 10 available (needs >= 4); fewest 7 at t=60s
+  castle: 5 children went inside, 6 of the 7 shops chosen, peak 3 indoors at one sample (cap 4)
+  fewest measured (in the garden, no activity holding them): 13 at t=130s (needs >= 7 of 24; caps allow 17 held or indoors)
+
+npc dispersal OK
+$ node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-npc-presence.mts
+31 NPCs, player in garden
+  ran 300s (18000 frames) at 0.0167 s/frame
+  frames with somebody marked elsewhere: 18000 of 18000
+  crossings: 10 in, 8 out
+  movement by characters in another space: 0 occurrences (none)
+  mark/world disagreements: 0 character-frames
+  park children spawned outside the garden: 0 (none)
+
+npc presence OK
+$ node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-speech-bubbles.mts
+check:speech-bubbles — 7200 frames at 390x844, 659 crowd-bubble sightings, 3 set-once probes.
+Every one of 659 drawn speech bubbles was over its own child, and 3 set-once bubbles stayed on their anchors.
+$ node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/trace-ride-camera.mts
+frames=5640 beats=35 in 0.4s
+covered yaw-left=1089 yaw-right=1360 pitch-top=2410 pitch-bottom=759 keys=1560 drag=1080 fovs=2 full-turn=1
+trace=6dc5cff1
+$ node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-slide-rider.mts
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+skyCruiser: the station platform is 0.9 m of track from the castle's level run — they would deform each other, and 5 m is the least that keeps them apart
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+  the cut: 6 beats — chase | trackside | chase | trackside | chase | trackside
+  292 frames on the chase, 294 trackside, 0 with no camera at all
+  the shot, sampled down the ride (240x135 rays through the live camera):
+    beat 0 chase     frame  60  head  2454 px   body     0 px   body is  0.00% of frame
+    beat 1 trackside frame 120  head  1417 px   body   737 px   body is  2.27% of frame
+    beat 1 trackside frame 180  head  2126 px   body   469 px   body is  1.45% of frame
+    beat 2 chase     frame 240  head  2577 px   body     0 px   body is  0.00% of frame
+    beat 3 trackside frame 300  head  1174 px   body   647 px   body is  2.00% of frame
+    beat 3 trackside frame 360  head  2327 px   body   699 px   body is  2.16% of frame
+    beat 4 chase     frame 420  head  2539 px   body     0 px   body is  0.00% of frame
+    beat 4 chase     frame 480  head  2480 px   body     0 px   body is  0.00% of frame
+    beat 5 trackside frame 540  head  2336 px   body   872 px   body is  2.69% of frame
+check:slide-rider ok — 586 frames ridden, drawn throughout, worst 0.25 m off the chute (trough allows 1.90 m), seat within 0.18 m, reclined throughout (body at most -0.99 along the chute, head at most 0.90 m over her feet and 1.30 m from the chute).
+  All 6 beats live and sampled, every frame covered. Her body fills at least 1.45% of the frame on a trackside camera (floor 0.40%), with nothing between the lens and her on any of 294 trackside frames, and she is on screen on every chase sample — where she is allowed to be all head, and manages 0 px of body at best.
+$ node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-pet-slide.mts
+  riding the ginormous slide with three companions:
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+skyCruiser: the station platform is 0.9 m of track from the castle's level run — they would deform each other, and 5 m is the least that keeps them apart
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+  wired  : 586 ridden frames, worst 0.78 m off the chute, closest pair 2.04 m, closest to her 0.16 m (deepest inside her 0.00 m), closest to its neighbour 0.68 m (deepest inside it 0.00 m), most upright lie -0.947 against -0.707, biggest single-frame step 0.163 m, nearest pet in shot on 88% of rasters (smallest 0.0%), 292 chase frames, 8 chase rasters (child at worst 192 px, biggest pet 16% of frame — Little Mouse), furthest from her afterwards 4.2 m (0 undrawn, 0 off-chute, 0 overtaking, 0 clipping, 0 upright pet-frames)
+  and again with the ride never told about the parade — the control:
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+skyCruiser: the station platform is 0.9 m of track from the castle's level run — they would deform each other, and 5 m is the least that keeps them apart
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+THREE.Texture: Unable to serialize Texture.
+  control: 586 ridden frames, worst 12.18 m off the chute, closest pair 0.00 m, closest to her 0.00 m (deepest inside her 0.08 m), closest to its neighbour 0.00 m (deepest inside it 0.58 m), most upright lie 0.000 against -0.707, biggest single-frame step 3.803 m, nearest pet in shot on 0% of rasters (smallest 0.0%), 292 chase frames, 8 chase rasters (child at worst 628 px, biggest pet 0% of frame — —), furthest from her afterwards 4.2 m (0 undrawn, 1356 off-chute, 401 overtaking, 20 clipping, 1758 upright pet-frames)
+check:pet-slide FAILED
+  - in shot: the nearest companion filled at least 1% of the chase frame on only 88% of 8 rasters, against 95% required (its smallest was 0.0%) — it is behind her, but not in the shot
+[ELIFECYCLE] Command failed with exit code 1.
+[ELIFECYCLE] Command failed with exit code 1.
+check exit: 1
