@@ -445,14 +445,6 @@ export interface BuiltBridges {
   readonly platforms: readonly MovingPlatform[];
   /** Every parapet/spandrel wall, ready for `collision.addWall`. */
   readonly guardRails: readonly BridgeWall[];
-  /**
-   * Crossings the real, backtracking search (`bridgeFootprint.ts`'s
-   * `planReal`) could not find any walkable, collision-clear bridge
-   * configuration for at all — genuinely the last resort (issues #317,
-   * #319). `fence.ts` opens an ordinary ground-level gap for each of these
-   * instead of seaming a hump over it.
-   */
-  readonly fallbackCrossings: readonly LevelCrossing[];
 }
 
 function clamp01(value: number): number {
@@ -542,7 +534,6 @@ export function buildBridges(
   const bridges: Bridge[] = [];
   const platforms: MovingPlatform[] = [];
   const guardRails: BridgeWall[] = [];
-  const fallbackCrossings: LevelCrossing[] = [];
 
   // One footprint per crossing, same order — the single owner of every
   // ground-plane number below, shared with whatever keeps scenery off the
@@ -555,8 +546,15 @@ export function buildBridges(
     const crossing = crossings[crossingIndex] as LevelCrossing;
     const footprint = footprints[crossingIndex];
     if (!footprint) {
-      fallbackCrossings.push(crossing);
-      continue;
+      // The site was proven by the planner, so the real search failing here
+      // means the two have drifted — the exact #414 disease — and there is
+      // no level tier to absorb it. A crossing without a bridge is a path
+      // walking through a fence gap onto live rails; fail the build.
+      throw new Error(
+        `bridges: no walkable bridge fits at proven crossing railD ${crossing.railDistance.toFixed(1)} ` +
+          `(${crossing.x.toFixed(1)}, ${crossing.z.toFixed(1)}). The planner proved this site; ` +
+          'the real search refused it — find the drift between them (issue #414).',
+      );
     }
     const built = buildOneBridge(crossing, footprint);
     bridges.push(built.bridge);
@@ -565,7 +563,7 @@ export function buildBridges(
     group.add(built.group);
   }
 
-  return { group, bridges, platforms, guardRails, fallbackCrossings };
+  return { group, bridges, platforms, guardRails };
 }
 
 interface OneBridge {

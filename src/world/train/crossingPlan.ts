@@ -31,23 +31,6 @@ const SOLVED = takePrewarmedCrossingSites() ?? solveCrossingSites();
 export const CROSSING_SITES: readonly CrossingSite[] = SOLVED.bridges;
 
 /**
- * Deliberate, station-clear, square level-crossing sites — Decision 8's
- * rare fallback, offered only where {@link CROSSING_SITES} leaves a whole
- * stretch of the loop unbridgeable. `paths.ts` charges
- * {@link LEVEL_CROSSING_PENALTY} extra metres for picking one, so a bridge
- * always wins when one is anywhere reasonable.
- */
-export const LEVEL_CROSSING_SITES: readonly CrossingSite[] = SOLVED.levels;
-
-/**
- * Extra path-metres a level-crossing site costs in `paths.ts`'s site
- * selection — the price of contradicting Decision 8's preference. Sized so
- * a bridge within roughly this much extra walking always wins, and only a
- * genuinely stranded region (nothing bridgeable anywhere near) falls back.
- */
-export const LEVEL_CROSSING_PENALTY = 45;
-
-/**
  * Which side of the railway a point stands on, in `crossings.ts`'s own
  * sign convention (+1 along `(tangent.z, -tangent.x)` from the nearest rail
  * point). Well-defined for any point meaningfully off the centre line; the

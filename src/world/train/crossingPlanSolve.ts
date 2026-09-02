@@ -57,12 +57,15 @@ export { NARROW_HALF_WIDTH, SITE_HALF_WIDTH, SITE_RAMP_FLOOR, SITE_RAMP_IDEAL };
  * `ParkTrain`'s late, real, backtracking search stays the final verifier
  * rather than a search that was doomed before it started.
  *
- * Where the loop genuinely cannot take a bridge anywhere useful — on the
- * canonical seed the north-east strip between rail and boundary is too
- * shallow for any ramp — {@link LEVEL_CROSSING_SITES} offers deliberate,
- * station-clear, perpendicular *level* crossings as the last resort
- * Decision 8 allows, and `paths.ts` charges a heavy cost for choosing one
- * so a bridge always wins when one is in reach.
+ * **There is no level-crossing tier.** Jim's ruling, 2 Sep 2026: every
+ * place a path crosses the railway is a bridge, and the ability to plan a
+ * level crossing must not exist in the code. A loop that proves no bridge
+ * site anywhere is an invalid park and this module fails it loudly; the
+ * cure is a warp vector (`parkWarp.ts`) or, failing that, the seed simply
+ * not entering the pool — never a flat crossing. (The tier this replaced
+ * was measured before deletion: emptying it cost no attraction on any of
+ * the sixteen pool seeds, only garden-waypoint pockets that the baked
+ * warps reconnect — branch feat/park-warp-solver, measurements/.)
  *
  * Thresholds are the game's own (CLAUDE.md's procgen rule): the walkable
  * floor is `BRIDGE_RISE / MAX_RAMP_GRADIENT` — the identical floor the real
@@ -86,9 +89,6 @@ export interface CrossingSite {
    * site they are the (much shorter) ground-corridor reaches. */
   readonly rampReachPos: number;
   readonly rampReachNeg: number;
-  /** True when a real bridge provably fits here; false for a deliberate
-   * level crossing (the rare fallback). */
-  readonly bridge: boolean;
   /** The corridor half-width this site was proven at. For a bridge site
    * this is what the measured crossing's `halfGap` is capped to (minus the
    * probe's own half-stride of slack), so the real search's deck-width
@@ -118,21 +118,6 @@ const MARCH_STEP = 2.0;
  * the loop — two bridges closer than this fight over the same ground
  * (`bridgeFootprint.ts`'s `RAMP_CLEARANCE` capping) and read as clutter. */
 const SITE_SPACING = 24;
-
-/** Ground corridor a level-crossing site keeps clear past the fence gap on
- * each side — room for the path to arrive square and walk on, nothing
- * more. Short on purpose: this tier exists precisely where long clear runs
- * do not, and it must stay permissive enough to exist wherever a district
- * genuinely needs a crossing — a level crossing is barely more than a
- * fence gap, and the pre-plan park opened one wherever a path crossed with
- * no feasibility test at all. Making this tier too choosy stranded seed
- * 2's whole east district (8 waypoints, 1 unreachable attraction) the
- * moment its only bridge site was correctly ruled out. */
-const LEVEL_REACH = 4;
-
-/** Corridor half-width probed for a level-crossing site — the path ribbon
- * plus a walker, not a bridge deck. */
-const LEVEL_HALF_WIDTH = 2.0;
 
 const scratch = new Vector3();
 
@@ -300,41 +285,8 @@ function bridgeCandidateAt(railDistance: number): Candidate | null {
     dirZ: fit.dirZ,
     rampReachPos: fit.rampReachPos,
     rampReachNeg: fit.rampReachNeg,
-    bridge: true,
     halfWidth: fit.halfWidth,
     obliqueness: Math.abs(fit.angleOffset) + (fit.halfWidth < SITE_HALF_WIDTH ? 0.01 : 0),
-  };
-}
-
-function levelCandidateAt(railDistance: number): Candidate | null {
-  if (stationBlocked(railDistance)) return null;
-  const route = TRAIN_PLAN.route;
-  const point = new Vector3();
-  const tangent = new Vector3();
-  route.pointAt(railDistance, point);
-  route.tangentAt(railDistance, tangent);
-  const [dirX, dirZ] = sidePlusDirection(tangent);
-  const { pos, neg, deckClear } = probeReach(
-    point,
-    dirX,
-    dirZ,
-    LEVEL_HALF_WIDTH,
-    LEVEL_REACH,
-    1.0,
-    0.5,
-  );
-  if (!deckClear || pos < LEVEL_REACH - 0.5 || neg < LEVEL_REACH - 0.5) return null;
-  return {
-    railDistance,
-    x: point.x,
-    z: point.z,
-    dirX,
-    dirZ,
-    rampReachPos: pos,
-    rampReachNeg: neg,
-    bridge: false,
-    halfWidth: LEVEL_HALF_WIDTH,
-    obliqueness: 0,
   };
 }
 
@@ -443,10 +395,7 @@ function selectSpaced(candidates: readonly Candidate[], serveTheGate = false): C
             route.length / 2,
         ) < SITE_SPACING,
     );
-    // Bridge sites only: two level crossings are paint on the ground and may
-    // sit as close as the loop rule allows.
-    const collides =
-      candidate.bridge && kept.some((other) => other.bridge && footprintsOverlap(candidate, other));
+    const collides = kept.some((other) => footprintsOverlap(candidate, other));
     if (collides && !tooClose && (globalThis as { process?: { env?: Record<string, string> } }).process?.env?.['LGP_DEBUG_BRIDGE']) {
       (globalThis as unknown as { process: { stdout: { write: (s: string) => void } } }).process.stdout.write(
         `site: bridge candidate at railD=${candidate.railDistance.toFixed(1)} (${candidate.x.toFixed(1)}, ${candidate.z.toFixed(1)}) rejected -- footprint overlaps a kept bridge site\n`,
@@ -457,7 +406,7 @@ function selectSpaced(candidates: readonly Candidate[], serveTheGate = false): C
   if ((globalThis as { process?: { env?: Record<string, string> } }).process?.env?.['LGP_DEBUG_BRIDGE']) {
     for (const k of kept) {
       (globalThis as unknown as { process: { stdout: { write: (s: string) => void } } }).process.stdout.write(
-        `site: kept ${k.bridge ? 'BRIDGE' : 'level '} railD=${k.railDistance.toFixed(1)} at (${k.x.toFixed(2)}, ${k.z.toFixed(2)}) dir=(${k.dirX.toFixed(2)}, ${k.dirZ.toFixed(2)}) halfW=${k.halfWidth.toFixed(2)}\n`,
+        `site: kept BRIDGE railD=${k.railDistance.toFixed(1)} at (${k.x.toFixed(2)}, ${k.z.toFixed(2)}) dir=(${k.dirX.toFixed(2)}, ${k.dirZ.toFixed(2)}) halfW=${k.halfWidth.toFixed(2)}\n`,
       );
     }
   }
@@ -469,46 +418,6 @@ function selectSpaced(candidates: readonly Candidate[], serveTheGate = false): C
 /** **Why did the planner refuse a bridge here?** — diagnostic only (#414/#427).
  * Reports, per width and angle, which gate closed, through the same probe the
  * real decision uses. */
-/**
- * **Why is there no LEVEL site here?** — the same instrument as
- * {@link explainBridgeRefusal}, for the tier below it, and asked of the real
- * {@link levelCandidateAt} rather than a second model of it. Node-only
- * diagnostics; nothing in the game calls it.
- *
- * Written after a re-implementation of this tier's own tests reported ground
- * near seed 18's entrance arch as clean when the planner refuses it. A second
- * description of "does a crossing fit" is the defect this whole area keeps
- * producing, so the question is now asked of the one that decides.
- */
-export function explainLevelRefusal(railDistance: number): string {
-  const where = (): string => {
-    const point = new Vector3();
-    TRAIN_PLAN.route.pointAt(railDistance, point);
-    return `railD=${railDistance.toFixed(1)} at (${point.x.toFixed(1)}, ${point.z.toFixed(1)})`;
-  };
-  if (stationBlocked(railDistance)) return `${where()}: inside a station's window`;
-  const candidate = levelCandidateAt(railDistance);
-  if (candidate) {
-    return (
-      `${where()}: LEVEL CANDIDATE, reach ${candidate.rampReachPos.toFixed(1)}/` +
-      `${candidate.rampReachNeg.toFixed(1)} vs floor ${(LEVEL_REACH - 0.5).toFixed(1)}`
-    );
-  }
-  const route = TRAIN_PLAN.route;
-  const point = new Vector3();
-  const tangent = new Vector3();
-  route.pointAt(railDistance, point);
-  route.tangentAt(railDistance, tangent);
-  const [dirX, dirZ] = sidePlusDirection(tangent);
-  const { pos, neg, deckClear } = probeReach(point, dirX, dirZ, LEVEL_HALF_WIDTH, LEVEL_REACH, 1.0, 0.5);
-  return (
-    `${where()}: refused -- ` +
-    (!deckClear
-      ? 'the crossing corridor itself is blocked'
-      : `reach ${pos.toFixed(1)}/${neg.toFixed(1)} vs floor ${(LEVEL_REACH - 0.5).toFixed(1)} -- SHORT`)
-  );
-}
-
 export function explainBridgeRefusal(railDistance: number): string[] {
   if (stationBlocked(railDistance)) return [`railD=${railDistance.toFixed(1)}: inside a station's window`];
   const route = TRAIN_PLAN.route;
@@ -537,7 +446,6 @@ export function explainBridgeRefusal(railDistance: number): string[] {
 
 export interface SolvedCrossingSites {
   readonly bridges: readonly CrossingSite[];
-  readonly levels: readonly CrossingSite[];
 }
 
 /**
@@ -552,7 +460,6 @@ export interface SolvedCrossingSites {
 export function* crossingSitesSearch(): Generator<number, SolvedCrossingSites, void> {
   const route = TRAIN_PLAN.route;
   const bridgeCandidates: Candidate[] = [];
-  const levelCandidates: Candidate[] = [];
   for (let d = 0; d < route.length; d += MARCH_STEP) {
     yield d;
     // The warp vector may ban a site the paths could not use well; the
@@ -560,58 +467,23 @@ export function* crossingSitesSearch(): Generator<number, SolvedCrossingSites, v
     // picks the next-best spacing. Unwarped, nothing is ever banned.
     if (crossingSiteBanned(d)) continue;
     const bridge = bridgeCandidateAt(d);
-    if (bridge) {
-      bridgeCandidates.push(bridge);
-      continue;
-    }
-    const level = levelCandidateAt(d);
-    if (level) levelCandidates.push(level);
+    if (bridge) bridgeCandidates.push(bridge);
   }
   const bridges = selectSpaced(bridgeCandidates);
-  // A level crossing within a bridge site's own spacing is pure redundancy —
-  // the bridge is right there and always preferred — so it never survives.
-  const spacedLevels = selectSpaced(levelCandidates, true);
-  if ((globalThis as { process?: { env?: Record<string, string> } }).process?.env?.['LGP_DEBUG_BRIDGE']) {
-    const w = (globalThis as unknown as { process: { stdout: { write: (s: string) => void } } }).process.stdout;
-    w.write(`site: ${levelCandidates.length} level candidates -> ${spacedLevels.length} after same-tier spacing: ${spacedLevels.map((l) => l.railDistance.toFixed(0)).join(', ')}\n`);
+  // Zero bridge sites is an invalid park, full stop — there is no level
+  // tier to fall back to (Jim, 2 Sep 2026: a path crosses the railway on a
+  // bridge or not at all), and every route the paths could take across the
+  // rail would be an illegal crossing. Fail the build loudly here, where
+  // the cause is, rather than letting paths.ts strand half the park:
+  // the cure is a warp vector (parkWarp.ts), or the seed leaving the pool.
+  if (bridges.length === 0) {
+    throw new Error(
+      'crossing plan: the solved railway loop proves NO bridge site anywhere. ' +
+        'A park with no way over the railway is invalid; warp the seed (parkWarp.ts) ' +
+        'or drop it from the pool. All sixteen pool seeds prove at least one site.',
+    );
   }
-  // **And the same exception, one filter further on.** Clearing the same-tier
-  // rule for the gate only revealed this one behind it: seed 18's railDistance
-  // 306 survives the spacing above and is then struck here, because it sits
-  // 16.2 m along the loop from the bridge site at railDistance 4.
-  //
-  // "The bridge is right there" is a claim about the ground, and this rule
-  // measures the loop. Across the park that bridge is 21.9 m from the arch and
-  // on the FAR SIDE of the very railway the walk is trying to cross, while the
-  // level site is 7.9 m away on the near side. It is not redundant; it is the
-  // only crossing the front door can reach.
-  //
-  // So a level site nearer the arch than the bridge that shadows it survives.
-  // Measured in world metres, which is what a child walks. Every other level
-  // site on this same seed, and on every other seed, is filtered exactly as
-  // before.
-  const nearerTheGate = (level: CrossingSite, bridge: CrossingSite): boolean =>
-    Math.hypot(level.x - ENTRANCE_GATE_X, level.z - ENTRANCE_GATE_Z) <
-    Math.hypot(bridge.x - ENTRANCE_GATE_X, bridge.z - ENTRANCE_GATE_Z);
-  const levels = spacedLevels.filter(
-    (level) =>
-      !bridges.some(
-        (bridge) =>
-          Math.abs(
-            route.wrap(level.railDistance - bridge.railDistance + route.length / 2) -
-              route.length / 2,
-          ) < SITE_SPACING && !nearerTheGate(level, bridge),
-      ),
-  );
-  // Node-only probe (feat/park-warp-solver): `LGP_NO_LEVEL_CROSSINGS=1`
-  // publishes an empty level tier, so the two park gates can measure what
-  // actually depends on level crossings, per seed, before the tier is
-  // deleted for real. Absent in the browser bundle (no `process`), and with
-  // the variable unset this function is byte-identical to before.
-  const noLevels = (globalThis as { process?: { env?: Record<string, string> } }).process?.env?.[
-    'LGP_NO_LEVEL_CROSSINGS'
-  ];
-  return { bridges, levels: noLevels ? [] : levels };
+  return { bridges };
 }
 
 
