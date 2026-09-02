@@ -1728,6 +1728,83 @@ function* streetLatticeSearch(): Generator<number, StreetLattice, void> {
     }
   }
 
+  // **Jog links: a street that steps half a cell round a plot and comes back.**
+  // The pinch pass above heals a blocked *corner*; this heals a blocked *run*.
+  // Measured on seed 11, whose park the 12 m grid alone cut into a 61-node
+  // component holding the ring and a 35-node component holding the hotel, the
+  // castle, the ball pit and the slide exit — half the park, with no grid route
+  // to it at all, so every one of those doors fell to the straight-line last
+  // resort and four of them drew a ribbon across the railway.
+  //
+  // The jog is three axis-aligned segments through offsets of half a cell, so
+  // nothing diagonal is drawn and the run still reads as a street stepping
+  // round an obstacle. Half-pitch, not some other number, so a jog's own two
+  // legs sit on the lattice's own half-lines rather than on a private line of
+  // their own — the same reason `STREET_PITCH` is the one big number.
+  const JOG_OFFSET = STREET_PITCH / 2;
+  const JOG_COST_FACTOR = 1.15;
+  for (let i = -LATTICE_HALF_CELLS; i <= LATTICE_HALF_CELLS; i += 1) {
+    yield i;
+    for (let j = -LATTICE_HALF_CELLS; j <= LATTICE_HALF_CELLS; j += 1) {
+      const a = indexOf(i, j);
+      if (!nodeOk[a]) continue;
+      for (const [di, dj, dir, back] of [
+        [1, 0, 0, 1],
+        [0, 1, 2, 3],
+      ] as readonly (readonly [number, number, number, number])[]) {
+        if (Math.abs(i + di) > LATTICE_HALF_CELLS || Math.abs(j + dj) > LATTICE_HALF_CELLS) continue;
+        const b = indexOf(i + di, j + dj);
+        if (!nodeOk[b] || side[a] !== side[b]) continue;
+        if (di === 1 ? edgeEast[a] : edgeSouth[a]) continue; // the straight run is fine
+        const ax = xs[a] as number;
+        const az = zs[a] as number;
+        const bx = xs[b] as number;
+        const bz = zs[b] as number;
+        const railSide = side[a] as 1 | -1;
+        for (const sign of [1, -1] as const) {
+          const offX = di === 1 ? 0 : JOG_OFFSET * sign;
+          const offZ = di === 1 ? JOG_OFFSET * sign : 0;
+          const shape: readonly (readonly [number, number])[] = [
+            [ax, az],
+            [ax + offX, az + offZ],
+            [bx + offX, bz + offZ],
+            [bx, bz],
+          ];
+          let ok = true;
+          let length = 0;
+          let corridor = 0;
+          for (let t = 1; t < shape.length && ok; t += 1) {
+            const p0 = shape[t - 1] as readonly [number, number];
+            const p1 = shape[t] as readonly [number, number];
+            if (
+              !streetSegmentClear(p0[0], p0[1], p1[0], p1[1]) ||
+              !segmentClearOfRing(p0[0], p0[1], p1[0], p1[1]) ||
+              !segmentHoldsRailSide(p0[0], p0[1], p1[0], p1[1], railSide, RAIL_CLAMP_DISTANCE - 0.1) ||
+              segmentCutsABridgeRamp(p0[0], p0[1], p1[0], p1[1])
+            ) {
+              ok = false;
+              break;
+            }
+            corridor += slideCorridorOverlap(p0[0], p0[1], p1[0], p1[1]);
+            corridor += cruiserCorridorOverlap(p0[0], p0[1], p1[0], p1[1]);
+            length += Math.hypot(p1[0] - p0[0], p1[1] - p0[1]);
+          }
+          if (!ok || corridor > 4) continue;
+          const via = shape.slice(1, -1);
+          const cost = length * JOG_COST_FACTOR;
+          (neighbours[a] as LatticeNeighbour[]).push({ to: b, dir, cost, via });
+          (neighbours[b] as LatticeNeighbour[]).push({
+            to: a,
+            dir: back,
+            cost,
+            via: [...via].reverse(),
+          });
+          break;
+        }
+      }
+    }
+  }
+
   // The four compass taps (Decision 5: "exactly 4 connections at compass
   // points"): each walks outward from the ring's rim along its own compass
   // lattice line to the first valid node with a clear, on-line street
@@ -2116,6 +2193,120 @@ function relayConnectors(
   }
   connectors.sort((a, b) => a.cost - b.cost);
   return connectors;
+}
+
+/**
+ * **An axis-aligned walk between two points, along the grid's own lines.**
+ *
+ * The generalisation of {@link relayConnectors}: the lines it may use are the
+ * grid's, plus the two endpoints' own rows and columns, so every segment is
+ * either a grid line or a straight step out to one. It is what serves a
+ * destination the shared grid cannot reach — a district the plots have cut off
+ * from the component the ring stands in — without handing the route to a
+ * continuous router that would draw a diagonal and, on seed 11, four ribbons
+ * across the railway.
+ *
+ * `legClear` carries the caller's screens, including the rail side, so this can
+ * never cross the railway: a route that has to cross gets over a bridge first
+ * (the deck is an edge of the shared grid) and calls this for the walk on the
+ * far side.
+ */
+function relayPolyline(
+  a: readonly [number, number],
+  b: readonly [number, number],
+  legClear: (ax: number, az: number, bx: number, bz: number) => boolean,
+): (readonly [number, number])[] | null {
+  const pad = 2;
+  const iLo = Math.round((Math.min(a[0], b[0]) - PLAZA.x) / STREET_PITCH) - pad;
+  const iHi = Math.round((Math.max(a[0], b[0]) - PLAZA.x) / STREET_PITCH) + pad;
+  const jLo = Math.round((Math.min(a[1], b[1]) - PLAZA.z) / STREET_PITCH) - pad;
+  const jHi = Math.round((Math.max(a[1], b[1]) - PLAZA.z) / STREET_PITCH) + pad;
+  const xs: number[] = [a[0], b[0]];
+  const zs: number[] = [a[1], b[1]];
+  // Full-pitch lines, and the **half-pitch lines between them**. Half-pitch is
+  // the same grid seen one level finer, not a second grid: a run on one still
+  // shares its heading and its origin with every street in the park, which is
+  // what "reads as a grid" means (`streetsShareLatticeLines`). It is here
+  // because the districts this router exists to rescue are cut off by pinches
+  // narrower than a whole cell — a strip beside the rail fence, a gap between
+  // two plots — and a router that can only stand on 12 m lines cannot see them.
+  for (let i = iLo * 2; i <= iHi * 2; i += 1) {
+    if (Math.abs(i) <= LATTICE_HALF_CELLS * 2) xs.push(PLAZA.x + (i * STREET_PITCH) / 2);
+  }
+  for (let j = jLo * 2; j <= jHi * 2; j += 1) {
+    if (Math.abs(j) <= LATTICE_HALF_CELLS * 2) zs.push(PLAZA.z + (j * STREET_PITCH) / 2);
+  }
+  xs.sort((p, q) => p - q);
+  zs.sort((p, q) => p - q);
+  const w = xs.length;
+  const h = zs.length;
+  if (w * h > 16384) return null; // two points this far apart are not this router's job
+  const at = (i: number, j: number): number => i * h + j;
+  const ai = xs.indexOf(a[0]);
+  const aj = zs.indexOf(a[1]);
+  const bi = xs.indexOf(b[0]);
+  const bj = zs.indexOf(b[1]);
+  const usable = new Uint8Array(w * h);
+  for (let i = 0; i < w; i += 1) {
+    for (let j = 0; j < h; j += 1) {
+      const x = xs[i] as number;
+      const z = zs[j] as number;
+      usable[at(i, j)] = !pointStandsOnBridgeMasonry(x, z) && legClear(x, z, x, z) ? 1 : 0;
+    }
+  }
+  usable[at(ai, aj)] = 1;
+  usable[at(bi, bj)] = 1;
+  const cost = new Float64Array(w * h).fill(Infinity);
+  const from = new Int32Array(w * h).fill(-1);
+  const done = new Uint8Array(w * h);
+  cost[at(ai, aj)] = 0;
+  for (;;) {
+    let cell = -1;
+    let cheapest = Infinity;
+    for (let c = 0; c < w * h; c += 1) {
+      if (!done[c] && (cost[c] as number) < cheapest) {
+        cheapest = cost[c] as number;
+        cell = c;
+      }
+    }
+    if (cell < 0) break;
+    if (cell === at(bi, bj)) break;
+    done[cell] = 1;
+    const i = Math.floor(cell / h);
+    const j = cell % h;
+    for (const [di, dj] of [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ] as readonly (readonly [number, number])[]) {
+      const ni = i + di;
+      const nj = j + dj;
+      if (ni < 0 || nj < 0 || ni >= w || nj >= h) continue;
+      const next = at(ni, nj);
+      if (!usable[next] || done[next]) continue;
+      const ax = xs[i] as number;
+      const az = zs[j] as number;
+      const bx = xs[ni] as number;
+      const bz = zs[nj] as number;
+      if (!legClear(ax, az, bx, bz)) continue;
+      // A turn costs, so the walk prefers to run straight down one line
+      // rather than staircase — the same reason `STREET_TURN_PENALTY` exists.
+      const straight = from[cell] !== -1 && (Math.floor((from[cell] as number) / h) === ni || (from[cell] as number) % h === nj);
+      const step = cheapest + Math.hypot(bx - ax, bz - az) + (straight ? 0 : 2);
+      if (step < (cost[next] as number)) {
+        cost[next] = step;
+        from[next] = cell;
+      }
+    }
+  }
+  if (!Number.isFinite(cost[at(bi, bj)] as number)) return null;
+  const chain: (readonly [number, number])[] = [];
+  for (let c = at(bi, bj); c !== -1; c = from[c] as number) {
+    chain.push([xs[Math.floor(c / h)] as number, zs[c % h] as number]);
+  }
+  chain.reverse();
+  return collapseCollinear(chain);
 }
 
 // ------------------------------------------------------------- the grid
@@ -3253,6 +3444,7 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
     },
   ];
 
+  const strandedDoors: string[] = [];
   yield (progress += 1); // the ring is solved; each destination now gets its own slice
   for (const destination of grid.destinations) {
     nodes.push({
@@ -3262,16 +3454,94 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
       z: destination.z,
     });
     const goal = grid.destinationNode.get(destination.id);
-    const path = goal === undefined ? null : routeFromNetwork(goal);
-    // **No fallback router.** A door the grid cannot reach is a park defect to
-    // find, not a ribbon to draw with some other machinery: the whole point of
-    // the rework is that one graph owns every metre of paving, bridges
-    // included. A straight run to the nearest paving is the last resort, so
-    // that the door is still a paving terminal and the invariants can say
-    // plainly which seed lost its grid route.
-    const routed = path
-      ? gridPathPoints(path)
-      : [nearestGridPaving(destination.gridPoint), destination.gridPoint];
+    let path = goal === undefined ? null : routeFromNetwork(goal);
+    let routed = path ? gridPathPoints(path) : null;
+    if (!routed) {
+      // **The shared grid could not reach this door**, because the plots have
+      // cut its district off from the component the ring stands in — seed 11
+      // splits into a 61-node component holding the ring and a 35-node one
+      // holding the hotel, the castle, the ball pit and the slide exit.
+      //
+      // So: get onto the door's own side of the railway by the shared grid
+      // (over a bridge if that is what it takes — the deck is an edge of that
+      // grid), then walk in on {@link relayPolyline}'s axis-aligned lines,
+      // screened with this door's own arrival exemption. Every metre is still
+      // on a grid line and still cannot cross the railway anywhere but a
+      // bridge; what it gives up is only the *shared* grid's clearance, which
+      // is what made the district unreachable in the first place.
+      const door = destination.gridPoint;
+      const doorSide = railInfoAt(door[0], door[1]).side;
+      // Everything the paved network can already reach, on the door's own side
+      // of the railway — the possible bridgeheads, nearest to the door first.
+      const reachable = new Set<number>(pavedGridNodes);
+      const queue = [...pavedGridNodes];
+      while (queue.length > 0) {
+        const here = queue.pop() as number;
+        for (const step of grid.neighbours[here] as readonly LatticeNeighbour[]) {
+          if (reachable.has(step.to)) continue;
+          reachable.add(step.to);
+          queue.push(step.to);
+        }
+      }
+      const heads = [...reachable]
+        .filter(
+          (node) =>
+            node < grid.lattice.count &&
+            railInfoAt(grid.xs[node] as number, grid.zs[node] as number).side === doorSide,
+        )
+        .sort(
+          (m, n) =>
+            Math.hypot((grid.xs[m] as number) - door[0], (grid.zs[m] as number) - door[1]) -
+            Math.hypot((grid.xs[n] as number) - door[0], (grid.zs[n] as number) - door[1]),
+        )
+        .slice(0, 6);
+      // **Backtracking, CLAUDE.md's standing procgen rule**: several
+      // bridgeheads, and a plot clearance that tightens one step at a time
+      // before it gives up. 2.2 m still keeps a 2.6 m ribbon's own paved edge
+      // (1.3 + 0.85 = 2.15 m) off the plot it passes; below that it would not,
+      // so the ladder stops there.
+      if (DEBUG_STREETS) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[rescue] ${destination.id} door (${door[0].toFixed(1)},${door[1].toFixed(1)}) side ${doorSide}: ` +
+            `${reachable.size} reachable, ${heads.length} heads` +
+            (heads[0] !== undefined
+              ? ` nearest (${(grid.xs[heads[0]] as number).toFixed(1)},${(grid.zs[heads[0]] as number).toFixed(1)})`
+              : ''),
+        );
+      }
+      for (const margin of [STREET_PLOT_CLEARANCE, 2.2]) {
+        for (const head of heads) {
+          const toHead = gridSearch(
+            [...pavedGridNodes].map((node) => ({ node, cost: 0 })),
+            (node) => (node === head ? 0 : Infinity),
+          );
+          if (!toHead) continue;
+          const walk = relayPolyline(
+            [grid.xs[head] as number, grid.zs[head] as number],
+            door,
+            (ax, az, bx, bz) =>
+              streetSegmentClear(ax, az, bx, bz, door, 7, 2.0, margin) &&
+              segmentClearOfRing(ax, az, bx, bz) &&
+              segmentHoldsRailSide(ax, az, bx, bz, doorSide, 0) &&
+              !segmentCutsABridgeRamp(ax, az, bx, bz),
+          );
+          if (!walk) continue;
+          path = toHead;
+          routed = [...gridPathPoints(toHead), ...walk.slice(1)];
+          break;
+        }
+        if (routed) break;
+      }
+    }
+    if (!routed) {
+      // Nothing legal reaches it. Draw the shortest straight run to paving so
+      // the door is still a paving terminal, and let the invariants say
+      // plainly which seed lost its grid route rather than hide it.
+      path = null;
+      routed = [nearestGridPaving(destination.gridPoint), destination.gridPoint];
+      strandedDoors.push(destination.id);
+    }
     const points: (readonly [number, number])[] = [...routed, ...destination.tail];
     if (SPUR_STRETCH > 0 && destination.id === SPUR_STRETCH_ID) bowMidSegment(points);
     if (path) commitGridPathDrawn(path, points);
@@ -3302,7 +3572,20 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
   // interconnection hub-and-spoke tree directly).
   if (!DISABLE_INTERCONNECTS) yield* addInterconnects(nodes, edges, progress);
 
+  lastStrandedDoors = strandedDoors;
   return { nodes, edges, ring };
+}
+
+/**
+ * Doors the grid could not reach on the park just built, if any — each one a
+ * straight run to the nearest paving rather than a street. Read by
+ * `test/procgen/invariants.ts` so a park that loses a door's grid route says so
+ * on every run, rather than passing quietly on a ribbon that happens to land in
+ * the right place.
+ */
+let lastStrandedDoors: readonly string[] = [];
+export function strandedDoorsOfLastSolve(): readonly string[] {
+  return lastStrandedDoors;
 }
 
 /** The nearest point on anything already paved — the last-resort terminal for
@@ -4502,5 +4785,44 @@ export function debugGridReach(): unknown {
     links: (grid.neighbours[n] as readonly LatticeNeighbour[]).length,
     reachable: seen.has(n),
   }));
-  return { unreachable, noSearch, feet };
+  const comp = new Map<number, number>();
+  let next = 0;
+  for (let n = 0; n < grid.count; n += 1) {
+    if (comp.has(n)) continue;
+    if (n < grid.lattice.count && !grid.lattice.nodeOk[n]) continue;
+    const id = next++;
+    const q = [n];
+    comp.set(n, id);
+    while (q.length) {
+      const cur = q.pop() as number;
+      for (const step of grid.neighbours[cur] as readonly LatticeNeighbour[]) {
+        if (comp.has(step.to)) continue;
+        comp.set(step.to, id);
+        q.push(step.to);
+      }
+    }
+  }
+  const sizes = new Map<number, number>();
+  for (const id of comp.values()) sizes.set(id, (sizes.get(id) ?? 0) + 1);
+  const ringComp = grid.ringNodes.map((n) => comp.get(n));
+  return {
+    unreachable,
+    noSearch,
+    feet,
+    components: [...sizes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8),
+    ringComp,
+    doorComp: grid.destinations.map((d) => `${d.id}:${comp.get(grid.destinationNode.get(d.id) as number)}`),
+    map: (() => {
+      const rows: string[] = [];
+      for (let j = -LATTICE_HALF_CELLS; j <= LATTICE_HALF_CELLS; j += 1) {
+        let row = '';
+        for (let i = -LATTICE_HALF_CELLS; i <= LATTICE_HALF_CELLS; i += 1) {
+          const n = grid.lattice.indexOf(i, j);
+          row += grid.lattice.nodeOk[n] ? String(comp.get(n) ?? '?') : (grid.lattice.side[n] === 1 ? '.' : ',');
+        }
+        rows.push(row);
+      }
+      return rows;
+    })(),
+  };
 }
