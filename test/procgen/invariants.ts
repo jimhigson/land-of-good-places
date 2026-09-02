@@ -26,6 +26,27 @@
  * **Whichever you write, prove it can fail.** Break the thing it guards, watch
  * it go red, put it back. An invariant nobody has ever seen fail is a claim
  * about the park, not a check on it.
+ *
+ * ## Which seeds run this suite, and the rule that governs the list
+ *
+ * Jim's ruling, 2 Sep 2026, revising the older "swap the seed and write down
+ * why": **the bar is sixteen good seeds** (`parkSeedPool.ts`) **that pass
+ * every invariant — including quality, like not bunching the park up —
+ * and beyond those sixteen, not every seed the generator can produce needs
+ * to pass. The invariants themselves are never weakened; a seed that cannot
+ * satisfy them is simply not in the pool.**
+ *
+ * That ruling retired **seed 18** from this suite (its file registered
+ * `registerParkInvariants(18)` since the #374 gradient work): seed 18's
+ * loop pins the entrance walk to ground where only a *level* crossing ever
+ * fit, and since every crossing must be a bridge (2 Sep 2026 — the level
+ * tier is deleted), a park like seed 18 cannot exist under the rules. It
+ * was never in the sixteen-seed pool (b2617949 records why); it stops
+ * being a sweep seed rather than the invariants learning to excuse it.
+ * Nothing about the deletion was assumed: emptying the tier was measured
+ * across all sixteen pool seeds first (branch feat/park-warp-solver,
+ * measurements/ — no attraction lost anywhere; only seed 18, not in the
+ * pool, went red).
  */
 import { describe, it, beforeAll, expect } from 'vitest';
 import { Box3, InstancedMesh, Matrix4, Mesh, Raycaster, Vector3, type Object3D } from 'three';
