@@ -423,6 +423,14 @@ DEAD — do not resume it. The work is now:
    drifting. Suite cost ~16 x ~30 s, parallel workers mitigate; it is the
    full #437 fix and Jim has priced it deliberately.
 
+7. Jim, final generalisation (direct): "it can be a different 16 if it
+   helps later ... I don't care so long as at any given time we have 16
+   confirmed good parks." THE system invariant: |pool| = 16, every member
+   passes both gates, membership churns freely (record why on each swap).
+   Consequence: spares 1102/1104 only failed the DEAD default-gate stack;
+   as pool candidates they face just check:park + invariants — refill the
+   16th slot on the final plotter (post grid rework), vetting once.
+
 Sequencing per Jim's standing instruction: the grid path rework stays the
 priority (builder running on feat/grid-paths); this conversion is its own
 branch/PR after or alongside, and #474's canonical-only CI failures
