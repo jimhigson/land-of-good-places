@@ -2,7 +2,7 @@
  * **No new pair of faces may come to share a plane.**
  *
  * ```
- * pnpm run check:coplanar              # every space, every procgen seed
+ * pnpm run check:coplanar              # every space, every seed in the pool
  * pnpm run check:coplanar -- --verbose # and print the whole ranked backlog
  * pnpm run check:coplanar -- --print-baseline > scripts/coplanar-baseline.mts
  * ```
@@ -26,8 +26,10 @@
  * keeps a list of rooms, because #472 asked for exactly that: *"a hand-written
  * list is how a room quietly stops being checked."*
  *
- * The seeds are derived too, off `test/procgen`'s own `seed-*.test.ts` files,
- * so the pool this sweeps is by construction the pool the invariants run on.
+ * The seeds are derived too, off `world/parkSeedPool.ts`'s `PARK_SEED_POOL` —
+ * the sixteen parks a child can actually be given (#426), not the four
+ * `test/procgen` keeps files for. A seam that only shows on the sixteenth seed
+ * is one that one child in sixteen is looking at.
  *
  * ## What varies by seed and what does not
  *
@@ -52,13 +54,15 @@
  * fix is `ART_DIRECTION.md`'s: delete the hidden face, never offset a surface.
  */
 import './headless-canvas.mjs';
-import { execFileSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { cpus } from 'node:os';
+import { promisify } from 'node:util';
 import { buildHeadlessPark } from './park-harness.mts';
 import { DEFAULT_TOLERANCES, sweepCoplanar } from './coplanar-sweep.mts';
 import { rankSeams, type RankedSeam } from './coplanar-rank.mts';
 import { COPLANAR_BASELINE, type BaselineEntry } from './coplanar-baseline.mts';
 import { PARK_SEED } from '../src/world/parkManifest.ts';
+import { PARK_SEED_POOL } from '../src/world/parkSeedPool.ts';
 import { SPACE_GARDEN } from '../src/world/spaces.ts';
 
 const verbose = process.argv.includes('--verbose');
@@ -69,19 +73,19 @@ const isChild = process.env['LGP_COPLANAR_CHILD'] === '1';
 // ------------------------------------------------------------------ the seeds
 
 /**
- * The procgen seed pool, read off `test/procgen`'s own files.
+ * **Every park a child can actually be given** — `world/parkSeedPool.ts`'s
+ * `PARK_SEED_POOL`, which is the one owner of that question since #426/#463.
  *
- * Not typed out here: the pool is `test/procgen`'s to decide, it is being
- * widened as this lands (#463), and a second copy of it would be exactly the
- * bug `CLAUDE.md` opens with. The canonical seed is `parkManifest.ts`'s.
+ * Not the four seeds `test/procgen` happens to have files for, and certainly
+ * not a list typed out here: a park is drawn from this pool on first visit, so
+ * a seam that only appears on the sixteenth seed is a seam one child in sixteen
+ * is looking at. Asking the pool directly also means the day somebody vets a
+ * seventeenth, this sweeps it without anybody remembering to come back here.
+ * #472 budgeted for exactly this: *"a full park build is seconds, so sweeping
+ * every space across sixteen seeds is minutes."*
  */
-function procgenSeeds(): number[] {
-  const seeds = new Set<number>([PARK_SEED]);
-  for (const file of readdirSync(new URL('../test/procgen', import.meta.url))) {
-    const match = /^seed-(\d+)\.test\.ts$/.exec(file);
-    if (match) seeds.add(Number(match[1]));
-  }
-  return [...seeds].sort((a, b) => a - b);
+function poolSeeds(): number[] {
+  return [...new Set([PARK_SEED, ...PARK_SEED_POOL])].sort((a, b) => a - b);
 }
 
 // ------------------------------------------------------------ one seed's sweep
@@ -143,34 +147,51 @@ if (isChild) {
 // ------------------------------------------------------------ across the pool
 
 const started = performance.now();
-const seeds = procgenSeeds();
+const seeds = poolSeeds();
 const findings: Finding[] = [];
 
 /** The canonical seed is swept in-process; the others need a fresh registry. */
 findings.push(...sweepThisSeed());
-for (const seed of seeds) {
-  if (seed === PARK_SEED) continue;
-  const out = execFileSync(
-    process.execPath,
-    [
-      '--no-warnings',
-      '--import',
-      './scripts/ts-extension-resolver-register.mjs',
-      'scripts/check-coplanar.mts',
-    ],
-    {
-      env: {
-        ...process.env,
-        LGP_SEED: String(seed),
-        LGP_COPLANAR_CHILD: '1',
-        LGP_COPLANAR_GARDEN_ONLY: '1',
-      },
-      encoding: 'utf8',
-      maxBuffer: 64 * 1024 * 1024,
-    },
-  );
-  findings.push(...(JSON.parse(out.trim().split('\n').at(-1) as string) as Finding[]));
-}
+
+/**
+ * The rest of the pool, several at a time.
+ *
+ * Sixteen seeds one after another is four minutes on this laptop and each one
+ * is a whole park built and swept in a process of its own, so they are
+ * independent by construction — nothing is shared but the baseline they are all
+ * compared against afterwards. Capped at half the cores because each child
+ * peaks around a quarter of a gigabyte holding the park's triangles, and a
+ * machine that starts swapping would be slower than doing them in a row.
+ */
+const lanes = Math.max(1, Math.min(6, Math.floor(cpus().length / 2)));
+const queue = seeds.filter((seed) => seed !== PARK_SEED);
+const run = promisify(execFile);
+await Promise.all(
+  Array.from({ length: lanes }, async () => {
+    for (let seed = queue.pop(); seed !== undefined; seed = queue.pop()) {
+      const { stdout } = await run(
+        process.execPath,
+        [
+          '--no-warnings',
+          '--import',
+          './scripts/ts-extension-resolver-register.mjs',
+          'scripts/check-coplanar.mts',
+        ],
+        {
+          env: {
+            ...process.env,
+            LGP_SEED: String(seed),
+            LGP_COPLANAR_CHILD: '1',
+            LGP_COPLANAR_GARDEN_ONLY: '1',
+          },
+          encoding: 'utf8',
+          maxBuffer: 64 * 1024 * 1024,
+        },
+      );
+      findings.push(...(JSON.parse(stdout.trim().split('\n').at(-1) as string) as Finding[]));
+    }
+  }),
+);
 
 // --------------------------------------------------------- baseline printing
 
@@ -217,6 +238,20 @@ export const COPLANAR_BASELINE: Readonly<Record<string, BaselineEntry>> = {
 const BASELINE_FOOTER = `
 };
 `;
+
+/**
+ * Seed order, restored.
+ *
+ * The children finish in whatever order the machine gets round to them, and
+ * two seeds can produce the same seam at exactly the same area — the entrance
+ * road is the entrance road on every seed. Which of those two identical
+ * findings is kept as the report's example then depends on which child
+ * returned first, and the "buried where no camera can reach them" count moved
+ * by one between a serial run and a parallel one because of it. Nothing the
+ * gate decides depended on the order; the summary did, and a number that moves
+ * on its own is a number nobody can act on.
+ */
+findings.sort((a, b) => a.seed - b.seed || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
 
 // ------------------------------------------------------------------ the gate
 
@@ -265,7 +300,14 @@ const worst = new Map<
 
 if (printBaseline) {
   const lines: string[] = [];
-  for (const [key, entry] of [...worst.entries()].sort((a, b) => b[1].area - a[1].area)) {
+  // Biggest first, and the key breaks the ties: a great many of these are the
+  // same fitting repeated in every room, so without a tie-break the file's line
+  // order would depend on which child process happened to answer first and the
+  // diff — which is the whole review — would be noise.
+  const ordered = [...worst.entries()].sort(
+    (a, b) => b[1].area - a[1].area || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0),
+  );
+  for (const [key, entry] of ordered) {
     lines.push(
       `  ${JSON.stringify(key)}: { area: ${entry.area.toFixed(4)}, seams: ${entry.seams}, ` +
         `fighting: ${entry.separation <= DEFAULT_TOLERANCES.fighting} },`,
