@@ -415,6 +415,14 @@ DEAD — do not resume it. The work is now:
    scatterDecoupling baseline, measure scripts) is renamed/re-pointed at
    pool seeds.
 
+6. Jim, follow-up ruling (direct): "all 16 should pass invariants tests"
+   — the pool IS the tested set. test/procgen gets one registration per
+   pool seed (16 thin files calling registerParkInvariants(seed)), and
+   `check:seed-pool` gains a guard asserting exactly one test file exists
+   per pool member — the one-owner mechanism that stops the two lists
+   drifting. Suite cost ~16 x ~30 s, parallel workers mitigate; it is the
+   full #437 fix and Jim has priced it deliberately.
+
 Sequencing per Jim's standing instruction: the grid path rework stays the
 priority (builder running on feat/grid-paths); this conversion is its own
 branch/PR after or alongside, and #474's canonical-only CI failures
