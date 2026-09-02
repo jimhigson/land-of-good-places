@@ -5,8 +5,9 @@ No browser, no dev server: this is a headless geometry tool.
 
 ## State
 
-Done and pushed. Remaining: full `pnpm run check` / `test:procgen` / `build`
-exit codes, then the PR.
+Done. PR #473. `check` / `test:procgen` / `build` all exit 0 locally; CI is the
+authority. No geometry changed, so there is nothing to look at — no preview
+link was given, deliberately.
 
 ## What was built
 
