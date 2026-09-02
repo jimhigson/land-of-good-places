@@ -54,6 +54,14 @@ interface WarpVector {
 }
 
 interface Score {
+  /**
+   * The whole gate, exactly as `vet-seed-pool.mts` applies it to every pool
+   * candidate: `check:park` exit 0 WITH the ratchet live. The first
+   * canonical winner under a ratchet-off scorer ({layout:{fountain:1}})
+   * strands nothing yet overbuilds waterFight's declared radius — a
+   * regression only the ratchet catches. A winner must be `ok`.
+   */
+  readonly ok: boolean;
   /** Infinity = park invalid (attraction unrouted / illegal crossing / crash). */
   readonly stranded: number;
   readonly summary: string;
@@ -76,14 +84,17 @@ async function entryIds(): Promise<string[]> {
 }
 
 async function score(seed: number, warp: WarpVector | null, noLevels: boolean): Promise<Score> {
+  // Ratchet ON (the default): the pool's own standard — `vet-seed-pool.mts`
+  // rejects any seed that trips a recorded deviation, so the search must
+  // score against exactly that gate or its winners are not admissible.
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
     LGP_SEED: String(seed),
-    LGP_RATCHET: 'off',
   };
   if (noLevels) env['LGP_NO_LEVEL_CROSSINGS'] = '1';
   if (warp) env['LGP_WARP'] = JSON.stringify(warp);
   let out: string;
+  let ok = false;
   try {
     const result = await run(
       process.execPath,
@@ -91,6 +102,7 @@ async function score(seed: number, warp: WarpVector | null, noLevels: boolean): 
       { env, maxBuffer: 16 * 1024 * 1024 },
     );
     out = result.stdout + result.stderr;
+    ok = true;
   } catch (error) {
     const e = error as { stdout?: string; stderr?: string; message: string };
     out = `${e.stdout ?? ''}${e.stderr ?? ''}` || e.message;
@@ -99,10 +111,10 @@ async function score(seed: number, warp: WarpVector | null, noLevels: boolean): 
   const attractions = /(\d+)\/(\d+) attractions route/.exec(summary);
   const crossings = /(\d+) rail crossing\(s\)/.exec(summary);
   const waypoints = /(\d+)\/(\d+) waypoints connected/.exec(summary);
-  if (!attractions || !crossings || !waypoints) return { stranded: Infinity, summary };
-  if (attractions[1] !== attractions[2]) return { stranded: Infinity, summary };
-  if (crossings[1] !== '0') return { stranded: Infinity, summary };
-  return { stranded: Number(waypoints[2]) - Number(waypoints[1]), summary };
+  if (!attractions || !crossings || !waypoints) return { ok: false, stranded: Infinity, summary };
+  if (attractions[1] !== attractions[2]) return { ok: false, stranded: Infinity, summary };
+  if (crossings[1] !== '0') return { ok: false, stranded: Infinity, summary };
+  return { ok, stranded: Number(waypoints[2]) - Number(waypoints[1]), summary };
 }
 
 /** Cheapest-first candidate vectors: nothing, then local bumps, then re-rolls. */
@@ -150,7 +162,7 @@ if (args.includes('--control')) {
   // The summary ends in wall-clock ms, which honestly differs run to run;
   // the park facts before it must not.
   const facts = (s: Score) => s.summary.replace(/ \d+ ms\.$/, '');
-  if (a.stranded !== 0 || b.stranded !== 0 || facts(a) !== facts(b)) {
+  if (!a.ok || !b.ok || a.stranded !== 0 || b.stranded !== 0 || facts(a) !== facts(b)) {
     console.error(`CONTROL FAILED:\n a=${a.stranded} ${a.summary}\n b=${b.stranded} ${b.summary}`);
     process.exit(1);
   }
@@ -172,8 +184,12 @@ for (const seed of seeds) {
   for (const warp of candidates(ids)) {
     const s = await score(seed, warp, true);
     tried += 1;
-    if (best === null || s.stranded < best.score.stranded) best = { warp, score: s };
-    if (s.stranded === 0) {
+    const better =
+      best === null ||
+      (s.ok && !best.score.ok) ||
+      (s.ok === best.score.ok && s.stranded < best.score.stranded);
+    if (better) best = { warp, score: s };
+    if (s.ok && s.stranded === 0) {
       winner = { warp, score: s };
       break;
     }
@@ -183,6 +199,7 @@ for (const seed of seeds) {
   const record = {
     seed,
     solved: winner !== null,
+    gate: chosen?.score.ok ? 'ratchet-on pass' : 'fails gate',
     warp: chosen?.warp ?? null,
     stranded: chosen?.score.stranded ?? Infinity,
     oracle,
