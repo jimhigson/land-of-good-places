@@ -2711,7 +2711,9 @@ function* pathGridSearch(): Generator<number, PathGrid, void> {
   for (const mouth of gateCorridorMouthCandidates()) {
     const handover = gateCorridorHandover(mouth);
     const node = addNode(handover[0], handover[1]);
-    if (joinToGrid(node, handover, false) === 0) joinToGrid(node, handover, false, 1);
+    if (joinToGrid(node, handover, false) === 0 && joinToGrid(node, handover, false, 1) === 0) {
+      joinToGrid(node, handover, false, 2);
+    }
     gateNodes.push({ mouth, node });
   }
 
@@ -3310,14 +3312,30 @@ function* gateApproachSearch(
     best = { points, path, score, retraced };
   }
   if (!best) {
-    // Nothing solved at all — a straight corridor to the nearest gateway is a
-    // worse avenue than a solved one and a far better park than none.
+    // **Nothing solved at all.** The old fallback here ran a straight line from
+    // the corridor's mouth to the nearest ring gateway, and on the canonical
+    // seed that line crossed the railway 20.9 m from the nearest proven bridge
+    // site — a park that fails its own every-crossing-is-a-bridge rule at the
+    // front door. So the fallback is an axis-aligned walk on the grid's lines
+    // instead, held to the mouth's own side of the track; and if even that
+    // finds nothing, the avenue is the authored corridor alone, which is short
+    // and legal and leaves the failure where an invariant can see it.
     const mouth = gateCorridorDeepestMouth();
+    const handover = gateCorridorHandover(mouth);
+    const side = railInfoAt(handover[0], handover[1]).side;
+    const gateway = nearestCompassPoint(handover[0], handover[1]);
+    const walk = relayPolyline(
+      handover,
+      gateway,
+      (ax, az, bx, bz) =>
+        streetSegmentClear(ax, az, bx, bz, handover, 7, 2.0) &&
+        segmentHoldsRailSide(ax, az, bx, bz, side, 0) &&
+        !segmentCutsABridgeRamp(ax, az, bx, bz),
+    );
     return {
-      points: assembleGateApproach(mouth, [
-        gateCorridorHandover(mouth),
-        nearestCompassPoint(0, GATE_CORRIDOR_INNER_Z - 3),
-      ]),
+      points: walk
+        ? assembleGateApproach(mouth, walk)
+        : [[0, GATE_CORRIDOR_START_Z] as readonly [number, number], mouth],
       progress,
     };
   }
