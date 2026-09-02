@@ -1,0 +1,81 @@
+# HANDOFF — park-warp solver (holistic path+bridge planning)
+
+Branch `feat/park-warp-solver`, off `origin/main` (3cd9d53d).
+Worktree `.claude/worktrees/park-warp`. Dev server port **5611** when needed.
+
+## Jim's brief, verbatim intent (2 Sep 2026, direct conversation)
+
+The bug: the player can stand in "path mess" near the first bridge on main
+(screenshot shown). The wider bug: **paths get plotted, then bridges added
+after the fact — the wrong approach fundamentally.** Requirements:
+
+1. Paths and bridges considered **together from the start**.
+2. **Zero level crossings, ever — the ability to create one should not even
+   exist in the code.** Every rail/path crossing is a bridge.
+3. **Structured, generic backtracking** so *every* decision can be unwound,
+   up to and including restart-from-zero, retrying until a seed makes a
+   usable park.
+4. Paths on an approximate grid — no twists/mini-turns that make no visual
+   sense.
+5. Paths reliably reach doors: hotel, castle, every attraction.
+6. Park looks good, things roughly evenly spaced.
+7. **Big-bang rewrite of path plotting is acceptable** if it fixes the many
+   current issues.
+
+## The two architectures, and the ordered plan
+
+**A — bridges-first (constructive):** plot path/rail bridge sites first, at
+90° crossings by declaration, grow rail through them, fit paths around.
+Guarantees geometry; does not guarantee bridges lead anywhere useful.
+
+**B — plot-then-warp (repair), TRY FIRST per Jim:** plot roughly as now,
+then where a crossing cannot carry a bridge, apply **park-warping
+mutations** — move attractions, re-site crossings, re-route paths —
+preferring small warps over backtracking; restart only when warping stalls.
+
+**Agreed synthesis for B (avoids whack-a-mole):** a mutation never edits the
+built park in place. It perturbs an explicit **decision vector** (attraction
+placements, crossing choices, path picks — the existing seeded candidate
+streams) and **replays the whole deterministic pipeline**, then re-scores
+against the invariants. Every candidate is a complete fresh solve; no
+half-edited park can exist. Falls back cleanly to A (same decision vector,
+different search policy) if B converges badly.
+
+Jim's ruling: **build B now; if it does not work well, try A.**
+
+## Evidence already in hand (do not re-derive)
+
+- #414 fixed under-the-ramp paths; #436 (closed) records that on seed 5 the
+  dodgems are unreachable without deck crossing — no pricing scheme can fix
+  it. `pointStandsOnABridgeRamp` doc comment (paths.ts ~line 1900) records
+  TWO measured dead ends inside the path routers — do not rebuild them.
+- Crossing feet are not path-grid nodes → the apron hairpin at the entrance
+  bridge on ALL 16 seeds (59.6 m ribbon for 33.4 m progress, canonical).
+  Three cheap fixes tried and failed (feet-as-nodes refused by 10.62 vs
+  9.8 m gate; hairpin post-pass strands a spur; retrace scorer fix helps one
+  seed).
+- HANDOFF-rail-from-crossing.md (#427, on main): "choose the crossing first,
+  grow rail through it perpendicular" measured to 5/5 seeds solving, faster
+  than baseline; 100% bridge-provable after station clearance fix; next
+  action documented as `RouteBrief.satisfies` at rail/generate.ts:268.
+- 18 checks still build only the canonical seed (#437) — whatever we build
+  must measure across ALL 16 pool seeds.
+
+## Rules
+
+- Never weaken an assertion / widen a probe / tune a threshold / swap a seed
+  to pass. Instrument before theorising; run a control on the instrument.
+- Extend test/procgen/invariants.ts in the same PR as procgen changes.
+- Commit+push per finding (API drops every ~10 min). Never `git add -A`.
+- Report to the Overseer at checkpoints.
+
+## Status
+
+- [x] Worktree created, brief captured.
+- [ ] Pipeline mapped (two Explore agents dispatched: level-crossing scope;
+      decision-point map).
+- [ ] Full-solve wall time per seed measured (feasibility of mutation loop).
+- [ ] Decision-vector abstraction designed.
+- [ ] Warp loop built.
+- [ ] Level-crossing capability deleted.
+- [ ] Measured across 16 seeds.
