@@ -75,15 +75,6 @@ Both against `src/world/entrance/Entrance.ts` at `72d526f4`:
    ```
    exit 1.
 
-Both reverted; the check is green at exit 0 on the unmodified tree.
-
-## If you pick this up
-
-The backlog it produces is #467's list plus more. Fixing any of it is a
-separate ticket — when a seam is fixed, `check:coplanar` prints
-`BASELINE LOOSE` and asks for the line to be deleted from
-`scripts/coplanar-baseline.mts`.
-
 3. A second unnamed `PlaneGeometry` added to `signGroup` at `(0, 2.6, 0.08)`,
    flush with the board's own front face — same scene-graph path as the
    existing text plane, so it lands on an existing ratchet key rather than a
@@ -97,3 +88,12 @@ separate ticket — when a seam is fixed, `check:coplanar` prints
    pair fold into one seam, so this is caught by `area` and `fighting`, not by
    `seams`. `seams` counts distinct facings and exists for the other hole —
    `hotel.wall|hotel.wall` is one key covering two different meshes.
+
+All three reverted; the check is green at exit 0 on the unmodified tree.
+
+## If you pick this up
+
+The backlog it produces is #467's list plus more. Fixing any of it is a
+separate ticket — when a seam is fixed, `check:coplanar` prints
+`BASELINE LOOSE` and asks for the line to be deleted from
+`scripts/coplanar-baseline.mts`.
