@@ -132,6 +132,8 @@ const INVARIANT_FILES: Record<number, string> = {
   5: 'test/procgen/seed-5.test.ts',
   11: 'test/procgen/seed-11.test.ts',
   24: 'test/procgen/seed-24.test.ts',
+  288: 'test/procgen/seed-288.test.ts',
+  326: 'test/procgen/seed-326.test.ts',
 };
 
 async function proveWithOracle(seed: number, warp: WarpVector | null): Promise<'pass' | 'fail' | 'not covered'> {

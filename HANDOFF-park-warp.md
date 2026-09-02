@@ -266,6 +266,50 @@ reached** — warping preferentially to backtracking, exactly as ruled.
    probe switch, add the every-crossing-is-a-bridge invariant in the same
    PR, re-vet the pool via vet-seed-pool (feat/sixteen-seeds branch).
 
+## THE DELETION (2 Sep, after Jim's rulings)
+
+Jim ruled: (1) seed 18 need not pass — the bar is sixteen good seeds
+passing ALL invariants incl. quality; invariants never weaken; (2) proceed
+with the deletion; (3) update developer docs in the same PR. All landed on
+this branch:
+
+- Level tier deleted end-to-end (commit "Delete the level-crossing tier"):
+  planner, paths, crossings, bridges, fence, ParkTrain. Zero bridge sites
+  now THROWS; an unsnapped drawn crossing THROWS; a proven site the real
+  search cannot bridge THROWS. `LGP_ALLOW_UNPROVEN_BRIDGES` and
+  `LGP_NO_LEVEL_CROSSINGS` are gone.
+- check:park + invariants strengthened (no fallback escapes; gate walk must
+  cross on a proven site; every crossing must stand on a proven site AND
+  carry a deck). **Proved red by mutation, both layers**: banning every
+  march candidate via `LGP_WARP banCrossingsAt` (canonical, loop 361.8 m,
+  step 2) fires the no-site throw; `deckOverIt = false` mutation sent
+  seed-canonical red on exactly the new clause (81 tests, 1 failed), then
+  reverted.
+- Docs: CLAUDE.md (sixteen-good-seeds rule + backtracks section),
+  ARCHITECTURE-DECISIONS Decision 8 answered, invariants.ts header carries
+  the seed-roster rule and seed 18's retirement rationale.
+- seed-18.test.ts deleted; **seed-288 and seed-326 test files added**
+  (#437: pool seeds with baked warps, previously uncovered).
+
+## OPEN — seed 326 needs a better warp; 288 is proven
+
+New coverage immediately earned its keep:
+- 288 with baked {waterFight:1}: **81/81 pass**.
+- 326 with baked {fountain:1}: red on "slide climbs 0.001 m"; UNWARPED on
+  this branch: red on "paved path off grid axes"; **on origin/main
+  (72d526f4): 81/81 pass, twice** — branch-caused, not a live main defect.
+- `warp-search` rerun for 326/288 WITH their new oracles wired into
+  INVARIANT_FILES (results → measurements/warp-search-2sep-with-oracles.jsonl).
+
+## Remaining before PR
+
+1. Bake 326's oracle-passing vector when the search lands one (or report
+   non-convergence to Jim as a decision).
+2. Full verification: check:park all 16 pool seeds + whole vitest suite,
+   no env vars (final state).
+3. Rebase onto latest origin/main (it advanced to 72d526f4+), re-verify,
+   then `gh pr create`. Do not merge.
+
 ## Status
 
 - [x] Worktree created, brief captured.
