@@ -598,7 +598,15 @@ export function* crossingSitesSearch(): Generator<number, SolvedCrossingSites, v
           ) < SITE_SPACING && !nearerTheGate(level, bridge),
       ),
   );
-  return { bridges, levels };
+  // Node-only probe (feat/park-warp-solver): `LGP_NO_LEVEL_CROSSINGS=1`
+  // publishes an empty level tier, so the two park gates can measure what
+  // actually depends on level crossings, per seed, before the tier is
+  // deleted for real. Absent in the browser bundle (no `process`), and with
+  // the variable unset this function is byte-identical to before.
+  const noLevels = (globalThis as { process?: { env?: Record<string, string> } }).process?.env?.[
+    'LGP_NO_LEVEL_CROSSINGS'
+  ];
+  return { bridges, levels: noLevels ? [] : levels };
 }
 
 
