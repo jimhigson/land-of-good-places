@@ -81,15 +81,31 @@ const RUN_SECONDS = 15;
 const FRAMES = Math.ceil(RUN_SECONDS / DT);
 
 /**
+ * How far each child must actually walk for the run to count as "the
+ * collision course was driven" — the coverage clause's own floor, named so
+ * {@link MIN_START_GAP} below can be derived from it instead of silently
+ * contradicting it.
+ */
+const WALK_FLOOR = 0.5;
+
+/**
  * How far apart the chosen pair must start.
  *
- * Comfortably outside {@link SEPARATION} (1.8 m), so the run genuinely watches
- * them close the gap and cross the trigger threshold rather than starting
- * already inside it. Kept small (0.3 m of margin) on purpose: the smallest
- * gap above the threshold is the pair least likely to have a wall, a tree or
- * a bed between them on the straight line this check walks them along.
+ * Outside {@link SEPARATION} (1.8 m), so the run genuinely watches them
+ * close the gap and cross the trigger threshold — AND far enough that the
+ * coverage clause is *satisfiable*: two children driving at each other
+ * stall in equilibrium at the trigger, so each can walk at most
+ * `(startGap - SEPARATION) / 2` before the run ends. The old floor,
+ * `SEPARATION + 0.3`, admitted pairs in a dead band (2.1-2.8 m) where even
+ * a perfect run fails the `walked > 0.5 m` clause by construction —
+ * measured on the first warped canonical park (2 Sep 2026): Ola and Theo,
+ * 2.66 m apart, walked exactly (2.66 - 1.80)/2 = 0.43 m each while the
+ * mechanism corrected them on 887 of 900 frames and never let them below
+ * the floor. The mechanism passed; the geometry could not. Deriving the
+ * floor from the clause keeps the same 0.3 m clearance margin and asserts
+ * nothing weaker — the collision course gets longer, not laxer.
  */
-const MIN_START_GAP = SEPARATION + 0.3;
+const MIN_START_GAP = SEPARATION + 2 * WALK_FLOOR + 0.3;
 
 /** `--mutate` disables the real separation mechanism, to prove this check is real. */
 const mutate = process.argv.includes('--mutate');
@@ -266,7 +282,7 @@ const walkedB = Math.hypot(pairB.position.x - startBX, pairB.position.z - startB
 
 // Coverage: none of the below means anything if nothing actually happened.
 check(
-  walkedA > 0.5 && walkedB > 0.5,
+  walkedA > WALK_FLOOR && walkedB > WALK_FLOOR,
   `the chosen pair barely moved (${walkedA.toFixed(2)} m and ${walkedB.toFixed(2)} m over ${RUN_SECONDS} s) — ` +
     'the collision course was never actually driven',
 );
