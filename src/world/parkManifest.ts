@@ -1,4 +1,5 @@
 import type { AnchorFootprint } from './anchors';
+import { resolveParkSeed } from './parkSeedPool';
 
 /**
  * The park manifest — the single editable input to the layout generator.
@@ -27,32 +28,23 @@ import type { AnchorFootprint } from './anchors';
  */
 
 /**
- * The canonical seed. One park for everyone; bumping this is a deliberate
- * design act (it re-rolls the whole layout), never a side effect. Saves
- * carry {@link LAYOUT_VERSION}, so positions from an older park degrade to
- * the plaza spawn rather than to a spot inside a relocated ride.
+ * **This park's seed** — read once, at module load, by everything that
+ * generates anything.
+ *
+ * It is no longer one number for everyone. Since issue #426 a new game draws
+ * from `parkSeedPool.ts`'s vetted pool, so a child gets a different park each
+ * time she starts one, while the park she gets is still one that has been
+ * proved sound. `resolveParkSeed()` is the single owner of the choice and its
+ * doc comment is the whole story: pins first (`LGP_SEED`, then `?seed=`), then
+ * the seed this profile already drew, then a fresh draw.
+ *
+ * **In Node with nothing pinned this is still `CANONICAL_PARK_SEED`**,
+ * so every check script measures the park it always did.
+ *
+ * Saves carry {@link LAYOUT_VERSION}, so positions from an older park degrade
+ * to the plaza spawn rather than to a spot inside a relocated ride.
  */
-export const PARK_SEED = seedOverride() ?? 20260728;
-
-/**
- * Node-only escape hatch for seed hunting: `LGP_SEED=n npm run check:park`
- * (and the sweep script) try other parks without touching the canonical
- * constant. Absent in the browser bundle — Vite ships no `process` — so a
- * player can never wander into a different park by accident.
- */
-function seedOverride(): number | null {
-  try {
-    // `process` is a Node global the browser bundle does not have; reach for
-    // it via globalThis so the browser build needs no Node type definitions.
-    const nodeProcess = (globalThis as { process?: { env?: Record<string, string> } }).process;
-    const raw = nodeProcess?.env?.['LGP_SEED'];
-    if (!raw) return null;
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
-  } catch {
-    return null;
-  }
-}
+export const PARK_SEED = resolveParkSeed();
 
 /**
  * Bump alongside PARK_SEED (or any generator change that moves things).

@@ -2326,11 +2326,26 @@ them from authored to generated.
    is not fixed in code.** Invariants — such as "paths lead to every
    attraction" — are stated explicitly and *satisfied by construction, then
    verified by machine*.
-2. **One canonical park**: a single `PARK_SEED` committed in code. Everyone
+2. ~~**One canonical park**: a single `PARK_SEED` committed in code. Everyone
    gets the same park; a replan is a deliberate seed bump we choose, not a
-   per-save roll. Saves carry a `layoutVersion`; on mismatch a park-space
+   per-save roll.~~ Saves carry a `layoutVersion`; on mismatch a park-space
    position degrades to the plaza spawn by the save system's existing
    unknown-place path. (Interior positions are space-relative and survive.)
+
+   **Superseded 31 August 2026 by issue #426, and struck rather than deleted
+   because the reason it was right is the reason its replacement is shaped as
+   it is.** Jim: *"there should now be a non-fixed seed for the park — each
+   park should be generated from a new seed. To make this work, let's have 16
+   seeds that are pre-confirmed as conforming to invariants, and choose from
+   the 16."* A **new game** now draws from a vetted pool
+   (`world/parkSeedPool.ts`), so a child gets a different park each time she
+   starts one — but only ever one of the parks somebody has proved is sound,
+   which is what the original ruling was really protecting. Everything else
+   here survives intact: the draw is **per profile, not per save-load** (a
+   returning child gets her own park back, because her saved positions mean
+   nothing in any other one), and `layoutVersion` still owns the mismatch
+   case. Node with nothing pinned still resolves to the canonical seed, so
+   every check script measures the park it always did.
 3. **Everything moves except the entrance.** The castle and the fountain are
    placed by the solver like everything else. The entrance stays pinned as
    the one fixed thing a returning child can rely on.
