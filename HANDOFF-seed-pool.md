@@ -64,3 +64,29 @@ sweeps five seeds and is the pattern to copy.
 
 `pnpm run check` exit 0, `test:procgen` 497 passed, `build` exit 0,
 `vet:seeds --list <pool>` 16/16.
+
+## Rebased onto `main` 2 September (#462 castle roof, #468 pet-slide, #470 cat bus)
+
+One conflict, `package.json`'s `check` chain, rebuilt deterministically from
+`main`'s step list rather than accepting git's interleave. The resulting chain
+is **58 steps = `main`'s 56, plus `check:stall-shape` (this branch's
+de-duplication restores it) and `check:seed-pool`**. Set comparison, not counts:
+nothing on `main` is missing, no duplicate keys, every step defined, and all 57
+named steps were confirmed to have actually executed in the passing run.
+
+**Worth knowing:** the first, obvious resolution — take `main`'s chain and
+insert the step the conflict was about — silently left `check:seed-pool`
+*defined but unrun*, because the chain edit and the seed-pool step arrived in
+the same commit and only one of them was in front of me at conflict time. It
+parsed, `grep check:seed-pool` matched (the definition), and `check` was green.
+Caught by diffing the step *set* against the pre-rebase branch.
+
+Gates re-run after the rebase:
+
+- `pnpm run check` exit 0 (all 57 named steps ran)
+- `pnpm run test:procgen` **16 files / 502 tests passed** — identical to
+  `origin/main` at `72d526f4`, measured, not assumed (was 497 before these
+  three PRs)
+- `pnpm run build` exit 0
+- `pnpm run vet:seeds --list <pool>` **16/16, 81 invariants each** (was 80; the
+  merged PRs added one). **No vetted seed was lost to `main` moving.**
