@@ -24,13 +24,14 @@
  */
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { CI_SWEEP_SEEDS } from '../src/world/parkSeedPool.ts';
 
 const NAV_GRID = new URL('../src/world/NavGrid.ts', import.meta.url);
 const KERB = 'scripts/measure-kerb-detour.mts';
 const FOUNTAIN = 'scripts/check-fountain-hop.mts';
 
-/** The five seeds CI builds a park on — `test/procgen/`'s list, seed 24 included. */
-const CI_SEEDS = [20260728, 5, 11, 18, 24] as const;
+/** The pool's own sweep list — one owner, see parkSeedPool.ts (seed 18 is out by ruling). */
+const CI_SEEDS = CI_SWEEP_SEEDS;
 
 const CANDIDATES =
   process.argv.length > 2
