@@ -359,6 +359,31 @@ Everything else is DONE and green: 15 pool seeds (all but canonical) pass
 both gates with their bakes; seed 18 retired; docs in; npc-separation dead
 band fixed with --mutate still red.
 
+## RULED — canonical leaves the pool (Jim, 2 Sep, via Overseer)
+
+"Yeah drop any seed from the pool that doesn't work so long as we have 16
+parks it's fine." Generalises: search reasonably, then drop-and-replace;
+always record what the seed failed on; never weaken a gate.
+
+**Canonical (20260728)'s failure record, for the file that drops it:**
+under the level-tier deletion, no vector in the 35-candidate neighbourhood
+(one-entry bumps x2 rounds, layout restarts 1-6) passes the full default-
+seed gate stack. Nearest misses: {ferrisWheel:2} passed check:park + all
+81 invariants, failed check:path-preference (kerb-step worst 84.1% vs 73%
+ceiling); {hotel:2} passed path-preference, failed check:pet-slide (7/8
+chase rasters vs 95%). Unwarped it strands 19 garden waypoints. The park
+passes everything on pre-deletion main; it is the combination canonical +
+zero-LC + every canonical-only gate that has no local solution.
+
+**Execution in flight:** spares 1102/1104 being warp-searched with
+--full-gates (the default-seed stack goes with the role). Whichever
+converges becomes BOTH the pool replacement and the new default seed for
+the canonical-only checks — closing the "park every check measures is not
+a park children get" hat of #437 in the same change, not deferred. Then:
+swap CANONICAL_PARK_SEED + pool membership + warps table + the
+seed-canonical test registration, run full chain + test:procgen + re-vet,
+push, CI.
+
 ## Superseded checklist (history)
 
 1. Bake 326's oracle-passing vector when the search lands one (or report
