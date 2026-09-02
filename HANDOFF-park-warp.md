@@ -199,13 +199,14 @@ restart, crossing-site ban) all sit at the cheap end IN-PROCESS, but any
 candidate still pays the full ~6 s replay out-of-process today. Convergence
 math: 4 seeds x dozens of candidates x 6 s = minutes, offline — fine.
 
-## LANDMINE — cache key vs baked warps (recorded 2 Sep, not yet handled)
+## LANDMINE, DEFUSED BY DESIGN — cache key vs baked warps (2 Sep)
 
-`PARK_LAYOUT` ships through `cachedSolve` keyed on `LAYOUT_VERSION` (+seed).
-When `WARPS_BY_SEED` gains its first baked entry, a browser that cached the
-UNWARPED layout for that seed will keep serving it. Baking warps must
-either bump `LAYOUT_VERSION` or fold the warp vector into the cache key.
-Do this in the same commit as the first bake, and prove it in a check.
+Feared: a browser serving a pre-bake cached layout after `WARPS_BY_SEED`
+gains entries. Checked `src/core/solveCache.ts`: the key carries
+`__APP_VERSION__` (the commit hash) and `evictStale` sweeps other versions'
+entries, so any deploy that bakes a warp starts cold automatically. No
+action needed; `LAYOUT_VERSION` bump still applies for save-position
+compatibility if a baked warp moves plots on a seed players have saves in.
 
 ## MEASUREMENT 4 — the warp search converges, and the scorer had to be honest (2 Sep)
 
