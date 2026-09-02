@@ -127,6 +127,52 @@ Screenshots on the `qa-screenshots` orphan branch under `pr469/`.
 - `pnpm run check` — step sets compared against `origin/main`: 55 → 56, nothing
   dropped, `check:pet-slide` added.
 
+## Two findings measured but deliberately NOT landed here
+
+Both concern `PET_SIDE_STEP` (0.45 m), which is **unchanged by this round** — it
+came in with round 2 and the numbers below are pre-existing, not a regression.
+They were found while checking whether its doc was still true. It was not: it
+argues from `CHUTE_ENVELOPE.halfWidth` (0.95 m, the width at the *top* of the
+trough) and `PARADE_MEMBER_RADIUS` (0.3, the radius the *parade* shoves animals
+apart by, which is not any model's half-width).
+
+**1. A wide companion reaches outside the trough.** Instrumented with the same
+oriented boxes the clip clause uses, the widest lateral reach of a riding
+companion's drawn geometry is **1.116 m** from the chute centre line, against a
+`CHUTE_ENVELOPE.halfWidth` of **0.95 m** — and the profile is only **±0.66 m**
+down at the floor where a lying body actually is. The puff is 1.23 m across, so
+0.615 + 0.45 = 1.065 m before the box corner is even counted. Nothing in
+`check:pet-slide` can currently see this: its `on the chute` clause measures the
+**root's** distance from the centreline against a 1.58 m allowance, which a
+poking shoulder passes comfortably.
+
+**2. Retuning it is not a one-line change, because it trades against framing.**
+Measured on the real chase raster:
+
+| stagger | species in check | biggest pet, chase frame | child, worst |
+|---|---|---|---|
+| 0.45 m | 3 | 12% | 296 px |
+| none | 4 (puff added) | 23% | 75 px |
+| 0.30 m | 4 (puff added) | 26% — **over the 25% ceiling** | 3 px |
+
+Deleting the stagger was tried first and is wrong: with the line dead down the
+middle the nearest companion sits squarely between her and the lens and covers
+her up, which is Jim's own complaint one notch quieter. Shrinking it is worse
+still on these runs. Note also that simply adding `pet.puff` to `PET_IDS` moved
+the raster numbers far more than the seat geometry alone explains — **that is
+not yet understood**, and retuning the constant before it is understood would be
+tuning against an instrument nobody has read properly. (Suspicion: the check
+grants companions on top of whatever the store already holds, so `PET_IDS`
+controls how many slots are *measured* rather than who is in them.)
+
+**The fix that probably wants writing** is a per-companion side step — each
+animal offset by what its own width leaves inside the trough, rather than one
+constant for a bunny and a puff alike — plus a trough-fit clause in
+`check:pet-slide` measured on geometry rather than on the root. That is a
+sensible follow-up issue and a bad thing to land unwatched at the end of a
+round. **Left as it shipped, and written down here rather than fixed quietly or
+forgotten.**
+
 ## Housekeeping
 
 - Dev server 5593 killed by PID; browser pages closed by the capture script.
