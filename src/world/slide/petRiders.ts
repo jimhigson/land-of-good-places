@@ -131,14 +131,25 @@ const PET_RECLINED_LENGTH = 1.53;
  * her, which is 0.78 m *inside* a child whose arms reach 2.28 m back, and it
  * stood upright through her while it did it.
  *
- * 0.30 m is a third of a pet's width and it has to absorb three things a
- * measurement of two straight bodies cannot: the chute bends, so two bodies
- * 1.8 m apart along the curve are slightly closer than that through the air;
- * her hair and her backpack are hers, chosen in the character creator, and are
- * not in the 2.28 m above; and a pet breathes and bobs. Anything smaller has
- * been seen to touch.
+ * 0.45 m is half a pet's width, and it has to absorb four things a measurement
+ * of two straight bodies laid end to end cannot:
+ *
+ * - **the chute bends**, so two rigid bodies spaced along the curve lie across
+ *   its chords rather than along it, and reach past each other on the inside of
+ *   every turn;
+ * - her hair and her backpack are **hers**, chosen in the character creator,
+ *   and are not in the 2.28 m above — that is a default kid;
+ * - a pet breathes, bobs and squashes, and the reclining lift is measured off
+ *   the model at rest;
+ * - and the last two metres of chute flatten into the landing, where she and
+ *   the animal behind her stop pitching at different rates.
+ *
+ * Both smaller values were tried and measured, not reasoned about. At 0.30 m
+ * the mouse touched her over four frames at the very bottom of the descent —
+ * a centimetre, invisible, and exactly the sort of near-miss that becomes a
+ * visible clip on a seed whose slide bends harder.
  */
-const BODY_CLEARANCE = 0.3;
+const BODY_CLEARANCE = 0.45;
 
 /**
  * How far behind her the first companion rides, in metres of chute.
