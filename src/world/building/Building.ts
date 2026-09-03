@@ -20,7 +20,7 @@ import { buildSlideSupports, planSlideLegs, type SlideLeg } from '../slide/suppo
 // The railway as *data*. Solved at module load from the layout alone, so it is
 // final long before this constructor runs — which is the whole reason the
 // slide's legs can be kept off it (issue #501). See `planSlideLegs`.
-import { distanceToRailCorridor, RAIL_CORRIDOR_CLEARANCE } from '../train/plan';
+import { distanceToRailCorridor } from '../train/plan';
 import { planSlideShots, SlideShotDirector, type SlideShot } from '../slide/cameras';
 import {
   petSeatOnSlide,
@@ -798,12 +798,13 @@ export class Building implements GameSystem {
     this.slideLegs = planSlideLegs(
       SLIDE_PLAN.points,
       (x, z, radius) => collision.isClearCircle(x, z, radius),
-      // **And off the railway** (issue #501). Not something `collision` can
-      // answer at this point in the build — see `planSlideLegs`'s own note —
-      // so it comes from the rail plan, which is solved and final by now.
-      // Both names read from `train/plan.ts`, their single owner: this adds no
-      // number of its own, and the day the fence moves out the legs follow.
-      (x, z) => distanceToRailCorridor(x, z) >= RAIL_CORRIDOR_CLEARANCE,
+      // **And where the railway is** (issue #501). Not something `collision`
+      // can answer at this point in the build — `ParkTrain` is constructed
+      // further down `World`, so nothing is in the collision world anywhere
+      // the loop will go. The rail *plan* is solved at module load and final
+      // by now, which is why this is answerable at all. How far is far enough
+      // is `planSlideLegs`'s own business, not decided here.
+      (x, z) => distanceToRailCorridor(x, z),
     );
     // At park level, not under the castle's plot — the ride spans two plots and
     // its legs stand in the park between them. See `buildSlideSupports`.

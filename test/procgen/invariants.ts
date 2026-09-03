@@ -3613,6 +3613,42 @@ const theGinormousSlideStandsOnSomething: Invariant = (facts) => {
 };
 
 /**
+ * **No slide leg stands on the railway** (issue #501).
+ *
+ * The pair nobody had written down. `trainClearsEveryPlotAndStall` covers plots
+ * and stalls, `wallsClearTheRailway` covers garden walls, `treesClearTheRailway`
+ * covers trees — and roughly eighty-three invariants between them were blind to
+ * the ginormous slide's supports, because each one names the pair it checks and
+ * this pair was never named. Seed 5 built four legs inside the train's envelope
+ * for as long as the ride has existed, the worst of them standing **0.12 m from
+ * the rail centre line**, and the train drove through them every lap.
+ *
+ * The chute itself flies over the loop, legitimately and by design; that is
+ * `theGinormousSlideClearsTheRailway`'s business and it is about air. This is
+ * about the ground, where a post is as solid as a wall.
+ *
+ * **`TRACK_CLEARANCE`, not the planner's `RAIL_CLEARANCE`.** The threshold is
+ * the game's own half-width for "inside the train", so this asserts what the
+ * railway requires rather than what `slide/supports.ts` happens to aim for. The
+ * planner keeps further off than this — it also has a fence to miss — and that
+ * slack is deliberate: it means a future retuning of the planner's own figure
+ * cannot quietly turn this check green by moving the goalposts with it.
+ */
+const slideLegsClearTheRailway: Invariant = (facts) => {
+  const fouls: string[] = [];
+  for (const leg of facts.slideLegs) {
+    const face = facts.distanceToRail(leg.x, leg.z) - SLIDE_LEG_RADIUS;
+    if (face < TRACK_CLEARANCE) {
+      fouls.push(
+        `a ginormous slide leg at ${fmt([leg.x, leg.z])} stands ${face.toFixed(2)} m from the ` +
+          `rail centre line (needs ${TRACK_CLEARANCE} m) — the train drives through it`,
+      );
+    }
+  }
+  return fouls;
+};
+
+/**
  * **The ginormous slide leaves the castle over the top of the battlements**,
  * with real air under it — not through the stone.
  *
@@ -8685,6 +8721,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     'the ginormous slide stands on legs a child can walk between',
     theGinormousSlideStandsOnSomething,
   ],
+  ['no ginormous slide leg stands on the railway', slideLegsClearTheRailway],
   [
     'the ginormous slide leaves the castle over the top of the battlements',
     theGinormousSlideLeavesOverTheBattlements,

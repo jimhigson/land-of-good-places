@@ -5,6 +5,12 @@ import type { CollisionWorld } from '../Collision';
 import { PLAYER_RADIUS } from '../../core/constants';
 import { PARK_LAYOUT } from '../parkLayout';
 import { distanceToPath } from '../pathGraph';
+// Leaf module, and chosen over `train/plan` on purpose: these are two floats
+// about where the lineside fence stands, and importing them must not drag the
+// railway's own solve in behind them. `train/plan.ts` owns *where the rails
+// are* and is injected as a function below; this file owns *how far a leg
+// keeps off them*. See {@link RAIL_CLEARANCE}.
+import { FENCE_HALF_THICKNESS, FENCE_OFFSET } from '../train/clearance';
 import { terrainHeight } from '../terrain';
 // `./solve`, not `./plan`: these two are plan-view geometry helpers, and
 // importing them has no business triggering the three-and-a-half-second solve
@@ -104,6 +110,45 @@ const POST_COLLISION_RADIUS = 0.42;
 const GROUND_CLEARANCE = 1.0;
 
 /**
+ * **How far a leg's centre keeps off the rail centre line** (issue #501).
+ *
+ * Derived, never chosen, and every term is read from its owner:
+ *
+ * - {@link FENCE_OFFSET} — where `train/fence.ts` stands the lineside fence.
+ * - {@link FENCE_HALF_THICKNESS} — how thick that fence is.
+ * - {@link FOOT_RADIUS} — the widest part of this post, which is ours.
+ *
+ * So the post's foot rests exactly against the fence's outer face and never
+ * inside it. Two solid things in one place is the same disease as a post
+ * standing on the track; it is simply the one you meet second.
+ *
+ * ### Why not the train's own envelope, which is smaller
+ *
+ * `TRACK_CLEARANCE` (1.3 m) is what the *train* needs, and it is the threshold
+ * `slideLegsClearTheRailway` holds the built park to — deliberately, because an
+ * invariant should assert what the game requires rather than what this file
+ * aims for. But a leg at 1.3 m + its foot straddles the fence: the fence
+ * occupies 1.82 m to 2.18 m from the centre line, and a foot centred at 1.82 m
+ * spans 1.30 m to 2.34 m, straight through it. Stopping at the train's number
+ * would have been shaving the clearance to the smallest value that made the
+ * pool pass, and it would have shipped a post through a fence to do it.
+ *
+ * ### What it costs, and why that is reported rather than shaved
+ *
+ * On seed 5 this is the difference between four legs and two, and two is under
+ * what `theGinormousSlideStandsOnSomething` asks of an 83 m chute. That is a
+ * finding about seed 5's park — its chute spends 30 of those 83 m over or
+ * beside the loop — and not a reason to move this number. See the PR.
+ *
+ * **Not `RAIL_CORRIDOR_CLEARANCE`** (4.2 m), which `Scenery` holds its garden
+ * walls to: that one also clears a station platform's canopy, because a wall is
+ * long and blind and may run anywhere. A leg is a point on a known curve, and
+ * paying a platform's width everywhere the chute passes the loop costs seed 5
+ * every leg but one. Measured: 1.
+ */
+const RAIL_CLEARANCE = FENCE_OFFSET + FENCE_HALF_THICKNESS + FOOT_RADIUS;
+
+/**
  * The narrowest gap a child can actually walk through, and so the least room
  * two legs may leave between their feet.
  *
@@ -147,16 +192,24 @@ export interface SlideLeg {
  * (issue #501). No pairwise invariant covered the pair either, so nothing said
  * so; `slideLegsClearTheRailway` in `test/procgen/invariants.ts` does now.
  *
- * The railway *is* answerable here, just not through collision: `TRAIN_PLAN` is
- * solved at module load from the layout alone, long before any scene object
- * exists. So the caller passes that question in, the same shape and for the
- * same reason as `isClear` — `Scenery` already asks it of its garden walls, and
- * this is the second caller rather than a second definition.
+ * **The ordering was the first thing established, because it decides which side
+ * the fix belongs on**: had the legs genuinely been placed before the railway
+ * existed, nothing here could see it and the railway would have had to move
+ * instead. It does not. `TRAIN_PLAN` is solved *at module load*, from the park
+ * layout alone, before any scene object exists — the railway as data, final
+ * long before this constructor runs. So the question is answerable here; it
+ * simply cannot be answered by `CollisionWorld`.
+ *
+ * Hence a distance, injected: `train/plan.ts` owns **where the rails are** and
+ * hands that in (`Scenery` already asks it the same thing for garden walls, so
+ * this is a second caller rather than a second definition), and this file owns
+ * **how far a leg keeps off them** — see {@link RAIL_CLEARANCE}. Splitting it
+ * that way is what keeps the policy next to the thing whose foot it is about.
  */
 export function planSlideLegs(
   chute: readonly Vector3[],
   isClear: (x: number, z: number, radius: number) => boolean,
-  clearOfRailway: (x: number, z: number) => boolean,
+  distanceToRailway: (x: number, z: number) => number,
 ): SlideLeg[] {
   // Arc length along the chute, so spacing means metres of ride rather than
   // metres of straight line — the difference is large on a curve this tight.
@@ -199,7 +252,7 @@ export function planSlideLegs(
       // stands in front of the train. Rejected rather than nudged sideways —
       // the loop below is the nudge, and it slides the candidate along the
       // chute until it clears rather than shrinking what "clear" means.
-      if (!clearOfRailway(point.x, point.z)) continue;
+      if (distanceToRailway(point.x, point.z) < RAIL_CLEARANCE) continue;
       if (!isClear(point.x, point.z, GROUND_CLEARANCE)) continue;
       if (distanceToPath(point.x, point.z) < PATH_CLEARANCE) continue;
       // The coaster's lesson: a post in the gap between two plots pinches shut
