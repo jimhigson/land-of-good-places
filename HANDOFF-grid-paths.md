@@ -3793,6 +3793,14 @@ before this leg and still open:
 > before designing anything**; every fix aimed at the connector will keep
 > missing it.
 
+**That warning is now answered and half of it was wrong — corrected here so
+nobody inherits the wrong reason.** There is no second producer. 225 is
+`computeGridConnectors`'s `straightToLead`, rung 2, exactly as 131 turned out
+to be; the connector's `direct` is 16.2 m and the invariant reports 16.2 m.
+Fixes kept missing 225 not because they aimed at the wrong router but because
+the verdict is carrier-relative and marginal (0.2 m over a 16 m threshold) —
+see 'THE EXEMPTION SUSPICION IS REFUTED' at the end of this file.
+
 131 was later located to the head-on straight shape. **225 never was**, and
 this measurement is the strongest evidence yet that it is genuinely something
 else. **So the next agent must answer that question before pricing, ordering or
@@ -3875,3 +3883,87 @@ the exemption's exact condition has not been read, and I am not asserting it.
 **For the PR body, replacing the struck line:** *the same drawn metres passing
 under one route name and failing under another is a property of the check, not
 of the park.*
+
+## THE EXEMPTION SUSPICION IS REFUTED — and the carrier-dependence is real for a different reason
+
+Read, as required, before asserting anything.
+
+**`pathsRunOnGridAxes` has no `DOOR_APPROACH_REACH` exemption. It has no
+exemption at all.** That constant belongs to `streetsShareLatticeLines`, whose
+doc comment is where I read it; `pathsRunOnGridAxes` is fifty lines of
+merge-consecutive-off-axis-hops with one threshold and one railway carve-out.
+**So my recorded suspicion is wrong as to mechanism, and is struck.**
+
+Two facts from the read that change the picture:
+
+- **`MAX_DIAGONAL_APPROACH = 16`, and the reported run was 16.2 m.** Seed 225
+  fails this by **0.2 m**. It is a marginal verdict, not a structural one, and
+  nobody has said so in three legs of chasing it.
+- **It measures the DRAWN CURVE**, `PathEdgeFact.points`, sampled every ~0.5 m
+  off the Catmull-Rom, deliberately and for a stated reason. So every
+  hand-computation anybody (me included) has done from *control* polylines is
+  not the model this check uses.
+
+### What the carrier-dependence actually is
+
+The check walks **one edge at a time** and merges consecutive off-axis hops
+into a run, flushing when a hop comes back on axis. A run therefore ends where
+that edge's own curve happens to straighten — **which depends on the control
+points the carrier supplies either side of the shared diagonal.**
+
+The door-to-node diagonal at seed 225's building is one piece of painted
+ground. `spur-building` ends at that door; `connector-building-ballPit` starts
+at it; under the priced build `connector-building-exit-ginormousSlide` started
+at it. **The same metres are therefore judged more than once, with different
+neighbouring context each time**, and whether they merge into a >16 m run or
+get broken by a fillet turning briefly on-axis is decided by the *route object*
+rather than by the ground.
+
+**So the anomaly is real and the invariant is carrier-relative — but the cause
+is its unit of measurement, not an exemption.** Its unit is the route object;
+the thing Jim looks at is the painted ground.
+
+**HYPOTHESIS, NOT MEASURED:** that the ballPit carrier's curve straightens at
+the node and splits the run below 16 while the ginormousSlide carrier's does
+not. It is consistent with a 0.2 m margin and with both observations, and I
+have not instrumented it. Whoever takes this should sample both carriers' drawn
+curves and print the per-hop off-axis fraction across the shared node — that is
+the measurement that settles it, and it is cheap.
+
+### The Overseer's second question, answered honestly
+
+*Does the check go red against geometry a child cannot walk, and green against
+geometry she can?* **That is not this check's question, and saying so matters.**
+`pathsRunOnGridAxes` is a **legibility** check — Jim's complaint #3, paths that
+read as a grid — not a walkability one. A child walks the same diagonal
+whichever route object owns it. `check:park`'s reachability figures are
+unmoved by any of this, and were unmoved through every experiment this leg ran.
+
+So the defect is not "reports success about ground a child cannot walk". It is
+one layer over: **it reports a verdict about painted ground while actually
+describing a route object**, so the same drawn metres can pass and fail at
+once. That is still this repo's dominant fault — an assertion reporting about
+something it is not describing — and it is exactly what CLAUDE.md's "a check
+can pass without checking anything" section is about.
+
+### Which change is it?
+
+**Its own change, not part of the path work.** Nothing a player can see
+changes: the ribbons are identical, the reachability is identical, and the fix
+is to what the check measures over — deduplicating shared metres, or measuring
+runs over the painted network rather than per route object. That is invisible
+by CLAUDE.md's own definition, so it merges on review plus a QA agent having
+actually measured it, without going to Jim. Doing it inside this branch would
+also mix a check fix into a path fix, and then neither column means what it
+says.
+
+**And it must be proved on both sides**: red on a genuine long diagonal, green
+on the same metres judged from any carrier. A check that changes its answer
+with the observer has not been fixed until it stops doing that.
+
+**For the PR body, unchanged and now measured:** *the same drawn metres passing
+under one route name and failing under another is a property of the check, not
+of the park.* With the correction that the mechanism is the unit of
+measurement, not an exemption — **and that seed 225 fails it by 0.2 m against a
+16 m threshold**, which is worth saying plainly after three legs of treating it
+as a structural defect.
