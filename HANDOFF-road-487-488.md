@@ -99,12 +99,56 @@ corridor and `PARK_LAYOUT.entries`. The road was simply missing from that list.
    written, and asking about the foot is strictly stronger than asking about the
    midpoint. After the fix: `test:procgen` **exit 0, 515 passed**.
 
+## The check exists now, and it is honestly red
+
+`pnpm run check:entrance-road` (in the `check` chain — added and verified by
+**parsing** `package.json`'s `scripts` and diffing the step *sets*: nothing
+dropped, one added).
+
+It does three things, and the order matters:
+
+1. **The control, first and every run.** It sweeps the road as it *used* to be —
+   the straight chord at the wall plus nine metres — and requires that to come
+   back dirty. Latest run: **96 legs across 16 seeds, worst 3.30 m inside a
+   bus**. If that ever reads clean the instrument is blind and the whole run is
+   declared void rather than passing.
+2. **The sweep.** The bus's own oriented footprint, stepped at 0.25 m from the
+   brow at +26.2 m to −26.2 m, against every trestle leg in the built park
+   (resolved to each leg's **foot**, with the ring's own scaled foot radius).
+   **0 hits on all sixteen seeds.**
+3. **Plan versus park.** Every vertex of every drawn `entrance-road*` mesh must
+   lie inside the corridor the sweep measured. **This is currently RED** — 63 to
+   113 vertices per seed, up to 6.43 m out — and it is red on purpose: without
+   it, the file would report a clean sweep of a *route* while the game still
+   drew and drove the old straight kerb. That is exactly "an assertion reporting
+   success about something it is not describing", and this clause is what stops
+   it. It goes green when step 1 of "What is left" below is done.
+
+Two findings from building it, both worth keeping:
+
+- **The corridor is the swept body, not the ribbon.** Testing width alone
+  (`ROAD_HALF_WIDTH`) still left the bus through 1–3 legs on every seed: a
+  `CAT_BUS_LENGTH` rigid box on a road that turns overhangs the kerb. The
+  corridor is now the union of a bus-length, road-width box at every sample.
+- **Sample the corridor finer than anything that measures it.** At the 1 m
+  station spacing the union of boxes misses the bulge *between* samples, and two
+  seeds kept a leg 0.18 and 0.22 m inside the bus. `CORRIDOR_SAMPLE_SPACING` is
+  0.2 m. Same disease as CLAUDE.md's "a gap you cannot walk into at 5 cm a step
+  you may still tunnel into", inside out.
+- **The keep-out must use the ring's *scaled* foot radius**, not bare
+  `POST_FOOT_RADIUS` — the walk-past ring's legs are fatter than the constant,
+  so the bare value understated the collider the ride actually registers.
+  `trestleSpots` now takes `footRadius` and is handed
+  `POST_FOOT_RADIUS * ringSizeVsRace`.
+
 ## Gate status on this branch right now
 
 - `tsc --noEmit` exit 0
 - `typecheck:test` exit 0
 - `check:rail-race` exit 0
 - `test:procgen` exit 0 (515/515)
+- `check:entrance-road` **exit 1, deliberately** — the sweep and the control are
+  green; the plan-versus-park clause is red until the ribbon and the bus move
 - **`pnpm run check` NOT yet run in full.** Expect `check:cat-bus`,
   `check:park-map`, `check:arrival-*` to have opinions once the road actually
   moves (see below) — they do not today, because it has not.
