@@ -2812,3 +2812,32 @@ Instrument removed again (`git checkout src/world/paths.ts`, grep-verified 0
 occurrences of `LGP_DEBUG_SHAPES`) — it costs an env lookup per node per shape
 inside the connector search, and `check:park-boot` is already red on this
 branch's parent for boot-slice cost.
+
+### BOTH COLUMNS MEASURED — five of five fixed, green unchanged, stranded down 2
+
+**Benefit** — `pathsRunOnGridAxes`, the five seeds, reorder + `sqrt(2)` elbow
+cap together:
+
+| seed | 131 | 208 | 225 | 346 | 451 |
+|---|---|---|---|---|---|
+| | **passes** | **passes** | **passes** | **passes** | **passes** |
+
+**Five of five.** The two previous attempts got three of five (reorder alone)
+and five of five at a cost of two greens (outright refusal).
+
+**Cost** — `check:park`, all sixteen, against the `df7ecac4` baseline:
+
+| seed | before | after | |
+|---|---|---|---|
+| 5 | **0** | **1** | **lost green** — the one regression |
+| 11 | 3 | **1** | **-2** |
+| 326 | 1 | **0** | **now green** |
+| every other seed | — | — | identical |
+
+**Green 10 -> 10. Stranded 13 -> 11.** Seed 5's green is genuinely lost and is
+reported, not absorbed; it is offset by 326 gaining one, so the pool's green
+count does not move while two waypoints and all five grid-axis failures are
+recovered.
+
+That is a different trade from the two refuted attempts, which paid **two net
+greens** for three and five invariants respectively. This pays **none**.
