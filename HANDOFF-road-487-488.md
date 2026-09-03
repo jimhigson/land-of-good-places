@@ -279,3 +279,78 @@ time rather than by distance-to-the-gate. Nothing about it is measurement
 error; the check is right.
 
 **Nobody has looked at any of this in a browser yet.**
+
+
+---
+
+# The stagger is NOT a pacing bug — it is the door (3 September, later still)
+
+**Correcting my own diagnosis, and the Overseer's instruction that followed it.**
+I reported the disembark fault as "pacing driven by distance-to-the-gate, wants
+pacing by time". That was wrong, and reading the code rather than inferring from
+the symptom shows it: `KID_DELAYS` is **already** time-based and has been since
+it was written — a cumulative `KID_DOORWAY_GAP + dawdle` per child, computed once
+at module scope from a fixed seed, with a comment explaining that cumulative was
+chosen precisely so jitter cannot eat the gap. There is no distance in it.
+
+## What is actually wrong (`scripts/probe-door.mts`)
+
+```
+doorDrop local  x -4.66 z -2.55
+stopAt -2.55  bus centre -2.58, 65.41  facing -96.6deg
+door lands at   0.49, 61.08
+gate is at      0.00, 60.00
+door -> gate    1.18 m
+door -> her     9.70 m
+```
+
+**The bus's door now opens 1.18 m from the middle of the arch.** The road hugs
+the wall at `ENTRANCE_ROAD_OUTSET` = 5.73, the door sits 4.66 m towards the park
+from the bus's centre, so the drop lands **1.07 m outside the park's edge** —
+against about 4.3 m on the old road. The children step down essentially *in the
+gateway*: their walk route is a degenerate stub, `releaseDistanceFor` is
+satisfied almost at once, and several are handed to the NPC system on the same
+frame. That is what `check:cat-bus` is reporting as "0.00 s apart" and as speeds
+of 0.87 and 7.15 m/s. The timing code is innocent.
+
+It is also simply wrong to look at: a bus door should open onto a pavement, not
+into a doorway.
+
+## The constraint this exposes, which the road's design missed
+
+The door has to stand clear of the arch, and the door is `4.66 m` from the bus's
+centre on the park side. So
+
+```
+ENTRANCE_ROAD_OUTSET >= (pavement the child needs) + 4.66
+```
+
+A child needs somewhere to step down and turn — on the order of
+`CHILD_FOOTPRINT * 2` (3.6 m) — which wants an outset near **8.3**, and the old
+road's 9 was not arbitrary after all.
+
+**That reopens the trestle question in the other direction.** At outset 8.3 the
+corridor spans 4.4 to 12.2, so a leg cannot clear it by moving *outward*
+(`RIM_OUTSET_START` is 12 — it would be on the hillside). It has to move
+**inward**, into the band between the road and the wall: leg centres in roughly
+1.3 to 3.7 outset, which is 2.4 m of usable band and is inside `RADIAL_NUDGES`
+(−3 from 6.5). Whether the ride absorbs that is a measurement, not a guess —
+`check:entrance-road`, `check:rail-race` and `test:procgen` are what answer it,
+and none has been run against that geometry.
+
+**Do not simply raise the outset and push.** Each change to it invalidates every
+gate below, and this branch has now oscillated through three values of
+`ENTRANCE_ROAD_TAIL_RUN` and two of the outset. The next session should:
+
+1. Derive the outset from the door, not tune it — `roadRoute.ts` should state
+   `ENTRANCE_ROAD_OUTSET` in terms of the bus's own `doorDrop` and a stated
+   pavement width, so it moves on its own if the bus is ever rebuilt.
+2. Re-run `check:entrance-road`, `check:rail-race`, `test:procgen`,
+   `check:coplanar` and full `check` **in that order**, and expect the trestles
+   to need the inward nudge.
+3. Only then look at it in a browser.
+
+## Gate status, unchanged from above except
+
+- `check:cat-bus` **1** — one fault, now correctly diagnosed as the door's
+  position rather than the stagger's pacing.
