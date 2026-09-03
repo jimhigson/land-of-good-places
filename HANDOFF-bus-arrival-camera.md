@@ -1,5 +1,20 @@
 # HANDOFF — the cat bus arrival camera
 
+**Model: Opus (`claude-opus-5[1m]`), chosen by the Overseer as the Engineer
+default.** A replacement must run the same model — CLAUDE.md, 3 Sept 2026.
+
+**This PR is STACKED: its base is `feat/arch-placement`, not `main`.** Do not
+rebase it onto `main` — that detaches it from its base and GitHub goes
+`CONFLICTING`/`DIRTY` and stops running CI entirely, so no preview publishes.
+I did exactly that on 3 September and had to restore. `feat/arch-placement`
+itself is behind `main` (it predates #485, the gateway fix); it has to be
+rebased first, by whoever owns it, and this branch follows it.
+
+**Measured while I was up there: main's gate rewrite (#485) does NOT move this
+shot.** Drop still (0, 64.34), archPass `under` 6.806 / `clear` 7.416,
+clearances 0.37 m under the crossbar and 0.58 m inside the opening — identical
+before and after. So the rebase bought nothing here.
+
 Branch `feat/bus-arrival-camera`, worktree `.claude/worktrees/bus-camera`,
 branched from `feat/arch-placement` (which carries the placed gate arch Jim has
 already approved). Dev server port **5347** (`vite --port 5347 --strictPort`).
