@@ -2505,35 +2505,11 @@ function computeGridConnectors(
         // hotel had a clean 7.1 m straight run to its door and no route at all
         // to the point in front of it.
         if (lead) {
-          const straightToLead = [[nx, nz], lead, p] as const;
-          const elbowViaColumn = [[nx, nz], [nx, lead[1]], lead, p] as const;
-          const elbowViaRow = [[nx, nz], [lead[0], nz], lead, p] as const;
-          // **The straight shape is a doorway approach or it is a street on
-          // its own heading, and which one decides the ORDER, never whether
-          // it is offered at all.**
-          //
-          // `node -> lead` is the only one of the three that can be a
-          // diagonal; the two elbows are axis-aligned by construction. Trying
-          // the straight one first unconditionally is what draws the long
-          // diagonals `pathsRunOnGridAxes` fires on — but *refusing* it was
-          // built and measured and cost two greens and three fresh
-          // `detourRatiosStayReasonable` failures (see the note below), so it
-          // stays as the last rung and a door can never be starved by this.
-          //
-          // The bound is `STUB_TAIL_LIMIT`, this file's own doorway reach —
-          // the same number its comment two shapes down already calls "the
-          // tight doorway reach" for a cut corner, and deliberately not the
-          // invariant's `MAX_DIAGONAL_APPROACH`, which would make that check
-          // true by definition. An exactly axis-aligned leg is a doorway
-          // approach at any length, because it is not a diagonal at all.
-          const leadDx = Math.abs(nx - lead[0]);
-          const leadDz = Math.abs(nz - lead[1]);
-          const straightIsADoorwayApproach =
-            Math.min(leadDx, leadDz) < 1e-6 || Math.hypot(leadDx, leadDz) <= STUB_TAIL_LIMIT;
-          const shapes: readonly (readonly (readonly [number, number])[])[] =
-            straightIsADoorwayApproach
-              ? [straightToLead, elbowViaColumn, elbowViaRow]
-              : [elbowViaColumn, elbowViaRow, straightToLead];
+          const shapes: readonly (readonly (readonly [number, number])[])[] = [
+            [[nx, nz], lead, p],
+            [[nx, nz], [nx, lead[1]], lead, p],
+            [[nx, nz], [lead[0], nz], lead, p],
+          ];
           let headOn = false;
           for (const shape of shapes) {
             let ok = true;
