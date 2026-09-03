@@ -52,6 +52,9 @@ if (!edge) {
         if (railSide(q[0], q[1]) === side) {
           sameSideSamples += 1;
           if (gap < nearestSameSide) nearestSameSide = gap;
+          console.log(
+            `  same-side sample: ${other.route.name} (${q[0].toFixed(2)},${q[1].toFixed(2)}) gap=${gap.toFixed(2)}`,
+          );
         }
       }
     }

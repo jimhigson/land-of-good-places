@@ -1026,9 +1026,24 @@ const noPathEndsNowhere: Invariant = (facts) => {
       if (id === 'ring') {
         const gap = distanceToOtherPaving(facts, edge.name, point);
         if (gap > ARRIVAL) {
+          // **Two different faults read identically without this.** "Nobody
+          // joined this end to the paving beside it" and "there was never
+          // anything on this side of the railway for it to join to" are not the
+          // same defect: the first is a routing miss, the second is a layout
+          // one, and only the second means no post-pass could ever have fixed
+          // it. So say which, measured, rather than leaving the reader to guess
+          // from one number — the mistake a whole leg of this branch was
+          // written on.
+          const beside = pavingBesideAStrayEnd(facts, edge.name, point);
+          const aside = beside.nearestIsOnSameSide
+            ? ''
+            : `; that paving is across the railway, and the nearest on this end's ` +
+              `own side is ` +
+              `${Number.isFinite(beside.sameSideGap) ? `${beside.sameSideGap.toFixed(2)} m away` : 'nowhere at all'} ` +
+              `— so nothing on this side was ever built for it to join`;
           strays.push(
             `${edge.name}'s ${which} at ${fmt(point)} is ${gap.toFixed(2)} m from the ` +
-              `nearest other paving — it branches off nothing`,
+              `nearest other paving — it branches off nothing${aside}`,
           );
         }
         continue;
@@ -8977,6 +8992,90 @@ function distanceToOtherPaving(
     if (gap < best) best = gap;
   }
   return Math.max(0, best);
+}
+
+/**
+ * **Is the paving nearest a stray end on the same side of the railway as the
+ * end itself — and if not, how far off is the nearest that is?**
+ *
+ * A dead end 17 m from paving *across the tracks* is a different fault from one
+ * 17 m from paving a child could walk to: the first means nothing on that side
+ * was ever built for it to join, the second means something was and nobody
+ * joined it. `distanceToOtherPaving` cannot tell them apart, and seed 288 was
+ * mis-diagnosed twice over exactly that gap.
+ *
+ * **Asked without a threshold, on purpose.** The first cut of this compared two
+ * distances and fired when the same-side one was larger, which a control caught
+ * immediately: it measured the same-side figure to a ribbon's *vertices* and
+ * the overall figure to its *segments*, so the same-side number was larger by a
+ * hair essentially always, and the clause fired on canonical seed strays whose
+ * nearest paving was plainly on their own side (`3.48` against `3.48`). Two
+ * definitions of one distance — the commonest bug in this repo, written by hand
+ * into the check meant to catch it. So the question asked here is the direct
+ * one, over one shared measurement: **which side is the nearest paving on?**
+ *
+ * Rail side is the cross product of the loop's own tangent with the offset from
+ * the nearest point on it — the same arithmetic `paths.ts`'s `railInfoAt` and
+ * `crossingPlanSolve.ts`'s `railSideOf` use, read off the built route here
+ * rather than imported, because this file measures the park it was handed.
+ *
+ * `pathEdges` is **paved-only**, which is the honest unit for "paving": on seed
+ * 288 all three destinations on the bridge's far side are `paved=false`, drawn
+ * no ribbon at all, so that side really does hold none.
+ */
+function pavingBesideAStrayEnd(
+  facts: ParkFacts,
+  exclude: string,
+  point: readonly [number, number],
+): { readonly nearestIsOnSameSide: boolean; readonly sameSideGap: number } {
+  const route = facts.world.train.route;
+  const at = new Vector3();
+  const tangent = new Vector3();
+  const sideOf = (x: number, z: number): number => {
+    const distance = route.distanceNear(x, z);
+    route.pointAt(distance, at);
+    route.tangentAt(distance, tangent);
+    return Math.sign(tangent.z * (x - at.x) - tangent.x * (z - at.z)) || 1;
+  };
+  const side = sideOf(point[0], point[1]);
+
+  let best = Infinity;
+  let bestIsOnSameSide = false;
+  let sameSide = Infinity;
+  const consider = (gap: number, x: number, z: number): void => {
+    const onSameSide = sideOf(x, z) === side;
+    if (gap < best) {
+      best = gap;
+      bestIsOnSameSide = onSameSide;
+    }
+    if (onSameSide && gap < sameSide) sameSide = gap;
+  };
+
+  for (const edge of facts.pathEdges) {
+    if (edge.name === exclude) continue;
+    for (let i = 0; i < edge.points.length - 1; i += 1) {
+      const a = edge.points[i]!;
+      const b = edge.points[i + 1]!;
+      const dx = b[0] - a[0];
+      const dz = b[1] - a[1];
+      const lengthSq = dx * dx + dz * dz;
+      const t =
+        lengthSq > 1e-9
+          ? Math.max(0, Math.min(1, ((point[0] - a[0]) * dx + (point[1] - a[1]) * dz) / lengthSq))
+          : 0;
+      const cx = a[0] + dx * t;
+      const cz = a[1] + dz * t;
+      // The side is read at the closest point on the ribbon — the metre of
+      // paving she would actually be standing on — not at a vertex that may be
+      // several metres away round a corner.
+      consider(Math.hypot(point[0] - cx, point[1] - cz) - edge.halfWidth, cx, cz);
+    }
+  }
+  for (const node of facts.pathNodes) {
+    if (node.reach <= 0) continue;
+    consider(Math.hypot(point[0] - node.x, point[1] - node.z) - node.reach, node.x, node.z);
+  }
+  return { nearestIsOnSameSide: bestIsOnSameSide, sameSideGap: sameSide };
 }
 
 function fmt(point: readonly [number, number]): string {

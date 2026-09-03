@@ -4259,3 +4259,69 @@ inert: seed 116 exercises the refusal branch on an unmutated park, with
 holds no paved node the lattice can reach from that foot`. The old wording is
 what produced the previous leg's wrong headline, and a whole brief was written
 on it.
+
+### `noPathEndsNowhere` now distinguishes the two faults — proved red, and its control caught a bug in it
+
+The clause added to the `'ring'`-end branch: when a stray end's nearest paving
+turns out to be **across the railway**, say so and give the nearest on its own
+side.
+
+**PROOF — seed 288, unmutated, the clause fires** (`vitest run
+test/procgen/seed-288.test.ts`, exit 1):
+
+```
+bridge-walk-0's end at -15.7, -47.7 is 17.61 m from the nearest other paving —
+it branches off nothing; that paving is across the railway, and the nearest on
+this end's own side is nowhere at all — so nothing on this side was ever built
+for it to join
+```
+
+Geometry it was proved against (`scripts/tmp-288end.mts`, seed 288):
+
+```
+bridge-walk-0 (16.26,-21.22) ... (-15.69,-47.69)
+  end side=-1, nearest other paving any side 18.58 m, all of it side +1
+  side -1 path nodes: ferrisWheel, stall.spaceFerrisWheel, exit-ferrisWheel
+  spur-ferrisWheel            paved=FALSE
+  spur-stall.spaceFerrisWheel paved=FALSE
+  spur-exit-ferrisWheel       paved=FALSE
+```
+
+**CONTROL — a stray end whose own side does have paving must NOT get the
+clause.** No such end exists in the pool, so one was made: in `paths.ts`,
+`if (process.env.LGP_TRIM_SPUR_START === destination.id && points.length > 2)
+points.splice(0, points.length - 2);` right after the `SPUR_STRETCH` hook,
+which pulls a spur's start off the network on the canonical seed (both sides of
+which carry 11 destinations). Canonical seed, exit 1 both times, **no clause**:
+
+```
+LGP_TRIM_SPUR_START=hotel
+  spur-hotel's start at 41.2, 58.2 is 25.52 m from the nearest other paving
+    — it branches off nothing
+LGP_TRIM_SPUR_START=stall.keychain
+  spur-stall.keychain's start at -6.7, -12.6 is 3.48 m from the nearest other
+    paving — it branches off nothing
+```
+
+**The control earned its keep on the first run.** The first cut fired the clause
+on *both* of those, claiming "the nearest paving on its own side is 3.48 m away,
+so there was nothing on this side to join it to" — against an overall figure of
+3.48 m, i.e. the paving it was calling unreachable was the paving it had just
+measured. Cause: the same-side figure was measured to a ribbon's **vertices**
+and the overall figure to its **segments**, so the same-side number was larger
+by a hair essentially always. Two definitions of one distance, hand-written into
+the check meant to catch that class. Rebuilt as one measurement asking the
+direct question — *which side is the nearest paving on?* — with the side read at
+the closest point on the ribbon, and **no threshold anywhere**.
+
+**Third finding on 288, and it supersedes both earlier accounts.** `pathEdges`
+is paved-only, which is the right unit, and on seed 288 **all three far-side
+destinations are `paved=false`** — `paths.ts` drew them no ribbon at all. So the
+far quarter has one bridge landing in it, three attractions, and zero paving,
+and the isolated far foot is one symptom of that rather than the whole of it.
+
+**`test:procgen` after: 5 failed / 1404 passed — violation SET byte-identical**
+to the inherited baseline (5/11/128 `streetsShareLatticeLines`, 267
+`detourRatiosStayReasonable`, 288 `noPathEndsNowhere`). Only 288's message text
+moved. Control mutation reverted, grep-verified (`grep -n
+"LGP_TRIM_SPUR_START\|TEMP MUTATION" src/world/paths.ts` — nothing).
