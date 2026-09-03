@@ -1242,3 +1242,71 @@ reservation to what gets built is the single change that would unlock 288, 11
 and probably 5 — and it is Jim's brief #2 in one line: the bridge's real shape
 is decided after the paths, from the paths, so no path can be screened against
 it. **That is the next leg**, and it is bigger than a ladder.
+
+---
+
+## State — 2 Sep, fourth leg
+
+**check:park: 10 of 16 green, 21 stranded** (canonical 0, 5 10, 11 3, 24 2,
+225 2, 288 3, 326 1). `tsc` 0, `tsc -p tsconfig.test.json` 0, `build` 0.
+
+### The suite now runs the whole sixteen-seed pool
+
+Ten new files: 115 128 131 208 225 267 274 346 428 451. **84.8 s wall for 27
+files / 1393 tests**, against 70 s for six. It found **seven more failures on
+its first run** — the gap was never theoretical.
+
+### Fix 6 (kept): a cut corner gets the doorway reach, never the relaxed one
+
+Bounding the straight connector's off-axis *component* was not enough — a leg
+with dx 3.6 over dz 15.1 has a small off-axis component and is still a 15.5 m
+diagonal. The limit now depends on the shape: axis-aligned it is an ordinary
+street stub and may run the relaxed distance; off axis at all it is a cut corner
+and gets `STUB_TAIL_LIMIT`.
+
+Whole-pool `test:procgen` **11 failed -> 9**: seed 346's grid axes and seed
+451's detour ratio both go green. `check:park` unchanged on all sixteen.
+
+### Measured and reverted this leg — recorded in the code
+
+**Bounding the head-on arrival shape's diagonal leg the same way.** It fixed
+*all five* remaining `pathsRunOnGridAxes` failures (131, 208, 225, 451) and seed
+128's climbable-tree failure — `test:procgen` 9 -> 7 — and cost:
+
+```
+check:park    10 green -> 8      seed 267 0 -> 1,  seed 451 0 -> 1
+test:procgen  three NEW detourRatiosStayReasonable failures (225, 326, 346)
+```
+
+The elbowed head-on shapes are axis-aligned but longer, so a door pushed off the
+straight shape walks a long way round or not at all. **The honest fix gives the
+door a short axis-aligned arrival rather than refusing the diagonal and leaving
+it to walk** — that is the open work, not a re-run of this.
+
+### `test:procgen` — 9 failing on the whole pool, all diagnosed
+
+| test | seed | owner |
+|---|---|---|
+| `pathsRunOnGridAxes` | 131, 208, 225, 451 | the head-on shape's diagonal leg — see the reverted experiment above |
+| `everyPathIsNearAClimbableTree` | 128 | moves with the same routes; not separately diagnosed |
+| `noPathEndsNowhere` | 288 | bridge 0's foot inside **bridge 1's** reservation |
+| `noPathEndsNowhere` | 5 | the gate pocket, seed 5 flavour |
+| `streetsShareLatticeLines` | 11 | reservation + plot seal every lattice and half-lattice line |
+| `streetsShareLatticeLines` | 5 | the elbow's long leg on a bridge foot's own line |
+
+### THE NEXT LEG, unchanged and now better evidenced: shrink the reservation
+
+Three of these have one owner. `footprintsOverlap` measures
+`MIN_BRIDGE_HALF_LENGTH`; `paths.ts` forbids
+`DECK_HALF_LENGTH + proven reach + RAMP_SCREEN_MARGIN`. Two definitions of one
+rectangle. And the rectangle itself is far larger than the masonry a bridge
+builds — measured on seeds 24/131/451, **real masonry at `|across|` 1.1–2.7
+against a `halfWidth` of 4–5**. Widening `footprintsOverlap` to the reservation
+was tried and cost seed 288 a bridge (`route.unreachable: 2`), so the direction
+is the other one: **shrink the reservation to what gets built.** Expect it to
+move 288, 11 and possibly 5 together. It needs its own control.
+
+Still deferred, with reasons: the `tmp-*` probes and debug exports (they are the
+diagnostic kit for every open defect above), and the rebase (this branch is
+stacked on the still-open #474; `origin/main...HEAD` is 92 files because it
+carries the parent's work).
