@@ -5036,6 +5036,188 @@ const everyCopingStoneSitsOnItsWall: Invariant = (facts) => {
   return complaints;
 };
 
+/**
+ * **You cannot see through a bridge's parapet.** Issue #489.
+ *
+ * Jim, 3 September 2026, standing on one: *"bridges have a hole in them and
+ * their near side, above the arch where some of the wall is missing"*. The
+ * coursed outer face was clamped to the height of the ROAD's crown while the
+ * wall carried on up to the parapet top, `PARAPET_HEIGHT + PARAPET_CROWN_LIFT`
+ * higher — a 1.17 m band with no outer face on it, on every bridge of every
+ * seed. The inner face and the `wallTop` cap were drawn full height and are
+ * single-sided, so the camera looked straight through to the grass beyond.
+ *
+ * **Why a ray and not an arithmetic check.** Nothing derives the drawn face
+ * from the wall it is meant to be facing — they are two lists of vertices kept
+ * together on purpose — so the only honest question is the player's own: point
+ * a camera at the wall and see whether stone stops it. A check that recomputed
+ * the course levels would have agreed with the bug, because the bug *was* the
+ * course levels.
+ *
+ * **Its control is built in, and is the reason it cannot pass vacuously.**
+ * Each sample fires two rays: one inward at the outer face, one outward from
+ * over the roadway at the same wall's inner face. Only samples whose inner ray
+ * hits — proof there is masonry at that height — are judged at all. A ray at
+ * the wrong height, on the wrong ring or along the wrong normal misses both,
+ * and is counted as untested rather than as a pass. The count of judged samples
+ * is announced on every run, so "it tested nothing" cannot look like "it found
+ * nothing".
+ *
+ * Two things it deliberately does not flag, both taken from the game rather
+ * than from a figure of its own:
+ *
+ * - Rings below `bridges.ts`'s `PARAPET_GONE_HUMP` (`ParkFacts`'s
+ *   `expected: false`), where `parapetHeightFor` removes the wall on purpose
+ *   so a wing wall does not sever the path junction a ramp foot lands in.
+ * - Ring points themselves. The wall is drawn as chords between rings while the
+ *   ring points sit on the arc, so a ray aimed at a ring along its own normal
+ *   passes outside both chords and reports a hole in solid stone — the same
+ *   fact `ShellGeometry.planEdge` exists for. Samples are taken at the middle
+ *   of each face. Measured, probing at rings invented see-through on 9 of 23
+ *   bridges and all of it vanished at face middles.
+ */
+const noBridgeParapetCanBeSeenThrough: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const raycaster = new Raycaster();
+  const from = new Vector3();
+  const direction = new Vector3();
+
+  /** How far outside the masonry the probing ray starts. */
+  const STANDOFF = 3.0;
+  /** How far in over the roadway the control ray starts. */
+  const INNER_STANDOFF = 1.2;
+  const HIT_SLACK = 0.25;
+  const PROBE_STEP = 0.05;
+  const PROBE_BOTTOM = 1.5;
+
+  const groups = new Map<string, Object3D>();
+  for (const crossing of facts.world.train.crossings) {
+    if (facts.world.train.fallbackCrossings.includes(crossing)) continue;
+    const name = `bridge-${crossing.railDistance.toFixed(1)}`;
+    const group = facts.world.train.group.getObjectByName(name);
+    if (group) groups.set(name, group);
+  }
+
+  const rings = facts.bridgeParapetRings;
+  let judged = 0;
+  /** Which bridges actually contributed a judged sample — not which exist. */
+  const covered = new Set<string>();
+  const seeThrough = new Map<string, { count: number; worst: number; at: string }>();
+
+  for (let i = 0; i + 1 < rings.length; i += 1) {
+    const a = rings[i] as (typeof rings)[number];
+    // `parkFacts` writes side 0 then side 1 for each ring, so one flank's face
+    // joins entries **two** apart — same parity, therefore same side — and a
+    // differing bridge name is what marks the end of a bridge's run.
+    const next = rings[i + 2] as (typeof rings)[number] | undefined;
+    if (!next || next.bridge !== a.bridge) continue;
+    if (!a.expected || !next.expected) continue;
+    const group = groups.get(a.bridge);
+    if (!group) continue;
+
+    // The middle of the face between this ring and the next on the same flank.
+    const ox = (a.outer[0] + next.outer[0]) / 2;
+    const oz = (a.outer[1] + next.outer[1]) / 2;
+    const ix = (a.inner[0] + next.inner[0]) / 2;
+    const iz = (a.inner[1] + next.inner[1]) / 2;
+    const top = (a.top + next.top) / 2;
+    const nx = ox - ix;
+    const nz = oz - iz;
+    const norm = Math.hypot(nx, nz);
+    if (norm < 1e-6) continue;
+    const ux = nx / norm;
+    const uz = nz / norm;
+
+    const faceHit = (): boolean =>
+      raycaster
+        .intersectObject(group, true)
+        .some((candidate) => candidate.object.name !== 'deck');
+
+    let runFrom: number | null = null;
+    let runTo = 0;
+    const closeRun = (): void => {
+      if (runFrom === null) return;
+      const band = runTo - runFrom + PROBE_STEP;
+      const found = seeThrough.get(a.bridge) ?? { count: 0, worst: 0, at: '' };
+      if (band > found.worst) {
+        found.worst = band;
+        found.at = `(${ox.toFixed(1)}, ${oz.toFixed(1)}), ${runFrom.toFixed(2)}–${runTo.toFixed(2)} m below the top`;
+      }
+      seeThrough.set(a.bridge, found);
+      runFrom = null;
+    };
+
+    for (let drop = 0.03; drop <= PROBE_BOTTOM + 1e-9; drop += PROBE_STEP) {
+      const y = top - drop;
+
+      // The control: is there any wall here at all?
+      direction.set(ux, 0, uz);
+      from.set(ix - ux * INNER_STANDOFF, y, iz - uz * INNER_STANDOFF);
+      raycaster.set(from, direction);
+      raycaster.far = INNER_STANDOFF + norm + HIT_SLACK;
+      if (!faceHit()) {
+        closeRun();
+        continue;
+      }
+
+      // The probe: can it be seen through?
+      direction.set(-ux, 0, -uz);
+      from.set(ox + ux * STANDOFF, y, oz + uz * STANDOFF);
+      raycaster.set(from, direction);
+      raycaster.far = STANDOFF + HIT_SLACK;
+      judged += 1;
+      covered.add(a.bridge);
+      if (faceHit()) {
+        closeRun();
+        continue;
+      }
+      const found = seeThrough.get(a.bridge) ?? { count: 0, worst: 0, at: '' };
+      found.count += 1;
+      seeThrough.set(a.bridge, found);
+      if (runFrom === null) runFrom = drop;
+      runTo = drop;
+    }
+    closeRun();
+  }
+
+  for (const [bridge, found] of seeThrough) {
+    complaints.push(
+      `${bridge}: ${found.count} places on its parapet have masonry at that height ` +
+        `but no outer face on it — you see straight through the wall to the park ` +
+        `beyond. Worst run ${found.worst.toFixed(2)} m at ${found.at}. The drawn ` +
+        'outer face must reach the top of the wall it is facing (#489).',
+    );
+  }
+
+  // A green line that implies cover it does not give is how the next agent
+  // inherits a false belief — stderr, because vitest hides console output from
+  // passing tests, which is exactly the run this note exists for.
+  if (judged === 0) {
+    complaints.push(
+      'no bridge parapet was probed — every crossing on this seed fell back to a ' +
+        'level crossing, or the built mesh names have changed, so this asserts nothing',
+    );
+  } else {
+    // **`covered.size`, never `groups.size`.** The first is how many bridges
+    // this actually judged a sample on; the second is how many exist. Reporting
+    // the second means losing cover on *some* bridges — a renamed mesh on one,
+    // a flank whose rings all read as tapered — says nothing at all, because
+    // only total-zero trips the clause above. Naming the uncovered ones is the
+    // difference between a note that can warn you and one that cannot.
+    const missing = [...groups.keys()].filter((name) => !covered.has(name));
+    process.stderr.write(
+      `noBridgeParapetCanBeSeenThrough: judged ${judged} samples across ` +
+        `${covered.size} of ${groups.size} bridge(s) on seed ${facts.seed}` +
+        (missing.length > 0
+          ? ` — NO SAMPLE JUDGED on ${missing.join(', ')}, which this run therefore asserts nothing about`
+          : '') +
+        `\n`,
+    );
+  }
+
+  return complaints;
+};
+
 const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
   const complaints: string[] = [];
   const probe = new Vector3();
@@ -8718,6 +8900,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   [
     'every modelled coping stone sits on the wall it caps',
     everyCopingStoneSitsOnItsWall,
+  ],
+  [
+    'no bridge parapet can be seen through — its outer face reaches the wall top',
+    noBridgeParapetCanBeSeenThrough,
   ],
   [
     'every bridge is as wide as its own path, with the rail corridor open beneath',

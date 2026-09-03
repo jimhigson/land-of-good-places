@@ -39,7 +39,7 @@ import {
   buildVoussoirRing,
   haunchRadius,
 } from './bridgeStonework';
-import { VOUSSOIR_TAPER_RADIUS } from '../../art/models/bridgeStones';
+import { COPING_HEIGHT, COPING_SINK, VOUSSOIR_TAPER_RADIUS } from '../../art/models/bridgeStones';
 import type { MovingPlatform } from '../building/surfaces';
 
 /**
@@ -199,6 +199,19 @@ export const PARAPET_HEIGHT = 0.72;
  */
 const PARAPET_MIN_HUMP = BUILDING_STEP_UP;
 
+/**
+ * The hump height at which the parapet has tapered away to **nothing at all**
+ * — the bottom of {@link parapetHeightFor}'s taper window.
+ *
+ * Named rather than left as a literal inside that function because anything
+ * asking "is a parapet supposed to be standing here?" has to ask the same
+ * question the geometry answers, and there is exactly one right answer. The
+ * see-through probe (`scripts/measure-bridge-parapet.mts`) and #489's invariant
+ * both ask: below this the wall is deliberately absent, and counting its
+ * absence as a hole would be a check failing on correct geometry.
+ */
+export const PARAPET_GONE_HUMP = 0.25;
+
 /** How the visible parapet fades out as the hump shrinks toward the taper
  * threshold — full height at {@link PARAPET_MIN_HUMP} (where its collision
  * wall also starts existing), gone by ankle height. One owner for the
@@ -207,7 +220,7 @@ const PARAPET_MIN_HUMP = BUILDING_STEP_UP;
 function parapetHeightFor(humpHeight: number): number {
   // Taper to nothing at the feet, where the hump is barely above the ground
   // and a wall would sever the path junctions the ramps land in.
-  const t = (humpHeight - 0.25) / (PARAPET_MIN_HUMP - 0.25);
+  const t = (humpHeight - PARAPET_GONE_HUMP) / (PARAPET_MIN_HUMP - PARAPET_GONE_HUMP);
   const taper = t < 0 ? 0 : t > 1 ? 1 : t;
   // …and grow with how high the hump stands, so the parapet's own top line
   // arcs *above* the road's profile instead of running parallel to it.
@@ -706,7 +719,6 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
     lengthPos,
     roadHalf,
     halfAcross,
-    crownY,
     surfaceProfile,
     soffitAt,
     springY,
@@ -939,7 +951,6 @@ function buildShellGeometry(
   lengthPos: number,
   roadHalf: number,
   halfAcross: number,
-  crownY: number,
   surfaceProfile: (x: number, z: number, along: number) => number,
   soffitAt: (alongAbs: number) => number,
   springY: number,
@@ -978,7 +989,11 @@ function buildShellGeometry(
   // previous ring's vertices per strip, so strips join into quads.
   interface Ring {
     readonly outerBottom: [number, number]; // [side +1, side -1]
-    readonly outerTop: [number, number];
+    // No `outerTop`. There was one, built at the parapet top and consumed by no
+    // quad at all — it was an exact duplicate of course 0's top vertices, and it
+    // is what made #489 look for a while like the top of the wall was drawn when
+    // it was not. A vertex nothing reads is a false signal to the next person
+    // holding a profiler or a diff, so it goes rather than staying as decoration.
     /** The coursed outer face: per side, two vertex indices per course (its
      * own top and bottom, at its own recess). See {@link COURSE_HEIGHT}. */
     readonly courses: [number[], number[]];
@@ -987,6 +1002,16 @@ function buildShellGeometry(
     readonly courseYs: [number[], number[]];
     /** This ring's parapet top, per side — the plane the coping strip caps. */
     readonly top: [number, number];
+    /** This ring's road surface — with {@link top}, how much parapet there
+     * actually is here, which is what decides whether a coping block is laid. */
+    readonly surface: number;
+    /**
+     * The terrain at this ring's own outer face, per side — or `-Infinity`
+     * inside the tunnel, where the flank stands in open air over the railway
+     * and nothing is buried. What the reveal below asks to find out whether it
+     * is drawing a horizontal face underground.
+     */
+    readonly groundOuter: [number, number];
     readonly innerBottom: [number, number]; // parapet inner face, at road
     readonly innerTop: [number, number];
     readonly roadA: number; // road edge, side +1
@@ -1032,9 +1057,35 @@ function buildShellGeometry(
   //
   // So the face is stepped into courses at **fixed world heights** — every
   // course is genuinely level, right along the bridge and across both flanks,
-  // the way a real coursed wall is. Levels are anchored on the crown so the top
-  // course lands square under the coping rather than wherever the arithmetic
-  // finished.
+  // the way a real coursed wall is. Levels are anchored on the **top of the
+  // parapet** so the top course lands square under the coping rather than
+  // wherever the arithmetic finished.
+  //
+  // **Anchored on `highestTop`, the drawn wall top — never on `crownY`, the
+  // road's own crown.** That was issue #489: Jim, 2026-09-03, *"bridges have a
+  // hole in them and their near side, above the arch where some of the wall is
+  // missing"*. The ladder started at `crownY`, so no course level ever existed
+  // above it, and `buildCourses` below clamps every column into the levels it
+  // is given — which put the top of the drawn outer face at the road crown
+  // while the wall it was meant to be facing carried on up to
+  // `parapetTopFor(...)`, i.e. `PARAPET_HEIGHT + PARAPET_CROWN_LIFT` = 1.17 m
+  // higher. That band had no outer face at all. The inner face and the
+  // `wallTop` cap were drawn full height and are single-sided, so the game
+  // camera looked straight through the missing face to the grass beyond.
+  //
+  // It read as an *arch* bug — and the issue reasonably guessed at one — purely
+  // because the band is widest where the parapet stands highest, which is the
+  // crown, which is directly over the arch. Measured on the built park it was
+  // every bridge on all sixteen pool seeds, a 1.05 m contiguous see-through
+  // band on all 23 of them, independent of span: the giveaway that the arch had
+  // nothing to do with it, since spans vary and the band did not.
+  // `pnpm run measure:bridge-parapet` is that measurement, and
+  // `everyBridgeParapetHasAnOuterFace` in `test/procgen/invariants.ts` is what
+  // stops it coming back.
+  //
+  // The collider was never wrong here: `guardRails` takes its `topHeight` from
+  // `parapetTopFor` too, so the masonry stayed solid throughout — she could see
+  // through the bridge but never walk through it.
   //
   // Alternate courses are recessed `COURSE_RECESS` inward. Inward, never
   // outward: `halfAcross` is the width the footprint search actually cleared
@@ -1063,8 +1114,8 @@ function buildShellGeometry(
   }
   lowestBottom = Math.min(lowestBottom, soffitAt(0) - 0.5);
   const courseLevels: number[] = [];
-  for (let y = crownY; y > lowestBottom - COURSE_HEIGHT; y -= COURSE_HEIGHT) {
-    if (y <= highestTop + COURSE_HEIGHT) courseLevels.push(y);
+  for (let y = highestTop; y > lowestBottom - COURSE_HEIGHT; y -= COURSE_HEIGHT) {
+    courseLevels.push(y);
   }
   if (courseLevels.length < 2) courseLevels.push(lowestBottom);
   const courseCount = courseLevels.length - 1;
@@ -1144,13 +1195,13 @@ function buildShellGeometry(
         vertex(outerPlus.x, bottomPlus, outerPlus.z, u, bottomPlus / TEXTURE_METRES),
         vertex(outerMinus.x, bottomMinus, outerMinus.z, u, bottomMinus / TEXTURE_METRES),
       ],
-      outerTop: [
-        vertex(outerPlus.x, parapetTopPlus, outerPlus.z, u, parapetTopPlus / TEXTURE_METRES),
-        vertex(outerMinus.x, parapetTopMinus, outerMinus.z, u, parapetTopMinus / TEXTURE_METRES),
-      ],
       courses: [coursesPlus.column, coursesMinus.column],
       courseYs: [coursesPlus.ys, coursesMinus.ys],
       top: ringTop,
+      surface,
+      groundOuter: inTunnel
+        ? [-Infinity, -Infinity]
+        : [terrainHeight(outerPlus.x, outerPlus.z), terrainHeight(outerMinus.x, outerMinus.z)],
       innerBottom: [
         vertex(roadPlus.x, roadBed, roadPlus.z, u, roadBed / TEXTURE_METRES),
         vertex(roadMinus.x, roadBed, roadMinus.z, u, roadBed / TEXTURE_METRES),
@@ -1248,10 +1299,108 @@ function buildShellGeometry(
             // already closes the wall at exactly this height. The reveal is
             // surplus geometry that only exists because the collapsed course
             // above it has no face for it to step to.
+            //
+            // **Under the coping counts as at the top** (#489). The test was an
+            // exact `>=` against the wall top, which catches a course collapsed
+            // *precisely* there and misses one collapsed a millimetre under it —
+            // and a millimetre under it the reveal is still a horizontal face
+            // fighting the `wallTop` cap. #489 moved the course levels (they now
+            // hang off the wall top rather than the road crown), which simply
+            // reshuffled which rings land on that coincidence: four baselined
+            // `shell|wallTop` seams went away and three fresh ones appeared.
+            //
+            // `COPING_SINK` is the honest depth to use rather than a tolerance
+            // invented here: `buildCopingRun` seats every block that far below
+            // the drawn wall top, so the band from `top - COPING_SINK` to `top`
+            // is *inside the coping stone*. A face there is hidden by
+            // construction, which is what makes deleting it the ART_DIRECTION §7
+            // fix and not a maintained stand-off.
+            //
+            // **But only where there is actually a stone to hide under, and
+            // that question has one owner.** `buildCopingRun` lays no block on a
+            // segment whose parapet is shorter than the block is thick, so on a
+            // tapered ramp foot the slack was deleting reveals with open sky
+            // above them and no cap closing the step — 50 of them across 12 of
+            // the 16 pool seeds, 16–77 mm below a wall top standing 0.00–0.10 m
+            // proud of the road, every one introduced by this branch. Asking
+            // `min(parapet) >= COPING_HEIGHT` here is the *same* test that
+            // function makes, so the two cannot drift into two definitions of
+            // "is there coping here" (CLAUDE.md's most-cited bug); where there
+            // is no block, the exact `>= top` test is what applies, as it did
+            // before.
+            const copingHere =
+              Math.min(
+                (previous.top[side] as number) - previous.surface,
+                (ring.top[side] as number) - ring.surface,
+              ) >= COPING_HEIGHT;
+            // Where no block is laid, the `wallTop` cap is still there — it is
+            // drawn for every ring pair on both flanks, unconditionally — so a
+            // reveal landing *in the cap's own plane* still fights it and still
+            // has to go. What it must not do is take a genuine ledge with it.
+            //
+            // The two are cleanly separable, measured across the pool: the
+            // strays this branch was deleting sat **16–77 mm** below the wall
+            // top, while a reveal actually fighting the cap sits **1.5 mm**
+            // under it (seed 225's `bridge-244.0`). So the test is a shape one —
+            // *is the course above this reveal a real course, or a clamping
+            // artefact?* — at a hundredth of `COURSE_HEIGHT`, which is 7 mm and
+            // falls in the middle of that gap. A course 0.2% of a course tall is
+            // the arithmetic landing on the wall top by coincidence; one 2–11%
+            // of a course tall is masonry somebody can see.
+            const artefact = COURSE_HEIGHT / 100;
+            const sink = copingHere ? COPING_SINK : artefact;
             const revealAtTop =
-              (previous.courseYs[side][course * 2 + 1] as number) >= (previous.top[side] as number) &&
-              (ring.courseYs[side][course * 2 + 1] as number) >= (ring.top[side] as number);
-            if (!revealAtTop) {
+              (previous.courseYs[side][course * 2 + 1] as number) >=
+                (previous.top[side] as number) - sink &&
+              (ring.courseYs[side][course * 2 + 1] as number) >=
+                (ring.top[side] as number) - sink;
+            // **And not where it would be drawn in the ground** (#489).
+            //
+            // The flank deliberately runs half a metre below the terrain so a
+            // bridge does not float over its own ground with a seam. Course
+            // levels are fixed world heights and the terrain undulates, so
+            // somewhere along a 30 m flank one boundary always grazes the
+            // grass — and a reveal is a horizontal 6 cm shelf, so where it
+            // grazes it shares the ground's plane. That is the same seam the
+            // baselined `terrain|<bridge>/wallTop` entries already record at
+            // the ramp feet; re-anchoring the ladder for #489 moved which
+            // level does the grazing, so it had to be closed properly rather
+            // than re-baselined.
+            //
+            // `COURSE_RECESS` is the depth to use, and for the same reason
+            // `COPING_SINK` is the right one above: it is the ledge's own
+            // width, owned by the geometry rather than invented here. A 6 cm
+            // shelf standing less than its own width out of the grass is not
+            // reading as masonry to anybody, so deleting it is the
+            // ART_DIRECTION §7 answer where nudging it would not be.
+            //
+            // **Measured across all sixteen pool seeds, and the threshold is
+            // saturated — read this before changing anything near it.** Of
+            // 2241 reveals this clause deletes, 209 stand *above* the terrain
+            // rather than under it, 110 of those by more than 30 mm, and the
+            // worst is **59.9 mm against the 60 mm threshold**. So there is
+            // essentially no headroom: a face is being deleted within 0.1 mm of
+            // the limit, and any change that lifts the coursing or moves the
+            // terrain under a flank can push one back over and reopen the seam
+            // `check:coplanar` is currently green on.
+            //
+            // This comment first said "2–19 mm", which was measured on two
+            // bridges of one seed and read as 3× headroom where there is none.
+            // The reviewer caught it. `scripts/measure-bridge-parapet.mts` is
+            // the see-through half; the deletion counts above come from
+            // instrumenting this clause directly across the pool, and anyone
+            // touching it should re-run that rather than trust these numbers,
+            // which are a measurement and will go stale like any other.
+            //
+            // Only the reveal goes. The vertical course faces stay: a wall does
+            // not share a plane with a hillside, so they cost nothing and they
+            // are what stops the buried stretch opening up on a slope.
+            const revealInGround =
+              (previous.courseYs[side][course * 2 + 1] as number) <=
+                (previous.groundOuter[side] as number) + COURSE_RECESS &&
+              (ring.courseYs[side][course * 2 + 1] as number) <=
+                (ring.groundOuter[side] as number) + COURSE_RECESS;
+            if (!revealAtTop && !revealInGround) {
               const bnt = before[(course + 1) * 2] as number;
               const nnt = now[(course + 1) * 2] as number;
               if (side === 0) quad(indices, bb, bnt, nnt, nb);

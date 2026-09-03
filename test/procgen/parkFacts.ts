@@ -22,6 +22,32 @@ import { createCatBus } from '../../src/world/entrance/catBus.ts';
 import type { World } from '../../src/world/World.ts';
 import type { ParkBoundary } from '../../src/world/boundary.ts';
 
+/**
+ * One side of one ring of a bridge's drawn parapet. See
+ * {@link ParkFacts.bridgeParapetRings}.
+ */
+export interface BridgeParapetRing {
+  /** Which bridge group it came off, so a failure names it. */
+  readonly bridge: string;
+  /** The wall's outer face in plan, and the height it was drawn to. */
+  readonly outer: readonly [number, number];
+  /** The wall's inner face in plan, at the same height. */
+  readonly inner: readonly [number, number];
+  /** World height of the parapet's drawn top here. */
+  readonly top: number;
+  /** How far that top stands over the terrain beside it. */
+  readonly hump: number;
+  /**
+   * Whether a parapet is *supposed* to be standing here at all.
+   *
+   * False below `bridges.ts`'s `PARAPET_GONE_HUMP`, where `parapetHeightFor`
+   * deletes the wall on purpose — a wing wall at a ramp foot severs the path
+   * junction the foot lands in. Its absence there is correct geometry, and an
+   * invariant counting it would be failing on a bridge that is right.
+   */
+  readonly expected: boolean;
+}
+
 /** One planted thing found standing in front of the arriving cat bus. */
 export interface HidingFact {
   readonly x: number;
@@ -589,6 +615,25 @@ export interface ParkFacts {
    * own masonry. See {@link BridgePavingFact}.
    */
   readonly bridgePaving: readonly BridgePavingFact[];
+  /**
+   * **Every ring of every bridge's drawn parapet, as the sweep really laid it
+   * out** — for the see-through probe behind issue #489.
+   *
+   * Read straight off the built `wallTop` mesh, which `buildShellGeometry`
+   * writes four vertices per ring (`copingOuter[+], copingOuter[−],
+   * copingInner[+], copingInner[−]`), so each entry is one side of one ring:
+   * where the wall's outer face is in plan, where its inner face is, and the
+   * height of the top it was actually drawn to.
+   *
+   * `hump` is the drawn top's height over the terrain beside it, and it is
+   * sampled here rather than in the invariant because `terrainHeight` reaches
+   * `parkManifest` through `boundary.ts` — a static import of it into the test
+   * tree pins every seed to the default park, which is this file's own standing
+   * trap. {@link BridgeParapetRing.expected} folds that into the one question
+   * an invariant wants to ask, using `bridges.ts`'s own `PARAPET_GONE_HUMP`
+   * rather than a threshold restated here.
+   */
+  readonly bridgeParapetRings: readonly BridgeParapetRing[];
   /**
    * **Drawn paths whose own END stands in the air on a bridge** — issue #414,
    * Jim's *"there is also a path that runs into the side of the bridge —
@@ -1380,6 +1425,49 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // Dynamic, like everything else seed-dependent here: a static import would
   // pull in a second copy of the park at the default seed.
   const { terrainHeight } = await import('../../src/world/terrain.ts');
+
+  // --- every bridge's drawn parapet, ring by ring (issue #489) --------------
+  // Read off the built `wallTop` mesh; `PARAPET_GONE_HUMP` comes from
+  // `bridges.ts` so "is a parapet supposed to be here?" has one owner rather
+  // than a threshold restated in a test. Both imports are dynamic for the usual
+  // reason — `bridges.ts` reaches `paths.ts` and `terrain.ts` reaches
+  // `parkManifest` through `boundary.ts`, and either would pin the seed.
+  const { PARAPET_GONE_HUMP } = await import('../../src/world/train/bridges.ts');
+  const bridgeParapetRings: BridgeParapetRing[] = [];
+  {
+    // `Mesh` is shadowed later in this function by a destructured dynamic
+    // import, so the static one is in its TDZ here; aliasing is the pattern
+    // this file already uses (see `InstancedMeshClass` above).
+    const { Mesh: MeshClass } = await import('three');
+    const bridgeGroups: import('three').Object3D[] = [];
+    world.train.group.traverse((node) => {
+      if (node.name.startsWith('bridge-')) bridgeGroups.push(node);
+    });
+    for (const group of bridgeGroups) {
+      const wallTop = group.getObjectByName('wallTop');
+      if (!(wallTop instanceof MeshClass)) continue;
+      const at = wallTop.geometry.getAttribute('position');
+      if (!at || at.count % 4 !== 0) continue;
+      for (let ring = 0; ring < at.count / 4; ring += 1) {
+        for (const side of [0, 1] as const) {
+          const outer = ring * 4 + side;
+          const inner = ring * 4 + 2 + side;
+          const top = at.getY(outer);
+          const ox = at.getX(outer);
+          const oz = at.getZ(outer);
+          const hump = top - terrainHeight(ox, oz);
+          bridgeParapetRings.push({
+            bridge: group.name,
+            outer: [ox, oz],
+            inner: [at.getX(inner), at.getZ(inner)],
+            top,
+            hump,
+            expected: hump > PARAPET_GONE_HUMP,
+          });
+        }
+      }
+    }
+  }
   const slideCameras: {
     beat: number;
     eye: readonly [number, number, number];
@@ -2538,6 +2626,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     climbableTrees,
     lamps: world.lampPosts.positions.map((p) => [p.x, p.z] as const),
     bridgeReservations,
+    bridgeParapetRings,
     plannedBridgeSiteDistances,
     bridgePaving,
     strandedPathEnds,
