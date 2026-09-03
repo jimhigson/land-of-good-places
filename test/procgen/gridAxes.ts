@@ -95,15 +95,15 @@ export const OFF_AXIS_FRACTION = 0.15;
  * | tolerance | pieces over 16 m | longest piece |
  * |---|---|---|
  * | 0.5 - 22 deg | none | 13.69 m |
- * | 23 - 28 deg | seed 5 at 16.8 m | 16.83 m |
- * | 30 deg | seeds 5, 24 (the dogleg, 21.9 m) | 21.93 m |
+ * | 22.5 - 28 deg | seed 5 at 16.8 m | 16.83 m |
+ * | 29 - 30 deg | seeds 5, 24 (the dogleg, 21.9 m) | 21.93 m |
  * | 35 - 40 deg | seeds 5, 24, 131, 267 | 21.93 m |
  *
  * So the answer is *identical* everywhere from 0.5 to 22 degrees, and the first
- * thing the measurement invents is a 16.8 m piece on seed 5 at 23. **8.627
- * degrees sits inside that plateau with 8.1 degrees of room below it and 13.4
- * above** — that is the whole claim, and it is a claim about where the value
- * sits rather than about where it came from.
+ * thing the measurement invents is a 16.8 m piece on seed 5, which appears
+ * between 22 and 22.5. **8.627 degrees sits inside that plateau with 8.1
+ * degrees of room below it and 13.4 above** — that is the whole claim, and it
+ * is a claim about where the value sits rather than about where it came from.
  *
  * Note what the plateau does *not* cover: **cut-invariance held at every
  * tolerance swept, 0.5 through 40 degrees.** That property comes from asking
@@ -219,15 +219,25 @@ const parallel = (a: GroundPoint, b: GroundPoint): boolean =>
  * dogleg fixture exists to reject, sneaking back in through the other rule.
  * `gridAxes.test.ts` pins that number so nobody discovers it by surprise.
  *
- * It happens on the real park, and it is measured rather than feared. Across
- * the sixteen-seed pool there are **nine** stretch pairs welded by rule 1 that
- * rule 2 would have refused, at angles from 17.0 to **83.6 degrees**. Seven of
- * the nine inflate the piece by nothing at all (the shorter arm lies inside the
- * longer one's span); the worst inflation anywhere is **0.44 m** (seed 225,
- * 3.88 m arm to a 4.32 m piece), and the tightest any welded piece comes to the
- * limit is **3.64 m of headroom** (seed 288, 12.36 m against 16). So it changes
- * no verdict today — but it is a way this measurement could overstate, and it
- * should be read as a known bound, not as a proof of correctness.
+ * It happens on the real park, and it is measured rather than feared. Over
+ * seventeen seeds — the sixteen of `PARK_SEED_POOL` plus seed 18, which the
+ * invariant suite runs but the pool does not contain — there are **ten**
+ * stretch pairs welded by rule 1 that rule 2 would have refused, at angles from
+ * 17.0 to **83.6 degrees**.
+ *
+ * **What that costs, measured on the thing that is actually compared against
+ * {@link MAX_DIAGONAL_APPROACH}:** nothing. Re-running every seed with rule 1
+ * restricted to welds that *also* pass rule 2's angle test, the largest piece
+ * of off-axis ground is **identical to two decimal places on every seed** — so
+ * rule 1's angle-blindness contributes **0.00 m** to any verdict. The welds it
+ * makes are all inside pieces that something else already bounds. (Per *pair*
+ * the worst it adds is 0.44 m, on seed 225's 3.88 m arm; that inflation never
+ * reaches the piece being tested.)
+ *
+ * The tightest any measured piece comes to the limit is **2.31 m of headroom**
+ * — 13.69 m against 16, on seeds 11 and 288. So there is real room, but it is
+ * a way this measurement could overstate, and it should be read as a known
+ * bound rather than as a proof of correctness.
  *
  * **Why it cannot simply be fixed by requiring collinearity**, the way rule 2's
  * predecessor was: the spur into seed 225's building door turns **37 degrees**

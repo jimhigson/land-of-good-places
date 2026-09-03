@@ -350,13 +350,16 @@ const SEED24_CONNECTOR_OTHER_ARM: GroundPoint[] = [
  * stretch in two — and tearing a stretch according to where a carrier happened
  * to end it is the carrier-dependence this whole module exists to remove.
  *
- * Measured impact on the real pool, so the bound is known rather than feared:
- * nine stretch pairs across the sixteen seeds are welded by rule 1 where rule 2
- * would have refused, at angles from 17.0 to 83.6 degrees. Seven inflate the
- * piece by nothing (the shorter arm lies inside the longer one's span); the
- * worst inflation anywhere is 0.44 m, and the tightest a welded piece comes to
- * `MAX_DIAGONAL_APPROACH` is 3.64 m of headroom (seed 288, 12.36 m against 16).
- * No seed's verdict turns on it today.
+ * Measured impact on the real park, so the bound is known rather than feared.
+ * Over seventeen seeds (the sixteen of `PARK_SEED_POOL` plus seed 18, which the
+ * suite runs but the pool does not contain), ten stretch pairs are welded by
+ * rule 1 where rule 2 would have refused, at 17.0 to 83.6 degrees. Re-running
+ * every seed with rule 1 restricted to welds that also pass rule 2's angle
+ * test, the largest piece of off-axis ground is identical to two decimals on
+ * every seed: rule 1's angle-blindness contributes **0.00 m** to any verdict,
+ * because the welds it makes all sit inside pieces something else already
+ * bounds. Tightest headroom of any measured piece is 2.31 m (13.69 m against
+ * 16, seeds 11 and 288).
  */
 it('welds a right-angle junction through rule 1 — a known limitation, pinned', () => {
   // Two 9.90 m arms at 45 degrees to the world axes, so every hop is off-axis,
