@@ -1292,19 +1292,88 @@ function pointInSlideCorridor(x: number, z: number): boolean {
  * sites carry it.
  */
 function segmentCutsABridgeRamp(ax: number, az: number, bx: number, bz: number): boolean {
-  const length = Math.hypot(bx - ax, bz - az);
-  // 1.5 m is coarser than the 3 m parapet band is thick, so a transverse
-  // segment cannot step over the masonry between two samples.
-  const steps = Math.max(1, Math.ceil(length / 1.5));
-  for (let s = 0; s <= steps; s += 1) {
-    const t = s / steps;
-    // The masonry, not the whole footprint — see
-    // {@link pointStandsOnBridgeMasonry}. A street may run along a bridge's
-    // deck (that is what the crossing leg itself does); it may not run into
-    // the parapet flanking it.
-    if (pointStandsOnBridgeMasonry(ax + (bx - ax) * t, az + (bz - az) * t)) return true;
+  // **Solved, not sampled** (2 Sep 2026). This walked the segment in 1.5 m
+  // steps and asked `pointStandsOnBridgeMasonry` at each one, under a comment
+  // claiming "1.5 m is coarser than the 3 m parapet band is thick". The band is
+  // `halfWidth` to `halfWidth + RAMP_SCREEN_MARGIN` — **half a metre** thick,
+  // not three — so a ribbon crossing a ramp square-on stepped clean over it
+  // between two samples and the screen said nothing.
+  //
+  // Measured on seed 225: five drawn routes crossed a parapet
+  // (`spur-building`, `spur-ferrisWheel`, `spur-dodgems`, `spur-waterFight`,
+  // `spur-stall.keychain`), the control polylines every bit as much as the
+  // drawn curves — so it was never the fillet pass. Each crossing breaks the
+  // waypoint chain of the route it is on, because the parapet is solid, and the
+  // two halves fall into separate `poiGraph` pockets: seed 225's whole
+  // `poi.stranded` count of 70 across three components.
+  //
+  // In the site's own (along, across) frame the parapet is two axis-aligned
+  // rectangles, so this is an exact segment-rectangle test — no step size to be
+  // wrong about, and cheaper than sampling finely enough to be safe.
+  for (const site of CROSSING_SITES) {
+    const alongA = (ax - site.x) * site.dirX + (az - site.z) * site.dirZ;
+    const acrossA = -(ax - site.x) * site.dirZ + (az - site.z) * site.dirX;
+    const alongB = (bx - site.x) * site.dirX + (bz - site.z) * site.dirZ;
+    const acrossB = -(bx - site.x) * site.dirZ + (bz - site.z) * site.dirX;
+    const alongMin = -(DECK_HALF_LENGTH + site.rampReachNeg + RAMP_SCREEN_MARGIN);
+    const alongMax = DECK_HALF_LENGTH + site.rampReachPos + RAMP_SCREEN_MARGIN;
+    const inner = site.halfWidth;
+    const outer = site.halfWidth + RAMP_SCREEN_MARGIN;
+    for (const sign of [1, -1] as const) {
+      if (
+        segmentMeetsRect(
+          alongA,
+          acrossA * sign,
+          alongB,
+          acrossB * sign,
+          alongMin,
+          alongMax,
+          inner,
+          outer,
+        )
+      ) {
+        return true;
+      }
+    }
   }
   return false;
+}
+
+/** Liang-Barsky: does the segment meet the axis-aligned rectangle at all
+ * (touching counts)? Used in a crossing site's own frame, where the parapet is
+ * a rectangle and the road beside it is not. */
+function segmentMeetsRect(
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+  xMin: number,
+  xMax: number,
+  zMin: number,
+  zMax: number,
+): boolean {
+  let t0 = 0;
+  let t1 = 1;
+  const dx = bx - ax;
+  const dz = bz - az;
+  const clip = (p: number, q: number): boolean => {
+    if (Math.abs(p) < 1e-12) return q >= 0;
+    const r = q / p;
+    if (p < 0) {
+      if (r > t1) return false;
+      if (r > t0) t0 = r;
+    } else {
+      if (r < t0) return false;
+      if (r < t1) t1 = r;
+    }
+    return true;
+  };
+  return (
+    clip(-dx, ax - xMin) &&
+    clip(dx, xMax - ax) &&
+    clip(-dz, az - zMin) &&
+    clip(dz, zMax - az)
+  );
 }
 
 /**
@@ -5087,4 +5156,10 @@ export function debugGridReach(): unknown {
       return rows;
     })(),
   };
+}
+
+/** TEMP diagnostic: the parapet band only — what `segmentCutsABridgeRamp`
+ * actually screens against. */
+export function debugPointStandsOnBridgeMasonry(x: number, z: number): boolean {
+  return pointStandsOnBridgeMasonry(x, z);
 }
