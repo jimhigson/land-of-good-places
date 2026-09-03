@@ -2762,3 +2762,53 @@ instead, this is wrong and the cap is innocent. Then, if the cap is the cause,
 measure reorder + widened elbow cap together — the five seeds for the benefit
 column **and** all sixteen for the cost column, both, because a one-sided
 measurement is what made me report this item wrongly the first time.
+
+### THE CAP HYPOTHESIS IS CONFIRMED — measured, and my "centimetres" figure was wrong
+
+Instrumented `computeGridConnectors` to evaluate **all three** head-on shapes
+at a node and print each one's length and verdict. This had to be done
+*before* the real loop and writing only to stderr: the real loop `break`s on
+its first acceptance, so it can never report what the shapes it did not reach
+would have done — which is the entire question. Its control is that it prints
+the accepted shape too, and the shape it called `would-ACCEPT` is the one
+actually drawn.
+
+Seed 131, the node `spur-building` is really drawn from:
+
+```
+node=(33.7,-6.7) lead=(37.3,8.4) relax=0 cap=19.60
+  STRAIGHT len=19.07  clear=true   would-ACCEPT     <- the 15.5 m diagonal
+  ELBOW1   len=22.25  clear=true   REFUSED-cap
+  ELBOW2   len=22.25  clear=true   REFUSED-cap
+```
+
+**Both axis-aligned alternatives are geometrically CLEAR and are refused by
+the length cap alone.** Not by a plot, not by the ring, not by the rail side,
+not by bridge masonry — by one number.
+
+**My arithmetic in the previous section said "refused by centimetres". It is
+2.65 m. Recording that as wrong**; the conclusion survives the correction but
+the figure did not, and the difference matters if anyone sizes the fix off it.
+
+The ratio is the point: **22.25 / 19.07 = 1.167**, comfortably under `sqrt(2)`.
+An elbow is the Manhattan form of the straight shape's diagonal, so its length
+is at most `sqrt(2)` times it, *by construction*. One cap applied to both
+therefore forbids the axis-aligned shape exactly where the diagonal is nearest
+the cap — the only case that matters — which is this repo's dominant defect
+wearing its geometry clothes.
+
+**The fix that follows, and its justification.** Give the elbows a cap of
+`cap * Math.SQRT2` and leave the straight shape's cap untouched. That admits
+**every elbow whose diagonal counterpart would have fitted, and nothing more**
+— a derived bound, not a tuned one, and it is widening a *distance* for the
+axis-aligned shape rather than licensing a *shape*, which is this branch's own
+stated rule.
+
+It only bites in combination with the reorder: without it the straight shape
+is still tried first and still accepted at 19.07, so nothing changes. The two
+are one change and must be measured as one.
+
+Instrument removed again (`git checkout src/world/paths.ts`, grep-verified 0
+occurrences of `LGP_DEBUG_SHAPES`) — it costs an env lookup per node per shape
+inside the connector search, and `check:park-boot` is already red on this
+branch's parent for boot-slice cost.
