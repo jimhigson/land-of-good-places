@@ -2484,3 +2484,57 @@ grep-verified** (0 occurrences of `MUTATION`, 1 of the clean comparison).
 **10 green, 13 stranded, seed for seed identical.** Widening the reservation's
 length cost no routing anywhere in the pool — which is worth knowing, because
 the `across` widening on the fifth leg cost plenty.
+
+### `test:procgen`, before and after — 11 failed -> 9, 1398 passed -> 1400
+
+```
+before (df7ecac4)   Test Files 11 failed | 16 passed (27)   Tests 11 failed | 1398 passed (1409)
+after               Test Files  9 failed | 18 passed (27)   Tests  9 failed | 1400 passed (1409)
+```
+
+`builtMasonryStaysInsideItsReservation` is **green on all sixteen seeds** — the
+two false positives (5, 288) are gone and the two real defects it newly found
+(274, 326) are fixed. **No new failure of any kind.** The nine that remain are
+the nine that were already there:
+
+| test | seeds |
+|---|---|
+| `pathsRunOnGridAxes` | 131, 208, 225, 346, 451 |
+| `streetsShareLatticeLines` | 5, 11 |
+| `every path passes near a tree a child can climb` | 128 |
+| `noPathEndsNowhere` | 288 |
+
+`check:park` is unchanged seed for seed: **10 of 16 green, 13 stranded**
+(`diff` of the two sweeps is empty).
+
+### Where the next leg picks up
+
+The main task is **done and closed, with its premise corrected**: seeds 5 and
+288 were not one defect and were not defects at all, and chasing
+`footprintsOverlap` would have been chasing nothing. Do not reopen it —
+`footprintsOverlap` is untouched, and the refuted list it carries stands.
+
+Still owed, in the brief's own order:
+
+1. **`pathsRunOnGridAxes`, five seeds, one class** (131, 208, 225, 346, 451):
+   the head-on arrival shape's diagonal leg. Bounding the leg is already
+   measured and reverted. The open work is unchanged — **give the door a short
+   axis-aligned arrival rather than refusing the diagonal and leaving the door
+   to walk.**
+2. **Seed 267, green -> 3.** Untested hypothesis stands: try the *other* elbow
+   corner (the code takes the cheaper of two), then price a rescued tap above
+   a straight one.
+3. The remaining stranded to zero.
+4. **Stage-2 invariant (b)** — "every destination's doormat is a paving
+   terminal". Not started.
+5. **`scripts/tmp-*.mts` and the debug exports are still in place** and should
+   stay until the above is done — `tmp-stoneground.mts` in particular is the
+   instrument that found the ramp overrun and the one to re-run after any
+   change to a reservation or to `bridgeFootprint.ts`. Delete them in the
+   commit that opens the PR, not before.
+6. **Rebase onto `origin/main`** (this leg did not: `main` moved under the
+   branch and the parent #474 is still open). `main` carries `check:coplanar`
+   and its workflow, which this branch lacks.
+7. The three inherited reds (`check:pet-slide`, `check:park-boot`,
+   `check:arrival-completes`) are **#474's**, measured byte-identical on #474
+   alone. This branch cannot go green on `pnpm run check` until #474 does.
