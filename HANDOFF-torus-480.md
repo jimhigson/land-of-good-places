@@ -68,9 +68,13 @@ solidity.
       removed). `test:procgen` green on all 5 seeds, exit 0.
 - [x] Browser before/after, posted to #480 (comment 5524511359) with the
       `/view?camPos=0,4.5,74&camDir=0,-0.08,-1&timeOfDay=12:00` framing.
-- [ ] `pnpm run check` — running, log at scratchpad/check.log
-- [ ] `pnpm run build`
-- [ ] PR
+- [x] `pnpm run build` exit 0; `pnpm run test:procgen` exit 0 (17 files, 520
+      tests); `pnpm run check` exit 0 (re-run on the final tree in flight at
+      hand-off — confirm before merge)
+- [x] PR #482 raised. **Not merged.**
+- [x] #481 filed: the boundary spline crosses the fixed gate on pool seed 288
+      and sweep seed 18. The invariant's walkability clause is withheld for it
+      and announces the gap on stderr every run.
 
 ## Trap for whoever probes near the boundary
 
@@ -90,10 +94,16 @@ post for "solid" (that is inside `PLAYER_RADIUS + GATE_POST_COLLIDER_RADIUS`
    `HANDOFF-gate-arch-asset.md`. `createGateArch()`, origin at the middle of
    the gateway on the ground, forward +Z; collider two circles r
    `GATE_ARCH_PIER_KEEP_OUT` 0.80 at x = ±`ENTRANCE_GATE_HALF_WIDTH`; keep the
-   node name `park-gate-arch`. It replaces the meshes `gateArch.ts` builds —
-   this branch's one-owner seam is exactly where it lands, and the yaw,
-   `feet`, `footRadius` and `clearHeightY` contract already fits it. Owes a
-   `keepOutsFor` reachability check with a control, and `check:coplanar`.
+   node names `park-gate-arch` **and** `park-gate-post-0/1` — both are now
+   load-bearing (`check:park-map` reads the first, the invariant reads all
+   three). It replaces the meshes `gateArch.ts` builds; the seam is
+   `buildGateArch`, and the contract it already offers is `yaw` (local +X onto
+   the gateway axis), `feet` (±4.3 along that axis), `footRadius` (0.55,
+   exported as `GATE_POST_COLLIDER_RADIUS`) and `clearHeightY` (3.45 m of
+   headroom). Owes a `keepOutsFor` reachability check with a control, and
+   `check:coplanar`. Note the asset's 0.80 keep-out is wider than the 0.55
+   here, so re-run `scripts/probe-gate-pool.mts` after: it is the one thing
+   that could narrow the opening.
 2. **The arrival camera sequence.** Jim: doors → follow her in under the arch →
    rise to the normal pseudo-isometric camera. Not begun. Read the Overseer's
    brief in the session log; the constraints that matter are: no snap at the
