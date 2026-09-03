@@ -21,6 +21,33 @@ head - instead, hide their name while they are talking."
   "asserts nothing this run" on a silent park, and `--mutate-label` to prove
   it red.
 
+## Review round 1 (changes requested — the check, not the fix)
+
+Clause 4b was a **total** latch (`spoken.size > 0 && namesReturned.size === 0`),
+so a patch stopping the *first* child ever to speak from getting her pill back
+printed "4 talked, 3 got their name back" and exited 0. Now per child:
+
+- `NpcSystem.speechBubbles` also hands over `labelRank`, `labelDistance` and
+  `speaking` — facts `updateLabels` already computed this frame.
+- `VISIBLE_LABEL_CAP` and `LABEL_MAX_DISTANCE` are now exported and imported
+  by the check, so it re-derives **nothing**. (The reviewer's own probe
+  re-sorted the crowd; that would have been a second copy of a rule
+  `NpcSystem` owns, which is the fault the check guards.)
+- `--mutate-latch` added, so the one-child case stays re-provable: 1 child,
+  1844 frames, clause 4a quiet — the halves isolate.
+- `--mutate-label` is now faithful: it keeps the cap, which its comment always
+  claimed and it did not.
+- The 40-46 m band (`BUBBLE_MAX_DISTANCE` 40 vs `LABEL_MAX_DISTANCE` 46) is
+  counted and printed, not asserted. 0 frames on canonical.
+
+**Found while re-proving, pre-existing, not ours:** `--mutate` no longer
+reaches assertion 1. On this branch *and* on `origin/main` `7a1d81f9` it fails
+**assertion 3 only**, 0 off-screen speakers, 1984 sightings — identical to the
+unmutated run, so blinding the gate draws no extra bubble. Every speaker stays
+in shot for the whole run. Assertion 1 is armed but unproven; restoring its
+reach means stranding a speaker off screen deliberately. Written into the
+file's header where the stale transcript was. Worth a ticket.
+
 ## Findings
 
 - **The player has a name label and cannot speak.** `Player.label` is a
