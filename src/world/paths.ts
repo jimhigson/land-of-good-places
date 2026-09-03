@@ -2241,6 +2241,28 @@ function computeGridConnectors(
             for (let s = 1; s < shape.length && ok; s += 1) {
               const a = shape[s - 1] as readonly [number, number];
               const b = shape[s] as readonly [number, number];
+              // **BUILT AND MEASURED HERE, AND REVERTED.** The head-on
+              // shapes' only bound is total length, so the first of them —
+              // node straight to the lead — can draw a long diagonal and
+              // routinely does: seed 131's `spur-building` runs
+              // `(33.7,-6.7) -> (37.3,8.4)`, 15.5 m at 13 degrees off axis and
+              // 18.1 m once drawn, and `pathsRunOnGridAxes` fires on it (also
+              // seeds 208, 225, 451).
+              //
+              // Refusing any off-axis leg longer than `STUB_TAIL_LIMIT` here
+              // fixed **all five** of those and seed 128's climbable-tree
+              // failure — whole-pool `test:procgen` 9 failed -> 7 — and cost
+              // more than it bought: `check:park` went **10 green -> 8**, seed
+              // 267 0 -> 1 and seed 451 0 -> 1, with three new
+              // `detourRatiosStayReasonable` failures (225, 326, 346). The
+              // elbowed head-on shapes are axis-aligned but longer, and a door
+              // pushed off the straight shape walks a long way round or not at
+              // all. Two greens and three fresh invariants is not a trade worth
+              // making for five.
+              //
+              // The defect is real and stays open: the honest fix gives the
+              // door a *short* axis-aligned arrival rather than refusing the
+              // diagonal and leaving it to walk.
               if (!legClear(a[0], a[1], b[0], b[1])) ok = false;
               length += Math.hypot(b[0] - a[0], b[1] - a[1]);
             }
