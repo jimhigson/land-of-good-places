@@ -1896,3 +1896,66 @@ reach the ring. **The next question is what the nine links actually connect
 to** — they are at (5.1, 57.3), (-6.9, 57.3) and (-6.9, 45.3), all of them
 short of the railway — and why that cluster is 35 m from the nearest reachable
 node. Start there, not at `nodeOk`.
+
+### CORRECTION: the two reds are NOT "fat path-solve steps". I read the wrong line.
+
+**Withdrawn in full.** The previous section claimed `check:park-boot` and
+`check:arrival-completes` share one root — this branch's path solve doing too
+much between yields — on the strength of the line *"that worst slice was no
+generator step at all, 0 work units in 13.9 ms, during 'joining up the
+paths'"*. That is a **narration** line, not the failure. The actual failure,
+the only `-` line the check emits, is:
+
+```
+  - the cruiserFinish phase was divided into only 11 pieces, against 12 the
+    algorithm admits — it is being done in lumps the driver cannot stop in the
+    middle of, which is a stutter on any device slow enough to notice
+```
+
+`MIN_UNITS.cruiserFinish` is a hard-coded floor of **12** in
+`scripts/check-park-boot.mts`; this branch produces **11**. Nothing to do with
+the paths.
+
+And the "0 work units" line I built the theory on **cannot mean what I took it
+to mean**: the check's `Phase` union is
+`brief | cruiserSearch | cruiserFinish | trainSearch | slideSearch` — **there
+is no counter for the paths solve at all**. So any slice spent in the paths
+phase necessarily reports "no generator step at all, 0 work units". It was
+never evidence about the paths; it is evidence that the check is blind to them.
+
+The work units, side by side, which is what I should have quoted first:
+
+| phase | `origin/main` | this branch |
+|---|---|---|
+| brief | 152 | 152 |
+| cruiser search | 523721 | **22973** |
+| **cruiser finish** | **19** | **11** ← the failure |
+| slide search | 468570 | **102803** |
+
+So the branch's park makes the **cruiser and slide searches** far shorter — the
+8x difference in total generator steps is those two, not the path solve — and
+the cruiser's finish phase comes out one piece under a hard floor.
+`check:arrival-completes`'s drain-rate comparison is downstream of the same
+changed unit mix.
+
+**They do share a cause — the branch's park re-rolls these two searches much
+smaller — but it is not the one I named, and "fix the yielding inside
+`pathGridSearch`" is the wrong instruction.** Do not act on it.
+
+**What the next reader should actually settle**, and it is one question:
+is `cruiserFinish` at 11 *the same seams yielding on a legitimately shorter
+loop*, or *a seam that stopped yielding*? There is a direct precedent for the
+first in the same file — `trainSearch`'s floor was lowered 100 -> 60 on
+2026-08-23 when the statue-ring layout re-rolled the canonical park and its rail
+loop legitimately solved smaller (224.6 m, was 359). If this is that, the floor
+is prosecuting a quicker solve; if it is not, it is a real granularity
+regression. **Measure before touching the floor** — CLAUDE.md's "never weaken an
+assertion" stands, and the trainSearch precedent was paid for with a
+measurement, not an argument.
+
+**Also worth fixing while someone is in there:** the paths solve has no unit
+counter, so the largest phase on this branch is invisible to the boot check and
+reports as "no generator step at all". That is an instrument gap of exactly the
+kind CLAUDE.md's "a check can pass without checking anything" section is about —
+and it is what let me build a whole theory on a line that could only ever have
+said zero.
