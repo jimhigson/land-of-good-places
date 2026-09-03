@@ -5090,3 +5090,162 @@ against (`feet: [{links:1, reachable:false}, {links:4, reachable:false}]`,
 `proven sites` and `crossed` rows (canonical is the control — it prints all
 four in both today); and both columns re-measured, set-diffed, against
 **11 green / 12 stranded** and `test:procgen` `9 failed | 1401 passed`.
+
+---
+
+## State — 3 Sep, tenth leg: seed 326's level crossing is fixed, and the handover's diagnosis of it was wrong
+
+**11 green / 10 stranded, and `lc = 0` on all sixteen seeds.** `test:procgen`
+9 failed -> 6 failed, three removed and none added.
+
+### The handover's root cause was wrong, and here is why it read as right
+
+The ninth leg handed on: *"the defect is at `paths.ts:3482-3484`, the
+bridge-foot join ladder ... `> 0` means 'a link was made' ... Foot 0 reads
+`links: 1, reachable: false`: its one link lands in a singleton"*. It does not.
+**The deck edge is added to every foot unconditionally**, so a foot with no
+connector at all still reads `links: 1`. `scripts/tmp-footside.mts` counts
+connectors with deck edges excluded and 326's near foot has `conn=0`. Every
+rung of that ladder returned zero. There was no link for a better predicate to
+reject, and the specified fix would have changed nothing.
+
+**The proposed predicate is also refuted by its own control.** Canonical builds
+and crosses all four of its sites, and three of its eight feet are in a pocket
+rather than the largest component on their own side — two of those with zero
+connectors. "Reaches its side's backbone" is not a necessary condition for a
+working bridge, so a ladder climbing until it held would have fired the
+own-site exemption across the pool: the 2 Sep regression (seed 11 `2 -> 22`,
+seed 208 `0 -> 3`) reached from the other direction.
+
+Recorded as a wrong prediction, not quietly dropped.
+
+### The real cause: a bridge foot standing inside the statue ring
+
+`scripts/tmp-plazafoot.mts` (control: canonical, whose four sites all become
+built crossings):
+
+```
+seed 326: plaza (11.1, 4.0) ringRadius 14.90, 1 site(s)
+  0@(38.0,-14.0) plus  at (20.1,-6.6)  rungs=[0,0,0]  distToPlaza=13.9  INSIDE RING
+  0@(38.0,-14.0) minus at (55.9,-21.4) rungs=[3,10,5] distToPlaza=51.5
+```
+
+326's **one and only** proven site puts its near foot inside the circle. The
+ring's ground is deliberately invalid to every lattice node and every leg
+(Decision 5: four compass taps and no fifth connection), so
+`segmentClearOfRing` refuses that foot from every bearing at every shell —
+`scripts/tmp-footjoin.mts` sweeps 60-odd candidates out to shell 4 and **every
+one reads `ring=false` with nothing else wrong**. No connector; the deck edge
+joined the far foot to nothing; `computeCrossings` returned empty; the dodgems
+quarter was isolated; the last resort drew a ribbon over live rail at
+(49.9, 4.1).
+
+Canonical has two feet inside its own ring as well (sites 300 and 332, both
+`rungs=[0,0,0]`) and is green — because it has four sites and the others carry
+the park. 326 has one, so the single dud foot is the whole park.
+
+### The fix — the standing procgen rule, in the function that already applies it
+
+`crossingFeet` already pulls the ramp reach in, one metre at a time down to a
+floor of 4, when a full-reach foot lands on the wrong side of the loop. It now
+pulls it in for the ring too: same loop, same floor, and the same "return the
+full-reach foot if nothing clears" ending, so **a foot that is fine today
+cannot move**. It asks `segmentClearOfRing` rather than re-deriving
+`RING_RADIUS` and a margin, per one-owner.
+
+326 clears the ring 2.4 m short of full reach, at (22.0, -7.4), and
+`scripts/tmp-bridges.mts` then prints the same shape as the control:
+
+```
+proven sites 0@(38.0,-14.0)
+crossed      0@(38.0,-14.0)
+```
+
+Its near foot still gets nothing from the first two rungs (`rungs=[0,0,4]`) —
+it is still on ring-adjacent ground — and joins on the own-site-exempt rung.
+That is the ladder working as designed, not a hole.
+
+### Both columns
+
+`check:park`, sixteen seeds, `scripts/tmp-sweep2.sh` (a count of
+`crosses the railway at` lines beside the stranded count, so a level crossing
+cannot hide inside a stranded number), baseline `bee8e8c0`:
+
+| | before | after |
+|---|---|---|
+| green | 11 | **11** |
+| stranded | 12 | **10** |
+| seeds with a level crossing | **1** (326) | **0** |
+
+326 alone moved: `lc 1 -> 0`, `route.unreachable 2 -> 0`,
+`route.crossesRail 1 -> 0`, `poi.stranded 5 -> 3`. The `diff` of the two sweeps
+is that line, canonical's waypoint count (284 -> 286) and per-seed timings.
+
+`test:procgen`, both runs mine, baseline in a detached worktree at `bee8e8c0`:
+
+```
+baseline  Test Files 6 failed | 22 passed (28)   Tests 9 failed | 1401 passed (1410)
+after     Test Files 5 failed | 23 passed (28)   Tests 6 failed | 1404 passed (1410)
+```
+
+Set-diff of the sorted FAIL lists: **three removals, no additions**, all three
+on 326 and all three about its missing bridge (`everyProvenBridgeSiteKeepsItsBridge`,
+the coping-stone clause, the tunnel-ray clause). The six that remain are the six
+that were already there: `streetsShareLatticeLines` (5, 11), `noPathEndsNowhere`
+(5, 288), the detour clause (267, 346).
+
+**The handover's baseline *count* was right and its *list* was wrong** — its
+nine predate the rebase. Read the set.
+
+### The invariant this leg owes was already written, and the park proved it red
+
+No new clause: `everyProvenBridgeSiteKeepsItsBridge` clause 1 already owns this
+and was genuinely red on the real park at `bee8e8c0`.
+
+```
+AssertionError: the crossing planner proved 1 bridge site(s) on this loop (at
+railDistance 0.0) and not one of the park's 0 built crossing(s) stands on any of
+them (they sit at nowhere — there are none) — the crossing plan did not reach the
+park, so every per-bridge check here is iterating over nothing:
+expected [ Array(1) ] to have a length of +0 but got 1
+```
+
+**The geometry it was proved against**, so the transcript can be re-armed if the
+park moves: seed 326's single proven site, railDistance 0.0 at (38.0, -14.0),
+whose `plus` foot at full ramp reach is (20.1, -6.6) — 13.9 m from a plaza
+centre at (11.1, 4.0), `RING_RADIUS` 14.90. Restore `crossingFeet`'s loop to
+the side-only test and those are the numbers to look for.
+
+### New probes (delete with the rest of `tmp-*` when the PR opens)
+
+- `scripts/tmp-footside.mts` / `debugFootSideBackbone` — per foot: connectors
+  with deck edges excluded, its component flooded without deck edges, and the
+  largest component on its own side. This is what refuted the handover.
+- `scripts/tmp-footjoin.mts` / `debugFootJoin` — the three `gridConnectors`
+  calls the ladder actually makes, then every candidate node with the screen
+  that refuses it. Asks the call the code makes, not `debugDoorReach`, which is
+  the *arrival* form with a 7 m frontage exemption a foot never gets.
+- `scripts/tmp-plazafoot.mts` — foot against plaza and `RING_RADIUS`.
+- `scripts/tmp-sweep2.sh` — `tmp-sweep.sh` plus the level-crossing count.
+  **Use this one from here on**: zero level crossings is the branch's end goal
+  and a stranded count cannot see one.
+
+### Where the next leg picks up
+
+Unchanged from the ninth leg's list except that item 2 is now different: seed
+267 is **green** on `check:park` and fails only the procgen detour clause.
+
+1. `noPathEndsNowhere` on seeds 5 and 288. 288 is diagnosed (far quarter has
+   three destinations and zero paving; starts at `footprintsOverlap` in
+   `crossingPlanSolve.ts`) and was ruled the Overseer's to allocate, not this
+   branch's to build.
+2. The detour clause on 267 and 346 — the `LGP_CONNECT_TRACE` instrument.
+3. `streetsShareLatticeLines` on 5 and 11.
+4. Stage-2 invariant (b), "every destination's doormat is a paving terminal".
+5. Then delete the `tmp-*` probes and the debug exports. `drawsAsScreened`,
+   `ARRIVAL_LEAD_REACH` and `privateLegOf` are not probes and stay.
+   `tmp-stoneground.mts` goes last and must be re-run after any reservation or
+   `bridgeFootprint.ts` change — **it has NOT been re-run since `crossingFeet`
+   changed, and `crossingFeet` moves where a ramp starts. Run it first.**
+6. `pnpm run check` (the 47-step chain) — running now, result below when it
+   lands. The three inherited reds are #474's.
