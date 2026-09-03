@@ -4611,7 +4611,8 @@ function* pathGraphSolveOnce(): Generator<number, PathGraph, void> {
   // citizens of the layout rather than an afterthought — and a park with three
   // bridges in it is a better park for a six-year-old than one with two.
   yield (progress += 1);
-  yield* walkEveryBridge(edges, progress);
+  const strandedWalks: StrandedBridgeWalk[] = [];
+  yield* walkEveryBridge(edges, progress, strandedWalks);
 
   // Every ring gateway that no route happened to use still gets its street —
   // Decision 5's "exactly 4 connections at compass points" is a property of the
@@ -4626,8 +4627,114 @@ function* pathGraphSolveOnce(): Generator<number, PathGraph, void> {
   // interconnection hub-and-spoke tree directly).
   if (!DISABLE_INTERCONNECTS) yield* addInterconnects(nodes, edges, progress);
 
+  // Now that every destination is routed, the question `walkEveryBridge` could
+  // not answer has an answer. See {@link joinStrandedBridgeWalks}.
+  yield (progress += 1);
+  joinStrandedBridgeWalks(edges, strandedWalks);
+
   lastStrandedDoors = strandedDoors;
   return { nodes, edges, ring };
+}
+
+/**
+ * **A bridge walk may not end in the grass.**
+ *
+ * `walkEveryBridge` runs a route over every proven crossing site, and where the
+ * far side has nothing paved *yet* it stops at the far foot, on the strength of
+ * its own comment: *"a bridge foot is a real place to arrive, and the next
+ * destination on that side will branch from it."* That is a **forward promise,
+ * and nothing checked it was kept.**
+ *
+ * **Seed 288, measured:**
+ *
+ * ```
+ * bridge-walk-0  (16.3,-21.2) (11.7,-20.3) (0.3,-31.7) (-2.0,-34.0)
+ *                (-4.3,-36.3) (-15.7,-47.7)
+ * ```
+ *
+ * Branch off paving, near foot, the deck's three pinned points, far foot —
+ * and then nothing. No destination ever branched from it, so the ribbon stops
+ * **17.61 m from the nearest other paving**: a child walks over the bridge and
+ * off the end of the paving into grass. `noPathEndsNowhere` fails it, and it is
+ * right to — this is issue #114's own class, not merely an invariant line.
+ *
+ * The ordering is the whole point, and it is the same shape as the border fence
+ * (`Scenery.ts` places wall runs *from* the paths, so the router cannot consult
+ * them): a question that is unanswerable where it is asked belongs where the
+ * answer exists. Here that is after `addInterconnects`, when the network is
+ * complete — so the `onward` search `walkEveryBridge` already runs is simply
+ * **re-asked**, rather than a second idea of "paving on the far side" being
+ * invented beside it.
+ *
+ * **Dropping the walk instead is deliberately not the answer.** Its call site
+ * exists because an unwalked proven site is a *sealed pocket*, measured at 105
+ * stranded waypoints on seed 225 — so removing a walk trades this invariant for
+ * a reachability failure, and destinations a child cannot reach outrank
+ * invariant lines. A walk that still cannot be joined is therefore left exactly
+ * as it was: honestly failing, rather than quietly deleted.
+ *
+ * **And the extension must draw the shape it was assembled as.** `points` goes
+ * through `trimBacktracks`, which deletes about-turn vertices — lossless at 180
+ * degrees, where the two legs are collinear, and a shortcut across new ground at
+ * the 150 the threshold allows (seed 451's ribbon through the spooky house's own
+ * booth). A seam between a bridge walk and its onward leg is exactly where such
+ * a vertex appears, so an extension the trim would alter is **refused**, and the
+ * walk is left stranded rather than joined by a leg nobody screened.
+ */
+function joinStrandedBridgeWalks(edges: PathEdge[], stranded: readonly StrandedBridgeWalk[]): void {
+  const grid = pathGrid();
+  // **This phase says what it did.** A phase with no counter reports zero work
+  // and reads as a stall, and a pass that silently declines to act is
+  // indistinguishable from one that had nothing to do — the same disease as a
+  // check that cannot fail, one layer out.
+  //
+  // `console.warn`, not `process.stderr`: CLAUDE.md's stderr rule is about
+  // check scripts running on Node, and this file is browser code where
+  // `process` does not exist (`tsc` says so). And it announces only when
+  // something was left unjoined, because that is the condition worth a line —
+  // a park where every walk found its paving has nothing to report, and a
+  // warning on every boot would be noise in a child's game.
+  let joined = 0;
+  let noPaving = 0;
+  let refusedByTrim = 0;
+  for (const walk of stranded) {
+    const edge = edges[walk.at];
+    if (!edge) continue;
+    const farSide = railInfoAt(grid.xs[walk.far] as number, grid.zs[walk.far] as number).side;
+    const onward = gridSearch([{ node: walk.far, cost: 0 }], (node) =>
+      node !== walk.far &&
+      pavedGridNodes.has(node) &&
+      railInfoAt(grid.xs[node] as number, grid.zs[node] as number).side === farSide
+        ? 0
+        : Infinity,
+    );
+    if (!onward || onward.length <= 1) {
+      noPaving += 1;
+      continue;
+    }
+    const assembled = [...edge.route.points, ...gridPathPoints(onward).slice(1)];
+    const drawn = trimBacktracks(assembled);
+    // See the doc comment: a seam is exactly where an about-turn vertex
+    // appears, and a trimmed seam is a leg no screen has seen.
+    if (!drawsAsScreened(assembled)) {
+      refusedByTrim += 1;
+      continue;
+    }
+    commitGridPathDrawn(onward, drawn);
+    edges[walk.at] = {
+      ...edge,
+      route: { ...edge.route, points: drawn },
+    };
+    joined += 1;
+  }
+  if (noPaving > 0 || refusedByTrim > 0) {
+    console.warn(
+      `bridge walks ending on a bare foot: ${stranded.length} — ` +
+        `${joined} joined to the far side's paving, ` +
+        `${noPaving} with no paving on that side at all, ` +
+        `${refusedByTrim} refused because the seam would be trimmed into an unscreened leg`,
+    );
+  }
 }
 
 /**
@@ -4654,7 +4761,18 @@ export function strandedDoorsOfLastSolve(): readonly string[] {
  * yet, the foot is the end: a bridge foot is a real place to arrive, and the
  * next destination on that side will branch from it.
  */
-function* walkEveryBridge(edges: PathEdge[], progress: number): Generator<number, number, void> {
+interface StrandedBridgeWalk {
+  /** Index into `edges` of the walk whose far end landed on nothing. */
+  readonly at: number;
+  /** The far foot the walk stops at. */
+  readonly far: number;
+}
+
+function* walkEveryBridge(
+  edges: PathEdge[],
+  progress: number,
+  stranded: StrandedBridgeWalk[],
+): Generator<number, number, void> {
   const grid = pathGrid();
   for (let site = 0; site * 2 + 1 < grid.footNodes.length; site += 1) {
     yield (progress += 1);
@@ -4708,6 +4826,12 @@ function* walkEveryBridge(edges: PathEdge[], progress: number): Generator<number
       paved: true,
       route: { name: `bridge-walk-${site}`, width: 3.0, closed: false, points },
     });
+    // **The promise this function's own comment makes, written down so it can
+    // be checked.** "The next destination on that side will branch from it" is
+    // unanswerable here — the network is still being grown — so the walk that
+    // ends on a bare foot is recorded and re-asked once it *is* answerable.
+    // See {@link joinStrandedBridgeWalks}.
+    if (!onward) stranded.push({ at: edges.length - 1, far: best.far });
   }
   return progress;
 }

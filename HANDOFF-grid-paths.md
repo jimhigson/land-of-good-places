@@ -4050,3 +4050,58 @@ correctly than half-build it. Note `walkEveryBridge` also calls
 `trimBacktracks` on its assembled points, so anything added here must respect
 `drawsAsScreened`'s lesson: the shape that gets drawn is not always the shape
 that was assembled.
+
+### The 288 post-pass — BUILT, and its own announcement refutes the premise
+
+`joinStrandedBridgeWalks` re-asks `walkEveryBridge`'s `onward` query after
+`addInterconnects`, when the network is complete, and extends any walk that
+ended on a bare foot to the nearest paving on its own rail side. It refuses an
+extension `trimBacktracks` would alter (`drawsAsScreened`), and it does **not**
+drop a walk it cannot join — the sealed-pocket cost is measured at 105 stranded
+waypoints on seed 225 and the ranking is settled. `tsc --noEmit` exit 0.
+
+**Its coverage line is what produced the finding, and it is the finding:**
+
+```
+bridge walks ending on a bare foot: 1 — 0 joined to the far side's paving,
+  1 with no paving on that side at all,
+  0 refused because the seam would be trimmed into an unscreened leg
+```
+
+**`noPaving = 1`.** With every destination routed, seed 288's bridge-walk-0 has
+**no paved node on the far side at all**. The promise was not merely unkept —
+on this seed it was **never keepable**. The bridge crosses into an empty
+quarter, and no post-pass can join a ribbon to paving that does not exist.
+
+**Both columns, sixteen seeds:**
+
+- `check:park`: **12 green / 7 stranded — unchanged, no seed moved.**
+- `test:procgen`: **5 failed / 1404 passed**, violation set **byte-identical**.
+
+**So the joining branch is UNPROVEN: it never fires anywhere in the pool.** By
+this branch's own rule a change that measures nothing is not kept, and I am not
+claiming this one as a win. What it *did* buy is the announcement — a silent
+degeneracy is now a reported one, and it is how `noPaving = 1` was learned at
+all. I have left it on the branch rather than reverting it, and flag the
+decision as the Overseer's: **the mechanism is correct by construction and
+unexercised by the pool**, which is exactly the state CLAUDE.md warns about
+("break every check deliberately and watch it go red before you trust it
+green"). Nothing here has been watched go red.
+
+**What 288 actually needs, restated now the premise is gone.** The defect is
+not a missing join. It is that **a proven crossing site whose far side holds
+nothing gets a walk anyway**, because `walkEveryBridge` paves every proven site
+to avoid sealed pockets. Two honest options, neither measured:
+
+- pave the walk but give it a real terminus on the far side — the far foot is
+  where a child arrives, so something should be *there*, which is a layout
+  question, not a routing one;
+- or accept the walk as a stub and make `noPathEndsNowhere` say so by name,
+  distinguishing "ends nowhere because nobody joined it" from "ends at a bridge
+  foot on a side with nothing on it". Those are different facts and the check
+  currently reports them identically.
+
+The second is cheap and honest; the first is the one a six-year-old would
+notice, because a bridge to an empty field is a disappointment either way.
+**Neither is built. Do not treat 288 as diagnosed-and-pending-a-join any more —
+that diagnosis was mine and the announcement refuted it.**
