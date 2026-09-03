@@ -87,8 +87,8 @@ import { GATE_PROBE_INSET, measureGatewayWalk } from '../../src/world/entrance/g
 import { ROAD_TILE_METRES } from '../../src/world/entrance/road.ts';
 import {
   GATE_FOOT_TOLERANCE,
-  GATE_POST_COLLIDER_RADIUS,
-  GATE_PROBE_INSET,
+  GATE_POST_PROBE_INSET,
+  GATE_POST_REACH,
 } from '../../src/world/entrance/gateArch.ts';
 import { visibleTop } from '../../src/art/style/measure.ts';
 import { COPING_SINK, bridgeStoneGeometry } from '../../src/art/models/bridgeStones.ts';
@@ -795,8 +795,8 @@ const plotsDoNotOverlap: Invariant = (facts) => {
 /** The cover this invariant does not give, said the same way every time. */
 const GATE_UNCOVERED =
   'the park gate arch invariant asserts nothing about whether a child can walk through the gateway ' +
-  '— the boundary crosses it on some seeds (#481); it covers only the arch pointing the right way, ' +
-  'the posts being solid, and the headroom';
+  '— that is theWalkInFromTheGateIsWalkable (#481, #485); this one covers only the arch pointing the ' +
+  'right way, the posts being solid, and the headroom';
 
 const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
   // **What this invariant does not assert.** Written before the early returns
@@ -804,16 +804,21 @@ const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
   // uncovered rather than falling silent at the one moment that matters.
   //
   // There is no clause here that the gateway is *walkable* — that a child can
-  // actually get from outside the gate to inside it. That clause was written,
-  // it worked, and it found a defect that is not this one: the park boundary
-  // is a seed-dependent spline while the gate is a fixed constant at (0, 60),
-  // so on some seeds the boundary wall runs *across* the opening. Measured
-  // 1.5 m inside the gate, the middle of the way in is blocked on pool seed
-  // 288 (a chain of 0.18 m walls through (0.01, 57.76)) and on sweep seed 18
-  // (through (-1.13, 59.87), the opening shut but for a 1 m slot at x = 3.5).
-  // That is issue #481 and it predates this file's interest in the gate, so
-  // the walkability clause lands with its fix rather than being weakened to go
-  // green here.
+  // actually get from outside the gate to inside it. That clause was written
+  // on this branch, it worked, and it found a defect that is not this one: the
+  // park boundary is a seed-dependent spline while the gate is a fixed
+  // constant at (0, 60), so on some seeds the boundary wall ran *across* the
+  // opening — pool seed 288 (a chain of 0.18 m walls through (0.01, 57.76))
+  // and sweep seed 18 (through (-1.13, 59.87), shut but for a 1 m slot at
+  // x = 3.5). It was withheld rather than weakened, to land with that fix.
+  //
+  // **It has since landed, and not here.** #481 was fixed by #485, which moved
+  // the boundary masonry out of the opening and brought its own invariant,
+  // `theWalkInFromTheGateIsWalkable`, over `gatewayWalk.ts`'s full-width flood
+  // fill. So the clause is no longer withheld — it exists, it is simply owned
+  // by the check next door, and this one stays about the arch. The note above
+  // says which, because "asserts nothing about X" is only useful to the next
+  // reader if it also says who does.
   //
   // On `process.stderr`, because Vitest shows `console.log` from *failing*
   // tests only and this note exists for the passing runs.
@@ -882,7 +887,7 @@ const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
   const toMiddle = Math.hypot(arch.centreX, arch.centreZ);
   const inward: readonly [number, number] =
     toMiddle > 1e-6 ? [-arch.centreX / toMiddle, -arch.centreZ / toMiddle] : [0, 0];
-  const reach = PLAYER_RADIUS + GATE_POST_COLLIDER_RADIUS;
+  const reach = GATE_POST_REACH;
   let postsCovered = 0;
   const masked: string[] = [];
 
@@ -891,7 +896,7 @@ const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
       post.x + inward[0] * inset,
       post.z + inward[1] * inset,
     ];
-    const [clearX, clearZ] = at(GATE_PROBE_INSET.clear);
+    const [clearX, clearZ] = at(GATE_POST_PROBE_INSET.clear);
     if (!facts.isStandable(clearX, clearZ)) {
       // Something that is not this post is answering here, so the reading a
       // stride closer cannot be attributed to the post's collider.
@@ -899,10 +904,10 @@ const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
       continue;
     }
     postsCovered += 1;
-    const [solidX, solidZ] = at(GATE_PROBE_INSET.solid);
+    const [solidX, solidZ] = at(GATE_POST_PROBE_INSET.solid);
     if (facts.isStandable(solidX, solidZ)) {
       fouls.push(
-        `a child can stand at (${solidX.toFixed(2)}, ${solidZ.toFixed(2)}), ${GATE_PROBE_INSET.solid} m ` +
+        `a child can stand at (${solidX.toFixed(2)}, ${solidZ.toFixed(2)}), ${GATE_POST_PROBE_INSET.solid} m ` +
           `in front of the gate post at (${post.x.toFixed(2)}, ${post.z.toFixed(2)}) — inside the ` +
           `${reach.toFixed(2)} m the post is supposed to hold her off, so the gate is not solid`,
       );
@@ -913,7 +918,7 @@ const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
     `${GATE_UNCOVERED}; its solidity clause is live on ${postsCovered} of ${arch.posts.length} gate posts` +
       (masked.length > 0
         ? ` — masked at ${masked.join(' and ')}, where something that is not the post already blocks ` +
-          `${GATE_PROBE_INSET.clear} m out (#481)`
+          `${GATE_POST_PROBE_INSET.clear} m out (#481)`
         : ''),
   );
   if (postsCovered === 0) {

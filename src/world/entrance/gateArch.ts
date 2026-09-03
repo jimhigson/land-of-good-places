@@ -1,4 +1,5 @@
 import { CylinderGeometry, Group, Mesh, SphereGeometry, TorusGeometry, type Material } from 'three';
+import { PLAYER_RADIUS } from '../../core/constants';
 import { ENTRANCE_GATE_HALF_WIDTH, ENTRANCE_GATE_POST_HEIGHT } from './layout';
 
 /**
@@ -125,27 +126,56 @@ export const GATE_POST_COLLIDER_RADIUS = 0.55;
 export const GATE_FOOT_TOLERANCE = 0.6;
 
 /**
- * How far inside the park a gate probe stands, in metres.
+ * The reach a gate post has over a child: how far from the post's centre a
+ * `PLAYER_RADIUS` body is still pushed out. `0.62 + 0.55 = 1.17 m` today.
  *
- * Both are derived from the reach a gate post has over a child —
- * `PLAYER_RADIUS` (0.62) + {@link GATE_POST_COLLIDER_RADIUS} (0.55) = 1.17 m:
+ * The one owner of that sum. Every probe inset below is a distance either side
+ * of it, so nothing may write it down a second time.
+ */
+export const GATE_POST_REACH = PLAYER_RADIUS + GATE_POST_COLLIDER_RADIUS;
+
+/**
+ * How far in front of a gate post a probe stands, in metres — **derived from
+ * {@link GATE_POST_REACH}, never written down beside it.**
  *
- * - `solid` is **inside** that reach, so a child there must be pushed out.
- *   That is what proves the posts carry colliders at all.
+ * - `solid` is **inside** the reach, so a child there must be pushed out. That
+ *   is what proves the posts carry colliders at all.
  * - `clear` is **outside** it, so no post can be what answers there. A probe
  *   that comes back blocked at `clear` is being answered by something that is
- *   not the gate — the boundary, on the seeds of issue #481 — and the `solid`
- *   reading beside it therefore proves nothing. This is how the check knows
- *   when its own control has been masked instead of assuming it has not.
- * - `open` is what the withheld walkability clause uses, kept here for
- *   whoever lands it with #481's fix.
+ *   not the gate, and the `solid` reading beside it therefore proves nothing.
+ *   This is how the check knows when its own control has been masked instead
+ *   of assuming it has not.
  *
- * None of them may be pointed at the gate line itself: the park boundary keeps
- * a child *inside* the park, so a `PLAYER_RADIUS` body standing on the line
+ * **Why `clear` is derived and no longer the literal `1.5`.** It has to sit
+ * outside the post's reach by enough that the detector is not deciding on
+ * rounding. Against today's 1.17 m, `1.5` happened to leave 0.33 m — but it
+ * was a promise, not a mechanism, and the very next change to the gate breaks
+ * it: the authored replacement arch on `feat/arch-placement` carries
+ * `GATE_ARCH_PIER_KEEP_OUT = 0.80`, which takes the reach to **1.42 m** and
+ * leaves a literal `1.5` just **0.08 m** of margin. At that separation the two
+ * probes are effectively asking the same question, the masking detector goes
+ * near-degenerate, and it starts quietly dropping live posts — a control that
+ * silently stops controlling, which is this repo's most expensive failure
+ * shape. Derived, the gap travels with the collider that causes it.
+ *
+ * The `0.3` is the margin itself, and it is the only free number here: one
+ * probe step's worth of daylight between "the post answered" and "something
+ * else did".
+ *
+ * Neither may be pointed at the gate line itself: the park boundary keeps a
+ * child *inside* the park, so a `PLAYER_RADIUS` body standing on the line
  * overlaps the outside and every probe along it comes back blocked — 33 of 33
  * across the gate on the canonical seed, whatever the gate is doing.
+ *
+ * **Not to be confused with `gatewayWalk.ts`'s `GATE_PROBE_INSET`**, which is
+ * a different question entirely: how far inside the arch the *walk-in* flood
+ * fill starts. That one owns "can she get in"; this one owns "is the gate
+ * solid". They were briefly the same identifier in two files — hence the name.
  */
-export const GATE_PROBE_INSET = { solid: 1.0, clear: 1.5, open: 1.5 } as const;
+export const GATE_POST_PROBE_INSET = {
+  solid: 1.0,
+  clear: GATE_POST_REACH + 0.3,
+} as const;
 
 /** Half the gap between the posts, and the arch's own radius. */
 const HALF_WIDTH = ENTRANCE_GATE_HALF_WIDTH;
