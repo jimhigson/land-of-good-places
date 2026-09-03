@@ -86,9 +86,132 @@ straight-line last resort.
 - An arriving leg keeps 2.0 m from the boundary, not a crossroads' 2.6 —
   seeds 225/267 put the rail-race exit 2.38/2.31 m in from the spline.
 
+## State — 2 Sep, successor leg (gate corridor fixed; the big lead is measured)
+
+`check:park`, all sixteen pool seeds, baseline -> after
+`gate corridor: a ramp reaches it on seeds where the railway never does`:
+
+| seed | before | after | |
+|---|---|---|---|
+| canonical | 4 | 4 | |
+| 5 | 10 | 10 | |
+| 11 | 22 | 22 | + `poi.nospot: 2` |
+| 24 | 3 | 3 | |
+| 115 | 1 | **0** | **now green** |
+| 128 | 0 | 0 | green |
+| 131 | 6 | **0** | **now green** |
+| 208 | 0 | 0 | green |
+| 225 | 2 | 2 | |
+| 267 | — | — | fails on `poi.nospot: 1`, not `poi.stranded` |
+| 274 | 0 | 0 | green |
+| 288 | 1 | 1 | |
+| 326 | 1 | 1 | |
+| 346 | 0 | 0 | green |
+| 428 | 0 | 0 | green |
+| 451 | 30 | 30 | |
+
+**5 green -> 7 green. No seed regressed.** Kept.
+
+Note the counts are all far below the numbers in the older table further
+down this file — those pre-date the exact parapet screen.
+
+### THE LEAD: the parapet screen has never overlapped the parapet
+
+Measured (`scripts/tmp-sitedrift.mts`, which carries its own control), on the
+ramp at 0.35 and 0.7 of its reach:
+
+| seed | site | `site.halfWidth` | screen forbids | walkable | solid |
+|---|---|---|---|---|---|
+| 131 | 224 | 5.00 | [5.00, 5.50] | ±1.10 | ±2.70 |
+| 451 | 0 | 4.00 | [4.00, 4.50] | ±1.30 | ±2.90 |
+| 451 | 38 | 5.00 | [5.00, 5.50] | ±1.30 | ±2.90 |
+| 24 | 20 | 5.00 | [5.00, 5.50] | ±1.10 | ±2.70 |
+
+`segmentCutsABridgeRamp` forbids `|across|` in
+`[site.halfWidth, +RAMP_SCREEN_MARGIN]` and `pointStandsOnBridgeMasonry`
+declares everything inside `site.halfWidth` to be "road, not wall". **On every
+site measured the screened band sits 1.1–2.3 m OUTSIDE the outermost solid
+ground, and the real masonry — `|across|` 1.1 to 2.7 — is inside what the
+screen calls road, so it is not screened at all.**
+
+The arithmetic closes exactly: walkable is the footprint's `walkHalf`;
+`roadHalf = walkHalf + PLAYER_RADIUS`; `halfAcross = roadHalf +
+BRIDGE_WALL_THICKNESS` (0.3); a 0.7 m clearance probe stops at
+`halfAcross + 0.7`. Seed 131: 1.10 + 0.5 + 0.3 + 0.7 = 2.60 against 2.70
+measured.
+
+**Cause.** `site.halfWidth` is the *planner's reservation*
+(`SITE_HALF_WIDTH = 5`). The bridge is built as wide as the path that crosses
+it and no wider (Jim, 2026-08-23), along the *drawn path's own curved spine*
+(`bridgeSpine.ts`), with a lateral `shift`. `paths.ts` screens the reservation
+and never learns the built width. This is precisely the "two definitions of
+one thing" drift that `segmentCutsABridgeRamp`'s own doc comment predicted:
+*"If the layout's idea of a bridge's footprint and the builder's ever drift
+apart, issue #414 comes straight back wearing different clothes."*
+
+It is also Jim's brief #2 exactly — the bridge's real shape is decided *after*
+the paths, from the paths, so no path can be screened against it.
+
+**This is a fifth hypothesis, but it is measured, not proposed**, and it is
+none of the four refuted ones.
+
+### The design this points at (NOT yet built — read before starting)
+
+`paths.ts` cannot ask for the built footprint: it does not exist until the
+paths do. The rule that *is* expressible before drawing is the one Stage 2
+already owes as an invariant, which is a strong hint it is the right rule:
+
+> **The whole reserved footprint is forbidden to every leg except the bridge's
+> own deck edge and its two feet.**
+
+i.e. in `segmentCutsABridgeRamp`, `inner` goes from `site.halfWidth` to `0`.
+Then whatever narrow bridge is later built inside the reservation cannot meet
+another ribbon, because there are none in there. This is a *strengthening*;
+it does not loosen the exact segment-rectangle test, which stays exact.
+
+Two things to get right, both already known:
+
+- **The crossing's own approach must be exempt by identity, not by geometry.**
+  #414 records that screening the whole footprint refused the approach and
+  cost seed 24 its only bridge. In the grid architecture the feet are
+  mandatory nodes joined by `joinToGrid` and the deck is a mandatory `link()`
+  that is never screened, so the exemption is available — but a foot's own
+  connectors start at `along = ±(DECK_HALF_LENGTH + reach + 1.0)`, which is
+  only 0.5 m outside `alongMax`, and `segmentMeetsRect` counts touching.
+- `pointStandsOnBridgeMasonry` (used by `nodeOk` at ~1649 and `usable` at
+  ~2323) carries the same "inside halfWidth is road" carve-out and would have
+  to move with it. Change one thing at a time and measure each.
+
+### Per-relax-level door verdicts (the prescribed measurement, run)
+
+`scripts/tmp-doors.mts`, all sixteen seeds. Only **three** doors fail outright
+(`!`): seed 115 `stall.spaceFerrisWheel`, seed 225 `stall.keychain`, seed 288
+`stall.railRacer`. Everything else that appears is `:oblique`, `:wide` or
+`:relay` — a door that found a route on a relaxed pass, not a starved one.
+
+Decoding `debugDoorReach`'s eight flags per elbow (`streetClear, ring,
+railSide, ramp` for each of the two legs):
+
+- **115 `stall.spaceFerrisWheel`**: `ramp` is `true` on every candidate. It is
+  refused by `streetSegmentClear` on the tail leg, not by the ramp screen. Not
+  ramp starvation.
+- **225 `stall.keychain`**: node (1.4, 19.1) is clear on everything but
+  `ramp`; node (-22.6, 19.1) is refused by `streetSegmentClear`. Mixed.
+- **288 `stall.railRacer`**: mixture, plus `boundaryEdge 11.48`.
+
+**So the briefed premise needs correcting for the successor:** the starved
+doors are *not* mostly ramp-starved, and only three exist. They are a small
+tail. The 30 stranded waypoints on seed 451 and the 22 on seed 11 are long
+collinear runs — whole lanes cut, like seed 131's was — not doors. Chase the
+lanes with `scripts/tmp-pocket.mts` before chasing connectors.
+
 ## State — what remains
 
 - [x] Stage 1 grid solve (pushed).
+- [x] Gate corridor ramp guard (7/16 green, nothing regressed).
+- [ ] **The footprint screen** above. Biggest remaining lead by far.
+- [ ] Run `scripts/tmp-pocket.mts` on 451, 11, 5, canonical — it names the
+      lane and both ends of every pocket in one go, and it was decisive on 131.
 - [ ] **Stage 2: invariants. NOT STARTED.** `streetsShareLatticeLines` must be
       rewritten for the new grid (it must admit half-pitch runs from jogs and
       the rescue router, and must be at least as strong); add "every doormat is
