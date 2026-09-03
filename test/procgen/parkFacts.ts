@@ -1005,9 +1005,9 @@ export interface ParkFacts {
      */
     readonly posts: readonly { readonly x: number; readonly z: number }[];
     /**
-     * Air under the lowest thing over the *opening*, in metres above the
-     * arch's own base — raycast up from a child's toes, not read off the
-     * bounding box.
+     * Air under the lowest thing over the *opening*, in metres above **the
+     * terrain a child stands on** — raycast up from a child's toes, not read
+     * off the bounding box.
      *
      * The distinction is the whole clause. While the gate was a half-torus
      * crossbar on two separate posts, `minY` happened to be the underside of
@@ -1023,10 +1023,30 @@ export interface ParkFacts {
     readonly headroom: number;
     /** Where that lowest overhead thing is, so a failure names a place. */
     readonly lowestOverheadAt: { readonly x: number; readonly z: number } | null;
+    /**
+     * Which way the arch's lettered face looks, in world XZ. See
+     * `scripts/gate-arch-measure.mts`: the gate's *shape* cannot answer this,
+     * because an arch turned 180 degrees has an identical bounding box.
+     */
+    readonly forwardX: number;
+    readonly forwardZ: number;
   } | null;
   readonly distanceToRail: (x: number, z: number) => number;
   /** Can a walker of `radius` stand here without being pushed out? */
   readonly isStandable: (x: number, z: number, radius?: number) => boolean;
+  /**
+   * Where a walker of `radius` standing here actually ends up after collision
+   * resolves — not merely whether she moved.
+   *
+   * `isStandable` answers "was she pushed?", which cannot tell two blockers
+   * apart, and that is how half the gate's solidity clause died: the boundary
+   * wall and the gate pier both push a child at (-4.30, 59.00) in the same
+   * direction, so deleting the pier's collider changed nothing `isStandable`
+   * could see. *Where* she lands does tell them apart — the pier can only ever
+   * hold her at exactly its own reach, and anything further is somebody else's
+   * doing.
+   */
+  readonly pushedTo: (x: number, z: number, radius?: number) => { readonly x: number; readonly z: number };
   /**
    * Can the real nav lattice actually route a child here from where she
    * starts? The same question `scripts/check-park.mts` asks of every
@@ -1325,8 +1345,13 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
         centreZ: measured.centreZ,
         groundY: groundAt(measured.centreX, measured.centreZ),
         posts: measured.posts,
-        headroom: measured.headroom,
+        // Against the terrain, never against the arch's own base: an arch
+        // sunk into the paving takes its base down with it and a
+        // base-relative number cannot see that.
+        headroom: measured.lowestOverheadY - groundAt(measured.centreX, measured.centreZ),
         lowestOverheadAt: measured.lowestOverheadAt,
+        forwardX: measured.forwardX,
+        forwardZ: measured.forwardZ,
       };
     }
   }
@@ -1735,6 +1760,11 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     probe.set(x, 0, z);
     world.collision.resolve(probe, radius);
     return Math.hypot(probe.x - x, probe.z - z) < 1e-3;
+  };
+  const pushedTo = (x: number, z: number, radius = 0.62): { x: number; z: number } => {
+    probe.set(x, 0, z);
+    world.collision.resolve(probe, radius);
+    return { x: probe.x, z: probe.z };
   };
 
   // Every ride's exit, straight off `PATH_GRAPH` — the same nodes `paths.ts`
@@ -2670,6 +2700,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     wallCollisionHalf: BOUNDARY_WALL_COLLISION_HALF,
     distanceToRail,
     isStandable,
+    pushedTo,
     buildMs,
   };
 }

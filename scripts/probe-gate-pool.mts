@@ -23,6 +23,7 @@ import { PLAYER_RADIUS } from '../src/core/constants.ts';
 import { GATE_POST_COLLIDER_RADIUS } from '../src/world/entrance/gateArch.ts';
 import { GATE_ARCH_CLEAR_WIDTH } from '../src/art/models/gateArch.ts';
 import { TALLEST_CHILD_HEIGHT } from '../src/art/models/kid.ts';
+import { terrainHeight } from '../src/world/terrain.ts';
 
 const seed = process.env.LGP_SEED ?? '(default)';
 const park = quietly(() => buildHeadlessPark());
@@ -95,14 +96,15 @@ if (!gate || gate.posts.length !== 2) {
   // 4. Headroom, raycast up through the opening rather than read off the
   // bounding box — see `gate-arch-measure.mts` for why that distinction is the
   // whole of this clause.
-  if (!(gate.headroom < Infinity)) {
+  const headroom = gate.lowestOverheadY - terrainHeight(centreX, centreZ);
+  if (!(gate.lowestOverheadY < Infinity)) {
     fouls.push(`seed ${seed}: nothing at all overhangs the gateway — there is no arch over the opening`);
-  } else if (gate.headroom < TALLEST_CHILD_HEIGHT) {
-    fouls.push(`seed ${seed}: only ${gate.headroom.toFixed(2)} m of headroom under the arch`);
+  } else if (headroom < TALLEST_CHILD_HEIGHT) {
+    fouls.push(`seed ${seed}: only ${headroom.toFixed(2)} m of headroom under the arch`);
   }
   console.log(
     `seed ${String(seed).padStart(8)}: arch spans ${(half * 2).toFixed(2)} m along ${alongX ? 'X' : 'Z'}, ` +
-      `headroom ${gate.headroom.toFixed(2)} m (needs ${TALLEST_CHILD_HEIGHT}), ` +
+      `headroom ${headroom.toFixed(2)} m (needs ${TALLEST_CHILD_HEIGHT}), ` +
       `${GATE_ARCH_CLEAR_WIDTH.toFixed(2)} m clear opening, piers solid within ` +
       `${(PLAYER_RADIUS + GATE_POST_COLLIDER_RADIUS).toFixed(2)} m — ${fouls.length === 0 ? 'PASS' : 'FAIL'}`,
   );

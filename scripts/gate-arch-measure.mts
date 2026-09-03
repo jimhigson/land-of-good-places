@@ -46,14 +46,38 @@ export interface GateArchMeasurement {
   /** Where the piers stand, off the `park-gate-post-N` markers in the scene. */
   readonly posts: readonly { readonly x: number; readonly z: number }[];
   /**
-   * Air under the lowest thing over the opening, in metres above the arch's
-   * own base. `Infinity` if nothing at all overhangs the gateway — which is a
-   * gate with no arch on it, and a caller should treat it as a failure rather
-   * than as generous headroom.
+   * **World Y of the lowest thing overhanging the opening** — absolute, not
+   * relative to the arch.
+   *
+   * Deliberately not "headroom": the caller subtracts the height of the
+   * **ground a child actually stands on**, which is the terrain here and the
+   * road's own surface in the bus lane, and neither is knowable from this
+   * module. An earlier version returned a height above the arch's own base and
+   * was therefore blind to the whole arch being sunk — dropping it a metre
+   * into the paving moved base and geometry together and the number never
+   * budged. Proved by sinking it and watching the clause stay green.
+   *
+   * `Infinity` if nothing at all overhangs the gateway — a gate with no arch
+   * on it, which a caller must treat as a failure rather than as generous
+   * headroom.
    */
-  readonly headroom: number;
+  readonly lowestOverheadY: number;
   /** Where that lowest overhead thing is, for a failure message with a place in it. */
   readonly lowestOverheadAt: { readonly x: number; readonly z: number } | null;
+  /**
+   * Which way the arch's **lettered face** looks, in world XZ — its local `+Z`
+   * put through its world matrix, normalised.
+   *
+   * The one thing about this gate that no amount of measuring its *shape* can
+   * answer. The asset is symmetric front-to-back in its bounding box (59.20 to
+   * 60.80 about a gate at z = 60), so an arch installed 180 degrees out has an
+   * identical box, identical piers, identical headroom, and reads LAND OF GOOD
+   * PLACES to the fountain instead of to the child getting off the bus. This
+   * is read off the built scene's transform because there is nowhere else it
+   * could be read from.
+   */
+  readonly forwardX: number;
+  readonly forwardZ: number;
 }
 
 /** How far apart the headroom rays are, across the opening. */
@@ -109,7 +133,7 @@ export function measureGateArch(scene: Scene): GateArchMeasurement | null {
   // a downward ray cannot see an underside at all. Going up, the first thing
   // hit is exactly the surface a child would knock her hat on.
   const toes = 0.05;
-  let headroom = Infinity;
+  let lowestOverheadY = Infinity;
   let lowestOverheadAt: { x: number; z: number } | null = null;
 
   const reach = half * HEADROOM_RAY_REACH;
@@ -124,14 +148,19 @@ export function measureGateArch(scene: Scene): GateArchMeasurement | null {
     // outline hull is a child of that.
     const hits = raycaster.intersectObject(archNode, true);
     if (hits.length === 0) continue;
-    const y = hits[0]!.point.y - centre.y;
-    if (y < headroom) {
-      headroom = y;
+    const y = hits[0]!.point.y;
+    if (y < lowestOverheadY) {
+      lowestOverheadY = y;
       lowestOverheadAt = { x, z };
     }
   }
 
+  const forward = new Vector3(0, 0, 1).transformDirection(archNode.matrixWorld);
+  const flat = Math.hypot(forward.x, forward.z);
+
   return {
+    forwardX: flat > 1e-6 ? forward.x / flat : 0,
+    forwardZ: flat > 1e-6 ? forward.z / flat : 0,
     minX: box.min.x,
     maxX: box.max.x,
     minY: box.min.y,
@@ -141,7 +170,7 @@ export function measureGateArch(scene: Scene): GateArchMeasurement | null {
     centreX: centre.x,
     centreZ: centre.z,
     posts,
-    headroom,
+    lowestOverheadY,
     lowestOverheadAt,
   };
 }

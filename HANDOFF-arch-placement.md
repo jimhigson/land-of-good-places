@@ -92,3 +92,61 @@ on the right). The outermost probe sat at exactly
 `GATE_ARCH_CLEAR_WIDTH / 2 - PLAYER_RADIUS` = 2.88 m, where a child is
 *tangent* to a pier: overlap zero, so whether `resolve` moves her is the last
 bit of a float. `OPEN_PROBE_MARGIN` (0.2 m) makes it a question again.
+
+## Every clause proved red — against the geometry below
+
+**The geometry these were proved against** (canonical seed 20260728, this
+branch's HEAD). Paste this with the transcript: a red run is a measurement and
+measurements go stale.
+
+```
+park-gate-arch centre (0.00, 60.00)   root y = terrain -0.208
+box  x [-5.100, 5.100]  y [-0.208, 7.952]  z [59.200, 60.800]
+pier markers (-4.30, 60.00) and (4.30, 60.00)
+lowest overhead 3.60 m above terrain, at (-2.55, 60.00)
+```
+
+| mutation | result |
+|---|---|
+| M0 control, unmutated | **pass** |
+| M1 `outward` turned 90 deg | **red** — squareness 1.00 parallel, and facing 0.00 |
+| M2 `outward` turned 180 deg | **red** — facing -1.00; squareness passes, box identical |
+| M3 both pier colliders removed | **red** — child stands at (4.30, 59.00) |
+| M3b left pier collider only | **red** — right pier not solid |
+| M3c right pier collider only | **pass**, announced 1 of 2 piers measurable |
+| M4 arch sunk 1.0 m | **red** — comes down to 2.60 m, needs 2.97 |
+| M4b arch sunk 0.7 m | **red** — 2.90 m; the spare margin is 0.63 m |
+| M5 arch node renamed | **red** — NO SCENE OBJECT "park-gate-arch" |
+| M6 arch meshes dropped, markers kept | **red** — nothing overhangs the gateway |
+
+### Three clauses were incapable of failing, and mutation is what found it
+
+None of these would have been visible from reading the code.
+
+1. **Clause 1 (feet on piers) cannot see a whole-gate rotation any more.** It
+   caught #480 because the crossbar carried a rotation its posts did not — a
+   *disagreement between two meshes*. The authored arch is one asset and
+   `gateArch.ts` derives the pier markers from the very rotation it turns that
+   asset by, so they now turn together by construction. M1 was **green** at
+   first. Covered instead by two new clauses measured against the arch's world
+   position on the boundary: **squareness** (long axis perpendicular to the way
+   out) and **facing**.
+2. **Facing is unfalsifiable from shape.** An arch installed 180 degrees out
+   has an identical bounding box, identical piers, identical headroom and
+   identical colliders, and reads LAND OF GOOD PLACES to the fountain. Only the
+   world transform can see it — hence `forwardX/forwardZ`, and hence the
+   `outward` parameter replacing a bare `yaw`, which could not express the
+   difference.
+3. **Half the solidity clause was dead, exactly as warned.** M3c — deleting the
+   *left* pier's collider — was **green**. The boundary wall's end sits
+   alongside that pier and pushes a child the *same direction*, so
+   `isStandable` ("was she pushed?") could not tell them apart. Now the clause
+   asks **where she is held**: a pier can only ever hold her at its own 1.42 m
+   reach, and the left probe comes to rest at 1.53 m, so that pier is reported
+   masked on stderr on every run — 2 of 5 suite seeds. A clause that could
+   measure neither pier is now itself a failure.
+
+M4 also passed at first: headroom was measured from the arch's own base, so
+sinking the whole arch took the base down with it and the number never moved.
+`measureGateArch` now returns an **absolute** `lowestOverheadY` and each caller
+subtracts the ground a child actually stands on.

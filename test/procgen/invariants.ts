@@ -812,6 +812,23 @@ const plotsDoNotOverlap: Invariant = (facts) => {
 const GATE_FOOT_TOLERANCE = GATE_POST_COLLIDER_RADIUS + 0.3;
 
 /**
+ * How far off square to the way out the gate may sit, as |cos| of the angle
+ * between its long axis and the outward radial.
+ *
+ * 0.2 is about 11.5 degrees of lean, which is far more than a correctly built
+ * gate ever has (it measures 0.00 on the canonical seed) and far less than the
+ * 1.00 a gate laid flat along the path measures.
+ */
+const GATE_SQUARENESS_TOLERANCE = 0.2;
+
+/**
+ * How nearly the lettered face must point out of the park, as the cosine of
+ * the angle between them. 0.8 is about 37 degrees of slop — generous, because
+ * the failure this exists for is a **180 degree** one, which measures -1.00.
+ */
+const GATE_FACING_TOLERANCE = 0.8;
+
+/**
  * How far inside the park the gate probe stands, in metres.
  *
  * Derived from the reach a gate post has over a child — `PLAYER_RADIUS` (0.62)
@@ -829,6 +846,18 @@ const GATE_FOOT_TOLERANCE = GATE_POST_COLLIDER_RADIUS + 0.3;
  * issue #481's fix.
  */
 const GATE_PROBE_INSET = { solid: 1.0, open: 1.5 } as const;
+
+/**
+ * How much further than its own reach a pier may hold a child before we
+ * conclude something else is holding her.
+ *
+ * The pier resolves a child to exactly `PLAYER_RADIUS +
+ * GATE_POST_COLLIDER_RADIUS` = 1.42 m from its centre. On the canonical seed
+ * the *left* pier's probe comes to rest at 1.53 m — the boundary wall, whose
+ * end sits alongside that pier and pushes the same way. 0.05 m is well inside
+ * that 0.11 m gap and well outside float noise.
+ */
+const GATE_MASK_TOLERANCE = 0.05;
 
 const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
   const arch = facts.parkGateArch;
@@ -879,6 +908,54 @@ const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
     }
   }
 
+  // 1b. **The gate spans its own gateway, and faces out of the park.**
+  //
+  // Clause 1 above can no longer see either of these, and that is worth
+  // stating plainly rather than leaving as cover it does not give. It caught
+  // #480 because the crossbar carried a rotation its posts did not — a
+  // *disagreement* between two meshes. The authored arch is one asset, and
+  // `gateArch.ts` derives the pier markers from the very rotation it turns
+  // that asset by, so mesh and markers now turn together by construction:
+  // clause 1 is green for a gate laid flat along the path, which was proved by
+  // turning `outward` 90 degrees and watching it stay green.
+  //
+  // So these two ask the questions that survived. Both are measured against
+  // the arch's own world position on the boundary rather than against
+  // `ENTRANCE_ANGLE`, which is the constant the builder already used.
+  const outwardLength = Math.hypot(arch.centreX, arch.centreZ);
+  if (outwardLength < 1e-6) {
+    fouls.push('the park gate stands at the middle of the park, so there is no outward direction to check it against');
+  } else {
+    const outX = arch.centreX / outwardLength;
+    const outZ = arch.centreZ / outwardLength;
+
+    // The gate must span *across* the way out, not along it: its long
+    // horizontal axis is perpendicular to the outward radial.
+    const alongX2 = arch.maxX - arch.minX >= arch.maxZ - arch.minZ;
+    const spanDotOut = Math.abs(alongX2 ? outX : outZ);
+    if (spanDotOut > GATE_SQUARENESS_TOLERANCE) {
+      fouls.push(
+        `the gate arch's long axis runs along ${alongX2 ? 'X' : 'Z'}, which is ${spanDotOut.toFixed(2)} of the ` +
+          `way parallel to the outward direction (${outX.toFixed(2)}, ${outZ.toFixed(2)}) out of the park — ` +
+          'the gate is lying along the path rather than spanning it, so there is nothing to walk under',
+      );
+    }
+
+    // ...and the lettering faces the child arriving, not the fountain. The
+    // *only* clause that can see a gate installed 180 degrees out: the box,
+    // the piers, the headroom and the colliders are all identical either way.
+    const facingOut = arch.forwardX * outX + arch.forwardZ * outZ;
+    if (facingOut < GATE_FACING_TOLERANCE) {
+      fouls.push(
+        `the gate arch's lettered face points (${arch.forwardX.toFixed(2)}, ${arch.forwardZ.toFixed(2)}), only ` +
+          `${facingOut.toFixed(2)} of the way towards the outward direction (${outX.toFixed(2)}, ` +
+          `${outZ.toFixed(2)}) — LAND OF GOOD PLACES and the ferris-wheel roundel are turned in at the park ` +
+          'instead of out at the child getting off the bus. Nothing about the arch\'s shape can catch this: ' +
+          'an arch 180 degrees out has an identical bounding box.',
+      );
+    }
+  }
+
   // 2. The gate is solid where a child bumps into it: a stride in front of
   // each post, inside the reach the post is supposed to have over her. This
   // is the clause that fails if the gate loses its colliders, and it is also
@@ -887,17 +964,69 @@ const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
   const toMiddle = Math.hypot(arch.centreX, arch.centreZ);
   const inward: readonly [number, number] =
     toMiddle > 1e-6 ? [-arch.centreX / toMiddle, -arch.centreZ / toMiddle] : [0, 0];
+  //
+  // **A probe is only worth reading where the pier is the only thing that
+  // could have blocked it**, and on the canonical seed one of the two is not.
+  // The boundary wall runs close in on the left of the gate: at (-4.30, 59.00)
+  // a child is pushed to z 58.47 by the wall whatever the pier does, so
+  // deleting the left pier's collider left this clause **green** — proved, by
+  // deleting it. Half a clause, silently, on the gate that is the whole point
+  // of the check.
+  //
+  // So each pier is first asked whether it *can* be measured: is the ground
+  // just outside its reach free? If not, the pier is masked, and this clause
+  // says so on stderr rather than reporting a solidity it never established.
+  let covered = 0;
+  const masked: string[] = [];
+  const pierReach = PLAYER_RADIUS + GATE_POST_COLLIDER_RADIUS;
   for (const post of arch.posts) {
+    // **Is this pier's probe decisive?** Put a child inside the pier's reach
+    // and see *where she is held*. A pier can only ever hold her at exactly
+    // its own reach; if she comes to rest further out than that, something
+    // else is doing the holding and deleting the pier would not move her — so
+    // the probe below cannot see the pier at all.
+    //
+    // Asking "was she pushed?" instead is what failed: the boundary wall and
+    // the left pier push in the *same direction* on the canonical seed, so the
+    // clause stayed green with that pier's collider deleted.
+    const at = facts.pushedTo(
+      post.x + inward[0] * GATE_PROBE_INSET.solid,
+      post.z + inward[1] * GATE_PROBE_INSET.solid,
+    );
+    const held = Math.hypot(at.x - post.x, at.z - post.z);
+    if (held > pierReach + GATE_MASK_TOLERANCE) {
+      masked.push(
+        `(${post.x.toFixed(2)}, ${post.z.toFixed(2)}) — a child probing it is held ${held.toFixed(2)} m out, ` +
+          `beyond the pier's own ${pierReach.toFixed(2)} m reach, so something that is not the gate owns ` +
+          'that ground and deleting this pier would change nothing here',
+      );
+      continue;
+    }
+    covered += 1;
     const x = post.x + inward[0] * GATE_PROBE_INSET.solid;
     const z = post.z + inward[1] * GATE_PROBE_INSET.solid;
     if (facts.isStandable(x, z)) {
       fouls.push(
         `a child can stand at (${x.toFixed(2)}, ${z.toFixed(2)}), ${GATE_PROBE_INSET.solid} m in front of ` +
-          `the gate post at (${post.x.toFixed(2)}, ${post.z.toFixed(2)}) — inside the ` +
-          `${(PLAYER_RADIUS + GATE_POST_COLLIDER_RADIUS).toFixed(2)} m the post is supposed to hold her ` +
+          `the gate pier at (${post.x.toFixed(2)}, ${post.z.toFixed(2)}) — inside the ` +
+          `${(PLAYER_RADIUS + GATE_POST_COLLIDER_RADIUS).toFixed(2)} m the pier is supposed to hold her ` +
           'off, so the gate is not solid',
       );
     }
+  }
+  if (masked.length > 0) {
+    process.stderr.write(
+      `the park gate's solidity clause could measure ${covered} of ${arch.posts.length} piers on this seed; ` +
+        `masked: ${masked.join('; ')}\n`,
+    );
+  }
+  // A clause that measured neither pier is not a passing clause.
+  if (covered === 0) {
+    fouls.push(
+      'neither gate pier could be measured for solidity: the ground in front of both is blocked by ' +
+        'something that is not the gate, so this clause established nothing at all about whether the ' +
+        'gate is solid. It must not report success about something it is not describing.',
+    );
   }
 
   // **What this invariant deliberately does NOT assert, and why.** There is no
@@ -920,8 +1049,12 @@ const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
   // belief — and Vitest only shows `console.log` from *failing* tests.
   process.stderr.write(
     'the park gate arch invariant asserts nothing about whether a child can walk through the gateway ' +
-      '— the boundary crosses it on some seeds (#481); it covers only the arch pointing the right way, ' +
-      'the posts being solid, and the headroom\n',
+      '— the boundary crosses it on some seeds (#481); it covers only the arch spanning and facing its ' +
+      'gateway, the piers being solid, and the headroom.\n' +
+      'Its foot clause no longer covers a whole-gate rotation: mesh and pier markers are derived from one ' +
+      'rotation in gateArch.ts, so they turn together and the clause stays green for a gate laid along the ' +
+      'path. That case is covered by the squareness and facing clauses instead; the foot clause now only ' +
+      'proves the markers the colliders use agree with the mesh that is drawn.\n',
   );
 
   // 3. Nothing of it hangs into that gap. Raycast up through the opening —
