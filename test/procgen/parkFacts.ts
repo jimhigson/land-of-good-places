@@ -238,6 +238,22 @@ export interface CatBusFact {
   readonly widestRealChild: number;
   /** How many disembarking children were found in the arrival's group. */
   readonly kidCount: number;
+  /**
+   * Where on the entrance road the arrival starts the bus — `entranceRoadAt(
+   * entranceBusArriveAt())`, the sequence's own answer, so a test cannot drift
+   * from it.
+   *
+   * **A fact rather than an import**, for the reason this file's header gives
+   * and which cost this branch a red suite: `invariants.ts` reached for
+   * `roadRoute.ts` directly, that module imports `world/boundary.ts`, and the
+   * whole seeded manifest loaded at the test file's own module load — before
+   * `buildParkFacts` had set `LGP_SEED`. Every non-canonical seed then built the
+   * canonical park and threw, which is 4 failures and **328 silently skipped
+   * tests**. Seed-dependent geometry is read from here, where the park has
+   * already been built for the right seed.
+   */
+  readonly startsAtX: number;
+  readonly startsAtZ: number;
 }
 
 /** One drawn path, sampled along its centre line. */
@@ -1384,7 +1400,16 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
       // control", which is the thing the arrival actually asserts.
       const kidCount = world.npcs.all.filter((child) => child.scripted).length;
       const fit = measureCatBusFit();
+      // Dynamically imported, for the reason `startsAtX` documents: statically
+      // importing `roadRoute.ts` into `test/` loads the seeded manifest before
+      // the seed is set.
+      const { entranceBusArriveAt, entranceRoadAt } = await import(
+        '../../src/world/entrance/roadRoute.ts'
+      );
+      const startsAt = entranceRoadAt(entranceBusArriveAt());
       catBus = {
+        startsAtX: startsAt.x,
+        startsAtZ: startsAt.z,
         seatCount: fit.seatCount,
         worstOccupantProtrusion: fit.worstProtrusion,
         worstOccupantOverlap: fit.worstOverlap,
