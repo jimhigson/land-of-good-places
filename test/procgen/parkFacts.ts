@@ -1031,6 +1031,13 @@ export interface ParkFacts {
     readonly centreZ: number;
     /** Terrain height under the middle of the opening. */
     readonly groundY: number;
+    /**
+     * Where the two gate posts stand, read off the same scene — the things the
+     * arch's feet are supposed to be standing on, and the things a child
+     * actually bumps into. Empty if the posts lost their names, which the
+     * invariant reports rather than passing over.
+     */
+    readonly posts: readonly { readonly x: number; readonly z: number }[];
   } | null;
   readonly distanceToRail: (x: number, z: number) => number;
   /** Can a walker of `radius` stand here without being pushed out? */
@@ -1322,6 +1329,13 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
       const box = new Box3().setFromObject(mesh);
       const where = new Vector3();
       mesh.getWorldPosition(where);
+      const posts: { x: number; z: number }[] = [];
+      const postAt = new Vector3();
+      scene.traverse((object) => {
+        if (!/^park-gate-post-\d+$/.test(object.name)) return;
+        object.getWorldPosition(postAt);
+        posts.push({ x: postAt.x, z: postAt.z });
+      });
       const { terrainHeight: groundAt } = await import('../../src/world/terrain.ts');
       parkGateArch = {
         minX: box.min.x,
@@ -1333,6 +1347,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
         centreX: where.x,
         centreZ: where.z,
         groundY: groundAt(where.x, where.z),
+        posts,
       };
     }
   }

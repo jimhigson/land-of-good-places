@@ -285,7 +285,7 @@ export class Entrance implements GameSystem {
       groundAt: terrainHeight,
       stoneMaterial,
       capMaterial,
-      // Named so `scripts/check-park-map.mts` can ask the *scene* where the
+      // The crossbar is named `park-gate-arch` so `scripts/check-park-map.mts` can ask the *scene* where the
       // gate stands, rather than re-reading the constant the park map already
       // read. The crossbar spans the opening and is centred on it, so its
       // world position is the gate — independent truth for the map's `gate`
@@ -300,7 +300,7 @@ export class Entrance implements GameSystem {
       // reported the map 65.65 m wrong. Caught the same hour the check was
       // written, which is the argument for scene names being qualified by what
       // owns them.
-      crossbarName: 'park-gate-arch',
+      namePrefix: 'park-gate',
     });
     this.group.add(arch.group);
 
