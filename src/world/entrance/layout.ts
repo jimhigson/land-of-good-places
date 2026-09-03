@@ -85,6 +85,61 @@ export function isInEntranceGateGap(angle: number): boolean {
 }
 
 /**
+ * **How far across the gateway a point stands, in metres**, and how far along
+ * the way in — the gate's own frame, positive `along` being *into* the park.
+ *
+ * Exists because the opening had been written down twice in different units:
+ * {@link ENTRANCE_GATE_HALF_WIDTH} is 4.3 **metres**, the arch's own half-width
+ * and the number every other consumer reads, while
+ * {@link ENTRANCE_GATE_HALF_ANGLE} is 0.073 **radians**, hand-tuned, and the
+ * only thing `Garden.ts` used to decide where to stop laying stone. Two
+ * definitions of one thing, in units that cannot be compared by eye.
+ *
+ * At the gate's pinned radius the angle happens to be worth 4.38 m — an 0.08 m
+ * margin over the arch — but the wall is laid by **arc length along a spline
+ * whose radius varies per seed**, so where the last kept segment actually ends
+ * is a different number on every park. Measured on `main`, in the 7.00 m clear
+ * width 1.0-2.0 m inside the arch, boundary masonry (`halfThickness 0.45`)
+ * overlaps a child on **nine of the sixteen pool seeds**: 451 by 0.87 m, 128
+ * by 0.76 m, 267 by 0.50, 346 by 0.44, 115 by 0.36, 131 by 0.28, 274 by 0.19,
+ * 208 by 0.07, and the canonical seed itself by 0.05.
+ */
+export function entranceGateFrame(x: number, z: number): { across: number; along: number } {
+  const length = Math.hypot(ENTRANCE_GATE_X, ENTRANCE_GATE_Z) || 1;
+  const inX = -ENTRANCE_GATE_X / length;
+  const inZ = -ENTRANCE_GATE_Z / length;
+  const dx = x - ENTRANCE_GATE_X;
+  const dz = z - ENTRANCE_GATE_Z;
+  return { across: dx * -inZ + dz * inX, along: dx * inX + dz * inZ };
+}
+
+/**
+ * **How far along the way in the wall's opening runs**, either side of the gate
+ * line. Only enough to cut the aperture: the wall is a ring and the rest of it
+ * is nowhere near here.
+ */
+const ENTRANCE_GATE_OPENING_REACH = 8;
+
+/**
+ * **Is this point in the hole the boundary wall must leave for the arch?**
+ *
+ * The one owner of the aperture, in the same metres the arch is built in.
+ * `margin` is whatever the caller's own stone is thick — a collision segment
+ * passes {@link BOUNDARY_WALL_COLLISION_HALF}, a drawn block passes its own
+ * half-length — so the *edge* of the thing clears the opening rather than its
+ * centre line. That distinction is the bug: `Garden.ts` tested a segment's
+ * midpoint, and a 2 m segment whose midpoint sits just outside can still reach
+ * a metre into the doorway.
+ */
+export function isInEntranceGateOpening(x: number, z: number, margin = 0): boolean {
+  const { across, along } = entranceGateFrame(x, z);
+  return (
+    Math.abs(across) < ENTRANCE_GATE_HALF_WIDTH + margin &&
+    Math.abs(along) < ENTRANCE_GATE_OPENING_REACH
+  );
+}
+
+/**
  * **How far into the park the walk in from the arch stays clear.**
  *
  * The gate is the one fixed thing in the park; everything else is drawn afresh
