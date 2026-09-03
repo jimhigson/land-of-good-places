@@ -1664,7 +1664,10 @@ export class Game {
       if (this.frameContext.input.manualMoveActive) {
         this.arrivalCameraReleased = true;
       } else {
-        this.camera.setZoomTarget(shot.zoom);
+        // Only while it is genuinely moving — see `ArrivalShot.ownsTheZoom`.
+        // The shot outlives the zoom by `ARRIVAL_RISE_TAIL`, and writing a
+        // constant into a field `nudgeZoom` shares is #329.
+        if (shot.ownsTheZoom) this.camera.setZoomTarget(shot.zoom);
         this.camera.setShotOverride(shot.yawDegrees, shot.pitchDegrees, shot.distance);
         // The focus is *claimed* here, not written — see `focusClaim` below.
         if (shot.watchesTheDoor) focusClaim = arrival.doorFocus;

@@ -567,7 +567,7 @@ export const ARRIVAL_RISE_TAIL = Math.min(1.6, ARRIVAL_TIMELINE.departing);
 /** On the arrival's own clock: the instant the bus has stopped at the kerb. */
 const AT_STOPPED = ARRIVAL_TIMELINE.rollingIn;
 /** The instant she steps off the kerb and starts walking in. */
-const AT_WALKING = ARRIVAL_CONTROL_AT - ARRIVAL_TIMELINE.walkingIn;
+export const AT_WALKING = ARRIVAL_CONTROL_AT - ARRIVAL_TIMELINE.walkingIn;
 /** The instant the whole shot has landed on the rig's own pose. */
 export const AT_SHOT_HOME = ARRIVAL_CONTROL_AT + ARRIVAL_RISE_TAIL;
 
@@ -602,6 +602,23 @@ export interface ArrivalShot {
   readonly distance: number;
   /** Framing. 1 is the ordinary playing view. */
   readonly zoom: number;
+  /**
+   * **True only while the shot still has a moving zoom to write.**
+   *
+   * `nudgeZoom` writes the same field `setZoomTarget` does, so every frame a
+   * caller re-asserts a *constant* zoom is a frame her pinch or wheel notch is
+   * silently discarded — that is #329, and it was found the hard way once
+   * already. The zoom here finishes moving at {@link ARRIVAL_CONTROL_AT}, the
+   * very instant she is handed the controls, but the shot itself runs on for
+   * {@link ARRIVAL_RISE_TAIL} afterwards while the tilt lifts. Without this
+   * flag those 1.6 seconds are spent writing `setZoomTarget(1)` every frame at
+   * a child who can already pinch.
+   *
+   * Decided here rather than in `Game.tick` because this is where the reason
+   * lives and where a check can reach it.
+   */
+  readonly ownsTheZoom: boolean;
+
   /**
    * True while the **bus's own door** is the subject and the camera should
    * orbit `ArrivalSequence.doorFocus` instead of the player. False everywhere
@@ -746,6 +763,7 @@ export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | 
     // to a door that is still moving would hold the shot still while the bus
     // slid across it. From `walking-in` on it is her, and the ordinary damped
     // follow is what carries the camera through the gateway with her.
+    ownsTheZoom: elapsed < ARRIVAL_CONTROL_AT,
     watchesTheDoor: elapsed >= AT_STOPPED && elapsed < AT_WALKING,
   };
 }

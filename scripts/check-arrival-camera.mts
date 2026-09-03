@@ -81,6 +81,7 @@ import {
   ARRIVAL_RISE_TAIL,
   AT_SHOT_HOME,
   arrivalShot,
+  AT_WALKING,
   type ArchPass,
 } from '../src/world/entrance/ArrivalSequence.ts';
 import { GATE_ARCH_CLEAR_HEIGHT, GATE_ARCH_CLEAR_WIDTH } from '../src/art/models/gateArch.ts';
@@ -137,8 +138,24 @@ function near(value: number, want: number, tolerance: number, what: string): voi
 const BEARING_SWING_FLOOR = 60;
 /** How far the eye must actually travel through the world, in metres. */
 const EYE_TRAVEL_FLOOR = 40;
-/** Under this stand-back the eye is inside the gateway — see clause 7. */
+/** The stand-back below which the camera counts as riding with her. */
 const NEAR_THE_ARCH = 8;
+/**
+ * How far above its own closest ride the eye may be and still be counted as
+ * "in the gateway", as a multiple.
+ *
+ * **A band, not a time window, and not a bare threshold** — both were tried and
+ * both were wrong. A time window stops meaning anything when the dive is
+ * retimed, which it has been twice. A bare `distance < 8` looks right and is
+ * not: the stand-back passes *through* that value twice, once diving in and
+ * once opening back out on the rise, and the second time the camera is well
+ * past the arch with its tilt already climbing — so the clause measured a
+ * "headroom" of -1.32 m on a camera that was nowhere near the crossbar, and
+ * went red on a shot that was correct. Anchoring to the shot's own minimum
+ * makes it self-scoping: the eye is only within 15% of its closest ride while
+ * it is threading the gateway.
+ */
+const RIDING_BAND = 1.15;
 
 const STEP = 1 / 60;
 
@@ -393,9 +410,14 @@ console.log('the eye passes under the crossbar and between the piers');
     // is retimed, which it has been twice. An earlier version swept a fixed
     // window and reported a "headroom" of -9.62 m measured on a camera 45 m
     // away and climbing.
+    let riding = Infinity;
     for (let t = AT_WALKING; t <= AT_SHOT_HOME; t += STEP) {
       const shot = arrivalShot(t, pass);
-      if (!shot || shot.distance > NEAR_THE_ARCH) continue;
+      if (shot) riding = Math.min(riding, shot.distance);
+    }
+    for (let t = AT_WALKING; t <= AT_SHOT_HOME; t += STEP) {
+      const shot = arrivalShot(t, pass);
+      if (!shot || shot.distance > riding * RIDING_BAND) continue;
       const eyeUp = CHEST + shot.distance * Math.sin(shot.pitchDegrees * DEG);
       const eyeAside = Math.abs(
         shot.distance * Math.cos(shot.pitchDegrees * DEG) * Math.sin(shot.yawDegrees * DEG),
