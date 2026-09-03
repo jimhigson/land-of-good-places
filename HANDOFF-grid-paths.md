@@ -443,6 +443,43 @@ together.
 **Do not "fix" this by widening a screen or moving the fence.** The fence is
 correct; the paths it was given were not.
 
+**BUILT AND MEASURED.** `relayPolyline` now refuses a cell on a private line
+once it is more than one `STREET_PITCH` from the endpoint that owns it.
+`tsc --noEmit` exit 0. Sixteen seeds, against the approach-exemption baseline:
+
+| seed | before | after | |
+|---|---|---|---|
+| canonical | 4 | **7** | worse |
+| 5 | 10 | 10 | |
+| 11 | 22 | **4** | **the target: -18** |
+| 24 | 3 | 3 | |
+| 115 | 0 | 0 | green |
+| 128 | 0 | 0 | green |
+| 131 | 0 | 0 | green |
+| 208 | 0 | 0 | green |
+| 225 | 2 | 2 | |
+| 267 | 0 | **2** | worse, **lost green** |
+| 274 | 0 | 0 | green |
+| 288 | 3 | 3 | |
+| 326 | 1 | 1 | |
+| 346 | 0 | 0 | green |
+| 428 | 0 | **2** | worse, **lost green** |
+| 451 | 0 | 0 | green |
+
+**Total stranded 45 -> 34, but green 9 -> 7.** The rule is right — seed 11's
+district joined up and its two parallel arterials are gone — but applying it
+unconditionally starves the doors that genuinely need a longer step out, and
+they fall all the way to the straight-line last resort.
+
+**This is the same shape as the approach exemption two commits earlier, and it
+takes the same answer: a backtrack ladder, not a threshold.** Try the walk
+under grid discipline; only if that finds nothing, allow the private line its
+full length — which is still far better than the straight-line last resort.
+Discipline is then kept everywhere it is achievable, which is everywhere the
+regressions are not. **Do not answer this by raising the one-pitch cap**: the
+cap is derived (a step out to a shared line is at most half a pitch away in
+each axis), and loosening it would trade seed 11 back.
+
 ### The last resort still draws, and per the standing rule it must not
 
 `paths.ts` ~3786-3814: when nothing legal reaches a door it sets
