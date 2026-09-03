@@ -76,15 +76,21 @@ export interface WarpVector {
  *   `t = 0` stop, so every route answered with the same point for up to
  *   0.35 m at each join. Fixing it moves **every** route slightly, which
  *   re-solves every park, which is exactly the thing a baked vector cannot
- *   survive. Seeds 5 and 115 were re-searched against the fixed geometry
- *   (`measurements/warp-search-2sep-railroute-fix.jsonl`); the rest were
- *   re-vetted and still hold.
+ *   survive. Seeds **5, 115 and 326** were re-searched against the fixed
+ *   geometry (`measurements/warp-search-2sep-railroute-fix.jsonl`); the other
+ *   four were re-vetted and still hold.
  *
  * **If you change the geometry again, the vectors are stale again.** The tell
- * is not a red `check:park` — it was green on 115 while three invariants were
- * red — it is `pnpm run vet:seeds` over the whole pool. `CI_SWEEP_SEEDS` only
- * covers six of the sixteen, so the blocking chain structurally cannot see a
- * regression on the other ten.
+ * is neither gate on its own, because the three that went stale failed in
+ * both directions: 115 was `check:park`-green with three invariants red, 326
+ * was invariant-green (81/81) with `check:park` stranding 8. The tell is
+ * `pnpm run vet:seeds` over the whole pool, which runs both.
+ *
+ * And note `check:park` is **canonical-only** — it never builds a pool seed's
+ * park at all — while `CI_SWEEP_SEEDS` covers six of the sixteen. So the
+ * blocking chain structurally cannot see a stale vector on the other ten, and
+ * did not see 326's even though 326 is in the sweep list. See
+ * `parkSeedPool.ts`'s note beside `CI_SWEEP_SEEDS`.
  */
 const WARPS_BY_SEED: Readonly<Record<number, WarpVector>> = {
   // First baked as {ferrisWheel:2}, which passed check:park and all 81

@@ -152,6 +152,15 @@ export const PARK_SEED_POOL: readonly number[] = [
  * `measure-*`/`sweep-*` scripts nobody runs in CI. Grep before believing
  * otherwise; the list of importers is short and this comment can rot.
  *
+ * **The trap that makes this easy to misread**: `check-park.mts` *does*
+ * import something called `SEEDS` (line 72) and prints `N/M seeds placed`
+ * and `N/M waypoints connected`. Those are `poiGraph`'s **waypoint** seeds —
+ * points of interest a child can walk to — and have nothing whatever to do
+ * with park seeds. Two different meanings of "seed", one of them in the
+ * output of the very check people assume is sweeping the other. If you are
+ * checking whether `check:park` covers a park seed, the question is whether
+ * it imports **this** file; it does not.
+ *
  * Measured 2 Sep 2026: seed 326 is in this list, went green through the whole
  * 58-step chain, and was stranding 8 waypoints under `check:park` the entire
  * time. Seed 115 failed the other way round — `check:park` green, three
