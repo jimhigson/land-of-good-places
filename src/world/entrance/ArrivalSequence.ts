@@ -24,6 +24,7 @@ import {
   type CatBusHandle,
 } from './catBus';
 import {
+  CAMERA_DISTANCE,
   CAMERA_PITCH_DEGREES,
   CAMERA_VIEW_HEIGHT,
   CAMERA_YAW_DEGREES,
@@ -37,6 +38,7 @@ import {
   ENTRANCE_BUS_DOOR_X,
   ENTRANCE_BUS_STOP_Z,
   ENTRANCE_BUS_VANISH_X,
+  ENTRANCE_CLEAR_RADIUS,
   ENTRANCE_GATE_X,
   ENTRANCE_GATE_Z,
   ENTRANCE_PLAYER_X,
@@ -324,16 +326,28 @@ const SQUARE_ON_TO_THE_DOOR_DEGREES =
 
 /**
  * How far off square-on the door shot sits, in degrees, turned towards the
- * rig's own bearing.
+ * rig's own bearing — so the camera looks **along the kerb** at the bus rather
+ * than straight through the gateway at it.
  *
- * Dead square-on to an orthographic bus is a flat elevation drawing — no depth
- * to the doorway, no sense of the children coming *out* of anything. A
- * three-quarter turn gives the step some depth and shortens the arc the camera
- * has to travel on the way home, so the swing under the arch stays a move
- * rather than a spin. A look number, chosen by watching it; the bearing it is
- * measured from is not.
+ * **This is the number that decides whether the arch frames the shot or lands
+ * on top of it**, and the reason is the projection rather than taste. An
+ * orthographic camera puts everything on the view axis at the same screen
+ * point, however far apart the two things are — so from square-on, where the
+ * gate, the door and the lens are collinear, the arch draws itself squarely
+ * across the doorway at the same size it would be if it were touching the bus.
+ * It was photographed doing exactly that: the LAND OF GOOD PLACES sign lying
+ * across a child's chest as she stepped down. There is no pitch and no zoom
+ * that moves it, because in this projection nothing about distance moves
+ * anything.
+ *
+ * Turned this far down the kerb, the arch is 3 m off the sightline instead of
+ * on it, so it stands at the edge of frame as the thing she is about to walk
+ * under. It also gives the doorway some depth — dead square-on to an
+ * orthographic bus is a flat elevation drawing — and shortens the arc the
+ * camera has to travel on the way home, so the swing under the arch stays a
+ * move rather than a spin.
  */
-const ARRIVAL_DOOR_THREE_QUARTER_DEGREES = 25;
+const ARRIVAL_DOOR_THREE_QUARTER_DEGREES = 60;
 
 /** The bearing the door shot is actually taken from — square-on, turned that
  *  far towards the bearing it will have to come home to. */
@@ -347,17 +361,48 @@ export const ARRIVAL_DOOR_YAW_DEGREES =
  *
  * The rig's own 38° looks down on the park from above — right for playing,
  * wrong for watching children step down off a bus, because from up there you
- * see the tops of their heads and the roof of the bus. At 12° the doorway is
- * something you are standing in front of, the children come towards the lens
- * as they step off, and the arch becomes a thing to be walked *under* rather
- * than a shape drawn on the floor.
+ * see the tops of their heads and the roof of the bus. At 24° a child's face
+ * is towards the lens as she steps off, the doorway has a front rather than a
+ * lid, and the arch is a thing to be walked *under* rather than a shape drawn
+ * on the floor.
  *
- * It can be this low only because {@link ARRIVAL_DOOR_YAW_DEGREES} faces out of
- * the park: the previous attempt was pinned to the rig's bearing and had to
- * climb to 26° to get the rail race's track and pylons off the children's
- * heads.
+ * **Not lower, and 12° was tried.** In an orthographic projection a very low
+ * tilt collapses the ground plane to nothing, so the bus stops looking like it
+ * is standing on a road and starts looking like it is hanging in the air above
+ * the boundary wall — photographed, and unmistakable once seen. The tilt has to
+ * keep enough ground under everybody for the pavement to read as pavement.
  */
-const ARRIVAL_DOOR_PITCH_DEGREES = 12;
+const ARRIVAL_DOOR_PITCH_DEGREES = 24;
+
+/**
+ * **How far back the door shot's eye stands, in metres — and this is about
+ * what is in the way, not about how big anything looks.**
+ *
+ * An orthographic camera has no size falloff, so this cannot frame anything:
+ * every object lands on the same pixels whatever it is set to. The only thing
+ * it decides is **which geometry sits between the lens and the bus**, and on
+ * this shot that is the whole difficulty. The door faces *into* the park, so
+ * any bearing that faces the door is also looking down the length of the park,
+ * and at the rig's own 90 m stand-back that means whatever the seed put there:
+ * the rail race's track and pylons on one bearing, the hotel tower straight
+ * through the middle on another. Both were photographed while building this.
+ * Nothing tuneable fixes that, because it is a different obstacle on every
+ * seed.
+ *
+ * So the eye comes forward until it is standing **in the park's own gateway**,
+ * and the horizontal run is derived from the one thing in the world that
+ * promises a clear line: `ENTRANCE_CLEAR_RADIUS`, the disc `Scenery.ts` keeps
+ * free of trees and bushes around the stop and the gate. Stand within that and
+ * the deep park is behind the lens, where it cannot intrude, and the only
+ * things left between the camera and the children are the gateway and the arch
+ * — which are the subject's own setting rather than clutter across it.
+ *
+ * Divided by the pitch's cosine because {@link cameraOffset} takes a slant
+ * distance and the reasoning above is entirely about ground plan.
+ */
+const ARRIVAL_DOOR_DISTANCE =
+  (ENTRANCE_BUS_STOP_Z - ENTRANCE_GATE_Z + ENTRANCE_CLEAR_RADIUS) /
+  Math.cos(ARRIVAL_DOOR_PITCH_DEGREES * DEG);
 
 /**
  * How much air the door shot leaves around the bus's own height.
@@ -412,6 +457,12 @@ export interface ArrivalShot {
   readonly yawDegrees: number;
   /** Downward tilt, degrees. */
   readonly pitchDegrees: number;
+  /**
+   * How far back the eye stands, metres. **Occlusion, not framing** — see
+   * `IsoCamera.setShotOverride`. Orthographic: it changes what can get in the
+   * way and nothing else.
+   */
+  readonly distance: number;
   /** Framing. 1 is the ordinary playing view. */
   readonly zoom: number;
   /**
@@ -496,6 +547,9 @@ export function arrivalShot(elapsed: number): ArrivalShot | null {
       CAMERA_YAW_DEGREES +
       (angleDelta(CAMERA_YAW_DEGREES * DEG, ARRIVAL_DOOR_YAW_DEGREES * DEG) / DEG) * swing,
     pitchDegrees: lerp(CAMERA_PITCH_DEGREES, ARRIVAL_DOOR_PITCH_DEGREES, lift),
+    // Home on the yaw's curve rather than the tilt's, so the deep park is back
+    // in the sightline only once the shot has stopped facing across it.
+    distance: lerp(CAMERA_DISTANCE, ARRIVAL_DOOR_DISTANCE, swing),
     zoom,
     // The door is the subject exactly while the bus is stopped with children
     // coming out of it. Not during `rolling-in`: she is aboard for all of it,

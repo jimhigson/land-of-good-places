@@ -357,13 +357,24 @@ export class IsoCamera {
    * cannot restore a stale copy of it, and so a shot that eases its own angles
    * back to the rig's lands on `(0, 0, 0)` exactly rather than near it.
    *
+   * **`distance` is an occlusion control, not a framing one**, and that is the
+   * one counter-intuitive thing here. An orthographic projection has no size
+   * falloff, so pulling the eye in does not make anything bigger — every object
+   * lands on exactly the same pixels. What it changes is *what is in the way*:
+   * only geometry between the eye and the subject can cover the subject, so a
+   * shot that stands 20 m back sees past the whole park, and one that stands
+   * the rig's 90 m back sees a coaster, a hotel tower and a castle turret drawn
+   * across it. That is not hypothetical — it is what the first three attempts
+   * at the arrival's door shot looked like, on three different bearings, on the
+   * same seed. Defaults to {@link CAMERA_DISTANCE}, which is the rig's own.
+   *
    * **Safe and expected to call every frame with a moving value.** Unlike
    * {@link setZoomTarget} nothing else in the game competes for this, so there
    * is no #329 here to walk into: a caller driving a camera *path* writes a
    * different pose every frame, and that is the point.
    */
-  setShotOverride(yawDegrees: number, pitchDegrees: number): void {
-    const eye = cameraOffset(yawDegrees * DEG, pitchDegrees * DEG, CAMERA_DISTANCE);
+  setShotOverride(yawDegrees: number, pitchDegrees: number, distance = CAMERA_DISTANCE): void {
+    const eye = cameraOffset(yawDegrees * DEG, pitchDegrees * DEG, distance);
     this.poseTarget.set(eye.x - this.offset.x, eye.y - this.offset.y, eye.z - this.offset.z);
   }
 

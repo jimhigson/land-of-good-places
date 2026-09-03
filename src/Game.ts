@@ -1648,7 +1648,7 @@ export class Game {
         this.arrivalCameraReleased = true;
       } else {
         this.camera.setZoomTarget(shot.zoom);
-        this.camera.setShotOverride(shot.yawDegrees, shot.pitchDegrees);
+        this.camera.setShotOverride(shot.yawDegrees, shot.pitchDegrees, shot.distance);
         // Re-asserted unconditionally while it holds, exactly as
         // `setFocusOverride`'s own doc requires.
         if (shot.watchesTheDoor) this.camera.setFocusOverride(arrival.doorFocus);
