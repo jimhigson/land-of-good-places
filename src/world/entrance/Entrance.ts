@@ -5,6 +5,7 @@ import {
   CylinderGeometry,
   Group,
   Mesh,
+  type MeshStandardMaterial,
   PlaneGeometry,
   SphereGeometry,
   Vector3,
@@ -24,14 +25,27 @@ import type { CollisionWorld } from '../Collision';
 import type { Player } from '../../entities/Player';
 import { buildPawPrint, CAT_BUS_LENGTH } from './catBus';
 import { buildGateArch } from './gateArch';
-import { ROAD_HALF_WIDTH, ROAD_TILE_METRES, applyRoadUvs, roadMaterial } from './road';
+import { ROAD_HALF_WIDTH, ROAD_TILE_METRES, roadMaterial } from './road';
 import {
   entranceRoadAt,
   entranceRoadInnerEdge,
+  entranceRoadInnerEdgeAcross,
+  entranceRoadInnerEdgeRing,
+  entranceRoadInnerNormal,
   entranceRoadStations,
   type RoadStation,
 } from './roadRoute';
 import { PARK_BOUNDARY, edgeRadiusAt } from '../boundary';
+import { PATH_KERB_OVERHANG } from '../../core/constants';
+import {
+  addPathQuilt,
+  GeometryBuilder,
+  PATH_KERB_LIFT,
+  PATH_SURFACE_LIFT,
+  pathKerbMaterial,
+  pathSurfaceMaterial,
+} from '../pathSurface';
+
 import { forEachPavedDisc } from '../paving';
 import { ArrivalSequence, arrivalIsDue } from './ArrivalSequence';
 import type { NpcCharacter } from '../../entities/npc/NpcCharacter';
@@ -630,14 +644,14 @@ export class Entrance implements GameSystem {
  * Two ribbons, and the second is the one that answers him literally:
  *
  * 1. **The kerb**, running along the bus's own stopping line outside the wall.
- * 2. **The spur**, running from that kerb straight through the gate opening and
- *    on to the bus stop inside. You can trace the road surface from outside the
- *    wall to inside it without leaving it.
- *
- * Both are built from `road.ts` — the same width, the same slab courses, the
- * same dashed line as the lane the ride is driven down, because they are meant
- * to be the same road and the cut between the two scenes is the one place a
- * child's eye is on nothing else.
+ *    Built from `road.ts` — the same width, the same slab courses, the same
+ *    dashed line as the lane the ride is driven down, because they are meant to
+ *    be the same road and the cut between the two scenes is the one place a
+ *    child's eye is on nothing else.
+ * 2. **The run in through the gate**, from that kerb to the park's own paving,
+ *    so you can trace a walkable surface from outside the wall to inside it
+ *    without leaving it. That one is an **ordinary park path** and is built
+ *    from `pathSurface.ts` — see {@link buildGatewayPath}.
  *
  * ## Grey, and only here
  *
@@ -654,11 +668,12 @@ export class Entrance implements GameSystem {
  * material to accidentally repaint: each caller builds its own from the shared
  * *specification*, and the specification is dimensions, not colour.
  *
- * **Both ribbons, not just the one outside the wall.** The spur is one
- * continuous road surface running through the arch to the stop, and cutting it
- * in half at the boundary would put a sand/grey seam down the middle of a road
- * — where a road's own kerbs are the only edge that means anything. The eight
- * metres inside the arch is the bus-stop apron, not a garden path.
+ * **The grey stops at the wall**, because that is where the road stops. This
+ * used to say the opposite — that the spur through the arch had to be grey too,
+ * since cutting one road surface in half at the boundary would put a sand/grey
+ * seam down the middle of it, and that the apron inside the arch was bus-stop
+ * rather than garden. Jim looked at it and disagreed (3 September): the run in
+ * through the gate is a path, so there is no road to cut in half.
  *
  * ## The kerb's length is measured, not chosen
  *
@@ -700,20 +715,25 @@ function buildEntranceRoad(): Mesh[] {
    * from the exact line the road stops at, which is the castle roof deck's fix
    * in a different material.
    */
-  const spurReach = (): number => {
+  const spurReach = (): SpurReach => {
     const from = entranceRoadInnerEdge(0).z;
     for (let z = from; z >= ENTRANCE_STOP_Z; z -= 0.1) {
-      let paved = false;
+      let met: number | null = null;
       const known = forEachPavedDisc((x, discZ, radius) => {
-        if (Math.hypot(ENTRANCE_GATE_X - x, z - discZ) < radius) paved = true;
+        if (Math.hypot(ENTRANCE_GATE_X - x, z - discZ) < radius) {
+          // The narrowest path covering the axis here, because that is the one
+          // whose width the gateway path should match: joining a 1.3 m-wide
+          // street with a ribbon sized off the plaza would step out at the seam.
+          if (met === null || radius < met) met = radius;
+        }
       });
       // Nothing published — an interior harness with no garden. Behave as
       // before rather than guessing.
-      if (!known) return ENTRANCE_STOP_Z;
-      if (paved) return z;
+      if (!known) return { z: ENTRANCE_STOP_Z, halfWidth: null };
+      if (met !== null) return { z, halfWidth: met };
     }
     // No paving reaches the gate on this seed: run the whole way in, as before.
-    return ENTRANCE_STOP_Z;
+    return { z: ENTRANCE_STOP_Z, halfWidth: null };
   };
 
   const meshes: Mesh[] = [];
@@ -734,41 +754,88 @@ function buildEntranceRoad(): Mesh[] {
   // the ground the terrain disc is actually built out to.
   meshes.push(curvedRoadRibbon('entrance-road-kerb', material, entranceRoadStations()));
 
-  // --- the spur, in through the gate ----------------------------------------
-  // From the kerb road's **inner** edge to the bus stop inside the park, so it
-  // crosses the wall through the gate's own opening and meets ground the
-  // plaza's paths already reach.
-  //
-  // It used to start at the kerb's *outer* edge, which meant the spur ran
-  // straight across the full 7.78 m width of the kerb — a 48 m² slab of road
-  // laid on top of another slab of road, in the same plane, 0.08 mm apart, and
-  // the single worst coplanar seam in the game (#472). It is also the first
-  // thing a child sees: she arrives on the bus and walks in through here.
-  //
-  // Starting at the inner edge deletes that buried face rather than nudging
-  // either ribbon. The road stays continuous — the kerb already paves the whole
-  // gate opening's width across its own band, so the two abut exactly on the
-  // kerb's own inner edge and you can still trace the surface from outside the
-  // wall to inside it without leaving it, which is the thing this road exists
-  // to do.
-  //
-  // **The inner edge is asked for, not computed here.** On a curved road
-  // "inner" is a direction rather than an axis, so `entranceRoadInnerEdge`
-  // owns it; a `z` worked out at this call site would be a second description
-  // of the same kerb.
-  meshes.push(
-    roadRibbon({
-      name: 'entrance-road-gateway',
-      material,
-      from: { x: ENTRANCE_GATE_X, z: entranceRoadInnerEdge(0).z },
-      to: { x: ENTRANCE_GATE_X, z: spurReach() },
-      across: 'x',
-      along: 'z',
-      centre: ENTRANCE_GATE_X,
-    }),
-  );
+  meshes.push(...buildGatewayPath(spurReach()));
 
   return meshes;
+}
+
+/** Where the run in from the road stops, and how wide the paving it meets is. */
+interface SpurReach {
+  readonly z: number;
+  /** Half-width of the narrowest path covering the gate axis there, if any. */
+  readonly halfWidth: number | null;
+}
+
+/**
+ * Fallback width for the run in through the gate on a seed whose paving never
+ * reaches the gate (and in an interior harness with no garden at all), where
+ * there is no path to take a width from. The park's own streets are 2.6 to
+ * 3.6 m across, so this is one of them rather than a number of its own.
+ */
+const GATEWAY_PATH_FALLBACK_HALF_WIDTH = 1.6;
+
+/**
+ * **The short run in through the gate — an ordinary park path.**
+ *
+ * Jim, 3 September 2026, looking out through the arch: *"the small run of path
+ * from the road into the park should be just a normal path, make that change
+ * before merging that work"*.
+ *
+ * It used to be road: the same grey slabs as the kerb outside, running through
+ * the arch to meet the park's own pink-and-cream paving at a visible seam a few
+ * metres in. The note this replaces argued that cutting the surface at the
+ * boundary would put a sand/grey join down the middle of a road, and that the
+ * apron inside the arch was bus-stop, not garden. Jim's eye says otherwise, and
+ * he is right: the road is the thing outside the wall that the bus drives on.
+ * Inside the wall it is a path like every other path, and now it is drawn out
+ * of `pathSurface.ts` — the same two materials, the same lifts, the same slab
+ * size as the network it joins, rather than a copy of any of them.
+ *
+ * **Its width comes from the path it meets**, and its far end from that path's
+ * own paving (`spurReach`), so nothing here is a number picked to look right on
+ * one seed: on the sixteen in the pool the run is 5.9 to 10.2 m long and the
+ * paving it joins is 2.8 to 3.2 m across, and it follows both.
+ *
+ * **Its road end is the road's own boundary, point for point.** Not a straight
+ * line at one representative `z`: the kerb is curved, and across even a path's
+ * width its inner edge wanders up to 0.93 m — so a straight join lies across
+ * the road (a coplanar seam, which is what the road-width spur left behind) or
+ * opens a wedge of grass between the two surfaces at the one place every child
+ * walks. `entranceRoadInnerEdgeAcross` hands back the kerb's own vertices and
+ * the quilt is built onto them.
+ */
+function buildGatewayPath(reach: SpurReach): Mesh[] {
+  const halfWidth = reach.halfWidth ?? GATEWAY_PATH_FALLBACK_HALF_WIDTH;
+
+  /** One layer, `half` metres either side of the gate's axis, at its own lift. */
+  const layer = (name: string, half: number, lift: number, material: MeshStandardMaterial): Mesh | null => {
+    const road = entranceRoadInnerEdgeAcross(ENTRANCE_GATE_X, half);
+    if (road.length < 2) return null;
+    const park = road.map((point) => ({ x: point.x, z: reach.z }));
+    // A row per metre or so of run, for the same reason the road is sampled at
+    // a metre: the ground under the arch is not flat and a ribbon laid in two
+    // rows cuts the corner of it.
+    const rows = Math.max(2, Math.round(Math.abs((road[0] as { z: number }).z - reach.z)));
+    const builder = new GeometryBuilder();
+    addPathQuilt(builder, road, park, rows, lift);
+    const mesh = new Mesh(builder.build(), material);
+    mesh.name = name;
+    mesh.receiveShadow = true;
+    return mesh;
+  };
+
+  // Kerb first, then surface — the same order and the same overhang the network
+  // is drawn in, so the cream frame sits under the sandy middle here exactly as
+  // it does everywhere else.
+  return [
+    layer(
+      'entrance-gateway-path-kerb',
+      halfWidth + PATH_KERB_OVERHANG,
+      PATH_KERB_LIFT,
+      pathKerbMaterial(),
+    ),
+    layer('entrance-gateway-path', halfWidth, PATH_SURFACE_LIFT, pathSurfaceMaterial()),
+  ].filter((mesh): mesh is Mesh => mesh !== null);
 }
 
 /**
@@ -801,17 +868,22 @@ function curvedRoadRibbon(
   const position = geometry.getAttribute('position') as BufferAttribute;
   const uv = geometry.getAttribute('uv') as BufferAttribute;
 
+  // **Column 0 is the road's own inner edge**, taken from `roadRoute.ts`'s ring
+  // rather than recomputed from the station's frame here. The path through the
+  // gate is built onto that same list, so the two meshes share a boundary by
+  // construction. While this loop worked the edge out for itself the agreement
+  // was a measurement — 0 of 143 stations disagreed on seed 326 — and a
+  // measurement is not a mechanism.
+  const innerRing = entranceRoadInnerEdgeRing();
   for (let row = 0; row < stations.length; row += 1) {
     const station = stations[row] as RoadStation;
-    // Left of the heading; which side is which does not matter, only that it is
-    // consistent, because the texture's kerbs are symmetric about the middle.
-    const normalX = -station.headingZ;
-    const normalZ = station.headingX;
+    const inner = innerRing[row] as { x: number; z: number };
+    const normal = entranceRoadInnerNormal(station);
     for (let column = 0; column <= across; column += 1) {
       const t = column / across;
-      const offset = (t - 0.5) * ROAD_HALF_WIDTH * 2;
-      const x = station.x + normalX * offset;
-      const z = station.z + normalZ * offset;
+      const offset = t * ROAD_HALF_WIDTH * 2;
+      const x = inner.x - normal.x * offset;
+      const z = inner.z - normal.z * offset;
       const index = row * (across + 1) + column;
       // A hand's breadth up, so it never z-fights the lawn — the same lift the
       // park's own paths take.
@@ -843,8 +915,14 @@ function curvedRoadRibbon(
   //
   // `check:entrance-road` now asserts the drawn road faces the sky, which is the
   // assertion that was missing rather than a second copy of this reasoning.
+  //
+  // **Whether to flip is measured off the first triangle**, not asserted once
+  // and left. Which way the columns run is `roadRoute.ts`'s business now — its
+  // inner normal turns round if the park is on the other side of the heading —
+  // so a fixed "always reverse" would be right on the geometry it was written
+  // against and silently wrong on any other. This asks.
   const index = geometry.getIndex();
-  if (index) {
+  if (index && facesTheGround(position, index)) {
     for (let i = 0; i < index.count; i += 3) {
       const second = index.getX(i + 1);
       const third = index.getX(i + 2);
@@ -861,52 +939,21 @@ function curvedRoadRibbon(
   return mesh;
 }
 
-interface RoadRibbonOptions {
-  readonly name: string;
-  readonly material: ReturnType<typeof roadMaterial>;
-  readonly from: { x: number; z: number };
-  readonly to: { x: number; z: number };
-  readonly across: 'x' | 'z';
-  readonly along: 'x' | 'z';
-  readonly centre: number;
-}
-
 /**
- * One straight ribbon of road, draped on the terrain.
- *
- * Built in **world coordinates before anything is displaced**, and then not
- * moved: `applyRoadUvs` reads the geometry's own positions, so a mesh translated
- * after its vertices are placed gets UVs describing where it used to be. That is
- * the mistake that put the journey's hills 100 m out of step with everything
- * driving on them (`BusJourney.buildGround`), in the form it would take here.
+ * Does this indexed, near-horizontal geometry face downwards? Read off the
+ * first triangle, which is enough for a ribbon: every quad in one is wound the
+ * same way as its neighbours, and it is the *inherited* winding of the whole
+ * sheet that flips, never one triangle of it.
  */
-function roadRibbon(options: RoadRibbonOptions): Mesh {
-  const { name, material, from, to, across, along, centre } = options;
-  const length = Math.hypot(to.x - from.x, to.z - from.z);
-  const alongSegments = Math.max(4, Math.round(length / 2));
-  // Eight segments across: the texture pins its kerbs at fixed `u`, so too few
-  // samples across puts the nearest vertex metres from the kerb it should draw.
-  const geometry = new PlaneGeometry(
-    across === 'x' ? ROAD_HALF_WIDTH * 2 : length,
-    across === 'x' ? length : ROAD_HALF_WIDTH * 2,
-    across === 'x' ? 8 : alongSegments,
-    across === 'x' ? alongSegments : 8,
-  );
-  geometry.rotateX(-Math.PI / 2);
-  geometry.translate((from.x + to.x) / 2, 0, (from.z + to.z) / 2);
-
-  const position = geometry.getAttribute('position') as BufferAttribute;
-  for (let i = 0; i < position.count; i += 1) {
-    // Lifted a hand's breadth so it never z-fights the lawn, as the park's own
-    // paths are.
-    position.setY(i, terrainHeight(position.getX(i), position.getZ(i)) + 0.06);
-  }
-  position.needsUpdate = true;
-  geometry.computeVertexNormals();
-  applyRoadUvs(geometry, { across, along, centre });
-
-  const mesh = new Mesh(geometry, material);
-  mesh.name = name;
-  mesh.receiveShadow = true;
-  return mesh;
+function facesTheGround(position: BufferAttribute, index: BufferAttribute): boolean {
+  if (index.count < 3) return false;
+  const a = index.getX(0);
+  const b = index.getX(1);
+  const c = index.getX(2);
+  const abx = position.getX(b) - position.getX(a);
+  const abz = position.getZ(b) - position.getZ(a);
+  const acx = position.getX(c) - position.getX(a);
+  const acz = position.getZ(c) - position.getZ(a);
+  return abz * acx - abx * acz < 0;
 }
+

@@ -204,14 +204,20 @@ async function measureOneSeed(asControl: boolean): Promise<void> {
   // and the park, and it is the one thing that makes the numbers above mean
   // anything.
   //
-  // **Scoped to the ribbon the bus drives, and only that one.** The gateway spur
-  // runs the other way — in through the arch to the plaza — and the bus never
-  // goes there (a bus is not a park vehicle; #195 is the whole reason it stops
-  // outside). Holding the spur to the bus's corridor would be asserting that a
-  // road the bus does not drive is inside the road the bus does drive, which is
-  // false by design and would have to be weakened to pass. The spur gets the
-  // assertion that is actually true of it instead — that it **abuts** the kerb,
-  // below — so nothing here is excused, it is asked the right question.
+  // **Scoped to the ribbon the bus drives, and only that one.** The run in
+  // through the gate goes the other way — through the arch to the plaza — and
+  // the bus never goes there (a bus is not a park vehicle; #195 is the whole
+  // reason it stops outside). Holding it to the bus's corridor would be
+  // asserting that ground the bus does not drive is inside the road the bus does
+  // drive, which is false by design and would have to be weakened to pass. It
+  // gets the assertion that is actually true of it instead — that it **abuts**
+  // the kerb, below — so nothing here is excused, it is asked the right
+  // question.
+  //
+  // That run is an ordinary park path since 3 September and no longer carries a
+  // `entrance-road` name, which is why it is matched by its own name here. The
+  // reasoning above is unchanged by the material: it is about which surface the
+  // bus drives on, not what colour it is.
   let strayVertices = 0;
   let worstStray = 0;
   let spurGap = Infinity;
@@ -255,11 +261,11 @@ async function measureOneSeed(asControl: boolean): Promise<void> {
     park.scene.traverse((object) => {
       const mesh = object as InstanceType<typeof Mesh>;
       if (!mesh.isMesh) return;
-      if (mesh.name === 'entrance-road-gateway') {
+      if (mesh.name.startsWith('entrance-gateway-path')) {
         countFacing(mesh);
-        // Continuity: the spur's outermost vertex has to touch the kerb, or a
-        // child walking in from the bus steps over a strip of grass between two
-        // slabs of road.
+        // Continuity: the path's outermost vertex has to touch the kerb, or a
+        // child walking in from the bus steps over a strip of grass between the
+        // road and the paving.
         const position = mesh.geometry.getAttribute('position');
         for (let i = 0; i < position.count; i += 1) {
           at.set(position.getX(i), position.getY(i), position.getZ(i)).applyMatrix4(mesh.matrixWorld);
@@ -360,8 +366,8 @@ async function sweepThePool(): Promise<void> {
     }
     if (report.spurGap > 0.01) {
       failures.push(
-        `seed ${report.seed}: the gateway spur's nearest vertex is ${report.spurGap.toFixed(2)} m from ` +
-          'the kerb — the road through the arch does not meet the road the bus stops on, so there is ' +
+        `seed ${report.seed}: the gateway path's nearest vertex is ${report.spurGap.toFixed(2)} m from ` +
+          'the kerb — the path through the arch does not meet the road the bus stops on, so there is ' +
           'grass between them where a child walks in',
       );
     }

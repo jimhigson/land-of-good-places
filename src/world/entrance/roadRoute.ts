@@ -595,14 +595,104 @@ export function entranceRoadFacing(at: number): number {
  */
 export function entranceRoadInnerEdge(at: number): { readonly x: number; readonly z: number } {
   const station = entranceRoadAt(at);
-  // Left of the heading, then flipped if that points away from the park.
-  let nx = -station.headingZ;
-  let nz = station.headingX;
-  if (entranceRoadOutsetAt(station.x + nx, station.z + nz) > entranceRoadOutsetAt(station.x, station.z)) {
-    nx = -nx;
-    nz = -nz;
+  const normal = innerNormal(station);
+  return { x: station.x + normal.x * ROAD_HALF_WIDTH, z: station.z + normal.z * ROAD_HALF_WIDTH };
+}
+
+/**
+ * Which way is "towards the park" at this station — left of the heading, then
+ * flipped if that turns out to point away. On a curved road "inner" is a
+ * direction and not an axis, so it is asked of the boundary rather than of `z`.
+ */
+export function entranceRoadInnerNormal(station: RoadStation): {
+  readonly x: number;
+  readonly z: number;
+} {
+  return innerNormal(station);
+}
+
+function innerNormal(station: RoadStation): { readonly x: number; readonly z: number } {
+  const nx = -station.headingZ;
+  const nz = station.headingX;
+  const away =
+    entranceRoadOutsetAt(station.x + nx, station.z + nz) >
+    entranceRoadOutsetAt(station.x, station.z);
+  return away ? { x: -nx, z: -nz } : { x: nx, z: nz };
+}
+
+/**
+ * **The kerb's inner edge as a polyline — one point per station, in order.**
+ *
+ * The ribbon `Entrance.ts` draws is swept through these very points, and the
+ * path through the gate is built off the same list, so the two share a boundary
+ * *by construction* rather than by two call sites agreeing about which side of
+ * a station is which. They did agree — measured, 0 of 143 stations disagreed —
+ * but a fact that has to be measured to be believed is the shape of bug this
+ * repo pays for most often, and this removes the question.
+ */
+export function entranceRoadInnerEdgeRing(): readonly { readonly x: number; readonly z: number }[] {
+  const stations = entranceRoadStations();
+  if (!innerEdgeRingCache) {
+    innerEdgeRingCache = stations.map((station) => {
+      const normal = innerNormal(station);
+      return {
+        x: station.x + normal.x * ROAD_HALF_WIDTH,
+        z: station.z + normal.z * ROAD_HALF_WIDTH,
+      };
+    });
   }
-  return { x: station.x + nx * ROAD_HALF_WIDTH, z: station.z + nz * ROAD_HALF_WIDTH };
+  return innerEdgeRingCache;
+}
+
+let innerEdgeRingCache: readonly { readonly x: number; readonly z: number }[] | null = null;
+
+/**
+ * **The stretch of that edge a band of `x` either side of the gate covers**, as
+ * the road's own boundary points with the two ends interpolated *along the
+ * road's own segments* — so every point returned lies exactly on a triangle
+ * edge of the drawn kerb, and a ribbon built onto this list touches the road
+ * with no overlap and no gap.
+ *
+ * That exactness is the whole point. Across the gateway path's width the kerb's
+ * inner edge wanders up to 0.93 m in `z` (measured, `scripts/probe-spur-edge.mts`,
+ * seed 326), and even the straight chord between this list's two ends departs
+ * from it by up to 2.7 cm — enough to register as a coplanar seam, since the
+ * check calls anything under a centimetre apart a shared plane. Resampling the
+ * *centre line* instead was tried and made it worse: interpolated points do not
+ * land on the kerb's own triangle edges, so it kept the seam and added another.
+ */
+export function entranceRoadInnerEdgeAcross(
+  centreX: number,
+  halfWidth: number,
+): readonly { readonly x: number; readonly z: number }[] {
+  const ring = entranceRoadInnerEdgeRing();
+  const low = centreX - halfWidth;
+  const high = centreX + halfWidth;
+  const span: { x: number; z: number }[] = [];
+  const at = (a: { x: number; z: number }, b: { x: number; z: number }, x: number) => {
+    const t = (x - a.x) / (b.x - a.x);
+    return { x, z: a.z + (b.z - a.z) * t };
+  };
+  for (let i = 1; i < ring.length; i += 1) {
+    const a = ring[i - 1] as { x: number; z: number };
+    const b = ring[i] as { x: number; z: number };
+    if (a.x === b.x) continue;
+    // Every crossing of either edge of the band, plus every ring point inside
+    // it, walked in the road's own order.
+    for (const edge of [low, high]) {
+      if ((a.x < edge && b.x >= edge) || (a.x > edge && b.x <= edge)) span.push(at(a, b, edge));
+    }
+    if (b.x >= low && b.x <= high) span.push({ x: b.x, z: b.z });
+  }
+  if (ring.length > 0) {
+    const first = ring[0] as { x: number; z: number };
+    if (first.x >= low && first.x <= high) span.unshift({ x: first.x, z: first.z });
+  }
+  span.sort((p, q) => p.x - q.x);
+  // Two points at the same x are a road doubling back on itself, which the
+  // gateway's own band never sees; keep the first and let the caller's ribbon
+  // stay a function of x.
+  return span.filter((p, i) => i === 0 || Math.abs(p.x - (span[i - 1] as { x: number }).x) > 1e-6);
 }
 
 /** Where the boundary edge sits, for anything wanting the road's outset back. */
