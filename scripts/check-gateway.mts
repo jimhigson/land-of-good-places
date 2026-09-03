@@ -88,7 +88,7 @@ interface Foul {
   readonly what: string;
 }
 
-function measureThisSeed(): { fouls: Foul[]; open: number; total: number; map: string[] } {
+function measureThisSeed(): { fouls: Foul[]; open: number; total: number; map: string[]; masonrySegments: number } {
   const park = quietly(() => buildHeadlessPark());
   const collision = park.world.collision;
   const probe = new Vector3();
@@ -103,8 +103,17 @@ function measureThisSeed(): { fouls: Foul[]; open: number; total: number; map: s
 
   // The registered colliders, so the masonry clause below can ask about the
   // segments the wall actually built rather than about where a body ends up.
+  //
+  // **This reaches through `unknown` into a private field, and the count below
+  // is what makes that safe.** `CollisionWorld.walls` is private; nothing stops
+  // it being renamed, and if it is, this cast yields `undefined`, the loop runs
+  // zero times, and the clause reports a clear doorway with stone standing in
+  // it — proved, not supposed: with the masonry fix reverted *and* the field
+  // renamed, `tsc` is happy and this said `all 16 seed(s) open at the front
+  // door` while counting that very stone in its own corridor map. The matched
+  // count and its foul at zero are the control for exactly that.
   const inner = collision as unknown as {
-    walls: { x1: number; z1: number; x2: number; z2: number; halfThickness: number }[];
+    walls?: { x1: number; z1: number; x2: number; z2: number; halfThickness: number }[];
   };
 
   // The walk runs inward along the gate's own radial; across it is the
@@ -152,8 +161,10 @@ function measureThisSeed(): { fouls: Foul[]; open: number; total: number; map: s
   // seeds. Nothing else on this branch does, and a silent revert of the
   // headline fix on a `--ours` rebase is exactly what CLAUDE.md's rebase
   // section exists to stop.
-  for (const wall of inner.walls) {
+  let masonryMatched = 0;
+  for (const wall of inner.walls ?? []) {
     if (wall.halfThickness !== BOUNDARY_WALL_COLLISION_HALF) continue;
+    masonryMatched += 1;
     // Closest approach of the segment to the gate, sampled along it: the
     // aperture test is cheap and a wall is at most a couple of metres long.
     const steps = 8;
@@ -174,6 +185,19 @@ function measureThisSeed(): { fouls: Foul[]; open: number; total: number; map: s
     }
   }
 
+  // **The control for the clause above, and it is not optional.** A boundary
+  // wall is hundreds of segments on every park in the pool, so matching none of
+  // them means the cast found nothing — a renamed field, a changed
+  // `halfThickness`, a wall that stopped registering — and the clause was about
+  // to report a clear doorway without having looked at any stone.
+  if (masonryMatched === 0) {
+    foul(
+      'CONTROL: the masonry clause matched 0 boundary wall segments. Every park in the ' +
+        `pool builds hundreds at halfThickness ${BOUNDARY_WALL_COLLISION_HALF}, so this is ` +
+        "not a park without a wall — it is this clause reading nothing (CollisionWorld's " +
+        'private `walls` field renamed, most likely) and passing because it can no longer fail',
+    );
+  }
   // --- control 1: the posts are solid --------------------------------------
   // A collision world that had registered nothing at all would flood straight
   // through the grid above and report a lovely wide doorway. These say the
@@ -207,14 +231,22 @@ function measureThisSeed(): { fouls: Foul[]; open: number; total: number; map: s
     );
   }
 
-  return { fouls, open: walk.standableCells, total: walk.cells, map: walk.map };
+  return {
+    fouls,
+    open: walk.standableCells,
+    total: walk.cells,
+    map: walk.map,
+    masonrySegments: masonryMatched,
+  };
 }
 
 // ---------------------------------------------------------------- the child
 
 if (isChild) {
-  const { fouls, open, total, map } = measureThisSeed();
-  process.stdout.write(`${JSON.stringify({ seed: PARK_SEED, fouls, open, total, map })}\n`);
+  const { fouls, open, total, map, masonrySegments } = measureThisSeed();
+  process.stdout.write(
+    `${JSON.stringify({ seed: PARK_SEED, fouls, open, total, map, masonrySegments })}\n`,
+  );
   process.exit(0);
 }
 
@@ -233,12 +265,13 @@ interface SeedResult {
   readonly open: number;
   readonly total: number;
   readonly map: string[];
+  readonly masonrySegments: number;
 }
 
 const results: SeedResult[] = [];
 {
-  const { fouls, open, total, map } = measureThisSeed();
-  results.push({ seed: PARK_SEED, fouls, open, total, map });
+  const { fouls, open, total, map, masonrySegments } = measureThisSeed();
+  results.push({ seed: PARK_SEED, fouls, open, total, map, masonrySegments });
 }
 
 const lanes = Math.max(2, Math.min(6, cpus().length));
@@ -312,7 +345,11 @@ process.stderr.write(
     `    into at ${GATE_PROBE_STEP} m a probe she might still tunnel through at PLAYER_LONGEST_STEP.\n` +
     '  - it says nothing about headroom under the arch, or about the arch being drawn at all.\n' +
     `  - only the ${seeds.length} seed(s) in PARK_SEED_POOL are asked. A park from any other\n` +
-    '    seed is unmeasured here.\n',
+    '    seed is unmeasured here.\n' +
+    `  - the masonry clause measured ${results.reduce((n, r) => n + r.masonrySegments, 0)} boundary ` +
+    `wall segment(s) across the pool, ${Math.min(...results.map((r) => r.masonrySegments))} on the\n` +
+    '    thinnest seed. It reaches a private field through a cast, so that count IS the coverage:\n' +
+    '    at zero it has stopped seeing the wall and says so rather than passing.\n',
 );
 
 // The third control, and the one that would catch this probe quietly ceasing
@@ -327,7 +364,32 @@ if (everBlocked === 0) {
 }
 
 if (failed) {
-  console.error(`\ncheck:gateway: ${failed} of ${results.length} seed(s) cannot be walked into.`);
+  // **Two different fouls, named separately.** They used to share one summary
+  // line reading "N of 16 seed(s) cannot be walked into", which was wrong for
+  // the masonry clause in the most misleading direction available: on every
+  // seed it fires, a child walks in perfectly well — the complaint is that she
+  // is squeezing past stone standing in an 8.6 m doorway. Reporting that as
+  // "cannot be walked into" sends the next reader looking for a sealed gate.
+  const shut = results.filter((r) =>
+    r.fouls.some((f) => !f.what.startsWith('CONTROL') && !f.what.startsWith('boundary masonry')),
+  ).length;
+  const encroached = results.filter((r) =>
+    r.fouls.some((f) => f.what.startsWith('boundary masonry')),
+  ).length;
+  const controls = results.filter((r) => r.fouls.some((f) => f.what.startsWith('CONTROL'))).length;
+  if (shut) console.error(`\ncheck:gateway: ${shut} of ${results.length} seed(s) cannot be walked into.`);
+  if (encroached) {
+    console.error(
+      `check:gateway: ${encroached} of ${results.length} seed(s) have masonry standing inside the ` +
+        'arch\'s opening — walkable, and still stone in the doorway.',
+    );
+  }
+  if (controls) {
+    console.error(
+      `check:gateway: ${controls} of ${results.length} seed(s) failed a CONTROL — the probe is ` +
+        'not measuring the park, so nothing above it means anything.',
+    );
+  }
   process.exit(1);
 }
 console.log(
