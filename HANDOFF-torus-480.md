@@ -1,6 +1,17 @@
 # HANDOFF — issue #480, "a weird segment of a torus near the park edge"
 
-Branch `fix/torus-480`, worktree `.claude/worktrees/torus-480`.
+Branch `fix/torus-480`, worktree `.claude/worktrees/torus-480-b`.
+
+**Model: Opus** (`claude-opus-5[1m]`), chosen by the Overseer as the
+replacement for this task's first agent, which was also Opus — per CLAUDE.md's
+"a replacement runs the same model as the agent it replaces". If you are
+picking this up next, you are Opus too.
+
+**Worktree note:** the original `.claude/worktrees/torus-480` still holds the
+branch checked out and belongs to the dead agent; this session works in
+`torus-480-b`, detached at the branch tip, pushing with
+`git push origin HEAD:fix/torus-480`. Do not check the branch out in two
+worktrees at once.
 
 ## Found it — measured, not guessed
 
@@ -84,8 +95,61 @@ outside and comes back not-standable — 33 of 33 probes across the gate,
 measured with `scripts/measure-gate-480.mts`. My first draft of the invariant
 probed exactly there for open ground and was green for a reason that had
 nothing to do with the arch. Probe 1.5 m inside for "open", 1.0 m in front of a
-post for "solid" (that is inside `PLAYER_RADIUS + GATE_POST_COLLIDER_RADIUS`
-= 1.17 m, so it is guaranteed by geometry, not by the seed).
+post for "solid" (that is inside `GATE_POST_REACH` = 1.17 m, so it is
+guaranteed by geometry, not by the seed).
+
+## Second session: rebased onto #485/#493, and three corrections
+
+The first agent died with the PR approved. This session did four things.
+
+**Rebased onto `main`.** One conflict, `test/procgen/parkFacts.ts`: `main`'s
+`boundaryBlockWidth` and this branch's `parkGateArch` on the same interface
+line. Both kept; verified present in the type *and* the returned object.
+Three-dot diff is 9 files, additions only. `rerere` was disabled for the
+rebase (`git -c rerere.enabled=false`) so no stale resolution could be
+replayed.
+
+*Trap, if you rebase this branch again:* every commit subject starts with
+`#480`, and any rebase step that opens an **editor** applies git's `strip`
+cleanup, which deletes `#`-leading lines — the subject vanishes and the commit
+is named after its `Co-Authored-By` trailer. Reword with
+`-c commit.cleanup=verbatim`. It happened here and was caught by reading the
+log; it would not have shown in any diff.
+
+**What the rebase changed about the measurements.** #485 moved the boundary
+masonry out of the gate opening, so the invariant's masked-post count improved
+on its own: **5 of 10 post-probes live with two blank seeds → 9 of 10 with
+none blank.** The withheld walkability clause is no longer withheld — #485
+landed it next door as `theWalkInFromTheGateIsWalkable`, over
+`gatewayWalk.ts`'s full-width flood fill. The stderr note now names that owner
+instead of claiming the cover is missing.
+
+**#485 also introduced a name collision:** its own `GATE_PROBE_INSET` in
+`gatewayWalk.ts` (a number: where the walk-in flood starts) against this
+branch's (an object: where the post probes stand), same directory, and after
+the rebase a redeclaration error in `invariants.ts`. Renamed mine to
+`GATE_POST_PROBE_INSET`. New export `GATE_POST_REACH` is now the single owner
+of `PLAYER_RADIUS + GATE_POST_COLLIDER_RADIUS`.
+
+**`.clear` is derived, and this is the bit that matters for the authored
+arch.** It was the literal `1.5`, safely outside the 1.17 m reach by 0.33 m —
+but with `GATE_ARCH_PIER_KEEP_OUT = 0.80` the reach becomes **1.42 m and a
+literal 1.5 leaves 0.08 m**, where the masking detector goes near-degenerate
+and drops live posts silently. It is now `GATE_POST_REACH + 0.3`, so it moves
+with the collider. **Nothing more is needed here when the asset lands** — that
+was the whole point of doing it now.
+
+**`probe-gate-pool.mts` clause 2 no longer has its own opinion.** It used to
+sample a 3.66 m band at one depth of a 7.5 m clear width, hence one failing
+park where a full-width sweep finds four. It calls `measureGatewayWalk` now.
+
+**Verified on this tree:** `test:procgen` exit 0 (18 files, 541 tests);
+`build` exit 0; `check` exit 0, 58 steps, set-compared against `main` by
+parsing `package.json` (none dropped, none added). Mutation re-proved red —
+foot colliders removed at `Entrance.ts:331` gives 10 failed / 531 passed, and
+notably **#485's own walk-in check fails too, on its CONTROL clause**, because
+it depends on these post colliders. Do not remove them thinking only this
+invariant cares.
 
 ## New scope arrived mid-task, NOT started
 
