@@ -107,6 +107,46 @@ export interface GateArch {
  */
 export const GATE_POST_COLLIDER_RADIUS = 0.55;
 
+/**
+ * How far off its own post an arch foot may land and still be standing on it.
+ *
+ * The crossbar's bounding box overshoots the post centre by one {@link
+ * ARCH_TUBE} by construction, so this is that plus a hand's width. The arch
+ * turned a quarter-turn out of the gate plane (issue #480) put its feet
+ * **6.28 m** from the nearest post, so nothing about this number is delicately
+ * chosen.
+ *
+ * Exported for the same reason as {@link GATE_POST_COLLIDER_RADIUS}: the
+ * checks that ask whether the gate is still pointing the right way live in two
+ * places (`test/procgen/invariants.ts` and `scripts/probe-gate-pool.mts`), and
+ * a tolerance hand-copied into either of them is the exact disease this file
+ * exists to cure.
+ */
+export const GATE_FOOT_TOLERANCE = 0.6;
+
+/**
+ * How far inside the park a gate probe stands, in metres.
+ *
+ * Both are derived from the reach a gate post has over a child —
+ * `PLAYER_RADIUS` (0.62) + {@link GATE_POST_COLLIDER_RADIUS} (0.55) = 1.17 m:
+ *
+ * - `solid` is **inside** that reach, so a child there must be pushed out.
+ *   That is what proves the posts carry colliders at all.
+ * - `clear` is **outside** it, so no post can be what answers there. A probe
+ *   that comes back blocked at `clear` is being answered by something that is
+ *   not the gate — the boundary, on the seeds of issue #481 — and the `solid`
+ *   reading beside it therefore proves nothing. This is how the check knows
+ *   when its own control has been masked instead of assuming it has not.
+ * - `open` is what the withheld walkability clause uses, kept here for
+ *   whoever lands it with #481's fix.
+ *
+ * None of them may be pointed at the gate line itself: the park boundary keeps
+ * a child *inside* the park, so a `PLAYER_RADIUS` body standing on the line
+ * overlaps the outside and every probe along it comes back blocked — 33 of 33
+ * across the gate on the canonical seed, whatever the gate is doing.
+ */
+export const GATE_PROBE_INSET = { solid: 1.0, clear: 1.5, open: 1.5 } as const;
+
 /** Half the gap between the posts, and the arch's own radius. */
 const HALF_WIDTH = ENTRANCE_GATE_HALF_WIDTH;
 /** The crossbar's tube. */

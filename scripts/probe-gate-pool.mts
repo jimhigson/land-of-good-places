@@ -19,7 +19,11 @@
 import { Box3, Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { PLAYER_RADIUS } from '../src/core/constants.ts';
-import { GATE_POST_COLLIDER_RADIUS } from '../src/world/entrance/gateArch.ts';
+import {
+  GATE_FOOT_TOLERANCE,
+  GATE_POST_COLLIDER_RADIUS,
+  GATE_PROBE_INSET,
+} from '../src/world/entrance/gateArch.ts';
 import { TALLEST_CHILD_HEIGHT } from '../src/art/models/kid.ts';
 import { terrainHeight } from '../src/world/terrain.ts';
 
@@ -64,19 +68,19 @@ if (!arch || posts.length !== 2) {
   for (const t of [-1, 1] as const) {
     const [x, z] = along(t);
     const nearest = Math.min(...posts.map((post) => Math.hypot(x - post.x, z - post.z)));
-    if (nearest > 0.6) fouls.push(`seed ${seed}: arch end (${x.toFixed(2)}, ${z.toFixed(2)}) is ${nearest.toFixed(2)} m off its post`);
+    if (nearest > GATE_FOOT_TOLERANCE) fouls.push(`seed ${seed}: arch end (${x.toFixed(2)}, ${z.toFixed(2)}) is ${nearest.toFixed(2)} m off its post`);
   }
   // 2. Open in the middle, 1.5 m inside.
   for (const t of [-0.4, -0.2, 0, 0.2, 0.4] as const) {
     const [x, z] = along(t);
-    const px = x + inward[0] * 1.5;
-    const pz = z + inward[1] * 1.5;
+    const px = x + inward[0] * GATE_PROBE_INSET.open;
+    const pz = z + inward[1] * GATE_PROBE_INSET.open;
     if (!standable(px, pz)) fouls.push(`seed ${seed}: gateway blocked at (${px.toFixed(2)}, ${pz.toFixed(2)})`);
   }
   // 3. ...and solid at the posts, 1.0 m inside (the control).
   for (const post of posts) {
-    const px = post.x + inward[0];
-    const pz = post.z + inward[1];
+    const px = post.x + inward[0] * GATE_PROBE_INSET.solid;
+    const pz = post.z + inward[1] * GATE_PROBE_INSET.solid;
     if (standable(px, pz)) fouls.push(`seed ${seed}: post at (${post.x.toFixed(2)}, ${post.z.toFixed(2)}) is not solid`);
   }
   // 4. Headroom.
