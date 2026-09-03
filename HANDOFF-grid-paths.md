@@ -3210,3 +3210,51 @@ the minimum distance from `PLAZA` to any drawn non-backbone ribbon, on a build
 with the ring check reverted and again with it in. Any seed whose figure rises
 from below `RING_RADIUS` to at or above it showed the defect. That is one
 number per seed and it makes the before/after honest rather than assumed.
+
+### CORRECTION to the seed-267 write-up: the 3.2/6.3 split is NOT the ring boundary
+
+Building the before/after instrument surfaced an error in my own earlier
+diagnosis, and the control is what surfaced it. **`RING_RADIUS` is 14.90 m.**
+
+So when I wrote *"every stranded sample inside 3.2 m, every reachable one
+outside 6.3 m — the hole IS the ring's interior"*, the second half was wrong:
+**6.36 m is also inside a 14.90 m ring.** Every one of those samples,
+stranded and reachable alike, was inside the ring. The 3.2/6.3 split is real
+and it discriminates, but the boundary it marks is **not** `RING_RADIUS` —
+something else sits between 3.2 and 6.4 m of the plaza centre (the statue's
+own collider or the fountain, most likely; unmeasured, and it should be
+measured before anyone leans on it).
+
+**What survives, and it is the load-bearing part:**
+
+- `street-tap-north` really did run through the ring's interior, passing
+  within **1.16 m of the statue** against a `RING_RADIUS` of 14.90;
+- the gateway rescue really did omit the ring from its clearance list;
+- the fix really did take seed 267 from **6 stranded to 0, green** — measured,
+  not inferred.
+
+**What does not survive is the phrase "the hole is the ring's interior".** It
+read as an explanation of the split and it is not one. Recording it rather
+than quietly rewording, because the next reader would otherwise inherit a
+tidy causal story that the numbers do not support.
+
+### The before/after instrument, and the flaw its own control caught first
+
+`scripts/tmp-ringcross.mts`. **Its first cut took the minimum over all routes
+and reported seed 267 as "INSIDE THE RING by 6.50 m" — after the fix.** The
+culprit was `fountain-approach`, which legitimately runs to the fountain at
+the plaza centre. A route that is *supposed* to enter cannot be evidence that
+something entered wrongly, so the measure is now over the **gateway tap**
+ribbons alone — the routes this fix governs.
+
+Both controls discriminate, which is what makes a clean row mean anything:
+
+```
+267  taps=1  nearest tap approach to PLAZA: 14.90 m via street-tap-north
+     RING_RADIUS=14.90   every tap clear of the ring
+     control1(main-loop)=14.83        <- the ring's own ribbon reads as the ring
+     control2(fountain-approach)=8.40 <- an entering ribbon IS detected as entering
+```
+
+The tap now reads **exactly `RING_RADIUS`** — touching the rim, which is what
+a gateway is for, and not a centimetre further in.
