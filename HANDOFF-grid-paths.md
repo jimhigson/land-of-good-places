@@ -4325,3 +4325,13 @@ to the inherited baseline (5/11/128 `streetsShareLatticeLines`, 267
 `detourRatiosStayReasonable`, 288 `noPathEndsNowhere`). Only 288's message text
 moved. Control mutation reverted, grep-verified (`grep -n
 "LGP_TRIM_SPUR_START\|TEMP MUTATION" src/world/paths.ts` — nothing).
+
+### Sweep caveat, stated rather than glossed
+
+A second sweep (seeds 121–340, 88 clean counter rows) adds eleven more
+`noPaving=1` walks and a **second `refusedByTrim=1`** (seed 202, joining seed
+116). But part of that sweep ran **after** the forced guard was reverted, and
+under the shipped conditional guard a pure `joined=1 noPaving=0
+refusedByTrim=0` row prints nothing at all — so that sweep **cannot** rule out a
+join in its own range. Only the 1–120 sweep, which ran entirely under the forced
+guard, is conclusive, and the mutation proof above is what actually settles it.
