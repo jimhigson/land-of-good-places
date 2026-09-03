@@ -5589,6 +5589,23 @@ function* addInterconnects(
       stale = false;
     }
     const paved = graph.distanceBetween(a.x, a.z, b.x, b.z);
+    // TEMP INSTRUMENT (LGP_CONNECT_TRACE): what this pass saw, per candidate,
+    // at the moment it ran — the only place `paved` can be read from
+    // `buildRouteDistanceGraph` rather than re-derived afterwards.
+    if (stringFromEnv('LGP_CONNECT_TRACE') !== null) {
+      const gate = !Number.isFinite(paved)
+        ? 'DROPPED: paved is Infinity (line 5592 silent skip)'
+        : paved < straight * CONNECTOR_RATIO_THRESHOLD
+          ? `DROPPED: ratio ${(paved / straight).toFixed(2)} < ${CONNECTOR_RATIO_THRESHOLD}`
+          : paved - straight < minWaste
+            ? `DROPPED: waste ${(paved - straight).toFixed(1)} < minWaste ${minWaste.toFixed(1)}`
+            : 'PASSES the three paved gates';
+      // eslint-disable-next-line no-console
+      console.log(
+        `[connect-trace] ${a.id} <-> ${b.id} straight=${straight.toFixed(2)} ` +
+          `pavedSeenByPass=${paved.toFixed(2)} ${gate}`,
+      );
+    }
     if (!Number.isFinite(paved)) continue; // not actually connected — a different bug, not this pass's job
     if (paved < straight * CONNECTOR_RATIO_THRESHOLD) continue;
     if (paved - straight < minWaste) continue;
