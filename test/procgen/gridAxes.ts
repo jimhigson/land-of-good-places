@@ -76,34 +76,40 @@ export const OFF_AXIS_FRACTION = 0.15;
 /**
  * How nearly two stretches must run the same way to count as the same ground.
  *
- * **Derived, not chosen** — and derived from the only direction tolerance this
- * check already owns. {@link OFF_AXIS_FRACTION} says a hop whose sideways
- * movement is under 15% of its length is *on* the axis: that is
- * `asin(0.15)` = **8.63 degrees**, and what it means is "a direction
- * difference this small is how a Catmull-Rom curve gets sampled, not a
- * difference in where the paving goes". The question here is the same
- * question about a different pair of directions, so it takes the same answer.
- * Writing a second number would be two definitions of one thing kept in step
- * by hand, which is the most common bug in this repo.
+ * **Chosen by measurement, not derived.** An earlier draft of this comment
+ * claimed the value fell out of {@link OFF_AXIS_FRACTION}, and that claim does
+ * not hold: `OFF_AXIS_FRACTION` bounds **one hop's** deviation from an axis, so
+ * two ribbons sampling the *same* line can each sit up to 8.63 degrees off it
+ * in opposite directions and so differ from **each other** by roughly 17.3
+ * degrees. The expression below is kept because writing `asin(0.15)` ties this
+ * number to something already meaningful in the file rather than adding a
+ * seventh bare constant — but that is a tidiness argument, not a proof, and a
+ * derivation that does not hold is exactly the kind of promise this repo keeps
+ * getting caught by.
  *
- * It is emphatically not tuned to the seed pool, and the sweep that says so
- * was re-run after {@link hopDistance} landed rather than quoted from the
- * version before it — a measurement of superseded code is not a measurement.
- * Over the sixteen-seed pool, at 2, 4, 6, 8.63, 10, 12, 15 and 20 degrees the
- * answer is **identical**: no piece of ground over 16 m anywhere, longest
- * piece 13.69 m, and the re-cut agrees on every seed. So this value sits well
- * inside an 18-degree plateau rather than on a cliff. Outside it the
- * measurement starts fabricating — at 25 degrees a 16.8 m piece appears on
- * seed 5, at 30 the two arms of seed 24's junction dogleg weld into a 21.9 m
- * "diagonal" whose real arms are 12.3 m and 5.5 m, and at 35 two more arrive
- * on seeds 131 and 267. The plateau corroborates the derived number; it is
- * not the reason for it.
+ * **What justifies the value is the plateau**, swept over the sixteen-seed pool
+ * against the real cached geometry, and re-run after {@link hopDistance}
+ * landed rather than quoted from the version before it — a measurement of
+ * superseded code is not a measurement:
  *
- * Note what the plateau does *not* include: cut-invariance held at **every**
- * tolerance swept, 2 through 40 degrees. That property comes from asking
- * about hops rather than about ends, not from this constant, which is how it
- * should be — a structural property that depended on a tuning value would not
- * be one.
+ * | tolerance | pieces over 16 m | longest piece |
+ * |---|---|---|
+ * | 0.5 - 22 deg | none | 13.69 m |
+ * | 23 - 28 deg | seed 5 at 16.8 m | 16.83 m |
+ * | 30 deg | seeds 5, 24 (the dogleg, 21.9 m) | 21.93 m |
+ * | 35 - 40 deg | seeds 5, 24, 131, 267 | 21.93 m |
+ *
+ * So the answer is *identical* everywhere from 0.5 to 22 degrees, and the first
+ * thing the measurement invents is a 16.8 m piece on seed 5 at 23. **8.627
+ * degrees sits inside that plateau with 8.1 degrees of room below it and 13.4
+ * above** — that is the whole claim, and it is a claim about where the value
+ * sits rather than about where it came from.
+ *
+ * Note what the plateau does *not* cover: **cut-invariance held at every
+ * tolerance swept, 0.5 through 40 degrees.** That property comes from asking
+ * about hops rather than about ends ({@link hopDistance}), not from this
+ * constant — which is how it should be, since a structural property that
+ * depended on a tuning value would not be structural.
  */
 const PARALLEL_COS = Math.cos(Math.asin(OFF_AXIS_FRACTION));
 
@@ -191,13 +197,45 @@ const parallel = (a: GroundPoint, b: GroundPoint): boolean =>
  * That is what makes the answer a property of the paving:
  *
  * 1. **The two share a drawn sample**, so the paving is continuous there.
+ *    **No direction clause, and none is possible** — see the limitation below.
  * 2. **One is drawn along the other**: some point of one lies within reach of
  *    the other and the two run the same way there — asked hop against hop, see
  *    {@link hopDistance}. Reach is `min` of the two
  *    ribbons' own half-widths, read off the park rather than typed — at that
  *    distance the narrower ribbon's centre line is inside the wider one, so
  *    they really do cover the same paving. Running the same way is what keeps
- *    a *crossing* from qualifying; see {@link PARALLEL_COS}.
+ *    a crossing from qualifying **here, in rule 2 only**; see
+ *    {@link PARALLEL_COS}.
+ *
+ * ### Known limitation: rule 1 welds at any angle
+ *
+ * This used to say "running the same way is what keeps a *crossing* from
+ * qualifying" without saying which rule it was talking about, and that was
+ * false of rule 1. Rule 1 has no direction test at all, so two stretches that
+ * merely **share a node sample** are welded however sharply they meet.
+ *
+ * Driven with two 9.90 m arms meeting at a **right angle** on a shared sample,
+ * this module reports them as one 14.00 m piece — the very shape the seed 24
+ * dogleg fixture exists to reject, sneaking back in through the other rule.
+ * `gridAxes.test.ts` pins that number so nobody discovers it by surprise.
+ *
+ * It happens on the real park, and it is measured rather than feared. Across
+ * the sixteen-seed pool there are **nine** stretch pairs welded by rule 1 that
+ * rule 2 would have refused, at angles from 17.0 to **83.6 degrees**. Seven of
+ * the nine inflate the piece by nothing at all (the shorter arm lies inside the
+ * longer one's span); the worst inflation anywhere is **0.44 m** (seed 225,
+ * 3.88 m arm to a 4.32 m piece), and the tightest any welded piece comes to the
+ * limit is **3.64 m of headroom** (seed 288, 12.36 m against 16). So it changes
+ * no verdict today — but it is a way this measurement could overstate, and it
+ * should be read as a known bound, not as a proof of correctness.
+ *
+ * **Why it cannot simply be fixed by requiring collinearity**, the way rule 2's
+ * predecessor was: the spur into seed 225's building door turns **37 degrees**
+ * between the two hops either side of a seam, so any angle test tight enough to
+ * reject a 90-degree junction also tears that genuine stretch in half — and
+ * tearing it in half is the carrier-dependence this whole module exists to
+ * remove. Contiguity and direction are in real tension here; contiguity wins,
+ * because it is the one that keeps the answer a property of the paving.
  *
  * **Neither may be asked about ends.** An earlier version asked whether the
  * stretches' *ends* met, and that is not a property of the paving: cutting a
