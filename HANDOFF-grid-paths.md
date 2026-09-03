@@ -2107,3 +2107,93 @@ any route is solved.
 `debugGridNodes` already reports component ids, so the measurement is in place
 and a `check:park`/invariant clause could assert it directly: **no lattice
 component of more than N nodes may be without a ring gateway.**
+
+---
+
+## State — 2 Sep, eighth leg: ring gateways backtrack. 11/16 green, 10 stranded.
+
+### Built and kept: a gateway that finds nothing on its own line is rescued
+
+`streetLattice`'s four compass taps walked three cells out along their own
+lattice line and, finding nothing valid, were **dropped**. The rescue rung
+tries an axis-aligned **elbow** from the same rim to a nearby node, preferring a
+lattice component no other tap serves.
+
+**Decision 5 is untouched.** `rim` is still one of `RING_COMPASS_POINTS` on
+every tap, so the ring keeps exactly four gateways at four compass points; only
+*which node* a gateway may reach is widened. The elbow (rather than a straight
+rim-to-node line) is deliberate — a straight line to an off-line node is a
+diagonal, which is what `pathsRunOnGridAxes` and Jim's complaint #3 are about.
+
+Two constants, both taken from something that already means something:
+`TAP_RESCUE_REACH = 3 * STREET_PITCH` (the same reach the straight rung already
+walks, expressed as a radius), and `UNSERVED_COMPONENT_REPORT = 12` (a `poiGraph`
+lane samples about every 7 m, so a dozen nodes is a district a child would walk
+for a minute).
+
+### Measured, all sixteen seeds
+
+`check:park`: **10 green -> 11, stranded 20 -> 10. Nothing regressed.** Seed 5
+goes green (28 reachable of 106 -> 101 of 108).
+
+Every seed now gets **4/4 taps**; before, several ran with three or two. Nine of
+sixteen gain a rescued gateway — **canonical, 5 (two), 11, 115, 225, 267, 288,
+346 (two), 451**.
+
+### The visible change, for Jim's eye when the branch is showable
+
+A rescued gateway is **a street leaving the plaza that was not there before**,
+and it leaves on the same compass point but bends once to reach its node. Nine
+of the sixteen seeds look different at the plaza; the two-tap seeds (**5** and
+**346**) change most. Seed 5 changes beyond the plaza as well — the entire north
+and west of that park is now reachable, so the hotel quarter, the gate approach
+and the whole north side gain paving they never had. **That one is worth the
+screenshot when the branch is showable**: it is the clearest picture on the
+branch of what "paths that actually go to useful places" means.
+
+### The honest trade
+
+`test:procgen` **10 failed -> 12**. Seed 5's `noPathEndsNowhere` is **fixed**;
+three appear:
+
+| test | seed | why |
+|---|---|---|
+| `pathsRunOnGridAxes` | 267, 346 | both gained rescued taps, so new streets leave the plaza and route shapes move |
+| `builtMasonryStaysInsideItsReservation` | 5 | **this branch's own new invariant**, firing on ground that was unroutable until now — a defect newly *exposed*, not introduced |
+
+Kept, because half a park being unreachable is a worse fault than two grid-axis
+complaints, and because the third is an invariant doing its job. **The next leg
+owes all three.**
+
+### THE PROPOSED INVARIANT WOULD BE RED ON GREEN PARKS — not shipped, and why
+
+The brief was to assert "no sizeable lattice component without a ring gateway".
+**Measured, it cannot be shipped as written.** `latticeComponentsWithoutAGateway()`
+after the fix:
+
+```
+canonical  orphanedComponents=[43]     check:park GREEN
+5          orphanedComponents=[39]     check:park GREEN
+11         orphanedComponents=[12]
+225        orphanedComponents=[26]
+267        orphanedComponents=[13]     check:park GREEN
+every other seed  []
+```
+
+**Canonical carries a 43-node orphaned component and passes everything**; so does
+seed 5 now, with 39. An orphaned *lattice* component is not the same thing as
+unreachable *park* — those nodes may host no destination, or their destinations
+may be reached by a connector or the rescue router instead. Asserting emptiness
+would prosecute three parks that demonstrably work.
+
+It also breaks `invariants.ts`'s own **rule 1**: *measure the built park, never
+the rules that built it*. A lattice component is the generator's scaffolding,
+not the park. The question that matters — can a child reach everything — is
+already owned by `poi.stranded` and `route.unreachable` in `check:park`, which
+is exactly what caught seed 5 in the first place.
+
+So: **no assertion added.** `latticeComponentsWithoutAGateway()` is exported and
+`scripts/tmp-taps.mts` reports it, because the number is a good diagnostic and it
+is how this defect was found. Tuning a threshold until canonical passed would
+have been fitting the assertion to the pool, which this branch has refused three
+times already.
