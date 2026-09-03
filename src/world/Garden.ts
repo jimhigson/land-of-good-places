@@ -178,7 +178,7 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
   // running from 57 m to 110 m an even angular step is not an even spacing:
   // it would bond the masonry at the pinch and stretch it into a picket fence
   // at the bulge.
-  const blockWidth = 1.7;
+  const blockWidth = BOUNDARY_BLOCK_WIDTH;
   const courses = 2;
   const courseStations = [
     alongBoundary(PARK_BOUNDARY, blockWidth).filter(outsideTheGate),
@@ -372,11 +372,31 @@ function outsideTheGate(station: EdgeStation): boolean {
 }
 
 /**
- * How far a drawn block's centre must stand clear of the arch's opening: its
- * own half-length (`blockWidth / 2`, and the pillars are 1.5 m so half of the
- * widest is 0.85) plus the masonry's half-width.
+ * **How long one drawn block of the boundary wall is**, along the edge.
+ *
+ * Exported because it is a *geometric fact about the built wall*, and the
+ * procgen invariant that proves no masonry stands in the gate's opening has to
+ * know it to ask the question honestly: a station is where a block's **middle**
+ * goes, so "is this block in the doorway?" is about `BOUNDARY_BLOCK_WIDTH / 2`
+ * either side of that middle, not about the middle.
+ *
+ * The invariant deliberately derives its own expectation from this and
+ * {@link BOUNDARY_MASONRY_HALF_WIDTH} rather than reading
+ * {@link DRAWN_BLOCK_GATE_MARGIN}. It read that constant for one commit, and
+ * that made it blind in exactly the way a check must never be: zeroing the
+ * margin moved the code *and the check together*, and the whole suite stayed at
+ * 520/520 with stone back in the gateway. A check that reads the policy it is
+ * checking cannot fail. It reads the geometry now, and zeroing the margin turns
+ * it red.
  */
-export const DRAWN_BLOCK_GATE_MARGIN = 0.85 + BOUNDARY_MASONRY_HALF_WIDTH;
+export const BOUNDARY_BLOCK_WIDTH = 1.7;
+
+/**
+ * How far a drawn block's centre must stand clear of the arch's opening: its
+ * own half-length (the pillars are 1.5 m, so the widest half-length is the
+ * block's) plus the masonry's half-width.
+ */
+export const DRAWN_BLOCK_GATE_MARGIN = BOUNDARY_BLOCK_WIDTH / 2 + BOUNDARY_MASONRY_HALF_WIDTH;
 
 const UP = new Vector3(0, 1, 0);
 const SQUASHED_CAP = new Vector3(1, 0.72, 1);
