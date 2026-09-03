@@ -162,115 +162,52 @@ line) and the successor must still catch it. Rewriting it to allow half-pitch
 and nothing else is therefore *stronger* than the current test on that third
 run and honest about the first two — do not simply widen the tolerance.
 
-### `poi.stranded` — what is measured, and what is ruled out
+### `poi.stranded` — cause found and fixed; the tail it exposed
 
-The parent-branch probe was run (ordered, and it answers the "did this branch
-cause it" question): **parent seed 225 gives 19/19 attractions, 284/284
-waypoints connected, all six invariants.** This branch gives 254 seeds placed,
-183 in the main component, 70 stranded. So yes, this branch causes it.
+**The cause was `segmentCutsABridgeRamp`.** It walked a segment in 1.5 m steps
+under a comment claiming "1.5 m is coarser than the 3 m parapet band is thick".
+The band is `halfWidth` to `halfWidth + RAMP_SCREEN_MARGIN` — **half a metre**
+thick — so a ribbon crossing a ramp square-on stepped clean over it between two
+samples. Each such crossing breaks the waypoint chain of the route it is on
+(the parapet is solid) and drops the two halves into separate `poiGraph`
+pockets. It is now an exact segment-rectangle test in the site's own
+(along, across) frame: no step size to be wrong about, and cheaper than
+sampling finely enough to be safe.
 
-**Both branches build the same three bridges**, at the same three proven sites
-(railD 0 / 102 / 194) with the same halfGaps — measured with the park harness on
-each branch. The rail is **not** the split: waypoint seeds by rail side are
-90 inside / 164 outside on this branch (97 / 187 on the parent), and 94 of the
-164 outside seeds ARE in the main component. The bridge-ramp-span hypothesis is
-therefore dead — write it off, do not re-run it.
+Parapet crossings on seed 225: **control 5 / drawn 5 -> 0 / 0.**
+`poi.stranded` on seed 225: **70 -> 2**; seed 115 **16 -> 1**.
 
-**What the 70 actually are.** Every one of them belongs to a route of the *east
-district*, and that district's routes are the whole list:
+**Three hypotheses were refuted by measurement before that one was found** — do
+not re-run any of them:
 
-```
-spur-building 14  spur-stall.waterFight 12  spur-waterFight 11  spur-hotel 9
-spur-exit-ginormousSlide 6  spur-ballPit 6  connector-building-exit-ginormousSlide 4
-spur-stall.skyCruiser 4  spur-exit-skyCruiser 4
-```
-
-One contiguous district, every route in it, nothing else. So the district's own
-path network is internally connected and joins the rest of the poiGraph
-nowhere.
-
-**Ruled out by measurement, each mutation reverted** (do not re-litigate any of
-these):
-
-| suspect | seed 225 before → after |
+| hypothesis | measurement that killed it |
 |---|---|
-| `collapseCollinear` dropping a bridge's pinned deck points | 105 → 105 |
-| rescue router's 2.2 m plot clearance + 2.0 m arrival boundary | 70 → 70 (seed 115 16 → 16) |
-| a second drawn route over every bridge | 70 → 70 |
-| connectors/relay hugging the rail (margin 0 vs `RAIL_CLAMP_DISTANCE - 0.1`) | 70 → 71 |
-| trimming route backtracks | 70 → 70 |
-| refusing a gate-corridor mouth that stands on a bridge ramp | 70 → **74** (reverted) |
+| the district hangs off one articulation point | 29 poiGraph edges join it to the rest (parent 81); 3 components, closest cross-component pair 3.12 m |
+| the waypoint graph cannot span a bridge ramp | both branches build the same 3 bridges at the same sites; 94 of 164 outside-the-loop seeds are in the main component |
+| `routeCurve`'s fillet strays onto ground the polyline cleared | parapet crossings on seed 225: control 5, drawn 5 — identical |
 
-(The first three fixes were kept anyway — each is a correctness fix in its own
-right, and `walkEveryBridge` took seed 451 from 3 stranded to a full pass.)
+Because the fillet hypothesis died, the **stricter `nodeOk`** (refusing the ramp
+surface, not just the parapet band) was never needed, and #414's measured cost
+for it — seed 24 losing its only bridge — stands untouched.
 
-**A real defect found on the way, which is NOT the cause.** The gate corridor's
-mouth on seed 225 came to rest at `(0, 39.8)` — exactly the 5.8 m
-`GATE_CORRIDOR_RAIL_STANDOFF` from the track and **four metres up the front-door
-bridge's ramp**, because that standoff is measured from the rail centre line and
-a ramp reaches three times further. The mouth is the node every later route
-branches from, and `spur-building` — the east district's only join to the rest —
-branched exactly there. This is #414's "another path shouldn't join into a
-mid-ramp bridge" and Jim's own complaint 1, so it wants fixing on its own
-merits. It is **not** the stranding cause: screening it took seed 225 from 70 to
-74, so the change was reverted rather than kept on a story. Whoever fixes it
-should do so where the junction is chosen, and measure.
+### Where it stands now (after the exact screen)
 
-**The articulation-point hypothesis is REFUTED, and the cause is found.**
-Instrumented with `scripts/tmp-poigraph.mts` / `tmp-poilinks.mts` /
-`tmp-poibreaks.mts` (committed; control: `tmp-poigraph` reproduces check:park's
-independently-computed 254 seeds / 184-vs-183 main component on seed 225).
+`check:park`: **5 of 16 green** (128, 208, 274, 346, 428), down from 9 — the
+screen is correct and it *starved doors*. A door whose every route would have
+crossed a ramp now falls to the straight-line last resort, and a last-resort
+door makes a pocket of its own. Doors with no grid route are back up: seeds 0,
+11, 24, 115, 225, 267, 288 each name one to five in
+`strandedDoorsOfLastSolve()`. Seed 5 went from a **build crash** (a
+single-point route the corridor collapsed to — fixed) to `poi.stranded 10`;
+seed 451 went 0 -> 30.
 
-- The district is **not** joined at one point: 29 poiGraph edges run between the
-  east routes and the rest. The parent has 81.
-- Seed 225 has **three** components (184 / 47 / 23), and the closest
-  cross-component pair is **3.12 m apart** — far inside `MAX_EDGE`, so the
-  failure is geometric, not topological.
-- `tmp-poibreaks` walks each route's own samples in order and reports
-  consecutive samples that are not neighbours. Seed 225 has exactly four such
-  breaks, and **all four have their midpoint standing on a bridge ramp**:
-
-```
-spur-building       (1.3, 40.9)-(5.3, 40.9)   gap 4.02 m   ramp: true
-spur-waterFight     (1.4,-51.8)-(5.4,-50.7)   gap 4.11 m   ramp: true
-spur-waterFight     (5.4,-50.7)-(9.3,-50.7)   gap 3.95 m   ramp: true
-spur-stall.keychain (-1.1, 19.8)-(-5.4, 20.0) gap 4.33 m   ramp: true
-```
-
-**A drawn ribbon that crosses a bridge ramp transversely breaks the waypoint
-chain**, because the parapet is solid, and the two halves of that route — and
-everything hanging off them — fall into separate pockets. That is the whole of
-`poi.stranded` on this branch, and it is the same family as Jim's own
-"another path shouldn't join into a mid-ramp bridge".
-
-**Where the leak is, and what to do next.** The control polylines *are*
-screened: `edgeOk`, the pinch and jog links, `computeGridConnectors` and
-`relayPolyline` all refuse `segmentCutsABridgeRamp`. Two things are not:
-
-1. `nodeOk` refuses only `pointStandsOnBridgeMasonry` (the parapet band), not
-   the ramp *surface* — deliberately, so a crossing's own approach is not
-   refused (#414, seed 24 lost its only bridge to the stricter version). So a
-   grid node may stand on a ramp, a route may branch there, and the next leg
-   steps sideways through the parapet.
-2. Nothing screens the **drawn** curve. `routeCurve`'s fillet pass rounds every
-   corner, so a polyline that turns just clear of a ramp can be drawn across it.
-
-Next experiment, in order: sample each finished route with `routeCurve` and
-count how many cross masonry (that is `tmp-poibreaks`' answer already, from the
-other end); then decide between (a) refusing a *branch point* that stands on a
-ramp surface while still allowing a route to *pass* along one, and (b) screening
-the drawn curve and re-routing. (a) is the smaller change and matches the
-existing "refusing to branch in mid-air is a different question from refusing to
-pass" note in `pointStandsOnBridgeMasonry`'s doc.
-
-Fixed on the way, on its own merits and **not** as a stranding fix: the gate
-corridor's mouth stood at `(0, 39.8)` on seed 225 — its 5.8 m
-`GATE_CORRIDOR_RAIL_STANDOFF` from the rail centre line, and four metres up the
-front-door bridge's ramp, because a ramp reaches ~3x further than that standoff
-measures. It now clears the bridge footprint itself, taken from
-`pointStandsOnABridgeRamp` (the single owner of that rectangle) plus
-`RIBBON_HALF_WIDTH_CEILING`. Seed 225 goes 70 -> 73 stranded; 131/326/115
-unchanged. Kept because a junction four metres up a ramp is Jim's complaint 1.
+**This is the next leg's whole job, and it is a routing problem, not a screen
+problem: do not relax the ramp screen to get the count back.** The doors that
+lost their routes need routes that go round the ramps — the backtracking ladder
+in `gridConnectors`/`relayPolyline` is what has to find them. Start by running
+`scripts/tmp-reach.mts` on seeds 0, 11, 24, 115, 225, 267, 288 to see which
+doors and why, then `scripts/tmp-poibreaks.mts` to confirm no chain break has
+its midpoint on a ramp any more (it should be zero everywhere now).
 
 ## Open elsewhere
 
