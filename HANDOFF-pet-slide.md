@@ -239,3 +239,75 @@ EXIT=1
 - `pnpm run build` — to run.
 
 Exit codes read directly, never piped through `head`/`tail`.
+
+---
+
+# Review round 2 (#476) — the four asks
+
+**Blocker was: pool seed 115 regressed.** Resolved, plus a fourth seed the
+reviewer's sweep could not have seen.
+
+## 1. Stale vectors, re-searched — three, not one
+
+A warp vector is only meaningful against the geometry it was searched on. This
+fix changes where a given distance lands on every route, so every vector baked
+before it is suspect. `warp-search.mts` was run per seed, `--control` first and
+passing each time:
+
+| seed | old vector | `check:park` | invariants | new vector | candidates |
+|---|---|---|---|---|---|
+| 5 | `ferrisWheel:2` | stranded 10 | 81/81 | `waterFight:1` | 5 |
+| 115 | `dodgems:1` | pass | **78/81** | `hotel:1` | 8 |
+| 326 | `waterFight:1` | stranded 8 | 81/81 | `building:1` | 3 |
+
+115 and 326 fail in **opposite** directions, so neither gate implies the other.
+
+## 2. 115: stale vector, NOT a pre-existing breach uncovered
+
+The reviewer's hypothesis was that the bridge-tunnel invariant's 0.1 m
+finite-difference tangent (`invariants.ts:4788`) sat inside the old 0.35 m dead
+spot, collapsing its across-track probe fan onto the centreline, so the fix
+makes it strictly stricter and might be surfacing an older fault. Confirmed the
+mechanism is real — pre-fix, both `pointAt` calls returned the identical point,
+`norm` was 0 and the `|| 1` guard fired.
+
+Tested rather than assumed, three runs:
+
+| tree | instrument | 115 |
+|---|---|---|
+| pre-fix base (control) | as shipped | **pass 81/81** |
+| pre-fix base | finite difference → `route.tangentAt` (honest fan) | **pass 81/81** |
+| this branch, old vector | as shipped | fail 78/81 |
+
+The honest fan on the old geometry finds nothing. So the breach is **not older
+than the fix**; the vector is stale.
+
+## 3. `WARPS_BY_SEED` header — fixed
+
+Now states the two vintages explicitly, which entries belong to each, and that
+`vet:seeds` over the whole pool (not `check:park`) is the tell when geometry
+changes again.
+
+## 4. The Sky Cruiser moved too — measured here, not asserted
+
+The rail centre-line is **unchanged** (same segments, canonical loop 342.1 m
+before and after). What changed is where a distance lands on it, so everything
+sampling the route by distance moves:
+
+- chute, sampled at 0.9 m: spline 63.6 m → 67.7 m, 69 → 74 control points.
+- Sky Cruiser profile, `CONTROL_SPACING = 2 m`, canonical loop: control gaps
+  off nominal by >2% were **2 of 170, worst 14.3%**; now **0 of 170, worst
+  0.1%**.
+
+## A mistake worth recording
+
+The `WARPS_BY_SEED` header rewrite swallowed the closing `*/` and the
+`const WARPS_BY_SEED … = {` line, and I **pushed it without running `tsc`**.
+`vet:seeds` caught it as 0/16 with `ReferenceError: envWarp is not defined` —
+the signature of a broken module, not sixteen broken parks. Fixed in
+`a40b2f64`. Run `tsc` before pushing, even for a comment.
+
+## Control worktree
+
+`.claude/worktrees/pet-slide-ctl` (detached at `origin/feat/park-warp-solver`)
+was used for the pre-fix controls. **Remove it when done.**
