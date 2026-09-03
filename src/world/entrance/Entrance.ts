@@ -1057,6 +1057,26 @@ function densify(
 }
 
 /**
+ * How many quads the road is cut into across its width.
+ *
+ * **This is a coplanar-seam fix, not a detail setting.** Each vertex is placed
+ * at `terrainHeight + 0.06`, so the drawn road is the *chord* between those
+ * heights while the ground under it is the curve — and over the hilltop's brow
+ * the ground is convex, so it bulges up towards the road between vertices. At
+ * eight columns the 7.78 m road spans about a metre a quad, the bulge sags the
+ * surface 5.2 cm of its 6 cm lift, and the ground comes within **8.5 mm** of
+ * the road: two faces the coplanar sweep rightly calls one plane, 1.434 m² of
+ * it on seed 208.
+ *
+ * Chord error falls with the square of the spacing, so doubling the columns
+ * quarters it. That is the fix ART_DIRECTION.md §7 allows — the road follows
+ * the ground it is laid on more closely, and the 6 cm lift is untouched.
+ * Raising the lift instead would be the stand-off §7 forbids, and it would go
+ * stale the moment the terrain moved.
+ */
+const ROAD_COLUMNS = 16;
+
+/**
  * **One curved ribbon of road, swept along the route's own stations.**
  *
  * The straight {@link roadRibbon} below cannot lay this: it builds an
@@ -1081,7 +1101,7 @@ function curvedRoadRibbon(
   material: ReturnType<typeof roadMaterial>,
   stations: readonly RoadStation[],
 ): Mesh {
-  const across = 8;
+  const across = ROAD_COLUMNS;
   const geometry = new PlaneGeometry(1, 1, across, stations.length - 1);
   const position = geometry.getAttribute('position') as BufferAttribute;
   const uv = geometry.getAttribute('uv') as BufferAttribute;
