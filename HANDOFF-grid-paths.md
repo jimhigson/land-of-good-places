@@ -201,6 +201,19 @@ door makes a pocket of its own. Doors with no grid route are back up: seeds 0,
 single-point route the corridor collapsed to — fixed) to `poi.stranded 10`;
 seed 451 went 0 -> 30.
 
+**Measured and reverted (do not re-run):** adding, to `relayPolyline`'s line
+set, the four lines that graze each crossing site's own footprint — taken from
+the site's proven reach numbers plus `RIBBON_HALF_WIDTH_CEILING +
+RAMP_SCREEN_MARGIN`, so a leg on one of them can pass a bridge — so the rescue
+router could walk *round* a ramp. **Neutral on every seed measured**: 451 stayed
+at 30, 5 at 10, 288 at 1, 225 still red. Reverted, because a change that
+measures nothing is not kept. The inference: the starved doors are failing
+earlier than the rescue router — in `gridConnectors` at relax 0/1 — so the
+detour has to be offered *there*, on the terminal connector's own legs, not only
+in `relayPolyline`. Check which relax level each stranded door dies at before
+building anything (`scripts/tmp-doors.mts` prints the per-node connector
+verdicts).
+
 **This is the next leg's whole job, and it is a routing problem, not a screen
 problem: do not relax the ramp screen to get the count back.** The doors that
 lost their routes need routes that go round the ramps — the backtracking ladder
