@@ -4803,3 +4803,108 @@ one place that sentence can be checked against a real number.
 | steps 22-58 | 35 green, **2 red** — both bisected to the parent stack above |
 
 **Every path-related check in the chain is green on this branch.**
+
+---
+
+## REBASED onto `feat/park-warp-solver` @ a3bd7dde (#476) — AND IT EXPOSED A LEVEL CROSSING ON SEED 326
+
+### The rebase itself was clean, and verified rather than trusted
+
+144 commits replayed, **no conflicts** — which CLAUDE.md warns is the exact
+shape of a silent revert, so it was checked three ways:
+
+- **Check step SETS compared, not counts.** Parsed the `scripts` object before
+  and after: 58 steps, and `diff` against the parent's list is empty — nothing
+  added, nothing swapped. `rerere` had an empty `rr-cache`, so nothing stale
+  could be replayed.
+- **#476's work is intact.** Every one of the ten files a3bd7dde touched is
+  **byte-identical** to the parent in my tree (`scripts/check-park-boot.mts`,
+  `scripts/check-arrival-completes.mts`, `src/world/parkWarp.ts`,
+  `src/world/rail/generate.ts`, `src/world/parkSeedPool.ts`, ...).
+- **My own work is intact**, grep-verified: `privateLegOf` 3, `drawsAsScreened`
+  8, `ARRIVAL_LEAD_REACH` 2, `corners.sort` **0** (the reverted experiment
+  stayed reverted). No deletions in my diff against the parent.
+
+**The three reds bisected to the parent are now GREEN — measured, not assumed:**
+`check:pet-slide` exit 0, `check:park-boot` exit 0, `check:arrival-completes`
+exit 0. `tsc --noEmit` 0, `typecheck:test` 0.
+
+### THE PARKS MOVED, AND MY BRANCH BUILDS A LEVEL CROSSING ON SEED 326
+
+#476 re-searched three stale warp vectors (seeds 5, 115, 326), so those parks
+are genuinely different and **every number taken before the rebase is stale.**
+
+`test:procgen`, captured unpiped, exit 1:
+`Test Files 6 failed | 22 passed (28)`, `Tests 9 failed | 1401 passed (1410)`
+(was 4 failed / 1406 passed). Set-diffed against the pre-rebase state:
+
+```
+  unchanged:  seed  11  streetsShareLatticeLines   spur-building
+              seed 267  detourRatiosStayReasonable
+              seed 288  noPathEndsNowhere
+  still gone: seed 128  (the tie-break holds across the rebase)
+  MOVED:      seed   5  streetsShareLatticeLines
+                        was spur-waterFight  z=-23.31, 2.57 m off
+                        now spur-dodgems     z= 59.11, 1.85 m off
+  NEW:        seed   5  noPathEndsNowhere  gate-approach's end at (0.0, 48.8),
+                        12.44 m from the nearest other paving
+  NEW:        seed 326  x3 bridge invariants — "the crossing planner proved 1
+                        bridge site and not one of the park's 0 built
+                        crossings stands on any of them"
+  NEW:        seed 346  detourRatiosStayReasonable — 'ferrisWheel' and
+                        'stall.spaceFerrisWheel' 6.8 m apart, 122.6 m by
+                        paving (17.93x)
+```
+
+**ATTRIBUTED, and seed 326 is MINE.** `test/procgen/seed-326.test.ts` is
+**byte-identical** between the parent and this branch (`git diff --stat` on that
+path is empty). The parent tip **passes** it; this branch **fails** it. Identical
+measurement, different park code, so the difference is this branch's.
+
+**And `check:park` on seed 326 says what that means for a child:**
+
+```
+LGP_SEED=326 check:park -> exit 1
+  [2] the walk to anchor:dodgems crosses the railway at (49.9, 4.1)
+      0.00 m above the rail, short of the 4.06 m a bridge deck needs
+```
+
+**That is a level crossing.** Jim's END GOAL is *"zero level crossings (the
+ability to create LC should not even exist)"*, and zero-LC was the parent
+branch's delivered work. **This outranks every remaining item in the queue** —
+it is a child walking across a live railway at grade, not an invariant line.
+Seed 326 built **0 crossings** where the planner proved **1** bridgeable site,
+so `routeFromNetwork` had no bridge to use and the last-resort straight line
+went over the rail.
+
+**Note the shape: it is this file's own oldest lesson wearing new clothes.** The
+crossing planner proved a site; the park built nothing there; the router then
+drew anyway rather than backtracking. *A generator whose output is consumed by
+a later placer cannot validate against that placer's output*, and *the last
+resort still draws, and per the standing rule it must not.*
+
+### An instrument trap caught, worth keeping
+
+Running my three failing seed files at the parent tip first gave
+`Test Files 2 passed (2)` — but I had named **three**. `seed-346.test.ts` is a
+file *this branch added*, so it silently was not there, and a clean exit 0 on
+two files would have read as "the parent passes all three". **The tell was the
+file count, not the pass count** — CLAUDE.md's own "a skipped test is not a
+passing test", one level out.
+
+The follow-up experiment (copy my `test/procgen` onto the parent's park code, to
+isolate park code from measurement) is **not available**: it dies with
+`TypeError: bridgeScreenHalfAcross is not a function`, because my invariants call
+exports only this branch has. It reported `246 skipped | 0 passed`, which again
+must be read as *threw*, not *passed*. The parent worktree was restored
+afterwards (`git checkout -- test/procgen && git clean -fd`, 0 modified files).
+
+### Standing order of work, revised by the above
+
+1. **Seed 326's level crossing.** Everything else waits.
+2. Seed 5's new `noPathEndsNowhere`, and its moved `streetsShareLatticeLines`.
+3. Seed 346's detour ratio (same class as 267 — likely the same
+   `buildRouteDistanceGraph`/`buildFactsDistanceGraph` two-owner question,
+   which the `LGP_CONNECT_TRACE` instrument now on the branch will answer for
+   both at once).
+4. Then 11, 267, 288, stage-2 (b), probe deletion.
