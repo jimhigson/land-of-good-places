@@ -5705,6 +5705,19 @@ const theDrawnPathRidesOverEveryBridge: Invariant = (facts) => {
     }
   }
 
+  // **Why twice, and not once.** This clause compared the two counts for
+  // equality, which was right while the kerb was one ribbon under the surface
+  // — same curve, same `divisions`, same vertex count. `pathGraph.ts` now draws
+  // the kerb as the **two bands you can actually see** (its middle was a face
+  // buried under the path, and `ART_DIRECTION.md` §7 says delete those rather
+  // than hold them apart with a lift), so a kerb that is riding its bridge
+  // perfectly has exactly twice the vertices. Measured: 92 against 46 on seed
+  // 11, and the same 2.000 ratio on every seed that carries a bridge.
+  //
+  // It is a structural constant of the geometry, not a tolerance — the ±15%
+  // beside it is the tolerance, and it is unchanged. A kerb genuinely torn off
+  // its paving still fails this.
+  const KERB_VERTICES_PER_SURFACE_VERTEX = 2;
   const surfaceCount = carried['path-surface'] ?? 0;
   const kerbCount = carried['path-kerb'] ?? 0;
   if (surfaceCount === 0) {
@@ -5713,9 +5726,10 @@ const theDrawnPathRidesOverEveryBridge: Invariant = (facts) => {
         'of them — the path does not go over the bridges at all, and every check above ' +
         'passed by having nothing to measure',
     );
-  } else if (Math.abs(surfaceCount - kerbCount) > surfaceCount * 0.15) {
+  } else if (Math.abs(kerbCount - surfaceCount * KERB_VERTICES_PER_SURFACE_VERTEX) > surfaceCount * 0.15) {
     complaints.push(
-      `the bridges carry ${surfaceCount} path-surface vertices but ${kerbCount} path-kerb ones — ` +
+      `the bridges carry ${surfaceCount} path-surface vertices but ${kerbCount} path-kerb ones, ` +
+        `against the ${KERB_VERTICES_PER_SURFACE_VERTEX}x the kerb's two bands should give — ` +
         'the kerb is torn off the paving it borders somewhere over a bridge',
     );
   }
