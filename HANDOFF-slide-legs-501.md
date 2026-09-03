@@ -50,3 +50,38 @@ After: see PR body / `scratchpad/m/after-*.txt`.
 
 New invariant `slideLegsClearTheRailway` in `test/procgen/invariants.ts` — the
 pairwise clause that never existed. Proved red on seed 5 before the fix.
+
+## Refuted: more attempts does not help (do not retry this)
+
+The obvious backtrack — tighten the attempt cadence so more candidate
+positions are asked — **was measured and does not work.** At the fence-honest
+clearance, seed 5 tops out at **3 legs at every spacing tried**:
+
+| `LEG_SPACING` | seed 5 legs | canonical legs |
+|---|---|---|
+| 6 (shipped) | 2 | 11 |
+| 4 | 3 | 14 |
+| 3 | 2 | 13 |
+| 2 | 3 | 13 |
+
+The canonical seed saturating at 13-14 is the useful half: the ground-space
+crowding test, not the cadence, is what sets the real spacing, so more
+attempts never produce a picket fence. It also never produces legs where
+there is no ground. **The binding constraint on seed 5 is available ground.**
+
+## Refuted: a greedy walk along the chute
+
+Replacing the slot-and-nudge pass with a greedy walk (place wherever legal,
+`LEG_SPACING` behind the last) was measured **worse**, not better: seed 5 gave
+6 legs where the slot planner gives 8 with the railway ignored, and 3 where it
+gives 4. Greedy-first takes the near edge of each clear stretch and then locks
+out the 6 m behind it; the nudge ladder spreads better. Reverted.
+
+## Instrument control (this one mattered)
+
+The first clearance ladder re-ran `planSlideLegs` against the **finished**
+collision world and reported 1 leg at clearance 0, where the park actually
+builds 8. It was measuring a park that already contained the fence, the train,
+the coaster and the legs themselves. The ladder is now driven through real park
+builds, and the control — clearance 0 must reproduce the unfixed park exactly —
+**passes**: 8 legs, the same four violations at the same four coordinates.
