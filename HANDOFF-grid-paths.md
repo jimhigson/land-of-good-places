@@ -3638,3 +3638,86 @@ i.e. which screen refuses the nearer lattice nodes around (27.1, 39.2). That is
 `debugDoorReach` territory and it has not been run on this door. **Do not reach
 for the ladder, the lead, or the tail bound** — all three are now measured
 dead ends.
+
+### The missing cost term — LOCATED, BUILT, MEASURED, REVERTED (a swap, not a gain)
+
+`scripts/tmp-128face.mts`'s **control row** is what found this, not the door
+reach it was written for. `debugNodeEdges` on `stall.facePaint`'s stand point,
+seed 128 — the door has **three** connectors:
+
+```
+-> 26.583,45.310  cost 10.27  via (29.559,41.649)
+-> 14.583,45.310  cost 27.67  via (29.559,41.649) (29.559,45.310)
+-> 14.583,33.310  cost 33.52  via (29.559,41.649) (14.583,41.649)
+```
+
+The third is the one drawn, and its second leg is the **15.0 m run on
+z = 41.649** the invariant fails. The second connector is **already cheaper
+(27.67)**, and its long leg is 15.0 m on **z = 45.310, a real lattice line**,
+with only 3.66 m of private run before it. It lost on *total path* cost,
+because the node it lands on is further from the paved network.
+
+**So a connector's cost was its length and nothing else: the search could not
+see that one of them runs along a line the rest of the park shares.**
+
+**This is NOT the retired "pricing is ordering" idea.** That retirement was
+about pricing two shapes **at the same node**, where a node's offered cost is
+the minimum over its connectors, so a price only reorders. These two
+connectors land on **different nodes**, so a price genuinely decides which node
+wins. Recording the distinction because the retirement is written down without
+it and would otherwise close this off wrongly.
+
+**Built:** `privateLineRun(shape)` — metres of axis-aligned run of
+`MIN_STREET_RUN` (8 m) or longer sitting further than 0.9 m from a 12 m or 6 m
+line through the plaza, i.e. the invariant's own two families and tolerance —
+priced at 1.25 per metre on top of length, at all three connector push sites.
+Diagonal legs deliberately not counted (a different invariant's business).
+A **price, not a refusal**: refusal is variant B, measured at 10 green / 13
+stranded -> 9 / 16. `tsc --noEmit` exit 0.
+
+**It does exactly what it was built to do on 128:**
+
+```
+before  (27.1,39.2) (29.6,41.6) (14.6,41.6) (14.6,21.3) ...   15.0 m private on z=41.649
+after   (27.1,39.2) (29.6,41.6) (29.6,45.3) (14.6,45.3) ...   3.66 m private, then 15.0 m on z=45.310 (lattice)
+```
+
+**Column 1 — `check:park`: 12 green / 7 stranded, UNCHANGED. No seed moved.**
+
+**Column 2 — `test:procgen`: 5 failed / 1404 passed, the same COUNT as before —
+and the count is a lie. The violation SET swapped one for one:**
+
+```
+- seed 128  every street sits on the shared 12 m lattice
+            connector-stall.facePaint-station-1, 12.4 m on z = 41.65
++ seed 225  every paved path runs on grid axes
+            connector-building-exit-ginormousSlide runs diagonally for 16.2 m
+```
+
+That second line is **the exact violation this leg's `drawsAsScreened` fix had
+removed**. The pricing gave it straight back.
+
+**Mechanism, diagnosed rather than guessed:** `privateLineRun` scores a
+diagonal leg as **zero**, because diagonals are `pathsRunOnGridAxes`'s
+business. So pricing the elbows' private legs makes the *diagonal*
+`straightToLead` shape relatively cheaper, and on seed 225 the winning node
+moved to one whose head-on ladder accepts rung 2 — the diagonal. The term is
+not wrong; it is **incomplete**, and an incomplete cost function moves work
+from the invariant it prices to the one it does not.
+
+**REVERTED. Revert grep-verified** (`privateLineRun|PRIVATE_LINE_COST_FACTOR|
+offSharedLine|PRIVATE_MIN_RUN` -> 0 matches). A one-for-one swap of invariant
+lines is not progress, and giving back a measured 16.2 m diagonal — the more
+Jim-visible of the two, against complaint #3 — to gain a run 2.34 m off a
+lattice line is churn.
+
+**For the PR body:** *an incomplete cost function does not remove work, it
+moves it to the invariant it cannot see* — and *two runs with the same failure
+count can be a swap; only the set says which.*
+
+**The next step, fully specified.** Price the diagonal too, so a node offering
+a long diagonal is not made attractive merely by comparison with a priced
+elbow. Pricing rather than refusing is the right instrument (refusal is variant
+B), and the two prices must be introduced **together** — this measurement shows
+that introducing either alone relocates the defect. Both columns, sixteen
+seeds, and diff the violation **set**, never the count.
