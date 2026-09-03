@@ -1959,3 +1959,35 @@ reports as "no generator step at all". That is an instrument gap of exactly the
 kind CLAUDE.md's "a check can pass without checking anything" section is about —
 and it is what let me build a whole theory on a line that could only ever have
 said zero.
+
+### `cruiserFinish` at 11: the benign explanation is RULED OUT, measured
+
+The one question the previous section left — *same seams on a legitimately
+shorter loop, or a seam that stopped yielding?* — is answered, and it is not
+the benign one:
+
+```
+origin/main    cruiser solved in slices: 301.2630 m, loop 1d17280bfe89   cruiserFinish 19 pieces
+this branch    cruiser solved in slices: 345.4336 m, loop 43d37a7cad49   cruiserFinish 11 pieces
+```
+
+**The branch's cruiser loop is 44 m LONGER and yields 8 fewer times.** The
+`trainSearch` precedent in the same file — a floor lowered because a layout
+change re-rolled the park and the loop legitimately solved *smaller* — is
+therefore the opposite case and does not apply here. **Do not lower
+`MIN_UNITS.cruiserFinish`.**
+
+Where to look: `finishCruiserPlanSearch` (`src/world/coaster/solve.ts:247`)
+yields entirely through `coasterProfileSearch`
+(`src/world/coaster/route.ts:1298`), whose seams are a handful of fixed
+`yield 0`s — a fixed count, independent of loop length. A fixed-count generator
+producing 19 on one park and 11 on another means **some of those seams are
+being skipped**, so the next step is to find which of them are inside a
+conditional and which condition this branch's park changes. That is a Sky
+Cruiser question, not a paths one, and it wants whoever owns that code.
+
+**Still unattributed:** whether this originates on this branch or on the still
+open #474 beneath it. Both were measured only against `origin/main` and against
+this branch; nobody has run `check:park-boot` on `feat/park-warp-solver` alone.
+That single run splits the ownership and is the cheapest next measurement on
+this whole item.
