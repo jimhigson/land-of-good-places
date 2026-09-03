@@ -1001,3 +1001,101 @@ widest rung, `nearestReachable: 35.0m`).
 
 **Do not "fix" this by threading the 1.5 m line.** It trades a measured
 `poi.stranded` for a measured grid violation and Jim's own complaint.
+
+### Fix 3 (kept): the `streetsShareLatticeLines` successor
+
+Admits the **6 m half lattice by name**, because that is the grid the
+generator actually builds on (`JOG_OFFSET = STREET_PITCH / 2`, used by the jog,
+span and rescue routers). A run is on the grid if it is within
+`STREET_LINE_TOLERANCE` of a full line **or** a half line; everything reported
+is off both, and the message says so.
+
+Proved, `--reporter=verbose`:
+
+```
+[streets] 29 street-length run(s) asserted on, 5 admitted on a 6 m half line, 0 excused
+ OK canonical seed 20260728 > every street sits on the shared 12 m lattice
+[streets] 25 street-length run(s) asserted on, 8 admitted on a 6 m half line, 0 excused
+ XX seed 11 > every street sits on the shared 12 m lattice
+    spur-waterFight runs north-south for 29.8 m on x = 49.32, 1.91 m off the
+    nearest line of the 12 m lattice through the plaza (9.24, 6.93) OR of its
+    6 m half lattice
+```
+
+Canonical goes green; seed 11's private-line run is still caught — the
+requirement. A coverage line goes to **`process.stderr`** on every run (vitest's
+default reporter hides console output from passing tests) counting runs
+asserted on, runs admitted on a half line, and runs *excused* by the
+threading-unserved-ground exemption, with "THIS SEED ASSERTS NOTHING" when the
+count is zero.
+
+**THE BRIEFED CAP IS REFUTED BY MEASUREMENT — do not re-add it.**
+`scripts/tmp-runs.mts` over the six suite seeds:
+
+```
+seed 11  spur-hotel            NS len= 51.0 line= -80.76 off12=6.00 off6=0.00
+seed 11  spur-stall.skyCruiser NS len= 51.3 line= -80.76 off12=6.00 off6=0.00
+seed 11  spur-exit-skyCruiser  NS len= 51.3 line= -80.76 off12=6.00 off6=0.00
+```
+
+Three routes, 51 m each, on the **same** half line — the best example in the
+pool of the property the invariant exists to measure. A cap below street length
+fires on it. What reads as wandering is a line nobody else uses; length does not
+tell the two apart.
+
+## Where the branch stands, and what is next
+
+`pnpm exec tsc --noEmit` **0**, `pnpm exec tsc --noEmit -p tsconfig.test.json`
+**0**, `pnpm run build` **0**. `pnpm run check` (47 steps) **not run**.
+`pnpm run test:procgen` **exit 1**, and this is the honest full list:
+
+| test | seed | what |
+|---|---|---|
+| `scatterDecoupling` | — | "perturbed the park for real" — the two hashes are equal, so everything below it is vacuous. **Not diagnosed.** |
+| `noPathEndsNowhere` | canonical | `gate-approach`'s end 13.92 m from any paving — the gate pocket, root-caused above, fix is upstream |
+| `noPathEndsNowhere` | 5 | same, 32.02 m |
+| `noPathEndsNowhere` | 288 | `bridge-walk-0`'s end at (-15.7,-47.7) 27.10 m from any paving. **Not diagnosed** — 288 has ONE paving component, so this is a dangling end, not an island |
+| `pathsRunOnGridAxes` | 5 | `spur-stall.keychain` diagonal 17.3 m from **(7.8,-23.3)**, which is a bridge foot, to (-7.2,-14.9). **Not diagnosed** |
+| `streetsShareLatticeLines` | 11 | `spur-waterFight`, below |
+
+### Seed 11's `spur-waterFight` — measured, not fixed
+
+Control polyline: `(45.2,54.9) (49.3,54.9) (49.3,23.5) (49.7,23.7)`. A 31.4 m
+run on the door's own column, from a ring tap on the lattice at x = 45.24.
+
+`scripts/tmp-col.mts` walks a column in 3 m pieces against `paths.ts`'s own
+screens (control: the private column the router DID use reads blocked, so the
+instrument discriminates):
+
+```
+x=45.24  z 41.5..47.5 BLOCKED ramp          <- the lattice column, 6 m of bridge reservation
+x=49.3   z 29.5..44.5 BLOCKED streetClear   <- the column used, 15 m along a plot's face
+x=51.24  z 29.5..44.5 BLOCKED streetClear
+```
+
+So the lattice column beside it is clear **except for 6 m of one bridge's
+reservation**, and the router preferred 31 m on a private line. The connector
+cannot be the elbow builder — its tail is bounded by `STUB_TAIL_LIMIT` (7.8,
+15.6 relaxed) — so this is `relayConnectors`/`relayPolyline`'s last rung, the
+one that allows a private line its full length when the disciplined walk finds
+nothing. **The disciplined walk finds nothing because 6 m of reservation ends
+the lattice column**, which is the same disease span links fixed for a dead
+*node*: nothing heals a run blocked by a reservation. A span-like step round a
+reservation on the lattice column is the obvious next thing to try, and it
+would also be the honest fix for Jim's complaint #3 on this seed.
+
+### Deliberately NOT done, and why
+
+- **The `tmp-*` probes and the debug exports are still in the tree.** Every
+  open defect above is still being chased with them, and `debugGateNodes`,
+  `debugGridNodes`, `debugLegScreens`, `debugNodeScreens`, `debugWhatBlocks`
+  are what made this leg's diagnoses possible. Delete them in the leg that
+  closes the last defect, not before.
+- **No rebase onto `origin/main`.** This branch is stacked on
+  `feat/park-warp-solver` (#474), which is still open; `origin/main...HEAD` is
+  92 files because it carries the parent's work. Rebasing onto main while the
+  parent is unmerged flattens the stack. Rebase when #474 lands. `main` is 2
+  commits ahead of the merge base and carries `check:coplanar`, which this
+  branch's `package.json` does not have (`103` scripts, `check:coplanar` absent
+  — parsed, not grepped).
+- **No PR**, by instruction.
