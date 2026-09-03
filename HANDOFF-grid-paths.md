@@ -502,6 +502,42 @@ counts (that was 34 / 7).
 gone, the district joined, and `spur-hotel`'s 39.7 m private arterial with
 `spur-stall.skyCruiser`'s 24 m run 0.8 m beside it are no longer drawn.
 
+**SEED 267 DIFFED (`scripts/tmp-routes.mts`, same seed, ladder vs
+`withDiscipline` forced to `[false]`). Exactly two routes differ, and the
+disciplined ones are BETTER, not worse:**
+
+```
+undisciplined  spur-exit-skyCruiser  (-3.6,-42.4) (-15.2,-31.5) (-15.2,-19.5)
+                                     (-9.2,-19.5) (-9.2,-13.5) (14.8,-13.5)
+                                     (14.8,-77.0) (-3.7,-77.0)
+disciplined    spur-exit-skyCruiser  (8.8,-31.5) (14.8,-31.5) (14.8,-73.5)
+                                     (-3.7,-73.5) (-3.7,-77.0)
+
+undisciplined  spur-stall.skyCruiser (8.8,-31.5) (14.8,-31.5) (14.8,-76.6)
+                                     (-11.8,-76.6)
+disciplined    spur-stall.skyCruiser (8.8,-31.5) (14.8,-31.5) (14.8,-73.5)
+                                     (-11.8,-73.5) (-11.8,-76.6)
+```
+
+Undisciplined, `spur-exit-skyCruiser` opens with a **diagonal**
+(-3.6,-42.4) -> (-15.2,-31.5), wanders through eight points, and finishes
+along **z = -77.0** — while `spur-stall.skyCruiser` finishes along
+**z = -76.6**. **Two parallel arterials 0.4 m apart**: the seed-11 defect
+again, on a different seed, and the rule caught it.
+
+Disciplined, both share one arterial down x = 14.8 to z = -73.5, separate
+along it, and each takes a short private stub to its own door (3.5 m and
+3.1 m). That is precisely the shape the rule is for, and it is what Jim's
+report #3 asks for.
+
+**So the finding is: the rule is right and the routes are better, yet
+`poi.stranded` went 0 -> 2.** The regression is therefore *not* in the route
+shapes — it is in what those two short final stubs land on. Chase the two
+stranded waypoints on 267 with `tmp-pocket.mts` / `tmp-blocker.mts` at the
+ends of `(-3.7,-73.5) -> (-3.7,-77.0)` and `(-11.8,-73.5) -> (-11.8,-76.6)`.
+**Do not treat this as an argument against the rule**; on the evidence it is
+an argument for it.
+
 **The one regression, seed 267 (0 -> 2), is NOT starvation** — and that is
 diagnostic. Canonical and 428 both recovered when the fallback rung was
 added, which is what starvation looks like. 267 did not, so on that seed the
