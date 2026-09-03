@@ -88,10 +88,20 @@ const ringOwn = nearest('main-loop');
 // see an entering ribbon at all and a clean run would prove nothing.
 const fountain = nearest('fountain-approach');
 
+/** A tap that touches the rim sits at **exactly** `RING_RADIUS`, and in
+ * floating point that lands a hair under it. The first run of this reported
+ * seeds 274, 326 and 428 as `TAP INSIDE THE RING by 0.00 m` — and **"by
+ * 0.00 m" is the tell**: a violation whose magnitude rounds to zero is not a
+ * violation, it is the comparison. Touching the rim is what a gateway is for,
+ * so the epsilon is the instrument admitting that, not a threshold being
+ * tuned to make seeds pass. Anything genuinely inside is inside by metres —
+ * seed 267's was 13.74 m. */
+const RIM_EPSILON = 0.01;
+
 const verdict =
   taps === 0
     ? 'no gateway tap — ASSERTS NOTHING on this seed'
-    : worstTap < RING_RADIUS
+    : worstTap < RING_RADIUS - RIM_EPSILON
       ? `TAP INSIDE THE RING by ${(RING_RADIUS - worstTap).toFixed(2)} m`
       : 'every tap clear of the ring';
 console.log(
