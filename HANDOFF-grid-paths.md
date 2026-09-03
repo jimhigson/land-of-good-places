@@ -4979,3 +4979,41 @@ dodgems, `stall.dodgems` and `exit-railRace` sit in an isolated component
 across the railway, so `check:park` reports *the walk to anchor:dodgems crosses
 the railway at (49.9, 4.1), 0.00 m above the rail*. She walks over live track
 to reach the dodgems.
+
+### Column 1 after the rebase — 11 green / 12 stranded, and the LC is confined to one seed
+
+`check:park`, all sixteen pool seeds, each run unpiped with its exit code read.
+The sweep also counts lines matching `crosses the railway at`, so a level
+crossing cannot hide inside a stranded count.
+
+| seed | pre-rebase | post-rebase | |
+|---|---|---|---|
+| canonical | 0 | 0 | green |
+| 5 | 0 | **2** | **lost green** |
+| 11 | 1 | 1 | |
+| 24 | 2 | **0** | **recovered — now green** |
+| 115 | 0 | 0 | green |
+| 128 | 0 | 0 | green |
+| 131 | 0 | 0 | green |
+| 208 | 0 | 0 | green |
+| 225 | 2 | 2 | |
+| 267 | 0 | 0 | green |
+| 274 | 0 | 0 | green |
+| 288 | 2 | 2 | |
+| 326 | 0 | **5** | **lost green + 1 LEVEL CROSSING** |
+| 346 | 0 | 0 | green |
+| 428 | 0 | 0 | green |
+| 451 | 0 | 0 | green |
+
+**12 green / 7 stranded -> 11 green / 12 stranded.** Two lost (5, 326), one
+gained (24 — #476's rail-route fix). The **set** moved, not just the count.
+
+**The level crossing is on seed 326 and nowhere else** — `levelCrossingLines=0`
+on all fifteen other seeds. That bounds the damage: it is one seed's isolated
+component, not a park-wide loss of the zero-LC guarantee the parent delivered.
+
+**Both losses are on seeds #476 re-searched** (5, 115, 326 were the three
+re-searched vectors; 115 stayed green). So this branch's path code meets two
+parks it has never seen, and fails on both. That is not an excuse — the code
+should build a park on any seed — but it is the honest scope: **nothing
+regressed on a park that was already being measured.**
