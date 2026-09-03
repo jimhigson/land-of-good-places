@@ -2,7 +2,6 @@ import { CanvasTexture, RepeatWrapping, SRGBColorSpace, type Texture } from 'thr
 import { hexToCss, PALETTE } from './palette';
 import { Rng } from './mathUtils';
 import { markShared } from '../art/style/materials';
-import { ART } from '../art/style/artPalette';
 
 /**
  * Every texture in the game is drawn here with the 2D canvas API.
@@ -186,12 +185,22 @@ export function pathTexture(repeat = 8): CanvasTexture {
  * the ride is touched: it asks for the default and gets exactly the bytes it
  * got before.
  *
- * The grey is `ART.statueStone*` — the park's **one** documented grey, already
- * reasoned about against `stonePink` in `artPalette.ts` (a nine-point red lift,
- * so it reads as grey without punching a desaturated hole in a pink park). No
- * new colour is invented here; ART_DIRECTION §5 forbids a second opinion about
- * a colour the world already names, and this is the same rock the fountain
- * statue is carved from.
+ * The grey is `PALETTE.stoneGrey*` — the park's **one** grey, already reasoned
+ * about against `stonePink` (a nine-point red lift, so it reads as grey without
+ * punching a desaturated hole in a pink park). No new colour is invented here;
+ * ART_DIRECTION §5 forbids a second opinion about a colour the world already
+ * names, and this is the same rock the fountain statue, the rail race's
+ * trestles and the Spooky House's walls are cut from.
+ *
+ * That ladder had to **move** to `core/palette.ts` for this to be possible at
+ * all, and the reason is worth a line because it will catch the next person:
+ * `art/style/bridge.ts` is *"the ONLY file in the art system that reaches into
+ * `src/`"* and it re-exports this very module, so importing `ART` here closes a
+ * cycle — `ART` is still in its temporal dead zone when {@link ROAD_TONES} is
+ * built, and every check that generates a park dies with
+ * `Cannot access 'ART' before initialization`. Measured, not guessed: that is
+ * what `check:stall-shape` printed. `ART.statueStone*` now reads from
+ * `PALETTE`, so there is still exactly one definition of each of the five.
  */
 export type RoadTone = 'sand' | 'grey';
 
@@ -205,7 +214,7 @@ export type RoadTone = 'sand' | 'grey';
  */
 const ROAD_TONES: Record<RoadTone, { light: number; mid: number; dark: number }> = {
   sand: { light: PALETTE.pathEdge, mid: PALETTE.pathSand, dark: PALETTE.pathSandDark },
-  grey: { light: ART.statueStoneLight, mid: ART.statueStone, dark: ART.statueStoneMid },
+  grey: { light: PALETTE.stoneGreyLight, mid: PALETTE.stoneGrey, dark: PALETTE.stoneGreyMid },
 };
 
 export function roadTexture(tone: RoadTone = 'sand'): CanvasTexture {
