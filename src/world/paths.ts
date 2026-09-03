@@ -3188,6 +3188,27 @@ const GATE_CORRIDOR_INNER_Z = 30;
  */
 const GATE_CORRIDOR_RAIL_STANDOFF = RAIL_CLAMP_DISTANCE + 1.6;
 
+/**
+ * **How far the corridor's mouth keeps from a bridge's own ground.**
+ *
+ * `GATE_CORRIDOR_RAIL_STANDOFF` measures from the rail **centre line**, and a
+ * ramp reaches roughly three times further than that: on seed 225 the mouth
+ * came to rest at (0, 39.8) — exactly its 5.8 m standoff from the track and
+ * **four metres up the front-door bridge's ramp**. The mouth is where the
+ * corridor hands the walk to the grid, so it is also the node every later route
+ * branches from, and a route branching there is drawn across the ramp's flank.
+ * Measured on that seed: all four of the park's waypoint-chain breaks had their
+ * midpoint standing on a ramp, and they cut 70 waypoints into two pockets.
+ *
+ * The reach comes from {@link pointStandsOnABridgeRamp}, which builds it from
+ * the site's own proven `rampReachPos`/`rampReachNeg`/`halfWidth` — the one
+ * owner of that rectangle, deliberately, so this cannot drift from what the
+ * bridge builder does. The margin on top is the widest ribbon's own half-width
+ * plus kerb, because it is the drawn *edge* that must clear the parapet, not
+ * the centreline.
+ */
+const GATE_CORRIDOR_RAMP_MARGIN = RIBBON_HALF_WIDTH_CEILING;
+
 /** Cached so the callers below cannot disagree, and so the stub search is
  * not repeated. */
 let gateCorridorDeepestCache: readonly [number, number] | null = null;
@@ -3236,6 +3257,7 @@ function gateCorridorDeepestMouth(): readonly [number, number] {
     const z = GATE_CORRIDOR_START_Z - step * 0.2;
     if (z <= crossesAt) break;
     if (railInfoAt(0, z).dist < GATE_CORRIDOR_RAIL_STANDOFF) break;
+    if (pointStandsOnABridgeRamp(0, z, GATE_CORRIDOR_RAMP_MARGIN)) break;
     deepest = [0, z] as const;
   }
   gateCorridorDeepestCache = deepest;
