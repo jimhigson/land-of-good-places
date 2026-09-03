@@ -825,9 +825,21 @@ export class IsoCamera {
   }
 }
 
-// Raised with the closer framing: the aim point wants to sit around chest height
-// on the character, and the character's chest went up when her head did.
-const TEMP_LIFT = new Vector3(0, 1.25, 0);
+/**
+ * How far above her feet the follow camera aims, in metres.
+ *
+ * Raised with the closer framing: the aim point wants to sit around chest
+ * height on the character, and the character's chest went up when her head did.
+ *
+ * **Exported because it is the eye's own height reference.** The camera orbits
+ * this point, so anything asking "how high does the eye ride?" — the arrival
+ * shot's clearance under the gate arch, for one — is asking about this number.
+ * `check:arrival-camera` used to carry its own hand-copied 1.1, which was the
+ * *door beat's* lift and 0.15 m too low, and its headroom clause passed only
+ * because of the difference. One owner; everyone else asks.
+ */
+export const CAMERA_FOCUS_LIFT = 1.25;
+const TEMP_LIFT = new Vector3(0, CAMERA_FOCUS_LIFT, 0);
 
 /**
  * Below this many metres from her, the look-around offset is simply zero.

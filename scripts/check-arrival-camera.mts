@@ -68,7 +68,7 @@
  * Run: `pnpm run check:arrival-camera`
  */
 import { Vector3 } from 'three';
-import { IsoCamera } from '../src/core/IsoCamera.ts';
+import { CAMERA_FOCUS_LIFT, IsoCamera } from '../src/core/IsoCamera.ts';
 import { cameraOffset } from '../src/core/cameraRig.ts';
 import {
   CAMERA_DISTANCE,
@@ -399,7 +399,15 @@ console.log('the eye passes under the crossbar and between the piers');
   // at a child's chest, and sits off to one side by `d·cos(pitch)·sin(yaw)`.
   // Both are measured against the arch's own published clearances, so an arch
   // resized by its artist moves these rather than quietly invalidating them.
-  const CHEST = 1.1;
+  //
+  // **The lift is read from `IsoCamera`, not typed here.** The arch pass runs
+  // with `watchesTheDoor === false`, so the shot is orbiting the ordinary
+  // player-follow focus — her feet plus {@link CAMERA_FOCUS_LIFT}. An earlier
+  // version of this clause hand-copied 1.1 from `ARRIVAL_DOOR_FOCUS_LIFT`,
+  // which is the *door beat's* aim height and belongs to a beat that is over
+  // by the time the eye reaches the gateway. It measured the eye 0.15 m low,
+  // and that 0.15 m was the whole of the margin the clause reported.
+  const CHEST = CAMERA_FOCUS_LIFT;
   let worstHeadroom = Infinity;
   let worstSideroom = Infinity;
   let worstAt = 0;
@@ -415,7 +423,22 @@ console.log('the eye passes under the crossbar and between the piers');
       const shot = arrivalShot(t, pass);
       if (shot) riding = Math.min(riding, shot.distance);
     }
-    for (let t = AT_WALKING; t <= AT_SHOT_HOME; t += STEP) {
+    // **And cut at `clear`, which is the last instant this file can say where
+    // the eye *is*.** A headroom is a height measured at a place, and the only
+    // place `ArrivalSequence` hands over is `clear` — by its own definition the
+    // instant the eye is on the gate line, solved off the bezier she walks.
+    // Before it, the eye is outside the gateway coming in, and a band-scoped
+    // sweep is sound because the height only falls. After it the eye is
+    // *leaving*, and how far it has got depends on how fast she is walking,
+    // which this file has no model of — so a height asserted there is a height
+    // at an unknown horizontal position, which is the "assertion reporting
+    // success about something it is not describing" fault in miniature.
+    //
+    // What that costs is real and is not hidden: the eye's climb back out
+    // through the plane of the arch is now **uncovered**, and it is measured
+    // and printed to stderr below rather than asserted. Do not read the number
+    // above as covering it.
+    for (let t = AT_WALKING; t <= pass.clear; t += STEP) {
       const shot = arrivalShot(t, pass);
       if (!shot || shot.distance > riding * RIDING_BAND) continue;
       const eyeUp = CHEST + shot.distance * Math.sin(shot.pitchDegrees * DEG);
