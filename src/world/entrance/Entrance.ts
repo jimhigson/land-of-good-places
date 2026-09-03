@@ -23,7 +23,7 @@ import { terrainHeight } from '../terrain';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld } from '../Collision';
 import type { Player } from '../../entities/Player';
-import { buildPawPrint, CAT_BUS_LENGTH } from './catBus';
+import { buildPawPrint } from './catBus';
 import { buildGateArch } from './gateArch';
 import { ROAD_HALF_WIDTH, ROAD_TILE_METRES, roadMaterial } from './road';
 import {
@@ -35,7 +35,6 @@ import {
   entranceRoadStations,
   type RoadStation,
 } from './roadRoute';
-import { PARK_BOUNDARY, edgeRadiusAt } from '../boundary';
 import { PATH_KERB_OVERHANG } from '../../core/constants';
 import {
   addPathQuilt,
