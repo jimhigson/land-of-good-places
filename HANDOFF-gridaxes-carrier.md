@@ -123,6 +123,44 @@ is asserted on every seed on every run, and announces its coverage to `stderr`.
       `check:coplanar` 0, `typecheck:test` 0 — all read unpiped
 - [x] PR #484 raised. **Not merged** — awaiting review + QA.
 
+## Review round 1 (#484) — changes requested, both edits made
+
+1. **`samePaintedGround`'s docstring denied a real weld.** "Running the same way
+   keeps a crossing from qualifying" is true of **rule 2 only**; rule 1 (shared
+   drawn sample) has no direction clause and welds at any angle. Confirmed by my
+   own measurement, not taken on trust: nine rule-1-only welds across the pool at
+   **17.0-83.6 deg**, worst inflation **0.44 m** (seed 225), tightest headroom
+   **3.64 m** (seed 288, 12.36 m against 16). No verdict turns on it today.
+   Docstring rewritten to state the bound; fixture added pinning the 90-degree
+   case at **14.00 m**, labelled "Pinned, not endorsed".
+   **It cannot be fixed with a collinearity clause** — the seed 225 spur turns
+   37 deg across a seam, so any test that rejects a right angle tears it in two.
+
+2. **The tolerance derivation was overstated.** `OFF_AXIS_FRACTION` bounds one
+   hop's deviation, so two ribbons on the same line can differ by ~17.3 deg; it
+   does not imply 8.63. Comment now says chosen-by-plateau, not derived.
+
+**Two numbers I measured differently from the review, flagged in the PR rather
+than smoothed over:**
+- Plateau top edge is **22 deg**, not 25: the first fabricated piece (seed 5,
+  16.8 m) appears at **23 deg**. 30 deg is where the *seed 24 dogleg* welds.
+- Rule-1 worst inflation **0.44 m / 3.64 m headroom**, against the review's
+  0.70 m / 2.31 m. Mine is over the 16 `PARK_SEED_POOL` seeds; seed 18 is a CI
+  seed **not** in the pool and is not in my cached geometry, which likely
+  explains it.
+
+**Dominance argument (from the review, re-verified on 16 seeds not 5):** old
+measured the chord between a run's first and last sample; this measures the
+diameter of the same set, and union only adds points. `diameter >= chord`, so
+the new measure dominates and cannot swallow a violation. Instrumented both:
+`newMax == oldMax` **exactly on all sixteen seeds**, never less.
+
+Seed 225 **is** a pool seed and passes `vet:seeds --list 225` on this branch
+(PASS, 83 invariants, exit 0).
+
+`check:park-boot` contention filed as a comment on existing **#456**, not a new
+issue: <https://github.com/jimhigson/land-of-good-places/issues/456#issuecomment-5527823672>
+
 ## Note for whoever picks this up
 
 `check:park-boot` failed once at 76.4 ms against its 21.9 ms ceiling while three
