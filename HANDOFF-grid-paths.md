@@ -1991,3 +1991,34 @@ open #474 beneath it. Both were measured only against `origin/main` and against
 this branch; nobody has run `check:park-boot` on `feat/park-warp-solver` alone.
 That single run splits the ownership and is the cheapest next measurement on
 this whole item.
+
+### OWNERSHIP SETTLED: all three red checks belong to #474, not to this branch
+
+The measurement named above, taken. `feat/park-warp-solver` at `1c5a4c5e`, run
+on its own:
+
+| check | `origin/main` | **#474 alone** | `feat/grid-paths` |
+|---|---|---|---|
+| `check:pet-slide` | passes | **fails** | fails |
+| `check:park-boot` | passes | **fails** | fails |
+| `check:arrival-completes` | passes | **fails** | fails |
+
+Every figure on #474 is **byte-identical** to this branch's: work units
+`brief 152, cruiser search 22973, cruiser finish 11, slide search 102803`;
+cruiser `345.4336 m, loop 43d37a7cad49`; arrival `125939 generator steps`,
+`4.0 while looping against 7.7 while rolling`; pet-slide `88% of 8 rasters`.
+
+**So `feat/grid-paths` introduces none of them and inherits all three.** The
+grid rework is not the cause of the changed unit mix — #474's park warp is,
+since the cruiser and slide searches re-roll with the park.
+
+That also confirms the Overseer routed `check:pet-slide` correctly, and puts
+`check:park-boot` and `check:arrival-completes` with the same owner rather than
+with this branch. **This branch cannot go green on `pnpm run check` until #474
+does**, which is worth knowing before anyone treats these as blockers on the
+path work.
+
+The open technical question is unchanged and stays with #474: a fixed-seam
+generator (`coasterProfileSearch`) yields 19 pieces on `main`'s park and 11 on
+#474's, on a loop that is 44 m **longer** — so seams are being skipped, and
+`MIN_UNITS.cruiserFinish` must not be lowered to accommodate it.
