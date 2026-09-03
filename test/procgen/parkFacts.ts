@@ -585,6 +585,30 @@ export interface ParkFacts {
    */
   readonly plannedBridgeSiteDistances: readonly number[];
   /**
+   * **The same proven sites, with the geometry of the rectangle `paths.ts`
+   * reserves round each one** — position, crossing direction, the ramp reach
+   * proven either way, and the corridor half-width the site was proven at.
+   *
+   * {@link plannedBridgeSiteDistances} is derived from this list rather than
+   * gathered separately, so the two cannot come to disagree about which sites
+   * exist.
+   *
+   * Here so an invariant can ask the question `paths.ts` cannot ask for
+   * itself: the reservation is forbidden ground to every foreign leg, drawn
+   * before any bridge exists, and nothing has ever checked that the bridge
+   * eventually built inside it actually fits.
+   */
+  readonly plannedBridgeSites: readonly {
+    readonly railDistance: number;
+    readonly x: number;
+    readonly z: number;
+    readonly dirX: number;
+    readonly dirZ: number;
+    readonly rampReachPos: number;
+    readonly rampReachNeg: number;
+    readonly halfWidth: number;
+  }[];
+  /**
    * One entry per built bridge: how far the paving it lifts hangs past its
    * own masonry. See {@link BridgePavingFact}.
    */
@@ -1092,7 +1116,18 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
 
   const { CROSSING_SITES } = await import('../../src/world/train/crossingPlan.ts');
   const { SITE_SNAP_TOLERANCE } = await import('../../src/world/train/crossings.ts');
-  const plannedBridgeSiteDistances = CROSSING_SITES.map((site) => site.railDistance);
+  const plannedBridgeSites = CROSSING_SITES.map((site) => ({
+    railDistance: site.railDistance,
+    x: site.x,
+    z: site.z,
+    dirX: site.dirX,
+    dirZ: site.dirZ,
+    rampReachPos: site.rampReachPos,
+    rampReachNeg: site.rampReachNeg,
+    halfWidth: site.halfWidth,
+  }));
+  // Derived, never gathered a second time — one owner for "which sites exist".
+  const plannedBridgeSiteDistances = plannedBridgeSites.map((site) => site.railDistance);
 
   const { BOUNDARY_MASONRY_HALF_WIDTH, BOUNDARY_WALL_COLLISION_HALF } = await import(
     '../../src/world/Garden.ts'
@@ -2525,6 +2560,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     lamps: world.lampPosts.positions.map((p) => [p.x, p.z] as const),
     bridgeReservations,
     plannedBridgeSiteDistances,
+    plannedBridgeSites,
     bridgePaving,
     strandedPathEnds,
     crossingSiteSnapTolerance: SITE_SNAP_TOLERANCE,

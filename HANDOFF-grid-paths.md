@@ -1310,3 +1310,136 @@ Still deferred, with reasons: the `tmp-*` probes and debug exports (they are the
 diagnostic kit for every open defect above), and the rebase (this branch is
 stacked on the still-open #474; `origin/main...HEAD` is 92 files because it
 carries the parent's work).
+
+---
+
+## State — 2 Sep, fifth leg: the reservation shrink, MEASURED AND REFUTED AS BRIEFED
+
+Baseline re-measured from scratch on this leg, not inherited: `check:park`
+**10/16 green, 21 stranded** (canonical 0, 5 10, 11 3, 24 2, 225 2, 288 3,
+326 1) — identical to the handover. `test:procgen`: **9 failed | 1384 passed**
+(quote off the screen; the brief said 7).
+
+### The three numbers, and none of them is the same as another
+
+Measured, not reasoned (`scripts/tmp-resfit.mts`, 30 built decks over all
+sixteen pool seeds; reads the walkable deck from `bridgeHeightAt`, which is
+non-null only over a bridge, so unlike a collision sweep it cannot be
+contaminated by the railway fence at the crossing point; control — the same
+sweep 15 m past the ramp's end reports no deck on every site):
+
+| quantity | value | where it comes from |
+|---|---|---|
+| masonry actually **built** | ≤ **2.52** m symmetric, ≤ **3.72** with one curved spine | measured, 30 decks |
+| masonry the constants **permit** | **2.95** = `RIBBON_HALF_WIDTH_CEILING` (2.65) + `BRIDGE_WALL_THICKNESS` (0.3) | `paths.ts`, `bridgeFootprint.ts` |
+| what `paths.ts` **screens** | **4.50 / 5.50** = `site.halfWidth` + `RAMP_SCREEN_MARGIN` | `segmentCutsABridgeRamp` |
+| what the builder is **licensed** to occupy | **~9.95** = 2.95 + `DEVIATION_CAP` (3.0) + `maxLateralShiftFor` (≥ 4.0) | `bridgeSpine.ts`, `bridgeFootprint.ts` |
+
+**The screen is a third number, agreeing with neither the masonry nor the
+licence — and it is NARROWER than the licence, not wider.** So the briefed
+framing ("the reservation is far larger than the masonry") is true of the
+*outcome* and false of the *contract*: a bridge is permitted to put masonry
+almost 10 m off its site axis, on ground the screen leaves open. Correcting
+the screen to cover the licence would *widen* it to 5.95, not shrink it.
+
+`site.halfWidth` is documented as "the corridor half-width this site was
+**proven at**" — a proof of clear room, never a promise about where the
+masonry goes. It has been read as the second thing.
+
+### The shrink, built and measured — DO NOT RE-RUN AS WRITTEN
+
+`segmentCutsABridgeRamp` and `bridgeSiteReserving` screened
+`RIBBON_HALF_WIDTH_CEILING + BRIDGE_WALL_THICKNESS + RAMP_SCREEN_MARGIN`
+(**3.45**) instead of `site.halfWidth + RAMP_SCREEN_MARGIN` (4.50/5.50).
+Nothing else changed. `tsc --noEmit` exit 0. Reverted; restore verified by
+grep (`DIAGNOSTIC-SHRINK` matches: 0, both original lines back).
+
+| seed | baseline | shrunk to 3.45 | |
+|---|---|---|---|
+| canonical | 0 | 0 | green |
+| 5 | 10 | **0** | **now green — the big win** |
+| 11 | 3 | **22** | **+ `poi.nospot: 2`** |
+| 24 | 2 | 2 | |
+| 115 | 0 | 0 | green |
+| 128 | 0 | 0 | green |
+| 131 | 0 | 0 | green |
+| 208 | 0 | 0 | green |
+| 225 | 2 | 2 | |
+| 267 | 0 | 0 | green |
+| 274 | 0 | 0 | green |
+| 288 | 3 | **3** | **did not move at all** |
+| 326 | 1 | 1 | |
+| 346 | 0 | 0 | green |
+| 428 | 0 | 0 | green |
+| 451 | 0 | **5** | **lost green** |
+
+**Green 10 -> 10. Stranded 21 -> 35.**
+
+**The briefed prediction was that this would move 288, 11 and possibly 5
+together. Recorded as wrong: it cures 5 outright, does nothing whatever for
+288, and costs 11 nineteen waypoints and 451 its green.** 288 is therefore
+*not* a reservation-width defect and must be chased as its own thing.
+
+### Why 11 and 451 regress, and it is NOT a masonry breach
+
+`scripts/tmp-poibreaks.mts` on seed 11 under the shrink:
+
+```
+spur-hotel:            chain breaks between (-44.4,23.1) and (-42.2,8.7) gap 14.53 m, midpoint on a bridge ramp: false
+spur-stall.skyCruiser: chain breaks between (-40.0,30.5) and (-37.7,5.8) gap 24.84 m, midpoint on a bridge ramp: false
+total consecutive-sample breaks: 2
+```
+
+**Both breaks are off every ramp**, and `tmp-ribboncomp.mts` reports **one**
+paving component — the drawn network is whole. So the narrow band screened the
+masonry perfectly well; nothing walked into a parapet.
+
+Those two breaks are seed 11's *original* island, at the *original* coordinates:
+`spur-hotel` breaking at ~(-43, 15), which this branch already root-caused as
+**a border fence built from two long parallel private path runs 0.8 m apart**
+(`spur-hotel` on x = -42.2 beside `spur-stall.skyCruiser` on x = -43.0). The
+grid-discipline ladder's last rung — a private line at full length when the
+disciplined walk finds nothing — fired again the moment the reservation stopped
+forbidding the ground that had been pushing it onto a shared line.
+
+**So the wide reservation has been doing shaping work it was never meant to
+do, and seed 11's cure was accidental.** The width is not screening masonry
+there; it is acting as an obstacle that happens to force grid discipline. That
+is why shrinking it to the honest masonry band un-does a fix that was never
+really about masonry.
+
+### What this means for the next leg
+
+Three separate things were being answered by one rectangle, and they want
+three different sizes:
+
+1. **Which ground foreign masonry will stand on** — narrow (3.45 measured
+   sufficient: no ramp-midpoint breaks anywhere under the shrink) but only
+   correct if the builder is bounded to it, which it is not (licence ~9.95).
+2. **Which ground a route may not branch in or run along** — the #414
+   question, unrelated to width.
+3. **An accidental obstacle that forces the discipline ladder onto shared
+   lines** — seed 11 and 451 depend on this and nothing says so.
+
+**The honest programme, in order:** fix (3) properly — the discipline
+ladder must not fall back to a 24-40 m private line beside another route's
+private line, whatever the reservation does — and only then shrink the band,
+which at that point buys seed 5's ten waypoints for nothing. Shrinking first
+trades one seed's ten for another's nineteen.
+
+**Seed 5's 10 -> 0 is the single largest per-seed win still available and it
+is now located**: seed 5's gate handover stands inside a reservation for the
+corridor's whole 24 m, and narrowing the band frees it. If the private-line
+defect is fixed first, this is a clean gain.
+
+### Built this leg and kept
+
+- `scripts/tmp-resfit.mts` — the reservation-occupancy probe above.
+- `scripts/tmp-sweep.sh` — `check:park` across the whole pool, one line a seed.
+- `ParkFacts.plannedBridgeSites` — the proven sites' full geometry (position,
+  crossing direction, ramp reach either way, proven corridor half-width), with
+  `plannedBridgeSiteDistances` now **derived from it** so the two cannot come
+  to disagree about which sites exist. `tsc -p tsconfig.test.json` exit 0.
+  It is there for the stage-2 invariant "no bridge's masonry stands outside
+  the band `paths.ts` screened", which is the mechanism that would have caught
+  this whole class — nothing checks it today, in either direction.
