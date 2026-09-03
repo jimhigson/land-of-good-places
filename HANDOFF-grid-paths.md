@@ -294,6 +294,39 @@ at 94..217, which is where to look first.
 `spur-station-0` sample — just past `MAX_EDGE` (13 m) with something in the
 chord.
 
+**CORRECTION, measured after the above: (a) and (b) are ONE defect, not two.**
+`scripts/tmp-lonely.mts` (its own control) on 288 and 11: every `nbrs=0`
+waypoint is a **doormat** — 1.69, 2.20 and 1.45 m from an anchor entrance —
+whose **nearest drawn paving is 20.43, 25.07 and 24.85 m away**. The control
+rows sit 2.00–8.10 m from paving, so the column discriminates.
+
+Then the tell. On seed 11 `debugRelaxedDoors()` is `[]` — *every door got a
+connector* — while `debugGridReach()` reports `building`, `hotel`, `ballPit`,
+`dodgems`, `waterFight`, `stall.railRacer` as **both `unreachable` and
+`noSearch`**, and `strandedDoorsOfLastSolve()` names five doors that fell to
+the straight-line last resort: `building`, `ballPit`, `stall.railRacer`,
+`exit-railRace`, `exit-ginormousSlide`.
+
+Those are two different questions and only one of them was being asked:
+
+- `relaxedDoors` — *did this door reach the grid?* Yes, all of them.
+- `strandedDoorsOfLastSolve` — *did a route get drawn to it from the paved
+  network?* No, for five.
+
+**A door can have a perfectly good connector to a grid node that is itself in
+a component the ring cannot reach.** So the lone doormats are not a
+starved-door tail at all: they are casualties of the island in (b), and the
+island is the whole defect. `tmp-doors.mts`'s verdicts — the measurement the
+brief was built on — cannot see this, because a door dying this way never
+appears in them. That is why five seeds looked door-clean and were not.
+
+**The defect to fix is therefore: `pathGrid`'s lattice has disconnected
+components, and `routeFromNetwork` answers a failure by drawing a straight
+line instead of backtracking.** A ribbon nobody can walk to is exactly the
+"shrink to a floor and accept a result that still doesn't clear" CLAUDE.md's
+standing procgen rule forbids. The last resort should backtrack — or the
+component should be joined — never draw.
+
 **Seed 288's 1 -> 3 regression is (a) plus (c)**, so it is not a new class:
 the reservation is forbidden ground now, and a spur that used to reach through
 it no longer does. Fixing (a) is likely to fix the regression too — do that
