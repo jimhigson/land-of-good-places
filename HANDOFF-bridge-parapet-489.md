@@ -195,14 +195,36 @@ exit 0 (520 passed), `build` exit 0, `check:coplanar` exit 0. Rebased onto
 `origin/main` at `3799fae1`; script set compared by parsing `package.json` —
 104 → 105 steps, nothing lost, `check` chain byte-identical.
 
+## Review round (3 Sept) — three edits, all pushed
+
+1. **Sink band gated on `buildCopingRun`'s own rule** (`min(parapet) >=
+   COPING_HEIGHT`). Instrumented across the pool: gated **0** strays, control
+   with the gate removed **50 on 12 seeds**, reproducing the reviewer's count.
+   **But the `wallTop` cap is not the modelled coping** — it is drawn for every
+   ring pair unconditionally, so it *is* over those faces, and gating alone
+   reopened seed 225 `bridge-244.0` (a reveal 1.5 mm under the cap, one of the
+   five entries this branch had cleared). Strays sit 16–77 mm below the top and
+   a real fight at 1.5 mm, so where no block is laid the test is a shape one at
+   `COURSE_HEIGHT / 100` = 7 mm, in the middle of that measured gap.
+2. **`revealInGround` comment corrected.** Across sixteen seeds: 2241
+   deletions, 209 above the terrain, 110 over 30 mm, worst **59.9 mm against
+   the 60 mm threshold** — saturated, not 3× clear. The old "2–19 mm" was two
+   bridges of one seed.
+3. **`Ring.outerTop` deleted.**
+
+Non-blocking, all done: body figures → 531/18 and 16 seeds; the invariant
+reports `covered.size` of `groups.size` and names any bridge it judged nothing
+on; `/spawn` deck drift filed as **#497** (and the spawn links below now carry
+an explicit `y` because of it).
+
 ## Still to do
 
 - **Visual QA. Not done — I was not granted the shared Chrome.** Recorded as a
   PR comment rather than skipped quietly. What needs eyes is listed there.
 - Dev server is running on port **5391**, PID **88353**. Kill it *by that PID*.
-  Crown of each canonical-seed bridge:
-  `/spawn?pos=0.0,39.7&facing=180` (bridge-0.0) and
-  `/spawn?pos=-1.9,-28.0&facing=13` (bridge-234.0). Both return 200.
+  Crown of each canonical-seed bridge — **three numbers, not two**, because of
+  #497: `/spawn?pos=-1.0,4.52,40.0&facing=180` and
+  `/spawn?pos=-2.0,4.59,-28.0&facing=180`. Both return 200.
 
 ## The instrument
 
