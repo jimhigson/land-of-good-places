@@ -5,56 +5,119 @@ Branch `fix/gridaxes-carrier`, worktree `.claude/worktrees/gridaxes-carrier`, of
 ## Settling measurement — done, and it refutes the brief's hypothesis
 
 The brief asked: *does the ballPit carrier's curve straighten at the node and split
-the run below 16, while the other's does not?* **No. Neither carrier straightens at
-the node.** Measured on `origin/feat/grid-paths` @ `b8da4593`, seed 225, by dumping
-the per-hop off-axis fraction of every edge touching node `building`:
+the run below 16, while the other's does not?* **No. Neither carrier straightens.**
+Measured on `origin/feat/grid-paths` @ `b8da4593`, seed 225, per-hop:
 
-- `spur-building` (`ring -> building`, 162 samples) arrives at the door along a
-  diagonal at frac ~0.32. Its **last 5 hops** are off-axis:
-  `(38.35, 12.92) -> (40.72, 13.71)`. The hop before them,
-  `(37.86, 12.85) -> (38.35, 12.92)`, measures **frac 0.141** — a hair under the
-  0.15 threshold — so the run is flushed there. `spur-building` therefore reports
-  that lead as two short runs (~1.3 m and ~2.4 m).
-- `connector-building-ballPit` (`building -> ballPit`, 49 samples) starts at
-  `(40.34, 13.58)` — the same door, the same lead — and retraces that ground at
-  frac 0.317…0.325 for its first seven hops, **with no dip at all**, then carries
-  straight on to `(24.16, 3.50)`. One unbroken run: **15.89 m**.
+- `spur-building` arrives at the door along a diagonal at off-axis fraction ~0.32,
+  but the hop `(37.86, 12.85) -> (38.35, 12.92)` measures **0.141** — a hair under
+  the 0.15 threshold — so its run is flushed there. That carrier calls the lead two
+  short approach runs, 1.32 m and 2.50 m.
+- `connector-building-ballPit` starts at `(40.34, 13.58)` — same door, same lead —
+  retraces that ground at 0.317…0.325 with **no dip at all**, and carries on to
+  `(25.85, 7.06)` where the railway exemption takes over. One unbroken run:
+  **15.89 m**.
 
-So the same painted metres at that door are "two short approach runs" to one
-carrier and "the first 3 m of a 15.89 m diagonal" to the other, **in the same
-park**. The reported 16.2 m failure was the same diagonal under an earlier build
-whose carrier (`connector-building-exit-ginormousSlide`) ran 0.3 m further before
-its curve straightened. Pass/fail on this seed is decided by 0.3 m of somebody
-else's continuation.
+Same park, same metres, two verdicts. The reported 16.2 m failure was the same
+diagonal under an earlier build whose carrier ran 0.3 m further.
 
-Same disease, visible on `origin/main` seed 225 (which passes overall) at the
-dodgems door: `spur-dodgems` calls that lead a **3.49 m** run
-(`-50.4, 20.5 -> -53.6, 21.7`) while `connector-dodgems-stall.dodgems` calls the
-same ground a **2.98 m** run (`-53.3, 21.6 -> -50.5, 20.5`).
+Same disease on `origin/main` seed 225 at the dodgems door: `spur-dodgems` calls
+that lead a **3.49 m** run, `connector-dodgems-stall.dodgems` calls the same ground
+a **2.98 m** run.
 
-**Consequence for the brief's closing note:** the 15.89/16.2 m diagonal at seed
-225's building door is a *genuine* sustained diagonal (frac 0.32-0.67 for 32
-consecutive samples). An honest observer-free measurement is more likely to make
-it **consistently red** than to make it evaporate. That is a finding to report,
-not a number to nudge.
+## The fix
 
-## Mechanism, restated
+`test/procgen/gridAxes.ts` — one owner for the measurement. Hop classification is
+untouched (same `OFF_AXIS_FRACTION`, same railway exemption). What changed is the
+*unit*: every edge's off-axis stretches are collected, stretches that are the same
+painted ground are unioned, and each piece is measured by its own spread.
 
-Two halves, both fixed by the same change:
+Same painted ground, asked **of points, never of ends**:
 
-1. Run boundaries are read off *one* carrier's sampling of ground that several
-   carriers paint, and a single sub-threshold hop (0.141) inside a genuine
-   diagonal splits the run. That is the sampling jitter the invariant's own doc
-   comment says the run-merging exists to absorb — it absorbs it in the middle of
-   a run but not at the ends.
-2. A run is cut at the edge's end whatever the ground does next.
+1. the two share a drawn sample (exact equality — a carving seam, or paving that is
+   literally continuous);
+2. some hop of one lies within `min(halfWidth)` of some hop of the other and the
+   two run the same way there.
+
+### Three wrong versions, each caught by measurement
+
+- **Endpoint-based continuation** is itself observer-dependent: cutting a stretch
+  makes new ends in its middle. Merged a 1.84 m and a 9.60 m stretch on the
+  canonical seed *only after* the re-cut; red on 4 of 16 seeds.
+- **No contiguity rule.** A stretch that curves hard (the spur into seed 225's
+  building door turns 37 deg between consecutive hops) has halves no angle
+  tolerance rejoins. Fixed by rule 1.
+- **"Nearest point on the polyline"** reports the direction of whichever segment
+  holds the closest point, and cutting can remove that segment from the piece being
+  asked. Flipped the verdict across a re-cut on seed 451 at 22 deg and seed 208 at
+  40 deg. Fixed by asking hop against hop.
+
+### The tolerance is derived, not fitted
+
+`PARALLEL_COS = cos(asin(OFF_AXIS_FRACTION))` = **8.63 deg** — the same direction
+tolerance this check already owns, which already means "a difference this small is
+curve sampling, not a difference in where the paving goes". Corroborated, not
+chosen: swept over the sixteen-seed pool, **every** tolerance from 2 to 20 deg
+gives the identical answer (nothing over 16 m, longest piece 13.69 m, cut-invariant
+on every seed). At 25 deg the measurement begins fabricating failures; at 30 it
+welds seed 24's junction dogleg into a 21.9 m "diagonal" whose real arms are 12.3 m
+and 5.5 m.
+
+**Cut-invariance now holds at every tolerance swept, 2 deg to 40 deg** — the
+property is structural, not a value that happened to be safe.
+
+## Results
+
+**Sixteen-seed pool, `origin/main` geometry — violation set empty before and
+after.** Longest piece of off-axis paving anywhere in the pool: **13.69 m**
+against a limit of 16. No seed changes verdict; nothing was loosened.
+
+**`feat/grid-paths` seed 225: the failure does NOT evaporate — it stops
+flickering.** Measured on that branch's real park with the new module:
+
+```
+  TOP| 16.29 m (40.7, 13.7) -> (25.9, 7.1) :: connector-building-ballPit+spur-building
+@@GP_OVER16 1
+@@GP_RECUT_IDENTICAL true
+```
+
+The three numbers that branch has seen — 15.89 m (ballPit carrier), 16.2 m
+(ginormousSlide carrier), 2.50 m (spur) — are three views of **one 16.29 m piece of
+painted ground**. That is a genuine legibility defect on `feat/grid-paths`, not a
+measurement artifact, and it is now reported the same way from any carrier.
+`feat/grid-paths` must not claim this PR removed it.
+
+`MAX_DIAGONAL_APPROACH` is untouched at 16.
+
+## Proofs
+
+`test/procgen/gridAxes.test.ts` — five, all on real geometry pasted into the file
+with the seed and commit it was read off:
+
+- **red** on the seed 225 lead: 16.29 m, over the limit, from both carriers;
+- **green, and cut-invariant**: one answer across **257 carvings** of that same
+  paving — every single cut of either ribbon, every piece count to 8, every overlap
+  to 6, and 200 ragged carvings;
+- retraced ground is not double-counted (10 m stays 10 m);
+- ordinary grid paving says nothing;
+- seed 24's junction dogleg is not welded.
+
+Mutation-proved red (each restores clean afterwards):
+
+| mutation | red |
+|---|---|
+| merging disabled | 3 of 5 |
+| continuation without collinearity (pre-rewrite) | dogleg test |
+| overlap rule disabled | 2 of 5 |
+
+`gridAxisVerdictsIgnoreTheCarrier` is registered in `INVARIANTS`, so the property
+is asserted on every seed on every run, and announces its coverage to `stderr`.
 
 ## Status
 
-- [x] worktree + install
-- [x] instrument written, control run (reproduces the shipped check's verdicts
-      exactly: 0 problems on main seed 225, 0 on grid-paths seed 225)
-- [x] settling measurement (above)
-- [ ] fix
-- [ ] both-sided proof
-- [ ] gates
+- [x] settling measurement
+- [x] fix
+- [x] both-sided proof, cut-invariance proved directly
+- [x] tolerance derived + sensitivity swept
+- [x] grid-paths seed 225 verified
+- [ ] gates (`check`, `test:procgen`, `build`) — running
+- [ ] PR
