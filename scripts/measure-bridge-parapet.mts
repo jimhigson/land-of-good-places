@@ -21,15 +21,39 @@
  * `normalize(outer − inner)` in plan. If the sweep drew the wall somewhere
  * other than where the formula says, this probes where it really is.
  *
- * ## The control comes first
+ * ## It carries its own control
  *
- * `--control` probes the same rings at {@link CONTROL_DROP} below the parapet
- * top, which is under the road crown on every bridge in the park and therefore
- * inside coursed wall that is definitely drawn. **It must find zero holes.** An
- * instrument that reports a hole everywhere, or nowhere, is measuring something
- * other than what it claims; two agents on this project have had clean,
- * decisive and entirely wrong answers from a flood fill nobody ran a control
- * on, and only the control caught it.
+ * Every sample is probed **twice**: once inward at the outer face, and once
+ * outward from the roadway at the *inner* face of the same wall at the same
+ * height. The inner probe is the control, and it is the right one because it
+ * fails in exactly the ways a bad instrument would — a ray at the wrong height,
+ * on the wrong ring, aimed along the wrong normal, or below the masonry
+ * altogether misses both faces, not one.
+ *
+ * So a sample only counts against the bridge when the inner face is there and
+ * the outer face is not: proof that there is wall at that height and that you
+ * can still see through it. Samples where neither face answers are reported
+ * separately rather than quietly folded in.
+ *
+ * Rings where the parapet has tapered away entirely are skipped, on the game's
+ * own threshold ({@link PARAPET_GONE_HUMP}, read from `bridges.ts` rather than
+ * restated here). `parapetHeightFor` deletes the wall below that on purpose —
+ * a wing wall at a ramp foot severs the path junction the foot lands in — so
+ * its absence there is correct, and counting it would be a check failing on
+ * geometry that is right.
+ *
+ * `--control` runs the negative control: the same ladder taken {@link ABOVE_TOP}
+ * metres *above* each parapet top, which is open air. It must find no wall on
+ * either face. A "hole finder" that reports holes in the sky is measuring
+ * something other than what it claims, and two agents on this project have had
+ * clean, decisive and entirely wrong answers from a flood fill nobody ran a
+ * control on.
+ *
+ * **The first version of this control was wrong, and saying so is the point.**
+ * It probed a fixed 1.6 m below the parapet top, expecting solid wall, and
+ * reported 35–42% see-through on a bridge that was fine there: at a tapered
+ * ramp foot, 1.6 m below the parapet top is under the masonry entirely. The
+ * control caught the instrument, which is what it is for.
  *
  * ## Usage
  *
@@ -47,6 +71,8 @@ import { Mesh, type Object3D, Raycaster, Vector3 } from 'three';
 import { buildHeadlessPark } from './park-harness.mts';
 import { PARK_SEED } from '../src/world/parkManifest.ts';
 import { PARK_SEED_POOL } from '../src/world/parkSeedPool.ts';
+import { PARAPET_GONE_HUMP } from '../src/world/train/bridges.ts';
+import { terrainHeight } from '../src/world/terrain.ts';
 
 const pool = process.argv.includes('--pool');
 const control = process.argv.includes('--control');
@@ -161,6 +187,11 @@ function measureThisSeed(): { seed: number; bridges: BridgeResult[] } {
 
         const ux = nx / norm;
         const uz = nz / norm;
+        // Is a parapet meant to exist here at all? Below the taper floor the
+        // wall is deliberately gone and the drawn top sits on (or under) the
+        // terrain — measured, every residual sample of #489's fix was one of
+        // these, at hump 0.01 m or less.
+        if (oy - terrainHeight(ox, oz) <= PARAPET_GONE_HUMP) continue;
         // Run down the ladder, tracking the deepest contiguous run of misses so
         // a band is reported as a band rather than as N unrelated samples.
         let runFrom: number | null = null;

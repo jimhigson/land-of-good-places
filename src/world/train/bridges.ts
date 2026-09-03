@@ -199,6 +199,19 @@ export const PARAPET_HEIGHT = 0.72;
  */
 const PARAPET_MIN_HUMP = BUILDING_STEP_UP;
 
+/**
+ * The hump height at which the parapet has tapered away to **nothing at all**
+ * — the bottom of {@link parapetHeightFor}'s taper window.
+ *
+ * Named rather than left as a literal inside that function because anything
+ * asking "is a parapet supposed to be standing here?" has to ask the same
+ * question the geometry answers, and there is exactly one right answer. The
+ * see-through probe (`scripts/measure-bridge-parapet.mts`) and #489's invariant
+ * both ask: below this the wall is deliberately absent, and counting its
+ * absence as a hole would be a check failing on correct geometry.
+ */
+export const PARAPET_GONE_HUMP = 0.25;
+
 /** How the visible parapet fades out as the hump shrinks toward the taper
  * threshold — full height at {@link PARAPET_MIN_HUMP} (where its collision
  * wall also starts existing), gone by ankle height. One owner for the
@@ -207,7 +220,7 @@ const PARAPET_MIN_HUMP = BUILDING_STEP_UP;
 function parapetHeightFor(humpHeight: number): number {
   // Taper to nothing at the feet, where the hump is barely above the ground
   // and a wall would sever the path junctions the ramps land in.
-  const t = (humpHeight - 0.25) / (PARAPET_MIN_HUMP - 0.25);
+  const t = (humpHeight - PARAPET_GONE_HUMP) / (PARAPET_MIN_HUMP - PARAPET_GONE_HUMP);
   const taper = t < 0 ? 0 : t > 1 ? 1 : t;
   // …and grow with how high the hump stands, so the parapet's own top line
   // arcs *above* the road's profile instead of running parallel to it.
@@ -706,7 +719,6 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
     lengthPos,
     roadHalf,
     halfAcross,
-    crownY,
     surfaceProfile,
     soffitAt,
     springY,
@@ -939,7 +951,6 @@ function buildShellGeometry(
   lengthPos: number,
   roadHalf: number,
   halfAcross: number,
-  crownY: number,
   surfaceProfile: (x: number, z: number, along: number) => number,
   soffitAt: (alongAbs: number) => number,
   springY: number,
@@ -1032,9 +1043,35 @@ function buildShellGeometry(
   //
   // So the face is stepped into courses at **fixed world heights** — every
   // course is genuinely level, right along the bridge and across both flanks,
-  // the way a real coursed wall is. Levels are anchored on the crown so the top
-  // course lands square under the coping rather than wherever the arithmetic
-  // finished.
+  // the way a real coursed wall is. Levels are anchored on the **top of the
+  // parapet** so the top course lands square under the coping rather than
+  // wherever the arithmetic finished.
+  //
+  // **Anchored on `highestTop`, the drawn wall top — never on `crownY`, the
+  // road's own crown.** That was issue #489: Jim, 2026-09-03, *"bridges have a
+  // hole in them and their near side, above the arch where some of the wall is
+  // missing"*. The ladder started at `crownY`, so no course level ever existed
+  // above it, and `buildCourses` below clamps every column into the levels it
+  // is given — which put the top of the drawn outer face at the road crown
+  // while the wall it was meant to be facing carried on up to
+  // `parapetTopFor(...)`, i.e. `PARAPET_HEIGHT + PARAPET_CROWN_LIFT` = 1.17 m
+  // higher. That band had no outer face at all. The inner face and the
+  // `wallTop` cap were drawn full height and are single-sided, so the game
+  // camera looked straight through the missing face to the grass beyond.
+  //
+  // It read as an *arch* bug — and the issue reasonably guessed at one — purely
+  // because the band is widest where the parapet stands highest, which is the
+  // crown, which is directly over the arch. Measured on the built park it was
+  // every bridge on all sixteen pool seeds, a 1.05 m contiguous see-through
+  // band on all 23 of them, independent of span: the giveaway that the arch had
+  // nothing to do with it, since spans vary and the band did not.
+  // `pnpm run measure:bridge-parapet` is that measurement, and
+  // `everyBridgeParapetHasAnOuterFace` in `test/procgen/invariants.ts` is what
+  // stops it coming back.
+  //
+  // The collider was never wrong here: `guardRails` takes its `topHeight` from
+  // `parapetTopFor` too, so the masonry stayed solid throughout — she could see
+  // through the bridge but never walk through it.
   //
   // Alternate courses are recessed `COURSE_RECESS` inward. Inward, never
   // outward: `halfAcross` is the width the footprint search actually cleared
@@ -1063,8 +1100,8 @@ function buildShellGeometry(
   }
   lowestBottom = Math.min(lowestBottom, soffitAt(0) - 0.5);
   const courseLevels: number[] = [];
-  for (let y = crownY; y > lowestBottom - COURSE_HEIGHT; y -= COURSE_HEIGHT) {
-    if (y <= highestTop + COURSE_HEIGHT) courseLevels.push(y);
+  for (let y = highestTop; y > lowestBottom - COURSE_HEIGHT; y -= COURSE_HEIGHT) {
+    courseLevels.push(y);
   }
   if (courseLevels.length < 2) courseLevels.push(lowestBottom);
   const courseCount = courseLevels.length - 1;
