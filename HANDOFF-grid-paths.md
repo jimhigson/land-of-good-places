@@ -2841,3 +2841,62 @@ recovered.
 
 That is a different trade from the two refuted attempts, which paid **two net
 greens** for three and five invariants respectively. This pays **none**.
+
+### BUT `test:procgen` REFUTES IT AS BUILT — the elbow's tail is a private line
+
+`check:park` was the wrong place to look for this change's cost, exactly as it
+was for the refusal attempt.
+
+```
+baseline (df7ecac4)   11 failed | 1398 passed
+after the masonry leg  9 failed | 1400 passed
+after reorder + cap    7 failed | 1402 passed
+```
+
+The headline improves and **the composition is worse in kind**.
+`pathsRunOnGridAxes` is gone on all five and seed 128's climbable-tree failure
+with it — but `streetsShareLatticeLines` goes from **2 seeds (5, 11) to 6
+(5, 11, 115, 128, 131, 451)**:
+
+```
+115  spur-waterFight        runs north-south 29.8 m on x = 49.32,  1.91 m off the lattice
+5    spur-stall.keychain    runs east-west   22.5 m on z = 12.16,  2.90 m off
+131  spur-building          runs east-west   18.0 m on z = -15.28, 0.93 m off
+451  spur-ballPit           runs east-west   16.9 m on z = -41.48, 1.27 m off
+128  spur-building          runs east-west   14.5 m on z = 8.44,   2.84 m off
+...
+```
+
+**The cause is structural and predictable from the shape itself.**
+`elbowViaColumn` is `node -> (nx, lead[1]) -> lead`: its first leg is on the
+node's own lattice column, and its second runs along **`z = lead[1]` — the
+door's own private row**. `elbowViaRow` is the mirror. So relaxing the total
+length cap by `sqrt(2)` did not only buy axis-alignment, it bought **longer
+private-line runs**, which is the very defect the grid-discipline work
+retired from `relayPolyline` and is Jim's complaint #3 in its purest form. A
+29.8 m private arterial is a worse offence against "reads as a grid" than a
+16 m diagonal doorway approach.
+
+**A net count of failures is not a measure of whether the park reads as a
+grid.** 9 -> 7 looked like progress and is not, and it is the same one-sided
+reading that made me report the reorder wrongly. Recording it.
+
+### The refinement this points at, and it restores a documented intent
+
+`STUB_TAIL_LIMIT`'s own doc comment already says what the bound should be:
+
+> *"A stub elbowed via the node's own street line keeps one leg exactly on the
+> lattice; the other (**the tail, along the destination's own x or z**) must
+> stay shorter than the new lattice invariant's own straight-run threshold, or
+> the stub itself would read as a rogue street line."*
+
+That is precisely the leg now running 29.8 m. The existing guard is
+`tail = Math.min(|p.x - nx|, |p.z - nz|)` at the **node**, which is the minimum
+over both axes and so says nothing about which elbow is taken. Bounding **each
+elbow's own private leg** to `STUB_TAIL_LIMIT` is the constant doing the job
+it is documented to do.
+
+On seed 131 it also picks the right elbow rather than either: node
+`(33.7,-6.7)`, lead `(37.3,8.4)`, so `leadDx = 3.6` and `leadDz = 15.1` —
+`elbowViaColumn`'s private tail is 3.6 (allowed), `elbowViaRow`'s is 15.1
+(refused). The good elbow survives and the rogue one does not.
