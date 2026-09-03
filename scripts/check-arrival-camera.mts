@@ -137,6 +137,8 @@ function near(value: number, want: number, tolerance: number, what: string): voi
 const BEARING_SWING_FLOOR = 60;
 /** How far the eye must actually travel through the world, in metres. */
 const EYE_TRAVEL_FLOOR = 40;
+/** Under this stand-back the eye is inside the gateway — see clause 7. */
+const NEAR_THE_ARCH = 8;
 
 const STEP = 1 / 60;
 
@@ -385,13 +387,15 @@ console.log('the eye passes under the crossbar and between the piers');
   let worstSideroom = Infinity;
   let worstAt = 0;
   for (const pass of PASSES) {
-    // Only while the eye is actually in the gateway. Outside that window the
-    // camera is nowhere near the arch and its clearance means nothing — the
-    // first version of this clause swept past it and reported a "headroom" of
-    // -9.62 m measured on a camera 45 m away and climbing.
-    for (let t = pass.under; t <= pass.clear; t += STEP) {
+    // **Scoped by the stand-back itself, not by a time window.** The eye is
+    // only anywhere near the arch while it is riding close, so "close" is the
+    // honest definition of "in the gateway" — and it stays honest if the dive
+    // is retimed, which it has been twice. An earlier version swept a fixed
+    // window and reported a "headroom" of -9.62 m measured on a camera 45 m
+    // away and climbing.
+    for (let t = AT_WALKING; t <= AT_SHOT_HOME; t += STEP) {
       const shot = arrivalShot(t, pass);
-      if (!shot) continue;
+      if (!shot || shot.distance > NEAR_THE_ARCH) continue;
       const eyeUp = CHEST + shot.distance * Math.sin(shot.pitchDegrees * DEG);
       const eyeAside = Math.abs(
         shot.distance * Math.cos(shot.pitchDegrees * DEG) * Math.sin(shot.yawDegrees * DEG),
@@ -420,17 +424,31 @@ console.log('the eye passes under the crossbar and between the piers');
     `the eye must pass BETWEEN the piers — worst sideroom ${show(worstSideroom)} m ` +
       `inside a ${GATE_ARCH_CLEAR_WIDTH.toFixed(2)} m opening`,
   );
-  // And it must genuinely be close: a "pass through the arch" that happens at
-  // the rig's 90 m stand-back is a camera watching from the far side of the
-  // park, which is the note this whole round came from.
+  // And it must genuinely be close, *while the arch is overhead*: a "pass
+  // through the arch" that happens at the rig's 90 m stand-back is a camera
+  // watching from the far side of the park, which is the note this whole round
+  // came from. Measured as the closest the shot ever rides, plus an assertion
+  // that it rides that close somewhere inside the gateway.
   let closest = Infinity;
+  let closestAt = 0;
+  let inTheGateway = false;
   for (const pass of PASSES) {
-    const shot = arrivalShot(pass.under, pass);
-    if (shot) closest = Math.min(closest, shot.distance);
+    for (let t = AT_WALKING; t <= AT_SHOT_HOME; t += STEP) {
+      const shot = arrivalShot(t, pass);
+      if (!shot || shot.distance >= closest) continue;
+      closest = shot.distance;
+      closestAt = t;
+      inTheGateway = t >= pass.under && t <= pass.clear + ARRIVAL_RISE_TAIL;
+    }
   }
+  check(
+    inTheGateway,
+    `the closest the camera rides must be while the arch is overhead — it was at ` +
+      `t=${closestAt.toFixed(2)}s, outside the gateway window`,
+  );
   console.log(`  closest stand-back at the pass: ${show(closest)} m`);
   check(
-    closest < 8,
+    closest < NEAR_THE_ARCH,
     `the camera must actually go under the arch with her — closest stand-back ${show(closest)} m`,
   );
 }

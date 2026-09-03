@@ -516,6 +516,29 @@ const ARRIVAL_ARCH_TRAIL_Z =
   Math.cos(CAMERA_YAW_DEGREES * DEG);
 
 /**
+ * How long the eye takes to dive from the door shot's stand-back to the
+ * arch's, in seconds — see the note at its use.
+ *
+ * Derived from her own walking pace and the camera's own lag — a quarter of
+ * the time she takes to walk the distance the eye trails her by — so a slower
+ * walk or a shorter lag stretch or shorten it on their own rather than needing
+ * a second number nudged to match.
+ *
+ * **Short on purpose, and the quarter is the measurement.** There is a band of
+ * stand-backs, roughly 14 m down to 6 m, in which the near plane lies along the
+ * length of the parked bus and saws it open down the left of frame. Photographed
+ * at 20.7 m (clean, the bus wholly in front of the lens), at 10.5 m (a wedge of
+ * cut-open bus) and at 5.6 m (clean again, the bus gone from the frame
+ * entirely). The band cannot be avoided — the eye has to end up between the bus
+ * and the park — so it is crossed quickly instead: `smoothstep` is at its
+ * fastest in the middle of its own range, which is exactly where the band sits,
+ * and at a quarter of the lag the whole crossing is a few frames at the extreme
+ * edge of a frame whose subject is centred.
+ */
+const ARRIVAL_DIVE_SECONDS = ARRIVAL_ARCH_TRAIL_Z / (4 * NPC_WALK_SPEED);
+
+
+/**
  * **How long the rise keeps going after she has the controls**, in seconds.
  *
  * The pitch is the one part of the shot that is deliberately still moving at
@@ -681,10 +704,32 @@ export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | 
   // she walks up to the gateway, holds there while the eye passes through, and
   // then opens back out to the rig's 90 m on the way up. On `ride`, so it is
   // one continuous move with the framing rather than a second one beside it.
+  //
+  // **Late and quick, and that is not a taste call.** The eye has to travel
+  // from the door shot's vantage — deep in the park, with the bus in front of
+  // it — to a few metres behind her, which puts the bus *behind* it. So the
+  // bus must cross the near plane, and an orthographic near plane crossing an
+  // 18 m vehicle slowly, at a shallow angle, saws it open: the first version
+  // dived from the moment she started walking and the bus sat sliced through
+  // the corner of frame for the better part of a second, showing its own
+  // hollow interior. Photographed, and it reads as a rendering fault rather
+  // than as a move.
+  //
+  // Diving over only the last {@link ARRIVAL_DIVE_SECONDS} means the crossing
+  // happens once she is well clear of the bus, when it is off the edge of a
+  // frame that is by then close on her — so the cut lands on nothing anybody
+  // is looking at.
+  // Timed to end at `clear` rather than at `under`: the crossing has to happen
+  // once she is far enough past the bus that it has left the frame, and at
+  // `under` it has not. Half a second earlier there is a wedge of sawn-open bus
+  // down the left edge — photographed twice while getting this right.
+  const dive = smoothstep(clear - ARRIVAL_DIVE_SECONDS, clear, elapsed);
   const distance =
     elapsed < AT_WALKING
       ? lerp(CAMERA_DISTANCE, ARRIVAL_DOOR_DISTANCE, swing)
-      : lerp(CAMERA_DISTANCE, ARRIVAL_ARCH_DISTANCE, ride);
+      : elapsed < clear
+        ? lerp(ARRIVAL_DOOR_DISTANCE, ARRIVAL_ARCH_DISTANCE, dive)
+        : lerp(CAMERA_DISTANCE, ARRIVAL_ARCH_DISTANCE, ride);
 
   return {
     // Turned the short way round — `angleDelta` owns that question everywhere
