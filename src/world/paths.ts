@@ -2335,6 +2335,7 @@ function relayPolyline(
   a: readonly [number, number],
   b: readonly [number, number],
   legClear: (ax: number, az: number, bx: number, bz: number) => boolean,
+  disciplined = true,
 ): (readonly [number, number])[] | null {
   const pad = 2;
   const iLo = Math.round((Math.min(a[0], b[0]) - PLAZA.x) / STREET_PITCH) - pad;
@@ -2425,8 +2426,9 @@ function relayPolyline(
       const x = xs[i] as number;
       const z = zs[j] as number;
       const onGridDiscipline =
-        privateReach(x, PLAZA.x, (p) => p[0], x, z) <= STREET_PITCH &&
-        privateReach(z, PLAZA.z, (p) => p[1], x, z) <= STREET_PITCH;
+        !disciplined ||
+        (privateReach(x, PLAZA.x, (p) => p[0], x, z) <= STREET_PITCH &&
+          privateReach(z, PLAZA.z, (p) => p[1], x, z) <= STREET_PITCH);
       usable[at(i, j)] =
         onGridDiscipline && !pointStandsOnBridgeMasonry(x, z) && legClear(x, z, x, z) ? 1 : 0;
     }
@@ -3815,26 +3817,44 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
               : ''),
         );
       }
-      for (const margin of [STREET_PLOT_CLEARANCE, 2.2]) {
-        for (const head of heads) {
-          const toHead = gridSearch(
-            [...pavedGridNodes].map((node) => ({ node, cost: 0 })),
-            (node) => (node === head ? 0 : Infinity),
-          );
-          if (!toHead) continue;
-          const walk = relayPolyline(
-            [grid.xs[head] as number, grid.zs[head] as number],
-            door,
-            (ax, az, bx, bz) =>
-              streetSegmentClear(ax, az, bx, bz, door, 7, 2.0, margin) &&
-              segmentClearOfRing(ax, az, bx, bz) &&
-              segmentHoldsRailSide(ax, az, bx, bz, doorSide, 0) &&
-              !segmentCutsABridgeRamp(ax, az, bx, bz),
-          );
-          if (!walk) continue;
-          path = toHead;
-          routed = [...gridPathPoints(toHead), ...walk.slice(1)];
-          break;
+      // **Grid discipline first, its own private line only as the backtrack.**
+      // `relayPolyline` may walk an endpoint's own row or column, and left
+      // unbounded that is how seed 11 got two 39.7 m and 24 m arterials on
+      // private lines 0.8 m apart — see that function's own note. Bounding it
+      // to one `STREET_PITCH` from the owning endpoint fixes seed 11 (22 -> 4
+      // stranded) and, applied unconditionally, starves the doors that
+      // genuinely need a longer step out: canonical 4 -> 7, seeds 267 and 428
+      // each 0 -> 2, two green seeds lost. Measured, both ways.
+      //
+      // So it is a ladder, the same shape the bridge feet walk above: every
+      // bridgehead and margin under discipline, and only if the whole of that
+      // finds nothing does the private line get its full length back. A long
+      // private run is still far better than the straight-line last resort
+      // below, which draws a ribbon nobody can walk to.
+      for (const withDiscipline of [true, false]) {
+        for (const margin of [STREET_PLOT_CLEARANCE, 2.2]) {
+          for (const head of heads) {
+            const toHead = gridSearch(
+              [...pavedGridNodes].map((node) => ({ node, cost: 0 })),
+              (node) => (node === head ? 0 : Infinity),
+            );
+            if (!toHead) continue;
+            const walk = relayPolyline(
+              [grid.xs[head] as number, grid.zs[head] as number],
+              door,
+              (ax, az, bx, bz) =>
+                streetSegmentClear(ax, az, bx, bz, door, 7, 2.0, margin) &&
+                segmentClearOfRing(ax, az, bx, bz) &&
+                segmentHoldsRailSide(ax, az, bx, bz, doorSide, 0) &&
+                !segmentCutsABridgeRamp(ax, az, bx, bz),
+              withDiscipline,
+            );
+            if (!walk) continue;
+            path = toHead;
+            routed = [...gridPathPoints(toHead), ...walk.slice(1)];
+            break;
+          }
+          if (routed) break;
         }
         if (routed) break;
       }
