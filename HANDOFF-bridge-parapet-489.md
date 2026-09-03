@@ -8,6 +8,59 @@ Branch `fix/bridge-parapet-489`, worktree
 **Root cause confirmed by measurement on all 17 pool seeds / 23 bridges.**
 Fix not yet written.
 
+## FOR THE OVERSEER AND THE ARTIST — the reported "second fault" is not one
+
+The Artist reports that after the one-liner, **0.16–0.18 m of daylight survives
+at 1.10–1.28 m over the road, at along ≈ ±6 m**, on seed 3's `bridge-4.0` and
+seed 5's `bridge-56.0`, and calls it a second independent fault. **Measured, it
+is its instrument reading the sky above an intact coping.** #489 does close on
+the anchor fix.
+
+The one number that settles it: **the tallest parapet on any bridge in this
+game is 1.170 m**, and only at the crown. That is
+`PARAPET_HEIGHT + PARAPET_CROWN_LIFT` = 0.72 + 0.45, and it is capped there by
+construction. Confirmed on all three of the Artist's own seeds:
+
+| seed | bridge | tallest parapet anywhere on it |
+|---|---|---|
+| 1 | bridge-72.0 | 1.170 m |
+| 3 | bridge-4.0 | 1.170 m |
+| 5 | bridge-56.0 | 1.170 m |
+
+A band at **1.28 m** over the road is therefore above the wall on every bridge
+in the park, at every ring, including the crown. And the reported spot is *not*
+the crown: at along ≈ ±6 m the parapet is shorter still, because
+`parapetHeightFor` arcs it with the hump. Seed 5's `bridge-56.0`, mid-ramp,
+read off the drawn `wallTop` mesh with a downward cast for the coping's real
+top:
+
+| ring | road | wall top | parapet | coping top | road + 1.10 | road + 1.28 |
+|---|---|---|---|---|---|---|
+| 17 | 3.578 | 4.683 | **1.105 m** | 4.788 | 4.678 | 4.858 |
+| 34 | 2.859 | 3.865 | **1.006 m** | 3.970 | 3.959 | 4.139 |
+
+At ring 34 the coping's top is 3.970 and the probed band runs to 4.139 — it
+overshoots the stone by **0.169 m**, which is the Artist's own 0.16–0.18 m
+figure, arrived at as an overshoot rather than a hole.
+
+That is exactly the failure its instrument's history already records ("it
+bounded the ladder by *the ray stopped hitting anything*, which in a hole means
+sky"), relocated rather than removed: the ladder no longer runs off the top of a
+*holed* wall, it runs off the top of an *intact but shorter* one on the ramp.
+It also explains the two properties the Artist found puzzling — span-independent,
+and byte-identical under a different ladder anchoring — because it is not
+geometry at all.
+
+Checked the other way too. My probe takes the parapet top per ring from the
+drawn mesh and refuses to judge any sample its inner-face control cannot find
+wall at, so it cannot run off the top. On the Artist's own two seeds, after the
+fix: seed 1 `bridge-72.0` **0 / 3041**, seed 3 `bridge-4.0` **0 / 2407**, both
+with a clean negative control (0 walled of 936 and 738 samples in open air).
+
+Where the Artist is right, and it matters: the kit contains no wall piece, the
+fault is `buildShellGeometry`'s course ladder, and collision is correct. All
+three agree with what I measured independently.
+
 ## FOR THE OVERSEER — the ownership call, settled
 
 **This is mine (Engineer), not the Artist's. The authored stone kit is not
