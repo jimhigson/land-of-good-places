@@ -203,12 +203,12 @@ export function buildPaths(): Mesh[] {
     const curve = routeCurve(route);
     const divisions = Math.max(24, Math.round(curve.getLength() / 0.8));
     addRibbon(surface, curve, route.width, divisions, PATH_SURFACE_LIFT);
-    addRibbon(kerb, curve, route.width + PATH_KERB_OVERHANG * 2, divisions, PATH_KERB_LIFT);
+    addRibbonKerb(kerb, curve, route.width, PATH_KERB_OVERHANG, divisions, PATH_KERB_LIFT);
     recordSamples(curve, divisions, route.width / 2);
   }
 
   addDisc(surface, PLAZA.x, PLAZA.z, PLAZA.radius, 48, 5, PATH_SURFACE_LIFT);
-  addDisc(kerb, PLAZA.x, PLAZA.z, PLAZA.radius + PATH_KERB_OVERHANG * 2, 48, 5, PATH_KERB_LIFT);
+  addAnnulusKerb(kerb, PLAZA.x, PLAZA.z, PLAZA.radius, PLAZA.radius + PATH_KERB_OVERHANG * 2, 48, PATH_KERB_LIFT);
 
   const surfaceMaterial = new MeshStandardMaterial({
     map: pathTexture(1),
@@ -330,6 +330,115 @@ function recordSamples(curve: CatmullRomCurve3, divisions: number, halfWidth: nu
 }
 
 /** Sweeps a flat ribbon of `width` along the curve, draped onto the terrain. */
+/**
+ * **The kerb, as the two bands you can actually see.**
+ *
+ * `ART_DIRECTION.md` §7: delete the hidden face, never hold two surfaces apart
+ * with an offset. The kerb used to be a full-width ribbon laid `PATH_KERB_LIFT`
+ * (0.03 m) under a `PATH_SURFACE_LIFT` (0.055 m) surface ribbon that is only
+ * `PATH_KERB_OVERHANG` narrower each side — so every square metre of it except
+ * two 0.425 m bands was **buried under the path**, sharing a plane with it, held
+ * apart by 25 mm that somebody has to maintain. `check:coplanar` scored the pair
+ * at **3.99 m² of shared plane**, the largest garden seam in its whole baseline.
+ *
+ * Only the bands are drawn now. Nothing changes on screen: the deleted middle
+ * was never visible from any camera, being flat under an opaque surface at the
+ * same drape. What changes is that there is no longer a stand-off to maintain,
+ * and the seam leaves the ratchet rather than sitting in it forever.
+ *
+ * Found by #481, which does not touch paths: moving pool seed 288's railway
+ * moved its bridges, `drapePathsOverBridges` lifted different stretches, and the
+ * same two ribbons came to share a plane at five facings instead of one. The
+ * ratchet reported it as worse. It was not worse — it was the same buried face
+ * seen from more angles, which is what a buried face does when the park moves.
+ */
+function addRibbonKerb(
+  builder: GeometryBuilder,
+  curve: CatmullRomCurve3,
+  width: number,
+  overhang: number,
+  divisions: number,
+  lift: number,
+): void {
+  // Inner edge exactly where the surface's own edge falls: both ribbons walk
+  // the same curve at the same `divisions`, so the two edges share their
+  // stations and there is no hairline between them to fill.
+  addRibbonBand(builder, curve, width / 2, width / 2 + overhang, divisions, lift);
+  addRibbonBand(builder, curve, -width / 2 - overhang, -width / 2, divisions, lift);
+}
+
+/** One band of a ribbon, between two signed offsets from its centre line. */
+function addRibbonBand(
+  builder: GeometryBuilder,
+  curve: CatmullRomCurve3,
+  fromOffset: number,
+  toOffset: number,
+  divisions: number,
+  lift: number,
+): void {
+  const point = new Vector3();
+  const tangent = new Vector3();
+  let travelled = 0;
+  let previousX = 0;
+  let previousZ = 0;
+
+  for (let i = 0; i <= divisions; i += 1) {
+    const t = i / divisions;
+    curve.getPoint(t, point);
+    curve.getTangent(t, tangent);
+    const nx = -tangent.z;
+    const nz = tangent.x;
+    const length = Math.hypot(nx, nz) || 1;
+
+    if (i > 0) travelled += Math.hypot(point.x - previousX, point.z - previousZ);
+    previousX = point.x;
+    previousZ = point.z;
+
+    const ax = point.x + (nx / length) * fromOffset;
+    const az = point.z + (nz / length) * fromOffset;
+    const bx = point.x + (nx / length) * toOffset;
+    const bz = point.z + (nz / length) * toOffset;
+
+    // Same winding rule as `addRibbon`: the lower offset first, so the quads
+    // wind anticlockwise seen from above and the band faces the sky.
+    const v = travelled / Math.max(1, toOffset - fromOffset);
+    builder.vertex(ax, terrainHeight(ax, az) + lift, az, 0, v);
+    builder.vertex(bx, terrainHeight(bx, bz) + lift, bz, 1, v);
+
+    if (i > 0) {
+      const base = builder.vertexCount - 4;
+      builder.quad(base, base + 1, base + 2, base + 3);
+    }
+  }
+}
+
+/** The plaza's kerb: the same idea round a disc, so its middle is not buried. */
+function addAnnulusKerb(
+  builder: GeometryBuilder,
+  cx: number,
+  cz: number,
+  innerRadius: number,
+  outerRadius: number,
+  segments: number,
+  lift: number,
+): void {
+  const first = builder.vertexCount;
+  for (let r = 0; r <= 1; r += 1) {
+    const radiusAt = r === 0 ? innerRadius : outerRadius;
+    for (let s = 0; s <= segments; s += 1) {
+      const angle = (s / segments) * Math.PI * 2;
+      const x = cx + Math.cos(angle) * radiusAt;
+      const z = cz + Math.sin(angle) * radiusAt;
+      builder.vertex(x, terrainHeight(x, z) + lift, z, x / 6, z / 6);
+    }
+  }
+  const stride = segments + 1;
+  for (let s = 0; s < segments; s += 1) {
+    const a = first + s;
+    builder.quad(a, a + 1, a + stride, a + stride + 1);
+  }
+}
+
 function addRibbon(
   builder: GeometryBuilder,
   curve: CatmullRomCurve3,
