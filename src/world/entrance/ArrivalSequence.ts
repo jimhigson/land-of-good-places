@@ -317,6 +317,23 @@ const ARRIVAL_DOOR_FOCUS_LIFT = 1.1;
  *
  * A bus of another length or a gate moved round the boundary both move this on
  * their own: it is two layout constants and no third number.
+ *
+ * **But it is derived from the wrong owner, and only the current geometry
+ * hides it.** "Square-on to the bus's door" is a fact about **the bus's own
+ * facing** — it is the perpendicular to {@link BUS_FACING}, on the gate side.
+ * What is written above is the *gate-to-stop line*, which is the same answer
+ * only because the bus happens to stand at right angles to it (`BUS_FACING`
+ * −90°, the stop due +z of the gate). Turn the bus without moving the stop and
+ * this does not follow: at a bus yaw of −102° the two part company by exactly
+ * that 12°, and the shot would sit 11.3° wrong against the side of the bus it
+ * is supposed to be facing. Two definitions of one thing, agreeing by
+ * coincidence — this file's own history, one more time.
+ *
+ * It is left as it stands **only** because the branch that turns the bus (the
+ * curved road) is not landable yet, and changing this before that lands would
+ * be tuning against geometry nobody has. The fix is one line — take the
+ * perpendicular to `BUS_FACING` — and it makes the road's curve irrelevant
+ * here, so do it in the merge rather than after it.
  */
 const SQUARE_ON_TO_THE_DOOR_DEGREES =
   Math.atan2(
@@ -340,12 +357,35 @@ const SQUARE_ON_TO_THE_DOOR_DEGREES =
  * that moves it, because in this projection nothing about distance moves
  * anything.
  *
- * Turned this far down the kerb, the arch is 3 m off the sightline instead of
- * on it, so it stands at the edge of frame as the thing she is about to walk
- * under. It also gives the doorway some depth — dead square-on to an
- * orthographic bus is a flat elevation drawing — and shortens the arc the
- * camera has to travel on the way home, so the swing under the arch stays a
- * move rather than a spin.
+ * Turned this far down the kerb the arch stands at the edge of frame, as the
+ * thing she is about to walk under rather than a thing across her. It also
+ * gives the doorway some depth — dead square-on to an orthographic bus is a
+ * flat elevation drawing — and shortens the arc the camera has to travel on
+ * the way home, so the swing under the arch stays a move rather than a spin.
+ *
+ * **The quantity this is really setting**, and the one to re-measure if the
+ * bus stop ever moves, is the screen-horizontal separation between the drop
+ * point the shot orbits and the arch's *nearer pier*:
+ *
+ * ```
+ * separation = D · sin θ − ENTRANCE_GATE_HALF_WIDTH · cos θ
+ *              where D = distance from the drop to the gate line
+ * ```
+ *
+ * Measured today: D = 7.70 m, θ = 60° → **4.52 m**. The working band is
+ * roughly **2 m** at the bottom — a child is `CHILD_FOOTPRINT` 1.53 m across,
+ * and below that the pier is drawn on top of her, which at θ = 25° it is
+ * (−0.64 m: the pier is past her) — and the frame's own half-width at the top,
+ * **7.17 m** on a 16:10 screen at {@link ARRIVAL_DOOR_ZOOM}, beyond which the
+ * arch leaves the frame entirely and stops framing anything. On a 390×844
+ * phone that ceiling is only **3.29 m**, so the arch is already at the very
+ * edge there.
+ *
+ * **`D` is not a constant — it is wherever the bus put its door**, so a stop
+ * that moves nearer the wall shrinks the whole band. At D = 4.5 m the
+ * separation cannot exceed 4.5 m at any θ, and 60° would give 1.75 m, which is
+ * under the floor. That is not a number to nudge; it is a sign the shot needs
+ * its focus moved out along the bus rather than its bearing turned further.
  */
 const ARRIVAL_DOOR_THREE_QUARTER_DEGREES = 60;
 
