@@ -408,6 +408,27 @@ export function entranceRoadBrow(): number {
 }
 
 /**
+ * **Where the bus comes on from, and where it is disposed** — the brow, both
+ * ways.
+ *
+ * These replace `ENTRANCE_BUS_ARRIVE_X` and `ENTRANCE_BUS_VANISH_X`, which were
+ * two hand-measured `x` coordinates on a straight kerb ("just inside the window
+ * an 18.2 m bus can stand in"). On a road that follows the park's edge that
+ * window is not a range of `x` at all, and both numbers are now the same
+ * question answered once: **the point at which the road goes over the hill**,
+ * `entranceRoadBrow()`. So the bus drives on from out of sight and leaves the
+ * same way, instead of appearing on a kerb, and it is never driving on the 50°
+ * face beyond the brow because that is exactly where it stops existing.
+ */
+export function entranceBusArriveAt(): number {
+  return entranceRoadBrow();
+}
+
+export function entranceBusVanishAt(): number {
+  return -entranceRoadBrow();
+}
+
+/**
  * **Which way the cat bus faces, `at` metres along the road.**
  *
  * The bus drives from the brow on the positive side to the brow on the negative
