@@ -4385,3 +4385,102 @@ of the park with a bridge into it and no paths in it, which is a
 looks-unfinished defect of exactly Jim's complaint #4 ("the paths don't go up to
 the door ... reliably"), not of #5's "useful places". Recorded so nobody
 escalates it as a lockout, and nobody files it as cosmetic either.
+
+---
+
+## State — 3 Sep, eleventh leg (successor). Baseline recaptured unpiped.
+
+Worktree `.claude/worktrees/grid-paths-eng2`, branch `grid-paths-eng2`, pushed
+to `origin/feat/grid-paths`. Started at `40878be0`.
+
+### Baseline, captured unpiped to a file, exit code read
+
+`pnpm run test:procgen` — **exit 1, `Test Files 5 failed | 23 passed (28)`,
+`Tests 5 failed | 1405 passed (1410)`.** Note the pass count read off the
+screen is **1405**, not the 1404 in the brief; the violation SET is what
+matters and it is the inherited one:
+
+```
+seed   5  streetsShareLatticeLines  spur-waterFight  E-W 11.0 m on z = -23.31, 2.57 m off
+seed  11  streetsShareLatticeLines  spur-building    E-W  8.5 m on z =  58.06, 2.87 m off
+seed 128  streetsShareLatticeLines  connector-stall.facePaint-station-1
+                                                     E-W 12.4 m on z =  41.65, 2.34 m off
+seed 267  detourRatiosStayReasonable  stall.railRacer / exit-railRace
+                                     5.0 m apart, 76.8 m by paving (15.24x, wasting 71.7 m)
+seed 288  noPathEndsNowhere         bridge-walk-0's end at -15.7,-47.7
+```
+
+**One thing the brief groups that the set separates:** 128's offender is a
+`connector-`, 5's and 11's are `spur-`s. They are not guaranteed to be one
+producer and should not be assumed to be.
+
+### THE MECHANISM ON 128, MEASURED — and it CONTRADICTS the node-choice framing
+
+`scripts/tmp-elbowpick.mts` (control built in: the winning shape is
+reconstructed from push order alone and compared against what
+`debugNodeEdges` reports as drawn — `viaMatches=Y` on both elbow rows, so the
+reconstruction discriminates). Seed 128, `stall.facePaint`, door node
+(27.084, 39.175):
+
+```
+  -> 26.583,45.310  cost  10.27  lead(29.559,41.649)
+       leadDx= 2.98 (discip)  leadDz= 3.66 (discip)   drawn=straightToLead
+  -> 14.583,45.310  cost  27.67  lead(29.559,41.649)
+       leadDx=14.98 (rogue)   leadDz= 3.66 (discip)   drawn=elbowViaRow      viaMatches=Y
+  -> 14.583,33.310  cost  33.52  lead(29.559,41.649)
+       leadDx=14.98 (rogue)   leadDz= 8.34 (rogue)    drawn=elbowViaColumn   viaMatches=Y
+       *** SWAPPABLE: same length, private run 14.98 -> 8.34 m ***
+```
+
+The third row is the connector the invariant fails on. At **that same node, at
+exactly the same cost**, `elbowViaRow` was available:
+
+| shape at node (14.583,33.310) | leg on node's line | leg on lead's line |
+|---|---|---|
+| `elbowViaColumn` (drawn) | x = 14.583 **shared**, 8.34 m | z = 41.649 **private, 14.98 m** |
+| `elbowViaRow` (not tried) | z = 33.310 **shared**, 14.98 m | x = 29.559 **private, 8.34 m** |
+
+Both elbows are Manhattan over the same rectangle, so **their lengths are
+identical and `cost = length * STUB_COST_FACTOR` cannot tell them apart.** Both
+are `rogue` (both `leadDx` and `leadDz` exceed `STUB_TAIL_LIMIT` 7.8), so they
+land in the same bucket, and the bucket is filled `elbowViaColumn` first
+**unconditionally** (`paths.ts` ~2559). The shape loop `break`s at the first
+acceptance, so `elbowViaRow` is never evaluated.
+
+**So the private run is 14.98 m rather than 8.34 m because of a push order, not
+because of a price, a node choice, or a screen.** Nothing in the search ever
+compared the two.
+
+### Why the framing said otherwise, and where the earlier read went wrong
+
+The inherited framing — "node-choice, not connector-shape; the shared-line
+connector was already cheaper at 27.67 vs 33.52 and still lost on total path
+cost" — is **true and remains true about which node wins**. It is not the whole
+defect. There is a second, independent loss *inside* the winning node.
+
+The earlier "the reorder is doubly closed" finding computed `leadDx = 15.0`,
+`leadDz = 20.3` from node **(14.6, 21.3)** — a vertex further along the drawn
+`connector-stall.facePaint-station-1` polyline, which concatenates the
+connector with the onward route to `station-1`. The connector's own node is
+**(14.583, 33.310)**. At the wrong node `elbowViaColumn` really is the better
+of the two, which is exactly why the reorder was closed; at the real node the
+numbers are 14.98 and 8.34 and **the conclusion inverts**. Recorded as a wrong
+prediction inherited and corrected, not quietly dropped.
+
+### Why this is not any of the seven measured-dead approaches
+
+It is a **tie-break, not a price and not a refusal**. The two shapes have equal
+length, so:
+
+- the node's offered cost is **unchanged**, therefore **node choice cannot
+  move** — which is precisely the mechanism by which `privateLineRun` relocated
+  work onto seed 225's `pathsRunOnGridAxes` and both-prices onto 267's
+  `detourRatiosStayReasonable`;
+- `straightToLead`'s position in the ladder is untouched, so the diagonal is
+  neither made cheaper nor more expensive;
+- no door loses a shape and no rung is removed, so it cannot starve the way
+  variant B's hard tail bound did (12 green/7 stranded -> 9/16).
+
+**Prediction recorded before measuring:** `check:park` unchanged at 12 green /
+7 stranded, and seed 128 drops out of the `streetsShareLatticeLines` set. To be
+measured on both columns, set-diffed, and reported either way.
