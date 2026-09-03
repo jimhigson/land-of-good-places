@@ -39,6 +39,10 @@ import { cruiserCrossesColumn, insideCastle } from './solve';
  * - **Block the walking network**, which is the coaster's pylon rule and its
  *   hard-won lesson: a 0.32 m post inflates past a lane's half-width in the
  *   nav lattice, and one placed in a gap between plots pinches it shut.
+ * - **Stand on the railway** (issue #501). The chute flies *over* the loop
+ *   legitimately; a leg dropped from that stretch does not. See
+ *   {@link planSlideLegs}'s `clearOfRailway` for why this could not come from
+ *   `CollisionWorld` and where the answer does come from.
  */
 
 /** The two plots this ride spans. See the pinch test in {@link planSlideLegs}. */
@@ -129,10 +133,30 @@ export interface SlideLeg {
  * Pure, and separate from building the meshes, so `test/procgen` can measure
  * the choice without a scene — and so the collision registration below happens
  * exactly once, at a point the caller controls.
+ *
+ * ### Why the railway arrives as a second injected question
+ *
+ * `isClear` is the real `CollisionWorld`, and asking it was never enough for
+ * the train, because **the railway is not a collider when this runs.** The
+ * lineside fence is one (`train/fence.ts` adds walls of `TRACK_CLEARANCE`
+ * half-width) but `ParkTrain` is built in `World.ts` *after* `Building`, so at
+ * this moment there is nothing in the collision world anywhere the loop will
+ * go. A leg vetted against it is vetted against a park with no railway in it,
+ * which is exactly how seed 5 shipped four posts standing in the train — one of
+ * them 0.43 m *past* the centre line — for as long as the ride has existed
+ * (issue #501). No pairwise invariant covered the pair either, so nothing said
+ * so; `slideLegsClearTheRailway` in `test/procgen/invariants.ts` does now.
+ *
+ * The railway *is* answerable here, just not through collision: `TRAIN_PLAN` is
+ * solved at module load from the layout alone, long before any scene object
+ * exists. So the caller passes that question in, the same shape and for the
+ * same reason as `isClear` — `Scenery` already asks it of its garden walls, and
+ * this is the second caller rather than a second definition.
  */
 export function planSlideLegs(
   chute: readonly Vector3[],
   isClear: (x: number, z: number, radius: number) => boolean,
+  clearOfRailway: (x: number, z: number) => boolean,
 ): SlideLeg[] {
   // Arc length along the chute, so spacing means metres of ride rather than
   // metres of straight line — the difference is large on a curve this tight.
@@ -170,6 +194,12 @@ export function planSlideLegs(
       // The column, not the top of it: the chute flies over the coaster and a
       // leg dropped from there would go straight through it.
       if (cruiserCrossesColumn(point.x, point.z, ground, point.y)) continue;
+      // Same shape as the cruiser clause above, and for the same reason: the
+      // chute passes over the railway, and a post dropped from that stretch
+      // stands in front of the train. Rejected rather than nudged sideways —
+      // the loop below is the nudge, and it slides the candidate along the
+      // chute until it clears rather than shrinking what "clear" means.
+      if (!clearOfRailway(point.x, point.z)) continue;
       if (!isClear(point.x, point.z, GROUND_CLEARANCE)) continue;
       if (distanceToPath(point.x, point.z) < PATH_CLEARANCE) continue;
       // The coaster's lesson: a post in the gap between two plots pinches shut
