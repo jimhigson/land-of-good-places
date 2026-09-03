@@ -2197,3 +2197,61 @@ So: **no assertion added.** `latticeComponentsWithoutAGateway()` is exported and
 is how this defect was found. Tuning a threshold until canonical passed would
 have been fitting the assertion to the pool, which this branch has refused three
 times already.
+
+### CORRECTION TO THE 11/16 HEADLINE — it is 10/16, and here is the whole trade
+
+**The 11/16 reported at the end of the gateway-rescue commit was measured
+before a bug in that same commit was found.** `link()` was handed `[]` instead
+of `tap.via`, so a rescued gateway's **elbow was drawn as a single straight
+rim-to-node line**. That line is a diagonal, and — the part that matters — it
+is a line **neither of whose legs had been screened**: the elbow's two legs are
+validated with `streetSegmentClear`, the straight line between their endpoints
+never was, so the ribbon could be drawn through a plot. Fixing it is not
+optional.
+
+Fixed, and it costs seed 267 its green. **The honest running total for this
+leg:**
+
+| | at leg start | gateway rescue | **+ `via` fix (final)** |
+|---|---|---|---|
+| `check:park` green | 10 | 11 | **10** |
+| `check:park` stranded | 20 | 10 | **13** |
+| `test:procgen` failed | 10 | 12 | **11** |
+
+So the leg's real result is **stranded 20 -> 13, green unchanged at 10,
+`test:procgen` 10 -> 11**. Seed 5 goes from `poi.stranded: 10` to green; seed
+267 goes from green to 3.
+
+**Do not report 11/16.** It was true of a build with an unscreened ribbon in it.
+
+### What the three owed items came to
+
+- **`pathsRunOnGridAxes` on 267** — **fixed**, and it was my own bug (the
+  dropped `via`), not a routing problem.
+- **`pathsRunOnGridAxes` on 346** — **not fixed, and it is not a new class.**
+  It is now `gate-approach runs diagonally for 21.5 m, from (-0.1, 31.0) to
+  (-15.2, 15.7)`, which is the **head-on arrival shape's diagonal leg** — the
+  known open item the fourth leg measured and reverted, and which the brief
+  names as "give the door a short axis-aligned arrival rather than refusing the
+  diagonal". My gateway change altered which node the gate reaches on 346 and
+  so triggered it there. It joins 131, 208, 225 and 451 in that one class.
+- **`builtMasonryStaysInsideItsReservation` on seed 5** — **not fixed**, and
+  the geometry is now recorded: site at **(0.0, 36.0)**, railDistance 0.0,
+  masonry reaching **14.92 m** against a **5.50 m** screen, walkable deck
+  spanning across **-1.40 to 14.00**. That span is two decks in one rectangle —
+  the site's own (centred, out to -1.40) plus a neighbour's at +14 — which is
+  the **same shape as seed 288's** (across -14.00 to -5.20 at site 152). Two
+  seeds, one defect: `footprintsOverlap` lets a bridge be planned inside
+  another site's reservation. Chase them together.
+
+### Seed 267's regression is the one loose end of this leg
+
+Green -> `poi.stranded: 3`, caused by drawing the elbow correctly rather than
+as a shortcut. **Measured and ruled out:** restricting the rescue to taps that
+serve an unserved component changes nothing on any of the sixteen seeds — 267's
+rescued tap *is* serving an unserved component, so that is not the explanation.
+The remaining hypothesis, untested: the elbow at
+`(-3.2,-10.4) -> (-15.2,16.5)` is a long two-legged gateway that the router
+then prefers over better routes. Worth trying **the other corner** (the elbow
+has two, and the code takes the cheaper) and, if that fails, pricing a rescued
+tap above a straight one so it is used only when nothing else serves.
