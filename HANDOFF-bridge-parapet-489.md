@@ -159,17 +159,44 @@ face covers the whole wall by construction. `crownY` then has no remaining use
 inside `buildShellGeometry` and the parameter should go — one owner, rather than
 a second crown definition sitting unused.
 
+## What shipped
+
+1. **The anchor.** `courseLevels` hangs off `highestTop`, the drawn wall top,
+   not `crownY`, the road crown. The dead `y <= highestTop + COURSE_HEIGHT`
+   guard goes, and `crownY` leaves `buildShellGeometry`'s signature rather than
+   sitting there unused as a second crown.
+2. **`PARAPET_GONE_HUMP`** named, so "is a parapet supposed to be here?" has one
+   owner instead of a bare `0.25` inside `parapetHeightFor` and a copy in every
+   probe that asks.
+3. **Two reveal deletions**, both ART_DIRECTION §7 (delete the hidden face,
+   never stand it off), both keyed on a length the geometry already owns:
+   `COPING_SINK` for a reveal inside the coping stone, `COURSE_RECESS` for one
+   grazing the grass. Moving the ladder relocated which rings hit those
+   coincidences, so they had to be closed rather than re-baselined.
+4. **`scripts/measure-bridge-parapet.mts`**, `pnpm run measure:bridge-parapet`
+   (`--pool`, `--control`).
+5. **`noBridgeParapetCanBeSeenThrough`** in `test/procgen/invariants.ts`, on
+   `ParkFacts.bridgeParapetRings`.
+
+## Results
+
+| gate | result |
+|---|---|
+| see-through probe, whole pool | **0** of 62,699 walled samples, 23 bridges, 17 seeds |
+| negative control | 0 walled in open air, every seed |
+| collider, full-height parapet | 0 of 163 pushes escape |
+| collider, tapered kerb (control) | 35 of 44 escape — correct, by design |
+| `pnpm run test:procgen` | 520 passed, 17 files |
+| `pnpm run build` | exit 0 |
+| `pnpm run check:coplanar` | exit 0; 245 seams, none new, **baseline down 5** |
+
 ## Still to do
 
-1. Run the instrument (below) and paste per-seed numbers under "Measured".
-2. Answer the collider question: `guardRails`' `topHeight` already reads
-   `parapetTopFor`, i.e. the *arced* top, so the collider is expected to be
-   correct where the mesh is not — confirm by measurement, not by reading.
-3. Fix, re-measure, add the invariant, prove it red against today's geometry
-   and paste the geometry beside the transcript.
-4. `pnpm run check`, `pnpm run test:procgen`, `pnpm run build`; `check:coplanar`
-   especially — new wall area meets the coping plane.
-5. Eyes on it in a browser, standing on a bridge, on more than one seed.
+- Eyes on it in a browser, standing on a bridge, on more than one seed. Needs
+  the shared Chrome — ask the Overseer.
+- Dev server for that is port **5391**, PID noted in the session; kill it by PID.
+  Crown of each canonical-seed bridge:
+  `/spawn?pos=0.0,39.7&facing=180` and `/spawn?pos=-1.9,-28.0&facing=13`.
 
 ## The instrument
 
