@@ -150,3 +150,33 @@ M4 also passed at first: headroom was measured from the arch's own base, so
 sinking the whole arch took the base down with it and the number never moved.
 `measureGateArch` now returns an **absolute** `lowestOverheadY` and each caller
 subtracts the ground a child actually stands on.
+
+## Reachability: the 0.80 m piers take away nothing a child may stand on
+
+Flood fill of the park's walkable ground, `PLAYER_RADIUS` body, 0.5 m cells,
+seeded from the default spawn (0, 7). **Control on the instrument first**, per
+CLAUDE.md — two agents have had confident, wrong answers from flood fills that
+were measuring the wrong thing.
+
+| run | reachable cells | note |
+|---|---|---|
+| gateway deliberately blocked (control on the instrument) | 44 655 | responds: 73 cells lost |
+| piers 0.55 m (control on the change) | 44 728 | |
+| piers 0.80 m (this branch) | 44 723 | |
+
+Set difference, 0.55 minus 0.80 — **five cells, and none the other way**:
+
+```
+(3.0, 59.5) (3.5, 59.0) (5.0, 59.0) (5.5, 59.5) (5.5, 60.0)
+```
+
+All five are within the right pier's own 1.42 m reach of (4.3, 60) — the
+ground immediately beside the pier. Nothing else in the park changes.
+
+**One dud signal, recorded so nobody reads it as meaning something.** The
+instrument also reports `reachesOutsideTheGate`, and it is `false` in **all
+three** runs including the unblocked ones — the boundary keeps a child inside
+the park, so it can never be true and it discriminates nothing. It is not
+evidence the gate is shut. (The arrival puts her down at z = 52, *inside* the
+gate, so she does not walk in through it under her own control today — which
+matters for piece 2's third beat.)
