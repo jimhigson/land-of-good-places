@@ -1661,3 +1661,48 @@ and closes a real conceptual defect; it does not buy seed 5.
 the ring. The gate's own exemption ladder — Fix 1 of the third leg, which
 exempts by identity the reservation the handover stands in — is not reaching
 far enough on this seed. **Chase the gate ladder, not the reservation.**
+
+### A SECOND branch-introduced red check, and the reason both stayed hidden
+
+**`check:park-boot` fails on this branch and passes on `origin/main`** — the
+same shape as `check:pet-slide`, found the same way, and it is **not** this
+leg's two-pass (measured below).
+
+| commit | `check:park-boot` | worst single `advance()` |
+|---|---|---|
+| `origin/main` (bd818210) | **exit 0 — passes** | 11.0 ms |
+| `ca5db30f`, before this leg's two-pass | exit 1 | 14.6 ms |
+| `b61c8554`, this leg's head | exit 1 | **13.9 ms** |
+
+Against an 8 ms budget. So the branch's path rework made the boot's worst slice
+heavier and nobody had seen it.
+
+**The two-pass did not cause it and did not worsen it** — 14.6 ms before,
+13.9 ms after, i.e. marginally *better* and inside the noise, despite the solve
+now running two to three times. The reason is in the check's own words: *"that
+worst slice was no generator step at all, 0 work units in 13.9 ms, during
+'joining up the paths'"*. The worst slice is not the solve's own work, so
+adding passes to a **sliced** generator does not land on it. That is worth
+knowing before anyone optimises the wrong thing.
+
+**Why both reds were invisible: `pnpm run check` is a single `&&` chain, and
+`check:pet-slide` is step 21 of 58.** Everything after it — including
+`check:park`, `check:park-boot`, `check:solve-cost`, `check:waypoints`, and
+about thirty-five others — never runs at all once it fails. The chain reports
+one failure and stops, so "check is red on pet-slide" was concealing a second
+red and could have been concealing more.
+
+**Run the tail of the chain individually on this branch until pet-slide is
+fixed.** Done this leg, directly: `check:solve-cost` **exit 0**,
+`check:waypoints` **exit 0**, `check:park-boot` **exit 1** (above). The rest of
+the tail is still unmeasured.
+
+### This leg's gates, exit codes read and unpiped
+
+- `pnpm exec tsc --noEmit` **0**; `pnpm run build` **0**.
+- `pnpm run test:procgen` **exit 1**, `10 failed | 1399 passed (1409)` — the
+  identical ten to before the two-pass, so it neither fixed nor broke an
+  invariant.
+- `pnpm run check` **exit 1**, on `check:pet-slide` (not this leg's, and the
+  Overseer has a separate agent on it against #474 — stay off it).
+- `check:park` sweep: **10 of 16 green, 21 -> 20 stranded**.
