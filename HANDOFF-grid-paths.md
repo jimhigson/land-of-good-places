@@ -4335,3 +4335,23 @@ under the shipped conditional guard a pure `joined=1 noPaving=0
 refusedByTrim=0` row prints nothing at all — so that sweep **cannot** rule out a
 join in its own range. Only the 1–120 sweep, which ran entirely under the forced
 guard, is conclusive, and the mutation proof above is what actually settles it.
+
+### Still owed after this leg (unchanged list, two struck)
+
+- ~~The `joinStrandedBridgeWalks` ruling~~ — discharged: proved firing, kept.
+- ~~`noPathEndsNowhere` on 288 distinguishing the two faults~~ — done, with
+  control.
+- **288's real defect is now named and is NOT in `paths.ts`'s router**: three
+  far-side destinations, all `paved=false`, plus a far foot cut off by a
+  *neighbouring* crossing site's reservation. Whoever takes it should start at
+  `footprintsOverlap` in `crossingPlanSolve.ts` and at why those three doors got
+  no ribbon at all — **and it is a layout question as much as a routing one, so
+  the Overseer/Jim call flagged in the brief still stands.**
+- `streetsShareLatticeLines` on 5, 11, 128 — as a **node-choice** question.
+- `detourRatiosStayReasonable` on 267 — honest baseline first.
+- Stage-2 invariant (b); probe deletion (`tmp-stoneground.mts` last, re-run
+  after any reservation or `bridgeFootprint.ts` change); the rebase.
+- **Probes added this leg, to delete with the rest:** `tmp-joinsweep.mts`,
+  `tmp-288end.mts`.
+- **Reproductions for the two mutations used this leg** are written out above in
+  full; neither is on the branch.
