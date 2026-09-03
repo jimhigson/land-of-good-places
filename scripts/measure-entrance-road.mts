@@ -13,10 +13,14 @@ import { terrainHeight } from '../src/world/terrain.ts';
 import { PARK_SEED } from '../src/world/parkManifest.ts';
 import { ROAD_HALF_WIDTH } from '../src/world/entrance/road.ts';
 import {
-  ENTRANCE_BUS_STOP_Z,
-  ENTRANCE_BUS_ARRIVE_X,
-  ENTRANCE_BUS_VANISH_X,
-} from '../src/world/entrance/layout.ts';
+  entranceBusArriveAt,
+  entranceBusVanishAt,
+  entranceRoadAt,
+} from '../src/world/entrance/roadRoute.ts';
+
+const ENTRANCE_BUS_STOP_Z = entranceRoadAt(0).z;
+const ENTRANCE_BUS_ARRIVE_X = entranceRoadAt(entranceBusArriveAt()).x;
+const ENTRANCE_BUS_VANISH_X = entranceRoadAt(entranceBusVanishAt()).x;
 import { CAT_BUS_LENGTH, CAT_BUS_WIDTH } from '../src/world/entrance/catBus.ts';
 
 const park = buildHeadlessPark();

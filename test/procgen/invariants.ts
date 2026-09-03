@@ -92,8 +92,6 @@ import {
   RIM_OUTSET_START,
 } from '../../src/core/constants.ts';
 import {
-  ENTRANCE_BUS_ARRIVE_X,
-  ENTRANCE_BUS_STOP_Z,
   ENTRANCE_GATE_HALF_WIDTH,
   ENTRANCE_GATE_X,
   ENTRANCE_GATE_Z,
@@ -106,6 +104,7 @@ import {
 // A leaf module: pure geometry over a `standable` predicate, no three.js and
 // nothing seed-dependent, so importing it here cannot fix the park's seed early.
 import { GATE_PROBE_INSET, measureGatewayWalk } from '../../src/world/entrance/gatewayWalk.ts';
+import { entranceBusArriveAt, entranceRoadAt } from '../../src/world/entrance/roadRoute.ts';
 import { ROAD_TILE_METRES } from '../../src/world/entrance/road.ts';
 import {
   GATE_FOOT_TOLERANCE,
@@ -7433,13 +7432,20 @@ const theCatBusIsInThePark: Invariant = (facts) => {
     );
   }
 
-  // Waiting on the kerb outside the gate, where the sequence starts. A bus left
+  // Waiting on the road outside the gate, where the sequence starts. A bus left
   // at the origin is in the middle of the ball pit.
-  const kerbGap = Math.hypot(bus.x - ENTRANCE_BUS_ARRIVE_X, bus.z - ENTRANCE_BUS_STOP_Z);
+  //
+  // **Asked of the road, not of a coordinate.** This used to compare against
+  // `ENTRANCE_BUS_ARRIVE_X`/`ENTRANCE_BUS_STOP_Z`, two hand-measured points on a
+  // straight kerb that no longer exists — the road follows the park's edge now,
+  // and the bus comes on at the brow. `entranceRoadAt(entranceBusArriveAt())` is
+  // where the sequence itself starts the bus, so this cannot drift from it.
+  const start = entranceRoadAt(entranceBusArriveAt());
+  const kerbGap = Math.hypot(bus.x - start.x, bus.z - start.z);
   if (kerbGap > 1) {
     fouls.push(
-      `the cat bus starts at ${fmt([bus.x, bus.z])}, ${kerbGap.toFixed(2)} m from the kerb ` +
-        `${fmt([ENTRANCE_BUS_ARRIVE_X, ENTRANCE_BUS_STOP_Z])} it is supposed to pull in from`,
+      `the cat bus starts at ${fmt([bus.x, bus.z])}, ${kerbGap.toFixed(2)} m from the point on the ` +
+        `entrance road ${fmt([start.x, start.z])} it is supposed to drive on from`,
     );
   }
 
