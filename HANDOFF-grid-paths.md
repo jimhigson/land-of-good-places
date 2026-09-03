@@ -4908,3 +4908,74 @@ afterwards (`git checkout -- test/procgen && git clean -fd`, 0 modified files).
    which the `LGP_CONNECT_TRACE` instrument now on the branch will answer for
    both at once).
 4. Then 11, 267, 288, stage-2 (b), probe deletion.
+
+### SEED 326 ROOT-CAUSED: both bridge feet have links but the ring reaches neither — the gate ladder's bug, in the bridge-foot join
+
+**The chain, each link measured:**
+
+1. **The planner proves exactly one site**, and it is kept:
+   `site railD 0.0 at (38.00, -14.00) dir (-0.92, 0.38) halfW 5.00`.
+   (`scripts/tmp-bridges.mts`. **Control:** the canonical seed proves 4 sites
+   and crosses all 4 — `1@(0.8,41.0) 238@(-1.3,-30.3) 300@(-38.6,11.2)
+   332@(-22.4,35.4)`, proven and crossed lists identical. The column
+   discriminates.)
+
+2. **`computeCrossings` returns empty — 0 built crossings.**
+
+3. **No paved route crosses the railway anywhere on the seed.**
+   `scripts/tmp-whichcross.mts` walks the ring plus every paved edge at 0.5 m
+   and reports **not one** side change within 6 m of the rail.
+
+4. **Why: the grid is cut in two and the bridge cannot join it.**
+   `debugGridReach`, seed 326:
+
+```
+unreachable: ["dodgems", "stall.dodgems", "exit-railRace"]
+noSearch:    ["dodgems", "stall.dodgems", "exit-railRace"]
+feet: [ {i:0, at "20.1,-6.6", links:1, reachable:false},
+        {i:1, at "55.9,-21.4", links:4, reachable:false} ]
+components: [[0,97], [4,17], [1,2], [2,1], [3,1], [5,1]]
+ringComp:  [0,0,0,0]
+doorComp:  building:0  hotel:0  ballPit:0  ferrisWheel:0  waterFight:0
+           **dodgems:4**
+```
+
+Two real components: **0 (97 nodes, holds the ring and every other door)** and
+**4 (17 nodes, holds the dodgems quarter across the rail)**. The bridge's
+mandatory foot->deck->foot edge is the one edge that could join them — and
+**both feet are `reachable:false`**, so no search ever reaches the deck.
+
+**So it is circular and the loop never closes on this seed:** a crossing is
+built where a path crosses; a path may only cross on a bridge's own edge; the
+bridge's edge is only used if a route can reach a foot. Foot 0 has **1 link**
+and it is a link *into a pocket*.
+
+**AND THAT IS A BUG THIS BRANCH HAS ALREADY FIXED ONCE, IN A DIFFERENT ORGAN.**
+From this file, the gate ladder (Fix 1, kept):
+
+> `scripts/tmp-gate.mts` on 267: `links: 1, reachableFromRing: false,
+> routes: false` — a count-of-links ladder stopped at the first rung,
+> satisfied, on a connector into a pocket. **The rung that stops it is *the
+> ring reaching the node*, not the node having a link.**
+
+Foot 0 reads `links: 1, reachable: false` — **the identical signature.** The
+gate join was rebuilt to climb until the ring can *reach* it; the **bridge-foot
+join was not**, and it still stops at "the foot has a link".
+
+**A shared signature across seeds is a hypothesis, not a diagnosis** — this
+one is a diagnosis because the component map shows *why* the link is worthless
+(it lands inside component 4's pocket, or a 1-2 node singleton, rather than in
+the ring's component 0).
+
+**The fix, by the precedent already measured on this branch:** the bridge
+foot's join ladder must climb until **the ring's component can reach the
+foot**, not until the foot has any link at all — and if no rung achieves that,
+that is a backtrack (a different foot placement, a different site), never a
+route drawn over the rail. **Not built. Diagnosed and handed on rather than
+started badly.**
+
+**And the consequence for a child, which is why this outranks the queue:** the
+dodgems, `stall.dodgems` and `exit-railRace` sit in an isolated component
+across the railway, so `check:park` reports *the walk to anchor:dodgems crosses
+the railway at (49.9, 4.1), 0.00 m above the rail*. She walks over live track
+to reach the dodgems.
