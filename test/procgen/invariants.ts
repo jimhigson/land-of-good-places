@@ -6462,28 +6462,67 @@ const everyProvenBridgeSiteKeepsItsBridge: Invariant = (facts) => {
  * BRIDGE_WALL_THICKNESS` to reach the outer face of the parapet, the same
  * arithmetic `bridgeFootprint.ts` builds the wall by.
  *
- * It fires in both directions, and both are real defects:
+ * It fires in two directions, and they are asked of different things:
  *
- * - **masonry outside the band** — unscreened stone, the #414 shape;
- * - **a neighbouring bridge's masonry inside this site's band** — the
- *   `footprintsOverlap`/`paths.ts` disagreement about how long a bridge is,
- *   which is what strands `bridge-walk-0` on seed 288.
+ * - **(a) a site's OWN bridge must fit its own band** — swept across without
+ *   bound, so a deck built wider or shifted further than the reservation
+ *   allows is caught;
+ * - **(b) no built masonry may stand on OPEN ground** — ground no reservation
+ *   covers at all, so no ribbon was ever kept off it. This is the #414 shape
+ *   proper, and it is asked of `paths.ts`'s own `pointStandsOnABridgeRamp`
+ *   via `facts.masonryOnOpenGround` rather than reconstructed here.
  *
- * A site whose reservation carries no deck at all asserts nothing, and says so
- * on `process.stderr` rather than passing silently — the coverage here is a
- * function of how many proven sites a leg actually chose to cross at, which is
- * not something the seed guarantees.
+ * ## What this used to do, why it was wrong, and what it cost (3 Sep 2026)
+ *
+ * It used to sweep `across` from **−14 to +14 whatever the reservation's
+ * half-width was**, take the widest `|across|` at which *any* built deck
+ * stood over the site's strip, and prosecute that against *this* site's band.
+ * Two failures came out of that, and neither was a defect in the park:
+ *
+ * - **seed 5**, site (0.0, 36.0): the offending deck was the bridge on site
+ *   railDistance 246, standing on its own site **29 m away**, at `across`
+ *   13.60–13.95 — entirely outside this site's 5.50 m reservation, with the
+ *   two reservation rectangles provably disjoint. All four of that seed's
+ *   bridges sit centred on their own sites at `across` 0.00 with outer faces
+ *   of 2.22 / 2.22 / 2.02 / 2.12 against screens of 5.50 / 4.50 / 5.50 / 4.50.
+ * - **seed 288**, site railDistance 152: a real 0.30 m intrusion (`across`
+ *   −5.50 to −5.20) by the bridge on site railDistance 0 — but into a
+ *   rectangle the two-pass had **released**, so not reserved ground at all,
+ *   and by a bridge every sample of which lies inside its own screened
+ *   reservation. The message quoted 14.92 m for a 0.30 m overlap.
+ *
+ * Which site reserved a given square metre is immaterial to whether a ribbon
+ * may be drawn on it. Direction (b) asks the question that is not immaterial.
+ *
+ * **And the old form could not fail in one of its two axes at all.** It swept
+ * `along` between the reservation's own bounds — the very rectangle it was
+ * testing against — so a bridge whose ramp ran off the *end* of its
+ * reservation walked out of the sweep instead of failing it. Direction (b)
+ * found three such overruns the moment it was asked: seed 274 by 1.46 m and
+ * seed 326 by 0.69 m and 0.96 m, on seeds that are `check:park` green and that
+ * passed this invariant.
+ *
+ * A site whose reservation carries no deck at all asserts nothing under (a),
+ * and says so on `process.stderr` rather than passing silently — the coverage
+ * here is a function of how many proven sites a leg actually chose to cross
+ * at, which is not something the seed guarantees.
  */
 const builtMasonryStaysInsideItsReservation: Invariant = (facts) => {
   const complaints: string[] = [];
   const sites = facts.plannedBridgeSites;
   const bridges = facts.world.train.bridges;
 
-  /** Widest `|across|` in this site's own straight frame at which any built
-   * bridge's walkable deck stands, swept over the reservation's own `along`
-   * extent. `covers` is the deck a child can stand on; the masonry's outer face
-   * is that plus her own body and the wall's thickness. */
-  const sweep = (site: (typeof sites)[number]): { lo: number; hi: number } => {
+  /** Widest `|across|` in this site's own straight frame at which **this
+   * site's own** bridge's walkable deck stands, swept over the reservation's
+   * own `along` extent.
+   *
+   * A site's own bridge is the one that covers the site's own centre point —
+   * read off the built park, never off any index the planner hands out. A
+   * neighbour's deck is deliberately not measured here: see the header for
+   * the two seeds that cost. */
+  const sweepOwn = (site: (typeof sites)[number]): { lo: number; hi: number } => {
+    const own = bridges.find((bridge) => bridge.covers(site.x, site.z));
+    if (own === undefined) return { lo: Infinity, hi: -Infinity };
     const nx = site.dirZ;
     const nz = -site.dirX;
     const alongMin = -(DECK_HALF_LENGTH + site.rampReachNeg);
@@ -6494,9 +6533,7 @@ const builtMasonryStaysInsideItsReservation: Invariant = (facts) => {
       const bx = site.x + site.dirX * along;
       const bz = site.z + site.dirZ * along;
       for (let a = -14; a <= 14; a += 0.1) {
-        const x = bx + nx * a;
-        const z = bz + nz * a;
-        if (bridges.some((bridge) => bridge.covers(x, z))) {
+        if (own.covers(bx + nx * a, bz + nz * a)) {
           lo = Math.min(lo, a);
           hi = Math.max(hi, a);
         }
@@ -6505,22 +6542,44 @@ const builtMasonryStaysInsideItsReservation: Invariant = (facts) => {
     return { lo, hi };
   };
 
+  // (a) A site's own bridge fits its own band.
   let measured = 0;
   for (const site of sites) {
-    const { lo, hi } = sweep(site);
+    const { lo, hi } = sweepOwn(site);
     if (lo === Infinity) continue;
     measured += 1;
     const outerFace = Math.max(Math.abs(lo), Math.abs(hi)) + PLAYER_RADIUS + BRIDGE_WALL_THICKNESS;
     if (outerFace > site.screenHalfAcross) {
       complaints.push(
-        `the bridge masonry standing in the reservation of the crossing site at ` +
-          `(${fmt([site.x, site.z])}), railDistance ${site.railDistance.toFixed(1)}, reaches ` +
-          `${outerFace.toFixed(2)} m from that site's axis, while paths.ts only kept other ` +
-          `legs out to ${site.screenHalfAcross.toFixed(2)} m — ` +
+        `the bridge built on the crossing site at (${fmt([site.x, site.z])}), railDistance ` +
+          `${site.railDistance.toFixed(1)}, reaches ${outerFace.toFixed(2)} m from that site's ` +
+          `axis, while paths.ts only kept other legs out to ` +
+          `${site.screenHalfAcross.toFixed(2)} m — ` +
           `${(outerFace - site.screenHalfAcross).toFixed(2)} m of stone on ground no ribbon ` +
-          `was ever screened off (walkable deck spans across ${lo.toFixed(2)} to ${hi.toFixed(2)}). ` +
-          'Either the bridge was built outside the ground reserved for it, or a neighbouring ' +
-          "bridge is standing inside this site's reservation",
+          `was ever screened off (its walkable deck spans across ${lo.toFixed(2)} to ` +
+          `${hi.toFixed(2)}). The bridge was built wider, or shifted further, than the ground ` +
+          'reserved for it',
+      );
+    }
+  }
+
+  // (b) No built masonry stands on ground no reservation covers. Measured in
+  // `parkFacts.ts`, because only `paths.ts` can answer "is this point
+  // reserved?" and only its own function honours the released set.
+  const open = facts.masonryOnOpenGround;
+  if (open.length > 0) {
+    const byBridge = new Map<number, typeof open>();
+    for (const sample of open) {
+      byBridge.set(sample.bridgeIndex, [...(byBridge.get(sample.bridgeIndex) ?? []), sample]);
+    }
+    for (const [bridgeIndex, samples] of byBridge) {
+      const first = samples[0]!;
+      complaints.push(
+        `bridge ${bridgeIndex}'s walkable deck stands on ${samples.length} sample(s) of ground ` +
+          `no crossing site reserves — the first at (${fmt([first.x, first.z])}). paths.ts kept ` +
+          'no ribbon off that ground, so a drawn path may run straight into this masonry ' +
+          '(issue #414). The bridge was built outside every reservation, or the reservation ' +
+          'it belongs to is shorter than the ramp actually built',
       );
     }
   }
@@ -6531,10 +6590,15 @@ const builtMasonryStaysInsideItsReservation: Invariant = (facts) => {
   process.stderr.write(
     `[reservation cover] ${
       sites.length === 0
-        ? 'the planner proved NO bridge sites on this seed, so this invariant ASSERTS NOTHING'
-        : `${measured} of ${sites.length} proven site reservation(s) carry a built deck` +
-          (measured === 0 ? ' — so this invariant ASSERTS NOTHING on this seed' : '')
-    }\n`,
+        ? 'the planner proved NO bridge sites on this seed, so clause (a) ASSERTS NOTHING'
+        : `clause (a): ${measured} of ${sites.length} proven site(s) have a bridge of their own` +
+          (measured === 0 ? ' — so clause (a) ASSERTS NOTHING on this seed' : '')
+    }; clause (b): ${facts.masonrySweptBridges} of ${bridges.length} built bridge(s) swept for ` +
+      `open ground` +
+      (facts.masonrySweptBridges === 0 && bridges.length > 0
+        ? ' — so clause (b) ASSERTS NOTHING on this seed'
+        : '') +
+      `\n`,
   );
 
   return complaints;
