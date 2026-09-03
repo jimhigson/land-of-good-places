@@ -232,6 +232,46 @@ shared ground manufacture exactly these seams."* Stages 1–4 are held by **one
 design-owning agent**; parallelism begins at stage 5, where the spine makes
 collisions structural rather than accidental.
 
+## The universal collision invariant (Jim, same conversation: "any collision between drawn features, not just certain pairings")
+
+The test suite has the same disease as the generators. Most of the ~80
+invariants are hand-picked pairings — `treesKeepOffWalls`,
+`lampsTouchNothing`, `plotsDoNotOverlap` — so **a pairing nobody thought to
+write is a collision nobody can detect.** The fence through a path was
+invisible for exactly this reason: no one had written `fencesKeepOffPaths`.
+
+So, one new invariant, **deny-by-default**:
+
+- Enumerate **everything drawn** in the built park and sweep every feature
+  against every other (a broadphase grid keeps this cheap at park scale).
+- The **only** thing that may excuse an overlap is the same small legality
+  table the registry uses — a path may cross a surface, corridors cross at
+  declared crossings, nothing overlaps a walkable-must-remain. One table,
+  shared between the generator and the check, so the two cannot drift.
+- An unanticipated pairing **fails by default** instead of passing silently.
+  New feature kinds are covered the day they exist, with no new test written.
+
+Two rules that keep it honest:
+
+- **It measures the built geometry, never the claims.** The registry checking
+  its own claims would be the registry marking its own homework; this
+  invariant exists to catch what a generator or the registry itself got
+  wrong, so it reads the park the way `ParkFacts` does — real placements,
+  real footprints.
+- **Its first run is expected to be red, and that is the deliverable.** It
+  will find collisions nobody has an issue number for — the unknown
+  remainder of the 24-issue backlog, turned into a list. Per the zero-
+  tolerance rule those findings get triaged and fixed, not exempted; every
+  entry added to the legality table is a design decision to record, never a
+  silencer.
+
+Sequencing: this does **not** wait for the registry. It is buildable today on
+`ParkFacts`, it immediately widens coverage from named pairings to everything,
+and it then serves as the acceptance test for every migration stage — the
+universal check is how a placer proves it stopped colliding, and the existing
+pairwise invariants stay on as the control group that proves the universal
+check can see what they see.
+
 ## What this does not fix
 
 Carried from the ground-claims memo, still true, stated so the design is not
