@@ -3258,3 +3258,71 @@ Both controls discriminate, which is what makes a clean row mean anything:
 
 The tap now reads **exactly `RING_RADIUS`** — touching the rim, which is what
 a gateway is for, and not a centimetre further in.
+
+## THE STATUE CROSSING IS A ONE-SEED DEFECT: seed 267 only, measured
+
+The Overseer asked for a real before/after list rather than an assumed one.
+Run, and **the assumption was wrong.**
+
+`scripts/tmp-ringcross.mts`, the gateway-tap ribbons' closest approach to
+`PLAZA`, with the `segmentClearOfRing` calls out and then in. Only the eight
+seeds that actually draw a `street-tap-*` ribbon can be affected, so those are
+the eight run:
+
+| seed | taps | BEFORE | AFTER |
+|---|---|---|---|
+| canonical | 1 | 14.90 clear | 14.90 clear |
+| 115 | 1 | 14.90 clear | 14.90 clear |
+| 128 | 1 | 14.90 clear | 14.90 clear |
+| **267** | 1 | **0.00 m — INSIDE BY 14.90 m** | **14.90 clear** |
+| 274 | 2 | 14.90 clear | 14.90 clear |
+| 326 | 2 | 14.90 clear | 14.90 clear |
+| 428 | 1 | 14.90 clear | 14.90 clear |
+| 451 | 1 | 14.90 clear | 14.90 clear |
+
+Controls on every row: `main-loop` (the ring's own ribbon) reads **14.83**
+against a `RING_RADIUS` of 14.90, so the distance measure is right; and
+`fountain-approach` reads **8.40**, so the instrument demonstrably *can* see a
+ribbon inside the ring — a clean row means something.
+
+**So: one seed, not nine.** The nine-seed "gained a rescued gateway" list was
+never a list of seeds showing this defect, and treating it as one would have
+put a false claim in front of Jim. Eight seeds draw a tap ribbon; seven of
+them were always clear of the ring.
+
+**And 267's real number is 0.00 m, not the 1.16 m recorded earlier.** That
+1.16 m was the nearest *stranded `poiGraph` sample*; the ribbon's own closest
+approach is **the plaza centre itself** — `street-tap-north` ran straight
+over the statue. Use 0.00.
+
+### For the screenshot, then
+
+The before/after is **seed 267** and nothing else. Before: a path running
+straight across the statue circle and over the statue. After: the same
+gateway leaving the rim and going round. Any other seed would show no
+difference at all, which is exactly the "link with nothing to look at" Jim
+has already rejected twice.
+
+### One instrument flaw caught, and one caveat
+
+**Flaw, caught by the control:** the first cut measured the minimum over *all*
+routes and reported 267 as inside the ring **after** the fix — because
+`fountain-approach` legitimately runs to the fountain at the plaza centre. A
+route that is supposed to enter cannot be evidence that something entered
+wrongly. Now measured over the tap ribbons alone.
+
+**Second flaw, caught by reading the number:** seeds 274, 326 and 428 first
+reported `TAP INSIDE THE RING by 0.00 m`. A violation whose magnitude rounds
+to zero is not a violation — a tap that touches the rim sits at exactly
+`RING_RADIUS` and floating point lands it a hair under. `RIM_EPSILON` is the
+instrument admitting that touching the rim is what a gateway is for, not a
+threshold tuned to make seeds pass: anything genuinely inside is inside by
+metres, as 267's 14.90 shows.
+
+**Caveat, unexplained and not to be assumed away:** the eight seeds that draw
+a `street-tap-*` ribbon are **not** the nine this file records as having
+gained a rescued gateway (5, 11, 225, 288 and 346 draw no tap ribbon; 274,
+326 and 428 do and are not on that list). A rescued tap and a drawn
+`street-tap-*` route are evidently not the same population. **Nobody has
+established why**, and no conclusion here rests on their being the same — the
+before/after above is measured per seed, not inferred from either list.
