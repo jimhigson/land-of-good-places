@@ -70,5 +70,30 @@ defects seed 18's re-rolled park exposed are **#483**, not weakened here.
 - [x] fix, as a closed-loop property
 - [x] `check:gateway` + procgen invariant, both proved red first
 - [x] `test:procgen` 520/520, `build` 0
-- [ ] `pnpm run check` — running
-- [ ] PR
+- [x] `pnpm run check` exit 0
+- [x] PR **#485** raised — not merged (never merge your own)
+
+## The one thing still red, on purpose
+
+`check:coplanar` reports `MORE: garden|garden/path-kerb|garden/path-surface`,
+5 facings against 1 recorded, on seed 288 — its bridges moved, so the drape
+lifts different path stretches, so the two parallel ribbons share a plane at
+more angles. Same area (3.9910 m²), same `fighting: false`. Root cause and the
+real fix (delete the kerb's hidden face, ART_DIRECTION §7) are written up on
+**#483**; not done here because it changes how every path is drawn and three
+`grid-paths-*` branches own that file. The baseline entry was **not** bumped.
+
+The other three coplanar findings were fixed at the root: `keyOf` had the
+bridge's rail distance in the ratchet key, so one seam was recorded eleven
+times and any moved loop read as NEW.
+
+## After the in-flight branches land
+
+- **`fix/torus-480` (PR #482)** adds `gateArch.ts` with
+  `GATE_POST_COLLIDER_RADIUS` and its own gate clauses. No conflict expected —
+  this branch touches neither `Entrance.ts` nor that file — but re-run
+  `pnpm run check:gateway` once it merges, because the post colliders are what
+  `gatewayWalk`'s control probes.
+- **The authored replacement arch** widens the piers' keep-out to 0.80 m. That
+  narrows the walkable opening, so re-run `check:gateway` and expect the
+  corridor's blocked-cell counts to rise; the connected route is what matters.
