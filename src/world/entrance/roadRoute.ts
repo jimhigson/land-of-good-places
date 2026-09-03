@@ -407,6 +407,41 @@ export function entranceRoadBrow(): number {
   return browCache;
 }
 
+/**
+ * **Which way the cat bus faces, `at` metres along the road.**
+ *
+ * The bus drives from the brow on the positive side to the brow on the negative
+ * one, so its nose points down *decreasing* `at` — hence the negated heading.
+ * The same yaw convention `Player.facing` and `BUS_FACING` always used
+ * (`atan2(x, z)`: zero looks along +z), so nothing downstream has to know the
+ * road is curved; it just asks where the bus is pointing.
+ */
+export function entranceRoadFacing(at: number): number {
+  const station = entranceRoadAt(at);
+  return Math.atan2(-station.headingX, -station.headingZ);
+}
+
+/**
+ * **Where the road's inner kerb is**, `at` metres along — the edge nearest the
+ * park.
+ *
+ * The gateway spur has to start exactly here or it lays a slab on top of the
+ * kerb's, which is #472's coplanar seam in a curved coat. Taken from the
+ * station's own frame rather than from a z-coordinate, because on a curved road
+ * "inner" is a direction and not an axis.
+ */
+export function entranceRoadInnerEdge(at: number): { readonly x: number; readonly z: number } {
+  const station = entranceRoadAt(at);
+  // Left of the heading, then flipped if that points away from the park.
+  let nx = -station.headingZ;
+  let nz = station.headingX;
+  if (entranceRoadOutsetAt(station.x + nx, station.z + nz) > entranceRoadOutsetAt(station.x, station.z)) {
+    nx = -nx;
+    nz = -nz;
+  }
+  return { x: station.x + nx * ROAD_HALF_WIDTH, z: station.z + nz * ROAD_HALF_WIDTH };
+}
+
 /** Where the boundary edge sits, for anything wanting the road's outset back. */
 export function entranceRoadOutsetAt(x: number, z: number): number {
   return -PARK_BOUNDARY.distanceToEdge(x, z);
