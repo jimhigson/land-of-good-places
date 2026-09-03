@@ -2971,3 +2971,62 @@ Measure it the same way: five seeds for the benefit column, sixteen for the
 cost column, **and `test:procgen` for the composition**, because `check:park`
 could not see variant A's 29.8 m private arterials and the failure *count*
 could not see them either.
+
+### THE LADDER, measured on all three columns — best variant yet, but PROVISIONAL
+
+Disciplined elbow -> the diagonal -> the rogue elbow at full tail. No rung
+removed, node never dropped.
+
+**Benefit** (`pathsRunOnGridAxes`, the five seeds): **131, 208, 346, 451 pass;
+225 still fails.** Four of five.
+
+**Composition** (`test:procgen`): **5 failed | 1404 passed.**
+
+| invariant | baseline | A (cap only) | B (hard bound) | **ladder** |
+|---|---|---|---|---|
+| `builtMasonryStaysInsideItsReservation` | 2 | 0 | 0 | **0** |
+| `pathsRunOnGridAxes` | 5 | 0 | 1 | **1** (225) |
+| `streetsShareLatticeLines` | 2 | **6** | 2 | **3** (5, 11, **128**) |
+| climbable tree (128) | 1 | 0 | 0 | **0** |
+| `noPathEndsNowhere` (288) | 1 | 1 | 1 | **1** |
+| **total** | **11** | 7 | 4 | **5** |
+
+**Cost** (`check:park`, sixteen seeds):
+
+| seed | baseline | A | B | **ladder** |
+|---|---|---|---|---|
+| 11 | 3 | 1 | 3 | **1** |
+| 267 | 3 | 3 | 6 | **6** |
+| 326 | 1 | 0 | 1 | **0** (green) |
+| 451 | 0 | 0 | 2 | **1** (lost green) |
+| 5 | 0 | 1 | 0 | **0** |
+| **green / stranded** | **10 / 13** | 10 / 11 | 9 / 16 | **10 / 14** |
+
+**The ladder beats B on both columns** (green 10 vs 9, stranded 14 vs 16) **and
+beats A on composition** (3 lattice seeds vs 6). It is the only variant that
+keeps the green count *and* keeps the private arterials out.
+
+### What it still costs, stated plainly rather than absorbed
+
+- **`poi.stranded` 13 -> 14.** One more destination a child cannot walk to.
+  By this branch's own ranking that is the senior metric, so this is a
+  regression, not a rounding error.
+- **Seed 267 goes 3 -> 6**, the single worst movement, partly offset by seed
+  11 going 3 -> 1.
+- **Seed 451 loses green** (0 -> 1) while **326 gains it** (1 -> 0), so the
+  count is unchanged but the set is not.
+- **Seed 128 joins `streetsShareLatticeLines`** — one new lattice seed, where
+  variant A added four.
+
+**So this is KEPT PROVISIONALLY, and the condition is written down here:**
+seed 267's `3 -> 6` must come back, or the ladder is reverted. That is not an
+arbitrary condition — **267 is precisely the seed whose green -> 3 regression
+an earlier leg already attributed to a rescued gateway's *elbow*, with the
+other-corner hypothesis still untested.** This change also reorders elbows, so
+the most likely reading is one latent defect being amplified by a second
+elbow decision rather than two independent faults. That hypothesis is the next
+item on the queue anyway, so the two should be settled together.
+
+If it turns out they are independent and 267 cannot be recovered, revert the
+ladder: **+1 stranded for four invariant lines is not a trade this branch
+should make**, on the ranking it has just been endorsed for.
