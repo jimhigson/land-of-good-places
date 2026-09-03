@@ -19,13 +19,25 @@ import { SolveScheduler } from './solveScheduler';
  * (`docs/DESIGN-round-robin-generation.md`): park features are to generate
  * **all at the same time, round-robin, with backtracking** — so the driver
  * here is **one scheduler** holding every solve as a task, not a hand-ordered
- * chain of phases. Today the task graph's dependencies reproduce the exact
- * order the hand-ordered chain ran in, so the park is byte-identical (proved
- * by `check:park-boot`'s sliced-vs-straight-through hashes); the point of the
- * change is what it makes possible next — a placer migrates to genuine
- * round-robin by *relaxing its deps and publishing claims*
- * (`boot/groundClaims.ts`), one placer per PR, instead of anybody ever again
- * attempting a big-bang rewrite of a monolithic driver.
+ * chain of phases. Today the task graph reproduces the exact order the
+ * hand-ordered chain ran in, so the park is byte-identical (proved by
+ * `check:park-boot`'s sliced-vs-straight-through hashes).
+ *
+ * **Be honest about what serializes the order today: the import ladder, not
+ * the `deps`.** Review of #499 measured it — removing the `deps` from
+ * `trainSearch`, `slideSearch`, `crossingSites` and `pathGraph` leaves the
+ * task order character-for-character unchanged, because each of those tasks
+ * is *also* held by a `ready()` gate on a module that the strictly-ordered
+ * ladder only loads behind a `gate()` on the very task the dep names. The
+ * deps document the data a task genuinely reads (and become load-bearing the
+ * moment the module gating loosens), but **relaxing a dep alone changes
+ * nothing** — do not conclude from that experiment that the spine is inert.
+ * What stage 3 actually has to do is **confront the ladder**: load a
+ * migrating placer's modules eagerly (or behind data-readiness rather than
+ * task-completion gates), so that its task's `ready()` answers true while
+ * other tasks still run — at which point the scheduler genuinely interleaves
+ * it and the `deps`/claims become the real constraints. One placer per PR,
+ * never a big-bang rewrite of a monolithic driver.
  *
  * ## What was actually costing the boot
  *
@@ -151,10 +163,11 @@ interface ImportStep {
  *   cruiser; the crossing modules wait for the solved slide; `pathGraph` waits
  *   for the solved walk graph).
  * - The {@link SolveScheduler} holds every solve as a task. Tasks gate on
- *   their modules with `ready()` and name their predecessor solves as `deps` —
- *   **today's dep graph reproduces the old hand-ordered chain exactly**, which
- *   is what makes this commit byte-identical, and relaxing it is how a placer
- *   joins the genuine round-robin later.
+ *   their modules with `ready()` and name the data they read as `deps`.
+ *   **Today the ladder's gates make four of the six deps inert** (see the
+ *   module header) — the order is the ladder's, byte-identical to the old
+ *   chain, and a placer joins the genuine round-robin at stage 3 by
+ *   loosening its module gating, not by touching deps alone.
  *
  * ### Failure semantics, preserved exactly
  *

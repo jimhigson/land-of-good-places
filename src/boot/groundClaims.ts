@@ -93,10 +93,21 @@ export interface Crossing {
 }
 
 /**
- * *"A paved corridor must terminate here."* Served when any feature's
- * corridor claim overlaps the disc; unserved demands are what
- * {@link GroundClaims.unservedDemands} reports and what the search must
- * drive to zero before a park is finished.
+ * *"A paved corridor must terminate here."* Served when **another feature's**
+ * corridor claim has an END of its centreline inside the disc; unserved
+ * demands are what {@link GroundClaims.unservedDemands} reports and what the
+ * search must drive to zero before a park is finished.
+ *
+ * Both restrictions are the design's, not conveniences (review of #499
+ * caught the first cut getting both wrong while the code was still dead):
+ *
+ * - **A feature's own corridors never serve its own demand.** The door stub
+ *   a building plants *is the demand's mouth, not its answer* — the whole
+ *   point is that the network must come to it. Counting the stub would mark
+ *   a hotel alone in an empty park as served.
+ * - **Passing through is not terminating.** A road sailing past the door
+ *   uninvited leaves the child exactly as cut off as no road at all; only a
+ *   corridor whose end arrives in the disc answers the demand.
  */
 export interface Demand {
   readonly x: number;
@@ -343,7 +354,7 @@ export class GroundClaims {
     const out: { feature: string; demand: Demand }[] = [];
     for (const [feature, contribution] of this.contributions) {
       for (const demand of contribution.demands) {
-        if (!this.demandServed(demand)) out.push({ feature, demand });
+        if (!this.demandServed(feature, demand)) out.push({ feature, demand });
       }
     }
     return out;
@@ -351,11 +362,22 @@ export class GroundClaims {
 
   // ------------------------------------------------------------- internals
 
-  private demandServed(demand: Demand): boolean {
-    const spot: Disc = { shape: 'disc', x: demand.x, z: demand.z, radius: demand.radius };
-    for (const contribution of this.contributions.values()) {
+  /** See {@link Demand}: another feature's corridor, terminating in the disc. */
+  private demandServed(owner: string, demand: Demand): boolean {
+    for (const [feature, contribution] of this.contributions) {
+      if (feature === owner) continue;
       for (const claim of contribution.claims) {
-        if (claim.kind === 'corridor' && shapesOverlap(spot, claim.shape)) return true;
+        if (claim.kind !== 'corridor') continue;
+        const ends =
+          claim.shape.shape === 'disc'
+            ? [[claim.shape.x, claim.shape.z] as const]
+            : [
+                [claim.shape.x1, claim.shape.z1] as const,
+                [claim.shape.x2, claim.shape.z2] as const,
+              ];
+        for (const [x, z] of ends) {
+          if (Math.hypot(x - demand.x, z - demand.z) < demand.radius) return true;
+        }
       }
     }
     return false;

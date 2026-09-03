@@ -158,7 +158,7 @@ describe('GroundClaims', () => {
     expect(ground.allows('bridge', claim('footprint', disc(2, 0, 1)))).toBe(true);
   });
 
-  it('a demand is unserved until a corridor reaches it, whoever paves', () => {
+  it("a demand is served by another feature's corridor terminating on it", () => {
     const ground = new GroundClaims();
     ground.commit('hotel', {
       claims: [claim('walkable', disc(5, 5, 1.2))],
@@ -170,6 +170,36 @@ describe('GroundClaims', () => {
     // Withdrawing the paving un-serves it again — service is a live question,
     // never a latch.
     ground.withdraw('paths');
+    expect(ground.unservedDemands().map((u) => u.demand.label)).toEqual(['hotel front door']);
+  });
+
+  it("a feature's OWN door stub never serves its own demand", () => {
+    // The design's normal case: a building plants its stub and its demand in
+    // one commit. The stub is the demand's mouth, not its answer — a hotel
+    // alone in an empty park is UNSERVED until the network arrives.
+    const ground = new GroundClaims();
+    ground.commit('hotel', {
+      claims: [
+        claim('walkable', disc(5, 5, 1.2)),
+        claim('corridor', capsule(5, 5, 5, 9, 1.5)), // its own perpendicular stub
+      ],
+      demands: [{ x: 5, z: 9, radius: 1.2, label: 'hotel stub free end' }],
+    });
+    expect(ground.unservedDemands().map((u) => u.demand.label)).toEqual(['hotel stub free end']);
+    // The network joining the stub's free end is what serves it.
+    ground.commit('paths', { claims: [claim('corridor', capsule(5, 9, 5, 30, 1.5))] });
+    expect(ground.unservedDemands()).toEqual([]);
+  });
+
+  it('a corridor passing through without terminating does not serve', () => {
+    // "Terminate here" means terminate: a 100 m road sailing straight past
+    // the door leaves the child as cut off as no road at all.
+    const ground = new GroundClaims();
+    ground.commit('hotel', {
+      claims: [claim('walkable', disc(5, 5, 1.2))],
+      demands: [{ x: 5, z: 5, radius: 1.2, label: 'hotel front door' }],
+    });
+    ground.commit('roads', { claims: [claim('corridor', capsule(-50, 5, 50, 5, 1.5))] });
     expect(ground.unservedDemands().map((u) => u.demand.label)).toEqual(['hotel front door']);
   });
 
