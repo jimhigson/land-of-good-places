@@ -1631,8 +1631,25 @@ export class Game {
     // moving the value genuinely changes every frame, so there is nothing for
     // it to eat, and from the moment it would become constant nobody writes it
     // at all. The pose has no such competitor and is simply driven.
+    // **One owner for the focus override, decided once a frame.**
+    //
+    // Two things in this method want the camera to orbit something other than
+    // the player — the arrival's door beat and the keychain rack's zoomed
+    // picker — and until now each wrote `IsoCamera`'s single override itself.
+    // The rack's branch ends in an unconditional `clearFocusOverride()` for
+    // "my picker is shut", which ran *after* the arrival's own write and threw
+    // it away every single frame. Measured on the running game: through the
+    // whole door beat the camera orbited the player at z 67.70 while
+    // `doorFocus` sat at z 64.34, so the shot Jim watched was never the shot
+    // the code describes. Nothing failed; there was simply a second writer.
+    //
+    // So both claim into this, and it is written to the camera exactly once,
+    // below the two of them. A third claimant added later inherits the
+    // arbitration instead of quietly winning it by being last.
+    let focusClaim: Readonly<Vector3> | null = null;
+
     const arrival = this.world.entrance.arrival;
-    const shot = arrival && !arrival.finished ? arrivalShot(arrival.elapsed) : null;
+    const shot = arrival && !arrival.finished ? arrivalShot(arrival.elapsed, arrival.archPassAt) : null;
     if (arrival && shot && !this.arrivalCameraReleased) {
       // **Skippable, and it is the camera that yields, not the bus.** Touching
       // the stick hands the view straight back: the shot stops being driven,
@@ -1649,11 +1666,8 @@ export class Game {
       } else {
         this.camera.setZoomTarget(shot.zoom);
         this.camera.setShotOverride(shot.yawDegrees, shot.pitchDegrees, shot.distance);
-        // Re-asserted unconditionally while it holds, exactly as
-        // `setFocusOverride`'s own doc requires.
-        if (shot.watchesTheDoor) this.camera.setFocusOverride(arrival.doorFocus);
-        else if (this.arrivalFocusHeld) this.camera.clearFocusOverride();
-        this.arrivalFocusHeld = shot.watchesTheDoor;
+        // The focus is *claimed* here, not written — see `focusClaim` below.
+        if (shot.watchesTheDoor) focusClaim = arrival.doorFocus;
         this.arrivalCameraEngaged = true;
       }
     }
@@ -1675,9 +1689,7 @@ export class Game {
       // tell her why. On the ordinary landing it is a no-op, the shot having
       // already driven the zoom back to 1.
       this.arrivalCameraEngaged = false;
-      this.arrivalFocusHeld = false;
       this.camera.setZoomTarget(1);
-      this.camera.clearFocusOverride();
       this.camera.clearPoseOverride();
     }
 
@@ -1703,10 +1715,15 @@ export class Game {
     this.keychainShopWasOpen = keychainShopOpen;
     if (keychainShopOpen) {
       this.camera.setZoomTarget(this.world.keychainShop.viewZoom(this.camera));
-      this.camera.setFocusOverride(this.world.keychainShop.viewFocus);
-    } else {
-      this.camera.clearFocusOverride();
+      // **Claims, and wins.** A modal picker she has opened outranks a
+      // cutscene: if both ever hold at once she is being asked to choose
+      // between six keyrings and must be able to see them.
+      focusClaim = this.world.keychainShop.viewFocus;
     }
+
+    // The single write. Everything above only ever *claims*.
+    if (focusClaim) this.camera.setFocusOverride(focusClaim);
+    else this.camera.clearFocusOverride();
 
     // Drag-to-look-around's two per-frame duties (#419).
     //
@@ -1789,9 +1806,6 @@ export class Game {
    * one — the first-person rides. The sky pass keeps the park's sky.
    */
   private cameraOverride: import('three').PerspectiveCamera | null = null;
-
-  /** Whether beat one currently holds a focus override, so it can be released once. */
-  private arrivalFocusHeld = false;
 
   /**
    * Whether the arrival has written anything to the camera that still needs

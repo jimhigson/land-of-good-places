@@ -81,7 +81,29 @@ import {
   ARRIVAL_RISE_TAIL,
   AT_SHOT_HOME,
   arrivalShot,
+  type ArchPass,
 } from '../src/world/entrance/ArrivalSequence.ts';
+import { GATE_ARCH_CLEAR_HEIGHT, GATE_ARCH_CLEAR_WIDTH } from '../src/art/models/gateArch.ts';
+import { TALLEST_CHILD_HEIGHT } from '../src/art/models/kid.ts';
+
+/**
+ * **The arch pass is swept, not pinned.** The instants she and the eye cross
+ * the gate line are solved by `ArrivalSequence` off its own bezier, and that
+ * bezier starts wherever the bus put its door — which the curved-road branch
+ * is about to move. Pinning one pair here would be a second copy of a number
+ * that is about to change; sweeping the range proves the *shape* of the shot
+ * is right for any of them, which is the property that has to survive.
+ *
+ * Measured on the game as it stands: she is under the arch 44% of the way
+ * through the walk, `under` = 6.79 s.
+ */
+const PASSES: readonly ArchPass[] = [0.2, 0.3, 0.44, 0.6, 0.8].map((fraction) => {
+  const walkStart = ARRIVAL_CONTROL_AT - 4.5;
+  const under = walkStart + fraction * 4.5;
+  return { under, clear: Math.min(under + 1.0, ARRIVAL_CONTROL_AT) };
+});
+/** The one nearest the game's own geometry, for the single-value clauses. */
+const PASS: ArchPass = PASSES[2]!;
 
 let checks = 0;
 let failures = 0;
@@ -127,7 +149,7 @@ console.log('the shot goes somewhere: bearing, tilt and eye position');
   let widestTilt = 0;
   const eyes: Vector3[] = [];
   for (let t = 0; t < AT_SHOT_HOME; t += STEP) {
-    const shot = arrivalShot(t);
+    const shot = arrivalShot(t, PASS);
     if (!shot) break;
     widestBearing = Math.max(
       widestBearing,
@@ -165,7 +187,7 @@ console.log('the shot goes somewhere: bearing, tilt and eye position');
 // ---------------------------------------------------------------------------
 console.log('the bearing is home the instant she gets the controls (the CONTROL rule)');
 {
-  const atHandover = arrivalShot(ARRIVAL_CONTROL_AT);
+  const atHandover = arrivalShot(ARRIVAL_CONTROL_AT, PASS);
   check(atHandover !== null, 'the shot is still running at the hand-over — beat three needs it to be');
   if (atHandover) {
     near(
@@ -175,11 +197,12 @@ console.log('the bearing is home the instant she gets the controls (the CONTROL 
       'the bearing must be the rig\'s own when she is handed the stick, or "up" is not up the screen',
     );
     near(atHandover.zoom, 1, 0.001, 'she must be handed the ordinary framing, not the shot\'s');
-    near(
-      atHandover.distance,
-      CAMERA_DISTANCE,
-      0.05,
-      'and the ordinary stand-back, so the park behind her is drawn',
+    // The stand-back is deliberately NOT home here — it opens out across the
+    // hand-over with the tilt, which is the rise. It competes with nothing she
+    // can press, so unlike the zoom it costs her no input.
+    check(
+      atHandover.distance < CAMERA_DISTANCE,
+      'the stand-back should still be opening out at the hand-over — that is the rise',
     );
   }
   // Every frame from the hand-over on, not just the one — reported as the one
@@ -187,7 +210,7 @@ console.log('the bearing is home the instant she gets the controls (the CONTROL 
   let worstAfter = 0;
   let worstAt = 0;
   for (let t = ARRIVAL_CONTROL_AT; t < AT_SHOT_HOME; t += STEP) {
-    const shot = arrivalShot(t);
+    const shot = arrivalShot(t, PASS);
     if (!shot) continue;
     const off = Math.abs(angleDelta(CAMERA_YAW_DEGREES * DEG, shot.yawDegrees * DEG) / DEG);
     if (off > worstAfter) {
@@ -207,7 +230,7 @@ console.log('the bearing is home the instant she gets the controls (the CONTROL 
 // ---------------------------------------------------------------------------
 console.log('the rise happens under her hand, and finishes');
 {
-  const atHandover = arrivalShot(ARRIVAL_CONTROL_AT);
+  const atHandover = arrivalShot(ARRIVAL_CONTROL_AT, PASS);
   const stillToRise = atHandover ? CAMERA_PITCH_DEGREES - atHandover.pitchDegrees : 0;
   console.log(`  ${stillToRise.toFixed(1)}° of tilt still to lift when she gets the controls`);
   check(
@@ -215,9 +238,9 @@ console.log('the rise happens under her hand, and finishes');
     `beat three must not be over before it starts — only ${stillToRise.toFixed(1)}° left to rise ` +
       `at the hand-over. ARRIVAL_RISE_TAIL is ${ARRIVAL_RISE_TAIL.toFixed(2)}s.`,
   );
-  check(arrivalShot(AT_SHOT_HOME) === null, 'the shot must let go at AT_SHOT_HOME');
+  check(arrivalShot(AT_SHOT_HOME, PASS) === null, 'the shot must let go at AT_SHOT_HOME');
   check(
-    arrivalShot(AT_SHOT_HOME + 60) === null,
+    arrivalShot(AT_SHOT_HOME + 60, PASS) === null,
     'and stay let go — a shot that came back later would seize a camera she is playing with',
   );
 }
@@ -248,7 +271,7 @@ console.log('driven at 60fps through a real IsoCamera, it lands on the rig exact
   // three lines and this one ever disagree, the browser run in the PR is what
   // catches it — which is why the PR carries frames as well as this transcript.
   for (let t = 0; t <= AT_SHOT_HOME + 3; t += STEP) {
-    const shot = arrivalShot(t);
+    const shot = arrivalShot(t, PASS);
     if (shot) camera.setShotOverride(shot.yawDegrees, shot.pitchDegrees, shot.distance);
     else camera.clearPoseOverride();
     camera.update(frame, her, still);
@@ -299,14 +322,14 @@ console.log('the shot is dt-driven: a pause holds it, a slow machine still lands
 
     let movedWhilePaused = 0;
     for (let t = 0; t <= AT_SHOT_HOME + 3; t += step) {
-      const shot = arrivalShot(t);
+      const shot = arrivalShot(t, PASS);
       if (shot) camera.setShotOverride(shot.yawDegrees, shot.pitchDegrees, shot.distance);
       else camera.clearPoseOverride();
       camera.update(frame, her, still);
       if (stallSeconds > 0 && t >= stallAt && t < stallAt + step) {
         // The park is paused: `dt` is zero for everything, and
         // `ArrivalSequence.update` returns early, so the shot's own clock does
-        // not move either — the same `arrivalShot(t)` is re-asserted.
+        // not move either — the same `arrivalShot(t, PASS)` is re-asserted.
         const before = camera.camera.position.clone();
         for (let n = 0; n < stallSeconds * fps; n += 1) camera.update(paused, her, still);
         movedWhilePaused = camera.camera.position.distanceTo(before);
@@ -345,6 +368,93 @@ console.log('the shot is dt-driven: a pause holds it, a slow machine still lands
     0,
     1e-3,
     'a run that was paused mid-blend must still land on the rig once it resumes',
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 7. the camera fits through the arch it is going under
+// ---------------------------------------------------------------------------
+console.log('the eye passes under the crossbar and between the piers');
+{
+  // The eye rides at `focus.y + d·sin(pitch)` above the paving, with the focus
+  // at a child's chest, and sits off to one side by `d·cos(pitch)·sin(yaw)`.
+  // Both are measured against the arch's own published clearances, so an arch
+  // resized by its artist moves these rather than quietly invalidating them.
+  const CHEST = 1.1;
+  let worstHeadroom = Infinity;
+  let worstSideroom = Infinity;
+  let worstAt = 0;
+  for (const pass of PASSES) {
+    // Only while the eye is actually in the gateway. Outside that window the
+    // camera is nowhere near the arch and its clearance means nothing — the
+    // first version of this clause swept past it and reported a "headroom" of
+    // -9.62 m measured on a camera 45 m away and climbing.
+    for (let t = pass.under; t <= pass.clear; t += STEP) {
+      const shot = arrivalShot(t, pass);
+      if (!shot) continue;
+      const eyeUp = CHEST + shot.distance * Math.sin(shot.pitchDegrees * DEG);
+      const eyeAside = Math.abs(
+        shot.distance * Math.cos(shot.pitchDegrees * DEG) * Math.sin(shot.yawDegrees * DEG),
+      );
+      const headroom = GATE_ARCH_CLEAR_HEIGHT - eyeUp;
+      const sideroom = GATE_ARCH_CLEAR_WIDTH / 2 - eyeAside;
+      if (headroom < worstHeadroom) {
+        worstHeadroom = headroom;
+        worstAt = t;
+      }
+      worstSideroom = Math.min(worstSideroom, sideroom);
+    }
+  }
+  console.log(
+    `  worst headroom ${show(worstHeadroom)} m under the ${GATE_ARCH_CLEAR_HEIGHT.toFixed(2)} m crossbar, ` +
+      `worst sideroom ${show(worstSideroom)} m inside the ${GATE_ARCH_CLEAR_WIDTH.toFixed(2)} m opening`,
+  );
+  check(
+    worstHeadroom > 0.3,
+    `the eye must pass UNDER the crossbar, not through it — worst headroom ${show(worstHeadroom)} m ` +
+      `at t=${worstAt.toFixed(2)}s, against a ${GATE_ARCH_CLEAR_HEIGHT.toFixed(2)} m clear height. ` +
+      `A camera that clips the arch reads as a bug, not as a move.`,
+  );
+  check(
+    worstSideroom > 0.3,
+    `the eye must pass BETWEEN the piers — worst sideroom ${show(worstSideroom)} m ` +
+      `inside a ${GATE_ARCH_CLEAR_WIDTH.toFixed(2)} m opening`,
+  );
+  // And it must genuinely be close: a "pass through the arch" that happens at
+  // the rig's 90 m stand-back is a camera watching from the far side of the
+  // park, which is the note this whole round came from.
+  let closest = Infinity;
+  for (const pass of PASSES) {
+    const shot = arrivalShot(pass.under, pass);
+    if (shot) closest = Math.min(closest, shot.distance);
+  }
+  console.log(`  closest stand-back at the pass: ${show(closest)} m`);
+  check(
+    closest < 8,
+    `the camera must actually go under the arch with her — closest stand-back ${show(closest)} m`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 8. the close shot frames a child, not a vehicle
+// ---------------------------------------------------------------------------
+console.log('the door shot is close enough to read a face');
+{
+  let tightest = 0;
+  for (let t = 0; t < AT_SHOT_HOME; t += STEP) {
+    const shot = arrivalShot(t, PASS);
+    if (shot) tightest = Math.max(tightest, shot.zoom);
+  }
+  // Frame half-height at that zoom, on the default 16:10 framing.
+  const halfHeight = Math.max(15 / 2, 11 / 2 / 1.6) / tightest;
+  const sheFills = TALLEST_CHILD_HEIGHT / (halfHeight * 2);
+  console.log(
+    `  tightest zoom ${show(tightest)} — a child fills ${(sheFills * 100).toFixed(0)}% of frame height`,
+  );
+  check(
+    sheFills > 0.3,
+    `Jim asked for "much closer" — a child fills only ${(sheFills * 100).toFixed(0)}% of the frame ` +
+      `at the tightest point (zoom ${show(tightest)})`,
   );
 }
 
