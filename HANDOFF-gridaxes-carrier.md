@@ -101,13 +101,25 @@ with the seed and commit it was read off:
 - ordinary grid paving says nothing;
 - seed 24's junction dogleg is not welded.
 
-Mutation-proved red (each restores clean afterwards):
+Mutation-proved red, each restored clean afterwards and each **counted against
+both populations separately** — the earlier version of this table said "3 of 5"
+and "2 of 5" without saying *of what*, which read as seeds when it meant unit
+tests. QA caught it; these are re-measured against the real suite:
 
-| mutation | red |
-|---|---|
-| merging disabled | 3 of 5 |
-| continuation without collinearity (pre-rewrite) | dogleg test |
-| overlap rule disabled | 2 of 5 |
+| mutation | unit tests red (of 6) | seed invariant red (of 5 CI seeds) |
+|---|---|---|
+| all merging disabled | 4 | **5 of 5** |
+| rule 1 gated by rule 2's angle test | 2 | **5 of 5** |
+| **rule 2 (drawn-along) disabled** | 3 | **0 of 5 — stays green** |
+
+**State that last row plainly, because "which clause is covered by what" is
+exactly the thing that rots:** `rule 2 is covered by the fixture tests only, not
+by the seed invariants.` Disabling it leaves `gridAxisVerdictsIgnoreTheCarrier`
+green on every seed — which makes sense (removing a merge rule cannot make the
+answer carrier-*dependent*, it just makes it wrong), but it means the seed
+invariant is not a guard on rule 2 and nobody should assume it is. The three
+fixtures that do guard it are the seed-225 lead, the carving sweep, and the
+retrace test.
 
 `gridAxisVerdictsIgnoreTheCarrier` is registered in `INVARIANTS`, so the property
 is asserted on every seed on every run, and announces its coverage to `stderr`.
