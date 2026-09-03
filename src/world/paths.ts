@@ -1938,6 +1938,110 @@ function* streetLatticeSearch(): Generator<number, StreetLattice, void> {
     }
   }
 
+  // **Span links: a street that steps round a crossroads that does not
+  // exist.** The jog pass above heals a blocked *run* between two adjacent
+  // nodes; this heals a blocked *node* — the two nodes either side of it, two
+  // pitches apart on the same line, joined by the same three-segment
+  // half-pitch shape.
+  //
+  // Neither of the passes above can look at this case, and it is not a rare
+  // one: a jog requires `nodeOk[b]`, and the straight and pinch links are only
+  // ever built between *adjacent* cells, so when the crossroads in the middle
+  // is refused — by a plot, the boundary, the ring or a bridge's masonry — the
+  // line simply ends, whatever clear ground lies beyond it.
+  //
+  // Measured on the canonical seed, 2 Sep 2026 (`scripts/tmp-north.mts`):
+  //
+  //   (-33.1,55.4) comp=0 REACHABLE nbrs=[-33.1,43.4 -28.5,53.8]
+  //   (-21.1,55.4) does not exist — nodeOk is 0
+  //   ( -9.1,55.4) comp=8 --------- nbrs=[2.9,55.4 ... the gate nodes]
+  //
+  // One missing crossroads, and the park's whole northern strip — the arch,
+  // the gate corridor, every mouth candidate the avenue can try — is a
+  // seven-node island (component 8) that the ring cannot reach, while the
+  // bridge foot at (-28.5,53.8) that would have served it sits **19.5 m
+  // away**, reachable, on the very next node along the same line. The avenue
+  // fell to its own last resort and `gate-approach` was drawn as a 7.2 m
+  // ribbon touching no other paving in the park.
+  //
+  // The standing rule (CLAUDE.md, Jim, 22 Aug 2026) is that the procgen
+  // backtracks and makes a different decision rather than accepting a result
+  // that does not clear. A run stepping round a bad crossroads is a different
+  // decision; ending the line is accepting the failure.
+  //
+  // Cost is charged at {@link SPAN_COST_FACTOR} — dearer per metre than a jog,
+  // because a span is a 24 m run plus its two offset legs and should never be
+  // preferred to a route that has an ordinary way through. Dijkstra picks it
+  // only when there is nothing shorter, which is exactly when it is wanted.
+  const SPAN_COST_FACTOR = 1.35;
+  for (let i = -LATTICE_HALF_CELLS; i <= LATTICE_HALF_CELLS; i += 1) {
+    yield i;
+    for (let j = -LATTICE_HALF_CELLS; j <= LATTICE_HALF_CELLS; j += 1) {
+      const a = indexOf(i, j);
+      if (!nodeOk[a]) continue;
+      for (const [di, dj, dir, back] of [
+        [1, 0, 0, 1],
+        [0, 1, 2, 3],
+      ] as readonly (readonly [number, number, number, number])[]) {
+        if (Math.abs(i + 2 * di) > LATTICE_HALF_CELLS || Math.abs(j + 2 * dj) > LATTICE_HALF_CELLS) {
+          continue;
+        }
+        // Only when the crossroads between them is genuinely missing: with a
+        // usable middle node the two-hop walk already exists and a span would
+        // be a second, longer way to say the same thing.
+        const middle = indexOf(i + di, j + dj);
+        if (nodeOk[middle]) continue;
+        const b = indexOf(i + 2 * di, j + 2 * dj);
+        if (!nodeOk[b] || side[a] !== side[b]) continue;
+        const ax = xs[a] as number;
+        const az = zs[a] as number;
+        const bx = xs[b] as number;
+        const bz = zs[b] as number;
+        const railSide = side[a] as 1 | -1;
+        for (const sign of [1, -1] as const) {
+          const offX = di === 1 ? 0 : JOG_OFFSET * sign;
+          const offZ = di === 1 ? JOG_OFFSET * sign : 0;
+          const shape: readonly (readonly [number, number])[] = [
+            [ax, az],
+            [ax + offX, az + offZ],
+            [bx + offX, bz + offZ],
+            [bx, bz],
+          ];
+          let ok = true;
+          let length = 0;
+          let corridor = 0;
+          for (let t = 1; t < shape.length && ok; t += 1) {
+            const p0 = shape[t - 1] as readonly [number, number];
+            const p1 = shape[t] as readonly [number, number];
+            if (
+              !streetSegmentClear(p0[0], p0[1], p1[0], p1[1]) ||
+              !segmentClearOfRing(p0[0], p0[1], p1[0], p1[1]) ||
+              !segmentHoldsRailSide(p0[0], p0[1], p1[0], p1[1], railSide, RAIL_CLAMP_DISTANCE - 0.1) ||
+              segmentCutsABridgeRamp(p0[0], p0[1], p1[0], p1[1])
+            ) {
+              ok = false;
+              break;
+            }
+            corridor += slideCorridorOverlap(p0[0], p0[1], p1[0], p1[1]);
+            corridor += cruiserCorridorOverlap(p0[0], p0[1], p1[0], p1[1]);
+            length += Math.hypot(p1[0] - p0[0], p1[1] - p0[1]);
+          }
+          if (!ok || corridor > 4) continue;
+          const via = shape.slice(1, -1);
+          const cost = length * SPAN_COST_FACTOR;
+          (neighbours[a] as LatticeNeighbour[]).push({ to: b, dir, cost, via });
+          (neighbours[b] as LatticeNeighbour[]).push({
+            to: a,
+            dir: back,
+            cost,
+            via: [...via].reverse(),
+          });
+          break;
+        }
+      }
+    }
+  }
+
   // The four compass taps (Decision 5: "exactly 4 connections at compass
   // points"): each walks outward from the ring's rim along its own compass
   // lattice line to the first valid node with a clear, on-line street
@@ -5454,6 +5558,21 @@ export function debugGateNodes(): unknown {
     })(),
     gates: grid.gateNodes.map((g) => ({
       mouth: `${g.mouth[0].toFixed(2)},${g.mouth[1].toFixed(2)}`,
+      targets: (grid.neighbours[g.node] as readonly LatticeNeighbour[]).map(
+        (s) => `${(grid.xs[s.to] as number).toFixed(1)},${(grid.zs[s.to] as number).toFixed(1)}${seen.has(s.to) ? ' REACHABLE' : ''}`,
+      ),
+      nearestReachable: (() => {
+        let best = Infinity;
+        let at = '';
+        for (const n of seen) {
+          const d = Math.hypot((grid.xs[n] as number) - g.mouth[0], (grid.zs[n] as number) - g.mouth[1]);
+          if (d < best) {
+            best = d;
+            at = `${(grid.xs[n] as number).toFixed(1)},${(grid.zs[n] as number).toFixed(1)}`;
+          }
+        }
+        return `${best.toFixed(1)}m at ${at}`;
+      })(),
       handover: (() => {
         const h = gateCorridorHandover(g.mouth);
         return `${h[0].toFixed(2)},${h[1].toFixed(2)}`;
@@ -5462,5 +5581,86 @@ export function debugGateNodes(): unknown {
       reachableFromRing: seen.has(g.node),
       routes: routeFromNetwork(g.node) !== null,
     })),
+  };
+}
+
+/** TEMP diagnostic: every grid node, its component and its neighbours. */
+export function debugGridNodes(): unknown {
+  const grid = pathGrid();
+  const seen = new Set<number>(grid.ringNodes);
+  const queue = [...grid.ringNodes];
+  while (queue.length) {
+    const n = queue.pop() as number;
+    for (const step of grid.neighbours[n] as readonly LatticeNeighbour[]) {
+      if (seen.has(step.to)) continue;
+      seen.add(step.to);
+      queue.push(step.to);
+    }
+  }
+  const comp = new Map<number, number>();
+  let next = 0;
+  for (let n = 0; n < grid.count; n += 1) {
+    if (comp.has(n)) continue;
+    if (n < grid.lattice.count && !grid.lattice.nodeOk[n]) continue;
+    const id = next++;
+    const q = [n];
+    comp.set(n, id);
+    while (q.length) {
+      const cur = q.pop() as number;
+      for (const step of grid.neighbours[cur] as readonly LatticeNeighbour[]) {
+        if (comp.has(step.to)) continue;
+        comp.set(step.to, id);
+        q.push(step.to);
+      }
+    }
+  }
+  const rows: { x: number; z: number; comp: number; nbrs: string[]; reachable: boolean }[] = [];
+  for (let n = 0; n < grid.count; n += 1) {
+    if (!comp.has(n)) continue;
+    rows.push({
+      x: grid.xs[n] as number,
+      z: grid.zs[n] as number,
+      comp: comp.get(n) as number,
+      reachable: seen.has(n),
+      nbrs: (grid.neighbours[n] as readonly LatticeNeighbour[]).map(
+        (s) => `${(grid.xs[s.to] as number).toFixed(1)},${(grid.zs[s.to] as number).toFixed(1)}`,
+      ),
+    });
+  }
+  return rows;
+}
+
+/** TEMP diagnostic: which screen refuses a given axis-aligned leg. */
+export function debugLegScreens(
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+): unknown {
+  const railSide = railInfoAt(ax, az).side as 1 | -1;
+  return {
+    leg: `${ax},${az} -> ${bx},${bz}`,
+    streetClear: streetSegmentClear(ax, az, bx, bz),
+    ring: segmentClearOfRing(ax, az, bx, bz),
+    railSide: segmentHoldsRailSide(ax, az, bx, bz, railSide, RAIL_CLAMP_DISTANCE - 0.1),
+    ramp: !segmentCutsABridgeRamp(ax, az, bx, bz),
+    slide: slideCorridorOverlap(ax, az, bx, bz),
+    cruiser: cruiserCorridorOverlap(ax, az, bx, bz),
+    sideA: railInfoAt(ax, az).side,
+    sideB: railInfoAt(bx, bz).side,
+  };
+}
+
+/** TEMP diagnostic: why a lattice point is not a node. */
+export function debugNodeScreens(x: number, z: number): unknown {
+  const rail = railInfoAt(x, z);
+  return {
+    at: `${x},${z}`,
+    streetClear: streetSegmentClear(x, z, x, z),
+    inRing: Math.hypot(x - PLAZA.x, z - PLAZA.z) < RING_RADIUS + 1,
+    onMasonry: pointStandsOnBridgeMasonry(x, z),
+    railDist: rail.dist,
+    railClamp: RAIL_CLAMP_DISTANCE,
+    side: rail.side,
   };
 }
