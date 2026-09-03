@@ -5397,3 +5397,253 @@ seed depends on.
 `debugEdgeWhy` restates `edgeOk`'s clauses because `edgeOk` is a closure inside
 `streetLatticeSearch` and cannot be called from outside — **if `edgeOk` gains
 or loses a clause, that probe is wrong and must be changed with it.**
+
+---
+
+# HANDOVER — 3 Sep, end of the tenth leg
+
+**The agent that wrote this ran `claude-opus-5[1m]` (Opus 5, 1M context).**
+Per the rule added to `CLAUDE.md` today, a replacement runs the same model as
+the agent it replaces, and this line exists so the next Overseer can check.
+**This work was originally assigned to a Fable agent**; ten Opus replacements
+were spawned in a row without anyone checking. Your successor is Fable — write
+for a reader who has none of your context and is not the same model as you.
+
+Read this section first. Everything above it is the archaeology.
+
+## STOP — read before doing anything
+
+**Jim halted this work.** His words, 3 Sep: *"our approach as a whole is
+wrong"*, *"we are polishing a turd"*, *"stop all work immediately"*. No PR is
+open, nothing is merged, and **nothing on this branch should be continued
+without him saying so.** The architectural reading at the bottom of this
+section is why he is right; read it before you touch a line.
+
+## The one unmeasured commit
+
+`gate: a handover no connector can serve walks to the nearest ring-reachable
+node` is **pushed and UNVERIFIED.** Do not treat it as good.
+
+- What it does: after all six screened connector rungs fail, the gate corridor
+  walks (`relayPolyline`, axis-aligned, held to its own rail side) to the
+  nearest node the ring can actually reach; fully screened over every target
+  first, then one pass per crossing site with that site exempted by identity.
+- What is known: `tsc --noEmit` exit 0; seed 5's paving went from **two
+  components (the front gate alone) to one**, and seed 5 turned green on
+  `check:park`.
+- **What is not known:** the sixteen-seed sweep reached **14 of 16** before it
+  was stopped. The two never run are **428 and 451**. `test:procgen` was
+  started for this commit and **never finished** — there is no procgen number
+  for it at all.
+- Of the 14 that did run: canonical, 5, 24, 115, 128, 131, 208, 267, 274, 346
+  exit 0; 11, 225, 288, 326 exit 1; **`lc=0` on all fourteen**. Nothing moved
+  except seed 5.
+
+To finish it:
+
+```
+bash scripts/tmp-sweep2.sh                 # all sixteen, lc column included
+pnpm run test:procgen                      # never pipe through head/tail
+```
+
+and set-diff both against the verified numbers below. **If anything other than
+seed 5 moves, revert the commit** — a change that costs a seed is not kept.
+
+## Verified state (the commit before the gate one)
+
+Everything here was measured by this agent, both columns, against `bee8e8c0`.
+
+- `check:park`, sixteen seeds: **11 green, 10 stranded waypoints,
+  `lc = 0` on all sixteen.** Not green: 5 (2), 11 (1), 225 (2), 288 (2),
+  326 (3).
+- `test:procgen`: `Test Files 5 failed | 23 passed (28)`,
+  `Tests 6 failed | 1404 passed (1410)`.
+- `pnpm run check` — **exit 0, the whole 47-step chain**, including the three
+  reds an earlier leg had attributed to #474. `package.json` is byte-identical
+  to `bee8e8c0`, so nothing was dropped from the chain to achieve that.
+- `pnpm run build` exit 0, `pnpm exec tsc --noEmit` exit 0.
+
+**The violation SET, not the count** — the count has misled twice on this
+branch already:
+
+```
+seed 5   > every street sits on the shared 12 m lattice
+seed 5   > no paved path stops anywhere but a destination     <- the gate commit targets this
+seed 11  > every street sits on the shared 12 m lattice
+seed 267 > no two close destinations are left with a wildly disproportionate paved detour
+seed 288 > no paved path stops anywhere but a destination
+seed 346 > no two close destinations are left with a wildly disproportionate paved detour
+```
+
+**The handover this leg received quoted a different set of nine and it was
+stale.** Its baseline *count* (9 failed | 1401 passed) was right; its list —
+`pathsRunOnGridAxes` on 131/208/225/346/451, a tree clause on 128 — did not
+match a single failure in either of this agent's own runs. **Re-measure the
+set yourself before believing any list in this file, including this one.**
+
+## Refuted hypotheses — do not re-run any of these
+
+This list is the most valuable thing on the branch. Each line is a real
+measurement that killed a plausible idea.
+
+**Killed this leg:**
+
+| hypothesis | what killed it |
+|---|---|
+| Seed 326's bridge-foot ladder stops at `> 0` ("a link was made") and needs a better predicate | **The deck edge is added to every foot unconditionally**, so a foot with *no connector at all* still reads `links: 1`. `tmp-footside.mts` counts connectors with deck edges excluded: 326's near foot is `conn=0`. Every rung returned zero — there was no link for a predicate to reject, and the specified fix would have changed nothing |
+| A foot should climb rungs until it reaches the largest component on its own side of the rail | Its own control: canonical builds and crosses all four of its sites while **three of its eight feet sit in a pocket**, two of them with zero connectors. Not a necessary condition for a working bridge; a ladder demanding it would fire the own-site exemption pool-wide |
+| The gate's rescue walk works fully screened | `tmp-gaterelay.mts` on seed 5: `all: NO WALK`, `none: 4 points, 28.7 m`. Predicted wrong, recorded wrong |
+
+**Killed by earlier legs** (numbers from their own runs, not re-verified here):
+
+| hypothesis | what killed it |
+|---|---|
+| The stranded district hangs off one articulation point | 29 `poiGraph` edges join it to the rest; closest cross-component pair 3.12 m |
+| The waypoint graph cannot span a bridge ramp | Both branches build the same 3 bridges at the same sites; 94 of 164 outside-the-loop seeds are in the main component |
+| `routeCurve`'s fillet strays onto ground the polyline cleared | Parapet crossings on seed 225: control 5, drawn 5 — identical |
+| Forbid the whole reservation (`inner = 0`) with no approach exemption | Seed 5 gained `route.unreachable: 5` — five destinations no child can reach |
+| Hand a bridge foot its own-site exemption up front | Seed 11 `2 -> 22` stranded, seed 208 `0 -> 3`. **The exemption must always be the LAST rung** |
+| Widen the exempt rungs to relax 1 and 2 | Neutral on all sixteen. Seed 288's foot is cut by a *different* site's reservation, which no own-site exemption can reach |
+| Add the four lines grazing each site's footprint to `relayPolyline` | Neutral on every seed measured |
+| Apply grid discipline in `relayPolyline` unconditionally | Stranded 45 -> 34 but green 9 -> 7; the ladder form was kept instead |
+| Widen `footprintsOverlap` to the reservation | Seed 288 loses a bridge, `route.unreachable: 2` |
+| Make the arrival lead the grid node | Loses doors outright — seed 131's hotel had a clean 7.1 m run to the door and no route at all to the point in front of it |
+| Forbid a route passing through a door node | Cuts the park into islands; priced instead |
+| Price `privateLineRun` / price both elbow terms | Cost two greens and produced a 292 m walk to a destination 16.8 m away |
+
+## What is not fixed
+
+One line per cause. **None of these is bridge or level-crossing work.**
+
+- **267 and 346 — the detour clause** (`no two close destinations are left
+  with a wildly disproportionate paved detour`). Both seeds are `check:park`
+  **green**; this is procgen-only. Instrument on the branch:
+  `LGP_CONNECT_TRACE`. Untested hypothesis from an earlier leg: the elbow
+  builder takes the cheaper of two corners — try the other one, then price a
+  rescued tap above a straight one.
+- **288 — the far quarter has three destinations and zero paving.**
+  `check:park poi.stranded: 2`, plus `noPathEndsNowhere`. Diagnosed by an
+  earlier leg; **start at `footprintsOverlap` in `crossingPlanSolve.ts`**.
+  Note the refuted row above: widening it to the reservation costs 288 its
+  bridge. Ruled the Overseer's to allocate, not this branch's to build.
+- **326 — three near-miss doormats**, all one pocket at `stall.facePaint`:
+  `(35.1,33.7) nbrs=0` 0.36 m from its own paving, `(36.1,36.0) nbrs=1`
+  1.01 m, `(35.6,37.7) nbrs=1` 0.30 m, against control rows at nbrs 10–15.
+  `debugRelaxedDoors` names one failed door, `exit-railRace!`.
+- **225 — `poi.stranded: 2`** on `check:park`. An earlier brief attributed a
+  stable 16.29 m `pathsRunOnGridAxes` diagonal on this seed to **another
+  branch's fix — do not claim it**. Recorded honestly: *that clause did not
+  appear in either of this agent's procgen runs at all*, so either it has
+  moved or the attribution is stale. Measure before acting.
+- **5 and 11 — `streetsShareLatticeLines`**, private-line runs. Unrelated to
+  the gate work; stage 2 already owed a rewrite of that invariant (it must
+  admit half-pitch runs by name and stay at least as strong, never widen a
+  tolerance).
+
+## Probes still in the tree, and what is NOT a probe
+
+Everything named `scripts/tmp-*.mts`, `scripts/tmp-sweep*.sh`, and every
+`export function debug*` in `src/world/paths.ts` is temporary and comes out in
+the commit that opens a PR — **not before**, because they are the only way any
+of this is diagnosable.
+
+Added this leg: `tmp-footside`, `tmp-footjoin`, `tmp-plazafoot`, `tmp-sweep2.sh`,
+`tmp-gateisland`, `tmp-eastofgate`, `tmp-edgewhy`, `tmp-comp5`, `tmp-gaterelay`,
+and the exports `debugFootSideBackbone`, `debugFootJoin`, `debugGridIslands`,
+`debugLatticeRow`, `debugEdgeWhy`, `debugGateRelay`.
+
+**These are NOT probes and must stay:** `drawsAsScreened`,
+`ARRIVAL_LEAD_REACH`, `privateLegOf`. Also `strandedDoorsOfLastSolve`, which
+the invariants read.
+
+**`scripts/tmp-stoneground.mts` goes LAST**, and it must be re-run across all
+sixteen seeds after **any** change to a reservation or to
+`bridgeFootprint.ts` — it is the instrument that found built stone standing on
+ground no ribbon was ever kept off, and it is the only thing that can see it.
+Last verified run: 16 seeds, 29 bridges, **0 deck samples on open ground**,
+both controls passing on every seed.
+
+Two traps in the instruments themselves:
+
+- **`debugEdgeWhy` restates `edgeOk`'s clauses** rather than calling it —
+  `edgeOk` is a closure inside `streetLatticeSearch` and cannot be reached from
+  outside. It is two definitions of one thing, kept in step by hand, and
+  labelled as such. **If `edgeOk` gains or loses a clause, that probe is wrong
+  until you change it too.**
+- **`debugGridReach`'s ASCII map cannot render a two-digit component id.** It
+  takes two characters and silently shifts the whole row, so the picture
+  misreads with nothing to warn you. Use `debugGridIslands`, which prints
+  coordinates.
+
+## The architectural reading — why Jim stopped this
+
+This is the part to read before writing any code, and it is why the work above
+is worth less than it looks.
+
+**The park is not generated; it is assembled from layers drawn on separate
+sheets of tracing paper.** All crossings are planned. Then the lattice. Then
+all paths are routed. Then bridges are built onto the paths. Then fences are
+placed along the paths. **Each layer treats the previous layer's output as
+immovable fact**, so a later layer can only ever *discover* an earlier layer's
+mistake — never prevent it, and never fix it. Its only available move is to
+route around it.
+
+That is why this codebase has accumulated **six separate backtracking
+mechanisms doing the same job at six different seams**: the bridge-foot join
+ladder, the gate handover ladder, the door arrival ladder, `relayPolyline`'s
+rescue, the grid-discipline ladder, and exemption-by-identity in three places.
+**Those ladders are not features. They are scar tissue from the ordering.**
+
+Underneath it: **there is no single representation of the park so far.** There
+is a collision world, a plot list, a crossing plan, a lattice, a path graph, a
+set of reservations, and a scenery pass — **seven partial models of the same
+ground**. Every bug fixed in the last two days is two of those seven
+disagreeing. `CLAUDE.md`'s most-repeated complaint, "two definitions of one
+thing kept in step by hand", is filed as a recurring bug; **it is not a bug,
+it is the architecture.**
+
+Both defects this leg fixed are that shape, and **both fixes are patches at a
+seam, not root fixes**:
+
+- Seed 326's crossing planner *proved* a site was good against its own private
+  obstacle list — boundary, plots, stations, rail corridor. **It did not know
+  the statue ring existed**, so it put a bridge foot inside the plaza, and
+  nothing found out until the path router could not draw anything to it. Then
+  the router did not report the impossibility; it drew a ribbon over live rail.
+- Seed 5's front gate was cut off because **a bridge's reserved ground, sized
+  by the bridge system, severed a row of the path lattice seventeen metres
+  away** — the row the gate stands on. Neither system knew the other was there.
+  And the reservation was lengthened by an *earlier, correct* fix. One agent's
+  right answer became another's defect.
+
+The mechanism, stated so it cannot be missed: **every generator carries its own
+hand-written list of what to avoid.** `edgeOk` has one. `crossingPlanSolve` has
+a different one. `relayPolyline` has a third. `Scenery` places fences off paths
+with a fourth — which is how it once put a fence through a path 0.8 m from the
+one it was bordering. **Nobody asks the world; everybody asks their own list.**
+
+`CLAUDE.md` already forbids exactly this, in almost those words, and it was
+ignored for two days by agents who had read it. **That rule cannot survive as
+prose.** In whatever replaces this, there must be *no other way* to ask — if it
+is possible to place something without consulting one live world, someone will,
+and this file will be written again in three weeks.
+
+What Jim asked for on 2 September and never got: *"it shouldn't be make paths
+and then put bridges on after the fact, these need to be considered together
+from the start."* This branch is named `grid-paths`; it was scoped as a path
+rewrite. **The problem was never confined to paths, so the scope was wrong on
+the day it was written.** A bridge is not a thing added to a path — a crossing
+is what happens when a path and a railway both want the same ground and neither
+yields, and that negotiation should produce the deck, the ramps, the width and
+the claimed ground in one decision. That piece has never existed.
+
+Worth keeping across any rewrite: **the invariants and the probes.** They are
+the only reason any of this was diagnosable, and they are the honest test of
+whatever replaces the pipeline. The geometry and the art are fine — bridges,
+ribbons and stone all look right. **This was never a drawing problem. It is a
+placement problem.**
+
+One risk to state plainly: a rewrite handed to a fleet becomes the same object
+again, because parallel agents working on shared ground manufacture exactly
+these seams. Two agents' correct fixes collided this week. **This wants one
+design, held tightly, before anyone implements in parallel.**
