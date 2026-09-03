@@ -471,8 +471,47 @@ district joined up and its two parallel arterials are gone — but applying it
 unconditionally starves the doors that genuinely need a longer step out, and
 they fall all the way to the straight-line last resort.
 
-**This is the same shape as the approach exemption two commits earlier, and it
-takes the same answer: a backtrack ladder, not a threshold.** Try the walk
+**LADDER BUILT AND MEASURED — KEPT.** Discipline tried first over every
+bridgehead and margin; the private line gets its full length only if all of
+that finds nothing. `tsc --noEmit` exit 0. Sixteen seeds, against the
+approach-exemption baseline:
+
+| seed | baseline | discipline only | **ladder** | |
+|---|---|---|---|---|
+| canonical | 4 | 7 | **4** | recovered |
+| 5 | 10 | 10 | 10 | |
+| 11 | 22 | 4 | **3** | **-19, the target** |
+| 24 | 3 | 3 | 3 | |
+| 115 | 0 | 0 | 0 | green |
+| 128 | 0 | 0 | 0 | green |
+| 131 | 0 | 0 | 0 | green |
+| 208 | 0 | 0 | 0 | green |
+| 225 | 2 | 2 | 2 | |
+| 267 | 0 | 2 | **2** | **the one regression; did NOT recover** |
+| 274 | 0 | 0 | 0 | green |
+| 288 | 3 | 3 | 3 | |
+| 326 | 1 | 1 | 1 | |
+| 346 | 0 | 0 | 0 | green |
+| 428 | 0 | 2 | **0** | recovered, green |
+| 451 | 0 | 0 | 0 | green |
+
+**Stranded 45 -> 28. Green 9 -> 8.** Better than discipline-alone on both
+counts (that was 34 / 7).
+
+**Seed 11 is what this was aimed at and it moved: 22 -> 3.** The island is
+gone, the district joined, and `spur-hotel`'s 39.7 m private arterial with
+`spur-stall.skyCruiser`'s 24 m run 0.8 m beside it are no longer drawn.
+
+**The one regression, seed 267 (0 -> 2), is NOT starvation** — and that is
+diagnostic. Canonical and 428 both recovered when the fallback rung was
+added, which is what starvation looks like. 267 did not, so on that seed the
+*disciplined* walk **succeeds** and simply yields a worse route than the
+undisciplined one did. Chase it by diffing 267's route set between the two
+(`disciplined = true` vs `false`), not by touching the cap.
+
+**Earlier reasoning, kept because it was right:** this is the same shape as
+the approach exemption two commits earlier, and it takes the same answer: a
+backtrack ladder, not a threshold. Try the walk
 under grid discipline; only if that finds nothing, allow the private line its
 full length — which is still far better than the straight-line last resort.
 Discipline is then kept everywhere it is achievable, which is everywhere the
