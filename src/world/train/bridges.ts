@@ -989,7 +989,11 @@ function buildShellGeometry(
   // previous ring's vertices per strip, so strips join into quads.
   interface Ring {
     readonly outerBottom: [number, number]; // [side +1, side -1]
-    readonly outerTop: [number, number];
+    // No `outerTop`. There was one, built at the parapet top and consumed by no
+    // quad at all — it was an exact duplicate of course 0's top vertices, and it
+    // is what made #489 look for a while like the top of the wall was drawn when
+    // it was not. A vertex nothing reads is a false signal to the next person
+    // holding a profiler or a diff, so it goes rather than staying as decoration.
     /** The coursed outer face: per side, two vertex indices per course (its
      * own top and bottom, at its own recess). See {@link COURSE_HEIGHT}. */
     readonly courses: [number[], number[]];
@@ -998,6 +1002,9 @@ function buildShellGeometry(
     readonly courseYs: [number[], number[]];
     /** This ring's parapet top, per side — the plane the coping strip caps. */
     readonly top: [number, number];
+    /** This ring's road surface — with {@link top}, how much parapet there
+     * actually is here, which is what decides whether a coping block is laid. */
+    readonly surface: number;
     /**
      * The terrain at this ring's own outer face, per side — or `-Infinity`
      * inside the tunnel, where the flank stands in open air over the railway
@@ -1188,13 +1195,10 @@ function buildShellGeometry(
         vertex(outerPlus.x, bottomPlus, outerPlus.z, u, bottomPlus / TEXTURE_METRES),
         vertex(outerMinus.x, bottomMinus, outerMinus.z, u, bottomMinus / TEXTURE_METRES),
       ],
-      outerTop: [
-        vertex(outerPlus.x, parapetTopPlus, outerPlus.z, u, parapetTopPlus / TEXTURE_METRES),
-        vertex(outerMinus.x, parapetTopMinus, outerMinus.z, u, parapetTopMinus / TEXTURE_METRES),
-      ],
       courses: [coursesPlus.column, coursesMinus.column],
       courseYs: [coursesPlus.ys, coursesMinus.ys],
       top: ringTop,
+      surface,
       groundOuter: inTunnel
         ? [-Infinity, -Infinity]
         : [terrainHeight(outerPlus.x, outerPlus.z), terrainHeight(outerMinus.x, outerMinus.z)],
