@@ -88,6 +88,50 @@ standing between it and somebody lengthening the swing later. A tilt still
 lifting has no such problem: "up the screen" is the same ground direction at
 every tilt.
 
+## Round two — Jim played it and asked for two things
+
+> *"as the child gets out of the bus I want the camera much closer to them, and
+> then the camera to follow them as they go under the arch"* — and the
+> clarification, *"ie, the camera goes under the arch as well."*
+
+**A bug this found first.** `Game.tick` had **two writers** of `IsoCamera`'s
+single focus override: the arrival's door beat, and the keychain rack's picker,
+whose branch ends in an unconditional `clearFocusOverride()` for "my picker is
+shut". That ran *after* the arrival's write and threw it away every frame.
+Measured on the running game: through the whole door beat the camera orbited the
+**player** at z 67.70 while `doorFocus` sat at z **64.34**. The shot Jim watched
+was never the shot the code described. Both now claim into one value, written
+once, below both of them.
+
+| change | before | after |
+|---|---|---|
+| door framing | `CAT_BUS_TOP` — the whole vehicle | `TALLEST_CHILD_HEIGHT`; she fills **45%** of frame height |
+| stand-back at the arch | 20.8 m, outside the gateway | dives to **4.0 m** and passes *through* the opening |
+| `SQUARE_ON_TO_THE_DOOR` | the gate→stop line | `BUS_FACING` — the bus's own facing |
+
+**The camera now physically goes through the arch**, and its path has to fit a
+real hole. Bounded by the arch's own published clearances, both asserted:
+**0.62 m** under the 3.60 m crossbar, **0.92 m** inside the 7.00 m opening.
+
+The two instants are solved off the very bezier `walkIn` walks — she is under
+the arch **44%** of the way through the walk, so a camera timed to the phase
+would have pulled away long before she got there.
+
+### The one blemish, measured rather than hidden
+
+There is a band of stand-backs, roughly **14 m down to 6 m**, in which the
+orthographic near plane lies along the length of the parked bus and saws it open
+down the left of frame. Photographed at 20.7 m (clean), 10.5 m (a wedge of
+cut-open bus), 5.6 m (clean again, bus gone from frame).
+
+**It cannot be removed.** The eye must finish between the bus and the park to be
+a few metres behind her, and the sideroom limit at the arch forces the final
+stand-back *below* the band's floor — so the dive crosses it whatever it does.
+It is crossed quickly instead: the dive is a quarter of the camera's own lag,
+**~0.25 s**, and `smoothstep` is fastest in the middle of its range, which is
+where the band sits. What survives is a few frames of a cut edge at the extreme
+left while the subject is centred under the sign.
+
 ## Watched, as a player
 
 Five parks, end to end, at 960×600 through a real-GPU headless Chromium:
