@@ -905,11 +905,24 @@ function buildFoliage(collision: CollisionWorld): {
   // 4200 is the smallest of these at which **no seed is thinner than it was
   // before #500** (295 >= 286, 266 >= 263, 201 ~ 203, and s24/s131 well up),
   // which is the honest bar: a fix for bushes growing through fences should
-  // not also quietly strip a fifth of the park's ground cover. It costs
-  // nothing measurable — headless build of seed 11 came out at 2.38 s and
-  // 1.78 s at 4200 against 2.47 s and 2.00 s at 1400, i.e. inside the noise,
-  // because the extra work is a bounded scan per candidate and the bush
-  // colliders are registered after the loop rather than inside it.
+  // not also quietly strip a fifth of the park's ground cover.
+  //
+  // **What it costs, stated as measured rather than as hoped.** Headless
+  // `buildMs`, one sample either side, so indicative only: seed 11 came out at
+  // 2.38 s and 1.78 s at 4200 against 2.47 s and 2.00 s at 1400 — no
+  // regression, faster on one run — and three other seeds likewise moved
+  // within noise. **One seed did not: 1888 ms to 2291 ms, +21%.** So the
+  // honest summary is "no measured regression on four parks and about a fifth
+  // of a second on the fifth", and the first draft of this comment said
+  // "nothing measurable", which was true of four parks and false of the one
+  // that mattered. Nobody has taken repeated samples. If that fifth of a
+  // second ever matters, the lever is this number and the table above says
+  // what each value buys.
+  //
+  // It is not more draw calls either way: bushes are a single `InstancedMesh`,
+  // so extra clumps cost vertices and nothing else. The extra work per
+  // candidate is a bounded scan, and the bush colliders are registered after
+  // the loop rather than inside it, so the scan does not grow as clumps land.
   //
   // Locality is unaffected by the number: candidate k is evaluated if and only
   // if k < budget, whatever the budget is.
