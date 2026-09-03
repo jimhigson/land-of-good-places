@@ -3030,3 +3030,100 @@ item on the queue anyway, so the two should be settled together.
 If it turns out they are independent and 267 cannot be recovered, revert the
 ladder: **+1 stranded for four invariant lines is not a trade this branch
 should make**, on the ranking it has just been endorsed for.
+
+---
+
+## Seed 267: root-caused to a ribbon through the statue circle. 11/16 GREEN, stranded 8.
+
+### The instrument named it in one run, and the control discriminated completely
+
+`scripts/tmp-lonely.mts` on 267 (six stranded, two groups of three):
+
+```
+X (20.7,53.5) nbrs=1 nearestPaving=1.02m (spur-stall.facePaint)
+X (20.2,50.3) nbrs=1 nearestPaving=2.21m (spur-stall.facePaint)
+X (22.4,52.8) nbrs=2 nearestPaving=0.41m (spur-stall.facePaint)
+X (-2.1, 1.5) nbrs=2 nearestPaving=1.10m (street-tap-north)
+X (-3.2, 3.3) nbrs=2 nearestPaving=0.30m (street-tap-north)
+X (-3.2, 7.3) nbrs=2 nearestPaving=0.07m (street-tap-north)
+
+control (reachable, same columns):
+. (-3.2,-1.9) nbrs=15   . (-3.2,10.9) nbrs=12   ... both on street-tap-north
+```
+
+The control is the whole finding: **the same ribbon is reachable at
+`z = -1.9` and `z = 10.9` and stranded in between.** A hole in the middle of a
+lane, not a starved end.
+
+Distances from `PLAZA`, which is `(-3.23, 4.46)` on this seed:
+
+| stranded | 1.16 | 2.84 | 3.17 |
+|---|---|---|---|
+| **reachable** | **6.36** | **6.44** | **6.74 / 6.83** |
+
+**Every stranded sample inside 3.2 m, every reachable one outside 6.3 m.** The
+hole *is* the statue ring's interior: `street-tap-north` is drawn **straight
+through the statue circle, within 1.16 m of the statue**.
+
+### The cause: the gateway rescue's obstacle list omits the ring it stands on
+
+The tap rescue screened with `streetSegmentClear` and `segmentHoldsRailSide`
+and nothing else — **a hand-picked obstacle list missing the one obstacle the
+tap is standing on**, which is verbatim CLAUDE.md's standing procgen rule.
+
+`segmentClearOfRing` takes a `margin` now (one owner, parameterised, the same
+shape as `bridgeScreenHalfAcross`) and the gateway legs pass **0**: the leg
+legitimately *starts* on the rim at exactly `RING_RADIUS`, so the ordinary 0.5
+clearance would refuse every gateway there has ever been. **Touching the rim
+is what a gateway is for; entering the interior is the defect.**
+
+### This also RETIRES the standing "try the other corner" hypothesis
+
+Do not spend a run on it. Two reasons, both structural:
+
+1. **The two corners always tie.** Both are the same Manhattan length, so
+   `cost` is identical and the "cheaper of two" was never a choice — only an
+   iteration order.
+2. **A node roughly collinear with the plaza and the rim drives *both*
+   corners through the middle**, which is exactly seed 267's geometry. No
+   corner choice could have fixed it.
+
+### Measured, all three columns
+
+| | baseline (`df7ecac4`) | **now** |
+|---|---|---|
+| `check:park` green | 10 | **11** |
+| `check:park` stranded | 13 | **8** |
+| `test:procgen` | 11 failed / 1398 passed | **6 failed / 1403 passed** |
+| `tsc` / `typecheck:test` / `build` | — | **0 / 0 / 0** |
+
+Per seed: **267 3 -> 0 (green)**, **326 1 -> 0 (green)**, **11 3 -> 1**,
+**451 0 -> 1 (lost green)**, everything else identical.
+
+**This is the first honest 11 of 16 on this branch.** The earlier 11/16 was
+withdrawn because it was measured on a build with an unscreened ribbon in it;
+this one is not.
+
+### The two new invariant failures, reported not absorbed
+
+`test:procgen` is 11 -> 6, but two of the six are **new**:
+
+- **`streetsShareLatticeLines` on seed 128** — one new lattice seed (5 and 11
+  were already failing). From the arrival ladder's elbows, not the ring fix.
+- **`detourRatiosStayReasonable` on seed 267** — new, and caused by the ring
+  fix itself: the tap now goes round the statue instead of through it, so some
+  pair of close destinations has a longer paved detour than before. Note the
+  path it replaced was through solid ground, so the *old* ratio was measured
+  against a route nobody could walk.
+
+Both are named, neither is absorbed, and both belong to the next leg.
+
+### Still owed
+
+- Seed 451's lost green (0 -> 1) — the one seed worse than baseline.
+- `pathsRunOnGridAxes` on 225 — the last of the five.
+- `streetsShareLatticeLines` on 5, 11, 128.
+- `noPathEndsNowhere` on 288.
+- `detourRatiosStayReasonable` on 267 (new, above).
+- Stage-2 invariant (b); probe deletion (`tmp-stoneground.mts` last, re-run
+  after any reservation or `bridgeFootprint.ts` change); the rebase.
