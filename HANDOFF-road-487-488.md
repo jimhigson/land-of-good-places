@@ -354,3 +354,86 @@ gate below, and this branch has now oscillated through three values of
 
 - `check:cat-bus` **1** — one fault, now correctly diagnosed as the door's
   position rather than the stagger's pacing.
+
+
+---
+
+# The outset is derived now, and the stagger fault is pinned (3 September)
+
+## The road
+
+`ENTRANCE_ROAD_OUTSET` is no longer "as close to the wall as a road can be laid".
+It is **derived from the door**: `DOOR_PAVEMENT + BUS_DOOR_INBOARD` =
+`CHILD_FOOTPRINT * 2 + 4.66` = **8.26 m**. The floor (the door needs two children
+abreast of pavement before the arch) and the ceiling (the outer kerb must stay
+inside `RIM_OUTSET_START`, 8.11) **cross by 0.15 m**, which is the honest
+statement of how full the apron is; the road takes the floor and its outer kerb
+overhangs the very start of the rim by 15 cm, where the fall is under a
+centimetre.
+
+**Numbers the arrival-camera branch needs (measured, `scripts/probe-door.mts`):**
+
+```
+doorDrop local  x -4.66 z -2.55
+bus centre     -2.58, 67.96   facing -97.4 deg
+door drop      0.55, 63.67
+door -> gate   3.71 m
+```
+
+So the **drop is (0.55, 63.67)**, not near z 64.5, and **D = 3.71 m**, not the
+4.50 m the camera branch assumed — worse, not better. Its own preferred fix
+(moving the shot's focus a metre or two out along the bus) is therefore load
+bearing rather than optional. The stop is *not* a free parameter for me: it is
+pinned between the door's pavement and the rim, with 0.15 m of overlap and no
+slack to give.
+
+Their second finding is right and matters here: `SQUARE_ON_TO_THE_DOOR_DEGREES`
+deriving from the gate->stop line rather than the bus's own facing now diverges
+by **7.4 deg** on this geometry (bus facing -97.4 deg against the -90 deg that
+line implies).
+
+## Gates at this geometry
+
+- `check:entrance-road` **0** — 0 legs hit on all 16 seeds. The ride absorbed it
+  by nudging legs **inward**, into the band between the road and the wall.
+- `check:rail-race` **0** — the ride still races with its supports moved.
+- `tsc` 0, `typecheck:test` 0, `check:park-map` 0, `check:arrival-completes` 0.
+- `test:procgen`, `check:coplanar`, full `check` — still not run at this outset.
+- `check:cat-bus` **1**, one fault, diagnosed below.
+
+**One caveat on the control, found by watching it move.** The control's hit count
+fell from 96 to 35 as the trestles moved out of the road, because it sweeps the
+*old* line against the *new* placement. It still discriminates (35 hits, worst
+2.83 m) so the runs above stand, but if the ride ever moved its legs clear of the
+old line too the control would read zero and void a perfectly good run. The
+stronger form is to place trestles once with the corridor disabled and sweep
+against *those*. Worth doing before this merges.
+
+## The stagger: pinned, and it is a real pre-existing bug
+
+Not systemic. `children left over 8.3 s, tightest gap 0.02 s` — the spread is
+right for eleven children; **one pair** is too close.
+
+A child leaves the bus at `delay + aisleSeconds`. `KID_DELAYS` staggers the
+`delay` — when they *start* down the aisle — but `aisleSeconds` is per-child,
+because it is how far their own seat is from the door. So a child with a short
+aisle walk catches the one in front with a long one: `delay_n + 2.0` against
+`delay_n + 0.64 + 1.4` is 0.04 s apart, which is exactly the shape of what is
+measured.
+
+**The queue is paced at the wrong end** — at the seat, not at the door.
+
+Why it surfaced now: it did not become true, it became *visible*. `check:cat-bus`
+was measuring an axis-aligned box round the bus, which is ~3x its real footprint
+at 45 deg; children were counted as still aboard well after they had stepped
+down, which smoothed the difference away. Fixing the instrument to ask in the
+bus's own frame is what exposed it. Moving the door from 1.18 m to 3.71 m from
+the arch improved it (7.15 -> 5.27 m/s) but cannot fix it, because the cause is
+not the geometry.
+
+**The fix** is to stagger the *door* rather than the seat: choose each child's
+delay so that `delay_n + aisle_n >= delay_{n-1} + aisle_{n-1} + KID_DOORWAY_GAP`.
+It needs `KID_DELAYS` to stop being module-scope (it is computed before seats are
+known, and `BUS_WAITS_FOR_THE_REST` reads it), so it becomes per-instance work in
+`ArrivalSequence`'s constructor once the seats exist. Not a change to make in the
+last five minutes of a session, which is why it is written down instead.
