@@ -2364,3 +2364,46 @@ recorded beside the transcript.
 the reservation is already on the refuted list (288 loses a bridge,
 `route.unreachable: 2`), and on this measurement there is nothing in either
 park for it to fix.
+
+### The sixteen-seed sweep found a REAL defect nothing has ever been able to see
+
+`scripts/tmp-stoneground.mts`, all sixteen seeds, both controls passing on
+every one (a bridge's own centre reports screened; a point 400 m outside the
+park reports open, so the query is not `true` everywhere).
+
+**Fourteen seeds clean. Two are not**, and the trespass is in the *`along`*
+axis every time — the built ramp running off the end of the reserved
+rectangle, with `across` comfortably inside the band:
+
+```
+seed 274  bridge#1 (site railD=312)  1295 deck samples,  50 on OPEN ground
+  trespass along [-18.36, -16.93]  across [-1.64, 0.44]
+  reservation   along [-16.90,  18.86]  across ±5.50        -> overruns by 1.46 m
+
+seed 326  bridge#0 (site railD=44)   1231 deck samples,  15 on OPEN ground
+  trespass along [ 15.93,  16.61]  across [-0.78, 1.00]
+  reservation   along [-18.86,  15.92]  across ±5.50        -> overruns by 0.69 m
+
+seed 326  bridge#1 (site railD=204)  1300 deck samples,  34 on OPEN ground
+  trespass along [ 17.39,  18.35]  across [-0.96, 1.18]
+  reservation   along [-18.86,  17.39]  across ±5.50        -> overruns by 0.96 m
+```
+
+**This is #414 exactly** — stone standing where a ribbon was never kept off —
+and it is the *third* face of the same two-definitions drift: the reservation's
+`along` extent is `DECK_HALF_LENGTH + the reach the site was PROVEN at +
+RAMP_SCREEN_MARGIN`, and `bridgeFootprint.ts` builds a ramp longer than the
+proof. Both seeds are `check:park` **green** and both **pass** the invariant
+that exists to catch this.
+
+**Why nothing could see it.** `builtMasonryStaysInsideItsReservation` sweeps
+`along` from `-(DECK_HALF_LENGTH + rampReachNeg)` to
+`DECK_HALF_LENGTH + rampReachPos` — it is bounded by the very rectangle it is
+supposed to be testing against, so an overrun leaves the sweep rather than
+failing it. It can only ever measure `across`. A check that is structurally
+incapable of failing in one of its two axes.
+
+**So the honest rewrite is a strengthening on both counts**, and it is not a
+relaxation of anything: it drops a clause that convicts disjoint neighbours of
+each other (seeds 5, 288 — measured, no defect in either park) and adds one
+that catches three real trespasses on two seeds nobody had ever looked at.
