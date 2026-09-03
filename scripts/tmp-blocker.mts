@@ -63,12 +63,19 @@ const report = (label: string, x: number, z: number): void => {
   for (const h of hits) console.log('   ', h);
 };
 
-// The worst point of the seed-11 spur-hotel blockage, and its two ends.
-report('BLOCKAGE peak', -42.81, 12.39);
-report('BLOCKAGE mid', -43.72, 18.22);
-// CONTROL: the transect measured these CLEAR.
-report('CONTROL clear (lane at=195)', -44.4, 22.6);
-report('CONTROL clear (lane at=217)', -42.2, 8.5);
+// Seed 11's spur-hotel blockage, kept because it documents that finding:
+//   report('BLOCKAGE peak', -42.81, 12.39);  report('BLOCKAGE mid', -43.72, 18.22);
+//   report('CONTROL clear (lane at=195)', -44.4, 22.6);
+//   report('CONTROL clear (lane at=217)', -42.2, 8.5);
+//
+// Seed 451's spur-stall.spookyHouse lane, whose middle sample has nbrs=0
+// while its neighbours 2.37 m away are reachable. Transect says 1.85 m of the
+// 2.31 m chord is BLOCKED, peak push 0.82 m.
+report('BLOCKAGE peak', 32.82, -33.28);
+report('BLOCKAGE mid', 32.78, -32.82);
+// CONTROL: the transect measured these two CLEAR — the lane's own endpoints.
+report('CONTROL clear (lane at=14)', 32.7, -31.9);
+report('CONTROL clear (lane at=7)', 32.9, -34.2);
 
 console.log(`\ntotal colliders in the finished park: ${(() => {
   let c = 0;
