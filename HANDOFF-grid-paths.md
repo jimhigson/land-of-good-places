@@ -2584,3 +2584,23 @@ sound and passed two parks that were not, and the replacement reverses both.**
 The seed count moving was a consequence, never the goal — and it moved because
 two real defects were found and fixed, not only because two false ones were
 dropped.
+
+### This leg's gates, exit codes read and unpiped
+
+- `pnpm exec tsc --noEmit` **0**; `pnpm exec tsc --noEmit -p tsconfig.test.json`
+  **0**; `pnpm run build` **0**.
+- `pnpm run test:procgen` **exit 1**, `9 failed | 1400 passed (1409)` — down
+  from `11 failed | 1398 passed`. No new failure.
+- `pnpm run check` **exit 1**, on **`check:pet-slide`**, step 21 of 58:
+  `the nearest companion filled at least 1% of the chase frame on only 88% of
+  8 rasters, against 95% required`. Byte-identical to the figure the seventh
+  leg recorded on **#474 alone**, so it is the inherited red, not this leg's.
+  The twenty steps before it (including `tsc --noEmit` and `typecheck:test`)
+  all passed.
+- **The 37 steps after it are masked by the `&&` chain.** Because this leg
+  changes `paths.ts`, the path-relevant ones were run individually:
+  `check:park` **0**, `check:solve-cost` **0**, `check:waypoints` **0**,
+  `check:nav-routes` **0**, `check:path-preference` **0**, `check:park-map`
+  **0**.
+- `check:park` sweep, all sixteen seeds: **10 green, 13 stranded** — `diff`
+  against the `df7ecac4` sweep is **empty**.
