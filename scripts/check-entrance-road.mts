@@ -83,6 +83,9 @@ interface SeedReport {
   readonly control: boolean;
   readonly reach: number;
   readonly brow: number;
+  /** Road triangles drawn facing the ground rather than the sky. Must be zero. */
+  readonly downFacingTriangles: number;
+  readonly roadTriangles: number;
   /** Road vertices drawn outside the corridor the bus drives. Must be zero. */
   readonly strayVertices: number;
   readonly worstStray: number;
@@ -212,13 +215,48 @@ async function measureOneSeed(asControl: boolean): Promise<void> {
   let strayVertices = 0;
   let worstStray = 0;
   let spurGap = Infinity;
+  // **Which way does the road face?** Position alone cannot answer it, and that
+  // is not a hypothetical: every vertex of the kerb passed the corridor clause
+  // below, on all sixteen seeds, while the road was **invisible** — a swept
+  // ribbon inherited `PlaneGeometry`'s winding, came out facing the ground, and
+  // `FrontSide` culled the lot. A road you can drive on and cannot see is
+  // exactly "an assertion reporting success about something it is not
+  // describing", so the facing is now asserted rather than assumed.
+  let downFacingTriangles = 0;
+  let roadTriangles = 0;
   {
     const { Mesh } = await import('three');
     const at = new Vector3();
+    const triA = new Vector3();
+    const triB = new Vector3();
+    const triC = new Vector3();
+    const edge1 = new Vector3();
+    const edge2 = new Vector3();
+    const face = new Vector3();
+    /** Counts a mesh's world-space triangles, and how many point downwards. */
+    const countFacing = (mesh: { geometry: import('three').BufferGeometry; matrixWorld: import('three').Matrix4 }): void => {
+      const position = mesh.geometry.getAttribute('position');
+      const index = mesh.geometry.getIndex();
+      const count = index ? index.count : position.count;
+      for (let i = 0; i + 2 < count; i += 3) {
+        const ia = index ? index.getX(i) : i;
+        const ib = index ? index.getX(i + 1) : i + 1;
+        const ic = index ? index.getX(i + 2) : i + 2;
+        triA.fromBufferAttribute(position, ia).applyMatrix4(mesh.matrixWorld);
+        triB.fromBufferAttribute(position, ib).applyMatrix4(mesh.matrixWorld);
+        triC.fromBufferAttribute(position, ic).applyMatrix4(mesh.matrixWorld);
+        edge1.subVectors(triB, triA);
+        edge2.subVectors(triC, triA);
+        face.crossVectors(edge1, edge2);
+        roadTriangles += 1;
+        if (face.y < 0) downFacingTriangles += 1;
+      }
+    };
     park.scene.traverse((object) => {
       const mesh = object as InstanceType<typeof Mesh>;
       if (!mesh.isMesh) return;
       if (mesh.name === 'entrance-road-gateway') {
+        countFacing(mesh);
         // Continuity: the spur's outermost vertex has to touch the kerb, or a
         // child walking in from the bus steps over a strip of grass between two
         // slabs of road.
@@ -230,6 +268,7 @@ async function measureOneSeed(asControl: boolean): Promise<void> {
         return;
       }
       if (!mesh.name.startsWith('entrance-road')) return;
+      countFacing(mesh);
       const position = mesh.geometry.getAttribute('position');
       for (let i = 0; i < position.count; i += 1) {
         at.set(position.getX(i), position.getY(i), position.getZ(i)).applyMatrix4(mesh.matrixWorld);
@@ -244,6 +283,8 @@ async function measureOneSeed(asControl: boolean): Promise<void> {
 
   const report: SeedReport = {
     seed: PARK_SEED,
+    downFacingTriangles,
+    roadTriangles,
     strayVertices,
     worstStray: Number(worstStray.toFixed(2)),
     legs: legs.length,
@@ -302,6 +343,13 @@ async function sweepThePool(): Promise<void> {
   }
 
   for (const report of reports) {
+    if (report.downFacingTriangles > 0) {
+      failures.push(
+        `seed ${report.seed}: ${report.downFacingTriangles} of ${report.roadTriangles} triangles of the ` +
+          'drawn entrance road face the ground rather than the sky — the material is `FrontSide`, so ' +
+          'that much of the road is culled and a child looks straight through it at the grass',
+      );
+    }
     if (report.strayVertices > 0) {
       failures.push(
         `seed ${report.seed}: ${report.strayVertices} vertices of the drawn entrance road lie outside ` +
@@ -331,6 +379,10 @@ async function sweepThePool(): Promise<void> {
   process.stderr.write(
     `  control: with the corridor off the ride puts ${controlTotal} legs back in the bus's path across ` +
       `${pairs.length} seeds (worst ${controlWorst.toFixed(2)} m inside a bus) — the sweep can see a collision\n`,
+  );
+  process.stderr.write(
+    `  facing: ${reports.reduce((sum, r) => sum + r.roadTriangles, 0)} road triangles checked, ` +
+      `${reports.reduce((sum, r) => sum + r.downFacingTriangles, 0)} facing the ground\n`,
   );
   process.stderr.write(
     `  covered: ${pairs.length} seeds x 2 parks (real and control), ` +

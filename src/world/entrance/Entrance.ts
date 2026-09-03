@@ -821,6 +821,38 @@ function curvedRoadRibbon(
   }
   position.needsUpdate = true;
   uv.needsUpdate = true;
+
+  // **Every triangle has to be turned over, and without this the whole road is
+  // invisible.**
+  //
+  // `PlaneGeometry` is authored in the XY plane facing **+Z**, and its index is
+  // wound to be front-facing seen from there. The loop above keeps that index
+  // and rewrites the vertices into the **XZ** plane — rows running along the
+  // road, columns across it. Going from (right, up) to (across, along) flips the
+  // handedness of the surface, so every one of those triangles ends up wound the
+  // other way and the finished road faces the *ground*.
+  //
+  // Nothing about that is visible to a check that reads vertex positions —
+  // `check:entrance-road` proved all 1287 of them were inside the corridor and
+  // 0.06 m above the lawn, on all sixteen seeds, while the road could not be seen
+  // at all: `MeshToonMaterial` is `FrontSide`, so a road facing down is culled
+  // and you look straight through it at the grass. The only thing on screen was
+  // the faint band of its own shading. Measured before the fix: 2272 of 2272
+  // triangles facing down, mean vertex normal.y **-0.822**, against the gateway
+  // spur beside it — a plain `roadRibbon`, built in world space — at +1.000.
+  //
+  // `check:entrance-road` now asserts the drawn road faces the sky, which is the
+  // assertion that was missing rather than a second copy of this reasoning.
+  const index = geometry.getIndex();
+  if (index) {
+    for (let i = 0; i < index.count; i += 3) {
+      const second = index.getX(i + 1);
+      const third = index.getX(i + 2);
+      index.setX(i + 1, third);
+      index.setX(i + 2, second);
+    }
+    index.needsUpdate = true;
+  }
   geometry.computeVertexNormals();
 
   const mesh = new Mesh(geometry, material);
