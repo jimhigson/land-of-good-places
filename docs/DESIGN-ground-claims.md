@@ -21,7 +21,7 @@ You are choosing between four things:
 
 | | What you get | What it costs | When it's right |
 |---|---|---|---|
-| **A. Do nothing** | Bugs fixed one at a time, as children find them | ~1 agent permanently, forever. The backlog of this exact bug is **23 open issues** and growing faster than it is cleared | If the park is nearly finished and you want to stop |
+| **A. Do nothing** | Bugs fixed one at a time, as children find them | ~1 agent permanently, forever. The backlog of this exact bug is **24 open issues** and growing faster than it is cleared | If the park is nearly finished and you want to stop |
 | **B. More checks** | Each new bug gets an invariant so it can't come back | Cheap per bug (~half a day). But a check finds a broken park; it does not build a good one. The **1-in-30 build rate gets worse**, because every check rejects more seeds | If you only want to protect what works today |
 | **C. Fewer parks** | Lock the layout down so fewer arrangements exist | Cheapest of all. **Costs Eleri the varied park** — this is the one option that makes the game worse | Never, on your stated rules |
 | **D. One owner of the ground** *(recommended)* | Placers ask the park, not a list. The whole class of bug stops being possible | **~3–4 agent-weeks across 5 stages**, each shippable on its own. Parks change — the sixteen seeds must be re-vetted, twice | Now, because it gets cheaper the earlier it is done |
@@ -46,8 +46,8 @@ about 96 could not grow a railway loop at all — roughly **40% of all
 rejections are one system standing on ground another needed**. The sixteen
 seeds Eleri can be given exist because 484 others were broken.
 
-**Twenty-three open issues are the same bug.** Not similar — the same shape.
-#319, #488, #481, #349, #433, #392, #313, #428, #442, #443, #210, #235, #233,
+**Twenty-four open issues are the same bug.** Not similar — the same shape.
+#319, #488, #481, #483, #349, #433, #392, #313, #428, #442, #443, #210, #235, #233,
 #207, #206, #193, #325, #412, #466, #300, #396, #432, #437. Plus six more
 found in the last two days that are not even filed yet, sitting in commit
 messages on two unmerged branches.
@@ -354,7 +354,7 @@ Said plainly, because a design that fixes everything gets believed once.
 **A. Do nothing; fix instances.** This is the current policy and it is not
 absurd — every fix so far has been correct, and the park does work on sixteen
 seeds. The cost is that the backlog of this class is growing faster than it is
-cleared (23 open, 6 more found in two days, none of them closed in that time),
+cleared (24 open, 6 more found in two days, none of them closed in that time),
 and each fix adds a mechanism the next agent has to understand. Right if the
 park is close to finished.
 
