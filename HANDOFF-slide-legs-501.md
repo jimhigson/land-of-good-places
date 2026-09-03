@@ -85,3 +85,102 @@ builds 8. It was measuring a park that already contained the fence, the train,
 the coaster and the legs themselves. The ladder is now driven through real park
 builds, and the control — clearance 0 must reproduce the unfixed park exactly —
 **passes**: 8 legs, the same four violations at the same four coordinates.
+
+## Red proof, and the geometry it was proved against
+
+**Commit `12a0fcaa`, base `4f32f8c8`, seed 5, chute 83.2 m.** Disabling *only*
+the new rejection clause in `planSlideLegs` and running
+`vitest run test/procgen/seed-5.test.ts -t railway`:
+
+```
+× no ginormous slide leg stands on the railway
+AssertionError: a ginormous slide leg at -30.2, -15.6 stands 0.69 m from the rail centre line (needs 1.3 m) — the train drives through it
+                a ginormous slide leg at -31.3, -18.1 stands 0.51 m ...
+                a ginormous slide leg at -34.0, -21.9 stands 0.64 m ...
+                a ginormous slide leg at -35.7, -27.3 stands -0.40 m ...
+Tests  1 failed | 8 passed
+```
+
+Real numbers, no `NaN` and no `Infinity`, four legs at the four coordinates the
+issue names. Clause restored: `9 passed`, exit 0.
+
+## Pool result — per park
+
+Railway violations: **0 on all 16 parks**, down from 4 on seed 5. The violation
+*set* is empty, not merely a smaller count. Leg counts:
+
+| seed | before | after | | seed | before | after |
+|---|---|---|---|---|---|---|
+| 20260728 | 11 | 11 | | 225 | 13 | 13 |
+| **5** | **8 (4 illegal)** | **2** | | 267 | 8 | 8 |
+| **11** | **7** | **6** | | 274 | 10 | 10 |
+| 24 | 10 | 10 | | 288 | 12 | 12 |
+| 115 | 8 | 8 | | 326 | 11 | 11 |
+| 128 | 11 | 11 | | 346 | 7 | 7 |
+| 131 | 12 | 12 | | 428 | 7 | 7 |
+| 208 | 10 | 10 | | 451 | 8 | 8 |
+
+Fourteen parks are untouched. Two pay legs, and one of them is a problem.
+
+## OPEN — needs a decision, do not merge as-is
+
+`pnpm run test:procgen` is **red on one clause**, and it is not the new one:
+
+```
+FAIL test/procgen/seed-5.test.ts > the ginormous slide stands on legs a child can walk between
+AssertionError: the ginormous slide is 83 m long and stands on 2 legs — at least 4 were expected
+Test Files 1 failed | 17 passed (18)   Tests 1 failed | 535 passed (536)
+```
+
+Seed 5's chute was only ever meeting that clause **by cheating** — four of its
+eight legs stood in front of the train. Take those away honestly and the park
+cannot stand its own slide up.
+
+### Why, measured — it is not the railway's fault alone
+
+Chute points forbidden by each rule, independently (seed 5, 91 samples):
+
+| rule | seed 5 | canonical |
+|---|---|---|
+| paths (`PATH_CLEARANCE` 2.8) | **50 (55%)** | 22 (28%) |
+| railway (this change) | 30 (33%) | 0 |
+| too short to need a leg | 14 (15%) | 13 (16%) |
+| castle | 6 | 2 |
+| Sky Cruiser | 5 | 0 |
+| **legal for a leg** | **5 (5%)** | **43 (54%)** |
+| legal if the railway is ignored | 30 | 43 |
+
+**Seed 5's chute has 5% supportable ground.** The dominant constraint is the
+paved network, which this change did not touch; the railway is the second bite.
+Crowding then reduces those 5 clustered points to 2 legs.
+
+### Levers, and why the ones I did not pull are worse
+
+1. **Shave the clearance to the train's 1.3 m envelope** — gives seed 5 four
+   legs and a green suite. **Refused.** A foot centred at 1.82 m spans
+   1.30-2.34 m and the fence occupies 1.82-2.18 m: it ships a post through the
+   fence. This is fitting the number to the seed pool.
+2. **Ask the real fence instead of a constant**, since the fence opens at
+   stations and crossings. **Refuted by measurement.** All five chute points in
+   the 1.82-2.70 m band that sit in an open stretch are within 5.9 m of a
+   station — the fence is open there because a **platform** is there, reaching
+   3.7 m from the centre line. Wider, not narrower.
+3. **More attempts / tighter spacing / a greedy walk** — refuted above. Ceiling
+   of 3 legs at every spacing; the constraint is ground, not attempts.
+4. **Re-route the chute** so it spends less of its length over the loop and
+   beside the paths. This is the standing rule's own last lever and probably the
+   right long-term answer, but it is a change to `slide/solve.ts`'s 3.5 s search
+   that moves the slide's shape on **every** park — a separate, visible ticket,
+   not this one.
+5. **Swap seed 5 out of the pool.** CLAUDE.md's own sanctioned move: *"Never
+   weaken an assertion to make a seed pass — swap the seed and write down why."*
+   Seed 5 no longer conforms to the invariants, and the pool is by definition
+   the seeds that do. Costs a `pnpm run vet:seeds` run (about one candidate in
+   thirty passes) and retiring `test/procgen/seed-5.test.ts`.
+
+**My recommendation: (5) now, (4) as a follow-up ticket.** (5) is what the pool
+is for and what the repo already says to do; (4) is the real fix for parks whose
+chute is hemmed in, and it needs Jim's eyes because it changes what the slide
+looks like everywhere.
+
+**Not my call to make alone** — escalated to the Overseer.
