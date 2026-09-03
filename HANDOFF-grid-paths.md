@@ -1585,3 +1585,79 @@ and it should probably be chased on #474 first since that is the parent.
    the real numbers to move it to: the road is `|across|` <= ~1.4, the wall
    ~1.4-2.5, and everything out to 5.5 is plain grass.
 6. Delete the `tmp-*` probes and the debug exports; rebase when #474 lands.
+
+---
+
+## State — 2 Sep, sixth leg: the two-pass reservation release, BUILT AND KEPT
+
+**`check:park`: 10 of 16 green, stranded 21 -> 20** (seed 288 3 -> 2). Nothing
+regressed. `test:procgen` unchanged at **10 failed | 1399 passed** — the same
+ten, so the two-pass neither fixed nor broke an invariant.
+
+### What was built
+
+`pathGraphSearch` is now a loop around the old body (`pathGraphSolveOnce`):
+solve, ask which sites a leg really crossed at, release the reservations of the
+rest, solve again. `dropScreenDependentMemos()` drops the three memos
+downstream of the screen between passes — `latticeCache` (its `nodeOk` carries
+`onRamp`), `pathGridCache`, `gateCorridorDeepestCache`. Each was checked, not
+assumed; the other module caches are inputs to the screen rather than outputs
+and are deliberately kept, being the expensive ones.
+
+`sitesTheNetworkCrossesAt` reads **the solver's own bookkeeping**: a site's
+deck is the one mandatory edge that crosses the railway, so a route crosses
+there exactly when that edge is in `pavedGridEdges`. It **also** tests the
+drawn polylines, and that is not padding — `crossings.ts` decides where a
+bridge really goes from where *drawn* paths touch the rail, so a ribbon laid by
+the rescue router can put a crossing at a site whose deck edge was never paved.
+
+**The screened set only ever grows.** It starts as the sites the fully-screened
+solve crossed at; every later pass adds whatever that pass crossed at. That is
+what makes the loop terminate (finitely many sites) and what makes it sound (at
+the fixed point every crossed site is screened, so no bridge stands on ground
+the solve left open).
+
+### Two things measured here that the next reader must not re-run
+
+**1. Also dropping a released site's deck edge.** "Released" then means the
+whole decision — no ground reserved, no crossing offered — which is
+self-consistent and settles on the second pass every time. It measured
+**worse**: seed 5 `poi.stranded` **10 -> 12**, seed 288 3 -> 2, green 10 -> 10,
+total **21 -> 22**. It forecloses a crossing the freed ground would have made
+attractive. Recorded in the code where the next reader meets it.
+
+**2. The oscillation, which is why the loop is shaped this way.**
+`scripts/tmp-passes.mts` on seed 5, with the deck edges left in and the release
+judged afresh each pass:
+
+```
+[pass 1] used=[156]              release=[0,74,246]
+[pass 2] used=[0,74,156,246]     release=[]
+[pass 3] used=[156]              release=[0,74,246]
+```
+
+Releasing the ground in front of a site makes its crossing attractive, so the
+site becomes used, so it must be screened, so it stops being used. There is no
+fixed point for "release exactly the unused sites"; there is one for "screen
+everything ever used".
+
+### THE HEADLINE IS HONEST AND IT IS NOT THE ONE THE BRIEF EXPECTED
+
+**Seed 5 is unchanged at 10, not green.** The earlier hard-coded release
+(`LGP_DIAG_UNUSED_SITES=0,74,246`) that took seed 5 to green did so by leaving
+those three crossings *available* while their ground was *unscreened* — the
+router then crossed at all four sites, and the extra bridges connected the
+park. That is masonry on ground no ribbon was kept off: issue #414, not a win.
+The measurement was right; **the conclusion drawn from it was wrong, and this
+is the correction.**
+
+So the prize claimed in the fifth leg ("expected: seed 5 10 -> 0, taking the
+pool to 11 of 16") **is withdrawn**. The two-pass buys one waypoint on seed 288
+and closes a real conceptual defect; it does not buy seed 5.
+
+**What is actually in seed 5's way, and it is the next thing to chase:** site
+0's reservation swallows the gate corridor for its whole 24 m
+(`pointStandsOnABridgeRamp(0, 54)` is true on seed 5), so the gate cannot reach
+the ring. The gate's own exemption ladder — Fix 1 of the third leg, which
+exempts by identity the reservation the handover stands in — is not reaching
+far enough on this seed. **Chase the gate ladder, not the reservation.**
