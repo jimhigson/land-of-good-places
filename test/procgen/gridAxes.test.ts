@@ -329,6 +329,72 @@ const SEED24_CONNECTOR_OTHER_ARM: GroundPoint[] = [
   [-39.08, -4.7],
 ];
 
+/**
+ * **Pins a known limitation rather than a desired behaviour.**
+ *
+ * Rule 1 of `samePaintedGround` — the two share a drawn sample — has no
+ * direction clause, so it welds two stretches however sharply they meet. These
+ * two arms are 9.90 m each, cross at a **right angle**, and share exactly one
+ * sample at the origin; the module reports them as **one 14.00 m piece**, which
+ * is the same shape the dogleg fixture below rejects, arriving through the
+ * other rule.
+ *
+ * This asserts the number the shipped module actually produces, so that anyone
+ * changing the merge rules has to come here and decide deliberately. **It is
+ * not a claim that 14.00 m is right.** The right answer is two 9.90 m pieces.
+ *
+ * Why it is not simply fixed: rule 1 cannot take a collinearity clause, because
+ * the spur into seed 225's building door turns 37 degrees between the hops
+ * either side of a seam (`SPUR_BUILDING_TAIL`, samples 3-6 against 6-8). Any
+ * angle test tight enough to reject this right angle also tears that genuine
+ * stretch in two — and tearing a stretch according to where a carrier happened
+ * to end it is the carrier-dependence this whole module exists to remove.
+ *
+ * Measured impact on the real pool, so the bound is known rather than feared:
+ * nine stretch pairs across the sixteen seeds are welded by rule 1 where rule 2
+ * would have refused, at angles from 17.0 to 83.6 degrees. Seven inflate the
+ * piece by nothing (the shorter arm lies inside the longer one's span); the
+ * worst inflation anywhere is 0.44 m, and the tightest a welded piece comes to
+ * `MAX_DIAGONAL_APPROACH` is 3.64 m of headroom (seed 288, 12.36 m against 16).
+ * No seed's verdict turns on it today.
+ */
+it('welds a right-angle junction through rule 1 — a known limitation, pinned', () => {
+  // Two 9.90 m arms at 45 degrees to the world axes, so every hop is off-axis,
+  // meeting at 90 degrees on the shared sample (0, 0).
+  const SHARED: GroundPoint = [0, 0];
+  const west: GroundPoint[] = [];
+  const east: GroundPoint[] = [];
+  for (let i = 14; i >= 1; i -= 1) west.push([-i * 0.5, -i * 0.5]);
+  west.push(SHARED);
+  east.push(SHARED);
+  for (let i = 1; i <= 14; i += 1) east.push([i * 0.5, -i * 0.5]);
+
+  const length = (points: readonly GroundPoint[]): number =>
+    Math.hypot(
+      points[points.length - 1]![0] - points[0]![0],
+      points[points.length - 1]![1] - points[0]![1],
+    );
+  expect(length(west)).toBeCloseTo(9.9, 1);
+  expect(length(east)).toBeCloseTo(9.9, 1);
+  // They meet at a right angle, on a sample they genuinely share.
+  expect(west[west.length - 1]).toBe(SHARED);
+  expect(east[0]).toBe(SHARED);
+  // ...and the arms really are perpendicular: (1,1)/sqrt2 against (1,-1)/sqrt2.
+  expect(
+    (west[1]![0] - west[0]![0]) * (east[1]![0] - east[0]![0]) +
+      (west[1]![1] - west[0]![1]) * (east[1]![1] - east[0]![1]),
+  ).toBeCloseTo(0, 9);
+
+  const ground = offAxisGround([carrier('arm-west', west), carrier('arm-east', east)], noRailway);
+
+  expect(ground).toHaveLength(1);
+  expect(ground[0]!.extent).toBeCloseTo(14.0, 1);
+  process.stderr.write(
+    `    gridAxes: KNOWN LIMITATION — rule 1 welds a 90 degree junction; two 9.90 m arms ` +
+      `report as one ${ground[0]!.extent.toFixed(2)} m piece. Pinned, not endorsed.\n`,
+  );
+});
+
 it('does not weld two arms of a junction dogleg into one long diagonal', () => {
   const ground = offAxisGround(
     [
