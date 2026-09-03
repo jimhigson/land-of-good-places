@@ -109,13 +109,24 @@
  *
  *    One thing assertion 4 **counts and prints but does not fail on**: the pill
  *    hides because there is *text*, while the overlap it is avoiding is caused
- *    by a bubble being *drawn*, and `BUBBLE_MAX_DISTANCE` (40 m) is shorter
- *    than `LABEL_MAX_DISTANCE` (46 m). Between the two, a talking child wears
- *    no name for a bubble too far away to draw. It is 0 frames on the canonical
- *    seed, and it is a property of two constants rather than of this fix, so
- *    the number goes on the stderr summary where it can be watched. If it stops
- *    being 0, hide the pill for a bubble that is drawn, not for text that
- *    exists.
+ *    by a bubble being *drawn*. Those come apart in two places, and the counter
+ *    catches both — it is named for the frames, not for either cause:
+ *
+ *      - `BUBBLE_MAX_DISTANCE` (40 m) is shorter than `LABEL_MAX_DISTANCE`
+ *        (46 m), so between them a talking child wears no name for a bubble
+ *        too far away to draw; and
+ *      - at **any** distance, a speaker whose anchor is off screen has her
+ *        bubble gated by `isOnScreen` — the #415 fix — and gives up her pill
+ *        for it just the same. This is the larger set of the two, and the
+ *        counter's first name (`silentBands`) did not mention it.
+ *
+ *    0 frames on the canonical seed either way, so no number printed here has
+ *    ever been wrong — but a counter whose name is narrower than its condition
+ *    is how the next reader inherits a false belief about what has been ruled
+ *    out. It is a property of the constants and the gate rather than of this
+ *    fix, so the number goes on the stderr summary where it can be watched. If
+ *    it stops being 0, hide the pill for a bubble that is drawn, not for text
+ *    that exists.
  *
  * And, because the first two are vacuously true of a park where nobody ever
  * speaks: **the run must actually have seen bubbles**, or it fails saying so.
@@ -140,7 +151,7 @@
  * which is the state CLAUDE.md warns a red-run transcript decays into: the
  * numbers below were true on `dd5a1b09` and the geometry has moved since.
  * Restoring its reach means stranding a speaker off screen deliberately —
- * worth a ticket, not done here, and **not** caused by #486.
+ * **issue #494**, not done here, and **not** caused by #486.
  *
  * The paragraph below is the claim as it stood, kept for the argument in it:
  *
@@ -171,7 +182,7 @@
  *
  * ```
  * (unmutated)      1984 sightings; 10 talked; longest nameless run 0 frames;
- *                  0 overlaps; 0 frames in the 40-46 m band       exit 0
+ *                  0 overlaps; 0 frames mid-word with nothing drawn  exit 0
  * --mutate-label   1984 sightings; 1984 pills drawn under their own bubble.
  *                  First: Finn talking at (-2.78, -0.10, 51.88), frame 840.
  *                  Clause 4b stays at 0 — the halves isolate.      exit 1
@@ -381,14 +392,32 @@ interface Latch {
 const latches = new Map<string, Latch>();
 /**
  * Frames where a child was mid-word, near enough for her pill, and yet nothing
- * at all was drawn over her: `BUBBLE_MAX_DISTANCE` (40 m) is shorter than
- * `LABEL_MAX_DISTANCE` (46 m), so between the two her name is hidden for a
- * bubble that is itself too far away to draw. Structural, not a defect of this
- * fix — and 0 on the canonical seed — so it is counted and printed rather than
- * asserted. If it ever stops being 0, the honest fix is to hide the pill for a
- * bubble that is *drawn* rather than for text that exists.
+ * at all was drawn over her — she has given up her name for a bubble nobody
+ * can see. The pill hides because there **is text**; the overlap it is
+ * avoiding is caused by a bubble being **drawn**, and those are not the same
+ * condition.
+ *
+ * **What this actually counts, which is more than the 40-46 m band it was
+ * first named for.** `SpeechBubble.updateScreenSize` hides a bubble for two
+ * reasons, and the condition here — speaking, no bubble drawn, inside
+ * `LABEL_MAX_DISTANCE` — catches both:
+ *
+ *   - past `BUBBLE_MAX_DISTANCE` (40 m) but inside `LABEL_MAX_DISTANCE`
+ *     (46 m): the band between the two constants, and
+ *   - **at any distance**, a speaker whose anchor is off screen and whose
+ *     bubble is therefore gated by `isOnScreen` (the #415 fix).
+ *
+ * The second is the larger set and was not in the name. It reads 0 either way
+ * today, so no number printed on any previous run was wrong — but the label on
+ * it was, and a counter whose name is narrower than its condition is how the
+ * next reader inherits a false belief about what has been ruled out.
+ *
+ * Structural, not a defect of this fix, and 0 on the canonical seed, so it is
+ * counted and printed rather than asserted. If it stops being 0, the honest
+ * fix is to hide the pill for a bubble that is *drawn* rather than for text
+ * that exists.
  */
-let silentBands = 0;
+let spokeWithNothingDrawn = 0;
 
 /**
  * Assertion 2, shared by the crowd and the probes: is `anchor` inside the
@@ -500,7 +529,7 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
 
     if (speaking) {
       spoken.add(character.name);
-      if (!bubble.sprite.visible && labelDistance <= LABEL_MAX_DISTANCE) silentBands += 1;
+      if (!bubble.sprite.visible && labelDistance <= LABEL_MAX_DISTANCE) spokeWithNothingDrawn += 1;
     }
 
     // 4b — and, per child, the name comes back. She is owed her pill on any
@@ -664,7 +693,8 @@ process.stderr.write(
     ? '  #486: nobody spoke, so assertion 4 asserts nothing this run.\n'
     : `  #486: ${spoken.size} child(ren) seen talking; longest run without a name while ` +
       `silent and in shot, over all of them: ${worstLatch} frame(s). ` +
-      `${silentBands} frame(s) in the 40-46 m band where neither pill nor bubble is drawn.\n`,
+      `${spokeWithNothingDrawn} frame(s) mid-word with neither pill nor bubble drawn ` +
+      `(the 40-46 m band, and any speaker whose bubble was gated off screen).\n`,
 );
 
 if (verbose) {

@@ -1441,7 +1441,13 @@ export class NpcSystem implements GameSystem {
    * The pairing is `bubbles[i]` to `characters[i]` and lives nowhere else, so
    * a check that re-derived it by proximity — nearest child to each bubble —
    * could not tell a bubble over the wrong child from a bubble over the right
-   * one. Allocates; not for the frame path.
+   * one. **Allocates, and is O(n²)** — the `labelOrder.indexOf` below is a
+   * scan per child — so it is for a check stepping the park offline, **not for
+   * the frame path**. It has no shipping consumer: grepped across `src/`,
+   * `scripts/` and `test/`, `check:speech-bubbles` is the only caller, which
+   * is what makes it a reasonable place to hand over a frame's working-out.
+   * If the game ever wants this per frame, keep `labelOrder`'s inverse
+   * alongside it rather than making this cheaper in place.
    *
    * Her name pill rides along in the same triple, by the same index, so
    * `check:speech-bubbles` can ask the one question issue #486 is about —
