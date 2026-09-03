@@ -2551,30 +2551,6 @@ function computeGridConnectors(
             // and nothing more. This widens a *distance* for the axis-aligned
             // shape; it does not license a *shape*.
             const shapeCap = (tailLimit + 2) * 2 * (shape === straightToLead ? 1 : Math.SQRT2);
-            // **An elbow keeps one leg on the node's own lattice line and the
-            // other on the DOOR's — and only the first of those is a street.**
-            //
-            // `elbowViaColumn` runs `z = lead[1]`, the door's own private row,
-            // for `leadDx`; `elbowViaRow` runs `x = lead[0]` for `leadDz`.
-            // Relaxing the total cap above without bounding this bought longer
-            // private-line runs instead of shorter diagonals — measured,
-            // `streetsShareLatticeLines` went from 2 seeds to 6 with runs up
-            // to 29.8 m — which is the same defect the grid discipline retired
-            // from `relayPolyline`, and Jim's complaint #3 exactly.
-            //
-            // `STUB_TAIL_LIMIT` is the bound because its own doc comment
-            // already says so: *"the other (the tail, along the destination's
-            // own x or z) must stay shorter than the new lattice invariant's
-            // own straight-run threshold, or the stub itself would read as a
-            // rogue street line."* The pre-existing guard is
-            // `Math.min(|p.x - nx|, |p.z - nz|)` at the **node**, a minimum
-            // over both axes, so it cannot say which elbow is the rogue one.
-            // This asks per shape, which is what makes it choose between them:
-            // on seed 131 (`leadDx` 3.6, `leadDz` 15.1) the column elbow's
-            // tail is 3.6 and survives, the row elbow's is 15.1 and does not.
-            const privateTail =
-              shape === elbowViaColumn ? leadDx : shape === elbowViaRow ? leadDz : 0;
-            if (privateTail > STUB_TAIL_LIMIT) continue;
             let ok = true;
             let length = 0;
             for (let s = 1; s < shape.length && ok; s += 1) {
