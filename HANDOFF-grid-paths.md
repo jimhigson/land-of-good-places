@@ -1515,3 +1515,73 @@ ground the other never wants.
 Expected prize on the measurement above: seed 5 **10 -> 0**, taking the pool to
 **11 of 16 green** and 21 -> 11 stranded, with nothing else touched. Seed 115
 also carries one empty reservation (railD 76) and is already green.
+
+### RED CHECK, NOT THIS LEG'S AND NOT PREVIOUSLY REPORTED: `check:pet-slide`
+
+`pnpm run check` (the full chain) **exits 1** on this branch, and it is not the
+path work:
+
+```
+check:pet-slide FAILED
+  - in shot: the nearest companion filled at least 1% of the chase frame on
+    only 88% of 8 rasters, against 95% required (its smallest was 0.0%)
+    — it is behind her, but not in the shot
+```
+
+Bisected rather than assumed, and it is **deterministic, not flaky** — the same
+figures three runs running:
+
+| commit | `check:pet-slide` |
+|---|---|
+| `origin/main` (bd818210) | **exit 0 — passes** |
+| `8df8685a`, this leg's branch point | exit 1, identical message |
+| `d3967f05`, this leg's head | exit 1, identical message |
+
+So **this branch or its still-open parent `feat/park-warp-solver` (#474) broke
+it**, and nothing on either branch had run the full chain to find out — the
+previous legs record `pnpm run check` as "NOT RUN". 88% of 8 rasters is 7 of 8,
+so it needs every raster; the pet is behind her but out of frame on one.
+
+It is not caused by this leg's commits (the `bridgeScreenHalfAcross` refactor
+and the `BRIDGE_WALL_THICKNESS` move are behaviour-neutral — see below), but by
+CLAUDE.md's zero-tolerance rule it is the work now for whoever takes this on,
+and it should probably be chased on #474 first since that is the parent.
+
+### This leg's own state
+
+- `pnpm exec tsc --noEmit` **0**; `pnpm exec tsc --noEmit -p tsconfig.test.json`
+  **0**; `pnpm run build` **0**.
+- `pnpm run check` **1**, and only on `check:pet-slide`, above.
+- `pnpm run test:procgen`: **10 failed | 1399 passed (1409)** — the 9 inherited,
+  plus the new `builtMasonryStaysInsideItsReservation` firing honestly on seed
+  288.
+- `check:park`: **10 of 16 green, 21 stranded — unchanged from the handover**,
+  re-measured after this leg's commits. That is the proof the refactor is
+  behaviour-neutral: identical seed-for-seed.
+- `main` is **2 commits ahead** of the merge base and now carries `check:coplanar`
+  and its own workflow, which this branch does not have. Still stacked on the
+  unmerged #474, so still **not rebased**, for the reason the previous leg gave.
+
+### Next leg, in priority order
+
+1. **Release reservations for crossings no leg uses** — proved above to take
+   seed 5 from 10 to green on its own. Two-pass in `paths.ts`: solve, record the
+   sites a crossing leg used, re-solve with only those screened, iterate to a
+   fixed point and keep the union if it does not settle. **Not started, and
+   deliberately not started badly**: `pathGrid()` is a module-level memo with
+   module-level mutable `pavedGridNodes`/`pavedGridEdges` read by a dozen
+   entry points, so a second pass means invalidating both and is a real piece
+   of surgery rather than an edit.
+2. `check:pet-slide`, above.
+3. Seed 288's `noPathEndsNowhere`, now also caught by the new invariant with
+   exact geometry: a neighbour's deck at across -14.00 to -5.20 inside site
+   152's reservation. **It is not a reservation-width defect** — the width
+   shrink did not move it at all.
+4. The remaining `pathsRunOnGridAxes` diagonals (131, 208, 225, 451): give the
+   door a short axis-aligned arrival rather than refusing the diagonal.
+5. `pointStandsOnBridgeMasonry` still calls everything inside `site.halfWidth`
+   "road" while `segmentCutsABridgeRamp` no longer does. Untouched this leg, on
+   purpose — move it alone, measure it alone. Note the new invariant now gives
+   the real numbers to move it to: the road is `|across|` <= ~1.4, the wall
+   ~1.4-2.5, and everything out to 5.5 is plain grass.
+6. Delete the `tmp-*` probes and the debug exports; rebase when #474 lands.
