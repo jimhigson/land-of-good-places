@@ -155,7 +155,7 @@ the paths, from the paths, so no path can be screened against it.
 **This is a fifth hypothesis, but it is measured, not proposed**, and it is
 none of the four refuted ones.
 
-### The design this points at (NOT yet built — read before starting)
+### The design this points at — BUILT AND KEPT (numbers below)
 
 `paths.ts` cannot ask for the built footprint: it does not exist until the
 paths do. The rule that *is* expressible before drawing is the one Stage 2
@@ -205,18 +205,72 @@ keeping its bridge says #414's cost is not automatic in the grid architecture.
 Note also: seed 451's 30 did not move at all, so **451's pocket has a
 different cause** and should be chased separately with `tmp-pocket.mts`.
 
-Two things to get right, both already known:
+### BUILT AND KEPT: the approach exemption, as the last rung of a ladder
 
-- **The crossing's own approach must be exempt by identity, not by geometry.**
-  #414 records that screening the whole footprint refused the approach and
-  cost seed 24 its only bridge. In the grid architecture the feet are
-  mandatory nodes joined by `joinToGrid` and the deck is a mandatory `link()`
-  that is never screened, so the exemption is available — but a foot's own
-  connectors start at `along = ±(DECK_HALF_LENGTH + reach + 1.0)`, which is
-  only 0.5 m outside `alongMax`, and `segmentMeetsRect` counts touching.
+Two commits, `bridge screen: forbid the whole reservation, exempt the
+crossing's own approach` and `bridge screen: screen a foot first, exempt its
+own site only as backtrack`. `tsc --noEmit` exit 0 on both.
+
+The exemption is **by identity, not by geometry** — the `CrossingSite` is
+threaded through `gridConnectors` (and into its memo key) to
+`segmentCutsABridgeRamp`, which skips that one site. A radius round the foot
+would have been a second definition of "near this bridge" able to drift from
+the rectangle itself.
+
+**The ordering is the whole trick, and it was measured twice.** Handing a foot
+its exemption up front is wrong: a foot that *can* reach the grid on clear
+ground then reaches it back *through* the reservation instead, over the
+masonry, because connectors are cost-sorted and the way through is shorter
+than the way round. Measured — seed 11 went from 2 back to 22 and seed 208
+from 0 to 3. So the exemption is the last rung:
+
+```
+joinToGrid(node, foot, false)                    // screened, like anything else
+joinToGrid(node, foot, false, 1)                 // wider shells, still screened
+joinToGrid(node, foot, false, 0, null, site)     // only now, its own site exempt
+```
+
+It can now only fire for a foot with no other way onto the grid at all —
+exactly the case #414 recorded when seed 24 lost its bridge.
+
+**Sixteen-seed `check:park`, gate-corridor baseline -> here:**
+
+| seed | before | after | |
+|---|---|---|---|
+| canonical | 4 | 4 | |
+| 5 | 10 | 10 | `route.unreachable: 5` **cured** by the exemption |
+| 11 | 22 | 22 | |
+| 24 | 3 | 3 | kept its bridge throughout |
+| 115 | 0 | 0 | green |
+| 128 | 0 | 0 | green |
+| 131 | 0 | 0 | green |
+| 208 | 0 | 0 | green — the ladder recovered it |
+| 225 | 2 | 2 | |
+| 267 | (nospot 1) | **0** | **now green** |
+| 274 | 0 | 0 | green |
+| 288 | 1 | **3** | **the one regression** |
+| 326 | 1 | 1 | |
+| 346 | 0 | 0 | green |
+| 428 | 0 | 0 | green |
+| 451 | 30 | **0** | **now green** — the largest single win of the rework |
+
+**7 green -> 9 green; total stranded 73 -> 45.** Kept.
+
+Cumulative for this leg: **5 green -> 9 green**, and Jim's report #1 (the
+apron knot at the first bridge) has a named, measured cause and a fix.
+
+**The one debt: seed 288 went 1 -> 3 and must not be left.** It is the only
+seed anywhere in this leg that is worse than it started. Chase it with
+`tmp-pocket.mts` before the invariants.
+
+### Still to get right
+
 - `pointStandsOnBridgeMasonry` (used by `nodeOk` at ~1649 and `usable` at
-  ~2323) carries the same "inside halfWidth is road" carve-out and would have
-  to move with it. Change one thing at a time and measure each.
+  ~2323) still carries the "inside halfWidth is road" carve-out that
+  `segmentCutsABridgeRamp` has now dropped. **These two now disagree about
+  the same piece of ground** — precisely the two-definitions shape this repo
+  keeps paying for. Moving it is the next screen change; do it alone and
+  measure it alone.
 
 ### Per-relax-level door verdicts (the prescribed measurement, run)
 
@@ -245,7 +299,7 @@ lanes with `scripts/tmp-pocket.mts` before chasing connectors.
 
 - [x] Stage 1 grid solve (pushed).
 - [x] Gate corridor ramp guard (7/16 green, nothing regressed).
-- [ ] **The footprint screen** above. Biggest remaining lead by far.
+- [x] The footprint screen + approach exemption ladder (9/16 green).
 - [ ] Run `scripts/tmp-pocket.mts` on 451, 11, 5, canonical — it names the
       lane and both ends of every pocket in one go, and it was decisive on 131.
 - [ ] **Stage 2: invariants. NOT STARTED.** `streetsShareLatticeLines` must be
