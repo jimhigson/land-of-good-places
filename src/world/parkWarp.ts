@@ -85,6 +85,8 @@ export interface WarpVector {
  * red — it is `pnpm run vet:seeds` over the whole pool. `CI_SWEEP_SEEDS` only
  * covers six of the sixteen, so the blocking chain structurally cannot see a
  * regression on the other ten.
+ */
+const WARPS_BY_SEED: Readonly<Record<number, WarpVector>> = {
   // First baked as {ferrisWheel:2}, which passed check:park and all 81
   // invariants yet failed check:path-preference's kerb-step clause in CI
   // (84.1% vs 73% ceiling) — the canonical seed answers to canonical-only
