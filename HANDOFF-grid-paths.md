@@ -332,6 +332,52 @@ the reservation is forbidden ground now, and a spur that used to reach through
 it no longer does. Fixing (a) is likely to fix the regression too — do that
 before reaching for anything else.
 
+### Seed 11's island: located to two dropped samples, and it is NOT the bridge
+
+`spur-hotel`'s whole lane, printed by `tmp-pocket.mts`. It **crosses the
+bridge perfectly** — at 51..116 are all `ok`, `onRamp=true`, h climbing
+0.06 -> 4.63 and back down — so the bridge is exonerated. Every sample from
+at=0 to at=195 is reachable. Then:
+
+```
+  ok at=195.0 (-44.4,22.6) nbrs=4
+  XX at=217.0 (-42.2, 8.5) nbrs=6
+```
+
+**at≈202 and at≈209 do not exist as nodes at all.** The lane steps by ~7
+everywhere else; here it jumps 195 -> 217. `poiGraph`'s `findClearSpot`
+drops a seed it cannot place clear of geometry, and the two it dropped leave
+a hole of `hypot(2.2, 14.1) = 14.27 m` — **wider than `MAX_EDGE` (13)**, so
+the `dx*dx + dz*dz > MAX_EDGE*MAX_EDGE` guard rejects the pair before either
+the chord test or `laneIsClear` is ever consulted. Everything past the hole is
+orphaned: the 19-node island.
+
+**So the defect is that `spur-hotel` is drawn through something solid at
+roughly (-43, 15).** The paving is there and a child cannot walk it. That is
+the same disease as the parapet crossings this leg already fixed, in a
+different organ — a ribbon drawn over ground the router never asked the real
+collision world about.
+
+Next measurement, and it is a short one: `scripts/tmp-transect.mts -44.4 22.6
+-42.2 8.5` prints `blocked`/`push` every 25 cm along exactly that stretch and
+will name what is standing in it. Then find which router drew it — `hotel` is
+NOT in `strandedDoorsOfLastSolve()`, so it came from the normal grid solve or
+the `relayPolyline` rescue, not the straight-line last resort.
+
+### The last resort still draws, and per the standing rule it must not
+
+`paths.ts` ~3786-3814: when nothing legal reaches a door it sets
+`routed = [near, destination.gridPoint]` — a straight ribbon from the nearest
+paving to the door — and only falls back to `paved = false` if even that would
+hop the railway. Jim, 22 Aug: the procgen backtracks and makes different
+decisions until it works. Drawing a ribbon nobody can walk to is the "shrink
+to a floor and accept a result that still doesn't clear" that rule forbids.
+
+**Either join the component or backtrack; never draw.** Note that flipping it
+to `paved = false` alone will *not* move `poi.stranded`: the stranded waypoint
+is seeded from the anchor's own entrance, not from the ribbon. The count only
+falls when paving genuinely reaches within `MAX_EDGE` of the doormat.
+
 ### Still to get right
 
 - `pointStandsOnBridgeMasonry` (used by `nodeOk` at ~1649 and `usable` at
