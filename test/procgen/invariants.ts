@@ -80,6 +80,7 @@ import {
   isInEntranceGateGap,
 } from '../../src/world/entrance/layout.ts';
 import { ROAD_TILE_METRES } from '../../src/world/entrance/road.ts';
+import { GATE_POST_COLLIDER_RADIUS } from '../../src/world/entrance/gateArch.ts';
 import { visibleTop } from '../../src/art/style/measure.ts';
 import { COPING_SINK, bridgeStoneGeometry } from '../../src/art/models/bridgeStones.ts';
 import {
@@ -739,7 +740,7 @@ const plotsDoNotOverlap: Invariant = (facts) => {
 
 /** Every doormat and stall counter has ground a visitor can stand on. */
 /**
- * **The park gate's arch stands over the gateway, and the gateway stays
+ * **The park gate's arch stands over its own posts, and the way in stays
  * open.** Issue #480 — Jim, playing: *"There's a weird segment of a taurus
  * near the park edge."*
  *
@@ -753,31 +754,70 @@ const plotsDoNotOverlap: Invariant = (facts) => {
  * Every number involved was right. The gate was the right width, the posts
  * stood in the right places, the arch was centred on the opening, and both
  * rotations read like framing. **Only the mesh's own world box says which way
- * it points**, which is why this is measured off the built scene and not
- * argued from the builder.
+ * it points**, which is why this is measured off the built scene.
  *
- * Three clauses, and the first two are each other's control:
+ * Three clauses:
  *
- * 1. **The ends of the arch land on something solid** — the posts. Probed
- *    through the real collision world.
- * 2. **The middle of the arch is over open ground** a child can stand on,
- *    all the way across. This is the clause that must not be bought with the
- *    first: a gate solid enough to stop her at the posts and still let her
- *    walk in is the whole point, and a collider under the span would pass
- *    clause 1 while shutting the park.
+ * 1. **The arch's two ends come down on its two posts** — the meshes named
+ *    beside it by `src/world/entrance/gateArch.ts`, found in the scene, not
+ *    asked of the builder. A crossbar turned out of the gate plane takes its
+ *    ends with it and lands nowhere near them.
+ * 2. **The way in is open in the middle and closed at the sides.** Probed
+ *    through the real collision world along a line parallel to the arch and
+ *    {@link GATE_PROBE_INSET} inside the park.
  *
- *    Together they are also the instrument's own control: clause 1 proves the
- *    probe can see a blocker, clause 2 proves it can see clear ground. A
- *    `isStandable` that answered the same everywhere would fail one or the
- *    other, rather than reporting a clean pass about nothing.
- * 3. **Nothing hangs into the gateway.** The lowest point of the arch clears
+ *    **Both halves of that sentence are load-bearing, and the second is the
+ *    control.** A probe that answered "blocked" everywhere would pass a
+ *    naive open-in-the-middle clause by never being asked, and one that
+ *    answered "open" everywhere would pass a naive closed-at-the-sides one;
+ *    requiring both from the same probe on the same line is what makes it an
+ *    instrument rather than an assertion. It matters here specifically:
+ *    **the gate line itself is blocked from wall to wall**, because the park
+ *    boundary keeps a child *inside* the park and a `PLAYER_RADIUS` body on
+ *    the boundary overlaps the outside. Measured on the canonical seed, every
+ *    one of the 33 probes across the gate at z = 60 comes back blocked. A
+ *    clause probing there would have been green for a reason that has nothing
+ *    to do with the gate, which is exactly how the first draft of this
+ *    invariant passed the broken arch's own geometry.
+ * 3. **Nothing hangs into that gap.** The lowest point of the arch clears
  *    {@link TALLEST_CHILD_HEIGHT} — the park's tallest possible child, party
  *    hat and all, taken from the game rather than from the gate's own design.
  *    The broken arch reached below ground and failed this by 4.31 m.
  *
  * The arch itself is deliberately **not** solid: its feet are the posts,
- * which are, and the span is headroom. See `src/world/entrance/gateArch.ts`.
+ * which are, and the span is headroom over a child walking under it.
  */
+/**
+ * How far off its own post an arch foot may land and still be standing on it.
+ *
+ * The crossbar's bounding box overshoots the post centre by one tube radius by
+ * construction (0.28 m), so this is that plus a hand's width. The arch turned
+ * a quarter-turn out of the gate plane put its feet **6.11 m** from the
+ * nearest post, so nothing about this number is delicately chosen.
+ */
+const GATE_FOOT_TOLERANCE = 0.6;
+
+/**
+ * How far inside the park the two gateway probes stand, in metres.
+ *
+ * Both are derived from the reach a gate post has over a child —
+ * `PLAYER_RADIUS` (0.62) + {@link GATE_POST_COLLIDER_RADIUS} (0.55) = 1.17 m:
+ *
+ * - `SOLID` is **inside** that reach, so a child there must be pushed out.
+ *   This is what proves the posts carry colliders at all, and it is the
+ *   control on the probe: it must be able to answer "no".
+ * - `OPEN` is **outside** it, so neither post can be what answers, and it is
+ *   far enough off the boundary line that the park's containment is not
+ *   either. This is what proves the gate she can see is still a gate she can
+ *   walk through.
+ *
+ * The gate line itself is useless for both: the park boundary keeps a child
+ * *inside* the park, so a `PLAYER_RADIUS` body standing on it overlaps the
+ * outside and every probe along it comes back blocked — 33 of 33 across the
+ * gate on the canonical seed, whatever the gate is doing.
+ */
+const GATE_PROBE_INSET = { solid: 1.0, open: 1.5 } as const;
+
 const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
   const arch = facts.parkGateArch;
   if (!arch) {
@@ -787,44 +827,83 @@ const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
         'and either way every clause below would have passed vacuously.',
     ];
   }
+  if (arch.posts.length !== 2) {
+    return [
+      `the park gate has ${arch.posts.length} named posts in the built scene, not 2 — ` +
+        'clause 1 below has nothing to measure the arch against',
+    ];
+  }
 
   const fouls: string[] = [];
 
   // The axis the arch lies along, taken from the arch rather than from the
   // gate's design: the longer of its two horizontal extents. A crossbar turned
-  // out of the gate plane takes this with it, which is what makes the probes
-  // below land somewhere revealing.
+  // out of the gate plane takes this with it.
   const spanX = arch.maxX - arch.minX;
   const spanZ = arch.maxZ - arch.minZ;
   const alongX = spanX >= spanZ;
-  const span = alongX ? spanX : spanZ;
-  const pointAt = (t: number): readonly [number, number] => {
-    // `t` runs -1 (one end) to +1 (the other).
-    const half = span / 2;
-    return alongX ? [arch.centreX + t * half, arch.centreZ] : [arch.centreX, arch.centreZ + t * half];
-  };
+  const span = Math.max(spanX, spanZ);
+  const half = span / 2;
+  const along = (t: number): readonly [number, number] =>
+    alongX ? [arch.centreX + t * half, arch.centreZ] : [arch.centreX, arch.centreZ + t * half];
 
-  // 1. Both ends stand on a post.
+  // 1. Each end of the arch comes down on a post. `GATE_FOOT_TOLERANCE` is
+  // the arch's own tube plus a hand's width — a foot further off its post
+  // than that is not standing on it.
   for (const t of [-1, 1] as const) {
-    const [x, z] = pointAt(t);
-    if (facts.isStandable(x, z)) {
+    const [x, z] = along(t);
+    let nearest = Infinity;
+    for (const post of arch.posts) {
+      nearest = Math.min(nearest, Math.hypot(x - post.x, z - post.z));
+    }
+    if (nearest > GATE_FOOT_TOLERANCE) {
       fouls.push(
-        `the gate arch's ${t < 0 ? 'first' : 'second'} end at (${x.toFixed(2)}, ${z.toFixed(2)}) ` +
-          'is open ground — the arch is not standing on its own posts, so it is pointing ' +
-          `somewhere the gate does not go (it spans ${span.toFixed(2)} m along ` +
-          `${alongX ? 'X' : 'Z'}, centred on ${arch.centreX.toFixed(2)}, ${arch.centreZ.toFixed(2)})`,
+        `the gate arch's ${t < 0 ? 'first' : 'second'} end at (${x.toFixed(2)}, ${z.toFixed(2)}) is ` +
+          `${nearest.toFixed(2)} m from the nearest post — it is not standing on the gate, so it is ` +
+          `pointing somewhere the gate does not go (it spans ${span.toFixed(2)} m along ` +
+          `${alongX ? 'X' : 'Z'}, posts at ` +
+          arch.posts.map((post) => `(${post.x.toFixed(2)}, ${post.z.toFixed(2)})`).join(' and '),
       );
     }
   }
 
-  // 2. ...and the way in between them is open. Sampled across the middle
-  // three-fifths of the span, which is clear of the posts at either end.
-  for (const t of [-0.6, -0.3, 0, 0.3, 0.6] as const) {
-    const [x, z] = pointAt(t);
-    if (!facts.isStandable(x, z)) {
+  // 2. The way in, on lines parallel to the arch and a stride inside the park,
+  // where the boundary's own containment is not the answer to every probe.
+  // "Inside" is towards the middle of the park, which the gate faces.
+  const toMiddle = Math.hypot(arch.centreX, arch.centreZ);
+  const inward: readonly [number, number] =
+    toMiddle > 1e-6 ? [-arch.centreX / toMiddle, -arch.centreZ / toMiddle] : [0, 0];
+  const inside = (t: number, inset: number): readonly [number, number] => {
+    const [x, z] = along(t);
+    return [x + inward[0] * inset, z + inward[1] * inset];
+  };
+
+  let openInTheMiddle = 0;
+  for (const t of [-0.4, -0.2, 0, 0.2, 0.4] as const) {
+    const [x, z] = inside(t, GATE_PROBE_INSET.open);
+    if (facts.isStandable(x, z)) openInTheMiddle += 1;
+    else {
       fouls.push(
-        `the gateway is blocked at (${x.toFixed(2)}, ${z.toFixed(2)}), ${(t * span * 0.5).toFixed(2)} m ` +
-          'from the middle of the opening — a child cannot walk into her own park',
+        `the gateway is blocked at (${x.toFixed(2)}, ${z.toFixed(2)}), ${(t * half).toFixed(2)} m from ` +
+          `the middle of the opening and ${GATE_PROBE_INSET.open} m inside the park — a child cannot ` +
+          'walk into her own park',
+      );
+    }
+  }
+
+  // ...and the control on that probe, at the posts themselves: it has to be
+  // able to answer "no", or the open readings above prove nothing. This is
+  // also the clause that fails if the gate loses its colliders.
+  for (const post of arch.posts) {
+    const x = post.x + inward[0] * GATE_PROBE_INSET.solid;
+    const z = post.z + inward[1] * GATE_PROBE_INSET.solid;
+    if (facts.isStandable(x, z)) {
+      fouls.push(
+        `a child can stand at (${x.toFixed(2)}, ${z.toFixed(2)}), ${GATE_PROBE_INSET.solid} m in front of ` +
+          `the gate post at (${post.x.toFixed(2)}, ${post.z.toFixed(2)}) — inside the ` +
+          `${(PLAYER_RADIUS + GATE_POST_COLLIDER_RADIUS).toFixed(2)} m the post is supposed to hold her ` +
+          `off, so the gate is not solid, and the ${openInTheMiddle} open readings across the middle ` +
+          'were taken with a probe that cannot see a blocker',
       );
     }
   }

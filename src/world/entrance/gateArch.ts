@@ -63,13 +63,20 @@ export interface GateArchOptions {
   /** The caps and the crossbar. */
   readonly capMaterial: Material;
   /**
-   * Name for the crossbar mesh, if the scene wants to find it again.
-   * `Entrance` passes `park-gate-arch`, which `check:park-map` reads as the
-   * independent truth of where the gate stands. Left unnamed otherwise, on
-   * purpose: `getObjectByName` returns the *first* match in the scene, so a
-   * second mesh under the same name would silently answer for the first.
+   * Names the gate's meshes `<prefix>-arch`, `<prefix>-post-0` and
+   * `<prefix>-post-1`, so the scene can be asked where the gate stands and
+   * which way it faces.
+   *
+   * `Entrance` passes `park-gate`: `check:park-map` reads `park-gate-arch` as
+   * the independent truth of where the gate is, and
+   * `theParkGateArchStandsOverItsGateway` reads the posts beside it to ask
+   * whether the arch is still standing on them.
+   *
+   * Left unnamed otherwise, on purpose: `getObjectByName` returns the *first*
+   * match in the scene, so a second gate under the same names would silently
+   * answer for the park's own.
    */
-  readonly crossbarName?: string;
+  readonly namePrefix?: string;
 }
 
 export interface GateArch {
@@ -90,6 +97,15 @@ export interface GateArch {
    */
   readonly clearHeightY: number;
 }
+
+/**
+ * What a gate post's collider covers, and therefore what a child bumps into:
+ * whichever of the post's splayed base or the arch's tube is wider, plus a
+ * hand's width. Exported because a check asking "is the gate solid where it
+ * should be, and open where a child walks?" has to know the reach it is
+ * probing against rather than write 0.55 down a second time.
+ */
+export const GATE_POST_COLLIDER_RADIUS = 0.55;
 
 /** Half the gap between the posts, and the arch's own radius. */
 const HALF_WIDTH = ENTRANCE_GATE_HALF_WIDTH;
@@ -123,6 +139,7 @@ export function buildGateArch(options: GateArchOptions): GateArch {
     feet.push({ x, z });
 
     const post = new Mesh(postGeometry, stoneMaterial);
+    if (options.namePrefix !== undefined) post.name = `${options.namePrefix}-post-${feet.length - 1}`;
     post.position.set(x, ground + ENTRANCE_GATE_POST_HEIGHT / 2, z);
     post.castShadow = true;
     post.receiveShadow = true;
@@ -142,17 +159,13 @@ export function buildGateArch(options: GateArchOptions): GateArch {
   crossbar.position.set(centreX, springY, centreZ);
   crossbar.rotation.y = yaw;
   crossbar.castShadow = true;
-  if (options.crossbarName !== undefined) crossbar.name = options.crossbarName;
+  if (options.namePrefix !== undefined) crossbar.name = `${options.namePrefix}-arch`;
   group.add(crossbar);
 
   return {
     group,
     feet: [feet[0]!, feet[1]!],
-    // Whichever of the two things standing on this foot is wider — the post's
-    // splayed base, or the crossbar's tube coming down onto it — plus a hand's
-    // width so a child bumps the stone rather than clipping its corner. It
-    // comes out at 0.55, which is the number `Entrance` had written down.
-    footRadius: Math.max(POST_FOOT_RADIUS, ARCH_TUBE) + 0.05,
+    footRadius: GATE_POST_COLLIDER_RADIUS,
     clearHeightY: springY,
   };
 }
