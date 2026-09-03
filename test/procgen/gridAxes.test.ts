@@ -157,38 +157,86 @@ describe('one answer per piece of painted ground', () => {
     expect(ground[0]!.extent).toBeCloseTo(16.29, 1);
   });
 
-  it('gives the same answer however that ground is cut into carriers', () => {
+  it('gives the same answer for every way that ground can be cut into carriers', () => {
     const asBuilt = extents([
       carrier('spur-building', SPUR_BUILDING_TAIL),
       carrier('connector-building-ballPit', CONNECTOR_BUILDING_BALLPIT),
     ]);
 
-    // The same metres, re-cut. Not one sample moves; only ownership changes.
-    const decompositions: Record<string, PathEdgeFact[]> = {
-      'connector in two, butt-joined': [
-        carrier('spur-building', SPUR_BUILDING_TAIL),
-        ...cutInto('connector', CONNECTOR_BUILDING_BALLPIT, 2),
-      ],
-      'connector in five': [
-        carrier('spur-building', SPUR_BUILDING_TAIL),
-        ...cutInto('connector', CONNECTOR_BUILDING_BALLPIT, 5),
-      ],
-      'connector in two, overlapping by 3 samples': [
-        carrier('spur-building', SPUR_BUILDING_TAIL),
-        ...cutOverlapping('connector', CONNECTOR_BUILDING_BALLPIT, 3),
-      ],
-      'both edges cut in three': [
-        ...cutInto('spur', SPUR_BUILDING_TAIL, 3),
-        ...cutInto('connector', CONNECTOR_BUILDING_BALLPIT, 3),
-      ],
-      'the spur alone carries the lead': [carrier('spur-building', SPUR_BUILDING_TAIL)].concat(
-        cutInto('connector', CONNECTOR_BUILDING_BALLPIT, 1),
-      ),
+    // Not a handful of carvings that happen to occur in today's seed pool —
+    // *every* carving of this paving, by construction. The merge rule is meant
+    // to be cut-invariant, so a sampled agreement is the wrong claim to make
+    // about it; these are the carvings themselves.
+    let carvings = 0;
+    const check = (how: string, edges: PathEdgeFact[]): void => {
+      carvings += 1;
+      expect(extents(edges), `re-cut as: ${how}`).toEqual(asBuilt);
     };
 
-    for (const [how, edges] of Object.entries(decompositions)) {
-      expect(extents(edges), `re-cut as: ${how}`).toEqual(asBuilt);
+    // 1. Every single cut, at every sample of either ribbon.
+    for (let at = 1; at < CONNECTOR_BUILDING_BALLPIT.length - 1; at += 1) {
+      check(`connector split at sample ${at}`, [
+        carrier('spur-building', SPUR_BUILDING_TAIL),
+        carrier('connector#a', CONNECTOR_BUILDING_BALLPIT.slice(0, at + 1)),
+        carrier('connector#b', CONNECTOR_BUILDING_BALLPIT.slice(at)),
+      ]);
     }
+    for (let at = 1; at < SPUR_BUILDING_TAIL.length - 1; at += 1) {
+      check(`spur split at sample ${at}`, [
+        carrier('spur#a', SPUR_BUILDING_TAIL.slice(0, at + 1)),
+        carrier('spur#b', SPUR_BUILDING_TAIL.slice(at)),
+        carrier('connector-building-ballPit', CONNECTOR_BUILDING_BALLPIT),
+      ]);
+    }
+
+    // 2. Chopped into ever more carriers, both ribbons at once.
+    for (let pieces = 1; pieces <= 8; pieces += 1) {
+      check(`both ribbons in ${pieces}`, [
+        ...cutInto('spur', SPUR_BUILDING_TAIL, Math.min(pieces, SPUR_BUILDING_TAIL.length - 1)),
+        ...cutInto('connector', CONNECTOR_BUILDING_BALLPIT, pieces),
+      ]);
+    }
+
+    // 3. Carriers that *overlap*, which is the real shape of the thing: a spur
+    //    ending at a door and a connector leaving it share the lead's metres.
+    for (let overlap = 0; overlap <= 6; overlap += 1) {
+      check(`connector in two, overlapping by ${overlap} samples`, [
+        carrier('spur-building', SPUR_BUILDING_TAIL),
+        ...cutOverlapping('connector', CONNECTOR_BUILDING_BALLPIT, overlap),
+      ]);
+    }
+
+    // 4. Ragged carvings no generator would produce, so that agreement cannot
+    //    be an artefact of the tidy ones above. Deterministic, so a failure is
+    //    reproducible.
+    let rng = 20260903;
+    const nextCut = (limit: number): number => {
+      rng = (rng * 1103515245 + 12345) & 0x7fffffff;
+      return 1 + (rng % Math.max(1, limit - 1));
+    };
+    for (let trial = 0; trial < 200; trial += 1) {
+      const edges: PathEdgeFact[] = [];
+      for (const [name, points] of [
+        ['spur', SPUR_BUILDING_TAIL],
+        ['connector', CONNECTOR_BUILDING_BALLPIT],
+      ] as const) {
+        const cuts = new Set<number>();
+        for (let n = nextCut(5); n > 0; n -= 1) cuts.add(nextCut(points.length - 1));
+        const bounds = [0, ...[...cuts].sort((x, y) => x - y), points.length - 1];
+        for (let i = 1; i < bounds.length; i += 1) {
+          if (bounds[i]! <= bounds[i - 1]!) continue;
+          edges.push(carrier(`${name}#${trial}.${i}`, points.slice(bounds[i - 1]!, bounds[i]! + 1)));
+        }
+      }
+      check(`ragged carving ${trial}`, edges);
+    }
+
+    // An announcement nobody can hear is the same disease as a check that
+    // cannot fail — vitest's default reporter hides console output from
+    // passing tests, so this goes to stderr.
+    process.stderr.write(
+      `    gridAxes: one answer (${asBuilt.join(', ')} m) across ${carvings} carvings of the same paving\n`,
+    );
   });
 
   it('does not inflate a lead by counting each carrier that retraces it', () => {

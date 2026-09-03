@@ -58,7 +58,6 @@
  * measure: a child walks the same diagonal whichever route object owns it, and
  * reachability is owned by `poi.stranded` and `check:park`.
  */
-import { PLAYER_RADIUS } from '../../src/core/constants.ts';
 import type { PathEdgeFact } from './parkFacts.ts';
 
 export type GroundPoint = readonly [number, number];
@@ -75,34 +74,9 @@ export type GroundPoint = readonly [number, number];
 export const OFF_AXIS_FRACTION = 0.15;
 
 /**
- * How much near-parallel coincidence makes two stretches the same painted
- * ground rather than two that merely touch.
- *
- * A child's width. Two ribbons crossing each other are within reach of one
- * another for a sample or two around the crossing point whatever their angle;
- * two ribbons *drawn along* the same lead are within reach of each other for
- * the whole lead. The width of the person walking on them is the length at
- * which "they touch here" becomes "this is one path".
- */
-const SHARED_GROUND_RUN = PLAYER_RADIUS * 2;
-
-/**
- * How close two off-axis stretches' ends may stand and still be one
- * continuous piece of ground. The same number read the other way round: if
- * the child cannot stand in the gap, there is no gap, and the diagonal she is
- * walking did not stop merely because the route object carrying it did.
- */
-const CONTINUATION_GAP = PLAYER_RADIUS * 2;
-
-/**
  * How nearly two stretches must run the same way to count as the same ground.
  *
- * The hop classifier's own boundary is 8.6 degrees off an axis, and a true
- * diagonal in this network sits at 20-45 degrees, so 30 degrees separates
- * "these two ribbons are drawn along the same diagonal" from "these two
- * ribbons cross". Measured on the built park across the sixteen-seed pool,
- * every pair this rule unions agrees to within 12 degrees; every pair it
- * rejects on angle differs by more than 55.
+ * TOLERANCE PENDING MEASUREMENT — do not quote this comment yet.
  */
 const PARALLEL_COS = Math.cos((30 * Math.PI) / 180);
 
@@ -164,72 +138,55 @@ const parallel = (a: GroundPoint, b: GroundPoint): boolean =>
 /**
  * Are these two stretches the same piece of painted ground?
  *
- * Two ways they can be, and both are things a person looking at the park would
- * call one path rather than two:
+ * **Two ways, and both are questions about points rather than about ends.**
+ * That is what makes the answer a property of the paving:
  *
- * 1. **One is drawn on top of the other.** The reach is `min` of the two
- *    ribbons' own half-widths, read off the park rather than typed: at that
- *    distance the narrower ribbon's centre line is inside the wider ribbon, so
- *    the two really do cover the same paving. They must also run the same way
- *    there, or a crossing would qualify.
- * 2. **One carries on where the other stops** — ends within
- *    {@link CONTINUATION_GAP}, running the same way, *and lying on each
- *    other's line*: a diagonal that crosses a node into the next ribbon is one
- *    diagonal.
+ * 1. **The two share a drawn sample**, so the paving is continuous there.
+ * 2. **One is drawn along the other**: some point of one lies within reach of
+ *    the other and the two run the same way there. Reach is `min` of the two
+ *    ribbons' own half-widths, read off the park rather than typed — at that
+ *    distance the narrower ribbon's centre line is inside the wider one, so
+ *    they really do cover the same paving. Running the same way is what keeps
+ *    a *crossing* from qualifying; see {@link PARALLEL_COS}.
  *
- *    The collinearity clause is load-bearing, not decoration. Without it this
- *    rule joins any two off-axis stretches whose ends happen to stop near one
- *    another, which at a junction is two *different* diagonals meeting — and
- *    it fabricated exactly that on seed 24 before it was added. `spur-hotel`
- *    starts its diagonal at `(-36.78, -8.55)` heading `(0.18, 0.98)`;
- *    `connector-hotel-stall.skyCruiser` starts one at `(-37.24, -8.71)`
- *    heading `(-0.30, 0.95)`. Ends 0.49 m apart, tangents 28 degrees apart —
- *    parallel enough to pass a tangent test on its own. But the line joining
- *    them runs `(-0.95, -0.33)`, square across both, because they are two arms
- *    of a dogleg round a junction with on-axis paving between them, not one
- *    stretch continuing. Joined, they reported 21.9 m of "diagonal" whose two
- *    real arms are 12.3 m and 10.0 m pointing 19 degrees apart.
+ * **Neither may be asked about ends.** An earlier version asked whether the
+ * stretches' *ends* met, and that is not a property of the paving: cutting a
+ * stretch in half creates two new ends in its middle, which can then reach
+ * something the whole stretch never offered an end to. Measured, that is not
+ * hypothetical — on the canonical seed it merged a 1.84 m and a 9.60 m stretch
+ * into one 9.97 m piece only *after* the re-cut, and
+ * `gridAxisVerdictsIgnoreTheCarrier` went red on four of the sixteen seeds.
+ *
+ * Asked of points, cutting changes neither the samples nor their local
+ * directions, so every pair available to the pieces was already available to
+ * the whole and the components come out the same however the paving is carved
+ * — which `gridAxes.test.ts` asserts over every single cut of a real lead,
+ * not over a handful of carvings that happen to occur in today's pool.
  */
 const samePaintedGround = (a: CarriedStretch, b: CarriedStretch): boolean => {
+  // 1. The paving is literally continuous here: the two share a drawn sample.
+  //    This is what a carving seam looks like, and it is why cutting a stretch
+  //    can never take it apart — including a stretch curving hard enough that
+  //    its own two halves point 37 degrees away from each other, which the
+  //    spur into seed 225's building door does. Exact equality, deliberately:
+  //    these are the *same* sample, copied, not two samples that landed near
+  //    one another, so no tolerance is wanted or safe.
+  for (const p of a.points) {
+    for (const q of b.points) if (p[0] === q[0] && p[1] === q[1]) return true;
+  }
+
+  // 2. ...or one ribbon is drawn along the other, running the same way.
   const reach = Math.min(a.halfWidth, b.halfWidth);
   for (const [drawn, beneath] of [
     [a, b],
     [b, a],
   ] as const) {
-    let shared = 0;
     for (let i = 1; i < drawn.points.length; i += 1) {
       const from = drawn.points[i - 1]!;
       const to = drawn.points[i]!;
       const middle: GroundPoint = [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2];
       const near = nearestAlong(beneath, middle);
-      if (near.distance <= reach && parallel(unit(from, to), near.direction)) {
-        shared += Math.hypot(to[0] - from[0], to[1] - from[1]);
-        if (shared >= SHARED_GROUND_RUN) return true;
-      }
-    }
-  }
-
-  const endsOf = (s: CarriedStretch): [GroundPoint, GroundPoint][] => {
-    const last = s.points.length - 1;
-    return [
-      [s.points[0]!, s.points[Math.min(1, last)]!],
-      [s.points[last]!, s.points[Math.max(0, last - 1)]!],
-    ];
-  };
-  for (const [endA, inwardA] of endsOf(a)) {
-    for (const [endB, inwardB] of endsOf(b)) {
-      const gap = Math.hypot(endB[0] - endA[0], endB[1] - endA[1]);
-      if (gap > CONTINUATION_GAP) continue;
-      const outA = unit(inwardA, endA);
-      const outB = unit(endB, inwardB);
-      if (!parallel(outA, outB)) continue;
-      // Collinear, not merely adjacent — see this function's own comment for
-      // the seed 24 dogleg this rejects. A seam with no gap at all (two
-      // carriers cut from one polyline) has no direction to test and is
-      // collinear by construction.
-      if (gap <= 1e-6) return true;
-      const across = unit(endA, endB);
-      if (parallel(across, outA) && parallel(across, outB)) return true;
+      if (near.distance <= reach && parallel(unit(from, to), near.direction)) return true;
     }
   }
   return false;
