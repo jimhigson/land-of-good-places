@@ -142,12 +142,24 @@ const WARPS_BY_SEED: Readonly<Record<number, WarpVector>> = {
   115: { layout: { hotel: 1 } },
   225: { layout: { 'stall.railRacer': 1 } },
   288: { layout: { waterFight: 1 } },
-  // First baked as {fountain:1} on check:park evidence alone; the moment
-  // seed-326.test.ts existed, that vector went red on ONE invariant the
-  // check cannot see (the slide climbing 0.001 m) — the #437 blind spot,
-  // measured. Re-searched with the oracle in the loop, 2 Sep 2026:
-  // {waterFight:1} passes all 81.
-  326: { layout: { waterFight: 1 } },
+  // **326 is second-vintage**, and it is the #437 blind spot pointing the
+  // other way from 115's. First baked as {fountain:1} on check:park evidence
+  // alone; the moment seed-326.test.ts existed that went red on ONE invariant
+  // the check cannot see (the slide climbing 0.001 m), so it was re-searched
+  // with the oracle in the loop to {waterFight:1}.
+  //
+  // On the fixed geometry {waterFight:1} keeps passing all 81 invariants and
+  // fails the *other* gate instead: check:park strands 8 waypoints
+  // (216/216 connected before, 208/216 after). So neither gate implies the
+  // other in either direction, which is why vet:seeds runs both — and note
+  // check:park is **canonical-only**, so even though 326 is in
+  // CI_SWEEP_SEEDS nothing in the blocking chain builds its park under
+  // check:park. The `--- seed N: passed` lines in a `check` log are
+  // check:fountain-hop's sweep, not check:park's.
+  //
+  // Re-searched 2 Sep 2026: SOLVED after 3 candidates, stranded=0,
+  // oracle=pass.
+  326: { layout: { building: 1 } },
 };
 
 function envWarp(): WarpVector | null {
