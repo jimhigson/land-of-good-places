@@ -700,3 +700,179 @@ The fix has to take the spur's outer row from **the kerb ribbon's own boundary
 vertices** (`curvedRoadRibbon` should return its inner edge ring, and the spur be
 built off that ring), not from a resampling of the station curve. Resampling is
 what I tried and it left the seam while adding a `path-surface` one.
+
+
+---
+
+# The spur is a path, the road is cleared of trees (3 September, session 4)
+
+Model: **Opus 5 (1M context)**. Worktree
+`.claude/worktrees/road-spur-path`, detached on `origin/fix/road-487-488`
+(the branch ref itself is held by the dead `road-487-488` worktree, so pushes
+go `git push origin HEAD:fix/road-487-488`).
+
+## Jim's two asks, both in
+
+**1. "the small run of path from the road into the park should be just a
+normal path".** Done. The spur is no longer road: it is drawn from a new
+`src/world/pathSurface.ts`, which now owns *what a park path is made of* —
+the two materials, the accumulator and the ribbon sweep, moved out of
+`pathGraph.ts` because importing that module **runs the whole path solve** and
+`Entrance.ts` must not be what triggers it. So the run through the gate is the
+same surface as the network it joins rather than a copy of it.
+
+- **Width comes from the paving it meets** (`forEachPavedDisc`'s own radius at
+  the point it reaches), so 2.8–3.2 m across the pool rather than a number.
+- **Length likewise**: 5.9–10.2 m on the sixteen seeds.
+- Meshes renamed `entrance-road-gateway` -> `entrance-gateway-path`,
+  `-kerb-left`, `-kerb-right`. `check:entrance-road` follows the new names and
+  keeps clause 3's reasoning verbatim; `theRoadArrivesAtTheParkAndGoesIn` was
+  widened to both families and **went red the moment the rename landed**,
+  which is the invariant doing its job.
+
+**2. "the bus drives through trees on its final approach".** Done, and it was
+structural. Measured on the built park (`scripts/probe-road-trees.mts`):
+**64–106 treeline instances per seed inside the corridor the bus sweeps**, at
+outsets 13.7–21.1 m. `Scenery.ts`'s treeline band is 11.5 m to
+`TERRAIN_APRON - 1.5`; the road's tails climb through it to 23.5. The two
+share an annulus by construction.
+
+**The trees give way, and the ordering says so rather than a preference:**
+`roadRoute.ts` derives the corridor from `PARK_BOUNDARY` alone — no scenery,
+no rides — so it is a pure pre-scene plan in the exact sense `onRailway`
+already documents for the train, and at the moment it solves no tree exists to
+avoid. The road cannot move either: its outset is pinned between the bus
+door's pavement and the rim, bounds that cross by 0.15 m. So `buildTreeline`
+refuses a spot whose canopy reach enters `distanceToEntranceCorridor` — the
+**swept body sampled at 0.2 m**, not the ribbon — after every rng draw, so the
+stream is untouched. 58 trees felled on the canonical seed; 0 instances left
+in the corridor on every seed probed.
+
+### The invariant
+
+`nothing is planted in the road the cat bus drives`, on `ParkFacts.
+treesInTheBusRoad`, measured off **instance matrices in the built scene**.
+Prints `[bus road cover] N planted instances swept …, M inside it` to
+`process.stderr` every run.
+
+**Proved red against the geometry of commit `260174d3`** (road outset 8.26,
+treeline band 11.5..`TERRAIN_APRON`-1.5, tails 55 m to outset 23.5) by
+neutering the single keep-out line in `buildTreeline`:
+
+```
+seed 11        59 in the corridor, worst 3.02 m inside
+seed 18        57
+seed 24        84
+seed 5         97
+seed canonical 91
+Test Files  5 failed | 13 passed (18)
+Tests  10 failed | 521 passed (531)
+```
+
+(The second failure per seed is `the road arrives at the park…`, red for the
+unrelated rename reason above; both green together afterwards.) With the line
+in: **exit 0, 531 passed, 0 skipped**, 1660–2008 instances swept per seed.
+
+## The seam that was called structural is gone
+
+The branch inherited *"the spur one is structural… a straight spur meeting a
+curved kerb whose inner edge spans 2.84 m of z"*, 5.202 m², with a note that
+the previous attempt made it worse. **It is closed**, and the recipe is the
+one that handoff predicted:
+
+`roadRoute.ts` now owns the kerb's inner edge as a **ring**
+(`entranceRoadInnerEdgeRing`), `curvedRoadRibbon` sweeps its column 0 through
+that ring so the drawn kerb's boundary *is* the ring, and
+`entranceRoadInnerEdgeAcross(centre, half)` hands back the stretch of it under
+the path with **the two ends interpolated along the ring's own segments** — a
+point on a segment between two ring vertices lies exactly on the drawn kerb's
+triangle edge, which is what the earlier resampling of the *centre line* did
+not. Zero overlap, zero gap; `check:entrance-road`'s abut clause is green on
+all sixteen seeds.
+
+Measured why a chord is not enough (`scripts/probe-spur-edge.mts`): across a
+path's width the inner edge still spans 0.089–0.932 m, and even the chord
+between the two end points departs from the polyline by up to **2.7 cm** —
+inside the sweep's 1 cm "same plane" tolerance.
+
+## `check:coplanar`: 2 seams inherited -> 4 open, and where they came from
+
+Run it yourself; it is not in `pnpm run check`.
+
+| seam | m² | mine? |
+|---|---|---|
+| `entrance-gateway-path` \| `garden/path-surface` | 0.240 | yes |
+| `entrance-gateway-path-kerb-left` \| `garden/path-kerb` | 0.048 | yes |
+| `entrance-gateway-path-kerb-right` \| `garden/path-kerb` | 0.060 | yes |
+| `entrance-road-kerb` \| `garden/terrain` | 1.434 | **inherited** |
+
+Gone since the session started: the structural spur/kerb one (5.202 m²), the
+old `entrance-road-gateway`\|`path-surface` **baseline** entry (2.491 m² —
+`coplanar-baseline.mts` says to delete it, still to do), and two I made and
+then killed:
+
+- **kerb-as-a-slab, 1.53 m² -> 0.05.** `main` rebuilt the network's kerb as
+  its two visible bands while this branch was in flight (`addRibbonKerb`);
+  built as a full-width slab the gateway path reproduced that exact buried
+  face. Now drawn as bands too.
+- **ballast, 3.14 m² -> 0.** On seed 288 the railway crosses the gate's
+  approach 4.5 m in, so the run was laid down the ballast. It only appeared
+  when the run became *paving*: a road at 0.06 cleared the 1 cm tolerance and
+  paving at 0.055 does not. `BALLAST_HALF_WIDTH` is exported and the columns
+  stop at it; the level crossing paves that band itself, so no grass.
+
+**Why the remaining three are not zero, and what would fix them.** The far end
+of the path is placed against `forEachPavedDisc` — an approximation of the
+network's ribbons by discs at their samples — while the seam is measured
+against the network's **actual triangles**. Columns are cut at 0.15 m
+(`GATEWAY_PATH_COLUMN`) and each stops on its own, which took it from 0.64 to
+0.24 m², but no column spacing removes the disc-vs-mesh mismatch. The clean
+answer is for the path network itself to draw the run to the gate — one
+surface, no join — which means a route in `paths.ts`'s graph reaching outside
+the boundary, and that touches `isOnPath`, scenery keep-outs and NPC routing.
+That is the next engineer's call, not a nudge.
+
+The **terrain** one is inherited and untouched: the road ribbon is 8 columns
+across a hillside whose convexity rises to within 8.1 mm of it between
+vertices. The honest fix is still sampling the terrain's max across each quad
+(or subdividing across, where the rim's fall is), never lifting the road.
+
+## Gate status at `3406f871`
+
+Read from each run's own log file, never a pipe.
+
+- `tsc --noEmit` **0**, `typecheck:test` **0**
+- `test:procgen` **0** — 531 passed, 0 skipped
+- `check:entrance-road` **0** — 0 legs hit on 16 seeds, control 151 legs,
+  0 of 38616 road triangles facing the ground, spur abutting
+- `check:coplanar` **1** — the four above
+- full `pnpm run check` — running in CI on this head, not yet read
+- CI at `9ec90db2` failed `typecheck:test` on an `ENTRANCE_ANGLE` import my
+  rebase resolution left unused. Fixed in `3406f871`. **Run `typecheck:test`
+  as well as `tsc` after any rebase** — `tsc --noEmit` cannot see test files.
+
+## Rebase, and the two conflicts worth knowing
+
+Rebased onto `origin/main` `44ede1e8` (the PR was `CONFLICTING`, which is why
+**no CI and no preview ran on four of my pushes** — a conflicting PR gets no
+merge commit, so `pull_request` workflows never fire. If your pushes are
+producing no runs, check `mergeable` before anything else).
+
+- `package.json`: resolved by keeping both script definitions and then
+  **parsing** the object — 106 steps on main, 107 here, dropped `[]`, added
+  `["check:entrance-road"]`; chain 58 -> 59, same delta.
+- `pathGraph.ts`: main's banded kerb vs my move of the ribbon sweep into
+  `pathSurface.ts`. Both wanted; see the kerb note above.
+- `git diff --diff-filter=D --name-only origin/main...HEAD` is **empty**.
+
+## Ports
+
+- **5297** is mine (`vite --port 5297 --strictPort`, started from this
+  worktree). Kill by PID when done.
+- **5291 is Jim's link and serves the `road-stagger` worktree at `f4160b18`**
+  — i.e. the branch *before* any of this session's work. I could not move it
+  (checking out in another agent's worktree is blocked here). Anyone handing
+  Jim 5291 is showing him the road-through-the-gateway he complained about.
+- Preview for `3406f871`:
+  `https://pr-498-3406f87-land-of-good-places.blockstack.workers.dev` — loaded
+  and photographed at the gateway; both changes are in it.
