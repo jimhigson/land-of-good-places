@@ -415,7 +415,46 @@ export function distanceToEntranceRoad(x: number, z: number): number {
  * curvature moves this on its own rather than needing somebody to notice.
  */
 export function isInEntranceRoad(x: number, z: number, radius = 0): boolean {
+  if (!corridorHonoured) return false;
   return distanceToEntranceCorridor(x, z) < radius;
+}
+
+/**
+ * Whether {@link isInEntranceRoad} answers truthfully — **on in the game,
+ * always**, and turned off only by `check:entrance-road`'s control.
+ *
+ * This exists because of what a control has to be. The check sweeps the bus
+ * along the road and requires it to hit **no** trestle leg; a sweep that cannot
+ * see a collision returns exactly that same answer, so something known to be
+ * dirty has to go through the same instrument on every run or the clean result
+ * means nothing.
+ *
+ * The first control swept the road as it *used* to be — the straight chord at
+ * the wall — against the legs as they are **now**. That worked, and then began
+ * to stop working: as the ride learned to nudge its legs out of the road, it
+ * moved them off the old line too, and the control's hit count fell from 96 to
+ * 35 across the pool, to as few as **one leg on seed 11**. It still
+ * discriminated, but it was one placement decision away from reading zero — and
+ * a zero there does not mean "the road is clean", it means the run is void. A
+ * control that degrades as the thing it controls for improves is a control with
+ * a shelf life.
+ *
+ * So the dirty input is generated instead of remembered: the control builds the
+ * park with this switched off, which is the same park minus the one clause in
+ * `railRace/track.ts`'s `groundIsClear` that keeps legs out of the road, and
+ * sweeps **the real, current road** against those legs. It cannot go stale,
+ * because it is rebuilt from whatever the ride does today.
+ *
+ * Nothing in the game calls this. It is deliberately a plain function rather
+ * than an environment variable: `src/` is bundled for a browser, where
+ * `process.env` does not exist, and a switch the game could read by accident is
+ * a switch that will one day be read by accident.
+ */
+let corridorHonoured = true;
+
+/** See {@link corridorHonoured} — `check:entrance-road`'s control, and nothing else. */
+export function setEntranceCorridorHonoured(honoured: boolean): void {
+  corridorHonoured = honoured;
 }
 
 /**

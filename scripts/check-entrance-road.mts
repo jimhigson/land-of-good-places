@@ -26,16 +26,27 @@
  * CLAUDE.md: *"run a control on the instrument first — two agents got clean,
  * decisive, entirely wrong answers from flood fills that were measuring the
  * wrong thing"*. A sweep that finds nothing is exactly what a broken sweep also
- * finds, so before it reports on the road that exists it sweeps the road that
- * **used** to exist — the straight chord at the wall plus nine metres that the
- * bus drove until this change — and requires that to come back **dirty**. If the
- * old line reads clean, the instrument cannot see a collision at all and the
- * whole run is void, whatever it says about the new one.
+ * finds, so every seed is built **twice**: once as the game builds it, and once
+ * with `roadRoute.ts`'s `setEntranceCorridorHonoured(false)`, which switches off
+ * the single clause in `railRace/track.ts`'s `groundIsClear` that keeps trestle
+ * legs out of the road. The second park is the ride placing its supports the way
+ * it did before this change — through the road — and **the identical sweep** is
+ * run against it. It must come back dirty. If it does not, the instrument cannot
+ * see a collision at all and the whole run is void, whatever it says about the
+ * real park.
  *
  * That control is not a one-off transcript pasted into a comment; it is measured
- * on every seed on every run, and its numbers are printed. It is the same
- * geometry the fix was proved against, so it cannot go stale the way a recorded
- * red run does.
+ * on every seed on every run, and its numbers are printed.
+ *
+ * **It replaced a weaker one, and why matters.** The first control swept the road
+ * as it *used* to be — the straight chord at the wall — against the legs as they
+ * are now. That degraded as the fix worked: the ride nudging its legs clear of
+ * the new road moved them off the old line too, and the count fell from 96 legs
+ * across the pool to 35, as low as **one leg on seed 11**. A control one
+ * placement decision away from reading zero is a control that will one day void a
+ * perfectly good run, and nothing would announce that it had stopped being a
+ * measurement. Generating the dirty park instead of remembering it cannot decay,
+ * because it is rebuilt from whatever the ride does today.
  *
  * ## What is measured, and off what
  *
@@ -68,9 +79,8 @@ interface SeedReport {
   /** Legs the bus's swept body reaches on the road as it is now. Must be zero. */
   readonly hits: number;
   readonly worstPenetration: number;
-  /** Legs the bus reached on the OLD straight chord. The control: must be > 0. */
-  readonly controlHits: number;
-  readonly controlWorst: number;
+  /** True if this park was built with the corridor off — the control run. */
+  readonly control: boolean;
   readonly reach: number;
   readonly brow: number;
   /** Road vertices drawn outside the corridor the bus drives. Must be zero. */
@@ -82,14 +92,19 @@ interface SeedReport {
 
 // ---------------------------------------------------------------- the child
 
-async function measureOneSeed(): Promise<void> {
+async function measureOneSeed(asControl: boolean): Promise<void> {
   const { buildHeadlessPark } = await import('./park-harness.mts');
   const { CAT_BUS_LENGTH, CAT_BUS_WIDTH } = await import('../src/world/entrance/catBus.ts');
   const { POST_FOOT_RADIUS } = await import('../src/world/railRace/trestleGeometry.ts');
   const { PARK_SEED } = await import('../src/world/parkManifest.ts');
-  const { ENTRANCE_WALL_RADIUS } = await import('../src/world/entrance/layout.ts');
-  const { entranceRoadAt, entranceRoadBrow, entranceRoadReach, distanceToEntranceCorridor } =
+  const { entranceRoadAt, entranceRoadBrow, entranceRoadReach, distanceToEntranceCorridor, setEntranceCorridorHonoured } =
     await import('../src/world/entrance/roadRoute.ts');
+
+  // **The control's dirty input, generated rather than remembered.** With the
+  // corridor switched off the ride places its trestles exactly as it did before
+  // this change — including through the road — and the identical sweep below
+  // then runs against them. See `setEntranceCorridorHonoured`.
+  if (asControl) setEntranceCorridorHonoured(false);
 
   const park = buildHeadlessPark();
 
@@ -151,26 +166,6 @@ async function measureOneSeed(): Promise<void> {
   };
 
   const STEP = 0.25;
-
-  // --- the control: the road as it used to be -------------------------------
-  // A straight chord at the wall plus nine metres, swept from where the bus used
-  // to appear to where it used to be disposed. If this reads clean the sweep
-  // above cannot see a collision and nothing else in this file means anything.
-  const oldStopZ = ENTRANCE_WALL_RADIUS + 9;
-  const controlLegs = new Set<number>();
-  let controlWorst = 0;
-  for (let x = 7; x >= -22; x -= STEP) {
-    const { worst } = penetration(x, oldStopZ, -1, 0);
-    controlWorst = Math.max(controlWorst, worst);
-    for (let i = 0; i < legs.length; i += 1) {
-      const leg = legs[i] as { x: number; z: number; radius: number };
-      const along = -(leg.x - x);
-      const across = leg.z - oldStopZ;
-      if (Math.abs(along) - halfLength <= leg.radius && Math.abs(across) - halfWidth <= leg.radius) {
-        controlLegs.add(i);
-      }
-    }
-  }
 
   // --- the road the bus is actually on now ----------------------------------
   const brow = entranceRoadBrow();
@@ -254,8 +249,7 @@ async function measureOneSeed(): Promise<void> {
     legs: legs.length,
     hits: hitLegs.size,
     worstPenetration: Number(worstPenetration.toFixed(3)),
-    controlHits: controlLegs.size,
-    controlWorst: Number(controlWorst.toFixed(3)),
+    control: asControl,
     spurGap: Number((Number.isFinite(spurGap) ? spurGap : 999).toFixed(3)),
     reach: Number(entranceRoadReach().toFixed(1)),
     brow: Number(brow.toFixed(1)),
@@ -266,32 +260,44 @@ async function measureOneSeed(): Promise<void> {
 // --------------------------------------------------------------- the parent
 
 async function sweepThePool(): Promise<void> {
-  const reports: SeedReport[] = [];
   const failures: string[] = [];
 
-  const results = await Promise.all(
-    PARK_SEED_POOL.map(async (seed) => {
-      const { stdout } = await run(
-        process.execPath,
-        ['--no-warnings', '--import', './scripts/ts-extension-resolver-register.mjs', HERE, '--one'],
-        { env: { ...process.env, LGP_SEED: String(seed) }, maxBuffer: 1 << 26 },
-      );
-      const line = stdout.trim().split('\n').pop() as string;
-      return JSON.parse(line) as SeedReport;
-    }),
+  /** One child process per park: a seed is pinned at module load, so it cannot be reused. */
+  const measure = async (seed: number, asControl: boolean): Promise<SeedReport> => {
+    const argv = ['--no-warnings', '--import', './scripts/ts-extension-resolver-register.mjs', HERE, '--one'];
+    if (asControl) argv.push('--control');
+    const { stdout } = await run(process.execPath, argv, {
+      env: { ...process.env, LGP_SEED: String(seed) },
+      maxBuffer: 1 << 26,
+    });
+    return JSON.parse(stdout.trim().split('\n').pop() as string) as SeedReport;
+  };
+
+  const pairs = await Promise.all(
+    PARK_SEED_POOL.map(async (seed) => ({
+      real: await measure(seed, false),
+      control: await measure(seed, true),
+    })),
   );
-  reports.push(...results);
+  const reports = pairs.map((pair) => pair.real);
 
   // **The control is read first, and it gates everything.** An instrument that
-  // cannot find the collisions we already know are there is not evidence that
-  // the new road has none.
-  const blindSeeds = reports.filter((report) => report.controlHits === 0);
-  if (blindSeeds.length > 0) {
+  // cannot find a collision is not evidence that there is none — and the shape
+  // of that mistake here would be a sweep silently measuring the wrong bus, the
+  // wrong legs, or nothing at all, on a run that prints "0 hits" and passes.
+  //
+  // The dirty park is built fresh on every run rather than remembered from a
+  // transcript: same seed, same road, same sweep, with only
+  // `groundIsClear`'s corridor clause switched off. Anything that blinds the
+  // real sweep blinds this one identically, which is the whole point.
+  const blind = pairs.filter((pair) => pair.control.hits === 0);
+  if (blind.length > 0) {
     failures.push(
-      `the control found NO collision on ${blindSeeds.length} seed(s) — sweeping the old straight ` +
-        'chord at the wall plus nine metres is supposed to hit the supports the bus used to drive ' +
-        'through, so this sweep cannot see a collision and its verdict on the real road is void: ' +
-        blindSeeds.map((report) => report.seed).join(', '),
+      `the control found NO collision on ${blind.length} seed(s) — with the road's corridor switched ` +
+        'off the Rail Race puts its legs back through the road, so the bus is supposed to sweep ' +
+        'through them. Reading zero there means this sweep cannot see a collision at all, and its ' +
+        'verdict on the real road is void: ' +
+        blind.map((pair) => pair.control.seed).join(', '),
     );
   }
 
@@ -320,21 +326,23 @@ async function sweepThePool(): Promise<void> {
     }
   }
 
-  const controlTotal = reports.reduce((sum, report) => sum + report.controlHits, 0);
+  const controlTotal = pairs.reduce((sum, pair) => sum + pair.control.hits, 0);
+  const controlWorst = Math.max(...pairs.map((pair) => pair.control.worstPenetration));
   process.stderr.write(
-    `  control: the old straight kerb hits ${controlTotal} legs across ${reports.length} seeds ` +
-      `(worst ${Math.max(...reports.map((r) => r.controlWorst)).toFixed(2)} m inside a bus) — the sweep ` +
-      'can see a collision\n',
+    `  control: with the corridor off the ride puts ${controlTotal} legs back in the bus's path across ` +
+      `${pairs.length} seeds (worst ${controlWorst.toFixed(2)} m inside a bus) — the sweep can see a collision\n`,
   );
   process.stderr.write(
-    `  covered: ${reports.length} seeds, ${reports.reduce((sum, r) => sum + r.legs, 0)} trestle legs, ` +
+    `  covered: ${pairs.length} seeds x 2 parks (real and control), ` +
+      `${reports.reduce((sum, r) => sum + r.legs, 0)} trestle legs, ` +
       `bus swept from the brow at +${reports[0]?.brow ?? 0} m to -${reports[0]?.brow ?? 0} m\n`,
   );
 
-  for (const report of reports) {
+  for (const pair of pairs) {
     console.log(
-      `  seed ${String(report.seed).padStart(8)}  legs ${String(report.legs).padStart(3)}  ` +
-        `bus hits ${report.hits}  (old road hit ${report.controlHits}, worst ${report.controlWorst.toFixed(2)} m)`,
+      `  seed ${String(pair.real.seed).padStart(8)}  legs ${String(pair.real.legs).padStart(3)}  ` +
+        `bus hits ${pair.real.hits}  (corridor off: ${pair.control.hits} legs in the bus, ` +
+        `worst ${pair.control.worstPenetration.toFixed(2)} m)`,
     );
   }
 
@@ -347,7 +355,7 @@ async function sweepThePool(): Promise<void> {
 }
 
 if (process.argv.includes('--one')) {
-  await measureOneSeed();
+  await measureOneSeed(process.argv.includes('--control'));
 } else {
   await sweepThePool();
 }
