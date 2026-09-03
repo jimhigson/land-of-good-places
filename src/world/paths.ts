@@ -3215,7 +3215,15 @@ function* pathGridSearch(): Generator<number, PathGrid, void> {
   const ringNodes: number[] = [];
   for (const tap of lattice.taps) {
     const node = addNode(tap.rim[0], tap.rim[1]);
-    link(node, tap.index, tap.cost, CONNECTOR_DIR, []);
+    // **`tap.via`, not `[]`.** Every tap used to be a straight run out along
+    // its own compass line, so its `via` was always empty and passing `[]`
+    // here was harmless. The rescue rung above builds an *elbow* when the
+    // straight line finds nothing, and dropping its corner drew the tap as a
+    // single rim-to-node line — a diagonal, and precisely what
+    // `pathsRunOnGridAxes` exists to refuse. Measured: seed 267's
+    // `street-tap-north` came out "diagonally for 29.3 m, from (-3.2, -10.4)
+    // to (-15.8, 16.0)", which is the elbow's two legs drawn as one.
+    link(node, tap.index, tap.cost, CONNECTOR_DIR, tap.via);
     ringNodes.push(node);
   }
 
