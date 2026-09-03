@@ -73,6 +73,50 @@ defects seed 18's re-rolled park exposed are **#483**, not weakened here.
 - [x] `pnpm run check` exit 0
 - [x] PR **#485** raised — not merged (never merge your own)
 
+## Which side yields: BOTH, and they were two different bugs
+
+**1. The boundary wall's aperture — fixed here.** The hole in the wall was an
+**angle** (`ENTRANCE_GATE_HALF_ANGLE`, 0.073 rad, hand-tuned) while the arch is
+a **width** (`ENTRANCE_GATE_HALF_WIDTH`, 4.3 m). Two definitions of one thing in
+units nobody can compare by eye, and the wall is laid by arc length along a
+spline whose radius varies per seed, so where the stone actually stops is a
+different number on every park. The segment test also asked about a *midpoint*,
+so a 2 m chord whose middle cleared the gap still reached a metre into the
+doorway. Measured on `main`, in the 7.00 m clear width 1.0-2.0 m inside the
+arch, masonry (`halfThickness 0.45`) overlapped a player-sized body on **nine of
+sixteen pool seeds**:
+
+```
+451 0.87 m   128 0.76   267 0.50   346 0.44   115 0.36
+131 0.28     274 0.19   208 0.07   20260728 0.05
+```
+
+One owner now: `isInEntranceGateOpening(x, z, margin)` in `entrance/layout.ts`,
+in metres, in the gate's own frame, and every point of a segment is tested, not
+its midpoint. All nine clear. **No probe was widened and no seed dropped.**
+
+**2. The railway — fixed here** (the section above). Different bug, different
+collider (`halfThickness 0.18`), and the only one that *severed* the walk.
+
+## What is left, named rather than waved at
+
+After both fixes, every remaining blocked cell in the 7.00 m clear width has a
+**negative overlap** — nothing is touching it. The blocker is the **soft play
+boundary** (`GARDEN_PLAY_BOUNDARY`, which is `PARK_BOUNDARY` itself): the spline
+is pinned to `ENTRANCE_WALL_RADIUS` at *one bearing* and is free to dip inside
+it across the rest of the arch's ±4.1°, so the corners of the doorway read as
+outside the park. Measured on seed 288, `edgeRadiusAt` runs 59.80 m at −0.06 rad
+against 60.00 at the gate bearing.
+
+**The mechanism it wants**, and it is small: `Collision.resolve` consumes the
+clamp through `distanceToEdge` alone (plus a 0.25 m numeric gradient), so
+wrapping `GARDEN_PLAY_BOUNDARY` — edge no nearer than the gate radius inside
+`isInEntranceGateOpening` — fixes it without moving the spline, which is what
+keeps every other park identical. **Not done here**: the gradient is normalised,
+so a hard-edged override pushes a child *sideways* at the jamb, and getting the
+taper right is a feelable, visible change to the player clamp at the front gate
+that I cannot QA without a browser. It is a change to make with eyes on it.
+
 ## The one thing still red, on purpose
 
 `check:coplanar` reports `MORE: garden|garden/path-kerb|garden/path-surface`,
