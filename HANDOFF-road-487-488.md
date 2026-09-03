@@ -1,28 +1,16 @@
 # Handoff — the road outside the gate (#487 road ends + grey, #488 bus clips the rail race supports)
 
 Branch `fix/road-487-488`, worktree `.claude/worktrees/road-487-488`.
+**Not finished.** Read "What is left" at the bottom before doing anything.
 
-## 1. Grey — DONE, on this branch
+## The measurement that decided everything
 
-`roadMaterial()` has exactly **two** call sites: `Entrance.ts:648` (the park, i.e.
-gameplay) and `BusJourney.ts:1256` (the intro ride's own `Scene`). So one material
-serves both, but the seam already exists at the call site — a `tone` argument on
-`roadMaterial` recolours gameplay and leaves the intro alone. That is the whole
-fix, and the cancelled branch `origin/fix/grey-arrival-paving` had already made
-it; its two commits are cherry-picked here (`647ea7c5`, `9347f62d`). `tsc` clean.
+`scripts/measure-entrance-road.mts` (sweep with `LGP_SEED=<n>`; run under
+`node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs`).
 
-Still needs eyes: the colour under the park's own light, not in a still.
-
-## 2. The measurements (all seeds, `scripts/measure-entrance-road.mts`)
-
-```
-LGP_SEED=<n> node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs \
-  scripts/measure-entrance-road.mts
-```
-
-**Every one of the sixteen pool seeds has rail-race trestle legs standing inside
-the bus's swept body.** 2–8 legs per seed; worst lateral intrusion 0.54–2.51 m.
-It is structural, not luck:
+**All sixteen pool seeds had rail-race trestle legs inside the bus's swept
+body** — 2 to 8 per seed, worst lateral intrusion 0.54–2.51 m. Structural, not
+luck on Jim's park:
 
 | seed | legs in bus sweep | legs in road footprint | worst intrusion (m) |
 |---|---|---|---|
@@ -43,90 +31,143 @@ It is structural, not luck:
 | 428 | 8 | 8 | 2.46 |
 | 451 | 2 | 2 | 2.15 |
 
-### Why, exactly — and why the road alone cannot fix it
+### The impossibility proof (why the road alone cannot fix it)
 
-Everything outside the wall is measured as **outset**: metres beyond
-`PARK_BOUNDARY`'s own edge, which is how `route.ts`, `terrain.ts` and
-`ringPath.ts` all already talk about that ground.
+Everything outside the wall is measured as **outset** — metres beyond
+`PARK_BOUNDARY`'s own edge, the unit `route.ts`, `terrain.ts` and `ringPath.ts`
+already use.
 
-- **Trestle feet stand at outset 6.5, on every seed, all the way round.**
-  Measured (`nearGateLegsBeyondEdge` is `6.5` for every leg near the gate on all
-  sixteen seeds) and stated: `route.ts`'s `NOMINAL_OUTSET = 6.5`, whose own doc
-  boxes it into `[6.15, 6.92]` — inner limit so the innermost rail clears the
-  masonry, outer limit so the outermost rail stays inside `RIM_OUTSET_START`.
-  **It cannot move.**
-- The ring's structure spans outset **1.42 … 11.58** (6.5 ± 5.08 m of true
-  perpendicular reach). `RIM_OUTSET_START` is 12, where the ground begins its
-  17 m fall.
-- The road is `2 * ROAD_HALF_WIDTH` = **7.78 m** wide, derived from the bus.
-- For the road to stay out of the park its centre needs outset ≥ 3.89; to stay
-  off the hillside, outset ≤ 12 − 3.89 = **8.11**. So the road's centre line
-  lives in **[3.89, 8.11]**.
-- To clear a leg at outset 6.5 the road's centre must be **≥ 4.4 m** from it
-  (3.89 half-width + ~0.5 m foot radius) — i.e. outset ≤ 2.1 **or** ≥ 10.9.
+- Trestle feet stand at `NOMINAL_OUTSET` = **6.5**, all the way round, on every
+  seed (measured, and stated in `route.ts`, whose doc boxes it into
+  `[6.15, 6.92]` — inner so the innermost rail clears the masonry, outer so the
+  outermost stays inside `RIM_OUTSET_START`). It cannot move.
+- A `2 * ROAD_HALF_WIDTH` = **7.78 m** road needs its centre at outset ≥ 3.89 to
+  stay out of the park and ≤ 8.11 to stay off the 17 m hillside → **[3.89, 8.11]**.
+- To clear a leg at 6.5 that centre must be ≥ **4.4 m** away → outset ≤ 2.1 or
+  ≥ 10.9.
 
-**Those two bands do not intersect.** There is no outset, straight or curved, at
-which a full-width road parallel to the wall clears a support. The apron outside
-this park is entirely occupied by the ride; the bus road was laid straight
-through it.
+**The bands do not intersect.** No road running *along* the wall clears a
+support at any offset, straight or curved. A road *crossing* the trestle line is
+fine — `TRESTLE_SPACING` is 12 m against a 7.78 m road.
 
-The road *crossing* the trestle line radially is fine — `TRESTLE_SPACING` is
-12 m and the road is 7.78 m wide, so a radial road threads a gap with ~2 m
-either side. It is only a road running **along** the line that cannot fit, and
-the kerb the bus stands on is exactly that.
+Overseer's ruling (3 September): the ride's placement search **must** treat the
+road as a corridor, exactly as `groundIsClear` already treats paths, the rail
+corridor and `PARK_LAYOUT.entries`. The road was simply missing from that list.
 
-### The current road, for reference (canonical seed)
+## What is done and pushed
 
-- `entrance-road-kerb`: x −29.9…14.9, z 65.1…72.9 (centre z = 69 = wall + 9)
-- `entrance-road-gateway`: x −3.9…3.9, z 57.5…65.1
-- Six legs inside it: (7.26, 68.87), (5.37, 68.20), (−16.16, 67.92),
-  (−18.09, 68.46), (−6.36, 66.05), (−4.36, 66.04).
+1. **Grey (#487 part 2).** Cherry-picked `647ea7c5`, `9347f62d` from the
+   cancelled `origin/fix/grey-arrival-paving`. `roadMaterial()` gains a tone;
+   the park asks for `'grey'`, `BusJourney.ts` (the intro ride's own `Scene`,
+   the only other call site) takes the sand default, so the intro is untouched
+   by construction rather than by promise.
+2. **`src/world/entrance/roadRoute.ts` — the road's one owner.** The centre line
+   is the park's edge pushed out along its normal by `ENTRANCE_ROAD_OUTSET`
+   (4.49 m — `ROAD_HALF_WIDTH` plus the masonry's reach, i.e. as close to the
+   wall as a road can be laid, because every metre further out is a metre of the
+   ride's apron taken). It runs `ENTRANCE_ROAD_KERB_HALF_RUN` (= `CAT_BUS_LENGTH`,
+   15.8 m) each way, then two tails turn away from the park and climb to
+   `ENTRANCE_ROAD_TAIL_OUTSET` (= `TERRAIN_APRON`, 23.5 m), over the hilltop's
+   brow to the terrain disc's own cut edge. Verified shape,
+   `scripts/probe-road.mts`:
+   ```
+   road outset 4.49 -> 23.50, kerb half run 15.8, extent -40.8..41.1
+       at        x        z   outset   groundY
+      -16   -15.86    65.76     4.50      0.27
+        0    -0.08    64.56     4.49     -0.20
+       16    15.07    69.65     4.50     -0.40
+       26    18.27    78.89    12.16     -0.47
+       30    18.98    82.83    15.69     -5.69
+       40    22.78    91.86    23.32    -17.41
+   ```
+   It goes over the brow (outset 12, `RIM_OUTSET_START`) at about 26 m from the
+   gate and is out of sight past that.
+3. **`railRace/track.ts`'s `groundIsClear` honours the corridor** —
+   `isInEntranceRoad(x, z, POST_FOOT_RADIUS)`. `World.ts` builds `RailRace`
+   before `Entrance` and the corridor is derived from the boundary alone, so the
+   ordering works. `pnpm run check:rail-race` **exit 0** with it in.
+4. **A real regression found and root-caused**, not absorbed: `test:procgen` went
+   red on five seeds, all on *"only the walk-past one is solid"*. Cause was **not**
+   the ride — it was the invariant. `track.ts`'s `strut` composes a leg's matrix
+   about the *midpoint* of foot-to-top and registers the collider at the **foot**;
+   the invariant asked about the midpoint. On a leg that leans (a nudged spot with
+   its branch tops still under the rails) those are different places — measured
+   drift up to **2.00 m** — so bigger nudges made four solid legs read as hollow.
+   Control (`scripts/probe-leg-lean.mts`, canonical seed): of 100 legs, **50 have
+   no collider under the foot (the whole race ring, which registers none) and 50
+   do (the whole walk-past ring)** — the test still separates the rings exactly as
+   written, and asking about the foot is strictly stronger than asking about the
+   midpoint. After the fix: `test:procgen` **exit 0, 515 passed**.
 
-## 3. Where the fully-zoomed-out view reaches
+## Gate status on this branch right now
 
-Owner: `IsoCamera.frustumBase()` =
-`max(CAMERA_VIEW_HEIGHT/2, CAMERA_MIN_VIEW_WIDTH/2 / aspect)`; half-height at
-full zoom-out is `frustumBase / CAMERA_ZOOM_MIN` (0.42). Aspect-dependent, so
-anything reading it must call that function, never copy a number.
+- `tsc --noEmit` exit 0
+- `typecheck:test` exit 0
+- `check:rail-race` exit 0
+- `test:procgen` exit 0 (515/515)
+- **`pnpm run check` NOT yet run in full.** Expect `check:cat-bus`,
+  `check:park-map`, `check:arrival-*` to have opinions once the road actually
+  moves (see below) — they do not today, because it has not.
 
-Worked through: 16:9 desktop → half-height 17.86 m, half-width 31.75 m, and
-`halfHeight / sin(CAMERA_PITCH)` = **29.0 m** of ground up-screen; furthest
-ground corner ≈ **43.0 m** from the focus. A 390×844 portrait phone (where
-`CAMERA_MIN_VIEW_WIDTH`'s floor bites and grows the view) is worse: **47.8 m**.
+## What is left — and the one big piece
 
-Against that, the drawn ground simply runs out first. Along the kerb line the
-terrain disc (`TERRAIN_RADIUS` 83.5) cuts at |x| ≈ 47, and going **east** the
-boundary spline bulges out to meet the kerb at x ≈ +27 — so a straight kerb
-cannot be extended both ways at all. Radially outward the ground is flat to
-outset 12 and then falls 17 m, bottoming past outset 22.
+**`Entrance.ts` still builds the OLD straight kerb, and `ArrivalSequence` still
+drives the bus along the old straight line.** So today the branch has a road
+corridor that the ride respects and a road mesh that ignores it. That is a
+half-state; it is coherent (nothing is worse than `main`) but it fixes nothing
+visible yet.
 
-So "as far as the game renders" is not a length to pick: it is *the road runs
-until the drawn, out-of-park ground runs out*, which is a query against
-`PARK_BOUNDARY` + `TERRAIN_RADIUS` + the rim, checked against the view reach
-above so we can say it is never short.
+To finish:
 
-## 4. The design fork — needs a ruling
+1. **`Entrance.ts` `buildEntranceRoad`** — replace the axis-aligned
+   `roadRibbon` kerb with a ribbon swept along `entranceRoadStations()`.
+   `roadRibbon` is straight-only; a curved sibling is needed. Keep
+   `applyRoadUvs`'s divisors (`ROAD_HALF_WIDTH * 2`, `ROAD_TILE_METRES`) as the
+   one owner of the scale — write `u` across and `v` as arc length, do not
+   invent a second scale. The gateway spur should start at the kerb's **inner**
+   edge at the gate (`entranceRoadAt(0)` minus `ROAD_HALF_WIDTH` along its
+   normal) to keep #472's coplanar fix.
+2. **The bus follows the road.** `ArrivalSequence` currently lerps a scalar
+   `busX` and calls `placeBus(x)`, which does
+   `position.set(x, terrainHeight(x, ENTRANCE_BUS_STOP_Z), ENTRANCE_BUS_STOP_Z)`
+   and a fixed `BUS_FACING`. That becomes an **arc parameter**: `entranceRoadAt(s)`
+   for position, and `atan2(headingX, headingZ)` for facing. Dispose the bus once
+   it is past the brow (outset ≥ `RIM_OUTSET_START`, about `s = ±26`) rather than
+   letting it drive down a 50° slope.
+3. **Blast radius of `ENTRANCE_BUS_STOP_Z`** — it is the wall + 9 m today and the
+   road is now at wall + 4.49, so it is wrong for everything that reads it:
+   `ui/parkMapContent.ts`, `entrance/arrivalSightline.ts`,
+   `entrance/ArrivalSequence.ts`, `entrance/Entrance.ts` (the shelter),
+   `scripts/check-cat-bus.mts`, `scripts/check-park-map.mts`,
+   `test/procgen/invariants.ts`. The one-owner move is to **delete it from
+   `layout.ts`** and have those read the route. `roadRoute.ts` imports
+   `layout.ts`, so the dependency must stay that way round — do not make
+   `layout.ts` import `roadRoute.ts`.
+4. **A check that measures the thing.** `scripts/check-entrance-road.mts`:
+   the bus's swept body against every trestle collider, per seed over
+   `PARK_SEED_POOL`, printing the count on every run (to `process.stderr`, so a
+   passing run still says what it covered). Prove it red first — reverting the
+   `groundIsClear` line gives 2–8 legs per seed, the table above is the
+   transcript to compare against. Add it to the `check` chain and verify by
+   **parsing** `package.json`'s `scripts` object, never grepping.
+5. **Reach vs the frustum.** `IsoCamera.frustumBase()` is the owner and it is
+   aspect-dependent — **call it, never copy it.** At `CAMERA_ZOOM_MIN`: 16:9
+   desktop reaches 29.0 m of ground up-screen (43.0 m to the furthest ground
+   corner); a 390×844 portrait phone 47.8 m. The road reaches 40.8 m before the
+   ground itself ends. **Say this plainly to Jim rather than shipping it
+   quietly:** the road does not stop in a field any more — it goes over the
+   hilltop's brow at ~26 m and there is no ground beyond — but on a tall phone
+   the frame can reach further than the hilltop does. That is a property of the
+   diorama, not of the road.
+6. **Browser QA** (this agent had the browser granted but has not used it):
+   the grey under the park's own light, the road reaching the edge of the view
+   fully zoomed out, and **the bus actually driving in** — the clipping is
+   motion and a still cannot show it. Own port, `--strictPort`, kill by PID.
 
-Every remaining option requires the **ride's trestle placement to learn about
-the road corridor**, because the road has nowhere else to be. `groundIsClear`
-in `railRace/track.ts` already refuses ground within 2.8 m of a path, 2.4 m of
-the rail corridor, and near `PARK_LAYOUT.entries` — the entrance road is simply
-missing from that list, which is exactly CLAUDE.md's "a generator that only
-checks itself against a hand-picked obstacle list will silently miss whatever a
-sibling system placed there". `World.ts` builds `RailRace` (line 214) **before**
-`Entrance` (line 268), so the ordering works.
+## Gotchas
 
-`RADIAL_NUDGES` already allows ±5 m, and a leg moving from outset 6.5 to ~8.4
-clears a road centred at outset 4.0. Nothing is deleted and nothing is
-hand-placed; the existing search does it. But Jim's wording on #488 is "do not …
-nudge a support", so this wants confirming before it is built.
-
-The road at outset 4.0 has to be a **boundary-offset curve**, not the straight
-chord it is today (a straight kerb at z = 64 is inside the park by x ≈ +12) —
-which means `ArrivalSequence`/`busDriver` must drive the bus along a curve.
-That is the expensive half of the work.
-
-## Status
-
-Grey done and typechecking. Road route and length not yet implemented — blocked
-on the fork above. Nothing has been merged; no PR raised yet.
+- `pnpm run <x> | tail` **masks the exit code** — `[ELIFECYCLE] ... exit code 1`
+  appeared while `$status` read 0. Redirect to a file and read `$status`.
+- Another agent's branch has deleted `ENTRANCE_GATE_HALF_ANGLE` and given the
+  gate aperture one owner in metres. Expect a conflict near the entrance
+  geometry.
