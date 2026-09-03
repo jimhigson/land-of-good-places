@@ -24,6 +24,7 @@ import { distanceToPath } from '../pathGraph';
 import { archFeet } from './arch';
 import { PARK_LAYOUT } from '../parkLayout';
 import { distanceToRailCorridor } from '../train/plan';
+import { isInEntranceRoad } from '../entrance/roadRoute';
 import type { CollisionWorld } from '../Collision';
 import { railFrameAt, sweptRails, type RailFrame, type RailSampler } from '../rail/sweptRail';
 import {
@@ -1226,11 +1227,43 @@ interface TrestleSpot {
   readonly index: number;
 }
 
-/** Every one of `trestleSpots`'s four ground-clearance predicates, together. */
+/**
+ * Every one of `trestleSpots`'s ground-clearance predicates, together.
+ *
+ * **The entrance road is one of them (#488).** It was not, and the omission was
+ * exactly the shape CLAUDE.md names: *"a generator that only checks itself
+ * against a hand-picked obstacle list will silently miss whatever a sibling
+ * system placed there"*. This list already refuses ground near a path, near the
+ * railway's corridor and near a `PARK_LAYOUT` entry — the road the cat bus
+ * arrives on was simply not in it, so on **all sixteen pool seeds** two to eight
+ * legs stood inside the bus's own swept body and it drove straight through them.
+ *
+ * It cannot be answered on the road's side: measured, the trestle line stands at
+ * `NOMINAL_OUTSET` (6.5 m beyond the park's edge) and a 7.78 m road parallel to
+ * it needs a centre at outset ≤ 2.1 or ≥ 10.9, while staying out of the park and
+ * off the hillside allows only [3.89, 8.11]. Those bands do not intersect — see
+ * `entrance/roadRoute.ts`, which owns the corridor and carries the full
+ * argument.
+ *
+ * So the ride declines to put a foot in the road and re-rolls, which is the
+ * standing procgen rule rather than a special case: `searchForClearGround`'s
+ * existing nudges do the moving, and a leg at outset 6.5 needs about +2.6 m
+ * radially to clear a road hugging the wall — inside `RADIAL_NUDGES` and inside
+ * `MANDATORY_RADIAL_NUDGES`. Nothing here deletes a support or places one by
+ * hand.
+ *
+ * Ordering works because `World.ts` builds `RailRace` before `Entrance`, and the
+ * corridor is derived from the boundary alone — it does not need the road to
+ * have been built, only to have been *decided*.
+ */
 function groundIsClear(x: number, z: number, collision: CollisionWorld): boolean {
   if (!collision.isClearCircle(x, z, 1.1)) return false;
   if (distanceToPath(x, z) < 2.8) return false;
   if (distanceToRailCorridor(x, z) < 2.4) return false;
+  // The leg's own foot, not a hand-picked margin: the collider `track.ts`
+  // registers for it is `POST_FOOT_RADIUS` wide, so that is exactly how much of
+  // the road a leg standing here would take away from the bus.
+  if (isInEntranceRoad(x, z, POST_FOOT_RADIUS)) return false;
   const pinchesCorridor = [...PARK_LAYOUT.entries.values()].some(
     (entry) => Math.hypot(x - entry.x, z - entry.z) < entry.boundingRadius + 2.4,
   );
