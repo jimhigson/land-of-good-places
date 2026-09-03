@@ -2,6 +2,7 @@ import { CanvasTexture, RepeatWrapping, SRGBColorSpace, type Texture } from 'thr
 import { hexToCss, PALETTE } from './palette';
 import { Rng } from './mathUtils';
 import { markShared } from '../art/style/materials';
+import { ART } from '../art/style/artPalette';
 
 /**
  * Every texture in the game is drawn here with the 2D canvas API.
@@ -165,20 +166,64 @@ export function pathTexture(repeat = 8): CanvasTexture {
  * The kerbs are the park's own `stonePink` family — the same material as the
  * boundary wall and the gate posts — which is not decoration: the lane and the
  * park are meant to read as one road arriving at one place, and matching the
- * stone is how the eye is told that before the gate is even in shot.
+ * stone is how the eye is told that before the gate is even in shot. They are
+ * painted the same on **both** tones below, and so is the centre line, for that
+ * reason: the carriageway changes stone, the road does not change identity.
+ *
+ * ## Two tones, and why the ladder is swapped rather than the material tinted
+ *
+ * Jim, 3 September 2026 (issue #477): *"the paving outside the park that the
+ * bus arrives on should be grey during gameplay - don't change the intro
+ * sequence."*
+ *
+ * The obvious way to grey a sandy road is to tint its material, and it does not
+ * work: `pathSand` is a warm 0xf3ddb2, so any grey multiplied through it comes
+ * out as darker sand. Grey has to be *painted*, which means a second bake of
+ * this canvas with the slab ladder substituted — and a second bake is free to
+ * cache under its own key, so both tones can exist at once. That is what lets
+ * the park's own entrance road be grey while `BusJourney`'s lane, which the
+ * intro is twenty seconds of, keeps the sand it has always had. Nothing about
+ * the ride is touched: it asks for the default and gets exactly the bytes it
+ * got before.
+ *
+ * The grey is `ART.statueStone*` — the park's **one** documented grey, already
+ * reasoned about against `stonePink` in `artPalette.ts` (a nine-point red lift,
+ * so it reads as grey without punching a desaturated hole in a pink park). No
+ * new colour is invented here; ART_DIRECTION §5 forbids a second opinion about
+ * a colour the world already names, and this is the same rock the fountain
+ * statue is carved from.
  */
-export function roadTexture(): CanvasTexture {
-  return cached('road', () => {
+export type RoadTone = 'sand' | 'grey';
+
+/**
+ * The three slab tones and the mortar behind them, per {@link RoadTone}.
+ *
+ * Ordered light → mid → dark, matching the luminance order of the sand ladder
+ * they replace, so the running bond keeps the same rhythm of light and dark
+ * slabs rather than becoming a flat sheet. The mortar is the dark step in both,
+ * which is what makes every joint read as a joint.
+ */
+const ROAD_TONES: Record<RoadTone, { light: number; mid: number; dark: number }> = {
+  sand: { light: PALETTE.pathEdge, mid: PALETTE.pathSand, dark: PALETTE.pathSandDark },
+  grey: { light: ART.statueStoneLight, mid: ART.statueStone, dark: ART.statueStoneMid },
+};
+
+export function roadTexture(tone: RoadTone = 'sand'): CanvasTexture {
+  return cached(`road:${tone}`, () => {
     const size = 512;
     const { canvas, ctx } = createCanvas(size);
+    // The same seed for both tones, deliberately: the grey road is the sand
+    // road cut from different stone, not a differently-laid one, so the two
+    // bakes must put their light and dark slabs in exactly the same places.
     const rng = new Rng(0x0ad0a1);
+    const stone = ROAD_TONES[tone];
 
     /** Where the kerb stops and the carriageway starts, as a fraction across. */
     const KERB = 0.085;
     const seam = `${hexToCss(PALETTE.ink)}2e`;
 
     // The mortar the slabs are bedded in, showing through every joint.
-    ctx.fillStyle = hexToCss(PALETTE.pathSandDark);
+    ctx.fillStyle = hexToCss(stone.dark);
     ctx.fillRect(0, 0, size, size);
 
     /** A slab with a soft corner and an inked joint, in the house style. */
@@ -212,9 +257,8 @@ export function roadTexture(): CanvasTexture {
       // courses are not short a slab at the edges.
       for (let i = -1; i <= ACROSS; i += 1) {
         const x = laneX + shift + i * slabW;
-        const tone = rng.range(0, 1);
-        const fill =
-          tone > 0.72 ? PALETTE.pathEdge : tone > 0.3 ? PALETTE.pathSand : PALETTE.pathSandDark;
+        const shade = rng.range(0, 1);
+        const fill = shade > 0.72 ? stone.light : shade > 0.3 ? stone.mid : stone.dark;
         slab(x + joint / 2, y + joint / 2, slabW - joint, courseH - joint, fill);
       }
     }
@@ -222,7 +266,7 @@ export function roadTexture(): CanvasTexture {
     // --- the kerbs -----------------------------------------------------------
     // Painted last so they cover the slab courses that were allowed to run
     // under them, which is how a kerb sits on a road anyway.
-    ctx.fillStyle = hexToCss(PALETTE.pathSandDark);
+    ctx.fillStyle = hexToCss(stone.dark);
     ctx.fillRect(0, 0, size * KERB, size);
     ctx.fillRect(size * (1 - KERB), 0, size * KERB, size);
     const KERB_STONES = 6;
@@ -253,8 +297,10 @@ export function roadTexture(): CanvasTexture {
     }
 
     // Repeat `(1, 1)`: every road writes its own `v` in **tiles** rather than
-    // scaling this, so one texture serves the lane and the park's own road
-    // alike and `ROAD_TILE_METRES` is the only place their scale is decided.
+    // scaling this, so one bake serves a road of any length and
+    // `ROAD_TILE_METRES` is the only place the scale is decided — which is also
+    // why the two tones stay interchangeable, differing in pixels and in
+    // nothing else.
     return finish(canvas, 1);
   });
 }

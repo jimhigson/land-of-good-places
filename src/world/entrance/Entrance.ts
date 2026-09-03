@@ -629,10 +629,31 @@ export class Entrance implements GameSystem {
  *    on to the bus stop inside. You can trace the road surface from outside the
  *    wall to inside it without leaving it.
  *
- * Both are built from `road.ts` — the same width, the same slabs, the same
- * dashed line as the lane the ride is driven down, because they are meant to be
- * the same road and the cut between the two scenes is the one place a child's
- * eye is on nothing else.
+ * Both are built from `road.ts` — the same width, the same slab courses, the
+ * same dashed line as the lane the ride is driven down, because they are meant
+ * to be the same road and the cut between the two scenes is the one place a
+ * child's eye is on nothing else.
+ *
+ * ## Grey, and only here
+ *
+ * Jim, 3 September 2026 (issue #477): *"the paving outside the park that the
+ * bus arrives on should be grey during gameplay - don't change the intro
+ * sequence."* Sandy slabs made this read as another of the park's own paths
+ * laid outside the wall; a road is grey.
+ *
+ * The tone is asked for **at this one call site**, which is what makes the
+ * second half of that sentence structural rather than a promise. `roadMaterial`
+ * defaults to sand, and the only other caller is `BusJourney.ts` — the intro
+ * ride, in its own scene, built before any park exists — so it takes the
+ * default and draws exactly the bytes it drew before. There is no shared
+ * material to accidentally repaint: each caller builds its own from the shared
+ * *specification*, and the specification is dimensions, not colour.
+ *
+ * **Both ribbons, not just the one outside the wall.** The spur is one
+ * continuous road surface running through the arch to the stop, and cutting it
+ * in half at the boundary would put a sand/grey seam down the middle of a road
+ * — where a road's own kerbs are the only edge that means anything. The eight
+ * metres inside the arch is the bus-stop apron, not a garden path.
  *
  * ## The kerb's length is measured, not chosen
  *
@@ -645,7 +666,7 @@ export class Entrance implements GameSystem {
  * itself rather than restating a number once derived from it.
  */
 function buildEntranceRoad(): Mesh[] {
-  const material = roadMaterial();
+  const material = roadMaterial('grey');
 
   /** How far along the kerb the road can run before it is inside the park. */
   const kerbReach = (direction: -1 | 1): number => {
