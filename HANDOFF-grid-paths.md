@@ -2604,3 +2604,80 @@ dropped.
   **0**, `check:fountain-hop` **0**, `check:jitter` **0**. Eight of eight.
 - `check:park` sweep, all sixteen seeds: **10 green, 13 stranded** — `diff`
   against the `df7ecac4` sweep is **empty**.
+
+---
+
+## `pathsRunOnGridAxes`, the five-seed class — one hypothesis built, measured, WRONG, reverted
+
+All five are the same shape, and the offending run is always the connector's
+**`node -> lead` leg**, the only one of the three head-on shapes that can be a
+diagonal (both elbows are axis-aligned by construction):
+
+```
+131  spur-building                          18.1 m  (32.5,-6.7) -> (41.1,9.3)
+208  spur-stall.waterFight                  17.4 m  (-21.6,-47.2) -> (-38.2,-42.0)
+225  connector-building-exit-ginormousSlide 16.2 m  (40.3,13.6) -> (25.7,6.6)
+346  gate-approach                          21.5 m  (-0.1,31.0) -> (-15.2,15.7)
+451  spur-stall.keychain                    16.8 m  (27.7,33.0) -> (14.6,22.5)
+```
+
+against `MAX_DIAGONAL_APPROACH = 16`. The straight shape is tried **first**
+and unconditionally, so it wins whenever it is clear.
+
+### HYPOTHESIS (mine): reorder, don't refuse — MEASURED, WORSE, REVERTED
+
+The brief's own instruction is a short axis-aligned arrival rather than
+refusing the diagonal, and refusing it is already on the refuted list. So I
+built the ladder this branch uses everywhere: keep all three shapes, but when
+the straight leg is neither exactly axis-aligned nor within `STUB_TAIL_LIMIT`
+(7.8 m, this file's own doorway reach), try the two elbows **first** and leave
+the diagonal as the **last rung** — never removed, so no door can be starved
+by it. `tsc --noEmit` exit 0.
+
+**It costs exactly what refusing it cost.** `check:park`, all sixteen seeds,
+against the `df7ecac4` baseline:
+
+| seed | before | after | |
+|---|---|---|---|
+| 5 | **0** | **1** | **lost green** |
+| 267 | 3 | **4** | worse |
+| 451 | **0** | **2** | **lost green** |
+| every other seed | — | — | identical |
+
+**10 green -> 8.** Reverted; revert grep-verified (0 occurrences of
+`straightIsADoorwayApproach`, 1 of the original shape list).
+
+### WHY IT FAILED, and it rules out a whole family of fixes
+
+**A last-rung fallback only fires when the preferred shape *fails*, never when
+it is merely *worse*.** The elbow is axis-aligned but its Manhattan length
+exceeds the diagonal's, and `cost: length * STUB_COST_FACTOR` is what the
+Dijkstra over the grid actually spends. So preferring the elbow does not
+"give the door a short axis-aligned arrival" — it makes every route through
+that node dearer, a different node wins, and the door ends up further away
+than it began. That is the same mechanism that made the outright refusal cost
+two greens, which is why the two experiments cost the same two greens.
+
+**So ordering is not the lever, and neither is refusal.** Both decide *which
+single shape a node offers*, and the damage is done by that node then losing
+to another node entirely.
+
+### What the next attempt should be, and why it is different
+
+`computeGridConnectors` offers **one** head-on connector per node —
+`if (headOn) continue;` after the first shape that clears. The untried
+mechanism is to offer **both** the axis-aligned elbow and the diagonal as
+separate connectors at the same node, priced apart, and let the search choose:
+the elbow wins wherever the two are comparable, and the diagonal still wins
+over a genuinely much worse alternative, so nothing is starved and no route is
+made dearer than it was.
+
+That is the "price it, do not refuse it" pattern the handoff already proposes
+for seed 267's rescued tap, and it is the only one of the three that does not
+change what a node offers to the rest of the search.
+
+**Honest caveat before anyone builds it:** pricing alone **cannot guarantee**
+`pathsRunOnGridAxes` goes green, because the invariant is a hard bound and a
+price is not. If a long diagonal is still the cheapest thing available
+anywhere, it will be drawn. Measure whether it clears all five before assuming
+it does; if it clears four, that is a partial result to report, not to absorb.
