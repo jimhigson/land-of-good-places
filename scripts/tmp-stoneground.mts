@@ -26,7 +26,9 @@
  */
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { CROSSING_SITES } from '../src/world/train/crossingPlan.ts';
-import { pointStandsOnABridgeRamp } from '../src/world/paths.ts';
+import { pointStandsOnABridgeRamp, bridgeScreenHalfAcross } from '../src/world/paths.ts';
+import { DECK_HALF_LENGTH } from '../src/world/train/bridgeFootprint.ts';
+import { RAMP_SCREEN_MARGIN } from '../src/world/train/bridgeFit.ts';
 
 const seed = process.env['LGP_SEED'] ?? 'canonical';
 const park = quietly(() => buildHeadlessPark());
@@ -82,7 +84,17 @@ for (const [i, bridge] of bridges.entries()) {
   }
   let open = 0;
   let total = 0;
-  let firstOpen: [number, number] | null = null;
+  // Where the trespass is IN THE SITE'S OWN FRAME — an `along` overrun (the
+  // built ramp running past the reserved length) and an `across` overrun (the
+  // built deck wider or more shifted than the reserved band) are different
+  // defects and the world coordinate cannot tell them apart.
+  let alongLo = Infinity;
+  let alongHi = -Infinity;
+  let acrossLo = Infinity;
+  let acrossHi = -Infinity;
+  const resAlongPos = DECK_HALF_LENGTH + ownSite.rampReachPos + RAMP_SCREEN_MARGIN;
+  const resAlongNeg = -(DECK_HALF_LENGTH + ownSite.rampReachNeg + RAMP_SCREEN_MARGIN);
+  const resAcross = bridgeScreenHalfAcross(ownSite);
   for (let dx = -40; dx <= 40; dx += 0.25) {
     for (let dz = -40; dz <= 40; dz += 0.25) {
       const x = ownSite.x + dx;
@@ -91,7 +103,12 @@ for (const [i, bridge] of bridges.entries()) {
       total += 1;
       if (!pointStandsOnABridgeRamp(x, z)) {
         open += 1;
-        if (firstOpen === null) firstOpen = [x, z];
+        const along = (x - ownSite.x) * ownSite.dirX + (z - ownSite.z) * ownSite.dirZ;
+        const across = -(x - ownSite.x) * ownSite.dirZ + (z - ownSite.z) * ownSite.dirX;
+        alongLo = Math.min(alongLo, along);
+        alongHi = Math.max(alongHi, along);
+        acrossLo = Math.min(acrossLo, across);
+        acrossHi = Math.max(acrossHi, across);
       }
     }
   }
@@ -99,7 +116,12 @@ for (const [i, bridge] of bridges.entries()) {
   console.log(
     `  bridge#${i} (site railD=${ownSite.railDistance.toFixed(0)}): ${total} deck samples, ` +
       `${open} on OPEN ground` +
-      (firstOpen ? ` (first at ${firstOpen[0].toFixed(2)}, ${firstOpen[1].toFixed(2)})` : ''),
+      (open > 0
+        ? `  trespass in site frame: along [${alongLo.toFixed(2)}, ${alongHi.toFixed(2)}] ` +
+          `across [${acrossLo.toFixed(2)}, ${acrossHi.toFixed(2)}]  ` +
+          `vs reservation along [${resAlongNeg.toFixed(2)}, ${resAlongPos.toFixed(2)}] ` +
+          `across ±${resAcross.toFixed(2)}`
+        : ''),
   );
 }
 console.log(`  VERDICT seed ${seed}: ${worstOpen === 0 ? 'no masonry on open ground' : `${worstOpen} deck samples on open ground`}`);
