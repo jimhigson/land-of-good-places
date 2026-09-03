@@ -1,4 +1,3 @@
-import { PLAYER_RADIUS } from '../../core/constants';
 import {
   ENTRANCE_GATE_HALF_WIDTH,
   ENTRANCE_GATE_X,
@@ -142,25 +141,4 @@ export function measureGatewayWalk(standable: (x: number, z: number) => boolean)
 
   const open = Array.from({ length: columns }, (_, column) => reached[index(rows - 1, column)]).some(Boolean);
   return { open, reachedDepth, standableCells, cells, map };
-}
-
-/**
- * The standability question in the form every caller here asks it: can a body
- * of `PLAYER_RADIUS` stand at (x, z) without the collision world pushing it?
- *
- * Here rather than written out at each call site because "is this standable"
- * quietly means "at what radius", and two callers picking their own radius is
- * how a check comes to measure a different child from the one in the game.
- */
-export function standableAtPlayerRadius(
-  resolve: (position: { x: number; y: number; z: number }, radius: number) => unknown,
-  scratch: { x: number; y: number; z: number },
-): (x: number, z: number) => boolean {
-  return (x, z) => {
-    scratch.x = x;
-    scratch.y = 0;
-    scratch.z = z;
-    resolve(scratch, PLAYER_RADIUS);
-    return Math.hypot(scratch.x - x, scratch.z - z) < 1e-3;
-  };
 }
