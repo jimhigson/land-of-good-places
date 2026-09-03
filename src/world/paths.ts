@@ -2780,9 +2780,20 @@ function* pathGridSearch(): Generator<number, PathGrid, void> {
       [plusNode, feet.plus],
       [minusNode, feet.minus],
     ] as readonly (readonly [number, readonly [number, number]])[]) {
-      // The site is passed so this foot's own connectors are not screened
-      // against the reservation they stand at the end of — see
-      // {@link segmentCutsABridgeRamp}. Every other site still screens them.
+      // **Screened first; its own site's exemption is the backtrack, not the
+      // default** — the standing procgen rule, the same ladder every door
+      // walks a few lines below.
+      //
+      // Handing a foot the exemption straight away was measured on 2 Sep 2026
+      // and is wrong: a foot that *can* reach the grid on clear ground is then
+      // free to reach it back through the reservation instead, over the
+      // masonry, because a connector is chosen by cost and the way through is
+      // shorter than the way round. Seed 11 went from 2 back to 22 stranded
+      // and seed 208 from 0 to 3. Screened first, the exemption only ever
+      // fires for a foot that has no other way onto the grid at all — which
+      // is the case #414 recorded, seed 24 losing its only bridge.
+      if (joinToGrid(node, foot, false) > 0) continue;
+      if (joinToGrid(node, foot, false, 1) > 0) continue;
       if (joinToGrid(node, foot, false, 0, null, site) > 0) continue;
       // **A ramp landing beside the statue circle still crosses somewhere
       // real.** A foot with no connector because it stands inside the ring's
