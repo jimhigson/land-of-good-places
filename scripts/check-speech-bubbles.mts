@@ -5,6 +5,7 @@
  * pnpm run check:speech-bubbles                  # part of pnpm run check
  * pnpm run check:speech-bubbles -- --mutate      # prove it can go red
  * pnpm run check:speech-bubbles -- --mutate-anchor
+ * pnpm run check:speech-bubbles -- --mutate-label
  * ```
  *
  * ## Why this exists
@@ -65,8 +66,25 @@
  *    `sprite.position`, which was where the anchor lived, so the first clamped
  *    frame ate it and she never got it back.
  *
+ * 4. **A talking child wears no name pill.** Issue #486, Jim: *"when children
+ *    talk, the speech bubble overlaps the name over their head - instead, hide
+ *    their name while they are talking."* The two are drawn in the same square
+ *    of air over the same head, so while the bubble is visible the pill must
+ *    not be — and, the other half of it, **a child who has finished talking
+ *    gets her name back**. Hiding the pill forever would satisfy the first
+ *    clause and be a worse bug than the one it fixed, so both are counted and
+ *    both are printed on every run, passing or failing.
+ *
+ *    It is asked of what is **drawn** — two `sprite.visible` flags — rather
+ *    than of `NpcSystem.speechTextOf`, the one getter both sides read today.
+ *    Asking the shared source would be asking whether one value equals itself;
+ *    asking the sprites is what still catches a later refactor handing the pill
+ *    an opinion of its own.
+ *
  * And, because the first two are vacuously true of a park where nobody ever
  * speaks: **the run must actually have seen bubbles**, or it fails saying so.
+ * Assertion 4 says so for itself, in as many words, on the stderr summary
+ * line — "nobody spoke, so assertion 4 asserts nothing this run".
  *
  * ## Proving it red
  *
@@ -85,7 +103,26 @@
  * shipping code: with the anchor in shot the clamp never moved a bubble outside
  * its own rectangle, which is the bound this fix claims.
  *
- * The two mutations isolate cleanly: `--mutate-anchor` fails assertion 3 alone,
+ * `--mutate-label` restores the park as it was before #486 in the one line the
+ * fix added: the pill sized and shown by distance alone, knowing nothing about
+ * whether its owner is mid-sentence. Assertion 4 must fail on it.
+ *
+ * Proved red on `fix/name-label-486`, default seed, 390x844, `SECONDS=120`,
+ * with the geometry it was proved against stated because a transcript without
+ * its inputs goes stale silently (CLAUDE.md):
+ *
+ * ```
+ * --mutate-label   1984 sightings; 4 children talked, 4 got their name back;
+ *                  1984 pills drawn under their own bubble. First: Finn
+ *                  talking at (-2.78, -0.10, 51.88), frame 840        exit 1
+ * (unmutated)      1984 sightings; 4 talked, 4 names back; 0 overlaps  exit 0
+ * ```
+ *
+ * The same 1984 sightings come off `origin/main` at `7a1d81f9` unchanged, so
+ * the run is measuring the same park either way — this fix moves pills, not
+ * bubbles.
+ *
+ * The mutations isolate cleanly: `--mutate-anchor` fails assertion 3 alone,
  * which is what makes 3 a real guard on the `Hotel` set-once fault rather than
  * a restatement of the clamp fault. Both transcripts are quoted in the PR.
  *
@@ -120,6 +157,7 @@ import type { FrameContext } from '../src/core/types.ts';
 
 const mutate = process.argv.includes('--mutate');
 const mutateAnchor = process.argv.includes('--mutate-anchor');
+const mutateLabel = process.argv.includes('--mutate-label');
 const verbose = process.argv.includes('--verbose');
 
 /** A 390x844 portrait phone — the framing #280 was reported on, and the one
@@ -243,6 +281,18 @@ let probeBreaches = 0;
 let worstProbeDrift = 0;
 let worstProbeLine = '';
 
+// --- assertion 4, issue #486 ------------------------------------------------
+//
+// A bubble and a name pill are drawn in the same square of air over the same
+// head, so while one is up the other must be down. Two counters, because the
+// bug has two halves and only asserting the first would trade #486 for a worse
+// one: a name hidden **forever** by a chat that ended.
+let pillsUnderBubbles = 0;
+let worstPillLine = '';
+/** Everyone seen mid-sentence, and everyone whose pill came back afterwards. */
+const spoken = new Set<string>();
+const namesReturned = new Set<string>();
+
 /**
  * Assertion 2, shared by the crowd and the probes: is `anchor` inside the
  * rectangle the bubble is actually drawing, grown by the slack the clamp is
@@ -296,6 +346,45 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
   // was taken from somewhere the game never stands.
   camera.update(context, playerPosition, playerVelocity);
   quietly(() => world.update(context));
+
+  if (mutateLabel) {
+    // The park exactly as it was before #486, restored as the one line the fix
+    // added: the pill sized and shown by distance alone, with no idea that its
+    // owner is mid-sentence. `NameLabel.updateScreenSize` is the shipping call
+    // `NpcSystem.updateLabels` makes; it is only the *skip* in front of it that
+    // is undone here, so the mutation is one behaviour and lives in this file.
+    for (const { character, label } of world.npcs.speechBubbles) {
+      if (label.sprite.visible) continue;
+      label.updateScreenSize(camera.worldUnitsPerPixel, character.position.distanceTo(camera.focusPoint));
+    }
+  }
+
+  // --- 4: a talking child wears no name pill (#486) -------------------------
+  //
+  // Asked of what is *drawn*, not of the driver state both sides read, so the
+  // check can still see the two disagreeing if a later refactor gives them
+  // separate opinions again.
+  for (const { character, bubble, label } of world.npcs.speechBubbles) {
+    if (bubble.sprite.visible) {
+      spoken.add(character.name);
+      if (label.sprite.visible) {
+        pillsUnderBubbles += 1;
+        if (worstPillLine === '') {
+          worstPillLine =
+            `${character.name} is talking at (${fmt(character.position)}) with her bubble ` +
+            `and her name pill both drawn, on frame ${frame}`;
+        }
+        record({
+          frame,
+          who: character.name,
+          what: 'name pill drawn under her own speech bubble',
+          detail: 'both visible on the same frame',
+        });
+      }
+    } else if (label.sprite.visible && spoken.has(character.name)) {
+      namesReturned.add(character.name);
+    }
+  }
 
   // --- 1 and 2: the crowd ---------------------------------------------------
   for (const { character, bubble } of world.npcs.speechBubbles) {
@@ -390,6 +479,18 @@ if (probeBreaches > 0) {
       `occasion(s). Worst: ${worstProbeLine}`,
   );
 }
+if (pillsUnderBubbles > 0) {
+  failures.push(
+    `A child's name pill was drawn under her own speech bubble, on ${pillsUnderBubbles} ` +
+      `occasion(s) — the overlap of #486. First: ${worstPillLine}`,
+  );
+}
+if (spoken.size > 0 && namesReturned.size === 0) {
+  failures.push(
+    `${spoken.size} child(ren) were seen talking and not one of them ever wore her name ` +
+      'again afterwards. Hiding the pill while she speaks must not outlive the sentence.',
+  );
+}
 if (sightings < MIN_SIGHTINGS) {
   failures.push(
     `Only ${sightings} bubble(s) were drawn in ${RUN_SECONDS}s, below the ${MIN_SIGHTINGS} ` +
@@ -402,6 +503,11 @@ process.stderr.write(
   `check:speech-bubbles — ${FRAMES} frames at ${VIEW_WIDTH}x${VIEW_HEIGHT}, ` +
     `${sightings} crowd-bubble sightings, ${probes.length} set-once probes.\n`,
 );
+process.stderr.write(
+  spoken.size === 0
+    ? '  #486: nobody spoke, so assertion 4 asserts nothing this run.\n'
+    : `  #486: ${spoken.size} child(ren) seen talking, ${namesReturned.size} got their name back.\n`,
+);
 
 if (verbose) {
   for (const breach of breaches.slice(0, 40)) {
@@ -410,13 +516,16 @@ if (verbose) {
 }
 
 if (failures.length > 0) {
-  console.error('\nA speech bubble must always be above the child it belongs to (#415).\n');
+  console.error(
+    '\nA speech bubble must always be above the child it belongs to (#415), and never ' +
+      'over her own name (#486).\n',
+  );
   for (const failure of failures) console.error(`  FAIL  ${failure}`);
   console.error('');
   process.exit(1);
 }
 
 console.log(
-  `Every one of ${sightings} drawn speech bubbles was over its own child, and ` +
-    `${probes.length} set-once bubbles stayed on their anchors.`,
+  `Every one of ${sightings} drawn speech bubbles was over its own child and over no ` +
+    `child's own name, and ${probes.length} set-once bubbles stayed on their anchors.`,
 );
