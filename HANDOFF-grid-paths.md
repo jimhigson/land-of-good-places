@@ -3732,3 +3732,76 @@ elbow. Pricing rather than refusing is the right instrument (refusal is variant
 B), and the two prices must be introduced **together** — this measurement shows
 that introducing either alone relocates the defect. Both columns, sixteen
 seeds, and diff the violation **set**, never the count.
+
+### BOTH PRICES TOGETHER — BUILT, MEASURED ON BOTH COLUMNS, REVERTED. The hypothesis is refuted.
+
+My own handoff specified this: "price the diagonal too... the two prices must
+be introduced **together** — introducing either alone relocates the defect."
+**Built exactly that way, and it is worse than either.**
+
+`offGridRun(shape)` = metres of a connector that are not a street on a shared
+cardinal line, in one function with both halves:
+
+- an axis-aligned run of 8 m or more further than 0.9 m from a 12 m or 6 m line
+  through the plaza (`streetsShareLatticeLines`'s own families, anchor and
+  tolerance);
+- a diagonal leg, beyond a free allowance of exactly `ARRIVAL_LEAD_REACH` —
+  **derived, not tuned**: a door's lead-to-door leg is a diagonal of precisely
+  that length by construction and is the only diagonal the network needs.
+
+Priced at 1.25/metre at all four connector push sites. `tsc --noEmit` exit 0.
+
+**Column 1 — `check:park`: 12 green / 7 stranded -> 10 green / 13 stranded.**
+
+| seed | kept | both prices | |
+|---|---|---|---|
+| 208 | 0 | **3** | **lost green** |
+| 451 | 0 | **3** | **lost green** — the green this leg won |
+| 11 | 1 | 1 | |
+| 24 | 2 | 2 | |
+| 225 | 2 | 2 | |
+| 288 | 2 | 2 | |
+| every other seed | 0 | 0 | green |
+
+**Column 2 — `test:procgen`: 5 failed / 1404 -> 6 failed / 1403.** Set diff
+against the kept state:
+
+```
+- seed 128  connector-stall.facePaint-station-1, 12.4 m on z = 41.65   (fixed, as before)
++ seed 225  connector-building-exit-ginormousSlide runs diagonally for 16.2 m
++ seed 267  'stall.facePaint' and 'stall.keychain' are 16.8 m apart in a
+            straight line but 292.3 m apart by paving (17.43x, wasting 275.5 m)
+```
+
+**Refuted on both columns, and it violates the settled ranking** — two greens
+and a 292 m walk to a destination 16.8 m away, for one invariant line.
+**Reverted; revert grep-verified to 0 matches**, and 208 and 451 confirmed back
+to exit 0 afterwards.
+
+### The refutation's real content: the diagonal price did not stop the diagonal
+
+**Seed 225's 16.2 m diagonal came back even though the diagonal was priced**,
+at (16.2 - 3.5) x 1.25 = 15.9 on top of its length. A price that large not
+changing the outcome is strong evidence the leg **is not produced by
+`computeGridConnectors` at all** — nothing there was offered a cheaper
+alternative to switch to.
+
+That lands exactly on this file's own oldest unanswered question, recorded long
+before this leg and still open:
+
+> **131, 225 — an unidentified second producer. Find which router draws it
+> before designing anything**; every fix aimed at the connector will keep
+> missing it.
+
+131 was later located to the head-on straight shape. **225 never was**, and
+this measurement is the strongest evidence yet that it is genuinely something
+else. **So the next agent must answer that question before pricing, ordering or
+refusing anything for 225** — three separate legs have now aimed a connector
+fix at it and missed, which is precisely what that warning predicted.
+
+**Kept from the attempt:** `ARRIVAL_LEAD_REACH`, the lead's 3.5 m given a name
+in `arrivalLead`, carrying the `tmp-leadsnap.mts` finding as its doc comment so
+the next agent does not re-derive the snap idea. No behaviour change.
+
+**For the PR body:** *a price large enough to dominate that changes nothing
+tells you the leg is drawn somewhere you are not looking.*

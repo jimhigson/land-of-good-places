@@ -3161,6 +3161,23 @@ interface PathGrid {
  * wall it stands beside. */
 const PAST_CLEARANCE = 1;
 
+/**
+ * **How far out a door's arrival lead stands.**
+ *
+ * Named rather than written inline below because a measurement now hangs on
+ * it. A booth's outward ray is the camera's fixed 45 degree diagonal
+ * (`CAMERA_FACING_YAW`), so the lead-to-door leg is a diagonal of exactly this
+ * length — the one diagonal the network legitimately needs.
+ *
+ * **Do not try to snap this to the lattice.** Measured on seed 128
+ * (`scripts/tmp-leadsnap.mts`; the finding is in `HANDOFF-grid-paths.md`): a
+ * 45 degree ray meets a 6 m half-lattice line about every 8.5 m per axis, so
+ * of thirteen doors only six had any snap distance at all within a sane band,
+ * and `stall.facePaint` — the door that motivated the idea — had none. A rule
+ * that fires on half the doors by coincidence is not a rule.
+ */
+const ARRIVAL_LEAD_REACH = 3.5;
+
 /** The outward lead a door's own ribbon arrives along: a few metres out on
  * the doormat's own outward ray (entrance minus plot centre), which is the
  * counter's facing for a camera-facing booth and the toward-middle line for
@@ -3174,7 +3191,9 @@ function arrivalLead(x: number, z: number, id: string): readonly [number, number
   const outZ = z - placed.z;
   const out = Math.hypot(outX, outZ);
   if (out <= 1e-6) return [];
-  return [[x + (outX / out) * 3.5, z + (outZ / out) * 3.5]];
+  return [
+    [x + (outX / out) * ARRIVAL_LEAD_REACH, z + (outZ / out) * ARRIVAL_LEAD_REACH],
+  ];
 }
 
 /**
