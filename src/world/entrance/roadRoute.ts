@@ -107,7 +107,21 @@ const BOUNDARY_MASONRY_REACH = 0.6;
  * Race's own apron it takes, and a bigger radial nudge the ride's trestle
  * search has to find. Hugging the wall is the cheapest place for it to be.
  */
-export const ENTRANCE_ROAD_OUTSET = ROAD_HALF_WIDTH + BOUNDARY_MASONRY_REACH;
+/**
+ * How far a parked bus's silhouette stands proud of the box `CAT_BUS_LENGTH` and
+ * `CAT_BUS_WIDTH` describe — the tail, the whiskers and the swung-open door.
+ *
+ * `arrivalSightline.ts` measured this at up to **1.24 m** and pads its own
+ * corridor by it for the same reason. It is here because the road's distance
+ * from the wall has to keep the *whole vehicle* out of the park, not the
+ * bodywork box: with the road following a curve, the bus's inner corner swings
+ * in, and `check:cat-bus` reported 0.23 m of a real built bus inside the
+ * boundary while the box itself cleared by 0.77 m.
+ */
+const BUS_SILHOUETTE_OVERHANG = 1.24;
+
+export const ENTRANCE_ROAD_OUTSET =
+  ROAD_HALF_WIDTH + BOUNDARY_MASONRY_REACH + BUS_SILHOUETTE_OVERHANG;
 
 /**
  * How far out the tails run before the road is off the edge of the world.
@@ -134,13 +148,43 @@ export const ENTRANCE_ROAD_KERB_HALF_RUN = CAT_BUS_LENGTH;
 /**
  * The arc a tail takes to climb from the kerb's outset to the terrain's edge.
  *
- * Sized so the road crosses the trestle line **steeply**: at this run the
- * centre line makes about 55° to the ring, so a 7.78 m road occupies about
- * 9.6 m of the ring's arc — inside `TRESTLE_SPACING`'s 12 m, so the crossing
- * costs at most one slot per ring, and that slot's own `ARC_NUDGES` (which are
- * free, unlike radial ones) can usually step round it.
+ * **Set by the bus's turning circle, and it had to be.** The first value here
+ * was 14 m, chosen to cross the Rail Race's line steeply — which it did, and
+ * which was the wrong thing to optimise. Measured (`scripts/probe-tail.mts`), a
+ * 14 m tail turns at a **3.6 m radius** for a **15.8 m** bus, and a rigid body
+ * that long on a curve that tight does not stay between the kerbs: it cut
+ * **2.17 m inside the park boundary**, which `check:cat-bus` reported as *"the
+ * bus reached 2.17 m INSIDE the park"* — the very fault (#195) the bus stopping
+ * outside the gate exists to prevent, reintroduced by the road's own shape.
+ *
+ * A road vehicle's kerb-to-kerb turning circle is roughly its own length, so the
+ * tail is sized to give the bus a radius of about
+ * `CAT_BUS_LENGTH * TAIL_TURN_CIRCLES` — derived from the thing that drives it
+ * rather than from how the crossing looks. Turn radius goes as the square of
+ * this run, so it is `14 * sqrt(wanted / 3.6)` measured from that same probe.
+ *
+ * **What it costs, stated rather than hidden:** the crossing of the trestle line
+ * is now shallow instead of steep, so the road occupies more than
+ * `TRESTLE_SPACING` of the ring's arc and displaces two slots per ring per
+ * crossing rather than one. The ride's own search absorbs that — it is why the
+ * corridor is in `groundIsClear` at all — and `check:rail-race` and
+ * `test:procgen` are what say whether it has absorbed it, rather than this
+ * comment.
+ *
+ * **55, because clearance saturates there.** Swept (same probe): 14 m leaves the
+ * bus 2.17 m *inside* the park, 37 m clears by 0.23 m, 45 m by 0.66 m, and 55 m
+ * by 0.77 m at a 24.4 m turn radius — about 1.55 bus lengths, which is a real
+ * vehicle's turning circle. Past 55 the binding constraint stops being the tail
+ * at all and becomes the kerb's own curvature near the gate (the worst point
+ * moves from at = -20.9 to at = -7.1), so 65 buys exactly nothing. That is the
+ * argument for this number: it is where the curve stops being what limits it.
+ *
+ * It also settles the reach: the road runs about 83 m from the gate before the
+ * ground ends, comfortably past the 47.8 m a 390x844 portrait phone can see at
+ * full zoom-out — so the road leaves the frame on every aspect rather than only
+ * on a desktop.
  */
-export const ENTRANCE_ROAD_TAIL_RUN = 14;
+export const ENTRANCE_ROAD_TAIL_RUN = 55;
 
 /** One station on the road's centre line. */
 export interface RoadStation {
