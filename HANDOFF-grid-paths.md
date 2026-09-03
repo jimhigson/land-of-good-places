@@ -553,6 +553,40 @@ canonical seed's remaining stranded waypoints are**: canonical's very first
 baseline listed `(0.0, 51.8) (0.0, 48.2) (0.0, 44.6)` and canonical is still
 at 4 today, unmoved by every change since.
 
+**LOCATED, and it is a hole in leg 1's own fix.** `tmp-pocket.mts` on 267
+prints the whole `gate-approach` lane, and the whole lane is:
+
+```
+lane gate-approach:
+  XX at=0.0 (0.0,51.8) nbrs=1 onRamp=true h=NaN
+  XX at=4.0 (0.0,50.9) nbrs=1 onRamp=true h=NaN
+```
+
+**Two nodes. That is the entire gate approach.** (Seed 131's, for comparison,
+has twelve, at=0..81.) Both are `onRamp=true` — inside a crossing site's
+footprint — and each is 0.20 m and 1.10 m from its own paving, so the paving
+is there and it is 4 m long.
+
+**Why: `gateCorridorDeepestMouth` degenerates instead of backtracking.**
+`deepest` is initialised to `[0, GATE_CORRIDOR_START_Z]` and the scan walks
+inward, breaking at the first `z` that stands on a ramp. Leg 1 correctly made
+that scan always run — but if the ramp reaches the corridor at or near the
+**start**, the scan breaks on its first sample and `deepest` is never assigned
+anything better. The corridor collapses to a ~4 m stub at the gate, sitting on
+the ramp, and the park's main approach effectively does not exist.
+
+So leg 1 traded "walks onto a ramp" for "gives up entirely" in the case where
+the ramp is at the outer end. Both are wrong; the standing procgen rule says
+backtrack — try another corridor line, another mouth, or a route round the
+ramp — rather than accept a degenerate result.
+
+**Check canonical the same way before fixing** (`tmp-pocket.mts`, read the
+`gate-approach` lane). Canonical's stranded set has been `(0.0, 51.8)
+(0.0, 48.2) (0.0, 44.6)` and friends since the first baseline and has not
+moved through four separate fixes, which is consistent with the same
+degeneracy. If its lane is also two or three nodes long, canonical's 4 and
+267's 2 are one bug and one fix.
+
 **So canonical's 4 and 267's 2 are probably ONE cause, and it is the gate
 approach's outer end, not the grid discipline.** 267 only started showing it
 because the discipline change altered which routes exist near the gate; the
