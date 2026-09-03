@@ -565,3 +565,116 @@ nothing, 59 steps in the chain.
   6x throttle, `hud` never appears and `sawHidden` never becomes true. Needs a
   control run against `origin/main` on an idle machine; the first run was taken
   while the box was saturated, which makes a throttled timing test meaningless.
+
+
+---
+
+# The road was invisible, and every check said it was fine (3 September, later)
+
+**The headline finding of this session, and it was found by looking.** After the
+gates went green I opened the park and photographed it. The bus was standing on
+**grass**. There was no road.
+
+`scripts/probe-live2.mjs`-style queries against the running page and then the
+headless park pinned it in three steps:
+
+1. Both `entrance-road-kerb` and `entrance-road-gateway` are in the scene,
+   `visible`, opaque, sharing one `MeshToonMaterial` with a 512x512 map and sane
+   UVs. So not a missing mesh and not a missing material.
+2. All 1287 kerb vertices are a uniform **0.06 m above the terrain** — not
+   buried, not z-fighting.
+3. **Every one of its 2272 triangles faced *down*** — mean vertex normal.y
+   **-0.822**, against the gateway spur beside it at **+1.000**. The material is
+   `FrontSide`, so the whole road was back-face culled. What little you could see
+   was the faint band of its own shading on the grass.
+
+## Cause
+
+`curvedRoadRibbon` builds a `PlaneGeometry`, which is authored in the **XY**
+plane facing +Z and indexed to be front-facing from there, and then rewrites
+every vertex into the **XZ** plane. Going from (right, up) to (across, along)
+flips the handedness of the surface, so the inherited index winding comes out
+backwards. The straight `roadRibbon` beside it does not have this because it is
+built in world space from the start.
+
+Fixed by reversing every triangle's winding before `computeVertexNormals`.
+
+## Why nothing caught it
+
+**Every check in the file reads vertex positions.** `check:entrance-road` proved
+all 1287 of them lay inside the bus's corridor and 0.06 m above the lawn, on all
+sixteen seeds, and said so proudly — about a road nobody could see. That is
+CLAUDE.md's "an assertion reporting success about something it is not
+describing", in the one form none of the existing clauses could reach.
+
+`check:entrance-road` now asserts the facing too. **Proved red** at the geometry
+of this branch (road outset 8.26, canonical seed): removing the winding flip
+gives **2272 of 2336 triangles facing the ground**, and 0 with it in. It prints
+`facing: 38400 road triangles checked, 0 facing the ground` on every run.
+
+# Open: two coplanar seams, and they are mine
+
+`pnpm run check:coplanar` is **red, exit 1, 2 new seams** — and they are a
+direct consequence of the road becoming visible, because the sweep only counts
+faces a camera can reach. They were always there and were culled.
+
+```
+NEW: garden|entrance/entrance-road-gateway|entrance/entrance-road-kerb
+    5.202 m² of shared plane, 3.1e-4 m apart, seed 326
+NEW: garden|entrance/entrance-road-kerb|garden/terrain
+    1.434 m² of shared plane, 8.1e-3 m apart, seed 208
+```
+
+**The spur one is structural, not a nudge.** The spur is a straight ribbon down
+`z`; the kerb it meets is a curve. Their join line therefore has a different `z`
+at every `x`, and a straight edge can only *overlap* the kerb (what happens now,
+on the seeds where the curvature is strongest) or leave a wedge of grass. Taking
+the middle's answer — `entranceRoadInnerEdge(0).z` — is what #472 left behind,
+and it was correct while the road was straight.
+
+**I attempted the real fix and backed it out.** Building the spur as a grid whose
+outer edge follows `entranceRoadInnerEdgeAtX(x)` per column made it **worse — 3
+findings**, adding a `path-surface` seam, because interpolating between station
+edges does not land on the kerb's own triangle edges. That work is reverted; the
+branch is at the simpler, well-understood state. Whoever takes it needs the
+spur's outer row to be *the kerb's actual boundary vertices*, not a resampling of
+them — most likely by having `curvedRoadRibbon` hand back its inner edge ring and
+building the spur off that ring directly.
+
+The terrain one is the coarse road grid over a convex hillside: the road is
+`terrainHeight` + 0.06 at its own vertices, and between them the ground rises to
+within 8 mm. Sampling the terrain's maximum across each quad rather than at its
+corners is the honest fix; raising the lift is a stand-off and ART_DIRECTION.md
+§7 forbids it.
+
+# `check:arrival-starts` is red on `main`, not on this branch
+
+Given a dev server at last (`ARRIVAL_URL` points it anywhere — it does not need
+5173), it fails at its default 6x throttle: no hand-over inside 75 s.
+
+**Controlled.** `origin/main`, same machine, same throttle, fails identically —
+`parked=true` from t+21s, `hud` never appears. So it is not this branch:
+
+| | 1x | 3x | 6x |
+|---|---|---|---|
+| this branch | **pass**, 22.8 s | pass, 39.2 s | fail |
+| `origin/main` | — | pass, 37.1 s | fail |
+
+Park generation is **not** the cause and my first hypothesis was wrong: measured
+headlessly, three runs each, branch 1749-1848 ms against main 1715-1840 ms.
+It is simply over the ceiling on a slow device — the exact failure the check was
+written for, now true again on `main`. **It needs its own ticket and its own
+engineer**; it is not in the `check` chain, so nothing in CI is red because of it.
+
+# State at handover
+
+- `tsc` 0, `typecheck:test` 0
+- `test:procgen` **0** — 18 files, 526 tests, 0 skips
+- `check:entrance-road` **0** — 0 legs hit on 16 seeds, control 151 legs, 0 of
+  38400 road triangles facing the ground
+- `check:cat-bus` **0**, `check:bus-journey` **0**
+- full `pnpm run check` **0** (re-run after the winding fix)
+- `check:coplanar` **1** — the two seams above, open
+- `check:arrival-starts` 1 at 6x, red on `main` too
+- QA: the bus photographed driving in on a grey road, clearing the trestles;
+  the intro ride's lane confirmed still sand.
