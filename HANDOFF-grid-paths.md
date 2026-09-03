@@ -3326,3 +3326,114 @@ gained a rescued gateway (5, 11, 225, 288 and 346 draw no tap ribbon; 274,
 `street-tap-*` route are evidently not the same population. **Nobody has
 established why**, and no conclusion here rests on their being the same — the
 before/after above is measured per seed, not inferred from either list.
+
+---
+
+## Seed 451 ROOT-CAUSED — and the predecessor's attribution was wrong
+
+**It is not a fence, and the seed-11 ordering excuse does not apply.**
+
+`scripts/tmp-451corner.mts` (control rebuilt first — see below) completes the
+"V" the predecessor printed. The two runs it named are two edges of a **closed
+rectangle of four**:
+
+```
+(31.42,-28.66)-(34.39,-31.63) len=4.20 yaw=-45.0 half=0.30
+(29.54,-30.53)-(32.51,-33.50) len=4.20 yaw=-45.0 half=0.30
+(31.42,-28.66)-(29.54,-30.53) len=2.65 yaw=-135.0 half=0.30
+(34.39,-31.63)-(32.51,-33.50) len=2.65 yaw=-135.0 half=0.30
+```
+
+4.20 x 2.65, rotated 45 degrees, `halfThickness` 0.30 — the signature of
+`src/minigames/stalls.ts:310-313`, a booth's own four counter walls, at
+`signYaw` = `CAMERA_FACING_YAW` = 45 degrees. And the layout agrees:
+
+```
+stall.spookyHouse at (31.95,-31.10) r=3.40 signYaw=45.0deg
+                  entrance=(34.78,-28.27) fp={"kind":"circle","radius":2.6}
+```
+
+`halfThickness` was the tell that should have been read: `train/fence.ts` adds
+0.18 (seed 11's blocker) and `Scenery.ts` 0.22/0.34. Nothing that borders a
+path is 0.30.
+
+**So `spur-stall.spookyHouse` is drawn straight through the spooky house's own
+booth** — 0.76 m inside a 2.6 m footprint at the deepest — and the booth is
+placed by the layout solver *before* the router runs. The router could have
+consulted it, and does: `streetSegmentClear` screens it.
+
+### The instrument control, rebuilt
+
+The predecessor flagged that `tmp-blocker.mts`'s second control row did not
+discriminate. **The cause is a constant, not the geometry**: `tmp-blocker.mts`
+asks at a flat 0.7 m clearance while `tmp-transect.mts` asks at
+`NPC_RADIUS - 0.02` on paving. `tmp-451corner.mts` uses the transect's own
+rule, and all three rows then agree with the transect exactly:
+
+```
+transect said CLEAR  lane at=14 (32.7,-31.9)   clearance=0.48 clear
+transect said CLEAR  lane at=7  (32.9,-34.2)   clearance=0.48 clear
+transect said BLOCKED peak      (32.82,-33.28) clearance=0.48 BLOCKED push=0.82
+```
+
+### The screen refused this leg. Something downstream drew it anyway.
+
+`debugArrivalLegScreens` asks the exact question `computeGridConnectors` asks —
+the door's own 7 m plot exemption, the 2.0 m arrival boundary margin:
+
+```
+THE LEG (32.279,-40.209) -> (34.140,-28.908), door (34.140,-28.908)
+  streetClearArriving: false
+  streetClearPublic:   false
+  plot(31.95,-31.10) atDoor=0.50 deepestOnLeg=-0.76 list=relaxed
+CONTROL, a leg well clear of the booth, same exemption
+  streetClearArriving: true       <- the column discriminates
+  plot(31.95,-31.10) atDoor=0.50 deepestOnLeg=2.52 list=relaxed
+```
+
+Note `atDoor=0.50` is `>= 0`, so the plot lands in `relaxed`, **not** exempt
+outright — the ginormous-slide carve-out is not involved. And
+`STUB_TAIL_LIMIT` is 7.8 against a `direct` of 11.45, so the straight
+connector could not have offered this leg either.
+
+### `trimBacktracks` deleted the corner, and nothing re-screened the result
+
+`debugNodeEdges` on the door node prints the connector the search actually
+accepted, with its `via`:
+
+```
+DOOR node 857 at 34.140,-28.908  isLattice=false
+  -> 32.279,-40.209  cost 22.43  via (36.615,-26.433)
+```
+
+Three points, not two: **(32.279,-40.209) -> (36.615,-26.433) ->
+(34.140,-28.908)**. That is the head-on arrival shape `straightToLead`, and
+(36.615,-26.433) is the door's own 3.5 m outward lead. Both legs pass every
+screen; the drawn route has only two points because `trimBacktracks` removed
+the middle one:
+
+```
+in  = (4.336, 13.776)  len 14.442
+out = (-2.475, -2.475) len  3.500
+cosine = -0.8866   ABOUT_TURN_COSINE_DRAWN = cos(150 deg) = -0.8660
+```
+
+**A 152.4 degree vertex, cut by 0.02 of cosine.** What is left is a single
+11.45 m leg that no screen has ever seen, and it runs through the booth.
+
+**`trimBacktracks`'s own doc comment states the assumption that fails:**
+*"Deleting the middle vertex of an about-turn leaves exactly the net movement
+the walk actually makes."* That is true at 180 degrees, where the two legs are
+collinear and the survivor lies on ground both legs already covered. At 152
+degrees it is false — the survivor is a **new line over ground nobody
+screened**. The pass was written for a pure overshoot seam
+(`(0,43.1) -> (36.5,43.1) -> (25.4,43.1)`, genuinely collinear) and its
+tolerance was then widened to 150 degrees without the assumption being
+re-examined.
+
+**For the PR body:** *a trim that is exactly right at 180 degrees is a
+shortcut across new ground at 152 — deleting a vertex is only lossless when
+the two legs are collinear.* And the general form, which is this branch's own
+recurring shape one layer further out: **a post-process that improves a
+polyline's shape must re-answer the screens the polyline was accepted
+under, or it must not run.**

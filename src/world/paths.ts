@@ -6356,3 +6356,70 @@ export function debugWhichSiteCuts(
   }
   return { cutWithNothingExempt: segmentCutsABridgeRamp(ax, az, bx, bz), out };
 }
+
+/** TEMP diagnostic: a leg screened exactly as an ARRIVING connector screens
+ * it — the door's own 7 m plot exemption and the 2.0 m boundary margin — so
+ * the question "would `computeGridConnectors` have accepted this leg?" can be
+ * asked directly instead of inferred. */
+export function debugArrivalLegScreens(
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+  px: number,
+  pz: number,
+): unknown {
+  const p = [px, pz] as const;
+  const worst: string[] = [];
+  for (const plot of streetPlots()) {
+    const atDoor = distanceToPlotEdge(plot, px, pz);
+    const length = Math.hypot(bx - ax, bz - az);
+    const steps = Math.max(1, Math.ceil(length / 1.5));
+    let deepest = Infinity;
+    for (let s = 0; s <= steps; s += 1) {
+      const t = s / steps;
+      deepest = Math.min(deepest, distanceToPlotEdge(plot, ax + (bx - ax) * t, az + (bz - az) * t));
+    }
+    if (deepest < 8) {
+      worst.push(
+        `plot(${plot.x.toFixed(2)},${plot.z.toFixed(2)}) atDoor=${atDoor.toFixed(2)} ` +
+          `deepestOnLeg=${deepest.toFixed(2)} ` +
+          `list=${atDoor > 7 ? 'active' : atDoor >= 0 ? 'relaxed' : 'EXEMPT-OUTRIGHT'}`,
+      );
+    }
+  }
+  return {
+    streetClearArriving: streetSegmentClear(ax, az, bx, bz, p, 7, 2.0),
+    streetClearPublic: streetSegmentClear(ax, az, bx, bz),
+    stubTailLimit: STUB_TAIL_LIMIT,
+    plots: worst,
+  };
+}
+
+/** TEMP diagnostic: the grid edges incident on the node nearest a point,
+ * with every link's own `via` points — so the shape a route will actually
+ * draw through that node can be read rather than inferred. */
+export function debugNodeEdges(x: number, z: number): unknown {
+  const grid = pathGrid();
+  let best = -1;
+  let bestD = Infinity;
+  for (let n = 0; n < grid.count; n += 1) {
+    const d = Math.hypot((grid.xs[n] as number) - x, (grid.zs[n] as number) - z);
+    if (d < bestD) {
+      bestD = d;
+      best = n;
+    }
+  }
+  return {
+    node: best,
+    at: `${(grid.xs[best] as number).toFixed(3)},${(grid.zs[best] as number).toFixed(3)}`,
+    distanceFromAsked: bestD.toFixed(3),
+    isLattice: best < grid.lattice.count,
+    edges: (grid.neighbours[best] as readonly LatticeNeighbour[]).map((s) => ({
+      to: `${(grid.xs[s.to] as number).toFixed(3)},${(grid.zs[s.to] as number).toFixed(3)}`,
+      dir: s.dir,
+      cost: s.cost.toFixed(2),
+      via: s.via.map((p) => `(${p[0].toFixed(3)},${p[1].toFixed(3)})`).join(' '),
+    })),
+  };
+}
