@@ -641,12 +641,36 @@ export class ArrivalSequence {
     // both what happens on a bus and what keeps the queue in order: the walk to
     // the door then gets *longer* with every child, so the gaps between people
     // appearing on the step can only widen from the stagger, never narrow.
-    const drop = this.playerRoute.from;
+    //
+    // **Asked in the bus's own frame**, and that is the whole of issue #488's
+    // disembark fault. `World`'s constructor calls this while the bus is still
+    // standing at the far end of the road it has yet to drive — measured, 36.26 m
+    // from the drop — so a *world* distance from a seat to the drop carried the
+    // entire length of that drive. Every child's aisle walk came out at 12.7-16.3
+    // seconds against the {@link KID_AISLE_SECONDS} 5.49 s this file's own
+    // timeline budgets, so:
+    //
+    // - they crawled, because the lerp below covers the real ~5 m at whatever
+    //   pace a 13-second budget implies — `check:cat-bus` saw 0.87 m/s;
+    // - most of them never reached the door at all inside the sequence, and were
+    //   left behind by the departing bus rather than walking out of it;
+    // - and the 36 m every seat shared **compressed the differences between
+    //   them**: two seats either side of the gangway are all but equidistant
+    //   from a point 36 m away, which is the 0.02 s gap reported as "two
+    //   children left the bus at once".
+    //
+    // The seat's offset from the door is a property of the bus, not of where the
+    // bus is parked, so it is measured where it does not move — the same cure
+    // `check:cat-bus` itself was given the day the bus started driving a curve.
+    // {@link CatBusHandle.doorDrop} is the drop in those same local coordinates,
+    // which is why the two are directly comparable.
+    const door = this.bus.doorDrop;
+    this.bus.root.updateMatrixWorld(true);
     const free = this.bus.seats
       .filter((seat) => seat !== this.bus.passengerSeat)
       .map((seat) => {
-        const at = seat.getWorldPosition(new Vector3());
-        return { seat, distance: Math.hypot(at.x - drop.x, at.z - drop.z) };
+        const at = this.bus.root.worldToLocal(seat.getWorldPosition(new Vector3()));
+        return { seat, distance: Math.hypot(at.x - door.x, at.z - door.z) };
       })
       .sort((a, b) => a.distance - b.distance);
 
