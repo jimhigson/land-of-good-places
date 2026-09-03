@@ -112,7 +112,34 @@ interface Finding {
  * seed, so this is stable in exactly the way the geometry is.
  */
 function keyOf(seam: RankedSeam): string {
-  return `${seam.space}|${seam.a}|${seam.b}`;
+  return `${seam.space}|${stableName(seam.a)}|${stableName(seam.b)}`;
+}
+
+/**
+ * **A key may not carry a position, and one did.**
+ *
+ * A railway bridge is named for the distance along the loop it stands at —
+ * `park-train/railway-bridges/bridge-44.0/deck` — so the ratchet keyed the same
+ * modelled seam under a different name on every seed, and under a *new* name
+ * the moment a loop moved. The baseline duly recorded the identical
+ * `deck`-against-`shell` seam **ten times over**, at `0.0173 m²` and `fighting`
+ * every time, under bridge-0.0, 2.0, 12.0, 20.0, 62.0, 142.0, 200.0, 224.0,
+ * 244.0, 284.0, 312.0.
+ *
+ * Found by #481, which legitimately moves pool seed 288's railway off the
+ * park's front gate: three seams appeared as NEW that are the same seam on
+ * bridges that had moved to 44 m and 96 m, and the honest fix is not to record
+ * two more copies. This file's own header says an entry means "this was already
+ * wrong when the gate was written" — a key that changes when nothing has gone
+ * wrong turns that into noise, and the noise is what an agent silences with a
+ * baseline edit.
+ *
+ * So the index comes out of the key while the *printed* path keeps it, which is
+ * the right granularity anyway: a bridge is one model, and a seam in it is one
+ * finding however many the park builds.
+ */
+function stableName(path: string): string {
+  return path.replace(/\/bridge-\d+(?:\.\d+)?\//g, '/bridge/');
 }
 
 function sweepThisSeed(): Finding[] {
