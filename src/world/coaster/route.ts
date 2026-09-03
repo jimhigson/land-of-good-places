@@ -1443,7 +1443,15 @@ export function* coasterProfileSearch(
     // converges early — so all ten always run, and as one block they measured
     // 18.9 ms here and 54.6 ms on CI. Re-measured 9 August 2026, a pass is
     // **0.55-0.8 ms**, comfortably inside the 8 ms a frame is given.
-    yield pass;
+    // `pass + 1`, never `pass`, so that **zero is reserved for the structural
+    // seams above**. Those eight always run; this loop's count is data — it
+    // breaks the moment a pass finds nothing to lift, so a park whose profile
+    // already clears the terrain legitimately takes one pass where the
+    // canonical seed takes ten. `check:park-boot` has to be able to tell the
+    // two apart: counting them together says only "eleven pieces", which
+    // cannot distinguish a seam that was skipped from a repair that was not
+    // needed, and it went red on the second while claiming the first.
+    yield pass + 1;
     // Worst deficit per control point, so a run of low samples under one
     // control raises it once by what it needs, not once per sample. The same
     // sweep records how close to the station each control's track actually
