@@ -66,6 +66,50 @@ Re-proved after the edits: unmutated exit 0 (10 talkers, longest nameless run
 0, 0 frames with nothing drawn); `--mutate-latch` exit 1 (Finn, 1844 frames,
 46.0 m, rank 9), clause 4a quiet.
 
+## QA sign-off, and two numbers that correct this branch's own claims
+
+Approved and QA-signed. QA measured 35,000 frames across two screen sizes: no
+name drawn under its own bubble, none lost permanently, pill returns on the
+same frame the bubble goes.
+
+**1. `spokeWithNothingDrawn` reading 0 is a property of this check's camera
+route, not of the game.** QA's equivalent counter over its own route read
+**2203 frames**, which splits as:
+
+- **0** in the 40–46 m band (the `BUBBLE_MAX_DISTANCE` 40 vs
+  `LABEL_MAX_DISTANCE` 46 gap), and
+- **131 frames (0.37%)** where a child on screen and inside
+  `VISIBLE_LABEL_CAP` was mid-word wearing neither pill nor bubble — **all of
+  them `isOnScreen` gating the bubble**, which is the second cause the counter
+  was renamed to admit it catches.
+
+So the header's "0 frames on the canonical seed" is true of the run it
+describes and **must not be read as "this does not happen"**. The 0 comes from
+where `check:speech-bubbles` walks its player, and a different route finds it
+at once. The renaming was right and the number under it is route-specific;
+whoever next touches that comment should say so in it. (Not amended on this
+branch: the PR is approved and awaiting Jim, and a doc-only push would re-run
+26 minutes of CI and re-open the review for nothing. It is a one-line change if
+wanted.)
+
+Direction it points: the pill hides for *text that exists*, and the honest fix
+named in the header — hide it for a bubble that is *drawn* — would close all
+131 of those frames, not just the band. That is a real follow-up, not a
+hypothetical.
+
+**2. The `check:pet-slide` flake (#496) is environmental, not timing noise.**
+QA could not reproduce it in five consecutive local runs and got
+**byte-identical numbers each time**. Byte-identical rules out accumulated
+`dt`, frame counts and scheduling jitter, which is where I would have looked
+first — it points at a code path that differs on the CI box. Recorded on #496.
+
+## Residual, now measured properly
+
+The player-pill overlap I flagged is **worse than I estimated**: QA measured
+another child's bubble covering the player's own pill in about **10% of
+frames, sometimes completely**. Jim has it as a design call; the merge waits on
+his answer. My own evidence for it is `486-head-1.png` and `486-far-talker.png`.
+
 ## Findings
 
 - **The player has a name label and cannot speak.** `Player.label` is a
