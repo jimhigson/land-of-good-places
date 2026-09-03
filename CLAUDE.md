@@ -1154,11 +1154,27 @@ preview" check run or its posted comment; never construct one by hand.** The
 posted comment is regenerated on every push and always names the newest
 build, so the newest such comment is the only trustworthy source.
 
-Referring to a PR by *number* in prose ("#340 adds the `/bridge` link") is
-fine and often necessary — it is the clickable `github.com` URL that is
-banned. If a preview genuinely does not exist for something (a CI-only
-change, a workflow edit, a docs commit), say so plainly rather than
-substituting a PR link to fill the gap.
+**Struck 3 September 2026 — PR *numbers* are out too, not just PR URLs.**
+This section used to say that referring to a PR by number in prose ("#340
+adds the `/bridge` link") was fine and often necessary. Jim, on being given
+a status update built around them: **"for PRs, ONLY give links to preview
+deploys, otherwise I don't care."**
+
+So a message to Jim identifies a piece of work by **the preview deploy URL
+with a path that lands on the thing**, and by nothing else — no `#482`, no
+branch name, no "the gate arch PR". Those are all the same fault in
+different clothes: an identifier he has to go and look up before he can see
+anything. He does not merge, he does not read diffs, and he has said twice
+now that the number is of no use to him.
+
+This is about **what Jim reads**. Numbers stay entirely normal in commit
+messages, PR bodies, issue threads and agent briefs — that is how agents
+find each other's work, and a brief without them would be useless.
+
+If a preview genuinely does not exist for something (a CI-only change, a
+workflow edit, a docs commit), say in one line what changed and that there
+is nothing to look at. Do not substitute a number or a branch name to fill
+the gap — a message with no link in it is fine when there is nothing to see.
 
 **Every preview link carries one sentence saying what to look at — and if
 there is nothing to look at, do not send the link.** Jim, 27 August 2026,
