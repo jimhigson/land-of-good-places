@@ -2722,3 +2722,43 @@ So the briefed "one class, five seeds" is **two classes**:
 
 That second question is the cheapest next measurement on this item and nobody
 has taken it.
+
+### 131 LOCATED, and it points at a cap that structurally forbids the axis-aligned shape
+
+Seed 131's `spur-building`, control polyline off the built park:
+
+```
+(12.6,-6.7) (33.7,-6.7) (37.3,8.4) (40.7,9.2) (41.1,9.3)
+```
+
+So it **is** the head-on `node -> lead` shape after all — node `(33.7,-6.7)`,
+lead `(37.3,8.4)`, `dx 3.6 / dz 15.1`, hypot **15.5 m**, 13 degrees off axis,
+**18.1 m** once `routeCurve` fillets it. The correction two sections up was
+right that the reorder did not move it and wrong to conclude a different
+router draws it. **Recording that as wrong.**
+
+**Why the reorder did not move it — the arithmetic, and this is a HYPOTHESIS
+not yet confirmed by a run.** The elbow the reorder would have preferred is
+`(33.7,-6.7) -> (33.7,8.4) -> (37.3,8.4) -> p`: Manhattan, so
+`15.1 + 3.6 = 18.7` plus the lead's own tail to the door (~0.9) — about
+**19.6 m**. The shapes' length cap is `(tailLimit + 2) * 2`, which at relax 0
+is `(7.8 + 2) * 2 =` **19.6 m**. The elbow is refused by centimetres, the
+diagonal (about 16.4 m total) is inside the cap, and the last rung fires.
+
+If that is right, the cap is the defect and it is this repo's own dominant
+shape one more time: **one distance applied to two different geometries.** An
+elbow is up to `sqrt(2)` longer than the diagonal it replaces, *by
+construction*, so a single cap forbids the axis-aligned shape precisely where
+the diagonal is near it — the case that matters.
+
+The branch's own principle says what is allowed here: **"relaxing may widen a
+distance, never license a shape."** Widening the cap *for the axis-aligned
+elbows only* is widening a distance. It does not license the diagonal, and it
+composes with the reorder rather than replacing it.
+
+**Confirm before building**: print the chosen `relax`, the cap and both shape
+lengths at that node on seed 131. If the elbow is refused by `legClear`
+instead, this is wrong and the cap is innocent. Then, if the cap is the cause,
+measure reorder + widened elbow cap together — the five seeds for the benefit
+column **and** all sixteen for the cost column, both, because a one-sided
+measurement is what made me report this item wrongly the first time.
