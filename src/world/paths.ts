@@ -1291,7 +1291,13 @@ function pointInSlideCorridor(x: number, z: number): boolean {
  * through this screen. Level-crossing sites stay flat, so only bridge
  * sites carry it.
  */
-function segmentCutsABridgeRamp(ax: number, az: number, bx: number, bz: number): boolean {
+function segmentCutsABridgeRamp(
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+  exemptSite: CrossingSite | null = null,
+): boolean {
   // **Solved, not sampled** (2 Sep 2026). This walked the segment in 1.5 m
   // steps and asked `pointStandsOnBridgeMasonry` at each one, under a comment
   // claiming "1.5 m is coarser than the 3 m parapet band is thick". The band is
@@ -1311,13 +1317,54 @@ function segmentCutsABridgeRamp(ax: number, az: number, bx: number, bz: number):
   // rectangles, so this is an exact segment-rectangle test — no step size to be
   // wrong about, and cheaper than sampling finely enough to be safe.
   for (const site of CROSSING_SITES) {
+    // **A crossing's own approach is exempt from its own site, by identity.**
+    // The reservation below is forbidden ground to every *foreign* leg, which
+    // is the whole point of it — but the bridge's own feet have to be joined
+    // to the grid, and a foot stands only 1.0 m past `alongMax`, so a
+    // connector leaving it grazes the rectangle it belongs to. #414 records
+    // what happens when that is not exempted: screening the full footprint
+    // refused the crossing's approach and cost seed 24 its only bridge.
+    //
+    // Exempting by identity rather than by distance is deliberate. A radius
+    // round the foot would be a second definition of "near this bridge" that
+    // could drift from the rectangle itself; passing the site says exactly
+    // which bridge is being approached and exempts nothing else, so a foot's
+    // connector is still screened against every OTHER site it might cross.
+    if (site === exemptSite) continue;
     const alongA = (ax - site.x) * site.dirX + (az - site.z) * site.dirZ;
     const acrossA = -(ax - site.x) * site.dirZ + (az - site.z) * site.dirX;
     const alongB = (bx - site.x) * site.dirX + (bz - site.z) * site.dirZ;
     const acrossB = -(bx - site.x) * site.dirZ + (bz - site.z) * site.dirX;
     const alongMin = -(DECK_HALF_LENGTH + site.rampReachNeg + RAMP_SCREEN_MARGIN);
     const alongMax = DECK_HALF_LENGTH + site.rampReachPos + RAMP_SCREEN_MARGIN;
-    const inner = site.halfWidth;
+    // **The whole reservation, not the annulus round it.** Measured 2 Sep
+    // 2026 (`scripts/tmp-sitedrift.mts`, which carries its own control): on
+    // every site on seeds 24, 131 and 451 the built masonry stands at
+    // |across| 1.1 to 2.7, while this band was
+    // `[halfWidth, halfWidth + 0.5]` = `[4 or 5, +0.5]` — between 1.1 and
+    // 2.3 m OUTSIDE the outermost solid ground. It guarded grass, and the
+    // real wall lay inside the region the screen called road.
+    //
+    //   seed  site  halfWidth  old band      walkable   solid
+    //   131   224     5.00     [5.00, 5.50]   +-1.10    +-2.70
+    //   451     0     4.00     [4.00, 4.50]   +-1.30    +-2.90
+    //   451    38     5.00     [5.00, 5.50]   +-1.30    +-2.90
+    //    24    20     5.00     [5.00, 5.50]   +-1.10    +-2.70
+    //
+    // The arithmetic closes exactly: walkable is the footprint's `walkHalf`,
+    // `roadHalf = walkHalf + PLAYER_RADIUS`, `halfAcross = roadHalf +
+    // BRIDGE_WALL_THICKNESS`, and a 0.7 m clearance probe stops at
+    // `halfAcross + 0.7` — 1.10 + 0.5 + 0.3 + 0.7 = 2.60 against 2.70.
+    //
+    // `site.halfWidth` is the **planner's reservation** (`SITE_HALF_WIDTH`);
+    // the bridge is built as wide as the path that crosses it and no wider
+    // (Jim, 2026-08-23), along that path's own curved spine. Its real width
+    // therefore cannot be known here — the paths do not exist yet. The rule
+    // that *can* be stated before drawing is that the reservation belongs to
+    // the bridge alone, so the deck edge (a mandatory `link()`, never
+    // screened) and the feet's own connectors (exempt above) are the only
+    // things in it, and no later, narrower bridge can meet a foreign ribbon.
+    const inner = 0;
     const outer = site.halfWidth + RAMP_SCREEN_MARGIN;
     for (const sign of [1, -1] as const) {
       if (
@@ -1967,11 +2014,14 @@ function gridConnectors(
   arrival: boolean,
   relax = 0,
   lead: readonly [number, number] | null = null,
+  exemptSite: CrossingSite | null = null,
 ): GridConnector[] {
-  const key = `${p[0]},${p[1]},${arrival ? 1 : 0},${relax},${lead ? `${lead[0]},${lead[1]}` : ''}`;
+  const key =
+    `${p[0]},${p[1]},${arrival ? 1 : 0},${relax},${lead ? `${lead[0]},${lead[1]}` : ''}` +
+    `,${exemptSite ? exemptSite.railDistance : ''}`;
   const hit = gridConnectorCache.get(key);
   if (hit) return hit;
-  const connectors = computeGridConnectors(p, arrival, relax, lead);
+  const connectors = computeGridConnectors(p, arrival, relax, lead, exemptSite);
   gridConnectorCache.set(key, connectors);
   return connectors;
 }
@@ -1981,6 +2031,7 @@ function computeGridConnectors(
   arrival: boolean,
   relax: number,
   lead: readonly [number, number] | null,
+  exemptSite: CrossingSite | null = null,
 ): GridConnector[] {
   const lattice = streetLattice();
   const pSide = railInfoAt(p[0], p[1]).side;
@@ -2014,7 +2065,7 @@ function computeGridConnectors(
     streetSegmentClear(ax, az, bx, bz, p, exemptNear, boundaryMargin) &&
     segmentClearOfRing(ax, az, bx, bz) &&
     segmentHoldsRailSide(ax, az, bx, bz, pSide, 0) &&
-    !segmentCutsABridgeRamp(ax, az, bx, bz);
+    !segmentCutsABridgeRamp(ax, az, bx, bz, exemptSite);
 
   const ci = Math.round((p[0] - PLAZA.x) / STREET_PITCH);
   const cj = Math.round((p[1] - PLAZA.z) / STREET_PITCH);
@@ -2665,9 +2716,10 @@ function* pathGridSearch(): Generator<number, PathGrid, void> {
     arrival: boolean,
     relax = 0,
     lead: readonly [number, number] | null = null,
+    exemptSite: CrossingSite | null = null,
   ): number => {
     let made = 0;
-    for (const connector of gridConnectors(p, arrival, relax, lead)) {
+    for (const connector of gridConnectors(p, arrival, relax, lead, exemptSite)) {
       link(
         node,
         connector.node,
@@ -2728,7 +2780,10 @@ function* pathGridSearch(): Generator<number, PathGrid, void> {
       [plusNode, feet.plus],
       [minusNode, feet.minus],
     ] as readonly (readonly [number, readonly [number, number]])[]) {
-      if (joinToGrid(node, foot, false) > 0) continue;
+      // The site is passed so this foot's own connectors are not screened
+      // against the reservation they stand at the end of — see
+      // {@link segmentCutsABridgeRamp}. Every other site still screens them.
+      if (joinToGrid(node, foot, false, 0, null, site) > 0) continue;
       // **A ramp landing beside the statue circle still crosses somewhere
       // real.** A foot with no connector because it stands inside the ring's
       // own guard zone (every node and leg there is deliberately invalid) is
