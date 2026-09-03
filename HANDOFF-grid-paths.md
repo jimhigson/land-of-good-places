@@ -1771,3 +1771,84 @@ reservation shrink, built and measured on the fifth leg: seed 11 3 -> 22, seed
 wherever edges are refused — which is a *strengthening*, consistent with the
 `inner = 0` decision, and it removes only nodes that were unreachable anyway.
 **Not yet built or measured. It is one line, and it must be measured alone.**
+
+### THE TAIL WALK: 37 masked steps run, and there are THREE branch-introduced reds
+
+`pnpm run check` is one `&&` chain of **58** steps and `check:pet-slide` is step
+**21**, so the 37 after it had never run on this branch. All 37 run
+individually, exit codes recorded: **35 pass, 2 fail.** With pet-slide that is
+**three** red checks, not one.
+
+| check | `origin/main` | this branch | who |
+|---|---|---|---|
+| `check:pet-slide` | passes | **fails** | Overseer has an agent on it, against #474 |
+| `check:park-boot` | passes (11.0 ms) | **fails** (14.6 ms before this leg's two-pass, 13.9 ms after) | not this leg's |
+| `check:arrival-completes` | passes | **fails** | not this leg's — identical numbers before the two-pass |
+
+The other 35: `orientation sky-view space-night waypoints seed-pool park
+fountain-hop park-map hud-during-rides solve-cost jitter castle benches
+castle-floors hall-solid hotel tap-spacing look-around nav-routes
+path-preference rail-race cart-shape tie-frame cruiser-solves
+cruiser-turn-radius cruiser-clearance castle-window backpack-peek
+statue-occlusion keyring-hang keyring-view climb-wave cat-bus
+cat-bus-suspension bus-journey` — **all exit 0**.
+
+#### `check:arrival-completes`, the one nobody knew about
+
+```
+check:arrival-completes FAILED
+  - the looping frames drain 4.0 steps each against 7.7 while rolling — the
+    overrun is draining no faster than the ride, so `overrunAwareBudgetMs`/
+    `overrunning` is not applying the overrun budget once the ride is over
+```
+
+Bisected. **Not this leg's** — byte-identical figures at `ca5db30f`, before the
+two-pass (125939 steps, 31242 frames, 4.0 against 7.7). On `origin/main` it
+**passes**, draining 9.2 against 7.7.
+
+#### The two non-pet-slide reds probably share one root, and it is this branch
+
+Put the two side by side:
+
+```
+origin/main    992462 generator steps, 107718 frames, loop drains 9.2/frame (1.2x rolling)  PASSES
+this branch    125939 generator steps,  31242 frames, loop drains 4.0/frame (0.5x rolling)  FAILS
+```
+
+The branch generates the park in **an eighth of the generator steps**. The
+grid rework replaced the old street solver with far fewer, far **fatter**
+steps. If steps were uniform, a 12 ms looping budget against an 8 ms rolling
+one should drain *more* per frame, not half as many — 4.0 per frame under 12 ms
+against 7.7 under 8 ms means the steps running during the looping phase cost
+roughly three times what the early ones do.
+
+That is the same disease `check:park-boot` reports from the other end — *"worst
+single `advance()` 13.9 ms against an 8 ms budget"*, and *"that worst slice was
+no generator step at all, 0 work units in 13.9 ms, during 'joining up the
+paths'"*. **One root: this branch's path solve does too much between yields.**
+Neither check is wrong; both are describing a solve whose steps are too coarse
+to slice.
+
+**That makes it this branch's debt, not #474's, for these two** — the grid
+rework is where the step granularity changed. Fixing it means yielding more
+finely inside `pathGridSearch`/`pathGraphSolveOnce`, not adjusting either
+check's thresholds. Note this leg's two-pass does **not** contribute: on the
+canonical seed all four sites are used, so the loop settles on the first pass
+and adds no work at all — the byte-identical step counts above are the proof.
+
+#### Recommendation on the `&&` chain (the Overseer's question)
+
+**Yes — `check` should run every step and report the full set of failures.**
+The evidence is this walk: the chain reported *one* failure when there were
+*three*, and fixing pet-slide would have revealed park-boot, and fixing that
+would have revealed arrival-completes — three sequential 16-minute discoveries
+where one walk found all three. That is "a check that never runs is worse than
+a check that fails" applied to the chain itself.
+
+It is also mechanically safe to convert: parsed, not grepped, the chain is
+**58 steps, all of the form `pnpm run <name>` (plus `tsc --noEmit`), with no
+duplicates**. A runner over an explicit list is easier to diff than a 58-term
+`&&` expression, which directly reduces the rebase hazard CLAUDE.md's own
+"a check that never runs" section is about. Exit non-zero if any step failed,
+so zero-tolerance is unchanged. **Not built — it is a `check`-chain change and
+belongs on its own PR, not buried in this one.**
