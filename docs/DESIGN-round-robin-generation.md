@@ -268,6 +268,75 @@ shared ground manufacture exactly these seams."* Stages 1–4 are held by **one
 design-owning agent**; parallelism begins at stage 5, where the spine makes
 collisions structural rather than accidental.
 
+## The quality tier (Jim, same conversation: "let's talk about the improvements we also need")
+
+Everything above raises the floor — no invalid parks. Jim's brief was never
+only about validity, and the parts of it that keep not happening ("the path
+still doesn't go up to the hotel") fail for a structural reason: **today,
+destinations are decorations, not demands.** The pipeline grows a network and
+then asks afterwards whether it happened to reach the doors. The door is not
+an input to the path search; it is a thing the search is graded on later —
+which is why the paths branch grew arrival ladders and rescue walks trying to
+drag a finished network the last seven metres to a door it never knew it owed.
+
+### Demands: the fifth claim kind
+
+When a feature places itself, it publishes what it is owed: *"a paved
+corridor must terminate here, flush with this threshold, at this width."*
+The park is **not finished until every demand is served.** An unserved demand
+is a conflict exactly like an overlap and backtracks the same way — reroute
+the path; if no path can serve it, the *building* is asked to move or turn.
+"Paths reach the hotel" stops being a hope and becomes part of the definition
+of done. The universal invariant gets a twin: **every demand served,
+deny-by-default** — no hand-picked list of which buildings deserve paths.
+
+"All the way up" defined precisely, because near-misses are the recorded
+common failure (doormats stranded 0.3 m from their own paving): **the paving
+polygon abuts the threshold.** Zero gap, full door width, roughly
+perpendicular over the final approach — never a ribbon that ends nearby or a
+diagonal sliver clipping a doormat's corner.
+
+### Paths do not clump or overlap — and there is no self-exemption
+
+Jim: *"paths should not clump together or overlap — this is an invariant that
+gets violated a lot but should backtrack out."*
+
+Clumping survives today because both offenders are the same placer: the path
+system checks its ribbons against everyone else's obstacles, and two of its
+own ribbons a metre apart is nobody's collision. So, the rule: **every
+corridor segment is a claim like any other, including against its own
+placer's segments.** A corridor near another corridor is legal in exactly two
+ways — a declared junction, or the same shared segment. There is no third
+state where two ribbons run parallel a stride apart. Each corridor claim
+carries a separation halo; a route wanting ground inside another ribbon's
+halo must **join it, reuse it, or backtrack**. Reuse is the move that fixes
+the aesthetics: paths clump because drawing a fresh ribbon was cheaper than
+routing along the one that existed. Make reuse free and duplication a
+refusal, and the network converges to trunk-and-branch — which also serves
+the grid ask. The bridge-foot apron knot is this rule at a junction: N
+ribbons meet a foot only as one merged junction geometry, never as N
+individually-drawn arrivals.
+
+### Hard demands vs soft costs
+
+The tier decides what **backtracks** versus what merely **steers**. Promote
+too much to hard and generation thrashes; leave too much soft and the park is
+technically valid and visually nonsense.
+
+- **Hard** (a violation backtracks out, on any seed, by construction): every
+  door / ride entrance / seat served flush; no corridor clumping or
+  self-overlap; junctions merged, never aprons; zero level crossings (kept
+  from the parent work); nothing overlaps a walkable-must-remain.
+- **Soft** (search costs, bounded by invariants): approximate grid layout, no
+  pointless mini-turns or twists; things roughly evenly spaced around the
+  park; sensible detour ratios — the existing detour invariant graduates
+  from bug-detector to quality bar.
+
+The soft list is open — main routes visibly wider than side paths, plazas
+where trunks meet, path-to-green ratio are candidates awaiting Jim's ruling —
+and each addition is a cost function plus an invariant, never a new private
+rule inside one placer.
+
 ## The universal collision invariant (Jim, same conversation: "any collision between drawn features, not just certain pairings")
 
 The test suite has the same disease as the generators. Most of the ~80
