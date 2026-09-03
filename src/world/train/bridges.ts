@@ -998,6 +998,13 @@ function buildShellGeometry(
     readonly courseYs: [number[], number[]];
     /** This ring's parapet top, per side — the plane the coping strip caps. */
     readonly top: [number, number];
+    /**
+     * The terrain at this ring's own outer face, per side — or `-Infinity`
+     * inside the tunnel, where the flank stands in open air over the railway
+     * and nothing is buried. What the reveal below asks to find out whether it
+     * is drawing a horizontal face underground.
+     */
+    readonly groundOuter: [number, number];
     readonly innerBottom: [number, number]; // parapet inner face, at road
     readonly innerTop: [number, number];
     readonly roadA: number; // road edge, side +1
@@ -1188,6 +1195,9 @@ function buildShellGeometry(
       courses: [coursesPlus.column, coursesMinus.column],
       courseYs: [coursesPlus.ys, coursesMinus.ys],
       top: ringTop,
+      groundOuter: inTunnel
+        ? [-Infinity, -Infinity]
+        : [terrainHeight(outerPlus.x, outerPlus.z), terrainHeight(outerMinus.x, outerMinus.z)],
       innerBottom: [
         vertex(roadPlus.x, roadBed, roadPlus.z, u, roadBed / TEXTURE_METRES),
         vertex(roadMinus.x, roadBed, roadMinus.z, u, roadBed / TEXTURE_METRES),
@@ -1306,7 +1316,36 @@ function buildShellGeometry(
                 (previous.top[side] as number) - COPING_SINK &&
               (ring.courseYs[side][course * 2 + 1] as number) >=
                 (ring.top[side] as number) - COPING_SINK;
-            if (!revealAtTop) {
+            // **And not where it would be drawn in the ground** (#489).
+            //
+            // The flank deliberately runs half a metre below the terrain so a
+            // bridge does not float over its own ground with a seam. Course
+            // levels are fixed world heights and the terrain undulates, so
+            // somewhere along a 30 m flank one boundary always grazes the
+            // grass — and a reveal is a horizontal 6 cm shelf, so where it
+            // grazes it shares the ground's plane. That is the same seam the
+            // baselined `terrain|<bridge>/wallTop` entries already record at
+            // the ramp feet; re-anchoring the ladder for #489 moved which
+            // level does the grazing, so it had to be closed properly rather
+            // than re-baselined.
+            //
+            // `COURSE_RECESS` is the depth to use, and for the same reason
+            // `COPING_SINK` is the right one above: it is the ledge's own
+            // width, owned by the geometry rather than invented here. A 6 cm
+            // shelf standing less than its own width out of the grass is not
+            // reading as masonry to anybody — measured, the faces this deletes
+            // sit 2–19 mm above the ground — and deleting it is the
+            // ART_DIRECTION §7 answer where nudging it would not be.
+            //
+            // Only the reveal goes. The vertical course faces stay: a wall does
+            // not share a plane with a hillside, so they cost nothing and they
+            // are what stops the buried stretch opening up on a slope.
+            const revealInGround =
+              (previous.courseYs[side][course * 2 + 1] as number) <=
+                (previous.groundOuter[side] as number) + COURSE_RECESS &&
+              (ring.courseYs[side][course * 2 + 1] as number) <=
+                (ring.groundOuter[side] as number) + COURSE_RECESS;
+            if (!revealAtTop && !revealInGround) {
               const bnt = before[(course + 1) * 2] as number;
               const nnt = now[(course + 1) * 2] as number;
               if (side === 0) quad(indices, bb, bnt, nnt, nb);
