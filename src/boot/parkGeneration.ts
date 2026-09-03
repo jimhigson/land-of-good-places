@@ -200,6 +200,21 @@ export class ParkGeneration {
   private cruiserStart: CruiserSearchStart | null = null;
   private cruiserRoute: SolvedRailRoute | null = null;
 
+  /**
+   * How many of `coasterProfileSearch`'s **structural seams** were taken —
+   * the yields that carry zero, as against the vertical repair's passes,
+   * which carry `pass + 1`.
+   *
+   * Kept apart from {@link units} because the two answer different
+   * questions. The seam count is a fixed property of the algorithm and a
+   * drop in it means a seam was skipped; the repair count is data, and a
+   * park whose profile already clears the terrain legitimately takes one
+   * pass where the canonical seed takes ten. A single total cannot tell
+   * those apart, and `check:park-boot` spent a red run saying the first
+   * when the truth was the second.
+   */
+  private cruiserFinishSeams = 0;
+
   /** Frames on which this was asked to do work and did some. */
   private workingFrames = 0;
   private slicesSeen = 0;
@@ -356,6 +371,12 @@ export class ParkGeneration {
               offerPrewarmedCruiser(step.value);
               return;
             }
+            // The structural seams are the yields that carry zero; the
+            // vertical repair's passes carry `pass + 1`. Counted apart
+            // because only the seams are a fixed property of the algorithm —
+            // see `coasterProfileSearch` and `check:park-boot`'s seam
+            // assertion.
+            if (step.value === 0) self.cruiserFinishSeams += 1;
             yield step.value;
           }
         },
@@ -569,6 +590,11 @@ export class ParkGeneration {
       trainSearch: counts['trainSearch'] ?? 0,
       slideSearch: counts['slideSearch'] ?? 0,
     };
+  }
+
+  /** How many of the cruiser finish's structural seams were taken. */
+  get cruiserFinishSeamCount(): number {
+    return this.cruiserFinishSeams;
   }
 
   /**

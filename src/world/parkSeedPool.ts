@@ -142,6 +142,35 @@ export const PARK_SEED_POOL: readonly number[] = [
  * The subset is the pool seeds with checked-in invariant files (the deep
  * sweep), not all sixteen — `vet:seeds` owns whole-pool coverage; this
  * keeps the blocking chain's cost where it was.
+ *
+ * ## What being in this list does NOT mean
+ *
+ * **It does not mean `check:park` builds that seed's park. `check:park` is
+ * canonical-only.** The only `check:*` step that sweeps this list today is
+ * `check:fountain-hop` — so the `--- seed N: passed` lines in a `pnpm run
+ * check` log are *its* sweep, and nothing else's. The other consumers are
+ * `measure-*`/`sweep-*` scripts nobody runs in CI. Grep before believing
+ * otherwise; the list of importers is short and this comment can rot.
+ *
+ * **The trap that makes this easy to misread**: `check-park.mts` *does*
+ * import something called `SEEDS` (line 72) and prints `N/M seeds placed`
+ * and `N/M waypoints connected`. Those are `poiGraph`'s **waypoint** seeds —
+ * points of interest a child can walk to — and have nothing whatever to do
+ * with park seeds. Two different meanings of "seed", one of them in the
+ * output of the very check people assume is sweeping the other. If you are
+ * checking whether `check:park` covers a park seed, the question is whether
+ * it imports **this** file; it does not.
+ *
+ * Measured 2 Sep 2026: seed 326 is in this list, went green through the whole
+ * 58-step chain, and was stranding 8 waypoints under `check:park` the entire
+ * time. Seed 115 failed the other way round — `check:park` green, three
+ * invariants red. Neither gate implies the other (#437), and neither sees
+ * most of the pool.
+ *
+ * **So when the generator's geometry changes, the tell is `pnpm run
+ * vet:seeds` over the whole pool — not a green `check`, which by
+ * construction cannot see a stale warp vector on ten of the sixteen seeds a
+ * child can actually draw.** See `parkWarp.ts`'s `WARPS_BY_SEED` header.
  */
 export const CI_SWEEP_SEEDS: readonly number[] = [CANONICAL_PARK_SEED, 5, 11, 24, 288, 326].map(
   (seed) => {

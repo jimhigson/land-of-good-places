@@ -513,13 +513,19 @@ const MIN_UNITS: Readonly<Record<keyof typeof units, number>> = {
   cruiserSearch: 500,
   // Eight structural seams that always run — the plan sampling, the station
   // scan, the hill and station carve, the castle span, the window carve, the
-  // first curve build, and two in the tail — plus the vertical repair's up-to-
-  // ten passes and the final step. Nineteen on the canonical seed. The floor is
-  // 12 rather than 19 because the repair loop breaks as soon as a pass finds
-  // nothing to lift, so a seed whose loop needs no repair legitimately produces
-  // ten; it can never produce fewer than the seams, and eleven — the count
-  // before those seams existed — is now red.
-  cruiserFinish: 12,
+  // first curve build, and two in the tail — plus the vertical repair's
+  // up-to-ten passes and the final step.
+  //
+  // **This floor is 10 because that is what the algorithm admits, and the real
+  // guarantee is the exact seam count asserted below, not this number.** The
+  // repair loop breaks the moment a pass finds nothing to lift, so its count is
+  // data: the canonical seed takes all ten passes (19 units), a park whose
+  // profile already clears the terrain takes one (10 units). A single total
+  // cannot tell a skipped seam from an unneeded repair, and a floor of 12 set
+  // to make one historical count red did exactly that — it prosecuted a park
+  // for having a *better* profile, in the very words of a comment that had
+  // already worked out that ten was legitimate.
+  cruiserFinish: 10,
   // The train's loop is grown by the same rail generator as the cruiser, so a
   // solve takes hundreds to thousands of joints and yields at every one. The
   // floor is conservative — the loop is shorter than the cruiser's and a lucky
@@ -541,6 +547,41 @@ for (const [phase, floor] of Object.entries(MIN_UNITS) as [keyof typeof units, n
         'which is a stutter on any device slow enough to notice',
     );
   }
+}
+
+/**
+ * **Every structural seam in the cruiser finish was actually taken.**
+ *
+ * This is the guarantee `cruiserFinish`'s unit floor was reaching for and
+ * could not express. `coasterProfileSearch` suspends in two different kinds
+ * of place: eight seams between the phases, which are a fixed property of
+ * the algorithm and always run, and the vertical repair loop, whose count is
+ * data — it breaks as soon as a pass finds nothing to lift.
+ *
+ * Counting them together can only say "eleven pieces", which is the same
+ * number whether a seam was skipped (a real stutter: a phase done in one
+ * unstoppable lump) or a repair was simply not needed (a park whose profile
+ * already clears the terrain, which is *better*). It went red on the second
+ * while describing the first.
+ *
+ * So they are counted apart — the seams yield zero, the repair yields
+ * `pass + 1` — and this asserts the seam count **exactly**. Exactly, not a
+ * floor: one fewer means a phase stopped being interruptible, and one more
+ * means a seam was added that nobody has re-measured the budget against.
+ * Both are things a person should look at.
+ */
+const CRUISER_FINISH_SEAMS = 8;
+const seamsSeen = generation.cruiserFinishSeamCount;
+said.push(
+  `cruiser finish seams: ${seamsSeen} of ${CRUISER_FINISH_SEAMS}, ` +
+    `plus ${units.cruiserFinish - seamsSeen - 1} vertical repair pass(es) and the result`,
+);
+if (seamsSeen !== CRUISER_FINISH_SEAMS) {
+  fouls.push(
+    `the cruiser finish took ${seamsSeen} of its ${CRUISER_FINISH_SEAMS} structural seams — ` +
+      'a phase of it is being done in one lump the driver cannot stop in the middle of, ' +
+      'which is a stutter on any device slow enough to notice',
+  );
 }
 
 // The event loop's own view, which covers the module evaluations too.
