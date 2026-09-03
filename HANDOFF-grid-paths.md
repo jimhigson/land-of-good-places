@@ -358,11 +358,53 @@ the same disease as the parapet crossings this leg already fixed, in a
 different organ — a ribbon drawn over ground the router never asked the real
 collision world about.
 
-Next measurement, and it is a short one: `scripts/tmp-transect.mts -44.4 22.6
--42.2 8.5` prints `blocked`/`push` every 25 cm along exactly that stretch and
-will name what is standing in it. Then find which router drew it — `hotel` is
-NOT in `strandedDoorsOfLastSolve()`, so it came from the normal grid solve or
-the `relayPolyline` rescue, not the straight-line last resort.
+**MEASURED. `scripts/tmp-transect.mts -44.4 22.6 -42.2 8.5`:** from d=1.97 to
+d=12.30 the ground is **continuously BLOCKED with `onPath=Y` at every
+sample** — 10.3 m of ribbon over solid ground, peak push 0.81 m at
+(-42.81, 12.39). Clear either side. So the paving really is drawn through
+something a child cannot pass.
+
+**Which router, and the root cause.** `spur-hotel`'s control polyline:
+
+```
+(-5.7,6.9) (-14.8,6.9) (-14.8,21.2) (-15.8,21.2) (-20.8,36.6) (-21.7,39.6)
+(-22.7,42.7) (-27.6,58.1) (-38.8,54.9) (-38.8,42.9) (-42.2,42.9)
+(-42.2,3.2) (-42.5,3.0)
+```
+
+`(-42.2, 42.9) -> (-42.2, 3.2)` is **one straight segment 39.7 m long on
+x = -42.2**, and it is what runs through the blockage. Beside it,
+`spur-stall.skyCruiser` carries `(-43.0, 30.9) -> (-43.0, 6.9)`, a 24 m run on
+x = -43.0 — **two long parallel private lines 0.8 m apart**, neither on the
+12 m lattice. The hotel's door is at (-42.2, 3.2), so x = -42.2 is *the door's
+own column*: this is `relayPolyline`, which walks "the grid's lines **and the
+endpoints' own rows/columns**".
+
+**The root cause is the screen it walks behind.** `relayPolyline`'s `legClear`
+is `streetSegmentClear` + `segmentClearOfRing` + `segmentHoldsRailSide` +
+`!segmentCutsABridgeRamp` — plots, ring, rail, boundary, bridge masonry. **A
+hand-picked obstacle list. It never asks the real `CollisionWorld`**, so
+whatever a sibling system placed there — scenery, fence, hedge, bench — is
+invisible to it, and 39.7 m of rescue leg was paved through 10.3 m of it.
+
+That is verbatim the failure CLAUDE.md's standing procgen rule names: *"a
+generator that only checks itself against a hand-picked obstacle list will
+silently miss whatever a sibling system placed there — the exact shape of
+issues #317 and #319."* And the fix it prescribes is the one to build:
+**check the real collision world as it stands at that moment, and backtrack** —
+a different column, a different bridgehead, a different margin — rather than
+accept a leg that does not clear.
+
+It also explains the 1.87 m private-line run that the `streetsShareLatticeLines`
+successor must still catch: these two runs are the same defect seen from the
+invariant's side.
+
+**Note the ordering trap before fixing it.** Scenery is placed from
+`pathCentreline` (Scenery.ts owns wall runs vs paths), so at the moment
+`relayPolyline` runs, some of what will later block it does not exist yet.
+Asking the collision world naively will therefore under-report. Establish what
+is actually in the world at that instant before designing the query — measure
+first, as ever.
 
 ### The last resort still draws, and per the standing rule it must not
 
