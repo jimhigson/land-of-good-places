@@ -141,8 +141,10 @@ const walks = (arrival as unknown as { kidWalks: { aisleSeconds: number; route: 
   console.log('');
 }
 
+const DOOR = (arrival as unknown as { bus: { doorDrop: { x: number; z: number } } }).bus.doorDrop;
 const startedAt = new Array<number>(ARRIVAL_KID_COUNT).fill(Number.NaN);
 const exitAt = new Array<number>(ARRIVAL_KID_COUNT).fill(Number.NaN);
+const exitLocal = new Array<{ x: number; z: number } | null>(ARRIVAL_KID_COUNT).fill(null);
 const atDoorAt = new Array<number>(ARRIVAL_KID_COUNT).fill(Number.NaN);
 const offTheBus = new Array<boolean>(ARRIVAL_KID_COUNT).fill(false);
 const last = kids.map((kid) => kid.position.clone());
@@ -157,7 +159,15 @@ for (let index = 0; index < frames; index += 1) {
     last[k]!.copy(kid.position);
     if (Number.isNaN(startedAt[k]!) && moved > 1e-3) startedAt[k] = elapsed;
     if (!offTheBus[k]! && !insideFootprint(busRoot, busLocalBox, kid.position)) offTheBus[k] = true;
-    if (Number.isNaN(exitAt[k]!) && offTheBus[k]!) exitAt[k] = elapsed;
+    if (Number.isNaN(exitAt[k]!) && offTheBus[k]!) {
+      exitAt[k] = elapsed;
+      // **Where** did they cross the bodywork? In the bus's own frame, against
+      // the door's own local position: a child who walks out of the door
+      // crosses near it, one who cuts a diagonal from their seat crosses the
+      // side wall metres away from it.
+      const local = busRoot.worldToLocal(kid.position.clone());
+      exitLocal[k] = { x: local.x, z: local.z };
+    }
     const from = walks[k]?.route.from;
     if (from && Number.isNaN(atDoorAt[k]!)) {
       if (Math.hypot(kid.position.x - from.x, kid.position.z - from.z) < 0.15) atDoorAt[k] = elapsed;
@@ -175,7 +185,9 @@ for (let k = 0; k < ARRIVAL_KID_COUNT; k += 1) {
   rows.push({ delay, aisle, door, exit });
   console.log(
     `${String(k).padStart(3)}  ${delay.toFixed(2).padStart(6)}  ${aisle.toFixed(2).padStart(6)}  ` +
-      `${door.toFixed(2).padStart(6)}  ${exit.toFixed(2).padStart(6)}   reachedDrop ${atDoorAt[k]!.toFixed(2)}`,
+      `${door.toFixed(2).padStart(6)}  ${exit.toFixed(2).padStart(6)}   reachedDrop ${atDoorAt[k]!.toFixed(2)}` +
+      `   crossed the bodywork at local ${exitLocal[k] ? `${exitLocal[k]!.x.toFixed(2)}, ${exitLocal[k]!.z.toFixed(2)}` : 'never'}` +
+      `   (door is at ${DOOR.x.toFixed(2)}, ${DOOR.z.toFixed(2)}, ${exitLocal[k] ? Math.hypot(exitLocal[k]!.x - DOOR.x, exitLocal[k]!.z - DOOR.z).toFixed(2) : '-'} m away)`,
   );
 }
 
