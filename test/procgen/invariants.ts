@@ -876,14 +876,23 @@ const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
   // 2. The gate is solid where a child bumps into it — and the probe proves
   // itself at each post before it is believed there.
   //
-  // **Why per-post and not once:** with the colliders removed, the *east*
-  // post's probe flips to standable, which is a clean control; the west post's
-  // stays blocked out past 1.5 m, because the boundary intrudes on that side
-  // on the canonical seed. That is #481 again, masking half of this clause —
-  // and a clause that quietly covers one post while reading as though it
-  // covers two is the disease this file is most often about. So each post is
-  // asked twice: outside the post's reach (must be open, or nothing here is
-  // being answered by the gate) and inside it (must be closed).
+  // **Why per-post and not once:** on the canonical seed, with the colliders
+  // removed, the *east* post's probe flips to standable — a clean control —
+  // while the west post's stays blocked, because something other than the post
+  // occupies that ground. A clause that quietly covers one post while reading
+  // as though it covers two is the disease this file is most often about. So
+  // each post is asked twice: outside the post's reach (must be open, or
+  // nothing here is being answered by the gate) and inside it (must be
+  // closed), and the stderr note below reports how many posts survived that.
+  //
+  // **What the count is, measured on the rebased tree** (`test:procgen`, five
+  // seeds, 541 tests, exit 0): **9 of 10 post-probes live** — four seeds at 2
+  // of 2, one seed masked at (-4.30, 60.00) — and no seed where it asserts
+  // nothing. Before the rebase onto #485 it was 5 of 10 with two seeds
+  // covering nothing at all; moving the boundary masonry out of the opening is
+  // what freed the other four. Both numbers were true when taken, which is the
+  // reason this one is dated to the tree it was read off rather than left as a
+  // bare figure for the next reader to trust.
   const toMiddle = Math.hypot(arch.centreX, arch.centreZ);
   const inward: readonly [number, number] =
     toMiddle > 1e-6 ? [-arch.centreX / toMiddle, -arch.centreZ / toMiddle] : [0, 0];
@@ -918,7 +927,8 @@ const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
     `${GATE_UNCOVERED}; its solidity clause is live on ${postsCovered} of ${arch.posts.length} gate posts` +
       (masked.length > 0
         ? ` — masked at ${masked.join(' and ')}, where something that is not the post already blocks ` +
-          `${GATE_POST_PROBE_INSET.clear} m out (#481)`
+          `${GATE_POST_PROBE_INSET.clear.toFixed(2)} m out, past the ${reach.toFixed(2)} m the post ` +
+          `itself reaches, so the reading a stride closer proves nothing there`
         : ''),
   );
   if (postsCovered === 0) {
