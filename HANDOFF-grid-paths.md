@@ -3999,3 +3999,54 @@ of the park.* With the correction that the mechanism is the unit of
 measurement, not an exemption — **and that seed 225 fails it by 0.2 m against a
 16 m threshold**, which is worth saying plainly after three legs of treating it
 as a structural defect.
+
+## 288's `noPathEndsNowhere` — a promise the generator makes and does not keep
+
+```
+bridge-walk-0 paved=true ring->ring
+  (16.3,-21.2) (11.7,-20.3) (0.3,-31.7) (-2.0,-34.0) (-4.3,-36.3) (-15.7,-47.7)
+```
+
+Read against `walkEveryBridge`, the shape is unambiguous: `(16.3,-21.2)` is the
+branch off existing paving, `(11.7,-20.3)` the near foot, the three middle
+points the deck's own pinned control points, and `(-15.7,-47.7)` the **far
+foot**, where the route simply stops. `onward` was `null` — the search for
+paving on the far side found none — so nothing was appended.
+
+**The generator says so itself, and the sentence is the defect:**
+
+> *"Where the far side has nothing paved yet, the foot is the end: a bridge
+> foot is a real place to arrive, and **the next destination on that side will
+> branch from it**."*
+
+On seed 288 no destination ever did. So the ribbon stops 17.61 m from anything,
+in the grass, and `noPathEndsNowhere` is right to fail it. **That is a path to
+nowhere — issue #114's own class, and Jim-visible**, not merely an invariant
+line: a child walks over a bridge and off the end of the paving.
+
+**This is a forward promise with nothing checking it was kept.** `walkEveryBridge`
+runs while the network is still being grown, so at that moment "will a later
+destination branch from this foot?" is genuinely unanswerable there — the same
+ordering shape as the border fence, and it takes the same answer: **the fix
+belongs where the answer exists, which is after all destinations are routed.**
+
+**The fix, per the standing procgen rule (backtrack, never accept a result that
+does not clear):** a post-pass over the drawn bridge walks. For each whose far
+end has no other paving within `ARRIVAL`, either
+
+- extend it to the nearest paving on that rail side — `gridSearch` from the far
+  foot to `pavedGridNodes` on that side, exactly the `onward` query already
+  written, just re-asked once the network is complete; or
+- if there is still nothing on that side at all, drop the walk — **but weigh
+  that against the call site's own reason for existing**, that an unwalked site
+  is a *sealed pocket* rather than an unused shortcut. Dropping may trade this
+  invariant for a reachability failure, which the settled ranking forbids.
+
+So the first branch is the one to build, and the second is the fallback that
+must be measured, not assumed. **Both columns, sixteen seeds, and diff the set.**
+
+**NOT BUILT. Measured and specified only** — I would rather hand this over
+correctly than half-build it. Note `walkEveryBridge` also calls
+`trimBacktracks` on its assembled points, so anything added here must respect
+`drawsAsScreened`'s lesson: the shape that gets drawn is not always the shape
+that was assembled.
