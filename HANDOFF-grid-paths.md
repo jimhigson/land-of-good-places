@@ -580,6 +580,45 @@ the ramp is at the outer end. Both are wrong; the standing procgen rule says
 backtrack — try another corridor line, another mouth, or a route round the
 ramp — rather than accept a degenerate result.
 
+**THE MECHANISM, TRACED EXACTLY — this is what the fix must address.** Not
+built; I ran out of room and would rather leave it right than half-done.
+
+`gateCorridorDeepestMouth` initialises `deepest = [0, GATE_CORRIDOR_START_Z]`
+and its loop's first iteration is `z = GATE_CORRIDOR_START_Z`. **If that very
+first sample stands on a ramp, it breaks before assigning anything**, so
+`deepest` is returned as `[0, GATE_CORRIDOR_START_Z]` — *and that point is
+itself on the ramp*, because being on a ramp is precisely why it broke.
+
+Then `gateCorridorMouthCandidates` cannot recover, and the arithmetic shows
+why it silently offers nothing:
+
+```
+deepest = [0, START_Z]
+deepest[1] <= INNER_Z ?            no  -> build the candidate list
+candidates = [deepest]
+midpoint = (START_Z + START_Z) / 2 = START_Z
+midpoint - deepest[1] = 0          not > 2  -> no midpoint candidate
+START_Z - deepest[1] = 0           not > 2  -> no start candidate
+=> candidates = [[0, START_Z]]     one degenerate mouth, on the ramp
+```
+
+Every fallback it has is expressed as a *fraction of the corridor's length*,
+and the corridor's length is zero, so all three collapse to the same point.
+**A backtrack ladder whose rungs are proportional to the thing that failed has
+no rungs when that thing is zero** — worth remembering beyond this function.
+
+**The fix is a mouth that is off the ramp.** The handover must not be placed on
+bridge masonry; when `GATE_CORRIDOR_START_Z` itself is on a ramp the mouth has
+to move *outward* (increasing z, back toward the gate) until
+`pointStandsOnABridgeRamp` is false, and that point becomes the handover the
+grid routes from. Note the bound question before writing it: `START_Z` is the
+authored start, so walking outward needs a stated limit and a stated answer
+for "no clear z exists" — and that answer must not be the stub.
+
+**Prove it red first.** The degenerate-lane clause below would fail on seed 267
+today; write that, watch it go red on 267's two-node `gate-approach`, then fix
+this and watch it go green.
+
 **CANONICAL READ, AND THEY ARE NOT THE SAME BUG.** Asked before assuming, and
 the answer was no:
 
