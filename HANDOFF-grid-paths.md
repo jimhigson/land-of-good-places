@@ -2407,3 +2407,80 @@ incapable of failing in one of its two axes.
 relaxation of anything: it drops a clause that convicts disjoint neighbours of
 each other (seeds 5, 288 — measured, no defect in either park) and adds one
 that catches three real trespasses on two seeds nobody had ever looked at.
+
+### Built and kept: `bridgeScreenHalfAlong`, the reservation's length
+
+One owner for the reservation's `along` half-length, replacing three copies in
+`paths.ts` (`segmentCutsABridgeRamp`, `bridgeSiteReserving`,
+`pointStandsOnBridgeMasonry`) and a fourth in the invariant. Built from
+`SITE_RAMP_IDEAL` — `BRIDGE_RISE / BRIDGE_RAMP_GRADIENT`, the same expression
+`idealRampRunFor` takes a `Math.min` of, so a true upper bound on every ramp
+the builder is licensed to build, and known before a path is drawn.
+
+**Not** from `site.rampReachPos` / `rampReachNeg`. Those are what
+`crossingPlanSolve.ts` *proved* with its own margins and obstacle set;
+`bridgeFootprint.ts` probes with `searchClear` (the real collision world plus
+sibling guard rails) and routinely builds past the proof. That gap is the
+0.69–1.46 m of unscreened stone on seeds 274 and 326.
+
+This is the `along` axis getting exactly the treatment the `across` axis got
+when `segmentCutsABridgeRamp`'s `inner` went to `0`: reserve the whole
+rectangle the builder could occupy, not the one the proof happened to reach.
+
+**Cured, same instrument, same controls, all four seeds re-measured:**
+
+```
+seed 274  bridge#0 1651 samples, 0 on OPEN ground   bridge#1 1295, 0
+seed 326  bridge#0 1231 samples, 0 on OPEN ground   bridge#1 1300, 0
+seed 5    all four bridges, 0 on OPEN ground
+seed 288  bridge#0 1555 samples, 0 on OPEN ground
+```
+
+### Both clauses proved red, with the geometry they were proved against
+
+**Clause (b)** was proved red by the real park, not by a mutation — the
+transcript is the failure section above, and the geometry it was proved
+against is: seed 274 site railDistance 312, built ramp reaching `along`
+−18.36 against a reservation ending at −16.90; seed 326 sites railDistance 44
+(`along` 16.61 against 15.92) and 204 (`along` 18.35 against 17.39). To arm it
+again, restore `bridgeScreenHalfAlong` to
+`DECK_HALF_LENGTH + site.rampReach{Pos,Neg} + margin` and run seeds 274 and
+326; if the parks have since moved, the numbers above are what to look for.
+
+**Clause (a)** has nothing in the pool that exercises it, so it was proved red
+by mutation — threshold `site.screenHalfAcross` → `× 0.3` in `invariants.ts`
+alone (which cannot move the park), seed 5:
+
+```
+FAIL seed 5 > a bridge's masonry stands inside the ground paths.ts reserved for it
+  the bridge built on the crossing site at (0.0, 36.0), railDistance 0.0,
+    reaches 2.22 m from that site's axis ... deck spans across -1.30 to 1.30
+  the bridge built on ... (63.0, 9.0), railDistance 74.0, reaches 2.22 m ...
+  the bridge built on ... (12.4, -42.1), railDistance 156.0, reaches 2.02 m ...
+  the bridge built on ... (-27.5, 25.0), railDistance 246.0, reaches 2.12 m ...
+  expected [ …(4) ] to have a length of +0 but got 4
+```
+
+Four real numbers against four real thresholds (5.50 / 4.50 / 5.50 / 4.50), no
+`NaN`, no `Infinity`. The geometry: seed 5's four bridges, each centred on its
+own site with a walkable half-width of 1.10–1.30 m. **Mutation reverted, revert
+grep-verified** (0 occurrences of `MUTATION`, 1 of the clean comparison).
+
+### Sixteen seeds, before and after — nothing moved
+
+`check:park`, `scripts/tmp-sweep.sh`, at `df7ecac4` and at the fix:
+
+| seed | before | after | | seed | before | after |
+|---|---|---|---|---|---|---|
+| canonical | 0 | 0 | | 267 | 3 | 3 |
+| 5 | 0 | 0 | | 274 | 0 | 0 |
+| 11 | 3 | 3 | | 288 | 2 | 2 |
+| 24 | 2 | 2 | | 326 | 1 | 1 |
+| 115 | 0 | 0 | | 346 | 0 | 0 |
+| 128 | 0 | 0 | | 428 | 0 | 0 |
+| 131 | 0 | 0 | | 451 | 0 | 0 |
+| 208 | 0 | 0 | | 225 | 2 | 2 |
+
+**10 green, 13 stranded, seed for seed identical.** Widening the reservation's
+length cost no routing anywhere in the pool — which is worth knowing, because
+the `across` widening on the fifth leg cost plenty.
