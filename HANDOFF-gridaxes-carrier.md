@@ -119,5 +119,13 @@ is asserted on every seed on every run, and announces its coverage to `stderr`.
 - [x] both-sided proof, cut-invariance proved directly
 - [x] tolerance derived + sensitivity swept
 - [x] grid-paths seed 225 verified
-- [ ] gates (`check`, `test:procgen`, `build`) — running
-- [ ] PR
+- [x] gates: `check` 0, `test:procgen` 0 (525 tests), `build` 0,
+      `check:coplanar` 0, `typecheck:test` 0 — all read unpiped
+- [x] PR #484 raised. **Not merged** — awaiting review + QA.
+
+## Note for whoever picks this up
+
+`check:park-boot` failed once at 76.4 ms against its 21.9 ms ceiling while three
+vitest jobs ran in parallel; idle it reports 12.3 ms and passes. Its calibration
+loop measures single-thread speed and cannot see contention. Not this branch's
+diff (`test/` only) and not fixed here — recorded in the PR as an observation.
