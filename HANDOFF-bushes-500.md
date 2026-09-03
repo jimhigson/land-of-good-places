@@ -67,22 +67,28 @@ Refusal **drops** the candidate; no clearance is shrunk.
 Bush colliders are registered in a deferred batch after the loop, so a clump is
 never refused by a sibling clump (see `acceptedClumps`'s doc).
 
-## Still to do
+## Done
 
-- Measure post-fix counts per seed; `BUSH_BUDGET` (1400) may need raising to
-  hold the 108-per-seed floor `invariants.ts` asserts.
-- Diff the violation *set*, not the count.
-- Decide/report on trees x bushes: the invariant denies plan-view canopy
-  overlap; a bush under a canopy 4 m up is arguably not a collision. Numbers
-  first.
-- `pnpm run check`, `test:procgen`, `build`; browser look; PR.
+- Fix + budget 4200 + invariant, all pushed.
+- `test:procgen` exit **0** (536/536, 18 files), `check` exit **0**, `build`
+  exit **0** — each read from the run's own log file, never through a pipe.
+- Violation set diffed per park: **716 removed, 0 added**, zero remaining on
+  all five seeds.
+- Red proof taken and restored — see the PR body for the transcript, the
+  geometry it was measured against, and the grep that verified the restore.
+- Looked at it in a browser: matched daylight `/view` shots of the same fence
+  on `main` and on this branch. Servers killed by PID, page closed.
 
-## Answers to the two side questions
+## If you pick this up
 
-- **Bushes do have colliders** — `collision.addCircle(x, z, 0.85)` per clump.
-  A child cannot walk through a bush. Not an exception to "anything drawn is
-  solid".
-- **Anything else through the same blind list?** `buildFoliage` also scatters
-  trees, and trees already ask `clearOfWalls` and `planted`. Flowers moved out
-  to `world/Flowers.ts` and are deliberately walk-through. Checked lamps
-  (`LampPosts.ts`) separately — see below when measured.
+Nothing is outstanding on the fix itself. Two things I found and did **not**
+do, both worth their own ticket:
+
+1. **`PlacedBush.radius` under-reports a clump.** It publishes the collider
+   (0.85 m) while the drawn blobs reach 2.15 m, so both my invariant and the
+   universal sweep can miss a leaf overhanging a wall the clump does not stand
+   in. Stated in both places rather than quietly relied on.
+2. **`world/Flowers.ts` has the same blind list**, one step smaller: it asks
+   `isOnPath` and `clearOfCruiser` and nothing else — no walls, no trees, no
+   collision world. Flowers are deliberately colliderless and tiny, so nobody
+   has complained, but it is the same shape of bug.
