@@ -109,3 +109,22 @@ Traps for a successor: ribbon findings must aggregate per label-pair or one
 defect floods as hundreds of half-metre capsules; plots/castle are swept as
 INSCRIBED capsules (corner overlaps missed, stated in the doc comment);
 entrances/exits are points until doormats can be tied to their own plot.
+
+## CORRECTIONS to the findings write-up (3 Sep, from the Overseer)
+
+- **Both defect classes are OWNED, not open — do not re-dispatch.**
+  Bushes (#500): fixed, PR #502 in review — violation set diffed 716 removed,
+  0 added; BUSH_BUDGET raised so the park comes out fuller, and the same
+  blind-list disease was found in world/Flowers.ts (wants its own ticket).
+  Slide legs (#501): fixed on the slide's side (railway consulted at leg
+  placement; rail violations empty on all sixteen parks), now blocked on a
+  decision of JIM'S, not engineering — one park leaves only 5% of the chute
+  leggable, so it stands on two legs and the walk-between clause correctly
+  fails; drop that park or re-route the chute everywhere.
+- **My reported counts were understated: 64 wall fouls and 653 tree fouls,
+  not 29 and 3.** The real numbers came from diffing the violation set; mine
+  came off vitest's TRUNCATED assertion diff (it prints ~8 lines of 188).
+  LESSON for successors: count findings from the fouls array (write them to
+  a file from the invariant, or run the sweep in a standalone probe), never
+  from what the reporter chose to print. Same disease as reading a count off
+  the screen you expected — the screen itself was incomplete.
