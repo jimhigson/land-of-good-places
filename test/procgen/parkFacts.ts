@@ -1004,6 +1004,41 @@ export interface ParkFacts {
    * the block rather than about its centre point.
    */
   readonly boundaryBlockWidth: number;
+  /**
+   * **The park's front gate, read off the built scene** — the crossbar mesh
+   * `Entrance.ts` names `park-gate-arch`, and the ground it stands on.
+   *
+   * `null` if no such mesh is in the scene, which the invariant treats as a
+   * failure rather than as nothing to check: a gate that was never built would
+   * otherwise pass every clause below for free.
+   *
+   * Measured, never asked for. Issue #480 was two rotations on this mesh —
+   * inverted, so it hung *down* from the posts and buried its apex 1.34 m
+   * under the paving, and turned a quarter-turn, so it lay along the path
+   * rather than across it. Every number the builder used still read
+   * plausibly; only the mesh's own world box says which way it points.
+   */
+  readonly parkGateArch: {
+    /** World bounding box of the crossbar. */
+    readonly minX: number;
+    readonly maxX: number;
+    readonly minY: number;
+    readonly maxY: number;
+    readonly minZ: number;
+    readonly maxZ: number;
+    /** Where the crossbar's own origin sits — the middle of the opening. */
+    readonly centreX: number;
+    readonly centreZ: number;
+    /** Terrain height under the middle of the opening. */
+    readonly groundY: number;
+    /**
+     * Where the two gate posts stand, read off the same scene — the things the
+     * arch's feet are supposed to be standing on, and the things a child
+     * actually bumps into. Empty if the posts lost their names, which the
+     * invariant reports rather than passing over.
+     */
+    readonly posts: readonly { readonly x: number; readonly z: number }[];
+  } | null;
   readonly distanceToRail: (x: number, z: number) => number;
   /** Can a walker of `radius` stand here without being pushed out? */
   readonly isStandable: (x: number, z: number, radius?: number) => boolean;
@@ -1275,6 +1310,44 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
         minZ: box.min.z,
         maxZ: box.max.z,
         topY: box.max.y,
+      };
+    }
+  }
+
+  // --- the park's front gate -------------------------------------------------
+  // Found by walking the scene for the crossbar's own name, the same way the
+  // cat bus below is found, and for the same reason: asking `Entrance` whether
+  // it built a gate cannot tell you which way the gate is pointing.
+  let parkGateArch: ParkFacts['parkGateArch'] = null;
+  {
+    let archMesh: import('three').Object3D | null = null;
+    scene.traverse((object) => {
+      if (object.name === 'park-gate-arch') archMesh = object;
+    });
+    if (archMesh) {
+      const mesh = archMesh as import('three').Object3D;
+      const box = new Box3().setFromObject(mesh);
+      const where = new Vector3();
+      mesh.getWorldPosition(where);
+      const posts: { x: number; z: number }[] = [];
+      const postAt = new Vector3();
+      scene.traverse((object) => {
+        if (!/^park-gate-post-\d+$/.test(object.name)) return;
+        object.getWorldPosition(postAt);
+        posts.push({ x: postAt.x, z: postAt.z });
+      });
+      const { terrainHeight: groundAt } = await import('../../src/world/terrain.ts');
+      parkGateArch = {
+        minX: box.min.x,
+        maxX: box.max.x,
+        minY: box.min.y,
+        maxY: box.max.y,
+        minZ: box.min.z,
+        maxZ: box.max.z,
+        centreX: where.x,
+        centreZ: where.z,
+        groundY: groundAt(where.x, where.z),
+        posts,
       };
     }
   }
@@ -2650,6 +2723,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     slideLanding,
     castleMasonryTopY,
     castleRoofGarden,
+    parkGateArch,
     castleTowers,
     chuteEnvelope: CHUTE_ENVELOPE,
     slideLegs: world.building.slideLegs,

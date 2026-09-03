@@ -85,6 +85,11 @@ import {
 // nothing seed-dependent, so importing it here cannot fix the park's seed early.
 import { GATE_PROBE_INSET, measureGatewayWalk } from '../../src/world/entrance/gatewayWalk.ts';
 import { ROAD_TILE_METRES } from '../../src/world/entrance/road.ts';
+import {
+  GATE_FOOT_TOLERANCE,
+  GATE_POST_PROBE_INSET,
+  GATE_POST_REACH,
+} from '../../src/world/entrance/gateArch.ts';
 import { visibleTop } from '../../src/art/style/measure.ts';
 import { COPING_SINK, bridgeStoneGeometry } from '../../src/art/models/bridgeStones.ts';
 import {
@@ -743,6 +748,206 @@ const plotsDoNotOverlap: Invariant = (facts) => {
 };
 
 /** Every doormat and stall counter has ground a visitor can stand on. */
+/**
+ * **The park gate's arch stands over its own posts, and the way in stays
+ * open.** Issue #480 — Jim, playing: *"There's a weird segment of a taurus
+ * near the park edge."*
+ *
+ * The crossbar carried two rotations too many. `rotation.z = Math.PI` turned
+ * the upper half of the torus — the arch shape — into the lower half, so it
+ * hung down from the tops of the posts and drove its apex 1.34 m under the
+ * paving; `rotation.y = Math.PI / 2` laid it *along* the path instead of
+ * across it. What stood at the park's front door was two curved prongs coming
+ * out of the ground either side of the way in, with nothing solid about them.
+ *
+ * Every number involved was right. The gate was the right width, the posts
+ * stood in the right places, the arch was centred on the opening, and both
+ * rotations read like framing. **Only the mesh's own world box says which way
+ * it points**, which is why this is measured off the built scene.
+ *
+ * Three clauses:
+ *
+ * 1. **The arch's two ends come down on its two posts** — the meshes named
+ *    beside it by `src/world/entrance/gateArch.ts`, found in the scene, not
+ *    asked of the builder. A crossbar turned out of the gate plane takes its
+ *    ends with it and lands nowhere near them.
+ * 2. **The gate is solid where a child walks into it** — a stride in front of
+ *    each post, inside the reach that post has over her. This is what fails
+ *    if the gate loses its colliders, and it is the control on the probe:
+ *    it has to be able to answer "no".
+ *
+ *    **Where that probe may not be pointed:** the gate line itself is
+ *    blocked from wall to wall, because the park boundary keeps a child
+ *    *inside* the park and a `PLAYER_RADIUS` body standing on the line
+ *    overlaps the outside — 33 of 33 probes across the gate at z = 60 on the
+ *    canonical seed, whatever the gate is doing. A clause probing there is
+ *    green for a reason that has nothing to do with the gate, which is
+ *    exactly how the first draft of this invariant passed the *broken*
+ *    arch's own geometry. See `scripts/measure-gate-480.mts`.
+ * 3. **Nothing hangs into that gap.** The lowest point of the arch clears
+ *    {@link TALLEST_CHILD_HEIGHT} — the park's tallest possible child, party
+ *    hat and all, taken from the game rather than from the gate's own design.
+ *    The broken arch reached below ground and failed this by 4.31 m.
+ *
+ * The arch itself is deliberately **not** solid: its feet are the posts,
+ * which are, and the span is headroom over a child walking under it.
+ */
+/** The cover this invariant does not give, said the same way every time. */
+const GATE_UNCOVERED =
+  'the park gate arch invariant asserts nothing about whether a child can walk through the gateway ' +
+  '— that is theWalkInFromTheGateIsWalkable (#481, #485); this one covers only the arch pointing the ' +
+  'right way, the posts being solid, and the headroom';
+
+const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
+  // **What this invariant does not assert.** Written before the early returns
+  // below, not after, so a park with no gate in it at all still says what is
+  // uncovered rather than falling silent at the one moment that matters.
+  //
+  // There is no clause here that the gateway is *walkable* — that a child can
+  // actually get from outside the gate to inside it. That clause was written
+  // on this branch, it worked, and it found a defect that is not this one: the
+  // park boundary is a seed-dependent spline while the gate is a fixed
+  // constant at (0, 60), so on some seeds the boundary wall ran *across* the
+  // opening — pool seed 288 (a chain of 0.18 m walls through (0.01, 57.76))
+  // and sweep seed 18 (through (-1.13, 59.87), shut but for a 1 m slot at
+  // x = 3.5). It was withheld rather than weakened, to land with that fix.
+  //
+  // **It has since landed, and not here.** #481 was fixed by #485, which moved
+  // the boundary masonry out of the opening and brought its own invariant,
+  // `theWalkInFromTheGateIsWalkable`, over `gatewayWalk.ts`'s full-width flood
+  // fill. So the clause is no longer withheld — it exists, it is simply owned
+  // by the check next door, and this one stays about the arch. The note above
+  // says which, because "asserts nothing about X" is only useful to the next
+  // reader if it also says who does.
+  //
+  // On `process.stderr`, because Vitest shows `console.log` from *failing*
+  // tests only and this note exists for the passing runs.
+  const say = (line: string): void => process.stderr.write(`${line}\n`);
+
+  const arch = facts.parkGateArch;
+  if (!arch) {
+    say(GATE_UNCOVERED + ' — and there is no gate in the scene at all, so it covers nothing else either');
+    return [
+      'NO SCENE OBJECT "park-gate-arch": the park has no front gate to measure. ' +
+        'Either the entrance stopped building one or the crossbar lost its name, ' +
+        'and either way every clause below would have passed vacuously.',
+    ];
+  }
+  if (arch.posts.length !== 2) {
+    say(GATE_UNCOVERED + ` — and the gate has ${arch.posts.length} named posts, so clause 1 covers nothing`);
+    return [
+      `the park gate has ${arch.posts.length} named posts in the built scene, not 2 — ` +
+        'clause 1 below has nothing to measure the arch against',
+    ];
+  }
+
+  const fouls: string[] = [];
+
+  // The axis the arch lies along, taken from the arch rather than from the
+  // gate's design: the longer of its two horizontal extents. A crossbar turned
+  // out of the gate plane takes this with it.
+  const spanX = arch.maxX - arch.minX;
+  const spanZ = arch.maxZ - arch.minZ;
+  const alongX = spanX >= spanZ;
+  const span = Math.max(spanX, spanZ);
+  const half = span / 2;
+  const along = (t: number): readonly [number, number] =>
+    alongX ? [arch.centreX + t * half, arch.centreZ] : [arch.centreX, arch.centreZ + t * half];
+
+  // 1. Each end of the arch comes down on a post.
+  for (const t of [-1, 1] as const) {
+    const [x, z] = along(t);
+    let nearest = Infinity;
+    for (const post of arch.posts) {
+      nearest = Math.min(nearest, Math.hypot(x - post.x, z - post.z));
+    }
+    if (nearest > GATE_FOOT_TOLERANCE) {
+      fouls.push(
+        `the gate arch's ${t < 0 ? 'first' : 'second'} end at (${x.toFixed(2)}, ${z.toFixed(2)}) is ` +
+          `${nearest.toFixed(2)} m from the nearest post — it is not standing on the gate, so it is ` +
+          `pointing somewhere the gate does not go (it spans ${span.toFixed(2)} m along ` +
+          `${alongX ? 'X' : 'Z'}, posts at ` +
+          arch.posts.map((post) => `(${post.x.toFixed(2)}, ${post.z.toFixed(2)})`).join(' and ') +
+          ')',
+      );
+    }
+  }
+
+  // 2. The gate is solid where a child bumps into it — and the probe proves
+  // itself at each post before it is believed there.
+  //
+  // **Why per-post and not once:** on the canonical seed, with the colliders
+  // removed, the *east* post's probe flips to standable — a clean control —
+  // while the west post's stays blocked, because something other than the post
+  // occupies that ground. A clause that quietly covers one post while reading
+  // as though it covers two is the disease this file is most often about. So
+  // each post is asked twice: outside the post's reach (must be open, or
+  // nothing here is being answered by the gate) and inside it (must be
+  // closed), and the stderr note below reports how many posts survived that.
+  //
+  // **What the count is, measured on the rebased tree** (`test:procgen`, five
+  // seeds, 541 tests, exit 0): **9 of 10 post-probes live** — four seeds at 2
+  // of 2, one seed masked at (-4.30, 60.00) — and no seed where it asserts
+  // nothing. Before the rebase onto #485 it was 5 of 10 with two seeds
+  // covering nothing at all; moving the boundary masonry out of the opening is
+  // what freed the other four. Both numbers were true when taken, which is the
+  // reason this one is dated to the tree it was read off rather than left as a
+  // bare figure for the next reader to trust.
+  const toMiddle = Math.hypot(arch.centreX, arch.centreZ);
+  const inward: readonly [number, number] =
+    toMiddle > 1e-6 ? [-arch.centreX / toMiddle, -arch.centreZ / toMiddle] : [0, 0];
+  const reach = GATE_POST_REACH;
+  let postsCovered = 0;
+  const masked: string[] = [];
+
+  for (const post of arch.posts) {
+    const at = (inset: number): readonly [number, number] => [
+      post.x + inward[0] * inset,
+      post.z + inward[1] * inset,
+    ];
+    const [clearX, clearZ] = at(GATE_POST_PROBE_INSET.clear);
+    if (!facts.isStandable(clearX, clearZ)) {
+      // Something that is not this post is answering here, so the reading a
+      // stride closer cannot be attributed to the post's collider.
+      masked.push(`(${post.x.toFixed(2)}, ${post.z.toFixed(2)})`);
+      continue;
+    }
+    postsCovered += 1;
+    const [solidX, solidZ] = at(GATE_POST_PROBE_INSET.solid);
+    if (facts.isStandable(solidX, solidZ)) {
+      fouls.push(
+        `a child can stand at (${solidX.toFixed(2)}, ${solidZ.toFixed(2)}), ${GATE_POST_PROBE_INSET.solid} m ` +
+          `in front of the gate post at (${post.x.toFixed(2)}, ${post.z.toFixed(2)}) — inside the ` +
+          `${reach.toFixed(2)} m the post is supposed to hold her off, so the gate is not solid`,
+      );
+    }
+  }
+
+  say(
+    `${GATE_UNCOVERED}; its solidity clause is live on ${postsCovered} of ${arch.posts.length} gate posts` +
+      (masked.length > 0
+        ? ` — masked at ${masked.join(' and ')}, where something that is not the post already blocks ` +
+          `${GATE_POST_PROBE_INSET.clear.toFixed(2)} m out, past the ${reach.toFixed(2)} m the post ` +
+          `itself reaches, so the reading a stride closer proves nothing there`
+        : ''),
+  );
+  if (postsCovered === 0) {
+    say('  ...so the gate-is-solid clause asserts NOTHING on this seed');
+  }
+
+  // 3. Nothing of it hangs into that gap.
+  const headroom = arch.minY - arch.groundY;
+  if (headroom < TALLEST_CHILD_HEIGHT) {
+    fouls.push(
+      `the gate arch reaches down to ${arch.minY.toFixed(2)} m, ${headroom.toFixed(2)} m over ground at ` +
+        `${arch.groundY.toFixed(2)} m — less than the ${TALLEST_CHILD_HEIGHT} m of the tallest child the ` +
+        'park can make, so she walks through it',
+    );
+  }
+
+  return fouls;
+};
+
 const entrancesAreUsable: Invariant = (facts) => {
   const blocked: string[] = [];
   for (const entrance of facts.entrances) {
@@ -8812,6 +9017,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no two plots overlap', plotsDoNotOverlap],
   ['no two stations stand in each other', stationsDoNotCrowdEachOther],
   ['every entrance has standable ground', entrancesAreUsable],
+  [
+    'the park gate arch stands over its gateway, and the gateway stays open',
+    theParkGateArchStandsOverItsGateway,
+  ],
   ['no two trees interpenetrate', treesDoNotInterpenetrate],
   ['no bush stands on the paving or inside a plot', bushesStandOnOpenGround],
   ['no tree grows into a wall', treesKeepOffWalls],
