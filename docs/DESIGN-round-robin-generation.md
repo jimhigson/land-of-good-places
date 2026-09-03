@@ -158,6 +158,42 @@ tissue from *not* having this; expect most to collapse into the one
 mechanism, and be honest that a few encode real per-placer knowledge and will
 merely get simpler.
 
+### Smarter than blind backtracking (Jim: "looking ahead a couple steps — premature optimisation or genuine help?")
+
+This is a constraint-satisfaction search, and CSP practice settled the
+question: **cheap propagation and ordering are genuine help; deep lookahead
+is the premature optimisation.**
+
+Genuine help, in the order they should arrive:
+
+- **Backjumping** (ships with the spine): a refused claim already learns who
+  refused it (`CoSolveEngine`'s `blockers` hint), so failure jumps straight
+  back to the blocking decision instead of unwinding unrelated ones
+  chronologically. Nearly free — the information already exists.
+- **Forward checking** (add on measured thrash): when a claim commits, check
+  the domains it just constrained — the doorway with one approach left, the
+  rail gap that now fits one bridge site. A domain at zero fails *now*, not
+  forty rounds later. One lookup per affected neighbour; no search.
+- **Most-constrained-first** (add with forward checking): the scheduler gives
+  the next turn to the placer with the fewest legal options — a placer with
+  one option is a fact, not a choice; commit it before anyone steals its
+  ground. Strict round-robin is the naive fairness; "round-robin, but the
+  desperate go first" is the real rule. Deterministic, because domain sizes
+  are computed from a deterministic world.
+- **Least-constraining-value**: among legal options, prefer the one that
+  removes fewest options from others.
+
+Premature optimisation: **simulating k moves down alternative futures.**
+Exponential in k, and it duplicates what backtracking already is — lookahead
+paid for lazily, only on paths actually taken. No planner.
+
+Rollout rule, per this repo's measure-first culture: the spine ships with
+plain backtracking + backjumping (simplest correct thing; totality holds
+regardless). Propagation and ordering change **no outcomes, only search
+speed**, so they are pulled in by a measured retry-thrash number, not built
+speculatively — and the budget counters above are exactly the instrument that
+will show when.
+
 ### Determinism rules (non-negotiable)
 
 - **Named per-placer PRNG substreams**, derived as `hash(seed, placerName,
