@@ -286,21 +286,125 @@ export function distanceToEntranceRoad(x: number, z: number): number {
 }
 
 /**
- * **Is this ground inside the road's corridor?** — the road's half width plus
- * whatever the thing being placed measures across.
+ * **Is this ground inside the road's corridor?** — one predicate, asked by the
+ * ride before it stands a leg and by the checks afterwards, so neither gets to
+ * hold its own idea of how wide the road is.
  *
- * One predicate rather than a comparison spelled out at each call site: the
- * ride asks it, the checks ask it, and neither gets to hold its own idea of how
- * wide the road is.
+ * ## It is the swept body, not the ribbon, and that is not a detail
+ *
+ * The first version of this asked {@link distanceToEntranceRoad} against
+ * `ROAD_HALF_WIDTH`, which is the painted surface. Measured with
+ * `check:entrance-road`, that still left the bus sweeping through **one to three
+ * legs on every one of the sixteen seeds**, reaching up to 1.66 m inside one —
+ * a tenth of the old fault but the same fault.
+ *
+ * The reason is length. The bus is `CAT_BUS_LENGTH` of rigid body on a road that
+ * *turns*, and a long box on a curve does not stay between the kerbs: it cuts
+ * the inside and overhangs the outside. Its half width (2.64 m) is comfortably
+ * inside the road's (3.89 m) on the straight, which is exactly why a
+ * width-only test reads clean and is wrong — the overhang only appears where
+ * the tails bend away from the park.
+ *
+ * So the corridor is the union of a **bus-length, road-width box** standing at
+ * every station: at least as wide as the surface everywhere, and as long as the
+ * thing that drives on it. That is the honest statement of what must be kept
+ * clear, and it means a future change to the bus's length or the tails'
+ * curvature moves this on its own rather than needing somebody to notice.
  */
 export function isInEntranceRoad(x: number, z: number, radius = 0): boolean {
-  return distanceToEntranceRoad(x, z) < ROAD_HALF_WIDTH + radius;
+  return distanceToEntranceCorridor(x, z) < radius;
+}
+
+/**
+ * How finely the swept corridor is sampled, in metres.
+ *
+ * **Not the station spacing, and it must not be.** The union of boxes standing
+ * at every *station* is not the corridor a body sweeps between them: where the
+ * road turns, the swept envelope bulges outside every sampled box, and a leg can
+ * sit in that bulge. Measured — sampling at the 1 m station spacing left two of
+ * the sixteen seeds with a leg 0.18 and 0.22 m inside the bus. That is the same
+ * disease as CLAUDE.md's *"a gap you cannot walk into at 5 cm a step you may
+ * still tunnel into"*, turned inside out: here the coarse sample lets a leg in
+ * rather than letting a child out.
+ *
+ * A quarter of a metre is finer than the finest thing that asks (the check's own
+ * sweep), which is the only defensible way to pick it: the corridor must not be
+ * sampled more coarsely than anything measuring it.
+ */
+const CORRIDOR_SAMPLE_SPACING = 0.2;
+
+let corridorCache: readonly RoadStation[] | null = null;
+
+/** The swept corridor's own stations — see {@link CORRIDOR_SAMPLE_SPACING}. */
+function corridorSamples(): readonly RoadStation[] {
+  if (corridorCache) return corridorCache;
+  const { from, to } = entranceRoadExtent();
+  const samples: RoadStation[] = [];
+  for (let at = from; at <= to; at += CORRIDOR_SAMPLE_SPACING) samples.push(entranceRoadAt(at));
+  samples.push(entranceRoadAt(to));
+  corridorCache = samples;
+  return corridorCache;
+}
+
+/**
+ * How far this point is **outside** the swept corridor, in metres; zero inside.
+ *
+ * Separate from {@link isInEntranceRoad} so a check can report the margin rather
+ * than only a verdict — a boolean cannot say "cleared by 4 cm", and a clearance
+ * that is technically positive is the shape of the hotel's 0.006 m "coincidence"
+ * CLAUDE.md records.
+ */
+export function distanceToEntranceCorridor(x: number, z: number): number {
+  const halfLength = CAT_BUS_LENGTH / 2;
+  let nearest = Infinity;
+  for (const station of corridorSamples()) {
+    const dx = x - station.x;
+    const dz = z - station.z;
+    // Into the box's own frame: heading is along its length.
+    const along = Math.abs(dx * station.headingX + dz * station.headingZ) - halfLength;
+    const across = Math.abs(dx * -station.headingZ + dz * station.headingX) - ROAD_HALF_WIDTH;
+    if (along <= 0 && across <= 0) return 0;
+    nearest = Math.min(nearest, Math.hypot(Math.max(0, along), Math.max(0, across)));
+  }
+  return nearest;
 }
 
 /** How far the road reaches from the gate, for the checks to compare against a frustum. */
 export function entranceRoadReach(): number {
   const { from, to } = entranceRoadExtent();
   return Math.min(Math.abs(from), Math.abs(to));
+}
+
+/**
+ * **Where the road goes over the hilltop's brow**, in metres from the gate.
+ *
+ * `RIM_OUTSET_START` is where the ground begins its 17 m fall, and `terrain.ts`
+ * makes that fall steeper than the camera's own pitch on purpose — so this is
+ * the exact point at which anything on the road stops being visible, whichever
+ * way the camera is turned. Found by walking the built centre line rather than
+ * solved, because the tails' outset is a curve and this must agree with the
+ * road that was actually laid.
+ *
+ * It is the one owner of "far enough away to appear from and disappear into":
+ * the bus arrives at `+brow` and is disposed at `-brow`, so it drives on from
+ * over the hill and off over the hill instead of winking into existence on a
+ * kerb. Nothing picks a number for that any more.
+ */
+function browAt(): number {
+  const stations = entranceRoadStations();
+  for (const station of stations) {
+    if (station.at <= 0) continue;
+    if (entranceRoadOutsetAt(station.x, station.z) >= RIM_OUTSET_START) return station.at;
+  }
+  return (stations[stations.length - 1] as RoadStation).at;
+}
+
+let browCache: number | null = null;
+
+/** See {@link browAt}. Positive; the far side is its negation. */
+export function entranceRoadBrow(): number {
+  browCache ??= browAt();
+  return browCache;
 }
 
 /** Where the boundary edge sits, for anything wanting the road's outset back. */

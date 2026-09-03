@@ -542,7 +542,12 @@ export function buildRailRaceTrack(
   const mandatoryTrestleIndices = new Set(
     layout.bars.map((bar) => trestleGridIndex(bar.at, route.length)),
   );
-  const spots = trestleSpots(route, collision, mandatoryTrestleIndices);
+  const spots = trestleSpots(
+    route,
+    collision,
+    mandatoryTrestleIndices,
+    POST_FOOT_RADIUS * ringSizeVsRace,
+  );
   const spotByIndex = new Map(spots.map((spot) => [spot.index, spot]));
 
   // --- the duck bars ---------------------------------------------------------
@@ -1256,14 +1261,19 @@ interface TrestleSpot {
  * corridor is derived from the boundary alone — it does not need the road to
  * have been built, only to have been *decided*.
  */
-function groundIsClear(x: number, z: number, collision: CollisionWorld): boolean {
+function groundIsClear(
+  x: number,
+  z: number,
+  collision: CollisionWorld,
+  footRadius: number,
+): boolean {
   if (!collision.isClearCircle(x, z, 1.1)) return false;
   if (distanceToPath(x, z) < 2.8) return false;
   if (distanceToRailCorridor(x, z) < 2.4) return false;
   // The leg's own foot, not a hand-picked margin: the collider `track.ts`
   // registers for it is `POST_FOOT_RADIUS` wide, so that is exactly how much of
   // the road a leg standing here would take away from the bus.
-  if (isInEntranceRoad(x, z, POST_FOOT_RADIUS)) return false;
+  if (isInEntranceRoad(x, z, footRadius)) return false;
   const pinchesCorridor = [...PARK_LAYOUT.entries.values()].some(
     (entry) => Math.hypot(x - entry.x, z - entry.z) < entry.boundingRadius + 2.4,
   );
@@ -1381,6 +1391,7 @@ function searchForClearGround(
   atArch0: number,
   arcNudges: readonly number[],
   radialNudges: readonly number[],
+  footRadius: number,
 ): { at: number; x: number; z: number } | null {
   for (const dr of radialNudges) {
     for (const da of arcNudges) {
@@ -1393,7 +1404,7 @@ function searchForClearGround(
       const sample = route.path.sampleAt(at);
       const x = sample.x + sample.normalX * dr;
       const z = sample.z + sample.normalZ * dr;
-      if (groundIsClear(x, z, collision)) return { at, x, z };
+      if (groundIsClear(x, z, collision, footRadius)) return { at, x, z };
     }
   }
   return null;
@@ -1444,6 +1455,7 @@ function trestleSpots(
   route: RailRaceRoute,
   collision: CollisionWorld,
   mandatoryIndices: ReadonlySet<number>,
+  footRadius: number,
 ): TrestleSpot[] {
   const spots: TrestleSpot[] = [];
   // Arch-relative, matching `planHazards`'s `snapToTrestleGrid` exactly — the
@@ -1454,9 +1466,9 @@ function trestleSpots(
   for (let i = 0; i < count; i += 1) {
     const atArch0 = (i / count) * route.length;
     const mandatory = mandatoryIndices.has(i);
-    let placed = searchForClearGround(route, collision, atArch0, ARC_NUDGES, RADIAL_NUDGES);
+    let placed = searchForClearGround(route, collision, atArch0, ARC_NUDGES, RADIAL_NUDGES, footRadius);
     if (!placed && mandatory) {
-      placed = searchForClearGround(route, collision, atArch0, WIDE_ARC_NUDGES, MANDATORY_RADIAL_NUDGES);
+      placed = searchForClearGround(route, collision, atArch0, WIDE_ARC_NUDGES, MANDATORY_RADIAL_NUDGES, footRadius);
     }
     if (!placed && mandatory) {
       // Last resort — see `WIDE_RADIAL_NUDGES`'s own doc comment. Loud
@@ -1465,7 +1477,7 @@ function trestleSpots(
       // (`test/procgen/invariants.ts`) actually wants; if this fires on a
       // real seed, that slot's ground is worth a closer look, not just a
       // wider search.
-      placed = searchForClearGround(route, collision, atArch0, WIDE_ARC_NUDGES, WIDE_RADIAL_NUDGES);
+      placed = searchForClearGround(route, collision, atArch0, WIDE_ARC_NUDGES, WIDE_RADIAL_NUDGES, footRadius);
       if (placed) {
         console.warn(
           `railRace/track.ts: the mandatory trestle at slot ${i} (arch-relative at=` +
