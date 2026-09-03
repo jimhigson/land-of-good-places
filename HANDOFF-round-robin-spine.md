@@ -76,3 +76,18 @@ untouched procgen).
   before push per the updated CLAUDE.md in this worktree.
 
 No PR yet. Jim's instruction: implement, then hand to the Overseer when ready.
+
+## The stack, for whoever rebases
+
+- **PR #499** = `feat/round-robin-spine` (registry + scheduler features + the
+  one-scheduler driver + this handoff). At review; may merge first. I do not
+  merge it.
+- **`feat/universal-overlap-invariant`** is stacked on the spine at the
+  handoff commit. Everything on it beyond #499's HEAD is invariant work only
+  (test/procgen + any shared-geometry helpers). If the spine merges first:
+  rebase this branch onto main and the diff should collapse to exactly the
+  invariant commits — three-dot diff it and account for every file.
+- Expected state of the invariant branch: RED against real parks on first
+  honest run. That red list is the deliverable — real defects with
+  measurements, reported to the Overseer, never exempted. A pair genuinely
+  allowed to overlap is a CLAIM_COMPATIBILITY entry with a stated reason.
