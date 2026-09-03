@@ -2275,7 +2275,11 @@ function computeGridConnectors(
         // `tailLimit + 2`. `pathsRunOnGridAxes` fired on exactly that run.
         // With the tight limit the leg is refused and the elbow below is
         // taken instead, which is axis-aligned by construction.
-        if (tail <= STUB_TAIL_LIMIT && direct <= tailLimit + 2 && legClear(nx, nz, p[0], p[1])) {
+        // Axis-aligned, this is an ordinary street stub and may run the
+        // relaxed distance. Off axis at all, it is a **cut corner**, and a cut
+        // corner gets the tight doorway reach — never the relaxed one.
+        const straightLimit = tail <= 0.05 ? tailLimit + 2 : STUB_TAIL_LIMIT;
+        if (tail <= STUB_TAIL_LIMIT && direct <= straightLimit && legClear(nx, nz, p[0], p[1])) {
           found.push({
             node: index,
             points: [[nx, nz], p],
