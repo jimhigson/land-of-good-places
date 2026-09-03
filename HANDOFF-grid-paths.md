@@ -3127,3 +3127,86 @@ Both are named, neither is absorbed, and both belong to the next leg.
 - `detourRatiosStayReasonable` on 267 (new, above).
 - Stage-2 invariant (b); probe deletion (`tmp-stoneground.mts` last, re-run
   after any reservation or `bridgeFootprint.ts` change); the rebase.
+
+---
+
+## Seed 451's lost green: a fence run crosses the spur, and it is the seed-11 class
+
+**Attributed first**: 451 went 0 -> 1 under **the ladder**, and was still 1
+after the ring fix — so it is the arrival ladder's doing, not the gateway's.
+
+`scripts/tmp-pocket.mts` on 451. The lane is three samples long and the
+**middle** one is the stranded one, which is the 267 signature again — a hole
+in the middle, not a starved end — except the gap here is trivial:
+
+```
+lane spur-stall.spookyHouse:
+  ok at= 7.0 (32.9,-34.2) nbrs=3
+  XX at=14.0 (32.7,-31.9) nbrs=0   <- nearestReachable 2.37 m, at at=7.0
+  ok at=21.0 (34.1,-26.7) nbrs=4
+```
+
+**2.37 m, against a `MAX_EDGE` of 13** — so distance is not the refusal;
+something solid stands on the chord. `scripts/tmp-transect.mts 32.7 -31.9
+32.9 -34.2`:
+
+```
+d=0.00 clear   d=0.23 clear
+d=0.46 .. d=2.08  BLOCKED, onPath=Y at every sample, peak push 0.82 at (32.82,-33.28)
+d=2.31 clear
+```
+
+**1.85 m of a 2.31 m chord is blocked, and `onPath=Y` throughout** — the
+ribbon really is drawn through it.
+
+`scripts/tmp-blocker.mts` names it, and it is **two wall runs meeting at a
+corner**:
+
+```
+wall (29.54,-30.53)-(32.51,-33.50) halfThick=0.30 overlap=0.62
+wall (34.39,-31.63)-(32.51,-33.50) halfThick=0.30 overlap=0.94
+```
+
+A **V of border fence with its apex at (32.51,-33.50)**, right beside the
+lane, whose second arm crosses the ribbon at about `z = -33.2`. That is
+**a fence across a path** — Jim-visible, not merely an invariant's business.
+
+**This is verbatim the seed-11 `spur-hotel` class** already in this file:
+border fence is placed **from** the paths (`Scenery.ts`, off `pathCentreline`),
+so it does not exist when the router runs and the router cannot consult it.
+The recorded conclusion there stands and applies unchanged: **"the fence is
+correct; the paths it was given were not"** — the fix is upstream, in the
+path shape that scenery cannot border safely, never in the fence or in a
+widened screen.
+
+What is new is the trigger: **the arrival ladder changed
+`spur-stall.spookyHouse`'s shape into one the fence placer cannot border.**
+Whoever takes this should ask what about the new shape does that — a corner
+too tight for two runs to border, most likely, given the blocker is itself a
+corner — rather than reaching for the ladder's ordering, which is measured
+good on eleven other seeds.
+
+### INSTRUMENT CAVEAT — one control row failed, and it must not be glossed
+
+`tmp-blocker.mts`'s second control, the lane end at `(32.9,-34.2)`, reports
+**BLOCKED** (overlap 0.20) where `tmp-transect.mts` reports that same point
+**clear**. The two ask at different clearances, so it is not a contradiction —
+but **that control row does not discriminate**, and only the first one
+(`(32.7,-31.9)`, "no collider within clearance") does. The named colliders
+above are believable because the first control holds and because the transect
+independently found the same 1.85 m band; they should not be believed on the
+strength of the second row.
+
+## For the before/after screenshot the Overseer asked about
+
+**Which seeds show the statue crossing.** The gateway-rescue fix can only
+change a seed that *has* a rescued tap, and this file already records those:
+**canonical, 5 (two), 11, 115, 225, 267, 288, 346 (two), 451** — nine of
+sixteen. 267 is confirmed by measurement (ribbon within 1.16 m of the statue);
+the other eight are candidates, not confirmations.
+
+**The cheap way to get the real list** (nobody has run it): measure, per seed,
+the minimum distance from `PLAZA` to any drawn non-backbone ribbon, on a build
+with the ring check reverted and again with it in. Any seed whose figure rises
+from below `RING_RADIUS` to at or above it showed the defect. That is one
+number per seed and it makes the before/after honest rather than assumed.
