@@ -1625,12 +1625,14 @@ export class Game {
     // The one thing re-derivation cannot excuse it from is #329 — writing a
     // *constant* to `setZoomTarget` every frame swallows every pinch and wheel
     // notch, because `nudgeZoom` writes the same field. That is why the zoom
-    // below stops being written the instant the shot lands (`arrivalShot`
-    // returns `null`), which is at `AT_SHOT_HOME`, a little after she gets the
-    // controls: for the seconds she is holding them and the shot is still
-    // moving the value genuinely changes every frame, so there is nothing for
-    // it to eat, and from the moment it would become constant nobody writes it
-    // at all. The pose has no such competitor and is simply driven.
+    // below is written only while `ArrivalShot.ownsTheZoom` says so, and that
+    // flag goes false at **`ARRIVAL_CONTROL_AT`** — the instant she gets the
+    // controls, not the later `AT_SHOT_HOME` when the shot finally lands. The
+    // two are `ARRIVAL_RISE_TAIL` apart, and the shot is still moving across
+    // that gap: the tilt is deliberately still lifting under her hand. Writing
+    // the zoom through it would eat her first pinch for those seconds, so it
+    // stops at the earlier of the two. The pose has no such competitor — the
+    // stick cannot fight it — and is simply driven to the end.
     // **One owner for the focus override, decided once a frame.**
     //
     // Two things in this method want the camera to orbit something other than

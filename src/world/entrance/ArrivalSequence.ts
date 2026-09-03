@@ -486,18 +486,25 @@ export const ARRIVAL_DOOR_ZOOM =
  * off the arch rather than guessed:
  *
  * - **Headroom.** The eye rides at `focus.y + d·sin(pitch)` and must pass under
- *   {@link GATE_ARCH_CLEAR_HEIGHT}, 3.45 m above the paving. With the focus at
- *   a child's chest that leaves `d·sin(pitch)` under about 2.35 m.
+ *   {@link GATE_ARCH_CLEAR_HEIGHT}, 3.60 m above the paving. The focus during
+ *   the pass is the ordinary player-follow one — her feet plus `IsoCamera`'s
+ *   `CAMERA_FOCUS_LIFT`, 1.25 m — so `d·sin(pitch)` has to stay under 2.35 m.
  * - **The opening.** The eye trails her by `d·cos(pitch)` along the bearing,
  *   which by then is the rig's own 45°, so it is off to one side by
  *   `d·cos(pitch)·sin(45°)`. {@link GATE_ARCH_CLEAR_WIDTH} is 7.00 m, so that
  *   has to stay under 3.5 m or the camera goes through a pier instead of the
  *   gap.
  *
- * At 4.0 m the eye rides 1.63 m above her chest — 0.7 m of headroom under the
- * crossbar — and passes 2.58 m to her side, 0.9 m clear of the pier. Both
- * margins are asserted by `check:arrival-camera`, because a camera that clips
- * the arch reads as a bug rather than as a move.
+ * **Two different numbers, and it matters which is quoted.** At 4.0 m and the
+ * door shot's own 24° tilt the eye rides 1.63 m above her chest — 0.72 m of
+ * headroom — and passes 2.58 m to her side, 0.92 m clear of the pier. Those
+ * are the *nominal* margins, at the pose the dive aims for. What
+ * `check:arrival-camera` actually asserts is the worst of a swept pass, and
+ * the worst sample is not at that pose: the tilt is already lifting by the
+ * time the eye is on the gate line, which costs height. Swept, the margins are
+ * **0.37 m of headroom and 0.81 m of sideroom** — roughly half the nominal
+ * figure in the first case. Quote the swept numbers when asking whether this
+ * fits; the nominal pair only describes the instant the dive bottoms out.
  */
 const ARRIVAL_ARCH_DISTANCE = 4.0;
 
