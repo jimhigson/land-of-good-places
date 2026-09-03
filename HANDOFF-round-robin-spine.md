@@ -91,3 +91,21 @@ No PR yet. Jim's instruction: implement, then hand to the Overseer when ready.
   honest run. That red list is the deliverable — real defects with
   measurements, reported to the Overseer, never exempted. A pair genuinely
   allowed to overlap is a CLAIM_COMPATIBILITY entry with a stated reason.
+
+## Universal overlap invariant — BUILT, HONESTLY RED, findings filed (3 Sep, Fable)
+
+On `feat/universal-overlap-invariant` (stacked on the spine): 'no two drawn
+features share ground the law forbids' — deny-by-default any-pair sweep,
+CLAIM_COMPATIBILITY imported from groundClaims, coverage announced on stderr.
+First honest run: red on all 5 pool seeds, 36 residual findings after one
+ruled legality (station boarding gaps, read from world.train.stations —
+corridors only). Defects filed with measurements: #500 (bushes through
+walls/trees, up to 1.69 m) and #501 (train drives through slide legs, worst
+leg 0.12 m from the rail centre line). THE INVARIANT MUST NOT BE EXEMPTED —
+it goes green when the defects are fixed. Raw outputs: /tmp/uo-pool.out,
+/tmp/uo-r2.out, /tmp/uo-r3.out.
+
+Traps for a successor: ribbon findings must aggregate per label-pair or one
+defect floods as hundreds of half-metre capsules; plots/castle are swept as
+INSCRIBED capsules (corner overlaps missed, stated in the doc comment);
+entrances/exits are points until doormats can be tied to their own plot.
