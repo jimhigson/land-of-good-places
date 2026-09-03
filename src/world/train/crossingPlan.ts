@@ -1,5 +1,3 @@
-import { Vector3 } from 'three';
-import { TRAIN_PLAN } from './plan';
 import { solveCrossingSites, type CrossingSite } from './crossingPlanSolve';
 import { takePrewarmedCrossingSites } from './crossingPrewarm';
 
@@ -31,18 +29,15 @@ const SOLVED = takePrewarmedCrossingSites() ?? solveCrossingSites();
 export const CROSSING_SITES: readonly CrossingSite[] = SOLVED.bridges;
 
 /**
- * Which side of the railway a point stands on, in `crossings.ts`'s own
- * sign convention (+1 along `(tangent.z, -tangent.x)` from the nearest rail
- * point). Well-defined for any point meaningfully off the centre line; the
- * loop is simple (never self-crossing), so the sign is stable park-wide.
+ * Which side of the railway a point stands on — **moved to
+ * `crossingPlanSolve.ts` and re-exported here**, so every consumer keeps
+ * importing it from where it always did.
+ *
+ * It moved because the solver itself needs the answer: its second-tier gate
+ * pass asks whether the park's gate and the park's middle are on opposite
+ * sides of the loop, and a copy of this arithmetic living there would be a
+ * second definition of "which side" able to drift from this one — the
+ * commonest bug in this repo. Importing it back from this module would be a
+ * cycle, since this module is what runs the solve.
  */
-const sideScratch = new Vector3();
-const sideTangent = new Vector3();
-
-export function railSideOf(x: number, z: number): 1 | -1 {
-  const route = TRAIN_PLAN.route;
-  const d = route.distanceNear(x, z);
-  const p = route.pointAt(d, sideScratch);
-  const t = route.tangentAt(d, sideTangent);
-  return Math.sign(t.z * (x - p.x) - t.x * (z - p.z)) >= 0 ? 1 : -1;
-}
+export { railSideOf } from './crossingPlanSolve';
