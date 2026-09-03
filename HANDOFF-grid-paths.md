@@ -2715,7 +2715,18 @@ So the briefed "one class, five seeds" is **two classes**:
   *equivalent to ordering* — a node's offered cost is the minimum over its
   connectors, so pricing the diagonal above the elbow makes the elbow win, and
   pricing it below changes nothing at all. **Do not spend a sweep proving
-  that.**);
+  that.**
+
+  **CORRECTED 3 Sep, and the correction matters: this retirement holds only
+  WITHIN one node.** As written it reads as "pricing connectors is retired",
+  and a later leg nearly closed a real fix off on the strength of it. Two
+  connectors that land on **different nodes** are not reordered by a price —
+  the price decides which node wins, which ordering cannot do. The measured
+  case is seed 128's `stall.facePaint`: its shared-line connector was
+  **already the cheaper of the two** (27.67 against 33.52) and still lost, on
+  *total path* cost, because its node sits further from the paved network.
+  Nothing about ordering shapes at one node can reach that. So: retired for
+  shape-versus-shape at a node; **live, and load-bearing, for node-versus-node**.);
 - **131, 225** — an unidentified second producer. **Find which router draws
   `(32.5,-6.7) -> (41.1,9.3)` on seed 131 before designing anything**; every
   fix aimed at the connector will keep missing it, as this one did.
