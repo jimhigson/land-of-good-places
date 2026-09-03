@@ -215,3 +215,67 @@ To finish:
 - Another agent's branch has deleted `ENTRANCE_GATE_HALF_ANGLE` and given the
   gate aperture one owner in metres. Expect a conflict near the entrance
   geometry.
+
+
+---
+
+# The arc is real (3 September, later)
+
+The road is drawn on the route and **the bus drives it**. `ENTRANCE_BUS_STOP_Z`,
+`ENTRANCE_BUS_ARRIVE_X` and `ENTRANCE_BUS_VANISH_X` are deleted from `layout.ts`;
+all seven consumers read `roadRoute.ts`. No scalar `busX` survives.
+
+## Numbers the arrival-camera branch needs
+
+- **The bus's door, and so the stop: x −0.07, z 65.83**, bus yaw **−102.0°**
+  (was: door at x 0, z 69, yaw −90°). The stop moved **3.2 m towards the wall
+  and 12° round**, because the road hugs the boundary now instead of cutting a
+  straight chord across the ride.
+- The bus drives on at arc **+39.6 m** and is disposed at **−39.6 m** — the brow,
+  both ways, so it comes over the hill rather than appearing on a kerb.
+- The road reaches **81.6 m** from the gate before the ground ends, past the
+  47.8 m a 390×844 portrait phone sees at full zoom-out.
+
+## Two more findings, both instruments measuring the wrong thing
+
+- **`check:cat-bus` used an axis-aligned box round a bus that now turns.** An
+  AABB round a 15.8 × 5.3 m vehicle at 45° is ~14.9 m square — nearly three
+  times its footprint. It produced three confident wrong failures at once: "the
+  bus reached 6.15 m INSIDE the park", "two children left 0.00 s apart", "the
+  slowest child walked 1.54 m/s". Fixed by asking in the bus's **own** frame
+  (`worldToLocal` against a local box measured off the built vehicle).
+- **The tail turned tighter than a bus can drive.** `ENTRANCE_ROAD_TAIL_RUN` was
+  14 m, chosen to cross the ride's line steeply — the wrong thing to optimise. A
+  14 m tail turns at a **3.6 m radius** for a 15.8 m bus and put it **2.17 m
+  inside the park**, which is #195 reintroduced by the road's own shape. Swept:
+  37 m clears by 0.23 m, 45 m by 0.66 m, 55 m by 0.77 m at a 24.4 m radius
+  (~1.55 bus lengths, a real turning circle), and past 55 the binding constraint
+  becomes the kerb's own curvature instead, so 65 buys nothing. **55.**
+- The road's outset also had to carry the bus's **silhouette** (1.24 m of tail,
+  whiskers and swung door — the same figure `arrivalSightline.ts` pads by),
+  because the box cleared by 0.77 m while the built bus was 0.23 m inside.
+
+## Gate status
+
+- `tsc` 0, `typecheck:test` 0
+- `check:entrance-road` **0** — 0 legs hit on all sixteen seeds, spur abutting,
+  control still finding 75 legs on the old road
+- `check:park-map` 0, `check:arrival-completes` 0
+- `check:rail-race`, `test:procgen`, `check:coplanar`, full `check` — **not
+  re-run since the tail lengthened to 55.** They must be.
+- `check:cat-bus` **1**, one real fault left, below.
+- `check:arrival-starts` 1 — it wants a dev server on 127.0.0.1:5173 and could
+  not reach one; environmental, not yet judged.
+
+## The one real fault left
+
+`check:cat-bus`: *"two children left the bus only 0.00 s apart"* and walking
+speeds of 0.87 and 7.15 m/s. The park-intrusion complaint is gone; this is a
+**behavioural** consequence of the stop moving 3.2 m closer to the wall — the
+walk from the door through the arch is now ~5 m instead of ~9, so the
+disembarking stagger (which is paced off that geometry) compresses and the
+release fires several children on one frame. It wants the stagger driven by
+time rather than by distance-to-the-gate. Nothing about it is measurement
+error; the check is right.
+
+**Nobody has looked at any of this in a browser yet.**
