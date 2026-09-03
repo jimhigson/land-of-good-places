@@ -10,6 +10,7 @@ import {
 } from './parkManifest';
 import { cachedSolve } from '../core/solveCache';
 import { PARK_BOUNDARY } from './boundary';
+import { ENTRANCE_GATE_X } from './entrance/layout';
 import type { AnchorFootprint } from './anchors';
 
 /**
@@ -136,17 +137,25 @@ const SPREAD_CHOICES = 12;
  */
 const PARK_RESTARTS = 240;
 
-/** The gate sits on the boundary wall; the corridor runs from it to centre. */
-const GATE_ANGLE = Math.PI / 2; // matches entrance/layout.ts ENTRANCE_ANGLE
-const GATE_RADIUS = 60; //         matches ENTRANCE_WALL_RADIUS
+/**
+ * The gate sits on the boundary wall; the corridor runs from it to centre.
+ *
+ * **Read from `entrance/layout.ts`, never restated.** These were
+ * `Math.PI / 2` and `60` written out here with the comments "matches
+ * entrance/layout.ts ENTRANCE_ANGLE" and "matches ENTRANCE_WALL_RADIUS" —
+ * a promise that two numbers agree, which is not a mechanism, and which
+ * CLAUDE.md names as the most common bug in this repo by a distance. Found
+ * while fixing #481; nothing had drifted yet, and that is exactly when it is
+ * cheap to fix.
+ */
 
 function inGateCorridor(x: number, z: number, clearance: number): boolean {
   // The corridor is the short axis-aligned strip inside the gate (which sits
-  // at bearing GATE_ANGLE, i.e. +Z on the boundary wall). Only the strip
+  // at `ENTRANCE_ANGLE`, i.e. +Z on the boundary wall). Only the strip
   // itself must stay clear — from its mouth the approach *path* winds to
   // wherever the plaza was placed, around whatever stands in between, and
   // `check:park`'s routing invariant proves that walk exists.
-  const gateX = Math.cos(GATE_ANGLE) * GATE_RADIUS;
+  const gateX = ENTRANCE_GATE_X;
   const corridorHalf = GATE_CORRIDOR_HALF_WIDTH + clearance;
   return Math.abs(x - gateX) < corridorHalf && z > 25;
 }

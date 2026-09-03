@@ -2,12 +2,15 @@ import { Vector3 } from 'three';
 import { TAU } from '../../core/mathUtils';
 import { edgeRadiusAt, PARK_BOUNDARY } from '../boundary';
 import { COASTER_PLANS } from '../coaster/plan';
+import { ENTRANCE_GATE_HALF_WIDTH, ENTRANCE_GATE_X, ENTRANCE_GATE_Z } from '../entrance/layout';
 import { RAIL_OVER_RAIL_AIR } from '../coaster/route';
 import { PARK_LAYOUT } from '../parkLayout';
 import { terrainHeight } from '../terrain';
 import { bridgeableCrossingPosesSearch } from './crossingPoses';
 import { fitBridgeAcross, railCorridorBlocked } from './bridgeFit';
 import { chosenCrossingCorridor, crossingSurvivesStationAt } from './crossingKeepOut';
+import { FENCE_HALF_THICKNESS, FENCE_OFFSET } from './clearance';
+import { PLAYER_RADIUS } from '../../core/constants';
 import { STATION_SEEDS, STATION_SEED_RADIUS } from './stationSeeds';
 import { PARK_SEED } from '../parkManifest';
 import { type Pose2, type SegmentKind, type Vec2, turnVocabulary } from '../rail/segments';
@@ -82,6 +85,35 @@ const TRACK_PLOT_CLEARANCE = 4.2;
  * collision half is ~0.45; this leaves the track's width plus a hair inside it.
  */
 const CORRIDOR_RADIUS = 1.8;
+
+/**
+ * **How far the centre line keeps off the park's front doorway** (issue #481).
+ *
+ * The one thing in the park that cannot move out of the railway's way, so the
+ * railway moves out of its. Derived, never chosen: the arch's own half-width,
+ * plus the fence line, plus the fence's own thickness, plus the child walking
+ * past it. Every term is read from its owner, so the day the arch is widened or
+ * the fence moved out this follows without anybody remembering it exists.
+ *
+ * `PLAYER_RADIUS` is in here because the question is not "does the fence miss
+ * the arch" but "can she walk through the arch with the fence there" — the
+ * outermost half-metre of an 8.6 m opening is opening she uses.
+ *
+ * Read by {@link loopKeepsItsCrossing}, which asks it of a **closed loop**
+ * rather than by `trainObstacles` asking it of every candidate piece. See that
+ * clause for why the difference matters more than it looks.
+ *
+ * **The name says "walk", and it is asked at exactly one point: the arch.** Not
+ * along `ENTRANCE_WALK_DEPTH`'s 12 m — that is `check:gateway`'s span, and the
+ * two are deliberately different. The railway *may* cross the way in further
+ * down, where `crossings.ts` gives it a level crossing or a bridge and the walk
+ * stays open; what it may not do is run over the doorway itself, which is the
+ * one place no crossing is minted because no path flips sides there. So the
+ * rule is one distance from one point, and the 12 m walk is what the check
+ * measures afterwards to see whether the result actually works.
+ */
+const GATE_WALK_RAIL_CLEARANCE =
+  ENTRANCE_GATE_HALF_WIDTH + FENCE_OFFSET + FENCE_HALF_THICKNESS + PLAYER_RADIUS;
 
 /** How close the loop may come to an earlier part of itself. */
 const SELF_CLEARANCE = 3;
@@ -352,6 +384,31 @@ function loopKeepsItsCrossing(route: SolvedRailRoute): boolean {
     railDistanceCache.set(key, value);
     return value;
   };
+
+  // 0. **Does this loop leave the park's front door open?** (issue #481.)
+  //
+  // The gate is the one fixed thing in the park, and it was the one fixed thing
+  // the railway had never been told about. Measured on `main`: pool seed 288's
+  // loop ran 0.3 m from the walk in, 4 m inside the arch, near enough parallel
+  // to it — so no path ever flipped sides at it, `crossings.ts` minted no gap,
+  // and the lineside fence sealed the doorway a child had just walked through.
+  // Sweep seed 18 was worse: the fence ran through the arch itself.
+  //
+  // **Asked here rather than added to `trainObstacles`, and that is not a
+  // detail.** The piece-level search is bounded — `budgets.perJoint` keeps only
+  // sixteen candidates at each joint — so an obstacle does not merely forbid
+  // the loops that hit it, it changes which candidates survive the shortlist
+  // everywhere, and the search returns a *different* first solution on seeds
+  // that were never in the doorway at all. Measured: a keep-out disc at the
+  // arch re-rolled the canonical park's loop (362 m to 359 m) though its
+  // railway was 13.3 m from the gate and never came near, and re-rolled the
+  // paths with it until one ended on a bridge; on seed 115 it removed the loop
+  // altogether. Asked as a property of the *closed* loop it costs nothing on
+  // the pool seeds that already clear the gate — their first solution is
+  // unchanged — and sends the search on to the next start pose on the ones that
+  // do not. Same reasoning as the two clauses below, which are here for the
+  // same reason.
+  if (railDistanceAt(ENTRANCE_GATE_X, ENTRANCE_GATE_Z) < GATE_WALK_RAIL_CLEARANCE) return false;
 
   const centre: Vec2 = { x: 0, z: 0 };
   const tangent: Vec2 = { x: 0, z: 0 };

@@ -43,6 +43,31 @@ import { VOUSSOIR_TAPER_RADIUS } from '../../art/models/bridgeStones';
 import type { MovingPlatform } from '../building/surfaces';
 
 /**
+ * **What a bridge's group is called, and how to recognise one.**
+ *
+ * The name carries the crossing's `railDistance` so a group can be traced back
+ * to the crossing that built it — which makes it a *position*, and positions
+ * belong nowhere near anything that has to be stable. `check:coplanar`'s
+ * ratchet key learned that the hard way (#481): it keyed seams on the full
+ * object path, so the identical `deck`-against-`shell` seam was recorded under
+ * eleven different bridge names and read as NEW the moment a loop moved.
+ *
+ * `scripts/check-coplanar.mts` strips the distance back out again. It needs to
+ * know the convention to do that, and a regex over there restating the template
+ * over here is two definitions of one thing — this file's own comment two lines
+ * down is about avoiding exactly that. So both live here: the builder calls
+ * {@link bridgeGroupName} and the ratchet calls {@link BRIDGE_GROUP_NAME_RE},
+ * and neither can drift from a convention it does not own.
+ */
+export function bridgeGroupName(railDistance: number): string {
+  return `bridge-${railDistance.toFixed(1)}`;
+}
+
+/** Matches what {@link bridgeGroupName} produces, as one path segment. */
+export const BRIDGE_GROUP_NAME_RE = /\/bridge-\d+(?:\.\d+)?\//g;
+
+
+/**
  * Hump-back masonry bridges over the railway (issue #116, Decision 8;
  * reworked to Jim's 2026-08-23 feedback against a reference photo of a real
  * model-railway humpback bridge kit).
@@ -626,7 +651,7 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   const bridgeGroup = new Group();
   // The same name the invariants find this crossing's own group under —
   // one owner (the crossing's `railDistance`) for both.
-  bridgeGroup.name = `bridge-${crossing.railDistance.toFixed(1)}`;
+  bridgeGroup.name = bridgeGroupName(crossing.railDistance);
 
   // The crown-span clearance marker — NOT drawn (see below): the swept
   // shell built past this point is the one owner of everything visible,

@@ -70,7 +70,6 @@ import {
   RIM_OUTSET_START,
 } from '../../src/core/constants.ts';
 import {
-  ENTRANCE_ANGLE,
   ENTRANCE_BUS_ARRIVE_X,
   ENTRANCE_BUS_STOP_Z,
   ENTRANCE_GATE_HALF_WIDTH,
@@ -78,8 +77,13 @@ import {
   ENTRANCE_GATE_Z,
   ENTRANCE_PLAYER_X,
   ENTRANCE_PLAYER_Z,
-  isInEntranceGateGap,
+  ENTRANCE_WALK_DEPTH,
+  entranceGateFrame,
+  isInEntranceGateOpening,
 } from '../../src/world/entrance/layout.ts';
+// A leaf module: pure geometry over a `standable` predicate, no three.js and
+// nothing seed-dependent, so importing it here cannot fix the park's seed early.
+import { GATE_PROBE_INSET, measureGatewayWalk } from '../../src/world/entrance/gatewayWalk.ts';
 import { ROAD_TILE_METRES } from '../../src/world/entrance/road.ts';
 import { visibleTop } from '../../src/art/style/measure.ts';
 import { COPING_SINK, bridgeStoneGeometry } from '../../src/art/models/bridgeStones.ts';
@@ -5720,6 +5724,19 @@ const theDrawnPathRidesOverEveryBridge: Invariant = (facts) => {
     }
   }
 
+  // **Why twice, and not once.** This clause compared the two counts for
+  // equality, which was right while the kerb was one ribbon under the surface
+  // — same curve, same `divisions`, same vertex count. `pathGraph.ts` now draws
+  // the kerb as the **two bands you can actually see** (its middle was a face
+  // buried under the path, and `ART_DIRECTION.md` §7 says delete those rather
+  // than hold them apart with a lift), so a kerb that is riding its bridge
+  // perfectly has exactly twice the vertices. Measured: 92 against 46 on seed
+  // 11, and the same 2.000 ratio on every seed that carries a bridge.
+  //
+  // It is a structural constant of the geometry, not a tolerance — the ±15%
+  // beside it is the tolerance, and it is unchanged. A kerb genuinely torn off
+  // its paving still fails this.
+  const KERB_VERTICES_PER_SURFACE_VERTEX = 2;
   const surfaceCount = carried['path-surface'] ?? 0;
   const kerbCount = carried['path-kerb'] ?? 0;
   if (surfaceCount === 0) {
@@ -5728,9 +5745,10 @@ const theDrawnPathRidesOverEveryBridge: Invariant = (facts) => {
         'of them — the path does not go over the bridges at all, and every check above ' +
         'passed by having nothing to measure',
     );
-  } else if (Math.abs(surfaceCount - kerbCount) > surfaceCount * 0.15) {
+  } else if (Math.abs(kerbCount - surfaceCount * KERB_VERTICES_PER_SURFACE_VERTEX) > surfaceCount * 0.15) {
     complaints.push(
-      `the bridges carry ${surfaceCount} path-surface vertices but ${kerbCount} path-kerb ones — ` +
+      `the bridges carry ${surfaceCount} path-surface vertices but ${kerbCount} path-kerb ones, ` +
+        `against the ${KERB_VERTICES_PER_SURFACE_VERTEX}x the kerb's two bands should give — ` +
         'the kerb is torn off the paving it borders somewhere over a bridge',
     );
   }
@@ -6505,7 +6523,7 @@ const noBridgeStandsWhereNoneWasProven: Invariant = (facts) => {
 /**
  * **Is there actually a hole in the wall at the gate?**
  *
- * Issue #195. `isInEntranceGateGap` sat in `entrance/layout.ts` from the day the
+ * Issue #195. The gate-gap predicate sat in `entrance/layout.ts` from the day the
  * entrance was written with **zero callers anywhere**, so the gate was a gate in
  * name only: an arch stood over unbroken masonry, with an unbroken collision
  * polygon behind it. `buildBoundaryWall`'s own comment said "the wall is solid",
@@ -6538,7 +6556,30 @@ const theGateIsAHoleInTheWall: Invariant = (facts) => {
   if (blocks.length === 0) return ['found no boundary wall blocks at all to measure'];
 
   const fouls: string[] = [];
-  const inGap = blocks.filter((b) => isInEntranceGateGap(Math.atan2(b.z, b.x)));
+  // **Tested at the block's own extent, not its centre — and the extent is
+  // derived from the geometry, never from the rule being checked.**
+  //
+  // This filtered on the centre, blind to the very thing `Garden.ts`'s
+  // `DRAWN_BLOCK_GATE_MARGIN` exists to add: a station is where a block's
+  // *middle* goes and the block is `BOUNDARY_BLOCK_WIDTH` long lying along the
+  // edge, so the last kept block reached into the opening by up to its own
+  // half-length and nothing said so.
+  //
+  // The first attempt at this fix read `DRAWN_BLOCK_GATE_MARGIN` itself, which
+  // is worse than useless: zeroing that constant then moved the wall *and this
+  // clause together* and the suite stayed at 520/520 with stone back in the
+  // doorway. So the expectation is rebuilt here from the two facts about the
+  // built wall — how long a block is and how thick the masonry is — and it
+  // holds whatever policy `Garden.ts` adopts.
+  //
+  // Read off `facts`, never imported: a static import of `Garden.ts` into this
+  // file loads `parkManifest.ts` before the seed is set and pins every seed to
+  // the default park. Measured — it did, and the tell was the *pass* count:
+  // 4 files red, **332 skipped**, 188 passed. `parkFacts.ts` reaches Garden
+  // through an `await import` after the park exists, which is the whole reason
+  // that pattern is there.
+  const blockReach = facts.boundaryBlockWidth / 2 + facts.masonryHalfWidth;
+  const inGap = blocks.filter((b) => isInEntranceGateOpening(b.x, b.z, blockReach));
   if (inGap.length > 0) {
     const worst = inGap[0];
     fouls.push(
@@ -6559,6 +6600,89 @@ const theGateIsAHoleInTheWall: Invariant = (facts) => {
         `a child of ${PLAYER_RADIUS} m cannot get through`,
     );
   }
+  return fouls;
+};
+
+/**
+ * **A child can walk in through the front gate.**
+ *
+ * Issue #481. The gate is the one fixed thing in the park; the railway, the
+ * paths, the plots and the scenery are all drawn afresh from the seed. So the
+ * front door is exactly where "two definitions of one thing" bites, and it bit:
+ * measured on `main` at `bd818210`, the railway's lineside fence ran across the
+ * opening 2.3 m inside the arch on pool seed 288, and **through the arch itself
+ * on sweep seed 18** — `(-1.13, 59.87) -> (1.43, 58.85)`, a 0.18 m fence, with
+ * its 1.3 m track escort 3 m behind it. The obstacle field the loop is grown
+ * against (`train/route.ts`'s `trainObstacles`) knew every plot in the park and
+ * the Sky Cruiser's dismount point, and had never been told the park had a way
+ * in.
+ *
+ * {@link theGateIsAHoleInTheWall} above is the *other* half of this and does not
+ * cover it: it asks whether the boundary masonry leaves a gap, and on both
+ * failing seeds it correctly answered yes. The gap was there; something else was
+ * standing in it two metres further on.
+ *
+ * The measurement lives in `entrance/gatewayWalk.ts` rather than here, because
+ * `scripts/check-gateway.mts` asks the same question of all sixteen seeds a
+ * child can be given — 288 is not one of this suite's five — and shipping the
+ * fix for a two-definitions bug as two definitions would be the same mistake.
+ *
+ * **Never probe the gate line itself**: the soft boundary holds a child inside
+ * the park, so a `PLAYER_RADIUS` body on `z = 60` overlaps the outside and reads
+ * blocked whatever the gate does — 33 of 33 probes across it on the canonical
+ * seed. The walk starts a metre in, and the gate posts are the control that says
+ * the probe can see solid ground at all.
+ */
+const theWalkInFromTheGateIsWalkable: Invariant = (facts) => {
+  const walk = measureGatewayWalk((x, z) => facts.isStandable(x, z, PLAYER_RADIUS));
+  const fouls: string[] = [];
+
+  // The control first, and asserted rather than printed: if the arch's own
+  // posts are not solid, this probe is not measuring the park and the clause
+  // below proves nothing.
+  const toGate = Math.hypot(ENTRANCE_GATE_X, ENTRANCE_GATE_Z) || 1;
+  const inX = -ENTRANCE_GATE_X / toGate;
+  const inZ = -ENTRANCE_GATE_Z / toGate;
+  // Across the gateway is the perpendicular of the way in, so the posts are
+  // found from the gate itself rather than from an assumption that the gate is
+  // on the x axis.
+  for (const side of [-1, 1] as const) {
+    const x = ENTRANCE_GATE_X + inX + -inZ * side * ENTRANCE_GATE_HALF_WIDTH;
+    const z = ENTRANCE_GATE_Z + inZ + inX * side * ENTRANCE_GATE_HALF_WIDTH;
+    if (facts.isStandable(x, z, PLAYER_RADIUS)) {
+      fouls.push(
+        `CONTROL: the gate post at ${fmt([x, z])} is not solid — the walkability probe is ` +
+          'measuring nothing, so its verdict on the doorway means nothing either',
+      );
+    }
+  }
+
+  if (walk.standableCells === 0) {
+    fouls.push(
+      `nowhere for a child to stand ${GATE_PROBE_INSET} m inside the arch — the doorway is ` +
+        'shut on its own threshold',
+    );
+  } else if (!walk.open) {
+    fouls.push(
+      `the walk in from the arch stops ${walk.reachedDepth.toFixed(1)} m inside it; nothing ` +
+        `connects that to the ${ENTRANCE_WALK_DEPTH} m mark within the arch's own ` +
+        `${(2 * ENTRANCE_GATE_HALF_WIDTH).toFixed(1)} m width. The corridor, ` +
+        `'.' walked, 'o' open but cut off, '#' no room:\n${walk.map.join('\n')}`,
+    );
+  }
+
+  // **On stderr, on every run, including the passing ones** — vitest's default
+  // reporter hides console output from passing tests, which is precisely when a
+  // coverage note matters. What this does *not* cover: everything past
+  // `ENTRANCE_WALK_DEPTH`. The railway may legitimately ring the park between
+  // the gate and the plaza and the walk crosses it at a crossing; whether that
+  // walk connects all the way is `check:park`'s routing invariant.
+  process.stderr.write(
+    `[gateway walk] ${walk.standableCells}/${walk.cells} of the corridor standable, ` +
+      `walked to ${walk.reachedDepth.toFixed(1)} m of ${ENTRANCE_WALK_DEPTH} m. ` +
+      'Asserts nothing about the ground past that, nor about headroom under the arch.\n',
+  );
+
   return fouls;
 };
 
@@ -6629,17 +6753,18 @@ const theRoadArrivesAtTheParkAndGoesIn: Invariant = (facts) => {
 
   // **Everything inside the park runs between the arch's posts.**
   //
-  // Measured as perpendicular distance from the gate's own radial axis, not
-  // with `isInEntranceGateGap`. That predicate is an *angle*, which is the
-  // right question at the wall and the wrong one further in: a constant angle
-  // is a corridor that narrows as it approaches the plaza, so the spur's far
-  // corners — 8 m inside the park, and perfectly between the posts — fell
-  // outside it by 0.0017 rad and were reported as having "spilled over the
-  // boundary". The posts stand at `ENTRANCE_GATE_HALF_WIDTH` either side of the
-  // axis, so that is the width the road may not exceed anywhere.
-  const axisX = Math.cos(ENTRANCE_ANGLE);
-  const axisZ = Math.sin(ENTRANCE_ANGLE);
-  const offAxis = (p: { x: number; z: number }): number => Math.abs(p.z * axisX - p.x * axisZ);
+  // Measured as perpendicular distance from the gate's own radial axis. This
+  // clause worked that out for itself before there was anywhere to put it —
+  // the old angular predicate was "the right question at the wall and the wrong
+  // one further in: a constant angle is a corridor that narrows as it
+  // approaches the plaza, so the spur's far corners, 8 m inside the park and
+  // perfectly between the posts, fell outside it by 0.0017 rad". That reasoning
+  // is exactly #481's, reached here first; it now reads the one owner
+  // (`entranceGateFrame`) rather than being a third hand-rolled copy of the
+  // same axis. The posts stand at `ENTRANCE_GATE_HALF_WIDTH` either side, so
+  // that is the width the road may not exceed anywhere.
+  const offAxis = (p: { x: number; z: number }): number =>
+    Math.abs(entranceGateFrame(p.x, p.z).across);
   const trespassing = inside.filter((p) => offAxis(p) > ENTRANCE_GATE_HALF_WIDTH);
   if (trespassing.length > 0) {
     const worst = trespassing[0];
@@ -8626,6 +8751,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the cat bus is actually in the park, at the gate, with everyone aboard', theCatBusIsInThePark],
   ['every child fits in the cat bus seat they are sitting in', childrenFitTheSeatsTheySitIn],
   ['the boundary wall has a gate you can actually walk through', theGateIsAHoleInTheWall],
+  ['a child can walk in through the front gate', theWalkInFromTheGateIsWalkable],
   ['the road arrives at the park and goes in through the gate', theRoadArrivesAtTheParkAndGoesIn],
   [
     'the bus stop and the walk in from it are clear of trees and bushes',

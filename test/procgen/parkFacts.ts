@@ -951,6 +951,14 @@ export interface ParkFacts {
   readonly masonryHalfWidth: number;
   /** Half-thickness of the boundary wall as collision sees it, off `Garden.ts`. */
   readonly wallCollisionHalf: number;
+  /**
+   * How long one drawn block of the boundary wall is, off `Garden.ts`.
+   *
+   * A station is where a block's **middle** goes, so any clause asking "is this
+   * block standing somewhere it should not?" needs half of this to ask about
+   * the block rather than about its centre point.
+   */
+  readonly boundaryBlockWidth: number;
   readonly distanceToRail: (x: number, z: number) => number;
   /** Can a walker of `radius` stand here without being pushed out? */
   readonly isStandable: (x: number, z: number, radius?: number) => boolean;
@@ -1101,9 +1109,8 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   const plannedBridgeSiteDistances = CROSSING_SITES.map((site) => site.railDistance);
   const plannedLevelSiteDistances = LEVEL_CROSSING_SITES.map((site) => site.railDistance);
 
-  const { BOUNDARY_MASONRY_HALF_WIDTH, BOUNDARY_WALL_COLLISION_HALF } = await import(
-    '../../src/world/Garden.ts'
-  );
+  const { BOUNDARY_BLOCK_WIDTH, BOUNDARY_MASONRY_HALF_WIDTH, BOUNDARY_WALL_COLLISION_HALF } =
+    await import('../../src/world/Garden.ts');
   const { CIRCULAR_PARK_AREA, PARK_AREA_MULTIPLIER } = await import('../../src/world/boundary.ts');
   const { PARK_LAYOUT } = await import('../../src/world/parkLayout.ts');
   const { ANCHORS } = await import('../../src/world/anchors.ts');
@@ -2564,6 +2571,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     boundary: world.collision.playBounds,
     boundaryTargetArea: CIRCULAR_PARK_AREA * PARK_AREA_MULTIPLIER,
     masonryHalfWidth: BOUNDARY_MASONRY_HALF_WIDTH,
+    boundaryBlockWidth: BOUNDARY_BLOCK_WIDTH,
     wallCollisionHalf: BOUNDARY_WALL_COLLISION_HALF,
     distanceToRail,
     isStandable,

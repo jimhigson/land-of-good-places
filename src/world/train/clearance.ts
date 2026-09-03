@@ -190,6 +190,17 @@ export const BRIDGE_RISE = TRAIN_CLEARANCE_Y + BRIDGE_DECK_DEPTH;
 export const FENCE_OFFSET = 2.0;
 
 /**
+ * Half-thickness of the exclusion fence as **collision** sees it.
+ *
+ * Here beside {@link FENCE_OFFSET} for the same reason and by the same
+ * argument: `fence.ts` builds with it, and anything asking "how far from the
+ * rail centre line is solid?" — `route.ts`'s gate keep-out is the first —
+ * needs it too. It was a bare `0.18` written out three times in `fence.ts`,
+ * which is one number with three owners waiting to disagree.
+ */
+export const FENCE_HALF_THICKNESS = 0.18;
+
+/**
  * Half-length of a bridge deck along the crossing direction — has to clear
  * both fence lines (each {@link FENCE_OFFSET} out from the rail centre) with
  * a little margin so the deck's own edge does not sit flush on a fence post.
