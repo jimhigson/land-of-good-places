@@ -2538,3 +2538,49 @@ Still owed, in the brief's own order:
 7. The three inherited reds (`check:pet-slide`, `check:park-boot`,
    `check:arrival-completes`) are **#474's**, measured byte-identical on #474
    alone. This branch cannot go green on `pnpm run check` until #474 does.
+
+### PLAINLY: which side changed, and where
+
+The Overseer's question, answered without dressing it up. **Both sides
+changed, and they are different changes with different worth:**
+
+- **The assertion changed what it measures** — deliberately, and this is the
+  part that must be scrutinised. `builtMasonryStaysInsideItsReservation` no
+  longer sweeps `across` −14..+14 and prosecutes whatever it finds against the
+  nearest site's band. That clause is *gone*, and with it seeds 5's and 288's
+  failures.
+- **`footprintsOverlap` was NOT touched.** The planner does not put two decks
+  in one reservation any differently than it did at `df7ecac4`. Nothing in
+  `crossingPlanSolve.ts` is in this diff.
+- **A real source fix was made, and it is not the one the brief expected.**
+  `bridgeScreenHalfAlong` in `paths.ts` — the reservation's length now comes
+  from the builder's licence (`SITE_RAMP_IDEAL`) instead of the planner's
+  proof. That fixed genuine unscreened stone on seeds 274 and 326.
+
+**Why dropping the clause is not fitting the assertion to the pool**, and the
+evidence rather than the argument:
+
+1. Seed 5's two "overlapping" decks are **29 m apart** on sites whose
+   reservation rectangles are provably **disjoint** (SAT, both rectangles, in
+   `tmp-twodecks.mts`). Each bridge is centred on its own site at `across`
+   0.00 with an outer face of 2.02–2.22 m against bands of 4.50–5.50 m. There
+   is no defect in that park for a planner change to fix.
+2. Seed 288's is **0.30 m** (`across` −5.50 to −5.20) into a rectangle the
+   two-pass had **released** — not reserved ground at all — by a bridge every
+   sample of which lies inside its own *screened* reservation. The failure
+   message quoted **14.92 m** for it.
+3. The clause **could not fail in one of its two axes at all**: it swept
+   `along` between the bounds of the very rectangle it was testing against, so
+   a ramp running off the end of its reservation left the sweep instead of
+   failing it.
+4. The replacement is a **net strengthening, and it proved it immediately** —
+   asked the question the old clause could not, it caught three real
+   trespasses (274 by 1.46 m, 326 by 0.69 m and 0.96 m) on two seeds that were
+   `check:park` green and that *passed* the old invariant. Those were fixed in
+   `paths.ts`, not in the assertion.
+
+If a reader wants one sentence: **the old clause failed two parks that are
+sound and passed two parks that were not, and the replacement reverses both.**
+The seed count moving was a consequence, never the goal — and it moved because
+two real defects were found and fixed, not only because two false ones were
+dropped.
