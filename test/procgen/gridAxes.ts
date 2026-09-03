@@ -242,11 +242,21 @@ const parallel = (a: GroundPoint, b: GroundPoint): boolean =>
  * **Why it cannot be fixed by requiring collinearity — measured, not argued.**
  * The obvious cure is to gate rule 1 behind rule 2's angle test. Doing exactly
  * that and running the suite turns `gridAxisVerdictsIgnoreTheCarrier` **red on
- * all five CI seeds** (5, 11, 18, 24, canonical), because the gate refuses to
- * rejoin a stretch at its own seam wherever the paving turns. Every corner
- * comes apart along whichever line the carrier happened to be cut at — on the
- * canonical seed, five 1.83 m stretches become eleven halves of 0.97 m and
- * 0.98 m, and the re-cut stops agreeing with the as-built:
+ * all five CI seeds**, because the gate refuses to rejoin a stretch at its own
+ * seam wherever the paving turns. Every corner comes apart along whichever line
+ * the carrier happened to be cut at, and the re-cut stops agreeing with the
+ * as-built — pieces the as-built sees but the re-cut does not, and vice versa:
+ *
+ * | seed | only as-built | only re-cut |
+ * |---|---|---|
+ * | 5 | 2 | 4 |
+ * | **11** | **5** | **11** |
+ * | 18 | 3 | 6 |
+ * | 24 | 1 | 2 |
+ * | canonical (20260728) | 2 | 5 |
+ *
+ * The excerpt below is **seed 11's**, that being the loudest — five 1.83 m
+ * stretches coming apart into eleven halves of 0.97 m and 0.98 m:
  *
  * ```
  * re-cutting the same paving into different route objects changed the answer:
