@@ -399,12 +399,49 @@ It also explains the 1.87 m private-line run that the `streetsShareLatticeLines`
 successor must still catch: these two runs are the same defect seen from the
 invariant's side.
 
-**Note the ordering trap before fixing it.** Scenery is placed from
-`pathCentreline` (Scenery.ts owns wall runs vs paths), so at the moment
-`relayPolyline` runs, some of what will later block it does not exist yet.
-Asking the collision world naively will therefore under-report. Establish what
-is actually in the world at that instant before designing the query — measure
-first, as ever.
+**THE ORDERING TRAP RESOLVED, AND IT MOVES THE FIX.** `scripts/tmp-blocker.mts`
+names the colliders (control: both points the transect measured clear report
+"no collider within clearance", so the query discriminates):
+
+```
+BLOCKAGE peak (-42.81,12.39) — BLOCKED
+  wall (-41.28, 9.79)-(-42.74,12.23) halfThick=0.18 overlap=0.71
+  wall (-42.74,12.23)-(-43.61,14.95) halfThick=0.18 overlap=0.86
+BLOCKAGE mid  (-43.72,18.22) — BLOCKED
+  wall (-43.61,14.95)-(-43.83,17.79) halfThick=0.18 overlap=0.43
+  wall (-43.83,17.79)-(-43.47,20.48) halfThick=0.18 overlap=0.83
+  wall (-41.65,15.33)-(-41.83,17.71) halfThick=1.30 overlap=0.05
+```
+
+A continuous chain of 0.36 m-thick walls — **a fence** — running
+(-41.28,9.79) -> (-42.74,12.23) -> (-43.61,14.95) -> (-43.83,17.79) ->
+(-43.47,20.48), plus a 2.6 m-thick run beside it.
+
+**That fence is a border fence placed FROM the paths** (`Scenery.ts` owns wall
+runs vs paths, off `pathCentreline`). Its line sits within 0.83 m of x = -43.0
+for its whole length — i.e. it is bordering **`spur-stall.skyCruiser`'s own
+private run** `(-43.0, 30.9) -> (-43.0, 6.9)`. And `spur-hotel`'s private run
+is on x = -42.2, **0.8 m away**. A fence offset to border one ribbon
+necessarily lands on the other.
+
+**So `relayPolyline` consulting the collision world would NOT have fixed
+this** — the fence does not exist when it runs, and cannot. The ordering
+means the answer is not knowable there, which by the Overseer's own rule
+moves the fix to where the answer does exist: **upstream, to the decision that
+put two long parallel runs 0.8 m apart on two private lines.** That spacing is
+below anything the scenery placer can border safely.
+
+**This unifies the whole branch.** The two parallel private runs are
+simultaneously: Jim's complaint #3 (paths that do not read as a grid), the
+`poi.stranded` on seed 11, and precisely what the `streetsShareLatticeLines`
+successor must catch. Fix the grid discipline in `relayPolyline` — a long run
+belongs on the shared lattice or a half-pitch line, never on a route's own
+private column beside another's — and the invariant and the defect are the
+same piece of work, which is where to build stage-2 (b) and the successor
+together.
+
+**Do not "fix" this by widening a screen or moving the fence.** The fence is
+correct; the paths it was given were not.
 
 ### The last resort still draws, and per the standing rule it must not
 
