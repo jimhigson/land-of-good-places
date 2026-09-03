@@ -1099,3 +1099,103 @@ would also be the honest fix for Jim's complaint #3 on this seed.
   branch's `package.json` does not have (`103` scripts, `check:coplanar` absent
   — parsed, not grepped).
 - **No PR**, by instruction.
+
+---
+
+## State — 2 Sep, third leg (Overseer-directed)
+
+**10 of 16 green, 21 stranded.** canonical 0 (was 4), 5 10, 11 3, 24 2, 225 2,
+288 3, 326 1.
+
+### Fix 4 (kept): a second tier for the gate in the crossing planner
+
+`fitBridgeAcross` takes a `rampFloor`, defaulting to `SITE_RAMP_FLOOR` so no
+caller can drift off it by omission. Exactly one caller passes anything else:
+`serveTheGateOnTheSecondTier`, which re-marches the gate's own window
+(`SITE_SPACING` either way of the gate's nearest rail distance) at
+`MIN_RAMP_RUN` — the bar `bridgeFootprint.ts` itself accepts — and keeps the
+least oblique fit. **`SITE_RAMP_FLOOR` is untouched for every other candidate
+on every seed**; that is what makes this a ladder and not a lower floor.
+
+The trigger is structural, and **the ungated version was measured first**
+(`scripts/tmp-gateside.mts`):
+
+```
+canonical  gateSide=-1 centreSide= 1  gained railD=1  @(0.8,41.0)  15.2/11.2   4 -> 0 GREEN
+208        gateSide=-1 centreSide=-1  gained railD=49 @(-1.9,37.3) 11.7/15.2   0 -> 9 LOST GREEN
+```
+
+208's gate is on the **same** side of the loop as the fountain, so its walk in
+never crosses and the site was pure cost — since the grid rework a crossing
+reserves a rectangle forbidden to every foreign leg, and an unneeded one lays a
+no-go across the park entrance. Gated on gate and fountain being on opposite
+sides, 208 keeps its green and canonical still goes green.
+
+`railSideOf` **moved** into `crossingPlanSolve.ts` (re-exported from
+`crossingPlan.ts`, so every consumer imports it from where it always did): the
+solver needs the answer itself and a copy would have been a second definition
+of "which side". The park's middle is `PARK_LAYOUT.fountain`, the same owner
+`paths.ts` reads `PLAZA` from — never the world origin.
+
+### `scatterDecoupling`'s vacuous suite: ROOT-CAUSED, and it was the gate
+
+Not a separate defect. `LGP_SPUR_STRETCH` bows exactly `spur-stall.railRacer`,
+and on the canonical seed **that door stands in the gate pocket**. While the
+pocket was orphaned the door fell to the straight-line last resort, so the knob
+had an *unpaved* 0.9 m stub to bow and `paths.digest` did not move — leaving
+every "unchanged" assertion beneath it passing for the worst possible reason.
+
+Proved with a control, by disabling `serveTheGateOnTheSecondTier` and putting
+it back (restore verified by grep: `CONTROL-DISABLED matches: 0`):
+
+```
+second tier ON   spur-stall.railRacer paved=true
+                   (0.0,54.0) (-9.1,55.4) (-6.7,52.0) (-9.1,49.6)
+                 vitest scatterDecoupling: 4 passed, exit 0
+second tier OFF  spur-stall.railRacer paved=false
+                   (-9.1,49.6) (-8.4,50.3)          <- the 1 m stranded-door stub
+                 vitest scatterDecoupling: 1 failed | 3 passed, exit 1
+                 AssertionError: expected 'c0b4bd32db83bd9b' not to be 'c0b4bd32db83bd9b'
+```
+
+**The geometry that transcript was proved against is the canonical seed with
+the second tier disabled** — the polyline above is the whole of it. The
+assertion did its job exactly as written; there is nothing to fix in the test.
+
+### Seed 11's `spur-waterFight`: measured, and NOT a router bug
+
+The span pass **did** fire — `(45.24, 42.93)` has `onMasonry=true`, so the
+middle crossroads is genuinely absent — and every offset it may legally use is
+blocked (`scripts/tmp-spanoff.mts`, control offset 0 correctly reports blocked
+and names `ramp`):
+
+```
+offset     0  blocked  leg2:ramp                          <- the control
+offset     6  blocked  leg2:streetClear leg3:streetClear
+offset    -6  blocked  leg2:ramp
+offset     3  blocked  leg2:streetClear leg3:streetClear
+offset     2  CLEAR                                        <- x = 47.24, a private line
+offset  -1.5  blocked  leg2:ramp
+```
+
+The reservation is 10 m across, so a half-pitch step west stays inside it and a
+half-pitch step east is inside the plot. **Same class as canonical's gate**: a
+bridge reservation and a plot together seal every lattice and half-lattice line
+to a door, and the owner is the joint solve (Decision 4). The 31 m private line
+is the rescue ladder's last rung firing correctly on geometry offering nothing
+better. Do not thread the +2 line — it trades a stranded waypoint for Jim's
+complaint #3.
+
+### For the PR body
+
+- The `tmp-ribboncomp.mts` control: three unrelated counts (canonical 4, 5 10,
+  267 2) collapsing into **one** named defect — `gate-approach` as a second
+  paving component on exactly those three seeds, one component on the other
+  thirteen.
+- **`noPathEndsNowhere` was honestly red on canonical all along and structurally
+  unheard on 267**, because the invariant suite runs six seeds (canonical, 5,
+  11, 24, 288, 326) and the pool is sixteen. **It should run the whole pool.**
+  267's identical defect was invisible to CI for the life of this branch, and
+  the ten seeds with no test file are covered by `check:park` alone, which
+  measures whether the park *works*, not whether its furniture is placed sanely.
+  The cost is ten more park builds; the suite already spends 70 s on six.
