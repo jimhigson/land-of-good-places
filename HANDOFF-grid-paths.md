@@ -2681,3 +2681,44 @@ change what a node offers to the rest of the search.
 price is not. If a long diagonal is still the cheapest thing available
 anywhere, it will be drawn. Measure whether it clears all five before assuming
 it does; if it clears four, that is a partial result to report, not to absorb.
+
+### CORRECTION, measured: the five are NOT one class, and the reorder fixes only three
+
+My first write-up of the reorder reported its cost with **no benefit column**,
+which is exactly the one-sided measurement this branch exists not to make. Run
+properly — the reorder re-applied, `pathsRunOnGridAxes` alone on each of the
+five seeds — the benefit is:
+
+| seed | `pathsRunOnGridAxes` under the reorder |
+|---|---|
+| 208 | **passes** |
+| 346 | **passes** |
+| 451 | **passes** |
+| 131 | **still fails** — `spur-building` 18.1 m, `(32.5,-6.7) -> (41.1,9.3)` |
+| 225 | **still fails** — `connector-building-exit-ginormousSlide` 16.2 m, `(40.3,13.6) -> (25.7,6.6)` |
+
+**Three of five, for two greens.** The trade is clearly bad and the hypothesis
+is refuted with both columns on the table. Reverted; revert grep-verified.
+
+**But the important part is not the trade, it is that 131 and 225 did not move
+at all** — byte-identical runs, from byte-identical endpoints. Reordering the
+head-on shapes is a change to `computeGridConnectors`'s straight
+`node -> lead` shape, so **on 131 and 225 the offending diagonal does not come
+from there.** It is drawn by something else: the plain straight connector
+below the head-on block, an oblique shape, a pinch link, or `relayPolyline`.
+
+So the briefed "one class, five seeds" is **two classes**:
+
+- **208, 346, 451** — the head-on straight shape, reachable from the connector
+  ordering, and curable there if a mechanism can be found that does not make
+  the node dearer (ordering and refusal both do; pricing at the same node is
+  *equivalent to ordering* — a node's offered cost is the minimum over its
+  connectors, so pricing the diagonal above the elbow makes the elbow win, and
+  pricing it below changes nothing at all. **Do not spend a sweep proving
+  that.**);
+- **131, 225** — an unidentified second producer. **Find which router draws
+  `(32.5,-6.7) -> (41.1,9.3)` on seed 131 before designing anything**; every
+  fix aimed at the connector will keep missing it, as this one did.
+
+That second question is the cheapest next measurement on this item and nobody
+has taken it.
