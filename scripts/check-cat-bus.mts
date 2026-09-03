@@ -52,9 +52,7 @@ import {
   type ArrivalPhase,
 } from '../src/world/entrance/ArrivalSequence.ts';
 import {
-  ENTRANCE_BUS_ARRIVE_X,
-  ENTRANCE_BUS_STOP_Z,
-  ENTRANCE_BUS_VANISH_X,
+
   ENTRANCE_GATE_X,
   ENTRANCE_GATE_Z,
   ENTRANCE_PLAYER_X,
@@ -69,6 +67,21 @@ import {
 } from '../src/world/entrance/catBus.ts';
 import { isBakedFaceMesh } from '../src/art/style/faces.ts';
 import { ROAD_TILE_METRES } from '../src/world/entrance/road.ts';
+import {
+  entranceBusArriveAt,
+  entranceBusVanishAt,
+  entranceRoadAt,
+} from '../src/world/entrance/roadRoute.ts';
+
+/**
+ * Where the bus starts, stands and ends, in world coordinates — asked of the
+ * road it drives rather than of the three straight-kerb constants this file used
+ * to import. Those are gone: the road follows the park's edge now, and a point
+ * on it is an arc, not an `x`.
+ */
+const BUS_ARRIVES_AT = entranceRoadAt(entranceBusArriveAt());
+const BUS_VANISHES_AT = entranceRoadAt(entranceBusVanishAt());
+const BUS_STANDS_AT = entranceRoadAt(0);
 import {
   CHILD_FOOTPRINT,
   TALLEST_CHILD_HEIGHT,
@@ -588,12 +601,13 @@ check(arrival.finished, `the arrival never finished inside ${totalSeconds.toFixe
 const busStart = busXs[0] ?? Number.NaN;
 const busEnd = busXs[busXs.length - 1] ?? Number.NaN;
 check(
-  Math.abs(busStart - ENTRANCE_BUS_ARRIVE_X) < 0.01,
-  `the bus started at x ${busStart.toFixed(2)}, not ENTRANCE_BUS_ARRIVE_X (${ENTRANCE_BUS_ARRIVE_X})`,
+  Math.abs(busStart - BUS_ARRIVES_AT.x) < 0.01,
+  `the bus started at x ${busStart.toFixed(2)}, not on the road at the brow (${BUS_ARRIVES_AT.x.toFixed(2)})`,
 );
 check(
-  Math.abs(busEnd - ENTRANCE_BUS_VANISH_X) < 1.5,
-  `the bus ended at x ${busEnd.toFixed(2)}, nowhere near ENTRANCE_BUS_VANISH_X (${ENTRANCE_BUS_VANISH_X})`,
+  Math.abs(busEnd - BUS_VANISHES_AT.x) < 1.5,
+  `the bus ended at x ${busEnd.toFixed(2)}, nowhere near where the road goes over the far brow ` +
+    `(${BUS_VANISHES_AT.x.toFixed(2)})`,
 );
 check(widestDoorSwing > 1.5, `the door only ever swung ${widestDoorSwing.toFixed(2)} rad while children were still aboard`);
 check(doorAtEnd < 0.01, `the bus drove away with its door ${doorAtEnd.toFixed(2)} rad open`);
@@ -824,8 +838,8 @@ if (handover) {
 // the park edge, ~17 m away, and the camera spent half a second sliding out to
 // the bus to find her. Measuring where the camera ends up would have passed.
 const openingDistanceToBus = Math.hypot(
-  openingPlayerPosition.x - ENTRANCE_BUS_ARRIVE_X,
-  openingPlayerPosition.z - ENTRANCE_BUS_STOP_Z,
+  openingPlayerPosition.x - BUS_ARRIVES_AT.x,
+  openingPlayerPosition.z - BUS_ARRIVES_AT.z,
 );
 const openingDistanceToSpawn = Math.hypot(
   openingPlayerPosition.x - ENTRANCE_PLAYER_X,
@@ -919,8 +933,11 @@ check(
     // **And the bus stands on it**, everywhere it stops along its run — which is
     // the fault as Jim actually saw it, a bus on grass.
     let worstOffRoad = 0;
-    for (const x of [ENTRANCE_BUS_ARRIVE_X, 0, ENTRANCE_BUS_VANISH_X / 2]) {
-      worstOffRoad = Math.max(worstOffRoad, roadReaches(x, ENTRANCE_BUS_STOP_Z));
+    // Three points along the run, taken off the road itself: where it drives on,
+    // where it stands, and halfway to where it leaves.
+    for (const at of [entranceBusArriveAt(), 0, entranceBusVanishAt() / 2]) {
+      const on = entranceRoadAt(at);
+      worstOffRoad = Math.max(worstOffRoad, roadReaches(on.x, on.z));
     }
     check(
       worstOffRoad < ROAD_TILE_METRES / 2,
