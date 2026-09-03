@@ -1,5 +1,37 @@
 # HANDOFF — grid-first path network (the path rework Jim actually asked for)
 
+## READ THIS BEFORE MEASURING ANYTHING (3 Sep)
+
+**The grid invariants measure the DRAWN CURVE, not the control polyline.**
+`pathsRunOnGridAxes` and `noPathEndsNowhere` walk `PathEdgeFact.points`, which
+is the real Catmull-Rom curve `paths.ts` sweeps, **sampled every ~0.5 m** — its
+own doc comment says so and gives the reason (control points are axis-aligned;
+the curve bows rounding each corner). `scripts/tmp-poly.mts` prints **control**
+points, and every hand-computation anybody on this branch has done from that
+output — mine included, more than once — used the wrong model. If you are about
+to reason about whether a run trips an invariant, sample the drawn curve.
+
+**`pathsRunOnGridAxes` has no exemption of any kind.** `DOOR_APPROACH_REACH`
+(15) belongs to `streetsShareLatticeLines`. I read it in the wrong doc comment
+and built a suspicion on it; do not repeat that.
+
+**Current failure list, and one of them is not mine to fix:**
+
+| seed | invariant | owner |
+|---|---|---|
+| 5, 11, 128 | `streetsShareLatticeLines` | this branch |
+| 288 | `noPathEndsNowhere` | this branch |
+| 267 | `detourRatiosStayReasonable` | this branch |
+
+**Seed 225's `pathsRunOnGridAxes` is NOT in that list** — `drawsAsScreened`
+fixed it this leg. It reappeared only under the reverted both-prices
+experiment, and the carrier-relative defect behind it (the check's unit is the
+route object, not the painted ground; 225 fails by 0.2 m against a 16 m
+threshold) is **being fixed by another agent off `main`**. Do not chase it, do
+not price or refuse anything for it, and if it evaporates that is their result,
+not this branch's.
+
+
 Branch `feat/grid-paths`, stacked on `feat/park-warp-solver` (#474).
 Worktree `.claude/worktrees/park-warp/.claude/worktrees/grid-paths`.
 **pnpm**, not npm. Dev port 5611 if needed.
