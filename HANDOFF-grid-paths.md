@@ -4355,3 +4355,33 @@ guard, is conclusive, and the mutation proof above is what actually settles it.
   `tmp-288end.mts`.
 - **Reproductions for the two mutations used this leg** are written out above in
   full; neither is on the branch.
+
+### The Overseer's question answered: seed 288's far quarter is NOT cut off
+
+`test/procgen/tmp-288reach.test.ts` (TEMP, delete with the probes) asks
+`reachableFromEntrance` — the game's own `NavGrid`, player radius and jump apex,
+bridge decks included — of every destination on seed 288.
+
+**CONTROL first, on the same run**, because a flood fill that answers everything
+the same way has answered nothing: a point 400 m outside the boundary comes back
+`reachable=false`. It discriminates.
+
+```
+  (400, 400)                   reachable=false                    <- control
+  gate/plaza/hotel/...         reachable=true   grassToNearestPaving= 0.00 m
+  FAR ferrisWheel              reachable=true   grassToNearestPaving= 9.07 m
+  FAR stall.spaceFerrisWheel   reachable=true   grassToNearestPaving= 7.71 m
+  FAR exit-ferrisWheel         reachable=true   grassToNearestPaving=10.99 m
+```
+
+**Plainly: a child can walk to the Space Ferris Wheel on seed 288.** She crosses
+the bridge and then walks **7.7 to 11.0 m over grass**, because those three
+destinations drew no ribbon. Every one of the park's other nineteen
+destinations has paving reaching it — `0.00 m` — so the three are the only ones
+in the park a child reaches off the paths.
+
+So this is **not** an unreachable attraction and not a lockout. It is a quarter
+of the park with a bridge into it and no paths in it, which is a
+looks-unfinished defect of exactly Jim's complaint #4 ("the paths don't go up to
+the door ... reliably"), not of #5's "useful places". Recorded so nobody
+escalates it as a lockout, and nobody files it as cosmetic either.
