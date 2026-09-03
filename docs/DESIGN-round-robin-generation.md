@@ -265,6 +265,16 @@ Two rules that keep it honest:
   entry added to the legality table is a design decision to record, never a
   silencer.
 
+**Which invariants generalise (Jim: "maybe in many cases — some not"):** the
+**overlap class** — every "X keeps off Y" pairing — is subsumed by the
+universal check, because they are all the same fact about ground. The
+**metric and reachability classes are not, and must not be**: detour ratios,
+lattice discipline, every-path-lit, every-doormat-usable are statements about
+quality and connectivity that no collision sweep can see, and "generalising"
+one of those away would be the forbidden weakening of an assertion. The suite
+ends up as: one universal ground check, plus the irreducibly specific quality
+checks, plus the old pairwise rows kept as the control group.
+
 Sequencing: this does **not** wait for the registry. It is buildable today on
 `ParkFacts`, it immediately widens coverage from named pairings to everything,
 and it then serves as the acceptance test for every migration stage — the
