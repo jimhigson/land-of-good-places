@@ -5664,3 +5664,18 @@ export function debugNodeScreens(x: number, z: number): unknown {
     side: rail.side,
   };
 }
+
+/** TEMP diagnostic: what refuses a point for streetSegmentClear. */
+export function debugWhatBlocks(x: number, z: number): unknown {
+  const out: string[] = [];
+  for (const plot of streetPlots()) {
+    const d = distanceToPlotEdge(plot, x, z);
+    if (d < 8) out.push(`plot ${(plot as { id?: string }).id ?? '?'} edgeDist=${d.toFixed(2)}`);
+  }
+  out.push(`boundary=${boundaryDistanceCached(x, z).toFixed(2)}`);
+  for (const foot of archFootBlockers()) {
+    const d = Math.hypot(x - foot.x, z - foot.z);
+    if (d < foot.radius + 6) out.push(`archFoot r=${foot.radius.toFixed(2)} dist=${d.toFixed(2)}`);
+  }
+  return out;
+}
