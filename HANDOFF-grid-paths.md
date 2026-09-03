@@ -263,6 +263,42 @@ apron knot at the first bridge) has a named, measured cause and a fix.
 seed anywhere in this leg that is worse than it started. Chase it with
 `tmp-pocket.mts` before the invariants.
 
+### What the remaining 45 stranded waypoints actually are (measured)
+
+`scripts/tmp-pocket.mts` on 288 and 11. **They are three different causes, and
+none of them is the one seed 131 had.** Do not treat the remaining count as one
+defect.
+
+**(a) A lone door nobody paved to — `nbrs=0`.** Seed 288 `(-26.6, -65.0)`, zero
+neighbours, 22.32 m to the nearest reachable node. That is
+`stall.railRacer`'s doormat, and `tmp-doors.mts` names `stall.railRacer` as one
+of only three doors that fail outright on any seed. Seed 11 has two more of the
+same shape: `(-11.1, -47.4)` and `(66.1, -21.6)`, both `nbrs=0`, both 26 m from
+anything. **This is the starved-door tail the brief was originally aimed at**,
+and it is now small: three doors across sixteen seeds (115 and 225 having gone
+green).
+
+**(b) An island district.** Seed 11's other **19** stranded waypoints are one
+richly-connected cluster around x −30..−42, z −19..+9 — `spur-hotel`'s far end
+(at 217..231), `spur-stall.skyCruiser` (at 79..150) and
+`connector-hotel-stall.skyCruiser` (at 15..44). They have 6–11 neighbours each,
+all naming each other, and the nearest *reachable* node is **14.3–24.0 m away
+in every single case**. So the hotel/skyCruiser quarter is paved, internally
+walkable, and joined to the rest of the park by nothing at all. Note
+`spur-hotel` is reachable at at=0..94 (it climbs a bridge, `onRamp=true`,
+h up to 4.63) and unreachable by at=217 — so the break is somewhere in
+at 94..217, which is where to look first.
+
+**(c) Two near-misses.** Seed 288's other two, `(-32.5, -23.6)` and
+`(-34.5, -16.5)`, have `nbrs=1` and sit 9.6–10.0 m from a reachable
+`spur-station-0` sample — just past `MAX_EDGE` (13 m) with something in the
+chord.
+
+**Seed 288's 1 -> 3 regression is (a) plus (c)**, so it is not a new class:
+the reservation is forbidden ground now, and a spur that used to reach through
+it no longer does. Fixing (a) is likely to fix the regression too — do that
+before reaching for anything else.
+
 ### Still to get right
 
 - `pointStandsOnBridgeMasonry` (used by `nodeOk` at ~1649 and `usable` at
