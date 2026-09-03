@@ -5647,3 +5647,25 @@ One risk to state plainly: a rewrite handed to a fleet becomes the same object
 again, because parallel agents working on shared ground manufacture exactly
 these seams. Two agents' correct fixes collided this week. **This wants one
 design, held tightly, before anyone implements in parallel.**
+
+# CHECKPOINT — 3 Sep, eleventh custodian (Fable)
+
+**This agent runs `claude-fable-5` (Fable 5)** — the model the work was
+originally assigned to, per the replacement rule in CLAUDE.md. Worktree
+`.claude/worktrees/grid-paths-fable`, branch `grid-paths-fable` at `ecd7c165`.
+
+- **The unmeasured gate commit's sweep is RUNNING** (all sixteen seeds via
+  `tmp-sweep2.sh`, then `test:procgen`, both redirected to files, exit codes
+  captured — never piped). Not yet complete. Per the standing instruction: if
+  anything but seed 5 moved against the verified baseline in the handover
+  above, the commit gets reverted and the revert grep-verified.
+- **Jim ruled on direction, in conversation, today**: round-robin generation
+  with backtracking against one shared registry, deterministic via PRNG,
+  unwinding as far as an empty park — so the generator is total and no seed
+  can fail. Design written and pushed on `design/round-robin-generation`
+  (`docs/DESIGN-round-robin-generation.md`), revising `design/ground-claims`
+  by moving round-robin from stage 5 to the spine. No PR opened, nothing
+  implemented — awaiting Jim's ruling on the document per the Overseer.
+- This branch (`feat/grid-paths`) remains frozen by Jim's stop order. Nothing
+  on it has been changed by this agent; this checkpoint and the sweep result
+  are the only additions.
