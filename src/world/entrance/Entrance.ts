@@ -867,19 +867,23 @@ function buildGatewayPath(
   const halfWidth = reach.halfWidth ?? GATEWAY_PATH_FALLBACK_HALF_WIDTH;
 
   /**
-   * One layer, `half` metres either side of the gate's axis, at its own lift,
-   * stopping `margin` short of the published paving — which is the paving's
-   * *surface*, so the layer that has to stop clear of the network's **kerb**
-   * says so with the same overhang the network draws it at.
+   * One band of the run, between two signed offsets from the gate's axis, at
+   * its own lift, stopping `margin` short of the published paving — which is
+   * the paving's *surface*, so a band that has to stop clear of the network's
+   * **kerb** says so with the same overhang the network draws it at.
    */
-  const layer = (
+  const band = (
     name: string,
-    half: number,
+    fromX: number,
+    toX: number,
     lift: number,
     margin: number,
     material: MeshStandardMaterial,
   ): Mesh | null => {
-    const road = densify(entranceRoadInnerEdgeAcross(ENTRANCE_GATE_X, half), GATEWAY_PATH_COLUMN);
+    const road = densify(
+      entranceRoadInnerEdgeAcross((fromX + toX) / 2, Math.abs(toX - fromX) / 2),
+      GATEWAY_PATH_COLUMN,
+    );
     if (road.length < 2) return null;
     // **Each column stops where the paving under *it* starts**, so the far end
     // follows the edge of what it meets instead of cutting across it.
@@ -896,18 +900,40 @@ function buildGatewayPath(
     return mesh;
   };
 
-  // Kerb first, then surface — the same order and the same overhang the network
-  // is drawn in, so the cream frame sits under the sandy middle here exactly as
-  // it does everywhere else.
+  // **The kerb is the two bands you can see, not a slab under the path.** The
+  // network's own kerb was rebuilt this way (`pathGraph.ts`'s `addRibbonKerb`)
+  // because a full-width kerb ribbon laid 25 mm under an opaque surface only
+  // 0.425 m narrower is buried everywhere except its two edges — 3.99 m² of
+  // shared plane, the largest garden seam in the whole baseline. Drawing this
+  // one the same way is not imitation for its own sake: built as a slab it
+  // reproduced exactly that seam here, 1.53 m² of it against `path-kerb`,
+  // measured. Nothing changes on screen; the deleted middle was never visible.
+  const centre = ENTRANCE_GATE_X;
   return [
-    layer(
-      'entrance-gateway-path-kerb',
-      halfWidth + PATH_KERB_OVERHANG,
+    band(
+      'entrance-gateway-path-kerb-left',
+      centre - halfWidth - PATH_KERB_OVERHANG,
+      centre - halfWidth,
       PATH_KERB_LIFT,
       PATH_KERB_OVERHANG,
       pathKerbMaterial(),
     ),
-    layer('entrance-gateway-path', halfWidth, PATH_SURFACE_LIFT, 0, pathSurfaceMaterial()),
+    band(
+      'entrance-gateway-path-kerb-right',
+      centre + halfWidth,
+      centre + halfWidth + PATH_KERB_OVERHANG,
+      PATH_KERB_LIFT,
+      PATH_KERB_OVERHANG,
+      pathKerbMaterial(),
+    ),
+    band(
+      'entrance-gateway-path',
+      centre - halfWidth,
+      centre + halfWidth,
+      PATH_SURFACE_LIFT,
+      0,
+      pathSurfaceMaterial(),
+    ),
   ].filter((mesh): mesh is Mesh => mesh !== null);
 }
 
