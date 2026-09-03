@@ -4,10 +4,11 @@ import {
   CROSSING_STATION_CLEARANCE,
   CROSSING_STATION_STRUCTURE_CLEARANCE,
 } from './clearance';
-import { MIN_BRIDGE_HALF_LENGTH } from './bridgeFootprint';
+import { MIN_BRIDGE_HALF_LENGTH, MIN_RAMP_RUN } from './bridgeFootprint';
 import { STATION_GAP } from './fence';
 import { ENTRANCE_GATE_X, ENTRANCE_GATE_Z, isInEntranceGateway } from '../entrance/layout';
 import { crossingSiteBanned } from '../parkWarp';
+import { PARK_LAYOUT } from '../parkLayout';
 import {
   NARROW_HALF_WIDTH,
   SITE_ANGLE_OFFSETS,
@@ -120,6 +121,26 @@ const MARCH_STEP = 2.0;
 const SITE_SPACING = 24;
 
 const scratch = new Vector3();
+
+/**
+ * Which side of the railway a point stands on, in `crossings.ts`'s own sign
+ * convention (+1 along `(tangent.z, -tangent.x)` from the nearest rail point).
+ * Well-defined for any point meaningfully off the centre line; the loop is
+ * simple (never self-crossing), so the sign is stable park-wide.
+ *
+ * The one owner. `crossingPlan.ts` re-exports it as `railSideOf`, which is
+ * where every other module imports it from, and this module's own second-tier
+ * gate pass calls it directly rather than keeping a copy.
+ */
+const sideScratch = new Vector3();
+const sideTangent = new Vector3();
+export function railSideOf(x: number, z: number): 1 | -1 {
+  const route = TRAIN_PLAN.route;
+  const d = route.distanceNear(x, z);
+  const p = route.pointAt(d, sideScratch);
+  const t = route.tangentAt(d, sideTangent);
+  return Math.sign(t.z * (x - p.x) - t.x * (z - p.z)) >= 0 ? 1 : -1;
+}
 
 /** The same memo for "how far from the rail centre line" — `distanceNear`
  * walks the whole solved loop per query. */
@@ -266,7 +287,10 @@ function sidePlusDirection(tangent: Vector3): readonly [number, number] {
   return [tangent.z, -tangent.x];
 }
 
-function bridgeCandidateAt(railDistance: number): Candidate | null {
+function bridgeCandidateAt(
+  railDistance: number,
+  rampFloor: number = SITE_RAMP_FLOOR,
+): Candidate | null {
   if (stationBlocked(railDistance)) return null;
   const route = TRAIN_PLAN.route;
   const point = new Vector3();
@@ -275,7 +299,7 @@ function bridgeCandidateAt(railDistance: number): Candidate | null {
   route.tangentAt(railDistance, tangent);
   const [perpX, perpZ] = sidePlusDirection(tangent);
 
-  const fit = fitBridgeAcross(point.x, point.z, perpX, perpZ, plannerBlocked);
+  const fit = fitBridgeAcross(point.x, point.z, perpX, perpZ, plannerBlocked, rampFloor);
   if (!fit) return null;
   return {
     railDistance,
@@ -325,7 +349,7 @@ function bridgeCandidateAt(railDistance: number): Candidate | null {
  * carries the re-scoped question — why seed 2 proves no bridge sites at all,
  * which is the defect that actually let two bridges collide.
  */
-function footprintsOverlap(a: Candidate, b: Candidate): boolean {
+function footprintsOverlap(a: CrossingSite, b: CrossingSite): boolean {
   const axes = [
     [a.dirX, a.dirZ],
     [-a.dirZ, a.dirX],
@@ -336,7 +360,7 @@ function footprintsOverlap(a: Candidate, b: Candidate): boolean {
   const dz = b.z - a.z;
   for (const [axX, axZ] of axes) {
     // Each rectangle's own extent on this axis, and the gap between centres.
-    const extent = (c: Candidate): number =>
+    const extent = (c: CrossingSite): number =>
       Math.abs((c.dirX * axX + c.dirZ * axZ) * MIN_BRIDGE_HALF_LENGTH) +
       Math.abs((-c.dirZ * axX + c.dirX * axZ) * c.halfWidth);
     // A single axis on which they are apart proves they do not overlap.
@@ -449,6 +473,114 @@ export interface SolvedCrossingSites {
 }
 
 /**
+ * **The gate gets a second tier when the first proves nothing near it** — a
+ * backtrack ladder for exactly one site, and only when the alternative is a
+ * park whose front gate is joined to nothing.
+ *
+ * The park's arch is world-fixed at `[0, 54]` and the walk in from it has to
+ * reach the ring. Where the loop runs between the two, that walk must cross on
+ * a bridge — there is no level tier any more — so a seed with no site anywhere
+ * near the gate's own stretch of loop strands its whole entrance.
+ *
+ * ## Measured on the canonical seed, 2 Sep 2026
+ *
+ * `scripts/tmp-ribboncomp.mts` floods the drawn paving from the backbone: the
+ * canonical seed has **two** paving components and the second is
+ * `gate-approach` alone — a 7.2 m ribbon from the arch touching nothing else in
+ * the park. `scripts/tmp-refusal.mts` (control: railD=300, a site that WAS
+ * kept, reads OK) says why no site serves it:
+ *
+ * ```
+ * railD=0.0 at (0.0, 41.0)     halfW=4.0 angle=0deg: reach 15.2/11.2 vs floor 12.1 -- SHORT
+ * railD=300.0 at (-38.6,11.2)  halfW=5.0 angle=0deg: reach 13.7/15.2 vs floor 12.1 -- OK
+ * ```
+ *
+ * The square-on fit at the very point the gate corridor meets the loop misses
+ * by **0.9 m on one side**, with **3.1 m to spare on the other**. And
+ * `SITE_RAMP_FLOOR` is `MIN_RAMP_RUN + 1.0`: the site clears the *real*
+ * acceptance bar (11.2 > 11.1) and is refused by the one extra stride of
+ * **planning** slack that exists so the late, real pass has something to spend
+ * on a lamp base or a bush trunk.
+ *
+ * So this pass re-marches the gate's own window at {@link MIN_RAMP_RUN} — the
+ * bar `bridgeFootprint.ts` itself accepts — and keeps the least oblique fit it
+ * finds. Giving up planning slack on a site that would otherwise not exist is a
+ * different decision, not a weaker rule: **`SITE_RAMP_FLOOR` is untouched for
+ * every other candidate on every seed**, which is the whole point of doing it
+ * here rather than by lowering the constant.
+ *
+ * Both of its guards reuse constants this file already owns rather than
+ * inventing a reach of their own: the window is {@link SITE_SPACING} either
+ * way of the gate's nearest rail distance, and the trigger is that no
+ * first-tier site is already inside it — so on a seed the first tier already
+ * serves, this runs, finds the site it was going to find, and adds nothing.
+ *
+ * Not to be confused with `selectSpaced`'s `serveTheGate` flag, which is a
+ * *ranking* change within the first tier. That was measured on 2 Sep 2026 and
+ * **reverted**: it moved canonical's sites by 2 m of rail distance and cost
+ * seed 11 (3 -> 7 stranded) and seed 451 (0 -> 1, losing green). It cannot help
+ * here because there is no first-tier candidate near the gate to prefer.
+ */
+function serveTheGateOnTheSecondTier(bridges: CrossingSite[]): void {
+  const route = TRAIN_PLAN.route;
+  // **Only when the walk in actually has to cross.** A site is not free: since
+  // the grid rework every crossing reserves a rectangle that is forbidden
+  // ground to every foreign leg, so an unneeded one lays a no-go across the
+  // park's entrance for nothing.
+  //
+  // Measured, 2 Sep 2026 (`scripts/tmp-gateside.mts`), ungated:
+  //
+  //   canonical  gateSide=-1 centreSide= 1   gained railD=1 @(0.8,41.0) reach 15.2/11.2
+  //                                          -> poi.stranded 4 -> 0, GREEN
+  //   208        gateSide=-1 centreSide=-1   gained railD=49 @(-1.9,37.3) reach 11.7/15.2
+  //                                          -> poi.stranded 0 -> 9, LOST GREEN
+  //
+  // Seed 208's gate stands on the **same** side of the loop as the fountain,
+  // so nothing about its walk in needs a bridge and the site it was handed was
+  // pure cost. The condition is therefore the structural one and not a
+  // threshold: the gate and the park's own middle on opposite sides of the
+  // track is exactly when the avenue must cross.
+  //
+  // `PARK_LAYOUT.fountain` is the same owner `paths.ts` reads its `PLAZA`
+  // from — the park's middle is asked of the solver that placed it, never
+  // re-derived here, and never approximated as the world origin.
+  const fountain = PARK_LAYOUT.fountain;
+  if (railSideOf(ENTRANCE_GATE_X, ENTRANCE_GATE_Z) === railSideOf(fountain.x, fountain.z)) {
+    return;
+  }
+  const gateRailDistance = route.distanceNear(ENTRANCE_GATE_X, ENTRANCE_GATE_Z);
+  const alongLoop = (a: number, b: number): number =>
+    Math.abs(route.wrap(a - b + route.length / 2) - route.length / 2);
+  if (bridges.some((site) => alongLoop(site.railDistance, gateRailDistance) < SITE_SPACING)) {
+    return;
+  }
+  let best: Candidate | null = null;
+  for (let d = -SITE_SPACING; d <= SITE_SPACING; d += MARCH_STEP) {
+    const at = route.wrap(gateRailDistance + d);
+    if (crossingSiteBanned(at)) continue;
+    const candidate = bridgeCandidateAt(at, MIN_RAMP_RUN);
+    if (!candidate) continue;
+    if (
+      best === null ||
+      candidate.obliqueness < best.obliqueness ||
+      (candidate.obliqueness === best.obliqueness &&
+        Math.min(candidate.rampReachPos, candidate.rampReachNeg) >
+          Math.min(best.rampReachPos, best.rampReachNeg))
+    ) {
+      best = candidate;
+    }
+  }
+  if (!best) return;
+  // A site that would sit on ground a kept bridge already fills is not a
+  // second decision, it is the same one twice — the first tier's own rule.
+  const chosen = best;
+  if (bridges.some((other) => footprintsOverlap(chosen, other))) return;
+  const { obliqueness: _obliqueness, ...site } = chosen;
+  bridges.push(site);
+  bridges.sort((a, b) => a.railDistance - b.railDistance);
+}
+
+/**
  * The feasibility march as a generator, one candidate rail distance per
  * `yield` — so the boot (`boot/parkGeneration.ts`) can spread the ~300 ms
  * solve across the cat-bus ride's frames exactly the way the train's own
@@ -470,6 +602,7 @@ export function* crossingSitesSearch(): Generator<number, SolvedCrossingSites, v
     if (bridge) bridgeCandidates.push(bridge);
   }
   const bridges = selectSpaced(bridgeCandidates);
+  serveTheGateOnTheSecondTier(bridges);
   // Zero bridge sites is an invalid park, full stop — there is no level
   // tier to fall back to (Jim, 2 Sep 2026: a path crosses the railway on a
   // bridge or not at all), and every route the paths could take across the

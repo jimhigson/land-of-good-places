@@ -253,6 +253,20 @@ export function fitBridgeAcross(
   perpX: number,
   perpZ: number,
   extraBlocked?: ExtraBlocked,
+  /**
+   * **How much ramp each side must prove.** {@link SITE_RAMP_FLOOR} — the real
+   * acceptance bar plus one stride of planning slack — for every ordinary
+   * candidate, and that is the default so no caller can drift off it by
+   * omission.
+   *
+   * A caller may pass {@link MIN_RAMP_RUN} instead, and exactly one does: the
+   * second-tier pass in `crossingPlanSolve.ts` that runs only when the first
+   * tier proved no site at all near the park's own gate. That is a backtrack
+   * ladder, not a lower floor — see its own comment for the measurement, and
+   * note that the slack it gives up is *planning* slack, so what it accepts is
+   * still a bridge `bridgeFootprint.ts` will really build.
+   */
+  rampFloor: number = SITE_RAMP_FLOOR,
 ): BridgeFitAcross | null {
   for (const halfWidth of SITE_HALF_WIDTHS) {
     for (const angleOffset of SITE_ANGLE_OFFSETS) {
@@ -271,7 +285,7 @@ export function fitBridgeAcross(
         SITE_PLOT_MARGIN,
         extraBlocked,
       );
-      if (!deckClear || pos < SITE_RAMP_FLOOR || neg < SITE_RAMP_FLOOR) continue;
+      if (!deckClear || pos < rampFloor || neg < rampFloor) continue;
       return { halfWidth, dirX, dirZ, rampReachPos: pos, rampReachNeg: neg, angleOffset };
     }
   }
