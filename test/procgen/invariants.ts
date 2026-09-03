@@ -129,7 +129,13 @@ import {
   CARRIAGE_BODY_HALF_WIDTH,
   LOCO_BODY_TOP_Y,
 } from '../../src/world/train/trainDimensions.ts';
-import { RIDER_HEADROOM, STATION_GAP, TRAIN_CLEARANCE_Y } from '../../src/world/train/clearance.ts';
+import {
+  BRIDGE_WALL_THICKNESS,
+  DECK_HALF_LENGTH,
+  RIDER_HEADROOM,
+  STATION_GAP,
+  TRAIN_CLEARANCE_Y,
+} from '../../src/world/train/clearance.ts';
 // A leaf module (imports nothing), so it cannot pin the park's seed the way a
 // static import of `train/route.ts` would — see that constant's own note.
 import { TRAIN_MIN_TURN_RADIUS } from '../../src/world/train/turning.ts';
@@ -6426,6 +6432,115 @@ const everyProvenBridgeSiteKeepsItsBridge: Invariant = (facts) => {
 };
 
 /**
+ * **A bridge's masonry stands inside the ground `paths.ts` reserved for it.**
+ *
+ * The reservation is a rectangle round each proven crossing site that
+ * `paths.ts` forbids to every foreign leg before a single path is drawn
+ * (`segmentCutsABridgeRamp`; the half-width is `bridgeScreenHalfAcross`, whose
+ * answer this reads off `ParkFacts` rather than restating). The bridge is then
+ * built much later, from the drawn path, with levers the layout never sees: a
+ * width taken from whatever ribbon crosses here, a lateral shift to dodge an
+ * obstacle, and a spine that follows the path's own curve.
+ *
+ * **Nothing has ever checked that the second fits inside the first**, in either
+ * direction, and the two have drifted for the life of the crossing planner.
+ * Measured 2 Sep 2026 across the sixteen-seed pool, the three numbers involved
+ * are all different: the masonry built reaches `|across|` 2.52 m (3.72 m on the
+ * one curved spine), the constants permit 2.95 m, this band forbids 4.5–5.5 m,
+ * and the builder's own licence — width plus `bridgeSpine.ts`'s
+ * `DEVIATION_CAP` plus `bridgeFootprint.ts`'s `maxLateralShiftFor` — runs to
+ * nearly 10 m. **The screen is narrower than the licence**, so the drift is not
+ * merely wasteful: masonry may legally be built on ground no ribbon was ever
+ * kept off, and a child then walks a drawn path into a wall. That is issue
+ * #414 exactly, which `segmentCutsABridgeRamp`'s own doc comment predicted
+ * would "come straight back wearing different clothes" if these two ever
+ * parted company.
+ *
+ * So this is the mechanism that replaces that comment's promise. It measures
+ * the **built park** — where the deck a child can really stand on actually is,
+ * swept in each site's own straight frame — and adds `PLAYER_RADIUS +
+ * BRIDGE_WALL_THICKNESS` to reach the outer face of the parapet, the same
+ * arithmetic `bridgeFootprint.ts` builds the wall by.
+ *
+ * It fires in both directions, and both are real defects:
+ *
+ * - **masonry outside the band** — unscreened stone, the #414 shape;
+ * - **a neighbouring bridge's masonry inside this site's band** — the
+ *   `footprintsOverlap`/`paths.ts` disagreement about how long a bridge is,
+ *   which is what strands `bridge-walk-0` on seed 288.
+ *
+ * A site whose reservation carries no deck at all asserts nothing, and says so
+ * on `process.stderr` rather than passing silently — the coverage here is a
+ * function of how many proven sites a leg actually chose to cross at, which is
+ * not something the seed guarantees.
+ */
+const builtMasonryStaysInsideItsReservation: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const sites = facts.plannedBridgeSites;
+  const bridges = facts.world.train.bridges;
+
+  /** Widest `|across|` in this site's own straight frame at which any built
+   * bridge's walkable deck stands, swept over the reservation's own `along`
+   * extent. `covers` is the deck a child can stand on; the masonry's outer face
+   * is that plus her own body and the wall's thickness. */
+  const sweep = (site: (typeof sites)[number]): { lo: number; hi: number } => {
+    const nx = site.dirZ;
+    const nz = -site.dirX;
+    const alongMin = -(DECK_HALF_LENGTH + site.rampReachNeg);
+    const alongMax = DECK_HALF_LENGTH + site.rampReachPos;
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let along = alongMin; along <= alongMax; along += 0.5) {
+      const bx = site.x + site.dirX * along;
+      const bz = site.z + site.dirZ * along;
+      for (let a = -14; a <= 14; a += 0.1) {
+        const x = bx + nx * a;
+        const z = bz + nz * a;
+        if (bridges.some((bridge) => bridge.covers(x, z))) {
+          lo = Math.min(lo, a);
+          hi = Math.max(hi, a);
+        }
+      }
+    }
+    return { lo, hi };
+  };
+
+  let measured = 0;
+  for (const site of sites) {
+    const { lo, hi } = sweep(site);
+    if (lo === Infinity) continue;
+    measured += 1;
+    const outerFace = Math.max(Math.abs(lo), Math.abs(hi)) + PLAYER_RADIUS + BRIDGE_WALL_THICKNESS;
+    if (outerFace > site.screenHalfAcross) {
+      complaints.push(
+        `the bridge masonry standing in the reservation of the crossing site at ` +
+          `(${fmt([site.x, site.z])}), railDistance ${site.railDistance.toFixed(1)}, reaches ` +
+          `${outerFace.toFixed(2)} m from that site's axis, while paths.ts only kept other ` +
+          `legs out to ${site.screenHalfAcross.toFixed(2)} m — ` +
+          `${(outerFace - site.screenHalfAcross).toFixed(2)} m of stone on ground no ribbon ` +
+          `was ever screened off (walkable deck spans across ${lo.toFixed(2)} to ${hi.toFixed(2)}). ` +
+          'Either the bridge was built outside the ground reserved for it, or a neighbouring ' +
+          "bridge is standing inside this site's reservation",
+      );
+    }
+  }
+
+  // `process.stderr`, not `console.log`: vitest's default reporter hides
+  // console output from *passing* tests, which is exactly the run where a
+  // coverage note matters.
+  process.stderr.write(
+    `[reservation cover] ${
+      sites.length === 0
+        ? 'the planner proved NO bridge sites on this seed, so this invariant ASSERTS NOTHING'
+        : `${measured} of ${sites.length} proven site reservation(s) carry a built deck` +
+          (measured === 0 ? ' — so this invariant ASSERTS NOTHING on this seed' : '')
+    }\n`,
+  );
+
+  return complaints;
+};
+
+/**
  * **No bridge stands where the crossing planner proved none fits.** The
  * converse of {@link everyProvenBridgeSiteKeepsItsBridge}, and the direction
  * that was missing.
@@ -8606,6 +8721,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     everyProvenBridgeSiteKeepsItsBridge,
   ],
   ['no drawn path ends in mid-air on a bridge', noDrawnPathEndsStrandedOnABridge],
+  [
+    "a bridge's masonry stands inside the ground paths.ts reserved for it",
+    builtMasonryStaysInsideItsReservation,
+  ],
   [
     'no bridge stands where the crossing planner proved none fits',
     noBridgeStandsWhereNoneWasProven,
