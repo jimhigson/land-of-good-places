@@ -1,19 +1,16 @@
-import {
-  BufferAttribute,
-  BufferGeometry,
-  CatmullRomCurve3,
-  Mesh,
-  MeshStandardMaterial,
-  Vector3,
-} from 'three';
+import { type BufferAttribute, CatmullRomCurve3, Mesh, Vector3 } from 'three';
 import {
   PATH_KERB_LIFT,
   PATH_KERB_OVERHANG,
   PATH_SURFACE_LIFT,
 } from '../core/constants';
-import { PALETTE } from '../core/palette';
-import { pathTexture } from '../core/textures';
-import { terrainHeight, terrainNormal } from './terrain';
+import {
+  addPathRibbon,
+  GeometryBuilder,
+  pathKerbMaterial,
+  pathSurfaceMaterial,
+} from './pathSurface';
+import { terrainHeight } from './terrain';
 import { buildGraph, PLAZA, routeCurve, type PathGraph, type RouteDefinition } from './paths';
 
 /**
@@ -202,7 +199,7 @@ export function buildPaths(): Mesh[] {
   for (const route of ROUTES) {
     const curve = routeCurve(route);
     const divisions = Math.max(24, Math.round(curve.getLength() / 0.8));
-    addRibbon(surface, curve, route.width, divisions, PATH_SURFACE_LIFT);
+    addPathRibbon(surface, curve, route.width, divisions, PATH_SURFACE_LIFT);
     addRibbonKerb(kerb, curve, route.width, PATH_KERB_OVERHANG, divisions, PATH_KERB_LIFT);
     recordSamples(curve, divisions, route.width / 2);
   }
@@ -210,28 +207,11 @@ export function buildPaths(): Mesh[] {
   addDisc(surface, PLAZA.x, PLAZA.z, PLAZA.radius, 48, 5, PATH_SURFACE_LIFT);
   addAnnulusKerb(kerb, PLAZA.x, PLAZA.z, PLAZA.radius, PLAZA.radius + PATH_KERB_OVERHANG * 2, 48, PATH_KERB_LIFT);
 
-  const surfaceMaterial = new MeshStandardMaterial({
-    map: pathTexture(1),
-    roughness: 0.95,
-    metalness: 0,
-    polygonOffset: true,
-    polygonOffsetFactor: -2,
-    polygonOffsetUnits: -2,
-  });
-  const kerbMaterial = new MeshStandardMaterial({
-    color: PALETTE.pathEdge,
-    roughness: 0.9,
-    metalness: 0,
-    polygonOffset: true,
-    polygonOffsetFactor: -1,
-    polygonOffsetUnits: -1,
-  });
-
-  const surfaceMesh = new Mesh(surface.build(), surfaceMaterial);
+  const surfaceMesh = new Mesh(surface.build(), pathSurfaceMaterial());
   surfaceMesh.name = 'path-surface';
   surfaceMesh.receiveShadow = true;
 
-  const kerbMesh = new Mesh(kerb.build(), kerbMaterial);
+  const kerbMesh = new Mesh(kerb.build(), pathKerbMaterial());
   kerbMesh.name = 'path-kerb';
   kerbMesh.receiveShadow = true;
 
@@ -439,51 +419,6 @@ function addAnnulusKerb(
   }
 }
 
-function addRibbon(
-  builder: GeometryBuilder,
-  curve: CatmullRomCurve3,
-  width: number,
-  divisions: number,
-  lift: number,
-): void {
-  const half = width / 2;
-  const point = new Vector3();
-  const tangent = new Vector3();
-  let travelled = 0;
-  let previousX = 0;
-  let previousZ = 0;
-
-  for (let i = 0; i <= divisions; i += 1) {
-    const t = i / divisions;
-    curve.getPoint(t, point);
-    curve.getTangent(t, tangent);
-    // Perpendicular on the ground plane.
-    const nx = -tangent.z;
-    const nz = tangent.x;
-    const length = Math.hypot(nx, nz) || 1;
-
-    if (i > 0) travelled += Math.hypot(point.x - previousX, point.z - previousZ);
-    previousX = point.x;
-    previousZ = point.z;
-
-    const lx = point.x + (nx / length) * half;
-    const lz = point.z + (nz / length) * half;
-    const rx = point.x - (nx / length) * half;
-    const rz = point.z - (nz / length) * half;
-
-    // Right edge before left edge: that ordering makes the quads wind
-    // anticlockwise seen from above, so the ribbon faces the sky.
-    const v = travelled / Math.max(1, width);
-    builder.vertex(rx, terrainHeight(rx, rz) + lift, rz, 0, v);
-    builder.vertex(lx, terrainHeight(lx, lz) + lift, lz, 1, v);
-
-    if (i > 0) {
-      const base = builder.vertexCount - 4;
-      builder.quad(base, base + 1, base + 2, base + 3);
-    }
-  }
-}
-
 /** A paved circle (the fountain plaza), built as concentric rings. */
 function addDisc(
   builder: GeometryBuilder,
@@ -516,44 +451,3 @@ function addDisc(
   }
 }
 
-/**
- * Minimal geometry accumulator so the whole path network collapses into a
- * single draw call per layer.
- */
-class GeometryBuilder {
-  private readonly positions: number[] = [];
-  private readonly normals: number[] = [];
-  private readonly uvs: number[] = [];
-  private readonly indices: number[] = [];
-  private readonly scratchNormal = new Vector3();
-
-  get vertexCount(): number {
-    return this.positions.length / 3;
-  }
-
-  vertex(x: number, y: number, z: number, u: number, v: number): void {
-    this.positions.push(x, y, z);
-    // Normals come from the terrain function rather than computeVertexNormals():
-    // the plaza fan has degenerate triangles at its centre, which would leave
-    // those vertices with a zero-length normal and a black splodge in the middle
-    // of the paving.
-    const normal = terrainNormal(x, z, this.scratchNormal);
-    this.normals.push(normal.x, normal.y, normal.z);
-    this.uvs.push(u, v);
-  }
-
-  /** Two triangles for a quad given as (a, b) then (c, d) vertex pairs. */
-  quad(a: number, b: number, c: number, d: number): void {
-    this.indices.push(a, b, c, b, d, c);
-  }
-
-  build(): BufferGeometry {
-    const geometry = new BufferGeometry();
-    geometry.setAttribute('position', new BufferAttribute(new Float32Array(this.positions), 3));
-    geometry.setAttribute('normal', new BufferAttribute(new Float32Array(this.normals), 3));
-    geometry.setAttribute('uv', new BufferAttribute(new Float32Array(this.uvs), 2));
-    geometry.setIndex(this.indices);
-    geometry.computeBoundingSphere();
-    return geometry;
-  }
-}
