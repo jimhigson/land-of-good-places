@@ -47,6 +47,7 @@ import {
   ENTRANCE_CLEAR_Z,
 } from './entrance/layout';
 import { hidesTheArrivingBus } from './entrance/arrivalSightline';
+import { distanceToEntranceCorridor } from './entrance/roadRoute';
 import { RAIL_RACE_PLAN } from './railRace/plan';
 import { SLIDE_PLAN } from './slide/plan';
 import { FERRIS_WHEEL_EXIT } from '../minigames/ferrisWheel/exit';
@@ -1165,6 +1166,33 @@ function buildTreeline(): Group {
     // 0.35` is where the blob's centre goes and it stands `radius * 1.15` up
     // from there at its tallest roll.
     if (hidesTheArrivingBus(x, z, ground + height + radius * 1.5, radius)) continue;
+
+    // **And nothing stands in the road.** Jim, 3 September 2026: the bus drives
+    // through trees on its final approach. It does, and structurally rather
+    // than by bad luck on one seed — measured on the built park
+    // (`scripts/probe-road-trees.mts`), **64 to 106 of these instances per seed
+    // reach into the corridor the bus sweeps**, standing at outsets of 13.7 to
+    // 21.1 m. That is not a coincidence: this band runs from 11.5 m out to
+    // `TERRAIN_APRON - 1.5`, and the road's tails climb from the kerb to
+    // `ENTRANCE_ROAD_TAIL_OUTSET` right through it, so the road and the
+    // woodland occupy the same annulus by construction.
+    //
+    // **The trees give way, not the road**, and which way round that goes is a
+    // measurement rather than a preference: `roadRoute.ts` derives the corridor
+    // from `PARK_BOUNDARY` alone — no scenery, no rides, nothing built — so it
+    // is a pure pre-scene plan in exactly the sense {@link onRailway} describes
+    // for the train's route, and at the moment it solves, not one tree exists to
+    // avoid. The road also has nowhere to go: `check:entrance-road`'s own
+    // impossibility proof pins its outset between the bus door's pavement and
+    // the rim, with the two bounds crossing by 0.15 m. So the road claims its
+    // corridor and the woodland respects it, which is the same move pylon
+    // placement makes when it fells foliage.
+    //
+    // Refused rather than moved, for the reason above: the RNG stream is
+    // untouched and every tree that is not in the road stands where it did.
+    // What a player sees is a cleared run through the woodland where the road
+    // comes over the brow, which is what a road through woodland looks like.
+    if (distanceToEntranceCorridor(x, z) < radius) continue;
 
     trunks.push({
       position: new Vector3(x, ground + height / 2, z),

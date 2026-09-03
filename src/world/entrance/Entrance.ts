@@ -736,6 +736,37 @@ function buildEntranceRoad(): Mesh[] {
     return { z: ENTRANCE_STOP_Z, halfWidth: null };
   };
 
+  /**
+   * The same question asked **down one column** of the gateway path rather than
+   * down its middle: how far in can `x` run before the park's own paving is
+   * under it?
+   *
+   * Asking only about the middle is not enough, and the coplanar sweep is what
+   * said so. Paving arrives at the gate as a ribbon with a straight end and two
+   * straight sides, and the gateway path is a few metres wide: stopping the
+   * whole width where the *centre* first meets paving left 0.64 m² of the path
+   * lying on `path-surface`, and its kerb 1.53 m² on `path-kerb` — two surfaces
+   * in one plane, which is the thing this exists to avoid. Every column stops
+   * on its own, so the join follows the shape of what it meets.
+   */
+  const columnReach = (x: number, from: number, margin: number, floor: number): number => {
+    for (let z = from; z >= floor; z -= 0.05) {
+      let paved = false;
+      const known = forEachPavedDisc((discX, discZ, radius) => {
+        if (Math.hypot(x - discX, z - discZ) < radius + margin) paved = true;
+      });
+      if (!known) return floor;
+      if (paved) return z;
+    }
+    // **A column that meets no paving stops level with the middle**, rather
+    // than running on to the bus stop on its own. Letting it run was measured
+    // and it is worse than it sounds: on seed 288 the columns off the end of
+    // the path's own approach found nothing, ran twelve metres in, and laid the
+    // path across the railway's ballast — 2.7 m² of shared plane where a
+    // metre-long stub was wanted.
+    return floor;
+  };
+
   const meshes: Mesh[] = [];
 
   // --- the kerb, along the road the bus actually drives ---------------------
@@ -754,7 +785,7 @@ function buildEntranceRoad(): Mesh[] {
   // the ground the terrain disc is actually built out to.
   meshes.push(curvedRoadRibbon('entrance-road-kerb', material, entranceRoadStations()));
 
-  meshes.push(...buildGatewayPath(spurReach()));
+  meshes.push(...buildGatewayPath(spurReach(), columnReach));
 
   return meshes;
 }
@@ -804,14 +835,30 @@ const GATEWAY_PATH_FALLBACK_HALF_WIDTH = 1.6;
  * walks. `entranceRoadInnerEdgeAcross` hands back the kerb's own vertices and
  * the quilt is built onto them.
  */
-function buildGatewayPath(reach: SpurReach): Mesh[] {
+function buildGatewayPath(
+  reach: SpurReach,
+  columnReach: (x: number, from: number, margin: number, floor: number) => number,
+): Mesh[] {
   const halfWidth = reach.halfWidth ?? GATEWAY_PATH_FALLBACK_HALF_WIDTH;
 
-  /** One layer, `half` metres either side of the gate's axis, at its own lift. */
-  const layer = (name: string, half: number, lift: number, material: MeshStandardMaterial): Mesh | null => {
-    const road = entranceRoadInnerEdgeAcross(ENTRANCE_GATE_X, half);
+  /**
+   * One layer, `half` metres either side of the gate's axis, at its own lift,
+   * stopping `margin` short of the published paving — which is the paving's
+   * *surface*, so the layer that has to stop clear of the network's **kerb**
+   * says so with the same overhang the network draws it at.
+   */
+  const layer = (
+    name: string,
+    half: number,
+    lift: number,
+    margin: number,
+    material: MeshStandardMaterial,
+  ): Mesh | null => {
+    const road = densify(entranceRoadInnerEdgeAcross(ENTRANCE_GATE_X, half), GATEWAY_PATH_COLUMN);
     if (road.length < 2) return null;
-    const park = road.map((point) => ({ x: point.x, z: reach.z }));
+    // **Each column stops where the paving under *it* starts**, so the far end
+    // follows the edge of what it meets instead of cutting across it.
+    const park = road.map((point) => ({ x: point.x, z: columnReach(point.x, point.z, margin, reach.z) }));
     // A row per metre or so of run, for the same reason the road is sampled at
     // a metre: the ground under the arch is not flat and a ribbon laid in two
     // rows cuts the corner of it.
@@ -832,10 +879,52 @@ function buildGatewayPath(reach: SpurReach): Mesh[] {
       'entrance-gateway-path-kerb',
       halfWidth + PATH_KERB_OVERHANG,
       PATH_KERB_LIFT,
+      PATH_KERB_OVERHANG,
       pathKerbMaterial(),
     ),
-    layer('entrance-gateway-path', halfWidth, PATH_SURFACE_LIFT, pathSurfaceMaterial()),
+    layer('entrance-gateway-path', halfWidth, PATH_SURFACE_LIFT, 0, pathSurfaceMaterial()),
   ].filter((mesh): mesh is Mesh => mesh !== null);
+}
+
+/**
+ * How finely the gateway path is cut across its width, in metres.
+ *
+ * The far end of each column stops on its own, so the end of the path is a
+ * staircase approximating the edge of the paving it meets — and the width of a
+ * step is how far that approximation can be wrong. At the road ring's own
+ * spacing (about a metre) the error left 0.22 m² of path lying on
+ * `path-surface`; the sweep drops any overlap under a square centimetre, so the
+ * step has to be small enough that no single one of them reaches that.
+ */
+const GATEWAY_PATH_COLUMN = 0.15;
+
+/**
+ * Splits a polyline so no segment is longer than `spacing`, **without moving
+ * any of its points**.
+ *
+ * Safe on the road's inner edge specifically because a point interpolated along
+ * one of its segments still lies exactly on the drawn kerb's own boundary — the
+ * boundary between two ring vertices *is* that straight segment. This is the
+ * distinction that made the earlier attempt fail: resampling the road's *centre
+ * line* and offsetting produces points that are near the kerb rather than on
+ * it, and near is a seam.
+ */
+function densify(
+  points: readonly { readonly x: number; readonly z: number }[],
+  spacing: number,
+): { x: number; z: number }[] {
+  const out: { x: number; z: number }[] = [];
+  for (let i = 0; i < points.length; i += 1) {
+    const a = points[i] as { x: number; z: number };
+    out.push({ x: a.x, z: a.z });
+    const b = points[i + 1];
+    if (!b) break;
+    const steps = Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / spacing);
+    for (let s = 1; s < steps; s += 1) {
+      out.push({ x: a.x + ((b.x - a.x) * s) / steps, z: a.z + ((b.z - a.z) * s) / steps });
+    }
+  }
+  return out;
 }
 
 /**
