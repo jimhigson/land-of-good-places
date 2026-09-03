@@ -2366,12 +2366,69 @@ function relayPolyline(
   const aj = zs.indexOf(a[1]);
   const bi = xs.indexOf(b[0]);
   const bj = zs.indexOf(b[1]);
+  // **An endpoint's own row or column is a step out to the grid, never an
+  // arterial.** The line set above is the lattice at half pitch *plus*
+  // `a` and `b`'s own rows and columns, and those last four are private
+  // lines: nothing else in the park shares them.
+  //
+  // Measured on seed 11, 2 Sep 2026. `spur-hotel` came out carrying
+  // `(-42.2, 42.9) -> (-42.2, 3.2)` — **one straight run 39.7 m long on
+  // x = -42.2**, the hotel door's own column — while `spur-stall.skyCruiser`
+  // carried `(-43.0, 30.9) -> (-43.0, 6.9)` beside it. Two long parallel
+  // arterials **0.8 m apart**, on two private lines.
+  //
+  // That is Jim's report #3 ("they should be on an approximate grid layout")
+  // in its plainest form, and it is also why seed 11 lost a whole district:
+  // `Scenery.ts` places border fences from `pathCentreline`, a fence bordering
+  // one of those two ribbons necessarily lands on the other, and the fence
+  // that did measured 10.3 m of solid ground straight down the middle of
+  // `spur-hotel` (peak push 0.81 m at (-42.81, 12.39)). `poiGraph` then
+  // dropped the two seeds it could not place, leaving a 14.27 m hole against
+  // a 13 m `MAX_EDGE`, and everything past it — 19 waypoints — was stranded.
+  //
+  // **The fence is correct; the paths it was given were not.** This cannot be
+  // fixed by asking the collision world here: the fence does not exist yet
+  // when this runs, and cannot. A generator whose output is consumed by a
+  // later placer cannot validate against that placer's output — the
+  // constraint has to be a rule this router can honour on its own. That rule
+  // is grid discipline: a private line may carry a cell only while it is
+  // still within one {@link STREET_PITCH} of the endpoint that owns it, which
+  // is the "short step out" it exists for. Beyond that the walk must be on a
+  // line the rest of the park shares, so two routes can never end up
+  // shoulder to shoulder on lines of their own.
+  const HALF_PITCH = STREET_PITCH / 2;
+  const sharesAGridLine = (value: number, origin: number): boolean =>
+    Math.abs(Math.round((value - origin) / HALF_PITCH) * HALF_PITCH + origin - value) < 1e-6;
+  /** How far a cell on `value`'s **private** line stands from the endpoint
+   * that owns it. **Zero for a line the park shares**, so a lattice or
+   * half-pitch cell is never constrained by this — the cap below applies to
+   * private lines and nothing else. `Infinity` for a private line with no
+   * owner, which cannot happen and would be refused if it did. */
+  const privateReach = (
+    value: number,
+    origin: number,
+    pick: (p: readonly [number, number]) => number,
+    x: number,
+    z: number,
+  ): number => {
+    if (sharesAGridLine(value, origin)) return 0;
+    let best = Infinity;
+    for (const end of [a, b] as const) {
+      if (pick(end) !== value) continue;
+      best = Math.min(best, Math.hypot(end[0] - x, end[1] - z));
+    }
+    return best;
+  };
   const usable = new Uint8Array(w * h);
   for (let i = 0; i < w; i += 1) {
     for (let j = 0; j < h; j += 1) {
       const x = xs[i] as number;
       const z = zs[j] as number;
-      usable[at(i, j)] = !pointStandsOnBridgeMasonry(x, z) && legClear(x, z, x, z) ? 1 : 0;
+      const onGridDiscipline =
+        privateReach(x, PLAZA.x, (p) => p[0], x, z) <= STREET_PITCH &&
+        privateReach(z, PLAZA.z, (p) => p[1], x, z) <= STREET_PITCH;
+      usable[at(i, j)] =
+        onGridDiscipline && !pointStandsOnBridgeMasonry(x, z) && legClear(x, z, x, z) ? 1 : 0;
     }
   }
   usable[at(ai, aj)] = 1;
