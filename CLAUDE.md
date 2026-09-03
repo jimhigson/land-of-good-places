@@ -1154,6 +1154,28 @@ preview" check run or its posted comment; never construct one by hand.** The
 posted comment is regenerated on every push and always names the newest
 build, so the newest such comment is the only trustworthy source.
 
+**A `localhost` link is fine when he is at the Mac — and it is often the
+faster answer.** Jim, 3 September 2026: *"local is fine too, I don't care so
+long as I can try it, whatever is quickest"*, and then the rule: **"I need
+deployed when I'm using remote, and local is fine when I'm on my mac."**
+
+So the question is not "preview or localhost", it is **where is he**:
+
+- **At the Mac** — hand over the running dev server's URL, with its port and
+  the feature's deep link on it, and **leave that server up**. Waiting ~10
+  minutes for a preview build to publish something he could have opened
+  immediately is a cost with nothing bought.
+- **Remote** — the deploy preview, pulled fresh from the PR's newest preview
+  comment, because a `localhost` URL is useless to him and reads as
+  carelessness.
+
+If you do not know where he is, say which one you are giving him and offer
+the other; do not guess silently. And a localhost link carries the same
+duties as a preview one: it lands on the feature, it is one sentence of what
+he will see, the server stays running, and **it must work on a fresh profile
+without him being told to clear anything** — stale content on a reused port
+is a defect to fix, never a workaround to hand over.
+
 **Struck 3 September 2026 — PR *numbers* are out too, not just PR URLs.**
 This section used to say that referring to a PR by number in prose ("#340
 adds the `/bridge` link") was fine and often necessary. Jim, on being given
