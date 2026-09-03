@@ -4210,3 +4210,52 @@ overlap onto each other's feet.
 **That is the defect on 288, and it is in the crossing planner
 (`footprintsOverlap` in `crossingPlanSolve.ts`), not in the join pass and not in
 `noPathEndsNowhere`.** No post-pass can join a foot the lattice cannot leave.
+
+### THE RULING IS DISCHARGED: the joining branch is proved, watched, and kept
+
+The Overseer's ruling was *prove it or revert it*, and a deliberately mutated
+park was explicitly allowed. The mutation used, in `walkEveryBridge`:
+
+```ts
+// TEMP MUTATION: force every bridge walk to end on a bare foot
+if (process.env.LGP_FORCE_STRANDED_WALKS) return null;   // before `return settled && ...`
+```
+
+with the counter's guard forced to `if (true || ...)` so a zero row is
+distinguishable from no row. **Watched:**
+
+```
+canonical  stranded=2 joined=1 noPaving=0 refusedByTrim=1
+  bridge-walk-1  far foot (2.91,-11.45) -> new end (17.62,-15.40)
+                 6 points -> 10; onward path 3 grid nodes
+                 tail (2.91,-4.62) (14.93,-4.62) (14.93,-15.40) (17.62,-15.40)
+seed 5     stranded=2 joined=1 noPaving=0 refusedByTrim=1
+  bridge-walk-0  far foot (0.00,55.36) -> new end (5.12,57.26)
+                 7 points -> 8; onward path 2 grid nodes
+seed 11    stranded=0  (every deck already walked by another route)
+seed 451   stranded=1 joined=0 noPaving=0 refusedByTrim=1
+seed 288   stranded=1 joined=0 noPaving=1 refusedByTrim=0  — unchanged, and
+           correctly so: its foot is graph-isolated, mutation or not
+```
+
+The tails are axis-aligned lattice walks, which is the shape the pass claims to
+draw. **Both mutations reverted, grep-verified** (`grep -n "TEMP \|
+LGP_FORCE_STRANDED_WALKS\|if (true ||" src/world/paths.ts` returns only the
+pre-existing debug exports at the end of the file, which item 4 deletes).
+
+**And the mutation explains the narrowness rather than excusing it.** Unmutated,
+`walkEveryBridge` asks this same question at the moment it draws the walk, so
+anything the post-pass could find there has already been found. Its window is
+only paving laid *after* the walk is drawn — `ensureCompassTaps`,
+`addInterconnects`, a later bridge walk. That is small on purpose, and it is not
+inert: seed 116 exercises the refusal branch on an unmutated park, with
+`noPaving=0`, i.e. the far side's paving really was found.
+
+**Kept.** Both halves of the doc comment's claim are now measurements.
+
+### Also fixed: the counter said something it had not measured
+
+`${noPaving} with no paving on that side at all` -> `${noPaving} whose far side
+holds no paved node the lattice can reach from that foot`. The old wording is
+what produced the previous leg's wrong headline, and a whole brief was written
+on it.

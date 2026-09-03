@@ -4680,6 +4680,29 @@ function* pathGraphSolveOnce(): Generator<number, PathGraph, void> {
  * booth). A seam between a bridge walk and its onward leg is exactly where such
  * a vertex appears, so an extension the trim would alter is **refused**, and the
  * walk is left stranded rather than joined by a leg nobody screened.
+ *
+ * **Watched working, 3 Sep, because "correct by construction" is not evidence.**
+ * The joining branch fires on no seed in the sixteen-seed pool and on none of
+ * the 62 seeds outside it that build (1–120), so it was exercised on a
+ * deliberately mutated park instead: `walkEveryBridge`'s own `onward` query
+ * forced to `null`, which strands every walk and leaves this pass to find the
+ * far side for itself. It does:
+ *
+ * ```
+ * canonical  stranded=2 joined=1 refusedByTrim=1
+ *   bridge-walk-1  far foot (2.91,-11.45) -> new end (17.62,-15.40)
+ *   tail (2.91,-4.62) (14.93,-4.62) (14.93,-15.40) (17.62,-15.40)
+ * seed 5     stranded=2 joined=1 refusedByTrim=1
+ *   bridge-walk-0  far foot (0.00,55.36) -> new end (5.12,57.26)
+ * ```
+ *
+ * **And that mutation is also the explanation of the narrowness.** Unmutated,
+ * `walkEveryBridge` asks this very question at the moment it draws the walk, so
+ * anything this pass could find there, that one has already found. The window
+ * left is only paving laid *after* the walk was drawn — `ensureCompassTaps`,
+ * `addInterconnects`, or a later bridge walk. Small on purpose, not inert: the
+ * refusal branch fires unmutated on seed 116, where the far side's paving *was*
+ * found and the seam would have been trimmed into an unscreened leg.
  */
 function joinStrandedBridgeWalks(edges: PathEdge[], stranded: readonly StrandedBridgeWalk[]): void {
   const grid = pathGrid();
@@ -4731,7 +4754,17 @@ function joinStrandedBridgeWalks(edges: PathEdge[], stranded: readonly StrandedB
     console.warn(
       `bridge walks ending on a bare foot: ${stranded.length} — ` +
         `${joined} joined to the far side's paving, ` +
-        `${noPaving} with no paving on that side at all, ` +
+        // **Say what was measured, not the stronger thing it looks like.** This
+        // counter is the `onward` search coming back empty, and that search asks
+        // for a *paved grid node the lattice can reach from this foot* — not for
+        // paving. Seed 288 read as "no paving on that side at all" and was
+        // believed; measured, that side carries three destinations and paving
+        // 21.19 m from the foot, and what is actually true is that all 20 other
+        // grid nodes on that side are unreachable from the foot, whose only edge
+        // is the deck (it stands inside a *neighbouring* site's reservation —
+        // `paths.ts`'s own note above `nearestCompassPoint`, and
+        // `footprintsOverlap` in `crossingPlanSolve.ts` is where that lives).
+        `${noPaving} whose far side holds no paved node the lattice can reach from that foot, ` +
         `${refusedByTrim} refused because the seam would be trimmed into an unscreened leg`,
     );
   }
