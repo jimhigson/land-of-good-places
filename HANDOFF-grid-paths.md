@@ -4540,3 +4540,75 @@ moving which node wins.*
 **Item struck: `streetsShareLatticeLines` on 128.** Still open on 5 and 11,
 whose offenders are `spur-`s, not connectors — a different producer, to be
 instrumented rather than assumed to be this one.
+
+### Seeds 5 and 11 are NOT the same defect as 128 — the corner sort reproduces as neutral, now WITH a reason
+
+The `connector-` / `spur-` prefix split flagged at the top of this leg was
+real. 128's offender came from the **head-on elbow ladder**; 5's and 11's come
+from the **second connector block** (`corners`, `paths.ts` ~2741), whose own
+comment records that sorting corners by tail was measured neutral and reverted,
+and invites a successor: *"whoever finds a case where it bites should reach for
+it first."*
+
+**Built it, measured it, reverted it — it is still neutral, and this time the
+cause is named rather than the verdict merely repeated.**
+
+`test:procgen` with the corner sort: `4 failed | 1406 passed`, **violation set
+byte-identical** to the tie-break state. Seed 5's `spur-waterFight` control
+polyline is byte-identical too:
+
+```
+(20.0,-2.7) (29.1,-2.7) (29.1,-14.7) (17.1,-14.7) (17.1,-20.7) (-6.9,-20.7)
+(-6.9,-23.3) (7.8,-23.3) (11.7,-39.0) ...
+```
+
+**Why it cannot bite, measured.** Seed 5's leg is the connector
+node (-6.880,-26.736) -> corner -> foot (7.830,-23.308):
+
+| corner | nodeLeg | tail (private) | total | `streetClear` | `ring` | `railSide` | `ramp` |
+|---|---|---|---|---|---|---|---|
+| A (drawn) (-6.880,-23.308) | 3.43 | **14.71** | 18.14 | true | true | true | **true** |
+| B (alt) (7.830,-26.736) | 14.71 | **3.43** | 18.14 | true | true | true | **false, both legs** |
+
+**Corner B is refused by `segmentCutsABridgeRamp` on both of its legs.** The
+terminal is a *bridge foot*, so the alternative corner is the one that turns
+along the bridge's own axis and lies inside the reservation. Corner A is
+therefore correct, the tie is not a tie, and no ordering can change it.
+
+**MY PROBE WAS WRONG AND ITS OWN CONTROL DID NOT CATCH IT — recorded, because
+the next agent will otherwise trust it.** `scripts/tmp-corner.mts` reported
+both corners "clear" using `debugArrivalLegScreens`, which asks only
+`streetSegmentClear` — **one of the four screens in `legClear`** (the others
+are ring, rail side and bridge ramp). Its control (a corner 200 m outside the
+park) came back BLOCKED and looked like it discriminated, but it is blocked by
+the *street* screen, so it could never have detected a probe blind to the other
+three. **A control only discriminates on the axis it varies.** The honest
+instrument is `debugLegScreens`, which prints all four; that is what produced
+the table above. `tmp-corner.mts` must be deleted with the other probes or
+fixed to call `debugLegScreens`.
+
+**So the remaining `streetsShareLatticeLines` failures on 5 and 11 are a
+node-choice question after all** — the inherited framing holds for *these two*,
+and 128 was the exception to it. Seed 5's private run is structurally forced at
+that node: its only alternative corner is inside a bridge reservation. Removing
+it needs a different node, not a different shape, and that is the
+`debugDoorReach`/`tmp-128face.mts` question — *which screen refuses the nearer
+lattice nodes* — asked at the foot rather than at a door. Not started.
+
+**Revert grep-verified:** `grep -c 'corners.sort' src/world/paths.ts` -> 0;
+head-on tie-break confirmed still present (`privateLegOf` -> 3 matches);
+`tsc --noEmit` exit 0.
+
+### Where this leg leaves the queue
+
+- [x] `streetsShareLatticeLines` on **128** — fixed, both columns measured.
+- [ ] `streetsShareLatticeLines` on **5 and 11** — reframed as node-choice with
+      the alternative shape proved structurally unavailable on 5. Next question
+      is which screen refuses the nearer nodes at the foot.
+- [ ] 267 `detourRatiosStayReasonable` — honest baseline first (the route it
+      replaced ran through solid ground). NOT STARTED.
+- [ ] Stage-2 invariant (b). NOT STARTED.
+- [ ] Probe deletion — now also `tmp-elbowpick.mts` and `tmp-corner.mts`
+      (the latter is *wrong*, see above). `tmp-stoneground.mts` last.
+- [ ] The rebase onto `origin/main` (`check:coplanar` is on `main`, absent here).
+- [ ] `pnpm run check` has still NOT been run on this branch.
