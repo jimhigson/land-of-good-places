@@ -8,7 +8,7 @@ import { STATION_GAP } from './train/fence';
 import { FENCE_OFFSET } from './train/clearance';
 import { DECK_HALF_LENGTH } from './train/bridgeFootprint';
 import { CROSSING_SITES, type CrossingSite } from './train/crossingPlan';
-import { RAMP_SCREEN_MARGIN } from './train/bridgeFit';
+import { RAMP_SCREEN_MARGIN, SITE_RAMP_IDEAL } from './train/bridgeFit';
 import { COASTER_PLANS } from './coaster/plan';
 import { RAIL_RACE_PLAN } from './railRace/plan';
 import { archFeet } from './railRace/arch';
@@ -1378,8 +1378,8 @@ function segmentCutsABridgeRamp(
     const acrossA = -(ax - site.x) * site.dirZ + (az - site.z) * site.dirX;
     const alongB = (bx - site.x) * site.dirX + (bz - site.z) * site.dirZ;
     const acrossB = -(bx - site.x) * site.dirZ + (bz - site.z) * site.dirX;
-    const alongMin = -(DECK_HALF_LENGTH + site.rampReachNeg + RAMP_SCREEN_MARGIN);
-    const alongMax = DECK_HALF_LENGTH + site.rampReachPos + RAMP_SCREEN_MARGIN;
+    const alongMax = bridgeScreenHalfAlong();
+    const alongMin = -alongMax;
     // **The whole reservation, not the annulus round it.** Measured 2 Sep
     // 2026 (`scripts/tmp-sitedrift.mts`, which carries its own control): on
     // every site on seeds 24, 131 and 451 the built masonry stands at
@@ -1572,6 +1572,50 @@ export function bridgeScreenHalfAcross(
 }
 
 /**
+ * **How far along a crossing site's axis, either side of it, this file forbids
+ * ground to every foreign leg — the one owner of that half-length**, and the
+ * companion to {@link bridgeScreenHalfAcross}.
+ *
+ * It is deliberately **not** built from the site's own `rampReachPos` /
+ * `rampReachNeg`, and that is the fix for a measured defect rather than a
+ * stylistic preference.
+ *
+ * Those two numbers are the reach `crossingPlanSolve.ts` *proved* by walking
+ * out from the deck with its own margins (`SITE_PLOT_MARGIN`,
+ * `SITE_BOUNDARY_MARGIN`) and its own obstacle set. `bridgeFootprint.ts` then
+ * builds a ramp out to `idealRampRunFor`, which it probes with a **different**
+ * clearance test (`searchClear`, the real collision world, plus sibling guard
+ * rails) — so the built ramp routinely runs past the length the proof reached,
+ * and every metre it overruns is ground this file kept no ribbon off.
+ *
+ * Measured 3 Sep 2026 (`scripts/tmp-stoneground.mts`, two discriminating
+ * controls), sweeping every built deck against `bridgeSiteReserving`:
+ *
+ * | seed | site | overrun |
+ * |---|---|---|
+ * | 274 | railDistance 312 | **1.46 m** |
+ * | 326 | railDistance 44 | **0.69 m** |
+ * | 326 | railDistance 204 | **0.96 m** |
+ *
+ * Both seeds were `check:park` green and both passed
+ * `builtMasonryStaysInsideItsReservation`, because that invariant swept
+ * `along` between the bounds of the very rectangle it was testing against and
+ * so could never see an overrun.
+ *
+ * `SITE_RAMP_IDEAL` is the answer instead: it is `BRIDGE_RISE /
+ * BRIDGE_RAMP_GRADIENT`, the same expression `idealRampRunFor` takes a
+ * `Math.min` of, so it is a **true upper bound on every ramp the builder is
+ * licensed to build** and is known before a single path is drawn. This is the
+ * `along` axis receiving exactly the treatment this branch already gave the
+ * `across` axis when `segmentCutsABridgeRamp`'s `inner` went to `0`: reserve
+ * the whole rectangle the builder could occupy, not the one the proof happened
+ * to reach.
+ */
+export function bridgeScreenHalfAlong(margin: number = RAMP_SCREEN_MARGIN): number {
+  return DECK_HALF_LENGTH + SITE_RAMP_IDEAL + margin;
+}
+
+/**
  * **The ground a bridge will really stand on — deck, both ramps and the
  * parapets that flank them — known before a single path is drawn.**
  *
@@ -1675,8 +1719,7 @@ function bridgeSiteReserving(x: number, z: number, margin = RAMP_SCREEN_MARGIN):
     const across = -dx * site.dirZ + dz * site.dirX;
     if (Math.abs(across) > bridgeScreenHalfAcross(site, margin)) continue;
     const along = dx * site.dirX + dz * site.dirZ;
-    if (along <= DECK_HALF_LENGTH + site.rampReachPos + margin &&
-        along >= -(DECK_HALF_LENGTH + site.rampReachNeg + margin)) {
+    if (Math.abs(along) <= bridgeScreenHalfAlong(margin)) {
       return site;
     }
   }
@@ -1730,8 +1773,7 @@ function pointStandsOnBridgeMasonry(x: number, z: number, margin = RAMP_SCREEN_M
     // site's masonry may still claim this point.
     if (across <= site.halfWidth || across > site.halfWidth + margin) continue;
     const along = dx * site.dirX + dz * site.dirZ;
-    if (along <= DECK_HALF_LENGTH + site.rampReachPos + margin &&
-        along >= -(DECK_HALF_LENGTH + site.rampReachNeg + margin)) {
+    if (Math.abs(along) <= bridgeScreenHalfAlong(margin)) {
       return true;
     }
   }

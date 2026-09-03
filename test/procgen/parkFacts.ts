@@ -614,6 +614,14 @@ export interface ParkFacts {
      * park to the band the layout really used.
      */
     readonly screenHalfAcross: number;
+    /**
+     * How far along the site's axis, either side, `paths.ts` forbids ground —
+     * read from that file's own `bridgeScreenHalfAlong`, never restated here.
+     * The companion to {@link screenHalfAcross}, and the axis in which an
+     * invariant that bounded its own sweep by the site's proven ramp reach
+     * could never fail (see `builtMasonryStaysInsideItsReservation`).
+     */
+    readonly screenHalfAlong: number;
   }[];
   /**
    * **Where a built bridge's walkable deck stands on ground `paths.ts` left
@@ -1150,15 +1158,13 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // Dynamically imported here, after `world` (and so `TRAIN_PLAN`) is
   // already built for this exact seed — never at this file's own top level,
   // the seed-pinning trap this file's header already warns about.
-  const { planBridgeFootprints, DECK_HALF_LENGTH } = await import(
-    '../../src/world/train/bridgeFootprint.ts'
-  );
+  const { planBridgeFootprints } = await import('../../src/world/train/bridgeFootprint.ts');
   const bridgeReservations = planBridgeFootprints(world.train.crossings);
 
   const { CROSSING_SITES } = await import('../../src/world/train/crossingPlan.ts');
   const { SITE_SNAP_TOLERANCE } = await import('../../src/world/train/crossings.ts');
   // The band `paths.ts` really screened, from that file's own owner.
-  const { bridgeScreenHalfAcross, pointStandsOnABridgeRamp } = await import(
+  const { bridgeScreenHalfAcross, bridgeScreenHalfAlong, pointStandsOnABridgeRamp } = await import(
     '../../src/world/paths.ts'
   );
   const plannedBridgeSites = CROSSING_SITES.map((site) => ({
@@ -1171,6 +1177,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     rampReachNeg: site.rampReachNeg,
     halfWidth: site.halfWidth,
     screenHalfAcross: bridgeScreenHalfAcross(site),
+    screenHalfAlong: bridgeScreenHalfAlong(),
   }));
   // Derived, never gathered a second time — one owner for "which sites exist".
   const plannedBridgeSiteDistances = plannedBridgeSites.map((site) => site.railDistance);
@@ -1188,7 +1195,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     masonrySweptBridges += 1;
     const nx = site.dirZ;
     const nz = -site.dirX;
-    const alongMax = DECK_HALF_LENGTH + Math.max(site.rampReachPos, site.rampReachNeg) + 10;
+    const alongMax = bridgeScreenHalfAlong() + 10;
     for (let along = -alongMax; along <= alongMax; along += 0.25) {
       const bx = site.x + site.dirX * along;
       const bz = site.z + site.dirZ * along;
