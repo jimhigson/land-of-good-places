@@ -76,3 +76,24 @@ untouched procgen).
   before push per the updated CLAUDE.md in this worktree.
 
 No PR yet. Jim's instruction: implement, then hand to the Overseer when ready.
+
+## Review of #499 — all items addressed and pushed (3 Sep, Fable)
+
+- Demand semantics fixed (the blocker): another feature's corridor ENDPOINT
+  in the disc — own stubs never serve, passing through never serves. Tests
+  encode the reviewer's probes. See the Demand doc comment for why both
+  restrictions are the design's own.
+- The honest ladder account is in parkGeneration.ts (module header + class
+  doc): THE IMPORT LADDER, NOT THE DEPS, SERIALIZES TODAY — four of six deps
+  measured inert. Stage 3 = confront the ladder (eager or data-gated module
+  loading for the migrating placer). Do not conclude from a relaxed dep that
+  the spine is inert.
+- check-park-boot's one-phase-per-advance comment corrected; coSolve carries
+  the dead-registry sign (PlacementField superseded, GroundClaims live);
+  the design doc now travels on this branch; rebased onto main.
+- Reviewer's extra proofs recorded in the PR body: five more byte-identical
+  hashes (TRAIN_PLAN, CROSSING_SITES, LEVEL_CROSSING_SITES, PATH_GRAPH,
+  stations), perturbation red-proof, and the buildGraph-twice trap
+  (paths.ts mutates module-level lattice paving — never compare two builds
+  in one process).
+- Full gates re-running on the rebased head; exit codes go to the Overseer.
