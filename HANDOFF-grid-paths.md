@@ -3576,3 +3576,65 @@ That is the next thing to build and measure, and it is a change to where the
 lead is placed, not to which shapes are allowed.
 
 **Unmeasured. Recorded as the next step, not as a result.**
+
+### THE LEAD-SNAP HYPOTHESIS IS REFUTED — measured before it was built
+
+I recorded, one section above, that snapping the arrival lead to the lattice
+"would cost the arrival nothing". **It was tested first and it is wrong. It
+does not fix the seed that motivated it, and it cannot be a general rule.**
+
+`scripts/tmp-leadsnap.mts` asks, per door: the lead is a fixed 3.5 m out along
+`entrance - plotCentre` (`arrivalLead`); the ray carries the meaning, the 3.5 is
+arbitrary ("a few metres out"). So at what distance `t` along that **same ray**
+does the lead land on a 12 m or 6 m shared line? Seed 128:
+
+```
+stall.facePaint  door(28.4,40.5) ray(0.71,0.71) lead@3.5 offLine=1.68
+                 snap t in [2.0,5.5]: NONE      all t in (0.5,14): 5.88,6.78
+```
+
+**NONE.** The nearest snap distances are 5.88 and 6.78 m — and the lead-to-door
+leg runs along the ray, so a 5.9 m lead makes that leg a 5.9 m **diagonal**,
+which is buying a `pathsRunOnGridAxes` risk to pay a `streetsShareLatticeLines`
+one. (Recomputed from the stall's stand point, which is what `arrivalLead` is
+actually called with, rather than the doormat the probe starts from: t = 0.16 or
+8.86 on z, 7.6 on x. Same verdict.)
+
+**And it fails as a general rule, not just here: only 6 of 13 doors on seed 128
+have any snap in [2.0, 5.5] at all.** The reason is structural and worth
+keeping: a booth's outward ray is the camera's fixed 45 degree diagonal
+(`CAMERA_FACING_YAW`), and the lattice is cardinal — a 45 degree ray crosses a
+6 m line about every 8.5 m on each axis, so a 3.5 m band catches one only by
+luck. **A rule that fires on half the doors by coincidence is not a rule.**
+
+**Prediction recorded as wrong.** The lead's position is not the free parameter.
+
+### What the refutation leaves, and why the reorder is now doubly closed
+
+With the lead fixed, `elbowViaColumn`'s leg 2 runs on the lead's row **by
+construction**, and the lead's row can never be reliably a shared line. So the
+private run cannot be removed by moving the lead; it can only be moved onto a
+different line or shortened.
+
+Both elbows were compared on the actual seed-128 geometry — node (14.6,21.3),
+lead (29.6,41.6), `leadDx` 15.0, `leadDz` 20.3:
+
+| shape | leg 1 | leg 2 |
+|---|---|---|
+| `elbowViaColumn` | x = 14.6 (**shared**), 20.3 m | z = 41.6 (private), **15.0 m** |
+| `elbowViaRow` | z = 21.3 (**shared**), 15.0 m | x = 29.6 (private), **20.3 m** |
+
+**`elbowViaColumn` already minimises the private run**, and it is already tried
+first by push order. So the reorder is closed for a second, independent reason
+beyond the one recorded earlier — it is not merely neutral, it is provably the
+better of the two on this geometry.
+
+**Where a successor should look instead.** Any shape must spend 15 m in x and
+20.3 m in z somewhere, and only two lines are on offer: the node's (shared) and
+the lead's (private). Driving the private run to zero therefore needs a **nearer
+or better-placed node**, not a better shape — so the question to ask next is
+*why is the cheapest connector for this door at a node 15 m and 20.3 m away?*,
+i.e. which screen refuses the nearer lattice nodes around (27.1, 39.2). That is
+`debugDoorReach` territory and it has not been run on this door. **Do not reach
+for the ladder, the lead, or the tail bound** — all three are now measured
+dead ends.
