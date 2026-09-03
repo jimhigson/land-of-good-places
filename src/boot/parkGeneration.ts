@@ -1,6 +1,6 @@
 import type { SolvedRailRoute } from '../world/rail/generate';
 import { railRouteSearch, RailRouteUnsolvable } from '../world/rail/generate';
-import type { CruiserSearchStart, PlannedCoaster } from '../world/coaster/solve';
+import type { CruiserSearchStart } from '../world/coaster/solve';
 import { offerPrewarmedCruiser } from '../world/coaster/prewarm';
 import { offerPrewarmedSlide } from '../world/slide/prewarm';
 import { offerPrewarmedTrain } from '../world/train/prewarm';
@@ -15,60 +15,54 @@ import { SolveScheduler } from './solveScheduler';
  * > many small tasks over many frames, so it acts as a kind of loading screen
  * > for the park generation"*
  *
+ * And Jim, 3 September 2026, the ruling this file's shape now serves
+ * (`docs/DESIGN-round-robin-generation.md`): park features are to generate
+ * **all at the same time, round-robin, with backtracking** — so the driver
+ * here is **one scheduler** holding every solve as a task, not a hand-ordered
+ * chain of phases. Today the task graph's dependencies reproduce the exact
+ * order the hand-ordered chain ran in, so the park is byte-identical (proved
+ * by `check:park-boot`'s sliced-vs-straight-through hashes); the point of the
+ * change is what it makes possible next — a placer migrates to genuine
+ * round-robin by *relaxing its deps and publishing claims*
+ * (`boot/groundClaims.ts`), one placer per PR, instead of anybody ever again
+ * attempting a big-bang rewrite of a monolithic driver.
+ *
  * ## What was actually costing the boot
  *
- * Measured on this branch, not guessed: the park's boot is **~4.5 s**, of which
- * `World`'s constructor is 442 ms and **the other ~4 s is module-scope
- * generation** — every ride's route is solved by a top-level `const` as its
- * module is first imported, because `paths.ts` needs each ride's exit to build
- * the walk graph and cannot wait for a scene. `SLIDE_PLAN` alone is **~3.46 s,
- * 86% of it**.
- *
- * The ride used to cover only the 442 ms, because `main.ts` imported `Game`
- * statically: the whole four seconds was spent before the first bus frame could
- * be drawn. So the loading screen covered about a tenth of the load.
+ * Measured (7 Aug): the park's boot was **~4.5 s**, of which `World`'s
+ * constructor is 442 ms and **the other ~4 s is module-scope generation** —
+ * every ride's route is solved by a top-level `const` as its module is first
+ * imported, because `paths.ts` needs each ride's exit to build the walk graph
+ * and cannot wait for a scene. `SLIDE_PLAN` alone was **~3.46 s, 86% of it**.
  *
  * ## Two different problems, two different answers
  *
  * **The small solves are each about a frame's worth**, so they only need to be
  * on separate frames. Dynamic `import()` gives that for free — the module
  * evaluation that runs the top-level `const` happens when the promise settles,
- * and settling returns to the event loop, so one import is one frame.
- * {@link MODULES_BEFORE_CRUISER} and {@link MODULES_AFTER_CRUISER} are those
- * lists, in dependency order.
+ * and settling returns to the event loop, so one import is one frame. Those
+ * imports are the {@link ImportStep} ladder below, in dependency order — they
+ * are Vite chunk loading, not park placement, which is why they stay the
+ * driver's own business rather than becoming scheduler tasks: an import
+ * completes on the event loop *between* frames, and a task that waited on one
+ * would busy-yield its budget away (see `SolveTaskSpec.ready`, which is the
+ * clean half of the same answer).
  *
- * **Two of them are not small**, and no import boundary helps either: each is
- * one `solveRailRoute` call. They are sliced from the inside instead —
- * `railRouteSearch` suspends at every joint (~35 us of work), and {@link advance}
- * runs it until a millisecond budget is spent. That is the "many small tasks"
- * half of the ask, and it is the only part of the park that needed inventing
- * anything.
- *
- * - **the ginormous slide**, at ~3.46 s;
- * - **the Sky Cruiser**, at ~0.8 s (~1.3 s when it was sliced), sliced second
- *   (#252) once the cost stopped being billed to the train that merely imports
- *   it — see {@link MODULES_AFTER_CRUISER}.
- *
- * The two sit either side of the module list rather than together, because
- * `train/plan.ts` and everything after it read `COASTER_PLANS`: the cruiser has
- * to be in its letterbox before the first module that imports it is evaluated,
- * or the const it feeds has already initialised the slow way.
+ * **The big solves are sliced from the inside** — each suspends at every joint
+ * and the scheduler runs it until a millisecond budget is spent. They are the
+ * {@link SolveScheduler} tasks: the cruiser's brief/search/finish, the train's
+ * loop, the slide's ladder, the crossing-plan march, and the walk graph.
  *
  * ## Why this class has no DOM, no `Game` and no renderer in it
  *
  * So that a check can build a real one and drive it. `Game` cannot be
  * constructed outside a browser — it makes a `WebGLRenderer` — and on this
  * feature *three separate guards* have already turned out to be incapable of
- * failing, one of them for exactly that reason (fixed by moving the decision
- * into `arrivalSpawn.ts`; `journeyDirector.ts` is the same pattern, and so is
- * this).
- *
- * Everything here is pure module loading and arithmetic, so
- * `scripts/check-park-boot.mts` builds one in Node, advances it with real frame
- * budgets and a real clock, and measures **what each frame actually cost** —
- * rather than asserting that a function was called. Importing `Game` itself
- * stays in `main.ts`, which is where it already lived and which has nothing
- * left to amortise.
+ * failing, one of them for exactly that reason. Everything here is pure module
+ * loading and arithmetic, so `scripts/check-park-boot.mts` builds one in Node,
+ * advances it with real frame budgets and a real clock, and measures **what
+ * each frame actually cost** — rather than asserting that a function was
+ * called.
  */
 
 /**
@@ -94,110 +88,28 @@ export const GENERATION_BUDGET_MS = 8;
  * length and the drive is looping** while it waits for the park — see
  * `JourneyDirector.overrunAwareBudgetMs`.
  *
- * ## Why this is small, and why it used to be 200
+ * It was **200 ms**, on a premise that no longer holds: that once the ride
+ * ended the bus *parked*, so there was no moving shot left to keep smooth. The
+ * bus now **loops and keeps moving** throughout the overrun, so a frame that
+ * blocks for 200 ms jerks the moving bus, its orbiting camera and the rolling
+ * countryside alike — measured on a throttled overrun, the 200 ms budget
+ * produced a p99 frame interval of ~209 ms, the "jumpy while it generates" Jim
+ * reported. At 12 ms a frame is budget + at most one work unit (the slide's
+ * dearest is ~2 ms), inside one 60 Hz refresh with room for the light looping
+ * scene to draw.
  *
- * It was **200 ms**, on a premise that no longer holds: that once the ride ended
- * the bus *parked* at the gate, so there was no moving shot left to keep smooth
- * and the generator could have most of the frame to drain flat-out. That was true
- * when the overrun was a stopped bus under a caption.
+ * **The trade, stated honestly.** A smaller budget means a longer wait on a
+ * slow device: the loop drains at 12 ms a frame rather than 200. Jim reported
+ * *jumpiness, not slowness*, and a smooth loop that lasts a few seconds longer
+ * reads far better than a juddering one that ends a moment sooner. If the raw
+ * wait is itself too long on real hardware the fix is cheaper generation, not
+ * a fatter budget that trades the smoothness back away.
  *
- * This branch makes the bus **loop and keep moving** throughout the overrun (a
- * stopped bus read as "stuck forever"; see `BusJourney`/`journeyDirector`). So the
- * premise is void in the other direction: the looping bus, its orbiting camera and
- * the rolling countryside are a *moving* shot exactly like the ride's, and a frame
- * that blocks for 200 ms jerks all three. Measured on a throttled overrun, the
- * 200 ms budget produced a p99 frame interval of ~209 ms — the moving bus at about
- * five frames a second, which is precisely the "jumpy while it generates" Jim
- * reported.
- *
- * So during the loop the generator gets a budget chosen for **smoothness**, not
- * for draining fastest: a little more than {@link GENERATION_BUDGET_MS} because the
- * looping scene has no shot transitions or title work competing for the frame, but
- * nowhere near a figure that drops a frame of the moving bus. At 12 ms a frame is
- * budget + at most one work unit (the slide's dearest is ~2 ms), which sits inside
- * one 60 Hz refresh with room for the light looping scene to draw.
- *
- * **The trade, stated honestly.** A smaller budget means a longer wait on a slow
- * device: the loop drains at 12 ms a frame rather than 200, so the residual wait is
- * ~1.5x the rolling budget's rate instead of ~25x it. Jim reported *jumpiness, not
- * slowness*, and a smooth loop that lasts a few seconds longer reads far better than
- * a juddering one that ends a moment sooner — the bus is moving and full of children
- * the whole time, so nobody is watching a frozen screen. If the raw wait is itself
- * too long on real hardware the fix is cheaper generation (`solve.ts` §265), not a
- * fatter budget that trades the smoothness back away.
- *
- * `check:park-boot` drives generation at this budget and asserts no single frame
- * blocks past one refresh's worth of work; `check:arrival-completes` asserts the
- * loop still *completes* (the anti-"stuck forever" guarantee) at whatever budget
- * this is.
+ * `check:park-boot` drives generation at this budget and asserts no single
+ * frame blocks past one refresh's worth of work; `check:arrival-completes`
+ * asserts the loop still *completes* at whatever budget this is.
  */
 export const OVERRUN_GENERATION_BUDGET_MS = 12;
-
-/**
- * The ground the Sky Cruiser measures itself against, before it is solved.
- *
- * The boundary (~55 ms) and the layout (~9 ms). Each is one module whose
- * top-level `const` solves something, and importing them one per frame is what
- * turns one block into two frames nobody notices.
- *
- * They are listed separately from {@link MODULES_AFTER_CRUISER} rather than
- * being pulled in transitively by `coaster/solve` — which imports both — because
- * a single import settling would evaluate all three in **one** block. Naming
- * them here is what buys them a frame each.
- */
-const MODULES_BEFORE_CRUISER: readonly (() => Promise<unknown>)[] = [
-  () => import('../world/boundary'),
-  () => import('../world/parkLayout'),
-  // The rail generator and the cruiser's own route module, imported on their
-  // own frames rather than being dragged in wholesale by `coaster/solve`.
-  //
-  // **This is a slice, not tidiness.** A dynamic `import()` does a chunk of
-  // synchronous work in the calling frame before it ever returns a promise —
-  // resolving and compiling every file in the graph it has not seen. Pulling
-  // `coaster/solve`'s whole graph in one call measured **70 ms** on a machine
-  // running at CI's speed, which is a dropped-frame hitch that no budget can
-  // interrupt because it happens inside a single expression. Naming the two
-  // heaviest sub-graphs here buys each of them its own frame, and leaves the
-  // `coaster/solve` import with almost nothing left to resolve.
-  () => import('../world/rail/generate'),
-  // `coaster/route` drags these three in, and together they measured 21.8 ms of
-  // synchronous resolution in one frame. Named individually, the largest is
-  // ~6 ms and `coaster/route` itself is what is left over.
-  () => import('../world/terrain'),
-  () => import('../world/building/layout'),
-  () => import('../world/building/cruiserWindow'),
-  () => import('../world/coaster/route'),
-];
-
-/**
- * The park's remaining solved artefacts, in the order one depends on the next.
- *
- * The train (~157 ms of its own) and the rail race (~13 ms). **Both are after
- * the cruiser, and that ordering is the fix for a real bug rather than a
- * tidy-up.**
- *
- * `train/plan.ts` imports `COASTER_PLANS`, and this list used to load
- * `train/plan` *first* — so the cruiser's entire ~1.3 s solve was evaluated
- * inside the train's import and billed to the train's frame. Measured in that
- * order: `train/plan` 1439.6 ms, `coaster/plan` **0.3 ms**. Issue #252 read that
- * number off this list and went after the train's search, which could not have
- * fixed it: with PR #253's train fix applied the worst block moved 1354 ms to
- * 1300 ms against a 250 ms ceiling, because ~1288 ms of it was never the train.
- *
- * A module whose measured cost is really its dependency's is a measurement that
- * lies in the most expensive way — it sends the next person to the wrong file.
- * Solving the cruiser above means each of these is now billed for its own work.
- *
- * **The list does not have to be complete.** `main.ts` imports `Game` at the end
- * regardless, which pulls in anything missed — so the failure mode of this list
- * falling out of date as the park grows is *a slightly lumpier boot*, never a
- * wrong or half-built park. That is the safe direction, and it is why this is
- * allowed to be a hand-kept list at all.
- */
-const MODULES_AFTER_CRUISER: readonly (() => Promise<unknown>)[] = [
-  () => import('../world/train/plan'),
-  () => import('../world/railRace/plan'),
-];
 
 /** Roughly where generation has got to, for a caption or a check. */
 export type GenerationStage =
@@ -210,135 +122,347 @@ export type GenerationStage =
   | 'ready';
 
 /**
+ * One rung of the import ladder: a dynamic import to run on its own frame,
+ * held until `gate()` (if given) answers true. The ladder is strictly ordered —
+ * rung n+1 is never considered before rung n has completed — because module
+ * evaluation order is meaning here: a top-level `const` initialises on first
+ * import, and several of them read letterboxes a solve task must fill first.
+ */
+interface ImportStep {
+  /** Why this import exists / what it unblocks — for a failure that names it. */
+  readonly name: string;
+  readonly begin: () => Promise<unknown>;
+  /** Held until this answers true. Omitted: ready as soon as it is reached. */
+  readonly gate?: () => boolean;
+}
+
+/**
  * Drives the park's generation in slices. One per boot; `main.ts` owns it.
  *
  * {@link advance} is synchronous and returns immediately — it either spends the
- * budget on the slide's search or starts a module import and comes back next
- * frame. Nothing here ever blocks for longer than the budget except a single
- * module evaluation, which is one small solve.
+ * budget in the scheduler or starts a module import and comes back next frame.
+ * Nothing here ever blocks for longer than the budget except a single module
+ * evaluation, which is one small solve.
+ *
+ * ### The shape: one import ladder + one scheduler
+ *
+ * - The {@link ImportStep} ladder loads modules one per frame, each rung gated
+ *   on the solve whose letterbox it reads (`train/route` waits for the solved
+ *   cruiser; the crossing modules wait for the solved slide; `pathGraph` waits
+ *   for the solved walk graph).
+ * - The {@link SolveScheduler} holds every solve as a task. Tasks gate on
+ *   their modules with `ready()` and name their predecessor solves as `deps` —
+ *   **today's dep graph reproduces the old hand-ordered chain exactly**, which
+ *   is what makes this commit byte-identical, and relaxing it is how a placer
+ *   joins the genuine round-robin later.
+ *
+ * ### Failure semantics, preserved exactly
+ *
+ * - A cruiser ladder that exhausts even its rescue tier throws
+ *   `RailRouteUnsolvable` out of the task; the scheduler records it as
+ *   `failed`, nothing is offered to the letterbox, and `COASTER_PLANS`
+ *   re-solves and throws in exactly the place and shape it always did.
+ * - The slide catches `RailRouteUnsolvable` *per rung* (a target that admits
+ *   no route is a rung that did not work, not a park that cannot be built)
+ *   and throws only when the whole `DESIRED_LENGTH_LADDER` is spent.
  */
 export class ParkGeneration {
-  private moduleIndex = 0;
-  private afterIndex = 0;
+  private readonly scheduler: SolveScheduler;
+
+  private importIndex = 0;
   private importInFlight = false;
-  private search: Generator<number, SolvedRailRoute, void> | null = null;
+  private failure: Error | null = null;
+  private pathsDone = false;
 
-  /** The cruiser's how-module, once loaded. Holds no solved route itself. */
+  // ---- module letterboxes, filled by the import ladder ----
   private cruiserModule: typeof import('../world/coaster/solve') | null = null;
-  private cruiserStart: CruiserSearchStart | null = null;
-  private cruiserStartSearch: Generator<number, CruiserSearchStart, void> | null = null;
-  /**
-   * The whole retry ladder — first brief, escalated castle pull, rescue —
-   * as ONE generator, `coaster/route.ts`'s `cruiserRouteSearch`. This class
-   * used to walk the first-then-escalated steps by hand ("the same verdict,
-   * in the same order, as the constructor's"), which was a second writer of
-   * one policy held in step by a comment; when the rescue tier arrived the
-   * ladder became a generator with one owner and this became a driver over
-   * it, exactly as `advance()` already is over the slide's search.
-   */
-  private cruiserSearch: Generator<number, SolvedRailRoute, void> | null = null;
-  /** The solved plan view, held between the search finishing and the finisher. */
-  private cruiserRoute: SolvedRailRoute | null = null;
-  private cruiserFinish: Generator<number, PlannedCoaster, void> | null = null;
-  private cruiserSolved = false;
-  private cruiserAttemptsSeen = 0;
-
-  /**
-   * The train's loop, solved a slice at a time by the generic {@link
-   * SolveScheduler} — the first feature ported onto it. Sits between the cruiser
-   * and the after-modules because its brief reads the cruiser's published low
-   * corridor (`COASTER_PLANS`) and its result must reach `train/prewarm.ts`
-   * before `train/plan` is imported below.
-   */
   private trainModule: typeof import('../world/train/route') | null = null;
-  private trainScheduler: SolveScheduler | null = null;
-  private trainSolved = false;
-
-  /**
-   * Which rung of `DESIRED_LENGTH_LADDER` the sliced search is on. The hotel
-   * merge brought the ladder in (seed 5: a fixed 60 m target solved 123
-   * routes and threw every one away), and the sliced path must walk the SAME
-   * ladder `planSlide()` walks or the two cadences stop being one search.
-   */
-  private rung = 0;
-
-  /** The last rung's complaint, for the error if the whole ladder fails. */
-  private lastComplaint = 'never solved a route at all';
   private solveModule: typeof import('../world/slide/solve') | null = null;
-  /** A solved chute waiting to be judged and built, on a frame of its own. */
-  private slidePending: { readonly route: SolvedRailRoute; readonly target: number } | null = null;
-  private slideSolved = false;
-
-  /**
-   * The railway crossing plan (`train/crossingPlanSolve.ts`) — the
-   * feasibility march deciding where a bridge provably fits — solved a
-   * candidate at a time after the slide and offered to
-   * `train/crossingPrewarm.ts` before `paths.ts` (whose import would
-   * otherwise run the whole ~300 ms march inside one frame; check:park-boot
-   * measured exactly that lump at 323 ms).
-   */
   private crossingModule: typeof import('../world/train/crossingPlanSolve') | null = null;
   private crossingPrewarmModule: typeof import('../world/train/crossingPrewarm') | null = null;
-  private crossingScheduler: SolveScheduler | null = null;
-  private crossingSitesSolved = false;
-
-  /**
-   * The walk graph itself (`paths.ts`'s `pathGraphSearch`) — every spur,
-   * street and interconnect, solved a destination at a time after the
-   * crossing sites and offered to `pathsPrewarm.ts` before `pathGraph.ts`
-   * (whose import would otherwise run the whole street-lattice solve inside
-   * one frame; check:park-boot measured exactly that lump at ~215 ms against
-   * its 250 ms ceiling after the PR #286 lattice rework).
-   */
   private pathsModule: typeof import('../world/paths') | null = null;
   private pathsPrewarmModule: typeof import('../world/pathsPrewarm') | null = null;
-  private pathsScheduler: SolveScheduler | null = null;
-  private pathGraphSolved = false;
-  private pathsDone = false;
-  private failure: Error | null = null;
 
-  /**
-   * Generator steps begun **after** this slice's deadline had already passed.
-   *
-   * The device-independent form of "the search can be stopped where it was
-   * asked to stop". Every drive loop here checks the clock after each step and
-   * returns, so having done one step it can never *begin* another past the
-   * deadline — this counter is therefore 0 on a correct implementation, on a
-   * phone and on a fast laptop alike, and goes positive the moment a loop is
-   * written without that check.
-   *
-   * **The first step of a slice is deliberately not counted**, and finding out
-   * why was worth the detour: a garbage collection between computing the
-   * deadline and entering the loop spends the whole budget before any step has
-   * run, which made this fire 1-4 times a run on a slowed machine with every
-   * loop written correctly. That is the budget being gone on arrival, not a
-   * loop refusing to stop, and counting it would have made the check
-   * flaky-by-design — the exact failure mode it exists to prevent.
-   *
-   * It is not a millisecond count on purpose. How long a step takes is a fact
-   * about the machine; how many steps run after the driver was told to stop is
-   * a fact about this code.
-   */
-  private overrunSteps = 0;
-
-  /** Which phase began a step late, so the report names the loop at fault. */
-  private overrunByPhase: Record<string, number> = {};
-
-  /**
-   * How many pieces each sliced phase was divided into.
-   *
-   * Also device-independent, and the other half of the guarantee: `overrunSteps`
-   * proves the driver stops when asked, and these prove there are frequent
-   * opportunities to. The park is deterministic, so for a given seed these are
-   * the same numbers everywhere — a phone that is ten times slower does fewer
-   * units per frame, not fewer units.
-   */
-  private units = { brief: 0, cruiserSearch: 0, cruiserFinish: 0, slideSearch: 0 };
+  // ---- results passed between tasks (a dep is done before a dependent starts) ----
+  private cruiserStart: CruiserSearchStart | null = null;
+  private cruiserRoute: SolvedRailRoute | null = null;
 
   /** Frames on which this was asked to do work and did some. */
   private workingFrames = 0;
-  /** Attempts the slide's search has begun — the only progress figure there is. */
-  private attemptsSeen = 0;
+  private slicesSeen = 0;
+
+  /**
+   * The import ladder, in the order the old hand-ordered driver ran them.
+   *
+   * The first block is the ground the Sky Cruiser measures itself against —
+   * each is one module whose top-level `const` solves something, and importing
+   * them one per frame is what turns one block into several frames nobody
+   * notices. They are named individually rather than pulled in transitively
+   * because a single `import()` does a chunk of synchronous resolve-and-compile
+   * work for every file in the graph it has not seen (measured at 70 ms for
+   * `coaster/solve`'s whole graph in one call): naming the heavy sub-graphs
+   * buys each its own frame.
+   *
+   * `train/plan` is **after** the cruiser's solve on purpose — it imports
+   * `COASTER_PLANS`, and loading it earlier evaluated the cruiser's entire
+   * ~1.3 s solve inside the train's import, billing it to the train's frame
+   * (issue #252 was sent to the wrong file by exactly that misattribution).
+   */
+  private readonly importLadder: readonly ImportStep[] = [
+    { name: 'boundary', begin: () => import('../world/boundary') },
+    { name: 'parkLayout', begin: () => import('../world/parkLayout') },
+    { name: 'rail/generate', begin: () => import('../world/rail/generate') },
+    { name: 'terrain', begin: () => import('../world/terrain') },
+    { name: 'building/layout', begin: () => import('../world/building/layout') },
+    { name: 'building/cruiserWindow', begin: () => import('../world/building/cruiserWindow') },
+    { name: 'coaster/route', begin: () => import('../world/coaster/route') },
+    {
+      name: 'coaster/solve',
+      begin: () =>
+        import('../world/coaster/solve').then((module) => {
+          this.cruiserModule = module;
+        }),
+    },
+    {
+      name: 'train/route',
+      gate: () => this.scheduler.isDone('cruiserFinish'),
+      begin: () =>
+        import('../world/train/route').then((module) => {
+          this.trainModule = module;
+        }),
+    },
+    {
+      name: 'train/plan',
+      gate: () => this.scheduler.isDone('trainSearch'),
+      begin: () => import('../world/train/plan'),
+    },
+    { name: 'railRace/plan', begin: () => import('../world/railRace/plan') },
+    {
+      name: 'slide/solve',
+      begin: () =>
+        import('../world/slide/solve').then((module) => {
+          this.solveModule = module;
+        }),
+    },
+    {
+      name: 'train/crossingPlan',
+      gate: () => this.scheduler.isDone('slideSearch'),
+      begin: () =>
+        Promise.all([
+          import('../world/train/crossingPlanSolve'),
+          import('../world/train/crossingPrewarm'),
+        ]).then(([solveModule, prewarmModule]) => {
+          this.crossingModule = solveModule;
+          this.crossingPrewarmModule = prewarmModule;
+        }),
+    },
+    {
+      name: 'paths',
+      gate: () => this.scheduler.isDone('crossingSites'),
+      begin: () =>
+        Promise.all([import('../world/paths'), import('../world/pathsPrewarm')]).then(
+          ([pathsModule, prewarmModule]) => {
+            this.pathsModule = pathsModule;
+            this.pathsPrewarmModule = prewarmModule;
+          },
+        ),
+    },
+    {
+      name: 'pathGraph',
+      gate: () => this.scheduler.isDone('pathGraph'),
+      begin: () =>
+        import('../world/pathGraph').then(() => {
+          this.pathsDone = true;
+        }),
+    },
+  ];
+
+  constructor() {
+    // `self` because the task generators must read the letterboxes lazily —
+    // at slice time, when their `ready()` gates have guaranteed the module is
+    // there — and an arrow generator does not exist in the language.
+    const self = this;
+    this.scheduler = new SolveScheduler([
+      {
+        // The cruiser's brief: a ring of candidate stations. ~19 ms of
+        // `boundary.distanceToEdge`, too much for one frame on its own.
+        name: 'brief',
+        ready: () => self.cruiserModule !== null,
+        *start() {
+          const solve = self.cruiserModule as typeof import('../world/coaster/solve');
+          const building = solve.cruiserStartSearch();
+          for (;;) {
+            const step = building.next();
+            if (step.done) {
+              self.cruiserStart = step.value;
+              return;
+            }
+            yield step.value;
+          }
+        },
+      },
+      {
+        // The route itself — the whole retry ladder (first brief, escalated
+        // castle pull, rescue) as ONE generator, `cruiserRouteSearch`, so the
+        // tier transitions are the policy's own to sequence, not this
+        // driver's. The rescue tier's pose construction is one ~20 ms
+        // un-yielding block, reachable only on a seed where the park
+        // previously failed to build at all — a trade a loading screen takes.
+        name: 'cruiserSearch',
+        deps: ['brief'],
+        *start() {
+          const solve = self.cruiserModule as typeof import('../world/coaster/solve');
+          const start = self.cruiserStart as CruiserSearchStart;
+          const search = solve.cruiserRouteSearch(start.briefs);
+          for (;;) {
+            const step = search.next();
+            if (step.done) {
+              self.cruiserRoute = step.value;
+              return;
+            }
+            yield step.value;
+          }
+        },
+      },
+      {
+        // The hill profile, the carves and the vertical repair, one repair
+        // pass at a time — run whole, this block failed CI at 54.6 ms against
+        // a 24 ms ceiling.
+        name: 'cruiserFinish',
+        deps: ['cruiserSearch'],
+        *start() {
+          const solve = self.cruiserModule as typeof import('../world/coaster/solve');
+          const start = self.cruiserStart as CruiserSearchStart;
+          const finishing = solve.finishCruiserPlanSearch(
+            self.cruiserRoute as SolvedRailRoute,
+            start.rng,
+          );
+          for (;;) {
+            const step = finishing.next();
+            if (step.done) {
+              offerPrewarmedCruiser(step.value);
+              return;
+            }
+            yield step.value;
+          }
+        },
+      },
+      {
+        // The train's loop. Its brief reads the cruiser's published low
+        // corridor (`COASTER_PLANS`, built cheap by the `train/route` import
+        // from the pre-warmed cruiser), and its result must reach
+        // `train/prewarm.ts` before `train/plan` is imported.
+        name: 'trainSearch',
+        deps: ['cruiserFinish'],
+        ready: () => self.trainModule !== null,
+        *start() {
+          const module = self.trainModule as typeof import('../world/train/route');
+          const route = yield* module.trainRouteSearch();
+          offerPrewarmedTrain(route);
+        },
+      },
+      {
+        // The ginormous slide: the `DESIRED_LENGTH_LADDER` walked rung by
+        // rung, exactly as `planSlide()` walks it, so the sliced path and the
+        // straight-through path are one search (`check:park-boot` hashes the
+        // two against each other).
+        name: 'slideSearch',
+        deps: ['trainSearch'],
+        ready: () => self.solveModule !== null,
+        *start() {
+          const solve = self.solveModule as typeof import('../world/slide/solve');
+          const ladder = solve.DESIRED_LENGTH_LADDER;
+          let lastComplaint = 'never solved a route at all';
+          for (let rung = 0; ; rung += 1) {
+            const target = ladder[rung];
+            if (target === undefined) {
+              // Every rung tried, none rideable — the same terminal answer
+              // `planSlide()` gives, with the same shape of message.
+              throw new Error(
+                `the ginormous slide never solved to a chute a child could ride: ` +
+                  `after ${ladder.length} target lengths (${ladder.join(', ')} m), ` +
+                  `the best on offer ${lastComplaint}.`,
+              );
+            }
+            // The brief gets its own frame: it is pure, but `doorPoses()` and
+            // `pitPoses()` both filter through `PARK_BOUNDARY`, and it
+            // measured 13.7 ms sharing a frame with the search.
+            const search = railRouteSearch(solve.slideRouteBriefAt(target));
+            yield 'frame';
+            let route: SolvedRailRoute;
+            try {
+              for (;;) {
+                const step = search.next();
+                if (step.done) {
+                  route = step.value;
+                  break;
+                }
+                yield step.value;
+              }
+            } catch (error) {
+              if (error instanceof RailRouteUnsolvable) {
+                // A target that admits no route at all is a rung that did not
+                // work, not a park that cannot be built — the next rung gets
+                // its turn, exactly as `solveChuteAt` treats the same throw.
+                lastComplaint = `admitted no route at a ${target} m target`;
+                yield 'frame';
+                continue;
+              }
+              throw error;
+            }
+            // **A finished route is judged and built on its own frame.**
+            // `unrideableComplaint` rebuilds the whole chute and measures it
+            // in three dimensions, and `finishSlidePlan` builds it again for
+            // keeps; doing either on the frame whose search produced the
+            // route made that frame the worst in the entire park build.
+            yield 'frame';
+            const complaint = solve.unrideableComplaint(route);
+            if (complaint === null) {
+              offerPrewarmedSlide(solve.finishSlidePlan(route));
+              return;
+            }
+            lastComplaint = `${complaint} (at a ${target} m target)`;
+            // The next rung's brief must not share the frame that just
+            // rebuilt and measured a whole chute — same rule as above.
+            yield 'frame';
+          }
+        },
+      },
+      {
+        // The railway crossing plan — the feasibility march deciding where a
+        // bridge provably fits — solved a candidate at a time and offered to
+        // `crossingPrewarm` before `paths.ts` (whose import would otherwise
+        // run the whole ~300 ms march inside one frame).
+        name: 'crossingSites',
+        deps: ['slideSearch'],
+        ready: () => self.crossingModule !== null && self.crossingPrewarmModule !== null,
+        *start() {
+          const solveModule = self
+            .crossingModule as typeof import('../world/train/crossingPlanSolve');
+          const prewarmModule = self
+            .crossingPrewarmModule as typeof import('../world/train/crossingPrewarm');
+          const sites = yield* solveModule.crossingSitesSearch();
+          prewarmModule.offerPrewarmedCrossingSites(sites);
+        },
+      },
+      {
+        // The walk graph itself — every spur, street and interconnect, solved
+        // a destination at a time and offered to `pathsPrewarm` so
+        // `pathGraph.ts`'s import takes a pre-warmed graph instead of
+        // blocking a frame on the whole street-lattice solve (~215 ms).
+        name: 'pathGraph',
+        deps: ['crossingSites'],
+        ready: () => self.pathsModule !== null && self.pathsPrewarmModule !== null,
+        *start() {
+          const pathsModule = self.pathsModule as typeof import('../world/paths');
+          const prewarmModule = self
+            .pathsPrewarmModule as typeof import('../world/pathsPrewarm');
+          const graph = yield* pathsModule.pathGraphSearch();
+          prewarmModule.offerPrewarmedPathGraph(graph);
+        },
+      },
+    ]);
+  }
 
   /** Everything is solved and `SLIDE_PLAN` will be free when it is imported. */
   get ready(): boolean {
@@ -356,25 +480,25 @@ export class ParkGeneration {
    * is worth more.
    */
   get failed(): Error | null {
-    return this.failure;
+    return this.failure ?? this.scheduler.failed;
   }
 
   get stage(): GenerationStage {
     if (this.pathsDone) return 'ready';
-    if (this.slideSolved) return 'joining up the paths';
-    // The train and the rail race sit between the two sliced solves. They had
-    // no stage of their own, so every frame of theirs was reported as the
+    if (this.scheduler.isDone('slideSearch')) return 'joining up the paths';
+    // The train and the rail race sit between the two big solves. They had no
+    // stage of their own once, so every frame of theirs was reported as the
     // slide's — which made a 28.8 ms train-import hitch look like a slide
     // problem while it was being profiled. A stage that lies about which work
     // is running is a measurement bug, not a cosmetic one.
-    if (this.cruiserSolved) {
-      if (!this.trainSolved) return 'laying the railway';
-      return this.afterIndex >= MODULES_AFTER_CRUISER.length
+    if (this.scheduler.isDone('cruiserFinish')) {
+      if (!this.scheduler.isDone('trainSearch')) return 'laying the railway';
+      return this.importsCompletedThrough('railRace/plan')
         ? 'shaping the ginormous slide'
         : 'laying the railway';
     }
-    if (this.moduleIndex >= MODULES_BEFORE_CRUISER.length) return 'flying the sky cruiser';
-    if (this.moduleIndex > 0 || this.importInFlight) return 'measuring out the park';
+    if (this.importsCompletedThrough('coaster/route')) return 'flying the sky cruiser';
+    if (this.importIndex > 0 || this.importInFlight) return 'measuring out the park';
     return 'waiting';
   }
 
@@ -385,513 +509,130 @@ export class ParkGeneration {
 
   /** How many of the slide search's attempts have been started. */
   get attempts(): number {
-    return this.attemptsSeen;
+    return this.scheduler.progressOf('slideSearch');
   }
 
   /** How many of the Sky Cruiser search's attempts have been started. */
   get cruiserAttempts(): number {
-    return this.cruiserAttemptsSeen;
+    return this.scheduler.progressOf('cruiserSearch');
   }
 
-  /** Steps begun after a slice's deadline had passed. Zero, on correct code. */
+  /**
+   * Steps begun after a slice's deadline had passed. Zero, on correct code —
+   * the device-independent "the search can be stopped where it was asked to
+   * stop" (a step count, not a millisecond count, because how long a step
+   * takes is a fact about the machine; how many run after the driver was told
+   * to stop is a fact about this code). The first step of a slice is
+   * deliberately exempt: a GC between computing the deadline and entering the
+   * loop spends the budget before any step has run, and counting that made
+   * the check flaky-by-design on a slowed machine.
+   */
   get stepsPastDeadline(): number {
-    return (
-      this.overrunSteps +
-      (this.trainScheduler?.slicesPastDeadline ?? 0) +
-      (this.crossingScheduler?.slicesPastDeadline ?? 0) +
-      (this.pathsScheduler?.slicesPastDeadline ?? 0)
-    );
+    return this.scheduler.slicesPastDeadline;
   }
 
   /** Which loops began a step late — the diagnosis, not just the count. */
   get lateStepsByPhase(): Readonly<Record<string, number>> {
-    return {
-      ...this.overrunByPhase,
-      ...(this.trainScheduler?.lateSlicesByTask ?? {}),
-      ...(this.crossingScheduler?.lateSlicesByTask ?? {}),
-      ...(this.pathsScheduler?.lateSlicesByTask ?? {}),
-    };
+    return this.scheduler.lateSlicesByTask;
   }
 
-  /** How many pieces each sliced phase was divided into. Device-independent. */
+  /**
+   * How many pieces each sliced phase was divided into.
+   *
+   * Device-independent: the park is deterministic, so for a given seed these
+   * are the same numbers everywhere — a phone that is ten times slower does
+   * fewer units per frame, not fewer units. (The slide's count includes its
+   * ladder's own frame boundaries — the brief and judgement frames — which
+   * are equally deterministic.)
+   */
   get unitCounts(): Readonly<
     Record<'brief' | 'cruiserSearch' | 'cruiserFinish' | 'trainSearch' | 'slideSearch', number>
   > {
-    return { ...this.units, trainSearch: this.trainScheduler?.sliceCounts['trainSearch'] ?? 0 };
+    const counts = this.scheduler.sliceCounts;
+    return {
+      brief: counts['brief'] ?? 0,
+      cruiserSearch: counts['cruiserSearch'] ?? 0,
+      cruiserFinish: counts['cruiserFinish'] ?? 0,
+      trainSearch: counts['trainSearch'] ?? 0,
+      slideSearch: counts['slideSearch'] ?? 0,
+    };
   }
 
   /**
    * Generate for up to `budgetMs`, then get out of the way.
    *
    * Safe to call every frame, including after it is ready or has failed. Never
-   * re-enters an import that is still in flight.
+   * re-enters an import that is still in flight. Each frame is either **one
+   * module import** (the ladder's next rung, if its gate is open) or **a
+   * budget's worth of scheduler slices** — the same one-or-the-other the old
+   * hand-ordered driver kept, which is what keeps every import on its own
+   * frame.
    */
   advance(budgetMs: number): void {
-    if (this.pathsDone || this.failure || this.importInFlight) return;
+    if (this.pathsDone || this.failed || this.importInFlight) return;
 
-    // The ground the cruiser is measured against: one module, one frame.
-    const before = MODULES_BEFORE_CRUISER[this.moduleIndex];
-    if (before) {
-      this.moduleIndex += 1;
+    const step = this.importLadder[this.importIndex];
+    if (step && (!step.gate || step.gate())) {
+      this.importIndex += 1;
       this.workingFrames += 1;
-      this.runImport(before);
+      this.runImport(step);
       return;
     }
 
-    // The cruiser's own how-module. Nothing in it solves at module scope —
-    // that is the whole point of the `solve.ts`/`plan.ts` split.
-    if (!this.cruiserModule) {
+    this.scheduler.advance(budgetMs);
+    const sliced = Object.values(this.scheduler.sliceCounts).reduce((a, b) => a + b, 0);
+    if (sliced > this.slicesSeen) {
+      this.slicesSeen = sliced;
       this.workingFrames += 1;
-      this.runImport(() =>
-        import('../world/coaster/solve').then((module) => {
-          this.cruiserModule = module;
-        }),
-      );
-      return;
-    }
-
-    // The ~1.3 s, in eight-millisecond pieces. Everything below imports
-    // `COASTER_PLANS` sooner or later, so this has to finish first or the
-    // letterbox is read after the const it feeds has already initialised.
-    if (!this.cruiserSolved) {
-      this.advanceCruiser(this.cruiserModule, budgetMs);
-      return;
-    }
-
-    // The train's loop, spread over the ride's frames by the generic slice
-    // scheduler. Importing `train/route` here builds `COASTER_PLANS` from the
-    // pre-warmed cruiser (cheap) so the train's brief can read the low corridor;
-    // solving it *before* the after-modules below is what lets `TRAIN_PLAN` take
-    // a pre-warmed loop instead of blocking a frame on the ~1.1 s search.
-    if (!this.trainModule) {
-      this.workingFrames += 1;
-      this.runImport(() =>
-        import('../world/train/route').then((module) => {
-          this.trainModule = module;
-        }),
-      );
-      return;
-    }
-    if (!this.trainSolved) {
-      this.advanceTrain(this.trainModule, budgetMs);
-      return;
-    }
-
-    // The small solves that depend on the cruiser: one module, one frame.
-    const after = MODULES_AFTER_CRUISER[this.afterIndex];
-    if (after) {
-      this.afterIndex += 1;
-      this.workingFrames += 1;
-      this.runImport(after);
-      return;
-    }
-
-    // The slide's own module, which brings the castle and the coaster it
-    // measures itself against with it.
-    if (!this.solveModule) {
-      this.workingFrames += 1;
-      this.runImport(() =>
-        import('../world/slide/solve').then((module) => {
-          this.solveModule = module;
-        }),
-      );
-      return;
-    }
-
-    // The 3.46 s, in eight-millisecond pieces.
-    if (!this.slideSolved) {
-      this.advanceSlide(this.solveModule, budgetMs);
-      return;
-    }
-
-    // The crossing plan: where the railway can genuinely take a bridge,
-    // marched a candidate at a time (see the field's own comment). It reads
-    // the settled layout and TRAIN_PLAN, both long since in place here.
-    if (!this.crossingModule || !this.crossingPrewarmModule) {
-      this.workingFrames += 1;
-      this.runImport(() =>
-        Promise.all([
-          import('../world/train/crossingPlanSolve'),
-          import('../world/train/crossingPrewarm'),
-        ]).then(([solveModule, prewarmModule]) => {
-          this.crossingModule = solveModule;
-          this.crossingPrewarmModule = prewarmModule;
-        }),
-      );
-      return;
-    }
-    if (!this.crossingSitesSolved) {
-      this.advanceCrossingSites(this.crossingModule, this.crossingPrewarmModule, budgetMs);
-      return;
-    }
-
-    // The walk graph, a destination at a time. `paths.ts` is the machinery —
-    // it reads `SLIDE_PLAN` and the crossing plan, so it must not be imported
-    // until both letterboxes above are filled — and solving it here is what
-    // lets `pathGraph.ts` below take a pre-warmed graph instead of blocking a
-    // frame on the whole street-lattice solve.
-    if (!this.pathsModule || !this.pathsPrewarmModule) {
-      this.workingFrames += 1;
-      this.runImport(() =>
-        Promise.all([import('../world/paths'), import('../world/pathsPrewarm')]).then(
-          ([pathsModule, prewarmModule]) => {
-            this.pathsModule = pathsModule;
-            this.pathsPrewarmModule = prewarmModule;
-          },
-        ),
-      );
-      return;
-    }
-    if (!this.pathGraphSolved) {
-      this.advancePathGraph(this.pathsModule, this.pathsPrewarmModule, budgetMs);
-      return;
-    }
-
-    // `pathGraph.ts` last: its module scope takes the pre-warmed graph from
-    // the letterbox just filled (or would re-solve, on the no-prewarm paths).
-    this.workingFrames += 1;
-    this.runImport(() =>
-      import('../world/pathGraph').then(() => {
-        this.pathsDone = true;
-      }),
-    );
-  }
-
-  /**
-   * Runs the walk-graph solve through the generic {@link SolveScheduler},
-   * exactly the crossing-sites pattern above: `yield*` the search, post the
-   * result to the letterbox, and let `pathGraph.ts`'s eventual load take it
-   * instead of re-solving.
-   */
-  private advancePathGraph(
-    pathsModule: typeof import('../world/paths'),
-    prewarmModule: typeof import('../world/pathsPrewarm'),
-    budgetMs: number,
-  ): void {
-    this.workingFrames += 1;
-    const scheduler = (this.pathsScheduler ??= new SolveScheduler([
-      {
-        name: 'pathGraph',
-        *start() {
-          const graph = yield* pathsModule.pathGraphSearch();
-          prewarmModule.offerPrewarmedPathGraph(graph);
-        },
-      },
-    ]));
-    scheduler.advance(budgetMs);
-    if (scheduler.failed) {
-      this.failure = scheduler.failed;
-      return;
-    }
-    if (scheduler.done) this.pathGraphSolved = true;
-  }
-
-  /**
-   * Runs the crossing-plan march through the generic {@link SolveScheduler},
-   * exactly the train's own pattern: `yield*` the search, post the result to
-   * the letterbox, and let `crossingPlan.ts`'s eventual load take it instead
-   * of re-solving.
-   */
-  private advanceCrossingSites(
-    solveModule: typeof import('../world/train/crossingPlanSolve'),
-    prewarmModule: typeof import('../world/train/crossingPrewarm'),
-    budgetMs: number,
-  ): void {
-    this.workingFrames += 1;
-    const scheduler = (this.crossingScheduler ??= new SolveScheduler([
-      {
-        name: 'crossingSites',
-        *start() {
-          const sites = yield* solveModule.crossingSitesSearch();
-          prewarmModule.offerPrewarmedCrossingSites(sites);
-        },
-      },
-    ]));
-    scheduler.advance(budgetMs);
-    if (scheduler.failed) {
-      this.failure = scheduler.failed;
-      return;
-    }
-    if (scheduler.done) this.crossingSitesSolved = true;
-  }
-
-  /**
-   * Runs the Sky Cruiser's search until the budget is gone.
-   *
-   * The same driver as {@link advanceSlide} over the same generator, and the
-   * same argument for why the cadence cannot move the route: the search's whole
-   * state is generator locals, so suspending it cannot reorder an `Rng` draw
-   * (`rail/generate.ts`). `check:park-boot` proves it rather than asserting it,
-   * by hashing this loop against a straight-through `planCruiser()`.
-   *
-   * A `RailRouteUnsolvable` out of the ladder — which now means even the
-   * rescue tier found nothing — is **not** caught, unlike the slide's per-rung
-   * throw. The straight-through path does not catch it either — it comes out of
-   * `COASTER_PLANS`'s initialiser and `check:cruiser-solves` is what reports it —
-   * so swallowing it here would make the two cadences disagree about what a
-   * park that cannot be built looks like. It becomes `failed`, nothing is
-   * offered to the letterbox, and `COASTER_PLANS` re-solves and throws in
-   * exactly the place and shape it always did.
-   */
-  private advanceCruiser(
-    solve: typeof import('../world/coaster/solve'),
-    budgetMs: number,
-  ): void {
-    this.workingFrames += 1;
-    const deadline = performance.now() + budgetMs;
-
-    // Phase one: the briefs, a ring of candidate stations at a time. ~19 ms of
-    // `boundary.distanceToEdge`, which is too much for one frame on its own, so
-    // it is driven to the same budget as the search that follows it.
-    if (!this.cruiserStart) {
-      const building = (this.cruiserStartSearch ??= solve.cruiserStartSearch());
-      let steps = 0;
-      for (;;) {
-        if (steps > 0 && performance.now() >= deadline) this.noteLateStep('brief');
-        steps += 1;
-        const step = building.next();
-        this.units.brief += 1;
-        if (step.done) {
-          this.cruiserStart = step.value;
-          this.cruiserStartSearch = null;
-          break;
-        }
-        if (performance.now() >= deadline) return;
-      }
-      // **A finished phase does not entitle this slice to start the next one.**
-      // Falling straight through into the search below meant the frame that
-      // completed the brief also began solving the route, which is a step begun
-      // after the deadline — invisible on a fast machine and eight dropped
-      // frames on a slow one. Found by `stepsPastDeadline`, not by a stopwatch.
-      if (performance.now() >= deadline) return;
-    }
-    const start = this.cruiserStart;
-
-    try {
-      // Phase two: the route itself.
-      //
-      // Guarded on `cruiserRoute` rather than falling through, because a
-      // generator that has already returned answers `next()` with
-      // `{ done: true, value: undefined }` — so re-entering this on the frame
-      // after the search finished would overwrite the solved route with
-      // `undefined` and then read `.report` off it. Phases that have completed
-      // must be skipped, not merely finished.
-      if (!this.cruiserRoute) {
-        // The tier transitions (escalation, rescue) happen INSIDE the policy
-        // generator, between two of its yields — they are not this driver's
-        // to sequence, which is the whole point of the ladder having one
-        // owner. The rescue tier's pose construction is one ~20 ms un-yielding
-        // block, and it is reachable only on a seed where the park previously
-        // failed to build at all, which is a trade a loading screen takes.
-        const search = (this.cruiserSearch ??= solve.cruiserRouteSearch(start.briefs));
-        let steps = 0;
-        for (;;) {
-          if (steps > 0 && performance.now() >= deadline) this.noteLateStep('cruiserSearch');
-          steps += 1;
-          const step = search.next();
-          this.units.cruiserSearch += 1;
-          if (step.done) {
-            this.cruiserRoute = step.value;
-            break;
-          }
-          this.cruiserAttemptsSeen = step.value;
-          if (performance.now() >= deadline) return;
-        }
-        if (performance.now() >= deadline) return;
-      }
-
-      // Phase three: finish it — the hill profile, the carves and the vertical
-      // repair, one repair pass at a time. This block, run whole, is what CI
-      // failed on at 54.6 ms against a 24 ms ceiling.
-      const finishing = (this.cruiserFinish ??= solve.finishCruiserPlanSearch(
-        this.cruiserRoute,
-        start.rng,
-      ));
-      let steps = 0;
-      for (;;) {
-        if (steps > 0 && performance.now() >= deadline) this.noteLateStep('cruiserFinish');
-        steps += 1;
-        const step = finishing.next();
-        this.units.cruiserFinish += 1;
-        if (step.done) {
-          offerPrewarmedCruiser(step.value);
-          this.cruiserSolved = true;
-          return;
-        }
-        if (performance.now() >= deadline) return;
-      }
-    } catch (error) {
-      this.failure = error instanceof Error ? error : new Error(String(error));
     }
   }
 
   /**
-   * Runs the train's loop search through the generic {@link SolveScheduler}.
-   *
-   * The train is the first feature ported onto the scheduler: one task today, so
-   * this behaves like `advanceCruiser`, but it is driven by the generic engine
-   * rather than a bespoke loop — the shape every other solve is being moved to,
-   * and the substrate the round-robin/backtracking work stands on. The task
-   * `yield*`s `train/route.ts`'s own search generator and, on completion, hands
-   * the loop to `train/prewarm.ts`; determinism is the scheduler's cadence
-   * guarantee plus `rail/generate.ts`'s yield-inertness.
-   */
-  private advanceTrain(module: typeof import('../world/train/route'), budgetMs: number): void {
-    this.workingFrames += 1;
-    const scheduler = (this.trainScheduler ??= new SolveScheduler([
-      {
-        name: 'trainSearch',
-        *start() {
-          const route = yield* module.trainRouteSearch();
-          offerPrewarmedTrain(route);
-        },
-      },
-    ]));
-    scheduler.advance(budgetMs);
-    if (scheduler.failed) {
-      this.failure = scheduler.failed;
-      return;
-    }
-    if (scheduler.done) this.trainSolved = true;
-  }
-
-  /**
-   * Runs the search until the budget is gone.
-   *
-   * The clock is read every joint rather than every N joints: a joint is ~35 us
-   * and `performance.now()` is a few tens of nanoseconds, so the check costs
-   * well under a percent and buys an exact budget instead of an estimated one.
-   */
-  private advanceSlide(solve: typeof import('../world/slide/solve'), budgetMs: number): void {
-    this.workingFrames += 1;
-    const deadline = performance.now() + budgetMs;
-
-    // **A finished route is judged and built on its own frame.**
-    //
-    // `unrideableComplaint` rebuilds the whole chute and measures it in three
-    // dimensions, and `finishSlidePlan` builds it again for keeps. Doing both on
-    // the same frame as the search step that produced the route made that frame
-    // the worst in the entire park build — a budget's worth of searching plus
-    // two chute builds, none of it interruptible. Deferring by one frame does
-    // not make the work smaller, but it stops it being *added* to a slice that
-    // had already spent its budget.
-    const pending = this.slidePending;
-    if (pending) {
-      this.slidePending = null;
-      const complaint = solve.unrideableComplaint(pending.route);
-      if (complaint === null) {
-        offerPrewarmedSlide(solve.finishSlidePlan(pending.route));
-        this.slideSolved = true;
-      } else {
-        this.lastComplaint = `${complaint} (at a ${pending.target} m target)`;
-        this.rung += 1;
-        this.search = null;
-      }
-      return;
-    }
-
-    const ladder = solve.DESIRED_LENGTH_LADDER;
-    const target = ladder[this.rung];
-    if (target === undefined) {
-      // Every rung tried, none rideable — the same terminal answer
-      // `planSlide()` gives, with the same shape of message.
-      this.failure = new Error(
-        `the ginormous slide never solved to a chute a child could ride: ` +
-          `after ${ladder.length} target lengths (${ladder.join(', ')} m), ` +
-          `the best on offer ${this.lastComplaint}.`,
-      );
-      return;
-    }
-
-    // The brief gets its own frame too: it is pure, but `doorPoses()` and
-    // `pitPoses()` both filter their candidates through `PARK_BOUNDARY`, which
-    // is not free, and it measured 13.7 ms sharing a frame with the search.
-    if (!this.search) {
-      this.search = railRouteSearch(solve.slideRouteBriefAt(target));
-      return;
-    }
-    const search = this.search;
-
-    try {
-      let steps = 0;
-      for (;;) {
-        if (steps > 0 && performance.now() >= deadline) this.noteLateStep('slideSearch');
-        steps += 1;
-        const step = search.next();
-        this.units.slideSearch += 1;
-        if (step.done) {
-          // **The same verdict, in the same order, as `planSlide()`** — just
-          // taken on the next frame rather than this one. See above.
-          this.slidePending = { route: step.value, target };
-          return;
-        }
-        this.attemptsSeen = step.value;
-        if (performance.now() >= deadline) return;
-      }
-    } catch (error) {
-      if (error instanceof RailRouteUnsolvable) {
-        // A target that admits no route at all is a rung that did not work,
-        // not a park that cannot be built — the next rung gets its turn,
-        // exactly as `solveChuteAt` treats the same throw.
-        this.lastComplaint = `admitted no route at a ${target} m target`;
-        this.rung += 1;
-        this.search = null;
-        return;
-      }
-      this.failure = error instanceof Error ? error : new Error(String(error));
-    }
-  }
-
-  /**
-   * Marks an import in flight so no frame starts a second one on top of it, and
-   * **starts it off the frame rather than inside it.**
+   * Marks an import in flight so no frame starts a second one on top of it,
+   * and **starts it off the frame rather than inside it.**
    *
    * ### Why the `queueMicrotask`, which is not a dodge
    *
    * In a browser, `import()` hands back a promise essentially immediately and
-   * the module's own work happens when that promise settles — which is *already*
-   * off `advance()`'s books, and is measured instead by `check:park-boot`'s
-   * event-loop lag. That is the behaviour this class is written for and the one
-   * a phone actually runs.
+   * the module's own work happens when that promise settles — which is
+   * *already* off `advance()`'s books, and is measured instead by
+   * `check:park-boot`'s event-loop lag. That is the behaviour this class is
+   * written for and the one a phone actually runs.
    *
-   * In Node under the TypeScript loader the check uses, `import()` additionally
-   * does the whole resolve-and-compile of every file in the graph
-   * **synchronously, before returning the promise**. Measured: 41.4 ms for a
-   * module's first import and 0.2 ms for the same import once the graph is in
-   * the module cache; a dependency-free module costs 0.1 ms. So it is per-file
-   * loader work, not the module's own work, and it exists only in the harness.
-   *
-   * Calling `import()` inside `advance()` therefore charged the frame budget for
-   * a cost the game does not have, and it was the largest thing left in there —
-   * four of the six worst slices on a deliberately slowed machine were imports
-   * rather than generation. Scheduling the call one microtask out puts that cost
-   * where the equivalent browser cost already lands: on the event loop, under the
-   * block ceiling that owns work which does not pass through `advance()`.
+   * In Node under the TypeScript loader the check uses, `import()`
+   * additionally does the whole resolve-and-compile of every file in the
+   * graph **synchronously, before returning the promise** (measured: 41.4 ms
+   * for a module's first import, 0.2 ms once the graph is in the module
+   * cache). So it is per-file loader work that exists only in the harness,
+   * and calling `import()` inside `advance()` charged the frame budget for a
+   * cost the game does not have. Scheduling the call one microtask out puts
+   * that cost where the equivalent browser cost already lands: on the event
+   * loop, under the block ceiling that owns work which does not pass through
+   * `advance()`.
    *
    * `importInFlight` is still set **synchronously**, so the very next
    * `advance()` cannot start a second import on top of this one.
    */
-  /**
-   * Records a step that began after its slice's deadline, and which loop did it.
-   *
-   * The count alone says a driver overran; the phase says which one, which is
-   * the difference between a diagnosis and a hunt. Both are device-independent.
-   */
-  private noteLateStep(phase: string): void {
-    this.overrunSteps += 1;
-    this.overrunByPhase[phase] = (this.overrunByPhase[phase] ?? 0) + 1;
-  }
-
-  private runImport(begin: () => Promise<unknown>): void {
+  private runImport(step: ImportStep): void {
     this.importInFlight = true;
     queueMicrotask(() => {
-      begin()
+      step
+        .begin()
         .catch((error: unknown) => {
-          this.failure = error instanceof Error ? error : new Error(String(error));
+          this.failure =
+            error instanceof Error
+              ? error
+              : new Error(`importing ${step.name}: ${String(error)}`);
         })
         .finally(() => {
           this.importInFlight = false;
         });
     });
+  }
+
+  /** Has the ladder finished every rung up to and including `name`? */
+  private importsCompletedThrough(name: string): boolean {
+    const index = this.importLadder.findIndex((step) => step.name === name);
+    return this.importIndex > index && !this.importInFlight;
   }
 }
