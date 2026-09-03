@@ -1,6 +1,7 @@
 import { RIM_OUTSET_START } from '../../core/constants';
 import { PARK_BOUNDARY, TERRAIN_APRON } from '../boundary';
 import { RingPath } from '../railRace/ringPath';
+import { CHILD_FOOTPRINT } from '../../art/models/kid';
 import { CAT_BUS_LENGTH } from './catBus';
 import { ENTRANCE_ANGLE } from './layout';
 import { ROAD_HALF_WIDTH } from './road';
@@ -120,7 +121,65 @@ const BOUNDARY_MASONRY_REACH = 0.6;
  */
 const BUS_SILHOUETTE_OVERHANG = 1.24;
 
-export const ENTRANCE_ROAD_OUTSET =
+/**
+ * **How much pavement a child needs between the bus's door and the arch.**
+ *
+ * Two children abreast, which is what stepping down and turning towards the gate
+ * actually takes — `CHILD_FOOTPRINT` is the width `NpcSystem` keeps them apart
+ * by, so two of it is the narrowest strip eleven of them can leave a bus onto
+ * without immediately being in the doorway.
+ *
+ * **This is what the first curved road got wrong, and it is worth stating why it
+ * was invisible.** With the outset set purely by "as close to the wall as a road
+ * can be laid" the geometry was correct in every way anybody was checking — the
+ * road cleared the masonry, the bus cleared the park, the trestles cleared the
+ * bus — and the door came to rest **1.18 m from the middle of the arch**
+ * (`scripts/probe-door.mts`). The children stepped down inside the gateway,
+ * their walk routes collapsed to a stub, and `check:cat-bus` reported it as a
+ * *timing* fault: "two children left the bus only 0.00 s apart", at 0.87 and
+ * 7.15 m/s. Nothing was wrong with the timing — `KID_DELAYS` is cumulative and
+ * time-based and always was. The symptom named the wrong system, which is why
+ * the number is derived here now instead of being a consequence of somewhere
+ * else's optimum.
+ */
+const DOOR_PAVEMENT = CHILD_FOOTPRINT * 2;
+
+/**
+ * How far the bus's door drop sits from the bus's own centre, towards the park.
+ *
+ * A statement about the built vehicle rather than a second definition of it:
+ * `check:cat-bus`'s road section measures the real `doorDrop` against the gate,
+ * so if the bus is ever rebuilt with its door elsewhere the check says so rather
+ * than the road quietly stopping in the wrong place. Not imported from
+ * `catBus.ts` because that module builds textures at import time and this one is
+ * pulled in by `railRace/track.ts` during the ride's own build.
+ */
+const BUS_DOOR_INBOARD = 4.66;
+
+/**
+ * **The road's centre line, as metres beyond the park's edge.**
+ *
+ * Bounded below by the door and above by the hill, and both bounds are real:
+ *
+ * - **The door** must open onto {@link DOOR_PAVEMENT} of ground before the arch,
+ *   and it sits {@link BUS_DOOR_INBOARD} from the bus's centre, which the bus
+ *   shares with the road's. That is the floor.
+ * - **The hill** starts at `RIM_OUTSET_START`, and the road's outer kerb must
+ *   stay inside it or the carriageway is cambered down a 17 m slope. That is the
+ *   ceiling, at `RIM_OUTSET_START - ROAD_HALF_WIDTH` = 8.11.
+ *
+ * The floor is `3.6 + 4.66` = 8.26 and the ceiling 8.11, so **they cross by
+ * 0.15 m** — which is the honest statement of how tight the apron outside this
+ * park is, and why the old straight road simply sat on top of the ride instead.
+ * The road takes the floor, and its outer kerb overhangs the very start of the
+ * rim by 15 cm, where the fall is `smoothstep(12, 22, 12.15)` of 17 m — under a
+ * centimetre. It is inside the ceiling in every sense that matters and outside it
+ * arithmetically, and that is worth saying plainly rather than rounding away.
+ */
+export const ENTRANCE_ROAD_OUTSET = DOOR_PAVEMENT + BUS_DOOR_INBOARD;
+
+/** Kept for the record — the wall-hugging outset the first version used. */
+export const ENTRANCE_ROAD_MINIMUM_OUTSET =
   ROAD_HALF_WIDTH + BOUNDARY_MASONRY_REACH + BUS_SILHOUETTE_OVERHANG;
 
 /**
