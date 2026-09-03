@@ -58,6 +58,18 @@ export interface HidingFact {
   readonly what: string;
 }
 
+/** One planted thing found standing in the road the cat bus drives. */
+export interface TreeInTheRoadFact {
+  readonly x: number;
+  readonly z: number;
+  /** How far it spreads on the ground, in metres — its own instance scale. */
+  readonly reach: number;
+  /** How far that reach comes inside the corridor the bus sweeps. */
+  readonly inside: number;
+  /** Which `InstancedMesh` it came out of, so a failure names the population. */
+  readonly what: string;
+}
+
 /**
  * One thing found standing in the journey lane's carriageway — the road the cat
  * bus drives up to the park on.
@@ -744,6 +756,17 @@ export interface ParkFacts {
    * from behind.
    */
   readonly hidingTheArrivingBus: readonly HidingFact[];
+  /**
+   * **Every planted thing standing in the road the cat bus drives**, measured
+   * the same way and for the same reason as {@link hidingTheArrivingBus}: off
+   * the built scene's instance matrices, never off the scatter's own rules.
+   *
+   * Empty is the healthy state. Before the keep-out went in this was 64 to 106
+   * entries a seed.
+   */
+  readonly treesInTheBusRoad: readonly TreeInTheRoadFact[];
+  /** How many treeline/foliage instances were examined to fill it. */
+  readonly plantedInstancesSwept: number;
   /**
    * **Everything standing in the journey lane's carriageway**, measured off the
    * built `BusJourney` scene in world space.
@@ -1433,7 +1456,10 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // manifest and loads it before the seed is set, which silently skips 156
   // tests rather than failing one.
   const { hidesTheArrivingBus } = await import('../../src/world/entrance/arrivalSightline.ts');
+  const { distanceToEntranceCorridor } = await import('../../src/world/entrance/roadRoute.ts');
   const hidingTheArrivingBus: HidingFact[] = [];
+  const treesInTheBusRoad: TreeInTheRoadFact[] = [];
+  let plantedInstancesSwept = 0;
   {
     // Only the two groups the scatter owns. The boundary wall and the Rail
     // Race's trestles also cross this corridor — 20 wall blocks and 40-odd
@@ -1460,6 +1486,21 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
           at.setFromMatrixPosition(matrix);
           scale.setFromMatrixScale(matrix);
           const top = at.y + bounds.max.y * scale.y;
+          plantedInstancesSwept += 1;
+          // How far this instance spreads on the ground: its own horizontal
+          // scale, read off the matrix that will be drawn, so a canopy is
+          // measured by the canopy and a trunk by the trunk.
+          const reach = Math.max(scale.x, scale.z) * Math.max(bounds.max.x, bounds.max.z);
+          const outside = distanceToEntranceCorridor(at.x, at.z);
+          if (outside < reach) {
+            treesInTheBusRoad.push({
+              x: at.x,
+              z: at.z,
+              reach,
+              inside: reach - outside,
+              what: object.name,
+            });
+          }
           if (!hidesTheArrivingBus(at.x, at.z, top)) continue;
           hidingTheArrivingBus.push({ x: at.x, z: at.z, top, what: object.name });
         }
@@ -2736,6 +2777,8 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     keychainKeyringEntrances,
     catBus,
     hidingTheArrivingBus,
+    treesInTheBusRoad,
+    plantedInstancesSwept,
     exits,
     pathNodes,
     pathEdges,

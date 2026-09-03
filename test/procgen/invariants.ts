@@ -7192,7 +7192,19 @@ const theRoadArrivesAtTheParkAndGoesIn: Invariant = (facts) => {
   const at = new Vector3();
   facts.world.entrance.group.traverse((object: Object3D) => {
     if (!(object instanceof Mesh)) return;
-    if (!object.name.startsWith('entrance-road')) return;
+    // **The road and the path that carries on from it**, because what this
+    // asserts is that a made surface runs from the kerb through the arch and
+    // into the park — not that any one mesh does. Since 3 September the run in
+    // through the gate is ordinary park paving rather than road (Jim: *"the
+    // small run of path from the road into the park should be just a normal
+    // path"*), and a filter that named only the road would have gone on
+    // asserting the road's own end while the thing it exists to prove — that
+    // you can walk in on something — had moved into a differently-named mesh.
+    // It went red the moment the spur was renamed, which is what an invariant
+    // measuring the park rather than the code is for.
+    const road = object.name.startsWith('entrance-road');
+    const gateway = object.name.startsWith('entrance-gateway-path');
+    if (!road && !gateway) return;
     const position = object.geometry.getAttribute('position');
     for (let i = 0; i < position.count; i += 1) {
       at.set(position.getX(i), position.getY(i), position.getZ(i)).applyMatrix4(object.matrixWorld);
@@ -7513,6 +7525,63 @@ const nothingPlantedHidesTheArrivingBus: Invariant = (facts) => {
       `arriving cat bus — she cannot see the bus she is arriving on. Worst: ` +
       worst
         .map((thing) => `${thing.what} at ${fmt([thing.x, thing.z])} reaching ${thing.top.toFixed(1)} m`)
+        .join('; '),
+  ];
+};
+
+/**
+ * **Nothing is planted in the road the cat bus drives.**
+ *
+ * Jim, 3 September 2026: *"the bus drives through trees on its final
+ * approach"*. It did, and on every seed — measured on the built park before the
+ * fix, **64 to 106 treeline instances per seed** stood inside the corridor the
+ * bus sweeps, at outsets of 13.7 to 21.1 m. That is structural, not luck:
+ * `Scenery.ts`'s treeline band runs from 11.5 m outside the boundary to
+ * `TERRAIN_APRON - 1.5`, and the road's tails climb from the kerb to
+ * `ENTRANCE_ROAD_TAIL_OUTSET` straight through it.
+ *
+ * ## Why the trees are the ones that move
+ *
+ * Because the road cannot. Its outset is pinned between the pavement the bus's
+ * door needs and `RIM_OUTSET_START`, two bounds that **cross by 0.15 m**
+ * (`roadRoute.ts`), so there is no offset at which a road along this wall
+ * misses anything — the same impossibility `check:entrance-road` was built
+ * around for the Rail Race's supports. And the corridor is derived from
+ * `PARK_BOUNDARY` alone, so it is solved before a single tree exists, exactly
+ * as the train's route is in `Scenery.ts`'s own `onRailway` note. The road
+ * claims its corridor and the woodland gives way, which is what pylon placement
+ * already does when it fells foliage.
+ *
+ * ## What is measured
+ *
+ * The **built park's instance matrices**, not the scatter's rules — the same
+ * distinction {@link nothingPlantedHidesTheArrivingBus} earned twice. The
+ * threshold is the game's: `distanceToEntranceCorridor` is the bus's own swept
+ * body (a `CAT_BUS_LENGTH` box at every sample, sampled at 0.2 m so the bulge
+ * between samples cannot hide anything), against each instance's own drawn
+ * reach. Nothing here restates the keep-out `buildTreeline` applies; if that
+ * keep-out were sized off the ribbon rather than the sweep, this would still
+ * fail.
+ */
+const nothingIsPlantedInTheBusRoad: Invariant = (facts) => {
+  // Coverage on every run, passing or not — `process.stderr`, because vitest's
+  // default reporter shows console output from failing tests only, so the note
+  // would be invisible in exactly the case it exists for.
+  process.stderr.write(
+    `[bus road cover] ${facts.plantedInstancesSwept} planted instances swept against the ` +
+      `bus's corridor, ${facts.treesInTheBusRoad.length} inside it\n`,
+  );
+  if (facts.treesInTheBusRoad.length === 0) return [];
+  const worst = [...facts.treesInTheBusRoad].sort((a, b) => b.inside - a.inside).slice(0, 3);
+  return [
+    `${facts.treesInTheBusRoad.length} planted thing(s) stand in the road the cat bus drives — ` +
+      `it drives through them on its way in. Worst: ` +
+      worst
+        .map(
+          (tree) =>
+            `${tree.what} at ${fmt([tree.x, tree.z])} reaching ${tree.reach.toFixed(2)} m, ` +
+            `${tree.inside.toFixed(2)} m inside the bus`,
+        )
         .join('; '),
   ];
 };
@@ -9255,6 +9324,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     theEntranceIsClearEnoughToArriveAt,
   ],
   ['you can see the cat bus she arrives on', nothingPlantedHidesTheArrivingBus],
+  ['nothing is planted in the road the cat bus drives', nothingIsPlantedInTheBusRoad],
 ];
 
 /**
