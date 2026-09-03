@@ -1592,7 +1592,23 @@ export function createCatBus(): CatBusHandle {
       bumperMaterial,
     ),
   );
-  riser.position.set(stepX, lowestTreadUnderside + riserHeight / 2, stepZ - stepDepth / 2 + 0.08 * DETAIL);
+  // **Set into the treads, not flush with them.** The riser is `0.16 * DETAIL`
+  // deep and used to be centred exactly half that in from `stepZ - stepDepth /
+  // 2`, which put its back face in the *same plane* as both treads' back faces,
+  // pointing the same way — two surfaces fighting for one plane, which is
+  // `check:coplanar`'s whole subject and ART_DIRECTION.md §7's flat
+  // prohibition. It was in the baseline as 31 tolerated seams and went to 33 the
+  // moment the bus stopped parking square to the camera, because the sweep only
+  // counts what the iso camera can see and a new yaw shows it more of the step.
+  //
+  // Moved forward by `0.02 * DETAIL` so the back face sits *inside* the treads
+  // rather than on their boundary. Interpenetration is fine — the depth buffer
+  // has an unambiguous answer everywhere — and the riser still overlaps both
+  // treads, so `check:bus-journey`'s "every part touches the bodywork" is
+  // unaffected. This is the §7 fix (stop sharing the plane), not a stand-off:
+  // there is no gap to maintain and nothing goes stale if the step is resized,
+  // because the inset is expressed in the same `DETAIL` the step is.
+  riser.position.set(stepX, lowestTreadUnderside + riserHeight / 2, stepZ - stepDepth / 2 + 0.10 * DETAIL);
   stepGroup.add(riser);
 
   // --- bumpers ---------------------------------------------------------------
