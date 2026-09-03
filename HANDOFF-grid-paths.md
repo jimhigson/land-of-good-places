@@ -5669,3 +5669,29 @@ originally assigned to, per the replacement rule in CLAUDE.md. Worktree
 - This branch (`feat/grid-paths`) remains frozen by Jim's stop order. Nothing
   on it has been changed by this agent; this checkpoint and the sweep result
   are the only additions.
+
+## The unmeasured commit is RESOLVED — measured complete, KEPT (3 Sep, Fable)
+
+Both gates run to completion in this worktree, redirected to files, exit codes
+read, sets diffed (not counts), against the verified baseline above:
+
+- `tmp-sweep2.sh`, all sixteen seeds: **12 green / 8 stranded, lc=0 on all
+  sixteen.** Seeds 428 and 451 (the two never run before) are green with
+  lc=0, identical to baseline. Not green: 11 (1), 225 (2), 288 (2), 326 (3)
+  — the exact baseline set minus seed 5, which turned green as the commit
+  intended. **Only seed 5 moved.**
+- `test:procgen`: `Test Files 5 failed | 23 passed (28)`,
+  `Tests 5 failed | 1405 passed (1410)`. Violation set: 5 lattice,
+  11 lattice, 267 detour, 288 detour->noPathEndsNowhere wording as before,
+  346 detour — the baseline set of six minus exactly `seed 5 >
+  noPathEndsNowhere`, the one line the gate commit targets. No swaps.
+
+Per the standing instruction ("if anything but seed 5 moves, revert"): nothing
+else moved, so the commit **stands**. The branch's ledger is closed; it remains
+frozen per Jim's stop order.
+
+Direction since: Jim ruled round-robin-with-backtracking, total generator
+(any seed builds, unwinding as far as an empty park, deterministic via PRNG),
+plus a universal deny-by-default collision invariant. Design pushed on
+`design/round-robin-generation`, awaiting his ruling. Raw run outputs:
+`sweep2-ecd7c165.out` and `procgen-ecd7c165.out` in this session's scratchpad.
