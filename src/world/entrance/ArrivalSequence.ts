@@ -1,5 +1,13 @@
 import { Group, Vector3 } from 'three';
-import { clamp01, createRandom, lerp, smoothstep, turnTowards } from '../../core/mathUtils';
+import {
+  angleDelta,
+  clamp01,
+  createRandom,
+  DEG,
+  lerp,
+  smoothstep,
+  turnTowards,
+} from '../../core/mathUtils';
 import { terrainHeight } from '../terrain';
 import type { FrameContext } from '../../core/types';
 import type { Player } from '../../entities/Player';
@@ -15,7 +23,11 @@ import {
   CAT_BUS_WIDTH,
   type CatBusHandle,
 } from './catBus';
-import { CAMERA_VIEW_HEIGHT } from '../../core/constants';
+import {
+  CAMERA_PITCH_DEGREES,
+  CAMERA_VIEW_HEIGHT,
+  CAMERA_YAW_DEGREES,
+} from '../../core/constants';
 import { createBusDriver, type BusDriver } from './busDriver';
 import { playBrakeSqueak, playDoorHiss, playHornToot } from './sounds';
 import { markArrived } from './arrivalFlag';
@@ -25,6 +37,7 @@ import {
   ENTRANCE_BUS_DOOR_X,
   ENTRANCE_BUS_STOP_Z,
   ENTRANCE_BUS_VANISH_X,
+  ENTRANCE_GATE_X,
   ENTRANCE_GATE_Z,
   ENTRANCE_PLAYER_X,
   ENTRANCE_PLAYER_Z,
@@ -247,23 +260,18 @@ export const ARRIVAL_CAMERA_ZOOM =
   CAMERA_VIEW_HEIGHT / 2 / (ARRIVAL_BUS_RADIUS * ARRIVAL_FRAMING_AIR);
 
 /**
- * The zoom the park camera should be holding, for a given arrival phase.
- *
- * A pure function in its own right, for the reason `arrivalSpawn.ts` exists:
- * the caller is `Game.tick()`, `Game` cannot be constructed in a test, and a
- * camera decision made inline in there is a camera decision no check can reach
- * — which is exactly how the last camera bug on this feature stayed green.
- *
- * Back to 1 from `departing` onward. She has the controls by then, and the
- * framing she plays in is the ordinary one; the damping in `IsoCamera.update`
- * turns the change into a push-in rather than a jump.
+ * How far above the pavement the door shot is aimed, in metres — about a
+ * child's chest. Below `TALLEST_CHILD_HEIGHT` on purpose: the subject is the
+ * children coming down the step, not the roof of the bus behind them.
  */
-export function arrivalCameraZoom(phase: ArrivalPhase): number {
-  return phase === 'departing' || phase === 'done' ? 1 : ARRIVAL_CAMERA_ZOOM;
-}
+const ARRIVAL_DOOR_FOCUS_LIFT = 1.1;
+
+// ---------------------------------------------------------------------------
+// The arrival camera: three placements, and the path between them
+// ---------------------------------------------------------------------------
 
 /**
- * **How low the camera sits while the arrival is the shot**, in degrees.
+ * **What Jim asked for, and what the first attempt got wrong.**
  *
  * Jim, on what the arrival should do: *"when the bus arrives at the park, the
  * camera needs to face the bus's doors as the children get off the bus, then
@@ -271,71 +279,231 @@ export function arrivalCameraZoom(phase: ArrivalPhase): number {
  * then once through the arch the camera moves up to its usual pseudo-isometric
  * perspective."*
  *
- * The rig's own pitch is 38 degrees, which looks down on the park from above —
- * right for playing, wrong for watching children step down off a bus, because
- * from up there you see the tops of their heads and the roof of the bus. Lower
- * it and the door faces you, the children come *towards* the camera, and the
- * arch becomes a thing you pass under rather than a shape on the floor. The
- * distance and the yaw are the rig's own — only the tilt changes, so the rise
- * back is a lift rather than a swing.
+ * The first version of this changed the **pitch** (38° → 26° → 38°) and the
+ * look-at point, and nothing else. He watched it and said *"why doesn't the
+ * camera follow into the park like asked for?"* and *"this is nothing like
+ * what I asked for."*
  *
- * **26 rather than 16, and the difference was found by looking.** 16 degrees is
- * nearly side-on and frames the bus beautifully, but the rail race runs right
- * past the entrance: at that angle its track and pylons lie across the whole
- * frame, straight through the arch and over the children's heads, so the one
- * beat that is supposed to land — walking under the gate — was competing with a
- * roller coaster drawn on top of it. At 26 the track passes over and the arch,
- * the bus and the queue coming off it all read. No assertion could have caught
- * that; it is the seed's own park furniture meeting a camera angle nothing had
- * ever pointed at it before.
+ * The reason it could not have worked is worth writing down, because it is a
+ * property of this game's rig rather than a matter of taste. **The park camera
+ * is orthographic.** Sliding an orthographic eye along its own view axis
+ * changes literally nothing on screen; the only three things that can make an
+ * orthographic shot a different shot are its **yaw**, its **pitch** and the
+ * **point it is looking at**. That first attempt held the yaw at the park's one
+ * eternal 45° for the whole sequence — so however much the tilt moved, the park
+ * was still being seen from exactly the compass angle it is always seen from,
+ * and "the camera never went anywhere" was a correct description of the frame.
+ *
+ * So this shot swings the yaw round to stand square-ish to the bus's door,
+ * drops the pitch to a child's eye line, pushes in on the step, and then
+ * *travels* — the yaw arcs back round and the pitch lifts while the focus rides
+ * along with her through the gateway — landing on the rig's own pose exactly.
  */
-export const ARRIVAL_CAMERA_PITCH_DEGREES = 26;
 
 /**
- * How far above the pavement the door shot is aimed, in metres — about a
- * child's chest. Below `TALLEST_CHILD_HEIGHT` on purpose: the subject is the
- * children coming down the step, not the roof of the bus behind them.
+ * **Where the camera stands to face the doors: on the park's side of the bus,
+ * looking back out at it.**
+ *
+ * Derived, not dialled. `cameraOffset` puts the eye at `focus + offset` looking
+ * back down `-offset`, so an eye offset pointing **from the bus towards the
+ * gate** is a camera standing between the two, facing the bus — which is where
+ * somebody waiting to meet the children would stand, and, usefully, the one
+ * bearing whose background is the road and the sky rather than the park's own
+ * furniture. (The previous attempt had to give up 10° of tilt because the rail
+ * race lies across the frame at a low angle. It lies across the frame because
+ * it is *inside* the park, so a camera looking outward has it behind the lens.)
+ *
+ * A bus of another length or a gate moved round the boundary both move this on
+ * their own: it is two layout constants and no third number.
  */
-const ARRIVAL_DOOR_FOCUS_LIFT = 1.1;
+const SQUARE_ON_TO_THE_DOOR_DEGREES =
+  Math.atan2(
+    ENTRANCE_GATE_X - ENTRANCE_BUS_DOOR_X,
+    ENTRANCE_GATE_Z - ENTRANCE_BUS_STOP_Z,
+  ) / DEG;
 
 /**
- * The pitch the park camera should hold for a given phase, or `null` for
- * "the ordinary pose".
+ * How far off square-on the door shot sits, in degrees, turned towards the
+ * rig's own bearing.
  *
- * A pure function beside {@link arrivalCameraZoom} and for exactly its reason:
- * the caller is `Game.tick()`, `Game` builds a real `WebGLRenderer` and cannot
- * be constructed in a test, so a camera decision made inline in there is a
- * camera decision no check can reach.
- *
- * **`null` from `departing` on — the beat-three rise.** She is handed the
- * controls on `departing`'s very first frame (`ARRIVAL_CONTROL_AT`), so the
- * camera lifts *under her hand* rather than in front of it. That is
- * deliberate: a rise she is already steering through reads as the game giving
- * her the park, where the same move played out before control returns reads as
- * one more second of being made to wait. It is also the existing hand-over
- * point, so nothing about when she gets to play changed.
+ * Dead square-on to an orthographic bus is a flat elevation drawing — no depth
+ * to the doorway, no sense of the children coming *out* of anything. A
+ * three-quarter turn gives the step some depth and shortens the arc the camera
+ * has to travel on the way home, so the swing under the arch stays a move
+ * rather than a spin. A look number, chosen by watching it; the bearing it is
+ * measured from is not.
  */
-export function arrivalCameraPitch(phase: ArrivalPhase): number | null {
-  return phase === 'departing' || phase === 'done' ? null : ARRIVAL_CAMERA_PITCH_DEGREES;
+const ARRIVAL_DOOR_THREE_QUARTER_DEGREES = 25;
+
+/** The bearing the door shot is actually taken from — square-on, turned that
+ *  far towards the bearing it will have to come home to. */
+export const ARRIVAL_DOOR_YAW_DEGREES =
+  SQUARE_ON_TO_THE_DOOR_DEGREES +
+  Math.sign(angleDelta(SQUARE_ON_TO_THE_DOOR_DEGREES * DEG, CAMERA_YAW_DEGREES * DEG)) *
+    ARRIVAL_DOOR_THREE_QUARTER_DEGREES;
+
+/**
+ * **How low the door shot sits**, in degrees of downward tilt.
+ *
+ * The rig's own 38° looks down on the park from above — right for playing,
+ * wrong for watching children step down off a bus, because from up there you
+ * see the tops of their heads and the roof of the bus. At 12° the doorway is
+ * something you are standing in front of, the children come towards the lens
+ * as they step off, and the arch becomes a thing to be walked *under* rather
+ * than a shape drawn on the floor.
+ *
+ * It can be this low only because {@link ARRIVAL_DOOR_YAW_DEGREES} faces out of
+ * the park: the previous attempt was pinned to the rig's bearing and had to
+ * climb to 26° to get the rail race's track and pylons off the children's
+ * heads.
+ */
+const ARRIVAL_DOOR_PITCH_DEGREES = 12;
+
+/**
+ * How much air the door shot leaves around the bus's own height.
+ *
+ * The vertical subject is the bus from wheels to ear tips — {@link CAT_BUS_TOP}
+ * is exactly that, ears included, per its own doc — with room above so the cat
+ * is not cropped at the eyebrows, and room below for the pavement everybody
+ * lands on. Derived from the bus rather than dialled in, for the same reason
+ * {@link ARRIVAL_CAMERA_ZOOM} is: a bus that grows stays in shot.
+ */
+const ARRIVAL_DOOR_FRAMING_AIR = 1.5;
+
+/** The push-in on the doorway itself, once the bus has stopped. */
+export const ARRIVAL_DOOR_ZOOM = CAMERA_VIEW_HEIGHT / (CAT_BUS_TOP * ARRIVAL_DOOR_FRAMING_AIR);
+
+/**
+ * **How long the rise keeps going after she has the controls**, in seconds.
+ *
+ * The pitch is the one part of the shot that is deliberately still moving at
+ * the hand-over. Jim's third beat is *"once through the arch the camera moves
+ * up to its usual pseudo-isometric perspective"*, and she is through the arch
+ * and holding the controls at the same instant ({@link ARRIVAL_CONTROL_AT}) —
+ * so a rise that had already finished by then would have happened in front of
+ * her instead of under her hand, which is the difference between the game
+ * handing her the park and the game making her watch one more second of
+ * something.
+ *
+ * **The yaw, by contrast, is home before she can touch anything, and that is
+ * not a taste call.** `IsoCamera.forward`/`right` — the axes "up on the stick"
+ * is read through — are solved once from the rig's fixed yaw and never move.
+ * A camera still swinging while she walks would therefore mean pressing up
+ * sends her somewhere that is not up the screen, which is precisely the class
+ * of thing GAME_DESIGN.md's CONTROL rule exists to forbid. A pitch that is
+ * still lifting has no such problem: "up the screen" is the same ground
+ * direction at every tilt.
+ *
+ * Clamped to the phase it has to fit inside, so a shorter `departing` shortens
+ * this rather than leaving the camera mid-rise when the sequence ends.
+ */
+export const ARRIVAL_RISE_TAIL = Math.min(1.6, ARRIVAL_TIMELINE.departing);
+
+/** On the arrival's own clock: the instant the bus has stopped at the kerb. */
+const AT_STOPPED = ARRIVAL_TIMELINE.rollingIn;
+/** The instant she steps off the kerb and starts walking in. */
+const AT_WALKING = ARRIVAL_CONTROL_AT - ARRIVAL_TIMELINE.walkingIn;
+/** The instant the whole shot has landed on the rig's own pose. */
+export const AT_SHOT_HOME = ARRIVAL_CONTROL_AT + ARRIVAL_RISE_TAIL;
+
+/** One frame of the arrival camera — a placement, not a nudge. */
+export interface ArrivalShot {
+  /** Compass bearing the camera looks from, degrees. */
+  readonly yawDegrees: number;
+  /** Downward tilt, degrees. */
+  readonly pitchDegrees: number;
+  /** Framing. 1 is the ordinary playing view. */
+  readonly zoom: number;
+  /**
+   * True while the **bus's own door** is the subject and the camera should
+   * orbit `ArrivalSequence.doorFocus` instead of the player. False everywhere
+   * else, which includes the whole walk in: `walkIn` already drives her along
+   * a bezier from the step through the gateway, so the ordinary damped
+   * player-follow *is* beat two, and it translates with her by construction.
+   */
+  readonly watchesTheDoor: boolean;
 }
 
 /**
- * Does this phase want the camera pointed at the **bus's door** rather than at
- * the player?
+ * **The whole camera, as a function of one number.**
  *
- * True for the two phases where the door is the subject — it swinging open,
- * and the children coming down the step. From `walking-in` on it is false, and
- * the ordinary damped player-follow takes her in under the arch, which is beat
- * two and needs nothing else: `walkIn` already drives her along a bezier from
- * the door through the gateway, so following her *is* the shot Jim asked for.
+ * A pure function of the arrival's own elapsed seconds, for the reason
+ * `arrivalSpawn.ts` exists: the caller is `Game.tick()`, `Game` builds a real
+ * `WebGLRenderer` and cannot be constructed in a test, so a camera decision
+ * made inline in there is a camera decision no check can reach — which is
+ * exactly how the last camera bug on this feature stayed green.
  *
- * `rolling-in` is false as well, and deliberately: she is aboard the bus for
- * all of it, so following the player already follows the bus, and pinning the
- * camera to a door that is still moving would hold the shot still while the
- * bus slid across it.
+ * **One continuous clock rather than a per-phase lookup**, and that is what
+ * makes the third beat expressible at all. The rise has to cross the boundary
+ * between `walking-in` and `departing` — it starts before she has the controls
+ * and finishes after — and a function of the *phase* cannot say that. It also
+ * means every easing here is stated once, in seconds, against instants derived
+ * from {@link ARRIVAL_TIMELINE}: lengthen a phase and the shot stretches with
+ * it rather than desynchronising from it.
+ *
+ * Returns `null` once the shot has landed, which is the honest way to say
+ * "the ordinary camera owns this now" — the caller then clears its overrides
+ * and the rig is the single owner of the pose again.
  */
-export function arrivalCameraWatchesTheDoor(phase: ArrivalPhase): boolean {
-  return phase === 'doors-opening' || phase === 'stepping-down';
+export function arrivalShot(elapsed: number): ArrivalShot | null {
+  if (elapsed >= AT_SHOT_HOME) return null;
+
+  // How much of the door shot is in force. 0 is the rig exactly.
+  const swing =
+    elapsed < AT_STOPPED
+      ? // Swinging round off the ordinary view as the bus rolls up, so the
+        // arrival opens on a move rather than on a cut.
+        smoothstep(0, 1, elapsed / Math.max(0.001, ARRIVAL_TIMELINE.rollingIn))
+      : elapsed < AT_WALKING
+        ? 1
+        : 1 -
+          smoothstep(
+            0,
+            1,
+            (elapsed - AT_WALKING) / Math.max(0.001, ARRIVAL_TIMELINE.walkingIn),
+          );
+
+  // The tilt runs on the same curve out and a longer one back — see
+  // ARRIVAL_RISE_TAIL for why the two differ.
+  const lift =
+    elapsed < AT_WALKING
+      ? swing
+      : 1 -
+        smoothstep(
+          0,
+          1,
+          (elapsed - AT_WALKING) /
+            Math.max(0.001, ARRIVAL_TIMELINE.walkingIn + ARRIVAL_RISE_TAIL),
+        );
+
+  // Wide on the arriving bus, in on the doorway, back out as she walks in.
+  const zoom =
+    elapsed < AT_STOPPED
+      ? lerp(1, ARRIVAL_CAMERA_ZOOM, swing)
+      : elapsed < AT_WALKING
+        ? lerp(
+            ARRIVAL_CAMERA_ZOOM,
+            ARRIVAL_DOOR_ZOOM,
+            smoothstep(0, 1, (elapsed - AT_STOPPED) / Math.max(0.001, AT_WALKING - AT_STOPPED)),
+          )
+        : lerp(1, ARRIVAL_DOOR_ZOOM, swing);
+
+  return {
+    // Turned the short way round, so the arc home under the arch is the
+    // hundred-odd degrees the shot actually travelled and never the long way
+    // about — `angleDelta` owns that question everywhere else in the codebase.
+    yawDegrees:
+      CAMERA_YAW_DEGREES +
+      (angleDelta(CAMERA_YAW_DEGREES * DEG, ARRIVAL_DOOR_YAW_DEGREES * DEG) / DEG) * swing,
+    pitchDegrees: lerp(CAMERA_PITCH_DEGREES, ARRIVAL_DOOR_PITCH_DEGREES, lift),
+    zoom,
+    // The door is the subject exactly while the bus is stopped with children
+    // coming out of it. Not during `rolling-in`: she is aboard for all of it,
+    // so following the player already follows the bus, and pinning the camera
+    // to a door that is still moving would hold the shot still while the bus
+    // slid across it.
+    watchesTheDoor: elapsed >= AT_STOPPED && elapsed < AT_WALKING,
+  };
 }
 
 /**
@@ -711,6 +879,28 @@ export class ArrivalSequence {
 
   get finished(): boolean {
     return this.doneFlag;
+  }
+
+  /**
+   * **Seconds since the bus first came into view** — the single clock
+   * {@link arrivalShot} reads.
+   *
+   * Summed from the phases already finished plus however far into the current
+   * one we are, rather than kept as a second accumulator beside
+   * {@link phaseTime}: two clocks advanced by the same `dt` in two places is a
+   * pair of numbers somebody has to keep in step by hand, and this file's own
+   * history is what that costs. It also means it is `dt`-driven for free —
+   * `update` returns early on `dt <= 0`, so `gameStore.setPaused(true)` stops
+   * this clock exactly as it stops the bus, and no camera move can be stranded
+   * half-finished by a pause or a slow frame.
+   */
+  get elapsed(): number {
+    if (this.doneFlag) return ARRIVAL_DURATION;
+    let total = this.phaseTime;
+    for (let index = 0; index < this.phaseIndex && index < PHASE_ORDER.length; index += 1) {
+      total += PHASE_ORDER[index]![1];
+    }
+    return total;
   }
 
   /**

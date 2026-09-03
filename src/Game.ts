@@ -20,11 +20,7 @@ import {
   ENTRANCE_PLAYER_Z,
 } from './world/entrance/layout';
 import { arrivalOwnsTheSpawn } from './world/entrance/arrivalSpawn';
-import {
-  arrivalCameraPitch,
-  arrivalCameraWatchesTheDoor,
-  arrivalCameraZoom,
-} from './world/entrance/ArrivalSequence';
+import { arrivalShot } from './world/entrance/ArrivalSequence';
 import { Highlights } from './world/Highlights';
 import { Selection } from './world/Selection';
 import { pickInteractZone, PRIMARY_ACTION, type InteractZone } from './world/interact';
@@ -1601,115 +1597,86 @@ export class Game {
 
     if (!paused) this.player.update(this.frameContext);
 
-    // The arrival's subject is an 18 m bus, and the default framing is sized
-    // around a 2.12 m child — so while the bus is what the shot is about, the
-    // camera sits further out. The decision itself is `arrivalCameraZoom`, a
-    // pure function, so a check can hold it — `Game` builds a real
-    // `WebGLRenderer` and cannot be constructed in one.
-    //
-    // **Asserted only when the value actually changes, not every frame**
-    // (#329). It used to be reasserted unconditionally for as long as
-    // `!arrival.finished`, which holds all the way through the `departing`
-    // phase — several more seconds of the bus unloading stragglers and
-    // driving off, *after* `ArrivalSequence.depart` has already handed her
-    // the controls on its very first frame. Every one of those frames called
-    // `setZoomTarget(arrivalCameraZoom('departing'))`, i.e. `setZoomTarget(1)`
-    // again and again, so any wheel notch, pinch or +/- press landed via
-    // `nudgeZoom` and was silently overwritten on the very next frame — the
-    // mouse wheel read as completely dead for however long the bus took to
-    // empty and pull away, exactly what was reported. `arrivalCameraZoom`
-    // only takes the *phase* and is constant across most of them, so nothing
-    // is lost by writing it once per actual change instead of once per
-    // frame: the bus framing still snaps in for `rolling-in`, still eases
-    // back to 1 the moment `departing` begins (`IsoCamera.update`'s damping
-    // still turns that into a push-in, same as before) — but from that same
-    // frame on, nothing here writes to `zoomTarget` again, so her own
-    // zoom input finally takes effect immediately instead of after the whole
-    // sequence finishes.
-    //
-    // **The three beats Jim asked for**, on top of that zoom. Jim, 3 September
+    // **The arrival camera — the three beats Jim asked for.** Jim, 3 September
     // 2026: *"when the bus arrives at the park, the camera needs to face the
     // bus's doors as the children get off the bus, then follow your character
     // as they walk into the park and under the arch, and then once through the
     // arch the camera moves up to its usual pseudo-isometric perspective."*
     //
-    // | beat | phases | what happens here |
+    // | beat | when | what happens |
     // |---|---|---|
-    // | 1 doors | `doors-opening`, `stepping-down` | focus on the bus's own door |
-    // | 2 follow her in | `walking-in` | focus released; the ordinary follow takes her under the arch |
-    // | 3 rise | `departing` on | pose override cleared; the camera lifts into the rig |
+    // | 1 doors | the bus is stopped and unloading | a low three-quarter shot facing the door, orbiting the bus's own drop point |
+    // | 2 follow her in | she is walking the bezier | the yaw arcs home and the focus rides with her through the arch |
+    // | 3 rise | across the hand-over | the tilt finishes lifting on to the rig's own pose |
     //
-    // Beat two needs no code: `ArrivalSequence.walkIn` already drives her along
-    // a bezier from the door through the gateway, so the ordinary damped
-    // player-follow *is* the shot. Beat three lands on the rig's own pose
-    // exactly, because `IsoCamera`'s pose override is a delta that damps to
-    // zero rather than a second pose to restore.
+    // Every one of those decisions is `arrivalShot(elapsed)`, a pure function
+    // of one number, for the reason `arrivalSpawn.ts` exists: `Game` builds a
+    // real `WebGLRenderer` and cannot be constructed in a test, so a camera
+    // decision made inline *here* is a camera decision no check can reach —
+    // which is exactly how the last camera bug on this feature stayed green.
+    // This block is wiring and nothing else.
     //
-    // **Every frame this re-derives the whole camera state from `(phase,
-    // released)` rather than acting on an edge**, which is the trap this file's
-    // own `/view` note describes and the one CLAUDE.md records `dayNight
-    // .setPaused` dying to: `tick()` re-derives the world every frame, so
-    // anything set once here is silently overwritten by whatever runs next.
-    // Re-derivation makes that structurally impossible — but it then has to
-    // respect the two opposite re-assertion contracts, which are opposite for
-    // good reasons:
+    // **It re-derives the whole camera state from the clock every frame**
+    // rather than acting on an edge, which is the trap this file's own `/view`
+    // note describes and the one CLAUDE.md records `dayNight.setPaused` dying
+    // to: `tick()` re-derives the world every frame, so anything set once here
+    // is silently overwritten by whatever runs next.
     //
-    // * `setFocusOverride` **must** be re-asserted every frame it holds (its
-    //   own doc says so).
-    // * `setZoomTarget` and `setPoseOverride` must **not** be, or they fight
-    //   the player's own pinch and wheel for the whole sequence (#329).
-    //
-    // Hence: focus written unconditionally while beat one holds, zoom and pose
-    // written only when the derived value actually changes.
+    // The one thing re-derivation cannot excuse it from is #329 — writing a
+    // *constant* to `setZoomTarget` every frame swallows every pinch and wheel
+    // notch, because `nudgeZoom` writes the same field. That is why the zoom
+    // below stops being written the instant the shot lands (`arrivalShot`
+    // returns `null`), which is at `AT_SHOT_HOME`, a little after she gets the
+    // controls: for the seconds she is holding them and the shot is still
+    // moving the value genuinely changes every frame, so there is nothing for
+    // it to eat, and from the moment it would become constant nobody writes it
+    // at all. The pose has no such competitor and is simply driven.
     const arrival = this.world.entrance.arrival;
-    if (arrival && !arrival.finished) {
+    const shot = arrival && !arrival.finished ? arrivalShot(arrival.elapsed) : null;
+    if (arrival && shot && !this.arrivalCameraReleased) {
       // **Skippable, and it is the camera that yields, not the bus.** Touching
-      // the stick during beats one or two hands the view straight back: the
-      // shot releases its focus and rises into the ordinary pose from wherever
-      // it is, damped, so it reads as the game getting out of the way. The
-      // sequence itself keeps running — the bus still has eleven children to
-      // unload and she is not standing anywhere yet, so "skipping" it would
-      // mean teleporting her, which is a worse answer than a nine-second
-      // arrival. She is handed the controls at `ARRIVAL_CONTROL_AT` either
-      // way, so this can shorten the watching but can never strand her: there
-      // is no state here she can get stuck in and no input that stops the
-      // clock.
-      if (this.frameContext.input.manualMoveActive) this.arrivalCameraReleased = true;
-      const released = this.arrivalCameraReleased;
-      const phase = arrival.phase;
-
-      const zoom = released ? 1 : arrivalCameraZoom(phase);
-      if (zoom !== this.arrivalZoomApplied) {
-        this.arrivalZoomApplied = zoom;
-        this.camera.setZoomTarget(zoom);
+      // the stick hands the view straight back: the shot stops being driven,
+      // so the pose damps home from wherever it had got to and the focus
+      // returns to her — it reads as the game getting out of the way. The
+      // sequence itself keeps running, because she is not standing anywhere
+      // yet and "skipping" it would mean teleporting her, which is a worse
+      // answer than a nine-second arrival. She is handed the controls at
+      // `ARRIVAL_CONTROL_AT` either way, so this can shorten the watching but
+      // can never strand her: there is no state here she can get stuck in and
+      // no input that stops the clock.
+      if (this.frameContext.input.manualMoveActive) {
+        this.arrivalCameraReleased = true;
+      } else {
+        this.camera.setZoomTarget(shot.zoom);
+        this.camera.setShotOverride(shot.yawDegrees, shot.pitchDegrees);
+        // Re-asserted unconditionally while it holds, exactly as
+        // `setFocusOverride`'s own doc requires.
+        if (shot.watchesTheDoor) this.camera.setFocusOverride(arrival.doorFocus);
+        else if (this.arrivalFocusHeld) this.camera.clearFocusOverride();
+        this.arrivalFocusHeld = shot.watchesTheDoor;
+        this.arrivalCameraEngaged = true;
       }
-
-      const pitch = released ? null : arrivalCameraPitch(phase);
-      if (pitch !== this.arrivalPitchApplied) {
-        this.arrivalPitchApplied = pitch;
-        if (pitch === null) this.camera.clearPoseOverride();
-        else this.camera.setPoseOverride(pitch);
-      }
-
-      const watchTheDoor = !released && arrivalCameraWatchesTheDoor(phase);
-      if (watchTheDoor) {
-        this.camera.setFocusOverride(arrival.doorFocus);
-      } else if (this.arrivalFocusHeld) {
-        this.camera.clearFocusOverride();
-      }
-      this.arrivalFocusHeld = watchTheDoor;
-      this.arrivalCameraEngaged = true;
-    } else if (this.arrivalCameraEngaged) {
-      // **The way out, for every way of leaving.** The branch above stops
-      // running the moment the arrival finishes or is disposed, and anything
-      // it had asserted would otherwise be stranded on the camera for the rest
-      // of the session — a park stuck at 16 degrees, orbiting a bus door that
-      // no longer exists. Reached in the ordinary case too, one frame after
-      // `finished`, where it is a no-op because beat three already cleared
-      // both.
+    }
+    if ((!shot || this.arrivalCameraReleased) && this.arrivalCameraEngaged) {
+      // **The way out, for every way of leaving** — landed, skipped, finished
+      // or disposed. Anything the shot had asserted would otherwise be
+      // stranded on the camera for the rest of the session: a park seen for
+      // ever from twelve degrees, orbiting a bus door that no longer exists.
+      //
+      // Clearing the pose override sets its target to `(0, 0, 0)`, which is
+      // the rig's own pose *by construction* rather than a remembered copy of
+      // it — so beat three lands exactly on the ordinary camera.
+      //
+      // **This runs exactly once**, because it clears the flag that let it
+      // run — which is what makes writing the zoom here safe where writing it
+      // every frame is #329. It is needed for the skip: a child who grabs the
+      // stick two seconds in is halfway to the bus's wide framing, and without
+      // this she would play the rest of the session zoomed out with nothing to
+      // tell her why. On the ordinary landing it is a no-op, the shot having
+      // already driven the zoom back to 1.
       this.arrivalCameraEngaged = false;
       this.arrivalFocusHeld = false;
-      this.arrivalPitchApplied = null;
+      this.camera.setZoomTarget(1);
       this.camera.clearFocusOverride();
       this.camera.clearPoseOverride();
     }
@@ -1822,20 +1789,6 @@ export class Game {
    * one — the first-person rides. The sky pass keeps the park's sky.
    */
   private cameraOverride: import('three').PerspectiveCamera | null = null;
-
-  /**
-   * The arrival's own zoom target, last written to {@link IsoCamera}, so it
-   * can be re-asserted only when it actually **changes** rather than every
-   * single frame. See the call site in {@link tick} for why (#329).
-   */
-  private arrivalZoomApplied: number | null = null;
-
-  /**
-   * The arrival's own pitch, last written to {@link IsoCamera} — `null` for
-   * "the ordinary pose". Re-asserted only on a real change, exactly as
-   * {@link arrivalZoomApplied} is and for the same reason.
-   */
-  private arrivalPitchApplied: number | null = null;
 
   /** Whether beat one currently holds a focus override, so it can be released once. */
   private arrivalFocusHeld = false;

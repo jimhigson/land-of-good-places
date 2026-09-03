@@ -337,24 +337,34 @@ export class IsoCamera {
   }
 
   /**
-   * Tilts the camera to `pitchDegrees` instead of the rig's own
-   * {@link CAMERA_PITCH_DEGREES}, keeping its yaw and its distance.
+   * **Puts the camera somewhere else entirely** — a different compass angle and
+   * a different tilt from the rig's own {@link CAMERA_YAW_DEGREES} /
+   * {@link CAMERA_PITCH_DEGREES}, at the same {@link CAMERA_DISTANCE}.
+   *
+   * The yaw is the half that matters and the half that was missing. This
+   * method used to take a pitch alone, and the cat bus arrival built on it
+   * changed only the tilt — so the shot looked at the bus from the park's one
+   * eternal compass angle, a few degrees flatter, and Jim's verdict on
+   * watching it was *"why doesn't the camera follow into the park like asked
+   * for?"* and *"this is nothing like what I asked for."* He was right: **this
+   * is an orthographic rig, so the eye's distance along the view axis changes
+   * nothing you can see. Yaw, pitch and the focus point are the entire
+   * vocabulary of "the camera moved."** A shot that holds the yaw fixed has,
+   * visually, not moved at all.
    *
    * Stored as the **difference** from the normal pose, so
    * {@link clearPoseOverride} needs no memory of what the normal pose was and
-   * cannot restore a stale copy of it. Damped by {@link update} on the
-   * look-around's own return curve, so both entering and leaving are a move
-   * rather than a cut.
+   * cannot restore a stale copy of it, and so a shot that eases its own angles
+   * back to the rig's lands on `(0, 0, 0)` exactly rather than near it.
    *
-   * Cheap enough to call every frame, but there is no reason to: like
-   * {@link setZoomTarget} this is a plain assignment, so a caller should write
-   * it when its own decision changes. Unlike `setZoomTarget` nothing else in
-   * the game competes for this value, so re-asserting it is merely wasteful
-   * rather than a way to eat a player's input.
+   * **Safe and expected to call every frame with a moving value.** Unlike
+   * {@link setZoomTarget} nothing else in the game competes for this, so there
+   * is no #329 here to walk into: a caller driving a camera *path* writes a
+   * different pose every frame, and that is the point.
    */
-  setPoseOverride(pitchDegrees: number): void {
-    const low = cameraOffset(CAMERA_YAW_DEGREES * DEG, pitchDegrees * DEG, CAMERA_DISTANCE);
-    this.poseTarget.set(low.x - this.offset.x, low.y - this.offset.y, low.z - this.offset.z);
+  setShotOverride(yawDegrees: number, pitchDegrees: number): void {
+    const eye = cameraOffset(yawDegrees * DEG, pitchDegrees * DEG, CAMERA_DISTANCE);
+    this.poseTarget.set(eye.x - this.offset.x, eye.y - this.offset.y, eye.z - this.offset.z);
   }
 
   /** Rises back to the ordinary pseudo-isometric pose. */
@@ -818,16 +828,20 @@ const TEMP_LIFT = new Vector3(0, 1.25, 0);
 const LOOK_HOME_EPSILON = 0.001;
 
 /**
- * How quickly the camera rises back into its ordinary pose, in seconds per
- * halving.
+ * How quickly the camera settles onto the pose it has been asked for, in
+ * seconds per halving.
  *
- * Slower than the follow's 0.16 s, because this is a *shot* changing rather
- * than a camera chasing a child — the same reasoning
- * `CAMERA_LOOK_RETURN_HALF_LIFE` is written down for, and the same number, so
- * the two composed-shot returns in this file move alike rather than being two
- * separately dialled feels.
+ * **Short, because this is a smoother and not the animation.** It was
+ * `CAMERA_LOOK_RETURN_HALF_LIFE` (0.45 s) back when the only caller set one
+ * pose and let the damping carry the whole move — an easing of last resort. The
+ * cat bus arrival now drives a genuine camera *path*, writing a fresh pose
+ * every frame off its own clock, so a long half-life here would not smooth that
+ * path, it would lag half a second behind it and blur the moment the shot is
+ * supposed to land on. At 0.12 s the damping does what damping is for — it
+ * absorbs a discontinuity at a phase boundary — and leaves the shape of the
+ * move to whoever is driving it.
  */
-const CAMERA_POSE_HALF_LIFE = CAMERA_LOOK_RETURN_HALF_LIFE;
+const CAMERA_POSE_HALF_LIFE = 0.12;
 
 /** Below this, the rise has landed. Metres. */
 const POSE_HOME_EPSILON = 0.001;
