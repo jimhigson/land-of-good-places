@@ -360,6 +360,43 @@ function footprintsOverlap(a: CrossingSite, b: CrossingSite): boolean {
   const dz = b.z - a.z;
   for (const [axX, axZ] of axes) {
     // Each rectangle's own extent on this axis, and the gap between centres.
+    // **This measures a SHORTER rectangle than `paths.ts` forbids, and that is
+    // a known, measured gap — not an oversight.**
+    //
+    // `MIN_BRIDGE_HALF_LENGTH` is the floor a bridge must achieve;
+    // `paths.ts` screens every foreign leg against
+    // `DECK_HALF_LENGTH + this site's own proven reach + RAMP_SCREEN_MARGIN`,
+    // which is longer whenever a site proved more room than the floor. So two
+    // kept sites can pass this test and still have one's *foot* standing inside
+    // the other's reservation — and a foot's exemption is by identity, covering
+    // only its own site, so that foot gets no connector at all.
+    //
+    // Measured on seed 288, 2 Sep 2026 (`scripts/tmp-whichsite.mts`), on the
+    // connector bridge 0's foot needs:
+    //
+    //   leg (-15.7,-47.7) -> (-19.7,-45.2)
+    //   cutWithNothingExempt: true
+    //   site 0 railD=0   at (-2.0,-34.0):  cutWithThisSiteExempt=true
+    //   site 1 railD=152 at (-18.9,-56.4): cutWithThisSiteExempt=false
+    //
+    // `walkEveryBridge` then drew a ribbon that crossed the rail and stopped
+    // dead — `bridge-walk-0`'s end 27.10 m from the nearest other paving, which
+    // is what `noPathEndsNowhere` fires on — and `stall.railRacer` beyond it
+    // failed outright.
+    //
+    // **Widening this to the reservation rectangle was BUILT AND MEASURED, and
+    // reverted**: on seed 288 it refused the pair, the seed lost a bridge it
+    // needs, and `check:park` gained `route.unreachable: 2` — two destinations a
+    // child cannot walk to at all, which is worse than the stranded waypoints it
+    // was meant to cure. Do not re-apply it as written.
+    //
+    // The real disagreement is upstream of both: the reservation is far larger
+    // than the masonry a bridge actually builds (measured on seeds 24/131/451 —
+    // real masonry at |across| 1.1-2.7 against a `halfWidth` of 4-5), so two
+    // bridges whose reservations overlap may still be perfectly buildable side
+    // by side. Shrinking the reservation to what gets built is the fix, and it
+    // is Jim's brief #2 — the bridge's real shape is decided after the paths,
+    // from the paths, so no path can be screened against it.
     const extent = (c: CrossingSite): number =>
       Math.abs((c.dirX * axX + c.dirZ * axZ) * MIN_BRIDGE_HALF_LENGTH) +
       Math.abs((-c.dirZ * axX + c.dirX * axZ) * c.halfWidth);

@@ -121,6 +121,21 @@ export const SITE_RAMP_FLOOR = MIN_RAMP_RUN + 1.0;
 /** The most ramp a site ever needs credit for — the shallow, ideal grade,
  * the same run the real pass starts from. */
 export const SITE_RAMP_IDEAL = BRIDGE_RISE / BRIDGE_RAMP_GRADIENT;
+/**
+ * **The margin the path screen adds round a site's proven reach** — the
+ * difference between "the bridge's own ground" and "ground no foreign ribbon
+ * may touch".
+ *
+ * It lives here, with the other shared thresholds, because **two modules have
+ * to agree about the same rectangle**: `paths.ts` forbids
+ * `DECK_HALF_LENGTH + rampReach + this` by `halfWidth + this` to every leg that
+ * is not the crossing's own, and `crossingPlanSolve.ts`'s `footprintsOverlap`
+ * has to refuse two sites whose *those* rectangles overlap. A copy of the
+ * number in either place is the drift that produced seed 288's dangling bridge
+ * (see `footprintsOverlap`).
+ */
+export const RAMP_SCREEN_MARGIN = 0.5;
+
 /** Boundary / plot margins for a ramp — the early reservation pass's own
  * figures (`bridgeFootprint.ts`'s `RAMP_BOUNDARY_MARGIN` / `RAMP_PLOT_MARGIN`
  * are module-private; same numbers, same job, and drift here only ever makes

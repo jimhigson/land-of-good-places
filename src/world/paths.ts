@@ -8,6 +8,7 @@ import { STATION_GAP } from './train/fence';
 import { FENCE_OFFSET } from './train/clearance';
 import { DECK_HALF_LENGTH } from './train/bridgeFootprint';
 import { CROSSING_SITES, type CrossingSite } from './train/crossingPlan';
+import { RAMP_SCREEN_MARGIN } from './train/bridgeFit';
 import { COASTER_PLANS } from './coaster/plan';
 import { RAIL_RACE_PLAN } from './railRace/plan';
 import { archFeet } from './railRace/arch';
@@ -1455,7 +1456,11 @@ function segmentMeetsRect(
  * starved the crossing's approach to proven site 20 and left seed 24, alone of
  * every seed, with no bridge at all.
  */
-const RAMP_SCREEN_MARGIN = 0.5;
+// The one owner is `train/bridgeFit.ts`: `crossingPlanSolve.ts` needs the very
+// same number to decide whether two sites' reservations overlap, and a copy
+// here is exactly the drift that let seed 288 plan one bridge's foot inside
+// another bridge's reservation.
+export { RAMP_SCREEN_MARGIN };
 
 /**
  * **The ground a bridge will really stand on — deck, both ramps and the
@@ -2975,6 +2980,15 @@ function* pathGridSearch(): Generator<number, PathGrid, void> {
       if (joinToGrid(node, foot, false) > 0) continue;
       if (joinToGrid(node, foot, false, 1) > 0) continue;
       if (joinToGrid(node, foot, false, 0, null, site) > 0) continue;
+      // **Widening the exempt rungs to relax 1 and 2 was BUILT AND MEASURED
+      // here, and reverted: neutral on all sixteen pool seeds.** It looked
+      // right — a foot whose only neighbours are both outside the tight shells
+      // and behind its own reservation falls off the end of this ladder — but
+      // seed 288's foot at (-15.7,-47.7), the case it was built for, is cut by
+      // a DIFFERENT site's reservation (`scripts/tmp-whichsite.mts`: site 1,
+      // not its own site 0), which no widening of an own-site exemption can
+      // reach. A change that measures nothing is not kept. See
+      // `footprintsOverlap` in `crossingPlanSolve.ts` for where that one lives.
       // **A ramp landing beside the statue circle still crosses somewhere
       // real.** A foot with no connector because it stands inside the ring's
       // own guard zone (every node and leg there is deliberately invalid) is
@@ -5678,4 +5692,28 @@ export function debugWhatBlocks(x: number, z: number): unknown {
     if (d < foot.radius + 6) out.push(`archFoot r=${foot.radius.toFixed(2)} dist=${d.toFixed(2)}`);
   }
   return out;
+}
+
+/** TEMP diagnostic: which crossing site's reservation cuts a leg, by index. */
+export function debugWhichSiteCuts(
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+): unknown {
+  const out: string[] = [];
+  for (let i = 0; i < CROSSING_SITES.length; i += 1) {
+    const site = CROSSING_SITES[i] as CrossingSite;
+    const others = CROSSING_SITES.filter((s) => s !== site);
+    // Cut by THIS site alone: exempt every other one in turn is awkward, so ask
+    // the exact question directly — is the leg still cut when only this site
+    // exists in the screen? Emulated by exempting all others one at a time is
+    // not possible, so instead: is it cut with this site exempted?
+    const cutWithout = segmentCutsABridgeRamp(ax, az, bx, bz, site);
+    out.push(
+      `site ${i} railD=${site.railDistance.toFixed(0)} at (${site.x.toFixed(1)},${site.z.toFixed(1)}): ` +
+        `cutWithThisSiteExempt=${cutWithout} (others=${others.length})`,
+    );
+  }
+  return { cutWithNothingExempt: segmentCutsABridgeRamp(ax, az, bx, bz), out };
 }
