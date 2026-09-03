@@ -3295,31 +3295,47 @@ let gateCorridorDeepestCache: readonly [number, number] | null = null;
  * best, so asking twice bought nothing and cost a `streetStubs` search on
  * every 20 cm of the scan.
  *
- * When the loop is nowhere near the corridor this returns
- * {@link GATE_CORRIDOR_INNER_Z} — the pre-#339 answer, unchanged, and still
- * the answer on three of the five swept seeds.
+ * When neither the loop, a bridge ramp nor the rail standoff is anywhere near
+ * the corridor the scan runs its whole length and ends at
+ * {@link GATE_CORRIDOR_INNER_Z} — the pre-#339 answer, unchanged. It is
+ * reached by scanning now rather than by an early return, because a ramp can
+ * reach the corridor on a seed whose railway does not; see the body.
  */
 function gateCorridorDeepestMouth(): readonly [number, number] {
   if (gateCorridorDeepestCache) return gateCorridorDeepestCache;
   const gateSide = railInfoAt(0, GATE_CORRIDOR_START_Z).side;
-  const full = [0, GATE_CORRIDOR_INNER_Z] as const;
   const steps = Math.round((GATE_CORRIDOR_START_Z - GATE_CORRIDOR_INNER_Z) / 0.2);
-  // **Only a corridor the loop actually cuts across gets shortened.** A
-  // corridor that merely passes near the track keeps its authored length, so
-  // three of the five swept seeds build precisely the park they built before
-  // this change — the fix is for the walk that meets the railway, and a seed
-  // whose walk does not meet it has nothing here to fix.
-  let crossesAt = -1;
+  // **A ramp reaches the corridor on seeds where the railway never does.**
+  //
+  // This used to return the authored length outright when the loop did not
+  // cross `x = 0`, on the reasoning that "a seed whose walk does not meet the
+  // railway has nothing here to fix". That skipped the two guards below along
+  // with the crossing test, and a bridge is much longer than the track it
+  // spans: a diagonal site whose deck sits well off the corridor still sweeps
+  // a ramp across it.
+  //
+  // Measured on seed 131 (2 Sep 2026). The loop never crosses `x = 0`, so the
+  // corridor kept its authored mouth at (0, 30) — and the proven site at
+  // (-9.80, 34.65), dir (0.799, -0.602), puts that mouth at across = 2.18,
+  // along = 10.6 in the site's own frame: inside the footprint, on the ramp's
+  // flank. `pointStandsOnABridgeRamp(0, 30)` was true the whole time and was
+  // never asked. The drawn gate-approach then ran over the parapet, poiGraph
+  // found 1.72 m of solid ground at z 30.14 -> 28.68 (peak push 0.62 m), and
+  // the lane's outer half — six waypoints, at = 0..37 — became a pocket
+  // joined to nothing. Jim's report #1, "the player can stand in 'path mess'
+  // near the first bridge on the main branch", is this.
+  //
+  // So the scan always runs. `crossesAt = -Infinity` makes its own break
+  // unreachable, which reproduces the old early return exactly on any seed
+  // where no ramp and no standoff intervenes: the walk then ends at
+  // `GATE_CORRIDOR_INNER_Z`, which is what `full` was.
+  let crossesAt = -Infinity;
   for (let step = 0; step <= steps; step += 1) {
     const z = GATE_CORRIDOR_START_Z - step * 0.2;
     if (railInfoAt(0, z).side !== gateSide) {
       crossesAt = z;
       break;
     }
-  }
-  if (crossesAt < 0) {
-    gateCorridorDeepestCache = full;
-    return full;
   }
   let deepest: readonly [number, number] = [0, GATE_CORRIDOR_START_Z] as const;
   for (let step = 0; step <= steps; step += 1) {
