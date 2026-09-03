@@ -846,6 +846,74 @@ const treesKeepOffWalls: Invariant = (facts) => {
   return fouls;
 };
 
+/**
+ * **No bush grows through a wall or out of a tree.**
+ *
+ * Issue #500, and it had been true since walls and trees both existed: the
+ * bush scatter's whole idea of an obstacle was `isPlantable` — paving, plots,
+ * the railway, ride exits, the plaza — so nothing else could refuse it a spot.
+ * Measured on the built park across these five seeds before the fix: **64
+ * clumps standing inside a wall run** (worst 1.17 m, through a wooden fence a
+ * child can see straight through) and **653 inside a tree's own footprint**
+ * (worst 3.89 m, a clump growing out of a trunk).
+ *
+ * About eighty invariants missed it for one reason: **every one of them names
+ * the pair it checks**, and nobody had written `bushesKeepOffWalls`. This one
+ * names two more pairs and is therefore the same shape of thing — it is here
+ * to hold the fix on `main` until the universal deny-by-default sweep
+ * (`feat/universal-overlap-invariant`, blocked on this issue and #501) lands
+ * and subsumes it. **When that merges, delete this**; a narrower check kept
+ * beside a wider one is two definitions of one rule, which is this repo's
+ * most-repeated bug.
+ *
+ * Measured off the built park, in the game's own published numbers: a clump's
+ * `radius` is the collider a walking child actually meets, a wall's
+ * `halfWidth` is what it is drawn at, and a tree's `footprint` is derived from
+ * the parts it is really built from. Nothing here re-derives the scatter's own
+ * clearances, which would only prove the generator agrees with itself.
+ *
+ * Threshold zero: touching is legal and a bush against a fence is a good look.
+ * It is *sharing ground* that a player sees as a bush sprouting through rails.
+ */
+const bushesGrowThroughNothing: Invariant = (facts) => {
+  const fouls: string[] = [];
+  for (const bush of facts.bushes) {
+    const where = `bush at (${bush.x.toFixed(1)}, ${bush.z.toFixed(1)})`;
+    for (const wall of facts.walls) {
+      const overlap =
+        wall.halfWidth +
+        bush.radius -
+        segmentDistance([bush.x, bush.z], [bush.x, bush.z], wall.from, wall.to);
+      if (overlap > 0) {
+        fouls.push(
+          `${where} stands ${overlap.toFixed(2)} m inside the ${wall.kind} run ` +
+            `(${fmt(wall.from)}->${fmt(wall.to)}) — it grows through the rails`,
+        );
+      }
+    }
+    for (const tree of facts.trees) {
+      const overlap =
+        tree.footprint + bush.radius - Math.hypot(bush.x - tree.x, bush.z - tree.z);
+      if (overlap > 0) {
+        fouls.push(
+          `${where} stands ${overlap.toFixed(2)} m inside the footprint of the tree at ` +
+            `(${tree.x.toFixed(1)}, ${tree.z.toFixed(1)}) reaching ${tree.footprint.toFixed(2)} m`,
+        );
+      }
+    }
+  }
+  // What this ran against, on every run including a green one — a count of
+  // zero fouls means nothing unless you know how many pairs produced it.
+  process.stderr.write(
+    `[bushes grow through nothing] swept ${facts.bushes.length} clumps x ` +
+      `${facts.walls.length} wall runs and ${facts.trees.length} trees; ` +
+      `NOT covered: a clump's drawn blobs, which reach up to 2.15 m while ` +
+      `PlacedBush.radius publishes 0.85 m, so a leaf overhanging a wall it ` +
+      `does not stand in is invisible here\n`,
+  );
+  return fouls;
+};
+
 /** No lamp stands in anything: another lamp, a wall, a plot, or the railway. */
 const lampsTouchNothing: Invariant = (facts) => {
   const fouls: string[] = [];
@@ -8815,6 +8883,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no two trees interpenetrate', treesDoNotInterpenetrate],
   ['no bush stands on the paving or inside a plot', bushesStandOnOpenGround],
   ['no tree grows into a wall', treesKeepOffWalls],
+  ['no bush grows through a wall or out of a tree', bushesGrowThroughNothing],
   ['every path passes near a tree a child can climb', everyPathIsNearAClimbableTree],
   ['no lamp stands in anything', lampsTouchNothing],
   ['every path is lit end to end', everyPathIsLit],
