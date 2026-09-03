@@ -64,3 +64,21 @@ jobs:
       # is why both are required.
       - name: Procgen invariant suite
         run: pnpm run test:procgen
+
+      # **The same question, on the sixteen parks a child can actually be
+      # given** (issue #481). The suite above keeps files for the canonical seed
+      # and four sweep seeds; `PARK_SEED_POOL` is a different, larger set, and
+      # the defect this was written for stood on **pool seed 288**, which is in
+      # none of them. `check:gateway` builds each pool park in a process of its
+      # own and walks a child in through the arch.
+      #
+      # Here rather than in `checks.yml` because **that chain is already at 25
+      # minutes against its own 30-minute cap**, and a job killed by
+      # `timeout-minutes` reports as `cancelled` — the failure mode that took
+      # this project's deploy down on 29 August. Here rather than in a workflow
+      # of its own (which is what `coplanar.yml` did) because this job is
+      # already a **required** status check, so the gate takes effect on the day
+      # it lands instead of waiting on a branch-protection setting only Jim can
+      # make. It is ~90 s against this job's 15-minute budget.
+      - name: The front gate opens, on every seed in the pool
+        run: pnpm run check:gateway

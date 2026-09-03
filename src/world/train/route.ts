@@ -9,6 +9,8 @@ import { terrainHeight } from '../terrain';
 import { bridgeableCrossingPosesSearch } from './crossingPoses';
 import { fitBridgeAcross, railCorridorBlocked } from './bridgeFit';
 import { chosenCrossingCorridor, crossingSurvivesStationAt } from './crossingKeepOut';
+import { FENCE_HALF_THICKNESS, FENCE_OFFSET } from './clearance';
+import { PLAYER_RADIUS } from '../../core/constants';
 import { STATION_SEEDS, STATION_SEED_RADIUS } from './stationSeeds';
 import { PARK_SEED } from '../parkManifest';
 import { type Pose2, type SegmentKind, type Vec2, turnVocabulary } from '../rail/segments';
@@ -83,6 +85,22 @@ const TRACK_PLOT_CLEARANCE = 4.2;
  * collision half is ~0.45; this leaves the track's width plus a hair inside it.
  */
 const CORRIDOR_RADIUS = 1.8;
+
+/**
+ * **How far the centre line keeps off the park's front doorway** (issue #481).
+ *
+ * The one thing in the park that cannot move out of the railway's way, so the
+ * railway moves out of its. Derived, never chosen: the arch's own half-width,
+ * plus the fence line, plus the fence's own thickness, plus the child walking
+ * past it. Every term is read from its owner, so the day the arch is widened or
+ * the fence moved out this follows without anybody remembering it exists.
+ *
+ * `PLAYER_RADIUS` is in here because the question is not "does the fence miss
+ * the arch" but "can she walk through the arch with the fence there" — the
+ * outermost half-metre of an 8.6 m opening is opening she uses.
+ */
+const GATE_WALK_RAIL_CLEARANCE =
+  ENTRANCE_GATE_HALF_WIDTH + FENCE_OFFSET + FENCE_HALF_THICKNESS + PLAYER_RADIUS;
 
 /** How close the loop may come to an earlier part of itself. */
 const SELF_CLEARANCE = 3;
@@ -205,12 +223,17 @@ function trainObstacles(): Obstacle[] {
   // gate and the plaza, and `crossings.ts` puts a crossing on that walk. It
   // may not do it on the doorstep.
   //
-  // `TRACK_PLOT_CLEARANCE` is the right width and not a new number: it is what
-  // every plot gets, and for the reason spelled out on it — the fence stands
-  // 2 m off the rails and a walkable lane must survive beyond it. The walk in
-  // needs exactly that, out to the arch's own half-width.
+  // The width is derived from what actually stands beside the rails rather
+  // than chosen: the arch's own half-width, plus the fence line, plus the
+  // fence's own thickness, plus the body of the child walking past it. That is
+  // exactly the distance at which the doorway is walkable to its jambs, and
+  // nothing more — this is not `TRACK_PLOT_CLEARANCE`, which adds a *second*
+  // walkable lane on top for a booth's doormat to open into. The walk in is
+  // itself the lane, and the difference is not academic: at the wider number
+  // seed 115 — the pool's tightest park, a 179 m loop on `main` — had no legal
+  // loop left at all.
   for (const point of entranceWalkPoints()) {
-    out.push({ x: point.x, z: point.z, reach: ENTRANCE_GATE_HALF_WIDTH + TRACK_PLOT_CLEARANCE });
+    out.push({ x: point.x, z: point.z, reach: GATE_WALK_RAIL_CLEARANCE });
   }
 
   const cruiser = COASTER_PLANS.cruiser.route;
