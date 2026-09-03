@@ -896,6 +896,36 @@ but never so much that writing it costs more than recovery would. Record
 findings (a root cause, a decision, a formula) as soon as you have them, not
 at the end.
 
+### A replacement runs the same model as the agent it replaces
+
+**Hard rule, Jim, 3 September 2026: "when an agent dies, the replacement must
+be the same model."** No exceptions, and it outranks every default in this
+file — including "Engineer: default model Opus". A default decides what to use
+when nobody has chosen; it never overrides a choice already made for that
+piece of work.
+
+This is written down because it was got wrong at length. Jim assigned the path
+rework to a **Fable** agent. That agent died, as they all do here, and the
+Overseer spawned an Opus replacement — then did it again at every handover,
+about ten times over a day and a half, each time applying the Opus default and
+never once checking what the work had been assigned. The technical state
+survived every handover intact; the one thing that was not in the handoff file
+was the only thing lost.
+
+So, two duties:
+
+- **The Overseer**, before spawning any replacement, establishes what the dead
+  agent was running and matches it. "What model was this?" is part of the
+  restart, not an afterthought — and if the answer cannot be found, ask rather
+  than assume.
+- **Every agent**, in its handoff file, writes down **which model it is** and
+  who chose it, alongside the branch and the task. It is one line and it is the
+  only fact about a session that its successor cannot recover from the repo.
+
+The same holds for anything else Jim assigns per-task — a role, a constraint, a
+tool. When he chooses for a piece of work, that choice belongs in the handoff
+and travels with the work, not with the agent that happened to be holding it.
+
 ## Before you design anything
 
 - **GAME_DESIGN.md** is the canonical record of what the family asked for. Its
