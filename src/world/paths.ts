@@ -964,6 +964,44 @@ function collapseCollinear(points: readonly (readonly [number, number])[]): (rea
 /** Lattice pitch — Decision 1's "grid pitch 12 m". The one big number. */
 const STREET_PITCH = 12;
 
+/**
+ * How far from its own compass rim a gateway may reach for a node when its own
+ * lattice line offers none — the rescue rung above.
+ *
+ * Three street pitches. Taken from the lattice's own spacing rather than
+ * invented: the straight rung already walks three cells out along its line, so
+ * this is the same reach expressed as a radius instead of a direction, and a
+ * gateway that has to go further than three blocks to find anything is not a
+ * gateway to that quarter of the park in any sense a child would recognise.
+ */
+const TAP_RESCUE_REACH = 3 * STREET_PITCH;
+
+/**
+ * The smallest orphaned lattice component worth announcing on `process.stderr`.
+ *
+ * From the park, not from the generator: `poiGraph` samples a lane roughly
+ * every 7 m, so a dozen lattice nodes is already a district a child could spend
+ * a minute walking. Below that an unserved fragment is a corner of grass behind
+ * a plot, which is not news; seed 5's was **71**.
+ */
+const UNSERVED_COMPONENT_REPORT = 12;
+
+/**
+ * Sizes of the lattice components the ring's four gateways could not reach,
+ * largest first — empty when every sizeable component has a way in.
+ *
+ * Published rather than printed because this module runs in the browser. The
+ * one reader is `test/procgen/invariants.ts`, which asserts it is empty and
+ * announces its own cover on every run.
+ */
+const unservedLatticeComponents: number[] = [];
+
+/** {@link unservedLatticeComponents}, for the invariant that asserts on it. */
+export function latticeComponentsWithoutAGateway(): readonly number[] {
+  streetLattice();
+  return unservedLatticeComponents;
+}
+
 /** Cells each way from the plaza the lattice extends. ±14 cells is ±168 m,
  * comfortably past every boundary spline the generator produces (measured
  * extent on the canonical seed: x -51..83, z -48..58 about a plaza near the
@@ -2159,6 +2197,129 @@ function* streetLatticeSearch(): Generator<number, StreetLattice, void> {
         break;
       }
     }
+  }
+
+  // ## A gateway that finds nothing on its own line is not dropped
+  //
+  // **The rule above gives up after three cells and leaves that compass point
+  // with no gateway at all** — and a dropped gateway is not a cosmetic loss.
+  // The statue circle's guard zone makes every node inside it invalid, which
+  // cuts the lattice into pieces that meet only *through* the ring; the four
+  // taps are the whole of that meeting, and they are also the only paved
+  // sources every route is solved from. So a compass point with no tap is a
+  // slice of the park nothing can ever be routed to.
+  //
+  // Measured on seed 5 (2 Sep 2026, `scripts/tmp-north.mts`): two of the four
+  // taps were dropped, and the park came out as **106 lattice nodes of which
+  // only 28 were reachable** — one component of **71** holding the entire
+  // north and west, the park gate, the hotel quarter and a perfectly good
+  // railway bridge, with no gateway in it and therefore no way in. Its bridge
+  // even worked: the deck edge carried (0, 55.4) to (0, 16.6) and landed in
+  // the *same* orphaned component. That is seed 5's whole `poi.stranded: 10`
+  // and all eleven of its stranded destinations.
+  //
+  // This is CLAUDE.md's standing procgen rule in the place it was missing: on
+  // a real collision, make a different decision rather than accept a result
+  // that does not work. The rungs widen what the gateway may *reach*; they
+  // never move it off its compass point, so Decision 5 ("exactly 4
+  // connections at compass points") is untouched — `rim` is still one of
+  // {@link RING_COMPASS_POINTS} on every tap.
+  //
+  // Two things the rungs deliberately keep:
+  //
+  // - **Axis-aligned only.** A straight rim-to-node line to an off-line node
+  //   is a diagonal, which is exactly what `pathsRunOnGridAxes` exists to
+  //   refuse and what Jim's complaint #3 is about. So a widened tap is an
+  //   elbow through `via`, both legs on an axis.
+  // - **A component nothing else serves comes first.** Cheapest-first alone
+  //   would happily hand a second gateway to a component that already has
+  //   one, which buys nothing. The components are read off the lattice's own
+  //   `neighbours`, so this needs only the lattice and the ring — both of
+  //   which exist before any route is solved. That is what makes it a rule
+  //   this generator can honour alone, rather than one needing an answer only
+  //   a later stage has.
+  if (taps.length < compassDirs.length) {
+    const component = new Int32Array(count).fill(-1);
+    let components = 0;
+    for (let start = 0; start < count; start += 1) {
+      if (!nodeOk[start] || component[start] !== -1) continue;
+      const id = components;
+      components += 1;
+      const queue = [start];
+      component[start] = id;
+      while (queue.length > 0) {
+        const at = queue.pop() as number;
+        for (const step of neighbours[at] as LatticeNeighbour[]) {
+          if (component[step.to] !== -1) continue;
+          component[step.to] = id;
+          queue.push(step.to);
+        }
+      }
+    }
+    const served = new Set<number>(taps.map((tap) => component[tap.index] as number));
+    const componentSize = new Map<number, number>();
+    for (let node = 0; node < count; node += 1) {
+      const id = component[node] as number;
+      if (id >= 0) componentSize.set(id, (componentSize.get(id) ?? 0) + 1);
+    }
+
+    for (const [di, dj] of compassDirs) {
+      const rim: readonly [number, number] = [
+        PLAZA.x + di * RING_RADIUS,
+        PLAZA.z + dj * RING_RADIUS,
+      ];
+      if (taps.some((tap) => tap.rim[0] === rim[0] && tap.rim[1] === rim[1])) continue;
+      let best: LatticeTap | null = null;
+      let bestKey: readonly [number, number] = [Infinity, Infinity];
+      for (let node = 0; node < count; node += 1) {
+        if (!nodeOk[node]) continue;
+        const nx = xs[node] as number;
+        const nz = zs[node] as number;
+        if (Math.hypot(nx - rim[0], nz - rim[1]) > TAP_RESCUE_REACH) continue;
+        const id = component[node] as number;
+        // An elbow, both legs axis-aligned; try each corner.
+        for (const corner of [
+          [nx, rim[1]] as const,
+          [rim[0], nz] as const,
+        ]) {
+          if (
+            !streetSegmentClear(rim[0], rim[1], corner[0], corner[1]) ||
+            !streetSegmentClear(corner[0], corner[1], nx, nz) ||
+            !segmentHoldsRailSide(rim[0], rim[1], corner[0], corner[1], side[node] as 1 | -1, 0) ||
+            !segmentHoldsRailSide(corner[0], corner[1], nx, nz, side[node] as 1 | -1, 0)
+          ) {
+            continue;
+          }
+          const cost =
+            Math.hypot(corner[0] - rim[0], corner[1] - rim[1]) +
+            Math.hypot(nx - corner[0], nz - corner[1]);
+          // Unserved component first, then cheapest — see the note above.
+          const key: readonly [number, number] = [served.has(id) ? 1 : 0, cost];
+          if (key[0] < bestKey[0] || (key[0] === bestKey[0] && key[1] < bestKey[1])) {
+            bestKey = key;
+            best = { index: node, rim, kind: 'compass', via: [corner], cost };
+          }
+        }
+      }
+      if (best) {
+        taps.push(best);
+        served.add(component[best.index] as number);
+      }
+    }
+
+    // **Record what was left unserved.** A rescued tap is the good case; a
+    // component this could not reach at all is the one nobody would otherwise
+    // hear about, and it is the shape of defect that cost seed 5 ten waypoints
+    // in silence. It is published rather than printed because this module runs
+    // in the browser, where there is no `process` to write to —
+    // `test/procgen/invariants.ts` reads it and announces it on every run.
+    unservedLatticeComponents.length = 0;
+    for (const [id, size] of componentSize) {
+      if (size >= UNSERVED_COMPONENT_REPORT && !served.has(id)) {
+        unservedLatticeComponents.push(size);
+      }
+    }
+    unservedLatticeComponents.sort((a, b) => b - a);
   }
 
   latticeCache = { count, xs, zs, nodeOk, side, edgeEast, edgeSouth, neighbours, taps, indexOf, cellOf };
