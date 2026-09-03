@@ -1443,3 +1443,75 @@ defect is fixed first, this is a clean gain.
   It is there for the stage-2 invariant "no bridge's masonry stands outside
   the band `paths.ts` screened", which is the mechanism that would have caught
   this whole class — nothing checks it today, in either direction.
+
+### THE REAL DEFECT, LOCATED AND PROVED: reservations for bridges that are never built
+
+The width was the wrong axis. **A proven crossing site that no path ever
+crosses at still costs a full reservation** — roughly 38 m by 11 m of ground
+forbidden to every foreign leg, protecting a bridge that does not exist and
+never will.
+
+`scripts/tmp-resfit.mts` reports it directly, and the new invariant's own
+coverage line does too (`[reservation cover] N of M ... carry a built deck`):
+
+```
+5  site railD=0    NO DECK BUILT  forbids |across|<=5.50 along [-18.9,18.9]
+5  site railD=74   NO DECK BUILT  forbids |across|<=4.50 along [-18.9,18.9]
+5  site railD=156  walk=[-1.10,1.10]  masonry=[-2.02,2.02]  used=2.02  forbidden=5.50
+5  site railD=246  NO DECK BUILT  forbids |across|<=4.50 along [-18.9,18.9]
+```
+
+**Three of seed 5's four reservations are empty.** Seed 5 is the worst seed in
+the pool (10 stranded) and the one the width shrink cured outright — because
+narrowing the band was an indirect, partial way of doing what releasing the
+empty reservations does completely.
+
+**PROVED, with a control on the instrument first.** A temporary
+`LGP_DIAG_UNUSED_SITES` exempted named sites from `segmentCutsABridgeRamp` and
+`bridgeSiteReserving` by rail distance. Reverted; restore verified by grep
+(`DIAGNOSTIC-UNUSED` matches: 0).
+
+```
+LGP_SEED=5 LGP_DIAG_UNUSED_SITES=''          poi.stranded: 10   <- CONTROL, reproduces baseline exactly
+LGP_SEED=5 LGP_DIAG_UNUSED_SITES='0,74,246'  (no failures)      <- GREEN
+```
+
+The geometry that was proved against is the four sites listed above, on seed 5
+at this branch's head: one built bridge at railDistance 156, three empty
+reservations at 0, 74 and 246.
+
+**Seed 5's ten stranded waypoints are caused entirely by three no-go rectangles
+protecting nothing.** That is the same disease as the width — the reservation
+is bigger than the bridge — in its most extreme form, where the bridge's size
+is zero.
+
+### Why this is the honest fix and the width shrink was not
+
+The width shrink narrowed every reservation, including the ones doing real
+work, which is why seeds 11 and 451 paid for seed 5's cure. Releasing an
+**empty** reservation costs nothing at all: there is no masonry to keep a
+ribbon off.
+
+### What is NOT yet answered, and it matters
+
+**"No deck was built in this rectangle" is not the same question as "no path
+crosses at this site", and seed 288 is the case that separates them.** 288's
+site at railDistance 152 has no bridge of its own, but a *neighbouring*
+bridge's deck stands inside its rectangle (across -14.00 to -5.20 — this is
+exactly what the new invariant fires on). Releasing 152 by the "no deck built"
+rule would un-screen ground where real masonry stands. **The rule must be
+"no crossing leg uses this site", not "this rectangle is empty."**
+
+### The implementation this points at
+
+`paths.ts` chooses which sites carry a crossing leg, so it can know. Solve the
+network, record the sites a crossing leg actually used, re-solve with only
+those screened, and iterate to a fixed point (bounded — keep the union if it
+does not settle within a small number of passes). That is a genuine backtrack
+in CLAUDE.md's standing sense rather than a threshold, and it is Jim's brief #2
+again: the bridges and the paths decided together instead of one reserving
+ground the other never wants.
+
+Expected prize on the measurement above: seed 5 **10 -> 0**, taking the pool to
+**11 of 16 green** and 21 -> 11 stranded, with nothing else touched. Seed 115
+also carries one empty reservation (railD 76) and is already green.
