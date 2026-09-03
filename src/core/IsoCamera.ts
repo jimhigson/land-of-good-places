@@ -75,6 +75,26 @@ export class IsoCamera {
    * setFocusOverride}.
    */
   private focusOverrideActive = false;
+
+  /**
+   * **How far the camera currently sits from its normal pseudo-isometric
+   * pose** — a delta in metres, damped to zero, added on top of
+   * {@link offset} rather than replacing it.
+   *
+   * This is what lets a shot sit lower and flatter than the rig and then
+   * *rise* back into it, which is the cat bus arrival's third beat: Jim, on
+   * the arrival, *"once through the arch the camera moves up to its usual
+   * pseudo-isometric perspective."*
+   *
+   * **A delta, and never a second pose.** `offset` stays the one owner of
+   * where the camera lives; nothing here writes a pitch or a distance down a
+   * second time, and the rise cannot land somewhere near-but-not-quite home
+   * because "home" is this reaching exactly zero. Two definitions of the
+   * camera's resting place kept in step by hand is the bug this repo has paid
+   * for more than any other.
+   */
+  private readonly poseOffset = new Vector3();
+  private readonly poseTarget = new Vector3();
   private readonly focusOverrideValue = new Vector3();
 
   /**
@@ -316,6 +336,44 @@ export class IsoCamera {
     this.focusOverrideActive = false;
   }
 
+  /**
+   * Tilts the camera to `pitchDegrees` instead of the rig's own
+   * {@link CAMERA_PITCH_DEGREES}, keeping its yaw and its distance.
+   *
+   * Stored as the **difference** from the normal pose, so
+   * {@link clearPoseOverride} needs no memory of what the normal pose was and
+   * cannot restore a stale copy of it. Damped by {@link update} on the
+   * look-around's own return curve, so both entering and leaving are a move
+   * rather than a cut.
+   *
+   * Cheap enough to call every frame, but there is no reason to: like
+   * {@link setZoomTarget} this is a plain assignment, so a caller should write
+   * it when its own decision changes. Unlike `setZoomTarget` nothing else in
+   * the game competes for this value, so re-asserting it is merely wasteful
+   * rather than a way to eat a player's input.
+   */
+  setPoseOverride(pitchDegrees: number): void {
+    const low = cameraOffset(CAMERA_YAW_DEGREES * DEG, pitchDegrees * DEG, CAMERA_DISTANCE);
+    this.poseTarget.set(low.x - this.offset.x, low.y - this.offset.y, low.z - this.offset.z);
+  }
+
+  /** Rises back to the ordinary pseudo-isometric pose. */
+  clearPoseOverride(): void {
+    this.poseTarget.set(0, 0, 0);
+  }
+
+  /**
+   * How far the camera still is from its normal pose, in metres — 0 once the
+   * rise has actually landed.
+   *
+   * Read by `scripts/check-arrival-camera.mts` to prove the hand-over into
+   * ordinary play ends on the rig's own pose exactly, rather than near it.
+   * Nothing in the game needs it.
+   */
+  get poseDistance(): number {
+    return this.poseOffset.length();
+  }
+
   // -------------------------------------------------- drag to look around
 
   /**
@@ -479,6 +537,7 @@ export class IsoCamera {
     this.focus.z = damp(this.focus.z, this.desiredFocus.z, CAMERA_FOLLOW_HALF_LIFE, dt);
 
     this.updateLook(dt);
+    this.updatePose(dt);
     this.applyTransform();
   }
 
@@ -516,11 +575,30 @@ export class IsoCamera {
     }
   }
 
+  /**
+   * Eases the pose delta towards its target by one frame.
+   *
+   * The last millimetre is snapped off for the same reason `updateLook` snaps
+   * its own: an exponential approaches zero forever, so without this the
+   * camera would sit a hair off its resting pose for the whole rest of the
+   * session and "has the rise finished?" would have no answer that ever
+   * arrives. Beat three of the arrival has to land *on* the ordinary camera,
+   * not beside it.
+   */
+  private updatePose(dt: number): void {
+    this.poseOffset.x = damp(this.poseOffset.x, this.poseTarget.x, CAMERA_POSE_HALF_LIFE, dt);
+    this.poseOffset.y = damp(this.poseOffset.y, this.poseTarget.y, CAMERA_POSE_HALF_LIFE, dt);
+    this.poseOffset.z = damp(this.poseOffset.z, this.poseTarget.z, CAMERA_POSE_HALF_LIFE, dt);
+    if (this.poseOffset.distanceToSquared(this.poseTarget) < POSE_HOME_EPSILON * POSE_HOME_EPSILON) {
+      this.poseOffset.copy(this.poseTarget);
+    }
+  }
+
   private applyTransform(): void {
     // The look-around offset is applied *here*, on top of the settled follow,
     // rather than folded into `focus` — see `viewFocus`.
     this.viewFocus.copy(this.focus).add(this.lookOffset);
-    this.camera.position.copy(this.viewFocus).add(this.offset);
+    this.camera.position.copy(this.viewFocus).add(this.offset).add(this.poseOffset);
     this.camera.lookAt(this.viewFocus);
     this.camera.updateMatrixWorld();
 
@@ -738,6 +816,21 @@ const TEMP_LIFT = new Vector3(0, 1.25, 0);
  * movement anyone could.
  */
 const LOOK_HOME_EPSILON = 0.001;
+
+/**
+ * How quickly the camera rises back into its ordinary pose, in seconds per
+ * halving.
+ *
+ * Slower than the follow's 0.16 s, because this is a *shot* changing rather
+ * than a camera chasing a child — the same reasoning
+ * `CAMERA_LOOK_RETURN_HALF_LIFE` is written down for, and the same number, so
+ * the two composed-shot returns in this file move alike rather than being two
+ * separately dialled feels.
+ */
+const CAMERA_POSE_HALF_LIFE = CAMERA_LOOK_RETURN_HALF_LIFE;
+
+/** Below this, the rise has landed. Metres. */
+const POSE_HOME_EPSILON = 0.001;
 
 // Scratch vector for clampToFrustum's own intermediate maths — discarded
 // before the method returns, so safe to share across calls.

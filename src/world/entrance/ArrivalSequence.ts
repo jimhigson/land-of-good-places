@@ -263,6 +263,72 @@ export function arrivalCameraZoom(phase: ArrivalPhase): number {
 }
 
 /**
+ * **How low the camera sits while the arrival is the shot**, in degrees.
+ *
+ * Jim, on what the arrival should do: *"when the bus arrives at the park, the
+ * camera needs to face the bus's doors as the children get off the bus, then
+ * follow your character as they walk into the park and under the arch, and
+ * then once through the arch the camera moves up to its usual pseudo-isometric
+ * perspective."*
+ *
+ * The rig's own pitch is 38 degrees, which looks down on the park from above —
+ * right for playing, wrong for watching children step down off a bus, because
+ * from up there you see the tops of their heads and the roof of the bus. 16
+ * degrees is nearly side-on: the door faces you, the children come *towards*
+ * the camera, and the arch is a thing you pass under rather than a shape on
+ * the floor. The distance and the yaw are the rig's own — only the tilt
+ * changes, so the rise back is a lift rather than a swing.
+ */
+export const ARRIVAL_CAMERA_PITCH_DEGREES = 16;
+
+/**
+ * How far above the pavement the door shot is aimed, in metres — about a
+ * child's chest. Below `TALLEST_CHILD_HEIGHT` on purpose: the subject is the
+ * children coming down the step, not the roof of the bus behind them.
+ */
+const ARRIVAL_DOOR_FOCUS_LIFT = 1.1;
+
+/**
+ * The pitch the park camera should hold for a given phase, or `null` for
+ * "the ordinary pose".
+ *
+ * A pure function beside {@link arrivalCameraZoom} and for exactly its reason:
+ * the caller is `Game.tick()`, `Game` builds a real `WebGLRenderer` and cannot
+ * be constructed in a test, so a camera decision made inline in there is a
+ * camera decision no check can reach.
+ *
+ * **`null` from `departing` on — the beat-three rise.** She is handed the
+ * controls on `departing`'s very first frame (`ARRIVAL_CONTROL_AT`), so the
+ * camera lifts *under her hand* rather than in front of it. That is
+ * deliberate: a rise she is already steering through reads as the game giving
+ * her the park, where the same move played out before control returns reads as
+ * one more second of being made to wait. It is also the existing hand-over
+ * point, so nothing about when she gets to play changed.
+ */
+export function arrivalCameraPitch(phase: ArrivalPhase): number | null {
+  return phase === 'departing' || phase === 'done' ? null : ARRIVAL_CAMERA_PITCH_DEGREES;
+}
+
+/**
+ * Does this phase want the camera pointed at the **bus's door** rather than at
+ * the player?
+ *
+ * True for the two phases where the door is the subject — it swinging open,
+ * and the children coming down the step. From `walking-in` on it is false, and
+ * the ordinary damped player-follow takes her in under the arch, which is beat
+ * two and needs nothing else: `walkIn` already drives her along a bezier from
+ * the door through the gateway, so following her *is* the shot Jim asked for.
+ *
+ * `rolling-in` is false as well, and deliberately: she is aboard the bus for
+ * all of it, so following the player already follows the bus, and pinning the
+ * camera to a door that is still moving would hold the shot still while the
+ * bus slid across it.
+ */
+export function arrivalCameraWatchesTheDoor(phase: ArrivalPhase): boolean {
+  return phase === 'doors-opening' || phase === 'stepping-down';
+}
+
+/**
  * Re-exported from `arrivalFlag.ts`, which is where it is now defined.
  *
  * It had to move so that `main.ts` could ask it without importing this file,
@@ -635,6 +701,25 @@ export class ArrivalSequence {
 
   get finished(): boolean {
     return this.doneFlag;
+  }
+
+  /**
+   * **Where the camera looks during beat one: the spot on the pavement every
+   * child steps down onto.**
+   *
+   * This is `playerRoute.from`, which is worked back from the bus's *own*
+   * `doorDrop` — so a bus of a different length still gets its door framed,
+   * and the shot cannot drift from the thing it is a shot of. Everybody leaves
+   * by this one point (see the constructor), so it frames the whole queue
+   * coming off, not just her.
+   *
+   * Lifted to roughly a child's chest so they sit in the middle of the frame
+   * rather than along its bottom edge — the same reason the ordinary follow
+   * aims above the player's feet.
+   */
+  get doorFocus(): Vector3 {
+    const { x, z } = this.playerRoute.from;
+    return new Vector3(x, terrainHeight(x, z) + ARRIVAL_DOOR_FOCUS_LIFT, z);
   }
 
   /** Where the bus is, for a check that wants to measure rather than trust. */
