@@ -1852,3 +1852,47 @@ duplicates**. A runner over an explicit list is easier to diff than a 58-term
 "a check that never runs" section is about. Exit non-zero if any step failed,
 so zero-tolerance is unchanged. **Not built — it is a `check`-chain change and
 belongs on its own PR, not buried in this one.**
+
+### `pointStandsOnBridgeMasonry`: moved alone, measured alone — NEUTRAL, and my gate diagnosis was WRONG
+
+The one-line alignment, built exactly as the previous section prescribed:
+`nodeOk`'s `onRamp` from `pointStandsOnBridgeMasonry(x, z)` (the parapet ring
+only) to `pointStandsOnABridgeRamp(x, z)` (the whole reservation, the same
+rectangle every edge is screened against). `tsc --noEmit` exit 0.
+
+**It changes nothing at all.**
+
+| measurement | before | after |
+|---|---|---|
+| `check:park`, all sixteen seeds | 10 green, 20 stranded | **identical, seed for seed** |
+| `test:procgen` | 10 failed / 1399 passed | **10 failed / 1399 passed** |
+| seed 5's gate (`tmp-gate.mts`) | `links: 9`, `nearestReachable: 35.0m at 21.6,26.5` | **byte-identical** |
+
+**So the previous commit's claim — that this disagreement is seed 5's gate
+defect — is refuted, and I am recording it as wrong rather than quietly moving
+on.** The two definitions really do describe different ground, and the
+reasoning about islands is sound in the abstract; it is simply **not
+load-bearing on this pool**. The lattice is on a 12 m pitch and a reservation
+is about 11 m across, so hardly any lattice node lands in the disputed band in
+the first place. The gate's nine links are gate-corridor handover nodes, not
+lattice nodes, so `nodeOk` never had anything to say about them.
+
+**Reverted** (restore verified by grep: the `pointStandsOnBridgeMasonry` line is
+back, the `pointStandsOnABridgeRamp` one is gone), on this branch's own standing
+rule that a change measuring nothing is not kept — the same rule that retired
+the `relayPolyline` line-set addition and the shorter-tailed elbow corner. My
+justification for it was the gate diagnosis, and once that fell there was
+nothing left but an unmeasured refactor on a branch already carrying three red
+checks.
+
+**What this leaves for whoever takes the gate.** The disagreement is real,
+latent, and now measured to cost nothing today — so it is a tidy-up, not a fix,
+and it must not be sold as one again. Seed 5's gate is still unexplained past
+this point: site 0's reservation demonstrably swallows the whole corridor
+(`tmp-whichsite.mts`, one site named at every metre of z 54..30, and
+`cutWithThisSiteExempt=false` for it), a single-site identity exemption is
+provably enough for every corridor *leg*, and yet the handover still cannot
+reach the ring. **The next question is what the nine links actually connect
+to** — they are at (5.1, 57.3), (-6.9, 57.3) and (-6.9, 45.3), all of them
+short of the railway — and why that cluster is 35 m from the nearest reachable
+node. Start there, not at `nodeOk`.
