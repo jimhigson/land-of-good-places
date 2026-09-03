@@ -775,23 +775,41 @@ const plotsDoNotOverlap: Invariant = (facts) => {
  *    green for a reason that has nothing to do with the gate, which is
  *    exactly how the first draft of this invariant passed the *broken*
  *    arch's own geometry. See `scripts/measure-gate-480.mts`.
- * 3. **Nothing hangs into that gap.** The lowest point of the arch clears
- *    {@link TALLEST_CHILD_HEIGHT} — the park's tallest possible child, party
- *    hat and all, taken from the game rather than from the gate's own design.
- *    The broken arch reached below ground and failed this by 4.31 m.
+ * 3. **Nothing hangs into that gap.** The lowest thing *over the opening*
+ *    clears {@link TALLEST_CHILD_HEIGHT} — the park's tallest possible child,
+ *    party hat and all, taken from the game rather than from the gate's own
+ *    design. The broken arch reached below ground and failed this by 4.31 m.
  *
- * The arch itself is deliberately **not** solid: its feet are the posts,
+ *    **Measured by raycasting up through the opening, not off the bounding
+ *    box**, and that is not a refinement — it is the difference between the
+ *    clause working and the clause lying. `arch.minY - groundY` was right only
+ *    while the gate was a half-torus crossbar held up by two *separate* post
+ *    meshes, so the box's floor really was the underside of the span. The
+ *    authored arch is one asset whose piers come down to the paving: the same
+ *    expression reports **0.00 m of headroom** under a gate a child walks
+ *    through on every arrival. It would have failed loudly for a correct arch
+ *    having passed quietly for a broken one, which is this repo's own
+ *    definition of a check that is not describing what it claims.
+ *    See `scripts/gate-arch-measure.mts`.
+ *
+ * The arch itself is deliberately **not** solid: its feet are the piers,
  * which are, and the span is headroom over a child walking under it.
  */
 /**
- * How far off its own post an arch foot may land and still be standing on it.
+ * How far off its own pier an arch end may land and still be standing on it.
  *
- * The crossbar's bounding box overshoots the post centre by one tube radius by
- * construction (0.28 m), so this is that plus a hand's width. The arch turned
- * a quarter-turn out of the gate plane put its feet **6.11 m** from the
- * nearest post, so nothing about this number is delicately chosen.
+ * **Derived from the asset, not chosen.** The gate's bounding box overshoots
+ * each pier's centre by exactly that pier's own keep-out radius, by
+ * construction — the widest thing on the pier is what
+ * {@link GATE_POST_COLLIDER_RADIUS} is measured from — so the tolerance is
+ * that plus a hand's width. It moved from 0.6 to 1.1 when the authored arch
+ * replaced the half-torus, because the piers are wider than the old 0.28 m
+ * tube, and it will move again by itself if the asset changes.
+ *
+ * Nothing about it is delicately chosen: the arch turned a quarter-turn out of
+ * the gate plane put its ends **6.11 m** from the nearest post.
  */
-const GATE_FOOT_TOLERANCE = 0.6;
+const GATE_FOOT_TOLERANCE = GATE_POST_COLLIDER_RADIUS + 0.3;
 
 /**
  * How far inside the park the gate probe stands, in metres.
@@ -906,13 +924,21 @@ const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
       'the posts being solid, and the headroom\n',
   );
 
-  // 3. Nothing of it hangs into that gap.
-  const headroom = arch.minY - arch.groundY;
-  if (headroom < TALLEST_CHILD_HEIGHT) {
+  // 3. Nothing of it hangs into that gap. Raycast up through the opening —
+  // see the note on clause 3 above for why the bounding box cannot answer this.
+  if (!(arch.headroom < Infinity)) {
     fouls.push(
-      `the gate arch reaches down to ${arch.minY.toFixed(2)} m, ${headroom.toFixed(2)} m over ground at ` +
-        `${arch.groundY.toFixed(2)} m — less than the ${TALLEST_CHILD_HEIGHT} m of the tallest child the ` +
-        'park can make, so she walks through it',
+      'nothing at all overhangs the park gateway: rays cast up through the opening hit no part of the ' +
+        'arch, so there is no arch over the way in — and every headroom number below would have been ' +
+        'vacuously generous',
+    );
+  } else if (arch.headroom < TALLEST_CHILD_HEIGHT) {
+    const where = arch.lowestOverheadAt;
+    fouls.push(
+      `the gate arch comes down to ${arch.headroom.toFixed(2)} m over the opening` +
+        (where ? ` at (${where.x.toFixed(2)}, ${where.z.toFixed(2)})` : '') +
+        ` — less than the ${TALLEST_CHILD_HEIGHT} m of the tallest child the park can make, so she ` +
+        'walks through it',
     );
   }
 
@@ -8616,7 +8642,10 @@ const nothingGrowsInTheLaneButTheParksOwnTrees: Invariant = (facts) => {
 
   for (const thing of facts.laneGreenery) {
     if (thing.parkTreeGeometry !== null) continue;
-    if (LANE_FURNITURE.has(thing.population)) continue;
+    // *Any* named ancestor being declared is enough — see `populations` in
+    // `parkFacts.ts`. An authored asset names its own parts, so the declared
+    // name is often one level out from the mesh that draws.
+    if (thing.populations.some((name) => LANE_FURNITURE.has(name))) continue;
     fouls.push(
       `\`${thing.population}\`${thing.node && thing.node !== thing.population ? ` (${thing.node})` : ''} ` +
         `draws ${thing.instances} instance(s) of a \`${thing.geometryType}\` that is not one of the ` +
