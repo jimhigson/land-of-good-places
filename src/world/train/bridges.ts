@@ -39,7 +39,7 @@ import {
   buildVoussoirRing,
   haunchRadius,
 } from './bridgeStonework';
-import { VOUSSOIR_TAPER_RADIUS } from '../../art/models/bridgeStones';
+import { COPING_SINK, VOUSSOIR_TAPER_RADIUS } from '../../art/models/bridgeStones';
 import type { MovingPlatform } from '../building/surfaces';
 
 /**
@@ -1285,9 +1285,27 @@ function buildShellGeometry(
             // already closes the wall at exactly this height. The reveal is
             // surplus geometry that only exists because the collapsed course
             // above it has no face for it to step to.
+            //
+            // **Under the coping counts as at the top** (#489). The test was an
+            // exact `>=` against the wall top, which catches a course collapsed
+            // *precisely* there and misses one collapsed a millimetre under it —
+            // and a millimetre under it the reveal is still a horizontal face
+            // fighting the `wallTop` cap. #489 moved the course levels (they now
+            // hang off the wall top rather than the road crown), which simply
+            // reshuffled which rings land on that coincidence: four baselined
+            // `shell|wallTop` seams went away and three fresh ones appeared.
+            //
+            // `COPING_SINK` is the honest depth to use rather than a tolerance
+            // invented here: `buildCopingRun` seats every block that far below
+            // the drawn wall top, so the band from `top - COPING_SINK` to `top`
+            // is *inside the coping stone*. A face there is hidden by
+            // construction, which is what makes deleting it the ART_DIRECTION §7
+            // fix and not a maintained stand-off.
             const revealAtTop =
-              (previous.courseYs[side][course * 2 + 1] as number) >= (previous.top[side] as number) &&
-              (ring.courseYs[side][course * 2 + 1] as number) >= (ring.top[side] as number);
+              (previous.courseYs[side][course * 2 + 1] as number) >=
+                (previous.top[side] as number) - COPING_SINK &&
+              (ring.courseYs[side][course * 2 + 1] as number) >=
+                (ring.top[side] as number) - COPING_SINK;
             if (!revealAtTop) {
               const bnt = before[(course + 1) * 2] as number;
               const nnt = now[(course + 1) * 2] as number;
