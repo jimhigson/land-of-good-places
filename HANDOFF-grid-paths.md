@@ -5247,5 +5247,26 @@ Unchanged from the ninth leg's list except that item 2 is now different: seed
    `tmp-stoneground.mts` goes last and must be re-run after any reservation or
    `bridgeFootprint.ts` change — **it has NOT been re-run since `crossingFeet`
    changed, and `crossingFeet` moves where a ramp starts. Run it first.**
-6. `pnpm run check` (the 47-step chain) — running now, result below when it
-   lands. The three inherited reds are #474's.
+6. **`pnpm run check` is GREEN on this branch — exit 0, the whole chain.**
+   The three inherited reds the ninth leg recorded as #474's
+   (`check:pet-slide`, `check:park-boot`, `check:arrival-completes`) all pass
+   here now; `package.json` is byte-identical to `bee8e8c0`, so nothing was
+   dropped from the chain to achieve it. `pnpm run build` exit 0,
+   `pnpm exec tsc --noEmit` exit 0.
+
+### 326's three remaining stranded waypoints are a different family
+
+`scripts/tmp-lonely.mts` on 326, with its own control rows:
+
+```
+  X0 (35.1,33.7) nbrs=0 nearestPaving=0.36m (connector-stall.facePaint-station-0) nearestDoormat=4.30m
+  X  (36.1,36.0) nbrs=1 nearestPaving=1.01m (spur-stall.facePaint)               nearestDoormat=2.21m
+  X  (35.6,37.7) nbrs=1 nearestPaving=0.30m (spur-stall.facePaint)               nearestDoormat=2.88m
+  control rows: nbrs 10-15, paving 2.00-8.10 m
+```
+
+All three are one pocket at **`stall.facePaint`'s own doormat**, each within
+0.3-1.0 m of its own paving — the near-miss shape, not the isolated-district
+shape the railway defect had. `debugRelaxedDoors` names one failed door,
+`exit-railRace!`. Chase it with the rest of the stranded tail, not as bridge
+work.
