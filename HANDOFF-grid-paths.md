@@ -2601,6 +2601,6 @@ dropped.
   changes `paths.ts`, the path-relevant ones were run individually:
   `check:park` **0**, `check:solve-cost` **0**, `check:waypoints` **0**,
   `check:nav-routes` **0**, `check:path-preference` **0**, `check:park-map`
-  **0**.
+  **0**, `check:fountain-hop` **0**, `check:jitter` **0**. Eight of eight.
 - `check:park` sweep, all sixteen seeds: **10 green, 13 stranded** — `diff`
   against the `df7ecac4` sweep is **empty**.
