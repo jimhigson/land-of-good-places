@@ -335,6 +335,21 @@ export class ParkGeneration {
    */
   private units = { brief: 0, cruiserSearch: 0, cruiserFinish: 0, slideSearch: 0 };
 
+  /**
+   * How many of `coasterProfileSearch`'s **structural seams** were taken —
+   * the yields that carry zero, as against the vertical repair's passes,
+   * which carry `pass + 1`.
+   *
+   * Kept apart from {@link units} because the two answer different
+   * questions. The seam count is a fixed property of the algorithm and a
+   * drop in it means a seam was skipped; the repair count is data, and a
+   * park whose profile already clears the terrain legitimately takes one
+   * pass where the canonical seed takes ten. A single total cannot tell
+   * those apart, and `check:park-boot` spent a red run saying the first
+   * when the truth was the second.
+   */
+  private cruiserFinishSeams = 0;
+
   /** Frames on which this was asked to do work and did some. */
   private workingFrames = 0;
   /** Attempts the slide's search has begun — the only progress figure there is. */
@@ -418,6 +433,11 @@ export class ParkGeneration {
     Record<'brief' | 'cruiserSearch' | 'cruiserFinish' | 'trainSearch' | 'slideSearch', number>
   > {
     return { ...this.units, trainSearch: this.trainScheduler?.sliceCounts['trainSearch'] ?? 0 };
+  }
+
+  /** How many of the cruiser finish's structural seams were taken. */
+  get cruiserFinishSeamCount(): number {
+    return this.cruiserFinishSeams;
   }
 
   /**
@@ -713,6 +733,11 @@ export class ParkGeneration {
         steps += 1;
         const step = finishing.next();
         this.units.cruiserFinish += 1;
+        // The structural seams are the yields that carry zero; the vertical
+        // repair's passes carry `pass + 1`. Counted apart because only the
+        // seams are a fixed property of the algorithm — see
+        // `coasterProfileSearch` and `check:park-boot`'s seam assertion.
+        if (!step.done && step.value === 0) this.cruiserFinishSeams += 1;
         if (step.done) {
           offerPrewarmedCruiser(step.value);
           this.cruiserSolved = true;

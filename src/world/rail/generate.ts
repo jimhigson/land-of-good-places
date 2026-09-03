@@ -1283,7 +1283,28 @@ function buildRoute(
     if (!seg) continue;
     const steps = Math.max(8, Math.ceil(seg.length / 0.35));
     cubicPoint(seg, 0, previous);
-    if (index === 0) stops.push({ s: 0, index: 0, t: 0 });
+    // **Every piece gets its own `t = 0` stop**, not just the first.
+    //
+    // Without it, the stop *before* a new piece's first sample is the last
+    // sample of the previous piece, so `locate` below found `hit` and `before`
+    // on different pieces, refused to interpolate `t` across them, and returned
+    // `hit.t` verbatim. Every distance in that piece's whole first step —
+    // anything up to the 0.35 m sample spacing — therefore answered with the
+    // same point, and the route had a dead spot at every join.
+    //
+    // Measured on the canonical park's ginormous slide, whose chute samples the
+    // route at a fixed 0.9 m: the control points either side of a join came out
+    // 1.163 m and 0.635 m apart against a rock-solid 0.899 m everywhere else —
+    // the pair summing to exactly 2 × 0.899, because only the point *between*
+    // them was displaced. A uniform Catmull-Rom through points spaced like that
+    // kinks, which put a +14° spike in the chute's slope inside one percent of
+    // its length, pitched the chase camera hard enough to throw the trailing pet
+    // out of the bottom of the frame, and is what `check:pet-slide` went red on.
+    //
+    // The duplicate `s` at a join is deliberate and harmless: the binary search
+    // takes the first stop at or past the distance, so a query exactly on the
+    // join still lands on the previous piece's `t = 1` — the same point.
+    stops.push({ s: total, index, t: 0 });
     for (let i = 1; i <= steps; i += 1) {
       const t = i / steps;
       cubicPoint(seg, t, point);
