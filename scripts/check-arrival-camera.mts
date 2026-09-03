@@ -524,6 +524,63 @@ console.log('the door shot is close enough to read a face');
 // ---------------------------------------------------------------------------
 // What this check cannot see — said out loud on every run, per CLAUDE.md
 // ---------------------------------------------------------------------------
+// **The climb back out through the plane of the arch — measured, not asserted.**
+//
+// Clause 7 stops at `clear`, the last instant `ArrivalSequence` can say where
+// the eye is. What happens next is structural rather than tuneable: the
+// stand-back opens from 4 m to the rig's 90 m in `ARRIVAL_RISE_TAIL`, tens of
+// metres a second, which is far faster than a child walks — so the eye, having
+// dipped just past the gate line, is dragged back out through it while its
+// tilt is still lifting. It therefore crosses the arch's own plane on the way
+// home, and how high it is when it does decides whether it grazes the sign.
+//
+// That cannot be asserted here, because it needs her position after the
+// handover and this file has no park. It can be *measured*, at the one pace
+// the pass itself implies — `clear` is by definition the instant she is the
+// eye's own lag past the line she crossed at `under`, so that lag over that
+// interval is her speed there, derived rather than copied. Printed with the
+// modelling stated, so nobody reads clause 7's margin as covering it.
+{
+  const eyeZOffset = (shot: NonNullable<ReturnType<typeof arrivalShot>>): number =>
+    shot.distance * Math.cos(shot.pitchDegrees * DEG) * Math.cos(shot.yawDegrees * DEG);
+  const lines: string[] = [];
+  for (const pass of PASSES) {
+    const atClear = arrivalShot(pass.clear, pass);
+    if (!atClear) continue;
+    const lagAtClear = eyeZOffset(atClear);
+    const pace = lagAtClear / Math.max(1e-3, pass.clear - pass.under);
+    let backOutAt: number | null = null;
+    let backOutEyeUp = 0;
+    for (let t = pass.clear + STEP; t <= AT_SHOT_HOME; t += STEP) {
+      const shot = arrivalShot(t, pass);
+      if (!shot) break;
+      // Zero at `clear` by construction; negative is inside the park.
+      const eyeZ = eyeZOffset(shot) - lagAtClear - pace * (t - pass.clear);
+      if (eyeZ < 0) continue;
+      backOutAt = t;
+      backOutEyeUp = CAMERA_FOCUS_LIFT + shot.distance * Math.sin(shot.pitchDegrees * DEG);
+      break;
+    }
+    lines.push(
+      backOutAt === null
+        ? `    pass ${pass.under.toFixed(2)}/${pass.clear.toFixed(2)}: the eye never comes back out to the gate line`
+        : `    pass ${pass.under.toFixed(2)}/${pass.clear.toFixed(2)}: back on the gate line at t=${backOutAt.toFixed(2)}s, ` +
+          `eye ${backOutEyeUp.toFixed(2)} m up — ${show(GATE_ARCH_CLEAR_HEIGHT - backOutEyeUp)} m ` +
+          `${backOutEyeUp > GATE_ARCH_CLEAR_HEIGHT ? 'ABOVE the sign underside (it is through the plank)' : 'under the sign underside'}` +
+          `, at a modelled ${pace.toFixed(2)} m/s`,
+    );
+  }
+  process.stderr.write(
+    'UNCOVERED by check:arrival-camera: the eye rises back out through the plane of the ' +
+      'arch on its way home, and clause 7 asserts NOTHING about that — it stops at `clear`, ' +
+      'the last instant this file can place the eye. Measured below at the pace each pass ' +
+      'implies, which is a model and not the park:\n' +
+      `${lines.join('\n')}\n` +
+      '    A negative margin here is a camera that goes through the sign plank on the way ' +
+      'out. Only eyes on a rendered frame at /arrive can settle it.\n',
+  );
+}
+
 process.stderr.write(
   'check:arrival-camera measures where the camera goes and that it lands home. ' +
     'It measures NOTHING about what the shot looks like: whether the arch frames the ' +
