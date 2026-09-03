@@ -70,7 +70,6 @@ import {
   RIM_OUTSET_START,
 } from '../../src/core/constants.ts';
 import {
-  ENTRANCE_ANGLE,
   ENTRANCE_GATE_HALF_WIDTH,
   ENTRANCE_GATE_X,
   ENTRANCE_GATE_Z,
