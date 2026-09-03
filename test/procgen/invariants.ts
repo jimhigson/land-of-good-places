@@ -6534,6 +6534,13 @@ const builtMasonryStaysInsideItsReservation: Invariant = (facts) => {
     for (let along = alongMin; along <= alongMax; along += 0.5) {
       const bx = site.x + site.dirX * along;
       const bz = site.z + site.dirZ * along;
+      // 14 m is a sweep BOUND, not a threshold: it only has to exceed the
+      // widest the builder is licensed to reach, which is the ribbon's own
+      // half-width plus the parapet (2.95 m) displaced by `bridgeSpine.ts`'s
+      // `DEVIATION_CAP` (3.0) and `bridgeFootprint.ts`'s `maxLateralShiftFor`
+      // (>= 4.0) — under 10 m. A deck found at the bound would mean the sweep
+      // is clipping, so the numbers in a complaint are worth reading against
+      // it.
       for (let a = -14; a <= 14; a += 0.1) {
         if (own.covers(bx + nx * a, bz + nz * a)) {
           lo = Math.min(lo, a);
