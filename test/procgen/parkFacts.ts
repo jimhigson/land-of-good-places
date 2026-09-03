@@ -616,6 +616,38 @@ export interface ParkFacts {
     readonly screenHalfAcross: number;
   }[];
   /**
+   * **Where a built bridge's walkable deck stands on ground `paths.ts` left
+   * open to every router** — one entry per offending sample, empty when the
+   * park is sound.
+   *
+   * This is the question `builtMasonryStaysInsideItsReservation` exists to
+   * ask, and the only one of its two directions that cannot be answered from
+   * geometry already on `ParkFacts`: "is this point reserved?" belongs to
+   * `paths.ts`'s `bridgeSiteReserving`, whose boolean face is
+   * `pointStandsOnABridgeRamp`. Asked here rather than restated there, for the
+   * usual reason — and because that function alone honours
+   * `releasedCrossingSites`, so a rectangle the two-pass handed back to the
+   * routers correctly counts as open ground.
+   *
+   * Deliberately **not** per-site. A site's reservation keeps foreign legs
+   * off *some* ground; which site reserved a given square metre is
+   * immaterial to whether a ribbon may be drawn on it, and treating it as
+   * material is what made the old form prosecute two bridges 29 m apart with
+   * disjoint reservations (seed 5, 3 Sep 2026).
+   *
+   * `covers` reports the deck a child can stand on; the masonry's outer face
+   * lies beyond it, so this is a **lower bound** on any trespass.
+   */
+  readonly masonryOnOpenGround: readonly {
+    readonly bridgeIndex: number;
+    readonly x: number;
+    readonly z: number;
+  }[];
+  /** How many built bridges {@link masonryOnOpenGround} actually swept — a
+   * bridge standing on no proven site has no frame to sweep in and is left to
+   * `noBridgeStandsWhereNoneWasProven`, so the count is the coverage. */
+  readonly masonrySweptBridges: number;
+  /**
    * One entry per built bridge: how far the paving it lifts hangs past its
    * own masonry. See {@link BridgePavingFact}.
    */
@@ -1118,13 +1150,17 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // Dynamically imported here, after `world` (and so `TRAIN_PLAN`) is
   // already built for this exact seed — never at this file's own top level,
   // the seed-pinning trap this file's header already warns about.
-  const { planBridgeFootprints } = await import('../../src/world/train/bridgeFootprint.ts');
+  const { planBridgeFootprints, DECK_HALF_LENGTH } = await import(
+    '../../src/world/train/bridgeFootprint.ts'
+  );
   const bridgeReservations = planBridgeFootprints(world.train.crossings);
 
   const { CROSSING_SITES } = await import('../../src/world/train/crossingPlan.ts');
   const { SITE_SNAP_TOLERANCE } = await import('../../src/world/train/crossings.ts');
   // The band `paths.ts` really screened, from that file's own owner.
-  const { bridgeScreenHalfAcross } = await import('../../src/world/paths.ts');
+  const { bridgeScreenHalfAcross, pointStandsOnABridgeRamp } = await import(
+    '../../src/world/paths.ts'
+  );
   const plannedBridgeSites = CROSSING_SITES.map((site) => ({
     railDistance: site.railDistance,
     x: site.x,
@@ -1138,6 +1174,32 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   }));
   // Derived, never gathered a second time — one owner for "which sites exist".
   const plannedBridgeSiteDistances = plannedBridgeSites.map((site) => site.railDistance);
+
+  // Every built deck, swept in its own site's straight frame and asked whether
+  // the ground under it is reserved at all. The `along` bound comes from the
+  // site's own proven reaches (padded, because `bridgeFootprint.ts` may shift
+  // the spine laterally and `bridgeSpine.ts` may bend it); the `across` bound
+  // is wide enough to contain any licence the builder has.
+  const masonryOnOpenGround: { bridgeIndex: number; x: number; z: number }[] = [];
+  let masonrySweptBridges = 0;
+  for (const [bridgeIndex, bridge] of world.train.bridges.entries()) {
+    const site = CROSSING_SITES.find((candidate) => bridge.covers(candidate.x, candidate.z));
+    if (site === undefined) continue;
+    masonrySweptBridges += 1;
+    const nx = site.dirZ;
+    const nz = -site.dirX;
+    const alongMax = DECK_HALF_LENGTH + Math.max(site.rampReachPos, site.rampReachNeg) + 10;
+    for (let along = -alongMax; along <= alongMax; along += 0.25) {
+      const bx = site.x + site.dirX * along;
+      const bz = site.z + site.dirZ * along;
+      for (let across = -14; across <= 14; across += 0.25) {
+        const x = bx + nx * across;
+        const z = bz + nz * across;
+        if (!bridge.covers(x, z)) continue;
+        if (!pointStandsOnABridgeRamp(x, z)) masonryOnOpenGround.push({ bridgeIndex, x, z });
+      }
+    }
+  }
 
   const { BOUNDARY_MASONRY_HALF_WIDTH, BOUNDARY_WALL_COLLISION_HALF } = await import(
     '../../src/world/Garden.ts'
@@ -2571,6 +2633,8 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     bridgeReservations,
     plannedBridgeSiteDistances,
     plannedBridgeSites,
+    masonryOnOpenGround,
+    masonrySweptBridges,
     bridgePaving,
     strandedPathEnds,
     crossingSiteSnapTolerance: SITE_SNAP_TOLERANCE,
