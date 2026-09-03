@@ -9074,12 +9074,38 @@ export function registerParkInvariants(seed: number, label = `seed ${seed}`): vo
       // `Scenery.ts`'s `BUSH_BUDGET`). That makes thinning something that can
       // now happen quietly, so it gets a guard.
       //
-      // Measured across the five CI seeds at 149 / 128 / 137 / 142 / 140. The
-      // floor is 108 because that is exactly what every seed used to plant, so
-      // it reads as "no seed is worse off than before the scatter was made
-      // local" rather than as an arbitrary round number — and the worst seed
-      // still clears it by 20.
-      expect(facts.bushes.length, 'the park planted almost no bushes').toBeGreaterThan(107);
+      // **The table that stood here was the same stale one `Scenery.ts` was
+      // carrying** — 149 / 128 / 137 / 142 / 140, a copy kept in step by hand
+      // and, by #500, wrong by two to four times. Two definitions of one
+      // measurement, which is this repo's most-repeated bug; the owner of what
+      // the budget buys is `Scenery.ts`'s `BUSH_BUDGET` comment, and this
+      // quotes no numbers of its own beyond the one it asserts.
+      //
+      // **And 107 had stopped guarding the thing the budget exists for.** It
+      // was chosen when every seed planted 108, so it read as "no seed is
+      // worse off than before". Today the five parks plant 295 / 266 / 201 /
+      // 483 / 456, so a change that halved the scatter — the exact failure
+      // `BUSH_BUDGET` was raised to 4200 to prevent, and the cheapest possible
+      // way to make a clearance invariant go green — would leave the thinnest
+      // park at 100 and this line **still green**. A floor that only fires
+      // after a two-thirds collapse is not a floor.
+      //
+      // So it guards the property the budget was actually chosen for: **no
+      // park is thinner than the day before #500**, whose worst park was 203.
+      // 180 is that, less about a tenth for ordinary seed-to-seed drift as the
+      // geometry moves — the thinnest park today (201) clears it by 21.
+      //
+      // **What a 50% thinning actually does to it, measured rather than
+      // assumed** — the budget halved to 2100 plants 139 / 145 / 98 / 237 /
+      // 220 across canonical / 5 / 11 / 24 / 131, so **three of the five go
+      // red** at 180 where **one** did at 107. Not all five: seeds 24 and 131
+      // sit high enough that halving still leaves them over the bar. A floor
+      // is a per-park guard and the parks are not alike, so no single number
+      // catches every thinning everywhere — the same thing the tree floor's
+      // comment above says about its own 24, and the reason running on five
+      // seeds is what does the work rather than the cleverness of the number.
+      // Three suites going red at once is a loud enough signal.
+      expect(facts.bushes.length, 'the park planted almost no bushes').toBeGreaterThan(180);
       // Climbable trees get their own floor, separate from the walk-distance
       // invariant, because the two fail differently: the distance check goes
       // red when they are badly spread, this one when there are simply too few.

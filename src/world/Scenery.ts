@@ -952,9 +952,18 @@ function buildFoliage(collision: CollisionWorld): {
     //    moment**, which is the standing rule from CLAUDE.md's "Procgen
     //    backtracks on collision, always". Deny-by-default: whatever any
     //    sibling system has registered by now refuses this spot without this
-    //    loop having to know the sibling exists. Today that is the garden's
-    //    boundary masonry and every tree trunk planted above; tomorrow it is
-    //    whatever else is built before `Scenery`, for free.
+    //    loop having to know the sibling exists.
+    //
+    //    **Be clear about how little that is today, because the shape of the
+    //    query flatters it.** `Scenery` is built early — `World`'s
+    //    constructor stands up the hotel, the stalls, the lamps, the rides,
+    //    the keychain shop and the entrance *after* it — so at this instant
+    //    the world holds the garden's boundary masonry and the tree trunks
+    //    planted a few dozen lines above, and almost nothing else. This is
+    //    not a query that currently catches much; it is a query that cannot
+    //    go blind. A list would have to be edited by whoever adds the next
+    //    system, and would not be; this gets it for free the day `Scenery`
+    //    moves later in the order, or the day something moves before it.
     // 2. `wallPlan()`, via `clearOfWalls` — the walls are *not* in the
     //    collision world yet (`Scenery`'s constructor stands them up after
     //    `buildFoliage` returns), but they are a fully-solved pre-scene plan,
