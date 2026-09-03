@@ -296,6 +296,43 @@ polygon abuts the threshold.** Zero gap, full door width, roughly
 perpendicular over the final approach — never a ribbon that ends nearby or a
 diagonal sliver clipping a doormat's corner.
 
+### Seed paths: the door plants its own stub (Jim's construction)
+
+Jim, same conversation: *"a path has to hit the hotel door, and the castle
+door, perpendicular to the doors — this should be a seed path that other
+paths grow from, and if it fails the backtracking can go so far as to move
+the building."*
+
+This moves the correctness from **arrival to departure**, and it is the
+better construction. Rather than a network grown elsewhere having to achieve
+a flush perpendicular landing on a door — the hard, ill-conditioned version
+that all six arrival ladders were scar tissue from — **the building plants
+its own door path as part of placing itself**: a short paved stub,
+perpendicular off the threshold, full door width, claimed *atomically with
+the building in the same turn*. The stub cannot be wrong, because the thing
+that knows where the door is drew it. The demand moves to the stub's **free
+end** — "the network must join here" — and joining path to path mid-park is
+the easy problem.
+
+Three properties fall out:
+
+- **Earliest possible failure.** No room for the stub — the door faces a
+  wall, the rail corridor, another claim — and the *building placement
+  itself* is refused in its own turn, re-drawing position or orientation
+  immediately. Nobody discovers forty rounds later that the hotel opens onto
+  a fence.
+- **Doors are founding members of the network, not remote targets.** Under
+  round-robin the stubs exist early, so paths grow *from* doors as much as
+  *toward* them.
+- **The full backtrack ladder, in order:** route the network to the stub →
+  extend or bend the stub beyond its perpendicular first metres → reorient
+  the building → **move the building** → unwind further. Totality holds at
+  every rung.
+
+Deny-by-default applies: castle, hotel, every ride entrance, stall front and
+seat gets a stub and a demand — there is no list of which buildings deserve
+paths.
+
 ### Paths do not clump or overlap — and there is no self-exemption
 
 Jim: *"paths should not clump together or overlap — this is an invariant that
@@ -316,6 +353,28 @@ refusal, and the network converges to trunk-and-branch — which also serves
 the grid ask. The bridge-foot apron knot is this rule at a junction: N
 ribbons meet a foot only as one merged junction geometry, never as N
 individually-drawn arrivals.
+
+### Bridges may bend (Jim: "by about 10%, by deforming the mesh along its length")
+
+A bridge's spine may curve, with lateral deviation bounded at ~10% of its
+span, by deforming the mesh along its length. This is not cosmetic — it is
+**one more degree of freedom in the crossing negotiation**: a foot lands
+where the network actually is, a claim near an abutment is cleared by easing
+the spine rather than abandoning the site, and a deck meets a gently curved
+corridor without a kink at its edge. Three rules keep it from becoming a bug
+source:
+
+- **The bend is a parameter of the claim.** What is published to the registry
+  is the deformed footprint and surface — never the straight ideal with a
+  bend applied afterwards (that would be `SITE_HALF_WIDTH` again: claimed
+  shape and built shape disagreeing).
+- **One spine owns everything.** Mesh, collider, walkable surface and claim
+  all derive from the same deformed centreline. A collider following the
+  straight original under a bent mesh is the walk-through-the-parapet bug
+  built on purpose.
+- **The deformation is a sweep, not a stretch.** Authored cross-sections
+  (the Blender stone kit) swept along the curved spine, so courses and
+  parapets still read as stonework per ART_DIRECTION.
 
 ### Hard demands vs soft costs
 
