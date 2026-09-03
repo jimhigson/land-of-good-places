@@ -9006,6 +9006,21 @@ const drawnFeaturesShareNoForbiddenGround: Invariant = (facts) => {
   // each piece's core, with `TRACK_CLEARANCE` (the game's own half-width) as
   // its reach. A corridor may cross it only on ground a bridge reservation
   // covers: grade separation is the one legal way to share the plan view.
+  // A station's boarding gap is the one place the park DELIBERATELY lets
+  // walkable ground meet the railway — the same declaration
+  // `check-park.mts`'s `declaredOpen` reads when it allows the fence to gap
+  // there (`STATION_GAP` about `station.distance`). One owner
+  // (`world.train.stations`), read here rather than restated, and it excuses
+  // CORRIDORS only: a solid thing standing in a boarding gap still blocks
+  // the boarding and still meets the train.
+  const trainRoute = facts.world.train.route;
+  const inBoardingGap = (x: number, z: number): boolean => {
+    const alongRail = trainRoute.distanceNear(x, z);
+    return facts.world.train.stations.some((station) => {
+      const wrapped = trainRoute.wrap(alongRail - station.distance + trainRoute.length / 2);
+      return Math.abs(wrapped - trainRoute.length / 2) <= STATION_GAP;
+    });
+  };
   for (const feature of features) {
     const rule = CLAIM_COMPATIBILITY[feature.kind].corridor;
     if (rule === true) continue;
@@ -9015,9 +9030,10 @@ const drawnFeaturesShareNoForbiddenGround: Invariant = (facts) => {
       for (const [x, z] of samplesOfShape(piece.shape)) {
         if (
           rule === 'crossing' &&
-          facts.bridgeReservations.some((reservation) => reservation?.covers(x, z) ?? false)
+          (inBoardingGap(x, z) ||
+            facts.bridgeReservations.some((reservation) => reservation?.covers(x, z) ?? false))
         ) {
-          continue; // grade-separated: the legal way to share the plan view
+          continue; // grade-separated or a boarding platform: the legal interfaces
         }
         const gap = facts.distanceToRail(x, z) - reachOfShape(piece.shape);
         if (gap < worst) {
