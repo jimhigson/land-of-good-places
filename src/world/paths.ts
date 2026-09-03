@@ -3589,6 +3589,21 @@ function* pathGridSearch(): Generator<number, PathGrid, void> {
   // keeps climbing while the answer is no. Gate nodes are added last, after
   // the ring, the feet and every door, so the graph a flood sees here is the
   // finished one bar the gate itself.
+  const ringReachableSet = (): Set<number> => {
+    const seen = new Set<number>(ringNodes);
+    const queue = [...ringNodes];
+    while (queue.length) {
+      const n = queue.pop() as number;
+      for (const step of neighbours[n] as readonly LatticeNeighbour[]) {
+        if (seen.has(step.to)) continue;
+        seen.add(step.to);
+        queue.push(step.to);
+      }
+    }
+    return seen;
+  };
+  // Kept as its own early-exiting flood: it is asked once per rung of every
+  // gate ladder, where the answer is usually yes and usually close.
   const ringReaches = (node: number): boolean => {
     const seen = new Set<number>(ringNodes);
     const queue = [...ringNodes];
@@ -3641,6 +3656,115 @@ function* pathGridSearch(): Generator<number, PathGrid, void> {
     for (const rung of rungs) {
       joinToGrid(node, handover, false, rung.relax, null, rung.exempt);
       if (ringReaches(node)) break;
+    }
+    // **Last rung of all: walk to the nearest node the ring CAN reach.**
+    //
+    // Every rung above offers the handover a *terminal connector* — a short
+    // leg to a lattice node in its own cell's shells. That asks "is there a
+    // crossroads near the gate?", and on a seed whose gate stands outside the
+    // railway loop the honest answer can be "yes, and it is on an island".
+    //
+    // Measured, 3 Sep 2026, seed 5 (`scripts/tmp-gate.mts`,
+    // `scripts/tmp-gateisland.mts`, `scripts/tmp-edgewhy.mts`,
+    // `scripts/tmp-whichsite.mts`; control: canonical, whose gate-approach is
+    // in the park's single paving component):
+    //
+    //   - the gate stands OUTSIDE the loop (`gateSide=-1`, `centreSide=1`);
+    //   - all three mouths report `links: 6, reachableFromRing: false`, every
+    //     rung landing on the same two targets;
+    //   - the gate's whole grid component is FIVE nodes — (-6.9,57.3),
+    //     (5.1,57.3) and its own three handovers — against ring components of
+    //     81, 11 and 2;
+    //   - the outer row is severed by ONE clause of `edgeOk`,
+    //     `segmentCutsABridgeRamp`, and by ONE site of four: railDistance 12
+    //     at (11.8, 40.9), whose reservation runs up the outside of the loop;
+    //   - `nearestReachable` is 19.1–21.1 m away at (18.4, 59.1) — **that
+    //     site's own outer bridge foot**, which the corridor is already
+    //     walking toward.
+    //
+    // The result was `gate-approach` drawn as a ribbon touching no other
+    // paving in the park: two paving components on seed 5, one of them the
+    // front gate on its own. A park whose front door is paved to nothing is
+    // worse than a long connector, and `noPathEndsNowhere` reported it as an
+    // orphaned path end 12.44 m from anything.
+    //
+    // So this rung stops asking for a crossroads and asks the question the
+    // caller has: **reach paving the ring can reach**, by an axis-aligned walk
+    // on the grid's own lines — `relayPolyline`, the same rescue router the
+    // `!best` fallback below already uses, held to the handover's own side of
+    // the track so it cannot hop the railway. Nearest target first, and the
+    // first walk that exists wins.
+    //
+    // It is deliberately last. A handover that can reach the ring through
+    // ordinary connectors keeps them: this only ever runs when six screened
+    // rungs have all failed, exactly as the own-site exemption above does.
+    if (!ringReaches(node)) {
+      // Each `relayPolyline` below is a whole grid search, and this block can
+      // run several; `boot/parkGeneration.ts` holds this generator to an 8 ms
+      // slice, so give the slicer a boundary before starting.
+      yield mouth[1];
+      const reachable = ringReachableSet();
+      const side = railInfoAt(handover[0], handover[1]).side;
+      const targets = [...reachable]
+        .filter((n) => railInfoAt(xs[n] as number, zs[n] as number).side === side)
+        .map((n) => ({
+          n,
+          d: Math.hypot((xs[n] as number) - handover[0], (zs[n] as number) - handover[1]),
+        }))
+        .sort((a, b) => a.d - b.d);
+      // **A budget, not a threshold.** `relayPolyline` decides for itself
+      // whether two points are too far apart to be its job (its own
+      // `w * h > 16384` guard); this only bounds how many it is asked, because
+      // each call is a grid search and `boot/parkGeneration.ts` holds this
+      // generator to an 8 ms slice. Nearest-first, so the ones it skips are
+      // strictly worse than the ones it tried.
+      const ATTEMPTS = 6;
+      const shortlist = targets.slice(0, ATTEMPTS);
+      // **And the walk gets the same exemption ladder everything else here
+      // has: fully screened over every target FIRST, and only then one pass
+      // per site with that site's reservation exempted, by identity.**
+      //
+      // Measured on seed 5 (`scripts/tmp-gaterelay.mts`, whose `none` row is
+      // the control — the router does find a walk, so a refusal below it is a
+      // clause and not the search):
+      //
+      //   all (street + railSide + ramp)   NO WALK
+      //   withoutRamp                      4 points, 28.7 m
+      //   exempt railD=12                  4 points, 28.7 m   <- the only one
+      //   exempt railD=150 / 308 / 332     NO WALK
+      //   none                             4 points, 28.7 m
+      //
+      // The same site that severs the lattice row the gate stands on is the
+      // one obstructing its rescue, and exempting any other changes nothing —
+      // so this is a backtrack round one identified reservation, not a
+      // loosened screen. Screened-first ordering is what keeps it that way:
+      // a gate that can be served on clear ground never reaches this tier.
+      const exemptions: readonly (CrossingSite | null)[] = [null, ...CROSSING_SITES];
+      let joined = false;
+      for (const exempt of exemptions) {
+        for (const target of shortlist) {
+          const to = [xs[target.n] as number, zs[target.n] as number] as const;
+          const walk = relayPolyline(
+            handover,
+            to,
+            (ax, az, bx, bz) =>
+              streetSegmentClear(ax, az, bx, bz, handover, 7, 2.0) &&
+              segmentHoldsRailSide(ax, az, bx, bz, side, 0) &&
+              !segmentCutsABridgeRamp(ax, az, bx, bz, exempt),
+          );
+          if (!walk || walk.length < 2) continue;
+          link(
+            node,
+            target.n,
+            polylineLength(walk) * STUB_COST_FACTOR,
+            CONNECTOR_DIR,
+            walk.slice(1, -1),
+          );
+          joined = true;
+          break;
+        }
+        if (joined) break;
+      }
     }
     gateNodes.push({ mouth, node });
   }
@@ -6960,5 +7084,42 @@ export function debugEdgeWhy(
     slide: slideEdgeAllowed(ax, az, bx, bz),
     cruiser: cruiserCorridorOverlap(ax, az, bx, bz),
     ramp: !segmentCutsABridgeRamp(ax, az, bx, bz),
+  };
+}
+
+/** TEMP diagnostic: the gate handover's rescue walk, under the full screen and
+ * with each clause dropped in turn — which one refuses it, if any. Same call
+ * `pathGridSearch`'s last gate rung makes, same arguments. */
+export function debugGateRelay(
+  from: readonly [number, number],
+  to: readonly [number, number],
+): Record<string, string> {
+  const side = railInfoAt(from[0], from[1]).side;
+  const street = (ax: number, az: number, bx: number, bz: number): boolean =>
+    streetSegmentClear(ax, az, bx, bz, from, 7, 2.0);
+  const rail = (ax: number, az: number, bx: number, bz: number): boolean =>
+    segmentHoldsRailSide(ax, az, bx, bz, side, 0);
+  const ramp = (ax: number, az: number, bx: number, bz: number): boolean =>
+    !segmentCutsABridgeRamp(ax, az, bx, bz);
+  const run = (f: (ax: number, az: number, bx: number, bz: number) => boolean): string => {
+    const walk = relayPolyline(from, to, f);
+    return walk ? `${walk.length} points, ${polylineLength(walk).toFixed(1)} m` : 'NO WALK';
+  };
+  const out: Record<string, string> = {};
+  for (const site of CROSSING_SITES) {
+    out[`exempt railD=${site.railDistance.toFixed(0)}`] = run(
+      (a, b, c, d) =>
+        street(a, b, c, d) &&
+        rail(a, b, c, d) &&
+        !segmentCutsABridgeRamp(a, b, c, d, site),
+    );
+  }
+  return {
+    ...out,
+    all: run((a, b, c, d) => street(a, b, c, d) && rail(a, b, c, d) && ramp(a, b, c, d)),
+    withoutRamp: run((a, b, c, d) => street(a, b, c, d) && rail(a, b, c, d)),
+    withoutStreet: run((a, b, c, d) => rail(a, b, c, d) && ramp(a, b, c, d)),
+    withoutRailSide: run((a, b, c, d) => street(a, b, c, d) && ramp(a, b, c, d)),
+    none: run(() => true),
   };
 }
