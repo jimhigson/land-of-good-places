@@ -6,12 +6,20 @@ import { debugLegScreens } from '../src/world/paths.ts';
 quietly(() => buildHeadlessPark());
 const [ax, az, bx, bz] = process.argv.slice(2, 6).map(Number) as [number, number, number, number];
 for (const off of [0, 6, -6, 4, -4, 3, -3, 2, -2, 1.5, -1.5]) {
-  const shape: [number, number][] = [
-    [ax, az],
-    [ax, az + off],
-    [bx, bz + off],
-    [bx, bz],
-  ];
+  const across = Math.abs(bx - ax) > Math.abs(bz - az);
+  const shape: [number, number][] = across
+    ? [
+        [ax, az],
+        [ax, az + off],
+        [bx, bz + off],
+        [bx, bz],
+      ]
+    : [
+        [ax, az],
+        [ax + off, az],
+        [bx + off, bz],
+        [bx, bz],
+      ];
   const verdicts = [];
   let ok = true;
   for (let i = 1; i < shape.length; i += 1) {
