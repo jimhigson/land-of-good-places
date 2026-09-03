@@ -2255,3 +2255,112 @@ The remaining hypothesis, untested: the elbow at
 then prefers over better routes. Worth trying **the other corner** (the elbow
 has two, and the code takes the cheaper) and, if that fails, pricing a rescued
 tap above a straight one so it is used only when nothing else serves.
+
+---
+
+## State — 3 Sep, ninth leg: the two-decks failure is TWO false positives, not one defect
+
+**Baseline confirmed at `df7ecac4`, all sixteen seeds** (`scripts/tmp-sweep.sh`):
+10 green, 13 stranded — canonical, 5, 115, 128, 131, 208, 274, 346, 428, 451
+green; 11 (3), 24 (2), 225 (2), 267 (3), 288 (2), 326 (1).
+
+### The brief's premise is refuted: seeds 5 and 288 are not one defect, and neither is a defect
+
+`scripts/tmp-twodecks.mts` attributes every deck found in a site's sweep to the
+bridge that built it and to *that* bridge's own site.
+
+```
+seed 5   site railD=0 at (0.0, 36.0)  screen=5.50  worstFace[±14]=14.87  FAILS TODAY
+           foreignDeckInsideReservation=FALSE
+  bridge#0 across[±14] [-1.30, 1.30]  INSIDE RESERVATION: [-1.30, 1.30]  OWN
+  bridge#3 across[±14] [13.60, 13.95] INSIDE RESERVATION: none           FOREIGN
+           (its site railD=246 at -27.5,25.0;
+            planner-rects overlap=false, reservation-rects overlap=FALSE)
+  control 1 (frame): own bridge centred at across 0.00 — frame ok
+```
+
+**Seed 5 carries no defect at all.** The foreign deck is bridge #3, standing on
+its own site 29 m away; it is at `across` 13.60–13.95, entirely **outside** site
+0's 5.50 m reservation, and the two reservation rectangles provably do not
+overlap. All four of seed 5's bridges are centred on their own sites at
+`across` 0.00 and reach outer faces of 2.22 / 2.22 / 2.02 / 2.12 against
+screens of 5.50 / 4.50 / 5.50 / 4.50.
+
+**The cause is the invariant's own sweep.** `builtMasonryStaysInsideItsReservation`
+runs `across` from **−14 to +14 whatever the reservation's half-width is**, so it
+sees any bridge within 14 m of a site's strip and then prosecutes that bridge
+against *this* site's band. Two bridges 29 m apart with disjoint reservations
+therefore convict each other. It is a verdict about ground it is not describing.
+
+```
+seed 288 site railD=152 at (-18.9, -56.4)  screen=5.50  worstFace[±14]=14.92  FAILS TODAY
+           foreignDeckInsideReservation=true
+  bridge#0 across[±14] [-14.00, -5.20]  INSIDE RESERVATION: [-5.50, -5.20]  FOREIGN
+           (its site railD=0 at -2.0,-34.0;
+            planner-rects overlap=false, reservation-rects overlap=TRUE)
+```
+
+Seed 288 *is* the documented `footprintsOverlap` gap — reservation rectangles
+overlap, planner rectangles do not — but the trespass is **0.30 m** of deck
+(`across` −5.50 to −5.20), not the 14.92 m the failure message quotes, and the
+next measurement shows it harms nothing.
+
+### The property the invariant is FOR holds on every seed measured
+
+`scripts/tmp-stoneground.mts` asks the question directly, of the one owner:
+every deck sample of every built bridge, against `pointStandsOnABridgeRamp`
+(the boolean face of `bridgeSiteReserving`, which honours
+`releasedCrossingSites`). Both controls discriminate — a bridge's own centre
+reports screened, a point 400 m outside the park reports open.
+
+```
+seed 5         4 bridges, 1265 / 1537 / 1298 / 1101 deck samples, 0 on OPEN ground
+seed 288       1 bridge,  1555 deck samples, 0 on OPEN ground
+seed canonical 4 bridges, 1285 / 1534 / 1011 / 1191 deck samples, 0 on OPEN ground
+```
+
+**Not one square metre of built masonry stands on ground a ribbon was allowed
+onto.** That is the whole point of the invariant, and it is satisfied.
+
+### Why seed 288's 0.30 m trespass is not a defect either
+
+The same run prints the release state, and it settles it:
+
+```
+seed 288  site railD=0   at (-2.0, -34.0)  -- its own centre is SCREENED
+          site railD=152 at (-18.9, -56.4) -- its own centre is RELEASED (open ground)
+```
+
+Site 152 **has no bridge of its own and the two-pass released its rectangle**,
+so it is not reserved ground: there is nothing for a neighbour to trespass in.
+And the neighbour's stone is itself screened — every sample of bridge #0 lies
+inside site 0's own (screened) reservation. Nothing can be drawn there, and
+nothing walks into it.
+
+Note this contradicts, on today's park, the note at `paths.ts` ~4786: *"seed 288
+... has no bridge of its own, but a neighbouring bridge's deck stands inside its
+rectangle. Releasing by deck presence would un-screen that neighbour's real
+stone."* The neighbour's stone is un-screened by nothing, because site 0 screens
+all of it. The reasoning holds in general; it is not load-bearing here.
+
+### What is therefore owed
+
+The invariant must be rewritten to ask the reservation's real questions, and
+this is a **strengthening plus a correction**, not a relaxation:
+
+1. **own masonry stays in** — sweep each site's *own* bridge, `across`
+   unbounded, and require its outer face within that site's `screenHalfAcross`.
+   (Unchanged in intent; it stops being confounded by neighbours.)
+2. **no masonry on open ground** — every deck sample of every built bridge must
+   satisfy `pointStandsOnABridgeRamp`. This is strictly stronger than the old
+   direction 2: the old form could only fire when a neighbour pushed the
+   per-site maximum past the band, and was blind to stone on genuinely
+   unreserved ground anywhere else.
+
+Both must be proved red by mutation, with the geometry they were proved against
+recorded beside the transcript.
+
+**Do not "fix" seeds 5 and 288 by touching `footprintsOverlap`.** Widening it to
+the reservation is already on the refuted list (288 loses a bridge,
+`route.unreachable: 2`), and on this measurement there is nothing in either
+park for it to fix.
