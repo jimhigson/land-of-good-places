@@ -3805,3 +3805,73 @@ the next agent does not re-derive the snap idea. No behaviour change.
 
 **For the PR body:** *a price large enough to dominate that changes nothing
 tells you the leg is drawn somewhere you are not looking.*
+
+## 225's PRODUCER IDENTIFIED — and it refutes my own inference from the leg before
+
+The Overseer made this a prerequisite on the strength of my inference that a
+price of 15.9 changing nothing meant the leg "is not produced by
+`computeGridConnectors`". **That inference is wrong. Measured, and recorded as
+wrong rather than quietly dropped.**
+
+`scripts/tmp-225prod.mts`, seed 225, the building's door at (40.3, 13.6).
+`debugNodeEdges` prints its connectors — **all three of them, every one via the
+same point**:
+
+```
+-> 37.428,19.119  cost 12.71  via (37.021,12.466)
+-> 25.428, 7.119  cost 20.33  via (37.021,12.466)
+-> 25.428,19.119  cost 27.18  via (37.021,12.466) (37.021,19.119)
+```
+
+`(37.021, 12.466)` is the door's arrival lead, at exactly
+{@link ARRIVAL_LEAD_REACH} along its outward ray. The middle connector is
+therefore `straightToLead` — `[node (25.428,7.119), lead, door]` — and
+`debugDoorReach` gives that node `direct = 16.2`, **the invariant's reported
+16.2 m to the decimal**.
+
+**So the producer is `computeGridConnectors`, rung 2 of the arrival ladder,
+exactly like seed 131's.** There is no unidentified second producer here. The
+file's long-standing warning was right that fixes kept missing 225, and wrong
+about why — and my "drawn somewhere you are not looking" line does **not**
+apply to this leg. Strike it from the PR body.
+
+**The price did not fail for want of an alternative, either.** The door has a
+clean near connector at `37.4,19.1` — `ok=Y clear=Y`, every elbow flag true,
+cost 12.71 against the diagonal's 20.33. A cheaper, fully axis-aligned option
+was on offer the whole time and the search still took the far node, so the
+deciding term is **total path cost to the node**, not the connector. That is
+the same node-versus-node effect seed 128 showed, pushing the other way.
+
+### The real anomaly, and it is NOT the one anybody has been chasing
+
+**The identical geometry is drawn in the kept state and is legal there.** In
+the kept state the same three points are carried by `connector-building-ballPit`:
+
+```
+kept        connector-building-ballPit
+            (40.3,13.6) (37.0,12.5) (25.4,7.1) (23.7,2.2) (27.2,2.5)
+both-prices connector-building-exit-ginormousSlide  -> pathsRunOnGridAxes FAILS
+            "runs diagonally for 16.2 m, from 40.3, 13.6 to 25.7, 6.6"
+```
+
+Same door, same lead, same node, same diagonal — and `pathsRunOnGridAxes` does
+not fire on it in the kept state. What changed under the prices is **which
+interconnect consumes the connector**, not the shape of the connector.
+
+**So the question to answer next is not "who draws it" — that is settled — but
+"why is one carrier of this run judged and the other not".** Look at
+`pathsRunOnGridAxes`'s run-merging and its `DOOR_APPROACH_REACH` (15 m)
+exemption: a run that ends at a door is treated as a doorway approach, and
+whether this run's end IS the door depends on which edge carries it and in
+which direction. If that is what is happening, then the invariant is
+**carrier-dependent** — it would pass and fail the same drawn metres depending
+on which route object owns them, which is a defect in the invariant of exactly
+the kind CLAUDE.md warns about ("a check that passes without checking
+anything"), and it would mean seed 225 has been misdescribed for three legs.
+
+**UNMEASURED. Recorded as the next step and as a suspicion, not a result** —
+the exemption's exact condition has not been read, and I am not asserting it.
+
+**For the PR body, replacing the struck line:** *the same drawn metres passing
+under one route name and failing under another is a property of the check, not
+of the park.*
