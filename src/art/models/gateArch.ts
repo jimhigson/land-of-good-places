@@ -417,10 +417,23 @@ function gateArchLogoTexture(): CanvasTexture {
   }
 
   const hubX = half;
-  const hubY = half * 0.94;
-  const wheelR = size * 0.225;
-  const footY = half * 1.66;
+  const hubY = half * 0.90;
+  const wheelR = size * 0.285;
+  const footY = half * 1.62;
   const lineInk = size * 0.014;
+
+  /** The ride's own twelve cars, in the ride's own six colours. */
+  const carColours = [
+    PALETTE.markerPink,
+    PALETTE.markerLemon,
+    PALETTE.markerMint,
+    PALETTE.markerSky,
+    PALETTE.markerLilac,
+    PALETTE.blossomWhite,
+  ];
+  const cars = 12;
+  const carW = size * 0.068;
+  const carH = size * 0.056;
 
   // --- legs, drawn first so the wheel stands in front of them ---------------
   ctx.lineJoin = 'round';
@@ -456,41 +469,6 @@ function gateArchLogoTexture(): CanvasTexture {
     ctx.stroke();
   }
 
-  // --- gondolas, hanging from the rim --------------------------------------
-  const carColours = [
-    PALETTE.markerPink,
-    PALETTE.markerLemon,
-    PALETTE.markerMint,
-    PALETTE.markerSky,
-    PALETTE.markerLilac,
-    PALETTE.blossomWhite,
-  ];
-  const cars = 12;
-  const carW = size * 0.068;
-  const carH = size * 0.056;
-  for (let i = 0; i < cars; i += 1) {
-    const a = -Math.PI / 2 + (i * TAU) / cars;
-    const rx = hubX + Math.cos(a) * wheelR;
-    const ry = hubY + Math.sin(a) * wheelR;
-    // Every car hangs level, whatever the rim is doing — which is the one
-    // thing a ferris wheel drawing has to get right, and the same reason the
-    // real ride re-poses its gondolas every frame.
-    const top = ry + size * 0.016;
-    roundedRect(ctx, rx - carW / 2, top, carW, carH, size * 0.018);
-    ctx.fillStyle = hexToCss(carColours[i % carColours.length] as number);
-    ctx.fill();
-    ctx.strokeStyle = ink;
-    ctx.lineWidth = lineInk;
-    ctx.stroke();
-    // The hanger, a short bar up to the rim.
-    ctx.beginPath();
-    ctx.moveTo(rx, ry);
-    ctx.lineTo(rx, top);
-    ctx.strokeStyle = ink;
-    ctx.lineWidth = size * 0.011;
-    ctx.stroke();
-  }
-
   // --- spokes ---------------------------------------------------------------
   for (let i = 0; i < cars; i += 1) {
     const a = -Math.PI / 2 + (i * TAU) / cars;
@@ -511,6 +489,9 @@ function gateArchLogoTexture(): CanvasTexture {
   }
 
   // --- the rim: two rings, the way the ride carries two --------------------
+  // Drawn *before* the gondolas below, so the cars hang in front of it the way
+  // they do on the ride. Drawn after and they are half-eaten by their own rim,
+  // which is what the first version of this looked like.
   for (const r of [wheelR, wheelR - size * 0.030]) {
     ctx.beginPath();
     ctx.arc(hubX, hubY, r, 0, TAU);
@@ -521,6 +502,30 @@ function gateArchLogoTexture(): CanvasTexture {
     ctx.arc(hubX, hubY, r, 0, TAU);
     ctx.strokeStyle = hexToCss(PALETTE.stonePink);
     ctx.lineWidth = size * 0.022;
+    ctx.stroke();
+  }
+
+  // --- gondolas, drawn last so they hang in front of the rim ---------------
+  for (let i = 0; i < cars; i += 1) {
+    const a = -Math.PI / 2 + (i * TAU) / cars;
+    const rx = hubX + Math.cos(a) * wheelR;
+    const ry = hubY + Math.sin(a) * wheelR;
+    // Every car hangs level, whatever the rim is doing — which is the one
+    // thing a ferris wheel drawing has to get right, and the same reason the
+    // real ride re-poses its gondolas every frame.
+    const top = ry + size * 0.030;
+    roundedRect(ctx, rx - carW / 2, top, carW, carH, size * 0.018);
+    ctx.fillStyle = hexToCss(carColours[i % carColours.length] as number);
+    ctx.fill();
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = lineInk;
+    ctx.stroke();
+    // The hanger, a short bar up to the rim.
+    ctx.beginPath();
+    ctx.moveTo(rx, ry);
+    ctx.lineTo(rx, top);
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = size * 0.011;
     ctx.stroke();
   }
 

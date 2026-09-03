@@ -77,7 +77,7 @@
     "blend:hotel": "blender --background --factory-startup --python-exit-code 1 --python art/blend/hotel_build.py && blender --background --factory-startup --python-exit-code 1 --python art/blend/hotel_export.py && pnpm run pack:hotel",
     "pack:gate-arch": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/pack-gate-arch-asset.mts",
     "blend:gate-arch": "blender --background --factory-startup --python-exit-code 1 --python art/blend/gate_arch_build.py && blender --background --factory-startup --python-exit-code 1 --python art/blend/gate_arch_export.py && pnpm run pack:gate-arch",
-    "render:gate-arch": "blender --background --factory-startup --python-exit-code 1 --python art/blend/gate_arch_render.py",
+    "render:gate-arch": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/render-gate-arch.mts",
     "pack:castle": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/pack-castle-asset.mts",
     "blend:castle": "blender --background --factory-startup --python-exit-code 1 --python art/blend/castle_build.py && blender --background --factory-startup --python-exit-code 1 --python art/blend/castle_export.py && pnpm run pack:castle",
     "render:castle": "blender --background --factory-startup --python-exit-code 1 --python art/blend/castle_render.py",

@@ -136,10 +136,10 @@ BAND_TOP = ARC_CENTRE_Z + EXTRADOS_R
 # (ART_DIRECTION §4).
 
 BOBBLES = 9
-BOBBLE_R = 0.20
+BOBBLE_R = 0.23
 #: How far the ball's centre sits outside the extrados. Sunk in, so each one
 #: reads as growing out of the stone rather than balanced on it.
-BOBBLE_SINK = 0.11
+BOBBLE_SINK = 0.07
 #: Fraction of the visible arc the run of bobbles spans.
 BOBBLE_SPREAD = 0.78
 
@@ -190,7 +190,7 @@ MEDALLION_RIM_R = 1.00
 MEDALLION_HALF_D = 0.13
 #: How far the roundel's bottom laps down over the collar's top.
 MEDALLION_LAP = 0.12
-MEDALLION_SEGMENTS = 28
+MEDALLION_SEGMENTS = 36
 MEDALLION_CENTRE_Z = BAND_TOP + COLLAR_RISE - MEDALLION_LAP + MEDALLION_RIM_R
 
 
@@ -206,34 +206,43 @@ def revolve_about_z(profile, segments, offset=(0.0, 0.0, 0.0)):
     return [(v[0] + dx, v[1] + dy, v[2] + dz) for v in verts], faces
 
 
-def revolve_about_y(profile, segments):
-    """A surface of revolution about **Blender Y** — a plate facing the player.
+def plate(profile, segments):
+    """A round plate standing on edge in the gateway, facing **−Y**.
 
-    ``blendkit.revolve`` turns about Z, which is up here; a coin standing on
-    edge in the gateway turns about the depth axis instead. The profile is
-    ``(radius, depth)`` pairs, and the radius sweeps X and Z, so the flat face
-    lands squarely in the plane the lettering and the logo are read off.
+    The profile is ``(radius, depth)`` pairs running front to back and **never
+    reaching the axis**: the two flat faces are closed with a single n-gon each,
+    and the rim is quad strips between consecutive rings. Every vertex is shared
+    between the strips that meet at it, so nothing here is a duplicate.
+
+    **``blendkit.revolve`` cannot be used for a painted plate, and this is the
+    trap worth writing down.** Its profile closes on the axis, which leaves a
+    ring of degenerate faces at each pole; ``Part.emit``'s ``remove_doubles``
+    then collapses them, the polygon *indices* shift, and the per-face UV table
+    — which is keyed by index — lands on the wrong polygons. The first render
+    of this roundel showed the ferris wheel smeared into radial wedges, with a
+    mesh, a canvas and a UV layout that were each individually correct.
     """
-    count = len(profile)
-    verts = []
+    rings = []
+    for r, y in profile:
+        rings.append(
+            [
+                (r * math.cos(s * TAU / segments), y, r * math.sin(s * TAU / segments))
+                for s in range(segments)
+            ]
+        )
+    verts = [v for ring in rings for v in ring]
     faces = []
-    for s in range(segments):
-        angle = s * TAU / segments
-        cos_a, sin_a = math.cos(angle), math.sin(angle)
-        for r, y in profile:
-            verts.append((r * cos_a, y, r * sin_a))
-    for s in range(segments):
-        s_next = (s + 1) % segments
-        for p in range(count):
-            p_next = (p + 1) % count
-            faces.append(
-                (
-                    s * count + p,
-                    s * count + p_next,
-                    s_next * count + p_next,
-                    s_next * count + p,
-                )
-            )
+    for p in range(len(rings) - 1):
+        base_a = p * segments
+        base_b = (p + 1) * segments
+        for s in range(segments):
+            t = (s + 1) % segments
+            faces.append((base_a + s, base_a + t, base_b + t, base_b + s))
+    # The two flat faces, as one n-gon each. Convex, so whatever the glTF
+    # exporter triangulates them into keeps the planar UVs exact.
+    faces.append(tuple(range(segments - 1, -1, -1)))
+    last = (len(rings) - 1) * segments
+    faces.append(tuple(range(last, last + segments)))
     return verts, faces
 
 
@@ -275,11 +284,9 @@ def strip_solid(inner, outer, depth):
 def rounded_plank(half_width, bottom, height, depth, radius, segments=4):
     """The sign plank: a rectangle in XZ with rounded ends, extruded through Y.
 
-    Returns ``(verts, faces, front_face_indices, back_face_indices)`` so the
-    caller can hand the two flat faces their own UVs — the front reading
-    left-to-right for a child walking up to the gate, the back reading
-    left-to-right for one walking out of the park. One texture, two faces, no
-    second mesh (``src/art/models/CLAUDE.md``).
+    The two flat faces are what the lettering is painted across, front and
+    back, from the one canvas — see :func:`paint_planar_uvs`. One texture, two
+    faces, no second mesh (``src/art/models/CLAUDE.md``).
     """
     z0, z1 = bottom, bottom + height
     outline = []
@@ -299,30 +306,48 @@ def rounded_plank(half_width, bottom, height, depth, radius, segments=4):
     for i in range(count):
         j = (i + 1) % count
         faces.append((i, j, count + j, count + i))
-    front = tuple(range(count))
-    back = tuple(range(2 * count - 1, count - 1, -1))
-    faces.append(front)
-    faces.append(back)
-    return verts, faces, len(faces) - 2, len(faces) - 1
+    faces.append(tuple(range(count)))
+    faces.append(tuple(range(2 * count - 1, count - 1, -1)))
+    return verts, faces
 
 
-def face_uvs(verts, face, lo_x, hi_x, lo_z, hi_z, mirror):
-    """Planar UVs for one flat face, in the part's own XZ bounds.
+def paint_planar_uvs(obj, lo_x, hi_x, lo_z, hi_z):
+    """Give an emitted object planar UVs **computed from where its vertices are**.
 
-    ``mirror`` flips ``u``. It is the whole of getting a painted word the right
-    way round, and it is not guessable from the vertex data: the game's +Z is
-    Blender's −Y, so a viewer standing in front of this arch has the model's
-    **+X on her left**. The front face therefore runs ``u`` from +X to −X and
-    the back face runs it the other way, and both read correctly.
+    Applied after :meth:`blendkit.Part.emit` rather than handed to it, and that
+    is not a style choice. ``Part.emit`` takes a per-face UV table keyed by the
+    index a face had *before* ``mesh.validate`` and ``remove_doubles`` ran, and
+    those reorder: the roundel's two flat n-gon caps came out wearing the rim
+    strip's coordinates, so the ferris wheel smeared into radial wedges while
+    the mesh, the canvas and the UV layout were each individually correct. A
+    UV that is a function of position cannot be given to the wrong face.
+
+    Two axes, and both are inverted from the arithmetic that looks obvious.
+    The first render came back with the words rotated 180°, which is both at
+    once:
+
+    * ``u``. A child standing in front of this arch looks down the game's −Z
+      with +Y up, so the model's **+X is on her right** and text has to run with
+      ``x``. The face behind the board is read from the other side, and its
+      ``u`` runs the other way — decided here from the face's own normal, so a
+      part cannot be told which of its faces is the front and be told wrong.
+    * ``v``. **Blender's glTF exporter writes ``1 − v``**, because glTF puts its
+      texture origin at the top left and Blender puts it at the bottom left. So
+      a ``v`` authored here climbing with height arrives in the game climbing
+      *downward*, and the board ships upside down. ``(hi_z − z)`` cancels it.
     """
+    mesh = obj.data
     width = max(hi_x - lo_x, 1e-6)
     height = max(hi_z - lo_z, 1e-6)
-    out = []
-    for i in face:
-        x, _, z = verts[i]
-        u = (hi_x - x) / width if not mirror else (x - lo_x) / width
-        out.append((u, (z - lo_z) / height))
-    return out
+    layer = mesh.uv_layers.new(name="UVMap")
+    for poly in mesh.polygons:
+        # A face pointing into the park is read from the far side, so its `u`
+        # runs the other way and the words are the right way round from both.
+        mirror = poly.normal.y > 1e-6
+        for loop_index in poly.loop_indices:
+            co = mesh.vertices[mesh.loops[loop_index].vertex_index].co
+            u = (co.x - lo_x) / width if not mirror else (hi_x - co.x) / width
+            layer.data[loop_index].uv = (u, (hi_z - co.z) / height)
 
 
 # =============================================================================
@@ -420,64 +445,42 @@ def build_bobbles(coll):
 
 def build_sign(coll):
     """The lettered plank. Carries the arch's own UVs — see the module docstring."""
-    verts, faces, front, back = rounded_plank(
+    verts, faces = rounded_plank(
         SIGN_HALF_WIDTH, SIGN_BOTTOM, SIGN_HEIGHT, SIGN_DEPTH, SIGN_ROUND
     )
-    lo_x, hi_x = -SIGN_HALF_WIDTH, SIGN_HALF_WIDTH
-    lo_z, hi_z = SIGN_BOTTOM, SIGN_TOP
-    uvs = []
-    for index, face in enumerate(faces):
-        if index == front:
-            uvs.append(face_uvs(verts, face, lo_x, hi_x, lo_z, hi_z, mirror=False))
-        elif index == back:
-            uvs.append(face_uvs(verts, face, lo_x, hi_x, lo_z, hi_z, mirror=True))
-        else:
-            # The rounded edge. Takes the silhouette's own UVs, so the painted
-            # border wraps round the end of the plank the way paint does.
-            uvs.append(face_uvs(verts, face, lo_x, hi_x, lo_z, hi_z, mirror=False))
     part = Part("gate-arch-sign")
-    part.add(verts, faces, uvs=uvs)
-    # Not smoothed: a plank with a hard front face is what the lettering wants,
-    # and a smoothed rounded end would drag the toon ramp across the words.
-    return part.emit(coll, sharp_deg=30.0)
+    part.add(verts, faces)
+    # Not smoothed hard: a plank with a crisp front face is what the lettering
+    # wants, and a smoothed rounded end would drag the toon ramp across the
+    # words.
+    obj = part.emit(coll, sharp_deg=30.0)
+    paint_planar_uvs(obj, -SIGN_HALF_WIDTH, SIGN_HALF_WIDTH, SIGN_BOTTOM, SIGN_TOP)
+    return obj
 
 
 def build_medallion(coll):
     """The ferris-wheel roundel: a raised-rim coin, painted in its own UV space."""
     profile = [
-        (0.0, -MEDALLION_HALF_D),
         (MEDALLION_R, -MEDALLION_HALF_D),
         (MEDALLION_R + 0.06, -MEDALLION_HALF_D + 0.04),
         (MEDALLION_RIM_R, -MEDALLION_HALF_D + 0.09),
         (MEDALLION_RIM_R, MEDALLION_HALF_D - 0.09),
         (MEDALLION_R + 0.06, MEDALLION_HALF_D - 0.04),
         (MEDALLION_R, MEDALLION_HALF_D),
-        (0.0, MEDALLION_HALF_D),
     ]
-    verts, faces = revolve_about_y(profile, MEDALLION_SEGMENTS)
+    verts, faces = plate(profile, MEDALLION_SEGMENTS)
     verts = [(x, y, z + MEDALLION_CENTRE_Z) for x, y, z in verts]
-    lo_x, hi_x = -MEDALLION_RIM_R, MEDALLION_RIM_R
-    lo_z = MEDALLION_CENTRE_Z - MEDALLION_RIM_R
-    hi_z = MEDALLION_CENTRE_Z + MEDALLION_RIM_R
-    uvs = [
-        face_uvs(
-            verts,
-            face,
-            lo_x,
-            hi_x,
-            lo_z,
-            hi_z,
-            # A face on the far side of the plate is read from behind, so it
-            # wants the mirrored map. The wheel is left-right symmetric, so
-            # this changes nothing visible — it is here so the rule is the same
-            # one everywhere and the next painted thing inherits it.
-            mirror=sum(verts[i][1] for i in face) / len(face) > 0.0,
-        )
-        for face in faces
-    ]
     part = Part("gate-arch-medallion")
-    part.add(verts, faces, uvs=uvs)
-    return part.emit(coll)
+    part.add(verts, faces)
+    obj = part.emit(coll)
+    paint_planar_uvs(
+        obj,
+        -MEDALLION_RIM_R,
+        MEDALLION_RIM_R,
+        MEDALLION_CENTRE_Z - MEDALLION_RIM_R,
+        MEDALLION_CENTRE_Z + MEDALLION_RIM_R,
+    )
+    return obj
 
 
 # =============================================================================
