@@ -5017,3 +5017,76 @@ re-searched vectors; 115 stayed green). So this branch's path code meets two
 parks it has never seen, and fails on both. That is not an excuse — the code
 should build a park on any seed — but it is the honest scope: **nothing
 regressed on a park that was already being measured.**
+
+### 326's fix, specified against the code — and TWO constraints that make the obvious version wrong
+
+The defect is at `paths.ts:3482-3484`, the bridge-foot join ladder:
+
+```ts
+if (joinToGrid(node, foot, false) > 0) continue;              // screened
+if (joinToGrid(node, foot, false, 1) > 0) continue;           // wider shells
+if (joinToGrid(node, foot, false, 0, null, site) > 0) continue; // own site exempt
+```
+
+**`> 0` is "a link was made".** That is the count-of-links rung the gate join
+was rebuilt to abandon. The gate's replacement is right there at
+`paths.ts:3557`, `ringReaches(node)`, with a doc comment naming the exact
+failure this seed now shows.
+
+**Constraint 1 — `ringReaches` is the WRONG test for a bridge foot, by
+construction.** The far foot is on the other side of the railway; it is
+*supposed* to be unreachable from the ring until the deck edge joins it. Copying
+the gate's predicate verbatim would make the far rung never satisfiable, and the
+ladder would run to its end on every bridge on every seed — the exemption rung
+firing everywhere, which is precisely the regression measured on 2 Sep (seed 11
+went 2 -> 22 stranded, seed 208 0 -> 3). **The predicate has to be side-local:**
+does this foot reach the largest component *on its own side of the rail*,
+flooding **without** the deck edge so the two sides are measured apart.
+
+That is also what the data says the bug is. On 326 both feet read
+`reachable: false`, and foot 0 has `links: 1` — its one link lands in a
+singleton or in component 4's pocket, not in the ring's 97-node component 0.
+The question to ask is not "is there a link" but "is the link worth anything".
+
+**Constraint 2 — the rungs ACCUMULATE, so "climb and keep the best" is not
+available.** `joinToGrid` *adds* edges; nothing removes them. The current
+`continue`-on-first-success exists to stop a later rung's worse links being
+added on top — and the recorded reason is specific: connectors are cost-sorted,
+so once the exempt rung's links exist the search will prefer the short way
+*through the reservation*, over the masonry. So the new ladder must still stop
+at the first rung that genuinely works; it just has to judge "works" correctly.
+It may not evaluate all rungs and pick a winner.
+
+**So the fix is a one-line change of predicate plus one helper**, and it keeps
+the ladder's existing shape and order:
+
+```ts
+const sideNetworkReaches = (node: number): boolean => /* flood from node over
+   `neighbours`, SKIPPING DECK_DIR edges; true if it reaches the largest
+   component on this foot's own rail side */;
+
+for (const rung of [screened, wider, exemptOwnSite]) {
+  joinToGrid(node, foot, false, rung.relax, null, rung.exempt);
+  if (sideNetworkReaches(node)) break;
+}
+```
+
+and if **no** rung achieves it, that is a backtrack — a different foot
+placement, a different site, or the seed leaves the pool — **never a route
+drawn over the rail.** Note the standing rule as it now reads: a level crossing
+is no longer an available fallback at all, so "cannot bridge" must backtrack
+further (`parkWarp.ts`) or the seed goes.
+
+**Not built. I am at the end of my useful context and this is the branch's own
+discipline — stop cleanly rather than start badly.** Everything needed is
+above: the failing line numbers, the working precedent 75 lines below it, the
+two constraints that kill the naive copy, and the measured signature to verify
+against (`feet: [{links:1, reachable:false}, {links:4, reachable:false}]`,
+`components: [[0,97],[4,17],...]`, `doorComp: dodgems:4`).
+
+**Verification, when built:** `LGP_SEED=326 check:park` must lose the line
+*the walk to anchor:dodgems crosses the railway at (49.9, 4.1)*;
+`scripts/tmp-bridges.mts` on 326 must print the proven site in **both** the
+`proven sites` and `crossed` rows (canonical is the control — it prints all
+four in both today); and both columns re-measured, set-diffed, against
+**11 green / 12 stranded** and `test:procgen` `9 failed | 1401 passed`.
