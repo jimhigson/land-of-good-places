@@ -2258,7 +2258,24 @@ function computeGridConnectors(
           if (headOn) continue;
         }
         // Straight connector: shortest, slightly diagonal — fine when short.
-        if (direct <= tailLimit + 2 && legClear(nx, nz, p[0], p[1])) {
+        //
+        // **Its off-axis reach is bounded by the TIGHT tail limit at every
+        // relax level.** Relaxing widens the shells and the elbow's tail
+        // because those are distances the search may spend; this shape is not.
+        // A straight connector is the one connector that draws a *diagonal*,
+        // and a diagonal is a shape Decision 6 keeps a genuine minority — so
+        // doubling its allowance does not buy a longer approach, it buys a
+        // street on its own heading.
+        //
+        // Measured on seed 5, 2 Sep 2026: `spur-stall.keychain` opened
+        // `(7.8,-23.3) -> (-6.9,-14.7)`, a **17.3 m diagonal** straight off a
+        // bridge foot (dx 14.7, dz 8.6 — 30 degrees off axis, not "slightly").
+        // It passed because at relax 1 `tailLimit` is 15.6, so an 8.6 m
+        // off-axis excursion was inside it and `direct` 17.0 was inside
+        // `tailLimit + 2`. `pathsRunOnGridAxes` fired on exactly that run.
+        // With the tight limit the leg is refused and the elbow below is
+        // taken instead, which is axis-aligned by construction.
+        if (tail <= STUB_TAIL_LIMIT && direct <= tailLimit + 2 && legClear(nx, nz, p[0], p[1])) {
           found.push({
             node: index,
             points: [[nx, nz], p],
@@ -2273,6 +2290,18 @@ function computeGridConnectors(
         // own private line, which is exactly the rogue street the grid
         // invariant polices (measured: a 13 m run on x = -70.8, seed 5's
         // rail-race stall, from the wrong corner being tried first).
+        //
+        // **Trying the shorter-tailed corner first was BUILT AND MEASURED here
+        // and reverted: neutral on all sixteen pool seeds and on the whole
+        // invariant suite.** The intent above says the point is to keep the
+        // off-street tail short, and a fixed order does not test that — on seed
+        // 5, connecting the bridge foot (7.8,-23.3) to the node (-6.9,-14.7),
+        // the fixed order takes corner (-6.9,-23.3) with a **14.7 m** tail
+        // while corner (7.8,-14.7) has an **8.6 m** one and is never tried,
+        // because a relaxed pass raises `tailLimit` enough to make the worse
+        // corner legal too. Sorting by tail changed no seed's `poi.stranded`
+        // and no invariant, so it is not kept — but the reasoning is sound and
+        // whoever finds a case where it bites should reach for it first.
         const corners: readonly (readonly [number, number])[] = [
           [nx, p[1]], // long leg north-south on the node's x line
           [p[0], nz], // long leg east-west on the node's z line
