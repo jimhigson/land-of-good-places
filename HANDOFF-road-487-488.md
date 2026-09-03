@@ -678,3 +678,25 @@ engineer**; it is not in the `check` chain, so nothing in CI is red because of i
 - `check:arrival-starts` 1 at 6x, red on `main` too
 - QA: the bus photographed driving in on a grey road, clearing the trestles;
   the intro ride's lane confirmed still sand.
+
+## The spur seam, measured exactly (for whoever fixes it)
+
+Not a convention mismatch — I checked that and was wrong: on seed 326, **0 of 143
+stations** disagree about which side `entranceRoadInnerEdge` and
+`curvedRoadRibbon`'s column 0 call "inner". They are the same edge.
+
+It is purely the straight-edge-meets-curve problem, and here is the size of it:
+
+```
+seed 326
+spur starts at z 65.72                     (entranceRoadInnerEdge(0).z)
+kerb inner edge across the spur's width:   z 63.86 .. 66.71   spread 2.84 m
+```
+
+So the kerb reaches **1.86 m past where the spur begins** at the worst column,
+and the two cover that band in the same plane — 5.202 m², which is that overlap.
+
+The fix has to take the spur's outer row from **the kerb ribbon's own boundary
+vertices** (`curvedRoadRibbon` should return its inner edge ring, and the spur be
+built off that ring), not from a resampling of the station curve. Resampling is
+what I tried and it left the seam while adding a `path-surface` one.
