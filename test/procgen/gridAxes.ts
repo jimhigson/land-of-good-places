@@ -86,16 +86,24 @@ export const OFF_AXIS_FRACTION = 0.15;
  * Writing a second number would be two definitions of one thing kept in step
  * by hand, which is the most common bug in this repo.
  *
- * It is emphatically not tuned to the seed pool. Swept over the sixteen-seed
- * pool afterwards, every tolerance from 5 to 20 degrees gives the identical
- * answer — no piece of ground over {@link MAX_DIAGONAL_APPROACH} anywhere,
- * longest piece 13.69 m, cut-invariant on every seed — so this value sits in
- * the middle of a 15-degree plateau rather than on a cliff. Outside that
- * plateau the measurement starts fabricating: at 30 degrees it welds the two
- * arms of seed 24's junction dogleg into a 21.9 m "diagonal" whose real arms
- * are 12.3 m and 5.5 m, and at 35 it invents two more on seeds 131 and 267.
- * The plateau is corroboration that the derived number is a sane one; it is
+ * It is emphatically not tuned to the seed pool, and the sweep that says so
+ * was re-run after {@link hopDistance} landed rather than quoted from the
+ * version before it — a measurement of superseded code is not a measurement.
+ * Over the sixteen-seed pool, at 2, 4, 6, 8.63, 10, 12, 15 and 20 degrees the
+ * answer is **identical**: no piece of ground over 16 m anywhere, longest
+ * piece 13.69 m, and the re-cut agrees on every seed. So this value sits well
+ * inside an 18-degree plateau rather than on a cliff. Outside it the
+ * measurement starts fabricating — at 25 degrees a 16.8 m piece appears on
+ * seed 5, at 30 the two arms of seed 24's junction dogleg weld into a 21.9 m
+ * "diagonal" whose real arms are 12.3 m and 5.5 m, and at 35 two more arrive
+ * on seeds 131 and 267. The plateau corroborates the derived number; it is
  * not the reason for it.
+ *
+ * Note what the plateau does *not* include: cut-invariance held at **every**
+ * tolerance swept, 2 through 40 degrees. That property comes from asking
+ * about hops rather than about ends, not from this constant, which is how it
+ * should be — a structural property that depended on a tuning value would not
+ * be one.
  */
 const PARALLEL_COS = Math.cos(Math.asin(OFF_AXIS_FRACTION));
 
