@@ -194,6 +194,37 @@ follows the drawn path's own curve. No rigid `.glb` can be that. Anything else
 in the park with the same shape (fence runs, wall coursing, path edging) should
 follow this route rather than inventing a third one.
 
+**Rendering the bridge the game actually builds** (issue #489). The kit is
+three stones; the parapet, the flank coursing and the tunnel are swept at
+runtime by `src/world/train/bridges.ts` and are in no `.blend` at all. So
+`render:bridge` — which assembles a *preview* bridge out of the kit — is
+structurally unable to show a fault in the swept shell, and #489 was exactly
+such a fault: the coursed outer wall face stopped at the road's crown height
+while the parapet stood 1.23 m above it, leaving a band of missing wall over
+the arch that a child could see the railway through.
+
+Two scripts exist so that class of thing can be looked at:
+
+| step | command | what it does |
+|---|---|---|
+| dump | `LGP_SEED=1 pnpm run dump:bridge-shell <bridge-name> <out.obj>` | builds the **real park** (`scripts/park-harness.mts`) and writes one bridge's drawn meshes — `shell`, `wallTop`, `archRing`, `coping` — to OBJ, in the bridge's own frame (+X across, +Z along, centred on the crown). With no arguments it lists that seed's bridges. |
+| render | `pnpm run render:bridge-shell <a.obj> [<b.obj> …]` | `art/blend/bridge_shell_render.py`: imports each OBJ, gives each named part a flat grey, puts a **saturated orange backdrop** behind it and renders four shots to `art/renders/<stem>-{parapet,flank,iso,mouth}.png`. |
+
+The orange is the point: these renders answer "is there a hole", and a hole is
+only obvious when what shows through looks nothing like stone. For how the
+bridge is *meant* to look, use `render:bridge`.
+
+**Neither script contains a bridge dimension.** The dump writes the vertices
+the game draws, and every camera in the render script is derived from the
+imported geometry's own bounding box — so there is nothing here to drift out of
+step with the game the way `bridge_stones_render.py`'s hand-copied constants
+once did. That is the same discipline `ts_const` gives the build script,
+arrived at from the other end: rather than asking the game for its numbers,
+ask it for its geometry.
+
+Renders committed from this: `art/renders/{before,after}-seed{1-72,5-142}-*.png`,
+the #489 hole and the candidate repair, at two different spans on two seeds.
+
 ### 33 — Castle interior, batch 1 (issue #363)
 
 Ten assets, built for the castle-interior Engineer against a written size

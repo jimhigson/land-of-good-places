@@ -71,6 +71,8 @@
     "blend:duckbar": "blender --background --factory-startup --python art/blend/duckbar_export.py && pnpm run pack:duckbar",
     "render:bridge": "blender --background --factory-startup --python-exit-code 1 --python art/blend/bridge_stones_render.py",
     "dump:bridge-constants": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/dump-bridge-constants.mts",
+    "dump:bridge-shell": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs art/blend/bridge_shell_dump.mts",
+    "render:bridge-shell": "blender --background --factory-startup --python-exit-code 1 --python art/blend/bridge_shell_render.py --",
     "pack:bridge-stones": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/pack-bridge-stones-asset.mts",
     "blend:bridge-stones": "blender --background --factory-startup --python-exit-code 1 --python art/blend/bridge_stones_build.py && blender --background --factory-startup --python-exit-code 1 --python art/blend/bridge_stones_export.py && pnpm run pack:bridge-stones",
     "pack:hotel": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/pack-hotel-asset.mts",
