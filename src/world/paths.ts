@@ -3471,9 +3471,19 @@ function* gateApproachSearch(
         !segmentCutsABridgeRamp(ax, az, bx, bz),
     );
     return {
-      points: walk
-        ? assembleGateApproach(mouth, walk)
-        : [[0, GATE_CORRIDOR_START_Z] as readonly [number, number], mouth],
+      points: trimBacktracks(
+        walk
+          ? assembleGateApproach(mouth, walk)
+          : [
+              [0, GATE_CORRIDOR_START_Z] as readonly [number, number],
+              // A mouth that never left the arch leaves no corridor to draw, so
+              // the avenue is one short step in — enough to be a curve, and
+              // honest about how little of it solved.
+              mouth[1] < GATE_CORRIDOR_START_Z - 1e-6
+                ? mouth
+                : ([0, GATE_CORRIDOR_START_Z - 2] as readonly [number, number]),
+            ],
+      ),
       progress,
     };
   }
@@ -3894,7 +3904,17 @@ const ABOUT_TURN_COSINE_DRAWN = Math.cos((150 * Math.PI) / 180);
 function trimBacktracks(
   points: readonly (readonly [number, number])[],
 ): (readonly [number, number])[] {
-  const out = points.map((point) => [point[0], point[1]] as readonly [number, number]);
+  // Repeats first: a zero-length hop has no direction, and every consumer
+  // downstream takes directions off this list. A route that collapses to a
+  // single point is one `CatmullRomCurve3` cannot curve at all — seed 5 crashed
+  // the park build in `poiGraph`'s own sampler when the gate corridor's mouth
+  // came out equal to its start.
+  const out: (readonly [number, number])[] = [];
+  for (const point of points) {
+    const last = out[out.length - 1];
+    if (last && Math.hypot(last[0] - point[0], last[1] - point[1]) < 1e-6) continue;
+    out.push([point[0], point[1]] as readonly [number, number]);
+  }
   for (let pass = 0; pass < out.length; pass += 1) {
     let cut = -1;
     for (let i = 1; i < out.length - 1; i += 1) {
