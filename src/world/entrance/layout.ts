@@ -102,40 +102,19 @@ export function isInEntranceGateGap(angle: number): boolean {
  *
  * 12 m is the forecourt a six-year-old walks across before the park proper
  * begins: room for the arch, the welcome sign beside it, and turning round to
- * wave the bus off, without a fence in shot. It is deliberately not the whole
- * walk to the plaza — the railway is *allowed* to ring the park between the
- * gate and the middle, and `crossings.ts` gives that walk a level crossing or
- * a bridge. It just may not do it on the doorstep.
+ * wave the bus off. It is deliberately not the whole walk to the plaza — the
+ * railway is *allowed* to ring the park between the gate and the middle, and
+ * `crossings.ts` gives that walk a level crossing or a bridge, which is the
+ * park working as designed.
+ *
+ * **This is a depth to be *walkable*, not a depth to be empty**, and the
+ * distinction is the whole of `gatewayWalk.ts`: measured across the sixteen
+ * pool seeds, every one of them stands a lamp, a bollard or the welcome sign
+ * somewhere in this box, and a rule that nothing may is a rule sixteen parks
+ * out of sixteen break. What must hold is that a child can get from the arch to
+ * here — past the furniture, and through any crossing in between.
  */
 export const ENTRANCE_WALK_DEPTH = 12;
-
-/**
- * **The walk in from the arch, as points on the ground.**
- *
- * The one owner of "where is the way into the park", asked by anything that
- * puts something solid down and therefore has to keep off it. `route.ts`'s
- * `trainObstacles` is the first caller: the railway's loop is grown against a
- * field of keep-out discs, so the walk is handed to it as discs too, and the
- * loop backtracks round them like it does round any plot.
- *
- * A chain of points rather than one disc because the walk is a corridor: a
- * single disc big enough to cover 12 m of it would also claim ground either
- * side that nothing needs to keep off.
- *
- * The corridor's half-width is the caller's own business — the arch is
- * `ENTRANCE_GATE_HALF_WIDTH` either side of this line, and whatever the caller
- * builds has its own thickness to add to that.
- */
-export function entranceWalkPoints(step = 2): { readonly x: number; readonly z: number }[] {
-  const length = Math.hypot(ENTRANCE_GATE_X, ENTRANCE_GATE_Z) || 1;
-  const inX = -ENTRANCE_GATE_X / length;
-  const inZ = -ENTRANCE_GATE_Z / length;
-  const points: { x: number; z: number }[] = [];
-  for (let inset = 0; inset <= ENTRANCE_WALK_DEPTH + 1e-9; inset += step) {
-    points.push({ x: ENTRANCE_GATE_X + inX * inset, z: ENTRANCE_GATE_Z + inZ * inset });
-  }
-  return points;
-}
 
 /**
  * Where the bus stop itself stands — a little inside the wall, well inside
