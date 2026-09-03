@@ -1537,6 +1537,23 @@ const RAMP_SCREEN_MARGIN = 0.5;
  * `fallbackSpurRoute` is gone, so dead end 2 has nothing left to price.
  */
 export function pointStandsOnABridgeRamp(x: number, z: number, margin = RAMP_SCREEN_MARGIN): boolean {
+  return bridgeSiteReserving(x, z, margin) !== null;
+}
+
+/**
+ * **Which crossing's reservation this point stands in** — the same rectangle
+ * {@link pointStandsOnABridgeRamp} answers `true`/`false` about, returning the
+ * site itself so a caller can name it.
+ *
+ * It exists because the exemptions in this file are **by identity, not by
+ * geometry** (see {@link segmentCutsABridgeRamp}'s own note): a caller that
+ * needs "the bridge I am standing on" must get it from the very test that put
+ * it there, never from a radius of its own that could drift from this
+ * rectangle. `pointStandsOnABridgeRamp` is now this function's boolean face,
+ * so there is one owner of the rectangle and no second copy to fall out of
+ * step.
+ */
+function bridgeSiteReserving(x: number, z: number, margin = RAMP_SCREEN_MARGIN): CrossingSite | null {
   for (const site of CROSSING_SITES) {
     const dx = x - site.x;
     const dz = z - site.z;
@@ -1545,10 +1562,10 @@ export function pointStandsOnABridgeRamp(x: number, z: number, margin = RAMP_SCR
     const along = dx * site.dirX + dz * site.dirZ;
     if (along <= DECK_HALF_LENGTH + site.rampReachPos + margin &&
         along >= -(DECK_HALF_LENGTH + site.rampReachNeg + margin)) {
-      return true;
+      return site;
     }
   }
-  return false;
+  return null;
 }
 
 /**
@@ -2901,12 +2918,74 @@ function* pathGridSearch(): Generator<number, PathGrid, void> {
 
   // The gate corridor's candidate handover points — one node each, so the
   // avenue is solved on the same graph as everything else.
+  //
+  // **The rung that works is the one that leaves the gate reachable, not the
+  // one that makes a link.** Every other ladder in this file counts
+  // connectors, and for a door that is the right question: a door's
+  // neighbourhood is ordinary lattice, so a connector to it is a connector to
+  // the park. The gate's is not. Measured 2 Sep 2026 (`scripts/tmp-gate.mts`):
+  // on seed 267 the handover had **one** connector at the very first rung —
+  // so a count-of-links ladder stopped there, satisfied — and that connector
+  // landed on a lattice node the ring could not reach either. `links: 1,
+  // reachableFromRing: false, routes: false`.
+  //
+  // So this ladder asks the question the caller actually has
+  // (`gateApproachSearch` needs `routeFromNetwork` to find something) and
+  // keeps climbing while the answer is no. Gate nodes are added last, after
+  // the ring, the feet and every door, so the graph a flood sees here is the
+  // finished one bar the gate itself.
+  const ringReaches = (node: number): boolean => {
+    const seen = new Set<number>(ringNodes);
+    const queue = [...ringNodes];
+    while (queue.length) {
+      const n = queue.pop() as number;
+      if (n === node) return true;
+      for (const step of neighbours[n] as readonly LatticeNeighbour[]) {
+        if (seen.has(step.to)) continue;
+        seen.add(step.to);
+        queue.push(step.to);
+      }
+    }
+    return false;
+  };
   const gateNodes: { mouth: readonly [number, number]; node: number }[] = [];
   for (const mouth of gateCorridorMouthCandidates()) {
     const handover = gateCorridorHandover(mouth);
     const node = addNode(handover[0], handover[1]);
-    if (joinToGrid(node, handover, false) === 0 && joinToGrid(node, handover, false, 1) === 0) {
-      joinToGrid(node, handover, false, 2);
+    // **Last rung: the reservation the handover is standing in, exempted by
+    // identity** — the same ladder, in the same order and for the same reason
+    // that a bridge foot gets one above.
+    //
+    // The gate is a **world-fixed landmark** at `[0, 54]`: unlike a door or a
+    // foot, nothing can move it off a bridge's reserved ground, and
+    // `gateCorridorMouthCandidates` cannot walk it clear either — every rung
+    // it offers is a *fraction of the corridor's length*, so when the corridor
+    // is zero long (the ramp reaches the arch itself) all three collapse onto
+    // the same point. A backtrack ladder whose rungs are proportional to the
+    // thing that failed has no rungs when that thing is zero.
+    //
+    // Measured, 2 Sep 2026 (`scripts/tmp-gate.mts`): on seeds 5 and 267
+    // `pointStandsOnABridgeRamp(0, 54)` is true — on seed 5 for the corridor's
+    // whole 24 m — so the arch itself sits inside a reservation, and every
+    // edge touching a reservation is refused. The avenue fell to its own last
+    // resort and `gate-approach` came out as a ribbon touching no other paving
+    // in the park (`scripts/tmp-ribboncomp.mts`: two paving components on
+    // canonical, 5 and 267, the second being `gate-approach` alone, against
+    // one component on all thirteen other pool seeds).
+    //
+    // A park whose front gate is joined to nothing is worse than a connector
+    // that grazes one reservation, and this only ever runs after every
+    // screened rung above has failed to reach the ring.
+    const own = bridgeSiteReserving(handover[0], handover[1], GATE_CORRIDOR_RAMP_MARGIN);
+    const rungs: { relax: number; exempt: CrossingSite | null }[] = [
+      { relax: 0, exempt: null },
+      { relax: 1, exempt: null },
+      { relax: 2, exempt: null },
+      ...(own ? [{ relax: 0, exempt: own }, { relax: 1, exempt: own }, { relax: 2, exempt: own }] : []),
+    ];
+    for (const rung of rungs) {
+      joinToGrid(node, handover, false, rung.relax, null, rung.exempt);
+      if (ringReaches(node)) break;
     }
     gateNodes.push({ mouth, node });
   }
@@ -5341,4 +5420,47 @@ export function debugGridReach(): unknown {
  * actually screens against. */
 export function debugPointStandsOnBridgeMasonry(x: number, z: number): boolean {
   return pointStandsOnBridgeMasonry(x, z);
+}
+
+/** TEMP diagnostic: the gate corridor's candidate mouths, and what the grid
+ * made of each one. */
+export function debugGateNodes(): unknown {
+  const grid = pathGrid();
+  const seen = new Set<number>(grid.ringNodes);
+  const queue = [...grid.ringNodes];
+  while (queue.length) {
+    const n = queue.pop() as number;
+    for (const step of grid.neighbours[n] as readonly LatticeNeighbour[]) {
+      if (seen.has(step.to)) continue;
+      seen.add(step.to);
+      queue.push(step.to);
+    }
+  }
+  const deepest = gateCorridorDeepestMouth();
+  return {
+    deepest: `${deepest[0].toFixed(2)},${deepest[1].toFixed(2)}`,
+    START_Z: GATE_CORRIDOR_START_Z,
+    INNER_Z: GATE_CORRIDOR_INNER_Z,
+    onRampAtStart: pointStandsOnABridgeRamp(0, GATE_CORRIDOR_START_Z, GATE_CORRIDOR_RAMP_MARGIN),
+    scan: (() => {
+      const rows: string[] = [];
+      for (let z = GATE_CORRIDOR_START_Z; z >= GATE_CORRIDOR_INNER_Z - 1e-9; z -= 1) {
+        const info = railInfoAt(0, z);
+        rows.push(
+          `z=${z.toFixed(0)} side=${info.side} railDist=${info.dist.toFixed(1)} ramp=${pointStandsOnABridgeRamp(0, z, GATE_CORRIDOR_RAMP_MARGIN) ? 'Y' : 'n'}`,
+        );
+      }
+      return rows;
+    })(),
+    gates: grid.gateNodes.map((g) => ({
+      mouth: `${g.mouth[0].toFixed(2)},${g.mouth[1].toFixed(2)}`,
+      handover: (() => {
+        const h = gateCorridorHandover(g.mouth);
+        return `${h[0].toFixed(2)},${h[1].toFixed(2)}`;
+      })(),
+      links: (grid.neighbours[g.node] as readonly LatticeNeighbour[]).length,
+      reachableFromRing: seen.has(g.node),
+      routes: routeFromNetwork(g.node) !== null,
+    })),
+  };
 }
