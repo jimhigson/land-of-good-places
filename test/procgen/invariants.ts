@@ -108,6 +108,18 @@ import { HAT_KINDS, createHat } from '../../src/art/models/hats.ts';
 // The leaf module is defence against that chain becoming real, not a fix for a
 // live bug. `railRaceFliesClear`'s "reached through the built world, never
 // imported" note below is about `railRace/plan.ts`, which genuinely does.
+// The claims law itself — `src/boot/groundClaims.ts` is a leaf module that
+// imports nothing, so (like the other leaf imports above) it cannot pin the
+// park's seed. ONE table rules both the generator's registry and this suite's
+// universal overlap sweep; two copies kept in step by hand is the repo's
+// most-repeated bug, and this import is the mechanism that prevents it.
+import {
+  CLAIM_COMPATIBILITY,
+  overlapDepth,
+  shapesOverlap,
+  type ClaimKind,
+  type ClaimShape,
+} from '../../src/boot/groundClaims.ts';
 import {
   CAR_FLOOR_Y,
   CARRIAGE_BODY_HALF_WIDTH,
@@ -8791,7 +8803,308 @@ const nothingGrowsInTheLaneButTheParksOwnTrees: Invariant = (facts) => {
   return fouls;
 };
 
+/**
+ * **The universal overlap invariant: any two drawn features, deny by
+ * default.** Jim, 3 September 2026: *"we need to also check against a wider
+ * range of possible failures — ie any collision between drawn features, not
+ * just certain pairings."*
+ *
+ * Most of this suite is hand-picked pairings (`treesKeepOffWalls`,
+ * `lampsTouchNothing`, ...), so a pairing nobody thought to write is a
+ * collision nobody can detect — the checking side's version of the private
+ * obstacle list. The fence through a path 0.8 m from the one it bordered was
+ * invisible for exactly this reason: no one had written `fencesKeepOffPaths`.
+ *
+ * So: every drawn feature this file can shape is swept against every other,
+ * and the ONLY thing that may excuse an overlap is
+ * `CLAIM_COMPATIBILITY` — the same exported table the generator's claims
+ * registry rules by (`src/boot/groundClaims.ts`, a leaf module importing
+ * nothing, so it cannot pin the park's seed) — plus, for the one 'crossing'
+ * cell, ground a bridge reservation covers (a grade-separated crossing is the
+ * legal way a path and the railway share plan-view ground). An unanticipated
+ * pairing therefore FAILS by default instead of passing silently, and a new
+ * feature kind is covered the day somebody adds its shapes below, not the day
+ * somebody thinks to write its pairings.
+ *
+ * The old pairwise invariants stay, deliberately: they are the control group
+ * proving this sweep can see what they see.
+ *
+ * **What is covered, and what is not.** Coverage is announced on stderr every
+ * run (a green line that implies cover it does not give is how the next agent
+ * inherits a false belief). Not yet shaped here: the slide's chute and legs'
+ * spans (3D, plan-view-only sweep would misread the flying parts), the
+ * castle's towers (inside its inscribed footprint), the Sky Cruiser (flies;
+ * own clearance invariant), bridges' own masonry (grade-separated by design),
+ * and within-feature spacing — path clumping is the ruled follow-up
+ * (`docs/DESIGN-round-robin-generation.md`, "paths do not clump"), and it is
+ * a different question from this one, because one network's segments legally
+ * share ground at every junction.
+ *
+ * Two under-approximations, stated: plots and the castle are swept as the
+ * capsule INSCRIBED in their rectangle (corner-only overlaps are missed —
+ * refusal-safe direction is not available here, and an over-approximating
+ * disc would manufacture findings); entrances and exits are swept as points
+ * rather than `PLAYER_RADIUS` discs until each doormat can be tied to the
+ * plot that owns it (a doormat legitimately abuts its own facade).
+ */
+const drawnFeaturesShareNoForbiddenGround: Invariant = (facts) => {
+  type Piece = { readonly shape: ClaimShape; readonly label: string };
+  type Drawn = { readonly name: string; readonly kind: ClaimKind; readonly pieces: Piece[] };
+
+  const disc = (x: number, z: number, radius: number): ClaimShape => ({
+    shape: 'disc',
+    x,
+    z,
+    radius,
+  });
+  const at = (x: number, z: number) => `(${x.toFixed(1)}, ${z.toFixed(1)})`;
+
+  /** A polyline with a half-width, as capsule pieces. */
+  const ribbonPieces = (
+    points: readonly (readonly [number, number])[],
+    halfWidth: number,
+    label: string,
+  ): Piece[] => {
+    const pieces: Piece[] = [];
+    for (let i = 1; i < points.length; i += 1) {
+      const [x1, z1] = points[i - 1] as readonly [number, number];
+      const [x2, z2] = points[i] as readonly [number, number];
+      pieces.push({
+        shape: { shape: 'capsule', x1, z1, x2, z2, halfWidth },
+        label,
+      });
+    }
+    return pieces;
+  };
+
+  /** The capsule inscribed in an axis-aligned rectangle (under-approximate). */
+  const inscribed = (x: number, z: number, halfX: number, halfZ: number, label: string): Piece => {
+    const along = Math.max(halfX, halfZ);
+    const across = Math.min(halfX, halfZ);
+    const dx = halfX >= halfZ ? along - across : 0;
+    const dz = halfX >= halfZ ? 0 : along - across;
+    return {
+      shape: { shape: 'capsule', x1: x - dx, z1: z - dz, x2: x + dx, z2: z + dz, halfWidth: across },
+      label,
+    };
+  };
+
+  const features: Drawn[] = [
+    {
+      name: 'walls',
+      kind: 'footprint',
+      pieces: facts.walls.map((wall) => ({
+        shape: {
+          shape: 'capsule',
+          x1: wall.from[0],
+          z1: wall.from[1],
+          x2: wall.to[0],
+          z2: wall.to[1],
+          halfWidth: wall.halfWidth,
+        } as ClaimShape,
+        label: `${wall.kind} wall ${at(wall.from[0], wall.from[1])}->${at(wall.to[0], wall.to[1])}`,
+      })),
+    },
+    {
+      name: 'trees',
+      kind: 'footprint',
+      pieces: facts.trees.map((tree) => ({
+        shape: disc(tree.x, tree.z, tree.footprint),
+        label: `tree at ${at(tree.x, tree.z)}`,
+      })),
+    },
+    {
+      name: 'bushes',
+      kind: 'footprint',
+      pieces: facts.bushes.map((bush) => ({
+        shape: disc(bush.x, bush.z, bush.radius),
+        label: `bush at ${at(bush.x, bush.z)}`,
+      })),
+    },
+    {
+      name: 'lamps',
+      kind: 'footprint',
+      pieces: facts.lamps.map(([x, z]) => ({
+        shape: disc(x, z, 0),
+        label: `lamp at ${at(x, z)}`,
+      })),
+    },
+    {
+      name: 'rail-race arch feet',
+      kind: 'footprint',
+      pieces: facts.railRaceArchFeet.map((foot) => ({
+        shape: disc(foot.x, foot.z, foot.radius),
+        label: `arch foot at ${at(foot.x, foot.z)}`,
+      })),
+    },
+    {
+      name: 'slide legs',
+      kind: 'footprint',
+      pieces: facts.slideLegs.map((leg) => ({
+        shape: disc(leg.x, leg.z, SLIDE_LEG_RADIUS),
+        label: `slide leg at ${at(leg.x, leg.z)}`,
+      })),
+    },
+    {
+      name: 'plots',
+      kind: 'footprint',
+      pieces: facts.plots.map((plot) =>
+        inscribed(plot.x, plot.z, plot.halfX, plot.halfZ, `plot ${plot.id}`),
+      ),
+    },
+    {
+      name: 'castle',
+      kind: 'footprint',
+      pieces: [
+        inscribed(
+          facts.castleFootprint.x,
+          facts.castleFootprint.z,
+          facts.castleFootprint.halfX,
+          facts.castleFootprint.halfZ,
+          'the castle',
+        ),
+      ],
+    },
+    {
+      name: 'paths',
+      kind: 'corridor',
+      pieces: facts.pathEdges.flatMap((edge) =>
+        ribbonPieces(edge.points, edge.halfWidth, `path ${edge.name}`),
+      ),
+    },
+    {
+      name: 'entrances',
+      kind: 'walkable',
+      pieces: facts.entrances.map((entrance) => ({
+        shape: disc(entrance.x, entrance.z, 0),
+        label: `entrance ${entrance.id}`,
+      })),
+    },
+    {
+      name: 'ride exits',
+      kind: 'walkable',
+      pieces: facts.exits.map((exit) => ({
+        shape: disc(exit.x, exit.z, 0),
+        label: `exit ${exit.id}`,
+      })),
+    },
+  ];
+
+  // One finding per pair of *labelled things*, carrying its single worst
+  // measurement — a ribbon is hundreds of half-metre capsules, and a defect
+  // reported once per capsule floods the output with near-duplicates of one
+  // fact. The label pair is the defect; the depth is the measurement.
+  const worstByPair = new Map<string, { depth: number; x: number; z: number }>();
+  const record = (key: string, depth: number, x: number, z: number): void => {
+    const seen = worstByPair.get(key);
+    if (!seen || depth > seen.depth) worstByPair.set(key, { depth, x, z });
+  };
+
+  // ---- every feature against the railway's centre-line oracle -------------
+  // The railway has no point list in the facts — `distanceToRail` is the
+  // oracle every existing rail invariant uses — so it is swept by sampling
+  // each piece's core, with `TRACK_CLEARANCE` (the game's own half-width) as
+  // its reach. A corridor may cross it only on ground a bridge reservation
+  // covers: grade separation is the one legal way to share the plan view.
+  for (const feature of features) {
+    const rule = CLAIM_COMPATIBILITY[feature.kind].corridor;
+    if (rule === true) continue;
+    for (const piece of feature.pieces) {
+      let worst = Infinity;
+      let worstAt: readonly [number, number] | null = null;
+      for (const [x, z] of samplesOfShape(piece.shape)) {
+        if (
+          rule === 'crossing' &&
+          facts.bridgeReservations.some((reservation) => reservation?.covers(x, z) ?? false)
+        ) {
+          continue; // grade-separated: the legal way to share the plan view
+        }
+        const gap = facts.distanceToRail(x, z) - reachOfShape(piece.shape);
+        if (gap < worst) {
+          worst = gap;
+          worstAt = [x, z];
+        }
+      }
+      if (worst >= TRACK_CLEARANCE || !worstAt) continue;
+      record(
+        `${feature.name}: ${piece.label} ~ the railway`,
+        TRACK_CLEARANCE - worst,
+        worstAt[0],
+        worstAt[1],
+      );
+    }
+  }
+
+  // ---- every feature against every other, deny by default -----------------
+  let pairsSwept = 0;
+  for (let i = 0; i < features.length; i += 1) {
+    for (let j = i + 1; j < features.length; j += 1) {
+      const a = features[i] as Drawn;
+      const b = features[j] as Drawn;
+      const rule = CLAIM_COMPATIBILITY[a.kind][b.kind];
+      if (rule === true) continue;
+      pairsSwept += 1;
+      for (const pieceA of a.pieces) {
+        for (const pieceB of b.pieces) {
+          if (!shapesOverlap(pieceA.shape, pieceB.shape)) continue;
+          // The 'crossing' cell (corridor x corridor) has no declared
+          // crossings between non-rail features today; when one exists it is
+          // a legality-table decision with a stated reason, never a quiet
+          // exemption here.
+          const witness =
+            pieceA.shape.shape === 'disc'
+              ? { x: pieceA.shape.x, z: pieceA.shape.z }
+              : pieceB.shape.shape === 'disc'
+                ? { x: pieceB.shape.x, z: pieceB.shape.z }
+                : { x: pieceA.shape.x1, z: pieceA.shape.z1 };
+          record(
+            `${a.name} x ${b.name}: ${pieceA.label} ~ ${pieceB.label}`,
+            overlapDepth(pieceA.shape, pieceB.shape),
+            witness.x,
+            witness.z,
+          );
+        }
+      }
+    }
+  }
+
+  const fouls = [...worstByPair.entries()].map(
+    ([pair, worst]) =>
+      `${pair}: sharing ground by ${worst.depth.toFixed(2)} m near ${at(worst.x, worst.z)}`,
+  );
+
+  // The coverage announcement, on stderr so a PASSING run still says it —
+  // vitest's default reporter shows console output from failing tests only.
+  const shaped = features
+    .map((feature) => `${feature.name} ${feature.pieces.length}`)
+    .join(', ');
+  process.stderr.write(
+    `[universal overlap] swept ${pairsSwept} feature pairs + rail oracle; shapes: ${shaped}; ` +
+      `NOT covered: slide chute, castle towers, cruiser, bridge masonry, within-feature spacing\n`,
+  );
+
+  return fouls;
+};
+
+/** The core points of a shape, for sweeping it along a distance oracle. */
+function* samplesOfShape(shape: ClaimShape): Generator<readonly [number, number], void, void> {
+  if (shape.shape === 'disc') {
+    yield [shape.x, shape.z];
+    return;
+  }
+  const length = Math.hypot(shape.x2 - shape.x1, shape.z2 - shape.z1);
+  const count = Math.max(1, Math.ceil(length / 0.5));
+  for (let i = 0; i <= count; i += 1) {
+    const t = i / count;
+    yield [shape.x1 + t * (shape.x2 - shape.x1), shape.z1 + t * (shape.z2 - shape.z1)];
+  }
+}
+
+const reachOfShape = (shape: ClaimShape): number =>
+  shape.shape === 'disc' ? shape.radius : shape.halfWidth;
+
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
+  ['no two drawn features share ground the law forbids', drawnFeaturesShareNoForbiddenGround],
   ['the arrival reaches its end and hands over', theArrivalReachesItsEnd],
   ['the ginormous slide clears the garden on the castle roof', theSlideClearsTheCastleRoofGarden],
   ['nothing stands in the journey lane carriageway', nothingStandsInTheLanesCarriageway],

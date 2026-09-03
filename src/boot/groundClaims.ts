@@ -243,6 +243,16 @@ const overlapConfinedToZone = (
 export const shapesOverlap = (a: ClaimShape, b: ClaimShape): boolean =>
   coreDistance(a, b) < reachOf(a) + reachOf(b);
 
+/**
+ * How deeply two shapes share ground, in metres — positive when they overlap,
+ * negative when clear by that much. Exported so a check reporting a violation
+ * carries a real measurement, computed by the same owner that decided the
+ * overlap existed — never a second hand-written distance formula that can
+ * drift from this one.
+ */
+export const overlapDepth = (a: ClaimShape, b: ClaimShape): number =>
+  reachOf(a) + reachOf(b) - coreDistance(a, b);
+
 /** Cheap per-axis bounds, so most pairs are dismissed without a hypot. */
 const bounds = (s: ClaimShape): readonly [number, number, number, number] =>
   s.shape === 'disc'

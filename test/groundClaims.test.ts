@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import type { Capsule, Claim, ClaimKind, Disc } from '../src/boot/groundClaims';
-import { CLAIM_COMPATIBILITY, GroundClaims, shapesOverlap } from '../src/boot/groundClaims';
+import {
+  CLAIM_COMPATIBILITY,
+  GroundClaims,
+  overlapDepth,
+  shapesOverlap,
+} from '../src/boot/groundClaims';
 
 /**
  * Unit tests for the ground-claims registry — pure and fast, no park. Each
@@ -48,6 +53,12 @@ describe('shapesOverlap', () => {
     const path = capsule(-10, 5, 10, 5, 1);
     expect(shapesOverlap(disc(0, 3.5, 1), path)).toBe(true); // 1.5 m gap < 2 m reach
     expect(shapesOverlap(disc(0, 8, 1), path)).toBe(false); // 3 m gap > 2 m reach
+  });
+
+  it('overlapDepth carries the real measurement, signed', () => {
+    expect(overlapDepth(disc(0, 0, 2), disc(3, 0, 2))).toBeCloseTo(1); // 4 reach - 3 gap
+    expect(overlapDepth(disc(0, 0, 2), disc(5, 0, 2))).toBeCloseTo(-1); // clear by 1
+    expect(overlapDepth(disc(0, 3.5, 1), capsule(-10, 5, 10, 5, 1))).toBeCloseTo(0.5);
   });
 
   it('capsule–capsule: crossing segments overlap regardless of width', () => {
