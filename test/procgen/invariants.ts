@@ -1231,6 +1231,40 @@ const pathsRunOnGridAxes: Invariant = (facts) => {
 const STREET_LATTICE_PITCH = 12;
 
 /**
+ * **The half lines of the same lattice — the grid one level finer.**
+ *
+ * A street run may sit on one of these as well as on a full line, and that is
+ * an admission by *name*, not a widened tolerance: the generator's jog, span
+ * and rescue routers all step exactly half a pitch sideways
+ * (`paths.ts`'s `JOG_OFFSET = STREET_PITCH / 2`) so that a detour lands on a
+ * line the lattice already owns rather than on a private one of its own. A run
+ * on `x = -80.76` where the full lines are `-86.76` and `-74.76` is not a
+ * street wandering; it is the same grid read at 6 m.
+ *
+ * **The briefed cap on how long such a run may be is refuted by measurement,
+ * so it is deliberately not here.** `scripts/tmp-runs.mts`, 2 Sep 2026, over
+ * the six seeds this suite builds:
+ *
+ * ```
+ * seed 11  spur-hotel            NS len= 51.0 line= -80.76 off12=6.00 off6=0.00
+ * seed 11  spur-stall.skyCruiser NS len= 51.3 line= -80.76 off12=6.00 off6=0.00
+ * seed 11  spur-exit-skyCruiser  NS len= 51.3 line= -80.76 off12=6.00 off6=0.00
+ * ```
+ *
+ * Three separate routes, 51 m each, **all on the same half line**. Capping
+ * half-pitch runs below street length would have fired on the single best
+ * example in the pool of the property this invariant exists to measure — a set
+ * of lines the routes share. The thing that reads as wandering is a line
+ * *nobody else uses*, and length is not what tells the two apart.
+ *
+ * What still fails, and must: seed 11's `spur-waterFight`, 29.8 m on
+ * `x = 49.32`, **1.91 m off the nearest half line** as well as 4.09 off the
+ * full one. That is the private-line run the successor was required to keep
+ * catching, and it does.
+ */
+const STREET_HALF_LATTICE_PITCH = STREET_LATTICE_PITCH / 2;
+
+/**
  * How long an axis-aligned straight run must be before it counts as a
  * *street* (and so must sit on a lattice line): door stubs, arrival leads
  * and fillet transitions are all shorter than this; anything longer is a
@@ -1313,12 +1347,22 @@ const streetsShareLatticeLines: Invariant = (facts) => {
   if (!plaza) {
     return ['no plaza node in the path graph — cannot anchor the street lattice'];
   }
-  const offLattice = (coordinate: number, anchor: number): number => {
-    const remainder =
-      ((((coordinate - anchor) % STREET_LATTICE_PITCH) + STREET_LATTICE_PITCH) %
-        STREET_LATTICE_PITCH);
-    return Math.min(remainder, STREET_LATTICE_PITCH - remainder);
+  const offLattice = (
+    coordinate: number,
+    anchor: number,
+    pitch: number = STREET_LATTICE_PITCH,
+  ): number => {
+    const remainder = ((((coordinate - anchor) % pitch) + pitch) % pitch);
+    return Math.min(remainder, pitch - remainder);
   };
+  // Coverage, announced on every run — see CLAUDE.md, "when a check stops
+  // covering something, it must say so". `unservedRuns` are runs this
+  // invariant deliberately *stopped asserting on* because both neighbouring
+  // lattice lines were obstructed; a run silently excused is how the next
+  // agent inherits a false belief about what this measures.
+  let halfLineRuns = 0;
+  let unservedRuns = 0;
+  let assertedRuns = 0;
 
   // Is a straight lattice-line segment obstructed anywhere along the span,
   // in the built park? Sampled every 2 m. The margins mirror what the
@@ -1412,7 +1456,16 @@ const streetsShareLatticeLines: Invariant = (facts) => {
       const line = sum / (endIndex - runStart + 1);
       if (edge.name === 'gate-approach' && runAxis === 'z' && Math.abs(line) < 1) return;
       const anchor = runAxis === 'z' ? plaza.x : plaza.z;
-      const off = offLattice(line, anchor);
+      // The full lattice line first, then the half line — see
+      // {@link STREET_HALF_LATTICE_PITCH}. A run on either is on the grid;
+      // everything reported below is off *both*.
+      const off = Math.min(
+        offLattice(line, anchor),
+        offLattice(line, anchor, STREET_HALF_LATTICE_PITCH),
+      );
+      if (off <= STREET_LINE_TOLERANCE && offLattice(line, anchor) > STREET_LINE_TOLERANCE) {
+        halfLineRuns += 1;
+      }
       if (off > STREET_LINE_TOLERANCE) {
         // Threading ground the lattice does not serve — see this
         // invariant's exemption list. Both neighbouring lines must be
@@ -1467,16 +1520,19 @@ const streetsShareLatticeLines: Invariant = (facts) => {
           });
         };
         if (!usable(lower) && !usable(upper)) {
+          unservedRuns += 1;
           return;
         }
       }
+      assertedRuns += 1;
       if (off > STREET_LINE_TOLERANCE) {
         problems.push(
           `${edge.name} runs ${runAxis === 'z' ? 'north-south' : 'east-west'} for ` +
             `${length.toFixed(1)} m on ${runAxis === 'z' ? 'x' : 'z'} = ${line.toFixed(2)}, ` +
-            `${off.toFixed(2)} m off the nearest ${STREET_LATTICE_PITCH} m lattice line through ` +
-            `the plaza (${plaza.x.toFixed(2)}, ${plaza.z.toFixed(2)}) — a street on its own ` +
-            `private line is what makes the network read as wandering instead of a grid`,
+            `${off.toFixed(2)} m off the nearest line of the ${STREET_LATTICE_PITCH} m lattice ` +
+            `through the plaza (${plaza.x.toFixed(2)}, ${plaza.z.toFixed(2)}) OR of its ` +
+            `${STREET_HALF_LATTICE_PITCH} m half lattice — a street on its own private line is ` +
+            `what makes the network read as wandering instead of a grid`,
         );
       }
     };
@@ -1506,6 +1562,17 @@ const streetsShareLatticeLines: Invariant = (facts) => {
     }
     flush(points.length - 1);
   }
+  // **Say what this run actually covered, every time, pass or fail.** To
+  // `process.stderr`, not `console.log`: vitest's default reporter shows
+  // console output from *failing* tests only, so a coverage note written the
+  // obvious way is invisible in exactly the case it exists for.
+  process.stderr.write(
+    `[streets] ${assertedRuns} street-length run(s) asserted on, ${halfLineRuns} of them ` +
+      `admitted on a ${STREET_HALF_LATTICE_PITCH} m half line; ${unservedRuns} excused as ` +
+      `threading ground the lattice does not serve` +
+      (assertedRuns === 0 ? ' — THIS SEED ASSERTS NOTHING' : '') +
+      '\n',
+  );
   return problems;
 };
 
