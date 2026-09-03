@@ -2,6 +2,7 @@ import { Vector3 } from 'three';
 import { TAU } from '../../core/mathUtils';
 import { edgeRadiusAt, PARK_BOUNDARY } from '../boundary';
 import { COASTER_PLANS } from '../coaster/plan';
+import { ENTRANCE_GATE_HALF_WIDTH, entranceWalkPoints } from '../entrance/layout';
 import { RAIL_OVER_RAIL_AIR } from '../coaster/route';
 import { PARK_LAYOUT } from '../parkLayout';
 import { terrainHeight } from '../terrain';
@@ -186,6 +187,31 @@ function trainObstacles(): Obstacle[] {
   // The cruiser's dismount point: a fence across the spot a ride sets a child
   // down is the seed-18 failure shape, so the avoidance lives here.
   out.push({ x: COASTER_PLANS.cruiser.exitX, z: COASTER_PLANS.cruiser.exitZ, reach: 1.6 + 4.0 });
+
+  // **And the park's own front door, for exactly the same reason** (issue
+  // #481). A fence across the spot a ride sets a child down was the seed-18
+  // shape above; a fence across the spot the *bus* sets her down is the same
+  // shape at the one place every child arrives. Measured on pool seed 288, the
+  // lineside fence ran across the opening 2.3 m inside the arch, and on sweep
+  // seed 18 through the arch itself.
+  //
+  // The gate cannot move — it is the one fixed thing in the park — and it was
+  // the only fixed thing this obstacle field had never been told about, so the
+  // loop was free to run over it. The bridge pipeline has asked
+  // `entrance/layout.ts` where the doorway is since #414/#437; this makes the
+  // railway ask the same owner, one step earlier, where the loop is still free
+  // to go somewhere else. It is not a reserved zone (family ruling, 5 Aug:
+  // nothing reserves space) — the railway may still ring the park between the
+  // gate and the plaza, and `crossings.ts` puts a crossing on that walk. It
+  // may not do it on the doorstep.
+  //
+  // `TRACK_PLOT_CLEARANCE` is the right width and not a new number: it is what
+  // every plot gets, and for the reason spelled out on it — the fence stands
+  // 2 m off the rails and a walkable lane must survive beyond it. The walk in
+  // needs exactly that, out to the arch's own half-width.
+  for (const point of entranceWalkPoints()) {
+    out.push({ x: point.x, z: point.z, reach: ENTRANCE_GATE_HALF_WIDTH + TRACK_PLOT_CLEARANCE });
+  }
 
   const cruiser = COASTER_PLANS.cruiser.route;
   const probe = new Vector3();

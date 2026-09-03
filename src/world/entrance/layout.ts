@@ -85,6 +85,59 @@ export function isInEntranceGateGap(angle: number): boolean {
 }
 
 /**
+ * **How far into the park the walk in from the arch stays clear.**
+ *
+ * The gate is the one fixed thing in the park; everything else is drawn afresh
+ * on every seed. So "the way in" is the one piece of ground that cannot move
+ * out of anybody's way, and it needs a stated depth rather than a hope.
+ *
+ * Issue #481, measured on the built park rather than argued: on pool seed 288
+ * the railway's lineside fence ran `(2.64, 57.73) -> (0.01, 57.76) ->
+ * (-2.59, 57.41)` — 2.3 m inside the arch, straight across the opening — with
+ * its 1.3 m track escort 4 m behind it. On sweep seed 18 the fence ran through
+ * the arch itself, `(-1.13, 59.87) -> (1.43, 58.85)`. A child stepping off the
+ * bus walked into a pen. (The issue blames the boundary wall; it is not the
+ * boundary wall. `Garden.ts` cuts the gap in that correctly on both seeds —
+ * its 0.45 m segments stop at `(4.47, 59.65)` and `(-3.48, 60.44)` on 288.)
+ *
+ * 12 m is the forecourt a six-year-old walks across before the park proper
+ * begins: room for the arch, the welcome sign beside it, and turning round to
+ * wave the bus off, without a fence in shot. It is deliberately not the whole
+ * walk to the plaza — the railway is *allowed* to ring the park between the
+ * gate and the middle, and `crossings.ts` gives that walk a level crossing or
+ * a bridge. It just may not do it on the doorstep.
+ */
+export const ENTRANCE_WALK_DEPTH = 12;
+
+/**
+ * **The walk in from the arch, as points on the ground.**
+ *
+ * The one owner of "where is the way into the park", asked by anything that
+ * puts something solid down and therefore has to keep off it. `route.ts`'s
+ * `trainObstacles` is the first caller: the railway's loop is grown against a
+ * field of keep-out discs, so the walk is handed to it as discs too, and the
+ * loop backtracks round them like it does round any plot.
+ *
+ * A chain of points rather than one disc because the walk is a corridor: a
+ * single disc big enough to cover 12 m of it would also claim ground either
+ * side that nothing needs to keep off.
+ *
+ * The corridor's half-width is the caller's own business — the arch is
+ * `ENTRANCE_GATE_HALF_WIDTH` either side of this line, and whatever the caller
+ * builds has its own thickness to add to that.
+ */
+export function entranceWalkPoints(step = 2): { readonly x: number; readonly z: number }[] {
+  const length = Math.hypot(ENTRANCE_GATE_X, ENTRANCE_GATE_Z) || 1;
+  const inX = -ENTRANCE_GATE_X / length;
+  const inZ = -ENTRANCE_GATE_Z / length;
+  const points: { x: number; z: number }[] = [];
+  for (let inset = 0; inset <= ENTRANCE_WALK_DEPTH + 1e-9; inset += step) {
+    points.push({ x: ENTRANCE_GATE_X + inX * inset, z: ENTRANCE_GATE_Z + inZ * inset });
+  }
+  return points;
+}
+
+/**
  * Where the bus stop itself stands — a little inside the wall, well inside
  * `GARDEN_PLAY_RADIUS` (58) so the player is standing on solid, ordinary park
  * ground the instant they step off the bus.
