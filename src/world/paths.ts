@@ -1218,7 +1218,13 @@ interface StreetLattice {
 /** True if the segment keeps genuinely clear of the statue circle — streets
  * never cut through the ring's own ground (the plaza and statue live there,
  * and the ring must stay a clean circle with exactly four compass taps). */
-function segmentClearOfRing(ax: number, az: number, bx: number, bz: number): boolean {
+function segmentClearOfRing(
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+  margin = 0.5,
+): boolean {
   const dx = bx - ax;
   const dz = bz - az;
   const lengthSq = dx * dx + dz * dz;
@@ -1226,7 +1232,7 @@ function segmentClearOfRing(ax: number, az: number, bx: number, bz: number): boo
     lengthSq > 1e-9
       ? Math.max(0, Math.min(1, ((PLAZA.x - ax) * dx + (PLAZA.z - az) * dz) / lengthSq))
       : 0;
-  return Math.hypot(PLAZA.x - (ax + dx * t), PLAZA.z - (az + dz * t)) >= RING_RADIUS + 0.5;
+  return Math.hypot(PLAZA.x - (ax + dx * t), PLAZA.z - (az + dz * t)) >= RING_RADIUS + margin;
 }
 
 /** Rail screen for a lattice edge or stub: every sample stays on `side` and
@@ -2328,7 +2334,35 @@ function* streetLatticeSearch(): Generator<number, StreetLattice, void> {
             !streetSegmentClear(rim[0], rim[1], corner[0], corner[1]) ||
             !streetSegmentClear(corner[0], corner[1], nx, nz) ||
             !segmentHoldsRailSide(rim[0], rim[1], corner[0], corner[1], side[node] as 1 | -1, 0) ||
-            !segmentHoldsRailSide(corner[0], corner[1], nx, nz, side[node] as 1 | -1, 0)
+            !segmentHoldsRailSide(corner[0], corner[1], nx, nz, side[node] as 1 | -1, 0) ||
+            // **A gateway leaves the ring; it may never cross it.** This list
+            // was `streetSegmentClear` + `segmentHoldsRailSide` and nothing
+            // else — a hand-picked obstacle set with the one obstacle the tap
+            // is standing on missing from it, which is verbatim the failure
+            // CLAUDE.md's standing procgen rule names.
+            //
+            // Measured on seed 267, where PLAZA is (-3.23, 4.46): the rescued
+            // north tap's ribbon runs **straight through the statue circle**,
+            // passing within **1.16 m of the statue itself**. Its own
+            // `poiGraph` lane is reachable at 6.36 m and 6.44 m from the
+            // plaza and stranded at 1.16, 2.84 and 3.17 m — the hole in the
+            // middle of the lane is exactly the ring's interior, and the
+            // column discriminates completely (every stranded sample inside
+            // 3.2 m, every reachable one outside 6.3 m).
+            //
+            // A node roughly collinear with the plaza and the rim drives
+            // **both** corners through the middle, so choosing the other
+            // corner cannot fix it — that retires the standing "try the other
+            // corner" hypothesis, which was in any case a pure tie-break flip
+            // (both corners are the same Manhattan length, so their costs
+            // always tie).
+            //
+            // `margin: 0`, not the default 0.5: this leg legitimately *starts*
+            // on the rim, at exactly `RING_RADIUS`, so the ordinary clearance
+            // would refuse every gateway there has ever been. Touching the rim
+            // is what a gateway is for; entering the interior is the defect.
+            !segmentClearOfRing(rim[0], rim[1], corner[0], corner[1], 0) ||
+            !segmentClearOfRing(corner[0], corner[1], nx, nz, 0)
           ) {
             continue;
           }
