@@ -190,13 +190,19 @@ a second crown definition sitting unused.
 | `pnpm run build` | exit 0 |
 | `pnpm run check:coplanar` | exit 0; 245 seams, none new, **baseline down 5** |
 
+**PR #493** is open (do not merge). `pnpm run check` exit 0, `test:procgen`
+exit 0 (520 passed), `build` exit 0, `check:coplanar` exit 0. Rebased onto
+`origin/main` at `3799fae1`; script set compared by parsing `package.json` —
+104 → 105 steps, nothing lost, `check` chain byte-identical.
+
 ## Still to do
 
-- Eyes on it in a browser, standing on a bridge, on more than one seed. Needs
-  the shared Chrome — ask the Overseer.
-- Dev server for that is port **5391**, PID noted in the session; kill it by PID.
+- **Visual QA. Not done — I was not granted the shared Chrome.** Recorded as a
+  PR comment rather than skipped quietly. What needs eyes is listed there.
+- Dev server is running on port **5391**, PID **88353**. Kill it *by that PID*.
   Crown of each canonical-seed bridge:
-  `/spawn?pos=0.0,39.7&facing=180` and `/spawn?pos=-1.9,-28.0&facing=13`.
+  `/spawn?pos=0.0,39.7&facing=180` (bridge-0.0) and
+  `/spawn?pos=-1.9,-28.0&facing=13` (bridge-234.0). Both return 200.
 
 ## The instrument
 
