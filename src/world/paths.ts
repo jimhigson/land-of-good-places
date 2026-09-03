@@ -6877,3 +6877,88 @@ export function debugNodeEdges(x: number, z: number): unknown {
     })),
   };
 }
+
+/** TEMP diagnostic: the grid's components as coordinates rather than as an
+ * ASCII map — the map cannot render a two-digit component id without shifting
+ * its whole row. Reports the ring's component, the gate handover's, and every
+ * node of each of the small ones. */
+export function debugGridIslands(): string[] {
+  const grid = pathGrid();
+  const comp = new Int32Array(grid.count).fill(-1);
+  let next = 0;
+  for (let n = 0; n < grid.count; n += 1) {
+    if (comp[n] !== -1) continue;
+    if (n < grid.lattice.count && !grid.lattice.nodeOk[n]) continue;
+    const id = next++;
+    comp[n] = id;
+    const q = [n];
+    while (q.length) {
+      const cur = q.pop() as number;
+      for (const step of grid.neighbours[cur] as readonly LatticeNeighbour[]) {
+        if (comp[step.to] !== -1) continue;
+        comp[step.to] = id;
+        q.push(step.to);
+      }
+    }
+  }
+  const members = new Map<number, number[]>();
+  for (let n = 0; n < grid.count; n += 1) {
+    const id = comp[n] as number;
+    if (id === -1) continue;
+    (members.get(id) ?? (members.set(id, []), members.get(id) as number[])).push(n);
+  }
+  const at = (n: number): string =>
+    `(${(grid.xs[n] as number).toFixed(1)},${(grid.zs[n] as number).toFixed(1)})`;
+  const out: string[] = [];
+  const ringComps = new Set(grid.ringNodes.map((n) => comp[n] as number));
+  out.push(`ring gateways are in component(s) ${[...ringComps].join(', ')}`);
+  for (const [id, ns] of [...members.entries()].sort((a, b) => b[1].length - a[1].length)) {
+    if (ns.length === 1) continue;
+    out.push(
+      `component ${id}: ${ns.length} node(s)${ringComps.has(id) ? ' -- RING' : ''}` +
+        (ns.length <= 20 ? ` ${ns.map(at).join(' ')}` : ''),
+    );
+  }
+  return out;
+}
+
+/** TEMP diagnostic: one lattice row, with each node's validity, rail side and
+ * whether its east/south edges were built. */
+export function debugLatticeRow(z: number): string[] {
+  const lattice = streetLattice();
+  const j = Math.round((z - PLAZA.z) / STREET_PITCH);
+  const out: string[] = [`lattice row j=${j} (z ~ ${(PLAZA.z + j * STREET_PITCH).toFixed(1)})`];
+  for (let i = -LATTICE_HALF_CELLS; i <= LATTICE_HALF_CELLS; i += 1) {
+    const index = lattice.indexOf(i, j);
+    if (!lattice.nodeOk[index]) continue;
+    out.push(
+      `  (${(lattice.xs[index] as number).toFixed(1)},${(lattice.zs[index] as number).toFixed(1)})` +
+        ` side=${lattice.side[index]} east=${lattice.edgeEast[index] === 1}` +
+        ` south=${lattice.edgeSouth[index] === 1}` +
+        ` nbrs=${(lattice.neighbours[index] as readonly LatticeNeighbour[]).length}`,
+    );
+  }
+  return out;
+}
+
+/** TEMP diagnostic: `edgeOk`'s clauses, one by one, for a given segment.
+ * These are the same calls `edgeOk` makes, in the same order, against the same
+ * arguments — `edgeOk` itself is a closure inside `streetLatticeSearch` and
+ * cannot be reached from here, so the clauses are restated rather than the
+ * "nearest available" screen substituted. If `edgeOk` changes, this must. */
+export function debugEdgeWhy(
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+  side: 1 | -1,
+): Record<string, unknown> {
+  return {
+    street: streetSegmentClear(ax, az, bx, bz),
+    ring: segmentClearOfRing(ax, az, bx, bz),
+    railSide: segmentHoldsRailSide(ax, az, bx, bz, side, RAIL_CLAMP_DISTANCE - 0.1),
+    slide: slideEdgeAllowed(ax, az, bx, bz),
+    cruiser: cruiserCorridorOverlap(ax, az, bx, bz),
+    ramp: !segmentCutsABridgeRamp(ax, az, bx, bz),
+  };
+}

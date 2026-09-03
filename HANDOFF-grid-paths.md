@@ -5270,3 +5270,130 @@ All three are one pocket at **`stall.facePaint`'s own doormat**, each within
 shape the railway defect had. `debugRelaxedDoors` names one failed door,
 `exit-railRace!`. Chase it with the rest of the stranded tail, not as bridge
 work.
+
+---
+
+## State — 3 Sep, tenth leg (cont.): seed 5's `noPathEndsNowhere` root-caused
+
+**Not built.** Diagnosed to a single lattice edge and a named site, with the
+fix's shape already proven twice on this branch. Handed on rather than started
+badly.
+
+### The failure, and what it really is
+
+```
+FAIL seed 5 > no paved path stops anywhere but a destination
+  gate-approach's end at 0.0, 48.8 is 12.44 m from the nearest other paving
+  — it branches off nothing
+```
+
+`scripts/tmp-ribboncomp.mts`, with canonical as the control, says what that
+means for a child:
+
+```
+seed 5     2 paving component(s); backbone is #0
+             component 1: gate-approach          <- the park's front gate, alone
+canonical  1 paving component(s)                 <- gate-approach in the main one
+```
+
+**Seed 5's front gate is paved to nothing.** That outranks the invariant line
+it is reported as.
+
+### Why: the gate is outside the loop, and its island is five nodes
+
+`scripts/tmp-gateside.mts`: `gateSide=-1 centreSide=1` — seed 5's gate stands
+**outside** the railway loop, so the corridor must cross to reach the park.
+Two proven sites are near it (railD 12 at (11.8,40.9) and railD 332 at
+(-12.9,40.2)) and **both build bridges**, so crossing is possible.
+
+`scripts/tmp-gate.mts`: all three mouth candidates report `links: 6`,
+`reachableFromRing: false`, `routes: false`, every rung landing on the same two
+targets (5.1,57.3) and (-6.9,57.3), with `nearestReachable` 19.1–21.1 m away at
+(18.4,59.1) — which is site 12's outer bridge foot, and IS in the ring's
+component. **The gate ladder climbed all six rungs and honestly found nothing.**
+
+`scripts/tmp-gateisland.mts` (new; the ASCII map in `debugGridReach` cannot
+answer this — a two-digit component id takes two characters and silently
+shifts its whole row, so read coordinates, never that picture):
+
+```
+seed 5
+  ring gateways are in component(s) 12, 0, 8
+  component 0: 81 node(s) -- RING
+  component 12: 11 node(s) -- RING
+  component 8:  2 node(s) -- RING
+  component 7:  5 node(s)  (-6.9,57.3) (5.1,57.3) (0.0,48.8) (0.0,51.4) (0.0,54.0)
+```
+
+**The gate's whole world is five nodes**: two lattice nodes on the outer row
+z = 57.3 and its own three handover points. It touches no ring component.
+
+### The severed edge, and the one clause that severs it
+
+`scripts/tmp-eastofgate.mts` prints the outer row. It is valid ground with
+almost no edges — (17.1,57.3) and (-18.9,57.3) are `nodeOk` with **`nbrs=0`**.
+`scripts/tmp-edgewhy.mts` asks `edgeOk`'s clauses one at a time, and the
+control row is decisive because it is the edge that *was* built:
+
+```
+(-6.9,57.3)->(5.1,57.3)   street ✓ ring ✓ railSide ✓ slide ✓ cruiser 0  ramp ✓   BUILT
+( 5.1,57.3)->(17.1,57.3)  street ✓ ring ✓ railSide ✓ slide ✓ cruiser 0  ramp ✗   cut
+(17.1,57.3)->(29.1,57.3)  street ✓ ring ✓ railSide ✓ slide ✓ cruiser 0  ramp ✗   cut
+```
+
+One clause, `segmentCutsABridgeRamp`, and nothing else. `scripts/tmp-whichsite.mts`
+names the site, and only one of the four answers:
+
+```
+(5.1,57.3)->(17.1,57.3)  cutWithNothingExempt: true
+  site 0 railD=12  at (11.8,40.9): cutWithThisSiteExempt=FALSE   <- this one
+  site 1 railD=150 at (8.8,-34.4): cutWithThisSiteExempt=true
+  site 2 railD=308 at (-28.8,23.0): cutWithThisSiteExempt=true
+  site 3 railD=332 at (-12.9,40.2): cutWithThisSiteExempt=true
+```
+
+**Site 12's reservation runs up the outside of the loop and severs the row the
+gate stands on.** That reservation is the one the ninth leg deliberately
+lengthened (`bridgeScreenHalfAlong`, built from `SITE_RAMP_IDEAL`) to stop
+unscreened stone — correct, and this is its cost, showing up 17 m away.
+
+### The fix's shape is already proven twice on this branch — do not invent a third
+
+This is the same trade as the `across` widening on the fifth leg and the foot
+join on the tenth: forbidding the whole reservation is right for masonry and it
+starves routes, and the answer both times was **a backtrack ladder with the
+site's own exemption as the LAST rung**, never up front. A bridge foot has one.
+The gate handover has one. **A lattice edge has none** — `edgeOk` is a flat
+conjunction with no rung at all, so an edge a reservation cuts is simply gone.
+
+So the work is: give `edgeOk` the same ladder — screened first, and only an
+edge that can be built no other way gets its blocking site exempted. Two things
+to get right, both already learned here:
+
+- **Order is the whole trick.** Exempting up front lets an edge that had a
+  clear alternative take the way through the reservation instead, because the
+  search is cost-sorted (measured 2 Sep: seed 11 `2 -> 22`, seed 208 `0 -> 3`).
+- **By identity, not by radius.** Thread the `CrossingSite` through, as
+  `gridConnectors` already does; a distance test round the foot is a second
+  definition of "near this bridge" able to drift from the rectangle.
+
+And measure both columns on all sixteen with `scripts/tmp-sweep2.sh`, then
+**re-run `scripts/tmp-stoneground.mts`** — this change is to the same screen
+that keeps stone off drawable ground.
+
+**An alternative not yet measured, cheaper and worth pricing first:** the gate
+corridor could hand over to the **nearest ring-reachable node** rather than
+only to lattice connectors off its own line's shells — on seed 5 that is site
+12's own outer foot at (18.4, 59.1), 21.1 m away, which the corridor is already
+walking toward. That is `relayPolyline`'s job and `gateApproachSearch` does not
+currently reach for it. It would fix the gate without touching a screen every
+seed depends on.
+
+### New probes this leg (delete with the rest)
+
+`scripts/tmp-gateisland.mts` / `debugGridIslands`,
+`scripts/tmp-eastofgate.mts` / `debugLatticeRow`,
+`scripts/tmp-edgewhy.mts` / `debugEdgeWhy`, `scripts/tmp-comp5.mts`.
+`debugEdgeWhy` restates `edgeOk`'s clauses because `edgeOk` is a closure inside
+`streetLatticeSearch` and cannot be called from outside — **if `edgeOk` gains
+or loses a clause, that probe is wrong and must be changed with it.**
