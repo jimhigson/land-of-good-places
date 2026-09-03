@@ -69,7 +69,6 @@ import {
   RIM_OUTSET_START,
 } from '../../src/core/constants.ts';
 import {
-  ENTRANCE_ANGLE,
   ENTRANCE_BUS_ARRIVE_X,
   ENTRANCE_BUS_STOP_Z,
   ENTRANCE_GATE_HALF_WIDTH,
@@ -78,7 +77,8 @@ import {
   ENTRANCE_PLAYER_X,
   ENTRANCE_PLAYER_Z,
   ENTRANCE_WALK_DEPTH,
-  isInEntranceGateGap,
+  entranceGateFrame,
+  isInEntranceGateOpening,
 } from '../../src/world/entrance/layout.ts';
 // A leaf module: pure geometry over a `standable` predicate, no three.js and
 // nothing seed-dependent, so importing it here cannot fix the park's seed early.
@@ -6490,7 +6490,7 @@ const noBridgeStandsWhereNoneWasProven: Invariant = (facts) => {
 /**
  * **Is there actually a hole in the wall at the gate?**
  *
- * Issue #195. `isInEntranceGateGap` sat in `entrance/layout.ts` from the day the
+ * Issue #195. The gate-gap predicate sat in `entrance/layout.ts` from the day the
  * entrance was written with **zero callers anywhere**, so the gate was a gate in
  * name only: an arch stood over unbroken masonry, with an unbroken collision
  * polygon behind it. `buildBoundaryWall`'s own comment said "the wall is solid",
@@ -6523,7 +6523,7 @@ const theGateIsAHoleInTheWall: Invariant = (facts) => {
   if (blocks.length === 0) return ['found no boundary wall blocks at all to measure'];
 
   const fouls: string[] = [];
-  const inGap = blocks.filter((b) => isInEntranceGateGap(Math.atan2(b.z, b.x)));
+  const inGap = blocks.filter((b) => isInEntranceGateOpening(b.x, b.z));
   if (inGap.length > 0) {
     const worst = inGap[0];
     fouls.push(
@@ -6697,17 +6697,18 @@ const theRoadArrivesAtTheParkAndGoesIn: Invariant = (facts) => {
 
   // **Everything inside the park runs between the arch's posts.**
   //
-  // Measured as perpendicular distance from the gate's own radial axis, not
-  // with `isInEntranceGateGap`. That predicate is an *angle*, which is the
-  // right question at the wall and the wrong one further in: a constant angle
-  // is a corridor that narrows as it approaches the plaza, so the spur's far
-  // corners — 8 m inside the park, and perfectly between the posts — fell
-  // outside it by 0.0017 rad and were reported as having "spilled over the
-  // boundary". The posts stand at `ENTRANCE_GATE_HALF_WIDTH` either side of the
-  // axis, so that is the width the road may not exceed anywhere.
-  const axisX = Math.cos(ENTRANCE_ANGLE);
-  const axisZ = Math.sin(ENTRANCE_ANGLE);
-  const offAxis = (p: { x: number; z: number }): number => Math.abs(p.z * axisX - p.x * axisZ);
+  // Measured as perpendicular distance from the gate's own radial axis. This
+  // clause worked that out for itself before there was anywhere to put it —
+  // the old angular predicate was "the right question at the wall and the wrong
+  // one further in: a constant angle is a corridor that narrows as it
+  // approaches the plaza, so the spur's far corners, 8 m inside the park and
+  // perfectly between the posts, fell outside it by 0.0017 rad". That reasoning
+  // is exactly #481's, reached here first; it now reads the one owner
+  // (`entranceGateFrame`) rather than being a third hand-rolled copy of the
+  // same axis. The posts stand at `ENTRANCE_GATE_HALF_WIDTH` either side, so
+  // that is the width the road may not exceed anywhere.
+  const offAxis = (p: { x: number; z: number }): number =>
+    Math.abs(entranceGateFrame(p.x, p.z).across);
   const trespassing = inside.filter((p) => offAxis(p) > ENTRANCE_GATE_HALF_WIDTH);
   if (trespassing.length > 0) {
     const worst = trespassing[0];

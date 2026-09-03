@@ -24,6 +24,8 @@ import { distanceToPath, ROUTES, routeCurve } from './pathGraph';
 import { ANCHORS } from './anchors';
 import { PARK_LAYOUT } from './parkLayout';
 import { clearOfCruiser, onRideExit } from './Scenery';
+import { isInEntranceGateOpening } from './entrance/layout';
+import { PLAYER_RADIUS } from '../core/constants';
 import { distanceToRailCorridor, RAIL_CORRIDOR_CLEARANCE } from './train/plan';
 import { isInBridgeFootprint } from './train/bridgeKeepout';
 import { REAL_PROBE_RADIUS } from './train/bridgeFootprint';
@@ -554,6 +556,20 @@ function lampFits(
   placed: readonly (readonly [number, number])[],
   collision: CollisionWorld,
 ): boolean {
+  // **Out of the park's own front doorway** (issue #481). Asking
+  // `entrance/layout.ts`, which is the one owner of where the way in is — the
+  // same predicate the boundary masonry, the play clamp and the bridge
+  // pipeline ask. A lamp is a `LAMP_RADIUS` post and a child is
+  // `PLAYER_RADIUS` wide, so both come off the aperture: what must survive is
+  // the arch's full opening, not the lamp's own centre clearing it.
+  //
+  // Measured on `main` with the masonry and the clamp already fixed, a lamp
+  // still stood inside the arch on two pool seeds — `(-1.96, 59.53)` on 428,
+  // 0.47 m inside the gate line and 2 m across it, and `(3.73, 58.91)` on 131.
+  // This file's own rule is that a lamp which does not fit is skipped rather
+  // than forced, so this costs a lamp and nothing else.
+  if (isInEntranceGateOpening(x, z, LAMP_RADIUS + PLAYER_RADIUS)) return false;
+
   // Off the paving of *every* path, not just the one being walked: routes
   // cross, and the offset that clears one can land on another.
   if (distanceToPath(x, z) < LAMP_PATH_GAP) return false;

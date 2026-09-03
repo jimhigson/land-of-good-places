@@ -340,7 +340,7 @@ const PILLAR_TARGET_COUNT = 28;
 /**
  * **Is this point on the boundary inside the gate's opening?**
  *
- * `isInEntranceGateGap` has existed in `entrance/layout.ts` since the entrance
+ * The gate-gap predicate has existed in `entrance/layout.ts` since the entrance
  * was written and, until now, had **zero callers anywhere in the repo** — so
  * the gate was a gate in name only. `Entrance.ts` built an arch, `boundary.ts`
  * pinned the outline's radius at the gate's bearing, and this function laid

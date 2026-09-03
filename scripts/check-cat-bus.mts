@@ -59,7 +59,7 @@ import {
   ENTRANCE_GATE_Z,
   ENTRANCE_PLAYER_X,
   ENTRANCE_PLAYER_Z,
-  isInEntranceGateGap,
+  isInEntranceGateOpening,
 } from '../src/world/entrance/layout.ts';
 import {
   CAT_BUS_DESTINATION,
@@ -548,7 +548,7 @@ for (let index = 0; index < frames; index += 1) {
         edgeRadiusAt(PARK_BOUNDARY, Math.atan2(kid.position.z, kid.position.x));
       if (nowInside) {
         enteredPark[kidIndex] = true;
-        if (!isInEntranceGateGap(Math.atan2(kid.position.z, kid.position.x))) {
+        if (!isInEntranceGateOpening(kid.position.x, kid.position.z)) {
           crossedGateOutsideGap.push(
             `child ${kidIndex} at x ${kid.position.x.toFixed(2)}, z ${kid.position.z.toFixed(2)}`,
           );

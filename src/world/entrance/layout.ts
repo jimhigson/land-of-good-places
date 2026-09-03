@@ -1,5 +1,4 @@
 import { GARDEN_HALF_SIZE } from '../../core/constants';
-import { angleDelta } from '../../core/mathUtils';
 
 /**
  * Where the park entrance sits, geometrically.
@@ -22,12 +21,22 @@ export const ENTRANCE_ANGLE = Math.PI / 2;
 /** Matches `Garden.ts`'s `buildBoundaryWall` radius exactly (`GARDEN_HALF_SIZE - 2`). */
 export const ENTRANCE_WALL_RADIUS = GARDEN_HALF_SIZE - 2;
 
-/**
- * Half-angle, in radians, of the gap left in the boundary wall for the gate.
- * At {@link ENTRANCE_WALL_RADIUS} this opens a walkway a little under 9 m wide —
- * comfortably wide for the bus plus a pedestrian gate either side of the road.
+/*
+ * **`ENTRANCE_GATE_HALF_ANGLE` used to live here, and it is gone** (issue #481).
+ *
+ * It was 0.073 radians — "a walkway a little under 9 m wide", said its own
+ * comment — standing beside {@link ENTRANCE_GATE_HALF_WIDTH}'s 4.3 metres and
+ * describing the same opening in units nobody can compare by eye. They agree to
+ * 0.08 m at the gate's pinned radius and nowhere else, and the wall is laid by
+ * arc length along a spline whose radius varies per seed. Nine of the sixteen
+ * pool seeds ended up with masonry standing in the doorway, the canonical seed
+ * among them.
+ *
+ * Everything that asked the angle now asks {@link isInEntranceGateOpening},
+ * which is the same question in the same metres the arch is built in. A second
+ * definition kept "in case something needs it" is how this class of bug comes
+ * back, so there is not one.
  */
-export const ENTRANCE_GATE_HALF_ANGLE = 0.073;
 
 /** Centre of the gate opening, right on the boundary wall. */
 export const ENTRANCE_GATE_X = Math.cos(ENTRANCE_ANGLE) * ENTRANCE_WALL_RADIUS;
@@ -79,21 +88,17 @@ export function isInEntranceGateway(x: number, z: number): boolean {
   return Math.hypot(x - ENTRANCE_GATE_X, z - ENTRANCE_GATE_Z) < ENTRANCE_GATE_HALF_WIDTH;
 }
 
-/** True if the angle (radians, `atan2(z, x)` convention) falls inside the gate gap. */
-export function isInEntranceGateGap(angle: number): boolean {
-  return Math.abs(angleDelta(angle, ENTRANCE_ANGLE)) < ENTRANCE_GATE_HALF_ANGLE;
-}
-
 /**
  * **How far across the gateway a point stands, in metres**, and how far along
  * the way in — the gate's own frame, positive `along` being *into* the park.
  *
  * Exists because the opening had been written down twice in different units:
  * {@link ENTRANCE_GATE_HALF_WIDTH} is 4.3 **metres**, the arch's own half-width
- * and the number every other consumer reads, while
- * {@link ENTRANCE_GATE_HALF_ANGLE} is 0.073 **radians**, hand-tuned, and the
- * only thing `Garden.ts` used to decide where to stop laying stone. Two
- * definitions of one thing, in units that cannot be compared by eye.
+ * and the number every other consumer reads, while `ENTRANCE_GATE_HALF_ANGLE`
+ * was 0.073 **radians**, hand-tuned, and the only thing `Garden.ts` used to
+ * decide where to stop laying stone. Two definitions of one thing, in units
+ * that cannot be compared by eye. The angle is deleted; this is what replaced
+ * it.
  *
  * At the gate's pinned radius the angle happens to be worth 4.38 m — an 0.08 m
  * margin over the arch — but the wall is laid by **arc length along a spline
