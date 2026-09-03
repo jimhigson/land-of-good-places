@@ -4105,3 +4105,108 @@ The second is cheap and honest; the first is the one a six-year-old would
 notice, because a bridge to an empty field is a disappointment either way.
 **Neither is built. Do not treat 288 as diagnosed-and-pending-a-join any more —
 that diagnosis was mine and the announcement refuted it.**
+
+## State — 3 Sep, tenth leg: the 288 premise is refuted TWICE, and `noPaving` is a mis-worded counter
+
+**Overseer ruling picked up this leg:** prove `joinStrandedBridgeWalks`'s joining
+branch fires, or revert it. What follows is the measurement, and it changed the
+question.
+
+### The instrument, and its control
+
+`scripts/tmp-joinsweep.mts` captures `console.warn` **for the whole process**
+and prints the pass's own counter line. Two things it had to get right, both
+found by running the control first:
+
+- `park-harness`'s `quietly`/`said` collector sees **nothing** here — the park
+  is built more than once per process and the collector wraps only one of those
+  builds. A probe reading `park.said` reported `NO-ANNOUNCEMENT` on seed 288
+  while the line was plainly on the terminal. Capture `console.warn` at process
+  scope instead.
+- The announcement is conditional (`noPaving > 0 || refusedByTrim > 0`), so a
+  sweep looking for `joined > 0` cannot see it. For the sweep only, the guard
+  was temporarily forced: `if (true || noPaving > 0 || refusedByTrim > 0)`.
+  **That instrumentation is not committed.**
+
+CONTROL rows: seed 288 reproduces `stranded=1 joined=0 noPaving=1
+refusedByTrim=0`, and the canonical seed produces a full zero row rather than no
+row — so "the pass did nothing" and "the instrument saw nothing" are
+distinguishable.
+
+### Sweep: seeds 1–120 outside the pool, 62 of which built
+
+| seed | counter |
+|---|---|
+| 16, 23, 38, 39, 40, 50, 65 | `stranded=1 joined=0 noPaving=1 refusedByTrim=0` |
+| 116 | `stranded=1 joined=0 noPaving=0 **refusedByTrim=1**` |
+| the other 54 | `stranded=0` — the pass has nothing to do |
+
+**Seed 116 is the first evidence the pass is not inert.** `noPaving=0` there
+means the `onward` re-ask **did** find paving on the far side and **did**
+assemble an extension; only `drawsAsScreened` refused the seam. So the search
+half and the refusal half of the joining branch are both exercised on a real
+park. The commit half still is not, anywhere in 78 seeds.
+
+### Seed 288's "empty quarter" is REFUTED — measured, and the previous leg's headline was mine to correct
+
+`scripts/tmp-288end.mts`, seed 288:
+
+```
+side=+1: 19 path nodes — gate, plaza, building, hotel, ballPit, dodgems,
+         waterFight, stall.*, station-0, station-1, exit-*
+side=-1:  3 path nodes — ferrisWheel, stall.spaceFerrisWheel, exit-ferrisWheel
+
+bridge-walk-0 start (16.26,-21.22) side=+1  nearestOtherPavingSameSide=0.00
+bridge-walk-0 end   (-15.69,-47.69) side=-1 nearestOtherPavingSameSide=21.19
+                                            nearestOtherPavingAnySide=18.58
+```
+
+**The far side is not empty.** It carries three destinations and their paving,
+the nearest of it **21.19 m** from the foot the walk stops at. The previous
+leg's "the bridge crosses into an empty quarter, so the promise was never
+keepable" is wrong, and so is the brief built on it. My own first prediction —
+that the far side would hold *no destination* — was wrong too, and is recorded
+here as wrong.
+
+### What `noPaving` actually means: the foot is graph-isolated, not the side empty
+
+Instrumented inside the pass (seed 288):
+
+```
+far=845 at (-15.7,-47.7) farSide=-1 pavedGridNodes=45..49 pavedOnFarSide=1
+  anyPavedReachable=2
+far-side nodes: 300 301 302 328 329 330 331 332 357 358 359 360 387 388
+  416 417 847 851 858 867  — every one UNREACHABLE from 845
+  845@(-15.7,-47.7) *paved  ← the only paved node on that side is the foot itself
+```
+
+Twenty of the twenty-one grid nodes on the far side are **unreachable from the
+far foot**; its only edge is the deck. `anyPavedReachable=2` is the near foot,
+back across the deck, which the side filter correctly refuses.
+
+So **`noPaving` does not mean "no paving on that side"**. It means "no paved
+grid node reachable across the lattice from this foot", and the counter's
+wording asserts the stronger fact. That is this branch's own recurring disease —
+a report describing something other than what it measured — and the wording is
+corrected rather than the measurement.
+
+### Why the foot is isolated — already in the code, now measured
+
+`paths.ts:3455`'s own comment records it: seed 288's foot at (-15.7,-47.7) is
+cut by a **different** site's reservation, site 1 rather than its own site 0, so
+no widening of an own-site exemption can reach it. Measured this leg
+(`tmp-288end.mts`):
+
+```
+foot (-15.69,-47.69) vs site d=0.0   : along=-19.36 across= 0.00 reach=15.2 halfW=4.0
+                     vs site d=152.0 : along= -7.87 across= 4.94 reach=15.2 halfW=5.0
+```
+
+`across=4.94` against site 1's `halfWidth=5.0`, `|along|=7.87` well inside its
+15.2 m reach: **the foot of site 0 stands squarely inside site 1's forbidden
+band.** Two proven crossing sites 28 m apart on the loop have reservations that
+overlap onto each other's feet.
+
+**That is the defect on 288, and it is in the crossing planner
+(`footprintsOverlap` in `crossingPlanSolve.ts`), not in the join pass and not in
+`noPathEndsNowhere`.** No post-pass can join a foot the lattice cannot leave.
