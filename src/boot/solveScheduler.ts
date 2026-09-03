@@ -66,8 +66,28 @@ export interface SolveTaskSpec {
   readonly name: string;
   /** Names of tasks that must be `done` before this one may start. */
   readonly deps?: readonly string[];
-  /** Builds the resumable work. Called once, on this task's first slice. */
-  start(): Generator<number, void, void>;
+  /**
+   * An extra gate on starting, asked fresh each time the task comes up while
+   * unstarted: deps say *what work* must be finished; this says whether the
+   * world outside the scheduler is ready — in practice, whether the lazily
+   * imported module a task reads has landed. Without it a task would have to
+   * busy-yield waiting for its module, which burns budget and makes its slice
+   * count a fact about the machine instead of the park.
+   */
+  ready?(): boolean;
+  /**
+   * Builds the resumable work. Called once, on this task's first slice.
+   *
+   * Yield a **number** to report progress and offer the scheduler a chance to
+   * stop; the task may be given another slice in the same frame if budget
+   * remains. Yield **`'frame'`** to end this task's work for the whole
+   * `advance()` call — the next slice comes no earlier than the next frame.
+   * That is for joints that must not share a frame with the work beside them
+   * (the slide judges a finished route on its own frame, deliberately), and
+   * it is a *floor* on separation, never a change to what is computed — the
+   * generator's locals carry across either kind of yield identically.
+   */
+  start(): Generator<number | 'frame', void, void>;
 }
 
 /** A clock, injected so the scheduler is testable without `performance.now()`. */
@@ -75,9 +95,11 @@ export type Clock = () => number;
 
 interface TaskState {
   readonly spec: SolveTaskSpec;
-  gen: Generator<number, void, void> | null;
+  gen: Generator<number | 'frame', void, void> | null;
   started: boolean;
   done: boolean;
+  /** Ended its own frame with a `'frame'` yield; cleared at the next advance(). */
+  frameEnded: boolean;
   progress: number;
   /**
    * How many slices this task has had. Device-independent — the park is
@@ -110,6 +132,7 @@ export class SolveScheduler {
       gen: null,
       started: false,
       done: false,
+      frameEnded: false,
       progress: 0,
       steps: 0,
     }));
@@ -154,6 +177,16 @@ export class SolveScheduler {
     return out;
   }
 
+  /** The last progress number `name` yielded, or 0. For a driver's reporting. */
+  progressOf(name: string): number {
+    return this.byName.get(name)?.progress ?? 0;
+  }
+
+  /** Has `name` finished? Unknown names are simply not done, never a throw. */
+  isDone(name: string): boolean {
+    return this.byName.get(name)?.done ?? false;
+  }
+
   /** The tasks started but not finished — what is "running" this frame. */
   get running(): readonly string[] {
     return this.tasks.filter((task) => task.started && !task.done).map((task) => task.spec.name);
@@ -171,6 +204,8 @@ export class SolveScheduler {
    */
   advance(budgetMs: number): void {
     if (this.failure || this.done) return;
+    // A 'frame' yield ends a task's frame, and this is the next frame.
+    for (const task of this.tasks) task.frameEnded = false;
     const deadline = this.now() + budgetMs;
     let sliced = 0;
     for (;;) {
@@ -186,11 +221,13 @@ export class SolveScheduler {
           task.gen = task.spec.start();
           task.started = true;
         }
-        const step = (task.gen as Generator<number, void, void>).next();
+        const step = (task.gen as Generator<number | 'frame', void, void>).next();
         task.steps += 1;
         if (step.done) {
           task.done = true;
           task.gen = null;
+        } else if (step.value === 'frame') {
+          task.frameEnded = true;
         } else {
           task.progress = step.value;
         }
@@ -206,12 +243,12 @@ export class SolveScheduler {
 
   /** A task is runnable if it is unfinished and either in flight or ready to start. */
   private runnable(task: TaskState): boolean {
-    if (task.done) return false;
+    if (task.done || task.frameEnded) return false;
     if (task.started) return true;
     for (const dep of task.spec.deps ?? []) {
       if (!(this.byName.get(dep) as TaskState).done) return false;
     }
-    return true;
+    return !task.spec.ready || task.spec.ready();
   }
 
   /** The next runnable task from the rotating cursor, or null. Advances the cursor. */

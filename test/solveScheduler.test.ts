@@ -133,3 +133,123 @@ describe('SolveScheduler', () => {
     expect(() => new SolveScheduler([counter('x', 1, [], ['ghost'])])).toThrow(/unknown task/);
   });
 });
+
+describe("SolveScheduler ready gates and 'frame' yields", () => {
+  it('holds an unstarted task until ready() answers true, without spinning it', () => {
+    const log: string[] = [];
+    let moduleLoaded = false;
+    const scheduler = new SolveScheduler(
+      [
+        {
+          name: 'gated',
+          ready: () => moduleLoaded,
+          *start() {
+            log.push('ran');
+            yield 0;
+          },
+        },
+      ],
+      () => 0,
+    );
+    scheduler.advance(1);
+    // Nothing runnable: the task took no slices at all — no busy-wait, so its
+    // slice count stays a fact about the park, not the machine.
+    expect(log).toEqual([]);
+    expect(scheduler.sliceCounts['gated']).toBe(0);
+    expect(scheduler.done).toBe(false);
+    moduleLoaded = true;
+    scheduler.advance(1);
+    expect(log).toEqual(['ran']);
+    expect(scheduler.done).toBe(true);
+  });
+
+  it('ready() is not re-asked once a task has started', () => {
+    let asks = 0;
+    let open = true;
+    const scheduler = new SolveScheduler(
+      [
+        {
+          name: 't',
+          ready: () => ((asks += 1), open),
+          *start() {
+            yield 0;
+            yield 1;
+            yield 2;
+          },
+        },
+      ],
+      () => 0,
+    );
+    scheduler.advance(1);
+    // The gate may slam after the first slice; an in-flight task keeps going.
+    open = false;
+    scheduler.advance(1);
+    expect(scheduler.done).toBe(true);
+    expect(asks).toBe(1);
+  });
+
+  it("a 'frame' yield ends the task's work for that advance() only", () => {
+    const log: string[] = [];
+    const scheduler = new SolveScheduler(
+      [
+        {
+          name: 'careful',
+          *start() {
+            log.push('search');
+            yield 'frame';
+            log.push('judge'); // must not share a frame with the search step
+          },
+        },
+      ],
+      () => 0, // infinite budget: only the 'frame' yield can stop it
+    );
+    scheduler.advance(1);
+    expect(log).toEqual(['search']);
+    scheduler.advance(1);
+    expect(log).toEqual(['search', 'judge']);
+    expect(scheduler.done).toBe(true);
+  });
+
+  it("a 'frame' yield hands the rest of the budget to other tasks", () => {
+    const log: string[] = [];
+    const scheduler = new SolveScheduler(
+      [
+        {
+          name: 'a',
+          *start() {
+            log.push('a1');
+            yield 'frame';
+            log.push('a2');
+          },
+        },
+        counter('b', 2, log),
+      ],
+      () => 0,
+    );
+    scheduler.advance(1);
+    // a stops itself after a1; b then drains fully in the same frame.
+    expect(log).toEqual(['a1', 'b', 'b']);
+    scheduler.advance(1);
+    expect(log).toEqual(['a1', 'b', 'b', 'a2']);
+  });
+
+  it("a 'frame' yield does not disturb the recorded progress number", () => {
+    const scheduler = new SolveScheduler(
+      [
+        {
+          name: 't',
+          *start() {
+            yield 7;
+            yield 'frame';
+            yield 9;
+          },
+        },
+      ],
+      () => 0,
+    );
+    scheduler.advance(1);
+    expect(scheduler.progressOf('t')).toBe(7);
+    scheduler.advance(1);
+    expect(scheduler.progressOf('t')).toBe(9);
+  });
+});
