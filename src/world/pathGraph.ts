@@ -22,7 +22,7 @@ import { buildGraph, PLAZA, routeCurve, type PathGraph, type RouteDefinition } f
  */
 export { routeCurve };
 import { takePrewarmedPathGraph } from './pathsPrewarm';
-import { publishPaving } from './paving';
+import { publishDrawnPath, publishPaving } from './paving';
 
 /**
  * **The solved walk network and everything drawn from it.**
@@ -231,7 +231,59 @@ export function buildPaths(): Mesh[] {
     sink(PLAZA.x, PLAZA.z, PLAZA.radius);
   });
 
+  // **And where those two surfaces were actually drawn** (`world/paving.ts`),
+  // which is a different question from the one above and has to be answered
+  // from the strip *between* samples rather than from discs *at* them.
+  //
+  // The discs published to the router pinch in between consecutive samples,
+  // while the ribbon drawn from those same samples runs straight across — so a
+  // surface laid up against the disc union laps over the drawn ribbon in the
+  // scallops. Measured, that is 67% of the gateway path's seam against
+  // `path-surface`. The kerb is worse: it is deliberately absent from the disc
+  // list, so a caller could only approximate it by adding a margin to the
+  // surface, and both of the gateway path's kerb seams were **entirely** on
+  // ground the discs called clear.
+  //
+  // Segment-wise, so the answer is the swept strip itself. Consecutive samples
+  // in one `run` are adjacent cross-sections of one ribbon; samples either side
+  // of a `run` boundary belong to different routes and are not joined. A
+  // capsule can only ever *overstate* the trapezoid drawn between two
+  // cross-sections (it rounds the ends the strip cuts square), and overstating
+  // is the safe direction here: a caller stops a hair early and leaves nothing
+  // behind, where understating puts two surfaces in one plane.
+  publishDrawnPath((x, z, layer) => {
+    const overhang = layer === 'kerb' ? PATH_KERB_OVERHANG : 0;
+    // The plaza's kerb is an annulus drawn out to `radius + OVERHANG * 2`, not
+    // one overhang — read from the same expression that draws it above rather
+    // than assuming the ribbons' reach applies here too.
+    const plazaReach = PLAZA.radius + (layer === 'kerb' ? PATH_KERB_OVERHANG * 2 : 0);
+    if (Math.hypot(x - PLAZA.x, z - PLAZA.z) < plazaReach) return true;
+    for (let i = 1; i < samples.length; i += 1) {
+      const a = samples[i - 1] as PathSample;
+      const b = samples[i] as PathSample;
+      if (a.run !== b.run) continue;
+      if (distanceToSegment(x, z, a.x, a.z, b.x, b.z) < a.halfWidth + overhang) return true;
+    }
+    return false;
+  });
+
   return [kerbMesh, surfaceMesh];
+}
+
+/** Distance from a point to a line segment, in the ground plane. */
+function distanceToSegment(x: number, z: number, ax: number, az: number, bx: number, bz: number): number {
+  const dx = bx - ax;
+  const dz = bz - az;
+  const lengthSquared = dx * dx + dz * dz;
+  // A zero-length segment — two samples on top of one another, which a curve
+  // with a stationary point can produce — degenerates to its own endpoint
+  // rather than dividing by zero and answering `NaN`. `NaN < r` is false, so
+  // the surface would silently read as clear: this repo's own worked example
+  // of a check that cannot fail.
+  if (lengthSquared === 0) return Math.hypot(x - ax, z - az);
+  let t = ((x - ax) * dx + (z - az) * dz) / lengthSquared;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(x - (ax + t * dx), z - (az + t * dz));
 }
 
 /** Half-stride used to read the slope of a bridge's surface for the lifted

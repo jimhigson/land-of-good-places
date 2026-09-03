@@ -46,7 +46,7 @@ import {
   pathSurfaceMaterial,
 } from '../pathSurface';
 
-import { forEachPavedDisc } from '../paving';
+import { type DrawnPathLayer, forEachPavedDisc, pointIsOnDrawnPath } from '../paving';
 import { ArrivalSequence, arrivalIsDue } from './ArrivalSequence';
 import type { NpcCharacter } from '../../entities/npc/NpcCharacter';
 import { highlightObject } from '../highlight';
@@ -750,24 +750,77 @@ function buildEntranceRoad(): Mesh[] {
    * lying on `path-surface`, and its kerb 1.53 m² on `path-kerb` — two surfaces
    * in one plane, which is the thing this exists to avoid. Every column stops
    * on its own, so the join follows the shape of what it meets.
+   *
+   * **It asks where the network was drawn, not where the router's discs are.**
+   * `forEachPavedDisc` describes the walkable paving as circles at the
+   * centreline samples, which is the right shape for `NavGrid` and the wrong
+   * one for abutting a surface: the circles pinch in between samples where the
+   * drawn ribbon runs straight across, and they describe the surface only, so
+   * a kerb band could reach it only through a margin standing in for a kerb it
+   * never touches. Both were measured as real seams here — 67% of the surface
+   * seam and **100%** of both kerb seams lay where the discs said clear
+   * (`scripts/probe-gateway-seam.mts`). `pointIsOnDrawnPath` answers from the
+   * strip `pathGraph.ts` actually drew, at the layer this band is drawn in, so
+   * the two surfaces meet by construction instead of by a margin somebody has
+   * to keep in step — the same move `roadRoute.ts` makes for the kerb's inner
+   * edge at the other end of this path.
    */
-  const columnReach = (x: number, from: number, margin: number, floor: number): number => {
-    for (let z = from; z >= floor; z -= 0.05) {
-      // **The railway's ballast is a surface too, and it gets here first.** On
-      // seed 288 the train crosses the gate's own approach 4.5 m inside the
-      // wall, so a path run to the paving beyond it is laid straight down the
-      // ballast — 3.1 m² of shared plane, and it only appeared when the run
-      // became park paving, because a road at its own lift cleared the sweep's
-      // one-centimetre tolerance and sandy paving at the path's lift does not.
-      // The level crossing paves that band itself, so stopping here leaves no
-      // grass behind: one surface hands over to the next.
-      if (distanceToTrackCentre(x, z) < BALLAST_HALF_WIDTH + margin) return z;
-      let paved = false;
-      const known = forEachPavedDisc((discX, discZ, radius) => {
-        if (Math.hypot(x - discX, z - discZ) < radius + margin) paved = true;
-      });
-      if (!known) return floor;
-      if (paved) return z;
+  const columnReach = (
+    x: number,
+    from: number,
+    ballastMargin: number,
+    layer: DrawnPathLayer,
+    floor: number,
+  ): number => {
+    /**
+     * Is this point already covered by something the column must not lie on?
+     *
+     * Two surfaces, asked as one question because the column stops at whichever
+     * it reaches first. **The railway's ballast gets here first on seed 288**,
+     * where the train crosses the gate's own approach 4.5 m inside the wall, so
+     * a path run to the paving beyond it is laid straight down the ballast —
+     * 3.1 m² of shared plane, and it only appeared when the run became park
+     * paving, because a road at its own lift cleared the sweep's one-centimetre
+     * tolerance and sandy paving at the path's lift does not. The level
+     * crossing paves that band itself, so stopping there leaves no grass
+     * behind: one surface hands over to the next.
+     *
+     * `null` is "nobody drew a network" — an interior harness with no garden —
+     * and is deliberately not read as "clear", which would run the column on to
+     * the floor through paving that simply was not published.
+     */
+    const taken = (z: number): boolean | null => {
+      if (distanceToTrackCentre(x, z) < BALLAST_HALF_WIDTH + ballastMargin) return true;
+      return pointIsOnDrawnPath(x, z, layer);
+    };
+
+    /**
+     * **The column stops on the last clear step, never on the first taken
+     * one.** Returning the taken step is an off-by-one that lands the band's
+     * final row *on* the surface it was trying to abut: measured, it left
+     * 0.0675 m² of the run lying on `path-surface` and 0.0087/0.0157 m² of its
+     * kerbs on `path-kerb`, which is one step deep along every column.
+     *
+     * The coarse walk brackets the boundary; the bisection then finds it to a
+     * fraction of a millimetre, so the band abuts without a visible strip of
+     * grass between the two surfaces. Stepping the walk itself that finely
+     * instead would cost 250x the work per column for the same answer.
+     */
+    let lastClear = from;
+    for (let z = from; z >= floor; z -= COLUMN_STEP) {
+      const isTaken = taken(z);
+      if (isTaken === null) return floor;
+      if (isTaken) {
+        let clear = lastClear;
+        let hit = z;
+        for (let i = 0; i < COLUMN_BISECTIONS; i += 1) {
+          const middle = (clear + hit) / 2;
+          if (taken(middle) === true) hit = middle;
+          else clear = middle;
+        }
+        return clear;
+      }
+      lastClear = z;
     }
     // **A column that meets no paving stops level with the middle**, rather
     // than running on to the bus stop on its own. Letting it run was measured
@@ -862,22 +915,25 @@ const GATEWAY_PATH_FALLBACK_HALF_WIDTH = 1.6;
  */
 function buildGatewayPath(
   reach: SpurReach,
-  columnReach: (x: number, from: number, margin: number, floor: number) => number,
+  columnReach: (x: number, from: number, ballastMargin: number, layer: DrawnPathLayer, floor: number) => number,
 ): Mesh[] {
   const halfWidth = reach.halfWidth ?? GATEWAY_PATH_FALLBACK_HALF_WIDTH;
 
   /**
    * One band of the run, between two signed offsets from the gate's axis, at
-   * its own lift, stopping `margin` short of the published paving — which is
-   * the paving's *surface*, so a band that has to stop clear of the network's
-   * **kerb** says so with the same overhang the network draws it at.
+   * its own lift, stopping where the network's own drawn `layer` begins — so a
+   * band drawn as kerb stops against the network's kerb and a band drawn as
+   * surface against its surface, each asking about the thing it would
+   * otherwise lie on top of. `ballastMargin` is a separate question: how far
+   * clear of the railway's ballast this band has to stop.
    */
   const band = (
     name: string,
     fromX: number,
     toX: number,
     lift: number,
-    margin: number,
+    ballastMargin: number,
+    layer: DrawnPathLayer,
     material: MeshStandardMaterial,
   ): Mesh | null => {
     const road = densify(
@@ -887,7 +943,10 @@ function buildGatewayPath(
     if (road.length < 2) return null;
     // **Each column stops where the paving under *it* starts**, so the far end
     // follows the edge of what it meets instead of cutting across it.
-    const park = road.map((point) => ({ x: point.x, z: columnReach(point.x, point.z, margin, reach.z) }));
+    const park = road.map((point) => ({
+      x: point.x,
+      z: columnReach(point.x, point.z, ballastMargin, layer, reach.z),
+    }));
     // A row per metre or so of run, for the same reason the road is sampled at
     // a metre: the ground under the arch is not flat and a ribbon laid in two
     // rows cuts the corner of it.
@@ -916,6 +975,7 @@ function buildGatewayPath(
       centre - halfWidth,
       PATH_KERB_LIFT,
       PATH_KERB_OVERHANG,
+      'kerb',
       pathKerbMaterial(),
     ),
     band(
@@ -924,6 +984,7 @@ function buildGatewayPath(
       centre + halfWidth + PATH_KERB_OVERHANG,
       PATH_KERB_LIFT,
       PATH_KERB_OVERHANG,
+      'kerb',
       pathKerbMaterial(),
     ),
     band(
@@ -932,6 +993,7 @@ function buildGatewayPath(
       centre + halfWidth,
       PATH_SURFACE_LIFT,
       0,
+      'surface',
       pathSurfaceMaterial(),
     ),
   ].filter((mesh): mesh is Mesh => mesh !== null);
@@ -948,6 +1010,22 @@ function buildGatewayPath(
  * step has to be small enough that no single one of them reaches that.
  */
 const GATEWAY_PATH_COLUMN = 0.15;
+
+/**
+ * How far a column walks in per step while it is looking for the surface it
+ * has to stop against, in metres. Coarse on purpose — it only has to *bracket*
+ * the boundary, which {@link COLUMN_BISECTIONS} then pins down exactly.
+ */
+const COLUMN_STEP = 0.05;
+
+/**
+ * How many times the bracketed boundary is halved. Eight takes the 5 cm step
+ * to **0.2 mm**, which is two orders of magnitude under the 1 cm at which the
+ * coplanar sweep calls two faces the same plane — so the band lands on the
+ * clear side of the join with no gap a player could see, and the number of
+ * probes is fixed rather than proportional to how far the column ran.
+ */
+const COLUMN_BISECTIONS = 8;
 
 /**
  * Splits a polyline so no segment is longer than `spacing`, **without moving
