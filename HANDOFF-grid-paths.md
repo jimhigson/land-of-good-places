@@ -1706,3 +1706,68 @@ the tail is still unmeasured.
 - `pnpm run check` **exit 1**, on `check:pet-slide` (not this leg's, and the
   Overseer has a separate agent on it against #474 — stay off it).
 - `check:park` sweep: **10 of 16 green, 21 -> 20 stranded**.
+
+---
+
+## State — 2 Sep, seventh leg: the gate located, and it is the two-definitions bug
+
+### Seed 5's gate: measured to a single site, and to a single line of code
+
+`scripts/tmp-gate.mts` on seed 5 — the whole authored corridor, every metre of
+it, stands inside a bridge reservation:
+
+```
+deepest: '0.00,54.00'   START_Z: 54   INNER_Z: 30   onRampAtStart: true
+  z=54 side=-1 railDist=18.0 ramp=Y
+  ... every z from 54 down to 30 ...
+  z=30 side=1  railDist=6.0  ramp=Y
+gates: [{ mouth: '0.00,54.00', links: 9,
+          reachableFromRing: false, routes: false,
+          nearestReachable: '35.0m at 21.6,26.5' }]
+```
+
+`scripts/tmp-whichsite.mts` on five points down that corridor (z = 54, 48, 42,
+36, 30) names the culprit, and it is **one site, the same one every time**:
+
+```
+site 0 railD=0   at (0.0,36.0):   cutWithThisSiteExempt=false   <- exempting it clears the leg
+site 1 railD=74  at (63.0,9.0):   cutWithThisSiteExempt=true
+site 2 railD=156 at (12.4,-42.1): cutWithThisSiteExempt=true
+site 3 railD=246 at (-27.5,25.0): cutWithThisSiteExempt=true
+```
+
+Site 0 sits at (0, 36) — **on the gate's own axis**, 18 m in front of it, so the
+gate corridor runs straight down the middle of that site's reservation. A
+single-site identity exemption is provably sufficient for every corridor *leg*.
+
+### So why is the gate still unreachable? The nodes and the edges disagree
+
+`nodeOk` (paths.ts ~1791):
+
+```ts
+const onRamp = pointStandsOnBridgeMasonry(x, z);
+nodeOk[index] = clear && !inRing && !onRamp && rail.dist >= RAIL_CLAMP_DISTANCE ? 1 : 0;
+```
+
+`pointStandsOnBridgeMasonry` refuses only the **parapet ring**,
+`(halfWidth, halfWidth + margin]` — everything inside `halfWidth` it calls
+road. `segmentCutsABridgeRamp` forbids the **whole** reservation, `inner = 0`,
+since this branch's own change.
+
+**So lattice nodes are created on ground no edge is allowed to reach.** The
+gate's handover has nine links it may use and nothing on the far end of them
+that joins anywhere: an island of nodes standing in the middle of a rectangle
+every edge must go round. `nearestReachable: 35.0 m` is that island's distance
+to the rest of the park.
+
+**This is exactly the `pointStandsOnBridgeMasonry` item the brief has carried
+for three legs — "two definitions of one piece of ground; move it alone,
+measure it alone" — and it turns out to be seed 5's gate defect.** The two
+converge; they are not separate work.
+
+**Do NOT fix it by aligning the edges down to the nodes.** That is the
+reservation shrink, built and measured on the fifth leg: seed 11 3 -> 22, seed
+451 losing green. The alignment has to go the other way — nodes refused
+wherever edges are refused — which is a *strengthening*, consistent with the
+`inner = 0` decision, and it removes only nodes that were unreachable anyway.
+**Not yet built or measured. It is one line, and it must be measured alone.**
