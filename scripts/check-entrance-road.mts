@@ -76,6 +76,8 @@ interface SeedReport {
   /** Road vertices drawn outside the corridor the bus drives. Must be zero. */
   readonly strayVertices: number;
   readonly worstStray: number;
+  /** Nearest the gateway spur gets to the kerb. Must be zero — they must touch. */
+  readonly spurGap: number;
 }
 
 // ---------------------------------------------------------------- the child
@@ -203,14 +205,36 @@ async function measureOneSeed(): Promise<void> {
   // inside the corridor the sweep measured. That is the join between the plan
   // and the park, and it is the one thing that makes the numbers above mean
   // anything.
+  //
+  // **Scoped to the ribbon the bus drives, and only that one.** The gateway spur
+  // runs the other way — in through the arch to the plaza — and the bus never
+  // goes there (a bus is not a park vehicle; #195 is the whole reason it stops
+  // outside). Holding the spur to the bus's corridor would be asserting that a
+  // road the bus does not drive is inside the road the bus does drive, which is
+  // false by design and would have to be weakened to pass. The spur gets the
+  // assertion that is actually true of it instead — that it **abuts** the kerb,
+  // below — so nothing here is excused, it is asked the right question.
   let strayVertices = 0;
   let worstStray = 0;
+  let spurGap = Infinity;
   {
     const { Mesh } = await import('three');
     const at = new Vector3();
     park.scene.traverse((object) => {
       const mesh = object as InstanceType<typeof Mesh>;
-      if (!mesh.isMesh || !mesh.name.startsWith('entrance-road')) return;
+      if (!mesh.isMesh) return;
+      if (mesh.name === 'entrance-road-gateway') {
+        // Continuity: the spur's outermost vertex has to touch the kerb, or a
+        // child walking in from the bus steps over a strip of grass between two
+        // slabs of road.
+        const position = mesh.geometry.getAttribute('position');
+        for (let i = 0; i < position.count; i += 1) {
+          at.set(position.getX(i), position.getY(i), position.getZ(i)).applyMatrix4(mesh.matrixWorld);
+          spurGap = Math.min(spurGap, distanceToEntranceCorridor(at.x, at.z));
+        }
+        return;
+      }
+      if (!mesh.name.startsWith('entrance-road')) return;
       const position = mesh.geometry.getAttribute('position');
       for (let i = 0; i < position.count; i += 1) {
         at.set(position.getX(i), position.getY(i), position.getZ(i)).applyMatrix4(mesh.matrixWorld);
@@ -232,6 +256,7 @@ async function measureOneSeed(): Promise<void> {
     worstPenetration: Number(worstPenetration.toFixed(3)),
     controlHits: controlLegs.size,
     controlWorst: Number(controlWorst.toFixed(3)),
+    spurGap: Number((Number.isFinite(spurGap) ? spurGap : 999).toFixed(3)),
     reach: Number(entranceRoadReach().toFixed(1)),
     brow: Number(brow.toFixed(1)),
   };
@@ -277,6 +302,13 @@ async function sweepThePool(): Promise<void> {
           `the corridor the bus drives, the furthest ${report.worstStray.toFixed(2)} m out — the road ` +
           'on screen is not the road this check measured, so its verdict below describes a plan rather ' +
           'than the park',
+      );
+    }
+    if (report.spurGap > 0.01) {
+      failures.push(
+        `seed ${report.seed}: the gateway spur's nearest vertex is ${report.spurGap.toFixed(2)} m from ` +
+          'the kerb — the road through the arch does not meet the road the bus stops on, so there is ' +
+          'grass between them where a child walks in',
       );
     }
     if (report.hits > 0) {
