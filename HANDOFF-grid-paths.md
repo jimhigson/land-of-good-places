@@ -532,11 +532,32 @@ report #3 asks for.
 
 **So the finding is: the rule is right and the routes are better, yet
 `poi.stranded` went 0 -> 2.** The regression is therefore *not* in the route
-shapes — it is in what those two short final stubs land on. Chase the two
-stranded waypoints on 267 with `tmp-pocket.mts` / `tmp-blocker.mts` at the
-ends of `(-3.7,-73.5) -> (-3.7,-77.0)` and `(-11.8,-73.5) -> (-11.8,-76.6)`.
-**Do not treat this as an argument against the rule**; on the evidence it is
-an argument for it.
+shapes. **Do not treat this as an argument against the rule**; on the evidence
+it is an argument for it.
+
+**AND THE OBVIOUS NEXT GUESS WAS WRONG — measured, so recorded.** I predicted
+the two stranded waypoints would be at the ends of the two short skyCruiser
+stubs the diff had just changed. They are not. `tmp-lonely.mts` on 267:
+
+```
+X (0.0,51.8) nbrs=1 nearestPaving=0.20m (gate-approach) nearestDoormat=21.62m
+X (0.0,50.9) nbrs=1 nearestPaving=1.10m (gate-approach) nearestDoormat=21.79m
+```
+
+Both are on **`gate-approach`, at x = 0, z ~ 51**, sitting 0.20 m and 1.10 m
+from their own paving with one neighbour each. Nowhere near the skyCruiser.
+
+**That is the same signature as the defect leg 1 fixed** — the gate corridor's
+outer end at x = 0, z 44..52 — and, decisively, **it is also where the
+canonical seed's remaining stranded waypoints are**: canonical's very first
+baseline listed `(0.0, 51.8) (0.0, 48.2) (0.0, 44.6)` and canonical is still
+at 4 today, unmoved by every change since.
+
+**So canonical's 4 and 267's 2 are probably ONE cause, and it is the gate
+approach's outer end, not the grid discipline.** 267 only started showing it
+because the discipline change altered which routes exist near the gate; the
+defect was latent. Chase them together — they are 6 of the 28 remaining — and
+start at the gate end of `gate-approach`, not at the skyCruiser.
 
 **The one regression, seed 267 (0 -> 2), is NOT starvation** — and that is
 diagnostic. Canonical and 428 both recovered when the fallback rung was
