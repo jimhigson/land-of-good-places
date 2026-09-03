@@ -1,7 +1,9 @@
 # Issue #501 — the train drives through the ginormous slide's legs
 
 Branch `fix/slide-legs-501`, worktree `.claude/worktrees/slide-legs-501`.
-Engineer, **Opus 5 (1M context)** (`claude-opus-5[1m]`).
+Engineer, **Opus 5 (1M context)** (`claude-opus-5[1m]`) — the Engineer role's
+default model, chosen by CLAUDE.md rather than per-task by Jim. A replacement
+should resume on the same.
 
 ## Root cause (measured, not guessed)
 
