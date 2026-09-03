@@ -39,7 +39,7 @@ import {
   buildVoussoirRing,
   haunchRadius,
 } from './bridgeStonework';
-import { COPING_SINK, VOUSSOIR_TAPER_RADIUS } from '../../art/models/bridgeStones';
+import { COPING_HEIGHT, COPING_SINK, VOUSSOIR_TAPER_RADIUS } from '../../art/models/bridgeStones';
 import type { MovingPlatform } from '../building/surfaces';
 
 /**
@@ -1315,11 +1315,45 @@ function buildShellGeometry(
             // is *inside the coping stone*. A face there is hidden by
             // construction, which is what makes deleting it the ART_DIRECTION §7
             // fix and not a maintained stand-off.
+            //
+            // **But only where there is actually a stone to hide under, and
+            // that question has one owner.** `buildCopingRun` lays no block on a
+            // segment whose parapet is shorter than the block is thick, so on a
+            // tapered ramp foot the slack was deleting reveals with open sky
+            // above them and no cap closing the step — 50 of them across 12 of
+            // the 16 pool seeds, 16–77 mm below a wall top standing 0.00–0.10 m
+            // proud of the road, every one introduced by this branch. Asking
+            // `min(parapet) >= COPING_HEIGHT` here is the *same* test that
+            // function makes, so the two cannot drift into two definitions of
+            // "is there coping here" (CLAUDE.md's most-cited bug); where there
+            // is no block, the exact `>= top` test is what applies, as it did
+            // before.
+            const copingHere =
+              Math.min(
+                (previous.top[side] as number) - previous.surface,
+                (ring.top[side] as number) - ring.surface,
+              ) >= COPING_HEIGHT;
+            // Where no block is laid, the `wallTop` cap is still there — it is
+            // drawn for every ring pair on both flanks, unconditionally — so a
+            // reveal landing *in the cap's own plane* still fights it and still
+            // has to go. What it must not do is take a genuine ledge with it.
+            //
+            // The two are cleanly separable, measured across the pool: the
+            // strays this branch was deleting sat **16–77 mm** below the wall
+            // top, while a reveal actually fighting the cap sits **1.5 mm**
+            // under it (seed 225's `bridge-244.0`). So the test is a shape one —
+            // *is the course above this reveal a real course, or a clamping
+            // artefact?* — at a hundredth of `COURSE_HEIGHT`, which is 7 mm and
+            // falls in the middle of that gap. A course 0.2% of a course tall is
+            // the arithmetic landing on the wall top by coincidence; one 2–11%
+            // of a course tall is masonry somebody can see.
+            const artefact = COURSE_HEIGHT / 100;
+            const sink = copingHere ? COPING_SINK : artefact;
             const revealAtTop =
               (previous.courseYs[side][course * 2 + 1] as number) >=
-                (previous.top[side] as number) - COPING_SINK &&
+                (previous.top[side] as number) - sink &&
               (ring.courseYs[side][course * 2 + 1] as number) >=
-                (ring.top[side] as number) - COPING_SINK;
+                (ring.top[side] as number) - sink;
             // **And not where it would be drawn in the ground** (#489).
             //
             // The flank deliberately runs half a metre below the terrain so a
@@ -1337,9 +1371,26 @@ function buildShellGeometry(
             // `COPING_SINK` is the right one above: it is the ledge's own
             // width, owned by the geometry rather than invented here. A 6 cm
             // shelf standing less than its own width out of the grass is not
-            // reading as masonry to anybody — measured, the faces this deletes
-            // sit 2–19 mm above the ground — and deleting it is the
+            // reading as masonry to anybody, so deleting it is the
             // ART_DIRECTION §7 answer where nudging it would not be.
+            //
+            // **Measured across all sixteen pool seeds, and the threshold is
+            // saturated — read this before changing anything near it.** Of
+            // 2241 reveals this clause deletes, 209 stand *above* the terrain
+            // rather than under it, 110 of those by more than 30 mm, and the
+            // worst is **59.9 mm against the 60 mm threshold**. So there is
+            // essentially no headroom: a face is being deleted within 0.1 mm of
+            // the limit, and any change that lifts the coursing or moves the
+            // terrain under a flank can push one back over and reopen the seam
+            // `check:coplanar` is currently green on.
+            //
+            // This comment first said "2–19 mm", which was measured on two
+            // bridges of one seed and read as 3× headroom where there is none.
+            // The reviewer caught it. `scripts/measure-bridge-parapet.mts` is
+            // the see-through half; the deletion counts above come from
+            // instrumenting this clause directly across the pool, and anyone
+            // touching it should re-run that rather than trust these numbers,
+            // which are a measurement and will go stale like any other.
             //
             // Only the reveal goes. The vertical course faces stay: a wall does
             // not share a plane with a hillside, so they cost nothing and they

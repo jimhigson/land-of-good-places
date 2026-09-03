@@ -5100,6 +5100,8 @@ const noBridgeParapetCanBeSeenThrough: Invariant = (facts) => {
 
   const rings = facts.bridgeParapetRings;
   let judged = 0;
+  /** Which bridges actually contributed a judged sample — not which exist. */
+  const covered = new Set<string>();
   const seeThrough = new Map<string, { count: number; worst: number; at: string }>();
 
   for (let i = 0; i + 1 < rings.length; i += 1) {
@@ -5164,6 +5166,7 @@ const noBridgeParapetCanBeSeenThrough: Invariant = (facts) => {
       raycaster.set(from, direction);
       raycaster.far = STANDOFF + HIT_SLACK;
       judged += 1;
+      covered.add(a.bridge);
       if (faceHit()) {
         closeRun();
         continue;
@@ -5195,9 +5198,20 @@ const noBridgeParapetCanBeSeenThrough: Invariant = (facts) => {
         'level crossing, or the built mesh names have changed, so this asserts nothing',
     );
   } else {
+    // **`covered.size`, never `groups.size`.** The first is how many bridges
+    // this actually judged a sample on; the second is how many exist. Reporting
+    // the second means losing cover on *some* bridges — a renamed mesh on one,
+    // a flank whose rings all read as tapered — says nothing at all, because
+    // only total-zero trips the clause above. Naming the uncovered ones is the
+    // difference between a note that can warn you and one that cannot.
+    const missing = [...groups.keys()].filter((name) => !covered.has(name));
     process.stderr.write(
       `noBridgeParapetCanBeSeenThrough: judged ${judged} samples across ` +
-        `${groups.size} bridge(s) on seed ${facts.seed}\n`,
+        `${covered.size} of ${groups.size} bridge(s) on seed ${facts.seed}` +
+        (missing.length > 0
+          ? ` — NO SAMPLE JUDGED on ${missing.join(', ')}, which this run therefore asserts nothing about`
+          : '') +
+        `\n`,
     );
   }
 
