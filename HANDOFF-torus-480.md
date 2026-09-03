@@ -58,9 +58,44 @@ solidity.
 
 ## Status
 
-- [x] Found and measured
-- [ ] Owner extracted, both callers on it
-- [ ] Invariant/check
-- [ ] check / test:procgen / build
-- [ ] Browser screenshots before+after, posted to #480
+- [x] Found and measured (see above)
+- [x] One owner `src/world/entrance/gateArch.ts`; `Entrance.ts` and
+      `BusJourney.ts` both call it. Posts derived from the same `yaw`.
+- [x] Collider: `arch.footRadius` (0.55, derived) on each foot, in `Entrance`.
+      Nothing under the span — that is the way in.
+- [x] Invariant `the park gate arch stands over its gateway, and the gateway
+      stays open`, both mutations proved red (rotations restored; colliders
+      removed). `test:procgen` green on all 5 seeds, exit 0.
+- [x] Browser before/after, posted to #480 (comment 5524511359) with the
+      `/view?camPos=0,4.5,74&camDir=0,-0.08,-1&timeOfDay=12:00` framing.
+- [ ] `pnpm run check` — running, log at scratchpad/check.log
+- [ ] `pnpm run build`
 - [ ] PR
+
+## Trap for whoever probes near the boundary
+
+**The gate line is blocked from wall to wall.** The park boundary keeps a child
+*inside* the park, so a `PLAYER_RADIUS` body standing on z = 60 overlaps the
+outside and comes back not-standable — 33 of 33 probes across the gate,
+measured with `scripts/measure-gate-480.mts`. My first draft of the invariant
+probed exactly there for open ground and was green for a reason that had
+nothing to do with the arch. Probe 1.5 m inside for "open", 1.0 m in front of a
+post for "solid" (that is inside `PLAYER_RADIUS + GATE_POST_COLLIDER_RADIUS`
+= 1.17 m, so it is guaranteed by geometry, not by the seed).
+
+## New scope arrived mid-task, NOT started
+
+1. **Place the authored arch.** Jim approved the Blender asset: *"perfect. Add
+   the arch please to the game."* It is on branch `art/gate-arch-asset` with
+   `HANDOFF-gate-arch-asset.md`. `createGateArch()`, origin at the middle of
+   the gateway on the ground, forward +Z; collider two circles r
+   `GATE_ARCH_PIER_KEEP_OUT` 0.80 at x = ±`ENTRANCE_GATE_HALF_WIDTH`; keep the
+   node name `park-gate-arch`. It replaces the meshes `gateArch.ts` builds —
+   this branch's one-owner seam is exactly where it lands, and the yaw,
+   `feet`, `footRadius` and `clearHeightY` contract already fits it. Owes a
+   `keepOutsFor` reachability check with a control, and `check:coplanar`.
+2. **The arrival camera sequence.** Jim: doors → follow her in under the arch →
+   rise to the normal pseudo-isometric camera. Not begun. Read the Overseer's
+   brief in the session log; the constraints that matter are: no snap at the
+   handover, deep links must not wait on it, skippable, `dt`-driven, and the
+   normal camera pose read from its existing owner rather than copied.
