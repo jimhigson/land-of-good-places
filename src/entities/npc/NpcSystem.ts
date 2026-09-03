@@ -336,8 +336,13 @@ const NPC_LABEL_ACCENT = PALETTE.markerSky;
 const NPC_LABEL_SCALE = 0.82;
 /** How high above a child's own height their label floats. */
 const LABEL_HEIGHT_OFFSET = 0.34;
-/** Only the nearest handful of labels show at once — a dozen name pills is clutter. */
-const VISIBLE_LABEL_CAP = 10;
+/**
+ * Only the nearest handful of labels show at once — a dozen name pills is
+ * clutter. Exported for the same reason as {@link LABEL_MAX_DISTANCE}: so a
+ * check can tell a pill that is legitimately down (out of the cap) from one
+ * that is stuck down, without keeping its own copy of the number.
+ */
+export const VISIBLE_LABEL_CAP = 10;
 
 /** A speech bubble floats a little higher than the name pill it shares a head with. */
 const BUBBLE_HEIGHT_OFFSET = LABEL_HEIGHT_OFFSET + 0.62;
@@ -1442,18 +1447,54 @@ export class NpcSystem implements GameSystem {
    * `check:speech-bubbles` can ask the one question issue #486 is about —
    * whether the two are ever drawn over each other — without pairing them up
    * again itself.
+   *
+   * `labelRank` and `labelDistance` are the two facts `updateLabels` has
+   * already worked out this frame — how near the camera's focus she ranks, and
+   * how far off it she is. They are here so a check can tell a pill that is
+   * legitimately down (out of {@link VISIBLE_LABEL_CAP}, or past
+   * {@link LABEL_MAX_DISTANCE}) from one that is **stuck** down, and tell it by
+   * asking the system that decided rather than by sorting the crowd a second
+   * time. A check that re-derived the ranking would be a second definition of
+   * a rule this class owns, kept in step by hand — the fault CLAUDE.md names
+   * most often, and not one worth introducing inside the check written to
+   * prevent an instance of it.
+   *
+   * `speaking` is the same {@link speechTextOf} both the bubble and the pill
+   * read. It is **not** for asking whether the pill obeys it — that question
+   * has to be put to the two `sprite.visible` flags, or it is asking whether
+   * one value equals itself. It is for classifying a frame: a child mid-word
+   * whose bubble is too far away to draw is neither speaking-on-screen nor
+   * silent, and only the driver can say which she is.
    */
   get speechBubbles(): readonly {
     readonly character: NpcCharacter;
     readonly bubble: SpeechBubble;
     readonly label: NameLabel;
+    readonly labelRank: number;
+    readonly labelDistance: number;
+    readonly speaking: boolean;
   }[] {
-    const pairs: { character: NpcCharacter; bubble: SpeechBubble; label: NameLabel }[] = [];
+    const pairs: {
+      character: NpcCharacter;
+      bubble: SpeechBubble;
+      label: NameLabel;
+      labelRank: number;
+      labelDistance: number;
+      speaking: boolean;
+    }[] = [];
     for (let i = 0; i < this.characters.length; i += 1) {
       const character = this.characters[i];
       const bubble = this.bubbles[i];
       const label = this.labels[i];
-      if (character && bubble && label) pairs.push({ character, bubble, label });
+      if (!character || !bubble || !label) continue;
+      pairs.push({
+        character,
+        bubble,
+        label,
+        labelRank: this.labelOrder.indexOf(i),
+        labelDistance: this.labelDistances[i] ?? Infinity,
+        speaking: this.speechTextOf(i) !== null,
+      });
     }
     return pairs;
   }
