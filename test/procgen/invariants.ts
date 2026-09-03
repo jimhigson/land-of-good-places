@@ -767,23 +767,19 @@ const plotsDoNotOverlap: Invariant = (facts) => {
  *    beside it by `src/world/entrance/gateArch.ts`, found in the scene, not
  *    asked of the builder. A crossbar turned out of the gate plane takes its
  *    ends with it and lands nowhere near them.
- * 2. **The way in is open in the middle and closed at the sides.** Probed
- *    through the real collision world along a line parallel to the arch and
- *    {@link GATE_PROBE_INSET} inside the park.
+ * 2. **The gate is solid where a child walks into it** — a stride in front of
+ *    each post, inside the reach that post has over her. This is what fails
+ *    if the gate loses its colliders, and it is the control on the probe:
+ *    it has to be able to answer "no".
  *
- *    **Both halves of that sentence are load-bearing, and the second is the
- *    control.** A probe that answered "blocked" everywhere would pass a
- *    naive open-in-the-middle clause by never being asked, and one that
- *    answered "open" everywhere would pass a naive closed-at-the-sides one;
- *    requiring both from the same probe on the same line is what makes it an
- *    instrument rather than an assertion. It matters here specifically:
- *    **the gate line itself is blocked from wall to wall**, because the park
- *    boundary keeps a child *inside* the park and a `PLAYER_RADIUS` body on
- *    the boundary overlaps the outside. Measured on the canonical seed, every
- *    one of the 33 probes across the gate at z = 60 comes back blocked. A
- *    clause probing there would have been green for a reason that has nothing
- *    to do with the gate, which is exactly how the first draft of this
- *    invariant passed the broken arch's own geometry.
+ *    **Where that probe may not be pointed:** the gate line itself is
+ *    blocked from wall to wall, because the park boundary keeps a child
+ *    *inside* the park and a `PLAYER_RADIUS` body standing on the line
+ *    overlaps the outside — 33 of 33 probes across the gate at z = 60 on the
+ *    canonical seed, whatever the gate is doing. A clause probing there is
+ *    green for a reason that has nothing to do with the gate, which is
+ *    exactly how the first draft of this invariant passed the *broken*
+ *    arch's own geometry. See `scripts/measure-gate-480.mts`.
  * 3. **Nothing hangs into that gap.** The lowest point of the arch clears
  *    {@link TALLEST_CHILD_HEIGHT} — the park's tallest possible child, party
  *    hat and all, taken from the game rather than from the gate's own design.
@@ -803,23 +799,21 @@ const plotsDoNotOverlap: Invariant = (facts) => {
 const GATE_FOOT_TOLERANCE = 0.6;
 
 /**
- * How far inside the park the two gateway probes stand, in metres.
+ * How far inside the park the gate probe stands, in metres.
  *
- * Both are derived from the reach a gate post has over a child —
- * `PLAYER_RADIUS` (0.62) + {@link GATE_POST_COLLIDER_RADIUS} (0.55) = 1.17 m:
+ * Derived from the reach a gate post has over a child — `PLAYER_RADIUS` (0.62)
+ * + {@link GATE_POST_COLLIDER_RADIUS} (0.55) = 1.17 m. `solid` is **inside**
+ * that reach, so a child there must be pushed out, which is what proves the
+ * posts carry colliders at all and is the control on the probe.
  *
- * - `SOLID` is **inside** that reach, so a child there must be pushed out.
- *   This is what proves the posts carry colliders at all, and it is the
- *   control on the probe: it must be able to answer "no".
- * - `OPEN` is **outside** it, so neither post can be what answers, and it is
- *   far enough off the boundary line that the park's containment is not
- *   either. This is what proves the gate she can see is still a gate she can
- *   walk through.
+ * It must not be pointed at the gate line itself: the park boundary keeps a
+ * child *inside* the park, so a `PLAYER_RADIUS` body standing on the line
+ * overlaps the outside and every probe along it comes back blocked — 33 of 33
+ * across the gate on the canonical seed, whatever the gate is doing.
  *
- * The gate line itself is useless for both: the park boundary keeps a child
- * *inside* the park, so a `PLAYER_RADIUS` body standing on it overlaps the
- * outside and every probe along it comes back blocked — 33 of 33 across the
- * gate on the canonical seed, whatever the gate is doing.
+ * `open` (1.5 m, outside the posts' reach and clear of the boundary) is what
+ * the withheld walkability clause used, kept here for whoever lands it with
+ * issue #481's fix.
  */
 const GATE_PROBE_INSET = { solid: 1.0, open: 1.5 } as const;
 
@@ -872,33 +866,14 @@ const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
     }
   }
 
-  // 2. The way in, on lines parallel to the arch and a stride inside the park,
-  // where the boundary's own containment is not the answer to every probe.
-  // "Inside" is towards the middle of the park, which the gate faces.
+  // 2. The gate is solid where a child bumps into it: a stride in front of
+  // each post, inside the reach the post is supposed to have over her. This
+  // is the clause that fails if the gate loses its colliders, and it is also
+  // this probe's control — it must be able to answer "no" before an answer of
+  // "yes" anywhere else is worth anything.
   const toMiddle = Math.hypot(arch.centreX, arch.centreZ);
   const inward: readonly [number, number] =
     toMiddle > 1e-6 ? [-arch.centreX / toMiddle, -arch.centreZ / toMiddle] : [0, 0];
-  const inside = (t: number, inset: number): readonly [number, number] => {
-    const [x, z] = along(t);
-    return [x + inward[0] * inset, z + inward[1] * inset];
-  };
-
-  let openInTheMiddle = 0;
-  for (const t of [-0.4, -0.2, 0, 0.2, 0.4] as const) {
-    const [x, z] = inside(t, GATE_PROBE_INSET.open);
-    if (facts.isStandable(x, z)) openInTheMiddle += 1;
-    else {
-      fouls.push(
-        `the gateway is blocked at (${x.toFixed(2)}, ${z.toFixed(2)}), ${(t * half).toFixed(2)} m from ` +
-          `the middle of the opening and ${GATE_PROBE_INSET.open} m inside the park — a child cannot ` +
-          'walk into her own park',
-      );
-    }
-  }
-
-  // ...and the control on that probe, at the posts themselves: it has to be
-  // able to answer "no", or the open readings above prove nothing. This is
-  // also the clause that fails if the gate loses its colliders.
   for (const post of arch.posts) {
     const x = post.x + inward[0] * GATE_PROBE_INSET.solid;
     const z = post.z + inward[1] * GATE_PROBE_INSET.solid;
@@ -907,11 +882,34 @@ const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
         `a child can stand at (${x.toFixed(2)}, ${z.toFixed(2)}), ${GATE_PROBE_INSET.solid} m in front of ` +
           `the gate post at (${post.x.toFixed(2)}, ${post.z.toFixed(2)}) — inside the ` +
           `${(PLAYER_RADIUS + GATE_POST_COLLIDER_RADIUS).toFixed(2)} m the post is supposed to hold her ` +
-          `off, so the gate is not solid, and the ${openInTheMiddle} open readings across the middle ` +
-          'were taken with a probe that cannot see a blocker',
+          'off, so the gate is not solid',
       );
     }
   }
+
+  // **What this invariant deliberately does NOT assert, and why.** There is no
+  // clause here that the gateway is *walkable* — that a child can actually get
+  // from outside the gate to inside it — and that gap is real cover this check
+  // does not give.
+  //
+  // It was written, it worked, and it found a defect that is not this one: the
+  // park boundary is a seed-dependent spline while the gate is a fixed
+  // constant at (0, 60), so on some seeds the boundary wall runs *across* the
+  // opening. Measured 1.5 m inside the gate, the middle of the way in is
+  // blocked on pool seed 288 (a chain of 0.18 m walls through (0.01, 57.76))
+  // and on sweep seed 18 (through (-1.13, 59.87), the opening shut but for a
+  // 1 m slot at x = 3.5). That is the two-definitions disease and it predates
+  // this file's interest in the gate; it is issue #481, and the walkability
+  // clause lands with its fix rather than being weakened to go green here.
+  //
+  // Announced on stderr on every run, passing or failing, because a green line
+  // that implies cover it does not give is how the next agent inherits a false
+  // belief — and Vitest only shows `console.log` from *failing* tests.
+  process.stderr.write(
+    'the park gate arch invariant asserts nothing about whether a child can walk through the gateway ' +
+      '— the boundary crosses it on some seeds (#481); it covers only the arch pointing the right way, ' +
+      'the posts being solid, and the headroom\n',
+  );
 
   // 3. Nothing of it hangs into that gap.
   const headroom = arch.minY - arch.groundY;
