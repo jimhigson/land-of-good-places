@@ -3437,3 +3437,88 @@ the two legs are collinear.* And the general form, which is this branch's own
 recurring shape one layer further out: **a post-process that improves a
 polyline's shape must re-answer the screens the polyline was accepted
 under, or it must not run.**
+
+### THE FIX — BUILT, MEASURED ON BOTH COLUMNS, KEPT
+
+`drawsAsScreened(shape)` = `trimBacktracks(shape).length === shape.length`, and
+a connector whose shape it refuses is not offered. The rule is asked of
+`trimBacktracks` itself, never of a second copy of the angle test, so the two
+cannot drift.
+
+**Applied at every connector-production site, not only the one that failed** —
+the head-on shapes, the straight connector, the corner elbow and
+`relayConnectors`. The last three refuse nothing on any pool seed today; they
+are guarded because a rule honoured in one place and not its siblings is how
+this branch's defects have kept reappearing in new organs.
+
+`pnpm exec tsc --noEmit` exit 0.
+
+**Column 1 — `check:park`, all sixteen pool seeds:**
+
+| seed | before | after | |
+|---|---|---|---|
+| canonical | 0 | 0 | green |
+| 5 | 0 | 0 | green |
+| 11 | 1 | 1 | |
+| 24 | 2 | 2 | |
+| 115 | 0 | 0 | green |
+| 128 | 0 | 0 | green |
+| 131 | 0 | 0 | green |
+| 208 | 0 | 0 | green |
+| 225 | 2 | 2 | |
+| 267 | 0 | 0 | green |
+| 274 | 0 | 0 | green |
+| 288 | 2 | 2 | |
+| 326 | 0 | 0 | green |
+| 346 | 0 | 0 | green |
+| 428 | 0 | 0 | green |
+| 451 | 1 | **0** | **now green** |
+
+**11 green / 8 stranded -> 12 green / 7 stranded. No seed regressed.**
+
+**Column 2 — `test:procgen`. Baseline RE-RUN rather than reused**, because the
+first capture was piped through `tail -60` and had silently kept only the last
+two failures — a truncated baseline would have made any set-diff a guess.
+
+**6 failed / 1403 passed -> 5 failed / 1404 passed**, and the *violation set*
+(not the count) diffs to exactly one removal and no additions:
+
+```
+- seed 225  every paved path runs on grid axes
+  connector-building-exit-ginormousSlide runs diagonally for 16.2 m,
+  from 40.3, 13.6 to 25.7, 6.6
+```
+
+Every other violation line is byte-identical before and after, including both
+of seed 11's and both of seed 5's `streetsShareLatticeLines` runs. **That is
+the column that matters here**: `streetsShareLatticeLines` is precisely the
+instrument that catches long private arterials, which is what sank variant A
+while its net failure count looked like progress. No arterial was traded in
+for this green.
+
+**So seed 451's lost green and item 1 (seed 225's `pathsRunOnGridAxes`) are
+one defect and one fix.** The brief listed them as two.
+
+451's spur, before and after:
+
+```
+before  (32.3,-40.2) (34.1,-28.9)                                 one 11.45 m diagonal, 0.76 m inside the booth
+after   (44.3,-40.2) (44.3,-26.4) (36.6,-26.4) (34.1,-28.9)       two lattice lines, then the 3.5 m head-on lead
+```
+
+`deepestOnLeg` against `stall.spookyHouse`'s footprint: **-0.76 -> +0.50.**
+
+### Still owed (unchanged except the two struck above)
+
+- ~~Seed 451's lost green~~ — done.
+- ~~`pathsRunOnGridAxes` on 225~~ — done, same fix.
+- `streetsShareLatticeLines` on 5, 11, 128.
+- `noPathEndsNowhere` on 288.
+- `detourRatiosStayReasonable` on 267 — establish the honest baseline first:
+  the route it replaced ran through solid ground.
+- Stage-2 invariant (b); probe deletion (`tmp-stoneground.mts` last, re-run
+  after any reservation or `bridgeFootprint.ts` change); the rebase.
+- **New probes this leg added, to delete with the rest:** `tmp-451corner.mts`,
+  `tmp-451leg.mts`, `tmp-451edges.mts`, `tmp-451who.mts`, `tmp-sweep.sh`, and
+  the `debugArrivalLegScreens` / `debugNodeEdges` exports at the end of
+  `paths.ts`. `drawsAsScreened` is **not** a probe and stays.
