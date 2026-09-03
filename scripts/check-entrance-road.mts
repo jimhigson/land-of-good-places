@@ -73,6 +73,9 @@ interface SeedReport {
   readonly controlWorst: number;
   readonly reach: number;
   readonly brow: number;
+  /** Road vertices drawn outside the corridor the bus drives. Must be zero. */
+  readonly strayVertices: number;
+  readonly worstStray: number;
 }
 
 // ---------------------------------------------------------------- the child
@@ -83,9 +86,8 @@ async function measureOneSeed(): Promise<void> {
   const { POST_FOOT_RADIUS } = await import('../src/world/railRace/trestleGeometry.ts');
   const { PARK_SEED } = await import('../src/world/parkManifest.ts');
   const { ENTRANCE_WALL_RADIUS } = await import('../src/world/entrance/layout.ts');
-  const { entranceRoadAt, entranceRoadBrow, entranceRoadReach } = await import(
-    '../src/world/entrance/roadRoute.ts'
-  );
+  const { entranceRoadAt, entranceRoadBrow, entranceRoadReach, distanceToEntranceCorridor } =
+    await import('../src/world/entrance/roadRoute.ts');
 
   const park = buildHeadlessPark();
 
@@ -188,8 +190,43 @@ async function measureOneSeed(): Promise<void> {
     }
   }
 
+  // --- is the road that is DRAWN the road the bus drives? -------------------
+  //
+  // **Without this the rest of the file can pass while fixing nothing.** The
+  // sweep above asks whether the *route* clears the supports; a route is a plan.
+  // If `Entrance.ts` goes on building a ribbon somewhere else — as it did for
+  // the whole first half of this change — every seed reads clean while the bus
+  // still drives through a leg, which is precisely CLAUDE.md's "an assertion
+  // reporting success about something it is not describing".
+  //
+  // So: every vertex of every `entrance-road*` mesh in the built park has to lie
+  // inside the corridor the sweep measured. That is the join between the plan
+  // and the park, and it is the one thing that makes the numbers above mean
+  // anything.
+  let strayVertices = 0;
+  let worstStray = 0;
+  {
+    const { Mesh } = await import('three');
+    const at = new Vector3();
+    park.scene.traverse((object) => {
+      const mesh = object as InstanceType<typeof Mesh>;
+      if (!mesh.isMesh || !mesh.name.startsWith('entrance-road')) return;
+      const position = mesh.geometry.getAttribute('position');
+      for (let i = 0; i < position.count; i += 1) {
+        at.set(position.getX(i), position.getY(i), position.getZ(i)).applyMatrix4(mesh.matrixWorld);
+        const outside = distanceToEntranceCorridor(at.x, at.z);
+        if (outside > 0.01) {
+          strayVertices += 1;
+          worstStray = Math.max(worstStray, outside);
+        }
+      }
+    });
+  }
+
   const report: SeedReport = {
     seed: PARK_SEED,
+    strayVertices,
+    worstStray: Number(worstStray.toFixed(2)),
     legs: legs.length,
     hits: hitLegs.size,
     worstPenetration: Number(worstPenetration.toFixed(3)),
@@ -234,6 +271,14 @@ async function sweepThePool(): Promise<void> {
   }
 
   for (const report of reports) {
+    if (report.strayVertices > 0) {
+      failures.push(
+        `seed ${report.seed}: ${report.strayVertices} vertices of the drawn entrance road lie outside ` +
+          `the corridor the bus drives, the furthest ${report.worstStray.toFixed(2)} m out — the road ` +
+          'on screen is not the road this check measured, so its verdict below describes a plan rather ' +
+          'than the park',
+      );
+    }
     if (report.hits > 0) {
       failures.push(
         `seed ${report.seed}: the cat bus sweeps through ${report.hits} Rail Race trestle leg(s) on ` +
