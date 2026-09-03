@@ -7,7 +7,6 @@ import {
   Mesh,
   PlaneGeometry,
   SphereGeometry,
-  TorusGeometry,
   Vector3,
 } from 'three';
 import { PALETTE } from '../../core/palette';
@@ -24,6 +23,7 @@ import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld } from '../Collision';
 import type { Player } from '../../entities/Player';
 import { buildPawPrint, CAT_BUS_LENGTH } from './catBus';
+import { buildGateArch } from './gateArch';
 import { ROAD_HALF_WIDTH, applyRoadUvs, roadMaterial } from './road';
 import { PARK_BOUNDARY, edgeRadiusAt } from '../boundary';
 import { forEachPavedDisc } from '../paving';
@@ -40,7 +40,6 @@ import {
   ENTRANCE_CLEAR_RADIUS,
   ENTRANCE_CLEAR_X,
   ENTRANCE_CLEAR_Z,
-  ENTRANCE_GATE_HALF_WIDTH,
   ENTRANCE_GATE_POST_HEIGHT,
   ENTRANCE_GATE_X,
   ENTRANCE_GATE_Z,
@@ -268,68 +267,69 @@ export class Entrance implements GameSystem {
     const capMaterial = toonMaterial(PALETTE.stonePinkLight);
 
     // --- the gate arch ---------------------------------------------------
-    // One owner, in `layout.ts`: the ride builds this same arch at the end of
-    // its lane, and the cut between the two lands squarely on it.
-    const halfWidth = ENTRANCE_GATE_HALF_WIDTH;
-    const postHeight = ENTRANCE_GATE_POST_HEIGHT;
-    const postGeometry = new CylinderGeometry(0.42, 0.5, postHeight, 12);
+    // One owner, `gateArch.ts`: the bus ride builds this same gate at the end
+    // of its lane, and the cut between the two lands squarely on it. It used
+    // to be built twice, and the copies drifted — issue #480.
+    //
     // The posts sit either side of the gate along the wall's own tangent —
     // perpendicular to the radius out to `ENTRANCE_GATE_X/Z` — so the arch
     // reads as a gap cut straight through the ring, whatever angle it is at.
+    // A rotation of `yaw` about Y takes the arch's local `+X` onto
+    // `(cos yaw, -sin yaw)`, and the tangent is `(-sin A, cos A)`, so the yaw
+    // the gate wants is `-(A + π/2)`. The posts come back out of the same
+    // rotation rather than being placed from the tangent a second time.
+    const arch = buildGateArch({
+      centreX: ENTRANCE_GATE_X,
+      centreZ: ENTRANCE_GATE_Z,
+      yaw: -(ENTRANCE_ANGLE + Math.PI / 2),
+      groundAt: terrainHeight,
+      stoneMaterial,
+      capMaterial,
+      // Named so `scripts/check-park-map.mts` can ask the *scene* where the
+      // gate stands, rather than re-reading the constant the park map already
+      // read. The crossbar spans the opening and is centred on it, so its
+      // world position is the gate — independent truth for the map's `gate`
+      // feature.
+      //
+      // **`park-gate-`, not just `entrance-`, and that is not fussiness.** The
+      // obvious name `entrance-arch` is already taken, by the archway over the
+      // castle's own front door in `building/facade.ts`. `getObjectByName`
+      // walks the scene and returns the *first* match, and the castle is added
+      // under `anchor-plots` before the entrance group is added at all — so
+      // the check silently measured the park gate against the castle door and
+      // reported the map 65.65 m wrong. Caught the same hour the check was
+      // written, which is the argument for scene names being qualified by what
+      // owns them.
+      crossbarName: 'park-gate-arch',
+    });
+    this.group.add(arch.group);
+
+    // **The gate is solid at its feet and open above them.** A collider on
+    // each post, sized by the arch itself (`footRadius` covers the post's
+    // splayed base and the crossbar's tube where it comes down onto it), and
+    // deliberately nothing under the span — that span is the way into the
+    // park, 3.45 m of headroom over a 1.24 m-wide child, and a collider there
+    // would shut the gateway. Proved both ways by
+    // `theParkGateArchStandsOverItsGateway` in `test/procgen/invariants.ts`.
     const tangentX = -Math.sin(ENTRANCE_ANGLE);
     const tangentZ = Math.cos(ENTRANCE_ANGLE);
-
-    for (const side of [-1, 1] as const) {
-      const x = ENTRANCE_GATE_X + side * halfWidth * tangentX;
-      const z = ENTRANCE_GATE_Z + side * halfWidth * tangentZ;
-      const ground = terrainHeight(x, z);
-
-      const post = new Mesh(postGeometry, stoneMaterial);
-      post.position.set(x, ground + postHeight / 2, z);
-      post.castShadow = true;
-      post.receiveShadow = true;
-      this.group.add(post);
-
-      const cap = new Mesh(new SphereGeometry(0.62, 14, 10), capMaterial);
-      cap.position.set(x, ground + postHeight + 0.15, z);
-      cap.scale.set(1, 0.75, 1);
-      cap.castShadow = true;
-      this.group.add(cap);
+    for (const [index, foot] of arch.feet.entries()) {
+      const side = index === 0 ? -1 : 1;
+      const ground = terrainHeight(foot.x, foot.z);
 
       // Nudged back towards the gate centre from the post's own position.
       const pawA = buildPawPrint(toonMaterial(PALETTE.stonePinkDark));
-      pawA.position.set(x - side * 0.46 * tangentX, ground + postHeight * 0.55, z - side * 0.46 * tangentZ);
+      pawA.position.set(
+        foot.x - side * 0.46 * tangentX,
+        ground + ENTRANCE_GATE_POST_HEIGHT * 0.55,
+        foot.z - side * 0.46 * tangentZ,
+      );
       pawA.rotation.y = side > 0 ? -Math.PI / 2 : Math.PI / 2;
       pawA.scale.setScalar(1.6);
       this.group.add(pawA);
 
-      collision.addCircle(x, z, 0.55);
+      collision.addCircle(foot.x, foot.z, arch.footRadius);
     }
-
-    // A curved crossbar joining the two posts, following the wall's own
-    // pink-stone material family so the gate reads as part of the boundary,
-    // not a separate prop dropped in front of it.
-    const crossbar = new Mesh(new TorusGeometry(halfWidth, 0.28, 10, 24, Math.PI), capMaterial);
-    // Named so `scripts/check-park-map.mts` can ask the *scene* where the gate
-    // stands, rather than re-reading the constant the park map already read.
-    // The crossbar spans the opening and is centred on it, so its world
-    // position is the gate — independent truth for the map's `gate` feature.
-    //
-    // **`park-gate-`, not just `entrance-`, and that is not fussiness.** The
-    // obvious name `entrance-arch` is already taken, by the archway over the
-    // castle's own front door in `building/facade.ts`. `getObjectByName` walks
-    // the scene and returns the *first* match, and the castle is added under
-    // `anchor-plots` before the entrance group is added at all — so the check
-    // silently measured the park gate against the castle door and reported the
-    // map 65.65 m wrong. Caught the same hour the check was written, which is
-    // the argument for scene names being qualified by what owns them.
-    crossbar.name = 'park-gate-arch';
-    const archGround = terrainHeight(ENTRANCE_GATE_X, ENTRANCE_GATE_Z);
-    crossbar.position.set(ENTRANCE_GATE_X, archGround + postHeight + 0.15, ENTRANCE_GATE_Z);
-    crossbar.rotation.z = Math.PI;
-    crossbar.rotation.y = Math.PI / 2;
-    crossbar.castShadow = true;
-    this.group.add(crossbar);
 
     // --- the welcome sign ----------------------------------------------------
     this.welcomeSignZone = this.buildWelcomeSign(collision, trainRoute);
