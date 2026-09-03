@@ -22,10 +22,16 @@ import { terrainHeight } from '../terrain';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld } from '../Collision';
 import type { Player } from '../../entities/Player';
-import { buildPawPrint, CAT_BUS_LENGTH } from './catBus';
+import { buildPawPrint } from './catBus';
 import { buildGateArch } from './gateArch';
-import { ROAD_HALF_WIDTH, applyRoadUvs, roadMaterial } from './road';
-import { PARK_BOUNDARY, edgeRadiusAt } from '../boundary';
+import { ROAD_HALF_WIDTH, ROAD_TILE_METRES, applyRoadUvs, roadMaterial } from './road';
+import { PARK_BOUNDARY } from '../boundary';
+import {
+  entranceRoadAt,
+  entranceRoadInnerEdge,
+  entranceRoadStations,
+  type RoadStation,
+} from './roadRoute';
 import { forEachPavedDisc } from '../paving';
 import { ArrivalSequence, arrivalIsDue } from './ArrivalSequence';
 import type { NpcCharacter } from '../../entities/npc/NpcCharacter';
@@ -34,9 +40,6 @@ import { pressAction, type InteractZone } from '../interact';
 import { playOpenChime } from '../../ui/chime';
 import {
   ENTRANCE_ANGLE,
-  ENTRANCE_BUS_ARRIVE_X,
-  ENTRANCE_BUS_STOP_Z,
-  ENTRANCE_BUS_VANISH_X,
   ENTRANCE_CLEAR_RADIUS,
   ENTRANCE_CLEAR_X,
   ENTRANCE_CLEAR_Z,
@@ -345,7 +348,9 @@ export class Entrance implements GameSystem {
     // one side of the opening so it never blocks the way in, and clear of the
     // bus's own footprint.
     const shelterX = -9;
-    const shelterZ = (ENTRANCE_GATE_Z + ENTRANCE_BUS_STOP_Z) / 2;
+    // Halfway between the arch and where the bus's door actually comes to rest,
+    // asked of the road rather than of a constant that used to describe it.
+    const shelterZ = (ENTRANCE_GATE_Z + entranceRoadAt(0).z) / 2;
     const shelterGround = terrainHeight(shelterX, shelterZ);
     const woodMaterial = toonMaterial(0xffffff, { map: woodTexture(2, 1) });
 
@@ -668,19 +673,6 @@ export class Entrance implements GameSystem {
 function buildEntranceRoad(): Mesh[] {
   const material = roadMaterial('grey');
 
-  /** How far along the kerb the road can run before it is inside the park. */
-  const kerbReach = (direction: -1 | 1): number => {
-    // The road's inner edge is the part that would enter the park first.
-    const edgeZ = ENTRANCE_BUS_STOP_Z - ROAD_HALF_WIDTH;
-    let reach = 0;
-    for (let x = 0; x <= 60; x += 0.5) {
-      const at = direction * x;
-      if (Math.hypot(at, edgeZ) < edgeRadiusAt(PARK_BOUNDARY, Math.atan2(edgeZ, at))) break;
-      reach = x;
-    }
-    return reach;
-  };
-
   /**
    * How far in through the gate the spur can run before the park's own paving
    * is already under it.
@@ -709,7 +701,7 @@ function buildEntranceRoad(): Mesh[] {
    * in a different material.
    */
   const spurReach = (): number => {
-    const from = ENTRANCE_BUS_STOP_Z - ROAD_HALF_WIDTH;
+    const from = entranceRoadInnerEdge(0).z;
     for (let z = from; z >= ENTRANCE_STOP_Z; z -= 0.1) {
       let paved = false;
       const known = forEachPavedDisc((x, discZ, radius) => {
@@ -726,24 +718,21 @@ function buildEntranceRoad(): Mesh[] {
 
   const meshes: Mesh[] = [];
 
-  // --- the kerb, along the bus's stopping line -------------------------------
-  // Long enough to cover the whole run the bus drives, so it is never on grass:
-  // `ENTRANCE_BUS_ARRIVE_X` in, `ENTRANCE_BUS_VANISH_X` out, plus half a bus
-  // either end for its own length. Clipped to what the boundary allows.
-  const halfBus = CAT_BUS_LENGTH / 2;
-  const kerbTo = Math.min(kerbReach(1), ENTRANCE_BUS_ARRIVE_X + halfBus);
-  const kerbFrom = -Math.min(kerbReach(-1), Math.abs(ENTRANCE_BUS_VANISH_X) + halfBus);
-  meshes.push(
-    roadRibbon({
-      name: 'entrance-road-kerb',
-      material,
-      from: { x: kerbFrom, z: ENTRANCE_BUS_STOP_Z },
-      to: { x: kerbTo, z: ENTRANCE_BUS_STOP_Z },
-      across: 'z',
-      along: 'x',
-      centre: ENTRANCE_BUS_STOP_Z,
-    }),
-  );
+  // --- the kerb, along the road the bus actually drives ---------------------
+  //
+  // **Swept along `entranceRoadStations()`, which is the same object
+  // `ArrivalSequence` drives the bus along** — so the road on screen and the
+  // road the bus is on cannot be two things. `check:entrance-road`'s third
+  // clause holds them together: every vertex laid here has to fall inside the
+  // corridor that check sweeps, and while this ribbon was still the old straight
+  // chord it reported 63 to 113 stray vertices a seed, up to 6.43 m out.
+  //
+  // It runs the road's whole length, tails and all: away from the park, across
+  // the Rail Race's line, and over the hilltop's brow, which is where a road
+  // leaving a hilltop goes and is as far as the game draws in that direction.
+  // Nothing here picks that length — `roadRoute.ts` takes it from `TERRAIN_APRON`,
+  // the ground the terrain disc is actually built out to.
+  meshes.push(curvedRoadRibbon('entrance-road-kerb', material, entranceRoadStations()));
 
   // --- the spur, in through the gate ----------------------------------------
   // From the kerb road's **inner** edge to the bus stop inside the park, so it
@@ -758,15 +747,20 @@ function buildEntranceRoad(): Mesh[] {
   //
   // Starting at the inner edge deletes that buried face rather than nudging
   // either ribbon. The road stays continuous — the kerb already paves the whole
-  // gate opening's width across its own band, so the two abut exactly at
-  // `ENTRANCE_BUS_STOP_Z - ROAD_HALF_WIDTH` and you can still trace the surface
-  // from outside the wall to inside it without leaving it, which is the thing
-  // this road exists to do.
+  // gate opening's width across its own band, so the two abut exactly on the
+  // kerb's own inner edge and you can still trace the surface from outside the
+  // wall to inside it without leaving it, which is the thing this road exists
+  // to do.
+  //
+  // **The inner edge is asked for, not computed here.** On a curved road
+  // "inner" is a direction rather than an axis, so `entranceRoadInnerEdge`
+  // owns it; a `z` worked out at this call site would be a second description
+  // of the same kerb.
   meshes.push(
     roadRibbon({
       name: 'entrance-road-gateway',
       material,
-      from: { x: ENTRANCE_GATE_X, z: ENTRANCE_BUS_STOP_Z - ROAD_HALF_WIDTH },
+      from: { x: ENTRANCE_GATE_X, z: entranceRoadInnerEdge(0).z },
       to: { x: ENTRANCE_GATE_X, z: spurReach() },
       across: 'x',
       along: 'z',
@@ -775,6 +769,64 @@ function buildEntranceRoad(): Mesh[] {
   );
 
   return meshes;
+}
+
+/**
+ * **One curved ribbon of road, swept along the route's own stations.**
+ *
+ * The straight {@link roadRibbon} below cannot lay this: it builds an
+ * axis-aligned `PlaneGeometry` and asks `applyRoadUvs` to read `u` and `v` off
+ * world `x`/`z`, which only says anything while the road runs down an axis. A
+ * road that turns needs its `v` measured **along itself**.
+ *
+ * **The scale is still owned by `road.ts`.** `u` spans `ROAD_HALF_WIDTH * 2`
+ * exactly once and `v` counts `ROAD_TILE_METRES`, which are the same two
+ * divisors `applyRoadUvs` uses — so the slabs, the kerbs and the centre line
+ * come out the same size on this ribbon as on the straight spur it abuts, and
+ * a change to either constant moves both. Writing a `repeat` here instead, or
+ * a tile size of its own, is precisely the second definition CLAUDE.md warns
+ * about, and it would show up as a visible step in the paving at the join.
+ *
+ * Vertices are placed in **world coordinates and the mesh is never moved**,
+ * for the reason `applyRoadUvs` documents at length: a geometry displaced after
+ * its vertices are laid describes where it used to be.
+ */
+function curvedRoadRibbon(
+  name: string,
+  material: ReturnType<typeof roadMaterial>,
+  stations: readonly RoadStation[],
+): Mesh {
+  const across = 8;
+  const geometry = new PlaneGeometry(1, 1, across, stations.length - 1);
+  const position = geometry.getAttribute('position') as BufferAttribute;
+  const uv = geometry.getAttribute('uv') as BufferAttribute;
+
+  for (let row = 0; row < stations.length; row += 1) {
+    const station = stations[row] as RoadStation;
+    // Left of the heading; which side is which does not matter, only that it is
+    // consistent, because the texture's kerbs are symmetric about the middle.
+    const normalX = -station.headingZ;
+    const normalZ = station.headingX;
+    for (let column = 0; column <= across; column += 1) {
+      const t = column / across;
+      const offset = (t - 0.5) * ROAD_HALF_WIDTH * 2;
+      const x = station.x + normalX * offset;
+      const z = station.z + normalZ * offset;
+      const index = row * (across + 1) + column;
+      // A hand's breadth up, so it never z-fights the lawn — the same lift the
+      // park's own paths take.
+      position.setXYZ(index, x, terrainHeight(x, z) + 0.06, z);
+      uv.setXY(index, t, station.at / ROAD_TILE_METRES);
+    }
+  }
+  position.needsUpdate = true;
+  uv.needsUpdate = true;
+  geometry.computeVertexNormals();
+
+  const mesh = new Mesh(geometry, material);
+  mesh.name = name;
+  mesh.receiveShadow = true;
+  return mesh;
 }
 
 interface RoadRibbonOptions {
