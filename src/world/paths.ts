@@ -1332,6 +1332,10 @@ function segmentCutsABridgeRamp(
     // which bridge is being approached and exempts nothing else, so a foot's
     // connector is still screened against every OTHER site it might cross.
     if (site === exemptSite) continue;
+    // Released: no leg of the network crosses here, so no bridge is built here
+    // and there is no masonry to keep anything off. See
+    // {@link releasedCrossingSites}.
+    if (releasedCrossingSites.has(site)) continue;
     const alongA = (ax - site.x) * site.dirX + (az - site.z) * site.dirZ;
     const acrossA = -(ax - site.x) * site.dirZ + (az - site.z) * site.dirX;
     const alongB = (bx - site.x) * site.dirX + (bz - site.z) * site.dirZ;
@@ -1461,6 +1465,27 @@ function segmentMeetsRect(
 // here is exactly the drift that let seed 288 plan one bridge's foot inside
 // another bridge's reservation.
 export { RAMP_SCREEN_MARGIN };
+
+/**
+ * **Crossing sites whose reservation is not screened, because no leg of the
+ * finished network crosses there and so no bridge will ever be built on it.**
+ *
+ * A proven site is a place a bridge *could* go, not a place one *does* go.
+ * `paths.ts` reserves the ground for every one of them before it knows which
+ * the network will use, and a site nobody crosses at then keeps roughly
+ * 38 m by 11 m of the park permanently forbidden to every other leg —
+ * protecting masonry that is never built.
+ *
+ * Measured 2 Sep 2026: **three of seed 5's four reservations are empty**, and
+ * releasing exactly those three takes that seed from `poi.stranded: 10` to
+ * green. The control — the same release with an empty list — reproduced the
+ * baseline 10 exactly.
+ *
+ * {@link pathGraphSearch} owns this set; nothing else may write to it, and it
+ * is emptied at the start of every build so a second build in the same process
+ * still produces the same park.
+ */
+const releasedCrossingSites = new Set<CrossingSite>();
 
 /**
  * **How far either side of a crossing site's axis this file forbids ground to
@@ -1606,6 +1631,7 @@ export function pointStandsOnABridgeRamp(x: number, z: number, margin = RAMP_SCR
  */
 function bridgeSiteReserving(x: number, z: number, margin = RAMP_SCREEN_MARGIN): CrossingSite | null {
   for (const site of CROSSING_SITES) {
+    if (releasedCrossingSites.has(site)) continue;
     const dx = x - site.x;
     const dz = z - site.z;
     const across = -dx * site.dirZ + dz * site.dirX;
@@ -1658,6 +1684,7 @@ function bridgeSiteReserving(x: number, z: number, margin = RAMP_SCREEN_MARGIN):
  */
 function pointStandsOnBridgeMasonry(x: number, z: number, margin = RAMP_SCREEN_MARGIN): boolean {
   for (const site of CROSSING_SITES) {
+    if (releasedCrossingSites.has(site)) continue;
     const dx = x - site.x;
     const dz = z - site.z;
     const across = Math.abs(-dx * site.dirZ + dz * site.dirX);
@@ -3983,7 +4010,12 @@ function assembleGateApproach(
   });
 }
 
-export function* pathGraphSearch(): Generator<number, PathGraph, void> {
+/**
+ * **One solve of the whole network, against whatever reservations are
+ * currently screened.** {@link pathGraphSearch} wraps it and may run it more
+ * than once — see that function for why, and for the state each pass resets.
+ */
+function* pathGraphSolveOnce(): Generator<number, PathGraph, void> {
   let progress = 0;
   // **The whole grid first, sliced, before anything asks for it.** It is
   // memoised and expensive to build, so whoever touched it first paid the lot
@@ -4447,6 +4479,210 @@ function bowMidSegment(points: (readonly [number, number])[]): void {
     walked += segment;
   }
 }
+
+/**
+ * **Everything memoised downstream of the bridge screen**, dropped so the next
+ * pass rebuilds it against a different set of released reservations.
+ *
+ * The three listed here are the complete set, and each was checked rather than
+ * assumed: `latticeCache`'s `nodeOk` is computed with `onRamp` in it,
+ * `pathGridCache` carries the lattice plus every screened edge and connector,
+ * and `gateCorridorDeepestCache` is walked with `pointStandsOnABridgeRamp`.
+ * The other module caches here — plots, arch feet, slide and ride corridors,
+ * the rail corridor — are inputs to the screen rather than outputs of it, and
+ * are deliberately kept: they are the expensive ones, and rebuilding them
+ * could not change an answer.
+ */
+function dropScreenDependentMemos(): void {
+  latticeCache = null;
+  pathGridCache = null;
+  gateCorridorDeepestCache = null;
+}
+
+/**
+ * **Which proven sites the finished network actually crosses at**, read off
+ * the solver's own bookkeeping rather than guessed at from the geometry.
+ *
+ * A site's deck is a single mandatory edge between its two foot nodes (see
+ * where `footNodes` is filled), and it is the only edge in the whole graph
+ * that crosses the railway — so a route crosses here exactly when that edge
+ * was paved. `pavedGridEdges` records every edge any committed route walked,
+ * which makes this an exact answer with no second definition of "crosses
+ * here" to drift.
+ *
+ * **The drawn polylines are consulted as well, and that is not belt-and-braces
+ * padding.** `crossings.ts` decides where a bridge really goes by looking at
+ * where the *drawn* paths touch the rail, so a ribbon laid by the rescue
+ * router — which produces a polyline rather than a walk over grid edges —
+ * can put a crossing at a site whose deck edge was never paved. Releasing
+ * that site would un-screen ground a real bridge then stands on. Both
+ * questions are asked and a site counts as used if **either** says so.
+ */
+function sitesTheNetworkCrossesAt(graph: PathGraph): Set<CrossingSite> {
+  const grid = pathGrid();
+  const used = new Set<CrossingSite>();
+  for (let i = 0; i < CROSSING_SITES.length; i += 1) {
+    const site = CROSSING_SITES[i] as CrossingSite;
+    const plus = grid.footNodes[2 * i];
+    const minus = grid.footNodes[2 * i + 1];
+    if (plus !== undefined && minus !== undefined && pavedGridEdges.has(gridEdgeKey(plus, minus))) {
+      used.add(site);
+    }
+  }
+  // The drawn ribbons, against each site's own deck rectangle.
+  const routes = [graph.ring, ...graph.edges.map((edge) => edge.route)];
+  for (const route of routes) {
+    if (!route) continue;
+    const points = route.points;
+    for (let s = 1; s < points.length; s += 1) {
+      const a = points[s - 1] as readonly [number, number];
+      const b = points[s] as readonly [number, number];
+      for (const site of CROSSING_SITES) {
+        if (used.has(site)) continue;
+        const alongA = (a[0] - site.x) * site.dirX + (a[1] - site.z) * site.dirZ;
+        const acrossA = -(a[0] - site.x) * site.dirZ + (a[1] - site.z) * site.dirX;
+        const alongB = (b[0] - site.x) * site.dirX + (b[1] - site.z) * site.dirZ;
+        const acrossB = -(b[0] - site.x) * site.dirZ + (b[1] - site.z) * site.dirX;
+        if (
+          segmentMeetsRect(
+            alongA,
+            acrossA,
+            alongB,
+            acrossB,
+            -DECK_HALF_LENGTH,
+            DECK_HALF_LENGTH,
+            -site.halfWidth,
+            site.halfWidth,
+          )
+        ) {
+          used.add(site);
+        }
+      }
+    }
+  }
+  return used;
+}
+
+/**
+ * **The network and its bridges, solved together rather than one reserving
+ * ground the other never wants** — Jim's brief #2, in the one place the
+ * ordering can actually be fixed.
+ *
+ * `paths.ts` has to forbid a crossing site's reservation before it knows which
+ * sites the network will cross at, because the screen is what the solve runs
+ * against. So it solves, looks at which sites a leg really crossed
+ * ({@link sitesTheNetworkCrossesAt}), releases the reservations of the ones
+ * nobody used, and solves again. That is a backtrack in CLAUDE.md's standing
+ * sense — a different decision once the first one is known to have been
+ * speculative — rather than a threshold.
+ *
+ * **Why it is worth a second solve.** A released reservation costs nothing to
+ * release: no leg crosses there, so no bridge is built there, so there is no
+ * masonry for a ribbon to walk into. What it *buys* is the ground back.
+ * Measured 2 Sep 2026: seed 5 keeps three empty reservations of roughly
+ * 38 m by 11 m each.
+ *
+ * **The trap, and why the loop grows a screened set instead of releasing
+ * once.** Freeing ground changes what the router can reach, so a pass may
+ * route a crossing through a site the previous pass released — and then real
+ * masonry would stand on ground that solve left open, which is issue #414
+ * again. So the *screened* set only ever grows: it starts as the sites the
+ * fully-screened solve crossed at, and every pass adds whatever that pass
+ * turned out to cross at. Growing-only terminates (there are finitely many
+ * sites) and is sound at the fixed point (every crossed site is screened).
+ * If it has not settled within {@link MAX_RESERVATION_PASSES} the loop
+ * releases **nothing** and returns the fully-screened solve. Giving up
+ * conservatively is the only safe direction: the failure mode of releasing too
+ * much is a child walking a drawn path into a wall.
+ *
+ * **Removing a released site's deck edge as well was built and measured, and
+ * is NOT what this does.** It makes "released" mean the whole decision — no
+ * ground reserved and no crossing offered — which settles on the second pass
+ * every time and is self-consistent. But it forecloses a crossing the freed
+ * ground would have made attractive, and it measured worse: sixteen seeds,
+ * seed 5 `poi.stranded` **10 -> 12** and seed 288 3 -> 2, green 10 -> 10,
+ * total 21 -> 22. Growing the screened set instead regresses nothing.
+ *
+ * **What this does and does not buy, measured on all sixteen seeds.** Green
+ * 10 -> 10, stranded **21 -> 20** (seed 288 3 -> 2); nothing regressed.
+ * Seed 5 — the seed with three empty reservations, and the one a hard-coded
+ * release takes to green — is **unchanged at 10**, because once its three are
+ * released the router immediately crosses at all four sites, so all four end
+ * up screened and the loop lands back on the fully-screened park. That is the
+ * honest result: seed 5's ten waypoints are not bought by this, and the thing
+ * actually in its way is that site 0's reservation swallows the gate corridor
+ * for its whole 24 m, so the gate's own exemption ladder is what has to reach
+ * further. Chase that, not this.
+ *
+ * The related trap is in the *question*, not the loop: "no deck was built in
+ * this rectangle" is **not** "no leg crosses at this site". Seed 288 separates
+ * them — its site at railDistance 152 has no bridge of its own, but a
+ * neighbouring bridge's deck stands inside its rectangle. Releasing by deck
+ * presence would un-screen that neighbour's real stone, which is why
+ * {@link sitesTheNetworkCrossesAt} asks about legs and never about decks.
+ */
+export function* pathGraphSearch(): Generator<number, PathGraph, void> {
+  // A second build in the same process must produce the same park.
+  releasedCrossingSites.clear();
+  dropScreenDependentMemos();
+
+  let graph = yield* pathGraphSolveOnce();
+
+  // **The screened set only ever grows.** It starts as the sites the
+  // fully-screened solve crossed at, and every later pass adds any site that
+  // pass turned out to cross at. Growing-only is what makes this terminate —
+  // there are finitely many sites — and it is also what makes it *sound*: at
+  // the fixed point every site the finished network crosses at is screened,
+  // so no bridge can stand on ground that solve left open.
+  const screened = new Set<CrossingSite>(sitesTheNetworkCrossesAt(graph));
+
+  for (let pass = 1; pass < MAX_RESERVATION_PASSES; pass += 1) {
+    if (screened.size === CROSSING_SITES.length) {
+      // Nothing left to release. If the current graph was solved with anything
+      // released, re-solve fully screened so the park handed back matches the
+      // screen it was solved against.
+      if (releasedCrossingSites.size === 0) return graph;
+      releasedCrossingSites.clear();
+      dropScreenDependentMemos();
+      return yield* pathGraphSolveOnce();
+    }
+
+    const release = CROSSING_SITES.filter((site) => !screened.has(site));
+    const alreadyReleased =
+      release.length === releasedCrossingSites.size &&
+      release.every((site) => releasedCrossingSites.has(site));
+    if (alreadyReleased) return graph;
+
+    releasedCrossingSites.clear();
+    for (const site of release) releasedCrossingSites.add(site);
+    dropScreenDependentMemos();
+    graph = yield* pathGraphSolveOnce();
+
+    // Anything this pass crossed at must be screened from here on — including
+    // a site it only reached *because* the release freed the ground in front
+    // of it. That is the trap this loop exists to close.
+    for (const site of sitesTheNetworkCrossesAt(graph)) screened.add(site);
+  }
+
+  // Did not settle inside the budget: release nothing and hand back the
+  // fully-screened solve, which is exactly the park this file built before the
+  // loop existed. Giving up conservatively is the only safe direction.
+  if (releasedCrossingSites.size > 0) {
+    releasedCrossingSites.clear();
+    dropScreenDependentMemos();
+    graph = yield* pathGraphSolveOnce();
+  }
+  return graph;
+}
+
+/**
+ * How many extra times {@link pathGraphSearch} will solve the network while
+ * looking for a stable screened set. Measured over the sixteen-seed pool, every
+ * seed settles within three solves — either the released set repeats, or the
+ * screened set grows to every site and the loop re-solves fully screened. The
+ * sixteen-seed `check:park` sweep costs 3 min 12 s with this in place.
+ */
+const MAX_RESERVATION_PASSES = 4;
 
 /**
  * The straight-through drain of {@link pathGraphSearch} — what `pathGraph.ts`
