@@ -140,14 +140,30 @@ is asserted on every seed on every run, and announces its coverage to `stderr`.
    hop's deviation, so two ribbons on the same line can differ by ~17.3 deg; it
    does not imply 8.63. Comment now says chosen-by-plateau, not derived.
 
-**Two numbers I measured differently from the review, flagged in the PR rather
-than smoothed over:**
-- Plateau top edge is **22 deg**, not 25: the first fabricated piece (seed 5,
-  16.8 m) appears at **23 deg**. 30 deg is where the *seed 24 dogleg* welds.
-- Rule-1 worst inflation **0.44 m / 3.64 m headroom**, against the review's
-  0.70 m / 2.31 m. Mine is over the 16 `PARK_SEED_POOL` seeds; seed 18 is a CI
-  seed **not** in the pool and is not in my cached geometry, which likely
-  explains it.
+**Both disputed numbers settled by measurement (round 2).** Population quoted
+everywhere is now **seventeen seeds**: `PARK_SEED_POOL` plus seed 18, the only
+seed the invariant suite runs that the pool does not contain.
+
+1. **Headroom — the review is right, and its definition is better. Adopted.**
+   My 3.64 m was the welded *pair's* extent (seed 288, 12.36 m). The review
+   measured the **component**, which is what actually gets compared against
+   `MAX_DIAGONAL_APPROACH`: 13.69 m on seeds 11 and 288, giving exactly
+   **2.31 m**. Reproduced to the digit.
+2. **Plateau top edge — my 22 deg stands; 25 is not reproducible.** Half-degree
+   sweep over all seventeen seeds: empty at 22, seed 5's 16.8 m piece appears at
+   **22.5**. 29-30 deg is where the *seed 24 dogleg* welds, which is what the
+   30 deg figure refers to. Seed 18 did not move the edge.
+3. **Rule 1's real cost is better than either figure: 0.00 m.** Re-running every
+   seed with rule 1 restricted to welds that also pass rule 2's angle test
+   leaves the largest piece **identical to two decimals on every seed**. Its
+   welds all sit inside pieces something else already bounds, so the 0.44 m
+   pair-level inflation never reaches the piece being tested. I could not
+   reproduce 0.70 m under any definition and said so rather than splitting the
+   difference.
+
+**My seed-18 hypothesis was refuted**, not confirmed: seed 18 adds one weld
+(75.5 deg, +0.25 m per-pair, 13.92 m headroom), neither the worst pair nor the
+tightest piece. The gap was a difference of *definition*, not of population.
 
 **Dominance argument (from the review, re-verified on 16 seeds not 5):** old
 measured the chord between a run's first and last sample; this measures the
