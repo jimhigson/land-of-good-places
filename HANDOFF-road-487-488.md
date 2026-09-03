@@ -876,3 +876,141 @@ producing no runs, check `mergeable` before anything else).
 - Preview for `3406f871`:
   `https://pr-498-3406f87-land-of-good-places.blockstack.workers.dev` — loaded
   and photographed at the gateway; both changes are in it.
+
+
+---
+
+# The four seams are closed (3 September, session 5)
+
+Model: **Opus 5 (1M context)** — matching the agent I replaced, per CLAUDE.md's
+"a replacement runs the same model". Worktree
+`.claude/worktrees/road-seams-498`, detached on `origin/fix/road-487-488`
+(the branch ref is held by the dead `road-487-488` worktree, so pushes go
+`git push origin HEAD:fix/road-487-488`).
+
+**Nothing Jim can see changed in this session.** Both of his asks were already
+in the build he approved; this is the finish — `check:coplanar` going green,
+which does not merge red.
+
+## All four are closed, and three of them were one bug
+
+| seam | m² before | after |
+|---|---|---|
+| `entrance-gateway-path` \| `garden/path-surface` | 0.240 | **0** |
+| `entrance-gateway-path-kerb-left` \| `garden/path-kerb` | 0.048 | **0** |
+| `entrance-gateway-path-kerb-right` \| `garden/path-kerb` | 0.060 | **0** |
+| `entrance-road-kerb` \| `garden/terrain` | 1.434 | **0** |
+
+Nothing was filed elsewhere and nothing was baselined.
+
+### The first three: the run was placed against an approximation
+
+Same shape as the fix already on this branch, where `roadRoute.ts` came to own
+the kerb's inner edge as a ring so the two meshes share a boundary by
+construction rather than by two approximations agreeing.
+
+`columnReach` stopped each column of the run against `forEachPavedDisc` — the
+paving as **circles at the centreline samples**, published for `NavGrid` to
+rasterise. That is the right shape for a router and the wrong one for abutting
+a surface, in two ways, and **both were measured rather than assumed**
+(`scripts/probe-gateway-seam.mts`, which reproduces the sweep's own areas to
+within 10% before changing anything):
+
+- **The discs scallop.** They sit *at* the samples; the ribbon is drawn as a
+  strip *between* them, so the union pinches to `sqrt(r² − (s/2)²)` where the
+  drawn surface runs straight across at `r`. **67%** of the surface seam lay on
+  ground the discs called clear, up to 0.17 m past them.
+- **The kerb is not in the disc list at all**, deliberately — `publishPaving`'s
+  own comment says a child walks the surface. So the kerb bands were stopped
+  against a surface they never touch, with a fixed `PATH_KERB_OVERHANG` margin
+  standing in for a kerb that reaches **twice** that around the plaza
+  (`addAnnulusKerb` draws it to `radius + OVERHANG * 2`). **100%** of both kerb
+  seams were outside the disc union, up to 0.57 m.
+
+So `paving.ts` gained a second publication beside the first:
+`publishDrawnPath` / `pointIsOnDrawnPath(x, z, layer)`, answered by
+`pathGraph.ts` from the swept strip between consecutive samples of one `run`,
+at the layer's own reach. `forEachPavedDisc`, `isOnPath` and the scenery
+keep-outs are **untouched** — the predecessor flagged that the clean fix might
+have to pull those apart, and it did not.
+
+`pointIsOnDrawnPath` returns **`null`, not `false`**, when nothing is
+published: an interior harness has no network, and a caller reading `false`
+would lay its surface straight through where the paving would have been.
+
+**A capsule can only overstate the trapezoid drawn between two cross-sections**
+(it rounds ends the strip cuts square), and overstating is the safe direction —
+a caller stops a hair early rather than putting two surfaces in one plane.
+
+### The off-by-one underneath it, which only appeared once the above was right
+
+Fixing the approximation took the surface seam 0.2644 → 0.0675 m² and no
+further, because `columnReach` returned the **first taken** step: every column's
+last row landed one 0.05 m step deep *on* the surface it was abutting. It now
+returns the last clear step, bracketed coarsely and then bisected 8 times to
+**0.2 mm** — two orders under the sweep's 1 cm — so there is no overlap and no
+strip of grass either. Stepping the walk that finely instead would cost 250x
+the probes per column for the same answer.
+
+Measured, seed 5:
+
+```
+                                   inherited   fix 1     fix 1+2
+entrance-gateway-path|path-surface    0.2644   0.0675    0.0000
+kerb-left |path-kerb                  0.0464   0.0087    0.0000
+kerb-right|path-kerb                  0.0587   0.0157    0.0000
+```
+
+### The fourth: the road is a chord and the brow is a curve
+
+**It was described as inherited. It is not** — `main` has no curved road; this
+branch draws `entrance-road-kerb`, and the seam appeared on this branch the day
+the winding fix made the road visible. So it was this branch's to close.
+
+Each road vertex sits at `terrainHeight + 0.06`, so the drawn surface is the
+chord between those heights while the ground is the curve. Over the brow that
+ground is convex and bulges up between vertices: at 8 columns the 7.78 m road
+spans about a metre a quad, the sag eats 5.2 cm of the 6 cm lift, and the
+terrain comes within **8.5 mm** of the road.
+
+Chord error falls with the square of the spacing, so `across` 8 → 16 quarters
+it. Measured on seed 208 (`LGP_COPLANAR_CHILD=1 LGP_COPLANAR_GARDEN_ONLY=1`):
+
+```
+before   1.4337 m² of shared plane, separation 0.008513 m
+after    no entrance-road|terrain seam at all
+```
+
+That is the fix ART_DIRECTION.md §7 asks for — the road follows its ground more
+closely and the **lift is untouched**. Raising the lift would be the stand-off
+§7 forbids, and it would go stale the moment the terrain moved.
+
+## The loose baseline entry is deleted
+
+`garden|entrance/entrance-road-gateway|garden/path-surface` (2.491 m²) matched
+nothing — the mesh was renamed when the spur became a path — so it was a licence
+for 2.5 m² of seam under a name nothing draws.
+
+**The sweep reports its own stale rows** (`BASELINE LOOSE: … is gone`), which is
+worth knowing: the loud half of the ratchet fails on a new seam, and this quiet
+half is what stops the baseline silently accumulating permission nobody uses.
+
+## Gate status
+
+Exit codes read from each run's own log file, never a pipe.
+
+- `tsc --noEmit` **0**, `typecheck:test` **0**
+- `check:entrance-road` **0** — 0 bus/leg hits on all 16 seeds, control still
+  dirty at 8–10 legs a seed (worst 2.35 m), so it still discriminates
+- `check:coplanar` — see below
+- `test:procgen`, full `pnpm run check` — see below
+
+## For whoever is next
+
+- **`isOnPath` has the same scallop error** as the disc list did, and it is what
+  scenery keep-outs are asked against. Not touched here on purpose — it would
+  move planting on every seed and belongs in its own PR with its own procgen
+  run. `pointIsOnDrawnPath` is the exact answer if anyone wants to close it.
+- The probe is committed as `scripts/probe-gateway-seam.mts` and takes a
+  `LGP_SEED`; it prints the predicted scallop depth beside the measured one, so
+  it can say "no" if this diagnosis ever stops being the right one.
