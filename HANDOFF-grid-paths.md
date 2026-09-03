@@ -3522,3 +3522,57 @@ after   (44.3,-40.2) (44.3,-26.4) (36.6,-26.4) (34.1,-28.9)       two lattice li
   `tmp-451leg.mts`, `tmp-451edges.mts`, `tmp-451who.mts`, `tmp-sweep.sh`, and
   the `debugArrivalLegScreens` / `debugNodeEdges` exports at the end of
   `paths.ts`. `drawsAsScreened` is **not** a probe and stays.
+
+## Item 2 located on seed 128 — it is the ladder's rung 3, and the cheap fixes are already ruled out
+
+`streetsShareLatticeLines` on 128:
+`connector-stall.facePaint-station-1 runs east-west for 12.4 m on z = 41.65,
+2.34 m off the nearest line`.
+
+The control polyline (`tmp-poly.mts`, seed 128):
+
+```
+spur-stall.facePaint            (2.6,45.3) (26.6,45.3) (29.6,41.6) (27.1,39.2)
+spur-station-1                  (14.6,21.3) (22.5,21.3) (22.5,22.0) (28.9,24.6) (28.4,21.2)
+connector-stall.facePaint-station-1
+  (27.1,39.2) (29.6,41.6) (14.6,41.6) (14.6,21.3) (22.5,21.3) (22.5,22.0) (28.4,21.2)
+```
+
+Read it backwards and it is exactly `elbowViaColumn` at the facePaint door:
+
+```
+node (14.6,21.3)  ->  (14.6,41.6)  ->  lead (29.6,41.6)  ->  door (27.1,39.2)
+     leg 1: x = 14.6, a real lattice column (plaza x 2.58 + 12)
+     leg 2: z = 41.6, the LEAD's own row — private, 2.34 m off the half lattice
+```
+
+`x = 14.58` is on the lattice; `z = 41.65` is not (the 12 m lines are 33.31 and
+45.31, the 6 m half lines 39.31 and 45.31). So the offending 15 m run is
+`elbowViaColumn`'s second leg, whose length is `leadDx`.
+
+**`leadDx` = 15.0 and `leadDz` = 20.3, both past `STUB_TAIL_LIMIT` (7.8), so
+BOTH elbows are `rogue` — this is the ladder's rung 3.** And the two cheap
+moves are already taken or already refuted:
+
+- **The shorter private leg is already being chosen.** `rogue` is pushed in
+  `leadDx`-then-`leadDz` order, so `elbowViaColumn` (private leg 15.0) is tried
+  before `elbowViaRow` (private leg 20.3). There is no reorder left to make
+  here — and reordering the head-on shapes was measured and reverted earlier on
+  this branch anyway.
+- **Bounding the tail by refusal is the recorded variant B**: it cured
+  composition and cost `check:park` 10 green / 13 stranded -> 9 / 16. Rung 3
+  exists precisely because of that measurement, and a destination a child
+  cannot walk to outranks an invariant line — a settled ranking.
+
+**So item 2 is not a tuning question and must not be answered by touching the
+ladder.** The fix is the one `computeGridConnectors`'s own comment already
+names: *"the honest fix gives the door a short axis-aligned arrival rather than
+refusing the diagonal and leaving it to walk."* Concretely, on this seed the
+door at (27.1,39.2) is handed a lead at (29.6,41.6) whose row is 2.34 m off any
+shared line; a lead **snapped to the nearest lattice or half-lattice line**
+would put leg 2 on a shared row and cost the arrival nothing, because the lead
+is a 3.5 m stand-off point the layout invented, not a place anything has to be.
+That is the next thing to build and measure, and it is a change to where the
+lead is placed, not to which shapes are allowed.
+
+**Unmeasured. Recorded as the next step, not as a result.**
