@@ -738,6 +738,110 @@ const plotsDoNotOverlap: Invariant = (facts) => {
 };
 
 /** Every doormat and stall counter has ground a visitor can stand on. */
+/**
+ * **The park gate's arch stands over the gateway, and the gateway stays
+ * open.** Issue #480 — Jim, playing: *"There's a weird segment of a taurus
+ * near the park edge."*
+ *
+ * The crossbar carried two rotations too many. `rotation.z = Math.PI` turned
+ * the upper half of the torus — the arch shape — into the lower half, so it
+ * hung down from the tops of the posts and drove its apex 1.34 m under the
+ * paving; `rotation.y = Math.PI / 2` laid it *along* the path instead of
+ * across it. What stood at the park's front door was two curved prongs coming
+ * out of the ground either side of the way in, with nothing solid about them.
+ *
+ * Every number involved was right. The gate was the right width, the posts
+ * stood in the right places, the arch was centred on the opening, and both
+ * rotations read like framing. **Only the mesh's own world box says which way
+ * it points**, which is why this is measured off the built scene and not
+ * argued from the builder.
+ *
+ * Three clauses, and the first two are each other's control:
+ *
+ * 1. **The ends of the arch land on something solid** — the posts. Probed
+ *    through the real collision world.
+ * 2. **The middle of the arch is over open ground** a child can stand on,
+ *    all the way across. This is the clause that must not be bought with the
+ *    first: a gate solid enough to stop her at the posts and still let her
+ *    walk in is the whole point, and a collider under the span would pass
+ *    clause 1 while shutting the park.
+ *
+ *    Together they are also the instrument's own control: clause 1 proves the
+ *    probe can see a blocker, clause 2 proves it can see clear ground. A
+ *    `isStandable` that answered the same everywhere would fail one or the
+ *    other, rather than reporting a clean pass about nothing.
+ * 3. **Nothing hangs into the gateway.** The lowest point of the arch clears
+ *    {@link TALLEST_CHILD_HEIGHT} — the park's tallest possible child, party
+ *    hat and all, taken from the game rather than from the gate's own design.
+ *    The broken arch reached below ground and failed this by 4.31 m.
+ *
+ * The arch itself is deliberately **not** solid: its feet are the posts,
+ * which are, and the span is headroom. See `src/world/entrance/gateArch.ts`.
+ */
+const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
+  const arch = facts.parkGateArch;
+  if (!arch) {
+    return [
+      'NO SCENE OBJECT "park-gate-arch": the park has no front gate to measure. ' +
+        'Either the entrance stopped building one or the crossbar lost its name, ' +
+        'and either way every clause below would have passed vacuously.',
+    ];
+  }
+
+  const fouls: string[] = [];
+
+  // The axis the arch lies along, taken from the arch rather than from the
+  // gate's design: the longer of its two horizontal extents. A crossbar turned
+  // out of the gate plane takes this with it, which is what makes the probes
+  // below land somewhere revealing.
+  const spanX = arch.maxX - arch.minX;
+  const spanZ = arch.maxZ - arch.minZ;
+  const alongX = spanX >= spanZ;
+  const span = alongX ? spanX : spanZ;
+  const pointAt = (t: number): readonly [number, number] => {
+    // `t` runs -1 (one end) to +1 (the other).
+    const half = span / 2;
+    return alongX ? [arch.centreX + t * half, arch.centreZ] : [arch.centreX, arch.centreZ + t * half];
+  };
+
+  // 1. Both ends stand on a post.
+  for (const t of [-1, 1] as const) {
+    const [x, z] = pointAt(t);
+    if (facts.isStandable(x, z)) {
+      fouls.push(
+        `the gate arch's ${t < 0 ? 'first' : 'second'} end at (${x.toFixed(2)}, ${z.toFixed(2)}) ` +
+          'is open ground — the arch is not standing on its own posts, so it is pointing ' +
+          `somewhere the gate does not go (it spans ${span.toFixed(2)} m along ` +
+          `${alongX ? 'X' : 'Z'}, centred on ${arch.centreX.toFixed(2)}, ${arch.centreZ.toFixed(2)})`,
+      );
+    }
+  }
+
+  // 2. ...and the way in between them is open. Sampled across the middle
+  // three-fifths of the span, which is clear of the posts at either end.
+  for (const t of [-0.6, -0.3, 0, 0.3, 0.6] as const) {
+    const [x, z] = pointAt(t);
+    if (!facts.isStandable(x, z)) {
+      fouls.push(
+        `the gateway is blocked at (${x.toFixed(2)}, ${z.toFixed(2)}), ${(t * span * 0.5).toFixed(2)} m ` +
+          'from the middle of the opening — a child cannot walk into her own park',
+      );
+    }
+  }
+
+  // 3. Nothing of it hangs into that gap.
+  const headroom = arch.minY - arch.groundY;
+  if (headroom < TALLEST_CHILD_HEIGHT) {
+    fouls.push(
+      `the gate arch reaches down to ${arch.minY.toFixed(2)} m, ${headroom.toFixed(2)} m over ground at ` +
+        `${arch.groundY.toFixed(2)} m — less than the ${TALLEST_CHILD_HEIGHT} m of the tallest child the ` +
+        'park can make, so she walks through it',
+    );
+  }
+
+  return fouls;
+};
+
 const entrancesAreUsable: Invariant = (facts) => {
   const blocked: string[] = [];
   for (const entrance of facts.entrances) {
@@ -8486,6 +8590,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no two plots overlap', plotsDoNotOverlap],
   ['no two stations stand in each other', stationsDoNotCrowdEachOther],
   ['every entrance has standable ground', entrancesAreUsable],
+  [
+    'the park gate arch stands over its gateway, and the gateway stays open',
+    theParkGateArchStandsOverItsGateway,
+  ],
   ['no two trees interpenetrate', treesDoNotInterpenetrate],
   ['no bush stands on the paving or inside a plot', bushesStandOnOpenGround],
   ['no tree grows into a wall', treesKeepOffWalls],
