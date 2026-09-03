@@ -4745,3 +4745,61 @@ from different carriers. **It is a real legibility defect against Jim's
 complaint #3 and it is outstanding.** Its producer is `straightToLead` rung 2,
 the same class as 131, and it should be worked with that class rather than
 chased alone. Once #484 lands it is this branch's again.
+
+### Steps 22-58 run individually: 35 green, 2 red — BOTH BISECTED TO THE PARENT STACK
+
+Step **sets** compared, not counts: the 37 steps run are byte-identical to the
+chain's tail (`diff` of the run list against the parsed chain — clean).
+
+```
+35 x exit=0    (incl. check:park, check:waypoints, check:nav-routes,
+                check:path-preference, check:solve-cost, check:park-map)
+check:park-boot          exit=1
+check:arrival-completes  exit=1
+```
+
+**Not contention.** `check:park-boot` reports `this box runs the calibration
+loop in 1.28 ms against the reference 1.34 ms — 1.00x`, so the machine was
+idle-equivalent. The failing assertions are structural, not timing:
+
+```
+check:park-boot   - the cruiserFinish phase was divided into only 11 pieces,
+                    against 12 the algorithm admits
+check:arrival-completes
+                  - the looping frames drain 4.0 steps each against 7.7 while
+                    rolling — the overrun is draining no faster than the ride,
+                    so `overrunAwareBudgetMs`/`overrunning` is not applying the
+                    overrun budget once the ride is over
+```
+
+**BISECTED, because "pre-existing" is not a claim to make without evidence:**
+
+| tree | `check:park-boot` | `check:arrival-completes` |
+|---|---|---|
+| `origin/main` (bd818210) | **exit 0** | **exit 0** |
+| `d9faa0b6` — the fork point, parent #474's work, **none** of this branch's | **exit 1** | **exit 1** |
+| this branch's HEAD | exit 1 | exit 1 |
+
+**Failure text at the fork point is byte-identical to this branch's**, both
+assertions. So both are **inherited from `feat/park-warp-solver` (#474)** — they
+are real regressions against `main`, and they are **not** produced by any commit
+on `feat/grid-paths`. They arrive with the parent and they belong with #474's
+owner. Red is red and this is reported, not absorbed; it is simply not this
+branch's diff that caused it, and the bisect is the evidence for saying so.
+
+**One thing in `check:park-boot`'s output IS this branch's territory and is
+worth a look even though it is not the failing clause:** `that worst slice was
+no generator step at all, 0 work units in 14.2 ms, during "joining up the
+paths"` — a 14.2 ms slice doing zero work units in the path-joining phase. *A
+phase with no counter reports zero work and reads as a stall*, and this is the
+one place that sentence can be checked against a real number.
+
+### `check` scoreboard for this branch, whole chain
+
+| | |
+|---|---|
+| steps 1-20 | green (incl. `tsc --noEmit`, `typecheck:test`) |
+| step 21 `check:pet-slide` | **red** — no pet/slide source in this branch's three-dot diff; `fix/pet-slide-check` is live elsewhere |
+| steps 22-58 | 35 green, **2 red** — both bisected to the parent stack above |
+
+**Every path-related check in the chain is green on this branch.**
