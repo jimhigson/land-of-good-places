@@ -2022,3 +2022,88 @@ The open technical question is unchanged and stays with #474: a fixed-seam
 generator (`coasterProfileSearch`) yields 19 pieces on `main`'s park and 11 on
 #474's, on a loop that is 44 m **longer** — so seams are being skipped, and
 `MIN_UNITS.cruiserFinish` must not be lowered to accommodate it.
+
+---
+
+## Seed 5 IS NOT A GATE DEFECT: half the park's grid has no ring gateway in it
+
+`scripts/tmp-north.mts` (`debugGridNodes`) on seed 5, whole park. The numbers
+settle it in one line:
+
+```
+total nodes: 106      REACHABLE: 28
+components:  comp0 71 nodes   comp4 26   comp5 2   comp2 2   comp1/3/6/7/8 1 each
+```
+
+**`comp0` holds 71 of the park's 106 grid nodes — the entire north and west —
+and not one of them is reachable.** The 28 reachable nodes are `comp4` (26) and
+`comp5` (2), all of them east and south. The northernmost reachable node in the
+whole park is `(21.6, 26.5)`.
+
+### The gate is a symptom; the bridge does not help
+
+The gate's nine links go to `(5.1,57.3)`, `(-6.9,57.3)` and `(-6.9,45.3)`.
+Those are ordinary lattice nodes and they are all `comp0`. So is site 0's north
+foot `(0.0, 55.4)`, and — this is the part that matters —
+
+```
+(0.0,55.4)  comp=0  nbrs=[0.0,16.6  5.1,57.3  -6.9,57.3  -6.9,45.3]
+(0.0,16.6)  comp=0  nbrs=[0.0,55.4  -6.9,21.3  -6.9,9.3]
+```
+
+**the bridge deck edge is present and works.** It carries you from `(0,55.4)`
+across the railway to `(0,16.6)` — and lands you in the *same* orphaned
+component. Crossing the railway on seed 5 gains nothing, because both banks of
+that crossing are in `comp0`.
+
+That retires the whole gate-ladder framing, including my own last two
+diagnoses. The gate corridor being swallowed by site 0's reservation is true and
+irrelevant: even with a perfect corridor and a working bridge, there is nowhere
+to arrive.
+
+### Where the cut actually is: the ring's own guard zone
+
+The two big components meet along the plaza, and the nodes that would join them
+are simply absent:
+
+```
+comp0   (-6.9, 9.3)   (-6.9, 21.3)   (0.0, 16.6)
+comp4   (17.1, 9.3)   (29.1, 9.3)    (-6.9, -14.7)
+absent  (5.1, 9.3)    (5.1, -2.7)    (-6.9, -2.7)
+```
+
+The lattice residues put `PLAZA` at about `(5.1, -2.7)` — dead centre of that
+hole. `nodeOk` refuses `inRing`, so **the statue circle's guard zone cuts the
+lattice clean in half**, and the only sanctioned way across it is the four
+compass gateways (`grid.ringNodes`), which are the search's only paved sources.
+`paths.ts`'s own note states the rule: *"the bridge feeds one of the four
+compass gateways, not a fifth connection of its own."*
+
+**On seed 5 all four gateways landed in the east/south component.** `comp0` —
+71 nodes, the gate, the hotel quarter, and a working railway bridge — contains
+no gateway at all, so nothing in it can ever be routed to. That is precisely
+seed 5's `poi.stranded: 10` and its eleven stranded destinations (`building`,
+`hotel`, `ballPit`, `ferrisWheel`, `dodgems`, `stall.skyCruiser`,
+`stall.spaceFerrisWheel`, `stall.dodgems`, `exit-skyCruiser`,
+`exit-ginormousSlide`, `exit-ferrisWheel`).
+
+### What to build, and what not to
+
+**Not** a wider gate exemption, **not** a narrower reservation, **not** a
+`nodeOk` change — all three measured neutral or worse on this branch already.
+The defect is that **the ring's gateway placement is not required to serve every
+component the guard zone creates.** Four gateways at fixed compass bearings is a
+rule that cannot notice it has orphaned half the park.
+
+The honest fix is the standing procgen rule applied to the gateways: after the
+lattice is built, check which components the ring's guard zone has severed, and
+**place or move a gateway into any component that has none** — backtracking on a
+real, measured collision rather than trusting four fixed bearings. That is one
+generator making a different decision when its first one demonstrably failed,
+which is exactly what CLAUDE.md asks for, and it is a rule the generator can
+honour alone: it needs only the lattice and the ring, both of which exist before
+any route is solved.
+
+`debugGridNodes` already reports component ids, so the measurement is in place
+and a `check:park`/invariant clause could assert it directly: **no lattice
+component of more than N nodes may be without a ring gateway.**
