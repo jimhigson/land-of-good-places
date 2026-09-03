@@ -437,3 +437,131 @@ It needs `KID_DELAYS` to stop being module-scope (it is computed before seats ar
 known, and `BUS_WAITS_FOR_THE_REST` reads it), so it becomes per-instance work in
 `ArrivalSequence`'s constructor once the seats exist. Not a change to make in the
 last five minutes of a session, which is why it is written down instead.
+
+
+---
+
+# The disembark fault was not the stagger at all (3 September, session 3)
+
+**Two previous diagnoses of this were wrong and are recorded above. This is the
+third, and unlike the others it was measured before it was believed** —
+`scripts/probe-disembark.mts`, which prints every child's delay, aisle time,
+door time and the instant they actually leave the bus's footprint.
+
+## Root cause
+
+`World`'s constructor calls `ArrivalSequence.attachNpcs`, which sized each
+child's walk down the bus by the **world** distance from their seat to the drop.
+It runs while the bus is still standing at the far end of the road it has yet to
+drive — **measured, 36.26 m from the drop**. So:
+
+```
+bus stands at 31.59, 82.42 when attachNpcs measured the aisles
+the drop is at 0.55, 63.67
+bus -> drop   36.26 m
+longest walk down the bus itself: 14.00 m = 5.49 s (KID_AISLE_SECONDS)
+```
+
+Every child's `aisleSeconds` came out **12.74–16.28 s** against the 5.49 s this
+file's own timeline budgets. Three symptoms, one cause:
+
+- they crawled (`check:cat-bus` measured 0.87 m/s in a 2.55 m/s park);
+- **six of the eleven never reached the door at all** inside the sequence and
+  were left behind by the departing bus rather than walking out of it;
+- and the 36 m every seat shared **compressed the differences between them** —
+  two seats either side of the gangway are all but equidistant from a point
+  36 m away — which is the reported "two children left 0.02 s apart".
+
+**The proposed fix in the handoff above (restaggering `delay_n + aisle_n` in the
+constructor) would not have worked, and would have measured nothing.** Seats are
+already handed out nearest-the-door-first, so `delay + aisle` was already
+monotone with a gap of at least `KID_DOORWAY_GAP`; the quantity `check:cat-bus`
+measures is the moment a child leaves the bus's *footprint*, which is a
+different instant. `KID_DELAYS` stays at module scope and untouched.
+
+## The fix
+
+One line of intent: a seat's distance to the door is a property of the bus, not
+of where the bus is parked, so it is asked in the **bus's own frame** —
+`bus.root.worldToLocal(seat)` against `bus.doorDrop`, which is that same local
+point. Exactly the cure `check:cat-bus` itself was given when the bus started
+driving a curve.
+
+Measured after: aisle times **1.37–3.41 s**, all eleven reach the door, tightest
+gap at the footprint **0.017 s -> 0.650 s** (needs 0.64), walking speed
+**2.48–2.69 m/s** against the park's 2.55. `check:cat-bus` exit 0.
+
+**The drop did not move** — still (0.55, 63.67), D = 3.71 m. Nothing here
+changes the number the arrival-camera branch is building its shot around.
+
+**One thin margin to know about:** the gap clears its floor by 0.01 s. It is
+deterministic (fixed `ARRIVAL_SEED`), so it is not flaky, but it is close.
+The cause is that children walk a straight line from their seat to the drop and
+so cross the bodywork *smeared up to 2.14 m along the door side* rather than at
+the door — measured, `probe-disembark.mts`. Walking them down the gangway to the
+door and out (an L, which is what `CAT_BUS_LONGEST_WALK_TO_DOOR` already models:
+`CABIN_LENGTH_FROM_SEATS + BODY_WIDTH / 2`) would restore the designed 0.706 s
+floor and stop children stepping out through the side panel of a bus with
+windows. Not done — it is a visible behavioural change and wanted its own QA.
+
+# The control is stronger, and the old one was decaying
+
+`check:entrance-road` no longer sweeps the *old* road line against the *new*
+legs. Every seed is now built **twice**: once as the game builds it, once with
+`setEntranceCorridorHonoured(false)`, which switches off the single clause in
+`groundIsClear` that keeps legs out of the road. The identical sweep runs
+against that park and must come back dirty.
+
+- old control: 1–4 legs per seed, **35 total**, as low as one leg on seed 11
+- new control: **8–10 legs per seed, 151 total**, worst 2.40 m inside a bus
+- cost: 28.6 s -> 50.3 s wall clock (16 seeds x 2 parks)
+
+**Proved red**, geometry = this branch at road outset 8.26: mutating the sweep
+to look for `railRace:trestle-legs-TYPO` makes the control report zero on all
+16 seeds and the run is declared void, exit 1.
+
+# Two red gates that were hiding behind each other
+
+**`test:procgen` was red on this branch and green on `main`** — 4 files failed,
+**328 tests silently skipped**, 187 passed. Two separate faults, one masking the
+other:
+
+1. `invariants.ts` had gained a **static import of `roadRoute.ts`**, which
+   reaches `world/boundary.ts` and so loads the seeded manifest at the test
+   file's own module load — before `buildParkFacts` sets `LGP_SEED`. Every
+   non-canonical seed built the canonical park and threw; `seed-canonical`
+   passed because its seed *is* the default. Exactly the trap CLAUDE.md
+   documents. Fixed by putting the bus's start point on `ParkFacts`
+   (`startsAtX/Z`) behind a dynamic import, as `hidesTheArrivingBus` already
+   was. **Audited the whole file afterwards** (`/tmp/audit.mjs`, walks every
+   non-`type` static import transitively): no other chain reaches
+   `parkManifest.ts`.
+2. With the skips gone, **two real failures appeared underneath** — foliage
+   standing in front of the arriving bus on seeds 5 and 11. `hidesTheArrivingBus`
+   was the only keep-out on a planted thing asked as a **bare point**, while
+   `isPlantable` and `clearOfCruiser` both take a reach; `Scenery.ts` sites a
+   clump by its centre and then rolls blobs up to `BUSH_REACH`/`TREE_REACH`
+   away. Measured (`scripts/probe-sightline.mts`): every offender stood
+   *lower* than the nominal height its planter passed, so height was never the
+   fault — the offset was. It only went red now because the road's longer,
+   curved approach brought the corridor out to where the scatter lives.
+   `hidesTheArrivingBus` takes a `reach` now and every planter passes its own.
+
+`test:procgen` after both: **exit 0, 515 passed, 0 skipped.**
+
+# State
+
+Rebased onto `origin/main` (3799fae1), clean, no deletions in
+`git diff --diff-filter=D origin/main...HEAD`. Script step sets compared by
+parsing `package.json`: branch adds exactly `check:entrance-road`, drops
+nothing, 59 steps in the chain.
+
+- `tsc` 0, `typecheck:test` 0
+- `test:procgen` **0** (515/515, no skips)
+- `check:entrance-road` **0**, control 151 legs
+- `check:cat-bus` **0**
+- full `pnpm run check`, `check:coplanar` — running
+- `check:arrival-starts` — **red, not yet judged**: no hand-over within 75 s at
+  6x throttle, `hud` never appears and `sawHidden` never becomes true. Needs a
+  control run against `origin/main` on an idle machine; the first run was taken
+  while the box was saturated, which makes a throttled timing test meaningless.
