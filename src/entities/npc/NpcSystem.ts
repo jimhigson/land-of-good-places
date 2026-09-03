@@ -1186,6 +1186,28 @@ export class NpcSystem implements GameSystem {
   }
 
   /**
+   * What child `i` is saying this frame, or `null` if she is not talking.
+   *
+   * **The single owner of "is this child speaking".** Her name pill and her
+   * speech bubble both hang off this one getter — the bubble draws the text,
+   * the label hides itself while there is text — so the two cannot disagree
+   * about whether she is mid-sentence. Issue #486 is what happens when they
+   * do: the bubble was drawn straight over the pill and neither could be
+   * read. Two places each deciding their own visibility and being kept in
+   * step by hand is this repo's most-cited bug class; there is one decision
+   * here and both readers ask it.
+   *
+   * The state itself lives further in still — `WanderDriver.chatBubbleText`
+   * is a pure getter over `ChatToPlayer`'s state machine and `Journey`'s
+   * announcement — so a child who is despawned, interrupted, or whose chat
+   * simply times out stops "speaking" by the same route she started, and her
+   * name comes back on the next frame with nothing to remember to undo.
+   */
+  private speechTextOf(index: number): string | null {
+    return this.wanderDrivers[index]?.chatBubbleText ?? null;
+  }
+
+  /**
    * Floats each child's name pill above their head, screen-constant size —
    * the same {@link NameLabel} mechanism the player wears (design feedback:
    * "name labels, larger and screen-constant").
@@ -1194,6 +1216,8 @@ export class NpcSystem implements GameSystem {
    * looking at are shown; a park-full of pills on screen at once is clutter,
    * not charm. `labelOrder` is sorted in place every frame rather than
    * rebuilt, so this allocates nothing per frame beyond the sort itself.
+   *
+   * A child mid-sentence shows no pill at all — see {@link speechTextOf}.
    */
   private updateLabels(): void {
     const camera = this.camera;
@@ -1214,7 +1238,7 @@ export class NpcSystem implements GameSystem {
       const label = this.labels[i];
       if (!character || !label) continue;
 
-      if (rank >= VISIBLE_LABEL_CAP) {
+      if (rank >= VISIBLE_LABEL_CAP || this.speechTextOf(i) !== null) {
         label.sprite.visible = false;
         continue;
       }
@@ -1413,13 +1437,23 @@ export class NpcSystem implements GameSystem {
    * a check that re-derived it by proximity — nearest child to each bubble —
    * could not tell a bubble over the wrong child from a bubble over the right
    * one. Allocates; not for the frame path.
+   *
+   * Her name pill rides along in the same triple, by the same index, so
+   * `check:speech-bubbles` can ask the one question issue #486 is about —
+   * whether the two are ever drawn over each other — without pairing them up
+   * again itself.
    */
-  get speechBubbles(): readonly { readonly character: NpcCharacter; readonly bubble: SpeechBubble }[] {
-    const pairs: { character: NpcCharacter; bubble: SpeechBubble }[] = [];
+  get speechBubbles(): readonly {
+    readonly character: NpcCharacter;
+    readonly bubble: SpeechBubble;
+    readonly label: NameLabel;
+  }[] {
+    const pairs: { character: NpcCharacter; bubble: SpeechBubble; label: NameLabel }[] = [];
     for (let i = 0; i < this.characters.length; i += 1) {
       const character = this.characters[i];
       const bubble = this.bubbles[i];
-      if (character && bubble) pairs.push({ character, bubble });
+      const label = this.labels[i];
+      if (character && bubble && label) pairs.push({ character, bubble, label });
     }
     return pairs;
   }
@@ -1429,11 +1463,10 @@ export class NpcSystem implements GameSystem {
 
     for (let i = 0; i < this.characters.length; i += 1) {
       const character = this.characters[i];
-      const driver = this.wanderDrivers[i];
       const bubble = this.bubbles[i];
       if (!character || !bubble) continue;
 
-      bubble.setText(driver?.chatBubbleText ?? null);
+      bubble.setText(this.speechTextOf(i));
       bubble.anchorAt(
         character.position.x,
         character.position.y + character.avatar.height + BUBBLE_HEIGHT_OFFSET,
