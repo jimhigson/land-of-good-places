@@ -37,6 +37,7 @@ import {
   pairKey,
   type ParkFacts,
 } from './parkFacts.ts';
+import { offAxisGround, recutCarriers, type OffAxisGround } from './gridAxes.ts';
 import { resolveDismount, resolveDismountGroup } from '../../src/world/dismount.ts';
 // Leaf module, safe to import statically: `bridgeSpine.ts`'s ONLY import is
 // a type-only one (from `world/train/crossings`), which erases — no seeded
@@ -1154,52 +1155,70 @@ function railwayGeometryTest(
   };
 }
 
+const describeGround = (ground: OffAxisGround): string =>
+  `the paving from ${fmt(ground.from)} to ${fmt(ground.to)} runs diagonally for ` +
+  `${ground.extent.toFixed(1)} m — longer than a doorway approach or a platform turn should ` +
+  `ever need (drawn by ${ground.carriers.join(', ')})`;
+
 const pathsRunOnGridAxes: Invariant = (facts) => {
-  const problems: string[] = [];
-  const OFF_AXIS_FRACTION = 0.15;
-
   // See {@link railwayGeometryTest} — the grid rule's one measured exception.
+  const ground = offAxisGround(facts.pathEdges, railwayGeometryTest(facts));
+  return ground
+    .filter((piece) => piece.extent > MAX_DIAGONAL_APPROACH)
+    .map((piece) => describeGround(piece));
+};
+
+/**
+ * **The grid verdict is a property of the paving, not of the route object
+ * that happens to carry it.**
+ *
+ * `pathsRunOnGridAxes` used to answer differently about one piece of painted
+ * ground depending on which ribbon you asked — see `gridAxes.ts`'s header for
+ * the seed 225 measurement that pinned it down, where the same diagonal at the
+ * `building` door was "two short approach runs" to `spur-building` and the
+ * first 3 m of a 15.89 m failure to `connector-building-ballPit`. A check that
+ * changes its answer with the observer is not a check, so this asserts the
+ * property directly rather than leaving it to be inferred from the fix.
+ *
+ * {@link recutCarriers} re-cuts every edge into two carriers through the
+ * middle of its longest off-axis stretch. **Not one metre of paving moves** —
+ * the sample points are the same points, in the same order, with the same
+ * classification — so the only thing that changed is which route object owns
+ * which metres, and the answer must be identical, extent for extent.
+ *
+ * It is deliberately not a comparison of *counts*: two runs with the same
+ * number of violations can be a swap, and only the set says which.
+ */
+const gridAxisVerdictsIgnoreTheCarrier: Invariant = (facts) => {
   const railwayGeometry = railwayGeometryTest(facts);
+  const asBuilt = offAxisGround(facts.pathEdges, railwayGeometry);
+  const recut = offAxisGround(recutCarriers(facts.pathEdges, railwayGeometry), railwayGeometry);
 
-  for (const edge of facts.pathEdges) {
-    // The ring is deliberately a circle, not a grid loop — see this
-    // invariant's own comment and {@link ringIsATrueCircleRoundTheStatue}.
-    if (edge.backbone) continue;
-    const points = edge.points;
-    let runStart: readonly [number, number] | null = null;
-    let runEnd: readonly [number, number] | null = null;
+  // Geometry only: the carrier *names* are expected to differ, since that is
+  // the whole variable being changed.
+  const shape = (ground: readonly OffAxisGround[]): string[] =>
+    ground.map((piece) => `${piece.extent.toFixed(2)} ${fmt(piece.from)} -> ${fmt(piece.to)}`).sort();
 
-    const flushRun = (): void => {
-      if (!runStart || !runEnd) return;
-      const runLength = Math.hypot(runEnd[0] - runStart[0], runEnd[1] - runStart[1]);
-      if (runLength > MAX_DIAGONAL_APPROACH) {
-        problems.push(
-          `${edge.name} runs diagonally for ${runLength.toFixed(1)} m, from ${fmt(runStart)} to ` +
-            `${fmt(runEnd)} — longer than a doorway approach or a platform turn should ever need`,
-        );
-      }
-      runStart = null;
-      runEnd = null;
-    };
-
-    for (let i = 1; i < points.length; i += 1) {
-      const a = points[i - 1] as readonly [number, number];
-      const b = points[i] as readonly [number, number];
-      const dx = Math.abs(b[0] - a[0]);
-      const dz = Math.abs(b[1] - a[1]);
-      const hop = Math.hypot(dx, dz);
-      const offAxis =
-        hop > 1e-6 && Math.min(dx, dz) / hop > OFF_AXIS_FRACTION && !railwayGeometry(a, b);
-      if (offAxis) {
-        if (!runStart) runStart = a;
-        runEnd = b;
-      } else {
-        flushRun();
-      }
-    }
-    flushRun();
+  const before = shape(asBuilt);
+  const after = shape(recut);
+  const missing = before.filter((line) => !after.includes(line));
+  const extra = after.filter((line) => !before.includes(line));
+  if (missing.length === 0 && extra.length === 0) {
+    // A passing run must still say what it covered — CLAUDE.md's "a check that
+    // stops covering something must say so on every run". stderr, because
+    // vitest's default reporter shows console output from failing tests only.
+    process.stderr.write(
+      `    gridAxisVerdictsIgnoreTheCarrier: ${asBuilt.length} pieces of off-axis paving, ` +
+        `longest ${(asBuilt[0]?.extent ?? 0).toFixed(1)} m, unchanged when every edge is re-cut ` +
+        `into two carriers\n`,
+    );
+    return [];
   }
-  return problems;
+  return [
+    `re-cutting the same paving into different route objects changed the answer: ` +
+      `${missing.length} piece(s) only the as-built carriers see (${missing.join(' | ')}), ` +
+      `${extra.length} only the re-cut ones do (${extra.join(' | ')})`,
+  ];
 };
 
 /**
@@ -8495,6 +8514,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no paved path stops anywhere but a destination', noPathEndsNowhere],
   ['every plot faces exactly the camera axis', buildingsFaceTheCameraAxis],
   ['every paved path runs on grid axes', pathsRunOnGridAxes],
+  ['the grid verdict does not depend on which route object carries the paving', gridAxisVerdictsIgnoreTheCarrier],
   ['every street sits on the shared 12 m lattice', streetsShareLatticeLines],
   ['the ring road is one true circle round the statue', ringIsATrueCircleRoundTheStatue],
   ['every place a child can be served is a node in the path graph', everyDestinationIsANode],
