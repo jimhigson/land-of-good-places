@@ -48,6 +48,24 @@ in shot for the whole run. Assertion 1 is armed but unproven; restoring its
 reach means stranding a speaker off screen deliberately. Written into the
 file's header where the stale transcript was. Worth a ticket.
 
+## Review round 2 (approved, one condition + two nits — all in)
+
+- **Condition:** assertion-1 gap filed as **#494**, and its number now sits in
+  the header comment that promises it (was "worth a ticket, not done here").
+- `speechBubbles` header says it is **O(n²)** via `labelOrder.indexOf`, beside
+  the line that already said not-for-the-frame-path, plus what to do instead
+  (keep `labelOrder`'s inverse) if the game ever wants it per frame. Also
+  records that it has **no shipping consumer** — the check is the only caller.
+- `silentBands` → `spokeWithNothingDrawn`. The condition
+  (`speaking && !bubble.visible && labelDistance <= LABEL_MAX_DISTANCE`) also
+  catches, at any distance, a speaker whose bubble was gated off screen by the
+  #415 `isOnScreen` fix — the larger set, and not in the old name. 0 either
+  way today, so no printed number was wrong; the label on it was.
+
+Re-proved after the edits: unmutated exit 0 (10 talkers, longest nameless run
+0, 0 frames with nothing drawn); `--mutate-latch` exit 1 (Finn, 1844 frames,
+46.0 m, rank 9), clause 4a quiet.
+
 ## Findings
 
 - **The player has a name label and cannot speak.** `Player.label` is a
