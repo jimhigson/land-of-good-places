@@ -51,8 +51,17 @@ for (const e of r.edges) {
     : Math.abs(drawnCorner[0] - nx) < 1e-6
       ? 'elbowViaColumn'
       : 'elbowViaRow';
+  // Models the SHIPPED order: bucket first (disciplined before rogue), then
+  // within a bucket the shorter private leg. Keep this in step with
+  // `computeGridConnectors` or the control below stops discriminating.
   const predicted =
-    colRogue === rowRogue ? 'elbowViaColumn' : colRogue ? 'elbowViaRow' : 'elbowViaColumn';
+    colRogue !== rowRogue
+      ? colRogue
+        ? 'elbowViaRow'
+        : 'elbowViaColumn'
+      : leadDz < leadDx
+        ? 'elbowViaRow'
+        : 'elbowViaColumn';
   const viaMatches = winner === 'straightToLead' ? 'n/a' : winner === predicted ? 'Y' : 'N';
   console.log(
     `  -> ${e.to.padEnd(16)} cost ${e.cost.padStart(6)}  lead(${lead[0].toFixed(3)},${lead[1].toFixed(3)})\n` +

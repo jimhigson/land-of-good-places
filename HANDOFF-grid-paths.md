@@ -4484,3 +4484,59 @@ length, so:
 **Prediction recorded before measuring:** `check:park` unchanged at 12 green /
 7 stranded, and seed 128 drops out of the `streetsShareLatticeLines` set. To be
 measured on both columns, set-diffed, and reported either way.
+
+### THE TIE-BREAK — BUILT, MEASURED ON BOTH COLUMNS, KEPT
+
+`computeGridConnectors` now sorts each of the two buckets by the length of the
+shape's own private leg (`leadDx` for `elbowViaColumn`, `leadDz` for
+`elbowViaRow`) before the ladder runs. Four lines. `sort` is stable, so equal
+private legs keep the previous column-first order. `pnpm exec tsc --noEmit`
+exit 0; `pnpm run build` exit 0.
+
+**Column 2 — `test:procgen`: exit 1, `Test Files 4 failed | 24 passed (28)`,
+`Tests 4 failed | 1406 passed (1410)` (from 5 failed / 1405 passed).
+Set-diffed against the baseline file, not counted — it is a PURE REMOVAL, one
+line out and nothing in:**
+
+```
+- seed 128  every street sits on the shared 12 m lattice
+            connector-stall.facePaint-station-1  E-W 12.4 m on z = 41.65, 2.34 m off
+```
+
+Seeds 5, 11 (`streetsShareLatticeLines`), 267 (`detourRatiosStayReasonable`)
+and 288 (`noPathEndsNowhere`) are byte-identical to the baseline. **No swap** —
+which is the failure mode both pricing experiments had, and the reason the set
+was diffed rather than the count read.
+
+**Column 1 — `check:park`, all sixteen pool seeds: 12 green / 7 stranded.
+UNCHANGED. No seed moved in either direction.**
+
+```
+canonical 0   5 0    11 1   24 2   115 0  128 0  131 0  208 0
+225 2     267 0  274 0  288 2  326 0  346 0  428 0  451 0
+```
+
+**The prediction recorded before measuring — column 1 unchanged, 128 out of the
+column-2 set — held on both counts.** It held for the stated structural reason:
+equal-length shapes leave the node's offered cost untouched, so no node choice
+moved, so no work could be relocated onto `pathsRunOnGridAxes` or
+`detourRatiosStayReasonable`. That is the property the two pricing experiments
+lacked.
+
+**The drawn change on 128, at the same node and the same cost 33.52:**
+
+```
+before  door (29.559,41.649) (14.583,41.649) (14.583,33.310)   14.98 m private on z=41.649
+after   door (29.559,41.649) (29.559,33.310) (14.583,33.310)    8.34 m private on x=29.559,
+                                                                then 14.98 m on z=33.310 (lattice)
+```
+
+**For the PR body:** *when two shapes are the same length, cost cannot choose
+between them and push order silently does — so a search that breaks at its
+first acceptance must be ordered by what the cost function cannot see.* And:
+*a tie-break is not a price; it is the one way to prefer a shape without
+moving which node wins.*
+
+**Item struck: `streetsShareLatticeLines` on 128.** Still open on 5 and 11,
+whose offenders are `spur-`s, not connectors — a different producer, to be
+instrumented rather than assumed to be this one.

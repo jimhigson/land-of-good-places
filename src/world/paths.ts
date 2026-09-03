@@ -2554,10 +2554,40 @@ function computeGridConnectors(
           // thing it bounds. The pre-existing `tail` guard is a `Math.min`
           // over both axes at the **node**, so it cannot tell the two elbows
           // apart; this asks per shape, which is what lets it choose.
+          //
+          // **Within a bucket, the shorter private leg wins — and this is a
+          // TIE-BREAK, not a price.** The two elbows are Manhattan walks over
+          // the same rectangle, so their lengths are *identical* and
+          // `cost = length * STUB_COST_FACTOR` cannot tell them apart. Filling
+          // the bucket column-first unconditionally therefore decided the
+          // drawn shape by push order alone, and on seed 128's
+          // `stall.facePaint` it chose the worse one: at node
+          // (14.583, 33.310), `elbowViaColumn` runs **14.98 m** on the lead's
+          // private row z = 41.649 while `elbowViaRow`, at the same cost, runs
+          // only **8.34 m** private and puts its long leg on z = 33.310, a
+          // real 12 m lattice line. `streetsShareLatticeLines` fails on
+          // exactly that 14.98 m run.
+          //
+          // Because the lengths are equal, the node's offered cost is
+          // unchanged, so **node choice cannot move**. That is what makes this
+          // different from the two pricing experiments this branch measured and
+          // reverted: `privateLineRun` alone changed which node won and handed
+          // seed 225's 16.2 m diagonal back to `pathsRunOnGridAxes`, and
+          // pricing both terms cost two greens and a 292 m walk to a
+          // destination 16.8 m away. A tie-break moves no work anywhere it
+          // cannot be seen — it only stops the search throwing away a strictly
+          // better shape it had already built.
+          //
+          // `sort` is stable, so equal private legs keep the column-first
+          // order this had before.
           const disciplined: (typeof elbowViaColumn)[] = [];
           const rogue: (typeof elbowViaColumn)[] = [];
           (leadDx <= STUB_TAIL_LIMIT ? disciplined : rogue).push(elbowViaColumn);
           (leadDz <= STUB_TAIL_LIMIT ? disciplined : rogue).push(elbowViaRow);
+          const privateLegOf = (shape: typeof elbowViaColumn): number =>
+            shape === elbowViaColumn ? leadDx : leadDz;
+          disciplined.sort((a, b) => privateLegOf(a) - privateLegOf(b));
+          rogue.sort((a, b) => privateLegOf(a) - privateLegOf(b));
           // **A straight leg is a doorway approach, or it is a street on its
           // own heading**, and which one only decides the ORDER. The bound is
           // this file's own doorway reach, deliberately not the invariant's
