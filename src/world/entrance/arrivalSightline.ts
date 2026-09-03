@@ -177,11 +177,28 @@ const BUS_GROUND_Y = terrainHeight(BUS_STOP_POINT.x, BUS_STOP_POINT.z);
  *              its own height. The grazing ray is cast from the top because a
  *              ray that clears the top of a thing is not blocked by it; every
  *              ray below that one is.
+ * @param reach how far its own parts stand from `(x, z)`. **A planter must pass
+ *              this**; a check measuring one built instance passes nothing,
+ *              because an instance is already where it is.
+ *
+ * `reach` exists because a planted thing is not a point and this was the only
+ * keep-out on it that pretended otherwise. `Scenery.ts` sites a bush clump or a
+ * tree by its *centre* and then rolls blobs up to `BUSH_REACH`/`TREE_REACH`
+ * away from it — which is exactly why `isPlantable` and `clearOfCruiser` both
+ * take a reach — but this one was asked as a bare point. A clump centred just
+ * outside the shot therefore put its leaves inside it, and the planter said yes.
+ *
+ * Measured, `scripts/probe-sightline.mts`: seed 11 kept two bush blobs at
+ * (-27.4, 61.1) and (-30.7, 61.4), seed 5 a tree canopy at (22.6, 61.7). Every
+ * one of them stood **lower** than the nominal height its planter passed, so the
+ * height was never the fault — the offset was. Both seeds went red only once the
+ * road's longer, curved approach brought that edge of the corridor out to where
+ * the scatter actually lives.
  */
-export function hidesTheArrivingBus(x: number, z: number, top: number): boolean {
+export function hidesTheArrivingBus(x: number, z: number, top: number, reach = 0): boolean {
   // Behind the bus: it cannot be in front of what it is not in front of.
   // (`d.z` is positive — the camera is on the +z side.)
-  if (z <= BUS_FAR_Z) return false;
+  if (z + reach <= BUS_FAR_Z) return false;
 
   const back = Math.max(0, (z - BUS_NEAR_Z) / TOWARDS_CAMERA.z);
   const topAtBus = top - TOWARDS_CAMERA.y * back;
@@ -194,10 +211,10 @@ export function hidesTheArrivingBus(x: number, z: number, top: number): boolean 
   // drives? The corridor is the bus's swept body, so "inside it, plus the
   // silhouette's own overhang" is exactly "in front of the bus at some point in
   // the run" — and it is asked of the road rather than restated from it.
-  if (distanceToEntranceCorridor(xAtBus, zAtBus) > RUN_MARGIN) return false;
+  if (distanceToEntranceCorridor(xAtBus, zAtBus) > RUN_MARGIN + reach) return false;
   // Nothing beyond the brow can hide a bus that stops existing there.
   return Math.hypot(xAtBus - BUS_STOP_POINT.x, zAtBus - BUS_STOP_POINT.z) <=
-    entranceRoadBrow() + RUN_MARGIN;
+    entranceRoadBrow() + RUN_MARGIN + reach;
 }
 
 /**

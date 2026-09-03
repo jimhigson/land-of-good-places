@@ -645,7 +645,7 @@ function buildFoliage(collision: CollisionWorld): {
     // guessing at the tallest tree the scatter can produce, and a keep-out sized
     // for a tree that never grows there is the same disease as a 10 m disc sized
     // for an 11 m bus. See `entrance/arrivalSightline.ts`.
-    if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + TREE_TOP[kind])) return false;
+    if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + TREE_TOP[kind], reach)) return false;
     planted.push({ x, z, reach });
     const y = terrainHeight(x, z);
 
@@ -942,7 +942,7 @@ function buildFoliage(collision: CollisionWorld): {
     // check on the next line already uses for exactly this reach.
     if (!isPlantable(x, z, BUSH_REACH)) continue;
     if (!clearOfCruiser(x, z, BUSH_REACH, BUSH_TOP)) continue;
-    if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + BUSH_TOP)) continue;
+    if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + BUSH_TOP, BUSH_REACH)) continue;
     // **...and then the same three questions every other plant here asks, of
     // the same three owners.** Issue #500: until this branch the bush
     // scatter's whole idea of an obstacle was `isPlantable` — paving, plots,
@@ -1164,7 +1164,7 @@ function buildTreeline(): Group {
     // The canopy's own top, not the trunk's: `top = ground + height + radius *
     // 0.35` is where the blob's centre goes and it stands `radius * 1.15` up
     // from there at its tallest roll.
-    if (hidesTheArrivingBus(x, z, ground + height + radius * 1.5)) continue;
+    if (hidesTheArrivingBus(x, z, ground + height + radius * 1.5, radius)) continue;
 
     trunks.push({
       position: new Vector3(x, ground + height / 2, z),
