@@ -607,6 +607,13 @@ export interface ParkFacts {
     readonly rampReachPos: number;
     readonly rampReachNeg: number;
     readonly halfWidth: number;
+    /**
+     * How far either side of the site's axis `paths.ts` actually forbids
+     * ground to every foreign leg — read from that file's own
+     * `bridgeScreenHalfAcross`, never restated here, so an invariant holds the
+     * park to the band the layout really used.
+     */
+    readonly screenHalfAcross: number;
   }[];
   /**
    * One entry per built bridge: how far the paving it lifts hangs past its
@@ -1116,6 +1123,8 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
 
   const { CROSSING_SITES } = await import('../../src/world/train/crossingPlan.ts');
   const { SITE_SNAP_TOLERANCE } = await import('../../src/world/train/crossings.ts');
+  // The band `paths.ts` really screened, from that file's own owner.
+  const { bridgeScreenHalfAcross } = await import('../../src/world/paths.ts');
   const plannedBridgeSites = CROSSING_SITES.map((site) => ({
     railDistance: site.railDistance,
     x: site.x,
@@ -1125,6 +1134,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     rampReachPos: site.rampReachPos,
     rampReachNeg: site.rampReachNeg,
     halfWidth: site.halfWidth,
+    screenHalfAcross: bridgeScreenHalfAcross(site),
   }));
   // Derived, never gathered a second time — one owner for "which sites exist".
   const plannedBridgeSiteDistances = plannedBridgeSites.map((site) => site.railDistance);

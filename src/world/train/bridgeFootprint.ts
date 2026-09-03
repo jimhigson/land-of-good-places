@@ -1,6 +1,6 @@
 import type { LevelCrossing } from './crossings';
 import { frameFor, type SpineFrame } from './bridgeSpine';
-import { BRIDGE_RISE, DECK_HALF_LENGTH, FENCE_OFFSET } from './clearance';
+import { BRIDGE_RISE, BRIDGE_WALL_THICKNESS, DECK_HALF_LENGTH, FENCE_OFFSET } from './clearance';
 import { ENTRANCE_RAMP } from '../building/layout';
 import { isInEntranceGateway } from '../entrance/layout';
 import { GARDEN_PLAY_BOUNDARY } from '../boundary';
@@ -245,14 +245,15 @@ function maxLateralShiftFor(crossing: LevelCrossing): number {
 export const MIN_DECK_HALF_WIDTH = PLAYER_RADIUS + 0.3;
 
 /**
- * Full thickness of a bridge's own masonry side wall (the spandrel face,
- * carried up past the road as the parapet). The structural half-width the
- * search must clear is the paved half-width plus this — the wall stands
- * just outside the road, so obstacles are probed out to its own outer face,
- * not merely the paving's edge. One owner: `bridges.ts` builds the wall
- * meshes and their colliders from this same number.
+ * Full thickness of a bridge's own masonry side wall — **defined in
+ * `clearance.ts` and re-exported here**, for the reason {@link DECK_HALF_LENGTH}
+ * gives directly above its own re-export: this module cannot be imported from a
+ * seed-sensitive test file without pinning the seed, and
+ * `test/procgen/invariants.ts` needs the number to work out where a built
+ * bridge's masonry really ends. Every existing reader is unchanged and there is
+ * still exactly one definition.
  */
-export const BRIDGE_WALL_THICKNESS = 0.3;
+export { BRIDGE_WALL_THICKNESS } from './clearance';
 
 /**
  * **The half-width of the road a bridge carries — the one owner (issue

@@ -214,6 +214,22 @@ export const FENCE_OFFSET = 2.0;
 export const DECK_HALF_LENGTH = FENCE_OFFSET + 1.2;
 
 /**
+ * Full thickness of a bridge's own masonry side wall (the spandrel face,
+ * carried up past the road as the parapet). The structural half-width the
+ * footprint search must clear is the paved half-width plus this — the wall
+ * stands just outside the road, so obstacles are probed out to its own outer
+ * face, not merely the paving's edge. `bridges.ts` builds the wall meshes and
+ * their colliders from this same number.
+ *
+ * Lives here, in the leaf module, for the same reason {@link DECK_HALF_LENGTH}
+ * does: `test/procgen/invariants.ts` has to know where a bridge's masonry
+ * really ends, and it cannot reach `bridgeFootprint.ts` at its own top level
+ * without loading `parkManifest` before the seed is fixed.
+ * `bridgeFootprint.ts` re-exports it, so every existing reader is unchanged.
+ */
+export const BRIDGE_WALL_THICKNESS = 0.3;
+
+/**
  * How far below a bridge deck's own surface the fence's `topIsAbsolute` top
  * sits, where a run of fence posts falls directly under a deck — a decisive
  * margin, never a graze, and nowhere near a ground jump reaches (see

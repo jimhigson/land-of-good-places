@@ -1366,7 +1366,7 @@ function segmentCutsABridgeRamp(
     // screened) and the feet's own connectors (exempt above) are the only
     // things in it, and no later, narrower bridge can meet a foreign ribbon.
     const inner = 0;
-    const outer = site.halfWidth + RAMP_SCREEN_MARGIN;
+    const outer = bridgeScreenHalfAcross(site);
     for (const sign of [1, -1] as const) {
       if (
         segmentMeetsRect(
@@ -1461,6 +1461,52 @@ function segmentMeetsRect(
 // here is exactly the drift that let seed 288 plan one bridge's foot inside
 // another bridge's reservation.
 export { RAMP_SCREEN_MARGIN };
+
+/**
+ * **How far either side of a crossing site's axis this file forbids ground to
+ * every foreign leg — the one owner of that half-width.**
+ *
+ * {@link segmentCutsABridgeRamp} and {@link bridgeSiteReserving} both ask it
+ * rather than each restating `site.halfWidth + RAMP_SCREEN_MARGIN`, and
+ * `test/procgen/parkFacts.ts` carries the answer onto `ParkFacts` so
+ * `builtMasonryStaysInsideItsReservation` can hold the built park to *this*
+ * number rather than to a copy of it. A comment promising the layout's band
+ * and the invariant's band agree would not be a mechanism; asking the same
+ * function is.
+ *
+ * ## What the number means, and the two things it is not (measured, 2 Sep 2026)
+ *
+ * `site.halfWidth` is documented in `crossingPlanSolve.ts` as *"the corridor
+ * half-width this site was **proven at**"* — a proof that a deck and its ramps
+ * would have room here, never a statement about where the masonry ends up. It
+ * has repeatedly been read as the second thing, and it is neither of the two
+ * quantities that matter:
+ *
+ * - **the masonry actually built** — `scripts/tmp-resfit.mts`, 30 decks across
+ *   the sixteen-seed pool: `|across|` at most **2.52 m**, or **3.72 m** on the
+ *   one seed (267) whose spine curves under its own ramp;
+ * - **the masonry the builder is licensed to build** — the widest ribbon plus
+ *   the parapet (**2.95 m**), displaced by `bridgeSpine.ts`'s `DEVIATION_CAP`
+ *   (3.0 m) and `bridgeFootprint.ts`'s `maxLateralShiftFor` (**at least 4 m**),
+ *   so close to **10 m**.
+ *
+ * This band sits between them at 4.5–5.5 m: too wide to be the masonry, too
+ * narrow to cover the licence. Shrinking it to the masonry band alone was
+ * built and measured and is recorded in `HANDOFF-grid-paths.md` — it cures
+ * seed 5 outright, does nothing for 288, and costs 11 and 451, because the
+ * extra width has been doing shaping work (forcing the grid-discipline ladder
+ * onto shared lines) that nothing else does. **Do not narrow it without
+ * bounding the builder to the same band and fixing that ladder first**, and do
+ * not widen it believing the licence justifies it: the invariant below
+ * measures what is actually built, which is the only side of this anyone has
+ * ever checked.
+ */
+export function bridgeScreenHalfAcross(
+  site: CrossingSite,
+  margin: number = RAMP_SCREEN_MARGIN,
+): number {
+  return site.halfWidth + margin;
+}
 
 /**
  * **The ground a bridge will really stand on — deck, both ramps and the
@@ -1563,7 +1609,7 @@ function bridgeSiteReserving(x: number, z: number, margin = RAMP_SCREEN_MARGIN):
     const dx = x - site.x;
     const dz = z - site.z;
     const across = -dx * site.dirZ + dz * site.dirX;
-    if (Math.abs(across) > site.halfWidth + margin) continue;
+    if (Math.abs(across) > bridgeScreenHalfAcross(site, margin)) continue;
     const along = dx * site.dirX + dz * site.dirZ;
     if (along <= DECK_HALF_LENGTH + site.rampReachPos + margin &&
         along >= -(DECK_HALF_LENGTH + site.rampReachNeg + margin)) {
