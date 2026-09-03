@@ -65,6 +65,7 @@ import { COPLANAR_BASELINE, type BaselineEntry } from './coplanar-baseline.mts';
 import { PARK_SEED } from '../src/world/parkManifest.ts';
 import { PARK_SEED_POOL } from '../src/world/parkSeedPool.ts';
 import { SPACE_GARDEN } from '../src/world/spaces.ts';
+import { BRIDGE_GROUP_NAME_RE } from '../src/world/train/bridges.ts';
 
 const verbose = process.argv.includes('--verbose');
 const printBaseline = process.argv.includes('--print-baseline');
@@ -137,9 +138,12 @@ function keyOf(seam: RankedSeam): string {
  * So the index comes out of the key while the *printed* path keeps it, which is
  * the right granularity anyway: a bridge is one model, and a seam in it is one
  * finding however many the park builds.
+ *
+ * The pattern is `bridges.ts`'s own — restating the naming convention here as a
+ * second regex would be the same disease one layer out.
  */
 function stableName(path: string): string {
-  return path.replace(/\/bridge-\d+(?:\.\d+)?\//g, '/bridge/');
+  return path.replace(BRIDGE_GROUP_NAME_RE, '/bridge/');
 }
 
 function sweepThisSeed(): Finding[] {

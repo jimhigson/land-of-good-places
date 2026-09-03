@@ -376,7 +376,7 @@ function outsideTheGate(station: EdgeStation): boolean {
  * own half-length (`blockWidth / 2`, and the pillars are 1.5 m so half of the
  * widest is 0.85) plus the masonry's half-width.
  */
-const DRAWN_BLOCK_GATE_MARGIN = 0.85 + BOUNDARY_MASONRY_HALF_WIDTH;
+export const DRAWN_BLOCK_GATE_MARGIN = 0.85 + BOUNDARY_MASONRY_HALF_WIDTH;
 
 const UP = new Vector3(0, 1, 0);
 const SQUASHED_CAP = new Vector3(1, 0.72, 1);

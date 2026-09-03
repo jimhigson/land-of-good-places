@@ -70,9 +70,12 @@ import {
   ENTRANCE_GATE_X,
   ENTRANCE_GATE_Z,
   ENTRANCE_WALK_DEPTH,
+  entranceGateFrame,
+  isInEntranceGateOpening,
 } from '../src/world/entrance/layout.ts';
 import { GATE_PROBE_INSET, GATE_PROBE_STEP, measureGatewayWalk } from '../src/world/entrance/gatewayWalk.ts';
 import { edgeRadiusAt, PARK_BOUNDARY } from '../src/world/boundary.ts';
+import { BOUNDARY_WALL_COLLISION_HALF } from '../src/world/Garden.ts';
 import { PARK_SEED } from '../src/world/parkManifest.ts';
 import { PARK_SEED_POOL } from '../src/world/parkSeedPool.ts';
 
@@ -97,6 +100,12 @@ function measureThisSeed(): { fouls: Foul[]; open: number; total: number; map: s
 
   const fouls: Foul[] = [];
   const foul = (what: string): void => fouls.push({ seed: PARK_SEED, what });
+
+  // The registered colliders, so the masonry clause below can ask about the
+  // segments the wall actually built rather than about where a body ends up.
+  const inner = collision as unknown as {
+    walls: { x1: number; z1: number; x2: number; z2: number; halfThickness: number }[];
+  };
 
   // The walk runs inward along the gate's own radial; across it is the
   // perpendicular. Derived from the gate rather than assumed to be the x axis,
@@ -123,6 +132,46 @@ function measureThisSeed(): { fouls: Foul[]; open: number; total: number; map: s
         `nothing connects that to the ${ENTRANCE_WALK_DEPTH} m mark within the arch's own ` +
         `${(2 * ENTRANCE_GATE_HALF_WIDTH).toFixed(1)} m width`,
     );
+  }
+
+  // --- the second assertion: no masonry stands in the opening --------------
+  //
+  // **Walkability alone cannot see this, which is why it is here.** The clause
+  // above asks whether a child can get *through*; a wall reaching a metre into
+  // an 8.6 m doorway leaves her a way past and passes it. Measured on `main`,
+  // boundary masonry overlapped a player-sized body inside the arch on **nine
+  // of the sixteen pool seeds** — 0.87 m on 451, 0.76 m on 128, and 0.05 m on
+  // the canonical seed — and every one of them walked in fine.
+  //
+  // So this asks the thing the fix actually changed: does any boundary
+  // collision segment come inside the aperture at all? It is stated over the
+  // **whole segment**, not its midpoint, because the midpoint was the bug —
+  // a 2 m chord whose middle clears the gap still reaches a metre into it.
+  //
+  // Reverting `Garden.ts` to the midpoint-only test turns this red on nine
+  // seeds. Nothing else on this branch does, and a silent revert of the
+  // headline fix on a `--ours` rebase is exactly what CLAUDE.md's rebase
+  // section exists to stop.
+  for (const wall of inner.walls) {
+    if (wall.halfThickness !== BOUNDARY_WALL_COLLISION_HALF) continue;
+    // Closest approach of the segment to the gate, sampled along it: the
+    // aperture test is cheap and a wall is at most a couple of metres long.
+    const steps = 8;
+    for (let i = 0; i <= steps; i += 1) {
+      const t = i / steps;
+      const x = wall.x1 + (wall.x2 - wall.x1) * t;
+      const z = wall.z1 + (wall.z2 - wall.z1) * t;
+      if (!isInEntranceGateOpening(x, z, wall.halfThickness)) continue;
+      const { across, along } = entranceGateFrame(x, z);
+      foul(
+        `boundary masonry reaches into the gateway at (${x.toFixed(2)}, ${z.toFixed(2)}) — ` +
+          `${Math.abs(across).toFixed(2)} m off the axis of an opening that is ` +
+          `${ENTRANCE_GATE_HALF_WIDTH} m wide either side, ${along.toFixed(2)} m along the way in. ` +
+          `Segment (${wall.x1.toFixed(2)}, ${wall.z1.toFixed(2)}) -> ` +
+          `(${wall.x2.toFixed(2)}, ${wall.z2.toFixed(2)}), halfThickness ${wall.halfThickness}`,
+      );
+      break;
+    }
   }
 
   // --- control 1: the posts are solid --------------------------------------
