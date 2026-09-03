@@ -868,3 +868,136 @@ its midpoint on a ramp any more (it should be zero everywhere now).
 
 - #474 blocks on Jim's canonical ruling (widen vs leave pool) — separate.
 - Visual QA owed on both PRs; Overseer dispatches.
+
+---
+
+## State — 2 Sep, second successor leg
+
+**9 of 16 green, 26 stranded** (from 8 / 28 at handover).
+
+| seed | at handover | now | |
+|---|---|---|---|
+| canonical | 4 | 4 | root cause found, upstream — see below |
+| 5 | 10 | 10 | gate pocket unreachable, same family |
+| 11 | 3 | 3 | |
+| 24 | 3 | **2** | span links |
+| 115 | 0 | 0 | green |
+| 128 | 0 | 0 | green |
+| 131 | 0 | 0 | green |
+| 208 | 0 | 0 | green |
+| 225 | 2 | 2 | |
+| 267 | 2 | **0** | **now green** — the gate ladder |
+| 274 | 0 | 0 | green |
+| 288 | 3 | 3 | |
+| 326 | 1 | 1 | |
+| 346 | 0 | 0 | green |
+| 428 | 0 | 0 | green |
+| 451 | 0 | 0 | green |
+
+### The instrument that made all of this visible
+
+`scripts/tmp-ribboncomp.mts` — flood the **drawn paving** from the backbone,
+two ribbons joined where their centre lines come within the sum of their half
+widths. Sixteen seeds: **canonical, 5 and 267 each have two components, and the
+second is `gate-approach` alone.** All thirteen others are one component. That
+is the control — the column discriminates, and it named the defect as one
+defect on three seeds rather than three unrelated counts.
+
+`scripts/tmp-gate.mts` (`debugGateNodes`) prints every mouth candidate with its
+link count, whether the ring can reach it, and whether `routeFromNetwork`
+finds anything. `scripts/tmp-north.mts` (`debugGridNodes`) prints every grid
+node with its component and neighbours. `scripts/tmp-clearmap.mts` prints a
+point-clearance map. `scripts/tmp-whatblocks.mts` / `tmp-nodewhy.mts` name what
+refuses a given point.
+
+### `noPathEndsNowhere` was ALREADY the degenerate-lane assertion, and already red
+
+The briefed "write the degenerate-lane clause, watch it go red" turned out to
+need no new clause. `pnpm exec vitest run test/procgen/seed-canonical.test.ts`,
+before any change on this leg:
+
+```
+FAIL  canonical seed 20260728 > no paved path stops anywhere but a destination
+  gate-approach's end at 0.0, 46.8 is 13.92 m from the nearest other paving
+    — it branches off nothing
+```
+
+It catches exactly the island, by name, and it has been red on canonical all
+along. Note the invariant suite runs on **six** seeds (canonical, 5, 11, 24,
+288, 326) — 267 has no test file, which is why nobody saw it there.
+
+### Fix 1 (kept): the gate ladder climbs until the ring can REACH the gate
+
+`bridgeSiteReserving` is now the one owner of the reservation rectangle;
+`pointStandsOnABridgeRamp` is its boolean face. The gate's join is a ladder of
+relax 0/1/2 screened, then relax 0/1/2 with the reservation the handover itself
+stands in exempted **by identity**, and the rung that stops it is *the ring
+reaching the node*, not the node having a link.
+
+That distinction is the whole fix. `scripts/tmp-gate.mts` on 267:
+`links: 1, reachableFromRing: false, routes: false` — a count-of-links ladder
+stopped at the first rung, satisfied, on a connector into a pocket. Every other
+ladder in the file counts connectors and is right to; a door's neighbourhood is
+ordinary lattice and the gate's is not, because on 5 and 267
+`pointStandsOnABridgeRamp(0, 54)` is **true** (on 5 for the corridor's whole
+24 m): the arch itself stands inside a bridge's reservation, and every edge
+touching a reservation is refused.
+
+267: 2 -> 0, green. Nothing else moved.
+
+### Fix 2 (kept): span links — a street steps round a crossroads that does not exist
+
+The jog pass heals a blocked *run* between adjacent nodes; nothing healed a
+blocked *node*. Jogs require `nodeOk[b]`, and straight/pinch links only ever
+join adjacent cells, so a refused crossroads ended the line whatever clear
+ground lay beyond. Span links join the two nodes two pitches apart either side
+of a dead crossroads with the same three-segment half-pitch shape, at
+`SPAN_COST_FACTOR` 1.35. Seed 24: 3 -> 2. Nothing regressed.
+
+### CANONICAL'S ROOT CAUSE — measured, and it is NOT in `paths.ts`
+
+Do not spend another leg inside the router on this. The gate pocket is walled
+in on all four sides and the wall is built by three different systems:
+
+```
+(-33.1,55.4) comp=0 REACHABLE nbrs=[-33.1,43.4 -28.5,53.8]
+(-21.1,55.4) does not exist — nodeOk 0
+( -9.1,55.4) comp=8 --------- nbrs=[2.9,55.4 ... the gate nodes]
+```
+
+- **West** — `(-21.07, 55.38)` is refused by **the Rail Race arch feet**, not by
+  a plot: `debugWhatBlocks` gives `archFoot r=4.40 dist=3.09` and five more
+  behind it, a continuous chain. The arch marches straight across the gate's
+  only westward lattice line.
+- **North** — `(-21.07, 61.38)` (the half-pitch line) has `boundary=1.12`. The
+  park edge is right there.
+- **East and south** — `(14.93,55.38)` `railDist 3.03`, `(14.93,43.38)` 3.85,
+  `(2.93,43.38)` 2.10, all under `RAIL_CLAMP_DISTANCE` 4.2. The railway loop.
+- **No crossing site serves the pocket.** Canonical has three sites (six feet);
+  the nearest foot to the pocket is `(-28.5,53.8)` — on the far side of the
+  arch.
+
+`scripts/tmp-spanoff.mts` (control: offset 0, the known-blocked straight run,
+correctly reports blocked) tried every offset for a span between
+`(-9.07,55.38)` and `(-33.07,55.38)`:
+
+```
+offset     0  blocked  leg2:streetClear      <- the control
+offset     6  blocked  leg1:streetClear leg2:streetClear
+offset    -6  blocked  leg1:streetClear leg2:streetClear,ramp leg3:ramp
+offset     3  blocked  leg1:streetClear leg2:streetClear
+offset  -1.5  blocked  leg2:streetClear,ramp
+offset   1.5  CLEAR
+```
+
+**Only an eighth of a pitch clears.** A 24 m run on a private line 1.5 m off
+the lattice is precisely the defect the `streetsShareLatticeLines` successor
+must catch and precisely Jim's complaint #3. So there is no honest grid answer
+here: the fix is upstream — a crossing site that serves the gate's own side of
+the loop, or an arch that does not sit across the gate's line (Jim's brief #2,
+"considered together from the start"; Decision 4's joint solve). Seed 5 is the
+same family (its gate handover is still `reachableFromRing: false` at the
+widest rung, `nearestReachable: 35.0m`).
+
+**Do not "fix" this by threading the 1.5 m line.** It trades a measured
+`poi.stranded` for a measured grid violation and Jim's own complaint.
