@@ -580,7 +580,36 @@ the ramp is at the outer end. Both are wrong; the standing procgen rule says
 backtrack — try another corridor line, another mouth, or a route round the
 ramp — rather than accept a degenerate result.
 
-**Check canonical the same way before fixing** (`tmp-pocket.mts`, read the
+**CANONICAL READ, AND THEY ARE NOT THE SAME BUG.** Asked before assuming, and
+the answer was no:
+
+```
+canonical  lane gate-approach:
+  XX at=0.0  (0.0,51.8) nbrs=3 onRamp=false
+  XX at=7.0  (0.0,48.2) nbrs=3 onRamp=false
+  XX at=14.0 (0.0,44.6) nbrs=3 onRamp=false
+```
+
+Three nodes, **`onRamp=false` on all three**, spanning 7.2 m and joined to each
+other but to nothing else. 267's two are `onRamp=true` and 4 m long. Both lanes
+are degenerately short against seed 131's twelve — so they share a *shape* —
+but only 267's is the ramp-at-the-start collapse described above.
+
+Decisively: **canonical's four stranded waypoints were `(-8.3,48.8) (0,51.8)
+(0,48.2) (0,44.6)` in the very first baseline of this branch, before leg 1
+existed.** So canonical is a pre-existing truncated gate approach, not
+something leg 1 caused, and it needs its own diagnosis — start by asking why
+the drawn `gate-approach` route is only ~7 m long there when nothing is on a
+ramp. Two fixes, not one; the circumstantial evidence was misleading.
+
+**The generalisable point, and it is the one for the PR body:** both seeds show
+a lane far shorter than its peers, and *nothing asserts on that*. A degenerate
+lane is a result nobody checks for. **The `streetsShareLatticeLines` successor
+should catch a lane degenerately short against its peers by name** — that is
+worth more than the seed count it recovers, because it turns a silent
+degeneracy into a red run whoever causes it next.
+
+**(superseded) Check canonical the same way before fixing** (`tmp-pocket.mts`, read the
 `gate-approach` lane). Canonical's stranded set has been `(0.0, 51.8)
 (0.0, 48.2) (0.0, 44.6)` and friends since the first baseline and has not
 moved through four separate fixes, which is consistent with the same
