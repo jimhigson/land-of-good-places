@@ -44,3 +44,29 @@ console.log(`gate at (${ENTRANCE_GATE_X.toFixed(1)}, ${ENTRANCE_GATE_Z.toFixed(1
 console.log(`x runs ${(ENTRANCE_GATE_X - half).toFixed(1)} to ${(ENTRANCE_GATE_X + half).toFixed(1)}, 0.5 m a column`);
 for (const line of lines) console.log(line);
 console.log(`${standCount} standable, ${blockCount} blocked — a map that is all one or the other is measuring nothing`);
+
+// --- what is standing there --------------------------------------------------
+// Every wall segment passing within `reach` of the gate centre. A blocked gate
+// names its blocker rather than leaving the next agent guessing.
+const reach = 6;
+const walls = (collision as unknown as Record<string, unknown>).walls;
+if (Array.isArray(walls)) {
+  console.log(`\nwall segments within ${reach} m of the gate centre, of ${walls.length} in the park:`);
+  let near = 0;
+  for (const wall of walls as Record<string, number>[]) {
+    const ax = wall.ax ?? wall.x1 ?? NaN;
+    const az = wall.az ?? wall.z1 ?? NaN;
+    const bx = wall.bx ?? wall.x2 ?? NaN;
+    const bz = wall.bz ?? wall.z2 ?? NaN;
+    if (!Number.isFinite(ax)) continue;
+    const mx = (ax + bx) / 2;
+    const mz = (az + bz) / 2;
+    if (Math.hypot(mx - ENTRANCE_GATE_X, mz - ENTRANCE_GATE_Z) > reach) continue;
+    near += 1;
+    console.log(
+      `  (${ax.toFixed(2)}, ${az.toFixed(2)}) -> (${bx.toFixed(2)}, ${bz.toFixed(2)}) ` +
+        `halfThickness ${String(wall.halfThickness ?? wall.half ?? '?')} top ${String(wall.topHeight)}`,
+    );
+  }
+  console.log(`${near} near the gate`);
+}
