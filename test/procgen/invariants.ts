@@ -131,7 +131,6 @@ import {
 } from '../../src/world/train/trainDimensions.ts';
 import {
   BRIDGE_WALL_THICKNESS,
-  DECK_HALF_LENGTH,
   RIDER_HEADROOM,
   STATION_GAP,
   TRAIN_CLEARANCE_Y,
@@ -6525,8 +6524,11 @@ const builtMasonryStaysInsideItsReservation: Invariant = (facts) => {
     if (own === undefined) return { lo: Infinity, hi: -Infinity };
     const nx = site.dirZ;
     const nz = -site.dirX;
-    const alongMin = -(DECK_HALF_LENGTH + site.rampReachNeg);
-    const alongMax = DECK_HALF_LENGTH + site.rampReachPos;
+    // The reservation's own length, from `paths.ts`'s own owner via
+    // `ParkFacts` — never `DECK_HALF_LENGTH + rampReach`, which is the bound
+    // that made this sweep unable to fail in the `along` axis at all.
+    const alongMax = site.screenHalfAlong;
+    const alongMin = -alongMax;
     let lo = Infinity;
     let hi = -Infinity;
     for (let along = alongMin; along <= alongMax; along += 0.5) {
