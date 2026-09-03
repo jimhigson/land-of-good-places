@@ -4612,3 +4612,136 @@ head-on tie-break confirmed still present (`privateLegOf` -> 3 matches);
       (the latter is *wrong*, see above). `tmp-stoneground.mts` last.
 - [ ] The rebase onto `origin/main` (`check:coplanar` is on `main`, absent here).
 - [ ] `pnpm run check` has still NOT been run on this branch.
+
+### `pnpm run check` — RUN FOR THE FIRST TIME ON THIS BRANCH. Exit 1 at step 21 of 58.
+
+Chain enumerated by parsing the scripts object, never grepped:
+`node -e "..."` on `package.json` -> **58 steps**.
+
+```
+CHECK_EXIT=1
+check:pet-slide FAILED
+  - in shot: the nearest companion filled at least 1% of the chase frame on
+    only 88% of 8 rasters, against 95% required (its smallest was 0.0%)
+    — it is behind her, but not in the shot
+```
+
+**`check:pet-slide` is step 21 of 58, so steps 22-58 never ran** — and that
+range holds every check this branch's work actually touches: `check:park`,
+`check:waypoints`, `check:nav-routes`, `check:path-preference`,
+`check:solve-cost`, `check:park-map`, `check:park-boot`. A red step near the
+front hides everything behind it, which is why this was run early rather than
+last. **Steps 1-20 passed, including `tsc --noEmit` (7) and `typecheck:test`
+(8).**
+
+**Attribution, stated rather than assumed:** this branch's three-dot diff
+touches no pet or slide source — the only matching path is
+`scripts/measure-slide-boot.mts`, a measurement script, not the checked
+behaviour. A `fix/pet-slide-check` branch is live in another worktree, so this
+is very likely already owned. **Reported, not absorbed, and not claimed as
+"pre-existing" without the diff evidence above.**
+
+Steps 22-58 were then run individually so the branch is actually covered
+rather than hidden behind an unrelated red step; results in the next section.
+
+**Caveat carried from the Overseer:** `check:park-boot` calibrates
+single-thread speed and cannot see machine contention — another agent saw it
+fail at 76.4 ms against a 21.9 ms ceiling under parallel load and pass at
+12.3 ms idle. A `check:park-boot` failure is a load question before it is a
+regression.
+
+### 267's `detourRatiosStayReasonable` — the honest baseline, and the two-definitions suspicion REFUTED
+
+```
+seed 267  'stall.railRacer' and 'exit-railRace' are 5.0 m apart in a straight
+          line but 76.8 m apart by paving (15.24x, wasting 71.7 m) — closer
+          than 33.5 m ... with no direct connector between them
+```
+
+Measured on the built park:
+
+```
+stall.railRacer  stall  (76.030, 68.835)
+exit-railRace    exit   (72.583, 72.510)      straight 5.04 m
+```
+
+**There is no `connector-stall.railRacer-exit-railRace` route at all** — the
+pair's only paving is `spur-stall.railRacer` and `spur-exit-railRace`, both
+`paved=true`, each running back to the ring. Three interconnects *were* built
+on this seed (`connector-ferrisWheel-exit-ferrisWheel`,
+`connector-stall.waterFight-station-1`, `connector-dodgems-stall.dodgems`), so
+the pass ran and is not inert.
+
+**Every gate `addInterconnects` applies to this pair passes:**
+
+| gate | value | verdict |
+|---|---|---|
+| `straight > closeCap` | 5.04 vs 16.8 x 2.5 = 42.0 | passes |
+| rail sides differ | side 1 both | passes |
+| kind is a destination | `stall`, `exit` | passes |
+| `paved < straight * 2.5` | 76.8 vs 12.6 | passes |
+| `paved - straight < minWaste` | 71.7 vs 16.8 x 1.5 = 25.2 | passes |
+| `straight <= 10` -> direct connector | 5.04 | takes the direct branch |
+| `streetSegmentClear(a,b,[a],7)` | **true** | passes |
+| `segmentHoldsRailSide` | true | passes |
+| `!segmentCutsABridgeRamp` | true | passes |
+
+**A HYPOTHESIS REFUTED BEFORE IT COST ANYTHING.** I suspected the classic
+two-definitions shape: `invariants.ts`'s `DETOUR_DESTINATION_KINDS` carries a
+doc comment promising it matches "`paths.ts`'s own `addInterconnects`", and a
+comment promising two lists agree is not a mechanism. **They are in fact
+identical** — both `new Set(['anchor', 'stall', 'station', 'exit'])`. Recorded
+as refuted so nobody re-runs it.
+
+**MY PROBE UNDER-TESTED AGAIN, SAME CLASS AS `tmp-corner.mts`.**
+`debugLegScreens` reported `streetClear: false` for this pair and I nearly
+took that as the cause. It is the **public** call, with no exemption;
+`addInterconnects` passes the door's own 7 m plot exemption, and asked that
+way (`debugArrivalLegScreens`) the leg is **clear**, with the only nearby plot
+`(73.84, 66.64)` at `atDoor=0.50`, i.e. `relaxed`, not blocking. **Ask the
+call the code makes, not the nearest available one.** My control here also
+failed to discriminate — a point 300 m out returns `streetClear:false` too, so
+it could not distinguish "blocked" from "asked the wrong question". Same
+lesson as before: *a control only discriminates on the axis it varies.*
+
+**SO THE LOCATED QUESTION, for whoever takes it next.** Every gate passes on
+the *finished* park, yet no connector was built — so the pass must have seen
+something different **at the moment it ran**. Two candidates, in order:
+
+1. **`paved` was `Infinity`.** Line 5592 skips silently with the comment *"not
+   actually connected — a different bug, not this pass's job"*. If the two
+   spurs were not yet joined in `buildRouteDistanceGraph`'s view when the pass
+   ran, the pair is dropped and nothing announces it. **A phase with no counter
+   reports zero work and reads as a stall** — this pass has no counter for
+   candidates dropped this way.
+2. **`paved` was short.** `paths.ts` measures with `buildRouteDistanceGraph`
+   over **control polylines**; the invariant measures with
+   `buildFactsDistanceGraph` over the **drawn, resampled curves**, paved-only.
+   If `edges` at that moment included edges the invariant will not count, the
+   pass saw a shortcut and concluded "already fine". **That is a genuine
+   two-definitions candidate and it is the one to measure first** — it is the
+   same distance under two owners.
+
+Both need one debug export of `buildRouteDistanceGraph`'s verdict for a named
+pair, plus a counter for candidates dropped at each gate. **Not built — I
+stopped rather than start it badly.**
+
+**On the honest baseline the brief asked for:** the route this replaced ran
+through solid ground (the statue crossing, fixed earlier this branch), so the
+*old* ratio was measured against a path nobody could walk and is not a
+baseline to restore. The 15.24x is the first honest number for this pair. It
+is still wrong — two destinations 5 m apart should not be 76.8 m apart by
+paving — but it is wrong in the open rather than hidden behind an unwalkable
+shortcut.
+
+### Seed 225 — NOT fixed by #484, and this branch must not claim it is
+
+Per the agent that owns the carrier-relative check: 225's `pathsRunOnGridAxes`
+does **not** evaporate, it **stops flickering**. On this branch's real park it
+reads a stable **16.29 m** (`connector-building-ballPit` + `spur-building`,
+`(40.7, 13.7) -> (25.9, 7.1)`). The three numbers this file has recorded —
+15.89, 16.2 and 2.50 — are three views of **one 16.29 m piece of ground** seen
+from different carriers. **It is a real legibility defect against Jim's
+complaint #3 and it is outstanding.** Its producer is `straightToLead` rung 2,
+the same class as 131, and it should be worked with that class rather than
+chased alone. Once #484 lands it is this branch's again.
