@@ -39,10 +39,37 @@ head - instead, hide their name while they are talking."
 origin/main 7a1d81f9, unmodified check: 1984 sightings                exit 0
 ```
 
+## Watched in a running game (headless Chromium, dev server on 5287)
+
+`/spawn?pos=-1.6,51.6`, sampling `window.game.world.npcs.speechBubbles` at
+10 Hz for 180 s across 24 children:
+
+- 0 pills drawn under their own bubble, in 1800 samples.
+- 9 bubble episodes ended; 9 names came back; worst delay **0 ms** (same
+  sample — the pill returns on the frame the bubble goes).
+- Shortest episode 1166 ms, longest 6472 ms — nothing brief enough to flicker.
+- Chat is sparse: one 150 s run saw no bubble at all. Budget several minutes
+  before concluding anything from a silent run.
+
+Screenshots in the session scratchpad: `486-before.png`, `486-during.png`
+(Ines talking, her pill gone), `486-after.png` (her pill back),
+`486-far-talker.png` (two children talking, neighbours' pills still up).
+
+**Not fixed, on purpose:** a chatter walks right up to the player, so her
+bubble can be drawn in front of the *player's* pill and hide it behind an
+opaque sprite (`486-far-talker.png`). One character's bubble over another
+character's name — not what Jim described, and hiding the player's name
+whenever anyone speaks near her is a design call. Worth its own ticket.
+
 ## Remaining
 
-- Rebase onto `origin/main` (moved to 7a1d81f9 after this branch was cut).
-- `pnpm run check`, `test:procgen`, `check:coplanar`, `build`.
-- Browser QA: watch a child chat, name goes, name returns. Screenshots to the
-  Overseer. Dev server port **5287** (`--strictPort`), kill by PID.
-- PR, do not merge. Preview link must land where a child talks.
+- Rebased onto `origin/main` 7a1d81f9; three-dot diff is three files, all
+  mine, no deletions, `package.json` untouched (script sets compared with
+  `main`: 104 = 104, no adds, no drops, `check` chain byte-identical).
+- PR #490 raised. **Do not merge.**
+- Gates were running at last checkpoint on a box at load average 12–20; if
+  `check:park-boot` or `check:arrival-completes` fails on timing, that is #456
+  under contention, not this diff. Re-run before believing it.
+- Dev server for Jim: port **5287** (`--strictPort`), land on
+  `/spawn?pos=-1.6,51.6` and stand still — a child comes over within a minute
+  or two. Kill by PID when he is done.
