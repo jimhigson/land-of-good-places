@@ -273,13 +273,23 @@ export function arrivalCameraZoom(phase: ArrivalPhase): number {
  *
  * The rig's own pitch is 38 degrees, which looks down on the park from above —
  * right for playing, wrong for watching children step down off a bus, because
- * from up there you see the tops of their heads and the roof of the bus. 16
- * degrees is nearly side-on: the door faces you, the children come *towards*
- * the camera, and the arch is a thing you pass under rather than a shape on
- * the floor. The distance and the yaw are the rig's own — only the tilt
- * changes, so the rise back is a lift rather than a swing.
+ * from up there you see the tops of their heads and the roof of the bus. Lower
+ * it and the door faces you, the children come *towards* the camera, and the
+ * arch becomes a thing you pass under rather than a shape on the floor. The
+ * distance and the yaw are the rig's own — only the tilt changes, so the rise
+ * back is a lift rather than a swing.
+ *
+ * **26 rather than 16, and the difference was found by looking.** 16 degrees is
+ * nearly side-on and frames the bus beautifully, but the rail race runs right
+ * past the entrance: at that angle its track and pylons lie across the whole
+ * frame, straight through the arch and over the children's heads, so the one
+ * beat that is supposed to land — walking under the gate — was competing with a
+ * roller coaster drawn on top of it. At 26 the track passes over and the arch,
+ * the bus and the queue coming off it all read. No assertion could have caught
+ * that; it is the seed's own park furniture meeting a camera angle nothing had
+ * ever pointed at it before.
  */
-export const ARRIVAL_CAMERA_PITCH_DEGREES = 16;
+export const ARRIVAL_CAMERA_PITCH_DEGREES = 26;
 
 /**
  * How far above the pavement the door shot is aimed, in metres — about a
