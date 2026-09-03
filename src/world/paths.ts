@@ -2634,9 +2634,15 @@ function computeGridConnectors(
               length += Math.hypot(b[0] - a[0], b[1] - a[1]);
             }
             if (!ok || length > shapeCap) continue;
+            // See {@link drawsAsScreened}: this is the shape seed 451's
+            // through-the-booth ribbon came from — the lead is 3.5 m out past
+            // the door, so a node on the far side of it arrives, overshoots
+            // and turns back, and `trimBacktracks` then deletes the lead.
+            const drawn = collapseCollinear(shape);
+            if (!drawsAsScreened(drawn)) continue;
             found.push({
               node: index,
-              points: collapseCollinear(shape),
+              points: drawn,
               cost: length * STUB_COST_FACTOR,
             });
             headOn = true;
@@ -2669,12 +2675,19 @@ function computeGridConnectors(
         // corner gets the tight doorway reach — never the relaxed one.
         const straightLimit = tail <= 0.05 ? tailLimit + 2 : STUB_TAIL_LIMIT;
         if (tail <= STUB_TAIL_LIMIT && direct <= straightLimit && legClear(nx, nz, p[0], p[1])) {
-          found.push({
-            node: index,
-            points: [[nx, nz], p],
-            cost: direct * STUB_COST_FACTOR + (lead ? 0.5 : 0),
-          });
-          continue;
+          const drawnStraight: readonly (readonly [number, number])[] = [[nx, nz], p];
+          // A two-point shape has no interior vertex, so {@link drawsAsScreened}
+          // cannot refuse one today. It is asked anyway: the rule belongs to
+          // every connector this function offers, and a sibling left unguarded
+          // is how this branch's defects have kept reappearing in new organs.
+          if (drawsAsScreened(drawnStraight)) {
+            found.push({
+              node: index,
+              points: [[nx, nz], p],
+              cost: direct * STUB_COST_FACTOR + (lead ? 0.5 : 0),
+            });
+            continue;
+          }
         }
         // Elbow via the node's own street line: corner shares the node's x
         // (north-south street) or z (east-west street). **Only a corner
@@ -2707,6 +2720,8 @@ function computeGridConnectors(
             legClear(corner[0], corner[1], p[0], p[1])
           ) {
             const length = Math.hypot(nx - corner[0], nz - corner[1]) + tailLength;
+            const drawnElbow: readonly (readonly [number, number])[] = [[nx, nz], corner, p];
+            if (!drawsAsScreened(drawnElbow)) continue;
             found.push({
               node: index,
               points: [[nx, nz], corner, p],
@@ -2857,7 +2872,15 @@ function relayConnectors(
     }
     // `chain` runs node-first back to the door, which is exactly the order a
     // connector's points are published in.
-    connectors.push({ node: goal.node, points: collapseCollinear(chain), cost: goal.cost + 2 });
+    const drawnChain = collapseCollinear(chain);
+    // Same rule as every other connector above. A relay walk is axis-aligned
+    // by construction, so its vertices are right angles and this refuses
+    // nothing today — but it is a walk over a *cell* grid whose lines include
+    // the door's own two, so a staircase that steps back on itself is
+    // expressible here, and if one is ever drawn it must not be silently
+    // straightened into a leg through a plot.
+    if (!drawsAsScreened(drawnChain)) continue;
+    connectors.push({ node: goal.node, points: drawnChain, cost: goal.cost + 2 });
   }
   connectors.sort((a, b) => a.cost - b.cost);
   return connectors;
@@ -4691,6 +4714,39 @@ function* walkEveryBridge(edges: PathEdge[], progress: number): Generator<number
  * terminates.
  */
 const ABOUT_TURN_COSINE_DRAWN = Math.cos((150 * Math.PI) / 180);
+
+/**
+ * **A connector must draw the shape it was screened as.**
+ *
+ * Every leg of a candidate connector is screened against plots, the ring, the
+ * rail side and the bridge reservations before the connector is offered. But
+ * {@link trimBacktracks} runs on the *assembled* route afterwards and deletes
+ * about-turn vertices — and deleting an interior vertex replaces two screened
+ * legs with **one leg no screen has ever seen**.
+ *
+ * That is fine at 180 degrees, which is what the pass was written for: the two
+ * legs are collinear, so the survivor lies on ground both of them already
+ * covered, and `trimBacktracks`'s own comment ("leaves exactly the net
+ * movement the walk actually makes") is exactly true. It is not fine at the
+ * 150 degrees the threshold was later widened to. **Seed 451, measured:** the
+ * accepted head-on connector was
+ * `(32.279,-40.209) -> (36.615,-26.433) -> (34.140,-28.908)` — node, the
+ * door's own 3.5 m outward lead, the door — with both legs clear. Its vertex
+ * turns at cosine -0.8866 against this threshold's -0.8660, so the lead was
+ * cut and what got drawn was a single 11.45 m diagonal running **0.76 m inside
+ * the spooky house's own 2.6 m footprint**: a ribbon through the building it
+ * serves, and the middle sample of its own lane stranded behind the booth's
+ * counter walls.
+ *
+ * So a shape this pass would alter is refused *at the connector*, where there
+ * is still a ladder of other shapes to fall through to, rather than being
+ * accepted and then silently rewritten into something illegal. The rule is
+ * asked of `trimBacktracks` itself and never of a second copy of the angle
+ * test, so the two cannot drift (CLAUDE.md: "two definitions of one thing").
+ */
+function drawsAsScreened(shape: readonly (readonly [number, number])[]): boolean {
+  return trimBacktracks(shape).length === shape.length;
+}
 
 function trimBacktracks(
   points: readonly (readonly [number, number])[],
