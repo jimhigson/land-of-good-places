@@ -102,6 +102,15 @@ const CORRIDOR_RADIUS = 1.8;
  * Read by {@link loopKeepsItsCrossing}, which asks it of a **closed loop**
  * rather than by `trainObstacles` asking it of every candidate piece. See that
  * clause for why the difference matters more than it looks.
+ *
+ * **The name says "walk", and it is asked at exactly one point: the arch.** Not
+ * along `ENTRANCE_WALK_DEPTH`'s 12 m — that is `check:gateway`'s span, and the
+ * two are deliberately different. The railway *may* cross the way in further
+ * down, where `crossings.ts` gives it a level crossing or a bridge and the walk
+ * stays open; what it may not do is run over the doorway itself, which is the
+ * one place no crossing is minted because no path flips sides there. So the
+ * rule is one distance from one point, and the 12 m walk is what the check
+ * measures afterwards to see whether the result actually works.
  */
 const GATE_WALK_RAIL_CLEARANCE =
   ENTRANCE_GATE_HALF_WIDTH + FENCE_OFFSET + FENCE_HALF_THICKNESS + PLAYER_RADIUS;
