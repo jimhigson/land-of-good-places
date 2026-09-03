@@ -28,22 +28,45 @@ overseer when ready"). Read it before touching this branch. It supersedes
   pairing both directions, overlap AND clear for each geometry pairing,
   crossing-as-gate-not-hole, blockers order, demand serve/unserve/re-unserve.
 
+## Done (cont.) — stage 2: the spine is landed and proven byte-identical
+
+- **`src/boot/solveScheduler.ts`** gained three additive features (5 new
+  tests, 12 total green): `ready()` start gates (a task whose module has not
+  landed is held un-started, never busy-yielded), `'frame'` yields (a task
+  ends its own frame — the slide's judge-on-its-own-frame rule), and
+  `progressOf`/`isDone` for drivers.
+- **`src/boot/parkGeneration.ts` rewritten**: the hand-ordered phase chain is
+  now ONE SolveScheduler with seven tasks (brief, cruiserSearch,
+  cruiserFinish, trainSearch, slideSearch, crossingSites, pathGraph) whose
+  deps reproduce the old order exactly, plus a gated import ladder (imports
+  are chunk loading, not placement — they stay the driver's business, one per
+  frame). Public API unchanged (stage/unitCounts/attempts/lateSteps...).
+- **Proof**: `check:park-boot` exit 0 — sliced vs straight-through hashes
+  IDENTICAL for slide route, chute, and cruiser loop. Traps handled: judge
+  and next-rung brief must not share a frame ('frame' yield after a failed
+  judgement); slide brief is evaluated eagerly as railRouteSearch's argument
+  so it lands on its own slice.
+
+## In flight
+
+Full gates running in background at the rewrite commit: `pnpm run check`
+(58 steps), `test:procgen` (whole pool), `check:coplanar`, `build` — outputs
+to /tmp/rr-*.out, exit codes appended. Anything red gets root-caused before
+handover; procgen baseline on main is expected-green (branch is off main,
+untouched procgen).
+
 ## Next (in order)
 
-1. **Scheduler lands byte-identical (stage 2, the un-skippable one).**
-   `src/boot/parkGeneration.ts` is the driver: currently a hand-ordered
-   dependency chain; `SolveScheduler` (no backtracking) already hosts train /
-   crossing-sites / path-graph solves; `CoSolveEngine` (`src/boot/coSolve.ts`,
-   round-robin + backtracking + blockers + dep cascade, ten unit tests) is
-   built and wired into nothing. Plan: drive placers through the engine with
-   un-migrated placers running whole in their slot; prove byte-identity by
-   hashing the generated park per seed before/after (check:park-boot's
-   "sliced equals straight-through" is the precedent).
-2. **Universal deny-by-default overlap invariant** on ParkFacts, importing
-   `CLAIM_COMPATIBILITY`. Expected red on first run — that list is the
-   deliverable, triaged not exempted.
-3. Engine generalisation: `CoSolveEngine` commits `Obstacle[]` discs; migrate
-   it to `GroundClaims` contributions (claims + crossings + demands).
+1. **Universal deny-by-default overlap invariant** on ParkFacts, importing
+   `CLAIM_COMPATIBILITY` from groundClaims (one law, two readers). Expected
+   red on first run — that list is the deliverable, triaged not exempted.
+   NOT started while the background gates run (editing test/procgen mid-run
+   would corrupt the measurement).
+2. First placer migration onto claims (stage 3, design doc): entrance road +
+   rail-race trestles pair, measured against fix/road-487-488.
+3. Engine generalisation: CoSolveEngine commits Obstacle[] discs; migrate to
+   GroundClaims contributions (claims + crossings + demands), then wire
+   backtracking into the spine as placers migrate.
 
 ## Discipline learned/relearned this leg
 
