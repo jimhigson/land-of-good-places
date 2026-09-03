@@ -880,23 +880,40 @@ function buildFoliage(collision: CollisionWorld): {
   //
   // Every seed used to get 108, because the old fill-to-N loop had 4-5x the
   // candidates it needed on all of them. So the bar is: **no seed plants fewer
-  // than the 108 it used to.** Measured across the five CI seeds:
+  // than the 108 it used to** — and, since #500, no seed plants fewer than it
+  // did the day before #500 either.
   //
-  //   budget   canonical   s2    s5   s11   s18   worst
-  //     1050        108    86   103   106   102      86   <- seed 2 stripped
-  //     1200        131   105   118   119   116     105   <- still under
-  //     1300        138   118   126   129   127     118
-  //     1400        149   128   137   142   140     128   <- chosen
-  //     1500        164   138   151   157   151     138
+  // **The table that used to sit here was stale and read as authoritative.**
+  // It quoted seeds 2 and 18, which have not been in the pool since #426
+  // swapped the sweep to 5 / 11 / 24 / 131, and counts (149 / 128 / 137 / 142
+  // / 140) that the park had long since left behind — the same budget of 1400
+  // actually planted **286 / 263 / 203 / 358 / 354** on `main` the day #500
+  // was fixed, because every path, plot and wall change since had moved the
+  // accept rate. Re-measured from scratch rather than extended.
   //
-  // 1400 is the first value with real headroom over the 108 floor on the
-  // *worst* seed (128, so 20 clumps of slack) rather than merely clearing it,
-  // which matters because the count moves whenever the geometry does — a park
-  // change that paves more lawn takes a bite out of every seed at once.
+  // Refusing walls and trees (#500) costs roughly two candidates in three, so
+  // the budget has to buy them back. Measured on the current five CI seeds,
+  // clump counts, every row proved to have **zero** wall or tree
+  // interpenetration:
+  //
+  //   budget   canonical    s5   s11   s24  s131   worst
+  //     1400          83    96    65   161   155      65   <- under the floor
+  //     3000         204   195   140   342   322     140
+  //     4200         295   266   201   483   456     201   <- chosen
+  //     5000         355   305   232   582   536     232
+  //
+  // 4200 is the smallest of these at which **no seed is thinner than it was
+  // before #500** (295 >= 286, 266 >= 263, 201 ~ 203, and s24/s131 well up),
+  // which is the honest bar: a fix for bushes growing through fences should
+  // not also quietly strip a fifth of the park's ground cover. It costs
+  // nothing measurable — headless build of seed 11 came out at 2.38 s and
+  // 1.78 s at 4200 against 2.47 s and 2.00 s at 1400, i.e. inside the noise,
+  // because the extra work is a bounded scan per candidate and the bush
+  // colliders are registered after the loop rather than inside it.
   //
   // Locality is unaffected by the number: candidate k is evaluated if and only
   // if k < budget, whatever the budget is.
-  const BUSH_BUDGET = 1400;
+  const BUSH_BUDGET = 4200;
   while (attempts < BUSH_BUDGET) {
     attempts += 1;
     const rng = candidateRng(BUSH_SALT, attempts);
