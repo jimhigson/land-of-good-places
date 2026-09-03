@@ -21,6 +21,16 @@
  * `normalize(outer − inner)` in plan. If the sweep drew the wall somewhere
  * other than where the formula says, this probes where it really is.
  *
+ * **Sampled halfway between consecutive rings, never at a ring itself.** A ring
+ * point is the shared edge of the two quads either side of it, and the wall is
+ * drawn as straight chords between rings while the ring points sit on the arc —
+ * so on a curving spine a ray aimed at a ring along that ring's own normal
+ * passes just outside both chords and reports a hole in solid masonry. That is
+ * the same "on the outside of a curve a chord sits inside the arc it
+ * approximates" fact `ShellGeometry.planEdge` was written for. Measured: it
+ * produced 1–13 phantom samples on 9 of 23 bridges, all on the same flank, and
+ * every one of them vanished when the probe moved to the middle of a face.
+ *
  * ## It carries its own control
  *
  * Every sample is probed **twice**: once inward at the outer face, and once
@@ -171,15 +181,19 @@ function measureThisSeed(): { seed: number; bridges: BridgeResult[] } {
     };
 
     const rings = position.count / 4;
-    for (let ring = 0; ring < rings; ring += 1) {
+    // One sample per FACE, taken at its middle — see the header on why a ring
+    // point is the one place this must not probe.
+    for (let ring = 0; ring + 1 < rings; ring += 1) {
       for (const side of [0, 1] as const) {
-        const outer = ring * 4 + side;
-        const inner = ring * 4 + 2 + side;
-        const ox = position.getX(outer);
-        const oy = position.getY(outer);
-        const oz = position.getZ(outer);
-        const ix = position.getX(inner);
-        const iz = position.getZ(inner);
+        const outerA = ring * 4 + side;
+        const innerA = ring * 4 + 2 + side;
+        const outerB = (ring + 1) * 4 + side;
+        const innerB = (ring + 1) * 4 + 2 + side;
+        const ox = (position.getX(outerA) + position.getX(outerB)) / 2;
+        const oy = (position.getY(outerA) + position.getY(outerB)) / 2;
+        const oz = (position.getZ(outerA) + position.getZ(outerB)) / 2;
+        const ix = (position.getX(innerA) + position.getX(innerB)) / 2;
+        const iz = (position.getZ(innerA) + position.getZ(innerB)) / 2;
         const nx = ox - ix;
         const nz = oz - iz;
         const norm = Math.hypot(nx, nz);
