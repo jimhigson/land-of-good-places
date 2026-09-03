@@ -74,7 +74,19 @@ const WARPS_BY_SEED: Readonly<Record<number, WarpVector>> = {
   // gates the pool seeds do not (#437). Re-searched with that gate in the
   // acceptance loop: {hotel:2}, candidate 22.
   20260728: { layout: { hotel: 2 } },
-  5: { layout: { ferrisWheel: 2 } },
+  // Re-searched 2 Sep 2026, after `rail/generate.ts`'s `buildRoute` stopped
+  // leaving a dead spot at every piece join: that fix moves every route
+  // slightly, so the vector baked against the old geometry
+  // (`{ferrisWheel:2}`) is no longer the one this seed wants — it now leaves
+  // one pair of destinations with a 30.8x paved detour. Re-run of
+  // `scripts/warp-search.mts 5`, control passed first: SOLVED after 5
+  // candidates, stranded=0, oracle=pass.
+  // (measurements/warp-search-2sep-railroute-fix.jsonl.)
+  //
+  // Note the empty vector is *not* enough here even though seed 5 passes all
+  // 81 of its own invariants unwarped — check:park still strands 10 waypoints
+  // on it. Both gates, or it is not a vector.
+  5: { layout: { waterFight: 1 } },
   // Not a stranded seed: 24's unwarped network crossed the rail at railD
   // 47.8, off every proven site — absorbed silently as a fence gap while
   // the level tier existed, invisible to check:park (which samples only
