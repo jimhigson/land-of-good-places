@@ -63,6 +63,8 @@ import {
   ENTRANCE_STOP_Z,
 } from './layout';
 import { TRACK_CLEARANCE, type TrainRoute } from '../train/route';
+import { BALLAST_HALF_WIDTH } from '../train/track';
+import { TRAIN_PLAN } from '../train/plan';
 import { CARRIAGE_BODY_HALF_WIDTH } from '../train/trainDimensions';
 
 /** Candy colours for the welcome sign's bulbs — the fairground palette used everywhere else in the park. */
@@ -751,6 +753,15 @@ function buildEntranceRoad(): Mesh[] {
    */
   const columnReach = (x: number, from: number, margin: number, floor: number): number => {
     for (let z = from; z >= floor; z -= 0.05) {
+      // **The railway's ballast is a surface too, and it gets here first.** On
+      // seed 288 the train crosses the gate's own approach 4.5 m inside the
+      // wall, so a path run to the paving beyond it is laid straight down the
+      // ballast — 3.1 m² of shared plane, and it only appeared when the run
+      // became park paving, because a road at its own lift cleared the sweep's
+      // one-centimetre tolerance and sandy paving at the path's lift does not.
+      // The level crossing paves that band itself, so stopping here leaves no
+      // grass behind: one surface hands over to the next.
+      if (distanceToTrackCentre(x, z) < BALLAST_HALF_WIDTH + margin) return z;
       let paved = false;
       const known = forEachPavedDisc((discX, discZ, radius) => {
         if (Math.hypot(x - discX, z - discZ) < radius + margin) paved = true;
@@ -789,6 +800,20 @@ function buildEntranceRoad(): Mesh[] {
 
   return meshes;
 }
+
+/**
+ * How far this point is from the middle of the railway.
+ *
+ * `TRAIN_PLAN` is a module-load constant — the route is a pure pre-scene plan
+ * (`train/plan.ts`) — so asking it here costs nothing and cannot depend on
+ * build order, which is the same reason `Scenery.ts`'s `onRailway` asks it.
+ */
+function distanceToTrackCentre(x: number, z: number): number {
+  const route = TRAIN_PLAN.route;
+  const near = route.pointAt(route.distanceNear(x, z), trackProbe);
+  return Math.hypot(near.x - x, near.z - z);
+}
+const trackProbe = new Vector3();
 
 /** Where the run in from the road stops, and how wide the paving it meets is. */
 interface SpurReach {
