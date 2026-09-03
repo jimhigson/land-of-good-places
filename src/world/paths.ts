@@ -2505,13 +2505,70 @@ function computeGridConnectors(
         // hotel had a clean 7.1 m straight run to its door and no route at all
         // to the point in front of it.
         if (lead) {
-          const shapes: readonly (readonly (readonly [number, number])[])[] = [
-            [[nx, nz], lead, p],
-            [[nx, nz], [nx, lead[1]], lead, p],
-            [[nx, nz], [lead[0], nz], lead, p],
-          ];
+          // `node -> lead` is the only one of the three head-on shapes that
+          // can be a diagonal; both elbows are axis-aligned by construction.
+          const straightToLead = [[nx, nz], lead, p] as const;
+          const elbowViaColumn = [[nx, nz], [nx, lead[1]], lead, p] as const;
+          const elbowViaRow = [[nx, nz], [lead[0], nz], lead, p] as const;
+          const leadDx = Math.abs(nx - lead[0]);
+          const leadDz = Math.abs(nz - lead[1]);
+          // **An elbow keeps one leg on the node's own lattice line and the
+          // other on the DOOR's**: `elbowViaColumn` runs `z = lead[1]` for
+          // `leadDx`, `elbowViaRow` runs `x = lead[0]` for `leadDz`. Only the
+          // first of each pair is a street; the second is a private line, and
+          // `STUB_TAIL_LIMIT`'s own doc comment already names that leg as the
+          // thing it bounds. The pre-existing `tail` guard is a `Math.min`
+          // over both axes at the **node**, so it cannot tell the two elbows
+          // apart; this asks per shape, which is what lets it choose.
+          const disciplined: (typeof elbowViaColumn)[] = [];
+          const rogue: (typeof elbowViaColumn)[] = [];
+          (leadDx <= STUB_TAIL_LIMIT ? disciplined : rogue).push(elbowViaColumn);
+          (leadDz <= STUB_TAIL_LIMIT ? disciplined : rogue).push(elbowViaRow);
+          // **A straight leg is a doorway approach, or it is a street on its
+          // own heading**, and which one only decides the ORDER. The bound is
+          // this file's own doorway reach, deliberately not the invariant's
+          // `MAX_DIAGONAL_APPROACH` — reading that here would make
+          // `pathsRunOnGridAxes` true by definition. An exactly axis-aligned
+          // leg is a doorway approach at any length, not being a diagonal.
+          const straightIsADoorwayApproach =
+            Math.min(leadDx, leadDz) < 1e-6 || Math.hypot(leadDx, leadDz) <= STUB_TAIL_LIMIT;
+          // **THE LADDER, and every rung of it was paid for by a measurement.**
+          //
+          //   1. a disciplined elbow — axis-aligned, private tail inside the
+          //      doorway reach: the shape the park should read as;
+          //   2. the straight leg — a diagonal, kept because REFUSING it cost
+          //      `check:park` 10 green -> 8 and three fresh
+          //      `detourRatiosStayReasonable` failures;
+          //   3. a rogue elbow at full tail — kept because bounding the tail
+          //      by refusal cost 10 green / 13 stranded -> 9 / 16. A hard
+          //      bound starves exactly the way a hard refusal does, one layer
+          //      down, and a destination a child cannot walk to outranks an
+          //      invariant line.
+          //
+          // So no rung is ever removed and the node is never dropped; the
+          // ordering is the whole mechanism. See `HANDOFF-grid-paths.md` for
+          // the five variants this shape was chosen from, measured on both
+          // columns.
+          const shapes: readonly (readonly (readonly [number, number])[])[] =
+            straightIsADoorwayApproach
+              ? [straightToLead, ...disciplined, ...rogue]
+              : [...disciplined, straightToLead, ...rogue];
           let headOn = false;
           for (const shape of shapes) {
+            // **An elbow may run `sqrt(2)` further than the straight shape,
+            // because that is exactly what turning a diagonal into two
+            // axis-aligned legs costs.** One cap for both geometries forbids
+            // the axis-aligned shape precisely where the diagonal is nearest
+            // the cap — the only case that matters. Measured with an
+            // instrument that evaluates all three shapes instead of stopping
+            // at the first acceptance: seed 131's `spur-building`, node
+            // (33.7,-6.7), lead (37.3,8.4), relax 0, cap 19.60 — STRAIGHT
+            // 19.07 accepted, **both elbows 22.25 and `clear=true`, refused by
+            // the cap and by nothing else**. `Math.SQRT2` is derived, not
+            // tuned: it admits every elbow whose diagonal counterpart would
+            // have fitted and nothing more, which widens a *distance* for the
+            // axis-aligned shape without licensing a *shape*.
+            const shapeCap = (tailLimit + 2) * 2 * (shape === straightToLead ? 1 : Math.SQRT2);
             let ok = true;
             let length = 0;
             for (let s = 1; s < shape.length && ok; s += 1) {
@@ -2542,7 +2599,7 @@ function computeGridConnectors(
               if (!legClear(a[0], a[1], b[0], b[1])) ok = false;
               length += Math.hypot(b[0] - a[0], b[1] - a[1]);
             }
-            if (!ok || length > (tailLimit + 2) * 2) continue;
+            if (!ok || length > shapeCap) continue;
             found.push({
               node: index,
               points: collapseCollinear(shape),
