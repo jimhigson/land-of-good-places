@@ -1199,3 +1199,46 @@ complaint #3.
   the ten seeds with no test file are covered by `check:park` alone, which
   measures whether the park *works*, not whether its furniture is placed sanely.
   The cost is ten more park builds; the suite already spends 70 s on six.
+
+### Fix 5 (kept): relaxing may widen a distance, never license a diagonal
+
+`computeGridConnectors`' straight connector is the one shape that draws a
+diagonal. Its off-axis reach is now bounded by the tight `STUB_TAIL_LIMIT` at
+every relax level. Seed 5's `spur-stall.keychain` opened
+`(7.8,-23.3) -> (-6.9,-14.7)` — 17.3 m, dx 14.7 dz 8.6, 30 degrees off axis —
+because relax 1 doubles `tailLimit` to 15.6. It is now the elbow
+`(7.8,-23.3) (-6.9,-23.3) (-6.9,-14.7)`.
+
+`seed 5 > every paved path runs on grid axes`: **RED -> GREEN**.
+
+**Honest accounting: a trade, not a clean win.** Refusing the diagonal pushes
+`spur-waterFight` onto the elbow too and its long leg lands on the foot's own z
+line, so `seed 5 > every street sits on the shared 12 m lattice` goes
+**GREEN -> RED** (`11.0 m on z = -23.31, 2.57 m off`). `test:procgen` is 4
+failed either way. Kept because the rule is right independently of the count.
+
+### Measured and reverted this leg — do not rebuild these
+
+| change | measurement that killed it |
+|---|---|
+| `footprintsOverlap` widened to the reservation rectangle | seed 288 refused the pair, lost a bridge it needs, `route.unreachable: 2` — destinations a child cannot reach at all |
+| the foot ladder's exempt rungs widened to relax 1 and 2 | neutral on all sixteen seeds: 288's foot is cut by a **different** site's reservation, which no own-site exemption can reach |
+| shorter-tailed elbow corner tried first | neutral on all sixteen seeds and the whole invariant suite (the reasoning is sound; the case that bites it is not in the pool) |
+| `selectSpaced(bridgeCandidates, true)` — the existing `serveTheGate` ranking flag | canonical's sites moved 2 m; seed 11 3 -> 7, seed 451 0 -> 1 losing green |
+
+### `test:procgen` — 4 failing, all four diagnosed
+
+| test | seed | status |
+|---|---|---|
+| `streetsShareLatticeLines` | 11 | `spur-waterFight` 29.8 m on a private line — **joint-solve class**, a reservation and a plot seal every lattice and half-lattice line to the door (only a +2 m private offset clears) |
+| `streetsShareLatticeLines` | 5 | `spur-waterFight` 11.0 m on the bridge foot's own z line — the elbow's long leg; introduced by Fix 5, which traded a worse diagonal for it |
+| `noPathEndsNowhere` | 288 | `bridge-walk-0` ends 27.10 m from paving because its foot stands in **bridge 1's** reservation — `footprintsOverlap` measures a shorter rectangle than `paths.ts` forbids |
+| `noPathEndsNowhere` | 5 | `gate-approach` 32.02 m — the gate pocket, seed 5 flavour; its handover is still `reachableFromRing: false` at the widest rung |
+
+**Three of the four now share one owner: the reservation rectangle is far
+larger than the masonry a bridge actually builds** (measured on 24/131/451:
+real masonry at `|across|` 1.1–2.7 against a `halfWidth` of 4–5). Shrinking the
+reservation to what gets built is the single change that would unlock 288, 11
+and probably 5 — and it is Jim's brief #2 in one line: the bridge's real shape
+is decided after the paths, from the paths, so no path can be screened against
+it. **That is the next leg**, and it is bigger than a ladder.
