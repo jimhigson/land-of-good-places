@@ -2900,3 +2900,74 @@ On seed 131 it also picks the right elbow rather than either: node
 `(33.7,-6.7)`, lead `(37.3,8.4)`, so `leadDx = 3.6` and `leadDz = 15.1` —
 `elbowViaColumn`'s private tail is 3.6 (allowed), `elbowViaRow`'s is 15.1
 (refused). The good elbow survives and the rogue one does not.
+
+### THE PRIVATE-TAIL BOUND: composition cured, reachability regressed — REVERTED
+
+Both columns, with the bound in:
+
+**Benefit.** `test:procgen` **4 failed | 1405 passed**, from a baseline of
+11 | 1398 — and the composition is clean, which is what the previous variant
+failed on:
+
+| invariant | baseline | variant A (cap, no tail bound) | **variant B (with it)** |
+|---|---|---|---|
+| `builtMasonryStaysInsideItsReservation` | 2 seeds | 0 | **0** |
+| `pathsRunOnGridAxes` | 5 seeds | 0 | **1** (225 only) |
+| `streetsShareLatticeLines` | 2 seeds | **6** | **2** — back to baseline exactly |
+| climbable tree (128) | 1 | 0 | **0** |
+| `noPathEndsNowhere` (288) | 1 | 1 | 1 |
+| **total failed** | **11** | 7 | **4** |
+
+**Cost.** `check:park`, all sixteen:
+
+| seed | baseline | variant A | **variant B** |
+|---|---|---|---|
+| 5 | 0 | **1** | 0 |
+| 11 | 3 | **1** | 3 |
+| 267 | 3 | 3 | **6** |
+| 326 | 1 | **0** | 1 |
+| 451 | 0 | 0 | **2** |
+| **green / stranded** | **10 / 13** | **10 / 11** | **9 / 16** |
+
+**Reverted**, and the revert is grep-verified (0 occurrences of `privateTail`,
+`shapeCap`, `straightIsADoorwayApproach`; the original shape list back; the
+`src`/`test` diff against the last known-good commit is empty).
+
+**Why, and it is not the green count.** `poi.stranded` going **13 -> 16** is
+destinations a child cannot walk to. Jim's complaint #4 (paths that actually
+reach the doors) outranks his #3 (paths that read as a grid), and CLAUDE.md's
+standing rule is that a ribbon nobody can walk to is the worse fault. Trading
+three of those for six invariant lines is not a trade this branch should make
+silently, and `4 failed | 1405 passed` is exactly the seductive headline that
+made variant A look like progress when its composition was worse.
+
+### The decision tree, fully measured, for whoever takes this next
+
+Three variants exist and all three are now measured on both columns. **None is
+shippable as it stands**, and that is the honest state:
+
+| | grid-axes fixed | green | stranded | lattice seeds |
+|---|---|---|---|---|
+| baseline | 0 of 5 | 10 | 13 | 2 |
+| refusal (earlier leg) | 5 of 5 | **8** | — | — |
+| reorder alone | 3 of 5 | **8** | — | — |
+| **A** reorder + `sqrt(2)` cap | **5 of 5** | **10** | **11** | **6** |
+| **B** A + private-tail bound | 4 of 5 | **9** | **16** | **2** |
+
+**A is one bound away from being the answer.** It is the only variant that
+costs no greens and *reduces* stranded, and its sole defect is named and
+local: the elbow's private-line tail. B bounds that tail with a hard refusal,
+and a hard refusal starves — the same mechanism that cost the first two
+attempts their greens, arriving one layer down.
+
+**So the next rung is a ladder, not a bound:** try each elbow with its private
+tail inside `STUB_TAIL_LIMIT`; if neither qualifies **and** the straight shape
+is refused by its own cap, allow the elbow at full tail rather than dropping
+the node. That keeps B's clean composition wherever it is achievable and A's
+reachability everywhere it is not — which is the shape every kept fix on this
+branch has taken.
+
+Measure it the same way: five seeds for the benefit column, sixteen for the
+cost column, **and `test:procgen` for the composition**, because `check:park`
+could not see variant A's 29.8 m private arterials and the failure *count*
+could not see them either.
