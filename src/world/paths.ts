@@ -847,18 +847,53 @@ function crossingFeet(site: CrossingSite): {
   // of the loop a few metres apart) a full-reach foot can overshoot past
   // the loop's OTHER branch, and every leg joined to it then crosses the
   // railway somewhere no site exists. Pull the reach in until it does.
+  //
+  // **And it must not land inside the statue ring.** The ring's ground is
+  // deliberately invalid to every lattice node and every leg (Decision 5:
+  // the circle takes exactly four compass taps and no fifth connection), so
+  // a foot standing in there is refused by `segmentClearOfRing` from *every*
+  // bearing at *every* shell and at every rung of the join ladder — it gets
+  // zero connectors, the deck edge joins its far foot to nothing, and the
+  // district across the railway is cut off from the park.
+  //
+  // Measured, 3 Sep 2026, seed 326 (`scripts/tmp-plazafoot.mts`, control:
+  // canonical): its **one and only** proven site, railDistance 0.0 at
+  // (38.0, -14.0), put its `plus` foot at (20.1, -6.6) — **13.9 m from a
+  // plaza centre at (11.1, 4.0) with `RING_RADIUS` 14.90, i.e. inside the
+  // circle.** All three join rungs returned 0 connectors; every one of the
+  // 60-odd candidate nodes swept out to shell 4 reported `ring=false` and
+  // nothing else wrong. No bridge was built, the dodgems quarter was
+  // stranded across the track, and the last resort drew a ribbon over live
+  // rail at (49.9, 4.1) — a child walking the railway at grade.
+  //
+  // Pulling the reach in is the standing procgen rule's "try a different
+  // decision" and it costs a couple of metres of ramp run: seed 326 clears
+  // the ring 2.4 m short of full reach. It is deliberately the *same* loop
+  // as the rail-side backtrack above, with the same `r > 4` floor and the
+  // same "return the full-reach foot if nothing clears" ending, so a foot
+  // that is fine today cannot move.
+  //
+  // `segmentClearOfRing` is asked, rather than `RING_RADIUS` re-derived
+  // here: it is the one owner of "may a path be on this ground", margin and
+  // all, and a second copy of that arithmetic is the drift this repo keeps
+  // paying for.
   const foot = (sign: 1 | -1, reach: number): readonly [number, number] => {
+    const at = (r: number): readonly [number, number] =>
+      [
+        site.x + site.dirX * sign * (DECK_HALF_LENGTH + r),
+        site.z + site.dirZ * sign * (DECK_HALF_LENGTH + r),
+      ] as const;
     let r = reach;
+    let ownSide: readonly [number, number] | null = null;
     while (r > 4) {
-      const x = site.x + site.dirX * sign * (DECK_HALF_LENGTH + r);
-      const z = site.z + site.dirZ * sign * (DECK_HALF_LENGTH + r);
-      if (railInfoAt(x, z).side === sign) return [x, z] as const;
+      const p = at(r);
+      if (railInfoAt(p[0], p[1]).side === sign) {
+        if (ownSide === null) ownSide = p;
+        if (segmentClearOfRing(p[0], p[1], p[0], p[1])) return p;
+      }
       r -= 1;
     }
-    return [
-      site.x + site.dirX * sign * (DECK_HALF_LENGTH + r),
-      site.z + site.dirZ * sign * (DECK_HALF_LENGTH + r),
-    ] as const;
+    return ownSide ?? at(r);
   };
   return {
     plus: foot(1, site.rampReachPos + 1.0),
@@ -6450,6 +6485,146 @@ export function debugGridReach(): unknown {
       return rows;
     })(),
   };
+}
+
+/** TEMP diagnostic: the exact `gridConnectors` calls the foot-join ladder
+ * makes, rung by rung, for every foot of every proven site — plus, for a foot
+ * that finds nothing, the nearest same-side lattice nodes and which screen
+ * refuses each one. Asks the call the code makes, not the nearest available
+ * one (`debugDoorReach` is the *arrival* form, with a 7 m frontage exemption a
+ * foot does not get). */
+export function debugFootJoin(): unknown {
+  const lattice = streetLattice();
+  const out: unknown[] = [];
+  for (const site of CROSSING_SITES) {
+    const feet = crossingFeet(site);
+    for (const [label, p] of [
+      ['plus', feet.plus],
+      ['minus', feet.minus],
+    ] as readonly (readonly [string, readonly [number, number]])[]) {
+      const rungs = [
+        gridConnectors(p, false, 0, null, null).length,
+        gridConnectors(p, false, 1, null, null).length,
+        gridConnectors(p, false, 0, null, site).length,
+      ];
+      const pSide = railInfoAt(p[0], p[1]).side;
+      const ci = Math.round((p[0] - PLAZA.x) / STREET_PITCH);
+      const cj = Math.round((p[1] - PLAZA.z) / STREET_PITCH);
+      const nodes: unknown[] = [];
+      for (let shell = 0; shell <= 4; shell += 1) {
+        for (let di = -shell; di <= shell; di += 1) {
+          for (let dj = -shell; dj <= shell; dj += 1) {
+            if (Math.max(Math.abs(di), Math.abs(dj)) !== shell) continue;
+            const i = ci + di;
+            const j = cj + dj;
+            if (Math.abs(i) > LATTICE_HALF_CELLS || Math.abs(j) > LATTICE_HALF_CELLS) continue;
+            const index = lattice.indexOf(i, j);
+            const nx = lattice.xs[index] as number;
+            const nz = lattice.zs[index] as number;
+            nodes.push({
+              shell,
+              n: `${nx.toFixed(1)},${nz.toFixed(1)}`,
+              ok: lattice.nodeOk[index] === 1,
+              side: lattice.side[index],
+              tail: Math.min(Math.abs(p[0] - nx), Math.abs(p[1] - nz)).toFixed(1),
+              street: streetSegmentClear(nx, nz, p[0], p[1], p, 0.5, STREET_PLOT_CLEARANCE),
+              ring: segmentClearOfRing(nx, nz, p[0], p[1]),
+              railSide: segmentHoldsRailSide(nx, nz, p[0], p[1], pSide, 0),
+              ramp: !segmentCutsABridgeRamp(nx, nz, p[0], p[1], null),
+              rampExempt: !segmentCutsABridgeRamp(nx, nz, p[0], p[1], site),
+            });
+          }
+        }
+      }
+      out.push({
+        site: `${site.railDistance.toFixed(0)}@(${site.x.toFixed(1)},${site.z.toFixed(1)})`,
+        foot: label,
+        at: `${p[0].toFixed(1)},${p[1].toFixed(1)}`,
+        side: pSide,
+        rungs,
+        nodes,
+      });
+    }
+  }
+  return out;
+}
+
+/** TEMP diagnostic: for every bridge foot, whether it reaches the biggest
+ * component on **its own side of the railway**, flooding with the deck edges
+ * removed — the predicate the foot-join ladder ought to be stopping on.
+ *
+ * The deck edges come out because the far foot is *supposed* to be cut off
+ * from the ring until the deck joins it; asking "can the ring reach this
+ * foot" of a bridge is a question whose answer is no by construction.
+ *
+ * Control rows are printed with it: canonical builds four bridges and crosses
+ * all four, so every foot there must read `backbone`. A run where every foot
+ * reads `backbone` on both seeds would mean the column cannot discriminate. */
+export function debugFootSideBackbone(): unknown {
+  const grid = pathGrid();
+  const comp = new Int32Array(grid.count).fill(-1);
+  let next = 0;
+  for (let n = 0; n < grid.count; n += 1) {
+    if (comp[n] !== -1) continue;
+    if (n < grid.lattice.count && !grid.lattice.nodeOk[n]) continue;
+    const id = next++;
+    comp[n] = id;
+    const q = [n];
+    while (q.length) {
+      const cur = q.pop() as number;
+      for (const step of grid.neighbours[cur] as readonly LatticeNeighbour[]) {
+        if (step.dir === DECK_DIR) continue;
+        if (comp[step.to] !== -1) continue;
+        comp[step.to] = id;
+        q.push(step.to);
+      }
+    }
+  }
+  const size = new Map<number, number>();
+  const sideOf = new Map<number, number>();
+  for (let n = 0; n < grid.count; n += 1) {
+    const id = comp[n] as number;
+    if (id === -1) continue;
+    size.set(id, (size.get(id) ?? 0) + 1);
+    if (!sideOf.has(id)) sideOf.set(id, railInfoAt(grid.xs[n] as number, grid.zs[n] as number).side);
+  }
+  const backboneFor = (side: number): number => {
+    let best = -1;
+    let bestSize = 0;
+    for (const [id, s] of sideOf) {
+      if (s !== side) continue;
+      const n = size.get(id) as number;
+      if (n > bestSize) {
+        bestSize = n;
+        best = id;
+      }
+    }
+    return best;
+  };
+  return grid.footNodes.map((n, i) => {
+    const x = grid.xs[n] as number;
+    const z = grid.zs[n] as number;
+    const side = railInfoAt(x, z).side;
+    const backbone = backboneFor(side);
+    const id = comp[n] as number;
+    return {
+      i,
+      at: `${x.toFixed(1)},${z.toFixed(1)}`,
+      side,
+      links: (grid.neighbours[n] as readonly LatticeNeighbour[]).length,
+      // The deck edge is always there, so `links` alone cannot answer "did
+      // this foot join the grid?" — a foot with no connector at all still
+      // reads 1.
+      connectors: (grid.neighbours[n] as readonly LatticeNeighbour[]).filter(
+        (s) => s.dir !== DECK_DIR,
+      ).length,
+      comp: id,
+      compSize: id === -1 ? 0 : (size.get(id) as number),
+      backbone,
+      backboneSize: backbone === -1 ? 0 : (size.get(backbone) as number),
+      reachesBackbone: id !== -1 && id === backbone,
+    };
+  });
 }
 
 /** TEMP diagnostic: the parapet band only — what `segmentCutsABridgeRamp`
