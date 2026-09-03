@@ -239,13 +239,27 @@ const parallel = (a: GroundPoint, b: GroundPoint): boolean =>
  * a way this measurement could overstate, and it should be read as a known
  * bound rather than as a proof of correctness.
  *
- * **Why it cannot simply be fixed by requiring collinearity**, the way rule 2's
- * predecessor was: the spur into seed 225's building door turns **37 degrees**
- * between the two hops either side of a seam, so any angle test tight enough to
- * reject a 90-degree junction also tears that genuine stretch in half — and
- * tearing it in half is the carrier-dependence this whole module exists to
- * remove. Contiguity and direction are in real tension here; contiguity wins,
- * because it is the one that keeps the answer a property of the paving.
+ * **Why it cannot be fixed by requiring collinearity — measured, not argued.**
+ * The obvious cure is to gate rule 1 behind rule 2's angle test. Doing exactly
+ * that and running the suite turns `gridAxisVerdictsIgnoreTheCarrier` **red on
+ * all five CI seeds** (5, 11, 18, 24, canonical), because the gate refuses to
+ * rejoin a stretch at its own seam wherever the paving turns. Every corner
+ * comes apart along whichever line the carrier happened to be cut at — on the
+ * canonical seed, five 1.83 m stretches become eleven halves of 0.97 m and
+ * 0.98 m, and the re-cut stops agreeing with the as-built:
+ *
+ * ```
+ * re-cutting the same paving into different route objects changed the answer:
+ *   5 piece(s) only the as-built carriers see (1.83 -2.8, 20.5 -> -3.9, 19.0 | ...)
+ *   11 only the re-cut ones do (0.97 -3.1, 19.5 -> -3.9, 19.0 | 0.98 -2.8, 20.5 -> -3.1, 19.5 | ...)
+ * ```
+ *
+ * And it buys nothing: with rule 1 so gated, the largest piece of off-axis
+ * ground is **identical to two decimal places on every seed** (see the impact
+ * measurement above). So the cure destroys the one property this module exists
+ * to provide and does not move a single verdict. Contiguity and direction are
+ * in genuine tension here, and contiguity wins on the evidence — it is the one
+ * that keeps the answer a property of the paving.
  *
  * **Neither may be asked about ends.** An earlier version asked whether the
  * stretches' *ends* met, and that is not a property of the paving: cutting a
