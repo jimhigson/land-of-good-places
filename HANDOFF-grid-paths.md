@@ -169,6 +169,42 @@ Then whatever narrow bridge is later built inside the reservation cannot meet
 another ribbon, because there are none in there. This is a *strengthening*;
 it does not loosen the exact segment-rectangle test, which stays exact.
 
+**BUILT AND MEASURED, 2 Sep — do not re-run as written.** `inner = 0` alone,
+nothing else changed, `tsc --noEmit` exit 0. Sixteen seeds, against the
+gate-fix baseline in the table above:
+
+| seed | before | after | |
+|---|---|---|---|
+| canonical | 4 | 4 | |
+| 5 | 10 | **13** | **+ `route.unreachable: 5`** — a new, worse failure class |
+| 11 | 22 | **2** | the big win |
+| 24 | 3 | 3 | kept its bridge — #414's cost did NOT recur here |
+| 115 | 0 | 0 | green |
+| 128 | 0 | 0 | green |
+| 131 | 0 | 0 | green |
+| 208 | 0 | 0 | green |
+| 225 | 2 | 2 | |
+| 267 | (nospot 1) | **5** | regressed into `poi.stranded` |
+| 274 | 0 | 0 | green |
+| 288 | 1 | **3** | regressed |
+| 326 | 1 | 1 | |
+| 346 | 0 | 0 | green |
+| 428 | 0 | 0 | green |
+| 451 | 30 | 30 | untouched — 451's pocket is NOT the masonry |
+
+Green stays **7 -> 7**; total stranded 73 -> 63. **Reverted**, because seed 5
+gains `route.unreachable: 5` — five destinations a child cannot walk to at
+all, which is worse than any number of stranded waypoints.
+
+**This is not a refutation, it is a half-built fix.** Seed 11's 22 -> 2
+confirms the diagnosis exactly: those waypoints were being cut by masonry the
+old band never screened. What is missing is the one part named below, the
+approach exemption. Add it and re-measure before concluding anything; seed 24
+keeping its bridge says #414's cost is not automatic in the grid architecture.
+
+Note also: seed 451's 30 did not move at all, so **451's pocket has a
+different cause** and should be chased separately with `tmp-pocket.mts`.
+
 Two things to get right, both already known:
 
 - **The crossing's own approach must be exempt by identity, not by geometry.**
