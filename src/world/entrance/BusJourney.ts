@@ -2,7 +2,6 @@ import {
   Box3,
   BoxGeometry,
   BufferAttribute,
-  CylinderGeometry,
   DirectionalLight,
   Fog,
   Group,
@@ -15,7 +14,6 @@ import {
   Quaternion,
   Scene,
   SphereGeometry,
-  TorusGeometry,
   Vector3,
   type WebGLRenderer,
 } from 'three';
@@ -68,8 +66,8 @@ import { ROAD_HALF_WIDTH, ROAD_TILE_METRES, applyRoadUvs, roadMaterial } from '.
 // two import-free core modules. See its note on why the arch is built twice.
 import {
   ENTRANCE_GATE_HALF_WIDTH as GATE_HALF_WIDTH,
-  ENTRANCE_GATE_POST_HEIGHT as GATE_POST_HEIGHT,
 } from './layout';
+import { buildGateArch } from './gateArch';
 
 /**
  * **The ride to the park — the twenty seconds before the gate.**
@@ -1479,27 +1477,26 @@ export class BusJourney {
     this.parkAhead.add(wall);
 
     // --- the gate arch -------------------------------------------------------
-    // `Entrance.ts`'s own posts, caps and crossbar. Same shape, same stone: this
-    // is the gate she is about to walk through, seen from outside.
-    const gateGround = groundHeight(0, gateZ);
-    const gate = new Group();
+    // **`gateArch.ts`, the same call `Entrance` makes.** This is the gate she
+    // is about to walk through, seen from outside, and the cut between the two
+    // scenes lands squarely on it — so it cannot be a lookalike. It used to be
+    // a second copy of the posts, the caps and the crossbar, and the copies
+    // drifted (issue #480): both inverted the arch so it hung down from the
+    // post tops, and only the park's own gate also had it turned across the
+    // path. Nothing about the shape is written down here any more.
+    //
+    // This road runs along Z, so the gateway spans world X and the yaw is 0.
+    const gate = buildGateArch({
+      centreX: 0,
+      centreZ: gateZ,
+      yaw: 0,
+      groundAt: groundHeight,
+      stoneMaterial: stone,
+      capMaterial: capStone,
+      // Deliberately unnamed: `check:park-map` finds the park's gate by
+      // `park-gate-arch`, and `getObjectByName` returns the first match.
+    }).group;
     gate.name = 'journey-park-gate';
-    for (const side of [-1, 1] as const) {
-      const post = new Mesh(new CylinderGeometry(0.42, 0.5, GATE_POST_HEIGHT, 12), stone);
-      post.position.set(side * GATE_HALF_WIDTH, gateGround + GATE_POST_HEIGHT / 2, gateZ);
-      post.castShadow = true;
-      gate.add(post);
-
-      const cap = new Mesh(new SphereGeometry(0.62, 14, 10), capStone);
-      cap.position.set(side * GATE_HALF_WIDTH, gateGround + GATE_POST_HEIGHT + 0.15, gateZ);
-      cap.scale.set(1, 0.75, 1);
-      gate.add(cap);
-    }
-    const crossbar = new Mesh(new TorusGeometry(GATE_HALF_WIDTH, 0.28, 10, 24, Math.PI), capStone);
-    crossbar.position.set(0, gateGround + GATE_POST_HEIGHT + 0.15, gateZ);
-    crossbar.rotation.z = Math.PI;
-    crossbar.castShadow = true;
-    gate.add(crossbar);
     this.parkAhead.add(gate);
 
     // --- what stands over the wall -------------------------------------------
