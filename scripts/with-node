@@ -1,41 +1,199 @@
 #!/usr/bin/env bash
 #
-# Run a command under a current Node (26+) — the version this repo requires and
-# CI pins. The cloud dev container ships an OLDER default `node` on PATH; this
-# repo's scripts run TypeScript natively (no bundler, no transpile), which needs
-# a modern Node, so put a current one in front of whatever you run:
+# Run a command under a current Node (>= 26) — the version this repo requires
+# and CI pins. This repo's scripts and checks run TypeScript natively (no
+# bundler, no transpile), which needs a modern Node, so put a current one in
+# front of whatever you run:
 #
-#   scripts/with-node npm run check:park-boot
-#   scripts/with-node npm run build          # the whole check suite
+#   scripts/with-node pnpm run check
 #   scripts/with-node node --version         # -> v26.x
 #
-# It uses the newest installed Node >= 26, installing the latest via nvm on first
-# use if none is present. Idempotent; safe in front of any npm/node invocation.
+# It selects the newest installed Node >= 26. If it cannot find one it **fails,
+# loudly and non-zero**. It will never hand you an older Node and let you carry
+# on, because that is issue #506 and it cost this project days.
 #
+# ## Why this script is written the way it is (#506)
+#
+# The version before this one looked only in nvm's directories and derived each
+# candidate's version by **regex on its directory name**. On a Mac with
+# Homebrew and fnm it therefore found nothing, printed a note, and left the
+# caller on whatever `node` was first on PATH — which here is v25.6.1, below
+# this repo's floor.
+#
+# That silence is the whole defect. `check:pet-slide` is non-deterministic on
+# Node 26 and deterministic on Node 25, so the #496 determinism hunt spent days
+# measuring on a runtime where the bug it was chasing **cannot occur** — three
+# branches and a QA pass all reporting "byte-identical locally" about a
+# question their runtime could not answer. A tool that quietly substitutes the
+# wrong thing does not merely fail; it manufactures confident wrong answers.
+#
+# Two rules follow, and they are the design:
+#
+#   1. **Ask, do not guess.** Candidates come from mechanisms that *know*
+#      where Nodes are — the PATH this shell already has, and each version
+#      manager that is actually installed, queried in its own terms so it
+#      reports its own layout (Homebrew on Apple silicon and on Intel, an fnm
+#      with a moved FNM_DIR, an nvm with a custom NVM_DIR all answer
+#      correctly). Adding `/opt/homebrew` to a hard-coded list would have been
+#      the same bug with a longer list.
+#
+#   2. **A version comes from the binary, never from its path.** Every
+#      candidate is executed and asked `--version`. Path-name parsing is what
+#      made the old one brittle, and it is unnecessary: the binary knows.
+#
+# There is **no OS-level registry of installed Node runtimes** to consult —
+# that is worth writing down, because it is the reason this is a list of
+# managers at all. What keeps the list honest is that each entry is a *query
+# to a tool that is present*, not a path someone once observed; a machine
+# using a manager none of these covers still gets a loud failure naming what
+# was searched, which is recoverable, rather than a silent downgrade, which is
+# not.
+
 set -euo pipefail
 
-newest_node() {
-  # Newest installed v26+ across the nvm dirs this container might use.
-  ls -d /root/.nvm/versions/node/v*/bin "$HOME"/.nvm/versions/node/v*/bin 2>/dev/null \
-    | sed -E 's#.*/node/v([0-9]+)\..*#\1 &#' \
-    | awk '$1 >= 26 {print}' | sort -V | tail -1 | cut -d' ' -f2-
+MIN_MAJOR=26
+
+# Every `node` this machine can offer, one absolute path per line. May contain
+# duplicates, non-existent paths and older versions — `select_node` filters by
+# asking each one.
+node_candidates() {
+  # 1. Everything named `node` that is already reachable. On the machine that
+  #    produced #506 this alone is sufficient: Homebrew's v26.7.0 is on PATH,
+  #    merely *behind* an fnm shim at v25.6.1, so the old script's failure was
+  #    not even a missing install — it never asked.
+  which -a node 2>/dev/null || true
+
+  # 2. Homebrew, asked for its own prefix per installed node formula, so this
+  #    works on /opt/homebrew and /usr/local alike and picks up keg-only
+  #    `node@NN` formulae that are deliberately kept off PATH.
+  if command -v brew >/dev/null 2>&1; then
+    brew list --formula 2>/dev/null | grep -E '^node(@[0-9.]+)?$' | while IFS= read -r formula; do
+      prefix="$(brew --prefix "$formula" 2>/dev/null || true)"
+      [ -n "$prefix" ] && printf '%s\n' "$prefix/bin/node"
+    done
+  fi
+
+  # 3. fnm, asked where it keeps its versions rather than assumed.
+  if command -v fnm >/dev/null 2>&1; then
+    fnm_dir="$(fnm env --json 2>/dev/null | sed -n 's/.*"FNM_DIR":"\([^"]*\)".*/\1/p')"
+    if [ -n "${fnm_dir:-}" ]; then
+      ls -d "$fnm_dir"/node-versions/*/installation/bin/node 2>/dev/null || true
+    fi
+    # **Not** fnm's multishell links. They are per-shell symlinks *into* the
+    # installs above — one created for every shell session ever opened, and on
+    # the machine that produced #506 there are **12,658 of them against 12 real
+    # installs**. Enumerating them added no version that the line above misses
+    # and cost 12,658 `node --version` process spawns, which hung this script
+    # for minutes. The currently-active one is on PATH anyway, so `which -a`
+    # already has it.
+  fi
+
+  # 4. nvm, rooted at whatever NVM_DIR says rather than at /root.
+  nvm_root="${NVM_DIR:-$HOME/.nvm}"
+  ls -d "$nvm_root"/versions/node/*/bin/node 2>/dev/null || true
+  ls -d /root/.nvm/versions/node/*/bin/node 2>/dev/null || true
+
+  # 5. Other managers, each asked only if present.
+  if command -v volta >/dev/null 2>&1; then
+    ls -d "${VOLTA_HOME:-$HOME/.volta}"/tools/image/node/*/bin/node 2>/dev/null || true
+  fi
+  if command -v asdf >/dev/null 2>&1; then
+    ls -d "${ASDF_DATA_DIR:-$HOME/.asdf}"/installs/nodejs/*/bin/node 2>/dev/null || true
+  fi
+  if command -v mise >/dev/null 2>&1; then
+    ls -d "${MISE_DATA_DIR:-$HOME/.local/share/mise}"/installs/node/*/bin/node 2>/dev/null || true
+  fi
 }
 
-BIN="$(newest_node || true)"
-if [ -z "${BIN:-}" ] || [ ! -x "$BIN/node" ]; then
-  echo "with-node: no Node >= 26 found; installing the latest via nvm..." >&2
-  export NVM_DIR="${NVM_DIR:-/root/.nvm}"
-  for f in "$NVM_DIR/nvm.sh" /opt/nvm/nvm.sh /etc/profile.d/nvm.sh "$HOME/.nvm/nvm.sh"; do
+# Prints "<major> <path>" for every candidate that runs and reports a version.
+# The version is whatever the binary says, so a moved, renamed or symlinked
+# install is read correctly and a directory named for one version holding
+# another cannot lie.
+survey_nodes() {
+  # Deduplicated on the **resolved** directory, not the written path: the same
+  # install is commonly reachable under several names (a manager's shim, a
+  # symlinked prefix, PATH itself), and each duplicate would otherwise cost a
+  # process spawn to learn a version already known.
+  node_candidates | while IFS= read -r candidate; do
+    dir="$(cd "$(dirname "$candidate")" 2>/dev/null && pwd -P || true)"
+    [ -n "$dir" ] && printf '%s/%s\n' "$dir" "$(basename "$candidate")"
+  done | awk '!seen[$0]++' | while IFS= read -r candidate; do
+    [ -x "$candidate" ] || continue
+    raw="$("$candidate" --version 2>/dev/null || true)"
+    case "$raw" in
+      v[0-9]*) printf '%s %s\n' "${raw#v}" "$candidate" ;;
+    esac
+  done
+}
+
+# The newest surveyed Node that clears the floor, or empty. One owner of that
+# choice, because it is asked twice — before and after an attempted install —
+# and two copies of a version comparison is how they drift apart.
+best_node() {
+  printf '%s\n' "$1" \
+    | awk -v min="$MIN_MAJOR" '{ split($1, v, "."); if (v[1] + 0 >= min) print }' \
+    | sort -V -r | head -1 | cut -d' ' -f2-
+}
+
+SURVEY="$(survey_nodes || true)"
+BIN="$(best_node "$SURVEY")"
+
+# Nothing new enough is installed. **Try to install one — announcing it — but
+# never quietly carry on without it.** The cloud dev container ships an older
+# default Node and `scripts/node-skill/SKILL.md` tells people this script will
+# bootstrap one, so the install is a promise this script keeps; what it must
+# not do is treat a *failed* install as permission to run anyway, which is
+# exactly what the version before this one did.
+if [ -z "$BIN" ]; then
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  for f in "$NVM_DIR/nvm.sh" /opt/nvm/nvm.sh /etc/profile.d/nvm.sh /root/.nvm/nvm.sh; do
     # shellcheck disable=SC1090
     [ -s "$f" ] && . "$f" && break
   done
-  command -v nvm >/dev/null || { echo "with-node: nvm not available on this box" >&2; exit 1; }
-  nvm install node >&2   # 'node' = the latest release
-  BIN="$(newest_node || true)"
+  if command -v nvm >/dev/null 2>&1; then
+    echo "with-node: no Node >= $MIN_MAJOR found; installing the latest via nvm..." >&2
+    nvm install node >&2 || echo "with-node: nvm install failed" >&2
+    SURVEY="$(survey_nodes || true)"
+    BIN="$(best_node "$SURVEY")"
+  fi
 fi
 
-[ -n "${BIN:-}" ] && [ -x "$BIN/node" ] || { echo "with-node: could not locate a Node >= 26 binary" >&2; exit 1; }
+if [ -z "$BIN" ]; then
+  # **Loud, and non-zero.** Never fall through to the Node that happens to be
+  # first on PATH — see the header. The report names what was searched so the
+  # next person can tell "nothing installed" from "installed somewhere this
+  # does not know about", which are different problems.
+  {
+    echo "with-node: FAILED — no Node >= $MIN_MAJOR on this machine."
+    echo
+    if [ -n "$SURVEY" ]; then
+      echo "  Nodes found, none new enough:"
+      printf '%s\n' "$SURVEY" | sort -V -r | while read -r version path; do
+        echo "    v$version  $path"
+      done
+    else
+      echo "  No working node binary was found at all."
+    fi
+    echo
+    echo "  Searched: PATH (which -a node), and these managers if installed —"
+    echo "    brew, fnm, nvm, volta, asdf, mise."
+    echo
+    echo "  Install a current Node (e.g. 'brew install node' or 'fnm install 26'),"
+    echo "  or if yours is managed by something not listed above, add that"
+    echo "  manager's own query to node_candidates() in this script."
+    echo
+    echo "  Refusing to run on an older Node: this repo's scripts need >= $MIN_MAJOR,"
+    echo "  and a silent downgrade is issue #506 — it produced days of confident,"
+    echo "  wrong measurements taken on a runtime that could not show the bug."
+  } >&2
+  exit 1
+fi
 
-export PATH="$BIN:$PATH"
-[ "$#" -gt 0 ] || { echo "with-node: node $("$BIN/node" --version) ready on PATH; give a command to run" >&2; exit 0; }
+# **Say which runtime this is, every time.** A transcript that does not record
+# the runtime a measurement was taken on cannot be checked afterwards, which is
+# exactly how #496's local runs went unquestioned for days.
+echo "with-node: $("$BIN" --version) at $BIN" >&2
+
+export PATH="$(dirname "$BIN"):$PATH"
+[ "$#" -gt 0 ] || exit 0
 exec "$@"
