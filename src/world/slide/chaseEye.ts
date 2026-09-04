@@ -52,12 +52,22 @@ export interface ChaseEye {
    * The world point the lens should look at — the midpoint of the child and
    * the nearest companion, or just the child when she rides alone.
    *
-   * Returned as a **point rather than an angle** on purpose. An angle would
-   * have to be expressed in some frame, and this rig has three of them stacked
-   * (`rideMount` yawed and pitched with the chute, `eyeMount` turned by PI, the
-   * camera's own look) — which is exactly where `RideCamera`'s header records
-   * two agents getting a sign backwards. A point has no frame to get wrong, and
-   * the caller aims at it with vectors it already holds.
+   * **Returned as a point rather than an angle, and that is the load-bearing
+   * decision in this file — do not turn it back into an angle.**
+   *
+   * An angle has to be expressed in some frame, and this rig stacks three of
+   * them: `rideMount` yawed and pitched with the chute, `eyeMount` turned by
+   * `PI` so its +Z is *behind* the rider, and the camera's own look on top.
+   * `RideCamera`'s header records **two agents getting a sign backwards** on
+   * exactly that kind of composition, and warns you to run `check:ride-camera`
+   * before touching one.
+   *
+   * **A point has no frame to get wrong.** The caller aims at it by decomposing
+   * the direction to it against the mount's own forward and up — vectors it
+   * already holds, in whatever frame it already has. That does not get the sign
+   * right this once; it removes the way of getting it wrong. Returning an angle
+   * from here would put the whole class of bug back, however carefully the
+   * angle was derived.
    */
   readonly aimAt: Vector3;
   /** True when no placement in range framed the companion and cleared ground. */
