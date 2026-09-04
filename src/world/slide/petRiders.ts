@@ -232,35 +232,87 @@ const point = new Vector3();
 const tangent = new Vector3();
 const across = new Vector3();
 const UP = new Vector3(0, 1, 0);
+const ahead = new Vector3();
+const trial = new Vector3();
 
 /**
- * How far back along the chute the `slot`-th companion rides, in metres.
+ * How much extra chute the bend allowance may ever spend, in metres.
  *
- * **A plain line, and it is plain again on purpose.** The version before this
- * one had a hole punched in it — a "blind band" that shunted any companion
- * landing near the chase lens out past the far side of it, because a 1.46 m
- * animal standing bolt upright 45 cm from the camera filled the entire frame.
- * Lying down retires the problem the band was invented for rather than
- * mitigating it: a reclining pet stands 0.6–0.9 m off the trough floor against
- * a lens 1.62 m above it, so the one that passes under the camera passes
- * *under* it — some 70° below the axis of a shot whose lower edge is 38° down —
- * and is simply not in the picture, instead of being all of it.
- *
- * So the line goes `lead + slot * gap` and nothing else, which is what Jim
- * asked for: *"several strung out behind her, lying down, as a line."* A hole
- * in it was visible from the three trackside cameras, which see the whole line
- * in profile and were never the shot the band was protecting.
- *
- * Nothing here asserts where the camera is, and that is deliberate — the copy
- * of `CHASE_EYE.z` this module used to keep, purely so the band could be
- * measured around it, is gone with the band. What replaces it is not another
- * constant but a measurement: `check:pet-slide` rasters the **live** chase
- * camera and fails if the child is ever hidden or a pet ever fills more than a
- * quarter of the frame, so moving the lens is answered by the shot rather than
- * by two numbers promising each other they still agree.
+ * A stop, not a tuning knob: the solve below walks back until the bodies really
+ * are apart, and this bounds the walk so a pathological chute cannot push a
+ * companion arbitrarily far up the slide (or into an unbounded loop) instead of
+ * failing visibly. Measured worst case across the seed pool is 0.15 m, so 1.5 m
+ * is ten times the worst bend the generator has ever produced.
  */
-export function petSlideOffset(slot: number): number {
-  return PET_SLIDE_LEAD + slot * PET_SLIDE_GAP;
+const MAX_BEND_ALLOWANCE = 1.5;
+
+/** Resolution of the walk, in metres. Well under the 1 cm clips it must fix. */
+const BEND_STEP = 0.05;
+
+/** The raw seat point for an arc distance and slot, side-step included. */
+function seatPointFor(slide: SlideRide, distance: number, slot: number, out: Vector3): void {
+  const t = Math.min(1, Math.max(0, distance) / slide.length);
+  slide.pointAt(t, out);
+  slide.tangentAt(t, tangent);
+  // Behind the lip: carry on along the entry tangent, backwards. `distance` is
+  // negative here, so this subtracts.
+  if (distance < 0) out.addScaledVector(tangent, distance);
+
+  // Left, right, left — see PET_SIDE_STEP. Across the chute is the tangent
+  // crossed with world up, which is the same "up is always world up" the chute
+  // itself is swept with (`SlideRide`), so a companion stays in the trough
+  // through a corkscrew instead of being rolled up its wall by a Frenet frame.
+  across.crossVectors(tangent, UP);
+  if (across.lengthSq() > 1e-6) {
+    across.normalize();
+    out.addScaledVector(across, slot % 2 === 0 ? PET_SIDE_STEP : -PET_SIDE_STEP);
+  }
+}
+
+/**
+ * How far back along the chute a body must sit for `wanted` metres of **real
+ * daylight** between it and the body in front of it.
+ *
+ * ## Why this is not just `fromArc - wanted`
+ *
+ * That is what it used to be, and it is the bug in #507. `PET_SLIDE_LEAD` and
+ * `PET_SLIDE_GAP` are lengths of **bodies** — a reclining child is 2.28 m long
+ * in a straight line, not 2.28 m of chute — but they were being spent as arc
+ * length. On a bend the chord is shorter than the arc, so the daylight the
+ * constants promise quietly shrinks by however hard that particular chute
+ * happens to turn, and two rigid bodies laid across the chords reach past each
+ * other on the inside of the turn. The `BODY_CLEARANCE` doc says exactly this
+ * and calls the outcome "a near-miss that becomes a visible clip on a seed
+ * whose slide bends harder"; **pool seed 346 is that seed**, clipping 1 cm at
+ * rider 50 m of a 78 m chute where its bend eats 0.135 m against the canonical
+ * park's 0.114 m.
+ *
+ * Raising `BODY_CLEARANCE` until those two seeds pass would be tuning a
+ * constant against the parks that happen to be in the pool today, and the next
+ * chute that bends harder would clip again — the same shape as weakening an
+ * assertion, one level down, and exactly what CLAUDE.md's "procgen backtracks
+ * on collision" rule forbids. So this asks the chute that was actually built
+ * how far back the daylight really is, instead of assuming a straight one.
+ *
+ * The constants keep their meaning and their single ownership: they still say
+ * how long a body is and how much room to leave after it. Only the units they
+ * are spent in are corrected, from metres-of-chute to metres.
+ */
+function arcForChord(
+  slide: SlideRide,
+  from: Vector3,
+  fromArc: number,
+  wanted: number,
+  slot: number,
+): number {
+  // The old answer is the first guess and also the floor: a bend can only ever
+  // require a companion to sit *further* back, never nearer.
+  const floor = fromArc - wanted;
+  for (let extra = 0; extra <= MAX_BEND_ALLOWANCE; extra += BEND_STEP) {
+    seatPointFor(slide, floor - extra, slot, trial);
+    if (trial.distanceTo(from) >= wanted) return floor - extra;
+  }
+  return floor - MAX_BEND_ALLOWANCE;
 }
 
 /**
@@ -276,6 +328,28 @@ export function petSlideOffset(slot: number): number {
  * than as having followed her in. Extending the curve backwards puts them where
  * they would have been a moment ago, which is up inside the castle's own
  * geometry, so they emerge from it one after another as she pulls away.
+ *
+ * **Still a plain line, and still plain on purpose.** An older version had a
+ * hole punched in it — a "blind band" that shunted any companion landing near
+ * the chase lens out past the far side of it, because a 1.46 m animal standing
+ * bolt upright 45 cm from the camera filled the entire frame. Lying down
+ * retired the problem the band was invented for rather than mitigating it: a
+ * reclining pet stands 0.6–0.9 m off the trough floor against a lens 1.62 m
+ * above it, so the one that passes under the camera passes *under* it — some
+ * 70° below the axis of a shot whose lower edge is 38° down — and is simply not
+ * in the picture, instead of being all of it. A hole in the line was visible
+ * from the three trackside cameras, which see the whole line in profile and
+ * were never the shot the band was protecting. What #507 adds is not a second
+ * hole: the bend allowance moves every companion the same way for the same
+ * reason, and only ever backwards.
+ *
+ * Nothing here asserts where the camera is, and that is deliberate — the copy
+ * of `CHASE_EYE.z` this module used to keep, purely so the band could be
+ * measured around it, is gone with the band. What replaces it is not another
+ * constant but a measurement: `check:pet-slide` rasters the **live** chase
+ * camera and fails if the child is ever hidden or a pet ever fills more than a
+ * quarter of the frame, so moving the lens is answered by the shot rather than
+ * by two numbers promising each other they still agree.
  */
 export function petSeatOnSlide(
   slide: SlideRide,
@@ -283,23 +357,28 @@ export function petSeatOnSlide(
   slot: number,
   seat: SlideSeat,
 ): void {
-  const distance = riderDistance - petSlideOffset(slot);
-  const t = Math.min(1, Math.max(0, distance) / slide.length);
-  slide.pointAt(t, point);
-  slide.tangentAt(t, tangent);
-  // Behind the lip: carry on along the entry tangent, backwards. `distance` is
-  // negative here, so this subtracts.
-  if (distance < 0) point.addScaledVector(tangent, distance);
-
-  // Left, right, left — see PET_SIDE_STEP. Across the chute is the tangent
-  // crossed with world up, which is the same "up is always world up" the chute
-  // itself is swept with (`SlideRide`), so a companion stays in the trough
-  // through a corkscrew instead of being rolled up its wall by a Frenet frame.
-  across.crossVectors(tangent, UP);
-  if (across.lengthSq() > 1e-6) {
-    across.normalize();
-    point.addScaledVector(across, slot % 2 === 0 ? PET_SIDE_STEP : -PET_SIDE_STEP);
+  // **Walk the line down from her, link by link.** Each companion's daylight is
+  // measured against the body actually in front of it — hers for the first, the
+  // previous animal for the rest — which is the same rule the line already had
+  // and the same one `check:pet-slide` asserts. It is re-walked per slot rather
+  // than cached because the ride asks for one seat at a time and a cache would
+  // be a second description of where the line is; at eight companions the whole
+  // chain is a few dozen curve samples a frame.
+  const herT = Math.min(1, Math.max(0, riderDistance) / slide.length);
+  slide.pointAt(herT, ahead);
+  if (riderDistance < 0) {
+    slide.tangentAt(herT, tangent);
+    ahead.addScaledVector(tangent, riderDistance);
   }
+
+  let distance = riderDistance;
+  for (let link = 0; link <= slot; link += 1) {
+    distance = arcForChord(slide, ahead, distance, link === 0 ? PET_SLIDE_LEAD : PET_SLIDE_GAP, link);
+    seatPointFor(slide, distance, link, point);
+    ahead.copy(point);
+  }
+  // `seatPointFor` left `tangent` at this companion's own place on the chute,
+  // which is what facing and pitch below want.
 
   seat.x = point.x;
   seat.y = point.y + PET_RIDE_LIFT;
