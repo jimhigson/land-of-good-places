@@ -76,6 +76,20 @@
  * failed" throw plays in the rail solvers.
  */
 
+/**
+ * **Which registry is live: `groundClaims.ts`'s `GroundClaims`, not this
+ * file's {@link PlacementField}.** Both exist during the migration ruled in
+ * `docs/DESIGN-round-robin-generation.md`, and two registries with no sign
+ * saying which is dead is exactly the two-definitions bug CLAUDE.md keeps
+ * cataloguing — so, the sign: `PlacementField` (keep-out discs only, no claim
+ * kinds, no crossings, no demands) is the **superseded prototype**, kept
+ * because {@link CoSolveEngine} still types against it and the engine's
+ * round-robin/backtracking mechanics are the part being carried forward.
+ * **Do not build new callers on `PlacementField`.** New placement asks go to
+ * `GroundClaims`; the engine's field is migrated to it when the first real
+ * placer pair co-solves (stage 3+ of the design).
+ */
+
 /** A keep-out disc a feature contributes to the shared field. */
 export interface Obstacle {
   readonly x: number;

@@ -108,8 +108,10 @@
     "check:hall-solid": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-hall-solid.mts",
     "check:benches": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-benches.mts",
     "check:coplanar": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-coplanar.mts",
+    "check:gateway": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-gateway.mts",
     "vet:seeds": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/vet-seed-pool.mts",
-    "check:seed-pool": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-seed-pool.mts"
+    "check:seed-pool": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-seed-pool.mts",
+    "measure:bridge-parapet": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-bridge-parapet.mts"
   },
   "dependencies": {
     "three": "^0.185.1",

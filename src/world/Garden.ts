@@ -24,7 +24,7 @@ import { grassTexture, pinkStoneTexture } from '../core/textures';
 import { terrainHeight } from './terrain';
 import { buildPaths } from './pathGraph';
 import type { CollisionWorld } from './Collision';
-import { isInEntranceGateGap } from './entrance/layout';
+import { isInEntranceGateOpening } from './entrance/layout';
 
 /**
  * The ground itself: grassy terrain, the winding paths and the pink stone
@@ -178,7 +178,7 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
   // running from 57 m to 110 m an even angular step is not an even spacing:
   // it would bond the masonry at the pinch and stretch it into a picket fence
   // at the bulge.
-  const blockWidth = 1.7;
+  const blockWidth = BOUNDARY_BLOCK_WIDTH;
   const courses = 2;
   const courseStations = [
     alongBoundary(PARK_BOUNDARY, blockWidth).filter(outsideTheGate),
@@ -289,10 +289,29 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
   for (let i = 0; i < collisionStations.length; i += 1) {
     const a = collisionStations[i] as EdgeStation;
     const b = collisionStations[(i + 1) % collisionStations.length] as EdgeStation;
-    // Tested at the midpoint: a segment with one end inside the opening and one
-    // end outside it is part of the opening's edge, and walling it off would put
-    // a stub back across the very gap the blocks above leave clear.
-    if (inGateGap((a.x + b.x) / 2, (a.z + b.z) / 2)) continue;
+    // **Tested at both ends and the middle, not the midpoint alone.**
+    //
+    // The midpoint test was the bug behind half of #481. A collision station
+    // sits every ~2 m along the outline, so a segment whose *midpoint* is a
+    // hand's breadth outside the opening still reaches a metre into it, and the
+    // last kept segment on each side did exactly that. Measured on `main`, in
+    // the 7.00 m clear width 1.0-2.0 m inside the arch, that stone overlapped a
+    // player-sized body on **nine of the sixteen pool seeds** — worst 0.87 m on
+    // 451 and 0.76 m on 128, and 0.05 m on the canonical seed Jim plays.
+    //
+    // Asking about all three points is what makes "this segment is clear of the
+    // doorway" true of the whole segment rather than of one point on it. The
+    // margin is the collider's own half-thickness, so the *surface* a child
+    // meets clears the arch rather than the centre line.
+    //
+    // The old comment here said a segment with one end in the opening is part
+    // of the opening's edge and must not be walled off. That is still true and
+    // this still honours it — such a segment is skipped, more of them than
+    // before — the aperture simply ends up the arch's own width instead of an
+    // angle that happened to be worth about the same at one radius.
+    const inside = (px: number, pz: number): boolean =>
+      inGateGap(px, pz, BOUNDARY_WALL_COLLISION_HALF);
+    if (inside(a.x, a.z) || inside(b.x, b.z) || inside((a.x + b.x) / 2, (a.z + b.z) / 2)) continue;
     collision.addWall(a.x, a.z, b.x, b.z, BOUNDARY_WALL_COLLISION_HALF);
   }
 
@@ -321,7 +340,7 @@ const PILLAR_TARGET_COUNT = 28;
 /**
  * **Is this point on the boundary inside the gate's opening?**
  *
- * `isInEntranceGateGap` has existed in `entrance/layout.ts` since the entrance
+ * The gate-gap predicate has existed in `entrance/layout.ts` since the entrance
  * was written and, until now, had **zero callers anywhere in the repo** — so
  * the gate was a gate in name only. `Entrance.ts` built an arch, `boundary.ts`
  * pinned the outline's radius at the gate's bearing, and this function laid
@@ -335,14 +354,49 @@ const PILLAR_TARGET_COUNT = 28;
  * was the second half of that, and the children walking in would have done
  * exactly the same thing at a smaller scale. Issue #195.
  */
-function inGateGap(x: number, z: number): boolean {
-  return isInEntranceGateGap(Math.atan2(z, x));
+function inGateGap(x: number, z: number, margin: number): boolean {
+  return isInEntranceGateOpening(x, z, margin);
 }
 
-/** The same, as a predicate to filter edge stations with. */
+/**
+ * The same, as a predicate to filter drawn edge stations with.
+ *
+ * The margin is **half a block plus the masonry's own half-width**, because a
+ * station is where a block's *centre* goes and the block is `blockWidth` long
+ * lying along the edge. Filtering on the centre alone left the last kept block
+ * reaching into the opening by up to its own half-length — which is most of
+ * what a child walks into.
+ */
 function outsideTheGate(station: EdgeStation): boolean {
-  return !inGateGap(station.x, station.z);
+  return !inGateGap(station.x, station.z, DRAWN_BLOCK_GATE_MARGIN);
 }
+
+/**
+ * **How long one drawn block of the boundary wall is**, along the edge.
+ *
+ * Exported because it is a *geometric fact about the built wall*, and the
+ * procgen invariant that proves no masonry stands in the gate's opening has to
+ * know it to ask the question honestly: a station is where a block's **middle**
+ * goes, so "is this block in the doorway?" is about `BOUNDARY_BLOCK_WIDTH / 2`
+ * either side of that middle, not about the middle.
+ *
+ * The invariant deliberately derives its own expectation from this and
+ * {@link BOUNDARY_MASONRY_HALF_WIDTH} rather than reading
+ * {@link DRAWN_BLOCK_GATE_MARGIN}. It read that constant for one commit, and
+ * that made it blind in exactly the way a check must never be: zeroing the
+ * margin moved the code *and the check together*, and the whole suite stayed at
+ * 520/520 with stone back in the gateway. A check that reads the policy it is
+ * checking cannot fail. It reads the geometry now, and zeroing the margin turns
+ * it red.
+ */
+export const BOUNDARY_BLOCK_WIDTH = 1.7;
+
+/**
+ * How far a drawn block's centre must stand clear of the arch's opening: its
+ * own half-length (the pillars are 1.5 m, so the widest half-length is the
+ * block's) plus the masonry's half-width.
+ */
+export const DRAWN_BLOCK_GATE_MARGIN = BOUNDARY_BLOCK_WIDTH / 2 + BOUNDARY_MASONRY_HALF_WIDTH;
 
 const UP = new Vector3(0, 1, 0);
 const SQUASHED_CAP = new Vector3(1, 0.72, 1);

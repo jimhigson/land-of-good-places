@@ -70,7 +70,6 @@ import {
   RIM_OUTSET_START,
 } from '../../src/core/constants.ts';
 import {
-  ENTRANCE_ANGLE,
   ENTRANCE_BUS_ARRIVE_X,
   ENTRANCE_BUS_STOP_Z,
   ENTRANCE_GATE_HALF_WIDTH,
@@ -78,9 +77,19 @@ import {
   ENTRANCE_GATE_Z,
   ENTRANCE_PLAYER_X,
   ENTRANCE_PLAYER_Z,
-  isInEntranceGateGap,
+  ENTRANCE_WALK_DEPTH,
+  entranceGateFrame,
+  isInEntranceGateOpening,
 } from '../../src/world/entrance/layout.ts';
+// A leaf module: pure geometry over a `standable` predicate, no three.js and
+// nothing seed-dependent, so importing it here cannot fix the park's seed early.
+import { GATE_PROBE_INSET, measureGatewayWalk } from '../../src/world/entrance/gatewayWalk.ts';
 import { ROAD_TILE_METRES } from '../../src/world/entrance/road.ts';
+import {
+  GATE_FOOT_TOLERANCE,
+  GATE_POST_PROBE_INSET,
+  GATE_POST_REACH,
+} from '../../src/world/entrance/gateArch.ts';
 import { visibleTop } from '../../src/art/style/measure.ts';
 import { COPING_SINK, bridgeStoneGeometry } from '../../src/art/models/bridgeStones.ts';
 import {
@@ -739,6 +748,206 @@ const plotsDoNotOverlap: Invariant = (facts) => {
 };
 
 /** Every doormat and stall counter has ground a visitor can stand on. */
+/**
+ * **The park gate's arch stands over its own posts, and the way in stays
+ * open.** Issue #480 — Jim, playing: *"There's a weird segment of a taurus
+ * near the park edge."*
+ *
+ * The crossbar carried two rotations too many. `rotation.z = Math.PI` turned
+ * the upper half of the torus — the arch shape — into the lower half, so it
+ * hung down from the tops of the posts and drove its apex 1.34 m under the
+ * paving; `rotation.y = Math.PI / 2` laid it *along* the path instead of
+ * across it. What stood at the park's front door was two curved prongs coming
+ * out of the ground either side of the way in, with nothing solid about them.
+ *
+ * Every number involved was right. The gate was the right width, the posts
+ * stood in the right places, the arch was centred on the opening, and both
+ * rotations read like framing. **Only the mesh's own world box says which way
+ * it points**, which is why this is measured off the built scene.
+ *
+ * Three clauses:
+ *
+ * 1. **The arch's two ends come down on its two posts** — the meshes named
+ *    beside it by `src/world/entrance/gateArch.ts`, found in the scene, not
+ *    asked of the builder. A crossbar turned out of the gate plane takes its
+ *    ends with it and lands nowhere near them.
+ * 2. **The gate is solid where a child walks into it** — a stride in front of
+ *    each post, inside the reach that post has over her. This is what fails
+ *    if the gate loses its colliders, and it is the control on the probe:
+ *    it has to be able to answer "no".
+ *
+ *    **Where that probe may not be pointed:** the gate line itself is
+ *    blocked from wall to wall, because the park boundary keeps a child
+ *    *inside* the park and a `PLAYER_RADIUS` body standing on the line
+ *    overlaps the outside — 33 of 33 probes across the gate at z = 60 on the
+ *    canonical seed, whatever the gate is doing. A clause probing there is
+ *    green for a reason that has nothing to do with the gate, which is
+ *    exactly how the first draft of this invariant passed the *broken*
+ *    arch's own geometry. See `scripts/measure-gate-480.mts`.
+ * 3. **Nothing hangs into that gap.** The lowest point of the arch clears
+ *    {@link TALLEST_CHILD_HEIGHT} — the park's tallest possible child, party
+ *    hat and all, taken from the game rather than from the gate's own design.
+ *    The broken arch reached below ground and failed this by 4.31 m.
+ *
+ * The arch itself is deliberately **not** solid: its feet are the posts,
+ * which are, and the span is headroom over a child walking under it.
+ */
+/** The cover this invariant does not give, said the same way every time. */
+const GATE_UNCOVERED =
+  'the park gate arch invariant asserts nothing about whether a child can walk through the gateway ' +
+  '— that is theWalkInFromTheGateIsWalkable (#481, #485); this one covers only the arch pointing the ' +
+  'right way, the posts being solid, and the headroom';
+
+const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
+  // **What this invariant does not assert.** Written before the early returns
+  // below, not after, so a park with no gate in it at all still says what is
+  // uncovered rather than falling silent at the one moment that matters.
+  //
+  // There is no clause here that the gateway is *walkable* — that a child can
+  // actually get from outside the gate to inside it. That clause was written
+  // on this branch, it worked, and it found a defect that is not this one: the
+  // park boundary is a seed-dependent spline while the gate is a fixed
+  // constant at (0, 60), so on some seeds the boundary wall ran *across* the
+  // opening — pool seed 288 (a chain of 0.18 m walls through (0.01, 57.76))
+  // and sweep seed 18 (through (-1.13, 59.87), shut but for a 1 m slot at
+  // x = 3.5). It was withheld rather than weakened, to land with that fix.
+  //
+  // **It has since landed, and not here.** #481 was fixed by #485, which moved
+  // the boundary masonry out of the opening and brought its own invariant,
+  // `theWalkInFromTheGateIsWalkable`, over `gatewayWalk.ts`'s full-width flood
+  // fill. So the clause is no longer withheld — it exists, it is simply owned
+  // by the check next door, and this one stays about the arch. The note above
+  // says which, because "asserts nothing about X" is only useful to the next
+  // reader if it also says who does.
+  //
+  // On `process.stderr`, because Vitest shows `console.log` from *failing*
+  // tests only and this note exists for the passing runs.
+  const say = (line: string): void => process.stderr.write(`${line}\n`);
+
+  const arch = facts.parkGateArch;
+  if (!arch) {
+    say(GATE_UNCOVERED + ' — and there is no gate in the scene at all, so it covers nothing else either');
+    return [
+      'NO SCENE OBJECT "park-gate-arch": the park has no front gate to measure. ' +
+        'Either the entrance stopped building one or the crossbar lost its name, ' +
+        'and either way every clause below would have passed vacuously.',
+    ];
+  }
+  if (arch.posts.length !== 2) {
+    say(GATE_UNCOVERED + ` — and the gate has ${arch.posts.length} named posts, so clause 1 covers nothing`);
+    return [
+      `the park gate has ${arch.posts.length} named posts in the built scene, not 2 — ` +
+        'clause 1 below has nothing to measure the arch against',
+    ];
+  }
+
+  const fouls: string[] = [];
+
+  // The axis the arch lies along, taken from the arch rather than from the
+  // gate's design: the longer of its two horizontal extents. A crossbar turned
+  // out of the gate plane takes this with it.
+  const spanX = arch.maxX - arch.minX;
+  const spanZ = arch.maxZ - arch.minZ;
+  const alongX = spanX >= spanZ;
+  const span = Math.max(spanX, spanZ);
+  const half = span / 2;
+  const along = (t: number): readonly [number, number] =>
+    alongX ? [arch.centreX + t * half, arch.centreZ] : [arch.centreX, arch.centreZ + t * half];
+
+  // 1. Each end of the arch comes down on a post.
+  for (const t of [-1, 1] as const) {
+    const [x, z] = along(t);
+    let nearest = Infinity;
+    for (const post of arch.posts) {
+      nearest = Math.min(nearest, Math.hypot(x - post.x, z - post.z));
+    }
+    if (nearest > GATE_FOOT_TOLERANCE) {
+      fouls.push(
+        `the gate arch's ${t < 0 ? 'first' : 'second'} end at (${x.toFixed(2)}, ${z.toFixed(2)}) is ` +
+          `${nearest.toFixed(2)} m from the nearest post — it is not standing on the gate, so it is ` +
+          `pointing somewhere the gate does not go (it spans ${span.toFixed(2)} m along ` +
+          `${alongX ? 'X' : 'Z'}, posts at ` +
+          arch.posts.map((post) => `(${post.x.toFixed(2)}, ${post.z.toFixed(2)})`).join(' and ') +
+          ')',
+      );
+    }
+  }
+
+  // 2. The gate is solid where a child bumps into it — and the probe proves
+  // itself at each post before it is believed there.
+  //
+  // **Why per-post and not once:** on the canonical seed, with the colliders
+  // removed, the *east* post's probe flips to standable — a clean control —
+  // while the west post's stays blocked, because something other than the post
+  // occupies that ground. A clause that quietly covers one post while reading
+  // as though it covers two is the disease this file is most often about. So
+  // each post is asked twice: outside the post's reach (must be open, or
+  // nothing here is being answered by the gate) and inside it (must be
+  // closed), and the stderr note below reports how many posts survived that.
+  //
+  // **What the count is, measured on the rebased tree** (`test:procgen`, five
+  // seeds, 541 tests, exit 0): **9 of 10 post-probes live** — four seeds at 2
+  // of 2, one seed masked at (-4.30, 60.00) — and no seed where it asserts
+  // nothing. Before the rebase onto #485 it was 5 of 10 with two seeds
+  // covering nothing at all; moving the boundary masonry out of the opening is
+  // what freed the other four. Both numbers were true when taken, which is the
+  // reason this one is dated to the tree it was read off rather than left as a
+  // bare figure for the next reader to trust.
+  const toMiddle = Math.hypot(arch.centreX, arch.centreZ);
+  const inward: readonly [number, number] =
+    toMiddle > 1e-6 ? [-arch.centreX / toMiddle, -arch.centreZ / toMiddle] : [0, 0];
+  const reach = GATE_POST_REACH;
+  let postsCovered = 0;
+  const masked: string[] = [];
+
+  for (const post of arch.posts) {
+    const at = (inset: number): readonly [number, number] => [
+      post.x + inward[0] * inset,
+      post.z + inward[1] * inset,
+    ];
+    const [clearX, clearZ] = at(GATE_POST_PROBE_INSET.clear);
+    if (!facts.isStandable(clearX, clearZ)) {
+      // Something that is not this post is answering here, so the reading a
+      // stride closer cannot be attributed to the post's collider.
+      masked.push(`(${post.x.toFixed(2)}, ${post.z.toFixed(2)})`);
+      continue;
+    }
+    postsCovered += 1;
+    const [solidX, solidZ] = at(GATE_POST_PROBE_INSET.solid);
+    if (facts.isStandable(solidX, solidZ)) {
+      fouls.push(
+        `a child can stand at (${solidX.toFixed(2)}, ${solidZ.toFixed(2)}), ${GATE_POST_PROBE_INSET.solid} m ` +
+          `in front of the gate post at (${post.x.toFixed(2)}, ${post.z.toFixed(2)}) — inside the ` +
+          `${reach.toFixed(2)} m the post is supposed to hold her off, so the gate is not solid`,
+      );
+    }
+  }
+
+  say(
+    `${GATE_UNCOVERED}; its solidity clause is live on ${postsCovered} of ${arch.posts.length} gate posts` +
+      (masked.length > 0
+        ? ` — masked at ${masked.join(' and ')}, where something that is not the post already blocks ` +
+          `${GATE_POST_PROBE_INSET.clear.toFixed(2)} m out, past the ${reach.toFixed(2)} m the post ` +
+          `itself reaches, so the reading a stride closer proves nothing there`
+        : ''),
+  );
+  if (postsCovered === 0) {
+    say('  ...so the gate-is-solid clause asserts NOTHING on this seed');
+  }
+
+  // 3. Nothing of it hangs into that gap.
+  const headroom = arch.minY - arch.groundY;
+  if (headroom < TALLEST_CHILD_HEIGHT) {
+    fouls.push(
+      `the gate arch reaches down to ${arch.minY.toFixed(2)} m, ${headroom.toFixed(2)} m over ground at ` +
+        `${arch.groundY.toFixed(2)} m — less than the ${TALLEST_CHILD_HEIGHT} m of the tallest child the ` +
+        'park can make, so she walks through it',
+    );
+  }
+
+  return fouls;
+};
+
 const entrancesAreUsable: Invariant = (facts) => {
   const blocked: string[] = [];
   for (const entrance of facts.entrances) {
@@ -839,6 +1048,74 @@ const treesKeepOffWalls: Invariant = (facts) => {
       }
     }
   }
+  return fouls;
+};
+
+/**
+ * **No bush grows through a wall or out of a tree.**
+ *
+ * Issue #500, and it had been true since walls and trees both existed: the
+ * bush scatter's whole idea of an obstacle was `isPlantable` — paving, plots,
+ * the railway, ride exits, the plaza — so nothing else could refuse it a spot.
+ * Measured on the built park across these five seeds before the fix: **64
+ * clumps standing inside a wall run** (worst 1.17 m, through a wooden fence a
+ * child can see straight through) and **653 inside a tree's own footprint**
+ * (worst 3.89 m, a clump growing out of a trunk).
+ *
+ * About eighty invariants missed it for one reason: **every one of them names
+ * the pair it checks**, and nobody had written `bushesKeepOffWalls`. This one
+ * names two more pairs and is therefore the same shape of thing — it is here
+ * to hold the fix on `main` until the universal deny-by-default sweep
+ * (`feat/universal-overlap-invariant`, blocked on this issue and #501) lands
+ * and subsumes it. **When that merges, delete this**; a narrower check kept
+ * beside a wider one is two definitions of one rule, which is this repo's
+ * most-repeated bug.
+ *
+ * Measured off the built park, in the game's own published numbers: a clump's
+ * `radius` is the collider a walking child actually meets, a wall's
+ * `halfWidth` is what it is drawn at, and a tree's `footprint` is derived from
+ * the parts it is really built from. Nothing here re-derives the scatter's own
+ * clearances, which would only prove the generator agrees with itself.
+ *
+ * Threshold zero: touching is legal and a bush against a fence is a good look.
+ * It is *sharing ground* that a player sees as a bush sprouting through rails.
+ */
+const bushesGrowThroughNothing: Invariant = (facts) => {
+  const fouls: string[] = [];
+  for (const bush of facts.bushes) {
+    const where = `bush at (${bush.x.toFixed(1)}, ${bush.z.toFixed(1)})`;
+    for (const wall of facts.walls) {
+      const overlap =
+        wall.halfWidth +
+        bush.radius -
+        segmentDistance([bush.x, bush.z], [bush.x, bush.z], wall.from, wall.to);
+      if (overlap > 0) {
+        fouls.push(
+          `${where} stands ${overlap.toFixed(2)} m inside the ${wall.kind} run ` +
+            `(${fmt(wall.from)}->${fmt(wall.to)}) — it grows through the rails`,
+        );
+      }
+    }
+    for (const tree of facts.trees) {
+      const overlap =
+        tree.footprint + bush.radius - Math.hypot(bush.x - tree.x, bush.z - tree.z);
+      if (overlap > 0) {
+        fouls.push(
+          `${where} stands ${overlap.toFixed(2)} m inside the footprint of the tree at ` +
+            `(${tree.x.toFixed(1)}, ${tree.z.toFixed(1)}) reaching ${tree.footprint.toFixed(2)} m`,
+        );
+      }
+    }
+  }
+  // What this ran against, on every run including a green one — a count of
+  // zero fouls means nothing unless you know how many pairs produced it.
+  process.stderr.write(
+    `[bushes grow through nothing] swept ${facts.bushes.length} clumps x ` +
+      `${facts.walls.length} wall runs and ${facts.trees.length} trees; ` +
+      `NOT covered: a clump's drawn blobs, which reach up to 2.15 m while ` +
+      `PlacedBush.radius publishes 0.85 m, so a leaf overhanging a wall it ` +
+      `does not stand in is invisible here\n`,
+  );
   return fouls;
 };
 
@@ -5032,6 +5309,188 @@ const everyCopingStoneSitsOnItsWall: Invariant = (facts) => {
   return complaints;
 };
 
+/**
+ * **You cannot see through a bridge's parapet.** Issue #489.
+ *
+ * Jim, 3 September 2026, standing on one: *"bridges have a hole in them and
+ * their near side, above the arch where some of the wall is missing"*. The
+ * coursed outer face was clamped to the height of the ROAD's crown while the
+ * wall carried on up to the parapet top, `PARAPET_HEIGHT + PARAPET_CROWN_LIFT`
+ * higher — a 1.17 m band with no outer face on it, on every bridge of every
+ * seed. The inner face and the `wallTop` cap were drawn full height and are
+ * single-sided, so the camera looked straight through to the grass beyond.
+ *
+ * **Why a ray and not an arithmetic check.** Nothing derives the drawn face
+ * from the wall it is meant to be facing — they are two lists of vertices kept
+ * together on purpose — so the only honest question is the player's own: point
+ * a camera at the wall and see whether stone stops it. A check that recomputed
+ * the course levels would have agreed with the bug, because the bug *was* the
+ * course levels.
+ *
+ * **Its control is built in, and is the reason it cannot pass vacuously.**
+ * Each sample fires two rays: one inward at the outer face, one outward from
+ * over the roadway at the same wall's inner face. Only samples whose inner ray
+ * hits — proof there is masonry at that height — are judged at all. A ray at
+ * the wrong height, on the wrong ring or along the wrong normal misses both,
+ * and is counted as untested rather than as a pass. The count of judged samples
+ * is announced on every run, so "it tested nothing" cannot look like "it found
+ * nothing".
+ *
+ * Two things it deliberately does not flag, both taken from the game rather
+ * than from a figure of its own:
+ *
+ * - Rings below `bridges.ts`'s `PARAPET_GONE_HUMP` (`ParkFacts`'s
+ *   `expected: false`), where `parapetHeightFor` removes the wall on purpose
+ *   so a wing wall does not sever the path junction a ramp foot lands in.
+ * - Ring points themselves. The wall is drawn as chords between rings while the
+ *   ring points sit on the arc, so a ray aimed at a ring along its own normal
+ *   passes outside both chords and reports a hole in solid stone — the same
+ *   fact `ShellGeometry.planEdge` exists for. Samples are taken at the middle
+ *   of each face. Measured, probing at rings invented see-through on 9 of 23
+ *   bridges and all of it vanished at face middles.
+ */
+const noBridgeParapetCanBeSeenThrough: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const raycaster = new Raycaster();
+  const from = new Vector3();
+  const direction = new Vector3();
+
+  /** How far outside the masonry the probing ray starts. */
+  const STANDOFF = 3.0;
+  /** How far in over the roadway the control ray starts. */
+  const INNER_STANDOFF = 1.2;
+  const HIT_SLACK = 0.25;
+  const PROBE_STEP = 0.05;
+  const PROBE_BOTTOM = 1.5;
+
+  const groups = new Map<string, Object3D>();
+  for (const crossing of facts.world.train.crossings) {
+    if (facts.world.train.fallbackCrossings.includes(crossing)) continue;
+    const name = `bridge-${crossing.railDistance.toFixed(1)}`;
+    const group = facts.world.train.group.getObjectByName(name);
+    if (group) groups.set(name, group);
+  }
+
+  const rings = facts.bridgeParapetRings;
+  let judged = 0;
+  /** Which bridges actually contributed a judged sample — not which exist. */
+  const covered = new Set<string>();
+  const seeThrough = new Map<string, { count: number; worst: number; at: string }>();
+
+  for (let i = 0; i + 1 < rings.length; i += 1) {
+    const a = rings[i] as (typeof rings)[number];
+    // `parkFacts` writes side 0 then side 1 for each ring, so one flank's face
+    // joins entries **two** apart — same parity, therefore same side — and a
+    // differing bridge name is what marks the end of a bridge's run.
+    const next = rings[i + 2] as (typeof rings)[number] | undefined;
+    if (!next || next.bridge !== a.bridge) continue;
+    if (!a.expected || !next.expected) continue;
+    const group = groups.get(a.bridge);
+    if (!group) continue;
+
+    // The middle of the face between this ring and the next on the same flank.
+    const ox = (a.outer[0] + next.outer[0]) / 2;
+    const oz = (a.outer[1] + next.outer[1]) / 2;
+    const ix = (a.inner[0] + next.inner[0]) / 2;
+    const iz = (a.inner[1] + next.inner[1]) / 2;
+    const top = (a.top + next.top) / 2;
+    const nx = ox - ix;
+    const nz = oz - iz;
+    const norm = Math.hypot(nx, nz);
+    if (norm < 1e-6) continue;
+    const ux = nx / norm;
+    const uz = nz / norm;
+
+    const faceHit = (): boolean =>
+      raycaster
+        .intersectObject(group, true)
+        .some((candidate) => candidate.object.name !== 'deck');
+
+    let runFrom: number | null = null;
+    let runTo = 0;
+    const closeRun = (): void => {
+      if (runFrom === null) return;
+      const band = runTo - runFrom + PROBE_STEP;
+      const found = seeThrough.get(a.bridge) ?? { count: 0, worst: 0, at: '' };
+      if (band > found.worst) {
+        found.worst = band;
+        found.at = `(${ox.toFixed(1)}, ${oz.toFixed(1)}), ${runFrom.toFixed(2)}–${runTo.toFixed(2)} m below the top`;
+      }
+      seeThrough.set(a.bridge, found);
+      runFrom = null;
+    };
+
+    for (let drop = 0.03; drop <= PROBE_BOTTOM + 1e-9; drop += PROBE_STEP) {
+      const y = top - drop;
+
+      // The control: is there any wall here at all?
+      direction.set(ux, 0, uz);
+      from.set(ix - ux * INNER_STANDOFF, y, iz - uz * INNER_STANDOFF);
+      raycaster.set(from, direction);
+      raycaster.far = INNER_STANDOFF + norm + HIT_SLACK;
+      if (!faceHit()) {
+        closeRun();
+        continue;
+      }
+
+      // The probe: can it be seen through?
+      direction.set(-ux, 0, -uz);
+      from.set(ox + ux * STANDOFF, y, oz + uz * STANDOFF);
+      raycaster.set(from, direction);
+      raycaster.far = STANDOFF + HIT_SLACK;
+      judged += 1;
+      covered.add(a.bridge);
+      if (faceHit()) {
+        closeRun();
+        continue;
+      }
+      const found = seeThrough.get(a.bridge) ?? { count: 0, worst: 0, at: '' };
+      found.count += 1;
+      seeThrough.set(a.bridge, found);
+      if (runFrom === null) runFrom = drop;
+      runTo = drop;
+    }
+    closeRun();
+  }
+
+  for (const [bridge, found] of seeThrough) {
+    complaints.push(
+      `${bridge}: ${found.count} places on its parapet have masonry at that height ` +
+        `but no outer face on it — you see straight through the wall to the park ` +
+        `beyond. Worst run ${found.worst.toFixed(2)} m at ${found.at}. The drawn ` +
+        'outer face must reach the top of the wall it is facing (#489).',
+    );
+  }
+
+  // A green line that implies cover it does not give is how the next agent
+  // inherits a false belief — stderr, because vitest hides console output from
+  // passing tests, which is exactly the run this note exists for.
+  if (judged === 0) {
+    complaints.push(
+      'no bridge parapet was probed — every crossing on this seed fell back to a ' +
+        'level crossing, or the built mesh names have changed, so this asserts nothing',
+    );
+  } else {
+    // **`covered.size`, never `groups.size`.** The first is how many bridges
+    // this actually judged a sample on; the second is how many exist. Reporting
+    // the second means losing cover on *some* bridges — a renamed mesh on one,
+    // a flank whose rings all read as tapered — says nothing at all, because
+    // only total-zero trips the clause above. Naming the uncovered ones is the
+    // difference between a note that can warn you and one that cannot.
+    const missing = [...groups.keys()].filter((name) => !covered.has(name));
+    process.stderr.write(
+      `noBridgeParapetCanBeSeenThrough: judged ${judged} samples across ` +
+        `${covered.size} of ${groups.size} bridge(s) on seed ${facts.seed}` +
+        (missing.length > 0
+          ? ` — NO SAMPLE JUDGED on ${missing.join(', ')}, which this run therefore asserts nothing about`
+          : '') +
+        `\n`,
+    );
+  }
+
+  return complaints;
+};
+
 const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
   const complaints: string[] = [];
   const probe = new Vector3();
@@ -5720,6 +6179,19 @@ const theDrawnPathRidesOverEveryBridge: Invariant = (facts) => {
     }
   }
 
+  // **Why twice, and not once.** This clause compared the two counts for
+  // equality, which was right while the kerb was one ribbon under the surface
+  // — same curve, same `divisions`, same vertex count. `pathGraph.ts` now draws
+  // the kerb as the **two bands you can actually see** (its middle was a face
+  // buried under the path, and `ART_DIRECTION.md` §7 says delete those rather
+  // than hold them apart with a lift), so a kerb that is riding its bridge
+  // perfectly has exactly twice the vertices. Measured: 92 against 46 on seed
+  // 11, and the same 2.000 ratio on every seed that carries a bridge.
+  //
+  // It is a structural constant of the geometry, not a tolerance — the ±15%
+  // beside it is the tolerance, and it is unchanged. A kerb genuinely torn off
+  // its paving still fails this.
+  const KERB_VERTICES_PER_SURFACE_VERTEX = 2;
   const surfaceCount = carried['path-surface'] ?? 0;
   const kerbCount = carried['path-kerb'] ?? 0;
   if (surfaceCount === 0) {
@@ -5728,9 +6200,10 @@ const theDrawnPathRidesOverEveryBridge: Invariant = (facts) => {
         'of them — the path does not go over the bridges at all, and every check above ' +
         'passed by having nothing to measure',
     );
-  } else if (Math.abs(surfaceCount - kerbCount) > surfaceCount * 0.15) {
+  } else if (Math.abs(kerbCount - surfaceCount * KERB_VERTICES_PER_SURFACE_VERTEX) > surfaceCount * 0.15) {
     complaints.push(
-      `the bridges carry ${surfaceCount} path-surface vertices but ${kerbCount} path-kerb ones — ` +
+      `the bridges carry ${surfaceCount} path-surface vertices but ${kerbCount} path-kerb ones, ` +
+        `against the ${KERB_VERTICES_PER_SURFACE_VERTEX}x the kerb's two bands should give — ` +
         'the kerb is torn off the paving it borders somewhere over a bridge',
     );
   }
@@ -6505,7 +6978,7 @@ const noBridgeStandsWhereNoneWasProven: Invariant = (facts) => {
 /**
  * **Is there actually a hole in the wall at the gate?**
  *
- * Issue #195. `isInEntranceGateGap` sat in `entrance/layout.ts` from the day the
+ * Issue #195. The gate-gap predicate sat in `entrance/layout.ts` from the day the
  * entrance was written with **zero callers anywhere**, so the gate was a gate in
  * name only: an arch stood over unbroken masonry, with an unbroken collision
  * polygon behind it. `buildBoundaryWall`'s own comment said "the wall is solid",
@@ -6538,7 +7011,30 @@ const theGateIsAHoleInTheWall: Invariant = (facts) => {
   if (blocks.length === 0) return ['found no boundary wall blocks at all to measure'];
 
   const fouls: string[] = [];
-  const inGap = blocks.filter((b) => isInEntranceGateGap(Math.atan2(b.z, b.x)));
+  // **Tested at the block's own extent, not its centre — and the extent is
+  // derived from the geometry, never from the rule being checked.**
+  //
+  // This filtered on the centre, blind to the very thing `Garden.ts`'s
+  // `DRAWN_BLOCK_GATE_MARGIN` exists to add: a station is where a block's
+  // *middle* goes and the block is `BOUNDARY_BLOCK_WIDTH` long lying along the
+  // edge, so the last kept block reached into the opening by up to its own
+  // half-length and nothing said so.
+  //
+  // The first attempt at this fix read `DRAWN_BLOCK_GATE_MARGIN` itself, which
+  // is worse than useless: zeroing that constant then moved the wall *and this
+  // clause together* and the suite stayed at 520/520 with stone back in the
+  // doorway. So the expectation is rebuilt here from the two facts about the
+  // built wall — how long a block is and how thick the masonry is — and it
+  // holds whatever policy `Garden.ts` adopts.
+  //
+  // Read off `facts`, never imported: a static import of `Garden.ts` into this
+  // file loads `parkManifest.ts` before the seed is set and pins every seed to
+  // the default park. Measured — it did, and the tell was the *pass* count:
+  // 4 files red, **332 skipped**, 188 passed. `parkFacts.ts` reaches Garden
+  // through an `await import` after the park exists, which is the whole reason
+  // that pattern is there.
+  const blockReach = facts.boundaryBlockWidth / 2 + facts.masonryHalfWidth;
+  const inGap = blocks.filter((b) => isInEntranceGateOpening(b.x, b.z, blockReach));
   if (inGap.length > 0) {
     const worst = inGap[0];
     fouls.push(
@@ -6559,6 +7055,89 @@ const theGateIsAHoleInTheWall: Invariant = (facts) => {
         `a child of ${PLAYER_RADIUS} m cannot get through`,
     );
   }
+  return fouls;
+};
+
+/**
+ * **A child can walk in through the front gate.**
+ *
+ * Issue #481. The gate is the one fixed thing in the park; the railway, the
+ * paths, the plots and the scenery are all drawn afresh from the seed. So the
+ * front door is exactly where "two definitions of one thing" bites, and it bit:
+ * measured on `main` at `bd818210`, the railway's lineside fence ran across the
+ * opening 2.3 m inside the arch on pool seed 288, and **through the arch itself
+ * on sweep seed 18** — `(-1.13, 59.87) -> (1.43, 58.85)`, a 0.18 m fence, with
+ * its 1.3 m track escort 3 m behind it. The obstacle field the loop is grown
+ * against (`train/route.ts`'s `trainObstacles`) knew every plot in the park and
+ * the Sky Cruiser's dismount point, and had never been told the park had a way
+ * in.
+ *
+ * {@link theGateIsAHoleInTheWall} above is the *other* half of this and does not
+ * cover it: it asks whether the boundary masonry leaves a gap, and on both
+ * failing seeds it correctly answered yes. The gap was there; something else was
+ * standing in it two metres further on.
+ *
+ * The measurement lives in `entrance/gatewayWalk.ts` rather than here, because
+ * `scripts/check-gateway.mts` asks the same question of all sixteen seeds a
+ * child can be given — 288 is not one of this suite's five — and shipping the
+ * fix for a two-definitions bug as two definitions would be the same mistake.
+ *
+ * **Never probe the gate line itself**: the soft boundary holds a child inside
+ * the park, so a `PLAYER_RADIUS` body on `z = 60` overlaps the outside and reads
+ * blocked whatever the gate does — 33 of 33 probes across it on the canonical
+ * seed. The walk starts a metre in, and the gate posts are the control that says
+ * the probe can see solid ground at all.
+ */
+const theWalkInFromTheGateIsWalkable: Invariant = (facts) => {
+  const walk = measureGatewayWalk((x, z) => facts.isStandable(x, z, PLAYER_RADIUS));
+  const fouls: string[] = [];
+
+  // The control first, and asserted rather than printed: if the arch's own
+  // posts are not solid, this probe is not measuring the park and the clause
+  // below proves nothing.
+  const toGate = Math.hypot(ENTRANCE_GATE_X, ENTRANCE_GATE_Z) || 1;
+  const inX = -ENTRANCE_GATE_X / toGate;
+  const inZ = -ENTRANCE_GATE_Z / toGate;
+  // Across the gateway is the perpendicular of the way in, so the posts are
+  // found from the gate itself rather than from an assumption that the gate is
+  // on the x axis.
+  for (const side of [-1, 1] as const) {
+    const x = ENTRANCE_GATE_X + inX + -inZ * side * ENTRANCE_GATE_HALF_WIDTH;
+    const z = ENTRANCE_GATE_Z + inZ + inX * side * ENTRANCE_GATE_HALF_WIDTH;
+    if (facts.isStandable(x, z, PLAYER_RADIUS)) {
+      fouls.push(
+        `CONTROL: the gate post at ${fmt([x, z])} is not solid — the walkability probe is ` +
+          'measuring nothing, so its verdict on the doorway means nothing either',
+      );
+    }
+  }
+
+  if (walk.standableCells === 0) {
+    fouls.push(
+      `nowhere for a child to stand ${GATE_PROBE_INSET} m inside the arch — the doorway is ` +
+        'shut on its own threshold',
+    );
+  } else if (!walk.open) {
+    fouls.push(
+      `the walk in from the arch stops ${walk.reachedDepth.toFixed(1)} m inside it; nothing ` +
+        `connects that to the ${ENTRANCE_WALK_DEPTH} m mark within the arch's own ` +
+        `${(2 * ENTRANCE_GATE_HALF_WIDTH).toFixed(1)} m width. The corridor, ` +
+        `'.' walked, 'o' open but cut off, '#' no room:\n${walk.map.join('\n')}`,
+    );
+  }
+
+  // **On stderr, on every run, including the passing ones** — vitest's default
+  // reporter hides console output from passing tests, which is precisely when a
+  // coverage note matters. What this does *not* cover: everything past
+  // `ENTRANCE_WALK_DEPTH`. The railway may legitimately ring the park between
+  // the gate and the plaza and the walk crosses it at a crossing; whether that
+  // walk connects all the way is `check:park`'s routing invariant.
+  process.stderr.write(
+    `[gateway walk] ${walk.standableCells}/${walk.cells} of the corridor standable, ` +
+      `walked to ${walk.reachedDepth.toFixed(1)} m of ${ENTRANCE_WALK_DEPTH} m. ` +
+      'Asserts nothing about the ground past that, nor about headroom under the arch.\n',
+  );
+
   return fouls;
 };
 
@@ -6629,17 +7208,18 @@ const theRoadArrivesAtTheParkAndGoesIn: Invariant = (facts) => {
 
   // **Everything inside the park runs between the arch's posts.**
   //
-  // Measured as perpendicular distance from the gate's own radial axis, not
-  // with `isInEntranceGateGap`. That predicate is an *angle*, which is the
-  // right question at the wall and the wrong one further in: a constant angle
-  // is a corridor that narrows as it approaches the plaza, so the spur's far
-  // corners — 8 m inside the park, and perfectly between the posts — fell
-  // outside it by 0.0017 rad and were reported as having "spilled over the
-  // boundary". The posts stand at `ENTRANCE_GATE_HALF_WIDTH` either side of the
-  // axis, so that is the width the road may not exceed anywhere.
-  const axisX = Math.cos(ENTRANCE_ANGLE);
-  const axisZ = Math.sin(ENTRANCE_ANGLE);
-  const offAxis = (p: { x: number; z: number }): number => Math.abs(p.z * axisX - p.x * axisZ);
+  // Measured as perpendicular distance from the gate's own radial axis. This
+  // clause worked that out for itself before there was anywhere to put it —
+  // the old angular predicate was "the right question at the wall and the wrong
+  // one further in: a constant angle is a corridor that narrows as it
+  // approaches the plaza, so the spur's far corners, 8 m inside the park and
+  // perfectly between the posts, fell outside it by 0.0017 rad". That reasoning
+  // is exactly #481's, reached here first; it now reads the one owner
+  // (`entranceGateFrame`) rather than being a third hand-rolled copy of the
+  // same axis. The posts stand at `ENTRANCE_GATE_HALF_WIDTH` either side, so
+  // that is the width the road may not exceed anywhere.
+  const offAxis = (p: { x: number; z: number }): number =>
+    Math.abs(entranceGateFrame(p.x, p.z).across);
   const trespassing = inside.filter((p) => offAxis(p) > ENTRANCE_GATE_HALF_WIDTH);
   if (trespassing.length > 0) {
     const worst = trespassing[0];
@@ -8505,9 +9085,14 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no two plots overlap', plotsDoNotOverlap],
   ['no two stations stand in each other', stationsDoNotCrowdEachOther],
   ['every entrance has standable ground', entrancesAreUsable],
+  [
+    'the park gate arch stands over its gateway, and the gateway stays open',
+    theParkGateArchStandsOverItsGateway,
+  ],
   ['no two trees interpenetrate', treesDoNotInterpenetrate],
   ['no bush stands on the paving or inside a plot', bushesStandOnOpenGround],
   ['no tree grows into a wall', treesKeepOffWalls],
+  ['no bush grows through a wall or out of a tree', bushesGrowThroughNothing],
   ['every path passes near a tree a child can climb', everyPathIsNearAClimbableTree],
   ['no lamp stands in anything', lampsTouchNothing],
   ['every path is lit end to end', everyPathIsLit],
@@ -8595,6 +9180,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     everyCopingStoneSitsOnItsWall,
   ],
   [
+    'no bridge parapet can be seen through — its outer face reaches the wall top',
+    noBridgeParapetCanBeSeenThrough,
+  ],
+  [
     'every bridge is as wide as its own path, with the rail corridor open beneath',
     bridgesMatchTheirPathAndKeepTheRailClear,
   ],
@@ -8626,6 +9215,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the cat bus is actually in the park, at the gate, with everyone aboard', theCatBusIsInThePark],
   ['every child fits in the cat bus seat they are sitting in', childrenFitTheSeatsTheySitIn],
   ['the boundary wall has a gate you can actually walk through', theGateIsAHoleInTheWall],
+  ['a child can walk in through the front gate', theWalkInFromTheGateIsWalkable],
   ['the road arrives at the park and goes in through the gate', theRoadArrivesAtTheParkAndGoesIn],
   [
     'the bus stop and the walk in from it are clear of trees and bushes',
@@ -8693,12 +9283,38 @@ export function registerParkInvariants(seed: number, label = `seed ${seed}`): vo
       // `Scenery.ts`'s `BUSH_BUDGET`). That makes thinning something that can
       // now happen quietly, so it gets a guard.
       //
-      // Measured across the five CI seeds at 149 / 128 / 137 / 142 / 140. The
-      // floor is 108 because that is exactly what every seed used to plant, so
-      // it reads as "no seed is worse off than before the scatter was made
-      // local" rather than as an arbitrary round number — and the worst seed
-      // still clears it by 20.
-      expect(facts.bushes.length, 'the park planted almost no bushes').toBeGreaterThan(107);
+      // **The table that stood here was the same stale one `Scenery.ts` was
+      // carrying** — 149 / 128 / 137 / 142 / 140, a copy kept in step by hand
+      // and, by #500, wrong by two to four times. Two definitions of one
+      // measurement, which is this repo's most-repeated bug; the owner of what
+      // the budget buys is `Scenery.ts`'s `BUSH_BUDGET` comment, and this
+      // quotes no numbers of its own beyond the one it asserts.
+      //
+      // **And 107 had stopped guarding the thing the budget exists for.** It
+      // was chosen when every seed planted 108, so it read as "no seed is
+      // worse off than before". Today the five parks plant 295 / 266 / 201 /
+      // 483 / 456, so a change that halved the scatter — the exact failure
+      // `BUSH_BUDGET` was raised to 4200 to prevent, and the cheapest possible
+      // way to make a clearance invariant go green — would leave the thinnest
+      // park at 100 and this line **still green**. A floor that only fires
+      // after a two-thirds collapse is not a floor.
+      //
+      // So it guards the property the budget was actually chosen for: **no
+      // park is thinner than the day before #500**, whose worst park was 203.
+      // 180 is that, less about a tenth for ordinary seed-to-seed drift as the
+      // geometry moves — the thinnest park today (201) clears it by 21.
+      //
+      // **What a 50% thinning actually does to it, measured rather than
+      // assumed** — the budget halved to 2100 plants 139 / 145 / 98 / 237 /
+      // 220 across canonical / 5 / 11 / 24 / 131, so **three of the five go
+      // red** at 180 where **one** did at 107. Not all five: seeds 24 and 131
+      // sit high enough that halving still leaves them over the bar. A floor
+      // is a per-park guard and the parks are not alike, so no single number
+      // catches every thinning everywhere — the same thing the tree floor's
+      // comment above says about its own 24, and the reason running on five
+      // seeds is what does the work rather than the cleverness of the number.
+      // Three suites going red at once is a loud enough signal.
+      expect(facts.bushes.length, 'the park planted almost no bushes').toBeGreaterThan(180);
       // Climbable trees get their own floor, separate from the walk-distance
       // invariant, because the two fail differently: the distance check goes
       // red when they are badly spread, this one when there are simply too few.

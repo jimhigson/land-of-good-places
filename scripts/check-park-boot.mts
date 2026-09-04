@@ -168,8 +168,14 @@ while (!generation.ready && !generation.failed && frames < MAX_FRAMES) {
   const spent = performance.now() - before;
   frames += 1;
   totalAdvanceMs += spent;
-  // Exactly one phase does work in any one `advance()` — every branch of it
-  // returns — so the single non-zero delta names the slice.
+  // Since the one-scheduler driver, more than one phase MAY do work in one
+  // `advance()` — a task finishing mid-budget hands the rest of the frame to
+  // the next runnable task (today that happens across the cruiser's three
+  // phases; when stage 3 loosens the module gating it happens generally).
+  // The label therefore names the LAST phase that moved, which is the right
+  // owner for a worst-slice diagnosis (it is the one that ran up against the
+  // deadline), and `phaseMs` attributes the whole frame to it — a
+  // calibration-grade approximation, not an exact per-phase ledger.
   let did: Phase | null = null;
   let steps = 0;
   for (const phase of PHASES) {

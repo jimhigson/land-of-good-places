@@ -1,5 +1,4 @@
 import { GARDEN_HALF_SIZE } from '../../core/constants';
-import { angleDelta } from '../../core/mathUtils';
 
 /**
  * Where the park entrance sits, geometrically.
@@ -22,12 +21,22 @@ export const ENTRANCE_ANGLE = Math.PI / 2;
 /** Matches `Garden.ts`'s `buildBoundaryWall` radius exactly (`GARDEN_HALF_SIZE - 2`). */
 export const ENTRANCE_WALL_RADIUS = GARDEN_HALF_SIZE - 2;
 
-/**
- * Half-angle, in radians, of the gap left in the boundary wall for the gate.
- * At {@link ENTRANCE_WALL_RADIUS} this opens a walkway a little under 9 m wide —
- * comfortably wide for the bus plus a pedestrian gate either side of the road.
+/*
+ * **`ENTRANCE_GATE_HALF_ANGLE` used to live here, and it is gone** (issue #481).
+ *
+ * It was 0.073 radians — "a walkway a little under 9 m wide", said its own
+ * comment — standing beside {@link ENTRANCE_GATE_HALF_WIDTH}'s 4.3 metres and
+ * describing the same opening in units nobody can compare by eye. They agree to
+ * 0.08 m at the gate's pinned radius and nowhere else, and the wall is laid by
+ * arc length along a spline whose radius varies per seed. Nine of the sixteen
+ * pool seeds ended up with masonry standing in the doorway, the canonical seed
+ * among them.
+ *
+ * Everything that asked the angle now asks {@link isInEntranceGateOpening},
+ * which is the same question in the same metres the arch is built in. A second
+ * definition kept "in case something needs it" is how this class of bug comes
+ * back, so there is not one.
  */
-export const ENTRANCE_GATE_HALF_ANGLE = 0.073;
 
 /** Centre of the gate opening, right on the boundary wall. */
 export const ENTRANCE_GATE_X = Math.cos(ENTRANCE_ANGLE) * ENTRANCE_WALL_RADIUS;
@@ -79,10 +88,93 @@ export function isInEntranceGateway(x: number, z: number): boolean {
   return Math.hypot(x - ENTRANCE_GATE_X, z - ENTRANCE_GATE_Z) < ENTRANCE_GATE_HALF_WIDTH;
 }
 
-/** True if the angle (radians, `atan2(z, x)` convention) falls inside the gate gap. */
-export function isInEntranceGateGap(angle: number): boolean {
-  return Math.abs(angleDelta(angle, ENTRANCE_ANGLE)) < ENTRANCE_GATE_HALF_ANGLE;
+/**
+ * **How far across the gateway a point stands, in metres**, and how far along
+ * the way in — the gate's own frame, positive `along` being *into* the park.
+ *
+ * Exists because the opening had been written down twice in different units:
+ * {@link ENTRANCE_GATE_HALF_WIDTH} is 4.3 **metres**, the arch's own half-width
+ * and the number every other consumer reads, while `ENTRANCE_GATE_HALF_ANGLE`
+ * was 0.073 **radians**, hand-tuned, and the only thing `Garden.ts` used to
+ * decide where to stop laying stone. Two definitions of one thing, in units
+ * that cannot be compared by eye. The angle is deleted; this is what replaced
+ * it.
+ *
+ * At the gate's pinned radius the angle happens to be worth 4.38 m — an 0.08 m
+ * margin over the arch — but the wall is laid by **arc length along a spline
+ * whose radius varies per seed**, so where the last kept segment actually ends
+ * is a different number on every park. Measured on `main`, in the 7.00 m clear
+ * width 1.0-2.0 m inside the arch, boundary masonry (`halfThickness 0.45`)
+ * overlaps a child on **nine of the sixteen pool seeds**: 451 by 0.87 m, 128
+ * by 0.76 m, 267 by 0.50, 346 by 0.44, 115 by 0.36, 131 by 0.28, 274 by 0.19,
+ * 208 by 0.07, and the canonical seed itself by 0.05.
+ */
+export function entranceGateFrame(x: number, z: number): { across: number; along: number } {
+  const length = Math.hypot(ENTRANCE_GATE_X, ENTRANCE_GATE_Z) || 1;
+  const inX = -ENTRANCE_GATE_X / length;
+  const inZ = -ENTRANCE_GATE_Z / length;
+  const dx = x - ENTRANCE_GATE_X;
+  const dz = z - ENTRANCE_GATE_Z;
+  return { across: dx * -inZ + dz * inX, along: dx * inX + dz * inZ };
 }
+
+/**
+ * **How far along the way in the wall's opening runs**, either side of the gate
+ * line. Only enough to cut the aperture: the wall is a ring and the rest of it
+ * is nowhere near here.
+ */
+const ENTRANCE_GATE_OPENING_REACH = 8;
+
+/**
+ * **Is this point in the hole the boundary wall must leave for the arch?**
+ *
+ * The one owner of the aperture, in the same metres the arch is built in.
+ * `margin` is whatever the caller's own stone is thick — a collision segment
+ * passes {@link BOUNDARY_WALL_COLLISION_HALF}, a drawn block passes its own
+ * half-length — so the *edge* of the thing clears the opening rather than its
+ * centre line. That distinction is the bug: `Garden.ts` tested a segment's
+ * midpoint, and a 2 m segment whose midpoint sits just outside can still reach
+ * a metre into the doorway.
+ */
+export function isInEntranceGateOpening(x: number, z: number, margin = 0): boolean {
+  const { across, along } = entranceGateFrame(x, z);
+  return (
+    Math.abs(across) < ENTRANCE_GATE_HALF_WIDTH + margin &&
+    Math.abs(along) < ENTRANCE_GATE_OPENING_REACH
+  );
+}
+
+/**
+ * **How far into the park the walk in from the arch stays clear.**
+ *
+ * The gate is the one fixed thing in the park; everything else is drawn afresh
+ * on every seed. So "the way in" is the one piece of ground that cannot move
+ * out of anybody's way, and it needs a stated depth rather than a hope.
+ *
+ * Issue #481, measured on the built park rather than argued: on pool seed 288
+ * the railway's lineside fence ran `(2.64, 57.73) -> (0.01, 57.76) ->
+ * (-2.59, 57.41)` — 2.3 m inside the arch, straight across the opening — with
+ * its 1.3 m track escort 4 m behind it. On sweep seed 18 the fence ran through
+ * the arch itself, `(-1.13, 59.87) -> (1.43, 58.85)`. A child stepping off the
+ * bus walked into a pen. (The issue blames the boundary wall; it is not the
+ * boundary wall. `Garden.ts` cuts the gap in that correctly on both seeds —
+ * its 0.45 m segments stop at `(4.47, 59.65)` and `(-3.48, 60.44)` on 288.)
+ *
+ * 12 m is the forecourt a six-year-old walks across before the park proper
+ * begins: room for the arch, the welcome sign beside it, and turning round to
+ * wave the bus off. It is deliberately not the whole walk to the plaza — the
+ * railway is *allowed* to ring the park between the gate and the middle, and
+ * `crossings.ts` gives that walk a level crossing or a bridge, which is the
+ * park working as designed.
+ *
+ * **This is a depth to be *walkable*, not a depth to be empty**, and the
+ * distinction is the whole of `gatewayWalk.ts`: measured across the sixteen
+ * pool seeds, every one of them stands a lamp, a bollard or the welcome sign
+ * somewhere in this box, and a rule that nothing may is a rule sixteen parks
+ * out of sixteen break. What must hold is that a child can get from the arch to
+ * here — past the furniture, and through any crossing in between.
+ */
+export const ENTRANCE_WALK_DEPTH = 12;
 
 /**
  * Where the bus stop itself stands — a little inside the wall, well inside

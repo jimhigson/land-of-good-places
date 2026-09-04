@@ -11,7 +11,7 @@ import type { TrainRoute } from './route';
 import { TRACK_CLEARANCE } from './route';
 import type { Bridge } from './bridges';
 import type { LevelCrossing } from './crossings';
-import { FENCE_OFFSET, FENCE_SEAM_MARGIN, STATION_GAP } from './clearance';
+import { FENCE_HALF_THICKNESS, FENCE_OFFSET, FENCE_SEAM_MARGIN, STATION_GAP } from './clearance';
 import { PLAYER_RADIUS } from '../../core/constants';
 import type { CollisionWorld } from '../Collision';
 import { PALETTE } from '../../core/palette';
@@ -272,11 +272,11 @@ export function buildRailFence(
    * passes under a bridge deck always gets the seam instead of the ordinary
    * always-solid wall — see `deckSpanAt` above. */
   const addFenceWall = (a: Post, b: Post): void => {
-    const deckY = deckSpanForSegment(a, b, 0.18);
+    const deckY = deckSpanForSegment(a, b, FENCE_HALF_THICKNESS);
     if (deckY === null) {
-      collision.addWall(a.x, a.z, b.x, b.z, 0.18);
+      collision.addWall(a.x, a.z, b.x, b.z, FENCE_HALF_THICKNESS);
     } else {
-      collision.addWall(a.x, a.z, b.x, b.z, 0.18, deckY - FENCE_SEAM_MARGIN, false, true);
+      collision.addWall(a.x, a.z, b.x, b.z, FENCE_HALF_THICKNESS, deckY - FENCE_SEAM_MARGIN, false, true);
     }
   };
   const link = (a: Post, b: Post) => {
@@ -336,7 +336,7 @@ export function buildRailFence(
   }
 
   // --- 2b. the rail itself, down the centre of every closed stretch --------
-  // The two flanking runs above are thin (0.18 m) lines offset FENCE_OFFSET
+  // The two flanking runs above are thin (FENCE_HALF_THICKNESS) lines offset FENCE_OFFSET
   // either side of the centre line — collision-solid, but only *there*.
   // Nothing ever stamped the ground *between* them, so a walker's own
   // fattened reach (`walkerRadius`) from each flank reaches a couple of
