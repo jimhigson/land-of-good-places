@@ -1,4 +1,5 @@
-import { OrthographicCamera, Vector2, Vector3 } from 'three';
+import { OrthographicCamera, PerspectiveCamera, Vector2, Vector3 } from 'three';
+import { perspectiveParkCamera } from './perspectiveFlag';
 import {
   CAMERA_DISTANCE,
   CAMERA_FOLLOW_HALF_LIFE,
@@ -37,7 +38,7 @@ import type { ParkBoundary } from '../world/boundary';
  * them.
  */
 export class IsoCamera {
-  readonly camera: OrthographicCamera;
+  readonly camera: OrthographicCamera | PerspectiveCamera;
 
   /** Point the camera orbits. Damped towards the follow target every frame. */
   private readonly focus = new Vector3();
@@ -147,7 +148,25 @@ export class IsoCamera {
     this.forwardVector = new Vector3(basis.upX, 0, basis.upZ);
     this.rightVector = new Vector3(basis.rightX, 0, basis.rightZ);
 
-    this.camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, CAMERA_DISTANCE * 3);
+    // **PROTOTYPE (#511): a perspective park camera behind a URL flag.**
+    //
+    // Not a migration. `?projection=perspective` builds a `PerspectiveCamera`
+    // in the *same place*, at the *same* pitch and yaw, so the only thing that
+    // changes is the projection — ARCHITECTURE.md fixes the angle and this
+    // does not touch it.
+    //
+    // Why it exists: an orthographic projection has no convergence, so a
+    // horizon is drawn at its true distance rather than compressed to a line.
+    // Jim's sphere (#511) does have a horizon — at 870 m for a bus-safe
+    // radius — and ortho simply cannot show it, because the frame is ~29 m
+    // tall and the ground clips at 270 m. Perspective is the projection in
+    // which distance compresses, so a horizon lands in frame at all.
+    //
+    // `far` is deliberately far past the ortho rig's `CAMERA_DISTANCE * 3`:
+    // the whole question is what is visible a long way off.
+    this.camera = perspectiveParkCamera()
+      ? new PerspectiveCamera(50, 1, 0.1, 6000)
+      : new OrthographicCamera(-1, 1, 1, -1, 0.1, CAMERA_DISTANCE * 3);
     this.camera.position.copy(this.offset);
     this.applyFrustum();
   }
@@ -192,13 +211,41 @@ export class IsoCamera {
    * {@link skyAnchor}.
    */
   get viewHalfHeight(): number {
-    return this.camera.top;
+    return this.focusHalfHeight;
   }
 
   /** Half the width of the orthographic box, in world metres. */
   get viewHalfWidth(): number {
+    return this.focusHalfWidth;
+  }
+  /**
+   * **Half the frame in world metres, at the focus** — the one place that
+   * answers it for either projection.
+   *
+   * Orthographic has a single answer: the box is the frame everywhere. A
+   * perspective frame widens with distance, so "the frame in metres" is only
+   * meaningful at a stated depth, and the depth every caller means is the one
+   * the rig is focused on — `CAMERA_DISTANCE` away, where the player is.
+   *
+   * **This is why the prototype's HUD placement is approximate rather than
+   * wrong-but-silent.** Callers that clamp a bubble or a name pill to the frame
+   * are asking a question that no longer has one answer; at the focus they get
+   * the right one, and nearer or further they get a slightly generous or
+   * slightly tight box. Named here rather than hidden so the consequence list
+   * in the PR can point at it.
+   */
+  private get focusHalfHeight(): number {
+    if (this.camera instanceof PerspectiveCamera) {
+      return Math.tan(((this.camera.fov / 2) * Math.PI) / 180) * CAMERA_DISTANCE;
+    }
+    return this.camera.top;
+  }
+
+  private get focusHalfWidth(): number {
+    if (this.camera instanceof PerspectiveCamera) return this.focusHalfHeight * this.aspect;
     return this.camera.right;
   }
+
 
   /**
    * "Right on screen" as three.js itself resolved it, straight off the camera's
@@ -238,7 +285,7 @@ export class IsoCamera {
    * scale that reads as that size regardless of zoom — see `ui/NameLabel.ts`.
    */
   get worldUnitsPerPixel(): number {
-    return (this.camera.top - this.camera.bottom) / this.viewportHeight;
+    return (this.focusHalfHeight * 2) / this.viewportHeight;
   }
 
   /** Snaps the camera straight to a position, skipping the follow smoothing. */
@@ -619,6 +666,21 @@ export class IsoCamera {
   private applyFrustum(): void {
     const base = this.frustumBase();
     const halfHeight = base / this.zoomValue;
+    if (this.camera instanceof PerspectiveCamera) {
+      // **Match today's apparent scale at the focus.** The ortho rig frames
+      // `halfHeight` world metres top-to-centre; a perspective lens
+      // `CAMERA_DISTANCE` away frames the same amount when its half-fov is
+      // `atan(halfHeight / CAMERA_DISTANCE)`. Derived from the zoom rather
+      // than fixed, so every existing zoom level — including the cutscene
+      // framings that ask for a specific one — still frames what it asked
+      // for at the player's own distance. Things nearer than the focus grow
+      // and things beyond it shrink, which is the entire point of the
+      // prototype.
+      this.camera.fov = (2 * Math.atan(halfHeight / CAMERA_DISTANCE) * 180) / Math.PI;
+      this.camera.aspect = this.aspect;
+      this.camera.updateProjectionMatrix();
+      return;
+    }
     const halfWidth = halfHeight * this.aspect;
     this.camera.left = -halfWidth;
     this.camera.right = halfWidth;
@@ -674,8 +736,8 @@ export class IsoCamera {
   isOnScreen(point: Readonly<Vector3>, margin = 0): boolean {
     const relative = SCRATCH_CLAMP_RELATIVE.copy(point).sub(this.camera.position);
     return (
-      Math.abs(relative.dot(this.screenRight)) <= this.camera.right - margin &&
-      Math.abs(relative.dot(this.screenUp)) <= this.camera.top - margin
+      Math.abs(relative.dot(this.screenRight)) <= this.focusHalfWidth - margin &&
+      Math.abs(relative.dot(this.screenUp)) <= this.focusHalfHeight - margin
     );
   }
 
@@ -710,8 +772,8 @@ export class IsoCamera {
     const right = relative.dot(this.screenRight);
     const up = relative.dot(this.screenUp);
 
-    const maxRight = Math.max(0, this.camera.right - halfWidth - margin);
-    const maxUp = Math.max(0, this.camera.top - halfHeight - margin);
+    const maxRight = Math.max(0, this.focusHalfWidth - halfWidth - margin);
+    const maxUp = Math.max(0, this.focusHalfHeight - halfHeight - margin);
     const clampedRight = clamp(right, -maxRight, maxRight);
     const clampedUp = clamp(up, -maxUp, maxUp);
 
