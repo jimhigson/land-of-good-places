@@ -101,6 +101,7 @@ const { PARADE_MEMBER_RADIUS } = await import('../src/core/constants.ts');
 const { IsoCamera } = await import('../src/core/IsoCamera.ts');
 const { gameStore } = await import('../src/state/index.ts');
 const { shopItem } = await import('../src/world/building/shops/catalogue.ts');
+const { terrainHeight } = await import('../src/world/terrain.ts');
 type InteriorControls = import('../src/world/building/Building.ts').InteriorControls;
 
 // Live controls, as `check:slide-rider` uses: boarding the slide is a change of
@@ -641,6 +642,11 @@ async function ride(wired: boolean): Promise<RunResult> {
     new Vector3(1, -1, 1).normalize(), new Vector3(-1, -1, 1).normalize(),
     new Vector3(1, -1, -1).normalize(), new Vector3(-1, -1, -1).normalize(),
   ];
+  const NEAR_FAN_GATE = 1.0;
+  let lowestAboveGround = Infinity;
+  let lowestAboveGroundFrame = 0;
+  let lowestAboveGroundShot = 'none';
+  let undergroundFrames = 0;
   let nearFanFrames = 0;
   let nearestAnything = Infinity;
   let nearestAnythingName = 'nothing';
@@ -960,7 +966,26 @@ async function ride(wired: boolean): Promise<RunResult> {
       // asks the scene instead of assuming it: a short ray fan from the lens,
       // recording the nearest thing hit and its name. Naming the mesh is the
       // difference between fixing the camera and fixing the wrong prop.
-      if (nearFanFrames % NEAR_FAN_EVERY === 0) {
+      // **The cheap, decisive test first.** The hypothesis is that the lens
+      // goes UNDER THE GROUND near the bottom of the chute, so ask the ground
+      // directly: `terrainHeight` is the same sampler every prop in the park
+      // is placed against. Negative clearance means the camera is underground,
+      // which is exactly the "buried in a flat tan surface" frame QA caught.
+      //
+      // This runs every frame because it is two lookups; the ray fan below,
+      // which names the mesh, is gated behind it because 14 rays against the
+      // whole scene is seconds per seed and is only interesting where the
+      // camera is actually close to something.
+      const groundY = terrainHeight(cameraWorld.x, cameraWorld.z);
+      const aboveGround = cameraWorld.y - groundY;
+      if (aboveGround < lowestAboveGround) {
+        lowestAboveGround = aboveGround;
+        lowestAboveGroundFrame = ridingFrames;
+        lowestAboveGroundShot = liveShot?.kind ?? 'none';
+      }
+      if (aboveGround < 0) undergroundFrames += 1;
+
+      if (aboveGround < NEAR_FAN_GATE && nearFanFrames % NEAR_FAN_EVERY === 0) {
         // Sprites raycast through the camera's own matrix, so a caster with no
         // camera throws the moment the fan meets one (the park has several).
         // Handing it the live camera is both the fix and the honest thing: a
@@ -1127,6 +1152,9 @@ async function ride(wired: boolean): Promise<RunResult> {
       `camera nearest the pit rim ${rimNearest === Infinity ? 'n/a' : `${rimNearest.toFixed(2)} m`} ` +
       `on a ${rimNearestShot} shot (${rimInsideFrames} frames INSIDE it` +
       `${rimInsideShots.size > 0 ? `, on ${[...rimInsideShots].join('/')} shots` : ''}), ` +
+      `lens lowest above ground ${lowestAboveGround === Infinity ? 'n/a' : `${lowestAboveGround.toFixed(2)} m`} ` +
+      `on a ${lowestAboveGroundShot} shot (ridden frame ${lowestAboveGroundFrame}, ` +
+      `${undergroundFrames} frames UNDERGROUND), ` +
       `nearest ANYTHING to the lens ` +
       `${nearestAnything === Infinity ? `>${NEAR_FAN_REACH} m` : `${nearestAnything.toFixed(2)} m`} ` +
       `— ${nearestAnythingName} (ridden frame ${nearestAnythingFrame})`,
