@@ -600,3 +600,38 @@ flower's own reach, and it refuses to pass vacuously.
 - Delete the two scratch probes (`scripts/probe-coplanar-detail.mts`,
   `scripts/probe-flower-fallback.mts`) — untracked, never committed.
 - Remove the throwaway control worktree `.claude/worktrees/warp-474-main`.
+
+### The flower invariant's red proof — and what it does *not* prove
+
+`no flower grows on the railway` runs on the **7 seeds that have per-seed test
+files** (canonical, 5, 11, 24, 131, 288, 326) and passes on all of them,
+confirmed with `--reporter=verbose -t` rather than inferred from a total.
+
+**Removing `clearOfRailway` alone leaves it green.** That is worth knowing
+before anyone trusts the call: the rail exclusion fence is a wall in the
+collision world, so the sowing-time collision query and
+`settleAgainstTheFinishedPark` already cover the corridor. `clearOfRailway`
+adds what the collision world does not hold — the bridge decks and ramps
+(`isInBridgeFootprint`) and the platform stand areas — and on these seven
+seeds nothing landed there.
+
+**Red with all three keep-outs disabled** (`clearOfRailway`, the
+`isClearCircle` call, and the settle pass): **all 7 seeds fail**, with real
+numbers and several *negative* gaps — a flower dead on the centre line:
+
+```
+× seed 5 > no flower grows on the railway
+  → flower at -42.3, -42.6 reaches to -0.24 m of the rail centre line
+    (needs 1.3 m) — it is growing on the track      … 8 flowers on this seed
+× canonical seed 20260728 …  8 flowers, worst -0.23 m
+× seed 131 … worst -0.28 m
+```
+
+Proved against **this branch's head** with those three lines commented out and
+nothing else changed; the tree was restored and `git status` is clean but for
+the two untracked probes. So what is established is that the invariant is
+armed and reports real geometry — **not** that any one of the three keep-outs
+is individually load-bearing on these seeds.
+
+`pnpm run test:procgen`: **21 files, 752 tests, all passed, exit 0.**
+`pnpm run build`: exit 0.
