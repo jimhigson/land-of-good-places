@@ -162,3 +162,99 @@ whenever anyone speaks near her is a design call. Worth its own ticket.
 - Dev server for Jim: port **5287** (`--strictPort`), land on
   `/spawn?pos=-1.6,51.6` and stand still — a child comes over within a minute
   or two. Kill by PID when he is done.
+
+---
+
+## Review round 3 — taken over by a new engineer (3 September 2026)
+
+**Model: Opus** (`claude-opus-5[1m]`), chosen by the Overseer to match the
+engineer it replaced. A replacement runs the same model as the agent it
+replaces — see CLAUDE.md.
+
+Rebased onto `origin/main` `c95facf6` (post-#508, which changed how the park
+seed resolves, so **every number measured before it is of a different park**).
+All gates run on Node 26.7.0 at `/opt/homebrew/opt/node@26/bin/node`;
+`scripts/with-node` is broken, #506.
+
+### The blocker: the pill hid for text, the bubble drew for something narrower
+
+One owner of *is she speaking*, but two conditions on *what is drawn* — the
+pill on `text !== null`, the bubble on `text && isOnScreen(anchor) && <= 40 m`.
+Between them a child lost her name with nothing in its place. Not theoretical:
+at 1920x1080 over 420 s, **96 player-visible frames**, first `Wren` at
+`(-0.45, 3.91, 43.27)` on frame 7274, 8.8 m from the camera's focus at **rank
+0**, body in shot, head-anchor just past the top edge.
+
+**Fixed at the root, not documented.** `NpcSystem.update` now calls
+`updateBubbles()` **before** `updateLabels()`, and `updateLabels` gates on
+`this.bubbles[i]?.sprite.visible === true`. The two conditions are now one
+expression.
+
+*The ordering is load-bearing.* Swap it back and `updateLabels` reads last
+frame's flag, which puts #486 back for the first frame of every sentence.
+Clause 4a is what notices.
+
+### The check
+
+- `VIEW` env var (`WIDTHxHEIGHT`, default `390x844`), and a new chain step
+  `check:speech-bubbles:wide` = `VIEW=1920x1080 SECONDS=420`. **34 s.** The
+  chain is 58 steps on `main`, 59 here; parsed both sides, nothing removed,
+  nothing else changed.
+- Clause **4c** (mid-word, entitled to a pill, nothing drawn) is now
+  **asserted on its on-screen half** and reported on the rest.
+- Its coverage note is keyed on the **opportunity** (a visible child mid-word
+  with her bubble withheld), not the failure — a working fix drives the failure
+  to 0 by construction, so keying it there would announce cover on every green
+  run for ever.
+- New `--mutate-text-gate` restores the pill gated on text existing.
+
+### Every transcript, both viewports, on this head
+
+```
+                     390x844, SECONDS=120        1920x1080, SECONDS=420
+(unmutated)          1881 sightings, 12 talked,  3551 sightings, 19 talked,
+                     4c had 0 chances     ex 0   4c had 96 chances, 0 lost ex 0
+--mutate             assertion 3 alone, 9068     assertions 1 (363, worst
+                                         ex 1    17.70 m) and 3     ex 1
+--mutate-anchor      assertion 3 alone, 7349     assertion 3 alone, 23274 ex 1
+--mutate-label       4a: 1881 pills under their  4a: 3551 pills, same first
+                     own bubble. First: Finn at  line               ex 1
+                     (-2.78, -0.10, 51.88), f840
+--mutate-latch       4b: Finn nameless 1867 f,   4b: Finn nameless 1831 f,
+                     46.0 m, rank 7       ex 1   46.0 m, rank 7     ex 1
+--mutate-text-gate   4c had 0 chances     ex 0   4c: 96 frames. First: Wren
+                                                 mid-word at (-0.45, 3.91,
+                                                 43.27), f7274, on screen,
+                                                 8.8 m, rank 0      ex 1
+```
+
+Each mutation fails exactly one clause and leaves the others at 0, in both
+columns. **`--mutate` and `--mutate-text-gate` are each green in one column**
+— neither is broken; each names a bug the other viewport cannot stage. That is
+the whole reason there are two chain steps.
+
+### #494 is closed by this
+
+It asked for a fixture that strands a speaker off screen. None was needed: a
+wide frustum is short, children leave it constantly, and `--mutate` at
+1920x1080 fails assertion 1 **363** times, worst `Iris` towed **17.70 m** onto
+empty ground. Commented on the issue with the transcript.
+
+### #509 filed
+
+The chatter-in-front-of-the-player's-own-pill finding, disclosed in the PR body
+since round 1 with no ticket. Now has one.
+
+### The cap slot — decided, not filed
+
+A talking child still occupies a `VISIBLE_LABEL_CAP` slot. **Left as is,
+deliberately**, and written into `updateLabels`' doc: the cap bounds how much
+floats over the crowd at once, and she is floating a bubble in that slot.
+Promoting the eleventh-nearest child would put *more* on screen while she
+talks, not the same amount.
+
+### Still outstanding
+
+- Visible change: **must not merge without Jim seeing it.**
+- Browser QA on a rendered frame — not done by this engineer (no browser
+  ownership). The name going and coming back needs eyes.
