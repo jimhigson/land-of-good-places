@@ -1158,9 +1158,18 @@ function buildTreeline(): Group {
     // the lower-left of the bus in every captured frame from t = 3 to t = 6.
     //
     // Refused rather than moved: an outset nudged along the same bearing is
-    // still on the same bearing, and the whole point is to be off it. Every draw
-    // above happens first, so the RNG stream is untouched and the other 500-odd
-    // trees stand exactly where they always did.
+    // still on the same bearing, and the whole point is to be off it.
+    //
+    // **This does shift the RNG stream, and an earlier version of this comment
+    // claimed it did not.** The `continue` sits above the draws that finish a
+    // tree, so a refused one leaves them untaken and every tree after it reads
+    // the stream one tree out of step. Measured on the sibling clause below:
+    // 436 trunks against 494, and only 115 of the 436 survivors stand where
+    // they did — they diverge from the second tree onward. That is cosmetic
+    // rather than a fault (the woodland is scattered either way, and the seed
+    // still determines it exactly), but it is not what the old sentence
+    // promised, and a promise about determinism is worth more than the
+    // convenience of leaving it unread.
     //
     // The canopy's own top, not the trunk's: `top = ground + height + radius *
     // 0.35` is where the blob's centre goes and it stands `radius * 1.15` up
@@ -1188,8 +1197,13 @@ function buildTreeline(): Group {
     // corridor and the woodland respects it, which is the same move pylon
     // placement makes when it fells foliage.
     //
-    // Refused rather than moved, for the reason above: the RNG stream is
-    // untouched and every tree that is not in the road stands where it did.
+    // Refused rather than moved, for the reason above. **It shifts the RNG
+    // stream**, though — the `continue` is above the draws that finish a tree,
+    // so every tree after a refused one reads the stream one tree out of step.
+    // Measured: 436 trunks against 494 (so 58 felled is right), and only 115 of
+    // the 436 survivors stand where they did, diverging from the second tree.
+    // Cosmetic — the woodland is still exactly determined by the seed — but the
+    // old sentence here claimed the opposite and was simply false.
     // What a player sees is a cleared run through the woodland where the road
     // comes over the brow, which is what a road through woodland looks like.
     if (distanceToEntranceCorridor(x, z) < radius) continue;

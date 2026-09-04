@@ -109,19 +109,6 @@ const BOUNDARY_MASONRY_REACH = 0.6;
  * search has to find. Hugging the wall is the cheapest place for it to be.
  */
 /**
- * How far a parked bus's silhouette stands proud of the box `CAT_BUS_LENGTH` and
- * `CAT_BUS_WIDTH` describe — the tail, the whiskers and the swung-open door.
- *
- * `arrivalSightline.ts` measured this at up to **1.24 m** and pads its own
- * corridor by it for the same reason. It is here because the road's distance
- * from the wall has to keep the *whole vehicle* out of the park, not the
- * bodywork box: with the road following a curve, the bus's inner corner swings
- * in, and `check:cat-bus` reported 0.23 m of a real built bus inside the
- * boundary while the box itself cleared by 0.77 m.
- */
-const BUS_SILHOUETTE_OVERHANG = 1.24;
-
-/**
  * **How much pavement a child needs between the bus's door and the arch.**
  *
  * Two children abreast, which is what stepping down and turning towards the gate
@@ -177,10 +164,6 @@ const BUS_DOOR_INBOARD = 4.66;
  * arithmetically, and that is worth saying plainly rather than rounding away.
  */
 export const ENTRANCE_ROAD_OUTSET = DOOR_PAVEMENT + BUS_DOOR_INBOARD;
-
-/** Kept for the record — the wall-hugging outset the first version used. */
-export const ENTRANCE_ROAD_MINIMUM_OUTSET =
-  ROAD_HALF_WIDTH + BOUNDARY_MASONRY_REACH + BUS_SILHOUETTE_OVERHANG;
 
 /**
  * How far out the tails run before the road is off the edge of the world.
@@ -243,7 +226,7 @@ export const ENTRANCE_ROAD_KERB_HALF_RUN = CAT_BUS_LENGTH;
  * full zoom-out — so the road leaves the frame on every aspect rather than only
  * on a desktop.
  */
-export const ENTRANCE_ROAD_TAIL_RUN = 55;
+const ENTRANCE_ROAD_TAIL_RUN = 55;
 
 /** One station on the road's centre line. */
 export interface RoadStation {
@@ -370,7 +353,7 @@ export function entranceRoadAt(at: number): RoadStation {
  * station, so a leg cannot slip between two samples — the segment version of
  * the same trap CLAUDE.md's `bandCrossed` note describes for trigger bands.
  */
-export function distanceToEntranceRoad(x: number, z: number): number {
+function distanceToEntranceRoad(x: number, z: number): number {
   const stations = entranceRoadStations();
   let nearest = Infinity;
   for (let i = 1; i < stations.length; i += 1) {
@@ -416,7 +399,12 @@ export function distanceToEntranceRoad(x: number, z: number): number {
  */
 export function isInEntranceRoad(x: number, z: number, radius = 0): boolean {
   if (!corridorHonoured) return false;
-  return distanceToEntranceCorridor(x, z) < radius;
+  // **`<=`, not `<`.** `distanceToEntranceCorridor` returns exactly 0 for a
+  // point inside the corridor, so `< radius` at the default radius of 0 asks
+  // `0 < 0` and answers **false in the dead centre of the road** — the one
+  // place the question is least ambiguous. Every caller that passes a real
+  // radius was unaffected, which is why it went unnoticed.
+  return distanceToEntranceCorridor(x, z) <= radius;
 }
 
 /**
@@ -469,7 +457,7 @@ export function setEntranceCorridorHonoured(honoured: boolean): void {
  * still tunnel into"*, turned inside out: here the coarse sample lets a leg in
  * rather than letting a child out.
  *
- * A quarter of a metre is finer than the finest thing that asks (the check's own
+ * A fifth of a metre is finer than the finest thing that asks (the check's own
  * sweep), which is the only defensible way to pick it: the corridor must not be
  * sampled more coarsely than anything measuring it.
  */

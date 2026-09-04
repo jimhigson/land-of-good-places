@@ -676,15 +676,18 @@ export class Entrance implements GameSystem {
  * rather than garden. Jim looked at it and disagreed (3 September): the run in
  * through the gate is a path, so there is no road to cut in half.
  *
- * ## The kerb's length is measured, not chosen
+ * ## The kerb's length is not decided here at all
  *
- * The park boundary is a spline pinned to 60 m on the gate's bearing and bulging
- * to 92 m within 40 degrees of it (#115), so a *straight* kerb road outside the
- * gate dives back **inside the park** at both ends of its run — the same trap
- * that made `ENTRANCE_BUS_ARRIVE_X` a measured number rather than a symmetrical
- * one. So the run is found by walking outward from the gate axis and stopping
- * where the road's inner edge would cross the boundary, asking `PARK_BOUNDARY`
- * itself rather than restating a number once derived from it.
+ * This block used to describe walking outward from the gate axis until the
+ * road's inner edge crossed `PARK_BOUNDARY`, because a *straight* kerb close to
+ * the wall dives back inside the park at both ends of its run. That algorithm is
+ * gone, along with the straight kerb and `ENTRANCE_BUS_ARRIVE_X` — the road is a
+ * curve at a constant outset now, so it cannot dive back in, and there is
+ * nothing here to measure.
+ *
+ * `roadRoute.ts` owns the length instead, and takes it from `TERRAIN_APRON` —
+ * the ground the terrain disc is actually built out to — so the road runs to
+ * where the world stops rather than to where the boundary curves.
  */
 function buildEntranceRoad(): Mesh[] {
   const material = roadMaterial('grey');
