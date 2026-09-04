@@ -1,6 +1,6 @@
 ---
 name: node
-description: "Run this repo's checks on a current Node (26+), which it requires because its scripts run TypeScript natively (no bundler/transpile). The cloud dev container ships an older default Node, so checks fail or hang until you switch. Use when a check errors with 'bad option', ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX, or hangs at \"measuring out the park\"; when running check:park-boot or the full `npm run build`; or to reproduce CI locally. Examples: \"run check:park-boot\", \"the build says bad option\", \"validate the full suite\", \"reproduce CI\"."
+description: "Run this repo's checks on a current Node (26+), which it requires because its scripts run TypeScript natively (no bundler/transpile). The cloud dev container ships an older default Node, so checks fail or hang until you switch. Use when a check errors with 'bad option', ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX, or hangs at \"measuring out the park\"; when running check:park-boot or the full `pnpm run check`; or to reproduce CI locally. Examples: \"run check:park-boot\", \"the build says bad option\", \"validate the full suite\", \"reproduce CI\"."
 ---
 
 # Current Node for this repo
@@ -29,23 +29,45 @@ get one of these, none of which is a real bug in the code:
 
 ## How to do it
 
-`scripts/with-node` puts a current Node (26+) in front of any command,
-installing the latest via `nvm` on first use if the container lacks one:
+`scripts/with-node` puts a current Node (26+) in front of any command. It finds
+the newest one installed — asking PATH and every version manager present
+(Homebrew, fnm, nvm, volta, asdf, mise) in that manager's own terms — and
+installs the latest via `nvm` if there is none and nvm is available:
 
 ```bash
-scripts/with-node npm run check:park-boot     # needs a current Node
-scripts/with-node npm run build               # the whole CI suite
+scripts/with-node pnpm run check:park-boot    # needs a current Node
+scripts/with-node pnpm run check              # the 47-step gate
 scripts/with-node node --version              # sanity: v26.x
 ```
 
+**It prints the runtime it chose on every run**, so a transcript records which
+Node a measurement was taken on:
+
+```
+with-node: v26.7.0 at /opt/homebrew/bin/node
+```
+
+**And it never hands you an older Node.** If it cannot find or install one that
+clears the floor it exits **non-zero**, listing every Node it did find. That is
+issue #506: the version before this one searched nvm's directories only, missed
+a Homebrew Node 26 that was installed the whole time, and silently left callers
+on v25.6.1 — which is why the #496 determinism hunt spent days measuring on a
+runtime where the bug it was chasing cannot occur.
+
 ### By hand instead
 
+Rarely needed, and prefer the script — a hand-written path is how #506 happened.
+Ask whichever manager you use where its Nodes are, rather than assuming a
+layout:
+
 ```bash
-export NVM_DIR=/root/.nvm; . /opt/nvm/nvm.sh   # nvm is a shell function
-nvm install node                               # 'node' = the latest release
-export PATH="$(ls -d /root/.nvm/versions/node/v*/bin | sort -V | tail -1):$PATH"
-node --version                                 # npm scripts now use it
+brew --prefix node                             # Homebrew, either prefix
+fnm env --json                                 # FNM_DIR, then node-versions/*
+export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"; . "$NVM_DIR/nvm.sh"
 ```
+
+Then put that install's `bin` first on `PATH` and **check what you got**
+(`node --version`) rather than trusting the directory's name.
 
 ## Notes
 
