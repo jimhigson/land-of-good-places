@@ -110,6 +110,22 @@ is luck: it was right by accident while being structurally unable to see a
 trackside eye at all. What caught it was the contradiction with QA's frame, not
 the number.
 
+### Seen in a real browser (dev server 5417, `/slide?seed=346`)
+
+Watched on seed 346. The landing frame confirms the colour argument above from
+the game itself rather than from the palette file: **the pit's rim is a bright
+pink ring** and unmistakable, while the park's **paving and ground are the tan/
+sand** colour that fills two-thirds of QA's frame. The pit interior is full of
+coloured balls, which QA's frame does not show at all — so the lens was not
+inside or beside the pit when that shot was taken.
+
+**Working conclusion, still to be confirmed by the ray fan naming the mesh:**
+the chase camera dips into **the ground/paving**, not the pit. That is
+physically what you would expect — the lens rides 4.35 m *behind* the rider
+along the chute, and near the bottom the chute is both close to the ground and
+steeply pitched, so "behind and above, in the chute's tilted frame" puts the
+lens under the terrain.
+
 ## #516 — extent still unmeasured
 
 Camera position enters the ball-pit rim near the bottom of the chute on seed
