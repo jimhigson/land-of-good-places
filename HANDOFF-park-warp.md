@@ -508,3 +508,95 @@ normalisation, and `main`'s own baseline is normalised (`.../bridge/deck`).
 So most of the `NEW:` rows were the same modelled seam re-keyed per bridge
 instance, not new geometry. Re-running on the rebased head is the only honest
 measurement.
+
+### The `Coplanar faces` failure, root-caused (3 Sep 2026)
+
+**Control first: `origin/main` (c95facf6) is green on this check** — exit 0,
+225 seams, "none is new", 57.1 s. So every regression below belongs to this
+branch. Re-run on the rebased head cut the CI list of ~17 rows to **three**,
+all on pool seed 225, and they were two different problems:
+
+**1. Two `MORE:` rows were the instrument, not the geometry.** The `seams`
+column is documented as "how many distinct facings the two share on one seed".
+It counted *findings*, and `coplanar-sweep.mts` splits a finding off its
+neighbour on the plane normal rounded at `Math.round(n * 100)` — about 0.57°.
+Measured on seed 225:
+
+- `garden/path-kerb|garden/path-surface` 1 → 3, normals **1.9°, 2.5° and
+  6.8°** off vertical. One kerb, one path, ground that is not flat.
+- `garden/terrain|.../bridge/wallTop` 1 → 3: bridges at railD **102 and 194**
+  with the same modelled contact, plus 102's own second normal — which undoes
+  exactly what `stableName` took the rail distance out of the key for.
+
+Fixed in `check-coplanar.mts`: the count is taken **per real object pair**
+(findings now carry the raw names and the normal), **clustered by facing** at
+15° with chaining, and a key takes its **worst single instance** rather than
+the sum over instances.
+
+**On whether that is a loosening — it is not, and here is the arithmetic.**
+Before and after, every row goes red at *one more facing than the park
+actually has*. What moved is what "one more" counts. Because the meaning of
+the column changed, the recorded allowances were re-measured with
+`--print-baseline` **against `origin/main`, not against this branch**, so
+nothing of this branch's geometry is baked in. Comparing the two baselines by
+parsing them: **225 keys → 225**, none added, none removed, **area changed on
+0 rows, `fighting` changed on 0**, **16 rows tightened, 0 loosened**, total
+recorded allowance **516 → 340**. Leaving them alone would have been the real
+weakening: `bridge/deck|bridge/shell` allowed 4 where nothing can now measure
+above 1, so a genuine second facing would have passed in silence.
+
+Red proof, against `origin/main` c95facf6 + the regenerated baseline: adding a
+`PlaneGeometry(3.9, 0.16)` flat on the welcome sign's board top
+(`y = 2.6 + 0.95 + 0.002`, normal +Y, 90° from the existing ±Z plaque seam)
+takes `entrance/welcome-sign/<Mesh:BoxGeometry>|<Mesh:PlaneGeometry>` from 1 to
+2 and the check red. That mutation is **not** committed; it lives only in the
+throwaway control worktree.
+
+**2. One `NEW:` row was a real defect, and it had two more behind it.**
+`flowers/living-flower-stems|park-train/train-track/track-ballast`, seed 225,
+0.0035 m² at a 5.0 mm stand-off — a flower growing out of the railway ballast,
+inside a fence a child cannot cross, so it can never be picked either.
+
+`Flowers.pickSpawnPoint` kept its own list of things to avoid (paths, plots,
+tap zones, the Sky Cruiser) and the train was not on it. Fixing that moved the
+meadow and the next run found a flower in a **stone wall**; fixing *that* found
+one in a **lamp post**. Three symptoms, one cause: a scatter answering a
+question about a park that does not exist yet. So, in three commits:
+
+- ask `Scenery.onRailway` through a new exported `clearOfRailway` — the owner
+  every other scatter already asks;
+- ask the **collision world** at sowing time, deny-by-default, exactly as the
+  bush scatter has since #502;
+- and, because the meadow is sown ~200 lines before the park is finished, ask
+  it **again** once it is answerable —
+  `Flowers.settleAgainstTheFinishedPark()` at the end of `World`'s
+  constructor, replanting anything now inside something solid. Same
+  late-binding shape as the `keepClearOfTapZones` calls beside it.
+
+Measured on the built park, flowers standing inside something solid — **the
+control was run first and the instrument can fail**:
+
+| seed | with the settle pass | control, pass removed |
+|---|---|---|
+| 20260728 | 0 | 15 |
+| 11 | 0 | 15 |
+| 225 | 0 | 6 |
+
+All three keep their full 400 flowers with 0 falling back to the `(0, 12)`
+spot, so the extra rejections are not starving the meadow. **The control
+column is a defect older than this branch** — flowers have stood inside lamp
+posts and stalls for as long as both have existed, and nothing measured it.
+
+New invariant `no flower grows on the railway` (`invariants.ts`), measured on
+the built meadow's instance positions against `TRACK_CLEARANCE` plus the
+flower's own reach, and it refuses to pass vacuously.
+
+### Still to do
+
+- `pnpm run check` and `pnpm run test:procgen` on this head (the meadow moved,
+  so the tap-spacing invariant and `check:park` want re-running).
+- `vet:seeds` over the pool: the flower changes move geometry, and this
+  branch's whole warp-vector story is that neither gate implies the other.
+- Delete the two scratch probes (`scripts/probe-coplanar-detail.mts`,
+  `scripts/probe-flower-fallback.mts`) — untracked, never committed.
+- Remove the throwaway control worktree `.claude/worktrees/warp-474-main`.
