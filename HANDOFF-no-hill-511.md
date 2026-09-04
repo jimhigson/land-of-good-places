@@ -21,8 +21,118 @@ change behaviour.
 
 - [x] Worktree off current `origin/main` (`10fb7c2d`), `pnpm install --frozen-lockfile` clean.
 - [x] Dependency inventory — below.
-- [ ] Inventory reported to the Overseer, approach agreed.
+- [x] Sky measurement — the finding that changes the ticket. See "The sky" below.
+- [ ] **BLOCKED: reported to the Overseer, waiting on a decision about the sky.**
 - [ ] Implementation.
+
+---
+
+# The finding that has to be settled before any code changes
+
+## The sky, measured
+
+The instrument is at `scratchpad/skyfrac.mts` (not committed; it ray-marches the
+real `terrainHeight` under the real camera constants and counts screen rows that
+see no ground). **The control discriminates**: today's hill gives 19.8% sky at the
+park edge at max zoom-out and 0% at the park centre, so the instrument can see sky
+and can tell the two apart. I also derived the 19.8% analytically before believing
+it — the disc's cut edge lands 39 m up-screen, which projects to screen-up
+`39·cos38° − 17·sin38°... ` = 10.6 against a frame half-height of 17.86, leaving
+20.3% of the frame above it. Measurement and algebra agree.
+
+```
+sky % of frame                             z1.00   z0.80   z0.60   z0.42
+CONTROL: today, the hill (drop at 12 m outset)
+  park centre                               0.0%    0.0%    0.0%    0.0%
+  park edge (far side, up-screen)           0.0%    0.0%    6.8%   19.8%
+flat, land simply ends at 40 m outset        0.0%    0.0%    0.0%    0.0%
+flat, land simply ends at 300 m outset       0.0%    0.0%    0.0%    0.0%
+flat to 40 m outset, then the drop           0.0%    0.0%    0.0%    0.0%
+flat to 100 m outset, then the drop          0.0%    0.0%    0.0%    0.0%
+flat to 200 m outset, then the drop          0.0%    0.0%    0.0%    0.0%
+
+CONTROL: around the whole park edge at zoom 0.42 —
+  3/24 bearings show any sky (225°, 240°, 255°); the most is 18.5%
+```
+
+### What this means
+
+**Under an orthographic camera pitched down 38°, every view ray hits flat ground.**
+There is no horizon in an ortho projection of a plane. Sky can therefore only
+appear where the ground *runs out* — a cut edge, or a fall steep enough to carry
+the ground below the bottom of the frame. That is a geometric fact, not a tuning
+problem, and it is why `constants.ts:17-26` already says in as many words: *"With
+an orthographic camera an endless ground plane would fill the frame forever and
+the sky would never be seen."*
+
+So **"land spreading out a long way in all directions" and "sky visible at ground
+level" cannot both be true** with this camera. The middle option I expected to
+work — keep the drop but move it far out — **does not work either**, and the
+measurement is why I am not proposing it: at max zoom-out the frame only reaches
+~29 m up-screen from the player, so a drop at 40 m or beyond is simply off-frame
+and the visible land is flat to the frame edge. 0% sky in all three variants.
+
+### Why this is much less alarming than it sounds
+
+The comments defending the hill overstate what it currently buys:
+
+- **At default zoom (1.0) the sky is already 0% at ground level, everywhere** —
+  including standing at the park edge. `IsoCamera.ts:69` sets `zoomValue = 1`.
+- Sky only appears below zoom 0.6, and only on **3 of 24** edge bearings, topping
+  out at 18.5% of frame.
+- The day/night cycle is *not* mainly seen through visible sky. It is carried by
+  the light colour, the ambient, and the fog tint, all of which paint the ground
+  and every prop — `DayNight.ts:79-180`'s `SKY_KEYS` each carry their own `fog`,
+  applied at `:796-801`. The sky quad itself is a full-screen pass
+  (`Sky.ts:226-248`) drawn *behind* everything.
+- The genuinely sky-filled views are the ones that raise the camera or free it:
+  the ferris wheel's climb via `setSpaceFactor`, the sky cruiser, and `/view`.
+  None of those are affected by ground extent.
+
+So the real cost of Jim's instruction is: **the 3-bearings-at-max-zoom-out sliver
+of sky at the park edge goes away.** That is a much smaller loss than
+`constants.ts` implies, and it is a loss Jim may well accept — losing the diorama
+look is arguably the point of the ticket. But it is his call, not mine, and it is
+visible, so per CLAUDE.md it waits for him.
+
+## The three routes, honestly
+
+- **A — Do what Jim said.** Flat land spreading far, low-poly. Sky at ground level
+  goes to zero on all bearings and all zooms. `Sky.ts`'s `HORIZON_Y_LEVEL = 0.5`
+  and its comment about the crest become dead. Simplest code: `terrain.ts:36`
+  loses its `smoothstep`, the disc grows, an outer low-poly annulus is added.
+- **B — Flat land, and give the sky back another way.** Same as A, but earn the
+  sky by raising the camera pitch or adding a distance fade-to-sky on the ground
+  material. Raising the pitch breaks ARCHITECTURE.md's "One camera angle,
+  forever". A fog/alpha fade to the sky colour at the frame's far edge is the
+  honest version and is not expensive — but it is a new look, and a real
+  art-direction decision rather than an engineering one.
+- **C — Flat *apron*, hill kept far out.** Keep a drop but push it to ~40 m. This
+  fixes #498 completely (the road at 11.94 m outset is then on dead-flat ground)
+  and is by far the smallest change. It does **not** keep the sky (measured), so
+  it buys nothing over A on that axis — but it keeps the world bounded, which
+  keeps the treeline's job, the budget, and every rim-relative thing simple.
+
+My recommendation is **B**, with **C as the fallback** if the fade is judged too
+big a look change to take on this ticket. A is B without the thing that stops the
+frame being solid green at the top edge.
+
+## The low-poly budget, if we do extend
+
+Today's ground: **18,432 triangles, 9,417 verts, 1 draw call** (`Garden.ts:88-150`,
+72 rings x 128 segments, radius `pow(ring/rings,1.35) * TERRAIN_EDGE_RADIUS`,
+124.9 m today). Proposed outer annulus from 125 m to ~400 m at 8 rings x 64
+segments = **1,024 triangles, 585 verts, 1 extra draw call** — a 5.6% increase in
+ground triangles for 10x the radius. That is the measurable budget the issue asks
+for. Two cautions:
+- `boundary.ts:652` requires an even polar grid for the grass UV tiling; the
+  annulus must share the same polar parameterisation or the grass seams.
+- The annulus must be `receiveShadow` only, never a shadow **caster** — the shadow
+  camera is a fixed 52 m box that follows the player (`DayNight.ts:359-379`,
+  `SHADOW_AREA = 26`), so a 400 m caster is pure cost.
+- Camera `far = 270` (`IsoCamera.ts:150`) hard-clips ground at ~228 m. Land
+  authored past that is invisible *and* clipped mid-plane. Either stop the annulus
+  near 200 m or raise `far`.
 
 ---
 
