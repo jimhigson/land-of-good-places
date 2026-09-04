@@ -781,3 +781,33 @@ exists to catch.
 The `BASELINE LOOSE` line for the `anchor:waterFight` plot pair is seed 24's
 old `{waterFight:1}` vector leaving; it is not fatal and the row goes when 428
 settles.
+
+### FINAL: seed 428 settled at candidate 26, pool 16/16, all gates green
+
+```
+seed   old vector      new vector             candidates   why not the first hit
+ 24    waterFight:1    stall.skyCruiser:2      28          —
+428    (none)          stall.dodgems:2         26          candidate 16 {fountain:2}
+                                                           scored 0 on check:park and
+                                                           put the fountain flush with
+                                                           the paving
+```
+
+Also recorded in `parkWarp.ts` for the next searcher: **candidate 21,
+`{hotel:2}`, scores 0 on `check:park` too and brings ten new seams** — the rail
+race's rainbow arch legs sharing planes with each other. Two gates are not
+enough to pick a vector; that is #437 stated as a rule rather than an anecdote.
+
+Final state on `8b9c3cd4` (Node 26.7.0, exit codes read from each run's own
+log, never piped):
+
+| | |
+|---|---|
+| `vet:seeds -- --list <16 pool seeds>` | **16/16**, park and invariants, 88 each |
+| `check:coplanar` | **exit 0** — 224 seams, "none is new", no `BASELINE LOOSE` |
+| `test:procgen` | **exit 0** — 21 files, 752 tests |
+| `check` | see below |
+| `build` | exit 0 |
+
+`parkSeedPool.ts` is untouched: no seed was swapped out of the pool to reach
+16/16.
