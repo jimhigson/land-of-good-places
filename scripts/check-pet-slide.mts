@@ -84,7 +84,7 @@
  */
 
 import './headless-dom.mjs';
-import { Box3, Object3D, Quaternion, Vector3 } from 'three';
+import { Box3, Matrix4, Object3D, Quaternion, Vector3 } from 'three';
 
 await import('./headless-canvas.mjs');
 const { Scene } = await import('three');
@@ -611,6 +611,30 @@ async function ride(wired: boolean): Promise<RunResult> {
     );
   }
 
+  // **#516 instrumentation** — the rim mesh, found once by shape rather than by
+  // name, and its two radii read off the geometry that was actually built.
+  const cameraWorld = new Vector3();
+  const rimLocal = new Vector3();
+  const rimInverse = new Matrix4();
+  let rimMesh: { readonly matrixWorld: Matrix4 } | null = null;
+  let rimMajor = 0;
+  let rimTube = 0;
+  let rimNearest = Infinity;
+  let rimInsideFrames = 0;
+  building.ballPit.group.updateMatrixWorld(true);
+  building.ballPit.group.traverse((object: unknown) => {
+    const mesh = object as {
+      isMesh?: boolean;
+      geometry?: { type?: string; parameters?: { radius?: number; tube?: number } };
+      matrixWorld?: Matrix4;
+    };
+    if (!mesh.isMesh || mesh.geometry?.type !== 'TorusGeometry') return;
+    rimMesh = mesh as { readonly matrixWorld: Matrix4 };
+    rimMajor = mesh.geometry.parameters?.radius ?? 0;
+    rimTube = mesh.geometry.parameters?.tube ?? 0;
+    rimInverse.copy(mesh.matrixWorld as Matrix4).invert();
+  });
+
   const previous = new Map<string, Vector3>();
   let rasters = 0;
   let childHiddenSamples = 0;
@@ -863,6 +887,25 @@ async function ride(wired: boolean): Promise<RunResult> {
     if (liveShot?.kind === 'chase' && liveCamera && first) {
       chaseFrames += 1;
 
+      // **#516: is the lens itself inside the ball pit's rim?** Measured every
+      // chase frame, not at rasters — this is reported as lasting "a frame or
+      // two", so sampling one frame in twenty-five would very likely miss it.
+      //
+      // The rim is a torus, so the test is exact: put the camera into the rim's
+      // own local space, and a point is inside the tube when its distance to
+      // the ring circle is under the tube radius. Both radii are read off the
+      // built geometry rather than restated here — `BALL_PIT_RADIUS + 0.4` and
+      // `0.3` live in `BallPit.ts` and a copy here would be the usual defect.
+      cameraWorld.setFromMatrixPosition(liveCamera.matrixWorld);
+      if (rimMesh) {
+        rimLocal.copy(cameraWorld).applyMatrix4(rimInverse);
+        // Torus lies in local XY with its axis on Z (three.js `TorusGeometry`).
+        const ring = Math.hypot(rimLocal.x, rimLocal.y) - rimMajor;
+        const toSurface = Math.hypot(ring, rimLocal.z) - rimTube;
+        if (toSurface < rimNearest) rimNearest = toSurface;
+        if (toSurface < 0) rimInsideFrames += 1;
+      }
+
       // **What does the shot actually contain?** Rays through the live camera,
       // counting what each one lands on — the only honest form of this
       // question, and this file has now got it wrong in both directions with
@@ -1001,7 +1044,11 @@ async function ride(wired: boolean): Promise<RunResult> {
       `biggest pet ${(biggestPet * 100).toFixed(0)}% of frame — ${biggestPetName}), ` +
       `furthest from her afterwards ${worstRegroup.toFixed(1)} m ` +
       `(${missingFrames} undrawn, ${offChuteFrames} off-chute, ${aheadFrames} overtaking, ` +
-      `${touchingFrames} clipping, ${uprightFrames} upright pet-frames)`,
+      `${touchingFrames} clipping, ${uprightFrames} upright pet-frames), ` +
+      // #516: the lens against the ball pit's rim, every chase frame. Negative
+      // "nearest" means the camera was inside the tube.
+      `camera nearest the pit rim ${rimNearest === Infinity ? 'n/a' : `${rimNearest.toFixed(2)} m`} ` +
+      `(${rimInsideFrames} frames INSIDE it)`,
   );
 
   return {
