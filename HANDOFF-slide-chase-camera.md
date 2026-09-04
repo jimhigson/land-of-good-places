@@ -216,3 +216,109 @@ tacked onto the end of this one.
   common case should exit on the first candidate, but "should" is not a number
   and one instrument has already been thrown away this session for being
   unusably slow. Measure it before this ships.
+
+
+---
+
+# Continuation — second agent (Opus 5, 1M context), taking over after the first was lost
+
+Worktree `.claude/worktrees/eng-camera-514` adopted as found: clean, at branch
+HEAD, nothing uncommitted. Node 26.7.0, exit codes from each run's own file.
+
+**Correcting the section above:** its "Status: no code change yet / not yet
+wired" was already stale when written — commits `6c436073` and `4f9c20c7` wired
+the solver and added the near bound. Its *analysis* is sound and was not
+re-derived.
+
+## The three owed items, all now done
+
+### 1. Cost — measured, and it is a non-issue
+
+1350 solve calls over two descents: **1.0 candidates per call**, 0.0024 ms per
+call, worst single call 0.31 ms across the pool, against a 16.67 ms frame
+budget. The feared 600-candidate walk never happens.
+
+### 2. The sweep, before and after — 16 parks each
+
+| | before (`main`) | after |
+|---|---|---|
+| seed 11 | **exit 1**, worst raster **0.0%** | **exit 0**, worst raster **6.5%** |
+| seed 24 | 1.1% — one bend from failing | 9.2% |
+| canonical | 4.4% | 9.5% |
+| regressions | — | **none** |
+
+Seed 346 is red both sides: the **#507** clipping bug, which clears when #515
+lands. Not a camera regression.
+
+### 3. `chaseGaveUp` — it had no reader at all
+
+`Building.ts` incremented it and carried a comment saying `check:pet-slide`
+asserted it was zero. **Nothing read it.** Added
+`chaseSolveGaveUpFrames()` and a clause.
+
+**Proved red**, mutation `GROUND_CLEARANCE` 0.35 → 1000 so every candidate is
+genuinely rejected and the search exhausts (rather than skipping the loop):
+exit **1**, *"gave up on 675 frames of the descent"*. Restored: exit **0**,
+clause silent, 675 frames ridden. Geometry: canonical seed 20260728, chute
+73.16 m, three companions.
+
+## What the measurements found that nobody was looking for
+
+### The position search is dead code in practice
+
+`candidates == calls` **exactly**, on all 16 seeds, ~22,000 calls. No candidate
+is ever rejected. **The lens never moves** — the *aim* (at the child–companion
+midpoint) is the whole of the #514 fix. Docs rewritten to say so; the search is
+kept as a guard and documented as unexercised and therefore **unproven**.
+
+### #516 is untouched, and its hypothesis is contradicted
+
+The `terrainHeight` rejection has never fired, so the mechanism meant to fix
+#516 has never acted. `terrainHeight` is a height field; the mass burying the
+lens is **paving — a mesh**. Posted to #516 as a second correction.
+
+### The estimator used a collision radius
+
+`PARADE_MEMBER_RADIUS` (0.22 m, "what the parade shoves a companion about
+with") was predicting **screen area** for a body 1.53 m long. Measured **median
+4.21× under** the raster, range 1.65–5.89 **and rising with distance** — a
+wrong-shaped model, not a calibration, so no safety factor could absorb it.
+Replaced with `PET_SCREEN_RADIUS` (ellipse-equivalent, 0.41 m); ratio → ~1.0.
+
+**A measurement of a two-definitions fault that committed the same fault:** my
+first instrument still passed the *old* radius, so it measured the old model
+twice. Caught because an unchanged result was *implausible*, not because
+anything went red.
+
+### The near bound still cannot fire — filed as #518
+
+The solve measures `toPet` to the companion's **seat** (~2.30 m) while the
+drawn body centre is ~1.35 m, and the threshold bites under ~1.50 m. So it
+reads ~6% where the raster measures ~21%. **A design gap** — `chaseEye` is
+handed seats, not bodies — not a constant to tune. Filed as **#518** and
+cross-referenced from **#471** and **#513**: three instances of one pattern,
+a measurement taken on a convenient origin rather than on the thing drawn.
+
+## Watched in a browser (5473 mine, 5474 baseline; both killed by PID)
+
+Seed 5, `/slide` (this branch has no `/slide-with-pets` — that is on #515).
+
+- **Before**: the child's head fills the near field and the **pet is a sliver in
+  the bottom-right corner**, exactly the "top edge clipping in from underneath"
+  the rasters described. Frame `/tmp/cam/shot-06-before.png`.
+- **After**: child and companion both cleanly framed down the chute; the pet
+  reads as *following her*, not pressed against the lens. Frame
+  `/tmp/cam/shot-03.png`.
+- The ball pit is a **pink rim full of coloured balls** — nothing like the flat
+  tan mass in QA's #516 frame, independently confirming the first agent's
+  "not the rim" correction. Frame `/tmp/cam/shot-04.png`.
+
+**Caveat on the watch:** a fresh profile has **one** companion (the creator's
+starting pet), while the check measures **three**. So the browser confirms the
+qualitative fix; the 16–23% frame-share figures come from the raster, not from
+what I looked at.
+
+## Status
+
+#514 fixed and proven; #516 untouched and its cause contradicted; #518 filed.
+PR not yet raised. **Do not merge.**
