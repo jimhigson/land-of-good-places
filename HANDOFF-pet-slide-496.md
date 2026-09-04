@@ -12,8 +12,9 @@ worktree `.claude/worktrees/pet-slide-496`, based on `origin/main` `488605cd`.
 ## The finding that moves this on
 
 **The non-determinism is in park *generation*, not in the simulation.**
-`scripts/probe-world.mts` builds `new World(...)` and hashes the whole scene
-graph (traversal order + world positions, 17 sig figs). 6 runs, Node 26.7.0:
+A throwaway probe (not committed — it built `new World(...)` and hashed the
+whole scene graph: traversal order + world positions at 17 sig figs) run 6
+times on Node 26.7.0:
 
 | run | nodes | sceneHash |
 |---|---|---|
@@ -70,7 +71,8 @@ Traced by instrumenting `createRandom` to print each RNG's seed and call site.
 Both numbers are members of `PARK_SEED_POOL`. So `PARK_SEED` itself is
 different every run.
 
-Measured directly (`scripts/probe-seed.mts`):
+Measured directly (a throwaway probe printing `PARK_SEED`; the committed
+equivalent is now `scripts/seed-report.mts`):
 
 | Node | run 1 | 2 | 3 | 4 | 5 | `parkSeedSource()` |
 |---|---|---|---|---|---|---|
@@ -135,8 +137,8 @@ The browser's own half is split into an exported `parkSeedFor(store)`, so
 without being able to lie about which runtime it is on.
 
 **Node 26.7.0, six runs after: `PARK_SEED=20260728` every time. `LGP_SEED=115`
-still pins. The whole park is byte-identical, 4/4** (`probe-world.mts`,
-sceneHash `2671dac3…`, 7030 nodes).
+still pins. The whole park is byte-identical, 4/4** (scene hash `2671dac3…`,
+7030 nodes, over the scene-graph probe described above).
 
 ## `check:seed-pool` was green through all of this, and why
 
