@@ -53,11 +53,15 @@ import { MAX_AUTO_HOP_HEIGHT, autoHopClears } from '../src/world/Collision.ts';
 import { PLAYER_RADIUS } from '../src/core/constants.ts';
 import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
 import { PARK_SEED } from '../src/world/parkManifest.ts';
+import { CI_SWEEP_SEEDS } from '../src/world/parkSeedPool.ts';
 
 /**
  * The five seeds CI builds a park on — the canonical one and four sweeps.
  *
- * **Seed 24, not seed 2.** `test/procgen/` is the owner of this list, and #429
+ * **The pool owns this list** (`CI_SWEEP_SEEDS`, 2 Sep 2026): this file's own
+ * hand-typed copy kept building retired seed 18 after its retirement and
+ * turned CI red on a seed the rules say does not have to pass.
+ * Before that, seed 24 not seed 2: #429
  * retired seed 2 from it: seed 2 proves zero bridge sites, so it is
  * pathological rather than merely different, and `test/procgen/seed-24.test.ts`
  * records why 24 replaced it. This file was still sweeping the retired seed,
@@ -65,7 +69,7 @@ import { PARK_SEED } from '../src/world/parkManifest.ts';
  * hardest, so the check that exists to defend the fountain was the one seed
  * short of being able to see it.
  */
-const CI_SEEDS = [PARK_SEED, 5, 11, 18, 24] as const;
+const CI_SEEDS = CI_SWEEP_SEEDS;
 
 // Each seed needs its own module registry (the park is pinned to whichever
 // seed built it first), so the sweep is child processes — the same reason

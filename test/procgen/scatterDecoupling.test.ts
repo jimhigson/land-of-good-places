@@ -176,8 +176,16 @@ describe('scenery scatter is decoupled from the paths', () => {
     // The control. Everything above is an assertion that digests *match*, and a
     // digest that always matched — one hashing a constant, say — would sail
     // through all of it. A different seed must produce a different scatter.
-    const other = buildDigest({ LGP_SEED: '2' });
-    expect(other.seed).toBe(2);
+    //
+    // Seed 5, not the seed 2 this control used since it was written: the
+    // property is "two different parks differ", agnostic to WHICH other
+    // park, and seed 2 cannot build a park at all since 2 Sep 2026 — it
+    // proves zero bridge sites, which now fails the build loudly rather
+    // than falling back to level crossings (it was retired from the sweep
+    // for exactly this pathology, #429/seed-24.test.ts's header). Any pool
+    // seed serves; 5 is the one the sweep already builds everywhere else.
+    const other = buildDigest({ LGP_SEED: '5' });
+    expect(other.seed).toBe(5);
     expect(other.all).not.toBe(baseline.all);
     expect(other.trees.digest).not.toBe(baseline.trees.digest);
     expect(other.bushes.digest).not.toBe(baseline.bushes.digest);

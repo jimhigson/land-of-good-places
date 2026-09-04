@@ -5,7 +5,7 @@
  * Walks every drawn ribbon (the swept Catmull-Rom `routeCurve`, not the
  * control polyline — the two differ by metres on a bend, and it is the swept
  * curve a child walks on), records every rail-side flip, and reports each
- * against `CROSSING_SITES` / `LEVEL_CROSSING_SITES` using the same
+ * against `CROSSING_SITES` (every site is a bridge now) using the same
  * `SITE_SNAP_TOLERANCE` the gate invariant uses.
  *
  * Not used by the game. `pnpm exec tsx scripts/probe-unplanned-crossings.mts`
@@ -15,7 +15,7 @@ import { Vector3 } from 'three';
 import { buildHeadlessPark } from './park-harness.mts';
 import { PARK_SEED } from '../src/world/parkManifest.ts';
 import { TRAIN_PLAN } from '../src/world/train/plan.ts';
-import { CROSSING_SITES, LEVEL_CROSSING_SITES } from '../src/world/train/crossingPlan.ts';
+import { CROSSING_SITES } from '../src/world/train/crossingPlan.ts';
 import { SITE_SNAP_TOLERANCE } from '../src/world/train/crossings.ts';
 import { ROUTES, routeCurve } from '../src/world/pathGraph.ts';
 
@@ -39,7 +39,7 @@ const nearestOf = (d: number, sites: readonly number[]): number | null => {
 };
 
 const bridgeSites = CROSSING_SITES.map((s) => s.railDistance);
-const levelSites = LEVEL_CROSSING_SITES.map((s) => s.railDistance);
+const levelSites: number[] = [];
 
 console.log(`seed ${PARK_SEED}, loop ${route.length.toFixed(1)} m, snap tolerance ${SITE_SNAP_TOLERANCE}`);
 console.log(`bridge sites: ${bridgeSites.map((d) => d.toFixed(0)).join(', ') || '(none)'}`);

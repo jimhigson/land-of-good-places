@@ -1,0 +1,43 @@
+$ vitest run
+
+ RUN  v4.1.11 /Users/jim/dev/landOfGoodPlaces/.claude/worktrees/park-warp
+
+(node:79257) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:79251) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:79252) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:79250) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:79253) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:79255) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:79254) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+  the slide over the castle's roof garden: 11 chute sample(s) pass over it, clearing its 12.30 m top by 2.54 m at worst
+[proven-site cover] 3 of 3 built crossing(s) stand on one of 4 proven bridge site(s)
+[unproven-bridge cover] 3 built bridge(s) against 4 proven site(s) on this seed
+  the slide over the castle's roof garden: 4 chute sample(s) pass over it, clearing its 12.15 m top by 2.54 m at worst
+[proven-site cover] 2 of 2 built crossing(s) stand on one of 2 proven bridge site(s)
+[unproven-bridge cover] 2 built bridge(s) against 2 proven site(s) on this seed
+  the slide over the castle's roof garden: 4 chute sample(s) pass over it, clearing its 12.53 m top by 2.54 m at worst
+  the slide over the castle's roof garden: 4 chute sample(s) pass over it, clearing its 12.02 m top by 2.54 m at worst
+[proven-site cover] 3 of 3 built crossing(s) stand on one of 3 proven bridge site(s)
+[unproven-bridge cover] 3 built bridge(s) against 3 proven site(s) on this seed
+[proven-site cover] 2 of 2 built crossing(s) stand on one of 2 proven bridge site(s)
+[unproven-bridge cover] 2 built bridge(s) against 2 proven site(s) on this seed
+  the slide over the castle's roof garden: 4 chute sample(s) pass over it, clearing its 12.36 m top by 2.54 m at worst
+[proven-site cover] 1 of 1 built crossing(s) stand on one of 1 proven bridge site(s)
+[unproven-bridge cover] 1 built bridge(s) against 1 proven site(s) on this seed
+  the slide over the castle's roof garden: 4 chute sample(s) pass over it, clearing its 12.50 m top by 2.54 m at worst
+[proven-site cover] 2 of 2 built crossing(s) stand on one of 2 proven bridge site(s)
+[unproven-bridge cover] 2 built bridge(s) against 2 proven site(s) on this seed
+
+ Test Files  17 passed (17)
+      Tests  583 passed (583)
+   Start at  12:52:00
+   Duration  84.24s (transform 4.54s, setup 0ms, import 19.82s, tests 292.35s, environment 1ms)
+
+exit: 0

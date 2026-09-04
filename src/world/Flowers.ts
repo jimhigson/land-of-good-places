@@ -17,7 +17,14 @@ import { toonMaterial } from '../art/style/materials';
 import { createFlowerPickEffect, type FlowerPickEffect } from '../art/effects/flowerSparkle';
 import { terrainHeight } from './terrain';
 import { isOnPath } from './pathGraph';
-import { clearOfCruiser } from './Scenery';
+import { clearOfCruiser, clearOfRailway } from './Scenery';
+import type { CollisionWorld } from './Collision';
+import {
+  LARGE_HEAD_SCALE,
+  LARGE_STEM_SCALE,
+  TALLEST_FLOWER,
+  WIDEST_FLOWER,
+} from './flowerDimensions';
 import { ANCHORS } from './anchors';
 import { pressZone, type InteractZone } from './interact';
 import { highlightInstance } from './highlight';
@@ -127,30 +134,21 @@ const LARGE_SHARE = 0.1;
 const SIZE_SEED = 0x1a3e07;
 
 /**
- * Size multipliers for a large flower, over the small model's targets.
+ * The meadow's own dimensions live in `./flowerDimensions`, which imports
+ * nothing — so `test/procgen` and the check scripts can ask how wide a
+ * flower is without dragging this module (and `Scenery`, and the park) in
+ * behind it. See that file's header for the bug that put them there.
  *
- * The stem grows rather more than the bloom does (2.9× against 2×), which is
- * what turns the small flower's ground-hugging blob into something that reads
- * as *a stem with a flower on top* rather than just a bigger blob.
+ * They exist for one reason beyond the modelling: to ask {@link
+ * clearOfCruiser} whether the Sky Cruiser's car passes low over a spot before
+ * a flower is planted there, and now {@link clearOfRailway} and the collision
+ * world the same question. Every other scattered thing in the park already
+ * asked them — trees, bushes, hiding walls, lamp posts — and the meadow was
+ * the one population that never did. Measured on seed 11: the car flies
+ * through `living-flower-heads` at 4.0 m along its loop, world
+ * (-57.51, 0.70, -20.16), the ride's own station approach where the profile
+ * is barely off the grass.
  */
-const LARGE_STEM_SCALE = 2.9;
-const LARGE_HEAD_SCALE = 2.0;
-
-/**
- * The tallest and widest a flower can ever grow, derived from the same two
- * ranges {@link spawnAt} draws its targets from and the same wiggle flare the
- * update applies — never restated, so a retune of either moves this with it.
- *
- * These exist for one reason: to ask {@link clearOfCruiser} whether the Sky
- * Cruiser's car passes low over a spot before a flower is planted there. Every
- * other scattered thing in the park already asks it — trees, bushes, hiding
- * walls, lamp posts — and the meadow was the one population that never did.
- * Measured on seed 11: the car flies through `living-flower-heads` at 4.0 m
- * along its loop, world (-57.51, 0.70, -20.16), which is the ride's own
- * station approach where the profile is barely off the grass.
- */
-const TALLEST_FLOWER = 0.32 * LARGE_STEM_SCALE + 0.27 * LARGE_HEAD_SCALE * 1.18;
-const WIDEST_FLOWER = 0.27 * LARGE_HEAD_SCALE * 1.18;
 /** How much wider a large flower's stalk is. A tall stem on a hair needs it. */
 const LARGE_STALK_WIDTH = 2.1;
 
@@ -237,7 +235,25 @@ export class Flowers implements GameSystem {
   private readonly scratchScale = new Vector3();
   private readonly scratchColour = new Color();
 
-  constructor() {
+  /**
+   * **The collision world as it stands when the meadow is sown** — the one
+   * owner of "is this ground already taken", asked instead of the meadow
+   * keeping its own list of what to avoid.
+   *
+   * This is #502's answer for bushes, adopted here for the same reason and
+   * with the same honesty about its reach: `World` builds `Garden` and
+   * `Scenery` before the meadow and everything else after it, so at this
+   * instant the world holds the boundary masonry, the stone and wooden wall
+   * runs, and the tree trunks — and not the stalls, the entrance or the
+   * train. It is not a query that catches everything; it is a query that
+   * cannot go blind, and it grows for free the day the build order changes.
+   * The three things built later that a flower must still avoid are asked of
+   * their own owners in {@link pickSpawnPoint}, exactly as they always were.
+   */
+  private readonly collision: CollisionWorld;
+
+  constructor(collision: CollisionWorld) {
+    this.collision = collision;
     this.group.name = 'flowers';
 
     // Which slots are large is settled before anything is planted, because the
@@ -551,7 +567,10 @@ export class Flowers implements GameSystem {
     this.paintColour(index, this.stage[index] === STAGE_BLOOMED);
   }
 
-  /** Somewhere clear of paths, every reserved anchor plot, and every booth's tap area. */
+  /**
+   * Somewhere clear of paths, every reserved anchor plot, every booth's tap
+   * area, the Sky Cruiser's low passes and the railway.
+   */
   private pickSpawnPoint(): { x: number; z: number } {
     for (let attempt = 0; attempt < 40; attempt += 1) {
       const angle = this.rng.range(0, TAU);
@@ -568,6 +587,17 @@ export class Flowers implements GameSystem {
       // {@link TALLEST_FLOWER}. The same gate, and the same grid, every other
       // scattered thing in the park already passes through.
       if (!clearOfCruiser(x, z, WIDEST_FLOWER, TALLEST_FLOWER)) continue;
+      // And the train's own ground: the corridor, the platforms and every
+      // bridge's deck and ramps, asked of `Scenery`'s `onRailway`, which is
+      // the single owner of that question for every other scatter in the park.
+      // The meadow never asked it, and a flower duly grew out of the ballast
+      // on pool seed 225 — see {@link clearOfRailway}.
+      if (!clearOfRailway(x, z, WIDEST_FLOWER)) continue;
+      // And anything solid already standing here — see {@link collision}. A
+      // refusal drops the candidate rather than nudging it: a flower is
+      // decoration and has no claim on ground something solid already holds
+      // (#502's words, for the bushes this follows).
+      if (!this.collision.isClearCircle(x, z, WIDEST_FLOWER)) continue;
       return { x, z };
     }
     // Fell through every attempt (shouldn't happen with this much open lawn) —
@@ -608,6 +638,43 @@ export class Flowers implements GameSystem {
       const x = this.posX[i] ?? 0;
       const z = this.posZ[i] ?? 0;
       if (!this.insideAnyTapKeepOut(x, z)) continue;
+      this.spawnAt(i, true);
+      this.writeMatrix(i);
+    }
+    this.stems.instanceMatrix.needsUpdate = true;
+    this.heads.instanceMatrix.needsUpdate = true;
+    this.petals.instanceMatrix.needsUpdate = true;
+  }
+
+  /**
+   * **Replants every flower now standing inside something solid** — called
+   * once, after `World` has finished building the park.
+   *
+   * The meadow is sown early, so {@link collision} can only ever tell it about
+   * what already exists at that moment: the boundary masonry, the wall runs
+   * and the tree trunks. The lamp posts, the stalls, the rides and the
+   * entrance are all built afterwards, and a lamp planted on top of a flower
+   * leaves the flower inside its post.
+   *
+   * That is not hypothetical and it is not rare: it is how this method came to
+   * exist. `check:coplanar` found `living-flower-stems` sharing a plane with
+   * `lamp-posts/<Mesh:CylinderGeometry>`, having already found it sharing one
+   * with the track ballast and then with a stone wall — three symptoms of one
+   * cause, which is a scatter answering a question about a park that does not
+   * exist yet.
+   *
+   * So the question is asked again when the answer is finally knowable. This
+   * is the same shape as {@link keepClearOfTapZones}, which the train's
+   * platforms have always arrived through, and it is deliberately a *replant*
+   * rather than a nudge: the flower is drawn a whole new spot through
+   * {@link pickSpawnPoint}, which now puts it to a collision world holding the
+   * entire park.
+   */
+  settleAgainstTheFinishedPark(): void {
+    for (let i = 0; i < this.count; i += 1) {
+      const x = this.posX[i] ?? 0;
+      const z = this.posZ[i] ?? 0;
+      if (this.collision.isClearCircle(x, z, WIDEST_FLOWER)) continue;
       this.spawnAt(i, true);
       this.writeMatrix(i);
     }

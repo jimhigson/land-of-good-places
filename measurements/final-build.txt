@@ -1,0 +1,52 @@
+$ vite build
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./src/version-file" without a file extension (vite.config.ts:5:35). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+vite v8.2.2 building client environment for production...
+transforming...
+✓ 381 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/manifest.webmanifest                            0.56 kB
+dist/index.html                                      2.20 kB │ gzip:   0.97 kB
+dist/assets/index-CEeBf8Nt.css                      63.95 kB │ gzip:  11.41 kB
+dist/assets/rolldown-runtime-DK3Fl9T5.js             0.15 kB │ gzip:   0.15 kB
+dist/assets/pathsPrewarm-Bow02J82.js                 0.20 kB │ gzip:   0.16 kB
+dist/assets/crossingPrewarm-W_nbx3EY.js              0.20 kB │ gzip:   0.17 kB
+dist/assets/terrain-BQgV5m_h.js                      0.66 kB │ gzip:   0.42 kB
+dist/assets/mathUtils-_4XskpKf.js                    1.11 kB │ gzip:   0.58 kB
+dist/assets/cruiserWindow-DHDBlmEG.js                1.87 kB │ gzip:   1.01 kB
+dist/assets/solve-B9LXzvrs.js                        1.99 kB │ gzip:   0.89 kB
+dist/assets/uiScale-B_Ujxplt.js                      2.19 kB │ gzip:   1.14 kB
+dist/assets/plan-2J0tW5gj.js                         2.45 kB │ gzip:   1.30 kB
+dist/assets/pathGraph-BW19K73W.js                    3.89 kB │ gzip:   1.88 kB
+dist/assets/plan-D6iLiv6j.js                         5.02 kB │ gzip:   2.30 kB
+dist/assets/workbox-window.prod.es5-Bd17z0YL.js      5.65 kB │ gzip:   2.20 kB
+dist/assets/boundary-X-fYGZDB.js                     5.78 kB │ gzip:   2.77 kB
+dist/assets/parkLayout--HSdvBx_.js                   6.48 kB │ gzip:   2.90 kB
+dist/assets/crossingPlanSolve-CcQZEnrk.js            7.38 kB │ gzip:   3.25 kB
+dist/assets/solve-B5NrSSYq.js                        7.49 kB │ gzip:   3.49 kB
+dist/assets/layout-VDnk3jxe.js                       8.61 kB │ gzip:   3.95 kB
+dist/assets/route-BN9KzHB3.js                        8.82 kB │ gzip:   3.82 kB
+dist/assets/route-DVZpJFa_.js                       14.14 kB │ gzip:   6.09 kB
+dist/assets/paths-0mguTiwW.js                       43.99 kB │ gzip:  17.18 kB
+dist/assets/three.core-SkhTC-me.js                 231.07 kB │ gzip:  62.41 kB
+dist/assets/index-DpjOlpQy.js                      797.85 kB │ gzip: 237.75 kB
+dist/assets/Game-BVwLL2R9.js                     2,079.32 kB │ gzip: 617.68 kB
+
+[33m[INEFFECTIVE_DYNAMIC_IMPORT] [0msrc/world/rail/generate.ts is dynamically imported by src/boot/parkGeneration.ts but also statically imported by src/boot/parkGeneration.ts, src/world/coaster/route.ts, src/world/slide/solve.ts, src/world/train/route.ts, dynamic import will not move module into another chunk.
+
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 1200 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 534ms
+
+PWA v1.3.0
+mode      generateSW
+precache  30 entries (3225.17 KiB)
+files generated
+  dist/sw.js
+  dist/workbox-2fbc6a65.js
+build exit: 0

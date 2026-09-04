@@ -1340,6 +1340,26 @@ function onRailway(x: number, z: number, clearance: number): boolean {
 const railProbe = new Vector3();
 
 /**
+ * **Somewhere the railway does not already own** — the corridor, its
+ * platforms, and every bridge's deck and ramps.
+ *
+ * The public face of {@link onRailway}, and it exists for the same reason
+ * {@link clearOfCruiser} does: a scatter that is not routed through
+ * {@link isPlantable} still has to ask *the* owner of "is this the railway",
+ * rather than growing a second idea of where the track is.
+ *
+ * The meadow is that scatter (`world/Flowers.ts`). It asked about paths,
+ * plots, tap zones and the Sky Cruiser and never about the train, so a flower
+ * could sprout between the rails: found on 3 September 2026 by
+ * `check:coplanar`, as `living-flower-stems` sharing a plane with
+ * `track-ballast` on pool seed 225. The seam was the symptom; a flower growing
+ * out of the ballast, inside a fence a child cannot cross, was the defect.
+ */
+export function clearOfRailway(x: number, z: number, clearance: number): boolean {
+  return !onRailway(x, z, clearance);
+}
+
+/**
  * **Where the Sky Cruiser flies too low for this plant to stand under it.**
  *
  * Issue #198: the ride flew through a tree canopy and a bush beside its station

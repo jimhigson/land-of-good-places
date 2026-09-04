@@ -122,6 +122,84 @@ export const PARK_SEED_POOL: readonly number[] = [
   451,
 ];
 
+/**
+ * **The seeds a multi-seed check script sweeps — THE one owner.**
+ *
+ * Before 2 Sep 2026 each sweeping script kept its own hand-typed list
+ * (`CI_SEEDS = [PARK_SEED, 5, 11, 18, 24]` and variations), and when seed
+ * 18 was retired (it structurally needs a level crossing, which no longer
+ * exists — see `test/procgen/invariants.ts`'s header for the ruling) the
+ * lists kept building it and CI went red on a seed the rules say does not
+ * have to pass. A second hand-maintained list that can drift from the pool
+ * is the two-definitions shape this repo keeps paying for, so the sweep
+ * list now derives from the pool itself.
+ *
+ * **Seed 18 (and old seed 2) are not "missing" from this list — they are
+ * out by ruling.** Do not add a non-pool seed back here: a seed that is
+ * not in {@link PARK_SEED_POOL} is not a park a child can be given, and
+ * the filter below throws rather than sweep one.
+ *
+ * The subset is **exactly the pool seeds with a checked-in invariant file**
+ * (the deep sweep), not all sixteen — `vet:seeds` owns whole-pool coverage;
+ * this keeps the blocking chain's cost where it was.
+ *
+ * That sentence was false when it was written: seed 131 had
+ * `test/procgen/seed-131.test.ts` and was not in this list, so a comment
+ * added to retire a hand-maintained list was itself describing a derivation
+ * nobody performed. 131 is in the list now, and — because this module ships
+ * to the browser and cannot read a directory — the agreement is enforced from
+ * the outside instead of promised here:
+ * `check:seed-pool` fails if the two sets ever differ, in either direction.
+ * Add a per-seed file and it tells you to add the seed here; delete one and it
+ * tells you to take it out. It is in the blocking chain, so neither drifts
+ * silently again.
+ *
+ * ## What being in this list does NOT mean
+ *
+ * **It does not mean `check:park` builds that seed's park. `check:park` is
+ * canonical-only.** The only `check:*` step that sweeps this list today is
+ * `check:fountain-hop` — so the `--- seed N: passed` lines in a `pnpm run
+ * check` log are *its* sweep, and nothing else's. The other consumers are
+ * `measure-*`/`sweep-*` scripts nobody runs in CI. Grep before believing
+ * otherwise; the list of importers is short and this comment can rot.
+ *
+ * **The trap that makes this easy to misread**: `check-park.mts` *does*
+ * import something called `SEEDS` (line 72) and prints `N/M seeds placed`
+ * and `N/M waypoints connected`. Those are `poiGraph`'s **waypoint** seeds —
+ * points of interest a child can walk to — and have nothing whatever to do
+ * with park seeds. Two different meanings of "seed", one of them in the
+ * output of the very check people assume is sweeping the other. If you are
+ * checking whether `check:park` covers a park seed, the question is whether
+ * it imports **this** file; it does not.
+ *
+ * Measured 2 Sep 2026: seed 326 is in this list, went green through the whole
+ * 58-step chain, and was stranding 8 waypoints under `check:park` the entire
+ * time. Seed 115 failed the other way round — `check:park` green, three
+ * invariants red. Neither gate implies the other (#437), and neither sees
+ * most of the pool.
+ *
+ * **So when the generator's geometry changes, the tell is `pnpm run
+ * vet:seeds` over the whole pool — not a green `check`, which by
+ * construction cannot see a stale warp vector on ten of the sixteen seeds a
+ * child can actually draw.** See `parkWarp.ts`'s `WARPS_BY_SEED` header.
+ */
+export const CI_SWEEP_SEEDS: readonly number[] = [
+  CANONICAL_PARK_SEED,
+  5,
+  11,
+  24,
+  131,
+  288,
+  326,
+].map(
+  (seed) => {
+    if (!PARK_SEED_POOL.includes(seed)) {
+      throw new Error(`CI_SWEEP_SEEDS: ${seed} is not in PARK_SEED_POOL — sweep only real parks`);
+    }
+    return seed;
+  },
+);
+
 /** Where the drawn seed is remembered, so a reload is the same park. */
 export const PARK_SEED_KEY = 'lgp:parkSeed';
 

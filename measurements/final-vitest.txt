@@ -1,0 +1,114 @@
+
+ RUN  v4.1.11 /Users/jim/dev/landOfGoodPlaces/.claude/worktrees/park-warp
+
+(node:77647) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:77639) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:77643) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:77645) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:77640) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:77644) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:77641) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ test/procgen/seed-24.test.ts (81 tests | 81 skipped) 18658ms
+  the slide over the castle's roof garden: 11 chute sample(s) pass over it, clearing its 12.30 m top by 2.54 m at worst
+[proven-site cover] 3 of 3 built crossing(s) stand on one of 4 proven bridge site(s)
+[unproven-bridge cover] 3 built bridge(s) against 4 proven site(s) on this seed
+  the slide over the castle's roof garden: 4 chute sample(s) pass over it, clearing its 12.15 m top by 2.54 m at worst
+[proven-site cover] 2 of 2 built crossing(s) stand on one of 2 proven bridge site(s)
+[unproven-bridge cover] 2 built bridge(s) against 2 proven site(s) on this seed
+  the slide over the castle's roof garden: 4 chute sample(s) pass over it, clearing its 12.53 m top by 2.54 m at worst
+  the slide over the castle's roof garden: 4 chute sample(s) pass over it, clearing its 12.02 m top by 2.54 m at worst
+[proven-site cover] 3 of 3 built crossing(s) stand on one of 3 proven bridge site(s)
+[unproven-bridge cover] 3 built bridge(s) against 3 proven site(s) on this seed
+[proven-site cover] 2 of 2 built crossing(s) stand on one of 2 proven bridge site(s)
+[unproven-bridge cover] 2 built bridge(s) against 2 proven site(s) on this seed
+file:///Users/jim/dev/landOfGoodPlaces/.claude/worktrees/park-warp/src/world/train/crossingPlanSolve.ts:480
+    throw new Error(
+          ^
+
+Error: crossing plan: the solved railway loop proves NO bridge site anywhere. A park with no way over the railway is invalid; warp the seed (parkWarp.ts) or drop it from the pool. All sixteen pool seeds prove at least one site.
+    at crossingSitesSearch (file:///Users/jim/dev/landOfGoodPlaces/.claude/worktrees/park-warp/src/world/train/crossingPlanSolve.ts:480:11)
+    at crossingSitesSearch.next (<anonymous>)
+    at solveCrossingSites (file:///Users/jim/dev/landOfGoodPlaces/.claude/worktrees/park-warp/src/world/train/crossingPlanSolve.ts:495:25)
+    at file:///Users/jim/dev/landOfGoodPlaces/.claude/worktrees/park-warp/src/world/train/crossingPlan.ts:24:48
+    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:655:26)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v25.6.1
+ ❯ test/procgen/scatterDecoupling.test.ts (4 tests | 1 failed) 35075ms
+     × can tell two parks apart at all 35073ms
+  the slide over the castle's roof garden: 4 chute sample(s) pass over it, clearing its 12.50 m top by 2.54 m at worst
+[proven-site cover] 2 of 2 built crossing(s) stand on one of 2 proven bridge site(s)
+[unproven-bridge cover] 2 built bridge(s) against 2 proven site(s) on this seed
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/procgen/seed-24.test.ts > seed 24
+Error: rail crossings: the drawn paths cross the railway at railD 47.8 (-1.3, -61.3), which snaps to no proven bridge site. Every crossing must be a bridge (Jim, 2 Sep 2026); find the router that drew this leg.
+ ❯ emit src/world/train/crossings.ts:432:11
+    430|     // evidence is.
+    431|     const mid = route.pointAt(midDistance, new Vector3());
+    432|     throw new Error(
+       |           ^
+    433|       `rail crossings: the drawn paths cross the railway at railD ${mi…
+    434|         `(${mid.x.toFixed(1)}, ${mid.z.toFixed(1)}), which snaps to no…
+ ❯ computeCrossings src/world/train/crossings.ts:440:58
+ ❯ footprints src/world/train/bridgeKeepout.ts:46:21
+ ❯ isInBridgeFootprint src/world/train/bridgeKeepout.ts:80:27
+ ❯ onRailway src/world/Scenery.ts:1191:7
+ ❯ isPlantable src/world/Scenery.ts:1165:7
+ ❯ buildFoliage src/world/Scenery.ts:739:10
+ ❯ new Scenery src/world/Scenery.ts:309:21
+ ❯ new World src/world/World.ts:100:20
+ ❯ scripts/park-harness.mts:147:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/procgen/scatterDecoupling.test.ts > scenery scatter is decoupled from the paths > can tell two parks apart at all
+Error: Command failed: node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/scatter-digest.mts
+file:///Users/jim/dev/landOfGoodPlaces/.claude/worktrees/park-warp/src/world/train/crossingPlanSolve.ts:480
+    throw new Error(
+          ^
+
+Error: crossing plan: the solved railway loop proves NO bridge site anywhere. A park with no way over the railway is invalid; warp the seed (parkWarp.ts) or drop it from the pool. All sixteen pool seeds prove at least one site.
+    at crossingSitesSearch (file:///Users/jim/dev/landOfGoodPlaces/.claude/worktrees/park-warp/src/world/train/crossingPlanSolve.ts:480:11)
+    at crossingSitesSearch.next (<anonymous>)
+    at solveCrossingSites (file:///Users/jim/dev/landOfGoodPlaces/.claude/worktrees/park-warp/src/world/train/crossingPlanSolve.ts:495:25)
+    at file:///Users/jim/dev/landOfGoodPlaces/.claude/worktrees/park-warp/src/world/train/crossingPlan.ts:24:48
+    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:655:26)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v25.6.1
+
+ ❯ crossingSitesSearch src/world/train/crossingPlanSolve.ts:480:11
+    478|   // the cure is a warp vector (parkWarp.ts), or the seed leaving the …
+    479|   if (bridges.length === 0) {
+    480|     throw new Error(
+       |           ^
+    481|       'crossing plan: the solved railway loop proves NO bridge site an…
+    482|         'A park with no way over the railway is invalid; warp the seed…
+ ❯ solveCrossingSites src/world/train/crossingPlanSolve.ts:495:25
+ ❯ src/world/train/crossingPlan.ts:24:48
+ ❯ buildDigest test/procgen/scatterDecoupling.test.ts:59:15
+ ❯ test/procgen/scatterDecoupling.test.ts:179:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed | 15 passed (17)
+      Tests  1 failed | 501 passed | 81 skipped (583)
+   Start at  12:42:41
+   Duration  76.54s (transform 4.62s, setup 0ms, import 18.23s, tests 264.43s, environment 1ms)
+
+vitest exit: 1

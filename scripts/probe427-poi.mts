@@ -5,7 +5,7 @@ import { PoiGraph, SEEDS } from '../src/entities/npc/poiGraph.ts';
 import { bridgeHeightAt } from '../src/world/train/bridges.ts';
 import { PARK_SEED } from '../src/world/parkManifest.ts';
 import { TRAIN_PLAN } from '../src/world/train/plan.ts';
-import { CROSSING_SITES, LEVEL_CROSSING_SITES } from '../src/world/train/crossingPlan.ts';
+import { CROSSING_SITES } from '../src/world/train/crossingPlan.ts';
 
 const park = buildHeadlessPark();
 const collision = park.world.collision;
@@ -15,7 +15,7 @@ const route = TRAIN_PLAN.route;
 console.log(`seed ${PARK_SEED}: ${graph.nodes.length}/${SEEDS.length} placed, ${stranded.length} stranded, loop ${route.length.toFixed(1)} m`);
 
 console.log(`\nbridge sites: ${CROSSING_SITES.map((s) => s.railDistance.toFixed(0)).join(', ') || '(none)'}`);
-console.log(`level sites:  ${LEVEL_CROSSING_SITES.map((s) => s.railDistance.toFixed(0)).join(', ') || '(none)'}`);
+console.log('level sites:  (the tier is deleted -- every site is a bridge)');
 console.log(`built bridges: ${park.world.train.bridges.length}`);
 for (const b of park.world.train.bridges as any[]) {
   console.log(`  bridge at (${b.x?.toFixed?.(1)}, ${b.z?.toFixed?.(1)}) keys=${Object.keys(b).slice(0, 12).join(',')}`);
@@ -97,7 +97,7 @@ for (let d = 0; d < route.length; d += 2) {
 }
 if (runStart !== null) openRuns.push(`${runStart.toFixed(0)}-${(route.length).toFixed(0)}`);
 console.log(`  crossable rail distances: ${openRuns.join(', ') || '(none)'}`);
-console.log(`  bridge sites at ${CROSSING_SITES.map((s) => s.railDistance.toFixed(0)).join(', ')}; level sites at ${LEVEL_CROSSING_SITES.map((s) => s.railDistance.toFixed(0)).join(', ')}`);
+console.log(`  bridge sites at ${CROSSING_SITES.map((s) => s.railDistance.toFixed(0)).join(', ')}`);
 console.log(`  NW pocket spans railD 309-325; SE pocket spans railD 191-197`);
 
 // Name the blocker by its geometry: which registered collider covers the point?

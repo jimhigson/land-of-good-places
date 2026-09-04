@@ -1,7 +1,7 @@
 import type { TrainRoute } from './route';
 import { pathCentreline } from '../pathGraph';
 import { ENTRANCE_GATE_X, ENTRANCE_GATE_Z } from '../entrance/layout';
-import { CROSSING_SITES, LEVEL_CROSSING_SITES } from './crossingPlan';
+import { CROSSING_SITES } from './crossingPlan';
 import { Vector3 } from 'three';
 
 /**
@@ -56,26 +56,6 @@ export interface LevelCrossing {
    * falls back to the straight line the old geometry always assumed.
    */
   readonly spine: readonly SpinePoint[];
-  /**
-   * Did `crossingPlanSolve.ts` ever prove a bridge fits here?
-   *
-   * True only for a crossing snapped to a {@link CROSSING_SITES} entry —
-   * ground the planner measured a deck and both ramps onto. False for a
-   * {@link LEVEL_CROSSING_SITES} entry (the planner's deliberate level tier:
-   * it looked, and a bridge does not fit) and for an unsnapped crossing
-   * measured off the drawn paths, which nothing has ever probed.
-   *
-   * `bridgeFootprint.ts`'s late `planReal` pass used to try for a bridge at
-   * every crossing regardless, and where it found one at a level site the
-   * resulting ramp parapets stood across the very path that crossed there —
-   * measured on the canonical seed: bridges at railD 202 and 306, both level
-   * sites, severing `spur-dodgems`, `spur-stall.dodgems` and
-   * `spur-stall.waterFight` and stranding twenty waypoints on ground a child
-   * can otherwise reach. So the answer to "was a bridge proven here" has to
-   * travel with the crossing; the builder cannot re-derive it, because by
-   * then the site lists have been collapsed into this one array.
-   */
-  readonly provenBridgeSite: boolean;
 }
 
 /** One point of a crossing's {@link LevelCrossing.spine}. */
@@ -420,13 +400,12 @@ export function computeCrossings(
     // rail-corridor test sits right at its margin on curved stretches, so
     // that jitter alone flipped provably-feasible sites into level-crossing
     // fallbacks (canonical seed, 2026-08-23: sites 172/228 both lost to it).
-    for (const site of [...CROSSING_SITES, ...LEVEL_CROSSING_SITES]) {
+    for (const site of CROSSING_SITES) {
       const along = Math.abs(
         route.wrap(midDistance - site.railDistance + route.length / 2) - route.length / 2,
       );
       if (along <= SITE_SNAP_TOLERANCE) {
         crossings.push({
-          provenBridgeSite: site.bridge,
           x: site.x,
           z: site.z,
           railDistance: site.railDistance,
@@ -444,20 +423,17 @@ export function computeCrossings(
         return;
       }
     }
+    // A crossing measured off the drawn paths that snaps to no proven
+    // bridge site is a path illegally over the railway — paths.ts only
+    // crosses through CROSSING_SITES now, so this is always a bug upstream,
+    // and there is no level tier to hand it to. Fail the build where the
+    // evidence is.
     const mid = route.pointAt(midDistance, new Vector3());
-    const midTangent = route.tangentAt(midDistance, new Vector3());
-    crossings.push({
-      x: mid.x,
-      z: mid.z,
-      railDistance: midDistance,
-      pathDirX: midTangent.z,
-      pathDirZ: -midTangent.x,
-      halfGap,
-      // Nothing proved anything here: this crossing was measured off the
-      // drawn paths, at a rail distance no site list holds.
-      provenBridgeSite: false,
-    });
-    group = [];
+    throw new Error(
+      `rail crossings: the drawn paths cross the railway at railD ${midDistance.toFixed(1)} ` +
+        `(${mid.x.toFixed(1)}, ${mid.z.toFixed(1)}), which snaps to no proven bridge site. ` +
+        'Every crossing must be a bridge (Jim, 2 Sep 2026); find the router that drew this leg.',
+    );
   };
   for (const flip of flips) {
     const last = group[group.length - 1];

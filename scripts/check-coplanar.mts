@@ -102,6 +102,20 @@ interface Finding {
   readonly score: number;
   readonly occluded: boolean;
   readonly seed: number;
+  /**
+   * The **two objects as they are really named**, before {@link stableName}
+   * folds a bridge's rail distance out of them — so the seam count below can
+   * ask its question of one bridge at a time rather than of all of them at
+   * once. See {@link facingsPerInstance}.
+   */
+  readonly instance: string;
+  /**
+   * The shared plane's normal. Carried because a finding is split off from its
+   * neighbour by nothing more than that normal, and the seam count has to know
+   * whether two findings are two facings or one surface bending. Plain numbers
+   * rather than a `Vector3`: every finding crosses a process boundary as JSON.
+   */
+  readonly normal: readonly [number, number, number];
 }
 
 /**
@@ -178,6 +192,8 @@ function sweepThisSeed(): Finding[] {
       score: seam.score,
       occluded: seam.occluded,
       seed: PARK_SEED,
+      instance: `${seam.a}|${seam.b}`,
+      normal: [seam.normal.x, seam.normal.y, seam.normal.z] as const,
     }));
 }
 
@@ -256,10 +272,13 @@ const BASELINE_HEADER = `/**
  * shows up here as growth.
  *
  * \`seams\` is how many distinct **facings** the two share on the worst single
- * seed. Two objects can meet pointing more than one way, and two different
- * objects can share a path — \`hotel.wall\` appears twice below, because both
- * meshes are called that — so without a count a third wall joining an existing
- * key would pass in silence.
+ * seed, and on the worst single pair of real objects folded into the key. Two
+ * objects can meet pointing more than one way, and two different objects can
+ * share a path — \`hotel.wall\` appears twice below, because both meshes are
+ * called that — so without a count a third wall joining an existing key would
+ * pass in silence. Facings 15° or less apart are one facing: a surface that
+ * bends is not two ways of meeting. A model the park builds twice is not two
+ * either.
  *
  * \`fighting\` is true where the two faces are within 0.1 mm — the depth buffer
  * has nothing to resolve and the seam strobes now; false means they are held
@@ -304,13 +323,108 @@ findings.sort((a, b) => a.seed - b.seed || (a.key < b.key ? -1 : a.key > b.key ?
 // ------------------------------------------------------------------ the gate
 
 /**
+ * **Two findings are the same facing if their normals are within this of each
+ * other, chained.** 15°.
+ *
+ * Not a tolerance on the geometry — the sweep has already decided these faces
+ * share a plane. It is the answer to "how many *ways* do these two objects meet
+ * here", and it has to be a chain rather than a bucket because a bucket's own
+ * edge would split a surface at an arbitrary angle.
+ *
+ * The number sits in a wide gap. Below it: a surface that bends. The sweep
+ * separates findings on the normal rounded to `Math.round(n * 100)` — steps of
+ * about **0.57°** — so a kerb following a path that rises to a bridge is
+ * reported as several findings whose normals differ by a few degrees, and
+ * chaining walks along them however far the run curves in total. Above it: two
+ * objects genuinely meeting more than one way, which is a corner — 90°, or 45°
+ * at the shallowest thing in this game.
+ *
+ * @see facingsPerSeed for what went wrong without it.
+ */
+const SAME_FACING_DEGREES = 15;
+const SAME_FACING_COS = Math.cos((SAME_FACING_DEGREES * Math.PI) / 180);
+
+/**
+ * **How many ways these two objects meet, on each seed — not how many findings
+ * the sweep split that into.**
+ *
+ * This is the `seams` the baseline records, and it went wrong in both of the
+ * ways this file's own `stableName` header warns about, on the branch that
+ * makes every rail crossing a bridge (#474). It counted findings, and a finding
+ * is split from its neighbour by a normal rounded at half a degree, so:
+ *
+ * 1. **A surface that bends counted as several facings.** Pool seed 225's
+ *    `garden/path-kerb|garden/path-surface` went from 1 to 3 — measured, the
+ *    three normals were 1.9°, 2.5° and 6.8° off vertical: one kerb, following
+ *    one path, over ground that is not flat.
+ * 2. **A model built more than once counted once per copy.** Seed 225 builds
+ *    bridges at railD 102 and 194, each with the same modelled
+ *    `terrain|wallTop` contact, and the count came out 2 where the baseline
+ *    said 1 — undoing exactly what taking the rail distance out of the key was
+ *    for. `stableName`: *"a bridge is one model, and a seam in it is one
+ *    finding however many the park builds."*
+ *
+ * Neither is a new coplanar seam and neither is anything a builder did. So the
+ * count is taken **per real object pair, clustered by facing** (see
+ * {@link SAME_FACING_DEGREES}), and the key's figure is the **worst single
+ * instance** rather than the sum over instances.
+ *
+ * What it still catches is what the clause was written for: a third object
+ * hiding under a name another already uses — `hotel.wall|hotel.wall` is a real
+ * key — shows up as a second facing on that one pair and is red. Proved by
+ * mutation: giving one bridge's `wallTop` a second, 90°-apart contact with the
+ * terrain takes its key from 1 to 2 and fails.
+ */
+function facingsPerSeed(all: readonly Finding[]): Map<string, number> {
+  /** Every finding, grouped by seed, ratchet key, and real object pair. */
+  const groups = new Map<string, Finding[]>();
+  for (const finding of all) {
+    const id = `${finding.seed} ${finding.key} ${finding.instance}`;
+    const group = groups.get(id);
+    if (group) group.push(finding);
+    else groups.set(id, [finding]);
+  }
+
+  const perSeed = new Map<string, number>();
+  for (const [id, group] of groups) {
+    const [seed, key] = id.split(' ') as [string, string];
+    // Union-find over the group's normals: two findings join if they are
+    // within SAME_FACING_COS of each other, and joining is transitive, so a
+    // surface bending through any total angle in small steps stays one facing.
+    const parent = group.map((_, index) => index);
+    const find = (index: number): number => {
+      let root = index;
+      while (parent[root] !== root) root = parent[root] as number;
+      return root;
+    };
+    for (let i = 0; i < group.length; i += 1) {
+      for (let j = i + 1; j < group.length; j += 1) {
+        const [ax, ay, az] = (group[i] as Finding).normal;
+        const [bx, by, bz] = (group[j] as Finding).normal;
+        if (ax * bx + ay * by + az * bz < SAME_FACING_COS) continue;
+        const rootI = find(i);
+        const rootJ = find(j);
+        if (rootI !== rootJ) parent[rootJ] = rootI;
+      }
+    }
+    const facings = new Set(group.map((_, index) => find(index))).size;
+    const seedKey = `${seed} ${key}`;
+    // The worst single instance, never the total: see this function's header.
+    perSeed.set(seedKey, Math.max(perSeed.get(seedKey) ?? 0, facings));
+  }
+  return perSeed;
+}
+
+/**
  * Worst seen per key across the whole pool — the numbers the baseline records.
  *
  * **`seams` is per seed, not a total**, and it is what closes the hole the key
  * would otherwise leave: two *different* objects can share one path —
  * `hotel.wall|hotel.wall` is a real key today, because both meshes are called
  * `hotel.wall` — so without it a third wall joining them would land on an
- * existing key and pass in silence. It counts distinct facings; two objects
+ * existing key and pass in silence. It counts distinct facings — see
+ * {@link facingsPerSeed}, which is where "distinct" is decided, and which is
+ * the difference between a facing and a surface that bends. Two objects
  * meeting in two parallel planes fold into one seam whose `area` is their sum,
  * and that case is caught by `area` instead.
  *
@@ -327,12 +441,8 @@ const worst = new Map<
   { area: number; separation: number; seams: number; best: Finding }
 >();
 {
-  /** How many seams each key had **on one seed**, so the max is comparable. */
-  const perSeed = new Map<string, number>();
-  for (const finding of findings) {
-    const seedKey = `${finding.seed} ${finding.key}`;
-    perSeed.set(seedKey, (perSeed.get(seedKey) ?? 0) + 1);
-  }
+  /** How many facings each key had **on one seed**, so the max is comparable. */
+  const perSeed = facingsPerSeed(findings);
   for (const finding of findings) {
     const seams = perSeed.get(`${finding.seed} ${finding.key}`) ?? 1;
     const previous = worst.get(finding.key);

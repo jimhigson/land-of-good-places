@@ -7,12 +7,7 @@ import { TRAIN_PLAN, RAIL_CORRIDOR_CLEARANCE as RAIL_CORRIDOR_CLEARANCE_PLAN } f
 import { STATION_GAP } from './train/fence';
 import { FENCE_OFFSET } from './train/clearance';
 import { DECK_HALF_LENGTH } from './train/bridgeFootprint';
-import {
-  CROSSING_SITES,
-  LEVEL_CROSSING_SITES,
-  LEVEL_CROSSING_PENALTY,
-  type CrossingSite,
-} from './train/crossingPlan';
+import { CROSSING_SITES, type CrossingSite } from './train/crossingPlan';
 import { COASTER_PLANS } from './coaster/plan';
 import { RAIL_RACE_PLAN } from './railRace/plan';
 import { archFeet } from './railRace/arch';
@@ -897,8 +892,8 @@ function crossingFeet(site: CrossingSite): {
     ] as const;
   };
   return {
-    plus: foot(1, site.bridge ? site.rampReachPos + 1.0 : 4.0),
-    minus: foot(-1, site.bridge ? site.rampReachNeg + 1.0 : 4.0),
+    plus: foot(1, site.rampReachPos + 1.0),
+    minus: foot(-1, site.rampReachNeg + 1.0),
   };
 }
 
@@ -912,9 +907,8 @@ function crossingFeet(site: CrossingSite): {
  * the near ramp foot, dead straight along the crossing's own axis over the
  * rail, ordinary routing onward — so the drawn network only ever meets the
  * railway where `crossingPlan.ts` proved a bridge fits. Site choice
- * minimises real walked length, with {@link LEVEL_CROSSING_PENALTY} extra
- * charged for a level-crossing site so a bridge always wins when one is in
- * reach.
+ * minimises real walked length. Every site is a bridge — the level tier is
+ * gone (Jim, 2 Sep 2026).
  */
 function routeLeg(
   from: readonly [number, number],
@@ -939,7 +933,7 @@ function routeLeg(
     return sameSideLeg(from, to, fromSide);
   }
 
-  const candidates = [...CROSSING_SITES, ...LEVEL_CROSSING_SITES]
+  const candidates = [...CROSSING_SITES]
     .map((site) => {
       const feet = crossingFeet(site);
       const near = fromSide === 1 ? feet.plus : feet.minus;
@@ -947,15 +941,13 @@ function routeLeg(
       const cost =
         Math.hypot(from[0] - near[0], from[1] - near[1]) +
         Math.hypot(near[0] - far[0], near[1] - far[1]) +
-        Math.hypot(far[0] - to[0], far[1] - to[1]) +
-        (site.bridge ? 0 : LEVEL_CROSSING_PENALTY);
+        Math.hypot(far[0] - to[0], far[1] - to[1]);
       return { site, near, far, cost };
     })
     .sort((a, b) => a.cost - b.cost);
-  // No site anywhere on the loop (should not happen — the level tier exists
-  // for exactly this): the old behaviour, an ad-hoc crossing wherever the
-  // route lands, is still better than no path at all.
-  if (candidates.length === 0) return manhattanRoute(from, to);
+  // CROSSING_SITES is non-empty by construction — crossingSitesSearch fails
+  // the whole build rather than publish a loop with no bridge site — so
+  // there is always a candidate here and no ad-hoc fallback crossing.
 
   const build = (candidate: (typeof candidates)[number]): (readonly [number, number])[] => {
     const site = candidate.site;
@@ -1151,15 +1143,14 @@ function doubleCrossingLeg(
   to: readonly [number, number],
   side: 1 | -1,
 ): (readonly [number, number])[] | null {
-  const sites = [...CROSSING_SITES, ...LEVEL_CROSSING_SITES];
+  const sites = CROSSING_SITES;
   if (sites.length < 2) return null;
   const pick = (x: number, z: number, not: CrossingSite | null): CrossingSite | null => {
     let best: CrossingSite | null = null;
     let bestCost = Infinity;
     for (const site of sites) {
       if (site === not) continue;
-      const cost =
-        Math.hypot(site.x - x, site.z - z) + (site.bridge ? 0 : LEVEL_CROSSING_PENALTY);
+      const cost = Math.hypot(site.x - x, site.z - z);
       if (cost < bestCost) {
         bestCost = cost;
         best = site;
@@ -1973,7 +1964,6 @@ const RAMP_SCREEN_MARGIN = 0.5;
  */
 export function pointStandsOnABridgeRamp(x: number, z: number, margin = RAMP_SCREEN_MARGIN): boolean {
   for (const site of CROSSING_SITES) {
-    if (!site.bridge) continue;
     const dx = x - site.x;
     const dz = z - site.z;
     const across = -dx * site.dirZ + dz * site.dirX;
@@ -2026,7 +2016,6 @@ export function pointStandsOnABridgeRamp(x: number, z: number, margin = RAMP_SCR
  */
 function pointStandsOnBridgeMasonry(x: number, z: number, margin = RAMP_SCREEN_MARGIN): boolean {
   for (const site of CROSSING_SITES) {
-    if (!site.bridge) continue;
     const dx = x - site.x;
     const dz = z - site.z;
     const across = Math.abs(-dx * site.dirZ + dz * site.dirX);
@@ -2337,7 +2326,7 @@ function* streetLatticeSearch(): Generator<number, StreetLattice, void> {
   // routes fall out of plain Dijkstra rather than being a special case.
   // Registered after the cache is set because the stub search below reads
   // the finished node/edge tables through it.
-  for (const site of [...CROSSING_SITES, ...LEVEL_CROSSING_SITES]) {
+  for (const site of CROSSING_SITES) {
     yield site.railDistance;
     const feet = crossingFeet(site);
     const stubsPlus = streetStubs(feet.plus, false);
@@ -2391,7 +2380,7 @@ function* streetLatticeSearch(): Generator<number, StreetLattice, void> {
           rim: compass,
           kind: 'crossing',
           via,
-          cost: tapLength + (site.bridge ? 0 : LEVEL_CROSSING_PENALTY * 2),
+          cost: tapLength,
         });
         continue;
       }
@@ -2436,13 +2425,7 @@ function* streetLatticeSearch(): Generator<number, StreetLattice, void> {
       const q = chain[s] as readonly [number, number];
       length += Math.hypot(q[0] - p[0], q[1] - p[1]);
     }
-    // Twice the routeLeg-era penalty, deliberately: the graph search
-    // compares whole-network walks where terminating on any already-paved
-    // street makes a nearby level crossing look cheap in a way the old
-    // two-leg comparison never saw — measured on seed 11, a level site
-    // 31 m from a perfectly good bridge won under the plain penalty and
-    // put a level crossing where Decision 8 wants the rare exception.
-    const cost = length + (site.bridge ? 0 : LEVEL_CROSSING_PENALTY * 2);
+    const cost = length;
     (neighbours[stubPlus.node] as LatticeNeighbour[]).push({
       to: stubMinus.node,
       dir: 8,

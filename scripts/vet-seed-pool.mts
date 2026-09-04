@@ -8,10 +8,29 @@
  * *used* to work.
  *
  * ```
- * pnpm run vet:seeds -- 1 60            # vet the range [1, 60]
+ * pnpm run vet:seeds -- --pool          # vet THE POOL — the sixteen real parks
+ * pnpm run vet:seeds -- 1 60            # vet the candidate range [1, 60]
  * pnpm run vet:seeds -- --list 5,11,24  # vet exactly these
- * pnpm run vet:seeds -- 1 60 --jobs 4   # …with four at a time
+ * pnpm run vet:seeds -- --pool --jobs 4 # …with four at a time
  * ```
+ *
+ * ## Two things about this script that were, briefly, footguns
+ *
+ * **It has no bare form, on purpose.** `pnpm run vet:seeds` with no arguments
+ * used to vet *candidate* seeds **1–30** and print
+ * `N/30 candidate seeds passed both gates` — which reads exactly like pool
+ * coverage to anyone who has not opened this file, while touching only two of
+ * the pool's sixteen seeds. It was reported as pool coverage once, on the
+ * branch that deleted the level-crossing tier, where the pool *was* the thing
+ * under test. It now refuses and tells you the three real forms; `--pool` is
+ * the one almost everybody wants, and it reads `PARK_SEED_POOL` itself rather
+ * than making you paste sixteen numbers that can drift from it.
+ *
+ * **It exits non-zero when a seed fails.** It used to print `14/16` and exit
+ * **0**, so a caller reading the exit code — a CI step, a script, an agent —
+ * got "pass" from a run that had just found two broken parks. A report that
+ * cannot fail is CLAUDE.md's oldest lesson here; this one is now a gate as
+ * well as a report.
  *
  * ## The two gates, and why both
  *
@@ -46,6 +65,7 @@ import { execFile } from 'node:child_process';
 import { appendFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { relative } from 'node:path';
 import { promisify } from 'node:util';
+import { PARK_SEED_POOL } from '../src/world/parkSeedPool.ts';
 
 const run = promisify(execFile);
 
@@ -71,7 +91,7 @@ interface Verdict {
 // of a flag and the range comes out empty.
 const args = process.argv.slice(2).filter((a) => a !== '--');
 const FLAGS = ['--list', '--jobs', '--out'] as const;
-const BOOLEAN_FLAGS = ['--fast'];
+const BOOLEAN_FLAGS = ['--fast', '--pool'];
 
 function flag(name: (typeof FLAGS)[number]): string | undefined {
   const at = args.indexOf(name);
@@ -83,9 +103,37 @@ const positional = args.filter(
   (a, i) => !a.startsWith('--') && !isFlag(args[i - 1]) && !BOOLEAN_FLAGS.includes(a),
 );
 const listed = flag('--list');
-const seeds = listed
-  ? listed.split(',').map((s) => Number(s.trim()))
-  : rangeInclusive(Number(positional[0] ?? 1), Number(positional[1] ?? 30));
+/**
+ * `--pool` reads {@link PARK_SEED_POOL} rather than taking sixteen numbers on
+ * the command line. A pasted list is a second definition of the pool, and this
+ * is the script whose whole job is to say whether the pool is sound — the one
+ * place that copy must not exist.
+ */
+const wholePool = args.includes('--pool');
+const seeds = wholePool
+  ? [...PARK_SEED_POOL]
+  : listed
+    ? listed.split(',').map((s) => Number(s.trim()))
+    : positional.length > 0
+      ? rangeInclusive(Number(positional[0]), Number(positional[1] ?? positional[0]))
+      : refuseBareInvocation();
+
+/**
+ * **There is no default.** See this file's header: the bare form used to vet
+ * candidate seeds 1–30 and announce the result in words that read as pool
+ * coverage. Refusing is the fix; guessing which of the two the caller meant is
+ * how the original defect worked.
+ */
+function refuseBareInvocation(): never {
+  process.stderr.write(
+    'vet:seeds needs to be told what to vet — there is no default, because the\n' +
+      'one it used to have (candidate seeds 1-30) reads like pool coverage and is not.\n\n' +
+      `  pnpm run vet:seeds -- --pool          the ${PARK_SEED_POOL.length} real parks a child can be given\n` +
+      '  pnpm run vet:seeds -- 1 60            candidate seeds in a range\n' +
+      '  pnpm run vet:seeds -- --list 5,11,24  exactly these\n',
+  );
+  process.exit(2);
+}
 const jobs = Math.max(1, Number(flag('--jobs') ?? 3));
 const out = flag('--out') ?? 'seed-vetting.jsonl';
 /** Stop at the first gate a candidate fails. See {@link vet}. */
@@ -282,4 +330,20 @@ process.stdout.write(
   `vetting ${seeds.length} seed(s), ${jobs} at a time, into ${relative(process.cwd(), out) || out}\n`,
 );
 await Promise.all(Array.from({ length: Math.min(jobs, seeds.length) }, () => worker()));
-process.stdout.write(`\n${passes}/${seeds.length} candidate seeds passed both gates\n`);
+const failed = seeds.length - passes;
+const what = wholePool ? `pool seed${seeds.length === 1 ? '' : 's'}` : 'candidate seeds';
+process.stdout.write(`\n${passes}/${seeds.length} ${what} passed both gates\n`);
+
+// **Exit non-zero when anything failed.** This used to print its tally and
+// return 0, so a caller reading the exit code got "pass" from a run that had
+// just found broken parks — and on the level-crossing branch the pool's
+// soundness rested on exactly this script. A report nobody can hear fail is
+// the same defect as a check that cannot fail.
+if (failed > 0) {
+  process.stderr.write(
+    `vet:seeds: ${failed} seed(s) failed a gate${
+      wholePool ? ' — these are parks a child can be given' : ''
+    }. See ${relative(process.cwd(), out) || out}.\n`,
+  );
+  process.exitCode = 1;
+}

@@ -51,7 +51,7 @@ function check(claim: string, ok: boolean, detail: string): void {
   }
 }
 
-const { CANONICAL_PARK_SEED, PARK_SEED_KEY, PARK_SEED_POOL, forgetParkSeed, parkSeedFor, parkSeedSource, resolveParkSeed } =
+const { CANONICAL_PARK_SEED, CI_SWEEP_SEEDS, PARK_SEED_KEY, PARK_SEED_POOL, forgetParkSeed, parkSeedFor, parkSeedSource, resolveParkSeed } =
   await import('../src/world/parkSeedPool.ts');
 
 console.log(`check:seed-pool: ${PARK_SEED_POOL.length} seed(s) in the pool\n`);
@@ -237,6 +237,65 @@ check(
   `got ${real.join(', ')} — on Node ${process.versions.node}. This is issue #496: ` +
     'a seeded park that is not the same twice makes every invariant and every ' +
     'threshold in every check script a coin flip',
+);
+
+// ------------------------------------------------- CI_SWEEP_SEEDS is derived
+//
+// `parkSeedPool.ts` documents CI_SWEEP_SEEDS as "exactly the pool seeds with a
+// checked-in invariant file". That sentence was false when it was written —
+// seed 131 had `test/procgen/seed-131.test.ts` and was not in the list — so a
+// comment added to retire a hand-maintained list was itself describing a
+// derivation nobody performed. The `throw` beside the list could not catch it:
+// that checks pool MEMBERSHIP, which says nothing about which pool seeds got
+// left out of the sweep.
+//
+// The list has to stay a literal, because that module ships to the browser and
+// cannot read a directory. So the derivation is performed here, where a
+// directory is readable, and it fails in **both** directions — each is a real
+// defect. A file with no list entry is a seed that looks deeply swept and is
+// not; a list entry with no file is a sweep step that measures nothing.
+//
+// Proved red both ways before being trusted: dropping 131 from the list names
+// 131, and adding 451 to it names 451.
+
+const { readdirSync } = await import('node:fs');
+
+/**
+ * Every seed with a per-seed invariant file. `seed-canonical.test.ts` is the
+ * canonical seed under its name rather than its number; `vet-seed-<n>.test.ts`
+ * is the throwaway `vet-seed-pool.mts` and `warp-search.mts` write for a seed
+ * with no checked-in file, and is deliberately not counted — it is gitignored
+ * scratch that a killed run can leave behind.
+ */
+const seedsWithInvariantFiles = readdirSync('test/procgen')
+  .map((name) =>
+    name === 'seed-canonical.test.ts'
+      ? CANONICAL_PARK_SEED
+      : Number(/^seed-(\d+)\.test\.ts$/.exec(name)?.[1] ?? NaN),
+  )
+  .filter((seed) => Number.isFinite(seed))
+  .sort((a, b) => a - b);
+
+const sweptListed = [...CI_SWEEP_SEEDS].sort((a, b) => a - b);
+const notListed = seedsWithInvariantFiles.filter((seed) => !sweptListed.includes(seed));
+const noFile = sweptListed.filter((seed) => !seedsWithInvariantFiles.includes(seed));
+
+check(
+  `CI_SWEEP_SEEDS is exactly the ${seedsWithInvariantFiles.length} pool seed(s) with an ` +
+    `invariant file (${sweptListed.join(', ')})`,
+  notListed.length === 0 && noFile.length === 0,
+  [
+    notListed.length > 0
+      ? `${notListed.join(', ')} have test/procgen/seed-<n>.test.ts but are not in ` +
+        'CI_SWEEP_SEEDS, so they look deeply swept and are not'
+      : '',
+    noFile.length > 0
+      ? `${noFile.join(', ')} are in CI_SWEEP_SEEDS with no test/procgen/seed-<n>.test.ts, ` +
+        'so those sweep steps measure nothing'
+      : '',
+  ]
+    .filter(Boolean)
+    .join('; '),
 );
 
 // --------------------------------------------------------------------- verdict

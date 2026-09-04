@@ -39,15 +39,19 @@
  *
  * 24 is the only candidate that is green, and 32.5 m is comfortably in the
  * long-bridge regime the coverage exists for — half as long again as the 22 m
- * geometry that let #352 through. Its shape also matches seed 2's: two rail
- * crossings, of which one takes a bridge and one stays level.
+ * geometry that let #352 through. (When registered its shape matched seed
+ * 2's — two rail crossings, one bridged and one level; since 2 Sep 2026 the
+ * level tier is deleted and every crossing it builds is a bridge, measured
+ * green across the whole suite before the deletion landed.)
  *
- * **And it exercises the rule that replaced seed 2.** With
- * `LGP_ALLOW_UNPROVEN_BRIDGES=1` this seed goes red on exactly one invariant —
- * `no bridge stands where the crossing planner proved none fits` — so it is a
- * park that *would* have built a bridge on rejected ground. It is not merely a
- * quiet seed; it is a seed with something to say about the change it is here
- * for.
+ * **And it exercises the rule that replaced seed 2.** When registered,
+ * `LGP_ALLOW_UNPROVEN_BRIDGES=1` sent this seed red on exactly one
+ * invariant — `no bridge stands where the crossing planner proved none
+ * fits` — so it is a park that *would* have built a bridge on rejected
+ * ground. That reversal lever died with the level tier (an unproven
+ * crossing now fails the build in `crossings.ts` before the bridge search
+ * ever sees it), so the sentence above is a record of the proof, not a
+ * reproduction recipe.
  */
 import { registerParkInvariants } from './invariants.ts';
 

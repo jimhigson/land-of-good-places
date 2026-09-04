@@ -58,8 +58,7 @@ if (!process.env['LGP_ONE_SEED']) {
 }
 
 const { PARK_SEED } = await import('../src/world/parkManifest.ts');
-const { CROSSING_SITES, LEVEL_CROSSING_SITES } = await import('../src/world/train/crossingPlan.ts');
+const { CROSSING_SITES } = await import('../src/world/train/crossingPlan.ts');
 console.log(
-  `seed ${PARK_SEED}: ${CROSSING_SITES.length} bridge sites, ` +
-    `${LEVEL_CROSSING_SITES.length} level sites`,
+  `seed ${PARK_SEED}: ${CROSSING_SITES.length} bridge sites`,
 );

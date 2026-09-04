@@ -128,14 +128,6 @@ export class ParkTrain implements GameSystem, TrainService {
   readonly bridges: readonly Bridge[] = [];
   /** Every bridge's own deck and ramp treads — folded into {@link platforms}. */
   private readonly bridgePlatforms: readonly MovingPlatform[] = [];
-  /**
-   * Crossings the real, backtracking footprint search (issues #317, #319)
-   * could not find any walkable bridge for at all — genuinely rare, the
-   * last resort before this class of failure was falling straight through
-   * to a known-too-close edge. `fence.ts` opens an ordinary ground-level
-   * gap for each, exactly the pre-Decision-8 level crossing.
-   */
-  readonly fallbackCrossings: readonly LevelCrossing[] = [];
 
   /**
    * The first-person view from the player's seat (Decision 4 C2), built on
@@ -265,7 +257,6 @@ export class ParkTrain implements GameSystem, TrainService {
     });
     this.bridges = built.bridges;
     this.bridgePlatforms = built.platforms;
-    this.fallbackCrossings = built.fallbackCrossings;
     this.group.add(built.group);
     for (const rail of built.guardRails) {
       // A masonry parapet/spandrel wall: solid from the ground (blocks a
@@ -326,7 +317,6 @@ export class ParkTrain implements GameSystem, TrainService {
         collision,
         this.bridges,
         this.stations.map((station) => ({ distance: station.distance })),
-        this.fallbackCrossings,
       ),
     );
 

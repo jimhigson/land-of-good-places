@@ -14,7 +14,7 @@ import { Vector3 } from 'three';
 import { buildHeadlessPark } from './park-harness.mts';
 import { PARK_SEED } from '../src/world/parkManifest.ts';
 import { TRAIN_PLAN } from '../src/world/train/plan.ts';
-import { CROSSING_SITES, LEVEL_CROSSING_SITES } from '../src/world/train/crossingPlan.ts';
+import { CROSSING_SITES } from '../src/world/train/crossingPlan.ts';
 import { ROUTES, routeCurve, isOnPath } from '../src/world/pathGraph.ts';
 import { bridgeHeightAt } from '../src/world/train/bridges.ts';
 import { NPC_RADIUS } from '../src/core/constants.ts';
@@ -57,7 +57,7 @@ const blamed = (x: number, z: number, r: number): string => {
 
 const at = new Vector3();
 console.log(`seed ${PARK_SEED}, loop ${route.length.toFixed(1)} m`);
-console.log(`bridge sites ${CROSSING_SITES.map((s) => s.railDistance.toFixed(0)).join(',')} ; level sites ${LEVEL_CROSSING_SITES.map((s) => s.railDistance.toFixed(0)).join(',')}`);
+console.log(`bridge sites ${CROSSING_SITES.map((s) => s.railDistance.toFixed(0)).join(',')}`);
 
 let totalBlocked = 0;
 for (const definition of ROUTES) {
