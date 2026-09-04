@@ -885,10 +885,12 @@ async function ride(wired: boolean): Promise<RunResult> {
   if (gaveUp > 0) {
     say(
       'the spacing solve found a seat',
-      `the bend allowance ran out on ${gaveUp} companion-frames — this chute bends hard enough ` +
+      `the bend allowance ran out on ${gaveUp} seat solves — this chute bends hard enough ` +
         `that ${MAX_BEND_ALLOWANCE} m of extra chute still did not put a companion clear of ` +
-        'the body in front, so it was seated too close and may be drawn inside her. Raising the ' +
-        'allowance is the wrong fix; the seat is wanted, not the clamp',
+        'the body in front, so it was seated too close and may be drawn inside her. (A solve ' +
+        'is one link of the chain, and the chain is re-walked from her for every companion, ' +
+        'so a frame with n of them costs n(n+1)/2 solves — not one per companion.) Raising ' +
+        'the allowance is the wrong fix; the seat is wanted, not the clamp',
     );
   }
 

@@ -258,8 +258,18 @@ export const MAX_BEND_ALLOWANCE = 1.5;
 
 /**
  * How many times the solve has run out of {@link MAX_BEND_ALLOWANCE} since the
- * last reset — i.e. how many companion-frames were seated **closer than the
+ * last reset — i.e. how many **seat solves** ended up **closer than the
  * clearance asks for**, because no reachable seat satisfied it.
+ *
+ * **The unit is a seat solve, not a companion-frame**, and the two are not even
+ * a constant factor apart. {@link arcForChord} is called once per *link* of the
+ * chain, and {@link petSeatOnSlide} re-walks that chain from her for every
+ * companion, so slot `k` costs `k + 1` calls and a frame with `n` companions
+ * costs `n(n + 1) / 2` — twice the companion count at three, four and a half
+ * times it at eight. An earlier draft of this said companion-frames, which made
+ * the forced-failure run report 4320 of them on a 720-frame descent with three
+ * companions: an impossible sentence read literally, and 4320 is exactly
+ * `720 × (1 + 2 + 3)`.
  *
  * A plain count rather than a throw: this runs every frame of a real ride, and
  * a child who has done nothing wrong should not be shown a crash because her
@@ -410,11 +420,16 @@ export function petSeatOnSlide(
   // and the same one `check:pet-slide` asserts. It is re-walked per slot rather
   // than cached because the ride asks for one seat at a time and a cache would
   // be a second description of where the line is; at eight companions the whole
-  // chain is re-walked for each of them, so the cost is the triangle 8·9/2 = 36
-  // links a frame, each sampling the curve at least four times (twice per
-  // `seatPointFor`, and more wherever a bend makes the solve step) — call it
-  // 150 samples a frame rather than the "few dozen" an earlier draft of this
-  // comment claimed, which counted links and forgot what a link costs.
+  // chain is re-walked for each of them, so the cost is **quadratic in the
+  // number of companions**: `n(n + 1) / 2` links a frame, each sampling the
+  // curve at least four times (twice per `seatPointFor`, and more wherever a
+  // bend makes the solve step). There is no cap on pets — Jim, 30 August 2026,
+  // *"Currently there is no limit"* — so this is a shape, not a budget: the
+  // three the check rides with cost 6 links a frame, eight would cost 36 at
+  // roughly 150 curve samples, and twenty would cost 210. Two earlier drafts of
+  // this note were wrong in opposite directions: one said "a few dozen samples",
+  // counting links and forgetting what a link costs, and the other quoted the
+  // eight-companion figure as though eight were a maximum.
   chutePointAt(slide, riderDistance, ahead);
 
   let distance = riderDistance;
