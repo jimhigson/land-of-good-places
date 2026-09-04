@@ -84,17 +84,18 @@ if (major < floor) {
   console.error(
     `check:node FAILED — running on Node v${running}, but this repo needs >= ${floor}.\n` +
       '\n' +
-      '  Every check below this one would have run on this same too-old runtime, and\n' +
-      '  some of them behave differently on it — issue #496 was a non-determinism that\n' +
-      '  cannot occur below Node 26 at all, so days of "byte-identical locally" were\n' +
-      '  measured on a runtime that could not show it.\n' +
-      '\n' +
-      '  Run the chain under a current Node:\n' +
+      '  Run this instead — it picks a current Node for you:\n' +
       '\n' +
       '    scripts/with-node pnpm run check\n' +
       '\n' +
-      '  (`scripts/with-node` finds the newest installed Node and fails loudly if there\n' +
-      '  is none — see #506.)',
+      '  (Prefix any check the same way: `scripts/with-node pnpm run <script>`.)\n' +
+      '\n' +
+      '  Why this is a hard failure rather than a warning: every check below this one\n' +
+      '  would have run on the same too-old runtime, and some behave differently on it.\n' +
+      '  Issue #496 was a non-determinism that cannot occur below Node 26 at all, so\n' +
+      '  days of "byte-identical locally" were measured on a runtime that could not\n' +
+      '  show the bug being hunted. A wrong runtime does not produce wrong answers; it\n' +
+      '  produces confident ones. See #506.',
   );
   process.exit(1);
 }
