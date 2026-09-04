@@ -98,13 +98,37 @@
  *
  *    All three are counted and printed on every run, passing or failing.
  *
- *    The overlap half is asked of what is **drawn** — two `sprite.visible`
- *    flags — rather than of `NpcSystem.speechTextOf`, the one getter both
- *    sides read today. Asking the shared source would be asking whether one
- *    value equals itself; asking the sprites is what still catches a later
- *    refactor handing the pill an opinion of its own.
+ *    **4a is asked of what is drawn** — two `sprite.visible` flags — rather
+ *    than of `NpcSystem.speechTextOf`. Asking the shared source would be
+ *    asking whether one value equals itself; asking the sprites is what still
+ *    catches a later refactor handing the pill an opinion of its own.
  *
- *    The second half is **per child, and it did not start out that way**. It
+ *    **What 4a is still worth now that the shipping code reads the bubble's
+ *    own flag**, since a fair reading is that it has become a restatement:
+ *    it is the **frame order** it now guards. `updateLabels` gets *this*
+ *    frame's flag only because `NpcSystem.update` calls `updateBubbles` first.
+ *    Put them back the other way round and the pill is decided from last
+ *    frame's bubble. **Measured, by swapping those two lines in the shipping
+ *    code and running this file unmodified** (390x844, `SECONDS=120`, this
+ *    head):
+ *
+ *    ```
+ *    FAIL  name pill drawn under her own bubble, 6 occasion(s).
+ *          First: Finn talking at (-2.78, -0.10, 51.88), frame 840
+ *    FAIL  5 child(ren) went without their name while silent and in shot.
+ *          Worst: Noor, 1 frame, 2.1 m from focus at rank 0
+ *    exit 1
+ *    ```
+ *
+ *    Six, not thousands: it is one frame at each end of each sentence — the
+ *    pill lags on into the bubble's first frame (4a) and lags down past its
+ *    last (4b). A single frame of overlap is invisible to a person and
+ *    invisible to a screenshot, which is exactly why a check has to own it.
+ *    So 4a is no longer a guard on the *rule* — the shipping code reads the
+ *    same flag 4a asks about — it is a guard on the **ordering** that rule
+ *    depends on, and it is armed.
+ *
+ *    **4b is per child, and it did not start out that way.** It
  *    was first written as `spoken.size > 0 && namesReturned.size === 0` — true
  *    only if *nobody at all* ever got her name back. A review patched the
  *    shipping code so the first child to speak never got hers again — a name
