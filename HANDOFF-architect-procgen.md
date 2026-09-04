@@ -141,7 +141,26 @@ flagged to the coordinator). The one-function / claim-IS-the-route rule is
 the brief's first section, per the coordinator's ask. Byte-identical step;
 #498's clause and checks explicitly out of scope.
 
-Next trigger: #498 merges → brief goes to the coordinator as a proposal.
+## Checkpoint — all four stage-3 briefs drafted and held (3 Sep)
+
+`docs/BRIEF-stage3-step{1,2,3,4}-*.md` on this branch, each with: the
+one-function rule as the reviewer's first section, commit points with the
+re-verify-at-pickup caveat, an explicit byte-for-byte statement
+(steps 1–2 IDENTICAL and proved by hashes; step 3 park-may-change with
+substreams landing there and changes countersigned; step 4 change bounded
+to conflicted seeds only), and measured acceptance. Step 4 carries the
+Overseer's instruction verbatim in spirit: the swept-bus control must be
+**watched failing** (clause deleted + negotiation disabled, red transcript
+with geometry) before it is trusted as the deleted clause's stand-in —
+step 2's redundancy demo explicitly does not count. Also fixed en route:
+the spec's "byte-identical until the last" contradicted its own
+determinism note; now "byte-identical through step 2".
+
+Hand-out order: step 1 the moment #498 merges (rebased to `7bfcca23`, in
+review); each later brief when its predecessor lands. Steps are strictly
+sequential — do not parallelise them; the fleet parallelises at stage 5.
+
+Next trigger: #498 merges → step-1 brief to the coordinator as a proposal.
 Idle otherwise; coordinator has said they will assign rather than leave
 this agent parked.
 - Stage 3 remains: migrate the entrance road + rail-race trestles pair, and
