@@ -194,6 +194,25 @@ Fix complete and swept. `scripts/zz-probe-bend.mts` deleted. Gates queued.
 Seed 11's `in shot` clause is a **separate, unstarted** defect — do not assume
 this fix touches it.
 
+## Delivered
+
+**PR #515**, branch `fix/pet-slide-507`. Three-dot diff 4 files, no deletions:
+`HANDOFF-pet-slide-507.md` (A), `src/Game.ts` (M), `src/main.ts` (M),
+`src/world/slide/petRiders.ts` (M).
+
+Gates on Node 26.7.0, on the **shipped** diff (deep link included), exit codes
+from each run's own file: `tsc` **0**, `check` **0**, `test:procgen` **0**,
+`check:coplanar` **0**, `build` **0**.
+
+Preview `pr-515-1619797-…` — verified myself: root and
+`/slide-with-pets?seed=346` both **HTTP 200**, and the deployed bundle
+`/assets/index-DQN8Ln5s.js` contains the `slide-with-pets` route, so the build
+really carries this branch. **Not visually confirmed** — I do not own the
+browser, so whether the pets look right on screen is QA's call.
+
+Seed 11 split out to **#514** (framing) and **#513** (the raster cannot tell
+occlusion from absence). #507 closes when this merges.
+
 ## Still to do
 
 - Read the sweep; every seed must pass and none may regress.
