@@ -245,3 +245,42 @@ bury them. They need their own ticket, with these two seeds named.
 
 CI stays green either way: unpinned now always resolves canonical, which
 passes.
+
+## Delivered
+
+**PR #508**, branch `fix/pet-slide-496`, rebased onto `origin/main` `3aa55407`.
+Three-dot diff is 5 files, no deletions:
+`HANDOFF-pet-slide-496.md` (A), `scripts/check-seed-pool.mts` (M),
+`scripts/seed-report.mts` (A), `scripts/seed-report-control.mts` (A),
+`src/world/parkSeedPool.ts` (M).
+
+All gates on **Node 26.7.0**, exit codes read from each run's own log file:
+
+| gate | exit |
+|---|---|
+| `pnpm run check` | **0** |
+| `pnpm run test:procgen` | **0** (19 files, 566 tests) |
+| `pnpm run build` | **0** |
+
+`check:seed-pool` re-run green after the rebase (control 5 distinct in 6, real
+1 distinct in 6).
+
+**#507 filed** for the two genuinely red pool seeds (11 and 346) that this
+branch stops exposing.
+
+## Order taken, and why
+
+**Determinism first, and it was not a judgement call once measured.** The
+`--predictable` red handed over on #496 was measured on whatever park
+`Math.random` happened to draw — seed 346, as it turned out — so there was no
+way to know whether the 1 cm intrusion was a real defect or an artefact until
+the park was pinned. Fixing the generator first turned "a coin flip" into "14
+of 16 seeds pass, and these two do not, here are the exact messages".
+
+## If you pick this up
+
+- Nothing outstanding on #508 beyond review, QA and CI.
+- **Do not use `git stash` in this repo** — the stash stack is shared across
+  every worktree; see the hazard note above.
+- `scripts/with-node` is broken (#506) and is why everyone measured on Node 25.
+  Use `/opt/homebrew/opt/node@26/bin/node` explicitly until that lands.
