@@ -621,6 +621,8 @@ async function ride(wired: boolean): Promise<RunResult> {
   let rimTube = 0;
   let rimNearest = Infinity;
   let rimInsideFrames = 0;
+  let rimNearestShot = 'none';
+  const rimInsideShots = new Set<string>();
   building.ballPit.group.updateMatrixWorld(true);
   building.ballPit.group.traverse((object: unknown) => {
     const mesh = object as {
@@ -884,27 +886,43 @@ async function ride(wired: boolean): Promise<RunResult> {
     const liveShot = building.slideShots.liveShot;
     const liveCamera = building.rideCameraNow;
     const first = bodies[0];
+    // **#516: is the lens itself inside the ball pit's rim?** Measured on every
+    // ridden frame **whatever shot is live**, and that "whatever" is the whole
+    // point — the first version of this sampler sat inside the `kind === 'chase'`
+    // branch below and reported the camera never came within 6.13 m of the rim
+    // on seed 346, flatly contradicting the frame QA photographed. It was not
+    // measuring the camera that clips. The slide has **two** shot kinds
+    // (`slide/cameras.ts`: `chase` and `trackside`), and a trackside eye is a
+    // fixed world point placed by formula — standoff and elevation, stepped
+    // closer only until the *framing* fits — that never asks what is at that
+    // point. A sampler blind to it is a check that cannot see the bug it is for.
+    //
+    // Sampled per frame rather than per raster because #516 reports the clip as
+    // lasting "a frame or two", and the rasters are one frame in twenty-five.
+    //
+    // The rim is a torus, so the test is exact: put the camera into the rim's
+    // own local space, and a point is inside the tube when its distance to the
+    // ring circle is under the tube radius. Both radii are read off the built
+    // geometry rather than restated here — `BALL_PIT_RADIUS + 0.4` and `0.3`
+    // live in `BallPit.ts` and a copy here would be the usual defect.
+    if (liveCamera && rimMesh) {
+      cameraWorld.setFromMatrixPosition(liveCamera.matrixWorld);
+      rimLocal.copy(cameraWorld).applyMatrix4(rimInverse);
+      // Torus lies in local XY with its axis on Z (three.js `TorusGeometry`).
+      const ring = Math.hypot(rimLocal.x, rimLocal.y) - rimMajor;
+      const toSurface = Math.hypot(ring, rimLocal.z) - rimTube;
+      if (toSurface < rimNearest) {
+        rimNearest = toSurface;
+        rimNearestShot = liveShot?.kind ?? 'none';
+      }
+      if (toSurface < 0) {
+        rimInsideFrames += 1;
+        rimInsideShots.add(liveShot?.kind ?? 'none');
+      }
+    }
+
     if (liveShot?.kind === 'chase' && liveCamera && first) {
       chaseFrames += 1;
-
-      // **#516: is the lens itself inside the ball pit's rim?** Measured every
-      // chase frame, not at rasters — this is reported as lasting "a frame or
-      // two", so sampling one frame in twenty-five would very likely miss it.
-      //
-      // The rim is a torus, so the test is exact: put the camera into the rim's
-      // own local space, and a point is inside the tube when its distance to
-      // the ring circle is under the tube radius. Both radii are read off the
-      // built geometry rather than restated here — `BALL_PIT_RADIUS + 0.4` and
-      // `0.3` live in `BallPit.ts` and a copy here would be the usual defect.
-      cameraWorld.setFromMatrixPosition(liveCamera.matrixWorld);
-      if (rimMesh) {
-        rimLocal.copy(cameraWorld).applyMatrix4(rimInverse);
-        // Torus lies in local XY with its axis on Z (three.js `TorusGeometry`).
-        const ring = Math.hypot(rimLocal.x, rimLocal.y) - rimMajor;
-        const toSurface = Math.hypot(ring, rimLocal.z) - rimTube;
-        if (toSurface < rimNearest) rimNearest = toSurface;
-        if (toSurface < 0) rimInsideFrames += 1;
-      }
 
       // **What does the shot actually contain?** Rays through the live camera,
       // counting what each one lands on — the only honest form of this
@@ -1048,7 +1066,8 @@ async function ride(wired: boolean): Promise<RunResult> {
       // #516: the lens against the ball pit's rim, every chase frame. Negative
       // "nearest" means the camera was inside the tube.
       `camera nearest the pit rim ${rimNearest === Infinity ? 'n/a' : `${rimNearest.toFixed(2)} m`} ` +
-      `(${rimInsideFrames} frames INSIDE it)`,
+      `on a ${rimNearestShot} shot (${rimInsideFrames} frames INSIDE it` +
+      `${rimInsideShots.size > 0 ? `, on ${[...rimInsideShots].join('/')} shots` : ''})`,
   );
 
   return {
