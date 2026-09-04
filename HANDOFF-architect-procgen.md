@@ -67,6 +67,23 @@ next neighbour. Sequencing: PR #498 lands first, do not race it.
 
 Next: propose the stage-3 step-1 engineering brief to the coordinator once
 PR #498 merges (implementation changes shipped behaviour → proposal first).
+
+## Checkpoint — stage-4 mechanism written (3 Sep)
+
+"Incremental route growth: explore free, commit in sections" added to the
+doc, reconciling Jim's section-by-section ruling with `railRouteSearch`'s
+whole-route private exploration: reads of the registry are free and
+unlimited during search; commitment is turn-based, one section + its extra
+geometry per turn; the section is the unit of unwind. Support obligations
+reuse the demand mechanism (an unserved support demand fails like an
+unserved door demand). Two binding notes: search outcomes may legitimately
+change when a sibling claims between turns (budget counters measure the
+rate), and the exploration query MUST be the same function as the commit
+check — otherwise the two-definitions disease reappears inside one
+mechanism. First customer: the slide (ruled). While #498 is unmerged, the
+open design debts are: cost model for section size (how much geometry per
+turn), and whether crossingSites' feasibility march becomes claims or stays
+a solver.
 - Stage 3 remains: migrate the entrance road + rail-race trestles pair, and
   **confront the import ladder** (see `parkGeneration.ts`'s module header —
   the ladder, not the deps, serialises today; four of six deps measured
