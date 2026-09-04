@@ -99,11 +99,25 @@ mechanism. First customer: the slide (ruled).
   invalidation protocol. General rule set: a computed overview may inform
   decisions; only a claim makes ground yours.
 
-Remaining while #498 is unmerged: nothing owed to stage 3/4 spec-wise that
-this agent knows of. Candidate next work: review the doc end-to-end for
-internal contradictions after tonight's six additions, or begin the
-stage-5 migration checklist (per-placer inventory of private obstacle
-lists to dissolve).
+## Checkpoint — contradiction pass done (3 Sep)
+
+Whole doc read as one piece; four staleness fixes, all in pre-tonight
+sections, all pushed: (1) lead section no longer claims "stages 2-4 never
+started" / "pipeline is strictly sequential" — dated #499 update added;
+(2) substrate corrected from "PlacementField is 80%" to groundClaims.ts,
+with the four-kinds heading reconciled against the fifth (demands);
+(3) stages 1-2 marked landed, planned-vs-shipped stated honestly (stage 1
+shipped as a new module, not a widened field; parkFacts-from-registry proof
+deferred to the migrations); (4) demands section no longer quality-only —
+one mechanism, two tiers of consequence. Also: the epigraph is now at the
+top of the doc ("a computed overview may inform any number of decisions,
+but only a claim makes ground yours"), per the coordinator's endorsement.
+Checked and left alone: provisional-claims vs crossingSites-as-exploration
+(reconcilable — a provisional claim is made when a crossing is decided,
+which can be an early round; realisation waits for width).
+
+Remaining while #498 is unmerged: begin the stage-5 migration checklist
+(per-placer inventory of private obstacle lists to dissolve).
 - Stage 3 remains: migrate the entrance road + rail-race trestles pair, and
   **confront the import ladder** (see `parkGeneration.ts`'s module header —
   the ladder, not the deps, serialises today; four of six deps measured
