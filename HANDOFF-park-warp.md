@@ -456,3 +456,55 @@ special).
 - [ ] Warp loop built.
 - [ ] Level-crossing capability deleted.
 - [ ] Measured across 16 seeds.
+
+---
+
+## Session: rebase onto main + the red `Coplanar faces` check (3 Sep 2026)
+
+**Model: Opus** (Opus 5, 1M context), chosen by the Overseer for this
+Engineer slot. A replacement takes the same model.
+**Worktree: `.claude/worktrees/warp-474`** (detached; pushes to
+`feat/park-warp-solver` with `--force-with-lease`). The older
+`.claude/worktrees/park-warp` belongs to the previous session and was left
+untouched — it is behind and carries an untracked
+`measurements/warp-search-spares.jsonl`.
+
+### Rebase (done)
+
+`a3bd7dde` → `5cb6ea78`, 45 commits onto `origin/main` `c95facf6`. Run with
+`git -c rerere.enabled=false` so no stale resolution could be replayed.
+
+Two conflicts, both real:
+
+1. **`src/world/train/fence.ts`** — main added `FENCE_HALF_THICKNESS` to the
+   `clearance.ts` import while this branch deleted the `LevelCrossing` import
+   from the same line. Resolution keeps main's constant and drops the dead
+   type.
+2. **`src/boot/parkGeneration.ts`** — main's #499 replaced the hand-ordered
+   driver with the round-robin scheduler, and this branch's
+   `cruiserFinishSeams` counter lived inside the deleted driver. Took main's
+   side wholesale, then **re-applied the counter inside the scheduler's
+   `cruiserFinish` task** (`if (step.value === 0) self.cruiserFinishSeams += 1;`
+   before the `yield`). The field and the `cruiserFinishSeamCount` getter
+   auto-merged; only the increment had to be moved by hand — if
+   `check:park-boot`'s seam assertion is red, that line is the first place to
+   look.
+
+Verified after: script step **sets** parsed, not grepped — 103 → 106, nothing
+lost against the pre-rebase branch or against main, gained exactly main's
+three (`check:coplanar`, `check:gateway`, `measure:bridge-parapet`).
+`git diff --diff-filter=D --name-only origin/main...HEAD` is empty: no
+deletions. `test/procgen/seed-18.test.ts` drops out of the touched-file list
+because main deleted it too.
+
+### Why the CI `Coplanar faces` failure was suspect before the rebase
+
+`scripts/check-coplanar.mts` **did not exist at the merge base** — the whole
+check came in on main after this branch forked (#473), and so did
+`stableName`, which strips a bridge's rail distance out of the ratchet key via
+`BRIDGE_GROUP_NAME_RE`. The red run's rows were all *un-normalised*
+(`.../bridge-150.0/deck`), i.e. taken against a tree without that
+normalisation, and `main`'s own baseline is normalised (`.../bridge/deck`).
+So most of the `NEW:` rows were the same modelled seam re-keyed per bridge
+instance, not new geometry. Re-running on the rebased head is the only honest
+measurement.
