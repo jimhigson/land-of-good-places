@@ -984,7 +984,12 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `check:pet-slide ok — three companions rode all ${wired.ridingFrames} frames of the descent ` +
+  // The seed is on the green summary as well as on line 1 and on the failure,
+  // because **the misleading pass was the expensive half**: a red log at least
+  // gets read, while five green runs quoting different frame counts were read
+  // as one park behaving inconsistently for a whole evening.
+  `check:pet-slide ok on park seed ${PARK_SEED} (${parkSeedSource()}) — three companions rode ` +
+    `all ${wired.ridingFrames} frames of the descent ` +
     `behind her and in order, never more than ${wired.worstOffChute.toFixed(2)} m off the chute, ` +
     `lying down throughout (most upright ${wired.worstLie.toFixed(3)}, against ` +
     `${LYING_DOWN_DOT} required), never closer to her own body than ` +
