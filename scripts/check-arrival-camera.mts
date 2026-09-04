@@ -100,6 +100,31 @@
  * here, at a bearing swing of 132°. Nothing in this file can see composition or
  * occlusion. See the note it prints to stderr on every run.
  *
+ * ## Proved red for the face-height door beat (3 September 2026)
+ *
+ * Jim: *"For the arrival shot the camera should be face height so the ground
+ * should be visible normally."* Clause 9 is what holds that. Geometry it was
+ * proved against, pasted with the transcript because a red run is a measurement
+ * and measurements go stale:
+ *
+ * ```
+ * ARRIVAL_DOOR_PITCH_DEGREES 0    ARRIVAL_DOOR_DISTANCE ~6.6 m
+ * ARRIVAL_DOOR_FOCUS_LIFT = KID_HEAD_HEIGHT 1.36 + kidEyeCentre(1).y 0.056 = 1.4157 m
+ * ARRIVAL_DOOR_ZOOM 2.2957 -> a 6.534 m frame on 16:10
+ * green run: 39 checks; the eye rides 1.4157-1.4157 m through the door beat at 0.00 deg of tilt
+ * ```
+ *
+ * | mutation | result |
+ * |---|---|
+ * | none (control) | pass, 39 checks, exit 0 |
+ * | `ARRIVAL_DOOR_FOCUS_LIFT` back to the typed 1.1 "about a child's chest" | **red, clause 9**: eye 1.1000 m, off by -0.3157 m, exit 1 |
+ * | `ARRIVAL_DOOR_PITCH_DEGREES` back to 24 — the sign-across-her composition | **red, clause 9**: eye rides 4.0871 m, off by +2.6714 m, exit 1 |
+ *
+ * That second mutation is the live risk rather than a hypothetical one: it is
+ * the obvious way to fill the empty bottom of frame, it is what Jim has
+ * rejected twice, and at 4.09 m the eye would also be *above* the arch's 3.60 m
+ * crossbar. Clause 9 is what stands between the next round and reaching for it.
+ *
  * Run: `pnpm run check:arrival-camera`
  */
 import { Vector3 } from 'three';
@@ -107,12 +132,15 @@ import { CAMERA_FOCUS_LIFT, IsoCamera } from '../src/core/IsoCamera.ts';
 import { cameraOffset } from '../src/core/cameraRig.ts';
 import {
   CAMERA_DISTANCE,
+  CAMERA_MIN_VIEW_WIDTH,
   CAMERA_PITCH_DEGREES,
+  CAMERA_VIEW_HEIGHT,
   CAMERA_YAW_DEGREES,
 } from '../src/core/constants.ts';
 import { angleDelta, DEG } from '../src/core/mathUtils.ts';
 import {
   ARRIVAL_CONTROL_AT,
+  ARRIVAL_DOOR_FOCUS_LIFT,
   ARRIVAL_RISE_TAIL,
   AT_SHOT_HOME,
   arrivalShot,
@@ -120,7 +148,7 @@ import {
   type ArchPass,
 } from '../src/world/entrance/ArrivalSequence.ts';
 import { GATE_ARCH_CLEAR_HEIGHT, GATE_ARCH_CLEAR_WIDTH } from '../src/art/models/gateArch.ts';
-import { TALLEST_CHILD_HEIGHT } from '../src/art/models/kid.ts';
+import { KID_HEAD_HEIGHT, kidEyeCentre, TALLEST_CHILD_HEIGHT } from '../src/art/models/kid.ts';
 import { NPC_WALK_SPEED } from '../src/entities/npc/NpcCharacter.ts';
 
 /**
@@ -228,6 +256,36 @@ const NEAR_THE_ARCH = 8;
 const RIDING_BAND = 1.15;
 
 const STEP = 1 / 60;
+
+/**
+ * **How tall a slice of world the frame shows at a given zoom**, in metres.
+ *
+ * `IsoCamera.frustumBase` is private, so this restates it — but it restates it
+ * from the two constants that own it rather than from their values. Clause 8
+ * carried `Math.max(15 / 2, 11 / 2 / 1.6)` written out in digits, which is two
+ * hand-copied numbers of exactly the kind this repo keeps being bitten by: a
+ * retuned `CAMERA_VIEW_HEIGHT` would have moved the game and left this script
+ * measuring the old one, silently and greenly.
+ *
+ * The default aspect is the 16:10 the game is judged on; a portrait phone hits
+ * the width floor instead and gets a *taller* frame, which is noted where it
+ * matters rather than swept here.
+ */
+const DEFAULT_ASPECT = 1.6;
+const frameHeightAt = (zoom: number, aspect = DEFAULT_ASPECT): number =>
+  (2 * Math.max(CAMERA_VIEW_HEIGHT / 2, CAMERA_MIN_VIEW_WIDTH / 2 / aspect)) / zoom;
+
+/**
+ * **Where a child's face is above her own feet**, in metres — read from the one
+ * file that owns her head, not copied.
+ *
+ * The same expression `ARRIVAL_DOOR_FOCUS_LIFT` is built from, deliberately, so
+ * that clause 9 is asking *"is the shot still taken at the face?"* rather than
+ * *"does this constant still equal the number I wrote down?"*. If `kid.ts`
+ * re-scales the head, both move together and the clause keeps meaning what it
+ * says.
+ */
+const CHILD_FACE_HEIGHT = KID_HEAD_HEIGHT + kidEyeCentre(1).y;
 
 // ---------------------------------------------------------------------------
 // 1. the camera genuinely changes where it looks from
@@ -580,9 +638,7 @@ console.log('the door shot is close enough to read a face');
     const shot = arrivalShot(t, PASS);
     if (shot) tightest = Math.max(tightest, shot.zoom);
   }
-  // Frame half-height at that zoom, on the default 16:10 framing.
-  const halfHeight = Math.max(15 / 2, 11 / 2 / 1.6) / tightest;
-  const sheFills = TALLEST_CHILD_HEIGHT / (halfHeight * 2);
+  const sheFills = TALLEST_CHILD_HEIGHT / frameHeightAt(tightest);
   console.log(
     `  tightest zoom ${show(tightest)} — a child fills ${(sheFills * 100).toFixed(0)}% of frame height`,
   );
@@ -590,6 +646,88 @@ console.log('the door shot is close enough to read a face');
     sheFills > 0.3,
     `Jim asked for "much closer" — a child fills only ${(sheFills * 100).toFixed(0)}% of the frame ` +
       `at the tightest point (zoom ${show(tightest)})`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 9. the door beat is taken at a child's face, horizontally
+// ---------------------------------------------------------------------------
+console.log("the door shot is taken at a child's own face height, looking level");
+{
+  // Jim, 3 September 2026: *"For the arrival shot the camera should be face
+  // height so the ground should be visible normally."*
+  //
+  // **This is one assertion, not two, and that is the point.** At zero pitch
+  // `cameraOffset`'s offset has no `y` at all, so the eye rides at exactly the
+  // focus height — `ARRIVAL_DOOR_FOCUS_LIFT + d·sin(pitch)` with the second
+  // term zero. Measuring the eye rather than reading the constant therefore
+  // catches *both* ways this shot can stop being what he asked for: somebody
+  // moving the aim height off the face, and somebody reintroducing a downward
+  // tilt to fill the bottom of the frame. The second is the live risk — it is
+  // the sign-across-her composition he has now rejected twice, and at 24° of
+  // tilt and a 6.6 m stand-back the eye rides 2.7 m up rather than 1.42 m.
+  let lowest = Infinity;
+  let highest = -Infinity;
+  let sawTheDoorBeat = false;
+  let worstTilt = 0;
+  for (let t = 0; t < AT_SHOT_HOME; t += STEP) {
+    const shot = arrivalShot(t, PASS);
+    if (!shot || !shot.watchesTheDoor) continue;
+    sawTheDoorBeat = true;
+    const eyeUp =
+      ARRIVAL_DOOR_FOCUS_LIFT + shot.distance * Math.sin(shot.pitchDegrees * DEG);
+    lowest = Math.min(lowest, eyeUp);
+    highest = Math.max(highest, eyeUp);
+    worstTilt = Math.max(worstTilt, Math.abs(shot.pitchDegrees));
+  }
+  check(sawTheDoorBeat, 'there must BE a door beat — no frame reported watchesTheDoor');
+  console.log(
+    `  the eye rides ${show(lowest)}–${show(highest)} m up through the door beat, ` +
+      `against a face at ${show(CHILD_FACE_HEIGHT)} m; worst tilt ${worstTilt.toFixed(2)}°`,
+  );
+  near(
+    lowest,
+    CHILD_FACE_HEIGHT,
+    0.01,
+    "the door shot's eye must sit at a child's face — Jim asked for face height, and at " +
+      'zero pitch the eye height IS the aim height, so a miss here is either a moved aim ' +
+      'or a reintroduced downward tilt',
+  );
+  near(
+    highest,
+    CHILD_FACE_HEIGHT,
+    0.01,
+    'and must stay there for the whole beat, not only at its start',
+  );
+
+  // **The empty band below the ground line — measured, and printed rather than
+  // asserted.** A horizontal orthographic camera sees the ground exactly
+  // edge-on, so the ground plane projects to a line at the eye's own height and
+  // nothing renders below it. There is no threshold to assert against: how much
+  // empty frame is acceptable is a composition question and Jim's alone. What
+  // this file can do is stop the number being invisible, since it is the whole
+  // subject of the round that produced it.
+  let tightest = 0;
+  for (let t = 0; t < AT_SHOT_HOME; t += STEP) {
+    const shot = arrivalShot(t, PASS);
+    if (shot?.watchesTheDoor) tightest = Math.max(tightest, shot.zoom);
+  }
+  const wide = frameHeightAt(tightest);
+  const portrait = frameHeightAt(tightest, 390 / 844);
+  const band = (height: number): string =>
+    `${show(height / 2 - ARRIVAL_DOOR_FOCUS_LIFT)} m of a ${show(height)} m frame ` +
+    `(${(((height / 2 - ARRIVAL_DOOR_FOCUS_LIFT) / height) * 100).toFixed(1)}%)`;
+  process.stderr.write(
+    'MEASURED, NOT ASSERTED — the empty band under the ground line in the door beat. ' +
+      'A purely horizontal orthographic camera sees the ground edge-on, so it projects to a ' +
+      'LINE at the eye height and the frame below it is empty sky:\n' +
+      `    16:10  ${band(wide)}\n` +
+      `    390x844 portrait  ${band(portrait)}\n` +
+      `    it would close only at an eye height of ${show(wide / 2)} m — above a child's head, ` +
+      'not at her face.\n' +
+      '    Raising the eye shrinks it and tilting the camera down would close it, but the ' +
+      'tilt is the sign-across-her fault Jim has ruled out twice. Whether what is left ' +
+      'reads as a look or as a bug is his call, from a rendered frame.\n',
   );
 }
 
