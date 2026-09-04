@@ -1241,3 +1241,75 @@ the foot-only clause could not.
 `check:rail-race`, `check:entrance-road` and full `check` have **not** been
 re-run since `addPostCollider` landed — a new collider chain can move
 `keepOutsFor` ground, so those are the ones that matter next.
+
+---
+
+# Session 6: the corridor clause was nearly inert
+
+Model: **Opus 5 (1M context)**. Head `de3778df`. **`check:entrance-road` is RED
+on 12 of 16 seeds — deliberately, and not finished.**
+
+## The finding of the night
+
+`groundIsClear` asked `isInEntranceRoad` at the leg's **foot**, and
+`check-entrance-road.mts` swept the bus against the leg's **foot**. Two
+definitions of "where is this leg", both wrong the same way, agreeing with each
+other on every run. Measured with the check fixed to sweep posts:
+
+```
+                     real park   corridor OFF
+posts in the bus       8-9          8-10
+of them walk-past      3-4           4-5
+```
+
+**The clause this whole branch is built around was removing about one post in
+nine.** A nudged post keeps its top under the rails while its foot moves, so
+moving the foot out of the road leans the post straight back in.
+
+**Withdraw the earlier claim** in this handoff that the control at "151 legs"
+proved the check discriminated. Both arms shared the fault; it measured nothing.
+
+## Done this session
+
+1. `check-entrance-road.mts` sweeps each post every 0.25 m of its length over
+   the heights the bus body occupies (`CAT_BUS_BODY_BOTTOM_Y`/`_TOP_Y`, newly
+   exported from `catBus.ts` so the span is asked of the bus), radius tapering
+   as `addPostCollider` does.
+2. It counts **distinct posts over the whole run**, keyed on post identity and
+   split by ring. The first attempt summed per-station counts and gave 66-79,
+   which is a station-sample sum and **not** a post count — do not quote it.
+3. `postClearsEntranceRoad` in `track.ts`: `groundIsClear` now tests the whole
+   lean. The top is asked of the route and is knowable at test time because no
+   nudge moves it. **8-9 -> 0-5 posts, 3-4 -> 0-2 walk-past.**
+
+## What is left, in order
+
+1. **Finish the backtrack.** Still 0-5 posts on 12 seeds, worst 1.78 m. The
+   search exhausts `RADIAL_NUDGES` and settles for the last candidate rather
+   than trying a different decision — a wider search, a different arc slot, or
+   a real fallback. **Not a clamp** (CLAUDE.md, "Procgen backtracks on
+   collision, always").
+2. **Post positions move now that the clause works.** Leg counts already shifted
+   (1237 -> 1128 on the canonical seed). Hash the ring's post positions per seed
+   before/after and state plainly in the PR which seeds moved and by how much —
+   a park change that was invisible while the clause was broken.
+3. **Write the inert-clause finding into the PR body** as prominently as the
+   fix, so nobody trusts a green `check:entrance-road` for the wrong reason.
+4. `roadRoute.ts:84-86` claims `check-entrance-road.mts` calls
+   `IsoCamera.frustumBase()`. **It does not** — `frustumBase` is nowhere in that
+   file and `entranceRoadReach()` goes into `report.reach` unread. Wire it up
+   (Jim asked for that reach) rather than delete the claim.
+5. Stale text: PR body Gates section (18 files/526 tests -> 19/581, and this
+   round unmentioned); the orphaned `ENTRANCE_ROAD_OUTSET` docblock;
+   `Entrance.ts` says the length comes from `TERRAIN_APRON` when it is
+   `CAT_BUS_LENGTH + 55`; `roadRoute.ts:224` says "about 83 m" where
+   `entranceRoadReach()` gives 79.5.
+
+## The lesson I owe this file
+
+I reported "0 stale claims remaining" after verifying by **grepping for the
+strings I had just changed** rather than re-reading what the sections asserted.
+Six were sampled in review; two were wrong and three items were not done at all.
+That is a check that cannot fail, written by me, about my own work — the same
+disease this file documents everywhere else. **Verify a claim about a document
+by re-reading the document, not by searching for the words you edited.**
