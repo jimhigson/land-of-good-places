@@ -238,14 +238,35 @@ const mutate = process.argv.includes('--mutate');
 const mutateAnchor = process.argv.includes('--mutate-anchor');
 const mutateLabel = process.argv.includes('--mutate-label');
 const mutateLatch = process.argv.includes('--mutate-latch');
+const mutateTextGate = process.argv.includes('--mutate-text-gate');
 /** The one child `--mutate-latch` never gives her name back to. */
 let latchVictim: string | null = null;
 const verbose = process.argv.includes('--verbose');
 
-/** A 390x844 portrait phone — the framing #280 was reported on, and the one
- *  the clamp has most work to do on. */
-const VIEW_WIDTH = 390;
-const VIEW_HEIGHT = 844;
+/**
+ * The viewport, `WIDTHxHEIGHT`, defaulting to a **390x844 portrait phone** —
+ * the framing #280 was reported on, and the one the clamp has most work to do
+ * on.
+ *
+ * **It is a parameter because one viewport was not enough**, and that was
+ * found the expensive way. Clause 4c below counts a child left with neither
+ * pill nor bubble; the file used to state it as "0 either way", which was true
+ * of 390x844 and **not a property of the fix**. At 1920x1080 the same seed
+ * finds it in seconds: a portrait frustum is tall, so a child whose head-anchor
+ * clears the top edge while her feet are still in shot is a landscape shape
+ * almost exclusively. `check:speech-bubbles:wide` is the chain step that runs
+ * this at 1920x1080 for exactly that reason — see the transcripts in the
+ * "Proving it red" section, which are given per viewport because a number
+ * measured at one of them says nothing about the other.
+ */
+const VIEW = process.env['VIEW'] ?? '390x844';
+const viewMatch = /^(\d+)x(\d+)$/.exec(VIEW);
+if (!viewMatch) {
+  console.error(`VIEW must look like 390x844; got ${JSON.stringify(VIEW)}`);
+  process.exit(2);
+}
+const VIEW_WIDTH = Number(viewMatch[1]);
+const VIEW_HEIGHT = Number(viewMatch[2]);
 
 const DT = 1 / 60;
 const RUN_SECONDS = Number(process.env['SECONDS'] ?? 120);
@@ -391,33 +412,57 @@ interface Latch {
 }
 const latches = new Map<string, Latch>();
 /**
- * Frames where a child was mid-word, near enough for her pill, and yet nothing
- * at all was drawn over her — she has given up her name for a bubble nobody
- * can see. The pill hides because there **is text**; the overlap it is
- * avoiding is caused by a bubble being **drawn**, and those are not the same
- * condition.
+ * **Clause 4c.** Frames where a child was mid-word, entitled to her name pill
+ * by the owner's own two facts (inside {@link VISIBLE_LABEL_CAP} and inside
+ * {@link LABEL_MAX_DISTANCE}), and yet **nothing at all** was drawn over her —
+ * neither pill nor bubble. She has given up her name for a bubble nobody can
+ * see, which is strictly worse than the overlap #486 started as.
  *
- * **What this actually counts, which is more than the 40-46 m band it was
- * first named for.** `SpeechBubble.updateScreenSize` hides a bubble for two
- * reasons, and the condition here — speaking, no bubble drawn, inside
- * `LABEL_MAX_DISTANCE` — catches both:
+ * `SpeechBubble.updateScreenSize` declines to draw for two reasons, and both
+ * land here:
  *
  *   - past `BUBBLE_MAX_DISTANCE` (40 m) but inside `LABEL_MAX_DISTANCE`
  *     (46 m): the band between the two constants, and
  *   - **at any distance**, a speaker whose anchor is off screen and whose
- *     bubble is therefore gated by `isOnScreen` (the #415 fix).
+ *     bubble is therefore gated by `isOnScreen` (the #415 fix). This is much
+ *     the larger set.
  *
- * The second is the larger set and was not in the name. It reads 0 either way
- * today, so no number printed on any previous run was wrong — but the label on
- * it was, and a counter whose name is narrower than its condition is how the
- * next reader inherits a false belief about what has been ruled out.
+ * **Two counters, because only one of them is a bug a player can see.** A
+ * child the frustum never contained is a gap between two internal states that
+ * nobody renders; a child whose *body* is on screen while her head-anchor has
+ * slipped past an edge is a visible person with no name over her. Only the
+ * second is asserted, and it is asked with the real
+ * {@link isOnScreen} — the one captured before `--mutate` blinds it — against
+ * her body position, which is the same question a player's eye is asking.
  *
- * Structural, not a defect of this fix, and 0 on the canonical seed, so it is
- * counted and printed rather than asserted. If it stops being 0, the honest
- * fix is to hide the pill for a bubble that is *drawn* rather than for text
- * that exists.
+ * **This clause used to be a printed number rather than an assertion, and the
+ * number was route- and viewport-specific.** It read 0 at 390x844 and the file
+ * said "0 either way", which invited the reading "this does not happen". At
+ * 1920x1080 on the same seed the on-screen half is **not** 0 unless the pill
+ * is gated on a bubble being drawn — see the transcripts up top. That is a
+ * check reporting success about something it was not describing, which is this
+ * repo's named disease, so it is now an assertion with a viewport that
+ * exercises it.
  */
 let spokeWithNothingDrawn = 0;
+/** The player-visible half of {@link spokeWithNothingDrawn}: her body is in
+ *  shot, so a person is standing there wearing no name at all. Asserted. */
+let spokeWithNothingDrawnOnScreen = 0;
+let worstNothingDrawnLine = '';
+/**
+ * **The coverage counter for clause 4c, and it is not the same number.**
+ * Frames where a child was mid-word and entitled to her pill and her bubble
+ * was **withheld** — the situation 4c is about, whether or not it went wrong.
+ * The shipping code's job is to have her pill up on every one of them, so
+ * under a working fix {@link spokeWithNothingDrawn} is 0 *by construction* and
+ * says nothing about whether the run reached the case at all.
+ *
+ * Keying the "asserts nothing" note on the failure count would therefore be a
+ * green line implying cover it does not give — exactly what CLAUDE.md asks a
+ * check to announce rather than imply. This is the number that can honestly
+ * say whether 4c had anything to bite on, so this is the one on the summary.
+ */
+let bubbleWithheldOnScreen = 0;
 
 /**
  * Assertion 2, shared by the crowd and the probes: is `anchor` inside the
@@ -501,6 +546,26 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
     }
   }
 
+  if (mutateTextGate) {
+    // The pill gated on **text existing** rather than on a bubble being
+    // **drawn** — this branch's own first answer to #486, restored as the one
+    // line it was: `if (rank >= CAP || this.speechTextOf(i) !== null)`.
+    //
+    // It fixes the overlap (4a stays at 0) and opens a different hole: a child
+    // whose bubble `SpeechBubble.updateScreenSize` declines to draw loses her
+    // name with nothing in its place. That is clause 4c, and it is the reason
+    // the shipping code reads `bubble.sprite.visible` instead.
+    //
+    // **This mutation cannot be proved red at 390x844.** Portrait finds only
+    // children the frustum never contained; the visible case needs the top
+    // edge a landscape viewport puts a head-anchor past. Run it with
+    // `VIEW=1920x1080` — that is what `check:speech-bubbles:wide` is for, and
+    // why the viewport is a parameter at all.
+    for (const pair of world.npcs.speechBubbles) {
+      if (pair.speaking) pair.label.sprite.visible = false;
+    }
+  }
+
   // --- 4: a talking child wears no name pill (#486) -------------------------
   //
   // Asked of what is *drawn*, not of the driver state both sides read, so the
@@ -527,9 +592,39 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
       });
     }
 
+    // 4c — and she is never left with *nothing*. Entitlement comes from the
+    // owner's own two facts, so a pill that is legitimately down (out of the
+    // cap, or too far to draw) is not counted as a loss.
+    const entitledToPill =
+      labelRank >= 0 && labelRank < VISIBLE_LABEL_CAP && labelDistance <= LABEL_MAX_DISTANCE;
     if (speaking) {
       spoken.add(character.name);
-      if (!bubble.sprite.visible && labelDistance <= LABEL_MAX_DISTANCE) spokeWithNothingDrawn += 1;
+      if (entitledToPill && !bubble.sprite.visible) {
+        // The real frustum test, captured before `--mutate` blinds it, asked
+        // of where she is *standing* — a head-anchor that has slipped past an
+        // edge does not make the child invisible, and that is exactly the case
+        // this clause exists for.
+        const bodyOnScreen = isOnScreen.call(camera, character.position);
+        if (bodyOnScreen) bubbleWithheldOnScreen += 1;
+        if (!label.sprite.visible) {
+          spokeWithNothingDrawn += 1;
+          if (bodyOnScreen) {
+            spokeWithNothingDrawnOnScreen += 1;
+            if (worstNothingDrawnLine === '') {
+              worstNothingDrawnLine =
+                `${character.name} is mid-word at (${fmt(character.position)}) on frame ${frame}, ` +
+                `on screen and ${labelDistance.toFixed(1)} m from the camera's focus at rank ` +
+                `${labelRank} — but her bubble is not drawn and neither is her name`;
+            }
+            record({
+              frame,
+              who: character.name,
+              what: 'mid-word, on screen, with neither pill nor bubble drawn',
+              detail: `${labelDistance.toFixed(1)} m from focus at rank ${labelRank}`,
+            });
+          }
+        }
+      }
     }
 
     // 4b — and, per child, the name comes back. She is owed her pill on any
@@ -541,12 +636,7 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
       latch = { current: 0, worst: 0, worstLine: '' };
       latches.set(character.name, latch);
     }
-    const owedHerName =
-      spoken.has(character.name) &&
-      !speaking &&
-      labelRank >= 0 &&
-      labelRank < VISIBLE_LABEL_CAP &&
-      labelDistance <= LABEL_MAX_DISTANCE;
+    const owedHerName = spoken.has(character.name) && !speaking && entitledToPill;
     if (owedHerName && !label.sprite.visible) {
       latch.current += 1;
       if (latch.current > latch.worst) {
@@ -675,6 +765,14 @@ if (latched.length > 0) {
       `true of every child, not of the crowd on average. Worst: ${worst.worstLine}`,
   );
 }
+if (spokeWithNothingDrawnOnScreen > 0) {
+  failures.push(
+    `A child on screen was left mid-word with neither her name pill nor a speech bubble ` +
+      `drawn over her, on ${spokeWithNothingDrawnOnScreen} occasion(s). Hiding the pill must ` +
+      `be paid for by a bubble that is actually drawn, never by text that merely exists — ` +
+      `see NpcSystem.updateLabels. First: ${worstNothingDrawnLine}`,
+  );
+}
 if (sightings < MIN_SIGHTINGS) {
   failures.push(
     `Only ${sightings} bubble(s) were drawn in ${RUN_SECONDS}s, below the ${MIN_SIGHTINGS} ` +
@@ -693,9 +791,24 @@ process.stderr.write(
     ? '  #486: nobody spoke, so assertion 4 asserts nothing this run.\n'
     : `  #486: ${spoken.size} child(ren) seen talking; longest run without a name while ` +
       `silent and in shot, over all of them: ${worstLatch} frame(s). ` +
-      `${spokeWithNothingDrawn} frame(s) mid-word with neither pill nor bubble drawn ` +
-      `(the 40-46 m band, and any speaker whose bubble was gated off screen).\n`,
+      `Clause 4c: ${bubbleWithheldOnScreen} frame(s) where a child on screen was mid-word ` +
+      `with her bubble withheld and her pill therefore owed, of which ` +
+      `${spokeWithNothingDrawnOnScreen} left her wearing nothing ` +
+      `(${spokeWithNothingDrawn} counting the children the frustum never contained, which ` +
+      `nobody renders and which are not asserted).\n`,
 );
+if (spoken.size > 0 && bubbleWithheldOnScreen === 0) {
+  // Coverage, audible on a green run: no frame this run ever put a visible
+  // child mid-word with her bubble withheld, so 4c ruled nothing out. Keyed on
+  // the opportunity, not on the failure — the failure is 0 whenever the fix
+  // works, so keying it there would announce cover on every green run forever.
+  process.stderr.write(
+    `  #486: clause 4c found no such frame at ${VIEW_WIDTH}x${VIEW_HEIGHT} in ` +
+      `${RUN_SECONDS}s, so it asserts nothing this run. The viewport and run length that ` +
+      'do exercise it are check:speech-bubbles:wide — 1920x1080 — and a portrait frustum ' +
+      'is not expected to.\n',
+  );
+}
 
 if (verbose) {
   for (const breach of breaches.slice(0, 40)) {
