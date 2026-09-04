@@ -509,3 +509,83 @@ was pulled up for. Read the whole log.
 numbers that had been *typed* where they should have been *derived*, and in
 both cases a green check sat on top of them. The clamp and the fixed spacing
 were each a small lie that made a broken model look consistent.
+
+---
+
+# Round six — WATCHED. The square-on rebuild is wrong, and the reason is important
+
+**Model: Opus (`claude-opus-5[1m]`).** I watched it. **Do not hand round five
+to Jim.**
+
+## What I saw, at the door beat (t = 4.30 s)
+
+**The LAND OF GOOD PLACES sign lies squarely across the child's chest.** It is
+the exact frame `ARRIVAL_DOOR_THREE_QUARTER_DEGREES = 60` was introduced to
+prevent, reproduced by removing it. Photographed:
+`pr491-square-on-sign-across-her.png` on `qa-screenshots`
+(`10bd32cee1a87d252abbc719427c86301582ebef`).
+
+## Why `ARRIVAL_GATE_STANDOFF` does not fix it — and I should have known
+
+I reasoned that standing the eye **short of the gate** would put the arch
+behind the lens, so square-on would cost nothing. **That is false, and this
+file already said so.** From `ARRIVAL_DOOR_THREE_QUARTER_DEGREES`'s own doc:
+
+> *"There is no pitch and no zoom that moves it, because in this projection
+> nothing about distance moves anything."*
+
+An orthographic camera renders **everything along the view ray**, whatever the
+eye's position on that ray. The near plane sits far behind the eye — that is
+the same property that let the eye end up *inside* a pier in round three
+without being clipped out. So moving the eye 3 m nearer the bus does not put
+the arch behind it in any sense that matters: the arch is still between the
+ray and the child, and it still draws at full size across her.
+
+**Distance is an occlusion control only in the sense of what lies along the
+ray — not of what lies "behind the camera", because in ortho there is no such
+thing at a useful scale.** I had the right sentence in front of me and read it
+as being about *framing* rather than about *occlusion*. It is about both.
+
+## So the real constraint, stated properly
+
+While the camera is on the door's normal **and the gate stands on that same
+normal**, square-on and "the arch is not across her" are **mutually
+exclusive**. No stand-back, pitch or zoom resolves it.
+
+There are only two ways out, and the doc names the right one:
+
+> *"That is not a number to nudge; it is a sign the shot needs its focus moved
+> out along the bus rather than its bearing turned further."*
+
+1. **Move the subject along the bus.** Take the door beat on a door — or a
+   drop point — that is *not* on the line from the gate, so the square-on
+   normal misses the archway. This keeps Jim's "straight on to the doors"
+   exactly and is the option the original author already identified.
+2. **Move the gate off the normal** — not ours to do.
+
+Option 1 is what the next attempt should build. It means `doorFocus` moving
+along the bus's own axis until the archway is clear of the sightline, and that
+displacement is *derivable*: it is the same `separation = D·sinθ −
+ENTRANCE_GATE_HALF_WIDTH·cosθ` formula already written down in that doc, solved
+for a lateral offset at θ = 0 instead of for θ.
+
+## What is still good from round five, and should be kept
+
+- The **pass-model inversion** (`sheThrough`/`eyeThrough`, signed
+  `ARRIVAL_ARCH_EYE_OFFSET_Z`, no `Math.max` clamp) is correct and independent
+  of the bearing question. Keep it.
+- The **derived sweep spacing** and the **pace assertion** are correct and
+  armed. Keep them.
+- **Sideroom went 0.81 m → 3.50 m** because square-on flies the eye down the
+  centreline of the opening. Whatever bearing is chosen, that is worth keeping
+  in view.
+- `ARRIVAL_GATE_STANDOFF` should be **reverted or re-justified** — it does not
+  do what its doc claims. Its doc is currently *wrong* and would mislead the
+  next person exactly as my own reasoning misled me.
+
+## The honest status
+
+Rounds four and five are a **correct fix to the model** sitting under an
+**incorrect composition**. The composition must be solved by moving the
+subject, not the bearing and not the stand-back. Nothing here should go to Jim
+until that is built and watched.
