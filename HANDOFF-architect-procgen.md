@@ -11,6 +11,26 @@ SolveScheduler spine, byte-identical parks) merged as #499. The universal
 overlap invariant is in flight on `feat/universal-overlap-invariant` (its
 first honest run found #501).
 
+## State at a glance (for a cold pickup — details in the checkpoints below)
+
+- **The design is fully written.** All five stages carry specs or
+  checklists in the doc; both of Jim's 3-Sep rulings (unwind reaches any
+  decision; supports section-by-section, all extra geometry) are recorded
+  verbatim; the contradiction pass is done and its habit adopted.
+- **Four engineering briefs are drafted and HELD** in
+  `docs/BRIEF-stage3-step{1,2,3,4}-*.md`. Strictly sequential; step 1
+  goes out the moment PR #498 (`fix/road-487-488`, rebased `7bfcca23`,
+  in review) merges. **If you are resumed and #498 has merged: send the
+  step-1 brief to the coordinator as a proposal. That is the next
+  action.**
+- **Nothing else is owed** that this agent knows of. Deliberately NOT
+  written: stage-4/5 per-placer briefs (premature until stage 3's
+  decision point is answered with step 4's numbers) and quality-tier
+  soft-list additions (await Jim's ruling, per the doc).
+- Report to the coordinator, never Jim. Do not merge. Design work is
+  standing authority; anything changing shipped behaviour goes up as a
+  proposal first.
+
 ## Checkpoint, 3 Sep — the slide-leg evidence is in the doc
 
 Jim asked why a slide leg lands in the train's path. Judged: **an instance of
