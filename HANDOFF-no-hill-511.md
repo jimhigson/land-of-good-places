@@ -272,3 +272,83 @@ mechanically true rather than a hope — and it is worth asserting, not assuming
 - `src/world/paths.ts:1246` records that a `terrainHeight` boundary walk was removed
   as a **25.7 ms hot spot**. `terrainHeight` is cheap but not free; a much larger
   ground must not multiply calls to it.
+
+---
+
+# Continuation — perspective prototype (Opus 5, 1M context)
+
+Jim, 4 Sep, after being shown that a bus-safe sphere's horizon sits at 870 m and
+ortho cannot compress it: *"Maybe we just use a perspective camera then"* — and
+*"Ok try it and give me preview link when ready"*.
+
+## Built
+
+`?projection=perspective` on any route (`src/core/perspectiveFlag.ts`). Same
+position, same pitch, same yaw — **projection only**, so ARCHITECTURE.md's fixed
+angle is untouched. FOV is derived from the existing zoom
+(`2·atan(halfHeight / CAMERA_DISTANCE)`), so every framing still frames what it
+asked for at the player's distance. At default zoom that is **~22°** — a long
+lens, which is why the look is preserved rather than transformed.
+
+`viewHalfWidth/Height` now go through one owner (`focusHalfHeight`) that answers
+for both projections **at the focus**, and says in its own doc that it is
+approximate off-focus rather than being silently wrong.
+
+`tsc` exit 0. Committed, pushed. **Prototype, not a migration.**
+
+## Measured: perspective alone gives NO sky back
+
+Screenshots, canonical park, park centre and park edge (`/tmp/persp/`):
+
+| frame | sky |
+|---|---|
+| ortho centre | 0% |
+| perspective centre | 0% |
+| ortho edge (240° bearing) | 0% |
+| perspective edge | 0% |
+
+(A pixel count reports 0.5–4.9%, but that is the pale Menu pill, the fountain
+water and the blue rail line — not sky.)
+
+**Why:** there is nothing distant to see. Today's ground is a 125 m disc ending
+in a cliff, with a treeline in front of it. Perspective compresses distance, but
+only if there is distance. At the park edge the **treeline fills the up-screen
+area in both projections**.
+
+## The conclusion that matters
+
+**Neither half works alone, and together they should.**
+
+- The **sphere alone** fails because ortho draws its 870 m horizon at 870 m,
+  against a ~29 m frame.
+- **Perspective alone** fails because today's land stops at 125 m and the
+  treeline covers what is left.
+- **Perspective + far-spreading gentle ground** is the combination that puts a
+  horizon on screen: perspective supplies the compression, the extended ground
+  supplies something to compress. The treeline would then also need to stop
+  being a wall at the frame's top edge.
+
+So the sphere is not superseded by perspective — it is **unblocked** by it. That
+is the opposite of how it looked before this was measured.
+
+## Cost/consequence list for the projection swap — reported, not fixed
+
+Anything assuming a world object has a fixed screen size becomes suspect:
+
+- **Name pills and speech bubbles** — `clampToFrustum` and `screenOffset` are
+  exact only at the focus now. Pills on distant NPCs will drift.
+- **`check:pet-slide`'s frame-share clauses** (`PET_FRAME_FLOOR/CEILING`) measure
+  a raster, so they still measure truly — but the *numbers* would move, and
+  `chaseEye`'s `estimatedFrameShare` assumes a fixed angular frame.
+- **The slide chase camera and arrival camera** are separate rigs and unaffected
+  by this flag, but they would need their own answer in a real migration.
+- **Occlusion is new**: buildings will hide what is behind them, the castle will
+  cover the park. Nothing in the layout has ever had to avoid that.
+- **`worldUnitsPerPixel`** is now depth-dependent; anything sizing UI from it is
+  approximate.
+
+## Status
+
+Prototype pushed, both frames captured, sky measured. **Do not merge.** Next
+question for Jim is whether to try perspective **with** extended ground, which is
+the only combination the measurements say can work.
