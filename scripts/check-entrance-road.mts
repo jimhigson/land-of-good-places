@@ -78,6 +78,8 @@ interface SeedReport {
   readonly legs: number;
   /** Legs the bus's swept body reaches on the road as it is now. Must be zero. */
   readonly hits: number;
+  /** Of {@link hits}, the ones on the ring a child stands beside — the visible fault. */
+  readonly walkPastHits: number;
   readonly worstPenetration: number;
   /** True if this park was built with the corridor off — the control run. */
   readonly control: boolean;
@@ -226,23 +228,26 @@ async function measureOneSeed(asControl: boolean): Promise<void> {
 
   // --- the road the bus is actually on now ----------------------------------
   const brow = entranceRoadBrow();
-  const hitLegs = new Set<number>();
+  // **Distinct posts over the whole run, not samples and not per-station.**
+  // A post is sampled every POST_STEP of its length and the bus is inside it
+  // for many consecutive stations, so counting either would report one post
+  // dozens of times. The union is keyed on the post's own identity.
+  const hitPosts = new Set<string>();
+  const hitWalkPast = new Set<string>();
   let worstPenetration = 0;
   for (let at = brow; at >= -brow; at -= STEP) {
     const station = entranceRoadAt(at);
-    const { worst } = penetration(station.x, station.z, station.headingX, station.headingZ);
+    const { worst, posts, walkPast } = penetration(
+      station.x,
+      station.z,
+      station.headingX,
+      station.headingZ,
+    );
     worstPenetration = Math.max(worstPenetration, worst);
-    for (let i = 0; i < legs.length; i += 1) {
-      const leg = legs[i] as { x: number; z: number; radius: number };
-      const dx = leg.x - station.x;
-      const dz = leg.z - station.z;
-      const along = dx * station.headingX + dz * station.headingZ;
-      const across = dx * -station.headingZ + dz * station.headingX;
-      if (Math.abs(along) - halfLength <= leg.radius && Math.abs(across) - halfWidth <= leg.radius) {
-        hitLegs.add(i);
-      }
-    }
+    for (const post of posts) hitPosts.add(post);
+    for (const post of walkPast) hitWalkPast.add(post);
   }
+  const hitLegs = hitPosts;
 
   // --- is the road that is DRAWN the road the bus drives? -------------------
   //
@@ -349,6 +354,7 @@ async function measureOneSeed(asControl: boolean): Promise<void> {
     worstStray: Number(worstStray.toFixed(2)),
     legs: legs.length,
     hits: hitLegs.size,
+    walkPastHits: hitWalkPast.size,
     worstPenetration: Number(worstPenetration.toFixed(3)),
     control: asControl,
     spurGap: Number((Number.isFinite(spurGap) ? spurGap : 999).toFixed(3)),
@@ -453,7 +459,8 @@ async function sweepThePool(): Promise<void> {
   for (const pair of pairs) {
     console.log(
       `  seed ${String(pair.real.seed).padStart(8)}  legs ${String(pair.real.legs).padStart(3)}  ` +
-        `bus hits ${pair.real.hits}  (corridor off: ${pair.control.hits} legs in the bus, ` +
+        `posts in the bus ${pair.real.hits} (${pair.real.walkPastHits} on the walk-past ring)  ` +
+        `(corridor off: ${pair.control.hits} posts, ${pair.control.walkPastHits} walk-past, ` +
         `worst ${pair.control.worstPenetration.toFixed(2)} m)`,
     );
   }
