@@ -322,6 +322,15 @@ export class World implements GameSystem {
     // same late-binding `attachPlayer` has always used.
     this.entrance.attachNpcs(this.npcs.all.slice(0, ARRIVAL_KID_COUNT));
 
+    // The park is complete, so the meadow can finally be asked the one question
+    // it could not answer when it was sown two hundred lines above: is any
+    // flower standing inside something solid? The lamp posts, the stalls, the
+    // rides and the entrance are all built after it, and a flower planted where
+    // a lamp post later goes ends up inside the post. Same late-binding as the
+    // `keepClearOfTapZones` calls above, for the same reason — see
+    // `Flowers.settleAgainstTheFinishedPark`.
+    this.flowers.settleAgainstTheFinishedPark();
+
     // Everything the park *is*, as far as the scene is concerned. Kept as a
     // list rather than only spread into `scene.add` so {@link setParkVisible}
     // can take the whole park off screen in one go — see its own note. The

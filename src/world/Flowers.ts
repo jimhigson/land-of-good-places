@@ -649,6 +649,43 @@ export class Flowers implements GameSystem {
     this.petals.instanceMatrix.needsUpdate = true;
   }
 
+  /**
+   * **Replants every flower now standing inside something solid** — called
+   * once, after `World` has finished building the park.
+   *
+   * The meadow is sown early, so {@link collision} can only ever tell it about
+   * what already exists at that moment: the boundary masonry, the wall runs
+   * and the tree trunks. The lamp posts, the stalls, the rides and the
+   * entrance are all built afterwards, and a lamp planted on top of a flower
+   * leaves the flower inside its post.
+   *
+   * That is not hypothetical and it is not rare: it is how this method came to
+   * exist. `check:coplanar` found `living-flower-stems` sharing a plane with
+   * `lamp-posts/<Mesh:CylinderGeometry>`, having already found it sharing one
+   * with the track ballast and then with a stone wall — three symptoms of one
+   * cause, which is a scatter answering a question about a park that does not
+   * exist yet.
+   *
+   * So the question is asked again when the answer is finally knowable. This
+   * is the same shape as {@link keepClearOfTapZones}, which the train's
+   * platforms have always arrived through, and it is deliberately a *replant*
+   * rather than a nudge: the flower is drawn a whole new spot through
+   * {@link pickSpawnPoint}, which now puts it to a collision world holding the
+   * entire park.
+   */
+  settleAgainstTheFinishedPark(): void {
+    for (let i = 0; i < this.count; i += 1) {
+      const x = this.posX[i] ?? 0;
+      const z = this.posZ[i] ?? 0;
+      if (this.collision.isClearCircle(x, z, WIDEST_FLOWER)) continue;
+      this.spawnAt(i, true);
+      this.writeMatrix(i);
+    }
+    this.stems.instanceMatrix.needsUpdate = true;
+    this.heads.instanceMatrix.needsUpdate = true;
+    this.petals.instanceMatrix.needsUpdate = true;
+  }
+
   private insideAnyAnchor(x: number, z: number, margin: number): boolean {
     for (const anchor of ANCHORS) {
       const dx = x - anchor.position[0];
