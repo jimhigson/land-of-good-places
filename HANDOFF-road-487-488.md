@@ -1391,3 +1391,90 @@ decides between "the search needs to be cleverer" and "the geometry is
 impossible and the trestle's own shape has to give".
 
 **Do not weaken the 40 m tolerance or the duck-bar fairness assertion.**
+
+## The backtrack cannot be written, and here is the measurement that says so
+
+`scripts/probe-slot-search.mts` (committed) sweeps a slot's whole neighbourhood
+— `dr` −20..20 at 0.5 m, `da` ±6, far wider than any nudge list — and reports
+**which predicate refuses each candidate**. Canonical seed, all three rings:
+
+```
+50 slots, 4 whose nearest clear ground is beyond RADIAL_NUDGES' 5 m reach
+  slot 0: nearest clear ground 11.0 m off the ring's line
+  slot 1: nearest clear ground 11.0 m
+  slot 2: nearest clear ground 11.0 m
+  slot 3: nearest clear ground 10.5 m
+
+slot 0: centre-line outset 6.50 m, trunk rises 3.00 m, bus body reaches 3.99 m
+        (133% of the way up the trunk)
+trunk top is 0.00 m outside the corridor
+trunk top is 1.06 m from the road's centre line (road half width 3.89, bus 2.64)
+```
+
+Read that last line first. **The ride's rails pass 1.06 m from the middle of the
+lane the bus drives.** The trunk top is pinned under them, the bus body reaches
+84–133% of the way up the trunk, so *wherever the foot is put* the post arrives
+inside the corridor at a height the bus occupies. The refusal grid is `road` at
+every one of the 13 × 41 candidates within 10 m.
+
+So there is no different decision for `searchForClearGround` to make. This is
+not the generator shrugging; it is the generator being asked for something that
+does not exist. **Do not widen the nudge lists** — clear ground begins at 10–11 m
+off the ring's line, and `MANDATORY_RADIAL_NUDGES` caps at 4 precisely because a
+support that drifts from its bar is itself the visual bug (see its doc comment).
+
+**And the cheap answer is not available either.** The corridor is `ROAD_HALF_WIDTH`
+(3.89) across rather than the bus's own 2.64, which is deliberate slack — but the
+trunk top is 1.06 m from the centre line, inside even the bus. Narrowing the
+corridor buys nothing.
+
+This confirms the branch's own impossibility proof, measured independently and
+from the other side: the excluded band is (1.93, 11.07) and the first clear
+ground is at 10.5–11.0. The proof was right all along. What was wrong was the
+belief recorded in `groundIsClear`'s doc comment — *"a leg at outset 6.5 needs
+about +2.6 m radially to clear a road hugging the wall — inside `RADIAL_NUDGES`"*
+— which was true only of the foot, and the foot was never the question.
+
+### Where that leaves the branch
+
+Both states are visibly faulty, so this is a trade and not a regression to
+revert:
+
+| | `main` | this branch |
+|---|---|---|
+| bus vs trestle posts | drives through 8–10 posts a seed | **clears every post, 16/16 seeds** |
+| ring support at the entrance | fine | **4 slots dead, 61–64 m unsupported** (40 m invariant) |
+| duck bars at the entrance | fine | **3–5 a seed rendered with no support**, 14/16 seeds |
+
+`test:procgen` is honestly red on 5 seeds for the second and third rows.
+
+### The options, none of which I should pick silently
+
+Every one changes what the park looks like, which CLAUDE.md makes Jim's call.
+
+- **Move the road out** past outset 11.07 — blocked, the allowed band tops out
+  at 8.11 (`RIM_OUTSET_START` and the 17 m hillside).
+- **Move the road in** to ≤ 1.93 — blocked, the bus door needs 8.26 or it opens
+  into the archway (the fault fixed in session 3).
+- **The road crosses the ride's line rather than running along it.** The
+  impossibility proof itself says this is fine — `TRESTLE_SPACING` is 12 m
+  against a 7.78 m road. It means the bus stops on a radial approach instead of
+  pulling up parallel to the wall, and revisits the door/pavement work.
+- **The ride spans the entrance on purpose** — paired legs standing outside the
+  corridor and reaching in above the bus, or an arch, with the 40 m invariant
+  given a stated, measured exception at the gate. This is what a real elevated
+  railway over a road looks like.
+- **Raise the ride over the entrance** so the trunk tops clear the bus body and
+  a leg can stand outside the corridor and lean in above it.
+
+## A hole in `check:entrance-road`, found on the way
+
+It sweeps `railRace:trestle-legs` **only**. The trestle also draws
+`railRace:trestle-branches-lower` and `-upper`, and at the entrance the fork
+nodes sit at the trunk's top — **3.00 m above ground on two of the three rings,
+against a bus roof at 3.99 m**, i.e. inside the bus's own body band. So the
+branches over the road are unmeasured by the check that exists to measure
+exactly that. It does not bite today because those slots have no trestle at all,
+which is the other bug — but any resolution that puts a trestle back near the
+road needs the check widened to the branches first, or it will report clean
+about a bus driving through a fork.
