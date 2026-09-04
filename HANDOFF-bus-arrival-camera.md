@@ -272,12 +272,32 @@ Modelled at that pace, my instrument says the game's own pass takes the eye
 **0.57 m up through the sign plank** on the way out, and that most crossing
 fractions clip. `/tmp/probe3b.log` has the sweep.
 
-**I did not act on it, for two reasons, and both should be weighed rather than
-inherited as a conclusion:** it needs a change to a shot Jim is currently
-judging, and it rests on a modelled pace I could not verify — I was not granted
-the browser, so nobody has *looked* at the exit. Treat this as unproven and
-open. The cheap next step is eyes on `/arrive`, watching the moment the camera
-leaves the arch.
+**CONFIRMED BY EYE — it is real.** The Overseer granted me the browser and I
+went and looked. Method: dev server on port 5348 (`--strictPort`), `/arrive`,
+and the game's own clock dilated 20x by wrapping `requestAnimationFrame` — the
+sequence is `dt`-driven, so a slowed timestamp slows the whole park uniformly.
+That is the only way to inspect a ~0.1 s event at screenshot cadence, and it
+changes no code path.
+
+| game t | what is on screen |
+|---|---|
+| 7.05 s | camera under the arch, piers clean columns, band and sign intact |
+| **7.50-7.59 s** | **the near pier and the arch band are sheared open** — the pier renders as a flat wedge with its front faces gone, and a child's body draws straight through it |
+| 8.53 s | camera risen clear, arch intact again below-left |
+
+Reproduced on **two different parks**, fresh profile each. Screenshots are on
+the `qa-screenshots` branch as `pr491-arch-exit-clip-park1.png` and
+`...-park2.png`, linked from the PR comment.
+
+**I did not retune it.** The composition is Jim's call and I was asked not to.
+Three candidate fixes, none of which move the framing he is judging: hold the
+close stand-back a little longer after `clear`; ease the opening on a curve
+that is slow at the start; or push the eye's exit off the gateway centreline so
+it rises beside a pier rather than through one.
+
+**And a second gap for whoever takes this on:** the check's synthetic passes use
+`clear = under + 1.0 s`, which models a *slower walker than the game has*. The
+sweep should bracket the game's measured 0.61 s spacing.
 
 The sign plank is 3.60–4.66 m tall and only **0.26 m deep** in z (±0.13),
 which is why this is a graze rather than a long clip.
