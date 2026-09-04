@@ -240,23 +240,67 @@ const trial = new Vector3();
  *
  * A stop, not a tuning knob: the solve below walks back until the bodies really
  * are apart, and this bounds the walk so a pathological chute cannot push a
- * companion arbitrarily far up the slide (or into an unbounded loop) instead of
- * failing visibly. Measured worst case across the seed pool is 0.15 m, so 1.5 m
- * is ten times the worst bend the generator has ever produced.
+ * companion arbitrarily far up the slide, or loop for ever. Measured worst case
+ * across the seed pool is 0.15 m, so 1.5 m is ten times the worst bend the
+ * generator has ever produced.
+ *
+ * **What happens if it is ever reached, said honestly.** The solve gives up and
+ * returns the furthest seat it was allowed, which may still be too close — so
+ * on such a chute a pet would be drawn clipping into her, exactly as before
+ * this fix. The shipped game has no check in it and would simply draw that;
+ * nothing would be thrown and a child would see a pet inside her, which is why
+ * {@link bendAllowanceExhaustions} exists rather than a comment claiming this
+ * "fails visibly". It does not fail visibly on its own. It is *counted*, and
+ * `check:pet-slide` asserts the count is zero, so the giving-up is visible to
+ * the one thing that can act on it.
  */
-const MAX_BEND_ALLOWANCE = 1.5;
+export const MAX_BEND_ALLOWANCE = 1.5;
+
+/**
+ * How many times the solve has run out of {@link MAX_BEND_ALLOWANCE} since the
+ * last reset — i.e. how many companion-frames were seated **closer than the
+ * clearance asks for**, because no reachable seat satisfied it.
+ *
+ * A plain count rather than a throw: this runs every frame of a real ride, and
+ * a child who has done nothing wrong should not be shown a crash because her
+ * park's chute bends unusually hard. But a silent clamp is how a fix like this
+ * rots — it would go on producing exactly the clipping #507 is about while
+ * every check stayed green. So the number is kept, and `check:pet-slide`
+ * asserts it is zero across the descent.
+ */
+let bendAllowanceExhausted = 0;
+
+/** See {@link bendAllowanceExhausted}. */
+export function bendAllowanceExhaustions(): number {
+  return bendAllowanceExhausted;
+}
+
+/** Zeroes {@link bendAllowanceExhausted}, so one descent can be measured. */
+export function resetBendAllowanceExhaustions(): void {
+  bendAllowanceExhausted = 0;
+}
 
 /** Resolution of the walk, in metres. Well under the 1 cm clips it must fix. */
 const BEND_STEP = 0.05;
 
-/** The raw seat point for an arc distance and slot, side-step included. */
-function seatPointFor(slide: SlideRide, distance: number, slot: number, out: Vector3): void {
+/**
+ * **The chute's own centre line** at an arc distance, and the single owner of
+ * what "before the top of the chute" means — the child's place on it and every
+ * companion's are the same question asked at different distances, so they are
+ * the same code. Leaves `tangent` at that place, which every caller then wants.
+ */
+function chutePointAt(slide: SlideRide, distance: number, out: Vector3): void {
   const t = Math.min(1, Math.max(0, distance) / slide.length);
   slide.pointAt(t, out);
   slide.tangentAt(t, tangent);
   // Behind the lip: carry on along the entry tangent, backwards. `distance` is
   // negative here, so this subtracts.
   if (distance < 0) out.addScaledVector(tangent, distance);
+}
+
+/** The raw seat point for an arc distance and slot, side-step included. */
+function seatPointFor(slide: SlideRide, distance: number, slot: number, out: Vector3): void {
+  chutePointAt(slide, distance, out);
 
   // Left, right, left — see PET_SIDE_STEP. Across the chute is the tangent
   // crossed with world up, which is the same "up is always world up" the chute
@@ -312,6 +356,9 @@ function arcForChord(
     seatPointFor(slide, floor - extra, slot, trial);
     if (trial.distanceTo(from) >= wanted) return floor - extra;
   }
+  // Gave up: this seat is closer than `wanted` and a pet may clip. Counted, not
+  // thrown — see {@link bendAllowanceExhausted}.
+  bendAllowanceExhausted += 1;
   return floor - MAX_BEND_ALLOWANCE;
 }
 
@@ -363,13 +410,12 @@ export function petSeatOnSlide(
   // and the same one `check:pet-slide` asserts. It is re-walked per slot rather
   // than cached because the ride asks for one seat at a time and a cache would
   // be a second description of where the line is; at eight companions the whole
-  // chain is a few dozen curve samples a frame.
-  const herT = Math.min(1, Math.max(0, riderDistance) / slide.length);
-  slide.pointAt(herT, ahead);
-  if (riderDistance < 0) {
-    slide.tangentAt(herT, tangent);
-    ahead.addScaledVector(tangent, riderDistance);
-  }
+  // chain is re-walked for each of them, so the cost is the triangle 8·9/2 = 36
+  // links a frame, each sampling the curve at least four times (twice per
+  // `seatPointFor`, and more wherever a bend makes the solve step) — call it
+  // 150 samples a frame rather than the "few dozen" an earlier draft of this
+  // comment claimed, which counted links and forgot what a link costs.
+  chutePointAt(slide, riderDistance, ahead);
 
   let distance = riderDistance;
   for (let link = 0; link <= slot; link += 1) {

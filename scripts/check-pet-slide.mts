@@ -93,6 +93,9 @@ const { Sky } = await import('../src/world/Sky.ts');
 const { Player } = await import('../src/entities/Player.ts');
 const { Parade } = await import('../src/entities/parade/Parade.ts');
 const { CHUTE_ENVELOPE } = await import('../src/world/building/SlideRide.ts');
+const { bendAllowanceExhaustions, resetBendAllowanceExhaustions, MAX_BEND_ALLOWANCE } = await import(
+  '../src/world/slide/petRiders.ts'
+);
 const { Raycaster } = await import('three');
 const { PARADE_MEMBER_RADIUS } = await import('../src/core/constants.ts');
 const { IsoCamera } = await import('../src/core/IsoCamera.ts');
@@ -395,6 +398,10 @@ interface RunResult {
  * the parade, which is the game exactly as it was before #468.
  */
 async function ride(wired: boolean): Promise<RunResult> {
+  // The seat solve counts every frame it could not find a seat far enough back
+  // (see `petRiders.bendAllowanceExhaustions`). Zeroed per descent so the
+  // number below belongs to this ride and not to the one before it.
+  resetBendAllowanceExhaustions();
   const scene = new Scene();
   const world = new World(scene, new Sky(), liveControls, new IsoCamera());
   const building = world.building;
@@ -864,6 +871,24 @@ async function ride(wired: boolean): Promise<RunResult> {
         `frame on only ${(framedFraction * 100).toFixed(0)}% of ${rasters} rasters, against ` +
         `${(IN_SHOT_FLOOR * 100).toFixed(0)}% required (its smallest was ` +
         `${(smallestNearest * 100).toFixed(1)}%) — it is behind her, but not in the shot`,
+    );
+  }
+
+  // **The seat solve never gave up.** `arcForChord` walks back until a
+  // companion really is clear of the body in front; if it exhausts
+  // `MAX_BEND_ALLOWANCE` it seats the animal too close anyway and counts it,
+  // because a shipped game must not throw at a child mid-ride. That clamp is
+  // silent everywhere except here — without this clause a chute that bends hard
+  // enough would go on producing the exact clipping #507 is about while every
+  // check stayed green, which is the failure mode this file exists to prevent.
+  const gaveUp = bendAllowanceExhaustions();
+  if (gaveUp > 0) {
+    say(
+      'the spacing solve found a seat',
+      `the bend allowance ran out on ${gaveUp} companion-frames — this chute bends hard enough ` +
+        `that ${MAX_BEND_ALLOWANCE} m of extra chute still did not put a companion clear of ` +
+        'the body in front, so it was seated too close and may be drawn inside her. Raising the ' +
+        'allowance is the wrong fix; the seat is wanted, not the clamp',
     );
   }
 
