@@ -693,3 +693,15 @@ canonical scores 0 twice, summaries identical), out to
 `measurements/warp-search-post-rebase-24-428.jsonl`. If the search does not
 close both, that is a decision for the Overseer — the pool is sixteen seeds by
 Jim's own bar, and shipping fourteen is not it.
+
+**Written up as issue #510** — "Both required checks are green while fourteen
+of the sixteen pool seeds are unmeasured". That gap outlives this PR: nine pool
+seeds are built by no required check at all, and of the seven `test:procgen`
+covers, none goes through `check:park`. Both instrument defects above
+(`vet:seeds`'s bare invocation vetting candidates 1–30, and its exit 0 with
+seeds failing) are recorded there too.
+
+The PR body now states plainly that this branch fixes a **pre-existing visible
+bug** — flowers growing in the railway ballast and inside lamp posts, 15 on the
+canonical park today by the control measurement. That is the one thing in this
+diff a person can see.
