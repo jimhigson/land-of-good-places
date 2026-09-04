@@ -189,8 +189,17 @@ CLAUDE.md. My worktree is `.claude/worktrees/bus-camera-2`; the predecessor's
 `bus-camera` is still checked out on this branch and was left untouched.
 
 **Still stacked on `feat/arch-placement`. I did not rebase, onto `main` or
-anything else.** The gate arch fix and the round-robin spine both merged to
-`main` tonight; this branch takes them when its base does.
+anything else, and neither should you.** Rebasing this branch onto `main`
+detaches it from its base, GitHub goes `CONFLICTING`, and CI stops running
+entirely — my predecessor did exactly that and lost three commits' worth of
+cover.
+
+`feat/arch-placement` is now **four merges behind `main`**: the gateway fix,
+the bridge parapet, the round-robin spine and the gate arch fix. The base has
+to be rebased by whoever owns it, and this branch follows it. My predecessor
+measured that `main`'s gate rewrite does **not** move this shot — drop still
+(0, 64.34), archPass `under` 6.806 / `clear` 7.416, identical before and
+after — so the lag is a merge-order problem, not a correctness one.
 
 ## The defect I was sent for, and what it turned out to be
 
