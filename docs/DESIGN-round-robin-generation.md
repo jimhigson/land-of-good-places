@@ -185,11 +185,20 @@ in a place none of the ten ground models can see:
   route froze. A leg's only freedom is to slide **along** the chute
   (`NUDGES`, ±10 m); it cannot move sideways, because sideways is no longer
   under the chute.
-- So where the chute crosses ground no post may stand on — the train's
-  path, the paved network, a plot — every candidate in that stretch fails
-  every test, and the planner's own comment states the policy: *"one that
-  cannot is simply skipped."* The chute goes unsupported, and nothing
-  refuses anything.
+- Today the leg planner's obstacle list does not name the railway at all
+  (`isClear`, `distanceToPath`, plots, the castle, the cruiser column — no
+  rail corridor), so legs are *placed* in the train's path: issue #501,
+  found by the universal overlap invariant's first honest run, measured
+  **four legs inside `TRACK_CLEARANCE` on one pool seed**, the deepest with
+  its centre 0.12 m from the rail centre line. The train drives through
+  them every lap.
+- And the ticket-shaped fix — add the railway to the list — does not fix
+  the feature; it **trades the loud bug for the quiet one.** Once legs in
+  that stretch are refused, their only freedom is along the frozen chute,
+  every candidate there fails, and the planner's own comment states the
+  policy: *"one that cannot is simply skipped."* The chute goes
+  unsupported, and nothing refuses anything. A train through a post and a
+  floating chute are the two faces of the same committed-too-early route.
 
 This is #317/#319 again — a generator committing before the thing that
 constrains it exists — with one twist that earns it its own section: the
