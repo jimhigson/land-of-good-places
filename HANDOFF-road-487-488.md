@@ -1102,3 +1102,27 @@ the arch.*
 that matches on the name, and `grep` for the old name finds the check but not
 the *reasoning* that has gone stale. When a surface changes material, search
 for both names everywhere, in checks and invariants alike.
+
+## Which Node produced these numbers
+
+This Mac's default `node` is **v25.6.1**; CLAUDE.md wants 26+ and CI pins 26.
+Node **26.7.0** is at `/opt/homebrew/opt/node@26/bin/node` — `scripts/with-node`
+does not find it, because it only searches nvm directories.
+
+Another agent found the park simulation **non-deterministic under Node 26** on
+some checks (1 failure in 8 runs, different numbers each time) where Node 25 was
+byte-identical. **It does not affect `check:coplanar`.** Run twice under Node
+26.7.0 on this head:
+
+```
+224 seams, 67 fighting at 0.1 mm, 157 stand-off under 1 cm, 169 buried,
+none new — exit 0, both runs, byte-identical
+```
+
+and CI's own **Coplanar faces** and **Procgen invariants** jobs, which run on
+Node 26, are **green on this head**. So the seam closure is confirmed on the
+Node the repo actually requires, not only on the one this laptop defaults to.
+
+The seam measurements in the sections above (`probe-gateway-seam.mts`) were
+taken on Node 25.6.1; the coplanar ratchet that agrees with them has now been
+run on both.
