@@ -48,8 +48,18 @@ import { PET_SLIDE_LEAD } from './petRiders';
 export interface ChaseEye {
   readonly back: number;
   readonly up: number;
-  /** Radians, positive = nose down. */
-  readonly pitch: number;
+  /**
+   * The world point the lens should look at — the midpoint of the child and
+   * the nearest companion, or just the child when she rides alone.
+   *
+   * Returned as a **point rather than an angle** on purpose. An angle would
+   * have to be expressed in some frame, and this rig has three of them stacked
+   * (`rideMount` yawed and pitched with the chute, `eyeMount` turned by PI, the
+   * camera's own look) — which is exactly where `RideCamera`'s header records
+   * two agents getting a sign backwards. A point has no frame to get wrong, and
+   * the caller aims at it with vectors it already holds.
+   */
+  readonly aimAt: Vector3;
   /** True when no placement in range framed the companion and cleared ground. */
   readonly gaveUp: boolean;
 }
@@ -135,12 +145,15 @@ export function solveChaseEye(
       // With nobody behind her the shot only has to hold the child, which the
       // historical placement already did — so the first candidate wins and
       // every park without companions keeps exactly the camera it had.
-      if (!pet) return { back, up: high, pitch: pitchFor(rider, null, eye), gaveUp: false };
+      if (!pet) {
+        return { back, up: high, aimAt: new Vector3().copy(rider), gaveUp: false };
+      }
 
-      const pitch = pitchFor(rider, pet, eye);
-      // Aim the axis, then ask whether the animal is inside it. `axis` is the
-      // forward direction after pitching: -behind, tipped down by `pitch`.
-      axis.copy(behind).multiplyScalar(-1).addScaledVector(up, -Math.tan(pitch)).normalize();
+      // Aim between the two of them, then ask whether both are inside the
+      // frustum about that axis. Measured off the real points, so there is no
+      // angle in a frame to get the sign of wrong.
+      const aim = new Vector3().copy(rider).add(pet).multiplyScalar(0.5);
+      axis.copy(aim).sub(eye).normalize();
       toPet.copy(pet).sub(eye);
       const petAngle = Math.acos(
         Math.min(1, Math.max(-1, toPet.clone().normalize().dot(axis))),
@@ -150,21 +163,19 @@ export function solveChaseEye(
         Math.min(1, Math.max(-1, toChild.clone().normalize().dot(axis))),
       );
       if (petAngle <= wanted && childAngle <= wanted) {
-        return { back, up: high, pitch, gaveUp: false };
+        return { back, up: high, aimAt: aim, gaveUp: false };
       }
     }
   }
 
   // **No placement in range framed her line and stayed out of the hill.** Not a
   // floor to settle on — reported, and asserted zero by `check:pet-slide`.
-  return { back: BASE_BACK, up: BASE_UP, pitch: 0, gaveUp: true };
-}
-
-/** Nose-down angle putting the axis between the child and the companion. */
-function pitchFor(rider: Vector3, pet: Vector3 | null, at: Vector3): number {
-  const target = pet ? toPet.copy(rider).add(pet).multiplyScalar(0.5) : rider;
-  const dx = Math.hypot(target.x - at.x, target.z - at.z);
-  return Math.atan2(at.y - target.y, Math.max(dx, 1e-6));
+  return {
+    back: BASE_BACK,
+    up: BASE_UP,
+    aimAt: pet ? new Vector3().copy(rider).add(pet).multiplyScalar(0.5) : new Vector3().copy(rider),
+    gaveUp: true,
+  };
 }
 
 /** The nearest companion's own distance behind her, for callers that seat it. */
