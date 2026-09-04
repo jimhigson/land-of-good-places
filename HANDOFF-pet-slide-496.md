@@ -201,3 +201,16 @@ It conflicted, so the entry was **kept**, and `git stash list` still shows both
 entries untouched; `git reset --hard HEAD` restored this worktree. No work was
 lost, but the stash stack is one shared stack for every worktree in this repo.
 **Do not use `git stash` here.** Copy the file aside instead.
+
+## Verification status
+
+- `tsc --noEmit` — **exit 0**. `tsc --noEmit -p tsconfig.test.json` — **exit 0**.
+  Both on Node 26.7.0.
+- `check` chain step **sets** compared against `origin/main` by parsing
+  `package.json`: 58 steps both sides, **none removed, none added**;
+  `check:seed-pool` and `check:pet-slide` both present. The chain is untouched
+  by this branch.
+- `check:seed-pool` — exit 0 green, exit 1 with 4 failures under the mutation
+  above.
+- Sweep of `check:pet-slide` across all 16 pool seeds in flight; then the full
+  `pnpm run check`, `test:procgen`, `build`.
