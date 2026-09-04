@@ -2786,6 +2786,108 @@ const DROPPER_RAIL_TOLERANCE = 0.25;
  *    the classic "walked into a rail that is not drawn" bug. Checked by asking
  *    the real collision world what is at each measured leg position.
  */
+/**
+ * **A post a child can see is solid at every height she can touch it.**
+ *
+ * `railRaceRingsStandOutsideThePark`'s solidity clause asks whether a collider
+ * sits under each leg's **foot**. That is the right question about the foot and
+ * it is not the whole question about the post: it was moved midpoint→foot
+ * precisely because legs had begun to lean, which fixed the *collider* question
+ * and left the **mesh-versus-collider** one unasked — and unasked, it was
+ * answerable "no". A leg leans because `trunkFoot` is the nudged spot while
+ * `trunkTop` comes from the lane tops, which are never nudged; with a single
+ * circle at the foot, the drawn post at a child's chest stood up to 0.91 m from
+ * the centre of a 0.272 m collider, and she walked through it.
+ *
+ * So this walks the drawn post upward from its foot and asks, at each step,
+ * whether that point is inside something solid — stopping at
+ * {@link TALLEST_CHILD_HEIGHT}, because above that nothing that walks can reach
+ * it and `keepOutsFor` would rather have the ground.
+ *
+ * **Only the walk-past ring.** The race ring deliberately registers no
+ * colliders (it is hidden except mid-race), so asking this of it would demand
+ * the exact bug the sibling invariant forbids.
+ */
+const everyPostIsSolidAllTheWayUpAChild: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const solid: { x: number; z: number; radius: number }[] = [];
+  facts.world.collision.forEachCircle((x, z, radius) => {
+    solid.push({ x, z, radius });
+  });
+
+  const ring = builtRings(facts).find((candidate) => candidate.label === 'walk-past');
+  if (!ring) {
+    complaints.push('there is no walk-past ring in the built scene to measure posts on');
+    return complaints;
+  }
+  const legs = ring.group.getObjectByName('railRace:trestle-legs');
+  if (!(legs instanceof InstancedMesh)) {
+    complaints.push('the walk-past ring has no trestle legs in the built scene to measure');
+    return complaints;
+  }
+
+  const matrix = new Matrix4();
+  const centre = new Vector3();
+  const axis = new Vector3();
+  let leaning = 0;
+  let worstGap = 0;
+  let worstAt = '';
+  /** Finer than the collider chain's own spacing, so it can see between links. */
+  const STEP = 0.05;
+
+  for (let i = 0; i < legs.count; i += 1) {
+    legs.getMatrixAt(i, matrix);
+    centre.setFromMatrixPosition(matrix);
+    axis.setFromMatrixColumn(matrix, 1);
+    const length = axis.length() || 1;
+    axis.divideScalar(length);
+    // Foot and top from the instance's own matrix, the same derivation the
+    // sibling clause uses — measured off the mesh that is drawn, never from the
+    // spot the generator meant to put it at.
+    const footX = centre.x - (axis.x * length) / 2;
+    const footZ = centre.z - (axis.z * length) / 2;
+    const lean = Math.hypot(axis.x, axis.z) * length;
+    if (lean > STEP) leaning += 1;
+
+    // How far up this post a child can still walk into it, as a length along
+    // the post rather than a height, because a leaning post covers less height
+    // per metre of itself.
+    const rise = Math.abs(axis.y) * length;
+    const reachable = rise > 0 ? Math.min(length, (TALLEST_CHILD_HEIGHT / rise) * length) : 0;
+    for (let along = 0; along <= reachable; along += STEP) {
+      const x = footX + axis.x * along;
+      const z = footZ + axis.z * along;
+      let gap = Infinity;
+      for (const circle of solid) gap = Math.min(gap, Math.hypot(circle.x - x, circle.z - z) - circle.radius);
+      if (gap > 0 && gap > worstGap) {
+        worstGap = gap;
+        worstAt = `${fmt([x, z])} at ${(Math.abs(axis.y) * along).toFixed(2)} m up`;
+      }
+    }
+  }
+
+  // Says what it covered on every run, passing or failing — a park whose legs
+  // all stand straight asserts far less than one whose legs lean, and a reader
+  // has no way to tell those apart from a bare green line.
+  process.stderr.write(
+    `[post solidity] ${legs.count} walk-past posts, ${leaning} of them leaning, ` +
+      `swept to ${TALLEST_CHILD_HEIGHT} m at ${STEP} m\n`,
+  );
+  if (leaning === 0) {
+    process.stderr.write('[post solidity] no post leans on this seed — asserts nothing beyond the foot\n');
+  }
+
+  if (worstGap > 0) {
+    complaints.push(
+      `a walk-past trestle post is drawn ${worstGap.toFixed(2)} m outside anything solid at ` +
+        `${worstAt} — a child can see the post there and walk straight through it. The collider ` +
+        'is registered along the post in `track.ts`\'s `addPostCollider`; a leaning post whose ' +
+        'collider is a single circle at its foot is the fault this exists to catch',
+    );
+  }
+  return complaints;
+};
+
 const railRaceRingsStandOutsideThePark: Invariant = (facts) => {
   const complaints: string[] = [];
   const rings = builtRings(facts);
@@ -9231,6 +9333,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     'both Rail Race rings stand outside the park, built to their own size, ' +
       'and only the walk-past one is solid',
     railRaceRingsStandOutsideThePark,
+  ],
+  [
+    'every Rail Race post is solid all the way up a child',
+    everyPostIsSolidAllTheWayUpAChild,
   ],
   ["the rail-race stall's doormat is standable and reachable", railRaceStallDoormatIsUsable],
   ["every keychain keyring's stand point is standable and reachable", keychainStallStandIsUsable],

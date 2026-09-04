@@ -1203,3 +1203,41 @@ clauses firing, the old question still asked verbatim and still failing — only
 *which meshes count* changed, because the surface was renamed. The rebase is
 clean: the three dropped imports serve only main's `kerbReach` and `halfBus`,
 both replaced here, and `gateArch.ts` is byte-identical, so #482 is intact.
+
+## Blocker fixed, with the assertion that would have caught it
+
+`addPostCollider` (`track.ts`) walks the lean; new invariant **"every Rail Race
+post is solid all the way up a child"** asks the mesh-versus-collider question
+the foot-only clause could not.
+
+- Green: **576 passed**, 0 skipped (was 571 — one new invariant x 5 seeds).
+  Coverage note on every run: `[post solidity] 49-50 walk-past posts, 4-5 of
+  them leaning, swept to 2.97 m at 0.05 m`, and it says **"asserts nothing
+  beyond the foot"** on a seed where none leans. The 4–5 leaning independently
+  reproduces the reviewer's count.
+- **Proved red** by reverting the collider to a single circle at the foot, at
+  this branch's geometry (road outset 8.26, corridor honoured):
+  `5 failed | 571 passed`, posts drawn **1.82–2.14 m outside anything solid**
+  at ~2.93 m up. Worse than the review's 0.30–0.91 m because that was measured
+  at 1.4 m and this sweeps to `TALLEST_CHILD_HEIGHT` (2.97).
+
+### Still to do from the review
+
+1. **Must-fix**: `buildTreeline`'s false "RNG stream is untouched / every tree
+   stands where it did" comment — `continue` sits above six `rng` draws; 436 vs
+   494 trunks, only 115 of 436 survivors unmoved. Same sentence is on `main`
+   for the sibling clause; correct both.
+2. `isInEntranceRoad(x, z, radius = 0)` is `0 < 0` — false in the dead centre.
+3. Orphaned `ENTRANCE_ROAD_OUTSET` comment in `roadRoute.ts`.
+4. `Entrance.ts`'s "kerb's length is measured" block describes the deleted
+   straight-kerb algorithm.
+5. `CORRIDOR_SAMPLE_SPACING` is 0.2 under a comment saying "a quarter of a metre".
+6. Two dead exports.
+7. **PR body stale**: "not mergeable, coplanar red" (now green, CI too),
+   "38400 road triangles" (now 81008), "81.6 m from the gate" (measured 79.5).
+   Also the impossibility doc's 4.4 m should be **4.57**, and the excluded band
+   is (1.93, 11.07) against an allowed [3.89, 8.11].
+
+`check:rail-race`, `check:entrance-road` and full `check` have **not** been
+re-run since `addPostCollider` landed — a new collider chain can move
+`keepOutsFor` ground, so those are the ones that matter next.
