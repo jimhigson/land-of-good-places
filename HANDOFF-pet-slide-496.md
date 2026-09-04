@@ -214,3 +214,34 @@ lost, but the stash stack is one shared stack for every worktree in this repo.
   above.
 - Sweep of `check:pet-slide` across all 16 pool seeds in flight; then the full
   `pnpm run check`, `test:procgen`, `build`.
+
+## The sweep: two pool seeds carry real, visible defects
+
+`LGP_SEED=<n> check:pet-slide`, one run each, Node 26.7.0, on this branch
+(exit codes read from each run's own `.exit` file):
+
+| seed | exit | |
+|---|---|---|
+| 20260728 (canonical) | 0 | |
+| 5, 24, 115, 128, 131, 208, 225, 267, 274, 288, 326, 428 | 0 | |
+| **11** | **1** | `in shot: the nearest companion filled at least 1% of the chase frame on only 89% of 9 rasters, against 95% required (its smallest was 0.0%)` |
+| **346** | **1** | `not inside her: Little Mouse was 1 cm inside the child on ridden frame 459` |
+
+**Seed 346 is the `--predictable` failure**, character-for-character. (My
+earlier note that `--predictable` drew 115 was measured with
+`scripts/seed-report.mts`, which imports less before `parkManifest` than
+`check-pet-slide.mts` does and so leaves `Math.random` at a different point —
+in the check itself the frozen draw lands on **346**.)
+
+**Seed 11 is the CI failure** quoted on #496's third comment, also
+character-for-character.
+
+So the accidental randomisation had been *fuzzing the pool*, and it found two
+genuine defects. Both are parks a child can draw, so both are visible bugs:
+a pet drawn inside her body on the slide (346), and a pet missing from the
+chase shot (11). **Neither is caused by this branch and neither is fixed by
+it** — this branch stops the fuzzing, which is correct, and would therefore
+bury them. They need their own ticket, with these two seeds named.
+
+CI stays green either way: unpinned now always resolves canonical, which
+passes.
