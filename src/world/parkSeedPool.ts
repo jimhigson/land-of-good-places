@@ -139,9 +139,19 @@ export const PARK_SEED_POOL: readonly number[] = [
  * not in {@link PARK_SEED_POOL} is not a park a child can be given, and
  * the filter below throws rather than sweep one.
  *
- * The subset is the pool seeds with checked-in invariant files (the deep
- * sweep), not all sixteen — `vet:seeds` owns whole-pool coverage; this
- * keeps the blocking chain's cost where it was.
+ * The subset is **exactly the pool seeds with a checked-in invariant file**
+ * (the deep sweep), not all sixteen — `vet:seeds` owns whole-pool coverage;
+ * this keeps the blocking chain's cost where it was.
+ *
+ * That sentence was false when it was written: seed 131 had
+ * `test/procgen/seed-131.test.ts` and was not in this list, so a comment
+ * added to retire a hand-maintained list was itself describing a derivation
+ * nobody performed. 131 is in the list now, and — because this module ships
+ * to the browser and cannot read a directory — the agreement is enforced from
+ * the outside instead of promised here:
+ * `test/procgen/sweepSeeds.test.ts` fails if the two sets ever differ, in
+ * either direction. Add a per-seed file and that test tells you to add the
+ * seed here; delete one and it tells you to take it out.
  *
  * ## What being in this list does NOT mean
  *
@@ -172,7 +182,15 @@ export const PARK_SEED_POOL: readonly number[] = [
  * construction cannot see a stale warp vector on ten of the sixteen seeds a
  * child can actually draw.** See `parkWarp.ts`'s `WARPS_BY_SEED` header.
  */
-export const CI_SWEEP_SEEDS: readonly number[] = [CANONICAL_PARK_SEED, 5, 11, 24, 288, 326].map(
+export const CI_SWEEP_SEEDS: readonly number[] = [
+  CANONICAL_PARK_SEED,
+  5,
+  11,
+  24,
+  131,
+  288,
+  326,
+].map(
   (seed) => {
     if (!PARK_SEED_POOL.includes(seed)) {
       throw new Error(`CI_SWEEP_SEEDS: ${seed} is not in PARK_SEED_POOL — sweep only real parks`);
