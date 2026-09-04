@@ -352,3 +352,39 @@ Anything assuming a world object has a fixed screen size becomes suspect:
 Prototype pushed, both frames captured, sky measured. **Do not merge.** Next
 question for Jim is whether to try perspective **with** extended ground, which is
 the only combination the measurements say can work.
+
+## The frame does not reach the horizon — checked BEFORE building the sphere
+
+A perspective camera pitched down 38° with vertical half-FOV θ has its frame
+top at depression `38° − θ`. **The horizon is at 0° depression.** So the horizon
+is in frame only when **θ ≥ 38°, i.e. FOV ≥ 76°**. This is independent of the
+ground: no radius, no extension and no treeline work changes it.
+
+With FOV derived from zoom to match today's scale:
+
+| zoom | half-height | FOV | horizon in frame? |
+|---|---|---|---|
+| 1.00 (default) | 17.9 m | 22.4° | no |
+| 0.42 (`CAMERA_ZOOM_MIN` today) | 42.5 m | 50.6° | no |
+| 0.30 | 59.5 m | 67.0° | no |
+| **0.254** | **70.3 m** | **76.0°** | **first appears** |
+
+**Today's zoom-out stops at 0.42 — the horizon is just outside the range**, by a
+factor of 1.65. Building the sphere and measuring now would have produced another
+honest zero, and it would have looked like the sphere had failed when the cause is
+the zoom clamp.
+
+### Three ways out, for Jim to choose between
+
+- **(b) Extend zoom-out to ~0.25** (`CAMERA_ZOOM_MIN` 0.42 → 0.25). **The default
+  view is completely unchanged**; the horizon appears only when a child zooms
+  fully out. This is the same *behaviour* the ortho hill gave — its sky also only
+  appeared below zoom 0.6 — so it preserves today's look and restores the sky at
+  the same place in the zoom range. **Recommended, and the smallest change.**
+- (a) Widen the base FOV to ≥76°: the horizon is always visible, but the park
+  appears ~4× smaller at default zoom. A different game.
+- (c) Fix the FOV and zoom by moving the camera instead: horizon always in frame,
+  strong perspective everywhere. The largest change.
+
+**Do not build the sphere until this is settled** — the radius argument is
+downstream of it.
