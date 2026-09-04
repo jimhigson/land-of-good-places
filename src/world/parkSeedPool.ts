@@ -149,9 +149,10 @@ export const PARK_SEED_POOL: readonly number[] = [
  * nobody performed. 131 is in the list now, and — because this module ships
  * to the browser and cannot read a directory — the agreement is enforced from
  * the outside instead of promised here:
- * `test/procgen/sweepSeeds.test.ts` fails if the two sets ever differ, in
- * either direction. Add a per-seed file and that test tells you to add the
- * seed here; delete one and it tells you to take it out.
+ * `check:seed-pool` fails if the two sets ever differ, in either direction.
+ * Add a per-seed file and it tells you to add the seed here; delete one and it
+ * tells you to take it out. It is in the blocking chain, so neither drifts
+ * silently again.
  *
  * ## What being in this list does NOT mean
  *

@@ -6,7 +6,7 @@ import {
 } from './clearance';
 import { MIN_BRIDGE_HALF_LENGTH } from './bridgeFootprint';
 import { STATION_GAP } from './fence';
-import { ENTRANCE_GATE_X, ENTRANCE_GATE_Z, isInEntranceGateway } from '../entrance/layout';
+import { isInEntranceGateway } from '../entrance/layout';
 import { crossingSiteBanned } from '../parkWarp';
 import {
   NARROW_HALF_WIDTH,
@@ -345,48 +345,39 @@ function footprintsOverlap(a: Candidate, b: Candidate): boolean {
   return true;
 }
 
-function selectSpaced(candidates: readonly Candidate[], serveTheGate = false): CrossingSite[] {
+function selectSpaced(candidates: readonly Candidate[]): CrossingSite[] {
   const route = TRAIN_PLAN.route;
   const scored = [...candidates].sort(
     (a, b) =>
       a.obliqueness - b.obliqueness ||
       Math.min(b.rampReachPos, b.rampReachNeg) - Math.min(a.rampReachPos, a.rampReachNeg),
   );
-  // **The candidate nearest the park's entrance is kept first.**
+  // **There is no gate-priority seeding here, and that is a deliberate gap
+  // rather than an oversight — see the note below.**
   //
-  // This ranking has no notion of where the park *needs* to cross; it ranks by
+  // This ranking has no notion of where the park *needs* to cross: it ranks by
   // how square and how roomy a candidate is, and the 24 m rule then clears
-  // everything near whatever won. That is right for the open park and wrong at
-  // the one place the network is guaranteed to need a crossing.
+  // everything near whatever won. A `serveTheGate` flag used to seed the keep
+  // list with the candidate nearest the entrance arch, and it was only ever
+  // passed by `selectSpaced(levelCandidates, true)` — the level tier, which no
+  // longer exists. The parameter was dead the moment that tier was deleted, so
+  // it is deleted too rather than left as an argument nobody can pass.
   //
-  // Measured on seed 18. Its loop runs 2.5 m from the entrance arch and seals
-  // the gate-side neck outright: swept about the arch there is 0.0 m of
-  // gate-side ground 2 m out and 0.9 m at 4 m, against a 3.6 m ribbon. So the
-  // walk in must cross within a few metres of the arch. Of 77 level
-  // candidates the spacing rule kept 9, and near the gate it kept railDistance
-  // 8 — 25.3 m from the arch, across the railway — over railDistance 306,
-  // which stands 8.0 m from the arch and which the tier passes (reach 4.0/3.5
-  // against a 3.5 floor). It preferred it on ramp reach, 4.0 against 3.5. The
-  // walk in from the gate was then left crossing at railDistance 300.1 with no
-  // planned site anywhere in the 90 m from 274 to 4.
+  // **What is genuinely lost, stated so it is not lost with the code:** the
+  // problem it was written for applies to bridge sites exactly as much. The
+  // entrance is the one place the network is guaranteed to need a crossing, and
+  // nothing here prefers a site there. On `main` this was equally true — the
+  // flag was never reached for bridges either — so this PR changes no
+  // behaviour. What it changes is that there is no level tier underneath to
+  // absorb the miss: a gate-side crossing that finds no proven bridge site now
+  // throws instead of quietly becoming a level crossing.
   //
-  // Seeding the keep list with the arch's own nearest candidate costs nothing
-  // anywhere else: it is one site of the same tier, subject to the same 24 m
-  // rule for everything that follows it, and on a seed whose loop is nowhere
-  // near the gate it is a site that would have been kept regardless or one
-  // that displaces a neighbour no better than itself. Measured across all five
-  // CI seeds before shipping — see the commit.
+  // Whether bridge sites should get gate priority is therefore a real open
+  // question and a **follow-up, not a decision taken here**. It is not wanted
+  // in this PR because it would change site selection on every seed, which is
+  // exactly the kind of change that invalidates the baked warp vectors this
+  // branch has already had to re-search twice.
   const kept: Candidate[] = [];
-  if (serveTheGate && scored.length > 0) {
-    let nearest = scored[0] as Candidate;
-    for (const candidate of scored) {
-      const gap = Math.hypot(candidate.x - ENTRANCE_GATE_X, candidate.z - ENTRANCE_GATE_Z);
-      if (gap < Math.hypot(nearest.x - ENTRANCE_GATE_X, nearest.z - ENTRANCE_GATE_Z)) {
-        nearest = candidate;
-      }
-    }
-    kept.push(nearest);
-  }
   for (const candidate of scored) {
     const tooClose = kept.some(
       (other) =>
