@@ -233,6 +233,28 @@ the Overseer rather than signing it off.
 - Never `git add -A` or `git add .`. Name the files you mean.
 - `.claude/` is gitignored; worktree gitlinks must never reach `main`.
 
+**Never `git stash` in this repo. The stash is shared by every worktree.**
+
+It is a single stack on the common `.git`, not a per-worktree one, and with a
+dozen agents working at once that makes it a shared mutable global with no
+owner. On 3 September an agent ran `git stash -u` in its own clean worktree —
+saving nothing, because there was nothing to save — and the `pop` that followed
+pulled **another agent's uncommitted work** out of the stack and into its tree:
+conflict markers in `Building.ts` and four other files. Nothing was lost only
+because the conflict made git keep the entry rather than drop it.
+
+Note how ordinary that looked. Stashing in a tree you have just verified clean
+is the safest-feeling use of the command there is, and it is the one that goes
+wrong here, because the danger is in what the *pop* finds rather than in what
+the stash saved.
+
+You do not need it. **Commit instead** — this file already tells you to commit
+after every meaningful edit, and a commit on your own branch is private to your
+worktree in the way a stash is not. To set work aside, commit it; to throw it
+away, `git reset --hard HEAD` (which is also what cleaned up the incident). If
+you find yourself reaching for a stash, what you actually want is a commit you
+can amend later.
+
 ## `build` and `check` are different things
 
 Jim, 30 August 2026: *"why would we EVER run tests on a deploy to start
