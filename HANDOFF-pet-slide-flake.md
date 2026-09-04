@@ -105,7 +105,29 @@ cannot move the simulation, and the pass verdict line it is compared on is
 untouched, so the md5 comparison spans the edit intact. Runs 5+ additionally
 carry the new seed line, which is stronger evidence than runs 1–4 had.
 
+## Finding 6 — the flake reproduces on the pre-#508 tree, and not on `main`
+
+Measurement B, worktree `.claude/worktrees/pet-slide-pre508` at `3aa55407`
+(the commit `main`'s #508 squash sits on top of), first 5 runs:
+
+| run | exit | ridden frames |
+|---|---|---|
+| 1 | 0 | 683 |
+| 2 | 0 | **718** |
+| 3 | 0 | 675 |
+| 4 | 0 | **759** |
+| 5 | 0 | **718** |
+
+Four distinct frame counts in five runs, no edits between them — and **718 and
+759 both appear verbatim in the other agent's table**. Measurement A, on
+`main`, is 675 on every run so far.
+
+That is the hypothesis closed from both sides: the variance is present on the
+pre-fix tree and absent on the fixed one, with the other agent's own numbers
+landing inside the pre-fix spread and none of them equal to the fixed tree's
+675.
+
 ## Status
 
 Both loops running; seed-346 reproduction and `tsc --noEmit` queued behind
-them. Nothing to fix on `main` so far — the flake does not reproduce there.
+them. Nothing to fix on `main` — the flake does not reproduce there.
