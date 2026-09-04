@@ -617,6 +617,12 @@ drag a finished network the last seven metres to a door it never knew it owed.
 
 When a feature places itself, it publishes what it is owed: *"a paved
 corridor must terminate here, flush with this threshold, at this width."*
+(This section introduces demands through the quality tier because that is
+where Jim's brief raised them, but the mechanism is not quality-only: the
+stage-4 mechanism above uses the same object for **support obligations** —
+"held up within the invariant's spacing" — which are validity, and #499
+shipped demands in `groundClaims.ts` with `unservedDemands()` accordingly.
+One mechanism, two tiers of consequence.)
 The park is **not finished until every demand is served.** An unserved demand
 is a conflict exactly like an overlap and backtracks the same way — reroute
 the path; if no path can serve it, the *building* is asked to move or turn.
