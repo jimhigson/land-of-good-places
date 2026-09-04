@@ -159,3 +159,60 @@ by hand (this is #510's gap).
 ## Status
 
 #514 root-caused and measured. #516 not yet measured. No code change yet.
+
+## The fix: built, and exactly where it stands
+
+`src/world/slide/chaseEye.ts` — `solveChaseEye()`, committed and typechecking,
+**not yet wired**. It replaces the fixed `CHASE_EYE` with a solve that asks the
+two questions the constant never asked: what must be in the shot (child +
+nearest companion, stepping back and pitching so the axis lies *between* them),
+and what is *at* the point (`terrainHeight`). Old numbers are the **floor**, not
+the answer, so parks that were already fine keep their camera. It reports
+`gaveUp` rather than clamping.
+
+### The wiring, designed — and the trap in it
+
+`rideView.mountOn(this.eyeMount, CHASE_EYE)` is a **boot-time** call, so the
+offset cannot be moved per frame through it. The sanctioned extension point is
+`RideCamera`'s own doc: *"a ride that wants the eye somewhere else moves its own
+mount, and then there is one place where the seat's position is decided."*
+
+So: add an `eyeBoom` `Group` as a child of `eyeMount`, mount the camera on it at
+zero offset, and per frame in `advanceRide` set `eyeBoom.position` (solved
+offset) and its pitch. A `Group`'s local matrix is `T(position) * R(rotation)`,
+so position and orientation stay independent — which is what this needs.
+
+**The trap, and the reason it is not done in this pass.** `RideCamera` is
+constructed with `startPitch: -0.14`, and its header carries an explicit
+warning:
+
+> `look.x` is screen-space drag-right, but `rotation.y` (yaw) increasing turns a
+> three.js camera **left** … **Two agents have got this backwards on the ferris
+> wheel.** If you are about to change a sign in this file, run
+> `check:ride-camera` first, write the hash down, and be able to say why it
+> moved.
+
+The boom's pitch **composes with** `startPitch`, so the wiring has to decide
+whether the solve owns the whole pitch (set `startPitch: 0`, which also moves
+the child's look range) or only the extra beyond it. That is a sign-sensitive
+choice on a rig that has burned two agents, and it is a **camera**, where the
+only verdict that counts is a rendered frame. Guessing the sign and pushing it
+unwatched is the failure this project keeps paying for, so it is the next
+session's first job, watched on 5417 as it is made — not a five-minute edit
+tacked onto the end of this one.
+
+`fov: 60`, so the half-fov is exactly the 30° the measurement compared against.
+
+### Gates and cost, still owed
+
+- Whole-pool sweep **before** is running (`/tmp/cam514/before/`, 16 seeds, 3
+  lanes); **after** not yet run. `check:pet-slide` sweeps nothing, so this is
+  the only pool-wide evidence there will be.
+- The `gaveUp` assertion is **not yet written** and must be proved red by
+  deliberate mutation, with the geometry pasted beside the transcript.
+- **Cost is unmeasured and must be stated.** The solve is a nested walk
+  (`MAX_EXTRA_BACK/BACK_STEP` x `MAX_EXTRA_UP/UP_STEP` = up to 30 x 20 = 600
+  candidates) running **every frame of a real ride on a child's device**. The
+  common case should exit on the first candidate, but "should" is not a number
+  and one instrument has already been thrown away this session for being
+  unusably slow. Measure it before this ships.
