@@ -748,7 +748,8 @@ export function buildRailRaceTrack(
   sleeves.instanceColor!.needsUpdate = true;
 
   // --- the trestles ----------------------------------------------------------
-  const beamY = route.base - UNDULATION_REACH - BEAM_DROP;
+  // The beam height each trestle is solved against lives in `trestleTreeAt`,
+  // which is the one owner of a trestle's shape — see `TrestleTree`.
 
   // One colour for the whole support tree — trunk and both generations of
   // branch — which is Jim's "the supports can all be one colour that
@@ -824,53 +825,28 @@ export function buildRailRaceTrack(
     mesh.setMatrixAt(index, matrix);
   };
 
-  // Scratch points for one trestle's tree, reused across spots.
-  const laneTops = Array.from({ length: LANE_COUNT }, () => new Vector3());
-  const forkNodes = [new Vector3(), new Vector3()];
-  const trunkTop = new Vector3();
+  // Scratch for one trestle's tree, reused across spots. **The tree is solved by
+  // `trestleTreeAt` and not here** — `postClearsEntranceRoad` decides where a
+  // trestle may stand from the same solve, and the last time these were two
+  // copies of one derivation the copies disagreed and posts stood in the bus.
+  // See `TrestleTree`.
+  const tree = newTrestleTree();
   const trunkFoot = new Vector3();
 
   spots.forEach((spot, index) => {
     route.outwardAt(spot.at, outward);
     rotation.setFromUnitVectors(ACROSS, outward);
 
-    const ground = terrainHeight(spot.x, spot.z);
-    const postHeight = beamY - ground;
-    const plan = forkPlan(postHeight, route.laneSpacing);
-
     // **A branch top is the middle of the lane it carries** — the whole point of
     // Jim's 7 August ruling, and `route.pointAt` in full, height included, not
-    // flattened onto a plane. One owner: this is the same call the rails
-    // themselves are swept from, so a branch cannot end up anywhere but on the
-    // track's own centre line.
-    for (let lane = 0; lane < LANE_COUNT; lane += 1) {
-      laneTops[lane]!.copy(route.pointAt(lane, spot.at, point));
-    }
-    // A fork node sits under the midpoint of the pair it carries, and the trunk
-    // under the midpoint of the two fork nodes — horizontally derived from the
-    // tops rather than from `spot`, which `trestleSpots` may have nudged
-    // sideways to find clear ground.
-    //
-    // The *height* is measured down from the *lowest* of what each node carries,
-    // never the mean. That is what stops "different branches reach different
-    // heights" turning into a branch lying nearly flat: the lower of a pair then
-    // gets exactly `plan.upper` of rise and so exactly the solved angle, and its
-    // partner — whose lane is higher — is steeper. The solved angle is the
-    // widest the fork can ever open, in one direction only. See
-    // `trestleGeometry.ts` for the measured lane spread (up to 4.38 m across the
-    // four, 3.02 m within one pair) that makes this necessary.
-    for (let half = 0; half < 2; half += 1) {
-      const a = laneTops[half * 2]!;
-      const b = laneTops[half * 2 + 1]!;
-      forkNodes[half]!
-        .copy(a)
-        .lerp(b, 0.5)
-        .setY(Math.min(a.y, b.y) - plan.upper);
-    }
-    trunkTop
-      .copy(forkNodes[0]!)
-      .lerp(forkNodes[1]!, 0.5)
-      .setY(Math.min(forkNodes[0]!.y, forkNodes[1]!.y) - plan.lower);
+    // flattened onto a plane, which is what `trestleTreeAt` asks of the route.
+    const { laneTops, forkNodes, trunkTop, ground } = trestleTreeAt(
+      route,
+      spot.at,
+      spot.x,
+      spot.z,
+      tree,
+    );
     // The foot, though, stands exactly where the clear ground was found — so a
     // nudged trestle leans very slightly rather than planting itself in whatever
     // the nudge was avoiding.
@@ -1242,6 +1218,102 @@ interface TrestleSpot {
 }
 
 /**
+ * **Where a trestle's support tree stands — the one owner of that question.**
+ *
+ * A trestle is a trunk rising from the ground to `trunkTop`, forking twice to
+ * reach the four lane tops. Three separate things need to know where those
+ * points are: the loop that *draws* it, the collider that makes it solid, and
+ * `postClearsEntranceRoad`, which has to decide before any of that whether a
+ * candidate spot puts the post in the road the cat bus drives.
+ *
+ * **They used to be two definitions, and the second one was wrong.** The draw
+ * loop computed the tree inline; `postClearsEntranceRoad` restated it — and
+ * restated it *differently*, taking the trunk's top as the **mean of the four
+ * lane heights** where the drawn trunk stops a whole `forkPlan(...).fork` lower,
+ * under the branches. A post is only tested for the road as far up as there is
+ * bus to hit, expressed as a fraction of its rise, so believing the post rises
+ * further than it does made that fraction too small: the generator checked the
+ * bottom two thirds of a lean and passed a post whose top third stood squarely
+ * in the bus. Measured on seed 11 — feet 3.17 m clear of the corridor, posts
+ * leaning 6.00 m, and 1.78 m of post inside the bodywork at 3.38 m up.
+ *
+ * That is this repo's most common bug (CLAUDE.md, *"two definitions of one
+ * thing, kept in step by hand"*) and it is the **second** instance of it in this
+ * one mechanism: the clause and its check both asked about the leg's *foot* and
+ * agreed with each other for weeks. So this function exists to make a third
+ * copy impossible to write by accident. **If you need to know where any part of
+ * a trestle is, call this — do not re-derive it**, however small the derivation
+ * looks. Both of the bugs above looked small.
+ *
+ * The tree is solved for a *foot position*, because the fork geometry is scaled
+ * by how much post there is under the beam ({@link forkPlan}), and that depends
+ * on the terrain the foot stands on. `at` fixes the tops: a branch top is the
+ * middle of the lane it carries, and nothing nudges a lane.
+ */
+interface TrestleTree {
+  /** Where each lane's rails pass overhead — the four tips of the tree. */
+  readonly laneTops: readonly Vector3[];
+  /** The two nodes where the trunk's fork splits again to reach a pair of lanes. */
+  readonly forkNodes: readonly Vector3[];
+  /** Where the trunk stops and the first fork begins. **Not** the lane tops. */
+  readonly trunkTop: Vector3;
+  /** The terrain height under the foot this tree was solved for. */
+  ground: number;
+}
+
+function newTrestleTree(): TrestleTree {
+  return {
+    laneTops: Array.from({ length: LANE_COUNT }, () => new Vector3()),
+    forkNodes: [new Vector3(), new Vector3()],
+    trunkTop: new Vector3(),
+    ground: 0,
+  };
+}
+
+/** Scratch for {@link trestleTreeAt}; it is called once per candidate in a search loop. */
+const treeScratch = new Vector3();
+
+/** See {@link TrestleTree}. Writes into `into` and returns it. */
+function trestleTreeAt(
+  route: RailRaceRoute,
+  at: number,
+  footX: number,
+  footZ: number,
+  into: TrestleTree,
+): TrestleTree {
+  const ground = terrainHeight(footX, footZ);
+  const beamY = route.base - UNDULATION_REACH - BEAM_DROP;
+  const plan = forkPlan(beamY - ground, route.laneSpacing);
+  for (let lane = 0; lane < LANE_COUNT; lane += 1) {
+    into.laneTops[lane]!.copy(route.pointAt(lane, at, treeScratch));
+  }
+  // A fork node sits under the midpoint of the pair it carries, and the trunk
+  // under the midpoint of the two fork nodes — horizontally derived from the
+  // tops rather than from the foot, which may have been nudged sideways to find
+  // clear ground.
+  //
+  // The *height* is measured down from the *lowest* of what each node carries,
+  // never the mean. That is what stops "different branches reach different
+  // heights" turning into a branch lying nearly flat: the lower of a pair then
+  // gets exactly `plan.upper` of rise and so exactly the solved angle, and its
+  // partner — whose lane is higher — is steeper. The solved angle is the widest
+  // the fork can ever open, in one direction only. See `trestleGeometry.ts` for
+  // the measured lane spread (up to 4.38 m across the four, 3.02 m within one
+  // pair) that makes this necessary.
+  for (let half = 0; half < 2; half += 1) {
+    const a = into.laneTops[half * 2]!;
+    const b = into.laneTops[half * 2 + 1]!;
+    into.forkNodes[half]!.copy(a).lerp(b, 0.5).setY(Math.min(a.y, b.y) - plan.upper);
+  }
+  into.trunkTop
+    .copy(into.forkNodes[0]!)
+    .lerp(into.forkNodes[1]!, 0.5)
+    .setY(Math.min(into.forkNodes[0]!.y, into.forkNodes[1]!.y) - plan.lower);
+  into.ground = ground;
+  return into;
+}
+
+/**
  * **The collider for a trestle post, which leans.**
  *
  * A post runs from `trunkFoot` — the spot `trestleSpots` found clear ground at,
@@ -1309,7 +1381,14 @@ function addPostCollider(collision: CollisionWorld, foot: Vector3, top: Vector3,
  * plan-view span over the heights the **bus body** occupies — below the chassis
  * and above the roof there is nothing to hit — and asks the corridor about each,
  * at the post's own tapering radius.
+ *
+ * **The post it walks is {@link trestleTreeAt}'s, not a restatement of it.** This
+ * function used to derive the trunk's top itself and got it wrong — see that
+ * function's doc comment for what the wrong answer cost. There is one owner of
+ * where a trestle stands, and this asks it.
  */
+const clearanceTree = newTrestleTree();
+
 function postClearsEntranceRoad(
   route: RailRaceRoute,
   at: number,
@@ -1317,26 +1396,23 @@ function postClearsEntranceRoad(
   footZ: number,
   footRadius: number,
 ): boolean {
-  // The trunk top is the horizontal mean of the lanes it carries, which is how
-  // `buildTrestles` derives it — asked of the route here rather than restated.
-  let topX = 0;
-  let topZ = 0;
-  let topY = 0;
-  const point = new Vector3();
-  for (let lane = 0; lane < LANE_COUNT; lane += 1) {
-    route.pointAt(lane, at, point);
-    topX += point.x / LANE_COUNT;
-    topZ += point.z / LANE_COUNT;
-    topY += point.y / LANE_COUNT;
-  }
-  const rise = topY - terrainHeight(footX, footZ);
+  const { trunkTop, ground } = trestleTreeAt(route, at, footX, footZ, clearanceTree);
+  const rise = trunkTop.y - ground;
   if (rise <= 0) return !isInEntranceRoad(footX, footZ, footRadius);
-  // Only as far up the post as there is bus to meet.
+  // Only as far up the post as there is bus to meet. A fraction of the post's
+  // own rise, so it is the *drawn* post's height this is a fraction of.
   const reach = Math.min(1, CAT_BUS_BODY_TOP_Y / rise);
-  const steps = Math.max(1, Math.ceil((Math.hypot(topX - footX, topZ - footZ) * reach) / 0.25));
+  const lean = Math.hypot(trunkTop.x - footX, trunkTop.z - footZ);
+  const steps = Math.max(1, Math.ceil((lean * reach) / 0.25));
   for (let i = 0; i <= steps; i += 1) {
     const t = (i / steps) * reach;
-    if (isInEntranceRoad(footX + (topX - footX) * t, footZ + (topZ - footZ) * t, footRadius)) {
+    if (
+      isInEntranceRoad(
+        footX + (trunkTop.x - footX) * t,
+        footZ + (trunkTop.z - footZ) * t,
+        footRadius,
+      )
+    ) {
       return false;
     }
   }
