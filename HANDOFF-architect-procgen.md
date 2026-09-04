@@ -129,9 +129,21 @@ re-derives their circles by hand), scatter placers next, attached
 decorations last as verifications. Stage 3/4 items explicitly excluded so
 nobody re-files them.
 
-All five stages now have specs or checklists. Remaining while #498 is
-unmerged: nothing owed that this agent knows of — next trigger is #498
-merging (stage-3 step-1 brief goes to the coordinator as a proposal).
+All five stages now have specs or checklists.
+
+## Checkpoint — step-1 brief drafted and held (3 Sep)
+
+`docs/BRIEF-stage3-step1-road-placer.md` on this branch: the full
+engineering brief for "the road becomes a placer", written to hand to an
+engineer the minute #498 merges. Its own header says commit points must be
+re-verified at pickup (#498 was OPEN and **CONFLICTING** when drafted —
+flagged to the coordinator). The one-function / claim-IS-the-route rule is
+the brief's first section, per the coordinator's ask. Byte-identical step;
+#498's clause and checks explicitly out of scope.
+
+Next trigger: #498 merges → brief goes to the coordinator as a proposal.
+Idle otherwise; coordinator has said they will assign rather than leave
+this agent parked.
 - Stage 3 remains: migrate the entrance road + rail-race trestles pair, and
   **confront the import ladder** (see `parkGeneration.ts`'s module header —
   the ladder, not the deps, serialises today; four of six deps measured
