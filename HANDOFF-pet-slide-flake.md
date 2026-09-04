@@ -127,7 +127,63 @@ pre-fix tree and absent on the fixed one, with the other agent's own numbers
 landing inside the pre-fix spread and none of them equal to the fixed tree's
 675.
 
-## Status
+## Final measurements
 
-Both loops running; seed-346 reproduction and `tsc --noEmit` queued behind
-them. Nothing to fix on `main` — the flake does not reproduce there.
+**A — current `main` `10fb7c2d`, 13 runs.** Every one exit 0, **675** ridden
+frames, verdict line md5 `9992a824bedd26556933a1c844ba66e7`. One distinct
+frame count, one distinct md5, 13/13. Runs 6–13 also print
+`park seed 20260728 (remembered)`.
+
+**B — pre-#508 `3aa55407`, 9 runs.** All exit 0, but **six distinct ridden
+frame counts**: 673, 675, 683, 700, 718, 759. Of the other agent's five
+numbers (700, 718, 720, 759, 767), **700, 718 and 759 reproduce exactly**.
+
+Both loops were stopped by PID short of their nominal 20 and 15 — the
+remaining runs would only have raised a count on a question already answered.
+13 identical runs against 6 distinct values in 9 is not a close call.
+
+**C — seed 346 pinned, on this branch.** `LGP_SEED=346`, exit **1**:
+
+```
+  park seed 346 (pinned)
+check:pet-slide FAILED on park seed 346 (pinned)
+  - not inside her: Little Mouse was 1 cm inside the child on ridden frame 459
+    — Mesh and Mesh occupy the same space, …
+```
+
+Character-for-character the reported "flake" failure. This is the last link:
+the red the other agent saw was **seed 346's red**, not a flaky canonical park.
+
+## Conclusion
+
+**Hypothesis 1. The finding is stale — it predates #508.** There is no
+residual non-determinism on `main`.
+
+**The flake and #507 are the same finding wearing two hats.** Once the seed
+stopped being drawn at random, the "flakiness" disappears entirely and what is
+left is #507: two pool seeds (11 and 346) that are genuinely red when pinned.
+The randomisation was never itself a defect in the slide — it was a sampler
+that hit a real defect about one run in eight.
+
+**#507 must stay open.** A child can draw either park, and a pet drawn inside
+her body is still there whenever seed 346 comes up. The flakiness going away
+does not fix the defect underneath it.
+
+**For the camera agent:** the fix is simply absent from its tree — every
+camera branch has 0 hits for `process.versions.node` in
+`src/world/parkSeedPool.ts`. **Rebase onto current `main`.** No investigation
+needed and nothing to change in its own diff.
+
+## Gates (Node 26.7.0, exit codes from each run's own file)
+
+| gate | exit |
+|---|---|
+| `tsc --noEmit` | **0** |
+| `pnpm run check` | see `/tmp/psflake/check.exit` |
+| `pnpm run test:procgen` | see `/tmp/psflake/procgen.exit` |
+| `pnpm run build` | see `/tmp/psflake/build.exit` |
+
+## Cleanup owed
+
+`git worktree remove .claude/worktrees/pet-slide-pre508` (detached at
+`3aa55407`, created only for measurement B).
