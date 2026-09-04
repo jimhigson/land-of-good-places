@@ -38,7 +38,6 @@ import {
   ENTRANCE_BUS_DOOR_X,
   ENTRANCE_BUS_STOP_Z,
   ENTRANCE_BUS_VANISH_X,
-  ENTRANCE_CLEAR_RADIUS,
   ENTRANCE_GATE_X,
   ENTRANCE_GATE_Z,
   ENTRANCE_PLAYER_X,
@@ -391,10 +390,31 @@ const SQUARE_ON_TO_THE_DOOR_DEGREES = (() => {
  * under the floor. That is not a number to nudge; it is a sign the shot needs
  * its focus moved out along the bus rather than its bearing turned further.
  */
-const ARRIVAL_DOOR_THREE_QUARTER_DEGREES = 60;
+const ARRIVAL_DOOR_THREE_QUARTER_DEGREES = 0;
 
-/** The bearing the door shot is actually taken from — square-on, turned that
- *  far towards the bearing it will have to come home to. */
+/**
+ * The bearing the door shot is taken from. **Square-on, and nothing else.**
+ *
+ * Jim, 3 September 2026, having watched the three-quarter version: *"The
+ * camera should start facing the doors. Straight on to the doors."* That is
+ * the spec, and it retires the 60° above.
+ *
+ * **The objection the 60° existed for is answered by moving the camera, not by
+ * turning it.** The fault was real: from square-on the gate, the door and the
+ * lens were collinear, and an orthographic projection puts everything on the
+ * view axis at the same screen point, so the sign drew itself across a child's
+ * chest whatever the pitch or zoom. But that was a camera standing
+ * `ENTRANCE_CLEAR_RADIUS` **past** the gate, looking back through the archway
+ * at the bus. The arch was between the lens and the subject because the camera
+ * had put it there.
+ *
+ * {@link ARRIVAL_DOOR_DISTANCE} now stands the eye **short of the gate**,
+ * between the drop and the archway, so the arch is behind the lens and cannot
+ * land on anybody. Square-on then costs nothing — and it is also what makes
+ * the rest of Jim's sentence possible, because a camera already on the bus
+ * side of the gateway is a camera that can *glide through it with her* rather
+ * than watch her come towards it.
+ */
 export const ARRIVAL_DOOR_YAW_DEGREES =
   SQUARE_ON_TO_THE_DOOR_DEGREES +
   Math.sign(angleDelta(SQUARE_ON_TO_THE_DOOR_DEGREES * DEG, CAMERA_YAW_DEGREES * DEG)) *
@@ -417,6 +437,28 @@ export const ARRIVAL_DOOR_YAW_DEGREES =
  * keep enough ground under everybody for the pavement to read as pavement.
  */
 const ARRIVAL_DOOR_PITCH_DEGREES = 24;
+
+/**
+ * How far short of the gate line the door shot stands, in metres.
+ *
+ * **This is what lets the shot be square-on.** The eye sits on the door's own
+ * normal, between the drop and the archway, so the arch is *behind* it — see
+ * {@link ARRIVAL_DOOR_YAW_DEGREES} for the collinearity fault this avoids, and
+ * why turning the camera was the wrong answer to it.
+ *
+ * It is also the first metre of Jim's third beat. A camera already inside the
+ * gateway's approach is one that can **glide through the opening ahead of
+ * her** as she walks up to it, which is what *"as they walk through the gates
+ * the camera should glide to follow them under"* asks for. The old 20.8 m
+ * stand-back was on the far side of the arch looking back, and could only ever
+ * watch her come towards it.
+ *
+ * Big enough that the eye is unambiguously on the bus side of the archway
+ * rather than in its mouth — the arch's own piers stand at
+ * `ENTRANCE_GATE_HALF_WIDTH`, and an eye level with them would have them in
+ * the frame edges from the first frame.
+ */
+const ARRIVAL_GATE_STANDOFF = 3;
 
 /**
  * **How far back the door shot's eye stands, in metres — and this is about
@@ -445,8 +487,9 @@ const ARRIVAL_DOOR_PITCH_DEGREES = 24;
  * distance and the reasoning above is entirely about ground plan.
  */
 const ARRIVAL_DOOR_DISTANCE =
-  (ENTRANCE_BUS_STOP_Z - ENTRANCE_GATE_Z + ENTRANCE_CLEAR_RADIUS) /
+  (ENTRANCE_BUS_STOP_Z - ENTRANCE_GATE_Z - ARRIVAL_GATE_STANDOFF) /
   Math.cos(ARRIVAL_DOOR_PITCH_DEGREES * DEG);
+
 
 /**
  * How much air the close shot leaves around a child, as a multiple of her own
@@ -666,14 +709,46 @@ export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | 
   // comes home over the walk *up to the arch*, not over the whole walk: by the
   // time the eye has to thread the gateway it must already be on the rig's own
   // bearing, or it goes through a pier instead of the gap.
+  // **The eye holds its close pose for this long after it is through the
+  // archway, before it starts pulling back.** Derived from the pass itself:
+  // `clear - under` is exactly how long she takes to walk one eye-trail, so
+  // holding for the same again puts her a second trail-length into the park
+  // before the retreat begins.
+  //
+  // **This is what stops the camera shearing the arch open on the way out**,
+  // and it is a geometry fix rather than a taste one. The stand-back has to
+  // open from a few metres to the rig's 90 m, which retreats the eye far
+  // faster than a child walks — so the eye is dragged back out through the
+  // plane of the archway whatever it does. Photographed on two parks doing
+  // exactly that: the near pier sheared into a wedge with its front faces
+  // gone and a child drawn straight through it. The fix is to be *further in*
+  // when the retreat starts, so that by the time the eye is back level with
+  // the gate it is already above the whole arch rather than inside it.
+  const holdPast = Math.min(clear + (clear - under), ARRIVAL_CONTROL_AT);
+
   const swing =
     elapsed < AT_STOPPED
       ? // Swinging round off the ordinary view as the bus rolls up, so the
         // arrival opens on a move rather than on a cut.
         smoothstep(0, 1, elapsed / Math.max(0.001, ARRIVAL_TIMELINE.rollingIn))
-      : elapsed < AT_WALKING
+      : // **Square-on, held all the way through the gateway.** Jim: *"when the
+        // child walks out it should stay looking straight at them, as they
+        // walk through the gates the camera should glide to follow them
+        // under."* The bearing is the whole of "looking straight at them" in
+        // an orthographic rig, so it may not start coming home until the eye
+        // is out the other side — an earlier version began unwinding it at
+        // `under` and he read the result as the camera turning away from her
+        // mid-walk.
+        //
+        // It still lands exactly on the rig at `ARRIVAL_CONTROL_AT`, which is
+        // GAME_DESIGN.md's CONTROL rule and clause 2 of the check: the axes
+        // "up on the stick" is read through are solved from the rig's fixed
+        // yaw, so a bearing still moving under her hand sends her somewhere
+        // that is not up the screen.
+        elapsed < clear
         ? 1
-        : 1 - smoothstep(0, 1, (elapsed - AT_WALKING) / Math.max(0.001, under - AT_WALKING));
+        : 1 -
+          smoothstep(0, 1, (elapsed - clear) / Math.max(0.001, ARRIVAL_CONTROL_AT - clear));
 
   // **How close the shot is riding**, 1 at the arch pass and 0 at the rig.
   // Held all the way through the gateway — from the moment she starts walking
@@ -683,18 +758,18 @@ export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | 
   const ride =
     elapsed < AT_WALKING
       ? swing
-      : elapsed < clear
+      : elapsed < holdPast
         ? 1
-        : 1 - smoothstep(0, 1, (elapsed - clear) / Math.max(0.001, AT_SHOT_HOME - clear));
+        : 1 - smoothstep(0, 1, (elapsed - holdPast) / Math.max(0.001, AT_SHOT_HOME - holdPast));
 
   // The tilt is the last thing home: it is still lifting when she takes the
   // controls, which is Jim's third beat. See ARRIVAL_RISE_TAIL.
   const lift =
     elapsed < AT_WALKING
       ? swing
-      : elapsed < under
+      : elapsed < holdPast
         ? 1
-        : 1 - smoothstep(0, 1, (elapsed - under) / Math.max(0.001, AT_SHOT_HOME - under));
+        : 1 - smoothstep(0, 1, (elapsed - holdPast) / Math.max(0.001, AT_SHOT_HOME - holdPast));
 
   // Wide on the arriving bus, close on the child coming down the step, and it
   // *stays* close through the gateway — the framing does not back off until
@@ -751,7 +826,7 @@ export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | 
   const distance =
     elapsed < AT_WALKING
       ? lerp(CAMERA_DISTANCE, ARRIVAL_DOOR_DISTANCE, swing)
-      : elapsed < clear
+      : elapsed < holdPast
         ? lerp(ARRIVAL_DOOR_DISTANCE, ARRIVAL_ARCH_DISTANCE, dive)
         : lerp(CAMERA_DISTANCE, ARRIVAL_ARCH_DISTANCE, ride);
 
