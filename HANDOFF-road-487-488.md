@@ -1014,3 +1014,44 @@ Exit codes read from each run's own log file, never a pipe.
 - The probe is committed as `scripts/probe-gateway-seam.mts` and takes a
   `LGP_SEED`; it prints the predicted scallop depth beside the measured one, so
   it can say "no" if this diagnosis ever stops being the right one.
+
+## Rebased onto `main` (2 merges), and the PR is mergeable again
+
+The PR was **`CONFLICTING`**, which is why no CI and no preview had run on the
+last four pushes — a conflicting PR gets no merge commit, so `pull_request`
+workflows never fire. It is **`MERGEABLE`** now, at `9a14e0fb`.
+
+Rebased onto `488605cd` (#480/#482, the gate arch) and `f6b493f5` (#499, the
+round-robin spine). 44 commits, two conflicts, both in `Entrance.ts`'s imports.
+
+**The trap, and it is the one CLAUDE.md names.** Resolving both as a union left
+`CAT_BUS_LENGTH`, `PARK_BOUNDARY` and `edgeRadiusAt` imported and unused —
+`main`'s symbols going unused in a file we both touched, which is exactly the
+shape of a silent revert. Checked before deleting rather than after:
+
+- All three are used only by `main`'s **old straight road** — `kerbReach`
+  clipping a straight kerb to the boundary spline, and `halfBus` off
+  `ENTRANCE_BUS_STOP_Z`. This branch replaces all of it with the curved ribbon
+  swept along `entranceRoadStations()`, and deletes those layout constants.
+- They **predate #482**. #482's actual change to this file is the
+  `buildGateArch` swap, which is present and used.
+
+So it was supersession, not a revert, and the deletion is correct.
+
+`tsc --noEmit` did not catch it on its own — **`typecheck:test` is what went
+red**, the second time on this branch. Run both after any rebase.
+
+Verified after the rebase:
+
+```
+git diff --diff-filter=D --name-only origin/main...HEAD    (empty)
+scripts object   main 106, mine 107; dropped [], added [check:entrance-road]
+check chain      main 58, mine 59;  missing [], extra [check:entrance-road]
+```
+
+### Gates on the rebased tree
+
+- `tsc --noEmit` **0**, `typecheck:test` **0**
+- `test:procgen` **0** — 19 files, **571 passed**, 0 skipped
+- `check:coplanar` **0** — 224 seams, all in the baseline, none new
+- full `pnpm run check` — running at handover; read `/tmp/check-full.log`
