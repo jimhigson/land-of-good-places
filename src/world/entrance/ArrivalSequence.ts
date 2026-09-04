@@ -421,30 +421,68 @@ export const ARRIVAL_DOOR_YAW_DEGREES =
     ARRIVAL_DOOR_THREE_QUARTER_DEGREES;
 
 /**
- * **How low the door shot sits**, in degrees of downward tilt.
+ * **How low the door shot sits**, in degrees of downward tilt. **Zero — the
+ * view direction is purely horizontal.**
  *
- * The rig's own 38° looks down on the park from above — right for playing,
- * wrong for watching children step down off a bus, because from up there you
- * see the tops of their heads and the roof of the bus. At 24° a child's face
- * is towards the lens as she steps off, the doorway has a front rather than a
- * lid, and the arch is a thing to be walked *under* rather than a shape drawn
- * on the floor.
+ * Jim, 3 September 2026, shown a photograph of the sign lying across a child's
+ * chest: *"The camera can just be lower there. It should be looking purely
+ * horizontally."*
  *
- * **Not lower, and 12° was tried.** In an orthographic projection a very low
- * tilt collapses the ground plane to nothing, so the bus stops looking like it
- * is standing on a road and starts looking like it is hanging in the air above
- * the boundary wall — photographed, and unmistakable once seen. The tilt has to
- * keep enough ground under everybody for the pavement to read as pavement.
+ * **This is what makes square-on possible, and it is the only thing that
+ * could have.** The fault it fixes was the arch drawing itself across the
+ * subject when the gate, the door and the lens are collinear. Two parameters
+ * were tried against it and neither can work:
+ *
+ * - **Bearing** (`ARRIVAL_DOOR_THREE_QUARTER_DEGREES`, once 60°) moves the
+ *   arch aside, but only by giving up "straight on to the doors", which is the
+ *   thing actually asked for.
+ * - **Stand-back** does nothing at all. An orthographic camera renders
+ *   everything along the view ray whatever the eye's position on that ray, so
+ *   standing the eye short of the gate leaves the arch exactly where it was.
+ *   That was tried, photographed, and is the trap
+ *   {@link ARRIVAL_GATE_STANDOFF} now warns about.
+ *
+ * **Pitch is neither of those.** With the view direction horizontal, world
+ * *height* maps to frame height: the sign hangs `GATE_ARCH_CLEAR_HEIGHT` up,
+ * the child stands on the ground, and the arch therefore projects **above**
+ * her instead of across her. It was the downward tilt that folded the two
+ * together, which is also why no stand-back ever helped — the one parameter
+ * being varied was the one that genuinely could not separate them.
+ *
+ * **The old objection, and why it no longer decides this.** 12° was once tried
+ * and rejected because a very low tilt collapses the ground plane, so the bus
+ * read as hanging in the air above the boundary wall. That is a real effect
+ * and it will be visible here too. It is now outranked: Jim has seen the
+ * alternative and chosen this, and a horizontal camera at a child's eye
+ * height is *also* the natural way to watch children get off a bus. If the
+ * ground plane reads badly, the answer is the height the shot is taken at,
+ * not a reintroduced tilt.
+ *
+ * The rig's own pitch is still where the shot lands — see the `lift` curve in
+ * {@link arrivalShot}, which now holds zero through the gateway and does the
+ * whole climb afterwards.
  */
-const ARRIVAL_DOOR_PITCH_DEGREES = 24;
+const ARRIVAL_DOOR_PITCH_DEGREES = 0;
 
 /**
  * How far short of the gate line the door shot stands, in metres.
  *
- * **This is what lets the shot be square-on.** The eye sits on the door's own
- * normal, between the drop and the archway, so the arch is *behind* it — see
- * {@link ARRIVAL_DOOR_YAW_DEGREES} for the collinearity fault this avoids, and
- * why turning the camera was the wrong answer to it.
+ * **This does NOT put the arch behind the lens, and nothing about a stand-back
+ * ever could.** An earlier version of this comment claimed it did; it was
+ * wrong, it was photographed being wrong, and the correction is worth more
+ * than the constant. An orthographic camera renders everything along the view
+ * ray whatever the eye's position on that ray — the near plane sits far
+ * behind the eye, which is the same property that once let the eye end up
+ * *inside* a pier without being clipped away. Moving the eye 3 m nearer the
+ * bus leaves the archway exactly where it was in frame.
+ *
+ * What actually makes square-on possible is {@link ARRIVAL_DOOR_PITCH_DEGREES}
+ * being zero. Read that first.
+ *
+ * So what this constant is still for is smaller and honest: it keeps the eye
+ * on the bus side of the archway so the shot **starts inside the gateway's
+ * approach**, which is what lets it glide *through* the opening with her
+ * rather than watch her walk towards it.
  *
  * It is also the first metre of Jim's third beat. A camera already inside the
  * gateway's approach is one that can **glide through the opening ahead of
