@@ -1055,3 +1055,50 @@ check chain      main 58, mine 59;  missing [], extra [check:entrance-road]
 - `test:procgen` **0** — 19 files, **571 passed**, 0 skipped
 - `check:coplanar` **0** — 224 seams, all in the baseline, none new
 - full `pnpm run check` — running at handover; read `/tmp/check-full.log`
+
+## A fifth red, found by the full chain: `check:cat-bus`
+
+`pnpm run check` came back **exit 1** on the rebased tree, on a clause saying
+
+```
+the road has 2431 vertices outside the wall and 0 inside it — it does not
+pass through the gate, so it arrives at the park without going in
+```
+
+about a gateway with a path laid squarely through it. **Inherited from the
+session before this one, not caused by the seams work** — and it had never been
+read, because the chain had only ever been started, not finished, on this
+branch.
+
+The cause is this repo's most common bug. When Jim asked for the run through
+the gateway to be an ordinary park path, the surface changed material and so
+changed **name**: `entrance-road*` → `entrance-gateway-path*`. Nothing about
+the park moved. `theRoadArrivesAtTheParkAndGoesIn` in the invariant suite was
+widened to both families at the time; **its twin in `check-cat-bus.mts` was
+not**, and the two only failed to be noticed together because they live in
+different suites.
+
+The two vertex lists are kept **separate**, because the clauses ask different
+questions: the bus stands on the **road**, and must never be satisfied by a
+footpath it cannot drive on; the park is **reached** by whichever surface
+actually gets there.
+
+**Proved red** at this branch's geometry by mutating the gateway-path match to
+an unmatchable name — all three clauses fire, including the new one asserting
+the run exists at all:
+
+```
+- nothing is drawn between the road and the park — the run in through the gate is missing entirely
+- the nearest paved surface gets to the gate is 4.4 m — it does not reach the park
+- the arrival surface has 2431 vertices outside the wall and 0 inside it
+```
+
+Green, on every run: *the arrival surface runs from z 97 outside the wall to
+z 58 inside the park, passing 0.45 m from the gate centre — 2431 vertices of
+road (the bus's own surface) and 272 of gateway path carrying it in through
+the arch.*
+
+**The lesson worth keeping**: a mesh rename is a silent break of every check
+that matches on the name, and `grep` for the old name finds the check but not
+the *reasoning* that has gone stale. When a surface changes material, search
+for both names everywhere, in checks and invariants alike.
