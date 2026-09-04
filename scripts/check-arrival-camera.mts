@@ -58,6 +58,24 @@
  * | `POSE_HOME_EPSILON` snap removed from `IsoCamera` | **red, clause 4**: pose delta stalls at 3.136e-9 m, never exactly zero |
  * | pose damping handed a fixed `1/60` instead of `dt` | **red, clauses 5**: five paused seconds move the eye 3.037 m; at 15 fps it lands 0.0205 m off the rig |
  *
+ * ## Proved red again after the arch clause was rescoped (3 September 2026)
+ *
+ * The clause was narrowed to stop at `clear` (see its own comment), which is a
+ * *smaller* scope — so it had to be re-armed rather than assumed still armed.
+ * Geometry it was proved against, since a red run is a measurement:
+ *
+ * ```
+ * CAMERA_FOCUS_LIFT 1.25   GATE_ARCH_CLEAR_HEIGHT 3.60   GATE_ARCH_CLEAR_WIDTH 7.00
+ * ARRIVAL_ARCH_DISTANCE 4.0   ARRIVAL_CONTROL_AT 9.30   ARRIVAL_RISE_TAIL 1.60
+ * green run: 27 checks; swept headroom 0.3737 m, swept sideroom 0.8098 m
+ * ```
+ *
+ * | mutation | result |
+ * |---|---|
+ * | none (control) | pass, 27 checks, exit 0 |
+ * | `CHEST` back to the copied 1.1 | headroom reads 0.5237 m — 0.15 m of margin that is not there |
+ * | `ARRIVAL_ARCH_DISTANCE` 4.0 → 5.5 | **red, both clauses**: headroom -0.4060 m at t=9.27 s, sideroom -0.4756 m, exit 1 |
+ *
  * **And one mutation that stays green, recorded because it is the honest edge
  * of what this can do.** Turning `ARRIVAL_DOOR_THREE_QUARTER_DEGREES` from 60
  * down to 3 — which puts the gate arch squarely across the doorway, the
