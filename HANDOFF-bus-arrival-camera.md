@@ -707,8 +707,22 @@ eye 1.416 m (a child's face)  void 1.851 m   28.3%
 portrait 390x844                             36.3%
 ```
 
-It would close only at an eye of **3.267 m**, above a child's head. Printed to
-stderr on every run of the check.
+It would close only at an eye of **3.267 m**, above a child's head.
+
+**And the door beat is the *best* case, not the worst.** The tilt reaches zero
+at `AT_STOPPED` but the framing does not push in until `AT_WALKING`, so for
+1.8 s the shot is level at the **wide** zoom — a taller frame, therefore a
+taller band. Swept over the whole level stretch:
+
+```
+worst frame in the shot, t=3.00s   8.7761 m of a 20.3837 m frame   43.1%
+tightest level frame (door beat)   1.8513 m of a  6.5340 m frame   28.3%
+```
+
+That wide-and-level second is the frame most likely to be read as broken, and
+it was found by watching rather than by arithmetic — the first version of the
+note measured only the tightest frame, which is the best case. Both ends are
+printed to stderr on every run of the check now.
 
 **Confirmed by eye, and it matches**: the ground line sits ~68% down the frame,
 against 71.7% predicted (the difference is the terrain's own slope).
