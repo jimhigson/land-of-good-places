@@ -1,8 +1,7 @@
 import { Vector3 } from 'three';
 import { terrainHeight } from '../terrain';
 import { PET_SLIDE_LEAD } from './petRiders';
-import { PET_FRAME_CEILING, estimatedFrameShare } from './petFraming';
-import { PARADE_MEMBER_RADIUS } from '../../core/constants';
+import { PET_FRAME_CEILING, PET_SCREEN_RADIUS, estimatedFrameShare } from './petFraming';
 
 /**
  * **Where the ginormous slide's chase camera goes, solved against the ride
@@ -232,9 +231,27 @@ export function solveChaseEye(
       //
       // The ceiling is imported, never restated: `slide/petFraming.ts` owns it
       // and `check:pet-slide` reads the same one.
+      // **KNOWN GAP — this guard still does not bind, and the reason is the
+      // reference point, not the radius.** `toPet` runs to the companion's
+      // *seat*, which is its origin at its feet; the reclining body extends
+      // back from there **towards the lens**. Measured on the canonical park,
+      // the seat sits ~2.3 m from the eye while the drawn body's centre is
+      // ~1.35 m, and the threshold only bites under about 1.5 m — so the solve
+      // reads ~6% where the raster later measures 21%, and accepts.
+      //
+      // That is the same disease as **#471** (a check measuring a pet's *root*
+      // while its body hangs outside the trough) and as #513: a measurement
+      // taken on a convenient point rather than on the thing that gets drawn.
+      // Fixing it means asking the companion's real extent, which this module
+      // deliberately does not have — it is given seats, not bodies. Recorded
+      // here rather than papered over, because the alternative is a guard that
+      // looks calibrated and cannot fire.
       const share = estimatedFrameShare(
         toPet.length(),
-        PARADE_MEMBER_RADIUS,
+        // The radius that predicts *screen area*, not the collision radius —
+        // see PET_SCREEN_RADIUS. Using PARADE_MEMBER_RADIUS here made this
+        // guard read a median 4.2x light across the pool.
+        PET_SCREEN_RADIUS,
         halfFovRad,
         aspect,
       );
