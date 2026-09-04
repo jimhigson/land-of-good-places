@@ -424,6 +424,58 @@ player-visible bug now, and its instruments are the acceptance harness
 above); the migration then *removes* its named clause and keeps its
 checks. Do not race it.
 
+### Stage 4 mechanism — incremental route growth: explore free, commit in sections
+
+Jim's section-by-section ruling (the slide-leg section above) reshapes how
+every route-solving feature — slide, rail race, train, cruiser, all built on
+`rail/generate.ts`'s shared `railRouteSearch` — migrates. Today that search
+explores an (attempts × segment-choices) space **privately**, with its own
+backtrack counters, and only a finished `SolvedRailRoute` ever leaves it.
+Naively claiming every explored segment would thrash the registry across
+thousands of speculative branches that were never going to be built. The
+reconciliation is one distinction:
+
+- **Exploration is free and private.** A search may *read* the registry as
+  much as it likes — "would a section here be refused?", "could a leg stand
+  under it?" — reads cost nothing and claim nothing. All of today's search
+  cleverness survives unchanged inside the placer's own turn.
+- **Commitment is turn-based and sectional.** A placer's turn commits **one
+  section**: the segment's corridor/footprint claim *plus the extra geometry
+  that section needs* (Jim's ruling — legs, footings, trestles, claimed with
+  the step that creates the need). The section is the unit of unwind: a
+  placer's own backtrack pops sections LIFO and their claims with them;
+  cross-placer backjumping pops other placers' sections per the unwind
+  ruling above.
+
+Support obligations get the **demand** mechanism, which turns out not to be
+paths-to-doors-specific: a committed elevated section publishes a demand
+over its arc interval — *"held up within the invariant's spacing"* — and leg
+footprint claims serve it. This is what makes the ±10 m nudge legal and
+principled at once: a leg may stand in a neighbouring section and still
+serve the demand, but a demand no leg can serve is a refusal **at that
+section**, arriving while the route is bendable, not after 83 m has frozen.
+An unserved support demand and an unserved door demand are now the same
+object failing the same way.
+
+Two honesty notes, both measurable when this lands:
+
+- **Search behaviour may legitimately change.** A route "found" by
+  exploration can still die at commit if a sibling claimed ground between
+  the placer's turns — that is the design working, not a regression; the
+  budget counters are the instrument that says whether it happens at a
+  tolerable rate.
+- **The read API must be the claim API.** Exploration answering "yes" and
+  commit answering "no" for the same geometry is the two-definitions
+  disease inside one mechanism; the query a search asks during exploration
+  and the check a claim runs at commit must be the same function, so the
+  only legal source of disagreement is a sibling's intervening claim.
+
+The first customer is **the slide** — ruled by the Overseer (3 Sep): the
+re-route that `fix/slide-legs-501` proved necessary and could not deliver
+within its ticket *is* this migration; no bespoke `slide/solve.ts` ladder,
+and no engineer on it until this stage lands. The rail race ring, train
+loop and cruiser follow the same shape through the shared generator.
+
 ### Stage 4 — paths, railway, crossings migrate together (large; parks change)
 
 The heart of Jim's brief. Path growth, railway corridor and crossing
