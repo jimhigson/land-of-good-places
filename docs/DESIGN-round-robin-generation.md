@@ -14,6 +14,12 @@ should be read alongside, `docs/DESIGN-ground-claims.md` on
 changes is that **round-robin becomes the spine of the plan rather than its
 deferred stage 5**.
 
+The sentence to carry if you carry only one: **a computed overview of the
+world may inform any number of decisions, but only a claim makes ground
+yours.** Every mechanism below is that sentence applied somewhere; every bug
+this doc cites is a system somewhere treating an overview — a phase's
+output, a feasibility list, its own earlier answer — as a reservation.
+
 ---
 
 ## Lead with the most damning fact
@@ -31,6 +37,16 @@ twice.**
   step by step at the same time, not one system finishing before the next
   starts."* The pipeline is strictly sequential. The sentence describes a
   park that has never existed.
+
+**Update, 3 September 2026 — the streak is broken.** Stages 1–2 merged to
+`main` as #499: `src/boot/groundClaims.ts` is the live registry (superseding
+`PlacementField`, which now carries a dead-registry sign in `coSolve.ts`),
+and `parkGeneration.ts`'s driver is one `SolveScheduler`, proved
+byte-identical to the old chain. Read the paragraphs above as the history
+that made the integration-first plan necessary, not as the present state —
+and read `parkGeneration.ts`'s module header for the honest caveat: today
+the *import ladder*, not the declared deps, still serialises the order, and
+stage 3 is where that gets confronted.
 
 Why it keeps dying: every agent arrives scoped to a ticket — a bridge bug, a
 fence bug, a gate bug. Round-robin is a change to the *spine*, not to any
