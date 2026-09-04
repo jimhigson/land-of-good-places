@@ -332,3 +332,118 @@ All three run from this worktree, exit codes read from each run's own log file:
 
 Check chain step sets compared by parsing, base vs head: 58 → 59, **nothing
 removed**, `check:arrival-camera` added.
+
+---
+
+# Round four — square-on, and the model inversion it exposes
+
+**Model: Opus (`claude-opus-5[1m]`).** Branch still stacked on
+`feat/arch-placement`. **Not merged, not handed to Jim.**
+
+Jim's spec, verbatim, treated as the requirement:
+
+> *"The camera should start facing the doors. Straight on to the doors. Then,
+> when the child walks out it should stay looking straight at them, as they
+> walk through the gates the camera should glide to follow them under. Then it
+> should return to its normal projection."*
+
+## What is built (commit `472a6c33`)
+
+- **`ARRIVAL_DOOR_THREE_QUARTER_DEGREES` 60 → 0.** Square-on.
+  `SQUARE_ON_TO_THE_DOOR_DEGREES` was *already* derived from `BUS_FACING`
+  correctly, so nothing was needed there.
+- **The collinear-arch objection is answered by moving the camera, not turning
+  it.** That fault was real — from square-on at the old 20.8 m the camera stood
+  *past* the gate looking back through the archway, so the sign drew across a
+  child's chest. `ARRIVAL_DOOR_DISTANCE` now stands the eye **short of the
+  gate** (`ARRIVAL_GATE_STANDOFF = 3`), between the drop and the archway, so
+  the arch is behind the lens. 20.8 m → ~6.6 m.
+- **The bearing holds square-on through the whole gateway** and only then comes
+  home, landing exactly at `ARRIVAL_CONTROL_AT`. It used to start unwinding at
+  `under`, which is what read as turning away from her mid-walk.
+- **The close ride is held `clear - under` past the pass** before the pull-back
+  starts (`holdPast`), so the eye is deeper into the park when the retreat
+  begins — the arch-clip fix.
+
+Measured, `tsc` **exit 0**, `check:arrival-camera` **exit 0**:
+
+| | before | after |
+|---|---|---|
+| bearing swing | 75° | **135°** |
+| sideroom in the 7.00 m opening | 0.81 m | **3.50 m** (dead centre) |
+| headroom under the 3.60 m crossbar | 0.37 m | **0.54 m** |
+| tilt still to lift at the handover | 4.7° | 11.9° |
+
+The stand-back never now exceeds ~6.6 m, which also **removes the near-plane
+bus-sawing band entirely** — that band was 14 m down to 6 m, and the shot no
+longer enters it.
+
+## STOP — what is not finished, and why it is not shippable yet
+
+**The eye now LEADS her through the gate instead of trailing her, and the
+`ArchPass` model still says it trails.** `cameraOffset` puts the eye on the
+side its offset points, and square-on to the door points *from the bus towards
+the gate* — so the camera is between her and the archway and backs through it
+**ahead** of her. That is exactly the glide Jim asked for, and it is why the
+sideroom went to a perfect 3.50 m.
+
+But `solveArchPass` still computes
+
+```
+clear = crossing(ENTRANCE_GATE_Z - ARRIVAL_ARCH_TRAIL_Z)
+```
+
+— *"how far past the gate she has walked by the time the eye is through it"*.
+With a leading eye that is inverted: the eye is through the gate while she is
+still `ARRIVAL_ARCH_TRAIL_Z` **short** of it, so `clear` should be
+`crossing(ENTRANCE_GATE_Z + ARRIVAL_ARCH_TRAIL_Z)` and it now falls **before**
+`under`, not after.
+
+**The tell that caught it** — and it is worth keeping the mechanism that
+caught it, not just the fix: the uncovered-exit note now prints a **negative
+modelled pace, −3.65 m/s**, identical across four of the five passes. A child
+does not walk backwards at a constant speed on every pass. That note was
+written for a different failure and found this one instead, which is the whole
+argument for printing derived quantities rather than only asserting on them.
+
+So **every number in that exit note is currently meaningless**, and
+`holdPast = clear + (clear - under)` is built on an interval that is now
+negative. Do not trust either until the pass model is inverted.
+
+## What the next person should do, in order
+
+1. **Invert `solveArchPass`** for a leading eye, and rename so the direction is
+   in the name — `eyeThrough` / `sheThrough` rather than `clear` / `under`,
+   because "clear" no longer says who cleared what. `ARRIVAL_ARCH_TRAIL_Z` is
+   also misnamed now; it is a *lead*, not a trail.
+2. **Re-derive `holdPast`** off the corrected interval.
+3. **Fix the exit note's pace derivation** so it cannot go negative, and assert
+   the sign — a negative pace should fail loudly, not print.
+4. **Re-run the arch-clip probe.** The clip may well be gone for free: the eye
+   passes under the arch *once*, moving into the park, and then rises — it is
+   no longer dragged back out through the plane at speed, which was the whole
+   mechanism. Verify rather than assume.
+5. **Then watch it**, at 20× and at normal speed, on more than one park, before
+   it goes anywhere near Jim. It has come back twice.
+
+## The 20× clock trick, since it is the only way to see the fast parts
+
+Inject before the park finishes generating; the sequence is `dt`-driven so a
+slowed rAF timestamp slows the whole park uniformly and changes no code path:
+
+```js
+const SLOW = 20, raf = window.requestAnimationFrame.bind(window);
+let origin = null;
+window.__dilation = { fake: 0, real: 0 };
+window.requestAnimationFrame = (cb) => raf((t) => {
+  if (origin === null) origin = t;
+  const fake = origin + (t - origin) / SLOW;
+  window.__dilation.fake = fake - origin; window.__dilation.real = t - origin;
+  cb(fake);
+});
+```
+
+Then click "Go to the park! →", record `__dilation.fake` at the click, and poll
+`(fake - clickedAt) / 1000` for the game-seconds you want. The arch pass is
+around t = 6.8–8.0 s. There is no game global exposed on `window`, so this is
+the only handle.
