@@ -258,3 +258,19 @@ talks, not the same amount.
 - Visible change: **must not merge without Jim seeing it.**
 - Browser QA on a rendered frame — not done by this engineer (no browser
   ownership). The name going and coming back needs eyes.
+
+### Gates on the final *code* head `509534d5`, all unpiped, Node 26.7.0
+
+Everything after `509534d5` on this branch is this file, which no gate reads.
+
+`pnpm run check` **0** (59 steps, run twice: once mid-round, once on the exact
+final head). `pnpm run test:procgen` **0** — 571 passed / 19 files.
+`pnpm run build` **0**. `pnpm run check:coplanar` **0** — 225 seams, all
+baselined, none new.
+
+The 4c coverage note is audible on a **passing** run: line 512 of a green
+`check` log.
+
+Preview, verified HTTP 200 from here:
+`https://pr-490-509534d-land-of-good-places.blockstack.workers.dev/spawn?pos=-1.6,51.6`
+— stand still at the entrance and children come over to chat.
