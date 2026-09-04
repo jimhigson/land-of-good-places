@@ -51,7 +51,31 @@
 
 set -euo pipefail
 
-MIN_MAJOR=26
+# **The floor has one owner: `package.json`'s `engines.node`.** Not a constant
+# here. This script had `MIN_MAJOR=26` written into it, which is a second copy
+# of a number that also lives in the manifest and in `check:node` — the fault
+# this repo files more often than any other, committed inside the fix for a bug
+# that was itself about believing a stale local copy of the truth.
+#
+# Read with sed rather than by running a Node, because this script exists for
+# the case where the available Node is the wrong one or missing; parsing the
+# manifest must not depend on the thing being searched for. The pattern wants
+# `"node": ">=NN"` exactly, so `"@types/node": "^26…"` cannot match it (the
+# character before `node` there is `/`, not a quote, and it has no `>=`).
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+MIN_MAJOR="$(
+  sed -n 's/.*"node"[[:space:]]*:[[:space:]]*">=[[:space:]]*\([0-9][0-9]*\)".*/\1/p' \
+    "$REPO_ROOT/package.json" 2>/dev/null | head -1
+)"
+if [ -z "${MIN_MAJOR:-}" ]; then
+  # Loudly, for the same reason `check:node` fails when the field is missing: a
+  # floor that has vanished is a configuration bug, not a satisfied
+  # requirement, and defaulting to a guess here would quietly reintroduce the
+  # second copy this block exists to delete.
+  echo "with-node: FAILED — no engines.node \">=NN\" in $REPO_ROOT/package.json," >&2
+  echo "  so there is no Node floor to enforce. Restore it rather than guessing here." >&2
+  exit 1
+fi
 
 # Every `node` this machine can offer, one absolute path per line. May contain
 # duplicates, non-existent paths and older versions — `select_node` filters by
