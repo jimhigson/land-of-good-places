@@ -811,3 +811,70 @@ log, never piped):
 
 `parkSeedPool.ts` is untouched: no seed was swapped out of the pool to reach
 16/16.
+
+### Review round 1 answered (4 Sep 2026) — `#474#issuecomment-5537363029`
+
+Verdict was changes-requested, narrowly: three defects in new code plus one
+instrument gap. All four fixed, rebased onto `main` `10fb7c2d` first.
+
+**Two corrections the reviewer made to my own reporting, both of which I had
+under-claimed.** The baseline is **224 keys, not 225** — one entry was
+*removed* (the flower/sleeper seam, deleted because the fix removed the seam)
+rather than merely tightened, and "none added or removed" hid that. And the
+allowance total is **516 → 339, not 340**; my 340 counted the deleted key's
+own `seams: 1`. The reviewer also independently checked `area` and `fighting`,
+which I had only claimed for `seams`: zero areas grew, zero flags flipped.
+
+**1. `flowersClearTheRailway`'s reach was the unit cylinder's half-height.**
+It read the *unscaled* stem geometry's bounding sphere — 0.5008 m, of which
+0.5 is the cylinder's half **height** and 0.0008 its radius — under a comment
+claiming it was `WIDEST_FLOWER` (0.6372 m) "restated". 13.6 cm short, in the
+permissive direction, and a no-op modelling change (unit height 1 → 2,
+compensated in the instance scale) would have silently doubled it.
+
+Fixed by giving the number one owner: **`src/world/flowerDimensions.ts`**,
+which imports nothing — `./trainDimensions`'s shape and its #226 reason, and
+necessary because `test/procgen` cannot import `Flowers.ts` without loading
+the park before the seed is set. Still green at the tighter 1.9372 m on all
+seven covered seeds, so it is a real tightening, not a threshold moved to fit.
+
+**2. `CI_SWEEP_SEEDS` claimed a derivation nobody performed** — it said "the
+pool seeds with checked-in invariant files" while 131 had a file and was not
+listed. 131 added, and the claim is now **enforced from `check:seed-pool`**
+(not a vitest file: `tsconfig.test.json` deliberately has no node types, and
+this is a static consistency check, not a park invariant). Fails both ways,
+proved red at exit 1: dropping 131 names 131, adding 451 names 451. No new
+step in the check chain, so its step set is unchanged.
+
+**3. `serveTheGate` deleted** with its stale level-tier comment. The
+reviewer's question is answered *in the code* rather than lost with it: gate
+priority for **bridge** sites is a real open question and a deliberate
+follow-up, not wanted in this PR because it would change site selection on
+every seed — exactly what has already invalidated this branch's warp vectors
+twice.
+
+**4. `vet:seeds` is a gate now, not just a report.** It exits **non-zero**
+when a seed fails (controlled: `--list 18` exits 1), and the bare form
+**refuses** with the three real invocations and exit 2 instead of silently
+vetting candidates 1–30. New **`--pool`** reads `PARK_SEED_POOL` itself —
+which also removes the pasted sixteen-number list every whole-pool run in this
+PR had been using, a second definition of the pool inside the one script that
+judges it.
+
+### Gates on `3b881bd8`
+
+| | |
+|---|---|
+| `vet:seeds -- --pool` | **16/16 pool seeds**, exit 0 |
+| `check` | exit 0 (`CI_SWEEP_SEEDS is exactly the 7 pool seed(s) with an invariant file`) |
+| `test:procgen` | exit 0 — 21 files, 752 tests |
+| `check:coplanar` | exit 0 — 224 seams, none new |
+| `build` | exit 0 |
+
+CI on that head: `Coplanar faces`, `Procgen invariants`, `Deploy PR preview`
+and `A reload gets the new build` all pass; `Checks` was still running.
+
+**Still open, and not mine:** visual QA (the reviewer recommends looking at
+**all seven** warped seeds, not the one originally proposed, since seven pool
+seeds now build different parks), and the `LAYOUT_VERSION` question — which
+now touches **eight** seeds, 428 having gained its first vector.
