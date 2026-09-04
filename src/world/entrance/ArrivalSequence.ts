@@ -13,7 +13,12 @@ import type { FrameContext } from '../../core/types';
 import type { Player } from '../../entities/Player';
 import type { NpcCharacter } from '../../entities/npc/NpcCharacter';
 import { NPC_WALK_SPEED } from '../../entities/npc/NpcCharacter';
-import { CHILD_FOOTPRINT, TALLEST_CHILD_HEIGHT } from '../../art/models/kid';
+import {
+  CHILD_FOOTPRINT,
+  KID_HEAD_HEIGHT,
+  kidEyeCentre,
+  TALLEST_CHILD_HEIGHT,
+} from '../../art/models/kid';
 import {
   createCatBus,
   CAT_BUS_LENGTH,
@@ -261,11 +266,61 @@ export const ARRIVAL_CAMERA_ZOOM =
   CAMERA_VIEW_HEIGHT / 2 / (ARRIVAL_BUS_RADIUS * ARRIVAL_FRAMING_AIR);
 
 /**
- * How far above the pavement the door shot is aimed, in metres — about a
- * child's chest. Below `TALLEST_CHILD_HEIGHT` on purpose: the subject is the
- * children coming down the step, not the roof of the bus behind them.
+ * **How far above the pavement the door shot is aimed, in metres — a child's
+ * own face.**
+ *
+ * Jim, 3 September 2026, shown the horizontal door beat with the bottom of the
+ * frame empty: *"For the arrival shot the camera should be face height so the
+ * ground should be visible normally."*
+ *
+ * With {@link ARRIVAL_DOOR_PITCH_DEGREES} at zero this is also **the height the
+ * eye itself rides at** — `cameraOffset` puts the eye at `focus + offset`, and a
+ * horizontal offset has no `y` — so this one number is both what the shot aims
+ * at and where it is taken from. That is the whole of "the camera should be
+ * face height", and `check:arrival-camera` clause 9 asserts the two agree, which
+ * is also what makes reintroducing a downward tilt here fail rather than pass
+ * quietly.
+ *
+ * **Derived from the child, not typed.** It is the head pivot
+ * ({@link KID_HEAD_HEIGHT}) plus the painted eye's own height on the skull
+ * ({@link kidEyeCentre}) — 1.36 + 0.056 = **1.416 m**. Both come from the one
+ * file that owns where a child's face is, so a head that is re-modelled or
+ * re-scaled carries this shot with it. It replaces a hand-typed 1.1 "about a
+ * child's chest", which is the class of number this repo has been bitten by
+ * repeatedly.
+ *
+ * It ignores the head's own 10° backward tilt (`HEAD_TILT`, private to
+ * `kid.ts`), which would add about 0.10 m. That is deliberate: the tilt is a
+ * pose, and the shot wants the line a face sits on rather than where the pose
+ * happens to swing it this frame.
+ *
+ * ## What this does and does not fix, measured
+ *
+ * The complaint it answers is real: at zero pitch an orthographic camera sees
+ * the ground **exactly edge-on**, so the ground plane projects to a *line* at
+ * the eye's own height and everything below that line in frame is empty. The
+ * size of that empty band is `frameHeight / 2 − eyeHeight`, so **raising the
+ * eye shrinks it** — which is why Jim's instruction is the right direction and
+ * not merely a preference.
+ *
+ * It does not close it. At {@link ARRIVAL_DOOR_ZOOM} the frame is 6.534 m tall
+ * on a 16:10 screen, so:
+ *
+ * ```
+ * eye 1.100 m (the old chest)  void 2.167 m  33.2% of frame height
+ * eye 1.416 m (a child's face) void 1.851 m  28.3%
+ * ```
+ *
+ * The band would only vanish at an eye height of `frameHeight / 2` = 3.27 m,
+ * which is a camera above a child's head rather than at her face. **Do not
+ * reach for a downward tilt to close it** — that is the sign-across-her fault
+ * Jim has ruled on twice; see {@link ARRIVAL_DOOR_PITCH_DEGREES}. The remaining
+ * band is a composition question (a tighter frame would crop it out) and it is
+ * his to answer from a rendered frame, not one to guess at here.
+ *
+ * `check:arrival-camera` prints the band's measured size on every run.
  */
-const ARRIVAL_DOOR_FOCUS_LIFT = 1.1;
+export const ARRIVAL_DOOR_FOCUS_LIFT = KID_HEAD_HEIGHT + kidEyeCentre(1).y;
 
 /**
  * Which way the bus points.
@@ -1376,9 +1431,10 @@ export class ArrivalSequence {
    * by this one point (see the constructor), so it frames the whole queue
    * coming off, not just her.
    *
-   * Lifted to roughly a child's chest so they sit in the middle of the frame
-   * rather than along its bottom edge — the same reason the ordinary follow
-   * aims above the player's feet.
+   * Lifted to a child's own face ({@link ARRIVAL_DOOR_FOCUS_LIFT}) — and since
+   * the door beat looks purely horizontally, that is also the height the eye
+   * itself stands at. Jim: *"For the arrival shot the camera should be face
+   * height so the ground should be visible normally."*
    */
   get doorFocus(): Vector3 {
     const { x, z } = this.playerRoute.from;
