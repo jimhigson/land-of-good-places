@@ -447,3 +447,65 @@ Then click "Go to the park! →", record `__dilation.fake` at the click, and pol
 `(fake - clickedAt) / 1000` for the game-seconds you want. The arch pass is
 around t = 6.8–8.0 s. There is no game global exposed on `window`, so this is
 the only handle.
+
+---
+
+# Round five — the model is inverted and armed; it has NOT been watched
+
+**Model: Opus (`claude-opus-5[1m]`).** Commit `e8d818b5`. Still stacked on
+`feat/arch-placement`. **Not merged. Not handed to Jim.**
+
+## Done
+
+- `ARRIVAL_ARCH_TRAIL_Z` → **`ARRIVAL_ARCH_EYE_OFFSET_Z`**, signed, taken at
+  `SQUARE_ON_TO_THE_DOOR_DEGREES` — the bearing the pass is actually flown at.
+  The old `CAMERA_YAW_DEGREES` was right only while the shot came home *before*
+  the pass, which it no longer does.
+- `ArchPass.under/.clear` → **`.sheThrough/.eyeThrough`**. The old names quietly
+  asserted an order. `arrivalShot` now takes `min`/`max` into
+  `gatewayEntered`/`gatewayLeft` and assumes nothing.
+- **`solveArchPass` loses its `Math.max` clamp**, which had been pinning `clear`
+  to `under` whenever the eye led — so a leading eye looked like a zero-length
+  pass rather than a bug. That clamp is why this survived a green run.
+- **The check's synthetic spacing is derived** (`offset / pace`) over a walking
+  band around `NPC_WALK_SPEED`, instead of a typed 0.61 s. Typing the spacing
+  had implicitly asserted a **5.99 m/s** child.
+- **A pace that is not a real walking speed now fails**, and is proved red: the
+  old fixed-order subtraction gives −3.2482 m/s on 9 passes, exit 1. Geometry
+  pasted beside the transcript in the check's own header.
+
+`tsc` **exit 0**; `check:arrival-camera` **36 checks, exit 0**; bearing swing
+**135°**, headroom **0.4990 m**, sideroom **3.5000 m** (dead centre of a 7.00 m
+opening).
+
+## STILL TO DO — do not hand this over before it is done
+
+1. **Watch it.** It has not been looked at once since the square-on rebuild.
+   Everything above is arithmetic. The 20× clock recipe is in round four.
+   Several parks, and at normal speed as well as slowed.
+2. **Re-run the arch-clip probe.** The clip may be gone for free — the eye now
+   passes under the arch once and carries on rather than being dragged back
+   out — but that is a prediction, not a measurement. The round-three probe
+   scripts are described above; they were deleted after use, deliberately.
+3. **The exit note's "back out" detector still fires too eagerly.** It reports
+   the eye back on the gate line 0.02 s after crossing it, which is sign noise
+   while the shot is still holding its close pose, not a real return. The eye
+   heights it prints (2.88 m, 0.72 m under the plank) are sane; the *instants*
+   are not. Fix it to require the eye to have genuinely left and returned —
+   or, better, to notice that on a leading eye it may never return at all,
+   which would be the good outcome and should be said in as many words.
+4. Then the full three gates, and only then a link.
+
+## Two traps that cost me time tonight, both the same shape
+
+**Temporal dead zone.** I introduced `ARRIVAL_GATE_STANDOFF` below its use in
+`ARRIVAL_DOOR_DISTANCE`, and `EYE_LEAD_SECONDS` below its use in `PASSES`.
+`tsc` is happy with both; they die at runtime with `Cannot access '<X>' before
+initialization`. In a check script that is a **crash**, and a crash read
+through `| tail` looks like a pass — which is the exact fault my predecessor
+was pulled up for. Read the whole log.
+
+**And the deeper one:** both the pass-order bug and the 5.99 m/s child were
+numbers that had been *typed* where they should have been *derived*, and in
+both cases a green check sat on top of them. The clamp and the fixed spacing
+were each a small lie that made a broken model look consistent.
