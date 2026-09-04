@@ -553,17 +553,31 @@ const ARRIVAL_ARCH_DISTANCE = 4.0;
 
 /**
  * How far past the gate she has walked by the time the *eye* is through it —
- * the eye's own lag along z, at the pose it holds during the pass.
+ * the eye's own offset along z, at the pose it holds during the pass.
+ *
+ * **Signed, and the sign is the point.** `cameraOffset` puts the eye on the
+ * side its offset points, so this is positive when the eye TRAILS her (it sits
+ * on the bus side, and crosses the gate after she does) and negative when it
+ * LEADS her (it sits between her and the archway, and is through before she
+ * is). Nothing downstream may assume either — see {@link ArchPass}.
+ *
+ * It used to be taken at `CAMERA_YAW_DEGREES`, the rig's 45°, which was right
+ * only while the shot came home to the rig's bearing *before* the pass. It no
+ * longer does: the bearing is held square-on all the way through the gateway,
+ * so the pass is flown at {@link SQUARE_ON_TO_THE_DOOR_DEGREES} and that is
+ * the bearing this has to be measured at. Square-on points from the bus
+ * towards the gate, so this went negative and the eye became a leading one —
+ * which is what *"the camera should glide to follow them under"* actually
+ * asks for, and it is also why the shot no longer has to drag the eye back
+ * out through the plane of the arch at speed.
  *
  * Derived rather than timed, so it stays true if the bearing or the stand-back
- * change. It is what makes the shot hold its close pose until the camera has
- * actually cleared the arch, instead of starting to pull away while it is
- * still underneath it.
+ * change.
  */
-const ARRIVAL_ARCH_TRAIL_Z =
+const ARRIVAL_ARCH_EYE_OFFSET_Z =
   ARRIVAL_ARCH_DISTANCE *
   Math.cos(ARRIVAL_DOOR_PITCH_DEGREES * DEG) *
-  Math.cos(CAMERA_YAW_DEGREES * DEG);
+  Math.cos(SQUARE_ON_TO_THE_DOOR_DEGREES * DEG);
 
 /**
  * How long the eye takes to dive from the door shot's stand-back to the
@@ -585,7 +599,7 @@ const ARRIVAL_ARCH_TRAIL_Z =
  * and at a quarter of the lag the whole crossing is a few frames at the extreme
  * edge of a frame whose subject is centred.
  */
-const ARRIVAL_DIVE_SECONDS = ARRIVAL_ARCH_TRAIL_Z / (4 * NPC_WALK_SPEED);
+const ARRIVAL_DIVE_SECONDS = Math.abs(ARRIVAL_ARCH_EYE_OFFSET_Z) / (4 * NPC_WALK_SPEED);
 
 
 /**
@@ -632,10 +646,20 @@ export const AT_SHOT_HOME = ARRIVAL_CONTROL_AT + ARRIVAL_RISE_TAIL;
  * once, at construction, from the very curve it will walk.
  */
 export interface ArchPass {
-  /** She crosses the gate line. */
-  readonly under: number;
-  /** The trailing eye crosses it — see {@link ARRIVAL_ARCH_TRAIL_Z}. */
-  readonly clear: number;
+  /** The instant **she** crosses the gate line. */
+  readonly sheThrough: number;
+  /**
+   * The instant the **eye** crosses it — which may be before or after she
+   * does, depending on the sign of {@link ARRIVAL_ARCH_EYE_OFFSET_Z}.
+   *
+   * **Do not assume an order.** These were once called `under` and `clear`,
+   * names that quietly asserted the eye came second; when the shot went
+   * square-on the eye began leading her and every interval built on that
+   * assumption went negative. The tell was a derived walking pace printing as
+   * −3.65 m/s. Take `Math.min`/`Math.max` of the pair rather than subtracting
+   * one from the other in a fixed order.
+   */
+  readonly eyeThrough: number;
 }
 
 /** One frame of the arrival camera — a placement, not a nudge. */
@@ -703,7 +727,13 @@ export interface ArrivalShot {
 export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | null {
   if (elapsed >= AT_SHOT_HOME) return null;
 
-  const { under, clear } = archPass;
+  const { sheThrough, eyeThrough } = archPass;
+  // **Order-agnostic.** The eye leads her through the gateway on the square-on
+  // pass and trailed her on the three-quarter one, so neither instant may be
+  // assumed to be the earlier. Everything below is expressed against the
+  // transit as a whole.
+  const gatewayEntered = Math.min(sheThrough, eyeThrough);
+  const gatewayLeft = Math.max(sheThrough, eyeThrough);
 
   // **How much of the door shot is in force**, 0 being the rig exactly. It
   // comes home over the walk *up to the arch*, not over the whole walk: by the
@@ -724,7 +754,7 @@ export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | 
   // gone and a child drawn straight through it. The fix is to be *further in*
   // when the retreat starts, so that by the time the eye is back level with
   // the gate it is already above the whole arch rather than inside it.
-  const holdPast = Math.min(clear + (clear - under), ARRIVAL_CONTROL_AT);
+  const holdPast = Math.min(gatewayLeft + (gatewayLeft - gatewayEntered), ARRIVAL_CONTROL_AT);
 
   const swing =
     elapsed < AT_STOPPED
@@ -745,10 +775,14 @@ export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | 
         // "up on the stick" is read through are solved from the rig's fixed
         // yaw, so a bearing still moving under her hand sends her somewhere
         // that is not up the screen.
-        elapsed < clear
+        elapsed < gatewayLeft
         ? 1
         : 1 -
-          smoothstep(0, 1, (elapsed - clear) / Math.max(0.001, ARRIVAL_CONTROL_AT - clear));
+          smoothstep(
+            0,
+            1,
+            (elapsed - gatewayLeft) / Math.max(0.001, ARRIVAL_CONTROL_AT - gatewayLeft),
+          );
 
   // **How close the shot is riding**, 1 at the arch pass and 0 at the rig.
   // Held all the way through the gateway — from the moment she starts walking
@@ -793,9 +827,14 @@ export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | 
           lerp(
             1,
             ARRIVAL_DOOR_ZOOM,
-            elapsed < clear
+            elapsed < gatewayLeft
               ? 1
-              : 1 - smoothstep(0, 1, (elapsed - clear) / Math.max(0.001, ARRIVAL_CONTROL_AT - clear)),
+              : 1 -
+                smoothstep(
+                  0,
+                  1,
+                  (elapsed - gatewayLeft) / Math.max(0.001, ARRIVAL_CONTROL_AT - gatewayLeft),
+                ),
           );
 
   // **The stand-back, which is the whole of "the camera goes under the arch
@@ -822,7 +861,7 @@ export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | 
   // once she is far enough past the bus that it has left the frame, and at
   // `under` it has not. Half a second earlier there is a wedge of sawn-open bus
   // down the left edge — photographed twice while getting this right.
-  const dive = smoothstep(clear - ARRIVAL_DIVE_SECONDS, clear, elapsed);
+  const dive = smoothstep(gatewayEntered - ARRIVAL_DIVE_SECONDS, gatewayEntered, elapsed);
   const distance =
     elapsed < AT_WALKING
       ? lerp(CAMERA_DISTANCE, ARRIVAL_DOOR_DISTANCE, swing)
@@ -1173,7 +1212,7 @@ export class ArrivalSequence {
    * walk — a camera timed to the phase would have started pulling away long
    * before she got there.
    *
-   * Reads `ENTRANCE_GATE_Z` for the line and {@link ARRIVAL_ARCH_TRAIL_Z} for
+   * Reads `ENTRANCE_GATE_Z` for the line and {@link ARRIVAL_ARCH_EYE_OFFSET_Z} for
    * how far past it she has walked by the time the eye is through, so both
    * follow the pose the shot actually holds rather than a second copy of it.
    */
@@ -1193,8 +1232,15 @@ export class ArrivalSequence {
       // releases at the hand-over, so fail towards letting go.
       return ARRIVAL_CONTROL_AT;
     };
-    const under = crossing(ENTRANCE_GATE_Z);
-    return { under, clear: Math.max(under, crossing(ENTRANCE_GATE_Z - ARRIVAL_ARCH_TRAIL_Z)) };
+    const sheThrough = crossing(ENTRANCE_GATE_Z);
+    // **No `Math.max` clamp, and no assumed order.** Subtracting the signed
+    // offset gives the line she is on when the *eye* is on the gate line, and
+    // that works for a leading eye and a trailing one alike: a positive offset
+    // puts the line deeper in the park so she reaches it later, a negative one
+    // puts it short of the gate so she reaches it earlier. The old clamp
+    // silently pinned `clear` to `under` whenever the eye led, which is how a
+    // leading eye could look like a zero-length pass instead of a bug.
+    return { sheThrough, eyeThrough: crossing(ENTRANCE_GATE_Z - ARRIVAL_ARCH_EYE_OFFSET_Z) };
   }
 
   /**

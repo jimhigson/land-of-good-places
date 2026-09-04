@@ -76,6 +76,23 @@
  * | `CHEST` back to the copied 1.1 | headroom reads 0.5237 m — 0.15 m of margin that is not there |
  * | `ARRIVAL_ARCH_DISTANCE` 4.0 → 5.5 | **red, both clauses**: headroom -0.4060 m at t=9.27 s, sideroom -0.4756 m, exit 1 |
  *
+ * ## Proved red again for the leading eye (3 September 2026)
+ *
+ * The shot went square-on, which put the eye **in front of** her through the
+ * gateway instead of behind. Geometry it was proved against:
+ *
+ * ```
+ * ARRIVAL_DOOR_THREE_QUARTER_DEGREES 0   ARRIVAL_GATE_STANDOFF 3
+ * ARRIVAL_DOOR_DISTANCE ~6.6 m   ARRIVAL_ARCH_DISTANCE 4.0
+ * eye z-offset at the pass -3.65 m (NEGATIVE — the eye leads her)
+ * green run: 36 checks; bearing swings 135.0°, headroom 0.4990 m, sideroom 3.5000 m
+ * ```
+ *
+ * | mutation | result |
+ * |---|---|
+ * | none (control) | pass, 36 checks, exit 0 |
+ * | pace as `offset / (later - earlier)` — the fixed-order subtraction the old code did | **red, 9 passes**: -3.2482, -4.3350, -2.5500 m/s and so on, exit 1 |
+ *
  * **And one mutation that stays green, recorded because it is the honest edge
  * of what this can do.** Turning `ARRIVAL_DOOR_THREE_QUARTER_DEGREES` from 60
  * down to 3 — which puts the gate arch squarely across the doorway, the
@@ -104,6 +121,20 @@ import {
 } from '../src/world/entrance/ArrivalSequence.ts';
 import { GATE_ARCH_CLEAR_HEIGHT, GATE_ARCH_CLEAR_WIDTH } from '../src/art/models/gateArch.ts';
 import { TALLEST_CHILD_HEIGHT } from '../src/art/models/kid.ts';
+import { NPC_WALK_SPEED } from '../src/entities/npc/NpcCharacter.ts';
+
+/**
+ * The walking paces the pass is swept at, in m/s.
+ *
+ * **The spacing between the two crossings is derived from these, not typed.**
+ * The two are one eye-offset apart along z, so `spacing = offset / pace` — fix
+ * the spacing instead and you have implicitly asserted a pace, which is how
+ * the previous version came to model a 5.99 m/s child without saying so. She
+ * is driven along a fixed-duration bezier through a `smoothstep`, so her pace
+ * through the gateway is around `NPC_WALK_SPEED` at the low end and about 1.5x
+ * that at the curve's peak; this brackets it either side.
+ */
+const SWEEP_PACES = [NPC_WALK_SPEED, NPC_WALK_SPEED * 1.25, NPC_WALK_SPEED * 1.7];
 
 /**
  * **The arch pass is swept, not pinned.** The instants she and the eye cross
@@ -116,13 +147,34 @@ import { TALLEST_CHILD_HEIGHT } from '../src/art/models/kid.ts';
  * Measured on the game as it stands: she is under the arch 44% of the way
  * through the walk, `under` = 6.79 s.
  */
-const PASSES: readonly ArchPass[] = [0.2, 0.3, 0.44, 0.6, 0.8].map((fraction) => {
-  const walkStart = ARRIVAL_CONTROL_AT - 4.5;
-  const under = walkStart + fraction * 4.5;
-  return { under, clear: Math.min(under + 1.0, ARRIVAL_CONTROL_AT) };
-});
+/**
+ * The eye's own z-offset at the pose it holds through the gateway, measured off
+ * the shot rather than imported — `ARRIVAL_ARCH_EYE_OFFSET_Z` is private, and
+ * asking the shot is the same question one layer out. **Signed**: negative
+ * while the eye leads her, which is what the square-on pass does.
+ */
+const EYE_OFFSET_AT_THE_PASS = (() => {
+  const probe: ArchPass = { sheThrough: ARRIVAL_CONTROL_AT - 2, eyeThrough: ARRIVAL_CONTROL_AT - 2 };
+  const shot = arrivalShot(probe.sheThrough, probe)!;
+  return (
+    shot.distance * Math.cos(shot.pitchDegrees * DEG) * Math.cos(shot.yawDegrees * DEG)
+  );
+})();
+
+const PASSES: readonly ArchPass[] = [0.25, 0.44, 0.7].flatMap((fraction) =>
+  SWEEP_PACES.map((pace) => {
+    const walkStart = ARRIVAL_CONTROL_AT - 4.5;
+    const sheThrough = walkStart + fraction * 4.5;
+    // `spacing = offset / pace`, and the SIGN of the offset decides which of
+    // the two crossings comes first. A leading eye (negative offset) is
+    // through before her; a trailing one after. Neither is assumed anywhere
+    // downstream — see `ArchPass`.
+    const spacing = EYE_OFFSET_AT_THE_PASS / pace;
+    return { sheThrough, eyeThrough: Math.max(AT_WALKING, sheThrough + spacing) };
+  }),
+);
 /** The one nearest the game's own geometry, for the single-value clauses. */
-const PASS: ArchPass = PASSES[2]!;
+const PASS: ArchPass = PASSES[3]!;
 
 let checks = 0;
 let failures = 0;
@@ -456,7 +508,7 @@ console.log('the eye passes under the crossbar and between the piers');
     // through the plane of the arch is now **uncovered**, and it is measured
     // and printed to stderr below rather than asserted. Do not read the number
     // above as covering it.
-    for (let t = AT_WALKING; t <= pass.clear; t += STEP) {
+    for (let t = AT_WALKING; t <= Math.max(pass.sheThrough, pass.eyeThrough); t += STEP) {
       const shot = arrivalShot(t, pass);
       if (!shot || shot.distance > riding * RIDING_BAND) continue;
       const eyeUp = CHEST + shot.distance * Math.sin(shot.pitchDegrees * DEG);
@@ -501,7 +553,9 @@ console.log('the eye passes under the crossbar and between the piers');
       if (!shot || shot.distance >= closest) continue;
       closest = shot.distance;
       closestAt = t;
-      inTheGateway = t >= pass.under && t <= pass.clear + ARRIVAL_RISE_TAIL;
+      inTheGateway =
+        t >= Math.min(pass.sheThrough, pass.eyeThrough) &&
+        t <= Math.max(pass.sheThrough, pass.eyeThrough) + ARRIVAL_RISE_TAIL;
     }
   }
   check(
@@ -563,26 +617,46 @@ console.log('the door shot is close enough to read a face');
     shot.distance * Math.cos(shot.pitchDegrees * DEG) * Math.cos(shot.yawDegrees * DEG);
   const lines: string[] = [];
   for (const pass of PASSES) {
-    const atClear = arrivalShot(pass.clear, pass);
-    if (!atClear) continue;
-    const lagAtClear = eyeZOffset(atClear);
-    const pace = lagAtClear / Math.max(1e-3, pass.clear - pass.under);
+    const gatewayEntered = Math.min(pass.sheThrough, pass.eyeThrough);
+    const gatewayLeft = Math.max(pass.sheThrough, pass.eyeThrough);
+    const atCrossing = arrivalShot(pass.eyeThrough, pass);
+    if (!atCrossing) continue;
+    const offsetAtCrossing = eyeZOffset(atCrossing);
+    // Her pace where it matters, derived from the pass itself: the two
+    // crossings are one eye-offset apart along z, so that distance over that
+    // interval is her speed there. `Math.abs` on BOTH, because the offset is
+    // signed (a leading eye makes it negative) and a pace is not.
+    const pace = Math.abs(offsetAtCrossing) / Math.max(1e-3, gatewayLeft - gatewayEntered);
+    // **A pace that is not a positive, plausible walking speed means the model
+    // is broken, and that must FAIL rather than print.** This clause used to
+    // print whatever fell out; when the shot went square-on and the eye began
+    // leading her, it printed -3.65 m/s on four passes out of five and every
+    // number beside it was meaningless. A child walks; she does not walk
+    // backwards at a constant speed, and she does not sprint at 20 m/s.
+    check(
+      pace > 0 && pace < NPC_WALK_SPEED * 2.5,
+      `the pace derived from the arch pass must be a real walking speed — got ${show(pace)} m/s ` +
+        `on the pass crossing at ${gatewayEntered.toFixed(2)}/${gatewayLeft.toFixed(2)}. ` +
+        `A negative or absurd pace means the two crossings have been subtracted in a fixed ` +
+        `order that the eye's own offset no longer justifies.`,
+    );
     let backOutAt: number | null = null;
     let backOutEyeUp = 0;
-    for (let t = pass.clear + STEP; t <= AT_SHOT_HOME; t += STEP) {
+    for (let t = pass.eyeThrough + STEP; t <= AT_SHOT_HOME; t += STEP) {
       const shot = arrivalShot(t, pass);
       if (!shot) break;
-      // Zero at `clear` by construction; negative is inside the park.
-      const eyeZ = eyeZOffset(shot) - lagAtClear - pace * (t - pass.clear);
-      if (eyeZ < 0) continue;
+      // Zero at the eye's own crossing by construction; the sign convention
+      // follows the offset, so "back out" is a return towards the bus side.
+      const eyeZ = eyeZOffset(shot) - offsetAtCrossing - pace * (t - pass.eyeThrough);
+      if (Math.sign(eyeZ) !== Math.sign(offsetAtCrossing) || eyeZ === 0) continue;
       backOutAt = t;
       backOutEyeUp = CAMERA_FOCUS_LIFT + shot.distance * Math.sin(shot.pitchDegrees * DEG);
       break;
     }
     lines.push(
       backOutAt === null
-        ? `    pass ${pass.under.toFixed(2)}/${pass.clear.toFixed(2)}: the eye never comes back out to the gate line`
-        : `    pass ${pass.under.toFixed(2)}/${pass.clear.toFixed(2)}: back on the gate line at t=${backOutAt.toFixed(2)}s, ` +
+        ? `    pass ${gatewayEntered.toFixed(2)}/${gatewayLeft.toFixed(2)}: the eye never returns to the gate line — it leaves through the arch and stays gone`
+        : `    pass ${gatewayEntered.toFixed(2)}/${gatewayLeft.toFixed(2)}: back on the gate line at t=${backOutAt.toFixed(2)}s, ` +
           `eye ${backOutEyeUp.toFixed(2)} m up — ${show(GATE_ARCH_CLEAR_HEIGHT - backOutEyeUp)} m ` +
           `${backOutEyeUp > GATE_ARCH_CLEAR_HEIGHT ? 'ABOVE the sign underside (it is through the plank)' : 'under the sign underside'}` +
           `, at a modelled ${pace.toFixed(2)} m/s`,
