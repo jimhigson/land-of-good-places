@@ -750,3 +750,34 @@ unwarped before the rebase. So the absence of a vector is not evidence a seed
 survives a rebase; only a whole-pool vet is. It also has no per-seed invariant
 file, so `test:procgen` could not see it either — which is issue #510 in one
 seed.
+
+### …and re-baking moved seed 428 into a new coplanar seam
+
+`{fountain: 2}` was the first candidate to score 0 on `check:park`, and it
+puts the fountain's own cylinder flush with the paving:
+
+```
+NEW: garden|fountain/<Mesh:CylinderGeometry>|garden/path-surface
+     0.051 m² of shared plane, a maintained stand-off at 5.0e-3 m, seen on seed 428
+```
+
+**This is #437's shape again, exactly as this branch's own PR body describes
+for the canonical seed**: a gate that is not inside the acceptance loop finds
+the winner afterwards. `warp-search.mts` scores on `check:park` and re-proves
+with the seed's invariant oracle; `check:coplanar` is neither.
+
+So seed 428 is being re-searched from candidate 16 onward with
+**`check:coplanar` inside the acceptance loop** —
+`scripts/warp-research-428.mts` (scratch, not for commit), reusing
+`check-coplanar.mts`'s own child mode so the ratchet keys are built by their
+one owner rather than by a second copy of the rule.
+
+**Control on that instrument, run before believing it:** asked for
+`{fountain: 2}`'s keys, it returns 34 and flags exactly **1** unknown —
+`garden|fountain/<Mesh:CylinderGeometry>|garden/path-surface`, the seam it
+exists to catch.
+
+`test:procgen` on the re-baked head: **21 files, 752 tests, exit 0.**
+The `BASELINE LOOSE` line for the `anchor:waterFight` plot pair is seed 24's
+old `{waterFight:1}` vector leaving; it is not fatal and the row goes when 428
+settles.
