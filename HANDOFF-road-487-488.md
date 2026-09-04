@@ -1313,3 +1313,81 @@ Six were sampled in review; two were wrong and three items were not done at all.
 That is a check that cannot fail, written by me, about my own work — the same
 disease this file documents everywhere else. **Verify a claim about a document
 by re-reading the document, not by searching for the words you edited.**
+
+---
+
+# Session 7: the residual was never a search failure
+
+Model: **Opus 5 (1M context)** — matching the agent I replaced, per CLAUDE.md's
+"a replacement runs the same model". Worktree `.claude/worktrees/road-seams-498`,
+detached on `origin/fix/road-487-488`; pushes go
+`git push origin HEAD:fix/road-487-488`. Rebased onto `origin/main` `c95facf6`
+(#508 in), clean, no deletions.
+
+## Correcting the previous session's item 1
+
+It said the search *"exhausts `RADIAL_NUDGES` and then takes the last candidate
+anyway"*. **It does not.** `searchForClearGround` returns `null` and
+`trestleSpots` only pushes `if (placed)` — there is no settle-for-the-last-one
+path, and every one of the three attempts passes `route`, so all of them honour
+the corridor. Do not go looking for that code; it is not there.
+
+## What the residual actually was: a third copy of "where is this leg"
+
+`postClearsEntranceRoad` **restated** the trunk's top as the mean of the four
+lane heights. The drawn trunk stops a whole `forkPlan(...).fork` lower, under
+the branches. The road test walks the post only as far up as there is bus to
+hit, *as a fraction of its rise* — so believing the post rose further than it
+does made that fraction too small. It checked the bottom of a lean and passed
+posts whose top third stood in the bus.
+
+Measured, seed 11, `scripts/probe-post-lean.mts` (committed):
+
+```
+post          reach   at up   drawn rise   horiz lean   foot outside corridor
+race:33        1.78    3.38         3.47         6.00                    3.17
+race:34        1.63    3.91         4.03         6.00                    3.28
+race:35        0.64    3.91         4.47         4.00                    2.11
+walk-past:33   0.25    3.96         5.28         6.00                    3.22
+```
+
+The feet are 3 m clear. The posts lean six metres back over the road.
+
+**Fixed by making one owner** — `TrestleTree` / `trestleTreeAt` in `track.ts`.
+The draw loop, `addPostCollider`'s caller and `postClearsEntranceRoad` all now
+ask it. That is the **third** instance of "two definitions of where this leg is"
+in this one mechanism, which is why the owner's doc comment says so at length.
+
+`check:entrance-road`: **exit 0, 0 posts in the bus on all sixteen seeds**,
+control still 8–10 posts a seed. No wider search, no different arc slot, no
+fallback — the search was fine, it was being told to search for the wrong post.
+
+## But `test:procgen` is now RED, and it is the real finding
+
+**exit 1, 7 failed | 574 passed.** (The background-task notification said
+"exit code 0"; that was my `echo` wrapper's status, not the run's. Read the log.)
+
+```
+canonical  the widest run between consecutive trestle legs on the walk-past ring is 61.0 m (after leg 34), over the 40 m tolerance
+seed 5     61.1 m (after leg 34)
+seed 11    63.7 m (after leg 32)
+seed 24    64.1 m (after leg 34)   + racers meet 10/10/9/10 duck bars
+seed 131   62.8 m (after leg 34)   + racers meet 10/9/9/8 duck bars
+```
+
+And the trestle search now warns on **14 of the 16 seeds**, 3–5 slots each:
+*"no clear ground found for the mandatory trestle at slot N even after the wide
+search — a duck bar is scheduled here with no visible support"*.
+
+So the honest state is: with the clause finally testing the post that is drawn,
+**the ride cannot find ground for about five consecutive slots** where the road
+runs alongside it, and it is dropping the legs rather than deciding differently.
+*That* is the CLAUDE.md backtracking violation, and it is a different one from
+the one the last handoff described.
+
+Next: measure whether any foot position clears at those slots — sweep `dr` and
+`da` at a failing slot and record which clause refuses each candidate. That
+decides between "the search needs to be cleverer" and "the geometry is
+impossible and the trestle's own shape has to give".
+
+**Do not weaken the 40 m tolerance or the duck-bar fairness assertion.**
