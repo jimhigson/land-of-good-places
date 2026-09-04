@@ -148,7 +148,17 @@ already built and tested). The ladder of responses, in order:
 2. **Negotiate**: ask the blocker to be withdrawn and re-placed (the
    fountain steps aside for the railway; the felling-foliage precedent
    generalised).
-3. **Unwind**: pop own earlier decisions and re-draw.
+3. **Unwind**: pop earlier decisions and re-draw — **any earlier decision,
+   not only the noticing placer's own.** Jim, 3 September 2026, verbatim, on
+   the slide-leg case below, given as the specification: *"This is just a
+   normal collision to backtrack from. If needs be, the backtracking would
+   place the castle somewhere else, which is fine. All decisions can be
+   backtracked or reversed."* Nothing is pinned by having been decided
+   earlier: if the cheapest way out of a slide leg standing in the train's
+   path is to move the castle, moving the castle is a legitimate resolution.
+   Negotiation is transitive — a blocker asked to move may itself backtrack
+   further — and the backjumping hint is what points the unwind at the right
+   decision instead of the chronologically previous one.
 4. **Restart**: unwind to the empty park, bump the attempt counter, re-draw
    everything. Legal, deterministic, and expected to be rare.
 
