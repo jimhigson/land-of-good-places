@@ -120,7 +120,7 @@ const CHILD_RECLINED_LENGTH = 2.28;
  * height becomes length, which is the whole reason this number is not the one
  * the first version of this feature was spaced by.
  */
-const PET_RECLINED_LENGTH = 1.53;
+export const PET_RECLINED_LENGTH = 1.53;
 
 /**
  * The daylight left between one body and the next, in metres.
