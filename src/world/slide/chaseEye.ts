@@ -26,24 +26,54 @@ import { PARADE_MEMBER_RADIUS } from '../../core/constants';
  * underneath. That is #514, and it is arithmetic rather than bad luck, which
  * is why no seed escaped it.
  *
- * ## What it does instead
+ * ## What actually fixes #514: the aim, not the position
  *
- * Asks the two questions the fixed offset never asked.
+ * **Measured across the whole seed pool — 16 parks, ~22,000 solve calls — the
+ * first candidate is accepted every time and the lens never moves.** The
+ * position search below has never taken a second step on any park in the game.
  *
- * 1. **What must be in the shot?** The child and the nearest companion. The
- *    lens steps back until the companion is inside the frustum with margin,
- *    and pitches so the axis lies between the two of them rather than over
- *    the top of both.
- * 2. **What is at that point?** {@link terrainHeight}, the same sampler every
- *    prop in the park is placed against. A lens under the ground is #516: near
- *    the bottom the chute runs low and steeply pitched, so "behind and above"
- *    in the chute's tilted frame resolves to a point inside the hill.
+ * So the fix is the **aim**. The old rig pointed the lens along the mount's own
+ * forward, which flew it straight over the top of the line; this aims at the
+ * midpoint of the child and the nearest companion and asks whether *both* sit
+ * inside the frustum about that axis. At the same 4.35 m / 1.62 m the
+ * historical camera used, a better axis brings a pet that was 34°–45° off-axis
+ * into the picture.
  *
- * **It does not clamp and accept.** On a chute where no placement in range
- * satisfies both, it reports `gaveUp` rather than settling on a floor and
- * drawing a shot it knows is wrong — CLAUDE.md's standing rule, and the same
- * shape as `petRiders.ts`'s bend allowance. `check:pet-slide` asserts the
- * count is zero, because a shipped game must not throw at a child mid-ride.
+ * That is a smaller change than "solve the placement", and it is the one that
+ * is doing the work. **Saying so here is the point**: an earlier draft of this
+ * comment described a lens that "steps back until the companion is inside the
+ * frustum", which is what the code *can* do and not what it *does*, and a doc
+ * describing machinery that never runs is how the next person inherits a false
+ * model of their own camera.
+ *
+ * ## The search below is a guard, and an unexercised one
+ *
+ * It is kept because the aim alone has no answer for a chute that genuinely
+ * needs more room — a harder bend, a longer line, a portrait phone's narrower
+ * frame — and because falling back to a fixed offset in that case is the clamp
+ * this codebase forbids. But **it has never fired**, which means it is also
+ * **unproven**: nothing has ever validated the shot it would produce. Treat a
+ * park that makes it move as unverified territory, not as a solved case.
+ *
+ * `gaveUp` is reported rather than clamped, per CLAUDE.md's standing rule and
+ * in the same shape as `petRiders.ts`'s bend allowance; `check:pet-slide`
+ * asserts the count is zero, because a shipped game must not throw at a child
+ * mid-ride.
+ *
+ * ## What this does NOT fix: #516
+ *
+ * The {@link terrainHeight} rejection below was written to fix #516 (the lens
+ * buried in geometry near the bottom of the chute). **It never rejects
+ * anything** — zero rejections in ~22,000 calls across all 16 parks — so it has
+ * never once acted, and #516 is untouched by this file in practice.
+ *
+ * The reason is almost certainly that **`terrainHeight()` is the wrong question**:
+ * it is one scalar height field, and the mass burying the lens in QA's frame was
+ * flat tan **paving**, which is a mesh — as are the buildings and the chute
+ * itself. A camera can be inside a great deal of world that a height field knows
+ * nothing about. Whoever takes #516 should ask the collision world or cast
+ * against real geometry, and **name the mesh**; a hand-picked notion of "the
+ * world" is the fault this project files most often.
  */
 
 /** Where the lens sits, in the mount's frame: `back` behind, `up` above. */
@@ -91,9 +121,15 @@ const BASE_UP = 1.62;
 /**
  * How much further back the solve may go, and in what steps.
  *
- * A stop, not a tuning knob. Measured need on the pool is under a metre; three
- * metres is the room to solve in, and a chute that wants more is reported
- * rather than clamped.
+ * A stop, not a tuning knob, and a chute that wants more is reported rather
+ * than clamped.
+ *
+ * **Never spent.** Measured across the whole pool, the solve accepts its first
+ * candidate on every frame of every park, so `extraBack` has never exceeded 0
+ * and the measured need is **zero**, not the "under a metre" an earlier draft
+ * of this comment claimed. The range is headroom for a chute that needs it, not
+ * a described behaviour — see the header's note that this search is a guard,
+ * and an unproven one.
  */
 const MAX_EXTRA_BACK = 3.0;
 const BACK_STEP = 0.1;
@@ -163,7 +199,12 @@ export function solveChaseEye(
       const high = BASE_UP + extraUp;
       eye.copy(rider).addScaledVector(behind, back).addScaledVector(up, high);
 
-      // #516 first, because it is cheap and it disqualifies outright.
+      // Ground first, because it is cheap and it disqualifies outright.
+      //
+      // **This has never rejected a placement** — 0 rejections in ~22,000 calls
+      // across all 16 pool parks — so it is not, in practice, the fix for #516
+      // that it was written to be. `terrainHeight` is a height field; paving,
+      // buildings and the chute are meshes. See the header.
       if (eye.y - terrainHeight(eye.x, eye.z) < GROUND_CLEARANCE) continue;
 
       // With nobody behind her the shot only has to hold the child, which the
