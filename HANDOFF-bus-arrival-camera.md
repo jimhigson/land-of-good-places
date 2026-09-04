@@ -179,3 +179,127 @@ still opt **out** of the bus: `launchGame` asks the union once and only
 - [ ] `pnpm run test:procgen`
 - [ ] `pnpm run build`
 - [ ] PR (**do not merge**)
+
+---
+
+# Round three — the replacement engineer (3 September 2026)
+
+**Model: Opus (`claude-opus-5[1m]`).** Same model as my predecessor, per
+CLAUDE.md. My worktree is `.claude/worktrees/bus-camera-2`; the predecessor's
+`bus-camera` is still checked out on this branch and was left untouched.
+
+**Still stacked on `feat/arch-placement`. I did not rebase, onto `main` or
+anything else.** The gate arch fix and the round-robin spine both merged to
+`main` tonight; this branch takes them when its base does.
+
+## The defect I was sent for, and what it turned out to be
+
+`scripts/check-arrival-camera.mts` hard-coded `CHEST = 1.1`, hand-copied from
+`ARRIVAL_DOOR_FOCUS_LIFT`. That is the **door beat's** aim height. The arch
+pass runs with `watchesTheDoor === false`, so the shot orbits the ordinary
+player-follow focus, whose lift is `IsoCamera`'s own **1.25**. The clause
+measured the eye 0.15 m too low.
+
+`IsoCamera` now exports `CAMERA_FOCUS_LIFT` and the check asks it. One owner.
+
+Read from its owner, the headroom clause went
+**0.3726 m / PASS → 0.2226 m / FAIL** against its own 0.3 m floor. Confirmed
+by running it: `/tmp/ac-base.log` (exit 0) and `/tmp/ac-lift.log` (exit 1).
+
+## The remedy, and the measurement that chose it
+
+**A tighter gateway window — cut the sweep at `clear` — not a retune of the
+shot.** Here is the measurement, because the choice is not obvious and the
+brief warned against picking whichever went green.
+
+The worst sample is at **t = 9.37 s**, on the synthetic pass whose `clear` is
+clamped to `ARRIVAL_CONTROL_AT` = 9.30. It is **0.07 s past `clear`**, with the
+tilt already climbing. I instrumented the eye's actual position — `eyeZ` from
+`cameraOffset`'s own `cos(yaw)·cos(pitch)·d`, zeroed at `clear` by
+construction — and swept it:
+
+```
+pass 8.40/9.30    t     dist  pitch    eyeY   eyeZ-gate
+                 9.28   4.21  28.01   3.226     0.176   entering
+                 9.30   4.00  28.14   3.136    -0.000   ON THE GATE LINE (clear)
+                 9.33   4.11  28.40   3.205    -0.022
+                 9.37   4.44  28.66   3.377     0.088   the 0.2226 m sample
+                 9.40   4.97  28.93   3.652     0.324   already out and above
+```
+
+So the sample is not spurious — the eye really is near the plane there. But it
+is on the way **out**, and where it has got to depends on how fast she is
+walking, which the check has no model of. A height asserted at an unknown
+horizontal position is a measurement of something it is not describing.
+
+`clear` is the last instant `ArrivalSequence` can place the eye — by its own
+definition, on the gate line, solved off the bezier she walks. The sweep now
+stops there. Swept to `clear`: **0.3737 m headroom, 0.8098 m sideroom.**
+
+**Do not read that 0.3737 as the old 0.3726.** Different sample, different
+lift; the near-equality is a coincidence and it fooled me once.
+
+## What that cost, and the finding it exposed — READ THIS
+
+Cutting at `clear` leaves the eye's **climb back out through the plane of the
+arch uncovered**, and that is not hypothetical. The stand-back opens 4 m → 90 m
+in `ARRIVAL_RISE_TAIL` — tens of metres a second against a walking child — so
+the eye, having dipped just past the gate line, is *dragged back out through
+it* with the tilt still lifting. It crosses the arch's own plane on the way
+home, every time. Structural, not tuneable.
+
+The check now measures and prints that on **stderr** every run (confirmed
+audible on a passing, exit-0 run). At the pace each synthetic pass implies it
+clears — but only by **0.03 m on the earliest pass**.
+
+**And here is the open worry.** The check's synthetic passes use
+`clear = under + 1.0 s`. The game's own measured pass is **under 6.806 /
+clear 7.416 — 0.61 s**. `ARRIVAL_ARCH_TRAIL_Z` is 2.584 m, so the game's pace
+through the gate is ~**4.24 m/s**, not the ~2.55 m/s the synthetic spacing
+models. She is on a fixed-duration bezier through a `smoothstep`, so a peak of
+1.5× average is expected and 4.24 m/s is consistent with it.
+
+Modelled at that pace, my instrument says the game's own pass takes the eye
+**0.57 m up through the sign plank** on the way out, and that most crossing
+fractions clip. `/tmp/probe3b.log` has the sweep.
+
+**I did not act on it, for two reasons, and both should be weighed rather than
+inherited as a conclusion:** it needs a change to a shot Jim is currently
+judging, and it rests on a modelled pace I could not verify — I was not granted
+the browser, so nobody has *looked* at the exit. Treat this as unproven and
+open. The cheap next step is eyes on `/arrive`, watching the moment the camera
+leaves the arch.
+
+The sign plank is 3.60–4.66 m tall and only **0.26 m deep** in z (±0.13),
+which is why this is a graze rather than a long clip.
+
+## The two comment corrections
+
+- `Game.ts` argued the zoom stops at `AT_SHOT_HOME` and that eating input for
+  those seconds was acceptable — but the guard it sits on is `ownsTheZoom`,
+  false at `ARRIVAL_CONTROL_AT`, the earlier of the two. It was arguing against
+  its own code.
+- `ARRIVAL_ARCH_DISTANCE` quoted 0.7 m / 0.9 m as the asserted margins. Those
+  are the *nominal* figures at the dive's own 24°. The swept values are
+  **0.37 m / 0.81 m**. Both are now given and labelled, and the stale 3.45 m
+  clear height corrected to the arch's real **3.60 m**.
+
+## Fading the departing bus during the dive
+
+Worth **ruling out**: the near-plane band is crossed in ~0.25 s at the extreme
+left of frame while the subject is centred under the sign, and a fade that
+fast is itself a visible event — a bus that dissolves as a child walks away
+from it will read as a rendering fault to a six-year-old more readily than two
+frames of a cut edge she is not looking at, and it would need its own opacity
+path through a material nothing else fades.
+
+## Gates
+
+All three run from this worktree, exit codes read from each run's own log file:
+
+- `pnpm run check` → `/tmp/bc2-check.log`
+- `pnpm run test:procgen` → `/tmp/bc2-procgen.log` — **exit 0**
+- `pnpm run build` → `/tmp/bc2-build.log` — **exit 0**
+
+Check chain step sets compared by parsing, base vs head: 58 → 59, **nothing
+removed**, `check:arrival-camera` added.
