@@ -151,6 +151,11 @@ const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
   // without walking up to invite them first.
   '/slide': 'ginormousSlide',
   '/slide-with-grownup': 'ginormousSlideWithGrownUp',
+  // The same ride with a line of companions already caught, so the "everybody
+  // down the slide behind her" half (#468, and #507's spacing fix) can be seen
+  // without first going and catching animals in the roof garden. Three are
+  // granted and four ride — she starts with one from the character creator.
+  '/slide-with-pets': 'ginormousSlideWithPets',
   // The Land Hotel's lobby (#236) — not a ride at all, but exactly the same
   // QA problem the slide had: reaching it means a walk across the park on a
   // layout that is different on every seed. Drops her just inside the front
