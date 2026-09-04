@@ -240,10 +240,10 @@ function inNode(): boolean {
   return typeof nodeProcess?.versions?.node === 'string';
 }
 
-/** Is there a save on this device — i.e. is somebody already playing a park? */
-function hasSave(): boolean {
+/** Is there a save in `store` — i.e. is somebody already playing a park? */
+function hasSave(store: Storage | null): boolean {
   try {
-    return storage()?.getItem(SAVE_KEY) != null;
+    return store?.getItem(SAVE_KEY) != null;
   } catch {
     return false;
   }
@@ -280,7 +280,27 @@ export function resolveParkSeed(): number {
     return CANONICAL_PARK_SEED;
   }
 
-  const store = storage();
+  return parkSeedFor(storage());
+}
+
+/**
+ * **What a browser profile holding `store` gets** — everything after the pins
+ * and after {@link inNode}.
+ *
+ * Split out so `check:seed-pool` can exercise the browser's own path from
+ * Node, which is the only runtime any check has. It used to do that by
+ * assigning a fake `localStorage` onto `globalThis` and calling
+ * {@link resolveParkSeed}, and that is no longer possible now that Node never
+ * draws — nor should it be, because a check able to fake its way into the
+ * browser path is a check that cannot notice Node taking it for real, which is
+ * exactly how #496 hid.
+ *
+ * So the split is the point rather than a concession to testing: **which
+ * storage this runtime has** is {@link resolveParkSeed}'s question, and
+ * **what to do with one** is this function's, and a test can answer the second
+ * honestly without being able to lie about the first.
+ */
+export function parkSeedFor(store: Storage | null): number {
   const remembered = readSeed(store?.getItem(PARK_SEED_KEY));
   // A seed no longer in the pool is one that has been retired — usually
   // because it was found to build a bad park — so it is not honoured. The
@@ -299,7 +319,7 @@ export function resolveParkSeed(): number {
   // A save with no remembered seed is a profile from before the pool existed:
   // the park she has been playing is the canonical one, and every position in
   // her save is measured in it.
-  const fromBeforeThePool = remembered === null && hasSave();
+  const fromBeforeThePool = remembered === null && hasSave(store);
   const seed = fromBeforeThePool ? CANONICAL_PARK_SEED : drawFromPool();
   source = fromBeforeThePool ? 'remembered' : 'drawn';
   try {

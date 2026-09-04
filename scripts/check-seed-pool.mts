@@ -51,12 +51,7 @@ function check(claim: string, ok: boolean, detail: string): void {
   }
 }
 
-// The module reads `localStorage` through `globalThis`, so a store has to be
-// there before anything imports it. Node has none of its own.
-const store = fakeStorage();
-(globalThis as { localStorage?: Storage }).localStorage = store;
-
-const { CANONICAL_PARK_SEED, PARK_SEED_KEY, PARK_SEED_POOL, forgetParkSeed, parkSeedSource, resolveParkSeed } =
+const { CANONICAL_PARK_SEED, PARK_SEED_KEY, PARK_SEED_POOL, forgetParkSeed, parkSeedFor, parkSeedSource, resolveParkSeed } =
   await import('../src/world/parkSeedPool.ts');
 
 console.log(`check:seed-pool: ${PARK_SEED_POOL.length} seed(s) in the pool\n`);
@@ -85,15 +80,49 @@ check(
     'out of the pool, `resolveParkSeed` would move her off her own park on the next load',
 );
 
-// ------------------------------------------------------------ how a seed is got
+// ---------------------------------------------- what Node gets (issue #496)
+//
+// **These are the clauses that were missing, and their absence is the whole of
+// #496.** What stood here was:
+//
+// ```
+// delete (globalThis as { localStorage?: Storage }).localStorage;
+// check('Node, with no storage and nothing pinned, gets the canonical seed', …)
+// ```
+//
+// — which deleted the storage first and so asked about a *hypothetical* Node,
+// not the one every check script actually runs in. Every check script imports
+// `scripts/headless-dom.mjs`, which carries
+// `globalThis.localStorage ??= { getItem: () => null, setItem() {}, … }`; on
+// Node 26 (no `localStorage` of its own, unlike 25) that shim installs, and
+// `resolveParkSeed` fell through to `Math.random()`. Measured before the fix,
+// five consecutive runs of a script importing that harness got `PARK_SEED`
+// 326, 326, 20260728, 274 and 5. The check above was green the whole time,
+// because it had removed the exact condition that caused it.
+//
+// So these ask with a storage **present**, which is the real case.
 
-delete (globalThis as { localStorage?: Storage }).localStorage;
-process.env['LGP_SEED'] = '';
+const shim = fakeStorage();
+(globalThis as { localStorage?: Storage }).localStorage = shim;
+delete process.env['LGP_SEED'];
 check(
-  'Node, with no storage and nothing pinned, gets the canonical seed',
-  resolveParkSeed() === CANONICAL_PARK_SEED,
-  `got ${resolveParkSeed()} — every check script would then measure a park nobody chose`,
+  'Node gets the canonical seed even with a working localStorage in place',
+  resolveParkSeed() === CANONICAL_PARK_SEED && parkSeedSource() === 'remembered',
+  `got ${resolveParkSeed()} (${parkSeedSource()}) with a storage installed — ` +
+    'this is issue #496: every check script would measure a park drawn at random',
 );
+check(
+  'and it did not write a seed into that storage',
+  shim.getItem(PARK_SEED_KEY) === null,
+  `Node remembered ${String(shim.getItem(PARK_SEED_KEY))} — a check script must leave no park behind it`,
+);
+(globalThis as { localStorage?: Storage }).localStorage = fakeStorage({ [PARK_SEED_KEY]: '115' });
+check(
+  'and a seed already sitting in that storage does not steer Node either',
+  resolveParkSeed() === CANONICAL_PARK_SEED,
+  `got ${resolveParkSeed()} — a check script must build the canonical park whatever it finds`,
+);
+(globalThis as { localStorage?: Storage }).localStorage = shim;
 
 process.env['LGP_SEED'] = '424242';
 check(
@@ -103,9 +132,15 @@ check(
 );
 delete process.env['LGP_SEED'];
 
+// ------------------------------------------- what a browser profile gets
+//
+// Driven through `parkSeedFor(store)` rather than by faking a `localStorage`
+// and calling `resolveParkSeed()`, because Node no longer draws whatever is on
+// `globalThis` — see that function's own comment for why the split is the
+// point and not a concession.
+
 const fresh = fakeStorage();
-(globalThis as { localStorage?: Storage }).localStorage = fresh;
-const drawn = resolveParkSeed();
+const drawn = parkSeedFor(fresh);
 check(
   'a brand-new profile draws from the pool, and remembers it',
   PARK_SEED_POOL.includes(drawn) &&
@@ -115,15 +150,16 @@ check(
 );
 check(
   'a reload gets the same park',
-  resolveParkSeed() === drawn && parkSeedSource() === 'remembered',
-  `got ${resolveParkSeed()} (${parkSeedSource()}) where ${drawn} was remembered — ` +
+  parkSeedFor(fresh) === drawn && parkSeedSource() === 'remembered',
+  `got ${parkSeedFor(fresh)} (${parkSeedSource()}) where ${drawn} was remembered — ` +
     'her save, and every position in it, is measured in that one park',
 );
 
+(globalThis as { localStorage?: Storage }).localStorage = fresh;
 forgetParkSeed();
 check(
   'forgetting the seed is what makes the next park a new one',
-  fresh.getItem(PARK_SEED_KEY) === null && PARK_SEED_POOL.includes(resolveParkSeed()),
+  fresh.getItem(PARK_SEED_KEY) === null && PARK_SEED_POOL.includes(parkSeedFor(fresh)),
   `key still reads ${String(fresh.getItem(PARK_SEED_KEY))}`,
 );
 // `main.ts`'s "start again" forgets the seed and reloads, and reloads again
@@ -137,9 +173,7 @@ check(
 
 // A seed is usually retired because it was found to build a bad park, so a
 // profile still holding one must be moved rather than kept on it.
-const retired = fakeStorage({ [PARK_SEED_KEY]: '999999' });
-(globalThis as { localStorage?: Storage }).localStorage = retired;
-const replaced = resolveParkSeed();
+const replaced = parkSeedFor(fakeStorage({ [PARK_SEED_KEY]: '999999' }));
 check(
   'a remembered seed that has left the pool is replaced',
   replaced !== 999999 && PARK_SEED_POOL.includes(replaced),
@@ -150,12 +184,59 @@ check(
 // existed was playing the canonical park, and their saved positions mean
 // nothing anywhere else.
 const { SAVE_KEY } = await import('../src/state/save.ts');
-const preexisting = fakeStorage({ [SAVE_KEY]: '{"v":2}' });
-(globalThis as { localStorage?: Storage }).localStorage = preexisting;
 check(
   'a save from before the pool keeps the canonical park',
-  resolveParkSeed() === CANONICAL_PARK_SEED,
-  `got ${resolveParkSeed()} — every position in that save would land in the wrong park`,
+  parkSeedFor(fakeStorage({ [SAVE_KEY]: '{"v":2}' })) === CANONICAL_PARK_SEED,
+  `got ${parkSeedFor(fakeStorage({ [SAVE_KEY]: '{"v":2}' }))} — ` +
+    'every position in that save would land in the wrong park',
+);
+
+// ------------------------------ the end-to-end clause, in real child processes
+//
+// Everything above is in *this* process, where `headless-dom.mjs` was never
+// loaded and the imports have already happened. The failure in #496 was
+// end-to-end — a whole check script, booted from scratch, getting a different
+// park than the one before it — so this clause boots real ones and compares.
+//
+// It carries its own control: the same comparison is first run over a child
+// that deliberately reports a random pool member, and the check fails if that
+// control does **not** disagree with itself. A repetition test that cannot
+// see a difference would pass this file for ever while every park moved.
+
+const { execFileSync } = await import('node:child_process');
+const RUNS = 6;
+
+function seedsFromChildren(script: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < RUNS; i += 1) {
+    out.push(
+      execFileSync(
+        process.execPath,
+        ['--no-warnings', '--import', './scripts/ts-extension-resolver-register.mjs', script],
+        { encoding: 'utf8', env: { ...process.env, LGP_SEED: '' } },
+      ).trim(),
+    );
+  }
+  return out;
+}
+
+const control = seedsFromChildren('scripts/seed-report-control.mts');
+const real = seedsFromChildren('scripts/seed-report.mts');
+const distinctControl = new Set(control).size;
+const distinctReal = new Set(real).size;
+
+check(
+  `the control disagrees with itself, so this comparison can fail (${distinctControl} distinct in ${RUNS})`,
+  distinctControl > 1,
+  `the deliberately-random child reported ${control.join(', ')} — all the same, so the ` +
+    'clause below proves nothing and the instrument is broken, not the code',
+);
+check(
+  `${RUNS} freshly booted check harnesses all build the same park (${distinctReal} distinct)`,
+  distinctReal === 1 && real[0] === String(CANONICAL_PARK_SEED),
+  `got ${real.join(', ')} — on Node ${process.versions.node}. This is issue #496: ` +
+    'a seeded park that is not the same twice makes every invariant and every ' +
+    'threshold in every check script a coin flip',
 );
 
 // --------------------------------------------------------------------- verdict
