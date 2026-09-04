@@ -102,7 +102,9 @@ async function measureOneSeed(asControl: boolean): Promise<void> {
   const { CAT_BUS_LENGTH, CAT_BUS_WIDTH, CAT_BUS_BODY_BOTTOM_Y, CAT_BUS_BODY_TOP_Y } = await import(
     '../src/world/entrance/catBus.ts'
   );
-  const { POST_FOOT_RADIUS, POST_TOP_RADIUS } = await import('../src/world/railRace/trestleGeometry.ts');
+  // Each trestle mesh's radii are read from its own `CylinderGeometry` rather
+  // than imported and restated — see the sweep below.
+  const { terrainHeight } = await import('../src/world/terrain.ts');
   /**
    * How finely a post is sampled along its own length. Finer than the bus box
    * is deep, so a post cannot pass between two samples of itself.
@@ -140,17 +142,38 @@ async function measureOneSeed(asControl: boolean): Promise<void> {
    * ({@link CAT_BUS_BODY_BOTTOM_Y} to {@link CAT_BUS_BODY_TOP_Y}, asked of the
    * bus rather than restated here) — a post is only a collision where there is
    * bus to collide with, and the parts of it below the chassis or above the
-   * roof are not. The radius tapers with the post, exactly as
-   * `track.ts`'s `addPostCollider` does, because they are two answers to one
-   * question and this is the pair CLAUDE.md warns about keeping in step.
+   * roof are not.
+   *
+   * ## The whole tree, not only the trunk
+   *
+   * This swept `railRace:trestle-legs` **and nothing else** until a reviewer
+   * noticed. A trestle is a trunk that forks twice to reach the four lanes, and
+   * the fork sits at the trunk's *top* — measured at the entrance, **3.00 m
+   * above ground on two of the three rings, against a bus roof at 3.99 m**. So
+   * the branches spread outward through exactly the height band the bus
+   * occupies, and the check that exists to ask "does the bus hit the ride"
+   * could not see them. It did not bite only because the slots beside the road
+   * happened to be empty; the moment a trestle stands there again it would have
+   * reported clean about a bus driving through a fork.
+   *
+   * Every part of the tree is placed by one `strut` helper, so all three meshes
+   * are read the same way — and the **radii are asked of each mesh's own
+   * `CylinderGeometry`** rather than restated here. Three trestle radii written
+   * out in a check is three more copies of a number `trestleGeometry.ts` owns,
+   * which is the bug this whole branch keeps finding.
    */
   const legs: { x: number; z: number; radius: number; up: number; ring: string; post: string }[] = [];
   const matrix = new Matrix4();
   const centre = new Vector3();
   const axis = new Vector3();
+  const TRESTLE_MESHES = [
+    'railRace:trestle-legs',
+    'railRace:trestle-branches-lower',
+    'railRace:trestle-branches-upper',
+  ];
   park.scene.traverse((object) => {
     const mesh = object as InstancedMesh;
-    if (!mesh.isInstancedMesh || mesh.name !== 'railRace:trestle-legs') return;
+    if (!mesh.isInstancedMesh || !TRESTLE_MESHES.includes(mesh.name)) return;
     // Which ring this is matters to a reader: only the walk-past one is the
     // ride a child stands beside, so a post of its in the bus is the visible
     // fault, and the race ring's is the same fault seen mid-ride.
@@ -159,6 +182,15 @@ async function measureOneSeed(asControl: boolean): Promise<void> {
       if (node.name.includes('walk-past')) { ring = 'walk-past'; break; }
       if (node.name.includes('race-ring')) { ring = 'race'; break; }
     }
+    // `strut` stands a unit-height cylinder from `from` to `to`, so the
+    // geometry's own bottom radius is the `from` end and its top radius the
+    // `to` end. Asked of the geometry, never restated.
+    const parameters = (mesh.geometry as unknown as {
+      parameters?: { radiusTop: number; radiusBottom: number };
+    }).parameters;
+    if (!parameters) throw new Error(`${mesh.name} is not a cylinder — its radii cannot be read`);
+    const { radiusTop, radiusBottom } = parameters;
+    const part = mesh.name.replace('railRace:trestle-', '');
     for (let i = 0; i < mesh.count; i += 1) {
       mesh.getMatrixAt(i, matrix);
       centre.setFromMatrixPosition(matrix);
@@ -172,16 +204,25 @@ async function measureOneSeed(asControl: boolean): Promise<void> {
       const footZ = centre.z - axis.z * (length / 2);
       const footY = centre.y - axis.y * (length / 2);
       for (let along = 0; along <= length; along += POST_STEP) {
-        const up = footY + axis.y * along - footY;
+        const x = footX + axis.x * along;
+        const z = footZ + axis.z * along;
+        // **Height above the ground, not above the strut's own start.** A leg
+        // begins on the terrain, so for a leg the two are the same and the
+        // difference never showed. A *branch* begins at the trunk's top, metres
+        // up — measured from its own foot it would read as knee height and be
+        // compared against a bus roof it is nowhere near. The bus's own
+        // `CAT_BUS_BODY_*_Y` are heights above the ground it stands on, so this
+        // has to be too.
+        const up = footY + axis.y * along - terrainHeight(x, z);
         if (up < CAT_BUS_BODY_BOTTOM_Y || up > CAT_BUS_BODY_TOP_Y) continue;
         const t = along / length;
         legs.push({
-          x: footX + axis.x * along,
-          z: footZ + axis.z * along,
-          radius: (POST_FOOT_RADIUS + (POST_TOP_RADIUS - POST_FOOT_RADIUS) * t) * across,
+          x,
+          z,
+          radius: (radiusBottom + (radiusTop - radiusBottom) * t) * across,
           up,
           ring,
-          post: `${ring}:${i}`,
+          post: `${ring}:${part}:${i}`,
         });
       }
     }

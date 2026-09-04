@@ -1478,3 +1478,110 @@ exactly that. It does not bite today because those slots have no trestle at all,
 which is the other bug — but any resolution that puts a trestle back near the
 road needs the check widened to the branches first, or it will report clean
 about a bus driving through a fork.
+
+---
+
+# Session 7 cont.: Jim lifted the wrong ceiling — the binding one is the hill
+
+Jim, 3 September 2026: *"Ride supports on arrival road - move the arrival road a
+few meters further out to avoid them. It doesn't have to hug the park edge."*
+
+Taken literally that is right and it is what I set out to do. Measuring it first
+turned up something he should know before it is built: **"hugging the park edge"
+was never the constraint that pinned the road.** The hillside was.
+
+## What the road has to clear — measured, all sixteen seeds
+
+`scripts/probe-ride-reach.mts` (committed) reads the built park and asks how far
+out any part of a trestle reaches *within the heights the bus body occupies*
+(0.62–3.99 m). Not the trunk alone — the whole tree.
+
+```
+legs            reach outset 7.15-7.16   at 0.70 m up
+branches-lower  reach outset 7.81-8.05   at 3.96-3.99 m up
+branches-upper  nothing in the bus's band near the road
+```
+
+**The binding part is the lower branches, not the legs**, by nearly a metre. A
+trestle forks at the trunk's top and the fork spreads outward through exactly the
+band the bus occupies. Sizing the road off the legs would have put the bus
+through the forks, and the check could not have said so — which is why widening
+it to the branches (done, below) came first.
+
+Worst over the pool: **8.05**. So the road's inner kerb clears the ride at
+centre ≥ **8.05 + `ROAD_HALF_WIDTH` (3.89) = 11.94**, plus a margin.
+
+## And that is where it lands on the side of the hill
+
+The flat apron ends at `RIM_OUTSET_START` = 12; past it the ground falls
+`RIM_DROP` = 17 m by `RIM_OUTSET_END` = 22. Cross-fall across the 7.78 m
+carriageway, computed from those constants:
+
+| road centre | inner kerb | outer kerb | cross-fall |
+|---|---|---|---|
+| 8.26 (today) | 4.37 | 12.15 | **0.01 m** |
+| 10.00 | 6.11 | 13.89 | 1.59 m |
+| 11.00 | 7.11 | 14.89 | 3.44 m |
+| **11.94 (what the ride needs)** | 8.05 | 15.83 | **5.57 m** |
+| 12.40 | 8.51 | 16.29 | 6.70 m |
+
+A 5.6 m fall across a 7.8 m road is a **72% side slope**. The road is drawn by
+draping each vertex on `terrainHeight + 0.06`, so it would be a ribbon with half
+its width on the lawn and half plunging off the crest.
+
+**So the bands still do not intersect, for a different reason than before.** The
+ride needs centre ≥ 11.94; flat ground needs outer kerb ≤ 12, i.e. centre ≤ 8.11
+— which is the *same* 8.11 ceiling as before, and it was never about the park
+edge at all. Moving the road off the wall buys nothing on its own.
+
+## What would actually deliver what he asked for
+
+Give the road ground to stand on: **widen the hilltop's flat apron.**
+`RIM_OUTSET_START` 12 → ~16 (so a 15.83 outer kerb is still flat), with
+`RIM_OUTSET_END` moved with it to keep the crest's steepness (12→22 is a 10 m
+run, so 16→26), and `TERRAIN_APRON` follows as `RIM_OUTSET_END + 1.5` = 27.5.
+
+There is precedent in the constant's own doc comment: the apron was already
+widened once, for exactly this reason — *"the hilltop keeps an apron outside the
+wall wide enough to stand the ride on"*. This is the same move for the road.
+
+**It is a visible change beyond the one he approved**: the crest moves ~4 m
+further out all the way round the park, so the horizon past the wall moves in
+every shot. Knock-ons to work through: the treeline band (`TREELINE_INNER_RADIUS`
+11.5), the ride's documented outer limit 6.92 (derived from `RIM_OUTSET_START`),
+the road's tails (they climb to `TERRAIN_APRON`), a bigger terrain disc,
+`check:coplanar` and the procgen suite.
+
+**Not started.** It needs his yes, because it re-sculpts the hill rather than
+moving a road.
+
+## Done and pushed this round
+
+- Rebased onto `origin/main` (#490, #508 in). `package.json`'s chain conflict
+  resolved by **rebuilding from main's step list** and inserting our own step,
+  never by taking a side: main 59, branch 60, missing `[]`, extra
+  `['check:entrance-road']`. No deletions in the three-dot diff.
+- **`check:entrance-road` sweeps the whole trestle tree**, not just
+  `railRace:trestle-legs` — the reviewer's note, and the measurement above shows
+  it was load-bearing rather than tidy. Two further fixes fell out of it:
+  - each mesh's radii are read from its **own `CylinderGeometry.parameters`**
+    instead of the check restating `POST_FOOT_RADIUS`/`POST_TOP_RADIUS`;
+  - height is measured **above the ground**, not above the strut's own start. A
+    leg begins on the terrain so the two agreed and the bug never showed; a
+    branch begins metres up, and measured from its own foot it would read as
+    knee height against a bus roof it is nowhere near.
+
+## Still open, in order
+
+1. Jim's answer on widening the apron (above).
+2. Then: re-derive `ENTRANCE_ROAD_OUTSET` from the ride's reach rather than the
+   door alone — the floor becomes `max(door floor 8.26, ride reach + ROAD_HALF_WIDTH)`.
+3. `test:procgen` — still red on 5 seeds (61–64 m unsupported ring, duck bars
+   without support). Expected to clear once the road is off the ride, but
+   **prove it, do not assume it**.
+4. Per-seed post-position hashes for the park-change report:
+   `scripts/probe-trestle-move.mts`, baseline captured this session.
+5. `frustumBase()` is **private** in `IsoCamera.ts` — `roadRoute.ts:81`'s claim
+   that `check-entrance-road.mts` calls it is false twice over. Wiring it up needs
+   a public way to ask the ground reach at an aspect, not just an import.
+6. The four stale-text items.
