@@ -941,8 +941,16 @@ export class NpcSystem implements GameSystem {
 
     this.updatePets(dt, elapsed);
     this.updatePinnedPets(dt, elapsed);
-    this.updateLabels();
+    // **Bubbles first, and the order is load-bearing.** `updateLabels` hides a
+    // child's name pill for a bubble that is *drawn*, which is a fact only
+    // `updateBubbles` knows — `SpeechBubble.updateScreenSize` is what settles
+    // `sprite.visible`, after its own distance and on-screen gates. Stepping
+    // labels first would hand `updateLabels` **last** frame's flag, so on the
+    // frame a bubble appears the pill would still be up underneath it, which is
+    // issue #486 back again for one frame in every sentence. See
+    // {@link updateLabels}.
     this.updateBubbles();
+    this.updateLabels();
   }
 
   /**
@@ -1193,14 +1201,25 @@ export class NpcSystem implements GameSystem {
   /**
    * What child `i` is saying this frame, or `null` if she is not talking.
    *
-   * **The single owner of "is this child speaking".** Her name pill and her
-   * speech bubble both hang off this one getter — the bubble draws the text,
-   * the label hides itself while there is text — so the two cannot disagree
-   * about whether she is mid-sentence. Issue #486 is what happens when they
-   * do: the bubble was drawn straight over the pill and neither could be
-   * read. Two places each deciding their own visibility and being kept in
-   * step by hand is this repo's most-cited bug class; there is one decision
-   * here and both readers ask it.
+   * **The single owner of "is this child speaking".** It is what
+   * {@link updateBubbles} draws, and — one step further along the chain —
+   * what {@link updateLabels} ends up hiding her name pill for. Two places
+   * each deciding their own visibility and being kept in step by hand is this
+   * repo's most-cited bug class; there is one decision here.
+   *
+   * **What the pill is gated on is not this, and the difference is #486's
+   * second round.** The pill was first hidden on *text existing*, which is
+   * this getter — but the overlap it is avoiding is caused by a bubble being
+   * **drawn**, and `SpeechBubble.updateScreenSize` draws one only when the
+   * speaker is within `BUBBLE_MAX_DISTANCE` (40 m) **and** on screen (#415).
+   * Between the two conditions sat a real, player-visible window: a child
+   * mid-word whose bubble was gated off lost her name with nothing in its
+   * place. Measured on the canonical seed at 1920x1080 over 420 s: **96
+   * frames**, e.g. Wren at `(-0.45, 3.91, 43.27)`, 8.8 m from the camera's
+   * focus, body plainly on screen and her head-anchor just past the top edge.
+   * So {@link updateLabels} now asks the bubble's own `sprite.visible` — the
+   * two conditions are literally the same expression, and the window is
+   * closed by construction rather than by nobody having stood there yet.
    *
    * The state itself lives further in still — `WanderDriver.chatBubbleText`
    * is a pure getter over `ChatToPlayer`'s state machine and `Journey`'s
@@ -1222,7 +1241,31 @@ export class NpcSystem implements GameSystem {
    * not charm. `labelOrder` is sorted in place every frame rather than
    * rebuilt, so this allocates nothing per frame beyond the sort itself.
    *
-   * A child mid-sentence shows no pill at all — see {@link speechTextOf}.
+   * **A child with a speech bubble drawn over her head shows no name pill**
+   * (issue #486, Jim: *"when children talk, the speech bubble overlaps the
+   * name over their head - instead, hide their name while they are talking"*).
+   * The two are drawn in the same square of air over the same head.
+   *
+   * The gate is `bubble.sprite.visible` — *is a bubble actually being drawn* —
+   * and **not** {@link speechTextOf}, which is only *is there text*. Those
+   * come apart wherever `SpeechBubble.updateScreenSize` declines to draw:
+   * past `BUBBLE_MAX_DISTANCE` (40 m, against this class's 46 m for a pill),
+   * and at any distance for a speaker the camera cannot see (#415). Gating on
+   * the text alone cost a visible child her name with nothing in its place —
+   * see {@link speechTextOf} for the measurement. Reading the flag makes the
+   * pill's condition and the bubble's the same expression, so there is nothing
+   * left to keep in step.
+   *
+   * **That flag is this frame's only because `updateBubbles` runs first** —
+   * see the call site in `update`. Swap the two back and the pill is decided
+   * from last frame's bubble, which puts #486 back for the first frame of
+   * every sentence. `check:speech-bubbles` assertion 4a is what notices.
+   *
+   * A talking child still takes a {@link VISIBLE_LABEL_CAP} slot rather than
+   * yielding it to the eleventh-nearest child, and that is deliberate: the cap
+   * exists to bound how much floats over the crowd's heads at once, and she is
+   * floating a bubble in that slot. Promoting somebody else would mean *more*
+   * on screen while she talks, not the same.
    */
   private updateLabels(): void {
     const camera = this.camera;
@@ -1243,7 +1286,7 @@ export class NpcSystem implements GameSystem {
       const label = this.labels[i];
       if (!character || !label) continue;
 
-      if (rank >= VISIBLE_LABEL_CAP || this.speechTextOf(i) !== null) {
+      if (rank >= VISIBLE_LABEL_CAP || this.bubbles[i]?.sprite.visible === true) {
         label.sprite.visible = false;
         continue;
       }
