@@ -189,7 +189,20 @@ const WARPS_BY_SEED: Readonly<Record<number, WarpVector>> = {
   // either, so nothing in the blocking chain could see this (issue #510).
   // Control run first and passed; SOLVED after 16 candidates, stranded=0,
   // oracle=pass. (measurements/warp-search-post-rebase-24-428.jsonl.)
-  428: { layout: { fountain: 2 } },
+  // Candidate 26, not candidate 16. {fountain:2} was the first vector to score
+  // 0 on check:park and it stood the fountain's own cylinder flush with the
+  // paving — 'garden|fountain/<Mesh:CylinderGeometry>|garden/path-surface',
+  // 0.051 m² at a 5.0 mm stand-off, NEW to check:coplanar. That is #437's
+  // shape and the canonical seed's story repeated: a gate outside the
+  // acceptance loop finds the winner afterwards. Re-searched with
+  // check:coplanar INSIDE the loop (control on that gate first: it flagged
+  // exactly the one known-bad key out of 34).
+  //
+  // Worth knowing for the next search: candidate 21, {hotel:2}, also scores 0
+  // on check:park and brings TEN new seams — the rail race's rainbow arch legs
+  // sharing planes with each other. A vector can be structurally fine and
+  // visually wrong, and only the third gate says so.
+  428: { layout: { 'stall.dodgems': 2 } },
 };
 
 function envWarp(): WarpVector | null {
