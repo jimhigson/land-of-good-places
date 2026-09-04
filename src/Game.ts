@@ -49,6 +49,7 @@ import { createRideHud, type RideHud } from './minigames/ferrisWheel/hud';
 import { Shopping } from './Shopping';
 import { SaveSystem } from './SaveSystem';
 import { gameStore, type CharacterCreationChoice } from './state';
+import { shopItem } from './world/building/shops/catalogue';
 import type { SavedPlace } from './state/save';
 import { localToWorld, SPACE_GARDEN } from './world/spaces';
 import { OverlayPause } from './core/overlayPause';
@@ -926,6 +927,26 @@ export class Game {
       if (stallId === 'ginormousSlide') return this.world.building.requestBoardSlide(false);
       if (stallId === 'ginormousSlideWithGrownUp') {
         return this.world.building.requestBoardSlide(true);
+      }
+      // The same ride with **three companions already caught**, for #507. The
+      // pets coming down the chute behind her are the whole of that fix, and a
+      // fresh profile owns no animals — so without this the deep link lands on
+      // a child sliding alone and there is nothing to look at. Granted through
+      // `catchWildPet`, the roof garden's own route into the parade, so what
+      // rides down is a real parade rather than a stand-in; three species,
+      // matching the three `check:pet-slide` measures the descent with.
+      if (stallId === 'ginormousSlideWithPets') {
+        // Idempotent by hand: `catchWildPet` is `grantFree`, not
+        // `grantFreeOnce`, so pasting the link twice would otherwise leave her
+        // trailing six animals — the exact "five identical pets" fault
+        // `grantFreeOnce` exists to prevent, one caller over.
+        const owned = new Set(gameStore.get().inventory.map((item) => item.id));
+        for (const id of ['pet.kitten', 'pet.bunny', 'pet.mouse']) {
+          if (owned.has(id)) continue;
+          const spec = shopItem(id);
+          if (spec) gameStore.catchWildPet(spec);
+        }
+        return this.world.building.requestBoardSlide(false);
       }
       // Not a ride: the hotel's front door, for its deep link.
       if (stallId === 'hotelLobby') return this.world.hotel.requestEnterLobby();
