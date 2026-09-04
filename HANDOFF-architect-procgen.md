@@ -41,12 +41,15 @@ by permissions, merge used instead). Design-doc-only branch; no code.
 
 ## Standing judgements to carry
 
-- **#501's escalated decision** (their handoff, "OPEN"): they recommend
-  swapping seed 5 out of the pool now, re-route ticket later. Architect's
-  view, reported to the coordinator: the "re-route ticket" should be framed
-  as the slide's migration onto claims (a stage-4/5 item of this design),
-  not a bespoke `slide/solve.ts` edit — otherwise it is one more rescue
-  ladder of the kind the doc's "why it keeps dying" section predicts.
+- **#501 — RULED by the Overseer, 3 Sep** (both per this architect's
+  proposal): (5) seed 5 is swapped out of the pool now, by the documented
+  process in `parkSeedPool.ts` — vet, replace, record date and commit.
+  (4) the slide's re-route is **the slide's migration onto claims**, a
+  stage-4/5 item of this design; no bespoke `slide/solve.ts` rescue ladder,
+  and **no engineer is pointed at it until the stage lands.**
+- Jim has said this workstream is uniquely this agent's, to stay on until
+  done. Current work: the stage-3 spec — confronting the import ladder for
+  the entrance-road + rail-race-trestles pair.
 - Stage 3 remains: migrate the entrance road + rail-race trestles pair, and
   **confront the import ladder** (see `parkGeneration.ts`'s module header —
   the ladder, not the deps, serialises today; four of six deps measured
