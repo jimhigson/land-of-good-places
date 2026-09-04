@@ -594,6 +594,51 @@ random-seed sweep** (new seeds every night — totality means never being
 attached to any of them), and add the one new meta-invariant: *any seed
 builds within budget*.
 
+#### The migration checklist (3 Sep) — every private obstacle list, named
+
+Compiled by sweeping `src/world` for placement-time obstacle queries
+(`isOnPath`, `distanceToPath`, `clearOfCruiser`, `distanceToRailCorridor`,
+`isClearCircle`, `insideCastle`, hand-rolled `boundingRadius +` plot
+arithmetic). Each row is one ticket; a ticket's definition of done is
+**the private list deleted, claims published, and the universal invariant
+green pool-wide for that placer** — plus, per the two-definitions variant
+below, the claim describing the *drawn* geometry.
+
+Not stage 5 (listed so nobody re-files them here): paths/railway/crossings
+and every shared-generator route (slide, rail race ring, train, cruiser)
+are **stage 4**; the entrance road and rail-race trestles are **stage 3**.
+
+| placer | module(s) | what it privately names today | claims when migrated |
+|---|---|---|---|
+| slide legs | `slide/supports.ts` | castle, cruiser column, `isClear`, paths, plots — **not the railway** (#501, ruled: fixed by the slide's stage-4 migration, not a ticket here) | footprint per leg, serving the chute's support demands |
+| flowers | `Flowers.ts` | paths + cruiser **only** (#503 — misses walls, rail, everything else; "the same disease one step smaller") | footprint per clump (or per scatter batch) |
+| bushes | `Scenery.ts` | asks the world since #500 — the transitional pattern, better than a list, still not claims; **and publishes a 0.85 m footprint for a 2.15 m drawn reach (#504)** | footprint at `BUSH_REACH` for overlap; collider stays 0.85 m (see the variant note below) |
+| trees | `Scenery.ts` / `treeModel.ts` | plantability + hand-picked clearances | footprint; **movable** — the felling precedent becomes rung-2 negotiation |
+| lamp posts | `LampPosts.ts` | paths + hand-picked clearances | footprint per post + serving the "every path lit" demand |
+| plots | `parkLayout.ts` | `PARK_LAYOUT` circles, re-derived by hand in every consumer (`boundingRadius + x` arithmetic in slide, flowers, coaster…) | footprint per plot; consumers stop doing plot arithmetic at all |
+| garden walls | `Garden.ts` / `Scenery.ts` | paths, plots | corridor-like footprint runs with declared gateways |
+| lineside fence | `train/fence.ts` | derived from the railway after the fact | by-product claims laid **with** the railway's sections (Jim's extra-geometry ruling) |
+| boundary + gate | `boundary.ts` / `entrance/*` | its own spline; the gate opening owns `isInEntranceGateOpening` | footprint ring + walkable-must-remain at the opening |
+| attached decorations | `FairyLights.ts`, `TreeLights.ts`, `Fireflies.ts` | none — they dress an owner's geometry | probably **exempt** (no ground of their own); each ticket's first job is to verify that and write it down, not assume it |
+
+**The #504 variant, binding on every row:** a private obstacle list is one
+face of the disease; **a claim that understates the drawn geometry is the
+other**, and it survives migration if nobody looks. A bush that claims
+0.85 m of a 2.15 m drawn clump has migrated its collider, not its
+footprint — the universal invariant reads the built park and will still
+miss nothing *only if* the claim kinds let it: the **footprint claim
+describes what is drawn** (one owner — `BUSH_REACH`, not a copy), while
+the runtime collider stays its own size for walkability. Reconciling by
+widening the collider is explicitly refused in #504: solidity and overlap
+are different questions, and the claim kinds exist so they can differ
+without lying.
+
+**Order within stage 5**: plots first (every other row's private arithmetic
+names them, so their claims unblock the most deletions), then the scatter
+placers (flowers, bushes, trees — cheap, independent, and #503/#504 are
+already filed), then walls/fence/boundary. The attached decorations go
+last and are expected to be verifications, not migrations.
+
 ### Fleet discipline
 
 The `feat/grid-paths` handoff's warning, adopted as a rule of this plan: *"a
