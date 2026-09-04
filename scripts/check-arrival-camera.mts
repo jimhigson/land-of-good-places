@@ -141,6 +141,7 @@ import { angleDelta, DEG } from '../src/core/mathUtils.ts';
 import {
   ARRIVAL_CONTROL_AT,
   ARRIVAL_DOOR_FOCUS_LIFT,
+  ARRIVAL_DOOR_ZOOM,
   ARRIVAL_RISE_TAIL,
   AT_SHOT_HOME,
   arrivalShot,
@@ -707,27 +708,53 @@ console.log("the door shot is taken at a child's own face height, looking level"
   // empty frame is acceptable is a composition question and Jim's alone. What
   // this file can do is stop the number being invisible, since it is the whole
   // subject of the round that produced it.
-  let tightest = 0;
+  //
+  // **Swept over the whole level stretch of the shot, not just its tightest
+  // frame** — and that is not a refinement, it is where the number actually
+  // lives. The tilt reaches zero at `AT_STOPPED` but the framing does not push
+  // in until `AT_WALKING`, so for the 1.8 s between them the shot is level at
+  // the *wide* zoom, and a wider frame has a taller half-height and therefore a
+  // bigger empty band. Measured at the door beat alone this reads 28.3%; the
+  // worst frame in the shot is far worse, and it is the one most likely to be
+  // read as broken. Found by watching, not by arithmetic.
+  const LEVEL_ENOUGH_DEGREES = 2;
+  let worstBand = -Infinity;
+  let worstFrame = 0;
+  let worstAt = 0;
+  let doorBeatFrame = 0;
   for (let t = 0; t < AT_SHOT_HOME; t += STEP) {
     const shot = arrivalShot(t, PASS);
-    if (shot?.watchesTheDoor) tightest = Math.max(tightest, shot.zoom);
+    // Only while the view is level. At any real tilt the ground fills the lower
+    // frame in the ordinary way and there is no band to measure.
+    if (!shot || Math.abs(shot.pitchDegrees) > LEVEL_ENOUGH_DEGREES) continue;
+    const height = frameHeightAt(shot.zoom);
+    // The *tightest* level frame, which is where the band is smallest — the
+    // other end of the same range, so the pair brackets what is on screen
+    // rather than quoting one end twice.
+    if (height < doorBeatFrame || doorBeatFrame === 0) doorBeatFrame = height;
+    if (height / 2 - ARRIVAL_DOOR_FOCUS_LIFT > worstBand) {
+      worstBand = height / 2 - ARRIVAL_DOOR_FOCUS_LIFT;
+      worstFrame = height;
+      worstAt = t;
+    }
   }
-  const wide = frameHeightAt(tightest);
-  const portrait = frameHeightAt(tightest, 390 / 844);
   const band = (height: number): string =>
     `${show(height / 2 - ARRIVAL_DOOR_FOCUS_LIFT)} m of a ${show(height)} m frame ` +
     `(${(((height / 2 - ARRIVAL_DOOR_FOCUS_LIFT) / height) * 100).toFixed(1)}%)`;
   process.stderr.write(
-    'MEASURED, NOT ASSERTED — the empty band under the ground line in the door beat. ' +
-      'A purely horizontal orthographic camera sees the ground edge-on, so it projects to a ' +
-      'LINE at the eye height and the frame below it is empty sky:\n' +
-      `    16:10  ${band(wide)}\n` +
-      `    390x844 portrait  ${band(portrait)}\n` +
-      `    it would close only at an eye height of ${show(wide / 2)} m — above a child's head, ` +
-      'not at her face.\n' +
-      '    Raising the eye shrinks it and tilting the camera down would close it, but the ' +
-      'tilt is the sign-across-her fault Jim has ruled out twice. Whether what is left ' +
-      'reads as a look or as a bug is his call, from a rendered frame.\n',
+    'MEASURED, NOT ASSERTED — the empty band under the ground line. A purely horizontal ' +
+      'orthographic camera sees the ground edge-on, so it projects to a LINE at the eye ' +
+      'height and the frame below it is empty sky. On 16:10:\n' +
+      `    worst frame in the shot, at t=${worstAt.toFixed(2)}s:  ${band(worstFrame)}\n` +
+      `    tightest level frame (the door beat's own):  ${band(doorBeatFrame)}\n` +
+      `    390x844 portrait, door beat:  ${band(frameHeightAt(ARRIVAL_DOOR_ZOOM, 390 / 844))}\n` +
+      `    the band is frameHeight/2 - eyeHeight, so it closes only at an eye of ` +
+      `${show(worstFrame / 2)} m at the worst frame — well above a child's head, not at her ` +
+      'face. RAISING the eye shrinks it; the worst frame is wide-and-level, between the ' +
+      'tilt reaching zero and the framing pushing in.\n' +
+      '    Tilting the camera down would close it and is NOT available: that is the ' +
+      'sign-across-her composition Jim has ruled out twice, and clause 9 above fails on it. ' +
+      'Whether what is left reads as a look or as a bug is his call, from a rendered frame.\n',
   );
 }
 
