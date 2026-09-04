@@ -84,6 +84,28 @@ one.
 A, first 2 of 20: exit 0, 675 frames, verdict-line md5 identical
 (`9992a824…`).
 
+A, first 4 of 20: exit 0, 675 frames, verdict md5 `9992a824…` — 4/4 identical.
+
+## The one change this branch makes
+
+`scripts/check-pet-slide.mts` now prints the park seed and its source, on the
+opening line **and** on the `FAILED` line. Print-only — two `console` calls and
+two imports of modules `World` already pulls in transitively.
+
+Why it is worth a commit: every clause in that file is a statement about one
+generated park, and its output never said which. That is the whole reason
+tonight's report was ambiguous, why #507's two genuinely-red seeds were first
+read as flakiness, and why two agents in a row had to infer the park from
+ridden-frame counts. A red log gets quoted into an issue; quoted without its
+seed it reads as a flake rather than a finding.
+
+**Caveat, stated because it would otherwise be hidden:** this edit landed
+between run 4 and run 5 of measurement A, in the same worktree A runs from. It
+cannot move the simulation, and the pass verdict line it is compared on is
+untouched, so the md5 comparison spans the edit intact. Runs 5+ additionally
+carry the new seed line, which is stronger evidence than runs 1–4 had.
+
 ## Status
 
-Both loops running. Nothing to fix on `main` so far.
+Both loops running; seed-346 reproduction and `tsc --noEmit` queued behind
+them. Nothing to fix on `main` so far — the flake does not reproduce there.
