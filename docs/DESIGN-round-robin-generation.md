@@ -219,8 +219,33 @@ This is #317/#319 again — a generator committing before the thing that
 constrains it exists — with one twist that earns it its own section: the
 colliding parties are **the same feature**. The route and its legs are one
 placer's two halves, and today's shape lets the first half freeze before the
-second half has asked its first question. Two design consequences, both
-binding on the migration stages:
+second half has asked its first question.
+
+**Jim's ruling, 3 September 2026, verbatim — this is the specification, and
+it stands alongside his unwind ruling above:**
+
+> *"Any collisions caused by a step in the gen should count. The supports
+> should be added as and when the section of slide are added, not after
+> slide generation. Same applies to all extra geometry associated with a
+> feature."*
+
+Three things that settles:
+
+- **Granularity.** Supports are claimed **section by section, as each
+  section of chute is laid** — never for a finished route. A section that
+  cannot be held up is refused while only that section is committed, not
+  after 83 m of route has been decided.
+- **Scope.** Not a slide rule: **all extra geometry associated with a
+  feature** — trestles, pylons, footings, anything a feature grows to hold
+  itself up or dress itself — is claimed with the step that creates the
+  need for it.
+- **By-products are real.** "Any collisions caused by a step in the gen
+  should count" is the ask-the-world rule applied to a feature's own
+  by-products: a leg is as real as a wall the moment it exists, and every
+  placer downstream — including its own feature's later steps — must see
+  it.
+
+Two design consequences, both binding on the migration stages:
 
 - **A feature's derived placements are claims like any other, made
   interleaved with the parent decision, in the parent's own turns.** The

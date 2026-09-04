@@ -48,8 +48,25 @@ by permissions, merge used instead). Design-doc-only branch; no code.
   stage-4/5 item of this design; no bespoke `slide/solve.ts` rescue ladder,
   and **no engineer is pointed at it until the stage lands.**
 - Jim has said this workstream is uniquely this agent's, to stay on until
-  done. Current work: the stage-3 spec — confronting the import ladder for
-  the entrance-road + rail-race-trestles pair.
+  done.
+
+## Checkpoint — stage 3 specified (3 Sep, in the design doc)
+
+"Stage 3, specified" section added: today's commit points read from merged
+code (`RAIL_RACE_PLAN` at module load of an ungated ladder rung; legs at
+`RailRace` construction; PR #498's fix is a *named* road-corridor clause in
+`railRace/track.ts` — itself the seam stage 3 deletes). Four migration
+steps, each a small PR: road becomes a corridor-claiming placer (prewarm
+pattern), trestles become footprint-claiming, then confront the ladder
+(eager/data-gated module loading; re-run the #499 perturbation experiment
+to prove deps went load-bearing), then cross-feature negotiation. Named
+substreams must land WITH the ladder step, not after. Acceptance: universal
+invariant green pool-wide with the named clause deleted; #498's swept-bus
+control stays armed as the independent instrument; zero new code covers the
+next neighbour. Sequencing: PR #498 lands first, do not race it.
+
+Next: propose the stage-3 step-1 engineering brief to the coordinator once
+PR #498 merges (implementation changes shipped behaviour → proposal first).
 - Stage 3 remains: migrate the entrance road + rail-race trestles pair, and
   **confront the import ladder** (see `parkGeneration.ts`'s module header —
   the ladder, not the deps, serialises today; four of six deps measured
