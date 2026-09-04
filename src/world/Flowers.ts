@@ -19,6 +19,12 @@ import { terrainHeight } from './terrain';
 import { isOnPath } from './pathGraph';
 import { clearOfCruiser, clearOfRailway } from './Scenery';
 import type { CollisionWorld } from './Collision';
+import {
+  LARGE_HEAD_SCALE,
+  LARGE_STEM_SCALE,
+  TALLEST_FLOWER,
+  WIDEST_FLOWER,
+} from './flowerDimensions';
 import { ANCHORS } from './anchors';
 import { pressZone, type InteractZone } from './interact';
 import { highlightInstance } from './highlight';
@@ -128,30 +134,21 @@ const LARGE_SHARE = 0.1;
 const SIZE_SEED = 0x1a3e07;
 
 /**
- * Size multipliers for a large flower, over the small model's targets.
+ * The meadow's own dimensions live in `./flowerDimensions`, which imports
+ * nothing — so `test/procgen` and the check scripts can ask how wide a
+ * flower is without dragging this module (and `Scenery`, and the park) in
+ * behind it. See that file's header for the bug that put them there.
  *
- * The stem grows rather more than the bloom does (2.9× against 2×), which is
- * what turns the small flower's ground-hugging blob into something that reads
- * as *a stem with a flower on top* rather than just a bigger blob.
+ * They exist for one reason beyond the modelling: to ask {@link
+ * clearOfCruiser} whether the Sky Cruiser's car passes low over a spot before
+ * a flower is planted there, and now {@link clearOfRailway} and the collision
+ * world the same question. Every other scattered thing in the park already
+ * asked them — trees, bushes, hiding walls, lamp posts — and the meadow was
+ * the one population that never did. Measured on seed 11: the car flies
+ * through `living-flower-heads` at 4.0 m along its loop, world
+ * (-57.51, 0.70, -20.16), the ride's own station approach where the profile
+ * is barely off the grass.
  */
-const LARGE_STEM_SCALE = 2.9;
-const LARGE_HEAD_SCALE = 2.0;
-
-/**
- * The tallest and widest a flower can ever grow, derived from the same two
- * ranges {@link spawnAt} draws its targets from and the same wiggle flare the
- * update applies — never restated, so a retune of either moves this with it.
- *
- * These exist for one reason: to ask {@link clearOfCruiser} whether the Sky
- * Cruiser's car passes low over a spot before a flower is planted there. Every
- * other scattered thing in the park already asks it — trees, bushes, hiding
- * walls, lamp posts — and the meadow was the one population that never did.
- * Measured on seed 11: the car flies through `living-flower-heads` at 4.0 m
- * along its loop, world (-57.51, 0.70, -20.16), which is the ride's own
- * station approach where the profile is barely off the grass.
- */
-const TALLEST_FLOWER = 0.32 * LARGE_STEM_SCALE + 0.27 * LARGE_HEAD_SCALE * 1.18;
-const WIDEST_FLOWER = 0.27 * LARGE_HEAD_SCALE * 1.18;
 /** How much wider a large flower's stalk is. A tall stem on a hair needs it. */
 const LARGE_STALK_WIDTH = 2.1;
 

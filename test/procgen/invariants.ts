@@ -50,6 +50,7 @@
  */
 import { describe, it, beforeAll, expect } from 'vitest';
 import { Box3, InstancedMesh, Matrix4, Mesh, Raycaster, Vector3, type Object3D } from 'three';
+import { WIDEST_FLOWER } from '../../src/world/flowerDimensions.ts';
 import {
   buildParkFacts,
   segmentDistance,
@@ -3694,31 +3695,30 @@ const trainClearsEveryPlotAndStall: Invariant = (facts) => {
  *
  * Measured on the **built meadow** — the world-space instance positions of the
  * `living-flower-stems` `InstancedMesh` as the renderer is handed them — not on
- * the scatter's own rules, which is what let the gap exist unseen. The
- * threshold is the game's: `TRACK_CLEARANCE`, the train's own half-width, the
- * same number the three invariants above hold walls, trees and plots to, plus
- * the flower's own reach so the question is asked in the units a collision
- * would happen in. `Scenery.onRailway`'s 2.6 m fence margin is the generator's
- * target and is deliberately **not** the number here.
+ * the scatter's own rules, which is what let the gap exist unseen. Both numbers
+ * in the threshold are owned elsewhere and imported, never restated here:
+ * `TRACK_CLEARANCE`, the train's own half-width, the same figure the three
+ * invariants above hold walls, trees and plots to; and `WIDEST_FLOWER` from
+ * `world/flowerDimensions.ts`, the bloom's horizontal half-extent, so the
+ * question is asked in the units a collision would happen in.
+ * `Scenery.onRailway`'s 2.6 m fence margin is the generator's target and is
+ * deliberately **not** the number here.
+ *
+ * The reach used to be read off the stem's *unscaled unit* geometry's bounding
+ * sphere — 0.5008 m, dominated by the cylinder's half-height rather than any
+ * horizontal extent, under a comment claiming it was `WIDEST_FLOWER`
+ * restated. It was 13.6 cm short of it and would have doubled if anyone
+ * changed the unit height and compensated in the instance scale. See
+ * `flowerDimensions.ts`'s header.
  */
 const flowersClearTheRailway: Invariant = (facts) => {
   const fouls: string[] = [];
   const matrix = new Matrix4();
   const at = new Vector3();
-  /**
-   * The widest a flower's own bloom reaches from its stem, in metres —
-   * `Flowers.WIDEST_FLOWER`'s value restated as a *measurement of the built
-   * mesh* rather than imported, because importing `world/Flowers.ts` here would
-   * load a seed-dependent module into `test/` before the seed is set (see this
-   * file's own header). Read off the stems mesh's bounding sphere below.
-   */
-  let reach = 0;
   let measured = 0;
   facts.world.flowers.group.updateMatrixWorld(true);
   facts.world.flowers.group.traverse((object) => {
     if (!(object instanceof InstancedMesh) || object.name !== 'living-flower-stems') return;
-    object.geometry.computeBoundingSphere();
-    reach = object.geometry.boundingSphere?.radius ?? 0;
     for (let index = 0; index < object.count; index += 1) {
       object.getMatrixAt(index, matrix);
       at.setFromMatrixPosition(matrix).applyMatrix4(object.matrixWorld);
@@ -3726,11 +3726,12 @@ const flowersClearTheRailway: Invariant = (facts) => {
       // standing anywhere yet and is not a finding.
       if (matrix.getMaxScaleOnAxis() <= 0) continue;
       measured += 1;
-      const gap = facts.distanceToRail(at.x, at.z) - reach;
+      const gap = facts.distanceToRail(at.x, at.z) - WIDEST_FLOWER;
       if (gap < TRACK_CLEARANCE) {
         fouls.push(
           `flower at ${fmt([at.x, at.z])} reaches to ${gap.toFixed(2)} m of the rail centre ` +
-            `line (needs ${TRACK_CLEARANCE} m) — it is growing on the track`,
+            `line (needs ${TRACK_CLEARANCE} m, plus its own ${WIDEST_FLOWER.toFixed(2)} m bloom) ` +
+            `— it is growing on the track`,
         );
       }
     }
