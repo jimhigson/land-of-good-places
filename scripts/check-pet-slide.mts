@@ -530,6 +530,60 @@ async function ride(wired: boolean): Promise<RunResult> {
     return { child, pets: counts, total: RASTER_W * RASTER_H };
   }
 
+  /**
+   * **Why a companion is not in the shot** — diagnosis only, never an
+   * assertion, and printed only under `LGP_SHOT_DEBUG=1`.
+   *
+   * {@link raster} counts rays that *land on* a pet. A pet hidden behind the
+   * trough wall and a pet outside the frustum both land zero, so `in shot`
+   * reports the same 0% for two unrelated faults: a framing bug, which is about
+   * where the lens points, and an occlusion bug, which is about the chute being
+   * between the child and her own pet. Telling them apart needs a second
+   * question — where is it, and what does the camera meet on the way — which is
+   * what this asks.
+   */
+  function shotDiagnosis(
+    camera: unknown,
+    pet: { readonly displayName: string; readonly root: unknown },
+    childRoot: unknown,
+  ): string {
+    const centre = new Vector3();
+    new Box3().setFromObject(pet.root as never).getCenter(centre);
+    const ndc = centre.clone().project(camera as never);
+    const across = Math.abs(ndc.x) <= 1;
+    const down = Math.abs(ndc.y) <= 1;
+    const infront = ndc.z >= -1 && ndc.z <= 1;
+
+    // **Only ask what the camera meets if the camera can see there at all.**
+    // `setFromCamera` happily builds a ray for |ndc| > 1 by extrapolating past
+    // the frustum, and that ray hits the pet perfectly well — so an unguarded
+    // version of this prints "camera meets the pet itself" about a pet that is
+    // nowhere in the picture. That is the same fault this helper exists to
+    // expose, committed by the helper: one string for two different worlds.
+    let meets = 'n/a — outside the frustum, so there is no ray to follow';
+    if (across && down && infront) {
+      const caster = new Raycaster();
+      caster.setFromCamera({ x: ndc.x, y: ndc.y } as never, camera as never);
+      const hit = caster.intersectObjects(
+        [slide.group, building.gardenRoot, childRoot, parade.group] as never[],
+        true,
+      )[0];
+      meets = 'nothing';
+      if (hit) {
+        if (isDescendantOf(hit.object, pet.root)) meets = 'the pet itself';
+        else if (isDescendantOf(hit.object, childRoot)) meets = 'the child';
+        else if (isDescendantOf(hit.object, slide.group)) meets = 'the SLIDE — OCCLUDED';
+        else if (isDescendantOf(hit.object, building.gardenRoot)) meets = 'the garden — OCCLUDED';
+        else meets = 'another companion';
+      }
+    }
+    return (
+      `${pet.displayName} ndc(${ndc.x.toFixed(2)},${ndc.y.toFixed(2)},${ndc.z.toFixed(2)}) ` +
+      `${across ? '' : 'OFF-SIDE '}${down ? '' : 'OFF-TOP/BOTTOM '}${infront ? '' : 'BEHIND-LENS '}` +
+      `→ camera meets ${meets}`
+    );
+  }
+
   const previous = new Map<string, Vector3>();
   let rasters = 0;
   let childHiddenSamples = 0;
@@ -800,6 +854,19 @@ async function ride(wired: boolean): Promise<RunResult> {
         const shot = raster(liveCamera, player.model.root, bodies);
         rasters += 1;
         const nearestShare = (shot.pets[0]?.[1] ?? 0) / shot.total;
+        // **Why is it not in the shot?** `LGP_SHOT_DEBUG=1` only. The raster
+        // counts a pet hidden behind the trough wall and a pet outside the
+        // frustum identically, at 0 px, and those are different bugs with
+        // different fixes — see `shotDiagnosis`.
+        if (process.env['LGP_SHOT_DEBUG'] === '1') {
+          const nearest = bodies[0];
+          process.stderr.write(
+            `    raster ${rasters} ridden frame ${ridingFrames}: nearest ` +
+              `${(nearestShare * 100).toFixed(1)}% — ` +
+              (nearest ? shotDiagnosis(liveCamera, nearest, player.model.root) : 'no companion') +
+              '\n',
+          );
+        }
         if (nearestShare >= PET_FRAME_FLOOR) framedFrames += 1;
         if (nearestShare < smallestNearest) smallestNearest = nearestShare;
         if (shot.child === 0) {
