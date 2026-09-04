@@ -589,3 +589,66 @@ Rounds four and five are a **correct fix to the model** sitting under an
 **incorrect composition**. The composition must be solved by moving the
 subject, not the bearing and not the stand-back. Nothing here should go to Jim
 until that is built and watched.
+
+---
+
+# Round seven — horizontal. Jim's fix works; it exposes the next thing
+
+**Model: Opus (`claude-opus-5[1m]`).** Watched at the door beat, t = 4.30 s,
+the same instant that was wrong in round six. Screenshot
+`pr491-horizontal-door-beat.png` on `qa-screenshots`
+(`e3855a9699470ad8aa1e64323318ad95f69295c7`).
+
+Jim: *"The camera can just be lower there. It should be looking purely
+horizontally."* `ARRIVAL_DOOR_PITCH_DEGREES` 24 → **0**.
+
+## It works, and the reasoning was right
+
+**The sign now sits cleanly above her head**, framing the doorway instead of
+lying across her chest. The children face the lens, square-on, exactly as
+asked. Pitch was the only parameter that could have done this: with the view
+direction horizontal, world height maps to frame height, so the arch at 3.60 m
+projects *above* a child on the ground. Bearing could only have moved it aside
+(giving up "straight on"), and stand-back does nothing at all in an ortho rig.
+
+Measured with it: headroom under the crossbar **0.50 → 2.35 m**, sideroom
+**3.50 m**, tilt swing 38°. `tsc` 0, `check:arrival-camera` 36 checks exit 0.
+
+## The new problem, which is the one the old doc predicted
+
+**The ground plane has collapsed.** The bottom half of the frame is an empty
+pale void; the bus, the children and the gateway sit on a thin green line with
+nothing under them. This is the effect
+`ARRIVAL_DOOR_PITCH_DEGREES`'s previous doc recorded when 12° was tried —
+*"the bus stops looking like it is standing on a road and starts looking like
+it is hanging in the air"* — and at 0° it is at its most extreme, because a
+horizontal camera sees the ground exactly edge-on and it projects to a line.
+
+**Do not fix this by reintroducing tilt.** That would walk straight back into
+the sign-across-her fault, and Jim has now ruled on it twice. The doc in the
+file already says the answer is the *height* the shot is taken at, and that is
+still the right direction — but it needs designing and it needs his eye,
+because "what fills the bottom of frame" is a composition question:
+
+- **Raise the eye** so it looks horizontally from above a child's head and the
+  paving fills the lower frame by being *further away* rather than by being
+  tilted towards. In ortho, raising a horizontal camera slides the whole world
+  down the frame without changing any angle — the ground still projects to a
+  line, so **this alone will not do it**. Worth measuring before believing.
+- **Lower the framing** (raise `ARRIVAL_DOOR_ZOOM`'s subject so she sits higher
+  in frame and the void is cropped out).
+- **Accept it as a look.** A flat, elevation-like frame with sky behind is not
+  obviously wrong for a storybook arrival; it is only wrong if it reads as a
+  bug. Jim is the only one who can say which.
+
+My honest read: option 3 is likelier than it sounds, but it is a taste call on
+a shot he has rejected twice, and I would not spend another round guessing.
+
+## Status
+
+Everything from rounds four and five is intact and still right: the pass-model
+inversion, the derived sweep spacing, the armed pace assertion, the 3.50 m
+sideroom. `ARRIVAL_GATE_STANDOFF`'s doc is corrected — it no longer claims to
+put the arch behind the lens, which it never did.
+
+**Not merged. Not rebased.** Still stacked on `feat/arch-placement`.
