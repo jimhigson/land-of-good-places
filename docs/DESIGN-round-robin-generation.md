@@ -380,7 +380,12 @@ last:**
    asked of the registry — the named road clause and the
    construction-order collision trick both dissolve into "may I stand
    here?". A refused leg retries along its ring (the search's existing
-   freedom), then backjumps via `blockers()`.
+   freedom), then backjumps via `blockers()`. *Staging note:* at this step
+   the legs still hang off a finished `RAIL_RACE_PLAN` — an interim state.
+   Jim's section-by-section ruling (above) is the end state: the ring's
+   sections and their legs claim together when the ring itself migrates to
+   incremental growth in stage 4/5. Step 2 buys the registry and the
+   deleted pairing now; it does not discharge the ruling.
 3. **Confront the ladder** — the step that makes it round-robin rather
    than a refactor. The two migrated placers' modules load **eagerly (or
    behind data-readiness gates), not behind task-completion gates**, so
