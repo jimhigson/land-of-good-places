@@ -3676,6 +3676,72 @@ const trainClearsEveryPlotAndStall: Invariant = (facts) => {
 };
 
 /**
+ * **No flower grows on the railway.**
+ *
+ * The fourth twin of {@link wallsClearTheRailway}, {@link treesClearTheRailway}
+ * and {@link trainClearsEveryPlotAndStall}, and the meadow needed one for
+ * exactly the reason the trees did: `Flowers.pickSpawnPoint` kept its own list
+ * of things to avoid — paths, plots, tap zones, the Sky Cruiser — and the train
+ * was not on it. Nothing measured the result, so a flower could sprout between
+ * the rails and stay there.
+ *
+ * It did. Found on 3 September 2026 by `check:coplanar`, which reported
+ * `flowers/living-flower-stems` sharing a plane with
+ * `park-train/train-track/track-ballast` on pool seed 225 — 0.0035 m² at a
+ * 5.0 mm stand-off. The seam is the symptom; the defect is a flower growing out
+ * of the ballast, on the far side of a fence a child cannot cross, so it can
+ * never be picked either.
+ *
+ * Measured on the **built meadow** — the world-space instance positions of the
+ * `living-flower-stems` `InstancedMesh` as the renderer is handed them — not on
+ * the scatter's own rules, which is what let the gap exist unseen. The
+ * threshold is the game's: `TRACK_CLEARANCE`, the train's own half-width, the
+ * same number the three invariants above hold walls, trees and plots to, plus
+ * the flower's own reach so the question is asked in the units a collision
+ * would happen in. `Scenery.onRailway`'s 2.6 m fence margin is the generator's
+ * target and is deliberately **not** the number here.
+ */
+const flowersClearTheRailway: Invariant = (facts) => {
+  const fouls: string[] = [];
+  const matrix = new Matrix4();
+  const at = new Vector3();
+  /**
+   * The widest a flower's own bloom reaches from its stem, in metres —
+   * `Flowers.WIDEST_FLOWER`'s value restated as a *measurement of the built
+   * mesh* rather than imported, because importing `world/Flowers.ts` here would
+   * load a seed-dependent module into `test/` before the seed is set (see this
+   * file's own header). Read off the stems mesh's bounding sphere below.
+   */
+  let reach = 0;
+  let measured = 0;
+  facts.world.flowers.group.updateMatrixWorld(true);
+  facts.world.flowers.group.traverse((object) => {
+    if (!(object instanceof InstancedMesh) || object.name !== 'living-flower-stems') return;
+    object.geometry.computeBoundingSphere();
+    reach = object.geometry.boundingSphere?.radius ?? 0;
+    for (let index = 0; index < object.count; index += 1) {
+      object.getMatrixAt(index, matrix);
+      at.setFromMatrixPosition(matrix).applyMatrix4(object.matrixWorld);
+      // A picked flower is scaled to nothing until it respawns; it is not
+      // standing anywhere yet and is not a finding.
+      if (matrix.getMaxScaleOnAxis() <= 0) continue;
+      measured += 1;
+      const gap = facts.distanceToRail(at.x, at.z) - reach;
+      if (gap < TRACK_CLEARANCE) {
+        fouls.push(
+          `flower at ${fmt([at.x, at.z])} reaches to ${gap.toFixed(2)} m of the rail centre ` +
+            `line (needs ${TRACK_CLEARANCE} m) — it is growing on the track`,
+        );
+      }
+    }
+  });
+  if (measured === 0) {
+    return ['the meadow reported no flowers at all — this invariant measured nothing'];
+  }
+  return fouls;
+};
+
+/**
  * The suite. **Add an invariant by adding a line here.**
  */
 /**
@@ -5378,7 +5444,11 @@ const noBridgeParapetCanBeSeenThrough: Invariant = (facts) => {
 
   const groups = new Map<string, Object3D>();
   for (const crossing of facts.world.train.crossings) {
-    if (facts.world.train.fallbackCrossings.includes(crossing)) continue;
+    // #493 skipped `fallbackCrossings` here — the crossings that carried no
+    // bridge because the planner had fallen back to a level crossing. That tier
+    // is deleted (2 Sep 2026): every crossing carries a bridge or the build
+    // throws, so there is nothing left to excuse and the exemption is gone
+    // rather than reinstated under a new name.
     const name = `bridge-${crossing.railDistance.toFixed(1)}`;
     const group = facts.world.train.group.getObjectByName(name);
     if (group) groups.set(name, group);
@@ -9085,6 +9155,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['every wall run sits on a grid axis and actually borders something', wallsBorderTheGridSensibly],
   ['every wall run goes alongside a path, and some stand flush against one', wallsRunAlongsideAPath],
   ['no tree stands on the railway', treesClearTheRailway],
+  ['no flower grows on the railway', flowersClearTheRailway],
   ['no entrance prop stands on the railway', entrancePropsClearTheRailway],
   ['the train runs through no plot and no stall', trainClearsEveryPlotAndStall],
   ['the park train keeps its turning circle', trainKeepsItsTurningCircle],

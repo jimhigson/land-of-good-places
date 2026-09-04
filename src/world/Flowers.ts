@@ -17,7 +17,7 @@ import { toonMaterial } from '../art/style/materials';
 import { createFlowerPickEffect, type FlowerPickEffect } from '../art/effects/flowerSparkle';
 import { terrainHeight } from './terrain';
 import { isOnPath } from './pathGraph';
-import { clearOfCruiser } from './Scenery';
+import { clearOfCruiser, clearOfRailway } from './Scenery';
 import { ANCHORS } from './anchors';
 import { pressZone, type InteractZone } from './interact';
 import { highlightInstance } from './highlight';
@@ -551,7 +551,10 @@ export class Flowers implements GameSystem {
     this.paintColour(index, this.stage[index] === STAGE_BLOOMED);
   }
 
-  /** Somewhere clear of paths, every reserved anchor plot, and every booth's tap area. */
+  /**
+   * Somewhere clear of paths, every reserved anchor plot, every booth's tap
+   * area, the Sky Cruiser's low passes and the railway.
+   */
   private pickSpawnPoint(): { x: number; z: number } {
     for (let attempt = 0; attempt < 40; attempt += 1) {
       const angle = this.rng.range(0, TAU);
@@ -568,6 +571,12 @@ export class Flowers implements GameSystem {
       // {@link TALLEST_FLOWER}. The same gate, and the same grid, every other
       // scattered thing in the park already passes through.
       if (!clearOfCruiser(x, z, WIDEST_FLOWER, TALLEST_FLOWER)) continue;
+      // And the train's own ground: the corridor, the platforms and every
+      // bridge's deck and ramps, asked of `Scenery`'s `onRailway`, which is
+      // the single owner of that question for every other scatter in the park.
+      // The meadow never asked it, and a flower duly grew out of the ballast
+      // on pool seed 225 — see {@link clearOfRailway}.
+      if (!clearOfRailway(x, z, WIDEST_FLOWER)) continue;
       return { x, z };
     }
     // Fell through every attempt (shouldn't happen with this much open lawn) —
