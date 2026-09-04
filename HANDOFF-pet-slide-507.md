@@ -94,7 +94,72 @@ subsumes #471 rather than quietly overlapping it.
   right.
 - Add/extend a `test/procgen/invariants.ts` invariant if procgen changes.
 
+## Measured: curvature is the mechanism, and the margin is thin on every seed
+
+Reproduced on this branch, seed 346, **exit 1**: 720 ridden frames, deepest
+inside her **0.01 m**, exactly **1 clipping frame**, at ridden frame 459.
+
+A throwaway probe (`scripts/zz-probe-bend.mts` — **delete before the PR**)
+compared the arc offset the code spends against the straight-line chord it
+actually achieves, sampling the built chute at 2000 points:
+
+| seed | chute | worst her→pet0 chord | bend eats | check's worst clearance |
+|---|---|---|---|---|
+| canonical | 73.16 m | 2.616 m at rider 71.7 m | 0.114 m | +0.12 m (pass) |
+| **346** | **78.06 m** | **2.595 m at rider 49.5 m** | **0.135 m** | **−0.01 m (fail)** |
+| 11 | 71.57 m | 2.702 m at rider 32.6 m | 0.028 m | passes this clause |
+
+Frame 459 of 720 is ~64% of a 78 m chute — **rider ≈ 50 m**, which is exactly
+where 346's worst chord sits. The mechanism is confirmed, and the important
+part is that **canonical only ever had 0.12 m of margin**: this was never a
+seed-346 quirk, it was a structural under-spacing that seed 346 happened to
+tip over.
+
+Pet-to-pet is not the problem — the alternating `PET_SIDE_STEP` makes those
+chords *longer* than the arc (2.111 m against a 1.98 m offset).
+
+## Implemented (pushed)
+
+`src/world/slide/petRiders.ts`: the line is now spaced by the **straight-line
+distance the constants already mean**, solved against the chute that was
+actually built, instead of spending body lengths as arc length.
+
+- `arcForChord()` walks back from the old answer — which is also the floor, a
+  bend can only ever require a companion to sit *further* back — until the real
+  distance to the body in front reaches the wanted clearance.
+- `petSeatOnSlide()` walks the chain link by link, hers → slot 0 → slot 1 …,
+  measuring each against the body actually in front of it.
+- `MAX_BEND_ALLOWANCE = 1.5 m` bounds the walk (worst measured bend is 0.15 m,
+  so ten times it) so a pathological chute fails visibly instead of looping.
+- **`petSlideOffset()` deleted** — it was the old arc formula and, once unused,
+  would have been a second description of the spacing.
+- The "no blind band" history from its doc is preserved on `petSeatOnSlide`.
+
+**`BODY_CLEARANCE` is untouched at 0.45 m, deliberately.** Raising it until the
+two known seeds pass would tune a constant against today's pool and clip again
+on the next chute that bends harder — the same shape as weakening an assertion,
+one level down.
+
+`tsc --noEmit` — **exit 0**.
+
+## This is player-visible → Jim's call
+
+On a bending chute the companions now sit slightly further back. Not an
+invisible merge.
+
 ## Status
 
-Reproducing seed 346 in this worktree for frame-level diagnostics
-(`/tmp/psflake/507-346.log`). Nothing implemented yet.
+16-seed sweep in flight (`/tmp/ps507/seed-*.{log,exit}`). Seed 11's `in shot`
+clause is a **separate, unstarted** defect — do not assume this fix touches it.
+
+## Still to do
+
+- Read the sweep; every seed must pass and none may regress.
+- Seed 11 (`in shot`).
+- **Delete `scripts/zz-probe-bend.mts`** before opening the PR.
+- Extend `test/procgen/invariants.ts`? The spacing is a ride behaviour rather
+  than park furniture, and `check:pet-slide` already owns it across seeds —
+  state that reasoning in the PR rather than leaving it unaddressed.
+- Say whether this subsumes **#471** (it does not: #471 is about the
+  *off-chute* clause measuring a root, while the clauses fixed here already
+  measure drawn oriented boxes).
