@@ -928,13 +928,21 @@ export class Game {
       if (stallId === 'ginormousSlideWithGrownUp') {
         return this.world.building.requestBoardSlide(true);
       }
-      // The same ride with **three companions already caught**, for #507. The
-      // pets coming down the chute behind her are the whole of that fix, and a
-      // fresh profile owns no animals — so without this the deep link lands on
-      // a child sliding alone and there is nothing to look at. Granted through
-      // `catchWildPet`, the roof garden's own route into the parade, so what
-      // rides down is a real parade rather than a stand-in; three species,
-      // matching the three `check:pet-slide` measures the descent with.
+      // The same ride with **a line of companions already caught**, for #507.
+      // The pets coming down the chute behind her are the whole of that fix,
+      // and one animal is not a line — a single starting pet would show the
+      // lead gap and nothing about the spacing *between* companions, which is
+      // half of what this fixes. Granted through the store's own catch, the
+      // roof garden's route into the parade, so what rides down is a real
+      // parade rather than a stand-in.
+      //
+      // **Three are granted here and four ride**, because the character creator
+      // already gave her a starting pet, unstowed and paradeable from the first
+      // frame (`grantFree`'s other caller). That is the better test rather than
+      // an accident: an extra body means the chain is solved one link deeper
+      // than `check:pet-slide`'s own three. If a starting pet ever *is* one of
+      // these three, `catchWildPetOnce` reuses it and three ride — which is the
+      // wanted behaviour, not a special case.
       if (stallId === 'ginormousSlideWithPets') {
         // `catchWildPetOnce`, because somebody will paste this link twice and
         // six animals would trail her. The store owns "already got one" — an
