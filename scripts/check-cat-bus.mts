@@ -941,25 +941,66 @@ check(
 // about. So every number below comes from the road meshes' own world-space
 // vertices.
 {
+  /** The road itself — the surface the bus drives on, outside the wall. */
   const roadPoints: Vector3[] = [];
+  /**
+   * **The whole arrival surface: the road, plus the run in through the gate.**
+   *
+   * These were one mesh family until Jim asked for the run through the gateway
+   * to be an ordinary park path rather than road continuing through
+   * (3 September) — so it is drawn from `pathSurface.ts` now and named
+   * `entrance-gateway-path*`. The surface a child walks in on did not go
+   * anywhere; it changed material and therefore changed name.
+   *
+   * Asking only about `entrance-road*` after that rename is a clause measuring
+   * a mesh name instead of the thing it is about: it reported "0 vertices
+   * inside the wall — it does not pass through the gate" about a gateway with a
+   * path laid squarely through it. `theRoadArrivesAtTheParkAndGoesIn` in the
+   * invariant suite was widened to both families when the rename landed and
+   * this, its twin, was not — CLAUDE.md's "two definitions of one thing, kept
+   * in step by hand", with the copy found wrong by a check rather than a child
+   * only because the two happen to run in different suites.
+   *
+   * The two lists stay separate because the clauses below ask genuinely
+   * different questions: the bus stands on the **road**, and it must never be
+   * satisfied by a footpath it cannot drive on; the park is **reached** by
+   * whichever surface actually gets there.
+   */
+  const arrivalPoints: Vector3[] = [];
   const at = new Vector3();
   park.scene.traverse((object) => {
     const mesh = object as Mesh;
-    if (!mesh.isMesh || !mesh.name.startsWith('entrance-road')) return;
+    if (!mesh.isMesh) return;
+    const isRoad = mesh.name.startsWith('entrance-road');
+    const isGatewayPath = mesh.name.startsWith('entrance-gateway-path');
+    if (!isRoad && !isGatewayPath) return;
     const position = mesh.geometry.getAttribute('position');
     for (let i = 0; i < position.count; i += 1) {
       at.set(position.getX(i), position.getY(i), position.getZ(i)).applyMatrix4(mesh.matrixWorld);
-      roadPoints.push(at.clone());
+      const point = at.clone();
+      arrivalPoints.push(point);
+      if (isRoad) roadPoints.push(point);
     }
   });
 
   check(roadPoints.length > 0, 'there is no road at the park entrance at all — the bus arrives on grass');
+  check(
+    arrivalPoints.length > roadPoints.length,
+    'nothing is drawn between the road and the park — the run in through the gate is missing entirely',
+  );
 
   if (roadPoints.length > 0) {
-    /** How close the road gets to a point on the ground. */
+    /** How close the road the bus drives on gets to a point on the ground. */
     const roadReaches = (x: number, z: number): number => {
       let nearest = Infinity;
       for (const point of roadPoints) nearest = Math.min(nearest, Math.hypot(point.x - x, point.z - z));
+      return nearest;
+    };
+
+    /** How close any of the arrival surface — road or gateway path — gets. */
+    const arrivalReaches = (x: number, z: number): number => {
+      let nearest = Infinity;
+      for (const point of arrivalPoints) nearest = Math.min(nearest, Math.hypot(point.x - x, point.z - z));
       return nearest;
     };
 
@@ -968,22 +1009,22 @@ check(
     // threshold is the road's own segment length, because that is the finest
     // resolution a vertex can land at; anything tighter would be asserting on
     // where the tessellation happened to fall.
-    const toTheGate = roadReaches(ENTRANCE_GATE_X, ENTRANCE_GATE_Z);
+    const toTheGate = arrivalReaches(ENTRANCE_GATE_X, ENTRANCE_GATE_Z);
     check(
       toTheGate < ROAD_TILE_METRES / 2,
-      `the nearest the road gets to the gate is ${toTheGate.toFixed(1)} m — it does not reach the park`,
+      `the nearest paved surface gets to the gate is ${toTheGate.toFixed(1)} m — it does not reach the park`,
     );
 
-    // **And through it.** A road that stops at the wall is a road that arrives
-    // at a park you cannot drive into. The gate is a hole in the wall
-    // (`theGateIsAHoleInTheWall` in the invariant suite), so the road must have
-    // surface on both sides of it.
-    const outside = roadPoints.filter((point) => point.z > ENTRANCE_GATE_Z).length;
-    const inside = roadPoints.filter((point) => point.z < ENTRANCE_GATE_Z).length;
+    // **And through it.** A surface that stops at the wall arrives at a park you
+    // cannot walk into. The gate is a hole in the wall
+    // (`theGateIsAHoleInTheWall` in the invariant suite), so there must be
+    // surface on both sides of it — the road outside, the gateway path inside.
+    const outside = arrivalPoints.filter((point) => point.z > ENTRANCE_GATE_Z).length;
+    const inside = arrivalPoints.filter((point) => point.z < ENTRANCE_GATE_Z).length;
     check(
       outside > 0 && inside > 0,
-      `the road has ${outside} vertices outside the wall and ${inside} inside it — it does not pass ` +
-        'through the gate, so it arrives at the park without going in',
+      `the arrival surface has ${outside} vertices outside the wall and ${inside} inside it — it does ` +
+        'not pass through the gate, so it arrives at the park without going in',
     );
 
     // **And the bus stands on it**, everywhere it stops along its run — which is
@@ -1001,10 +1042,12 @@ check(
         '— it is parked on the grass',
     );
 
-    const deepest = Math.min(...roadPoints.map((point) => point.z));
+    const deepest = Math.min(...arrivalPoints.map((point) => point.z));
     notes.push(
-      `the road runs from z ${Math.max(...roadPoints.map((p) => p.z)).toFixed(0)} outside the wall to ` +
-        `z ${deepest.toFixed(0)} inside the park, passing ${toTheGate.toFixed(2)} m from the gate centre`,
+      `the arrival surface runs from z ${Math.max(...arrivalPoints.map((p) => p.z)).toFixed(0)} outside ` +
+        `the wall to z ${deepest.toFixed(0)} inside the park, passing ${toTheGate.toFixed(2)} m from the ` +
+        `gate centre — ${roadPoints.length} vertices of road (the bus's own surface) and ` +
+        `${arrivalPoints.length - roadPoints.length} of gateway path carrying it in through the arch`,
     );
   }
 }
