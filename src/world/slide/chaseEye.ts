@@ -1,6 +1,8 @@
 import { Vector3 } from 'three';
 import { terrainHeight } from '../terrain';
 import { PET_SLIDE_LEAD } from './petRiders';
+import { PET_FRAME_CEILING, estimatedFrameShare } from './petFraming';
+import { PARADE_MEMBER_RADIUS } from '../../core/constants';
 
 /**
  * **Where the ginormous slide's chase camera goes, solved against the ride
@@ -118,6 +120,17 @@ const GROUND_CLEARANCE = 0.35;
  */
 const FRAME_SAFETY = 0.75;
 
+/**
+ * How much of {@link PET_FRAME_CEILING} the solve will actually spend.
+ *
+ * The solve works off an **estimate** of the frame share (a sphere against a
+ * rectangle of angles); the check **measures** it by raster. Leaving headroom
+ * between the two means an estimate that runs a little light cannot hand the
+ * check a frame it then fails — the solve aims well inside the band rather
+ * than at its edge.
+ */
+const CEILING_SAFETY = 0.6;
+
 const eye = new Vector3();
 const toPet = new Vector3();
 const toChild = new Vector3();
@@ -140,6 +153,7 @@ export function solveChaseEye(
   behind: Vector3,
   up: Vector3,
   halfFovRad: number,
+  aspect: number,
 ): ChaseEye {
   const wanted = halfFovRad * FRAME_SAFETY;
 
@@ -168,6 +182,22 @@ export function solveChaseEye(
       const petAngle = Math.acos(
         Math.min(1, Math.max(-1, toPet.clone().normalize().dot(axis))),
       );
+      // **The other bound.** Getting the animal inside the frustum is only half
+      // the question, and a solve given one bound and not the other is exactly
+      // the shape of the bug this file was written to fix — the first version
+      // of it traded "pet out of shot" for "pet filling the shot", which is the
+      // failure `PET_FRAME_CEILING` was read off in the first place (a
+      // companion 0.45 m in front of the lens, the child nowhere in frame).
+      //
+      // The ceiling is imported, never restated: `slide/petFraming.ts` owns it
+      // and `check:pet-slide` reads the same one.
+      const share = estimatedFrameShare(
+        toPet.length(),
+        PARADE_MEMBER_RADIUS,
+        halfFovRad,
+        aspect,
+      );
+      if (share > PET_FRAME_CEILING * CEILING_SAFETY) continue;
       toChild.copy(rider).sub(eye);
       const childAngle = Math.acos(
         Math.min(1, Math.max(-1, toChild.clone().normalize().dot(axis))),
