@@ -36,3 +36,28 @@ on Node 26**.
 
 Isolating which generator decision varies. Do not widen thresholds; do not
 add `--predictable` to the test command.
+
+## It is not confined to the slide — three unrelated systems vary
+
+Diffing two runs' full node lists by subtree (`/tmp/ps496/nodes-{a,c}.txt`,
+Node 26.7.0):
+
+| subtree | run a | run c |
+|---|---|---|
+| `scenery/wooden-walls` | 97 | 65 |
+| `scenery/stone-walls` | 41 | 27 |
+| `anchor-plots/ginormous-slide-supports` | 9 | 11 |
+| `anchor-plots/anchor:dodgems` | 215 | 214 |
+
+Everything else matched. So #496 is filed as a slide-camera flake and it is
+**park generation**: walls, the slide's supports and the dodgems all move.
+
+## Eliminated here
+
+- `src/core/solveCache.ts` — localStorage only, and `store()` returns `null`
+  under Node, so `cachedSolve` is a straight passthrough in every check.
+  Cannot be the cause of any measurement taken on Node.
+
+Already eliminated by the previous agent, not re-derived: `Math.random`,
+V8 hash seed (`--hash-seed=1` alone still varies), the renderer, the clock
+*inside the check harness* (fixed `dt`, fixed `MAX_FRAMES`).
