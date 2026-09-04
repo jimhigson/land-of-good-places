@@ -120,11 +120,21 @@ geometry shipped, and never, ever, "a bad seed".
 
 Unchanged from `DESIGN-ground-claims.md`, adopted whole: **footprint**,
 **corridor**, **walkable-must-remain**, **surface**, with a small fixed
-compatibility table between kinds instead of per-placer knowledge.
-`PlacementField` is 80% of the substrate. A placer asks "may I put this
-here?" and never names an obstacle type. There is **no other way to place
-anything** — the API is the only door, because CLAUDE.md's prose version of
-this rule was read by every agent who then violated it.
+compatibility table between kinds instead of per-placer knowledge. (A fifth
+kind, **demands**, arrives in the quality tier below — owed things rather
+than occupied ground — and the stage-4 mechanism uses it for support
+obligations too.) A placer asks "may I put this here?" and never names an
+obstacle type. There is **no other way to place anything** — the API is the
+only door, because CLAUDE.md's prose version of this rule was read by every
+agent who then violated it.
+
+*Built, 3 Sep (#499):* the substrate is `src/boot/groundClaims.ts` — all
+four kinds plus demands, `CLAIM_COMPATIBILITY` as exported data (one law
+for the generator and the universal invariant), declared crossings gating
+corridor×corridor, and `blockers()` in commit order for backjumping. An
+earlier draft of this section called `PlacementField` "80% of the
+substrate"; it was the model to steal, not the module to keep, and it is
+superseded — `coSolve.ts` says so at the definition.
 
 ### Round-robin scheduling
 
@@ -336,22 +346,29 @@ Judged at every stage by `test/procgen/invariants.ts` (~80 invariants) and
 `check:park` — the invariants are the one asset of `feat/grid-paths` that
 must survive anything.
 
-### Stage 1 — the registry, validated by the tests (small; invisible)
+### Stage 1 — the registry, validated by the tests ✅ landed in #499
 
-As in the ground-claims memo: widen `PlacementField` to the four claim kinds
-and make `test/procgen/parkFacts.ts` (56 fields, 2,636 lines of hand-extracted
-"what is in this park") readable from it. If the registry can feed the
-existing invariants unchanged, it is complete enough to believe. No park
-changes.
+Planned as: widen `PlacementField` to the four claim kinds and make
+`test/procgen/parkFacts.ts` readable from it. **Shipped as**: a new module,
+`src/boot/groundClaims.ts` (see "One registry" above), with 17 unit tests —
+building fresh beside the superseded field proved cheaper than widening it.
+The parkFacts-readable-from-the-registry proof deferred to the migrations
+themselves: each placer that migrates is proven by the universal invariant
+reading the built park, which is the stronger form of the same check. No
+park changes; proven byte-identical.
 
-### Stage 2 — the scheduler lands, byte-identical (small; invisible; **the un-skippable one**)
+### Stage 2 — the scheduler lands, byte-identical ✅ landed in #499 (**the un-skippable one**)
 
-Convert `parkGeneration.ts`'s driver to the round-robin scheduler where **an
-un-migrated placer runs whole in its slot** — one giant turn, exactly today's
-behaviour. The park is byte-identical on day one (prove it: same seed, same
-serialized world, hashed). This is the stage that has never been attempted
-and the reason the idea has died twice: after it lands, round-robin is no
-longer a rewrite anybody has to start — it is a migration checklist.
+`parkGeneration.ts`'s driver is one `SolveScheduler` where **an un-migrated
+placer runs whole in its slot** — one giant turn, exactly the old behaviour.
+Proved byte-identical by `check:park-boot`'s sliced-vs-straight-through
+hashes (slide route, chute, cruiser loop, plus five more in the #499 review:
+train plan, crossing sites, level crossings, path graph, stations). This was
+the stage that had never been attempted and the reason the idea died twice;
+now that it is on `main`, round-robin is no longer a rewrite anybody has to
+start — it is a migration checklist. The honest caveat travels in the module
+header: the import ladder still serialises the order until stage 3 confronts
+it.
 
 ### Stage 3 — first negotiated pair (small; measurable)
 
