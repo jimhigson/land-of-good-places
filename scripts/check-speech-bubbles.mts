@@ -3,11 +3,21 @@
  *
  * ```
  * pnpm run check:speech-bubbles                  # part of pnpm run check
+ * pnpm run check:speech-bubbles:wide             # the same, at 1920x1080 for 420 s
  * pnpm run check:speech-bubbles -- --mutate      # prove it can go red
  * pnpm run check:speech-bubbles -- --mutate-anchor
  * pnpm run check:speech-bubbles -- --mutate-label
  * pnpm run check:speech-bubbles -- --mutate-latch
+ * VIEW=1920x1080 SECONDS=420 ... -- --mutate-text-gate   # clause 4c; see below
  * ```
+ *
+ * **Both chain steps are the same file.** `VIEW` and `SECONDS` are the only
+ * difference, and the second one exists because clause 4c below is unreachable
+ * at the first one's viewport — a fact discovered only after this file had
+ * spent three review rounds asserting the opposite. The wide run costs 34 s,
+ * which is a real addition to a `check` chain already at 25 minutes against a
+ * 30-minute cap; it is spent because the alternative was a printed 0 that
+ * meant nothing.
  *
  * ## Why this exists
  *
@@ -42,9 +52,11 @@
  * only thing this check has ever reported on `main` — 31 August 2026, one
  * breach in 986 sightings, quoted in full at the call site.
  *
- * The viewport is a 390x844 portrait phone, which is the
+ * The viewport defaults to a 390x844 portrait phone, which is the
  * narrowest framing the game supports and therefore the one the clamp works
- * hardest on. The player stands still for the first half of the run (a
+ * hardest on — and is run **again at 1920x1080** by
+ * `check:speech-bubbles:wide`, because two of the four assertions turn out to
+ * be reachable only there. The player stands still for the first half of the run (a
  * stationary player is what invites a child over to chat) and walks a slow
  * circle for the second (a moving camera is what strands a bubble whose anchor
  * has been overwritten).
@@ -67,14 +79,24 @@
  *    `sprite.position`, which was where the anchor lived, so the first clamped
  *    frame ate it and she never got it back.
  *
- * 4. **A talking child wears no name pill.** Issue #486, Jim: *"when children
- *    talk, the speech bubble overlaps the name over their head - instead, hide
- *    their name while they are talking."* The two are drawn in the same square
- *    of air over the same head, so while the bubble is visible the pill must
- *    not be — and, the other half of it, **every child who has finished
- *    talking gets her name back**. Hiding the pill forever would satisfy the
- *    first clause and be a worse bug than the one it fixed, so both are
- *    counted and both are printed on every run, passing or failing.
+ * 4. **A talking child wears no name pill — and is never left wearing
+ *    nothing.** Issue #486, Jim: *"when children talk, the speech bubble
+ *    overlaps the name over their head - instead, hide their name while they
+ *    are talking."* The two are drawn in the same square of air over the same
+ *    head, so while the bubble is visible the pill must not be. Three clauses,
+ *    because there are two ways to satisfy that sentence and make the game
+ *    worse, and each has to be closed separately:
+ *
+ *      - **4a, the overlap.** Never both drawn.
+ *      - **4b, the latch.** Every child who has finished talking gets her name
+ *        back. Hiding the pill forever satisfies 4a and is a worse bug than
+ *        the one it fixed. Per child, not per crowd — see below.
+ *      - **4c, the empty head.** A child mid-word, entitled to her pill, with
+ *        **neither** pill nor bubble drawn. Hiding the pill for a bubble
+ *        nobody can see is the same trade as 4b's, paid one sentence at a time
+ *        instead of for good.
+ *
+ *    All three are counted and printed on every run, passing or failing.
  *
  *    The overlap half is asked of what is **drawn** — two `sprite.visible`
  *    flags — rather than of `NpcSystem.speechTextOf`, the one getter both
@@ -107,26 +129,49 @@
  *    never to ask whether the pill obeyed it. That question stays sprite
  *    against sprite.
  *
- *    One thing assertion 4 **counts and prints but does not fail on**: the pill
- *    hides because there is *text*, while the overlap it is avoiding is caused
- *    by a bubble being *drawn*. Those come apart in two places, and the counter
- *    catches both — it is named for the frames, not for either cause:
+ *    **Clause 4c, and the claim that used to stand here.** Three earlier
+ *    versions of this paragraph said the 4c condition *"reads 0 either way
+ *    today, so no number printed on any previous run was wrong"*, and offered
+ *    the number as a structural curiosity rather than an assertion. **That was
+ *    false, and it was false in the way this repo names as its worst: a green
+ *    line implying cover it did not give.** The 0 was a property of the
+ *    viewport, not of the fix.
+ *
+ *    The pill was, at that point, hidden because there was *text*, while the
+ *    overlap it is avoiding is caused by a bubble being *drawn*, and
+ *    `SpeechBubble.updateScreenSize` declines to draw for two reasons:
  *
  *      - `BUBBLE_MAX_DISTANCE` (40 m) is shorter than `LABEL_MAX_DISTANCE`
  *        (46 m), so between them a talking child wears no name for a bubble
  *        too far away to draw; and
  *      - at **any** distance, a speaker whose anchor is off screen has her
- *        bubble gated by `isOnScreen` — the #415 fix — and gives up her pill
- *        for it just the same. This is the larger set of the two, and the
- *        counter's first name (`silentBands`) did not mention it.
+ *        bubble gated by `isOnScreen` — the #415 fix — and gave up her pill
+ *        for it just the same. This is much the larger set.
  *
- *    0 frames on the canonical seed either way, so no number printed here has
- *    ever been wrong — but a counter whose name is narrower than its condition
- *    is how the next reader inherits a false belief about what has been ruled
- *    out. It is a property of the constants and the gate rather than of this
- *    fix, so the number goes on the stderr summary where it can be watched. If
- *    it stops being 0, hide the pill for a bubble that is drawn, not for text
- *    that exists.
+ *    Measured across both viewports, same seed, `SECONDS=420`, with the pill
+ *    still gated on text (`--mutate-text-gate`):
+ *
+ *    ```
+ *    390x844     1079 frames, every one a child the frustum never contained
+ *    1920x1080   1150 frames, of which  96 had the child's body ON screen
+ *    ```
+ *
+ *    The portrait number is harmless: nobody renders those children, so it is
+ *    a gap between two internal states. The 96 are not. They are one person,
+ *    plainly in shot, wearing no name — first at frame 7274, `Wren` at
+ *    `(-0.45, 3.91, 43.27)`, 8.8 m from the camera's focus at **rank 0**, her
+ *    head-anchor just past the top edge of a wide frustum. A portrait frustum
+ *    is tall enough that this essentially never happens, which is the whole
+ *    reason one viewport reported 0 for three rounds.
+ *
+ *    **So it is fixed rather than documented.** `NpcSystem.updateLabels` now
+ *    hides the pill for `bubble.sprite.visible` — a bubble that is *drawn* —
+ *    with `updateBubbles` moved ahead of it so the flag is the same frame's.
+ *    The pill's condition and the bubble's are then literally one expression,
+ *    and 4c is 0 by construction rather than by nobody having stood there.
+ *    4c's **on-screen half is asserted**; the frames nobody renders are
+ *    reported, because a check that failed on those would be failing on a
+ *    difference no player can see.
  *
  * And, because the first two are vacuously true of a park where nobody ever
  * speaks: **the run must actually have seen bubbles**, or it fails saying so.
@@ -140,20 +185,22 @@
  * the code path before the gate was added. `--mutate-anchor` restores the other
  * half, reading the anchor back off `sprite.position` the way it used to.
  *
- * **Stale as of 3 September 2026, and left standing so the next reader can see
- * what changed: `--mutate` no longer reaches assertion 1.** Measured on this
- * branch *and* on `origin/main` at `7a1d81f9`, default seed, 390x844,
- * `SECONDS=120`: `--mutate` fails **assertion 3 only**, with **0** off-screen
- * speakers and 1984 sightings — the same 1984 the unmutated run sees, so
- * blinding the gate now draws no bubble that was not drawn anyway. Every child
- * who speaks on this park stays in shot for the whole run, so there is nothing
- * for the pre-#415 code path to get wrong. Assertion 1 is armed and unproven,
- * which is the state CLAUDE.md warns a red-run transcript decays into: the
- * numbers below were true on `dd5a1b09` and the geometry has moved since.
- * Restoring its reach means stranding a speaker off screen deliberately —
- * **issue #494**, not done here, and **not** caused by #486.
+ * **Assertion 1 is reachable again, and the viewport is why — issue #494 can
+ * be closed on this.** It had gone unprovable at 390x844: `--mutate` there
+ * fails **assertion 3 only**, with **0** off-screen speakers, on this branch
+ * and on `origin/main` alike, because every child who speaks on this park at
+ * that framing stays in shot for the whole run. #494 was opened to build a
+ * fixture that stranded a speaker off screen deliberately. It turns out no
+ * fixture is needed — a **wider** camera sees further past its own edges, and
+ * at 1920x1080 with `SECONDS=420`, `--mutate` fails assertion 1 on **363**
+ * occasions, worst `Iris at (40.28, -0.32, 47.62)` with her bubble towed
+ * **17.70 m** away onto empty ground. That is the pre-#415 bug reproduced
+ * exactly as Jim reported it, and `check:speech-bubbles:wide` runs it.
  *
- * The paragraph below is the claim as it stood, kept for the argument in it:
+ * The old claim is left standing above rather than deleted, because the pair
+ * is the lesson: the same command, the same seed, the same code, 0 breaches at
+ * one viewport and 363 at another. A red-run transcript without its inputs is
+ * not a measurement.
  *
  * **Assertions 1 and 3 must fail on the first; 3 on the second.** Not 1 and 2:
  * assertion 2 is structurally unreachable under `--mutate`, because an
@@ -169,43 +216,60 @@
  * fix added: the pill sized and shown by distance alone, knowing nothing about
  * whether its owner is mid-sentence. Assertion 4 must fail on it.
  *
- * Proved red on `fix/name-label-486`, default seed, 390x844, `SECONDS=120`,
- * with the geometry it was proved against stated because a transcript without
- * its inputs goes stale silently (CLAUDE.md):
- *
  * `--mutate-latch` hides one child's pill for good — the first child seen
  * speaking, and nobody else. That is the shape the crowd-average version of
  * clause 4b could not see, so it is here permanently rather than as a patch
  * somebody applied once during review.
  *
- * Re-measured on this branch, default seed, 390x844, `SECONDS=120`:
+ * `--mutate-text-gate` restores the pill gated on **text existing** — this
+ * branch's own first answer to #486 — which fixes 4a and opens 4c.
+ *
+ * **Re-measured on this branch after the rebase onto `origin/main`
+ * `c95facf6` (post-#508, which changed how the seed resolves, so every number
+ * measured before it is of a different park). Node 26.7.0. Both viewports,
+ * because the whole finding above is that one of them cannot see clause 4c:**
  *
  * ```
- * (unmutated)      1984 sightings; 10 talked; longest nameless run 0 frames;
- *                  0 overlaps; 0 frames mid-word with nothing drawn  exit 0
- * --mutate-label   1984 sightings; 1984 pills drawn under their own bubble.
- *                  First: Finn talking at (-2.78, -0.10, 51.88), frame 840.
- *                  Clause 4b stays at 0 — the halves isolate.      exit 1
- * --mutate-latch   1 child nameless for 1844 frames. Worst: Finn, 46.0 m
- *                  from focus at rank 9, inside the cap and inside 46 m.
- *                  Clause 4a stays at 0 — the halves isolate.      exit 1
+ *                      390x844, SECONDS=120        1920x1080, SECONDS=420
+ * (unmutated)          1881 sightings, 12 talked,  3551 sightings, 19 talked,
+ *                      4c had 0 chances     ex 0   4c had 96 chances, 0 lost ex 0
+ * --mutate             assertion 3 alone, 9068     assertions 1 (363, worst
+ *                                          ex 1    17.70 m) and 3     ex 1
+ * --mutate-anchor      assertion 3 alone, 7349     assertion 3 alone, 23274 ex 1
+ * --mutate-label       4a: 1881 pills under their  4a: 3551 pills. Same first
+ *                      own bubble. First: Finn at  line.              ex 1
+ *                      (-2.78, -0.10, 51.88), f840
+ * --mutate-latch       4b: Finn nameless 1867 f,   4b: Finn nameless 1831 f,
+ *                      46.0 m, rank 7       ex 1   46.0 m, rank 7     ex 1
+ * --mutate-text-gate   nothing to see: 4c had 0    4c: 96 frames. First: Wren
+ *                      chances at this viewport    mid-word at (-0.45, 3.91,
+ *                                           ex 0   43.27), f7274, on screen,
+ *                                                  8.8 m, rank 0      ex 1
  * ```
  *
- * Ten talkers here against the four an earlier draft counted: that draft could
- * only see a child whose bubble was *drawn*, and now `speaking` comes off the
- * driver, so children mid-word behind the camera are counted too.
+ * **Every mutation fails exactly one clause and leaves the others at 0**, in
+ * both columns, which is what makes each a guard rather than a restatement of
+ * its neighbour. Two rows deserve reading twice:
  *
- * The same 1984 sightings come off `origin/main` at `7a1d81f9` unchanged, so
- * the run is measuring the same park either way — this fix moves pills, not
- * bubbles.
+ *   - `--mutate` and `--mutate-text-gate` are each **green in one column**.
+ *     Neither is a broken mutation; each names a bug the other viewport cannot
+ *     stage. This is why there are two chain steps and why every transcript
+ *     here carries `VIEW` and `SECONDS`.
+ *   - 4c's 96 appear in both the unmutated wide run and the mutated one, and
+ *     mean opposite things: unmutated they are 96 *chances* the assertion had
+ *     and nothing lost, mutated they are 96 frames a visible child spent with
+ *     no name. The stderr line distinguishes the two, and the coverage note
+ *     fires on the chances rather than the losses — a working fix drives the
+ *     losses to 0 by construction, so keying "asserts nothing" there would
+ *     have announced cover on every green run for ever.
  *
- * The mutations isolate cleanly: `--mutate-anchor` fails assertion 3 alone,
- * which is what makes 3 a real guard on the `Hotel` set-once fault rather than
- * a restatement of the clamp fault. Both transcripts are quoted in the PR.
+ * Twelve talkers at 120 s against the "10" an earlier draft of this comment
+ * quoted, and 1881 sightings against 1984: those were measured pre-#508, on a
+ * different park. Nineteen talk in the 420 s run.
  *
- * Re-proved red on `dd5a1b09` + the frame-order fix, on the default seed at
- * 390x844 and `SECONDS=120` — quoted with its inputs because a transcript
- * without them goes stale silently (CLAUDE.md):
+ * **Superseded, and kept only as the pair to the row above it.** Proved red on
+ * `dd5a1b09` + the frame-order fix, default seed, 390x844, `SECONDS=120` — a
+ * park two seed changes ago, so read none of these as current:
  *
  * ```
  * --mutate         1437 sightings; 452 off-screen speakers (worst 37.63 m),
@@ -214,13 +278,17 @@
  * (unmutated)       985 sightings; 0 breaches of any kind        exit 0
  * ```
  *
+ * That is the same 390x844 `--mutate` that later found 0 off-screen speakers
+ * and now finds 363 at 1920x1080: three different answers from one command,
+ * every difference in the inputs rather than the code.
+ *
  * With the frame order right, assertion 1 asks a narrower question than it
  * looks: the gate it calls is the same `isOnScreen`, against the same anchor
  * and the same camera, that `SpeechBubble.updateScreenSize` just called — so it
  * is a check that the shipping code **applied** the gate, not an independent
  * opinion about the frustum. That is by design (it is why the real method is
- * captured on line ~126 before `--mutate` blinds the prototype), and `--mutate`
- * failing it 452 times is what keeps it from being a check that cannot fail.
+ * captured before `--mutate` blinds the prototype), and `--mutate` failing it
+ * 363 times at 1920x1080 is what keeps it from being a check that cannot fail.
  * The independent geometry lives in assertions 2 and 3.
  */
 import './headless-canvas.mjs';
