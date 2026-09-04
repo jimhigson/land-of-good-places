@@ -195,6 +195,51 @@ function urlPin(): number | null {
   }
 }
 
+/**
+ * **Is this Node rather than a real browser?**
+ *
+ * Asked because {@link resolveParkSeed} must never draw a random park outside
+ * a browser, and — issue #496 — it used to decide that by accident rather
+ * than on purpose.
+ *
+ * The rule this file used to rely on was written in its own doc comment:
+ * *"In Node, with nothing pinned, this is still `CANONICAL_PARK_SEED`,
+ * because there is no `localStorage`."* That is an observation about a
+ * runtime, not a mechanism, and it is exactly the "two definitions of one
+ * thing, kept in step by hand" fault CLAUDE.md catalogues — the moment
+ * anything supplied a `localStorage`, the invariant died silently.
+ *
+ * Something did. `scripts/headless-dom.mjs` has long carried
+ * `globalThis.localStorage ??= { getItem: () => null, setItem() {}, … }`, and
+ * which way the `??=` falls is decided by the Node version:
+ *
+ * - **Node 25 and earlier** ship their own `globalThis.localStorage`, so the
+ *   shim is *not* installed; Node's own throws on `getItem` without
+ *   `--localstorage-file`, {@link storage} catches that and returns `null`,
+ *   and the canonical seed is reached. Deterministic, by luck.
+ * - **Node 26** — the version this repo requires and CI pins — has no
+ *   `globalThis.localStorage` at all, so the shim *is* installed, its
+ *   `getItem` returns `null` without throwing, {@link storage} hands it back,
+ *   and {@link resolveParkSeed} fell through to {@link drawFromPool} and
+ *   `Math.random()`. Its `setItem` is a no-op, so nothing was ever
+ *   remembered and **every run drew a different park**.
+ *
+ * Measured on `488605cd`, five consecutive runs of a script that imports
+ * `headless-dom.mjs`: `PARK_SEED` came out 326, 326, 20260728, 274, 5 on
+ * Node 26.7.0, and 20260728 every time on Node 25.6.1. That is why
+ * `check:pet-slide` was flaky (#496) — it was not measuring one park.
+ *
+ * So the answer is now asked directly, of the runtime rather than of a DOM
+ * global a harness can fake. `process.versions.node` is absent from the
+ * browser bundle (there is no `process` shim — `vite.config.ts`'s `define`
+ * block adds only `__APP_VERSION__`), so this is `false` in the game and
+ * `true` in every check, test and script.
+ */
+function inNode(): boolean {
+  const nodeProcess = (globalThis as { process?: { versions?: { node?: unknown } } }).process;
+  return typeof nodeProcess?.versions?.node === 'string';
+}
+
 /** Is there a save on this device — i.e. is somebody already playing a park? */
 function hasSave(): boolean {
   try {
@@ -213,7 +258,8 @@ function hasSave(): boolean {
  * position in her save; and only then a fresh draw from the pool.
  *
  * **Node, with nothing pinned, always lands on {@link CANONICAL_PARK_SEED}**,
- * because there is no `localStorage` for step two or four to use. That is what
+ * and since issue #496 that is enforced by {@link inNode} rather than left to
+ * depend on whether the runtime happens to have a `localStorage`. That is what
  * keeps every check script and the canonical test seed measuring exactly the
  * park they measured before this file existed.
  */
@@ -222,6 +268,16 @@ export function resolveParkSeed(): number {
   if (pinned !== null) {
     source = 'pinned';
     return pinned;
+  }
+
+  // **Node never draws a park.** A random seed is a thing a *child* gets, once,
+  // on a device that can remember it; a check script that drew one would be
+  // measuring a different park on every run, which is issue #496 exactly. See
+  // {@link inNode} for how that happened and why this is asked of the runtime
+  // rather than of `localStorage`.
+  if (inNode()) {
+    source = 'remembered';
+    return CANONICAL_PARK_SEED;
   }
 
   const store = storage();
