@@ -728,3 +728,25 @@ stalls and the track. The PR body was corrected. The lesson is the one this
 repo already writes down twice: quote the count off the screen, never the one
 you expected — and a control run against a *nearly* unfixed tree is not a
 control against the unfixed tree.
+
+### RESOLVED: both seeds re-searched, pool back to 16/16
+
+```
+seed   old vector      failure on the rebased tree    new vector             candidates
+ 24    waterFight:1    stranded 1 at (9.1, -55.8)     stall.skyCruiser:2     28
+428    (none)          stranded 6 along the top       fountain:2             16
+```
+
+`scripts/warp-search.mts`, `--control` first and passed. Both `stranded=0`
+with their own oracle passing.
+
+`vet:seeds -- --list <the 16 pool seeds>` on the re-baked head:
+**16/16, park=pass and invariants=pass on every seed, 88 invariants each**
+(`measurements/vet-pool-rebaked.jsonl`). No seed was swapped out of the pool
+to get there — the pool list is untouched.
+
+**Seed 428 is the one to remember.** It had *no* warp entry, because it passed
+unwarped before the rebase. So the absence of a vector is not evidence a seed
+survives a rebase; only a whole-pool vet is. It also has no per-seed invariant
+file, so `test:procgen` could not see it either — which is issue #510 in one
+seed.
