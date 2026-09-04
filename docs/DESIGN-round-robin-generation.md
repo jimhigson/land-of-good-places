@@ -324,6 +324,76 @@ unconstructible, because during round-robin there is no "yet".
 the hand-written fix, stop; the cost was ~two invisible weeks and the tests
 gained a registry.
 
+#### Stage 3, specified (3 Sep, after the spine landed as #499)
+
+**Where the pair's decisions are made today**, established by reading the
+merged code — the spec starts here because a migration that misidentifies
+the commit points migrates nothing:
+
+- `RAIL_RACE_PLAN` solves at **module load** of `railRace/plan` — an
+  *ungated* rung of `parkGeneration.ts`'s import ladder. The trestle legs
+  are then chosen even later, at `RailRace` **construction** in `World.ts`
+  (`buildRailRaceTrack`; the walk-past ring registers collision first and
+  the race ring's search sees those posts — negotiation by construction
+  order, working today, undocumented as such).
+- The road's route lives in `entrance/roadRoute.ts` (as of PR #498), and
+  the trestle search in `railRace/track.ts` avoids it via a **named road
+  corridor clause** — the hand fix is itself the two-definitions seam this
+  stage removes: the trestles name the road, the road names nothing, and
+  the next thing to arrive near either names neither.
+
+**The migration, in order — each step a small PR, byte-identical until the
+last:**
+
+1. **The road becomes a placer.** Its route computation moves out of
+   module-load/scene-construction into a scheduler task that publishes a
+   **corridor claim** to `GroundClaims`, with the built road consuming the
+   claimed centreline (one owner — the claim *is* the route, never a claim
+   copied from a route). The prewarm-letterbox pattern the cruiser, train
+   and slide already use is the template.
+2. **The trestles become a placer.** Each leg is a **footprint claim**
+   asked of the registry — the named road clause and the
+   construction-order collision trick both dissolve into "may I stand
+   here?". A refused leg retries along its ring (the search's existing
+   freedom), then backjumps via `blockers()`.
+3. **Confront the ladder** — the step that makes it round-robin rather
+   than a refactor. The two migrated placers' modules load **eagerly (or
+   behind data-readiness gates), not behind task-completion gates**, so
+   their tasks' `ready()` answers true while other tasks still run and the
+   scheduler genuinely interleaves them. At that point their `deps` and
+   claims become the real constraints; re-run the perturbation experiment
+   from the #499 review (relax a dep, watch the order change) to prove the
+   deps are now load-bearing — the four-of-six-inert measurement is the
+   "before" of that proof.
+4. **Negotiation, only now**: where road corridor and trestle footprint
+   want the same ground, the refusal path runs — trestle steps aside
+   first (cheap, many candidates); if no leg placement serves the ring,
+   the road's corridor re-draws. This is the first real backtrack across
+   a feature boundary, and its budget counters are the design's first
+   thrash measurement.
+
+**Determinism note:** stage 2's byte-identical guarantee ends at step 3 by
+design — interleaving changes draw order. Named per-placer substreams
+(`hash(seed, placerName, attempt)`) must land **with** step 3, not after
+it, or every later change to either placer reshuffles the whole park.
+
+**Acceptance, all measured on the built park:**
+
+- The universal invariant's road×trestle pairing green across the whole
+  pool with the named clause **deleted** from `track.ts`.
+- `check:entrance-road`'s swept-bus control (151 legs across 16 seeds in
+  PR #498's version) stays armed and green — it becomes the independent
+  instrument that the registry is not marking its own homework.
+- Beats the hand fix on the stated stakes: same or better clearances, no
+  named pairing left between the two placers, and the next feature placed
+  near either is covered with zero new code — which is the property the
+  hand fix structurally cannot have.
+
+**Sequencing against `fix/road-487-488`:** let it land first (it fixes a
+player-visible bug now, and its instruments are the acceptance harness
+above); the migration then *removes* its named clause and keeps its
+checks. Do not race it.
+
 ### Stage 4 — paths, railway, crossings migrate together (large; parks change)
 
 The heart of Jim's brief. Path growth, railway corridor and crossing
