@@ -936,15 +936,12 @@ export class Game {
       // rides down is a real parade rather than a stand-in; three species,
       // matching the three `check:pet-slide` measures the descent with.
       if (stallId === 'ginormousSlideWithPets') {
-        // Idempotent by hand: `catchWildPet` is `grantFree`, not
-        // `grantFreeOnce`, so pasting the link twice would otherwise leave her
-        // trailing six animals — the exact "five identical pets" fault
-        // `grantFreeOnce` exists to prevent, one caller over.
-        const owned = new Set(gameStore.get().inventory.map((item) => item.id));
+        // `catchWildPetOnce`, because somebody will paste this link twice and
+        // six animals would trail her. The store owns "already got one" — an
+        // ownership test written here would be a second description of it.
         for (const id of ['pet.kitten', 'pet.bunny', 'pet.mouse']) {
-          if (owned.has(id)) continue;
           const spec = shopItem(id);
-          if (spec) gameStore.catchWildPet(spec);
+          if (spec) gameStore.catchWildPetOnce(spec);
         }
         return this.world.building.requestBoardSlide(false);
       }
