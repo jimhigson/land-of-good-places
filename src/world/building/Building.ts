@@ -520,6 +520,17 @@ export class Building implements GameSystem {
   private chaseGaveUp = 0;
 
   /**
+   * How many frames of this descent the chase solve could not place the lens.
+   *
+   * Exposed because a counter nobody reads is not a guard — and this one
+   * carried a comment saying `check:pet-slide` asserted it was zero for as long
+   * as no such assertion existed. The check now really does read it.
+   */
+  chaseSolveGaveUpFrames(): number {
+    return this.chaseGaveUp;
+  }
+
+  /**
    * The building's own space. Added straight to the scene rather than to the
    * `building` anchor plot, because it is nowhere near the plot — that is the
    * whole idea.

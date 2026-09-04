@@ -1136,6 +1136,27 @@ async function ride(wired: boolean): Promise<RunResult> {
     );
   }
 
+  // **The chase solve found a lens placement on every frame.** `solveChaseEye`
+  // walks back and up until the child and her nearest companion are both inside
+  // the frustum and the lens is clear of the ground; if nothing in range does
+  // both it reports `gaveUp` rather than clamping, because a shipped game must
+  // not throw at a child mid-ride.
+  //
+  // Without this clause that counter had no reader at all — while `Building.ts`
+  // carried a comment stating this check asserted it was zero. A guard nobody
+  // reads is not a guard, and a comment claiming an assertion that does not
+  // exist is worse than silence.
+  const chaseGaveUp = building.chaseSolveGaveUpFrames();
+  if (chaseGaveUp > 0) {
+    say(
+      'the chase solve found a lens',
+      `the chase camera solve gave up on ${chaseGaveUp} frames of the descent — no placement ` +
+        'within its range put the child and her nearest companion both in shot while keeping ' +
+        'the lens out of the ground, so the shot those frames drew is one the solver knows is ' +
+        'wrong. Widening the range is not the fix; the placement is wanted, not the clamp',
+    );
+  }
+
   parade.dispose();
 
   console.log(
