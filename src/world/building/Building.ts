@@ -1707,6 +1707,11 @@ export class Building implements GameSystem {
         // Vertical half-fov in radians, asked of the camera rather than
         // restated: `RideCamera` owns it and a copy would drift.
         (this.rideView!.camera.fov * Math.PI) / 360,
+        // Aspect from the live camera too, for the same reason: the solve's
+        // frame-share estimate is about the shot as it will actually be drawn,
+        // and a portrait phone frames a companion very differently from a
+        // landscape desktop.
+        this.rideView!.camera.aspect,
       );
       if (solved.gaveUp) this.chaseGaveUp += 1;
       this.eyeBoom.position.set(0, solved.up, solved.back);

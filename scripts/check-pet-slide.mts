@@ -104,6 +104,13 @@ const { shopItem } = await import('../src/world/building/shops/catalogue.ts');
 const { PARK_SEED } = await import('../src/world/parkManifest.ts');
 const { parkSeedSource } = await import('../src/world/parkSeedPool.ts');
 const { terrainHeight } = await import('../src/world/terrain.ts');
+// **The framing band has one owner**, `src/world/slide/petFraming.ts`, because
+// the camera solve has to respect the same two numbers while PLACING the lens.
+// A copy here would be the two-definitions fault inside the fix for a
+// two-definitions fault. This file measures the band; it does not define it.
+const { PET_FRAME_FLOOR, PET_FRAME_CEILING } = await import(
+  '../src/world/slide/petFraming.ts'
+);
 type InteriorControls = import('../src/world/building/Building.ts').InteriorControls;
 
 // **Say which park was measured, on every run, pass or fail.** Every clause in
@@ -184,7 +191,7 @@ const REGROUP_SECONDS = 3;
  * clipping the border would. It is a floor on "is it in the picture at all",
  * and {@link PET_FRAME_CEILING} is the ceiling on the same measurement.
  */
-const PET_FRAME_FLOOR = 0.01;
+
 
 /** The fraction of chase rasters the nearest companion must be in the shot on. */
 const IN_SHOT_FLOOR = 0.95;
@@ -220,7 +227,7 @@ const RASTER_H = 68;
  * case and far below the wall-of-fur one, so it cannot be satisfied by
  * accident and cannot fail correct behaviour.
  */
-const PET_FRAME_CEILING = 0.25;
+
 
 /**
  * How far back a companion has to be lying for this to call it lying down,
