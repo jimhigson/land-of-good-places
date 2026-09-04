@@ -168,6 +168,55 @@ tissue from *not* having this; expect most to collapse into the one
 mechanism, and be honest that a few encode real per-placer knowledge and will
 merely get simpler.
 
+### A feature's own supports are claims: the slide-leg evidence (3 Sep)
+
+Jim asked why a slide leg has to land in the train's path on one of the
+pool's parks. It doesn't — no leg is ever built there. What ships instead is
+a stretch of unsupported chute, and the mechanism is worth recording because
+it is the cleanest specimen yet of the disease this design exists to cure,
+in a place none of the ten ground models can see:
+
+- `src/world/slide/solve.ts` picks the chute's route on gradient and length,
+  then hands it over as fixed. It knows the rail corridor exists (it keeps
+  the *chute* and the *exit* off it) — but it never asks whether the route
+  it is committing can be **held up**.
+- `src/world/slide/supports.ts`'s `planSlideLegs` fits legs underneath
+  afterwards — called from `Building.ts` at scene build, long after the
+  route froze. A leg's only freedom is to slide **along** the chute
+  (`NUDGES`, ±10 m); it cannot move sideways, because sideways is no longer
+  under the chute.
+- So where the chute crosses ground no post may stand on — the train's
+  path, the paved network, a plot — every candidate in that stretch fails
+  every test, and the planner's own comment states the policy: *"one that
+  cannot is simply skipped."* The chute goes unsupported, and nothing
+  refuses anything.
+
+This is #317/#319 again — a generator committing before the thing that
+constrains it exists — with one twist that earns it its own section: the
+colliding parties are **the same feature**. The route and its legs are one
+placer's two halves, and today's shape lets the first half freeze before the
+second half has asked its first question. Two design consequences, both
+binding on the migration stages:
+
+- **A feature's derived placements are claims like any other, made
+  interleaved with the parent decision, in the parent's own turns.** The
+  slide's placer claims a route segment *and the legs that stretch needs*
+  as it grows; a leg that cannot claim ground is a refusal that backtracks
+  into the route while the route is still cheap to bend — rung 1 re-draws
+  the segment, rung 3 unwinds further, and per Jim's ruling above the
+  unwind may go as far as moving the castle the slide hangs from. The same
+  family: the rail race's trestles, the cruiser's pylons, any elevated
+  thing with feet.
+- **A silent skip is a refusal with the alarm unplugged.** "A gap in the
+  supports is a much smaller problem than a paddock in the middle of the
+  park" was the right call *within* a planner that cannot move the route;
+  under this design the premise is gone, and the pattern is banned:
+  a placement a feature needs either succeeds, or backtracks, or fails the
+  build loudly within budget. "Elevated structure is supported" (the
+  invariant already wants one leg per 20 m) joins the **hard** list in the
+  quality tier below — it is anything-that-looks-solid-must-be-solid's
+  sibling: anything that looks held up must be held up.
+
 ### Smarter than blind backtracking (Jim: "looking ahead a couple steps — premature optimisation or genuine help?")
 
 This is a constraint-satisfaction search, and CSP practice settled the
