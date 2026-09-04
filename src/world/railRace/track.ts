@@ -25,6 +25,7 @@ import { archFeet } from './arch';
 import { PARK_LAYOUT } from '../parkLayout';
 import { distanceToRailCorridor } from '../train/plan';
 import { TALLEST_CHILD_HEIGHT } from '../../art/models/kid';
+import { CAT_BUS_BODY_TOP_Y } from '../entrance/catBus';
 import { isInEntranceRoad } from '../entrance/roadRoute';
 import type { CollisionWorld } from '../Collision';
 import { railFrameAt, sweptRails, type RailFrame, type RailSampler } from '../rail/sweptRail';
@@ -1294,6 +1295,54 @@ function addPostCollider(collision: CollisionWorld, foot: Vector3, top: Vector3,
   }
 }
 
+
+/**
+ * **Does the whole post — not just its foot — stay out of the road the bus
+ * drives?**
+ *
+ * A trestle's foot is where `searchForClearGround` put it; its top is fixed by
+ * `at`, because a branch top is the middle of the lane it carries and no nudge
+ * moves it. So nudging the foot out of the corridor tilts the post back over
+ * it, and asking only about the foot answers a question nobody was asking.
+ *
+ * The corridor is plan-view and height-agnostic, so this walks the post's own
+ * plan-view span over the heights the **bus body** occupies — below the chassis
+ * and above the roof there is nothing to hit — and asks the corridor about each,
+ * at the post's own tapering radius.
+ */
+function postClearsEntranceRoad(
+  route: RailRaceRoute,
+  at: number,
+  footX: number,
+  footZ: number,
+  footRadius: number,
+): boolean {
+  // The trunk top is the horizontal mean of the lanes it carries, which is how
+  // `buildTrestles` derives it — asked of the route here rather than restated.
+  let topX = 0;
+  let topZ = 0;
+  let topY = 0;
+  const point = new Vector3();
+  for (let lane = 0; lane < LANE_COUNT; lane += 1) {
+    route.pointAt(lane, at, point);
+    topX += point.x / LANE_COUNT;
+    topZ += point.z / LANE_COUNT;
+    topY += point.y / LANE_COUNT;
+  }
+  const rise = topY - terrainHeight(footX, footZ);
+  if (rise <= 0) return !isInEntranceRoad(footX, footZ, footRadius);
+  // Only as far up the post as there is bus to meet.
+  const reach = Math.min(1, CAT_BUS_BODY_TOP_Y / rise);
+  const steps = Math.max(1, Math.ceil((Math.hypot(topX - footX, topZ - footZ) * reach) / 0.25));
+  for (let i = 0; i <= steps; i += 1) {
+    const t = (i / steps) * reach;
+    if (isInEntranceRoad(footX + (topX - footX) * t, footZ + (topZ - footZ) * t, footRadius)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /**
  * Every one of `trestleSpots`'s ground-clearance predicates, together.
  *
@@ -1328,14 +1377,29 @@ function groundIsClear(
   z: number,
   collision: CollisionWorld,
   footRadius: number,
+  route?: RailRaceRoute,
+  at = 0,
 ): boolean {
   if (!collision.isClearCircle(x, z, 1.1)) return false;
   if (distanceToPath(x, z) < 2.8) return false;
   if (distanceToRailCorridor(x, z) < 2.4) return false;
-  // The leg's own foot, not a hand-picked margin: the collider `track.ts`
-  // registers for it is `POST_FOOT_RADIUS` wide, so that is exactly how much of
-  // the road a leg standing here would take away from the bus.
-  if (isInEntranceRoad(x, z, footRadius)) return false;
+  // **The whole post, not just its foot.**
+  //
+  // This asked `isInEntranceRoad(x, z, footRadius)` — the foot alone — and was
+  // very nearly inert because of it. Measured with `check:entrance-road`
+  // sweeping posts rather than feet: turning this clause *entirely off* changed
+  // the count from 8–9 posts in the bus to 8–10. It was removing about one post
+  // in nine, and the check agreed with it only because the check had the
+  // identical blind spot.
+  //
+  // A nudged post keeps its top under the rails while its foot moves, so moving
+  // the foot out of the road leans the post straight back into it. The corridor
+  // is a plan-view swept body, so what has to clear it is the post's whole
+  // plan-view span over the heights the bus body occupies — which is what
+  // `postClearsEntranceRoad` asks. A candidate that fails is a **different
+  // decision to try**, not a floor to settle at: `searchForClearGround` walks on
+  // to the next radial nudge, exactly as it does for every other refusal here.
+  if (route && !postClearsEntranceRoad(route, at, x, z, footRadius)) return false;
   const pinchesCorridor = [...PARK_LAYOUT.entries.values()].some(
     (entry) => Math.hypot(x - entry.x, z - entry.z) < entry.boundingRadius + 2.4,
   );
@@ -1466,7 +1530,7 @@ function searchForClearGround(
       const sample = route.path.sampleAt(at);
       const x = sample.x + sample.normalX * dr;
       const z = sample.z + sample.normalZ * dr;
-      if (groundIsClear(x, z, collision, footRadius)) return { at, x, z };
+      if (groundIsClear(x, z, collision, footRadius, route, at)) return { at, x, z };
     }
   }
   return null;
