@@ -815,6 +815,46 @@ function buildFoliage(collision: CollisionWorld): {
   const bushColliders: BushCollider[] = [];
   /** Radius of the collider a clump registers, and so the ground it occupies. */
   const BUSH_COLLIDER = 0.85;
+  /**
+   * **The ground one clump claims**, and therefore the radius every
+   * obstacle question below is asked with.
+   *
+   * The same number as {@link BUSH_COLLIDER}, and named separately only so
+   * the two readings stay one owner rather than one literal used for two
+   * jobs: this is the footprint `PlacedBush.radius` publishes, the footprint
+   * `ParkFacts` measures a violation against, and the footprint a walking
+   * child actually meets. Not {@link BUSH_REACH} — that is the wider figure
+   * (2.15 m, the farthest a blob's leaf can hang) which the *paving* rules
+   * want, because a blob overhanging a path is something you trip on, while a
+   * blob overhanging a metre of open lawn beside a fence is just a bush.
+   *
+   * Stated because it is a real under-approximation and somebody will meet
+   * it: a clump's drawn blobs reach further than the ground it claims, so a
+   * leaf may still hang over a wall it does not stand in. That is the same
+   * plan-view/3D gap `PlacedBush.radius` has always carried and it belongs to
+   * whoever gives a bush a truthful published footprint, not here.
+   */
+  const BUSH_GROUND_CLAIM = BUSH_COLLIDER;
+  /**
+   * Accepted clumps, held back from `collision` until the loop is done.
+   *
+   * **A bush must not see its own siblings as obstacles.** The world query
+   * below is deny-by-default against everything else in the park, and if a
+   * clump's own collider went in as it was accepted then clump *k* would be
+   * refused by clump *k-1* — the scatter would starve itself, and what
+   * survived would depend on the order candidates happen to be drawn in
+   * rather than on the park. Foliage legitimately abuts foliage: a run of
+   * touching clumps is a hedge, which is the look this park wants, and
+   * within-feature spacing is a different question from "does this grow
+   * through something else" (the universal overlap invariant excludes it for
+   * the same reason).
+   *
+   * So registration is deferred to one batch after the loop. Locality is
+   * untouched — candidate *k*'s fate still depends only on its own roll and
+   * on the world as it stood before any bush — and it is in fact *stronger*
+   * than before, because no earlier bush can now move a later one.
+   */
+  const acceptedClumps: { x: number; z: number; instanceStart: number; blobs: number }[] = [];
   attempts = 0;
   // **A fixed budget, and no target count — the two are not compatible.**
   //
@@ -840,23 +880,53 @@ function buildFoliage(collision: CollisionWorld): {
   //
   // Every seed used to get 108, because the old fill-to-N loop had 4-5x the
   // candidates it needed on all of them. So the bar is: **no seed plants fewer
-  // than the 108 it used to.** Measured across the five CI seeds:
+  // than the 108 it used to** — and, since #500, no seed plants fewer than it
+  // did the day before #500 either.
   //
-  //   budget   canonical   s2    s5   s11   s18   worst
-  //     1050        108    86   103   106   102      86   <- seed 2 stripped
-  //     1200        131   105   118   119   116     105   <- still under
-  //     1300        138   118   126   129   127     118
-  //     1400        149   128   137   142   140     128   <- chosen
-  //     1500        164   138   151   157   151     138
+  // **The table that used to sit here was stale and read as authoritative.**
+  // It quoted seeds 2 and 18, which have not been in the pool since #426
+  // swapped the sweep to 5 / 11 / 24 / 131, and counts (149 / 128 / 137 / 142
+  // / 140) that the park had long since left behind — the same budget of 1400
+  // actually planted **286 / 263 / 203 / 358 / 354** on `main` the day #500
+  // was fixed, because every path, plot and wall change since had moved the
+  // accept rate. Re-measured from scratch rather than extended.
   //
-  // 1400 is the first value with real headroom over the 108 floor on the
-  // *worst* seed (128, so 20 clumps of slack) rather than merely clearing it,
-  // which matters because the count moves whenever the geometry does — a park
-  // change that paves more lawn takes a bite out of every seed at once.
+  // Refusing walls and trees (#500) costs roughly two candidates in three, so
+  // the budget has to buy them back. Measured on the current five CI seeds,
+  // clump counts, every row proved to have **zero** wall or tree
+  // interpenetration:
+  //
+  //   budget   canonical    s5   s11   s24  s131   worst
+  //     1400          83    96    65   161   155      65   <- under the floor
+  //     3000         204   195   140   342   322     140
+  //     4200         295   266   201   483   456     201   <- chosen
+  //     5000         355   305   232   582   536     232
+  //
+  // 4200 is the smallest of these at which **no seed is thinner than it was
+  // before #500** (295 >= 286, 266 >= 263, 201 ~ 203, and s24/s131 well up),
+  // which is the honest bar: a fix for bushes growing through fences should
+  // not also quietly strip a fifth of the park's ground cover.
+  //
+  // **What it costs, stated as measured rather than as hoped.** Headless
+  // `buildMs`, one sample either side, so indicative only: seed 11 came out at
+  // 2.38 s and 1.78 s at 4200 against 2.47 s and 2.00 s at 1400 — no
+  // regression, faster on one run — and three other seeds likewise moved
+  // within noise. **One seed did not: 1888 ms to 2291 ms, +21%.** So the
+  // honest summary is "no measured regression on four parks and about a fifth
+  // of a second on the fifth", and the first draft of this comment said
+  // "nothing measurable", which was true of four parks and false of the one
+  // that mattered. Nobody has taken repeated samples. If that fifth of a
+  // second ever matters, the lever is this number and the table above says
+  // what each value buys.
+  //
+  // It is not more draw calls either way: bushes are a single `InstancedMesh`,
+  // so extra clumps cost vertices and nothing else. The extra work per
+  // candidate is a bounded scan, and the bush colliders are registered after
+  // the loop rather than inside it, so the scan does not grow as clumps land.
   //
   // Locality is unaffected by the number: candidate k is evaluated if and only
   // if k < budget, whatever the budget is.
-  const BUSH_BUDGET = 1400;
+  const BUSH_BUDGET = 4200;
   while (attempts < BUSH_BUDGET) {
     attempts += 1;
     const rng = candidateRng(BUSH_SALT, attempts);
@@ -873,6 +943,71 @@ function buildFoliage(collision: CollisionWorld): {
     if (!isPlantable(x, z, BUSH_REACH)) continue;
     if (!clearOfCruiser(x, z, BUSH_REACH, BUSH_TOP)) continue;
     if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + BUSH_TOP)) continue;
+    // **...and then the same three questions every other plant here asks, of
+    // the same three owners.** Issue #500: until this branch the bush
+    // scatter's whole idea of an obstacle was `isPlantable` — paving, plots,
+    // the railway, ride exits, the plaza — so *walls and trees were invisible
+    // to it*, and had been for as long as both existed. Measured on the
+    // built park, five CI seeds: **64 clumps standing inside a wall run**
+    // (worst 1.17 m, on a 0.1 m-thick wooden fence a child can see straight
+    // through) and **653 standing inside a tree's own footprint** (worst
+    // 3.89 m, a clump growing out of a trunk). A player sees bushes sprouting
+    // through fence rails and out of tree trunks.
+    //
+    // The fix is deliberately *not* "add walls and trees to the list" — that
+    // buys today's two pairings and leaves the next sibling system just as
+    // invisible, which is the private-obstacle-list disease
+    // `docs/DESIGN-round-robin-generation.md` exists to end. Instead a
+    // candidate is put to the three things that actually know what ground is
+    // taken, none of them a list this loop owns:
+    //
+    // 1. `collision` — **the real collision world as it stands at this
+    //    moment**, which is the standing rule from CLAUDE.md's "Procgen
+    //    backtracks on collision, always". Deny-by-default: whatever any
+    //    sibling system has registered by now refuses this spot without this
+    //    loop having to know the sibling exists.
+    //
+    //    **Be clear about how little that is today, because the shape of the
+    //    query flatters it.** `Scenery` is built early — `World`'s
+    //    constructor stands up the hotel, the stalls, the lamps, the rides,
+    //    the keychain shop and the entrance *after* it — so at this instant
+    //    the world holds the garden's boundary masonry and the tree trunks
+    //    planted a few dozen lines above, and almost nothing else. This is
+    //    not a query that currently catches much; it is a query that cannot
+    //    go blind. A list would have to be edited by whoever adds the next
+    //    system, and would not be; this gets it for free the day `Scenery`
+    //    moves later in the order, or the day something moves before it.
+    // 2. `wallPlan()`, via `clearOfWalls` — the walls are *not* in the
+    //    collision world yet (`Scenery`'s constructor stands them up after
+    //    `buildFoliage` returns), but they are a fully-solved pre-scene plan,
+    //    which is exactly why `tryPlantTree` asks it rather than the world.
+    //    Same owner, same call, so a wall the trees avoid is a wall the
+    //    bushes avoid.
+    // 3. `planted` — a tree's *canopy*, which the collision world does not
+    //    hold either: a tree registers only its trunk (`0.55 * lean`), while
+    //    what a player sees is a ball reaching up to `TREE_REACH` out. This
+    //    is the same array, holding the same reach, that every tree is
+    //    already refused against by its neighbours; bushes now go through the
+    //    identical gate rather than a second copy of the rule.
+    //
+    // Cleared against {@link BUSH_COLLIDER} — the clump's own published
+    // footprint (`PlacedBush.radius`), which is what `ParkFacts` measures and
+    // what a walker actually meets — rather than `BUSH_REACH`, which is the
+    // wider figure the *paving* rules want because a stray blob hanging over
+    // a path is a thing you trip on. One owner either way; the two answer
+    // different questions.
+    //
+    // And on a refusal this **drops the candidate** rather than nudging it or
+    // relaxing a clearance: a bush is decoration and has no claim on ground
+    // something solid already holds. The budget below is what buys the count
+    // back, exactly as the tree scatter's attempt budget does.
+    if (!collision.isClearCircle(x, z, BUSH_GROUND_CLAIM)) continue;
+    if (!clearOfWalls(x, z, BUSH_GROUND_CLAIM, 0)) continue;
+    if (
+      planted.some((tree) => Math.hypot(x - tree.x, z - tree.z) < tree.reach + BUSH_GROUND_CLAIM)
+    ) {
+      continue;
+    }
 
     // Bushes come in clumps of two or three overlapping blobs.
     const blobs = rng.int(2, 3);
@@ -895,9 +1030,20 @@ function buildFoliage(collision: CollisionWorld): {
         shade: rng.range(0.9, 1.1),
       });
     }
-    const bushColliderId = collision.addCircle(x, z, BUSH_COLLIDER);
-    bushColliders.push({ id: bushColliderId, instanceStart, instanceCount: blobs });
-    bushClumps.push({ x, z, radius: BUSH_COLLIDER });
+    acceptedClumps.push({ x, z, instanceStart, blobs });
+  }
+
+  // The deferred batch — see {@link acceptedClumps}. Order is the order the
+  // candidates were accepted in, so `bushColliders` and `bushClumps` stay
+  // index-parallel exactly as `Scenery.clearTreesNear` requires.
+  for (const clump of acceptedClumps) {
+    const bushColliderId = collision.addCircle(clump.x, clump.z, BUSH_COLLIDER);
+    bushColliders.push({
+      id: bushColliderId,
+      instanceStart: clump.instanceStart,
+      instanceCount: clump.blobs,
+    });
+    bushClumps.push({ x: clump.x, z: clump.z, radius: BUSH_COLLIDER });
   }
 
   // Flowers used to be scattered here too, as static decoration. They are now
@@ -1428,8 +1574,18 @@ function wallPlan(): WallPlan {
 }
 
 /**
- * Is there room for a tree of `reach` here, clear of every wall the park is
+ * Is there room for a plant of `reach` here, clear of every wall the park is
  * about to stand up?
+ *
+ * `gap` is the breathing space *on top of* the two half-widths, and it
+ * defaults to {@link TREE_WALL_GAP} because a tree is what asked first. The
+ * bush scatter passes **0**, deliberately: `TREE_WALL_GAP` is two player radii
+ * and exists so a canopy does not lean out over a wall a child then has to
+ * squeeze past, and a bush has no canopy to lean. A clump standing *against* a
+ * fence is a good look and is legal — it is a clump standing *inside* one that
+ * issue #500 is about. Passing the reach and the gap separately, rather than
+ * folding the gap into the reach at the call site, keeps one owner for "how
+ * wide is this wall" and lets each caller state its own reason.
  *
  * Deliberately **not** folded into {@link isPlantable}, tempting though that
  * is: the wall generator's own {@link runIsClear} calls `isPlantable` for every
@@ -1442,9 +1598,9 @@ function wallPlan(): WallPlan {
  * pre-scene plan, and the walls are a pure pre-scene plan too. Neither needs
  * the collision world, so both are known before a single tree is planted.
  */
-function clearOfWalls(x: number, z: number, reach: number): boolean {
+function clearOfWalls(x: number, z: number, reach: number, gap: number = TREE_WALL_GAP): boolean {
   for (const run of wallPlan().all) {
-    const needed = WALL_HALF_WIDTH[run.kind] + reach + TREE_WALL_GAP;
+    const needed = WALL_HALF_WIDTH[run.kind] + reach + gap;
     if (pointToSegment([x, z], run.from, run.to) < needed) return false;
   }
   return true;
