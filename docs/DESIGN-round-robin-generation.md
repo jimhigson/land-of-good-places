@@ -444,7 +444,10 @@ technically valid and visually nonsense.
 - **Hard** (a violation backtracks out, on any seed, by construction): every
   door / ride entrance / seat served flush; no corridor clumping or
   self-overlap; junctions merged, never aprons; zero level crossings (kept
-  from the parent work); nothing overlaps a walkable-must-remain.
+  from the parent work); nothing overlaps a walkable-must-remain; **elevated
+  structure is supported** — a chute, track or deck whose feet cannot all
+  claim ground is a refused placement, never a thing shipped with gaps in
+  its legs (the slide-leg evidence above).
 - **Soft** (search costs, bounded by invariants): approximate grid layout, no
   pointless mini-turns or twists; things roughly evenly spaced around the
   park; sensible detour ratios — the existing detour invariant graduates
