@@ -1126,3 +1126,80 @@ Node the repo actually requires, not only on the one this laptop defaults to.
 The seam measurements in the sections above (`probe-gateway-seam.mts`) were
 taken on Node 25.6.1; the coplanar ratchet that agrees with them has now been
 run on both.
+
+---
+
+# Review of #498: changes requested (3 September, session 5 cont.)
+
+CI on `01f9281a`: **all five jobs pass** (Checks, Coplanar faces, Procgen
+invariants, Deploy PR preview, A reload gets the new build).
+
+## The blocker — a real regression this branch causes
+
+On `origin/main` the worst trestle leg **centre-vs-foot drift is 0.00 m** on all
+six seeds measured: legs are vertical because `RADIAL_NUDGES` never fires. This
+branch's `isInEntranceRoad` clause in `groundIsClear` (`track.ts:1276`) makes
+those nudges fire **for the first time**, so legs now lean — 2.00 m drift, 4–5
+legs a seed on the walk-past ring — and **each has its drawn post at 1.4 m
+standing 0.30–0.91 m from the centre of a 0.272 m collider, up to 3.3x the
+radius.** Collision is plan-view, so a child walks through the upper half of a
+visible post. First rule of the project.
+
+### Root cause, located
+
+- `track.ts:875` — `trunkFoot.set(spot.x, ground, spot.z)`, the **nudged** spot.
+- `track.ts:868` — `trunkTop` is derived from the lane tops, which are **not**
+  nudged (`route.pointAt`, deliberately: a branch top is the middle of the lane
+  it carries).
+- So a nudged leg leans by construction, and that is intended — the comment at
+  872 says so.
+- `track.ts:894` — `collision.addCircle(spot.x, spot.z, POST_FOOT_RADIUS *
+  ringSizeVsRace)`. **One circle, at the foot only.** That is the whole bug: the
+  drawn post's plan-view footprint is a *segment* once it leans, and the
+  collider is a point.
+
+### The fix, and the one thing not to get wrong
+
+Cover the post's plan-view span with a chain of circles from the foot to where
+the post reaches **child height** — *not* all the way to `trunkTop`. The top is
+6 m up under the rails; a collider running the full lean would block ground a
+child can walk on with nothing overhead, and `keepOutsFor` owns that ground.
+So: foot → the post's position at the tallest child's height, spaced finely
+enough that the chain has no waist (r/2 spacing gives a 8 mm waist on a 0.272 m
+radius).
+
+**And the assertion.** Session 4 moved the leg invariant midpoint→foot, which
+fixed the *collider* question and left the **mesh-versus-collider** question
+unasked — and it is now answerable "no". The new invariant must ask: is the
+drawn post, at every height a child can touch, inside a collider? That is the
+one that would have caught this.
+
+## Also requested
+
+- **Must-fix comment**: `buildTreeline`'s claim that *"the RNG stream is
+  untouched and every tree that is not in the road stands where it did"* is
+  **false** — the `continue` sits above six `rng` draws. Measured: 436 vs 494
+  trunks (so 58 felled is right), but **only 115 of 436 survivors stand where
+  they did**, diverging from the second tree. Cosmetic in effect. The same
+  sentence is already on `main` for the sibling clause — correct both.
+- `isInEntranceRoad(x, z, radius = 0)` is `0 < 0`, false in the dead centre of
+  the road.
+- Orphaned `ENTRANCE_ROAD_OUTSET` comment in `roadRoute.ts`.
+- `Entrance.ts`'s "kerb's length is measured" block still describes the deleted
+  straight-kerb algorithm.
+- `CORRIDOR_SAMPLE_SPACING` is 0.2 under a comment saying "a quarter of a metre".
+- Two dead exports.
+- **PR body is stale**: says "not mergeable, coplanar red" (green locally and in
+  CI), "38400 road triangles" (now 81008), "81.6 m from the gate" (measured 79.5).
+
+## What survived attack (verified by mutation, not reasoning)
+
+The impossibility argument holds and is *understated* — excluded band
+(1.93, 11.07) against an allowed [3.89, 8.11]; the doc's 4.4 m should be
+**4.57**. The facing clause fires hard (4544 of 5216 triangles down under
+mutation, 0 unmutated). **`check:cat-bus` did not define a defect away**:
+renaming the three `entrance-gateway-path*` meshes gives exit 1 with all three
+clauses firing, the old question still asked verbatim and still failing — only
+*which meshes count* changed, because the surface was renamed. The rebase is
+clean: the three dropped imports serve only main's `kerbReach` and `halfBus`,
+both replaced here, and `gateArch.ts` is byte-identical, so #482 is intact.
