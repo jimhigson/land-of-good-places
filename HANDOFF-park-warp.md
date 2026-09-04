@@ -705,3 +705,26 @@ The PR body now states plainly that this branch fixes a **pre-existing visible
 bug** — flowers growing in the railway ballast and inside lamp posts, 15 on the
 canonical park today by the control measurement. That is the one thing in this
 diff a person can see.
+
+### Correction: the flowers-inside-solids number on `main` is 146, not 15
+
+I first published "15 on the canonical park on `main`". **That was wrong, and
+it was an extrapolation rather than a measurement** — the 15/15/6 control was
+this *branch* with only the settle pass removed, so it still had the railway
+check and the sowing-time collision query doing most of the work. `main` has
+neither.
+
+Measured properly, same predicate both sides (is the flower's own footprint
+clear of the finished collision world), on `origin/main` c95facf6:
+
+| seed | `main` | this branch |
+|---|---|---|
+| 20260728 | **146** of 400 | 0 |
+| 11 | **121** of 400 | 0 |
+| 225 | **149** of 400 | 0 |
+
+Over a third of the meadow, standing inside tree trunks, wall runs, lamp posts,
+stalls and the track. The PR body was corrected. The lesson is the one this
+repo already writes down twice: quote the count off the screen, never the one
+you expected — and a control run against a *nearly* unfixed tree is not a
+control against the unfixed tree.
