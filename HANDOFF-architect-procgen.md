@@ -80,10 +80,30 @@ unserved door demand). Two binding notes: search outcomes may legitimately
 change when a sibling claims between turns (budget counters measure the
 rate), and the exploration query MUST be the same function as the commit
 check — otherwise the two-definitions disease reappears inside one
-mechanism. First customer: the slide (ruled). While #498 is unmerged, the
-open design debts are: cost model for section size (how much geometry per
-turn), and whether crossingSites' feasibility march becomes claims or stays
-a solver.
+mechanism. First customer: the slide (ruled).
+
+## Checkpoint — both named design debts closed (3 Sep)
+
+- **Section size is derived, never typed**: one decision of the growing
+  search — one `turnVocabulary` segment for everything on the shared
+  generator. No `SECTION_LENGTH` constant, ever (typed-not-derived bug
+  class). Claims map 1:1 to decisions so backjumping can land on the
+  decision a blocker names. Scatter placers may batch; route placers
+  commit one segment per turn — coarser commits only via a measured
+  proposal back to the doc.
+- **crossingSites reclassified as exploration**: the march survives as a
+  solver and its prewarm boot-slicing with it, but its sites are
+  candidates, not reservations — a site is claimed only when a real
+  path×rail conflict consults it, provisionally. Staleness handled by the
+  one-function rule (commit refusal catches it), NOT by a cache
+  invalidation protocol. General rule set: a computed overview may inform
+  decisions; only a claim makes ground yours.
+
+Remaining while #498 is unmerged: nothing owed to stage 3/4 spec-wise that
+this agent knows of. Candidate next work: review the doc end-to-end for
+internal contradictions after tonight's six additions, or begin the
+stage-5 migration checklist (per-placer inventory of private obstacle
+lists to dissolve).
 - Stage 3 remains: migrate the entrance road + rail-race trestles pair, and
   **confront the import ladder** (see `parkGeneration.ts`'s module header —
   the ladder, not the deps, serialises today; four of six deps measured
