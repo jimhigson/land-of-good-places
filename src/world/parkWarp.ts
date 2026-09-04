@@ -112,12 +112,22 @@ const WARPS_BY_SEED: Readonly<Record<number, WarpVector>> = {
   // 81 of its own invariants unwarped — check:park still strands 10 waypoints
   // on it. Both gates, or it is not a vector.
   5: { layout: { waterFight: 1 } },
-  // Not a stranded seed: 24's unwarped network crossed the rail at railD
-  // 47.8, off every proven site — absorbed silently as a fence gap while
-  // the level tier existed, invisible to check:park (which samples only
-  // the entrance route), surfaced the moment crossings.ts learned to
-  // throw. Its own invariant file proved the fix (81/81).
-  24: { layout: { waterFight: 1 } },
+  // Not a stranded seed originally: 24's unwarped network crossed the rail
+  // at railD 47.8, off every proven site — absorbed silently as a fence gap
+  // while the level tier existed, invisible to check:park (which samples only
+  // the entrance route), surfaced the moment crossings.ts learned to throw.
+  //
+  // **Re-searched 3 Sep 2026, after this branch was rebased onto main
+  // c95facf6.** The old vector was {waterFight:1}, baked before #499's
+  // round-robin spine reordered generation, #502 moved the bushes and #508
+  // stopped check scripts building a randomly drawn park. On the rebased tree
+  // it strands one waypoint at (9.1, -55.8) — check:park red, all 88
+  // invariants still green, which is the same split 115 showed in the other
+  // direction and the reason the whole pool has to be vetted rather than
+  // either gate trusted. Control run first and passed; SOLVED after 28
+  // candidates, stranded=0, oracle=pass.
+  // (measurements/warp-search-post-rebase-24-428.jsonl.)
+  24: { layout: { 'stall.skyCruiser': 2 } },
   // 225 was one of the full pool re-vet's catches (2 Sep): green under
   // check:park, red under the invariant suite (Sky Cruiser clearance) — the
   // same #437 shape as 326. Proved with a throwaway vet-style oracle, since
@@ -166,6 +176,20 @@ const WARPS_BY_SEED: Readonly<Record<number, WarpVector>> = {
   // Re-searched 2 Sep 2026: SOLVED after 3 candidates, stranded=0,
   // oracle=pass.
   326: { layout: { building: 1 } },
+  // **New on 3 Sep 2026, and the one that shows a seed can go bad without
+  // ever having had a vector.** 428 passed both gates unwarped on this branch
+  // before the rebase (measurements/rebased-vet-seeds.jsonl records it), so
+  // it had no entry here at all. Rebased onto main c95facf6 it strands six
+  // waypoints, clustered along the top of the park — (18.2, 53.2) (6.9, 57.1)
+  // (10.7, 58.2) (14.6, 57.1) (18.4, 57.1) (20.6, 55.1) — with its invariants
+  // still green.
+  //
+  // The absence of an entry is therefore NOT evidence a seed is safe across a
+  // rebase; only a whole-pool vet:seeds is. 428 has no per-seed invariant file
+  // either, so nothing in the blocking chain could see this (issue #510).
+  // Control run first and passed; SOLVED after 16 candidates, stranded=0,
+  // oracle=pass. (measurements/warp-search-post-rebase-24-428.jsonl.)
+  428: { layout: { fountain: 2 } },
 };
 
 function envWarp(): WarpVector | null {
