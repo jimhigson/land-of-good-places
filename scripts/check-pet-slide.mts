@@ -642,7 +642,10 @@ async function ride(wired: boolean): Promise<RunResult> {
     new Vector3(1, -1, 1).normalize(), new Vector3(-1, -1, 1).normalize(),
     new Vector3(1, -1, -1).normalize(), new Vector3(-1, -1, -1).normalize(),
   ];
-  const NEAR_FAN_GATE = 1.0;
+  // Only where the lens is ACTUALLY underground. Gating at 1.0 m fired the fan
+  // across most of the descent — the chute runs close to the ground — and made
+  // a whole-pool sweep impractical. Underground is the case that needs a name.
+  const NEAR_FAN_GATE = 0.0;
   let lowestAboveGround = Infinity;
   let lowestAboveGroundFrame = 0;
   let lowestAboveGroundShot = 'none';
