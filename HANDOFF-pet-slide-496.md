@@ -122,3 +122,80 @@ thresholds tight enough to notice.
 
 The deployed game is unaffected: a real browser has a real `localStorage`,
 the draw is the intended per-child park, and it is remembered.
+
+## The fix (pushed)
+
+`src/world/parkSeedPool.ts` — `resolveParkSeed()` now asks the **runtime**
+whether it is Node (`process.versions.node`, which no harness fakes and which
+the browser bundle does not have) instead of inferring it from the absence of
+a `localStorage`. In Node it returns `CANONICAL_PARK_SEED` and never draws.
+
+The browser's own half is split into an exported `parkSeedFor(store)`, so
+`check:seed-pool` can still exercise the draw/remember/forget path from Node
+without being able to lie about which runtime it is on.
+
+**Node 26.7.0, six runs after: `PARK_SEED=20260728` every time. `LGP_SEED=115`
+still pins. The whole park is byte-identical, 4/4** (`probe-world.mts`,
+sceneHash `2671dac3…`, 7030 nodes).
+
+## `check:seed-pool` was green through all of this, and why
+
+It had the right-sounding clause —
+
+```
+delete (globalThis as { localStorage?: Storage }).localStorage;
+check('Node, with no storage and nothing pinned, gets the canonical seed', …)
+```
+
+— which **deletes the storage first**, so it asked about a hypothetical Node
+rather than the one every check script runs in. It constructed the absence of
+the very condition that caused the bug. Replaced with clauses that ask with a
+storage present, plus an end-to-end clause that boots six real harnesses
+(`scripts/seed-report.mts`, which imports `headless-dom.mjs` exactly as every
+check does) and compares the park each built.
+
+**Control**, always run: `scripts/seed-report-control.mts` deliberately draws
+at random, and the check **fails if the control does not disagree with
+itself** — a repetition test that cannot see a difference would pass for ever.
+
+### Proved red (mutation, so it can be re-armed)
+
+Mutation: delete this block from `resolveParkSeed()` in `parkSeedPool.ts`,
+leaving `return parkSeedFor(storage());` in its place —
+
+```ts
+  if (inNode()) {
+    source = 'remembered';
+    return CANONICAL_PARK_SEED;
+  }
+```
+
+Result on Node 26.7.0, **exit 1, 4 failures**, the end-to-end clause reading
+`got 5, 346, 11, 131, 225, 128` from six harnesses. Restored: exit 0, control
+at 4–5 distinct in 6 either way.
+
+## `--predictable` drew seed 115, not the canonical park
+
+Measured on the pre-fix code: `--predictable` resolves `PARK_SEED=115`, three
+for three. So the deterministic red the previous agent handed over —
+`Little Mouse was 1 cm inside the child on ridden frame 459` — is a finding
+about **pool seed 115**, not about the canonical park. `--predictable` did not
+make the park deterministic; it froze `Math.random` and so froze the draw.
+
+On the **canonical** park, `check:pet-slide` passes: 5 clean runs, all exit 0
+and byte-identical, `never closer to her own body than 0.12 m`. (A 6th run in
+that batch died on `ERR_INVALID_TYPESCRIPT_SYNTAX` — my own interference, see
+the git-stash note below — not a result.)
+
+Seed 115 is a park a child can actually draw, so a 1 cm clip there is a real
+visible defect. Sweeping all 16 pool seeds now to size it.
+
+## Hazard for the fleet: **`git stash` is shared across worktrees**
+
+`git stash -u` in a clean worktree saves nothing, and the following
+`git stash pop` popped **another agent's** WIP (`chore/preview-incognito-advice`)
+into this worktree — conflict markers in `Building.ts` and four other files.
+It conflicted, so the entry was **kept**, and `git stash list` still shows both
+entries untouched; `git reset --hard HEAD` restored this worktree. No work was
+lost, but the stash stack is one shared stack for every worktree in this repo.
+**Do not use `git stash` here.** Copy the file aside instead.
