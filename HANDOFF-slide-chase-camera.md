@@ -75,7 +75,42 @@ drop inside 30° needs ≥1.56 m of run, i.e. the lens must sit ≥1.56 m behind
 **Do not lower `IN_SHOT_FLOOR` (0.95) or `PET_FRAME_FLOOR` (0.01)** — the pet
 really is out of shot.
 
-## #516 — not yet measured
+## #516 — the issue's named culprit does not survive measurement
+
+**#516 says the camera "enters the ball-pit rim". Three independent pieces of
+evidence say it is not the rim.**
+
+1. **Per-frame sampler, every ridden frame, every shot kind** (seed 346):
+   `camera nearest the pit rim 6.13 m on a chase shot (0 frames INSIDE it)`.
+2. **The trackside eyes, measured at plan time** (`scripts/measure-slide-camera.mts`,
+   seed 346): three trackside eyes, rim clearances **19.78 m, 26.35 m, 41.92 m**,
+   none inside, nearest pit surface of any kind >2 m for all three.
+3. **The screenshot's own colours.** The rim is `PALETTE.markerPink` and the
+   bowl `stonePinkLight`. In QA's frame the pink rim band and the pale bowl are
+   clearly visible **in the distance at the upper right**, while the thing
+   filling the left two-thirds of the frame is a flat **tan/sand** surface —
+   a different object, much nearer.
+
+So the defect is real (that frame is unmistakably a camera buried in geometry)
+but **the prop named in the issue is not the one doing it**. Fixing the rim
+would have fixed nothing, and a run of any rim-based check would have gone
+green while a child still lost her view.
+
+This is why the next instrument asks the scene rather than a named prop: a ray
+fan from the lens each frame recording the **nearest object of any kind and its
+name**. Naming the mesh is the difference between fixing the camera and fixing
+the wrong prop.
+
+### A trap worth recording
+
+My **first** rim sampler sat inside the `kind === 'chase'` branch, so it could
+only ever have measured one of the ride's two cameras. It reported 6.13 m and
+0 frames inside — the same numbers the corrected sampler later produced, which
+is luck: it was right by accident while being structurally unable to see a
+trackside eye at all. What caught it was the contradiction with QA's frame, not
+the number.
+
+## #516 — extent still unmeasured
 
 Camera position enters the ball-pit rim near the bottom of the chute on seed
 346. Extent unknown (one frame, one seed). Next step: sample the camera's world

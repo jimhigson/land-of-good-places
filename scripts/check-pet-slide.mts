@@ -623,6 +623,38 @@ async function ride(wired: boolean): Promise<RunResult> {
   let rimInsideFrames = 0;
   let rimNearestShot = 'none';
   const rimInsideShots = new Set<string>();
+
+  // **What is nearest the lens, of anything in the scene?** See the fan's use
+  // below. Every third frame, because 14 rays against the whole scene on every
+  // one of ~700 frames is real time for an answer that cannot move far in
+  // 50 ms — and the thing being hunted fills two-thirds of a frame, not a
+  // pixel.
+  const nearCaster = new Raycaster();
+  const NEAR_FAN_REACH = 2.0;
+  const NEAR_FAN_EVERY = 3;
+  const NEAR_FAN: readonly Vector3[] = [
+    new Vector3(1, 0, 0), new Vector3(-1, 0, 0),
+    new Vector3(0, 1, 0), new Vector3(0, -1, 0),
+    new Vector3(0, 0, 1), new Vector3(0, 0, -1),
+    new Vector3(1, 1, 1).normalize(), new Vector3(-1, 1, 1).normalize(),
+    new Vector3(1, 1, -1).normalize(), new Vector3(-1, 1, -1).normalize(),
+    new Vector3(1, -1, 1).normalize(), new Vector3(-1, -1, 1).normalize(),
+    new Vector3(1, -1, -1).normalize(), new Vector3(-1, -1, -1).normalize(),
+  ];
+  let nearFanFrames = 0;
+  let nearestAnything = Infinity;
+  let nearestAnythingName = 'nothing';
+  let nearestAnythingFrame = 0;
+  /** `a/b/c` up the scene graph, so a finding names something findable. */
+  const namePath = (object: { name?: string; parent?: unknown } | null): string => {
+    const parts: string[] = [];
+    let at = object as { name?: string; parent?: unknown } | null;
+    while (at && parts.length < 6) {
+      if (at.name) parts.unshift(at.name);
+      at = at.parent as { name?: string; parent?: unknown } | null;
+    }
+    return parts.join('/') || '<unnamed>';
+  };
   building.ballPit.group.updateMatrixWorld(true);
   building.ballPit.group.traverse((object: unknown) => {
     const mesh = object as {
@@ -919,6 +951,33 @@ async function ride(wired: boolean): Promise<RunResult> {
         rimInsideFrames += 1;
         rimInsideShots.add(liveShot?.kind ?? 'none');
       }
+
+      // **And what is nearest the lens, of anything at all?** #516 names the
+      // ball pit's rim as the culprit; the frame QA photographed is two-thirds
+      // filled by a flat TAN surface while the rim's pink and the bowl's cream
+      // sit far away at the top right, and both instruments here put the rim
+      // metres off. So the issue's stated culprit is a hypothesis, and this
+      // asks the scene instead of assuming it: a short ray fan from the lens,
+      // recording the nearest thing hit and its name. Naming the mesh is the
+      // difference between fixing the camera and fixing the wrong prop.
+      if (nearFanFrames % NEAR_FAN_EVERY === 0) {
+        // Sprites raycast through the camera's own matrix, so a caster with no
+        // camera throws the moment the fan meets one (the park has several).
+        // Handing it the live camera is both the fix and the honest thing: a
+        // sprite is only "in the way" as the lens sees it.
+        (nearCaster as unknown as { camera: unknown }).camera = liveCamera;
+        for (const dir of NEAR_FAN) {
+          nearCaster.set(cameraWorld, dir);
+          nearCaster.far = NEAR_FAN_REACH;
+          const hit = nearCaster.intersectObject(scene, true)[0];
+          if (hit && hit.distance < nearestAnything) {
+            nearestAnything = hit.distance;
+            nearestAnythingName = namePath(hit.object);
+            nearestAnythingFrame = ridingFrames;
+          }
+        }
+      }
+      nearFanFrames += 1;
     }
 
     if (liveShot?.kind === 'chase' && liveCamera && first) {
@@ -1067,7 +1126,10 @@ async function ride(wired: boolean): Promise<RunResult> {
       // "nearest" means the camera was inside the tube.
       `camera nearest the pit rim ${rimNearest === Infinity ? 'n/a' : `${rimNearest.toFixed(2)} m`} ` +
       `on a ${rimNearestShot} shot (${rimInsideFrames} frames INSIDE it` +
-      `${rimInsideShots.size > 0 ? `, on ${[...rimInsideShots].join('/')} shots` : ''})`,
+      `${rimInsideShots.size > 0 ? `, on ${[...rimInsideShots].join('/')} shots` : ''}), ` +
+      `nearest ANYTHING to the lens ` +
+      `${nearestAnything === Infinity ? `>${NEAR_FAN_REACH} m` : `${nearestAnything.toFixed(2)} m`} ` +
+      `— ${nearestAnythingName} (ridden frame ${nearestAnythingFrame})`,
   );
 
   return {
