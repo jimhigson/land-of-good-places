@@ -18,6 +18,7 @@ import { createFlowerPickEffect, type FlowerPickEffect } from '../art/effects/fl
 import { terrainHeight } from './terrain';
 import { isOnPath } from './pathGraph';
 import { clearOfCruiser, clearOfRailway } from './Scenery';
+import type { CollisionWorld } from './Collision';
 import { ANCHORS } from './anchors';
 import { pressZone, type InteractZone } from './interact';
 import { highlightInstance } from './highlight';
@@ -237,7 +238,25 @@ export class Flowers implements GameSystem {
   private readonly scratchScale = new Vector3();
   private readonly scratchColour = new Color();
 
-  constructor() {
+  /**
+   * **The collision world as it stands when the meadow is sown** — the one
+   * owner of "is this ground already taken", asked instead of the meadow
+   * keeping its own list of what to avoid.
+   *
+   * This is #502's answer for bushes, adopted here for the same reason and
+   * with the same honesty about its reach: `World` builds `Garden` and
+   * `Scenery` before the meadow and everything else after it, so at this
+   * instant the world holds the boundary masonry, the stone and wooden wall
+   * runs, and the tree trunks — and not the stalls, the entrance or the
+   * train. It is not a query that catches everything; it is a query that
+   * cannot go blind, and it grows for free the day the build order changes.
+   * The three things built later that a flower must still avoid are asked of
+   * their own owners in {@link pickSpawnPoint}, exactly as they always were.
+   */
+  private readonly collision: CollisionWorld;
+
+  constructor(collision: CollisionWorld) {
+    this.collision = collision;
     this.group.name = 'flowers';
 
     // Which slots are large is settled before anything is planted, because the
@@ -577,6 +596,11 @@ export class Flowers implements GameSystem {
       // The meadow never asked it, and a flower duly grew out of the ballast
       // on pool seed 225 — see {@link clearOfRailway}.
       if (!clearOfRailway(x, z, WIDEST_FLOWER)) continue;
+      // And anything solid already standing here — see {@link collision}. A
+      // refusal drops the candidate rather than nudging it: a flower is
+      // decoration and has no claim on ground something solid already holds
+      // (#502's words, for the bushes this follows).
+      if (!this.collision.isClearCircle(x, z, WIDEST_FLOWER)) continue;
       return { x, z };
     }
     // Fell through every attempt (shouldn't happen with this much open lawn) —

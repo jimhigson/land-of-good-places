@@ -101,7 +101,7 @@ export class World implements GameSystem {
     // Living, pickable flowers — no collision (you walk straight through
     // them, same as the old decorative scatter), so it needs nothing from
     // the world to be built.
-    this.flowers = new Flowers();
+    this.flowers = new Flowers(this.collision);
     this.fountain = new Fountain(this.collision, PLAZA.x, PLAZA.z);
     this.fairyLights = new FairyLights(this.collision);
     // Lamp posts along the paths — the family's "night is too dark" feedback.
