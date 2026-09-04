@@ -24,6 +24,7 @@ import { distanceToPath } from '../pathGraph';
 import { archFeet } from './arch';
 import { PARK_LAYOUT } from '../parkLayout';
 import { distanceToRailCorridor } from '../train/plan';
+import { TALLEST_CHILD_HEIGHT } from '../../art/models/kid';
 import { isInEntranceRoad } from '../entrance/roadRoute';
 import type { CollisionWorld } from '../Collision';
 import { railFrameAt, sweptRails, type RailFrame, type RailSampler } from '../rail/sweptRail';
@@ -890,8 +891,15 @@ export function buildRailRaceTrack(
     // Taken from the post's own foot radius rather than the 0.36 this was
     // written as when the leg was half as thick: the collider and the thing you
     // can see are now the same claim about the same post.
+    //
+    // **A single circle at the foot is only right for a post that stands up
+    // straight**, and since the entrance-road corridor joined `groundIsClear`
+    // these do not: `trunkFoot` is the nudged spot and `trunkTop` is derived
+    // from the lane tops, which are never nudged, so a nudged leg leans by
+    // construction (see the comment above `trunkFoot`). `addPostCollider` walks
+    // the lean instead.
     if (options.registerCollision) {
-      collision.addCircle(spot.x, spot.z, POST_FOOT_RADIUS * ringSizeVsRace);
+      addPostCollider(collision, trunkFoot, trunkTop, ringSizeVsRace);
     }
   });
 
@@ -1230,6 +1238,60 @@ interface TrestleSpot {
   readonly z: number;
   /** Which of `trestleSpots`'s `TRESTLE_SPACING` grid slots this is — see `planHazards`'s `snapToTrestleGrid`. */
   readonly index: number;
+}
+
+/**
+ * **The collider for a trestle post, which leans.**
+ *
+ * A post runs from `trunkFoot` — the spot `trestleSpots` found clear ground at,
+ * nudged radially if it had to be — up to `trunkTop`, which is derived from the
+ * lane tops and is therefore *not* nudged. So a nudged post is not vertical, and
+ * its plan-view footprint is a **segment**, not the point a single circle at the
+ * foot describes.
+ *
+ * That only became true when the entrance-road corridor joined `groundIsClear`:
+ * on `main` the nudges never fire, every post stands straight, and foot and
+ * centre are the same place — measured, 0.00 m drift on all six seeds. With the
+ * corridor in, 4–5 posts a seed on the walk-past ring lean, and the drawn post
+ * at a child's chest stood **0.30–0.91 m from the centre of a 0.272 m
+ * collider** — up to 3.3x its radius. Collision is plan-view, so she walked
+ * through the upper half of a post she could see. This project's first rule.
+ *
+ * Two things this deliberately does *not* do:
+ *
+ * - **It does not follow the post to `trunkTop`.** The top is metres up under
+ *   the rails, and a collider stamped along the whole lean would make ground
+ *   solid that has nothing but sky over it — `keepOutsFor` owns where a child
+ *   must be able to stand, and blocking her out of clear ground to guard a post
+ *   she cannot reach trades one fault for another. It stops at
+ *   {@link TALLEST_CHILD_HEIGHT}, which is the highest anything that walks can
+ *   touch it.
+ * - **It does not fatten the collider.** The circles carry the post's own
+ *   radius, tapering with it, so the collider stays the same claim about the
+ *   same post that the single circle was — just made along its length.
+ */
+function addPostCollider(collision: CollisionWorld, foot: Vector3, top: Vector3, ringSizeVsRace: number): void {
+  const footRadius = POST_FOOT_RADIUS * ringSizeVsRace;
+  const topRadius = POST_TOP_RADIUS * ringSizeVsRace;
+  const rise = top.y - foot.y;
+  /** How far up the post, as a fraction of it, a child can still walk into. */
+  const reach = rise > 0 ? Math.min(1, TALLEST_CHILD_HEIGHT / rise) : 0;
+  const lean = Math.hypot(top.x - foot.x, top.z - foot.z) * reach;
+  // Spaced at half the thinnest radius the chain carries, so its waist between
+  // two circles is under a centimetre rather than a gap she could be pushed
+  // through — the same "a gap you cannot walk into at 5 cm a step you may still
+  // tunnel into" reasoning CLAUDE.md applies to walls.
+  const steps = Math.max(0, Math.ceil(lean / (Math.min(footRadius, topRadius) / 2)));
+  for (let i = 0; i <= steps; i += 1) {
+    // `steps` is 0 for a post that does not lean, and `0 / 0` would be `NaN` —
+    // which would place a circle at `NaN, NaN` and silently register nothing.
+    const t = steps === 0 ? 0 : (i / steps) * reach;
+    collision.addCircle(
+      foot.x + (top.x - foot.x) * t,
+      foot.z + (top.z - foot.z) * t,
+      footRadius + (topRadius - footRadius) * t,
+    );
+  }
 }
 
 /**
