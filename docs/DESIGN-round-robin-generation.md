@@ -197,8 +197,23 @@ in a place none of the ten ground models can see:
   that stretch are refused, their only freedom is along the frozen chute,
   every candidate there fails, and the planner's own comment states the
   policy: *"one that cannot is simply skipped."* The chute goes
-  unsupported, and nothing refuses anything. A train through a post and a
-  floating chute are the two faces of the same committed-too-early route.
+  unsupported, and the *generator* refuses nothing — only the downstream
+  legs-per-metre invariant says so. A train through a post and a floating
+  chute are the two faces of the same committed-too-early route.
+- This is not hypothesis: `fix/slide-legs-501` **built the honest ticket
+  fix and measured the trade.** Railway violations went 4 → 0 across the
+  pool, and seed 5's slide went 8 legs (4 illegal) → **2 legs on an 83 m
+  chute**, failing the walk-between-legs invariant. Sampled along that
+  chute: 55% of it is forbidden by path clearance, 33% by the railway —
+  **5% of the route is supportable ground.** Every within-ticket lever was
+  tried and refuted with numbers (more attempts: ceiling of 3 legs at any
+  spacing — the constraint is ground, not questions; a greedy walk: worse;
+  shaving clearance: ships a post through the lineside fence). The
+  engineer's own conclusion names the one real fix — *re-route the chute* —
+  and correctly rules it out of the ticket, because in today's pipeline
+  that means hand-editing a 3.5 s solve that was never asked whether its
+  answer could stand up. Under this design it is not a ticket at all: it is
+  the backtrack the route's own leg-claims trigger.
 
 This is #317/#319 again — a generator committing before the thing that
 constrains it exists — with one twist that earns it its own section: the
