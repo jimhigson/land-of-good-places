@@ -147,10 +147,52 @@ one level down.
 On a bending chute the companions now sit slightly further back. Not an
 invisible merge.
 
+## The sweep: 15 of 16 pass, and seed 346 is fixed
+
+All 16 pool seeds, one run each, exit codes from each run's own file. Sorted by
+how close a companion ever got to her body:
+
+| seed | exit | worst clearance to her | deepest inside her |
+|---|---|---|---|
+| **346** | **0** | **0.08 m** | 0.00 |
+| 428 | 0 | 0.11 m | 0.00 |
+| 326 | 0 | 0.13 m | 0.00 |
+| 24 | 0 | 0.18 m | 0.00 |
+| 128 | 0 | 0.19 m | 0.00 |
+| 115 | 0 | 0.20 m | 0.00 |
+| canonical | 0 | **0.21 m** (was 0.12) | 0.00 |
+| 208 | 0 | 0.22 m | 0.00 |
+| 131, 451 | 0 | 0.23 m | 0.00 |
+| 5 | 0 | 0.24 m | 0.00 |
+| 225 | 0 | 0.25 m | 0.00 |
+| 267 | 0 | 0.26 m | 0.00 |
+| 274 | 0 | 0.27 m | 0.00 |
+| 288 | 0 | 0.28 m | 0.00 |
+| **11** | **1** | — | 0.00 |
+
+**`deepest inside her` is 0.00 on every seed, seed 11 included.** Nothing
+clips anywhere in the pool now. Seed 11's only failure is `in shot` at 89% of 9
+rasters — byte-identical to its pre-fix message, so this change neither fixed
+nor worsened it.
+
+### Honest caveat: 346 is the thinnest in the pool at 8 cm
+
+It passes, and it no longer clips, but it has the least room of any park. The
+solve guarantees the **chord between seat points**; what the check measures is
+**drawn box against drawn box**, and the residue between those two is the
+chute's *pitch* changing under bodies of different lengths — not its bend, which
+is what this fixes. That residue is small (8–28 cm across the pool) but it is
+not zero, and a future chute could in principle eat it.
+
+Two reasons not to chase it now: no seed in the pool clips, and the honest next
+step if one ever does is to solve against body extent rather than to add another
+constant. Recorded here so nobody reads 0.08 m as comfortable.
+
 ## Status
 
-16-seed sweep in flight (`/tmp/ps507/seed-*.{log,exit}`). Seed 11's `in shot`
-clause is a **separate, unstarted** defect — do not assume this fix touches it.
+Fix complete and swept. `scripts/zz-probe-bend.mts` deleted. Gates queued.
+Seed 11's `in shot` clause is a **separate, unstarted** defect — do not assume
+this fix touches it.
 
 ## Still to do
 
