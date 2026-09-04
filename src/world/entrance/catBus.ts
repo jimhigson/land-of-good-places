@@ -290,6 +290,20 @@ export const CAT_BUS_LENGTH = BODY_LENGTH;
 export const CAT_BUS_WIDTH = BODY_WIDTH;
 
 /**
+ * **How high off its own ground the bodywork starts and stops.**
+ *
+ * Exported for the same reason {@link CAT_BUS_LENGTH} and
+ * {@link CAT_BUS_WIDTH} are: anything asking what the bus would hit has to ask
+ * the bus, not restate it. `check:entrance-road` needs the vertical span
+ * because a trestle post leans — its foot can stand clear of the road while
+ * the post itself passes through the bus at head height — so "does this leg
+ * hit the bus" is a question about a *height range*, not a point on the
+ * ground, and the range belongs to the vehicle.
+ */
+export const CAT_BUS_BODY_BOTTOM_Y = BODY_BOTTOM_Y;
+export const CAT_BUS_BODY_TOP_Y = BODY_BOTTOM_Y + BODY_HEIGHT;
+
+/**
  * **Where the bodywork stops and the window opening starts.**
  *
  * The old bus had no openings at all: it was one closed `RoundedBoxGeometry`

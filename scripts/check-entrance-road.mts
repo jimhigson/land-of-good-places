@@ -67,7 +67,7 @@ import './headless-canvas.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { InstancedMesh, Matrix4, Vector3 } from 'three';
+import { InstancedMesh, Matrix4, type Object3D, Vector3 } from 'three';
 import { PARK_SEED_POOL } from '../src/world/parkSeedPool.ts';
 
 const run = promisify(execFile);
@@ -97,8 +97,15 @@ interface SeedReport {
 
 async function measureOneSeed(asControl: boolean): Promise<void> {
   const { buildHeadlessPark } = await import('./park-harness.mts');
-  const { CAT_BUS_LENGTH, CAT_BUS_WIDTH } = await import('../src/world/entrance/catBus.ts');
-  const { POST_FOOT_RADIUS } = await import('../src/world/railRace/trestleGeometry.ts');
+  const { CAT_BUS_LENGTH, CAT_BUS_WIDTH, CAT_BUS_BODY_BOTTOM_Y, CAT_BUS_BODY_TOP_Y } = await import(
+    '../src/world/entrance/catBus.ts'
+  );
+  const { POST_FOOT_RADIUS, POST_TOP_RADIUS } = await import('../src/world/railRace/trestleGeometry.ts');
+  /**
+   * How finely a post is sampled along its own length. Finer than the bus box
+   * is deep, so a post cannot pass between two samples of itself.
+   */
+  const POST_STEP = 0.25;
   const { PARK_SEED } = await import('../src/world/parkManifest.ts');
   const { entranceRoadAt, entranceRoadBrow, entranceRoadReach, distanceToEntranceCorridor, setEntranceCorridorHonoured } =
     await import('../src/world/entrance/roadRoute.ts');
@@ -111,14 +118,45 @@ async function measureOneSeed(asControl: boolean): Promise<void> {
 
   const park = buildHeadlessPark();
 
-  /** Every trestle leg in the built park, at its foot, with its own foot radius. */
-  const legs: { x: number; z: number; radius: number }[] = [];
+  /**
+   * **Every trestle post, sampled along its lean — not resolved to its foot.**
+   *
+   * This used to take each leg's foot and sweep the bus against that one point,
+   * and its own docblock noted in passing that foot and top are up to 2 m apart
+   * on a leaning leg. That was honest when it was written, because nothing made
+   * legs lean: `RADIAL_NUDGES` never fired, every post stood straight, and "at
+   * the foot" and "along the post" were the same question.
+   *
+   * **This branch is what makes them lean.** Adding `isInEntranceRoad` to
+   * `groundIsClear` is what fires the nudges, and a nudged post keeps its top
+   * under the rails while its foot moves — so a post can stand its *foot*
+   * clear of the road and still pass through the bus at head height. Asked
+   * only at the foot the check reported 0 hits while posts stood in the bus.
+   *
+   * So a post contributes a sample every {@link POST_STEP} of its length, and
+   * only over the heights the **bodywork** actually occupies
+   * ({@link CAT_BUS_BODY_BOTTOM_Y} to {@link CAT_BUS_BODY_TOP_Y}, asked of the
+   * bus rather than restated here) — a post is only a collision where there is
+   * bus to collide with, and the parts of it below the chassis or above the
+   * roof are not. The radius tapers with the post, exactly as
+   * `track.ts`'s `addPostCollider` does, because they are two answers to one
+   * question and this is the pair CLAUDE.md warns about keeping in step.
+   */
+  const legs: { x: number; z: number; radius: number; up: number; ring: string; post: string }[] = [];
   const matrix = new Matrix4();
   const centre = new Vector3();
   const axis = new Vector3();
   park.scene.traverse((object) => {
     const mesh = object as InstancedMesh;
     if (!mesh.isInstancedMesh || mesh.name !== 'railRace:trestle-legs') return;
+    // Which ring this is matters to a reader: only the walk-past one is the
+    // ride a child stands beside, so a post of its in the bus is the visible
+    // fault, and the race ring's is the same fault seen mid-ride.
+    let ring = 'unknown';
+    for (let node: Object3D | null = mesh; node; node = node.parent) {
+      if (node.name.includes('walk-past')) { ring = 'walk-past'; break; }
+      if (node.name.includes('race-ring')) { ring = 'race'; break; }
+    }
     for (let i = 0; i < mesh.count; i += 1) {
       mesh.getMatrixAt(i, matrix);
       centre.setFromMatrixPosition(matrix);
@@ -128,11 +166,22 @@ async function measureOneSeed(asControl: boolean): Promise<void> {
       // `strut` scales x and z by the ring's own size, which is exactly the
       // factor `track.ts` multiplies POST_FOOT_RADIUS by for the collider.
       const across = new Vector3().setFromMatrixColumn(matrix, 0).length();
-      legs.push({
-        x: centre.x - axis.x * (length / 2),
-        z: centre.z - axis.z * (length / 2),
-        radius: POST_FOOT_RADIUS * across,
-      });
+      const footX = centre.x - axis.x * (length / 2);
+      const footZ = centre.z - axis.z * (length / 2);
+      const footY = centre.y - axis.y * (length / 2);
+      for (let along = 0; along <= length; along += POST_STEP) {
+        const up = footY + axis.y * along - footY;
+        if (up < CAT_BUS_BODY_BOTTOM_Y || up > CAT_BUS_BODY_TOP_Y) continue;
+        const t = along / length;
+        legs.push({
+          x: footX + axis.x * along,
+          z: footZ + axis.z * along,
+          radius: (POST_FOOT_RADIUS + (POST_TOP_RADIUS - POST_FOOT_RADIUS) * t) * across,
+          up,
+          ring,
+          post: `${ring}:${i}`,
+        });
+      }
     }
   });
 
@@ -145,9 +194,13 @@ async function measureOneSeed(asControl: boolean): Promise<void> {
     z: number,
     headingX: number,
     headingZ: number,
-  ): { worst: number; hits: number } => {
+  ): { worst: number; hits: number; posts: Set<string>; walkPast: Set<string> } => {
     let worst = 0;
-    let hits = 0;
+    // **Distinct posts, not samples.** Each post contributes a sample every
+    // POST_STEP of its length, so counting raw hits counts one post many times
+    // and reports a number nobody can act on.
+    const posts = new Set<string>();
+    const walkPast = new Set<string>();
     for (const leg of legs) {
       // Into the bus's own frame: `heading` is along its length.
       const dx = leg.x - x;
@@ -161,11 +214,12 @@ async function measureOneSeed(asControl: boolean): Promise<void> {
         outAlong <= 0 && outAcross <= 0 ? Math.min(-outAlong, -outAcross) : -outside;
       const reach = inside + leg.radius;
       if (reach > 0) {
-        hits += 1;
+        posts.add(leg.post);
+        if (leg.ring === 'walk-past') walkPast.add(leg.post);
         worst = Math.max(worst, reach);
       }
     }
-    return { worst, hits };
+    return { worst, hits: posts.size, posts, walkPast };
   };
 
   const STEP = 0.25;
