@@ -652,3 +652,121 @@ sideroom. `ARRIVAL_GATE_STANDOFF`'s doc is corrected — it no longer claims to
 put the arch behind the lens, which it never did.
 
 **Not merged. Not rebased.** Still stacked on `feat/arch-placement`.
+
+---
+
+# Round eight — face height. Built, measured, and WATCHED
+
+**Model: Opus (`claude-opus-5[1m]`).** Worktree `.claude/worktrees/bus-camera-2`.
+**Still stacked on `feat/arch-placement`; not rebased onto `main`, and you must
+not.** `origin/feat/arch-placement` is the branch's merge base and this branch
+sits directly on it — nothing to do there.
+
+Jim, on round seven's empty bottom of frame: *"For the arrival shot the camera
+should be face height so the ground should be visible normally."*
+
+## Built
+
+`ARRIVAL_DOOR_FOCUS_LIFT` **1.1 (typed, "about a child's chest") → 1.4157 m**,
+derived as `KID_HEAD_HEIGHT + kidEyeCentre(1).y` — the head pivot plus the
+painted eye's own height, both from `kid.ts`, which owns where a child's face
+is. At zero pitch the eye rides at exactly the focus height, so **this one
+number is both what the shot aims at and where it is taken from**.
+
+Everything from rounds four to seven is untouched and still right: square-on
+bearing, zero pitch, the pass-model inversion (`sheThrough`/`eyeThrough`, signed
+`ARRIVAL_ARCH_EYE_OFFSET_Z`, no `Math.max` clamp), the derived sweep spacing,
+the armed pace assertion, the 3.50 m sideroom, the corrected
+`ARRIVAL_GATE_STANDOFF` doc.
+
+## Clause 9, and it is armed
+
+`check:arrival-camera` now asserts the door beat's **eye** sits at a child's
+face, reading the face from `kid.ts` rather than from a copy of the constant.
+Measuring the eye rather than the constant catches both failure modes at once —
+a moved aim, and **a reintroduced downward tilt**, which is the obvious way to
+fill the empty frame and the composition Jim has rejected twice.
+
+Proved red both ways (geometry in the check's own header):
+
+| mutation | result |
+|---|---|
+| none (control) | pass, **39 checks**, exit 0 |
+| lift back to the typed 1.1 | red: eye 1.1000 m, off by −0.3157 |
+| `ARRIVAL_DOOR_PITCH_DEGREES` back to 24 | red: eye rides **4.0871 m** — off by +2.6714, and *above* the arch's 3.60 m crossbar |
+
+## The void: it shrinks, it does not close, and here is the number
+
+The empty band under the ground line is `frameHeight / 2 − eyeHeight`, so
+raising the eye shrinks it — Jim's instruction is the right direction, not a
+preference. Measured on a 16:10 frame at `ARRIVAL_DOOR_ZOOM` (6.534 m tall):
+
+```
+eye 1.100 m (the old chest)   void 2.167 m   33.2% of frame height
+eye 1.416 m (a child's face)  void 1.851 m   28.3%
+portrait 390x844                             36.3%
+```
+
+It would close only at an eye of **3.267 m**, above a child's head. Printed to
+stderr on every run of the check.
+
+**Confirmed by eye, and it matches**: the ground line sits ~68% down the frame,
+against 71.7% predicted (the difference is the terrain's own slope).
+
+## Watched — three parks, 1280×800, aspect exactly 1.600
+
+Method: headless Chromium (playwright-core, `channel: 'chromium'`, real GPU
+args) rather than the MCP browser. **The MCP tab was opened with
+`background: true` per CLAUDE.md and a background tab's rAF is throttled, so the
+park never finished generating — six minutes and still "building the garden…".
+That is not a hang.** Driver script kept at
+`scratchpad/watch.mjs`; it also fixes round four's recipe: **inject the 20×
+dilation AFTER the park has built, not before** — a slowed rAF slows the
+generator too.
+
+**The shot's own clock runs ~2.0 s behind the click**, so the door beat
+(elapsed 3.0–4.8 s) is seen at wall-clock t ≈ 5.0–6.8 s. Round four's "t = 4.30"
+does not land on it.
+
+What is on screen:
+
+| t (from the click) | what it shows |
+|---|---|
+| 6.0 / 7.0 | **the door beat.** Square-on, horizontal, the sign framing cleanly *above* her head. The round-six fault is gone and stays gone. |
+| 9.0 | the children lined up off the bus, faces to the lens — the best frame in the sequence |
+| 10.0 | **through the arch, and the arch is intact.** Piers and sign draw as solid geometry |
+| 11.0 | risen, tilted, the park reads normally again; it lands |
+
+**The arch exit clip from round three is GONE** — re-checked by eye, on two
+parks, as round four predicted it would be. The eye passes under once and
+carries on rather than being dragged back out.
+
+**And the void is real and it reads as a fault.** The children stand on a
+hairline with a pale sheet under them — a sticker-sheet look. Worst just after
+the arch (t = 10), where the park's own trees are rooted on lower ground and so
+hang *in* the void, canopies and trunks with no floor. Reproduced on both parks:
+the composition is seed-stable, and so is the void.
+
+## The one alternative that was photographed, and its cost
+
+Not built, not committed — photographed so Jim can choose from a frame.
+`ARRIVAL_CLOSE_FRAMING_AIR` 2.2 → 1.3 crops the void to ~15% and fills it with
+nearby foliage, and the children become big and readable. **It also crops the
+LAND OF GOOD PLACES sign out of frame entirely, and clips the top of a party
+hat.** The sign framing the doorway above her head is the thing round seven won,
+so this trades the win for the fix. Reverted; the tree is clean.
+
+**Do not close the void by pitching the camera down.** Clause 9 now fails if
+anybody tries.
+
+## Gates
+
+`pnpm run check`, `pnpm run test:procgen`, `pnpm run build` — exit codes read
+from each run's own log (`/tmp/bc3-check.log`, `/tmp/bc3-procgen.log`,
+`/tmp/bc3-build.log`), none piped.
+
+## Status
+
+Built, armed and watched. **Not merged.** The remaining question is Jim's alone
+and it is a taste call on a rendered frame: accept the empty band as a flat,
+storybook elevation, or crop it out and give up the sign.
