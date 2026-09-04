@@ -1,0 +1,16 @@
+{"seed":5,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":88,"note":"88 invariants passed","seconds":58.6}
+{"seed":20260728,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":88,"note":"88 invariants passed","seconds":59.3}
+{"seed":11,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":88,"note":"88 invariants passed","seconds":81.1}
+{"seed":24,"verdict":"fail","park":"fail","parkWithoutRatchet":"pass","invariants":"pass","invariantsPassed":88,"note":"check:park: poi.stranded: 1 (no allowance — this is new)","seconds":87.5}
+{"seed":128,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":88,"note":"88 invariants passed","seconds":36}
+{"seed":115,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":88,"note":"88 invariants passed","seconds":48.7}
+{"seed":208,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":88,"note":"88 invariants passed","seconds":51.8}
+{"seed":131,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":88,"note":"88 invariants passed","seconds":60.1}
+{"seed":225,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":88,"note":"88 invariants passed","seconds":59.1}
+{"seed":267,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":88,"note":"88 invariants passed","seconds":55.1}
+{"seed":274,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":88,"note":"88 invariants passed","seconds":57.9}
+{"seed":326,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":88,"note":"88 invariants passed","seconds":62.5}
+{"seed":346,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":88,"note":"88 invariants passed","seconds":60.6}
+{"seed":428,"verdict":"fail","park":"fail","parkWithoutRatchet":"pass","invariants":"pass","invariantsPassed":88,"note":"check:park: poi.stranded: 6 (no allowance — this is new)","seconds":90.6}
+{"seed":288,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":88,"note":"88 invariants passed","seconds":148.4}
+{"seed":451,"verdict":"pass","park":"pass","invariants":"pass","invariantsPassed":88,"note":"88 invariants passed","seconds":74.5}

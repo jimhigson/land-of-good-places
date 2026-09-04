@@ -635,3 +635,61 @@ is individually load-bearing on these seeds.
 
 `pnpm run test:procgen`: **21 files, 752 tests, all passed, exit 0.**
 `pnpm run build`: exit 0.
+
+### FINDING: the rebase invalidated two pool seeds' warp vectors (3 Sep 2026)
+
+**`vet:seeds` over the sixteen pool seeds is 14/16 on this head. Seeds 24 and
+428 fail `check:park`.** Both are pool seeds — parks a child can be given.
+
+```
+  24 FAIL park=fail invariants=pass  check:park: poi.stranded: 1 (no allowance — this is new)
+ 428 FAIL park=fail invariants=pass  check:park: poi.stranded: 6 (no allowance — this is new)
+```
+
+The other fourteen pass both gates, 88 invariants each.
+
+**It is the rebase, not the flower work.** Control run at `65a9da8a` — this
+branch rebased, *before* any flower change — reproduces both failures with the
+**identical** stranded counts and the identical coordinates:
+
+```
+seed 24 : poiGraph: 1 waypoint nobody can walk to — (9.1, -55.8)
+seed 428: poiGraph: 6 waypoints — (18.2, 53.2) (6.9, 57.1) (10.7, 58.2)
+                                  (14.6, 57.1) (18.4, 57.1) (20.6, 55.1)
+```
+
+Both seeds are recorded `pass` in this branch's own
+`measurements/rebased-vet-seeds.jsonl` and `vet-seeds-railroute-fix.jsonl`
+(81 invariants then; 88 now). So the parks moved when `main` moved under the
+branch — #499's round-robin spine reorders generation, #502 moves bushes, #508
+changes which park a check script even builds — and:
+
+- **seed 24's baked vector `{waterFight: 1}` is stale**, exactly as 5, 115 and
+  326 went stale when the rail-route fix moved every park;
+- **seed 428 has no vector at all** — it passed unwarped before and no longer
+  does.
+
+This is the failure mode this branch documents about itself: *"the tell is
+`vet:seeds` over the whole pool, not a green check"*. `check:park` is
+canonical-only and `test:procgen` covers seven seeds, so **both required CI
+checks are green on this head while two pool seeds are unsound.** Nothing in
+the blocking chain can see this.
+
+**Two things worth knowing about the instrument itself:**
+
+- **`pnpm run vet:seeds` with no arguments does NOT vet the pool.** It vets
+  *candidate* seeds 1–30 — a different question. It printed `1/30` and a
+  failing seed 3, which is meaningless for pool coverage and would have read
+  as a pool result. The pool invocation is
+  `pnpm run vet:seeds -- --list 20260728,5,11,24,115,128,131,208,225,267,274,288,326,346,428,451`,
+  and every 14/16 number here came from that one.
+- **`vet:seeds` exits 0 with seeds failing.** It is a report, not a gate — it
+  printed `14/16 candidate seeds passed both gates` and returned `EXIT 0`. Do
+  not read its exit code as a verdict.
+
+**In progress:** re-searching vectors for 24 and 428 with
+`scripts/warp-search.mts` (its `--control` was run first and passed: unwarped
+canonical scores 0 twice, summaries identical), out to
+`measurements/warp-search-post-rebase-24-428.jsonl`. If the search does not
+close both, that is a decision for the Overseer — the pool is sixteen seeds by
+Jim's own bar, and shipping fourteen is not it.
