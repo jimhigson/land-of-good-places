@@ -183,6 +183,29 @@ needed and nothing to change in its own diff.
 | `pnpm run test:procgen` | see `/tmp/psflake/procgen.exit` |
 | `pnpm run build` | see `/tmp/psflake/build.exit` |
 
+## Review round 2 — `(remembered)` was false on the Node path
+
+The reviewer caught that `resolveParkSeed()` set `source = 'remembered'` in the
+`inNode()` branch, the path every unpinned CI run takes, where nothing was
+remembered. The line whose only job is to state provenance stated it falsely —
+the same disease this branch exists to cure, one level down. `check-seed-pool`
+had the tell: a clause *named* "Node gets the canonical seed" asserting
+`'remembered'`.
+
+Fixed by giving the Node branch its own `ParkSeedSource` value, `'canonical'`.
+It cannot reach `main.ts:568` (`=== 'remembered'` → forget + reload), which is
+browser-only, so "start again" cannot become a reload loop. The green summary
+line now names the seed too — the misleading *pass* was the expensive half.
+
+**Proved red**, mutation = put `source = 'remembered';` back in `inNode()`:
+`check:seed-pool` **exit 1**, failure printing `got 20260728 (remembered) with a
+storage installed`. Restored: **exit 0**, 12/12 clauses, control 4 distinct in 6.
+
+After: `tsc` **0**; `check:pet-slide` **0** printing
+`park seed 20260728 (canonical)` on both lines, still 675 frames.
+
+Full gates re-queued after the #507 sweep (`/tmp/psflake/r2-*.exit`).
+
 ## Cleanup owed
 
 `git worktree remove .claude/worktrees/pet-slide-pre508` (detached at
