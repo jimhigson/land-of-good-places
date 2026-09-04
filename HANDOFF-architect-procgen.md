@@ -91,6 +91,17 @@ a solver.
 - Anything changing shipped behaviour goes to the coordinator as a proposal
   before an engineer is put on it. Design work itself is standing authority.
 
+## The one rule to inherit above the others
+
+**The exploration query and the commit check must be the same function.**
+A search asking "would this be refused?" during exploration and the claim
+running a different check at commit is the two-definitions disease rebuilt
+inside the one mechanism designed to kill it — the only legal source of an
+explore-yes/commit-no disagreement is a sibling's intervening claim. The
+coordinator has singled this rule out; it binds every migration PR and
+every cache built over the registry (see the crossingSites decision in the
+design doc). If you review a placer migration, look for this first.
+
 ## Traps already paid for
 
 - Never pipe checks through `tail`/`head`; TDZ crashes read as passes.

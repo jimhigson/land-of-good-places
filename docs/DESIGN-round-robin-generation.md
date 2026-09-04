@@ -476,6 +476,72 @@ within its ticket *is* this migration; no bespoke `slide/solve.ts` ladder,
 and no engineer on it until this stage lands. The rail race ring, train
 loop and cruiser follow the same shape through the shared generator.
 
+#### What a section is — the size is derived, never typed
+
+A section is **one decision of the search that grows the feature** — for
+everything on the shared generator, one segment of `rail/segments.ts`'s
+`turnVocabulary`, the unit `railRouteSearch` already chooses, rejects and
+backtracks over. No new constant: introducing a `SECTION_LENGTH` beside a
+vocabulary that already has lengths would be a number *typed* where it
+should be *derived* — the bug class both of tonight's real bugs were, with
+a green check on top, and it would drift from the vocabulary the first
+time someone tunes a segment.
+
+The reasons are load-bearing, not aesthetic:
+
+- **A claim must be unwindable to the decision that caused it.** A claim
+  spanning several decisions cannot be popped back to the one a blocker
+  names — backjumping lands *between* its own decisions. A claim smaller
+  than a decision is a claim nothing can re-draw, because there is no
+  smaller choice to make differently.
+- **Turn cost stays bounded by construction.** A segment is the unit the
+  search already prices; the scheduler's millisecond budget (`8 ms`
+  slices) already amortises whatever a segment costs. Sizing sections in
+  metres or milliseconds would put a second owner beside both.
+
+Batching: the spine's "one claim or one small batch per turn" survives for
+**scatter placers** (lamps, trees, bushes — independent placements with no
+route to unwind), where a batch is just several one-decision claims that
+happen to share a turn. Route placers commit one segment per turn, full
+stop. If thrash counters ever argue for coarser route commits, that is a
+measured proposal to bring back here — not a knob a migration PR turns.
+
+#### crossingSites: the march becomes exploration, its sites stop being facts
+
+Today `crossingSitesSearch` (~300 ms) marches the railway before paths
+exist, proves where a bridge can fit, and offers the sites through a
+prewarm letterbox that `paths.ts` then treats as immovable fact — the
+committed-too-early shape, one layer up: not a placement but a *list of
+possible placements*, frozen before the things it constrains exist.
+
+Under the explore/commit split it is neither deleted nor kept as an
+authority — it is **reclassified as exploration**:
+
+- The march survives as a solver: a batch of registry *reads* computing
+  "where could a bridge provably fit, given claims so far". Boot-slicing
+  through the prewarm letterbox survives with it (the march is still
+  ~300 ms nobody wants in one frame).
+- Its output is **candidates, not reservations**. Nothing is claimed when
+  the march runs. When a path corridor and the railway corridor actually
+  conflict, the negotiation consults the candidate list and the chosen
+  site is claimed *then* — provisionally, realised when the crossing's
+  true width is known (the provisional-claims mechanism, unchanged).
+- **Staleness is handled by the one-function rule, not by invalidation.**
+  Each candidate is the march's per-site feasibility check saying yes —
+  and that check must be *the same function* the bridge claim runs at
+  commit. Then a candidate gone stale (a sibling claimed its ground after
+  the march) is caught by the commit refusal, exactly like any other
+  explore-yes/commit-no disagreement, and the negotiation moves to the
+  next candidate or re-runs the march. A cache-invalidation protocol
+  would be a second definition of freshness beside the registry's own.
+
+The general rule this instance sets, for every derived artefact of the old
+pipeline (`BLOCKERS`, the lattice, feasibility fields): **a computed
+overview of the world may inform any number of decisions, but only a claim
+makes ground yours** — an overview is exploration however expensive it was
+to compute, and treating one as a reservation is the disease in its
+subtlest costume.
+
 ### Stage 4 — paths, railway, crossings migrate together (large; parks change)
 
 The heart of Jim's brief. Path growth, railway corridor and crossing
