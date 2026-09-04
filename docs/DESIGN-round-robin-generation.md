@@ -400,8 +400,11 @@ the commit points migrates nothing:
   stage removes: the trestles name the road, the road names nothing, and
   the next thing to arrive near either names neither.
 
-**The migration, in order — each step a small PR, byte-identical until the
-last:**
+**The migration, in order — each step a small PR. Byte-identical through
+step 2; the park may first change at step 3** (an earlier draft said
+"until the last", contradicting the determinism note below — the note is
+right: interleaving changes draw order). Each step's brief states its
+byte-for-byte expectation and how it is proved:
 
 1. **The road becomes a placer.** Its route computation moves out of
    module-load/scene-construction into a scheduler task that publishes a
