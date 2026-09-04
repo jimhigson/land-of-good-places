@@ -116,8 +116,22 @@ Checked and left alone: provisional-claims vs crossingSites-as-exploration
 (reconcilable — a provisional claim is made when a crossing is decided,
 which can be an early round; realisation waits for width).
 
-Remaining while #498 is unmerged: begin the stage-5 migration checklist
-(per-placer inventory of private obstacle lists to dissolve).
+## Checkpoint — stage-5 migration checklist written (3 Sep)
+
+Ten-row per-placer table in the doc, compiled by sweeping `src/world` for
+placement-time obstacle queries. Starting evidence from the coordinator:
+#503 (Flowers asks paths+cruiser only), #504 (bush claims 0.85 m of a
+2.15 m drawn clump), #501 (leg planner, routed to stage 4 by ruling).
+The #504 two-definitions variant is binding on every row: footprint claims
+describe the DRAWN geometry (one owner), colliders stay their own size —
+overlap and solidity are different questions. Order: plots first (everyone
+re-derives their circles by hand), scatter placers next, attached
+decorations last as verifications. Stage 3/4 items explicitly excluded so
+nobody re-files them.
+
+All five stages now have specs or checklists. Remaining while #498 is
+unmerged: nothing owed that this agent knows of — next trigger is #498
+merging (stage-3 step-1 brief goes to the coordinator as a proposal).
 - Stage 3 remains: migrate the entrance road + rail-race trestles pair, and
   **confront the import ladder** (see `parkGeneration.ts`'s module header —
   the ladder, not the deps, serialises today; four of six deps measured
@@ -135,6 +149,18 @@ explore-yes/commit-no disagreement is a sibling's intervening claim. The
 coordinator has singled this rule out; it binds every migration PR and
 every cache built over the registry (see the crossingSites decision in the
 design doc). If you review a placer migration, look for this first.
+
+## Standing habit: additions rot the older sections
+
+The contradiction pass found all four of its fixes in sections written
+*before* that night's six additions — none in the additions themselves.
+That is not a one-off (coordinator's observation, adopted as practice):
+new sections are written against the current state; old ones quietly stop
+being true as stages land and rulings arrive. **After any burst of
+additions to the design doc, re-read the older sections against the newest
+rule** — especially the epigraph ("only a claim makes ground yours") and
+any ✅-landed markers — and date the corrections rather than silently
+rewriting history.
 
 ## Traps already paid for
 
