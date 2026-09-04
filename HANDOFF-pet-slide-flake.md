@@ -48,11 +48,42 @@ specific frame number is a fingerprint, not a coincidence.
 `Date.now`, no `performance.now`. Confirms the other agent's own reasoning
 that the variance is upstream in park generation.
 
-## Measurement in flight
+## Finding 4 — no camera branch carries the fix
 
-20 consecutive runs on current `main`, logs in `/tmp/psflake/run-N.log`,
-exit codes in `/tmp/psflake/run-N.exit`. Results below when complete.
+The other agent was on "an unrelated camera branch". Checked by content, not
+by ancestry (squash merges make `merge-base --is-ancestor` unreliable here —
+see CLAUDE.md): `grep -c process.versions.node src/world/parkSeedPool.ts`
+
+| branch | hits |
+|---|---|
+| `origin/feat/ride-camera` | **0** |
+| `origin/refactor/camera-eye-offset` | **0** |
+| `origin/feat/bus-arrival-camera` | **0** |
+| `origin/fix/rail-race-portrait-camera` | **0** |
+| `origin/sky-follows-camera` | **0** |
+| `origin/fix/pet-slide-flake` (this branch, off `main`) | 4 |
+
+So any of them, on Node 26, still draws a random pool seed every run — which
+is precisely the reported symptom, including the seed-346 signature.
+
+## Finding 5 — the frame count itself places the measurement pre-#508
+
+Current `main` rides **675** frames. The other agent's five runs were
+700, 718, 720, 759, 767 — **not one of them 675**. Their whole range sits
+outside the canonical park's value, which is what you would expect if every
+one of their runs was a *different, drawn* park and none was the canonical
+one.
+
+## Measurements in flight
+
+- **A — current `main` (`10fb7c2d`), 20 runs.** `/tmp/psflake/run-N.{log,exit}`.
+- **B — pre-#508 (`3aa55407`), 15 runs**, worktree
+  `.claude/worktrees/pet-slide-pre508`, to reproduce the flake and close the
+  hypothesis from the other side. `/tmp/pspre/run-N.{log,exit}`.
+
+A, first 2 of 20: exit 0, 675 frames, verdict-line md5 identical
+(`9992a824…`).
 
 ## Status
 
-Awaiting the 20-run baseline.
+Both loops running. Nothing to fix on `main` so far.
