@@ -110,12 +110,50 @@ const scripts: Record<string, string> = JSON.parse(
   readFileSync(join(REPO, 'package.json'), 'utf8'),
 ).scripts;
 
+/**
+ * Strip YAML comments before looking for invocations.
+ *
+ * **Without this, a comment is accepted as proof that CI runs something** — and
+ * that is the one direction this file must never fail in. Every other
+ * imprecision here fails *loudly*, reporting an orphan that is really covered,
+ * which someone then argues with. This one fails *silently*: an orphan reported
+ * as covered. One line of prose in a workflow —
+ *
+ * ```yaml
+ * # ... reproduce this locally with `pnpm run check:walking`.
+ * ```
+ *
+ * — with no `run:` step anywhere near it, would mark `check:walking` as run by
+ * CI forever, and the file's promise that a new orphan cannot be introduced
+ * quietly would be worth nothing. Found in review of this PR, which is the
+ * subject of this PR happening to the check itself.
+ *
+ * Both forms go: a whole-line comment, and a trailing one after code. Measured
+ * before adopting, on `origin/main` `f1c99347`: raw text yields 8 entry points,
+ * stripping whole-line comments yields 7 — the loss is `sweep:seeds`, which is
+ * named **only** in prose — and additionally stripping trailing comments loses
+ * nothing further. The orphan set is **5 either way**, so this is behaviour-
+ * neutral today and closes the hole for tomorrow.
+ *
+ * The residual imprecision, stated rather than hidden: a `pnpm run x` inside a
+ * non-`run:` YAML string would still count as an entry point. That direction is
+ * the safe one — it over-reports coverage of a script somebody has at least
+ * written into a workflow, and it fails loudly if it ever bites, because the
+ * script would show as covered while its step does not exist.
+ */
+const stripYamlComments = (text: string): string =>
+  text
+    .split('\n')
+    .filter((line) => !/^\s*#/.test(line))
+    .map((line) => line.replace(/\s#.*$/, ''))
+    .join('\n');
+
 /** Every `pnpm run X` / `npm run X` a workflow invokes: CI's real entry points. */
 const workflowDir = join(REPO, '.github', 'workflows');
 const entryPoints = new Set<string>();
 const workflowFiles = readdirSync(workflowDir).filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'));
 for (const file of workflowFiles) {
-  const text = readFileSync(join(workflowDir, file), 'utf8');
+  const text = stripYamlComments(readFileSync(join(workflowDir, file), 'utf8'));
   for (const m of text.matchAll(/(?:pnpm|npm)\s+run\s+([A-Za-z0-9:_-]+)/g)) entryPoints.add(m[1]!);
 }
 
