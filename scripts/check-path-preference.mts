@@ -114,6 +114,22 @@
  * one: that is exactly what happened to the two constants this file used to
  * carry. Seed **11** is the binding seed on every statement below and is the
  * one to measure first if the paving moves.
+ *
+ * **Two things about that list have changed since, and both matter if you
+ * re-derive (#510).** First, **seed 18 is retired** — it structurally needs a
+ * level crossing, and since 2 Sep 2026 every rail crossing is a bridge, so its
+ * park no longer builds at all. Every "all five seeds" transcript below was
+ * taken while it did, and they are left at the basis they were actually
+ * measured against rather than rewritten, because a transcript edited to a
+ * list it was never run on stops being a measurement. Second, the sweep list
+ * has an owner now: `CI_SWEEP_SEEDS` in `parkSeedPool.ts`, seven seeds today.
+ * **Re-derive against that, not against the five in the line above.**
+ *
+ * And note what this script itself does at runtime: it builds **one** park,
+ * whichever seed the process resolved to — canonical, in CI. The sweeping was
+ * done by hand, by a person setting `LGP_SEED`. So a green run here is a
+ * statement about the canonical park; the thresholds are what carry the other
+ * seeds, and they carry them only as well as the last hand sweep did.
  */
 
 import './headless-canvas.mjs';
