@@ -88,7 +88,7 @@ const chainSeconds = jobEnd - chainStart;
 const jobSeconds = jobEnd - jobStart;
 const cap = capSeconds();
 
-console.log(`scripts timed: ${named.length}`);
+console.log(`script invocations timed: ${named.length}  (not package.json step numbers — one chain entry is itself a mini-chain, so this runs a little high)`);
 console.log(`\n--- SLOWEST 20 SCRIPTS (wall clock on the runner) ---`);
 for (const s of named.slice(0, 20)) {
   const pct = ((100 * s.seconds) / chainSeconds).toFixed(1);

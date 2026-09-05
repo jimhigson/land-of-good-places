@@ -152,7 +152,21 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
  */
 let currentStep = '(nothing yet — still starting up)';
 let currentStepStarted = started;
-let stepsSeen = 0;
+/**
+ * Script *invocations* seen — deliberately not called "chain steps".
+ *
+ * The two are close but not equal, and the difference is real: at least one
+ * entry in the chain is itself a mini-chain (`trace-npc-driver.mts &&
+ * pnpm run check:npc-perch && …`). Its own `$` line carries `&&` and is
+ * skipped, while each of its children echoes a `$` line of its own — so a
+ * 59-step chain reports 60 invocations here, and 61-62 on CI.
+ *
+ * Reporting that as "59 steps" would be a number that looks exact and is not,
+ * which is the habit this whole branch exists to argue against. The count is
+ * useful for "how far did it get before the clock ran out"; it is not a step
+ * index into `package.json`, and it does not claim to be.
+ */
+let invocationsSeen = 0;
 
 /**
  * Forwards the child's output verbatim while watching for those markers.
@@ -174,7 +188,7 @@ const watch = (stream: NodeJS.ReadableStream, to: NodeJS.WritableStream): void =
       if (!marker || marker[1]!.includes('&&')) continue;
       currentStep = stepName(marker[1]!);
       currentStepStarted = Date.now();
-      stepsSeen += 1;
+      invocationsSeen += 1;
     }
   });
 };
@@ -194,7 +208,7 @@ const alarm = setTimeout(() => {
   say(`  ran for            ${formatDuration(firedAt)}`);
   say(`  watchdog budget    ${formatDuration(budget)}`);
   say(`  checks.yml cap     ${formatDuration(cap)}`);
-  say(`  steps completed    ${Math.max(0, stepsSeen - 1)}`);
+  say(`  scripts finished   ${Math.max(0, invocationsSeen - 1)}  (invocations, not package.json step numbers)`);
   say(`  killed during      ${currentStep}  (after ${formatDuration(inStep)} in it)`);
   say('');
   say('  This is a FAILURE, not a cancellation. Without this watchdog the job');
@@ -229,7 +243,7 @@ child.on('close', (code, signal) => {
   say('');
   say(
     `check:watchdog — chain took ${formatDuration(took)} of a ${formatDuration(cap)} cap ` +
-      `(${pct}% used, ${formatDuration(cap - took)} spare) across ${Math.max(0, stepsSeen - 1)} steps.`,
+      `(${pct}% used, ${formatDuration(cap - took)} spare) across ${Math.max(0, invocationsSeen - 1)} script invocations.`,
   );
   if (firedAt === null && took > cap * 0.8) {
     say(
