@@ -543,67 +543,98 @@ algebra:
 | road centre ceiling | 8.11 | `RIM_OUTSET_START − ROAD_HALF_WIDTH` | **no — hill** |
 
 The road's outset is not chosen: it derives from the bus door,
-`DOOR_PAVEMENT + BUS_DOOR_INBOARD` = **8.26**, which exceeds the 8.11 hill
-ceiling by 0.15 m — that crossing *was* the over-determination. With the
-centre at 8.26 a foot needs outset ≤ 3.86 or ≥ 12.66; the inner route is
-closed by masonry at 6.15, and ≥ 12.66 was forbidden only by
-`RIM_OUTSET_START`. So the trestles escape **outward**, and the corridor
-clause in #498's `groundIsClear` is **deleted, not tuned** (on `main` it
-never existed).
+`DOOR_PAVEMENT + BUS_DOOR_INBOARD` = **8.26**, which exceeded the 8.11 hill
+ceiling by 0.15 m — that crossing *was* the over-determination. The
+sphere deletes the ceiling and nothing else: 8.26 is a **floor**, and the
+road may now sit at any outset above it.
 
-**Caveat, binding until discharged:** this is constant algebra, not a
-built park. The Engineer building #511 re-measures on the **five seeds
-#498 was red on** (5, 11, 24, 131, canonical), not the canonical alone.
-Every step below says what it waits on.
+**Struck the same day (5 Sep, #511 Engineer's correction):** an earlier
+draft of this section had the trestles "escaping outward" to a foot at
+outset ≥ 12.66, and asked whether the nudge search should be extended to
+reach it. **A radial nudge is a lean, not a placement.** `track.ts` keeps
+a trestle's top under the rails and moves only the foot
+(`strut(legs, …, trunkFoot, trunkTop)`), so a +6 m nudge is a trunk
+leaning 6 m, and 12.66 was never a placement the generator could not
+reach — it was not a placement at all. Extending the range would have
+produced absurd geometry the invariants would then have been told to
+tolerate. The resolution is the other way round: **the road moves outward
+past the ring's band**, its own freedom, no party yielding. The ring's
+ground occupancy today is outset **1.42–11.58** (`NOMINAL_OUTSET` 6.5,
+nudges ±5, foot radius); the road branch is trying a centre near **16**,
+which clears a most-nudged foot at 11.5 by 4.5 m against the 4.4 m the bus
+needs — a **0.1 m margin, derived from feet**.
 
-**The algebra is about feet. The bus meets posts.** `track.ts` draws a
-trestle as one straight trunk from the *nudged foot* to a top under the
-lane midpoint at outset 6.5 (`strut(legs, …, trunkFoot, trunkTop)`; "a
-nudged trestle leans very slightly"), and the trunk's top sits below
-`beamY` = `BASE_HEIGHT` 9.5 − `UNDULATION_REACH` 2.95 − `BEAM_DROP` 0.2 =
-6.35 m by the fork height — inside the bus body's 0–5.62 m band. A foot at
-12.66 therefore makes a trunk leaning 6.16 m sideways that crosses the
-road corridor (edges 4.37–12.15) *below bus height* for most of its
-length. That is the #498 review blocker ("sweeps the feet, not the drawn
-post; 8–9 posts per seed in the bus body") reproduced by the algebra, and
-it is the design's #504 variant by name: **a claim describes the drawn
-geometry**. A trestle's ground claim is the plan projection of everything
-of it below the corridor's headroom — for today's trunk, the segment from
-the foot to where the trunk passes the bus's height — not a foot disc.
+Two design facts fall out of that, both binding on step 2:
 
-**Prediction, falsifiable by the #511 measurement:** on the sphere the
-feet go clear on all five seeds and the *posts at height* do not, with
-today's trunk shape. If the measurement disagrees, the design is wrong
-here and this paragraph is struck; if it agrees, the escape needs a
-support shape as well as an outset.
+- **The road's outset is a decision, and "16" must not be a typed copy of
+  the trestle search's reach.** "Clears ±5 nudges plus a foot" is the
+  trestle placer's knowledge; a constant in the road that restates it is
+  the two-definitions disease, and it goes stale the moment step 2
+  deletes the nudge ladders (the band changes). Interim, before step 2:
+  the ring's ground band has **one owner in `railRace`** (exported,
+  derived from `NOMINAL_OUTSET`, the nudge reach and the foot radius) and
+  the road reads it. From step 2: the road's turn **asks the registry** —
+  its corridor claim marches outward from the 8.26 floor until the one
+  function allows it against the trestles' committed claims. Whether
+  that makes the road's outset seed-dependent, and whether Jim wants
+  that, is a visible question for step 2's PR, not a thing to decide
+  here.
+- **The 0.1 m margin is thin, and it is the feet that bind, not the
+  posts.** With the road *outside* the ring, a nudged trunk leans
+  **inward** (foot at ≤ 11.5, top at 6.5), away from the road — so the
+  posts-at-height prediction below does not apply to this configuration.
+  The one geometry that still reaches outward at height is the race
+  ring's outer branches (`WIDEST_HALF_SPAN` = 4.125 m at `RIDE_SCALE`,
+  outer lane at outset ~10.6, fork nodes below `beamY` 6.35 m); step 2a
+  measures them along with everything else.
 
-**Ruling on `RADIAL_NUDGES` (Architect, 5 Sep).** The question put was
-whether to extend the ±5 range so the ordinary search can reach 12.66. No
-— and not because ±8 is the wrong number. `RADIAL_NUDGES`,
-`MANDATORY_RADIAL_NUDGES` and `WIDE_RADIAL_NUDGES` are three typed reaches
-forming a three-tier fallback ladder — the exact shape "Backtracking, one
-mechanism instead of six" deletes, and a typed reach is a "constant
-restating something computable". The trestle placer's foot search
-**marches outward from the ring asking the registry with the one
-function, and stops where the world says so** — a claim refuses it, or
-the ground ends — never where a list does. Three consequences:
+**Caveat, binding until discharged:** the above is constant algebra, not
+a built park. Step 2a's instrument (the bus's swept body against the
+**drawn** posts and branches at height, every seed, ratcheted) is the
+measurement; the five seeds #498 was red on (5, 11, 24, 131, canonical)
+are the ones to watch. `test:procgen` on the sphere branch is 9 failed /
+667 passed with the sole cause isolated to #498's corridor clause, which
+is being deleted.
 
-1. The three ladders are deleted together; there is one search with one
-   predicate and one ordering (nearest-first, deterministic).
-2. The claim it asks with is the below-headroom projection above. The
-   road's corridor claim carries its **headroom** (the bus's height from
-   its own owner, plus the clearance the swept-bus check uses — one
-   owner, read by both), because a ring passing *over* a road is fine and
-   a trunk passing *through* one is not.
-3. When the nearest allowed foot makes today's trunk cross the corridor
-   at height, the placer's "different decision" is **a different support
-   shape**, not a further foot: a trunk that rises vertically to headroom
-   before it leans, or a portal with feet either side. That is a
-   `forkPlan` decision (authored geometry — Artist input on what it looks
-   like), chosen by the same refusal path, and it is "a feature's own
-   supports are claims" gaining a second support kind. If no shape
-   serves, the refusal propagates — never a silent skip, never a warp
-   field.
+**Prediction, restated (5 Sep, after the correction), falsifiable by
+step 2a:** *for a road outside the ring's band, the drawn posts at height
+are clear wherever the feet are clear*, because nudged trunks lean
+inward; *the binding number is the foot margin (0.1 m at centre 16)*,
+and any seed where it fails will fail at a foot, not a post. If step 2a
+finds a post or branch in the bus body on a seed whose feet are clear,
+this paragraph is struck and the support-shape branch below goes live.
+**The support-shape branch is kept alive either way** — a trunk that
+rises vertically to headroom before it forks (`forkPlan`; Artist input
+on the look; "a feature's own supports are claims" gaining a second
+kind) — because it is the only "different decision" a support has when
+its foot is refused and its lean is exhausted.
+
+**Ruling on `RADIAL_NUDGES` (Architect, 5 Sep) — unchanged by the
+correction, and better for it.** `RADIAL_NUDGES`, `MANDATORY_RADIAL_NUDGES`
+and `WIDE_RADIAL_NUDGES` are three typed reaches forming a three-tier
+fallback ladder — the exact shape "Backtracking, one mechanism instead of
+six" deletes, and a typed reach is a "constant restating something
+computable". The trestle placer's foot search **marches outward from the
+ring asking the registry with the one function, and stops where the
+world says so** — a claim refuses it, or **the support's own geometry can
+no longer reach the rails** (the lean limit, derived from
+`trestleGeometry.ts`'s `MIN_TRUNK_FRACTION`/`BRANCH_ANGLE`, one owner) —
+never where a list does. Not "where the ground ends": on a 1200 m sphere
+the ground never ends, and terrain height is no longer seed-dependent
+(`terrain.ts` dropped `PARK_BOUNDARY` with the rim). Three consequences:
+
+1. The three ladders are deleted together; one search, one predicate,
+   one ordering (nearest-first, deterministic).
+2. The claim it asks with **describes the drawn geometry** (#504
+   variant): the plan projection of everything of the support below the
+   road corridor's headroom, not a foot disc. The road's corridor claim
+   carries its headroom (the bus's height from its own owner plus the
+   clearance step 2a uses — one owner, read by both), because a ring
+   passing *over* a road is fine and a trunk through one is not.
+3. When the lean is exhausted and the foot is still refused, the
+   placer's "different decision" is a **support shape**, not a further
+   foot. If no shape serves, the refusal propagates — never a silent
+   skip, never a warp field.
 
 **Step 1's correction, folded in.** The road is **not** constants: the
 kerb's ends measure against `PARK_BOUNDARY`, and the spur's inner end
@@ -634,11 +665,12 @@ there so nobody re-files it.
    baseline (the `check:coplanar` precedent), so it merges while `main`
    is still red on it and step 2 drives it to zero. Watched failing is
    its own definition of done.
-2. **Trestles become claims** (`BRIEF-stage3-step2-trestles-claim.md`) —
-   dispatchable when #511 (the sphere) and step 1 are both on `main`, and
-   the five-seed measurement is in. The park changes on every seed
-   (#498 counted 2–8 feet per seed in the bus body today) — visible,
-   Jim signs.
+2. **Trestles become claims, the road asks the registry**
+   (`BRIEF-stage3-step2-trestles-claim.md`) — dispatchable when #511 (the
+   sphere + the road outside the ring) and step 1 are both on `main` and
+   step 2a's ratchet is in the chain. The park changes wherever a foot
+   stood in the road (#498 counted 2–8 per seed) and wherever the road's
+   derived outset differs from the interim constant — visible, Jim signs.
 3. **Confront the ladder** — unchanged, after step 2; the road is now a
    genuinely two-turn task and the ladder confrontation must keep that.
 4. **Negotiation** — the first support-shape negotiation and the

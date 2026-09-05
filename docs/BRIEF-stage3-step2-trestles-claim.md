@@ -1,10 +1,11 @@
 # Engineering brief — stage 3, step 2: the trestles become a placer (sphere world)
 
 **Status: HELD until (a) step 1 (road placer) is on `main`, (b) #511 (the
-park off its hill, ground as a sphere) is on `main`, and (c) the five-seed
-measurement in the design doc's "Stage 3, ruled" section is in.** Then
-dispatchable as written. If the measurement contradicts the doc's
-prediction, the Architect re-cuts first. Authority:
+sphere, with the road moved outside the ring's band) is on `main`, and
+(c) step 2a's swept-bus ratchet is in the `check` chain.** Then
+dispatchable as written. Re-cut 5 Sep after the #511 correction: a radial
+nudge is a *lean*; the trestles do not escape outward; the road sits
+outside the ring's band and its outset is the thing this step derives. Authority:
 `docs/DESIGN-round-robin-generation.md`, "Stage 3, ruled (5 Sep, Jim)" and
 "A feature's own supports are claims". One engineer, one worktree.
 
@@ -38,13 +39,22 @@ green.
   with the one function, stopping where a claim refuses or the ground
   ends — never at a typed reach. Ruled in the doc; do not re-argue it in
   the PR, measure it.
-- **When the nearest allowed foot leaves today's trunk crossing the
-  corridor at height**, the placer chooses a different support shape
-  (`forkPlan`: vertical to headroom, then the fork; or a portal) — see
-  the doc's ruling point 3. If the five-seed measurement shows the sphere
-  alone clears posts at height, this bullet is dormant: say so, with the
-  numbers, and leave the shape decision to step 4. Do not author new
-  geometry without the Artist if it is needed — request it.
+- **The road's outset stops being a typed constant.** #511 lands it as a
+  number near 16 (interim; at best read from a band `railRace` owns). In
+  this step the road's turn asks the registry: its corridor claim marches
+  outward from its 8.26 floor (bus door — one owner) until the one
+  function allows it against the trestles' committed claims. Report per
+  seed what outset it found; if it varies by seed, say so in the PR body
+  as a visible question for Jim — do not pin it back to a constant to
+  hide the variation.
+- **The outward march's bound is the support's lean limit**, derived from
+  `trestleGeometry.ts` (`MIN_TRUNK_FRACTION`, `BRANCH_ANGLE`), never a
+  typed reach and never "the ground" (a sphere has no edge).
+- **Support shape** (`forkPlan`: vertical to headroom, then the fork) is
+  the placer's next decision when the lean is exhausted and the foot is
+  still refused — doc ruling point 3. With the road outside the ring this
+  is expected to be dormant; step 2a's numbers say. If it is needed,
+  request the geometry from the Artist rather than authoring it inline.
 - **The construction-order trick dissolves**: both rings' legs become
   claims in one registry; the walk-past-first ordering becomes claim
   order; update the `RailRace.ts` comment to describe the claims.
@@ -68,9 +78,11 @@ green.
 
 ## Acceptance — measured
 
-1. Step 2a's ratchet reads **0 intrusions on every seed** (posts at
-   height, not feet); baseline file deleted; the check now fails on any
-   intrusion.
+1. Step 2a's ratchet reads **0 intrusions on every seed** (posts and
+   branches at height, not feet); baseline file deleted; the check now
+   fails on any intrusion. Quote the per-seed foot margin as well — the
+   0.1 m the interim constant had is the number this step must beat or
+   explain.
 2. Registry sees every leg: claim count == built-leg count, both rings,
    all seeds.
 3. One-function proof, broken deliberately (search uses a stale copy →

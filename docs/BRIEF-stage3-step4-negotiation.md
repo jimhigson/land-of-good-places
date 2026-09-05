@@ -28,9 +28,11 @@ about geometry the registry did not compute is a fourth ground model.
   a trestle whose nearest allowed foot leaves its trunk in the corridor
   at height gets a different support shape (step 2's dormant bullet,
   now live if the measurement says so); if no shape serves the ring, the
-  refusal propagates via `blockers()` — the road does **not** yield (Jim,
-  5 Sep) and the ring does not move (family brief), so the only unwind
-  above the support shape is a loud failure naming the seed. That
+  refusal propagates via `blockers()` — the road's outset is its own
+  freedom above the 8.26 floor (it may move further out, per step 2's
+  derivation), the ring does not move (family brief), and the road never
+  goes *inside* the ring's band — so the unwind order is: support shape,
+  then the road's outset, then a loud failure naming the seed. That
   failure must be reachable and must be watched happening in a scratch
   build (disable the shape choice, run the pool, paste the red transcript
   with geometry).

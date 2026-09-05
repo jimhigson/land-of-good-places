@@ -25,14 +25,18 @@ first honest run found #501).
   ladders are deleted (one outward march, one function, stops where the
   world says); claims describe the drawn *post* below the road's headroom,
   not the foot; a refused foot's next decision is a support *shape*.
-  **Prediction on record**: the sphere clears feet on the five red seeds
-  but not posts at height with today's leaning trunk — confirmed or
-  falsified by the #511 engineer's measurement. If falsified, strike it
-  and re-cut.
+  **Corrected 5 Sep**: a radial nudge is a *lean*, so "trestles escape
+  outward" is struck; the road moves outside the ring's band (centre ~16,
+  0.1 m foot margin). **Prediction on record, restated**: with the road
+  outside the ring, posts at height are clear wherever feet are; the
+  binding number is the foot margin. Step 2a's ratchet settles it; if a
+  post/branch hits on a seed whose feet are clear, strike and re-cut.
+  Terrain is no longer seed-dependent (1200 m sphere) — the outward
+  march's bound is the support's lean limit, not the ground.
 - **Briefs**: step 1 nearly landed (byte-identical, 16 seeds). **Step 2a**
   (`BRIEF-stage3-step2a-swept-bus-instrument.md`, swept bus vs drawn
   posts as a ratchet) **READY today**. Step 2 held on step 1 + #511 +
-  the measurement. Steps 3, 4 sequential after. Step 4 re-cut: no clause
+  step 2a in the chain (dispatched). Steps 3, 4 sequential after. Step 4 re-cut: no clause
   to delete; it is the `CoSolveEngine`→`GroundClaims` migration + the
   first support-shape negotiation + counters, shrinking if the sphere
   alone suffices.
