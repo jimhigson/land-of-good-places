@@ -41,10 +41,11 @@
  * The question is **not** "is it in the `check` chain?" — that would be wrong in
  * both directions. `check:coplanar`, `check:live-version`, `check:gateway` and
  * `check:update-adoption` are deliberately *outside* it, each with its own
- * workflow, because `checks.yml` is already at 25 minutes against a 30-minute
- * cap and a job killed by `timeout-minutes` reports as `cancelled` — which is
- * how this project lost a deploy on 29 August. Calling those four orphans would
- * be an instrument measuring the wrong thing.
+ * workflow, because `checks.yml` is at **26m23s worst-of-ten against a 30-minute
+ * cap** — 87.9%, needing only 1.14x its own slowest to breach — and a job killed
+ * by `timeout-minutes` reports as `cancelled`, which is how this project lost a
+ * deploy on 29 August. Calling those four orphans would be an instrument
+ * measuring the wrong thing.
  *
  * So this starts from **what the workflows actually invoke** — every `pnpm run`
  * / `npm run` in `.github/workflows/*.yml` — and expands transitively through
@@ -56,8 +57,9 @@
  * ## The ratchet, and why it is not a baseline to hide behind
  *
  * The four above are red for want of a build or a dev server, not because the
- * game is broken (see {@link KNOWN_ORPHANS}), so wiring them up is real work
- * with its own ticket. Until then they sit in an explicit, dated,
+ * game is broken (see {@link KNOWN_ORPHANS}), so wiring them up is real work with
+ * its own ticket — **#526**, which owns building and serving the game on a
+ * non-default port. Until then they sit in an explicit, dated,
  * ticket-referencing list, and this check:
  *
  * - **fails on any orphan not in that list** — a new one cannot be introduced
@@ -90,13 +92,13 @@ const REPO = new URL('..', import.meta.url).pathname;
  * they fail on their own preconditions.
  */
 const KNOWN_ORPHANS: Record<string, string> = {
-  'check:frame-time': 'needs a built dist/ — "No dist/ to measure". Orphaned since #246, 8 Aug 2026. Wiring: #464',
-  'check:arrival-starts': 'needs a dev server on 127.0.0.1:5173 — ERR_CONNECTION_REFUSED. Orphaned since #264, 9 Aug 2026. Wiring: #464',
-  'check:deep-links': 'needs a dev server (has CHECK_DEEP_LINKS_URL override). Orphaned since #314, 22 Aug 2026. Wiring: #464',
-  'check:walking': 'needs a dev server on 127.0.0.1:5173 — ERR_CONNECTION_REFUSED. Orphaned since #342, 27 Aug 2026. Wiring: #464',
+  'check:frame-time': 'needs a built dist/ — "No dist/ to measure". Orphaned since #246, 8 Aug 2026. Wiring: #526',
+  'check:arrival-starts': 'needs a dev server on 127.0.0.1:5173 — ERR_CONNECTION_REFUSED. Orphaned since #264, 9 Aug 2026. Wiring: #526',
+  'check:deep-links': 'needs a dev server (has CHECK_DEEP_LINKS_URL override). Orphaned since #314, 22 Aug 2026. Wiring: #526',
+  'check:walking': 'needs a dev server on 127.0.0.1:5173 — ERR_CONNECTION_REFUSED. Orphaned since #342, 27 Aug 2026. Wiring: #526',
   'check:wall-tunnelling':
     'TWO faults, not one. (1) Unreachable: only check:all names it, and no workflow runs check:all — ' +
-    'wiring: #464. (2) It could not fail if it were reached: scripts/measure-wall-tunnelling.mts has ' +
+    'wiring: #526. (2) It could not fail if it were reached: scripts/measure-wall-tunnelling.mts has ' +
     'no process.exit(1) and no failure path at all — 32 s, always exit 0, a measurement tool named as ' +
     'a check — #525, which offers assertions or a rename to measure:wall-tunnelling. Fixing only (1) ' +
     'would buy a green step that gates nothing',
