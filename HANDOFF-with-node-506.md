@@ -58,14 +58,43 @@ to which Node CI runs.**
 
 ## A third finding, not in the brief
 
-**`fnm env --use-on-cd` only ever helps an interactive shell.** It installs a
-`cd` hook in Jim's *fish* rc. An agent's Bash tool shell is **zsh** — proved
-by `functions -q` erroring with `(eval):functions:1: bad option: -q` — so the
-hook does not exist there and `cd`-ing into the repo switches nothing.
+**Nothing switches Node automatically here — and my first reason for that was
+wrong.** I originally wrote that `fnm env --use-on-cd` "only helps an
+interactive shell". The reviewer measured that false, and the true reason is
+better:
 
-That is why the fix cannot be "declare the file and let the hook do it": for
-every agent on this project, nothing switches automatically at all. The
-declaration plus a loud check is the whole mechanism.
+```
+zsh -c 'eval "$(fnm env --use-on-cd --shell zsh)"; cd <repo>'  ->  Using Node v26.5.0
+```
+
+The hook fires fine non-interactively. **It is simply never installed**: fnm is
+wired into `config.fish` only, no zsh rc mentions it, `chpwd_functions` is
+empty and no fnm function is defined. Same conclusion — the declaration plus a
+loud check is the whole mechanism — but someone reasoning from "interactive
+only" would draw the wrong inference in a new situation.
+
+## `engine-strict` was tried and rejected on measurement
+
+The review asked me to weigh correcting a comment against adding
+`engine-strict=true` to `.npmrc`, on the sound principle that a gate at
+*install* time beats a corrected sentence. Measured in a clean-room project
+with real resolution, Node 25 against `">=26"`:
+
+| pnpm | plain | `engine-strict=true` |
+|---|---|---|
+| 11.24.0 | warns `Unsupported engine`, exit 0 | exit 0 |
+| **12.1.0** (this repo's pin) | **no warning**, exit 0 | **exit 0** |
+
+`strict-engines` is inert too; in pnpm 12 `engines` survives only as a filter
+on which optional dependencies install. **Option B is not available on this
+pnpm**, and adding it would have been a setting that looks like a gate and
+gates nothing — this ticket's own bug inside its own fix. Comment corrected
+instead; `engines.node` stays as declarative metadata, held true solely by
+`check:node`'s agreement clause.
+
+Worth knowing if anyone revisits: the version difference is real and is masked
+by the `packageManager` pin. A scratch project with no pin runs pnpm 11 and
+*does* warn, which is how the original false claim got written.
 
 ## What the branch now does
 
@@ -89,7 +118,11 @@ declaration plus a loud check is the whole mechanism.
 |---|---|
 | running Node v25.6.1 | **1** — names `fnm use --install-if-missing` |
 | `engines.node` mutated to `">=25"` | **1** — prints both numbers |
+| `.node-version` deleted | **1** — cannot pass with nothing to check |
 | running Node v26.5.0, both agreeing | **0** |
+
+Exit codes read from unpiped runs. Note `pnpm run check:node | head -3`
+reports **134**, not 1 — the pipe masks it, exactly as CLAUDE.md warns.
 
 Chain step **sets** compared by parsing, never grepping: **59 → 60, none
 removed, one added** (`pnpm run check:node`); no script *name* removed either.
@@ -109,10 +142,19 @@ loads, and every `setup-node` step's `with` is `node-version-file:
   shell's own command line, because the worktree is *named* `with-node-506`.
   Kill by PID, or anchor on the binary.
 - **`setup-node` accepting a bare major from `node-version-file`** is proved
-  by this PR's own CI run, not locally — that is the honest verification and
-  it is loud if wrong.
+  by this PR's own CI run: `Resolved .node-version as 26` ->
+  `Acquiring 26.8.1`, identical to the literal it replaced.
+- **A second person landed on Node 26 by accident.** The reviewer's agent
+  shell was on v26.5.0 inherited from an earlier session's `fnm use` rewriting
+  the shared multishell symlink — not by any mechanism. The trap above biting
+  someone else, and the best argument for the check existing.
 
 ## Status
 
 Gates run on **Node v26.5.0** (`fnm use --install-if-missing` in the same
-shell). Invisible to a player → review → QA → merge without Jim.
+shell). **There are three pre-push gates on `main`, not two** — `check`,
+`test:procgen` and `check:coplanar`; the last is easy to miss and is not in
+either of the others.
+
+Reviewed 5 Sept: changes requested on two false comments only, both now fixed
+and pushed. Invisible to a player → re-approval → QA → merge without Jim.
