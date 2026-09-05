@@ -46,6 +46,31 @@ export const PET_FRAME_FLOOR = 0.01;
  * **Read off the failure, not chosen in the abstract.** 25% sits far above the
  * honest case and far below the wall-of-fur one, so it cannot be satisfied by
  * accident and cannot fail correct behaviour.
+ *
+ * ## What #514's fix spent of it, stated because it is most of it
+ *
+ * Aiming the lens at the line put a great deal more animal in frame, and the
+ * ceiling is the edge that pays for it. Canonical park, `check:pet-slide`'s own
+ * rasters, the same two runs that prove the fix:
+ *
+ * | | biggest raster | this ceiling |
+ * |---|---|---|
+ * | aim reverted (pre-#514) | **8%** | 25% |
+ * | aimed at the line | **21%** | 25% |
+ *
+ * **Four points of margin left of seventeen.** That is reported here rather
+ * than left in a PR thread because of what sits next to it: the solve's own
+ * ceiling guard in `chaseEye.ts` measures to the companion's *seat* while the
+ * drawn body extends ~0.95 m back towards the lens, so it reads ~6% where the
+ * raster measures 21% and **cannot fire** (#518). The mechanism that was meant
+ * to protect this headroom is known dead, and the fix has just spent most of
+ * the headroom.
+ *
+ * So: **"bigger is better" remains the wrong reading**, and it is now the
+ * reading a well-meaning tweak in this area is most likely to take. A change
+ * that pushes the nearest companion further into frame needs the biggest
+ * raster checked on the whole pool, not the smallest — `check:pet-slide` prints
+ * both edges on every run for exactly this reason.
  */
 export const PET_FRAME_CEILING = 0.25;
 
