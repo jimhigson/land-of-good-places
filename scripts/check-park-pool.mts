@@ -152,9 +152,23 @@ function reasons(output: string): string {
   const at = lines.findIndex((l) => /^check:park: \d+ invariant regression/.test(l));
   if (at === -1) {
     // No regression header at all — the park did not build, or the process
-    // died. Say so with whatever it did emit rather than inventing a key.
+    // died. Find the **thrown error**, not the last line: proved red against
+    // retired seed 18, the last non-empty line is `Node.js v26.5.0`, so this
+    // reported "did not complete: Node.js v26.5.0" — a failure message naming
+    // the runtime version instead of the fault, which is the uninformative
+    // report CLAUDE.md warns about in the same breath as `NaN` and `Infinity`.
+    // The real line was
+    //   `Error: bridges: no walkable bridge fits at proven crossing railD 46.0 (-58.9, 53.7)`
+    // and it carries the coordinates somebody would actually need.
+    // The `(?:…)?` is load-bearing and was got wrong once: `/^[A-Za-z_$][\w$]*Error\b/`
+    // requires at least one character BEFORE "Error", so it matches `TypeError`
+    // and silently fails to match a bare `Error:` — which is what this actually
+    // gets. The first fix printed `Node.js v26.5.0` just as the version before
+    // it did, and only re-running the mutation showed it.
+    const thrown = lines.find((l) => /^(?:[A-Za-z_$][\w$]*)?Error\b/.test(l));
+    if (thrown) return `did not build: ${thrown.slice(0, 200)}`;
     const last = lines.filter(Boolean).at(-1) ?? '(no output)';
-    return `did not complete: ${last.slice(0, 120)}`;
+    return `did not complete, and emitted no error line: ${last.slice(0, 120)}`;
   }
   const keys = lines
     .slice(at + 1)
