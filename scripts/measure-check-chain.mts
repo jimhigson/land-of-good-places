@@ -31,27 +31,14 @@
  */
 
 import { readFileSync } from 'node:fs';
-
-/** `checks.yml`'s own cap. Read from the workflow, never copied by hand. */
-function capSeconds(): number {
-  const yml = readFileSync(new URL('../.github/workflows/checks.yml', import.meta.url), 'utf8');
-  // The `Checks` job's own `timeout-minutes:`. There is more than one
-  // `timeout-minutes` in some workflows, so take the first under this file.
-  const match = /^\s*timeout-minutes:\s*(\d+)\s*$/m.exec(yml);
-  if (!match) throw new Error('checks.yml has no timeout-minutes — has the job been restructured?');
-  return Number(match[1]) * 60;
-}
+// The cap and the step-naming rule live in one place, shared with
+// `check-watchdog.mts`. A second copy of either is how they drift.
+import { capSeconds, formatDuration as fmt, stepName } from './checkChain.mts';
 
 interface Entry {
   readonly at: number;
   readonly command: string;
 }
-
-const fmt = (seconds: number): string => {
-  const sign = seconds < 0 ? '-' : '';
-  const s = Math.abs(seconds);
-  return `${sign}${Math.floor(s / 60)}m${String(Math.round(s % 60)).padStart(2, '0')}s`;
-};
 
 const path = process.argv[2];
 if (!path) throw new Error('usage: measure-check-chain.mts <run.log from `gh run view --log`>');
@@ -89,31 +76,9 @@ if (jobStart === null || jobEnd === null) throw new Error('no timestamped lines 
  */
 const steps = marks.filter((m) => !m.command.includes('&&'));
 
-/**
- * The script's own name, not the command line.
- *
- * Printing the raw command truncated the interesting part: every entry begins
- * with the same 70 characters of `node --no-warnings --import ./scripts/…`, so
- * a column-limited dump cut `check-climb-wave.mts` to `check-climb-wav` and a
- * grep for it silently matched nothing. The name is the thing being measured.
- */
-const nameOf = (command: string): string => {
-  // Every entry runs through `--import ./scripts/ts-extension-resolver-register.mjs`,
-  // so the FIRST script-looking token is always the loader. Taking it named
-  // every one of the 59 steps `ts-extension-resolver-register` — an instrument
-  // confidently reporting one number for everything. Drop the loader and take
-  // what is left.
-  const files = [...command.matchAll(/([\w.-]+)\.(?:mts|mjs|ts|js)\b/g)]
-    .map((m) => m[1]!)
-    .filter((n) => n !== 'ts-extension-resolver-register');
-  const env = /^([A-Z_]+=\S+\s+)+/.exec(command)?.[0]?.trim();
-  const base = files.at(-1) ?? command.slice(0, 40);
-  return env ? `${base}  [${env}]` : base;
-};
-
 const named = steps.map((m, i) => {
   const next = steps[i + 1]?.at ?? jobEnd;
-  return { command: nameOf(m.command), seconds: next - m.at };
+  return { command: stepName(m.command), seconds: next - m.at };
 });
 
 named.sort((a, b) => b.seconds - a.seconds);
@@ -130,11 +95,14 @@ for (const s of named.slice(0, 20)) {
   console.log(`${fmt(s.seconds).padStart(7)}  ${pct.padStart(5)}%  ${s.command.slice(0, 96)}`);
 }
 
-const total = named.reduce((a, b) => a + b.seconds, 0);
 console.log(`\n--- WHERE THE TIME GOES ---`);
 console.log(`  job wall clock      ${fmt(jobSeconds)}`);
 console.log(`  chain wall clock    ${fmt(chainSeconds)}  (checkout+install: ${fmt(jobSeconds - chainSeconds)})`);
-console.log(`  summed script time  ${fmt(total)}`);
+// Deliberately NOT printing "summed script time" as if it corroborated the
+// chain's wall clock. Each step's duration is *defined* as the gap to the next
+// step's marker, so the sum equals the wall clock by construction — it would
+// be a number that agrees with itself whatever the truth, which is exactly
+// CLAUDE.md's "a check that passes without checking anything".
 const top5 = named.slice(0, 5).reduce((a, b) => a + b.seconds, 0);
 console.log(`  top 5 scripts       ${fmt(top5)}  (${((100 * top5) / chainSeconds).toFixed(1)}% of the chain)`);
 

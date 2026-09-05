@@ -85,8 +85,27 @@ jobs:
       # The full gate: `tsc --noEmit`, `typecheck:test`, and every `check:*`
       # that used to sit in front of `vite build`. Identical list, identical
       # order — the split moved them, it did not edit them.
+      #
+      # **Run under a watchdog, not directly.** `pnpm run check:watchdog` runs
+      # the very same `pnpm run check`, but under a clock set three minutes
+      # *inside* this job's `timeout-minutes` above. Two things that buys, both
+      # of which this job lacked:
+      #
+      # 1. **A timeout becomes red.** If `timeout-minutes` fires, GitHub marks
+      #    the job `cancelled` — grey, and identical to a superseded push. The
+      #    watchdog gets there first and exits 124, so the job is a `failure`
+      #    with a message naming the step that was running. Silence on a
+      #    timeout is the 29 August outage, described in this file's own header.
+      # 2. **The margin is printed on every run, pass or fail.** This chain sits
+      #    at ~88% of the cap on `main`, and the same chain measures 1.58x
+      #    slower on an ordinary runner than a fast one — so the remaining
+      #    margin is spent by luck rather than by growth, and it needs to be
+      #    visible before it is breached rather than after.
+      #
+      # `scripts/measure-check-chain.mts` is the tool for the "after" case:
+      # `gh run view <run-id> --log > run.log && pnpm run measure:check-chain run.log`.
       - name: Run the checks
-        run: pnpm run check
+        run: pnpm run check:watchdog
 
       # `vite build` on its own, kept here deliberately.
       #
