@@ -274,3 +274,25 @@ edit to Jim. In a plain Node script both streams are visible; these two use
 **stdout**. (The "stderr gets buried under 288 lines of `THREE.Texture` noise"
 caution did not reproduce on `check:park` or `check:gateway` — **0** such lines
 in either.)
+
+## PR and gates
+
+PR **#527**, `fix/seed-coverage-510` → `main`, base current at `61e95fe5`
+(no rebase needed). Invisible to a player: merges on review + QA, no preview
+link, nothing for Jim to look at.
+
+All three pre-push gates run locally, exit codes read from each run's own log,
+none piped:
+
+| gate | log | exit |
+|---|---|---|
+| `pnpm run check` (60 steps) | `/tmp/510-check.log` | **0** |
+| `pnpm run test:procgen` | `/tmp/510-procgen.log` | **0** — 21 files, 752 tests |
+| `pnpm run check:coplanar` | `/tmp/510-coplanar.log` | **0** — 224 seams, none new |
+
+Chain step **sets** compared by parsing `package.json`, base vs head:
+**59 → 60**, nothing removed, `check:seed-coverage` added.
+
+**No branch-protection change is needed for this PR** — see above. The two
+strings that *do* want adding, unrelated to #510, are `Coplanar faces` and
+`A reload gets the new build`, and they are Jim's to set.
