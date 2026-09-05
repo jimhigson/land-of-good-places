@@ -4,7 +4,30 @@
 - **Branch:** `feat/no-hill-511`
 - **Worktree:** `/Users/jim/dev/landOfGoodPlaces/.claude/worktrees/no-hill-511`
 - **Role:** Engineer. Reports to the Overseer, not to Jim. Does not merge.
-- **Browser:** NOT owned by this agent. Build-verify only; list visual QA in the PR.
+- **Browser:** **OWNED as of 5 Sep 2026** (granted by the Overseer). Dev server on
+  port **5391** (`vite --port 5391 --strictPort`), left running for Jim, who is at
+  the Mac. Kill it by PID when the workstream ends.
+
+## Where this is, 5 Sep 2026 (read this first)
+
+**Jim's instruction changed the priority:** asked whether the arrival camera should
+blend perspective→ortho, he said **"try perspective everywhere to see how it looks"**.
+So `?projection=perspective` is no longer a side experiment; it is the thing to show.
+
+Done this session:
+
+- Rebased onto `origin/main` (`61e95fe5`, #515). Clean, 3 files, no silent revert.
+- **Looked at it in a real browser** — matched ortho/perspective pairs at park
+  centre, at default zoom and at max zoom-out, clock pinned to 12:00 so the pair is
+  comparable. Screenshots in the scratchpad, `01-`…`06-`.
+- **Found and corrected a 2.38× error in this file's own FOV table** — see the
+  CORRECTION section near the end. The horizon needs zoom **0.107**, not 0.254.
+- **Measured frame time at full zoom-out** (the flagged unmeasured risk): 9.3 ms
+  median with the whole park in frame. Not a blocker on desktop.
+
+Not started: widening the zoom range, curving the ground, measuring the sky on
+extended ground. **#498 (entrance road) is still blocked on the ground shape** —
+nothing this session settled it, because the session went to Jim's re-prioritisation.
 
 ## The task
 
@@ -360,31 +383,112 @@ top at depression `38° − θ`. **The horizon is at 0° depression.** So the ho
 is in frame only when **θ ≥ 38°, i.e. FOV ≥ 76°**. This is independent of the
 ground: no radius, no extension and no treeline work changes it.
 
-With FOV derived from zoom to match today's scale:
+The 38° threshold above is correct and stands. **The table that used to sit here
+was not, and it is corrected below.**
+
+### CORRECTION, 5 Sep 2026 — the old zoom→FOV table was wrong by 2.38×
+
+The superseded table claimed the default zoom gives a 17.9 m half-height and a
+22.4° FOV, and that the horizon first appears at zoom **0.254**. Every row was
+wrong, from one mistake: it used **17.86 m as `frustumBase`**, when 17.86 m is
+the half-height at zoom **0.42**, not the base.
+
+The base is one line, `IsoCamera.ts:602`:
+
+```ts
+private frustumBase(): number {
+  return Math.max(CAMERA_VIEW_HEIGHT / 2, CAMERA_MIN_VIEW_WIDTH / 2 / this.aspect);
+}
+```
+
+`CAMERA_VIEW_HEIGHT = 15`, `CAMERA_MIN_VIEW_WIDTH = 11`, so on any screen wider
+than 11/15 the base is **7.5 m**, and `halfHeight = 7.5 / zoom`.
+
+**Measured off the live camera** (`window.game`, 2400×1524, aspect 1.575),
+not derived — both projections, same load:
+
+| what | reading |
+|---|---|
+| perspective, zoom 1.00 (default) | `fov` **9.53°** |
+| perspective, zoom 0.42 (`CAMERA_ZOOM_MIN`) | `fov` **22.34°** |
+| orthographic, zoom 0.42 | `camera.top` **17.77 m** |
+
+The 22.34° the old table put against zoom 1.00 is in fact zoom 0.42, and the
+17.86 m it used as the base is that same row's half-height. One row's numbers
+were read as the base, so the whole table was shifted and scaled.
+
+The corrected table, `FOV(zoom) = 2·atan((7.5/zoom) / CAMERA_DISTANCE)`,
+`CAMERA_DISTANCE = 90`:
 
 | zoom | half-height | FOV | horizon in frame? |
 |---|---|---|---|
-| 1.00 (default) | 17.9 m | 22.4° | no |
-| 0.42 (`CAMERA_ZOOM_MIN` today) | 42.5 m | 50.6° | no |
-| 0.30 | 59.5 m | 67.0° | no |
-| **0.254** | **70.3 m** | **76.0°** | **first appears** |
+| 1.00 (default) | 7.5 m | **9.5°** | no |
+| 0.42 (`CAMERA_ZOOM_MIN` today) | 17.9 m | **22.3°** | no |
+| 0.30 | 25.0 m | 30.8° | no |
+| 0.20 | 37.5 m | 45.2° | no |
+| **0.107** | **70.3 m** | **76.0°** | **first appears** |
 
-**Today's zoom-out stops at 0.42 — the horizon is just outside the range**, by a
-factor of 1.65. Building the sphere and measuring now would have produced another
-honest zero, and it would have looked like the sphere had failed when the cause is
-the zoom clamp.
+**So today's zoom-out is a factor of 3.9 short of the horizon, not 1.65.**
+`CAMERA_ZOOM_MIN` would have to go 0.42 → **0.107** — the frame is then 140 m
+tall and ~220 m wide, which is most of the park at once. That is a far bigger
+ask than "0.25" made it look, and option (b) below has to be re-judged against
+0.107 rather than against 0.254.
+
+### Confirmed by eye at FOV 76°, and it changes the ticket
+
+Holding `camera.fov = 76` on the live perspective rig (screenshot
+`06-persp-fov76-horizon.png`) gives, at once:
+
+- **Sky, a lot of it** — roughly the top third of the frame, with the sun disc
+  in it. So perspective + a wide enough FOV *does* restore the sky, on today's
+  ground, with no sphere and no ground extension at all. That is the first
+  non-zero sky reading anywhere in this workstream.
+- **The hill, unmistakably.** The park is visibly domed: the land crests and
+  falls away on every bearing, exactly the "park on a hill" look #511 exists to
+  remove. Ortho was *hiding* it. **Perspective makes Jim's complaint worse
+  before it makes it better**, and it is the projection that finally shows what
+  the ground is actually shaped like.
+
+The second point is the useful one: the ground work in #511 is not optional
+alongside a perspective camera, it is what a perspective camera exposes.
+
+### Frame time at full zoom-out — measured, was the open risk
+
+`requestAnimationFrame` deltas, medians over ~450 frames, Jim's Mac, 2400×1524:
+
+| framing | median | p95 | worst | fps |
+|---|---|---|---|---|
+| perspective, FOV 76° (whole park in frame) | **9.3 ms** | 10.1 | 11.5 | 107 |
+| perspective, FOV 22.3° (zoom 0.42, today's max) | **8.7 ms** | 9.7 | 10.7 | 115 |
+
+**0.6 ms for the whole park in frame.** This was flagged as the one unmeasured
+load-bearing risk; on this machine it is not a blocker. Caveats worth keeping:
+it is a desktop GPU, and the wide frame drives ~1759 draw calls, so a phone
+needs its own reading before any of this ships. Nothing here has been measured
+on a phone.
 
 ### Three ways out, for Jim to choose between
 
-- **(b) Extend zoom-out to ~0.25** (`CAMERA_ZOOM_MIN` 0.42 → 0.25). **The default
-  view is completely unchanged**; the horizon appears only when a child zooms
-  fully out. This is the same *behaviour* the ortho hill gave — its sky also only
-  appeared below zoom 0.6 — so it preserves today's look and restores the sky at
-  the same place in the zoom range. **Recommended, and the smallest change.**
+- **(b) Extend zoom-out to 0.107** (`CAMERA_ZOOM_MIN` 0.42 → 0.107). **The
+  default view is completely unchanged**; the horizon appears only when a child
+  zooms fully out. Still the smallest change and still the recommendation — but
+  it is a **3.9× extension of the zoom range**, not the 1.65× the old number
+  implied, and at the far end the frame holds most of the park, which is closer
+  to a map than to a play camera. Whether that is still "the same behaviour the
+  ortho hill gave" is now a real question rather than an obvious yes.
 - (a) Widen the base FOV to ≥76°: the horizon is always visible, but the park
-  appears ~4× smaller at default zoom. A different game.
+  appears ~8× smaller at default zoom (not 4× — same 2.38× error). A different
+  game.
 - (c) Fix the FOV and zoom by moving the camera instead: horizon always in frame,
   strong perspective everywhere. The largest change.
 
 **Do not build the sphere until this is settled** — the radius argument is
 downstream of it.
+
+### The lesson, since it nearly shipped as fact
+
+The old table was internally consistent, carried real decimals, and agreed with
+a hand-derivation done in the same wrong units — the "analytically derived the
+19.8% before believing it" note earlier in this file leans on the same 17.86 m.
+It was caught only by asking the running camera what its `fov` actually was.
+**Read the number off the live object, not off the algebra you just wrote.**
