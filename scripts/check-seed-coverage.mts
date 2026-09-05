@@ -49,7 +49,7 @@
  * silently editing branch protection.
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 
 import { CI_SWEEP_SEEDS, PARK_SEED_POOL } from '../src/world/parkSeedPool.ts';
 
@@ -71,6 +71,37 @@ const BLOCKING_JOBS: readonly { readonly workflow: string; readonly job: string 
   { workflow: '.github/workflows/checks.yml', job: 'Checks' },
   { workflow: '.github/workflows/procgen-invariants.yml', job: 'Procgen invariants' },
 ];
+
+/**
+ * **Read back from the real setting on 5 September 2026**, so this list is a
+ * measurement rather than an assumption on the day it was written:
+ *
+ * ```
+ * gh api .../branches/main/protection --jq '.required_status_checks.contexts'
+ * ["Procgen invariants","Checks"]
+ * ```
+ *
+ * Exactly two. Every other workflow in `.github/workflows` runs and blocks
+ * nothing, which is why they are enumerated and named below rather than
+ * counted — see {@link nonBlockingGates}.
+ */
+const PROTECTION_READ_BACK = '5 September 2026: ["Procgen invariants","Checks"]';
+
+/**
+ * **Jobs that run on a PR and are not gates at all**, so listing them as
+ * "blocks nothing" would be crying wolf.
+ *
+ * A deploy *publishes*; it asserts nothing about the change, so there is
+ * nothing for it to gate and it should never be a required check. The
+ * distinction matters because a report that names three things when only two
+ * are wrong gets skimmed, and then the two get missed.
+ *
+ * **Keep this tiny, and never add a check to it to quieten the output.** The
+ * question to ask is "would making this required be a mistake?" — for a deploy
+ * the answer is yes; for `Coplanar faces` it is emphatically no, which is why
+ * that one is named every run.
+ */
+const NOT_A_GATE: readonly string[] = ['Deploy PR preview'];
 
 let failures = 0;
 function fail(what: string): void {
@@ -173,7 +204,49 @@ if (wiredInto.length === 0) {
   );
 }
 
-// ------------------------------------------------------- 3. the coverage map
+// ------------------------- 3. workflows that look like a gate and are not
+
+/**
+ * **Every workflow that runs on a pull request, and whether it actually blocks
+ * one.**
+ *
+ * A workflow which runs on every PR, goes red on a real defect, and gates
+ * nothing is the most expensive kind of check in this repository: it costs the
+ * runner minutes, it produces the reassuring green tick, and a merge sails past
+ * it. It is #510's own disease one level up — a gate pointed at the wrong
+ * sample versus a gate wired to nothing — and on `main` today there are two.
+ *
+ * They are **named, not counted**. "5 of 7 workflows block" tells a reader
+ * nothing they can act on; "Coplanar faces runs on every PR and blocks nothing"
+ * is a sentence somebody can take to Jim.
+ *
+ * This does **not** fail the check. Whether a workflow should be required is
+ * Jim's call and a repository setting nobody here may touch — CLAUDE.md is
+ * report-don't-act on settings. Printing it every run is the report.
+ */
+function nonBlockingGates(): string[] {
+  const blocking = new Set(BLOCKING_JOBS.map((b) => b.job));
+  const out: string[] = [];
+  for (const file of readdirSync('.github/workflows').sort()) {
+    if (!file.endsWith('.yml') && !file.endsWith('.yaml')) continue;
+    const path = `.github/workflows/${file}`;
+    const text = readFileSync(path, 'utf8');
+    // Only workflows that run on a pull request can gate one at all. A deploy
+    // or a scheduled job is not a gate that is missing, it is not a gate.
+    if (!/^on:/m.test(text) || !/^\s+pull_request:?\s*$/m.test(text)) continue;
+    for (const line of text.split('\n')) {
+      const match = /^\s{2,}name:\s*(.+?)\s*$/.exec(line);
+      if (!match?.[1]) continue;
+      const job = match[1].replace(/^['"]|['"]$/g, '');
+      if (!blocking.has(job) && !NOT_A_GATE.includes(job)) out.push(`${job}  (${file})`);
+    }
+  }
+  return out;
+}
+
+const looksLikeAGate = nonBlockingGates();
+
+// ------------------------------------------------------- 4. the coverage map
 
 /**
  * **Printed on every run, pass or fail** — CLAUDE.md: "When a check stops
@@ -204,9 +277,17 @@ process.stdout.write(
     `    - the other ${'~'}40 seed-dependent steps of the ${'`check`'} chain build the canonical\n` +
     `      park and nothing else. This check does NOT assert otherwise, and running them\n` +
     `      on sixteen seeds is not proposed: checks.yml is at ~27 of its 30-minute cap.\n` +
+    `\n  RUNS ON EVERY PR AND BLOCKS NOTHING — a green tick a merge sails past:\n` +
+    (looksLikeAGate.length === 0
+      ? `    (none — every PR-triggered workflow is a required check)\n`
+      : looksLikeAGate.map((w) => `    ${w}\n`).join('')) +
+    `    Making one of these required is a repository setting, which is Jim's alone\n` +
+    `    (CLAUDE.md: report, do not act). Named here so the report is actionable.\n` +
     `\n  BLOCKING_JOBS is a claim about GitHub branch protection, which lives outside\n` +
-    `  this repository and cannot be read from here. Verify it with:\n` +
-    `    gh api repos/jimhigson/land-of-good-places/branches/main/protection\n`,
+    `  this repository and cannot be read from here. Read back ${PROTECTION_READ_BACK}.\n` +
+    `  Verify it with:\n` +
+    `    gh api repos/jimhigson/land-of-good-places/branches/main/protection \\\n` +
+    `      --jq '.required_status_checks.contexts'\n`,
 );
 
 if (failures > 0) {
