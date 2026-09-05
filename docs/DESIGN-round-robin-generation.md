@@ -578,6 +578,41 @@ makes ground yours** — an overview is exploration however expensive it was
 to compute, and treating one as a reservation is the disease in its
 subtlest costume.
 
+#### Warp vectors (#474, 4 Sep): baked backtracking, retired by stage 4
+
+`src/world/parkWarp.ts` ships a per-seed table of *decision overrides* —
+`layout` (a placement-stream bump per manifest entry), `layoutRestart` (a
+whole-layout re-roll) and `banCrossingsAt` (rail distances the crossing
+march must refuse, so `selectSpaced` takes its next-best spacing) — found
+offline by `scripts/warp-search.mts` and replayed through the whole
+deterministic pipeline; a warp never edits a built park in place. Read
+against this design it is **backtracking done by hand, once, per seed**:
+each vector is the decision a round-robin generator would have reached on
+its own by refusing a claim and retrying — a layout that put an attraction
+where a crossing had to go, a crossing site that a later feature could not
+live with. That is the right interim under the sixteen-seed ruling (the
+alternative was silent fallbacks, which #474 rightly replaced with loud
+throws), and it is also a reservation-shaped artefact of exactly the kind
+the epigraph warns about: an overview (the offline search) deciding ground
+before the features that want it exist.
+
+So, binding for stage 4: **when crossings migrate to negotiated,
+provisional-then-realised claims, `banCrossingsAt` has nothing left to
+ban** — the march is exploration and a site a sibling cannot live with is
+refused at commit, on the seed, at build time. The `layout*` fields retire
+with the plots' migration (stage 5, first row) for the same reason. The
+acceptance for each is measured: the pool builds with that field deleted
+from every vector, `check:park` and `test:procgen` green. Until then the
+table stands, and no migration PR may add a *new* warp field to get a seed
+through — a seed the migrated placer cannot build is a finding about the
+placer, per "Procgen backtracks on collision, always".
+
+Also noted from #474, no design change: `crossingSitesSearch` now fails the
+build rather than publish a loop with no bridge site, and `paths.ts`'s
+ad-hoc `manhattanRoute` escape is gone. Both harden the *current*
+committed-too-early shape rather than move it, and the crossingSites
+section above (march becomes exploration) is unchanged by them.
+
 ### Stage 4 — paths, railway, crossings migrate together (large; parks change)
 
 The heart of Jim's brief. Path growth, railway corridor and crossing
@@ -618,7 +653,7 @@ are **stage 4**; the entrance road and rail-race trestles are **stage 3**.
 | bushes | `Scenery.ts` | asks the world since #500 — the transitional pattern, better than a list, still not claims; **and publishes a 0.85 m footprint for a 2.15 m drawn reach (#504)** | footprint at `BUSH_REACH` for overlap; collider stays 0.85 m (see the variant note below) |
 | trees | `Scenery.ts` / `treeModel.ts` | plantability + hand-picked clearances | footprint; **movable** — the felling precedent becomes rung-2 negotiation |
 | lamp posts | `LampPosts.ts` | paths + hand-picked clearances | footprint per post + serving the "every path lit" demand |
-| plots | `parkLayout.ts` | `PARK_LAYOUT` circles, re-derived by hand in every consumer (`boundingRadius + x` arithmetic in slide, flowers, coaster…) | footprint per plot; consumers stop doing plot arithmetic at all |
+| plots | `parkLayout.ts` | `PARK_LAYOUT` circles, re-derived by hand in every consumer (`boundingRadius + x` arithmetic in slide, flowers, coaster…); **and the per-seed `layout`/`layoutRestart` warp fields (#474)** | footprint per plot; consumers stop doing plot arithmetic at all; the layout warp fields deleted, pool green |
 | garden walls | `Garden.ts` / `Scenery.ts` | paths, plots | corridor-like footprint runs with declared gateways |
 | lineside fence | `train/fence.ts` | derived from the railway after the fact | by-product claims laid **with** the railway's sections (Jim's extra-geometry ruling) |
 | boundary + gate | `boundary.ts` / `entrance/*` | its own spline; the gate opening owns `isInEntranceGateOpening` | footprint ring + walkable-must-remain at the opening |
@@ -772,8 +807,11 @@ technically valid and visually nonsense.
 
 - **Hard** (a violation backtracks out, on any seed, by construction): every
   door / ride entrance / seat served flush; no corridor clumping or
-  self-overlap; junctions merged, never aprons; zero level crossings (kept
-  from the parent work); nothing overlaps a walkable-must-remain; **elevated
+  self-overlap; junctions merged, never aprons; zero level crossings
+  (**shipped as #474, 4 Sep** — the level-crossing tier is deleted end to
+  end and a crossing with no proven site or no built deck throws; the
+  hard tier inherits that as a rule already true of every pool seed, not a
+  goal); nothing overlaps a walkable-must-remain; **elevated
   structure is supported** — a chute, track or deck whose feet cannot all
   claim ground is a refused placement, never a thing shipped with gaps in
   its legs (the slide-leg evidence above).
