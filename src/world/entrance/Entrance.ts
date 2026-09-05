@@ -11,7 +11,6 @@ import {
 } from 'three';
 import { PALETTE } from '../../core/palette';
 import {
-  pinkStoneTexture,
   WELCOME_SIGN_CANVAS_HEIGHT,
   WELCOME_SIGN_CANVAS_WIDTH,
   welcomeSignTexture,
@@ -42,7 +41,6 @@ import {
   ENTRANCE_CLEAR_RADIUS,
   ENTRANCE_CLEAR_X,
   ENTRANCE_CLEAR_Z,
-  ENTRANCE_GATE_POST_HEIGHT,
   ENTRANCE_GATE_X,
   ENTRANCE_GATE_Z,
   ENTRANCE_STOP_Z,
@@ -265,33 +263,28 @@ export class Entrance implements GameSystem {
   constructor(collision: CollisionWorld, trainRoute: TrainRoute, options: EntranceOptions = {}) {
     this.group.name = 'entrance';
 
-    const stoneMaterial = toonMaterial(0xffffff, { map: pinkStoneTexture(2, 1) });
-    const capMaterial = toonMaterial(PALETTE.stonePinkLight);
-
     // --- the gate arch ---------------------------------------------------
     // One owner, `gateArch.ts`: the bus ride builds this same gate at the end
     // of its lane, and the cut between the two lands squarely on it. It used
     // to be built twice, and the copies drifted — issue #480.
     //
-    // The posts sit either side of the gate along the wall's own tangent —
-    // perpendicular to the radius out to `ENTRANCE_GATE_X/Z` — so the arch
-    // reads as a gap cut straight through the ring, whatever angle it is at.
-    // A rotation of `yaw` about Y takes the arch's local `+X` onto
-    // `(cos yaw, -sin yaw)`, and the tangent is `(-sin A, cos A)`, so the yaw
-    // the gate wants is `-(A + π/2)`. The posts come back out of the same
-    // rotation rather than being placed from the tangent a second time.
+    // **Which way it faces is the outward radial**, `(cos A, sin A)`: straight
+    // out of the park, down the road the cat bus comes in on, so the lettered
+    // face and the ferris-wheel roundel are pointed at the child arriving
+    // rather than at the fountain. `gateArch.ts` derives the piers from the
+    // perpendicular to it, so the gate reads as a gap cut straight through the
+    // boundary ring whatever angle the entrance is at, and the sign cannot end
+    // up 180° out while the piers still look right.
     const arch = buildGateArch({
       centreX: ENTRANCE_GATE_X,
       centreZ: ENTRANCE_GATE_Z,
-      yaw: -(ENTRANCE_ANGLE + Math.PI / 2),
+      outward: { x: Math.cos(ENTRANCE_ANGLE), z: Math.sin(ENTRANCE_ANGLE) },
       groundAt: terrainHeight,
-      stoneMaterial,
-      capMaterial,
-      // The crossbar is named `park-gate-arch` so `scripts/check-park-map.mts` can ask the *scene* where the
-      // gate stands, rather than re-reading the constant the park map already
-      // read. The crossbar spans the opening and is centred on it, so its
-      // world position is the gate — independent truth for the map's `gate`
-      // feature.
+      // The arch's root is named `park-gate-arch` so `scripts/check-park-map.mts`
+      // can ask the *scene* where the gate stands, rather than re-reading the
+      // constant the park map already read. The asset's origin is the middle of
+      // the gateway on the ground, so that node's world position *is* the gate —
+      // independent truth for the map's `gate` feature.
       //
       // **`park-gate-`, not just `entrance-`, and that is not fussiness.** The
       // obvious name `entrance-arch` is already taken, by the archway over the
@@ -307,29 +300,24 @@ export class Entrance implements GameSystem {
     this.group.add(arch.group);
 
     // **The gate is solid at its feet and open above them.** A collider on
-    // each post, sized by the arch itself (`footRadius` covers the post's
-    // splayed base and the crossbar's tube where it comes down onto it), and
-    // deliberately nothing under the span — that span is the way into the
-    // park, 3.45 m of headroom over a 1.24 m-wide child, and a collider there
-    // would shut the gateway. Proved both ways by
-    // `theParkGateArchStandsOverItsGateway` in `test/procgen/invariants.ts`.
-    const tangentX = -Math.sin(ENTRANCE_ANGLE);
-    const tangentZ = Math.cos(ENTRANCE_ANGLE);
-    for (const [index, foot] of arch.feet.entries()) {
-      const side = index === 0 ? -1 : 1;
-      const ground = terrainHeight(foot.x, foot.z);
-
-      // Nudged back towards the gate centre from the post's own position.
-      const pawA = buildPawPrint(toonMaterial(PALETTE.stonePinkDark));
-      pawA.position.set(
-        foot.x - side * 0.46 * tangentX,
-        ground + ENTRANCE_GATE_POST_HEIGHT * 0.55,
-        foot.z - side * 0.46 * tangentZ,
-      );
-      pawA.rotation.y = side > 0 ? -Math.PI / 2 : Math.PI / 2;
-      pawA.scale.setScalar(1.6);
-      this.group.add(pawA);
-
+    // each pier, sized by the arch itself — `footRadius` is
+    // `GATE_ARCH_PIER_KEEP_OUT`, measured off the shipped `.glb` rather than
+    // written down here — and deliberately nothing under the span. That span
+    // is the way into the park: `GATE_ARCH_CLEAR_WIDTH` (7.00 m) of floor
+    // between the two circles, and `GATE_ARCH_CLEAR_HEIGHT` of air over a
+    // child's head. A collider there would shut the park's own front door,
+    // which is the worst thing a solidity fix can do. Proved both ways by
+    // `theParkGateArchStandsOverItsGateway` in `test/procgen/invariants.ts`
+    // and across the whole seed pool by `scripts/probe-gate-pool.mts`.
+    //
+    // **The two paw prints that used to be stuck on the posts are gone.** They
+    // were positioned 0.46 m off each cylinder's centre by a formula that had
+    // to track that cylinder's surface — the floating-appliqué mistake
+    // `src/art/models/CLAUDE.md` is about — and the authored piers are not
+    // cylinders. Jim approved this arch as it was rendered, and it was
+    // rendered without them. The bus's own paws (below, and on the bus) are
+    // untouched.
+    for (const foot of arch.feet) {
       collision.addCircle(foot.x, foot.z, arch.footRadius);
     }
 

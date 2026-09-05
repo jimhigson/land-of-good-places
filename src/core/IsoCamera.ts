@@ -87,6 +87,26 @@ export class IsoCamera {
    * setFocusOverride}.
    */
   private focusOverrideActive = false;
+
+  /**
+   * **How far the camera currently sits from its normal pseudo-isometric
+   * pose** — a delta in metres, damped to zero, added on top of
+   * {@link offset} rather than replacing it.
+   *
+   * This is what lets a shot sit lower and flatter than the rig and then
+   * *rise* back into it, which is the cat bus arrival's third beat: Jim, on
+   * the arrival, *"once through the arch the camera moves up to its usual
+   * pseudo-isometric perspective."*
+   *
+   * **A delta, and never a second pose.** `offset` stays the one owner of
+   * where the camera lives; nothing here writes a pitch or a distance down a
+   * second time, and the rise cannot land somewhere near-but-not-quite home
+   * because "home" is this reaching exactly zero. Two definitions of the
+   * camera's resting place kept in step by hand is the bug this repo has paid
+   * for more than any other.
+   */
+  private readonly poseOffset = new Vector3();
+  private readonly poseTarget = new Vector3();
   private readonly focusOverrideValue = new Vector3();
 
   /**
@@ -374,6 +394,65 @@ export class IsoCamera {
     this.focusOverrideActive = false;
   }
 
+  /**
+   * **Puts the camera somewhere else entirely** — a different compass angle and
+   * a different tilt from the rig's own {@link CAMERA_YAW_DEGREES} /
+   * {@link CAMERA_PITCH_DEGREES}, at the same {@link CAMERA_DISTANCE}.
+   *
+   * The yaw is the half that matters and the half that was missing. This
+   * method used to take a pitch alone, and the cat bus arrival built on it
+   * changed only the tilt — so the shot looked at the bus from the park's one
+   * eternal compass angle, a few degrees flatter, and Jim's verdict on
+   * watching it was *"why doesn't the camera follow into the park like asked
+   * for?"* and *"this is nothing like what I asked for."* He was right: **this
+   * is an orthographic rig, so the eye's distance along the view axis changes
+   * nothing you can see. Yaw, pitch and the focus point are the entire
+   * vocabulary of "the camera moved."** A shot that holds the yaw fixed has,
+   * visually, not moved at all.
+   *
+   * Stored as the **difference** from the normal pose, so
+   * {@link clearPoseOverride} needs no memory of what the normal pose was and
+   * cannot restore a stale copy of it, and so a shot that eases its own angles
+   * back to the rig's lands on `(0, 0, 0)` exactly rather than near it.
+   *
+   * **`distance` is an occlusion control, not a framing one**, and that is the
+   * one counter-intuitive thing here. An orthographic projection has no size
+   * falloff, so pulling the eye in does not make anything bigger — every object
+   * lands on exactly the same pixels. What it changes is *what is in the way*:
+   * only geometry between the eye and the subject can cover the subject, so a
+   * shot that stands 20 m back sees past the whole park, and one that stands
+   * the rig's 90 m back sees a coaster, a hotel tower and a castle turret drawn
+   * across it. That is not hypothetical — it is what the first three attempts
+   * at the arrival's door shot looked like, on three different bearings, on the
+   * same seed. Defaults to {@link CAMERA_DISTANCE}, which is the rig's own.
+   *
+   * **Safe and expected to call every frame with a moving value.** Unlike
+   * {@link setZoomTarget} nothing else in the game competes for this, so there
+   * is no #329 here to walk into: a caller driving a camera *path* writes a
+   * different pose every frame, and that is the point.
+   */
+  setShotOverride(yawDegrees: number, pitchDegrees: number, distance = CAMERA_DISTANCE): void {
+    const eye = cameraOffset(yawDegrees * DEG, pitchDegrees * DEG, distance);
+    this.poseTarget.set(eye.x - this.offset.x, eye.y - this.offset.y, eye.z - this.offset.z);
+  }
+
+  /** Rises back to the ordinary pseudo-isometric pose. */
+  clearPoseOverride(): void {
+    this.poseTarget.set(0, 0, 0);
+  }
+
+  /**
+   * How far the camera still is from its normal pose, in metres — 0 once the
+   * rise has actually landed.
+   *
+   * Read by `scripts/check-arrival-camera.mts` to prove the hand-over into
+   * ordinary play ends on the rig's own pose exactly, rather than near it.
+   * Nothing in the game needs it.
+   */
+  get poseDistance(): number {
+    return this.poseOffset.length();
+  }
+
   // -------------------------------------------------- drag to look around
 
   /**
@@ -537,6 +616,7 @@ export class IsoCamera {
     this.focus.z = damp(this.focus.z, this.desiredFocus.z, CAMERA_FOLLOW_HALF_LIFE, dt);
 
     this.updateLook(dt);
+    this.updatePose(dt);
     this.applyTransform();
   }
 
@@ -574,11 +654,30 @@ export class IsoCamera {
     }
   }
 
+  /**
+   * Eases the pose delta towards its target by one frame.
+   *
+   * The last millimetre is snapped off for the same reason `updateLook` snaps
+   * its own: an exponential approaches zero forever, so without this the
+   * camera would sit a hair off its resting pose for the whole rest of the
+   * session and "has the rise finished?" would have no answer that ever
+   * arrives. Beat three of the arrival has to land *on* the ordinary camera,
+   * not beside it.
+   */
+  private updatePose(dt: number): void {
+    this.poseOffset.x = damp(this.poseOffset.x, this.poseTarget.x, CAMERA_POSE_HALF_LIFE, dt);
+    this.poseOffset.y = damp(this.poseOffset.y, this.poseTarget.y, CAMERA_POSE_HALF_LIFE, dt);
+    this.poseOffset.z = damp(this.poseOffset.z, this.poseTarget.z, CAMERA_POSE_HALF_LIFE, dt);
+    if (this.poseOffset.distanceToSquared(this.poseTarget) < POSE_HOME_EPSILON * POSE_HOME_EPSILON) {
+      this.poseOffset.copy(this.poseTarget);
+    }
+  }
+
   private applyTransform(): void {
     // The look-around offset is applied *here*, on top of the settled follow,
     // rather than folded into `focus` — see `viewFocus`.
     this.viewFocus.copy(this.focus).add(this.lookOffset);
-    this.camera.position.copy(this.viewFocus).add(this.offset);
+    this.camera.position.copy(this.viewFocus).add(this.offset).add(this.poseOffset);
     this.camera.lookAt(this.viewFocus);
     this.camera.updateMatrixWorld();
 
@@ -799,9 +898,21 @@ export class IsoCamera {
   }
 }
 
-// Raised with the closer framing: the aim point wants to sit around chest height
-// on the character, and the character's chest went up when her head did.
-const TEMP_LIFT = new Vector3(0, 1.25, 0);
+/**
+ * How far above her feet the follow camera aims, in metres.
+ *
+ * Raised with the closer framing: the aim point wants to sit around chest
+ * height on the character, and the character's chest went up when her head did.
+ *
+ * **Exported because it is the eye's own height reference.** The camera orbits
+ * this point, so anything asking "how high does the eye ride?" — the arrival
+ * shot's clearance under the gate arch, for one — is asking about this number.
+ * `check:arrival-camera` used to carry its own hand-copied 1.1, which was the
+ * *door beat's* lift and 0.15 m too low, and its headroom clause passed only
+ * because of the difference. One owner; everyone else asks.
+ */
+export const CAMERA_FOCUS_LIFT = 1.25;
+const TEMP_LIFT = new Vector3(0, CAMERA_FOCUS_LIFT, 0);
 
 /**
  * Below this many metres from her, the look-around offset is simply zero.
@@ -811,6 +922,25 @@ const TEMP_LIFT = new Vector3(0, 1.25, 0);
  * movement anyone could.
  */
 const LOOK_HOME_EPSILON = 0.001;
+
+/**
+ * How quickly the camera settles onto the pose it has been asked for, in
+ * seconds per halving.
+ *
+ * **Short, because this is a smoother and not the animation.** It was
+ * `CAMERA_LOOK_RETURN_HALF_LIFE` (0.45 s) back when the only caller set one
+ * pose and let the damping carry the whole move — an easing of last resort. The
+ * cat bus arrival now drives a genuine camera *path*, writing a fresh pose
+ * every frame off its own clock, so a long half-life here would not smooth that
+ * path, it would lag half a second behind it and blur the moment the shot is
+ * supposed to land on. At 0.12 s the damping does what damping is for — it
+ * absorbs a discontinuity at a phase boundary — and leaves the shape of the
+ * move to whoever is driving it.
+ */
+const CAMERA_POSE_HALF_LIFE = 0.12;
+
+/** Below this, the rise has landed. Metres. */
+const POSE_HOME_EPSILON = 0.001;
 
 // Scratch vector for clampToFrustum's own intermediate maths — discarded
 // before the method returns, so safe to share across calls.
