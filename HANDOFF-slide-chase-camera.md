@@ -474,10 +474,10 @@ during the control descent (`[ELIFECYCLE] Command failed`, no code).
 
 What is known, rather than guessed:
 
-- **Not reproducible in two standalone re-runs**, both exit **0**
-  (`/tmp/cam519/131-retry.log` and `/tmp/cam519/131-rep1.log`). A third was
-  still in flight when this was written and its result is **not** included in
-  that count — two is the number actually read off the screen.
+- **Not reproducible in three standalone re-runs**, all exit **0**
+  (`/tmp/cam519/131-retry.log`, `131-rep1.log`, `131-rep2.log`). All three
+  print a wired line **byte-identical** to the failing run's, so the flake
+  never once touched a measured value.
 - **The measurement is deterministic.** The failing run's wired line is
   byte-identical to the clean re-run's: 704 ridden frames, 18% biggest, 14.5%
   smallest, 21.8° off-axis, 5.45 m above ground. So the park build and the
