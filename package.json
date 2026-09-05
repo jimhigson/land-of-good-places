@@ -117,7 +117,8 @@
     "measure:bridge-parapet": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-bridge-parapet.mts",
     "measure:check-chain": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-check-chain.mts",
     "check:watchdog": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-watchdog.mts check .github/workflows/checks.yml",
-    "test:procgen:watchdog": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-watchdog.mts test:procgen .github/workflows/procgen-invariants.yml"
+    "test:procgen:watchdog": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-watchdog.mts test:procgen .github/workflows/procgen-invariants.yml",
+    "check:swept-bus": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-swept-bus.mts"
   },
   "dependencies": {
     "three": "^0.185.1",
