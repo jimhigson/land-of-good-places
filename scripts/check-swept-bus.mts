@@ -220,6 +220,39 @@ async function measureOneSeed(): Promise<void> {
   }
   const bus = busRoot as Object3D;
 
+  /**
+   * **Everything above the bus must be identity, and this says so out loud.**
+   *
+   * `placeBus` writes the bus's pose into its **own** transform, and everything
+   * below reads that transform and then works in world coordinates. The two are
+   * the same thing only while every ancestor — the arrival group, the entrance
+   * group, the scene — is untransformed, which is true today and is nowhere
+   * written down. Give the arrival group an offset tomorrow and every number
+   * this check prints would be quietly measured in the wrong place: the "two
+   * definitions of one thing kept in step by hand" fault, sitting in the
+   * instrument instead of in the park.
+   *
+   * So it is asserted rather than assumed. Cheaper than folding the world
+   * matrix in, and it fails loudly instead of drifting.
+   */
+  for (let node = bus.parent; node; node = node.parent) {
+    const moved =
+      node.position.lengthSq() > 1e-12 ||
+      Math.abs(node.quaternion.w - 1) > 1e-9 ||
+      Math.abs(node.scale.x - 1) > 1e-9 ||
+      Math.abs(node.scale.y - 1) > 1e-9 ||
+      Math.abs(node.scale.z - 1) > 1e-9;
+    if (moved) {
+      throw new Error(
+        `check:swept-bus: \`${node.name || node.type}\`, an ancestor of the cat bus, has a ` +
+          "transform of its own. This check reads the bus's pose off the bus and then " +
+          'measures in world coordinates, which is only the same thing while everything ' +
+          'above it is identity. Fold the ancestor transform in before trusting any ' +
+          'number here.',
+      );
+    }
+  }
+
   /** The bearing `placeBus` gave it. Read, never restated. */
   const facing = bus.rotation.y;
   const forwardX = Math.sin(facing);
