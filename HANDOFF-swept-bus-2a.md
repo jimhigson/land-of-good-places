@@ -8,7 +8,7 @@
 - **Brief**: `docs/BRIEF-stage3-step2a-swept-bus-instrument.md`. Authority:
   `docs/DESIGN-round-robin-generation.md`, "Stage 3, ruled (5 Sep, Jim)".
 - **Scope**: step 2a only. Steps 2, 3 and 4 are held behind other work.
-- **Status**: complete, gates running, PR to open.
+- **Status**: complete. All gates green (`check`, `test:procgen`, `build`, `check:coplanar`, exit 0 each). PR open.
 
 ## What landed
 
@@ -50,7 +50,7 @@ the inputs the numbers below were produced from:
 ```
 bus body as drawn: 14.54 m long, 7.30 m wide, 0.02 to 6.15 m above the ground
 swept along z=69.00 from x=7.00 to x=-22.00, every 0.2 m
-post sampling 0.2 m; 11326 samples on seed 1
+post sampling 0.2 m; 12040 samples on seed 1
 trestle instances per seed (seed 1): legs 102, branches-lower 204, branches-upper 408
 base commit: origin/design/round-robin-generation @ b5fd17e6
 ```
@@ -64,26 +64,26 @@ post counts below run higher than the #498 reviewer's 8–9 per seed.
 
 ```
   seed   posts  feet(control)  lifted(control)  worst penetration
-      5     27              8                0  2.914 m at 3.58 m up (race:branches-lower:13)
-     11     25              7                0  3.369 m at 2.98 m up (race:branches-lower:66)
-     24     16              5                0  2.401 m at 3.99 m up (race:branches-lower:98)
-    115     24              8                0  2.938 m at 2.60 m up (race:legs:29)
-    128     21              6                0  3.383 m at 3.12 m up (race:branches-lower:49)
-    131     24              8                0  3.526 m at 3.20 m up (race:legs:29)
-    208     24              8                0  3.617 m at 3.00 m up (race:legs:33)
-    225     24              8                0  3.584 m at 3.00 m up (race:legs:2)
-    267     26              8                0  2.761 m at 3.74 m up (race:branches-lower:86)
-    274     22              6                0  3.265 m at 2.60 m up (race:legs:37)
-    288     26              8                0  3.596 m at 3.00 m up (race:legs:20)
-    326     10              3                0  3.410 m at 2.80 m up (race:legs:30)
-    346     24              6                0  3.368 m at 3.06 m up (race:branches-lower:42)
-    428     30              8                0  3.285 m at 3.00 m up (walk-past:legs:46)
-    451     13              2                0  3.605 m at 3.00 m up (race:legs:33)
-20260728     28              8                0  3.590 m at 3.00 m up (race:legs:0)
+      5     27              8                0  2.906 m at 3.56 m up (race:branches-lower:13)
+     11     25              7                0  3.365 m at 2.97 m up (race:branches-lower:66)
+     24     16              5                0  2.395 m at 3.98 m up (race:branches-lower:98)
+    115     24              8                0  2.942 m at 2.52 m up (race:legs:29)
+    128     21              6                0  3.445 m at 2.94 m up (race:legs:24)
+    131     24              8                0  3.541 m at 3.07 m up (race:legs:29)
+    208     24              8                0  3.616 m at 3.05 m up (race:legs:33)
+    225     24              8                0  3.584 m at 3.03 m up (race:legs:2)
+    267     26              8                0  2.771 m at 3.73 m up (race:branches-lower:86)
+    274     22              6                0  3.268 m at 2.71 m up (race:legs:37)
+    288     26              8                0  3.592 m at 3.10 m up (race:legs:20)
+    326     10              3                0  3.404 m at 2.90 m up (race:legs:30)
+    346     24              6                0  3.362 m at 3.06 m up (race:branches-lower:42)
+    428     30              8                0  3.214 m at 2.92 m up (walk-past:legs:46)
+    451     13              2                0  3.602 m at 3.07 m up (race:legs:33)
+20260728     28              8                0  3.584 m at 3.11 m up (race:legs:0)
 
 16 seed(s) still intruding — step 2 owes these. 364 drawn post(s) in total.
 WORSE: seed 5 — 27 drawn post(s) inside the bus, baseline allows 0
-    worst 2.914 m into the body at (-5.35, 67.96), 3.58 m up,
+    worst 2.906 m into the body at (-5.35, 67.95), 3.56 m up,
     post race:branches-lower:13, bus at x=-7.20
 ```
 
@@ -104,7 +104,7 @@ Real metres and real coordinates throughout — no `NaN`, no `Infinity`.
   instrument agrees with the old one when asked the old question, and finds
   three to four times as much when asked about the drawn post.
 
-## Watched failing — four deliberate breaks, all proved red
+## Watched failing — five deliberate breaks, all proved red
 
 | break | what was changed | result |
 |---|---|---|
