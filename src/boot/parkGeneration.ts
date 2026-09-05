@@ -554,6 +554,18 @@ export class ParkGeneration {
     ]);
   }
 
+  /**
+   * **The registry this generation claimed against**, read-only to callers.
+   *
+   * Exposed so a check can assert the `World` that follows took *this* object
+   * out of the letterbox rather than making a second one — see
+   * `scripts/check-ground-claims.mts`. Nothing in the game reads it here; the
+   * game reads `World.groundClaims`.
+   */
+  get groundClaims(): GroundClaims {
+    return this.claims;
+  }
+
   /** Everything is solved and `SLIDE_PLAN` will be free when it is imported. */
   get ready(): boolean {
     return this.pathsDone;
