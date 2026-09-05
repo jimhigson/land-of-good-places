@@ -138,3 +138,139 @@ lines of `THREE.Texture` noise.
 - `check-rail-race.mts:1942` — `FIELD_SEEDS`, 24 hard-coded values. These are
   **rival-race RNG seeds**, not park seeds. Biggest `SEEDS = [...]` in the
   chain and the easiest to misread as pool coverage.
+
+---
+
+## What was built
+
+Two parts, both agreed with the Overseer before building.
+
+### Part 1 — `check:park-pool`: `check:park` on all sixteen parks
+
+`scripts/check-park-pool.mts`, wired into the **`Procgen invariants`** job.
+
+- Runs **the real `scripts/check-park.mts`** once per pool seed in a child
+  process with `LGP_SEED` (`parkManifest.ts` reads the seed once at import, so
+  one process cannot build two parks). It states **no standard of its own** —
+  `check-park.mts` owns that — so there is nothing to drift.
+- **Ratchet ENFORCED**, deliberately. `LGP_RATCHET=off` exists for
+  `sweep-park-seeds.mts`, which is *hunting* candidates; under it `poi.stranded`
+  goes soft — and `poi.stranded` is the exact key #510's own evidence cited. The
+  pool is not a hunt, so it is held to the bar `vet:seeds --pool` already uses
+  (`checkPark(seed, true)`).
+- **16/16 pass today**, 1:54 wall on four lanes. Seed 288 alone is 99 s.
+- `--list` prints the seeds it will sweep, as JSON — the handle Part 2 uses.
+
+**Why not a new `Seed pool` matrix workflow, which is what I first proposed:**
+`procgen-invariants.yml` already runs `check:gateway` over the whole pool, and
+its comment gives the reason — that job is **already a required status check**,
+so a sweep put there gates on the day it lands instead of waiting on a
+branch-protection change only Jim can make. A separate workflow would have been
+inert until somebody changed a repo setting, which is a workflow that looks like
+a gate and is not: the very thing this ticket is about. **This design needs no
+branch-protection change at all.**
+
+### Part 2 — `check:seed-coverage`: coverage is an asserted, printed fact
+
+`scripts/check-seed-coverage.mts`, in the `check` chain (seed-independent,
+~1 s). Fails hard; does not ratchet.
+
+- Runs `check:park-pool --list` **in a child process** and compares what the
+  sweep *says it will ask* against `PARK_SEED_POOL`. Reading the pool here and
+  calling it coverage would be a constant asserted against itself.
+- Checks the sweep is wired into a job that blocks a merge, and that the job's
+  `name:` still exists — a required check is matched **by name**.
+- **Names every workflow that runs on a PR and blocks nothing.** On `main`
+  today: `Coplanar faces` and `A reload gets the new build`. Deploys are
+  excluded (`NOT_A_GATE`) so the real two are not skimmed past.
+- Prints what is **still** uncovered every run: nine pool seeds have no
+  per-seed invariant file, and ~40 chain steps remain canonical-only.
+
+## Branch protection — read back, not assumed
+
+```
+gh api repos/jimhigson/land-of-good-places/branches/main/protection \
+  --jq '.required_status_checks.contexts'
+["Procgen invariants","Checks"]
+```
+
+Exactly two. **#510 needs nothing added** — the sweep rides inside
+`Procgen invariants`. The two that genuinely run and gate nothing, with the
+exact strings GitHub matches (the job's `name:`, not the workflow's):
+
+| exact string | file | note |
+|---|---|---|
+| `Coplanar faces` | `coplanar.yml` | CLAUDE.md's own table says "not yet — needs adding" |
+| `A reload gets the new build` | `update-adoption.yml` | guards #341; runs on every PR, gates nothing |
+
+`entrance-road.yml` **does not exist on `origin/main`** nor on any remote
+branch I could find — if an ask is queued for it, it is premature.
+
+## Proved red — with the input, since transcripts go stale
+
+`check:park-pool`, retired seed 18 injected into the sweep list (it needs a
+level crossing; since 2 Sep every rail crossing is a bridge, so its park does
+not build):
+
+```
+seed 18: FAIL  did not build: Error: bridges: no walkable bridge fits at proven
+crossing railD 46.0 (-58.9, 53.7). The planner proved this site; the real search
+refused it — find the drift between them (issue #414).
+check:park-pool: 16/17 pool seed(s) pass ... 1 FAILED     exit 1
+```
+
+`check:seed-coverage`, three mutations, control exit 0 between each:
+
+| mutation | result |
+|---|---|
+| drop 115 and 428 from the sweep | `FAIL 2 pool seed(s) are built by no whole-pool sweep: 115, 428` — exit 1 |
+| replace the workflow step with `echo skipped` | `FAIL no merge-blocking workflow runs check:park-pool` — exit 1 |
+| rename the job to `Procgen invariants (fast)` | `FAIL ... no longer contains a job named "Procgen invariants"` — exit 1 |
+
+## Three defects proving-red found in my own checks
+
+Worth reading; all three are this repo's standard diseases, in new code.
+
+1. **A sweep that could vanish.** Six lanes saturated the Mac, one lane threw,
+   `Promise.all` rejected and took the entire report with it: ten seeds printed,
+   six never ran, **exit 1 with no error, no summary and no seed named**. In CI
+   that reads as "a park is broken" while naming none. Lanes now default to 4
+   (`LGP_LANES` overrides) and a lane cannot reject.
+2. **A failure message naming the runtime instead of the fault** — `did not
+   complete: Node.js v26.5.0`, because it quoted the last non-empty line. The
+   *first* fix for it also printed the version:
+   `/^[A-Za-z_$][\w$]*Error\b/` requires a character before `Error`, so it
+   matches `TypeError` and not a bare `Error:`. Only re-running the mutation
+   showed it.
+3. **`check:seed-coverage` could not see the rename it exists to catch.** Its
+   job-name regex matched the workflow's **top-level** `name:` (line 1) instead
+   of the job's (line 40), so renaming the job left it at exit 0. Fixed by
+   requiring indentation.
+
+## Measured, for whoever needs the numbers
+
+- `check:park`: **4.9 s** canonical, **16.6 s** seed 428, **99 s** seed 288.
+- whole pool, both gates, `vet:seeds --pool`-style: 52–63 s per seed.
+- `check:gateway`, whole pool: **56 s** wall, 487% CPU.
+- `checks.yml` recent **successful** runs on `main`: **26.7 / 26.8 / 25.9 min**
+  against `timeout-minutes: 30`. Handed to another Engineer by the Overseer;
+  **do not add to that chain.**
+
+## Vitest streams — measured, and it corrects CLAUDE.md's stated reason
+
+Throwaway passing test, default reporter, `pnpm run test:procgen`:
+
+```
+console.log(...)              NOT VISIBLE on a passing run
+process.stdout.write(...)     VISIBLE
+process.stderr.write(...)     VISIBLE
+```
+
+So the real distinction is **`console.*` interception**, not stdout-vs-stderr.
+CLAUDE.md's advice ("write to `process.stderr`, not `console.log`") is safe, but
+its reason is narrower than the truth, and somebody reasoning from the stated
+reason will make the wrong call in a new situation. The Overseer is putting the
+edit to Jim. In a plain Node script both streams are visible; these two use
+**stdout**. (The "stderr gets buried under 288 lines of `THREE.Texture` noise"
+caution did not reproduce on `check:park` or `check:gateway` — **0** such lines
+in either.)
