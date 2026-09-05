@@ -296,3 +296,52 @@ Chain step **sets** compared by parsing `package.json`, base vs head:
 **No branch-protection change is needed for this PR** — see above. The two
 strings that *do* want adding, unrelated to #510, are `Coplanar faces` and
 `A reload gets the new build`, and they are Jim's to set.
+
+---
+
+## Rebased onto #512 + #517 — and the `check:node` trap
+
+`main` moved to `f1c99347`. **#517 adds `check:node` to the `check` chain in
+first position** and rewrites all seven workflow files.
+
+The chain conflicted, as expected. **The resolution was rebuilt from `main`'s
+package.json rather than taken from either side**, and the rebase was run with
+`git -c rerere.enabled=false` so no recorded preimage could replay — taking
+"ours" here would have silently deleted `check:node`, which is #453 repeating.
+
+Verified by parsing, sets not counts:
+
+```
+main 60 -> head 61
+REMOVED: (none)
+ADDED  : [ 'pnpm run check:seed-coverage' ]
+check:node present? true   first step: pnpm run check:node
+```
+
+### #517's workflow rewrite vs this branch specifically
+
+`check:seed-coverage` **reads** the workflow files to decide which sweep is
+wired into a merge-blocking job, and #517 touched every one of them (+5/-1 each,
+`node-version-file`). A green run afterwards could equally mean the check had
+been **blinded** — so it was re-proved red *after* the rebase, not merely
+re-run:
+
+| mutation, post-rebase | result |
+|---|---|
+| rename the job to `Procgen invariants (fast)` | `FAIL ... no longer contains a job named "Procgen invariants"` — exit 1 |
+| replace the sweep step with `echo skipped` | `FAIL no merge-blocking workflow runs check:park-pool` — exit 1 |
+| control (restored) | exit 0 |
+
+The mutation script asserts its own target line exists before mutating, so a
+shape change in #517 would have failed loudly rather than producing a no-op
+mutation and a reassuring "still green".
+
+### The job-name vs workflow-name confusion is load-bearing across this area
+
+GitHub matches a required status check by the **job's** `name:`, not the
+workflow's own top-level `name:`. Both read `name: Procgen invariants` in that
+file, on lines 1 and 40. That confusion has now produced a defect twice in one
+night in two different tools — including in this very check, which sat green
+through the rename it exists to catch until the regex required indentation.
+Anything in this area that reads a workflow file must anchor on the indented
+job-level key.
