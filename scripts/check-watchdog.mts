@@ -35,8 +35,22 @@
  * on a developer's Mac, where GNU coreutils may not be installed at all —
  * and a watchdog that only works on CI cannot be tried before it is trusted.
  *
+ * ## Which gates it covers
+ *
+ * Both **required** status checks, because both fail this same silent way:
+ *
+ * | gate | workflow | cap | worst seen | % |
+ * |---|---|---|---|---|
+ * | `check` | `checks.yml` | 30m | 26m23s | 87.9% |
+ * | `test:procgen` | `procgen-invariants.yml` | 15m | 9m59s | 66.6% |
+ *
+ * `check:coplanar` (`coplanar.yml`, 15m cap, worst 5m30s = 36.7%) is left
+ * uncovered on purpose — it is genuinely comfortable, and it is not a
+ * required check.
+ *
  * Usage (CI, and locally if you want the same view):
  *   pnpm run check:watchdog
+ *   pnpm run test:procgen:watchdog
  *   CHECK_WATCHDOG_MARGIN_SECONDS=120 pnpm run check:watchdog
  *   CHECK_WATCHDOG_BUDGET_SECONDS=30 pnpm run check:watchdog   # to prove it fires
  */
@@ -56,8 +70,33 @@ import { capSeconds, formatDuration, stepName } from './checkChain.mts';
  */
 const DEFAULT_MARGIN_SECONDS = 180;
 
-const cap = capSeconds();
-const margin = Number(process.env.CHECK_WATCHDOG_MARGIN_SECONDS ?? DEFAULT_MARGIN_SECONDS);
+/**
+ * Which pnpm script to run, and which workflow's cap to run it against.
+ *
+ * Two gates use this now — `check` under `checks.yml`, and `test:procgen`
+ * under `procgen-invariants.yml`. Both are **required** status checks, and
+ * both fail the same silent way, so both want the same clock.
+ */
+const script = process.argv[2] ?? 'check';
+const workflowPath = process.argv[3] ?? '.github/workflows/checks.yml';
+const workflow = new URL(`../${workflowPath}`, import.meta.url);
+
+const cap = capSeconds(workflow);
+
+/**
+ * The margin scales with the cap rather than being a flat three minutes.
+ *
+ * 180 s is 10% of `checks.yml`'s 30 minutes and sensible there; against
+ * `procgen-invariants.yml`'s **15**-minute cap the same constant would eat
+ * 20% of the budget and fire on runs that were going to pass. So: 10% of the
+ * cap, floored at 60 s and capped at `DEFAULT_MARGIN_SECONDS`.
+ *
+ * What the margin has to buy is the runner's own overhead plus enough time to
+ * report the failure — checkout and install measure ~20 s on these jobs, so
+ * 60 s is already generous and 180 s is luxurious.
+ */
+const scaledMargin = Math.max(60, Math.min(DEFAULT_MARGIN_SECONDS, cap * 0.1));
+const margin = Number(process.env.CHECK_WATCHDOG_MARGIN_SECONDS ?? scaledMargin);
 /** Overridable only so the watchdog can be proved to fire — see the PR body. */
 const budget = Number(process.env.CHECK_WATCHDOG_BUDGET_SECONDS ?? cap - margin);
 
@@ -84,8 +123,9 @@ const started = Date.now();
 const elapsed = (): number => (Date.now() - started) / 1000;
 
 say(
-  `check:watchdog — budget ${formatDuration(budget)} against checks.yml's ` +
-    `${formatDuration(cap)} cap (${formatDuration(margin)} left for the runner).`,
+  `watchdog[${script}] — budget ${formatDuration(budget)} against ` +
+    `${workflowPath}'s ${formatDuration(cap)} cap ` +
+    `(${formatDuration(margin)} left for the runner).`,
 );
 
 /**
@@ -108,7 +148,7 @@ say(
  *
  * So: own group, and signal the *group* (`-pid`) rather than the process.
  */
-const child = spawn('pnpm', ['run', 'check'], {
+const child = spawn('pnpm', ['run', script], {
   stdio: ['inherit', 'pipe', 'pipe'],
   env: process.env,
   detached: true,
@@ -203,18 +243,18 @@ const alarm = setTimeout(() => {
   const inStep = (Date.now() - currentStepStarted) / 1000;
   say('');
   say('='.repeat(72));
-  say('check:watchdog — THE CHECK CHAIN RAN OUT OF CLOCK');
+  say(`watchdog[${script}] — RAN OUT OF CLOCK`);
   say('='.repeat(72));
   say(`  ran for            ${formatDuration(firedAt)}`);
   say(`  watchdog budget    ${formatDuration(budget)}`);
-  say(`  checks.yml cap     ${formatDuration(cap)}`);
+  say(`  ${workflowPath} cap  ${formatDuration(cap)}`);
   say(`  scripts finished   ${Math.max(0, invocationsSeen - 1)}  (invocations, not package.json step numbers)`);
   say(`  killed during      ${currentStep}  (after ${formatDuration(inStep)} in it)`);
   say('');
   say('  This is a FAILURE, not a cancellation. Without this watchdog the job');
-  say("  would have hit checks.yml's own `timeout-minutes` and GitHub would");
-  say('  have reported it as `cancelled` — grey, not red, and identical to a');
-  say('  superseded push. That silence is the 29 August outage.');
+  say(`  would have hit ${workflowPath}'s own \`timeout-minutes\` and GitHub`);
+  say('  would have reported it as `cancelled` — grey, not red, and identical');
+  say('  to a superseded push. That silence is the 29 August outage.');
   say('');
   say('  The step named above is where the clock ran out; it is not');
   say('  necessarily the slow one. Measure before blaming it:');
@@ -230,7 +270,7 @@ const alarm = setTimeout(() => {
 
 child.on('error', (error) => {
   clearTimeout(alarm);
-  say(`check:watchdog — could not start the chain: ${error.message}`);
+  say(`watchdog[${script}] — could not start it: ${error.message}`);
   process.exit(1);
 });
 
@@ -242,7 +282,7 @@ child.on('close', (code, signal) => {
   const pct = ((100 * took) / cap).toFixed(1);
   say('');
   say(
-    `check:watchdog — chain took ${formatDuration(took)} of a ${formatDuration(cap)} cap ` +
+    `watchdog[${script}] — took ${formatDuration(took)} of a ${formatDuration(cap)} cap ` +
       `(${pct}% used, ${formatDuration(cap - took)} spare) across ${Math.max(0, invocationsSeen - 1)} script invocations.`,
   );
   if (firedAt === null && took > cap * 0.8) {
@@ -259,7 +299,7 @@ child.on('close', (code, signal) => {
     process.exit(124);
   }
   if (signal) {
-    say(`check:watchdog — the chain was killed by ${signal}.`);
+    say(`watchdog[${script}] — killed by ${signal}.`);
     process.exit(1);
   }
   process.exit(code ?? 1);

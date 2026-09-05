@@ -65,8 +65,22 @@ jobs:
       # broke" rather than being buried in the build log. `test:procgen` is not
       # part of `pnpm run check` — the two suites do not cover each other, which
       # is why both are required.
+      #
+      # **Run under the same watchdog `checks.yml` uses**, for the same reason
+      # and against this job's own 15-minute cap. This is a *required* status
+      # check, so when it runs out of clock GitHub marks it `cancelled` — grey,
+      # not red, and identical to a superseded push — and the merge gate goes
+      # quiet rather than going red.
+      #
+      # It is less pressed than `checks.yml` (worst 9m59s of 15m = 66.6%, against
+      # that chain's 87.9%), and it would need to run 1.50x slower than its own
+      # slowest observed run to breach, where the chain needs only 1.14x. But
+      # this workflow's own ten runs span **2.83x** (3m32s to 9m59s) — a wider
+      # spread than the chain's 1.58x, and a different cause: seed-dependent
+      # solver work, not just runner speed, which makes the tail harder to
+      # predict rather than easier. Covering it costs one argument.
       - name: Procgen invariant suite
-        run: pnpm run test:procgen
+        run: pnpm run test:procgen:watchdog
 
       # **The same question, on the sixteen parks a child can actually be
       # given** (issue #481). The suite above keeps files for the canonical seed
