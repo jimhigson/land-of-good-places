@@ -84,7 +84,7 @@
  */
 
 import './headless-dom.mjs';
-import { Box3, Object3D, Quaternion, Vector3 } from 'three';
+import { Box3, Matrix4, Object3D, Quaternion, Vector3 } from 'three';
 
 await import('./headless-canvas.mjs');
 const { Scene } = await import('three');
@@ -101,6 +101,14 @@ const { PARADE_MEMBER_RADIUS } = await import('../src/core/constants.ts');
 const { IsoCamera } = await import('../src/core/IsoCamera.ts');
 const { gameStore } = await import('../src/state/index.ts');
 const { shopItem } = await import('../src/world/building/shops/catalogue.ts');
+const { terrainHeight } = await import('../src/world/terrain.ts');
+// **The framing band has one owner**, `src/world/slide/petFraming.ts`, because
+// the camera solve has to respect the same two numbers while PLACING the lens.
+// A copy here would be the two-definitions fault inside the fix for a
+// two-definitions fault. This file measures the band; it does not define it.
+const { PET_FRAME_FLOOR, PET_FRAME_CEILING } = await import(
+  '../src/world/slide/petFraming.ts'
+);
 type InteriorControls = import('../src/world/building/Building.ts').InteriorControls;
 
 // Live controls, as `check:slide-rider` uses: boarding the slide is a change of
@@ -143,28 +151,6 @@ const REGROUP_RADIUS = 14;
 /** How long it is given to get there. */
 const REGROUP_SECONDS = 3;
 
-/**
- * The least of the chase frame the nearest companion may fill and still count
- * as being in the shot.
- *
- * **Pixels, not a point.** The clause here before this one projected the
- * companion's centre and asked whether that point was inside the picture, and
- * it was the second instrument in this file to be undone by the difference
- * between *in frustum* and *in shot* — the first asked the frustum question and
- * scored 100% on a bunny that filled the lens. This one failed the other way
- * round: with the pets lying down, the nearest one sits low in the frame with
- * its middle a degree or so under the bottom edge, so the probe scored **3%**
- * on a shot the raster measures a whole animal in, at 8% of the frame. A point
- * is not an animal. Both mistakes have the same cure, which is to count what
- * the camera actually lands on.
- *
- * 1% of a 120 × 68 raster is 82 px — about a third the area a pet at the
- * back of the line makes, and far more than the handful of pixels an ear
- * clipping the border would. It is a floor on "is it in the picture at all",
- * and {@link PET_FRAME_CEILING} is the ceiling on the same measurement.
- */
-const PET_FRAME_FLOOR = 0.01;
-
 /** The fraction of chase rasters the nearest companion must be in the shot on. */
 const IN_SHOT_FLOOR = 0.95;
 
@@ -187,19 +173,6 @@ const RASTER_EVERY = 25;
  */
 const RASTER_W = 120;
 const RASTER_H = 68;
-
-/**
- * The most of the chase frame any one companion may fill.
- *
- * **Read off the failure, not chosen in the abstract.** With the seats laid out
- * plainly the third companion rode 0.45 m in front of the lens and filled
- * essentially the whole frame with the child nowhere in it — seen on a paused
- * mid-descent screenshot, then measured here. A pet that is genuinely following
- * her, at 1.5–2.7 m, comes out at a few percent. 25% sits far above the honest
- * case and far below the wall-of-fur one, so it cannot be satisfied by
- * accident and cannot fail correct behaviour.
- */
-const PET_FRAME_CEILING = 0.25;
 
 /**
  * How far back a companion has to be lying for this to call it lying down,
@@ -537,6 +510,171 @@ async function ride(wired: boolean): Promise<RunResult> {
     return { child, pets: counts, total: RASTER_W * RASTER_H };
   }
 
+  /**
+   * **Why a companion is not in the shot** — diagnosis only, never an
+   * assertion, and printed only under `LGP_SHOT_DEBUG=1`.
+   *
+   * {@link raster} counts rays that *land on* a pet. A pet hidden behind the
+   * trough wall and a pet outside the frustum both land zero, so `in shot`
+   * reports the same 0% for two unrelated faults: a framing bug, which is about
+   * where the lens points, and an occlusion bug, which is about the chute being
+   * between the child and her own pet. Telling them apart needs a second
+   * question — where is it, and what does the camera meet on the way — which is
+   * what this asks.
+   */
+  type PerspectiveCameraLike = {
+    readonly fov: number;
+    worldToLocal(v: Vector3): Vector3;
+  };
+
+  function shotDiagnosis(
+    camera: unknown,
+    pet: { readonly displayName: string; readonly root: unknown },
+    childRoot: unknown,
+  ): string {
+    const centre = new Vector3();
+    new Box3().setFromObject(pet.root as never).getCenter(centre);
+    const ndc = centre.clone().project(camera as never);
+    const across = Math.abs(ndc.x) <= 1;
+    const down = Math.abs(ndc.y) <= 1;
+    const infront = ndc.z >= -1 && ndc.z <= 1;
+
+    // **Only ask what the camera meets if the camera can see there at all.**
+    // `setFromCamera` happily builds a ray for |ndc| > 1 by extrapolating past
+    // the frustum, and that ray hits the pet perfectly well — so an unguarded
+    // version of this prints "camera meets the pet itself" about a pet that is
+    // nowhere in the picture. That is the same fault this helper exists to
+    // expose, committed by the helper: one string for two different worlds.
+    let meets = 'n/a — outside the frustum, so there is no ray to follow';
+    if (across && down && infront) {
+      const caster = new Raycaster();
+      caster.setFromCamera({ x: ndc.x, y: ndc.y } as never, camera as never);
+      const hit = caster.intersectObjects(
+        [slide.group, building.gardenRoot, childRoot, parade.group] as never[],
+        true,
+      )[0];
+      meets = 'nothing';
+      if (hit) {
+        if (isDescendantOf(hit.object, pet.root)) meets = 'the pet itself';
+        else if (isDescendantOf(hit.object, childRoot)) meets = 'the child';
+        else if (isDescendantOf(hit.object, slide.group)) meets = 'the SLIDE — OCCLUDED';
+        else if (isDescendantOf(hit.object, building.gardenRoot)) meets = 'the garden — OCCLUDED';
+        else meets = 'another companion';
+      }
+    }
+    // **Where the pet actually is, in the lens's own frame** — the numbers that
+    // say *why* the ndc is what it is. `worldToLocal` on the camera gives
+    // camera space: -z is straight ahead, +y is up the frame. So `ahead` is how
+    // far in front of the lens the animal is and `below` is how far under its
+    // axis, and `angle` is the two combined — which is the number to compare
+    // against the camera's own half-fov, because a pet further below the axis
+    // than that is off the bottom of the picture by construction.
+    const cam = camera as PerspectiveCameraLike;
+    const inCamera = cam.worldToLocal(centre.clone());
+    const ahead = -inCamera.z;
+    const below = -inCamera.y;
+    const angleBelow = (Math.atan2(below, Math.max(ahead, 1e-6)) * 180) / Math.PI;
+    const halfFov = cam.fov / 2;
+    return (
+      `${pet.displayName} ndc(${ndc.x.toFixed(2)},${ndc.y.toFixed(2)},${ndc.z.toFixed(2)}) ` +
+      `${across ? '' : 'OFF-SIDE '}${down ? '' : 'OFF-TOP/BOTTOM '}${infront ? '' : 'BEHIND-LENS '}` +
+      `| ahead ${ahead.toFixed(2)}m below-axis ${below.toFixed(2)}m ` +
+      `= ${angleBelow.toFixed(1)}° vs half-fov ${halfFov.toFixed(1)}° ` +
+      `→ camera meets ${meets}`
+    );
+  }
+
+  // **#516 instrumentation** — the rim mesh, found once by shape rather than by
+  // name, and its two radii read off the geometry that was actually built.
+  const cameraWorld = new Vector3();
+  const rimLocal = new Vector3();
+  const rimInverse = new Matrix4();
+  let rimMesh: { readonly matrixWorld: Matrix4 } | null = null;
+  let rimMajor = 0;
+  let rimTube = 0;
+  let rimNearest = Infinity;
+  let rimInsideFrames = 0;
+  let rimNearestShot = 'none';
+  const rimInsideShots = new Set<string>();
+
+  // **What is nearest the lens, of anything in the scene?** See the fan's use
+  // below. Every third frame, because 14 rays against the whole scene on every
+  // one of ~700 frames is real time for an answer that cannot move far in
+  // 50 ms — and the thing being hunted fills two-thirds of a frame, not a
+  // pixel.
+  const nearCaster = new Raycaster();
+  const NEAR_FAN_REACH = 2.0;
+  const NEAR_FAN_EVERY = 3;
+  const NEAR_FAN: readonly Vector3[] = [
+    new Vector3(1, 0, 0), new Vector3(-1, 0, 0),
+    new Vector3(0, 1, 0), new Vector3(0, -1, 0),
+    new Vector3(0, 0, 1), new Vector3(0, 0, -1),
+    new Vector3(1, 1, 1).normalize(), new Vector3(-1, 1, 1).normalize(),
+    new Vector3(1, 1, -1).normalize(), new Vector3(-1, 1, -1).normalize(),
+    new Vector3(1, -1, 1).normalize(), new Vector3(-1, -1, 1).normalize(),
+    new Vector3(1, -1, -1).normalize(), new Vector3(-1, -1, -1).normalize(),
+  ];
+  // Only where the lens is ACTUALLY underground. Gating at 1.0 m fired the fan
+  // across most of the descent — the chute runs close to the ground — and made
+  // a whole-pool sweep impractical. Underground is the case that needs a name.
+  const NEAR_FAN_GATE = 0.0;
+  let lowestAboveGround = Infinity;
+  let lowestAboveGroundFrame = 0;
+  let lowestAboveGroundShot = 'none';
+  let undergroundFrames = 0;
+  /**
+   * **The worst angle the nearest companion's drawn centre sat off the chase
+   * lens's own axis**, in degrees, across the descent's rasters — and the
+   * camera's own vertical half-fov to compare it against.
+   *
+   * This pair is the #514 guard; see the clause that fills them. `-1` and `0`
+   * mean nothing was ever measured, which the report says out loud rather than
+   * printing a reassuring zero.
+   */
+  let worstPetOffAxis = -1;
+  let worstPetOffAxisFrame = 0;
+  let petHalfFov = 0;
+  let nearFanFrames = 0;
+  /**
+   * **How many frames the fan actually fired on** — printed on every run,
+   * because it is usually **zero** and a "nearest ANYTHING" line that does not
+   * say so implies cover this instrument does not give.
+   *
+   * The fan is gated on {@link NEAR_FAN_GATE}, i.e. on the lens being genuinely
+   * underground. Once the stale-matrix bug above was fixed that stopped
+   * happening on the canonical park at all — so the honest reading of this
+   * instrument today is "it has never run against a real lens position", and
+   * the report has to be able to say that out loud rather than printing a
+   * confident `>2 m — nothing`.
+   */
+  let nearFanRuns = 0;
+  let nearestAnything = Infinity;
+  let nearestAnythingName = 'nothing';
+  let nearestAnythingFrame = 0;
+  /** `a/b/c` up the scene graph, so a finding names something findable. */
+  const namePath = (object: { name?: string; parent?: unknown } | null): string => {
+    const parts: string[] = [];
+    let at = object as { name?: string; parent?: unknown } | null;
+    while (at && parts.length < 6) {
+      if (at.name) parts.unshift(at.name);
+      at = at.parent as { name?: string; parent?: unknown } | null;
+    }
+    return parts.join('/') || '<unnamed>';
+  };
+  building.ballPit.group.updateMatrixWorld(true);
+  building.ballPit.group.traverse((object: unknown) => {
+    const mesh = object as {
+      isMesh?: boolean;
+      geometry?: { type?: string; parameters?: { radius?: number; tube?: number } };
+      matrixWorld?: Matrix4;
+    };
+    if (!mesh.isMesh || mesh.geometry?.type !== 'TorusGeometry') return;
+    rimMesh = mesh as { readonly matrixWorld: Matrix4 };
+    rimMajor = mesh.geometry.parameters?.radius ?? 0;
+    rimTube = mesh.geometry.parameters?.tube ?? 0;
+    rimInverse.copy(mesh.matrixWorld as Matrix4).invert();
+  });
+
   const previous = new Map<string, Vector3>();
   let rasters = 0;
   let childHiddenSamples = 0;
@@ -786,6 +924,108 @@ async function ride(wired: boolean): Promise<RunResult> {
     const liveShot = building.slideShots.liveShot;
     const liveCamera = building.rideCameraNow;
     const first = bodies[0];
+    // **#516: is the lens itself inside the ball pit's rim?** Measured on every
+    // ridden frame **whatever shot is live**, and that "whatever" is the whole
+    // point — the first version of this sampler sat inside the `kind === 'chase'`
+    // branch below and reported the camera never came within 6.13 m of the rim
+    // on seed 346, flatly contradicting the frame QA photographed. It was not
+    // measuring the camera that clips. The slide has **two** shot kinds
+    // (`slide/cameras.ts`: `chase` and `trackside`), and a trackside eye is a
+    // fixed world point placed by formula — standoff and elevation, stepped
+    // closer only until the *framing* fits — that never asks what is at that
+    // point. A sampler blind to it is a check that cannot see the bug it is for.
+    //
+    // Sampled per frame rather than per raster because #516 reports the clip as
+    // lasting "a frame or two", and the rasters are one frame in twenty-five.
+    //
+    // The rim is a torus, so the test is exact: put the camera into the rim's
+    // own local space, and a point is inside the tube when its distance to the
+    // ring circle is under the tube radius. Both radii are read off the built
+    // geometry rather than restated here — `BALL_PIT_RADIUS + 0.4` and `0.3`
+    // live in `BallPit.ts` and a copy here would be the usual defect.
+    if (liveCamera && rimMesh) {
+      // **Flush the lens's own world matrix before reading it, and flush it
+      // from the top of the chain.** Nothing renders in this process, so no
+      // world matrix is ever brought up to date except where a line like this
+      // one does it — and the chase camera hangs off `eyeBoom` → `eyeMount` →
+      // `rideMount`, every link of which is moved during the same frame.
+      //
+      // Read without this, `setFromMatrixPosition` returned **the world
+      // origin** on ridden frame 1 and a one-frame-stale position thereafter.
+      // That fed `terrainHeight(0, 0)` = 0.09 into the clearance below, which
+      // then reported "−0.09 m, 1 frame UNDERGROUND" and fired the ray fan from
+      // (0,0,0), naming whatever happened to be near the middle of the park.
+      // Neither number was about the lens; the tell was that the control run —
+      // whose camera is somewhere else entirely — printed identical figures.
+      //
+      // `updateWorldMatrix(true, false)` is the right call rather than
+      // `updateMatrixWorld(true)`: it walks **up** to the ancestors first, which
+      // is where the staleness is, and does not descend into children this has
+      // no use for. `orientedBoxOf` above uses it for exactly the same reason.
+      (liveCamera as { updateWorldMatrix(parents: boolean, children: boolean): void })
+        .updateWorldMatrix(true, false);
+      cameraWorld.setFromMatrixPosition(liveCamera.matrixWorld);
+      rimLocal.copy(cameraWorld).applyMatrix4(rimInverse);
+      // Torus lies in local XY with its axis on Z (three.js `TorusGeometry`).
+      const ring = Math.hypot(rimLocal.x, rimLocal.y) - rimMajor;
+      const toSurface = Math.hypot(ring, rimLocal.z) - rimTube;
+      if (toSurface < rimNearest) {
+        rimNearest = toSurface;
+        rimNearestShot = liveShot?.kind ?? 'none';
+      }
+      if (toSurface < 0) {
+        rimInsideFrames += 1;
+        rimInsideShots.add(liveShot?.kind ?? 'none');
+      }
+
+      // **And what is nearest the lens, of anything at all?** #516 names the
+      // ball pit's rim as the culprit; the frame QA photographed is two-thirds
+      // filled by a flat TAN surface while the rim's pink and the bowl's cream
+      // sit far away at the top right, and both instruments here put the rim
+      // metres off. So the issue's stated culprit is a hypothesis, and this
+      // asks the scene instead of assuming it: a short ray fan from the lens,
+      // recording the nearest thing hit and its name. Naming the mesh is the
+      // difference between fixing the camera and fixing the wrong prop.
+      // **The cheap, decisive test first.** The hypothesis is that the lens
+      // goes UNDER THE GROUND near the bottom of the chute, so ask the ground
+      // directly: `terrainHeight` is the same sampler every prop in the park
+      // is placed against. Negative clearance means the camera is underground,
+      // which is exactly the "buried in a flat tan surface" frame QA caught.
+      //
+      // This runs every frame because it is two lookups; the ray fan below,
+      // which names the mesh, is gated behind it because 14 rays against the
+      // whole scene is seconds per seed and is only interesting where the
+      // camera is actually close to something.
+      const groundY = terrainHeight(cameraWorld.x, cameraWorld.z);
+      const aboveGround = cameraWorld.y - groundY;
+      if (aboveGround < lowestAboveGround) {
+        lowestAboveGround = aboveGround;
+        lowestAboveGroundFrame = ridingFrames;
+        lowestAboveGroundShot = liveShot?.kind ?? 'none';
+      }
+      if (aboveGround < 0) undergroundFrames += 1;
+
+      if (aboveGround < NEAR_FAN_GATE && nearFanFrames % NEAR_FAN_EVERY === 0) {
+        // Sprites raycast through the camera's own matrix, so a caster with no
+        // camera throws the moment the fan meets one (the park has several).
+        // Handing it the live camera is both the fix and the honest thing: a
+        // sprite is only "in the way" as the lens sees it.
+        (nearCaster as unknown as { camera: unknown }).camera = liveCamera;
+        nearFanRuns += 1;
+        for (const dir of NEAR_FAN) {
+          nearCaster.set(cameraWorld, dir);
+          nearCaster.far = NEAR_FAN_REACH;
+          const hit = nearCaster.intersectObject(scene, true)[0];
+          if (hit && hit.distance < nearestAnything) {
+            nearestAnything = hit.distance;
+            nearestAnythingName = namePath(hit.object);
+            nearestAnythingFrame = ridingFrames;
+          }
+        }
+      }
+      nearFanFrames += 1;
+    }
+
     if (liveShot?.kind === 'chase' && liveCamera && first) {
       chaseFrames += 1;
 
@@ -806,7 +1046,77 @@ async function ride(wired: boolean): Promise<RunResult> {
         (liveCamera as { updateMatrixWorld(force: boolean): void }).updateMatrixWorld(true);
         const shot = raster(liveCamera, player.model.root, bodies);
         rasters += 1;
+
+        // **Is the nearest companion's MIDDLE inside the picture, or only its
+        // top edge?** This is the clause that guards #514, and it exists
+        // because the pixel clauses above cannot: reverting the aim
+        // (`eyeBoom.rotation.x = 0`, the pre-#514 camera) leaves the raster
+        // scoring **4.0%** of frame on 100% of rasters, comfortably over
+        // `PET_FRAME_FLOOR`'s 1%, so the broken camera passes every other
+        // assertion in this file on the only seed CI runs. A fix whose
+        // regression is invisible to the gate is not guarded at all.
+        //
+        // The number this asks for is the one #514 was actually diagnosed on:
+        // the angle of the animal from the lens's own axis, against the lens's
+        // own half-fov. Broken it was **34.3°–45.4° against 30°** — outside the
+        // frustum on every raster of every park, with the few percent of pixels
+        // coming from the body clipping in from underneath.
+        //
+        // Three things make it an honest question rather than a restatement:
+        //
+        // - **The threshold is the camera's own half-fov**, read off the live
+        //   camera, not a constant chosen here. A body centre beyond it is
+        //   outside the picture by construction, whatever any percentage says.
+        // - **It measures the DRAWN BODY**, via `Box3.setFromObject`, not the
+        //   seat. The seat is the reference point that made the solve's own
+        //   ceiling guard unable to fire (#518); taking it here would repeat
+        //   that fault in the instrument meant to catch it.
+        // - **It is about the aim, which is the whole of the fix.** The lens
+        //   position never moves (measured: first candidate accepted on every
+        //   frame of all 16 parks), so the axis is the only thing #514 changed
+        //   and the only thing a regression can change back.
+        if (first) {
+          const cam = liveCamera as unknown as PerspectiveCameraLike;
+          const bodyCentre = new Vector3();
+          new Box3().setFromObject(first.root as never).getCenter(bodyCentre);
+          const inCamera = cam.worldToLocal(bodyCentre.clone());
+          const ahead = -inCamera.z;
+          // Vertical off-axis only, compared against the VERTICAL half-fov:
+          // `fov` is the vertical field, and the frame is wider than it is
+          // tall, so folding the horizontal offset in here would compare a
+          // number against a bound that does not apply to it. #514 was a
+          // purely vertical miss — the lens flying over the top of the line.
+          const offAxis = (Math.atan2(Math.abs(inCamera.y), Math.max(ahead, 1e-6)) * 180) / Math.PI;
+          petHalfFov = cam.fov / 2;
+          if (ahead <= 0) {
+            // Behind the lens entirely: no angle describes that, and reporting
+            // one would be arithmetic about a body that is not in front of the
+            // camera at all.
+            say(
+              'the lens is aimed at the line',
+              `on ridden frame ${ridingFrames} the nearest companion was BEHIND the lens ` +
+                `(${(-ahead).toFixed(2)} m back), so the chase camera is not filming the line ` +
+                'it is chasing',
+            );
+          } else if (offAxis > worstPetOffAxis) {
+            worstPetOffAxis = offAxis;
+            worstPetOffAxisFrame = ridingFrames;
+          }
+        }
         const nearestShare = (shot.pets[0]?.[1] ?? 0) / shot.total;
+        // **Why is it not in the shot?** `LGP_SHOT_DEBUG=1` only. The raster
+        // counts a pet hidden behind the trough wall and a pet outside the
+        // frustum identically, at 0 px, and those are different bugs with
+        // different fixes — see `shotDiagnosis`.
+        if (process.env['LGP_SHOT_DEBUG'] === '1') {
+          const nearest = bodies[0];
+          process.stderr.write(
+            `    raster ${rasters} ridden frame ${ridingFrames}: nearest ` +
+              `${(nearestShare * 100).toFixed(1)}% — ` +
+              (nearest ? shotDiagnosis(liveCamera, nearest, player.model.root) : 'no companion') +
+              '\n',
+          );
+        }
         if (nearestShare >= PET_FRAME_FLOOR) framedFrames += 1;
         if (nearestShare < smallestNearest) smallestNearest = nearestShare;
         if (shot.child === 0) {
@@ -874,6 +1184,31 @@ async function ride(wired: boolean): Promise<RunResult> {
     );
   }
 
+  // **The aim guard (#514).** See the measurement's own comment in the raster
+  // block for why this is the clause that actually holds the fix down.
+  //
+  // Proved red by reverting the fix itself rather than by mutating a constant:
+  // with `Building.ts`'s `this.eyeBoom.rotation.x` forced to 0 — the pre-#514
+  // camera, aimed along the mount's forward — this clause fails while every
+  // other clause in the file stays green. That is the whole point of it.
+  if (worstPetOffAxis < 0) {
+    say(
+      'the lens is aimed at the line',
+      'the nearest companion was never measured against the chase lens axis, so the aim ' +
+        'that #514 is about was not tested on this run',
+    );
+  } else if (worstPetOffAxis > petHalfFov) {
+    say(
+      'the lens is aimed at the line',
+      `the nearest companion's drawn centre sat ${worstPetOffAxis.toFixed(1)}° off the chase ` +
+        `camera's own axis on ridden frame ${worstPetOffAxisFrame}, against a ` +
+        `${petHalfFov.toFixed(1)}° half-fov — its middle is outside the picture and any pixels ` +
+        'the raster counts are its edge clipping in from the border. This is #514: the lens ' +
+        'is flying over the top of the line it is meant to be filming. Aim it at the line, ' +
+        'do not lower the pixel floor',
+    );
+  }
+
   // **The seat solve never gave up.** `arcForChord` walks back until a
   // companion really is clear of the body in front; if it exhausts
   // `MAX_BEND_ALLOWANCE` it seats the animal too close anyway and counts it,
@@ -894,6 +1229,27 @@ async function ride(wired: boolean): Promise<RunResult> {
     );
   }
 
+  // **The chase solve found a lens placement on every frame.** `solveChaseEye`
+  // walks back and up until the child and her nearest companion are both inside
+  // the frustum and the lens is clear of the ground; if nothing in range does
+  // both it reports `gaveUp` rather than clamping, because a shipped game must
+  // not throw at a child mid-ride.
+  //
+  // Without this clause that counter had no reader at all — while `Building.ts`
+  // carried a comment stating this check asserted it was zero. A guard nobody
+  // reads is not a guard, and a comment claiming an assertion that does not
+  // exist is worse than silence.
+  const chaseGaveUp = building.chaseSolveGaveUpFrames();
+  if (chaseGaveUp > 0) {
+    say(
+      'the chase solve found a lens',
+      `the chase camera solve gave up on ${chaseGaveUp} frames of the descent — no placement ` +
+        'within its range put the child and her nearest companion both in shot while keeping ' +
+        'the lens out of the ground, so the shot those frames drew is one the solver knows is ' +
+        'wrong. Widening the range is not the fix; the placement is wanted, not the clamp',
+    );
+  }
+
   parade.dispose();
 
   console.log(
@@ -911,10 +1267,33 @@ async function ride(wired: boolean): Promise<RunResult> {
       `(smallest ${smallestNearest === Infinity ? 'n/a' : `${(smallestNearest * 100).toFixed(1)}%`}), ` +
       `${chaseFrames} chase frames, ` +
       `${rasters} chase rasters (child at worst ${worstChild === Infinity ? 'n/a' : `${worstChild} px`}, ` +
-      `biggest pet ${(biggestPet * 100).toFixed(0)}% of frame — ${biggestPetName}), ` +
+      // **Both edges of the band, always.** `PET_FRAME_CEILING` is 25% and the
+      // ceiling guard in the solve cannot currently fire (#518), so the biggest
+      // raster is the number that says how much headroom is left — reporting
+      // only the smallest describes one edge of a band as if it were the whole
+      // of it.
+      `biggest pet ${(biggestPet * 100).toFixed(0)}% of frame — ${biggestPetName}, ` +
+      `against a ${(PET_FRAME_CEILING * 100).toFixed(0)}% ceiling), ` +
+      // The #514 aim guard's own number, printed green or red.
+      `nearest pet worst ` +
+      `${worstPetOffAxis < 0 ? 'NEVER MEASURED' : `${worstPetOffAxis.toFixed(1)}° off the lens axis (frame ${worstPetOffAxisFrame}, half-fov ${petHalfFov.toFixed(1)}°)`}, ` +
       `furthest from her afterwards ${worstRegroup.toFixed(1)} m ` +
       `(${missingFrames} undrawn, ${offChuteFrames} off-chute, ${aheadFrames} overtaking, ` +
-      `${touchingFrames} clipping, ${uprightFrames} upright pet-frames)`,
+      `${touchingFrames} clipping, ${uprightFrames} upright pet-frames), ` +
+      // #516: the lens against the ball pit's rim, every chase frame. Negative
+      // "nearest" means the camera was inside the tube.
+      `camera nearest the pit rim ${rimNearest === Infinity ? 'n/a' : `${rimNearest.toFixed(2)} m`} ` +
+      `on a ${rimNearestShot} shot (${rimInsideFrames} frames INSIDE it` +
+      `${rimInsideShots.size > 0 ? `, on ${[...rimInsideShots].join('/')} shots` : ''}), ` +
+      `lens lowest above ground ${lowestAboveGround === Infinity ? 'n/a' : `${lowestAboveGround.toFixed(2)} m`} ` +
+      `on a ${lowestAboveGroundShot} shot (ridden frame ${lowestAboveGroundFrame}, ` +
+      `${undergroundFrames} frames UNDERGROUND), ` +
+      // The ray fan names the mesh nearest the lens — but only on frames where
+      // the lens is underground, which is normally none of them. Its own
+      // coverage is printed first, so a reader can never take the reach figure
+      // for a measurement it did not make.
+      `ray fan fired on ${nearFanRuns} frames ` +
+      `${nearFanRuns === 0 ? '(ASSERTS NOTHING — the lens was never underground, so nothing was named)' : `— nearest ANYTHING to the lens ${nearestAnything === Infinity ? `>${NEAR_FAN_REACH} m` : `${nearestAnything.toFixed(2)} m`} — ${nearestAnythingName} (ridden frame ${nearestAnythingFrame})`}`,
   );
 
   return {
