@@ -1,5 +1,5 @@
 import { OrthographicCamera, PerspectiveCamera, Vector2, Vector3 } from 'three';
-import { perspectiveParkCamera } from './perspectiveFlag';
+import { perspectiveParkCamera, zoomMinOverride } from './perspectiveFlag';
 import {
   CAMERA_DISTANCE,
   CAMERA_FOLLOW_HALF_LIFE,
@@ -7,13 +7,12 @@ import {
   CAMERA_LOOK_MAX_DISTANCE,
   CAMERA_LOOK_RETURN_DELAY,
   CAMERA_LOOK_RETURN_HALF_LIFE,
-  CAMERA_MIN_VIEW_WIDTH,
   CAMERA_PITCH_DEGREES,
-  CAMERA_VIEW_HEIGHT,
   CAMERA_YAW_DEGREES,
   CAMERA_ZOOM_MAX,
   CAMERA_ZOOM_MIN,
   CAMERA_ZOOM_STEP,
+  cameraViewHalfHeight,
 } from './constants';
 import { clamp, damp, DEG } from './mathUtils';
 import { cameraOffset } from './cameraRig';
@@ -69,6 +68,18 @@ export class IsoCamera {
 
   private zoomValue = 1;
   private zoomTarget = 1;
+
+  /**
+   * **How far out this load may zoom** — `CAMERA_ZOOM_MIN` for every real
+   * player, and the `?zoomMin=` prototype override when one was asked for
+   * (#511). Read once at construction: a URL cannot change mid-session, and
+   * this sits on the zoom path.
+   *
+   * It is a field rather than a call at each clamp so there is exactly one
+   * answer to "how far out can this camera go?", which is also what any future
+   * caller wanting to *report* the floor should read.
+   */
+  private readonly zoomMin: number = zoomMinOverride() ?? CAMERA_ZOOM_MIN;
 
   /**
    * A fixed world point the camera orbits instead of the ordinary follow
@@ -326,11 +337,11 @@ export class IsoCamera {
    * nobody else may legitimately be nudging this same target.
    */
   setZoomTarget(zoom: number): void {
-    this.zoomTarget = clamp(zoom, CAMERA_ZOOM_MIN, CAMERA_ZOOM_MAX);
+    this.zoomTarget = clamp(zoom, this.zoomMin, CAMERA_ZOOM_MAX);
   }
 
   nudgeZoom(delta: number): void {
-    this.zoomTarget = clamp(this.zoomTarget + delta, CAMERA_ZOOM_MIN, CAMERA_ZOOM_MAX);
+    this.zoomTarget = clamp(this.zoomTarget + delta, this.zoomMin, CAMERA_ZOOM_MAX);
   }
 
   /** What {@link zoom} is damping towards — read this, not `zoom` itself, to
@@ -600,7 +611,7 @@ export class IsoCamera {
    * checked on and clips somewhere else.
    */
   private frustumBase(): number {
-    return Math.max(CAMERA_VIEW_HEIGHT / 2, CAMERA_MIN_VIEW_WIDTH / 2 / this.aspect);
+    return cameraViewHalfHeight(this.aspect);
   }
 
   /**

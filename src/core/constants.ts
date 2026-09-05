@@ -517,6 +517,33 @@ export const CAMERA_VIEW_HEIGHT = 15;
 export const CAMERA_MIN_VIEW_WIDTH = 11;
 
 /**
+ * **Half the view's height in world metres at zoom 1, for a given aspect — the
+ * one owner of the framing formula.**
+ *
+ * Height-led framing with a minimum width: the height wins on any landscape
+ * screen, and {@link CAMERA_MIN_VIEW_WIDTH}'s floor takes over on a portrait
+ * phone, where it makes the view *taller* rather than stretching anything.
+ * The half-height at an arbitrary zoom is this divided by that zoom.
+ *
+ * **Why it is a function here rather than a line inside `IsoCamera`.** It had
+ * two definitions: `IsoCamera.frustumBase()` and a hand-copied `Math.max` in
+ * `world/tapSpacing.ts`, whose comment promised the tap radius "follows
+ * automatically" when the camera framing changes. It did not follow
+ * automatically — it followed because two places happened to still agree, which
+ * is the single most common bug in this repo (CLAUDE.md, "Two definitions of one
+ * thing, kept in step by hand"). Whoever changes the framing now changes it
+ * once.
+ *
+ * The cost of the drift, had it happened, was not cosmetic: `tapSpacing` sizes
+ * the world-space radius by which a child's tap is allowed to miss what she
+ * aimed at, so a stale copy would have quietly mis-sized every interact zone on
+ * a phone while every check stayed green.
+ */
+export function cameraViewHalfHeight(aspect: number): number {
+  return Math.max(CAMERA_VIEW_HEIGHT / 2, CAMERA_MIN_VIEW_WIDTH / 2 / aspect);
+}
+
+/**
  * Zoom bounds. Rebalanced around the closer default: the old 0.55 floor now
  * means "a bit further out", so it drops to 0.42 to keep a proper overview, and
  * the ceiling rises because a close-up of a character is worth having now that
