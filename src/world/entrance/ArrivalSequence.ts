@@ -21,6 +21,7 @@ import {
 } from '../../art/models/kid';
 import {
   createCatBus,
+  CAT_BUS_DOOR_DROP,
   CAT_BUS_LENGTH,
   CAT_BUS_LONGEST_WALK_TO_DOOR,
   CAT_BUS_SEAT_COUNT,
@@ -39,6 +40,7 @@ import { playBrakeSqueak, playDoorHiss, playHornToot } from './sounds';
 import { markArrived } from './arrivalFlag';
 import {
   ENTRANCE_BUS_DOOR_X,
+  ENTRANCE_GATE_X,
   ENTRANCE_GATE_Z,
   ENTRANCE_PLAYER_X,
   ENTRANCE_PLAYER_Z,
@@ -376,7 +378,7 @@ function busFacingAtStop(stopAt: number): number {
  * **Where the camera stands to face the doors: square-on to the bus's own
  * side, on whichever side of it the gate is.**
  *
- * Derived from {@link BUS_FACING} — *the bus's own idea of which way it
+ * Derived from {@link entranceRoadFacing} — *the bus's own idea of which way it
  * points* — and nothing else. That matters more than it looks. This used to
  * be `atan2(gate - busStop)`, the **gate-to-stop line**, which gives the same
  * answer only while the bus happens to stand at right angles to it. It did,
@@ -391,17 +393,55 @@ function busFacingAtStop(stopAt: number): number {
  * standing between the two, facing the bus, which is where somebody waiting to
  * meet the children would stand.
  */
-const SQUARE_ON_TO_THE_DOOR_DEGREES = (() => {
+/**
+ * **Where the bus stops, as a position along the road's arc.**
+ *
+ * The same value `ArrivalSequence` gives its own `stopAt` — the bus's door
+ * drop, read from {@link CAT_BUS_DOOR_DROP}, which is `catBus.ts`'s one owner
+ * of where the door puts a child down. Read from there rather than written
+ * down here: a second number that "should match" the door is exactly how this
+ * shot came to be derived against a road the bus no longer drives.
+ */
+const BUS_STOP_AT = CAT_BUS_DOOR_DROP.z;
+
+/**
+ * The shot's geometry, solved once against the **road as it actually curves**
+ * and then cached.
+ *
+ * **Lazy rather than module-scope-eager on purpose.** `roadRoute.ts` builds
+ * its `RingPath` off the seeded park boundary, so anything that asks it a
+ * question at import time is asking before the seed is necessarily set. These
+ * are wanted only once a bus is arriving, by which point the park exists.
+ */
+let shotGeometry: { readonly squareOnDegrees: number; readonly doorDistance: number } | null = null;
+
+function arrivalShotGeometry(): { readonly squareOnDegrees: number; readonly doorDistance: number } {
+  if (shotGeometry !== null) return shotGeometry;
+  const facing = entranceRoadFacing(BUS_STOP_AT);
+  const stop = entranceRoadAt(BUS_STOP_AT);
   // Perpendicular to the way the bus points, taken on whichever side the gate
   // is — a bus turned by the road's curve carries the shot round with it.
-  const travelX = Math.sin(BUS_FACING);
-  const travelZ = Math.cos(BUS_FACING);
-  const towardsGateX = ENTRANCE_GATE_X - ENTRANCE_BUS_DOOR_X;
-  const towardsGateZ = ENTRANCE_GATE_Z - ENTRANCE_BUS_STOP_Z;
+  const travelX = Math.sin(facing);
+  const travelZ = Math.cos(facing);
+  const towardsGateX = ENTRANCE_GATE_X - stop.x;
+  const towardsGateZ = ENTRANCE_GATE_Z - stop.z;
   // Both perpendiculars; keep the one that points at the gate.
   const sign = Math.sign(travelZ * towardsGateX - travelX * towardsGateZ) || 1;
-  return Math.atan2(sign * travelZ, -sign * travelX) / DEG;
-})();
+  const squareOnDegrees = Math.atan2(sign * travelZ, -sign * travelX) / DEG;
+  // **The stand-back is a ground-plan distance from the stop to the gate**, not
+  // a difference of z. On the straight road those were the same number and the
+  // z-difference was written down; the arc separates them, and a shot standing
+  // the wrong distance back is a shot with the park's furniture in front of it.
+  const doorDistance =
+    (Math.hypot(towardsGateX, towardsGateZ) - ARRIVAL_GATE_STANDOFF) /
+    Math.cos(ARRIVAL_DOOR_PITCH_DEGREES * DEG);
+  shotGeometry = { squareOnDegrees, doorDistance };
+  return shotGeometry;
+}
+
+function squareOnToTheDoorDegrees(): number {
+  return arrivalShotGeometry().squareOnDegrees;
+}
 
 /**
  * How far off square-on the door shot sits, in degrees, turned towards the
@@ -467,17 +507,21 @@ const ARRIVAL_DOOR_THREE_QUARTER_DEGREES = 0;
  * at the bus. The arch was between the lens and the subject because the camera
  * had put it there.
  *
- * {@link ARRIVAL_DOOR_DISTANCE} now stands the eye **short of the gate**,
+ * {@link arrivalDoorDistance} now stands the eye **short of the gate**,
  * between the drop and the archway, so the arch is behind the lens and cannot
  * land on anybody. Square-on then costs nothing — and it is also what makes
  * the rest of Jim's sentence possible, because a camera already on the bus
  * side of the gateway is a camera that can *glide through it with her* rather
  * than watch her come towards it.
  */
-export const ARRIVAL_DOOR_YAW_DEGREES =
-  SQUARE_ON_TO_THE_DOOR_DEGREES +
-  Math.sign(angleDelta(SQUARE_ON_TO_THE_DOOR_DEGREES * DEG, CAMERA_YAW_DEGREES * DEG)) *
-    ARRIVAL_DOOR_THREE_QUARTER_DEGREES;
+export function arrivalDoorYawDegrees(): number {
+  const squareOn = squareOnToTheDoorDegrees();
+  return (
+    squareOn +
+    Math.sign(angleDelta(squareOn * DEG, CAMERA_YAW_DEGREES * DEG)) *
+      ARRIVAL_DOOR_THREE_QUARTER_DEGREES
+  );
+}
 
 /**
  * **How low the door shot sits**, in degrees of downward tilt. **Zero — the
@@ -583,9 +627,9 @@ const ARRIVAL_GATE_STANDOFF = 3;
  * Divided by the pitch's cosine because {@link cameraOffset} takes a slant
  * distance and the reasoning above is entirely about ground plan.
  */
-const ARRIVAL_DOOR_DISTANCE =
-  (ENTRANCE_BUS_STOP_Z - ENTRANCE_GATE_Z - ARRIVAL_GATE_STANDOFF) /
-  Math.cos(ARRIVAL_DOOR_PITCH_DEGREES * DEG);
+function arrivalDoorDistance(): number {
+  return arrivalShotGeometry().doorDistance;
+}
 
 
 /**
@@ -661,7 +705,7 @@ const ARRIVAL_ARCH_DISTANCE = 4.0;
  * It used to be taken at `CAMERA_YAW_DEGREES`, the rig's 45°, which was right
  * only while the shot came home to the rig's bearing *before* the pass. It no
  * longer does: the bearing is held square-on all the way through the gateway,
- * so the pass is flown at {@link SQUARE_ON_TO_THE_DOOR_DEGREES} and that is
+ * so the pass is flown at {@link squareOnToTheDoorDegrees} and that is
  * the bearing this has to be measured at. Square-on points from the bus
  * towards the gate, so this went negative and the eye became a leading one —
  * which is what *"the camera should glide to follow them under"* actually
@@ -671,10 +715,13 @@ const ARRIVAL_ARCH_DISTANCE = 4.0;
  * Derived rather than timed, so it stays true if the bearing or the stand-back
  * change.
  */
-const ARRIVAL_ARCH_EYE_OFFSET_Z =
-  ARRIVAL_ARCH_DISTANCE *
-  Math.cos(ARRIVAL_DOOR_PITCH_DEGREES * DEG) *
-  Math.cos(SQUARE_ON_TO_THE_DOOR_DEGREES * DEG);
+function arrivalArchEyeOffsetZ(): number {
+  return (
+    ARRIVAL_ARCH_DISTANCE *
+    Math.cos(ARRIVAL_DOOR_PITCH_DEGREES * DEG) *
+    Math.cos(squareOnToTheDoorDegrees() * DEG)
+  );
+}
 
 /**
  * How long the eye takes to dive from the door shot's stand-back to the
@@ -696,7 +743,9 @@ const ARRIVAL_ARCH_EYE_OFFSET_Z =
  * and at a quarter of the lag the whole crossing is a few frames at the extreme
  * edge of a frame whose subject is centred.
  */
-const ARRIVAL_DIVE_SECONDS = Math.abs(ARRIVAL_ARCH_EYE_OFFSET_Z) / (4 * NPC_WALK_SPEED);
+function arrivalDiveSeconds(): number {
+  return Math.abs(arrivalArchEyeOffsetZ()) / (4 * NPC_WALK_SPEED);
+}
 
 
 /**
@@ -747,7 +796,7 @@ export interface ArchPass {
   readonly sheThrough: number;
   /**
    * The instant the **eye** crosses it — which may be before or after she
-   * does, depending on the sign of {@link ARRIVAL_ARCH_EYE_OFFSET_Z}.
+   * does, depending on the sign of {@link arrivalArchEyeOffsetZ}.
    *
    * **Do not assume an order.** These were once called `under` and `clear`,
    * names that quietly asserted the eye came second; when the shot went
@@ -950,7 +999,7 @@ export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | 
   // hollow interior. Photographed, and it reads as a rendering fault rather
   // than as a move.
   //
-  // Diving over only the last {@link ARRIVAL_DIVE_SECONDS} means the crossing
+  // Diving over only the last {@link arrivalDiveSeconds} means the crossing
   // happens once she is well clear of the bus, when it is off the edge of a
   // frame that is by then close on her — so the cut lands on nothing anybody
   // is looking at.
@@ -958,12 +1007,12 @@ export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | 
   // once she is far enough past the bus that it has left the frame, and at
   // `under` it has not. Half a second earlier there is a wedge of sawn-open bus
   // down the left edge — photographed twice while getting this right.
-  const dive = smoothstep(gatewayEntered - ARRIVAL_DIVE_SECONDS, gatewayEntered, elapsed);
+  const dive = smoothstep(gatewayEntered - arrivalDiveSeconds(), gatewayEntered, elapsed);
   const distance =
     elapsed < AT_WALKING
-      ? lerp(CAMERA_DISTANCE, ARRIVAL_DOOR_DISTANCE, swing)
+      ? lerp(CAMERA_DISTANCE, arrivalDoorDistance(), swing)
       : elapsed < holdPast
-        ? lerp(ARRIVAL_DOOR_DISTANCE, ARRIVAL_ARCH_DISTANCE, dive)
+        ? lerp(arrivalDoorDistance(), ARRIVAL_ARCH_DISTANCE, dive)
         : lerp(CAMERA_DISTANCE, ARRIVAL_ARCH_DISTANCE, ride);
 
   return {
@@ -971,7 +1020,7 @@ export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | 
     // else in the codebase.
     yawDegrees:
       CAMERA_YAW_DEGREES +
-      (angleDelta(CAMERA_YAW_DEGREES * DEG, ARRIVAL_DOOR_YAW_DEGREES * DEG) / DEG) * swing,
+      (angleDelta(CAMERA_YAW_DEGREES * DEG, arrivalDoorYawDegrees() * DEG) / DEG) * swing,
     pitchDegrees: lerp(CAMERA_PITCH_DEGREES, ARRIVAL_DOOR_PITCH_DEGREES, lift),
     distance,
     zoom,
@@ -1335,7 +1384,7 @@ export class ArrivalSequence {
    * walk — a camera timed to the phase would have started pulling away long
    * before she got there.
    *
-   * Reads `ENTRANCE_GATE_Z` for the line and {@link ARRIVAL_ARCH_EYE_OFFSET_Z} for
+   * Reads `ENTRANCE_GATE_Z` for the line and {@link arrivalArchEyeOffsetZ} for
    * how far past it she has walked by the time the eye is through, so both
    * follow the pose the shot actually holds rather than a second copy of it.
    */
@@ -1363,7 +1412,7 @@ export class ArrivalSequence {
     // puts it short of the gate so she reaches it earlier. The old clamp
     // silently pinned `clear` to `under` whenever the eye led, which is how a
     // leading eye could look like a zero-length pass instead of a bug.
-    return { sheThrough, eyeThrough: crossing(ENTRANCE_GATE_Z - ARRIVAL_ARCH_EYE_OFFSET_Z) };
+    return { sheThrough, eyeThrough: crossing(ENTRANCE_GATE_Z - arrivalArchEyeOffsetZ()) };
   }
 
   /**

@@ -870,7 +870,7 @@ const GATE_FACING_TOLERANCE = 0.8;
  * the withheld walkability clause used, kept here for whoever lands it with
  * issue #481's fix.
  */
-const GATE_PROBE_INSET = { solid: 1.0, open: 1.5 } as const;
+const GATE_POST_PROBE_INSET = { solid: 1.0, open: 1.5 } as const;
 
 /**
  * How much further than its own reach a pier may hold a child before we
@@ -1015,8 +1015,8 @@ const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
     // the left pier push in the *same direction* on the canonical seed, so the
     // clause stayed green with that pier's collider deleted.
     const at = facts.pushedTo(
-      post.x + inward[0] * GATE_PROBE_INSET.solid,
-      post.z + inward[1] * GATE_PROBE_INSET.solid,
+      post.x + inward[0] * GATE_POST_PROBE_INSET.solid,
+      post.z + inward[1] * GATE_POST_PROBE_INSET.solid,
     );
     const held = Math.hypot(at.x - post.x, at.z - post.z);
     if (held > pierReach + GATE_MASK_TOLERANCE) {
@@ -1028,11 +1028,11 @@ const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
       continue;
     }
     covered += 1;
-    const x = post.x + inward[0] * GATE_PROBE_INSET.solid;
-    const z = post.z + inward[1] * GATE_PROBE_INSET.solid;
+    const x = post.x + inward[0] * GATE_POST_PROBE_INSET.solid;
+    const z = post.z + inward[1] * GATE_POST_PROBE_INSET.solid;
     if (facts.isStandable(x, z)) {
       fouls.push(
-        `a child can stand at (${x.toFixed(2)}, ${z.toFixed(2)}), ${GATE_PROBE_INSET.solid} m in front of ` +
+        `a child can stand at (${x.toFixed(2)}, ${z.toFixed(2)}), ${GATE_POST_PROBE_INSET.solid} m in front of ` +
           `the gate pier at (${post.x.toFixed(2)}, ${post.z.toFixed(2)}) — inside the ` +
           `${(PLAYER_RADIUS + GATE_POST_COLLIDER_RADIUS).toFixed(2)} m the pier is supposed to hold her ` +
           'off, so the gate is not solid',
