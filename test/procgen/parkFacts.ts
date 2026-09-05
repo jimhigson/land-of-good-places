@@ -238,6 +238,22 @@ export interface CatBusFact {
   readonly widestRealChild: number;
   /** How many disembarking children were found in the arrival's group. */
   readonly kidCount: number;
+  /**
+   * Where `roadRoute.ts` says the bus comes on from — `entranceRoadAt(
+   * entranceBusArriveAt())`, the same call `ArrivalSequence` makes, so the
+   * invariant that compares the parked bus against the road cannot drift from
+   * the sequence that drives it.
+   *
+   * It is read here rather than imported into `invariants.ts` for exactly the
+   * reason this file's `measureCatBusFit` comment above gives: `roadRoute.ts`
+   * reaches `boundary.ts` and builds a `RingPath` **at module scope**, so a
+   * static import of it into `test/` loads the seeded manifest before the seed
+   * is set. That is the failure the seed guard reports as *"asked for seed 11
+   * but the park built with 20260728"*, and it cost 528 silent skips when this
+   * road work first added the import.
+   */
+  readonly roadStartX: number;
+  readonly roadStartZ: number;
 }
 
 /** One drawn path, sampled along its centre line. */
@@ -1377,6 +1393,12 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
       // control", which is the thing the arrival actually asserts.
       const kidCount = world.npcs.all.filter((child) => child.scripted).length;
       const fit = measureCatBusFit();
+      // Dynamic, for the reason `CatBusFact.roadStartX` documents: this module
+      // builds a `RingPath` off the seeded boundary as soon as it is loaded.
+      const { entranceRoadAt, entranceBusArriveAt } = await import(
+        '../../src/world/entrance/roadRoute.ts'
+      );
+      const roadStart = entranceRoadAt(entranceBusArriveAt());
       catBus = {
         seatCount: fit.seatCount,
         worstOccupantProtrusion: fit.worstProtrusion,
@@ -1389,6 +1411,8 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
         height: Number.isFinite(box.max.y - box.min.y) ? box.max.y - box.min.y : 0,
         hasDriver,
         kidCount,
+        roadStartX: roadStart.x,
+        roadStartZ: roadStart.z,
       };
     }
   }

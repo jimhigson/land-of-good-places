@@ -92,8 +92,6 @@ import {
   RIM_OUTSET_START,
 } from '../../src/core/constants.ts';
 import {
-  ENTRANCE_BUS_ARRIVE_X,
-  ENTRANCE_BUS_STOP_Z,
   ENTRANCE_GATE_HALF_WIDTH,
   ENTRANCE_GATE_X,
   ENTRANCE_GATE_Z,
@@ -106,6 +104,10 @@ import {
 // A leaf module: pure geometry over a `standable` predicate, no three.js and
 // nothing seed-dependent, so importing it here cannot fix the park's seed early.
 import { GATE_PROBE_INSET, measureGatewayWalk } from '../../src/world/entrance/gatewayWalk.ts';
+// NOTE: `roadRoute.ts` is deliberately **not** imported here. It builds a
+// `RingPath` off the seeded boundary at module scope, so a static import
+// pins every seed to the default park. Its one number this file needs
+// travels on `ParkFacts.catBus.roadStartX/Z` instead.
 import { ROAD_TILE_METRES } from '../../src/world/entrance/road.ts';
 import {
   GATE_FOOT_TOLERANCE,
@@ -2916,6 +2918,7 @@ const railRaceRingsStandOutsideThePark: Invariant = (facts) => {
   });
   const matrix = new Matrix4();
   const at = new Vector3();
+  const legAxis = new Vector3();
   for (const ring of rings) {
     const legs = ring.group.getObjectByName('railRace:trestle-legs');
     if (!(legs instanceof InstancedMesh)) {
@@ -2925,7 +2928,28 @@ const railRaceRingsStandOutsideThePark: Invariant = (facts) => {
     const wantsSolid = ring.label === 'walk-past';
     for (let i = 0; i < legs.count; i += 1) {
       legs.getMatrixAt(i, matrix);
+      // **The foot, not the instance centre.** `track.ts`'s `strut` composes a
+      // leg's matrix about the *midpoint* of foot-to-top, and registers its
+      // collider at the foot — so on a leg that leans (a trestle whose spot was
+      // nudged sideways to find clear ground, while its branch tops stay under
+      // the rails) the two are different places. Measured on the canonical seed:
+      // the centre drifts up to **2.00 m** horizontally from the foot, and at
+      // that lean this test reported four perfectly solid legs as "not solid".
+      //
+      // This was always the wrong point to ask about, and the reason it read
+      // green for so long is that legs barely leaned: the collider is at the
+      // foot, which is the only place a child's feet can meet a post, and the
+      // centre is four metres in the air. Asking about the foot is also
+      // strictly stronger — the old form would have passed a leg whose foot had
+      // no collider at all if its midpoint happened to overhang a neighbour's
+      // circle. Control run when this was changed: of 100 legs, 50 (the whole
+      // race ring, which registers nothing) have no collider under the foot and
+      // 50 (the whole walk-past ring) do, so the test still separates the two
+      // rings exactly as it is written to.
       at.setFromMatrixPosition(matrix);
+      legAxis.setFromMatrixColumn(matrix, 1);
+      const legLength = legAxis.length() || 1;
+      at.addScaledVector(legAxis.divideScalar(legLength), -legLength / 2);
       const found = solid.some(
         (circle) => Math.hypot(circle.x - at.x, circle.z - at.z) < circle.radius,
       );
@@ -7411,13 +7435,20 @@ const theCatBusIsInThePark: Invariant = (facts) => {
     );
   }
 
-  // Waiting on the kerb outside the gate, where the sequence starts. A bus left
+  // Waiting on the road outside the gate, where the sequence starts. A bus left
   // at the origin is in the middle of the ball pit.
-  const kerbGap = Math.hypot(bus.x - ENTRANCE_BUS_ARRIVE_X, bus.z - ENTRANCE_BUS_STOP_Z);
+  //
+  // **Asked of the road, not of a coordinate.** This used to compare against
+  // `ENTRANCE_BUS_ARRIVE_X`/`ENTRANCE_BUS_STOP_Z`, two hand-measured points on a
+  // straight kerb that no longer exists — the road follows the park's edge now,
+  // and the bus comes on at the brow. `entranceRoadAt(entranceBusArriveAt())` is
+  // where the sequence itself starts the bus, so this cannot drift from it.
+  const start = { x: bus.roadStartX, z: bus.roadStartZ };
+  const kerbGap = Math.hypot(bus.x - start.x, bus.z - start.z);
   if (kerbGap > 1) {
     fouls.push(
-      `the cat bus starts at ${fmt([bus.x, bus.z])}, ${kerbGap.toFixed(2)} m from the kerb ` +
-        `${fmt([ENTRANCE_BUS_ARRIVE_X, ENTRANCE_BUS_STOP_Z])} it is supposed to pull in from`,
+      `the cat bus starts at ${fmt([bus.x, bus.z])}, ${kerbGap.toFixed(2)} m from the point on the ` +
+        `entrance road ${fmt([start.x, start.z])} it is supposed to drive on from`,
     );
   }
 

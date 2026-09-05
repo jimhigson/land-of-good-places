@@ -645,7 +645,10 @@ function buildFoliage(collision: CollisionWorld): {
     // guessing at the tallest tree the scatter can produce, and a keep-out sized
     // for a tree that never grows there is the same disease as a 10 m disc sized
     // for an 11 m bus. See `entrance/arrivalSightline.ts`.
-    if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + TREE_TOP[kind])) return false;
+    // `reach` for the same reason the bush loop passes `BUSH_REACH`: a tree's
+    // canopy is a ball reaching this far out, and `parkFacts.ts` measures the
+    // drawn blobs, not the trunk this coordinate names.
+    if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + TREE_TOP[kind], reach)) return false;
     planted.push({ x, z, reach });
     const y = terrainHeight(x, z);
 
@@ -942,7 +945,11 @@ function buildFoliage(collision: CollisionWorld): {
     // check on the next line already uses for exactly this reach.
     if (!isPlantable(x, z, BUSH_REACH)) continue;
     if (!clearOfCruiser(x, z, BUSH_REACH, BUSH_TOP)) continue;
-    if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + BUSH_TOP)) continue;
+    // `BUSH_REACH`, matching the two lines above it: what hides the bus is a
+    // clump's *blobs*, which stand up to 2.15 m off this centre, and
+    // `parkFacts.ts` measures every one of them. Asking about the centre alone
+    // let a blob 2 m away stand in the shot — see `hidesTheArrivingBus`.
+    if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + BUSH_TOP, BUSH_REACH)) continue;
     // **...and then the same three questions every other plant here asks, of
     // the same three owners.** Issue #500: until this branch the bush
     // scatter's whole idea of an obstacle was `isPlantable` — paving, plots,
