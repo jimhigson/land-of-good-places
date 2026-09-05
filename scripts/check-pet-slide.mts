@@ -113,6 +113,14 @@ type InteriorControls = import('../src/world/building/Building.ts').InteriorCont
 // frame counts, because a red log named a pet and a frame number but never the
 // park those belonged to. `drawn` here means the run is not repeatable and the
 // result is about whichever park came up; it must never appear under Node.
+//
+// **What that tripwire is and is not.** Seeing `drawn` under Node means #508's
+// `inNode()` early return in `resolveParkSeed` has been removed or broken —
+// that one branch, and nothing wider. It is not general assurance that the park
+// is the one you meant: this file measures **exactly one** park, the canonical
+// seed, 1 of the 16 in the pool, so a green run here is a statement about seed
+// 20260728 and no other while a child can draw any of the 16. That gap is #510;
+// this line makes it legible rather than closing it.
 console.log(`  park seed ${PARK_SEED} (${parkSeedSource()})`);
 
 // Live controls, as `check:slide-rider` uses: boarding the slide is a change of
