@@ -107,7 +107,11 @@ const shim = fakeStorage();
 delete process.env['LGP_SEED'];
 check(
   'Node gets the canonical seed even with a working localStorage in place',
-  resolveParkSeed() === CANONICAL_PARK_SEED && parkSeedSource() === 'remembered',
+  // `canonical`, not `remembered`: nothing was remembered here — the storage is
+  // empty and this is the "Node never draws" rule firing. The clause's own name
+  // said so while its assertion said otherwise, which is how a false provenance
+  // string survived into a printed log.
+  resolveParkSeed() === CANONICAL_PARK_SEED && parkSeedSource() === 'canonical',
   `got ${resolveParkSeed()} (${parkSeedSource()}) with a storage installed — ` +
     'this is issue #496: every check script would measure a park drawn at random',
 );

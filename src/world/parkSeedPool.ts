@@ -206,10 +206,23 @@ export const PARK_SEED_KEY = 'lgp:parkSeed';
 /**
  * How this load got its seed. `startFresh` reads it: only a **remembered**
  * seed may be thrown away and redrawn, because a *pinned* one is a developer
- * asking for that exact park and a *drawn* one is already brand new — and
- * redrawing either would put `main.ts` in a reload loop.
+ * asking for that exact park, a *drawn* one is already brand new, and a
+ * *canonical* one was never anybody's choice to throw away — and redrawing any
+ * of them would put `main.ts` in a reload loop.
+ *
+ * **`canonical` is its own value because the alternative was a lie.** The Node
+ * branch of {@link resolveParkSeed} used to report `remembered`, on the path
+ * every unpinned check run in CI takes — where there is no storage, no save and
+ * nothing remembered. It is the *"Node never draws"* rule returning
+ * {@link CANONICAL_PARK_SEED}, which is a different fact about the world, and
+ * saying `remembered` made the one string whose entire job is to state
+ * provenance state it falsely. That is the same disease as a check that reports
+ * success about something it is not describing — #496's whole family — one
+ * level down, and it was caught in review of the very PR that added a line to
+ * print this. `check:seed-pool` had the tell already: a clause *named* "Node
+ * gets the canonical seed" asserting `=== 'remembered'`.
  */
-export type ParkSeedSource = 'pinned' | 'remembered' | 'drawn';
+export type ParkSeedSource = 'pinned' | 'remembered' | 'drawn' | 'canonical';
 
 let source: ParkSeedSource = 'pinned';
 
@@ -354,7 +367,8 @@ export function resolveParkSeed(): number {
   // {@link inNode} for how that happened and why this is asked of the runtime
   // rather than of `localStorage`.
   if (inNode()) {
-    source = 'remembered';
+    // Not `remembered` — nothing was. See {@link ParkSeedSource}.
+    source = 'canonical';
     return CANONICAL_PARK_SEED;
   }
 
