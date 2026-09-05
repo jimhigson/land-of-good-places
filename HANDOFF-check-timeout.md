@@ -231,3 +231,34 @@ prove the chain stopped.
   the sphere-ground branch; if the chain is still above ~80% of cap after
   that, the top steps become their own ticket. `check:climb-wave` (5m37s,
   ~21%) wants a look at *why* it is slow, not a trim.
+
+## There are THREE pre-push gates, and this watchdog covers one
+
+`check`, `test:procgen`, **and `check:coplanar`**. The last two run in their own
+workflows, with their own caps, and **the same silent-failure surface** — a
+timeout in any of them is reported by GitHub as `cancelled`.
+
+Measured on `main`, same method as the chain:
+
+| workflow | cap | worst recent | % of cap | watchdog? |
+|---|---|---|---|---|
+| `checks.yml` | 30m | **26m23s** | **87.9%** | yes |
+| `procgen-invariants.yml` | 15m | 9m59s | **66.6%** | no |
+| `coplanar.yml` | 15m | 5m30s | 36.7% | no |
+
+**`Procgen invariants` is the one to watch next.** Its own three runs span
+1.67× (5m59s → 9m59s) — the same runner-speed effect — so at 66.6% it has the
+identical exposure `checks.yml` has, one step behind. `Coplanar faces` is
+comfortable (103 s on the combined branch, matching the fast end here).
+
+Extending the watchdog is deliberately small: **`capSeconds()` already takes
+the workflow path as a parameter** rather than hard-coding `checks.yml`, so a
+second caller passes its own. Left out of this PR to keep one mechanism under
+review rather than three.
+
+**Reported, not acted on:** `check:coplanar` is documented as a required
+pre-push gate (CLAUDE.md line 298), sits outside the `check` chain by design
+(line 883), and its table row says "not yet — needs adding" as a required
+status check (line 285) — documented, unenforced, and outside the chain. Three
+workflows are now in that position. Branch protection is a repository setting;
+the Overseer has it queued as an ask for Jim.
