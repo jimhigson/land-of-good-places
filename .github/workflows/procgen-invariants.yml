@@ -85,3 +85,28 @@ jobs:
       # make. It is ~90 s against this job's 15-minute budget.
       - name: The front gate opens, on every seed in the pool
         run: pnpm run check:gateway
+
+      # **`check:park` on all sixteen parks a child can be given** (issue #510).
+      #
+      # Until this step, `check:park` — the gate that asks whether a park
+      # *works*, every attraction routing from the entrance and nothing walking
+      # across the railway — ran on the canonical seed and nothing else. So did
+      # 40 of the 63 expanded steps of `pnpm run check`. Nine pool seeds (115,
+      # 128, 208, 225, 267, 274, 346, 428, 451) were built by **no** required
+      # check at all, and both required checks could be fully green with
+      # fourteen of the sixteen unmeasured.
+      #
+      # Here, and not in `checks.yml`, for the reason that workflow's own
+      # comments give: its recent successful runs on `main` are 26.7, 26.8 and
+      # 25.9 minutes against a `timeout-minutes: 30`, and a job killed by a
+      # timeout reports as `cancelled` — which reads as "superseded" rather
+      # than as a failure. That is the 29 August deploy outage's exact shape.
+      #
+      # Here, and not in a workflow of its own, because **this job is already a
+      # required status check**, so the gate takes effect the day it lands
+      # instead of waiting on a branch-protection change only Jim can make —
+      # the same reasoning `check:gateway` above sits here under.
+      #
+      # ~2 minutes on four lanes, against this job's 15-minute budget.
+      - name: check:park, on every seed in the pool
+        run: pnpm run check:park-pool
