@@ -178,6 +178,48 @@ measurement: the *set* of mesh names in the built park is identical on all 16
 seeds, before vs after. So check:coplanar's name-keyed ratchet has not silently
 lost a baseline entry on this branch.
 
+## Before you rebase: this branch edits the `check` chain
+
+**This PR adds `check:ground-claims` to `package.json`'s `check` chain, so it is
+exposed to the exact failure #453 is about.** The branch targets
+`design/round-robin-generation`, so nothing is owed right now — but that design
+branch must take `main` eventually, and `main` has moved:
+
+- `1d329982` (#512)
+- `f1c99347` (#517) — **adds `check:node` to the chain and rewrites every
+  workflow file.**
+
+An engineer rebasing onto #517 tonight found the chain conflicted, and that
+**taking its own side — the natural resolution, and one `rerere` had already
+recorded a preimage for — would have silently deleted `check:node`.** A merged
+step gone, with a clean diff and nothing red. `rerere.enabled` is true in this
+repo and will replay that stale resolution without telling you.
+
+So when the rebase comes, do not accept what git hands back:
+
+1. Rebuild the resolution from **the target's own step list**, parsed.
+2. Re-apply this branch's single addition (`check:ground-claims`) into it.
+3. Verify by **parsing** the scripts object and comparing step **sets**, never
+   counts — a count cannot see a swap, and script names are prefixes of each
+   other so grep is structurally unable to answer this.
+
+The command, and the shape of the answer that clears you:
+
+```
+node -e "
+const mine=require('./package.json').scripts, base=require('/tmp/base-pkg.json').scripts;
+const steps=o=>o.check.split('&&').map(x=>x.trim().replace(/^pnpm run /,''));
+const a=new Set(steps(base)), b=new Set(steps(mine));
+console.log('dropped:', [...a].filter(x=>!b.has(x)));
+console.log('added:', [...b].filter(x=>!a.has(x)));
+console.log('definitions dropped:', Object.keys(base).filter(k=>!(k in mine)));
+"
+```
+
+`dropped` and `definitions dropped` must both be empty; `added` must be exactly
+`['check:ground-claims']`. That is how this branch was verified when the step
+was first added (59 -> 60, set difference exactly that one name).
+
 ## Next
 
 Awaiting review + QA. Invisible to a player, so it merges on those without Jim.
