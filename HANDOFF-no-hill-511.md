@@ -1,8 +1,49 @@
 # HANDOFF — issue #511, "the park is not on a hill"
 
+## ⛔ BLOCKING BEFORE ANY PR: `check:coplanar` is RED and must be green
+
+Do not open a PR from this branch until `pnpm run check:coplanar` exits 0.
+
+```
+NEW: garden|entrance/entrance-gateway-path|garden/path-surface
+     0.006 m² of shared plane, a maintained stand-off at 9.7e-3 m, seed 20260728
+```
+
+**Root-caused, with a stated fix and a stated moment to apply it** — which is
+why deferring it is legitimate rather than brushing it aside. The road branch
+renamed the mesh `entrance-road-gateway` → `entrance-gateway-path` and reduced
+the fault from **2.4910 m² to 0.006 m²**, but `main`'s baseline entry is keyed
+on the *old* name, so the 400×-smaller residue reads as brand new. Deleting
+that stale entry (which this branch does) is correct; it is what exposed the
+residue.
+
+**Fix it after the sphere lands, because the sphere changes the terrain under
+this exact geometry** and a fix applied now is likely wasted or invalidated.
+
+**Do NOT add a baseline entry to make it pass.** That is the forbidden move —
+an entry means "already wrong before the gate existed", and re-keying this one
+would be silencing a live finding. Fix the residue by deleting the hidden face,
+per ART_DIRECTION.md §7.
+
+Not this branch's regression: `HANDOFF-road-487-488.md` states plainly that
+`check:coplanar` was **never run at that branch's final geometry**, which is how
+the residue survived to be found here.
+
+### A finding for its own issue — do not fix it on this branch
+
+**`check:coplanar`'s ratchet is keyed on mesh names, so renaming a mesh
+silently loses that finding's baseline entry.** The finding then either
+disappears (if fixed) or reappears as NEW (if not), and neither tells you a
+rename happened. That is a structural weakness, not a one-off, and it is the
+same family as this repo's "two definitions of one thing kept in step by hand":
+the baseline and the meshes are kept in step by nobody. Reported to the
+Overseer to raise separately.
+
 - **Model: Opus** (chosen by the Overseer for this task; a replacement must also be Opus).
-- **Branch:** `feat/no-hill-511`
-- **Worktree:** `/Users/jim/dev/landOfGoodPlaces/.claude/worktrees/no-hill-511`
+- **Branch:** `feat/sphere-combined` (built off `feat/no-hill-511`; carries the
+  sphere ground, perspective, the arrival camera, the road, and the FOV fix —
+  Jim asked for **one branch he can try**).
+- **Worktree:** `/Users/jim/dev/landOfGoodPlaces/.claude/worktrees/sphere-combined`
 - **Role:** Engineer. Reports to the Overseer, not to Jim. Does not merge.
 - **Browser:** **OWNED as of 5 Sep 2026** (granted by the Overseer). Dev server on
   port **5391** (`vite --port 5391 --strictPort`), left running for Jim, who is at
@@ -34,6 +75,46 @@ Done this session:
 Not started: curving the ground, measuring the sky on extended ground.
 **#498 (entrance road) is still blocked on the ground shape** — nothing this
 session settled it, because the session went to Jim's re-prioritisation.
+
+## Unreachable-so-copied is a distinct smell from varies-so-copied
+
+Worth naming, because the repo has more of the first than anyone has written
+down and they need different fixes.
+
+`CAT_BUS_DOOR_DROP`'s values were **never variable** — every input is a module
+constant, so "where the bus door puts a child down" was a fixed pair of numbers
+from the day it was written. It was merely **unreachable**: obtainable only
+from a *built* bus, because it was computed inside `buildCatBus`. The arrival
+camera needed it at module scope, and a value that is deterministic but
+unreachable is exactly what gets hand-copied into a second definition — the
+copy looks harmless, because the number really never changes.
+
+The fix for *varies-so-copied* is to pass the live value around. The fix for
+**unreachable-so-copied is to make the real value reachable** — hoist it,
+export it, and have the original site consume it — never to write down a
+constant that "should match". `buildCatBus` now returns that same object and
+**asserts the built mesh agrees with it to 1e-9**; the assertion is what makes
+it an owner rather than a promise, since a comment claiming two numbers agree
+is not a mechanism.
+
+## The stand-back bug — a live visible defect no check would have caught
+
+Found by re-deriving the arrival shot against the arc rather than porting it.
+
+`ARRIVAL_DOOR_DISTANCE` was `ENTRANCE_BUS_STOP_Z - ENTRANCE_GATE_Z` — a
+**difference of z**. On the straight road that happened to equal the ground-plan
+distance from the stop to the gate, so it was right, so nothing said otherwise.
+The curved road separates the two and it silently stops being right.
+
+Why it matters on screen rather than only in arithmetic: **in an orthographic
+rig the stand-back does nothing for framing — it is purely an occlusion
+control** (sliding an ortho eye along its own view axis changes nothing). So a
+wrong stand-back does not look like a wrong size; it puts the park's furniture
+between the lens and the child. It is now the real planar distance,
+`hypot(gate - stop)`.
+
+No check on either branch could have caught this: it is a composition fault in
+a cutscene, and it only appears once the road curves.
 
 ## The ordering finding: the ground work is not optional alongside perspective
 
@@ -540,3 +621,35 @@ a hand-derivation done in the same wrong units — the "analytically derived the
 19.8% before believing it" note earlier in this file leans on the same 17.86 m.
 It was caught only by asking the running camera what its `fov` actually was.
 **Read the number off the live object, not off the algebra you just wrote.**
+
+---
+
+# Splitting this branch: where the seams are
+
+Jim asked for **one branch he can try**, so it is being built as one. But the
+diff is already larger than one reviewer should hold, and CLAUDE.md says that
+is a sign to split the PR rather than add reviewers. The cheapest time to name
+the seams is while the reasons are still fresh, so:
+
+**Invisible to a player — mergeable on review + QA without troubling Jim:**
+
+| seam | what it is | why invisible |
+|---|---|---|
+| `entrance-road.yml` + chain removal | `check:entrance-road` moves beside the chain | CI only; nothing on screen |
+| `cameraViewHalfHeight` | one owner for the camera framing formula, replacing a hand-copy in `tapSpacing.ts` | numerically identical, proved (phone half-height 11.902564102564103 both ways) |
+| `CAT_BUS_DOOR_DROP` | one owner + 1e-9 drift assertion | same geometry, now reachable |
+| `GATE_POST_PROBE_INSET` rename | resolves a real name collision the merge created | test-only symbol |
+| `?zoomMin=` | prototype URL parameter | a developer types it; absent, the shipped floor applies |
+
+**Visible — Jim's call, and they depend on each other:**
+
+- The sphere ground (#511) and perspective everywhere. **Do not land either
+  alone**: ortho hides the hill, perspective exposes it, so perspective without
+  the ground work ships a regression against the very ticket. See "The ordering
+  finding" above.
+- The arrival camera's re-derivation against the arc. Depends on the road
+  branch; carries the stand-back fix.
+
+**Ordering constraint for whoever splits:** `cameraViewHalfHeight` and
+`CAT_BUS_DOOR_DROP` are both *underneath* visible work that reads from them, so
+they land first or travel with it.
