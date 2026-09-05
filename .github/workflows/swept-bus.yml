@@ -10,8 +10,11 @@ name: Swept bus
 #
 # Measured: **8 s per seed**, 56 s wall clock across sixteen on a 14-core Mac.
 # A GitHub runner has far fewer cores and this script's own worker count is
-# `cpus - 1`, so the honest CI estimate is **two to five minutes**, run mostly
-# serially.
+# `cpus - 1`, so the first estimate here was "two to five minutes".
+#
+# **Measured on this runner, first green run: the sweep step took 3m26s**, and
+# the job 3m56s end to end. The estimate is left above only because it is what
+# the decision was taken on; the 3m26s is the number to re-decide from.
 #
 # `checks.yml` is already at ~25 minutes against its own 30-minute cap. A job
 # killed by `timeout-minutes` reports as **`cancelled`**, so nothing goes red —
@@ -52,9 +55,9 @@ jobs:
   swept-bus:
     name: Swept bus
     runs-on: ubuntu-latest
-    # Generous against a measured 56 s locally and an estimated 2-5 minutes
-    # here: a runner having a slow day should say so by being slow, not by
-    # being cancelled.
+    # Generous against a measured 56 s locally and a measured 3m26s here: a
+    # runner having a slow day should say so by being slow, not by being
+    # cancelled.
     timeout-minutes: 20
     steps:
       - name: Checkout

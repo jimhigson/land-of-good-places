@@ -131,7 +131,8 @@ The baseline is keyed on the **seed number**, which nothing can rename.
 ## Cost, and where it runs
 
 **8 s per seed; 56 s for sixteen on a 14-core Mac.** Estimated 2–5 minutes on a
-CI runner (the worker count is `cpus - 1`). `checks.yml` is at ~25 min against a
+CI runner (the worker count is `cpus - 1`), and then **measured there: the sweep
+step took 3m26s, the job 3m56s** on its first green run. `checks.yml` is at ~25 min against a
 30-minute cap and a timeout there reports as `cancelled`, not red — so this went
 in **its own workflow**, `swept-bus.yml`, exactly as `check:coplanar` did.
 
