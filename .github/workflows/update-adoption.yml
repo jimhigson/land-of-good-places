@@ -40,7 +40,10 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
-          node-version: 26
+          # The repo declares its Node once, in `.node-version`, which is also what
+          # `fnm use` reads locally. Read it here rather than restating 26 in each of
+          # the seven workflows (#506).
+          node-version-file: .node-version
           cache: pnpm
 
       - name: Install dependencies
