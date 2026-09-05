@@ -33,7 +33,7 @@
 import { readFileSync } from 'node:fs';
 // The cap and the step-naming rule live in one place, shared with
 // `check-watchdog.mts`. A second copy of either is how they drift.
-import { capSeconds, formatDuration as fmt, stepName } from './checkChain.mts';
+import { capSeconds, capSecondsForJob, formatDuration as fmt, stepName } from './checkChain.mts';
 
 interface Entry {
   readonly at: number;
@@ -55,8 +55,18 @@ const lines = readFileSync(path, 'utf8').split('\n');
 const marks: Entry[] = [];
 let jobStart: number | null = null;
 let jobEnd: number | null = null;
+/**
+ * The job's own name, taken from the log's first column.
+ *
+ * This is what decides which workflow's cap to measure against — see
+ * `capSecondsForJob`. Trusting a default here is what made this tool report a
+ * `Procgen invariants` run as "33.1% of cap" when it was 66.6% of its own.
+ */
+let jobName: string | null = null;
 
 for (const line of lines) {
+  const firstTab = line.indexOf('\t');
+  if (firstTab > 0 && jobName === null) jobName = line.slice(0, firstTab).replace(/^\ufeff/, '').trim();
   const tab = line.lastIndexOf('\t');
   const text = (tab >= 0 ? line.slice(tab + 1) : line).replace(/^﻿/, '');
   const stamp = /^(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\s?(.*)$/s.exec(text);
@@ -86,7 +96,14 @@ named.sort((a, b) => b.seconds - a.seconds);
 const chainStart = steps[0]?.at ?? jobStart;
 const chainSeconds = jobEnd - chainStart;
 const jobSeconds = jobEnd - jobStart;
-const cap = capSeconds();
+/**
+ * Explicit workflow path wins; otherwise the log names its own job.
+ */
+const override = process.argv[3];
+const resolved = override
+  ? { seconds: capSeconds(new URL(`../${override}`, import.meta.url)), workflow: override }
+  : capSecondsForJob(jobName ?? '');
+const cap = resolved.seconds;
 
 console.log(`script invocations timed: ${named.length}  (not package.json step numbers — one chain entry is itself a mini-chain, so this runs a little high)`);
 console.log(`\n--- SLOWEST 20 SCRIPTS (wall clock on the runner) ---`);
@@ -107,7 +124,8 @@ const top5 = named.slice(0, 5).reduce((a, b) => a + b.seconds, 0);
 console.log(`  top 5 scripts       ${fmt(top5)}  (${((100 * top5) / chainSeconds).toFixed(1)}% of the chain)`);
 
 console.log(`\n--- HEADROOM ---`);
-console.log(`  timeout-minutes     ${fmt(cap)}   (read from checks.yml, not copied)`);
+console.log(`  job                 ${jobName ?? '(unknown)'}`);
+console.log(`  timeout-minutes     ${fmt(cap)}   (read from ${resolved.workflow}, not copied)`);
 console.log(`  this run            ${fmt(jobSeconds)}`);
 console.log(`  headroom            ${fmt(cap - jobSeconds)}   ${((100 * jobSeconds) / cap).toFixed(1)}% of cap used`);
 if (jobSeconds > cap) {

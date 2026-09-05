@@ -10,7 +10,8 @@
  * late (never firing, which is the silence it exists to end).
  */
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 /**
  * `checks.yml`'s own `timeout-minutes`, in seconds.
@@ -34,6 +35,55 @@ export function capSeconds(
     );
   }
   return Number(match[1]) * 60;
+}
+
+/**
+ * **The cap for the job a `gh run view --log` dump came from.**
+ *
+ * `measure-check-chain.mts` used to call `capSeconds()` with no argument,
+ * which silently meant `checks.yml`'s 30 minutes **whatever log it was
+ * given**. Pointed at a `Procgen invariants` log it reported *"9m56s, 33.1%
+ * of cap used"* — comfortable-sounding, and wrong by exactly 2×: that run was
+ * 66.6% of its own 15-minute cap. A confident wrong percentage, in the
+ * reassuring direction, from the very tool built to stop that happening.
+ *
+ * So the log is asked which job it is rather than the caller being trusted to
+ * remember. Every line of a `gh` log dump begins with the job's name, and a
+ * job's `name:` is what GitHub matches a required status check by — so it is
+ * already load-bearing and already unique. Scanning the workflows for the one
+ * that declares it needs no hand-maintained map that could drift.
+ *
+ * Ambiguity and absence both **throw**. Falling back to a default cap is the
+ * behaviour that produced the bug.
+ */
+export function capSecondsForJob(jobName: string, dir = new URL('../.github/workflows/', import.meta.url)): {
+  seconds: number;
+  workflow: string;
+} {
+  const root = fileURLToPath(dir);
+  const matches: string[] = [];
+  for (const file of readdirSync(root)) {
+    if (!/\.ya?ml$/.test(file)) continue;
+    const yml = readFileSync(root + file, 'utf8');
+    // A *job's* `name:` is indented; the workflow's own sits at column 0.
+    // Either identifies the file, which is all that is wanted here.
+    const escaped = jobName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp(`^\\s*name:\\s*["']?${escaped}["']?\\s*$`, 'm').test(yml)) matches.push(file);
+  }
+  if (matches.length === 0) {
+    throw new Error(
+      `no workflow declares a job named "${jobName}" — cannot know its cap. ` +
+        'Pass the workflow path explicitly rather than measuring against the wrong one.',
+    );
+  }
+  if (matches.length > 1) {
+    throw new Error(
+      `"${jobName}" is declared by more than one workflow (${matches.join(', ')}), so its ` +
+        'cap is ambiguous. Pass the workflow path explicitly.',
+    );
+  }
+  const workflow = matches[0] as string;
+  return { seconds: capSeconds(new URL(workflow, dir)), workflow: `.github/workflows/${workflow}` };
 }
 
 /**
