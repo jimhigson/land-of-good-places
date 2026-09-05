@@ -1,4 +1,4 @@
-import { Group, Object3D, Raycaster, Vector2 } from 'three';
+import { Box3, Group, Object3D, Raycaster, Vector2, Vector3 } from 'three';
 import { PARADE_MEMBER_RADIUS } from '../../core/constants';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { IsoCamera } from '../../core/IsoCamera';
@@ -6,6 +6,9 @@ import type { TapPoint } from '../../core/input/PointerControls';
 import type { CollisionWorld } from '../../world/Collision';
 import type { PetBedSpot, PetParadeLink } from '../../world/hotel/Hotel';
 import type { PetSlideLink, SlideSeat, SlideSeatFor } from '../../world/slide/petRiders';
+
+/** Scratch for {@link Parade.nearestRiderBodyCentre}, so a per-frame call allocates nothing. */
+const SLIDE_BODY_BOX = new Box3();
 import { terrainHeight } from '../../world/terrain';
 import { shopItem } from '../../world/building/shops/catalogue';
 import { gameStore, walksInParade, type GameState, type InventoryItem } from '../../state';
@@ -267,6 +270,33 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
    */
   petsOnSlide(): number {
     return this.members.filter((member) => member.onSlide).length;
+  }
+
+  /**
+   * **Where the nearest companion's body actually is** — measured off the drawn
+   * animal, not derived from the seat it was put in (#518).
+   *
+   * Same principle as {@link petsOnSlide} and {@link companionAt} directly
+   * above: a question about these bodies, answered by the system that owns
+   * them, from the scene graph after the frame that moved it. *Observing rather
+   * than recomputing* is the distinction those two already draw, and it is the
+   * whole of #518 — the camera was recomputing, off a seat, and was most of a
+   * metre wrong about where the animal it was filming had got to.
+   *
+   * `updateWorldMatrix` first, and not for tidiness: the parade is moved this
+   * same frame, and `Box3.setFromObject` reads world matrices. Without it this
+   * measures where the animal was **last** frame — the identical fault, one
+   * frame instead of one metre, and the one that made three of
+   * `check:pet-slide`'s own numbers false until it was fixed.
+   */
+  nearestRiderBodyCentre(out: Vector3): boolean {
+    const member = this.members[0];
+    if (!member || !member.onSlide) return false;
+    member.root.updateWorldMatrix(true, true);
+    SLIDE_BODY_BOX.setFromObject(member.root);
+    if (SLIDE_BODY_BOX.isEmpty()) return false;
+    SLIDE_BODY_BOX.getCenter(out);
+    return true;
   }
 
   /**

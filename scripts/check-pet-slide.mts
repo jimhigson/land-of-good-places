@@ -642,6 +642,12 @@ async function ride(wired: boolean): Promise<RunResult> {
    * mean nothing was ever measured, which the report says out loud rather than
    * printing a reassuring zero.
    */
+  /**
+   * **How far the solve's derived body centre sat from the drawn body's own
+   * centre** (#518), in metres, and where. `-1` means never measured.
+   */
+  let worstBodyDrift = -1;
+  let worstBodyDriftFrame = 0;
   let worstPetOffAxis = -1;
   let worstPetOffAxisFrame = 0;
   let petHalfFov = 0;
@@ -1090,6 +1096,30 @@ async function ride(wired: boolean): Promise<RunResult> {
           const cam = liveCamera as unknown as PerspectiveCameraLike;
           const bodyCentre = new Vector3();
           new Box3().setFromObject(first.root as never).getCenter(bodyCentre);
+
+          // **Does the point the camera solve reasons about actually sit on the
+          // animal?** (#518.)
+          //
+          // `petBodyCentreOnSlide` *derives* the body centre from the pose —
+          // seat plus half a reclined length up-slope — rather than measuring
+          // the mesh, following the precedent `PET_RECLINED_LENGTH` sets: a
+          // number written down on purpose, whose guard against drift is a
+          // check that re-measures the real thing every build. **This is that
+          // check.** Without it the #518 fix would be a second formula
+          // asserting it agrees with the drawn body, which is precisely the
+          // fault #518 is the third instance of.
+          //
+          // Compared against `Box3.setFromObject` of the actual animal, on real
+          // frames of a real descent. If the pose, the model or the length ever
+          // moves, this goes red rather than the camera quietly going wrong.
+          const solved = building.chaseNearestBodyCentre();
+          if (solved) {
+            const drift = solved.distanceTo(bodyCentre);
+            if (drift > worstBodyDrift) {
+              worstBodyDrift = drift;
+              worstBodyDriftFrame = ridingFrames;
+            }
+          }
           const inCamera = cam.worldToLocal(bodyCentre.clone());
           const ahead = -inCamera.z;
           // Vertical off-axis only, compared against the VERTICAL half-fov:
@@ -1289,6 +1319,8 @@ async function ride(wired: boolean): Promise<RunResult> {
       // the whole defect was a guard that looked calibrated and rejected
       // nothing, and only a count can tell that from a guard with nothing to
       // reject.
+      `solved body centre vs drawn ` +
+      `${worstBodyDrift < 0 ? 'NEVER MEASURED' : `worst ${worstBodyDrift.toFixed(2)} m out (frame ${worstBodyDriftFrame})`}, ` +
       `near bound ${chaseCeilingRejections()} rejections in ${chaseCeilingCalls()} calls ` +
       `(worst estimate ${(chaseCeilingWorstShare() * 100).toFixed(1)}% against ` +
       `${(CEILING_REJECT_ABOVE * 100).toFixed(1)}% to reject)` +
