@@ -25,7 +25,6 @@ import type { Player } from '../../entities/Player';
 import { buildPawPrint } from './catBus';
 import { buildGateArch } from './gateArch';
 import { ROAD_HALF_WIDTH, ROAD_TILE_METRES, applyRoadUvs, roadMaterial } from './road';
-import { PARK_BOUNDARY } from '../boundary';
 import {
   entranceRoadAt,
   entranceRoadInnerEdge,
