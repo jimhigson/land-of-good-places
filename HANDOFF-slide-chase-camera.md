@@ -322,3 +322,104 @@ what I looked at.
 
 #514 fixed and proven; #516 untouched and its cause contradicted; #518 filed.
 PR not yet raised. **Do not merge.**
+
+---
+
+# Third agent — Opus 5 (1M context), addressing the review on PR #519
+
+Model chosen by the Overseer to match the agent it replaces (CLAUDE.md's
+"a replacement runs the same model"). Role: **Engineer**. Worktree
+`.claude/worktrees/eng-camera-514` **adopted as found** — clean, at branch HEAD,
+nothing uncommitted, already current with `origin/main` (rebase was a no-op).
+
+**Scope: #514 only. #516 stays open and is NOT fixed here.**
+
+## Every review finding was reproduced before it was acted on
+
+The baseline run on the untouched branch reproduced all three blocking
+findings exactly, and corrected one number in the PR body:
+
+- `624` ridden frames — the PR body's **675 is stale**.
+- `biggest pet 21% of frame — Little Mouse` (finding 2).
+- `lens lowest above ground -0.09 m ... (ridden frame 1, 1 frames UNDERGROUND)`
+  and `nearest ANYTHING to the lens 0.00 m — npcs/name-label` (finding 3).
+
+## Finding 1 — the guard, and its red proof
+
+`check:pet-slide` now asserts on the **geometry the fix controls**: the nearest
+companion's **drawn** centre (`Box3.setFromObject`, never the seat — the seat is
+what made #518's guard unable to fire) against the **live camera's own
+half-fov**. The threshold is read off the camera, not chosen here.
+
+**Proved red by reverting the fix itself**, which is a stronger proof than a
+constant mutation. `Building.ts` line 1753, the only edit:
+
+```js
+this.eyeBoom.rotation.x = 0; // REVIEW PROOF: pre-#514 behaviour
+```
+
+| | off-axis, worst | half-fov | biggest raster | in shot | exit |
+|---|---|---|---|---|---|
+| aim reverted | **44.0°** (frame 230) | 30.0° | 8% | 100% (smallest 4.0%) | **1** |
+| this branch | **22.8°** (frame 230) | 30.0° | 21% | 100% (smallest 14.1%) | **0** |
+
+**The new clause is the ONLY one that fails on the revert** — the raster still
+scores 4.0% on 100% of rasters, exactly as the reviewer measured, so every other
+clause stays green. That is the gap being closed.
+
+**Geometry the red run was proved against** (CLAUDE.md: a red-run transcript is
+a measurement and measurements go stale): canonical seed **20260728**, 624
+ridden frames, 312 chase frames, 8 chase rasters, three companions
+(`pet.kitten`, `pet.bunny`, `pet.mouse`), seats at 2.73/4.71/6.69 m, lens
+`BASE_BACK` 4.35 m / `BASE_UP` 1.62 m, camera fov 60 (half-fov 30.0°).
+
+The control run also fails the clause (49.7°, and 62.1° reverted), so it is
+listed among the control's failing clauses — a second, independent
+demonstration that it can go red.
+
+## Finding 3 — three false numbers, not two
+
+Root cause as the reviewer diagnosed: nothing renders in a check process, so the
+chase camera's `matrixWorld` was never flushed and `setFromMatrixPosition`
+returned the **world origin**. Fix is `updateWorldMatrix(true, false)` on the
+live camera — walks **up** to the ancestors, which is where the staleness is
+(`eyeBoom` → `eyeMount` → `rideMount`, all moved the same frame).
+
+The raster path was already honest (it calls `scene.updateMatrixWorld(true)` at
+what is now line 1034), so **only the #516 sampler was affected**.
+
+Corrected canonical readings — note the **rim figure moved too**, which the
+review did not flag:
+
+| | before | after |
+|---|---|---|
+| lens lowest above ground | −0.09 m, 1 frame UNDERGROUND | **5.41 m, 0 frames** |
+| camera nearest the pit rim | 1.99 m | **53.53 m** |
+| nearest ANYTHING to lens | 0.00 m — `npcs/name-label` | fan **never fires** |
+
+The ray fan is gated on the lens being underground, which is now never, so it
+prints `ray fan fired on 0 frames (ASSERTS NOTHING — ...)` rather than a
+confident `>2 m — nothing`.
+
+**The #516 conclusion is withdrawn, not restated.** The solve-side "0 rejections
+in ~22,000 calls" stands (it never touched a camera matrix), but it is no longer
+offered as evidence for a cause. `chaseEye.ts`'s header now says #516's cause is
+unclaimed here and has been misidentified twice.
+
+## Finding 4 — all four done
+
+- Two orphaned JSDoc blocks deleted from `check-pet-slide.mts`.
+- The front-of-the-line scope stated in `chaseEye.ts`'s header.
+- `chaseGaveUp`/`chaseCompanions` reset in `startRide`.
+- The stale 675 corrected to 624 (see above).
+
+## Open at handover
+
+- **16-seed pool sweep running** (`/tmp/cam519/sweep/<seed>.log`), reporting the
+  **biggest** raster per seed, which is what finding 2 asks for. If any seed is
+  near 25%, this needs #518 **before** it merges.
+- `pnpm run check`, `test:procgen`, `check:coplanar`, `build` not yet run on the
+  final tree.
+- **QA slot not yet taken.** A raster cannot answer whether a companion filling
+  21% of frame looks right to a six-year-old; that is the one open question and
+  the Overseer is scheduling the browser.
