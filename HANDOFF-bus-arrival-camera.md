@@ -784,3 +784,115 @@ from each run's own log (`/tmp/bc3-check.log`, `/tmp/bc3-procgen.log`,
 Built, armed and watched. **Not merged.** The remaining question is Jim's alone
 and it is a taste call on a rendered frame: accept the empty band as a flat,
 storybook elevation, or crop it out and give up the sign.
+
+---
+
+# Round nine — perspective everywhere. The void is not the problem it becomes
+
+**Model: Opus (`claude-opus-5[1m]`).** Worktree
+`.claude/worktrees/bus-arrival-camera`. **Still stacked on
+`feat/arch-placement`; not rebased onto `main`, and you must not** — see round
+three. I was *told* to rebase onto `main` and did not, for that reason;
+raised with the Overseer instead.
+
+Jim, on round eight's parked question (level + ortho leaves 43% empty ground):
+**"try perspective everywhere to see how it looks."** So: no projection blend.
+The park is to be judged on a perspective camera throughout, and this shot with
+it. `feat/no-hill-511` carries the `?projection=perspective` prototype.
+
+## Two predecessor worktrees, and one of them holds a staged revert
+
+`.claude/worktrees/bus-camera` has **staged, uncommitted** changes that are a
+*reversal*: −605 lines of this handoff, −365 of the check, `ArrivalSequence.ts`
+back toward an older shape (1260 deletions, 82 insertions). It is not new work.
+I left it exactly as found, per CLAUDE.md, and did not adopt any of it. Do the
+same. `bus-camera-2` is clean at the branch head.
+
+## The instrument, and its control
+
+The 43.1% comes from `check-arrival-camera.mts`'s stderr band note. Re-run
+unchanged on this head as a control before touching anything:
+
+```
+worst frame in the shot, at t=3.00s:  8.7761 m of a 20.3837 m frame (43.1%)
+tightest level frame (the door beat's own):  1.8513 m of a 6.5340 m frame (28.3%)
+```
+
+exit 0. It reproduces, so the instrument is the one that produced the number.
+
+**But it cannot be pointed at perspective, and this is the finding that
+matters.** Its formula is
+
+```
+band = frameHeight / 2 - eyeHeight
+```
+
+which is *derived from orthographic projection* — the ground is seen exactly
+edge-on and projects to a line at the eye's height. Under perspective there is
+no such line: a horizontal perspective camera puts the **horizon at the vertical
+centre of frame** and the ground fills the entire lower half continuously. The
+band does not shrink, it **ceases to be a quantity**. Re-running this instrument
+under perspective would print a number that describes nothing — the exact
+"assertion reporting success about something it is not describing" this repo
+keeps being bitten by. It must be measured on rendered pixels instead.
+
+Second reason it cannot be run: `perspectiveFlag.ts`'s `readFlag()` returns
+`false` when there is no `location`, so **every check script gets the shipped
+orthographic projection by construction**. A green check chain says nothing at
+all about the perspective look.
+
+## The prototype's own model, read from its source
+
+`feat/no-hill-511`, `IsoCamera.applyFrustum`:
+
+```ts
+this.camera.fov = (2 * Math.atan(halfHeight / CAMERA_DISTANCE) * 180) / Math.PI;
+```
+
+with `halfHeight = frustumBase() / zoom`, `frustumBase() = max(15/2, 11/2/aspect)`
+= **7.5** at 16:10, and `CAMERA_DISTANCE` = **90**. So default zoom 1 gives
+`fov = 2·atan(7.5/90)` = **9.53°**, not the ~22° I was briefed — read it from
+the source, not from the brief.
+
+## THE PROBLEM PERSPECTIVE CREATES HERE — predicted, being measured
+
+**In ortho, the shot's stand-back is inert for framing.** That is round one's
+founding finding: sliding an orthographic eye along its own view axis changes
+nothing on screen, so `ARRIVAL_DOOR_DISTANCE` was free to be used purely as an
+*occlusion* control — it dives to **~6.6 m** at the door beat and **4.0 m** to
+thread the arch, because that is what keeps park furniture out from between lens
+and child.
+
+**Under perspective, stand-back is THE framing control** — and the FOV is still
+derived against a fixed `CAMERA_DISTANCE = 90 m` that the arrival shot is
+nowhere near. The two disagree by the whole dive:
+
+| beat | frame (ortho) | zoom | derived fov | actual stand-back | world height actually framed |
+|---|---|---|---|---|---|
+| worst, t=3.00 | 20.3837 m | 0.7359 | 12.92° | (wide) | — |
+| door beat | 6.5340 m | 2.2957 | 4.157° | ~6.6 m | **~0.48 m** |
+
+A 4.157° lens at 6.6 m frames about **half a metre** of world height, against a
+child 1.4157 m tall. She would stand roughly **three times the height of the
+frame**. That is not an empty-ground problem; it is a face filling the screen.
+
+This is the same shape as #518 and as this file's own recurring fault: a
+quantity taken against a *convenient* origin (`CAMERA_DISTANCE`, the rig's
+constant) rather than against **the thing that gets drawn** (where the eye
+actually is this frame).
+
+**Predicted, not yet measured.** Being measured on rendered pixels now.
+
+## The measurement rig
+
+`playwright-core` is a dependency and Chromium 1234 is installed, so a real
+rendered frame is available **without** the shared MCP Chrome profile — which I
+do not own (the `no-hill-511` engineer has it). Round eight used the same route.
+
+Control first, per the brief: render ortho and confirm the pixel instrument
+reproduces ~43% empty band at t=3.00s. Only then trust it on perspective.
+
+## Status
+
+Nothing built, nothing committed but this note. No code change may be the right
+answer; that is a live possibility, not a fallback.
