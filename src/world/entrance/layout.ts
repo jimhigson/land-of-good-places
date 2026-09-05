@@ -190,35 +190,25 @@ export const ENTRANCE_PLAYER_X = ENTRANCE_STOP_X - 1.6;
 export const ENTRANCE_PLAYER_Z = ENTRANCE_STOP_Z - 0.4;
 
 /**
- * **Where the bus parks — outside the park, never in it.**
+ * **Where the bus parks used to be written down, and why it no longer is.**
  *
- * This used to be `ENTRANCE_STOP_Z + 2.6` (z = 54.6), which is **5.4 m inside
- * the boundary wall**, and on 7 August 2026 Jim watched the first ever run of
- * the arrival and said so: *"the bus drives something like 5 m into the park,
- * through a wall."* Both halves of that were true and neither was a rendering
- * fault — the bus really did drive to a point inside the park, and the wall
- * really had no hole in it (issue #195; `isInEntranceGateGap` had never been
- * called by anything).
+ * This file held `ENTRANCE_BUS_STOP_Z = ENTRANCE_GATE_Z + 9`, plus
+ * `ENTRANCE_BUS_ARRIVE_X` and `ENTRANCE_BUS_VANISH_X`: three coordinates on a
+ * straight kerb, each measured by hand against the boundary spline and the
+ * hilltop's rim. The road is not a straight kerb any more — it follows the
+ * park's own edge, because a straight one cannot both hug the wall and stay out
+ * of the park (see `roadRoute.ts` for the measurement) — so an `x` and a `z`
+ * cannot name a point on it.
  *
- * A bus is not a park vehicle. It stops on the road **outside** the gate and
- * the children walk in through the arch, which is what a bus stop is.
+ * All three now come from `entrance/roadRoute.ts`, which owns the road: the stop
+ * is `entranceRoadAt(0)`, and the bus arrives and is disposed at the brow. They
+ * are **deleted rather than re-derived here**, because a constant kept in this
+ * file that merely restated the route's answer is the copy CLAUDE.md warns
+ * about, and it would be the copy every consumer reached for first.
  *
- * The number is bounded at both ends and there is less room than you would
- * think:
- * - **Inwards** by the wall at `ENTRANCE_GATE_Z` (60) — the whole bus must
- *   clear it, and the bus is over 7 m long once scaled (see `catBus.ts`'s
- *   `BUS_SCALE`).
- * - **Outwards** by the terrain, which is a hilltop diorama: measured on the
- *   built ground, it is flat to z = 72 and then falls away hard — −0.13 m at
- *   72, −1.35 m at 74, −14 m at 80. Park a bus past the rim and it hangs in
- *   the air over a cliff.
- *
- * That leaves a **12 m window** between the wall and the rim for a 7 m bus,
- * which is the real reason the roll-in here is short. It is also the clearest
- * argument that Stage B's journey cannot happen on this terrain and needs its
- * own scene, as #245 already specifies.
+ * `roadRoute.ts` imports this file (for `ENTRANCE_ANGLE`), so the dependency
+ * only ever runs that way round — do not make this file import it back.
  */
-export const ENTRANCE_BUS_STOP_Z = ENTRANCE_GATE_Z + 9;
 
 /**
  * **Where the bus's *door* stops: dead in front of the gate.**
@@ -248,26 +238,7 @@ export const ENTRANCE_BUS_STOP_Z = ENTRANCE_GATE_Z + 9;
  */
 export const ENTRANCE_BUS_DOOR_X = 0;
 
-/**
- * Where the bus comes in from, along the kerb. This is the frame Stage B hands
- * over on — see `ArrivalSequence`.
- *
- * **Both of these are bounded by a measurement, and the measurement moved.**
- * Sizing the bus from a child that had actually been measured took it from
- * 11 m to 18.2 m long, and the run of kerb an 18.2 m bus can stand on without
- * any part of it being inside the park is `x` from **-23 to +7.5** at this
- * kerb — not the ±28 an 11 m bus had. (`scripts/check-cat-bus.mts` measures the
- * bus's own bounding box against `PARK_BOUNDARY` on every frame of the run and
- * caught exactly this: *"the bus reached 1.48 m INSIDE the park boundary"*.)
- *
- * So these sit just inside that window, with the stop itself at x = -4.6 —
- * see `catBus.ts`'s `doorZ` for why the door is behind the bus's centre, which
- * is what buys the approach its 11.6 m.
- */
-export const ENTRANCE_BUS_ARRIVE_X = 7;
 
-/** Once the departing bus has rolled on this far, it is disposed. */
-export const ENTRANCE_BUS_VANISH_X = -22;
 
 /** Keeps the tree/bush scatter (`Scenery.ts`) off the stop and the gate plaza. */
 export const ENTRANCE_CLEAR_X = ENTRANCE_STOP_X;

@@ -81,10 +81,12 @@ import { CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES } from '../../core/constants';
 import { terrainHeight } from '../terrain';
 import { CAT_BUS_LENGTH, CAT_BUS_TOP, CAT_BUS_TRACK_WIDTH } from './catBus';
 import {
-  ENTRANCE_BUS_ARRIVE_X,
-  ENTRANCE_BUS_DOOR_X,
-  ENTRANCE_BUS_STOP_Z,
 } from './layout';
+import {
+  distanceToEntranceCorridor,
+  entranceRoadAt,
+  entranceRoadBrow,
+} from './roadRoute';
 
 const DEG = Math.PI / 180;
 
@@ -122,8 +124,23 @@ const TOWARDS_CAMERA = {
  * Widening a keep-out costs a handful of decorative trees. Narrowing one is
  * what put trees across the bus in every frame of the first run anyone watched.
  */
-const RUN_FROM_X = Math.min(ENTRANCE_BUS_ARRIVE_X, ENTRANCE_BUS_DOOR_X) - CAT_BUS_LENGTH;
-const RUN_TO_X = Math.max(ENTRANCE_BUS_ARRIVE_X, ENTRANCE_BUS_DOOR_X) + CAT_BUS_LENGTH;
+/**
+ * **The run, as the road now measures it.**
+ *
+ * Was two `x` coordinates on a straight kerb. The bus drives an arc that follows
+ * the park's edge, so "somewhere on the run" is no longer a range of `x`: it is
+ * *inside the road's own corridor*, which `roadRoute.ts` already owns and
+ * already sweeps as a bus-length box at every station. Asking that instead of
+ * re-deriving a band here means this file cannot fall out of step with the road
+ * the bus is actually on — the failure the old pair of constants would have had
+ * the moment the kerb moved, silently, by putting trees back across the shot.
+ *
+ * The whole-bus-length padding the old constants carried is still here and still
+ * for the same reasons (the door mark is not the centre; the tail, whiskers and
+ * swung door stand up to 1.24 m proud of the box). It is spent as a margin on
+ * the corridor rather than on the ends of a straight line.
+ */
+const RUN_MARGIN = CAT_BUS_LENGTH;
 
 /**
  * The bus's two flanks, each a whole width out from its centre line for the
@@ -134,8 +151,9 @@ const RUN_TO_X = Math.max(ENTRANCE_BUS_ARRIVE_X, ENTRANCE_BUS_DOOR_X) + CAT_BUS_
  * the bus's own footprint, where the projection is meaningless and the answer
  * is simply *yes* — which is what clamping `back` at zero says.
  */
-const BUS_FAR_Z = ENTRANCE_BUS_STOP_Z - CAT_BUS_TRACK_WIDTH;
-const BUS_NEAR_Z = ENTRANCE_BUS_STOP_Z + CAT_BUS_TRACK_WIDTH;
+const BUS_STOP_POINT = entranceRoadAt(0);
+const BUS_FAR_Z = BUS_STOP_POINT.z - CAT_BUS_TRACK_WIDTH;
+const BUS_NEAR_Z = BUS_STOP_POINT.z + CAT_BUS_TRACK_WIDTH;
 
 /**
  * The ground the bus stands on — the height its silhouette starts from.
@@ -148,7 +166,7 @@ const BUS_NEAR_Z = ENTRANCE_BUS_STOP_Z + CAT_BUS_TRACK_WIDTH;
  * shot than their own height suggests, and is why the corridor is not as wide
  * as it first looks.
  */
-const BUS_GROUND_Y = terrainHeight(ENTRANCE_BUS_DOOR_X, ENTRANCE_BUS_STOP_Z);
+const BUS_GROUND_Y = terrainHeight(BUS_STOP_POINT.x, BUS_STOP_POINT.z);
 
 /**
  * Does a thing standing here, this tall, hide any part of the arriving bus?
@@ -159,11 +177,35 @@ const BUS_GROUND_Y = terrainHeight(ENTRANCE_BUS_DOOR_X, ENTRANCE_BUS_STOP_Z);
  *              its own height. The grazing ray is cast from the top because a
  *              ray that clears the top of a thing is not blocked by it; every
  *              ray below that one is.
+ * @param reach how far the thing **spreads** from that point, in metres.
+ *
+ * ### Why `reach` exists, and who passes what
+ *
+ * A planter knows where it is about to put a clump's *centre*; what a player
+ * sees is the clump's *blobs*, which stand up to `BUSH_REACH` (2.15 m) off
+ * that centre. Asking this about the centre alone answers a question nobody
+ * has: `Scenery.ts`'s bush loop did exactly that, sandwiched between an
+ * `isPlantable(x, z, BUSH_REACH)` and a `clearOfCruiser(x, z, BUSH_REACH, …)`
+ * that both correctly pass the spread — so the centre cleared the shot while
+ * a blob 2 m away stood in it.
+ *
+ * That is the two-definitions-of-one-thing bug CLAUDE.md puts at the top of
+ * the list, and it stayed invisible while the bus stopped somewhere else. The
+ * road moving the stop 3.2 m towards the wall put the corridor under the
+ * bushes' own band and three seeds went red at once (11, 24 and 5 — worst a
+ * clump at −28.9, 61.4 reaching 2.5 m).
+ *
+ * So: **a placer passes the thing's full spread; a check measuring a thing
+ * that is already built passes `0`**, because a drawn blob's own position *is*
+ * the point. `parkFacts.ts` asks per-instance and so takes the default.
+ * Widening a keep-out costs a handful of decorative bushes, which is the
+ * trade this file's header already states.
  */
-export function hidesTheArrivingBus(x: number, z: number, top: number): boolean {
+export function hidesTheArrivingBus(x: number, z: number, top: number, reach = 0): boolean {
   // Behind the bus: it cannot be in front of what it is not in front of.
-  // (`d.z` is positive — the camera is on the +z side.)
-  if (z <= BUS_FAR_Z) return false;
+  // (`d.z` is positive — the camera is on the +z side.) The spread counts here
+  // too: a clump centred behind the far flank can still reach in front of it.
+  if (z + reach <= BUS_FAR_Z) return false;
 
   const back = Math.max(0, (z - BUS_NEAR_Z) / TOWARDS_CAMERA.z);
   const topAtBus = top - TOWARDS_CAMERA.y * back;
@@ -171,7 +213,15 @@ export function hidesTheArrivingBus(x: number, z: number, top: number): boolean 
   if (topAtBus <= BUS_GROUND_Y) return false;
 
   const xAtBus = x - TOWARDS_CAMERA.x * back;
-  return xAtBus >= RUN_FROM_X && xAtBus <= RUN_TO_X;
+  const zAtBus = z - TOWARDS_CAMERA.z * back;
+  // Where the grazing ray meets the bus's own depth, is that on the road the bus
+  // drives? The corridor is the bus's swept body, so "inside it, plus the
+  // silhouette's own overhang" is exactly "in front of the bus at some point in
+  // the run" — and it is asked of the road rather than restated from it.
+  if (distanceToEntranceCorridor(xAtBus, zAtBus) > RUN_MARGIN + reach) return false;
+  // Nothing beyond the brow can hide a bus that stops existing there.
+  return Math.hypot(xAtBus - BUS_STOP_POINT.x, zAtBus - BUS_STOP_POINT.z) <=
+    entranceRoadBrow() + RUN_MARGIN + reach;
 }
 
 /**
@@ -182,8 +232,8 @@ export function hidesTheArrivingBus(x: number, z: number, top: number): boolean 
  */
 export const ARRIVAL_SIGHTLINE = {
   towardsCamera: TOWARDS_CAMERA,
-  runFromX: RUN_FROM_X,
-  runToX: RUN_TO_X,
+  runMargin: RUN_MARGIN,
+  stop: BUS_STOP_POINT,
   busFarZ: BUS_FAR_Z,
   busNearZ: BUS_NEAR_Z,
   busGroundY: BUS_GROUND_Y,

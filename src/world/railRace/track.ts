@@ -24,6 +24,7 @@ import { distanceToPath } from '../pathGraph';
 import { archFeet } from './arch';
 import { PARK_LAYOUT } from '../parkLayout';
 import { distanceToRailCorridor } from '../train/plan';
+import { isInEntranceRoad } from '../entrance/roadRoute';
 import type { CollisionWorld } from '../Collision';
 import { railFrameAt, sweptRails, type RailFrame, type RailSampler } from '../rail/sweptRail';
 import {
@@ -541,7 +542,12 @@ export function buildRailRaceTrack(
   const mandatoryTrestleIndices = new Set(
     layout.bars.map((bar) => trestleGridIndex(bar.at, route.length)),
   );
-  const spots = trestleSpots(route, collision, mandatoryTrestleIndices);
+  const spots = trestleSpots(
+    route,
+    collision,
+    mandatoryTrestleIndices,
+    POST_FOOT_RADIUS * ringSizeVsRace,
+  );
   const spotByIndex = new Map(spots.map((spot) => [spot.index, spot]));
 
   // --- the duck bars ---------------------------------------------------------
@@ -1226,11 +1232,48 @@ interface TrestleSpot {
   readonly index: number;
 }
 
-/** Every one of `trestleSpots`'s four ground-clearance predicates, together. */
-function groundIsClear(x: number, z: number, collision: CollisionWorld): boolean {
+/**
+ * Every one of `trestleSpots`'s ground-clearance predicates, together.
+ *
+ * **The entrance road is one of them (#488).** It was not, and the omission was
+ * exactly the shape CLAUDE.md names: *"a generator that only checks itself
+ * against a hand-picked obstacle list will silently miss whatever a sibling
+ * system placed there"*. This list already refuses ground near a path, near the
+ * railway's corridor and near a `PARK_LAYOUT` entry — the road the cat bus
+ * arrives on was simply not in it, so on **all sixteen pool seeds** two to eight
+ * legs stood inside the bus's own swept body and it drove straight through them.
+ *
+ * It cannot be answered on the road's side: measured, the trestle line stands at
+ * `NOMINAL_OUTSET` (6.5 m beyond the park's edge) and a 7.78 m road parallel to
+ * it needs a centre at outset ≤ 2.1 or ≥ 10.9, while staying out of the park and
+ * off the hillside allows only [3.89, 8.11]. Those bands do not intersect — see
+ * `entrance/roadRoute.ts`, which owns the corridor and carries the full
+ * argument.
+ *
+ * So the ride declines to put a foot in the road and re-rolls, which is the
+ * standing procgen rule rather than a special case: `searchForClearGround`'s
+ * existing nudges do the moving, and a leg at outset 6.5 needs about +2.6 m
+ * radially to clear a road hugging the wall — inside `RADIAL_NUDGES` and inside
+ * `MANDATORY_RADIAL_NUDGES`. Nothing here deletes a support or places one by
+ * hand.
+ *
+ * Ordering works because `World.ts` builds `RailRace` before `Entrance`, and the
+ * corridor is derived from the boundary alone — it does not need the road to
+ * have been built, only to have been *decided*.
+ */
+function groundIsClear(
+  x: number,
+  z: number,
+  collision: CollisionWorld,
+  footRadius: number,
+): boolean {
   if (!collision.isClearCircle(x, z, 1.1)) return false;
   if (distanceToPath(x, z) < 2.8) return false;
   if (distanceToRailCorridor(x, z) < 2.4) return false;
+  // The leg's own foot, not a hand-picked margin: the collider `track.ts`
+  // registers for it is `POST_FOOT_RADIUS` wide, so that is exactly how much of
+  // the road a leg standing here would take away from the bus.
+  if (isInEntranceRoad(x, z, footRadius)) return false;
   const pinchesCorridor = [...PARK_LAYOUT.entries.values()].some(
     (entry) => Math.hypot(x - entry.x, z - entry.z) < entry.boundingRadius + 2.4,
   );
@@ -1348,6 +1391,7 @@ function searchForClearGround(
   atArch0: number,
   arcNudges: readonly number[],
   radialNudges: readonly number[],
+  footRadius: number,
 ): { at: number; x: number; z: number } | null {
   for (const dr of radialNudges) {
     for (const da of arcNudges) {
@@ -1360,7 +1404,7 @@ function searchForClearGround(
       const sample = route.path.sampleAt(at);
       const x = sample.x + sample.normalX * dr;
       const z = sample.z + sample.normalZ * dr;
-      if (groundIsClear(x, z, collision)) return { at, x, z };
+      if (groundIsClear(x, z, collision, footRadius)) return { at, x, z };
     }
   }
   return null;
@@ -1411,6 +1455,7 @@ function trestleSpots(
   route: RailRaceRoute,
   collision: CollisionWorld,
   mandatoryIndices: ReadonlySet<number>,
+  footRadius: number,
 ): TrestleSpot[] {
   const spots: TrestleSpot[] = [];
   // Arch-relative, matching `planHazards`'s `snapToTrestleGrid` exactly — the
@@ -1421,9 +1466,9 @@ function trestleSpots(
   for (let i = 0; i < count; i += 1) {
     const atArch0 = (i / count) * route.length;
     const mandatory = mandatoryIndices.has(i);
-    let placed = searchForClearGround(route, collision, atArch0, ARC_NUDGES, RADIAL_NUDGES);
+    let placed = searchForClearGround(route, collision, atArch0, ARC_NUDGES, RADIAL_NUDGES, footRadius);
     if (!placed && mandatory) {
-      placed = searchForClearGround(route, collision, atArch0, WIDE_ARC_NUDGES, MANDATORY_RADIAL_NUDGES);
+      placed = searchForClearGround(route, collision, atArch0, WIDE_ARC_NUDGES, MANDATORY_RADIAL_NUDGES, footRadius);
     }
     if (!placed && mandatory) {
       // Last resort — see `WIDE_RADIAL_NUDGES`'s own doc comment. Loud
@@ -1432,7 +1477,7 @@ function trestleSpots(
       // (`test/procgen/invariants.ts`) actually wants; if this fires on a
       // real seed, that slot's ground is worth a closer look, not just a
       // wider search.
-      placed = searchForClearGround(route, collision, atArch0, WIDE_ARC_NUDGES, WIDE_RADIAL_NUDGES);
+      placed = searchForClearGround(route, collision, atArch0, WIDE_ARC_NUDGES, WIDE_RADIAL_NUDGES, footRadius);
       if (placed) {
         console.warn(
           `railRace/track.ts: the mandatory trestle at slot ${i} (arch-relative at=` +
