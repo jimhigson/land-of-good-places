@@ -141,6 +141,68 @@ export function pavingIsKnown(): boolean {
 }
 
 /**
+ * Which of the network's two drawn surfaces is being asked about. The path is
+ * drawn as a surface with a kerb framing it, in that order and at two different
+ * lifts, and the kerb reaches further out than the surface it frames — so
+ * "where does the network reach?" has two different answers and a caller has to
+ * say which one it means.
+ */
+export type DrawnPathLayer = 'surface' | 'kerb';
+
+/** Answers whether a point is covered by the network's drawn `layer`. */
+export type DrawnPathReader = (x: number, z: number, layer: DrawnPathLayer) => boolean;
+
+let drawnReader: DrawnPathReader | null = null;
+
+/**
+ * **Declares where the network's drawn surfaces actually reach** — as opposed
+ * to {@link publishPaving}, which describes the *walkable* paving as round
+ * patches for the router to rasterise.
+ *
+ * The two are not interchangeable and the difference is what this exists for.
+ * A disc list is an approximation in two ways that do not matter to `NavGrid`
+ * (whose cells are far coarser than either error) and matter a great deal to
+ * anything laying a second surface up against the network:
+ *
+ * - **It scallops.** The discs sit *at* the centreline samples, but the ribbon
+ *   is drawn as a strip *between* them. Between two samples `s` apart the disc
+ *   union pinches in to `sqrt(r² - (s/2)²)` while the drawn ribbon runs
+ *   straight across at `r`, so the drawn surface pokes out of the disc union.
+ * - **It is the surface only**, deliberately — `publishPaving`'s own comment
+ *   says the kerb is left out because a child walks the surface. So a caller
+ *   asking the disc list where the *kerb* is gets an answer about a different
+ *   surface, and the only way to use it is to add a margin, which is a number
+ *   somebody then has to keep in step with how the kerb is actually drawn.
+ *
+ * Both of those were measured as real coplanar seams where the run in through
+ * the gate meets the network (`scripts/probe-gateway-seam.mts`): 67% of the
+ * surface seam, and **100%** of both kerb seams, lay on ground the disc union
+ * called clear. So this reader answers from the drawn geometry itself — the
+ * strip between consecutive samples, at the layer's own reach — and a caller
+ * that abuts the network asks this rather than budgeting for the error.
+ *
+ * Live and idempotent for the same reasons {@link publishPaving} is.
+ */
+export function publishDrawnPath(reader: DrawnPathReader): void {
+  drawnReader = reader;
+}
+
+/**
+ * Is this point covered by the network's drawn `layer`?
+ *
+ * **`null` means nobody has published**, and it is deliberately not `false`:
+ * an interior harness with no garden has no path network, and a caller that
+ * read `false` there would conclude the ground was clear and lay its surface
+ * straight through where the paving would have been. `null` forces that case
+ * to be handled rather than silently misread — the same reason
+ * {@link forEachPavedDisc} returns whether it knew anything.
+ */
+export function pointIsOnDrawnPath(x: number, z: number, layer: DrawnPathLayer): boolean | null {
+  if (!drawnReader) return null;
+  return drawnReader(x, z, layer);
+}
+
+/**
  * Forgets the published paving. **For tests and checks only**, so one process
  * can measure a weighted router and an unweighted one without two parks.
  */

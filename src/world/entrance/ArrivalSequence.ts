@@ -20,15 +20,17 @@ import { createBusDriver, type BusDriver } from './busDriver';
 import { playBrakeSqueak, playDoorHiss, playHornToot } from './sounds';
 import { markArrived } from './arrivalFlag';
 import {
-  ENTRANCE_ANGLE,
-  ENTRANCE_BUS_ARRIVE_X,
   ENTRANCE_BUS_DOOR_X,
-  ENTRANCE_BUS_STOP_Z,
-  ENTRANCE_BUS_VANISH_X,
   ENTRANCE_GATE_Z,
   ENTRANCE_PLAYER_X,
   ENTRANCE_PLAYER_Z,
 } from './layout';
+import {
+  entranceBusArriveAt,
+  entranceBusVanishAt,
+  entranceRoadAt,
+  entranceRoadFacing,
+} from './roadRoute';
 
 /**
  * **The cat bus arrival — the scripted timeline.**
@@ -273,21 +275,30 @@ export function arrivalCameraZoom(phase: ArrivalPhase): number {
 export { arrivalIsDue } from './arrivalFlag';
 
 /**
- * Which way the bus points.
+ * **Which way the bus points while it is standing at the stop.**
  *
- * It runs **along** the kerb, not at the gate: the travel direction is the
- * boundary's own tangent at the gate's bearing, so this still reads correctly
- * if the gate is ever moved. A Three.js object at `rotation.y = t` sends local
- * +Z to world `(sin t, cos t)`, hence the `atan2`.
+ * Was `atan2(TRAVEL_X, TRAVEL_Z)` — a constant, because the bus drove down a
+ * straight kerb and never turned. It drives a road that follows the park's edge
+ * now, so its facing is a function of where it is along that road, and this is
+ * simply that function asked at the stop. Everything that used to read the
+ * constant wants the *stopped* bus's frame — the seated riders' facing, the
+ * door's world position, the walk routes off it — so they all ask here, and the
+ * moving bus asks `entranceRoadFacing` per frame instead.
  */
-const TRAVEL_X = -Math.sin(ENTRANCE_ANGLE);
-const TRAVEL_Z = Math.cos(ENTRANCE_ANGLE);
-const BUS_FACING = Math.atan2(TRAVEL_X, TRAVEL_Z);
+function busFacingAtStop(stopAt: number): number {
+  return entranceRoadFacing(stopAt);
+}
 
-/** A point in the bus's own local space, in world space, for a bus at `(bx, bz)`. */
-function busLocalToWorld(bx: number, bz: number, lx: number, lz: number): { x: number; z: number } {
-  const cos = Math.cos(BUS_FACING);
-  const sin = Math.sin(BUS_FACING);
+/** A point in the bus's own local space, in world space, for a bus at `(bx, bz)` facing `facing`. */
+function busLocalToWorld(
+  bx: number,
+  bz: number,
+  lx: number,
+  lz: number,
+  facing: number,
+): { x: number; z: number } {
+  const cos = Math.cos(facing);
+  const sin = Math.sin(facing);
   return { x: bx + lx * cos + lz * sin, z: bz - lx * sin + lz * cos };
 }
 
@@ -479,20 +490,31 @@ export class ArrivalSequence {
 
   /** Seconds since the doors opened — the clock every child's own walk reads. */
   private kidClock = 0;
-  /** Where the bus's centre comes to rest, worked back from where its door goes. */
-  private readonly stopX: number;
+  /**
+   * **Where the bus's centre comes to rest, in metres along the road**, worked
+   * back from where its door has to end up.
+   *
+   * The gate is arc zero and the bus drives down *decreasing* arc, so its
+   * forward is `-at` and a door sitting `doorDrop.z` ahead of the centre puts
+   * the centre that far *up* the arc. Same derivation as the `stopX` this
+   * replaces — a longer bus still stops with its door at the arch — with the
+   * straight kerb's `x` swapped for the curved road's own parameter.
+   */
+  private readonly stopAt: number;
+  /** The stopped bus's yaw. Constant, unlike the driving bus's. */
+  private readonly stopFacing: number;
 
   private player: Player | null = null;
   private phaseIndex = 0;
   private phaseTime = 0;
-  private busX = ENTRANCE_BUS_ARRIVE_X;
+  private busAt = entranceBusArriveAt();
   private busSpeed = 0;
   private doneFlag = false;
   private handedOver = false;
   private tootedHorn = false;
   private squeaked = false;
   private hissed = false;
-  private playerFacing = BUS_FACING;
+  private playerFacing = 0;
 
   /**
    * The pose {@link update} computed for the player this frame, re-applied at
@@ -512,8 +534,10 @@ export class ArrivalSequence {
     // should end up. Working back from the two is what keeps them from
     // drifting apart — and means a longer bus still stops with its door at the
     // gate rather than needing a second constant nudged by hand.
-    this.stopX = ENTRANCE_BUS_DOOR_X + this.bus.doorDrop.z;
-    this.placeBus(ENTRANCE_BUS_ARRIVE_X);
+    this.stopAt = this.bus.doorDrop.z;
+    this.stopFacing = busFacingAtStop(this.stopAt);
+    this.playerFacing = this.stopFacing;
+    this.placeBus(entranceBusArriveAt());
 
     // The driver rides at the wheel and never gets out. He is the one person
     // here who is not a park NPC — see `busDriver.ts`.
@@ -521,7 +545,14 @@ export class ArrivalSequence {
     this.bus.driverSeat.add(this.busDriver.root);
 
     // Routes are derived from where the bus's own door actually is.
-    const drop = busLocalToWorld(this.stopX, ENTRANCE_BUS_STOP_Z, this.bus.doorDrop.x, this.bus.doorDrop.z);
+    const stop = entranceRoadAt(this.stopAt);
+    const drop = busLocalToWorld(
+      stop.x,
+      stop.z,
+      this.bus.doorDrop.x,
+      this.bus.doorDrop.z,
+      this.stopFacing,
+    );
     const end = { x: ENTRANCE_PLAYER_X, z: ENTRANCE_PLAYER_Z };
     this.playerRoute = {
       from: drop,
@@ -610,12 +641,36 @@ export class ArrivalSequence {
     // both what happens on a bus and what keeps the queue in order: the walk to
     // the door then gets *longer* with every child, so the gaps between people
     // appearing on the step can only widen from the stagger, never narrow.
-    const drop = this.playerRoute.from;
+    //
+    // **Asked in the bus's own frame**, and that is the whole of issue #488's
+    // disembark fault. `World`'s constructor calls this while the bus is still
+    // standing at the far end of the road it has yet to drive — measured, 36.26 m
+    // from the drop — so a *world* distance from a seat to the drop carried the
+    // entire length of that drive. Every child's aisle walk came out at 12.7-16.3
+    // seconds against the {@link KID_AISLE_SECONDS} 5.49 s this file's own
+    // timeline budgets, so:
+    //
+    // - they crawled, because the lerp below covers the real ~5 m at whatever
+    //   pace a 13-second budget implies — `check:cat-bus` saw 0.87 m/s;
+    // - most of them never reached the door at all inside the sequence, and were
+    //   left behind by the departing bus rather than walking out of it;
+    // - and the 36 m every seat shared **compressed the differences between
+    //   them**: two seats either side of the gangway are all but equidistant
+    //   from a point 36 m away, which is the 0.02 s gap reported as "two
+    //   children left the bus at once".
+    //
+    // The seat's offset from the door is a property of the bus, not of where the
+    // bus is parked, so it is measured where it does not move — the same cure
+    // `check:cat-bus` itself was given the day the bus started driving a curve.
+    // {@link CatBusHandle.doorDrop} is the drop in those same local coordinates,
+    // which is why the two are directly comparable.
+    const door = this.bus.doorDrop;
+    this.bus.root.updateMatrixWorld(true);
     const free = this.bus.seats
       .filter((seat) => seat !== this.bus.passengerSeat)
       .map((seat) => {
-        const at = seat.getWorldPosition(new Vector3());
-        return { seat, distance: Math.hypot(at.x - drop.x, at.z - drop.z) };
+        const at = this.bus.root.worldToLocal(seat.getWorldPosition(new Vector3()));
+        return { seat, distance: Math.hypot(at.x - door.x, at.z - door.z) };
       })
       .sort((a, b) => a.distance - b.distance);
 
@@ -720,10 +775,12 @@ export class ArrivalSequence {
    * cannot disagree with the motion on screen.
    */
   private rollIn(t: number, dt: number): void {
-    const previous = this.busX;
-    this.busX = lerp(ENTRANCE_BUS_ARRIVE_X, this.stopX, smoothstep(0, 1, t));
-    this.placeBus(this.busX);
-    this.busSpeed = Math.abs(this.busX - previous) / dt;
+    const previous = this.busAt;
+    this.busAt = lerp(entranceBusArriveAt(), this.stopAt, smoothstep(0, 1, t));
+    this.placeBus(this.busAt);
+    // Metres of *road* per second, so the wheels and the tail still agree with
+    // the motion on screen now that a metre of arc is a metre of travel.
+    this.busSpeed = Math.abs(this.busAt - previous) / dt;
 
     if (!this.tootedHorn && t > 0.08) {
       this.tootedHorn = true;
@@ -820,23 +877,32 @@ export class ArrivalSequence {
     }
 
     const driving = (t - waitFraction) / Math.max(0.001, 1 - waitFraction);
-    const previous = this.busX;
+    const previous = this.busAt;
     if (driving < 0.18) {
       this.bus.setDoorOpen(1 - smoothstep(0, 0.18, driving));
       this.busSpeed = 0;
       return;
     }
     this.bus.setDoorOpen(0);
-    this.busX = lerp(this.stopX, ENTRANCE_BUS_VANISH_X, smoothstep(0.18, 1, driving));
-    this.placeBus(this.busX);
-    this.busSpeed = Math.abs(this.busX - previous) / dt;
+    this.busAt = lerp(this.stopAt, entranceBusVanishAt(), smoothstep(0.18, 1, driving));
+    this.placeBus(this.busAt);
+    this.busSpeed = Math.abs(this.busAt - previous) / dt;
   }
 
   // --- helpers ------------------------------------------------------------
 
-  private placeBus(x: number): void {
-    this.bus.root.position.set(x, terrainHeight(x, ENTRANCE_BUS_STOP_Z), ENTRANCE_BUS_STOP_Z);
-    this.bus.root.rotation.y = BUS_FACING;
+  /**
+   * Stands the bus `at` metres along the road, pointing the way the road goes.
+   *
+   * The whole of the curve arrives here: nothing else in this file knows the
+   * road bends, because position *and* yaw both come from the same station, so
+   * a bus can never be facing one way while standing somewhere the road turns
+   * the other.
+   */
+  private placeBus(at: number): void {
+    const station = entranceRoadAt(at);
+    this.bus.root.position.set(station.x, terrainHeight(station.x, station.z), station.z);
+    this.bus.root.rotation.y = entranceRoadFacing(at);
   }
 
   private setPlayerPose(
@@ -863,7 +929,7 @@ export class ArrivalSequence {
     const player = this.player;
     if (!player) return;
     const seat = this.bus.passengerSeat.getWorldPosition(SCRATCH);
-    this.setPlayerPose(seat.x, seat.y, seat.z, BUS_FACING, false, 0);
+    this.setPlayerPose(seat.x, seat.y, seat.z, this.stopFacing, false, 0);
   }
 
   /**
@@ -882,7 +948,7 @@ export class ArrivalSequence {
       const walk = this.kidWalks[index];
       if (!kid || !walk || walk.released || !walk.seat) continue;
       walk.seat.getWorldPosition(SCRATCH);
-      kid.setScriptedPose(SCRATCH.x, SCRATCH.y, SCRATCH.z, BUS_FACING, 0);
+      kid.setScriptedPose(SCRATCH.x, SCRATCH.y, SCRATCH.z, this.stopFacing, 0);
     }
   }
 
@@ -977,7 +1043,7 @@ export class ArrivalSequence {
       // Still in their seat, waiting their turn.
       if (walk.seat) {
         walk.seat.getWorldPosition(SCRATCH);
-        kid.setScriptedPose(SCRATCH.x, SCRATCH.y, SCRATCH.z, BUS_FACING, 0);
+        kid.setScriptedPose(SCRATCH.x, SCRATCH.y, SCRATCH.z, this.stopFacing, 0);
       }
       return;
     }
@@ -1025,7 +1091,7 @@ export class ArrivalSequence {
 
     const x = here.x + walk.nudgeX;
     const z = here.z + walk.nudgeZ;
-    const facing = dx !== 0 || dz !== 0 ? Math.atan2(dx, dz) : BUS_FACING;
+    const facing = dx !== 0 || dz !== 0 ? Math.atan2(dx, dz) : this.stopFacing;
     kid.setScriptedPose(x, terrainHeight(x, z), z, facing, releasing ? 0 : walk.speed);
 
     // **Handed back the moment they clear the gate, not several metres in.**

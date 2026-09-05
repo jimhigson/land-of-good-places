@@ -92,8 +92,6 @@ import {
   RIM_OUTSET_START,
 } from '../../src/core/constants.ts';
 import {
-  ENTRANCE_BUS_ARRIVE_X,
-  ENTRANCE_BUS_STOP_Z,
   ENTRANCE_GATE_HALF_WIDTH,
   ENTRANCE_GATE_X,
   ENTRANCE_GATE_Z,
@@ -2810,6 +2808,108 @@ const DROPPER_RAIL_TOLERANCE = 0.25;
  *    the classic "walked into a rail that is not drawn" bug. Checked by asking
  *    the real collision world what is at each measured leg position.
  */
+/**
+ * **A post a child can see is solid at every height she can touch it.**
+ *
+ * `railRaceRingsStandOutsideThePark`'s solidity clause asks whether a collider
+ * sits under each leg's **foot**. That is the right question about the foot and
+ * it is not the whole question about the post: it was moved midpoint→foot
+ * precisely because legs had begun to lean, which fixed the *collider* question
+ * and left the **mesh-versus-collider** one unasked — and unasked, it was
+ * answerable "no". A leg leans because `trunkFoot` is the nudged spot while
+ * `trunkTop` comes from the lane tops, which are never nudged; with a single
+ * circle at the foot, the drawn post at a child's chest stood up to 0.91 m from
+ * the centre of a 0.272 m collider, and she walked through it.
+ *
+ * So this walks the drawn post upward from its foot and asks, at each step,
+ * whether that point is inside something solid — stopping at
+ * {@link TALLEST_CHILD_HEIGHT}, because above that nothing that walks can reach
+ * it and `keepOutsFor` would rather have the ground.
+ *
+ * **Only the walk-past ring.** The race ring deliberately registers no
+ * colliders (it is hidden except mid-race), so asking this of it would demand
+ * the exact bug the sibling invariant forbids.
+ */
+const everyPostIsSolidAllTheWayUpAChild: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const solid: { x: number; z: number; radius: number }[] = [];
+  facts.world.collision.forEachCircle((x, z, radius) => {
+    solid.push({ x, z, radius });
+  });
+
+  const ring = builtRings(facts).find((candidate) => candidate.label === 'walk-past');
+  if (!ring) {
+    complaints.push('there is no walk-past ring in the built scene to measure posts on');
+    return complaints;
+  }
+  const legs = ring.group.getObjectByName('railRace:trestle-legs');
+  if (!(legs instanceof InstancedMesh)) {
+    complaints.push('the walk-past ring has no trestle legs in the built scene to measure');
+    return complaints;
+  }
+
+  const matrix = new Matrix4();
+  const centre = new Vector3();
+  const axis = new Vector3();
+  let leaning = 0;
+  let worstGap = 0;
+  let worstAt = '';
+  /** Finer than the collider chain's own spacing, so it can see between links. */
+  const STEP = 0.05;
+
+  for (let i = 0; i < legs.count; i += 1) {
+    legs.getMatrixAt(i, matrix);
+    centre.setFromMatrixPosition(matrix);
+    axis.setFromMatrixColumn(matrix, 1);
+    const length = axis.length() || 1;
+    axis.divideScalar(length);
+    // Foot and top from the instance's own matrix, the same derivation the
+    // sibling clause uses — measured off the mesh that is drawn, never from the
+    // spot the generator meant to put it at.
+    const footX = centre.x - (axis.x * length) / 2;
+    const footZ = centre.z - (axis.z * length) / 2;
+    const lean = Math.hypot(axis.x, axis.z) * length;
+    if (lean > STEP) leaning += 1;
+
+    // How far up this post a child can still walk into it, as a length along
+    // the post rather than a height, because a leaning post covers less height
+    // per metre of itself.
+    const rise = Math.abs(axis.y) * length;
+    const reachable = rise > 0 ? Math.min(length, (TALLEST_CHILD_HEIGHT / rise) * length) : 0;
+    for (let along = 0; along <= reachable; along += STEP) {
+      const x = footX + axis.x * along;
+      const z = footZ + axis.z * along;
+      let gap = Infinity;
+      for (const circle of solid) gap = Math.min(gap, Math.hypot(circle.x - x, circle.z - z) - circle.radius);
+      if (gap > 0 && gap > worstGap) {
+        worstGap = gap;
+        worstAt = `${fmt([x, z])} at ${(Math.abs(axis.y) * along).toFixed(2)} m up`;
+      }
+    }
+  }
+
+  // Says what it covered on every run, passing or failing — a park whose legs
+  // all stand straight asserts far less than one whose legs lean, and a reader
+  // has no way to tell those apart from a bare green line.
+  process.stderr.write(
+    `[post solidity] ${legs.count} walk-past posts, ${leaning} of them leaning, ` +
+      `swept to ${TALLEST_CHILD_HEIGHT} m at ${STEP} m\n`,
+  );
+  if (leaning === 0) {
+    process.stderr.write('[post solidity] no post leans on this seed — asserts nothing beyond the foot\n');
+  }
+
+  if (worstGap > 0) {
+    complaints.push(
+      `a walk-past trestle post is drawn ${worstGap.toFixed(2)} m outside anything solid at ` +
+        `${worstAt} — a child can see the post there and walk straight through it. The collider ` +
+        'is registered along the post in `track.ts`\'s `addPostCollider`; a leaning post whose ' +
+        'collider is a single circle at its foot is the fault this exists to catch',
+    );
+  }
+  return complaints;
+};
+
 const railRaceRingsStandOutsideThePark: Invariant = (facts) => {
   const complaints: string[] = [];
   const rings = builtRings(facts);
@@ -2916,6 +3016,7 @@ const railRaceRingsStandOutsideThePark: Invariant = (facts) => {
   });
   const matrix = new Matrix4();
   const at = new Vector3();
+  const legAxis = new Vector3();
   for (const ring of rings) {
     const legs = ring.group.getObjectByName('railRace:trestle-legs');
     if (!(legs instanceof InstancedMesh)) {
@@ -2925,7 +3026,28 @@ const railRaceRingsStandOutsideThePark: Invariant = (facts) => {
     const wantsSolid = ring.label === 'walk-past';
     for (let i = 0; i < legs.count; i += 1) {
       legs.getMatrixAt(i, matrix);
+      // **The foot, not the instance centre.** `track.ts`'s `strut` composes a
+      // leg's matrix about the *midpoint* of foot-to-top, and registers its
+      // collider at the foot — so on a leg that leans (a trestle whose spot was
+      // nudged sideways to find clear ground, while its branch tops stay under
+      // the rails) the two are different places. Measured on the canonical seed:
+      // the centre drifts up to **2.00 m** horizontally from the foot, and at
+      // that lean this test reported four perfectly solid legs as "not solid".
+      //
+      // This was always the wrong point to ask about, and the reason it read
+      // green for so long is that legs barely leaned: the collider is at the
+      // foot, which is the only place a child's feet can meet a post, and the
+      // centre is four metres in the air. Asking about the foot is also
+      // strictly stronger — the old form would have passed a leg whose foot had
+      // no collider at all if its midpoint happened to overhang a neighbour's
+      // circle. Control run when this was changed: of 100 legs, 50 (the whole
+      // race ring, which registers nothing) have no collider under the foot and
+      // 50 (the whole walk-past ring) do, so the test still separates the two
+      // rings exactly as it is written to.
       at.setFromMatrixPosition(matrix);
+      legAxis.setFromMatrixColumn(matrix, 1);
+      const legLength = legAxis.length() || 1;
+      at.addScaledVector(legAxis.divideScalar(legLength), -legLength / 2);
       const found = solid.some(
         (circle) => Math.hypot(circle.x - at.x, circle.z - at.z) < circle.radius,
       );
@@ -7248,7 +7370,19 @@ const theRoadArrivesAtTheParkAndGoesIn: Invariant = (facts) => {
   const at = new Vector3();
   facts.world.entrance.group.traverse((object: Object3D) => {
     if (!(object instanceof Mesh)) return;
-    if (!object.name.startsWith('entrance-road')) return;
+    // **The road and the path that carries on from it**, because what this
+    // asserts is that a made surface runs from the kerb through the arch and
+    // into the park — not that any one mesh does. Since 3 September the run in
+    // through the gate is ordinary park paving rather than road (Jim: *"the
+    // small run of path from the road into the park should be just a normal
+    // path"*), and a filter that named only the road would have gone on
+    // asserting the road's own end while the thing it exists to prove — that
+    // you can walk in on something — had moved into a differently-named mesh.
+    // It went red the moment the spur was renamed, which is what an invariant
+    // measuring the park rather than the code is for.
+    const road = object.name.startsWith('entrance-road');
+    const gateway = object.name.startsWith('entrance-gateway-path');
+    if (!road && !gateway) return;
     const position = object.geometry.getAttribute('position');
     for (let i = 0; i < position.count; i += 1) {
       at.set(position.getX(i), position.getY(i), position.getZ(i)).applyMatrix4(object.matrixWorld);
@@ -7411,13 +7545,25 @@ const theCatBusIsInThePark: Invariant = (facts) => {
     );
   }
 
-  // Waiting on the kerb outside the gate, where the sequence starts. A bus left
+  // Waiting on the road outside the gate, where the sequence starts. A bus left
   // at the origin is in the middle of the ball pit.
-  const kerbGap = Math.hypot(bus.x - ENTRANCE_BUS_ARRIVE_X, bus.z - ENTRANCE_BUS_STOP_Z);
+  //
+  // **Asked of the road, not of a coordinate.** This used to compare against
+  // `ENTRANCE_BUS_ARRIVE_X`/`ENTRANCE_BUS_STOP_Z`, two hand-measured points on a
+  // straight kerb that no longer exists — the road follows the park's edge now,
+  // and the bus comes on at the brow. `bus.startsAt*` is `entranceRoadAt(
+  // entranceBusArriveAt())`, where the sequence itself starts the bus, so this
+  // cannot drift from it.
+  //
+  // **Read off the facts, not imported.** Calling `roadRoute.ts` from this file
+  // loaded the seeded park manifest at module load, before `buildParkFacts` set
+  // the seed — see `CatBusFact.startsAtX`.
+  const start = { x: bus.startsAtX, z: bus.startsAtZ };
+  const kerbGap = Math.hypot(bus.x - start.x, bus.z - start.z);
   if (kerbGap > 1) {
     fouls.push(
-      `the cat bus starts at ${fmt([bus.x, bus.z])}, ${kerbGap.toFixed(2)} m from the kerb ` +
-        `${fmt([ENTRANCE_BUS_ARRIVE_X, ENTRANCE_BUS_STOP_Z])} it is supposed to pull in from`,
+      `the cat bus starts at ${fmt([bus.x, bus.z])}, ${kerbGap.toFixed(2)} m from the point on the ` +
+        `entrance road ${fmt([start.x, start.z])} it is supposed to drive on from`,
     );
   }
 
@@ -7557,6 +7703,63 @@ const nothingPlantedHidesTheArrivingBus: Invariant = (facts) => {
       `arriving cat bus — she cannot see the bus she is arriving on. Worst: ` +
       worst
         .map((thing) => `${thing.what} at ${fmt([thing.x, thing.z])} reaching ${thing.top.toFixed(1)} m`)
+        .join('; '),
+  ];
+};
+
+/**
+ * **Nothing is planted in the road the cat bus drives.**
+ *
+ * Jim, 3 September 2026: *"the bus drives through trees on its final
+ * approach"*. It did, and on every seed — measured on the built park before the
+ * fix, **64 to 106 treeline instances per seed** stood inside the corridor the
+ * bus sweeps, at outsets of 13.7 to 21.1 m. That is structural, not luck:
+ * `Scenery.ts`'s treeline band runs from 11.5 m outside the boundary to
+ * `TERRAIN_APRON - 1.5`, and the road's tails climb from the kerb to
+ * `ENTRANCE_ROAD_TAIL_OUTSET` straight through it.
+ *
+ * ## Why the trees are the ones that move
+ *
+ * Because the road cannot. Its outset is pinned between the pavement the bus's
+ * door needs and `RIM_OUTSET_START`, two bounds that **cross by 0.15 m**
+ * (`roadRoute.ts`), so there is no offset at which a road along this wall
+ * misses anything — the same impossibility `check:entrance-road` was built
+ * around for the Rail Race's supports. And the corridor is derived from
+ * `PARK_BOUNDARY` alone, so it is solved before a single tree exists, exactly
+ * as the train's route is in `Scenery.ts`'s own `onRailway` note. The road
+ * claims its corridor and the woodland gives way, which is what pylon placement
+ * already does when it fells foliage.
+ *
+ * ## What is measured
+ *
+ * The **built park's instance matrices**, not the scatter's rules — the same
+ * distinction {@link nothingPlantedHidesTheArrivingBus} earned twice. The
+ * threshold is the game's: `distanceToEntranceCorridor` is the bus's own swept
+ * body (a `CAT_BUS_LENGTH` box at every sample, sampled at 0.2 m so the bulge
+ * between samples cannot hide anything), against each instance's own drawn
+ * reach. Nothing here restates the keep-out `buildTreeline` applies; if that
+ * keep-out were sized off the ribbon rather than the sweep, this would still
+ * fail.
+ */
+const nothingIsPlantedInTheBusRoad: Invariant = (facts) => {
+  // Coverage on every run, passing or not — `process.stderr`, because vitest's
+  // default reporter shows console output from failing tests only, so the note
+  // would be invisible in exactly the case it exists for.
+  process.stderr.write(
+    `[bus road cover] ${facts.plantedInstancesSwept} planted instances swept against the ` +
+      `bus's corridor, ${facts.treesInTheBusRoad.length} inside it\n`,
+  );
+  if (facts.treesInTheBusRoad.length === 0) return [];
+  const worst = [...facts.treesInTheBusRoad].sort((a, b) => b.inside - a.inside).slice(0, 3);
+  return [
+    `${facts.treesInTheBusRoad.length} planted thing(s) stand in the road the cat bus drives — ` +
+      `it drives through them on its way in. Worst: ` +
+      worst
+        .map(
+          (tree) =>
+            `${tree.what} at ${fmt([tree.x, tree.z])} reaching ${tree.reach.toFixed(2)} m, ` +
+            `${tree.inside.toFixed(2)} m inside the bus`,
+        )
         .join('; '),
   ];
 };
@@ -9209,6 +9412,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
       'and only the walk-past one is solid',
     railRaceRingsStandOutsideThePark,
   ],
+  [
+    'every Rail Race post is solid all the way up a child',
+    everyPostIsSolidAllTheWayUpAChild,
+  ],
   ["the rail-race stall's doormat is standable and reachable", railRaceStallDoormatIsUsable],
   ["every keychain keyring's stand point is standable and reachable", keychainStallStandIsUsable],
   ['the Sky Cruiser flies clear of the whole park', skyCruiserFliesClearOfThePark],
@@ -9300,6 +9507,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     theEntranceIsClearEnoughToArriveAt,
   ],
   ['you can see the cat bus she arrives on', nothingPlantedHidesTheArrivingBus],
+  ['nothing is planted in the road the cat bus drives', nothingIsPlantedInTheBusRoad],
 ];
 
 /**

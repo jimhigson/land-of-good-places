@@ -52,9 +52,7 @@ import {
   type ArrivalPhase,
 } from '../src/world/entrance/ArrivalSequence.ts';
 import {
-  ENTRANCE_BUS_ARRIVE_X,
-  ENTRANCE_BUS_STOP_Z,
-  ENTRANCE_BUS_VANISH_X,
+
   ENTRANCE_GATE_X,
   ENTRANCE_GATE_Z,
   ENTRANCE_PLAYER_X,
@@ -69,6 +67,21 @@ import {
 } from '../src/world/entrance/catBus.ts';
 import { isBakedFaceMesh } from '../src/art/style/faces.ts';
 import { ROAD_TILE_METRES } from '../src/world/entrance/road.ts';
+import {
+  entranceBusArriveAt,
+  entranceBusVanishAt,
+  entranceRoadAt,
+} from '../src/world/entrance/roadRoute.ts';
+
+/**
+ * Where the bus starts, stands and ends, in world coordinates — asked of the
+ * road it drives rather than of the three straight-kerb constants this file used
+ * to import. Those are gone: the road follows the park's edge now, and a point
+ * on it is an arc, not an `x`.
+ */
+const BUS_ARRIVES_AT = entranceRoadAt(entranceBusArriveAt());
+const BUS_VANISHES_AT = entranceRoadAt(entranceBusVanishAt());
+const BUS_STANDS_AT = entranceRoadAt(0);
 import {
   CHILD_FOOTPRINT,
   TALLEST_CHILD_HEIGHT,
@@ -210,9 +223,55 @@ function frame(elapsed: number, at?: Vector3): FrameContext {
   };
 }
 
-/** Is this point inside the box, looking straight down? Height is irrelevant. */
-function insideFootprint(box: Box3, at: Vector3): boolean {
-  return at.x >= box.min.x && at.x <= box.max.x && at.z >= box.min.z && at.z <= box.max.z;
+/**
+ * **Is this point inside the bus, looking straight down?**
+ *
+ * Asked in the **bus's own frame**, not against a world-axis-aligned box, and
+ * that stopped being a nicety the day the bus started driving a road that
+ * curves. An `AABB` round a vehicle at 45° is about 14.9 m square where the
+ * vehicle is 15.8 x 5.3 — nearly three times the footprint, most of it empty
+ * air beside the bus.
+ *
+ * It produced three confident, wrong failures at once on the first run after the
+ * road was curved: the bus "reached 6.15 m inside the park boundary" (a corner
+ * of the box, not of the bus), "two children left the bus 0.00 s apart" and "the
+ * slowest child walked 1.54 m/s" (children counted as still aboard while
+ * standing well clear of it, then all released on one frame). One wrong box,
+ * three wrong measurements — CLAUDE.md's "an assertion reporting success about
+ * something it is not describing", pointed the other way.
+ *
+ * `worldToLocal` is the whole fix: it undoes the bus's own rotation, so the box
+ * being compared against is the box the bus really occupies.
+ */
+function insideFootprint(bus: Object3D, localBox: Box3, at: Vector3): boolean {
+  const local = bus.worldToLocal(at.clone());
+  return (
+    local.x >= localBox.min.x &&
+    local.x <= localBox.max.x &&
+    local.z >= localBox.min.z &&
+    local.z <= localBox.max.z
+  );
+}
+
+/**
+ * The bus's extent in its **own** coordinates, measured once off the built
+ * vehicle with its placement taken out of the way.
+ *
+ * Measured rather than taken from `CAT_BUS_LENGTH`/`CAT_BUS_WIDTH`: those
+ * describe the box the bodywork was designed around, and this file's whole job
+ * is to measure the thing that was actually built.
+ */
+function localFootprint(bus: Object3D): Box3 {
+  const position = bus.position.clone();
+  const rotation = bus.rotation.y;
+  bus.position.set(0, 0, 0);
+  bus.rotation.y = 0;
+  bus.updateMatrixWorld(true);
+  const box = new Box3().setFromObject(bus);
+  bus.position.copy(position);
+  bus.rotation.y = rotation;
+  bus.updateMatrixWorld(true);
+  return box;
 }
 
 function findByName(root: Object3D, name: string): Object3D | null {
@@ -428,6 +487,9 @@ check(busRoot !== null, 'no node named `cat-bus` anywhere under the arrival grou
 const doorHinge = busRoot ? findByName(busRoot, 'door-hinge') : null;
 check(doorHinge !== null, 'the cat bus has no `door-hinge`');
 
+/** The bus's own extent, measured once — see {@link localFootprint}. */
+const busLocalBox = busRoot ? localFootprint(busRoot) : new Box3();
+
 /** Where the player was on the very first frame anything was drawn. */
 const openingPlayerPosition = player.position.clone();
 
@@ -466,12 +528,19 @@ for (let index = 0; index < frames; index += 1) {
   // --- the bus -----------------------------------------------------------
   if (busRoot && !arrival.finished) {
     busXs.push(busRoot.position.x);
-    const box = new Box3().setFromObject(busRoot);
+    // Sampled over the bus's **own** footprint and then taken into the world, so
+    // every probe is a point the bus really occupies. The old version gridded a
+    // world-aligned box, whose corners are beside a turned bus rather than on it.
     for (let ix = 0; ix <= 4; ix += 1) {
       for (let iz = 0; iz <= 4; iz += 1) {
-        const px = box.min.x + ((box.max.x - box.min.x) * ix) / 4;
-        const pz = box.min.z + ((box.max.z - box.min.z) * iz) / 4;
-        const into = edgeRadiusAt(PARK_BOUNDARY, Math.atan2(pz, px)) - Math.hypot(px, pz);
+        const local = new Vector3(
+          busLocalBox.min.x + ((busLocalBox.max.x - busLocalBox.min.x) * ix) / 4,
+          0,
+          busLocalBox.min.z + ((busLocalBox.max.z - busLocalBox.min.z) * iz) / 4,
+        );
+        const world = busRoot.localToWorld(local);
+        const into =
+          edgeRadiusAt(PARK_BOUNDARY, Math.atan2(world.z, world.x)) - Math.hypot(world.x, world.z);
         if (into > deepestIntoPark) deepestIntoPark = into;
       }
     }
@@ -486,7 +555,7 @@ for (let index = 0; index < frames; index += 1) {
   }
 
   // --- the children -------------------------------------------------------
-  const busFootprint = busRoot ? new Box3().setFromObject(busRoot) : null;
+
   for (let kidIndex = 0; kidIndex < kids.length; kidIndex += 1) {
     const kid = kids[kidIndex]!;
     const previous = lastPosition[kidIndex]!;
@@ -510,7 +579,7 @@ for (let index = 0; index < frames; index += 1) {
     // straight across the children who already got out of it. Without this they
     // are re-classified as "back aboard" as it passes, which breaks the
     // consecutive-frame guard below and reported a 12.3 m/s child.
-    if (!offTheBus[kidIndex] && busFootprint !== null && !insideFootprint(busFootprint, kid.position)) {
+    if (!offTheBus[kidIndex] && busRoot !== null && !insideFootprint(busRoot, busLocalBox, kid.position)) {
       offTheBus[kidIndex] = true;
     }
     const onFoot = offTheBus[kidIndex]!;
@@ -588,12 +657,13 @@ check(arrival.finished, `the arrival never finished inside ${totalSeconds.toFixe
 const busStart = busXs[0] ?? Number.NaN;
 const busEnd = busXs[busXs.length - 1] ?? Number.NaN;
 check(
-  Math.abs(busStart - ENTRANCE_BUS_ARRIVE_X) < 0.01,
-  `the bus started at x ${busStart.toFixed(2)}, not ENTRANCE_BUS_ARRIVE_X (${ENTRANCE_BUS_ARRIVE_X})`,
+  Math.abs(busStart - BUS_ARRIVES_AT.x) < 0.01,
+  `the bus started at x ${busStart.toFixed(2)}, not on the road at the brow (${BUS_ARRIVES_AT.x.toFixed(2)})`,
 );
 check(
-  Math.abs(busEnd - ENTRANCE_BUS_VANISH_X) < 1.5,
-  `the bus ended at x ${busEnd.toFixed(2)}, nowhere near ENTRANCE_BUS_VANISH_X (${ENTRANCE_BUS_VANISH_X})`,
+  Math.abs(busEnd - BUS_VANISHES_AT.x) < 1.5,
+  `the bus ended at x ${busEnd.toFixed(2)}, nowhere near where the road goes over the far brow ` +
+    `(${BUS_VANISHES_AT.x.toFixed(2)})`,
 );
 check(widestDoorSwing > 1.5, `the door only ever swung ${widestDoorSwing.toFixed(2)} rad while children were still aboard`);
 check(doorAtEnd < 0.01, `the bus drove away with its door ${doorAtEnd.toFixed(2)} rad open`);
@@ -824,8 +894,8 @@ if (handover) {
 // the park edge, ~17 m away, and the camera spent half a second sliding out to
 // the bus to find her. Measuring where the camera ends up would have passed.
 const openingDistanceToBus = Math.hypot(
-  openingPlayerPosition.x - ENTRANCE_BUS_ARRIVE_X,
-  openingPlayerPosition.z - ENTRANCE_BUS_STOP_Z,
+  openingPlayerPosition.x - BUS_ARRIVES_AT.x,
+  openingPlayerPosition.z - BUS_ARRIVES_AT.z,
 );
 const openingDistanceToSpawn = Math.hypot(
   openingPlayerPosition.x - ENTRANCE_PLAYER_X,
@@ -871,25 +941,66 @@ check(
 // about. So every number below comes from the road meshes' own world-space
 // vertices.
 {
+  /** The road itself — the surface the bus drives on, outside the wall. */
   const roadPoints: Vector3[] = [];
+  /**
+   * **The whole arrival surface: the road, plus the run in through the gate.**
+   *
+   * These were one mesh family until Jim asked for the run through the gateway
+   * to be an ordinary park path rather than road continuing through
+   * (3 September) — so it is drawn from `pathSurface.ts` now and named
+   * `entrance-gateway-path*`. The surface a child walks in on did not go
+   * anywhere; it changed material and therefore changed name.
+   *
+   * Asking only about `entrance-road*` after that rename is a clause measuring
+   * a mesh name instead of the thing it is about: it reported "0 vertices
+   * inside the wall — it does not pass through the gate" about a gateway with a
+   * path laid squarely through it. `theRoadArrivesAtTheParkAndGoesIn` in the
+   * invariant suite was widened to both families when the rename landed and
+   * this, its twin, was not — CLAUDE.md's "two definitions of one thing, kept
+   * in step by hand", with the copy found wrong by a check rather than a child
+   * only because the two happen to run in different suites.
+   *
+   * The two lists stay separate because the clauses below ask genuinely
+   * different questions: the bus stands on the **road**, and it must never be
+   * satisfied by a footpath it cannot drive on; the park is **reached** by
+   * whichever surface actually gets there.
+   */
+  const arrivalPoints: Vector3[] = [];
   const at = new Vector3();
   park.scene.traverse((object) => {
     const mesh = object as Mesh;
-    if (!mesh.isMesh || !mesh.name.startsWith('entrance-road')) return;
+    if (!mesh.isMesh) return;
+    const isRoad = mesh.name.startsWith('entrance-road');
+    const isGatewayPath = mesh.name.startsWith('entrance-gateway-path');
+    if (!isRoad && !isGatewayPath) return;
     const position = mesh.geometry.getAttribute('position');
     for (let i = 0; i < position.count; i += 1) {
       at.set(position.getX(i), position.getY(i), position.getZ(i)).applyMatrix4(mesh.matrixWorld);
-      roadPoints.push(at.clone());
+      const point = at.clone();
+      arrivalPoints.push(point);
+      if (isRoad) roadPoints.push(point);
     }
   });
 
   check(roadPoints.length > 0, 'there is no road at the park entrance at all — the bus arrives on grass');
+  check(
+    arrivalPoints.length > roadPoints.length,
+    'nothing is drawn between the road and the park — the run in through the gate is missing entirely',
+  );
 
   if (roadPoints.length > 0) {
-    /** How close the road gets to a point on the ground. */
+    /** How close the road the bus drives on gets to a point on the ground. */
     const roadReaches = (x: number, z: number): number => {
       let nearest = Infinity;
       for (const point of roadPoints) nearest = Math.min(nearest, Math.hypot(point.x - x, point.z - z));
+      return nearest;
+    };
+
+    /** How close any of the arrival surface — road or gateway path — gets. */
+    const arrivalReaches = (x: number, z: number): number => {
+      let nearest = Infinity;
+      for (const point of arrivalPoints) nearest = Math.min(nearest, Math.hypot(point.x - x, point.z - z));
       return nearest;
     };
 
@@ -898,29 +1009,32 @@ check(
     // threshold is the road's own segment length, because that is the finest
     // resolution a vertex can land at; anything tighter would be asserting on
     // where the tessellation happened to fall.
-    const toTheGate = roadReaches(ENTRANCE_GATE_X, ENTRANCE_GATE_Z);
+    const toTheGate = arrivalReaches(ENTRANCE_GATE_X, ENTRANCE_GATE_Z);
     check(
       toTheGate < ROAD_TILE_METRES / 2,
-      `the nearest the road gets to the gate is ${toTheGate.toFixed(1)} m — it does not reach the park`,
+      `the nearest paved surface gets to the gate is ${toTheGate.toFixed(1)} m — it does not reach the park`,
     );
 
-    // **And through it.** A road that stops at the wall is a road that arrives
-    // at a park you cannot drive into. The gate is a hole in the wall
-    // (`theGateIsAHoleInTheWall` in the invariant suite), so the road must have
-    // surface on both sides of it.
-    const outside = roadPoints.filter((point) => point.z > ENTRANCE_GATE_Z).length;
-    const inside = roadPoints.filter((point) => point.z < ENTRANCE_GATE_Z).length;
+    // **And through it.** A surface that stops at the wall arrives at a park you
+    // cannot walk into. The gate is a hole in the wall
+    // (`theGateIsAHoleInTheWall` in the invariant suite), so there must be
+    // surface on both sides of it — the road outside, the gateway path inside.
+    const outside = arrivalPoints.filter((point) => point.z > ENTRANCE_GATE_Z).length;
+    const inside = arrivalPoints.filter((point) => point.z < ENTRANCE_GATE_Z).length;
     check(
       outside > 0 && inside > 0,
-      `the road has ${outside} vertices outside the wall and ${inside} inside it — it does not pass ` +
-        'through the gate, so it arrives at the park without going in',
+      `the arrival surface has ${outside} vertices outside the wall and ${inside} inside it — it does ` +
+        'not pass through the gate, so it arrives at the park without going in',
     );
 
     // **And the bus stands on it**, everywhere it stops along its run — which is
     // the fault as Jim actually saw it, a bus on grass.
     let worstOffRoad = 0;
-    for (const x of [ENTRANCE_BUS_ARRIVE_X, 0, ENTRANCE_BUS_VANISH_X / 2]) {
-      worstOffRoad = Math.max(worstOffRoad, roadReaches(x, ENTRANCE_BUS_STOP_Z));
+    // Three points along the run, taken off the road itself: where it drives on,
+    // where it stands, and halfway to where it leaves.
+    for (const at of [entranceBusArriveAt(), 0, entranceBusVanishAt() / 2]) {
+      const on = entranceRoadAt(at);
+      worstOffRoad = Math.max(worstOffRoad, roadReaches(on.x, on.z));
     }
     check(
       worstOffRoad < ROAD_TILE_METRES / 2,
@@ -928,10 +1042,12 @@ check(
         '— it is parked on the grass',
     );
 
-    const deepest = Math.min(...roadPoints.map((point) => point.z));
+    const deepest = Math.min(...arrivalPoints.map((point) => point.z));
     notes.push(
-      `the road runs from z ${Math.max(...roadPoints.map((p) => p.z)).toFixed(0)} outside the wall to ` +
-        `z ${deepest.toFixed(0)} inside the park, passing ${toTheGate.toFixed(2)} m from the gate centre`,
+      `the arrival surface runs from z ${Math.max(...arrivalPoints.map((p) => p.z)).toFixed(0)} outside ` +
+        `the wall to z ${deepest.toFixed(0)} inside the park, passing ${toTheGate.toFixed(2)} m from the ` +
+        `gate centre — ${roadPoints.length} vertices of road (the bus's own surface) and ` +
+        `${arrivalPoints.length - roadPoints.length} of gateway path carrying it in through the arch`,
     );
   }
 }

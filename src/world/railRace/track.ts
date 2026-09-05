@@ -24,6 +24,9 @@ import { distanceToPath } from '../pathGraph';
 import { archFeet } from './arch';
 import { PARK_LAYOUT } from '../parkLayout';
 import { distanceToRailCorridor } from '../train/plan';
+import { TALLEST_CHILD_HEIGHT } from '../../art/models/kid';
+import { CAT_BUS_BODY_TOP_Y } from '../entrance/catBus';
+import { isInEntranceRoad } from '../entrance/roadRoute';
 import type { CollisionWorld } from '../Collision';
 import { railFrameAt, sweptRails, type RailFrame, type RailSampler } from '../rail/sweptRail';
 import {
@@ -541,7 +544,12 @@ export function buildRailRaceTrack(
   const mandatoryTrestleIndices = new Set(
     layout.bars.map((bar) => trestleGridIndex(bar.at, route.length)),
   );
-  const spots = trestleSpots(route, collision, mandatoryTrestleIndices);
+  const spots = trestleSpots(
+    route,
+    collision,
+    mandatoryTrestleIndices,
+    POST_FOOT_RADIUS * ringSizeVsRace,
+  );
   const spotByIndex = new Map(spots.map((spot) => [spot.index, spot]));
 
   // --- the duck bars ---------------------------------------------------------
@@ -740,7 +748,8 @@ export function buildRailRaceTrack(
   sleeves.instanceColor!.needsUpdate = true;
 
   // --- the trestles ----------------------------------------------------------
-  const beamY = route.base - UNDULATION_REACH - BEAM_DROP;
+  // The beam height each trestle is solved against lives in `trestleTreeAt`,
+  // which is the one owner of a trestle's shape — see `TrestleTree`.
 
   // One colour for the whole support tree — trunk and both generations of
   // branch — which is Jim's "the supports can all be one colour that
@@ -816,53 +825,28 @@ export function buildRailRaceTrack(
     mesh.setMatrixAt(index, matrix);
   };
 
-  // Scratch points for one trestle's tree, reused across spots.
-  const laneTops = Array.from({ length: LANE_COUNT }, () => new Vector3());
-  const forkNodes = [new Vector3(), new Vector3()];
-  const trunkTop = new Vector3();
+  // Scratch for one trestle's tree, reused across spots. **The tree is solved by
+  // `trestleTreeAt` and not here** — `postClearsEntranceRoad` decides where a
+  // trestle may stand from the same solve, and the last time these were two
+  // copies of one derivation the copies disagreed and posts stood in the bus.
+  // See `TrestleTree`.
+  const tree = newTrestleTree();
   const trunkFoot = new Vector3();
 
   spots.forEach((spot, index) => {
     route.outwardAt(spot.at, outward);
     rotation.setFromUnitVectors(ACROSS, outward);
 
-    const ground = terrainHeight(spot.x, spot.z);
-    const postHeight = beamY - ground;
-    const plan = forkPlan(postHeight, route.laneSpacing);
-
     // **A branch top is the middle of the lane it carries** — the whole point of
     // Jim's 7 August ruling, and `route.pointAt` in full, height included, not
-    // flattened onto a plane. One owner: this is the same call the rails
-    // themselves are swept from, so a branch cannot end up anywhere but on the
-    // track's own centre line.
-    for (let lane = 0; lane < LANE_COUNT; lane += 1) {
-      laneTops[lane]!.copy(route.pointAt(lane, spot.at, point));
-    }
-    // A fork node sits under the midpoint of the pair it carries, and the trunk
-    // under the midpoint of the two fork nodes — horizontally derived from the
-    // tops rather than from `spot`, which `trestleSpots` may have nudged
-    // sideways to find clear ground.
-    //
-    // The *height* is measured down from the *lowest* of what each node carries,
-    // never the mean. That is what stops "different branches reach different
-    // heights" turning into a branch lying nearly flat: the lower of a pair then
-    // gets exactly `plan.upper` of rise and so exactly the solved angle, and its
-    // partner — whose lane is higher — is steeper. The solved angle is the
-    // widest the fork can ever open, in one direction only. See
-    // `trestleGeometry.ts` for the measured lane spread (up to 4.38 m across the
-    // four, 3.02 m within one pair) that makes this necessary.
-    for (let half = 0; half < 2; half += 1) {
-      const a = laneTops[half * 2]!;
-      const b = laneTops[half * 2 + 1]!;
-      forkNodes[half]!
-        .copy(a)
-        .lerp(b, 0.5)
-        .setY(Math.min(a.y, b.y) - plan.upper);
-    }
-    trunkTop
-      .copy(forkNodes[0]!)
-      .lerp(forkNodes[1]!, 0.5)
-      .setY(Math.min(forkNodes[0]!.y, forkNodes[1]!.y) - plan.lower);
+    // flattened onto a plane, which is what `trestleTreeAt` asks of the route.
+    const { laneTops, forkNodes, trunkTop, ground } = trestleTreeAt(
+      route,
+      spot.at,
+      spot.x,
+      spot.z,
+      tree,
+    );
     // The foot, though, stands exactly where the clear ground was found — so a
     // nudged trestle leans very slightly rather than planting itself in whatever
     // the nudge was avoiding.
@@ -884,8 +868,15 @@ export function buildRailRaceTrack(
     // Taken from the post's own foot radius rather than the 0.36 this was
     // written as when the leg was half as thick: the collider and the thing you
     // can see are now the same claim about the same post.
+    //
+    // **A single circle at the foot is only right for a post that stands up
+    // straight**, and since the entrance-road corridor joined `groundIsClear`
+    // these do not: `trunkFoot` is the nudged spot and `trunkTop` is derived
+    // from the lane tops, which are never nudged, so a nudged leg leans by
+    // construction (see the comment above `trunkFoot`). `addPostCollider` walks
+    // the lean instead.
     if (options.registerCollision) {
-      collision.addCircle(spot.x, spot.z, POST_FOOT_RADIUS * ringSizeVsRace);
+      addPostCollider(collision, trunkFoot, trunkTop, ringSizeVsRace);
     }
   });
 
@@ -1226,11 +1217,265 @@ interface TrestleSpot {
   readonly index: number;
 }
 
-/** Every one of `trestleSpots`'s four ground-clearance predicates, together. */
-function groundIsClear(x: number, z: number, collision: CollisionWorld): boolean {
+/**
+ * **Where a trestle's support tree stands — the one owner of that question.**
+ *
+ * A trestle is a trunk rising from the ground to `trunkTop`, forking twice to
+ * reach the four lane tops. Three separate things need to know where those
+ * points are: the loop that *draws* it, the collider that makes it solid, and
+ * `postClearsEntranceRoad`, which has to decide before any of that whether a
+ * candidate spot puts the post in the road the cat bus drives.
+ *
+ * **They used to be two definitions, and the second one was wrong.** The draw
+ * loop computed the tree inline; `postClearsEntranceRoad` restated it — and
+ * restated it *differently*, taking the trunk's top as the **mean of the four
+ * lane heights** where the drawn trunk stops a whole `forkPlan(...).fork` lower,
+ * under the branches. A post is only tested for the road as far up as there is
+ * bus to hit, expressed as a fraction of its rise, so believing the post rises
+ * further than it does made that fraction too small: the generator checked the
+ * bottom two thirds of a lean and passed a post whose top third stood squarely
+ * in the bus. Measured on seed 11 — feet 3.17 m clear of the corridor, posts
+ * leaning 6.00 m, and 1.78 m of post inside the bodywork at 3.38 m up.
+ *
+ * That is this repo's most common bug (CLAUDE.md, *"two definitions of one
+ * thing, kept in step by hand"*) and it is the **second** instance of it in this
+ * one mechanism: the clause and its check both asked about the leg's *foot* and
+ * agreed with each other for weeks. So this function exists to make a third
+ * copy impossible to write by accident. **If you need to know where any part of
+ * a trestle is, call this — do not re-derive it**, however small the derivation
+ * looks. Both of the bugs above looked small.
+ *
+ * The tree is solved for a *foot position*, because the fork geometry is scaled
+ * by how much post there is under the beam ({@link forkPlan}), and that depends
+ * on the terrain the foot stands on. `at` fixes the tops: a branch top is the
+ * middle of the lane it carries, and nothing nudges a lane.
+ */
+interface TrestleTree {
+  /** Where each lane's rails pass overhead — the four tips of the tree. */
+  readonly laneTops: readonly Vector3[];
+  /** The two nodes where the trunk's fork splits again to reach a pair of lanes. */
+  readonly forkNodes: readonly Vector3[];
+  /** Where the trunk stops and the first fork begins. **Not** the lane tops. */
+  readonly trunkTop: Vector3;
+  /** The terrain height under the foot this tree was solved for. */
+  ground: number;
+}
+
+function newTrestleTree(): TrestleTree {
+  return {
+    laneTops: Array.from({ length: LANE_COUNT }, () => new Vector3()),
+    forkNodes: [new Vector3(), new Vector3()],
+    trunkTop: new Vector3(),
+    ground: 0,
+  };
+}
+
+/** Scratch for {@link trestleTreeAt}; it is called once per candidate in a search loop. */
+const treeScratch = new Vector3();
+
+/** See {@link TrestleTree}. Writes into `into` and returns it. */
+function trestleTreeAt(
+  route: RailRaceRoute,
+  at: number,
+  footX: number,
+  footZ: number,
+  into: TrestleTree,
+): TrestleTree {
+  const ground = terrainHeight(footX, footZ);
+  const beamY = route.base - UNDULATION_REACH - BEAM_DROP;
+  const plan = forkPlan(beamY - ground, route.laneSpacing);
+  for (let lane = 0; lane < LANE_COUNT; lane += 1) {
+    into.laneTops[lane]!.copy(route.pointAt(lane, at, treeScratch));
+  }
+  // A fork node sits under the midpoint of the pair it carries, and the trunk
+  // under the midpoint of the two fork nodes — horizontally derived from the
+  // tops rather than from the foot, which may have been nudged sideways to find
+  // clear ground.
+  //
+  // The *height* is measured down from the *lowest* of what each node carries,
+  // never the mean. That is what stops "different branches reach different
+  // heights" turning into a branch lying nearly flat: the lower of a pair then
+  // gets exactly `plan.upper` of rise and so exactly the solved angle, and its
+  // partner — whose lane is higher — is steeper. The solved angle is the widest
+  // the fork can ever open, in one direction only. See `trestleGeometry.ts` for
+  // the measured lane spread (up to 4.38 m across the four, 3.02 m within one
+  // pair) that makes this necessary.
+  for (let half = 0; half < 2; half += 1) {
+    const a = into.laneTops[half * 2]!;
+    const b = into.laneTops[half * 2 + 1]!;
+    into.forkNodes[half]!.copy(a).lerp(b, 0.5).setY(Math.min(a.y, b.y) - plan.upper);
+  }
+  into.trunkTop
+    .copy(into.forkNodes[0]!)
+    .lerp(into.forkNodes[1]!, 0.5)
+    .setY(Math.min(into.forkNodes[0]!.y, into.forkNodes[1]!.y) - plan.lower);
+  into.ground = ground;
+  return into;
+}
+
+/**
+ * **The collider for a trestle post, which leans.**
+ *
+ * A post runs from `trunkFoot` — the spot `trestleSpots` found clear ground at,
+ * nudged radially if it had to be — up to `trunkTop`, which is derived from the
+ * lane tops and is therefore *not* nudged. So a nudged post is not vertical, and
+ * its plan-view footprint is a **segment**, not the point a single circle at the
+ * foot describes.
+ *
+ * That only became true when the entrance-road corridor joined `groundIsClear`:
+ * on `main` the nudges never fire, every post stands straight, and foot and
+ * centre are the same place — measured, 0.00 m drift on all six seeds. With the
+ * corridor in, 4–5 posts a seed on the walk-past ring lean, and the drawn post
+ * at a child's chest stood **0.30–0.91 m from the centre of a 0.272 m
+ * collider** — up to 3.3x its radius. Collision is plan-view, so she walked
+ * through the upper half of a post she could see. This project's first rule.
+ *
+ * Two things this deliberately does *not* do:
+ *
+ * - **It does not follow the post to `trunkTop`.** The top is metres up under
+ *   the rails, and a collider stamped along the whole lean would make ground
+ *   solid that has nothing but sky over it — `keepOutsFor` owns where a child
+ *   must be able to stand, and blocking her out of clear ground to guard a post
+ *   she cannot reach trades one fault for another. It stops at
+ *   {@link TALLEST_CHILD_HEIGHT}, which is the highest anything that walks can
+ *   touch it.
+ * - **It does not fatten the collider.** The circles carry the post's own
+ *   radius, tapering with it, so the collider stays the same claim about the
+ *   same post that the single circle was — just made along its length.
+ */
+function addPostCollider(collision: CollisionWorld, foot: Vector3, top: Vector3, ringSizeVsRace: number): void {
+  const footRadius = POST_FOOT_RADIUS * ringSizeVsRace;
+  const topRadius = POST_TOP_RADIUS * ringSizeVsRace;
+  const rise = top.y - foot.y;
+  /** How far up the post, as a fraction of it, a child can still walk into. */
+  const reach = rise > 0 ? Math.min(1, TALLEST_CHILD_HEIGHT / rise) : 0;
+  const lean = Math.hypot(top.x - foot.x, top.z - foot.z) * reach;
+  // Spaced at half the thinnest radius the chain carries, so its waist between
+  // two circles is under a centimetre rather than a gap she could be pushed
+  // through — the same "a gap you cannot walk into at 5 cm a step you may still
+  // tunnel into" reasoning CLAUDE.md applies to walls.
+  const steps = Math.max(0, Math.ceil(lean / (Math.min(footRadius, topRadius) / 2)));
+  for (let i = 0; i <= steps; i += 1) {
+    // `steps` is 0 for a post that does not lean, and `0 / 0` would be `NaN` —
+    // which would place a circle at `NaN, NaN` and silently register nothing.
+    const t = steps === 0 ? 0 : (i / steps) * reach;
+    collision.addCircle(
+      foot.x + (top.x - foot.x) * t,
+      foot.z + (top.z - foot.z) * t,
+      footRadius + (topRadius - footRadius) * t,
+    );
+  }
+}
+
+
+/**
+ * **Does the whole post — not just its foot — stay out of the road the bus
+ * drives?**
+ *
+ * A trestle's foot is where `searchForClearGround` put it; its top is fixed by
+ * `at`, because a branch top is the middle of the lane it carries and no nudge
+ * moves it. So nudging the foot out of the corridor tilts the post back over
+ * it, and asking only about the foot answers a question nobody was asking.
+ *
+ * The corridor is plan-view and height-agnostic, so this walks the post's own
+ * plan-view span over the heights the **bus body** occupies — below the chassis
+ * and above the roof there is nothing to hit — and asks the corridor about each,
+ * at the post's own tapering radius.
+ *
+ * **The post it walks is {@link trestleTreeAt}'s, not a restatement of it.** This
+ * function used to derive the trunk's top itself and got it wrong — see that
+ * function's doc comment for what the wrong answer cost. There is one owner of
+ * where a trestle stands, and this asks it.
+ */
+const clearanceTree = newTrestleTree();
+
+function postClearsEntranceRoad(
+  route: RailRaceRoute,
+  at: number,
+  footX: number,
+  footZ: number,
+  footRadius: number,
+): boolean {
+  const { trunkTop, ground } = trestleTreeAt(route, at, footX, footZ, clearanceTree);
+  const rise = trunkTop.y - ground;
+  if (rise <= 0) return !isInEntranceRoad(footX, footZ, footRadius);
+  // Only as far up the post as there is bus to meet. A fraction of the post's
+  // own rise, so it is the *drawn* post's height this is a fraction of.
+  const reach = Math.min(1, CAT_BUS_BODY_TOP_Y / rise);
+  const lean = Math.hypot(trunkTop.x - footX, trunkTop.z - footZ);
+  const steps = Math.max(1, Math.ceil((lean * reach) / 0.25));
+  for (let i = 0; i <= steps; i += 1) {
+    const t = (i / steps) * reach;
+    if (
+      isInEntranceRoad(
+        footX + (trunkTop.x - footX) * t,
+        footZ + (trunkTop.z - footZ) * t,
+        footRadius,
+      )
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Every one of `trestleSpots`'s ground-clearance predicates, together.
+ *
+ * **The entrance road is one of them (#488).** It was not, and the omission was
+ * exactly the shape CLAUDE.md names: *"a generator that only checks itself
+ * against a hand-picked obstacle list will silently miss whatever a sibling
+ * system placed there"*. This list already refuses ground near a path, near the
+ * railway's corridor and near a `PARK_LAYOUT` entry — the road the cat bus
+ * arrives on was simply not in it, so on **all sixteen pool seeds** two to eight
+ * legs stood inside the bus's own swept body and it drove straight through them.
+ *
+ * It cannot be answered on the road's side: measured, the trestle line stands at
+ * `NOMINAL_OUTSET` (6.5 m beyond the park's edge) and a 7.78 m road parallel to
+ * it needs a centre at outset ≤ 2.1 or ≥ 10.9, while staying out of the park and
+ * off the hillside allows only [3.89, 8.11]. Those bands do not intersect — see
+ * `entrance/roadRoute.ts`, which owns the corridor and carries the full
+ * argument.
+ *
+ * So the ride declines to put a foot in the road and re-rolls, which is the
+ * standing procgen rule rather than a special case: `searchForClearGround`'s
+ * existing nudges do the moving, and a leg at outset 6.5 needs about +2.6 m
+ * radially to clear a road hugging the wall — inside `RADIAL_NUDGES` and inside
+ * `MANDATORY_RADIAL_NUDGES`. Nothing here deletes a support or places one by
+ * hand.
+ *
+ * Ordering works because `World.ts` builds `RailRace` before `Entrance`, and the
+ * corridor is derived from the boundary alone — it does not need the road to
+ * have been built, only to have been *decided*.
+ */
+function groundIsClear(
+  x: number,
+  z: number,
+  collision: CollisionWorld,
+  footRadius: number,
+  route?: RailRaceRoute,
+  at = 0,
+): boolean {
   if (!collision.isClearCircle(x, z, 1.1)) return false;
   if (distanceToPath(x, z) < 2.8) return false;
   if (distanceToRailCorridor(x, z) < 2.4) return false;
+  // **The whole post, not just its foot.**
+  //
+  // This asked `isInEntranceRoad(x, z, footRadius)` — the foot alone — and was
+  // very nearly inert because of it. Measured with `check:entrance-road`
+  // sweeping posts rather than feet: turning this clause *entirely off* changed
+  // the count from 8–9 posts in the bus to 8–10. It was removing about one post
+  // in nine, and the check agreed with it only because the check had the
+  // identical blind spot.
+  //
+  // A nudged post keeps its top under the rails while its foot moves, so moving
+  // the foot out of the road leans the post straight back into it. The corridor
+  // is a plan-view swept body, so what has to clear it is the post's whole
+  // plan-view span over the heights the bus body occupies — which is what
+  // `postClearsEntranceRoad` asks. A candidate that fails is a **different
+  // decision to try**, not a floor to settle at: `searchForClearGround` walks on
+  // to the next radial nudge, exactly as it does for every other refusal here.
+  if (route && !postClearsEntranceRoad(route, at, x, z, footRadius)) return false;
   const pinchesCorridor = [...PARK_LAYOUT.entries.values()].some(
     (entry) => Math.hypot(x - entry.x, z - entry.z) < entry.boundingRadius + 2.4,
   );
@@ -1348,6 +1593,7 @@ function searchForClearGround(
   atArch0: number,
   arcNudges: readonly number[],
   radialNudges: readonly number[],
+  footRadius: number,
 ): { at: number; x: number; z: number } | null {
   for (const dr of radialNudges) {
     for (const da of arcNudges) {
@@ -1360,7 +1606,7 @@ function searchForClearGround(
       const sample = route.path.sampleAt(at);
       const x = sample.x + sample.normalX * dr;
       const z = sample.z + sample.normalZ * dr;
-      if (groundIsClear(x, z, collision)) return { at, x, z };
+      if (groundIsClear(x, z, collision, footRadius, route, at)) return { at, x, z };
     }
   }
   return null;
@@ -1411,6 +1657,7 @@ function trestleSpots(
   route: RailRaceRoute,
   collision: CollisionWorld,
   mandatoryIndices: ReadonlySet<number>,
+  footRadius: number,
 ): TrestleSpot[] {
   const spots: TrestleSpot[] = [];
   // Arch-relative, matching `planHazards`'s `snapToTrestleGrid` exactly — the
@@ -1421,9 +1668,9 @@ function trestleSpots(
   for (let i = 0; i < count; i += 1) {
     const atArch0 = (i / count) * route.length;
     const mandatory = mandatoryIndices.has(i);
-    let placed = searchForClearGround(route, collision, atArch0, ARC_NUDGES, RADIAL_NUDGES);
+    let placed = searchForClearGround(route, collision, atArch0, ARC_NUDGES, RADIAL_NUDGES, footRadius);
     if (!placed && mandatory) {
-      placed = searchForClearGround(route, collision, atArch0, WIDE_ARC_NUDGES, MANDATORY_RADIAL_NUDGES);
+      placed = searchForClearGround(route, collision, atArch0, WIDE_ARC_NUDGES, MANDATORY_RADIAL_NUDGES, footRadius);
     }
     if (!placed && mandatory) {
       // Last resort — see `WIDE_RADIAL_NUDGES`'s own doc comment. Loud
@@ -1432,7 +1679,7 @@ function trestleSpots(
       // (`test/procgen/invariants.ts`) actually wants; if this fires on a
       // real seed, that slot's ground is worth a closer look, not just a
       // wider search.
-      placed = searchForClearGround(route, collision, atArch0, WIDE_ARC_NUDGES, WIDE_RADIAL_NUDGES);
+      placed = searchForClearGround(route, collision, atArch0, WIDE_ARC_NUDGES, WIDE_RADIAL_NUDGES, footRadius);
       if (placed) {
         console.warn(
           `railRace/track.ts: the mandatory trestle at slot ${i} (arch-relative at=` +

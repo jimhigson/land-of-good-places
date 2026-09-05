@@ -46,8 +46,16 @@ const SLEEPER_LENGTH = 1.5;
 const SLEEPER_WIDTH = 0.26;
 const SLEEPER_THICKNESS = 0.12;
 
-/** Half-width of the sandy ballast strip under the sleepers. */
-const BALLAST_HALF_WIDTH = 1.05;
+/**
+ * Half-width of the sandy ballast strip under the sleepers.
+ *
+ * Exported because the entrance's gateway path has to stop short of it: two
+ * sandy surfaces drawn on the same ground within a centimetre of each other is
+ * a coplanar seam, and on seed 288 the railway crosses the gate's own approach
+ * 4.5 m inside the wall. Asked for rather than restated — a 1.05 written down
+ * in `Entrance.ts` would be the second definition this repo pays for most.
+ */
+export const BALLAST_HALF_WIDTH = 1.05;
 
 const UP = new Vector3(0, 1, 0);
 

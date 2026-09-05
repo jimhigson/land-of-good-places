@@ -290,6 +290,20 @@ export const CAT_BUS_LENGTH = BODY_LENGTH;
 export const CAT_BUS_WIDTH = BODY_WIDTH;
 
 /**
+ * **How high off its own ground the bodywork starts and stops.**
+ *
+ * Exported for the same reason {@link CAT_BUS_LENGTH} and
+ * {@link CAT_BUS_WIDTH} are: anything asking what the bus would hit has to ask
+ * the bus, not restate it. `check:entrance-road` needs the vertical span
+ * because a trestle post leans — its foot can stand clear of the road while
+ * the post itself passes through the bus at head height — so "does this leg
+ * hit the bus" is a question about a *height range*, not a point on the
+ * ground, and the range belongs to the vehicle.
+ */
+export const CAT_BUS_BODY_BOTTOM_Y = BODY_BOTTOM_Y;
+export const CAT_BUS_BODY_TOP_Y = BODY_BOTTOM_Y + BODY_HEIGHT;
+
+/**
  * **Where the bodywork stops and the window opening starts.**
  *
  * The old bus had no openings at all: it was one closed `RoundedBoxGeometry`
@@ -1592,7 +1606,23 @@ export function createCatBus(): CatBusHandle {
       bumperMaterial,
     ),
   );
-  riser.position.set(stepX, lowestTreadUnderside + riserHeight / 2, stepZ - stepDepth / 2 + 0.08 * DETAIL);
+  // **Set into the treads, not flush with them.** The riser is `0.16 * DETAIL`
+  // deep and used to be centred exactly half that in from `stepZ - stepDepth /
+  // 2`, which put its back face in the *same plane* as both treads' back faces,
+  // pointing the same way — two surfaces fighting for one plane, which is
+  // `check:coplanar`'s whole subject and ART_DIRECTION.md §7's flat
+  // prohibition. It was in the baseline as 31 tolerated seams and went to 33 the
+  // moment the bus stopped parking square to the camera, because the sweep only
+  // counts what the iso camera can see and a new yaw shows it more of the step.
+  //
+  // Moved forward by `0.02 * DETAIL` so the back face sits *inside* the treads
+  // rather than on their boundary. Interpenetration is fine — the depth buffer
+  // has an unambiguous answer everywhere — and the riser still overlaps both
+  // treads, so `check:bus-journey`'s "every part touches the bodywork" is
+  // unaffected. This is the §7 fix (stop sharing the plane), not a stand-off:
+  // there is no gap to maintain and nothing goes stale if the step is resized,
+  // because the inset is expressed in the same `DETAIL` the step is.
+  riser.position.set(stepX, lowestTreadUnderside + riserHeight / 2, stepZ - stepDepth / 2 + 0.10 * DETAIL);
   stepGroup.add(riser);
 
   // --- bumpers ---------------------------------------------------------------
