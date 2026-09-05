@@ -134,3 +134,25 @@ The hazard on `main` is the 12% margin, not a present failure.
   standalone script. Verified by **parsing** the scripts object against
   `origin/main`: 59 steps both sides, empty set difference both ways.
 - No `git stash`.
+
+## Scope boundary (Overseer, 5 September)
+
+**`entrance-road.yml` and pulling `check:entrance-road` out of the chain are
+NOT this ticket.** The sphere-ground Engineer holds that file on the combined
+branch and is porting the separation forward. This branch measures the chain
+and makes a timeout announce itself; it does not move that step. The 6m13s
+figure above is evidence about the cap, not a task.
+
+## Note for whoever builds the announcement
+
+Another agent measured this and it matters for where a budget line is printed:
+on a **passing** Vitest run, `console.log` is **intercepted and invisible**,
+while **both `process.stdout.write` and `process.stderr.write` are visible.**
+The real distinction is `console.*` interception, **not** stdout-versus-stderr
+— so CLAUDE.md's "write those notes to `process.stderr`" is right about the
+symptom but names the wrong mechanism. A budget note must use
+`process.*.write`, not `console.log`, or it will be invisible on exactly the
+runs it exists for.
+
+(The chain's own budget line runs in a shell step rather than under Vitest, so
+this applies to any per-check coverage note, not to the workflow-level print.)
