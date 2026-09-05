@@ -90,3 +90,51 @@ is the unused lever.
 
 Design not yet agreed with the Overseer; nothing built. A classification of
 which `check:*` steps are actually seed-dependent is in flight.
+
+### 7. The announcement stream — MEASURED, and it refines CLAUDE.md
+
+CLAUDE.md says a coverage note must go to `process.stderr`, "not `console.log`",
+because Vitest's default reporter shows console output from *failing* tests
+only. I ran the experiment rather than trusting it — a throwaway passing test
+writing to all three, under `pnpm run test:procgen`, default reporter:
+
+```
+console.log('...')                  NOT VISIBLE on a passing run
+process.stdout.write('...')         VISIBLE
+process.stderr.write('...')         VISIBLE
+```
+
+**So the real distinction is `console.*` (which Vitest intercepts and buffers)
+versus a direct stream write — not stdout versus stderr.** Either direct write
+is audible on a passing Vitest run. CLAUDE.md's advice is safe but its stated
+reason is narrower than the truth; worth correcting there if this lands.
+
+In a plain Node check script both streams are unconditionally visible, and
+**stdout is the right one** — a reviewer found stderr gets buried under ~288
+lines of `THREE.Texture` noise.
+
+### 8. The chain, classified (63 expanded steps)
+
+- **40 steps are seed-dependent and canonical-only.** They build a real park
+  via `scripts/park-harness.mts`, `World.ts`, or a seeded `*/plan.ts`, and in
+  Node with no `LGP_SEED` that resolves to `CANONICAL_PARK_SEED` every time.
+- **1 step sweeps** — `check:fountain-hop`, over `CI_SWEEP_SEEDS` (7 seeds).
+- **22 steps are seed-independent** (typechecking, character/model geometry,
+  text lint, HUD state machine, `check:seed-pool` itself).
+
+**Nine pool seeds are built by no required check at all: 115, 128, 208, 225,
+267, 274, 346, 428, 451.** Six more get `check:fountain-hop` only.
+
+### 9. Comment-vs-code drift found while classifying (small, worth sweeping)
+
+- `check-fountain-hop.mts:34,59` — says "all five CI seeds", names seeds 2 and
+  18; the code at `:72` uses `CI_SWEEP_SEEDS`, which is **7** seeds and contains
+  neither. Correct comment sits one line from correct code.
+- `check-path-preference.mts:27,111,785,843` — hard-codes the basis list as
+  "canonical plus 5, 11, 18, 24", including **retired seed 18**, while the
+  script sweeps nothing at runtime.
+- `parkSeedPool.ts:176` — "the whole 58-step chain"; measured today it is
+  **59 top-level / 63 expanded**.
+- `check-rail-race.mts:1942` — `FIELD_SEEDS`, 24 hard-coded values. These are
+  **rival-race RNG seeds**, not park seeds. Biggest `SEEDS = [...]` in the
+  chain and the easiest to misread as pool coverage.
