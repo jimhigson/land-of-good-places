@@ -117,6 +117,13 @@ export function stepName(command: string): string {
 /** `93s` → `1m33s`, and negatives keep their sign so headroom can go under. */
 export function formatDuration(seconds: number): string {
   const sign = seconds < 0 ? '-' : '';
-  const s = Math.abs(seconds);
-  return `${sign}${Math.floor(s / 60)}m${String(Math.round(s % 60)).padStart(2, '0')}s`;
+  // **Round to whole seconds FIRST, then split.** Flooring the minutes while
+  // separately rounding the remainder prints times that do not exist: 1799.6 s
+  // came out as `29m60s`, and 59.6 s as `0m60s`. `29m60s` was sitting in this
+  // branch's own control transcript, which is a poor look on a mechanism whose
+  // entire job is to report a number honestly.
+  const total = Math.round(Math.abs(seconds));
+  const minutes = Math.floor(total / 60);
+  const rest = total % 60;
+  return `${sign}${minutes}m${String(rest).padStart(2, '0')}s`;
 }

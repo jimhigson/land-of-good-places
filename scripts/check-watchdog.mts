@@ -283,7 +283,19 @@ child.on('close', (code, signal) => {
   say('');
   say(
     `watchdog[${script}] — took ${formatDuration(took)} of a ${formatDuration(cap)} cap ` +
-      `(${pct}% used, ${formatDuration(cap - took)} spare) across ${Math.max(0, invocationsSeen - 1)} script invocations.`,
+      // **No `- 1` here, unlike the alarm path above.** The two paths are
+      // counting different things and the difference is easy to miss: when the
+      // alarm fires, the last marker seen is the step *still running*, so
+      // completed is `n - 1`. By `close`, every invocation the counter saw has
+      // finished, so it is `n`.
+      //
+      // Carrying the alarm's `- 1` into here reported a run of ONE script as
+      // `across 0 script invocations` — visible in this PR's own green CI, and
+      // invisible at 61, where 60 reads perfectly plausible. Found by pointing
+      // the pass path at a second script, which is the same lesson the
+      // watchdog's failure path taught: a mechanism proven against one input
+      // is not proven.
+      `(${pct}% used, ${formatDuration(cap - took)} spare) across ${invocationsSeen} script invocations.`,
   );
   if (firedAt === null && took > cap * 0.8) {
     say(
