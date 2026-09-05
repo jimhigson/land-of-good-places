@@ -1,11 +1,24 @@
 # Engineering brief — stage 3, step 3: confront the import ladder
 
-**Status: HELD until steps 1–2 merge.** Re-verify every commit point
-against the `main` you branch from. Authority:
-`docs/DESIGN-round-robin-generation.md` ("Stage 3, specified") and
-`src/boot/parkGeneration.ts`'s module header — read the header in full; it
-is the honest account of why this step, not the deps, is what makes the
-spine real. One engineer, one worktree, normal CLAUDE.md discipline.
+**Status: HELD on Jim's ruling (design doc, "Stage 3, re-examined (5 Sep)").**
+#498 measured the road↔trestle pair over-determined: the ring's feet are
+boxed to outset [6.15, 6.92] by the family's brief, masonry and hill; a
+7.78 m road parallel to the wall needs its centre in [3.89, 8.11]; clearing
+a foot needs ≤ 2.1 or ≥ 10.9. No generator-owned decision can change that,
+so this brief cannot be built green on 5 of 16 seeds until one of three
+human-ruled things gives — and what this brief becomes depends on which:
+
+- **Apron widens** → the road sits outside the ring; legs never conflict.
+  Unchanged.
+- **Bus arrives radially** → the road crosses the ring once. Unchanged.
+- **A straddling support kind** (Artist geometry) → Unchanged, gated on the merged step 2.
+
+Also re-cut 5 Sep: this brief was written against #498's file layout
+(`entrance/roadRoute.ts`, a named road clause in `railRace/track.ts`).
+**Neither exists on `main`.** Re-verify every commit point at pickup; the
+intent binds, not the references. The swept-bus control (bus body vs the
+**drawn post at height**, never the foot) must exist on `main` and have
+been **watched failing** against today's legs before this lands.
 
 ## The rule a reviewer looks for first
 

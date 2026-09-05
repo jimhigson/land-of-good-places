@@ -1,10 +1,24 @@
 # Engineering brief — stage 3, step 4: negotiation, and the named clause comes out
 
-**Status: HELD until step 3 merges.** Re-verify every commit point against
-the `main` you branch from. Authority:
-`docs/DESIGN-round-robin-generation.md` ("Stage 3, specified" and
-"Backtracking, one mechanism instead of six"). One engineer, one worktree,
-normal CLAUDE.md discipline.
+**Status: HELD on Jim's ruling (design doc, "Stage 3, re-examined (5 Sep)").**
+#498 measured the road↔trestle pair over-determined: the ring's feet are
+boxed to outset [6.15, 6.92] by the family's brief, masonry and hill; a
+7.78 m road parallel to the wall needs its centre in [3.89, 8.11]; clearing
+a foot needs ≤ 2.1 or ≥ 10.9. No generator-owned decision can change that,
+so this brief cannot be built green on 5 of 16 seeds until one of three
+human-ruled things gives — and what this brief becomes depends on which:
+
+- **Apron widens** → the road sits outside the ring; legs never conflict.
+  No conflict ever fires; the budget counters ship reading zero, honestly reported; the 'clause comes out' sections are void — no clause reached `main`.
+- **Bus arrives radially** → the road crosses the ring once. This brief minus the clause-deletion sections: the negotiation is real on the crossing, counters report it.
+- **A straddling support kind** (Artist geometry) → This is where the straddling support is chosen when a plain foot is refused — the first support-kind negotiation; `CoSolveEngine` migrates onto `GroundClaims` here.
+
+Also re-cut 5 Sep: this brief was written against #498's file layout
+(`entrance/roadRoute.ts`, a named road clause in `railRace/track.ts`).
+**Neither exists on `main`.** Re-verify every commit point at pickup; the
+intent binds, not the references. The swept-bus control (bus body vs the
+**drawn post at height**, never the foot) must exist on `main` and have
+been **watched failing** against today's legs before this lands.
 
 ## The rule a reviewer looks for first
 

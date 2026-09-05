@@ -1,11 +1,24 @@
 # Engineering brief — stage 3, step 2: the trestles become a placer
 
-**Status: HELD until step 1 (`BRIEF-stage3-step1-road-placer.md`) merges.**
-Written against #498's layout plus step 1's expected result; **re-verify
-every commit point against the `main` you branch from** — the intent binds,
-not the line references. Authority: `docs/DESIGN-round-robin-generation.md`,
-"Stage 3, specified". One engineer, one worktree, normal CLAUDE.md
-discipline.
+**Status: HELD on Jim's ruling (design doc, "Stage 3, re-examined (5 Sep)").**
+#498 measured the road↔trestle pair over-determined: the ring's feet are
+boxed to outset [6.15, 6.92] by the family's brief, masonry and hill; a
+7.78 m road parallel to the wall needs its centre in [3.89, 8.11]; clearing
+a foot needs ≤ 2.1 or ≥ 10.9. No generator-owned decision can change that,
+so this brief cannot be built green on 5 of 16 seeds until one of three
+human-ruled things gives — and what this brief becomes depends on which:
+
+- **Apron widens** → the road sits outside the ring; legs never conflict.
+  This step is near-trivial: legs become claims and none is refused; keep it for the registry, expect identical hashes without any redundancy demo (there is no clause to be redundant to).
+- **Bus arrives radially** → the road crosses the ring once. This brief as written, minus the clause references: two feet step aside, hashes CHANGE on every seed where the road crosses the ring — visible, Jim signs.
+- **A straddling support kind** (Artist geometry) → the leg placer gains a second support shape; the refused-foot path chooses it; this brief merges with step 4's negotiation and the ruling's geometry is its input.
+
+Also re-cut 5 Sep: this brief was written against #498's file layout
+(`entrance/roadRoute.ts`, a named road clause in `railRace/track.ts`).
+**Neither exists on `main`.** Re-verify every commit point at pickup; the
+intent binds, not the references. The swept-bus control (bus body vs the
+**drawn post at height**, never the foot) must exist on `main` and have
+been **watched failing** against today's legs before this lands.
 
 ## The rule a reviewer looks for first
 
