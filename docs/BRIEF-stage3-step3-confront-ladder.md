@@ -2,7 +2,11 @@
 
 **Status: HELD until step 2 merges.** Re-cut 5 Sep for the sphere world:
 nothing in this step's mechanics changed, but two facts did — (1) the road
-is a **two-turn task** (a provisional corridor at generation, realised
+is a **two-turn task** whose second turn can only be scheduled once the
+paved discs exist at generation time — the `pathGraph` task already
+solves the graph, so **publishing the paving from that task** (a
+data-readiness gate) is in scope here; without it the re-commit stays a
+construction-time act and the road's second turn is not a turn — (a provisional corridor at generation, realised
 when `publishPaving()` runs; step 1 landed it as one owner plus a
 re-commit), and the ladder confrontation must keep both turns genuinely
 scheduled, not fold the second into construction; (2) the trestle placer

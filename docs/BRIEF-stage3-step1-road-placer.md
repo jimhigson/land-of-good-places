@@ -1,6 +1,6 @@
 # Engineering brief — stage 3, step 1: the entrance road becomes the first production placer
 
-**Status: READY — dispatchable against `main` today.** No dependency on PR
+**Status: IMPLEMENTED — PR #522, reviewed and approved 5 Sep.** Kept as the record of what was asked; two acceptance lines amended below to match what was accepted. No dependency on PR
 #498 (`fix/road-487-488`, stalled) or on the ruling stage 3's later steps
 wait for. Re-cut 5 Sep against `main` at `61e95fe5`; an earlier draft was
 written against #498's `entrance/roadRoute.ts`, which does not exist on
@@ -59,18 +59,18 @@ Three things, all invisible:
 
 ## Acceptance — measured, not asserted
 
-1. **Byte-identical proof**: `check:park-boot` already hashes plans
-   (`hashOfRoute`/`hashOfChute` pattern); add the road's corridor
-   (centreline endpoints + half-width) and the rail-race leg positions
-   (both rings) to the hash set, run on every pool seed before and after,
-   quote the hashes in the PR. Do not build the park twice in one process
+1. **Byte-identical proof**: a per-mesh digest of the whole built park
+   (`scripts/park-digest.mts`, one process per seed), all pool seeds
+   before and after, with two controls — determinism, and a perturbation
+   the digest must see. Strictly contains the road and the legs. Do not build the park twice in one process
    (`paths.ts` mutates module-level paving — the buildGraph-twice trap).
 2. **The claim is the road**: an assertion that the registry's corridor
    claim and the built road's centreline come from the same owner — by
    identity or byte-equality of the owner's output, not a tolerance
    comparison. **Break it deliberately** (perturb a copy) and paste the
    red run with the geometry it was proved against.
-3. **The registry sees the road**: exactly one corridor claim, feature
+3. **The registry sees the road**: exactly **two** corridor claims (the
+   road turns a corner at the gate; a capsule is straight), feature
    `road`, on every pool seed — a one-line probe in the same check.
 4. **One instance**: a probe that `World`'s registry `===` the
    scheduler's. Break it (construct a second) and paste the red run.
