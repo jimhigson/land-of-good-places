@@ -113,8 +113,28 @@ const started = performance.now();
 /**
  * How finely a post is sampled along its own length. Comfortably finer than the
  * bus is deep, so a post cannot slip between two samples of itself.
+ *
+ * **This can only ever *under*-count, never over-count**, and that is the
+ * direction that matters. A post grazing the bus between two of its own samples
+ * is missed; a post that is not touching can never be invented. So every number
+ * here is a **lower bound** on the intrusion — which is the safe direction while
+ * the count is large and the *unsafe* one at the moment it reaches zero.
+ *
+ * Hence {@link FINER_STEP_WARNING}: a zero measured at this step is not proof of
+ * a zero, and the check says so on the run where somebody would act on it.
  */
 const POST_STEP = 0.2;
+
+/**
+ * What to print when a seed reaches zero — read at the moment it is needed,
+ * rather than in a handoff nobody opens.
+ */
+const FINER_STEP_WARNING =
+  `  A zero at POST_STEP=${POST_STEP} m is a LOWER BOUND, not a proof. The sampling can only\n` +
+  '  under-count (a post grazing the bus between two of its own samples is missed),\n' +
+  '  so before deleting scripts/swept-bus-baseline.mts, re-run with POST_STEP and\n' +
+  '  SWEEP_STEP cut to 0.02 m and confirm the zero holds. Deleting the baseline on a\n' +
+  '  coarse zero is how this check would come to certify a bus still clipping a post.\n';
 
 /** How finely the bus is stepped along its run. Finer than the thinnest post. */
 const SWEEP_STEP = 0.2;
@@ -611,7 +631,28 @@ const orphans = Object.keys(SWEPT_BUS_BASELINE)
   .map(Number)
   .filter((seed) => !inPool.has(seed));
 
-/** Entries the park has grown out of — slack in the ratchet, to be taken up. */
+/**
+ * Entries the park has grown out of — slack in the ratchet.
+ *
+ * **This is enforced, not merely printed**, and that is a deliberate decision
+ * rather than the default. A ratchet with slack nobody takes up stops being a
+ * bound on anything: the recorded number drifts away from the measured one, and
+ * the next reader takes the baseline for a description of the park when it has
+ * quietly become a description of the past. That is the same family as #520 —
+ * a recorded finding that has stopped matching what is there, saying nothing
+ * about it.
+ *
+ * `check:coplanar` prints its `BASELINE LOOSE` without failing, and it is right
+ * to: its entries are *areas*, which move a little on every regenerated park
+ * whether or not the modelling mistake changed. These are **integer counts of
+ * distinct posts**, which move only when the road or the ride actually moves —
+ * so a drop here is a real event somebody should record, and the fix is ten
+ * seconds of `--print-baseline`.
+ *
+ * It also serves the design directly: the sphere (#511) is expected to change
+ * these counts, and this makes it impossible to land that change without
+ * re-taking the measurement the prediction is to be judged on.
+ */
 const loose = reports.filter(
   (report) => SWEPT_BUS_BASELINE[report.seed] !== undefined &&
     report.posts < (SWEPT_BUS_BASELINE[report.seed] ?? 0),
@@ -684,6 +725,15 @@ process.stderr.write(
     `${reports.reduce((sum, report) => sum + report.posts, 0)} drawn post(s) in total.\n`,
 );
 
+// **Said on the run where somebody would act on it, not in a handoff.** The
+// moment a seed reads zero is the moment the under-counting in POST_STEP stops
+// being the safe direction, so that is when the instruction has to appear.
+if (intruding.length < reports.length) {
+  process.stderr.write(
+    `\n  ${reports.length - intruding.length} seed(s) now read ZERO.\n` + FINER_STEP_WARNING,
+  );
+}
+
 for (const seed of orphans) {
   process.stderr.write(
     `  BASELINE ORPHAN: seed ${seed} has a baseline entry but is not in PARK_SEED_POOL.\n`,
@@ -692,7 +742,7 @@ for (const seed of orphans) {
 for (const report of loose) {
   process.stderr.write(
     `  BASELINE LOOSE: seed ${report.seed} is down to ${report.posts} from ` +
-      `${SWEPT_BUS_BASELINE[report.seed]} — tighten scripts/swept-bus-baseline.mts.\n`,
+      `${SWEPT_BUS_BASELINE[report.seed]} — tighten it (this fails the run; see below).\n`,
   );
 }
 
@@ -715,6 +765,28 @@ if (orphans.length > 0) {
       'A ratchet entry that matches no seed has stopped measuring anything, and #520 is\n' +
       'exactly what happens when that is allowed to be quiet. Delete the entry, or put\n' +
       'the seed back in PARK_SEED_POOL — do not leave it standing.',
+  );
+  process.exit(1);
+}
+
+if (loose.length > 0 && ratchetEnforced) {
+  console.error(
+    `\ncheck:swept-bus — ${loose.length} baseline ${loose.length === 1 ? 'entry is' : 'entries are'} ` +
+      'now looser than the park:\n',
+  );
+  for (const report of loose) {
+    console.error(
+      `  seed ${report.seed}: ${report.posts} drawn post(s), baseline records ` +
+        `${SWEPT_BUS_BASELINE[report.seed]}`,
+    );
+  }
+  console.error(
+    '\nThe park got better and the ratchet did not follow, which is good news that has\n' +
+      'to be recorded: slack nobody takes up stops the baseline describing anything, and\n' +
+      'the next reader takes it for the park when it has become a description of the\n' +
+      'past. Take it up in the same change:\n' +
+      '  pnpm run check:swept-bus -- --print-baseline > scripts/swept-bus-baseline.mts\n' +
+      'and put the new numbers in your diff, where a reviewer can see what moved.',
   );
   process.exit(1);
 }
