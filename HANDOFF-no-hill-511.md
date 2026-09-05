@@ -25,9 +25,57 @@ Done this session:
 - **Measured frame time at full zoom-out** (the flagged unmeasured risk): 9.3 ms
   median with the whole park in frame. Not a blocker on desktop.
 
-Not started: widening the zoom range, curving the ground, measuring the sky on
-extended ground. **#498 (entrance road) is still blocked on the ground shape** —
-nothing this session settled it, because the session went to Jim's re-prioritisation.
+- **Built `?zoomMin=`** so Jim can find the far end of the zoom himself, live,
+  rather than choosing between the three numbers offered. Any positive value
+  under `CAMERA_ZOOM_MAX`; absent, the shipped 0.42 applies and a real player is
+  unaffected. **Not the permanent change** — Jim has not decided the value yet.
+- **Fixed a two-definitions bug** in the camera framing formula (below).
+
+Not started: curving the ground, measuring the sky on extended ground.
+**#498 (entrance road) is still blocked on the ground shape** — nothing this
+session settled it, because the session went to Jim's re-prioritisation.
+
+## The ordering finding: the ground work is not optional alongside perspective
+
+**Do not treat "perspective camera" and "fix the hill" as two independent
+tickets that can be taken in either order.** They are one thing taken in an
+order, and the order is forced:
+
+- Orthographic **hides** the hill. There is no convergence, so the rim drop is
+  drawn as a band of dark green at the frame edge and reads as scenery.
+- Perspective **exposes** it. At a wide enough FOV the park is unmistakably a
+  dome — the land crests and falls away on every bearing (`06-persp-fov76-horizon.png`,
+  `07-zoommin-0107-live.png`).
+
+So a perspective camera does not merely *permit* the #511 ground work, it
+**requires** it: shipping perspective without it makes Jim's original complaint
+more visible than it is today, not less. Anyone picking this up who is tempted
+to land the projection change first and do the ground "later" should read that
+as shipping a regression against the very ticket this branch is named for.
+
+The converse also holds and is the reason the sphere stalled for a session:
+the ground work alone, under ortho, buys nothing visible, because ortho draws a
+870 m horizon at 870 m. **Neither half is worth landing without the other.**
+
+## Two definitions of the camera framing formula — fixed
+
+`IsoCamera.frustumBase()` and `world/tapSpacing.ts` both spelled out
+`Math.max(CAMERA_VIEW_HEIGHT / 2, CAMERA_MIN_VIEW_WIDTH / 2 / aspect)`.
+`tapSpacing`'s comment claimed the tap radius "follows automatically" when the
+camera framing changes; it did not — the two happened to still agree.
+
+Now `constants.ts`'s **`cameraViewHalfHeight(aspect)`** is the single owner and
+both ask it. Numerically identical (phone half-height 11.902564102564103 either
+way), so nothing on screen moves.
+
+Worth knowing why it mattered: `tapSpacing` sizes the world-space radius by
+which a child's tap is allowed to miss what she aimed at. A drift between the
+copies would have mis-sized every interact zone on a phone, and no check in the
+repo would have gone red — the copy is only ever found wrong by a child.
+
+This is also *how* the FOV table error was found: writing the derivation out
+forced a look at where the base actually comes from, and there turned out to be
+two answers to that question.
 
 ## The task
 
